@@ -27,6 +27,7 @@ import { TraceSidePanel } from "./trace-side-panel"
 import { BottomPanel } from "@/components/features/crews/bottom-panel"
 import type { BottomPanelContext } from "@/components/features/crews/bottom-panel/types"
 import type { TraceStep } from "@/lib/trace/types"
+import { mapSubSpans } from "@/lib/trace/sub-spans"
 import { shadeNodes, type HeatmapBucket, type HeatmapMode } from "@/lib/trace/percentile-heatmap"
 import { buildOverviewGraph } from "@/lib/trace/build-overview-graph"
 import type { Mission } from "@/lib/types/mission"
@@ -213,6 +214,15 @@ export function ActivityTracePage() {
     return run.step_outputs[stepId]
   }, [stepId, run?.step_outputs])
 
+  // Agent-internal tool calls for the selected step — the drill-down
+  // the side panel renders as a waterfall. mapSubSpans is defensive +
+  // returns [] when the run recorded none, so this is safe even when
+  // sub_spans is absent (older runs / non-agent steps).
+  const selectedSubSpans = useMemo(
+    () => (stepId ? mapSubSpans(run?.sub_spans?.[stepId]) : []),
+    [stepId, run?.sub_spans],
+  )
+
   const isFailedStep = run?.failed_at_step === stepId
 
   // Context for the bottom dock — log / trace / changes of the selected
@@ -390,6 +400,12 @@ export function ActivityTracePage() {
             output={selectedOutput}
             errorMessage={run?.error_message}
             isFailedStep={isFailedStep}
+            subSpans={selectedSubSpans}
+            context={{
+              chatId: run?.chat_id,
+              routineSlug: run?.pipeline_slug,
+              routineName: run?.pipeline_name,
+            }}
             onClose={closeSidePanel}
           />
         </div>

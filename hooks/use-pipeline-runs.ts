@@ -18,6 +18,15 @@ export interface PipelineRun {
   ended_at: string
   current_step_id: string
   step_outputs: Record<string, unknown> | null
+  // sub_spans — agent-internal tool calls per step, keyed by step id.
+  // Each value is the raw wire array (bash/write/read/edit/mcp_tool/
+  // http/tool/think spans, ordered by seq); mapSubSpans normalizes it.
+  // GetRun returns `{}` for a run with none, and the list endpoint may
+  // omit it entirely — both collapse to "no drill-down" in the UI.
+  sub_spans?: Record<string, unknown> | null
+  // chat_id — the agent session this run was authored in, when the run
+  // originated from a chat. Drives the "open session" Context link.
+  chat_id?: string
   cost_usd: number
   duration_ms: number
   triggered_via: "manual" | "schedule" | "webhook" | "call_pipeline" | "issue" | string

@@ -2,12 +2,24 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { Braces, FileText, Inbox, ScrollText, Send, X } from "lucide-react"
+import {
+  Activity,
+  Braces,
+  ExternalLink,
+  FileText,
+  Inbox,
+  ScrollText,
+  Send,
+  Workflow,
+  X,
+} from "lucide-react"
+import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { panel } from "@/lib/motion"
 import { TabBar } from "@/components/ui/tab-bar"
-import type { TraceStep } from "@/lib/trace/types"
+import type { SubSpan, TraceStep } from "@/lib/trace/types"
 import { JSONViewer } from "./json-viewer"
+import { SubSpanWaterfall } from "./sub-span-waterfall"
 import { extractArtifacts, type Artifact } from "@/lib/trace/extract-artifacts"
 import { toast } from "sonner"
 
@@ -21,7 +33,18 @@ import { toast } from "sonner"
 // right panel lets them click step → step → step and watch the panel
 // hot-swap without losing canvas focus.
 
-export type SidePanelTab = "input" | "output" | "logs" | "files"
+export type SidePanelTab = "actions" | "input" | "output" | "logs" | "files"
+
+// Context links surfaced under the panel — the agent session the run
+// was authored in + the routine it belongs to. Both optional: an
+// older run may lack a chat_id, and the routine slug is always known.
+export interface TraceContextLinks {
+  // /chat/{agentSlug}?session={chatId} when both are known.
+  agentSlug?: string
+  chatId?: string
+  routineSlug?: string
+  routineName?: string
+}
 
 interface TraceSidePanelProps {
   open: boolean
@@ -39,10 +62,16 @@ interface TraceSidePanelProps {
   // marked `failed_at_step`.
   errorMessage?: string
   isFailedStep?: boolean
+  // Agent-internal tool calls for the selected step (mapped from
+  // run.sub_spans[step.id]) — drives the Actions waterfall tab.
+  subSpans?: SubSpan[]
+  // Context links (session + routine).
+  context?: TraceContextLinks
   onClose: () => void
 }
 
 const TABS: ReadonlyArray<{ id: SidePanelTab; label: string; Icon: typeof Send }> = [
+  { id: "actions", label: "Actions", Icon: Activity },
   { id: "input", label: "Input", Icon: Send },
   { id: "output", label: "Output", Icon: Inbox },
   { id: "logs", label: "Logs", Icon: ScrollText },
@@ -56,9 +85,32 @@ export function TraceSidePanel({
   resolvedInput,
   errorMessage,
   isFailedStep,
+  subSpans,
+  context,
   onClose,
 }: TraceSidePanelProps) {
+  const spans = useMemo(() => subSpans ?? [], [subSpans])
+  const hasActions = spans.length > 0
   const [tab, setTab] = useState<SidePanelTab>("output")
+
+  // When a step is (re)selected, jump to the Actions waterfall if it
+  // has any — that's the drill-down the user came for. Falls back to
+  // Output for steps with no recorded agent activity. Keyed on step.id
+  // so re-renders from polling don't yank the user off their tab.
+  useEffect(() => {
+    setTab(hasActions ? "actions" : "output")
+  }, [step?.id, hasActions])
+
+  const copyArtifact = (path: string) => {
+    const cb = typeof navigator !== "undefined" ? navigator.clipboard : undefined
+    if (!cb) {
+      toast.error("Clipboard unavailable")
+      return
+    }
+    cb.writeText(path)
+      .then(() => toast.success(`Copied ${path}`))
+      .catch((err) => toast.error(err instanceof Error ? err.message : "Copy failed"))
+  }
 
   return (
     <AnimatePresence>
@@ -110,6 +162,9 @@ export function TraceSidePanel({
 
           {/* Body */}
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            {tab === "actions" && (
+              <SubSpanWaterfall spans={spans} onOpenArtifact={copyArtifact} />
+            )}
             {tab === "input" && <InputView step={step} resolved={resolvedInput} />}
             {tab === "output" && <OutputView output={output} />}
             {tab === "logs" && (
@@ -117,9 +172,70 @@ export function TraceSidePanel({
             )}
             {tab === "files" && <FilesView step={step} output={output} />}
           </div>
+
+          {/* Context — links back to the session the agent authored this
+            * in + the routine it belongs to. Always-visible footer so
+            * it's reachable from any tab. */}
+          {context && <ContextLinks step={step} context={context} />}
         </motion.aside>
       )}
     </AnimatePresence>
+  )
+}
+
+// ContextLinks — the "where did this come from" footer. Session link
+// resolves to /chat/{agentSlug}?session={chatId} (the agent + session
+// that produced this run) when both are known; routine link goes to
+// the routine the run belongs to. Either may be absent.
+function ContextLinks({
+  step,
+  context,
+}: {
+  step: TraceStep
+  context: TraceContextLinks
+}) {
+  // Prefer the per-step agent slug (the agent step that owns the
+  // selected span); fall back to the run-level agent.
+  const agentSlug = step.agent_slug || context.agentSlug
+  const sessionHref =
+    agentSlug && context.chatId
+      ? `/chat/${encodeURIComponent(agentSlug)}?session=${encodeURIComponent(context.chatId)}`
+      : null
+  const routineHref = context.routineSlug
+    ? `/routines?slug=${encodeURIComponent(context.routineSlug)}`
+    : null
+
+  if (!sessionHref && !routineHref) return null
+
+  return (
+    <div className="shrink-0 space-y-1.5 border-t border-white/[0.06] bg-card/60 px-3 py-2.5">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground/50">
+        Context
+      </div>
+      {sessionHref && (
+        <Link
+          href={sessionHref}
+          className="flex items-center gap-2 rounded border border-white/[0.08] bg-background px-2 py-1.5 text-[11px] transition-colors hover:border-blue-500/40 hover:bg-blue-500/5"
+        >
+          <ExternalLink className="h-3 w-3 shrink-0 text-blue-300" />
+          <span>Open the agent session</span>
+          <span className="ml-auto truncate font-mono text-muted-foreground/50">
+            {agentSlug}
+          </span>
+        </Link>
+      )}
+      {routineHref && (
+        <Link
+          href={routineHref}
+          className="flex items-center gap-2 rounded border border-white/[0.08] bg-background px-2 py-1.5 text-[11px] transition-colors hover:border-emerald-500/40 hover:bg-emerald-500/5"
+        >
+          <Workflow className="h-3 w-3 shrink-0 text-emerald-300" />
+          <span className="truncate">
+            Routine · {context.routineName || context.routineSlug}
+          </span>
+        </Link>
+      )}
+    </div>
   )
 }
 

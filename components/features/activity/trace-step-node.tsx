@@ -183,9 +183,22 @@ function hostnameFromTemplate(raw: string): string {
   return host.length > 32 ? host.slice(0, 31) + "…" : host
 }
 
+// baseName — last path segment of an artifact path, for the node badge.
+function baseName(path: string): string {
+  const parts = path.split("/").filter(Boolean)
+  return parts[parts.length - 1] || path
+}
+
 function TraceStepNodeBase({ data }: NodeProps) {
   const d = data as unknown as TraceStepNodeData
   const { step, status, selected, waitpoint, heatmapBucket, durationMs, costUsd, outputSnippet, errorMessage } = d
+  const subSpans = d.subSpans ?? []
+  const model = d.model ?? null
+  // First concrete tool + artifact across the step's actions — surfaced
+  // as node badges so the canvas reads "this step ran ansible + wrote
+  // sysfacts.yml" without expanding. Pure derivation, no hooks.
+  const toolName = subSpans.find((s) => s.attributes.tool)?.attributes.tool ?? null
+  const artifactPath = subSpans.find((s) => s.attributes.artifact_path)?.attributes.artifact_path ?? null
   const visual = KIND_VISUAL[step.type] ?? KIND_VISUAL.agent_run
   const Icon = visual.Icon
   const ring = STATUS_RING[status]
@@ -249,6 +262,40 @@ function TraceStepNodeBase({ data }: NodeProps) {
       <div className="mt-1 flex items-center gap-1 text-[10px]">
         {subtitleFor(step)}
       </div>
+
+      {/* Rich badges — model / tool / artifact + the drill-down count.
+        * Only render when the step actually has agent actions, so a run
+        * with no sub_spans looks exactly as it did before. */}
+      {(model || toolName || artifactPath || subSpans.length > 0) && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+          {model && (
+            <span className="rounded border border-indigo-500/40 px-1 py-0 text-[9px] font-medium text-indigo-300">
+              {model}
+            </span>
+          )}
+          {toolName && (
+            <span className="rounded border border-violet-500/40 px-1 py-0 text-[9px] text-violet-300">
+              {toolName}
+            </span>
+          )}
+          {artifactPath && (
+            <span className="max-w-[88px] truncate rounded border border-amber-500/40 px-1 py-0 text-[9px] text-amber-300">
+              {baseName(artifactPath)}
+            </span>
+          )}
+          {subSpans.length > 0 && (
+            <span
+              className={cn(
+                "ml-auto inline-flex items-center gap-0.5 rounded bg-white/[0.06] px-1 py-0 text-[9px] font-medium",
+                selected ? "text-blue-300" : "text-muted-foreground",
+              )}
+            >
+              {selected ? "▾" : "▸"} {subSpans.length}{" "}
+              {subSpans.length === 1 ? "action" : "actions"}
+            </span>
+          )}
+        </div>
+      )}
 
       {waitpoint && <WaitpointActions waitpoint={waitpoint} />}
     </div>
