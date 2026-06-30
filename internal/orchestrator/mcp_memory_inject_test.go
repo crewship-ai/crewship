@@ -75,3 +75,42 @@ func TestInjectMemoryMCP_KeepsOtherEntries(t *testing.T) {
 		t.Errorf("missing expected entries; got=%v", names)
 	}
 }
+
+// TestInjectMemoryMCPIntoClaudeJSON_SetsAlwaysLoad is the load-bearing
+// assertion for the eager-tool-loading optimization. Claude Code DEFERS MCP
+// tools by default — the model must spend a ToolSearch round-trip to discover
+// memory.read/write/search/append_daily before it can call them, even though
+// it needs them almost every turn. Marking our injected first-party server
+// with "alwaysLoad": true makes Claude Code present those tool schemas eagerly
+// at session start (no discovery hop). alwaysLoad is a Claude-only .mcp.json
+// field (v2.1.121+); the other CLIs load MCP tools eagerly already.
+func TestInjectMemoryMCPIntoClaudeJSON_SetsAlwaysLoad(t *testing.T) {
+	out, err := injectMemoryMCPIntoClaudeJSON(`{"mcpServers":{}}`)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(out, "crewship-memory") {
+		t.Fatalf("output missing crewship-memory server: %s", out)
+	}
+	if !strings.Contains(out, `"alwaysLoad":true`) {
+		t.Errorf("injected memory server missing alwaysLoad:true — tools stay deferred behind ToolSearch: %s", out)
+	}
+}
+
+// TestInjectMemoryMCPIntoClaudeJSON_PreservesUserEntry — a user-declared
+// server under our reserved name is left exactly as-is. We do NOT force
+// alwaysLoad onto an operator's own entry; eager-loading is our default only
+// for the server WE inject.
+func TestInjectMemoryMCPIntoClaudeJSON_PreservesUserEntry(t *testing.T) {
+	in := `{"mcpServers":{"crewship-memory":{"type":"http","url":"http://user/mcp"}}}`
+	out, err := injectMemoryMCPIntoClaudeJSON(in)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(out, "http://user/mcp") {
+		t.Errorf("user entry not preserved: %s", out)
+	}
+	if strings.Contains(out, "alwaysLoad") {
+		t.Errorf("must not inject alwaysLoad onto a user-declared entry: %s", out)
+	}
+}
