@@ -79,16 +79,20 @@ func TestPE2_DryRun_LoadDBError500(t *testing.T) {
 	}
 }
 
-func TestPE2_DryRun_ExecutorError500(t *testing.T) {
+// A stored definition that no longer parses is handled best-effort by dry_run:
+// it returns a 200 report with manifest null (rather than 500-ing the preview),
+// so the UI can still render "this routine's definition is corrupt". See the
+// dry_run manifest contract in TestPipelineDryRun_MalformedDefinition_ManifestNull.
+func TestPE2_DryRun_UnparseableDefinition_BestEffort200(t *testing.T) {
 	h, userID, wsID := newPipelineHandlerForCRUDTest(t)
 	seedPipelineRowDef(t, h.db, wsID, "pipe-pe2-dry", "pe2-dry", `also not json`)
 	rr := httptest.NewRecorder()
 	h.DryRun(rr, covPE2Req(t, "POST", "/x", "", userID, wsID, "pe2-dry"))
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (best-effort report); body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "Failed to dry-run pipeline") {
-		t.Errorf("body = %q", rr.Body.String())
+	if !strings.Contains(rr.Body.String(), `"manifest":null`) {
+		t.Errorf("manifest should be null for an unparseable definition; body=%s", rr.Body.String())
 	}
 }
 

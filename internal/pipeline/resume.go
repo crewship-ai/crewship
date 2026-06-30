@@ -200,9 +200,9 @@ func (e *Executor) ResumeAfterApproval(runID string, logger *slog.Logger) {
 // run fell back to interrupted.
 func (e *Executor) buildResumePlan(ctx context.Context, rec *RunRecord) (*resumePlan, string) {
 	if rec.Mode != ModeRun {
-		// test_run is the save gate, dry_run never persists a row —
-		// nobody is waiting on either after a restart; re-running
-		// would only burn tokens.
+		// dry_run never persists a row in production — nobody is
+		// waiting on a preview after a restart; re-running would only
+		// burn tokens. Only live runs resume.
 		return nil, fmt.Sprintf("mode %q is not resumable (only live runs resume)", rec.Mode)
 	}
 	p, err := e.store.GetByID(ctx, rec.PipelineID)

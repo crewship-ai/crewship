@@ -207,10 +207,10 @@ func TestRunDAG_ApprovalWaitStep(t *testing.T) {
 	}
 }
 
-// Guard: a NON-foreground-ModeRun caller (here ModeTestRun) must NOT suspend —
-// it keeps the existing blocking behaviour. We bound the wait with a short ctx
-// so the blocked WaitFor returns and we can assert the result is not WAITING.
-func TestRun_TestRunMode_DoesNotSuspend(t *testing.T) {
+// Guard: a non-live ModeDryRun caller must NOT suspend on a wait:approval
+// step — a preview walks the plan and returns DRY_RUN_OK without ever parking
+// on a waitpoint. We bound the call with a short ctx as a backstop.
+func TestRun_DryRunMode_DoesNotSuspend(t *testing.T) {
 	db := openResumeTestDB(t)
 	defer db.Close()
 
@@ -218,7 +218,7 @@ func TestRun_TestRunMode_DoesNotSuspend(t *testing.T) {
 	runStore := NewRunStore(db)
 	wpStore := NewSQLWaitpointStore(db)
 	defer wpStore.Close()
-	p := saveResumePipeline(t, store, "appr-testrun", asyncApprovalLinearDSL)
+	p := saveResumePipeline(t, store, "appr-dryrun", asyncApprovalLinearDSL)
 
 	exec := NewExecutor(store, NewResolver(db), newMockRunner(), &captureEmitter{}).
 		WithRunStore(runStore).
@@ -226,12 +226,12 @@ func TestRun_TestRunMode_DoesNotSuspend(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
 	defer cancel()
-	res, err := exec.Run(ctx, RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeTestRun})
+	res, err := exec.Run(ctx, RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeDryRun})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if res.Status == "WAITING" {
-		t.Fatal("ModeTestRun must NOT suspend (no foreground caller to return WAITING to)")
+		t.Fatal("ModeDryRun must NOT suspend (a preview never parks on a waitpoint)")
 	}
 }
 

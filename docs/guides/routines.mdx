@@ -44,7 +44,7 @@ Crewship is unusual among workflow systems because **agents author routines**, n
     Open `/routines`, click **+ New routine**, pick a starter template, edit the DSL JSON, click **Test & Save**. Test_run runs against the execution tier; on pass the routine is persisted with `authored_via=user_api` and the JWT user as author.
   </Card>
   <Card title="CLI" icon="terminal">
-    `crewship routine save --name "..." --definition file.json --author-crew <crew_id>`. Same test_run gate as UI. CI-friendly: validate offline first with `crewship routine validate file.json`, then save.
+    `crewship routine save --name "..." --definition file.json --author-crew <crew_id>`. The server validates the DSL on save (same gate as the UI). CI-friendly: validate offline first with `crewship routine validate file.json`, then save.
   </Card>
 </CardGroup>
 
@@ -170,10 +170,12 @@ Semantics:
   is **allowed** (a warning is logged). A bug in resolution must never wedge
   every run of every routine — a forgotten integration is a soft, recoverable
   failure; a hard block on all runs would be a self-inflicted outage.
-- **`run` and `test_run` are gated; `dry_run` is not.** A `test_run` really
-  executes against the author crew's agents, so it's gated too (fail fast
-  rather than burn a token-spending run the agent can't complete). `dry_run`
-  is a preview that invokes nothing, so it's left ungated.
+- **`run` is gated; `dry_run` is not.** A live `run` executes against the
+  author crew's agents, so it's gated (fail fast rather than land an
+  unrunnable routine). The internal save gate's draft validation applies the
+  same integration check. `dry_run` is a preview that invokes nothing, so it's
+  left ungated — it shows what the routine *would* need, even integrations the
+  crew hasn't connected yet.
 
 <Note>
 Integration availability is resolved from the crew's connected Composio
@@ -283,7 +285,8 @@ Semantics:
 - **Fail-open.** If the routine has no author crew, or resource resolution
   itself errors, the run is **allowed** (a warning is logged) — same reasoning
   as the integration gate: a resolver bug must never wedge every run.
-- **`run` and `test_run` are gated; `dry_run` is not.**
+- **`run` is gated; `dry_run` is not.** (The internal save gate's draft
+  validation applies the same resource check.)
 
 ### Agents already know what the container has
 
@@ -501,11 +504,11 @@ Per-step `complexity` annotation drives the resolver. With `on_fail: "escalate_t
 **Tier override at runtime.** The CLI flag `--model <model>` is constructed from the resolved tier and passed to the agent's CLI adapter, so a routine's `complexity: "fast"` actually fires Haiku, not the agent's default. `CLIAdapter` is preserved (so the agent's CLAUDE_CODE / GEMINI_CLI / etc. wiring stays intact); only the model name swaps.
 </Info>
 
-## Test-run gate
+## Save validation gate
 
-Save endpoints (sidecar `/pipelines/save`, user `/api/v1/workspaces/{ws}/pipelines/save`, internal `/api/v1/internal/pipelines/save`) require a fresh passing test_run within the last 5 minutes — otherwise inline runs one against the execution tier.
+Save endpoints (sidecar `/pipelines/save`, user `/api/v1/workspaces/{ws}/pipelines/save`, internal `/api/v1/internal/pipelines/save`) require the routine to clear a validation gate before it persists. The gate is a **dry-run validation** of the draft, not a real execution — there is no "test run" mode (you cannot run an agent dry). The sidecar agent-authoring flow forwards the draft to `/api/v1/internal/pipelines/test_run`, which parses, schema-validates, and dry-runs it (rendering every template, invoking no agent); on success it sets `last_test_run_passed` and forwards to save.
 
-This is the **self-improvement loop**: an authoring agent that writes brittle DSL gets a structured failure report it can read and revise from. Without the gate, MVP would ship pipelines that pass schema but fail at runtime.
+This is the **self-improvement loop**: an authoring agent that writes brittle DSL gets a structured failure report it can read and revise from. Without the gate, MVP would ship pipelines that pass schema but fail at runtime. Real execution happens on the first live `run`, and risky routines are human-reviewed (governance) before they go live.
 
 <Tip>
 `skip_test_gate: true` is honored only when the caller's role is OWNER or ADMIN; lower roles get 403. Useful for hand-crafted DSL from known-good templates (the seed flow uses it).
@@ -513,7 +516,7 @@ This is the **self-improvement loop**: an authoring agent that writes brittle DS
 
 ## Governance — agent proposes, human approves the risky ones
 
-Routines have a lifecycle `status` (migration v128): **`active`** (live + runnable), **`proposed`** (awaiting approval), or **`disabled`** (admin airbag). The test-run gate still applies on top — `status` is an *additional* gate.
+Routines have a lifecycle `status` (migration v128): **`active`** (live + runnable), **`proposed`** (awaiting approval), or **`disabled`** (admin airbag). The save validation gate still applies on top — `status` is an *additional* gate.
 
 ### Maker-checker on save
 
@@ -529,7 +532,7 @@ Otherwise it's **safe** — only `agent_run` / `transform` / `call_pipeline` / `
 - **Safe → `active`.** Goes live immediately, exactly as before.
 - **Risky → `proposed`.** The routine is persisted but **not runnable**, and a **blocking inbox item** is raised for `MANAGER+` (the same Inbox surface as proposed skills). Approve it to go live, or reject it.
 
-A `proposed` (or `disabled`) routine refuses `run` / `run_batch` with `409 Conflict` — `"routine is awaiting approval"` or `"routine is disabled"`. `dry_run` always previews, and `test_run` runs an unsaved draft, so neither is blocked.
+A `proposed` (or `disabled`) routine refuses `run` / `run_batch` with `409 Conflict` — `"routine is awaiting approval"` or `"routine is disabled"`. `dry_run` always previews a saved routine, so it's never blocked.
 
 ### Approve / reject (MANAGER+)
 
@@ -616,20 +619,21 @@ The signing secret is shown **once**. To rotate it: delete the webhook + create 
 After you click **Run** or **Test run** in the UI, a live **Run activity** rail appears inline in the detail panel showing the just-started run step by step (started → each step → completed/failed) — so status is visible immediately without switching to the Runs tab. Full run history stays in the **Runs** tab; see the [Activity](/guides/activity#run-activity-rail) guide for the rail, and the toolbar Activity Bar for a workspace-wide "what's running now" view.
 
 <Note>
-**Test run** in the detail panel runs the routine's current definition as a draft against the execution tier (the same draft endpoint the save gate uses), so it requires an **author crew**. For routines without one, the button is disabled with a tooltip — use **Run** instead. (Run / Dry run address the saved routine by slug and have no such requirement.)
+The public draft **test_run** endpoint has been removed (you can't run an agent "dry"), so a real run is just **Run**. To preview a routine before running it, use **Dry run** — it walks the saved definition, renders templates, and returns the declared **manifest** (the blast radius) without invoking anything. Drafts are validated by the internal save gate (dry-run) at save time.
 </Note>
 
 ## Dry-run preview
 
-Three execution modes, distinguished by `Mode` in the request body and surface:
+Two execution modes, distinguished by `Mode` in the request body and surface:
 
 | Mode | Side effects | Increments invocation_count | Cost |
 |------|--------------|------------------------------|------|
-| `run` | yes (agents called) | yes | real |
-| `test_run` | yes (agents called) | no | real |
+| `run` | yes (agents called) — production | yes | real |
 | `dry_run` | no (templates rendered, agents skipped) | no | estimated |
 
-Dry-run is the safe "what would this routine do?" preview. It walks the DSL, renders all template substitutions against the supplied inputs, resolves each step's execution tier (adapter + model), and reports a `would_execute` list with per-step estimated cost. No agents are invoked, no journal entries beyond a single `pipeline.dry_run` audit row are written.
+There is **no `test_run` mode**: you cannot run an agent "dry" — it executes arbitrary scripts (bash, ansible, curl) whose side effects can't be intercepted — so a real run is always `run`. The agent-authoring save gate validates a draft via a `dry_run` (structure + templates), not a real execution.
+
+Dry-run is the safe "what would this routine do?" preview, and an honest **static plan — not a proof the run will succeed**. It walks the DSL, renders all template substitutions against the supplied inputs, resolves each step's execution tier (adapter + model), and reports a `would_execute` list with per-step estimated cost. It also returns the routine's declared **`manifest`** — the full blast radius (`integrations`, `egress`, `credentials`, `agents`, `routines`, `datastores`, `tools`, `has_http`, `has_code`) — so the UI can show "would use: ansible, Postgres, discord.com, agent jordan". (A definition that no longer parses leaves `manifest` null and still returns the report.) No agents are invoked; no journal entries beyond a single `pipeline.dry_run` audit row are written.
 
 ```bash
 crewship routine dry-run email-fetch --inputs '{"since":"yesterday"}'
@@ -642,7 +646,7 @@ In the UI: click **Dry run** in the routine detail panel. The `would_execute` re
 - Estimated cost in USD (order-of-magnitude only — the executor uses a flat token-density heuristic, not real pricing)
 - `would_call_agent` / `would_call_pipeline` target
 
-The estimate is intentionally labelled "estimated" everywhere it surfaces — it's a planning aid, not a quote. Real cost only lands once you switch to `run` or `test_run`.
+The estimate is intentionally labelled "estimated" everywhere it surfaces — it's a planning aid, not a quote. Real cost only lands once you switch to `run`.
 
 ## Versioning + rollback
 
@@ -710,7 +714,7 @@ At boot, the server scans for runs left in `queued`/`running` from the previous 
 - **A resumed run that finds its concurrency slot occupied waits and retries** with capped exponential backoff (2s doubling up to 60s) instead of failing — losing the slot race to a freshly-fired scheduled run is a timing collision, not a reason to abandon hours of restored work. If the server shuts down while a run is still waiting for its slot, the row stays in-flight and the next boot resumes it again.
 - **A waitpoint that timed out while the process was down** resumes, observes the expired token, and fails with `wait step "X" (approval) timed out` — distinct from an operator clicking deny (`… denied`).
 
-When persisted state is insufficient to resume safely, the run is stamped `interrupted` instead — never silently dropped, never wrongly resumed. Fallback triggers: the pipeline row is gone or no longer parses, the definition changed since the run started (content-hash mismatch — this catches in-place edits even when every step id survives, not just renamed/removed steps), unreadable persisted inputs/outputs, or a non-resumable mode (`test_run` gates from a previous lifetime are not re-run). The reason lands in the run's `error_message`.
+When persisted state is insufficient to resume safely, the run is stamped `interrupted` instead — never silently dropped, never wrongly resumed. Fallback triggers: the pipeline row is gone or no longer parses, the definition changed since the run started (content-hash mismatch — this catches in-place edits even when every step id survives, not just renamed/removed steps), unreadable persisted inputs/outputs, or a non-resumable mode (only live `run` rows resume; a `dry_run` preview row from a previous lifetime is never re-run). The reason lands in the run's `error_message`.
 
 Graceful shutdowns are different: an in-flight run cancelled by shutdown is finalized as `cancelled` (a terminal state) and is **not** resumed at next boot. Resume targets hard kills, where no terminal write could land.
 
@@ -882,11 +886,9 @@ The platform **fails fast** if the rendered key is empty (missing input + no lit
 
 <AccordionGroup>
 <Accordion title="Save returns 422 &quot;save requires a fresh, passing test_run&quot;">
-The save endpoint requires the test gate cleared. Preferred path: call `/test_run`, capture the `save_token` from its response, and pass `"save_token": "<token>"` in the `/save` body. The token is a server-signed HMAC over `(workspace_id | definition_hash | user_id | issued_at)` and expires after 5 minutes — it cannot be forged from the client side.
+The save endpoint requires the validation gate cleared. The server validates the DSL on save (parse + schema + cycle detection); to clear the residual gate, send `"last_test_run_at"` (RFC3339, within the last 5 minutes) + `"last_test_run_passed": true` in the `/save` body. This is the body-trust path `crewship routine save` uses, and it mirrors the sidecar agent-authoring flow which sets the same fields after the internal dry-run validation. There is no public `test_run` endpoint to mint a token from — a real run can't be done "dry", so a real run is reserved for the first live `crewship routine run`.
 
-Alternatives:
-- `crewship apply --skip-test-gate` (CLI — the flag lives on `apply`, not `routine save`) / `"skip_test_gate": true` (API) if your role is OWNER/ADMIN and you trust the DSL — bypasses the gate without running the test_run.
-- Legacy fallback: send `"last_test_run_at"` + `"last_test_run_passed"` in the body. Honoured for backwards compatibility, but trusts client-supplied values; new clients should always use `save_token`.
+Alternative: `crewship apply --skip-test-gate` (CLI — the flag lives on `apply`, not `routine save`) / `"skip_test_gate": true` (API) if your role is OWNER/ADMIN and you trust the DSL — bypasses the gate explicitly.
 </Accordion>
 
 <Accordion title="Run starts but no step events appear in the UI">

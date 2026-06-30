@@ -18,8 +18,10 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// Pipelines — declarative DSL workflows persisted per-workspace and
 	// reusable across crews. Runner is wired post-construction by the
 	// orchestrator boot path; an unwired runner returns 503 from /run
-	// and /test_run so the rest of the surface (List/Get/Delete/DryRun)
-	// stays usable for read-only inspection during boot.
+	// so the rest of the surface (List/Get/Delete/DryRun) stays usable
+	// for read-only inspection during boot. There is no public test_run
+	// route — the only draft validation gate is the internal save gate
+	// (/internal/pipelines/test_run, dry-run); a real run is just /run.
 	pipes := NewPipelineHandler(r.db, r.logger, nil, nil)
 	r.PipelinesHandler = pipes // expose for orchestrator wiring
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines", authed(wsCtx(http.HandlerFunc(pipes.List))))
@@ -34,7 +36,6 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override", authed(wsCtx(http.HandlerFunc(pipes.SetStepOverride))))
 	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override", authed(wsCtx(http.HandlerFunc(pipes.DeleteStepOverride))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run", authed(wsCtx(http.HandlerFunc(pipes.DryRun))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/test_run", authed(wsCtx(http.HandlerFunc(pipes.TestRun))))
 	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Delete))))
 	// Routine governance (maker-checker + admin airbag). approve/reject are
 	// MANAGER+ (canRole "create"); disable/enable are OWNER/ADMIN

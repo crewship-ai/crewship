@@ -403,12 +403,13 @@ func TestResume_FallbackToInterrupted(t *testing.T) {
 		Status: RunStatusRunning, Mode: ModeRun,
 		StepOutputsJSON: `{"renamed_step":"stale"}`,
 	})
-	// Case 3: a test_run from a previous lifetime — nobody is waiting
-	// for its gate result anymore; resuming would only burn tokens.
+	// Case 3: a non-live (dry_run) mode row from a previous lifetime —
+	// only ModeRun resumes; a preview-mode row must be interrupted, never
+	// re-run (resuming would only burn tokens).
 	insertInFlightRun(t, runStore, &RunRecord{
 		ID: "run_testrun_mode", WorkspaceID: "ws_test",
 		PipelineID: p.ID, PipelineSlug: p.Slug,
-		Status: RunStatusRunning, Mode: ModeTestRun,
+		Status: RunStatusRunning, Mode: ModeDryRun,
 	})
 
 	runner := newMockRunner()

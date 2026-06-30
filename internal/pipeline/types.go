@@ -692,27 +692,27 @@ const (
 	OrderByName
 )
 
-// RunMode controls whether the executor performs side effects, runs
-// the pipeline against real agents to validate the DSL, or just
+// RunMode controls whether the executor performs side effects or just
 // reports what it would have done.
 //
 //   - ModeRun: live invocation. Agents are called, side effects
 //     happen, journal entries land, invocation_count increments.
-//   - ModeTestRun: identical to ModeRun in mechanics, but the run
-//     does NOT increment invocation_count and is marked in the
-//     journal as a test run. Used by the save endpoint to enforce
-//     the test-run gate.
+//     This is the ONLY real-execution mode — you cannot run an agent
+//     "dry" (it executes arbitrary scripts whose side effects can't
+//     be intercepted), so a real run is always ModeRun.
 //   - ModeDryRun: no agent invocation. Templates are rendered against
 //     inputs, the executor walks the step list and reports what it
 //     WOULD have done (Ansible --check). Returns a structured
-//     "would_execute" report. No journal entries beyond a single
-//     pipeline.dry_run audit row.
+//     "would_execute" report (plus the declared manifest on the API
+//     surface). No journal entries beyond a single pipeline.dry_run
+//     audit row. A dry_run is an honest STATIC plan, NOT a proof the
+//     run will succeed. It also backs the internal save-gate's
+//     fast structural+template validation of a draft.
 type RunMode string
 
 const (
-	ModeRun     RunMode = "run"
-	ModeTestRun RunMode = "test_run"
-	ModeDryRun  RunMode = "dry_run"
+	ModeRun    RunMode = "run"
+	ModeDryRun RunMode = "dry_run"
 )
 
 // AgentRunner is the narrow contract the executor needs from the

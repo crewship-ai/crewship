@@ -437,17 +437,20 @@ func TestPipelinesAPI_Delete_MEMBER_Forbidden(t *testing.T) {
 	}
 }
 
-func TestPipelinesAPI_TestRun_RejectsBadDSL(t *testing.T) {
+// The public TestRun surface was removed; the surviving draft validation
+// gate is InternalTestRun (X-Internal-Token, dry-run). It must still reject
+// an invalid DSL with 422 before reaching the runner.
+func TestPipelinesAPI_InternalTestRun_RejectsBadDSL(t *testing.T) {
 	db := openSmokeDB(t)
 	defer db.Close()
 	runner := &stubRunner{output: "x"}
 	h := NewPipelineHandler(db, slog.Default(), runner, nil)
 
-	body := []byte(`{"definition":{"name":"BAD NAME WITH SPACES","steps":[]},"author_crew_id":"crew_a"}`)
-	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", bytes.NewReader(body)), "ws_smoke")
+	body := []byte(`{"workspace_id":"ws_smoke","definition":{"name":"BAD NAME WITH SPACES","steps":[]},"author_crew_id":"crew_a"}`)
+	req := httptest.NewRequest("POST", "/api/v1/internal/pipelines/test_run", bytes.NewReader(body))
 	req.ContentLength = int64(len(body))
 	w := httptest.NewRecorder()
-	h.TestRun(w, req)
+	h.InternalTestRun(w, req)
 
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Errorf("expected 422 for invalid DSL, got %d body=%s", w.Code, w.Body.String())

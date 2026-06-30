@@ -195,25 +195,6 @@ func TestRunGate_FailOpenOnResolverError(t *testing.T) {
 	}
 }
 
-func TestTestRunGate_BlocksWhenIntegrationMissing(t *testing.T) {
-	h, userID, wsID := newPipelineHandlerForCRUDTest(t)
-	runner := &stubRunner{output: "ok"}
-	h.SetRunner(runner)
-	crewID := seedCrewRow(t, h.db, "crew_tr", wsID, "Marketing", "marketing")
-	_ = seedAgentRow(t, h.db, "ag_tr", wsID, crewID, "Eva", "eva", "LEAD")
-
-	body := `{"definition":` + gateDef("slack") + `,"author_crew_id":"` + crewID + `","sample_inputs":{}}`
-	req := withWorkspaceUser(httptest.NewRequest("POST", "/x", strings.NewReader(body)), userID, wsID, "OWNER")
-	req.ContentLength = int64(len(body))
-	rr := httptest.NewRecorder()
-	h.TestRun(rr, req)
-	if rr.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status = %d, want 422; body=%s", rr.Code, rr.Body.String())
-	}
-	if !strings.Contains(rr.Body.String(), "missing_integrations") {
-		t.Errorf("body missing the machine-readable missing_integrations: %s", rr.Body.String())
-	}
-	if runner.calls != 0 {
-		t.Errorf("runner invoked %d times; test_run must not execute when blocked", runner.calls)
-	}
-}
+// NOTE: the public TestRun integration-gate test was removed with the public
+// TestRun surface. The surviving draft gate (InternalTestRun) is covered by
+// TestInternalTestRunGate_BlocksWhenIntegrationMissing in internal_test_run_test.go.

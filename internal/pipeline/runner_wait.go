@@ -141,10 +141,11 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 		// output (so downstream steps read {{ steps.<id>.output }}).
 		// Blocking + in-memory (like wait:datetime) — steers a live run.
 		eventType := Render(step.Wait.EventType, parentRender)
-		// test_run / dry_run preview: don't block waiting for a signal
-		// that the save gate can't deliver — short-circuit so a routine
-		// with a wait:event step is saveable + previewable.
-		if in.Mode == ModeTestRun || in.Mode == ModeDryRun {
+		// dry_run preview: don't block waiting for a signal that the
+		// preview can't deliver — short-circuit so a routine with a
+		// wait:event step is previewable (and the save gate's draft
+		// dry-run validates it).
+		if in.Mode == ModeDryRun {
 			return "waited:event:preview", 0, time.Since(stepStart).Milliseconds(), nil
 		}
 		if e.signals == nil {

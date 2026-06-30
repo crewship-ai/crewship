@@ -532,8 +532,8 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 }
 
 // RunDefinition executes an in-memory DSL without a persisted
-// pipeline row. Used by the test_run gate before save and by
-// dry-run preview against unsaved drafts.
+// pipeline row. Used by the internal save gate (dry-run validation of
+// a draft) and by dry-run preview against unsaved drafts.
 //
 // authorCrewID, authorAgentID, and workspaceID must be supplied
 // since there's no pipelines row to read them from. The resulting
@@ -541,7 +541,7 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 // so observers can tell drafts from saved pipelines.
 func (e *Executor) RunDefinition(ctx context.Context, dsl *DSL, in RunInput) (*RunResult, error) {
 	if in.Mode == "" {
-		in.Mode = ModeTestRun
+		in.Mode = ModeRun
 	}
 	if in.WorkspaceID == "" {
 		return nil, errors.New("executor: workspace_id required for RunDefinition")
@@ -948,7 +948,7 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 			result.StepOutputs[step.ID] = "<dry-run>"
 			continue
 
-		case ModeRun, ModeTestRun:
+		case ModeRun:
 			emit.emitStepStarted(ctx, step, i, tier)
 
 			output, stepCost, stepDur, stepErr := e.runStepWithRetry(ctx, step, renderedPrompt, tier, fallback, in, runID, pipelineID, emit, ctxRender, depth)
@@ -1012,7 +1012,7 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 	switch in.Mode {
 	case ModeDryRun:
 		result.Status = "DRY_RUN_OK"
-	case ModeRun, ModeTestRun:
+	case ModeRun:
 		result.Status = "COMPLETED"
 		emit.emitRunCompleted(ctx, result.DurationMs, result.CostUSD)
 		if in.Mode == ModeRun && in.pipeline != nil {
@@ -1433,16 +1433,16 @@ func (e *Executor) persistStepOutputs(ctx context.Context, in RunInput, depth in
 // for previews).
 //
 // Skips entirely when pipelineID is empty — that's the unsaved-draft
-// path used by RunDefinition (TestRun on a draft DSL). Inserting
-// with empty pipelineID would violate the FK on pipeline_runs and
-// fail the test_run gate; saved-pipeline runs always have a real
-// pipelineID via the in.pipeline.ID field.
+// path used by RunDefinition (dry-run validation of a draft DSL).
+// Inserting with empty pipelineID would violate the FK on
+// pipeline_runs; saved-pipeline runs always have a real pipelineID
+// via the in.pipeline.ID field.
 func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipelineID, pipelineSlug string, inputs map[string]any, startedAt time.Time) {
 	if e.runStore == nil {
 		return
 	}
 	if pipelineID == "" {
-		// Unsaved-draft run (TestRun on RunDefinition path) — no
+		// Unsaved-draft run (RunDefinition path) — no
 		// matching pipelines row exists yet, so the FK insert would
 		// fail. Skip the projection write; the journal entries that
 		// already fired are sufficient for audit on draft runs.

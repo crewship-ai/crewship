@@ -36,9 +36,9 @@ const (
 	RunStatusWaiting     RunStatus = "waiting"     // NON-terminal: parked on a human approval (wait step); resumes on approve
 )
 
-// RunMode is defined in types.go (ModeRun / ModeTestRun / ModeDryRun)
-// and reused here. We don't redeclare to keep one source of truth for
-// the mode set across the executor + the store.
+// RunMode is defined in types.go (ModeRun / ModeDryRun) and reused
+// here. We don't redeclare to keep one source of truth for the mode
+// set across the executor + the store.
 
 // TriggeredVia documents how the run started. Used by the analytics
 // page + the run-detail header so users see "fired by schedule X" vs

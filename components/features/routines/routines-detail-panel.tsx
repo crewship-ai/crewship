@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { X, Play, FlaskConical, Eye, Square, Check, Ban, Power, PowerOff, Workflow } from "lucide-react"
+import { X, Play, Eye, Square, Check, Ban, Power, PowerOff, Workflow } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
@@ -19,7 +19,7 @@ import {
   canKillRoutine,
   normalizeRoutineStatus,
 } from "@/lib/routine-governance"
-import { buildPipelineActionRequest, canTestRun } from "@/lib/pipeline-actions"
+import { buildPipelineActionRequest } from "@/lib/pipeline-actions"
 import { integrationLabel, extractMissingIntegrations } from "@/lib/integration-labels"
 import { PipelineRunActivity } from "@/components/features/activity/pipeline-run-activity"
 import { usePendingApproval } from "@/hooks/use-pending-approval"
@@ -39,9 +39,9 @@ import type { RoutineManifest } from "@/lib/routine-flow"
 // RoutinesDetailPanel — right-side detail for the selected routine.
 // Hosts the seven sub-tabs (Overview, Editor, Runs, Versions,
 // Schedules, Webhooks, Waitpoints) plus the action toolbar
-// (Run / TestRun / DryRun / Cancel). Subscribes to the same routine
-// state the list view reads, so refresh after a successful Run is
-// already covered by usePipelines' WS subscription in the layout.
+// (Run / DryRun / Cancel). Subscribes to the same routine state the
+// list view reads, so refresh after a successful Run is already
+// covered by usePipelines' WS subscription in the layout.
 
 export interface RoutineDetail {
   id: string
@@ -99,8 +99,8 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   // dryRunResult holds the `would_execute` report from the most recent
   // dry_run invocation so we can render it inline. Cleared on close.
   const [dryRunResult, setDryRunResult] = useState<DryRunResult | null>(null)
-  // lastRunId holds the run_id of the most recent Run / Test run so we can
-  // show its live activity rail inline (instant status after clicking).
+  // lastRunId holds the run_id of the most recent Run so we can show its
+  // live activity rail inline (instant status after clicking).
   const [lastRunId, setLastRunId] = useState<string | null>(null)
   // abortRef tracks the in-flight fetch so a fast workspace/slug
   // switch cancels stale work. Without this, a slow network +
@@ -160,12 +160,12 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, slug])
 
-  const triggerAction = async (action: "run" | "test_run" | "dry_run") => {
+  const triggerAction = async (action: "run" | "dry_run") => {
     if (!routine) return
     setBusyAction(action)
     try {
-      // Test run hits a slugless route with the draft definition in the body;
-      // Run / Dry run address the saved pipeline by slug. See lib/pipeline-actions.
+      // Run / Dry run both address the saved pipeline by slug — `run` executes
+      // for real, `dry_run` is a static preview. See lib/pipeline-actions.
       const { url, body } = buildPipelineActionRequest(workspaceId, slug, action, routine)
       const res = await apiFetch(url, {
         method: "POST",
@@ -228,9 +228,16 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           cost_usd: typeof data.cost_usd === "number" ? data.cost_usd : undefined,
           duration_ms: typeof data.duration_ms === "number" ? data.duration_ms : undefined,
           would_execute: Array.isArray(data.would_execute) ? data.would_execute : [],
+          // manifest is the declared blast radius the redefined dry_run returns
+          // alongside the step plan. Pass it through untyped-guarded; the report
+          // tolerates its absence (older server builds) via isManifestEmpty.
+          manifest:
+            data.manifest && typeof data.manifest === "object"
+              ? (data.manifest as RoutineDetail["manifest"])
+              : undefined,
         })
-        toast.success("Dry-run report ready", {
-          description: "Per-step tier + cost estimate shown above the tabs.",
+        toast.success("Plan preview ready", {
+          description: "Step plan + declared resources shown above the tabs.",
         })
       } else {
         // Surface the just-started run's live activity rail inline.
@@ -416,29 +423,8 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
               {busyAction === "run" ? "Running…" : "Run"}
             </Button>
           </span>
-          {/* Wrap in a span so the explanatory tooltip still shows when the
-              button is disabled — disabled buttons swallow hover events. */}
           <span
-            title={
-              runGuard ??
-              (canTestRun(routine)
-                ? "Run the draft definition on the execution tier; logs result without persisting state"
-                : "Test run needs an author crew — only available for crew-authored routines")
-            }
-            className="inline-flex"
-          >
-            <Button
-              variant="outline"
-              onClick={() => triggerAction("test_run")}
-              disabled={!!busyAction || !routine || !canTestRun(routine) || !!runGuard}
-              className="h-9 gap-2 rounded-md px-4 text-sm"
-            >
-              <FlaskConical className="h-3.5 w-3.5" />
-              {busyAction === "test_run" ? "Testing…" : "Test run"}
-            </Button>
-          </span>
-          <span
-            title={runGuard ?? "Walk DSL, render templates, compute would_execute report — no agent invocations"}
+            title={runGuard ?? "Static plan preview — walks the DSL + shows declared resources; no agents invoked"}
             className="inline-flex"
           >
             <Button
@@ -534,7 +520,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
       )}
 
       {/* Run activity — instant readable status for the just-triggered
-          Run / Test run, so the user isn't left wondering what's happening
+          Run, so the user isn't left wondering what's happening
           after clicking. Full history stays in the Runs tab. */}
       {routine && lastRunId && (
         <div className="border-b border-white/[0.06]">
@@ -660,8 +646,8 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   )
 }
 
-function actionLabel(a: "run" | "test_run" | "dry_run"): string {
-  return a === "run" ? "Run" : a === "test_run" ? "Test run" : "Dry run"
+function actionLabel(a: "run" | "dry_run"): string {
+  return a === "run" ? "Run" : "Dry run"
 }
 
 function governanceLabel(a: "approve" | "reject" | "disable" | "enable"): string {
