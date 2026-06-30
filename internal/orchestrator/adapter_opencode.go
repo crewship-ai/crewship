@@ -29,6 +29,10 @@ type opencodeAdapter struct{}
 
 func (opencodeAdapter) Name() string { return "OPENCODE" }
 
+// PromptViaStdin is false: OpenCode is not confirmed to read its prompt from
+// stdin, so the message keeps being passed as an argument unchanged.
+func (opencodeAdapter) PromptViaStdin(req AgentRunRequest) bool { return false }
+
 func (opencodeAdapter) BuildCommand(req AgentRunRequest) []string {
 	cmd := []string{"opencode", "run", "--format", "json"}
 	if req.LLMModel != "" {

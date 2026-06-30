@@ -121,6 +121,13 @@ type ExecConfig struct {
 	Env         []string
 	WorkingDir  string
 	User        string
+	// Stdin, when non-nil, is streamed to the command's standard input and the
+	// write side is then half-closed so the process observes EOF. nil (the
+	// default) means no stdin is attached — byte-for-byte the historic
+	// behaviour. Used to deliver an oversized agent prompt that would exceed
+	// the kernel's per-argv MAX_ARG_STRLEN limit (128 KiB on Linux) if passed
+	// as a positional command argument.
+	Stdin io.Reader
 }
 
 // ExecResult holds the exec ID and output stream from a container exec command.

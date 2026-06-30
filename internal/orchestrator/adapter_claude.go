@@ -18,6 +18,32 @@ type claudeCodeAdapter struct{}
 
 func (claudeCodeAdapter) Name() string { return "CLAUDE_CODE" }
 
+// promptArgMaxBytes is the conservative ceiling, below Linux's per-argv
+// MAX_ARG_STRLEN limit of 128 KiB, above which the user message is delivered to
+// `claude` over stdin instead of as a positional argument. execve fails with
+// E2BIG when any single argv element exceeds 128 KiB; that surfaced as the
+// agent exiting 255 with $0.00 when a routine fed a large fetched page into an
+// agent_run prompt. The 96 KiB ceiling leaves a 32 KiB safety margin (the
+// kernel limit counts the trailing NUL and the message may be multi-byte).
+//
+// Claude Code's `--print` mode reads the prompt from stdin when no positional
+// prompt is supplied and an explicit --output-format is set (we always pass
+// --output-format stream-json) — verified against the real CLI (v2.1.x).
+const promptArgMaxBytes = 96 * 1024
+
+// claudePromptViaStdin is the shared predicate behind PromptViaStdin and the
+// arg-omission branch in BuildCommand so the two never disagree.
+func claudePromptViaStdin(req AgentRunRequest) bool {
+	return len(req.UserMessage) > promptArgMaxBytes
+}
+
+// PromptViaStdin routes oversized prompts through stdin to dodge E2BIG. Normal
+// (sub-ceiling) messages keep the historic positional-arg + tmux path so the
+// common case is byte-for-byte unchanged.
+func (claudeCodeAdapter) PromptViaStdin(req AgentRunRequest) bool {
+	return claudePromptViaStdin(req)
+}
+
 func (claudeCodeAdapter) BuildCommand(req AgentRunRequest) []string {
 	// --bare: skips auto-discovery of hooks/skills/plugins/MCP/CLAUDE.md.
 	// Anthropic docs recommend it for scripted/SDK calls. BUT — Claude
@@ -86,9 +112,15 @@ func (claudeCodeAdapter) BuildCommand(req AgentRunRequest) []string {
 	// calls. Pre-PR-A we gated this on a non-empty MCP source list, which
 	// would have stranded memory tools for agents with no other MCP servers.
 	cmd = append(cmd, "--mcp-config", fmt.Sprintf("/crew/agents/%s/.mcp.json", req.AgentSlug))
-	// `--` separator stops Claude Code from re-parsing user message tokens
-	// that happen to start with `-` as flags.
-	cmd = append(cmd, "--", req.UserMessage)
+	// Pass the user message as a positional argument guarded by `--` (which
+	// stops Claude Code from re-parsing message tokens starting with `-` as
+	// flags) — UNLESS it is large enough to risk execve's E2BIG, in which case
+	// it is omitted here and delivered over stdin by the orchestrator (see
+	// PromptViaStdin). `claude --print` reads the prompt from stdin when no
+	// positional prompt is given.
+	if !claudePromptViaStdin(req) {
+		cmd = append(cmd, "--", req.UserMessage)
+	}
 	return cmd
 }
 

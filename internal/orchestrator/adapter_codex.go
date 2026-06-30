@@ -30,6 +30,10 @@ type codexAdapter struct{}
 
 func (codexAdapter) Name() string { return "CODEX_CLI" }
 
+// PromptViaStdin is false: Codex is not confirmed to read its prompt from
+// stdin, so the message keeps being passed as an argument unchanged.
+func (codexAdapter) PromptViaStdin(req AgentRunRequest) bool { return false }
+
 func (codexAdapter) BuildCommand(req AgentRunRequest) []string {
 	cmd := []string{"codex", "exec", "--json"}
 

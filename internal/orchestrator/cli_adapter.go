@@ -28,6 +28,18 @@ type CLIAdapter interface {
 	// must be pure functions of req — no I/O, no globals.
 	BuildCommand(req AgentRunRequest) []string
 
+	// PromptViaStdin reports whether the user message should be delivered to
+	// the CLI over stdin instead of as a positional argv element. When it
+	// returns true, BuildCommand MUST omit the user-message argument and the
+	// orchestrator sets ExecConfig.Stdin to the message AND bypasses the tmux
+	// wrapper (a detached tmux session's stdin is not connected to the exec
+	// stream, so the prompt would otherwise be lost). Only adapters confirmed
+	// to read their prompt from stdin under non-interactive/print mode may
+	// return true; the rest keep passing the message as an argument. The
+	// decision may depend on req (e.g. message size) so it is a method of req,
+	// not a constant.
+	PromptViaStdin(req AgentRunRequest) bool
+
 	// UseStreamJSON declares whether ParseStreamLine should be invoked per
 	// line of stdout. When false, streamOutput emits each line as a single
 	// "text" event without parsing — used as a safe fallback for CLIs whose
@@ -127,6 +139,10 @@ func (unknownAdapter) Name() string { return "" }
 func (unknownAdapter) BuildCommand(req AgentRunRequest) []string {
 	return []string{"claude", "--print", req.UserMessage}
 }
+
+// PromptViaStdin is false for the unknown adapter: it preserves the historic
+// minimal `claude --print <msg>` arg shape for debuggability.
+func (unknownAdapter) PromptViaStdin(req AgentRunRequest) bool { return false }
 
 func (unknownAdapter) UseStreamJSON() bool { return false }
 

@@ -27,6 +27,10 @@ type droidAdapter struct{}
 
 func (droidAdapter) Name() string { return "FACTORY_DROID" }
 
+// PromptViaStdin is false: Droid is not confirmed to read its prompt from
+// stdin, so the message keeps being passed as an argument unchanged.
+func (droidAdapter) PromptViaStdin(req AgentRunRequest) bool { return false }
+
 func (droidAdapter) BuildCommand(req AgentRunRequest) []string {
 	// Map validated tool_profile (lib/validations.ts: MINIMAL/CODING/FULL)
 	// onto Droid's --auto autonomy: low/medium/high. MESSAGING was retired
