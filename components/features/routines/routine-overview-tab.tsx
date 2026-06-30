@@ -20,16 +20,18 @@ import {
   Clock,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { JSONViewer } from "@/components/features/activity/json-viewer"
 import { relTime, formatDurationDecimal } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import { integrationLabel } from "@/lib/integration-labels"
 import { usePipelineRunRecords, type PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
+import { useRunSubSpans } from "@/hooks/use-run-sub-spans"
 import type { RoutineDetail } from "./routines-detail-panel"
 import { Card } from "./_shared"
 import { RoutineTouches } from "./routine-touches"
+import { RoutineMiniTrace } from "./routine-mini-trace"
 import { buildPlainSteps, type PlainStep } from "@/lib/routine-flow"
+import { buildMiniTrace } from "@/lib/routine-mini-trace"
 
 // RoutineOverviewTab — the approachable, non-technical summary of a single
 // routine. Leads with the essentials a human asks first: a thin stat strip,
@@ -201,7 +203,7 @@ export function RoutineOverviewTab({
       </div>
 
       {/* ── ★ Last run — the prominent result card ─────────────────── */}
-      <LastRunCard run={lastRun} workspaceId={workspaceId} />
+      <LastRunCard run={lastRun} workspaceId={workspaceId} definition={def} />
 
       {/* ── Operational detail — demoted below the essentials ──────── */}
       <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
@@ -475,10 +477,27 @@ function RunsChart({ bins }: { bins: Array<{ day: string; total: number; failed:
 function LastRunCard({
   run,
   workspaceId,
+  definition,
 }: {
   run: PipelineRunRecord | null
   workspaceId: string | undefined
+  definition: Record<string, unknown> | undefined
 }) {
+  // Best-effort fetch of the run detail (carries sub_spans + step_outputs
+  // the list row omits) to power the mini-trace's tool calls. Hooks must
+  // run unconditionally, so this sits above the early return; it no-ops
+  // when there's no run.
+  const { run: runDetail } = useRunSubSpans(workspaceId, run?.id ?? null)
+
+  // Compact "how did it flow + what did it call" projection. Prefer the
+  // detail (sub_spans + per-step status); fall back to the list row so the
+  // flow still renders before/without the detail fetch. Memoized on the
+  // inputs so we don't re-walk the DSL on unrelated re-renders.
+  const miniTrace = useMemo(
+    () => buildMiniTrace(definition, runDetail ?? run),
+    [definition, runDetail, run],
+  )
+
   if (!run) {
     return (
       <Card title="Last run">
@@ -563,14 +582,15 @@ function LastRunCard({
             {run.error_message}
           </div>
         )}
-        {run.output && (
-          <div>
-            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Output</div>
-            <div className="overflow-hidden rounded-md border border-border/60 bg-black/30">
-              <JSONViewer value={run.output} />
-            </div>
+        {/* Mini-trace — HOW the run flowed + what it called, not its output
+            (the output lives in Activity → Output). A compact, read-only
+            projection of the step flow with each agent step's tool calls. */}
+        <div>
+          <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            How it ran
           </div>
-        )}
+          <RoutineMiniTrace nodes={miniTrace} />
+        </div>
         {workspaceId && (
           <Link
             href={`/activity?run=${encodeURIComponent(run.id)}`}
