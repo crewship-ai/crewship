@@ -57,10 +57,12 @@ func (d *DSL) ExtractManifest() *Manifest {
 		return m
 	}
 
-	// Integrations + credentials are direct passthroughs.
+	// Integrations + credentials are passthroughs, deduped + sorted so the
+	// manifest JSON the UI/governance consumes is deterministic regardless of
+	// how the author ordered (or repeated) the declarations.
 	m.Integrations = dedupeSorted(d.NormalizedIntegrationsRequired())
 	if len(d.CredsRequired) > 0 {
-		m.Credentials = append(m.Credentials, d.CredsRequired...)
+		m.Credentials = dedupeSortedCreds(d.CredsRequired)
 	}
 
 	// Accumulators walked across steps + hooks. Egress entries are DNS
@@ -171,6 +173,31 @@ func dedupeSorted(in []string) []string {
 // dedupeSortedTools dedupes ToolRefs by (Type, Name) and sorts by Type then
 // Name. Entries with an empty Type are dropped (a tool with no family is
 // meaningless in the manifest).
+func dedupeSortedCreds(in []CredReq) []CredReq {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]CredReq, 0, len(in))
+	for _, c := range in {
+		c.Type = strings.TrimSpace(c.Type)
+		c.Scope = strings.TrimSpace(c.Scope)
+		if c.Type == "" {
+			continue
+		}
+		key := c.Type + "\x00" + c.Scope
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Type != out[j].Type {
+			return out[i].Type < out[j].Type
+		}
+		return out[i].Scope < out[j].Scope
+	})
+	return out
+}
+
 func dedupeSortedTools(in []ToolRef) []ToolRef {
 	seen := make(map[string]struct{}, len(in))
 	out := make([]ToolRef, 0, len(in))

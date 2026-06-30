@@ -235,6 +235,35 @@ func TestRun_DryRunMode_DoesNotSuspend(t *testing.T) {
 	}
 }
 
+// TestDryRun_WaitDatetime_DoesNotSleep covers the gap the per-event guard
+// missed: a ModeDryRun preview must short-circuit EVERY wait kind, not just
+// wait:event. A wait:datetime far in the future would otherwise sleep and hang
+// the save-gate's draft dry-run. We bound the call tightly — if the guard
+// regressed, the executor would block on time.After(decades) until ctx expires.
+func TestDryRun_WaitDatetime_DoesNotSleep(t *testing.T) {
+	db := openStoreTestDB(t)
+	defer db.Close()
+	exec := NewExecutor(NewStore(db), NewResolver(db), newMockRunner(), &captureEmitter{})
+
+	dsl := &DSL{
+		DSLVersion: "1.0",
+		Name:       "dt-preview",
+		Steps: []Step{
+			{ID: "w", Type: StepWait, Wait: &WaitStep{Kind: "datetime", Until: "2099-01-01T00:00:00Z"}},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := exec.RunDefinition(ctx, dsl, RunInput{WorkspaceID: "ws_test", Mode: ModeDryRun})
+	if err != nil {
+		t.Fatalf("dry-run wait:datetime returned error (did it sleep until ctx expired?): %v", err)
+	}
+	if res.Status != "DRY_RUN_OK" {
+		t.Errorf("status = %q, want DRY_RUN_OK", res.Status)
+	}
+}
+
 // resumeAndAwait runs the approval-resume synchronously (the in-process
 // ResumeAfterApproval spawns this on a goroutine; here we drive it directly
 // for a deterministic assertion).

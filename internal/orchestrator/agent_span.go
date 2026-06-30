@@ -4,7 +4,15 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/scrubber"
 )
+
+// spanDetailScrubber redacts secret-shaped tokens from span Detail before it is
+// persisted to the journal and returned by the run-detail API. Detail is derived
+// from raw tool input (command / url / query / pattern), which can carry tokens,
+// API keys, or credentials in flags or query strings. Created once.
+var spanDetailScrubber = scrubber.New()
 
 // RunAgentSpan is one captured INTERNAL action of an agent_run step: a single
 // tool the agent invoked (Bash command, file Write/Edit/Read, an MCP tool call
@@ -88,7 +96,9 @@ var detailInputKeys = []string{"command", "file_path", "path", "notebook_path", 
 func deriveSpanDetail(tool string, input map[string]any) string {
 	for _, k := range detailInputKeys {
 		if v, ok := input[k].(string); ok && v != "" {
-			return v
+			// Redact secrets before this raw tool input is persisted /
+			// surfaced — a command flag or URL query can carry a token.
+			return spanDetailScrubber.Scrub(v)
 		}
 	}
 	// MCP tools rarely carry a path/command — fall back to the short name so

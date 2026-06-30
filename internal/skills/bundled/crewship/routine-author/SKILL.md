@@ -34,7 +34,14 @@ routine — grounded in what this crew actually has, tested before it ships.
    the routine needs in `integrations_required` (lowercase connector slugs like
    `"github"`, `"slack"`). Read `[AVAILABLE ROUTINES]` and **reuse/compose**
    existing routines with a `call_pipeline` step where one already fits — don't
-   re-build what's there.
+   re-build what's there. Also read the `[CONTAINER RESOURCES]` block: it lists
+   the datastores (e.g. Postgres at a host/port) and installed CLIs your crew's
+   container already has. If the routine uses any of them — typically from an
+   `agent_run` step that opens a DB connection or shells out to a CLI — **declare
+   them in the top-level `resources` block** (`resources.datastores[]` /
+   `resources.tools[]`). These can't be inferred from the step graph, so without
+   the declaration the manifest is incomplete and the run-time resource
+   precondition gate has nothing to check against.
 
 3. **Prefer linear steps.** A short, top-to-bottom sequence is easier to read,
    test, and approve. Avoid branching (`if:`), DAG `needs:`, and loops unless the
@@ -44,7 +51,12 @@ routine — grounded in what this crew actually has, tested before it ships.
 
    - Top level: `dsl_version` (always `"1.0"`), `name`, `description`,
      `inputs[]`, `outputs[]`, `integrations_required[]`, `egress_targets[]`,
-     `steps[]`.
+     `credentials_required[]`, `resources`, `steps[]`.
+   - `resources` (only when the routine touches container datastores/CLIs):
+     `{ "datastores": [{ "type":"postgres", "name":"app-db", "note":"writes table runs" }],
+        "tools": [{ "type":"ansible", "name":"deploy.yml" }] }`.
+     `type` is the engine/tool family (`postgres|redis|mysql|mongodb|other` for
+     datastores; `ansible|terraform|kubectl|bash|python|other` for tools).
    - Step types (the `type` field selects the shape):
      - `agent_run` — `{ "id", "type":"agent_run", "agent_slug", "prompt", "complexity":"fast|moderate|smart" }`
      - `http` — `{ "id", "type":"http", "http": { "method", "url", "headers", "body", "credential_ref": {"type":"slack"} } }`

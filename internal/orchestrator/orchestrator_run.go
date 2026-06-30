@@ -700,6 +700,22 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		o.logger.Info("delivering oversized agent prompt via stdin (tmux bypassed)",
 			"agent_id", req.AgentID, "prompt_bytes", len(req.UserMessage))
 	} else {
+		// Shared E2BIG guard. Only the Claude adapter currently routes
+		// oversized prompts via stdin; the others fold system+user into a
+		// single positional argv element (e.g. gemini `-p <prompt>`), which
+		// execve rejects with E2BIG once any element exceeds Linux's 128 KiB
+		// MAX_ARG_STRLEN. Left unguarded that surfaced as the agent exiting 255
+		// at $0.00 with no actionable reason. Catch it BEFORE exec at the
+		// shared layer and fail with a legible error for EVERY arg-path
+		// adapter, rather than per-adapter. (Enabling stdin delivery for a
+		// given CLI is a follow-up gated on confirming that CLI reads its
+		// prompt from stdin in non-interactive mode.)
+		if oversizedArg, n := firstOversizedArg(cmd); oversizedArg {
+			return fmt.Errorf("agent prompt too large for %s: a single argument is %d bytes, over the %d-byte execve limit; "+
+				"this CLI delivers the prompt as a command-line argument and cannot accept input this large — "+
+				"reduce the input fed into the agent_run step, or use a Claude agent (which delivers large prompts via stdin)",
+				req.CLIAdapter, n, maxArgStrLen)
+		}
 		var tmuxErr error
 		execCmd, tmuxErr = o.setupTmuxExec(ctx, req.ContainerID, cmd, req.AgentSlug, env)
 		if tmuxErr != nil {

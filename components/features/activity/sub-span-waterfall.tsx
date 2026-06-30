@@ -28,7 +28,21 @@ export function SubSpanWaterfall({
   onOpenArtifact?: (path: string) => void
 }) {
   const bars = useMemo(() => layoutSubSpans(spans), [spans])
-  const [openIdx, setOpenIdx] = useState<number | null>(null)
+  // Assign each bar a STABLE id derived from span content (not array
+  // index) so a live insert/reorder keeps the open detail panel attached
+  // to its own action instead of jumping to whatever now sits at that
+  // index. The trailing #n disambiguates otherwise-identical spans while
+  // staying stable under their preserved relative order.
+  const rows = useMemo(() => {
+    const seen = new Map<string, number>()
+    return bars.map((bar) => {
+      const base = `${bar.span.kind}:${bar.span.name}:${bar.span.startedAt ?? ""}:${bar.span.durationMs ?? ""}`
+      const n = seen.get(base) ?? 0
+      seen.set(base, n + 1)
+      return { ...bar, id: `${base}#${n}` }
+    })
+  }, [bars])
+  const [openId, setOpenId] = useState<string | null>(null)
 
   if (spans.length === 0) {
     return (
@@ -43,13 +57,13 @@ export function SubSpanWaterfall({
 
   return (
     <div className="space-y-0.5">
-      {bars.map(({ span, leftPct, widthPct }, i) => {
-        const open = openIdx === i
+      {rows.map(({ span, leftPct, widthPct, id }) => {
+        const open = openId === id
         return (
-          <div key={`${span.kind}:${span.name}:${i}`}>
+          <div key={id}>
             <button
               type="button"
-              onClick={() => setOpenIdx(open ? null : i)}
+              onClick={() => setOpenId(open ? null : id)}
               aria-expanded={open}
               className={cn(
                 "grid w-full grid-cols-[1fr_88px] items-center gap-2 rounded px-1 py-1 text-left transition-colors hover:bg-white/[0.04]",

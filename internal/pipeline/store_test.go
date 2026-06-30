@@ -172,6 +172,49 @@ func TestStore_Save_HappyPath(t *testing.T) {
 	}
 }
 
+// TestStore_Save_PreservesDisabledOnResave is the disable-airbag invariant: a
+// routine an OWNER/ADMIN killed (status='disabled') must stay disabled across an
+// edit. A plain re-save (which carries status='active' via statusForRisk) used
+// to silently revive it, bypassing the OWNER/ADMIN-only enable gate.
+func TestStore_Save_PreservesDisabledOnResave(t *testing.T) {
+	db := openStoreTestDB(t)
+	defer db.Close()
+	s := NewStore(db)
+	ctx := context.Background()
+
+	saved, err := s.Save(ctx, validSaveInput("airbag"))
+	if err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	if err := s.SetStatus(ctx, saved.ID, "disabled"); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+
+	// Re-save as 'active' (what statusForRisk yields for a non-risky routine).
+	in := validSaveInput("airbag")
+	in.Status = "active"
+	in.Description = "edited while disabled"
+	again, err := s.Save(ctx, in)
+	if err != nil {
+		t.Fatalf("re-save: %v", err)
+	}
+	if again.Status != "disabled" {
+		t.Errorf("status after re-save = %q, want disabled (airbag must survive an edit)", again.Status)
+	}
+
+	// The deliberate path back is enable (SetStatus), not a save.
+	if err := s.SetStatus(ctx, saved.ID, "active"); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	got, err := s.GetByID(ctx, saved.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != "active" {
+		t.Errorf("status after enable = %q, want active", got.Status)
+	}
+}
+
 func TestStore_Save_UpsertsExisting(t *testing.T) {
 	db := openStoreTestDB(t)
 	defer db.Close()

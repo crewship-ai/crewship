@@ -200,12 +200,18 @@ describe("buildPlainSteps", () => {
   })
 
   it("produces a human title + detail per step type", () => {
+    // Prose now comes from the shared canonical renderer
+    // (lib/routine-step-describe), so it reads identically to the readable
+    // summary: "Fetch from <host>", "Ask <agent>", etc.
     const lines = buildPlainSteps(fullDsl)
     const fetch = lines.find((l) => l.id === "fetch")!
     expect(fetch.title.toLowerCase()).toContain("fetch")
     expect(fetch.detail).toBeTruthy()
     const agent = lines.find((l) => l.id === "pick")!
-    expect(agent.title.toLowerCase()).toContain("agent")
+    expect(agent.title).toBe("Ask jordan")
+    // http carries no plain-language detail, so the mono line falls back
+    // to the technical one-liner.
+    expect(fetch.detail).toContain("http GET")
   })
 
   it("is defensive on malformed input", () => {

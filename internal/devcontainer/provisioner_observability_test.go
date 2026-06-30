@@ -38,13 +38,18 @@ func hasStep(evs []ProvisionEvent, step, status string) bool {
 	return false
 }
 
-func indexOfStep(evs []ProvisionEvent, step string) int {
-	for i, e := range evs {
+// requireStep returns the first event matching step, or fails the test with a
+// clear message (listing the steps seen) when absent — so a missing step fails
+// cleanly instead of panicking on a -1 slice index.
+func requireStep(t *testing.T, evs []ProvisionEvent, step string) ProvisionEvent {
+	t.Helper()
+	for _, e := range evs {
 		if e.Step == step {
-			return i
+			return e
 		}
 	}
-	return -1
+	t.Fatalf("step %q not found; steps seen: %#v", step, steps(evs))
+	return ProvisionEvent{} // unreachable: t.Fatalf stops the goroutine
 }
 
 // TestProvision_Sink_BuildKitOrderedEvents verifies the sink receives the full,
@@ -106,10 +111,10 @@ func TestProvision_Sink_BuildKitOrderedEvents(t *testing.T) {
 		}
 	}
 	// resolve_features and image_build_done carry a duration.
-	if e := (*got)[indexOfStep(*got, ProvStepImageBuildDone)]; e.DurationMs < 0 {
+	if e := requireStep(t, *got, ProvStepImageBuildDone); e.DurationMs < 0 {
 		t.Errorf("image_build_done missing duration")
 	}
-	if e := (*got)[indexOfStep(*got, ProvStepImageBuildStart)]; e.Tag == "" {
+	if e := requireStep(t, *got, ProvStepImageBuildStart); e.Tag == "" {
 		t.Errorf("image_build_start must carry the feature image tag")
 	}
 }

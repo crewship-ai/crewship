@@ -423,6 +423,13 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusTooManyRequests, "concurrency limit reached")
 			return
 		}
+		// Governance airbag: a 'proposed'/'disabled' routine refuses to run
+		// from the executor. Surface it as 409 (not a generic 5xx) so the
+		// webhook sender sees it's a policy block, not a server fault.
+		if errors.Is(err, pipeline.ErrRoutineNotActive) {
+			replyError(w, http.StatusConflict, "routine is not active (awaiting approval or disabled)")
+			return
+		}
 		h.logger.Warn("webhook fire", "error", err, "webhook_id", wh.ID)
 		replyError(w, http.StatusInternalServerError, "pipeline run failed")
 		return

@@ -97,6 +97,27 @@ func TestExtractManifest_IntegrationsAndCredsPassthrough(t *testing.T) {
 	}
 }
 
+// TestExtractManifest_CredentialsDedupedSorted — the doc promises every ref
+// slice is deduped + sorted; credentials must honor it so the manifest JSON is
+// deterministic regardless of how the author ordered/repeated declarations.
+func TestExtractManifest_CredentialsDedupedSorted(t *testing.T) {
+	d := &DSL{
+		Name: "p",
+		CredsRequired: []CredReq{
+			{Type: "stripe", Scope: "write"},
+			{Type: "github", Scope: "repo"},
+			{Type: "stripe", Scope: "write"}, // exact dup
+			{Type: "  github ", Scope: " repo "}, // dup after trim
+		},
+		Steps: []Step{{ID: "s1", Type: StepAgentRun, AgentSlug: "a"}},
+	}
+	m := d.ExtractManifest()
+	want := []CredReq{{Type: "github", Scope: "repo"}, {Type: "stripe", Scope: "write"}}
+	if !reflect.DeepEqual(m.Credentials, want) {
+		t.Errorf("Credentials = %+v, want %+v (deduped + sorted)", m.Credentials, want)
+	}
+}
+
 // TestExtractManifest_CodeStepsAndDeclaredTools — code-step runtimes become
 // ToolRefs and merge with declared Resources.Tools; datastores pass through;
 // deduped + sorted.

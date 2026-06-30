@@ -23,6 +23,16 @@ func hasProvStep(evs []devcontainer.ProvisionEvent, step, status string) bool {
 	return false
 }
 
+// indexOfProvStep returns the index of the first event matching step, or -1.
+func indexOfProvStep(evs []devcontainer.ProvisionEvent, step string) int {
+	for i, e := range evs {
+		if e.Step == step {
+			return i
+		}
+	}
+	return -1
+}
+
 // TestEnsureCrewRuntime_Sink_EmitsCreatePathEvents proves the create path emits
 // the ordered audit trail start → container_create → ready, every event carries
 // the canonical provision phase, and nothing reaches failed.
@@ -41,14 +51,24 @@ func TestEnsureCrewRuntime_Sink_EmitsCreatePathEvents(t *testing.T) {
 		t.Fatalf("EnsureCrewRuntime: %v", err)
 	}
 
-	if !hasProvStep(got, devcontainer.ProvStepStart, "") {
-		t.Errorf("missing provision.start event: %+v", got)
-	}
 	if !hasProvStep(got, devcontainer.ProvStepContainerCreate, devcontainer.ProvStatusCompleted) {
 		t.Errorf("missing container_create{completed} event: %+v", got)
 	}
 	if !hasProvStep(got, devcontainer.ProvStepReady, devcontainer.ProvStatusCompleted) {
 		t.Errorf("missing ready{completed} event: %+v", got)
+	}
+	// Order matters: start → container_create → ready. Compare indexes in the
+	// captured slice so a ready emitted before container_create fails the test
+	// (presence-only checks would pass on a wrong order).
+	startIdx := indexOfProvStep(got, devcontainer.ProvStepStart)
+	createIdx := indexOfProvStep(got, devcontainer.ProvStepContainerCreate)
+	readyIdx := indexOfProvStep(got, devcontainer.ProvStepReady)
+	if startIdx < 0 {
+		t.Errorf("missing provision.start event: %+v", got)
+	}
+	if !(startIdx < createIdx && createIdx < readyIdx) {
+		t.Errorf("events out of order: start=%d container_create=%d ready=%d, want start < container_create < ready: %+v",
+			startIdx, createIdx, readyIdx, got)
 	}
 	if hasProvStep(got, devcontainer.ProvStepFailed, "") {
 		t.Errorf("happy path must not emit provision.failed: %+v", got)

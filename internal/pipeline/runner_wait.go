@@ -25,6 +25,18 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 		return "", 0, 0, fmt.Errorf("wait step %q missing body", step.ID)
 	}
 
+	// dry_run preview: short-circuit EVERY wait kind before it can block or
+	// cause side effects — datetime would sleep, approval would
+	// CreateApproval/WaitFor (inbox card + DB row), event would block on a
+	// signal the preview can't deliver. The save-gate's draft dry-run must
+	// validate the routine statically, so return a deterministic preview marker.
+	if in.Mode == ModeDryRun {
+		switch step.Wait.Kind {
+		case "datetime", "approval", "event":
+			return "waited:" + step.Wait.Kind + ":preview", 0, time.Since(stepStart).Milliseconds(), nil
+		}
+	}
+
 	switch step.Wait.Kind {
 	case "datetime":
 		// Render template (allows {{ inputs.deadline }} etc.) before
@@ -141,13 +153,7 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 		// output (so downstream steps read {{ steps.<id>.output }}).
 		// Blocking + in-memory (like wait:datetime) — steers a live run.
 		eventType := Render(step.Wait.EventType, parentRender)
-		// dry_run preview: don't block waiting for a signal that the
-		// preview can't deliver — short-circuit so a routine with a
-		// wait:event step is previewable (and the save gate's draft
-		// dry-run validates it).
-		if in.Mode == ModeDryRun {
-			return "waited:event:preview", 0, time.Since(stepStart).Milliseconds(), nil
-		}
+		// (ModeDryRun is short-circuited for every wait kind at the top.)
 		if e.signals == nil {
 			return "", 0, time.Since(stepStart).Milliseconds(),
 				fmt.Errorf("wait step %q (event) no signal registry wired", step.ID)

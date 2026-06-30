@@ -235,7 +235,12 @@ export function ActivityTracePage() {
   const { bySlug: agentIdBySlug } = useWorkspaceAgents(workspaceId)
   const selectedAgentId = useMemo(() => {
     const slug = selectedStep?.agent_slug
-    return (slug ? agentIdBySlug.get(slug) : undefined) ?? run?.invoking_agent_id ?? null
+    // A slugged step resolves ONLY to its own agent — return null (not the
+    // invoking agent) while the slug→id lookup is still loading or stale, so a
+    // multi-agent run never points the Files tab at the wrong container. The
+    // invoking-agent fallback is for slugless steps only.
+    if (slug) return agentIdBySlug.get(slug) ?? null
+    return run?.invoking_agent_id ?? null
   }, [selectedStep?.agent_slug, agentIdBySlug, run?.invoking_agent_id])
 
   // Context for the bottom dock — log / trace / changes of the selected

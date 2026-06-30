@@ -531,7 +531,7 @@ func runInboxBulk(cmd *cobra.Command, state, action string) error {
 		// user re-run after this batch, or narrow with explicit --ids.
 		if len(ids) == inboxBulkChunk {
 			return fmt.Errorf(
-				"more than %d unread items — re-run after this batch, or pass --ids to target a specific subset",
+				"hit the %d unread-item page cap; no items were changed because this command cannot tell whether more unread items exist — pass --ids to target a specific subset",
 				inboxBulkChunk,
 			)
 		}

@@ -57,7 +57,7 @@ func TestExecutor_If_TrueExecutes(t *testing.T) {
 			If: "{{ inputs.go }}"},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 		Inputs: map[string]any{"go": "yes"},
 	})
 	if err != nil {
@@ -80,7 +80,7 @@ func TestExecutor_If_FalseSkips(t *testing.T) {
 			If: "{{ inputs.go }}"},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 		Inputs: map[string]any{"go": "false"},
 	})
 	if err != nil {
@@ -108,7 +108,7 @@ func TestExecutor_If_DependsOnPriorStep(t *testing.T) {
 			If: "{{ steps.classify.output }}"},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +165,7 @@ func TestExecutor_CostCap_TripsAfterStep(t *testing.T) {
 		},
 	}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +197,7 @@ func TestExecutor_CostCap_NoCapWhenZero(t *testing.T) {
 		},
 	}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -223,7 +223,7 @@ func TestExecutor_CostCap_PreservesPartialOutputs(t *testing.T) {
 		},
 	}
 	res, _ := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if res.StepOutputs["s1"] != "first done" {
 		t.Errorf("expected partial output preserved, got %v", res.StepOutputs)

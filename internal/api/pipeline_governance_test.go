@@ -207,6 +207,110 @@ func TestGovernance_Approve_ForbiddenForViewer(t *testing.T) {
 	}
 }
 
+// TestGovernance_Approve_RejectsNonProposed locks the airbag: approve/reject
+// only act on the maker-checker queue. Without the proposed-only guard, a
+// MANAGER+ could approve a 'disabled' routine straight back to 'active',
+// bypassing the OWNER/ADMIN-only enable gate.
+func TestGovernance_Approve_RejectsNonProposed(t *testing.T) {
+	h, userID, wsID := newPipelineHandlerForCRUDTest(t)
+	h.SetRunner(&stubRunner{output: "ok"})
+	crewID := seedCrewRow(t, h.db, "crew_np", wsID, "Eng", "eng")
+	_ = seedAgentRow(t, h.db, "ag_np", wsID, crewID, "Eva", "eva", "LEAD")
+	if rr := doInternalSave(t, h, internalSaveBody(t, wsID, "np-r", crewID, httpRoutineDef())); rr.Code != http.StatusCreated {
+		t.Fatalf("save status=%d; body=%s", rr.Code, rr.Body.String())
+	}
+
+	approve := func(role string) int {
+		req := withWorkspaceUser(httptest.NewRequest("POST", "/x", nil), userID, wsID, role)
+		req.SetPathValue("slug", "np-r")
+		rr := httptest.NewRecorder()
+		h.Approve(rr, req)
+		return rr.Code
+	}
+
+	// First approve (proposed → active) succeeds.
+	if code := approve("OWNER"); code != http.StatusOK {
+		t.Fatalf("first approve=%d want 200", code)
+	}
+	// Re-approving an active routine is refused.
+	if code := approve("OWNER"); code != http.StatusConflict {
+		t.Errorf("approve of active routine=%d want 409", code)
+	}
+
+	// Disable it (admin airbag), then prove approve can't revive it.
+	dreq := withWorkspaceUser(httptest.NewRequest("POST", "/x", nil), userID, wsID, "OWNER")
+	dreq.SetPathValue("slug", "np-r")
+	drr := httptest.NewRecorder()
+	h.Disable(drr, dreq)
+	if drr.Code != http.StatusOK {
+		t.Fatalf("disable=%d want 200; body=%s", drr.Code, drr.Body.String())
+	}
+	if code := approve("MANAGER"); code != http.StatusConflict {
+		t.Errorf("approve of disabled routine=%d want 409 (must not bypass enable gate)", code)
+	}
+	if got := routineStatus(t, h, wsID, "np-r"); got != "disabled" {
+		t.Errorf("status=%q want disabled — approve must not have revived it", got)
+	}
+
+	// Reject also refuses a non-proposed routine.
+	rjreq := withWorkspaceUser(httptest.NewRequest("POST", "/x", nil), userID, wsID, "MANAGER")
+	rjreq.SetPathValue("slug", "np-r")
+	rjrr := httptest.NewRecorder()
+	h.Reject(rjrr, rjreq)
+	if rjrr.Code != http.StatusConflict {
+		t.Errorf("reject of disabled routine=%d want 409", rjrr.Code)
+	}
+}
+
+// TestGovernance_RunBatch_StatusGated locks the status gate on the batch path
+// too: RunBatch added the same gate as Run, so a proposed/disabled routine must
+// be refused (409) from a batch trigger, and runnable once active.
+func TestGovernance_RunBatch_StatusGated(t *testing.T) {
+	h, userID, wsID := newPipelineHandlerForCRUDTest(t)
+	h.SetRunner(&stubRunner{output: "ok"})
+	crewID := seedCrewRow(t, h.db, "crew_bg", wsID, "Eng", "eng")
+	_ = seedAgentRow(t, h.db, "ag_bg", wsID, crewID, "Eva", "eva", "LEAD")
+	if rr := doInternalSave(t, h, internalSaveBody(t, wsID, "bg-r", crewID, httpRoutineDef())); rr.Code != http.StatusCreated {
+		t.Fatalf("save status=%d; body=%s", rr.Code, rr.Body.String())
+	}
+
+	batch := func() int {
+		req := covPE2Req(t, "POST", "/x", `{"items":[{"inputs":{}}]}`, userID, wsID, "bg-r")
+		rr := httptest.NewRecorder()
+		h.RunBatch(rr, req)
+		return rr.Code
+	}
+	setStatus := func(slug, action string) {
+		req := withWorkspaceUser(httptest.NewRequest("POST", "/x", nil), userID, wsID, "OWNER")
+		req.SetPathValue("slug", slug)
+		rr := httptest.NewRecorder()
+		switch action {
+		case "approve":
+			h.Approve(rr, req)
+		case "disable":
+			h.Disable(rr, req)
+		}
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s status=%d; body=%s", action, rr.Code, rr.Body.String())
+		}
+	}
+
+	// proposed → batch refused.
+	if code := batch(); code != http.StatusConflict {
+		t.Errorf("batch of proposed routine=%d want 409", code)
+	}
+	// active → batch runs.
+	setStatus("bg-r", "approve")
+	if code := batch(); code != http.StatusOK {
+		t.Errorf("batch of active routine=%d want 200", code)
+	}
+	// disabled → batch refused.
+	setStatus("bg-r", "disable")
+	if code := batch(); code != http.StatusConflict {
+		t.Errorf("batch of disabled routine=%d want 409", code)
+	}
+}
+
 func TestGovernance_Reject_RemovesRoutine(t *testing.T) {
 	h, userID, wsID := newPipelineHandlerForCRUDTest(t)
 	crewID := seedCrewRow(t, h.db, "crew_rj", wsID, "Eng", "eng")

@@ -491,8 +491,16 @@ function ProvisioningBuildLog({ lines, label = "build log", defaultOpen = false 
   label?: string
   defaultOpen?: boolean
 }) {
+  // Track the expanded flag locally, seeded from defaultOpen once. Driving
+  // `open` straight off the prop re-applied it on every rerender, so a
+  // user-expanded *live* log snapped shut each time new tail lines arrived.
+  const [open, setOpen] = useState(defaultOpen)
   return (
-    <details className="ml-4 mt-1 group" open={defaultOpen}>
+    <details
+      className="ml-4 mt-1 group"
+      open={open}
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+    >
       <summary className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer list-none select-none">
         <Terminal className="h-3 w-3" />
         <span>{label}</span>

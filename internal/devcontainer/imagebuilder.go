@@ -13,7 +13,16 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/scrubber"
 )
+
+// buildLogScrubber redacts secret-shaped tokens (KEY=secret, bearer tokens,
+// API keys, etc.) from BuildKit log tails before they are emitted as provision
+// events. The tail is arbitrary build output that can echo credentials baked
+// into a feature/Dockerfile; without this, those secrets would land in live WS
+// payloads and journal rows. Created once (pattern compilation is not free).
+var buildLogScrubber = scrubber.New()
 
 // FeatureImageTagPrefix is the Docker repository for intermediate BuildKit
 // feature images (crewship-feat:{hash}). These are regenerable and never
@@ -174,7 +183,7 @@ func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, f
 		})
 		// Surface the failing-step output as its own event so the tail is
 		// queryable independent of the (potentially truncated) Error field.
-		if tail := logTail.tail(); tail != "" {
+		if tail := buildLogScrubber.Scrub(logTail.tail()); tail != "" {
 			emitProvision(sink, ProvisionEvent{Step: ProvStepImageBuildStart, Status: ProvStatusFailed, Tag: featTag, Detail: tail})
 		}
 		return "", fmt.Errorf("building feature image: %w", err)

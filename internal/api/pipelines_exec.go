@@ -383,6 +383,92 @@ func (h *PipelineHandler) DryRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, dryRunResponse{RunResult: res, Manifest: manifest})
 }
 
+// TestRun is the PUBLIC, JWT-authed draft-validation gate behind the UI's
+// "Test run" button (simple + advanced authoring). It mirrors InternalTestRun's
+// dry-run validation — parse + Validate + integration/resource gates + a
+// ModeDryRun pass (no agent invocation; you cannot run an agent "dry") — but is
+// reachable by a browser/CLI with a workspace JWT rather than the sidecar's
+// internal token, and on success it MINTS an HMAC save_token bound to
+// (workspace, definition_hash, user). That token is the proof Save verifies:
+// without a minting endpoint the save test-gate degrades to self-asserted body
+// fields (last_test_run_passed), which any client can forge — so this endpoint
+// is what keeps the gate honest for the user authoring flow.
+//
+// POST /api/v1/workspaces/{workspaceId}/pipelines/test_run
+func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if h.runner == nil {
+		replyError(w, http.StatusServiceUnavailable, "pipeline runner not wired")
+		return
+	}
+	var body struct {
+		Definition   json.RawMessage `json:"definition"`
+		AuthorCrewID string          `json:"author_crew_id"`
+		SampleInputs map[string]any  `json:"sample_inputs"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
+		replyError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(body.Definition) == 0 {
+		replyError(w, http.StatusBadRequest, "definition required")
+		return
+	}
+	dsl, err := pipeline.Parse(body.Definition)
+	if err != nil {
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	// Accept any agent slug here (nil sets) — slugs are validated strictly at
+	// save. The authoring loop stays fast: a typo gets a quick error rather
+	// than a strict cross-crew membership check on every keystroke.
+	if err := pipeline.Validate(dsl, nil, nil); err != nil {
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	// Same preconditions a real run would hit (best-effort — author_crew_id is
+	// optional in the UI draft flow; an empty crew makes both gates no-op).
+	if h.gateMissingIntegrations(w, r, workspaceID, body.AuthorCrewID, "", dsl.NormalizedIntegrationsRequired()) {
+		return
+	}
+	ds, tools := declaredResources(dsl)
+	if h.gateMissingResources(w, r, workspaceID, body.AuthorCrewID, "", ds, tools) {
+		return
+	}
+
+	res, err := h.newExecutor().RunDefinition(r.Context(), dsl, pipeline.RunInput{
+		WorkspaceID:  workspaceID,
+		AuthorCrewID: body.AuthorCrewID,
+		Inputs:       body.SampleInputs,
+		Mode:         pipeline.ModeDryRun,
+	})
+	if err != nil {
+		h.logger.Error("pipeline test_run: exec", "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to test-run routine")
+		return
+	}
+
+	// Mint the save_token only when the dry-run actually passed AND a signing
+	// secret is wired. DRY_RUN_OK is the dry-run's pass status (see executor);
+	// COMPLETED is tolerated for forward-compat. The token proves THIS user
+	// validated THIS definition_hash, so Save can clear the test-gate without
+	// trusting any body-supplied "it passed" claim.
+	var saveToken string
+	if res != nil && (res.Status == "DRY_RUN_OK" || res.Status == "COMPLETED") && len(h.saveTokenSecret) > 0 {
+		userID := ""
+		if user := UserFromContext(r.Context()); user != nil {
+			userID = user.ID
+		}
+		defHash := definitionHashHex(body.Definition)
+		saveToken = signSaveToken(h.saveTokenSecret, workspaceID, defHash, userID, time.Now())
+	}
+	type testRunResponse struct {
+		*pipeline.RunResult
+		SaveToken string `json:"save_token,omitempty"`
+	}
+	writeJSON(w, http.StatusOK, testRunResponse{RunResult: res, SaveToken: saveToken})
+}
+
 // InternalTestRun is the X-Internal-Token save gate used by the sidecar
 // agent-authoring flow (POST /pipelines/save Step 1). It is the internal
 // validation gate for an unsaved draft: parse + Validate + integration gate,
@@ -420,6 +506,19 @@ func (h *PipelineHandler) InternalTestRun(w http.ResponseWriter, r *http.Request
 	}
 	if body.AuthorCrewID == "" {
 		replyError(w, http.StatusBadRequest, "author_crew_id required")
+		return
+	}
+	// Cross-tenant guard (parity with InternalSave / InternalRun): the
+	// sidecar's internal token is workspace-bound. Pin the body workspace to
+	// the token's binding so a captured token can't drive a dry-run — which
+	// renders templates against, and probes the connected integrations of —
+	// a foreign tenant's crew. author_crew_id is independent of workspace_id,
+	// so prove it belongs to the bound workspace too before the gate below
+	// reads that crew's integrations.
+	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
+		return
+	}
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.AuthorCrewID) {
 		return
 	}
 	dsl, err := pipeline.Parse(body.Definition)

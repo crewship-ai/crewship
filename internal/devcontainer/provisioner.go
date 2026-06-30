@@ -455,7 +455,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		if err := p.installResolvedFeatures(ctx, containerID, resolvedFeatures, optionsByRef, func(featureID string) {
 			emit(featureStepLabel(featureID))
 		}, o.onProvision); err != nil {
-			return nil, err
+			return fail(ProvStepFeatureInstall, err)
 		}
 	}
 

@@ -283,20 +283,26 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
     }
   }
 
-  const handleTestRun = async (): Promise<boolean> => {
+  // Returns both the pass verdict AND the freshly-minted save_token so a
+  // caller chaining straight into save (handleTestAndSave) can pass the token
+  // explicitly — React state (setSaveToken) is async and wouldn't be visible
+  // to a save invoked in the same tick.
+  const handleTestRun = async (): Promise<{ passed: boolean; token: string | null }> => {
     const parsed = parseDSLWithError()
     if (!parsed) {
       toast.error("Definition is not valid JSON")
-      return false
+      return { passed: false, token: null }
     }
     setBusy("testing")
     setTestResult(null)
     setSaveToken(null)
     try {
+      const testBody: Record<string, unknown> = { definition: parsed, sample_inputs: {} }
+      if (authorCrewId) testBody.author_crew_id = authorCrewId
       const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/test_run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ definition: parsed, sample_inputs: {} }),
+        body: JSON.stringify(testBody),
       })
       const data = (await res.json().catch(() => ({}))) as {
         passed?: boolean
@@ -309,36 +315,40 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
         const msg = data.error ?? `HTTP ${res.status}`
         setTestResult({ passed: false, details: msg })
         toast.error("Test run failed", { description: msg })
-        return false
+        return { passed: false, token: null }
       }
-      // status COMPLETED is the canonical pass signal; passed!=false
-      // is the legacy fallback for older servers that don't surface
-      // a status field.
-      const passed = data.status === "COMPLETED" || (data.status === undefined && data.passed !== false)
+      // DRY_RUN_OK is the dry-run validation's pass status; COMPLETED is
+      // tolerated for forward-compat; passed!=false is the legacy fallback
+      // for older servers that surface no status field.
+      const passed =
+        data.status === "DRY_RUN_OK" ||
+        data.status === "COMPLETED" ||
+        (data.status === undefined && data.passed !== false)
       setTestResult({
         passed,
         details: passed ? `Passed${data.output ? ` (output: ${truncate(String(data.output), 120)})` : ""}` : data.error ?? "test_run reported failure",
       })
-      if (passed && data.save_token) {
-        setSaveToken(data.save_token)
+      const token = passed && data.save_token ? data.save_token : null
+      if (token) {
+        setSaveToken(token)
       }
       if (passed) {
         toast.success("Test run passed")
       } else {
         toast.error("Test run failed", { description: data.error ?? "see details below" })
       }
-      return passed
+      return { passed, token }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setTestResult({ passed: false, details: msg })
       toast.error("Test run errored", { description: msg })
-      return false
+      return { passed: false, token: null }
     } finally {
       setBusy("none")
     }
   }
 
-  const handleSave = async (assumeTestPassed: boolean) => {
+  const handleSave = async (tokenOverride?: string | null) => {
     const parsed = parseDSLWithError()
     if (!parsed) {
       toast.error("Definition is not valid JSON")
@@ -357,16 +367,15 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
         definition: parsed,
         skip_test_gate: skipTestGate,
       }
-      // Three priority paths to clearing the save's test-gate, mirroring
-      // the server-side priority in pipelines.go Save handler.
-      if (saveToken) {
-        body.save_token = saveToken
-      } else if (assumeTestPassed && !skipTestGate) {
-        body.last_test_run_passed = true
-        body.last_test_run_at = new Date().toISOString()
-      } else if (skipTestGate) {
-        body.last_test_run_passed = true
+      // The server clears the save test-gate ONLY via the HMAC save_token
+      // (minted by /test_run) or the OWNER/ADMIN skip — it no longer trusts a
+      // body "it passed" claim. Prefer an explicitly-threaded token (the
+      // test-then-save chain) over the async state copy.
+      const effectiveToken = tokenOverride ?? saveToken
+      if (effectiveToken) {
+        body.save_token = effectiveToken
       }
+      // skip_test_gate is already on the body; nothing else to add.
       if (authorCrewId) body.author_crew_id = authorCrewId
 
       const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/save`, {
@@ -390,9 +399,9 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   }
 
   const handleTestAndSave = async () => {
-    const passed = await handleTestRun()
+    const { passed, token } = await handleTestRun()
     if (passed) {
-      await handleSave(true)
+      await handleSave(token)
     }
   }
 
@@ -792,7 +801,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
                 {skipTestGate ? (
                   <Button
                     size="sm"
-                    onClick={() => handleSave(false)}
+                    onClick={() => handleSave()}
                     disabled={busy !== "none"}
                     className="gap-1.5"
                   >

@@ -7,6 +7,7 @@ import {
   canKillRoutine,
   runDisabledReason,
 } from "@/lib/routine-governance"
+import { STATUS_BADGE_CLASSES, STATUS_DOT_CLASSES } from "@/lib/colors"
 
 describe("normalizeRoutineStatus", () => {
   it("passes through proposed and disabled", () => {
@@ -22,17 +23,23 @@ describe("normalizeRoutineStatus", () => {
 })
 
 describe("routineStatusBadge", () => {
-  it("returns an amber 'Awaiting approval' badge for proposed", () => {
+  it("maps a proposed routine to the shared AWAITING_APPROVAL palette", () => {
     const b = routineStatusBadge("proposed")
     expect(b).not.toBeNull()
     expect(b!.label).toBe("Awaiting approval")
-    expect(b!.text).toContain("amber")
+    // Colors come straight from the shared palette (violet), not a
+    // hand-rolled amber map — matches the approval pills everywhere else.
+    expect(b!.className).toBe(STATUS_BADGE_CLASSES.AWAITING_APPROVAL)
+    expect(b!.dot).toBe(STATUS_DOT_CLASSES.AWAITING_APPROVAL)
+    expect(b!.className).toContain("violet")
   })
-  it("returns a muted 'Disabled' badge for disabled", () => {
+  it("maps a disabled routine to the shared muted (SKIPPED) palette", () => {
     const b = routineStatusBadge("disabled")
     expect(b).not.toBeNull()
     expect(b!.label).toBe("Disabled")
-    expect(b!.text).toBe("text-muted-foreground")
+    expect(b!.className).toBe(STATUS_BADGE_CLASSES.SKIPPED)
+    expect(b!.dot).toBe(STATUS_DOT_CLASSES.SKIPPED)
+    expect(b!.className).toContain("text-muted-foreground")
   })
   it("returns null for active / unknown (no badge)", () => {
     expect(routineStatusBadge("active")).toBeNull()

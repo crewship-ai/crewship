@@ -49,7 +49,11 @@ func covHijackReadStdin(t *testing.T, w http.ResponseWriter, r *http.Request, ou
 	// Read the streamed stdin until the client CloseWrite()s (EOF). Bounded by
 	// a deadline so a contract break fails the test instead of hanging it.
 	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	stdin, _ := io.ReadAll(bufrw.Reader)
+	stdin, err := io.ReadAll(bufrw.Reader)
+	if err != nil {
+		t.Errorf("read streamed stdin before EOF: %v", err)
+		return
+	}
 	mu.Lock()
 	*sink = stdin
 	mu.Unlock()

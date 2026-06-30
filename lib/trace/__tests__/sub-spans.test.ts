@@ -29,10 +29,15 @@ describe("mapSubSpans", () => {
   it("orders by seq, not array order, stable on ties", () => {
     const spans = mapSubSpans([
       { kind: "bash", name: "third", seq: 2, status: "ok" },
-      { kind: "write", name: "first", seq: 0, status: "ok" },
-      { kind: "think", name: "second", seq: 1, status: "ok" },
+      { kind: "write", name: "tie-a", seq: 1, status: "ok" },
+      { kind: "think", name: "tie-b", seq: 1, status: "ok" },
+      { kind: "read", name: "first", seq: 0, status: "ok" },
     ])
-    expect(spans.map((s) => s.name)).toEqual(["first", "second", "third"])
+    // seq drives the order; tie-a and tie-b share seq=1, so the tie path
+    // actually runs and must preserve their original array order (a before
+    // b) — that's what proves the sort is stable, which unique seqs never
+    // exercised.
+    expect(spans.map((s) => s.name)).toEqual(["first", "tie-a", "tie-b", "third"])
   })
 
   it("falls back to array order when seq is absent", () => {
@@ -123,6 +128,20 @@ describe("layoutSubSpans", () => {
     ])
     const [bar] = layoutSubSpans(spans)
     expect(bar.leftPct + bar.widthPct).toBeLessThanOrEqual(100.001)
+  })
+
+  it("keeps a final 0ms span visible at the right edge", () => {
+    const spans = mapSubSpans([
+      { kind: "bash", name: "long", started_at: "2026-01-01T00:00:00.000Z", duration_ms: 10000, status: "ok" },
+      // Instantaneous span at the very end of the window — leftPct would
+      // compute to 100 and collapse the width to 0 without the clamp.
+      { kind: "think", name: "tail", started_at: "2026-01-01T00:00:10.000Z", duration_ms: 0, status: "ok" },
+    ])
+    const bars = layoutSubSpans(spans)
+    const tail = bars[1]
+    expect(tail.widthPct).toBeGreaterThan(0)
+    expect(tail.leftPct).toBeLessThan(100)
+    expect(tail.leftPct + tail.widthPct).toBeLessThanOrEqual(100.001)
   })
 
   it("falls back to even slices when no span has timing", () => {

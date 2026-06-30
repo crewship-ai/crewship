@@ -12,6 +12,8 @@
  * routine UI renders. Kept pure so they're unit-testable without React.
  */
 
+import { STATUS_BADGE_CLASSES, STATUS_DOT_CLASSES } from "@/lib/colors"
+
 export type RoutineStatus = "active" | "proposed" | "disabled"
 
 /** Normalise an unknown wire value to a RoutineStatus. Absent / unknown
@@ -23,32 +25,34 @@ export function normalizeRoutineStatus(status: string | null | undefined): Routi
 
 export interface RoutineStatusBadge {
   label: string
-  /** Tailwind tone classes mirroring the `bg-{c}-500/20 text-{c}-400`
-   *  pattern used by lib/colors STATUS_BADGE_CLASSES so the pill matches
-   *  the status pills rendered elsewhere (Inbox / Issues / Activity). */
-  bg: string
-  text: string
+  /** Combined Tailwind bg+text classes pulled straight from lib/colors
+   *  STATUS_BADGE_CLASSES so the pill matches the status pills rendered
+   *  elsewhere (Inbox / Issues / Activity). */
+  className: string
+  /** Solid dot fill from lib/colors STATUS_DOT_CLASSES. */
   dot: string
 }
 
 /** Returns the badge descriptor for a routine status, or null for
  *  "active" (which renders no badge — the routine is in its normal
- *  state and doesn't need to shout about it). */
+ *  state and doesn't need to shout about it).
+ *
+ *  Colors route through the shared palette: a proposed routine is
+ *  "awaiting approval" (violet, matching AWAITING_APPROVAL everywhere
+ *  else); a disabled one reads as inactive (muted, matching SKIPPED). */
 export function routineStatusBadge(status: string | null | undefined): RoutineStatusBadge | null {
   switch (normalizeRoutineStatus(status)) {
     case "proposed":
       return {
         label: "Awaiting approval",
-        bg: "bg-amber-500/20",
-        text: "text-amber-400",
-        dot: "bg-amber-400",
+        className: STATUS_BADGE_CLASSES.AWAITING_APPROVAL,
+        dot: STATUS_DOT_CLASSES.AWAITING_APPROVAL,
       }
     case "disabled":
       return {
         label: "Disabled",
-        bg: "bg-muted",
-        text: "text-muted-foreground",
-        dot: "bg-muted-foreground/60",
+        className: STATUS_BADGE_CLASSES.SKIPPED,
+        dot: STATUS_DOT_CLASSES.SKIPPED,
       }
     default:
       return null

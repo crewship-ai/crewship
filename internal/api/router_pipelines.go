@@ -36,6 +36,12 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override", authed(wsCtx(http.HandlerFunc(pipes.SetStepOverride))))
 	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override", authed(wsCtx(http.HandlerFunc(pipes.DeleteStepOverride))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run", authed(wsCtx(http.HandlerFunc(pipes.DryRun))))
+	// Public draft-validation gate behind the UI "Test run" button: dry-run
+	// validates an UNSAVED definition and mints the save_token Save verifies.
+	// Distinct from /internal/pipelines/test_run (sidecar, X-Internal-Token) —
+	// this one is JWT-authed so a browser/CLI can reach it. Literal "test_run"
+	// beats the {slug} catch-all in net/http matching, so no ordering hazard.
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/test_run", authed(wsCtx(http.HandlerFunc(pipes.TestRun))))
 	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Delete))))
 	// Routine governance (maker-checker + admin airbag). approve/reject are
 	// MANAGER+ (canRole "create"); disable/enable are OWNER/ADMIN

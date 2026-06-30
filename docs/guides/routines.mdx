@@ -619,7 +619,7 @@ The signing secret is shown **once**. To rotate it: delete the webhook + create 
 After you click **Run** or **Test run** in the UI, a live **Run activity** rail appears inline in the detail panel showing the just-started run step by step (started → each step → completed/failed) — so status is visible immediately without switching to the Runs tab. Full run history stays in the **Runs** tab; see the [Activity](/guides/activity#run-activity-rail) guide for the rail, and the toolbar Activity Bar for a workspace-wide "what's running now" view.
 
 <Note>
-The public draft **test_run** endpoint has been removed (you can't run an agent "dry"), so a real run is just **Run**. To preview a routine before running it, use **Dry run** — it walks the saved definition, renders templates, and returns the declared **manifest** (the blast radius) without invoking anything. Drafts are validated by the internal save gate (dry-run) at save time.
+The **Test run** button calls the public, JWT-authed `test_run` endpoint (`POST /api/v1/workspaces/{workspaceId}/pipelines/test_run`). It **validates a draft** — parse + `Validate` + the integration and resource preconditions + a `dry_run` pass (no agent is invoked; you can't run an agent "dry") — and on success mints an HMAC **`save_token`** bound to (workspace, definition hash, user). **Save** verifies that token, so a draft can't be saved as "test passed" unless it actually passed `test_run`. The UI button and the CLI both use this endpoint. To preview a *saved* routine instead, use **Dry run** — it walks the saved definition, renders templates, and returns the declared **manifest** (the blast radius) without invoking anything.
 </Note>
 
 ## Dry-run preview

@@ -130,7 +130,11 @@ export function TraceSidePanel({
   // so re-renders from polling don't yank the user off their tab.
   useEffect(() => {
     setTab(hasActions ? "actions" : "output")
-  }, [step?.id, hasActions])
+    // Reset ONLY when the selected step changes. Keying on hasActions too
+    // meant a poll that flips it false→true (sub-spans arriving late) would
+    // yank the user back to Actions after they'd switched tabs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step?.id])
 
   const copyArtifact = (path: string) => {
     const cb = typeof navigator !== "undefined" ? navigator.clipboard : undefined
@@ -646,12 +650,14 @@ function FileViewerBody({
     return <OutputView value={file.inlineContent} emptyLabel="Empty file." />
   }
 
-  // Fetchable file, but we couldn't resolve the agent — be honest.
+  // Fetchable file, but we couldn't resolve the agent — be honest. The
+  // download button is ALSO suppressed in this state (FileRow gates it on the
+  // same agentId/workspaceId), so don't point users at a control they can't see.
   if (!canFetch) {
     return (
       <div className="rounded border border-amber-500/20 bg-amber-500/5 px-2 py-3 text-center text-[11px] text-amber-200/80">
-        Can&apos;t preview this file — the agent that wrote it isn&apos;t resolvable
-        from this run. Use the download button to fetch it.
+        Can&apos;t preview or download this file — the agent that wrote it
+        isn&apos;t resolvable from this run.
       </div>
     )
   }

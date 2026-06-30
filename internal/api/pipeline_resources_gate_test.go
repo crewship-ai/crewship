@@ -142,6 +142,31 @@ func TestResourceGate_PassesWhenToolPresent(t *testing.T) {
 	}
 }
 
+// TestResourceGate_ToolMatchesOnNameNotJustType is the false-422 regression
+// guard: tool vocabulary is fuzzy (an author may declare a family Type while
+// the resolver surfaces the concrete CLI name). A declared tool must be
+// satisfied when EITHER its Type OR its Name matches what the crew has — here
+// the crew has "kubectl" and the routine declares {type:"k8s", name:"kubectl"}.
+// Pre-fix this 422'd because only the declared Type ("k8s") was checked.
+func TestResourceGate_ToolMatchesOnNameNotJustType(t *testing.T) {
+	h, userID, wsID := newPipelineHandlerForCRUDTest(t)
+	h.SetRunner(&stubRunner{output: "ok"})
+	crewID := seedCrewRow(t, h.db, "crew_relabel", wsID, "Ops", "ops")
+	_ = seedAgentRow(t, h.db, "ag_relabel", wsID, crewID, "Eva", "eva", "LEAD")
+	// Crew has kubectl (devcontainer feature → friendly name "kubectl").
+	kubectlFeature := `{"features":{"ghcr.io/devcontainers/features/kubectl-helm-minikube:1":{}}}`
+	seedCrewResourceConfig(t, h.db, crewID, "", kubectlFeature)
+	// Routine declares the family type "k8s" but the concrete tool name kubectl.
+	seedPipelineWithAuthorCrew(t, h.db, wsID, "pipe_relabel", "relabel",
+		resDef("", `[{"type":"k8s","name":"kubectl"}]`), crewID)
+
+	rr := httptest.NewRecorder()
+	h.Run(rr, covPE2Req(t, "POST", "/x", `{"inputs":{}}`, userID, wsID, "relabel"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (tool present under a different label); body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestResourceGate_BothMissingListedTogether(t *testing.T) {
 	h, userID, wsID := newPipelineHandlerForCRUDTest(t)
 	h.SetRunner(&stubRunner{output: "ok"})

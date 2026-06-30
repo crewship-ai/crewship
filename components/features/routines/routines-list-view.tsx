@@ -339,8 +339,7 @@ function RoutineRow({
                   <span
                     className={cn(
                       "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
-                      sb.bg,
-                      sb.text,
+                      sb.className,
                     )}
                   >
                     <span className={cn("h-1 w-1 rounded-full", sb.dot)} />

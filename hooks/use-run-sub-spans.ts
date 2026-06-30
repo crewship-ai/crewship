@@ -23,7 +23,14 @@ export function useRunSubSpans(
 
   useEffect(() => {
     if (!workspaceId || !runId) {
+      // Abort any in-flight request and fully reset. Without clearing
+      // loading here (and the aborted fetch skips the finally's
+      // setLoading(false)), loading would latch true forever once the
+      // inputs go empty.
+      abortRef.current?.abort()
+      abortRef.current = null
       setRun(null)
+      setLoading(false)
       return
     }
     abortRef.current?.abort()

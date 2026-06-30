@@ -1,6 +1,6 @@
 # PRD — Routines as Agent-Authored Capabilities (Manifest · Authoring · Governance · Prepare) 2026
 
-**Status:** Living draft · **Date:** 2026-06-30 · **Owner:** Pavel + Claude
+**Status:** Living draft · **Date:** 2026-06-30 · **Owner:** Pavel + an AI assistant
 **Extends** [PRD-ROUTINES-MAX-2026](./PRD-ROUTINES-MAX-2026.md) (engine done). §0 is the north-star vision (the breakthrough); §1+ is the onboarding/governance layer already in flight (W0–W2). Read §0 first.
 
 ---
@@ -8,9 +8,9 @@
 ## 0. North star — routines as agent-authored capabilities
 
 ### 0.0 The thesis (why this is the breakthrough)
-A routine is **not** "fetch X → post Y." A routine is an **agent-authored, durable, re-runnable CAPABILITY** that uses the *full devcontainer*: writes + runs scripts, runs CLIs (Ansible, kubectl, terraform), touches datastores (Redis, Postgres), uses integrations + credentials, and can delegate to other agents — **authored conversationally, like Claude Code.** You iterate 5–10 min in chat with a Lead; it prepares the routine *and* the scripts; you save it; it runs.
+A routine is **not** "fetch X → post Y." A routine is an **agent-authored, durable, re-runnable CAPABILITY** that uses the *full devcontainer*: writes + runs scripts, runs CLIs (Ansible, kubectl, terraform), touches datastores (Redis, Postgres), uses integrations + credentials, and can delegate to other agents — **authored conversationally, like an AI coding assistant.** You iterate 5–10 min in chat with a Lead; it prepares the routine *and* the scripts; you save it; it runs.
 
-**The moat is the container.** trigger.dev / n8n / Zapier run workflows in constrained sandboxes with predefined nodes/SDKs. Crewship gives each crew a **full, persistent devcontainer** — so a routine can do anything a developer's machine can, and cloned repos / installed tools **persist between runs**. They structurally cannot copy this. So: **chat-first authoring, skip the visual builder, vytěžit the container maximum.** The JSON DSL stays the durable compiled artifact; legibility comes from a stable **capability manifest**.
+**The moat is the container.** Conventional workflow-automation platforms run workflows in constrained sandboxes with predefined nodes/SDKs. Crewship gives each crew a **full, persistent devcontainer** — so a routine can do anything a developer's machine can, and cloned repos / installed tools **persist between runs**. They structurally cannot copy this. So: **chat-first authoring, skip the visual builder, vytěžit the container maximum.** The JSON DSL stays the durable compiled artifact; legibility comes from a stable **capability manifest**.
 
 ### 0.1 The capability manifest (the stable contract — "doesn't change, supports maximum")
 One stable vocabulary of capability **kinds**: `integration · datastore · tool/script · agent · routine · egress · credential · http`. Two faces of the same vocabulary:
@@ -95,17 +95,17 @@ Full cited research in session transcript; the load-bearing conclusions:
 
 | Pattern | Steal from | Avoid (anti-pattern) |
 |---|---|---|
-| **"requires connection X" as a typed, declarative contract**, validated at author/deploy time | **Windmill Resource Types**; Gumloop per-node credential dropdown | Trigger.dev/Inngest/Temporal — fail only at *run* time on missing `process.env` (bad when an autonomous agent authored it and isn't watching) |
-| **Per-node credential resolution: Personal-default / Team-default / Specific** | **Gumloop** (explicit, configurable) | **Make** — team-shared connection embedded by ID runs as the *builder* regardless of trigger; had to bolt on "Dynamic Connections" later |
-| **Block activation on missing/invalid connection** (table stakes) | Make (`Missing __IMTCONN__`), Zapier ("can't turn on") | n8n's "publish fails" is fine too |
-| **Bind credentials by reference; secrets never travel with the flow** | n8n / Make blueprints / Pipedream frozen links / Zapier "share a copy" | — (universal; maps to Crewship sidecar/stdin isolation) |
-| **Pre-publish maker-checker approval gate** (genuine differentiator — the field barely has one) | **Zapier Enterprise "publishing restrictions"**; our own skills `.proposed` flow | n8n/Pipedream outsource to Git PRs; Make/Gumloop/Lindy have none |
-| **AI/NL authoring = bounded draft generator → validate → human completes** | n8n (excludes creds from LLM context), Pipedream (schema-grounded), Gumloop "Gummie", Zapier Copilot | One-shot "AI builds the whole thing live" — every leader treats it as a draft only |
-| **Separate AUTHOR/DEPLOY right from RUN right** | Temporal (namespace Read/Write/Admin), Windmill (Developer vs Operator) | — |
-| **Split control-plane audit (who created/changed) from data-plane (who ran)** | Temporal | Make's audit even omits scenario lifecycle events |
-| **Templates need guided setup + immutable-published + live-checkpoint versioning** | Zapier guided templates, Gumloop org templates, Make immutable publish, Gumloop "Make This Checkpoint Live" | — |
+| **"requires connection X" as a typed, declarative contract**, validated at author/deploy time | Platforms with **typed resource/connection types** and per-node credential pickers | Orchestrators that fail only at *run* time on a missing env var (bad when an autonomous agent authored it and isn't watching) |
+| **Per-node credential resolution: Personal-default / Team-default / Specific** | Platforms with **explicit, configurable** per-node credential resolution | Platforms that embed a team-shared connection by ID so it runs as the *builder* regardless of trigger; later patched with a "dynamic connections" bolt-on |
+| **Block activation on missing/invalid connection** (table stakes) | Platforms that block turn-on with a clear "can't turn on" / "missing connection" error | A publish-time failure is fine too |
+| **Bind credentials by reference; secrets never travel with the flow** | Blueprint / "share a copy" / frozen-link exports that carry references, not secrets | — (universal; maps to Crewship sidecar/stdin isolation) |
+| **Pre-publish maker-checker approval gate** (genuine differentiator — the field barely has one) | Enterprise **"publishing restrictions"**; our own skills `.proposed` flow | Platforms that outsource review to Git PRs, or ship no gate at all |
+| **AI/NL authoring = bounded draft generator → validate → human completes** | Tools that exclude creds from LLM context, schema-ground the generation, and ship the NL copilot as a draft-only assistant | One-shot "AI builds the whole thing live" — every leader treats it as a draft only |
+| **Separate AUTHOR/DEPLOY right from RUN right** | Platforms with namespace Read/Write/Admin or Developer-vs-Operator role splits | — |
+| **Split control-plane audit (who created/changed) from data-plane (who ran)** | Orchestrators that separate control-plane from data-plane audit | Platforms whose audit omits workflow lifecycle events |
+| **Templates need guided setup + immutable-published + live-checkpoint versioning** | Platforms with guided template setup, org templates, immutable publish, and "make this checkpoint live" versioning | — |
 
-**Key insight:** Crewship is *already ahead* on the two things the field is weakest at — a review gate (skills `.proposed`) and agent authoring. We just haven't applied them to routines. Windmill (typed requirements + Developer/Operator + PR-promotion) is the closest reference; Gumloop is the model for credential binding.
+**Key insight:** Crewship is *already ahead* on the two things the field is weakest at — a review gate (skills `.proposed`) and agent authoring. We just haven't applied them to routines. The closest external reference is a typed-requirements platform with a Developer/Operator split and PR-promotion; explicit per-node credential binding is the model to follow.
 
 ## 5. Current state & gaps (ground truth, with citations)
 
@@ -125,15 +125,25 @@ Full cited research in session transcript; the load-bearing conclusions:
 ## 6. Design
 
 ### 6A. Routine requirements contract *(foundation)*
-Add to the DSL a declarative `requirements` block, mirroring skills' `credential_requirements`:
+The DSL declares what a routine needs as **top-level fields** (not a nested
+`requirements` object), mirroring skills' credential requirements:
 ```jsonc
-"requirements": {
-  "integrations": ["github", "slack"],     // Composio connector slugs
-  "credentials":  ["STRIPE_API_KEY"]        // env-var names
+{
+  "integrations_required": ["github", "slack"],   // Composio connector slugs (lowercased)
+  "credentials_required":  [{ "type": "stripe" }], // []CredReq — type-matched, not ID-matched
+  "resources": {                                   // agent-declared, not statically inferable
+    "datastores": [{ "type": "postgres", "name": "app-db", "note": "writes table runs" }],
+    "tools":      [{ "type": "ansible", "name": "deploy.yml" }]
+  }
 }
 ```
-- **Author-time validation** (`store.Save`): parse + record requirements; warn if the author crew can't satisfy them.
-- **Run-time gate** (`pipelines_exec.Run`): before executing, resolve the running crew/agent's connected integrations + credentials; if a requirement is unmet → **block with a clear Problem Details error** ("routine needs `github`, not connected for crew Quality") + a **"request integration"** affordance. (Make/Zapier "can't turn on" pattern.)
+`integrations_required` / `credentials_required` cover connectors + secrets;
+the `resources` block (`resources.datastores[]` / `resources.tools[]`) covers
+datastores and CLI tools/scripts that run via `agent_run` + shell and so can't
+be inferred from the step graph. Agents, routines, and egress are auto-derived
+by `ExtractManifest`; these declared fields complete the manifest.
+- **Author-time validation** (`store.Save`): parse + record the declarations; shape-validated (`validateResources`, integration-slug check) but lenient — declaring is always allowed at save time, even if the author crew can't yet satisfy them.
+- **Run-time gate** (`pipelines_exec.Run`): before executing, resolve the running crew/agent's connected integrations + credentials + container resources; if a requirement is unmet → **block with a clear Problem Details error** ("routine needs `github`, not connected for crew Quality") + a **"request integration"** affordance. (The "can't turn on" pattern from established automation platforms.) The integration gate lives in `pipeline_integrations_gate.go`; the datastore/tool precondition gate in `pipeline_resources_gate.go`.
 - Surface requirements in the UI (create dialog, Overview, review card) as chips.
 
 ### 6B. Credential / runner binding

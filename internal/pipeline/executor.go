@@ -384,6 +384,15 @@ func (e *Executor) WithPipelineResolver(p PipelineResolver) *Executor {
 // must NOT consume a concurrency slot — otherwise webhook
 // redeliveries thunder-herd a busy queue. Concurrency-rejected runs
 // also forget the idempotency reservation so the caller can retry.
+// routineStatusRunnable reports whether a routine's persisted governance
+// status permits a real run. Empty == 'active' (legacy rows + pre-governance
+// pipelines have no status set). Anything else — proposed / disabled / an
+// unknown future state — is refused (fail-closed) so a new status can never
+// silently run before the gate learns about it.
+func routineStatusRunnable(status string) bool {
+	return status == "" || status == "active"
+}
+
 func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	if in.Mode == "" {
 		in.Mode = ModeRun
@@ -391,6 +400,16 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	p, err := e.store.GetByID(ctx, in.PipelineID)
 	if err != nil {
 		return nil, fmt.Errorf("executor: load pipeline: %w", err)
+	}
+	// Governance airbag — central chokepoint. Every real-run dispatch path
+	// (HTTP Run/InternalRun/RunBatch, the cron scheduler, webhook dispatch,
+	// and the deferred-run dispatcher) funnels through here, so enforcing the
+	// status gate at the executor means a 'proposed' (unapproved) or
+	// 'disabled' (admin-killed) routine cannot run from ANY trigger — not just
+	// the handlers that remember to pre-check. dry_run / test_run are exempt:
+	// they preview/validate and carry no persisted status to honor.
+	if in.Mode == ModeRun && !routineStatusRunnable(p.Status) {
+		return nil, fmt.Errorf("%w: status=%s", ErrRoutineNotActive, p.Status)
 	}
 	dsl, err := Parse([]byte(p.DefinitionJSON))
 	if err != nil {
@@ -540,13 +559,22 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 // run is journaled with a synthetic pipeline_id ("draft-" + uuid)
 // so observers can tell drafts from saved pipelines.
 func (e *Executor) RunDefinition(ctx context.Context, dsl *DSL, in RunInput) (*RunResult, error) {
+	// Default to the safe preview, NOT live execution. RunDefinition runs an
+	// UNSAVED draft, so a caller that forgets to set Mode should get a dry-run
+	// (static validation, no agent invocation), not real steps with real side
+	// effects. Both production callers (TestRun, InternalTestRun) pass ModeDryRun
+	// explicitly; live execution must be opted into with Mode: ModeRun.
 	if in.Mode == "" {
-		in.Mode = ModeRun
+		in.Mode = ModeDryRun
 	}
 	if in.WorkspaceID == "" {
 		return nil, errors.New("executor: workspace_id required for RunDefinition")
 	}
-	if in.AuthorCrewID == "" {
+	// A real (agent-invoking) draft run needs a crew to resolve agents/runtime
+	// against. A ModeDryRun is static validation (parse + template render, no
+	// agent invocation), so it works without a crew — letting the public
+	// /test_run validate a draft before the author has pinned a crew.
+	if in.AuthorCrewID == "" && in.Mode != ModeDryRun {
 		return nil, errors.New("executor: author_crew_id required for RunDefinition")
 	}
 	in.dsl = dsl

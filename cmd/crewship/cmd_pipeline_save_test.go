@@ -12,39 +12,44 @@ import (
 )
 
 // routineSaveMock simulates the server contract for `routine save`
-// (issue #654). The internal save route behaves like production:
-// it is mounted under internalAuth, so a user CLI token always gets
-// 403 there. The CLI must therefore complete the save through the
-// user-facing workspace-scoped endpoint. The public test_run surface
-// was removed — the save goes straight to /pipelines/save (the server
-// validates the DSL on save) with the body-trust gate fields.
+// (issue #654). The internal save route behaves like production: it is mounted
+// under internalAuth, so a user CLI token always gets 403 there. The CLI must
+// complete the save through the user-facing workspace-scoped endpoints. The
+// flow is two steps: POST /pipelines/test_run dry-run-validates the draft and
+// mints an HMAC save_token; POST /pipelines/save then clears its test-gate with
+// that token (the server no longer trusts a body "it passed" claim).
 type routineSaveMock struct {
-	t                  *testing.T
-	testRunCalled      bool
-	userSaveCalled     bool
-	gotLastTestRunPass bool
-	gotSlug            string
-	gotAuthorCrew      string
-	internalSaveHits   int
+	t                *testing.T
+	testRunCalled    bool
+	userSaveCalled   bool
+	gotSaveToken     string
+	gotSlug          string
+	gotAuthorCrew    string
+	internalSaveHits int
 }
 
 func (m *routineSaveMock) handler() http.Handler {
 	mux := http.NewServeMux()
-	// The public test_run route is gone — flag it if the CLI still calls it.
+	// Public draft-validation gate — dry-run validates + mints the save_token.
 	mux.HandleFunc("POST /api/v1/workspaces/ws_test_1/pipelines/test_run", func(w http.ResponseWriter, r *http.Request) {
 		m.testRunCalled = true
-		w.WriteHeader(http.StatusNotFound)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":     "DRY_RUN_OK",
+			"save_token": "stub-save-token",
+		})
 	})
 	mux.HandleFunc("POST /api/v1/workspaces/ws_test_1/pipelines/save", func(w http.ResponseWriter, r *http.Request) {
 		m.userSaveCalled = true
 		var body struct {
-			Slug              string          `json:"slug"`
-			Definition        json.RawMessage `json:"definition"`
-			AuthorCrewID      string          `json:"author_crew_id"`
-			LastTestRunPassed bool            `json:"last_test_run_passed"`
+			Slug         string          `json:"slug"`
+			Definition   json.RawMessage `json:"definition"`
+			AuthorCrewID string          `json:"author_crew_id"`
+			SaveToken    string          `json:"save_token"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		m.gotLastTestRunPass = body.LastTestRunPassed
+		m.gotSaveToken = body.SaveToken
 		m.gotSlug = body.Slug
 		m.gotAuthorCrew = body.AuthorCrewID
 		w.Header().Set("Content-Type", "application/json")
@@ -56,8 +61,8 @@ func (m *routineSaveMock) handler() http.Handler {
 			"definition_hash": "abcdef1234567890",
 		})
 	})
-	// Production mounts this under internalAuth — a user JWT/CLI
-	// token is always rejected. Pre-#654 the CLI posted here.
+	// Production mounts this under internalAuth — a user JWT/CLI token is always
+	// rejected. Pre-#654 the CLI posted here.
 	mux.HandleFunc("POST /api/v1/internal/pipelines/save", func(w http.ResponseWriter, r *http.Request) {
 		m.internalSaveHits++
 		w.Header().Set("Content-Type", "application/json")
@@ -67,9 +72,10 @@ func (m *routineSaveMock) handler() http.Handler {
 	return mux
 }
 
-// TestRoutineSave_UsesUserFacingEndpoint pins the #654 fix: the save
-// flow must hit the workspace-scoped /pipelines/save and never touch the
-// internal-auth route nor the removed public test_run route.
+// TestRoutineSave_UsesUserFacingEndpoint pins the #654 fix plus the restored
+// proof flow: the save validates via the public test_run, forwards the minted
+// save_token to the workspace-scoped /pipelines/save, and never touches the
+// internal-auth route.
 func TestRoutineSave_UsesUserFacingEndpoint(t *testing.T) {
 	saveCLIState(t)
 
@@ -103,8 +109,8 @@ func TestRoutineSave_UsesUserFacingEndpoint(t *testing.T) {
 		t.Fatalf("routine save failed: %v", err)
 	}
 
-	if m.testRunCalled {
-		t.Error("save must NOT call the removed public test_run route")
+	if !m.testRunCalled {
+		t.Error("save must dry-run-validate via the public test_run route first")
 	}
 	if !m.userSaveCalled {
 		t.Error("user-facing /pipelines/save was never invoked")
@@ -112,8 +118,8 @@ func TestRoutineSave_UsesUserFacingEndpoint(t *testing.T) {
 	if m.internalSaveHits != 0 {
 		t.Errorf("CLI hit the internal-auth save route %d time(s) — that path 403s for user tokens (issue #654)", m.internalSaveHits)
 	}
-	if !m.gotLastTestRunPass {
-		t.Error("save body must set last_test_run_passed=true (body-trust gate)")
+	if m.gotSaveToken != "stub-save-token" {
+		t.Errorf("save body must forward the minted save_token; got %q", m.gotSaveToken)
 	}
 	if m.gotSlug != "save-test-probe" {
 		t.Errorf("slug: got %q", m.gotSlug)

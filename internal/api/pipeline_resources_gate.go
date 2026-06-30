@@ -106,9 +106,20 @@ func (h *PipelineHandler) gateMissingResources(w http.ResponseWriter, r *http.Re
 		if typ == "" {
 			continue
 		}
-		if !haveTool[strings.ToLower(typ)] {
-			missing = append(missing, missingResource{Kind: "tool", Type: typ, Name: strings.TrimSpace(t.Name)})
+		// Tool naming is fuzzy: the resolver derives a friendly CLI name
+		// heuristically (devcontainer feature-id / mise key → CLI), and an
+		// author may declare the family ("ansible") OR a concrete artifact
+		// name. Match BOTH the declared Type AND the declared Name against the
+		// resolved type/name set so a tool that IS present under a slightly
+		// different label isn't false-flagged as missing — a previously-working
+		// routine must not start 422-ing just because the two vocabularies
+		// disagree on which string labels the same CLI. Only block when
+		// NEITHER hits, i.e. the crew genuinely has nothing resembling it.
+		name := strings.TrimSpace(t.Name)
+		if haveTool[strings.ToLower(typ)] || (name != "" && haveTool[strings.ToLower(name)]) {
+			continue
 		}
+		missing = append(missing, missingResource{Kind: "tool", Type: typ, Name: name})
 	}
 	if len(missing) == 0 {
 		return false

@@ -130,13 +130,18 @@ func TestRecordRunAgentToolSpan(t *testing.T) {
 	if d := tool.EndTime.Sub(tool.StartTime).Milliseconds(); d != 250 {
 		t.Errorf("tool span duration = %dms, want 250", d)
 	}
-	// The errored tool span must carry codes.Error.
+	// The errored tool span must exist AND carry codes.Error.
+	foundErrorSpan := false
 	for _, s := range spans {
 		if s.Name == "routine.tool" && attrOf(s, AttrCrewshipRoutineToolStatus) == "error" {
+			foundErrorSpan = true
 			if s.Status.Code != codes.Error {
 				t.Errorf("error tool span status = %v, want Error", s.Status.Code)
 			}
 		}
+	}
+	if !foundErrorSpan {
+		t.Fatalf("did not find the error routine.tool span")
 	}
 }
 

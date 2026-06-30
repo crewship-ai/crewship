@@ -9,6 +9,11 @@
 // degrades to the trigger/output bookends. No React, no I/O, fully unit
 // testable (lib/__tests__/routine-flow.test.ts).
 
+import {
+  describeStep as describeReadableStep,
+  hostOf,
+} from "@/lib/routine-step-describe"
+
 // ── Manifest shape (mirrors internal/pipeline/manifest.go → JSON) ──────────
 export interface ManifestCred {
   type: string
@@ -160,19 +165,6 @@ function str(v: unknown): string {
 function truncate(s: string, n = 40): string {
   const t = s.trim()
   return t.length > n ? `${t.slice(0, n - 1)}…` : t
-}
-
-// hostOf parses a hostname from an http URL, mirroring Go's hostFromURL:
-// templated (`{{ }}`) or unparseable URLs yield "" so the caller can fall
-// back to the raw string.
-function hostOf(raw: string): string {
-  const s = raw.trim()
-  if (!s || s.includes("{{")) return ""
-  try {
-    return new URL(s).hostname
-  } catch {
-    return ""
-  }
 }
 
 // ── datastore + tool label/icon mapping ────────────────────────────────────
@@ -375,51 +367,14 @@ export interface PlainStep {
   determinism: StepDeterminism | "trigger"
 }
 
-function describeStep(s: Record<string, unknown>): { title: string; detail?: string } {
-  const type = str(s["type"])
-  switch (type) {
-    case "http": {
-      const http = asRecord(s["http"])
-      const method = str(http?.["method"]) || "GET"
-      const url = str(http?.["url"])
-      const host = hostOf(url) || url
-      return { title: `Fetch over HTTP${host ? ` from ${host}` : ""}`, detail: `${method} ${truncate(url, 60) || "—"}` }
-    }
-    case "agent_run": {
-      const slug = str(s["agent_slug"])
-      const prompt = truncate(str(s["prompt"]), 80)
-      return {
-        title: `Agent${slug ? ` @${slug}` : ""} decides what to do`,
-        detail: prompt || "AI step — output is non-deterministic",
-      }
-    }
-    case "code": {
-      const c = asRecord(s["code"])
-      const rt = str(c?.["runtime"]) || "script"
-      return { title: `Run a ${rt} script`, detail: rt }
-    }
-    case "transform": {
-      const t = asRecord(s["transform"])
-      return { title: "Reshape the data", detail: truncate(str(t?.["expression"]), 60) || undefined }
-    }
-    case "wait": {
-      const w = asRecord(s["wait"])
-      const kind = str(w?.["kind"]) || "condition"
-      return { title: `Pause until ${kind}`, detail: kind }
-    }
-    case "call_pipeline": {
-      const slug = str(s["pipeline_slug"])
-      return { title: `Call routine${slug ? ` ${slug}` : ""}`, detail: slug || undefined }
-    }
-    default:
-      return { title: type || "Step" }
-  }
-}
-
 /**
  * buildPlainSteps renders the routine as an ordered, human-readable list:
  * a trigger line followed by one line per executable step, each tagged with
- * its determinism (AI vs script). Pure + never throws.
+ * its determinism (AI vs script). Prose comes from the shared canonical
+ * per-step renderer (lib/routine-step-describe) so the "What it does" panel
+ * reads identically to the readable summary; the mono detail line falls back
+ * to the step's technical one-liner when there's no plain-language detail.
+ * Pure + never throws.
  */
 export function buildPlainSteps(dsl: unknown): PlainStep[] {
   const def = asRecord(dsl)
@@ -436,12 +391,12 @@ export function buildPlainSteps(dsl: unknown): PlainStep[] {
     const s = asRecord(raw)
     if (!s) return
     n += 1
-    const { title, detail } = describeStep(s)
+    const rs = describeReadableStep(s, n)
     out.push({
       id: str(s["id"]) || `step-${i}`,
       index: n,
-      title,
-      detail,
+      title: rs.title,
+      detail: rs.detail ?? rs.technical,
       determinism: stepDeterminism(str(s["type"])),
     })
   })

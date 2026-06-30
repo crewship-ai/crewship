@@ -517,6 +517,14 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				if inspErr != nil {
 					return "", fmt.Errorf("inspect existing container %s: %w", containerName, inspErr)
 				}
+				// The reused container may still be running a previously
+				// provisioned cached image, while desiredImage falls back to the
+				// provider default when the caller left Image/CachedImage empty.
+				// Report the ACTUAL running image on the ready events below.
+				reusedImage := desiredImage
+				if inspect.Config != nil && inspect.Config.Image != "" {
+					reusedImage = inspect.Config.Image
+				}
 				// Image-drift check before the mount checks: if a
 				// re-provision produced a new image tag, the running
 				// container is stale by definition (its filesystem
@@ -556,7 +564,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 					break // fall through to create new container
 				}
 				if c.State == "running" {
-					emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "reused running container", Tag: desiredImage})
+					emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "reused running container", Tag: reusedImage})
 					return c.ID, nil
 				}
 				// Verify bind-mount directories still exist (macOS /tmp is wiped on reboot).
@@ -596,7 +604,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				// template authors actually want. If a future use case needs
 				// ephemeral hooks that re-run on each restart, add a
 				// per-feature opt-in flag rather than flipping this default.
-				emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "restarted stopped container", Tag: desiredImage})
+				emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "restarted stopped container", Tag: reusedImage})
 				return c.ID, nil
 			}
 		}

@@ -169,6 +169,16 @@ func (h *PipelineHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "load routine")
 		return
 	}
+	// Approve only acts on the maker-checker queue. Without this, a MANAGER+
+	// could approve a 'disabled' routine straight back to 'active', bypassing
+	// the OWNER/ADMIN-only enable gate (the disable airbag).
+	if p.Status != "proposed" {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error":  "routine is not awaiting approval",
+			"status": p.Status,
+		})
+		return
+	}
 	if err := h.store.SetStatus(r.Context(), p.ID, "active"); err != nil {
 		if errors.Is(err, pipeline.ErrNotFound) {
 			replyError(w, http.StatusNotFound, "routine not found")
@@ -207,6 +217,16 @@ func (h *PipelineHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error("routine reject: load", "error", err, "slug", slug)
 		replyError(w, http.StatusInternalServerError, "load routine")
+		return
+	}
+	// Reject is the maker-checker "no" — it only discards a proposal. An
+	// active/disabled routine must be removed via Delete, not silently
+	// soft-deleted through the review path.
+	if p.Status != "proposed" {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error":  "routine is not awaiting approval",
+			"status": p.Status,
+		})
 		return
 	}
 	if err := h.store.SoftDelete(r.Context(), p.ID); err != nil && !errors.Is(err, pipeline.ErrNotFound) {

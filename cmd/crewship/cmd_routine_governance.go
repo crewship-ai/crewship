@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 // Routine governance CLI parity for the maker-checker + airbag endpoints:

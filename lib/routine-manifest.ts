@@ -8,8 +8,8 @@
 // from `type`). Keeping that mapping out of here makes the grouping fully
 // unit-testable (lib/__tests__/routine-manifest.test.ts).
 
-import { integrationLabel } from "./integration-labels"
-import type { RoutineManifest } from "./routine-flow"
+import { integrationLabel } from "@/lib/integration-labels"
+import type { RoutineManifest } from "@/lib/routine-flow"
 
 export type ManifestChipTone = "integ" | "store" | "tool" | "agent" | "routine" | "risk"
 

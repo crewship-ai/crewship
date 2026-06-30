@@ -9,7 +9,6 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -311,29 +310,55 @@ reuse contract).`,
 
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
-		_ = sampleInputs // legacy flag; the save no longer runs a draft test_run (see below)
 
-		// The public test_run surface was removed: you cannot run an agent
-		// "dry" (its scripts have uninterceptable side effects), so there is
-		// no honest "test run" distinct from a real run. The save endpoint
-		// validates the DSL server-side (parse + Validate + cycle detection +
-		// risk classification) — that IS the gate. The user-facing save route
-		// (JWT auth, MANAGER+ role, authorship recorded as the calling user)
-		// clears the residual test-gate via the body-trust path, mirroring the
-		// sidecar agent-authoring flow which sets last_test_run_passed after a
-		// dry-run validation. The internal /api/v1/internal/pipelines/save
-		// route is internalAuth (X-Internal-Token) — sidecar only; a user CLI
-		// token always 403s there (issue #654), so we never touch it.
+		// Save clears its test-gate via an HMAC save_token (the server no
+		// longer trusts a body "it passed" claim), so the CLI mirrors the UI:
+		// dry-run-validate the draft via /test_run first, then pass the returned
+		// token to /save. test_run parses + Validates + checks integration /
+		// resource preconditions and dry-runs the DSL (no agent invocation —
+		// you cannot run an agent "dry"); on pass it mints a token bound to
+		// (workspace, definition_hash, this user). The internal
+		// /api/v1/internal/pipelines/save route is internalAuth (sidecar only);
+		// a user CLI token always 403s there (issue #654), so we never touch it.
 		_ = authorAgent // recorded only on the sidecar path; user saves attribute the calling user
-		fmt.Println("Saving routine (server validates the DSL on save)...")
+		fmt.Println("Validating routine (server-side dry-run)...")
+		testBody := map[string]any{
+			"definition":     json.RawMessage(definitionRaw),
+			"author_crew_id": authorCrew,
+			"sample_inputs":  sampleInputs,
+		}
+		testResp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/test_run", ws), testBody)
+		if err != nil {
+			return err
+		}
+		defer testResp.Body.Close()
+		if err := cli.CheckError(testResp); err != nil {
+			return err
+		}
+		var testResult struct {
+			Status    string `json:"status"`
+			SaveToken string `json:"save_token"`
+			Error     string `json:"error_message"`
+		}
+		if err := json.NewDecoder(testResp.Body).Decode(&testResult); err != nil {
+			return fmt.Errorf("decode test_run response: %w", err)
+		}
+		if testResult.Status != "DRY_RUN_OK" && testResult.Status != "COMPLETED" {
+			return fmt.Errorf("routine failed validation (status=%s): %s", testResult.Status, testResult.Error)
+		}
+
+		fmt.Println("Saving routine...")
 		saveBody := map[string]any{
-			"slug":                 slugifyName(name),
-			"name":                 name,
-			"description":          description,
-			"definition":           json.RawMessage(definitionRaw),
-			"author_crew_id":       authorCrew,
-			"last_test_run_at":     time.Now().UTC().Format(time.RFC3339),
-			"last_test_run_passed": true,
+			"slug":           slugifyName(name),
+			"name":           name,
+			"description":    description,
+			"definition":     json.RawMessage(definitionRaw),
+			"author_crew_id": authorCrew,
+		}
+		// Forward the proof token when the server minted one (a server without
+		// a signing secret returns none — then an OWNER/ADMIN must --skip-test-gate).
+		if testResult.SaveToken != "" {
+			saveBody["save_token"] = testResult.SaveToken
 		}
 		saveResp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/save", ws), saveBody)
 		if err != nil {

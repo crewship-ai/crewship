@@ -513,17 +513,25 @@ function mergeDetail(
         failedStep: undefined,
         recent: undefined,
         acknowledged: false,
-        buildStartedAt: p.buildStartedAt ?? Date.now(),
+        // Stamp a fresh start time — carrying the previous run's
+        // buildStartedAt would fold the old run's elapsed time into this
+        // build's duration.
+        buildStartedAt: Date.now(),
       }
     }
+    // Server now reports this crew needs a (re)build, yet we're still
+    // carrying a lingering "ready · built" summary from a prior run. Drop
+    // that completed-recent (and any acknowledgement of it) so "needs
+    // rebuild" wins instead of a stale "built" line.
+    const staleRecent = s.status === "needs_provision" && p.recent?.outcome === "completed"
     return {
       ...s,
       eventSteps: p.eventSteps,
       activeFeature: p.activeFeature,
       buildLogTail: p.buildLogTail,
       failedStep: p.failedStep,
-      recent: p.recent,
-      acknowledged: p.acknowledged,
+      recent: staleRecent ? undefined : p.recent,
+      acknowledged: staleRecent ? false : p.acknowledged,
       buildStartedAt: p.buildStartedAt,
     }
   })

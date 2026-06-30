@@ -20,6 +20,13 @@ var (
 	ErrNotFound          = errors.New("pipeline: not found")
 	ErrSlugConflict      = errors.New("pipeline: slug already exists in workspace")
 	ErrTestRunGateFailed = errors.New("pipeline: save requires a fresh, passing test_run")
+	// ErrRoutineNotActive is the governance airbag enforced INSIDE the
+	// executor: a real run (ModeRun) of a routine that is not 'active'
+	// (proposed → awaiting approval, disabled → admin airbag) is refused.
+	// Enforcing it at the executor — not only at the HTTP handlers — closes
+	// the cron / webhook / batch / deferred-dispatch paths that call
+	// executor.Run directly and would otherwise bypass the status gate.
+	ErrRoutineNotActive = errors.New("pipeline: routine is not active")
 )
 
 // testRunFreshness is how recently a test_run must have passed for the
@@ -113,6 +120,22 @@ func (s *Store) Save(ctx context.Context, in SaveInput) (*Pipeline, error) {
 			return nil, fmt.Errorf("pipeline: begin tx: %w", err)
 		}
 		defer func() { _ = tx.Rollback() }()
+
+		// Disable-airbag invariant: a routine an OWNER/ADMIN explicitly
+		// 'disabled' must stay disabled across an edit. statusForRisk only
+		// ever yields 'active'/'proposed', so without this a plain re-save
+		// (user OR agent re-author) would silently revive a killed routine,
+		// bypassing the OWNER/ADMIN-only enable gate. Re-enable is the
+		// deliberate path (SetStatus via the enable handler), not a save.
+		var existingStatus string
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COALESCE(status, 'active') FROM pipelines WHERE id = ?`, existingID,
+		).Scan(&existingStatus); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("pipeline: read existing status: %w", err)
+		}
+		if existingStatus == "disabled" {
+			status = "disabled"
+		}
 
 		_, err = tx.ExecContext(ctx, `
 UPDATE pipelines SET

@@ -438,6 +438,21 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 	}
 
 	res, runErr := s.executor.Run(ctx, in)
+
+	// Governance airbag: a routine that is 'proposed' (unapproved) or
+	// 'disabled' (admin-killed) is refused by the executor. On the cron path
+	// that is a SKIP, not a failure — advance next_run_at and stay quiet
+	// rather than firing a MANAGER alert on every tick (which would spam the
+	// inbox for the whole time a routine sits disabled or awaiting approval).
+	if errors.Is(runErr, ErrRoutineNotActive) {
+		s.logger.Info("pipeline scheduler: skipping non-active routine",
+			"schedule", sched.ID, "pipeline", pipeline.Slug, "reason", runErr)
+		if err := s.store.recordRun(ctx, sched.ID, "", "SKIPPED", nextRun); err != nil {
+			s.logger.Warn("pipeline scheduler: record skipped run", "error", err)
+		}
+		return
+	}
+
 	status := "FAILED"
 	runID := ""
 	if res != nil {

@@ -171,6 +171,7 @@ func TestExecutor_TemplateSubstitution(t *testing.T) {
 		WorkspaceID:  "ws_test",
 		AuthorCrewID: "crew_a",
 		Inputs:       map[string]any{"since": "2026-05-01"},
+		Mode:         ModeRun,
 	}
 	res, err := exec.RunDefinition(context.Background(), dsl, in)
 	if err != nil {

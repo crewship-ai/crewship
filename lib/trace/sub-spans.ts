@@ -164,7 +164,11 @@ export function layoutSubSpans(spans: SubSpan[]): SubSpanBar[] {
       // window head with a minimal bar rather than dropping it.
       return { span, leftPct: 0, widthPct: MIN_BAR_PCT }
     }
-    const leftPct = clamp(((t.start - windowStart) / total) * 100, 0, 100)
+    // Cap leftPct at 100 - MIN_BAR_PCT: a final 0ms span lands at leftPct
+    // === 100, which would collapse the available width to 0 and hide the
+    // latest action entirely. Reserving the min-bar slice keeps it visible
+    // flush against the right edge.
+    const leftPct = clamp(((t.start - windowStart) / total) * 100, 0, 100 - MIN_BAR_PCT)
     const rawWidth = ((t.end - t.start) / total) * 100
     const widthPct = clamp(
       Math.max(rawWidth, MIN_BAR_PCT),

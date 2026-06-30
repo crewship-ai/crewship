@@ -47,6 +47,15 @@ type DockerfileBuild struct {
 // uppercase-only envKeyRe.
 var containerEnvKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// containerEnvBadValueRe matches any ASCII control character (notably \n / \r).
+// A Dockerfile `ENV KEY=value` cannot span lines without a trailing `\`, so a
+// value containing a newline would break out of the ENV line and turn its tail
+// into a new build directive — i.e. arbitrary build-time execution. These values
+// flow from feature metadata and the operator's devcontainer.json (neither fully
+// trusted), so values matching this are SKIPPED entirely (mirroring the
+// invalid-key skip) rather than emitted.
+var containerEnvBadValueRe = regexp.MustCompile(`[\x00-\x1f]`)
+
 // GenerateDockerfile renders a deterministic Dockerfile that installs the given
 // devcontainer features on top of BaseImage via BuildKit. It is pure: no Docker
 // daemon, no filesystem — so it is fully unit-testable. Determinism (sorted env
@@ -148,6 +157,9 @@ func containerEnvDirectives(features []*ResolvedFeature, rootEnv map[string]stri
 			if tok == "" || isPathSelfRef(tok) {
 				continue
 			}
+			if containerEnvBadValueRe.MatchString(tok) {
+				continue // control char would break out of the ENV line
+			}
 			if !seen[tok] {
 				seen[tok] = true
 				*dst = append(*dst, tok)
@@ -205,6 +217,9 @@ func containerEnvDirectives(features []*ResolvedFeature, rootEnv map[string]stri
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
+		if containerEnvBadValueRe.MatchString(nonPath[k]) {
+			continue // control char (e.g. newline) would inject a new Dockerfile directive
+		}
 		out = append(out, "ENV "+k+"="+dockerfileEnvValue(nonPath[k]))
 	}
 	// Merge PATH: root dirs first (highest precedence), then feature dirs, then

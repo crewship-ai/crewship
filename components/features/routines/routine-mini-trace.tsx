@@ -70,6 +70,10 @@ function StatusGlyph({ status }: { status: MiniStepStatus }) {
 
 function MiniCallRow({ call }: { call: MiniCall }) {
   const statusColor = SUB_SPAN_STATUS_COLOR[call.status] ?? "text-muted-foreground"
+  // The status icons are aria-hidden (decorative), so without this the
+  // outcome is conveyed by colour/shape alone. Surface it as text for SR users.
+  const statusLabel =
+    call.status === "ok" ? "succeeded" : call.status === "error" ? "failed" : "running"
   return (
     <li className="flex items-center gap-1.5 py-0.5 text-[11px]">
       <SubSpanIcon kind={call.kind} tool={call.tool} className="h-3 w-3 shrink-0" />
@@ -82,6 +86,7 @@ function MiniCallRow({ call }: { call: MiniCall }) {
         </span>
       )}
       <span className="ml-auto flex shrink-0 items-center gap-1 tabular-nums text-muted-foreground-soft">
+        <span className="sr-only">{statusLabel}</span>
         {call.durationMs != null && call.durationMs > 0 && (
           <span>{formatDurationDecimal(call.durationMs)}</span>
         )}

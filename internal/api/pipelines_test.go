@@ -500,13 +500,18 @@ func TestPipelinesAPI_Save_HappyPathManager(t *testing.T) {
 	defer db.Close()
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	// MANAGER cannot skip the test-gate (OWNER/ADMIN only), so a MANAGER save
+	// must carry the HMAC save_token proof minted by /test_run. The user save
+	// path no longer trusts body-supplied last_test_run_* fields.
+	def := `{"name":"manager-saved","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`
+	secret := []byte("test-secret-32-bytes-long-padxxx")
+	h.SetSaveTokenSecret(secret)
+	token := signSaveToken(secret, "ws_smoke", definitionHashHex([]byte(def)), "user_42", time.Now())
 	body := []byte(`{
 		"slug":"manager-saved","name":"by manager","description":"...",
-		"definition":{"name":"manager-saved","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]},
+		"definition":` + def + `,
 		"author_crew_id":"crew_a",
-		"last_test_run_passed":true,
-		"last_test_run_at":"` + now + `"}`)
+		"save_token":"` + token + `"}`)
 
 	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", bytes.NewReader(body)), "ws_smoke")
 	req = withAuthCtx(req, "user_42", "MANAGER")

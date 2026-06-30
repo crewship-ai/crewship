@@ -95,6 +95,28 @@ type CLIAdapter interface {
 	) error
 }
 
+// maxArgStrLen is Linux's per-argv-element ceiling (MAX_ARG_STRLEN, 128 KiB):
+// execve rejects any single argument at or over this with E2BIG. argSafetyMargin
+// keeps the guard a touch below it to allow for the trailing NUL and multi-byte
+// runes (the same headroom rationale as the Claude adapter's 96 KiB stdin gate).
+const (
+	maxArgStrLen    = 128 * 1024
+	argSafetyMargin = 4 * 1024
+)
+
+// firstOversizedArg reports whether any argv element is large enough to risk
+// execve's E2BIG, returning its byte length. Used by the shared exec path to
+// fail oversized-prompt runs legibly on adapters that pass the prompt as an
+// argument (everything except the stdin-capable Claude adapter).
+func firstOversizedArg(cmd []string) (bool, int) {
+	for _, a := range cmd {
+		if len(a) >= maxArgStrLen-argSafetyMargin {
+			return true, len(a)
+		}
+	}
+	return false, 0
+}
+
 // adapterRegistry maps the CLIAdapter enum value (as stored on
 // AgentRunRequest.CLIAdapter) to the adapter implementation. Lookup goes
 // through getAdapter, which falls back to the Claude Code adapter for

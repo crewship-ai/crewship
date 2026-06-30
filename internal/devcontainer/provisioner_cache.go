@@ -94,13 +94,17 @@ func configHash(baseImage string, cfg *Config, miseConfig, dockerfile string) st
 // the root-level containerEnv → ENV directives) via the real GenerateDockerfile
 // code path with no resolved features.
 //
-// Why a skeleton rather than the fully-resolved Dockerfile: the cache check
-// runs BEFORE features are downloaded/resolved (deliberately — a cache hit must
-// not pay for a feature download). The skeleton captures the parts of the
-// generator that are pure code (header, remediation hooks, env-emission logic)
-// so a code change there invalidates the cache. Per-feature layers are
-// data-driven by feature metadata, which is already covered by cfg.Features in
-// the hash, and by provisionerSchemaVersion for install-time logic bumps.
+// Why not the fully-resolved Dockerfile: the cache check runs BEFORE features
+// are downloaded/resolved (deliberately — a cache hit must not pay for a feature
+// download). So real features aren't available here. Instead we render the
+// skeleton PLUS one fixed SYNTHETIC feature: that exercises the per-feature
+// COPY/RUN/install-env rendering CODE without resolving anything, so an edit to
+// that template (the COPY layout, the RUN mount/install line, the contract-env
+// assembly) changes the fingerprint and busts the cache automatically — closing
+// the gap where a per-feature rendering change previously needed a manual
+// provisionerSchemaVersion bump. The feature's data still isn't covered (real
+// feature refs/metadata live in cfg.Features in the hash); this covers the
+// generator CODE.
 //
 // On the (unexpected) generation error the fingerprint degrades to an empty
 // string — the hash still includes provisionerSchemaVersion + cfg, so this
@@ -109,6 +113,16 @@ func dockerfileGenFingerprint(baseImage string, cfg *Config) string {
 	df, err := GenerateDockerfile(DockerfileBuild{
 		BaseImage: baseImage,
 		RootEnv:   cfg.ContainerEnv,
+		Features: []*ResolvedFeature{{
+			Ref: "crewship.dev/fingerprint-probe:1",
+			Dir: "/fingerprint-probe",
+			Metadata: FeatureMetadata{
+				ID:           "fingerprint-probe",
+				Version:      "1",
+				Name:         "fingerprint probe",
+				ContainerEnv: map[string]string{"PROBE_PATH": "/opt/fingerprint-probe/bin"},
+			},
+		}},
 	})
 	if err != nil {
 		return ""

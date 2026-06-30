@@ -9,6 +9,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TabBar } from "@/components/ui/tab-bar"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { STATUS_BADGE_CLASSES, STATUS_DOT_CLASSES } from "@/lib/colors"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
 import { useAbilities } from "@/hooks/use-abilities"
@@ -302,22 +303,24 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   const showKillControl = canKillRoutine(role)
 
   const status = routine?.last_invocation_status?.toLowerCase()
-  // Status tones share the same `bg-{c}-500/20 text-{c}-400` pattern
-  // as lib/colors.ts STATUS_BADGE_CLASSES so the pill matches the
-  // status pills rendered in Inbox / Issues / Activity.
+  // Run-status pill routes its colors through the shared palette
+  // (lib/colors STATUS_BADGE_CLASSES + STATUS_DOT_CLASSES) so it matches
+  // the status pills rendered in Inbox / Issues / Activity — failed reads
+  // red (not rose), running reads cyan (IN_PROGRESS), and an approval gate
+  // reads violet (AWAITING_APPROVAL).
   //
   // A live approval gate wins over the persisted last_invocation_status: the
   // run reads as "running" in the DB while parked, but the human is the
-  // bottleneck, so we show the amber "Waiting for approval" state instead.
-  const statusTone = pendingApproval
-    ? { bg: "bg-amber-500/20", text: "text-amber-400", label: "Waiting for approval" }
+  // bottleneck, so we show the awaiting-approval state instead.
+  const runStatus: { token: string; label: string } = pendingApproval
+    ? { token: "AWAITING_APPROVAL", label: "Waiting for approval" }
     : status === "completed" || status === "succeeded" || status === "success"
-      ? { bg: "bg-emerald-500/20", text: "text-emerald-400", label: "Last run · completed" }
+      ? { token: "COMPLETED", label: "Last run · completed" }
       : status === "failed" || status === "error"
-        ? { bg: "bg-rose-500/20", text: "text-rose-400", label: "Last run · failed" }
+        ? { token: "FAILED", label: "Last run · failed" }
         : status === "running"
-          ? { bg: "bg-blue-500/20", text: "text-blue-400", label: "Running…" }
-          : { bg: "bg-muted", text: "text-muted-foreground", label: "Never invoked" }
+          ? { token: "IN_PROGRESS", label: "Running…" }
+          : { token: "PENDING", label: "Never invoked" }
 
   // Top-level tabs are collapsed to the three the redesign elevates
   // (Overview / Runs / Schedules); the four power-user surfaces
@@ -347,8 +350,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
                     <span
                       className={cn(
                         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
-                        lifecycleBadge.bg,
-                        lifecycleBadge.text,
+                        lifecycleBadge.className,
                       )}
                     >
                       <span className={cn("h-1.5 w-1.5 rounded-full", lifecycleBadge.dot)} />
@@ -358,12 +360,11 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
                   <span
                     className={cn(
                       "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
-                      statusTone.bg,
-                      statusTone.text,
+                      STATUS_BADGE_CLASSES[runStatus.token],
                     )}
                   >
-                    <span className={cn("h-1.5 w-1.5 rounded-full", statusTone.text === "text-muted-foreground" ? "bg-muted-foreground/60" : "bg-current")} />
-                    {statusTone.label}
+                    <span className={cn("h-1.5 w-1.5 rounded-full", STATUS_DOT_CLASSES[runStatus.token])} />
+                    {runStatus.label}
                   </span>
                   <Badge variant="outline" className="px-2 py-0 text-[11px]">DSL v{routine?.dsl_version}</Badge>
                   <Badge variant="outline" className="px-2 py-0 text-[11px]">
