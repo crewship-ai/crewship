@@ -75,11 +75,13 @@ routine — grounded in what this crew actually has, tested before it ships.
    }
    ```
 
-5. **Save and test.** POST to `http://localhost:9119/pipelines/save` with
-   `{ "name", "description", "definition", "sample_inputs" }`. Save runs a
-   `test_run` first. **If the test fails, READ the error**, fix the DSL
-   (bad template path, missing input, wrong step shape), and retry — do not
-   hand the user a routine that never passed its test.
+5. **Save and test.** Call the **`save_routine`** tool with
+   `{ name, description, definition, sample_inputs }` — do NOT curl the save
+   endpoint. The tool validates (a fast dry-run) before saving. **If it returns
+   an error, READ it**, fix the DSL (bad template path, missing input, wrong
+   step shape), and retry — do not hand the user a routine that never passed
+   validation. Use `list_routines` to check existing routines before authoring
+   a duplicate.
 
 6. **Tell the user the real outcome.** A routine is **risky** and lands as
    `proposed` (a MANAGER must approve it before it can run) when it contains an
