@@ -64,6 +64,12 @@ func injectRoutinesMCPIntoClaudeJSON(in string) (string, error) {
 	entry := map[string]any{
 		"type": "http",
 		"url":  routinesMCPSpec().URL,
+		// alwaysLoad presents this server's tools (save_routine / list_routines
+		// / run_routine) to the model EAGERLY at session start instead of
+		// deferring them behind a ToolSearch discovery hop. Mirrors the memory
+		// injector. Claude-Code-only field (v2.1.121+); unknown keys are ignored
+		// by older CLIs, and the other adapters load MCP tools eagerly already.
+		"alwaysLoad": true,
 	}
 	entryJSON, err := json.Marshal(entry)
 	if err != nil {
