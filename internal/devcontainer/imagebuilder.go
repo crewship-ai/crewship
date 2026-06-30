@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // FeatureImageTagPrefix is the Docker repository for intermediate BuildKit
@@ -116,37 +117,101 @@ func (b *DockerBuildKitBuilder) Build(ctx context.Context, contextDir, tag strin
 // BuildKit. The returned tag is used as the base for the temp container that
 // then runs mise/postCreate/env. emit reports plan progress (pull + per-feature)
 // so the UI checklist advances identically to the container-commit path.
-func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, features []*ResolvedFeature, optionsByRef map[string]map[string]any, emit func(string)) (string, error) {
+func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, features []*ResolvedFeature, optionsByRef map[string]map[string]any, rootEnv map[string]string, emit func(string), sink ProvisionSink) (string, error) {
 	emit(pullStepLabel(baseImage))
 
-	contextDir, _, featTag, err := stageBuildContext(baseImage, features, optionsByRef)
+	contextDir, _, featTag, err := stageBuildContext(baseImage, features, optionsByRef, rootEnv)
 	if err != nil {
+		emitProvision(sink, ProvisionEvent{Step: ProvStepFailed, Status: ProvStatusFailed, Detail: ProvStepImageBuildStart, Error: err.Error()})
 		return "", err
 	}
 	defer func() { _ = os.RemoveAll(contextDir) }()
+
+	buildStart := time.Now()
+	emitProvision(sink, ProvisionEvent{
+		Step:   ProvStepImageBuildStart,
+		Status: ProvStatusStarted,
+		Tag:    featTag,
+		Detail: featureRefsSummary(features),
+	})
 
 	// Exact-tag hit: skip invoking the builder entirely. BuildKit also caches
 	// layers, but this avoids the process spawn when nothing changed.
 	if exists, _ := p.imageExists(ctx, featTag); exists {
 		for _, f := range features {
 			emit(featureStepLabel(f.Metadata.ID))
+			emitProvision(sink, ProvisionEvent{Step: ProvStepFeatureInstall, Feature: f.Metadata.ID, Status: ProvStatusCompleted, Detail: "cached"})
 		}
 		p.logger.Info("reusing cached feature image", "tag", featTag)
+		emitProvision(sink, ProvisionEvent{Step: ProvStepImageBuildDone, Status: ProvStatusCompleted, Tag: featTag, Detail: "cache_hit", DurationMs: elapsedMs(buildStart)})
 		return featTag, nil
 	}
 
+	// BuildKit bakes every feature in one invocation, so we can't observe a
+	// per-feature completion mid-build. Emit `started` for each up front (so the
+	// audit shows exactly which features the build covers), then `completed`
+	// once the whole build lands.
 	for _, f := range features {
 		emit(featureStepLabel(f.Metadata.ID))
+		emitProvision(sink, ProvisionEvent{Step: ProvStepFeatureInstall, Feature: f.Metadata.ID, Status: ProvStatusStarted})
 	}
 	p.logger.Info("building feature image via BuildKit", "tag", featTag, "features", featureRefsSummary(features))
+
+	// Capture a bounded tail of the BuildKit log so a build failure carries the
+	// output of the failing step without flooding the journal/WS on success.
+	logTail := newBoundedLog(buildLogTailCap)
 	if err := p.builder.Build(ctx, contextDir, featTag, func(line string) {
+		logTail.add(line)
 		p.logger.Debug("buildkit", "line", line)
 	}); err != nil {
+		emitProvision(sink, ProvisionEvent{
+			Step:       ProvStepFailed,
+			Status:     ProvStatusFailed,
+			Detail:     ProvStepImageBuildStart,
+			Tag:        featTag,
+			Error:      err.Error(),
+			DurationMs: elapsedMs(buildStart),
+		})
+		// Surface the failing-step output as its own event so the tail is
+		// queryable independent of the (potentially truncated) Error field.
+		if tail := logTail.tail(); tail != "" {
+			emitProvision(sink, ProvisionEvent{Step: ProvStepImageBuildStart, Status: ProvStatusFailed, Tag: featTag, Detail: tail})
+		}
 		return "", fmt.Errorf("building feature image: %w", err)
 	}
 	p.invalidateImageListCache()
+	for _, f := range features {
+		emitProvision(sink, ProvisionEvent{Step: ProvStepFeatureInstall, Feature: f.Metadata.ID, Status: ProvStatusCompleted})
+	}
+	emitProvision(sink, ProvisionEvent{Step: ProvStepImageBuildDone, Status: ProvStatusCompleted, Tag: featTag, DurationMs: elapsedMs(buildStart)})
 	return featTag, nil
 }
+
+// buildLogTailCap bounds how many trailing BuildKit log lines we retain for a
+// failure event — enough to see the failing RUN's output, capped so a verbose
+// successful build never balloons memory or the failure payload.
+const buildLogTailCap = 40
+
+// boundedLog keeps only the last `cap` lines appended to it — a fixed-size tail
+// buffer for capturing the end of a build log cheaply.
+type boundedLog struct {
+	cap   int
+	lines []string
+}
+
+func newBoundedLog(cap int) *boundedLog { return &boundedLog{cap: cap} }
+
+func (b *boundedLog) add(line string) {
+	b.lines = append(b.lines, line)
+	if len(b.lines) > b.cap {
+		// Re-slice to the last cap lines; copy to release the head storage.
+		tail := make([]string, b.cap)
+		copy(tail, b.lines[len(b.lines)-b.cap:])
+		b.lines = tail
+	}
+}
+
+func (b *boundedLog) tail() string { return strings.Join(b.lines, "\n") }
 
 // stageBuildContext materializes a build context directory for the given
 // features: it writes the generated Dockerfile and copies each feature's
@@ -155,11 +220,12 @@ func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, f
 // feature file contents (so any change to base image, features, options, or a
 // feature's own files yields a new tag and a clean rebuild). The caller is
 // responsible for removing contextDir.
-func stageBuildContext(baseImage string, features []*ResolvedFeature, optionsByRef map[string]map[string]any) (contextDir, dockerfile, tag string, err error) {
+func stageBuildContext(baseImage string, features []*ResolvedFeature, optionsByRef map[string]map[string]any, rootEnv map[string]string) (contextDir, dockerfile, tag string, err error) {
 	dockerfile, err = GenerateDockerfile(DockerfileBuild{
 		BaseImage:    baseImage,
 		Features:     features,
 		OptionsByRef: optionsByRef,
+		RootEnv:      rootEnv,
 	})
 	if err != nil {
 		return "", "", "", err

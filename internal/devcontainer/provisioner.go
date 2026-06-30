@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	dockerclient "github.com/docker/docker/client"
 
@@ -49,14 +50,86 @@ type ProgressCallback func(step int, total int, message string)
 
 type PlanCallback func(steps []string)
 
+// ProvisionEvent is a structured, auditable record of one step in the container
+// preparation pipeline. It is the wire format for the optional ProvisionSink so
+// the caller (which holds the run/agent + journal/WS context) can persist every
+// step. Stable Step/Status string constants mean the journal stays queryable
+// across thousands of runs — an operator can always see exactly where a
+// provision got stuck. Nothing in this pipeline fails silently: every failure
+// emits a ProvStepFailed event AND propagates the underlying error.
+type ProvisionEvent struct {
+	Phase      string `json:"phase"` // ProvisionPhase
+	Step       string `json:"step"`  // one of the ProvStep* constants
+	Feature    string `json:"feature,omitempty"`
+	Status     string `json:"status,omitempty"` // one of the ProvStatus* constants
+	Detail     string `json:"detail,omitempty"`
+	Error      string `json:"error,omitempty"`
+	Tag        string `json:"tag,omitempty"`
+	DurationMs int64  `json:"duration_ms,omitempty"`
+}
+
+// ProvisionSink receives ProvisionEvents synchronously from Provision. A nil
+// sink is a no-op (current behavior) so non-orchestrator callers and unit tests
+// don't have to wire one. Implementations must be cheap and non-blocking — they
+// run on the provisioning goroutine.
+type ProvisionSink func(ProvisionEvent)
+
+// ProvisionPhase labels every event from the container-preparation pipeline.
+const ProvisionPhase = "provision"
+
+// Stable step constants for ProvisionEvent.Step. Keep these in sync with any
+// journal/WS consumers — they are the audit vocabulary.
+const (
+	ProvStepStart             = "provision.start"
+	ProvStepResolveFeatures   = "resolve_features"
+	ProvStepImageBuildStart   = "image_build_start"
+	ProvStepFeatureInstall    = "feature_install"
+	ProvStepImageBuildDone    = "image_build_done"
+	ProvStepContainerCreate   = "container_create"
+	ProvStepContainerEnvApply = "containerEnv_apply"
+	ProvStepReady             = "ready"
+	ProvStepCacheHit          = "provision.cache_hit"
+	ProvStepFailed            = "provision.failed"
+)
+
+// Stable status constants for ProvisionEvent.Status.
+const (
+	ProvStatusStarted   = "started"
+	ProvStatusCompleted = "completed"
+	ProvStatusFailed    = "failed"
+)
+
+// emitProvision delivers ev to sink (no-op when sink is nil), stamping the
+// phase so callers never have to. Centralized so every emit site is consistent.
+func emitProvision(sink ProvisionSink, ev ProvisionEvent) {
+	if sink == nil {
+		return
+	}
+	ev.Phase = ProvisionPhase
+	sink(ev)
+}
+
+// elapsedMs is the millisecond duration since start, for the DurationMs field.
+func elapsedMs(start time.Time) int64 { return time.Since(start).Milliseconds() }
+
 // ProvisionOption configures a single Provision call. Use the With* helpers
 // rather than constructing the underlying type directly.
 
 type ProvisionOption func(*provisionOpts)
 
 type provisionOpts struct {
-	onProgress ProgressCallback
-	onPlan     PlanCallback
+	onProgress  ProgressCallback
+	onPlan      PlanCallback
+	onProvision ProvisionSink
+}
+
+// WithProvisionSink attaches a structured event sink to a Provision call. Every
+// step (resolve → build → per-feature → container create → env apply → ready,
+// plus cache_hit and failure) emits one ProvisionEvent. Optional: a nil sink
+// (or omitting the option) preserves current behavior. Routed by the caller
+// into the journal (persisted/auditable) and the WS hub (live).
+func WithProvisionSink(s ProvisionSink) ProvisionOption {
+	return func(o *provisionOpts) { o.onProvision = s }
 }
 
 // WithProgress attaches a progress callback to a Provision call. The callback
@@ -221,19 +294,34 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		fn(o)
 	}
 
+	runStart := time.Now()
+	emitEvt := func(ev ProvisionEvent) { emitProvision(o.onProvision, ev) }
+	// fail emits a structured provision.failed event for `step` and returns the
+	// (already-wrapped) error unchanged, so no failure path is silent and the
+	// error still propagates to the caller.
+	fail := func(step string, err error) (*ProvisionResult, error) {
+		emitEvt(ProvisionEvent{Step: ProvStepFailed, Status: ProvStatusFailed, Detail: step, Error: err.Error()})
+		return nil, err
+	}
+
+	emitEvt(ProvisionEvent{Step: ProvStepStart, Detail: baseImage})
+
 	hash := configHash(baseImage, cfg, miseConfig)
 	tag := cacheImageTag(hash)
 
 	// 1. Check cache.
 	exists, err := p.imageExists(ctx, tag)
 	if err != nil {
-		return nil, err
+		return fail(ProvStepStart, err)
 	}
 	if exists {
 		p.logger.Info("using cached image", "tag", tag)
 		if o.onProgress != nil {
 			o.onProgress(1, 1, "Using cached image")
 		}
+		// Even a no-build provision is audited: cache_hit → ready.
+		emitEvt(ProvisionEvent{Step: ProvStepCacheHit, Status: ProvStatusCompleted, Tag: tag})
+		emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Tag: tag, DurationMs: elapsedMs(runStart)})
 		return &ProvisionResult{CachedImage: tag, ConfigHash: hash}, nil
 	}
 
@@ -243,6 +331,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		if o.onProgress != nil {
 			o.onProgress(1, 1, "No customizations needed")
 		}
+		emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Detail: "no customizations", DurationMs: elapsedMs(runStart)})
 		return &ProvisionResult{CachedImage: "", ConfigHash: hash}, nil
 	}
 
@@ -295,10 +384,17 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// 1b. Resolve features once — the BuildKit build and the in-container
 	// install both consume them, and aggregateFeatureRequirements needs them
 	// regardless of which path runs.
+	resolveStart := time.Now()
 	resolvedFeatures, optionsByRef, err := p.resolveFeatures(ctx, cfg)
 	if err != nil {
-		return nil, err
+		return fail(ProvStepResolveFeatures, err)
 	}
+	emitEvt(ProvisionEvent{
+		Step:       ProvStepResolveFeatures,
+		Status:     ProvStatusCompleted,
+		Detail:     featureRefsSummary(resolvedFeatures),
+		DurationMs: elapsedMs(resolveStart),
+	})
 
 	// Choose the build engine. With BuildKit available we bake the features
 	// into an intermediate image so each feature is a cached layer (adding a
@@ -309,7 +405,10 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	effectiveBase := baseImage
 	useBuildKit := p.builder != nil && p.builder.Available() && len(resolvedFeatures) > 0
 	if useBuildKit {
-		featImage, berr := p.buildFeatureImage(ctx, baseImage, resolvedFeatures, optionsByRef, emit)
+		// buildFeatureImage emits image_build_start, per-feature feature_install,
+		// image_build_done, and on any failure provision.failed (with the build
+		// log tail) — so we just propagate its error here.
+		featImage, berr := p.buildFeatureImage(ctx, baseImage, resolvedFeatures, optionsByRef, cfg.ContainerEnv, emit, o.onProvision)
 		if berr != nil {
 			return nil, berr
 		}
@@ -321,8 +420,9 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// 2. Create temporary container from the (possibly feature-baked) base.
 	containerID, err := p.createTempContainer(ctx, effectiveBase)
 	if err != nil {
-		return nil, fmt.Errorf("creating temp container: %w", err)
+		return fail(ProvStepContainerCreate, fmt.Errorf("creating temp container: %w", err))
 	}
+	emitEvt(ProvisionEvent{Step: ProvStepContainerCreate, Status: ProvStatusCompleted, Detail: containerID})
 
 	// Ensure cleanup on any exit path.
 	defer func() {
@@ -333,15 +433,16 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 
 	// 3. Start the container.
 	if err := p.docker.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
-		return nil, fmt.Errorf("starting temp container: %w", err)
+		return fail("container_start", fmt.Errorf("starting temp container: %w", err))
 	}
 
 	// 4. Install features in the container only when BuildKit didn't already
-	// bake them into effectiveBase.
+	// bake them into effectiveBase. installResolvedFeatures emits per-feature
+	// feature_install started/completed/failed events through the sink.
 	if !useBuildKit {
 		if err := p.installResolvedFeatures(ctx, containerID, resolvedFeatures, optionsByRef, func(featureID string) {
 			emit(featureStepLabel(featureID))
-		}); err != nil {
+		}, o.onProvision); err != nil {
 			return nil, err
 		}
 	}
@@ -350,18 +451,18 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	if miseConfig != "" {
 		emit(miseStepLabel)
 		if err := p.installMise(ctx, containerID, miseConfig); err != nil {
-			return nil, fmt.Errorf("mise provisioning: %w", err)
+			return fail("mise", fmt.Errorf("mise provisioning: %w", err))
 		}
 	}
 
 	// 6a. Run feature-level postCreateCommand hooks. Baked into cached image.
 	if err := p.runFeatureLifecycleCommands(ctx, containerID, resolvedFeatures); err != nil {
-		return nil, err
+		return fail("feature_post_create", err)
 	}
 
 	// 6b. Run root-level postCreateCommand as agent user (1001:1001).
 	if err := p.runPostCreateCommands(ctx, containerID, cfg); err != nil {
-		return nil, err
+		return fail("post_create", err)
 	}
 
 	// 7. Write containerEnv (aggregated from features + root-level) to
@@ -373,9 +474,12 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		requirements.PostStartCommands,
 		cfg.NormalizedPostStartCommands()...,
 	)
+	envStart := time.Now()
+	emitEvt(ProvisionEvent{Step: ProvStepContainerEnvApply, Status: ProvStatusStarted, Detail: fmt.Sprintf("%d vars", len(requirements.ContainerEnv))})
 	if err := p.writeAggregatedContainerEnv(ctx, containerID, requirements.ContainerEnv); err != nil {
-		return nil, err
+		return fail(ProvStepContainerEnvApply, err)
 	}
+	emitEvt(ProvisionEvent{Step: ProvStepContainerEnvApply, Status: ProvStatusCompleted, DurationMs: elapsedMs(envStart)})
 
 	// 8. Clean up caches inside the container.
 	if err := p.cleanupCaches(ctx, containerID); err != nil {
@@ -388,7 +492,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		Reference: tag,
 	})
 	if commitErr != nil {
-		return nil, fmt.Errorf("committing container: %w", commitErr)
+		return fail("commit", fmt.Errorf("committing container: %w", commitErr))
 	}
 	// New crewship-cache:* tag is now present locally — drop cached list.
 	p.invalidateImageListCache()
@@ -399,6 +503,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		"mounts", len(requirements.Mounts),
 		"cap_add", len(requirements.CapAdd),
 	)
+	emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Tag: tag, DurationMs: elapsedMs(runStart)})
 	return &ProvisionResult{
 		CachedImage:  tag,
 		ConfigHash:   hash,

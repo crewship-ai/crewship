@@ -58,7 +58,7 @@ func TestBuildKitProvision_RealWorld(t *testing.T) {
 		t.Fatalf("common-utils must sort first, got %s", featureIDs(sorted))
 	}
 
-	ctxDir, _, tag, err := stageBuildContext(baseImage, sorted, cfg)
+	ctxDir, _, tag, err := stageBuildContext(baseImage, sorted, cfg, nil)
 	if err != nil {
 		t.Fatalf("stageBuildContext: %v", err)
 	}

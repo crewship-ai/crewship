@@ -272,6 +272,17 @@ const (
 	EntryProvisioningComplete EntryType = "provisioning.complete"
 	EntryProvisioningFailed   EntryType = "provisioning.failed"
 
+	// EntryProvisioningStep is one fine-grained, structured step in the
+	// container-preparation pipeline (resolve_features → image_build →
+	// per-feature install → container_create → containerEnv_apply → ready, plus
+	// cache_hit and per-step failures). Distinct from the coarse
+	// queued/building/complete markers above: those bracket the whole job, this
+	// records every step so an operator can see exactly where a build got stuck
+	// across thousands of runs. Payload carries the full ProvisionEvent fields
+	// (step, feature, status, detail, error, tag, duration_ms). Severity is
+	// warn for failures, info otherwise.
+	EntryProvisioningStep EntryType = "provisioning.step"
+
 	// Chat — user↔agent conversation turns. Captures the trigger that
 	// kicks off a series of agent actions, so the Timeline can answer
 	// "what did the user ask?" alongside "what did the agent do?".

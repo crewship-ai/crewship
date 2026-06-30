@@ -527,6 +527,68 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		})
 	}
 
+	// provisionEventSink routes every structured ProvisionEvent from the
+	// container-preparation pipeline into BOTH the journal (persisted =
+	// auditable across thousands of runs) and the WS hub (live = visible in the
+	// Activity Bar), tied to the triggering crew/workspace. This is the channel
+	// that guarantees no provisioning step fails silently: each step — resolve,
+	// build, per-feature install, container create, env apply, ready, cache_hit,
+	// and any failure — lands here with structured fields. Runs synchronously on
+	// the provisioning goroutine (same as the progress callback above), so it
+	// must stay cheap; journal.Emit is a single indexed insert.
+	provisionEventSink := func(ev devcontainer.ProvisionEvent) {
+		payload := map[string]any{
+			"crew_id": crewID,
+			"phase":   ev.Phase,
+			"step":    ev.Step,
+		}
+		if ev.Feature != "" {
+			payload["feature"] = ev.Feature
+		}
+		if ev.Status != "" {
+			payload["status"] = ev.Status
+		}
+		if ev.Detail != "" {
+			payload["detail"] = ev.Detail
+		}
+		if ev.Error != "" {
+			payload["error"] = ev.Error
+		}
+		if ev.Tag != "" {
+			payload["tag"] = ev.Tag
+		}
+		if ev.DurationMs != 0 {
+			payload["duration_ms"] = ev.DurationMs
+		}
+
+		// Live: push to any open Activity Bar.
+		h.wsHub.BroadcastWorkspace(workspaceID, "provision.event", payload)
+
+		// Persisted: one auditable journal row per step. Failures surface at
+		// warn so the Timeline highlights them without scrolling.
+		severity := journal.SeverityInfo
+		if ev.Status == devcontainer.ProvStatusFailed || ev.Step == devcontainer.ProvStepFailed {
+			severity = journal.SeverityWarn
+		}
+		summary := fmt.Sprintf("provision %s", ev.Step)
+		if ev.Feature != "" {
+			summary += " " + ev.Feature
+		}
+		if ev.Status != "" {
+			summary += " (" + ev.Status + ")"
+		}
+		_, _ = h.journal.Emit(ctx, journal.Entry{
+			WorkspaceID: workspaceID,
+			CrewID:      crewID,
+			Type:        journal.EntryProvisioningStep,
+			Severity:    severity,
+			ActorType:   journal.ActorOrchestrator,
+			Summary:     summary,
+			Payload:     payload,
+			Refs:        map[string]any{"crew_id": crewID},
+		})
+	}
+
 	// Emit provisioning.building once the plan is set and the actual
 	// image build is about to start. Distinct from queued so a viewer
 	// can tell pre-flight-config-parse from honest-build progress.
@@ -548,6 +610,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 	result, err := h.provisioner.Provision(ctx, baseImage, cfg, miseJSON,
 		devcontainer.WithPlan(plan),
 		devcontainer.WithProgress(progress),
+		devcontainer.WithProvisionSink(provisionEventSink),
 	)
 	if err != nil {
 		h.markJobFailed(job, workspaceID, fmt.Errorf("provision: %w", err))

@@ -43,7 +43,7 @@ func TestStageBuildContext_WritesDockerfileAndFeatures(t *testing.T) {
 	features := []*ResolvedFeature{
 		{Ref: "ghcr.io/devcontainers/features/common-utils:2", Dir: featDir, Metadata: FeatureMetadata{ID: "common-utils"}},
 	}
-	ctxDir, dockerfile, tag, err := stageBuildContext("ubuntu:22.04", features, nil)
+	ctxDir, dockerfile, tag, err := stageBuildContext("ubuntu:22.04", features, nil, nil)
 	if err != nil {
 		t.Fatalf("stageBuildContext: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestStageBuildContext_WritesDockerfileAndFeatures(t *testing.T) {
 	if !strings.HasPrefix(tag, "crewship-feat:") {
 		t.Errorf("unexpected tag %q", tag)
 	}
-	ctxDir2, _, tag2, err := stageBuildContext("ubuntu:22.04", features, nil)
+	ctxDir2, _, tag2, err := stageBuildContext("ubuntu:22.04", features, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,12 +91,12 @@ func TestStageBuildContext_TagReflectsFeatureContent(t *testing.T) {
 		}
 	}
 
-	ctx1, df1, tag1, err := stageBuildContext("ubuntu:22.04", mkFeature("#!/bin/sh\necho v1"), nil)
+	ctx1, df1, tag1, err := stageBuildContext("ubuntu:22.04", mkFeature("#!/bin/sh\necho v1"), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(ctx1)
-	ctx2, df2, tag2, err := stageBuildContext("ubuntu:22.04", mkFeature("#!/bin/sh\necho v2"), nil)
+	ctx2, df2, tag2, err := stageBuildContext("ubuntu:22.04", mkFeature("#!/bin/sh\necho v2"), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/docker/docker/api/types/container"
@@ -221,15 +222,30 @@ func (p *Provisioner) resolveFeatures(ctx context.Context, cfg *Config) ([]*Reso
 // installResolvedFeatures runs each feature's install.sh inside containerID in
 // dependency order (the container-commit path). beforeInstall fires per feature
 // for progress reporting.
-func (p *Provisioner) installResolvedFeatures(ctx context.Context, containerID string, sorted []*ResolvedFeature, optionsByRef map[string]map[string]any, beforeInstall func(featureID string)) error {
+func (p *Provisioner) installResolvedFeatures(ctx context.Context, containerID string, sorted []*ResolvedFeature, optionsByRef map[string]map[string]any, beforeInstall func(featureID string), sink ProvisionSink) error {
 	for _, feature := range sorted {
 		if beforeInstall != nil {
 			beforeInstall(feature.Metadata.ID)
 		}
+		emitProvision(sink, ProvisionEvent{Step: ProvStepFeatureInstall, Feature: feature.Metadata.ID, Status: ProvStatusStarted})
+		start := time.Now()
 		opts := optionsByRef[feature.Ref]
 		if err := p.installer.InstallFeature(ctx, containerID, feature, opts); err != nil {
+			emitProvision(sink, ProvisionEvent{
+				Step:       ProvStepFeatureInstall,
+				Feature:    feature.Metadata.ID,
+				Status:     ProvStatusFailed,
+				Error:      err.Error(),
+				DurationMs: elapsedMs(start),
+			})
 			return fmt.Errorf("installing feature %s: %w", feature.Metadata.ID, err)
 		}
+		emitProvision(sink, ProvisionEvent{
+			Step:       ProvStepFeatureInstall,
+			Feature:    feature.Metadata.ID,
+			Status:     ProvStatusCompleted,
+			DurationMs: elapsedMs(start),
+		})
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package devcontainer
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -33,7 +34,18 @@ type DockerfileBuild struct {
 	// OptionsByRef holds the operator-provided options per feature ref. Missing
 	// entries fall back to feature-metadata defaults.
 	OptionsByRef map[string]map[string]any
+	// RootEnv is the operator's root-level devcontainer.json `containerEnv`. It
+	// is applied as image ENV (root-wins over feature-declared containerEnv) so
+	// the runtime PATH/vars the agent exec inherits are authoritative. Optional.
+	RootEnv map[string]string
 }
+
+// containerEnvKeyRe validates an environment variable name. Unlike feature
+// OPTIONS (which we uppercase before turning into shell assignments), a
+// containerEnv key is a real env var name used verbatim and is case-sensitive,
+// so we accept the natural [A-Za-z_][A-Za-z0-9_]* form rather than the
+// uppercase-only envKeyRe.
+var containerEnvKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // GenerateDockerfile renders a deterministic Dockerfile that installs the given
 // devcontainer features on top of BaseImage via BuildKit. It is pure: no Docker
@@ -102,7 +114,130 @@ func GenerateDockerfile(b DockerfileBuild) (string, error) {
 		sb.WriteString("    rm -rf " + destDir + "\n")
 	}
 
+	// Apply containerEnv as image ENV. The devcontainer-feature spec says a
+	// feature's containerEnv MUST be applied to the container environment, but
+	// the agent exec inherits the IMAGE env, not /etc/environment — so a
+	// feature that adds its bin dir to PATH (e.g. ansible's pipx dir
+	// /usr/local/py-utils/bin) is invisible at runtime unless we bake it into
+	// ENV here. Emitted AFTER the feature layers so the dirs exist and the env
+	// lands in the final image. Root-level containerEnv wins over feature
+	// values, mirroring aggregateFeatureRequirements (provisioner_install.go).
+	for _, line := range containerEnvDirectives(b.Features, b.RootEnv) {
+		sb.WriteString(line + "\n")
+	}
+
 	return sb.String(), nil
+}
+
+// containerEnvDirectives renders the aggregated containerEnv (feature-declared,
+// first-feature-wins; root-level overrides) as deterministic Dockerfile ENV
+// lines. PATH is special-cased: every PATH contribution is merged into ONE
+// `ENV PATH=<dirs>:$PATH` so feature bin dirs accumulate instead of clobbering
+// each other (a second `ENV PATH=` would drop the first feature's dir). Root
+// PATH dirs are placed leftmost (highest search precedence). Non-PATH values
+// are emitted as individual `ENV KEY=value` lines, sorted for stable output.
+func containerEnvDirectives(features []*ResolvedFeature, rootEnv map[string]string) []string {
+	nonPath := map[string]string{}  // key -> value (first feature wins, root overrides)
+	var featPath, rootPath []string // accumulated PATH dirs, deduped
+	seen := map[string]bool{}
+
+	addPath := func(dst *[]string, val string) {
+		val = strings.ReplaceAll(val, "${containerEnv:", "${")
+		for _, tok := range strings.Split(val, ":") {
+			tok = strings.TrimSpace(tok)
+			if tok == "" || isPathSelfRef(tok) {
+				continue
+			}
+			if !seen[tok] {
+				seen[tok] = true
+				*dst = append(*dst, tok)
+			}
+		}
+	}
+
+	// Features in install order; within a feature, sorted keys for determinism.
+	for _, f := range features {
+		if f == nil {
+			continue
+		}
+		keys := make([]string, 0, len(f.Metadata.ContainerEnv))
+		for k := range f.Metadata.ContainerEnv {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			v := f.Metadata.ContainerEnv[k]
+			if strings.EqualFold(k, "PATH") {
+				addPath(&featPath, v)
+				continue
+			}
+			if !containerEnvKeyRe.MatchString(k) {
+				continue
+			}
+			if _, exists := nonPath[k]; !exists {
+				nonPath[k] = v
+			}
+		}
+	}
+
+	// Root-level overrides feature-declared values; root PATH dirs lead.
+	rootKeys := make([]string, 0, len(rootEnv))
+	for k := range rootEnv {
+		rootKeys = append(rootKeys, k)
+	}
+	sort.Strings(rootKeys)
+	for _, k := range rootKeys {
+		v := rootEnv[k]
+		if strings.EqualFold(k, "PATH") {
+			addPath(&rootPath, v)
+			continue
+		}
+		if !containerEnvKeyRe.MatchString(k) {
+			continue
+		}
+		nonPath[k] = v
+	}
+
+	var out []string
+	keys := make([]string, 0, len(nonPath))
+	for k := range nonPath {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		out = append(out, "ENV "+k+"="+dockerfileEnvValue(nonPath[k]))
+	}
+	// Merge PATH: root dirs first (highest precedence), then feature dirs, then
+	// the inherited $PATH so nothing already on PATH is lost.
+	pathDirs := append(append([]string{}, rootPath...), featPath...)
+	if len(pathDirs) > 0 {
+		out = append(out, "ENV PATH="+strings.Join(pathDirs, ":")+":$PATH")
+	}
+	return out
+}
+
+// isPathSelfRef reports whether a PATH token is just a reference to the existing
+// PATH (which we re-emit as the trailing $PATH) rather than a real directory.
+func isPathSelfRef(tok string) bool {
+	switch tok {
+	case "$PATH", "${PATH}", "$ENV{PATH}":
+		return true
+	}
+	return false
+}
+
+// dockerfileEnvValue normalizes a containerEnv value for an `ENV KEY=value`
+// directive: devcontainer `${containerEnv:X}` references become Dockerfile
+// `${X}` so they expand, and values containing whitespace are double-quoted
+// (escaping backslash and quote, leaving `$` intact so variable refs expand).
+func dockerfileEnvValue(v string) string {
+	v = strings.ReplaceAll(v, "${containerEnv:", "${")
+	if strings.ContainsAny(v, " \t") {
+		v = strings.ReplaceAll(v, `\`, `\\`)
+		v = strings.ReplaceAll(v, `"`, `\"`)
+		return `"` + v + `"`
+	}
+	return v
 }
 
 // featureBuildEnv returns the install-time environment for a feature as sorted

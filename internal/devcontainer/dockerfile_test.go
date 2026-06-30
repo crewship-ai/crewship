@@ -150,6 +150,94 @@ func TestGenerateDockerfile_ShellQuotesValues(t *testing.T) {
 	}
 }
 
+// TestGenerateDockerfile_FeatureContainerEnvPATH is the regression guard for the
+// ansible bug: the ansible feature installs into /usr/local/py-utils/bin (pipx)
+// and declares a containerEnv adding that dir to PATH. If the generated image's
+// ENV PATH doesn't include it, the agent (UID 1001) gets "command not found".
+// The Dockerfile MUST emit an `ENV PATH=…/py-utils/bin:…:$PATH` line.
+func TestGenerateDockerfile_FeatureContainerEnvPATH(t *testing.T) {
+	df, err := GenerateDockerfile(DockerfileBuild{
+		BaseImage: "ubuntu:22.04",
+		Features: []*ResolvedFeature{
+			{Ref: "ghcr.io/devcontainers-extra/features/ansible:2", Metadata: FeatureMetadata{
+				ID:           "ansible",
+				ContainerEnv: map[string]string{"PATH": "/usr/local/py-utils/bin:${PATH}"},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile: %v", err)
+	}
+	// An ENV PATH line that prepends the feature dir and keeps the existing PATH.
+	if !strings.Contains(df, "ENV PATH=/usr/local/py-utils/bin:$PATH") {
+		t.Fatalf("Dockerfile must emit ENV PATH including the feature dir:\n%s", df)
+	}
+	// The ENV must come AFTER the feature install layer, so it lands in the
+	// final image (and the feature's files exist before PATH points at them).
+	if envIdx, featIdx := strings.Index(df, "ENV PATH="), strings.Index(df, "# feature: ansible"); envIdx < 0 || featIdx < 0 || envIdx < featIdx {
+		t.Errorf("ENV PATH must follow the feature layer (env@%d, feature@%d)", envIdx, featIdx)
+	}
+}
+
+// TestGenerateDockerfile_ContainerEnvMergeAndOrder proves multiple PATH-adding
+// features merge into a single ENV PATH (not one ENV per feature that would
+// clobber each other), root-level containerEnv overrides feature-declared
+// non-PATH values, root PATH dirs take precedence (leftmost), and non-PATH env
+// is emitted as ENV directives.
+func TestGenerateDockerfile_ContainerEnvMergeAndOrder(t *testing.T) {
+	df, err := GenerateDockerfile(DockerfileBuild{
+		BaseImage: "ubuntu:22.04",
+		Features: []*ResolvedFeature{
+			{Ref: "a", Metadata: FeatureMetadata{ID: "aaa", ContainerEnv: map[string]string{
+				"PATH":      "/opt/aaa/bin:${PATH}",
+				"CARGO":     "from-aaa",
+				"SHAREDKEY": "from-aaa",
+			}}},
+			{Ref: "b", Metadata: FeatureMetadata{ID: "bbb", ContainerEnv: map[string]string{
+				"PATH":      "/opt/bbb/bin:${PATH}",
+				"SHAREDKEY": "from-bbb", // first feature (aaa) wins
+			}}},
+		},
+		RootEnv: map[string]string{
+			"PATH":      "/opt/root/bin:${PATH}", // root PATH dir leftmost
+			"SHAREDKEY": "from-root",             // root overrides feature
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile: %v", err)
+	}
+	// Exactly one ENV PATH line, merging all three dirs with root leftmost.
+	if got := strings.Count(df, "ENV PATH="); got != 1 {
+		t.Fatalf("expected exactly 1 ENV PATH line, got %d:\n%s", got, df)
+	}
+	if !strings.Contains(df, "ENV PATH=/opt/root/bin:/opt/aaa/bin:/opt/bbb/bin:$PATH") {
+		t.Fatalf("merged PATH order wrong (want root,aaa,bbb):\n%s", df)
+	}
+	// First feature wins for non-PATH shared key, but root overrides.
+	if !strings.Contains(df, `ENV SHAREDKEY=from-root`) {
+		t.Errorf("root-level containerEnv must override feature value:\n%s", df)
+	}
+	if strings.Contains(df, "from-aaa") && strings.Contains(df, "SHAREDKEY=from-aaa") {
+		t.Errorf("feature SHAREDKEY should have been overridden by root:\n%s", df)
+	}
+	if !strings.Contains(df, "ENV CARGO=from-aaa") {
+		t.Errorf("non-overridden feature env must still be emitted:\n%s", df)
+	}
+}
+
+func TestGenerateDockerfile_NoContainerEnvNoEnvLines(t *testing.T) {
+	df, err := GenerateDockerfile(DockerfileBuild{
+		BaseImage: "ubuntu:22.04",
+		Features:  []*ResolvedFeature{{Metadata: FeatureMetadata{ID: "plain"}}},
+	})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile: %v", err)
+	}
+	if strings.Contains(df, "\nENV ") {
+		t.Errorf("no containerEnv → no ENV directives expected:\n%s", df)
+	}
+}
+
 func TestGenerateDockerfile_Deterministic(t *testing.T) {
 	build := DockerfileBuild{
 		BaseImage: "ubuntu:22.04",
