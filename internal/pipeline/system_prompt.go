@@ -62,9 +62,9 @@ func BuildSystemPromptBlock(ctx context.Context, store *Store, workspaceID strin
 	b.WriteString("  POST http://localhost:9119/pipelines/{slug}/dry_run\n")
 	b.WriteString("  body: { \"inputs\": {...} }\n\n")
 	b.WriteString("To SAVE a new routine (when you discover a repetitive pattern):\n")
-	b.WriteString("  POST http://localhost:9119/pipelines/save\n")
-	b.WriteString("  body: { \"name\": \"...\", \"description\": \"...\", \"definition\": {...DSL...}, \"sample_inputs\": {...} }\n")
-	b.WriteString("  Note: save runs test_run first; if test fails, fix and retry.\n\n")
+	b.WriteString("  Call the save_routine tool — args: { name, description, definition (the DSL object), sample_inputs }\n")
+	b.WriteString("  It validates + saves in one call; on a DSL error it returns the message so you fix and retry.\n")
+	b.WriteString("  Do NOT curl the save endpoint — use the tool.\n\n")
 	b.WriteString("Currently registered routines in this workspace (top by usage):\n\n")
 
 	for _, p := range pipes {

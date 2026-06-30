@@ -117,6 +117,16 @@ func setupMCPConfig(
 		logger.Warn("memory MCP injection failed; agent will have no memory tools", "error", err)
 	}
 
+	// Auto-inject the sidecar-hosted routine-authoring MCP server (save_routine
+	// / list_routines) so the model authors routines as native tool calls
+	// instead of shelling out to curl /pipelines/save. No-op if the operator
+	// already declared a server named "crewship-routines".
+	if injected, err := injectRoutinesMCPIntoClaudeJSON(mcpJSON); err == nil {
+		mcpJSON = injected
+	} else if logger != nil {
+		logger.Warn("routines MCP injection failed; agent will have no save_routine tool", "error", err)
+	}
+
 	homeDir := fmt.Sprintf("/crew/agents/%s", agentSlug)
 	// Write config file (600 perms, owned by agent user).
 	// Use base64 encoding to prevent shell injection if mcpJSON contains

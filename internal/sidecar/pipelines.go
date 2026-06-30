@@ -62,9 +62,34 @@ func (s *Server) handlePipelinesSave(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
+	status, respBody := s.savePipeline(r.Context(), body)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(respBody)
+}
+
+// savePipeline runs the test_run gate then the internal save for an
+// agent-authored pipeline, returning the upstream HTTP status + the raw
+// JSON body. Author identity is always injected from IPC — any caller-
+// supplied author_* fields in `body` are ignored.
+//
+// This is the single source of truth for the save flow: both the legacy
+// HTTP handler (handlePipelinesSave) and the save_routine MCP tool
+// (handleRoutinesMCP) call it, so the trust boundary and the two-step
+// test_run→save sequence can never diverge between the two surfaces.
+//
+// Return contract:
+//   - 200 + saved-routine JSON on success
+//   - the upstream test_run status + body on a DSL/validation failure
+//     (so the model gets the exact parse error to fix and retry)
+//   - 422 + a structured hint when test_run ran but did not COMPLETE
+//   - 4xx/5xx + an {"error": ...} JSON body for the local failure modes
+func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest) (int, []byte) {
+	if s.ipc == nil {
+		return http.StatusServiceUnavailable, mustJSON(map[string]string{"error": "IPC not configured"})
+	}
 	if body.Name == "" || len(body.Definition) == 0 {
-		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "name and definition required"})
-		return
+		return http.StatusBadRequest, mustJSON(map[string]string{"error": "name and definition required"})
 	}
 
 	// Slug is derived from the name to keep the agent-side API
@@ -72,8 +97,7 @@ func (s *Server) handlePipelinesSave(w http.ResponseWriter, r *http.Request) {
 	// Same shape we use for skills.
 	slug := slugifyForPipelines(body.Name)
 	if slug == "" {
-		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "name does not produce a valid slug"})
-		return
+		return http.StatusBadRequest, mustJSON(map[string]string{"error": "name does not produce a valid slug"})
 	}
 
 	// Step 1: forward to test_run on the public endpoint. The public
@@ -86,22 +110,17 @@ func (s *Server) handlePipelinesSave(w http.ResponseWriter, r *http.Request) {
 		"sample_inputs":  body.SampleInputs,
 	})
 	if err != nil {
-		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "marshal test_run body"})
-		return
+		return http.StatusInternalServerError, mustJSON(map[string]string{"error": "marshal test_run body"})
 	}
 	testRunPath := "/api/v1/workspaces/" + s.ipc.WorkspaceID + "/pipelines/test_run"
-	testRes, err := s.ipcRequestJSON(r.Context(), http.MethodPost, testRunPath, testRunBody)
+	testRes, err := s.ipcRequestJSON(ctx, http.MethodPost, testRunPath, testRunBody)
 	if err != nil {
-		writeJSONResponse(w, http.StatusBadGateway, map[string]string{"error": "test_run forward: " + err.Error()})
-		return
+		return http.StatusBadGateway, mustJSON(map[string]string{"error": "test_run forward: " + err.Error()})
 	}
 	if testRes.status >= 400 {
 		// Forward the test_run failure straight back so the agent
 		// gets the parsing/validation error in its own retry loop.
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(testRes.status)
-		_, _ = w.Write(testRes.body)
-		return
+		return testRes.status, testRes.body
 	}
 	// Decode test_run result to confirm passed=true and capture the
 	// timestamp the store will check at save time.
@@ -110,13 +129,12 @@ func (s *Server) handlePipelinesSave(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.Unmarshal(testRes.body, &testRunResult)
 	if testRunResult.Status != "COMPLETED" {
-		writeJSONResponse(w, http.StatusUnprocessableEntity, map[string]any{
+		return http.StatusUnprocessableEntity, mustJSON(map[string]any{
 			"error":    "test_run did not complete cleanly; pipeline not saved",
 			"test_run": json.RawMessage(testRes.body),
 			"hint":     "fix the DSL or sample_inputs and retry",
 			"status":   testRunResult.Status,
 		})
-		return
 	}
 
 	// Step 2: forward to internal save with author injected from IPC.
@@ -134,10 +152,42 @@ func (s *Server) handlePipelinesSave(w http.ResponseWriter, r *http.Request) {
 		"last_test_run_passed": true,
 	})
 	if err != nil {
-		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "marshal save body"})
-		return
+		return http.StatusInternalServerError, mustJSON(map[string]string{"error": "marshal save body"})
 	}
-	s.proxyIPCJSON(w, r, http.MethodPost, "/api/v1/internal/pipelines/save", "pipeline-save", saveBody)
+	saveRes, err := s.ipcRequestJSON(ctx, http.MethodPost, "/api/v1/internal/pipelines/save", saveBody)
+	if err != nil {
+		return http.StatusBadGateway, mustJSON(map[string]string{"error": "pipeline-save request failed: " + err.Error()})
+	}
+	return saveRes.status, saveRes.body
+}
+
+// listPipelines fetches the workspace-visible pipelines and returns the
+// upstream status + raw JSON body. Shared by the legacy HTTP list handler
+// path and the list_routines MCP tool so both see the same surface a user
+// sees in the UI.
+func (s *Server) listPipelines(ctx context.Context, rawQuery string) (int, []byte) {
+	if s.ipc == nil {
+		return http.StatusServiceUnavailable, mustJSON(map[string]string{"error": "IPC not configured"})
+	}
+	path := "/api/v1/workspaces/" + s.ipc.WorkspaceID + "/pipelines"
+	if rawQuery != "" {
+		path += "?" + rawQuery
+	}
+	res, err := s.ipcRequestJSON(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return http.StatusBadGateway, mustJSON(map[string]string{"error": "pipeline-list request failed: " + err.Error()})
+	}
+	return res.status, res.body
+}
+
+// mustJSON marshals v, returning a minimal error envelope on the (near-
+// impossible) failure path so callers can always write a JSON body.
+func mustJSON(v any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return []byte(`{"error":"failed to marshal response"}`)
+	}
+	return b
 }
 
 // handlePipelinesList returns workspace-visible pipelines for the
