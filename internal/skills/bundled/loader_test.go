@@ -76,7 +76,7 @@ func TestRoutineAuthorSkill_ParsesWithRequiredSections(t *testing.T) {
 	// The DSL cheat-sheet and save endpoint are what make the playbook
 	// actionable — assert the load-bearing concrete references survive edits.
 	for _, marker := range []string{
-		"http://localhost:9119/pipelines/save",
+		"save_routine",
 		"integrations_required",
 		"{{ steps.",
 		"proposed",

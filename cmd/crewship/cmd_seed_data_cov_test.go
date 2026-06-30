@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -263,8 +264,22 @@ func TestSeedSkills_ExistingSkillsAreAssigned(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
 	existing := make([]map[string]string, 0, len(seeddata.Skills))
+	seenSlug := map[string]bool{}
 	for i, s := range seeddata.Skills {
 		existing = append(existing, map[string]string{"id": "cskill0000000000000" + string(rune('1'+i)), "slug": s.Slug})
+		seenSlug[s.Slug] = true
+	}
+	// Bundled first-party skills (e.g. routine-author) are auto-installed on
+	// server startup, so a real GET /skills returns them even though they're
+	// not in seeddata.Skills. Model that here, otherwise their assignments are
+	// silently skipped and the count is short.
+	for _, skills := range seeddata.SkillAssignments {
+		for _, slug := range skills {
+			if !seenSlug[slug] {
+				seenSlug[slug] = true
+				existing = append(existing, map[string]string{"id": fmt.Sprintf("cskillbundled%012d", len(existing)), "slug": slug})
+			}
+		}
 	}
 	stub.OnGet("/api/v1/skills", clitest.JSONResponse(200, existing))
 	stub.OnPost("/api/v1/agents/"+covAgentIDCli2+"/skills", clitest.JSONResponse(201, map[string]string{"id": "as1"}))
@@ -302,7 +317,24 @@ func TestSeedSkills_ExistingSkillsAreAssigned(t *testing.T) {
 func TestSeedSkills_ImportsMissingAndToleratesConflicts(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
-	stub.OnGet("/api/v1/skills", clitest.JSONResponse(200, []map[string]string{}))
+	// Bundled first-party skills (e.g. routine-author) are auto-installed on the
+	// server, so GET /skills returns them even though they're not in
+	// seeddata.Skills (which is the set that gets imported). Without modelling
+	// this, a bundled-skill assignment is silently skipped.
+	bundledExisting := []map[string]string{}
+	bundledSeen := map[string]bool{}
+	for _, s := range seeddata.Skills {
+		bundledSeen[s.Slug] = true
+	}
+	for _, skills := range seeddata.SkillAssignments {
+		for _, slug := range skills {
+			if !bundledSeen[slug] {
+				bundledSeen[slug] = true
+				bundledExisting = append(bundledExisting, map[string]string{"id": fmt.Sprintf("cskillbundled%012d", len(bundledExisting)), "slug": slug})
+			}
+		}
+	}
+	stub.OnGet("/api/v1/skills", clitest.JSONResponse(200, bundledExisting))
 	importPath := "/api/v1/workspaces/" + covWS + "/skills/import"
 	stub.OnPost(importPath, clitest.JSONResponse(201, map[string]string{"skill_id": "cskillnew00000000001", "slug": "x"}))
 	// All assignments answer 409 — treated as already-assigned success.
