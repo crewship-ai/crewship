@@ -34,6 +34,13 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 
 	cmd := exec.CommandContext(ctx, "container", args...)
 
+	// Attach stdin when supplied so oversized agent prompts (too large to pass
+	// as an argv element) reach the CLI. nil leaves stdin unset — the historic
+	// behaviour.
+	if cfg.Stdin != nil {
+		cmd.Stdin = cfg.Stdin
+	}
+
 	pr, pw := io.Pipe()
 	cmd.Stdout = pw
 	cmd.Stderr = pw

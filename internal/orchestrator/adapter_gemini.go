@@ -36,6 +36,10 @@ type geminiAdapter struct{}
 
 func (geminiAdapter) Name() string { return "GEMINI_CLI" }
 
+// PromptViaStdin is false: Gemini is not confirmed to read its prompt from
+// stdin, so the message keeps being passed as an argument unchanged.
+func (geminiAdapter) PromptViaStdin(req AgentRunRequest) bool { return false }
+
 func (geminiAdapter) BuildCommand(req AgentRunRequest) []string {
 	// Fold the crewship preamble + agent SystemPrompt into the prompt body
 	// since gemini-cli's headless docs do not expose a system-instruction
