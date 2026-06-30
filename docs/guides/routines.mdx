@@ -89,6 +89,7 @@ Minimal valid routine:
 | `egress_targets` | array of string | Declared outbound hosts. Enforced for `http` step. |
 | `integrations_required` | array of string | Declared third-party integrations (Composio connector slugs like `"github"`, `"slack"`). **Declared AND enforced at run time** — see [Required integrations](#required-integrations) below. Slugs are lowercased/trimmed. |
 | `credentials_required` | array of CredReq | Declared credential needs (`type` + `scope`). Declared-only today (not yet enforced at run time). |
+| `resources` | object | Agent-declared capability manifest — `datastores[]` and `tools[]` the routine touches that **can't** be inferred from the step graph. Advisory only (never gates a run). See [Capability manifest](#capability-manifest) below. |
 | `max_cost_usd` | number | Runtime cost cap; run aborts if exceeded between steps. |
 | `concurrency_key` | string | Template that gates how many runs can be in flight at once for the same workspace + rendered key. Typical pattern `"{{ inputs.account_id }}"` to serialise per-tenant runs. Empty (default) = no gate. See [Concurrency + idempotency](/guides/routines-cookbook#recipe-5-idempotent-routine-with-concurrency-key) recipe and the fail-fast note in [Troubleshooting](#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value). |
 | `max_concurrent` | integer | Cap on simultaneous runs sharing the resolved `concurrency_key`. Defaults to `1` when `concurrency_key` is set (strict per-key serialisation); ignored otherwise. |
@@ -182,6 +183,65 @@ account still reads as available until its binding is removed).
 `credentials_required` remains **declared-only** for now — it is not yet
 enforced at run time the way `integrations_required` is.
 </Note>
+
+## Capability manifest
+
+Every routine has a derived **capability manifest** — the full "what this
+routine touches" blast radius. The detail API (`GET .../routines/{id}`) returns
+it under a `manifest` member so the UI can render a data-flow diagram and
+governance can reason about the whole footprint of a run, not just its visible
+steps.
+
+Most of the manifest is **auto-derived** from the DSL — you don't declare it:
+
+| Manifest field | Derived from |
+|----------------|--------------|
+| `integrations` | `integrations_required` (normalized) |
+| `egress` | `egress_targets` **plus** any host parseable from `http` step URLs (templated `{{ }}` URLs are skipped) |
+| `credentials` | `credentials_required` |
+| `agents` | `agent_slug` of every `agent_run` step |
+| `routines` | `pipeline_slug` of every `call_pipeline` step |
+| `tools` | `code` step runtimes **plus** declared `resources.tools` |
+| `datastores` | declared `resources.datastores` |
+| `has_http` / `has_code` | whether any `http` / `code` step exists |
+
+The walk covers routine-level (`before_all` / `after_all` / `on_failure`) and
+per-step (`before` / `after`) lifecycle hooks too — a capability hidden in an
+`on_failure` hook is still part of the blast radius. Every list is deduped +
+sorted and always rendered as `[]` (never `null`), so the diagram is stable.
+
+### The `resources` block
+
+Two things can't be inferred from the step graph: **datastores** a routine
+reads/writes, and **CLI tools/scripts** it runs. In production, `code` steps
+aren't wired — agents run scripts (`ansible`, `kubectl`, …) via an `agent_run`
+step that shells out, so static analysis can't see them. Declare them so they
+show up in the manifest:
+
+```json
+{
+  "name": "deploy-service",
+  "resources": {
+    "datastores": [
+      { "type": "postgres", "name": "main", "note": "writes table runs" },
+      { "type": "redis",    "name": "cache" }
+    ],
+    "tools": [
+      { "type": "ansible",  "name": "deploy.yml" },
+      { "type": "kubectl" }
+    ]
+  },
+  "steps": [ ... ]
+}
+```
+
+- `datastores[].type` — `redis | postgres | mysql | mongodb | other`
+- `tools[].type` — `ansible | terraform | kubectl | bash | python | other`
+- `name` / `note` are free-form and optional.
+
+Validation is **lenient**: declaring a resource is always allowed (it never
+gates a run). Save only rejects malformed entries — a blank or non-slug `type`,
+or more than 32 of either kind.
 
 ## Step types
 

@@ -36,6 +36,14 @@ type DSL struct {
 	// the canonical set.
 	IntegrationsRequired []string  `json:"integrations_required,omitempty"`
 	CredsRequired        []CredReq `json:"credentials_required,omitempty"`
+	// Resources is the agent-declared part of the capability manifest —
+	// the things a routine touches that can't be inferred from the step
+	// graph. Agents/routines/integrations/egress are auto-derived from the
+	// DSL by ExtractManifest; datastores and CLI tools/scripts (run via an
+	// agent_run + shell, so invisible to static analysis) are not, so the
+	// author declares them here. Purely additive + advisory: declaring is
+	// always allowed at save time, and these never gate a run.
+	Resources *RoutineResources `json:"resources,omitempty"`
 	// ConcurrencyKey gates how many runs of this pipeline can be in
 	// flight at once for the same workspace + key value. A typical
 	// pattern is `concurrency_key: "{{ inputs.account_id }}"` so the
@@ -185,6 +193,33 @@ type OutputSpec struct {
 type CredReq struct {
 	Type  string `json:"type"`
 	Scope string `json:"scope,omitempty"`
+}
+
+// RoutineResources is the agent-declared part of the manifest — the things a
+// routine touches that can't be inferred from the step graph (datastores it
+// reads/writes, CLI tools/scripts it runs). Agents/routines/integrations/egress
+// are auto-derived from the DSL; these are not.
+type RoutineResources struct {
+	Datastores []DatastoreRef `json:"datastores,omitempty"`
+	Tools      []ToolRef      `json:"tools,omitempty"`
+}
+
+// DatastoreRef declares a datastore a routine reads or writes. Type is the
+// engine family (redis | postgres | mysql | mongodb | other); Name is the crew
+// service name / friendly id; Note is free-form context ("writes table runs").
+type DatastoreRef struct {
+	Type string `json:"type"`           // redis | postgres | mysql | mongodb | other
+	Name string `json:"name,omitempty"` // crew service name / friendly id
+	Note string `json:"note,omitempty"` // e.g. "writes table runs"
+}
+
+// ToolRef declares a CLI tool / script a routine invokes (typically via an
+// agent_run shell step, which static analysis can't see). Type is the tool
+// family (ansible | terraform | kubectl | bash | python | other); Name is the
+// concrete artifact ("deploy.yml").
+type ToolRef struct {
+	Type string `json:"type"`           // ansible | terraform | kubectl | bash | python | other
+	Name string `json:"name,omitempty"` // e.g. "deploy.yml"
 }
 
 // Step is the discriminated union of step types. The Type field

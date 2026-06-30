@@ -252,6 +252,13 @@ type pipelineResponse struct {
 	// there's no dedicated column. Enforced at run time (the run gate
 	// blocks a run whose author crew lacks one of these).
 	IntegrationsRequired []string `json:"integrations_required,omitempty"`
+	// Manifest is the routine's derived capability "blast radius" — the
+	// union of declared resources (datastores, tools) and what's derivable
+	// from the step graph (agents, called routines, egress, integrations,
+	// credentials, http/code flags). Included on the detail endpoint only
+	// (it parses the definition); list responses omit it. Best-effort: a
+	// malformed definition leaves it nil.
+	Manifest *pipeline.Manifest `json:"manifest,omitempty"`
 	// Definition is included on the detail endpoint only — list
 	// responses omit it to keep payloads small.
 	Definition json.RawMessage `json:"definition,omitempty"`
@@ -285,6 +292,12 @@ func toPipelineResponse(p *pipeline.Pipeline, includeDefinition bool) pipelineRe
 	// validators own reporting that elsewhere).
 	if dsl, err := pipeline.Parse([]byte(p.DefinitionJSON)); err == nil {
 		out.IntegrationsRequired = dsl.NormalizedIntegrationsRequired()
+		// The manifest is the heavier derived view — only compute + attach
+		// it on detail responses (includeDefinition), where the caller is
+		// already paying to parse + return the full definition.
+		if includeDefinition {
+			out.Manifest = dsl.ExtractManifest()
+		}
 	}
 	if includeDefinition {
 		out.Definition = json.RawMessage(p.DefinitionJSON)

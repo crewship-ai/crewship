@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -20,6 +21,33 @@ func TestTransform_Identity(t *testing.T) {
 	}
 	if out != "hello world" {
 		t.Errorf("identity: got %q", out)
+	}
+}
+
+// @json on RAW (non-JSON) input must encode it as a JSON string literal —
+// the safe way to build a JSON body from agent plain text, e.g.
+// {"content": {{ steps.x | @json }}}. Previously this errored ("input is not
+// JSON"), forcing fragile agent-emitted JSON (the smartmania→discord 400 bug).
+func TestTransform_JSON_RawStringEncodes(t *testing.T) {
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+	exec := NewExecutor(store, resolver, nil, nil)
+	step := Step{
+		ID: "enc", Type: StepTransform,
+		Transform: &TransformStep{Input: "say \"hi\"\nline2", Expression: "@json"},
+	}
+	out, _, _, err := exec.runTransformStep(step, RenderContext{})
+	if err != nil {
+		t.Fatalf("@json raw string: %v", err)
+	}
+	if out != `"say \"hi\"\nline2"` {
+		t.Errorf("@json raw string = %s, want a quoted+escaped JSON string", out)
+	}
+	// And it must compose into a valid JSON object body.
+	body := `{"content": ` + out + `}`
+	var m map[string]any
+	if err := json.Unmarshal([]byte(body), &m); err != nil {
+		t.Errorf("composed body is not valid JSON: %v (%s)", err, body)
 	}
 }
 
