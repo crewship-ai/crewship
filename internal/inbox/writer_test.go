@@ -355,6 +355,97 @@ func TestResolveBySource_NoMatchIsSilent(t *testing.T) {
 	ResolveBySource(context.Background(), db, quietLogger(), "waitpoint", "ghost", "ignored", "")
 }
 
+// TestResolveByPipeline_ResolvesLinkedItems pins the routine-delete cleanup:
+// deleting a routine must resolve its proposed-review escalation (payload
+// $.pipeline_id), its scheduled failed-run alerts (also $.pipeline_id), and
+// any pending waitpoint raised mid-run (payload $.pipeline_run_id joined to
+// pipeline_runs). Unrelated rows (another pipeline, another workspace) stay
+// untouched.
+func TestResolveByPipeline_ResolvesLinkedItems(t *testing.T) {
+	t.Parallel()
+	db := newInboxTestDB(t)
+	ctx := context.Background()
+
+	// A pipeline + run row that links a waitpoint back to the doomed pipeline.
+	if _, err := db.Exec(`INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash)
+		VALUES ('pipe-A', 'ws1', 'doomed', 'Doomed', '{}', 'h1')`); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO pipeline_runs (id, pipeline_id, pipeline_slug, workspace_id, status, started_at)
+		VALUES ('run-A', 'pipe-A', 'doomed', 'ws1', 'RUNNING', '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	// Proposed-review escalation (payload carries pipeline_id) — the dangling case.
+	Insert(ctx, db, quietLogger(), Item{
+		WorkspaceID: "ws1", Kind: "escalation", SourceID: "routineprop:ws1:doomed",
+		Title:   "Routine proposed for review: doomed",
+		Payload: map[string]interface{}{"pipeline_id": "pipe-A", "slug": "doomed"},
+	})
+	// Scheduled failed-run alert (payload pipeline_id).
+	Insert(ctx, db, quietLogger(), Item{
+		WorkspaceID: "ws1", Kind: "failed_run", SourceID: "run-A",
+		Title: "Scheduled routine failed", Payload: map[string]interface{}{"pipeline_id": "pipe-A", "run_id": "run-A"},
+	})
+	// Pending waitpoint (payload pipeline_run_id → pipeline_runs.pipeline_id).
+	Insert(ctx, db, quietLogger(), Item{
+		WorkspaceID: "ws1", Kind: "waitpoint", SourceID: "wp-tok",
+		Title: "Approval required", Payload: map[string]interface{}{"pipeline_run_id": "run-A"},
+	})
+	// Unrelated: another pipeline in the same workspace — must stay unread.
+	Insert(ctx, db, quietLogger(), Item{
+		WorkspaceID: "ws1", Kind: "escalation", SourceID: "routineprop:ws1:other",
+		Title: "Other routine", Payload: map[string]interface{}{"pipeline_id": "pipe-B"},
+	})
+	// Unrelated: same pipeline_id but a DIFFERENT workspace — must stay unread.
+	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws2', 'ws2', 'ws2')`); err != nil {
+		t.Fatalf("seed ws2: %v", err)
+	}
+	Insert(ctx, db, quietLogger(), Item{
+		WorkspaceID: "ws2", Kind: "failed_run", SourceID: "run-foreign",
+		Title: "Foreign", Payload: map[string]interface{}{"pipeline_id": "pipe-A"},
+	})
+
+	ResolveByPipeline(ctx, db, quietLogger(), "ws1", "pipe-A", "dismissed", "u-actor")
+
+	resolved := func(sourceID string) bool {
+		var state string
+		if err := db.QueryRow(`SELECT state FROM inbox_items WHERE source_id = ?`, sourceID).Scan(&state); err != nil {
+			t.Fatalf("read %s: %v", sourceID, err)
+		}
+		return state == "resolved"
+	}
+	for _, src := range []string{"routineprop:ws1:doomed", "run-A", "wp-tok"} {
+		if !resolved(src) {
+			t.Errorf("%s should be resolved after pipeline delete", src)
+		}
+	}
+	for _, src := range []string{"routineprop:ws1:other", "run-foreign"} {
+		if resolved(src) {
+			t.Errorf("%s must NOT be resolved (different pipeline/workspace)", src)
+		}
+	}
+	// Audit metadata stamped on a resolved row.
+	var action, by sql.NullString
+	if err := db.QueryRow(`SELECT resolved_action, resolved_by_user_id FROM inbox_items WHERE source_id='routineprop:ws1:doomed'`).
+		Scan(&action, &by); err != nil {
+		t.Fatalf("scan audit: %v", err)
+	}
+	if action.String != "dismissed" || by.String != "u-actor" {
+		t.Errorf("audit: action=%q by=%q, want dismissed/u-actor", action.String, by.String)
+	}
+}
+
+func TestResolveByPipeline_GuardsRequiredFields(t *testing.T) {
+	t.Parallel()
+	db := newInboxTestDB(t)
+	ctx := context.Background()
+	// nil db / empty workspace / empty pipeline must all be no-ops (no panic).
+	ResolveByPipeline(ctx, nil, quietLogger(), "ws1", "pipe-A", "dismissed", "u")
+	ResolveByPipeline(ctx, db, quietLogger(), "", "pipe-A", "dismissed", "u")
+	ResolveByPipeline(ctx, db, quietLogger(), "ws1", "", "dismissed", "u")
+}
+
 func TestResolveBySource_ValidatesRequiredFields(t *testing.T) {
 	t.Parallel()
 	db := newInboxTestDB(t)

@@ -305,17 +305,33 @@ func (m *AuthMiddleware) RequireWorkspace(next http.Handler) http.Handler {
 			return
 		}
 
-		var role string
+		// Membership lookup accepts EITHER the workspace id (CUID) OR its
+		// slug as workspace_id, and always resolves to the canonical id for
+		// downstream handlers. The CLI client only rewrites a bare slug to a
+		// CUID when it injects workspace_id itself; commands that set the
+		// query param explicitly (e.g. `crewship inbox …`) pass whatever the
+		// user configured — often a slug — which the old id-only lookup never
+		// matched, 403-ing a legitimate OWNER on those routes while crews/
+		// routines (where the client injects the resolved id) worked. Matching
+		// on slug too closes that gap; the resolved id is stored in context so
+		// handlers that filter by workspace_id never see a slug.
+		var resolvedID, role string
 		err := m.db.QueryRowContext(r.Context(),
-			"SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
-			workspaceID, user.ID,
-		).Scan(&role)
+			`SELECT wm.workspace_id, wm.role
+			   FROM workspace_members wm
+			   JOIN workspaces w ON w.id = wm.workspace_id
+			  WHERE wm.user_id = ?
+			    AND (w.id = ? OR w.slug = ?)
+			    AND w.deleted_at IS NULL
+			  LIMIT 1`,
+			user.ID, workspaceID, workspaceID,
+		).Scan(&resolvedID, &role)
 		if err != nil {
 			replyError(w, http.StatusForbidden, "Not a member of this workspace")
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), ctxWorkspaceID, workspaceID)
+		ctx := context.WithValue(r.Context(), ctxWorkspaceID, resolvedID)
 		ctx = context.WithValue(ctx, ctxRole, role)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

@@ -187,6 +187,44 @@ func (s *Server) listPipelines(ctx context.Context, rawQuery string) (int, []byt
 	return res.status, res.body
 }
 
+// routineRunRequest is the agent-facing body for the run_routine MCP tool:
+// the routine slug + its inputs. Workspace + invoker identity are injected by
+// the sidecar from IPC, never the caller — same trust boundary as save_routine.
+type routineRunRequest struct {
+	Slug   string         `json:"slug"`
+	Inputs map[string]any `json:"inputs"`
+}
+
+// runPipeline invokes a saved routine by slug and returns the upstream HTTP
+// status + raw JSON body. Shared by the run_routine MCP tool so the run path
+// reuses the exact author-identity-from-IPC trust boundary as save: workspace
+// + invoking crew/agent come from s.ipc, and the forward targets the internal
+// run endpoint (the public run route is JWT-authed and rejects the internal
+// token, exactly as it does for save's test_run/save steps).
+func (s *Server) runPipeline(ctx context.Context, body routineRunRequest) (int, []byte) {
+	if s.ipc == nil {
+		return http.StatusServiceUnavailable, mustJSON(map[string]string{"error": "IPC not configured"})
+	}
+	if body.Slug == "" {
+		return http.StatusBadRequest, mustJSON(map[string]string{"error": "slug required"})
+	}
+	runBody, err := json.Marshal(map[string]any{
+		"workspace_id":      s.ipc.WorkspaceID,
+		"slug":              body.Slug,
+		"inputs":            body.Inputs,
+		"invoking_crew_id":  s.ipc.CrewID,
+		"invoking_agent_id": s.ipc.AgentID,
+	})
+	if err != nil {
+		return http.StatusInternalServerError, mustJSON(map[string]string{"error": "marshal run body"})
+	}
+	res, err := s.ipcRequestJSON(ctx, http.MethodPost, "/api/v1/internal/pipelines/run", runBody)
+	if err != nil {
+		return http.StatusBadGateway, mustJSON(map[string]string{"error": "routine-run request failed: " + err.Error()})
+	}
+	return res.status, res.body
+}
+
 // mustJSON marshals v, returning a minimal error envelope on the (near-
 // impossible) failure path so callers can always write a JSON body.
 func mustJSON(v any) []byte {

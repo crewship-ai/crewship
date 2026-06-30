@@ -95,6 +95,12 @@ routine — grounded in what this crew actually has, tested before it ships.
    plain language ("On a manual run: 1) Alex summarizes the repo's commits,
    2) the summary is posted to Slack"). Never dump raw JSON at the user.
 
+8. **Run a saved routine when asked.** To invoke an existing routine, call the
+   **`run_routine`** tool with `{ slug, inputs }` — do NOT shell out to curl or
+   re-improvise the work by hand. The run executes synchronously and returns the
+   run result/status; report the real outcome to the user. Use `list_routines`
+   to find the slug first if you don't have it.
+
 ## Pitfalls
 
 - **Never use an integration the crew hasn't connected.** If it's not in

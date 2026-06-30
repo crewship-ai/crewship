@@ -67,7 +67,7 @@ func TestRoutinesMCP_ToolsList_ValidSchema(t *testing.T) {
 			t.Errorf("tool %q inputSchema.type = %v, want object", tl.Name, schema["type"])
 		}
 	}
-	want := []string{"save_routine", "list_routines"}
+	want := []string{"save_routine", "list_routines", "run_routine"}
 	if len(got) != len(want) {
 		t.Fatalf("tools = %v, want %v", got, want)
 	}
@@ -312,6 +312,94 @@ func TestRoutinesMCP_ListRoutines_ForwardsToWorkspace(t *testing.T) {
 	}
 	if len(resp.Result.Content) == 0 || !strings.Contains(resp.Result.Content[0].Text, "daily-report") {
 		t.Errorf("list content = %+v, want the routine list", resp.Result.Content)
+	}
+}
+
+// TestRoutinesMCP_RunRoutine_ForwardsToInternalRun verifies run_routine
+// forwards to the internal run endpoint with workspace + invoker identity
+// injected from IPC (never the caller), and returns the run result payload.
+func TestRoutinesMCP_RunRoutine_ForwardsToInternalRun(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"run_id":"run-123","status":"COMPLETED"}`))
+	}))
+	defer mock.Close()
+
+	s := newRoutineMCPTestServer(t, &IPCConfig{
+		BaseURL: mock.URL, Token: "t", WorkspaceID: "ws-real",
+		CrewID: "crew-real", AgentID: "agent-real",
+	})
+	// Agent forges invoker identity — must be ignored; IPC values win.
+	body := `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{
+		"name":"run_routine",
+		"arguments":{
+			"slug":"daily-report",
+			"inputs":{"date":"2026-06-30"},
+			"invoking_crew_id":"crew-FORGED",
+			"workspace_id":"ws-FORGED"
+		}}}`
+	req := httptest.NewRequest("POST", "/mcp/routines", strings.NewReader(body))
+	req.Host = "127.0.0.1:9119"
+	w := httptest.NewRecorder()
+	s.handleRoutinesMCP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	if gotPath != "/api/v1/internal/pipelines/run" {
+		t.Errorf("path = %q, want /api/v1/internal/pipelines/run", gotPath)
+	}
+	if gotBody["workspace_id"] != "ws-real" {
+		t.Errorf("workspace_id = %v, want ws-real (IPC value, forged ignored)", gotBody["workspace_id"])
+	}
+	if gotBody["invoking_crew_id"] != "crew-real" {
+		t.Errorf("invoking_crew_id = %v, want crew-real (forged value overwritten)", gotBody["invoking_crew_id"])
+	}
+	if gotBody["slug"] != "daily-report" {
+		t.Errorf("slug = %v, want daily-report", gotBody["slug"])
+	}
+	var resp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Result.IsError {
+		t.Errorf("isError=true on happy run; content=%v", resp.Result.Content)
+	}
+	if len(resp.Result.Content) == 0 || !strings.Contains(resp.Result.Content[0].Text, "run-123") {
+		t.Errorf("content should carry the run result, got %+v", resp.Result.Content)
+	}
+}
+
+// TestRoutinesMCP_RunRoutine_MissingSlug_IsError verifies the local guard
+// (slug required) surfaces as a recoverable MCP tool error.
+func TestRoutinesMCP_RunRoutine_MissingSlug_IsError(t *testing.T) {
+	s := newRoutineMCPTestServer(t, &IPCConfig{BaseURL: "http://x", Token: "t", WorkspaceID: "ws"})
+	body := `{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{
+		"name":"run_routine","arguments":{"inputs":{"a":1}}}}`
+	req := httptest.NewRequest("POST", "/mcp/routines", strings.NewReader(body))
+	req.Host = "127.0.0.1:9119"
+	w := httptest.NewRecorder()
+	s.handleRoutinesMCP(w, req)
+
+	var resp struct {
+		Result struct {
+			IsError bool `json:"isError"`
+		} `json:"result"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if !resp.Result.IsError {
+		t.Fatalf("expected isError=true when slug missing, got %s", w.Body.String())
 	}
 }
 

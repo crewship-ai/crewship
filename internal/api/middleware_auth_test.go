@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
@@ -302,6 +304,106 @@ func TestRequireWorkspace_OK(t *testing.T) {
 	}
 	if gotRole != "OWNER" || gotWS != wsID {
 		t.Errorf("got role=%s ws=%s, want OWNER ws=%s", gotRole, gotWS, wsID)
+	}
+}
+
+// TestRequireWorkspace_BySlug pins the inbox-403 fix: a member who passes the
+// workspace SLUG (not the CUID) as workspace_id must resolve to the canonical
+// id + role, not 403. The CLI's inbox commands set workspace_id explicitly to
+// the configured value (often a slug), bypassing the client's slug→id rewrite;
+// the old id-only membership lookup never matched a slug and rejected a
+// legitimate OWNER. Downstream handlers must see the resolved CUID in context.
+func TestRequireWorkspace_BySlug(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID) // id=test-workspace-id, slug=test
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
+
+	mw := NewAuthMiddleware(v, sessions.NewDBStore(db), db, logger)
+	var gotRole, gotWS string
+	handler := mw.RequireWorkspace(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRole = RoleFromContext(r.Context())
+		gotWS = WorkspaceIDFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Pass the SLUG, not the id.
+	req := httptest.NewRequest("GET", "/?workspace_id=test", nil)
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (slug must resolve, not 403); body=%s", rr.Code, rr.Body.String())
+	}
+	if gotRole != "OWNER" {
+		t.Errorf("role = %q, want OWNER", gotRole)
+	}
+	// Context must carry the canonical CUID, never the slug — handlers filter
+	// inbox_items by this value.
+	if gotWS != wsID {
+		t.Errorf("context workspace = %q, want canonical id %q (not the slug)", gotWS, wsID)
+	}
+}
+
+// TestInbox_OwnerViaSlug_EndToEnd runs the real RequireWorkspace middleware in
+// front of the inbox List + BulkPatchState handlers and drives them with the
+// workspace SLUG as workspace_id — the exact shape `crewship inbox list` /
+// `inbox bulk` send. Before the slug-tolerant lookup this 403'd a workspace
+// OWNER on the inbox surface while crews/routines worked; this pins that an
+// OWNER can both read and mutate their inbox via the slug.
+func TestInbox_OwnerViaSlug_EndToEnd(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID) // id=test-workspace-id, slug=test
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
+	mw := NewAuthMiddleware(v, sessions.NewDBStore(db), db, logger)
+	h := NewInboxHandler(db, logger, nil)
+
+	// One non-blocking message the OWNER can list + bulk-resolve.
+	if _, err := db.Exec(`
+		INSERT INTO inbox_items (id, workspace_id, kind, source_id, title, body_md,
+			sender_type, state, priority, blocking, payload_json, created_at, updated_at)
+		VALUES ('e2e-msg', ?, 'message', 'src-e2e', 'hi', '', 'system', 'unread', 'medium', 0, '{}',
+			?, ?)`, wsID, time.Now().UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatalf("seed inbox item: %v", err)
+	}
+
+	withUserReq := func(r *http.Request) *http.Request {
+		return r.WithContext(withUser(r.Context(), &AuthUser{ID: userID}))
+	}
+
+	// GET /inbox?workspace_id=<slug>
+	listReq := withUserReq(httptest.NewRequest("GET", "/api/v1/inbox?workspace_id=test&state=unread", nil))
+	listRR := httptest.NewRecorder()
+	mw.RequireWorkspace(http.HandlerFunc(h.List)).ServeHTTP(listRR, listReq)
+	if listRR.Code != http.StatusOK {
+		t.Fatalf("inbox list via slug: status = %d, want 200; body=%s", listRR.Code, listRR.Body.String())
+	}
+
+	// POST /inbox/bulk?workspace_id=<slug>
+	bulkReq := withUserReq(httptest.NewRequest("POST", "/api/v1/inbox/bulk?workspace_id=test",
+		strings.NewReader(`{"ids":["e2e-msg"],"state":"resolved","resolved_action":"dismissed"}`)))
+	bulkRR := httptest.NewRecorder()
+	mw.RequireWorkspace(http.HandlerFunc(h.BulkPatchState)).ServeHTTP(bulkRR, bulkReq)
+	if bulkRR.Code != http.StatusOK {
+		t.Fatalf("inbox bulk via slug: status = %d, want 200; body=%s", bulkRR.Code, bulkRR.Body.String())
+	}
+	var state string
+	if err := db.QueryRow(`SELECT state FROM inbox_items WHERE id='e2e-msg'`).Scan(&state); err != nil {
+		t.Fatalf("readback: %v", err)
+	}
+	if state != "resolved" {
+		t.Errorf("after bulk: state = %q, want resolved", state)
 	}
 }
 

@@ -44,6 +44,28 @@ var routineMCPSaveSchema = json.RawMessage(`{
 	"additionalProperties": false
 }`)
 
+// routineMCPRunSchema is the JSON Schema (Draft 2020-12) for run_routine.
+// `slug` identifies the saved routine (as returned by list_routines / shown in
+// the [AVAILABLE ROUTINES] block); `inputs` is the routine's input object.
+// Workspace + invoker identity are derived from the sidecar IPC config, never
+// the caller.
+var routineMCPRunSchema = json.RawMessage(`{
+	"type": "object",
+	"properties": {
+		"slug": {
+			"type": "string",
+			"description": "The slug of the saved routine to run (from list_routines or the [AVAILABLE ROUTINES] block)."
+		},
+		"inputs": {
+			"type": "object",
+			"description": "Input values for the routine, matching its declared inputs.",
+			"additionalProperties": true
+		}
+	},
+	"required": ["slug"],
+	"additionalProperties": false
+}`)
+
 // routineMCPListSchema is the schema for the read-only list_routines tool.
 // It takes no arguments — workspace scope is derived from the sidecar IPC
 // config, never from the caller.
@@ -73,6 +95,15 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 			"UI). Use this to check whether a routine already exists before authoring a new one.",
 		InputSchema: routineMCPListSchema,
 	},
+	{
+		Name: "run_routine",
+		Description: "Run a saved Crewship routine by slug instead of improvising the same work by " +
+			"hand. Supply the routine `slug` (from list_routines or the [AVAILABLE ROUTINES] block) and " +
+			"an `inputs` object matching its declared inputs. The run executes synchronously and the " +
+			"run result/status is returned so you can report the outcome. Do NOT shell out to curl — " +
+			"call this tool directly.",
+		InputSchema: routineMCPRunSchema,
+	},
 }
 
 // handleRoutinesMCP is the JSON-RPC 2.0 entry point in-container CLIs hit at
@@ -81,9 +112,10 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 // authoring tools instead of the memory tools. Methods:
 //
 //   - initialize  → handshake; returns protocolVersion + serverInfo
-//   - tools/list  → returns save_routine + list_routines descriptors
-//   - tools/call  → dispatches save_routine / list_routines to the shared
-//     savePipeline / listPipelines helpers (author identity injected from IPC)
+//   - tools/list  → returns save_routine + list_routines + run_routine descriptors
+//   - tools/call  → dispatches save_routine / list_routines / run_routine to the
+//     shared savePipeline / listPipelines / runPipeline helpers (author +
+//     invoker identity injected from IPC)
 //
 // Unknown methods return JSON-RPC -32601 (method not found).
 func (s *Server) handleRoutinesMCP(w http.ResponseWriter, r *http.Request) {
@@ -198,6 +230,16 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 		status, bodyBytes = s.savePipeline(r.Context(), save)
 	case "list_routines":
 		status, bodyBytes = s.listPipelines(r.Context(), "")
+	case "run_routine":
+		var run routineRunRequest
+		if len(params.Arguments) > 0 {
+			if err := json.Unmarshal(params.Arguments, &run); err != nil {
+				s.writeRoutinesMCPToolResult(w, req, http.StatusBadRequest,
+					mustJSON(map[string]string{"error": "invalid arguments: " + err.Error()}))
+				return
+			}
+		}
+		status, bodyBytes = s.runPipeline(r.Context(), run)
 	default:
 		// Unknown tool — surface as a recoverable MCP tool error (isError)
 		// so the model can correct the name and retry, matching the memory

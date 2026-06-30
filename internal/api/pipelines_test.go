@@ -126,6 +126,20 @@ CREATE TABLE journal_entries (
     span_id TEXT,
     expires_at TEXT
 );
+
+CREATE TABLE inbox_items (
+    id                   TEXT PRIMARY KEY,
+    workspace_id         TEXT NOT NULL,
+    kind                 TEXT NOT NULL,
+    source_id            TEXT NOT NULL,
+    state                TEXT NOT NULL DEFAULT 'unread',
+    payload_json         TEXT NOT NULL DEFAULT '{}',
+    resolved_at          TEXT,
+    resolved_by_user_id  TEXT,
+    resolved_action      TEXT,
+    created_at           TEXT NOT NULL DEFAULT (datetime('now','subsec')),
+    updated_at           TEXT NOT NULL DEFAULT (datetime('now','subsec'))
+);
 `
 
 func openSmokeDB(t *testing.T) *sql.DB {
@@ -355,6 +369,54 @@ func TestPipelinesAPI_Delete_SoftDeletes(t *testing.T) {
 	body, _ := io.ReadAll(listW.Body)
 	if !bytes.Contains(body, []byte("[]")) {
 		t.Errorf("list after delete should be empty array, got %s", body)
+	}
+}
+
+// TestPipelinesAPI_Delete_ResolvesInboxEscalations pins the routine-delete
+// inbox cleanup: deleting a routine that has a pending "proposed for review"
+// escalation (plus a failed-run alert carrying its pipeline_id) must resolve
+// those inbox items in the same operation, instead of orphaning them forever.
+func TestPipelinesAPI_Delete_ResolvesInboxEscalations(t *testing.T) {
+	db := openSmokeDB(t)
+	defer db.Close()
+	seedSmokePipeline(t, db, "doomed-esc")
+	pipelineID := "pln_test_doomed-esc"
+
+	// Proposed-review escalation tied to this routine (mirrors proposeRoutineInbox:
+	// kind=escalation, source_id=routineprop:<ws>:<slug>, payload pipeline_id).
+	if _, err := db.Exec(`INSERT INTO inbox_items (id, workspace_id, kind, source_id, state, payload_json)
+		VALUES ('ibx_escalation_routineprop:ws_smoke:doomed-esc', 'ws_smoke', 'escalation', 'routineprop:ws_smoke:doomed-esc', 'unread', ?)`,
+		`{"pipeline_id":"`+pipelineID+`","slug":"doomed-esc"}`); err != nil {
+		t.Fatalf("seed escalation: %v", err)
+	}
+	// A scheduled failed-run alert carrying the same pipeline_id (payload sweep).
+	if _, err := db.Exec(`INSERT INTO inbox_items (id, workspace_id, kind, source_id, state, payload_json)
+		VALUES ('ibx_failed_run_run-x', 'ws_smoke', 'failed_run', 'run-x', 'unread', ?)`,
+		`{"pipeline_id":"`+pipelineID+`"}`); err != nil {
+		t.Fatalf("seed failed_run: %v", err)
+	}
+
+	h := NewPipelineHandler(db, slog.Default(), nil, nil)
+	req := withWorkspaceUser(httptest.NewRequest("DELETE", "/x", nil), "u1", "ws_smoke", "OWNER")
+	req.SetPathValue("slug", "doomed-esc")
+	w := httptest.NewRecorder()
+	h.Delete(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d, want 204; body=%s", w.Code, w.Body.String())
+	}
+
+	for _, src := range []string{"routineprop:ws_smoke:doomed-esc", "run-x"} {
+		var state, action string
+		if err := db.QueryRow(`SELECT state, COALESCE(resolved_action,'') FROM inbox_items WHERE source_id=?`, src).
+			Scan(&state, &action); err != nil {
+			t.Fatalf("readback %s: %v", src, err)
+		}
+		if state != "resolved" {
+			t.Errorf("%s state = %q, want resolved (deleted routine must clear its inbox items)", src, state)
+		}
+		if action != "dismissed" {
+			t.Errorf("%s resolved_action = %q, want dismissed", src, action)
+		}
 	}
 }
 

@@ -138,3 +138,42 @@ func ResolveBySource(ctx context.Context, db *sql.DB, logger *slog.Logger, kind,
 		logger.Warn("inbox resolve", "error", err, "kind", kind, "source_id", sourceID)
 	}
 }
+
+// ResolveByPipeline resolves every still-open inbox item tied to a routine
+// that was just deleted, so a removed routine doesn't leave dangling review
+// escalations, failed-run alerts, or pending waitpoints in the inbox forever
+// (38 deleted routines were still showing "proposed for review" escalations).
+// It matches, scoped to the workspace, any non-resolved row whose payload
+// carries this pipeline id (json $.pipeline_id — the proposed-review
+// escalation + scheduled failed-run alerts) OR one of the pipeline's run ids
+// (json $.pipeline_run_id — waitpoints raised mid-run). Idempotent and
+// best-effort: a projection failure is logged, not fatal, since the pipeline
+// row (the source of truth) is already soft-deleted.
+func ResolveByPipeline(ctx context.Context, db *sql.DB, logger *slog.Logger, workspaceID, pipelineID, action, userID string) {
+	if db == nil || workspaceID == "" || pipelineID == "" {
+		return
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := db.ExecContext(ctx, `
+		UPDATE inbox_items
+		SET state = 'resolved',
+		    resolved_at = COALESCE(resolved_at, ?),
+		    resolved_by_user_id = COALESCE(resolved_by_user_id, NULLIF(?, '')),
+		    resolved_action = COALESCE(resolved_action, NULLIF(?, '')),
+		    updated_at = ?
+		WHERE workspace_id = ?
+		  AND state != 'resolved'
+		  AND (
+		      json_extract(payload_json, '$.pipeline_id') = ?
+		      OR json_extract(payload_json, '$.pipeline_run_id') IN (
+		          SELECT id FROM pipeline_runs WHERE pipeline_id = ?
+		      )
+		  )`,
+		now, userID, action, now, workspaceID, pipelineID, pipelineID)
+	if err != nil {
+		logger.Warn("inbox resolve by pipeline", "error", err, "pipeline_id", pipelineID)
+	}
+}

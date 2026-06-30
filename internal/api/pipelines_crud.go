@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
@@ -126,6 +127,23 @@ func (h *PipelineHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "delete pipeline")
 		return
 	}
+
+	// Clear the routine's dangling inbox escalations. A deleted routine used
+	// to leave its "proposed for review" escalation (and any failed-run /
+	// waitpoint items it raised) unresolved in the inbox forever — 38 deleted
+	// routines still showed escalations. Resolve them in the same operation:
+	// the precise proposal source_id, plus a payload sweep that catches
+	// failed-run alerts ($.pipeline_id) and pending waitpoints
+	// ($.pipeline_run_id). Best-effort — the soft-delete above is authoritative.
+	actorID := ""
+	if u := UserFromContext(r.Context()); u != nil {
+		actorID = u.ID
+	}
+	inbox.ResolveBySource(r.Context(), h.db, h.logger,
+		inbox.KindEscalation, routineProposalInboxSource(workspaceID, slug), "dismissed", actorID)
+	inbox.ResolveByPipeline(r.Context(), h.db, h.logger, workspaceID, p.ID, "dismissed", actorID)
+	h.broadcastInboxUpdated(workspaceID, "routine_deleted")
+
 	w.WriteHeader(http.StatusNoContent)
 }
 

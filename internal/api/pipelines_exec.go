@@ -212,6 +212,99 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
+// internalRunRequest is the sidecar→main body for an agent-invoked routine
+// run. Workspace + invoker identity are injected by the sidecar from its IPC
+// config (never the model), mirroring the save flow's trust boundary.
+type internalRunRequest struct {
+	WorkspaceID     string         `json:"workspace_id"`
+	Slug            string         `json:"slug"`
+	Inputs          map[string]any `json:"inputs"`
+	InvokingCrewID  string         `json:"invoking_crew_id"`
+	InvokingAgentID string         `json:"invoking_agent_id"`
+}
+
+// InternalRun invokes a saved routine by slug on behalf of an in-container
+// agent (the run_routine MCP tool). It is the internal-token counterpart of
+// the public Run handler: the public route is JWT-authed and rejects the
+// sidecar's internal token, so agents need this internal surface to RUN a
+// routine the same way InternalSave lets them author one.
+//
+// Trust: workspace_id + invoking_{crew,agent}_id come from the sidecar IPC
+// config; assertInternalTokenWorkspace pins the body workspace to the token's
+// binding so a captured token can't drive a foreign tenant's routine. The run
+// mirrors the public Run gates (status, integrations, resources) but executes
+// synchronously (no deferred dispatch) and attributes the run as call_pipeline.
+//
+// POST /api/v1/internal/pipelines/run
+func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
+	if h.runner == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "pipeline runner not wired"})
+		return
+	}
+	var body internalRunRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
+		replyError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if body.WorkspaceID == "" || body.Slug == "" {
+		replyError(w, http.StatusBadRequest, "workspace_id and slug required")
+		return
+	}
+	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
+		return
+	}
+
+	p, err := h.store.GetBySlug(r.Context(), body.WorkspaceID, body.Slug)
+	if errors.Is(err, pipeline.ErrNotFound) {
+		replyError(w, http.StatusNotFound, "routine not found")
+		return
+	}
+	if err != nil {
+		h.logger.Error("internal pipeline run: load", "error", err, "slug", body.Slug)
+		replyError(w, http.StatusInternalServerError, "load routine")
+		return
+	}
+	// Governance status gate — proposed/disabled routines are not runnable.
+	if h.gateRoutineStatus(w, p) {
+		return
+	}
+	// Integration + resource preconditions (same fail-open contract as Run).
+	if dsl, perr := pipeline.Parse([]byte(p.DefinitionJSON)); perr == nil {
+		if h.gateMissingIntegrations(w, r, body.WorkspaceID, p.AuthorCrewID, "", dsl.NormalizedIntegrationsRequired()) {
+			return
+		}
+		ds, tools := declaredResources(dsl)
+		if h.gateMissingResources(w, r, body.WorkspaceID, p.AuthorCrewID, "", ds, tools) {
+			return
+		}
+	}
+
+	exec := h.newExecutor()
+	res, err := exec.Run(r.Context(), pipeline.RunInput{
+		PipelineID:      p.ID,
+		WorkspaceID:     body.WorkspaceID,
+		InvokingCrewID:  body.InvokingCrewID,
+		InvokingAgentID: body.InvokingAgentID,
+		Inputs:          body.Inputs,
+		Mode:            pipeline.ModeRun,
+		TriggeredVia:    pipeline.TriggeredViaCallPipeline,
+	})
+	if err != nil {
+		if errors.Is(err, pipeline.ErrConcurrencyLimitReached) {
+			w.Header().Set("Retry-After", "5")
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{
+				"error":  "concurrency limit reached for this routine",
+				"reason": "another run with the same concurrency_key is already in flight",
+			})
+			return
+		}
+		h.logger.Error("internal pipeline run: exec", "error", err, "slug", body.Slug)
+		replyError(w, http.StatusInternalServerError, "Failed to start routine run")
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 // DryRun returns the structured WouldExecute report for a saved
 // pipeline against the supplied inputs. No agent invocations,
 // no journal entries beyond a single audit row.

@@ -423,19 +423,21 @@ Examples:
 	},
 }
 
-// inboxBulkCmd groups multi-item state transitions. The server has no
-// /inbox/bulk endpoint today; we compose the per-item PATCH /inbox/{id}
-// call instead. Failures are reported per-item but don't abort the
-// loop — partial success is the realistic outcome (one stale id
-// shouldn't void a 200-item clean-up).
+// inboxBulkCmd groups multi-item state transitions. It submits the id set to
+// the server-side POST /api/v1/inbox/bulk endpoint (one request flips many
+// rows) in chunks of 500 — the endpoint's id cap. The server SKIPS, never
+// closes, anything that needs an explicit human decision (source-managed
+// waitpoints/escalations + blocking rows) on a resolve, and reports
+// updated / skipped / not_found counts.
 var inboxBulkCmd = &cobra.Command{
 	Use:   "bulk",
 	Short: "Bulk operations on inbox items (read / resolve)",
 	Long: `Apply the same state transition to multiple inbox items in one go.
 
-The server has no dedicated bulk endpoint; this command iterates the
-per-item PATCH /inbox/{id} call. Failures are reported per-item but do
-NOT abort the loop — a stale id won't void a 200-item clean-up.
+Backed by POST /api/v1/inbox/bulk — a single request flips the whole set
+(chunked at 500 ids per call). On a resolve the server skips decision
+items (source-managed waitpoints/escalations and blocking rows) rather
+than closing them, and reports updated / skipped / not_found counts.
 
 Examples:
   crewship inbox bulk read --ids id1,id2,id3
@@ -460,13 +462,18 @@ var inboxBulkResolveCmd = &cobra.Command{
 	},
 }
 
-// runInboxBulk resolves the target id set (either explicit --ids or
-// every unread item via --all-unread), then issues a PATCH per id. We
-// keep the loop sequential — concurrent PATCHes against the same
-// inbox row would race on state, and the per-id cost is dominated by
-// network latency anyway (bulk-reading 50 items takes ~5s, fine for
-// a TUI flow). If this becomes a bottleneck, batch the PATCH calls
-// behind a worker pool with a bounded fan-out.
+// inboxBulkChunk matches the server's /inbox/bulk id cap (bulkMaxIDs). A
+// larger --ids set is submitted in chunks of this size so the request never
+// trips the 400 "too many ids" guard.
+const inboxBulkChunk = 500
+
+// runInboxBulk resolves the target id set (either explicit --ids or every
+// unread item via --all-unread), then submits them to the server-side
+// POST /api/v1/inbox/bulk endpoint in chunks of 500 (the endpoint's id cap).
+// One request flips many rows atomically; the server applies the same
+// decision-item protection it uses for the web UI (source-managed kinds +
+// blocking rows are SKIPPED on resolve, never closed), so the response
+// reports updated / skipped / not_found counts which we aggregate.
 func runInboxBulk(cmd *cobra.Command, state, action string) error {
 	if err := requireAuth(); err != nil {
 		return err
@@ -488,14 +495,15 @@ func runInboxBulk(cmd *cobra.Command, state, action string) error {
 
 	// Build the target id list. --all-unread fetches the current unread
 	// page (server-side, capped at 500) so a single CLI invocation can
-	// clear the queue without the user copy-pasting ids by hand.
-	const unreadPageCap = 500
+	// clear the queue without the user copy-pasting ids by hand. We leave
+	// workspace_id off the query so the client injects the resolved
+	// workspace id (CUID) — passing the raw configured value here can be a
+	// slug, which is the inbox-403 trap the bulk flow used to hit.
 	var ids []string
 	if allUnread {
 		q := url.Values{}
-		q.Set("workspace_id", cli.ResolveWorkspace(flagWorkspace, cliCfg))
 		q.Set("state", "unread")
-		q.Set("limit", fmt.Sprintf("%d", unreadPageCap))
+		q.Set("limit", fmt.Sprintf("%d", inboxBulkChunk))
 		resp, err := client.Get("/api/v1/inbox?" + q.Encode())
 		if err != nil {
 			return fmt.Errorf("list unread: %w", err)
@@ -521,10 +529,10 @@ func runInboxBulk(cmd *cobra.Command, state, action string) error {
 		// Server caps the page at 500 and exposes no cursor today. If
 		// we hit the cap, refuse to silently miss the tail — make the
 		// user re-run after this batch, or narrow with explicit --ids.
-		if len(ids) == unreadPageCap {
+		if len(ids) == inboxBulkChunk {
 			return fmt.Errorf(
 				"more than %d unread items — re-run after this batch, or pass --ids to target a specific subset",
-				unreadPageCap,
+				inboxBulkChunk,
 			)
 		}
 	} else {
@@ -539,19 +547,41 @@ func runInboxBulk(cmd *cobra.Command, state, action string) error {
 		}
 	}
 
-	ok, fail := 0, 0
-	for _, id := range ids {
-		if err := patchInboxState(id, state, action); err != nil {
-			fmt.Printf("%s%s%s  %s\n", cli.Red, id, cli.Reset, err)
-			fail++
-			continue
+	totalUpdated, totalSkipped, totalNotFound := 0, 0, 0
+	for start := 0; start < len(ids); start += inboxBulkChunk {
+		end := start + inboxBulkChunk
+		if end > len(ids) {
+			end = len(ids)
 		}
-		ok++
+		reqBody := map[string]interface{}{
+			"ids":   ids[start:end],
+			"state": state,
+		}
+		if action != "" {
+			reqBody["resolved_action"] = action
+		}
+		resp, err := client.Post("/api/v1/inbox/bulk", reqBody)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var out struct {
+			Updated  int `json:"updated"`
+			Skipped  int `json:"skipped"`
+			NotFound int `json:"not_found"`
+		}
+		if err := cli.ReadJSON(resp, &out); err != nil {
+			return err
+		}
+		totalUpdated += out.Updated
+		totalSkipped += out.Skipped
+		totalNotFound += out.NotFound
 	}
-	fmt.Printf("\n%s%d ok / %d failed%s\n", cli.Dim, ok, fail, cli.Reset)
-	if fail > 0 {
-		return fmt.Errorf("%d of %d items failed", fail, len(ids))
-	}
+
+	fmt.Printf("\n%s%d updated · %d skipped · %d not found%s\n",
+		cli.Dim, totalUpdated, totalSkipped, totalNotFound, cli.Reset)
 	return nil
 }
 
