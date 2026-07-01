@@ -169,6 +169,9 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Runs (require workspace context)
 	runs := NewRunHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/runs", authed(wsCtx(http.HandlerFunc(runs.List))))
+	// Fleet operations aggregate. Registered as a literal path so Go's mux
+	// prefers it over the {id} wildcard below (literal wins over pattern).
+	r.mux.Handle("GET /api/v1/runs/insights", authed(wsCtx(http.HandlerFunc(runs.Insights))))
 	r.mux.Handle("GET /api/v1/runs/{id}", authed(wsCtx(http.HandlerFunc(runs.Get))))
 
 	// Crew Journal: workspace-wide event stream. Reads only — writes are

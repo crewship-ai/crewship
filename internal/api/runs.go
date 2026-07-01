@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -236,6 +237,231 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 			TotalPages: int(math.Ceil(float64(total) / float64(limit))),
 		},
 	})
+}
+
+// journalCategory aliases the journal breakdown bucket so the API response
+// types read locally without leaking the import into every call site.
+type journalCategory = journal.CategoryCount
+
+type runInsightTotals struct {
+	Total     int `json:"total"`
+	Succeeded int `json:"succeeded"`
+	Failed    int `json:"failed"`
+	Running   int `json:"running"`
+}
+
+type runInsightDuration struct {
+	P50Ms int64 `json:"p50_ms"`
+	P95Ms int64 `json:"p95_ms"`
+}
+
+// crewCount is a per-crew rollup of runs; id "" / name "—" collects agents
+// with no crew so those runs aren't silently dropped from the breakdown.
+type crewCount struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Total  int    `json:"total"`
+	Failed int    `json:"failed"`
+}
+
+// insightAgentCount is one row of the top-agents leaderboard with display names
+// resolved from the agents/crews tables.
+type insightAgentCount struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	CrewName string `json:"crew_name"`
+	Total    int    `json:"total"`
+	Failed   int    `json:"failed"`
+}
+
+type runInsightsResponse struct {
+	Window    string              `json:"window"`
+	Totals    runInsightTotals    `json:"totals"`
+	Duration  runInsightDuration  `json:"duration"`
+	ByTrigger []journalCategory   `json:"by_trigger"`
+	ByModel   []journalCategory   `json:"by_model"`
+	ByCrew    []crewCount         `json:"by_crew"`
+	TopAgents []insightAgentCount `json:"top_agents"`
+	Truncated bool                `json:"truncated"`
+}
+
+// insightsTopN caps the crew rollup and agent leaderboard so the payload stays
+// small regardless of workspace size — the UI shows a leaderboard, not a dump.
+const insightsTopN = 8
+
+// Insights returns the fleet operations aggregate for the workspace over a
+// window (24h / 7d / 30d). Unlike Routines → Insights (routine-scoped, from
+// invocation_count), this spans ALL runs — including ad-hoc agent/chat runs —
+// and breaks them down by trigger, model and crew, which the routine surface
+// structurally can't.
+// GET /api/v1/runs/insights?window=24h
+func (h *RunHandler) Insights(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		replyError(w, http.StatusUnauthorized, "workspace required")
+		return
+	}
+
+	// Validate the window explicitly — journal.RunInsights defaults unknown
+	// values to 24h, but silently widening/narrowing on a typo is a confusing
+	// failure mode, so reject it at the edge like the status filter does.
+	windowRaw := r.URL.Query().Get("window")
+	if windowRaw == "" {
+		windowRaw = "24h"
+	}
+	window := journal.RunInsightsWindow(windowRaw)
+	switch window {
+	case journal.RunWindow24h, journal.RunWindow7d, journal.RunWindow30d:
+	default:
+		writeProblem(w, r, http.StatusBadRequest, "window must be one of: 24h, 7d, 30d")
+		return
+	}
+
+	agg, err := journal.RunInsights(r.Context(), h.db, workspaceID, window)
+	if err != nil {
+		h.logger.Error("run insights", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	byCrew, topAgents := h.rollupAgents(r.Context(), workspaceID, agg.ByAgent)
+
+	writeJSON(w, http.StatusOK, runInsightsResponse{
+		Window: agg.Window,
+		Totals: runInsightTotals{
+			Total:     agg.Total,
+			Succeeded: agg.Succeeded,
+			Failed:    agg.Failed,
+			Running:   agg.Running,
+		},
+		Duration:  runInsightDuration{P50Ms: agg.DurationP50Ms, P95Ms: agg.DurationP95Ms},
+		ByTrigger: nonNilCats(agg.ByTrigger),
+		ByModel:   nonNilCats(agg.ByModel),
+		ByCrew:    byCrew,
+		TopAgents: topAgents,
+		Truncated: agg.Truncated,
+	})
+}
+
+// rollupAgents resolves the journal's per-agent_id counts into a crew rollup
+// and a display-named top-agents leaderboard. One workspace-scoped SELECT joins
+// agents→crews (same scoping guarantee as enrichRuns). Agents whose row is
+// missing (deleted, cross-workspace) keep their id and fall into the "no crew"
+// bucket rather than vanishing from the totals.
+func (h *RunHandler) rollupAgents(ctx context.Context, workspaceID string, byAgent []journal.AgentCount) ([]crewCount, []insightAgentCount) {
+	if len(byAgent) == 0 {
+		return []crewCount{}, []insightAgentCount{}
+	}
+
+	agentIDs := make([]any, 0, len(byAgent))
+	for _, a := range byAgent {
+		if a.AgentID != "" {
+			agentIDs = append(agentIDs, a.AgentID)
+		}
+	}
+
+	type meta struct {
+		name, crewID, crewName string
+	}
+	lookup := make(map[string]meta, len(agentIDs))
+	if len(agentIDs) > 0 {
+		ph := "?"
+		for i := 1; i < len(agentIDs); i++ {
+			ph += ",?"
+		}
+		query := `SELECT a.id, a.name, COALESCE(a.crew_id,''), COALESCE(c.name,'')
+			FROM agents a
+			LEFT JOIN crews c ON c.id = a.crew_id
+			WHERE a.workspace_id = ? AND a.id IN (` + ph + `)`
+		args := make([]any, 0, len(agentIDs)+1)
+		args = append(args, workspaceID)
+		args = append(args, agentIDs...)
+		rows, err := h.db.QueryContext(ctx, query, args...)
+		if err == nil {
+			for rows.Next() {
+				var id string
+				var m meta
+				if err := rows.Scan(&id, &m.name, &m.crewID, &m.crewName); err == nil {
+					lookup[id] = m
+				}
+			}
+			// A mid-iteration error leaves lookup partial — the crew/agent
+			// rollup would silently drop display names. Log it rather than
+			// present degraded data as complete.
+			if err := rows.Err(); err != nil {
+				h.logger.Warn("run insights: agent rollup lookup iteration failed", "error", err)
+			}
+			_ = rows.Close()
+		} else {
+			h.logger.Warn("run insights: agent rollup lookup failed", "error", err)
+		}
+	}
+
+	// Crew rollup — key on crew id, bucket crewless agents under "".
+	crewAgg := map[string]*crewCount{}
+	topAgents := make([]insightAgentCount, 0, len(byAgent))
+	for _, a := range byAgent {
+		m := lookup[a.AgentID]
+		crewName := m.crewName
+		if crewName == "" {
+			crewName = "—"
+		}
+		cc := crewAgg[m.crewID]
+		if cc == nil {
+			cc = &crewCount{ID: m.crewID, Name: crewName}
+			crewAgg[m.crewID] = cc
+		}
+		cc.Total += a.Total
+		cc.Failed += a.Failed
+
+		name := m.name
+		if name == "" {
+			name = a.AgentID
+		}
+		topAgents = append(topAgents, insightAgentCount{
+			ID:       a.AgentID,
+			Name:     name,
+			CrewName: m.crewName,
+			Total:    a.Total,
+			Failed:   a.Failed,
+		})
+	}
+
+	byCrew := make([]crewCount, 0, len(crewAgg))
+	for _, c := range crewAgg {
+		byCrew = append(byCrew, *c)
+	}
+	sort.Slice(byCrew, func(i, j int) bool {
+		if byCrew[i].Total != byCrew[j].Total {
+			return byCrew[i].Total > byCrew[j].Total
+		}
+		return byCrew[i].Name < byCrew[j].Name
+	})
+	// byAgent already arrives sorted by total desc from the journal layer, but
+	// re-sort defensively (name resolution doesn't preserve order guarantees).
+	sort.Slice(topAgents, func(i, j int) bool {
+		if topAgents[i].Total != topAgents[j].Total {
+			return topAgents[i].Total > topAgents[j].Total
+		}
+		return topAgents[i].ID < topAgents[j].ID
+	})
+
+	if len(byCrew) > insightsTopN {
+		byCrew = byCrew[:insightsTopN]
+	}
+	if len(topAgents) > insightsTopN {
+		topAgents = topAgents[:insightsTopN]
+	}
+	return byCrew, topAgents
+}
+
+// nonNilCats guarantees a JSON array (not null) for an empty breakdown so the
+// frontend can iterate without a null guard.
+func nonNilCats(c []journalCategory) []journalCategory {
+	if c == nil {
+		return []journalCategory{}
+	}
+	return c
 }
 
 // enrichRuns maps RunAggregated to runResponse and fills in agent name/slug

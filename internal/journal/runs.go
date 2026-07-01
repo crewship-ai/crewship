@@ -13,6 +13,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -386,4 +387,351 @@ WHERE workspace_id = ?
 		return res, fmt.Errorf("journal: run stats failed today: %w", err)
 	}
 	return res, nil
+}
+
+// RunInsightsWindow bounds the aggregation window for RunInsights. Runs are
+// bucketed by their run.started timestamp; a run started inside the window
+// counts even if it finished (or is still running) later.
+type RunInsightsWindow string
+
+const (
+	RunWindow24h RunInsightsWindow = "24h"
+	RunWindow7d  RunInsightsWindow = "7d"
+	RunWindow30d RunInsightsWindow = "30d"
+)
+
+// sqlModifier maps a window to the SQLite datetime() modifier used to derive
+// the cutoff. Unknown values fall back to 24h so a bad query param can't widen
+// the scan to the whole table.
+func (w RunInsightsWindow) sqlModifier() string {
+	switch w {
+	case RunWindow7d:
+		return "-7 days"
+	case RunWindow30d:
+		return "-30 days"
+	default:
+		return "-1 day"
+	}
+}
+
+// normalize returns the canonical window string, defaulting unknown inputs to
+// 24h (matching sqlModifier).
+func (w RunInsightsWindow) normalize() string {
+	switch w {
+	case RunWindow7d:
+		return "7d"
+	case RunWindow30d:
+		return "30d"
+	default:
+		return "24h"
+	}
+}
+
+// CategoryCount is one breakdown bucket: total runs plus the failed subset for
+// a single key (a trigger type, model id, …). Failed counts run.failed and
+// run.timeout; cancelled and running runs are neither succeeded nor failed but
+// still contribute to Total.
+type CategoryCount struct {
+	Key    string `json:"key"`
+	Total  int    `json:"total"`
+	Failed int    `json:"failed"`
+}
+
+// AgentCount is a per-agent breakdown row. The API layer resolves AgentID to a
+// display name + crew before returning it to the UI — the journal layer only
+// knows the id.
+type AgentCount struct {
+	AgentID string `json:"agent_id"`
+	Total   int    `json:"total"`
+	Failed  int    `json:"failed"`
+}
+
+// RunInsightsResult is the fleet-wide operational aggregate over a window: the
+// numbers the Journal "Runs" ops overview renders (outcome split, duration
+// percentiles, and breakdowns by trigger / model / agent). It spans ALL runs
+// in the workspace, not just routine-triggered ones.
+type RunInsightsResult struct {
+	Window        string          `json:"window"`
+	Total         int             `json:"total"`
+	Succeeded     int             `json:"succeeded"`
+	Failed        int             `json:"failed"`
+	Running       int             `json:"running"`
+	DurationP50Ms int64           `json:"duration_p50_ms"`
+	DurationP95Ms int64           `json:"duration_p95_ms"`
+	ByTrigger     []CategoryCount `json:"by_trigger"`
+	ByModel       []CategoryCount `json:"by_model"`
+	ByAgent       []AgentCount    `json:"by_agent"`
+	// Truncated is set when the window held more runs than maxInsightRows, so
+	// the aggregate is computed over the most-recent maxInsightRows only. The
+	// caller surfaces this rather than presenting a partial total as complete.
+	Truncated bool `json:"truncated"`
+}
+
+// maxInsightRows bounds the in-memory aggregation scan so a very large window
+// can't balloon memory. The most-recent runs are aggregated; older ones beyond
+// the cap are dropped and Truncated is set.
+const maxInsightRows = 20000
+
+const insightUnknownKey = "unknown"
+
+// RunInsights computes the fleet operations aggregate for a workspace over the
+// given window. It reuses the same trace_id grouping as ListRuns, then folds
+// the rows in Go — the window bounds the row count and the fold is trivially
+// testable. Crew rollups and agent display names are added by the API layer;
+// here ByAgent is keyed on the raw agent_id.
+func RunInsights(ctx context.Context, db *sql.DB, workspaceID string, window RunInsightsWindow) (RunInsightsResult, error) {
+	if workspaceID == "" {
+		return RunInsightsResult{}, fmt.Errorf("journal: RunInsights requires workspace_id")
+	}
+	res := RunInsightsResult{
+		Window:    window.normalize(),
+		ByTrigger: []CategoryCount{},
+		ByModel:   []CategoryCount{},
+		ByAgent:   []AgentCount{},
+	}
+
+	terminalIN := "(" + sqlInPlaceholders(len(terminalEntryTypes)) + ")"
+	terminalArgs := make([]any, 0, len(terminalEntryTypes))
+	for _, t := range terminalEntryTypes {
+		terminalArgs = append(terminalArgs, t)
+	}
+
+	// One row per trace started within the window. Filtering all of a trace's
+	// entries by ts >= cutoff is safe: a run's entries cluster around its start,
+	// so a run.started inside the window keeps its terminal entry too.
+	//
+	// datetime(ts) normalises the compare: ts is stored RFC3339
+	// ("2006-01-02T15:04:05.000Z") while datetime('now', ?) yields
+	// "YYYY-MM-DD HH:MM:SS". A raw string compare between the two formats would
+	// admit same-day rows before the cutoff time ('T' > ' '); wrapping both in
+	// datetime() puts them in one canonical form.
+	q := `
+WITH run_aggregates AS (
+    SELECT trace_id,
+           MAX(CASE WHEN entry_type = 'run.started' THEN ts END)              AS started_at,
+           MAX(CASE WHEN entry_type IN ` + terminalIN + ` THEN ts END)         AS finished_at,
+           MAX(CASE WHEN entry_type IN ` + terminalIN + ` THEN entry_type END) AS terminal_type,
+           MAX(CASE WHEN entry_type = 'run.started' THEN agent_id END)        AS agent_id,
+           MAX(CASE WHEN entry_type = 'run.started' THEN payload END)         AS started_payload,
+           MAX(CASE WHEN entry_type IN ` + terminalIN + ` THEN payload END)    AS terminal_payload
+    FROM journal_entries
+    WHERE workspace_id = ?
+      AND trace_id IS NOT NULL
+      AND entry_type LIKE 'run.%'
+      AND datetime(ts) >= datetime('now', ?)
+    GROUP BY trace_id
+)
+SELECT started_at, finished_at, terminal_type, agent_id, started_payload, terminal_payload
+FROM run_aggregates
+WHERE started_at IS NOT NULL
+ORDER BY started_at DESC
+LIMIT ?`
+
+	// Placeholder order: 3 terminal IN-lists in the CTE SELECT, then
+	// workspace_id, the window modifier, and the LIMIT (+1 to detect overflow).
+	args := make([]any, 0, 3*len(terminalArgs)+3)
+	args = append(args, terminalArgs...)
+	args = append(args, terminalArgs...)
+	args = append(args, terminalArgs...)
+	args = append(args, workspaceID)
+	args = append(args, window.sqlModifier())
+	args = append(args, maxInsightRows+1)
+
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return res, fmt.Errorf("journal: run insights: %w", err)
+	}
+	defer rows.Close()
+
+	byTrigger := map[string]*CategoryCount{}
+	byModel := map[string]*CategoryCount{}
+	byAgent := map[string]*AgentCount{}
+	durations := make([]int64, 0, 256)
+
+	scanned := 0
+	for rows.Next() {
+		scanned++
+		if scanned > maxInsightRows {
+			res.Truncated = true
+			break
+		}
+		var (
+			startedTS                       string
+			finishedTS, terminalType        sql.NullString
+			agentID                         sql.NullString
+			startedPayload, terminalPayload sql.NullString
+		)
+		if err := rows.Scan(&startedTS, &finishedTS, &terminalType, &agentID, &startedPayload, &terminalPayload); err != nil {
+			return res, fmt.Errorf("journal: scan run insight: %w", err)
+		}
+
+		res.Total++
+
+		// Outcome buckets. Terminal type decides; a NULL terminal is RUNNING.
+		isFailed := terminalType.String == string(EntryRunFailed) || terminalType.String == string(EntryRunTimeout)
+		switch terminalType.String {
+		case string(EntryRunCompleted):
+			res.Succeeded++
+		case string(EntryRunFailed), string(EntryRunTimeout):
+			res.Failed++
+		case string(EntryRunCancelled):
+			// counted in Total, excluded from success/fail rate
+		default:
+			res.Running++
+		}
+
+		// Duration over finished runs (any terminal type with both timestamps).
+		if finishedTS.Valid {
+			if st, e1 := parseJournalTS(startedTS); e1 == nil {
+				if ft, e2 := parseJournalTS(finishedTS.String); e2 == nil {
+					if ms := ft.Sub(st).Milliseconds(); ms >= 0 {
+						durations = append(durations, ms)
+					}
+				}
+			}
+		}
+
+		trigger := insightUnknownKey
+		if v := jsonStringField(startedPayload, "trigger_type"); v != "" {
+			trigger = v
+		}
+		model := insightModel(startedPayload, terminalPayload)
+
+		bumpCategory(byTrigger, trigger, isFailed)
+		bumpCategory(byModel, model, isFailed)
+		if agentID.String != "" {
+			a := byAgent[agentID.String]
+			if a == nil {
+				a = &AgentCount{AgentID: agentID.String}
+				byAgent[agentID.String] = a
+			}
+			a.Total++
+			if isFailed {
+				a.Failed++
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return res, fmt.Errorf("journal: run insights iteration: %w", err)
+	}
+
+	res.DurationP50Ms = percentile(durations, 0.50)
+	res.DurationP95Ms = percentile(durations, 0.95)
+	res.ByTrigger = sortedCategories(byTrigger)
+	res.ByModel = sortedCategories(byModel)
+	res.ByAgent = sortedAgents(byAgent)
+	return res, nil
+}
+
+// bumpCategory increments a breakdown bucket, allocating it on first use.
+func bumpCategory(m map[string]*CategoryCount, key string, failed bool) {
+	c := m[key]
+	if c == nil {
+		c = &CategoryCount{Key: key}
+		m[key] = c
+	}
+	c.Total++
+	if failed {
+		c.Failed++
+	}
+}
+
+// jsonStringField pulls a top-level string field from a JSON payload column,
+// returning "" when absent/unparseable.
+func jsonStringField(payload sql.NullString, field string) string {
+	if !payload.Valid || payload.String == "" || payload.String == "{}" {
+		return ""
+	}
+	var p map[string]any
+	if err := json.Unmarshal([]byte(payload.String), &p); err != nil {
+		return ""
+	}
+	if v, ok := p[field].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// insightModel resolves the run's model the same way ListRuns does: prefer the
+// terminal entry's metadata.model (authoritative — known after session-init),
+// falling back to run.started metadata for still-running rows. Returns the
+// unknown sentinel when neither carries a model.
+func insightModel(startedPayload, terminalPayload sql.NullString) string {
+	if m := jsonMetadataModel(terminalPayload); m != "" {
+		return m
+	}
+	if m := jsonMetadataModel(startedPayload); m != "" {
+		return m
+	}
+	return insightUnknownKey
+}
+
+// jsonMetadataModel extracts payload.metadata.model, "" when absent.
+func jsonMetadataModel(payload sql.NullString) string {
+	if !payload.Valid || payload.String == "" || payload.String == "{}" {
+		return ""
+	}
+	var p map[string]any
+	if err := json.Unmarshal([]byte(payload.String), &p); err != nil {
+		return ""
+	}
+	meta, ok := p["metadata"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	if v, ok := meta["model"].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// percentile returns the nearest-rank percentile (p in [0,1]) of the values,
+// 0 for an empty slice. Sorts a copy so the caller's slice order is untouched.
+func percentile(values []int64, p float64) int64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sorted := make([]int64, len(values))
+	copy(sorted, values)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	// nearest-rank: idx = ceil(p*n) - 1, clamped to [0, n-1]
+	idx := int(float64(len(sorted))*p+0.9999999) - 1
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(sorted) {
+		idx = len(sorted) - 1
+	}
+	return sorted[idx]
+}
+
+// sortedCategories flattens the map into a slice ordered by total desc, then
+// key asc, so the output is deterministic (stable across identical inputs).
+func sortedCategories(m map[string]*CategoryCount) []CategoryCount {
+	out := make([]CategoryCount, 0, len(m))
+	for _, c := range m {
+		out = append(out, *c)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Total != out[j].Total {
+			return out[i].Total > out[j].Total
+		}
+		return out[i].Key < out[j].Key
+	})
+	return out
+}
+
+// sortedAgents flattens the per-agent map ordered by total desc, then id asc.
+func sortedAgents(m map[string]*AgentCount) []AgentCount {
+	out := make([]AgentCount, 0, len(m))
+	for _, a := range m {
+		out = append(out, *a)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Total != out[j].Total {
+			return out[i].Total > out[j].Total
+		}
+		return out[i].AgentID < out[j].AgentID
+	})
+	return out
 }
