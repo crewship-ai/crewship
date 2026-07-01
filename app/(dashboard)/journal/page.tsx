@@ -8,12 +8,12 @@ import {
   BookOpen,
   DollarSign,
   ListOrdered,
-  Lock,
   Radio,
   RadioTower,
   Zap,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { SubBar } from "@/components/layout/sub-bar"
 import { cn } from "@/lib/utils"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -425,87 +425,43 @@ export default function JournalPage() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
-      {/* ---- Header strip ---- */}
-      <div className="shrink-0 flex items-center h-9 bg-card border-b border-border/60 px-3 gap-2">
-        <BookOpen className="h-3.5 w-3.5 text-foreground/60" />
-        <h1 className="text-body font-medium text-foreground/80">Crew Journal</h1>
-        {activeTab === "timeline" && (
-          <Badge variant="outline" className="text-[10px] border-border/60 font-mono">
-            {entries.length} loaded
-          </Badge>
-        )}
-        {activeTab === "timeline" && <StreamStatusBadge status={streamStatus} />}
-        {activeTab === "timeline" && (
-          <AnomalyBadge
-            entries={entries}
-            onClick={() => {
-              setSeverity("error")
-              setTimeRange("5m")
-            }}
-          />
-        )}
-        {activeTab === "timeline" && (
-          <MetricsVisibilityChip
-            excludedTypes={excludedTypes}
-            onChange={setExcludedTypes}
-          />
-        )}
-        <div className="flex-1" />
-      </div>
-
-      {/* ---- Tab strip ---- */}
-      <div
-        role="tablist"
-        aria-label="Journal views"
-        className="shrink-0 flex items-center h-9 bg-card border-b border-border/60 px-2 gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
-      >
-        {visibleTabs.map(({ id, label, icon: Icon, adminOnly, locked }) => {
-          const isActive = activeTab === id
-          return (
-            <motion.button
-              key={id}
-              role="tab"
-              aria-selected={isActive}
-              aria-disabled={locked || undefined}
-              onClick={() => {
-                // Locked tabs never accept activation. Clicks fall
-                // through to the cursor-not-allowed style so the user
-                // sees the tooltip but the URL/state stays put.
-                if (locked) return
-                setActiveTab(id)
-              }}
-              whileHover={locked ? undefined : { y: -1 }}
-              whileTap={locked ? undefined : { y: 0, scale: 0.97 }}
-              transition={{ duration: 0.12 }}
-              title={locked ? `${label} — coming soon` : undefined}
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-colors duration-100 relative top-px whitespace-nowrap shrink-0",
-                locked
-                  ? "border-transparent text-muted-foreground/40 cursor-not-allowed"
-                  : isActive
-                    ? "border-blue-400 text-blue-400"
-                    : "border-transparent text-muted-foreground hover:text-foreground/80",
-              )}
-            >
-              <Icon className="h-3 w-3 opacity-75" />
-              {label}
-              {locked && (
-                <>
-                  <Lock className="h-2.5 w-2.5 opacity-60" />
-                  <span className="text-[9px] uppercase tracking-wider text-amber-400/70 font-mono">
-                    soon
-                  </span>
-                </>
-              )}
-              {adminOnly && !locked && (
-                <span className="text-[9px] uppercase tracking-wider text-muted-foreground/60 font-mono">
-                  admin
-                </span>
-              )}
-            </motion.button>
+      {/* ---- Sub-bar: identity + status + tabs ---- */}
+      <SubBar<JournalTab>
+        icon={BookOpen}
+        title="Crew Journal"
+        ariaLabel="Journal"
+        description={activeTab === "timeline" ? `${entries.length} loaded` : undefined}
+        meta={
+          activeTab === "timeline" && (
+            <>
+              <StreamStatusBadge status={streamStatus} />
+              <AnomalyBadge
+                entries={entries}
+                onClick={() => {
+                  setSeverity("error")
+                  setTimeRange("5m")
+                }}
+              />
+              <MetricsVisibilityChip
+                excludedTypes={excludedTypes}
+                onChange={setExcludedTypes}
+              />
+            </>
           )
-        })}
-      </div>
+        }
+        tabs={visibleTabs.map((t) => ({
+          id: t.id,
+          label: t.label,
+          icon: t.icon,
+          locked: t.locked,
+          badge: t.adminOnly && !t.locked ? "admin" : undefined,
+        }))}
+        activeTab={activeTab}
+        // SubBar already guards locked tabs (never fires onTabChange for
+        // them); the demote-to-timeline useEffect still owns stale-deeplink
+        // and role-loss fallbacks.
+        onTabChange={setActiveTab}
+      />
 
       {/* ---- Tab content (animated swap) ---- */}
       <AnimatePresence mode="wait">

@@ -47,6 +47,9 @@ interface ImportSkillDialogProps {
   triggerLabel?: React.ReactNode
   triggerVariant?: "default" | "outline" | "secondary" | "ghost"
   triggerSize?: "default" | "sm" | "lg" | "icon"
+  // Lets the sub-bar match the trigger to <SubBarSecondary> sizing
+  // (h-7 gap-1.5 text-xs) so Import reads as a neutral row-1 action.
+  triggerClassName?: string
 }
 
 export function ImportSkillDialog({
@@ -55,6 +58,7 @@ export function ImportSkillDialog({
   triggerLabel,
   triggerVariant = "outline",
   triggerSize = "sm",
+  triggerClassName,
 }: ImportSkillDialogProps) {
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<"url" | "content" | "repo">("url")
@@ -173,7 +177,7 @@ export function ImportSkillDialog({
       }}
     >
       <DialogTrigger asChild>
-        <Button variant={triggerVariant} size={triggerSize}>
+        <Button variant={triggerVariant} size={triggerSize} className={triggerClassName}>
           {triggerLabel ?? (
             <>
               <Upload className="mr-2 h-4 w-4" />

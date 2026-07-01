@@ -12,6 +12,7 @@ import {
 } from "lucide-react"
 // Tabs replaced with custom nav for orchestration toolbar
 import { Button } from "@/components/ui/button"
+import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { cn } from "@/lib/utils"
 import { WorkflowGraph } from "@/components/features/orchestration/workflow-graph"
 import { PipelineDetailSheet } from "@/components/features/orchestration/pipeline-detail-sheet"
@@ -542,48 +543,27 @@ export function OrchestrationLayout({
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
       {/* ---- Toolbar: Tab navigation + context + actions (single row) ---- */}
       {showToolbar && (
-        <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-white/[0.08] px-2 sm:px-3 gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-          {/* Tabs */}
-          {visibleTabs.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => setActiveTab(id)}
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-all duration-100 relative top-px whitespace-nowrap shrink-0",
-                activeTab === id
-                  ? "border-blue-400 text-blue-400"
-                  : "border-transparent text-muted-foreground hover:text-foreground/80",
-              )}
-            >
-              <Icon className="h-3 w-3 opacity-75" />
-              {label}
-            </button>
-          ))}
-
-          {/* spacer between tabs and actions */}
-
-          <div className="flex-1" />
-
-          {/* Create buttons — only relevant when issues UI is on this page */}
-          {showCreateButtons && (
-            <>
-              <button
-                onClick={() => setShowCreateIssue(true)}
-                className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium transition-colors shrink-0 bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
-              >
-                <CircleDot className="h-3 w-3" />
-                New Issue
-              </button>
-              <button
-                onClick={() => setShowCreateProject(true)}
-                className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium transition-colors shrink-0 bg-accent text-accent-foreground hover:bg-accent/80 border border-white/[0.08]"
-              >
-                <FolderKanban className="h-3 w-3" />
-                New Project
-              </button>
-            </>
-          )}
-        </div>
+        <SubBar
+          icon={mode === "issues" ? CircleDot : undefined}
+          title={mode === "activity" ? "Activity" : mode === "default" ? "Orchestration" : "Issues"}
+          description={`${missions.length} ${missions.length === 1 ? "issue" : "issues"}`}
+          ariaLabel="Issues"
+          tabs={visibleTabs.map(({ id, label, icon }) => ({ id, label, icon }))}
+          activeTab={activeTab}
+          onTabChange={(id) => setActiveTab(id)}
+          actions={
+            showCreateButtons ? (
+              <>
+                <SubBarSecondary icon={FolderKanban} onClick={() => setShowCreateProject(true)}>
+                  New Project
+                </SubBarSecondary>
+                <SubBarPrimary icon={CircleDot} onClick={() => setShowCreateIssue(true)}>
+                  New Issue
+                </SubBarPrimary>
+              </>
+            ) : undefined
+          }
+        />
       )}
 
       {/* ---- Main 3-column layout ---- */}

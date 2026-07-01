@@ -12,7 +12,9 @@ import { useRunWaitpoints } from "@/hooks/use-run-waitpoints"
 import { useStepMetrics } from "@/hooks/use-step-metrics"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
+import { SubBar, SubBarIconButton } from "@/components/layout/sub-bar"
 import {
+  Activity,
   Flame,
   PanelLeftClose,
   PanelLeftOpen,
@@ -276,74 +278,68 @@ export function ActivityTracePage() {
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
       {/* Top toolbar — minimal on Phase 1; heatmap toggle + view
         * switch land in Phase 4. */}
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-white/[0.08] bg-card px-2">
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label={railCollapsed ? "Expand run rail" : "Collapse run rail"}
-          className="text-muted-foreground/70 hover:text-foreground/80"
-          onClick={() => setRailCollapsed(!railCollapsed)}
-        >
-          {railCollapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
-        </Button>
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-          Activity
-        </span>
-        <span className="text-[11px] text-muted-foreground/40">
-          {run ? `· ${run.pipeline_name || run.pipeline_slug}` : "· no run selected"}
-        </span>
-
-        <div className="flex-1" />
-
-        {/* Heatmap toggle — only meaningful when a run is selected */}
-        {run !== null && (
-          <div className="mr-2 flex items-center gap-0.5 rounded border border-white/[0.06] bg-background p-0.5">
-            <HeatmapButton
-              label="Off"
-              icon={null}
-              active={heatmapMode === "off"}
-              onClick={() => setHeatmapMode("off")}
-            />
-            <HeatmapButton
-              label="Cost"
-              icon={Flame}
-              active={heatmapMode === "cost"}
-              onClick={() => setHeatmapMode("cost")}
-            />
-            <HeatmapButton
-              label="Time"
-              icon={Timer}
-              active={heatmapMode === "duration"}
-              onClick={() => setHeatmapMode("duration")}
-            />
-          </div>
-        )}
-
-        {sidePanelOpen && (
+      <SubBar
+        icon={Activity}
+        title="Activity"
+        ariaLabel="Activity"
+        description={run ? (run.pipeline_name || run.pipeline_slug) : "no run selected"}
+        leading={
           <Button
             variant="ghost"
             size="icon-xs"
-            aria-label="Close detail panel"
+            aria-label={railCollapsed ? "Expand run rail" : "Collapse run rail"}
             className="text-muted-foreground/70 hover:text-foreground/80"
-            onClick={closeSidePanel}
+            onClick={() => setRailCollapsed(!railCollapsed)}
           >
-            <PanelRightClose className="h-3.5 w-3.5" />
+            {railCollapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
           </Button>
-        )}
-        {!sidePanelOpen && stepId === null && run !== null && (
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Open detail panel"
-            className="opacity-50 hover:opacity-100"
-            // Disabled until a step is selected — clicking the open
-            // icon with no selection would have nothing to show.
-            disabled
-          >
-            <PanelRightOpen className="h-3.5 w-3.5" />
-          </Button>
-        )}
-      </div>
+        }
+        actions={
+          <>
+            {/* Heatmap toggle — only meaningful when a run is selected */}
+            {run !== null && (
+              <div className="flex items-center gap-0.5 rounded border border-white/[0.06] bg-background p-0.5">
+                <HeatmapButton
+                  label="Off"
+                  icon={null}
+                  active={heatmapMode === "off"}
+                  onClick={() => setHeatmapMode("off")}
+                />
+                <HeatmapButton
+                  label="Cost"
+                  icon={Flame}
+                  active={heatmapMode === "cost"}
+                  onClick={() => setHeatmapMode("cost")}
+                />
+                <HeatmapButton
+                  label="Time"
+                  icon={Timer}
+                  active={heatmapMode === "duration"}
+                  onClick={() => setHeatmapMode("duration")}
+                />
+              </div>
+            )}
+
+            {sidePanelOpen && (
+              <SubBarIconButton
+                icon={PanelRightClose}
+                aria-label="Close detail panel"
+                onClick={closeSidePanel}
+              />
+            )}
+            {!sidePanelOpen && stepId === null && run !== null && (
+              // Disabled until a step is selected — clicking the open
+              // icon with no selection would have nothing to show.
+              <SubBarIconButton
+                icon={PanelRightOpen}
+                aria-label="Open detail panel"
+                disabled
+                className="opacity-50 hover:opacity-100"
+              />
+            )}
+          </>
+        }
+      />
 
       {/* 3-zone grid: rail | canvas | side panel */}
       <div

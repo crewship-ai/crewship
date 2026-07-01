@@ -48,6 +48,7 @@ import { Button } from "@/components/ui/button"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { ImportSkillDialog } from "@/components/skills/import-dialog"
+import { SubBar } from "@/components/layout/sub-bar"
 import { SkillCard, type SkillCardData } from "@/components/features/skills/skill-card"
 import { SkillsDetailPanel } from "@/components/features/skills/skills-detail-panel"
 
@@ -443,50 +444,38 @@ export function SkillsBrowser() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
-      {/* ---- Toolbar: Tab navigation + actions (single row) — mirrors
-           OrchestrationLayout's toolbar so the chrome reads consistent
-           across pages. Tabs are lenses over the same skill list; the
-           Create + Import buttons live here (not in the rail) so the
-           rail stays a pure filter surface. */}
-      <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-white/[0.08] px-2 sm:px-3 gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-        {SKILLS_TABS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setActiveTab(id)}
-            className={cn(
-              "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-all duration-100 relative top-px whitespace-nowrap shrink-0",
-              activeTab === id
-                ? "border-blue-400 text-blue-400"
-                : "border-transparent text-muted-foreground hover:text-foreground/80",
-            )}
-          >
-            <Icon className="h-3 w-3 opacity-75" />
-            {label}
-          </button>
-        ))}
-
-        <div className="flex-1" />
-
-        {workspaceId && (
-          // Skill authoring is CLI-only by design (crewship skill create).
-          // The UI button lived here briefly but the LLM-authoring flow
-          // has too many environment-level prerequisites (workspace
-          // ANTHROPIC API_KEY etc.) to surface as a one-click action;
-          // CLI-first is the v0.1 stance the user picked.
-          <ImportSkillDialog
-            workspaceId={workspaceId}
-            onImported={reload}
-            triggerVariant="outline"
-            triggerSize="sm"
-            triggerLabel={
-              <span className="inline-flex items-center gap-1.5 text-xs font-medium">
-                <Plus className="h-3 w-3" />
-                Import
-              </span>
-            }
-          />
-        )}
-      </div>
+      {/* ---- Sub-bar: identity + tab lenses + Import action. Uses the
+           shared <SubBar> so the chrome reads consistent across pages.
+           Tabs are lenses over the same skill list; Import is a neutral
+           (ghost) row-1 action — skill authoring stays CLI-only by
+           design (crewship skill create), so Import is the only surfaced
+           action here. */}
+      <SubBar
+        icon={Library}
+        title="Skills"
+        description={loading ? "Loading…" : `${skills.length} skills · ${bundledCount} bundled`}
+        ariaLabel="Skills"
+        tabs={SKILLS_TABS.map((t) => ({ id: t.id, label: t.label, icon: t.icon }))}
+        activeTab={activeTab}
+        onTabChange={(id) => setActiveTab(id)}
+        actions={
+          workspaceId ? (
+            <ImportSkillDialog
+              workspaceId={workspaceId}
+              onImported={reload}
+              triggerVariant="ghost"
+              triggerSize="sm"
+              triggerClassName="h-7 gap-1.5 text-xs"
+              triggerLabel={
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+                  <Plus className="h-3 w-3" />
+                  Import
+                </span>
+              }
+            />
+          ) : undefined
+        }
+      />
 
       {/* ---- 3-panel grid: rail / centre / detail. Fixed-pixel
            template (orchestration pattern) instead of resizable

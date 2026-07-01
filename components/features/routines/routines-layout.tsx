@@ -4,11 +4,12 @@ import { useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { useRouter } from "next/navigation"
 import {
-  ScrollText, Calendar, BarChart3,
+  ScrollText, Calendar, BarChart3, Workflow,
   Plus, Upload, Settings, PanelLeftClose, PanelLeftOpen,
   X, ChevronLeft, ChevronRight,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { SubBar, SubBarPrimary, SubBarSecondary, SubBarIconButton } from "@/components/layout/sub-bar"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api-fetch"
@@ -20,7 +21,6 @@ import { RoutinesDetailPanel } from "./routines-detail-panel"
 import { type RoutineFilters } from "./routines-filter-sidebar"
 import { RoutinesExplorer } from "./routines-explorer"
 import { RoutineCreateDialog } from "./routine-create-dialog"
-import { TabBar } from "@/components/ui/tab-bar"
 import type { Mission } from "@/lib/types/mission"
 import { BottomPanel } from "@/components/features/crews/bottom-panel"
 import type { BottomPanelContext } from "@/components/features/crews/bottom-panel/types"
@@ -162,65 +162,51 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     [selectedSlug, selectedRoutine?.id, selectedRoutine?.name],
   )
 
+  // Live sub-bar description — derived from the loaded pipelines list.
+  // `pipelines.length` = routines in the workspace; `totalRuns` sums each
+  // routine's invocation_count (Pipeline.invocation_count from use-pipelines).
+  const totalRuns = pipelines.reduce((sum, p) => sum + (p.invocation_count ?? 0), 0)
+
   return (
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
-      {/* ---- Toolbar ---- */}
-      {/* Global toolbar always shows TabBar + actions. Breadcrumb back-bar
-          in detail mode is rendered separately inside the main content
-          area (matches the /issues pattern — top bar stays for global
-          context like List/Schedules/Insights + Import/New routine; the
-          page-specific 'Back to routines / <name>' lives one level down
-          so it doesn't compete with the global affordances). */}
-      <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-white/[0.08] px-2 sm:px-3 gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden">
-        <TabBar
-          value={activeTab}
-          onValueChange={(v) => setActiveTab(v as RoutinesTab)}
-          layoutId="routines-tabs-indicator"
-          ariaLabel="Routines view"
-          className="h-full border-b-0 shrink-0"
-        >
-          {ROUTINES_TABS.map(({ id, label, icon: Icon }) => (
-            <TabBar.Item key={id} value={id} className="h-full whitespace-nowrap">
-              <span className="inline-flex items-center gap-1.5">
-                <Icon className="h-3 w-3 opacity-75" />
-                {label}
-              </span>
-            </TabBar.Item>
-          ))}
-        </TabBar>
-
-        <div className="flex-1" />
-
-        {/* Search now lives in the left filter sidebar (mirroring the
-          * /issues UnifiedExplorer); the toolbar stays focused on tabs
-          * + actions. Removed the duplicate toolbar search to avoid
-          * confusing two visible inputs. */}
-
-        {/* Action buttons */}
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 gap-1.5 text-xs"
-          onClick={() => setImportDialogOpen(true)}
-          title="Import a routine bundle from JSON"
-        >
-          <Upload className="h-3 w-3" />
-          Import
-        </Button>
-        <Button
-          size="sm"
-          variant="default"
-          className="h-7 gap-1.5 text-xs"
-          onClick={() => setCreateDialogOpen(true)}
-          title="Create a new routine — DSL editor with starter templates + Test & Save"
-        >
-          <Plus className="h-3 w-3" />
-          New routine
-        </Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2" title="Routines settings">
-          <Settings className="h-3 w-3" />
-        </Button>
-      </div>
+      {/* ---- Sub-bar: identity + tabs + actions ----
+          Row 1 carries global context (List/Schedules/Insights + Import/New
+          routine); the page-specific 'Back to routines / <name>' breadcrumb
+          lives one level down inside the content area (matches /issues) so it
+          doesn't compete with the global affordances. */}
+      <SubBar<RoutinesTab>
+        icon={Workflow}
+        title="Routines"
+        description={
+          <>
+            {pipelines.length} {pipelines.length === 1 ? "routine" : "routines"} · {totalRuns}{" "}
+            {totalRuns === 1 ? "run" : "runs"}
+          </>
+        }
+        ariaLabel="Routines"
+        tabs={ROUTINES_TABS.map((t) => ({ id: t.id, label: t.label, icon: t.icon }))}
+        activeTab={activeTab}
+        onTabChange={(id) => setActiveTab(id)}
+        actions={
+          <>
+            <SubBarSecondary
+              icon={Upload}
+              onClick={() => setImportDialogOpen(true)}
+              title="Import a routine bundle from JSON"
+            >
+              Import
+            </SubBarSecondary>
+            <SubBarPrimary
+              icon={Plus}
+              onClick={() => setCreateDialogOpen(true)}
+              title="Create a new routine — DSL editor with starter templates + Test & Save"
+            >
+              New routine
+            </SubBarPrimary>
+            <SubBarIconButton icon={Settings} aria-label="Routines settings" title="Routines settings" />
+          </>
+        }
+      />
 
       {/* ---- Body: 3-column layout ---- */}
       <div className="flex flex-1 overflow-hidden">

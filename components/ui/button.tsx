@@ -22,6 +22,12 @@ const buttonVariants = cva(
           "border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        // Soft / tinted primary — the canonical sub-bar CTA (Style B).
+        // Translucent primary fill + brand-hover text keeps it clearly the
+        // page's primary action without the visual weight of a solid button,
+        // which reads as heavy when repeated on every page's toolbar.
+        soft:
+          "bg-primary/15 text-primary-hover border border-primary/30 hover:bg-primary/25 hover:text-primary-hover",
         ghost:
           "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
         link: "text-primary underline-offset-4 hover:underline",
