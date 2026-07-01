@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -485,6 +486,12 @@ func (h *AssignmentHandler) runAssignment(
 		SkipSidecar:     skipSidecar,
 		SkipConvHistory: true,
 	}
+	// Cost lever: route worker (non-lead-planning) sub-agents to a cheaper
+	// model when the operator opts in via CREWSHIP_SUBAGENT_MODEL. Delegated
+	// workers do bounded sub-tasks and rarely need the top tier; the lead
+	// planner keeps its configured model because it does the reasoning. Unset
+	// env leaves the target's own model untouched — no silent quality downgrade.
+	req.LLMModel = resolveSubAgentModel(target.LLMModel, body.LeadPlanning, os.Getenv)
 
 	// Load workspace language preference
 	var lang string

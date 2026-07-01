@@ -175,6 +175,26 @@ func covAgentPrompt(t *testing.T, c *covContainer) string {
 	return ""
 }
 
+// covAgentUserMessage extracts the positional user message (the argv element
+// after the `--` separator) from the agent exec. Per-turn volatile context
+// (conversation history, episodic recall, nudges) now rides here rather than in
+// --system-prompt, so the system prefix stays cache-stable.
+func covAgentUserMessage(t *testing.T, c *covContainer) string {
+	t.Helper()
+	for _, call := range c.snapshotCalls() {
+		if len(call.Cmd) == 0 || call.Cmd[0] != "stdbuf" {
+			continue
+		}
+		for i, arg := range call.Cmd {
+			if arg == "--" && i+1 < len(call.Cmd) {
+				return call.Cmd[i+1]
+			}
+		}
+	}
+	t.Fatal("agent exec with `--` user-message separator not captured")
+	return ""
+}
+
 func covRunReq() AgentRunRequest {
 	return AgentRunRequest{
 		AgentID:     "a1",
@@ -411,8 +431,17 @@ func TestRunAgent_PromptAssembly(t *testing.T) {
 		if err := o.RunAgent(context.Background(), covRunReq(), nil); err != nil {
 			t.Fatalf("RunAgent: %v", err)
 		}
-		if prompt := covAgentPrompt(t, c); !strings.Contains(prompt, "past incident notes") {
-			t.Error("recall output must be appended to the prompt")
+		// Recall is per-turn dynamic → it now rides in the user message's
+		// [SESSION CONTEXT], NOT the cache-stable --system-prompt.
+		userMsg := covAgentUserMessage(t, c)
+		if !strings.Contains(userMsg, "past incident notes") {
+			t.Error("recall output must be delivered in the user message")
+		}
+		if !strings.Contains(userMsg, sessionContextOpen) {
+			t.Error("recall must be wrapped in the [SESSION CONTEXT] block")
+		}
+		if sysPrompt := covAgentPrompt(t, c); strings.Contains(sysPrompt, "past incident notes") {
+			t.Error("recall must NOT be in --system-prompt — that breaks the cache prefix")
 		}
 	})
 

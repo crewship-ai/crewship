@@ -688,11 +688,12 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		// router so (a) the /api/v1/system/aux-status diagnostic surface
 		// reports the resolved provider/model per slot, and (b) the
 		// Phase 2 evaluator construction below uses the same source of
-		// truth the operator sees in the UI. Config-driven aux slots
-		// are a follow-up (cfg.Auxiliary not yet wired); MVP defaults
-		// from llm.DefaultAuxiliaryModels (every slot on
-		// anthropic/claude-haiku-4-5) keep the surface useful immediately.
-		auxModels := llm.DefaultAuxiliaryModels()
+		// truth the operator sees in the UI. Defaults put every slot on
+		// anthropic/claude-haiku-4-5; LoadAuxiliaryModels then applies any
+		// CREWSHIP_AUX_<SLOT>_{PROVIDER,MODEL,TIMEOUT} env overrides so an
+		// operator can repoint an aux slot at a cheaper/local model without
+		// a redeploy.
+		auxModels := llm.LoadAuxiliaryModels()
 		opts = append(opts, goapi.WithAuxiliaryModels(auxModels))
 
 		// PR-C F4 wire-up: construct the four Keeper Phase 2 evaluators
