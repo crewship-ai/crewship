@@ -548,7 +548,7 @@ export function OrchestrationLayout({
           icon={mode === "issues" ? CircleDot : undefined}
           title={mode === "activity" ? "Activity" : mode === "default" ? "Orchestration" : "Issues"}
           description={`${missions.length} ${missions.length === 1 ? "issue" : "issues"}`}
-          ariaLabel="Issues"
+          ariaLabel={mode === "activity" ? "Activity" : mode === "default" ? "Orchestration" : "Issues"}
           tabs={visibleTabs.map(({ id, label, icon }) => ({ id, label, icon }))}
           activeTab={activeTab}
           onTabChange={(id) => setActiveTab(id)}

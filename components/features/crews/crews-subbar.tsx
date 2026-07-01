@@ -44,7 +44,7 @@ export function CrewsSubbar({
   // Live description: breadcrumb path when something is selected, otherwise a count.
   const description =
     crewName || agentName
-      ? `${crewName ?? ""}${agentName ? ` / ${agentName}` : ""}`
+      ? [crewName, agentName].filter(Boolean).join(" / ")
       : `${crews.length} crews`
 
   return (

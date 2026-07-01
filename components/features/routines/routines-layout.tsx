@@ -73,7 +73,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable
       )
       if (e.key === "/" && !isInputContext) {
-        const el = document.querySelector<HTMLInputElement>("input[data-routines-search-input]")
+        const el = document.querySelector<HTMLInputElement>("[data-routines-search] input")
         if (el) {
           e.preventDefault()
           el.focus()

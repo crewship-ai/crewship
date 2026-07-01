@@ -24,7 +24,7 @@ import {
 import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import type { Pipeline } from "@/hooks/use-pipelines"
-import type { RoutineFilters } from "./routines-filter-sidebar"
+import type { RoutineFilters } from "@/components/features/routines/routines-filter-sidebar"
 
 // RoutinesExplorer — the /routines left sidebar, built on the shared
 // sidebar-kit primitives (SidebarToolbar/Search/FilterButton/Section/
@@ -163,14 +163,19 @@ export function RoutinesExplorer({
     <div className="flex flex-col h-full">
       {/* ── Search + Filter ── */}
       <SidebarToolbar>
-        <SidebarSearch
-          value={search}
-          onValueChange={onSearchChange}
-          placeholder="Search routines, agents…"
-        />
+        {/* data-routines-search wrapper keeps the `/` focus shortcut working
+            (routines-layout targets `[data-routines-search] input`). */}
+        <div data-routines-search className="flex-1 min-w-0">
+          <SidebarSearch
+            value={search}
+            onValueChange={onSearchChange}
+            placeholder="Search routines, agents…"
+          />
+        </div>
         <div className="relative shrink-0">
           <SidebarFilterButton
             activeCount={activeFilterCount}
+            aria-expanded={filterDropdownOpen}
             onClick={() => setFilterDropdownOpen(!filterDropdownOpen)}
           />
           <AnimatePresence>

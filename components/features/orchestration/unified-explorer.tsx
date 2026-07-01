@@ -111,6 +111,7 @@ export function UnifiedExplorer({
         <div className="relative shrink-0">
           <SidebarFilterButton
             activeCount={activeFilterCount}
+            aria-expanded={filterDropdownOpen}
             onClick={() => setFilterDropdownOpen(!filterDropdownOpen)}
           />
           <AnimatePresence>

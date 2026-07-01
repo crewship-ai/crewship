@@ -246,7 +246,12 @@ export function SidebarSection({
   headerClassName?: string
   children?: React.ReactNode
 }) {
-  const header = (
+  // Header content WITHOUT actions — this is what goes inside the toggle
+  // <button> when collapsible. `actions` (which may itself contain buttons)
+  // must never nest inside that button, so for the collapsible variant it's
+  // rendered as a sibling; the non-collapsible variant is a <div>, so keeping
+  // actions inline there is safe (and preserves the "label · meta" layout).
+  const headerInner = (
     <>
       {collapsible && (
         <ChevronDown
@@ -260,25 +265,28 @@ export function SidebarSection({
       {count != null && (
         <span className="ml-auto text-[10px] tabular-nums text-muted-foreground/50">{count}</span>
       )}
-      {actions}
+      {!collapsible && actions}
     </>
   )
   return (
     <div className={cn("shrink-0", className)}>
       {collapsible ? (
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={!collapsed}
-          className={cn(
-            "flex w-full items-center gap-1.5 px-3 py-1.5 hover:bg-white/[0.02] transition-colors",
-            headerClassName,
-          )}
-        >
-          {header}
-        </button>
+        <div className="flex items-center">
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={!collapsed}
+            className={cn(
+              "flex flex-1 items-center gap-1.5 px-3 py-1.5 hover:bg-white/[0.02] transition-colors",
+              headerClassName,
+            )}
+          >
+            {headerInner}
+          </button>
+          {actions && <div className="flex shrink-0 items-center pr-2">{actions}</div>}
+        </div>
       ) : (
-        <div className={cn("flex items-center gap-1.5 px-3 py-1.5 select-none", headerClassName)}>{header}</div>
+        <div className={cn("flex items-center gap-1.5 px-3 py-1.5 select-none", headerClassName)}>{headerInner}</div>
       )}
       {!collapsed && children}
     </div>
