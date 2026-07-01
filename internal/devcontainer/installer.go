@@ -168,18 +168,19 @@ func (inst *Installer) execInContainerFull(ctx context.Context, containerID stri
 
 	// The exec is attached WITHOUT a TTY (ExecOptions has no Tty:true), so
 	// Docker multiplexes stdout/stderr with an 8-byte stdcopy frame header per
-	// write ([STREAM_TYPE,0,0,0,SIZE...]). A raw io.Copy leaves those headers in
-	// the output — harmless for callers that only check the exit code, but
+	// write ([STREAM_TYPE,0,0,0,SIZE...]). A raw read leaves those headers in the
+	// output — harmless for callers that only check the exit code, but
 	// captureLoginPath uses the value VERBATIM as the container PATH, so the
 	// leading "\x01\x00\x00\x00\x00\x00\x00…" header injected a NUL byte and runc
 	// rejected every container with `invalid environment variable "PATH":
-	// contains nul byte`. Demultiplex with stdcopy (writing both streams into the
-	// same buffer preserves the previous combined-output semantics, minus the
-	// frame headers).
-	var buf bytes.Buffer
-	if _, copyErr := stdcopy.StdCopy(&buf, &buf, resp.Reader); copyErr != nil {
+	// contains nul byte`. Read raw, then demultiplex only when the bytes are
+	// actually framed (see demuxDockerStream) — that keeps this correct for a
+	// real daemon while staying a no-op for a raw/TTY stream.
+	var raw bytes.Buffer
+	if _, copyErr := io.Copy(&raw, resp.Reader); copyErr != nil {
 		inst.logger.Warn("failed to read exec output", "error", copyErr)
 	}
+	buf := bytes.NewBuffer(demuxDockerStream(raw.Bytes()))
 
 	inspect, err := inst.docker.ContainerExecInspect(ctx, exec.ID)
 	if err != nil {
@@ -187,6 +188,31 @@ func (inst *Installer) execInContainerFull(ctx context.Context, containerID stri
 	}
 
 	return buf.String(), inspect.ExitCode, nil
+}
+
+// demuxDockerStream returns the payload of a Docker exec attach stream. A
+// non-TTY exec is multiplexed with 8-byte stdcopy frame headers
+// ([STREAM_TYPE(0..2),0,0,0,SIZE(4 BE)]); a TTY exec — or a raw-stream test
+// double — is not. We detect framing from the first header and demux only when
+// it's present, so a raw stream passes through untouched. stdout+stderr collapse
+// into one buffer, matching the previous combined-output behaviour.
+func demuxDockerStream(b []byte) []byte {
+	if !looksMultiplexed(b) {
+		return b
+	}
+	var out bytes.Buffer
+	if _, err := stdcopy.StdCopy(&out, &out, bytes.NewReader(b)); err != nil {
+		// Malformed framing: fall back to raw bytes rather than dropping output.
+		return b
+	}
+	return out.Bytes()
+}
+
+// looksMultiplexed reports whether b starts with a plausible stdcopy frame
+// header: a stream-type byte in {0,1,2} followed by three zero bytes. Real
+// command output starts with a printable byte, so it never false-matches.
+func looksMultiplexed(b []byte) bool {
+	return len(b) >= 8 && b[0] <= 2 && b[1] == 0 && b[2] == 0 && b[3] == 0
 }
 
 // createTarFromDir creates a tar archive of the directory at srcDir. The
