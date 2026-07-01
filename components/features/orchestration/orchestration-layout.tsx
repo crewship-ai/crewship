@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Workflow, Clock, Activity, GitBranch,
-  PanelLeftClose, PanelLeftOpen,
+  PanelLeftOpen,
   FileCode2, Container,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
   CircleDot, FolderKanban, ScrollText,
@@ -12,6 +12,8 @@ import {
 } from "lucide-react"
 // Tabs replaced with custom nav for orchestration toolbar
 import { Button } from "@/components/ui/button"
+import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
+import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 import { cn } from "@/lib/utils"
 import { WorkflowGraph } from "@/components/features/orchestration/workflow-graph"
 import { PipelineDetailSheet } from "@/components/features/orchestration/pipeline-detail-sheet"
@@ -233,7 +235,7 @@ export function OrchestrationLayout({
       // `/` — focus the issues search input (works only outside inputs)
       if (e.key === "/" && !isInputContext) {
         const el = document.querySelector<HTMLInputElement>(
-          "input[data-issues-search-input]",
+          "[data-issues-search] input",
         )
         if (el) {
           e.preventDefault()
@@ -542,48 +544,27 @@ export function OrchestrationLayout({
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
       {/* ---- Toolbar: Tab navigation + context + actions (single row) ---- */}
       {showToolbar && (
-        <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-white/[0.08] px-2 sm:px-3 gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-          {/* Tabs */}
-          {visibleTabs.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => setActiveTab(id)}
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-all duration-100 relative top-px whitespace-nowrap shrink-0",
-                activeTab === id
-                  ? "border-blue-400 text-blue-400"
-                  : "border-transparent text-muted-foreground hover:text-foreground/80",
-              )}
-            >
-              <Icon className="h-3 w-3 opacity-75" />
-              {label}
-            </button>
-          ))}
-
-          {/* spacer between tabs and actions */}
-
-          <div className="flex-1" />
-
-          {/* Create buttons — only relevant when issues UI is on this page */}
-          {showCreateButtons && (
-            <>
-              <button
-                onClick={() => setShowCreateIssue(true)}
-                className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium transition-colors shrink-0 bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
-              >
-                <CircleDot className="h-3 w-3" />
-                New Issue
-              </button>
-              <button
-                onClick={() => setShowCreateProject(true)}
-                className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium transition-colors shrink-0 bg-accent text-accent-foreground hover:bg-accent/80 border border-white/[0.08]"
-              >
-                <FolderKanban className="h-3 w-3" />
-                New Project
-              </button>
-            </>
-          )}
-        </div>
+        <SubBar
+          icon={mode === "issues" ? CircleDot : undefined}
+          title={mode === "activity" ? "Activity" : mode === "default" ? "Orchestration" : "Issues"}
+          description={`${missions.length} ${missions.length === 1 ? "issue" : "issues"}`}
+          ariaLabel={mode === "activity" ? "Activity" : mode === "default" ? "Orchestration" : "Issues"}
+          tabs={visibleTabs.map(({ id, label, icon }) => ({ id, label, icon }))}
+          activeTab={activeTab}
+          onTabChange={(id) => setActiveTab(id)}
+          actions={
+            showCreateButtons ? (
+              <>
+                <SubBarSecondary icon={FolderKanban} onClick={() => setShowCreateProject(true)}>
+                  New Project
+                </SubBarSecondary>
+                <SubBarPrimary icon={CircleDot} onClick={() => setShowCreateIssue(true)}>
+                  New Issue
+                </SubBarPrimary>
+              </>
+            ) : undefined
+          }
+        />
       )}
 
       {/* ---- Main 3-column layout ---- */}
@@ -592,7 +573,7 @@ export function OrchestrationLayout({
         style={{
           gridTemplateColumns: isMobile
             ? "1fr"
-            : `${leftCollapsed ? "48px" : "300px"} 1fr ${showRightPanel ? "360px" : "0px"}`,
+            : `${leftCollapsed ? "48px" : "280px"} 1fr ${showRightPanel ? "360px" : "0px"}`,
           gridTemplateRows: "1fr auto",
         }}
       >
@@ -626,8 +607,7 @@ export function OrchestrationLayout({
                     exit={{ x: -280 }}
                     transition={{ type: "spring", damping: 25, stiffness: 300 }}
                   >
-                    <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.1]">
-                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Explorer</span>
+                    <div className="flex items-center justify-end px-3 py-2 border-b border-white/[0.1]">
                       <button
                         onClick={() => setLeftCollapsed(true)}
                         className="h-8 w-8 min-h-[44px] min-w-[44px] flex items-center justify-center text-muted-foreground hover:text-foreground"
@@ -670,25 +650,13 @@ export function OrchestrationLayout({
           <div className={cn(
             "row-span-1 border-r border-white/[0.1] bg-card flex flex-col min-h-0 transition-all duration-200 overflow-hidden",
           )}>
-            {/* Toggle */}
-            <div className="flex items-center justify-between px-2 py-1.5 border-b border-border shrink-0">
-              {!leftCollapsed && (
-                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Explorer
-                </span>
-              )}
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                className="text-muted-foreground/70 hover:text-foreground/70 ml-auto"
-                onClick={() => setLeftCollapsed(!leftCollapsed)}
-              >
-                {leftCollapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
-              </Button>
-            </div>
-
-            <AnimatePresence mode="wait">
-              {!leftCollapsed && (
+            {leftCollapsed ? (
+              /* Collapsed rail — a single expand button, no empty strip. */
+              <div className="flex h-full flex-col items-center pt-1.5">
+                <SidebarCollapseButton collapsed onToggle={() => setLeftCollapsed(false)} />
+              </div>
+            ) : (
+              <AnimatePresence mode="wait">
                 <motion.div
                   key={selectedMissionId}
                   initial={{ opacity: 0, x: -8 }}
@@ -719,10 +687,11 @@ export function OrchestrationLayout({
                     onAgentFilter={setFilterAgentId}
                     filterPriority={filterPriority}
                     onPriorityFilter={setFilterPriority}
+                    onToggleCollapse={() => setLeftCollapsed(true)}
                   />
                 </motion.div>
-              )}
-            </AnimatePresence>
+              </AnimatePresence>
+            )}
           </div>
         )}
 

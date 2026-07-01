@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useMemo, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import {
   LayoutDashboard, Building, Users, Server, Shield, Database, ListTodo, FileLock,
@@ -9,6 +9,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { SubBar } from "@/components/layout/sub-bar"
+import {
+  SidebarToolbar, SidebarSearch, SidebarSection, SidebarRow, SIDEBAR_WIDTH,
+} from "@/components/layout/sidebar-kit"
 
 import type { TabKey, Stats, AdminOrg, AdminUser, KeeperStatus, KeeperLogEntry } from "./types"
 import { useAdminWebSocket } from "./hooks/use-admin-websocket"
@@ -78,6 +82,18 @@ export default function AdminPage() {
   const router = useRouter()
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
   const [tab, setTab] = useState<TabKey>("overview")
+  // Universal search doubles as a command-finder — filters the nav live.
+  const [navQuery, setNavQuery] = useState("")
+  const navQ = navQuery.trim().toLowerCase()
+  // Hooks must run before the early returns below, so keep this memo up here.
+  const filteredSections = useMemo(
+    () =>
+      sections
+        .map((s) => ({ ...s, items: s.items.filter((i) => !navQ || i.label.toLowerCase().includes(navQ)) }))
+        .filter((s) => s.items.length > 0),
+    [navQ],
+  )
+  const firstNavMatch = filteredSections[0]?.items[0]?.key
   const [stats, setStats] = useState<Stats | null>(null)
   const [orgs, setOrgs] = useState<AdminOrg[]>([])
   const [users, setUsers] = useState<AdminUser[]>([])
@@ -262,47 +278,55 @@ export default function AdminPage() {
   const activeItem = sections.flatMap((s) => s.items).find((i) => i.key === tab)
 
   return (
-    <div className="flex h-[calc(100vh-48px)]">
-      {/* ── Left nav ─────────────────────────────────────────────── */}
-      <aside className="w-[200px] shrink-0 border-r border-border bg-sidebar flex flex-col overflow-y-auto">
-        <div className="flex items-center gap-2 px-3 h-9 border-b border-sidebar-border">
-          <Shield className="h-3.5 w-3.5 text-sidebar-foreground/60" />
-          <span className="text-xs font-semibold text-sidebar-foreground/80">Admin Console</span>
-          <span className="ml-auto text-[10px] font-mono text-sidebar-foreground/40 uppercase tracking-wide">Owner</span>
-        </div>
-        <nav className="flex-1 px-2 pt-3 pb-4" aria-label="Admin sections">
-          {sections.map((section) => (
-            <div key={section.label} className="mb-1">
-              <div className="px-2 pt-3 pb-1 text-[10px] font-semibold text-sidebar-foreground/50 uppercase tracking-wider">
-                {section.label}
-              </div>
-              {section.items.map((item) => {
-                const Icon = item.icon
-                const isActive = item.key === tab
-                return (
-                  <button
-                    key={item.key}
-                    onClick={() => setTab(item.key)}
-                    aria-current={isActive ? "page" : undefined}
-                    className={cn(
-                      "flex items-center gap-2 w-full h-7 px-2 rounded-md text-xs transition-colors",
-                      isActive
-                        ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                        : "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent/50",
-                    )}
-                  >
-                    <Icon className={cn("h-3 w-3 shrink-0", isActive ? "opacity-100" : "opacity-60")} />
-                    <span className="truncate">{item.label}</span>
-                  </button>
-                )
-              })}
-            </div>
-          ))}
-        </nav>
-      </aside>
+    <div className="flex flex-col h-[calc(100vh-48px)]">
+      {/* Identity lives in the sub-bar (not repeated in the sidebar). */}
+      <SubBar
+        icon={Shield}
+        title="Admin Console"
+        ariaLabel="Admin Console"
+        meta={
+          <span className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground/60">Owner</span>
+        }
+      />
 
-      {/* ── Content ─────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex flex-1 min-h-0">
+        {/* ── Left nav ─────────────────────────────────────────────── */}
+        <aside className={cn(SIDEBAR_WIDTH, "shrink-0 border-r border-border bg-sidebar flex flex-col overflow-hidden")}>
+          <SidebarToolbar>
+            <SidebarSearch
+              value={navQuery}
+              onValueChange={setNavQuery}
+              placeholder="Search admin…"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && firstNavMatch) setTab(firstNavMatch)
+              }}
+            />
+          </SidebarToolbar>
+          <nav className="flex-1 overflow-y-auto pb-4" aria-label="Admin sections">
+            {filteredSections.map((section) => (
+              <SidebarSection key={section.label} label={section.label}>
+                {section.items.map((item) => {
+                  const Icon = item.icon
+                  const isActive = item.key === tab
+                  return (
+                    <SidebarRow
+                      key={item.key}
+                      selected={isActive}
+                      onSelect={() => setTab(item.key)}
+                      aria-label={item.label}
+                    >
+                      <Icon className={cn("h-3.5 w-3.5 shrink-0", isActive ? "opacity-100" : "opacity-60")} />
+                      <span className="truncate flex-1">{item.label}</span>
+                    </SidebarRow>
+                  )
+                })}
+              </SidebarSection>
+            ))}
+          </nav>
+        </aside>
+
+        {/* ── Content ─────────────────────────────────────────────── */}
+        <div className="flex-1 overflow-y-auto">
         <div className="p-4 md:p-6 space-y-4 max-w-5xl mx-auto">
           {activeItem && (
             <div className="flex items-center gap-2">
@@ -312,6 +336,7 @@ export default function AdminPage() {
           )}
           {renderContent()}
         </div>
+      </div>
       </div>
     </div>
   )

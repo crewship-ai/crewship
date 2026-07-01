@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo, useState } from "react"
 import {
   User, Building, Users,
   Box, Link2, Activity,
@@ -7,6 +8,13 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { LucideIcon } from "lucide-react"
+import {
+  SidebarToolbar,
+  SidebarSearch,
+  SidebarSection,
+  SidebarRow,
+  SIDEBAR_WIDTH,
+} from "@/components/layout/sidebar-kit"
 
 interface NavItem {
   key: string
@@ -49,47 +57,68 @@ interface SettingsNavProps {
 }
 
 export function SettingsNav({ activeTab, onTabChange, workspaceName }: SettingsNavProps) {
+  // Universal search doubles as a command-finder here — type "audit" to jump
+  // straight to Audit Log. Filters the nav live; Enter opens the first match.
+  const [query, setQuery] = useState("")
+  const q = query.trim().toLowerCase()
+
+  const filtered = useMemo(
+    () =>
+      sections
+        .map((s) => ({ ...s, items: s.items.filter((i) => !q || i.label.toLowerCase().includes(q)) }))
+        .filter((s) => s.items.length > 0),
+    [q],
+  )
+
+  const firstMatch = filtered[0]?.items[0]?.key
+
   return (
-    <aside className="w-[220px] shrink-0 bg-sidebar border-r border-sidebar-border flex flex-col">
-      <nav className="flex-1 overflow-y-auto px-2 pt-3 pb-4" aria-label="Settings sections">
-        {sections.map((section) => (
-          <div key={section.label} className="mb-1">
-            <div className="flex items-center gap-2 px-2 pt-3 pb-1">
-              <span className="text-[10px] font-semibold text-sidebar-foreground/50 uppercase tracking-wider">
-                {section.label}
-              </span>
-              {section.label === "Workspace" && workspaceName && (
-                <span className="text-[10px] text-sidebar-foreground/35 truncate font-mono">
+    <aside className={cn(SIDEBAR_WIDTH, "shrink-0 bg-sidebar border-r border-sidebar-border flex flex-col")}>
+      <SidebarToolbar>
+        <SidebarSearch
+          value={query}
+          onValueChange={setQuery}
+          placeholder="Search settings…"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && firstMatch) onTabChange(firstMatch)
+          }}
+        />
+      </SidebarToolbar>
+
+      <nav className="flex-1 overflow-y-auto pb-4" aria-label="Settings sections">
+        {filtered.map((section) => (
+          <SidebarSection
+            key={section.label}
+            label={section.label}
+            actions={
+              section.label === "Workspace" && workspaceName ? (
+                <span className="ml-1 truncate font-mono text-[10px] normal-case tracking-normal text-sidebar-foreground/35">
                   {workspaceName}
                 </span>
-              )}
-            </div>
+              ) : undefined
+            }
+          >
             {section.items.map((item) => {
               const isActive = item.key === activeTab
               return (
-                <button
+                <SidebarRow
                   key={item.key}
-                  onClick={() => onTabChange(item.key)}
-                  aria-current={isActive ? "page" : undefined}
-                  className={cn(
-                    "flex items-center gap-2 w-full h-7 px-2 rounded-md text-xs transition-colors",
-                    isActive
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                      : "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent/50",
-                  )}
+                  selected={isActive}
+                  onSelect={() => onTabChange(item.key)}
+                  aria-label={item.label}
                 >
-                  <item.icon className={cn("h-3 w-3 shrink-0", isActive ? "opacity-100" : "opacity-60")} />
-                  <span className="truncate">{item.label}</span>
+                  <item.icon className={cn("h-3.5 w-3.5 shrink-0", isActive ? "opacity-100" : "opacity-60")} />
+                  <span className="truncate flex-1">{item.label}</span>
                   {item.badge === "P2" && (
-                    <span className="ml-auto text-[10px] text-sidebar-foreground/40 shrink-0 font-mono">P2</span>
+                    <span className="ml-auto shrink-0 font-mono text-[10px] text-sidebar-foreground/40">P2</span>
                   )}
                   {item.badge === "OWNER" && (
-                    <span className="ml-auto text-[10px] text-sidebar-foreground/60 shrink-0 font-mono">Owner</span>
+                    <span className="ml-auto shrink-0 font-mono text-[10px] text-sidebar-foreground/60">Owner</span>
                   )}
-                </button>
+                </SidebarRow>
               )
             })}
-          </div>
+          </SidebarSection>
         ))}
       </nav>
     </aside>

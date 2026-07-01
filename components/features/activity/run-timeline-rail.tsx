@@ -17,7 +17,6 @@ import {
 } from "@/lib/activity/run-filters"
 import { RailToolbar, type SortAxis } from "./rail/rail-toolbar"
 import { RunGroupTree } from "./rail/run-group-tree"
-import { SavedViewsButton } from "./rail/saved-views"
 import { apiFetch } from "@/lib/api-fetch"
 
 // RunTimelineRail v3 — composed of toolbar + grouped tree. Replaces
@@ -164,30 +163,23 @@ export function RunTimelineRail({
 
   return (
     <div className="flex h-full flex-col bg-card">
-      <div className="relative">
-        <RailToolbar
-          filter={filter}
-          onFilterChange={setFilter}
-          search={search}
-          onSearchChange={setSearch}
-          sort={sort}
-          onSortChange={setSort}
-          group={group}
-          onGroupChange={setGroup}
-          counts={counts}
-          options={options}
-        />
-        <div className="absolute right-2 top-2">
-          <SavedViewsButton
-            current={{ filter, sort, group }}
-            onApply={(v) => {
-              setFilter(v.filter)
-              setSort(v.sort)
-              setGroup(v.group)
-            }}
-          />
-        </div>
-      </div>
+      <RailToolbar
+        filter={filter}
+        onFilterChange={setFilter}
+        search={search}
+        onSearchChange={setSearch}
+        sort={sort}
+        onSortChange={setSort}
+        group={group}
+        onGroupChange={setGroup}
+        counts={counts}
+        options={options}
+        onApplyView={(v) => {
+          setFilter(v.filter)
+          setSort(v.sort)
+          setGroup(v.group)
+        }}
+      />
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {loading && runs.length === 0 ? (
