@@ -82,7 +82,7 @@ Since PR #234 (migration 61) the legacy `agent_runs` table no longer exists; a "
 
 Trace-id propagation is explicit: emit sites attach the id to context with `journal.WithRunID(ctx, runID)`, and downstream emitters read it back via `RunIDFromContext(ctx)`. The `noop` emitter loudly errors on `run.*` types so a misconfigured wiring fails immediately rather than silently dropping observability.
 
-`journal.ListRuns` and `journal.RunStats` reconstruct the row shape and KPIs that used to come from `agent_runs`. The `/journal` UI's `Runs` tab is a thin view over these.
+`journal.ListRuns`, `journal.RunStats` and `journal.RunInsights` reconstruct the row shape, KPIs and windowed operations aggregate that used to come from `agent_runs`. The `/journal` UI's `Runs` tab (a fleet operations overview — see [below](#runs-fleet-operations-overview)) reads all three.
 
 #### `container.snapshot` — container actuals
 
@@ -260,10 +260,41 @@ Entries themselves never carry display strings — the journal stores stable IDs
 Since PR #234 the standalone `/runs` page is folded into `/journal` as a preset tab. The `/runs` URL serves a redirect to `/journal?tab=runs`. The tab strip is `Timeline | Runs | Stats`:
 
 - **Timeline** — chronological event stream with FTS, severity, type, and crew filters.
-- **Runs** — KPI tiles (total / completed / failed / cancelled / running) plus a table grouped by `trace_id`. Same data the old `/runs` page rendered, now sourced via `journal.ListRuns`.
+- **Runs** — a **fleet operations overview** (not just a list). Because it reads the run superset — *every* run in the workspace, including ad-hoc agent/chat/delegation runs that never touch a routine — it surfaces breakdowns the routine-scoped [Routines → Insights](/guides/routines) view structurally can't. See below.
 - **Stats** — workspace KPIs (calls/day, top entry types, top error types).
 
 All three share the same SSE stream and FTS index — selecting a tab does not retrigger a fetch, only a client-side filter shift. Audit-tab navigation is dropped (it was always a redirect placeholder); the `/audit` page remains in the sidebar for security review.
+
+### Runs — fleet operations overview
+
+The Runs tab has four sections, scoped by a `24h / 7d / 30d` window selector:
+
+1. **Live pulse** — every currently-running execution across the fleet, with live-ticking elapsed time. Sourced from `/api/v1/runs?status=RUNNING`.
+2. **KPI row** — total runs in the window with an outcome split-bar (succeeded vs failed), success rate, failure count, and median / p95 duration.
+3. **Breakdowns** — by **trigger** (schedule / agent / user / webhook / system), **top crews** (volume + fail rate), and by **model** (e.g. Opus vs Sonnet — the resolved model recorded on each run).
+4. **Recent runs table** — a filterable list (status + trigger); each row deep-links to that run's trace in the Timeline. Includes the resolved **Model** column.
+
+Sections 2 and 3 are backed by a dedicated aggregate:
+
+```
+GET /api/v1/runs/insights?window=24h    # 24h | 7d | 30d
+```
+
+Response: `{ window, totals{total,succeeded,failed,running}, duration{p50_ms,p95_ms},
+by_trigger[], by_model[], by_crew[], top_agents[], truncated }`. It reconstructs runs
+by grouping `journal_entries` on `trace_id` over the window (`journal.RunInsights`),
+folds the outcome / duration / breakdown counters in Go, and the API layer resolves
+`agent_id` → crew + display names. Aggregation is bounded to the most-recent
+`maxInsightRows` runs in the window; when that cap is hit, `truncated` is `true` and the
+UI says so rather than presenting a partial total as complete.
+
+CLI parity (drive it the same way an agent would):
+
+```
+crewship run insights                # last 24h
+crewship run insights --window 7d
+crewship run insights -o json        # machine-readable for scripting
+```
 
 ## Tenancy
 

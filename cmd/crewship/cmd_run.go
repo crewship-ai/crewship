@@ -628,6 +628,164 @@ var runListCmd = &cobra.Command{
 	},
 }
 
+// runInsightsResp mirrors the /api/v1/runs/insights response.
+type runInsightsResp struct {
+	Window string `json:"window"`
+	Totals struct {
+		Total     int `json:"total"`
+		Succeeded int `json:"succeeded"`
+		Failed    int `json:"failed"`
+		Running   int `json:"running"`
+	} `json:"totals"`
+	Duration struct {
+		P50Ms int64 `json:"p50_ms"`
+		P95Ms int64 `json:"p95_ms"`
+	} `json:"duration"`
+	ByTrigger []insightCat   `json:"by_trigger"`
+	ByModel   []insightCat   `json:"by_model"`
+	ByCrew    []insightCrew  `json:"by_crew"`
+	TopAgents []insightAgent `json:"top_agents"`
+	Truncated bool           `json:"truncated"`
+}
+
+type insightCat struct {
+	Key    string `json:"key"`
+	Total  int    `json:"total"`
+	Failed int    `json:"failed"`
+}
+type insightCrew struct {
+	Name   string `json:"name"`
+	Total  int    `json:"total"`
+	Failed int    `json:"failed"`
+}
+type insightAgent struct {
+	Name     string `json:"name"`
+	CrewName string `json:"crew_name"`
+	Total    int    `json:"total"`
+	Failed   int    `json:"failed"`
+}
+
+var runInsightsCmd = &cobra.Command{
+	Use:   "insights",
+	Short: "Fleet operations overview — outcome, duration, and breakdowns across ALL runs",
+	Long: `Aggregate every run in the workspace over a window (not just routine runs)
+into an operations snapshot: success/fail split, duration percentiles, and
+breakdowns by trigger, crew and model.
+
+Examples:
+  crewship run insights
+  crewship run insights --window 7d
+  crewship run insights -o json`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		window, _ := cmd.Flags().GetString("window")
+		switch window {
+		case "24h", "7d", "30d":
+		default:
+			return fmt.Errorf("bad --window %q: must be one of 24h, 7d, 30d", window)
+		}
+
+		client := newAPIClient()
+		resp, err := client.Get("/api/v1/runs/insights?window=" + window)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var body runInsightsResp
+		if err := cli.ReadJSON(resp, &body); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		if f.Format == "json" {
+			return f.JSON(body)
+		}
+		if f.Format == "yaml" {
+			return f.YAML(body)
+		}
+		return renderRunInsights(body)
+	},
+}
+
+// renderRunInsights prints the human-readable ops snapshot.
+func renderRunInsights(b runInsightsResp) error {
+	windowLabel := map[string]string{"24h": "last 24h", "7d": "last 7 days", "30d": "last 30 days"}[b.Window]
+	fmt.Printf("%sFleet operations · %s%s\n", cli.Bold, windowLabel, cli.Reset)
+	rate := "—"
+	if b.Totals.Succeeded+b.Totals.Failed > 0 {
+		rate = fmt.Sprintf("%d%%", int(float64(b.Totals.Succeeded)*100/float64(b.Totals.Succeeded+b.Totals.Failed)))
+	}
+	fmt.Printf("  %d runs   %d ok   %d failed   %d running   ·   success %s   ·   p50 %s  p95 %s\n\n",
+		b.Totals.Total, b.Totals.Succeeded, b.Totals.Failed, b.Totals.Running, rate,
+		fmtMillis(b.Duration.P50Ms), fmtMillis(b.Duration.P95Ms))
+
+	printCatSection("By trigger", b.ByTrigger)
+	printCrewSection("Top crews", b.ByCrew)
+	printCatSection("By model", b.ByModel)
+	printAgentSection("Top agents", b.TopAgents)
+
+	if b.Truncated {
+		fmt.Printf("%s(window exceeded the aggregation cap — figures cover the most recent runs only)%s\n", cli.Dim, cli.Reset)
+	}
+	if b.Totals.Total == 0 {
+		fmt.Printf("%sNo runs in this window.%s\n", cli.Dim, cli.Reset)
+	}
+	return nil
+}
+
+func printCatSection(title string, cats []insightCat) {
+	if len(cats) == 0 {
+		return
+	}
+	fmt.Printf("%s%s%s\n", cli.Dim, title, cli.Reset)
+	for _, c := range cats {
+		fmt.Printf("  %-18s %5d   %sfail %d%s\n", c.Key, c.Total, cli.Dim, c.Failed, cli.Reset)
+	}
+	fmt.Println()
+}
+
+func printCrewSection(title string, crews []insightCrew) {
+	if len(crews) == 0 {
+		return
+	}
+	fmt.Printf("%s%s%s\n", cli.Dim, title, cli.Reset)
+	for _, c := range crews {
+		fmt.Printf("  %-18s %5d   %sfail %d%s\n", c.Name, c.Total, cli.Dim, c.Failed, cli.Reset)
+	}
+	fmt.Println()
+}
+
+func printAgentSection(title string, agents []insightAgent) {
+	if len(agents) == 0 {
+		return
+	}
+	fmt.Printf("%s%s%s\n", cli.Dim, title, cli.Reset)
+	for _, a := range agents {
+		crew := a.CrewName
+		if crew == "" {
+			crew = "—"
+		}
+		fmt.Printf("  %-18s %5d   %s%s · fail %d%s\n", a.Name, a.Total, cli.Dim, crew, a.Failed, cli.Reset)
+	}
+	fmt.Println()
+}
+
+// fmtMillis renders a millisecond count as a compact duration ("18.4s",
+// "1m12s"), or "—" when zero (no finished runs to measure).
+func fmtMillis(ms int64) string {
+	if ms <= 0 {
+		return "—"
+	}
+	return (time.Duration(ms) * time.Millisecond).String()
+}
+
 func init() {
 	runCmd.Flags().StringP("prompt", "p", "", "Prompt text, @file, or @- for stdin")
 	runCmd.Flags().Bool("interactive", false, "Interactive chat mode")
@@ -651,5 +809,7 @@ func init() {
 	runCmd.Flags().String("effort", "", "Reasoning effort: minimal|low|medium|high|xhigh")
 	runCmd.Flags().Bool("show-thinking", false, "Surface reasoning blocks on stdout (not truncated)")
 
+	runInsightsCmd.Flags().String("window", "24h", "Aggregation window: 24h, 7d, or 30d")
 	runCmd.AddCommand(runListCmd)
+	runCmd.AddCommand(runInsightsCmd)
 }
