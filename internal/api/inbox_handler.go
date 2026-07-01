@@ -714,3 +714,61 @@ func (h *InboxHandler) BulkPatchState(w http.ResponseWriter, r *http.Request) {
 		"state":       body.State,
 	})
 }
+
+// Purge handles DELETE /api/v1/inbox — HARD-delete inbox rows for the context
+// workspace. This is a teardown/reset primitive (seed --nuke's full wipe, or an
+// operator clearing accumulated failed-run spam), NOT a per-user action: unlike
+// List/PatchState it deliberately does NOT apply the per-user visibility clause
+// — it clears the whole workspace partition regardless of who each row was
+// targeted at. Because that's destructive and cross-user, it's gated on the
+// "manage" role (OWNER/ADMIN) rather than any workspace member (the bulk
+// state-flip endpoint is member-open because it only touches rows the caller can
+// already see; a purge ignores that boundary, so it needs the stronger gate).
+//
+// Optional ?kind=failed_run scopes the delete to one kind — the common case:
+// drop the failed-run notifications a broken scheduled routine piled up without
+// touching pending waitpoints/escalations. With no kind, every row in the
+// workspace is deleted. Returns {"deleted": N}.
+func (h *InboxHandler) Purge(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	user := UserFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	if workspaceID == "" || user == nil {
+		replyError(w, http.StatusUnauthorized, "workspace required")
+		return
+	}
+	if !canRole(role, "manage") {
+		replyError(w, http.StatusForbidden, "admin role required")
+		return
+	}
+
+	query := `DELETE FROM inbox_items WHERE workspace_id = ?`
+	args := []interface{}{workspaceID}
+	if kind := r.URL.Query().Get("kind"); kind != "" {
+		switch kind {
+		case "waitpoint", "escalation", "failed_run", "message":
+			query += ` AND kind = ?`
+			args = append(args, kind)
+		default:
+			replyError(w, http.StatusBadRequest, "kind must be waitpoint|escalation|failed_run|message")
+			return
+		}
+	}
+
+	res, err := h.db.ExecContext(r.Context(), query, args...)
+	if err != nil {
+		h.logger.Error("inbox purge", "error", err)
+		replyError(w, http.StatusInternalServerError, "purge failed")
+		return
+	}
+	deleted, _ := res.RowsAffected()
+
+	// One broadcast so any open inbox repaints its list + bell badge.
+	if h.hub != nil && deleted > 0 {
+		broadcastWorkspaceEvent(h.hub, workspaceID, "inbox.updated", map[string]string{
+			"purge": "true",
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]int64{"deleted": deleted})
+}

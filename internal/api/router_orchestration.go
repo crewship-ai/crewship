@@ -234,6 +234,9 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Bulk state transition — the tree-grouped UI's "resolve all under
 	// this routine / crew" action. POST so the body can carry the id list.
 	r.mux.Handle("POST /api/v1/inbox/bulk", authed(wsCtx(http.HandlerFunc(ih.BulkPatchState))))
+	// Hard purge (admin-only) — teardown primitive for seed --nuke and
+	// operator spam-cleanup. Optional ?kind= scopes the wipe.
+	r.mux.Handle("DELETE /api/v1/inbox", authed(wsCtx(http.HandlerFunc(ih.Purge))))
 
 	// Memory health dashboard — 5-metric score with per-crew scope.
 	// Read-only; available to every workspace member because the
@@ -497,6 +500,9 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/crews/{crewId}/standup", authed(wsCtx(http.HandlerFunc(queries.Standup))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/escalations", authed(wsCtx(http.HandlerFunc(queries.ListEscalations))))
 	r.mux.Handle("PATCH /api/v1/escalations/{escalationId}/resolve", authed(wsCtx(http.HandlerFunc(queries.ResolveEscalation))))
+	// Hard purge of a crew's escalations (admin-only) — teardown primitive for
+	// seed --nuke; escalations have no workspace FK, so a crew delete orphans them.
+	r.mux.Handle("DELETE /api/v1/crews/{crewId}/escalations", authed(wsCtx(http.HandlerFunc(queries.PurgeEscalations))))
 
 	// Workspace-wide escalation count (public, authenticated)
 	r.mux.Handle("GET /api/v1/escalations/pending-count", authed(wsCtx(http.HandlerFunc(queries.PendingEscalationCount))))

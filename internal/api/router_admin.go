@@ -140,4 +140,18 @@ func (r *Router) registerAdminRoutes() {
 	legacyH := NewLegacyResourceHandler(r.db, r.logger, legacyPruner, legacyDetector)
 	r.mux.Handle("GET /api/v1/admin/legacy-resources", authed(wsCtx(http.HandlerFunc(legacyH.Detect))))
 	r.mux.Handle("POST /api/v1/admin/prune-legacy-resources", authed(wsCtx(http.HandlerFunc(legacyH.Prune))))
+
+	// Crew runtime teardown (admin-only). Removes the LIVE id-scoped docker
+	// containers+volumes of every crew in the workspace — the docker half of a
+	// full `seed --nuke` (crew DB delete is a soft-delete that never touches
+	// docker). Cached devcontainer images are preserved so a reseed doesn't
+	// force a rebuild. Nil pruner (non-docker provider) → handler 503s.
+	var runtimePruner provider.CrewRuntimePruner
+	if r.keeperContainer != nil {
+		if rp, ok := r.keeperContainer.(provider.CrewRuntimePruner); ok {
+			runtimePruner = rp
+		}
+	}
+	crewRuntimeH := NewCrewRuntimeHandler(r.db, r.logger, runtimePruner)
+	r.mux.Handle("POST /api/v1/admin/prune-crew-runtimes", authed(wsCtx(http.HandlerFunc(crewRuntimeH.Prune))))
 }

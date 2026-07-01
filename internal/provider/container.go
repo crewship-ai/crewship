@@ -258,6 +258,21 @@ type LegacyResourceDetector interface {
 	HasLegacyCrewResources(ctx context.Context, crews []CrewRef) (present bool, err error)
 }
 
+// CrewRuntimePruner tears down the LIVE (id-scoped) docker runtime for the
+// given crews — the agent container plus its home/tools volumes AND each crew's
+// sidecar container(s)+volumes — WITHOUT removing shared cached devcontainer
+// images (crewship-cache:<hash>). It powers the workspace full-teardown behind
+// seed --nuke: crew DB deletion is a soft-delete that never touched docker, so
+// containers and volumes would otherwise orphan. Preserving the image cache is
+// deliberate — a subsequent reseed reuses it instead of forcing a slow rebuild.
+// Unlike LegacyResourcePruner (instance-wide, slug-only names) the caller passes
+// exactly the crews of one workspace, each with id AND slug. Returns the names
+// actually removed; a per-resource failure is skipped, a daemon-list failure is
+// returned WITH the partial removed list.
+type CrewRuntimePruner interface {
+	PruneCrewRuntimes(ctx context.Context, crews []CrewRef) (removed []string, err error)
+}
+
 // InteractiveExecConfig configures an interactive (TTY) exec session.
 type InteractiveExecConfig struct {
 	ContainerID string

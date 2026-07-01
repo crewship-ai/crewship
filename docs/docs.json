@@ -362,7 +362,8 @@
               "cli/eval",
               "cli/consolidate",
               "cli/credential",
-              "cli/seed"
+              "cli/seed",
+              "cli/nuke"
             ]
           },
           {

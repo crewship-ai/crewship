@@ -137,6 +137,7 @@ func init() {
 	rootCmd.AddCommand(issueCmd)
 	rootCmd.AddCommand(projectCmd)
 	rootCmd.AddCommand(seedCmd)
+	rootCmd.AddCommand(nukeCmd)
 	rootCmd.AddCommand(featuresCmd)
 	rootCmd.AddCommand(runtimesCmd)
 	rootCmd.AddCommand(memoryCmd)

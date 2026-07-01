@@ -58,11 +58,14 @@ The token + workspace are saved to `~/.crewship/cli-config.yaml`, so any follow-
 crewship seed --nuke
 # ⚠️  NUKE permanently deletes ALL contents of workspace "Acme Engineering" (acme)
 #     on https://crewship-dev2.unifylab.cz — 4 crew(s), 12 agent(s), plus every
-#     issue, project, label, pipeline, schedule, webhook, and credential. This
-#     cannot be undone.
+#     issue, project, label, pipeline, schedule, webhook, credential, inbox item,
+#     and escalation, and each crew's docker container(s)+volumes (cached images
+#     are kept). This cannot be undone.
 #
 # Type the workspace slug "acme" to confirm the wipe: acme
 ```
+
+`seed --nuke` is an **alias for [`crewship nuke all`](/cli/nuke)** — the full teardown: DB entities **plus** inbox items, escalations, and each crew's docker container(s)+volumes. Cached devcontainer images are preserved, so the reseed reuses them instead of forcing a rebuild. Use the `nuke` subcommands directly when you want to clear just one thing (e.g. `crewship nuke inbox --kind failed_run` to drop failed-run spam without touching data).
 
 Wipes the active workspace's contents first, then seeds. Two guards:
 

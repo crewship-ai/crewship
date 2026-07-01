@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -50,7 +52,9 @@ func confirmNuke(cmd *cobra.Command, client *cli.Client, server string) error {
 
 	fmt.Fprintf(os.Stderr, "\n⚠️  NUKE permanently deletes ALL contents of workspace %q (%s)\n", wsName, wsSlug)
 	fmt.Fprintf(os.Stderr, "    on %s — %d crew(s), %d agent(s), plus every issue, project,\n", server, crews, agents)
-	fmt.Fprintln(os.Stderr, "    label, pipeline, schedule, webhook, and credential. This cannot be undone.")
+	fmt.Fprintln(os.Stderr, "    label, pipeline, schedule, webhook, credential, inbox item, and")
+	fmt.Fprintln(os.Stderr, "    escalation, and each crew's docker container(s)+volumes (cached")
+	fmt.Fprintln(os.Stderr, "    images are kept). This cannot be undone.")
 
 	if yes {
 		fmt.Fprintln(os.Stderr, "    --yes set; proceeding without prompt.")
@@ -139,11 +143,18 @@ func nukeCount(client *cli.Client, path string) int {
 	return len(items)
 }
 
-func seedNuke(ctx context.Context, client *cli.Client) error {
+// nukeData deletes every workspace-scoped DB ENTITY — issues, projects, labels,
+// agents, credentials, integrations, pipeline webhooks/schedules/pipelines, and
+// crews — via the per-entity DELETE endpoints. It deliberately does NOT touch
+// inbox items, escalations, or docker runtimes; those are separate teardown
+// pieces the `nuke all` path composes AROUND this one (and, crucially, BEFORE
+// it, since deleting crews here would orphan the crew-scoped teardowns).
+// Returns the aggregated per-entity failures; a non-nil error is reserved for a
+// hard context cancellation, on which the caller should abort entirely.
+func nukeData(ctx context.Context, client *cli.Client) ([]string, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
-	fmt.Fprintln(os.Stderr, "Nuking workspace contents...")
 
 	var failures []string
 
@@ -155,7 +166,7 @@ func seedNuke(ctx context.Context, client *cli.Client) error {
 	offset := 0
 	for {
 		if err := ctx.Err(); err != nil {
-			return err
+			return nil, err
 		}
 		resp, err := client.Get(fmt.Sprintf("/api/v1/issues?limit=%d&offset=%d", pageLimit, offset))
 		if err != nil {
@@ -177,7 +188,7 @@ func seedNuke(ctx context.Context, client *cli.Client) error {
 		deletedOnPage := 0
 		for _, iss := range issues {
 			if err := ctx.Err(); err != nil {
-				return err
+				return nil, err
 			}
 			if iss.Identifier == nil {
 				continue
@@ -299,6 +310,57 @@ func seedNuke(ctx context.Context, client *cli.Client) error {
 	if err := nukeList(ctx, client, "/api/v1/crews", "/api/v1/crews/"); err != nil {
 		failures = append(failures, fmt.Sprintf("crews: %v", err))
 	}
+
+	return failures, nil
+}
+
+// seedNuke is the full-teardown entry point kept under its historical name so
+// `crewship seed --nuke` (cmd_seed.go) and its tests keep working — it delegates
+// to nukeAll, the single orchestrator shared with the `crewship nuke all`
+// subcommand.
+func seedNuke(ctx context.Context, client *cli.Client) error {
+	return nukeAll(ctx, client)
+}
+
+// nukeAll is the full workspace teardown: DB entities + inbox + escalations +
+// crew docker runtimes. Order matters — escalations and runtimes are
+// crew-scoped and MUST run while the crews still exist, so they go BEFORE
+// nukeData (which deletes the crew rows last). Inbox is independent. Every
+// piece feeds one aggregated "workspace cleanup had N failures" error so a
+// partial teardown is fully reported rather than failing fast.
+func nukeAll(ctx context.Context, client *cli.Client) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stderr, "Nuking workspace contents...")
+
+	var failures []string
+
+	// Escalations first — they carry a workspace_id but NO foreign key, so a
+	// crew delete never cascades to them; clear them while the crews (needed to
+	// enumerate) still exist.
+	if err := nukeEscalations(ctx, client, ""); err != nil {
+		failures = append(failures, fmt.Sprintf("escalations: %v", err))
+	}
+	// Crew docker runtimes next — the server enumerates the workspace's LIVE
+	// crews (deleted_at IS NULL), so this too must precede crew deletion.
+	// Cached images are preserved (no rebuild forced on reseed). A docker-less
+	// server 503s — tolerated inside nukeRuntimes, not fatal.
+	if err := nukeRuntimes(ctx, client); err != nil {
+		failures = append(failures, fmt.Sprintf("crew runtimes: %v", err))
+	}
+	// Inbox is independent of crews (failed-run spam, resolved escalations,
+	// messages) — no per-entity delete cascades to it.
+	if err := nukeInbox(ctx, client, ""); err != nil {
+		failures = append(failures, fmt.Sprintf("inbox: %v", err))
+	}
+
+	// DB entities last — this is the step that deletes the crew rows.
+	dataFailures, err := nukeData(ctx, client)
+	if err != nil {
+		return err // hard context cancellation
+	}
+	failures = append(failures, dataFailures...)
 
 	if len(failures) > 0 {
 		return fmt.Errorf("workspace cleanup had %d failures: %s", len(failures), strings.Join(failures, "; "))
@@ -431,6 +493,113 @@ func nukeCrewIntegrations(ctx context.Context, client *cli.Client) error {
 	}
 	if len(failures) > 0 {
 		return fmt.Errorf("%d delete failures: %s", len(failures), strings.Join(failures, "; "))
+	}
+	return nil
+}
+
+// nukeInbox hard-deletes inbox items in the workspace via the admin purge
+// endpoint. kind == "" clears every item; a non-empty kind
+// (waitpoint|escalation|failed_run|message) scopes the wipe. Best-effort within
+// the failures[] aggregation: a non-2xx is surfaced but never aborts the rest.
+func nukeInbox(ctx context.Context, client *cli.Client, kind string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	path := "/api/v1/inbox"
+	if kind != "" {
+		path += "?kind=" + url.QueryEscape(kind)
+	}
+	r, err := client.Delete(path)
+	if err != nil {
+		return err
+	}
+	defer r.Body.Close()
+	if r.StatusCode >= 300 {
+		return fmt.Errorf("DELETE %s: HTTP %d", path, r.StatusCode)
+	}
+	return nil
+}
+
+// nukeEscalations hard-deletes crew escalations. crewFilter == "" enumerates
+// every crew in the workspace and clears each one's rows (used by the full
+// teardown, before the crew rows are deleted — escalations have no workspace FK
+// so nothing else stops them orphaning); a non-empty crewFilter (slug or id)
+// targets one crew. Per-crew failures are aggregated, not fatal.
+func nukeEscalations(ctx context.Context, client *cli.Client, crewFilter string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	var crewIDs []string
+	if crewFilter != "" {
+		id, err := resolveCrewID(client, crewFilter)
+		if err != nil {
+			return err
+		}
+		crewIDs = []string{id}
+	} else {
+		resp, err := client.Get("/api/v1/crews")
+		if err != nil {
+			return fmt.Errorf("GET /api/v1/crews: %w", err)
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return fmt.Errorf("GET /api/v1/crews: %w", err)
+		}
+		var crews []struct {
+			ID string `json:"id"`
+		}
+		if err := cli.ReadJSON(resp, &crews); err != nil {
+			return fmt.Errorf("decode crews: %w", err)
+		}
+		for _, c := range crews {
+			if c.ID != "" {
+				crewIDs = append(crewIDs, c.ID)
+			}
+		}
+	}
+
+	var failures []string
+	for _, id := range crewIDs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		r, err := client.Delete("/api/v1/crews/" + id + "/escalations")
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("DELETE crew %s escalations: %v", id, err))
+			continue
+		}
+		if r.StatusCode >= 300 {
+			failures = append(failures, fmt.Sprintf("DELETE crew %s escalations: HTTP %d", id, r.StatusCode))
+		}
+		r.Body.Close()
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("%d escalation purge failures: %s", len(failures), strings.Join(failures, "; "))
+	}
+	return nil
+}
+
+// nukeRuntimes tears down every crew's docker container(s)+volumes via the
+// server. Crew DB deletion is a soft-delete that never touched docker, so
+// without this the runtimes orphan. A docker-less server answers 503 — expected
+// on a dev box without docker — so we warn and continue rather than failing the
+// whole nuke over it. Cached images are preserved server-side (no rebuild forced
+// on reseed).
+func nukeRuntimes(ctx context.Context, client *cli.Client) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r, err := client.Post("/api/v1/admin/prune-crew-runtimes", nil)
+	if err != nil {
+		return err
+	}
+	defer r.Body.Close()
+	if r.StatusCode == http.StatusServiceUnavailable {
+		fmt.Fprintln(os.Stderr, "  ! nuke: docker not configured on server; skipping crew runtime teardown")
+		return nil
+	}
+	if r.StatusCode >= 300 {
+		return fmt.Errorf("POST /api/v1/admin/prune-crew-runtimes: HTTP %d", r.StatusCode)
 	}
 	return nil
 }
