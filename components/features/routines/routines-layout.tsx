@@ -5,11 +5,11 @@ import { motion, AnimatePresence } from "motion/react"
 import { useRouter } from "next/navigation"
 import {
   ScrollText, Calendar, BarChart3, Workflow,
-  Plus, Upload, Settings, PanelLeftClose, PanelLeftOpen,
+  Plus, Upload, PanelLeftClose, PanelLeftOpen,
   X, ChevronLeft, ChevronRight,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { SubBar, SubBarPrimary, SubBarSecondary, SubBarIconButton } from "@/components/layout/sub-bar"
+import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api-fetch"
@@ -203,7 +203,6 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
             >
               New routine
             </SubBarPrimary>
-            <SubBarIconButton icon={Settings} aria-label="Routines settings" title="Routines settings" />
           </>
         }
       />
