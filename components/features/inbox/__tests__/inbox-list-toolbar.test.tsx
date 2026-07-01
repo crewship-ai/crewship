@@ -17,56 +17,50 @@ beforeEach(() => {
   }
 })
 
-const ITEMS: InboxItem[] = [
-  {
-    id: "ibx_escalation_1",
-    workspace_id: "ws-test",
-    kind: "escalation",
-    source_id: "esc-1",
-    title: "Credential approval: AWS-API-Key",
-    sender_type: "system",
-    sender_name: "Alice",
-    state: "unread",
-    priority: "high",
-    blocking: true,
-    payload: { escalation_type: "GENERAL" },
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: "ibx_failed_run_1",
-    workspace_id: "ws-test",
-    kind: "failed_run",
-    source_id: "run-1",
-    title: "Scheduled routine failed: nightly-backup",
-    sender_type: "pipeline",
-    sender_name: "nightly-backup",
-    state: "read",
-    priority: "medium",
-    blocking: false,
-    payload: { pipeline_slug: "nightly-backup" },
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-]
-
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-test" }) }))
 vi.mock("@/hooks/use-dashboard-data", () => ({ useCrewSummaries: () => ({ data: [] }) }))
 
-const patch = vi.fn().mockResolvedValue(undefined)
-const refresh = vi.fn().mockResolvedValue(undefined)
+// Everything the factory needs is declared INSIDE it — vi.mock is hoisted
+// above the imports, so closing over module-scope locals would hit the TDZ.
 vi.mock("@/hooks/use-inbox", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/use-inbox")>()
+  const items: InboxItem[] = [
+    {
+      id: "ibx_escalation_1",
+      workspace_id: "ws-test",
+      kind: "escalation",
+      source_id: "esc-1",
+      title: "Credential approval: AWS-API-Key",
+      sender_type: "system",
+      sender_name: "Alice",
+      state: "unread",
+      priority: "high",
+      blocking: true,
+      payload: { escalation_type: "GENERAL" },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    {
+      id: "ibx_failed_run_1",
+      workspace_id: "ws-test",
+      kind: "failed_run",
+      source_id: "run-1",
+      title: "Scheduled routine failed: nightly-backup",
+      sender_type: "pipeline",
+      sender_name: "nightly-backup",
+      state: "read",
+      priority: "medium",
+      blocking: false,
+      payload: { pipeline_slug: "nightly-backup" },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+  ]
+  const patch = vi.fn().mockResolvedValue(undefined)
+  const refresh = vi.fn().mockResolvedValue(undefined)
   return {
     ...actual,
-    useInbox: () => ({
-      items: ITEMS,
-      unreadCount: 1,
-      loading: false,
-      error: null,
-      patch,
-      refresh,
-    }),
+    useInbox: () => ({ items, unreadCount: 1, loading: false, error: null, patch, refresh }),
   }
 })
 
@@ -115,5 +109,22 @@ describe("InboxList — search-led toolbar", () => {
   it("surfaces the item priority as a pill on the row", () => {
     render(<InboxList />)
     expect(screen.getAllByText(/high/i).length).toBeGreaterThan(0)
+  })
+
+  it("drops a selection once a search hides it, so bulk never acts on unseen rows", async () => {
+    render(<InboxList />)
+    fireEvent.click(screen.getByRole("button", { name: /^select$/i }))
+
+    // Select the failed-run row, then narrow the search so it's hidden.
+    const cb = await screen.findByLabelText(/Scheduled routine failed/)
+    fireEvent.click(cb)
+    expect(screen.getByText(/1 selected/)).toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText(/search inbox/i), {
+      target: { value: "credential" },
+    })
+
+    // The hidden row leaves the selection — the bulk bar count follows.
+    expect(screen.queryByText(/1 selected/)).not.toBeInTheDocument()
   })
 })

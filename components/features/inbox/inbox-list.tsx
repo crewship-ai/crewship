@@ -480,11 +480,14 @@ export function InboxList() {
   }, [searchedItems, groupBy, crewName])
 
   // Drop checked ids that are no longer visible (filter switch, refresh,
-  // regroup) so the bulk bar count never lies about what it will act on.
+  // regroup, OR search narrowing) so the bulk bar count never lies about
+  // what it will act on — a selection hidden behind a search must not get
+  // swept up by a bulk Resolve. Keyed off searchedItems (the actually-
+  // rendered set), not just the state filter.
   useEffect(() => {
     setChecked((prev) => {
       if (prev.size === 0) return prev
-      const live = new Set(visibleItems.map((i) => i.id))
+      const live = new Set(searchedItems.map((i) => i.id))
       let changed = false
       const next = new Set<string>()
       for (const id of prev) {
@@ -493,7 +496,7 @@ export function InboxList() {
       }
       return changed ? next : prev
     })
-  }, [visibleItems])
+  }, [searchedItems])
 
   const toggleCollapse = (key: string) =>
     setCollapsed((prev) => {
@@ -532,10 +535,10 @@ export function InboxList() {
   // close vs. decision items the server will refuse to close. Drives the
   // confirmation warning so nothing important gets mass-closed by mistake.
   const selectionSplit = useMemo(() => {
-    const sel = visibleItems.filter((it) => checked.has(it.id))
+    const sel = searchedItems.filter((it) => checked.has(it.id))
     const decision = sel.filter(isDecisionItem)
     return { total: sel.length, decision: decision.length, safe: sel.length - decision.length }
-  }, [visibleItems, checked])
+  }, [searchedItems, checked])
 
   // Bulk apply via /inbox/bulk. Chunked to the backend's 500-id cap so a
   // large select-all can't fail the whole action; the server skips
