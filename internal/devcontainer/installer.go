@@ -15,6 +15,7 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/pkg/stdcopy"
 )
 
 var featureIDRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,49}$`)
@@ -165,8 +166,18 @@ func (inst *Installer) execInContainerFull(ctx context.Context, containerID stri
 	}
 	defer resp.Close()
 
+	// The exec is attached WITHOUT a TTY (ExecOptions has no Tty:true), so
+	// Docker multiplexes stdout/stderr with an 8-byte stdcopy frame header per
+	// write ([STREAM_TYPE,0,0,0,SIZE...]). A raw io.Copy leaves those headers in
+	// the output — harmless for callers that only check the exit code, but
+	// captureLoginPath uses the value VERBATIM as the container PATH, so the
+	// leading "\x01\x00\x00\x00\x00\x00\x00…" header injected a NUL byte and runc
+	// rejected every container with `invalid environment variable "PATH":
+	// contains nul byte`. Demultiplex with stdcopy (writing both streams into the
+	// same buffer preserves the previous combined-output semantics, minus the
+	// frame headers).
 	var buf bytes.Buffer
-	if _, copyErr := io.Copy(&buf, resp.Reader); copyErr != nil {
+	if _, copyErr := stdcopy.StdCopy(&buf, &buf, resp.Reader); copyErr != nil {
 		inst.logger.Warn("failed to read exec output", "error", copyErr)
 	}
 

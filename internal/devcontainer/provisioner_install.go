@@ -373,7 +373,10 @@ func (p *Provisioner) captureLoginPath(ctx context.Context, containerID string) 
 			"exit_code", exitCode, "error", err)
 		return ""
 	}
-	path := strings.TrimSpace(out)
+	// Defense in depth alongside the stdcopy demux at the exec reader: strip any
+	// control/NUL bytes so a stray one can NEVER reach the container PATH (runc
+	// rejects the whole container if PATH contains a NUL byte).
+	path := sanitizeCapturedPath(out)
 	// Sanity guard: a valid PATH always contains at least one absolute dir. A
 	// blank or junk value (e.g. a shell that printed a warning) must not
 	// override the image PATH, so treat it as a capture miss.
@@ -381,6 +384,24 @@ func (p *Provisioner) captureLoginPath(ctx context.Context, containerID string) 
 		return ""
 	}
 	return path
+}
+
+// sanitizeCapturedPath removes bytes that must never appear in a container PATH.
+// The capture reads a container exec stream; a demux miss or a shell that
+// emitted control characters can leave NUL/control bytes in the value, and runc
+// rejects the container outright if PATH contains a NUL. We drop control bytes
+// (< 0x20, plus DEL) and the U+FFFD replacement rune (what an undecodable
+// stream-frame size byte becomes), keeping only printable path text.
+func sanitizeCapturedPath(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r == '�' || r == 0x7f || r < 0x20 {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // writeAggregatedContainerEnv writes the merged (feature + root-level)
