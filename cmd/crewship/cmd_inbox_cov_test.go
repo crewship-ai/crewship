@@ -352,7 +352,7 @@ func TestInboxBulkReadRunE_AllUnreadHitsCap(t *testing.T) {
 	stub.OnGet("/api/v1/inbox", clitest.JSONResponse(200, map[string]any{"rows": rows}))
 
 	err := inboxBulkReadCmd.RunE(inboxBulkReadCmd, nil)
-	if err == nil || !strings.Contains(err.Error(), "more than 500 unread items") {
+	if err == nil || !strings.Contains(err.Error(), "unread-item page cap") {
 		t.Errorf("expected cap refusal; got %v", err)
 	}
 	// Refusal must happen BEFORE any bulk mutation fires.

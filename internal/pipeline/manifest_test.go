@@ -106,7 +106,7 @@ func TestExtractManifest_CredentialsDedupedSorted(t *testing.T) {
 		CredsRequired: []CredReq{
 			{Type: "stripe", Scope: "write"},
 			{Type: "github", Scope: "repo"},
-			{Type: "stripe", Scope: "write"}, // exact dup
+			{Type: "stripe", Scope: "write"},     // exact dup
 			{Type: "  github ", Scope: " repo "}, // dup after trim
 		},
 		Steps: []Step{{ID: "s1", Type: StepAgentRun, AgentSlug: "a"}},

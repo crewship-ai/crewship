@@ -48,8 +48,7 @@ func covPCDef(slug string) string {
 // covPCSaveBody assembles a userSaveRequest JSON body. It clears the store
 // test-gate via skip_test_gate (the OWNER/ADMIN escape hatch) — the user save
 // path no longer trusts body-supplied last_test_run_* fields, so every
-// gate-reaching caller of this helper drives it as OWNER/ADMIN. Tests that
-// exercise the HMAC proof path use saveBodyWithToken instead.
+// gate-reaching caller of this helper drives it as OWNER/ADMIN.
 func covPCSaveBody(slug, crewID string, extra map[string]any) string {
 	body := map[string]any{
 		"slug":           slug,
@@ -63,29 +62,6 @@ func covPCSaveBody(slug, crewID string, extra map[string]any) string {
 	}
 	for k, v := range extra {
 		body[k] = v
-	}
-	b, _ := json.Marshal(body)
-	return string(b)
-}
-
-// saveBodyWithToken builds a userSaveRequest JSON body whose save_token is a
-// valid HMAC over (workspace, definition_hash, user), after enabling the
-// handler's signing secret — mirroring the public /test_run → /save proof flow.
-// def MUST be the exact definition bytes embedded in the body (DefinitionHash
-// is over raw bytes), which json.RawMessage guarantees.
-func saveBodyWithToken(h *PipelineHandler, ws, userID, slug, crewID, def string) string {
-	secret := []byte("test-secret-32-bytes-long-padxxx")
-	h.SetSaveTokenSecret(secret)
-	token := signSaveToken(secret, ws, definitionHashHex([]byte(def)), userID, time.Now())
-	body := map[string]any{
-		"slug":        slug,
-		"name":        slug + " name",
-		"description": "desc",
-		"definition":  json.RawMessage(def),
-		"save_token":  token,
-	}
-	if crewID != "" {
-		body["author_crew_id"] = crewID
 	}
 	b, _ := json.Marshal(body)
 	return string(b)
