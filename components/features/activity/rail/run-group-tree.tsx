@@ -284,7 +284,7 @@ function RunRow({
         className={cn(
           "flex w-full items-center gap-1.5 px-2 py-1 text-left transition-colors hover:bg-white/[0.025]",
           accentBorder,
-          selected && "bg-blue-500/10",
+          selected && "bg-primary/10",
         )}
       >
         <span className={cn("h-4 w-4 shrink-0 rounded-full p-0.5", tint.bg)}>

@@ -234,7 +234,7 @@ export function OrchestrationLayout({
       // `/` — focus the issues search input (works only outside inputs)
       if (e.key === "/" && !isInputContext) {
         const el = document.querySelector<HTMLInputElement>(
-          "input[data-issues-search-input]",
+          "[data-issues-search] input",
         )
         if (el) {
           e.preventDefault()
@@ -572,7 +572,7 @@ export function OrchestrationLayout({
         style={{
           gridTemplateColumns: isMobile
             ? "1fr"
-            : `${leftCollapsed ? "48px" : "300px"} 1fr ${showRightPanel ? "360px" : "0px"}`,
+            : `${leftCollapsed ? "48px" : "280px"} 1fr ${showRightPanel ? "360px" : "0px"}`,
           gridTemplateRows: "1fr auto",
         }}
       >
@@ -606,8 +606,7 @@ export function OrchestrationLayout({
                     exit={{ x: -280 }}
                     transition={{ type: "spring", damping: 25, stiffness: 300 }}
                   >
-                    <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.1]">
-                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Explorer</span>
+                    <div className="flex items-center justify-end px-3 py-2 border-b border-white/[0.1]">
                       <button
                         onClick={() => setLeftCollapsed(true)}
                         className="h-8 w-8 min-h-[44px] min-w-[44px] flex items-center justify-center text-muted-foreground hover:text-foreground"
@@ -652,11 +651,6 @@ export function OrchestrationLayout({
           )}>
             {/* Toggle */}
             <div className="flex items-center justify-between px-2 py-1.5 border-b border-border shrink-0">
-              {!leftCollapsed && (
-                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Explorer
-                </span>
-              )}
               <Button
                 variant="ghost"
                 size="icon-xs"

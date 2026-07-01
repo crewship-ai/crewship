@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { useRouter } from "next/navigation"
 import {
   ScrollText, Calendar, BarChart3, Workflow,
   Plus, Upload, PanelLeftClose, PanelLeftOpen,
@@ -21,7 +20,6 @@ import { RoutinesDetailPanel } from "./routines-detail-panel"
 import { type RoutineFilters } from "./routines-filter-sidebar"
 import { RoutinesExplorer } from "./routines-explorer"
 import { RoutineCreateDialog } from "./routine-create-dialog"
-import type { Mission } from "@/lib/types/mission"
 import { BottomPanel } from "@/components/features/crews/bottom-panel"
 import type { BottomPanelContext } from "@/components/features/crews/bottom-panel/types"
 
@@ -63,23 +61,6 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
-  // Missions (with tasks) fed to the sidebar's Inbox section. Same
-  // endpoint + shape as orchestration-page-shell.tsx — fetched here so
-  // the inbox is live on /routines without depending on a separate
-  // shell. One-shot on mount; the inbox is intended as a peek + proklik
-  // to /inbox, not a live triage surface, so polling isn't justified.
-  const [missions, setMissions] = useState<Mission[]>([])
-  const router = useRouter()
-
-  useEffect(() => {
-    let cancelled = false
-    if (!workspaceId) return
-    apiFetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=50&include_tasks=true`)
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
-      .then((data: Mission[]) => { if (!cancelled) setMissions(Array.isArray(data) ? data : []) })
-      .catch(() => { if (!cancelled) setMissions([]) })
-    return () => { cancelled = true }
-  }, [workspaceId])
 
   // Keyboard shortcuts (mirrors /issues): `/` focuses the routines
   // search input, `Esc` clears every filter, `c` opens the create
@@ -211,12 +192,12 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
       <div className="flex flex-1 overflow-hidden">
         {/* Left filter panel — same chrome as the /issues sidebar
           * (bg-card, not bg-card/30) so the two surfaces feel like
-          * pieces of one app rather than two near-misses. The width
-          * also matches the orchestration explorer (300px expanded). */}
+          * pieces of one app rather than two near-misses. Width unified
+          * to the shared sidebar-kit 280px (SIDEBAR_WIDTH). */}
         <aside
           className={cn(
             "shrink-0 border-r border-white/[0.06] bg-card transition-all overflow-hidden",
-            leftCollapsed ? "w-9" : "w-[300px]",
+            leftCollapsed ? "w-9" : "w-[280px]",
           )}
         >
           {leftCollapsed ? (
@@ -233,11 +214,9 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
             </div>
           ) : (
             <div className="relative flex h-full flex-col">
-              {/* New explorer-style sidebar — mirrors /issues UnifiedExplorer
-                  chrome (search + Filter dropdown), with a STATUS bucket
-                  section (like Projects), a ROUTINES list (like Issues),
-                  and an INBOX section at the bottom with hover proklik
-                  to /inbox. */}
+              {/* Explorer-style sidebar built on the shared sidebar-kit —
+                  SidebarToolbar (search + Filter popover), a collapsible
+                  STATUS bucket section, and the ROUTINES list. */}
               <RoutinesExplorer
                 routines={pipelines}
                 search={search}
@@ -246,18 +225,6 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                 onSelectRoutine={handleSelect}
                 filters={filters}
                 onChange={setFilters}
-                missions={missions}
-                onTaskSelect={(_task, mission) => {
-                  // Inbox click navigates to the related issue page so
-                  // the user can resolve/approve where the full context
-                  // lives. Falls back to /inbox if the mission has no
-                  // identifier yet.
-                  if (mission.identifier) {
-                    router.push(`/issues/${encodeURIComponent(mission.identifier)}`)
-                  } else {
-                    router.push("/inbox")
-                  }
-                }}
               />
               <Button
                 size="sm"

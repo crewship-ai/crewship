@@ -7,12 +7,9 @@ import { create as createOrama, insertMultiple, search as oramaSearch } from "@o
 import type { AnyOrama } from "@orama/orama"
 import { VirtuosoGrid } from "react-virtuoso"
 import {
-  Search,
   Sparkles,
   Plus,
   X,
-  ChevronDown,
-  ChevronRight,
   Package,
   RefreshCw,
   ShieldCheck,
@@ -43,12 +40,17 @@ import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { ImportSkillDialog } from "@/components/skills/import-dialog"
 import { SubBar } from "@/components/layout/sub-bar"
+import {
+  SidebarToolbar,
+  SidebarSearch,
+  SidebarSection,
+  SidebarRow,
+} from "@/components/layout/sidebar-kit"
 import { SkillCard, type SkillCardData } from "@/components/features/skills/skill-card"
 import { SkillsDetailPanel } from "@/components/features/skills/skills-detail-panel"
 
@@ -102,7 +104,7 @@ const RUNTIMES = [
 const DETAIL_MIN_PX = 280
 const DETAIL_HARD_MAX_PX = 720
 const CENTRE_MIN_PX = 360
-const RAIL_OPEN_PX = 260
+const RAIL_OPEN_PX = 280
 const RAIL_COLLAPSED_PX = 44
 // Maturity dot colours mirror the bundled-skill ORDER BY in
 // internal/api/skills.go — OFFICIAL > CURATED > COMMUNITY >
@@ -171,6 +173,19 @@ export function SkillsBrowser() {
   useEffect(() => {
     if (isMobile) setRailCollapsed(true)
   }, [isMobile])
+  // Per-facet section collapse state, lifted out of the (previously
+  // internal-state) FacetSection so the shared <SidebarSection> can be
+  // driven as a controlled component. Domain + Source open by default;
+  // Runtime + Maturity start collapsed — same defaults as before.
+  const [facetOpen, setFacetOpen] = useState({
+    domain: true,
+    source: true,
+    runtime: false,
+    maturity: false,
+  })
+  const toggleFacetSection = useCallback((key: keyof typeof facetOpen) => {
+    setFacetOpen((prev) => ({ ...prev, [key]: !prev[key] }))
+  }, [])
 
   // Detail panel resizable width — drag handle on the panel's left
   // edge, persisted PER USER via /api/v1/me/preferences. Browser-
@@ -497,139 +512,157 @@ export function SkillsBrowser() {
           "row-span-1 border-r border-white/[0.1] bg-card flex flex-col min-h-0 overflow-hidden",
           isMobile && railCollapsed && "hidden",
         )}>
-          <div className="flex items-center justify-between px-2 py-1.5 border-b border-border shrink-0">
-            {!railCollapsed && (
-              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                Skills · {skills.length}
-              </span>
-            )}
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className="text-muted-foreground/70 hover:text-foreground/70 ml-auto"
-              onClick={() => setRailCollapsed((v) => !v)}
-              aria-label={railCollapsed ? "Expand filter rail" : "Collapse filter rail"}
-            >
-              {railCollapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
-            </Button>
-          </div>
-
-          {!railCollapsed && (
-          <>
-          <div style={{ display: "none" }}>
-            <span className="text-[10px] font-medium text-muted-foreground/60 tabular-nums">
-              {skills.length}
-            </span>
-          </div>
-
-          <div className="px-2 py-2 shrink-0 border-b border-white/[0.05]">
-            <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-              <Input
-                placeholder="Search skills…"
-                aria-label="Search skills"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                className="h-7 pl-7 text-[12px] bg-white/[0.04] border-white/[0.1]"
-              />
+          {railCollapsed ? (
+            <div className="flex items-center justify-center px-2 py-2 shrink-0">
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="text-muted-foreground/70 hover:text-foreground/70"
+                onClick={() => setRailCollapsed(false)}
+                aria-label="Expand filter rail"
+              >
+                <PanelLeftOpen className="h-3.5 w-3.5" />
+              </Button>
             </div>
-          </div>
+          ) : (
+            <>
+              {/* Rail starts at the toolbar — the "Skills · N" identity now
+                  lives in the sub-bar, not here. Skills are facet-driven, so
+                  the facet sections ARE the filter; the toolbar carries search
+                  only (+ the collapse toggle). */}
+              <SidebarToolbar>
+                <SidebarSearch
+                  value={searchInput}
+                  onValueChange={setSearchInput}
+                  placeholder="Search skills…"
+                  aria-label="Search skills"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  className="text-muted-foreground/70 hover:text-foreground/70 shrink-0"
+                  onClick={() => setRailCollapsed(true)}
+                  aria-label="Collapse filter rail"
+                >
+                  <PanelLeftClose className="h-3.5 w-3.5" />
+                </Button>
+              </SidebarToolbar>
 
-          <div className="flex-1 overflow-y-auto px-2 py-1">
-            <FacetSection title="Domain" defaultOpen>
-              {DOMAINS.map((d) => {
-                const c = counts.byDomain[d.value] ?? 0
-                const Icon = d.icon
-                const isDisabled = c === 0 && !filter.domains.has(d.value)
-                return (
-                  <FacetRow
-                    key={d.value}
-                    label={
-                      <span className="inline-flex items-center gap-1.5">
-                        <Icon className={cn(
-                          "h-3 w-3",
-                          isDisabled ? "text-white/25" : "text-white/65",
-                        )} />
-                        {capitalise(d.value)}
-                      </span>
-                    }
-                    count={c}
-                    checked={filter.domains.has(d.value)}
-                    onToggle={() => toggle("domains", d.value)}
-                    disabled={isDisabled}
-                  />
-                )
-              })}
-            </FacetSection>
+              <div className="flex-1 overflow-y-auto py-1">
+                <SidebarSection
+                  label="Domain"
+                  collapsible
+                  collapsed={!facetOpen.domain}
+                  onToggle={() => toggleFacetSection("domain")}
+                >
+                  {DOMAINS.map((d) => {
+                    const c = counts.byDomain[d.value] ?? 0
+                    const Icon = d.icon
+                    const isDisabled = c === 0 && !filter.domains.has(d.value)
+                    return (
+                      <FacetRow
+                        key={d.value}
+                        label={
+                          <span className="inline-flex items-center gap-1.5">
+                            <Icon className={cn(
+                              "h-3 w-3",
+                              isDisabled ? "text-white/25" : "text-white/65",
+                            )} />
+                            {capitalise(d.value)}
+                          </span>
+                        }
+                        count={c}
+                        checked={filter.domains.has(d.value)}
+                        onToggle={() => toggle("domains", d.value)}
+                        disabled={isDisabled}
+                      />
+                    )
+                  })}
+                </SidebarSection>
 
-            <FacetSection title="Source" defaultOpen>
-              {SOURCES.map((s) => {
-                const c = counts.bySource[s.value] ?? 0
-                const Icon = s.icon
-                const isDisabled = c === 0 && !filter.sources.has(s.value)
-                return (
-                  <FacetRow
-                    key={s.value}
-                    label={
-                      <span className="inline-flex items-center gap-1.5">
-                        <Icon className={cn(
-                          "h-3 w-3",
-                          isDisabled ? "text-white/25" : s.colour,
-                        )} />
-                        {s.label}
-                      </span>
-                    }
-                    count={c}
-                    checked={filter.sources.has(s.value)}
-                    onToggle={() => toggle("sources", s.value)}
-                    disabled={isDisabled}
-                  />
-                )
-              })}
-            </FacetSection>
+                <SidebarSection
+                  label="Source"
+                  collapsible
+                  collapsed={!facetOpen.source}
+                  onToggle={() => toggleFacetSection("source")}
+                >
+                  {SOURCES.map((s) => {
+                    const c = counts.bySource[s.value] ?? 0
+                    const Icon = s.icon
+                    const isDisabled = c === 0 && !filter.sources.has(s.value)
+                    return (
+                      <FacetRow
+                        key={s.value}
+                        label={
+                          <span className="inline-flex items-center gap-1.5">
+                            <Icon className={cn(
+                              "h-3 w-3",
+                              isDisabled ? "text-white/25" : s.colour,
+                            )} />
+                            {s.label}
+                          </span>
+                        }
+                        count={c}
+                        checked={filter.sources.has(s.value)}
+                        onToggle={() => toggle("sources", s.value)}
+                        disabled={isDisabled}
+                      />
+                    )
+                  })}
+                </SidebarSection>
 
-            <FacetSection title="Runtime">
-              {RUNTIMES.map((r) => {
-                const c = counts.byRuntime[r.value] ?? 0
-                return (
-                  <FacetRow
-                    key={r.value}
-                    label={r.label}
-                    count={c}
-                    checked={filter.runtimes.has(r.value)}
-                    onToggle={() => toggle("runtimes", r.value)}
-                    disabled={c === 0 && !filter.runtimes.has(r.value)}
-                  />
-                )
-              })}
-            </FacetSection>
+                <SidebarSection
+                  label="Runtime"
+                  collapsible
+                  collapsed={!facetOpen.runtime}
+                  onToggle={() => toggleFacetSection("runtime")}
+                >
+                  {RUNTIMES.map((r) => {
+                    const c = counts.byRuntime[r.value] ?? 0
+                    return (
+                      <FacetRow
+                        key={r.value}
+                        label={r.label}
+                        count={c}
+                        checked={filter.runtimes.has(r.value)}
+                        onToggle={() => toggle("runtimes", r.value)}
+                        disabled={c === 0 && !filter.runtimes.has(r.value)}
+                      />
+                    )
+                  })}
+                </SidebarSection>
 
-            <FacetSection title="Maturity">
-              {MATURITIES.map((m) => {
-                const c = counts.byMaturity[m.value] ?? 0
-                const isDisabled = c === 0 && !filter.maturities.has(m.value)
-                return (
-                  <FacetRow
-                    key={m.value}
-                    label={
-                      <span className="inline-flex items-center gap-2">
-                        <span className={cn(
-                          "h-1.5 w-1.5 rounded-full",
-                          isDisabled ? "bg-white/15" : m.dot,
-                        )} />
-                        {m.label}
-                      </span>
-                    }
-                    count={c}
-                    checked={filter.maturities.has(m.value)}
-                    onToggle={() => toggle("maturities", m.value)}
-                    disabled={isDisabled}
-                  />
-                )
-              })}
-            </FacetSection>
-          </div>
-          </>
+                <SidebarSection
+                  label="Maturity"
+                  collapsible
+                  collapsed={!facetOpen.maturity}
+                  onToggle={() => toggleFacetSection("maturity")}
+                >
+                  {MATURITIES.map((m) => {
+                    const c = counts.byMaturity[m.value] ?? 0
+                    const isDisabled = c === 0 && !filter.maturities.has(m.value)
+                    return (
+                      <FacetRow
+                        key={m.value}
+                        label={
+                          <span className="inline-flex items-center gap-2">
+                            <span className={cn(
+                              "h-1.5 w-1.5 rounded-full",
+                              isDisabled ? "bg-white/15" : m.dot,
+                            )} />
+                            {m.label}
+                          </span>
+                        }
+                        count={c}
+                        checked={filter.maturities.has(m.value)}
+                        onToggle={() => toggle("maturities", m.value)}
+                        disabled={isDisabled}
+                      />
+                    )
+                  })}
+                </SidebarSection>
+              </div>
+            </>
           )}
         </aside>
 
@@ -741,31 +774,6 @@ export function SkillsBrowser() {
   )
 }
 
-function FacetSection({
-  title,
-  defaultOpen = false,
-  children,
-}: {
-  title: string
-  defaultOpen?: boolean
-  children: React.ReactNode
-}) {
-  const [open, setOpen] = useState(defaultOpen)
-  return (
-    <div className="border-t border-white/[0.06] pt-3">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between text-[10px] font-medium uppercase tracking-wider text-white/55 hover:text-white/85"
-      >
-        {title}
-        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-      </button>
-      {open && <div className="mt-2 space-y-1">{children}</div>}
-    </div>
-  )
-}
-
 function FacetRow({
   label,
   count,
@@ -779,33 +787,35 @@ function FacetRow({
   onToggle: () => void
   disabled?: boolean
 }) {
+  // Routes through the shared SidebarRow → ListRow so an active facet gets
+  // the tokenized brand accent-bar (not a hardcoded blue fill). The checkbox
+  // + trust-tinted icon/dot + count are composed inline. Disabled rows drop
+  // out of the interaction (no onSelect) and grey out.
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      disabled={disabled}
-      className={`flex w-full items-center justify-between rounded px-1.5 py-1 text-xs transition-colors ${
-        disabled
-          ? "text-white/25 cursor-default"
-          : checked
-            ? "bg-blue-500/[0.15] text-blue-200"
-            : "text-white/70 hover:bg-white/[0.04]"
-      }`}
+    <SidebarRow
+      as="div"
+      selected={checked}
+      onSelect={disabled ? undefined : onToggle}
+      className={cn(
+        "justify-between items-center",
+        disabled && "pointer-events-none opacity-40",
+      )}
     >
-      <span className="inline-flex items-center gap-1.5">
+      <span className={cn("inline-flex items-center gap-1.5 min-w-0", checked && "text-primary-hover")}>
         <span
-          className={`inline-block h-3 w-3 rounded border ${
+          className={cn(
+            "inline-block h-3 w-3 rounded border shrink-0",
             checked
-              ? "border-blue-400 bg-blue-500"
+              ? "border-primary bg-primary"
               : disabled
                 ? "border-white/10"
-                : "border-white/20"
-          }`}
+                : "border-white/20",
+          )}
         />
         {label}
       </span>
-      <span className="tabular-nums text-white/45">{count}</span>
-    </button>
+      <span className="tabular-nums text-white/45 shrink-0">{count}</span>
+    </SidebarRow>
   )
 }
 

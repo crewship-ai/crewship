@@ -235,7 +235,7 @@ export function CrewsLayout({
         style={{
           gridTemplateColumns: isMobile
             ? "1fr"
-            : `${explorerCollapsed ? "48px" : "260px"} 1fr`,
+            : `${explorerCollapsed ? "48px" : "280px"} 1fr`,
         }}
       >
         {/* Explorer */}

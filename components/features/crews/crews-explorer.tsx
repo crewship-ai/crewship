@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  ChevronRight, Search, PanelLeftClose, PanelLeftOpen, Clock,
+  ChevronRight, PanelLeftClose, PanelLeftOpen, Clock,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { cn } from "@/lib/utils"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { isGhost, effectiveStatus } from "@/lib/agent-ephemeral"
+import { SidebarToolbar, SidebarSearch, SidebarRow } from "@/components/layout/sidebar-kit"
 
 const STATUS_BADGE: Record<string, { label: string; className: string; pulse?: boolean }> = {
   RUNNING: { label: "Running", className: "text-emerald-400", pulse: true },
@@ -142,40 +142,35 @@ export function CrewsExplorer({
     return { running, error, idle }
   }, [agentsByCrew])
 
+  const collapseToggle = (
+    <Button
+      variant="ghost"
+      size="icon-xs"
+      className="text-muted-foreground hover:text-foreground/70 shrink-0"
+      onClick={onToggleCollapse}
+      aria-label={collapsed ? "Expand explorer" : "Collapse explorer"}
+    >
+      {collapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
+    </Button>
+  )
+
   return (
     <div className="flex flex-col h-full bg-card border-r border-white/[0.1] overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-2 py-1.5 border-b border-border shrink-0">
-        {!collapsed && (
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-            Explorer
-          </span>
-        )}
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="text-muted-foreground hover:text-foreground/70 ml-auto"
-          onClick={onToggleCollapse}
-          aria-label={collapsed ? "Expand explorer" : "Collapse explorer"}
-        >
-          {collapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
-        </Button>
-      </div>
-
-      {!collapsed && (
+      {collapsed ? (
+        <div className="flex items-center justify-center px-2 py-2 shrink-0">
+          {collapseToggle}
+        </div>
+      ) : (
         <div className="flex-1 min-h-0 flex flex-col">
-          {/* Search — status/role filtering driven by sub-bar */}
-          <div className="px-2 py-2 shrink-0">
-            <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-              <Input
-                placeholder="Search agents, crews…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-7 pl-7 text-[12px] bg-white/[0.04] border-white/[0.1]"
-              />
-            </div>
-          </div>
+          {/* Toolbar — search + collapse toggle (status/role filtering driven by sub-bar) */}
+          <SidebarToolbar>
+            <SidebarSearch
+              value={search}
+              onValueChange={setSearch}
+              placeholder="Search agents, crews…"
+            />
+            {collapseToggle}
+          </SidebarToolbar>
 
           {/* Tree */}
           <div className="flex-1 overflow-y-auto px-1">
@@ -186,28 +181,28 @@ export function CrewsExplorer({
               const isSelected = selectedCrewId === crew.id && !selectedAgentId
 
               return (
-                <div key={crew.id} className="mb-0.5">
+                <div
+                  key={crew.id}
+                  className="mb-0.5"
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowRight" && !expanded) { e.preventDefault(); toggleCrew(crew.id) }
+                    if (e.key === "ArrowLeft" && expanded) { e.preventDefault(); toggleCrew(crew.id) }
+                  }}
+                >
                   {/* Crew row */}
-                  <button
-                    aria-expanded={expanded}
-                    className={cn(
-                      "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors group",
-                      isSelected
-                        ? "row-interactive row-selected"
-                        : "row-interactive row-hover",
-                    )}
-                    onClick={() => {
+                  <SidebarRow
+                    as="div"
+                    selected={isSelected}
+                    aria-label={crew.name}
+                    onSelect={() => {
                       onCrewSelect(crew.id)
                       if (!expanded) toggleCrew(crew.id)
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "ArrowRight" && !expanded) { e.preventDefault(); toggleCrew(crew.id) }
-                      if (e.key === "ArrowLeft" && expanded) { e.preventDefault(); toggleCrew(crew.id) }
                     }}
                   >
                     <span
                       role="button"
                       tabIndex={-1}
+                      aria-expanded={expanded}
                       className="shrink-0"
                       onClick={(e) => { e.stopPropagation(); toggleCrew(crew.id) }}
                       onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); toggleCrew(crew.id) } }}
@@ -236,7 +231,7 @@ export function CrewsExplorer({
                         <span key={`i${i}`} className="h-1.5 w-1.5 rounded-full bg-gray-500/50" />
                       ))}
                     </div>
-                  </button>
+                  </SidebarRow>
 
                   {/* Agent rows */}
                   {expanded && crewAgents.map((agent) => {
@@ -244,18 +239,16 @@ export function CrewsExplorer({
                     const badge = STATUS_BADGE[effectiveStatus(agent)] || STATUS_BADGE.IDLE
                     const isAgentSelected = selectedAgentId === agent.id
                     return (
-                      <button
+                      <SidebarRow
                         key={agent.id}
-                        aria-current={isAgentSelected ? "true" : undefined}
-                        data-expired={ghost ? "true" : undefined}
+                        as="div"
+                        indent
+                        selected={isAgentSelected}
+                        aria-label={agent.name}
+                        onSelect={() => onAgentSelect(agent.id)}
                         className={cn(
-                          "w-full flex items-center gap-2 pl-9 pr-2 py-1 rounded-md text-left transition-colors",
-                          isAgentSelected
-                            ? "row-interactive row-selected"
-                            : "row-interactive row-hover",
                           ghost && "opacity-55 grayscale-[0.4] hover:opacity-90 hover:grayscale-0",
                         )}
-                        onClick={() => onAgentSelect(agent.id)}
                       >
                         <AgentAvatar
                           seed={agent.avatar_seed || agent.name}
@@ -280,7 +273,7 @@ export function CrewsExplorer({
                           )}
                           <span className={cn("text-[10px]", badge.className)}>{badge.label}</span>
                         </div>
-                      </button>
+                      </SidebarRow>
                     )
                   })}
                 </div>
@@ -298,16 +291,15 @@ export function CrewsExplorer({
                   const badge = STATUS_BADGE[effectiveStatus(agent)] || STATUS_BADGE.IDLE
                   const isAgentSelected = selectedAgentId === agent.id
                   return (
-                    <button
+                    <SidebarRow
                       key={agent.id}
-                      aria-current={isAgentSelected ? "true" : undefined}
-                      data-expired={ghost ? "true" : undefined}
+                      as="div"
+                      selected={isAgentSelected}
+                      aria-label={agent.name}
+                      onSelect={() => onAgentSelect(agent.id)}
                       className={cn(
-                        "w-full flex px-2 py-1 rounded-md text-left items-center gap-2",
-                        isAgentSelected ? "row-interactive row-selected" : "row-interactive row-hover",
                         ghost && "opacity-55 grayscale-[0.4] hover:opacity-90 hover:grayscale-0",
                       )}
-                      onClick={() => onAgentSelect(agent.id)}
                     >
                       <AgentAvatar
                         seed={agent.avatar_seed || agent.name}
@@ -326,7 +318,7 @@ export function CrewsExplorer({
                         )}
                         <span className={cn("text-[10px]", badge.className)}>{badge.label}</span>
                       </div>
-                    </button>
+                    </SidebarRow>
                   )
                 })}
               </div>

@@ -1,19 +1,17 @@
 "use client"
 
 import { useState } from "react"
+import type { ReactNode } from "react"
 import {
   ArrowDownUp,
   Calendar,
-  Filter as FilterIcon,
   LayoutGrid,
   PauseCircle,
-  Search,
   Users,
   Workflow,
-  X,
   Zap,
 } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import type { LucideIcon } from "lucide-react"
 import {
   Popover,
   PopoverContent,
@@ -22,10 +20,20 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  SidebarActiveChip,
+  SidebarActiveChips,
+  SidebarFilterButton,
+  SidebarSearch,
+  SidebarToolbar,
+  SidebarViewButton,
+} from "@/components/layout/sidebar-kit"
 import { cn } from "@/lib/utils"
 import type {
   DateRangeKey,
@@ -35,9 +43,10 @@ import type {
 } from "@/lib/activity/run-filters"
 import { activeFilterCount } from "@/lib/activity/run-filters"
 
-// RailToolbar — search + filter / sort / group dropdowns + active
-// filter chips. Modeled on Linear's pattern: filter as a typed,
-// composable predicate the user assembles from a single popover.
+// RailToolbar — search + a SINGLE Filter popover + a View (⋮) menu that
+// folds Sort + Group together, so the rail never reads as "two filters".
+// Row 1 is the shared sidebar-kit toolbar; the status segmented control
+// and the active-facet chips live on their own rows below it.
 
 export type SortAxis = "newest" | "oldest" | "cost-desc" | "duration-desc"
 
@@ -59,95 +68,96 @@ export interface RailToolbarProps {
     routines: { slug: string; name: string }[]
     sources: TriggerSource[]
   }
+  // Optional trailing control rendered at the end of the toolbar row
+  // (e.g. the Saved Views bookmark menu).
+  savedViews?: ReactNode
 }
 
 export function RailToolbar(props: RailToolbarProps) {
-  const { filter, onFilterChange, search, onSearchChange, sort, onSortChange, group, onGroupChange, counts, options } = props
+  const { filter, onFilterChange, search, onSearchChange, sort, onSortChange, group, onGroupChange, counts, options, savedViews } = props
+  // activeFilterCount already excludes status + search, so it's exactly
+  // the facet count the Filter badge should show.
   const filterCount = activeFilterCount(filter)
 
   return (
-    <div className="shrink-0 space-y-1.5 border-b border-white/[0.06] p-2">
-      {/* Search box */}
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/50" />
-        <input
-          type="text"
+    <div className="shrink-0 border-b border-white/[0.06]">
+      {/* Row 1 — search + Filter + View (Sort/Group) */}
+      <SidebarToolbar>
+        <SidebarSearch
           value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search ID, routine, issue, agent…"
+          onValueChange={onSearchChange}
+          placeholder="Search ID, routine, issue…"
           aria-label="Search runs"
-          className="h-7 w-full rounded border border-white/[0.06] bg-background pl-7 pr-7 text-xs placeholder:text-muted-foreground/50 focus:border-blue-500/50 focus:outline-none"
         />
-        {search && (
-          <button
-            type="button"
-            onClick={() => onSearchChange("")}
-            aria-label="Clear search"
-            className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground/50 hover:text-foreground"
-          >
-            <X className="h-3 w-3" />
-          </button>
-        )}
-      </div>
-
-      {/* Toolbar dropdowns */}
-      <div className="flex items-center gap-1 text-[11px]">
         <FilterMenu filter={filter} onFilterChange={onFilterChange} options={options} count={filterCount} />
+        <ViewMenu sort={sort} onSortChange={onSortChange} group={group} onGroupChange={onGroupChange} />
+        {savedViews}
+      </SidebarToolbar>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="xs" className="h-6 gap-1 px-2 text-[11px] text-muted-foreground/80">
-              <ArrowDownUp className="h-3 w-3" />
-              <span>Sort: {SORT_LABEL[sort]}</span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="text-xs">
-            <DropdownMenuRadioGroup value={sort} onValueChange={(v) => onSortChange(v as SortAxis)}>
-              <DropdownMenuRadioItem value="newest">Newest first</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="oldest">Oldest first</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="cost-desc">Cost (high → low)</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="duration-desc">Duration (high → low)</DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="xs" className="h-6 gap-1 px-2 text-[11px] text-muted-foreground/80">
-              <LayoutGrid className="h-3 w-3" />
-              <span>Group: {GROUP_LABEL[group]}</span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="text-xs">
-            <DropdownMenuRadioGroup value={group} onValueChange={(v) => onGroupChange(v as GroupAxis)}>
-              <DropdownMenuRadioItem value="source">Source</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="routine">Routine</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="crew">Crew</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="issue">Issue</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="none">None (flat)</DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+      {/* Row 2 — status segmented control, always visible because users
+        * hit it constantly (kept out of the Filter popover on purpose). */}
+      <div className="px-2 pb-2">
+        <div className="flex items-center gap-0.5 rounded border border-white/[0.06] bg-background p-0.5">
+          <SegBtn label="Active" count={counts.active} active={filter.status === "active"}
+            onClick={() => onFilterChange({ ...filter, status: "active" })} />
+          <SegBtn label="All" count={counts.all} active={!filter.status || filter.status === "all"}
+            onClick={() => onFilterChange({ ...filter, status: "all" })} />
+          <SegBtn label="Done" count={counts.completed} active={filter.status === "completed"}
+            onClick={() => onFilterChange({ ...filter, status: "completed" })} />
+          <SegBtn label="Failed" count={counts.failed} active={filter.status === "failed"}
+            onClick={() => onFilterChange({ ...filter, status: "failed" })} />
+        </div>
       </div>
 
-      {/* Active filter chips */}
+      {/* Row 3 — removable chips for the active facet filters. */}
       {filterCount > 0 && (
         <FilterChips filter={filter} onFilterChange={onFilterChange} options={options} />
       )}
-
-      {/* Status segmented control — always visible, separate from
-        * the filter popover because users hit it constantly. */}
-      <div className="flex items-center gap-0.5 rounded border border-white/[0.06] bg-background p-0.5">
-        <SegBtn label="Active" count={counts.active} active={filter.status === "active"}
-          onClick={() => onFilterChange({ ...filter, status: "active" })} />
-        <SegBtn label="All" count={counts.all} active={!filter.status || filter.status === "all"}
-          onClick={() => onFilterChange({ ...filter, status: "all" })} />
-        <SegBtn label="Done" count={counts.completed} active={filter.status === "completed"}
-          onClick={() => onFilterChange({ ...filter, status: "completed" })} />
-        <SegBtn label="Failed" count={counts.failed} active={filter.status === "failed"}
-          onClick={() => onFilterChange({ ...filter, status: "failed" })} />
-      </div>
     </div>
+  )
+}
+
+// View (⋮) menu — folds Sort + Group into one dropdown so they don't
+// masquerade as a second filter next to the real Filter button.
+function ViewMenu({
+  sort,
+  onSortChange,
+  group,
+  onGroupChange,
+}: {
+  sort: SortAxis
+  onSortChange: (next: SortAxis) => void
+  group: GroupAxis
+  onGroupChange: (next: GroupAxis) => void
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <SidebarViewButton aria-label={`View — sort: ${SORT_LABEL[sort]}, group: ${GROUP_LABEL[group]}`} />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44 text-xs">
+        <DropdownMenuLabel className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+          <ArrowDownUp className="h-3 w-3" /> Sort
+        </DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={sort} onValueChange={(v) => onSortChange(v as SortAxis)}>
+          <DropdownMenuRadioItem value="newest">Newest first</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="oldest">Oldest first</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="cost-desc">Cost (high → low)</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="duration-desc">Duration (high → low)</DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+          <LayoutGrid className="h-3 w-3" /> Group
+        </DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={group} onValueChange={(v) => onGroupChange(v as GroupAxis)}>
+          <DropdownMenuRadioItem value="source">Source</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="routine">Routine</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="crew">Crew</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="issue">Issue</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="none">None (flat)</DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -172,8 +182,10 @@ function SegBtn({ label, count, active, onClick }: { label: string; count: numbe
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "flex flex-1 items-center justify-center gap-1 rounded px-2 py-0.5 text-[10px] transition-colors",
-        active ? "bg-blue-500/15 text-blue-300" : "text-muted-foreground/70 hover:text-foreground/80",
+        "flex flex-1 items-center justify-center gap-1 rounded border px-2 py-0.5 text-[10px] transition-colors",
+        active
+          ? "border-primary/30 bg-primary/15 text-primary-hover"
+          : "border-transparent text-muted-foreground/70 hover:text-foreground/80",
       )}
     >
       <span>{label}</span>
@@ -199,15 +211,9 @@ function FilterMenu({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="xs" className="h-6 gap-1 px-2 text-[11px]">
-          <FilterIcon className="h-3 w-3" />
-          Filter
-          {count > 0 && (
-            <span className="rounded bg-blue-500/15 px-1 text-[9px] text-blue-300">{count}</span>
-          )}
-        </Button>
+        <SidebarFilterButton activeCount={count} />
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[260px] p-0" sideOffset={4}>
+      <PopoverContent align="end" className="w-[260px] p-0" sideOffset={4}>
         <div className="border-b border-border px-3 py-2 text-[11px] font-semibold">
           Add filter
         </div>
@@ -224,7 +230,7 @@ function FilterMenu({
             <button
               type="button"
               onClick={() => onFilterChange({ status: filter.status })}
-              className="text-blue-300 hover:text-blue-200"
+              className="text-primary-hover hover:text-primary"
             >
               Clear all
             </button>
@@ -235,7 +241,7 @@ function FilterMenu({
   )
 }
 
-function SectionHeader({ Icon, label }: { Icon: typeof FilterIcon; label: string }) {
+function SectionHeader({ Icon, label }: { Icon: LucideIcon; label: string }) {
   return (
     <div className="flex items-center gap-1.5 px-3 pt-2 text-[10px] uppercase tracking-wider text-muted-foreground/60">
       <Icon className="h-3 w-3" /> {label}
@@ -270,7 +276,7 @@ function SourceSection({ filter, onChange, sources }: {
               className={cn(
                 "rounded border px-1.5 py-0.5 text-[10px] transition-colors",
                 sel.has(s)
-                  ? "border-blue-500/40 bg-blue-500/15 text-blue-300"
+                  ? "border-primary/40 bg-primary/15 text-primary-hover"
                   : "border-white/[0.06] text-muted-foreground/70 hover:text-foreground/80",
               )}
             >
@@ -308,7 +314,7 @@ function DateSection({ filter, onChange }: { filter: RunFilter; onChange: (next:
             className={cn(
               "flex-1 rounded border px-1.5 py-0.5 text-[10px]",
               value === v
-                ? "border-blue-500/40 bg-blue-500/15 text-blue-300"
+                ? "border-primary/40 bg-primary/15 text-primary-hover"
                 : "border-white/[0.06] text-muted-foreground/70 hover:text-foreground/80",
             )}
           >
@@ -414,14 +420,14 @@ function FilterChips({
   if (filter.sources?.length) {
     chips.push({
       key: "src",
-      label: `source: ${filter.sources.map((s) => SOURCE_LABEL[s]).join(", ")}`,
+      label: `Source: ${filter.sources.map((s) => SOURCE_LABEL[s]).join(", ")}`,
       remove: () => onFilterChange({ ...filter, sources: undefined }),
     })
   }
   if (filter.dateRange && filter.dateRange !== "all") {
     chips.push({
       key: "date",
-      label: `last ${filter.dateRange}`,
+      label: `Last ${filter.dateRange}`,
       remove: () => onFilterChange({ ...filter, dateRange: undefined }),
     })
   }
@@ -431,7 +437,7 @@ function FilterChips({
       .join(", ")
     chips.push({
       key: "crew",
-      label: `crew: ${names}`,
+      label: `Crew: ${names}`,
       remove: () => onFilterChange({ ...filter, crews: undefined }),
     })
   }
@@ -441,37 +447,26 @@ function FilterChips({
       .join(", ")
     chips.push({
       key: "rt",
-      label: `routine: ${names}`,
+      label: `Routine: ${names}`,
       remove: () => onFilterChange({ ...filter, routines: undefined }),
     })
   }
   if (filter.hasWaitpoint) {
     chips.push({
       key: "wp",
-      label: "awaiting approval",
+      label: "Awaiting approval",
       remove: () => onFilterChange({ ...filter, hasWaitpoint: undefined }),
     })
   }
 
   if (chips.length === 0) return null
   return (
-    <div className="flex flex-wrap gap-1">
+    <SidebarActiveChips>
       {chips.map((c) => (
-        <span
-          key={c.key}
-          className="inline-flex items-center gap-1 rounded border border-blue-500/25 bg-blue-500/10 px-1.5 py-0.5 text-[10px] text-blue-200"
-        >
+        <SidebarActiveChip key={c.key} onRemove={c.remove}>
           <span className="truncate max-w-[180px]">{c.label}</span>
-          <button
-            type="button"
-            onClick={c.remove}
-            aria-label={`Remove filter ${c.label}`}
-            className="text-blue-300/70 hover:text-blue-100"
-          >
-            <X className="h-2.5 w-2.5" />
-          </button>
-        </span>
+        </SidebarActiveChip>
       ))}
-    </div>
+    </SidebarActiveChips>
   )
 }

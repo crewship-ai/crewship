@@ -164,20 +164,18 @@ export function RunTimelineRail({
 
   return (
     <div className="flex h-full flex-col bg-card">
-      <div className="relative">
-        <RailToolbar
-          filter={filter}
-          onFilterChange={setFilter}
-          search={search}
-          onSearchChange={setSearch}
-          sort={sort}
-          onSortChange={setSort}
-          group={group}
-          onGroupChange={setGroup}
-          counts={counts}
-          options={options}
-        />
-        <div className="absolute right-2 top-2">
+      <RailToolbar
+        filter={filter}
+        onFilterChange={setFilter}
+        search={search}
+        onSearchChange={setSearch}
+        sort={sort}
+        onSortChange={setSort}
+        group={group}
+        onGroupChange={setGroup}
+        counts={counts}
+        options={options}
+        savedViews={
           <SavedViewsButton
             current={{ filter, sort, group }}
             onApply={(v) => {
@@ -186,8 +184,8 @@ export function RunTimelineRail({
               setGroup(v.group)
             }}
           />
-        </div>
-      </div>
+        }
+      />
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {loading && runs.length === 0 ? (
