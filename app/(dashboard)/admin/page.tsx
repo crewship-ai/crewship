@@ -84,6 +84,16 @@ export default function AdminPage() {
   const [tab, setTab] = useState<TabKey>("overview")
   // Universal search doubles as a command-finder — filters the nav live.
   const [navQuery, setNavQuery] = useState("")
+  const navQ = navQuery.trim().toLowerCase()
+  // Hooks must run before the early returns below, so keep this memo up here.
+  const filteredSections = useMemo(
+    () =>
+      sections
+        .map((s) => ({ ...s, items: s.items.filter((i) => !navQ || i.label.toLowerCase().includes(navQ)) }))
+        .filter((s) => s.items.length > 0),
+    [navQ],
+  )
+  const firstNavMatch = filteredSections[0]?.items[0]?.key
   const [stats, setStats] = useState<Stats | null>(null)
   const [orgs, setOrgs] = useState<AdminOrg[]>([])
   const [users, setUsers] = useState<AdminUser[]>([])
@@ -266,16 +276,6 @@ export default function AdminPage() {
   }
 
   const activeItem = sections.flatMap((s) => s.items).find((i) => i.key === tab)
-
-  const navQ = navQuery.trim().toLowerCase()
-  const filteredSections = useMemo(
-    () =>
-      sections
-        .map((s) => ({ ...s, items: s.items.filter((i) => !navQ || i.label.toLowerCase().includes(navQ)) }))
-        .filter((s) => s.items.length > 0),
-    [navQ],
-  )
-  const firstNavMatch = filteredSections[0]?.items[0]?.key
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)]">
