@@ -2,6 +2,8 @@ package llm
 
 import (
 	"fmt"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -64,6 +66,49 @@ func DefaultAuxiliaryModels() AuxiliaryModels {
 		Negative:     haiku(5 * time.Second),
 		Fallback:     haiku(10 * time.Second),
 	}
+}
+
+// LoadAuxiliaryModels returns the MVP defaults with any
+// CREWSHIP_AUX_<SLOT>_{PROVIDER,MODEL,TIMEOUT} environment overrides applied.
+// This is the wiring entry point for server bootstrap — operators can point
+// individual aux slots at a cheaper (or local) model without a config-file
+// redeploy, closing the "documented but unimplemented" gap the struct comment
+// promised.
+func LoadAuxiliaryModels() AuxiliaryModels {
+	return AuxiliaryModelsFromEnv(DefaultAuxiliaryModels(), os.Getenv)
+}
+
+// AuxiliaryModelsFromEnv overlays CREWSHIP_AUX_<SLOT>_{PROVIDER,MODEL,TIMEOUT}
+// onto base and returns the merged config. SLOT is the upper-cased slot name:
+// CURATOR, KEEPER, BEHAVIOR, MEMORY_HEALTH, NEGATIVE, FALLBACK. Only vars that
+// are set (non-empty after trim) override; everything else keeps base. TIMEOUT
+// takes a Go duration string ("5s", "500ms"); an unparsable or non-positive
+// value is IGNORED (base timeout kept) so a typo can never silently strip a
+// slot's deadline. getenv is injected for testability (pass os.Getenv in prod).
+func AuxiliaryModelsFromEnv(base AuxiliaryModels, getenv func(string) string) AuxiliaryModels {
+	slots := map[string]*AuxModel{
+		"CURATOR":       &base.Curator,
+		"KEEPER":        &base.Keeper,
+		"BEHAVIOR":      &base.Behavior,
+		"MEMORY_HEALTH": &base.MemoryHealth,
+		"NEGATIVE":      &base.Negative,
+		"FALLBACK":      &base.Fallback,
+	}
+	for name, slot := range slots {
+		prefix := "CREWSHIP_AUX_" + name + "_"
+		if v := strings.TrimSpace(getenv(prefix + "PROVIDER")); v != "" {
+			slot.Provider = v
+		}
+		if v := strings.TrimSpace(getenv(prefix + "MODEL")); v != "" {
+			slot.Model = v
+		}
+		if v := strings.TrimSpace(getenv(prefix + "TIMEOUT")); v != "" {
+			if d, err := time.ParseDuration(v); err == nil && d > 0 {
+				slot.Timeout = d
+			}
+		}
+	}
+	return base
 }
 
 // ResolveAux returns the configured AuxModel for slot, falling back

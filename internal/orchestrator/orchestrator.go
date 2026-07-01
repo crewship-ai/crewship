@@ -21,22 +21,28 @@ var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 // AgentRunRequest describes everything needed to execute an agent run inside
 // a container, including identity, credentials, prompts, and resource limits.
 type AgentRunRequest struct {
-	AgentID            string
-	AgentSlug          string
-	AgentRole          string // AGENT, LEAD
-	CrewID             string
-	CrewSlug           string
-	ChatID             string
-	MissionID          string // mission this run belongs to; threaded into every journal emit so Cartographer checkpoints can anchor on per-mission journal cursors.
-	WorkspaceID        string
-	ContainerID        string
-	CLIAdapter         string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, FACTORY_DROID
-	LLMModel           string // optional model override (e.g. claude-haiku-4-5-20251001)
-	SystemPrompt       string
-	UserMessage        string
-	ToolProfile        string // MINIMAL, CODING, FULL
-	Credentials        []Credential
-	TimeoutSecs        int
+	AgentID      string
+	AgentSlug    string
+	AgentRole    string // AGENT, LEAD
+	CrewID       string
+	CrewSlug     string
+	ChatID       string
+	MissionID    string // mission this run belongs to; threaded into every journal emit so Cartographer checkpoints can anchor on per-mission journal cursors.
+	WorkspaceID  string
+	ContainerID  string
+	CLIAdapter   string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, FACTORY_DROID
+	LLMModel     string // optional model override (e.g. claude-haiku-4-5-20251001)
+	SystemPrompt string
+	UserMessage  string
+	ToolProfile  string // MINIMAL, CODING, FULL
+	Credentials  []Credential
+	TimeoutSecs  int
+	// MaxTurns caps the adapter-side agent loop (via an adapter-specific
+	// turn-cap flag) as defense-in-depth against a runaway that burns budget
+	// re-sending context every turn. 0 means "use DefaultMaxTurns". Routine /
+	// scheduled runs set RoutineMaxTurns — lower, because an unattended job
+	// with no human watching is exactly where a stuck loop goes unnoticed.
+	MaxTurns           int
 	MemoryEnabled      bool
 	CrewMembers        []CrewMember // Populated by bridge for LEAD agents
 	SkipSidecar        bool         // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)

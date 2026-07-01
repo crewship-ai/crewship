@@ -174,17 +174,15 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	// instead of teaching the model to construct HTTP requests. Until
 	// PR-A merges, mid-session memory access degrades to the boot
 	// snapshot only — this is the documented hard-reset window.
-	// Agent-curated nudge + cost awareness — two small blocks that
-	// only fire when there's something to say. Both draw from the
-	// journal / paymaster rollups and are bounded in size so they
-	// can't eat the budget.
-	if nudge := o.buildNudgeBlock(ctx, req); nudge != "" {
-		b.WriteString(nudge)
-	}
-	if cost := o.buildCostAwarenessBlock(ctx, req); cost != "" {
-		b.WriteString(cost)
-	}
-
+	//
+	// NOTE: the agent-curated MEMORY NUDGE + COST AWARENESS blocks used to
+	// be appended here. They now live in the per-turn session context that
+	// the run flow prepends to the *user* message (see
+	// buildVolatileSessionContext) — both change on essentially every run
+	// (nudge counts journal entries, cost accrues each call), and keeping
+	// them inside the system prompt broke Anthropic prompt-cache reuse on
+	// every message. The memory block is now stable within a day so the
+	// cacheable prefix stops churning.
 	return b.String()
 }
 

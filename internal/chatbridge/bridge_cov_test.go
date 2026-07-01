@@ -221,7 +221,10 @@ func claudeSuccessOutput(nTools int) string {
 	b.WriteString(`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}}` + "\n")
 	b.WriteString(`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":" world"}}}` + "\n")
 	for i := 0; i < nTools; i++ {
-		fmt.Fprintf(&b, `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","id":"t%d"}]}}`+"\n", i)
+		// Distinct input per call: identical (name+args) tool calls repeated past
+		// the orchestrator loop-guard threshold correctly abort the run as a
+		// stuck loop, so a realistic multi-tool transcript varies them.
+		fmt.Fprintf(&b, `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","id":"t%d","input":{"command":"echo %d"}}]}}`+"\n", i, i)
 	}
 	// 250-char tool result to exercise the 200-char truncation.
 	long := strings.Repeat("A", 250)

@@ -259,7 +259,16 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		o.logger.Error("failed to persist run state", "error", err)
 	}
 
-	// Inject conversation history into system prompt for context continuity.
+	// volatile accumulates the per-turn-DYNAMIC context (conversation history,
+	// episodic recall, memory nudge, cost awareness). It is prepended to the
+	// USER message at the end of assembly rather than folded into the system
+	// prompt, so the system prompt stays byte-stable within a day and
+	// Anthropic prompt-cache reuse survives across turns (cache read = 0.1×
+	// input). Everything that changes message-to-message goes here; the stable
+	// preamble → persona → skills → memory-files prefix stays in SystemPrompt.
+	var volatile strings.Builder
+
+	// Inject conversation history for context continuity.
 	// Uses token-budget allocation: 60% conversation, 40% memory (of remaining budget).
 	baseTokens := tokenutil.EstimateTokens(req.SystemPrompt)
 	remaining := tokenutil.MaxSystemPromptTokens - baseTokens
@@ -273,7 +282,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		history, compaction := o.buildConversationContextWithStats(ctx, req.ChatID, convTokenBudget)
 		o.emitCompactionEvent(ctx, req, compaction)
 		if history != "" {
-			req.SystemPrompt = req.SystemPrompt + "\n\n" + history
+			volatile.WriteString(history)
 		}
 	}
 
@@ -348,8 +357,12 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			// dedup so a *future* outage logs anew.
 			o.episodicUnreachableLastLogged.Store(0)
 			if rendered != "" {
-				promptBuf.WriteString("\n\n")
-				promptBuf.WriteString(rendered)
+				// Query-dependent → changes every turn. Belongs in the
+				// volatile session context (user turn), not the cached prefix.
+				if volatile.Len() > 0 {
+					volatile.WriteString("\n\n")
+				}
+				volatile.WriteString(rendered)
 			}
 		}
 	}
@@ -373,9 +386,32 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 
 	req.SystemPrompt = promptBuf.String()
 
+	// Agent-curated nudge + cost awareness — two small blocks that only fire
+	// when there's something to say (journal-entry backlog / recorded spend).
+	// Both change on essentially every run, so they join the volatile session
+	// context (user turn) rather than the cached system prefix.
+	if nudge := o.buildNudgeBlock(ctx, req); nudge != "" {
+		if volatile.Len() > 0 {
+			volatile.WriteString("\n")
+		}
+		volatile.WriteString(nudge)
+	}
+	if cost := o.buildCostAwarenessBlock(ctx, req); cost != "" {
+		if volatile.Len() > 0 {
+			volatile.WriteString("\n")
+		}
+		volatile.WriteString(cost)
+	}
+
+	// Prepend the volatile context to the USER message, framed so the model
+	// reads it as background rather than as the operator's instruction. Keeping
+	// it out of SystemPrompt is the whole point — see the volatile declaration.
+	req.UserMessage = prependSessionContext(volatile.String(), req.UserMessage)
+
 	o.logger.Info("system prompt assembled",
 		"agent", req.AgentSlug,
 		"est_tokens", tokenutil.EstimateTokens(req.SystemPrompt),
+		"session_context_bytes", volatile.Len(),
 	)
 
 	o.mu.RLock()
@@ -854,6 +890,10 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// loggedModel guards the one-shot resolved-model log so a multi-init
 	// stream (sub-agents, restarts) doesn't re-log on every system event.
 	var loggedModel bool
+	// guard aborts the run the moment the agent gets stuck repeating the
+	// identical tool call (see loop_guard.go). It observes the same tool_call
+	// events the behavior monitor does, so it's adapter-agnostic.
+	guard := &loopGuard{}
 	tappedHandler := EventHandler(func(event AgentEvent) {
 		// Surface the model the run ACTUALLY resolved to. adapter_claude.go
 		// stamps meta["model"] on the session-init system event — that's
@@ -890,6 +930,23 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		//       rate (default every 5th).
 		if event.Type == "tool_call" {
 			o.dispatchToolCallObservers(req, event)
+			// Loop guard: extract (tool_name, input) from the event metadata
+			// and abort the exec if the same call repeats past the threshold.
+			// Cancelling execCtx closes the stream reader and kills the CLI
+			// process; the post-stream check below turns that into a distinct
+			// loop_detected failure instead of a generic non-zero exit.
+			if m, ok := event.Metadata.(map[string]interface{}); ok {
+				name, _ := m["tool_name"].(string)
+				if guard.observe(name, m["input"]) {
+					o.logger.Warn("loop guard tripped — aborting run",
+						"agent_id", req.AgentID,
+						"agent_slug", req.AgentSlug,
+						"tool", name,
+						"threshold", loopGuardThreshold,
+					)
+					cancel()
+				}
+			}
 		}
 		if scrubHandler != nil {
 			scrubHandler(event)
@@ -932,6 +989,44 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			},
 			Refs: map[string]any{"chat_id": req.ChatID},
 		})
+	}
+
+	// Loop guard tripped: we cancelled execCtx ourselves (not the parent ctx,
+	// so the user-cancel branch below won't fire). Surface it as a distinct
+	// failure so the journal/UI shows "stuck in a loop" rather than a generic
+	// non-zero exit, and so cost triage can tell runaway loops apart from real
+	// crashes. Uses a fresh context because execCtx is now cancelled.
+	if guard.Tripped() {
+		cleanCtx := context.Background()
+		o.updateRunStatus(cleanCtx, runState.ID, "error")
+		o.logger.Warn("run aborted by loop guard", "agent_id", req.AgentID, "exec_id", result.ExecID)
+		_, _ = j.Emit(cleanCtx, JournalEntry{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.AgentID,
+			MissionID:   req.MissionID,
+			Type:        "exec.command",
+			Severity:    "warn",
+			ActorType:   "agent",
+			ActorID:     req.AgentID,
+			Summary:     fmt.Sprintf("%s: ABORTED — stuck loop (same tool call ×%d)", req.AgentSlug, loopGuardThreshold),
+			Payload: map[string]any{
+				"cmd":         cmd,
+				"phase":       "end",
+				"reason":      "loop_detected",
+				"duration_ms": time.Since(execStart).Milliseconds(),
+			},
+			Refs: map[string]any{"chat_id": req.ChatID, "exec_id": result.ExecID},
+		})
+		_ = o.getPresence().Track(cleanCtx, PresenceInput{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.AgentID,
+			MissionID:   req.MissionID,
+			Status:      "online",
+			Details:     map[string]any{"reason": "loop_detected"},
+		})
+		return fmt.Errorf("run aborted: agent repeated the same tool call %d times (stuck loop)", loopGuardThreshold)
 	}
 
 	// If context was cancelled (user pressed stop), clean up with a fresh

@@ -186,6 +186,35 @@ The 10% discount for Anthropic cache reads (a `claude-haiku-4-5` cache read bill
 
 A regression earlier in this PR's history shipped the parser without consuming the cache fields — every workspace recorded zero cached tokens and the discount never triggered. The `cost_ledger.cached_input_tokens` column has been present since v62 but was effectively dead until this wiring landed.
 
+## Cost controls
+
+Beyond the ledger and budgets, a few knobs cut token spend directly without touching output quality.
+
+### Cache-stable system prompt
+
+Anthropic bills a cache read at ~10% of a fresh input token, but only when the request's **prefix is byte-identical** to a recent one. The orchestrator keeps the `--system-prompt` (preamble → persona → skills → memory files) stable within a day and pushes everything that changes turn-to-turn — conversation history, episodic recall, the `[MEMORY NUDGE]` and `[COST AWARENESS]` blocks — into a `[SESSION CONTEXT]` wrapper on the **user** message instead. Dynamic content in the system prefix used to force a full-price re-read on every message; moving it out lets the large stable prefix hit the cache. Watch `cost_ledger.cache_creation_tokens` (should fall) vs `cached_input_tokens` (should rise) across a multi-turn session to confirm the win.
+
+### Auxiliary & sub-agent model routing
+
+Auxiliary work (memory consolidation, Keeper/behavior evaluators, memory-health, negative learning) defaults to `anthropic/claude-haiku-4-5`. Override any slot per deployment — point it at a cheaper or local model without a redeploy:
+
+```bash
+CREWSHIP_AUX_<SLOT>_PROVIDER   # curator|keeper|behavior|memory_health|negative|fallback
+CREWSHIP_AUX_<SLOT>_MODEL
+CREWSHIP_AUX_<SLOT>_TIMEOUT     # Go duration, e.g. 5s; bad value is ignored, deadline preserved
+```
+
+Example: `CREWSHIP_AUX_CURATOR_MODEL=llama3.1 CREWSHIP_AUX_CURATOR_PROVIDER=ollama`.
+
+Delegated **worker** sub-agents (a lead handing a bounded sub-task to a crew member) rarely need the top model tier. Set `CREWSHIP_SUBAGENT_MODEL` to route them to a cheaper model; the lead planner keeps its own configured model. Unset = each agent uses its own model (no downgrade), so this is a pure opt-in.
+
+### Turn caps & loop guard
+
+Two independent guards stop a confused agent from burning budget:
+
+- **`--max-turns`** — the adapter-side loop cap. Interactive runs default to `50`; **scheduled / routine runs default to `20`** (`orchestrator.RoutineMaxTurns`) because an unattended job with no human watching is where a stuck loop runs up the bill unnoticed.
+- **Loop guard** — the orchestrator aborts a run when the agent repeats the **identical** tool call (same name + same input) five times in a row, emitting an `exec.command` journal entry with `reason: loop_detected` so cost triage can tell a runaway loop apart from a real crash. Adapter-agnostic — it observes the normalized tool-call stream, so it covers every CLI.
+
 ## Rate-card snapshotting
 
 Every metered row writes the `rate_*_per_m` columns from `RateCard(provider, model)` at the moment of write. When `pricing.go` is later edited (a provider repriced, a new model was added), historical rollups stay consistent: the old row continues to imply its old rate. New rollup queries can either trust `cost_usd` directly or recompute from `rate_*_per_m * tokens` to verify nothing has drifted.

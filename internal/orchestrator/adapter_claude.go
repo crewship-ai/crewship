@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +31,29 @@ func (claudeCodeAdapter) Name() string { return "CLAUDE_CODE" }
 // prompt is supplied and an explicit --output-format is set (we always pass
 // --output-format stream-json) — verified against the real CLI (v2.1.x).
 const promptArgMaxBytes = 96 * 1024
+
+// DefaultMaxTurns is the adapter-side agent-loop cap for interactive runs when
+// AgentRunRequest.MaxTurns is unset. 50 is generous enough for complex
+// multi-step tasks without letting a stuck agent burn budget indefinitely.
+//
+// RoutineMaxTurns is the tighter cap the scheduler stamps onto unattended
+// (routine / cron) runs. A background job that gets confused has no human to
+// hit stop, so it's exactly where a loose cap quietly runs up the bill — 20
+// still covers realistic scheduled work (fetch → reason → act → report).
+const (
+	DefaultMaxTurns = 50
+	RoutineMaxTurns = 20
+)
+
+// resolveMaxTurns picks the effective turn cap: an explicit per-run value wins,
+// otherwise the interactive default. Kept tiny and pure so the adapter argv
+// stays trivially testable.
+func resolveMaxTurns(req AgentRunRequest) int {
+	if req.MaxTurns > 0 {
+		return req.MaxTurns
+	}
+	return DefaultMaxTurns
+}
 
 // claudePromptViaStdin is the shared predicate behind PromptViaStdin and the
 // arg-omission branch in BuildCommand so the two never disagree.
@@ -100,10 +124,10 @@ func (claudeCodeAdapter) BuildCommand(req AgentRunRequest) []string {
 	// resolve. The per-profile policy lives in builtinToolAllowlist.
 	cmd = append(cmd, "--tools", builtinToolAllowlistCSV(req.ToolProfile))
 	// --max-turns caps runaway loops at the Claude side as defense-in-depth
-	// alongside Crewship's mission-level paymaster budget. 50 is generous
-	// enough for complex multi-step tasks without letting a stuck agent
-	// burn budget indefinitely.
-	cmd = append(cmd, "--max-turns", "50")
+	// alongside Crewship's mission-level paymaster budget and the orchestrator
+	// loop guard. Interactive runs default to DefaultMaxTurns; routine runs
+	// carry a tighter RoutineMaxTurns via req.MaxTurns (see resolveMaxTurns).
+	cmd = append(cmd, "--max-turns", strconv.Itoa(resolveMaxTurns(req)))
 	// MCP servers are read from /crew/agents/<slug>/.mcp.json — written by
 	// WriteMCPConfig. PR-A F1: the crewship-memory MCP server is now always
 	// injected by setupMCPConfig regardless of whether the user/crew
