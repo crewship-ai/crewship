@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, type CSSProperties } from "react"
 import { Check, ChevronRight, FileText, Loader2, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatDurationDecimal } from "@/lib/time"
@@ -99,12 +99,17 @@ export function SubSpanWaterfall({
               <div className="relative h-3 w-full overflow-hidden rounded-sm bg-white/[0.04]">
                 <span
                   className={cn(
-                    "absolute top-0 h-full rounded-sm",
+                    "absolute top-0 h-full rounded-sm left-[var(--bar-left)] w-[var(--bar-width)]",
                     SUB_SPAN_BAR_CLASS[span.kind],
                     span.status === "error" && "ring-1 ring-rose-500/60",
                     span.status === "running" && "animate-pulse",
                   )}
-                  style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                  style={
+                    {
+                      "--bar-left": `${leftPct}%`,
+                      "--bar-width": `${widthPct}%`,
+                    } as CSSProperties
+                  }
                 />
               </div>
             </button>

@@ -355,8 +355,10 @@ reuse contract).`,
 			"definition":     json.RawMessage(definitionRaw),
 			"author_crew_id": authorCrew,
 		}
-		// Forward the proof token when the server minted one (a server without
-		// a signing secret returns none — then an OWNER/ADMIN must --skip-test-gate).
+		// Forward the proof token when the server minted one. A server without
+		// a signing secret returns none; the save then relies on the server-side
+		// test-gate (an OWNER/ADMIN caller can bypass it via the save handler's
+		// skip_test_gate body field — there is no CLI flag for it).
 		if testResult.SaveToken != "" {
 			saveBody["save_token"] = testResult.SaveToken
 		}

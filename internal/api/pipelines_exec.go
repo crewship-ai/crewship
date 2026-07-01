@@ -426,6 +426,22 @@ func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
+	// Bind the client-supplied crew to the caller's JWT workspace before the
+	// gates resolve its integrations/resources. TestRun is JWT-authed, so
+	// assertBoundCrewWorkspaceDB (which keys off the internal token) is a no-op
+	// here — without this explicit check a caller could pass another tenant's
+	// author_crew_id and enumerate that crew's capabilities via the gate
+	// responses. Fail closed: a missing or foreign crew gets the same 403 so it
+	// is not an existence oracle. Empty crew stays a no-op (the draft flow).
+	if body.AuthorCrewID != "" {
+		var boundID string
+		if err := h.db.QueryRowContext(r.Context(),
+			`SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+			body.AuthorCrewID, workspaceID).Scan(&boundID); err != nil {
+			replyError(w, http.StatusForbidden, "crew does not belong to this workspace")
+			return
+		}
+	}
 	// Same preconditions a real run would hit (best-effort — author_crew_id is
 	// optional in the UI draft flow; an empty crew makes both gates no-op).
 	if h.gateMissingIntegrations(w, r, workspaceID, body.AuthorCrewID, "", dsl.NormalizedIntegrationsRequired()) {

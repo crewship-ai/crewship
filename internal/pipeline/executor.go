@@ -1046,6 +1046,12 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		if in.Mode == ModeRun && in.pipeline != nil {
 			_ = e.store.RecordInvocation(ctx, in.pipeline.ID, "COMPLETED")
 		}
+	default:
+		// Only ModeDryRun and ModeRun are supported. Any other (or empty)
+		// mode must never return an empty terminal Status — fail loudly so a
+		// caller sees a real error instead of a silently no-op'd run.
+		result.Status = "FAILED"
+		result.ErrorMessage = fmt.Sprintf("unknown run mode %q", in.Mode)
 	}
 
 	return result, nil
