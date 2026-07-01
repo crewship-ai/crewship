@@ -17,12 +17,14 @@ import {
   Eye,
   EyeOff,
   Inbox as InboxIcon,
-  Layers,
+  ListChecks,
   MailOpen,
   MessageSquare,
   RotateCcw,
   ScrollText,
   Sparkles,
+  Tag,
+  User,
   Users,
   Workflow,
   XCircle,
@@ -34,6 +36,13 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useCrewSummaries } from "@/hooks/use-dashboard-data"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { ListRow } from "@/components/ui/list-row"
 import { TabBar } from "@/components/ui/tab-bar"
 import { ListRowSkeleton } from "@/components/ui/skeletons"
@@ -121,13 +130,17 @@ function isSourceLessEscalation(item: InboxItem): boolean {
 // so grouping is pure client-side over the data the list already holds.
 type GroupDim = "smart" | "kind" | "sender" | "routine" | "issue" | "crew"
 
-const GROUP_DIMS: { id: GroupDim; label: string }[] = [
-  { id: "smart", label: "Smart" },
-  { id: "kind", label: "Type" },
-  { id: "sender", label: "Sender" },
-  { id: "routine", label: "Routine" },
-  { id: "issue", label: "Issue" },
-  { id: "crew", label: "Crew" },
+const GROUP_DIMS: {
+  id: GroupDim
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+}[] = [
+  { id: "smart", label: "Smart", icon: Sparkles },
+  { id: "kind", label: "Type", icon: Tag },
+  { id: "sender", label: "Sender", icon: User },
+  { id: "routine", label: "Routine", icon: Workflow },
+  { id: "issue", label: "Issue", icon: CircleDot },
+  { id: "crew", label: "Crew", icon: Users },
 ]
 
 // Smart buckets give the Linear-style "what needs me vs what's FYI" split
@@ -418,6 +431,12 @@ export function InboxList() {
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
   const [confirmResolve, setConfirmResolve] = useState(false)
+  // Selection is opt-in: the list reads clean (no checkboxes) until the
+  // user hits "Select". Toggling off clears any pending selection so the
+  // bulk bar can't linger over an invisible checkbox set.
+  const [selectMode, setSelectMode] = useState(false)
+
+  const activeDim = GROUP_DIMS.find((d) => d.id === groupBy) ?? GROUP_DIMS[0]
 
   const groups = useMemo<InboxGroup[]>(() => {
     const map = new Map<string, InboxGroup>()
@@ -475,6 +494,15 @@ export function InboxList() {
     })
 
   const clearChecked = () => setChecked(new Set())
+
+  // Enter/leave selection mode. Leaving always drops the pending selection
+  // so re-entering starts clean and the bulk bar never shows a stale count.
+  const toggleSelectMode = () => {
+    setSelectMode((on) => {
+      if (on) clearChecked()
+      return !on
+    })
+  }
 
   // Split the current selection into items a bulk Resolve will actually
   // close vs. decision items the server will refuse to close. Drives the
@@ -572,27 +600,50 @@ export function InboxList() {
           </TabBar.Item>
         </TabBar>
 
-        {/* Group-by control */}
-        <div className="flex shrink-0 items-center gap-1 border-b border-white/[0.06] px-3 py-1.5">
-          <Layers className="mr-1 h-3 w-3 text-muted-foreground/50" />
-          <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground/50">
-            Group
-          </span>
-          {GROUP_DIMS.map((d) => (
-            <button
-              key={d.id}
-              onClick={() => setGroupBy(d.id)}
-              aria-pressed={groupBy === d.id}
-              className={cn(
-                "rounded px-1.5 py-0.5 text-[11px] transition-colors",
-                groupBy === d.id
-                  ? "bg-white/[0.08] text-foreground"
-                  : "text-muted-foreground/60 hover:text-foreground",
-              )}
-            >
-              {d.label}
-            </button>
-          ))}
+        {/* Group-by + selection toolbar. The six dimensions live in a single
+            dropdown (labelled with the active one) instead of a cramped
+            button row; Select toggles multi-select so the list stays clean
+            by default. */}
+        <div className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-3 py-1.5">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 text-xs"
+                aria-label="Group inbox by"
+              >
+                <activeDim.icon className="h-3 w-3 text-muted-foreground/70" />
+                <span className="text-muted-foreground/60">Group:</span>
+                <span>{activeDim.label}</span>
+                <ChevronDown className="h-3 w-3 text-muted-foreground/50" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-44">
+              <DropdownMenuRadioGroup
+                value={groupBy}
+                onValueChange={(v) => setGroupBy(v as GroupDim)}
+              >
+                {GROUP_DIMS.map((d) => (
+                  <DropdownMenuRadioItem key={d.id} value={d.id} className="gap-2 text-xs">
+                    <d.icon className="h-3.5 w-3.5 text-muted-foreground/70" />
+                    {d.label}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Button
+            variant={selectMode ? "secondary" : "ghost"}
+            size="sm"
+            className="ml-auto h-7 gap-1.5 text-xs"
+            onClick={toggleSelectMode}
+            aria-pressed={selectMode}
+          >
+            <ListChecks className="h-3 w-3" />
+            {selectMode ? "Done" : "Select"}
+          </Button>
         </div>
 
         {/* List — collapsible tree, one folder per group */}
@@ -623,11 +674,13 @@ export function InboxList() {
                   <div key={g.key}>
                     {/* Group header — checkbox selects the whole folder */}
                     <div className="sticky top-0 z-[1] flex items-center gap-2 border-b border-white/[0.04] bg-card/95 px-3 py-1.5 backdrop-blur">
-                      <Checkbox
-                        checked={groupState}
-                        onCheckedChange={() => toggleGroup(g)}
-                        aria-label={`Select all in ${g.label}`}
-                      />
+                      {selectMode && (
+                        <Checkbox
+                          checked={groupState}
+                          onCheckedChange={() => toggleGroup(g)}
+                          aria-label={`Select all in ${g.label}`}
+                        />
+                      )}
                       <button
                         onClick={() => toggleCollapse(g.key)}
                         aria-expanded={!isCollapsed}
@@ -651,6 +704,7 @@ export function InboxList() {
                           <InboxRow
                             key={item.id}
                             item={item}
+                            selectMode={selectMode}
                             selected={selectedId === item.id}
                             checked={checked.has(item.id)}
                             onToggleCheck={() => toggleItem(item.id)}
@@ -809,14 +863,42 @@ export function InboxList() {
   )
 }
 
+// PriorityPill surfaces the item's priority (a field the API already
+// returns but the list used to drop) so "urgent" / "high" reads at a
+// glance. medium is the default and stays unlabelled to avoid noise.
+function PriorityPill({
+  priority,
+  className,
+}: {
+  priority: InboxItem["priority"]
+  className?: string
+}) {
+  if (priority === "medium") return null
+  return (
+    <span
+      className={cn(
+        "shrink-0 rounded px-1 py-0 text-[9px] font-semibold uppercase tracking-wide",
+        priority === "urgent" && "bg-rose-500/15 text-rose-300",
+        priority === "high" && "bg-amber-500/15 text-amber-300",
+        priority === "low" && "bg-white/[0.06] text-muted-foreground",
+        className,
+      )}
+    >
+      {priority}
+    </span>
+  )
+}
+
 function InboxRow({
   item,
+  selectMode,
   selected,
   checked,
   onToggleCheck,
   onSelect,
 }: {
   item: InboxItem
+  selectMode: boolean
   selected: boolean
   checked: boolean
   onToggleCheck: () => void
@@ -833,16 +915,19 @@ function InboxRow({
         item.state === "resolved" && "opacity-60",
       )}
     >
-      {/* Per-row checkbox for bulk select. Toggle is wired through
-          onCheckedChange so it works for keyboard + screen-reader users;
-          the wrapper just stops the click from also opening the detail. */}
-      <span className="mt-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-        <Checkbox
-          checked={checked}
-          onCheckedChange={onToggleCheck}
-          aria-label={`Select ${item.title}`}
-        />
-      </span>
+      {/* Per-row checkbox for bulk select — only in Select mode, so the
+          default list reads clean. Toggle is wired through onCheckedChange
+          so it works for keyboard + screen-reader users; the wrapper just
+          stops the click from also opening the detail. */}
+      {selectMode && (
+        <span className="mt-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+          <Checkbox
+            checked={checked}
+            onCheckedChange={onToggleCheck}
+            aria-label={`Select ${item.title}`}
+          />
+        </span>
+      )}
       {/* unread dot — left of the sender avatar */}
       <span
         className={cn(
@@ -863,6 +948,7 @@ function InboxRow({
           </span>
         </div>
         <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground/70">
+          <PriorityPill priority={item.priority} />
           <Icon className={cn("h-3 w-3 shrink-0", meta.accent)} />
           <span>{meta.label}</span>
           {item.sender_name && <><span>·</span><span className="truncate">{item.sender_name}</span></>}
@@ -908,16 +994,7 @@ function InboxDetail({
         <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-muted-foreground/60">
           <Icon className={cn("h-3.5 w-3.5", meta.accent)} />
           <span>{meta.label}</span>
-          {item.priority !== "medium" && (
-            <span className={cn(
-              "rounded px-1.5 py-0.5 text-[9px] font-semibold",
-              item.priority === "urgent" && "bg-rose-500/15 text-rose-300",
-              item.priority === "high" && "bg-amber-500/15 text-amber-300",
-              item.priority === "low" && "bg-white/[0.06] text-muted-foreground",
-            )}>
-              {item.priority}
-            </span>
-          )}
+          <PriorityPill priority={item.priority} className="px-1.5 py-0.5" />
         </div>
         <h1 className="mt-1.5 text-base font-semibold">{item.title}</h1>
         <div className="mt-3 flex items-center gap-2.5">
