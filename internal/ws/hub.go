@@ -20,10 +20,19 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+// ChatMessageOption carries optional per-message run settings from the
+// WebSocket frame (e.g. a `--max-turns` override). Passed variadically so
+// existing callers stay source-compatible; only the WS dispatch supplies one.
+type ChatMessageOption struct {
+	// MaxTurns overrides the adapter agent-loop cap for this run. 0 = leave the
+	// adapter default in place.
+	MaxTurns int
+}
+
 // ChatHandler processes incoming chat messages from WebSocket clients and
 // streams response events back via the provided callback.
 type ChatHandler interface {
-	HandleChatMessage(ctx context.Context, userID, sessionID, content string, streamFn func(event ChatEvent)) error
+	HandleChatMessage(ctx context.Context, userID, sessionID, content string, streamFn func(event ChatEvent), opts ...ChatMessageOption) error
 }
 
 // ChatEvent is a streaming event sent from an agent run back to the client,

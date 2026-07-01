@@ -26,7 +26,7 @@ import (
 //   - First-failure does NOT abort the others. A common use case is "ask 3
 //     agents, see who got it right" — losing 2 responses because 1 errored
 //     would defeat the purpose. Failures are reported in their own slot.
-func runFanout(server, wsToken string, agentsByID map[string]string, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile, timeoutSecs int) error {
+func runFanout(server, wsToken string, agentsByID map[string]string, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile, timeoutSecs int, maxTurns int) error {
 	if len(agentsByID) == 0 {
 		return fmt.Errorf("no agents")
 	}
@@ -57,7 +57,7 @@ func runFanout(server, wsToken string, agentsByID map[string]string, prompt stri
 		wg.Add(1)
 		go func(agentID, slug string) {
 			defer wg.Done()
-			text, err := fanoutOne(ctx, client, server, wsToken, agentID, prompt)
+			text, err := fanoutOne(ctx, client, server, wsToken, agentID, prompt, maxTurns)
 			results <- result{slug: slug, text: text, err: err}
 		}(agentID, slug)
 	}
@@ -156,7 +156,7 @@ func runFanout(server, wsToken string, agentsByID map[string]string, prompt stri
 // timeout) the goroutine wraps up promptly. WS read errors are now
 // propagated to the caller with the partial text so a connection drop
 // surfaces as a per-agent error instead of a silently-truncated success.
-func fanoutOne(ctx context.Context, client *cli.Client, server, wsToken, agentID, prompt string) (string, error) {
+func fanoutOne(ctx context.Context, client *cli.Client, server, wsToken, agentID, prompt string, maxTurns int) (string, error) {
 	resp, err := client.WithContext(ctx).Post("/api/v1/agents/"+agentID+"/chats", map[string]string{
 		"mode":   "CHAT",
 		"origin": "CLI",
@@ -183,7 +183,7 @@ func fanoutOne(ctx context.Context, client *cli.Client, server, wsToken, agentID
 	if err := ws.Subscribe("session:" + out.ID); err != nil {
 		return "", fmt.Errorf("subscribe: %w", err)
 	}
-	if err := ws.SendMessage("agent:"+agentID, out.ID, prompt); err != nil {
+	if err := ws.SendMessage("agent:"+agentID, out.ID, prompt, maxTurns); err != nil {
 		return "", fmt.Errorf("send: %w", err)
 	}
 

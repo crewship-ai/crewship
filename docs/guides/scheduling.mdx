@@ -55,6 +55,15 @@ The same operations are also available on the REST API under `/api/v1/workspaces
 
 <Note>
   Per-agent `schedule_cron` fields described elsewhere in this guide are a separate legacy path. New work should go through `crewship routine schedules` against a saved routine.
+
+  For a quick single-agent cron, the per-agent path is now settable straight from the CLI (previously API-only):
+
+  ```bash
+  crewship agent update <agent> --schedule-cron '*/5 * * * *' \
+    --schedule-prompt "check the queue" --schedule-enabled
+  ```
+
+  Runs that the scheduler dispatches this way get the tighter routine turn cap automatically — the internal `orchestrator.RoutineMaxTurns` (20), applied to scheduled dispatches (not a CLI flag you pass).
 </Note>
 
 ## Cron Expression Format

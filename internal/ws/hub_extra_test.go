@@ -66,7 +66,7 @@ type stubChatHandler struct {
 	gotCtx context.Context
 }
 
-func (s *stubChatHandler) HandleChatMessage(ctx context.Context, _, _, _ string, stream func(event ChatEvent)) error {
+func (s *stubChatHandler) HandleChatMessage(ctx context.Context, _, _, _ string, stream func(event ChatEvent), _ ...ChatMessageOption) error {
 	s.mu.Lock()
 	s.calls++
 	s.gotCtx = ctx

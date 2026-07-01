@@ -102,11 +102,17 @@ func (c *WSClient) Subscribe(channel string) error {
 	})
 }
 
-// SendMessage sends a chat message to the given channel and session.
-func (c *WSClient) SendMessage(channel, chatID, content string) error {
-	payload := map[string]string{
+// SendMessage sends a chat message to the given channel and session. An
+// optional maxTurns (first variadic value, when > 0) caps the adapter agent
+// loop for this run — the CLI surface of the `--max-turns` flag. Kept variadic
+// so existing callers stay source-compatible.
+func (c *WSClient) SendMessage(channel, chatID, content string, maxTurns ...int) error {
+	payload := map[string]any{
 		"session_id": chatID,
 		"content":    content,
+	}
+	if len(maxTurns) > 0 && maxTurns[0] > 0 {
+		payload["max_turns"] = maxTurns[0]
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {

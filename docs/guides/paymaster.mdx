@@ -212,7 +212,7 @@ Delegated **worker** sub-agents (a lead handing a bounded sub-task to a crew mem
 
 Two independent guards stop a confused agent from burning budget:
 
-- **`--max-turns`** — the adapter-side loop cap. Interactive runs default to `50`; **scheduled / routine runs default to `20`** (`orchestrator.RoutineMaxTurns`) because an unattended job with no human watching is where a stuck loop runs up the bill unnoticed.
+- **`--max-turns`** — the adapter-side loop cap. Interactive runs default to `50`; **scheduled / routine runs default to `20`** (`orchestrator.RoutineMaxTurns`) because an unattended job with no human watching is where a stuck loop runs up the bill unnoticed. Override it per-run from the CLI: `crewship run <agent> --max-turns 15 "..."` (also on `crewship ask`). `0` (the default) leaves the built-in cap in place.
 - **Loop guard** — the orchestrator aborts a run when the agent repeats the **identical** tool call (same name + same input) five times in a row, emitting an `exec.command` journal entry with `reason: loop_detected` so cost triage can tell a runaway loop apart from a real crash. Adapter-agnostic — it observes the normalized tool-call stream, so it covers every CLI.
 
 ## Rate-card snapshotting

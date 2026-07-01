@@ -168,6 +168,9 @@ func init() {
 	agentUpdateCmd.Flags().String("learning-reason", "", "Audit reason recorded with the --self-learning change (required when --self-learning is set)")
 	agentUpdateCmd.Flags().String("lead-mode", "", "Lead mode")
 	agentUpdateCmd.Flags().Int("timeout", 0, "Timeout in seconds")
+	agentUpdateCmd.Flags().String("schedule-cron", "", "Cron expression to run the agent on a schedule (e.g. '*/5 * * * *'); empty clears it")
+	agentUpdateCmd.Flags().String("schedule-prompt", "", "Prompt the scheduled run sends to the agent")
+	agentUpdateCmd.Flags().Bool("schedule-enabled", false, "Enable/disable the agent's cron schedule")
 	agentUpdateCmd.Flags().String("avatar-seed", "", "Avatar seed")
 	agentUpdateCmd.Flags().String("avatar-style", "", "Avatar style")
 

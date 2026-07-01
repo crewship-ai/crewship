@@ -244,7 +244,7 @@ func TestRunNoStream(t *testing.T) {
 		defer save.Close()
 
 		out, err := captureStdoutCov(t, func() error {
-			return runNoStream(srv.URL, "ws-tok", covAgentID, "chat1", "hi", true, nil, save)
+			return runNoStream(srv.URL, "ws-tok", covAgentID, "chat1", "hi", true, nil, save, 0)
 		})
 		if err != nil {
 			t.Fatalf("runNoStream: %v", err)
@@ -278,7 +278,7 @@ func TestRunNoStream(t *testing.T) {
 		defer save.Close()
 
 		_, err = captureStdoutCov(t, func() error {
-			return runNoStream(srv.URL, "ws-tok", covAgentID, "chat1", "hi", true, nil, save)
+			return runNoStream(srv.URL, "ws-tok", covAgentID, "chat1", "hi", true, nil, save, 0)
 		})
 		if err == nil || !strings.Contains(err.Error(), "agent error: boom") {
 			t.Fatalf("want agent error, got %v", err)
@@ -292,7 +292,7 @@ func TestRunNoStream(t *testing.T) {
 		// No scripted events: the server closes right after send_message.
 		srv := newRunServerCov(t, &wsCapture{}, nil, http.StatusOK, http.StatusOK)
 		_, err := captureStdoutCov(t, func() error {
-			return runNoStream(srv.URL, "ws-tok", covAgentID, "chat1", "hi", true, nil, nil)
+			return runNoStream(srv.URL, "ws-tok", covAgentID, "chat1", "hi", true, nil, nil, 0)
 		})
 		if err == nil || !strings.Contains(err.Error(), "connection closed before any output") {
 			t.Fatalf("want connection-closed error, got %v", err)
@@ -302,7 +302,7 @@ func TestRunNoStream(t *testing.T) {
 	t.Run("done without text", func(t *testing.T) {
 		srv := newRunServerCov(t, &wsCapture{}, []cli.ChatEventPayload{{Type: "done"}}, http.StatusOK, http.StatusOK)
 		_, err := captureStdoutCov(t, func() error {
-			return runNoStream(srv.URL, "ws-tok", covAgentID, "chat1", "hi", true, nil, nil)
+			return runNoStream(srv.URL, "ws-tok", covAgentID, "chat1", "hi", true, nil, nil, 0)
 		})
 		if err == nil || !strings.Contains(err.Error(), "agent returned no text") {
 			t.Fatalf("want no-text error, got %v", err)
@@ -312,7 +312,7 @@ func TestRunNoStream(t *testing.T) {
 	t.Run("empty error event means no done and no text", func(t *testing.T) {
 		srv := newRunServerCov(t, &wsCapture{}, []cli.ChatEventPayload{{Type: "error", Content: ""}}, http.StatusOK, http.StatusOK)
 		_, err := captureStdoutCov(t, func() error {
-			return runNoStream(srv.URL, "ws-tok", covAgentID, "chat1", "hi", true, nil, nil)
+			return runNoStream(srv.URL, "ws-tok", covAgentID, "chat1", "hi", true, nil, nil, 0)
 		})
 		if err == nil || !strings.Contains(err.Error(), "stream ended without done event") {
 			t.Fatalf("want stream-ended error, got %v", err)
@@ -344,7 +344,7 @@ func TestRunStream_StreamEvents(t *testing.T) {
 		defer save.Close()
 
 		out, err := captureStdoutCov(t, func() error {
-			return runStream(srv.URL, "ws-tok", covAgentID, "viktor", "chat1", "do it", false, nil, save)
+			return runStream(srv.URL, "ws-tok", covAgentID, "viktor", "chat1", "do it", false, nil, save, 0)
 		})
 		if err != nil {
 			t.Fatalf("runStream: %v", err)
@@ -371,7 +371,7 @@ func TestRunStream_StreamEvents(t *testing.T) {
 		t.Cleanup(ResetAIFirstLatches)
 
 		out, err := captureStdoutCov(t, func() error {
-			return runStream(srv.URL, "ws-tok", covAgentID, "viktor", "chat1", "q", true, nil, nil)
+			return runStream(srv.URL, "ws-tok", covAgentID, "viktor", "chat1", "q", true, nil, nil, 0)
 		})
 		if err != nil {
 			t.Fatalf("runStream: %v", err)
@@ -387,7 +387,7 @@ func TestRunStream_StreamEvents(t *testing.T) {
 		}, http.StatusOK, http.StatusOK)
 
 		_, err := captureStdoutCov(t, func() error {
-			return runStream(srv.URL, "ws-tok", covAgentID, "viktor", "chat1", "q", true, nil, nil)
+			return runStream(srv.URL, "ws-tok", covAgentID, "viktor", "chat1", "q", true, nil, nil, 0)
 		})
 		if err == nil || !strings.Contains(err.Error(), "agent error: tool exploded") {
 			t.Fatalf("want agent error, got %v", err)
@@ -401,7 +401,7 @@ func TestRunStream_StreamEvents(t *testing.T) {
 		}, http.StatusOK, http.StatusOK)
 
 		out, err := captureStdoutCov(t, func() error {
-			return runStream(srv.URL, "ws-tok", covAgentID, "viktor", "chat1", "q", true, cli.NewMarkdownRenderer(), nil)
+			return runStream(srv.URL, "ws-tok", covAgentID, "viktor", "chat1", "q", true, cli.NewMarkdownRenderer(), nil, 0)
 		})
 		if err != nil {
 			t.Fatalf("runStream: %v", err)
@@ -703,7 +703,7 @@ func TestRunInteractive(t *testing.T) {
 	withOSStdinCov(t, "\nfollow up\n")
 
 	out, err := captureStdoutCov(t, func() error {
-		return runInteractive(srv.URL, "ws-tok", covAgentID, "viktor", "chat1", "initial question", false, nil, nil)
+		return runInteractive(srv.URL, "ws-tok", covAgentID, "viktor", "chat1", "initial question", false, nil, nil, 0)
 	})
 	if err != nil {
 		t.Fatalf("runInteractive: %v", err)
@@ -731,7 +731,7 @@ func TestRunInteractive_StreamErrorPropagates(t *testing.T) {
 	withOSStdinCov(t, "")
 
 	_, err := captureStdoutCov(t, func() error {
-		return runInteractive(srv.URL, "ws-tok", covAgentID, "viktor", "chat1", "go", true, nil, nil)
+		return runInteractive(srv.URL, "ws-tok", covAgentID, "viktor", "chat1", "go", true, nil, nil, 0)
 	})
 	if err == nil || !strings.Contains(err.Error(), "agent error: kaput") {
 		t.Fatalf("want agent error from initial prompt, got %v", err)
@@ -867,13 +867,13 @@ func TestRunCmdRunE_ChatDecodeError(t *testing.T) {
 func TestRunHelpers_BadServerURL(t *testing.T) {
 	saveCLIState(t)
 	cliCfg = &cli.CLIConfig{}
-	if err := runNoStream("http://127.0.0.1:1", "tok", covAgentID, "c", "p", true, nil, nil); err == nil {
+	if err := runNoStream("http://127.0.0.1:1", "tok", covAgentID, "c", "p", true, nil, nil, 0); err == nil {
 		t.Error("runNoStream must fail on unreachable server")
 	}
-	if err := runStream("http://127.0.0.1:1", "tok", covAgentID, "slug", "c", "p", true, nil, nil); err == nil {
+	if err := runStream("http://127.0.0.1:1", "tok", covAgentID, "slug", "c", "p", true, nil, nil, 0); err == nil {
 		t.Error("runStream must fail on unreachable server")
 	}
-	if err := runInteractive("http://127.0.0.1:1", "tok", covAgentID, "slug", "c", "p", true, nil, nil); err == nil {
+	if err := runInteractive("http://127.0.0.1:1", "tok", covAgentID, "slug", "c", "p", true, nil, nil, 0); err == nil {
 		t.Error("runInteractive must fail on unreachable server")
 	}
 }
@@ -886,7 +886,7 @@ func TestRunNoStream_PongSkippedAndMarkdown(t *testing.T) {
 	}, http.StatusOK, http.StatusOK)
 
 	out, err := captureStdoutCov(t, func() error {
-		return runNoStream(srv.URL, "ws-tok", covAgentID, "chat1", "hi", true, cli.NewMarkdownRenderer(), nil)
+		return runNoStream(srv.URL, "ws-tok", covAgentID, "chat1", "hi", true, cli.NewMarkdownRenderer(), nil, 0)
 	})
 	if err != nil {
 		t.Fatalf("runNoStream: %v", err)
@@ -909,7 +909,7 @@ func TestRunNoStream_SaveWriteError(t *testing.T) {
 	_ = save.Close() // closed underlying tempfile → WriteString fails
 
 	_, err = captureStdoutCov(t, func() error {
-		return runNoStream(srv.URL, "ws-tok", covAgentID, "chat1", "hi", true, nil, save)
+		return runNoStream(srv.URL, "ws-tok", covAgentID, "chat1", "hi", true, nil, save, 0)
 	})
 	if err == nil || !strings.Contains(err.Error(), "save write") {
 		t.Fatalf("want save write error, got %v", err)
@@ -925,7 +925,7 @@ func TestStreamEvents_WSReadErrorMidStream(t *testing.T) {
 	}, http.StatusOK, http.StatusOK)
 
 	_, err := captureStdoutCov(t, func() error {
-		return runStream(srv.URL, "ws-tok", covAgentID, "viktor", "chat1", "q", true, nil, nil)
+		return runStream(srv.URL, "ws-tok", covAgentID, "viktor", "chat1", "q", true, nil, nil, 0)
 	})
 	if err == nil || !strings.Contains(err.Error(), "ws read") {
 		t.Fatalf("want ws read error, got %v", err)
@@ -947,7 +947,7 @@ func TestStreamEvents_SaveWriteFailureSurfaces(t *testing.T) {
 	_ = save.Close() // forces both WriteString and any Commit to fail
 
 	_, err = captureStdoutCov(t, func() error {
-		return runStream(srv.URL, "ws-tok", covAgentID, "viktor", "chat1", "q", true, nil, save)
+		return runStream(srv.URL, "ws-tok", covAgentID, "viktor", "chat1", "q", true, nil, save, 0)
 	})
 	if err == nil || !strings.Contains(err.Error(), "save write") {
 		t.Fatalf("want save write error returned on done, got %v", err)

@@ -278,6 +278,28 @@ func (c *Client) safeSend(data []byte) (sent bool) {
 type sendMessagePayload struct {
 	ChatID  string `json:"session_id"`
 	Content string `json:"content"`
+	// MaxTurns caps the adapter agent loop for this run (`--max-turns` CLI
+	// flag). 0/omitted leaves the adapter default in place. Clamped via
+	// clampMaxTurns before use — this arrives from an untrusted client.
+	MaxTurns int `json:"max_turns,omitempty"`
+}
+
+// maxAllowedTurns is the hard ceiling on a client-supplied turn cap. The whole
+// point of --max-turns is to STOP a runaway from burning budget, so a WS client
+// (CLI, browser devtools, anything) must not be able to disable that guard by
+// sending a huge value — nor pass a negative one with undefined adapter meaning.
+const maxAllowedTurns = 200
+
+// clampMaxTurns sanitizes an untrusted turn cap: negative → 0 (unset, adapter
+// default), and anything above the ceiling is capped.
+func clampMaxTurns(n int) int {
+	if n < 0 {
+		return 0
+	}
+	if n > maxAllowedTurns {
+		return maxAllowedTurns
+	}
+	return n
 }
 
 func (c *Client) handleCancelMessage(msg ClientMessage) {
@@ -408,6 +430,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 			payload.ChatID,
 			payload.Content,
 			streamFn,
+			ChatMessageOption{MaxTurns: clampMaxTurns(payload.MaxTurns)},
 		)
 		if err != nil {
 			// Don't emit error if context was cancelled (user requested stop)

@@ -120,9 +120,9 @@ Examples:
 		}
 
 		if noStream {
-			return runNoStream(server, wsToken, runMeta.AgentID, chatID, prompt, quiet, md, saveFile)
+			return runNoStream(server, wsToken, runMeta.AgentID, chatID, prompt, quiet, md, saveFile, 0)
 		}
-		return runStream(server, wsToken, runMeta.AgentID, agentSlug, chatID, prompt, quiet, md, saveFile)
+		return runStream(server, wsToken, runMeta.AgentID, agentSlug, chatID, prompt, quiet, md, saveFile, 0)
 	},
 }
 
