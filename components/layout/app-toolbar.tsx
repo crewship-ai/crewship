@@ -39,6 +39,13 @@ import { apiFetch } from "@/lib/api-fetch"
 
 import { ProvisioningBadge } from "./app-toolbar-provisioning"
 
+// External destinations for the user menu. Kept here (not env-driven) because
+// they are stable public properties; the docs site is the Mintlify source of
+// truth and Help & Support routes to the GitHub issue tracker.
+const DOCS_URL = "https://docs.crewship.ai"
+const GITHUB_URL = "https://github.com/crewship-ai/crewship"
+const SUPPORT_URL = "https://github.com/crewship-ai/crewship/issues"
+
 const mobileNavSections = [
   {
     label: "Work",
@@ -475,10 +482,6 @@ export function AppToolbar() {
           <NotificationBell />
         </div>
 
-        <Button variant="ghost" size="icon" className="h-8 w-8 hidden sm:inline-flex" aria-label="Help">
-          <BookOpen className="h-4 w-4" />
-        </Button>
-
         {/* Desktop: user menu */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -503,21 +506,29 @@ export function AppToolbar() {
               </div>
             </div>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="gap-3 text-xs">
-              <User className="h-4 w-4 text-muted-foreground" />
-              Profile & Settings
+            <DropdownMenuItem asChild className="gap-3 text-xs">
+              <Link href="/settings">
+                <User className="h-4 w-4 text-muted-foreground" />
+                Profile & Settings
+              </Link>
             </DropdownMenuItem>
-            <DropdownMenuItem className="gap-3 text-xs">
-              <HelpCircle className="h-4 w-4 text-muted-foreground" />
-              Help & Support
+            <DropdownMenuItem asChild className="gap-3 text-xs">
+              <a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer">
+                <HelpCircle className="h-4 w-4 text-muted-foreground" />
+                Help & Support
+              </a>
             </DropdownMenuItem>
-            <DropdownMenuItem className="gap-3 text-xs">
-              <BookOpen className="h-4 w-4 text-muted-foreground" />
-              Documentation
+            <DropdownMenuItem asChild className="gap-3 text-xs">
+              <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">
+                <BookOpen className="h-4 w-4 text-muted-foreground" />
+                Documentation
+              </a>
             </DropdownMenuItem>
-            <DropdownMenuItem className="gap-3 text-xs">
-              <GitBranch className="h-4 w-4 text-muted-foreground" />
-              GitHub
+            <DropdownMenuItem asChild className="gap-3 text-xs">
+              <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
+                <GitBranch className="h-4 w-4 text-muted-foreground" />
+                GitHub
+              </a>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="gap-3 text-xs text-destructive" onClick={() => { signOut().then(() => window.location.href = "/login") }}>
