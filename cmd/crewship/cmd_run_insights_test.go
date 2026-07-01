@@ -11,6 +11,52 @@ import (
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
+// Reuses the package-level captureStdout(t, func() error) (string, error)
+// helper (cmd_slash_admin_cov_test.go) to assert on renderRunInsights output.
+
+func TestRenderRunInsights_Branches(t *testing.T) {
+	// no-color so assertions match on plain text regardless of TTY detection.
+	t.Setenv("NO_COLOR", "1")
+
+	t.Run("populated with truncation", func(t *testing.T) {
+		var b runInsightsResp
+		b.Window = "7d"
+		b.Totals.Total, b.Totals.Succeeded, b.Totals.Failed, b.Totals.Running = 100, 90, 10, 3
+		b.Duration.P50Ms, b.Duration.P95Ms = 18400, 72000
+		b.ByTrigger = []insightCat{{Key: "CRON", Total: 60, Failed: 4}}
+		b.ByModel = []insightCat{{Key: "claude-opus", Total: 70, Failed: 3}}
+		b.ByCrew = []insightCrew{{Name: "Support Crew", Total: 55, Failed: 2}}
+		b.TopAgents = []insightAgent{{Name: "Triage Agent", CrewName: "Support Crew", Total: 40, Failed: 1}}
+		b.Truncated = true
+
+		out, err := captureStdout(t, func() error { return renderRunInsights(b) })
+		if err != nil {
+			t.Fatalf("render: %v", err)
+		}
+		for _, want := range []string{"last 7 days", "success 90%", "By trigger", "Top crews", "By model", "Top agents", "Triage Agent", "cap"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("output missing %q\n---\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("zero runs", func(t *testing.T) {
+		var b runInsightsResp
+		b.Window = "24h"
+		out, err := captureStdout(t, func() error { return renderRunInsights(b) })
+		if err != nil {
+			t.Fatalf("render: %v", err)
+		}
+		if !strings.Contains(out, "No runs in this window") {
+			t.Errorf("expected empty-state message; got:\n%s", out)
+		}
+		// success rate is "—" when nothing has completed
+		if !strings.Contains(out, "success —") {
+			t.Errorf("expected em-dash success rate; got:\n%s", out)
+		}
+	})
+}
+
 func TestRunInsightsCmdStructure(t *testing.T) {
 	t.Parallel()
 	if runInsightsCmd.Use != "insights" {
@@ -36,12 +82,17 @@ func TestRunInsightsRunE_BadWindow(t *testing.T) {
 	saveCLIState(t)
 	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "cabcdefghijklmnopqrs", Server: "http://unused"}
 	t.Cleanup(func() { _ = runInsightsCmd.Flags().Set("window", "24h") })
-	if err := runInsightsCmd.Flags().Set("window", "1y"); err != nil {
-		t.Fatalf("set --window: %v", err)
-	}
-	err := runInsightsCmd.RunE(runInsightsCmd, nil)
-	if err == nil || !strings.Contains(err.Error(), "--window") {
-		t.Errorf("expected window validation error; got %v", err)
+
+	for _, bad := range []string{"1y", "", "48h", "1D", "day"} {
+		t.Run(bad, func(t *testing.T) {
+			if err := runInsightsCmd.Flags().Set("window", bad); err != nil {
+				t.Fatalf("set --window: %v", err)
+			}
+			err := runInsightsCmd.RunE(runInsightsCmd, nil)
+			if err == nil || !strings.Contains(err.Error(), "--window") {
+				t.Errorf("expected window validation error for %q; got %v", bad, err)
+			}
+		})
 	}
 }
 

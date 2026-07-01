@@ -37,12 +37,15 @@ func (f *runsTestFixture) emitRunRowFull(t *testing.T, traceID, agentID, status,
 	if status == "" {
 		return
 	}
-	terminalKind := map[string]string{
+	terminalKind, ok := map[string]string{
 		"COMPLETED": "run.completed",
 		"FAILED":    "run.failed",
 		"CANCELLED": "run.cancelled",
 		"TIMEOUT":   "run.timeout",
 	}[status]
+	if !ok {
+		t.Fatalf("unknown status %q", status)
+	}
 	terminalPayload := `{"exit_code":0}`
 	if model != "" {
 		terminalPayload = `{"exit_code":0,"metadata":{"model":"` + model + `"}}`

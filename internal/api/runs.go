@@ -313,9 +313,7 @@ func (h *RunHandler) Insights(w http.ResponseWriter, r *http.Request) {
 	switch window {
 	case journal.RunWindow24h, journal.RunWindow7d, journal.RunWindow30d:
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "window must be one of: 24h, 7d, 30d",
-		})
+		writeProblem(w, r, http.StatusBadRequest, "window must be one of: 24h, 7d, 30d")
 		return
 	}
 
@@ -386,6 +384,12 @@ func (h *RunHandler) rollupAgents(ctx context.Context, workspaceID string, byAge
 				if err := rows.Scan(&id, &m.name, &m.crewID, &m.crewName); err == nil {
 					lookup[id] = m
 				}
+			}
+			// A mid-iteration error leaves lookup partial — the crew/agent
+			// rollup would silently drop display names. Log it rather than
+			// present degraded data as complete.
+			if err := rows.Err(); err != nil {
+				h.logger.Warn("run insights: agent rollup lookup iteration failed", "error", err)
 			}
 			_ = rows.Close()
 		} else {

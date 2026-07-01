@@ -267,7 +267,8 @@ All three share the same SSE stream and FTS index — selecting a tab does not r
 
 ### Runs — fleet operations overview
 
-The Runs tab has four sections, scoped by a `24h / 7d / 30d` window selector:
+The Runs tab has four sections. The KPI row and breakdowns (2-3) are scoped by a
+`24h / 7d / 30d` window selector; the live pulse and recent-runs table (1, 4) are not:
 
 1. **Live pulse** — every currently-running execution across the fleet, with live-ticking elapsed time. Sourced from `/api/v1/runs?status=RUNNING`.
 2. **KPI row** — total runs in the window with an outcome split-bar (succeeded vs failed), success rate, failure count, and median / p95 duration.

@@ -266,7 +266,11 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
           <div className="flex items-center gap-2">
             <Activity className="h-3.5 w-3.5 text-foreground/50" />
             <span className="text-[10px] font-mono text-muted-foreground/60">
-              {total > 0 ? `${total.toLocaleString()} total · ${WINDOW_LABEL[window]}` : "no runs yet"}
+              {t && t.total > 0
+                ? `${t.total.toLocaleString()} runs · ${WINDOW_LABEL[window]}`
+                : total > 0
+                  ? `${total.toLocaleString()} total runs`
+                  : "no runs yet"}
             </span>
           </div>
           <div className="flex items-center gap-2">

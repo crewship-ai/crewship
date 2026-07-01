@@ -99,7 +99,9 @@ func TestRunInsights_AggregatesWindow(t *testing.T) {
 	emitRunFull(t, w, "ws_i", "agent_a", "r_e", "", "AGENT", "claude-opus", now.Add(-1*time.Hour), 0) // running
 	// Out-of-window run (2 days old) — must be excluded from the 24h window.
 	emitRunFull(t, w, "ws_i", "agent_a", "r_old", "COMPLETED", "USER", "claude-opus", now.Add(-48*time.Hour), 10*time.Second)
-	_ = w.Flush(context.Background())
+	if err := w.Flush(context.Background()); err != nil {
+		t.Fatalf("flush journal entries: %v", err)
+	}
 	time.Sleep(50 * time.Millisecond)
 
 	res, err := RunInsights(context.Background(), db, "ws_i", RunWindow24h)

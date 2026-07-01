@@ -499,6 +499,12 @@ func RunInsights(ctx context.Context, db *sql.DB, workspaceID string, window Run
 	// One row per trace started within the window. Filtering all of a trace's
 	// entries by ts >= cutoff is safe: a run's entries cluster around its start,
 	// so a run.started inside the window keeps its terminal entry too.
+	//
+	// datetime(ts) normalises the compare: ts is stored RFC3339
+	// ("2006-01-02T15:04:05.000Z") while datetime('now', ?) yields
+	// "YYYY-MM-DD HH:MM:SS". A raw string compare between the two formats would
+	// admit same-day rows before the cutoff time ('T' > ' '); wrapping both in
+	// datetime() puts them in one canonical form.
 	q := `
 WITH run_aggregates AS (
     SELECT trace_id,
@@ -512,7 +518,7 @@ WITH run_aggregates AS (
     WHERE workspace_id = ?
       AND trace_id IS NOT NULL
       AND entry_type LIKE 'run.%'
-      AND ts >= datetime('now', ?)
+      AND datetime(ts) >= datetime('now', ?)
     GROUP BY trace_id
 )
 SELECT started_at, finished_at, terminal_type, agent_id, started_payload, terminal_payload
@@ -606,7 +612,7 @@ LIMIT ?`
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return res, err
+		return res, fmt.Errorf("journal: run insights iteration: %w", err)
 	}
 
 	res.DurationP50Ms = percentile(durations, 0.50)
