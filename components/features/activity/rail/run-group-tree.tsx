@@ -13,6 +13,7 @@ import {
   Zap,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { selection } from "@/lib/interaction"
 import { relTime } from "@/lib/time"
 import { statusIcon, statusTint } from "@/lib/activity/run-status"
 import type { RunGroup } from "@/lib/activity/run-filters"
@@ -132,7 +133,7 @@ function GroupNode({
           </span>
         )}
         {group.metadata?.issueIdentifier && (
-          <span className="ml-1.5 inline-flex items-center gap-0.5 rounded bg-blue-500/15 px-1 py-0 text-[9px] font-medium text-blue-300">
+          <span className="ml-1.5 inline-flex items-center gap-0.5 rounded bg-primary/15 px-1 py-0 text-[9px] font-medium text-primary-hover">
             <CircleDot className="h-2 w-2" />
             {group.metadata.issueIdentifier}
           </span>
@@ -239,7 +240,6 @@ function RunRows({
           run={r}
           selected={selectedRunId === r.id}
           onSelect={() => onSelect(r.id)}
-          accentBorder={accentBorder}
         />
       ))}
       {hidden > 0 && (
@@ -262,14 +262,12 @@ interface RunRowProps {
   run: PipelineRun
   selected: boolean
   onSelect: () => void
-  accentBorder: string
 }
 
 function RunRow({
   run,
   selected,
   onSelect,
-  accentBorder,
 }: RunRowProps) {
   const tint = statusTint(run.status)
   const StatusIcon = statusIcon(run.status)
@@ -281,10 +279,12 @@ function RunRow({
         type="button"
         onClick={onSelect}
         aria-current={selected ? "true" : undefined}
+        // Canonical selection — same tokenized rounded accent-bar as every
+        // other sidebar row (via lib/interaction), so selecting a run reads
+        // identically to selecting an issue / agent / setting.
         className={cn(
-          "flex w-full items-center gap-1.5 px-2 py-1 text-left transition-colors hover:bg-white/[0.025]",
-          accentBorder,
-          selected && "bg-primary/10",
+          "mx-1.5 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left",
+          selected ? selection.row.selected : selection.row.default,
         )}
       >
         <span className={cn("h-4 w-4 shrink-0 rounded-full p-0.5", tint.bg)}>
