@@ -37,11 +37,37 @@ const defaultAgentPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbi
 // so subsequent execs that don't set their own PATH inherit it from the
 // container config. imageEnv may be nil (image inspect failed) — handled.
 func applyAgentLoginPath(env []string, loginPath string, imageEnv map[string]string) []string {
-	desired := strings.TrimSpace(loginPath)
+	// Sanitize at the point of use: a NUL byte in PATH makes runc reject the
+	// entire container (`invalid environment variable "PATH": contains nul
+	// byte`). loginPath is captured from a container exec stream and, in an
+	// older crew_runtime_config, may have been PERSISTED with an undemuxed
+	// stdcopy frame header (\x01\x00\x00…) still embedded. Stripping control
+	// bytes here means an already-stored corrupt value can't brick container
+	// start — a re-provision isn't required to recover.
+	desired := sanitizeEnvValue(strings.TrimSpace(loginPath))
 	if desired == "" {
 		desired = fallbackAgentPath(envValue(env, "PATH"), imageEnv["PATH"])
 	}
 	return replaceOrAppendEnv(env, "PATH", desired)
+}
+
+// sanitizeEnvValue drops control/NUL bytes and the U+FFFD replacement rune from
+// a value bound for the container environment. NUL is the fatal one — runc
+// rejects the container outright — but no legitimate PATH carries control
+// bytes, so removing them is always safe.
+func sanitizeEnvValue(s string) string {
+	if s == "" {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r == '�' || r == 0x7f || r < 0x20 {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // fallbackAgentPath builds the capture-failure PATH: the well-known
