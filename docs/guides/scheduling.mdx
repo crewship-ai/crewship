@@ -63,7 +63,7 @@ The same operations are also available on the REST API under `/api/v1/workspaces
     --schedule-prompt "check the queue" --schedule-enabled
   ```
 
-  Runs the scheduler dispatches this way carry the tighter routine turn cap (`--max-turns 20`) automatically.
+  Runs that the scheduler dispatches this way get the tighter routine turn cap automatically — the internal `orchestrator.RoutineMaxTurns` (20), applied to scheduled dispatches (not a CLI flag you pass).
 </Note>
 
 ## Cron Expression Format

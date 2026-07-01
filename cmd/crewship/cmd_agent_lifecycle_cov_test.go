@@ -179,7 +179,8 @@ func TestAgentUpdateRunE_NoFields(t *testing.T) {
 	covResetFlagsCli6(t, agentUpdateCmd,
 		"name", "role", "role-title", "cli-adapter", "tool-profile", "lead-mode",
 		"llm-provider", "llm-model", "timeout", "memory", "system-prompt",
-		"avatar-seed", "avatar-style", "self-learning", "learning-reason")
+		"avatar-seed", "avatar-style", "self-learning", "learning-reason",
+		"schedule-cron", "schedule-prompt", "schedule-enabled")
 
 	// CUID argument: resolveAgentID short-circuits, no HTTP call needed.
 	err := agentUpdateCmd.RunE(agentUpdateCmd, []string{covAgentIDCli6})
@@ -234,6 +235,46 @@ func TestAgentUpdateRunE_PatchesChangedFields(t *testing.T) {
 		"system_prompt":   "updated prompt",
 		"avatar_seed":     "s2",
 		"avatar_style":    "micah",
+	}
+	for k, v := range want {
+		if body[k] != v {
+			t.Errorf("body[%q] = %v, want %v", k, body[k], v)
+		}
+	}
+}
+
+// TestAgentUpdateRunE_ScheduleFields verifies the cron-schedule flags fold into
+// the generic agent PATCH as schedule_cron / schedule_prompt / schedule_enabled
+// (the server forwards these to the scheduler).
+func TestAgentUpdateRunE_ScheduleFields(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli6(t, stub)
+
+	covResetFlagsCli6(t, agentUpdateCmd,
+		"name", "role", "role-title", "cli-adapter", "tool-profile", "lead-mode",
+		"llm-provider", "llm-model", "timeout", "memory", "system-prompt",
+		"avatar-seed", "avatar-style", "self-learning", "learning-reason",
+		"schedule-cron", "schedule-prompt", "schedule-enabled")
+
+	covSetFlagCli6(t, agentUpdateCmd, "schedule-cron", "*/5 * * * *")
+	covSetFlagCli6(t, agentUpdateCmd, "schedule-prompt", "check the queue")
+	covSetFlagCli6(t, agentUpdateCmd, "schedule-enabled", "true")
+
+	stub.OnPatch("/api/v1/agents/"+covAgentIDCli6, clitest.EmptyResponse(200))
+
+	if err := agentUpdateCmd.RunE(agentUpdateCmd, []string{covAgentIDCli6}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	calls := stub.CallsFor("PATCH", "/api/v1/agents/"+covAgentIDCli6)
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 PATCH, got %d", len(calls))
+	}
+	body := covDecodeBody(t, calls[0].Body)
+	want := map[string]any{
+		"schedule_cron":    "*/5 * * * *",
+		"schedule_prompt":  "check the queue",
+		"schedule_enabled": true,
 	}
 	for k, v := range want {
 		if body[k] != v {
