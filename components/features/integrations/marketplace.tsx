@@ -2,10 +2,12 @@
 
 import * as React from "react"
 import { motion } from "motion/react"
-import { Search, Plus, Globe, Terminal } from "lucide-react"
+import { Plus, Globe, Terminal } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
-import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import {
+  SidebarToolbar, SidebarSearch, SidebarSection, SidebarRow,
+} from "@/components/layout/sidebar-kit"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { MCPLogo } from "@/components/icons/mcp-logos"
@@ -134,84 +136,59 @@ export function Marketplace({ onAdd, recipeEmptyState }: MarketplaceProps) {
   }, [servers])
 
   return (
-    <div className="grid grid-cols-[180px_1fr] gap-4 min-h-[600px]">
-      {/* Left sidebar: categories + verified-by sub-filter */}
-      <div className="space-y-4">
-        <div>
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium px-2 py-1.5">Categories</div>
-          <button
-            onClick={() => setCategory(null)}
-            className={cn(
-              "w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs transition-colors",
-              category === null ? "bg-blue-500/10 text-blue-300" : "text-foreground/80 hover:bg-white/[0.02]",
-            )}
-          >
-            <span>All</span>
-            <span className="text-[10px] font-mono opacity-60">{servers.length}</span>
-          </button>
-          {categoryCounts.map(([cat, n]) => (
-            <button
-              key={cat}
-              onClick={() => setCategory(cat === category ? null : cat)}
-              className={cn(
-                "w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs transition-colors capitalize",
-                category === cat ? "bg-blue-500/10 text-blue-300" : "text-foreground/80 hover:bg-white/[0.02]",
-              )}
-            >
-              <span className="truncate">{cat.replace(/-/g, " ")}</span>
-              <span className="text-[10px] font-mono opacity-60">{n}</span>
-            </button>
-          ))}
-        </div>
+    <div className="grid grid-cols-[280px_1fr] gap-4 min-h-[600px]">
+      {/* Left sidebar: search + category / verified-by / transport facets
+          — unified on sidebar-kit so it matches every other page's rail. */}
+      <aside className="flex flex-col">
+        <SidebarToolbar className="px-0">
+          <SidebarSearch
+            value={query}
+            onValueChange={setQuery}
+            placeholder={`Search ${total} servers…`}
+          />
+        </SidebarToolbar>
 
-        <div>
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium px-2 py-1.5">Verified by</div>
-          {(["all", "anthropic", "crewship", "community"] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTrust(t)}
-              className={cn(
-                "w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs transition-colors capitalize",
-                trust === t ? "bg-blue-500/10 text-blue-300" : "text-foreground/80 hover:bg-white/[0.02]",
-              )}
+        <SidebarSection label="Categories">
+          <SidebarRow selected={category === null} onSelect={() => setCategory(null)}>
+            <span className="flex-1 truncate">All</span>
+            <span className="text-[10px] font-mono tabular-nums text-muted-foreground/60">{servers.length}</span>
+          </SidebarRow>
+          {categoryCounts.map(([cat, n]) => (
+            <SidebarRow
+              key={cat}
+              selected={category === cat}
+              onSelect={() => setCategory(cat === category ? null : cat)}
             >
-              <span>{t === "all" ? "All" : t}</span>
-              {t !== "all" && (
-                <span className="text-[10px] font-mono opacity-60">{trustCounts[t]}</span>
-              )}
-            </button>
+              <span className="flex-1 truncate capitalize">{cat.replace(/-/g, " ")}</span>
+              <span className="text-[10px] font-mono tabular-nums text-muted-foreground/60">{n}</span>
+            </SidebarRow>
           ))}
-        </div>
-      </div>
+        </SidebarSection>
+
+        <SidebarSection label="Verified by" className="mt-2">
+          {(["all", "anthropic", "crewship", "community"] as const).map((t) => (
+            <SidebarRow key={t} selected={trust === t} onSelect={() => setTrust(t)}>
+              <span className="flex-1 truncate capitalize">{t === "all" ? "All" : t}</span>
+              {t !== "all" && (
+                <span className="text-[10px] font-mono tabular-nums text-muted-foreground/60">{trustCounts[t]}</span>
+              )}
+            </SidebarRow>
+          ))}
+        </SidebarSection>
+
+        <SidebarSection label="Transport" className="mt-2">
+          {(["all", "stdio", "streamable-http"] as const).map((t) => (
+            <SidebarRow key={t} selected={transport === t} onSelect={() => setTransport(t)}>
+              <span className="flex-1 truncate">
+                {t === "all" ? "All transports" : t === "stdio" ? "stdio" : "HTTP"}
+              </span>
+            </SidebarRow>
+          ))}
+        </SidebarSection>
+      </aside>
 
       {/* Right content */}
       <div className="space-y-4 min-w-0">
-        {/* Search + filter row */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-[260px]">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-            <Input
-              placeholder={`Search ${total} servers...`}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="pl-8 h-8"
-            />
-          </div>
-          {(["all", "stdio", "streamable-http"] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTransport(t)}
-              className={cn(
-                "h-8 px-3 rounded-md text-xs font-medium border transition-colors",
-                transport === t
-                  ? "bg-blue-500/10 border-blue-400/30 text-blue-300"
-                  : "border-white/10 text-muted-foreground hover:bg-white/[0.02]",
-              )}
-            >
-              {t === "all" ? "All transports" : t === "stdio" ? "stdio" : "HTTP"}
-            </button>
-          ))}
-        </div>
 
         {/* Featured row */}
         {featured.length > 0 && !debouncedQuery && (

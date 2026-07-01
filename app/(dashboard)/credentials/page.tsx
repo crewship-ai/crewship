@@ -3,7 +3,7 @@
 import * as React from "react"
 import { motion } from "motion/react"
 import {
-  Key, Plus, Pencil, Trash2, Search, Clock, AlertTriangle,
+  Key, Plus, Pencil, Trash2, Clock, AlertTriangle,
   ArrowUpDown,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -11,7 +11,7 @@ import { PageShell } from "@/components/layout/page-shell"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
+import { SidebarSearch } from "@/components/layout/sidebar-kit"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TabBar } from "@/components/ui/tab-bar"
 import {
@@ -433,15 +433,12 @@ export default function CredentialsPage() {
 
           {/* Filter row */}
           <div className="flex items-center gap-2 flex-wrap">
-            <div className="relative flex-1 min-w-[200px] max-w-md">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                placeholder="Search by name, tag, or description…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-8 h-8"
-              />
-            </div>
+            <SidebarSearch
+              value={search}
+              onValueChange={setSearch}
+              placeholder="Search by name, tag, or description…"
+              className="min-w-[200px] max-w-md"
+            />
             <Select value={filterTag} onValueChange={setFilterTag}>
               <SelectTrigger className="h-8 w-[140px] text-xs">
                 <SelectValue placeholder="Tags" />
