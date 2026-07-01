@@ -22,6 +22,8 @@ import {
   MessageSquare,
   RotateCcw,
   ScrollText,
+  Search,
+  SlidersHorizontal,
   Sparkles,
   Tag,
   User,
@@ -39,6 +41,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
@@ -435,12 +438,33 @@ export function InboxList() {
   // user hits "Select". Toggling off clears any pending selection so the
   // bulk bar can't linger over an invisible checkbox set.
   const [selectMode, setSelectMode] = useState(false)
+  // Free-text search over the loaded list. The API has no search param
+  // (list is state/kind-filtered server-side, everything else is client-
+  // side), so we match locally against the fields a human scans by:
+  // title + sender + the routine/issue the item points at.
+  const [query, setQuery] = useState("")
 
-  const activeDim = GROUP_DIMS.find((d) => d.id === groupBy) ?? GROUP_DIMS[0]
+  // Search narrows the already state-filtered list. Matches the fields a
+  // person scans for: title, sender, and the routine/issue slug in payload.
+  const searchedItems = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return visibleItems
+    return visibleItems.filter((it) => {
+      const hay = [
+        it.title,
+        it.sender_name ?? "",
+        payloadString(it, "pipeline_slug"),
+        payloadString(it, "issue_identifier"),
+      ]
+        .join(" ")
+        .toLowerCase()
+      return hay.includes(q)
+    })
+  }, [visibleItems, query])
 
   const groups = useMemo<InboxGroup[]>(() => {
     const map = new Map<string, InboxGroup>()
-    for (const it of visibleItems) {
+    for (const it of searchedItems) {
       const g = groupOf(it, groupBy, crewName)
       const bucket = map.get(g.key)
       if (bucket) bucket.items.push(it)
@@ -453,7 +477,7 @@ export function InboxList() {
       out.sort((a, b) => (SMART_ORDER[a.key] ?? 99) - (SMART_ORDER[b.key] ?? 99))
     }
     return out
-  }, [visibleItems, groupBy, crewName])
+  }, [searchedItems, groupBy, crewName])
 
   // Drop checked ids that are no longer visible (filter switch, refresh,
   // regroup) so the bulk bar count never lies about what it will act on.
@@ -564,62 +588,81 @@ export function InboxList() {
     <div className="flex h-[calc(100vh-48px)] bg-background">
       {/* ── List panel ─────────────────────────────────────────── */}
       <div className="flex w-[420px] shrink-0 flex-col border-r border-white/[0.06] bg-card">
-        {/* Header */}
+        {/* Search row — search owns the top (finally something worth the
+            width); Select sits at the end as an icon toggle. Gmail/
+            Superhuman-style: type to find an item by name. */}
         <div className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-3 py-2">
-          <InboxIcon className="h-4 w-4 text-muted-foreground/60" />
-          <span className="text-sm font-medium">Inbox</span>
-          {unreadCount > 0 && (
-            <span className="ml-auto rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold text-blue-300">
-              {unreadCount} unread
-            </span>
-          )}
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/50" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search inbox…"
+              aria-label="Search inbox"
+              className="h-8 w-full rounded-md border border-white/[0.06] bg-white/[0.03] pl-8 pr-3 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 focus:border-white/[0.12] focus:bg-white/[0.05]"
+            />
+          </div>
+          <Button
+            variant={selectMode ? "secondary" : "ghost"}
+            size="icon-sm"
+            onClick={toggleSelectMode}
+            aria-pressed={selectMode}
+            aria-label={selectMode ? "Done selecting" : "Select"}
+            title={selectMode ? "Done" : "Select items"}
+          >
+            <ListChecks className="h-4 w-4" />
+          </Button>
         </div>
 
-        {/* State filter */}
-        <TabBar
-          value={stateFilter}
-          onValueChange={(v) => setStateFilter(v as StateFilter)}
-          layoutId="inbox-filter-indicator"
-          ariaLabel="Filter inbox by state"
-          className="shrink-0 [&>button]:flex-1"
-        >
-          <TabBar.Item
-            value="inbox"
-            count={stateFilter === "inbox" ? visibleItems.length : null}
+        {/* Filter tabs + Display on one bar — navigation left, tools right.
+            Grouping lives inside Display (Linear-style) so it stops being a
+            standing control competing with the tabs. */}
+        <div className="flex shrink-0 items-center border-b border-white/[0.06] pr-2">
+          <TabBar
+            value={stateFilter}
+            onValueChange={(v) => setStateFilter(v as StateFilter)}
+            layoutId="inbox-filter-indicator"
+            ariaLabel="Filter inbox by state"
+            className="flex-1 border-b-0"
           >
-            Inbox
-          </TabBar.Item>
-          <TabBar.Item
-            value="unread"
-            count={stateFilter === "unread" ? visibleItems.length : unreadCount || null}
-          >
-            Unread
-          </TabBar.Item>
-          <TabBar.Item value="archived" count={stateFilter === "archived" ? visibleItems.length : null}>
-            Archived
-          </TabBar.Item>
-        </TabBar>
+            <TabBar.Item
+              value="inbox"
+              count={stateFilter === "inbox" ? searchedItems.length : null}
+            >
+              Inbox
+            </TabBar.Item>
+            <TabBar.Item
+              value="unread"
+              count={stateFilter === "unread" ? searchedItems.length : unreadCount || null}
+            >
+              Unread
+            </TabBar.Item>
+            <TabBar.Item
+              value="archived"
+              count={stateFilter === "archived" ? searchedItems.length : null}
+            >
+              Archived
+            </TabBar.Item>
+          </TabBar>
 
-        {/* Group-by + selection toolbar. The six dimensions live in a single
-            dropdown (labelled with the active one) instead of a cramped
-            button row; Select toggles multi-select so the list stays clean
-            by default. */}
-        <div className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-3 py-1.5">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 className="h-7 gap-1.5 text-xs"
-                aria-label="Group inbox by"
+                aria-label="Display options"
               >
-                <activeDim.icon className="h-3 w-3 text-muted-foreground/70" />
-                <span className="text-muted-foreground/60">Group:</span>
-                <span>{activeDim.label}</span>
+                <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground/70" />
+                Display
                 <ChevronDown className="h-3 w-3 text-muted-foreground/50" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-44">
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground/60">
+                Group by
+              </DropdownMenuLabel>
               <DropdownMenuRadioGroup
                 value={groupBy}
                 onValueChange={(v) => setGroupBy(v as GroupDim)}
@@ -633,17 +676,6 @@ export function InboxList() {
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>
           </DropdownMenu>
-
-          <Button
-            variant={selectMode ? "secondary" : "ghost"}
-            size="sm"
-            className="ml-auto h-7 gap-1.5 text-xs"
-            onClick={toggleSelectMode}
-            aria-pressed={selectMode}
-          >
-            <ListChecks className="h-3 w-3" />
-            {selectMode ? "Done" : "Select"}
-          </Button>
         </div>
 
         {/* List — collapsible tree, one folder per group */}
@@ -654,8 +686,14 @@ export function InboxList() {
             <div className="p-6 text-center text-xs text-rose-300">
               Inbox unavailable: {error}
             </div>
-          ) : visibleItems.length === 0 ? (
-            <InboxEmpty filter={stateFilter} />
+          ) : searchedItems.length === 0 ? (
+            query.trim() ? (
+              <div className="p-8 text-center text-xs text-muted-foreground">
+                No items match “{query.trim()}”.
+              </div>
+            ) : (
+              <InboxEmpty filter={stateFilter} />
+            )
           ) : (
             <div>
               {groups.map((g) => {

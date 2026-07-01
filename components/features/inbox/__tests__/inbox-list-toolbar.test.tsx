@@ -4,7 +4,7 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react"
 import type { InboxItem } from "@/hooks/use-inbox"
 
 // Radix DropdownMenu relies on pointer-capture + scrollIntoView, which the
-// test DOM doesn't implement. Polyfill them so the Group menu can open.
+// test DOM doesn't implement. Polyfill them so the Display menu can open.
 beforeEach(() => {
   if (!Element.prototype.hasPointerCapture) {
     Element.prototype.hasPointerCapture = () => false
@@ -72,40 +72,48 @@ vi.mock("@/hooks/use-inbox", async (importOriginal) => {
 
 import { InboxList } from "../inbox-list"
 
-describe("InboxList — refined toolbar", () => {
+describe("InboxList — search-led toolbar", () => {
   beforeEach(() => cleanup())
 
-  it("group-by is a single dropdown showing the current dimension, not a row of buttons", async () => {
+  it("grouping lives inside a single Display menu, not a standing button row", async () => {
     render(<InboxList />)
-    // A single control that opens the grouping menu, labelled with the
-    // active dimension (default: Smart) — replaces the old 6-button row.
-    const trigger = screen.getByRole("button", { name: /group/i })
-    expect(trigger).toHaveTextContent(/smart/i)
-
+    const trigger = screen.getByRole("button", { name: /display/i })
     fireEvent.pointerDown(trigger, { button: 0 })
-    // The other dimensions live inside the menu now, not as always-visible buttons.
+    // The six dimensions are options in the Display popover now.
     expect(await screen.findByRole("menuitemradio", { name: /type/i })).toBeInTheDocument()
     expect(screen.getByRole("menuitemradio", { name: /sender/i })).toBeInTheDocument()
     expect(screen.getByRole("menuitemradio", { name: /routine/i })).toBeInTheDocument()
     expect(screen.getByRole("menuitemradio", { name: /crew/i })).toBeInTheDocument()
+    // The old always-visible "Group:" pill is gone.
+    expect(screen.queryByText(/^Group:/)).not.toBeInTheDocument()
+  })
+
+  it("a search field filters the list by item title", () => {
+    render(<InboxList />)
+    // Both items visible up front.
+    expect(screen.getByText(/Credential approval/)).toBeInTheDocument()
+    expect(screen.getByText(/Scheduled routine failed/)).toBeInTheDocument()
+
+    const search = screen.getByPlaceholderText(/search inbox/i)
+    fireEvent.change(search, { target: { value: "credential" } })
+
+    // Only the matching row survives.
+    expect(screen.getByText(/Credential approval/)).toBeInTheDocument()
+    expect(screen.queryByText(/Scheduled routine failed/)).not.toBeInTheDocument()
   })
 
   it("checkboxes are hidden until Select mode is turned on", async () => {
     render(<InboxList />)
-    // Clean list by default — no per-row checkboxes.
     expect(screen.queryByLabelText(/^Select /)).not.toBeInTheDocument()
 
     const selectBtn = screen.getByRole("button", { name: /^select$/i })
     fireEvent.click(selectBtn)
 
-    // Now the row checkboxes exist.
     expect(await screen.findByLabelText(/Credential approval/)).toBeInTheDocument()
   })
 
   it("surfaces the item priority as a pill on the row", () => {
     render(<InboxList />)
-    // The 'high' priority escalation shows its priority in the list (the API
-    // already returns it; the row now renders it).
     expect(screen.getAllByText(/high/i).length).toBeGreaterThan(0)
   })
 })
