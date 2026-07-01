@@ -1,0 +1,89 @@
+---
+title: "Nuke"
+description: "Tear down workspace contents — DB entities, inbox items, escalations, and each crew's docker containers+volumes — without touching cached images."
+icon: "bomb"
+---
+
+# crewship nuke
+
+The `nuke` group is the single home for workspace teardown. Each subcommand maps
+to exactly one server capability, so there's one CLI command per endpoint.
+
+```bash
+crewship nuke <target> [flags]
+```
+
+Everything targets the **active workspace** (from `crewship login` / `--workspace`).
+All subcommands are destructive and **admin-only** (OWNER/ADMIN).
+
+## Subcommands
+
+| Command | What it removes | Endpoint |
+|---------|-----------------|----------|
+| `nuke all` | Full teardown: DB entities **+** inbox **+** escalations **+** docker runtimes | (composes the four below) |
+| `nuke data` | DB entities only — issues, projects, labels, agents, credentials, integrations, pipeline webhooks/schedules/pipelines, crews | per-entity `DELETE` |
+| `nuke inbox` | Inbox items (`--kind` to scope) | `DELETE /api/v1/inbox` |
+| `nuke escalations` | Crew escalations (`--crew` to scope; default all crews) | `DELETE /api/v1/crews/{id}/escalations` |
+| `nuke runtimes` | Each crew's docker container(s)+volumes (agent home, crew shared, sidecar) | `POST /api/v1/admin/prune-crew-runtimes` |
+
+<Note>
+  `nuke runtimes` never removes cached devcontainer images
+  (`crewship-cache:<hash>`). A reseed reuses them instead of forcing a rebuild —
+  teardown is fast and leaves the image cache warm.
+</Note>
+
+## Why a full teardown needs all four
+
+Deleting a crew is a soft-delete of its database row. On its own that leaves
+two kinds of orphan behind:
+
+- **Inbox items and escalations** — `inbox_items` has no cascade from the
+  per-entity deletes, and `escalations` carries a `workspace_id` but no foreign
+  key, so neither is cleared by a data-only wipe. The accumulated failed-run
+  notifications a broken scheduled routine piles up live here.
+- **Docker containers and volumes** — crew soft-delete never touches docker, so
+  the agent container and its home/crew volumes survive.
+
+`nuke all` clears all of them. The crew-scoped pieces (escalations, runtimes)
+run **before** the crew rows are deleted, since they need the crews to still
+exist.
+
+## Confirmation
+
+The two full-DB wipes — `nuke all` and `nuke data` — use the typed-slug gate:
+they print a blast-radius summary and require you to type the workspace **slug**
+exactly (or pass `--yes` for CI). A non-interactive session refuses to run
+without `--yes`.
+
+The narrower purges — `nuke inbox`, `nuke escalations`, `nuke runtimes` — use a
+lighter gate: they require `--yes` and refuse to run non-interactively without
+it.
+
+```bash
+crewship nuke all --yes          # full teardown, no prompt (CI/dev)
+crewship nuke data               # entities only; prompts for the slug
+crewship nuke inbox --kind failed_run --yes   # drop failed-run spam, nothing else
+crewship nuke escalations --crew quality --yes
+crewship nuke runtimes --yes
+```
+
+<Warning>
+  `--yes` removes the only interactive safety on the most destructive commands
+  in the CLI. Reserve it for automation against throwaway/dev instances; never
+  wire it into a script that could point at a real workspace.
+</Warning>
+
+## Flags
+
+| Flag | Applies to | Description |
+|------|------------|-------------|
+| `--yes` | all subcommands | Skip the confirmation prompt |
+| `--kind` | `nuke inbox` | Scope to one kind: `waitpoint`, `escalation`, `failed_run`, `message` |
+| `--crew` | `nuke escalations` | Crew slug or ID (default: every crew in the workspace) |
+
+## Relationship to `seed --nuke`
+
+`crewship seed --nuke` is an alias for `nuke all` followed by a reseed — it calls
+the same orchestrator. Use `seed --nuke` when you want a fresh demo workspace;
+use the `nuke` subcommands when you only want to tear something down (or clear a
+single surface) without reseeding.

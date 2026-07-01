@@ -582,3 +582,41 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, items)
 }
+
+// PurgeEscalations handles DELETE /api/v1/crews/{crewId}/escalations —
+// HARD-delete every escalation row for one crew in the context workspace. A
+// teardown/reset primitive for seed --nuke: the escalations table carries a
+// workspace_id but NO foreign key, so a crew delete never cascades to it and
+// the rows survive a nuke as orphans (and keep surfacing in the inbox as
+// synthetic escalation items). Crew-scoped to mirror the ListEscalations route
+// and its wsCtx boundary, and gated on "manage" (OWNER/ADMIN) because it's
+// destructive and cross-user. Returns {"deleted": N}.
+func (h *QueryHandler) PurgeEscalations(w http.ResponseWriter, r *http.Request) {
+	crewID := r.PathValue("crewId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	if workspaceID == "" {
+		replyError(w, http.StatusUnauthorized, "workspace required")
+		return
+	}
+	if !canRole(role, "manage") {
+		replyError(w, http.StatusForbidden, "admin role required")
+		return
+	}
+	if crewID == "" {
+		replyError(w, http.StatusBadRequest, "crew id required")
+		return
+	}
+
+	// Scope by BOTH crew_id and workspace_id: crewId comes from the path and a
+	// caller must not reach another workspace's rows by guessing a crew id.
+	res, err := h.db.ExecContext(r.Context(),
+		`DELETE FROM escalations WHERE crew_id = ? AND workspace_id = ?`, crewID, workspaceID)
+	if err != nil {
+		h.logger.Error("purge escalations", "error", err)
+		replyError(w, http.StatusInternalServerError, "purge failed")
+		return
+	}
+	deleted, _ := res.RowsAffected()
+	writeJSON(w, http.StatusOK, map[string]int64{"deleted": deleted})
+}

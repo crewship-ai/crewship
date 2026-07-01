@@ -362,6 +362,11 @@ func covRegisterEmptyNukeStubs(s *clitest.StubServer) {
 	s.OnGet("/api/v1/workspaces/"+covWSCli7+"/pipeline-schedules", empty)
 	s.OnGet("/api/v1/workspaces/"+covWSCli7+"/pipelines", empty)
 	s.OnGet("/api/v1/crews", empty)
+	// Full-teardown additions: inbox purge, crew-runtime docker teardown.
+	// (Escalations are purged per-crew; an empty /crews list means no
+	// per-crew DELETE fires, so no stub is needed here.)
+	s.OnDelete("/api/v1/inbox", clitest.JSONResponse(200, map[string]int{"deleted": 0}))
+	s.OnPost("/api/v1/admin/prune-crew-runtimes", clitest.JSONResponse(200, map[string]any{"removed": []string{}, "count": 0}))
 }
 
 func TestSeedNuke_EmptyWorkspaceSucceeds(t *testing.T) {
@@ -372,9 +377,11 @@ func TestSeedNuke_EmptyWorkspaceSucceeds(t *testing.T) {
 	if err := seedNuke(context.Background(), covStubClient(s)); err != nil {
 		t.Fatalf("seedNuke on empty workspace: %v", err)
 	}
-	// All ten list endpoints must have been consulted.
-	if got := len(s.Calls()); got != 10 {
-		t.Errorf("expected 10 GET list calls, got %d", got)
+	// All ten list endpoints must have been consulted, plus the three
+	// full-teardown calls: inbox purge (DELETE /inbox), the escalation pass
+	// (a second GET /crews), and the crew-runtime teardown (POST prune) — 13.
+	if got := len(s.Calls()); got != 13 {
+		t.Errorf("expected 13 calls (10 lists + inbox purge + escalation crew list + runtime prune), got %d", got)
 	}
 }
 
@@ -551,10 +558,12 @@ func TestSeedNuke_EveryPhaseFailingIsAggregated(t *testing.T) {
 	}
 
 	err := seedNuke(context.Background(), covStubClient(s))
-	if err == nil || !strings.Contains(err.Error(), "workspace cleanup had 10 failures") {
-		t.Fatalf("want 10 aggregated failures, got %v", err)
+	// 10 original list phases + 3 full-teardown phases (inbox purge, escalation
+	// pass, crew-runtime teardown), all failing on the unrouted/garbage stubs.
+	if err == nil || !strings.Contains(err.Error(), "workspace cleanup had 13 failures") {
+		t.Fatalf("want 13 aggregated failures, got %v", err)
 	}
-	for _, frag := range []string{"projects:", "labels:", "agents:", "credentials:", "integrations:", "pipeline-webhooks:", "pipeline-schedules:", "pipelines:", "crews:"} {
+	for _, frag := range []string{"projects:", "labels:", "agents:", "credentials:", "integrations:", "pipeline-webhooks:", "pipeline-schedules:", "pipelines:", "crews:", "inbox:", "escalations:", "crew runtimes:"} {
 		if !strings.Contains(err.Error(), frag) {
 			t.Errorf("missing %q in %v", frag, err)
 		}
@@ -612,9 +621,14 @@ func TestSeedNuke_CancelDuringIssuePage(t *testing.T) {
 	if err := seedNuke(ctx, covStubClient(s)); err != context.Canceled {
 		t.Fatalf("got %v, want context.Canceled", err)
 	}
+	// The per-issue loop must bail before touching any row: no issue-level
+	// DELETE may fire. (The crew-scoped teardown pieces — inbox/escalations/
+	// runtimes — run BEFORE issue paging in nukeAll, so they legitimately
+	// completed under a still-valid context; this test guards the issue loop's
+	// cancellation, not those.)
 	for _, c := range s.Calls() {
-		if c.Method == "DELETE" {
-			t.Errorf("no deletes expected after cancel: %s", c.Path)
+		if c.Method == "DELETE" && strings.Contains(c.Path, "/issues/") {
+			t.Errorf("no issue deletes expected after cancel: %s", c.Path)
 		}
 	}
 }
