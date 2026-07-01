@@ -1,15 +1,12 @@
 "use client"
 
 import { useState } from "react"
-import { Bookmark, Plus, Trash2 } from "lucide-react"
+import { Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import type { GroupAxis, RunFilter } from "@/lib/activity/run-filters"
@@ -70,14 +67,21 @@ export function useSavedViews() {
   return { views: bundle.views, activeId: bundle.activeId, save, remove, setActive }
 }
 
-interface SavedViewsButtonProps {
+interface SavedViewsMenuSectionProps {
   current: { filter: RunFilter; sort: SortAxis; group: GroupAxis }
   onApply: (view: SavedView) => void
+  /** Close the surrounding menu after applying / saving / clearing. */
+  onClose?: () => void
 }
 
-export function SavedViewsButton({ current, onApply }: SavedViewsButtonProps) {
+/**
+ * Saved-views content, rendered INSIDE a parent DropdownMenuContent — it's
+ * folded into the rail's ⋮ View menu (Sort / Group / Saved views) rather than
+ * living as its own toolbar button, so row 1 stays Search + Filter + View and
+ * the search keeps its full width.
+ */
+export function SavedViewsMenuSection({ current, onApply, onClose }: SavedViewsMenuSectionProps) {
   const { views, activeId, save, remove, setActive } = useSavedViews()
-  const [open, setOpen] = useState(false)
   const [naming, setNaming] = useState(false)
   const [nameDraft, setNameDraft] = useState("")
 
@@ -87,97 +91,81 @@ export function SavedViewsButton({ current, onApply }: SavedViewsButtonProps) {
     save(trimmed, current)
     setNameDraft("")
     setNaming(false)
-    setOpen(false)
+    onClose?.()
   }
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="Saved views"
-          className={cnIfActive(activeId !== null)}
+    <>
+      <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground/60">
+        Saved views
+      </DropdownMenuLabel>
+      {views.length === 0 && (
+        <div className="px-2 py-1 text-[11px] text-muted-foreground/60">
+          No saved views yet.
+        </div>
+      )}
+      {views.map((v) => (
+        <div
+          key={v.id}
+          className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-white/[0.04]"
         >
-          <Bookmark className="h-3 w-3" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[220px] text-xs">
-        <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground/60">
-          Saved views
-        </DropdownMenuLabel>
-        {views.length === 0 && (
-          <div className="px-2 py-1 text-[11px] text-muted-foreground/60">
-            No saved views yet.
-          </div>
-        )}
-        {views.map((v) => (
-          <div
-            key={v.id}
-            className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-white/[0.04]"
+          <button
+            type="button"
+            onClick={() => {
+              onApply(v)
+              setActive(v.id)
+              onClose?.()
+            }}
+            className={`flex-1 truncate px-1 py-0.5 text-left text-[11px] ${activeId === v.id ? "text-primary-hover" : ""}`}
           >
-            <button
-              type="button"
-              onClick={() => {
-                onApply(v)
-                setActive(v.id)
-                setOpen(false)
-              }}
-              className={`flex-1 truncate px-1 py-0.5 text-left text-[11px] ${activeId === v.id ? "text-blue-300" : ""}`}
-            >
-              {v.name}
-            </button>
-            <button
-              type="button"
-              onClick={() => remove(v.id)}
-              aria-label={`Delete view ${v.name}`}
-              className="rounded p-0.5 text-muted-foreground/50 hover:text-rose-300"
-            >
-              <Trash2 className="h-3 w-3" />
-            </button>
-          </div>
-        ))}
-        <DropdownMenuSeparator />
-        {naming ? (
-          <div className="flex gap-1 p-1">
-            <input
-              type="text"
-              autoFocus
-              value={nameDraft}
-              onChange={(e) => setNameDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleSave()
-                if (e.key === "Escape") {
-                  setNaming(false)
-                  setNameDraft("")
-                }
-              }}
-              placeholder="View name"
-              className="h-6 flex-1 rounded border border-border bg-background px-1.5 text-[11px]"
-            />
-            <Button size="xs" onClick={handleSave} disabled={!nameDraft.trim()}>
-              Save
-            </Button>
-          </div>
-        ) : (
-          <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setNaming(true) }} className="text-[11px]">
-            <Plus className="h-3 w-3" />
-            Save current as view
-          </DropdownMenuItem>
-        )}
-        {activeId && (
-          <DropdownMenuItem
-            onSelect={() => setActive(null)}
-            className="text-[11px] text-muted-foreground/70"
+            {v.name}
+          </button>
+          <button
+            type="button"
+            onClick={() => remove(v.id)}
+            aria-label={`Delete view ${v.name}`}
+            className="rounded p-0.5 text-muted-foreground/50 hover:text-rose-300"
           >
-            Clear active view
-          </DropdownMenuItem>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </div>
+      ))}
+      <DropdownMenuSeparator />
+      {naming ? (
+        <div className="flex gap-1 p-1">
+          <input
+            type="text"
+            autoFocus
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleSave()
+              if (e.key === "Escape") {
+                setNaming(false)
+                setNameDraft("")
+              }
+            }}
+            placeholder="View name"
+            className="h-6 flex-1 rounded border border-border bg-background px-1.5 text-[11px]"
+          />
+          <Button size="xs" onClick={handleSave} disabled={!nameDraft.trim()}>
+            Save
+          </Button>
+        </div>
+      ) : (
+        <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setNaming(true) }} className="text-[11px]">
+          <Plus className="h-3 w-3" />
+          Save current as view
+        </DropdownMenuItem>
+      )}
+      {activeId && (
+        <DropdownMenuItem
+          onSelect={() => { setActive(null); onClose?.() }}
+          className="text-[11px] text-muted-foreground/70"
+        >
+          Clear active view
+        </DropdownMenuItem>
+      )}
+    </>
   )
-}
-
-function cnIfActive(active: boolean): string {
-  return active ? "text-blue-300" : "text-muted-foreground/70"
 }

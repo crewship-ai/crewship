@@ -17,7 +17,6 @@ import {
 } from "@/lib/activity/run-filters"
 import { RailToolbar, type SortAxis } from "./rail/rail-toolbar"
 import { RunGroupTree } from "./rail/run-group-tree"
-import { SavedViewsButton } from "./rail/saved-views"
 import { apiFetch } from "@/lib/api-fetch"
 
 // RunTimelineRail v3 — composed of toolbar + grouped tree. Replaces
@@ -175,16 +174,11 @@ export function RunTimelineRail({
         onGroupChange={setGroup}
         counts={counts}
         options={options}
-        savedViews={
-          <SavedViewsButton
-            current={{ filter, sort, group }}
-            onApply={(v) => {
-              setFilter(v.filter)
-              setSort(v.sort)
-              setGroup(v.group)
-            }}
-          />
-        }
+        onApplyView={(v) => {
+          setFilter(v.filter)
+          setSort(v.sort)
+          setGroup(v.group)
+        }}
       />
 
       <div className="min-h-0 flex-1 overflow-y-auto">

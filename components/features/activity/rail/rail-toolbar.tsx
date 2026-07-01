@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import type { ReactNode } from "react"
 import {
   ArrowDownUp,
   Calendar,
@@ -42,6 +41,7 @@ import type {
   TriggerSource,
 } from "@/lib/activity/run-filters"
 import { activeFilterCount } from "@/lib/activity/run-filters"
+import { SavedViewsMenuSection, type SavedView } from "./saved-views"
 
 // RailToolbar — search + a SINGLE Filter popover + a View (⋮) menu that
 // folds Sort + Group together, so the rail never reads as "two filters".
@@ -68,13 +68,13 @@ export interface RailToolbarProps {
     routines: { slug: string; name: string }[]
     sources: TriggerSource[]
   }
-  // Optional trailing control rendered at the end of the toolbar row
-  // (e.g. the Saved Views bookmark menu).
-  savedViews?: ReactNode
+  // Apply a saved view (filter + sort + group). Saved views now live inside
+  // the ⋮ View menu rather than a separate toolbar button.
+  onApplyView?: (view: SavedView) => void
 }
 
 export function RailToolbar(props: RailToolbarProps) {
-  const { filter, onFilterChange, search, onSearchChange, sort, onSortChange, group, onGroupChange, counts, options, savedViews } = props
+  const { filter, onFilterChange, search, onSearchChange, sort, onSortChange, group, onGroupChange, counts, options, onApplyView } = props
   // activeFilterCount already excludes status + search, so it's exactly
   // the facet count the Filter badge should show.
   const filterCount = activeFilterCount(filter)
@@ -90,8 +90,14 @@ export function RailToolbar(props: RailToolbarProps) {
           aria-label="Search runs"
         />
         <FilterMenu filter={filter} onFilterChange={onFilterChange} options={options} count={filterCount} />
-        <ViewMenu sort={sort} onSortChange={onSortChange} group={group} onGroupChange={onGroupChange} />
-        {savedViews}
+        <ViewMenu
+          sort={sort}
+          onSortChange={onSortChange}
+          group={group}
+          onGroupChange={onGroupChange}
+          current={{ filter, sort, group }}
+          onApplyView={onApplyView}
+        />
       </SidebarToolbar>
 
       {/* Row 2 — status segmented control, always visible because users
@@ -124,18 +130,25 @@ function ViewMenu({
   onSortChange,
   group,
   onGroupChange,
+  current,
+  onApplyView,
 }: {
   sort: SortAxis
   onSortChange: (next: SortAxis) => void
   group: GroupAxis
   onGroupChange: (next: GroupAxis) => void
+  current: { filter: RunFilter; sort: SortAxis; group: GroupAxis }
+  onApplyView?: (view: SavedView) => void
 }) {
+  // Controlled so the folded-in Saved Views section can close the menu after
+  // apply / save / clear.
+  const [open, setOpen] = useState(false)
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <SidebarViewButton aria-label={`View — sort: ${SORT_LABEL[sort]}, group: ${GROUP_LABEL[group]}`} />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44 text-xs">
+      <DropdownMenuContent align="end" className="w-48 text-xs">
         <DropdownMenuLabel className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/60">
           <ArrowDownUp className="h-3 w-3" /> Sort
         </DropdownMenuLabel>
@@ -156,6 +169,12 @@ function ViewMenu({
           <DropdownMenuRadioItem value="issue">Issue</DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="none">None (flat)</DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
+        {onApplyView && (
+          <>
+            <DropdownMenuSeparator />
+            <SavedViewsMenuSection current={current} onApply={onApplyView} onClose={() => setOpen(false)} />
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )
