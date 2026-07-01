@@ -22,7 +22,7 @@ type imageListCacheEntry struct {
 
 const imageListTTL = 60 * time.Second
 
-const provisionerSchemaVersion = "v1"
+const provisionerSchemaVersion = "v2"
 
 // cacheImageTag returns the Docker image tag for a given config hash.
 
@@ -35,17 +35,24 @@ func cacheImageTag(configHash string) string {
 }
 
 // configHash computes a deterministic SHA-256 hash from the base image,
-// devcontainer config, and mise config.
+// devcontainer config, mise config, AND the generated Dockerfile.
 //
 // Canonical JSON representation: Config.MarshalJSON emits a map with sorted
 // keys (Go's json package sorts map[string]X keys). miseConfig is re-parsed
 // and re-marshaled so that whitespace / key-order differences in the stored
 // JSON produce the same hash. Unparseable mise config falls back to raw.
 //
+// dockerfile is the (deterministic) output of GenerateDockerfile for this
+// config — see dockerfileGenFingerprint. Hashing it means a CODE change to
+// Dockerfile generation (e.g. a new ENV line, the yarn.list remediation, the
+// RUN template) produces a fresh hash → a new crewship-cache:<hash> tag → a
+// rebuild, instead of silently reusing a stale image baked by the OLD
+// generator. Before this, configHash ignored the Dockerfile entirely, so a
+// generator change never invalidated already-cached images.
+//
 // Note: changing the canonicalization changes existing hashes once; users
-
 // will re-provision on next run. Document in CHANGELOG when bumped.
-func configHash(baseImage string, cfg *Config, miseConfig string) string {
+func configHash(baseImage string, cfg *Config, miseConfig, dockerfile string) string {
 	h := sha256.New()
 	h.Write([]byte(provisionerSchemaVersion))
 	h.Write([]byte("|"))
@@ -70,7 +77,57 @@ func configHash(baseImage string, cfg *Config, miseConfig string) string {
 			h.Write([]byte(miseConfig))
 		}
 	}
+
+	// Fold in the generated Dockerfile so changes to the build-logic that
+	// produces it bust the cache. Deterministic by construction
+	// (GenerateDockerfile sorts env keys and emits a stable layer order).
+	h.Write([]byte("|"))
+	h.Write([]byte(dockerfile))
+
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// dockerfileGenFingerprint returns a deterministic representation of the
+// Dockerfile-generation logic for a given base image + config, suitable for
+// folding into configHash. It renders the feature-INDEPENDENT skeleton of the
+// generated Dockerfile (the FROM line, the known-broken-repo remediation, and
+// the root-level containerEnv → ENV directives) via the real GenerateDockerfile
+// code path with no resolved features.
+//
+// Why not the fully-resolved Dockerfile: the cache check runs BEFORE features
+// are downloaded/resolved (deliberately — a cache hit must not pay for a feature
+// download). So real features aren't available here. Instead we render the
+// skeleton PLUS one fixed SYNTHETIC feature: that exercises the per-feature
+// COPY/RUN/install-env rendering CODE without resolving anything, so an edit to
+// that template (the COPY layout, the RUN mount/install line, the contract-env
+// assembly) changes the fingerprint and busts the cache automatically — closing
+// the gap where a per-feature rendering change previously needed a manual
+// provisionerSchemaVersion bump. The feature's data still isn't covered (real
+// feature refs/metadata live in cfg.Features in the hash); this covers the
+// generator CODE.
+//
+// On the (unexpected) generation error the fingerprint degrades to an empty
+// string — the hash still includes provisionerSchemaVersion + cfg, so this
+// never makes cache correctness worse than the pre-fix behaviour.
+func dockerfileGenFingerprint(baseImage string, cfg *Config) string {
+	df, err := GenerateDockerfile(DockerfileBuild{
+		BaseImage: baseImage,
+		RootEnv:   cfg.ContainerEnv,
+		Features: []*ResolvedFeature{{
+			Ref: "crewship.dev/fingerprint-probe:1",
+			Dir: "/fingerprint-probe",
+			Metadata: FeatureMetadata{
+				ID:           "fingerprint-probe",
+				Version:      "1",
+				Name:         "fingerprint probe",
+				ContainerEnv: map[string]string{"PROBE_PATH": "/opt/fingerprint-probe/bin"},
+			},
+		}},
+	})
+	if err != nil {
+		return ""
+	}
+	return df
 }
 
 // IsCached reports whether a cached image for the given config hash exists.

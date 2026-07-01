@@ -278,6 +278,10 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "container error")
 		return
 	}
+	// Audit the runtime container-prep steps for this agent-run path too.
+	if h.provisioner != nil {
+		crewCfg.ProvisionSink = h.provisioner.RuntimeProvisionSink(body.CrewID, body.WorkspaceID)
+	}
 	containerID, err = h.orch.GetOrCreateContainerCfg(r.Context(), crewCfg, body.WorkspaceID)
 	if err != nil {
 		h.logger.Error("get container for query", "error", err, "query_id", convID)

@@ -42,6 +42,10 @@ type cursorAdapter struct{}
 
 func (cursorAdapter) Name() string { return "CURSOR_CLI" }
 
+// PromptViaStdin is false: Cursor is not confirmed to read its prompt from
+// stdin, so the message keeps being passed as an argument unchanged.
+func (cursorAdapter) PromptViaStdin(req AgentRunRequest) bool { return false }
+
 func (cursorAdapter) BuildCommand(req AgentRunRequest) []string {
 	cmd := []string{"cursor-agent", "-p", "--output-format", "stream-json", "--stream-partial-output"}
 	// --force lets the agent edit files without prompting. Without it any

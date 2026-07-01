@@ -87,6 +87,13 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Governance status gate (alongside the W0 integration gate below):
+	// refuse to run a routine that isn't 'active'. proposed → awaiting
+	// approval, disabled → admin airbag. dry_run still previews freely.
+	if h.gateRoutineStatus(w, p) {
+		return
+	}
+
 	var body runRequestBody
 	if r.ContentLength > 0 {
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
@@ -150,6 +157,15 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		if h.gateMissingIntegrations(w, r, workspaceID, p.AuthorCrewID, "", dsl.NormalizedIntegrationsRequired()) {
 			return
 		}
+		// Resource precondition gate (run-time enforcement of the declared
+		// resources block): block when the routine requires a datastore/tool
+		// the author crew's container doesn't have. Same fail-open / no-op
+		// contract as the integration gate above, evaluated here at ENQUEUE
+		// time so deferred runs fail fast rather than after the delay.
+		ds, tools := declaredResources(dsl)
+		if h.gateMissingResources(w, r, workspaceID, p.AuthorCrewID, "", ds, tools) {
+			return
+		}
 	}
 
 	// Deferred dispatch: a delay or a debounce key parks the trigger in
@@ -196,6 +212,99 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
+// internalRunRequest is the sidecar→main body for an agent-invoked routine
+// run. Workspace + invoker identity are injected by the sidecar from its IPC
+// config (never the model), mirroring the save flow's trust boundary.
+type internalRunRequest struct {
+	WorkspaceID     string         `json:"workspace_id"`
+	Slug            string         `json:"slug"`
+	Inputs          map[string]any `json:"inputs"`
+	InvokingCrewID  string         `json:"invoking_crew_id"`
+	InvokingAgentID string         `json:"invoking_agent_id"`
+}
+
+// InternalRun invokes a saved routine by slug on behalf of an in-container
+// agent (the run_routine MCP tool). It is the internal-token counterpart of
+// the public Run handler: the public route is JWT-authed and rejects the
+// sidecar's internal token, so agents need this internal surface to RUN a
+// routine the same way InternalSave lets them author one.
+//
+// Trust: workspace_id + invoking_{crew,agent}_id come from the sidecar IPC
+// config; assertInternalTokenWorkspace pins the body workspace to the token's
+// binding so a captured token can't drive a foreign tenant's routine. The run
+// mirrors the public Run gates (status, integrations, resources) but executes
+// synchronously (no deferred dispatch) and attributes the run as call_pipeline.
+//
+// POST /api/v1/internal/pipelines/run
+func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
+	if h.runner == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "pipeline runner not wired"})
+		return
+	}
+	var body internalRunRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
+		replyError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if body.WorkspaceID == "" || body.Slug == "" {
+		replyError(w, http.StatusBadRequest, "workspace_id and slug required")
+		return
+	}
+	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
+		return
+	}
+
+	p, err := h.store.GetBySlug(r.Context(), body.WorkspaceID, body.Slug)
+	if errors.Is(err, pipeline.ErrNotFound) {
+		replyError(w, http.StatusNotFound, "routine not found")
+		return
+	}
+	if err != nil {
+		h.logger.Error("internal pipeline run: load", "error", err, "slug", body.Slug)
+		replyError(w, http.StatusInternalServerError, "load routine")
+		return
+	}
+	// Governance status gate — proposed/disabled routines are not runnable.
+	if h.gateRoutineStatus(w, p) {
+		return
+	}
+	// Integration + resource preconditions (same fail-open contract as Run).
+	if dsl, perr := pipeline.Parse([]byte(p.DefinitionJSON)); perr == nil {
+		if h.gateMissingIntegrations(w, r, body.WorkspaceID, p.AuthorCrewID, "", dsl.NormalizedIntegrationsRequired()) {
+			return
+		}
+		ds, tools := declaredResources(dsl)
+		if h.gateMissingResources(w, r, body.WorkspaceID, p.AuthorCrewID, "", ds, tools) {
+			return
+		}
+	}
+
+	exec := h.newExecutor()
+	res, err := exec.Run(r.Context(), pipeline.RunInput{
+		PipelineID:      p.ID,
+		WorkspaceID:     body.WorkspaceID,
+		InvokingCrewID:  body.InvokingCrewID,
+		InvokingAgentID: body.InvokingAgentID,
+		Inputs:          body.Inputs,
+		Mode:            pipeline.ModeRun,
+		TriggeredVia:    pipeline.TriggeredViaCallPipeline,
+	})
+	if err != nil {
+		if errors.Is(err, pipeline.ErrConcurrencyLimitReached) {
+			w.Header().Set("Retry-After", "5")
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{
+				"error":  "concurrency limit reached for this routine",
+				"reason": "another run with the same concurrency_key is already in flight",
+			})
+			return
+		}
+		h.logger.Error("internal pipeline run: exec", "error", err, "slug", body.Slug)
+		replyError(w, http.StatusInternalServerError, "Failed to start routine run")
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 // DryRun returns the structured WouldExecute report for a saved
 // pipeline against the supplied inputs. No agent invocations,
 // no journal entries beyond a single audit row.
@@ -220,6 +329,45 @@ func (h *PipelineHandler) DryRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Enrich the preview with the declared MANIFEST — the routine's full
+	// blast radius (integrations, egress, credentials, agents, routines,
+	// datastores, tools, has_http/has_code) so the UI can show "would use:
+	// ansible, Postgres, discord.com, agent jordan" alongside the
+	// would_execute step plan. Best-effort: a definition that no longer
+	// parses leaves manifest null (and we still return a report below — a
+	// dry_run is an honest STATIC plan, not a success proof).
+	var manifest *pipeline.Manifest
+	dsl, perr := pipeline.Parse([]byte(p.DefinitionJSON))
+	if perr == nil {
+		manifest = dsl.ExtractManifest()
+	}
+
+	// Embed RunResult's fields at the top level (existing clients see no
+	// shape change) and attach manifest as a sibling field.
+	type dryRunResponse struct {
+		*pipeline.RunResult
+		Manifest *pipeline.Manifest `json:"manifest"`
+	}
+
+	// A corrupt stored definition (manual DB edit / failed migration — Save
+	// validates, so this is an edge case) can't be planned by the executor.
+	// Return a best-effort empty report with manifest null rather than a 500
+	// so the UI can still render "this routine's definition no longer parses".
+	if perr != nil {
+		h.logger.Warn("pipeline dry_run: stored definition unparseable", "slug", slug, "error", perr)
+		writeJSON(w, http.StatusOK, dryRunResponse{
+			RunResult: &pipeline.RunResult{
+				PipelineID:   p.ID,
+				PipelineSlug: p.Slug,
+				Status:       "FAILED",
+				StepOutputs:  map[string]string{},
+				ErrorMessage: "stored definition no longer parses: " + perr.Error(),
+			},
+			Manifest: nil,
+		})
+		return
+	}
+
 	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
 		PipelineID:  p.ID,
@@ -232,29 +380,27 @@ func (h *PipelineHandler) DryRun(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "Failed to dry-run pipeline")
 		return
 	}
-	writeJSON(w, http.StatusOK, res)
+	writeJSON(w, http.StatusOK, dryRunResponse{RunResult: res, Manifest: manifest})
 }
 
-// TestRun executes a draft DSL (NOT yet saved) against the
-// execution tier so the author can confirm the pipeline runs
-// before calling save. Used by the save-gate flow: agent posts a
-// draft, gets a passed/failed report; on pass the author's session
-// "owns" a fresh test_run timestamp it can include in the save.
+// TestRun is the PUBLIC, JWT-authed draft-validation gate behind the UI's
+// "Test run" button (simple + advanced authoring). It mirrors InternalTestRun's
+// dry-run validation — parse + Validate + integration/resource gates + a
+// ModeDryRun pass (no agent invocation; you cannot run an agent "dry") — but is
+// reachable by a browser/CLI with a workspace JWT rather than the sidecar's
+// internal token, and on success it MINTS an HMAC save_token bound to
+// (workspace, definition_hash, user). That token is the proof Save verifies:
+// without a minting endpoint the save test-gate degrades to self-asserted body
+// fields (last_test_run_passed), which any client can forge — so this endpoint
+// is what keeps the gate honest for the user authoring flow.
 //
 // POST /api/v1/workspaces/{workspaceId}/pipelines/test_run
-//
-// Body: { "definition": { ...DSL... }, "sample_inputs": { ... } }
-//
-// Returns: RunResult with status COMPLETED | FAILED. The save
-// endpoint will check the same DSL hash + a recent timestamp
-// before persisting.
 func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if h.runner == nil {
 		replyError(w, http.StatusServiceUnavailable, "pipeline runner not wired")
 		return
 	}
-
 	var body struct {
 		Definition   json.RawMessage `json:"definition"`
 		AuthorCrewID string          `json:"author_crew_id"`
@@ -268,72 +414,162 @@ func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "definition required")
 		return
 	}
-	if body.AuthorCrewID == "" {
-		replyError(w, http.StatusBadRequest, "author_crew_id required")
-		return
-	}
-
 	dsl, err := pipeline.Parse(body.Definition)
 	if err != nil {
 		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	// Cross-reference validation on save uses agent_slug ⊆ author
-	// crew membership. For the test_run we accept any slug — agent
-	// slugs are validated again at save time. This keeps the
-	// authoring loop fast (an iteration that fails because of a
-	// typo gets a quick error from the runner, not a strict
-	// schema check).
+	// Accept any agent slug here (nil sets) — slugs are validated strictly at
+	// save. The authoring loop stays fast: a typo gets a quick error rather
+	// than a strict cross-crew membership check on every keystroke.
 	if err := pipeline.Validate(dsl, nil, nil); err != nil {
 		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-
-	// Integration gate also applies to test_run: a test_run really executes
-	// against the author crew's agents (ModeTestRun differs from ModeRun only
-	// in invocation accounting), so a routine that can't reach a required
-	// integration should fail fast here too rather than burn a token-spending
-	// run the agent has no way to complete. Uses the draft's author_crew_id.
+	// Bind the client-supplied crew to the caller's JWT workspace before the
+	// gates resolve its integrations/resources. TestRun is JWT-authed, so
+	// assertBoundCrewWorkspaceDB (which keys off the internal token) is a no-op
+	// here — without this explicit check a caller could pass another tenant's
+	// author_crew_id and enumerate that crew's capabilities via the gate
+	// responses. Fail closed: a missing or foreign crew gets the same 403 so it
+	// is not an existence oracle. Empty crew stays a no-op (the draft flow).
+	if body.AuthorCrewID != "" {
+		var boundID string
+		if err := h.db.QueryRowContext(r.Context(),
+			`SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+			body.AuthorCrewID, workspaceID).Scan(&boundID); err != nil {
+			replyError(w, http.StatusForbidden, "crew does not belong to this workspace")
+			return
+		}
+	}
+	// Same preconditions a real run would hit (best-effort — author_crew_id is
+	// optional in the UI draft flow; an empty crew makes both gates no-op).
 	if h.gateMissingIntegrations(w, r, workspaceID, body.AuthorCrewID, "", dsl.NormalizedIntegrationsRequired()) {
 		return
 	}
+	ds, tools := declaredResources(dsl)
+	if h.gateMissingResources(w, r, workspaceID, body.AuthorCrewID, "", ds, tools) {
+		return
+	}
 
-	exec := h.newExecutor()
-	res, err := exec.RunDefinition(r.Context(), dsl, pipeline.RunInput{
+	res, err := h.newExecutor().RunDefinition(r.Context(), dsl, pipeline.RunInput{
 		WorkspaceID:  workspaceID,
 		AuthorCrewID: body.AuthorCrewID,
 		Inputs:       body.SampleInputs,
-		Mode:         pipeline.ModeTestRun,
+		Mode:         pipeline.ModeDryRun,
 	})
-	// Mint an HMAC save_token bound to (workspace, definition_hash,
-	// user) when the test_run passed AND a signing secret is wired.
-	// The token is the trustworthy proof that THIS user ran this DSL
-	// successfully — Save can verify it without trusting the body's
-	// last_test_run_at claim.
+	if err != nil {
+		h.logger.Error("pipeline test_run: exec", "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to test-run routine")
+		return
+	}
+
+	// Mint the save_token only when the dry-run actually passed AND a signing
+	// secret is wired. DRY_RUN_OK is the dry-run's pass status (see executor);
+	// COMPLETED is tolerated for forward-compat. The token proves THIS user
+	// validated THIS definition_hash, so Save can clear the test-gate without
+	// trusting any body-supplied "it passed" claim.
 	var saveToken string
-	if err == nil && res != nil && res.Status == "COMPLETED" && len(h.saveTokenSecret) > 0 {
-		user := UserFromContext(r.Context())
+	if res != nil && (res.Status == "DRY_RUN_OK" || res.Status == "COMPLETED") && len(h.saveTokenSecret) > 0 {
 		userID := ""
-		if user != nil {
+		if user := UserFromContext(r.Context()); user != nil {
 			userID = user.ID
 		}
 		defHash := definitionHashHex(body.Definition)
 		saveToken = signSaveToken(h.saveTokenSecret, workspaceID, defHash, userID, time.Now())
 	}
-	if err != nil {
-		h.logger.Error("pipeline test_run: exec", "error", err)
-		replyError(w, http.StatusInternalServerError, "Failed to test-run pipeline")
-		return
-	}
-	// Wrap the RunResult with save_token. Embed the result's fields
-	// at the top level so existing clients (CLI watchers, UI dialog)
-	// see no shape change; new clients can opt in to the save_token
-	// flow by reading the extra field.
 	type testRunResponse struct {
 		*pipeline.RunResult
 		SaveToken string `json:"save_token,omitempty"`
 	}
 	writeJSON(w, http.StatusOK, testRunResponse{RunResult: res, SaveToken: saveToken})
+}
+
+// InternalTestRun is the X-Internal-Token save gate used by the sidecar
+// agent-authoring flow (POST /pipelines/save Step 1). It is the internal
+// validation gate for an unsaved draft: parse + Validate + integration gate,
+// then a DRY-RUN of the draft (no agent invocation). It is NOT a real run —
+// the public test_run surface was removed because you cannot run an agent
+// "dry" (its scripts have uninterceptable side effects), so there is no
+// honest "test run" distinct from a real run. Structural + template validity
+// is what authoring needs; real execution happens on the first live run, and
+// risky routines are human-reviewed (governance) before they go live.
+// Workspace comes from the body (internal routes have no wsCtx).
+//
+// POST /api/v1/internal/pipelines/test_run  (X-Internal-Token)
+func (h *PipelineHandler) InternalTestRun(w http.ResponseWriter, r *http.Request) {
+	if h.runner == nil {
+		replyError(w, http.StatusServiceUnavailable, "pipeline runner not wired")
+		return
+	}
+	var body struct {
+		WorkspaceID  string          `json:"workspace_id"`
+		Definition   json.RawMessage `json:"definition"`
+		AuthorCrewID string          `json:"author_crew_id"`
+		SampleInputs map[string]any  `json:"sample_inputs"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
+		replyError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if body.WorkspaceID == "" {
+		replyError(w, http.StatusBadRequest, "workspace_id required")
+		return
+	}
+	if len(body.Definition) == 0 {
+		replyError(w, http.StatusBadRequest, "definition required")
+		return
+	}
+	if body.AuthorCrewID == "" {
+		replyError(w, http.StatusBadRequest, "author_crew_id required")
+		return
+	}
+	// Cross-tenant guard (parity with InternalSave / InternalRun): the
+	// sidecar's internal token is workspace-bound. Pin the body workspace to
+	// the token's binding so a captured token can't drive a dry-run — which
+	// renders templates against, and probes the connected integrations of —
+	// a foreign tenant's crew. author_crew_id is independent of workspace_id,
+	// so prove it belongs to the bound workspace too before the gate below
+	// reads that crew's integrations.
+	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
+		return
+	}
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.AuthorCrewID) {
+		return
+	}
+	dsl, err := pipeline.Parse(body.Definition)
+	if err != nil {
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	if err := pipeline.Validate(dsl, nil, nil); err != nil {
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	// Integration gate — a draft that can't reach a required integration
+	// fails fast here rather than landing an unrunnable routine.
+	if h.gateMissingIntegrations(w, r, body.WorkspaceID, body.AuthorCrewID, "", dsl.NormalizedIntegrationsRequired()) {
+		return
+	}
+	// The save gate uses DRY-RUN: it walks the DSL, renders every template,
+	// and validates step shapes WITHOUT invoking any agent (ModeDryRun skips
+	// the runner — see TestExecutor_DryRun_NoAgentInvocation). There is no
+	// "full test run" alternative — you cannot run an agent dry (its scripts
+	// have uninterceptable side effects), so a real run is reserved for the
+	// first live invocation. Structure + template validity is what authoring
+	// needs; risky routines are human-reviewed (governance) before they go live.
+	res, err := h.newExecutor().RunDefinition(r.Context(), dsl, pipeline.RunInput{
+		WorkspaceID:  body.WorkspaceID,
+		AuthorCrewID: body.AuthorCrewID,
+		Inputs:       body.SampleInputs,
+		Mode:         pipeline.ModeDryRun,
+	})
+	if err != nil {
+		h.logger.Error("pipeline internal test_run: exec", "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to test-run pipeline")
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // ListRunRecords returns runs from the pipeline_runs table directly

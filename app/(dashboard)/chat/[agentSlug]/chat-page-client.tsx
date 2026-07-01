@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { ChevronLeft, MessageSquarePlus, MoreVertical, Trash2, RotateCcw, Settings as SettingsIcon, FolderOpen } from "lucide-react"
@@ -98,6 +98,15 @@ export function ChatPageClient() {
   const initialSessionFromUrl = searchParams.get("session")
   const [sessionId, setSessionIdState] = useState<string | null>(initialSessionFromUrl)
 
+  // Describe-first authoring handoff: `/chat/<lead>?prompt=<goal>` opens a
+  // FRESH session and auto-sends the prompt (e.g. "Author a routine for
+  // me: …"). `promptConsumedRef` makes it one-shot; `authoringSession`
+  // scopes the auto-send to exactly the session we create for it so it
+  // never re-fires on an unrelated session.
+  const initialPrompt = searchParams.get("prompt")
+  const promptConsumedRef = useRef(false)
+  const [authoringSession, setAuthoringSession] = useState<{ id: string; prompt: string } | null>(null)
+
   const selectSession = useCallback((id: string | null) => {
     setSessionIdState(id)
     if (typeof window === "undefined" || slug === null) return
@@ -186,7 +195,10 @@ export function ChatPageClient() {
   // empty one). Only POST a new session when there are genuinely none.
   const ensureSession = useCallback(async () => {
     if (!agent || !workspaceId || !slug || sessionId || creatingSession || !sessionsLoaded) return
-    if (sessions.length > 0) {
+    // A pending authoring prompt always wants a clean, fresh session —
+    // never reuse an existing conversation for it.
+    const promptText = !promptConsumedRef.current ? initialPrompt : null
+    if (!promptText && sessions.length > 0) {
       // /chats?limit=20 returns sorted desc by created_at, so [0] is freshest.
       selectSession(sessions[0].id)
       return
@@ -206,13 +218,17 @@ export function ChatPageClient() {
           ? prev
           : [{ id: created.id, title: null, status: "ACTIVE", message_count: 0, started_at: nowIso, ended_at: null, origin: "UI" }, ...prev],
       )
+      if (promptText) {
+        promptConsumedRef.current = true
+        setAuthoringSession({ id: created.id, prompt: promptText })
+      }
       selectSession(created.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setCreatingSession(false)
     }
-  }, [agent, workspaceId, sessionId, creatingSession, sessionsLoaded, sessions, slug, selectSession])
+  }, [agent, workspaceId, sessionId, creatingSession, sessionsLoaded, sessions, slug, selectSession, initialPrompt])
 
   useEffect(() => {
     if (agent && !sessionId && !creatingSession && sessionsLoaded) void ensureSession()
@@ -420,6 +436,8 @@ export function ChatPageClient() {
               agentName={agent.name}
               agentSlug={agent.slug}
               sessionOrigin={sessions.find((s) => s.id === sessionId)?.origin ?? null}
+              initialInput={authoringSession?.id === sessionId ? authoringSession.prompt : undefined}
+              autoSendInitial={authoringSession?.id === sessionId}
               onSend={handleSessionSend}
             />
           ) : (

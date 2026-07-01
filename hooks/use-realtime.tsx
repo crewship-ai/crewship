@@ -54,6 +54,11 @@ export type RealtimeEventType =
   | "container.stats"
   | "provision.started"
   | "provision.progress"
+  // Structured per-step / per-feature provisioning frame (resolve, build,
+  // each feature install, container create, ready, failure) with a bounded
+  // BuildKit log tail. Richer source than provision.progress — the
+  // provisioning hook prefers it for the granular "installing ansible" view.
+  | "provision.event"
   | "provision.completed"
   | "provision.failed"
   | "pipeline.run.started"
@@ -92,7 +97,7 @@ const VALID_REALTIME_TYPES: Set<string> = new Set([
   "escalation.resolved", "mission.updated", "task.updated",
   "peer_conversation.updated", "crew.created", "crew.updated", "crew.deleted",
   "agent.log", "file.event", "container.stats",
-  "provision.started", "provision.progress", "provision.completed", "provision.failed",
+  "provision.started", "provision.progress", "provision.event", "provision.completed", "provision.failed",
   // Pipeline run events — RunsView + WaitpointRunDetail subscribe.
   "pipeline.run.started", "pipeline.run.completed", "pipeline.run.failed",
   "pipeline.step.started", "pipeline.step.completed", "pipeline.step.failed",

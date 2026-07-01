@@ -65,6 +65,73 @@ func TestExecutor_Run_LoadAndParseErrors(t *testing.T) {
 	}
 }
 
+// TestExecutor_Run_GovernanceStatusGate is the central airbag: a real run
+// (ModeRun) of a non-active routine is refused INSIDE the executor, so the
+// status gate holds on EVERY dispatch path (cron / webhook / batch / deferred),
+// not just the HTTP handlers. A dry-run is exempt (preview/validate carries no
+// persisted status).
+// TestRunDefinition_DefaultsToDryRun — the draft-only helper must default an
+// unset Mode to the SAFE preview, not live execution, so a caller that forgets
+// to set Mode gets a dry-run instead of running real steps with side effects.
+func TestRunDefinition_DefaultsToDryRun(t *testing.T) {
+	db := openExecutorGateDB(t)
+	exec := NewExecutor(NewStore(db), NewResolver(db), newMockRunner(), nil)
+
+	dsl := &DSL{
+		DSLVersion: "1.0",
+		Name:       "draft",
+		Steps:      []Step{{ID: "a", Type: StepAgentRun, AgentSlug: "agent_lead", Prompt: "hi"}},
+	}
+	// No Mode set — must NOT execute live.
+	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a"})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Status != "DRY_RUN_OK" {
+		t.Errorf("status = %q, want DRY_RUN_OK (default must be a safe preview, not ModeRun)", res.Status)
+	}
+}
+
+func TestExecutor_Run_GovernanceStatusGate(t *testing.T) {
+	db := openExecutorGateDB(t)
+	store := NewStore(db)
+	exec := NewExecutor(store, NewResolver(db), newMockRunner(), nil)
+	ctx := context.Background()
+
+	in := validSaveInput("gated")
+	in.DefinitionJSON = agentStepDef
+	p, err := store.Save(ctx, in)
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	for _, status := range []string{"proposed", "disabled"} {
+		if err := store.SetStatus(ctx, p.ID, status); err != nil {
+			t.Fatalf("set status %s: %v", status, err)
+		}
+		// Real run refused.
+		if _, err := exec.Run(ctx, RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeRun}); !errors.Is(err, ErrRoutineNotActive) {
+			t.Errorf("status=%s: ModeRun err = %v, want ErrRoutineNotActive", status, err)
+		}
+		// Dry-run still allowed (no status gate on preview/validate).
+		if _, err := exec.Run(ctx, RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeDryRun}); errors.Is(err, ErrRoutineNotActive) {
+			t.Errorf("status=%s: ModeDryRun must NOT be status-gated, got %v", status, err)
+		}
+	}
+
+	// Re-activating clears the gate.
+	if err := store.SetStatus(ctx, p.ID, "active"); err != nil {
+		t.Fatalf("re-activate: %v", err)
+	}
+	res, err := exec.Run(ctx, RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeRun})
+	if err != nil {
+		t.Fatalf("active run: %v", err)
+	}
+	if res.Status != "COMPLETED" {
+		t.Errorf("active run status = %q, want COMPLETED", res.Status)
+	}
+}
+
 func TestExecutor_Run_IdempotencyDedupe(t *testing.T) {
 	db := openExecutorGateDB(t)
 	store := NewStore(db)
@@ -218,7 +285,7 @@ func TestExecutor_RunDefinition_Validation(t *testing.T) {
 	if _, err := exec.RunDefinition(ctx, dsl, RunInput{AuthorCrewID: "crew_a"}); err == nil || !strings.Contains(err.Error(), "workspace_id required") {
 		t.Errorf("missing workspace: %v", err)
 	}
-	if _, err := exec.RunDefinition(ctx, dsl, RunInput{WorkspaceID: "ws_test"}); err == nil || !strings.Contains(err.Error(), "author_crew_id required") {
+	if _, err := exec.RunDefinition(ctx, dsl, RunInput{WorkspaceID: "ws_test", Mode: ModeRun}); err == nil || !strings.Contains(err.Error(), "author_crew_id required") {
 		t.Errorf("missing author crew: %v", err)
 	}
 }
@@ -280,7 +347,7 @@ func TestExecutor_CtxCancelledBetweenSteps(t *testing.T) {
 		{ID: "s1", Type: StepAgentRun, AgentSlug: "a", Prompt: "p1"},
 		{ID: "s2", Type: StepAgentRun, AgentSlug: "a", Prompt: "p2"},
 	}}
-	res, err := exec.RunDefinition(ctx, dsl, RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeTestRun})
+	res, err := exec.RunDefinition(ctx, dsl, RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -291,7 +358,7 @@ func TestExecutor_CtxCancelledBetweenSteps(t *testing.T) {
 	// Pre-cancelled ctx fails before the first step.
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	cancel2()
-	res, err = exec.RunDefinition(ctx2, dsl, RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeTestRun})
+	res, err = exec.RunDefinition(ctx2, dsl, RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun})
 	if err != nil {
 		t.Fatalf("run 2: %v", err)
 	}
@@ -310,7 +377,7 @@ func TestExecutor_TierOverride_AppliesToUnpinnedAgentSteps(t *testing.T) {
 		{ID: "s1", Type: StepAgentRun, AgentSlug: "a", Prompt: "p"},
 	}}
 	_, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeTestRun,
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 		TierOverride: ComplexitySmart,
 	})
 	if err != nil {
@@ -353,7 +420,7 @@ func TestExecutor_RunStep_DispatchBranches(t *testing.T) {
 	exec := NewExecutor(store, resolver, newMockRunner(), nil)
 	ctx := context.Background()
 	emit := &pipelineEmitContext{emitter: nopEmitter{}}
-	in := RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeTestRun}
+	in := RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun}
 	render := RenderContext{}
 
 	// Unsupported type.
@@ -401,7 +468,7 @@ func TestExecutor_RunnerError_EscalatesToFallbackTier(t *testing.T) {
 		{ID: "s1", Type: StepAgentRun, AgentSlug: "worker", Prompt: "go"},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeTestRun,
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -430,7 +497,7 @@ func TestExecutor_Validation_RetryStepNotImplemented(t *testing.T) {
 			Validation: &Validation{MinLength: intPtr(100)}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeTestRun,
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -454,7 +521,7 @@ func TestExecutor_Validation_ExhaustsTiers(t *testing.T) {
 			Validation: &Validation{MinLength: intPtr(500)}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeTestRun,
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -496,7 +563,7 @@ func TestExecutor_Outcomes_Paths(t *testing.T) {
 	runIt := func(t *testing.T, exec *Executor, dsl *DSL) *RunResult {
 		t.Helper()
 		res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-			WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeTestRun,
+			WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 		})
 		if err != nil {
 			t.Fatalf("run: %v", err)
@@ -575,7 +642,7 @@ func TestExecutor_CallPipeline_NestedBranches(t *testing.T) {
 		return nil, errors.New("backend exploded")
 	}))
 
-	parent := RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeTestRun}
+	parent := RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun}
 	render := RenderContext{Inputs: map[string]any{"x": "rendered-val"}}
 
 	if _, _, _, err := exec.runCallPipelineStep(ctx, Step{ID: "s", Type: StepCallPipeline, PipelineSlug: "bad-child"}, parent, render, 0); err == nil || !strings.Contains(err.Error(), "parse target") {

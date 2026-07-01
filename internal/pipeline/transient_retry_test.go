@@ -27,7 +27,7 @@ func TestRunAgentStep_RetriesEmptyOutputOnSameTier(t *testing.T) {
 		{ID: "s1", Type: StepAgentRun, AgentSlug: "agent_lead", Prompt: "go"},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -61,7 +61,7 @@ func TestRunAgentStep_RetriesTransientErrorOnSameTier(t *testing.T) {
 		{ID: "s1", Type: StepAgentRun, AgentSlug: "agent_lead", Prompt: "go"},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -90,7 +90,7 @@ func TestRunAgentStep_DoesNotRetryNonTransientError(t *testing.T) {
 		{ID: "s1", Type: StepAgentRun, AgentSlug: "agent_lead", Prompt: "go"},
 	}}
 	res, _ := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	// runDAG persists the failure on the result rather than bubbling
 	// the error, so we assert on Status instead of the returned err.

@@ -118,6 +118,9 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 	if err := validateIntegrationsRequired(dsl); err != nil {
 		return err
 	}
+	if err := validateResources(dsl); err != nil {
+		return err
+	}
 
 	seenStepIDs := make(map[string]struct{}, len(dsl.Steps))
 	for i, st := range dsl.Steps {

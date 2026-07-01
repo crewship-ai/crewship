@@ -111,7 +111,7 @@ func (m *mockCommitClient) ImageInspect(_ context.Context, ref string, _ ...dock
 
 func TestIsCached_Hit(t *testing.T) {
 	cfg := &Config{Image: "ubuntu:22.04"}
-	hash := configHash("ubuntu:22.04", cfg, "")
+	hash := configHash("ubuntu:22.04", cfg, "", "")
 	tag := cacheImageTag(hash)
 
 	mock := &mockCommitClient{existingImages: []string{tag}}
@@ -147,8 +147,8 @@ func TestConfigHash_Deterministic(t *testing.T) {
 		},
 	}
 
-	h1 := configHash("ubuntu:22.04", cfg, "node 20")
-	h2 := configHash("ubuntu:22.04", cfg, "node 20")
+	h1 := configHash("ubuntu:22.04", cfg, "node 20", "")
+	h2 := configHash("ubuntu:22.04", cfg, "node 20", "")
 
 	if h1 != h2 {
 		t.Errorf("config hash not deterministic: %s != %s", h1, h2)
@@ -158,9 +158,9 @@ func TestConfigHash_Deterministic(t *testing.T) {
 func TestConfigHash_DifferentInputs(t *testing.T) {
 	cfg := &Config{Image: "ubuntu:22.04"}
 
-	h1 := configHash("ubuntu:22.04", cfg, "")
-	h2 := configHash("ubuntu:24.04", cfg, "")
-	h3 := configHash("ubuntu:22.04", cfg, "node 20")
+	h1 := configHash("ubuntu:22.04", cfg, "", "")
+	h2 := configHash("ubuntu:24.04", cfg, "", "")
+	h3 := configHash("ubuntu:22.04", cfg, "node 20", "")
 
 	if h1 == h2 {
 		t.Error("different base images should produce different hashes")
@@ -170,9 +170,52 @@ func TestConfigHash_DifferentInputs(t *testing.T) {
 	}
 }
 
+// TestConfigHash_IncorporatesDockerfile is the Fix-2 regression: a change to the
+// generated Dockerfile (i.e. a Dockerfile-generation CODE change) must produce a
+// different config hash even when base image / cfg / mise are identical —
+// otherwise a stale crewship-cache:<hash> image is reused forever after a
+// generator change.
+func TestConfigHash_IncorporatesDockerfile(t *testing.T) {
+	cfg := &Config{Image: "ubuntu:22.04"}
+
+	base := configHash("ubuntu:22.04", cfg, "", "FROM ubuntu:22.04\n")
+	changed := configHash("ubuntu:22.04", cfg, "", "FROM ubuntu:22.04\nENV NEW=line\n")
+	same := configHash("ubuntu:22.04", cfg, "", "FROM ubuntu:22.04\n")
+
+	if base == changed {
+		t.Error("different generated Dockerfile must produce a different config hash")
+	}
+	if base != same {
+		t.Error("identical generated Dockerfile must produce the same config hash")
+	}
+}
+
+// TestDockerfileGenFingerprint_SensitiveToGenLogic proves the production
+// fingerprint reflects the real GenerateDockerfile output: two configs whose
+// root containerEnv differs render different skeletons, so the fingerprint (and
+// thus the cache key) diverges. Also guards determinism.
+func TestDockerfileGenFingerprint_SensitiveToGenLogic(t *testing.T) {
+	a := dockerfileGenFingerprint("ubuntu:22.04", &Config{Image: "ubuntu:22.04"})
+	b := dockerfileGenFingerprint("ubuntu:22.04", &Config{
+		Image:        "ubuntu:22.04",
+		ContainerEnv: map[string]string{"PATH": "/usr/local/py-utils/bin:$PATH"},
+	})
+	aAgain := dockerfileGenFingerprint("ubuntu:22.04", &Config{Image: "ubuntu:22.04"})
+
+	if a == "" {
+		t.Fatal("fingerprint must be non-empty for a valid base image")
+	}
+	if a != aAgain {
+		t.Error("fingerprint must be deterministic for identical input")
+	}
+	if a == b {
+		t.Error("fingerprint must change when generated Dockerfile changes (root containerEnv)")
+	}
+}
+
 func TestProvision_CacheHit(t *testing.T) {
 	cfg := &Config{Image: "ubuntu:22.04"}
-	hash := configHash("ubuntu:22.04", cfg, "")
+	hash := configHash("ubuntu:22.04", cfg, "", dockerfileGenFingerprint("ubuntu:22.04", cfg))
 	tag := cacheImageTag(hash)
 
 	mock := &mockCommitClient{existingImages: []string{tag}}

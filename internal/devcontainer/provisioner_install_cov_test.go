@@ -309,7 +309,7 @@ func covInstallFeatures(p *Provisioner, ctx context.Context, cid string, cfg *Co
 	if err != nil {
 		return nil, err
 	}
-	if err := p.installResolvedFeatures(ctx, cid, sorted, opts, cb); err != nil {
+	if err := p.installResolvedFeatures(ctx, cid, sorted, opts, cb, nil); err != nil {
 		return nil, err
 	}
 	return sorted, nil

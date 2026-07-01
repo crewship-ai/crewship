@@ -243,6 +243,7 @@ func writeMCPDroid(
 	// PR-A F1: auto-inject sidecar-hosted memory MCP server. See codex writer
 	// for rationale + invariants.
 	specs = injectMemoryMCP(specs)
+	specs = injectRoutinesMCP(specs)
 	if len(specs) == 0 {
 		return nil
 	}
@@ -284,6 +285,7 @@ func writeMCPGemini(
 	// PR-A F1: auto-inject sidecar-hosted memory MCP server. See codex writer
 	// for rationale.
 	specs = injectMemoryMCP(specs)
+	specs = injectRoutinesMCP(specs)
 	if len(specs) == 0 {
 		return nil
 	}
@@ -344,6 +346,7 @@ func writeMCPOpenCode(
 	// PR-A F1: auto-inject sidecar-hosted memory MCP server. See codex writer
 	// for rationale.
 	specs = injectMemoryMCP(specs)
+	specs = injectRoutinesMCP(specs)
 	if len(specs) == 0 {
 		return nil
 	}
@@ -417,6 +420,7 @@ func writeMCPCodex(
 	// exposes. injectMemoryMCP is a no-op if the user already declared a
 	// server named "crewship-memory" (override path).
 	specs = injectMemoryMCP(specs)
+	specs = injectRoutinesMCP(specs)
 	if len(specs) == 0 {
 		return nil
 	}

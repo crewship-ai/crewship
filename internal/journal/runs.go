@@ -45,7 +45,11 @@ type RunAggregated struct {
 	ErrorMessage string
 	ExitCode     *int
 	Metadata     map[string]any
-	CreatedAt    time.Time // == StartedAt for runs (we don't track a separate creation moment)
+	// Model is the model the run ACTUALLY resolved to (session-init ground
+	// truth), recorded on the terminal run.* entry's metadata by the run
+	// driver. Empty for runs predating the field or non-Claude adapters.
+	Model     string
+	CreatedAt time.Time // == StartedAt for runs (we don't track a separate creation moment)
 }
 
 // RunsQuery filters ListRuns. WorkspaceID is required; rest are
@@ -252,10 +256,18 @@ LIMIT ? OFFSET ?`
 				}
 				if v, ok := p["metadata"].(map[string]any); ok {
 					r.Metadata = v
+					// run.started rarely carries the resolved model (it's
+					// known only after session-init), but honour it as a
+					// fallback so a future producer that stamps it here works.
+					if m, ok := v["model"].(string); ok && m != "" {
+						r.Model = m
+					}
 				}
 			}
 		}
-		// exit_code and error_message live on the terminal entry.
+		// exit_code, error_message and the resolved model live on the
+		// terminal entry — the run driver knows the served model only after
+		// the stream completes, so the terminal metadata is authoritative.
 		if terminalPayload.Valid && terminalPayload.String != "" && terminalPayload.String != "{}" {
 			var p map[string]any
 			if err := json.Unmarshal([]byte(terminalPayload.String), &p); err == nil {
@@ -266,6 +278,11 @@ LIMIT ? OFFSET ?`
 				if v, ok := p["exit_code"].(float64); ok {
 					ec := int(v)
 					r.ExitCode = &ec
+				}
+				if v, ok := p["metadata"].(map[string]any); ok {
+					if m, ok := v["model"].(string); ok && m != "" {
+						r.Model = m
+					}
 				}
 			}
 		}

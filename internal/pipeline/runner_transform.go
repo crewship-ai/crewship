@@ -61,6 +61,17 @@ func (e *Executor) runTransformStep(step Step, parentRender RenderContext) (stri
 			return fmt.Sprintf("%d", len(rawInput)), 0, time.Since(stepStart).Milliseconds(), nil
 		case "tostring":
 			return rawInput, 0, time.Since(stepStart).Milliseconds(), nil
+		case "@json", "tojson":
+			// Non-JSON input + @json: encode the raw input AS a JSON string
+			// literal (quotes added, newlines/quotes/control chars escaped).
+			// This is the safe way to drop agent plain-text into a JSON body —
+			// e.g. an http step body `{"content": {{ steps.x | @json }}}` — without
+			// relying on the agent to emit perfectly-escaped JSON itself.
+			b, err := json.Marshal(rawInput)
+			if err != nil {
+				return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("@json: marshal raw string: %w", err)
+			}
+			return string(b), 0, time.Since(stepStart).Milliseconds(), nil
 		default:
 			return "", 0, time.Since(stepStart).Milliseconds(),
 				fmt.Errorf("transform step %q input is not JSON and expression %q requires JSON", step.ID, expr)

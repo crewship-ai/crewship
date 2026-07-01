@@ -11,6 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/skills"
 	"github.com/crewship-ai/crewship/internal/skills/bundled"
 )
 
@@ -34,6 +35,87 @@ func TestEmbedFS_ContainsAnthropicSkills(t *testing.T) {
 		if !strings.HasPrefix(string(f), "---") {
 			t.Errorf("%s does not start with frontmatter delimiter", p)
 		}
+	}
+}
+
+// TestRoutineAuthorSkill_ParsesWithRequiredSections proves the first-party
+// crewship/routine-author playbook is embedded, has valid frontmatter
+// (name + AUTOMATION category), and carries the structural sections the
+// authoring procedure depends on. A regression here (renamed heading,
+// dropped procedure) would silently degrade a Lead's ability to author a
+// routine from chat — exactly the failure the skill exists to prevent.
+func TestRoutineAuthorSkill_ParsesWithRequiredSections(t *testing.T) {
+	t.Parallel()
+	body, err := fs.ReadFile(bundled.FS(), "crewship/routine-author/SKILL.md")
+	if err != nil {
+		t.Fatalf("routine-author SKILL.md not embedded: %v", err)
+	}
+	parsed, err := skills.ParseSKILLMD(string(body))
+	if err != nil {
+		t.Fatalf("parse routine-author SKILL.md: %v", err)
+	}
+	if parsed.Meta.Name != "routine-author" {
+		t.Errorf("name = %q, want routine-author", parsed.Meta.Name)
+	}
+	if parsed.Meta.Category != "AUTOMATION" {
+		t.Errorf("category = %q, want AUTOMATION", parsed.Meta.Category)
+	}
+	if parsed.Meta.Description == "" {
+		t.Error("description is empty")
+	}
+	for _, section := range []string{
+		"## When to Activate",
+		"## Procedure",
+		"## Pitfalls",
+		"## Verification",
+	} {
+		if !strings.Contains(parsed.Content, section) {
+			t.Errorf("body missing required section %q", section)
+		}
+	}
+	// The DSL cheat-sheet and save endpoint are what make the playbook
+	// actionable — assert the load-bearing concrete references survive edits.
+	for _, marker := range []string{
+		"save_routine",
+		"integrations_required",
+		"{{ steps.",
+		"proposed",
+	} {
+		if !strings.Contains(parsed.Content, marker) {
+			t.Errorf("body missing load-bearing marker %q", marker)
+		}
+	}
+}
+
+// TestInstall_PopulatesCrewshipVendor verifies the first-party vendor
+// installs alongside anthropic — the routine-author row must land in the
+// catalog so the seed assignment loop (which resolves it by slug via the
+// skills API) can link it to the crew Leads.
+func TestInstall_PopulatesCrewshipVendor(t *testing.T) {
+	t.Parallel()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	logger := slog.New(slog.NewTextHandler(discardWriter{}, nil))
+	if err := database.Migrate(context.Background(), db, logger); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := bundled.Install(context.Background(), db, logger); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	var category, spdx, maturity, source string
+	err = db.QueryRow(`
+		SELECT category, spdx_license, maturity, source
+		FROM skills WHERE vendor = 'crewship' AND slug = 'routine-author'
+	`).Scan(&category, &spdx, &maturity, &source)
+	if err != nil {
+		t.Fatalf("routine-author row not installed: %v", err)
+	}
+	if category != "AUTOMATION" || spdx != "Apache-2.0" || maturity != "OFFICIAL" || source != "BUNDLED" {
+		t.Errorf("metadata mismatch: category=%s spdx=%s maturity=%s source=%s",
+			category, spdx, maturity, source)
 	}
 }
 

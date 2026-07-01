@@ -126,6 +126,61 @@ func TestCovPHToPipelineResponse_OmitsDefinitionAndNilInvoked(t *testing.T) {
 	}
 }
 
+// TestCovPHToPipelineResponse_ManifestOnDetailOnly — the derived manifest is
+// included on the detail response (includeDefinition=true) and omitted on the
+// list response (includeDefinition=false).
+func TestCovPHToPipelineResponse_ManifestOnDetailOnly(t *testing.T) {
+	def := `{"dsl_version":"1.0","name":"deploy","integrations_required":["github"],` +
+		`"steps":[{"id":"s1","type":"agent_run","agent_slug":"deployer","prompt":"go"},` +
+		`{"id":"s2","type":"call_pipeline","pipeline_slug":"child"}]}`
+	p := &pipeline.Pipeline{
+		ID:             "pl_m",
+		Slug:           "deploy",
+		Name:           "Deploy",
+		DefinitionJSON: def,
+		AuthoredVia:    pipeline.AuthoredViaAgent,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+
+	detail := toPipelineResponse(p, true)
+	if detail.Manifest == nil {
+		t.Fatal("detail response missing manifest")
+	}
+	if len(detail.Manifest.Agents) != 1 || detail.Manifest.Agents[0] != "deployer" {
+		t.Errorf("manifest Agents = %v, want [deployer]", detail.Manifest.Agents)
+	}
+	if len(detail.Manifest.Routines) != 1 || detail.Manifest.Routines[0] != "child" {
+		t.Errorf("manifest Routines = %v, want [child]", detail.Manifest.Routines)
+	}
+	if len(detail.Manifest.Integrations) != 1 || detail.Manifest.Integrations[0] != "github" {
+		t.Errorf("manifest Integrations = %v, want [github]", detail.Manifest.Integrations)
+	}
+
+	list := toPipelineResponse(p, false)
+	if list.Manifest != nil {
+		t.Errorf("list response should omit manifest; got %+v", list.Manifest)
+	}
+}
+
+// TestCovPHToPipelineResponse_ManifestBestEffortOnBadDef — a malformed
+// definition leaves the manifest nil rather than failing the response.
+func TestCovPHToPipelineResponse_ManifestBestEffortOnBadDef(t *testing.T) {
+	p := &pipeline.Pipeline{
+		ID:             "pl_bad",
+		Slug:           "bad",
+		Name:           "Bad",
+		DefinitionJSON: `{not valid json`,
+		AuthoredVia:    pipeline.AuthoredViaUser,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	out := toPipelineResponse(p, true)
+	if out.Manifest != nil {
+		t.Errorf("malformed definition should leave manifest nil; got %+v", out.Manifest)
+	}
+}
+
 // --- enrichPipelineListAuthorNames ---
 
 func TestCovPHEnrichAuthorNames_StitchesNames(t *testing.T) {

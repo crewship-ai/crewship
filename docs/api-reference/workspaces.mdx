@@ -35,8 +35,7 @@ Errors follow [RFC 7807 Problem Details](https://datatracker.ietf.org/doc/html/r
 | `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}`](#get-pipeline) | One pipeline with full `definition` |
 | `DELETE` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}`](#delete-pipeline) | Soft-delete a pipeline |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/save`](#save-pipeline) | Create or update a pipeline |
-| `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/test_run`](#test-run-a-draft) | Run an unsaved draft DSL |
-| `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run`](#dry-run-a-saved-pipeline) | WouldExecute report, no agent runs |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run`](#dry-run-a-saved-pipeline) | WouldExecute report + manifest, no agent runs |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run`](#run-pipeline) | Invoke a saved pipeline |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs`](#list-pipeline-runs-journal-backed) | Journal-backed run entries |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run-records`](#list-pipeline-run-records-projection-table) | Column-typed run projection |
@@ -600,10 +599,9 @@ Creates or updates a pipeline for the calling user. `authored_via` is always set
 | `description` | string | no | -- |
 | `definition` | object | yes | DSL JSON document |
 | `author_crew_id` | string | no | Pin a crew context for runtime resolution; without it, runs fall back to the first crew the saving user belongs to |
-| `last_test_run_at` | string | conditional | RFC 3339 timestamp from a recent `/test_run`; required unless `save_token` or `skip_test_gate` is used |
+| `last_test_run_at` | string | conditional | RFC 3339 timestamp (within the last 5 minutes) clearing the validation gate; required unless `skip_test_gate` is used |
 | `last_test_run_passed` | boolean | conditional | Must be `true` if relying on body-trust |
-| `save_token` | string | no | HMAC-signed proof returned by `/test_run`; supersedes the body-trust on `last_test_run_at` |
-| `skip_test_gate` | boolean | no | OWNER/ADMIN-only escape hatch -- bypass the 5-minute test-run gate entirely |
+| `skip_test_gate` | boolean | no | OWNER/ADMIN-only escape hatch -- bypass the 5-minute validation gate entirely |
 
 **Response:** `201 Created` -- full pipeline object including `definition`.
 
@@ -613,33 +611,11 @@ Creates or updates a pipeline for the calling user. `authored_via` is always set
 | `401` | Not authenticated |
 | `403` | Role below `MANAGER`, or `skip_test_gate` requested without OWNER/ADMIN |
 | `409` | Slug already exists in this workspace |
-| `422` | DSL parse / validate / cycle-detect failure, expired `save_token`, or test-run gate not satisfied |
+| `422` | DSL parse / validate / cycle-detect failure, or validation gate not satisfied |
 
-### Test-run a draft
-
-```
-POST /api/v1/workspaces/{workspaceId}/pipelines/test_run
-```
-
-Executes an **unsaved** DSL against the runner so the author can confirm it works before calling `/save`. On success the response includes a `save_token` HMAC-bound to `(workspace_id, definition_hash, user_id)` that can be passed to `/save` instead of a body-trust timestamp.
-
-**Request body:**
-
-```json
-{
-  "definition": { /* DSL JSON */ },
-  "author_crew_id": "crew_eng",
-  "sample_inputs": { "issue": "ENG-9" }
-}
-```
-
-**Response:** `200 OK` -- a [`RunResult`](#runresult-shape) with an additional `save_token` field when the run completed successfully and a token signing secret is wired.
-
-| Status | Condition |
-|---|---|
-| `400` | Missing `definition` or `author_crew_id`, invalid JSON |
-| `422` | DSL parse/validate failure |
-| `503` | Runner not wired (orchestrator hasn't booted, or build excluded the runner) |
+<Note>
+There is **no public `test_run` endpoint.** You cannot run an agent "dry" (its scripts have uninterceptable side effects), so a real run is just [Run](#run-pipeline). Drafts are validated server-side on `/save` (parse + schema + cycle detection), and the sidecar agent-authoring flow validates a draft via the internal dry-run gate (`/api/v1/internal/pipelines/test_run`, X-Internal-Token) before persisting.
+</Note>
 
 ### Dry-run a saved pipeline
 
@@ -647,11 +623,31 @@ Executes an **unsaved** DSL against the runner so the author can confirm it work
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run
 ```
 
-Returns the structured **WouldExecute** report for the supplied inputs -- no agent invocations, no journal entries.
+Returns the structured **WouldExecute** report for the supplied inputs plus the routine's declared **`manifest`** -- no agent invocations, no journal entries. The dry-run is an honest static plan, **not a proof the run will succeed**.
 
 **Request body:** Same shape as [Run](#run-pipeline). All fields optional.
 
-**Response:** `200 OK` -- `RunResult` with `mode="dry_run"`.
+**Response:** `200 OK` -- a `RunResult` (with `would_execute`) plus a sibling `manifest` object:
+
+```json
+{
+  "status": "DRY_RUN_OK",
+  "would_execute": [ /* per-step plan */ ],
+  "manifest": {
+    "integrations": ["github", "slack"],
+    "egress": ["api.example.com", "discord.com"],
+    "credentials": [{ "type": "stripe" }],
+    "agents": ["jordan"],
+    "routines": [],
+    "datastores": [{ "type": "postgres", "name": "main" }],
+    "tools": [{ "type": "ansible", "name": "deploy.yml" }],
+    "has_http": true,
+    "has_code": false
+  }
+}
+```
+
+`manifest` is the routine's full declared blast radius. It is best-effort: a stored definition that no longer parses leaves `manifest` null and still returns the report.
 
 ### Run pipeline
 
@@ -999,7 +995,7 @@ POST /api/v1/workspaces/{workspaceId}/pipelines/import
 
 Creates a pipeline from a previously exported bundle. The receiving workspace becomes the author context; the original bundle's source workspace id is preserved on the pipeline row as `imported_from_url` for audit.
 
-Imports **skip the test-run gate** by design -- a marketplace bundle is presumed to have passed test-run in its source workspace.
+Imports **skip the save validation gate** by design -- a marketplace bundle is presumed to have been validated in its source workspace.
 
 **Auth:** `MANAGER`+ (`canRole "create"`) -- importing creates a new pipeline row, same privilege as Save.
 

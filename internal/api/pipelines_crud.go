@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
@@ -30,6 +31,7 @@ func (h *PipelineHandler) List(w http.ResponseWriter, r *http.Request) {
 		IncludeEphemeral: q.Get("include_ephemeral") == "1",
 		IncludeHidden:    q.Get("include_hidden") == "1",
 		AuthorCrewID:     q.Get("author_crew_id"),
+		Status:           q.Get("status"),
 	}
 	switch q.Get("order") {
 	case "recent":
@@ -125,6 +127,23 @@ func (h *PipelineHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "delete pipeline")
 		return
 	}
+
+	// Clear the routine's dangling inbox escalations. A deleted routine used
+	// to leave its "proposed for review" escalation (and any failed-run /
+	// waitpoint items it raised) unresolved in the inbox forever — 38 deleted
+	// routines still showed escalations. Resolve them in the same operation:
+	// the precise proposal source_id, plus a payload sweep that catches
+	// failed-run alerts ($.pipeline_id) and pending waitpoints
+	// ($.pipeline_run_id). Best-effort — the soft-delete above is authoritative.
+	actorID := ""
+	if u := UserFromContext(r.Context()); u != nil {
+		actorID = u.ID
+	}
+	inbox.ResolveBySource(r.Context(), h.db, h.logger,
+		inbox.KindEscalation, routineProposalInboxSource(workspaceID, slug), "dismissed", actorID)
+	inbox.ResolveByPipeline(r.Context(), h.db, h.logger, workspaceID, p.ID, "dismissed", actorID)
+	h.broadcastInboxUpdated(workspaceID, "routine_deleted")
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -575,6 +594,12 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Governance maker-checker: classify the save. Risky routines (http/egress
+	// or code steps, declared credentials, or an integrations_required the
+	// author crew can't satisfy) land as 'proposed' and need MANAGER+ approval
+	// before they can run; safe ones go live as 'active'.
+	risky, riskReasons := h.classifyRoutineRisk(r.Context(), workspaceID, body.AuthorCrewID, dsl)
+
 	in := pipeline.SaveInput{
 		WorkspaceID:    workspaceID,
 		Slug:           body.Slug,
@@ -586,15 +611,22 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 			UserID: user.ID,
 			Via:    pipeline.AuthoredViaUser,
 		},
-		LastTestRunPassed: body.LastTestRunPassed || body.SkipTestGate,
+		// Default the gate to UNMET. The user save path does NOT trust the
+		// body's last_test_run_passed claim (it's forgeable — that's the whole
+		// reason the save_token exists). Only the two proof paths below flip it.
+		LastTestRunPassed: body.SkipTestGate,
+		Status:            statusForRisk(risky),
 	}
 
-	// Three paths to clearing the test-gate gate, in priority order:
-	// 1. SaveToken (HMAC, no body trust) — preferred path
-	// 2. SkipTestGate (OWNER/ADMIN role-gated escape hatch)
-	// 3. body's last_test_run_at + last_test_run_passed (legacy body
-	//    trust, kept for sidecar back-compat; will be retired once all
-	//    callers migrate to SaveToken).
+	// Two — and ONLY two — paths clear the test-gate for a user save:
+	// 1. SaveToken: the HMAC proof minted by /test_run that THIS user just
+	//    dry-run-validated THIS definition_hash. Verified server-side, no
+	//    body trust. This is the path the UI takes.
+	// 2. SkipTestGate: an OWNER/ADMIN-only escape hatch (role-gated above).
+	// There is deliberately NO body-trust fallback: a missing/invalid token
+	// without skip leaves the gate UNMET and the store returns
+	// ErrTestRunGateFailed → 422. (The forgeable body fields used to be a
+	// silent bypass for any MANAGER+ caller.)
 	switch {
 	case body.SaveToken != "":
 		defHash := definitionHashHex(body.Definition)
@@ -615,10 +647,6 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		now := time.Now().UTC()
 		in.LastTestRunAt = &now
 		h.logger.Info("pipeline save: test gate skipped", "user_id", user.ID, "role", role, "slug", body.Slug)
-	default:
-		if t, err := parseRFC3339(body.LastTestRunAt); err == nil {
-			in.LastTestRunAt = &t
-		}
 	}
 
 	saved, err := h.store.Save(r.Context(), in)
@@ -636,6 +664,12 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("pipeline user save", "error", err)
 		replyError(w, http.StatusInternalServerError, "Failed to save pipeline")
 		return
+	}
+	// Only raise the maker-checker review item when the save actually landed
+	// as 'proposed'. A re-save of a routine the store kept 'disabled' (the
+	// airbag invariant) must not spawn a misleading "awaiting approval" item.
+	if risky && saved.Status == "proposed" {
+		h.proposeRoutineInbox(r.Context(), workspaceID, saved, riskReasons, "Routine author ("+user.Email+")")
 	}
 	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))
 }
@@ -711,6 +745,11 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Governance maker-checker (mirrors the user save path): classify the
+	// agent-authored save. Risky → 'proposed' (MANAGER+ approval before it can
+	// run) + an inbox review item; safe → 'active' as before.
+	risky, riskReasons := h.classifyRoutineRisk(r.Context(), body.WorkspaceID, body.AuthorCrewID, dsl)
+
 	in := pipeline.SaveInput{
 		WorkspaceID:    body.WorkspaceID,
 		Slug:           body.Slug,
@@ -725,6 +764,7 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 			Via:     pipeline.AuthoredViaAgent,
 		},
 		LastTestRunPassed: body.LastTestRunPassed,
+		Status:            statusForRisk(risky),
 	}
 	if t, err := parseRFC3339(body.LastTestRunAt); err == nil {
 		in.LastTestRunAt = &t
@@ -745,6 +785,9 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("pipeline internal save", "error", err)
 		replyError(w, http.StatusInternalServerError, "Failed to save pipeline")
 		return
+	}
+	if risky && saved.Status == "proposed" {
+		h.proposeRoutineInbox(r.Context(), body.WorkspaceID, saved, riskReasons, "Agent routine author")
 	}
 	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))
 }

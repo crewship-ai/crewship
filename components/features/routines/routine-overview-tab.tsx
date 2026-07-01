@@ -15,25 +15,32 @@ import {
   ChevronRight,
   Activity,
   Puzzle,
+  ListChecks,
+  ShieldAlert,
+  Clock,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { JSONViewer } from "@/components/features/activity/json-viewer"
 import { relTime, formatDurationDecimal } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import { integrationLabel } from "@/lib/integration-labels"
 import { usePipelineRunRecords, type PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
+import { useRunSubSpans } from "@/hooks/use-run-sub-spans"
 import type { RoutineDetail } from "./routines-detail-panel"
 import { Card } from "./_shared"
+import { RoutineTouches } from "./routine-touches"
+import { RoutineMiniTrace } from "./routine-mini-trace"
+import { buildPlainSteps, type PlainStep } from "@/lib/routine-flow"
+import { buildMiniTrace } from "@/lib/routine-mini-trace"
 
-// RoutineOverviewTab — operational dashboard for a single routine,
-// modeled on Stripe/Vercel: KPI tiles with sparklines, runs chart,
-// schedule card, I/O schema, prominent last-run card with trigger
-// source + result, recent-runs feed, spend breakdown, compact
-// metadata footer. The whole tab answers the implicit question
-// "what does this routine do, when did it last run, what caused it
-// to run, and was it healthy?" — in that order — without leaving the
-// pane.
+// RoutineOverviewTab — the approachable, non-technical summary of a single
+// routine. Leads with the essentials a human asks first: a thin stat strip,
+// "What it does" (plain-language steps with deterministic/AI tags), "What it
+// touches" (brand-logo chips = blast radius), and the prominent last-run card.
+// Heavier/operational detail (runs-over-time chart, recent-runs feed,
+// schedules, metadata, integrations, credentials) is demoted below the fold.
+// The data-flow diagram lives in its own "Preview" tab; the raw I/O schema is
+// intentionally gone (it lived in the Editor/Advanced surfaces instead).
 
 // Defensive DSL field extraction so a malformed routine doesn't crash
 // the tab (the Editor tab still surfaces the raw JSON).
@@ -73,8 +80,6 @@ export function RoutineOverviewTab({
   workspaceId?: string
 }) {
   const def = routine.definition as Record<string, unknown> | undefined
-  const inputs = asArrayOfObjects(def?.["inputs"])
-  const outputs = asArrayOfObjects(def?.["outputs"])
   const creds = asArrayOfObjects(def?.["credentials_required"])
   const steps = asArrayOfObjects(def?.["steps"])
   // Required third-party integrations (Composio connector slugs). Filter
@@ -146,46 +151,61 @@ export function RoutineOverviewTab({
 
   const lastRun = runs[0] ?? null
 
+  // Plain-language step list + AI/script tags for the "What it does" panel,
+  // derived purely from the DSL (lib/routine-flow). Memoized on the
+  // definition object identity so we don't re-walk on unrelated re-renders.
+  const plainSteps = useMemo(
+    () => buildPlainSteps(routine.definition),
+    [routine.definition],
+  )
+  const manifest = routine.manifest
+
   return (
     <div className="space-y-4">
-      {/* ── KPI strip ──────────────────────────────────────────────── */}
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <KpiTile
-          label="Total runs"
-          value={stats.total.toString()}
-          delta={runs.length > 0 ? `+${runs.length} last 30` : "no runs yet"}
-          spark={buckets.bins.map((b) => b.total)}
-          tone="blue"
-        />
-        <KpiTile
-          label="Pass rate"
+      {/* ── Compact stat strip (DEMOTED from 4 big KPI cards) ───────── */}
+      <section className="flex flex-wrap overflow-hidden rounded-lg border border-border/60">
+        <StatCell label="Runs" value={stats.total.toString()} />
+        <StatCell
+          label="Pass"
           value={stats.passRate !== null ? `${stats.passRate}%` : "—"}
-          deltaTone={stats.passRate !== null && stats.passRate >= 90 ? "up" : stats.passRate !== null && stats.passRate < 70 ? "down" : undefined}
-          delta={
-            stats.passRate !== null
-              ? `${stats.succeeded} ok · ${stats.failed} failed`
-              : "no completed runs yet"
-          }
-          spark={buckets.bins.map((b) => (b.total > 0 ? (b.total - b.failed) / b.total : 1))}
-          tone="green"
+          tone={stats.passRate !== null && stats.passRate >= 90 ? "green" : undefined}
         />
-        <KpiTile
-          label="Avg duration"
-          value={stats.avgDurMs > 0 ? formatDurationDecimal(stats.avgDurMs) : "—"}
-          delta={lastRun && lastRun.duration_ms > 0 ? `last ${formatDurationDecimal(lastRun.duration_ms)}` : "—"}
-          spark={buckets.bins.map((b) => (b.total > 0 ? b.dur / b.total : 0))}
-          tone="violet"
+        <StatCell label="Avg" value={stats.avgDurMs > 0 ? formatDurationDecimal(stats.avgDurMs) : "—"} />
+        <StatCell
+          label="Spend / run"
+          value={runs.length > 0 ? `$${(stats.costSum / Math.max(runs.length, 1)).toFixed(4)}` : "—"}
         />
-        <KpiTile
-          label="Total spend"
-          value={stats.costSum > 0 ? `$${stats.costSum.toFixed(4)}` : "—"}
-          delta={runs.length > 0 ? `avg $${(stats.costSum / Math.max(runs.length, 1)).toFixed(4)} / run` : "—"}
-          spark={buckets.bins.map((b) => b.cost)}
-          tone="amber"
+        <StatCell
+          label="Schedule"
+          value={schedules.length > 0 ? schedules[0].cron_expr : "manual"}
+          mono={schedules.length > 0}
         />
       </section>
 
-      {/* ── Two-column body ────────────────────────────────────────── */}
+      {/* ── ★ Essentials — what it does + what it touches ──────────── */}
+      <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
+        {/* What it does — plain-language steps + deterministic/AI tags so
+            users aren't reading raw DSL JSON to understand the routine. */}
+        <Card title="What it does" subtitle="step by step" icon={ListChecks}>
+          <ol className="px-4 py-2">
+            {plainSteps.map((s) => (
+              <PlainStepRow key={s.id} step={s} />
+            ))}
+          </ol>
+        </Card>
+
+        {/* What it touches — capability manifest as brand-logo chips. */}
+        <Card title="What it touches" subtitle="blast radius" icon={ShieldAlert}>
+          <div className="px-3 py-2">
+            <RoutineTouches manifest={manifest} />
+          </div>
+        </Card>
+      </div>
+
+      {/* ── ★ Last run — the prominent result card ─────────────────── */}
+      <LastRunCard run={lastRun} workspaceId={workspaceId} definition={def} />
+
+      {/* ── Operational detail — demoted below the essentials ──────── */}
       <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
         {/* Main column */}
         <div className="space-y-4">
@@ -193,39 +213,6 @@ export function RoutineOverviewTab({
           <Card title="Runs over time" subtitle="last 7 days">
             <RunsChart bins={buckets.bins} />
           </Card>
-
-          {/* I/O schema */}
-          <Card title="I/O schema" subtitle={`${inputs.length} in · ${outputs.length} out`}>
-            <div className="divide-y divide-border/40">
-              {inputs.map((inp, i) => (
-                <IORow
-                  key={`in-${i}`}
-                  direction="in"
-                  name={String(inp["name"])}
-                  type={String(inp["type"])}
-                  required={inp["required"] === true}
-                  description={typeof inp["description"] === "string" ? String(inp["description"]) : undefined}
-                  defaultValue={"default" in inp ? inp["default"] : undefined}
-                />
-              ))}
-              {outputs.map((out, i) => (
-                <IORow
-                  key={`out-${i}`}
-                  direction="out"
-                  name={String(out["name"])}
-                  type={String(out["type"])}
-                />
-              ))}
-              {inputs.length === 0 && outputs.length === 0 && (
-                <div className="py-4 text-center text-xs text-muted-foreground">
-                  No inputs / outputs declared.
-                </div>
-              )}
-            </div>
-          </Card>
-
-          {/* Last run — the prominent "data flow" card */}
-          <LastRunCard run={lastRun} workspaceId={workspaceId} />
 
           {/* Recent runs feed */}
           {runs.length > 1 && (
@@ -373,74 +360,75 @@ export function RoutineOverviewTab({
  *  shared by every routine sub-tab.                                 *
  * ----------------------------------------------------------------- */
 
-const SPARK_TONES = {
-  blue: "rgb(107 141 247)",
-  green: "rgb(52 211 153)",
-  violet: "rgb(167 139 250)",
-  amber: "rgb(245 158 11)",
-} as const
-
-function KpiTile({
+// StatCell — one segment of the thin demoted stat strip. Replaces the four
+// large KPI tiles the redesign collapses into a single compact row.
+function StatCell({
   label,
   value,
-  delta,
-  deltaTone,
-  spark,
   tone,
+  mono,
 }: {
   label: string
   value: string
-  delta?: string
-  deltaTone?: "up" | "down"
-  spark: number[]
-  tone: keyof typeof SPARK_TONES
+  tone?: "green"
+  mono?: boolean
 }) {
-  const color = SPARK_TONES[tone]
-  const max = Math.max(1, ...spark)
   return (
-    <div className="relative flex flex-col gap-1 overflow-hidden rounded-xl border border-border/60 bg-card px-4 py-4">
+    <div className="min-w-[96px] flex-1 border-r border-border/60 px-3.5 py-2 last:border-r-0">
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground-soft">{label}</div>
       <div
-        aria-hidden
-        className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full"
-        style={{ background: `radial-gradient(circle, ${color}14, transparent 70%)` }}
-      />
-      {/* Label + value sized to match the dashboard's KpiCard so a KPI
-          renders identically whether shown on /dashboard or on a routine
-          detail Overview tab. */}
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-        {label}
-      </div>
-      <div className="mt-1 text-[28px] font-semibold leading-none tabular-nums sm:text-[32px]">
+        className={cn(
+          "mt-0.5 truncate text-[13px] font-semibold tabular-nums",
+          tone === "green" && "text-emerald-400",
+          mono && "font-mono text-[11px] font-medium",
+        )}
+        title={value}
+      >
         {value}
       </div>
-      {delta && (
-        <div
-          className={cn(
-            "mt-1 text-[11px]",
-            deltaTone === "up"
-              ? "text-emerald-400"
-              : deltaTone === "down"
-                ? "text-rose-400"
-                : "text-muted-foreground",
-          )}
-        >
-          {delta}
-        </div>
-      )}
-      <div className="mt-2 flex h-7 items-end gap-[3px]">
-        {spark.map((v, i) => (
-          <span
-            key={i}
-            className="flex-1 rounded-sm"
-            style={{
-              height: `${Math.max(6, (v / max) * 100)}%`,
-              backgroundColor: color,
-              opacity: 0.55,
-            }}
-          />
-        ))}
-      </div>
     </div>
+  )
+}
+
+// PlainStepRow — one line of the "What it does" list: a numbered (or
+// trigger) marker, a human title with a det-vs-AI tag, and an optional
+// detail line. The AI tag (indigo) flags non-deterministic agent steps; the
+// script tag (violet) marks deterministic ones.
+function PlainStepRow({ step }: { step: PlainStep }) {
+  const isTrigger = step.determinism === "trigger"
+  return (
+    <li className="flex gap-3 border-t border-white/[0.04] py-2.5 first:border-t-0">
+      <span
+        className={cn(
+          "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-medium",
+          isTrigger ? "bg-amber-500/15 text-amber-400" : "bg-white/[0.06] text-muted-foreground",
+        )}
+      >
+        {isTrigger ? <Clock className="h-3 w-3" aria-hidden /> : step.index}
+      </span>
+      <div className="min-w-0">
+        <div className="text-[12.5px] leading-snug text-foreground/90">
+          {step.title}
+          {!isTrigger && (
+            <span
+              className={cn(
+                "ml-1.5 rounded px-1.5 py-px align-middle text-[9.5px] font-medium",
+                step.determinism === "ai"
+                  ? "bg-indigo-500/15 text-indigo-300"
+                  : "bg-violet-500/15 text-violet-300",
+              )}
+            >
+              {step.determinism === "ai" ? "AI" : "script"}
+            </span>
+          )}
+        </div>
+        {step.detail && (
+          <div className="mt-0.5 truncate font-mono text-[10.5px] text-muted-foreground-soft" title={step.detail}>
+            {step.detail}
+          </div>
+        )}
+      </div>
+    </li>
   )
 }
 
@@ -486,84 +474,30 @@ function RunsChart({ bins }: { bins: Array<{ day: string; total: number; failed:
   )
 }
 
-function IORow({
-  direction,
-  name,
-  type,
-  required,
-  description,
-  defaultValue,
-}: {
-  direction: "in" | "out"
-  name: string
-  type: string
-  required?: boolean
-  description?: string
-  defaultValue?: unknown
-}) {
-  const isIn = direction === "in"
-  // Long defaults (multi-line strings, big JSON) were rendering as a
-  // wall-of-text in the meta line. Render short defaults inline; collapse
-  // long ones into a <details> block so the row stays scannable.
-  const defaultStr = defaultValue !== undefined ? JSON.stringify(defaultValue) : null
-  const isLongDefault = defaultStr !== null && defaultStr.length > 60
-  return (
-    <div className="flex items-start gap-3 px-4 py-3">
-      <span
-        className={cn(
-          "shrink-0 font-mono text-base leading-tight",
-          isIn ? "text-blue-400" : "text-emerald-400",
-        )}
-        aria-hidden
-      >
-        {isIn ? "→" : "←"}
-      </span>
-      <div className="min-w-0 flex-1 space-y-1.5">
-        {/* Name + type + flags on one line */}
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <span className="font-mono text-sm font-semibold text-foreground">{name}</span>
-          <span className="rounded bg-white/[0.04] px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-            {type}
-          </span>
-          {required && (
-            <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300">
-              required
-            </span>
-          )}
-          {defaultStr !== null && !isLongDefault && (
-            <span className="font-mono text-[11px] text-muted-foreground">
-              default {defaultStr}
-            </span>
-          )}
-        </div>
-        {/* Description */}
-        {description && (
-          <p className="text-[13px] leading-relaxed text-muted-foreground">{description}</p>
-        )}
-        {/* Long default — collapsible, preview clipped */}
-        {isLongDefault && defaultStr !== null && (
-          <details className="group rounded-md border border-border/60 bg-black/20 text-[12px]">
-            <summary className="cursor-pointer list-none px-2.5 py-1.5 font-mono text-muted-foreground hover:text-foreground">
-              <span className="mr-1 inline-block transition-transform group-open:rotate-90">▸</span>
-              default value <span className="text-faint">· {defaultStr.length} chars</span>
-            </summary>
-            <pre className="m-0 max-h-48 overflow-auto border-t border-border/40 px-2.5 py-2 font-mono text-[12px] leading-relaxed text-foreground/85">
-              {defaultStr}
-            </pre>
-          </details>
-        )}
-      </div>
-    </div>
-  )
-}
-
 function LastRunCard({
   run,
   workspaceId,
+  definition,
 }: {
   run: PipelineRunRecord | null
   workspaceId: string | undefined
+  definition: Record<string, unknown> | undefined
 }) {
+  // Best-effort fetch of the run detail (carries sub_spans + step_outputs
+  // the list row omits) to power the mini-trace's tool calls. Hooks must
+  // run unconditionally, so this sits above the early return; it no-ops
+  // when there's no run.
+  const { run: runDetail } = useRunSubSpans(workspaceId, run?.id ?? null)
+
+  // Compact "how did it flow + what did it call" projection. Prefer the
+  // detail (sub_spans + per-step status); fall back to the list row so the
+  // flow still renders before/without the detail fetch. Memoized on the
+  // inputs so we don't re-walk the DSL on unrelated re-renders.
+  const miniTrace = useMemo(
+    () => buildMiniTrace(definition, runDetail ?? run),
+    [definition, runDetail, run],
+  )
+
   if (!run) {
     return (
       <Card title="Last run">
@@ -648,14 +582,15 @@ function LastRunCard({
             {run.error_message}
           </div>
         )}
-        {run.output && (
-          <div>
-            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Output</div>
-            <div className="overflow-hidden rounded-md border border-border/60 bg-black/30">
-              <JSONViewer value={run.output} />
-            </div>
+        {/* Mini-trace — HOW the run flowed + what it called, not its output
+            (the output lives in Activity → Output). A compact, read-only
+            projection of the step flow with each agent step's tool calls. */}
+        <div>
+          <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            How it ran
           </div>
-        )}
+          <RoutineMiniTrace nodes={miniTrace} />
+        </div>
         {workspaceId && (
           <Link
             href={`/activity?run=${encodeURIComponent(run.id)}`}

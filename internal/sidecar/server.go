@@ -350,6 +350,16 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				// gets native function calling for memory without curl gymnastics.
 				s.handleMemoryMCP(w, r)
 				return
+			case r.Method == http.MethodPost && r.URL.Path == "/mcp/routines":
+				// In-container MCP server exposing the routine-authoring
+				// tools (save_routine / list_routines) via JSON-RPC 2.0.
+				// Adapters auto-inject a crewship-routines server entry
+				// pointing here so the model authors routines as native
+				// tool calls instead of shelling out to curl /pipelines/save
+				// (which weak models probe before committing). Reuses the
+				// same savePipeline test_run→save flow as POST /pipelines/save.
+				s.handleRoutinesMCP(w, r)
+				return
 			case r.Method == http.MethodPost && r.URL.Path == "/assign":
 				s.handleAssign(w, r)
 				return

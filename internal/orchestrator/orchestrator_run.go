@@ -685,10 +685,43 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// so users can attach via the web terminal to observe the running agent.
 	// The tmux session is named "agent-{slug}" and stdout still flows through
 	// the exec pipe for chat streaming.
-	execCmd, tmuxErr := o.setupTmuxExec(ctx, req.ContainerID, cmd, req.AgentSlug, env)
-	if tmuxErr != nil {
-		o.logger.Warn("tmux setup failed, falling back to direct exec", "error", tmuxErr)
+	// When the adapter delivers the prompt via stdin (claudeCodeAdapter does
+	// this for messages over ~96 KiB, to dodge Linux's 128 KiB MAX_ARG_STRLEN
+	// execve limit), bypass the tmux wrapper: a detached tmux session's stdin
+	// is NOT wired to the docker-exec stream, so a prompt sent on stdin would
+	// never reach the CLI. The trade-off — losing web-terminal attach for that
+	// one run — is acceptable for the rare oversized-prompt case; normal-size
+	// runs keep the tmux path unchanged.
+	var execCmd []string
+	var execStdin io.Reader
+	if getAdapter(req.CLIAdapter).PromptViaStdin(req) {
 		execCmd = append([]string{"stdbuf", "-oL"}, cmd...)
+		execStdin = strings.NewReader(req.UserMessage)
+		o.logger.Info("delivering oversized agent prompt via stdin (tmux bypassed)",
+			"agent_id", req.AgentID, "prompt_bytes", len(req.UserMessage))
+	} else {
+		// Shared E2BIG guard. Only the Claude adapter currently routes
+		// oversized prompts via stdin; the others fold system+user into a
+		// single positional argv element (e.g. gemini `-p <prompt>`), which
+		// execve rejects with E2BIG once any element exceeds Linux's 128 KiB
+		// MAX_ARG_STRLEN. Left unguarded that surfaced as the agent exiting 255
+		// at $0.00 with no actionable reason. Catch it BEFORE exec at the
+		// shared layer and fail with a legible error for EVERY arg-path
+		// adapter, rather than per-adapter. (Enabling stdin delivery for a
+		// given CLI is a follow-up gated on confirming that CLI reads its
+		// prompt from stdin in non-interactive mode.)
+		if oversizedArg, n := firstOversizedArg(cmd); oversizedArg {
+			return fmt.Errorf("agent prompt too large for %s: a single argument is %d bytes, over the %d-byte execve limit; "+
+				"this CLI delivers the prompt as a command-line argument and cannot accept input this large — "+
+				"reduce the input fed into the agent_run step, or use a Claude agent (which delivers large prompts via stdin)",
+				req.CLIAdapter, n, maxArgStrLen)
+		}
+		var tmuxErr error
+		execCmd, tmuxErr = o.setupTmuxExec(ctx, req.ContainerID, cmd, req.AgentSlug, env)
+		if tmuxErr != nil {
+			o.logger.Warn("tmux setup failed, falling back to direct exec", "error", tmuxErr)
+			execCmd = append([]string{"stdbuf", "-oL"}, cmd...)
+		}
 	}
 
 	execCfg := provider.ExecConfig{
@@ -697,6 +730,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		Env:         env,
 		WorkingDir:  workDir,
 		User:        "1001:1001",
+		Stdin:       execStdin,
 	}
 
 	timeout := time.Duration(req.TimeoutSecs) * time.Second
@@ -817,7 +851,23 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		}
 	})
 	scrubHandler, flushScrub := o.wrapScrubHandler(journalTap, secretValues)
+	// loggedModel guards the one-shot resolved-model log so a multi-init
+	// stream (sub-agents, restarts) doesn't re-log on every system event.
+	var loggedModel bool
 	tappedHandler := EventHandler(func(event AgentEvent) {
+		// Surface the model the run ACTUALLY resolved to. adapter_claude.go
+		// stamps meta["model"] on the session-init system event — that's
+		// ground truth for what the API served (the subscription may serve
+		// a lower tier than the requested --model). Compare against the
+		// requested override and WARN loudly on a family fallback.
+		if !loggedModel && event.Type == "system" {
+			if m, ok := event.Metadata.(map[string]interface{}); ok {
+				if actual, ok := m["model"].(string); ok && actual != "" {
+					loggedModel = true
+					logResolvedModel(o.logger, req.AgentID, req.LLMModel, actual)
+				}
+			}
+		}
 		// PR-C F4.2: invoke the sampled behavior monitor on every
 		// tool_call event. The hook's MaybeEvaluate is the sampling
 		// gate — most calls return (nil, false) without firing the

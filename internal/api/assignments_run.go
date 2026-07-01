@@ -433,6 +433,13 @@ func (h *AssignmentHandler) runAssignment(
 			fmt.Sprintf("resolve crew runtime config: %v", cfgErr))
 		return
 	}
+	// Journal + live-stream the runtime container-preparation steps the
+	// provider emits while ensuring the crew container, so an agent-triggered
+	// container creation is auditable exactly like an explicit provisioning job
+	// (nothing prepared silently). nil provisioner → nil sink → provider no-op.
+	if h.provisioner != nil {
+		crewCfg.ProvisionSink = h.provisioner.RuntimeProvisionSink(body.CrewID, body.WorkspaceID)
+	}
 	containerID, err = h.orch.GetOrCreateContainerCfg(ctx, crewCfg, body.WorkspaceID)
 	if err != nil {
 		h.logger.Error("get container for assignment", "error", err, "assignment_id", assignmentID)

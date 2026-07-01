@@ -73,6 +73,55 @@ export interface PipelineDSL {
   steps?: TraceStep[]
 }
 
+// ── Sub-spans — the agent's INTERNAL activity inside one step ─────────
+//
+// `GetRun` returns `sub_spans`: a map keyed by step id, each value an
+// array of the tool calls the agent made while executing that step
+// (the bash commands it ran, files it wrote, MCP tools it invoked,
+// thinking blocks, …), ordered by `seq`. A run with none returns `{}`.
+//
+// This is the drill-down layer beneath the step-level flow: the canvas
+// shows step1 → step2 → step3; expanding a step reveals what the agent
+// actually DID inside it. We keep the public shape camelCased and
+// normalize the wire (`started_at`, `duration_ms`) in mapSubSpans so
+// every renderer consumes one stable type.
+export type SubSpanKind =
+  | "bash"
+  | "write"
+  | "read"
+  | "edit"
+  | "mcp_tool"
+  | "http"
+  | "tool"
+  | "think"
+
+export type SubSpanStatus = "ok" | "error" | "running"
+
+export interface SubSpanAttributes {
+  // Concrete tool the action ran (e.g. "ansible", "terraform") — drives
+  // the brand logo when it resolves to a known Simple Icon.
+  tool?: string
+  // Model that produced this span (e.g. "opus-4-8") — surfaced as a
+  // badge on the owning step node and in the detail panel.
+  model?: string
+  // Path of a file the action wrote/read — clickable in the panel.
+  artifact_path?: string
+  // Network host the action reached (egress target).
+  host?: string
+}
+
+export interface SubSpan {
+  kind: SubSpanKind
+  name: string
+  detail?: string
+  // ISO timestamp the span started — used to position its bar in the
+  // detail-panel waterfall. May be absent on malformed rows.
+  startedAt?: string
+  durationMs?: number
+  status: SubSpanStatus
+  attributes: SubSpanAttributes
+}
+
 // Edges parsed from `{{ steps.X.output[.path] }}` references in any
 // step input field. Frontend mirrors the regex used by the Go
 // renderer in internal/pipeline/dsl.go:Render() — no need to ship
@@ -122,6 +171,15 @@ export interface TraceStepNodeData {
   costUsd?: number | null
   outputSnippet?: string | null
   errorMessage?: string | null
+  // Drill-down layer — the agent's internal tool calls inside this
+  // step, mapped from `run.sub_spans[step.id]`. Empty array when the
+  // step recorded none (the common case for non-agent steps). Drives
+  // the "▾ N actions" affordance on the node + the detail-panel
+  // waterfall when the step is selected.
+  subSpans?: SubSpan[]
+  // Model that ran this step (e.g. "opus-4-8"), derived from the first
+  // sub-span carrying `attributes.model`. Rendered as a node badge.
+  model?: string | null
   [key: string]: unknown
 }
 

@@ -37,7 +37,7 @@ func TestRunStepWithRetry_NonRetryableBreaksImmediately(t *testing.T) {
 		Retry: &RetryPolicy{MaxAttempts: 20, RetryOn: []string{"", "rate limit"}}}
 
 	_, _, _, err := exec.runStepWithRetry(context.Background(), step, "p", AdapterModel{}, nil,
-		RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeTestRun},
+		RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun},
 		"r", "p", &pipelineEmitContext{emitter: nopEmitter{}}, RenderContext{}, 0)
 	if err == nil || !strings.Contains(err.Error(), "hard validation wall") {
 		t.Fatalf("expected the runner error, got %v", err)
@@ -59,7 +59,7 @@ func TestRunStepWithRetry_ExponentialBackoffCapsAndExhausts(t *testing.T) {
 
 	start := time.Now()
 	_, _, _, err := exec.runStepWithRetry(context.Background(), step, "p", AdapterModel{}, nil,
-		RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeTestRun},
+		RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun},
 		"r", "p", &pipelineEmitContext{emitter: emitted}, RenderContext{}, 0)
 	if err == nil || !strings.Contains(err.Error(), "flaky upstream") {
 		t.Fatalf("expected exhausted error, got %v", err)
@@ -97,7 +97,7 @@ func TestRunStepWithRetry_PreCancelledContext(t *testing.T) {
 	step := Step{ID: "s", Type: StepAgentRun, AgentSlug: "a", Prompt: "p",
 		Retry: &RetryPolicy{MaxAttempts: 2}}
 	_, _, _, err := exec.runStepWithRetry(ctx, step, "p", AdapterModel{}, nil,
-		RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeTestRun},
+		RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun},
 		"r", "p", &pipelineEmitContext{emitter: nopEmitter{}}, RenderContext{}, 0)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled, got %v", err)
@@ -115,7 +115,7 @@ func TestRunStepWithRetry_CancelDuringBackoffSleep(t *testing.T) {
 	step := Step{ID: "s", Type: StepAgentRun, AgentSlug: "a", Prompt: "p",
 		Retry: &RetryPolicy{MaxAttempts: 3, InitialDelayMs: 40}}
 	_, _, _, err := exec.runStepWithRetry(ctx, step, "p", AdapterModel{}, nil,
-		RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeTestRun},
+		RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun},
 		"r", "p", &pipelineEmitContext{emitter: nopEmitter{}}, RenderContext{}, 0)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled from the sleep select, got %v", err)

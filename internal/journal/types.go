@@ -212,6 +212,16 @@ const (
 	EntryPipelineStepValidation EntryType = "pipeline.step.validation_failed"
 	EntryPipelineDryRun         EntryType = "pipeline.dry_run"
 
+	// EntryRunAgentSpan is one INTERNAL action of an agent_run step — a single
+	// tool the agent invoked (Bash/Write/Edit/Read/MCP/HTTP). It is the leaf of
+	// the drillable run-trace tree (run → step → tool). trace_id == run.id (so
+	// the runs API can pull every sub-span of a run via the trace_id index),
+	// actor_id == run.id, and the payload carries step_id, seq, kind, name,
+	// detail, started_at, duration_ms, status, attributes. Volume is bounded at
+	// the capture site (cap per step + detail truncation) so a chatty agent
+	// can't flood the journal. Severity is info (warn when the tool errored).
+	EntryRunAgentSpan EntryType = "run.agent_span"
+
 	// System
 	EntrySystemCompaction             EntryType = "system.compaction"
 	EntrySystemMigration              EntryType = "system.migration"
@@ -271,6 +281,17 @@ const (
 	EntryProvisioningBuilding EntryType = "provisioning.building"
 	EntryProvisioningComplete EntryType = "provisioning.complete"
 	EntryProvisioningFailed   EntryType = "provisioning.failed"
+
+	// EntryProvisioningStep is one fine-grained, structured step in the
+	// container-preparation pipeline (resolve_features → image_build →
+	// per-feature install → container_create → containerEnv_apply → ready, plus
+	// cache_hit and per-step failures). Distinct from the coarse
+	// queued/building/complete markers above: those bracket the whole job, this
+	// records every step so an operator can see exactly where a build got stuck
+	// across thousands of runs. Payload carries the full ProvisionEvent fields
+	// (step, feature, status, detail, error, tag, duration_ms). Severity is
+	// warn for failures, info otherwise.
+	EntryProvisioningStep EntryType = "provisioning.step"
 
 	// Chat — user↔agent conversation turns. Captures the trigger that
 	// kicks off a series of agent actions, so the Timeline can answer

@@ -19,7 +19,7 @@ func TestExecutor_Retry_HappyPath_NoRetry(t *testing.T) {
 			Retry: &RetryPolicy{MaxAttempts: 3, InitialDelayMs: 1}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -55,7 +55,7 @@ func TestExecutor_Retry_RetriesOnError(t *testing.T) {
 			Retry: &RetryPolicy{MaxAttempts: 3, InitialDelayMs: 1}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -86,7 +86,7 @@ func TestExecutor_Retry_GivesUpAfterMaxAttempts(t *testing.T) {
 			Retry: &RetryPolicy{MaxAttempts: 2, InitialDelayMs: 1}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -114,7 +114,7 @@ func TestExecutor_Retry_RetryOnAllowlist(t *testing.T) {
 			Retry: &RetryPolicy{MaxAttempts: 3, InitialDelayMs: 1, RetryOn: []string{"timeout", "5xx"}}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -147,7 +147,7 @@ func TestExecutor_Retry_RetryOnMatch_RetriesUntilSuccess(t *testing.T) {
 			Retry: &RetryPolicy{MaxAttempts: 3, InitialDelayMs: 1, RetryOn: []string{"timeout"}}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)

@@ -116,7 +116,7 @@ func TestExecutor_DAG_RunsIndependentStepsInParallel(t *testing.T) {
 	}}
 
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -147,7 +147,7 @@ func TestExecutor_DAG_RespectsDependencies(t *testing.T) {
 		{ID: "b", Type: StepAgentRun, AgentSlug: "agent_b", Prompt: "", Needs: []string{"a"}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -182,7 +182,7 @@ func TestExecutor_DAG_FailFast(t *testing.T) {
 		{ID: "d", Type: StepAgentRun, AgentSlug: "agent_d", Needs: []string{"b", "c"}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -212,7 +212,7 @@ func TestExecutor_DAG_CallPipelineRejected(t *testing.T) {
 		{ID: "b", Type: StepCallPipeline, PipelineSlug: "other", Needs: []string{"a"}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -240,7 +240,7 @@ func TestExecutor_DAG_ConditionalSkipDoesNotBlockDownstream(t *testing.T) {
 		{ID: "c", Type: StepAgentRun, AgentSlug: "agent_c", Needs: []string{"b"}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -270,7 +270,7 @@ func TestExecutor_DAG_LinearModeStillWorks(t *testing.T) {
 		{ID: "s2", Type: StepAgentRun, AgentSlug: "b"},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -322,7 +322,7 @@ func TestExecutor_DAG_FanOutObservesConcurrency(t *testing.T) {
 	}
 	dsl := &DSL{Name: "x", Steps: steps}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -360,7 +360,7 @@ func TestExecutor_DAG_FinalOutputPicksLeaf(t *testing.T) {
 		{ID: "audit", Type: StepAgentRun, AgentSlug: "agent_audit", Needs: []string{"fetch"}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -393,7 +393,7 @@ func TestExecutor_DAG_FinalOutputLinearFallback(t *testing.T) {
 		{ID: "s3", Type: StepAgentRun, AgentSlug: "c"},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil || res.Status != "COMPLETED" {
 		t.Fatalf("status: %s err=%v %s", res.Status, err, res.ErrorMessage)

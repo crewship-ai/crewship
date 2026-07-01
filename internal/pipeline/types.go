@@ -36,6 +36,15 @@ type DSL struct {
 	// the canonical set.
 	IntegrationsRequired []string  `json:"integrations_required,omitempty"`
 	CredsRequired        []CredReq `json:"credentials_required,omitempty"`
+	// Resources is the agent-declared part of the capability manifest —
+	// the things a routine touches that can't be inferred from the step
+	// graph. Agents/routines/integrations/egress are auto-derived from the
+	// DSL by ExtractManifest; datastores and CLI tools/scripts (run via an
+	// agent_run + shell, so invisible to static analysis) are not, so the
+	// author declares them here. Declaring is always allowed at save time;
+	// at run time the precondition gate blocks a run whose crew container
+	// lacks a declared datastore/tool (see pipeline_resources_gate.go).
+	Resources *RoutineResources `json:"resources,omitempty"`
 	// ConcurrencyKey gates how many runs of this pipeline can be in
 	// flight at once for the same workspace + key value. A typical
 	// pattern is `concurrency_key: "{{ inputs.account_id }}"` so the
@@ -185,6 +194,33 @@ type OutputSpec struct {
 type CredReq struct {
 	Type  string `json:"type"`
 	Scope string `json:"scope,omitempty"`
+}
+
+// RoutineResources is the agent-declared part of the manifest — the things a
+// routine touches that can't be inferred from the step graph (datastores it
+// reads/writes, CLI tools/scripts it runs). Agents/routines/integrations/egress
+// are auto-derived from the DSL; these are not.
+type RoutineResources struct {
+	Datastores []DatastoreRef `json:"datastores,omitempty"`
+	Tools      []ToolRef      `json:"tools,omitempty"`
+}
+
+// DatastoreRef declares a datastore a routine reads or writes. Type is the
+// engine family (redis | postgres | mysql | mongodb | other); Name is the crew
+// service name / friendly id; Note is free-form context ("writes table runs").
+type DatastoreRef struct {
+	Type string `json:"type"`           // redis | postgres | mysql | mongodb | other
+	Name string `json:"name,omitempty"` // crew service name / friendly id
+	Note string `json:"note,omitempty"` // e.g. "writes table runs"
+}
+
+// ToolRef declares a CLI tool / script a routine invokes (typically via an
+// agent_run shell step, which static analysis can't see). Type is the tool
+// family (ansible | terraform | kubectl | bash | python | other); Name is the
+// concrete artifact ("deploy.yml").
+type ToolRef struct {
+	Type string `json:"type"`           // ansible | terraform | kubectl | bash | python | other
+	Name string `json:"name,omitempty"` // e.g. "deploy.yml"
 }
 
 // Step is the discriminated union of step types. The Type field
@@ -549,6 +585,12 @@ type Pipeline struct {
 
 	ExecutionTierJSON string // empty = use workspace default
 
+	// Status is the governance lifecycle state (migration v128):
+	//   active   — live + runnable (default)
+	//   proposed — risky agent/user-authored save awaiting MANAGER+ approval
+	//   disabled — admin airbag; run gate refuses, in-flight runs cancelled
+	Status string
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DeletedAt *time.Time
@@ -617,6 +659,10 @@ type SaveInput struct {
 	// ExecutionTierJSON optional override of workspace tier mapping.
 	// Empty string ("") means "use workspace default".
 	ExecutionTierJSON string
+	// Status is the governance lifecycle state to persist. Empty defaults
+	// to 'active' (live). The save handlers set 'proposed' for risky
+	// agent/user-authored routines so they enter the maker-checker queue.
+	Status string
 }
 
 // ListFilters narrows a Store.List query. Zero value = "all
@@ -627,8 +673,11 @@ type ListFilters struct {
 	IncludeEphemeral bool
 	IncludeHidden    bool // include workspace_visible=false
 	AuthorCrewID     string
-	Limit            int
-	OrderBy          ListOrder
+	// Status optionally filters by governance lifecycle state
+	// (active | proposed | disabled). Empty = all states.
+	Status  string
+	Limit   int
+	OrderBy ListOrder
 }
 
 // ListOrder controls the ordering in Store.List. Default
@@ -643,27 +692,27 @@ const (
 	OrderByName
 )
 
-// RunMode controls whether the executor performs side effects, runs
-// the pipeline against real agents to validate the DSL, or just
+// RunMode controls whether the executor performs side effects or just
 // reports what it would have done.
 //
 //   - ModeRun: live invocation. Agents are called, side effects
 //     happen, journal entries land, invocation_count increments.
-//   - ModeTestRun: identical to ModeRun in mechanics, but the run
-//     does NOT increment invocation_count and is marked in the
-//     journal as a test run. Used by the save endpoint to enforce
-//     the test-run gate.
+//     This is the ONLY real-execution mode — you cannot run an agent
+//     "dry" (it executes arbitrary scripts whose side effects can't
+//     be intercepted), so a real run is always ModeRun.
 //   - ModeDryRun: no agent invocation. Templates are rendered against
 //     inputs, the executor walks the step list and reports what it
 //     WOULD have done (Ansible --check). Returns a structured
-//     "would_execute" report. No journal entries beyond a single
-//     pipeline.dry_run audit row.
+//     "would_execute" report (plus the declared manifest on the API
+//     surface). No journal entries beyond a single pipeline.dry_run
+//     audit row. A dry_run is an honest STATIC plan, NOT a proof the
+//     run will succeed. It also backs the internal save-gate's
+//     fast structural+template validation of a draft.
 type RunMode string
 
 const (
-	ModeRun     RunMode = "run"
-	ModeTestRun RunMode = "test_run"
-	ModeDryRun  RunMode = "dry_run"
+	ModeRun    RunMode = "run"
+	ModeDryRun RunMode = "dry_run"
 )
 
 // AgentRunner is the narrow contract the executor needs from the

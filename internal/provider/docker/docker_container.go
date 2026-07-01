@@ -404,7 +404,33 @@ func (p *Provider) migrateLegacyVolume(ctx context.Context, legacy, target, imag
 // with N-1 callers failing with `Conflict: name already in use`. The
 // per-crew mutex makes the second caller see the freshly-created
 // container and reuse it instead.
-func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConfig) (string, error) {
+func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConfig) (containerID string, err error) {
+	// emitProv routes a runtime container-prep event to the optional sink
+	// (no-op when nil), stamping the canonical provision phase. This is the
+	// agent-run/ensure-container half of the provisioning audit trail: the
+	// image BUILD is journaled by the Provisioner's sink, and these events
+	// cover the runtime container the agent actually runs in.
+	emitProv := func(ev devcontainer.ProvisionEvent) {
+		if team.ProvisionSink != nil {
+			ev.Phase = devcontainer.ProvisionPhase
+			team.ProvisionSink(ev)
+		}
+	}
+	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepStart, Detail: team.ID})
+	// Any error return emits a single provision.failed so the ensure path never
+	// fails silently — mirroring the build pipeline's fail() contract. Success
+	// paths set err=nil (they return c.ID/resp.ID, nil) so no failed event
+	// fires; they emit ready explicitly at their return site.
+	defer func() {
+		if err != nil {
+			emitProv(devcontainer.ProvisionEvent{
+				Step:   devcontainer.ProvStepFailed,
+				Status: devcontainer.ProvStatusFailed,
+				Error:  err.Error(),
+			})
+		}
+	}()
+
 	// crew_id/slug end up as filesystem path components below — validate
 	// before any filepath.Join so a malformed ID can't reach the bind
 	// mount layer (which would let an attacker who controls the DB pin
@@ -491,6 +517,14 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				if inspErr != nil {
 					return "", fmt.Errorf("inspect existing container %s: %w", containerName, inspErr)
 				}
+				// The reused container may still be running a previously
+				// provisioned cached image, while desiredImage falls back to the
+				// provider default when the caller left Image/CachedImage empty.
+				// Report the ACTUAL running image on the ready events below.
+				reusedImage := desiredImage
+				if inspect.Config != nil && inspect.Config.Image != "" {
+					reusedImage = inspect.Config.Image
+				}
 				// Image-drift check before the mount checks: if a
 				// re-provision produced a new image tag, the running
 				// container is stale by definition (its filesystem
@@ -530,6 +564,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 					break // fall through to create new container
 				}
 				if c.State == "running" {
+					emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "reused running container", Tag: reusedImage})
 					return c.ID, nil
 				}
 				// Verify bind-mount directories still exist (macOS /tmp is wiped on reboot).
@@ -569,6 +604,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				// template authors actually want. If a future use case needs
 				// ephemeral hooks that re-run on each restart, add a
 				// per-feature opt-in flag rather than flipping this default.
+				emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "restarted stopped container", Tag: reusedImage})
 				return c.ID, nil
 			}
 		}
@@ -715,7 +751,8 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// shell expansion at container start. Without this, Docker stores the
 	// literal "${PATH}" string and the runtime PATH ends up missing
 	// /usr/bin / /bin entirely (mkdir / touch / etc. all become exit 127).
-	if imgEnv, err := imageEnvMap(ctx, p.client, runtimeImage); err == nil {
+	imgEnv, imgEnvErr := imageEnvMap(ctx, p.client, runtimeImage)
+	if imgEnvErr == nil {
 		env = expandContainerEnv(env, imgEnv)
 	} else {
 		needsExpansion := false
@@ -726,11 +763,19 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 			}
 		}
 		if needsExpansion {
-			return "", fmt.Errorf("inspect image env for containerEnv expansion (%s): %w", runtimeImage, err)
+			return "", fmt.Errorf("inspect image env for containerEnv expansion (%s): %w", runtimeImage, imgEnvErr)
 		}
 		p.logger.Warn("could not inspect image for env expansion — passing containerEnv literally",
-			"image", runtimeImage, "error", err)
+			"image", runtimeImage, "error", imgEnvErr)
 	}
+	// Set the agent exec PATH explicitly. A non-login `docker exec` (how the
+	// agent CLI runs) inherits only the image ENV PATH, which omits the
+	// /etc/profile.d additions devcontainer features make (e.g. pipx's
+	// /usr/local/py-utils/bin where ansible lands) — so those tools surface as
+	// "command not found". team.LoginPath is the real login PATH captured at
+	// provision; absent that we prepend the well-known feature bin dirs. imgEnv
+	// is nil when inspect failed; applyAgentLoginPath tolerates that.
+	env = applyAgentLoginPath(env, team.LoginPath, imgEnv)
 	containerCfg := &container.Config{
 		Image: runtimeImage,
 		User:  "1001:1001",
@@ -836,6 +881,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	if err != nil {
 		return "", fmt.Errorf("container create: %w", err)
 	}
+	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepContainerCreate, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage})
 
 	if err := p.client.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		return "", fmt.Errorf("container start: %w", err)
@@ -927,6 +973,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	hooks = append(hooks, team.PostStartCommands...)
 	p.runPostStartCommands(ctx, resp.ID, hooks)
 
+	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage})
 	return resp.ID, nil
 }
 

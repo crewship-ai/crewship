@@ -10,6 +10,7 @@ import type {
   TraceTriggerNodeData,
 } from "./types"
 import { formatEdgeLabel, parseDataFlowEdges } from "./parse-data-flow"
+import { mapSubSpans, pickModel } from "./sub-spans"
 import type { HeatmapBucket } from "./percentile-heatmap"
 import type { StepMetric } from "@/hooks/use-step-metrics"
 import { summarizeValue } from "@/lib/format/summarize-value"
@@ -150,6 +151,11 @@ export function buildTraceGraph(
     const isFailed =
       run.failed_at_step === step.id ||
       (run.status === "failed" && step.id === run.current_step_id)
+    // Drill-down layer — the agent's internal tool calls inside this
+    // step. mapSubSpans is defensive (never throws) and returns [] for
+    // the common "step recorded none" case, so a run with no sub_spans
+    // produces the exact same node data as before this feature.
+    const subSpans = mapSubSpans(run.sub_spans?.[step.id])
     const data: TraceStepNodeData = {
       step,
       status: statusOf(run, step, effectiveSteps),
@@ -160,6 +166,8 @@ export function buildTraceGraph(
       costUsd: m?.costUsd ?? null,
       outputSnippet: snippetFromOutput(rawOutput),
       errorMessage: isFailed && run.error_message ? run.error_message : null,
+      subSpans,
+      model: pickModel(subSpans),
     }
     nodes.push({
       id: step.id,

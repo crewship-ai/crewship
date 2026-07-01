@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/telemetry"
 )
 
 // OrchestratorRunner satisfies pipeline.AgentRunner by routing each
@@ -268,11 +269,44 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		CaptureResultMeta: true,
 	})
 
-	if err := r.orch.RunAgent(ctx, runReq, handler); err != nil {
+	// Sub-span capture — the leaf of the drillable run-trace tree. When this
+	// is a real routine step (run_id + step_id present), wrap the buffering
+	// handler with a recorder that pairs the agent's tool_use→tool_result
+	// events into RunAgentSpans. Each completed span is persisted to the
+	// journal (run.agent_span, keyed back to this run via trace_id) and
+	// mirrored as an OTEL child of the step span carried on ctx (run → step →
+	// tool). A step with no tool calls produces zero spans and leaves the hot
+	// path byte-identical to before. ctx already carries StartRoutineStepSpan
+	// from the executor, so the OTEL children nest correctly.
+	finalHandler := handler
+	var recorder *orchestrator.AgentSpanRecorder
+	if req.PipelineRunID != "" && req.StepID != "" {
+		runID, stepID := req.PipelineRunID, req.StepID
+		wsID, crewID := req.WorkspaceID, info.CrewID
+		recorder = orchestrator.NewAgentSpanRecorder(runID, stepID, func(span orchestrator.RunAgentSpan) {
+			emitRunAgentSpan(ctx, r.journalE, wsID, crewID, span)
+			telemetry.RecordRunAgentToolSpan(ctx, span.Kind, span.Name, span.Seq,
+				span.StartedAt, span.DurationMs, span.Status, span.Attributes)
+		})
+		finalHandler = func(ev orchestrator.AgentEvent) {
+			recorder.Observe(ev)
+			handler(ev)
+		}
+	}
+
+	runErr := r.orch.RunAgent(ctx, runReq, finalHandler)
+	// Surface volume-bounding so operators can tell a sparse trace from a
+	// throttled one (a chatty agent hitting the per-step cap / detail cap).
+	if recorder != nil && (recorder.Dropped() > 0 || recorder.Truncated() > 0) {
+		r.logger.Warn("agent sub-span volume bounded",
+			"run_id", req.PipelineRunID, "step_id", req.StepID,
+			"dropped", recorder.Dropped(), "truncated", recorder.Truncated())
+	}
+	if runErr != nil {
 		return AgentStepResult{
 			Output:     acc.Text(),
 			DurationMs: time.Since(startedAt).Milliseconds(),
-		}, fmt.Errorf("orchestrator: %w", err)
+		}, fmt.Errorf("orchestrator: %w", runErr)
 	}
 
 	// 8. Extract token + cost from result metadata if the adapter

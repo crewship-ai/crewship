@@ -28,6 +28,18 @@ type CLIAdapter interface {
 	// must be pure functions of req — no I/O, no globals.
 	BuildCommand(req AgentRunRequest) []string
 
+	// PromptViaStdin reports whether the user message should be delivered to
+	// the CLI over stdin instead of as a positional argv element. When it
+	// returns true, BuildCommand MUST omit the user-message argument and the
+	// orchestrator sets ExecConfig.Stdin to the message AND bypasses the tmux
+	// wrapper (a detached tmux session's stdin is not connected to the exec
+	// stream, so the prompt would otherwise be lost). Only adapters confirmed
+	// to read their prompt from stdin under non-interactive/print mode may
+	// return true; the rest keep passing the message as an argument. The
+	// decision may depend on req (e.g. message size) so it is a method of req,
+	// not a constant.
+	PromptViaStdin(req AgentRunRequest) bool
+
 	// UseStreamJSON declares whether ParseStreamLine should be invoked per
 	// line of stdout. When false, streamOutput emits each line as a single
 	// "text" event without parsing — used as a safe fallback for CLIs whose
@@ -83,6 +95,28 @@ type CLIAdapter interface {
 	) error
 }
 
+// maxArgStrLen is Linux's per-argv-element ceiling (MAX_ARG_STRLEN, 128 KiB):
+// execve rejects any single argument at or over this with E2BIG. argSafetyMargin
+// keeps the guard a touch below it to allow for the trailing NUL and multi-byte
+// runes (the same headroom rationale as the Claude adapter's 96 KiB stdin gate).
+const (
+	maxArgStrLen    = 128 * 1024
+	argSafetyMargin = 4 * 1024
+)
+
+// firstOversizedArg reports whether any argv element is large enough to risk
+// execve's E2BIG, returning its byte length. Used by the shared exec path to
+// fail oversized-prompt runs legibly on adapters that pass the prompt as an
+// argument (everything except the stdin-capable Claude adapter).
+func firstOversizedArg(cmd []string) (bool, int) {
+	for _, a := range cmd {
+		if len(a) >= maxArgStrLen-argSafetyMargin {
+			return true, len(a)
+		}
+	}
+	return false, 0
+}
+
 // adapterRegistry maps the CLIAdapter enum value (as stored on
 // AgentRunRequest.CLIAdapter) to the adapter implementation. Lookup goes
 // through getAdapter, which falls back to the Claude Code adapter for
@@ -127,6 +161,10 @@ func (unknownAdapter) Name() string { return "" }
 func (unknownAdapter) BuildCommand(req AgentRunRequest) []string {
 	return []string{"claude", "--print", req.UserMessage}
 }
+
+// PromptViaStdin is false for the unknown adapter: it preserves the historic
+// minimal `claude --print <msg>` arg shape for debuggability.
+func (unknownAdapter) PromptViaStdin(req AgentRunRequest) bool { return false }
 
 func (unknownAdapter) UseStreamJSON() bool { return false }
 

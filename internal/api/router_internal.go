@@ -44,7 +44,16 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// Pipeline save — sidecar→main forward. Trust comes from
 	// X-Internal-Token (sidecar attaches it via proxyIPCJSON);
 	// regular JWT-authed users hit the public surface instead.
+	// Pipeline test_run — sidecar→main forward (Step 1 of agent save).
+	// Same internal-token trust as save; the public test_run is JWT-authed
+	// and the sidecar only carries the internal token.
+	r.mux.Handle("POST /api/v1/internal/pipelines/test_run", internalAuth(http.HandlerFunc(pipes.InternalTestRun)))
 	r.mux.Handle("POST /api/v1/internal/pipelines/save", internalAuth(http.HandlerFunc(pipes.InternalSave)))
+	// Routine RUN — sidecar→main forward for the run_routine MCP tool. The
+	// public run route is JWT-authed and rejects the internal token, so agents
+	// invoke saved routines through this internal surface (workspace + invoker
+	// identity injected from IPC, same trust boundary as save).
+	r.mux.Handle("POST /api/v1/internal/pipelines/run", internalAuth(http.HandlerFunc(pipes.InternalRun)))
 	r.mux.Handle("GET /api/v1/internal/credentials", internalAuth(http.HandlerFunc(internal.ListCredentials)))
 	r.mux.Handle("PATCH /api/v1/internal/credentials/{credentialId}", internalAuth(http.HandlerFunc(internal.UpdateCredentialStatus)))
 	r.mux.Handle("POST /api/v1/internal/chats", internalAuth(http.HandlerFunc(internal.CreateChat)))

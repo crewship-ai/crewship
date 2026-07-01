@@ -207,10 +207,10 @@ func TestRunDAG_ApprovalWaitStep(t *testing.T) {
 	}
 }
 
-// Guard: a NON-foreground-ModeRun caller (here ModeTestRun) must NOT suspend —
-// it keeps the existing blocking behaviour. We bound the wait with a short ctx
-// so the blocked WaitFor returns and we can assert the result is not WAITING.
-func TestRun_TestRunMode_DoesNotSuspend(t *testing.T) {
+// Guard: a non-live ModeDryRun caller must NOT suspend on a wait:approval
+// step — a preview walks the plan and returns DRY_RUN_OK without ever parking
+// on a waitpoint. We bound the call with a short ctx as a backstop.
+func TestRun_DryRunMode_DoesNotSuspend(t *testing.T) {
 	db := openResumeTestDB(t)
 	defer db.Close()
 
@@ -218,7 +218,7 @@ func TestRun_TestRunMode_DoesNotSuspend(t *testing.T) {
 	runStore := NewRunStore(db)
 	wpStore := NewSQLWaitpointStore(db)
 	defer wpStore.Close()
-	p := saveResumePipeline(t, store, "appr-testrun", asyncApprovalLinearDSL)
+	p := saveResumePipeline(t, store, "appr-dryrun", asyncApprovalLinearDSL)
 
 	exec := NewExecutor(store, NewResolver(db), newMockRunner(), &captureEmitter{}).
 		WithRunStore(runStore).
@@ -226,12 +226,41 @@ func TestRun_TestRunMode_DoesNotSuspend(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
 	defer cancel()
-	res, err := exec.Run(ctx, RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeTestRun})
+	res, err := exec.Run(ctx, RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeDryRun})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if res.Status == "WAITING" {
-		t.Fatal("ModeTestRun must NOT suspend (no foreground caller to return WAITING to)")
+		t.Fatal("ModeDryRun must NOT suspend (a preview never parks on a waitpoint)")
+	}
+}
+
+// TestDryRun_WaitDatetime_DoesNotSleep covers the gap the per-event guard
+// missed: a ModeDryRun preview must short-circuit EVERY wait kind, not just
+// wait:event. A wait:datetime far in the future would otherwise sleep and hang
+// the save-gate's draft dry-run. We bound the call tightly — if the guard
+// regressed, the executor would block on time.After(decades) until ctx expires.
+func TestDryRun_WaitDatetime_DoesNotSleep(t *testing.T) {
+	db := openStoreTestDB(t)
+	defer db.Close()
+	exec := NewExecutor(NewStore(db), NewResolver(db), newMockRunner(), &captureEmitter{})
+
+	dsl := &DSL{
+		DSLVersion: "1.0",
+		Name:       "dt-preview",
+		Steps: []Step{
+			{ID: "w", Type: StepWait, Wait: &WaitStep{Kind: "datetime", Until: "2099-01-01T00:00:00Z"}},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := exec.RunDefinition(ctx, dsl, RunInput{WorkspaceID: "ws_test", Mode: ModeDryRun})
+	if err != nil {
+		t.Fatalf("dry-run wait:datetime returned error (did it sleep until ctx expired?): %v", err)
+	}
+	if res.Status != "DRY_RUN_OK" {
+		t.Errorf("status = %q, want DRY_RUN_OK", res.Status)
 	}
 }
 

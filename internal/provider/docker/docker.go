@@ -638,6 +638,13 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 		AttachStderr: true,
 		User:         cfg.User,
 	}
+	// Attach stdin only when the caller supplies a reader. Keeping AttachStdin
+	// off for the nil case preserves the historic exec behaviour byte-for-byte
+	// (the agent prompt path uses this to deliver messages too large to pass as
+	// an argv element without tripping the kernel's MAX_ARG_STRLEN limit).
+	if cfg.Stdin != nil {
+		execCfg.AttachStdin = true
+	}
 	if execCfg.User == "" {
 		execCfg.User = "1001:1001"
 	}
@@ -650,6 +657,17 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 	resp, err := p.client.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("exec attach: %w", err)
+	}
+
+	// Stream stdin into the hijacked connection, then half-close so the process
+	// sees EOF. Runs in its own goroutine so a large reader cannot block the
+	// stdout pump below, and ignores copy errors (a process that exits before
+	// draining stdin yields a broken pipe we do not care about).
+	if cfg.Stdin != nil {
+		go func() {
+			_, _ = io.Copy(resp.Conn, cfg.Stdin)
+			_ = resp.CloseWrite()
+		}()
 	}
 
 	pr, pw := io.Pipe()

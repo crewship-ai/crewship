@@ -18,8 +18,10 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// Pipelines — declarative DSL workflows persisted per-workspace and
 	// reusable across crews. Runner is wired post-construction by the
 	// orchestrator boot path; an unwired runner returns 503 from /run
-	// and /test_run so the rest of the surface (List/Get/Delete/DryRun)
-	// stays usable for read-only inspection during boot.
+	// so the rest of the surface (List/Get/Delete/DryRun) stays usable
+	// for read-only inspection during boot. There is no public test_run
+	// route — the only draft validation gate is the internal save gate
+	// (/internal/pipelines/test_run, dry-run); a real run is just /run.
 	pipes := NewPipelineHandler(r.db, r.logger, nil, nil)
 	r.PipelinesHandler = pipes // expose for orchestrator wiring
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines", authed(wsCtx(http.HandlerFunc(pipes.List))))
@@ -34,8 +36,21 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override", authed(wsCtx(http.HandlerFunc(pipes.SetStepOverride))))
 	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override", authed(wsCtx(http.HandlerFunc(pipes.DeleteStepOverride))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run", authed(wsCtx(http.HandlerFunc(pipes.DryRun))))
+	// Public draft-validation gate behind the UI "Test run" button: dry-run
+	// validates an UNSAVED definition and mints the save_token Save verifies.
+	// Distinct from /internal/pipelines/test_run (sidecar, X-Internal-Token) —
+	// this one is JWT-authed so a browser/CLI can reach it. Literal "test_run"
+	// beats the {slug} catch-all in net/http matching, so no ordering hazard.
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/test_run", authed(wsCtx(http.HandlerFunc(pipes.TestRun))))
 	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Delete))))
+	// Routine governance (maker-checker + admin airbag). approve/reject are
+	// MANAGER+ (canRole "create"); disable/enable are OWNER/ADMIN
+	// (canRole "manage"). Literal sub-segments beat the {slug} catch-all in
+	// net/http's matcher, so no ordering hazard.
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/approve", authed(wsCtx(http.HandlerFunc(pipes.Approve))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/reject", authed(wsCtx(http.HandlerFunc(pipes.Reject))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/disable", authed(wsCtx(http.HandlerFunc(pipes.Disable))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/enable", authed(wsCtx(http.HandlerFunc(pipes.Enable))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs", authed(wsCtx(http.HandlerFunc(pipes.ListRuns))))
 	// run-records hits the v83 pipeline_runs table directly — column-typed
 	// reads beat the LIKE+json_extract scan ListRuns does over journal_entries.

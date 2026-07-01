@@ -37,10 +37,14 @@ type runResponse struct {
 	ErrorMessage *string         `json:"error_message"`
 	ExitCode     *int            `json:"exit_code"`
 	Metadata     json.RawMessage `json:"metadata"`
-	CreatedAt    string          `json:"created_at"`
-	AgentName    *string         `json:"agent_name,omitempty"`
-	AgentSlug    *string         `json:"agent_slug,omitempty"`
-	CrewName     *string         `json:"crew_name,omitempty"`
+	// Model is the model the run actually resolved to (session-init ground
+	// truth) — lets an operator verify Opus-vs-Sonnet on a subscription.
+	// Omitted when unknown (older runs, non-Claude adapters).
+	Model     *string `json:"model,omitempty"`
+	CreatedAt string  `json:"created_at"`
+	AgentName *string `json:"agent_name,omitempty"`
+	AgentSlug *string `json:"agent_slug,omitempty"`
+	CrewName  *string `json:"crew_name,omitempty"`
 }
 
 type runListResponse struct {
@@ -302,6 +306,7 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 			Status:       string(r.Status),
 			ErrorMessage: stringPtrOrNil(r.ErrorMessage),
 			ExitCode:     r.ExitCode,
+			Model:        stringPtrOrNil(r.Model),
 			CreatedAt:    formatRFC3339(r.CreatedAt),
 		}
 		if r.ChatID != "" {

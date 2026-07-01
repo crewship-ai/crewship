@@ -59,6 +59,8 @@ CREATE TABLE pipelines (
     last_test_run_at         TEXT,
     last_test_run_passed     INTEGER NOT NULL DEFAULT 0,
     execution_tier_json      TEXT,
+    status                   TEXT NOT NULL DEFAULT 'active'
+                               CHECK (status IN ('active','proposed','disabled')),
     created_at               TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at               TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     deleted_at               TEXT,
@@ -123,6 +125,20 @@ CREATE TABLE journal_entries (
     trace_id TEXT,
     span_id TEXT,
     expires_at TEXT
+);
+
+CREATE TABLE inbox_items (
+    id                   TEXT PRIMARY KEY,
+    workspace_id         TEXT NOT NULL,
+    kind                 TEXT NOT NULL,
+    source_id            TEXT NOT NULL,
+    state                TEXT NOT NULL DEFAULT 'unread',
+    payload_json         TEXT NOT NULL DEFAULT '{}',
+    resolved_at          TEXT,
+    resolved_by_user_id  TEXT,
+    resolved_action      TEXT,
+    created_at           TEXT NOT NULL DEFAULT (datetime('now','subsec')),
+    updated_at           TEXT NOT NULL DEFAULT (datetime('now','subsec'))
 );
 `
 
@@ -356,6 +372,54 @@ func TestPipelinesAPI_Delete_SoftDeletes(t *testing.T) {
 	}
 }
 
+// TestPipelinesAPI_Delete_ResolvesInboxEscalations pins the routine-delete
+// inbox cleanup: deleting a routine that has a pending "proposed for review"
+// escalation (plus a failed-run alert carrying its pipeline_id) must resolve
+// those inbox items in the same operation, instead of orphaning them forever.
+func TestPipelinesAPI_Delete_ResolvesInboxEscalations(t *testing.T) {
+	db := openSmokeDB(t)
+	defer db.Close()
+	seedSmokePipeline(t, db, "doomed-esc")
+	pipelineID := "pln_test_doomed-esc"
+
+	// Proposed-review escalation tied to this routine (mirrors proposeRoutineInbox:
+	// kind=escalation, source_id=routineprop:<ws>:<slug>, payload pipeline_id).
+	if _, err := db.Exec(`INSERT INTO inbox_items (id, workspace_id, kind, source_id, state, payload_json)
+		VALUES ('ibx_escalation_routineprop:ws_smoke:doomed-esc', 'ws_smoke', 'escalation', 'routineprop:ws_smoke:doomed-esc', 'unread', ?)`,
+		`{"pipeline_id":"`+pipelineID+`","slug":"doomed-esc"}`); err != nil {
+		t.Fatalf("seed escalation: %v", err)
+	}
+	// A scheduled failed-run alert carrying the same pipeline_id (payload sweep).
+	if _, err := db.Exec(`INSERT INTO inbox_items (id, workspace_id, kind, source_id, state, payload_json)
+		VALUES ('ibx_failed_run_run-x', 'ws_smoke', 'failed_run', 'run-x', 'unread', ?)`,
+		`{"pipeline_id":"`+pipelineID+`"}`); err != nil {
+		t.Fatalf("seed failed_run: %v", err)
+	}
+
+	h := NewPipelineHandler(db, slog.Default(), nil, nil)
+	req := withWorkspaceUser(httptest.NewRequest("DELETE", "/x", nil), "u1", "ws_smoke", "OWNER")
+	req.SetPathValue("slug", "doomed-esc")
+	w := httptest.NewRecorder()
+	h.Delete(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d, want 204; body=%s", w.Code, w.Body.String())
+	}
+
+	for _, src := range []string{"routineprop:ws_smoke:doomed-esc", "run-x"} {
+		var state, action string
+		if err := db.QueryRow(`SELECT state, COALESCE(resolved_action,'') FROM inbox_items WHERE source_id=?`, src).
+			Scan(&state, &action); err != nil {
+			t.Fatalf("readback %s: %v", src, err)
+		}
+		if state != "resolved" {
+			t.Errorf("%s state = %q, want resolved (deleted routine must clear its inbox items)", src, state)
+		}
+		if action != "dismissed" {
+			t.Errorf("%s resolved_action = %q, want dismissed", src, action)
+		}
+	}
+}
+
 // TestPipelinesAPI_Delete_MEMBER_Forbidden pins the audit M2-promoted
 // fix: a MEMBER may not Delete a pipeline. LIVE-verified A13.2 chain
 // finding root cause.
@@ -373,17 +437,20 @@ func TestPipelinesAPI_Delete_MEMBER_Forbidden(t *testing.T) {
 	}
 }
 
-func TestPipelinesAPI_TestRun_RejectsBadDSL(t *testing.T) {
+// The public TestRun surface was removed; the surviving draft validation
+// gate is InternalTestRun (X-Internal-Token, dry-run). It must still reject
+// an invalid DSL with 422 before reaching the runner.
+func TestPipelinesAPI_InternalTestRun_RejectsBadDSL(t *testing.T) {
 	db := openSmokeDB(t)
 	defer db.Close()
 	runner := &stubRunner{output: "x"}
 	h := NewPipelineHandler(db, slog.Default(), runner, nil)
 
-	body := []byte(`{"definition":{"name":"BAD NAME WITH SPACES","steps":[]},"author_crew_id":"crew_a"}`)
-	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", bytes.NewReader(body)), "ws_smoke")
+	body := []byte(`{"workspace_id":"ws_smoke","definition":{"name":"BAD NAME WITH SPACES","steps":[]},"author_crew_id":"crew_a"}`)
+	req := httptest.NewRequest("POST", "/api/v1/internal/pipelines/test_run", bytes.NewReader(body))
 	req.ContentLength = int64(len(body))
 	w := httptest.NewRecorder()
-	h.TestRun(w, req)
+	h.InternalTestRun(w, req)
 
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Errorf("expected 422 for invalid DSL, got %d body=%s", w.Code, w.Body.String())
@@ -433,13 +500,18 @@ func TestPipelinesAPI_Save_HappyPathManager(t *testing.T) {
 	defer db.Close()
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	// MANAGER cannot skip the test-gate (OWNER/ADMIN only), so a MANAGER save
+	// must carry the HMAC save_token proof minted by /test_run. The user save
+	// path no longer trusts body-supplied last_test_run_* fields.
+	def := `{"name":"manager-saved","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`
+	secret := []byte("test-secret-32-bytes-long-padxxx")
+	h.SetSaveTokenSecret(secret)
+	token := signSaveToken(secret, "ws_smoke", definitionHashHex([]byte(def)), "user_42", time.Now())
 	body := []byte(`{
 		"slug":"manager-saved","name":"by manager","description":"...",
-		"definition":{"name":"manager-saved","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]},
+		"definition":` + def + `,
 		"author_crew_id":"crew_a",
-		"last_test_run_passed":true,
-		"last_test_run_at":"` + now + `"}`)
+		"save_token":"` + token + `"}`)
 
 	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", bytes.NewReader(body)), "ws_smoke")
 	req = withAuthCtx(req, "user_42", "MANAGER")

@@ -45,17 +45,17 @@ func covPCDef(slug string) string {
 	return strings.ReplaceAll(covPCValidDef, "%SLUG%", slug)
 }
 
-// covPCSaveBody assembles a userSaveRequest JSON body. A fresh passing
-// test-run timestamp clears the store gate on the default (legacy) path.
+// covPCSaveBody assembles a userSaveRequest JSON body. It clears the store
+// test-gate via skip_test_gate (the OWNER/ADMIN escape hatch) — the user save
+// path no longer trusts body-supplied last_test_run_* fields, so every
+// gate-reaching caller of this helper drives it as OWNER/ADMIN.
 func covPCSaveBody(slug, crewID string, extra map[string]any) string {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
 	body := map[string]any{
-		"slug":                 slug,
-		"name":                 slug + " name",
-		"description":          "desc",
-		"definition":           json.RawMessage(covPCDef(slug)),
-		"last_test_run_passed": true,
-		"last_test_run_at":     now,
+		"slug":           slug,
+		"name":           slug + " name",
+		"description":    "desc",
+		"definition":     json.RawMessage(covPCDef(slug)),
+		"skip_test_gate": true,
 	}
 	if crewID != "" {
 		body["author_crew_id"] = crewID
@@ -266,9 +266,7 @@ func TestCovPCSave_HappyPath_NoAuthorCrew_SkipsAgentValidation(t *testing.T) {
 	// arbitrary agent slug still saves (runtime resolution catches mismatch).
 	h, userID, wsID, _ := covPCHandler(t)
 	def := `{"name":"freeform","steps":[{"id":"a","type":"agent_run","agent_slug":"whoever","prompt":"hi"}]}`
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	body := `{"slug":"freeform","name":"freeform","definition":` + def +
-		`,"last_test_run_passed":true,"last_test_run_at":"` + now + `"}`
+	body := `{"slug":"freeform","name":"freeform","definition":` + def + `,"skip_test_gate":true}`
 	req := httptest.NewRequest("POST", "/x", strings.NewReader(body))
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rr := httptest.NewRecorder()

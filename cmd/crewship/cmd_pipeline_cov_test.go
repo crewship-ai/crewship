@@ -244,36 +244,15 @@ func TestPipelineSaveRunE(t *testing.T) {
 		}
 	})
 
-	t.Run("test_run failure blocks save", func(t *testing.T) {
+	t.Run("happy path validates then saves with token", func(t *testing.T) {
+		// Two-step flow: POST /test_run dry-run-validates + mints a save_token,
+		// then POST /save clears its test-gate with that token (the server no
+		// longer trusts body-supplied last_test_run_* fields).
 		stub := clitest.NewStubServer()
 		defer stub.Close()
 		setupStubCLICov(t, stub)
 		stub.OnPost(pipelinesPathCov()+"/test_run", clitest.JSONResponse(200, map[string]any{
-			"status": "FAILED", "error_message": "step 2 exploded",
-		}))
-		setFlagCov(t, pipelineSaveCmd, "definition", writeDefinition(t))
-		setFlagCov(t, pipelineSaveCmd, "name", "X")
-		setFlagCov(t, pipelineSaveCmd, "author-crew", "crew_a")
-
-		_, err := captureStdoutCov(t, func() error {
-			return pipelineSaveCmd.RunE(pipelineSaveCmd, nil)
-		})
-		if err == nil || !strings.Contains(err.Error(), "test_run did not complete cleanly") ||
-			!strings.Contains(err.Error(), "step 2 exploded") {
-			t.Fatalf("want test_run failure error, got %v", err)
-		}
-		if n := len(stub.CallsFor("POST", pipelinesPathCov()+"/save")); n != 0 {
-			t.Errorf("save endpoint must not be called after failed test_run; got %d calls", n)
-		}
-	})
-
-	t.Run("happy path runs gate then saves", func(t *testing.T) {
-		stub := clitest.NewStubServer()
-		defer stub.Close()
-		setupStubCLICov(t, stub)
-		stub.OnPost(pipelinesPathCov()+"/test_run", clitest.JSONResponse(200, map[string]any{
-			"status": "COMPLETED", "duration_ms": 120, "cost_usd": 0.01,
-			"save_token": "tok-happy",
+			"status": "DRY_RUN_OK", "save_token": "mint-abc123",
 		}))
 		stub.OnPost(pipelinesPathCov()+"/save", clitest.JSONResponse(200, map[string]any{
 			"id": "p9", "slug": "email-fetch-v2",
@@ -292,23 +271,16 @@ func TestPipelineSaveRunE(t *testing.T) {
 		if err != nil {
 			t.Fatalf("RunE: %v", err)
 		}
-		for _, want := range []string{"test_run passed", "Saved routine email-fetch-v2", "hash=abcdef012345", "crewship routine run email-fetch-v2"} {
+		for _, want := range []string{"Validating routine", "Saving routine", "Saved routine email-fetch-v2", "hash=abcdef012345", "crewship routine run email-fetch-v2"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("stdout missing %q; got:\n%s", want, out)
 			}
 		}
 
+		// The draft is validated via test_run before save.
 		testCalls := stub.CallsFor("POST", pipelinesPathCov()+"/test_run")
 		if len(testCalls) != 1 {
 			t.Fatalf("expected one test_run POST, got %d", len(testCalls))
-		}
-		var testBody map[string]any
-		clitest.MustDecodeJSONBody(testCalls[0].Body, &testBody)
-		if testBody["author_crew_id"] != "crew_a" {
-			t.Errorf("test_run body author_crew_id: %v", testBody["author_crew_id"])
-		}
-		if si, ok := testBody["sample_inputs"].(map[string]any); !ok || si["since"] != "yesterday" {
-			t.Errorf("test_run sample_inputs: %v", testBody["sample_inputs"])
 		}
 
 		saveCalls := stub.CallsFor("POST", pipelinesPathCov()+"/save")
@@ -320,14 +292,12 @@ func TestPipelineSaveRunE(t *testing.T) {
 		if saveBody["slug"] != "email-fetch-v2" {
 			t.Errorf("save slug: got %v want email-fetch-v2 (slugified from name)", saveBody["slug"])
 		}
-		// Post-#655: the user-facing save carries the HMAC save_token minted by
-		// test_run (not a self-claimed boolean), and the workspace comes from the
-		// URL path. author_agent is recorded only on the sidecar path.
 		if saveBody["author_crew_id"] != "crew_a" {
 			t.Errorf("save body author_crew_id: got %v want crew_a", saveBody["author_crew_id"])
 		}
-		if saveBody["save_token"] != "tok-happy" {
-			t.Errorf("save body must carry the HMAC save_token from test_run; got %v", saveBody["save_token"])
+		// The minted token is forwarded as the proof — body-trust fields gone.
+		if saveBody["save_token"] != "mint-abc123" {
+			t.Errorf("save body must forward the minted save_token; got %v", saveBody["save_token"])
 		}
 	})
 }
@@ -707,41 +677,19 @@ func TestPipelineSaveRunE_ServerSideErrors(t *testing.T) {
 		setFlagCov(t, pipelineSaveCmd, "author-crew", "crew_a")
 	}
 
-	t.Run("test_run rejected by server", func(t *testing.T) {
-		stub := clitest.NewStubServer()
-		defer stub.Close()
-		setupStubCLICov(t, stub)
-		stub.OnPost(pipelinesPathCov()+"/test_run", clitest.ErrorResponse(422, "DSL invalid"))
-		setSaveFlags(t)
-
-		_, err := captureStdoutCov(t, func() error {
-			return pipelineSaveCmd.RunE(pipelineSaveCmd, nil)
-		})
-		if err == nil || !strings.Contains(err.Error(), "test_run failed") {
-			t.Fatalf("want test_run failed wrap, got %v", err)
-		}
-	})
-
-	t.Run("test_run decode error", func(t *testing.T) {
-		stub := clitest.NewStubServer()
-		defer stub.Close()
-		setupStubCLICov(t, stub)
-		stub.OnPost(pipelinesPathCov()+"/test_run", clitest.TextResponse(200, "not json"))
-		setSaveFlags(t)
-
-		_, err := captureStdoutCov(t, func() error {
-			return pipelineSaveCmd.RunE(pipelineSaveCmd, nil)
-		})
-		if err == nil || !strings.Contains(err.Error(), "decode test_run response") {
-			t.Fatalf("want decode error, got %v", err)
-		}
-	})
+	// passingTestRun stubs the dry-run validation step so the flow reaches the
+	// /save call the subtests below exercise.
+	passingTestRun := func(stub *clitest.StubServer) {
+		stub.OnPost(pipelinesPathCov()+"/test_run", clitest.JSONResponse(200, map[string]any{
+			"status": "DRY_RUN_OK", "save_token": "tok",
+		}))
+	}
 
 	t.Run("save rejected by server", func(t *testing.T) {
 		stub := clitest.NewStubServer()
 		defer stub.Close()
 		setupStubCLICov(t, stub)
-		stub.OnPost(pipelinesPathCov()+"/test_run", clitest.JSONResponse(200, map[string]any{"status": "COMPLETED"}))
+		passingTestRun(stub)
 		stub.OnPost(pipelinesPathCov()+"/save", clitest.ErrorResponse(403, "not yours"))
 		setSaveFlags(t)
 
@@ -757,7 +705,7 @@ func TestPipelineSaveRunE_ServerSideErrors(t *testing.T) {
 		stub := clitest.NewStubServer()
 		defer stub.Close()
 		setupStubCLICov(t, stub)
-		stub.OnPost(pipelinesPathCov()+"/test_run", clitest.JSONResponse(200, map[string]any{"status": "COMPLETED"}))
+		passingTestRun(stub)
 		stub.OnPost(pipelinesPathCov()+"/save", clitest.TextResponse(200, "not json"))
 		setSaveFlags(t)
 

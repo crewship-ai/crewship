@@ -2,21 +2,32 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { X, Play, FlaskConical, Eye, Square } from "lucide-react"
+import { X, Play, Eye, Square, Check, Ban, Power, PowerOff, Workflow } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TabBar } from "@/components/ui/tab-bar"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { STATUS_BADGE_CLASSES, STATUS_DOT_CLASSES } from "@/lib/colors"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
-import { buildPipelineActionRequest, canTestRun } from "@/lib/pipeline-actions"
+import { useAbilities } from "@/hooks/use-abilities"
+import {
+  routineStatusBadge,
+  runDisabledReason,
+  canApproveRoutine,
+  canKillRoutine,
+  normalizeRoutineStatus,
+} from "@/lib/routine-governance"
+import { buildPipelineActionRequest } from "@/lib/pipeline-actions"
 import { integrationLabel, extractMissingIntegrations } from "@/lib/integration-labels"
 import { PipelineRunActivity } from "@/components/features/activity/pipeline-run-activity"
 import { usePendingApproval } from "@/hooks/use-pending-approval"
 import { RoutineApprovalBanner } from "@/components/features/routines/routine-approval-banner"
 import { RoutineOverviewTab } from "./routine-overview-tab"
+import { RoutineFlowDiagram } from "./routine-flow-diagram"
+import { Card } from "./_shared"
 import { RoutineEditorTab } from "./routine-editor-tab"
 import { RoutineRunsTab } from "./routine-runs-tab"
 import { RoutineVersionsTab } from "./routine-versions-tab"
@@ -24,13 +35,14 @@ import { RoutineSchedulesTab } from "./routine-schedules-tab"
 import { RoutineWebhooksTab } from "./routine-webhooks-tab"
 import { RoutineWaitpointsTab } from "./routine-waitpoints-tab"
 import { RoutineDryRunReport, type DryRunResult } from "./routine-dry-run-report"
+import type { RoutineManifest } from "@/lib/routine-flow"
 
 // RoutinesDetailPanel — right-side detail for the selected routine.
 // Hosts the seven sub-tabs (Overview, Editor, Runs, Versions,
 // Schedules, Webhooks, Waitpoints) plus the action toolbar
-// (Run / TestRun / DryRun / Cancel). Subscribes to the same routine
-// state the list view reads, so refresh after a successful Run is
-// already covered by usePipelines' WS subscription in the layout.
+// (Run / DryRun / Cancel). Subscribes to the same routine state the
+// list view reads, so refresh after a successful Run is already
+// covered by usePipelines' WS subscription in the layout.
 
 export interface RoutineDetail {
   id: string
@@ -45,6 +57,9 @@ export interface RoutineDetail {
   invocation_count: number
   last_invoked_at?: string
   last_invocation_status?: string
+  // Lifecycle status: "active" (runnable), "proposed" (awaiting MANAGER+
+  // approval), "disabled" (killed by OWNER/ADMIN). Absent → "active".
+  status?: "active" | "proposed" | "disabled"
   author_crew_id?: string
   author_agent_id?: string
   author_user_id?: string
@@ -57,6 +72,12 @@ export interface RoutineDetail {
   // with no third-party dependencies. Surfaced as chips on the Overview
   // tab and used to explain a 422 run-refusal.
   integrations_required?: string[]
+  // manifest is the server-derived "blast radius" — the union of declared
+  // resources and what's inferable from the step graph (integrations,
+  // egress, credentials, agents, sub-routines, datastores, tools, plus
+  // has_http / has_code flags). Only the detail endpoint returns it; absent
+  // on list responses. Drives the flow diagram + "What it touches" panel.
+  manifest?: RoutineManifest
 }
 
 interface Props {
@@ -68,15 +89,19 @@ interface Props {
 
 export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: Props) {
   const router = useRouter()
+  const { role } = useAbilities()
   const [routine, setRoutine] = useState<RoutineDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
+  // Tracks the in-flight governance action (approve/reject/disable/enable)
+  // so its button shows a spinner and the others stay disabled meanwhile.
+  const [busyGov, setBusyGov] = useState<string | null>(null)
   // dryRunResult holds the `would_execute` report from the most recent
   // dry_run invocation so we can render it inline. Cleared on close.
   const [dryRunResult, setDryRunResult] = useState<DryRunResult | null>(null)
-  // lastRunId holds the run_id of the most recent Run / Test run so we can
-  // show its live activity rail inline (instant status after clicking).
+  // lastRunId holds the run_id of the most recent Run so we can show its
+  // live activity rail inline (instant status after clicking).
   const [lastRunId, setLastRunId] = useState<string | null>(null)
   // abortRef tracks the in-flight fetch so a fast workspace/slug
   // switch cancels stale work. Without this, a slow network +
@@ -136,12 +161,12 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, slug])
 
-  const triggerAction = async (action: "run" | "test_run" | "dry_run") => {
+  const triggerAction = async (action: "run" | "dry_run") => {
     if (!routine) return
     setBusyAction(action)
     try {
-      // Test run hits a slugless route with the draft definition in the body;
-      // Run / Dry run address the saved pipeline by slug. See lib/pipeline-actions.
+      // Run / Dry run both address the saved pipeline by slug — `run` executes
+      // for real, `dry_run` is a static preview. See lib/pipeline-actions.
       const { url, body } = buildPipelineActionRequest(workspaceId, slug, action, routine)
       const res = await apiFetch(url, {
         method: "POST",
@@ -204,9 +229,16 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           cost_usd: typeof data.cost_usd === "number" ? data.cost_usd : undefined,
           duration_ms: typeof data.duration_ms === "number" ? data.duration_ms : undefined,
           would_execute: Array.isArray(data.would_execute) ? data.would_execute : [],
+          // manifest is the declared blast radius the redefined dry_run returns
+          // alongside the step plan. Pass it through untyped-guarded; the report
+          // tolerates its absence (older server builds) via isManifestEmpty.
+          manifest:
+            data.manifest && typeof data.manifest === "object"
+              ? (data.manifest as RoutineDetail["manifest"])
+              : undefined,
         })
-        toast.success("Dry-run report ready", {
-          description: "Per-step tier + cost estimate shown above the tabs.",
+        toast.success("Plan preview ready", {
+          description: "Step plan + declared resources shown above the tabs.",
         })
       } else {
         // Surface the just-started run's live activity rail inline.
@@ -229,25 +261,74 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
     }
   }
 
+  // Lifecycle governance: approve/reject a proposed routine (MANAGER+),
+  // or disable/enable an existing one (OWNER/ADMIN). Each hits its own
+  // endpoint, toasts the outcome, then refetches so the hero badge +
+  // run-guard reflect the new status. enable/disable confirm first
+  // (matches the rollback confirm() pattern in the Versions tab).
+  const governanceAction = async (action: "approve" | "reject" | "disable" | "enable") => {
+    if (!routine) return
+    if (action === "disable" && !confirm(`Disable "${routine.name || routine.slug}"? It cannot be run until re-enabled.`)) {
+      return
+    }
+    if (action === "reject" && !confirm(`Reject "${routine.name || routine.slug}"? The proposed routine is discarded.`)) {
+      return
+    }
+    setBusyGov(action)
+    try {
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/${action}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      })
+      if (!res.ok) {
+        const t = await res.text().catch(() => "")
+        throw new Error(`${res.status}: ${t || res.statusText}`)
+      }
+      toast.success(governanceLabel(action))
+      onChanged()
+      fetchRoutine()
+    } catch (e) {
+      toast.error(`${governanceLabel(action)} failed`, {
+        description: e instanceof Error ? e.message : String(e),
+      })
+    } finally {
+      setBusyGov(null)
+    }
+  }
+
+  const lifecycle = normalizeRoutineStatus(routine?.status)
+  const lifecycleBadge = routineStatusBadge(routine?.status)
+  const runGuard = runDisabledReason(routine?.status)
+  const showApprovalBanner = lifecycle === "proposed" && canApproveRoutine(role)
+  const showKillControl = canKillRoutine(role)
+
   const status = routine?.last_invocation_status?.toLowerCase()
-  // Status tones share the same `bg-{c}-500/20 text-{c}-400` pattern
-  // as lib/colors.ts STATUS_BADGE_CLASSES so the pill matches the
-  // status pills rendered in Inbox / Issues / Activity.
+  // Run-status pill routes its colors through the shared palette
+  // (lib/colors STATUS_BADGE_CLASSES + STATUS_DOT_CLASSES) so it matches
+  // the status pills rendered in Inbox / Issues / Activity — failed reads
+  // red (not rose), running reads cyan (IN_PROGRESS), and an approval gate
+  // reads violet (AWAITING_APPROVAL).
   //
   // A live approval gate wins over the persisted last_invocation_status: the
   // run reads as "running" in the DB while parked, but the human is the
-  // bottleneck, so we show the amber "Waiting for approval" state instead.
-  const statusTone = pendingApproval
-    ? { bg: "bg-amber-500/20", text: "text-amber-400", label: "Waiting for approval" }
+  // bottleneck, so we show the awaiting-approval state instead.
+  const runStatus: { token: string; label: string } = pendingApproval
+    ? { token: "AWAITING_APPROVAL", label: "Waiting for approval" }
     : status === "completed" || status === "succeeded" || status === "success"
-      ? { bg: "bg-emerald-500/20", text: "text-emerald-400", label: "Last run · completed" }
+      ? { token: "COMPLETED", label: "Last run · completed" }
       : status === "failed" || status === "error"
-        ? { bg: "bg-rose-500/20", text: "text-rose-400", label: "Last run · failed" }
+        ? { token: "FAILED", label: "Last run · failed" }
         : status === "running"
-          ? { bg: "bg-blue-500/20", text: "text-blue-400", label: "Running…" }
-          : { bg: "bg-muted", text: "text-muted-foreground", label: "Never invoked" }
+          ? { token: "IN_PROGRESS", label: "Running…" }
+          : { token: "PENDING", label: "Never invoked" }
 
+  // Top-level tabs are collapsed to the three the redesign elevates
+  // (Overview / Runs / Schedules); the four power-user surfaces
+  // (Editor · Versions · Webhooks · Wait points) live behind a single
+  // "Advanced" tab with its own sub-tab bar so the chrome reads as
+  // "the routine" first and "the machinery" second.
   const [activeTab, setActiveTab] = useState("overview")
+  const [advancedTab, setAdvancedTab] = useState("editor")
 
   return (
     <div className="flex h-full flex-col">
@@ -265,15 +346,25 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
               <>
                 {/* Status + meta pills */}
                 <div className="flex flex-wrap items-center gap-2">
+                  {lifecycleBadge && (
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
+                        lifecycleBadge.className,
+                      )}
+                    >
+                      <span className={cn("h-1.5 w-1.5 rounded-full", lifecycleBadge.dot)} />
+                      {lifecycleBadge.label}
+                    </span>
+                  )}
                   <span
                     className={cn(
                       "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
-                      statusTone.bg,
-                      statusTone.text,
+                      STATUS_BADGE_CLASSES[runStatus.token],
                     )}
                   >
-                    <span className={cn("h-1.5 w-1.5 rounded-full", statusTone.text === "text-muted-foreground" ? "bg-muted-foreground/60" : "bg-current")} />
-                    {statusTone.label}
+                    <span className={cn("h-1.5 w-1.5 rounded-full", STATUS_DOT_CLASSES[runStatus.token])} />
+                    {runStatus.label}
                   </span>
                   <Badge variant="outline" className="px-2 py-0 text-[11px]">DSL v{routine?.dsl_version}</Badge>
                   <Badge variant="outline" className="px-2 py-0 text-[11px]">
@@ -317,50 +408,65 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
 
         {/* Action group — pill button row */}
         <div className="mt-5 flex items-center gap-2">
-          <Button
-            onClick={() => triggerAction("run")}
-            disabled={!!busyAction || !routine}
-            className="h-9 gap-2 rounded-md px-4 text-sm font-semibold"
-            title="Invoke routine with empty inputs"
-          >
-            {busyAction === "run" ? (
-              <Spinner className="h-3.5 w-3.5" />
-            ) : (
-              <Play className="h-3.5 w-3.5 fill-current" />
-            )}
-            {busyAction === "run" ? "Running…" : "Run"}
-          </Button>
-          {/* Wrap in a span so the explanatory tooltip still shows when the
+          {/* Wrap in a span so the run-guard tooltip still shows when the
               button is disabled — disabled buttons swallow hover events. */}
+          <span title={runGuard ?? "Invoke routine with empty inputs"} className="inline-flex">
+            <Button
+              onClick={() => triggerAction("run")}
+              disabled={!!busyAction || !routine || !!runGuard}
+              className="h-9 gap-2 rounded-md px-4 text-sm font-semibold"
+            >
+              {busyAction === "run" ? (
+                <Spinner className="h-3.5 w-3.5" />
+              ) : (
+                <Play className="h-3.5 w-3.5 fill-current" />
+              )}
+              {busyAction === "run" ? "Running…" : "Run"}
+            </Button>
+          </span>
           <span
-            title={
-              canTestRun(routine)
-                ? "Run the draft definition on the execution tier; logs result without persisting state"
-                : "Test run needs an author crew — only available for crew-authored routines"
-            }
+            title={runGuard ?? "Static plan preview — walks the DSL + shows declared resources; no agents invoked"}
             className="inline-flex"
           >
             <Button
               variant="outline"
-              onClick={() => triggerAction("test_run")}
-              disabled={!!busyAction || !routine || !canTestRun(routine)}
+              onClick={() => triggerAction("dry_run")}
+              disabled={!!busyAction || !routine || !!runGuard}
               className="h-9 gap-2 rounded-md px-4 text-sm"
             >
-              <FlaskConical className="h-3.5 w-3.5" />
-              {busyAction === "test_run" ? "Testing…" : "Test run"}
+              <Eye className="h-3.5 w-3.5" />
+              {busyAction === "dry_run" ? "Computing…" : "Dry run"}
             </Button>
           </span>
-          <Button
-            variant="outline"
-            onClick={() => triggerAction("dry_run")}
-            disabled={!!busyAction || !routine}
-            className="h-9 gap-2 rounded-md px-4 text-sm"
-            title="Walk DSL, render templates, compute would_execute report — no agent invocations"
-          >
-            <Eye className="h-3.5 w-3.5" />
-            {busyAction === "dry_run" ? "Computing…" : "Dry run"}
-          </Button>
           <div className="flex-1" />
+          {/* Enable / Disable — OWNER/ADMIN kill switch. Disable when the
+              routine is active; Enable when it's disabled. Hidden for a
+              proposed routine (approve/reject is the right action there). */}
+          {showKillControl && routine && lifecycle !== "proposed" && (
+            lifecycle === "disabled" ? (
+              <Button
+                variant="outline"
+                onClick={() => governanceAction("enable")}
+                disabled={!!busyGov || !!busyAction}
+                className="h-9 gap-2 rounded-md px-3 text-sm text-emerald-400 hover:text-emerald-300"
+                title="Re-enable this routine so it can run again"
+              >
+                {busyGov === "enable" ? <Spinner className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />}
+                Enable
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                onClick={() => governanceAction("disable")}
+                disabled={!!busyGov || !!busyAction}
+                className="h-9 gap-2 rounded-md px-3 text-sm text-rose-400 hover:text-rose-300"
+                title="Disable (kill) this routine — it cannot run until re-enabled"
+              >
+                {busyGov === "disable" ? <Spinner className="h-3.5 w-3.5" /> : <PowerOff className="h-3.5 w-3.5" />}
+                Disable
+              </Button>
+            )
+          )}
           <Button
             variant="ghost"
             className="h-9 gap-2 rounded-md px-3 text-sm text-muted-foreground hover:text-rose-400"
@@ -374,6 +480,40 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
         </div>
       </div>
 
+      {/* Approval banner — a proposed routine (risky / agent-authored)
+          needs a MANAGER+ to promote it before it can run. Approve →
+          active; Reject → discarded. Only rendered for MANAGER+ when the
+          routine is in the proposed state. */}
+      {showApprovalBanner && (
+        <div className="flex items-center gap-3 border-b border-amber-500/30 bg-amber-500/[0.07] px-6 py-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-amber-300">This routine is awaiting approval</div>
+            <p className="mt-0.5 text-[12px] text-amber-200/70">
+              It was proposed for review and can&apos;t run until a manager approves it.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => governanceAction("approve")}
+            disabled={!!busyGov}
+            className="h-8 gap-1.5 bg-amber-500 px-3 text-sm font-semibold text-amber-950 hover:bg-amber-400"
+          >
+            {busyGov === "approve" ? <Spinner className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+            Approve
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => governanceAction("reject")}
+            disabled={!!busyGov}
+            className="h-8 gap-1.5 border-amber-500/40 px-3 text-sm text-amber-200 hover:text-amber-100"
+          >
+            {busyGov === "reject" ? <Spinner className="h-3.5 w-3.5" /> : <Ban className="h-3.5 w-3.5" />}
+            Reject
+          </Button>
+        </div>
+      )}
+
       {/* Dry-run report — surfaces would_execute when the user clicks
           "Dry run". Pre-fix this payload was silently dropped. */}
       {dryRunResult && (
@@ -381,7 +521,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
       )}
 
       {/* Run activity — instant readable status for the just-triggered
-          Run / Test run, so the user isn't left wondering what's happening
+          Run, so the user isn't left wondering what's happening
           after clicking. Full history stays in the Runs tab. */}
       {routine && lastRunId && (
         <div className="border-b border-white/[0.06]">
@@ -418,12 +558,10 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
             className="shrink-0 px-4"
           >
             <TabBar.Item value="overview" className="h-10 text-sm">Overview</TabBar.Item>
-            <TabBar.Item value="editor" className="h-10 text-sm">Editor</TabBar.Item>
+            <TabBar.Item value="preview" className="h-10 text-sm">Preview</TabBar.Item>
             <TabBar.Item value="runs" className="h-10 text-sm">Runs</TabBar.Item>
-            <TabBar.Item value="versions" className="h-10 text-sm">Versions</TabBar.Item>
             <TabBar.Item value="schedules" className="h-10 text-sm">Schedules</TabBar.Item>
-            <TabBar.Item value="webhooks" className="h-10 text-sm">Webhooks</TabBar.Item>
-            <TabBar.Item value="waitpoints" className="h-10 text-sm">Wait points</TabBar.Item>
+            <TabBar.Item value="advanced" className="h-10 text-sm">Advanced</TabBar.Item>
           </TabBar>
 
           {error && (
@@ -436,37 +574,71 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
             <TabsContent value="overview" className="m-0 px-6 py-5">
               <RoutineOverviewTab routine={routine} workspaceId={workspaceId} />
             </TabsContent>
-            <TabsContent value="editor" className="m-0 h-full p-0">
-              <RoutineEditorTab
-                routine={routine}
-                workspaceId={workspaceId}
-                onSaved={() => {
-                  fetchRoutine()
-                  onChanged()
-                }}
-              />
+            {/* Preview — the read-only data-flow diagram, moved out of Overview
+                into its own tab so the Overview stays scannable for non-technical
+                users. Static derivation of the DSL + manifest, not a live run. */}
+            <TabsContent value="preview" className="m-0 px-6 py-5">
+              <Card title="Data flow" subtitle="preview — not live" icon={Workflow}>
+                <div className="px-4 py-3">
+                  <RoutineFlowDiagram definition={routine.definition} manifest={routine.manifest} />
+                </div>
+              </Card>
             </TabsContent>
             <TabsContent value="runs" className="m-0 px-6 py-5">
               <RoutineRunsTab workspaceId={workspaceId} slug={routine.slug} />
             </TabsContent>
-            <TabsContent value="versions" className="m-0 px-6 py-5">
-              <RoutineVersionsTab
-                workspaceId={workspaceId}
-                slug={routine.slug}
-                onRolledBack={() => {
-                  fetchRoutine()
-                  onChanged()
-                }}
-              />
-            </TabsContent>
             <TabsContent value="schedules" className="m-0 px-6 py-5">
               <RoutineSchedulesTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} />
             </TabsContent>
-            <TabsContent value="webhooks" className="m-0 px-6 py-5">
-              <RoutineWebhooksTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} />
-            </TabsContent>
-            <TabsContent value="waitpoints" className="m-0 px-6 py-5">
-              <RoutineWaitpointsTab workspaceId={workspaceId} slug={routine.slug} />
+            {/* Advanced — power-user machinery behind a sub-tab bar so the
+                top-level chrome stays at three approachable surfaces. */}
+            <TabsContent value="advanced" className="m-0 flex h-full flex-col p-0">
+              <Tabs
+                value={advancedTab}
+                onValueChange={setAdvancedTab}
+                className="flex flex-1 flex-col overflow-hidden"
+              >
+                <TabBar
+                  value={advancedTab}
+                  onValueChange={setAdvancedTab}
+                  layoutId="routine-advanced-tabs-indicator"
+                  ariaLabel="Advanced routine sections"
+                  className="shrink-0 border-b border-border/60 px-4"
+                >
+                  <TabBar.Item value="editor" className="h-9 text-[13px]">Editor / JSON</TabBar.Item>
+                  <TabBar.Item value="versions" className="h-9 text-[13px]">Versions</TabBar.Item>
+                  <TabBar.Item value="webhooks" className="h-9 text-[13px]">Webhooks</TabBar.Item>
+                  <TabBar.Item value="waitpoints" className="h-9 text-[13px]">Wait points</TabBar.Item>
+                </TabBar>
+                <div className="flex-1 overflow-auto">
+                  <TabsContent value="editor" className="m-0 h-full p-0">
+                    <RoutineEditorTab
+                      routine={routine}
+                      workspaceId={workspaceId}
+                      onSaved={() => {
+                        fetchRoutine()
+                        onChanged()
+                      }}
+                    />
+                  </TabsContent>
+                  <TabsContent value="versions" className="m-0 px-6 py-5">
+                    <RoutineVersionsTab
+                      workspaceId={workspaceId}
+                      slug={routine.slug}
+                      onRolledBack={() => {
+                        fetchRoutine()
+                        onChanged()
+                      }}
+                    />
+                  </TabsContent>
+                  <TabsContent value="webhooks" className="m-0 px-6 py-5">
+                    <RoutineWebhooksTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} />
+                  </TabsContent>
+                  <TabsContent value="waitpoints" className="m-0 px-6 py-5">
+                    <RoutineWaitpointsTab workspaceId={workspaceId} slug={routine.slug} />
+                  </TabsContent>
+                </div>
+              </Tabs>
             </TabsContent>
           </div>
         </Tabs>
@@ -475,6 +647,19 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   )
 }
 
-function actionLabel(a: "run" | "test_run" | "dry_run"): string {
-  return a === "run" ? "Run" : a === "test_run" ? "Test run" : "Dry run"
+function actionLabel(a: "run" | "dry_run"): string {
+  return a === "run" ? "Run" : "Dry run"
+}
+
+function governanceLabel(a: "approve" | "reject" | "disable" | "enable"): string {
+  switch (a) {
+    case "approve":
+      return "Routine approved"
+    case "reject":
+      return "Routine rejected"
+    case "disable":
+      return "Routine disabled"
+    case "enable":
+      return "Routine enabled"
+  }
 }

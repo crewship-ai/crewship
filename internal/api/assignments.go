@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -31,6 +32,11 @@ type MissionCallback interface {
 // works with provisioning disabled — nil means "skip the gate").
 type crewProvisioner interface {
 	EnsureProvisioned(ctx context.Context, crewID, workspaceID string, timeout time.Duration) error
+	// RuntimeProvisionSink builds the sink that journals + live-streams the
+	// runtime container-preparation events (start → container_create → ready /
+	// failed) the container provider emits during EnsureCrewRuntime, so the
+	// agent-run/ensure-container path is audited like the explicit job runner.
+	RuntimeProvisionSink(crewID, workspaceID string) func(devcontainer.ProvisionEvent)
 }
 
 type AssignmentHandler struct {

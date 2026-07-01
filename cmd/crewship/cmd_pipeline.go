@@ -50,13 +50,20 @@ Examples:
   crewship routine export email-fetch-summarize > bundle.json
   crewship routine import < bundle.json
   crewship routine cancel <run_id>
+  crewship routine list --status proposed
+  crewship routine approve <slug>
+  crewship routine disable <slug>
 
 Subcommand status:
   list       GET    /api/v1/workspaces/{ws}/pipelines
+  approve    POST   /api/v1/workspaces/{ws}/pipelines/{slug}/approve  (MANAGER+)
+  reject     POST   /api/v1/workspaces/{ws}/pipelines/{slug}/reject   (MANAGER+)
+  disable    POST   /api/v1/workspaces/{ws}/pipelines/{slug}/disable  (OWNER/ADMIN)
+  enable     POST   /api/v1/workspaces/{ws}/pipelines/{slug}/enable   (OWNER/ADMIN)
   get        GET    /api/v1/workspaces/{ws}/pipelines/{slug}
   run        POST   /api/v1/workspaces/{ws}/pipelines/{slug}/run
   dry-run    POST   /api/v1/workspaces/{ws}/pipelines/{slug}/dry_run
-  save       POST   /api/v1/workspaces/{ws}/pipelines/test_run + .../pipelines/save
+  save       POST   /api/v1/workspaces/{ws}/pipelines/save
   delete     DELETE /api/v1/workspaces/{ws}/pipelines/{slug}
   runs       GET    /api/v1/workspaces/{ws}/pipelines/{slug}/runs (journal-backed)
   versions   GET    /api/v1/workspaces/{ws}/pipelines/{slug}/versions
@@ -87,6 +94,7 @@ type pipelineRowJSON struct {
 	AuthorAgentID        string          `json:"author_agent_id"`
 	AuthorUserID         string          `json:"author_user_id"`
 	AuthoredVia          string          `json:"authored_via"`
+	Status               string          `json:"status"`
 	CreatedAt            string          `json:"created_at"`
 	UpdatedAt            string          `json:"updated_at"`
 	IntegrationsRequired []string        `json:"integrations_required,omitempty"`
@@ -116,6 +124,13 @@ var pipelineListCmd = &cobra.Command{
 			}
 			path += sep + "tag=" + url.QueryEscape(tag)
 		}
+		if status, _ := cmd.Flags().GetString("status"); status != "" {
+			sep := "?"
+			if strings.Contains(path, "?") {
+				sep = "&"
+			}
+			path += sep + "status=" + url.QueryEscape(status)
+		}
 		resp, err := client.Get(path)
 		if err != nil {
 			return err
@@ -134,7 +149,7 @@ var pipelineListCmd = &cobra.Command{
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "SLUG\tINVOC\tLAST STATUS\tAUTHOR CREW\tDESCRIPTION")
+		fmt.Fprintln(w, "SLUG\tSTATUS\tINVOC\tLAST STATUS\tAUTHOR CREW\tDESCRIPTION")
 		for _, p := range rows {
 			desc := p.Description
 			if len(desc) > 60 {
@@ -148,7 +163,11 @@ var pipelineListCmd = &cobra.Command{
 			if authorCrew == "" {
 				authorCrew = "—"
 			}
-			fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\n", p.Slug, p.InvocationCount, lastStatus, authorCrew, desc)
+			govStatus := p.Status
+			if govStatus == "" {
+				govStatus = "active"
+			}
+			fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\n", p.Slug, govStatus, p.InvocationCount, lastStatus, authorCrew, desc)
 		}
 		return w.Flush()
 	},
@@ -209,6 +228,11 @@ var pipelineGetCmd = &cobra.Command{
 		fmt.Fprintf(w, "Author crew:\t%s\n", p.AuthorCrewID)
 		fmt.Fprintf(w, "Author agent:\t%s\n", p.AuthorAgentID)
 		fmt.Fprintf(w, "Authored via:\t%s\n", p.AuthoredVia)
+		govStatus := p.Status
+		if govStatus == "" {
+			govStatus = "active"
+		}
+		fmt.Fprintf(w, "Status:\t%s\n", govStatus)
 		if len(p.IntegrationsRequired) > 0 {
 			// Enforced at run time: a run is blocked when the author crew
 			// hasn't connected one of these (422 + missing_integrations).
@@ -235,10 +259,11 @@ var pipelineGetCmd = &cobra.Command{
 var pipelineSaveCmd = &cobra.Command{
 	Use:   "save",
 	Short: "Save a new routine from a JSON DSL file",
-	Long: `Save a routine by uploading a DSL JSON file. The save flow runs the
-test_run gate first — your DSL is parsed, validated, and executed
-once against the workspace's execution tier. Only on success does
-the row land in the registry.
+	Long: `Save a routine by uploading a DSL JSON file. The server validates the
+DSL on save — it is parsed, schema-validated, and cycle-checked before
+the row lands in the registry. There is no separate "test run" step:
+you cannot run an agent dry (its scripts have real side effects), so a
+real run is reserved for the first live invocation (crewship routine run).
 
 The DSL file should be a JSON document matching the format described
 in ROUTINES.md (top-level: name, description, inputs, steps).
@@ -286,62 +311,56 @@ reuse contract).`,
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
 
-		// Step 1: test_run. The save endpoint requires a fresh
-		// passing test_run within 5 min, so we run one inline. The
-		// CLI surfaces the same gate the sidecar enforces for
-		// in-container agents.
-		fmt.Println("Running test_run gate against the execution tier...")
+		// Save clears its test-gate via an HMAC save_token (the server no
+		// longer trusts a body "it passed" claim), so the CLI mirrors the UI:
+		// dry-run-validate the draft via /test_run first, then pass the returned
+		// token to /save. test_run parses + Validates + checks integration /
+		// resource preconditions and dry-runs the DSL (no agent invocation —
+		// you cannot run an agent "dry"); on pass it mints a token bound to
+		// (workspace, definition_hash, this user). The internal
+		// /api/v1/internal/pipelines/save route is internalAuth (sidecar only);
+		// a user CLI token always 403s there (issue #654), so we never touch it.
+		_ = authorAgent // recorded only on the sidecar path; user saves attribute the calling user
+		fmt.Println("Validating routine (server-side dry-run)...")
 		testBody := map[string]any{
 			"definition":     json.RawMessage(definitionRaw),
 			"author_crew_id": authorCrew,
 			"sample_inputs":  sampleInputs,
 		}
-		// test_run executes the routine once (worker + any grader loop), so it
-		// outlasts the 30s default client timeout — lift it for this call.
-		testResp, err := client.WithTimeout(evalRunTimeout).Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/test_run", ws), testBody)
+		testResp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/test_run", ws), testBody)
 		if err != nil {
 			return err
 		}
 		defer testResp.Body.Close()
 		if err := cli.CheckError(testResp); err != nil {
-			return fmt.Errorf("test_run failed: %w", err)
+			return err
 		}
 		var testResult struct {
-			Status       string  `json:"status"`
-			Output       string  `json:"output"`
-			ErrorMessage string  `json:"error_message"`
-			DurationMs   int64   `json:"duration_ms"`
-			CostUSD      float64 `json:"cost_usd"`
-			// SaveToken is the HMAC proof that THIS user just
-			// test-ran THIS definition. Forwarded to the save
-			// endpoint so the gate clears without body-trusted
-			// timestamps.
+			Status    string `json:"status"`
 			SaveToken string `json:"save_token"`
+			Error     string `json:"error_message"`
 		}
 		if err := json.NewDecoder(testResp.Body).Decode(&testResult); err != nil {
 			return fmt.Errorf("decode test_run response: %w", err)
 		}
-		if testResult.Status != "COMPLETED" {
-			return fmt.Errorf("test_run did not complete cleanly: status=%s err=%q", testResult.Status, testResult.ErrorMessage)
+		if testResult.Status != "DRY_RUN_OK" && testResult.Status != "COMPLETED" {
+			return fmt.Errorf("routine failed validation (status=%s): %s", testResult.Status, testResult.Error)
 		}
-		fmt.Printf("test_run passed (%dms, $%.4f). Saving...\n", testResult.DurationMs, testResult.CostUSD)
 
-		// Step 2: user-facing save. The internal
-		// /api/v1/internal/pipelines/save route is mounted under
-		// internalAuth (X-Internal-Token) — sidecar only; a user CLI
-		// token always 403s there (issue #654). The workspace-scoped
-		// save endpoint is the CLI's contract: JWT auth, MANAGER+
-		// role, authorship recorded as the calling user, and the test
-		// gate cleared by the HMAC save_token /test_run just minted —
-		// no body-trusted timestamps.
-		_ = authorAgent // recorded only on the sidecar path; user saves attribute the calling user
+		fmt.Println("Saving routine...")
 		saveBody := map[string]any{
 			"slug":           slugifyName(name),
 			"name":           name,
 			"description":    description,
 			"definition":     json.RawMessage(definitionRaw),
 			"author_crew_id": authorCrew,
-			"save_token":     testResult.SaveToken,
+		}
+		// Forward the proof token when the server minted one. A server without
+		// a signing secret returns none; the save then relies on the server-side
+		// test-gate (an OWNER/ADMIN caller can bypass it via the save handler's
+		// skip_test_gate body field — there is no CLI flag for it).
+		if testResult.SaveToken != "" {
+			saveBody["save_token"] = testResult.SaveToken
 		}
 		saveResp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/save", ws), saveBody)
 		if err != nil {
@@ -828,6 +847,7 @@ func indent(s, prefix string) string {
 func init() {
 	pipelineListCmd.Flags().String("order", "popularity", "sort order: popularity | recent | name")
 	pipelineListCmd.Flags().String("tag", "", "filter routines by definition tag (cross-crew discovery)")
+	pipelineListCmd.Flags().String("status", "", "filter by governance status: active | proposed | disabled")
 	pipelineGetCmd.Flags().StringP("format", "f", "human", "output format: human | json")
 	pipelineRunsCmd.Flags().Int("limit", 20, "max number of run entries to return (1-500)")
 

@@ -21,7 +21,7 @@ func TestRunDAG_RuntimeValidationFailure(t *testing.T) {
 		{ID: "b", Type: StepAgentRun, AgentSlug: "a", Prompt: "p", Needs: []string{"ghost"}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeTestRun,
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -44,7 +44,7 @@ func TestRunDAG_CallPipelineForbidden(t *testing.T) {
 		{ID: "b", Type: StepCallPipeline, PipelineSlug: "child", Needs: []string{"a"}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeTestRun,
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -113,7 +113,7 @@ func TestRunDAG_StepErrorFailsRun(t *testing.T) {
 		{ID: "b", Type: StepAgentRun, AgentSlug: "agent_lead", Prompt: "p2", Needs: []string{"a"}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeTestRun,
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -148,7 +148,7 @@ func TestRunDAG_OutputFallback_WhenLeafSkipped(t *testing.T) {
 			Needs: []string{"a"}, If: "{{ inputs.never }}"},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
-		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeTestRun,
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)

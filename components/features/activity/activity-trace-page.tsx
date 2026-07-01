@@ -7,6 +7,7 @@ import { usePipelineRuns } from "@/hooks/use-pipeline-runs"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { useTrace } from "@/hooks/use-trace"
 import { useTraceSelection } from "@/hooks/use-trace-selection"
+import { useWorkspaceAgents } from "@/hooks/use-workspace-agents"
 import { useRunWaitpoints } from "@/hooks/use-run-waitpoints"
 import { useStepMetrics } from "@/hooks/use-step-metrics"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -27,6 +28,7 @@ import { TraceSidePanel } from "./trace-side-panel"
 import { BottomPanel } from "@/components/features/crews/bottom-panel"
 import type { BottomPanelContext } from "@/components/features/crews/bottom-panel/types"
 import type { TraceStep } from "@/lib/trace/types"
+import { mapSubSpans } from "@/lib/trace/sub-spans"
 import { shadeNodes, type HeatmapBucket, type HeatmapMode } from "@/lib/trace/percentile-heatmap"
 import { buildOverviewGraph } from "@/lib/trace/build-overview-graph"
 import type { Mission } from "@/lib/types/mission"
@@ -213,7 +215,33 @@ export function ActivityTracePage() {
     return run.step_outputs[stepId]
   }, [stepId, run?.step_outputs])
 
+  // Agent-internal tool calls for the selected step — the drill-down
+  // the side panel renders as a waterfall. mapSubSpans is defensive +
+  // returns [] when the run recorded none, so this is safe even when
+  // sub_spans is absent (older runs / non-agent steps).
+  const selectedSubSpans = useMemo(
+    () => (stepId ? mapSubSpans(run?.sub_spans?.[stepId]) : []),
+    [stepId, run?.sub_spans],
+  )
+
   const isFailedStep = run?.failed_at_step === stepId
+
+  // Resolve the selected step's agent id — the Files tab downloads the
+  // files the step touched from `/api/v1/agents/{id}/files…`, but the
+  // run/DSL only ever carries the agent *slug*. Map slug→id from the
+  // workspace's agent list; fall back to the run's invoking agent for
+  // steps that don't name one (the agent whose container holds the
+  // run's output dir).
+  const { bySlug: agentIdBySlug } = useWorkspaceAgents(workspaceId)
+  const selectedAgentId = useMemo(() => {
+    const slug = selectedStep?.agent_slug
+    // A slugged step resolves ONLY to its own agent — return null (not the
+    // invoking agent) while the slug→id lookup is still loading or stale, so a
+    // multi-agent run never points the Files tab at the wrong container. The
+    // invoking-agent fallback is for slugless steps only.
+    if (slug) return agentIdBySlug.get(slug) ?? null
+    return run?.invoking_agent_id ?? null
+  }, [selectedStep?.agent_slug, agentIdBySlug, run?.invoking_agent_id])
 
   // Context for the bottom dock — log / trace / changes of the selected
   // run. MEMOIZED: this page re-renders on every poll tick; a fresh context
@@ -388,8 +416,18 @@ export function ActivityTracePage() {
             open={sidePanelOpen}
             step={selectedStep}
             output={selectedOutput}
+            stepOutputs={run?.step_outputs}
+            runInputs={run?.inputs ?? null}
             errorMessage={run?.error_message}
             isFailedStep={isFailedStep}
+            subSpans={selectedSubSpans}
+            agentId={selectedAgentId}
+            workspaceId={workspaceId}
+            context={{
+              chatId: run?.chat_id,
+              routineSlug: run?.pipeline_slug,
+              routineName: run?.pipeline_name,
+            }}
             onClose={closeSidePanel}
           />
         </div>

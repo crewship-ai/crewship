@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 )
 
 // CrewRef identifies a crew by its globally-unique id and workspace slug. The
@@ -32,6 +34,16 @@ type CrewConfig struct {
 	// CREWSHIP_* keys are reserved for platform-managed vars and silently
 	// skipped. Providers merge these into the container's Env at create time.
 	ContainerEnv map[string]string
+
+	// LoginPath is the agent user's full login-shell PATH, captured at
+	// provision time (AggregatedRequirements.LoginPath) and persisted via
+	// cached_requirements. When set, the provider sets it verbatim as the
+	// container's PATH so a non-login `docker exec` (how the agent CLI runs)
+	// sees feature/pipx tool dirs like /usr/local/py-utils/bin, which are
+	// otherwise only added for login shells via /etc/profile.d. Empty when the
+	// crew wasn't provisioned or capture failed; the provider then falls back
+	// to prepending the well-known devcontainer bin dirs to the image PATH.
+	LoginPath string
 
 	// Runtime requirements bubbled up from devcontainer features. Applied to
 	// the HostConfig at create time. Critical for features like DinD which
@@ -63,6 +75,16 @@ type CrewConfig struct {
 	// trust model that everything in /crew/init.sh is code they wrote
 	// or audited.
 	InitHookEnabled bool
+
+	// ProvisionSink, when set, receives structured ProvisionEvents for the
+	// runtime container-preparation steps (start → container_create → ready,
+	// plus failed) emitted by EnsureCrewRuntime. It mirrors the image-build
+	// sink (devcontainer.ProvisionSink) so the agent-run / ensure-container
+	// path is journaled and live-streamed exactly like the explicit
+	// provisioning-job runner — no container preparation is silently
+	// un-logged. nil (the default for callers that pass only {id, slug}) is a
+	// no-op. Must be cheap/non-blocking; it runs on the ensure goroutine.
+	ProvisionSink func(devcontainer.ProvisionEvent)
 
 	// Services are sidecar containers (Redis, Postgres, etc.) the
 	// provider should start alongside the crew's runtime, on the
@@ -121,6 +143,13 @@ type ExecConfig struct {
 	Env         []string
 	WorkingDir  string
 	User        string
+	// Stdin, when non-nil, is streamed to the command's standard input and the
+	// write side is then half-closed so the process observes EOF. nil (the
+	// default) means no stdin is attached — byte-for-byte the historic
+	// behaviour. Used to deliver an oversized agent prompt that would exceed
+	// the kernel's per-argv MAX_ARG_STRLEN limit (128 KiB on Linux) if passed
+	// as a positional command argument.
+	Stdin io.Reader
 }
 
 // ExecResult holds the exec ID and output stream from a container exec command.

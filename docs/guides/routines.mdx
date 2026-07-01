@@ -37,12 +37,14 @@ Crewship is unusual among workflow systems because **agents author routines**, n
 <CardGroup cols={3}>
   <Card title="Agent" icon="robot">
     The most common path. An agent that's solved a repetitive problem twice posts to `http://localhost:9119/pipelines/save` from inside its container; the sidecar injects authorship and forwards to the main API. Next time `[AVAILABLE ROUTINES]` block in the system prompt advertises it to other crews.
+
+    You can also just **describe a routine in chat** — "make a routine that summarizes yesterday's commits and posts to Slack." A crew **Lead** carries the bundled **`routine-author`** skill (an authoring playbook): it clarifies the essentials, grounds the DSL in the crew's `[CONNECTED INTEGRATIONS]` and `[AVAILABLE ROUTINES]`, writes and test-runs the routine, then tells you whether it went live or landed as a **proposed** routine for a Manager to approve (see [Governance](#governance--agent-proposes-human-approves-the-risky-ones)).
   </Card>
   <Card title="UI" icon="browser">
     Open `/routines`, click **+ New routine**, pick a starter template, edit the DSL JSON, click **Test & Save**. Test_run runs against the execution tier; on pass the routine is persisted with `authored_via=user_api` and the JWT user as author.
   </Card>
   <Card title="CLI" icon="terminal">
-    `crewship routine save --name "..." --definition file.json --author-crew <crew_id>`. Same test_run gate as UI. CI-friendly: validate offline first with `crewship routine validate file.json`, then save.
+    `crewship routine save --name "..." --definition file.json --author-crew <crew_id>`. The server validates the DSL on save (same gate as the UI). CI-friendly: validate offline first with `crewship routine validate file.json`, then save.
   </Card>
 </CardGroup>
 
@@ -89,6 +91,7 @@ Minimal valid routine:
 | `egress_targets` | array of string | Declared outbound hosts. Enforced for `http` step. |
 | `integrations_required` | array of string | Declared third-party integrations (Composio connector slugs like `"github"`, `"slack"`). **Declared AND enforced at run time** — see [Required integrations](#required-integrations) below. Slugs are lowercased/trimmed. |
 | `credentials_required` | array of CredReq | Declared credential needs (`type` + `scope`). Declared-only today (not yet enforced at run time). |
+| `resources` | object | Agent-declared capability manifest — `datastores[]` and `tools[]` the routine touches that **can't** be inferred from the step graph. **Declared AND enforced at run time** against the crew's container resources — see [Required resources](#required-resources) below. See [Capability manifest](#capability-manifest) below for the shape. |
 | `max_cost_usd` | number | Runtime cost cap; run aborts if exceeded between steps. |
 | `concurrency_key` | string | Template that gates how many runs can be in flight at once for the same workspace + rendered key. Typical pattern `"{{ inputs.account_id }}"` to serialise per-tenant runs. Empty (default) = no gate. See [Concurrency + idempotency](/guides/routines-cookbook#recipe-5-idempotent-routine-with-concurrency-key) recipe and the fail-fast note in [Troubleshooting](#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value). |
 | `max_concurrent` | integer | Cap on simultaneous runs sharing the resolved `concurrency_key`. Defaults to `1` when `concurrency_key` is set (strict per-key serialisation); ignored otherwise. |
@@ -167,10 +170,12 @@ Semantics:
   is **allowed** (a warning is logged). A bug in resolution must never wedge
   every run of every routine — a forgotten integration is a soft, recoverable
   failure; a hard block on all runs would be a self-inflicted outage.
-- **`run` and `test_run` are gated; `dry_run` is not.** A `test_run` really
-  executes against the author crew's agents, so it's gated too (fail fast
-  rather than burn a token-spending run the agent can't complete). `dry_run`
-  is a preview that invokes nothing, so it's left ungated.
+- **`run` is gated; `dry_run` is not.** A live `run` executes against the
+  author crew's agents, so it's gated (fail fast rather than land an
+  unrunnable routine). The internal save gate's draft validation applies the
+  same integration check. `dry_run` is a preview that invokes nothing, so it's
+  left ungated — it shows what the routine *would* need, even integrations the
+  crew hasn't connected yet.
 
 <Note>
 Integration availability is resolved from the crew's connected Composio
@@ -182,6 +187,120 @@ account still reads as available until its binding is removed).
 `credentials_required` remains **declared-only** for now — it is not yet
 enforced at run time the way `integrations_required` is.
 </Note>
+
+## Capability manifest
+
+Every routine has a derived **capability manifest** — the full "what this
+routine touches" blast radius. The detail API (`GET .../routines/{id}`) returns
+it under a `manifest` member so the UI can render a data-flow diagram and
+governance can reason about the whole footprint of a run, not just its visible
+steps.
+
+Most of the manifest is **auto-derived** from the DSL — you don't declare it:
+
+| Manifest field | Derived from |
+|----------------|--------------|
+| `integrations` | `integrations_required` (normalized) |
+| `egress` | `egress_targets` **plus** any host parseable from `http` step URLs (templated `{{ }}` URLs are skipped) |
+| `credentials` | `credentials_required` |
+| `agents` | `agent_slug` of every `agent_run` step |
+| `routines` | `pipeline_slug` of every `call_pipeline` step |
+| `tools` | `code` step runtimes **plus** declared `resources.tools` |
+| `datastores` | declared `resources.datastores` |
+| `has_http` / `has_code` | whether any `http` / `code` step exists |
+
+The walk covers routine-level (`before_all` / `after_all` / `on_failure`) and
+per-step (`before` / `after`) lifecycle hooks too — a capability hidden in an
+`on_failure` hook is still part of the blast radius. Every list is deduped +
+sorted and always rendered as `[]` (never `null`), so the diagram is stable.
+
+### The `resources` block
+
+Two things can't be inferred from the step graph: **datastores** a routine
+reads/writes, and **CLI tools/scripts** it runs. In production, `code` steps
+aren't wired — agents run scripts (`ansible`, `kubectl`, …) via an `agent_run`
+step that shells out, so static analysis can't see them. Declare them so they
+show up in the manifest:
+
+```json
+{
+  "name": "deploy-service",
+  "resources": {
+    "datastores": [
+      { "type": "postgres", "name": "main", "note": "writes table runs" },
+      { "type": "redis",    "name": "cache" }
+    ],
+    "tools": [
+      { "type": "ansible",  "name": "deploy.yml" },
+      { "type": "kubectl" }
+    ]
+  },
+  "steps": [ ... ]
+}
+```
+
+- `datastores[].type` — **any string**, but use the canonical vocabulary
+  `redis | postgres | mysql | mongodb | other` so it matches what the crew's
+  container catalog reports (the precondition gate compares `type`
+  case-insensitively; a non-canonical type simply won't match a crew resource).
+- `tools[].type` — **any string**; canonical examples `ansible | terraform |
+  kubectl | bash | python | other`. Same matching rule as datastores.
+- `name` / `note` are free-form and optional.
+
+Validation is **lenient**: declaring a resource is always allowed at **save**
+time (declaring is a contract, not a provisioning request). Save only rejects
+malformed entries — a blank or non-slug `type`, or more than 32 of either kind.
+The *run* path enforces availability — see [Required resources](#required-resources).
+
+### Required resources
+
+The `resources` block is a **run-time precondition gate**, the resource sibling
+of [Required integrations](#required-integrations): it states what the routine
+**requires** (datastores like Postgres/Redis, CLI tools like `ansible`), and the
+run path checks it against what the executing crew's container actually **has**
+(`[CONTAINER RESOURCES]` — the crew's sidecar datastores + installed tools).
+
+Semantics:
+
+- **Enforced at run time.** Before a run starts, Crewship resolves the **author
+  crew's** container resources and compares them to the declared
+  `resources.datastores` + `resources.tools`. If the routine requires a
+  datastore or tool the crew doesn't have, the run is **blocked** with an
+  RFC 7807 Problem Details response, HTTP **422**, carrying a machine-readable
+  `missing_resources: [{ kind, type, name }]` member (`kind` is `"datastore"` or
+  `"tool"`) and a human `detail` like
+  `routine needs datastore postgres, tool ansible, not available to crew "Ops"`.
+  The run never starts — no tokens spent — until the resource is provisioned on
+  the crew.
+- **Matching.** A required **datastore** is satisfied when the crew has a
+  datastore of the same engine `type` (case-insensitive; the service `name` is
+  advisory and not matched). A required **tool** is satisfied when the crew has
+  an installed tool whose name matches the required `type` (the tool's `name`,
+  e.g. `deploy.yml`, is the concrete artifact and isn't matched against the
+  container).
+- **No-op fast path.** A routine that declares no `resources` block does zero
+  resolution work. Only the *declared* resources are gated — `code`-step
+  runtimes folded into the manifest's `tools` (e.g. `cel`) are internal
+  executor runtimes, not crew CLIs, and are never gated.
+- **Fail-open.** If the routine has no author crew, or resource resolution
+  itself errors, the run is **allowed** (a warning is logged) — same reasoning
+  as the integration gate: a resolver bug must never wedge every run.
+- **`run` is gated; `dry_run` is not.** (The internal save gate's draft
+  validation applies the same resource check.)
+
+### Agents already know what the container has
+
+You don't have to tell an agent that its crew runs Postgres or ships `kubectl` —
+Crewship surfaces it automatically. Every agent's system prompt now includes a
+`[CONTAINER RESOURCES]` block listing the crew's **datastores** (derived from the
+crew's sidecar services — a service named `postgres` is reachable at host
+`postgres` on its declared port) and **installed CLI tools** (derived from the
+crew's devcontainer features + mise toolchain, e.g. `ansible`, `kubectl`, `git`,
+`python`, `node`). The agent is instructed to use these directly instead of
+probing or trying to install them. So when you author a routine that needs a
+datastore, declare it under `resources.datastores` and connect via the host/port
+the agent already sees in that block. The block is omitted entirely when a crew
+has no services and no notable tools.
 
 ## Step types
 
@@ -385,15 +504,61 @@ Per-step `complexity` annotation drives the resolver. With `on_fail: "escalate_t
 **Tier override at runtime.** The CLI flag `--model <model>` is constructed from the resolved tier and passed to the agent's CLI adapter, so a routine's `complexity: "fast"` actually fires Haiku, not the agent's default. `CLIAdapter` is preserved (so the agent's CLAUDE_CODE / GEMINI_CLI / etc. wiring stays intact); only the model name swaps.
 </Info>
 
-## Test-run gate
+## Save validation gate
 
-Save endpoints (sidecar `/pipelines/save`, user `/api/v1/workspaces/{ws}/pipelines/save`, internal `/api/v1/internal/pipelines/save`) require a fresh passing test_run within the last 5 minutes — otherwise inline runs one against the execution tier.
+Save endpoints (sidecar `/pipelines/save`, user `/api/v1/workspaces/{ws}/pipelines/save`, internal `/api/v1/internal/pipelines/save`) require the routine to clear a validation gate before it persists. The gate is a **dry-run validation** of the draft, not a real execution — there is no "test run" mode (you cannot run an agent dry). The sidecar agent-authoring flow forwards the draft to `/api/v1/internal/pipelines/test_run`, which parses, schema-validates, and dry-runs it (rendering every template, invoking no agent); on success it sets `last_test_run_passed` and forwards to save.
 
-This is the **self-improvement loop**: an authoring agent that writes brittle DSL gets a structured failure report it can read and revise from. Without the gate, MVP would ship pipelines that pass schema but fail at runtime.
+This is the **self-improvement loop**: an authoring agent that writes brittle DSL gets a structured failure report it can read and revise from. Without the gate, MVP would ship pipelines that pass schema but fail at runtime. Real execution happens on the first live `run`, and risky routines are human-reviewed (governance) before they go live.
 
 <Tip>
 `skip_test_gate: true` is honored only when the caller's role is OWNER or ADMIN; lower roles get 403. Useful for hand-crafted DSL from known-good templates (the seed flow uses it).
 </Tip>
+
+## Governance — agent proposes, human approves the risky ones
+
+Routines have a lifecycle `status` (migration v128): **`active`** (live + runnable), **`proposed`** (awaiting approval), or **`disabled`** (admin airbag). The save validation gate still applies on top — `status` is an *additional* gate.
+
+### Maker-checker on save
+
+When a routine is saved (by an agent via the sidecar, or by a user via the UI/CLI), Crewship classifies it. A save is **risky** if **any** of these hold:
+
+- it declares an `integrations_required` the author crew can't currently satisfy (the same resolver the [run gate](#required-integrations) uses);
+- it has any `http`/egress step (or routine-level `egress_targets`);
+- it has any `code`-runtime step;
+- it declares `credentials_required`.
+
+Otherwise it's **safe** — only `agent_run` / `transform` / `call_pipeline` / `wait` steps over satisfiable integrations, no egress, no credentials.
+
+- **Safe → `active`.** Goes live immediately, exactly as before.
+- **Risky → `proposed`.** The routine is persisted but **not runnable**, and a **blocking inbox item** is raised for `MANAGER+` (the same Inbox surface as proposed skills). Approve it to go live, or reject it.
+
+A `proposed` (or `disabled`) routine refuses `run` / `run_batch` with `409 Conflict` — `"routine is awaiting approval"` or `"routine is disabled"`. `dry_run` always previews a saved routine, so it's never blocked.
+
+### Approve / reject (MANAGER+)
+
+```bash
+crewship routine approve <slug>   # status → active, resolves the inbox item
+crewship routine reject  <slug>   # removes the routine, resolves the inbox item
+```
+
+- `POST /api/v1/workspaces/{ws}/pipelines/{slug}/approve` — `MANAGER+`. Flips to `active`.
+- `POST /api/v1/workspaces/{ws}/pipelines/{slug}/reject` — `MANAGER+`. Soft-deletes the proposed routine.
+
+### Disable / enable (OWNER/ADMIN airbag)
+
+```bash
+crewship routine disable <slug>   # status → disabled; cancels in-flight runs
+crewship routine enable  <slug>   # status → active
+```
+
+- `POST /api/v1/workspaces/{ws}/pipelines/{slug}/disable` — `OWNER/ADMIN`. Flips to `disabled` **and cancels any in-flight runs** of that routine immediately.
+- `POST /api/v1/workspaces/{ws}/pipelines/{slug}/enable` — `OWNER/ADMIN`. Returns it to `active`.
+
+List responses (and `crewship routine list`) carry `status`; filter the queue with:
+
+```bash
+crewship routine list --status proposed
+```
 
 ## Triggers
 
@@ -454,20 +619,21 @@ The signing secret is shown **once**. To rotate it: delete the webhook + create 
 After you click **Run** or **Test run** in the UI, a live **Run activity** rail appears inline in the detail panel showing the just-started run step by step (started → each step → completed/failed) — so status is visible immediately without switching to the Runs tab. Full run history stays in the **Runs** tab; see the [Activity](/guides/activity#run-activity-rail) guide for the rail, and the toolbar Activity Bar for a workspace-wide "what's running now" view.
 
 <Note>
-**Test run** in the detail panel runs the routine's current definition as a draft against the execution tier (the same draft endpoint the save gate uses), so it requires an **author crew**. For routines without one, the button is disabled with a tooltip — use **Run** instead. (Run / Dry run address the saved routine by slug and have no such requirement.)
+The **Test run** button calls the public, JWT-authed `test_run` endpoint (`POST /api/v1/workspaces/{workspaceId}/pipelines/test_run`). It **validates a draft** — parse + `Validate` + the integration and resource preconditions + a `dry_run` pass (no agent is invoked; you can't run an agent "dry") — and on success mints an HMAC **`save_token`** bound to (workspace, definition hash, user). **Save** verifies that token, so a draft can't be saved as "test passed" unless it actually passed `test_run`. The UI button and the CLI both use this endpoint. To preview a *saved* routine instead, use **Dry run** — it walks the saved definition, renders templates, and returns the declared **manifest** (the blast radius) without invoking anything.
 </Note>
 
 ## Dry-run preview
 
-Three execution modes, distinguished by `Mode` in the request body and surface:
+Two execution modes, distinguished by `Mode` in the request body and surface:
 
 | Mode | Side effects | Increments invocation_count | Cost |
 |------|--------------|------------------------------|------|
-| `run` | yes (agents called) | yes | real |
-| `test_run` | yes (agents called) | no | real |
+| `run` | yes (agents called) — production | yes | real |
 | `dry_run` | no (templates rendered, agents skipped) | no | estimated |
 
-Dry-run is the safe "what would this routine do?" preview. It walks the DSL, renders all template substitutions against the supplied inputs, resolves each step's execution tier (adapter + model), and reports a `would_execute` list with per-step estimated cost. No agents are invoked, no journal entries beyond a single `pipeline.dry_run` audit row are written.
+There is **no `test_run` mode**: you cannot run an agent "dry" — it executes arbitrary scripts (bash, ansible, curl) whose side effects can't be intercepted — so a real run is always `run`. The agent-authoring save gate validates a draft via a `dry_run` (structure + templates), not a real execution.
+
+Dry-run is the safe "what would this routine do?" preview, and an honest **static plan — not a proof the run will succeed**. It walks the DSL, renders all template substitutions against the supplied inputs, resolves each step's execution tier (adapter + model), and reports a `would_execute` list with per-step estimated cost. It also returns the routine's declared **`manifest`** — the full blast radius (`integrations`, `egress`, `credentials`, `agents`, `routines`, `datastores`, `tools`, `has_http`, `has_code`) — so the UI can show "would use: ansible, Postgres, discord.com, agent jordan". (A definition that no longer parses leaves `manifest` null and still returns the report.) No agents are invoked; no journal entries beyond a single `pipeline.dry_run` audit row are written.
 
 ```bash
 crewship routine dry-run email-fetch --inputs '{"since":"yesterday"}'
@@ -480,7 +646,7 @@ In the UI: click **Dry run** in the routine detail panel. The `would_execute` re
 - Estimated cost in USD (order-of-magnitude only — the executor uses a flat token-density heuristic, not real pricing)
 - `would_call_agent` / `would_call_pipeline` target
 
-The estimate is intentionally labelled "estimated" everywhere it surfaces — it's a planning aid, not a quote. Real cost only lands once you switch to `run` or `test_run`.
+The estimate is intentionally labelled "estimated" everywhere it surfaces — it's a planning aid, not a quote. Real cost only lands once you switch to `run`.
 
 ## Versioning + rollback
 
@@ -548,7 +714,7 @@ At boot, the server scans for runs left in `queued`/`running` from the previous 
 - **A resumed run that finds its concurrency slot occupied waits and retries** with capped exponential backoff (2s doubling up to 60s) instead of failing — losing the slot race to a freshly-fired scheduled run is a timing collision, not a reason to abandon hours of restored work. If the server shuts down while a run is still waiting for its slot, the row stays in-flight and the next boot resumes it again.
 - **A waitpoint that timed out while the process was down** resumes, observes the expired token, and fails with `wait step "X" (approval) timed out` — distinct from an operator clicking deny (`… denied`).
 
-When persisted state is insufficient to resume safely, the run is stamped `interrupted` instead — never silently dropped, never wrongly resumed. Fallback triggers: the pipeline row is gone or no longer parses, the definition changed since the run started (content-hash mismatch — this catches in-place edits even when every step id survives, not just renamed/removed steps), unreadable persisted inputs/outputs, or a non-resumable mode (`test_run` gates from a previous lifetime are not re-run). The reason lands in the run's `error_message`.
+When persisted state is insufficient to resume safely, the run is stamped `interrupted` instead — never silently dropped, never wrongly resumed. Fallback triggers: the pipeline row is gone or no longer parses, the definition changed since the run started (content-hash mismatch — this catches in-place edits even when every step id survives, not just renamed/removed steps), unreadable persisted inputs/outputs, or a non-resumable mode (only live `run` rows resume; a `dry_run` preview row from a previous lifetime is never re-run). The reason lands in the run's `error_message`.
 
 Graceful shutdowns are different: an in-flight run cancelled by shutdown is finalized as `cancelled` (a terminal state) and is **not** resumed at next boot. Resume targets hard kills, where no terminal write could land.
 
@@ -720,11 +886,9 @@ The platform **fails fast** if the rendered key is empty (missing input + no lit
 
 <AccordionGroup>
 <Accordion title="Save returns 422 &quot;save requires a fresh, passing test_run&quot;">
-The save endpoint requires the test gate cleared. Preferred path: call `/test_run`, capture the `save_token` from its response, and pass `"save_token": "<token>"` in the `/save` body. The token is a server-signed HMAC over `(workspace_id | definition_hash | user_id | issued_at)` and expires after 5 minutes — it cannot be forged from the client side.
+The save endpoint requires the validation gate cleared. The server validates the DSL on save (parse + schema + cycle detection); to clear the residual gate, send `"last_test_run_at"` (RFC3339, within the last 5 minutes) + `"last_test_run_passed": true` in the `/save` body. This is the body-trust path `crewship routine save` uses, and it mirrors the sidecar agent-authoring flow which sets the same fields after the internal dry-run validation. There is no public `test_run` endpoint to mint a token from — a real run can't be done "dry", so a real run is reserved for the first live `crewship routine run`.
 
-Alternatives:
-- `crewship apply --skip-test-gate` (CLI — the flag lives on `apply`, not `routine save`) / `"skip_test_gate": true` (API) if your role is OWNER/ADMIN and you trust the DSL — bypasses the gate without running the test_run.
-- Legacy fallback: send `"last_test_run_at"` + `"last_test_run_passed"` in the body. Honoured for backwards compatibility, but trusts client-supplied values; new clients should always use `save_token`.
+Alternative: `crewship apply --skip-test-gate` (CLI — the flag lives on `apply`, not `routine save`) / `"skip_test_gate": true` (API) if your role is OWNER/ADMIN and you trust the DSL — bypasses the gate explicitly.
 </Accordion>
 
 <Accordion title="Run starts but no step events appear in the UI">

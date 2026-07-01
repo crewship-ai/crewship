@@ -1,0 +1,404 @@
+// routine-flow — pure, framework-free derivation of a read-only
+// horizontal "data flow" diagram and a plain-language step list for a
+// routine detail page. Consumes the raw DSL (routine.definition) plus the
+// server-derived `manifest` (blast radius) and emits an ordered list of
+// flow nodes the diagram component renders, and a list of human-readable
+// step lines the "What it does" panel renders.
+//
+// Everything here is DEFENSIVE — a malformed routine must never throw, it
+// degrades to the trigger/output bookends. No React, no I/O, fully unit
+// testable (lib/__tests__/routine-flow.test.ts).
+
+import {
+  describeStep as describeReadableStep,
+  hostOf,
+} from "@/lib/routine-step-describe"
+
+// ── Manifest shape (mirrors internal/pipeline/manifest.go → JSON) ──────────
+export interface ManifestCred {
+  type: string
+  scope?: string
+}
+export interface ManifestDatastore {
+  type: string
+  name?: string
+  note?: string
+}
+export interface ManifestTool {
+  type: string
+  name?: string
+}
+export interface RoutineManifest {
+  integrations: string[]
+  egress: string[]
+  credentials: ManifestCred[]
+  agents: string[]
+  routines: string[]
+  datastores: ManifestDatastore[]
+  tools: ManifestTool[]
+  has_http: boolean
+  has_code: boolean
+}
+
+// ── Flow node model ────────────────────────────────────────────────────────
+// `kind` drives color in the diagram (trigger=amber, agent=indigo,
+// store=cyan, tool=violet, out=green, step=neutral). `iconKey` is a stable
+// string the React layer maps to a lucide-react icon (keeps this module
+// JSX-free).
+export type FlowNodeKind = "trigger" | "step" | "agent" | "store" | "tool" | "out"
+
+export type FlowIconKey =
+  | "trigger"
+  | "http"
+  | "agent"
+  | "transform"
+  | "code"
+  | "wait"
+  | "call"
+  | "store-redis"
+  | "store-postgres"
+  | "store-mysql"
+  | "store-mongodb"
+  | "store"
+  | "tool"
+  | "out"
+
+// BrandIconKey is a stable, JSX-free identifier the React layer maps to a
+// real app/brand logo (Simple Icons via react-icons/si) — Postgres elephant,
+// Redis, Ansible, Slack, … — instead of a generic lucide glyph. A node only
+// carries one when its type resolves to a known brand (see brandIconKey()).
+export type BrandIconKey =
+  | "postgresql"
+  | "redis"
+  | "mysql"
+  | "mongodb"
+  | "ansible"
+  | "terraform"
+  | "kubernetes"
+  | "docker"
+  | "python"
+  | "bash"
+  | "git"
+  | "slack"
+  | "discord"
+  | "github"
+  | "notion"
+  | "googlecalendar"
+  | "zapier"
+
+// Alias table: every datastore type / tool type / integration slug we can
+// recognise → its canonical BrandIconKey. Keyed lowercase; the lookup
+// trims + lowercases first so "Postgres", " REDIS " etc. all resolve.
+const BRAND_ICON_ALIASES: Record<string, BrandIconKey> = {
+  // datastores
+  postgres: "postgresql",
+  postgresql: "postgresql",
+  pg: "postgresql",
+  redis: "redis",
+  mysql: "mysql",
+  mariadb: "mysql",
+  mongodb: "mongodb",
+  mongo: "mongodb",
+  // tools / runtimes
+  ansible: "ansible",
+  terraform: "terraform",
+  tf: "terraform",
+  kubernetes: "kubernetes",
+  kubectl: "kubernetes",
+  k8s: "kubernetes",
+  docker: "docker",
+  python: "python",
+  python3: "python",
+  py: "python",
+  bash: "bash",
+  sh: "bash",
+  shell: "bash",
+  git: "git",
+  // integrations
+  slack: "slack",
+  discord: "discord",
+  github: "github",
+  gh: "github",
+  notion: "notion",
+  google: "googlecalendar",
+  gcal: "googlecalendar",
+  googlecalendar: "googlecalendar",
+  "google-calendar": "googlecalendar",
+  google_calendar: "googlecalendar",
+  zapier: "zapier",
+}
+
+/**
+ * brandIconKey maps a datastore type, tool type, or integration slug to a
+ * canonical brand-logo key (resolved to a react-icons/si component in the
+ * React layer), or null when no real logo is known and the caller should
+ * fall back to a generic lucide glyph. Case- and whitespace-insensitive,
+ * never throws.
+ */
+export function brandIconKey(type: string): BrandIconKey | null {
+  if (!type || typeof type !== "string") return null
+  return BRAND_ICON_ALIASES[type.trim().toLowerCase()] ?? null
+}
+
+export interface FlowNode {
+  id: string
+  kind: FlowNodeKind
+  label: string
+  detail?: string
+  iconKey: FlowIconKey
+  // Optional real brand logo (Postgres/Redis/Ansible/…). When set the
+  // diagram renders the Simple Icon in the brand's tint; when absent it
+  // falls back to the generic lucide icon keyed by `iconKey`.
+  brandIconKey?: BrandIconKey
+}
+
+// ── tiny defensive accessors ───────────────────────────────────────────────
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null
+}
+function asArray(v: unknown): unknown[] {
+  return Array.isArray(v) ? v : []
+}
+function str(v: unknown): string {
+  return typeof v === "string" ? v : ""
+}
+function truncate(s: string, n = 40): string {
+  const t = s.trim()
+  return t.length > n ? `${t.slice(0, n - 1)}…` : t
+}
+
+// ── datastore + tool label/icon mapping ────────────────────────────────────
+const STORE_LABELS: Record<string, string> = {
+  redis: "Redis",
+  postgres: "Postgres",
+  postgresql: "Postgres",
+  mysql: "MySQL",
+  mongodb: "MongoDB",
+  mongo: "MongoDB",
+}
+function storeLabel(type: string): string {
+  const k = type.toLowerCase()
+  return STORE_LABELS[k] ?? (type ? type[0].toUpperCase() + type.slice(1) : "Store")
+}
+function storeIconKey(type: string): FlowIconKey {
+  switch (type.toLowerCase()) {
+    case "redis":
+      return "store-redis"
+    case "postgres":
+    case "postgresql":
+      return "store-postgres"
+    case "mysql":
+      return "store-mysql"
+    case "mongodb":
+    case "mongo":
+      return "store-mongodb"
+    default:
+      return "store"
+  }
+}
+
+// ── per-step → flow node ───────────────────────────────────────────────────
+function stepToNode(raw: unknown, i: number): FlowNode | null {
+  const s = asRecord(raw)
+  if (!s) return null
+  const type = str(s["type"])
+  const id = str(s["id"]) || `step-${i}`
+
+  switch (type) {
+    case "http": {
+      const http = asRecord(s["http"])
+      const url = str(http?.["url"])
+      const host = hostOf(url)
+      return {
+        id,
+        kind: "step",
+        label: "Fetch",
+        detail: host || url || str(http?.["method"]) || "HTTP",
+        iconKey: "http",
+      }
+    }
+    case "agent_run":
+      return {
+        id,
+        kind: "agent",
+        label: "Agent",
+        detail: str(s["agent_slug"]) || truncate(str(s["prompt"])) || "AI step",
+        iconKey: "agent",
+      }
+    case "transform": {
+      const t = asRecord(s["transform"])
+      return {
+        id,
+        kind: "step",
+        label: "Transform",
+        detail: truncate(str(t?.["expression"])) || "reshape",
+        iconKey: "transform",
+      }
+    }
+    case "code": {
+      const c = asRecord(s["code"])
+      return {
+        id,
+        kind: "step",
+        label: "Code",
+        detail: str(c?.["runtime"]) || "script",
+        iconKey: "code",
+      }
+    }
+    case "wait": {
+      const w = asRecord(s["wait"])
+      return {
+        id,
+        kind: "step",
+        label: "Wait",
+        detail: str(w?.["kind"]) || "pause",
+        iconKey: "wait",
+      }
+    }
+    case "call_pipeline":
+      return {
+        id,
+        kind: "step",
+        label: "Routine",
+        detail: str(s["pipeline_slug"]) || "sub-routine",
+        iconKey: "call",
+      }
+    default:
+      // Unknown/future step type — render a neutral node rather than drop it.
+      return { id, kind: "step", label: type || "Step", iconKey: "transform" }
+  }
+}
+
+/**
+ * buildFlowNodes derives the ordered, read-only data-flow node chain:
+ *   trigger → [one node per DSL step] → [datastore nodes] → [tool nodes] → output
+ *
+ * Resource nodes (datastores 🟥/🐘, tools 📜) come from the manifest and are
+ * appended after the step chain — the manifest aggregates them across the
+ * whole routine without a per-step link, so they sit between the last step
+ * and the terminal output node. Pure + never throws.
+ */
+export function buildFlowNodes(dsl: unknown, manifest?: RoutineManifest | null): FlowNode[] {
+  const def = asRecord(dsl)
+  const nodes: FlowNode[] = []
+
+  // 1. Trigger bookend.
+  const inputs = asArray(def?.["inputs"])
+  nodes.push({
+    id: "trigger",
+    kind: "trigger",
+    label: "Trigger",
+    detail: inputs.length > 0 ? `${inputs.length} input${inputs.length === 1 ? "" : "s"}` : "manual / scheduled",
+    iconKey: "trigger",
+  })
+
+  // 2. One node per step, in DSL order.
+  asArray(def?.["steps"]).forEach((raw, i) => {
+    const node = stepToNode(raw, i)
+    if (node) nodes.push(node)
+  })
+
+  // 3. Resource nodes from the manifest (datastores, then tools).
+  if (manifest) {
+    asArray(manifest.datastores).forEach((raw, i) => {
+      const ds = asRecord(raw)
+      if (!ds) return
+      const type = str(ds["type"])
+      if (!type) return
+      const note = str(ds["note"])
+      const name = str(ds["name"])
+      nodes.push({
+        id: `store-${type}-${name || i}`,
+        kind: "store",
+        label: storeLabel(type),
+        detail: note || name || undefined,
+        iconKey: storeIconKey(type),
+        brandIconKey: brandIconKey(type) ?? undefined,
+      })
+    })
+    asArray(manifest.tools).forEach((raw, i) => {
+      const t = asRecord(raw)
+      if (!t) return
+      const type = str(t["type"])
+      if (!type) return
+      const name = str(t["name"])
+      nodes.push({
+        id: `tool-${type}-${name || i}`,
+        kind: "tool",
+        label: type,
+        detail: name || undefined,
+        iconKey: "tool",
+        brandIconKey: brandIconKey(type) ?? undefined,
+      })
+    })
+  }
+
+  // 4. Output bookend.
+  const outputs = asArray(def?.["outputs"])
+  nodes.push({
+    id: "output",
+    kind: "out",
+    label: "Output",
+    detail: outputs.length > 0 ? `${outputs.length} output${outputs.length === 1 ? "" : "s"}` : "done",
+    iconKey: "out",
+  })
+
+  return nodes
+}
+
+// ── plain-language steps ("What it does") ──────────────────────────────────
+export type StepDeterminism = "ai" | "script"
+
+/**
+ * stepDeterminism classifies a step as AI (non-deterministic LLM call) or
+ * script (deterministic). Only `agent_run` invokes a model; everything else
+ * — http, code, transform, wait, call_pipeline — is deterministic.
+ */
+export function stepDeterminism(type: string): StepDeterminism {
+  return type === "agent_run" ? "ai" : "script"
+}
+
+export interface PlainStep {
+  id: string
+  // 0 = the trigger line; 1..N = the executable steps in order.
+  index: number
+  title: string
+  detail?: string
+  determinism: StepDeterminism | "trigger"
+}
+
+/**
+ * buildPlainSteps renders the routine as an ordered, human-readable list:
+ * a trigger line followed by one line per executable step, each tagged with
+ * its determinism (AI vs script). Prose comes from the shared canonical
+ * per-step renderer (lib/routine-step-describe) so the "What it does" panel
+ * reads identically to the readable summary; the mono detail line falls back
+ * to the step's technical one-liner when there's no plain-language detail.
+ * Pure + never throws.
+ */
+export function buildPlainSteps(dsl: unknown): PlainStep[] {
+  const def = asRecord(dsl)
+  const out: PlainStep[] = [
+    {
+      id: "trigger",
+      index: 0,
+      title: "Runs on trigger — manual, schedule, or webhook",
+      determinism: "trigger",
+    },
+  ]
+  let n = 0
+  asArray(def?.["steps"]).forEach((raw, i) => {
+    const s = asRecord(raw)
+    if (!s) return
+    n += 1
+    const rs = describeReadableStep(s, n)
+    out.push({
+      id: str(s["id"]) || `step-${i}`,
+      index: n,
+      title: rs.title,
+      detail: rs.detail ?? rs.technical,
+      determinism: stepDeterminism(str(s["type"])),
+    })
+  })
+  return out
+}

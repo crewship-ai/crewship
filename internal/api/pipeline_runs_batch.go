@@ -51,6 +51,25 @@ func (h *PipelineHandler) RunBatch(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "load pipeline")
 		return
 	}
+	// Same run-preflight as the single-run Run path: status gate, then the
+	// integration + resource preconditions. Without the latter two, a batch
+	// could fan out N runs of a routine whose author crew is missing a
+	// required integration / datastore / tool — each failing deep in the
+	// executor instead of being refused once up front. Same fail-open
+	// contract as Run (a parse failure skips the precondition checks and lets
+	// the executor surface the malformed definition).
+	if h.gateRoutineStatus(w, p) {
+		return
+	}
+	if dsl, perr := pipeline.Parse([]byte(p.DefinitionJSON)); perr == nil {
+		if h.gateMissingIntegrations(w, r, workspaceID, p.AuthorCrewID, "", dsl.NormalizedIntegrationsRequired()) {
+			return
+		}
+		ds, tools := declaredResources(dsl)
+		if h.gateMissingResources(w, r, workspaceID, p.AuthorCrewID, "", ds, tools) {
+			return
+		}
+	}
 
 	var body batchRunBody
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {

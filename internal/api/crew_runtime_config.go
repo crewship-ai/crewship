@@ -139,6 +139,7 @@ func buildCrewRuntimeConfig(ctx context.Context, db *sql.DB, crewID, workspaceID
 	}
 
 	if reqs != nil {
+		cfg.LoginPath = reqs.LoginPath
 		cfg.Privileged = reqs.Privileged
 		cfg.Init = reqs.Init
 		cfg.CapAdd = append(cfg.CapAdd, reqs.CapAdd...)

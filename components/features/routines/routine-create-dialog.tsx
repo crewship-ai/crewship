@@ -1,28 +1,43 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { X, FlaskConical, Save, AlertTriangle } from "lucide-react"
+import { useEffect, useMemo, useState, type ComponentType } from "react"
+import { useRouter } from "next/navigation"
+import {
+  X,
+  FlaskConical,
+  Save,
+  AlertTriangle,
+  ArrowLeft,
+  Sparkles,
+  GitFork,
+  Wrench,
+  Search,
+  ChevronRight,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 
-// RoutineCreateDialog — UI authoring flow for new routines. Two-step
-// pattern (write definition, then test) is compressed into one
-// dialog: enter DSL → Test & Save.
+// RoutineCreateDialog — describe-first authoring entry for new routines.
 //
-// The save endpoint (POST /api/v1/workspaces/{ws}/pipelines/save)
-// requires a fresh passing test_run. We run /test_run locally inside
-// this dialog before /save so the user sees explicit pass/fail before
-// the routine lands. OWNER + ADMIN roles can additionally toggle
-// "skip test gate" — useful when the DSL is hand-crafted from a
-// known-good template.
+// The dialog is a small router over four modes:
+//   • entry    — three cards: Describe it (★) / Fork an existing routine /
+//                Build step by step (advanced).
+//   • describe — pick crew → its Lead agent → a goal, then hand off into a
+//                chat with that Lead which auto-sends an authoring prompt.
+//                The backend Routine-Author skill drafts from there.
+//   • fork     — list the workspace's OWN routines; pick one to load its DSL
+//                into the advanced editor (not a curated template catalog).
+//   • advanced — the original JSON DSL editor + Test & Save gate, kept as the
+//                power-user fallback. Unchanged behaviour.
 //
-// Starter templates seed the editor with valid DSL skeletons so a
-// non-engineering author has something to riff on without reading
-// the spec first.
+// The save endpoint (POST .../pipelines/save) requires a fresh passing
+// test_run; the advanced mode runs /test_run inline before /save so the
+// user sees explicit pass/fail. OWNER/ADMIN can toggle "skip test gate".
 
 interface Props {
   workspaceId: string
@@ -30,6 +45,8 @@ interface Props {
   onClose: () => void
   onCreated: (slug: string) => void
 }
+
+type Mode = "entry" | "describe" | "fork" | "advanced"
 
 const STARTER_TEMPLATES = [
   {
@@ -116,11 +133,45 @@ interface Crew {
   name: string
 }
 
+interface AgentRec {
+  id: string
+  name: string
+  slug: string
+  agent_role: string
+  crew_id: string | null
+  role_title?: string | null
+}
+
+interface RoutineListItem {
+  id: string
+  slug: string
+  name: string
+  description?: string
+  invocation_count: number
+  ephemeral?: boolean
+}
+
 export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: Props) {
+  const router = useRouter()
+  const [mode, setMode] = useState<Mode>("entry")
+
+  // ── Shared meta ────────────────────────────────────────────────────
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   const [authorCrewId, setAuthorCrewId] = useState("")
   const [crews, setCrews] = useState<Crew[]>([])
+  const [agents, setAgents] = useState<AgentRec[]>([])
+
+  // ── Describe mode ──────────────────────────────────────────────────
+  const [goal, setGoal] = useState("")
+
+  // ── Fork mode ──────────────────────────────────────────────────────
+  const [routines, setRoutines] = useState<RoutineListItem[]>([])
+  const [routinesLoading, setRoutinesLoading] = useState(false)
+  const [forkSearch, setForkSearch] = useState("")
+  const [forking, setForking] = useState(false)
+
+  // ── Advanced (JSON DSL) mode ───────────────────────────────────────
   const [dslJson, setDslJson] = useState(() => JSON.stringify(STARTER_TEMPLATES[0].json, null, 2))
   const [parseError, setParseError] = useState<string | null>(null)
   const [busy, setBusy] = useState<"none" | "testing" | "saving">("none")
@@ -132,35 +183,70 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   // test-gate body-trust loophole. Cleared on edit + on save success.
   const [saveToken, setSaveToken] = useState<string | null>(null)
 
-  // Lazy-load crews on first open. Side effect lives in useEffect
-  // (not in render body) so React's render pipeline isn't disturbed
-  // — putting fetch + setState directly in the component body causes
-  // re-render loops and, in some hydration scenarios, blocks the
-  // dialog from mounting at all.
+  // Reset to the entry screen each time the dialog opens. (Field state is
+  // otherwise preserved across a close/reopen within the same session.)
   useEffect(() => {
-    if (!open || crews.length > 0) return
+    if (open) setMode("entry")
+  }, [open])
+
+  // Lazy-load crews + agents on first open. Side effects live in useEffect
+  // (not the render body) so React's render pipeline isn't disturbed.
+  useEffect(() => {
+    if (!open) return
     let cancelled = false
-    apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: Crew[]) => {
-        if (!cancelled) setCrews(Array.isArray(data) ? data : [])
-      })
-      .catch(() => {})
+    if (crews.length === 0) {
+      apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+        .then((r) => (r.ok ? r.json() : []))
+        .then((data: Crew[]) => {
+          if (!cancelled) setCrews(Array.isArray(data) ? data : [])
+        })
+        .catch(() => {})
+    }
+    if (agents.length === 0) {
+      apiFetch(`/api/v1/agents?workspace_id=${workspaceId}`)
+        .then((r) => (r.ok ? r.json() : []))
+        .then((data: AgentRec[]) => {
+          if (!cancelled) setAgents(Array.isArray(data) ? data : [])
+        })
+        .catch(() => {})
+    }
     return () => {
       cancelled = true
     }
-  }, [open, workspaceId, crews.length])
+  }, [open, workspaceId, crews.length, agents.length])
+
+  // Load the workspace's own routines when entering Fork mode.
+  useEffect(() => {
+    if (!open || mode !== "fork" || routines.length > 0) return
+    let cancelled = false
+    setRoutinesLoading(true)
+    apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: RoutineListItem[]) => {
+        if (!cancelled) setRoutines(Array.isArray(data) ? data : [])
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setRoutinesLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, mode, workspaceId, routines.length])
+
+  // The Lead agent for the chosen describe crew (LEAD role, same crew).
+  // Falls back to any agent in the crew so a crew without an explicit Lead
+  // can still be used as the authoring host.
+  const describeLead = useMemo<AgentRec | null>(() => {
+    if (!authorCrewId) return null
+    const inCrew = agents.filter((a) => a.crew_id === authorCrewId)
+    return inCrew.find((a) => a.agent_role === "LEAD") ?? inCrew[0] ?? null
+  }, [agents, authorCrewId])
 
   // Parse the DSL JSON for slug-preview without touching state in render.
-  // useMemo runs only when dslJson changes; setParseError stays in
-  // event handlers (handleTestRun / handleSave) so render is pure.
-  // Critical: this useMemo must execute on EVERY render regardless of
-  // `open` so React's hooks contract holds. The `if (!open) return null`
-  // below sits AFTER all hook declarations for that reason — moving it
-  // up changes the hook call count between mounts and triggers
-  // react-hooks/rules-of-hooks. CodeRabbit caught this as a critical
-  // bug: open→close→open transitions would crash with "Rendered more
-  // hooks than during the previous render".
+  // This useMemo must execute on EVERY render regardless of `open`/`mode`
+  // so React's hooks contract holds — the `if (!open) return null` below
+  // sits AFTER all hook declarations for that reason.
   const parsedDSL = useMemo<Record<string, unknown> | null>(() => {
     try {
       return JSON.parse(dslJson) as Record<string, unknown>
@@ -197,20 +283,26 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
     }
   }
 
-  const handleTestRun = async (): Promise<boolean> => {
+  // Returns both the pass verdict AND the freshly-minted save_token so a
+  // caller chaining straight into save (handleTestAndSave) can pass the token
+  // explicitly — React state (setSaveToken) is async and wouldn't be visible
+  // to a save invoked in the same tick.
+  const handleTestRun = async (): Promise<{ passed: boolean; token: string | null }> => {
     const parsed = parseDSLWithError()
     if (!parsed) {
       toast.error("Definition is not valid JSON")
-      return false
+      return { passed: false, token: null }
     }
     setBusy("testing")
     setTestResult(null)
     setSaveToken(null)
     try {
+      const testBody: Record<string, unknown> = { definition: parsed, sample_inputs: {} }
+      if (authorCrewId) testBody.author_crew_id = authorCrewId
       const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/test_run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ definition: parsed, sample_inputs: {} }),
+        body: JSON.stringify(testBody),
       })
       const data = (await res.json().catch(() => ({}))) as {
         passed?: boolean
@@ -223,40 +315,40 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
         const msg = data.error ?? `HTTP ${res.status}`
         setTestResult({ passed: false, details: msg })
         toast.error("Test run failed", { description: msg })
-        return false
+        return { passed: false, token: null }
       }
-      // status COMPLETED is the canonical pass signal; passed!=false
-      // is the legacy fallback for older servers that don't surface
-      // a status field. Prefer the explicit COMPLETED check so a
-      // status="FAILED" payload with passed missing doesn't read as a pass.
-      const passed = data.status === "COMPLETED" || (data.status === undefined && data.passed !== false)
+      // DRY_RUN_OK is the dry-run validation's pass status; COMPLETED is
+      // tolerated for forward-compat; passed!=false is the legacy fallback
+      // for older servers that surface no status field.
+      const passed =
+        data.status === "DRY_RUN_OK" ||
+        data.status === "COMPLETED" ||
+        (data.status === undefined && data.passed !== false)
       setTestResult({
         passed,
         details: passed ? `Passed${data.output ? ` (output: ${truncate(String(data.output), 120)})` : ""}` : data.error ?? "test_run reported failure",
       })
-      // Capture save_token if the server signed one. Server-side
-      // gating: only emitted when status==COMPLETED + signing
-      // secret wired. Consumed by handleSave below.
-      if (passed && data.save_token) {
-        setSaveToken(data.save_token)
+      const token = passed && data.save_token ? data.save_token : null
+      if (token) {
+        setSaveToken(token)
       }
       if (passed) {
         toast.success("Test run passed")
       } else {
         toast.error("Test run failed", { description: data.error ?? "see details below" })
       }
-      return passed
+      return { passed, token }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setTestResult({ passed: false, details: msg })
       toast.error("Test run errored", { description: msg })
-      return false
+      return { passed: false, token: null }
     } finally {
       setBusy("none")
     }
   }
 
-  const handleSave = async (assumeTestPassed: boolean) => {
+  const handleSave = async (tokenOverride?: string | null) => {
     const parsed = parseDSLWithError()
     if (!parsed) {
       toast.error("Definition is not valid JSON")
@@ -275,22 +367,15 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
         definition: parsed,
         skip_test_gate: skipTestGate,
       }
-      // Three priority paths to clearing the save's test-gate, mirroring
-      // the server-side priority in pipelines.go Save handler:
-      // 1. save_token (HMAC, no body trust) — preferred, captured from
-      //    the prior /test_run response when the server has signing wired.
-      // 2. skip_test_gate — OWNER/ADMIN-only escape hatch.
-      // 3. last_test_run_at + last_test_run_passed — legacy body-trust
-      //    fallback for servers without HMAC signing wired (graceful
-      //    degrade so this dialog works against older deployments).
-      if (saveToken) {
-        body.save_token = saveToken
-      } else if (assumeTestPassed && !skipTestGate) {
-        body.last_test_run_passed = true
-        body.last_test_run_at = new Date().toISOString()
-      } else if (skipTestGate) {
-        body.last_test_run_passed = true
+      // The server clears the save test-gate ONLY via the HMAC save_token
+      // (minted by /test_run) or the OWNER/ADMIN skip — it no longer trusts a
+      // body "it passed" claim. Prefer an explicitly-threaded token (the
+      // test-then-save chain) over the async state copy.
+      const effectiveToken = tokenOverride ?? saveToken
+      if (effectiveToken) {
+        body.save_token = effectiveToken
       }
+      // skip_test_gate is already on the body; nothing else to add.
       if (authorCrewId) body.author_crew_id = authorCrewId
 
       const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/save`, {
@@ -314,184 +399,473 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   }
 
   const handleTestAndSave = async () => {
-    const passed = await handleTestRun()
+    const { passed, token } = await handleTestRun()
     if (passed) {
-      await handleSave(true)
+      await handleSave(token)
     }
   }
+
+  // Describe handoff: navigate into the Lead's chat with the authoring
+  // prompt pre-sent. The chat page reads ?prompt= , opens a fresh session
+  // and auto-sends once connected; the Routine-Author skill takes over.
+  const handleDescribe = () => {
+    const text = goal.trim()
+    if (!describeLead || !text) return
+    const prompt = `Author a routine for me: ${text}`
+    router.push(
+      `/chat/${encodeURIComponent(describeLead.slug)}?prompt=${encodeURIComponent(prompt)}`,
+    )
+    onClose()
+  }
+
+  // Fork: load an existing routine's DSL into the advanced editor.
+  const handleForkPick = async (item: RoutineListItem) => {
+    setForking(true)
+    try {
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${item.slug}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const detail = (await res.json()) as { definition?: Record<string, unknown>; name?: string; description?: string }
+      const def = detail.definition ?? {}
+      // Rename the fork so it doesn't collide with the source slug on save.
+      const forkName = `${item.slug}-copy`
+      const nextDef = { ...def, name: forkName }
+      setDslJson(JSON.stringify(nextDef, null, 2))
+      setName("")
+      setDescription(item.description ?? detail.description ?? "")
+      setParseError(null)
+      setTestResult(null)
+      setSaveToken(null)
+      setMode("advanced")
+    } catch (e) {
+      toast.error("Could not load routine", { description: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setForking(false)
+    }
+  }
+
+  const filteredRoutines = routines.filter((r) => {
+    if (r.ephemeral) return false
+    if (!forkSearch.trim()) return true
+    const q = forkSearch.toLowerCase()
+    return `${r.slug} ${r.name} ${r.description ?? ""}`.toLowerCase().includes(q)
+  })
+
+  const headerTitle =
+    mode === "describe"
+      ? "Describe your routine"
+      : mode === "fork"
+        ? "Start from an existing routine"
+        : mode === "advanced"
+          ? "Build step by step"
+          : "New routine"
+  const headerSub =
+    mode === "describe"
+      ? "a Lead drafts it with you in chat"
+      : mode === "fork"
+        ? "fork one of your own routines"
+        : mode === "advanced"
+          ? "JSON DSL editor — Test & Save"
+          : undefined
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
       <div
-        className="flex h-[90vh] w-full max-w-3xl flex-col rounded-lg border border-white/10 bg-card shadow-2xl"
+        className={cn(
+          "flex w-full flex-col rounded-lg border border-white/10 bg-card shadow-2xl",
+          mode === "advanced"
+            ? "h-[90vh] max-w-3xl"
+            : mode === "fork"
+              ? "max-h-[85vh] max-w-2xl"
+              : "max-w-xl",
+        )}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3 shrink-0">
-          <h3 className="text-sm font-medium">New routine</h3>
-          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={onClose}>
+        <div className="flex items-center gap-2 border-b border-white/[0.06] px-4 py-3 shrink-0">
+          {mode !== "entry" && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              onClick={() => setMode("entry")}
+              aria-label="Back"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          <div className="min-w-0">
+            <h3 className="text-sm font-medium leading-tight">{headerTitle}</h3>
+            {headerSub && <p className="text-[11px] text-muted-foreground">{headerSub}</p>}
+          </div>
+          <Button size="sm" variant="ghost" className="ml-auto h-7 w-7 p-0" onClick={onClose} aria-label="Close">
             <X className="h-3 w-3" />
           </Button>
         </div>
 
-        {/* Body — split: left meta + templates, right DSL editor */}
-        <div className="flex flex-1 overflow-hidden">
-          <aside className="w-56 shrink-0 border-r border-white/[0.06] p-3 overflow-y-auto">
-            <div className="mb-3">
-              <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Name</label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Friendly name"
-                className="h-7 text-xs"
-              />
-              <p className="mt-1 text-[10px] text-muted-foreground">
-                Slug is derived from the DSL <code className="font-mono">name</code> field.
-              </p>
-            </div>
-            <div className="mb-3">
-              <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Description
-              </label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={3}
-                placeholder="One-line summary"
-                className="w-full resize-none rounded-md border border-white/10 bg-background p-1.5 text-xs"
-              />
-            </div>
-            <div className="mb-3">
-              <label htmlFor="routine-author-crew" className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Author crew
-              </label>
-              <select
-                id="routine-author-crew"
-                value={authorCrewId}
-                onChange={(e) => setAuthorCrewId(e.target.value)}
-                className="h-7 w-full rounded-md border border-white/10 bg-background px-1.5 text-xs"
-              >
-                <option value="">— choose at runtime —</option>
-                {crews.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-[10px] text-muted-foreground">
-                Crew whose agents + credentials run this routine.
-              </p>
-            </div>
+        {/* ── ENTRY — three cards ─────────────────────────────────────── */}
+        {mode === "entry" && (
+          <div className="p-4 space-y-2.5">
+            <EntryCard
+              icon={Sparkles}
+              tone="primary"
+              star
+              title="Describe it"
+              description="Tell a Lead agent your goal in plain words. It drafts the routine with you in chat, asks a couple of questions, and shows a readable preview before anything is saved."
+              onClick={() => setMode("describe")}
+            />
+            <EntryCard
+              icon={GitFork}
+              title="Fork an existing routine"
+              description="Start from one of your workspace's own routines and tweak it. No curated catalog — the library grows from what you and your agents actually build."
+              onClick={() => setMode("fork")}
+            />
+            <EntryCard
+              icon={Wrench}
+              title="Build step by step"
+              description="Hand-write the JSON DSL in the advanced editor, test-run it, and save. For when you already know exactly what you want."
+              onClick={() => setMode("advanced")}
+            />
+          </div>
+        )}
 
-            <div className="my-3 border-t border-white/[0.06]" />
+        {/* ── DESCRIBE ────────────────────────────────────────────────── */}
+        {mode === "describe" && (
+          <div className="p-4 space-y-4">
+            <div className="flex items-end gap-3">
+              <div className="flex-1">
+                <label htmlFor="describe-crew" className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground">
+                  Owner (crew)
+                </label>
+                <select
+                  id="describe-crew"
+                  value={authorCrewId}
+                  onChange={(e) => setAuthorCrewId(e.target.value)}
+                  className="h-8 w-full rounded-md border border-white/10 bg-background px-2 text-xs"
+                >
+                  <option value="">Choose a crew…</option>
+                  {crews.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="pb-1.5 text-[11px] text-muted-foreground">
+                {authorCrewId ? (
+                  describeLead ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="inline-block h-4 w-4 rounded-full bg-gradient-to-br from-violet-500 to-cyan-400" />
+                      Lead: <b className="text-foreground">{describeLead.name}</b>
+                    </span>
+                  ) : (
+                    <span className="text-amber-400">No Lead in this crew</span>
+                  )
+                ) : (
+                  <span className="text-muted-foreground-soft">pick a crew →</span>
+                )}
+              </div>
+            </div>
 
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Starter templates
+              <label htmlFor="describe-goal" className="mb-1.5 block text-sm font-medium">
+                What should the routine do?
               </label>
-              <div className="mt-1 space-y-1">
-                {STARTER_TEMPLATES.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => applyTemplate(t.id)}
-                    className="w-full rounded-md border border-white/[0.06] bg-card/40 px-2 py-1.5 text-left text-xs hover:border-white/15 hover:bg-card transition-colors"
-                  >
-                    <div className="font-medium">{t.label}</div>
-                    <p className="mt-0.5 text-[10px] text-muted-foreground line-clamp-2">{t.description}</p>
-                  </button>
-                ))}
-              </div>
+              <textarea
+                id="describe-goal"
+                value={goal}
+                onChange={(e) => setGoal(e.target.value)}
+                rows={4}
+                placeholder="Describe it in your own words. e.g. Every weekday morning, fetch the top 5 Hacker News stories, summarize each in one sentence, and post the digest to Slack #standup."
+                className="w-full resize-y rounded-md border border-white/10 bg-background p-2.5 text-[13px] leading-relaxed"
+              />
             </div>
-          </aside>
 
-          <div className="flex flex-1 flex-col overflow-hidden">
-            <div className="flex items-center justify-between border-b border-white/[0.06] px-3 py-1.5 shrink-0">
-              <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                <span>JSON DSL</span>
-                <span>·</span>
-                <span className="font-mono">slug: {slug}</span>
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              {describeLead?.name ?? "The Lead"} will draft it and ask a couple of questions, then show a
+              readable preview — nothing is saved without you. It grounds the draft in your crew's connected
+              integrations, your existing routines, and the routine schema.
+            </p>
+
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <div className="flex gap-3 text-[11px] text-muted-foreground">
+                <button type="button" className="hover:text-foreground" onClick={() => setMode("fork")}>
+                  fork a routine
+                </button>
+                <button type="button" className="hover:text-foreground" onClick={() => setMode("advanced")}>
+                  JSON editor
+                </button>
               </div>
-              {parseError && (
-                <Badge variant="outline" className="text-[10px] border-red-500/30 text-red-400">
-                  invalid JSON
-                </Badge>
+              <Button size="sm" className="gap-1.5" onClick={handleDescribe} disabled={!describeLead || !goal.trim()}>
+                <Sparkles className="h-3.5 w-3.5" />
+                Draft with {describeLead?.name ?? "a Lead"}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ── FORK ────────────────────────────────────────────────────── */}
+        {mode === "fork" && (
+          <div className="flex min-h-0 flex-1 flex-col p-4">
+            <div className="relative mb-3 shrink-0">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={forkSearch}
+                onChange={(e) => setForkSearch(e.target.value)}
+                placeholder="Search your routines…"
+                className="h-8 pl-8 text-xs"
+              />
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {routinesLoading ? (
+                <div className="flex items-center justify-center py-10 text-xs text-muted-foreground">
+                  <Spinner className="mr-2 h-3.5 w-3.5" /> Loading routines…
+                </div>
+              ) : filteredRoutines.length === 0 ? (
+                <div className="rounded-md border border-dashed border-white/10 px-3 py-6 text-center text-xs text-muted-foreground">
+                  {routines.length === 0
+                    ? "No routines yet. Describe one above, or build it step by step."
+                    : "No routines match your search."}
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {filteredRoutines.map((r) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      disabled={forking}
+                      onClick={() => handleForkPick(r)}
+                      className="group flex w-full items-center gap-3 rounded-md border border-white/[0.06] bg-card/40 px-3 py-2 text-left transition-colors hover:border-white/15 hover:bg-card disabled:opacity-50"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-mono text-xs font-medium">{r.slug}</div>
+                        {r.description && (
+                          <p className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{r.description}</p>
+                        )}
+                      </div>
+                      <span className="shrink-0 text-[10px] text-muted-foreground-soft">
+                        {r.invocation_count > 0 ? `ran ${r.invocation_count}×` : "never run"}
+                      </span>
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
-            <textarea
-              value={dslJson}
-              aria-label="Routine definition JSON"
-              onChange={(e) => {
-                setDslJson(e.target.value)
-                setParseError(null)
-                setTestResult(null)
-                setSaveToken(null) // edit → bound HMAC token invalid
-              }}
-              spellCheck={false}
-              className="flex-1 resize-none bg-background p-3 font-mono text-[11px] leading-relaxed outline-none"
-            />
-            {testResult && (
-              <div
-                className={cn(
-                  "border-t px-3 py-2 text-xs",
-                  testResult.passed ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-300" : "border-red-500/30 bg-red-500/5 text-red-400",
-                )}
-              >
-                <div className="flex items-center gap-1.5 font-medium">
-                  {testResult.passed ? "Test passed" : "Test failed"}
-                </div>
-                <p className="mt-0.5 font-mono text-[10px] opacity-80">{testResult.details}</p>
-              </div>
-            )}
+            <p className="mt-3 shrink-0 rounded-md border border-dashed border-white/10 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+              Forking copies a routine&apos;s definition into the editor so you can adapt it — the original is
+              untouched. Save creates a new routine.
+            </p>
           </div>
-        </div>
+        )}
 
-        {/* Footer */}
-        <div className="flex items-center justify-between gap-2 border-t border-white/[0.06] px-3 py-2 shrink-0">
-          <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={skipTestGate}
-              onChange={(e) => setSkipTestGate(e.target.checked)}
-              className="h-3 w-3 cursor-pointer accent-blue-500"
-            />
-            Skip test-run gate
-            <AlertTriangle className="h-2.5 w-2.5" />
-            <span className="text-[10px]">(OWNER / ADMIN only)</span>
-          </label>
-          <div className="flex gap-2">
-            <Button size="sm" variant="ghost" onClick={onClose} disabled={busy !== "none"}>
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleTestRun}
-              disabled={busy !== "none"}
-              className="gap-1.5"
-            >
-              <FlaskConical className="h-3 w-3" />
-              {busy === "testing" ? "Testing…" : "Test only"}
-            </Button>
-            {skipTestGate ? (
-              <Button
-                size="sm"
-                onClick={() => handleSave(false)}
-                disabled={busy !== "none"}
-                className="gap-1.5"
-              >
-                <Save className="h-3 w-3" />
-                {busy === "saving" ? "Saving…" : "Save (skip test)"}
-              </Button>
-            ) : (
-              <Button size="sm" onClick={handleTestAndSave} disabled={busy !== "none"} className="gap-1.5">
-                <Save className="h-3 w-3" />
-                {busy === "testing" ? "Testing…" : busy === "saving" ? "Saving…" : "Test & Save"}
-              </Button>
-            )}
-          </div>
-        </div>
+        {/* ── ADVANCED (JSON DSL) ─────────────────────────────────────── */}
+        {mode === "advanced" && (
+          <>
+            <div className="flex flex-1 overflow-hidden">
+              <aside className="w-56 shrink-0 border-r border-white/[0.06] p-3 overflow-y-auto">
+                <div className="mb-3">
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Name</label>
+                  <Input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Friendly name"
+                    className="h-7 text-xs"
+                  />
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    Slug is derived from the DSL <code className="font-mono">name</code> field.
+                  </p>
+                </div>
+                <div className="mb-3">
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Description
+                  </label>
+                  <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    rows={3}
+                    placeholder="One-line summary"
+                    className="w-full resize-none rounded-md border border-white/10 bg-background p-1.5 text-xs"
+                  />
+                </div>
+                <div className="mb-3">
+                  <label htmlFor="routine-author-crew" className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Author crew
+                  </label>
+                  <select
+                    id="routine-author-crew"
+                    value={authorCrewId}
+                    onChange={(e) => setAuthorCrewId(e.target.value)}
+                    className="h-7 w-full rounded-md border border-white/10 bg-background px-1.5 text-xs"
+                  >
+                    <option value="">— choose at runtime —</option>
+                    {crews.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    Crew whose agents + credentials run this routine.
+                  </p>
+                </div>
+
+                <div className="my-3 border-t border-white/[0.06]" />
+
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Starter templates
+                  </label>
+                  <div className="mt-1 space-y-1">
+                    {STARTER_TEMPLATES.map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => applyTemplate(t.id)}
+                        className="w-full rounded-md border border-white/[0.06] bg-card/40 px-2 py-1.5 text-left text-xs hover:border-white/15 hover:bg-card transition-colors"
+                      >
+                        <div className="font-medium">{t.label}</div>
+                        <p className="mt-0.5 text-[10px] text-muted-foreground line-clamp-2">{t.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </aside>
+
+              <div className="flex flex-1 flex-col overflow-hidden">
+                <div className="flex items-center justify-between border-b border-white/[0.06] px-3 py-1.5 shrink-0">
+                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                    <span>JSON DSL</span>
+                    <span>·</span>
+                    <span className="font-mono">slug: {slug}</span>
+                  </div>
+                  {parseError && (
+                    <Badge variant="outline" className="text-[10px] border-red-500/30 text-red-400">
+                      invalid JSON
+                    </Badge>
+                  )}
+                </div>
+                <textarea
+                  value={dslJson}
+                  aria-label="Routine definition JSON"
+                  onChange={(e) => {
+                    setDslJson(e.target.value)
+                    setParseError(null)
+                    setTestResult(null)
+                    setSaveToken(null) // edit → bound HMAC token invalid
+                  }}
+                  spellCheck={false}
+                  className="flex-1 resize-none bg-background p-3 font-mono text-[11px] leading-relaxed outline-none"
+                />
+                {testResult && (
+                  <div
+                    className={cn(
+                      "border-t px-3 py-2 text-xs",
+                      testResult.passed ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-300" : "border-red-500/30 bg-red-500/5 text-red-400",
+                    )}
+                  >
+                    <div className="flex items-center gap-1.5 font-medium">
+                      {testResult.passed ? "Test passed" : "Test failed"}
+                    </div>
+                    <p className="mt-0.5 font-mono text-[10px] opacity-80">{testResult.details}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between gap-2 border-t border-white/[0.06] px-3 py-2 shrink-0">
+              <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={skipTestGate}
+                  onChange={(e) => setSkipTestGate(e.target.checked)}
+                  className="h-3 w-3 cursor-pointer accent-blue-500"
+                />
+                Skip test-run gate
+                <AlertTriangle className="h-2.5 w-2.5" />
+                <span className="text-[10px]">(OWNER / ADMIN only)</span>
+              </label>
+              <div className="flex gap-2">
+                <Button size="sm" variant="ghost" onClick={onClose} disabled={busy !== "none"}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleTestRun}
+                  disabled={busy !== "none"}
+                  className="gap-1.5"
+                >
+                  <FlaskConical className="h-3 w-3" />
+                  {busy === "testing" ? "Testing…" : "Test only"}
+                </Button>
+                {skipTestGate ? (
+                  <Button
+                    size="sm"
+                    onClick={() => handleSave()}
+                    disabled={busy !== "none"}
+                    className="gap-1.5"
+                  >
+                    <Save className="h-3 w-3" />
+                    {busy === "saving" ? "Saving…" : "Save (skip test)"}
+                  </Button>
+                ) : (
+                  <Button size="sm" onClick={handleTestAndSave} disabled={busy !== "none"} className="gap-1.5">
+                    <Save className="h-3 w-3" />
+                    {busy === "testing" ? "Testing…" : busy === "saving" ? "Saving…" : "Test & Save"}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
+  )
+}
+
+function EntryCard({
+  icon: Icon,
+  title,
+  description,
+  onClick,
+  tone = "default",
+  star = false,
+}: {
+  icon: ComponentType<{ className?: string }>
+  title: string
+  description: string
+  onClick: () => void
+  tone?: "default" | "primary"
+  star?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors",
+        tone === "primary"
+          ? "border-primary/40 bg-primary/[0.06] hover:border-primary/60 hover:bg-primary/10"
+          : "border-white/[0.08] bg-card/40 hover:border-white/20 hover:bg-card",
+      )}
+    >
+      <span
+        className={cn(
+          "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
+          tone === "primary" ? "bg-primary/20 text-primary" : "bg-white/[0.06] text-muted-foreground",
+        )}
+      >
+        <Icon className="h-4 w-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 text-sm font-medium">
+          {title}
+          {star && <Sparkles className="h-3 w-3 text-primary" aria-label="recommended" />}
+        </div>
+        <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{description}</p>
+      </div>
+      <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+    </button>
   )
 }
 

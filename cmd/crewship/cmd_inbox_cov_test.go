@@ -249,27 +249,39 @@ func TestInboxBulkReadRunE_EmptyIDsList(t *testing.T) {
 	}
 }
 
-func TestInboxBulkReadRunE_PartialFailure(t *testing.T) {
+func TestInboxBulkReadRunE_SubmitsToBulkEndpoint(t *testing.T) {
 	stub := covSetupCli5(t)
 	covSetFlagCli5(t, inboxBulkReadCmd, "ids", "ok_1, ghost ,ok_2")
 	covSetFlagCli5(t, inboxBulkReadCmd, "all-unread", "false")
-	stub.OnPatch("/api/v1/inbox/ok_1", clitest.JSONResponse(200, map[string]any{"ok": true}))
-	stub.OnPatch("/api/v1/inbox/ok_2", clitest.JSONResponse(200, map[string]any{"ok": true}))
-	stub.OnPatch("/api/v1/inbox/ghost", clitest.ErrorResponse(404, "not found"))
+	// One bulk request carries all parsed ids; the server reports the split.
+	stub.OnPost("/api/v1/inbox/bulk", clitest.JSONResponse(200, map[string]any{
+		"updated": 2, "skipped": 0, "not_found": 1, "state": "read",
+	}))
 
 	var err error
 	out := covCaptureAll(t, func() { err = inboxBulkReadCmd.RunE(inboxBulkReadCmd, nil) })
-	if err == nil || !strings.Contains(err.Error(), "1 of 3 items failed") {
-		t.Errorf("expected partial-failure error; got %v", err)
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
 	}
-	if !strings.Contains(out, "2 ok / 1 failed") {
-		t.Errorf("expected summary line; got:\n%s", out)
+	if !strings.Contains(out, "2 updated") || !strings.Contains(out, "1 not found") {
+		t.Errorf("expected aggregated summary; got:\n%s", out)
 	}
-	// The loop must NOT abort on the failing id — both ok ids patched.
-	for _, id := range []string{"ok_1", "ok_2"} {
-		if calls := stub.CallsFor("PATCH", "/api/v1/inbox/"+id); len(calls) != 1 {
-			t.Errorf("expected PATCH for %s despite mid-loop failure, got %d", id, len(calls))
-		}
+	calls := stub.CallsFor("POST", "/api/v1/inbox/bulk")
+	if len(calls) != 1 {
+		t.Fatalf("expected exactly 1 bulk POST, got %d", len(calls))
+	}
+	var body struct {
+		IDs   []string `json:"ids"`
+		State string   `json:"state"`
+	}
+	clitest.MustDecodeJSONBody(calls[0].Body, &body)
+	if body.State != "read" {
+		t.Errorf("bulk state = %q, want read", body.State)
+	}
+	// The empty token (" ghost " trims to "ghost"; the lone spaces drop) leaves
+	// exactly the 3 non-empty ids in a single batch.
+	if len(body.IDs) != 3 {
+		t.Errorf("bulk ids = %v, want [ok_1 ghost ok_2]", body.IDs)
 	}
 }
 
@@ -281,8 +293,9 @@ func TestInboxBulkResolveRunE_AllUnread(t *testing.T) {
 	stub.OnGet("/api/v1/inbox", clitest.JSONResponse(200, map[string]any{
 		"rows": []map[string]any{{"id": "u1"}, {"id": "u2"}},
 	}))
-	stub.OnPatch("/api/v1/inbox/u1", clitest.JSONResponse(200, map[string]any{"ok": true}))
-	stub.OnPatch("/api/v1/inbox/u2", clitest.JSONResponse(200, map[string]any{"ok": true}))
+	stub.OnPost("/api/v1/inbox/bulk", clitest.JSONResponse(200, map[string]any{
+		"updated": 2, "skipped": 0, "not_found": 0, "state": "resolved",
+	}))
 
 	var err error
 	covCaptureAll(t, func() { err = inboxBulkResolveCmd.RunE(inboxBulkResolveCmd, nil) })
@@ -293,16 +306,22 @@ func TestInboxBulkResolveRunE_AllUnread(t *testing.T) {
 	if !strings.Contains(listQ, "state=unread") || !strings.Contains(listQ, "limit=500") {
 		t.Errorf("all-unread list query wrong: %q", listQ)
 	}
-	for _, id := range []string{"u1", "u2"} {
-		calls := stub.CallsFor("PATCH", "/api/v1/inbox/"+id)
-		if len(calls) != 1 {
-			t.Fatalf("expected 1 PATCH for %s, got %d", id, len(calls))
-		}
-		var body map[string]string
-		clitest.MustDecodeJSONBody(calls[0].Body, &body)
-		if body["state"] != "resolved" || body["resolved_action"] != "acknowledged" {
-			t.Errorf("%s body = %v", id, body)
-		}
+	// The fetched unread ids are submitted to the bulk endpoint in ONE request.
+	calls := stub.CallsFor("POST", "/api/v1/inbox/bulk")
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 bulk POST, got %d", len(calls))
+	}
+	var body struct {
+		IDs            []string `json:"ids"`
+		State          string   `json:"state"`
+		ResolvedAction string   `json:"resolved_action"`
+	}
+	clitest.MustDecodeJSONBody(calls[0].Body, &body)
+	if body.State != "resolved" || body.ResolvedAction != "acknowledged" {
+		t.Errorf("bulk body = %+v, want state=resolved action=acknowledged", body)
+	}
+	if len(body.IDs) != 2 || body.IDs[0] != "u1" || body.IDs[1] != "u2" {
+		t.Errorf("bulk ids = %v, want [u1 u2]", body.IDs)
 	}
 }
 
@@ -333,13 +352,13 @@ func TestInboxBulkReadRunE_AllUnreadHitsCap(t *testing.T) {
 	stub.OnGet("/api/v1/inbox", clitest.JSONResponse(200, map[string]any{"rows": rows}))
 
 	err := inboxBulkReadCmd.RunE(inboxBulkReadCmd, nil)
-	if err == nil || !strings.Contains(err.Error(), "more than 500 unread items") {
+	if err == nil || !strings.Contains(err.Error(), "unread-item page cap") {
 		t.Errorf("expected cap refusal; got %v", err)
 	}
-	// Refusal must happen BEFORE any PATCH fires.
+	// Refusal must happen BEFORE any bulk mutation fires.
 	for _, c := range stub.Calls() {
-		if c.Method == "PATCH" {
-			t.Fatalf("cap refusal must not patch anything; saw PATCH %s", c.Path)
+		if c.Method == "POST" {
+			t.Fatalf("cap refusal must not submit a bulk request; saw POST %s", c.Path)
 		}
 	}
 }

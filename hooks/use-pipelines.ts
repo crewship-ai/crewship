@@ -22,6 +22,10 @@ export interface Pipeline {
   invocation_count: number
   last_invoked_at?: string
   last_invocation_status?: string
+  // Lifecycle status: "active" (normal/runnable), "proposed" (risky /
+  // agent-authored, awaiting MANAGER+ approval), "disabled" (killed by
+  // OWNER/ADMIN). Absent on older payloads → treated as "active".
+  status?: "active" | "proposed" | "disabled"
   author_crew_id?: string
   author_agent_id?: string
   // author_agent_name is denormalized server-side from the agents
