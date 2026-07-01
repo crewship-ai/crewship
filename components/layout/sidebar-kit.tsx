@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { ChevronDown, Filter as FilterIcon, Search, X } from "lucide-react"
+import { ChevronDown, Filter as FilterIcon, PanelLeftClose, PanelLeftOpen, Search, X } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -155,6 +155,35 @@ export function SidebarViewButton({
       {...props}
     >
       {children ?? <span className="text-base leading-none">⋮</span>}
+    </button>
+  )
+}
+
+/**
+ * Collapse toggle — lives in the toolbar next to search on every sidebar
+ * (never a separate empty strip or a floating button). When the sidebar is
+ * collapsed, render this on its own in the narrow rail to expand it again.
+ */
+export function SidebarCollapseButton({
+  collapsed,
+  onToggle,
+  className,
+  ...props
+}: React.ComponentProps<"button"> & { collapsed: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      title={collapsed ? "Expand" : "Collapse"}
+      className={cn(
+        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground/70",
+        "hover:text-foreground hover:bg-white/[0.04] transition-colors",
+        className,
+      )}
+      {...props}
+    >
+      {collapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
     </button>
   )
 }

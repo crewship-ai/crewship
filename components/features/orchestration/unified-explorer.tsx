@@ -16,6 +16,7 @@ import {
   SidebarFilterButton,
   SidebarSection,
   SidebarRow,
+  SidebarCollapseButton,
 } from "@/components/layout/sidebar-kit"
 
 interface UnifiedExplorerProps {
@@ -37,6 +38,8 @@ interface UnifiedExplorerProps {
   onAgentFilter: (agentId: string | null) => void
   filterPriority?: IssuePriority | null
   onPriorityFilter?: (priority: IssuePriority | null) => void
+  /** Collapse toggle — rendered in the toolbar next to search. */
+  onToggleCollapse?: () => void
 }
 
 const dropdownAnim = {
@@ -51,6 +54,7 @@ export function UnifiedExplorer({
   crews,
   filterCrewId, onCrewFilter, filterAgentId, onAgentFilter,
   filterPriority = null, onPriorityFilter,
+  onToggleCollapse,
 }: UnifiedExplorerProps) {
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false)
@@ -173,6 +177,7 @@ export function UnifiedExplorer({
             )}
           </AnimatePresence>
         </div>
+        {onToggleCollapse && <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />}
       </SidebarToolbar>
 
       {/* ── Projects ── */}

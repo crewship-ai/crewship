@@ -8,6 +8,7 @@ import {
   SidebarSection,
   SidebarRow,
   SidebarActiveChip,
+  SidebarCollapseButton,
 } from "../sidebar-kit"
 
 describe("sidebar-kit", () => {
@@ -80,6 +81,15 @@ describe("sidebar-kit", () => {
     expect(row.getAttribute("data-selected")).toBe("true")
     fireEvent.click(row)
     expect(onSelect).toHaveBeenCalled()
+  })
+
+  it("SidebarCollapseButton toggles and reflects collapsed state in its label", () => {
+    const onToggle = vi.fn()
+    const { rerender } = render(<SidebarCollapseButton collapsed={false} onToggle={onToggle} />)
+    fireEvent.click(screen.getByRole("button", { name: /collapse sidebar/i }))
+    expect(onToggle).toHaveBeenCalled()
+    rerender(<SidebarCollapseButton collapsed onToggle={onToggle} />)
+    expect(screen.getByRole("button", { name: /expand sidebar/i })).toBeTruthy()
   })
 
   it("SidebarActiveChip renders a removable chip", () => {

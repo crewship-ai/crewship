@@ -2,14 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  ChevronRight, PanelLeftClose, PanelLeftOpen, Clock,
+  ChevronRight, Clock,
 } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { cn } from "@/lib/utils"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { isGhost, effectiveStatus } from "@/lib/agent-ephemeral"
-import { SidebarToolbar, SidebarSearch, SidebarRow } from "@/components/layout/sidebar-kit"
+import { SidebarToolbar, SidebarSearch, SidebarRow, SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 
 const STATUS_BADGE: Record<string, { label: string; className: string; pulse?: boolean }> = {
   RUNNING: { label: "Running", className: "text-emerald-400", pulse: true },
@@ -142,17 +141,7 @@ export function CrewsExplorer({
     return { running, error, idle }
   }, [agentsByCrew])
 
-  const collapseToggle = (
-    <Button
-      variant="ghost"
-      size="icon-xs"
-      className="text-muted-foreground hover:text-foreground/70 shrink-0"
-      onClick={onToggleCollapse}
-      aria-label={collapsed ? "Expand explorer" : "Collapse explorer"}
-    >
-      {collapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
-    </Button>
-  )
+  const collapseToggle = <SidebarCollapseButton collapsed={collapsed} onToggle={onToggleCollapse} />
 
   return (
     <div className="flex flex-col h-full bg-card border-r border-white/[0.1] overflow-hidden">

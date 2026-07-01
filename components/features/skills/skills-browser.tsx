@@ -18,8 +18,6 @@ import {
   AlertTriangle,
   Library,
   CheckSquare,
-  PanelLeftClose,
-  PanelLeftOpen,
   Users,
   Code2,
   Database,
@@ -50,6 +48,7 @@ import {
   SidebarSearch,
   SidebarSection,
   SidebarRow,
+  SidebarCollapseButton,
 } from "@/components/layout/sidebar-kit"
 import { SkillCard, type SkillCardData } from "@/components/features/skills/skill-card"
 import { SkillsDetailPanel } from "@/components/features/skills/skills-detail-panel"
@@ -514,15 +513,7 @@ export function SkillsBrowser() {
         )}>
           {railCollapsed ? (
             <div className="flex items-center justify-center px-2 py-2 shrink-0">
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                className="text-muted-foreground/70 hover:text-foreground/70"
-                onClick={() => setRailCollapsed(false)}
-                aria-label="Expand filter rail"
-              >
-                <PanelLeftOpen className="h-3.5 w-3.5" />
-              </Button>
+              <SidebarCollapseButton collapsed onToggle={() => setRailCollapsed(false)} />
             </div>
           ) : (
             <>
@@ -537,15 +528,7 @@ export function SkillsBrowser() {
                   placeholder="Search skills…"
                   aria-label="Search skills"
                 />
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="text-muted-foreground/70 hover:text-foreground/70 shrink-0"
-                  onClick={() => setRailCollapsed(true)}
-                  aria-label="Collapse filter rail"
-                >
-                  <PanelLeftClose className="h-3.5 w-3.5" />
-                </Button>
+                <SidebarCollapseButton collapsed={false} onToggle={() => setRailCollapsed(true)} />
               </SidebarToolbar>
 
               <div className="flex-1 overflow-y-auto py-1">

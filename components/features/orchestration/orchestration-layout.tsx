@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Workflow, Clock, Activity, GitBranch,
-  PanelLeftClose, PanelLeftOpen,
+  PanelLeftOpen,
   FileCode2, Container,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
   CircleDot, FolderKanban, ScrollText,
@@ -13,6 +13,7 @@ import {
 // Tabs replaced with custom nav for orchestration toolbar
 import { Button } from "@/components/ui/button"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
+import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 import { cn } from "@/lib/utils"
 import { WorkflowGraph } from "@/components/features/orchestration/workflow-graph"
 import { PipelineDetailSheet } from "@/components/features/orchestration/pipeline-detail-sheet"
@@ -649,20 +650,13 @@ export function OrchestrationLayout({
           <div className={cn(
             "row-span-1 border-r border-white/[0.1] bg-card flex flex-col min-h-0 transition-all duration-200 overflow-hidden",
           )}>
-            {/* Toggle */}
-            <div className="flex items-center justify-between px-2 py-1.5 border-b border-border shrink-0">
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                className="text-muted-foreground/70 hover:text-foreground/70 ml-auto"
-                onClick={() => setLeftCollapsed(!leftCollapsed)}
-              >
-                {leftCollapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
-              </Button>
-            </div>
-
-            <AnimatePresence mode="wait">
-              {!leftCollapsed && (
+            {leftCollapsed ? (
+              /* Collapsed rail — a single expand button, no empty strip. */
+              <div className="flex h-full flex-col items-center pt-1.5">
+                <SidebarCollapseButton collapsed onToggle={() => setLeftCollapsed(false)} />
+              </div>
+            ) : (
+              <AnimatePresence mode="wait">
                 <motion.div
                   key={selectedMissionId}
                   initial={{ opacity: 0, x: -8 }}
@@ -693,10 +687,11 @@ export function OrchestrationLayout({
                     onAgentFilter={setFilterAgentId}
                     filterPriority={filterPriority}
                     onPriorityFilter={setFilterPriority}
+                    onToggleCollapse={() => setLeftCollapsed(true)}
                   />
                 </motion.div>
-              )}
-            </AnimatePresence>
+              </AnimatePresence>
+            )}
           </div>
         )}
 

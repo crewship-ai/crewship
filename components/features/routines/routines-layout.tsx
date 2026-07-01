@@ -4,11 +4,12 @@ import { useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
   ScrollText, Calendar, BarChart3, Workflow,
-  Plus, Upload, PanelLeftClose, PanelLeftOpen,
+  Plus, Upload,
   X, ChevronLeft, ChevronRight,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
+import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api-fetch"
@@ -201,41 +202,25 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           )}
         >
           {leftCollapsed ? (
-            <div className="flex h-full flex-col items-center pt-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 w-7 p-0"
-                onClick={() => setLeftCollapsed(false)}
-                title="Expand filters"
-              >
-                <PanelLeftOpen className="h-3 w-3" />
-              </Button>
+            <div className="flex h-full flex-col items-center pt-1.5">
+              <SidebarCollapseButton collapsed onToggle={() => setLeftCollapsed(false)} />
             </div>
           ) : (
-            <div className="relative flex h-full flex-col">
-              {/* Explorer-style sidebar built on the shared sidebar-kit —
-                  SidebarToolbar (search + Filter popover), a collapsible
-                  STATUS bucket section, and the ROUTINES list. */}
-              <RoutinesExplorer
-                routines={pipelines}
-                search={search}
-                onSearchChange={setSearch}
-                selectedSlug={selectedSlug}
-                onSelectRoutine={handleSelect}
-                filters={filters}
-                onChange={setFilters}
-              />
-              <Button
-                size="sm"
-                variant="ghost"
-                className="absolute right-1 top-1.5 h-6 w-6 p-0"
-                onClick={() => setLeftCollapsed(true)}
-                title="Collapse"
-              >
-                <PanelLeftClose className="h-3 w-3" />
-              </Button>
-            </div>
+            /* Explorer-style sidebar built on the shared sidebar-kit —
+               SidebarToolbar (search + Filter + collapse), a collapsible
+               STATUS bucket section, and the ROUTINES list. The collapse
+               toggle lives inside the toolbar (next to search), not as a
+               floating button. */
+            <RoutinesExplorer
+              routines={pipelines}
+              search={search}
+              onSearchChange={setSearch}
+              selectedSlug={selectedSlug}
+              onSelectRoutine={handleSelect}
+              filters={filters}
+              onChange={setFilters}
+              onToggleCollapse={() => setLeftCollapsed(true)}
+            />
           )}
         </aside>
 
