@@ -98,6 +98,49 @@ func TestNewWSClient_UnreachableServer_Errors(t *testing.T) {
 
 // ---- NewWSClient + Subscribe + SendMessage + CancelMessage + send (one server run) ----
 
+// TestWSClient_SendMessage_MaxTurns verifies the per-run turn cap rides in the
+// send_message frame when set (>0) and is omitted otherwise — the CLI half of
+// the `--max-turns` flag.
+func TestWSClient_SendMessage_MaxTurns(t *testing.T) {
+	url, recv, _, stop := startTestWSServer(t)
+	defer stop()
+
+	c, err := NewWSClient(url, "tok-1")
+	if err != nil {
+		t.Fatalf("NewWSClient: %v", err)
+	}
+	defer c.Close()
+
+	nextSendPayload := func() string {
+		deadline := time.After(2 * time.Second)
+		for {
+			select {
+			case m := <-recv:
+				if m.Type == "send_message" {
+					return string(m.Payload)
+				}
+			case <-deadline:
+				t.Fatal("timed out waiting for send_message frame")
+				return ""
+			}
+		}
+	}
+
+	if err := c.SendMessage("session:chat-1", "chat-1", "hi", 9); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if p := nextSendPayload(); !strings.Contains(p, `"max_turns":9`) {
+		t.Fatalf("payload missing max_turns: %s", p)
+	}
+
+	if err := c.SendMessage("session:chat-1", "chat-1", "hi"); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if p := nextSendPayload(); strings.Contains(p, "max_turns") {
+		t.Fatalf("zero/unset max_turns must be omitted: %s", p)
+	}
+}
+
 func TestWSClient_SubscribeSendCancel_RoundTrip(t *testing.T) {
 	url, recv, _, stop := startTestWSServer(t)
 	defer stop()

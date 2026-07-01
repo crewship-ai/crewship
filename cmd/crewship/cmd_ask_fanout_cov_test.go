@@ -108,7 +108,7 @@ func covFanoutServer(t *testing.T) *httptest.Server {
 }
 
 func TestRunFanout_NoAgents(t *testing.T) {
-	err := runFanout("http://127.0.0.1:0", "tok", nil, "p", true, nil, nil, 1)
+	err := runFanout("http://127.0.0.1:0", "tok", nil, "p", true, nil, nil, 1, 0)
 	if err == nil || !strings.Contains(err.Error(), "no agents") {
 		t.Errorf("expected no-agents error; got %v", err)
 	}
@@ -134,7 +134,7 @@ func TestRunFanout_MixedResults(t *testing.T) {
 
 	var runErr error
 	out := covCaptureStdoutCli8(t, func() {
-		runErr = runFanout(srv.URL, "ws-tok", agents, "what is up?", false, nil, save, 10)
+		runErr = runFanout(srv.URL, "ws-tok", agents, "what is up?", false, nil, save, 10, 0)
 	})
 	if runErr != nil {
 		t.Fatalf("runFanout: %v", runErr)
@@ -183,7 +183,7 @@ func TestRunFanout_QuietMarkdown(t *testing.T) {
 
 	var runErr error
 	out := covCaptureStdoutCli8(t, func() {
-		runErr = runFanout(srv.URL, "ws-tok", agents, "hi", true, md, nil, 10)
+		runErr = runFanout(srv.URL, "ws-tok", agents, "hi", true, md, nil, 10, 0)
 	})
 	if runErr != nil {
 		t.Fatalf("runFanout: %v", runErr)
@@ -202,7 +202,7 @@ func TestFanoutOne_Success(t *testing.T) {
 	covSetupCli8(t, srv.URL)
 	client := newAPIClient()
 
-	text, err := fanoutOne(t.Context(), client, srv.URL, "ws-tok", "agent-a", "ping")
+	text, err := fanoutOne(t.Context(), client, srv.URL, "ws-tok", "agent-a", "ping", 0)
 	if err != nil {
 		t.Fatalf("fanoutOne: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestFanoutOne_AgentErrorEvent(t *testing.T) {
 	covSetupCli8(t, srv.URL)
 	client := newAPIClient()
 
-	text, err := fanoutOne(t.Context(), client, srv.URL, "ws-tok", "agent-err", "ping")
+	text, err := fanoutOne(t.Context(), client, srv.URL, "ws-tok", "agent-err", "ping", 0)
 	if err == nil || !strings.Contains(err.Error(), "agent error: agent exploded") {
 		t.Errorf("expected agent-error; got %v", err)
 	}
@@ -230,7 +230,7 @@ func TestFanoutOne_ConnectionDrop(t *testing.T) {
 	covSetupCli8(t, srv.URL)
 	client := newAPIClient()
 
-	text, err := fanoutOne(t.Context(), client, srv.URL, "ws-tok", "agent-drop", "ping")
+	text, err := fanoutOne(t.Context(), client, srv.URL, "ws-tok", "agent-drop", "ping", 0)
 	if err == nil || !strings.Contains(err.Error(), "read:") {
 		t.Errorf("expected read error on drop; got %v", err)
 	}
@@ -244,7 +244,7 @@ func TestFanoutOne_ChatCreateFails(t *testing.T) {
 	covSetupCli8(t, srv.URL)
 	client := newAPIClient()
 
-	_, err := fanoutOne(t.Context(), client, srv.URL, "ws-tok", "agent-bad", "ping")
+	_, err := fanoutOne(t.Context(), client, srv.URL, "ws-tok", "agent-bad", "ping", 0)
 	if err == nil || !strings.Contains(err.Error(), "chat backend down") {
 		t.Errorf("expected chat-create failure; got %v", err)
 	}
@@ -255,7 +255,7 @@ func TestFanoutOne_ChatDecodeError(t *testing.T) {
 	covSetupCli8(t, srv.URL)
 	client := newAPIClient()
 
-	if _, err := fanoutOne(t.Context(), client, srv.URL, "ws-tok", "agent-badjson", "ping"); err == nil {
+	if _, err := fanoutOne(t.Context(), client, srv.URL, "ws-tok", "agent-badjson", "ping", 0); err == nil {
 		t.Error("expected decode error for malformed chat-create body")
 	}
 }
@@ -270,7 +270,7 @@ func TestFanoutOne_ChatCreateTransportError(t *testing.T) {
 	covSetupCli8(t, deadURL)
 	client := newAPIClient()
 
-	_, err := fanoutOne(t.Context(), client, srv.URL, "ws-tok", "agent-a", "ping")
+	_, err := fanoutOne(t.Context(), client, srv.URL, "ws-tok", "agent-a", "ping", 0)
 	if err == nil || !strings.Contains(err.Error(), "create chat") {
 		t.Errorf("expected create-chat transport error; got %v", err)
 	}
@@ -289,7 +289,7 @@ func TestFanoutOne_ContextCancelled(t *testing.T) {
 
 	// agent-silent never answers; the cancel must unblock the read loop
 	// and surface as a "cancelled" error.
-	_, err := fanoutOne(ctx, client, srv.URL, "ws-tok", "agent-silent", "ping")
+	_, err := fanoutOne(ctx, client, srv.URL, "ws-tok", "agent-silent", "ping", 0)
 	if err == nil || !strings.Contains(err.Error(), "cancelled") {
 		t.Errorf("expected cancelled error; got %v", err)
 	}
@@ -311,7 +311,7 @@ func TestRunFanout_SaveWriteFailure(t *testing.T) {
 	agents := map[string]string{"agent-a": "alpha", "agent-err": "erratic"}
 	var runErr error
 	covCaptureStdoutCli8(t, func() {
-		runErr = runFanout(srv.URL, "ws-tok", agents, "hi", false, nil, save, 10)
+		runErr = runFanout(srv.URL, "ws-tok", agents, "hi", false, nil, save, 10, 0)
 	})
 	if runErr == nil || !strings.Contains(runErr.Error(), "save write") {
 		t.Errorf("expected save-write error; got %v", runErr)
@@ -341,7 +341,7 @@ func TestRunFanout_SaveCommitFailure(t *testing.T) {
 	agents := map[string]string{"agent-a": "alpha"}
 	var runErr error
 	covCaptureStdoutCli8(t, func() {
-		runErr = runFanout(srv.URL, "ws-tok", agents, "hi", false, nil, save, 10)
+		runErr = runFanout(srv.URL, "ws-tok", agents, "hi", false, nil, save, 10, 0)
 	})
 	if runErr == nil || !strings.Contains(runErr.Error(), "save commit") {
 		t.Errorf("expected save-commit error; got %v", runErr)
@@ -359,7 +359,7 @@ func TestFanoutOne_WSDialFails(t *testing.T) {
 	deadURL := dead.URL
 	dead.Close()
 
-	_, err := fanoutOne(t.Context(), client, deadURL, "ws-tok", "agent-a", "ping")
+	_, err := fanoutOne(t.Context(), client, deadURL, "ws-tok", "agent-a", "ping", 0)
 	if err == nil || !strings.Contains(err.Error(), "ws:") {
 		t.Errorf("expected ws dial error; got %v", err)
 	}

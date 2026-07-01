@@ -185,6 +185,7 @@ Examples:
 
 		noStream, _ := cmd.Flags().GetBool("no-stream")
 		timeoutSecs, _ := cmd.Flags().GetInt("timeout")
+		maxTurns, _ := cmd.Flags().GetInt("max-turns")
 
 		// Fan-out path: --agents takes precedence over --agent / default-agent.
 		if len(fanoutAgents) > 0 {
@@ -205,7 +206,7 @@ Examples:
 				return fmt.Errorf("get WS token: %w", err)
 			}
 			server := cli.ResolveServer(flagServer, cliCfg)
-			return runFanout(server, wsToken, agentsByID, prompt, quiet, md, saveFile, timeoutSecs)
+			return runFanout(server, wsToken, agentsByID, prompt, quiet, md, saveFile, timeoutSecs, maxTurns)
 		}
 		if timeoutSecs > 0 {
 			client.HTTPClient.Timeout = time.Duration(timeoutSecs) * time.Second
@@ -233,9 +234,9 @@ Examples:
 		server := cli.ResolveServer(flagServer, cliCfg)
 
 		if noStream {
-			return runNoStream(server, wsToken, agentID, chatResult.ID, prompt, quiet, md, saveFile)
+			return runNoStream(server, wsToken, agentID, chatResult.ID, prompt, quiet, md, saveFile, maxTurns)
 		}
-		return runStream(server, wsToken, agentID, agentSlug, chatResult.ID, prompt, quiet, md, saveFile)
+		return runStream(server, wsToken, agentID, agentSlug, chatResult.ID, prompt, quiet, md, saveFile, maxTurns)
 	},
 }
 
@@ -308,6 +309,7 @@ func init() {
 	askCmd.Flags().BoolP("quiet", "q", false, "Only output text, no meta info")
 	askCmd.Flags().Bool("no-stream", false, "Wait for completion, show only result")
 	askCmd.Flags().Int("timeout", 0, "Timeout in seconds (0 = no timeout)")
+	askCmd.Flags().Int("max-turns", 0, "Cap the agent loop at N turns for this run (0 = adapter default, 50 interactive)")
 	askCmd.Flags().Bool("with-git-diff", false, "Append `git diff` as context")
 	askCmd.Flags().Bool("with-git-staged", false, "Append `git diff --staged` as context")
 	askCmd.Flags().Bool("with-git-log", false, "Append last 20 commits as context")

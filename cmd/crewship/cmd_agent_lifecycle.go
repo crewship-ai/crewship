@@ -200,6 +200,22 @@ var agentUpdateCmd = &cobra.Command{
 			body["avatar_style"] = v
 		}
 
+		// Schedule (cron) fields. The update handler forwards these to the
+		// scheduler so the agent starts/stops firing on the given cron. Routine
+		// runs the scheduler dispatches carry orchestrator.RoutineMaxTurns (20).
+		if flags.Changed("schedule-cron") {
+			v, _ := flags.GetString("schedule-cron")
+			body["schedule_cron"] = v
+		}
+		if flags.Changed("schedule-prompt") {
+			v, _ := flags.GetString("schedule-prompt")
+			body["schedule_prompt"] = v
+		}
+		if flags.Changed("schedule-enabled") {
+			v, _ := flags.GetBool("schedule-enabled")
+			body["schedule_enabled"] = v
+		}
+
 		// self_learning lives behind its own audited endpoint
 		// (PATCH /agents/{id}/learning), not the generic agent PATCH, so it
 		// is applied as a separate call (issue #615). The endpoint mandates

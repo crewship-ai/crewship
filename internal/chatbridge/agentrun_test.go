@@ -40,6 +40,7 @@ func TestChatInfoToAgentRunRequest_CarriesAllFields(t *testing.T) {
 		TimeoutSecs: 300,
 		MemoryMB:    info.MemoryMB,
 		CPUs:        info.CPUs,
+		MaxTurns:    7,
 	})
 
 	// Per-call overrides.
@@ -57,6 +58,9 @@ func TestChatInfoToAgentRunRequest_CarriesAllFields(t *testing.T) {
 	}
 	if req.TimeoutSecs != 300 {
 		t.Errorf("TimeoutSecs = %d, want 300", req.TimeoutSecs)
+	}
+	if req.MaxTurns != 7 {
+		t.Errorf("MaxTurns = %d, want 7 (per-run --max-turns override)", req.MaxTurns)
 	}
 
 	// The previously-dropped resource + identity fields.

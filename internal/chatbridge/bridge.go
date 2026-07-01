@@ -288,8 +288,16 @@ func generateMsgID() string {
 // HandleChatMessage processes an incoming chat message by resolving the session,
 // ensuring the container is running, persisting the message, and streaming the
 // agent's response back to the client.
-func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content string, streamFn func(ws.ChatEvent)) error {
+func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content string, streamFn func(ws.ChatEvent), opts ...ws.ChatMessageOption) error {
 	b.logger.Debug("HandleChatMessage", "chat_id", chatID, "content_len", len(content))
+
+	// Per-message run overrides (currently just MaxTurns from the `--max-turns`
+	// CLI flag). Only the first option is honoured; callers that pass none keep
+	// the adapter defaults.
+	var msgOpt ws.ChatMessageOption
+	if len(opts) > 0 {
+		msgOpt = opts[0]
+	}
 
 	// Resolve chat BEFORE persisting user message so we can fail-fast on
 	// config errors (e.g. unprovisioned devcontainer) without polluting
@@ -648,6 +656,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		TimeoutSecs: info.TimeoutSecs,
 		MemoryMB:    memoryMB,
 		CPUs:        cpuVal,
+		MaxTurns:    msgOpt.MaxTurns,
 	})
 
 	// Only show "Starting agent..." on cold start (first message, container freshly created).

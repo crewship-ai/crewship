@@ -28,6 +28,11 @@ type AgentRunOverrides struct {
 	TimeoutSecs int
 	MemoryMB    int
 	CPUs        float64
+	// MaxTurns is a per-run cap on the adapter agent loop, sourced from the
+	// caller (e.g. the `--max-turns` CLI flag threaded through the WebSocket
+	// message). 0 leaves orchestrator.AgentRunRequest.MaxTurns unset so the
+	// adapter falls back to its interactive default.
+	MaxTurns int
 }
 
 // ToAgentRunRequest maps a resolved ChatInfo plus the per-call overrides
@@ -57,6 +62,7 @@ func (info ChatInfo) ToAgentRunRequest(o AgentRunOverrides) orchestrator.AgentRu
 		ToolProfile:        info.ToolProfile,
 		Credentials:        info.Credentials,
 		TimeoutSecs:        o.TimeoutSecs,
+		MaxTurns:           o.MaxTurns,
 		MemoryEnabled:      info.MemoryEnabled,
 		CrewMembers:        info.CrewMembers,
 		NetworkMode:        info.NetworkMode,

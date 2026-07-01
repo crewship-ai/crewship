@@ -278,6 +278,9 @@ func (c *Client) safeSend(data []byte) (sent bool) {
 type sendMessagePayload struct {
 	ChatID  string `json:"session_id"`
 	Content string `json:"content"`
+	// MaxTurns caps the adapter agent loop for this run (`--max-turns` CLI
+	// flag). 0/omitted leaves the adapter default in place.
+	MaxTurns int `json:"max_turns,omitempty"`
 }
 
 func (c *Client) handleCancelMessage(msg ClientMessage) {
@@ -408,6 +411,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 			payload.ChatID,
 			payload.Content,
 			streamFn,
+			ChatMessageOption{MaxTurns: payload.MaxTurns},
 		)
 		if err != nil {
 			// Don't emit error if context was cancelled (user requested stop)

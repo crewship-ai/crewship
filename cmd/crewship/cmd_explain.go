@@ -124,7 +124,7 @@ Examples:
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "%s[explain %s via %s]%s\n", cli.Dim, runID, summarizerSlug, cli.Reset)
 		}
-		return runStream(server, wsToken, summarizerID, summarizerSlug, chatResult.ID, prompt, quiet, md, saveFile)
+		return runStream(server, wsToken, summarizerID, summarizerSlug, chatResult.ID, prompt, quiet, md, saveFile, 0)
 	},
 }
 

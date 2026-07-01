@@ -177,15 +177,17 @@ Examples:
 			defer saveFile.Close()
 		}
 
+		maxTurns, _ := cmd.Flags().GetInt("max-turns")
+
 		if interactive {
-			return runInteractive(server, wsToken, agentID, agentSlug, chatID, prompt, quiet, md, saveFile)
+			return runInteractive(server, wsToken, agentID, agentSlug, chatID, prompt, quiet, md, saveFile, maxTurns)
 		}
 
 		if noStream {
-			return runNoStream(server, wsToken, agentID, chatID, prompt, quiet, md, saveFile)
+			return runNoStream(server, wsToken, agentID, chatID, prompt, quiet, md, saveFile, maxTurns)
 		}
 
-		return runStream(server, wsToken, agentID, agentSlug, chatID, prompt, quiet, md, saveFile)
+		return runStream(server, wsToken, agentID, agentSlug, chatID, prompt, quiet, md, saveFile, maxTurns)
 	},
 }
 
@@ -227,7 +229,7 @@ func openSaveFile(cmd *cobra.Command) (*cli.AtomicFile, error) {
 	return f, nil
 }
 
-func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile) error {
+func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile, maxTurns int) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -254,14 +256,14 @@ func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, qu
 	}()
 
 	agentChannel := "agent:" + agentID
-	if err := ws.SendMessage(agentChannel, chatID, prompt); err != nil {
+	if err := ws.SendMessage(agentChannel, chatID, prompt, maxTurns); err != nil {
 		return fmt.Errorf("send message: %w", err)
 	}
 
 	return streamEvents(ws, quiet, md, save)
 }
 
-func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile) error {
+func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile, maxTurns int) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -274,7 +276,7 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 	}
 
 	agentChannel := "agent:" + agentID
-	if err := ws.SendMessage(agentChannel, chatID, prompt); err != nil {
+	if err := ws.SendMessage(agentChannel, chatID, prompt, maxTurns); err != nil {
 		return fmt.Errorf("send message: %w", err)
 	}
 
@@ -380,7 +382,7 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 	return nil
 }
 
-func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPrompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile) error {
+func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPrompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile, maxTurns int) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -410,7 +412,7 @@ func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPromp
 
 	// If initial prompt given, send it first
 	if initialPrompt != "" {
-		if err := ws.SendMessage(agentChannel, chatID, initialPrompt); err != nil {
+		if err := ws.SendMessage(agentChannel, chatID, initialPrompt, maxTurns); err != nil {
 			return fmt.Errorf("send message: %w", err)
 		}
 		if err := streamEvents(ws, quiet, md, save); err != nil {
@@ -434,7 +436,7 @@ func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPromp
 			continue
 		}
 
-		if err := ws.SendMessage(agentChannel, chatID, input); err != nil {
+		if err := ws.SendMessage(agentChannel, chatID, input, maxTurns); err != nil {
 			return fmt.Errorf("send message: %w", err)
 		}
 
@@ -793,6 +795,7 @@ func init() {
 	runCmd.Flags().Bool("no-stream", false, "Wait for completion, show only result")
 	runCmd.Flags().BoolP("quiet", "q", false, "Only output text, no meta info")
 	runCmd.Flags().Int("timeout", 0, "Timeout in seconds (0 = no timeout)")
+	runCmd.Flags().Int("max-turns", 0, "Cap the agent loop at N turns for this run (0 = adapter default, 50 interactive)")
 	runCmd.Flags().Bool("with-git-diff", false, "Append `git diff` as context")
 	runCmd.Flags().Bool("with-git-staged", false, "Append `git diff --staged` as context")
 	runCmd.Flags().Bool("with-git-log", false, "Append last 20 commits as context")
