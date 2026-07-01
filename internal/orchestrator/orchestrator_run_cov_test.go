@@ -445,6 +445,35 @@ func TestRunAgent_PromptAssembly(t *testing.T) {
 		}
 	})
 
+	t.Run("nudge and cost routed to user turn", func(t *testing.T) {
+		t.Parallel()
+		c := covNewRunContainer(covRunOpts{stream: "{}\n"})
+		o := New(c, newMemState(), covQuietLogger())
+		// highMetrics forces both blocks: journal backlog past nudgeThreshold
+		// and non-zero 24h spend (defined in session_context_test.go).
+		o.SetMemoryMetrics(highMetrics{})
+		req := covRunReq()
+		req.MemoryEnabled = true
+		if err := o.RunAgent(context.Background(), req, nil); err != nil {
+			t.Fatalf("RunAgent: %v", err)
+		}
+		userMsg := covAgentUserMessage(t, c)
+		sysPrompt := covAgentPrompt(t, c)
+		// The whole point of the cache-prefix fix: these dynamic blocks ride in
+		// the user turn's [SESSION CONTEXT], never in the cache-stable prefix.
+		for _, marker := range []string{"[MEMORY NUDGE]", "[COST AWARENESS]"} {
+			if !strings.Contains(userMsg, marker) {
+				t.Errorf("user message missing %s", marker)
+			}
+			if strings.Contains(sysPrompt, marker) {
+				t.Errorf("--system-prompt still contains %s — breaks the cache prefix", marker)
+			}
+		}
+		if !strings.Contains(userMsg, sessionContextOpen) {
+			t.Error("nudge/cost must be wrapped in the [SESSION CONTEXT] block")
+		}
+	})
+
 	t.Run("recall failures are non-fatal", func(t *testing.T) {
 		t.Parallel()
 		for _, recallErr := range []error{

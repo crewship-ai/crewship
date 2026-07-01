@@ -37,8 +37,8 @@ type AgentRunRequest struct {
 	ToolProfile  string // MINIMAL, CODING, FULL
 	Credentials  []Credential
 	TimeoutSecs  int
-	// MaxTurns caps the adapter-side agent loop (e.g. Claude Code's
-	// --max-turns) as defense-in-depth against a runaway that burns budget
+	// MaxTurns caps the adapter-side agent loop (via an adapter-specific
+	// turn-cap flag) as defense-in-depth against a runaway that burns budget
 	// re-sending context every turn. 0 means "use DefaultMaxTurns". Routine /
 	// scheduled runs set RoutineMaxTurns — lower, because an unattended job
 	// with no human watching is exactly where a stuck loop goes unnoticed.

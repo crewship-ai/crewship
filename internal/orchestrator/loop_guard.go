@@ -10,8 +10,8 @@ import (
 // the run. A confused agent re-issuing the exact same failing action is the
 // most expensive failure mode we see: it burns to the --max-turns ceiling
 // re-sending the full context every turn for zero progress. Nobody in the
-// ecosystem (LangGraph, CrewAI, OpenAI/Claude Agent SDK) ships this — the
-// numeric turn cap is their only stop — so it's a cheap, high-leverage guard.
+// ecosystem ships this repeated-call detector by default; a numeric turn cap
+// is the usual only stop, so this is a cheap, high-leverage complement.
 //
 // 5 (not 3) is deliberate: a legitimate poll-until-ready loop ("check status"
 // with unchanged args) can repeat a few times before state flips. 5 identical
@@ -23,8 +23,8 @@ const loopGuardThreshold = 5
 
 // loopGuard detects a stuck agent that repeats the identical tool call with no
 // variation. It is adapter-agnostic: it observes the normalized tool_call
-// event stream, so it covers every CLI adapter (Claude, Codex, Gemini, …) that
-// emits tool calls through the shared parser. Safe for concurrent use — the
+// event stream, so it covers every CLI adapter that emits tool calls through
+// the shared parser. Safe for concurrent use — the
 // stream handler and the abort check run on different goroutines.
 type loopGuard struct {
 	mu      sync.Mutex
