@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import {
   deriveActiveRoutineRuns,
+  deriveRecentTerminalRuns,
   isAwaitingApproval,
 } from "@/hooks/use-active-routine-runs"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
@@ -79,5 +80,39 @@ describe("deriveActiveRoutineRuns", () => {
     expect(derived.activeCount).toBe(0)
     expect(derived.awaitingApproval).toBe(0)
     expect(derived.bySlug.size).toBe(0)
+  })
+})
+
+// RECENT section of the Activity dropdown: last few terminal runs
+// (completed/failed) out of the same "all" feed the provider already
+// polls — no second fetch.
+describe("deriveRecentTerminalRuns", () => {
+  it("keeps only completed/failed runs, newest ended first, capped", () => {
+    const recent = deriveRecentTerminalRuns(
+      [
+        run({ id: "live", status: "running" }),
+        run({ id: "parked", status: "waiting" }),
+        run({ id: "c1", status: "completed", ended_at: "2026-07-02T10:00:00Z" }),
+        run({ id: "f1", status: "failed", ended_at: "2026-07-02T11:00:00Z" }),
+        run({ id: "c2", status: "completed", ended_at: "2026-07-02T09:00:00Z" }),
+        run({ id: "c3", status: "completed", ended_at: "2026-07-02T08:00:00Z" }),
+      ],
+      3,
+    )
+    expect(recent.map((r) => r.id)).toEqual(["f1", "c1", "c2"])
+  })
+
+  it("excludes cancelled/interrupted and falls back to started_at when ended_at is empty", () => {
+    const recent = deriveRecentTerminalRuns([
+      run({ id: "x", status: "cancelled", ended_at: "2026-07-02T12:00:00Z" }),
+      run({ id: "y", status: "interrupted", ended_at: "2026-07-02T12:00:00Z" }),
+      run({ id: "no-end", status: "completed", ended_at: "", started_at: "2026-07-02T11:30:00Z" }),
+      run({ id: "older", status: "completed", ended_at: "2026-07-02T10:00:00Z" }),
+    ])
+    expect(recent.map((r) => r.id)).toEqual(["no-end", "older"])
+  })
+
+  it("returns an empty list when nothing is terminal", () => {
+    expect(deriveRecentTerminalRuns([run({ id: "live" })])).toEqual([])
   })
 })

@@ -297,7 +297,7 @@ function TraceStepNodeBase({ data }: NodeProps) {
         </div>
       )}
 
-      {waitpoint && <WaitpointActions waitpoint={waitpoint} />}
+      {waitpoint && <WaitpointActions waitpoint={waitpoint} stepStatus={status} />}
     </div>
   )
   return (
@@ -324,12 +324,38 @@ function TraceStepNodeBase({ data }: NodeProps) {
 // We stop event propagation on the buttons because React Flow's
 // onNodeClick fires on any click within the node — without stopping,
 // approve/deny would also re-select the step.
+//
+// Resolution handling (bugfix 2026-07-02): the pending-waitpoints
+// list refreshes on its own cadence, so a stale token can outlive the
+// decision — previously the buttons stayed armed after the waitpoint
+// was approved elsewhere and every click produced the red "waitpoint:
+// already decided or expired" toast. Three exits now land on a muted
+// resolved label instead of live buttons:
+//   1. the step status (which the run feed advances first) says the
+//      gate is past "waiting" → derive approved/denied from it,
+//   2. our own decide succeeded,
+//   3. the API answered "already decided or expired" → graceful
+//      recovery, not an error loop.
+type WaitpointResolution = "approved" | "denied" | "decided"
+
+// isAlreadyDecidedError — the decide endpoint's "somebody beat you to
+// it" answers: a 409/410-style conflict status, or the canonical
+// error string for callers that didn't get a status (transport
+// wrappers, older servers).
+function isAlreadyDecidedError(status: number | undefined, error: string): boolean {
+  if (status === 409 || status === 410) return true
+  return /already decided|expired/i.test(error)
+}
+
 function WaitpointActions({
   waitpoint,
+  stepStatus,
 }: {
   waitpoint: { token: string; workspaceId: string }
+  stepStatus: StepStatus
 }) {
   const [busy, setBusy] = useState<"approve" | "deny" | null>(null)
+  const [resolution, setResolution] = useState<WaitpointResolution | null>(null)
   // mountedRef guards setBusy after a successful decide — the
   // realtime pipeline.run.* event that fires once the run resumes
   // unmounts this node, and React warns on stale state updates if we
@@ -354,6 +380,12 @@ function WaitpointActions({
       const res = await waitpointDecide(waitpoint.workspaceId, waitpoint.token, approved)
       if (res.ok) {
         toast.success(approved ? "Approved" : "Denied")
+        if (mountedRef.current) setResolution(approved ? "approved" : "denied")
+      } else if (isAlreadyDecidedError(res.status, res.error)) {
+        // Someone else decided first — swap to the resolved state
+        // instead of leaving armed buttons behind a red toast.
+        toast.info("Waitpoint already decided", { description: res.error })
+        if (mountedRef.current) setResolution("decided")
       } else {
         toast.error(res.error)
       }
@@ -363,6 +395,48 @@ function WaitpointActions({
       if (mountedRef.current) setBusy(null)
     }
   }
+
+  // Externally decided: the step advanced past "waiting" while the
+  // stale token is still passed down. success = approved (the run
+  // resumed), failed = denied/failed at the gate, skipped = decided
+  // some other way — none of them may offer live buttons.
+  const external: WaitpointResolution | null =
+    stepStatus === "success"
+      ? "approved"
+      : stepStatus === "failed"
+        ? "denied"
+        : stepStatus === "skipped"
+          ? "decided"
+          : null
+  const resolved = resolution ?? external
+
+  if (resolved) {
+    return (
+      <div
+        role="status"
+        aria-label={`Waitpoint resolved: ${resolved}`}
+        className="mt-1.5 flex items-center gap-1 text-[10px] font-medium text-muted-foreground"
+      >
+        {resolved === "approved" ? (
+          <>
+            <Check className="h-2.5 w-2.5 text-emerald-400/70" />
+            <span>approved</span>
+          </>
+        ) : resolved === "denied" ? (
+          <>
+            <XCircle className="h-2.5 w-2.5 text-rose-400/70" />
+            <span>denied</span>
+          </>
+        ) : (
+          <>
+            <Check className="h-2.5 w-2.5" />
+            <span>already decided</span>
+          </>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="mt-1.5 flex items-center gap-1">
       <button

@@ -34,7 +34,6 @@ import { CommandPalette } from "@/components/command-palette"
 import { NotificationBell } from "@/components/features/notifications/notification-bell"
 import { InboxBell } from "@/components/features/inbox/inbox-bell"
 import { ActivityBell } from "@/components/features/activity/activity-bell"
-import { LiveRoutinesChip } from "@/components/features/routines/live-routines-chip"
 import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api-fetch"
 
@@ -451,11 +450,9 @@ export function AppToolbar() {
                 </TooltipContent>
               </Tooltip>
 
-              {/* Live routine runs — pulsing count + popover of active
-                  runs (current step, elapsed, cost, cancel, trace
-                  deep-link). Renders nothing while no routine is
-                  active, so the pill group stays quiet by default. */}
-              <LiveRoutinesChip />
+              {/* Live routine runs surface via the ActivityBell badge +
+                  dropdown (LIVE/RECENT sections), not a header chip —
+                  the pill group stays quiet by default. */}
 
               {/* Escalations (incl. agent credential-approval requests) surface
                   through the unified Inbox (the InboxBell + /inbox page), not a
