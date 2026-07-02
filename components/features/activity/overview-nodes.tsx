@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils"
 import { statusIcon, statusTint } from "@/lib/activity/run-status"
 import { relTime } from "@/lib/time"
+import { routineHref } from "@/lib/routine-href"
 import type {
   OverviewIssueNodeData,
   OverviewRoutineNodeData,
@@ -71,7 +72,7 @@ function RoutineNodeBase({ data: d }: NodeProps<Node<OverviewRoutineNodeData>>) 
   // free; adding role="button" would have stomped that.
   return (
     <Link
-      href={`/routines?slug=${encodeURIComponent(d.slug)}`}
+      href={routineHref(d.slug)}
       aria-label={`Routine ${d.name}`}
       className="relative block w-[200px] rounded-lg border border-violet-500/25 bg-card px-2.5 py-2 transition-colors hover:bg-card/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/80"
       onClick={(e) => e.stopPropagation()}

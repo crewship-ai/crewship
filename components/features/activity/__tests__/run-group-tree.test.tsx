@@ -43,6 +43,10 @@ function issueGroup(runs: PipelineRun[]): RunGroup {
   return { key: "noissue", label: "Without an issue", kind: "all", totalRuns: runs.length, runs }
 }
 
+function routineGroup(name: string, runs: PipelineRun[]): RunGroup {
+  return { key: "rg", label: name, kind: "routine", totalRuns: runs.length, runs }
+}
+
 describe("RunGroupTree — run rows carry routine context", () => {
   it("shows the routine name on a run row when the parent group isn't a routine", () => {
     render(
@@ -77,5 +81,24 @@ describe("RunGroupTree — run rows carry routine context", () => {
       />,
     )
     expect(screen.queryByRole("link")).not.toBeInTheDocument()
+  })
+
+  it("does NOT repeat the routine name on rows inside a routine group", () => {
+    render(
+      <RunGroupTree
+        groups={[routineGroup("Consistency sweep", [mkRun({ pipeline_slug: "consistency-sweep", pipeline_name: "Consistency sweep" })])]}
+        selectedRunId={null}
+        onSelectRun={() => {}}
+      />,
+    )
+    // The routine name appears once — in the group header — not again on the
+    // row (showRoutine=false). The row falls back to the short run id.
+    expect(screen.getAllByText("Consistency sweep")).toHaveLength(1)
+    expect(screen.getByText("run_cmr3b0")).toBeInTheDocument()
+    // The deep-link is still present on the row.
+    expect(screen.getByRole("link", { name: /consistency sweep/i })).toHaveAttribute(
+      "href",
+      "/routines?slug=consistency-sweep",
+    )
   })
 })

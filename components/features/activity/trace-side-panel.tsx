@@ -19,6 +19,7 @@ import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { panel } from "@/lib/motion"
 import { formatDurationDecimal } from "@/lib/time"
+import { routineHref } from "@/lib/routine-href"
 import { TabBar } from "@/components/ui/tab-bar"
 import { Spinner } from "@/components/ui/spinner"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -254,11 +255,11 @@ function ContextLinks({
     agentSlug && context.chatId
       ? `/chat/${encodeURIComponent(agentSlug)}?session=${encodeURIComponent(context.chatId)}`
       : null
-  const routineHref = context.routineSlug
-    ? `/routines?slug=${encodeURIComponent(context.routineSlug)}`
+  const routineLink = context.routineSlug
+    ? routineHref(context.routineSlug)
     : null
 
-  if (!sessionHref && !routineHref) return null
+  if (!sessionHref && !routineLink) return null
 
   return (
     <div className="shrink-0 space-y-1.5 border-t border-white/[0.06] bg-card/60 px-3 py-2.5">
@@ -277,9 +278,9 @@ function ContextLinks({
           </span>
         </Link>
       )}
-      {routineHref && (
+      {routineLink && (
         <Link
-          href={routineHref}
+          href={routineLink}
           className="flex items-center gap-2 rounded border border-white/[0.08] bg-background px-2 py-1.5 text-[11px] transition-colors hover:border-emerald-500/40 hover:bg-emerald-500/5"
         >
           <Workflow className="h-3 w-3 shrink-0 text-emerald-300" />

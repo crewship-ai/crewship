@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils"
 import { selection } from "@/lib/interaction"
 import { relTime } from "@/lib/time"
 import { statusIcon, statusTint } from "@/lib/activity/run-status"
+import { routineHref } from "@/lib/routine-href"
 import type { RunGroup } from "@/lib/activity/run-filters"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import { RoutinePreviewCard } from "./routine-preview-card"
@@ -287,11 +288,10 @@ function RunRow({
   const isWait = run.status === "paused"
   const routineLabel = run.pipeline_name || run.pipeline_slug
   const leadWithRoutine = showRoutine && !!routineLabel
-  // Deep-link to the routine's definition page — same target the trace side
-  // panel's Context link uses (query param, not a path segment).
-  const routineHref = run.pipeline_slug
-    ? `/routines?slug=${encodeURIComponent(run.pipeline_slug)}`
-    : null
+  // Deep-link to the routine's definition page (same helper every routine
+  // link uses). Null for a run with no slug — those rows keep their timestamp
+  // on hover since there's nothing to reveal in its place.
+  const href = run.pipeline_slug ? routineHref(run.pipeline_slug) : null
 
   return (
     // group/run scopes the hover so the ↗ only reveals for THIS row, not the
@@ -328,18 +328,28 @@ function RunRow({
             <span className="shrink-0 text-[10px] text-amber-300">awaiting approval</span>
           )}
         </span>
-        <span className="shrink-0 text-[10px] text-muted-foreground/50 group-hover/run:opacity-0">
+        {/* Only fade the timestamp when there's a link to reveal in its
+            place — otherwise a slug-less row would blank on hover with
+            nothing behind it. Fade on focus-within too so the keyboard path
+            matches the hover path. */}
+        <span
+          className={cn(
+            "shrink-0 text-[10px] text-muted-foreground/50",
+            href && "group-hover/run:opacity-0 group-focus-within/run:opacity-0",
+          )}
+        >
           {relTime(run.started_at)}
         </span>
       </button>
-      {routineHref && (
+      {href && (
         <Link
-          href={routineHref}
-          // Stop the row's onSelect from also firing when opening the routine.
-          onClick={(e) => e.stopPropagation()}
+          href={href}
           aria-label={`Open routine ${routineLabel || run.pipeline_slug}`}
           title={`Open routine ${routineLabel || run.pipeline_slug}`}
-          className="absolute right-2.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/60 opacity-0 transition hover:bg-white/[0.06] hover:text-foreground group-hover/run:opacity-100"
+          // opacity-0 by default; revealed on row hover AND on keyboard focus
+          // (focus-visible) so a tabbing user can see the control they've
+          // landed on instead of an invisible focus stop.
+          className="absolute right-2.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/60 opacity-0 transition hover:bg-white/[0.06] hover:text-foreground focus-visible:opacity-100 group-hover/run:opacity-100"
         >
           <ExternalLink className="h-3 w-3" />
         </Link>

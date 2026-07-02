@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import {
   ArrowDownUp,
   Calendar,
@@ -393,13 +393,40 @@ function CrewSection({ filter, onChange, crews }: {
 // doesn't survive a workspace with hundreds of routines; here you type to
 // filter and browse by owning crew. The global rail search already matches
 // routine name/slug, so this is the power-user multi-select on top of that.
-const ROUTINE_OTHER_CREW = "Other"
+
+// Sentinel React key for the crewless bucket. Kept distinct from any real
+// crew name (its heading is "No crew") so a workspace crew literally named
+// "No crew" can't collide with the catch-all — the earlier "Other" key did.
+const NO_CREW_KEY = " no-crew"
 
 function RoutineSection({ filter, onChange, routines }: {
   filter: RunFilter
   onChange: (next: RunFilter) => void
   routines: { slug: string; name: string; crew?: string }[]
 }) {
+  // Bucket routines under their owning crew (real crews sorted alphabetically),
+  // with crewless routines collected into a separate "No crew" group rendered
+  // last. Keeping crewless in its own bucket — rather than a magic "Other"
+  // string key — means a real crew of any name never merges with it.
+  const groups = useMemo(() => {
+    const byCrew = new Map<string, typeof routines>()
+    const noCrew: typeof routines = []
+    for (const r of routines) {
+      if (r.crew) {
+        const arr = byCrew.get(r.crew) ?? []
+        arr.push(r)
+        byCrew.set(r.crew, arr)
+      } else {
+        noCrew.push(r)
+      }
+    }
+    const ordered = Array.from(byCrew.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([crew, items]) => ({ key: crew, heading: crew, items }))
+    if (noCrew.length > 0) ordered.push({ key: NO_CREW_KEY, heading: "No crew", items: noCrew })
+    return ordered
+  }, [routines])
+
   const sel = new Set(filter.routines ?? [])
   if (routines.length === 0) return null
   const toggle = (slug: string) => {
@@ -407,21 +434,6 @@ function RoutineSection({ filter, onChange, routines }: {
     next.has(slug) ? next.delete(slug) : next.add(slug)
     onChange({ ...filter, routines: next.size === 0 ? undefined : Array.from(next) })
   }
-
-  // Bucket routines under their owning crew, then order crews alphabetically
-  // with the catch-all "Other" (no resolvable crew) last.
-  const byCrew = new Map<string, typeof routines>()
-  for (const r of routines) {
-    const key = r.crew ?? ROUTINE_OTHER_CREW
-    const arr = byCrew.get(key) ?? []
-    arr.push(r)
-    byCrew.set(key, arr)
-  }
-  const crewNames = Array.from(byCrew.keys()).sort((a, b) => {
-    if (a === ROUTINE_OTHER_CREW) return 1
-    if (b === ROUTINE_OTHER_CREW) return -1
-    return a.localeCompare(b)
-  })
 
   return (
     <div className="space-y-1 pb-2">
@@ -436,9 +448,9 @@ function RoutineSection({ filter, onChange, routines }: {
           <CommandEmpty className="py-3 text-center text-[10px] text-muted-foreground/50">
             No routines match.
           </CommandEmpty>
-          {crewNames.map((crew) => (
-            <CommandGroup key={crew} heading={crew}>
-              {byCrew.get(crew)!.map((r) => (
+          {groups.map((g) => (
+            <CommandGroup key={g.key} heading={g.heading}>
+              {g.items.map((r) => (
                 <CommandItem
                   key={r.slug}
                   // Include slug so search matches either the display name or
