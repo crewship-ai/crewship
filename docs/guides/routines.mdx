@@ -41,12 +41,16 @@ Crewship is unusual among workflow systems because **agents author routines**, n
     You can also just **describe a routine in chat** — "make a routine that summarizes yesterday's commits and posts to Slack." A crew **Lead** carries the bundled **`routine-author`** skill (an authoring playbook): it clarifies the essentials, grounds the DSL in the crew's `[CONNECTED INTEGRATIONS]` and `[AVAILABLE ROUTINES]`, writes and test-runs the routine, then tells you whether it went live or landed as a **proposed** routine for a Manager to approve (see [Governance](#governance--agent-proposes-human-approves-the-risky-ones)).
   </Card>
   <Card title="UI" icon="browser">
-    Open `/routines`, click **+ New routine**, pick a starter template, edit the DSL JSON, click **Test & Save**. Test_run runs against the execution tier; on pass the routine is persisted with `authored_via=user_api` and the JWT user as author.
+    Open `/routines`, click **+ New routine**, pick a starter template, edit the DSL JSON, click **Test & Save**. Test_run runs against the execution tier; on pass the routine is persisted with `authored_via=user_api` and the JWT user as author. An **existing** routine's DSL is also fully editable in-place from its detail page's **Editor / JSON** tab (CodeMirror, format + revert + copy) — see the note below on how that path's Save differs from Test & Save.
   </Card>
   <Card title="CLI" icon="terminal">
     `crewship routine save --name "..." --definition file.json --author-crew <crew_id>`. The server validates the DSL on save (same gate as the UI). CI-friendly: validate offline first with `crewship routine validate file.json`, then save.
   </Card>
 </CardGroup>
+
+<Note>
+**Editing an existing routine's DSL bypasses the test-run gate.** The **Editor / JSON** tab's Save button posts straight to `/pipelines/save` with `skip_test_gate: true` — it does not send the definition through `test_run` first. The server only honors that flag for **OWNER/ADMIN** (lower roles get `403`), so this is a fast lane for trusted operators, not a hole in the gate: a MEMBER/MANAGER can view and copy the DSL from this tab but can't save an edit without going through the create flow's Test & Save. A follow-up will chain `test_run → save_token → save` behind one button so any MANAGER+ role can edit safely.
+</Note>
 
 ## DSL anatomy
 
@@ -385,7 +389,7 @@ Approve via UI Inbox, CLI `crewship routine waitpoints approve <token>`, or API.
 
 ### `code`
 
-A `code` step has a `runtime`. Exactly one runtime is wired today: **`expr`**.
+A `code` step has a `runtime`. Two runtimes are wired today — **`expr`** and **`cel`** — both in-process, pure-Go, token-zero (no container, no LLM, no filesystem, no network). Use `expr` for a single boolean comparison (wake-gate probes); reach for `cel` as soon as you need real logic (booleans, arithmetic, string/list ops) — its own code comments call it out as the general-purpose deterministic primitive.
 
 #### `runtime: expr` (wired, token-zero)
 
@@ -397,7 +401,7 @@ A `code` step has a `runtime`. Exactly one runtime is wired today: **`expr`**.
     code: "{{ inputs.spend_usd }} > {{ inputs.threshold_usd }}"
 ```
 
-`expr` is an in-process, pure-Go evaluator — **no container, no LLM, no filesystem, no network**, so it costs zero tokens and runs in microseconds. It evaluates a **single comparison** and emits `true` or `false`:
+`expr` evaluates a **single comparison** and emits `true` or `false`:
 
 - Operators: `>`  `>=`  `<`  `<=`  `==`  `!=`.
 - The body is `Render()`-ed first, so `{{ inputs.x }}` / `{{ steps.y.output }}` placeholders substitute before evaluation.
@@ -405,7 +409,21 @@ A `code` step has a `runtime`. Exactly one runtime is wired today: **`expr`**.
 
 This is the canonical primitive for **agentless** probes and **schedule wake-gates** (emit `true` only when work is needed). See [Wake gates](#wake-gates).
 
-#### `runtime: bash | python | go` (not wired)
+#### `runtime: cel` (wired, token-zero, general logic)
+
+```yaml
+- id: spike
+  type: code
+  code:
+    runtime: cel
+    # Real logic in one deterministic, token-zero step — no {{ }} needed,
+    # inputs are exposed as a typed `inputs` map:
+    code: 'inputs.spend_usd > inputs.threshold_usd && inputs.region in ["eu", "us"]'
+```
+
+`cel` evaluates a [Google CEL](https://github.com/google/cel-go) expression — **non-Turing-complete** (every expression provably terminates), so it keeps the token-zero / no-execution-surface guarantee of `expr` while adding boolean operators (`&&`, `||`, `!`), arithmetic, string ops, list/map membership, ternaries, and field access. Reach for it when `expr`'s single comparison isn't enough. A `bool` result emits `true`/`false`; numeric and string results emit their canonical string form. Compile/eval errors fail closed.
+
+#### `runtime: bash | python | go` (rejected at author time)
 
 ```yaml
 - id: process
@@ -415,10 +433,10 @@ This is the canonical primitive for **agentless** probes and **schedule wake-gat
     code: "import json; print(json.dumps({'sum': sum(input_nums)}))"
 ```
 
-The container-backed runtimes are accepted by the schema but have **no sandboxed runner wired** in current builds.
+These are schema-legal runtime names but have **no sandboxed runner wired**. As of PR #710 they're no longer "saves-cleanly-then-fails-at-3am": a routine using one is **rejected at save / apply / test_run time** with a message pointing at the fix (`runtime: expr` or `cel`, or convert the step to `agent_run`).
 
 <Warning>
-`runtime: bash`, `python`, and `go` are **not executable today**: a step using them **fails closed at runtime**, and `crewship apply` emits a plan-time warning. Use `runtime: expr` for boolean probes, or express richer logic with `http` + `transform` steps (or an `agent_run` step). Only `expr` is wired.
+`runtime: bash`, `python`, and `go` are **not executable today** and are **rejected when you save, apply, or test-run a routine that uses them** — the error names the offending step and suggests `expr`/`cel` or an `agent_run` conversion. Only `expr` and `cel` are wired.
 </Warning>
 
 ### `transform`
@@ -453,6 +471,41 @@ Any step can carry `"if": "{{ inputs.run_summary }}"`. The placeholder is render
 ```
 
 Steps with no overlapping `needs` execute in parallel (one goroutine wave per ready set). Final output picks the unique leaf node; for multi-leaf DAGs the first leaf in source order wins.
+
+## Lifecycle hooks (`before_all` / `after_all` / `on_failure`)
+
+Routine-level `hooks` run deterministic side-channel steps around the main execution — a clean home for setup/teardown that isn't part of the visible step graph. Hook steps must be `code` / `http` / `transform` (no `agent_run` — a hook must not recurse or spend tokens):
+
+```yaml
+hooks:
+  before_all:   # setup — its FAILURE aborts the run before any step executes
+    id: claim
+    type: http
+    http: { method: POST, url: "https://ops.example.com/claim" }
+  after_all:    # runs after a COMPLETED run — best-effort
+    id: release
+    type: http
+    http: { method: POST, url: "https://ops.example.com/release" }
+  on_failure:   # runs after a FAILED run — best-effort cleanup
+    id: alert
+    type: http
+    http: { method: POST, url: "https://ops.example.com/alert" }
+```
+
+`after_all` and `on_failure` are best-effort — logged, but they never change the run's outcome. Hooks fire only on the **top-level** run (not nested `call_pipeline` expansions) and are skipped on resume re-entry and dry-run. Per-step `before` / `after` hooks also exist and are included in the [capability manifest](#capability-manifest) walk. Full reference: [Lifecycle hooks](/manifest/routine).
+
+## Per-step overrides (no version bump)
+
+Tweak a single step's `prompt` or `model` without bumping the routine version — the override is applied at run start over the versioned DSL, so the durable, authored definition stays the source of truth while an operator can patch and clear a live behavior quickly:
+
+```bash
+crewship routine step-override set my-routine summarize \
+  --prompt "Summarize in 3 bullets, lead with the risk." --model smart
+crewship routine step-override list my-routine
+crewship routine step-override clear my-routine summarize
+```
+
+Only non-empty fields win — a prompt-only override leaves the authored model untouched. Full reference: [Per-step prompt/model override](/manifest/routine).
 
 ## Agentless routines
 
@@ -625,6 +678,23 @@ After you click **Run** or **Test run** in the UI, a live **Run activity** rail 
 <Note>
 The **Test run** button calls the public, JWT-authed `test_run` endpoint (`POST /api/v1/workspaces/{workspaceId}/pipelines/test_run`). It **validates a draft** — parse + `Validate` + the integration and resource preconditions + a `dry_run` pass (no agent is invoked; you can't run an agent "dry") — and on success mints an HMAC **`save_token`** bound to (workspace, definition hash, user). **Save** verifies that token, so a draft can't be saved as "test passed" unless it actually passed `test_run`. The UI button and the CLI both use this endpoint. To preview a *saved* routine instead, use **Dry run** — it walks the saved definition, renders templates, and returns the declared **manifest** (the blast radius) without invoking anything.
 </Note>
+
+### Deferred dispatch: delay, ttl, debounce, priority
+
+A triggered run can be parked instead of firing immediately — useful for "run 60s from now" scheduling or for coalescing a burst of near-duplicate triggers into one run:
+
+```bash
+# fire 60s from now, expire if not dispatched within 5 min, high priority
+crewship routine run my-routine --delay 60 --ttl 300 --priority 9
+
+# coalesce a burst: repeated triggers sharing a key collapse into one run
+crewship routine run my-routine --debounce-key vendor-42 --debounce-window 30 --debounce-max 300
+
+crewship routine pending list            # not-yet-fired deferred triggers
+crewship routine pending cancel <id>     # cancel before it fires
+```
+
+An in-process dispatcher (5s tick) fires due rows highest-priority-first and expires rows past their `ttl`. Immediate runs (no `--delay` / `--debounce-key`) are unaffected. Full reference, including the underlying API fields: [Deferred dispatch](/manifest/routine).
 
 ## Dry-run preview
 
@@ -802,6 +872,30 @@ Both the UI Runs sub-tab waterfall and `crewship routine logs <run_id> --slug X`
 
 Worker tier escalation is visible too — a failed validation gate that retries on a higher tier emits a second `step.started`+`step.completed` pair with its own cost on the retry, so the column-summed footer reflects the *full* spend (including retries), not just the first attempt.
 
+### Run tags & metadata
+
+Tag and annotate a run at invoke time to make it filterable later:
+
+```bash
+crewship routine run cost-spike-probe \
+  --tag prod --tag billing \
+  --metadata '{"source":"manual","ticket":"OPS-42"}'
+```
+
+**Tags** are workspace-scoped labels (max 10/run, lowercased) surfaced on the run detail and usable as a filter (`crewship routine runs <slug> --tag prod`); replays inherit the source run's tags. **Metadata** is a free-form JSON object stored on the run and returned by `GET /pipeline-runs/{id}` — set at invoke time today (mid-run mutation and `{{ run.metadata.X }}` templating are a follow-up).
+
+### Replay & error fingerprinting
+
+Failed runs are bucketed by a stable **error fingerprint** (failing step + normalized message), so recurring failures group together instead of scrolling past one-by-one in run history:
+
+```bash
+crewship routine replay <run_id>                   # re-invoke with the run's captured inputs
+crewship routine errors                             # list fingerprint groups
+crewship routine bulk-replay --fingerprint <fp>      # replay every run in a fingerprint group after a fix
+```
+
+A replay is stamped `is_replay=true` + `replay_of=<run_id>`; gate a step on `{{ env.is_replay }}` to skip a side effect (e.g. a notification) on replay. Full reference: [Run observability: tags, metadata, replay, errors](/manifest/routine).
+
 Three terminal-side observability surfaces, ordered by when you'd reach for each:
 
 | Phase | Command | Why |
@@ -959,6 +1053,11 @@ Fixes, in order of preference:
 | `routine logs <run_id>` | Full journal trace for one run (post-mortem) |
 | `routine watch <slug>` | Live event stream |
 | `routine cancel <run_id>` | Signal in-flight run |
+| `routine replay <run_id>` | Re-invoke a run with its captured inputs |
+| `routine errors` | List failed-run error fingerprint groups |
+| `routine bulk-replay --fingerprint <fp>` | Replay every run in a fingerprint group |
+| `routine step-override set/list/clear` | Live prompt/model override for one step, no version bump |
+| `routine pending list/cancel <id>` | Inspect / cancel deferred (`--delay` / `--debounce-key`) triggers |
 | `routine versions <slug>` | Version history |
 | `routine rollback <slug> --to N` | Roll back to v N |
 | `routine export <slug>` | JSON bundle to stdout |
@@ -980,13 +1079,24 @@ The `pipeline` alias is preserved for back-compat on the legacy subcommands (`pi
 - Sidecar: `internal/sidecar/pipelines.go` (port 9119)
 - Frontend: `app/(dashboard)/routines/`, `components/features/routines/`, hooks `use-pipelines*`
 
+## Production notes
+
+Two caveats worth internalizing before you lean on routines for anything time- or cost-sensitive — both are permanent architectural properties of the current single-binary deployment, not bugs waiting on a fix:
+
+<Warning>
+**Single-instance only.** The scheduler, run registry, and online eval watermark all assume one process. Running multiple replicas would double-fire cron schedules and webhooks (no leader election yet) — see [Cron schedules](#cron-schedules).
+</Warning>
+
+<Warning>
+**Crash recovery is at-least-once, step-granular, not exact.** A hard kill loses at most the in-flight step, which re-executes (and re-bills) on resume. `call_pipeline` has no nested checkpointing — a kill mid-nested-run re-executes the **entire** nested pipeline. `max_cost_usd` under-counts after a crash, since whatever the killed step had already spent isn't in the restored total. See [Durability and restart recovery](#durability-and-restart-recovery) for the full resume matrix.
+</Warning>
+
 ## Limitations (current MVP)
 
 These are known gaps in the current MVP — none block production use, but they shape what you can rely on today.
 
-- **Resume is at-least-once, step-granular** — restart recovery re-enters runs from the last persisted step boundary (see [Durability and restart recovery](#durability-and-restart-recovery)). The step that was in flight at the kill re-executes from scratch; there is no sub-step checkpointing, nested `call_pipeline` runs re-execute in full, and DAG runs recover at wave granularity. Runs whose definition changed since the run started (content-hash mismatch) fall back to `interrupted`.
+- **Resume is at-least-once, step-granular** — restart recovery re-enters runs from the last persisted step boundary (see [Durability and restart recovery](#durability-and-restart-recovery)). The step that was in flight at the kill re-executes from scratch; there is no sub-step checkpointing, nested `call_pipeline` runs re-execute in full, and DAG runs recover at wave granularity. Runs whose definition changed since the run started (content-hash mismatch) fall back to `interrupted`. `max_cost_usd` under-counts true spend after a crash — see [Production notes](#production-notes).
 - **Single-instance scheduler** — running multiple replicas would double-fire schedules.
-- **DSL editor is read-only in UI** — Monaco write-mode is a follow-up. Authoring through CLI / agent / API works fully.
+- **`credentials_required` is declared-only** — unlike `integrations_required` and `resources`, it is not yet enforced at run time (see [Required integrations](#required-integrations)).
 - **No cross-adapter tier swap yet** — same-provider model swap (Haiku→Opus) works; Claude→Gemini swap requires a shorthand→constant mapping not yet wired.
 - **No NL→cron converter** — ops still hand-type `0 9 * * *`. Foundation PRD has the design; not in MVP.
-- **No errors fingerprinting / bulk replay** — one-by-one rerun via `routine run` only.
