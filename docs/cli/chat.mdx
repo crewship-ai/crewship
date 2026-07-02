@@ -20,7 +20,8 @@ Auth: every subcommand requires an authenticated session (`crewship login`) and 
 | Command | Purpose |
 | --- | --- |
 | `chat <chat-id>` | Print the full message history of one chat as a rendered transcript. |
-| `chat list <agent-slug-or-id>` | List recent chats for an agent (most-recent-first). |
+| `chat list <agent-slug-or-id>` | List recent chats for an agent, ordered by last activity. Includes an `UNREAD` column (replies you haven't seen). |
+| `chat read <chat-id>` | Mark a chat read for you: clears its unread count and the paired "agent replied" inbox notification. |
 | `chat attach <chat-id> <path>` | Upload a file into the chat (lands under `/output/<agent-slug>/attachments/<chat-id>/` in the container). |
 | `chat react add <chat-id> <msg-id> <emoji>` | Add an emoji reaction to a single message. |
 | `chat react remove <chat-id> <msg-id> <emoji>` | Remove your reaction (`rm` / `delete` aliases). |
@@ -50,6 +51,14 @@ The transcript renders assistant / `model` messages through the markdown ANSI re
 
 The upload is one multipart POST to `POST /api/v1/agents/{agentId}/chats/{chatId}/attachments`. The server caps the body at 25 MB; the CLI assembles the multipart body in memory rather than streaming because the bound is small.
 
+### `chat read <chat-id>`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--agent <slug-or-id>` | (auto) | Override the auto-resolved agent (same lookup as `chat attach`). |
+
+Calls `PUT /api/v1/agents/{agentId}/chats/{chatId}/read`. Your read cursor advances to now: `UNREAD` in `chat list` drops to 0 for the session, and the "agent replied" inbox item for it flips to read. Read state is per user — marking a shared group chat read doesn't touch anyone else's badge.
+
 ### `chat participants add <chat-id> <user-id>`
 
 | Flag | Default | Effect |
@@ -71,12 +80,20 @@ crewship chat c_abc123 --since 24h
 
 ```bash
 crewship chat list daniel
-# ID            TITLE                                 STATUS    MSGS  STARTED            ORIGIN
-# c_abc123      Refactor the queue worker             active    14    2026-05-19 14:02   CLI
-# c_xyz789      Audit pass on auth middleware         done      6     2026-05-19 09:18   web
+# ID            TITLE                                 STATUS    MSGS  UNREAD  LAST ACTIVITY      ORIGIN
+# c_abc123      Refactor the queue worker             active    14    2       2026-05-19 14:02   CLI
+# c_xyz789      Audit pass on auth middleware         done      6     -       2026-05-19 09:18   web
 ```
 
-The `ORIGIN` column distinguishes chats spawned by `crewship run` / `crewship ask` (`CLI`) from the web UI — handy when grep-ing for terminal sessions to attach a file to.
+Rows are ordered by `LAST ACTIVITY` (newest message, not creation time). `UNREAD` counts messages you haven't seen — your own don't count; `-` means fully read. The `ORIGIN` column distinguishes chats spawned by `crewship run` / `crewship ask` (`CLI`) from the web UI — handy when grep-ing for terminal sessions to attach a file to.
+
+### Catch up on a reply you missed
+
+```bash
+crewship chat list daniel            # UNREAD column shows what's waiting
+crewship chat c_abc123 --since 24h   # read the tail of the transcript
+crewship chat read c_abc123          # clear the badge + inbox notification
+```
 
 ### Attach a file
 

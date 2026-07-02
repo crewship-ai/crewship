@@ -1536,9 +1536,19 @@ export function KindActions({
       // Messages from the orchestrator (e.g. "ENG-1 ready for review")
       // carry the issue identifier in payload so the inbox can offer
       // a one-click jump to the issue. Without this the user reads
-      // the title and has nowhere to go.
+      // the title and has nowhere to go. "Agent replied" items carry
+      // chat_url instead — deep link straight into the session.
       return (
         <div className="flex items-center gap-2">
+          {typeof item.payload?.chat_url === "string" &&
+            (item.payload.chat_url as string).startsWith("/") && (
+              <Button asChild size="sm" className="gap-1.5">
+                <Link href={item.payload.chat_url as string}>
+                  <MessageSquare className="h-3 w-3" />
+                  Open chat
+                </Link>
+              </Button>
+            )}
           {typeof item.payload?.issue_identifier === "string" && (
             <Button asChild size="sm" className="gap-1.5">
               <Link

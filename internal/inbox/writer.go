@@ -112,6 +112,83 @@ func Insert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error
 	return nil
 }
 
+// UpsertMessage inserts a message-kind inbox row, or — when a row with
+// the same (kind, source_id) already exists — refreshes it in place:
+// title/body/payload are replaced, timestamps bumped, and the row is
+// resurrected to 'unread' with its read/resolved markers cleared. This
+// is the dedupe primitive behind per-(user, chat) notifications like
+// "your agent replied": repeated replies update ONE bell item instead
+// of piling up siblings, and a new reply after the user dismissed the
+// old item correctly re-notifies.
+//
+// Same envelope-validation contract as Insert: caller bugs (nil db,
+// missing workspace/kind/source) are a silent no-op returning nil; real
+// SQL failures are logged and returned.
+func UpsertMessage(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error {
+	if db == nil || in.WorkspaceID == "" || in.Kind == "" || in.SourceID == "" {
+		return nil
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if in.Priority == "" {
+		in.Priority = "medium"
+	}
+	payloadJSON := []byte("{}")
+	if in.Payload != nil {
+		if b, err := json.Marshal(in.Payload); err == nil {
+			payloadJSON = b
+		}
+	}
+	id := "ibx_" + in.Kind + "_" + in.SourceID
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	blocking := 0
+	if in.Blocking {
+		blocking = 1
+	}
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO inbox_items (
+			id, workspace_id, kind, source_id,
+			target_user_id, target_role,
+			title, body_md,
+			sender_type, sender_id, sender_name,
+			state, priority, blocking, payload_json,
+			created_at, updated_at
+		) VALUES (?, ?, ?, ?,
+			NULLIF(?, ''), NULLIF(?, ''),
+			?, ?,
+			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''),
+			'unread', ?, ?, ?, ?, ?)
+		ON CONFLICT(kind, source_id) DO UPDATE SET
+			title = excluded.title,
+			body_md = excluded.body_md,
+			sender_type = excluded.sender_type,
+			sender_id = excluded.sender_id,
+			sender_name = excluded.sender_name,
+			priority = excluded.priority,
+			blocking = excluded.blocking,
+			payload_json = excluded.payload_json,
+			state = 'unread',
+			read_at = NULL,
+			read_by_user_id = NULL,
+			resolved_at = NULL,
+			resolved_by_user_id = NULL,
+			resolved_action = NULL,
+			created_at = excluded.created_at,
+			updated_at = excluded.updated_at`,
+		id, in.WorkspaceID, in.Kind, in.SourceID,
+		in.TargetUserID, in.TargetRole,
+		in.Title, in.BodyMD,
+		in.SenderType, in.SenderID, in.SenderName,
+		in.Priority, blocking, string(payloadJSON), now, now,
+	)
+	if err != nil {
+		logger.Warn("inbox upsert", "error", err, "kind", in.Kind, "source_id", in.SourceID)
+		return err
+	}
+	return nil
+}
+
 // ResolveBySource flips an inbox item to state=resolved when the
 // underlying source resolves (waitpoint approved/denied, escalation
 // closed, failed run cancelled). resolved_action records what the
