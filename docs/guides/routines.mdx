@@ -949,7 +949,7 @@ Fixes, in order of preference:
 | `routine list` | Workspace routine catalog |
 | `routine get <slug>` | Detail with full DSL |
 | `routine save` | Save from JSON file |
-| `routine run <slug>` | Invoke against execution tier (`--tier-override fast/smart/...`) |
+| `routine run <slug>` | Invoke against execution tier (`--tier-override fast/smart/...`). Deferred dispatch via `--delay/--ttl/--debounce-key/--priority`; exactly-once retries via `--idempotency-key <key>` (+ `--idempotency-ttl <s>`) — a duplicate key inside the window returns the original run as `DEDUPED` instead of executing again (same contract as the webhook `Idempotency-Key` header) |
 | `routine dry-run <slug>` | Preview without invoking |
 | `routine delete <slug>` | Soft-delete |
 | `routine doctor <slug>` | Preflight checklist (✓/⚠/✗) — catches blind alleys before run |
