@@ -49,7 +49,7 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 	// write: the author guard treats authorless user-role rows
 	// (legacy, scheduler-injected) as "mine" so they never inflate the
 	// badge; assistant/system rows always count. No cursor row means
-	// "never opened" — everything counts (migration v129 backfills a
+	// "never opened" — everything counts (migration v130 backfills a
 	// cursor for pre-existing chats so upgrades ship quiet).
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.agent_id, c.workspace_id, c.title, c.mode, c.status,

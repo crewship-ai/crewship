@@ -19,7 +19,7 @@ export interface SessionRow {
   /** Server signal that the last message in the session was an error.
    *  Optional — undefined means we don't know. */
   last_message_error?: boolean | null
-  /** Bumped on every message append (migration v129) — drives ordering.
+  /** Bumped on every message append (migration v130) — drives ordering.
    *  Optional for optimistic client-inserted rows; falls back to started_at. */
   last_activity_at?: string | null
   /** Messages the requesting user hasn't read (their own excluded).

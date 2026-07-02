@@ -8,7 +8,7 @@
 
 export interface ActivitySortable {
   started_at: string
-  /** Bumped server-side on every message append (migration v129). Legacy
+  /** Bumped server-side on every message append (migration v130). Legacy
    *  rows and optimistic client inserts may lack it — fall back to
    *  started_at. */
   last_activity_at?: string | null

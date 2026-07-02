@@ -65,7 +65,7 @@ interface SessionRecord {
   /** Backend tag added in migration v59 — UI / CLI / WEBHOOK / CRON
    *  / AGENT. Older rows that pre-date the migration are NULL. */
   origin?: string | null
-  /** Bumped on every message append (migration v129); drives sidebar order. */
+  /** Bumped on every message append (migration v130); drives sidebar order. */
   last_activity_at?: string | null
   /** Per-user unread messages in this session (own messages excluded). */
   unread_count?: number
@@ -203,7 +203,7 @@ export function ChatPageClient() {
   }, [agent, workspaceId])
 
   // Mark a session read: advances the server-side read cursor (unread
-  // badge source, migration v129) and clears the paired "agent replied"
+  // badge source, migration v130) and clears the paired "agent replied"
   // inbox notification. Fire-and-forget — a failed call just leaves the
   // badge until the next visit. Local state zeroes immediately so the
   // sidebar badge never lags.

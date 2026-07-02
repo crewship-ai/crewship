@@ -301,7 +301,7 @@ Chat sessions honor the workspace `preferred_language` — the agent replies in 
 
 ### Unread badges & last activity
 
-The Sessions sidebar orders by **last activity** — a session jumps to the top whenever a message lands in it, regardless of when it was created (`chats.last_activity_at`, migration v129). Sessions with replies you haven't seen show a subtle blue **unread badge** (dot + count). Read state is **per user**: a `chat_read_cursors` row records the last moment *you* marked the chat read, and `unread_count` is everything appended after that cursor that you didn't write yourself. Opening a session marks it read automatically; the badge and the inbox notification clear together.
+The Sessions sidebar orders by **last activity** — a session jumps to the top whenever a message lands in it, regardless of when it was created (`chats.last_activity_at`, migration v130). Sessions with replies you haven't seen show a subtle blue **unread badge** (dot + count). Read state is **per user**: a `chat_read_cursors` row records the last moment *you* marked the chat read, and `unread_count` is everything appended after that cursor that you didn't write yourself. Opening a session marks it read automatically; the badge and the inbox notification clear together.
 
 From the CLI, the same data drives `crewship chat list` (an `UNREAD` column plus `LAST ACTIVITY` ordering), and `crewship chat read` is the mark-read parity command:
 
