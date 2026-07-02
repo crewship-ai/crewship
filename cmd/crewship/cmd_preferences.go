@@ -58,10 +58,21 @@ var preferencesListCmd = &cobra.Command{
 		}
 		sort.Strings(keys)
 		rows := make([][]string, 0, len(keys))
+		// Decode each raw value into a concrete Go type for the structured
+		// (json/yaml) output. Passing the raw map[string]json.RawMessage
+		// straight to the formatter breaks `-f yaml`: yaml.v3 renders a
+		// json.RawMessage ([]byte) as a list of byte values, not the value.
+		// The table keeps the compact raw-JSON literal.
+		decoded := make(map[string]any, len(prefs))
 		for _, k := range keys {
 			rows = append(rows, []string{k, string(prefs[k])})
+			var val any
+			if err := json.Unmarshal(prefs[k], &val); err != nil {
+				val = string(prefs[k]) // fall back to the literal if undecodable
+			}
+			decoded[k] = val
 		}
-		return newFormatter().Auto(prefs, []string{"KEY", "VALUE"}, rows)
+		return newFormatter().Auto(decoded, []string{"KEY", "VALUE"}, rows)
 	},
 }
 

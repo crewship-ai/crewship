@@ -30,6 +30,35 @@ func TestPreferencesListRunE_RendersKeysAndValues(t *testing.T) {
 	}
 }
 
+func TestPreferencesListRunE_YAMLRendersValuesNotBytes(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnGet("/api/v1/me/preferences", clitest.JSONResponse(200, map[string]json.RawMessage{
+		"theme":   json.RawMessage(`"dark"`),
+		"sidebar": json.RawMessage(`{"collapsed":true}`),
+	}))
+	covSetupCli10(t, s.URL())
+	flagFormat = "yaml" // covSetupCli10 restores flagFormat in cleanup
+
+	out, err := captureStdoutCovCli10(t, func() error {
+		return preferencesListCmd.RunE(preferencesListCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	// yaml.v3 renders a raw json.RawMessage ([]byte) as a list of byte
+	// values ("- 34\n- 100 ..."). The command must decode values first so
+	// yaml shows the real content.
+	if strings.Contains(out, "- 34") || strings.Contains(out, "- 100") {
+		t.Errorf("yaml output leaked raw bytes instead of decoded values:\n%s", out)
+	}
+	for _, want := range []string{"theme", "dark", "collapsed", "true"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("yaml output missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestPreferencesSetRunE_SendsRawJSONBody(t *testing.T) {
 	s := clitest.NewStubServer()
 	defer s.Close()
