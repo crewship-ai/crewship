@@ -304,6 +304,9 @@ Reopening a session now rehydrates the full structured turn — assistant text, 
 
 ### How assistant turns render
 
+- **Streamed text reveals at a smooth, constant rate.** Network chunks arrive in bursts; the renderer buffers them and reveals characters at a steady pace that speeds up when a backlog builds (e.g. after a reconnect replay), so replies read as a calm flow instead of sentence-sized pops.
+- **One reasoning pass = one thinking block.** While the model reasons, the block header shows a live shimmering "Thinking… Ns" timer; when the answer starts, it collapses to "Thought for N seconds". Transient progress lines never split a pass into multiple stub blocks — a streamed turn renders identically to the same turn reloaded from history.
+- **Your question pins to the top on send.** After you send a message, the conversation anchors your message at the top of the viewport and the reply streams in below it; once the reply outgrows the screen, normal follow-the-stream scrolling (with the scroll-to-bottom pill) resumes.
 - **Consecutive tool calls collapse into one "Worked · N steps" disclosure** with per-tool input/output. A single tool stays a plain card. Interactive tools (`AskUserQuestion`, `TodoWrite`, `Task`) are never grouped.
 - **Bursts of internal progress / thinking chatter collapse into a single quiet live status line** rather than scrolling the transcript.
 - **Subagent output is indented under its delegation.** Text, thinking, and tool calls from a delegation (via the `Task` tool) are tagged with `parent_tool_use_id` and rendered indented beneath the delegation in the transcript.

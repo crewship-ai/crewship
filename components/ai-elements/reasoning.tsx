@@ -34,6 +34,8 @@ interface ReasoningContextValue {
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;
   duration: number | undefined;
+  /** Whole seconds elapsed since streaming started; ticks live while open. */
+  elapsed: number;
 }
 
 const ReasoningContext = createContext<ReasoningContextValue | null>(null);
@@ -85,6 +87,7 @@ export const Reasoning = memo(
     const hasEverStreamedRef = useRef(isStreaming);
     const [hasAutoClosed, setHasAutoClosed] = useState(false);
     const startTimeRef = useRef<number | null>(null);
+    const [elapsed, setElapsed] = useState(0);
 
     // Track when streaming starts and compute duration
     useEffect(() => {
@@ -98,6 +101,20 @@ export const Reasoning = memo(
         startTimeRef.current = null;
       }
     }, [isStreaming, setDuration]);
+
+    // Live elapsed ticker while streaming — the header shows "Thinking… Ns"
+    // so a long reasoning pass reads as progress, not a hang.
+    useEffect(() => {
+      if (!isStreaming) return;
+      const tick = () => {
+        if (startTimeRef.current !== null) {
+          setElapsed(Math.floor((Date.now() - startTimeRef.current) / MS_IN_S));
+        }
+      };
+      tick();
+      const interval = setInterval(tick, MS_IN_S);
+      return () => clearInterval(interval);
+    }, [isStreaming]);
 
     // Auto-open when streaming starts (unless explicitly closed)
     useEffect(() => {
@@ -131,8 +148,8 @@ export const Reasoning = memo(
     );
 
     const contextValue = useMemo(
-      () => ({ duration, isOpen, isStreaming, setIsOpen }),
-      [duration, isOpen, isStreaming, setIsOpen]
+      () => ({ duration, isOpen, isStreaming, setIsOpen, elapsed }),
+      [duration, isOpen, isStreaming, setIsOpen, elapsed]
     );
 
     return (
@@ -153,17 +170,41 @@ export const Reasoning = memo(
 export type ReasoningTriggerProps = ComponentProps<
   typeof CollapsibleTrigger
 > & {
-  getThinkingMessage?: (isStreaming: boolean, duration?: number) => ReactNode;
+  getThinkingMessage?: (
+    isStreaming: boolean,
+    duration?: number,
+    elapsed?: number
+  ) => ReactNode;
 };
 
-const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
+/** Format whole seconds as "Ns" / "Nm Ns" for reasoning headers. */
+const formatSeconds = (totalSeconds: number): string => {
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  return `${Math.floor(totalSeconds / 60)}m ${totalSeconds % 60}s`;
+};
+
+/** Collapsed-header label once reasoning is done. Exported for tests. */
+export const thoughtForLabel = (duration?: number): string => {
+  if (duration === undefined) return "Thought for a few seconds";
+  if (duration < 60) {
+    return `Thought for ${duration} ${duration === 1 ? "second" : "seconds"}`;
+  }
+  return `Thought for ${formatSeconds(duration)}`;
+};
+
+/** Live header label while reasoning streams. Exported for tests. */
+export const thinkingLiveLabel = (elapsed: number): string =>
+  elapsed >= 1 ? `Thinking… ${formatSeconds(elapsed)}` : "Thinking…";
+
+const defaultGetThinkingMessage = (
+  isStreaming: boolean,
+  duration?: number,
+  elapsed?: number
+) => {
   if (isStreaming || duration === 0) {
-    return <Shimmer duration={1}>Thinking...</Shimmer>;
+    return <Shimmer duration={1.6}>{thinkingLiveLabel(elapsed ?? 0)}</Shimmer>;
   }
-  if (duration === undefined) {
-    return <p>Thought for a few seconds</p>;
-  }
-  return <p>Thought for {duration} seconds</p>;
+  return <p>{thoughtForLabel(duration)}</p>;
 };
 
 export const ReasoningTrigger = memo(
@@ -173,7 +214,7 @@ export const ReasoningTrigger = memo(
     getThinkingMessage = defaultGetThinkingMessage,
     ...props
   }: ReasoningTriggerProps) => {
-    const { isStreaming, isOpen, duration } = useReasoning();
+    const { isStreaming, isOpen, duration, elapsed } = useReasoning();
 
     return (
       <CollapsibleTrigger
@@ -186,7 +227,7 @@ export const ReasoningTrigger = memo(
         {children ?? (
           <>
             <BrainIcon size={16} />
-            {getThinkingMessage(isStreaming, duration)}
+            {getThinkingMessage(isStreaming, duration, elapsed)}
             <ChevronDownIcon
               className={cn(
                 "size-4 transition-transform",

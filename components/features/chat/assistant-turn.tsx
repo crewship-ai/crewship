@@ -23,6 +23,7 @@ import {
 import { Tool, ToolContent, ToolHeader } from "@/components/ai-elements/tool"
 import { CodeBlock } from "@/components/ai-elements/code-block"
 import { StatusIndicator } from "@/components/features/chat/status-indicator"
+import { useSmoothText } from "@/hooks/use-smooth-text"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 import { groupTurnParts, type ToolNode } from "./turn-grouping"
 import { formatCost } from "@/lib/utils/format"
@@ -478,6 +479,31 @@ function ActivityGroup({ tools, agentId }: { tools: ToolNode[]; agentId?: string
   )
 }
 
+/** Streamed prose bubble. useSmoothText decouples bursty WS chunk arrival
+ *  from the visual reveal (constant-rate, backlog-adaptive) so text flows
+ *  in smoothly instead of popping in sentence-sized jumps. The trailing
+ *  space while streaming reduces Streamdown reflow at the growing edge. */
+function StreamingProse({ content, streaming }: { content: string; streaming: boolean }) {
+  const text = useSmoothText(content, streaming)
+  return (
+    <MessageContent>
+      <MessageResponse>{streaming ? text + " " : text}</MessageResponse>
+    </MessageContent>
+  )
+}
+
+/** One reasoning pass: collapsible block with live "Thinking… Ns" header,
+ *  smooth-revealed content while streaming. */
+function ThinkingBlock({ part }: { part: TurnPart }) {
+  const text = useSmoothText(part.content, !!part.isStreaming)
+  return (
+    <Reasoning isStreaming={part.isStreaming} defaultOpen={part.isStreaming}>
+      <ReasoningTrigger />
+      <ReasoningContent>{text}</ReasoningContent>
+    </Reasoning>
+  )
+}
+
 export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId }: AssistantTurnProps) {
   // Collect all text content for copy action
   const fullText = turn.parts
@@ -512,12 +538,7 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId }: As
             return <StatusIndicator key={part.id} content={part.content} />
 
           case "thinking":
-            return (
-              <Reasoning key={part.id} isStreaming={part.isStreaming} defaultOpen={part.isStreaming}>
-                <ReasoningTrigger />
-                <ReasoningContent>{part.content}</ReasoningContent>
-              </Reasoning>
-            )
+            return <ThinkingBlock key={part.id} part={part} />
 
           case "tool_call":
             return <InlineToolCall key={part.id} part={part} agentId={agentId} />
@@ -567,13 +588,7 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId }: As
             if (part.content.startsWith("[DELEGATED")) {
               return <DelegationContent key={part.id} content={part.content} />
             }
-            return (
-              <MessageContent key={part.id}>
-                <MessageResponse>
-                  {part.isStreaming ? part.content + " " : part.content}
-                </MessageResponse>
-              </MessageContent>
-            )
+            return <StreamingProse key={part.id} content={part.content} streaming={!!part.isStreaming} />
 
           default:
             return null

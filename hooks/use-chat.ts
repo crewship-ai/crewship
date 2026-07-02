@@ -441,20 +441,26 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       // adapter (thinking_delta) and the stdout scrubber (buffered-tail flushes
       // that drop the streaming flag). We must NOT relabel each chunk a separate
       // "Thought" card — the boundaries are arbitrary and split sentences. So we
-      // accumulate CONSECUTIVE thinking chunks into one part regardless of the
-      // streaming flag; a non-thinking event (text/tool) closes the block, so
-      // genuinely separate reasoning passes (e.g. think → tool → think) stay
-      // distinct.
+      // accumulate thinking chunks into one part regardless of the streaming
+      // flag, looking PAST transient status parts (progress lines / non-init
+      // system logs) when locating the open block: the backend PartAccumulator
+      // ignores those when persisting, so if they split the live block, a
+      // streamed turn shows N "Thought for 1s" stubs where the reload shows one.
+      // A real content event (text/tool) still closes the block, so genuinely
+      // separate reasoning passes (e.g. think → tool → think) stay distinct.
       setTurns((prev) => {
         const last = prev[prev.length - 1]
         if (last?.role === "assistant" && last.isStreaming) {
-          const lastPart = last.parts[last.parts.length - 1]
-          if (lastPart?.type === "thinking") {
-            // Adjacent thinking chunk — append into the open block.
+          let anchorIdx = last.parts.length - 1
+          while (anchorIdx >= 0 && last.parts[anchorIdx].type === "status") anchorIdx--
+          const anchor = anchorIdx >= 0 ? last.parts[anchorIdx] : undefined
+          if (anchor?.type === "thinking" && anchor.isStreaming) {
+            // Same reasoning pass — append into the open block, leaving any
+            // trailing status line in place below it.
             thinkingBufferRef.current += content
             const updatedParts = [...last.parts]
-            updatedParts[updatedParts.length - 1] = {
-              ...lastPart,
+            updatedParts[anchorIdx] = {
+              ...anchor,
               content: thinkingBufferRef.current,
               isStreaming: true,
             }

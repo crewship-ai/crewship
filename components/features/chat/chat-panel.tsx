@@ -30,7 +30,9 @@ import { useSession } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useDrawerStore } from "@/stores/drawer-store"
 
+import { Shimmer } from "@/components/ai-elements/shimmer"
 import { TurnRenderer } from "./turn-renderer"
+import { PinToTopSpacer } from "./pin-to-top-spacer"
 import { RightPanel } from "./right-panel"
 import { RightRail } from "./right-rail"
 import { RightDrawer } from "./right-drawer"
@@ -304,11 +306,23 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
 
   const composer = useComposerStore()
 
+  // Bumped on every locally-sent message; arms the pin-to-top spacer so the
+  // just-sent question anchors at the viewport top while the reply streams
+  // in below it (the ChatGPT scroll pattern).
+  const [pinNonce, setPinNonce] = useState(0)
+  const lastUserTurnId = useMemo(() => {
+    for (let i = turns.length - 1; i >= 0; i--) {
+      if (turns[i].role === "user") return turns[i].id
+    }
+    return null
+  }, [turns])
+
   const handleSubmit = useCallback(async (message: PromptInputMessage) => {
     const text = message.text?.trim()
     if (!text || isStreaming) return
     await ensureSession()
     sendMessage(text)
+    setPinNonce((n) => n + 1)
     onSend?.(sessionId, text)
     setInput("")
     composer.clearDraft(sessionId)
@@ -338,6 +352,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     if (isStreaming) return
     await ensureSession()
     sendMessage(suggestion)
+    setPinNonce((n) => n + 1)
     onSend?.(sessionId, suggestion)
   }, [isStreaming, sendMessage, ensureSession, sessionId, onSend])
 
@@ -433,7 +448,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
                   />
                 ))}
               </AnimatePresence>
-              <StreamingIndicator isStreaming={isStreaming} turns={turns} />
+              <StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />
+              <PinToTopSpacer pinNonce={pinNonce} pinTurnId={lastUserTurnId} sessionId={sessionId} />
             </ConversationContent>
             <ConversationScrollButton />
           </Conversation>
@@ -507,7 +523,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
                   />
                 ))}
               </AnimatePresence>
-              <StreamingIndicator isStreaming={isStreaming} turns={turns} />
+              <StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />
+              <PinToTopSpacer pinNonce={pinNonce} pinTurnId={lastUserTurnId} sessionId={sessionId} />
             </ConversationContent>
             <ConversationScrollButton />
           </Conversation>
@@ -630,18 +647,17 @@ function OriginChip({ origin }: { origin?: string | null }) {
 interface StreamingIndicatorProps {
   isStreaming: boolean
   turns: { role: string }[]
+  agentName?: string
 }
 
-function StreamingIndicator({ isStreaming, turns }: StreamingIndicatorProps) {
+/** Pre-first-token indicator: a shimmering "<name> is thinking…" label (the
+ *  Claude.ai pattern) instead of generic bouncing dots. Shows only in the gap
+ *  between sending and the first streamed event. */
+function StreamingIndicator({ isStreaming, turns, agentName }: StreamingIndicatorProps) {
   if (!isStreaming || turns.length === 0 || turns[turns.length - 1]?.role !== "user") return null
   return (
-    <div className="flex items-center gap-2 px-4 py-3 text-muted-foreground text-sm animate-in fade-in">
-      <span className="inline-flex gap-0.5">
-        <span className="animate-bounce [animation-delay:0ms]">·</span>
-        <span className="animate-bounce [animation-delay:150ms]">·</span>
-        <span className="animate-bounce [animation-delay:300ms]">·</span>
-      </span>
-      <span>Agent is thinking</span>
+    <div className="flex items-center gap-2 px-4 py-3 text-sm animate-in fade-in">
+      <Shimmer duration={1.6}>{`${agentName ?? "Agent"} is thinking…`}</Shimmer>
     </div>
   )
 }
