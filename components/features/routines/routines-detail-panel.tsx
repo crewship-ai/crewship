@@ -36,7 +36,8 @@ import { RoutineSchedulesTab } from "./routine-schedules-tab"
 import { RoutineWebhooksTab } from "./routine-webhooks-tab"
 import { RoutineWaitpointsTab } from "./routine-waitpoints-tab"
 import { RoutineDryRunReport, type DryRunResult } from "./routine-dry-run-report"
-import type { RoutineManifest } from "@/lib/routine-flow"
+import { AgentlessBadge } from "./routine-agentless-badge"
+import { isAgentless, type RoutineManifest } from "@/lib/routine-flow"
 
 // RoutinesDetailPanel — right-side detail for the selected routine.
 // Hosts the seven sub-tabs (Overview, Editor, Runs, Versions,
@@ -429,6 +430,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
                   {routine?.head_version != null && (
                     <Badge variant="outline" className="px-2 py-0 text-[11px] font-mono">v{routine.head_version}</Badge>
                   )}
+                  <AgentlessBadge agentless={isAgentless(routine?.definition)} />
                 </div>
 
                 {/* Title + slug */}

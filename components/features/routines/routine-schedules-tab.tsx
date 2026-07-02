@@ -9,6 +9,7 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { RoutineListSkeleton } from "./routine-skeletons"
 import { Card, EmptyState, Pill, FieldLabel } from "./_shared"
+import { WakeGateChip } from "./routine-wake-gate-chip"
 
 // RoutineSchedulesTab — cron-trigger CRUD restyled for the dashboard.
 // Card-wrapped list + inline form, Pill states, readable typography,
@@ -159,6 +160,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
                     <Pill tone={s.enabled ? "violet" : "default"}>
                       {s.enabled ? "enabled" : "paused"}
                     </Pill>
+                    <WakeGateChip wakePipelineSlug={s.wake_pipeline_slug} />
                   </div>
                   <div className="flex flex-wrap items-baseline gap-x-3 font-mono text-[12px] text-muted-foreground">
                     <span>{s.cron_expr}</span>

@@ -25,6 +25,13 @@ export interface PipelineSchedule {
   next_run_at?: string
   created_at: string
   updated_at: string
+  // Wake gate (v115) — when set, each cron tick first runs the referenced
+  // agentless routine as a cheap probe; the target routine only fires when
+  // the probe's output signals "wake" (see internal/pipeline/schedules.go).
+  // wake_pipeline_slug is resolved server-side alongside the id so the UI
+  // doesn't need a second lookup.
+  wake_pipeline_id?: string
+  wake_pipeline_slug?: string
 }
 
 export interface ScheduleSaveBody {
