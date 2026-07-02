@@ -199,10 +199,10 @@ func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[s
 		sourceKey, targetKey, rtype string
 	}
 	rels := []relDef{
-		{"Ping google.com 5 times and save results", "Check HTTP status of 5 popular websites", "blocks"},
-		{"Ping google.com 5 times and save results", "Create a directory tree with sample files", "relates_to"},
-		{"Trace DNS resolution for 3 domains", "Measure download speed with a 1MB test file", "relates_to"},
-		{"Generate a CSV report with random data", "Create a directory tree with sample files", "blocked_by"},
+		{"Triage raw beta feedback into a prioritized fix list", "Coordinate the Harborlight launch page — delegate copy and build", "blocks"},
+		{"Rewrite the Harborlight README so a newcomer can follow it", "Coordinate the Harborlight launch page — delegate copy and build", "relates_to"},
+		{"Build a single-file interactive changelog page", "Coordinate the Harborlight launch page — delegate copy and build", "relates_to"},
+		{"Draft the Harborlight incident response runbook", "Map container resource limits and environment", "relates_to"},
 	}
 	for _, rd := range rels {
 		if err := ctx.Err(); err != nil {

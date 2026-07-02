@@ -1,50 +1,87 @@
 issues:
     - crew_slug: engineering
-      assignee: sam
-      title: Ping google.com 5 times and save results
+      assignee: alex
+      title: Coordinate the Harborlight launch page — delegate copy and build
       description: |-
-        Run ping -c 5 google.com inside the container.
-        Save the full output to /tmp/ping-google.txt.
-        Report the average round-trip time in a summary.
+        We're shipping a launch page for Harborlight, the crew's demo product
+        (a status dashboard for self-hosted services).
+
+        Plan the work, then delegate two subtasks to your crew:
+        1. Delegate to Sam: write the launch copy — a headline, three feature
+           bullets, and a short FAQ. Save it to /crew/shared/harborlight/copy.md.
+        2. Delegate to Robin: build a single-file landing page at
+           /crew/shared/harborlight/index.html with clean semantic HTML/CSS and
+           placeholder sections for the copy.
+
+        When both subtasks come back, review the results, merge Sam's copy into
+        Robin's page, and post a short summary of what shipped. Everything stays
+        inside the crew workspace — no external services needed.
       priority: high
-      project: Network Probes
+      project: Launch Prep
+      target_state: TODO
     - crew_slug: engineering
       assignee: sam
-      title: Check HTTP status of 5 popular websites
+      title: Rewrite the Harborlight README so a newcomer can follow it
       description: |-
-        Use curl to check the HTTP status code of these URLs:
-        - https://google.com
-        - https://github.com
-        - https://api.anthropic.com
-        - https://httpbin.org/status/200
-        - https://httpbin.org/status/404
+        Our README grew by accretion and buries the lede. Rewrite it for clarity
+        and save the result to /crew/shared/harborlight/README.md.
 
-        Save results as a CSV file: /tmp/http-status.csv with columns: url,status_code,response_time_ms
+        Raw source to refactor (keep the facts, cut the filler):
+        ---
+        harborlight is a thing for watching your self hosted stuff, it does
+        dashboards. install: clone the repo then maybe docker compose up but you
+        might need to set PORT first (default 8321) and HL_DB_PATH if you want
+        sqlite somewhere else. there is also HL_POLL_SECONDS (default 30). auth
+        is basic auth, set HL_USER/HL_PASS or it runs open which is bad. probes:
+        http probe checks a url returns 200, tcp probe checks a port, disk probe
+        warns at 90%. alerts go to a webhook you set with HL_WEBHOOK_URL.
+        troubleshooting: if the dashboard is blank check the db path is
+        writable, if probes never fire check HL_POLL_SECONDS isnt 0.
+        ---
+        Structure it as: What it is / Quick start / Configuration (a table) /
+        Probes / Troubleshooting. Finish with a two-line summary of what you
+        changed and why.
       priority: medium
-      project: Network Probes
+      project: Launch Prep
     - crew_slug: ops
       assignee: riley
-      title: Trace DNS resolution for 3 domains
+      title: Research and draft a competitive teardown of self-hosted agent runtimes
       description: |-
-        Resolve these domains and save the results:
-        - api.anthropic.com
-        - github.com
-        - registry.npmjs.org
+        Write a one-page competitive teardown at
+        /crew/shared/research/agent-runtimes-teardown.md.
 
-        For each domain, record the IP addresses returned.
-        Save output to /tmp/dns-results.txt with format: domain -> ip1, ip2, ...
-      priority: medium
-      project: Network Probes
+        Compare at least three self-hosted approaches to running AI agents
+        (agent frameworks, workflow orchestrators, DIY cron + scripts) on:
+        deployment model, agent persistence between tasks, scheduling and
+        automation, memory, and multi-agent coordination.
+
+        Use web research if the container has internet access (curl works). If
+        a source is unreachable, work from what you already know and clearly
+        mark those rows as unverified — do not fabricate citations.
+
+        Close with a comparison table and a three-sentence "so what" about
+        where a crew-based runtime stands out.
+      priority: high
+      project: Research
+      target_state: TODO
     - crew_slug: ops
-      assignee: riley
-      title: Measure download speed with a 1MB test file
+      assignee: morgan
+      title: Draft the Harborlight incident response runbook
       description: |-
-        Download a 1MB test file from https://httpbin.org/bytes/1048576 using curl.
-        Measure and report the download time and speed.
-        Save the timing info to /tmp/speed-test.txt.
-        Delete the downloaded file after measuring.
-      priority: low
-      project: Network Probes
+        Write /crew/shared/runbooks/incident-response.md for operating
+        Harborlight in production:
+        - Severity ladder (SEV1–SEV3) with one concrete example each
+        - First-15-minutes checklist
+        - Escalation and comms rules: who gets woken, what gets posted where,
+          at what cadence
+        - Rollback criteria
+        - A short postmortem template
+
+        Keep it under two pages and checklist-heavy — it has to be usable at
+        3 a.m.
+      priority: high
+      project: Reliability
+      target_state: TODO
     - crew_slug: engineering
       assignee: sam
       title: Create a directory tree with sample files
@@ -131,17 +168,22 @@ issues:
       priority: low
       project: Web Scraping
     - crew_slug: engineering
-      assignee: sam
-      title: Write a Python script that generates Fibonacci
+      assignee: robin
+      title: Build a single-file interactive changelog page
       description: |-
-        Create /tmp/fibonacci.py that:
-        1. Takes an argument N (default 20)
-        2. Prints the first N Fibonacci numbers
-        3. Calculates the golden ratio approximation from the last two numbers
+        Create /crew/shared/harborlight/changelog.html — one self-contained
+        HTML file (inline CSS + JS, no external assets) that renders this
+        changelog data with a version filter:
 
-        Run it with N=20 and save output to /tmp/fibonacci-output.txt
-      priority: high
-      project: Script Factory
+        [{"version":"0.3.0","date":"2026-06-24","changes":["disk probe","webhook alerts"]},
+         {"version":"0.2.1","date":"2026-06-10","changes":["fix: tcp probe timeout"]},
+         {"version":"0.2.0","date":"2026-05-28","changes":["tcp probes","basic auth"]}]
+
+        Keep it clean and readable: system font stack, sensible spacing, one
+        subtle accent color. No network access needed — verify by checking the
+        file is well-formed HTML.
+      priority: medium
+      project: Launch Prep
     - crew_slug: engineering
       assignee: robin
       title: Create a bash system info collector
@@ -174,20 +216,27 @@ issues:
         Run the test suite and save results to /tmp/test-results.txt
       priority: medium
       project: Script Factory
-    - crew_slug: ops
-      assignee: morgan
-      title: Inventory all installed tools in the container
+    - crew_slug: quality
+      assignee: casey
+      title: Triage raw beta feedback into a prioritized fix list
       description: |-
-        Check which common tools are available in the container:
-        curl, wget, python3, node, git, jq, sed, awk, grep, tar, gzip, ssh, ping, nslookup, dig
+        Beta feedback dump below. Turn it into /crew/shared/quality/beta-triage.md:
+        a markdown table with columns theme | severity (P0–P3) | affected area |
+        suggested owner (Sam = backend, Robin = frontend, Riley = platform),
+        followed by a "Top 3 to fix before launch" section with one-line
+        justifications.
 
-        Save a report to /tmp/tool-inventory.txt with:
-        - Tool name, path, version (if available)
-        - Mark as AVAILABLE or MISSING
-
-        This helps us know what agents can use.
-      priority: low
-      project: System Info
+        Feedback:
+        - "dashboard goes blank after ~a day, have to restart the container"
+        - "love the http probes, wish alerts had a quiet-hours setting"
+        - "setup took 5 minutes, docs were fine"
+        - "basic auth popup on every page load in Safari is annoying"
+        - "disk probe fired at 90% but the box died at 92%, threshold should be configurable"
+        - "webhook alert JSON has no timestamp field??"
+        - "CPU usage creeps up over a week"
+        - "would pay for a hosted version"
+      priority: high
+      project: Launch Prep
     - crew_slug: ops
       assignee: casey
       title: Map container resource limits and environment
@@ -221,9 +270,19 @@ labels:
     - name: Quick
       color: '#6B7280'
 projects:
-    - name: Network Probes
-      color: '#3B82F6'
-      icon: wifi
+    - name: Launch Prep
+      color: '#EC4899'
+      icon: rocket
+      status: in_progress
+      priority: high
+    - name: Research
+      color: '#8B5CF6'
+      icon: search
+      status: in_progress
+      priority: medium
+    - name: Reliability
+      color: '#EF4444'
+      icon: activity
       status: in_progress
       priority: high
     - name: File Operations
