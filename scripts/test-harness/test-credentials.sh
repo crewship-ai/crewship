@@ -71,11 +71,27 @@ else
 fi
 
 info "Human grants it (the step an agent intentionally cannot do itself)…"
-printf 'granted-token-rotate-me' | cs credential create --name "$ESC_NAME" \
-  --type API_KEY --provider CUSTOM_CLI --env-var-name "$ESC_NAME" --value-stdin >/dev/null 2>&1 \
-  && cs credential assign "$ESC_NAME" morgan --env-var-name "$ESC_NAME" >/dev/null 2>&1 \
-  && _pass "human granted + assigned the escalated credential" \
-  || _fail "human granted + assigned the escalated credential"
+# Two product paths, agent's choice at runtime:
+#   a) the agent included the proposed value in the escalation metadata →
+#      the vault already holds the credential as PENDING_APPROVAL and the
+#      human grant is APPROVING the escalation (one click), or
+#   b) the agent only described the need → the human creates + assigns it.
+if have jq && cs credential list --format json 2>/dev/null \
+    | jq -e --arg n "$ESC_NAME" '.[] | select(.name==$n)' >/dev/null 2>&1; then
+  esc_id="$(cs escalation list --crew ops --format json 2>/dev/null \
+    | jq -r 'first(.[] | select(.status=="PENDING" and .credential_id!=null)) | .id // empty')"
+  if [[ -n "$esc_id" ]] && cs escalation resolve "$esc_id" --action approve --resolution "granted by harness" >/dev/null 2>&1; then
+    _pass "human granted + assigned the escalated credential"
+  else
+    _fail "human granted + assigned the escalated credential" "agent-proposed credential exists but escalation approve failed (esc_id=$esc_id)"
+  fi
+else
+  printf 'granted-token-rotate-me' | cs credential create --name "$ESC_NAME" \
+    --type API_KEY --provider CUSTOM_CLI --env-var-name "$ESC_NAME" --value-stdin >/dev/null 2>&1 \
+    && cs credential assign "$ESC_NAME" morgan --env-var-name "$ESC_NAME" >/dev/null 2>&1 \
+    && _pass "human granted + assigned the escalated credential" \
+    || _fail "human granted + assigned the escalated credential"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "3. Agent self-service credential (probe — may be a gap)"
