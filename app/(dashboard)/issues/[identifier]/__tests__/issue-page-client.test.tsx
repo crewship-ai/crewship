@@ -107,6 +107,10 @@ describe("<IssuePageClient> — identifier resolution (static-export regression)
 })
 
 describe("<IssuePageClient> — creator attribution", () => {
+  // Object.defineProperty is not a Vitest mock — restoreAllMocks() won't
+  // undo it, so capture the real descriptor and put it back after each
+  // test to keep the override from leaking into other suites.
+  const originalLocation = Object.getOwnPropertyDescriptor(window, "location")
   const setupFetch = (issue: Record<string, unknown>) => {
     Object.defineProperty(window, "location", {
       configurable: true,
@@ -122,7 +126,10 @@ describe("<IssuePageClient> — creator attribution", () => {
     }) as unknown as typeof fetch
   }
 
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    if (originalLocation) Object.defineProperty(window, "location", originalLocation)
+  })
 
   it("shows 'Created by' with an agent badge for an agent-created issue", async () => {
     setupFetch({
