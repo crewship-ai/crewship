@@ -112,6 +112,14 @@ type Server struct {
 	// should always go through RegisterKeeperRoutines so the evaluator
 	// nil-checks stay in one place.
 	keeperPhase2 phase2Evaluators
+
+	// broadcastSessionEvent fans a chat_event onto a chat's
+	// "session:{chatID}" WebSocket channel. Indirected through a func
+	// field so boot-time recovery (recoverOrphanedRuns) can notify chat
+	// subscribers about interrupted replies while tests capture the
+	// frames without standing up a real WebSocket client. Set in New();
+	// nil-guarded at call sites for bare test Servers.
+	broadcastSessionEvent func(chatID string, event ws.ChatEvent)
 }
 
 // Deps holds the external dependencies injected into the server at startup.
@@ -371,6 +379,18 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	}
 	if deps != nil {
 		s.db = deps.DB
+	}
+	// Session-channel broadcaster for boot recovery. Dispatched on a
+	// goroutine because recoverOrphanedRuns runs BEFORE wsHub.Run starts
+	// draining the (buffered) broadcast channel — a synchronous send
+	// could block boot if enough orphaned chat runs piled up.
+	s.broadcastSessionEvent = func(chatID string, event ws.ChatEvent) {
+		channel := "session:" + chatID
+		go wsHub.Broadcast(channel, ws.ServerMessage{
+			Type:    "chat_event",
+			Channel: channel,
+			Payload: event,
+		})
 	}
 	// Promote the closure's view of the server now that it exists.
 	// The file-watcher closure declared above reads via this pointer.

@@ -554,6 +554,12 @@ func (a *convStoreAdapter) SearchConversations(ctx context.Context, agentID, que
 // terminal state, then reset any agent still flagged RUNNING that
 // has no live run anymore.
 
+// interruptedChatMessage is the user-facing copy appended to a chat
+// whose in-flight reply was killed by a hard server stop (SIGKILL/OOM/
+// power loss). Matches the actionable one-liner style of the
+// chatbridge's error copy.
+const interruptedChatMessage = "The agent's reply was interrupted by a server restart — try again"
+
 func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 	if s.journalWriter == nil {
 		// Without a journal writer we can't write the cancel entries —
@@ -564,6 +570,10 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 
 	type orphan struct {
 		id, agentID, workspaceID string
+		// chatID is the chats row the run was replying into, extracted
+		// from the run.started payload. Empty for non-chat runs (routine
+		// dispatch, assignments) — those get journal cleanup only.
+		chatID string
 	}
 	// GROUP BY trace_id + workspace_id deduplicates the result set when
 	// a retried CreateRun wrote multiple run.started entries for the
@@ -572,7 +582,8 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 	// MIN(rowid) just picks one canonical row to read agent_id off.
 	var orphans []orphan
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT je1.trace_id, MAX(je1.agent_id), je1.workspace_id
+		SELECT je1.trace_id, MAX(je1.agent_id), je1.workspace_id,
+		       MAX(COALESCE(json_extract(je1.payload, '$.chat_id'), ''))
 		FROM journal_entries je1
 		WHERE je1.entry_type = 'run.started'
 		  AND NOT EXISTS (
@@ -588,7 +599,7 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 	}
 	for rows.Next() {
 		var o orphan
-		if scanErr := rows.Scan(&o.id, &o.agentID, &o.workspaceID); scanErr == nil {
+		if scanErr := rows.Scan(&o.id, &o.agentID, &o.workspaceID, &o.chatID); scanErr == nil {
 			orphans = append(orphans, o)
 		}
 	}
@@ -620,6 +631,53 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 		// SELECT counts traces with no terminal entry.
 		if err := s.journalWriter.Flush(ctx); err != nil {
 			s.logger.Warn("flush journal before agent reset", "error", err)
+		}
+
+		// Surface the interruption to the CHAT each run was replying
+		// into. Journal/agent cleanup alone leaves the user's message
+		// with no assistant turn and no explanation — total silence.
+		// Append an explicit system/error turn (same store + parts
+		// shape the chatbridge persists, so history reloads render it
+		// as an error bubble), bump the chat's message count, and
+		// broadcast it on the session channel for anything already
+		// subscribed. Scoped inside the journalWriter branch on
+		// purpose: the notify must only happen when the trace was
+		// actually terminalized above, otherwise the still-open trace
+		// would be re-detected — and re-announced — on every boot.
+		//
+		// Resumable-stream note: this frame goes through Hub.Broadcast,
+		// NOT through the per-run replay buffer (streams.begin/record),
+		// so it carries no seq and clients apply it immediately — it
+		// can't perturb run_begin/resume reassembly for later runs.
+		for _, o := range orphans {
+			if o.chatID == "" || s.convStore == nil {
+				continue
+			}
+			if err := s.convStore.Append(ctx, o.chatID, conversation.Message{
+				ID:        fmt.Sprintf("msg_recovery_%s", o.id),
+				AgentID:   o.agentID,
+				Role:      conversation.RoleSystem,
+				Content:   interruptedChatMessage,
+				Parts:     []conversation.Part{{Type: "error", Content: interruptedChatMessage}},
+				Timestamp: time.Now().UTC(),
+			}); err != nil {
+				s.logger.Warn("recover orphaned runs: persist interrupted-reply turn",
+					"chat_id", o.chatID, "run_id", o.id, "error", err)
+				continue
+			}
+			if _, err := s.db.ExecContext(ctx,
+				`UPDATE chats SET message_count = message_count + 1 WHERE id = ?`,
+				o.chatID); err != nil {
+				s.logger.Warn("recover orphaned runs: bump message count",
+					"chat_id", o.chatID, "error", err)
+			}
+			if s.broadcastSessionEvent != nil {
+				s.broadcastSessionEvent(o.chatID, ws.ChatEvent{
+					Type:     "error",
+					Content:  interruptedChatMessage,
+					Metadata: map[string]any{"reason": "server_restart", "run_id": o.id},
+				})
+			}
 		}
 	}
 

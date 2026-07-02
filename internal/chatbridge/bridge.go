@@ -20,6 +20,13 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// noOutputChatMessage is the user-facing copy for a run that finished
+// cleanly but produced zero output (issue #545 — safety refusal
+// swallowed by the adapter, prompt-budget pressure, or the agent CLI
+// exiting 0 with no stdout). Kept short and actionable, matching the
+// generic-error copy style used elsewhere in the chat stream.
+const noOutputChatMessage = "The agent returned no output — try again"
+
 // AgentStatusPendingReview is the agents.status sentinel set by the
 // hire endpoint when the per-crew autonomy policy returns
 // DecisionInboxApprove (guided autonomy). The chatbridge refuses to
@@ -369,7 +376,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		if err := b.resolver.IncrementMessageCount(ctx, chatID, 1); err != nil {
 			b.logger.Warn("increment message count (group, no mention)", "error", err)
 		}
-		streamFn(ws.ChatEvent{Type: "done", Content: ""})
+		// no_reply marks a done that INTENTIONALLY carries no assistant
+		// turn (the agent wasn't @mentioned), so the frontend's
+		// "done arrived but nothing replied → show the no-output error"
+		// fallback doesn't misfire on the sender.
+		streamFn(ws.ChatEvent{Type: "done", Content: "", Metadata: map[string]any{"no_reply": true}})
 		return nil
 	}
 
@@ -802,6 +813,47 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}
 		streamFn(ws.ChatEvent{Type: "error", Content: runErr.Error()})
 		return fmt.Errorf("run agent: %w", runErr)
+	}
+
+	// Issue #545 — the run finished "successfully" but emitted ZERO output
+	// (no text, no tool activity, no image). Causes: a safety refusal the
+	// adapter swallowed, prompt-budget pressure pushing the response to 0
+	// tokens, or the agent CLI exiting cleanly with no stdout. Silence here
+	// is indistinguishable from a broken app, so surface it explicitly on
+	// BOTH surfaces: an error event (then a terminal done) for live
+	// viewers, and a persisted system/error turn so a later reload shows
+	// the failure too. The run is recorded FAILED, not COMPLETED — a run
+	// that answered nothing didn't complete anything.
+	if acc.Text() == "" && len(partAcc.Parts()) == 0 {
+		b.logger.Warn("agent run produced no output; surfacing error to chat (#545)",
+			"chat_id", chatID, "run_id", runID, "agent_slug", info.AgentSlug)
+		noOutputErr := "agent returned no output (#545)"
+		if err := b.resolver.UpdateRun(ctx, runID, "FAILED", nil, &noOutputErr, map[string]interface{}{
+			"duration_ms": time.Since(startedAt).Milliseconds(),
+			"reason":      "no_output",
+		}); err != nil {
+			b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
+		}
+		if err := b.convStore.Append(ctx, chatID, conversation.Message{
+			ID:        generateMsgID(),
+			AgentID:   info.AgentID,
+			Role:      conversation.RoleSystem,
+			Content:   noOutputChatMessage,
+			Parts:     []conversation.Part{{Type: "error", Content: noOutputChatMessage}},
+			Timestamp: time.Now().UTC(),
+		}); err != nil {
+			b.logger.Error("failed to persist no-output error turn", "error", err, "chat_id", chatID)
+		}
+		if err := b.resolver.IncrementMessageCount(ctx, chatID, 2); err != nil {
+			b.logger.Warn("failed to update message count", "chat_id", chatID, "error", err)
+		}
+		streamFn(ws.ChatEvent{
+			Type:     "error",
+			Content:  noOutputChatMessage,
+			Metadata: map[string]any{"reason": "no_output"},
+		})
+		streamFn(ws.ChatEvent{Type: "done", Content: ""})
+		return nil
 	}
 
 	exitCode := 0
