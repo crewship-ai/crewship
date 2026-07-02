@@ -421,6 +421,13 @@ func (e *Executor) executeOneStep(
 			dagCancel()
 			return
 		}
+		// Keep the failed attempt's spend — runStepWithRetry reports the
+		// cost of every tier it burned alongside the error. Mirrors the
+		// sequential runDSL failure branch; without it failed DAG runs
+		// persisted cost_usd=0.
+		resMu.Lock()
+		result.CostUSD += stepCost
+		resMu.Unlock()
 		f := &dagStepFailure{stepID: step.ID, message: stepErr.Error()}
 		firstErr.CompareAndSwap(nil, f)
 		dagCancel()

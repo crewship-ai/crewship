@@ -993,6 +993,14 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 				return result, nil
 			}
 			if stepErr != nil {
+				// Fold the failed attempt's spend into the run total
+				// BEFORE bailing — runStepWithRetry reports the cost of
+				// every tier it burned alongside the error. Dropping it
+				// here made failed runs persist cost_usd=0, hiding
+				// exactly the expensive retried/escalated failures from
+				// spend analytics (the cost-cap branch below always
+				// recorded it, so the two failure paths disagreed).
+				result.CostUSD += stepCost
 				result.Status = "FAILED"
 				result.FailedAtStep = step.ID
 				result.ErrorMessage = stepErr.Error()
