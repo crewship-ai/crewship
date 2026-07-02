@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { Card, EmptyState, Pill } from "./_shared"
+import { WakeGateChip } from "./routine-wake-gate-chip"
 
 // RoutinesSchedulesView — workspace-wide cron schedule dashboard.
 // Top: KPI strip (active / paused / firing-soon / last-failed).
@@ -241,13 +242,14 @@ export function RoutinesSchedulesView({
                       )}
                     >
                       <td className="px-4 py-3 text-sm font-medium">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           {s.enabled ? (
                             <Play className="h-3.5 w-3.5 text-emerald-400" aria-label="enabled" />
                           ) : (
                             <Pause className="h-3.5 w-3.5 text-muted-foreground" aria-label="paused" />
                           )}
                           <span>{s.name}</span>
+                          <WakeGateChip wakePipelineSlug={s.wake_pipeline_slug} />
                         </div>
                       </td>
                       <td className="px-3 py-3 font-mono text-[12px] text-muted-foreground">{slug || "—"}</td>

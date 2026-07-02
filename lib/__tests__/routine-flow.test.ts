@@ -4,6 +4,7 @@ import {
   buildPlainSteps,
   stepDeterminism,
   brandIconKey,
+  isAgentless,
   type RoutineManifest,
 } from "@/lib/routine-flow"
 
@@ -218,5 +219,31 @@ describe("buildPlainSteps", () => {
     expect(() => buildPlainSteps(null)).not.toThrow()
     expect(buildPlainSteps(null)[0].determinism).toBe("trigger")
     expect(() => buildPlainSteps({ steps: [null, 3] })).not.toThrow()
+  })
+})
+
+describe("isAgentless", () => {
+  it("reads true when the DSL declares agentless: true", () => {
+    expect(isAgentless({ ...fullDsl, agentless: true })).toBe(true)
+  })
+
+  it("reads false when agentless is explicitly false", () => {
+    expect(isAgentless({ ...fullDsl, agentless: false })).toBe(false)
+  })
+
+  it("reads false when the field is absent", () => {
+    expect(isAgentless(fullDsl)).toBe(false)
+  })
+
+  it("reads false for a truthy-but-non-boolean value (e.g. agent-authored typo)", () => {
+    expect(isAgentless({ agentless: "true" })).toBe(false)
+    expect(isAgentless({ agentless: 1 })).toBe(false)
+  })
+
+  it("is defensive on malformed input", () => {
+    expect(isAgentless(null)).toBe(false)
+    expect(isAgentless(undefined)).toBe(false)
+    expect(isAgentless(42)).toBe(false)
+    expect(isAgentless("agentless")).toBe(false)
   })
 })

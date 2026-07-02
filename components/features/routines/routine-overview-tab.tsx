@@ -26,10 +26,13 @@ import { integrationLabel } from "@/lib/integration-labels"
 import { usePipelineRunRecords, type PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import { useRunSubSpans } from "@/hooks/use-run-sub-spans"
+import { usePipelineStepOverrides, type PipelineStepOverride } from "@/hooks/use-pipeline-step-overrides"
 import type { RoutineDetail } from "./routines-detail-panel"
 import { Card } from "./_shared"
 import { RoutineTouches } from "./routine-touches"
 import { RoutineMiniTrace } from "./routine-mini-trace"
+import { RunTagChips } from "./routine-tag-chips"
+import { StepOverrideChip } from "./routine-step-override-chip"
 import { buildPlainSteps, type PlainStep } from "@/lib/routine-flow"
 import { buildMiniTrace } from "@/lib/routine-mini-trace"
 
@@ -160,6 +163,16 @@ export function RoutineOverviewTab({
   )
   const manifest = routine.manifest
 
+  // Per-step overrides (v121 runtime layer) — read-only visibility of which
+  // steps carry an operator-pinned prompt/model tier, keyed by step id so
+  // the "What it does" list can render a subtle chip inline.
+  const { overrides } = usePipelineStepOverrides(workspaceId, routine.slug)
+  const overrideByStepId = useMemo(() => {
+    const m = new Map<string, PipelineStepOverride>()
+    for (const o of overrides) m.set(o.step_id, o)
+    return m
+  }, [overrides])
+
   return (
     <div className="space-y-4">
       {/* ── Compact stat strip (DEMOTED from 4 big KPI cards) ───────── */}
@@ -189,7 +202,7 @@ export function RoutineOverviewTab({
         <Card title="What it does" subtitle="step by step" icon={ListChecks}>
           <ol className="px-4 py-2">
             {plainSteps.map((s) => (
-              <PlainStepRow key={s.id} step={s} />
+              <PlainStepRow key={s.id} step={s} override={overrideByStepId.get(s.id)} />
             ))}
           </ol>
         </Card>
@@ -394,7 +407,7 @@ function StatCell({
 // trigger) marker, a human title with a det-vs-AI tag, and an optional
 // detail line. The AI tag (indigo) flags non-deterministic agent steps; the
 // script tag (violet) marks deterministic ones.
-function PlainStepRow({ step }: { step: PlainStep }) {
+function PlainStepRow({ step, override }: { step: PlainStep; override?: PipelineStepOverride }) {
   const isTrigger = step.determinism === "trigger"
   return (
     <li className="flex gap-3 border-t border-white/[0.04] py-2.5 first:border-t-0">
@@ -419,6 +432,11 @@ function PlainStepRow({ step }: { step: PlainStep }) {
               )}
             >
               {step.determinism === "ai" ? "AI" : "script"}
+            </span>
+          )}
+          {!isTrigger && override && (
+            <span className="ml-1.5 inline-block align-middle">
+              <StepOverrideChip override={override} />
             </span>
           )}
         </div>
@@ -554,6 +572,7 @@ function LastRunCard({
             </span>
           </div>
           <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">{run.id}</div>
+          <RunTagChips tags={runDetail?.tags} className="mt-1.5" />
         </div>
         <div className="flex shrink-0 items-center gap-4 text-right text-[10px] text-muted-foreground">
           <div>

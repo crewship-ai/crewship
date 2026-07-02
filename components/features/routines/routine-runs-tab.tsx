@@ -7,10 +7,12 @@ import { Spinner } from "@/components/ui/spinner"
 import { usePipelineRuns } from "@/hooks/use-pipelines"
 import { usePipelineRunRecords, isActiveRunStatus, type PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 import { apiFetch } from "@/lib/api-fetch"
+import { useRunSubSpans } from "@/hooks/use-run-sub-spans"
 import { cn } from "@/lib/utils"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import { RoutineRunsSkeleton } from "./routine-skeletons"
 import { Card, EmptyState, Pill } from "./_shared"
+import { RunTagChips } from "./routine-tag-chips"
 import { extractStepMeta, formatStepCost, formatStepDuration } from "./routine-cost-format"
 
 // RoutineRunsTab — list of recent runs for one routine. Click to
@@ -59,6 +61,10 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
   // and stays disabled so a double-click can't fire twice.
   const [cancellingRunId, setCancellingRunId] = useState<string | null>(null)
   const [stepEvents, setStepEvents] = useState<Map<string, StepEvent[]>>(new Map())
+  // Tags aren't on any runs-LIST response (run-records/journal) — only
+  // the single-run detail endpoint (GetRun) carries them — so fetch them
+  // lazily for whichever run is currently expanded.
+  const { run: expandedRunDetail } = useRunSubSpans(workspaceId, expandedRunId)
   // Track which slug the auto-expand has fired for, so switching
   // routines re-arms it but re-rendering on data refresh doesn't.
   const autoExpandedFor = useRef<string | null>(null)
@@ -277,6 +283,9 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
               </div>
               {expanded && (
                 <div className="border-t border-border/40 bg-black/20 px-5 py-4">
+                  {expandedRunDetail?.id === run.runId && (
+                    <RunTagChips tags={expandedRunDetail.tags} className="mb-3" />
+                  )}
                   <RunWaterfall
                     runId={run.runId}
                     journalEntries={run.entries}
