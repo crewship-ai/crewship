@@ -30,6 +30,11 @@ type demoSchedule struct {
 	CronExpr   string
 	Inputs     map[string]interface{}
 	Enabled    bool
+	// WakeSlug optionally gates the schedule behind an AGENTLESS probe
+	// routine (pipeline_schedules.wake_pipeline_id). On each tick the
+	// scheduler runs the probe for zero tokens and only wakes the
+	// target when it emits true. "" = no gate.
+	WakeSlug string
 }
 
 var demoSchedules = []demoSchedule{
@@ -41,10 +46,11 @@ var demoSchedules = []demoSchedule{
 		Enabled:    true,
 	},
 	{
-		// Daily generative digest — the canonical scheduled-summary use case.
-		Name:       "Demo: daily status digest (09:00)",
-		TargetSlug: "daily-status-digest",
-		CronExpr:   "0 9 * * *",
+		// Daily briefing from the crew lead — the canonical scheduled
+		// agent routine; its completion lands a notification in the inbox.
+		Name:       "Demo: morning briefing (08:30)",
+		TargetSlug: "morning-briefing",
+		CronExpr:   "30 8 * * *",
 		Enabled:    true,
 	},
 	{
@@ -54,6 +60,19 @@ var demoSchedules = []demoSchedule{
 		TargetSlug: "consistency-sweep",
 		CronExpr:   "0 */6 * * *",
 		Enabled:    true,
+	},
+	{
+		// Token-zero monitoring demo: every 15 minutes the agentless
+		// feed-watch-probe runs for free; the agent-backed change report
+		// only wakes (and only spends tokens) when the probe says the
+		// watched feed actually changed. With the seed defaults the feed
+		// is stable, so the rail fills with zero-cost SKIPPED wake checks
+		// — exactly the story: crews sleep until something happens.
+		Name:       "Demo: feed watch — wake on change (every 15m)",
+		TargetSlug: "feed-change-report",
+		CronExpr:   "*/15 * * * *",
+		Enabled:    true,
+		WakeSlug:   "feed-watch-probe",
 	},
 }
 
@@ -103,6 +122,11 @@ func seedSchedules(ctx context.Context, client *cli.Client) error {
 		}
 		if len(s.Inputs) > 0 {
 			body["inputs"] = s.Inputs
+		}
+		if s.WakeSlug != "" {
+			// The API resolves the slug and enforces the wake-gate rules
+			// (probe exists, is agentless, isn't the target itself).
+			body["wake_pipeline_slug"] = s.WakeSlug
 		}
 		r, err := client.Post(endpoint, body)
 		if err != nil {

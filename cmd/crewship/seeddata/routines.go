@@ -43,11 +43,21 @@ func agentSlugRef(slug string) string { return slug }
 //     escalates to a smarter model rather than shipping a
 //     wrong answer. The goal, though, is Haiku stability.
 //
-// The 18 recipes below span the determinism classes: pure extraction /
-// normalization, closed-set classification, transcoding, validation /
-// linting, redaction, decision tables, structured review, faithful
+// The recipes below span the determinism classes: pure extraction /
+// normalization, closed-set classification, validation / linting,
+// redaction, decision tables, structured review, faithful
 // summarization, and multi-step / orchestration. The 17 eval-* scenarios
 // in eval_scenarios.go are the matching regression harness.
+//
+// Alongside the deterministic recipes, three routines exist for the
+// live-workspace demo loop rather than determinism:
+//   - morning-briefing    — scheduled lead briefing (agent routine whose
+//     completion lands an inbox notification)
+//   - feed-watch-probe    — agentless token-zero wake gate (http +
+//     transform + code:expr), wired as the wake gate of the demo
+//     feed-watch schedule
+//   - feed-change-report  — the wake-gated target that only runs (and
+//     only spends tokens) when the probe fires
 //
 // Design conventions (kept identical across every recipe):
 //   - Each routine runs with empty inputs (sensible defaults set)
@@ -217,49 +227,61 @@ var Routines = []RoutineDef{
 	},
 
 	// ───────────────────────────────────────────────────────────────
-	// 4. parse-log-line — structured parse → fields JSON (class A)
+	// 4. incident-timeline — structured extraction → timeline JSON
+	//    (class A, realistic framing: raw incident log → canonical
+	//    chronology, grader-checked)
 	// ───────────────────────────────────────────────────────────────
 	{
-		Slug:        "parse-log-line",
-		Name:        "Parse log line",
-		Description: "Parse a single log line into a canonical {timestamp, level, component, message} JSON object.",
+		Slug:        "incident-timeline",
+		Name:        "Incident timeline (canonical JSON)",
+		Description: "Turn a raw incident log excerpt into a canonical, chronologically-ordered JSON timeline.",
 		CrewSlug:    "ops",
 		Definition: map[string]interface{}{
 			"dsl_version":        "1.0",
-			"name":               "parse-log-line",
-			"display_name":       "Parse log line",
-			"description":        "Parse a single log line into a canonical {timestamp, level, component, message} JSON object.",
-			"estimated_cost_usd": 0.001,
+			"name":               "incident-timeline",
+			"display_name":       "Incident timeline (canonical JSON)",
+			"description":        "Turn a raw incident log excerpt into a canonical, chronologically-ordered JSON timeline.",
+			"estimated_cost_usd": 0.003,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
 			},
 			"inputs": []map[string]interface{}{
 				{
-					"name":        "line",
-					"type":        "string",
-					"required":    false,
-					"default":     "2024-08-14T09:31:02Z ERROR [auth-svc] token refresh failed: upstream 503",
-					"description": "A single log line",
+					"name":     "log",
+					"type":     "string",
+					"required": false,
+					"default": "2026-06-30T09:12:04Z WARN [gateway] p99 latency 2.4s\n" +
+						"2026-06-30T09:13:11Z ERROR [auth-svc] token refresh failed: upstream 503\n" +
+						"2026-06-30T09:13:40Z ERROR [auth-svc] circuit breaker open\n" +
+						"2026-06-30T09:15:02Z INFO [ops] rollback of auth-svc 1.4.2 initiated",
+					"description": "Raw incident log excerpt (one event per line)",
 				},
 			},
 			"outputs": []map[string]interface{}{
-				{"name": "parsed", "type": "string"},
+				{"name": "timeline", "type": "string"},
 			},
 			"steps": []map[string]interface{}{
 				{
-					"id":         "parse",
+					"id":         "extract",
 					"type":       "agent_run",
 					"agent_slug": agentSlugRef("riley"),
 					"complexity": "fast",
 					"on_fail":    "escalate_tier",
-					"prompt":     "Parse the log line into a JSON object with exactly these keys: \"timestamp\" (the ISO 8601 timestamp), \"level\" (uppercase, e.g. ERROR/WARN/INFO), \"component\" (the bracketed component name without brackets), \"message\" (the remaining message text). Output ONLY the JSON object, no prose, no code fences.\n\nLine:\n{{ inputs.line }}",
+					"prompt":     "Convert the incident log into a JSON array. Each line becomes one object with exactly these keys: \"time\" (the ISO 8601 timestamp), \"level\" (uppercase, e.g. ERROR/WARN/INFO), \"component\" (the bracketed component name without brackets), \"event\" (the remaining message text). Preserve the original line order. Output ONLY the JSON array, no prose, no code fences.\n\nLog:\n{{ inputs.log }}",
 					"validation": map[string]interface{}{
-						"schema": map[string]interface{}{
-							"type":     "object",
-							"required": []string{"timestamp", "level", "component", "message"},
-						},
+						"must_contain":     []string{"[", "]"},
 						"must_not_contain": []string{"API_KEY=", "Bearer "},
+					},
+					"outcomes": map[string]interface{}{
+						"grader_agent_slug": agentSlugRef("morgan"),
+						"max_iterations":    2,
+						"on_fail":           "escalate_tier",
+						"criteria": []map[string]interface{}{
+							{"name": "complete", "rule": "Every line of the source log appears exactly once in the timeline, in the original order."},
+							{"name": "errors_captured", "rule": "Every ERROR line from the source is present with level ERROR."},
+							{"name": "no_invention", "rule": "No timeline entry states an event that is not in the source log."},
+						},
 					},
 				},
 			},
@@ -327,45 +349,49 @@ var Routines = []RoutineDef{
 	},
 
 	// ───────────────────────────────────────────────────────────────
-	// 6. csv-to-json — transcode (class C, pure)
+	// 6. morning-briefing — scheduled lead briefing (agent routine)
+	//    The demo scheduler targets this at 08:30; its completion lands
+	//    a notification, so a fresh workspace shows the "your crew
+	//    briefs you every morning" loop end-to-end.
 	// ───────────────────────────────────────────────────────────────
 	{
-		Slug:        "csv-to-json",
-		Name:        "CSV to JSON",
-		Description: "Convert a CSV string into a JSON array of row objects, preserving order.",
+		Slug:        "morning-briefing",
+		Name:        "Morning briefing",
+		Description: "The crew lead compiles a morning briefing from real workspace activity and lands it in your inbox.",
 		CrewSlug:    "engineering",
 		Definition: map[string]interface{}{
 			"dsl_version":        "1.0",
-			"name":               "csv-to-json",
-			"display_name":       "CSV to JSON",
-			"description":        "Convert a CSV string into a JSON array of row objects, preserving order.",
-			"estimated_cost_usd": 0.001,
+			"name":               "morning-briefing",
+			"display_name":       "Morning briefing",
+			"description":        "The crew lead compiles a morning briefing from real workspace activity and lands it in your inbox.",
+			"estimated_cost_usd": 0.004,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
 			},
 			"inputs": []map[string]interface{}{
 				{
-					"name":        "csv",
+					"name":        "focus",
 					"type":        "string",
 					"required":    false,
-					"default":     "name,role,active\nAlex,lead,true\nSam,backend,true\nRobin,frontend,false",
-					"description": "CSV with a header row",
+					"default":     "overnight activity and today's priorities",
+					"description": "What the briefing should focus on",
 				},
 			},
 			"outputs": []map[string]interface{}{
-				{"name": "json", "type": "string"},
+				{"name": "briefing", "type": "string"},
 			},
 			"steps": []map[string]interface{}{
 				{
-					"id":         "convert",
+					"id":         "compose",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("sam"),
+					"agent_slug": agentSlugRef("alex"),
 					"complexity": "fast",
-					"on_fail":    "escalate_tier",
-					"prompt":     "Convert the CSV into a JSON array. The first row is the header; each subsequent row becomes an object keyed by the header columns, with string values, in the original row order. Output ONLY the JSON array, no prose, no code fences.\n\nCSV:\n{{ inputs.csv }}",
+					"prompt":     "Compile the Engineering crew's morning briefing, focused on {{ inputs.focus }}. Ground every statement in evidence you can actually see: the crew journal, shared notes under /crew/shared, and your own memory of recent work. If you find no recent activity, say so in one line and lay out a sensible plan for the day instead — do NOT invent events. Format as markdown with exactly three sections: ## Overnight, ## Today, ## Needs attention. Keep it under 200 words.",
 					"validation": map[string]interface{}{
-						"must_contain":     []string{"[", "]"},
+						"min_length":       80,
+						"max_length":       2500,
+						"must_contain":     []string{"##"},
 						"must_not_contain": []string{"API_KEY=", "Bearer "},
 					},
 				},
@@ -823,41 +849,155 @@ var Routines = []RoutineDef{
 	},
 
 	// ───────────────────────────────────────────────────────────────
-	// 15. daily-status-digest — scheduler target (light generative)
+	// 15. feed-watch-probe — agentless wake gate (token-zero monitoring)
+	//     http fetch → transform reduce → code:expr compare. The demo
+	//     scheduler runs this every 15 minutes as the wake gate for
+	//     feed-change-report: with the stable seed defaults it emits
+	//     false, so the rail shows recurring zero-token SKIPPED wake
+	//     checks — the crew literally sleeps until the feed changes.
+	//     On camera: lower expected_items (or point url at a live feed)
+	//     and the next tick wakes the crew.
 	// ───────────────────────────────────────────────────────────────
 	{
-		Slug:        "daily-status-digest",
-		Name:        "Daily status digest",
-		Description: "Compose a markdown digest of the day's work — useful as a scheduled summary.",
-		CrewSlug:    "engineering",
+		Slug:        "feed-watch-probe",
+		Name:        "Feed watch probe (agentless)",
+		Description: "Token-zero wake gate: fetch a JSON feed, count its items deterministically, emit true only when the count drifts from baseline.",
+		CrewSlug:    "ops",
 		Definition: map[string]interface{}{
 			"dsl_version":        "1.0",
-			"name":               "daily-status-digest",
-			"display_name":       "Daily status digest",
-			"description":        "Compose a markdown digest of the day's work — useful as a scheduled summary.",
-			"estimated_cost_usd": 0.002,
-			"egress_targets":     []string{},
+			"name":               "feed-watch-probe",
+			"display_name":       "Feed watch probe (agentless)",
+			"description":        "Token-zero wake gate: fetch a JSON feed, count its items deterministically, emit true only when the count drifts from baseline.",
+			"estimated_cost_usd": 0.0,
+			"agentless":          true,
+			// Narrow allowlist, same rationale as fetch-and-extract:
+			// the seed probe watches a stable public endpoint; swap url
+			// (and broaden egress) to watch your own status page/feed.
+			"egress_targets": []string{"httpbin.org"},
+			"inputs": []map[string]interface{}{
+				{
+					"name":        "url",
+					"type":        "string",
+					"required":    false,
+					"default":     "https://httpbin.org/json",
+					"description": "JSON feed to watch",
+				},
+				{
+					"name":        "expected_items",
+					"type":        "number",
+					"required":    false,
+					"default":     2.0,
+					"description": "Baseline item count — the probe fires when the feed drifts from this",
+				},
+			},
+			"outputs": []map[string]interface{}{
+				{"name": "changed", "type": "string"},
+			},
+			"steps": []map[string]interface{}{
+				{
+					"id":   "fetch",
+					"type": "http",
+					"http": map[string]interface{}{
+						"method":             "GET",
+						"url":                "{{ inputs.url }}",
+						"max_response_bytes": 200000,
+						"success_codes":      []int{200},
+					},
+					"timeout_seconds": 30,
+				},
+				{
+					// Deterministic reduce, no LLM: project the item list
+					// out of the payload…
+					"id":    "items",
+					"type":  "transform",
+					"needs": []string{"fetch"},
+					"transform": map[string]interface{}{
+						"input":      "{{ steps.fetch.output }}",
+						"expression": ".slideshow.slides",
+					},
+				},
+				{
+					// …then count it.
+					"id":    "count",
+					"type":  "transform",
+					"needs": []string{"items"},
+					"transform": map[string]interface{}{
+						"input":      "{{ steps.items.output }}",
+						"expression": "length",
+					},
+				},
+				{
+					"id":    "probe",
+					"type":  "code",
+					"needs": []string{"count"},
+					"code": map[string]interface{}{
+						// runtime: expr — the deterministic, token-zero
+						// CodeRunner. true = feed drifted from baseline →
+						// the gated schedule wakes its target routine.
+						"runtime": "expr",
+						"code":    "{{ steps.count.output }} != {{ inputs.expected_items }}",
+					},
+					"timeout_seconds": 15,
+				},
+			},
+		},
+	},
+
+	// ───────────────────────────────────────────────────────────────
+	// 15b. feed-change-report — the wake-gated target (agent routine)
+	//      Only runs when feed-watch-probe says the feed changed:
+	//      re-fetches the feed and has an agent brief the crew. Its
+	//      completion lands a notification — "the crew woke up because
+	//      something actually happened".
+	// ───────────────────────────────────────────────────────────────
+	{
+		Slug:        "feed-change-report",
+		Name:        "Feed change report",
+		Description: "Wake-gated by the feed-watch probe: re-fetch the changed feed and brief the crew on what's in it now.",
+		CrewSlug:    "ops",
+		Definition: map[string]interface{}{
+			"dsl_version":        "1.0",
+			"name":               "feed-change-report",
+			"display_name":       "Feed change report",
+			"description":        "Wake-gated by the feed-watch probe: re-fetch the changed feed and brief the crew on what's in it now.",
+			"estimated_cost_usd": 0.003,
+			"egress_targets":     []string{"httpbin.org"},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
 			},
 			"inputs": []map[string]interface{}{
-				{"name": "team", "type": "string", "required": false, "default": "engineering"},
-				{"name": "date", "type": "string", "required": false, "default": "today"},
+				{
+					"name":        "url",
+					"type":        "string",
+					"required":    false,
+					"default":     "https://httpbin.org/json",
+					"description": "The watched feed (keep in sync with feed-watch-probe's url)",
+				},
 			},
 			"outputs": []map[string]interface{}{
-				{"name": "digest", "type": "string"},
+				{"name": "report", "type": "string"},
 			},
 			"steps": []map[string]interface{}{
 				{
-					"id":         "compose",
+					"id":   "fetch",
+					"type": "http",
+					"http": map[string]interface{}{
+						"method":             "GET",
+						"url":                "{{ inputs.url }}",
+						"max_response_bytes": 200000,
+						"success_codes":      []int{200},
+					},
+					"timeout_seconds": 30,
+				},
+				{
+					"id":         "report",
 					"type":       "agent_run",
-					"agent_slug": agentSlugRef("robin"),
+					"agent_slug": agentSlugRef("riley"),
 					"complexity": "fast",
-					"prompt":     "Compose a markdown daily status digest for the {{ inputs.team }} team for {{ inputs.date }}. Include 3 sections: ## Done, ## In progress, ## Blockers. Use believable but generic items. Keep it under 200 words.",
+					"needs":      []string{"fetch"},
+					"prompt":     "The feed we monitor changed since its last baseline. Current JSON payload:\n\n{{ steps.fetch.output }}\n\nWrite a concise change report for the crew: at most 3 bullets describing what the feed contains now and anything that looks new or unusual, then a single 'Suggested action:' line. Plain markdown, under 120 words.",
 					"validation": map[string]interface{}{
-						"min_length":       100,
-						"max_length":       2000,
-						"must_contain":     []string{"##"},
+						"min_length":       40,
 						"must_not_contain": []string{"API_KEY=", "Bearer "},
 					},
 				},
@@ -1020,9 +1160,8 @@ var Routines = []RoutineDef{
 // and the canonicalisation policy lives in one place.
 var canonicalJSONRecipes = map[string]string{
 	"extract-contacts":     "extract",
-	"parse-log-line":       "parse",
+	"incident-timeline":    "extract",
 	"classify-ticket":      "classify",
-	"csv-to-json":          "convert",
 	"normalize-dates":      "normalize",
 	"json-schema-validate": "validate",
 	"invoice-extract":      "extract",

@@ -121,8 +121,8 @@ Implies `--wait-provision`. Picks the first provisioned crew (preferring `resear
 | 4–5. Skills + assignments | Workspace skills + per-agent skill bindings | Fatal |
 | 6–7. Credentials + assignments | Demo API keys + per-agent credential bindings | Fatal |
 | 8–9. Integrations + bindings | MCP servers, GitHub/Slack stubs | Fatal |
-| 9b. Routines | Five starter routine recipes | Non-fatal |
-| 9b. Schedules | One demo cron so `/activity` has data on first load | Non-fatal |
+| 9b. Routines | Starter routine library + eval scenarios (deterministic recipes, a morning briefing, an agentless feed-watch probe and its wake-gated change report) | Non-fatal |
+| 9b. Schedules | Demo crons so `/activity` has data on first load — including a wake-gated feed watch whose agentless probe runs token-zero every 15 minutes | Non-fatal |
 | 10. Issues | Sample issues, projects, labels (unless `--skip-issues`) | Fatal |
 | 10b. Wait for provisioning | If `--wait-provision`, blocks until images are ready | Fatal in sync mode, deferred otherwise |
 | 10c. Backup self-test | If `--test-backup`, full round-trip on one crew | Fatal |

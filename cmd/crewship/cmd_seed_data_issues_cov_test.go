@@ -392,13 +392,16 @@ func TestSeedIssues_UnknownAssigneeIsLoggedNotFatal(t *testing.T) {
 		return 404, nil, ""
 	})
 
-	// Empty agentIDs: every assignee lookup misses → logged, no PATCH sent.
+	// Empty agentIDs: every assignee lookup misses → logged, no ASSIGNMENT
+	// PATCH sent. Status-transition PATCHes (catalogue issues with a
+	// target_state) are independent of assignee resolution and still fire,
+	// so filter by body — this test locks the assignment behaviour only.
 	if err := seedIssues(context.Background(), covStubClient(s), crewIDs, map[string]string{}); err != nil {
 		t.Fatalf("unknown assignees must not abort: %v", err)
 	}
 	for _, c := range s.Calls() {
-		if c.Method == "PATCH" {
-			t.Errorf("no assignment PATCH expected: %s", c.Path)
+		if c.Method == "PATCH" && strings.Contains(string(c.Body), "assignee_type") {
+			t.Errorf("no assignment PATCH expected: %s %s", c.Path, c.Body)
 		}
 	}
 }

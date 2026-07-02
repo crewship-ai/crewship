@@ -43,20 +43,24 @@ func TestSeedSchedules_Created(t *testing.T) {
 	if !strings.Contains(stderr, "+ Schedule: Demo: classify ticket") {
 		t.Errorf("created log missing: %q", stderr)
 	}
-	if !strings.Contains(stderr, "Created 3/3 demo schedule(s)") {
+	if !strings.Contains(stderr, "Created 4/4 demo schedule(s)") {
 		t.Errorf("summary line missing: %q", stderr)
 	}
 	calls := s.CallsFor("POST", covSchedulesPath)
-	if len(calls) != 3 {
+	if len(calls) != 4 {
 		t.Fatalf("calls = %d", len(calls))
 	}
-	// Assert all three seeded payloads (in demoSchedules order), not just
-	// calls[0] — otherwise the other two definitions could regress or
-	// duplicate silently while the test still passes.
+	// Assert all four seeded payloads (in demoSchedules order), not just
+	// calls[0] — otherwise the other definitions could regress or
+	// duplicate silently while the test still passes. The feed-watch
+	// schedule must carry the wake gate (the token-zero wake-check
+	// demo); the ungated ones must NOT — an accidental gate would
+	// silently suppress their runs.
 	wantPerCall := [][]string{
 		{`"target_pipeline_slug":"classify-ticket"`, `"cron_expr":"*/30 * * * *"`, `"enabled":true`},
-		{`"target_pipeline_slug":"daily-status-digest"`, `"cron_expr":"0 9 * * *"`, `"enabled":true`},
+		{`"target_pipeline_slug":"morning-briefing"`, `"cron_expr":"30 8 * * *"`, `"enabled":true`},
 		{`"target_pipeline_slug":"consistency-sweep"`, `"cron_expr":"0 */6 * * *"`, `"enabled":true`},
+		{`"target_pipeline_slug":"feed-change-report"`, `"cron_expr":"*/15 * * * *"`, `"enabled":true`, `"wake_pipeline_slug":"feed-watch-probe"`},
 	}
 	for i, wants := range wantPerCall {
 		body := string(calls[i].Body)
@@ -64,6 +68,11 @@ func TestSeedSchedules_Created(t *testing.T) {
 			if !strings.Contains(body, want) {
 				t.Errorf("schedule[%d] body missing %s: %s", i, want, body)
 			}
+		}
+	}
+	for i := 0; i < 3; i++ {
+		if strings.Contains(string(calls[i].Body), `"wake_pipeline_slug"`) {
+			t.Errorf("schedule[%d] must not carry a wake gate: %s", i, calls[i].Body)
 		}
 	}
 }
@@ -83,7 +92,7 @@ func TestSeedSchedules_TargetMissing404(t *testing.T) {
 	if !strings.Contains(stderr, "target pipeline not found — skipping") {
 		t.Errorf("404 skip log missing: %q", stderr)
 	}
-	if !strings.Contains(stderr, "Created 0/3") {
+	if !strings.Contains(stderr, "Created 0/4") {
 		t.Errorf("summary should show zero created: %q", stderr)
 	}
 }
@@ -119,7 +128,7 @@ func TestSeedSchedules_TransportErrorTolerated(t *testing.T) {
 	if !strings.Contains(stderr, "! Schedule classify-ticket:") {
 		t.Errorf("transport error log missing: %q", stderr)
 	}
-	if !strings.Contains(stderr, "Created 0/3") {
+	if !strings.Contains(stderr, "Created 0/4") {
 		t.Errorf("summary should report zero created: %q", stderr)
 	}
 }

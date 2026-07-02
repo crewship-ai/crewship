@@ -649,6 +649,8 @@ crewship routine schedules update <schedule_id> --no-wake
 
 This gives schedules a cost ladder: **agentless schedule** (always free) → **wake-gated schedule** (probe free, LLM only on signal) → **plain schedule** (today's default, unchanged).
 
+A freshly-seeded workspace ships a working example: the *Demo: feed watch — wake on change* schedule runs the agentless `feed-watch-probe` every 15 minutes and only wakes `feed-change-report` (an agent routine) when the watched feed drifts from its baseline. Point the probe's `url`/`expected_items` inputs at your own endpoint to make it real.
+
 Semantics worth knowing:
 
 - The probe must be `agentless: true`, live in the same workspace, and can't be the schedule's own routine — all validated when the schedule is saved.
