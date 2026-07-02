@@ -450,6 +450,10 @@ export function AppToolbar() {
                 </TooltipContent>
               </Tooltip>
 
+              {/* Live routine runs surface via the ActivityBell badge +
+                  dropdown (LIVE/RECENT sections), not a header chip —
+                  the pill group stays quiet by default. */}
+
               {/* Escalations (incl. agent credential-approval requests) surface
                   through the unified Inbox (the InboxBell + /inbox page), not a
                   separate toolbar badge — one place for "things needing action". */}

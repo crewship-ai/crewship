@@ -416,7 +416,7 @@ func (h *PipelineHandler) RunLogs(w http.ResponseWriter, r *http.Request) {
 //
 // Filters:
 //
-//	?status=running|completed|failed|...|active   (active = running+queued+paused)
+//	?status=running|completed|failed|...|active   (active = running+queued+paused+waiting)
 //	?since=<RFC3339>                              created_at lower bound
 //	?limit=50                                     hard cap 200
 //
@@ -441,9 +441,12 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 	switch q.Get("status") {
 	case "active":
 		// "active" is the dashboard shortcut for "still doing
-		// something" — running + queued + paused (paused covers
-		// runs sitting on a wait step waiting on an inbox approval).
-		where = append(where, `r.status IN ('running', 'queued', 'paused')`)
+		// something" — running + queued + paused + waiting.
+		// 'waiting' is what SetWaiting writes when a run parks on a
+		// human waitpoint approval (internal/pipeline/runs.go), and
+		// the store's ListActive scan includes it; the workspace feed
+		// must match or parked runs disappear from live surfaces.
+		where = append(where, `r.status IN ('running', 'queued', 'paused', 'waiting')`)
 	case "":
 		// no filter
 	default:

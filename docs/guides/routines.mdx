@@ -783,6 +783,16 @@ Every routine run emits a sequence of journal entries:
 
 Plus WebSocket broadcast on the workspace channel for live UI updates (PipelineRunNode in the orchestration graph + Runs sub-tab waterfall both subscribe).
 
+### Live visibility — what is a routine doing right now?
+
+While at least one routine run is in flight, the dashboard surfaces it from anywhere in the app:
+
+- **Header chip** — a pulsing "N routines running" pill appears in the toolbar next to the Online / Crews pills (hidden when nothing is active). If any run is parked on a human approval it turns amber and appends "· M awaiting approval". Clicking opens a popover with the six newest active runs — routine name, short run id, elapsed time, cost so far, current step — each with **Open trace ↗** (deep-link to `/activity?run=<id>`), **Cancel** (same manage-tier RBAC as the Runs tab), and a **Review →** shortcut into the routine for parked runs. With more than six active runs a "View all N running →" footer jumps to the Activity rail pre-filtered to the active bucket (`/activity?status=active`).
+- **`/routines` sidebar** — a routine with an active run gets a pulsing blue dot and a sub-line showing the current step and elapsed time (`▶ ask-casey · 0:12`); a parked run shows the amber `⏸ awaiting approval` variant.
+- **`/routines` list table** — the status cell swaps the historical "last run" pill for a live **Running** (or amber **Awaiting approval**) pill with current step · elapsed · cost, and live routines bubble to the top of the table regardless of the chosen column sort.
+
+All three surfaces share one workspace-scoped subscription (`GET /api/v1/workspaces/{ws}/pipeline-runs?status=active` + the `pipeline.run.*`/`pipeline.step.started` events, 3s poll while anything is active). `status=active` bundles `running`, `queued`, `paused` **and `waiting`** — the status a run parks in while a [HITL waitpoint](#hitl-waitpoints) awaits a decision.
+
 ### Per-step cost + duration
 
 Both the UI Runs sub-tab waterfall and `crewship routine logs <run_id> --slug X` surface the `cost_usd` and `duration_ms` fields the executor stamps on every `pipeline.step.completed` event. Same data, two presentation surfaces:

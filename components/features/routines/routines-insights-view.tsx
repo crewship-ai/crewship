@@ -4,19 +4,24 @@ import { useMemo } from "react"
 import { AlertCircle, CheckCircle2, Sparkles, TrendingUp, Banknote } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Pipeline } from "@/hooks/use-pipelines"
+import { usePipelineRuns } from "@/hooks/use-pipeline-runs"
+import { aggregateRunCosts, formatUsd } from "@/lib/routines-insights"
 import { Card } from "./_shared"
 
 // RoutinesInsightsView — quick-glance health snapshot for the routine
-// catalog. Surfaces three simple numbers (total runs, recent success
-// rate, recent failures) plus a "top routines by usage" leaderboard.
+// catalog. Surfaces four simple numbers (total runs, recent success
+// rate, recent failures, recent spend) plus a "top routines by usage"
+// leaderboard.
 //
-// We intentionally compute everything from the cached pipeline list
-// rather than firing a dedicated /insights endpoint. The list already
-// carries invocation_count + last_invocation_status, which is enough
-// for an MVP. A richer per-pipeline runs aggregate can replace this
-// when the backend surface lands.
+// Health stats come from the cached pipeline list (invocation_count +
+// last_invocation_status) rather than a dedicated /insights endpoint.
+// The spend KPI is the one number the list can't carry — per-run
+// cost_usd only exists on pipeline runs — so we reuse the workspace-
+// wide pipeline-runs list (most recent 100) and aggregate client-side
+// via lib/routines-insights.ts.
 
 interface RoutinesInsightsViewProps {
+  workspaceId: string
   routines: Pipeline[]
   onSelect: (slug: string) => void
 }
@@ -33,9 +38,15 @@ function statusBadge(status: string | undefined) {
 }
 
 export function RoutinesInsightsView({
+  workspaceId,
   routines,
   onSelect,
 }: RoutinesInsightsViewProps) {
+  // Recent runs (most recent 100, workspace-wide) — the only place
+  // per-run cost_usd lives. Drives the spend KPI below.
+  const { runs } = usePipelineRuns(workspaceId, "all")
+  const cost = useMemo(() => aggregateRunCosts(runs), [runs])
+
   const stats = useMemo(() => {
     const totalRuns = routines.reduce((sum, r) => sum + (r.invocation_count ?? 0), 0)
     const everRun = routines.filter((r) => (r.invocation_count ?? 0) > 0)
@@ -73,13 +84,6 @@ export function RoutinesInsightsView({
     return { totalRuns, everRun, succeeded, failed, passRate, top, recentFailures }
   }, [routines])
 
-  // Average cost per routine across the workspace — same data source
-  // as Stats but separated so the card layout reads as a fourth KPI.
-  const avgCostPerRoutine = stats.everRun.length > 0
-    ? stats.everRun.reduce((sum, _r) => sum, 0) / stats.everRun.length
-    : 0
-  void avgCostPerRoutine
-
   return (
     <div className="h-full overflow-auto">
       <div className="space-y-4 p-6">
@@ -93,7 +97,7 @@ export function RoutinesInsightsView({
         </div>
 
         {/* KPI strip — same sizing as List view + Dashboard */}
-        <section className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
           <KpiTile
             label="Total runs"
             value={stats.totalRuns.toLocaleString()}
@@ -118,6 +122,17 @@ export function RoutinesInsightsView({
             }
             tone={stats.recentFailures.length > 0 ? "rose" : "default"}
             Icon={AlertCircle}
+          />
+          <KpiTile
+            label="Recent spend"
+            value={cost.runCount > 0 ? formatUsd(cost.totalUsd) : "—"}
+            sub={
+              cost.avgPerRunUsd !== null
+                ? `${formatUsd(cost.avgPerRunUsd)} avg per run · last ${cost.runCount} run${cost.runCount === 1 ? "" : "s"}`
+                : "No runs recorded yet"
+            }
+            tone="violet"
+            Icon={Banknote}
           />
         </section>
 
@@ -234,7 +249,3 @@ function RoutineLink({
   )
 }
 
-// Keep `Sparkles`/`Banknote` imports referenced — they may be used in
-// future per-routine cost insights.
-void Sparkles
-void Banknote

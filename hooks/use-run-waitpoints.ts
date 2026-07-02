@@ -62,6 +62,11 @@ export function useRunWaitpoints(
   // refresh so the canvas no longer shows stale pending pills.
   useRealtimeEvent("pipeline.run.completed", handleWaitpointEvent)
   useRealtimeEvent("pipeline.run.failed", handleWaitpointEvent)
+  // An approval decided ELSEWHERE (inbox, another tab) resumes the
+  // run mid-flight — the next step's started event is the first
+  // signal, and without this refresh the canvas kept offering
+  // Approve/Deny on the stale token ("already decided or expired").
+  useRealtimeEvent("pipeline.step.started", handleWaitpointEvent)
 
   return { waitpoints, refresh }
 }

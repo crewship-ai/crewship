@@ -21,6 +21,7 @@ import {
   normalizeRoutineStatus,
 } from "@/lib/routine-governance"
 import { buildPipelineActionRequest } from "@/lib/pipeline-actions"
+import { usePipelineRunRecords, isActiveRunStatus } from "@/hooks/use-pipeline-run-records"
 import { integrationLabel, extractMissingIntegrations } from "@/lib/integration-labels"
 import { PipelineRunActivity } from "@/components/features/activity/pipeline-run-activity"
 import { usePendingApproval } from "@/hooks/use-pending-approval"
@@ -103,6 +104,9 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   // lastRunId holds the run_id of the most recent Run so we can show its
   // live activity rail inline (instant status after clicking).
   const [lastRunId, setLastRunId] = useState<string | null>(null)
+  // cancelling gates the header Cancel button while its POST is in
+  // flight (same pattern as busyAction for Run / Dry run).
+  const [cancelling, setCancelling] = useState(false)
   // abortRef tracks the in-flight fetch so a fast workspace/slug
   // switch cancels stale work. Without this, a slow network +
   // rapid-fire selection could race-overwrite the panel with the
@@ -118,6 +122,17 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
     deciding: decidingApproval,
     decide: decideApproval,
   } = usePendingApproval(workspaceId, lastRunId)
+
+  // Live run records for THIS routine power the header Cancel button.
+  // The hook already refreshes on pipeline.run.* WS events, so the
+  // button's enabled state tracks run starts/finishes without polling.
+  const { records: runRecords, refresh: refreshRunRecords } = usePipelineRunRecords(workspaceId, slug)
+  const activeRuns = runRecords.filter((r) => isActiveRunStatus(r.status))
+  // Prefer the run this panel just started (lastRunId); otherwise a
+  // lone active run is unambiguous. Several active runs with no known
+  // lastRunId → don't guess, send the user to the Runs tab to pick.
+  const cancelTarget =
+    activeRuns.find((r) => r.id === lastRunId) ?? (activeRuns.length === 1 ? activeRuns[0] : undefined)
 
   const fetchRoutine = async () => {
     abortRef.current?.abort()
@@ -195,12 +210,12 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
                 ? String((parsed as Record<string, unknown>).detail)
                 : undefined
             toast.error(
-              `Tahle rutina potřebuje integraci: ${labels.join(", ")} — není připojená pro tuto crew`,
+              `This routine needs the ${labels.join(", ")} integration${labels.length > 1 ? "s" : ""} — not connected for this crew`,
               {
                 description:
-                  detail ?? "Připoj chybějící integraci pro crew, která rutinu spouští, a spusť ji znovu.",
+                  detail ?? "Connect the missing integration for the crew that runs this routine, then run it again.",
                 action: {
-                  label: "Spravovat integrace",
+                  label: "Manage integrations",
                   onClick: () => router.push("/integrations"),
                 },
                 duration: 10000,
@@ -293,6 +308,44 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
       })
     } finally {
       setBusyGov(null)
+    }
+  }
+
+  // Cancel the routine's active run. Targets cancelTarget (the run
+  // this panel started, or the lone active run); when several runs are
+  // active and none is ours, deep-link to the Runs tab where each row
+  // has its own cancel button. RBAC: manage-tier — MEMBERs get a 403.
+  const cancelActiveRun = async () => {
+    if (!cancelTarget) {
+      setActiveTab("runs")
+      toast.info("Multiple runs are active — pick the one to cancel in the Runs tab")
+      return
+    }
+    setCancelling(true)
+    try {
+      const res = await apiFetch(
+        `/api/v1/workspaces/${workspaceId}/pipelines/runs/${cancelTarget.id}/cancel`,
+        { method: "POST" },
+      )
+      if (!res.ok) {
+        if (res.status === 403) {
+          throw new Error("You don't have permission to cancel runs (manager role or above required)")
+        }
+        const t = await res.text().catch(() => "")
+        throw new Error(`${res.status}: ${t || res.statusText}`)
+      }
+      toast.success("Cancel requested", {
+        description: `Run ${cancelTarget.id.slice(0, 12)}… will stop at the next step boundary.`,
+      })
+      refreshRunRecords()
+      onChanged()
+      fetchRoutine()
+    } catch (e) {
+      toast.error("Cancel failed", {
+        description: e instanceof Error ? e.message : String(e),
+      })
+    } finally {
+      setCancelling(false)
     }
   }
 
@@ -467,16 +520,27 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
               </Button>
             )
           )}
-          <Button
-            variant="ghost"
-            className="h-9 gap-2 rounded-md px-3 text-sm text-muted-foreground hover:text-rose-400"
-            onClick={() => toast.info("Select an active run in the Runs tab to cancel it")}
-            title="Cancel an active run (select run in Runs tab)"
-            disabled
+          {/* Same disabled-tooltip wrapper trick as the Run button. */}
+          <span
+            title={
+              activeRuns.length === 0
+                ? "No active run to cancel"
+                : cancelTarget
+                  ? `Cancel run ${cancelTarget.id.slice(0, 12)}…`
+                  : "Multiple runs are active — pick one in the Runs tab"
+            }
+            className="inline-flex"
           >
-            <Square className="h-3.5 w-3.5" />
-            Cancel
-          </Button>
+            <Button
+              variant="ghost"
+              className="h-9 gap-2 rounded-md px-3 text-sm text-muted-foreground hover:text-rose-400"
+              onClick={cancelActiveRun}
+              disabled={cancelling || activeRuns.length === 0}
+            >
+              {cancelling ? <Spinner className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+              Cancel
+            </Button>
+          </span>
         </div>
       </div>
 

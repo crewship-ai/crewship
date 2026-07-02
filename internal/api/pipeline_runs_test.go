@@ -287,14 +287,20 @@ func TestPipelineRuns_List_StatusFilter_RestrictsRows(t *testing.T) {
 }
 
 // TestPipelineRuns_List_StatusActive_BundlesInProgressStatuses verifies
-// the `status=active` shortcut documented inline as
-// running+queued+paused. A row with status=completed must NOT appear.
+// the `status=active` shortcut bundles every in-flight status:
+// running+queued+paused+waiting. "waiting" is what SetWaiting
+// (internal/pipeline/runs.go) writes when a run parks on a human
+// waitpoint approval — the store's own ListActive scan includes it, so
+// the workspace feed must too or parked runs vanish from every live
+// surface (header chip, /activity active bucket, routines list).
+// A row with status=completed must NOT appear.
 func TestPipelineRuns_List_StatusActive_BundlesInProgressStatuses(t *testing.T) {
 	h, db, userID, wsID := runsHandlerRig(t)
 	seedRunsPipeline(t, db, wsID, "pln_a", "demo")
 	seedRunRow(t, db, wsID, "pln_a", "demo", "prn_running", "running")
 	seedRunRow(t, db, wsID, "pln_a", "demo", "prn_queued", "queued")
 	seedRunRow(t, db, wsID, "pln_a", "demo", "prn_paused", "paused")
+	seedRunRow(t, db, wsID, "pln_a", "demo", "prn_waiting", "waiting")
 	seedRunRow(t, db, wsID, "pln_a", "demo", "prn_done", "completed")
 
 	req := withWorkspaceUser(
@@ -310,8 +316,8 @@ func TestPipelineRuns_List_StatusActive_BundlesInProgressStatuses(t *testing.T) 
 		Count int `json:"count"`
 	}
 	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
-	if resp.Count != 3 {
-		t.Errorf("active count = %d, want 3 (running+queued+paused, excluding completed)", resp.Count)
+	if resp.Count != 4 {
+		t.Errorf("active count = %d, want 4 (running+queued+paused+waiting, excluding completed)", resp.Count)
 	}
 }
 

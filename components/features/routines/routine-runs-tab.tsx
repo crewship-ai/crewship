@@ -1,10 +1,12 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ChevronRight, CheckCircle2, XCircle, Eye, Play } from "lucide-react"
+import { ChevronRight, CheckCircle2, XCircle, Eye, Play, Square } from "lucide-react"
+import { toast } from "sonner"
 import { Spinner } from "@/components/ui/spinner"
 import { usePipelineRuns } from "@/hooks/use-pipelines"
-import { usePipelineRunRecords, type PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
+import { usePipelineRunRecords, isActiveRunStatus, type PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
+import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import { RoutineRunsSkeleton } from "./routine-skeletons"
@@ -42,11 +44,20 @@ interface StepEvent {
 export function RoutineRunsTab({ workspaceId, slug }: Props) {
   // Primary list source: pipeline_runs (v83). Cleaner shape, faster
   // query. Falls back to journal-backed grouping when legacy=true.
-  const { records, legacy, loading: recordsLoading, error: recordsError } = usePipelineRunRecords(workspaceId, slug)
+  const {
+    records,
+    legacy,
+    loading: recordsLoading,
+    error: recordsError,
+    refresh: refreshRecords,
+  } = usePipelineRunRecords(workspaceId, slug)
   // Always fetch journal-backed runs — needed for step-level waterfall
   // when a run is expanded (pipeline_runs has no per-step rows).
-  const { runs, loading: runsLoading, error: runsError } = usePipelineRuns(workspaceId, slug)
+  const { runs, loading: runsLoading, error: runsError, refresh: refreshRuns } = usePipelineRuns(workspaceId, slug)
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null)
+  // Run id whose cancel POST is in flight — its button shows a spinner
+  // and stays disabled so a double-click can't fire twice.
+  const [cancellingRunId, setCancellingRunId] = useState<string | null>(null)
   const [stepEvents, setStepEvents] = useState<Map<string, StepEvent[]>>(new Map())
   // Track which slug the auto-expand has fired for, so switching
   // routines re-arms it but re-rendering on data refresh doesn't.
@@ -77,6 +88,39 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
   useRealtimeEvent("pipeline.step.completed", handleStepEvent("completed"))
   useRealtimeEvent("pipeline.step.failed", handleStepEvent("failed"))
   useRealtimeEvent("pipeline.step.validation_failed", handleStepEvent("validation_failed"))
+
+  // Pre-empt an in-flight run. The backend cancels between steps and
+  // kills the underlying agent process; cancelled runs land as
+  // status=cancelled in pipeline_runs (pipeline.run.failed on the
+  // wire), so the WS subscription refreshes the row too — the manual
+  // refresh below just makes the optimistic path instant. RBAC:
+  // cancel is a manage-tier action, so a MEMBER gets a 403.
+  const cancelRun = async (runId: string) => {
+    setCancellingRunId(runId)
+    try {
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/runs/${runId}/cancel`, {
+        method: "POST",
+      })
+      if (!res.ok) {
+        if (res.status === 403) {
+          throw new Error("You don't have permission to cancel runs (manager role or above required)")
+        }
+        const t = await res.text().catch(() => "")
+        throw new Error(`${res.status}: ${t || res.statusText}`)
+      }
+      toast.success("Cancel requested", {
+        description: `Run ${runId.slice(0, 12)}… will stop at the next step boundary.`,
+      })
+      refreshRecords()
+      refreshRuns()
+    } catch (e) {
+      toast.error("Cancel failed", {
+        description: e instanceof Error ? e.message : String(e),
+      })
+    } finally {
+      setCancellingRunId(null)
+    }
+  }
 
   // The list view prefers `records` (column-typed) when available,
   // and uses `groupRunsByRunId(runs)` as the legacy fallback. Both
@@ -151,41 +195,86 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
       <ol className="divide-y divide-border/40">
         {grouped.map((run) => {
           const expanded = expandedRunId === run.runId
+          // `active` comes from the pipeline_runs record (queued /
+          // running / waiting — the backend's cancellable set); the
+          // legacy journal path only knows the coarse "running".
+          const cancellable = run.active ?? run.status === "running"
           return (
             <li
               key={run.runId}
               className={cn("transition-colors", expanded && "bg-white/[0.015]")}
             >
-              <button
-                onClick={() => setExpandedRunId(expanded ? null : run.runId)}
-                className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.025]"
-              >
-                <ChevronRight
-                  className={cn(
-                    "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
-                    expanded && "rotate-90",
-                  )}
-                />
-                <RunStatusIcon status={run.status} />
-                <span className="font-mono text-sm text-foreground/90">{run.runId.slice(0, 18)}…</span>
-                <Pill
-                  tone={
-                    run.status === "completed"
-                      ? "emerald"
-                      : run.status === "failed"
-                        ? "rose"
-                        : run.status === "running"
-                          ? "blue"
-                          : "default"
-                  }
-                  className="capitalize"
+              {/* Row is a flex div (not one big <button>) so the cancel
+                  action can be a sibling control — nesting a button
+                  inside the expand button would be invalid HTML. */}
+              <div className="flex w-full items-center gap-3 px-4 py-3 hover:bg-white/[0.025]">
+                <button
+                  onClick={() => setExpandedRunId(expanded ? null : run.runId)}
+                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
                 >
-                  {run.status}
-                </Pill>
-                <span className="ml-auto font-mono text-[12px] text-muted-foreground">
-                  {formatRelative(run.startedAt)}
-                </span>
-              </button>
+                  <ChevronRight
+                    className={cn(
+                      "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
+                      expanded && "rotate-90",
+                    )}
+                  />
+                  <RunStatusIcon status={run.status} />
+                  <span className="shrink-0 font-mono text-sm text-foreground/90">{run.runId.slice(0, 18)}…</span>
+                  <Pill
+                    tone={
+                      run.status === "completed"
+                        ? "emerald"
+                        : run.status === "failed"
+                          ? "rose"
+                          : run.status === "running"
+                            ? "blue"
+                            : "default"
+                    }
+                    className="capitalize"
+                  >
+                    {run.status}
+                  </Pill>
+                  {run.triggeredVia && (
+                    <span title="Trigger source" className="inline-flex shrink-0">
+                      <Pill className="capitalize">{run.triggeredVia.replace(/_/g, " ")}</Pill>
+                    </span>
+                  )}
+                  {run.status === "failed" && run.errorMessage ? (
+                    <span
+                      className="min-w-0 flex-1 truncate text-[12px] text-rose-400/80"
+                      title={run.errorMessage}
+                    >
+                      {run.errorMessage}
+                    </span>
+                  ) : (
+                    <span className="flex-1" />
+                  )}
+                  <span className="ml-auto flex shrink-0 items-center gap-3 font-mono text-[12px] tabular-nums text-muted-foreground">
+                    {run.durationMs != null && run.durationMs > 0 && (
+                      <span title="Run duration">{formatStepDuration(run.durationMs)}</span>
+                    )}
+                    {run.costUSD != null && run.costUSD > 0 && (
+                      <span title="Run cost (USD)">{formatStepCost(run.costUSD)}</span>
+                    )}
+                    <span>{formatRelative(run.startedAt)}</span>
+                  </span>
+                </button>
+                {cancellable && (
+                  <button
+                    onClick={() => cancelRun(run.runId)}
+                    disabled={cancellingRunId === run.runId}
+                    aria-label="Cancel run"
+                    title="Cancel this run"
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-rose-500/10 hover:text-rose-400 disabled:opacity-50"
+                  >
+                    {cancellingRunId === run.runId ? (
+                      <Spinner className="h-3.5 w-3.5" />
+                    ) : (
+                      <Square className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                )}
+              </div>
               {expanded && (
                 <div className="border-t border-border/40 bg-black/20 px-5 py-4">
                   <RunWaterfall
@@ -343,6 +432,14 @@ interface GroupedRun {
   status: "running" | "completed" | "failed" | "unknown"
   startedAt: string
   entries: Array<{ ts: string; entry_type: string; severity: string; summary: string; payload?: unknown }>
+  // Enrichment sourced from the v83 pipeline_runs record — absent on
+  // the legacy journal-grouping path (journal events don't carry
+  // per-run trigger / cost / duration columns).
+  active?: boolean
+  triggeredVia?: string
+  durationMs?: number
+  costUSD?: number
+  errorMessage?: string
 }
 
 function groupRunsByRunId(rows: Array<{ id: string; ts: string; entry_type: string; severity: string; summary: string; run_id?: string; payload?: unknown }>): GroupedRun[] {
@@ -406,6 +503,7 @@ function toGroupedRun(r: PipelineRunRecord): GroupedRun {
   switch (r.status) {
     case "running":
     case "queued":
+    case "waiting":
       status = "running"
       break
     case "completed":
@@ -424,5 +522,12 @@ function toGroupedRun(r: PipelineRunRecord): GroupedRun {
     status,
     startedAt: r.started_at,
     entries: [],
+    // Cancellable set matches the backend's active scan
+    // (queued/running/waiting — internal/pipeline/runs.go).
+    active: isActiveRunStatus(r.status),
+    triggeredVia: r.triggered_via,
+    durationMs: r.duration_ms,
+    costUSD: r.cost_usd,
+    errorMessage: r.error_message,
   }
 }

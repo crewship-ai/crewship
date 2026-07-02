@@ -14,11 +14,15 @@ import {
   XCircle,
 } from "lucide-react"
 import type { Pipeline } from "@/hooks/use-pipelines"
+import type { PipelineRun } from "@/hooks/use-pipeline-runs"
+import { isAwaitingApproval, useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
+import { useTick } from "@/hooks/use-tick"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { routineStatusBadge } from "@/lib/routine-governance"
 import { Card, Pill } from "./_shared"
+import { formatElapsedSince, formatStepCost } from "./routine-cost-format"
 
 // RoutinesListView — catalog dashboard for the routine list tab.
 // Designed so the middle pane adds value the left sidebar can't:
@@ -42,9 +46,27 @@ export function RoutinesListView({ routines, loading, error, selectedSlug, onSel
   const [sortKey, setSortKey] = useState<SortKey>("invocation_count")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
 
+  // Shared workspace live-runs subscription (one fetch loop app-wide,
+  // provided by the dashboard layout) — newest active run per slug.
+  // Drives the live status cell and bubbles running routines to the
+  // top regardless of the chosen column sort.
+  const { bySlug: liveBySlug } = useActiveRoutineRuns()
+
+  // 1s re-render tick ONLY while some listed routine is live, so the
+  // elapsed segment in the status cell counts up.
+  const hasLiveRow = routines.some((p) => liveBySlug.has(p.slug))
+  useTick(hasLiveRow ? 1000 : 0)
+
   const sorted = useMemo(
-    () => [...routines].sort((a, b) => (sortDir === "asc" ? 1 : -1) * compareBy(a, b, sortKey)),
-    [routines, sortKey, sortDir],
+    () =>
+      [...routines].sort((a, b) => {
+        // Live-first bubble: a routine mid-run is what the user came
+        // to see; ties fall through to the chosen column sort.
+        const liveRank = Number(liveBySlug.has(b.slug)) - Number(liveBySlug.has(a.slug))
+        if (liveRank !== 0) return liveRank
+        return (sortDir === "asc" ? 1 : -1) * compareBy(a, b, sortKey)
+      }),
+    [routines, sortKey, sortDir, liveBySlug],
   )
 
   const stats = useMemo(() => {
@@ -194,6 +216,7 @@ export function RoutinesListView({ routines, loading, error, selectedSlug, onSel
                     <RoutineRow
                       key={r.id}
                       routine={r}
+                      liveRun={liveBySlug.get(r.slug)}
                       selected={selectedSlug === r.slug}
                       onClick={() => onSelect(r.slug)}
                     />
@@ -282,15 +305,40 @@ function SortBtn({
 
 function RoutineRow({
   routine,
+  liveRun,
   selected,
   onClick,
 }: {
   routine: Pipeline
+  liveRun?: PipelineRun
   selected: boolean
   onClick: () => void
 }) {
   const status = routine.last_invocation_status?.toLowerCase()
-  const statusPill = !status ? (
+  // Live cell wins over the historical "last run" pill: while a run is
+  // in flight the row shows a pulsing Running / Awaiting approval pill
+  // plus current step · elapsed · cost (no step totals — the workspace
+  // feed only carries current_step_id).
+  const liveAwaiting = liveRun ? isAwaitingApproval(liveRun.status) : false
+  const statusPill = liveRun ? (
+    <div className="flex min-w-0 flex-col gap-1">
+      <Pill tone={liveAwaiting ? "amber" : "blue"}>
+        <span
+          className={cn(
+            "h-1.5 w-1.5 rounded-full animate-pulse",
+            liveAwaiting ? "bg-amber-400" : "bg-blue-400",
+          )}
+        />
+        {liveAwaiting ? "Awaiting approval" : "Running"}
+      </Pill>
+      <span className="truncate text-[11px] text-muted-foreground">
+        {liveAwaiting ? "waiting on a human" : liveRun.current_step_id || "starting…"}
+        {" · "}
+        {formatElapsedSince(liveRun.started_at)}
+        {liveRun.cost_usd > 0 ? ` · ${formatStepCost(liveRun.cost_usd)}` : ""}
+      </span>
+    </div>
+  ) : !status ? (
     <span className="text-[11px] text-muted-foreground">never invoked</span>
   ) : (
     <Pill

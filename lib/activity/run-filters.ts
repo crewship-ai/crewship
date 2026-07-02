@@ -39,7 +39,17 @@ export interface RunFilter {
   hasWaitpoint?: boolean
 }
 
-const ACTIVE_STATUSES = new Set(["running", "queued", "paused"])
+// "waiting" = parked on a human waitpoint approval (internal/pipeline/
+// runs.go RunStatusWaiting) — still in-flight from the user's point of
+// view, so it belongs in the active bucket alongside running/queued/
+// paused. Exported so live-visibility surfaces (header chip, routines
+// sidebar/list) share exactly this definition of "active".
+export const ACTIVE_STATUSES: ReadonlySet<string> = new Set([
+  "running",
+  "queued",
+  "paused",
+  "waiting",
+])
 const FAILED_STATUSES = new Set(["failed", "cancelled", "interrupted"])
 
 // applyFilters narrows a list of runs by every active filter
@@ -131,6 +141,50 @@ export function activeFilterCount(f: RunFilter): number {
   if (f.durationMinMs !== undefined || f.durationMaxMs !== undefined) n++
   if (f.hasWaitpoint) n++
   return n
+}
+
+// ── URL deep-link ───────────────────────────────────────────────────
+
+// applyPipelineParam seeds a filter from the `?pipeline=<slug>` query
+// param — the deep-link the routine overview's "view all →" emits so
+// /activity opens pre-filtered to that routine. Deep-link intent is
+// "focus on this routine", so the slug REPLACES any previously-pinned
+// routines. Returns the base filter untouched (same reference) when
+// the param is absent/blank or already applied — callers use the
+// identity check to skip a redundant preference write.
+export function applyPipelineParam(
+  base: RunFilter,
+  pipelineParam: string | null | undefined,
+): RunFilter {
+  const slug = pipelineParam?.trim()
+  if (!slug) return base
+  if (base.routines?.length === 1 && base.routines[0] === slug) return base
+  return { ...base, routines: [slug] }
+}
+
+// applyStatusParam seeds a filter from the `?status=<bucket>` query
+// param — the deep-link the header live-runs chip's "View all N
+// running →" emits so /activity opens on the active bucket. Same
+// identity-return semantics as applyPipelineParam: base is returned
+// untouched (same reference) when the param is absent/blank, not a
+// known bucket, or already applied — callers use the identity check
+// to skip a redundant preference write.
+const STATUS_BUCKETS: ReadonlySet<StatusBucket> = new Set<StatusBucket>([
+  "all",
+  "active",
+  "completed",
+  "failed",
+])
+
+export function applyStatusParam(
+  base: RunFilter,
+  statusParam: string | null | undefined,
+): RunFilter {
+  const v = statusParam?.trim().toLowerCase()
+  if (!v || !STATUS_BUCKETS.has(v as StatusBucket)) return base
+  const bucket = v as StatusBucket
+  if (base.status === bucket) return base
+  return { ...base, status: bucket }
 }
 
 // ── Grouping ────────────────────────────────────────────────────────
@@ -391,7 +445,9 @@ function rollupStatus(list: PipelineRun[]): RunGroup["status"] {
   let hasCompleted = false
   for (const r of list) {
     if (r.status === "running") hasRunning = true
-    else if (r.status === "paused") hasPaused = true
+    // "waiting" (parked on a human approval) rolls up with "paused" —
+    // both mean "in flight but blocked on a person".
+    else if (r.status === "paused" || r.status === "waiting") hasPaused = true
     else if (FAILED_STATUSES.has(r.status)) hasFailed = true
     else if (r.status === "queued") hasQueued = true
     else if (r.status === "completed") hasCompleted = true

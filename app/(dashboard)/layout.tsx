@@ -10,6 +10,7 @@ import { RuntimeBanner } from "@/components/layout/runtime-banner"
 import { UpdateBanner } from "@/components/layout/update-banner"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { RealtimeProvider } from "@/hooks/use-realtime"
+import { ActiveRoutineRunsProvider } from "@/hooks/use-active-routine-runs"
 import { RealtimeToasts } from "@/components/layout/realtime-toasts"
 import { RealtimeStatusBanner } from "@/components/layout/realtime-status-banner"
 
@@ -37,19 +38,24 @@ export default function DashboardLayout({
 
   return (
     <RealtimeProvider>
-      <SidebarProvider>
-        <AppSidebar />
-        <SidebarInset>
-          <AppToolbar />
-          <RealtimeStatusBanner />
-          <RuntimeBanner />
-          <UpdateBanner />
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background rounded-t-2xl">
-            {children}
-          </div>
-        </SidebarInset>
-      </SidebarProvider>
-      <RealtimeToasts />
+      {/* One workspace-scoped "active routine runs" subscription shared
+          by the toolbar live chip and the /routines live surfaces —
+          must sit inside RealtimeProvider (it consumes WS events). */}
+      <ActiveRoutineRunsProvider>
+        <SidebarProvider>
+          <AppSidebar />
+          <SidebarInset>
+            <AppToolbar />
+            <RealtimeStatusBanner />
+            <RuntimeBanner />
+            <UpdateBanner />
+            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background rounded-t-2xl">
+              {children}
+            </div>
+          </SidebarInset>
+        </SidebarProvider>
+        <RealtimeToasts />
+      </ActiveRoutineRunsProvider>
     </RealtimeProvider>
   )
 }

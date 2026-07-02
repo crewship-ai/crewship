@@ -69,19 +69,34 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
   const [saving, setSaving] = useState(false)
   const [copied, setCopied] = useState(false)
   const saveRef = useRef<(() => void) | null>(null)
+  // bufferRef mirrors the editor's latest doc. FileEditor only hands
+  // its buffer back through onSave (⌘S or a saveRef flush), and
+  // setText is asynchronous — so the save path below must read this
+  // ref, not the `text` state, or it validates + POSTs the PREVIOUS
+  // value (typing then clicking Save silently saved stale JSON).
+  const bufferRef = useRef(initial)
+
+  // The editor is remounted on key change to force a fresh CodeMirror
+  // instance after Format / Revert / refetch (FileEditor only consumes
+  // `code` on first mount). Cheap because the routine DSL is small.
+  const [editorKey, setEditorKey] = useState(0)
 
   // FileEditor controls its own internal state; we re-key it by the
   // routine slug so switching routines remounts with fresh content.
-  // text is updated on save() (CodeMirror reads its current doc and
-  // hands the string back via onSave).
+  // A same-slug refetch (new `initial`) must ALSO remount — without
+  // the key bump the visible editor keeps the old buffer while
+  // bufferRef already points at the new definition.
   useEffect(() => {
     setText(initial)
+    bufferRef.current = initial
     setDirty(false)
+    setEditorKey((k) => k + 1)
   }, [initial, routine.slug])
 
   const validation = useMemo(() => validate(text), [text])
 
   const handleEditorSave = (next: string) => {
+    bufferRef.current = next
     setText(next)
   }
 
@@ -92,6 +107,7 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
     }
     const pretty = JSON.stringify(validation.parsed, null, 2)
     setText(pretty)
+    bufferRef.current = pretty
     // Force the editor to remount with the formatted content. The
     // simplest way is to re-render with a new key, which we accomplish
     // by toggling the key prop below.
@@ -101,6 +117,7 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
 
   const handleRevert = () => {
     setText(initial)
+    bufferRef.current = initial
     setEditorKey((k) => k + 1)
     setDirty(false)
     toast.success("Reverted")
@@ -117,11 +134,14 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
   }
 
   const handleSave = async () => {
-    // Always pull the latest doc from CodeMirror — text state may
-    // lag if the user typed and clicked Save before the buffer
-    // synced through onSave.
+    // Always pull the latest doc from CodeMirror. FileEditor's
+    // saveRef invokes onSave(doc) synchronously, which lands in
+    // bufferRef — reading the `text` state here would still see the
+    // pre-flush value (setText hasn't re-rendered yet), silently
+    // saving a stale definition when the user types and clicks Save
+    // without pressing ⌘S first.
     saveRef.current?.()
-    const v = validate(text)
+    const v = validate(bufferRef.current)
     if (!v.ok || !v.parsed) {
       toast.error(v.message ?? "definition is not valid")
       return
@@ -164,11 +184,6 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
       setSaving(false)
     }
   }
-
-  // The editor is remounted on key change to force a fresh CodeMirror
-  // instance after Format / Revert (since FileEditor only consumes
-  // `code` on first mount). Cheap because the routine DSL is small.
-  const [editorKey, setEditorKey] = useState(0)
 
   return (
     <div className="flex h-full flex-col">

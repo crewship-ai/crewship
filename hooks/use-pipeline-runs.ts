@@ -12,7 +12,9 @@ export interface PipelineRun {
   pipeline_id: string
   pipeline_slug: string
   pipeline_name: string
-  status: "running" | "queued" | "paused" | "completed" | "failed" | "cancelled" | "interrupted" | string
+  // "waiting" = parked on a human waitpoint approval (SetWaiting,
+  // internal/pipeline/runs.go) — non-terminal, resumes on approve.
+  status: "running" | "queued" | "paused" | "waiting" | "completed" | "failed" | "cancelled" | "interrupted" | string
   mode: string
   started_at: string
   ended_at: string
@@ -58,6 +60,11 @@ interface ListResponse {
 export function usePipelineRuns(
   workspaceId: string | null | undefined,
   filter: StatusFilter = "all",
+  // Row budget for the list fetch. Server hard-caps at 200; the
+  // /activity rail keeps the historical 100, the live-visibility
+  // hook asks for the full 200 so a cron-heavy workspace doesn't
+  // truncate its active set.
+  limit = 100,
 ) {
   const [runs, setRuns] = useState<PipelineRun[]>([])
   const [loading, setLoading] = useState(false)
@@ -87,7 +94,7 @@ export function usePipelineRuns(
     try {
       const params = new URLSearchParams()
       if (filter !== "all") params.set("status", filter)
-      params.set("limit", "100")
+      params.set("limit", String(limit))
       const url = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-runs?${params.toString()}`
       const res = await apiFetch(url, { signal: ctrl.signal })
       if (ctrl.signal.aborted) return
@@ -106,7 +113,7 @@ export function usePipelineRuns(
       inFlightRef.current = false
       if (!ctrl.signal.aborted) setLoading(false)
     }
-  }, [workspaceId, filter])
+  }, [workspaceId, filter, limit])
 
   useEffect(() => {
     // workspace / filter change → abort any in-flight + start fresh
@@ -124,7 +131,7 @@ export function usePipelineRuns(
   // refreshing — the realtime events below cover the "new run
   // started" gap.
   const hasActive = runs.some((r) =>
-    r.status === "running" || r.status === "queued" || r.status === "paused",
+    r.status === "running" || r.status === "queued" || r.status === "paused" || r.status === "waiting",
   )
   useEffect(() => {
     if (!hasActive) return

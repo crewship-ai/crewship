@@ -5,11 +5,15 @@ import { apiFetch } from "@/lib/api-fetch"
 // false, so callers MUST send the field even on Deny. Originally
 // inlined inside inbox-list.tsx; lifted here so the trace canvas can
 // share the same helper.
+// The failure shape carries the HTTP status when there was one so
+// callers can distinguish "somebody already decided this" (409/410-
+// style) from a genuine failure and recover gracefully. Absent on
+// transport-level errors.
 export async function waitpointDecide(
   workspaceID: string,
   token: string,
   approved: boolean,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true } | { ok: false; error: string; status?: number }> {
   try {
     const res = await apiFetch(
       `/api/v1/workspaces/${encodeURIComponent(workspaceID)}/pipelines/waitpoints/${encodeURIComponent(token)}/approve`,
@@ -21,7 +25,11 @@ export async function waitpointDecide(
     )
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as { error?: string } | null
-      return { ok: false, error: body?.error ?? `Decide failed (${res.status})` }
+      return {
+        ok: false,
+        error: body?.error ?? `Decide failed (${res.status})`,
+        status: res.status,
+      }
     }
     return { ok: true }
   } catch (e) {

@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { ScrollText } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { useUserPreference } from "@/hooks/use-user-preference"
@@ -10,6 +11,8 @@ import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import {
   applyFilters,
+  applyPipelineParam,
+  applyStatusParam,
   groupRuns,
   type GroupAxis,
   type RunFilter,
@@ -66,9 +69,10 @@ export function RunTimelineRail({
   }, [crewsProp, workspaceId])
 
   // Persisted user state
-  const [filter, setFilter] = useUserPreference<RunFilter>("activity.rail.filter", {
-    status: "all",
-  })
+  const [filter, setFilter, { ready: filterReady }] = useUserPreference<RunFilter>(
+    "activity.rail.filter",
+    { status: "all" },
+  )
   const [sort, setSort] = useUserPreference<SortAxis>("activity.rail.sort", "newest")
   // Default to grouping by routine: the routine is the superordinate entity a
   // run belongs to, so a run stream reads as "these routines, and their runs"
@@ -76,6 +80,45 @@ export function RunTimelineRail({
   // View menu; the choice persists.
   const [group, setGroup] = useUserPreference<GroupAxis>("activity.rail.group", "routine")
   const [search, setSearch] = useState("")
+
+  // Deep-link: /activity?pipeline=<slug> (routine overview's "view
+  // all →") pre-applies a routine filter. One-shot, and only after
+  // the filter preference has hydrated from the server — applying
+  // earlier would lose to the initial server sync, which overrides
+  // local state with the remote value (use-user-preference.ts). URL
+  // params stay the read-side source of truth, same convention as
+  // use-trace-selection's ?run/?step handling.
+  // ?status=active (the Activity dropdown's "View all activity →")
+  // pre-selects a status bucket with the same semantics; unknown
+  // values no-op via applyStatusParam's identity return. Both params
+  // compose in ONE setFilter — separate effects would each derive
+  // from the same captured filter and the second write would clobber
+  // the first when a link carries both params.
+  const searchParams = useSearchParams()
+  const pipelineParam = searchParams.get("pipeline")
+  const statusParam = searchParams.get("status")
+  const pipelineParamApplied = useRef(false)
+  const statusParamApplied = useRef(false)
+  useEffect(() => {
+    // Only latch once a param is actually present — a later client-
+    // side navigation that adds ?pipeline= without remounting the
+    // rail still gets its single application. After that the user
+    // owns the filter (clearing it must not be fought by re-applies).
+    if (!filterReady) return
+    const wantPipeline = !pipelineParamApplied.current && !!pipelineParam
+    const wantStatus = !statusParamApplied.current && !!statusParam
+    if (!wantPipeline && !wantStatus) return
+    let next = filter
+    if (wantPipeline) {
+      pipelineParamApplied.current = true
+      next = applyPipelineParam(next, pipelineParam)
+    }
+    if (wantStatus) {
+      statusParamApplied.current = true
+      next = applyStatusParam(next, statusParam)
+    }
+    if (next !== filter) setFilter(next)
+  }, [filterReady, pipelineParam, statusParam, filter, setFilter])
 
   // Owning-crew name per routine slug, derived once from crews + pipelines.
   // Shared by the routine-filter options (crew-grouped combobox) and the group
@@ -129,7 +172,9 @@ export function RunTimelineRail({
     const ofStatus = (statuses: string[]) =>
       runs.filter((r) => statuses.includes(r.status)).length
     return {
-      active: ofStatus(["running", "queued", "paused"]),
+      // Mirrors ACTIVE_STATUSES in run-filters.ts — "waiting" is a run
+      // parked on a human waitpoint approval, still in flight.
+      active: ofStatus(["running", "queued", "paused", "waiting"]),
       all: runs.length,
       completed: ofStatus(["completed"]),
       failed: ofStatus(["failed", "cancelled", "interrupted"]),
