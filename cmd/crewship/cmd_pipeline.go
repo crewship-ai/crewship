@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -563,6 +565,8 @@ var pipelineRunCmd = &cobra.Command{
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return fmt.Errorf("decode run response: %w", err)
 		}
+		waitForRun, _ := cmd.Flags().GetBool("wait")
+		waitTimeout, _ := cmd.Flags().GetDuration("wait-timeout")
 		if result.Status == "SCHEDULED" {
 			verb := "Scheduled"
 			if result.Coalesced {
@@ -570,10 +574,19 @@ var pipelineRunCmd = &cobra.Command{
 			}
 			fmt.Printf("%s: pending %s fires at %s\n", verb, result.PendingID, result.FireAt)
 			fmt.Printf("  cancel: crewship routine pending cancel %s\n", result.PendingID)
+			if waitForRun {
+				// A deferred trigger has no run id yet — nothing to poll.
+				cli.PrintWarning("--wait ignored: a deferred run has no run id until it fires. Watch with: crewship routine watch " + args[0])
+			}
 			return nil
 		}
 		if result.Status == "DEDUPED" {
 			fmt.Printf("Run %s: DEDUPED (duplicate Idempotency-Key within the dedupe window — this is the original run's id, nothing executed)\n", result.RunID)
+			if waitForRun {
+				// The original run may still be in flight — poll it to a
+				// terminal state so retry loops get the real outcome.
+				return waitForPipelineRun(cmd, client, result.RunID, waitTimeout)
+			}
 			return nil
 		}
 		fmt.Printf("Run %s: %s (%dms, $%.4f)\n", result.RunID, result.Status, result.DurationMs, result.CostUSD)
@@ -587,6 +600,12 @@ var pipelineRunCmd = &cobra.Command{
 			fmt.Printf("  paused at approval step: %s\n", result.CurrentStep)
 			fmt.Printf("  approve: crewship routine waitpoints approve %s --comment \"LGTM\"\n", result.WaitpointToken)
 			fmt.Printf("  reject:  crewship routine waitpoints reject %s\n", result.WaitpointToken)
+			if waitForRun {
+				// Block until the waitpoint is resolved and the run
+				// finishes — the agent-facing "trigger and get the real
+				// outcome" path (previously required hand-rolled polling).
+				return waitForPipelineRun(cmd, client, result.RunID, waitTimeout)
+			}
 			return nil
 		}
 		if result.Output != "" {
@@ -605,6 +624,55 @@ var pipelineRunCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+// waitForPipelineRun blocks until the routine run reaches a terminal
+// status, printing status transitions to stderr and the final outcome to
+// stdout. Backs `routine run --wait` for the two receipts that used to
+// force callers into hand-rolled poll loops: WAITING (parked on a human
+// approval) and DEDUPED (the original run may still be in flight).
+func waitForPipelineRun(cmd *cobra.Command, client *cli.Client, runID string, timeout time.Duration) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	start := time.Now()
+	var lastStatus string
+	detail, err := client.PollPipelineRun(ctx, runID, 2*time.Second, func(d *cli.PipelineRunDetail) {
+		if d.Status != lastStatus {
+			lastStatus = d.Status
+			fmt.Fprintf(os.Stderr, "%s[wait]%s %s status=%s elapsed=%s\n",
+				cli.Dim, cli.Reset, runID, d.Status, time.Since(start).Truncate(time.Second))
+		}
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("timed out after %s waiting for run %s — keep waiting with: crewship wait --routine %s",
+				time.Since(start).Truncate(time.Second), runID, runID)
+		}
+		return err
+	}
+
+	fmt.Printf("Run %s: %s (%dms, $%.4f)\n",
+		detail.ID, strings.ToUpper(detail.Status), detail.DurationMs, detail.CostUSD)
+	switch strings.ToLower(detail.Status) {
+	case "failed", "interrupted":
+		fmt.Printf("  failed at step: %s\n  error: %s\n", detail.FailedAtStep, detail.ErrorMessage)
+		return fmt.Errorf("routine run failed")
+	case "cancelled":
+		return fmt.Errorf("routine run cancelled")
+	}
+	if detail.Output != "" {
+		fmt.Println("\nFinal output:")
+		fmt.Println(indent(detail.Output, "  "))
+	}
+	return nil
 }
 
 var pipelineDryRunCmd = &cobra.Command{
@@ -902,6 +970,8 @@ func init() {
 	pipelineRunCmd.Flags().Int("priority", 0, "dispatch priority for deferred runs (higher fires first)")
 	pipelineRunCmd.Flags().String("idempotency-key", "", "dedupe key — a duplicate key within the TTL window returns the original run as DEDUPED instead of executing again (sent as the Idempotency-Key header)")
 	pipelineRunCmd.Flags().Int("idempotency-ttl", 0, "dedupe window in seconds for --idempotency-key (0 = server default, 24h)")
+	pipelineRunCmd.Flags().Bool("wait", false, "block until the run reaches a terminal status — polls through WAITING approvals and DEDUPED originals instead of returning the receipt")
+	pipelineRunCmd.Flags().Duration("wait-timeout", 30*time.Minute, "maximum time --wait polls before giving up (0 = forever)")
 
 	pipelineDryRunCmd.Flags().String("inputs", "", "JSON inputs for the dry-run preview")
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -156,9 +158,38 @@ func main() {
 	registerSlashCommands()
 
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		exitWithError(err)
 	}
+}
+
+// exitWithError prints err and exits with its mapped exit code.
+//
+// Human formats (table/quiet) keep the historical plain-text line. When the
+// operator asked for a machine format (json/ndjson/yaml), the error is
+// emitted on stderr as a structured envelope in that same format, so an
+// agent driving the CLI parses failures the same way it parses successes —
+// stdout stays reserved for success output either way.
+func exitWithError(err error) {
+	format := cli.ResolveFormat(flagFormat, cliCfg)
+	switch format {
+	case "json", "ndjson":
+		enc := json.NewEncoder(os.Stderr)
+		if format == "json" {
+			enc.SetIndent("", "  ")
+		}
+		if encErr := enc.Encode(cli.NewErrorEnvelope(err)); encErr != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+	case "yaml":
+		if data, mErr := yaml.Marshal(cli.NewErrorEnvelope(err)); mErr == nil {
+			_, _ = os.Stderr.Write(data)
+		} else {
+			fmt.Fprintln(os.Stderr, err)
+		}
+	default:
+		fmt.Fprintln(os.Stderr, err)
+	}
+	os.Exit(cli.ExitCodeFor(err))
 }
 
 // newAPIClient creates an authenticated API client from resolved config.
@@ -178,7 +209,13 @@ func newAPIClient() *cli.Client {
 	workspace := cli.ResolveWorkspace(flagWorkspace, cliCfg)
 	token := ""
 	tokenHost := ""
-	if cliCfg != nil {
+	if envTok := cli.EnvToken(); envTok != "" {
+		// CREWSHIP_TOKEN: explicit per-shell credential (CI, agent
+		// containers). Wins over the stored token and is deliberately
+		// NOT host-bound — the operator scoped it to this environment;
+		// the #571 guard protects the *persisted* token, not this one.
+		token = envTok
+	} else if cliCfg != nil {
 		token = cliCfg.Token
 		tokenHost = serverHost(cliCfg.Server)
 	}
@@ -224,27 +261,33 @@ func newFormatter() *cli.Formatter {
 // `current` pointing at a removed profile), the overlay blanks the token, so
 // point the operator at the profile rather than a generic "run login".
 func requireAuth() error {
+	// CREWSHIP_TOKEN short-circuits everything: the env credential is a
+	// complete, self-contained auth source (see newAPIClient), so neither
+	// a missing config nor an unconfigured profile should block it.
+	if cli.EnvToken() != "" {
+		return nil
+	}
 	// Handle a selected profile first: a profile can carry a token but an empty
 	// server (hand-edited / half-written config), and accepting that token
 	// before the target is proven configured would let later fallbacks dial the
 	// wrong host. Require a non-empty profile server before the token counts.
 	if name := cli.ActiveProfileName(flagProfile, cliCfg); name != "" {
 		if cliCfg == nil {
-			return fmt.Errorf("profile %q is not configured — run 'crewship server add %s --server <url>' then 'crewship login --profile %s'", name, name, name)
+			return cli.WithExitCode(fmt.Errorf("profile %q is not configured — run 'crewship server add %s --server <url>' then 'crewship login --profile %s'", name, name, name), cli.ExitAuth)
 		}
 		p := cliCfg.Servers[name]
 		if p == nil || strings.TrimSpace(p.Server) == "" {
-			return fmt.Errorf("profile %q is not configured — run 'crewship server add %s --server <url>' then 'crewship login --profile %s'", name, name, name)
+			return cli.WithExitCode(fmt.Errorf("profile %q is not configured — run 'crewship server add %s --server <url>' then 'crewship login --profile %s'", name, name, name), cli.ExitAuth)
 		}
 		if strings.TrimSpace(p.Token) != "" {
 			return nil
 		}
-		return fmt.Errorf("not logged into profile %q. Run 'crewship login --profile %s'", name, name)
+		return cli.WithExitCode(fmt.Errorf("not logged into profile %q. Run 'crewship login --profile %s'", name, name), cli.ExitAuth)
 	}
 	if cliCfg != nil && cliCfg.Token != "" {
 		return nil
 	}
-	return fmt.Errorf("not logged in. Run 'crewship login' first")
+	return cli.WithExitCode(fmt.Errorf("not logged in. Run 'crewship login' first"), cli.ExitAuth)
 }
 
 // confirmAction prompts for confirmation unless --yes is passed.

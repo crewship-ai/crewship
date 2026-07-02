@@ -203,7 +203,11 @@ activity intentionally isn't wired.`,
 		for _, a := range activities {
 			ts := a.CreatedAt
 			if t, err := time.Parse(time.RFC3339Nano, a.CreatedAt); err == nil {
-				ts = t.Format("2006-01-02 15:04:05")
+				// Explicit UTC marker — a zone-less timestamp is ambiguous
+				// the moment the reader (or a scraper) sits in a different
+				// timezone than the server. UTC (not Local) keeps output
+				// deterministic across machines.
+				ts = t.UTC().Format("2006-01-02 15:04:05 UTC")
 			}
 
 			typeColor := ""

@@ -46,7 +46,7 @@ Output formats:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		runID := args[0]
 		slug, _ := cmd.Flags().GetString("slug")
-		jsonMode, _ := cmd.Flags().GetBool("json")
+		jsonMode := resolvedFormat(cmd) == "json"
 		full, _ := cmd.Flags().GetBool("full")
 		if err := requireAuth(); err != nil {
 			return err
@@ -355,7 +355,7 @@ func parseTime(s string) time.Time {
 
 func init() {
 	routineLogsCmd.Flags().String("slug", "", "routine slug the run belongs to (optional; enables full journal timeline)")
-	routineLogsCmd.Flags().Bool("json", false, "JSON output for jq / scripting")
+	routineLogsCmd.Flags().Bool("json", false, "Deprecated alias for --format json")
 	routineLogsCmd.Flags().Bool("full", false, "Full per-run journal timeline via the run-logs endpoint (no --slug needed)")
 	pipelineCmd.AddCommand(routineLogsCmd)
 }

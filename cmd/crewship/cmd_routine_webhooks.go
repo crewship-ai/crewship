@@ -98,9 +98,8 @@ var routineWebhooksListCmd = &cobra.Command{
 			}
 			rows = out
 		}
-		jsonOut, _ := cmd.Flags().GetBool("json")
-		f := newFormatter()
-		if jsonOut || f.Format == "json" || f.Format == "yaml" || f.Format == "ndjson" {
+		f := resolvedFormatter(cmd)
+		if f.Format == "json" || f.Format == "yaml" || f.Format == "ndjson" {
 			// Redact tokens + secrets from machine output. The list
 			// endpoint returns webhook tokens (the public URL
 			// segment) and signing_secret_set flags; piping --json
@@ -360,7 +359,7 @@ func redactedShort(s string) string {
 
 func init() {
 	routineWebhooksListCmd.Flags().String("slug", "", "filter to webhooks targeting this routine slug")
-	routineWebhooksListCmd.Flags().Bool("json", false, "output as JSON for scripting")
+	routineWebhooksListCmd.Flags().Bool("json", false, "Deprecated alias for --format json")
 
 	routineWebhooksCreateCmd.Flags().String("slug", "", "target routine slug (REQUIRED)")
 	routineWebhooksCreateCmd.Flags().String("name", "", "human-readable webhook name (default: '<slug> webhook')")

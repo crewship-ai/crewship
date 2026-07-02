@@ -1,0 +1,45 @@
+---
+title: "Feedback"
+description: "Record and inspect typed feedback signals (thumbs, edit, regenerate) on messages."
+icon: "thumbs-up"
+---
+
+# Feedback
+
+Typed feedback is structured eval signal — `thumbs_up` / `thumbs_down` / `edit` / `regenerate` bound to a message or trace. Distinct from chat reactions (social UI signal); feedback feeds evaluation and consolidation.
+
+## `crewship feedback create`
+
+| Flag | Type | Effect |
+|---|---|---|
+| `--message` | string | Message id the signal binds to (required). |
+| `--signal` | string | `thumbs_up` \| `thumbs_down` \| `edit` \| `regenerate` (required). |
+| `--chat` | string | Chat id (optional). |
+| `--trace` | string | Trace id (optional). |
+| `--reason` | string | Free-text reason (optional). |
+
+```bash
+crewship feedback create --message cmsg… --signal thumbs_down --reason "wrong file"
+```
+
+## `crewship feedback list`
+
+List signals for exactly one of `--message` or `--trace`.
+
+```bash
+crewship feedback list --message cmsg…
+crewship feedback list --trace tr_… --format json
+```
+
+## `crewship feedback delete`
+
+Remove a signal from a message.
+
+```bash
+crewship feedback delete --message cmsg… --signal thumbs_down
+```
+
+## See also
+
+- [`crewship eval`](/cli/eval) — replay/regression flows that consume feedback signal.
+- [`crewship chat`](/cli/chat) — the conversations the messages come from.

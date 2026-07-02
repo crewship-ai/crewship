@@ -32,6 +32,7 @@ func covSetupCli10(t *testing.T, serverURL string) {
 	t.Setenv("CREWSHIP_SERVER", "")
 	t.Setenv("CREWSHIP_WORKSPACE", "")
 	t.Setenv("CREWSHIP_DEFAULT_AGENT", "")
+	t.Setenv("CREWSHIP_TOKEN", "")
 	// Point config IO at a throwaway file so nothing touches the real
 	// ~/.crewship/cli-config.yaml.
 	t.Setenv("CREWSHIP_CONFIG", filepath.Join(t.TempDir(), "cli-config.yaml"))

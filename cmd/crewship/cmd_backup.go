@@ -185,8 +185,10 @@ func init() {
 	backupRotateCmd.Flags().Bool("dry-run", false, "List bundles that WOULD be deleted without touching disk")
 
 	backupUnlockCmd.Flags().Bool("force", false, "Skip interactive confirmation (required in non-interactive sessions)")
+	backupUnlockCmd.Flags().Bool("yes", false, "Alias for --force — the CLI-wide pre-confirmation convention")
 
 	backupDeleteCmd.Flags().Bool("force", false, "Delete without interactive confirmation (required in non-interactive sessions)")
+	backupDeleteCmd.Flags().Bool("yes", false, "Alias for --force — the CLI-wide pre-confirmation convention")
 
 	backupCmd.AddCommand(backupCreateCmd)
 	backupCmd.AddCommand(backupListCmd)

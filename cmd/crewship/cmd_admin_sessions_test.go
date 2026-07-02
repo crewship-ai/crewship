@@ -102,8 +102,10 @@ func TestShortAdminTime(t *testing.T) {
 	}{
 		{"", "-"},
 		{"   ", "-"},
-		{"2026-05-24T12:34:56Z", "2026-05-24 12:34"},
-		{"2026-05-24 12:34:56", "2026-05-24 12:34"},
+		// The explicit UTC marker keeps table timestamps unambiguous for
+		// readers (and scrapers) in other timezones.
+		{"2026-05-24T12:34:56Z", "2026-05-24 12:34 UTC"},
+		{"2026-05-24 12:34:56", "2026-05-24 12:34 UTC"},
 		{"not-a-timestamp", "not-a-timestamp"}, // pass through unchanged
 	}
 	for _, tc := range cases {

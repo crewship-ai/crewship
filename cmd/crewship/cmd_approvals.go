@@ -175,8 +175,12 @@ var approvalsListCmd = &cobra.Command{
 			case "timeout", "cancelled":
 				color = cli.Gray
 			}
-			fmt.Printf("%s%-24s%s  %s[%-9s]%s  %s%-16s%s  %-16s  %-16s  %s\n",
-				cli.Dim, truncateString(r.ID, 24), cli.Reset,
+			// The ID is what `approvals approve/deny <id>` consumes — print
+			// it in full (CUIDs are 25 chars; the old 24-char truncation
+			// clipped the last character and made every scraped ID unusable).
+			// Crew/agent IDs are link targets only and stay shortened.
+			fmt.Printf("%s%-25s%s  %s[%-9s]%s  %s%-16s%s  %-16s  %-16s  %s\n",
+				cli.Dim, r.ID, cli.Reset,
 				color, r.Status, cli.Reset,
 				cli.Bold, truncateString(r.Kind, 16), cli.Reset,
 				truncateString(r.CrewID, 16),

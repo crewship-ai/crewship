@@ -22,12 +22,53 @@ Every command inherits these persistent flags:
 |------|-------|------|---------|-------------|
 | `--server` | `-s` | `string` | `http://localhost:8080` | Server URL. Also via `CREWSHIP_SERVER` env var. |
 | `--workspace` | `-w` | `string` | _(from config)_ | Workspace ID or slug. Also via `CREWSHIP_WORKSPACE` env var. |
-| `--format` | `-f` | `string` | `table` | Output format: `table`, `json`, `yaml`, or `quiet`. |
+| `--format` | `-f` | `string` | `table` | Output format: `table`, `json`, `yaml`, `ndjson`, or `quiet`. A few commands still accept a legacy `--json` bool — it is a deprecated alias for `--format json`. |
 | `--verbose` | `-v` | `bool` | `false` | Verbose output. |
 | `--no-color` | | `bool` | `false` | Disable ANSI colors. |
 | `--server-allow-mismatch` | | `bool` | `false` | Allow sending the stored auth token to a `--server` host that differs from the one it was issued for. Also via `CREWSHIP_ALLOW_SERVER_MISMATCH` env var. |
 
 In addition: `CREWSHIP_DEFAULT_AGENT` env var sets the default agent for `crewship ask` / `crewship explain`. Resolution order: command-line flag → env var → config key.
+
+## Exit codes & machine-readable errors
+
+Every command exits with a classified code, so scripts and agents can branch on the *kind* of failure without parsing error prose:
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | Unclassified error |
+| `2` | Validation failure (HTTP 400 / 422) |
+| `3` | Not found (HTTP 404) |
+| `4` | Auth failure (HTTP 401 / 403, not logged in, token-host mismatch) |
+| `5` | Conflict (HTTP 409) |
+| `6` | Rate-limited (HTTP 429) |
+| `7` | Server error (HTTP 5xx) |
+| `8` | Network failure — the request never produced a response |
+
+`crewship wait` keeps its own run-outcome codes (0 completed / 1 failed / 2 cancelled / 3 timeout / 4 connection error) — those describe the *run's* terminal state, not a command failure. See the [Wait page](/cli/wait).
+
+When the output format is `json`, `ndjson`, or `yaml`, errors are emitted on **stderr** as a structured envelope in that same format (stdout stays reserved for success output):
+
+```json
+{
+  "error": {
+    "message": "API error (404): agent not found",
+    "status": 404,
+    "detail": "agent not found",
+    "exit_code": 3
+  }
+}
+```
+
+Extension members from RFC 7807 responses (e.g. `missing_integrations`) pass through under `error.extensions`.
+
+## Discovering the CLI surface
+
+`crewship commands` dumps the full command tree — every command, subcommand, and flag — as a machine-readable manifest. This is the recommended way for an agent to learn the CLI in one call instead of scraping `--help` page by page:
+
+```bash
+crewship commands --format json | jq '.commands[].path'
+```
 
 <Warning>
 **Token-host binding.** Your CLI bearer token is bound to the host it was
@@ -79,6 +120,18 @@ crewship login --token <api-token>
 | `--token` | `string` | | API token for non-interactive login. |
 
 The token is saved to `~/.crewship/cli-config.yaml`.
+
+### `CREWSHIP_TOKEN` (headless auth)
+
+For CI jobs and agent containers, export `CREWSHIP_TOKEN` instead of running `crewship login` — no config file needed:
+
+```bash
+export CREWSHIP_SERVER=https://crewship.example.com
+export CREWSHIP_TOKEN=cst_…
+crewship whoami
+```
+
+The env token wins over any stored config/profile token and is scoped to the shell. Unlike the persisted token it is **not** host-bound: you provided it for this exact environment, so the token-host guard (which protects the on-disk credential from `--server` exfiltration) does not apply.
 
 ### `crewship logout`
 

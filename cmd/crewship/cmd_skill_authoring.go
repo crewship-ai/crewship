@@ -355,7 +355,7 @@ Examples:
 			return err
 		}
 
-		force, _ := cmd.Flags().GetBool("force")
+		force := skipConfirm(cmd)
 		if !force {
 			fmt.Fprintf(os.Stderr, "Delete skill %q from workspace? (y/N): ", args[0])
 			var answer string
@@ -424,6 +424,8 @@ func init() {
 
 	skillDeleteCmd.Flags().Bool("force", false,
 		"Skip the interactive confirmation")
+	skillDeleteCmd.Flags().Bool("yes", false,
+		"Alias for --force — the CLI-wide pre-confirmation convention")
 
 	skillCmd.AddCommand(skillInitCmd)
 	skillCmd.AddCommand(skillExportCmd)

@@ -298,15 +298,15 @@ var backupDeleteCmd = &cobra.Command{
 		if err := requireWorkspace(); err != nil {
 			return err
 		}
-		force, _ := cmd.Flags().GetBool("force")
-		// Interactive confirmation unless --force. Silent deletion of
-		// a multi-GB bundle from a fat-fingered command is exactly the
+		force := skipConfirm(cmd)
+		// Interactive confirmation unless --yes/--force. Silent deletion
+		// of a multi-GB bundle from a fat-fingered command is exactly the
 		// kind of footgun we want to put behind a speed bump. When
-		// stdin isn't a TTY (scripts, CI) we require --force instead
-		// of prompting.
+		// stdin isn't a TTY (scripts, CI) we require pre-confirmation
+		// instead of prompting.
 		if !force {
 			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				return fmt.Errorf("refusing to delete %s without --force in a non-interactive session", args[0])
+				return fmt.Errorf("refusing to delete %s without --yes (or --force) in a non-interactive session", args[0])
 			}
 			fmt.Fprintf(os.Stderr, "Delete backup %s? [y/N] ", args[0])
 			reader := bufio.NewReader(os.Stdin)

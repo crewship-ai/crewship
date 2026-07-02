@@ -1,0 +1,54 @@
+---
+title: "Connector"
+description: "Browse, verify, and install generic connectors from the manifest-driven catalogue."
+icon: "cable"
+---
+
+# Connector
+
+Connectors are manifest-driven integrations from the built-in catalogue (`internal/connectors`). Distinct from the Composio subtree (`crewship integration composio …`) — these are Crewship's own connector manifests.
+
+## `crewship connector list`
+
+List the catalogue: id, name, category, auth mode.
+
+```bash
+crewship connector list --format json | jq '.[].id'
+```
+
+## `crewship connector get <id>`
+
+Show one connector's full manifest (fields, verify probe, install shape).
+
+## `crewship connector verify <id>`
+
+Probe credentials against the provider **without persisting them**. Exits non-zero when the provider rejects the credentials, so it drops straight into shell conditionals.
+
+| Flag | Type | Effect |
+|---|---|---|
+| `--field` | `NAME=value` (repeatable) | Credential form values for the verify probe. |
+
+```bash
+crewship connector verify slack --field SLACK_TOKEN=xoxb-… && echo ok
+```
+
+## `crewship connector install <id>`
+
+Install the connector as an integration. Workspace scope by default; `--crew` installs at crew scope.
+
+| Flag | Type | Effect |
+|---|---|---|
+| `--field` | `NAME=value` (repeatable) | Credential form values. |
+| `--crew` | string | Crew slug or id — install at crew scope. |
+| `--name` | string | User-facing label (default: connector name). |
+
+```bash
+crewship connector install slack --field SLACK_TOKEN=xoxb-… --crew backend
+```
+
+OAuth-mode connectors return a `next_step` + `oauth_url` — finish those in a browser; the CLI prints the URL.
+
+## See also
+
+- [`crewship integration`](/cli/integration) — manage installed integrations and bindings.
+- [`crewship recipe`](/cli/recipe) — install a whole crew template in one shot.

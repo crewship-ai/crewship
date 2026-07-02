@@ -340,10 +340,10 @@ func shortAdminTime(raw string) string {
 		return "-"
 	}
 	if t, err := time.Parse(time.RFC3339, raw); err == nil {
-		return t.UTC().Format("2006-01-02 15:04")
+		return t.UTC().Format("2006-01-02 15:04 UTC")
 	}
 	if t, err := time.Parse("2006-01-02 15:04:05", raw); err == nil {
-		return t.UTC().Format("2006-01-02 15:04")
+		return t.UTC().Format("2006-01-02 15:04 UTC")
 	}
 	return raw
 }

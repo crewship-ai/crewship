@@ -248,7 +248,7 @@ auth/network failure. The /workspaces fetch is the load-bearing call;
 the /cli-token/validate side-call is best-effort (a session-cookie
 user has no CLI token to validate).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		jsonOut, _ := cmd.Flags().GetBool("json")
+		jsonOut := resolvedFormat(cmd) == "json"
 
 		if err := requireAuth(); err != nil {
 			return err
@@ -379,7 +379,7 @@ func init() {
 	loginCmd.Flags().StringVar(&loginCodeFlag, "code", "", "Pairing code from the browser (with --pair)")
 	loginCmd.Flags().StringVar(&loginAdapterHint, "adapter", "", "Optional adapter hint (telemetry): CLAUDE_CODE | GEMINI_CLI | CODEX_CLI | OPENCODE | CURSOR_CLI | FACTORY_DROID")
 
-	whoamiCmd.Flags().Bool("json", false, "Emit machine-readable JSON to stdout instead of human-readable text")
+	whoamiCmd.Flags().Bool("json", false, "Deprecated alias for --format json")
 }
 
 // loginWithPairing redeems a device-code shown in the browser

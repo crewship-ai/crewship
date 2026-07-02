@@ -88,7 +88,7 @@ Server-side checks not run locally:
 			visited[s.ID] = true
 		}
 
-		jsonOut, _ := cmd.Flags().GetBool("json")
+		jsonOut := resolvedFormat(cmd) == "json"
 		if jsonOut {
 			b, _ := json.MarshalIndent(map[string]interface{}{
 				"source":      src,
@@ -139,6 +139,6 @@ func collectStepTypes(dsl *pipeline.DSL) []string {
 }
 
 func init() {
-	routineValidateCmd.Flags().Bool("json", false, "output as JSON for scripting / CI")
+	routineValidateCmd.Flags().Bool("json", false, "Deprecated alias for --format json")
 	pipelineCmd.AddCommand(routineValidateCmd)
 }

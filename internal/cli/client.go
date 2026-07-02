@@ -197,7 +197,7 @@ func (c *Client) Do(method, path string, body interface{}) (*http.Response, erro
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, &ConnectionError{Err: err}
 	}
 
 	return resp, nil
@@ -354,7 +354,10 @@ func ReadJSON(resp *http.Response, v interface{}) error {
 	return nil
 }
 
-// CheckError reads the body on non-2xx and returns a formatted error.
+// CheckError reads the body on non-2xx and returns a *APIError whose
+// message keeps the historical "API error (NNN): …" text while carrying
+// the status, detail, and any extension members for machine consumers
+// (exit-code mapping, --format json error envelopes).
 func CheckError(resp *http.Response) error {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
@@ -362,6 +365,8 @@ func CheckError(resp *http.Response) error {
 
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+
+	apiErr := &APIError{Status: resp.StatusCode}
 
 	var errBody struct {
 		// Canonical {"error": "..."} shape.
@@ -373,19 +378,30 @@ func CheckError(resp *http.Response) error {
 		MissingIntegrations []string `json:"missing_integrations"`
 	}
 	if json.Unmarshal(data, &errBody) == nil {
+		// Keep the full parsed body so extension members survive into
+		// structured error output without CheckError having to know them.
+		_ = json.Unmarshal(data, &apiErr.Extensions)
+
 		if errBody.Error != "" {
-			return fmt.Errorf("API error (%d): %s", resp.StatusCode, errBody.Error)
+			apiErr.Detail = errBody.Error
+			apiErr.message = fmt.Sprintf("API error (%d): %s", resp.StatusCode, errBody.Error)
+			return apiErr
 		}
 		if errBody.Detail != "" {
+			apiErr.Detail = errBody.Detail
 			if len(errBody.MissingIntegrations) > 0 {
-				return fmt.Errorf("API error (%d): %s [connect: %s]",
+				apiErr.message = fmt.Sprintf("API error (%d): %s [connect: %s]",
 					resp.StatusCode, errBody.Detail, strings.Join(errBody.MissingIntegrations, ", "))
+				return apiErr
 			}
-			return fmt.Errorf("API error (%d): %s", resp.StatusCode, errBody.Detail)
+			apiErr.message = fmt.Sprintf("API error (%d): %s", resp.StatusCode, errBody.Detail)
+			return apiErr
 		}
 	}
 
-	return fmt.Errorf("API error (%d): %s", resp.StatusCode, string(data))
+	apiErr.Detail = string(data)
+	apiErr.message = fmt.Sprintf("API error (%d): %s", resp.StatusCode, string(data))
+	return apiErr
 }
 
 // looksLikeCUID returns true if s looks like a CUID (starts with 'c', alphanumeric, length >= 20).
