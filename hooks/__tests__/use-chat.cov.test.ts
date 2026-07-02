@@ -228,7 +228,10 @@ describe("thinking events", () => {
     const parts = result.current.turns[0].parts
     expect(parts).toHaveLength(1)
     expect(parts[0].type).toBe("thinking")
-    expect(parts[0].isStreaming).toBe(false)
+    // The thinking block stays open (streaming) so a following chunk merges
+    // into it rather than spawning a second card; a later text/tool event, or
+    // `done`, finalizes it.
+    expect(parts[0].isStreaming).toBe(true)
   })
 
   it("creating a new thinking turn drops orphaned status-only assistant turns", () => {

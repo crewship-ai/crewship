@@ -390,60 +390,49 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
   }, [])
 
   const handleThinkingEvent = useCallback(
-    (content: string, metadata: Record<string, unknown> | undefined) => {
-      // Streaming deltas (thinking_delta from backend) accumulate into one part.
-      // Complete thinking blocks create separate parts.
-      const isStreamingDelta = metadata?.streaming === true
-      if (isStreamingDelta) {
-        thinkingBufferRef.current += content
-      }
+    (content: string) => {
+      // A single reasoning pass is chunked into many `thinking` events by the
+      // adapter (thinking_delta) and the stdout scrubber (buffered-tail flushes
+      // that drop the streaming flag). We must NOT relabel each chunk a separate
+      // "Thought" card — the boundaries are arbitrary and split sentences. So we
+      // accumulate CONSECUTIVE thinking chunks into one part regardless of the
+      // streaming flag; a non-thinking event (text/tool) closes the block, so
+      // genuinely separate reasoning passes (e.g. think → tool → think) stay
+      // distinct.
       setTurns((prev) => {
         const last = prev[prev.length - 1]
         if (last?.role === "assistant" && last.isStreaming) {
-          if (isStreamingDelta) {
-            // Find existing streaming thinking part to accumulate into
-            const thinkingIdx = last.parts.findLastIndex(
-              (p) => p.type === "thinking" && p.isStreaming
-            )
-            if (thinkingIdx >= 0) {
-              const updatedParts = [...last.parts]
-              updatedParts[thinkingIdx] = {
-                ...updatedParts[thinkingIdx],
-                content: thinkingBufferRef.current,
-              }
-              return [...prev.slice(0, -1), { ...last, parts: updatedParts }]
+          const lastPart = last.parts[last.parts.length - 1]
+          if (lastPart?.type === "thinking") {
+            // Adjacent thinking chunk — append into the open block.
+            thinkingBufferRef.current += content
+            const updatedParts = [...last.parts]
+            updatedParts[updatedParts.length - 1] = {
+              ...lastPart,
+              content: thinkingBufferRef.current,
+              isStreaming: true,
             }
-            // First thinking delta — remove status parts, create new streaming thinking part
-            thinkingBufferRef.current = content
-            const cleanedParts = last.parts.filter((p) => p.type !== "status")
-            return [
-              ...prev.slice(0, -1),
-              {
-                ...last,
-                parts: [
-                  ...cleanedParts,
-                  { id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: true, timestamp: new Date() },
-                ],
-              },
-            ]
+            return [...prev.slice(0, -1), { ...last, parts: updatedParts }]
           }
-          // Complete thinking block — remove status parts, create a new non-streaming part
-          const cleanedParts = last.parts.filter((p) => p.type !== "status")
+          // First thinking chunk after text/tool/status — finalize any open
+          // streaming text part, drop status parts, open a fresh thinking block.
+          thinkingBufferRef.current = content
+          const cleanedParts = last.parts
+            .filter((p) => p.type !== "status")
+            .map((p) => (p.type === "text" && p.isStreaming ? { ...p, isStreaming: false } : p))
           return [
             ...prev.slice(0, -1),
             {
               ...last,
               parts: [
                 ...cleanedParts,
-                { id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: false, timestamp: new Date() },
+                { id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: true, timestamp: new Date() },
               ],
             },
           ]
         }
         // Create new assistant turn — remove any orphaned status-only turns
-        if (isStreamingDelta) {
-          thinkingBufferRef.current = content
-        }
+        thinkingBufferRef.current = content
         const cleaned = prev.filter((t) => {
           if (t.role === "assistant" && t.isStreaming && t.parts.every((p) => p.type === "status")) {
             return false
@@ -455,7 +444,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
           {
             id: uuid(),
             role: "assistant",
-            parts: [{ id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: !isStreamingDelta ? false : true, timestamp: new Date() }],
+            parts: [{ id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: true, timestamp: new Date() }],
             isStreaming: true,
             timestamp: new Date(),
           },
@@ -503,23 +492,26 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
   )
 
   const handleTextEvent = useCallback((content: string) => {
-    textBufferRef.current += content
     setTurns((prev) => {
       const last = prev[prev.length - 1]
       if (last?.role === "assistant" && last.isStreaming) {
-        // Find existing streaming text part
-        const textIdx = last.parts.findLastIndex(
-          (p) => p.type === "text" && p.isStreaming
-        )
-        if (textIdx >= 0) {
+        // Only accumulate into the IMMEDIATELY-preceding text part. Matching any
+        // earlier streaming text part (the old findLastIndex) merged text that
+        // arrived AFTER a tool_result back into the pre-tool bubble — so the
+        // final answer landed above the tool call and nothing rendered after it.
+        // A tool/thinking event between two text runs finalizes the first, so
+        // this check starts a new part in the correct position.
+        const lastPart = last.parts[last.parts.length - 1]
+        if (lastPart?.type === "text" && lastPart.isStreaming) {
+          textBufferRef.current += content
           const updatedParts = [...last.parts]
-          updatedParts[textIdx] = {
-            ...updatedParts[textIdx],
+          updatedParts[updatedParts.length - 1] = {
+            ...lastPart,
             content: textBufferRef.current,
           }
           return [...prev.slice(0, -1), { ...last, parts: updatedParts }]
         }
-        // First text arriving: remove status parts + close streaming thinking
+        // First text of a new run: remove status parts + close streaming thinking
         const cleanedParts = last.parts
           .filter((p) => p.type !== "status")
           .map((p) =>
@@ -591,6 +583,11 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
 
   const handleToolCallEvent = useCallback(
     (content: string, metadata: Record<string, unknown> | undefined) => {
+      // A tool ends the current text/thinking run: reset the accumulation
+      // buffers so any text/thinking that follows opens a fresh part in its
+      // correct position instead of appending to the pre-tool bubble.
+      textBufferRef.current = ""
+      thinkingBufferRef.current = ""
       setTurns((prev) => {
         const last = prev[prev.length - 1]
         const part: TurnPart = {
@@ -601,9 +598,14 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
           timestamp: new Date(),
         }
         if (last?.role === "assistant" && last.isStreaming) {
+          const finalizedParts = last.parts.map((p) =>
+            (p.type === "text" || p.type === "thinking") && p.isStreaming
+              ? { ...p, isStreaming: false }
+              : p
+          )
           return [
             ...prev.slice(0, -1),
-            { ...last, parts: [...last.parts, part] },
+            { ...last, parts: [...finalizedParts, part] },
           ]
         }
         return [
@@ -623,6 +625,10 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
 
   const handleToolResultEvent = useCallback(
     (content: string, metadata: Record<string, unknown> | undefined) => {
+      // Same as tool_call: the result closes the current text/thinking run so
+      // the model's follow-up answer opens a fresh part AFTER the result.
+      textBufferRef.current = ""
+      thinkingBufferRef.current = ""
       setTurns((prev) => {
         const last = prev[prev.length - 1]
         const part: TurnPart = {
@@ -633,16 +639,18 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
           timestamp: new Date(),
         }
         if (last?.role === "assistant" && last.isStreaming) {
-          // Try to mark matching tool_call as completed via tool_use_id
+          // Try to mark matching tool_call as completed via tool_use_id, and
+          // finalize any still-open streaming text/thinking part.
           const toolUseId = metadata?.tool_use_id as string | undefined
-          const updatedParts = toolUseId
-            ? last.parts.map((p) => {
-                if (p.type === "tool_call" && p.metadata?.tool_id === toolUseId) {
-                  return { ...p, metadata: { ...p.metadata, completed: true } }
-                }
-                return p
-              })
-            : last.parts
+          const updatedParts = last.parts.map((p) => {
+            if (toolUseId && p.type === "tool_call" && p.metadata?.tool_id === toolUseId) {
+              return { ...p, metadata: { ...p.metadata, completed: true } }
+            }
+            if ((p.type === "text" || p.type === "thinking") && p.isStreaming) {
+              return { ...p, isStreaming: false }
+            }
+            return p
+          })
           return [
             ...prev.slice(0, -1),
             { ...last, parts: [...updatedParts, part] },
@@ -936,7 +944,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
           handleStatusEvent(content)
           break
         case "thinking":
-          handleThinkingEvent(content, metadata)
+          handleThinkingEvent(content)
           break
         case "tool_call":
           handleToolCallEvent(content, metadata)
