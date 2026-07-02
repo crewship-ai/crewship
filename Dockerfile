@@ -10,7 +10,12 @@
 # old daemons) and the syntax directive above.
 
 FROM node:26-alpine AS frontend
-RUN corepack enable pnpm
+# node:26-alpine stopped bundling corepack by default, so `corepack enable`
+# alone now fails with "corepack: not found". Install it explicitly first;
+# `pnpm install` below then picks up the exact version pinned in
+# package.json's `packageManager` field, same as CI's pnpm/action-setup
+# (see .github/actions/setup-node-pnpm/action.yml).
+RUN npm install -g corepack@latest && corepack enable pnpm
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
