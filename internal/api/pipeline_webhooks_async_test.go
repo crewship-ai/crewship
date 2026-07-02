@@ -421,6 +421,152 @@ func TestPipelineWebhooks_Fire_ApprovalWait_ParksWaiting(t *testing.T) {
 	}
 }
 
+// seedConcurrencyGatedPipeline inserts a pipelines row whose
+// definition declares a static concurrency_key (max_concurrent
+// defaults to 1), so a second fire while one run is in flight trips
+// the run registry's concurrency gate.
+func seedConcurrencyGatedPipeline(t *testing.T, db *sql.DB, wsID, id, slug string) {
+	t.Helper()
+	now := time.Now().UTC().Format(time.RFC3339)
+	def := `{"name":"` + slug + `","concurrency_key":"serial","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`
+	if _, err := db.Exec(`
+		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at)
+		VALUES (?, ?, ?, ?, ?, 'hash', ?, ?, ?)`,
+		id, wsID, slug, slug, def, now, now, now); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+}
+
+// TestPipelineWebhooks_Fire_ConcurrencyLimit_429Synchronous pins that
+// the concurrency-limit rejection stays a SYNCHRONOUS sender-visible
+// contract under async dispatch. RED against the first async handler:
+// the ErrConcurrencyLimitReached rejection had moved into the
+// background goroutine, so an over-limit delivery got a 202 +
+// {run_id, PENDING} the sender never retries — the background run
+// failed before any pipeline_runs row existed and the event was
+// permanently lost (the handed-out run_id 404s forever).
+//
+// Contract: while the routine's single concurrency slot is held,
+//   - a new delivery answers 429 + Retry-After BEFORE the 202, and
+//   - the 429 must NOT consume the idempotency reservation — the
+//     sender's retry of the SAME key must execute as a fresh run,
+//     not dedupe onto a run that never happened.
+func TestPipelineWebhooks_Fire_ConcurrencyLimit_429Synchronous(t *testing.T) {
+	runner := newBlockingRunner()
+	h, db, _, wsID := webhookHandlerRig(t)
+	h.SetRunner(runner)
+	h.SetRunRegistry(pipeline.NewRunRegistry())
+	seedConcurrencyGatedPipeline(t, db, wsID, "pln_conc", "conc-target")
+	wh := seedWebhookRow(t, db, wsID, "pln_conc", "conc-secret", true)
+
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(runner.release) }) }
+	t.Cleanup(release)
+
+	fire := func(body, idemKey string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/api/v1/webhooks/"+wh.Token, strings.NewReader(body))
+		req.SetPathValue("token", wh.Token)
+		req.Header.Set("X-Crewship-Signature", covPSWSign("conc-secret", body))
+		req.Header.Set("Idempotency-Key", idemKey)
+		rr := httptest.NewRecorder()
+		h.FireWebhook(rr, req)
+		return rr
+	}
+
+	// Delivery 1 takes the single "serial" slot and parks in the runner.
+	rr1 := fire(`{"n":1}`, "evt-1")
+	if rr1.Code != 202 {
+		t.Fatalf("first fire status = %d, want 202; body=%s", rr1.Code, rr1.Body.String())
+	}
+	select {
+	case <-runner.started:
+		// RunStep entered → the registry slot is definitely acquired.
+	case <-time.After(2 * time.Second):
+		t.Fatal("first run never started")
+	}
+
+	// Delivery 2 while the slot is held: must be rejected synchronously.
+	rr2 := fire(`{"n":2}`, "evt-2")
+	if rr2.Code != 429 {
+		t.Fatalf("over-limit fire status = %d, want 429; body=%s — a 202 here hands the sender a run_id that will never exist (event permanently lost, sender never retries)", rr2.Code, rr2.Body.String())
+	}
+	if rr2.Header().Get("Retry-After") == "" {
+		t.Error("429 response missing Retry-After header")
+	}
+	if n := runner.callCount(); n != 1 {
+		t.Errorf("runner invoked %d times with the slot held, want 1 (the parked run only)", n)
+	}
+
+	// Free the slot, drain the first run.
+	release()
+	h.WaitWebhookDispatches()
+
+	// The sender retries delivery 2 with the SAME idempotency key. The
+	// 429 must not have burned the key: this retry must execute as a
+	// fresh PENDING run — DEDUPED here means the reservation leaked and
+	// the event is lost for good.
+	rr3 := fire(`{"n":2}`, "evt-2")
+	if rr3.Code != 202 {
+		t.Fatalf("retry after 429 status = %d, want 202; body=%s", rr3.Code, rr3.Body.String())
+	}
+	var resp3 map[string]any
+	if err := json.Unmarshal(rr3.Body.Bytes(), &resp3); err != nil {
+		t.Fatalf("decode retry response: %v", err)
+	}
+	if resp3["status"] != "PENDING" || resp3["deduped"] == true {
+		t.Errorf("retry after 429 = %v, want status PENDING (fresh run) — the 429 consumed the idempotency reservation", resp3)
+	}
+	h.WaitWebhookDispatches()
+	if n := runner.callCount(); n != 2 {
+		t.Errorf("runner invoked %d times across slot-held fire + retry, want 2 (parked run + executed retry)", n)
+	}
+}
+
+// TestPipelineWebhooks_Fire_ConcurrencyGate_UnderLimit_202AndRuns pins
+// the other half of the synchronous concurrency contract: a delivery
+// for a concurrency-gated routine whose slot is FREE still answers
+// 202 + PENDING and the run executes to COMPLETED under the handed-out
+// run id — the pre-check must reject only genuinely over-limit fires.
+func TestPipelineWebhooks_Fire_ConcurrencyGate_UnderLimit_202AndRuns(t *testing.T) {
+	runner := &stubRunner{output: "ok"}
+	h, db, _, wsID := webhookHandlerRig(t)
+	h.SetRunner(runner)
+	h.SetRunRegistry(pipeline.NewRunRegistry())
+	seedConcurrencyGatedPipeline(t, db, wsID, "pln_conc_free", "conc-free-target")
+	wh := seedWebhookRow(t, db, wsID, "pln_conc_free", "free-secret", true)
+
+	body := `{"n":1}`
+	req := httptest.NewRequest("POST", "/api/v1/webhooks/"+wh.Token, strings.NewReader(body))
+	req.SetPathValue("token", wh.Token)
+	req.Header.Set("X-Crewship-Signature", covPSWSign("free-secret", body))
+	rr := httptest.NewRecorder()
+	h.FireWebhook(rr, req)
+
+	if rr.Code != 202 {
+		t.Fatalf("status = %d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["status"] != "PENDING" {
+		t.Errorf("status = %v, want PENDING", resp["status"])
+	}
+	respRunID, _ := resp["run_id"].(string)
+
+	h.WaitWebhookDispatches()
+	recordedRunID, recordedStatus := waitForWebhookFire(t, db, wh.ID, 3*time.Second)
+	if recordedStatus != "COMPLETED" {
+		t.Errorf("recorded last_status = %q, want COMPLETED", recordedStatus)
+	}
+	if recordedRunID != respRunID {
+		t.Errorf("recorded last_run_id = %q, want the 202's run_id %q", recordedRunID, respRunID)
+	}
+	if runner.calls != 1 {
+		t.Errorf("runner invoked %d times, want 1", runner.calls)
+	}
+}
+
 // TestPipelineWebhooks_Fire_InactiveRoutine_409Synchronous pins that
 // the governance gate stays a SYNCHRONOUS sender-visible contract
 // under async dispatch: a 'proposed' routine answers 409 (policy
