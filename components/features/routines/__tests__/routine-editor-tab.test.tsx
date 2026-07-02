@@ -135,3 +135,25 @@ describe("RoutineEditorTab", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
+
+  it("remounts the editor when a same-slug refetch delivers a new definition", () => {
+    const { rerender } = render(
+      <RoutineEditorTab routine={routine} workspaceId="ws-1" onSaved={vi.fn()} />,
+    )
+    const before = (screen.getByTestId("mock-editor") as HTMLTextAreaElement).value
+    expect(before).toContain("Daily ETL")
+
+    // Same slug, refreshed definition — e.g. an agent edited the routine
+    // and the panel refetched. The visible editor must pick up the new
+    // content, not keep serving the pre-refetch buffer.
+    const refreshed: RoutineDetail = {
+      ...routine,
+      definition: { name: "Daily ETL (refetched)", steps: [{ id: "s1", kind: "agent" }] },
+      definition_hash: "hash2",
+    }
+    rerender(
+      <RoutineEditorTab routine={refreshed} workspaceId="ws-1" onSaved={vi.fn()} />,
+    )
+    const after = (screen.getByTestId("mock-editor") as HTMLTextAreaElement).value
+    expect(after).toContain("Daily ETL (refetched)")
+  })

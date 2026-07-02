@@ -1,5 +1,7 @@
 "use client"
 
+import { Suspense } from "react"
+
 import { ActivityTracePage } from "@/components/features/activity/activity-trace-page"
 
 // /activity — single-canvas trace view. Picks a run from the left
@@ -11,6 +13,14 @@ import { ActivityTracePage } from "@/components/features/activity/activity-trace
 // OrchestrationPageShell) was retired here on the IA refactor — too
 // much fragmentation. The /orchestration route still uses the old
 // layout for backwards compat.
+//
+// Suspense: the rail reads useSearchParams() (?run/?step/?pipeline/
+// ?status deep-links); without a boundary the static-export build
+// fails on this route.
 export default function ActivityPage() {
-  return <ActivityTracePage />
+  return (
+    <Suspense fallback={null}>
+      <ActivityTracePage />
+    </Suspense>
+  )
 }

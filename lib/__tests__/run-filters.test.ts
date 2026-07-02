@@ -134,3 +134,17 @@ describe("applyFilters status=active", () => {
     expect(out.map((r) => r.id)).toEqual(["r1", "r2", "r3", "r4"])
   })
 })
+
+describe("deep-link param composition (?pipeline= + ?status= together)", () => {
+  it("chaining both appliers keeps both dimensions — neither clobbers the other", () => {
+    const base = { crews: ["crew-1"] }
+    const next = applyStatusParam(applyPipelineParam(base, "daily-digest"), "active")
+    expect(next).toEqual({ crews: ["crew-1"], routines: ["daily-digest"], status: "active" })
+  })
+
+  it("order does not matter", () => {
+    const a = applyStatusParam(applyPipelineParam({}, "s"), "failed")
+    const b = applyPipelineParam(applyStatusParam({}, "failed"), "s")
+    expect(a).toEqual(b)
+  })
+})

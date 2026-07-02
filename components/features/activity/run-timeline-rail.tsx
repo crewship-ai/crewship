@@ -88,32 +88,37 @@ export function RunTimelineRail({
   // local state with the remote value (use-user-preference.ts). URL
   // params stay the read-side source of truth, same convention as
   // use-trace-selection's ?run/?step handling.
+  // ?status=active (the Activity dropdown's "View all activity →")
+  // pre-selects a status bucket with the same semantics; unknown
+  // values no-op via applyStatusParam's identity return. Both params
+  // compose in ONE setFilter — separate effects would each derive
+  // from the same captured filter and the second write would clobber
+  // the first when a link carries both params.
   const searchParams = useSearchParams()
   const pipelineParam = searchParams.get("pipeline")
+  const statusParam = searchParams.get("status")
   const pipelineParamApplied = useRef(false)
+  const statusParamApplied = useRef(false)
   useEffect(() => {
     // Only latch once a param is actually present — a later client-
     // side navigation that adds ?pipeline= without remounting the
     // rail still gets its single application. After that the user
     // owns the filter (clearing it must not be fought by re-applies).
-    if (!filterReady || pipelineParamApplied.current || !pipelineParam) return
-    pipelineParamApplied.current = true
-    const next = applyPipelineParam(filter, pipelineParam)
+    if (!filterReady) return
+    const wantPipeline = !pipelineParamApplied.current && !!pipelineParam
+    const wantStatus = !statusParamApplied.current && !!statusParam
+    if (!wantPipeline && !wantStatus) return
+    let next = filter
+    if (wantPipeline) {
+      pipelineParamApplied.current = true
+      next = applyPipelineParam(next, pipelineParam)
+    }
+    if (wantStatus) {
+      statusParamApplied.current = true
+      next = applyStatusParam(next, statusParam)
+    }
     if (next !== filter) setFilter(next)
-  }, [filterReady, pipelineParam, filter, setFilter])
-
-  // Deep-link: /activity?status=active (the header live-runs chip's
-  // "View all N running →") pre-selects a status bucket. Same one-shot
-  // + hydration-gated semantics as ?pipeline= above; unknown values
-  // no-op via applyStatusParam's identity return.
-  const statusParam = searchParams.get("status")
-  const statusParamApplied = useRef(false)
-  useEffect(() => {
-    if (!filterReady || statusParamApplied.current || !statusParam) return
-    statusParamApplied.current = true
-    const next = applyStatusParam(filter, statusParam)
-    if (next !== filter) setFilter(next)
-  }, [filterReady, statusParam, filter, setFilter])
+  }, [filterReady, pipelineParam, statusParam, filter, setFilter])
 
   // Owning-crew name per routine slug, derived once from crews + pipelines.
   // Shared by the routine-filter options (crew-grouped combobox) and the group

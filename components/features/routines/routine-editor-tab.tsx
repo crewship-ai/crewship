@@ -76,14 +76,21 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
   // value (typing then clicking Save silently saved stale JSON).
   const bufferRef = useRef(initial)
 
+  // The editor is remounted on key change to force a fresh CodeMirror
+  // instance after Format / Revert / refetch (FileEditor only consumes
+  // `code` on first mount). Cheap because the routine DSL is small.
+  const [editorKey, setEditorKey] = useState(0)
+
   // FileEditor controls its own internal state; we re-key it by the
   // routine slug so switching routines remounts with fresh content.
-  // text is updated on save() (CodeMirror reads its current doc and
-  // hands the string back via onSave).
+  // A same-slug refetch (new `initial`) must ALSO remount — without
+  // the key bump the visible editor keeps the old buffer while
+  // bufferRef already points at the new definition.
   useEffect(() => {
     setText(initial)
     bufferRef.current = initial
     setDirty(false)
+    setEditorKey((k) => k + 1)
   }, [initial, routine.slug])
 
   const validation = useMemo(() => validate(text), [text])
@@ -177,11 +184,6 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
       setSaving(false)
     }
   }
-
-  // The editor is remounted on key change to force a fresh CodeMirror
-  // instance after Format / Revert (since FileEditor only consumes
-  // `code` on first mount). Cheap because the routine DSL is small.
-  const [editorKey, setEditorKey] = useState(0)
 
   return (
     <div className="flex h-full flex-col">
