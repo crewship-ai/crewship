@@ -350,6 +350,91 @@ func TestRequireWorkspace_BySlug(t *testing.T) {
 	}
 }
 
+// TestRequireWorkspace_ByHeader pins the Memory-tab fix: several frontend
+// surfaces (the agent Memory tab, crew policy controls, privacy section) pass
+// the workspace via the `X-Workspace-ID` header rather than a `workspace_id`
+// query param. The middleware only read query/path, so every one of those
+// panels 400'd with "workspace_id is required" — the entire Memory tab
+// (AGENT.md / CREW.md / PERSONA / Peers) rendered "list versions failed: 400".
+// The header is validated against membership exactly like the query param, so
+// honouring it is a source of input, not of trust.
+func TestRequireWorkspace_ByHeader(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID) // id=test-workspace-id, slug=test
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
+
+	mw := NewAuthMiddleware(v, sessions.NewDBStore(db), db, logger)
+	var gotRole, gotWS string
+	handler := mw.RequireWorkspace(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRole = RoleFromContext(r.Context())
+		gotWS = WorkspaceIDFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// No workspace_id query param, no path value — only the header (slug form,
+	// matching what the memory-tab passes).
+	req := httptest.NewRequest("GET", "/api/v1/memory/versions?path=agent:x/AGENT.md", nil)
+	req.Header.Set("X-Workspace-ID", "test")
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (X-Workspace-ID header must resolve, not 400); body=%s", rr.Code, rr.Body.String())
+	}
+	if gotRole != "OWNER" {
+		t.Errorf("role = %q, want OWNER", gotRole)
+	}
+	// Context must carry the canonical CUID, resolved from the header's slug.
+	if gotWS != wsID {
+		t.Errorf("context workspace = %q, want canonical id %q", gotWS, wsID)
+	}
+}
+
+// TestRequireWorkspace_QueryBeatsHeader pins precedence: when BOTH a
+// workspace_id query param and an X-Workspace-ID header are present, the query
+// param wins. This keeps the 152 existing query-param callers' behaviour
+// byte-for-byte unchanged; the header is a pure fallback for the handful of
+// header-only callers.
+func TestRequireWorkspace_QueryBeatsHeader(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID) // slug=test
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
+
+	mw := NewAuthMiddleware(v, sessions.NewDBStore(db), db, logger)
+	var gotWS string
+	handler := mw.RequireWorkspace(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotWS = WorkspaceIDFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Query param is the real (slug) workspace; header points at a bogus one.
+	// The query param must win → 200 + resolved id. If the header won we'd get
+	// a 403 (not a member of "bogus-ws").
+	req := httptest.NewRequest("GET", "/?workspace_id=test", nil)
+	req.Header.Set("X-Workspace-ID", "bogus-ws")
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (query param must take precedence over header); body=%s", rr.Code, rr.Body.String())
+	}
+	if gotWS != wsID {
+		t.Errorf("context workspace = %q, want canonical id %q from query param", gotWS, wsID)
+	}
+}
+
 // TestInbox_OwnerViaSlug_EndToEnd runs the real RequireWorkspace middleware in
 // front of the inbox List + BulkPatchState handlers and drives them with the
 // workspace SLUG as workspace_id — the exact shape `crewship inbox list` /
