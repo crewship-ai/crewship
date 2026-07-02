@@ -80,9 +80,10 @@ func seedQueuedAt(t *testing.T, db *sql.DB, id, chatID, byAgent, toAgent, queued
 
 func TestSweepStuckQueued_OldQueuedRows_GetPumped(t *testing.T) {
 	// 3 stale QUEUED rows in one crew, budget=2 (default), 0 RUNNING
-	// → the sweeper should pump 2 (budget) and leave the third
-	// QUEUED. Locks the "sweeper calls pumpAndDispatch which is
-	// already idempotent" contract.
+	// → the sweeper's own claim pumps 2 (budget); the third then
+	// drains via the post-completion pump once the first dispatches
+	// fail on orch=nil. Locks the "sweeper calls pumpAndDispatch
+	// which is already idempotent" contract.
 	h, db, crewID, agentIDs, chatID := stuckSweeperRig(t)
 	old := "2026-01-01 00:00:00.000" // far past the 1m default stale threshold
 	seedQueuedAt(t, db, "a_stuck_1", chatID, agentIDs[0], agentIDs[0], old)
@@ -93,17 +94,29 @@ func TestSweepStuckQueued_OldQueuedRows_GetPumped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SweepStuckQueued: %v", err)
 	}
+	// The sweep's own claim loop runs fully before any dispatch
+	// goroutine is spawned (pumpAndDispatch claims, then spawns), so
+	// the return value is deterministically budget-bound.
 	if pumped != 2 {
 		t.Errorf("pumped = %d, want 2 (budget)", pumped)
 	}
 
-	// Verify: 2 transitioned out of QUEUED, 1 still QUEUED.
-	var queued, nonQueued int
+	// "1 still QUEUED" is only a TRANSIENT state: the two pumped
+	// dispatches fail fast on orch=nil, and finishAssignment's
+	// post-completion pump (assignments_run.go) then legitimately
+	// claims the third row from its own goroutine. Asserting the
+	// transient state races those goroutines — it passed in isolation
+	// and lost under full-package load. Wait for the dispatch cascade
+	// to settle and assert the deterministic steady state instead:
+	// every row drained out of QUEUED and terminal via the
+	// orchestrator-not-available path.
+	h.WaitDispatches()
+	var queued, failed int
 	_ = db.QueryRow(`SELECT COUNT(*) FROM assignments WHERE status = 'QUEUED'`).Scan(&queued)
-	_ = db.QueryRow(`SELECT COUNT(*) FROM assignments WHERE status != 'QUEUED'`).Scan(&nonQueued)
+	_ = db.QueryRow(`SELECT COUNT(*) FROM assignments WHERE status = 'FAILED'`).Scan(&failed)
 	_ = crewID // silence unused; we identify rows by chat instead
-	if queued != 1 || nonQueued != 2 {
-		t.Errorf("post-sweep: queued=%d (want 1), non-queued=%d (want 2)", queued, nonQueued)
+	if queued != 0 || failed != 3 {
+		t.Errorf("post-cascade: queued=%d (want 0), failed=%d (want 3)", queued, failed)
 	}
 }
 
