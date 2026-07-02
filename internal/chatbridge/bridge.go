@@ -741,8 +741,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			}); err != nil {
 				b.logger.Warn("failed to update run status", "run_id", runID, "status", "CANCELLED", "error", err)
 			}
-			// Persist partial response if any
-			if acc.Text() != "" {
+			// Persist whatever the run produced before it was stopped so the
+			// partial reply is never silently dropped. Gate on parts too, not
+			// just text: a run cancelled after a tool call but before its text
+			// delta still has tool/thinking parts worth keeping (the old
+			// text-only gate discarded those, leaving the chat looking empty).
+			if acc.Text() != "" || len(partAcc.Parts()) > 0 {
 				_ = b.convStore.Append(cleanCtx, chatID, conversation.Message{
 					ID:        generateMsgID(),
 					AgentID:   info.AgentID,

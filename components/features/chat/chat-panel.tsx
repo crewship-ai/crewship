@@ -144,11 +144,17 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const session = useSession()
   const currentUserId = session.data?.user?.id ?? null
 
+  // Bumped to force a history refetch when the server can't replay an in-flight
+  // run (resume_reset — the replay buffer overflowed). Rare; a safety net.
+  const [historyReloadNonce, setHistoryReloadNonce] = useState(0)
+  const requestHistoryReload = useCallback(() => setHistoryReloadNonce((n) => n + 1), [])
+
   const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, isStreaming, connectionStatus } = useChat({
     wsUrl: getWsUrl(),
     getToken: getWsToken,
     sessionId,
     currentUserId: currentUserId ?? undefined,
+    onStreamReset: requestHistoryReload,
   })
 
   useEffect(() => {
@@ -216,7 +222,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
 
     void run()
     return () => { cancelled = true }
-  }, [sessionId, workspaceId, loadHistory])
+  }, [sessionId, workspaceId, loadHistory, historyReloadNonce])
 
   // Group-chat participants → display-name map for author attribution. Empty
   // for a private 1:1 chat (the endpoint returns no participants), so the

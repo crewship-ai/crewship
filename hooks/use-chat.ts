@@ -1,7 +1,12 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useWebSocket, type WSStatus } from "@/hooks/use-websocket"
+import { useWebSocket, type WSStatus, type WSMessage } from "@/hooks/use-websocket"
+
+/** Upper bound on out-of-order events held during reassembly. Past this, a gap
+ *  is assumed permanently lost and the stream skips ahead so it never freezes.
+ *  A run is turn-capped so a healthy stream never approaches this. */
+const MAX_PENDING_EVENTS = 1000
 
 /** uuid() is unavailable in non-secure (HTTP) contexts.
  *  Fall back to a simple Math.random-based UUID when needed. */
@@ -166,6 +171,10 @@ interface UseChatOptions {
    *  subscribers including the sender) so the message we already rendered
    *  optimistically doesn't appear twice. */
   currentUserId?: string
+  /** Called when the server can't replay an in-flight run (the replay buffer
+   *  overflowed): the chat surface should reload history rather than render a
+   *  partial stream. Optional — tests and simple callers omit it. */
+  onStreamReset?: () => void
 }
 
 /** Map a structured history part to a renderable TurnPart, coercing unknown
@@ -258,7 +267,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
  * Handles streaming text/thinking/tool events, turn grouping, history loading,
  * message editing, regeneration, and stop/cancel.
  */
-export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOptions) {
+export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamReset }: UseChatOptions) {
   const [turns, setTurns] = useState<ChatTurn[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const textBufferRef = useRef("")
@@ -283,6 +292,29 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
   // still flow through.
   const cancelledRef = useRef(false)
 
+  // --- Resumable-stream reassembly ---------------------------------------
+  // Streamed chat events carry a per-session monotonic seq (see internal/ws).
+  // On reconnect the client replays the gap, so the same event can arrive twice
+  // and out of order (replay interleaved with live). lastSeqRef is the highest
+  // contiguous seq applied; pendingRef holds out-of-order events keyed by seq
+  // until their predecessors arrive. This guarantees every event is applied
+  // exactly once, in order — the core "never lose (or double) text" invariant.
+  const lastSeqRef = useRef(0)
+  const pendingRef = useRef<Map<number, { eventType?: StreamEventType; content: string; metadata?: Record<string, unknown> }>>(new Map())
+  // Live/replayed events are held until the session's history has loaded, so a
+  // late-resolving history fetch can't clobber an already-rendered in-flight
+  // run (the mount race). loadHistory flips this true and drains.
+  const historyLoadedRef = useRef(false)
+  // Refs so the stable onConnect callback (passed to useWebSocket before `send`
+  // exists) can resubscribe/resume without being re-created.
+  const sendRef = useRef<((msg: WSMessage) => void) | null>(null)
+  const sessionIdRef = useRef(sessionId)
+  sessionIdRef.current = sessionId
+  // Set by the caller; invoked when the server says the replay buffer overflowed
+  // (resume_reset) so history is reloaded instead of rendering a partial stream.
+  const onStreamResetRef = useRef<(() => void) | null>(null)
+  onStreamResetRef.current = onStreamReset ?? null
+
   // Reset stream-side state when session changes. We deliberately do NOT
   // reset turns here — that would cause a blank-canvas flash between the
   // old session and the new one's history fetch. The chat-panel calls
@@ -300,6 +332,10 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
       cancelAnimationFrame(rafIdRef.current)
       rafIdRef.current = null
     }
+    // Reset resumable-stream reassembly for the new session.
+    lastSeqRef.current = 0
+    pendingRef.current.clear()
+    historyLoadedRef.current = false
   }, [sessionId])
 
   // Cancel any in-flight frame on unmount so the scheduled callback never
@@ -893,12 +929,88 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
     setIsStreaming(false)
   }, [])
 
+  // applyChatEvent dispatches a single (already in-order) chat event to the
+  // per-type handlers. Text is coalesced per animation frame; every other event
+  // first flushes buffered text so nothing renders ahead of the text it
+  // followed on the wire.
+  const applyChatEvent = useCallback(
+    (eventType: StreamEventType | undefined, content: string, metadata?: Record<string, unknown>) => {
+      if (eventType === "text") {
+        pendingTextRef.current += content
+        scheduleTextFlush()
+        return
+      }
+      flushPendingText()
+      switch (eventType) {
+        case "status": handleStatusEvent(content); break
+        case "thinking": handleThinkingEvent(content); break
+        case "tool_call": handleToolCallEvent(content, metadata); break
+        case "tool_result": handleToolResultEvent(content, metadata); break
+        case "image": handleImageEvent(content, metadata); break
+        case "result": handleResultEvent(content, metadata); break
+        case "system": handleSystemEvent(content, metadata); break
+        case "done": handleDoneEvent(metadata); break
+        case "crew_provisioning": handleCrewProvisioningEvent(content, metadata); break
+        case "user_message": handleUserMessageEvent(content, metadata); break
+        case "error": handleErrorEvent(content); break
+      }
+    },
+    [
+      scheduleTextFlush, flushPendingText, handleStatusEvent, handleThinkingEvent,
+      handleToolCallEvent, handleToolResultEvent, handleImageEvent, handleResultEvent,
+      handleSystemEvent, handleDoneEvent, handleCrewProvisioningEvent, handleUserMessageEvent,
+      handleErrorEvent,
+    ],
+  )
+
+  // drainPending applies buffered events in strict seq order, as far as the
+  // contiguous run allows. Gated on history having loaded so a late history
+  // fetch can't wipe an already-rendered in-flight run.
+  const drainPending = useCallback(() => {
+    if (!historyLoadedRef.current) return
+    const p = pendingRef.current
+    for (;;) {
+      const next = p.get(lastSeqRef.current + 1)
+      if (next === undefined) break
+      p.delete(lastSeqRef.current + 1)
+      lastSeqRef.current += 1
+      applyChatEvent(next.eventType, next.content, next.metadata)
+    }
+  }, [applyChatEvent])
+
+  // ingestChatEvent reassembles the resumable stream: unseq'd events (legacy /
+  // non-run broadcasts) apply immediately; seq'd events are deduped and ordered.
+  const ingestChatEvent = useCallback(
+    (seq: number, eventType: StreamEventType | undefined, content: string, metadata?: Record<string, unknown>) => {
+      if (!seq) {
+        // No sequence number — not part of a resumable run stream (legacy
+        // server, or a non-run broadcast). Apply immediately, as before.
+        applyChatEvent(eventType, content, metadata)
+        return
+      }
+      if (seq <= lastSeqRef.current) return // already applied — duplicate from replay∩live
+      pendingRef.current.set(seq, { eventType, content, metadata })
+      // Safety valve: if a gap never fills (a truly lost frame) the buffer would
+      // grow forever. Past the cap, skip to the smallest pending seq so the
+      // stream keeps moving rather than freezing.
+      if (pendingRef.current.size > MAX_PENDING_EVENTS) {
+        let min = Infinity
+        for (const k of pendingRef.current.keys()) if (k < min) min = k
+        if (min !== Infinity && min - 1 > lastSeqRef.current) lastSeqRef.current = min - 1
+      }
+      drainPending()
+    },
+    [applyChatEvent, drainPending],
+  )
+
   const handleMessage = useCallback(
     (msg: { type: string; payload?: string | Record<string, unknown>; channel?: string; [key: string]: unknown }) => {
+      const channelSessionId = msg.channel?.startsWith("session:") ? msg.channel.slice(8) : undefined
+      const envSeq = typeof msg.seq === "number" ? (msg.seq as number) : 0
+
       // Handle assignment lifecycle events
       const assignmentTypes: AssignmentEventType[] = ["assignment_created", "assignment_running", "assignment_completed", "assignment_failed"]
       if (assignmentTypes.includes(msg.type as AssignmentEventType)) {
-        const channelSessionId = msg.channel?.startsWith("session:") ? msg.channel.slice(8) : undefined
         if (channelSessionId && channelSessionId !== sessionId) return
         const payload = (typeof msg.payload === "object" && msg.payload !== null)
           ? msg.payload as Record<string, unknown>
@@ -907,6 +1019,30 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
         // the two render in arrival order.
         flushPendingText()
         handleAssignmentEvent(msg.type as AssignmentEventType, payload)
+        return
+      }
+
+      // run_begin anchors reassembly at the start of a run. Its own seq consumes
+      // the slot (no renderable content), so jump the baseline to it — this also
+      // rebases a fresh client that joined a channel whose counter already
+      // advanced on earlier runs. Never regress the baseline.
+      if (msg.type === "run_begin") {
+        if (channelSessionId && channelSessionId !== sessionId) return
+        if (envSeq > lastSeqRef.current) {
+          lastSeqRef.current = envSeq
+          for (const k of pendingRef.current.keys()) {
+            if (k <= lastSeqRef.current) pendingRef.current.delete(k)
+          }
+          drainPending()
+        }
+        return
+      }
+
+      // resume_reset: the server couldn't replay the in-flight run (buffer
+      // overflow). Reload history rather than render a partial stream.
+      if (msg.type === "resume_reset") {
+        if (channelSessionId && channelSessionId !== sessionId) return
+        onStreamResetRef.current?.()
         return
       }
 
@@ -926,79 +1062,40 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
       const metadata = (payload.metadata as Record<string, unknown>) ?? undefined
 
       // Filter by session
-      const channelSessionId = msg.channel?.startsWith("session:") ? msg.channel.slice(8) : undefined
       if (channelSessionId && channelSessionId !== sessionId) return
 
-      // Text streams token-by-token: buffer and commit once per animation
-      // frame. Every other event commits the buffered text first (below)
-      // so nothing renders ahead of the text it followed on the wire.
-      if (eventType === "text") {
-        pendingTextRef.current += content
-        scheduleTextFlush()
-        return
-      }
-      flushPendingText()
-
-      switch (eventType) {
-        case "status":
-          handleStatusEvent(content)
-          break
-        case "thinking":
-          handleThinkingEvent(content)
-          break
-        case "tool_call":
-          handleToolCallEvent(content, metadata)
-          break
-        case "tool_result":
-          handleToolResultEvent(content, metadata)
-          break
-        case "image":
-          handleImageEvent(content, metadata)
-          break
-        case "result":
-          handleResultEvent(content, metadata)
-          break
-        case "system":
-          handleSystemEvent(content, metadata)
-          break
-        case "done":
-          handleDoneEvent(metadata)
-          break
-        case "crew_provisioning":
-          handleCrewProvisioningEvent(content, metadata)
-          break
-        case "user_message":
-          handleUserMessageEvent(content, metadata)
-          break
-        case "error":
-          handleErrorEvent(content)
-          break
-      }
+      // Reassemble in seq order (dedup + reorder) so replay-after-reconnect and
+      // the live stream never lose or double an event.
+      ingestChatEvent(envSeq, eventType, content, metadata)
     },
     [
       sessionId,
       handleAssignmentEvent,
-      handleStatusEvent,
-      handleThinkingEvent,
       flushPendingText,
-      scheduleTextFlush,
-      handleToolCallEvent,
-      handleToolResultEvent,
-      handleImageEvent,
-      handleResultEvent,
-      handleSystemEvent,
-      handleDoneEvent,
-      handleCrewProvisioningEvent,
-      handleUserMessageEvent,
-      handleErrorEvent,
+      ingestChatEvent,
+      drainPending,
     ],
   )
+
+  // resumeOnConnect (re)subscribes to the session channel and asks the server to
+  // replay any in-flight run from the last seq we applied. Stable (reads refs)
+  // so it can be handed to useWebSocket before `send` exists. Fires on every
+  // (re)connect — a fresh socket has no server-side subscription.
+  const resumeOnConnect = useCallback(() => {
+    const sid = sessionIdRef.current
+    const s = sendRef.current
+    if (!sid || !s) return
+    s({ type: "subscribe", channel: "session:" + sid })
+    s({ type: "resume", payload: JSON.stringify({ session_id: sid, last_seq: lastSeqRef.current }) })
+  }, [])
 
   const { status, send } = useWebSocket({
     url: wsUrl,
     getToken,
     onMessage: handleMessage,
+    onConnect: resumeOnConnect,
   })
+  sendRef.current = send
 
   const sendMessage = useCallback(
     (content: string) => {
@@ -1123,7 +1220,12 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
     setIsStreaming(false)
     textBufferRef.current = ""
     thinkingBufferRef.current = ""
-  }, [])
+    // History is now the base. Release any in-flight run events that arrived via
+    // resume/live before the history fetch resolved, applying them ON TOP so a
+    // late history load can't wipe an already-streaming reply (the mount race).
+    historyLoadedRef.current = true
+    drainPending()
+  }, [drainPending])
 
   // Derive flat messages for backwards compat (used by history loading)
   const messages: ChatMessage[] = turns.flatMap((turn) =>

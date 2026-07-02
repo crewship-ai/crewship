@@ -231,6 +231,78 @@ describe("useChat", () => {
     expect(parts[4].content).toBe("Your calendar is empty.")
   })
 
+  // --- Resumable-stream reassembly (seq ordering + dedup + resume) ---------
+
+  it("reassembles seq'd events in order, deduping and reordering", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+    )
+    const onMessage = getOnMessage()
+    const emit = (m: Record<string, unknown>) =>
+      act(() => onMessage({ channel: "session:s1", ...m }))
+
+    // History present → the reassembler is allowed to apply live events.
+    act(() => result.current.loadHistory([]))
+
+    emit({ type: "run_begin", seq: 1, payload: { from_seq: 0 } })
+    emit({ type: "chat_event", seq: 3, payload: { type: "text", content: "B" } }) // out of order
+    emit({ type: "chat_event", seq: 2, payload: { type: "text", content: "A" } })
+    emit({ type: "chat_event", seq: 2, payload: { type: "text", content: "A" } }) // duplicate
+    flushFrames()
+
+    expect(result.current.turns).toHaveLength(1)
+    const textParts = result.current.turns[0].parts.filter((p) => p.type === "text")
+    expect(textParts).toHaveLength(1)
+    // Applied in seq order (2 then 3), duplicate dropped → "AB", not "BA"/"ABA".
+    expect(textParts[0].content).toBe("AB")
+  })
+
+  it("rebases the seq baseline from run_begin when joining mid-counter", () => {
+    // A fresh client on a chat whose channel already streamed earlier runs must
+    // NOT wait forever for seq 1..50 — run_begin rebases it to the run's start.
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+    )
+    const onMessage = getOnMessage()
+    const emit = (m: Record<string, unknown>) =>
+      act(() => onMessage({ channel: "session:s1", ...m }))
+    act(() => result.current.loadHistory([]))
+
+    emit({ type: "run_begin", seq: 51, payload: { from_seq: 50 } })
+    emit({ type: "chat_event", seq: 52, payload: { type: "text", content: "hi" } })
+    flushFrames()
+
+    const textParts = result.current.turns[0]?.parts.filter((p) => p.type === "text") ?? []
+    expect(textParts).toHaveLength(1)
+    expect(textParts[0].content).toBe("hi")
+  })
+
+  it("holds resumed events until history loads, then applies them on top", () => {
+    // The mount race: resume/live events can arrive before the history fetch
+    // resolves. They must be buffered, not dropped, and must not be clobbered
+    // when loadHistory replaces the turns.
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+    )
+    const onMessage = getOnMessage()
+    const emit = (m: Record<string, unknown>) =>
+      act(() => onMessage({ channel: "session:s1", ...m }))
+
+    // Events arrive BEFORE history has loaded.
+    emit({ type: "run_begin", seq: 1, payload: { from_seq: 0 } })
+    emit({ type: "chat_event", seq: 2, payload: { type: "text", content: "still working" } })
+    flushFrames()
+    // Nothing rendered yet — held pending until history is the base.
+    expect(result.current.turns).toHaveLength(0)
+
+    // History resolves (empty for a mid-run return) → pending drains on top.
+    act(() => result.current.loadHistory([]))
+    flushFrames()
+    const textParts = result.current.turns[0]?.parts.filter((p) => p.type === "text") ?? []
+    expect(textParts).toHaveLength(1)
+    expect(textParts[0].content).toBe("still working")
+  })
+
   it("collapses repeated status events into a single live status line", () => {
     // Internal progress chatter (thinking_tokens, task_started, task_progress,
     // …) arrives as a burst of status events. They must NOT stack into a column
