@@ -12,7 +12,6 @@ package orchestrator
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -79,47 +78,14 @@ func (o *Orchestrator) StopAccepting() {
 	o.accepting = false
 }
 
-// RecoverFromCrash inspects all persisted run states and marks stale runs
-
-func (o *Orchestrator) RecoverFromCrash(ctx context.Context) error {
-	runs, err := o.state.List(ctx, "agent_runs")
-	if err != nil {
-		return fmt.Errorf("list runs: %w", err)
-	}
-
-	for key, data := range runs {
-		var run RunState
-		if err := json.Unmarshal(data, &run); err != nil {
-			o.logger.Warn("corrupt run state", "key", key, "error", err)
-			continue
-		}
-		if run.Status != "running" {
-			continue
-		}
-
-		if run.ExecID == "" {
-			o.updateRunStatus(ctx, run.ID, "error")
-			continue
-		}
-
-		running, _, err := o.container.ExecInspect(ctx, run.ExecID)
-		if err != nil {
-			// Transient inspect failures (Docker daemon briefly unreachable
-			// during startup, container being restarted by an external
-			// process, etc.) must not be collapsed with "exec finished".
-			// Leave the run state alone so the next recovery pass — or the
-			// run's own exec loop — can reconcile it.
-			o.logger.Warn("inspect failed during crash recovery; leaving run state untouched",
-				"run_id", run.ID, "exec_id", run.ExecID, "error", err)
-			continue
-		}
-		if !running {
-			o.updateRunStatus(ctx, run.ID, "completed")
-			o.logger.Info("recovered stale run", "run_id", run.ID, "agent_id", run.AgentID)
-		}
-	}
-	return nil
-}
+// Boot-time crash recovery lives in internal/server/server_lifecycle.go
+// (Server.recoverOrphanedRuns, invoked from Server.Start) — it reconciles
+// agent_runs against journal_entries rather than against live Docker exec
+// state. An earlier orchestrator-level RecoverFromCrash (KV-state +
+// ExecInspect reconciliation) was removed as dead code (no production
+// caller); see PR history for the gap it covered that the DB/journal-only
+// sweep does not (no check of whether the underlying container exec is
+// still genuinely alive before marking a run cancelled).
 
 func (o *Orchestrator) Start(ctx context.Context) error {
 	o.logger.Info("starting orchestrator container TTL manager")

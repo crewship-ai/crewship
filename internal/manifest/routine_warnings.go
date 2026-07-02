@@ -37,7 +37,7 @@ func routinePlanWarnings(doc *kinds.RoutineDocument) []string {
 			continue
 		}
 		out = append(out, fmt.Sprintf(
-			"routine %q: step %q is type: code with runtime %q, which has no wired runner — invocations will fail until it is converted to type: agent_run with a shell-tool-enabled agent, or to runtime: expr for agentless probes (see docs/manifest/routine.md `Code-step limitation`)",
+			"routine %q: step %q is type: code with runtime %q, which has no wired runner — invocations will fail until it is converted to type: agent_run with a shell-tool-enabled agent, or to runtime: expr or cel for agentless logic (see docs/manifest/routine.md `Code steps`)",
 			doc.Metadata.Slug, step.ID, codeStepRuntime(step),
 		))
 	}

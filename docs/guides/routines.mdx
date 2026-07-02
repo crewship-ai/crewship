@@ -385,7 +385,7 @@ Approve via UI Inbox, CLI `crewship routine waitpoints approve <token>`, or API.
 
 ### `code`
 
-A `code` step has a `runtime`. Exactly one runtime is wired today: **`expr`**.
+A `code` step has a `runtime`. Two runtimes are wired today, both deterministic and token-zero: **`expr`** and **`cel`**.
 
 #### `runtime: expr` (wired, token-zero)
 
@@ -405,6 +405,18 @@ A `code` step has a `runtime`. Exactly one runtime is wired today: **`expr`**.
 
 This is the canonical primitive for **agentless** probes and **schedule wake-gates** (emit `true` only when work is needed). See [Wake gates](#wake-gates).
 
+#### `runtime: cel` (wired, token-zero)
+
+```yaml
+- id: spike
+  type: code
+  code:
+    runtime: cel
+    code: 'inputs.spend_usd > inputs.threshold_usd && inputs.region in ["eu", "us"]'
+```
+
+`cel` evaluates a [Google CEL](https://github.com/google/cel-go) expression — pure-Go, non-Turing-complete (every expression provably terminates), no loops, no I/O. It reaches further than `expr`: boolean operators, arithmetic, string ops, list/map membership, ternaries, and field access, while keeping the same token-zero / no-RCE guarantees. Inputs are exposed as a typed `inputs` map (no `{{ }}` templating needed). Reach for `cel` when `expr`'s single comparison isn't enough.
+
 #### `runtime: bash | python | go` (not wired)
 
 ```yaml
@@ -418,7 +430,7 @@ This is the canonical primitive for **agentless** probes and **schedule wake-gat
 The container-backed runtimes are accepted by the schema but have **no sandboxed runner wired** in current builds.
 
 <Warning>
-`runtime: bash`, `python`, and `go` are **not executable today**: a step using them **fails closed at runtime**, and `crewship apply` emits a plan-time warning. Use `runtime: expr` for boolean probes, or express richer logic with `http` + `transform` steps (or an `agent_run` step). Only `expr` is wired.
+`runtime: bash`, `python`, and `go` are **not executable**: a routine that uses one is **rejected at author time** (save / apply / test_run), with a `crewship apply` plan-time warning for anything that bypasses the validator. Use `runtime: expr` or `runtime: cel` for agentless logic, or convert the step to `http` + `transform`, or an `agent_run` step with a shell-tool-enabled agent. See the "Code steps" section of the [routine manifest reference](/manifest/routine) for the full conversion recipe.
 </Warning>
 
 ### `transform`
