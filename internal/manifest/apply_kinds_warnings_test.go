@@ -9,12 +9,12 @@ import (
 )
 
 // TestRoutinePlanWarnings_FiresOnCodeStep verifies that a routine
-// declaring a `type: code` step produces a clear plan-time warning.
-// The production CodeRunner is not yet wired
-// (internal/pipeline/runner_code.go); saving such a routine succeeds
-// but every invocation fails at the code step. Surfacing the gap at
-// apply time means the operator doesn't learn about it via a failed
-// cron at 03:00.
+// declaring a `type: code` step with no runtime (and thus no wired
+// CodeRunner) produces a clear plan-time warning. The server-side
+// save/apply/test_run validator already rejects such a step at
+// author time (internal/pipeline/dsl_validate_egress.go); this
+// plan-time warning is a client-side heads-up that flags the doomed
+// apply before the round-trip to the server.
 func TestRoutinePlanWarnings_FiresOnCodeStep(t *testing.T) {
 	t.Parallel()
 

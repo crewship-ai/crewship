@@ -12,16 +12,20 @@ import (
 // Plan.Warnings so the CLI can print them before apply exits.
 //
 // Today this catches `type: code` steps whose runtime has no wired
-// runner. The deterministic `runtime: expr` runner IS wired
-// (internal/pipeline/runner_code_expr.go) — agentless probes using it
-// run fine, so they must NOT warn. Other runtimes (bash/python/go)
-// have no sandbox wired: such a step saves successfully but every
-// invocation fails at runtime, so we surface that at apply time rather
-// than via a failed cron run at 03:00.
+// runner. The deterministic `runtime: expr` and `runtime: cel` runners
+// ARE wired (internal/pipeline/runner_code_expr.go,
+// runner_code_multi.go) — agentless steps using them run fine, so they
+// must NOT warn. Other runtimes (bash/python/go) have no sandbox
+// wired: the server-side save/apply/test_run validator
+// (internal/pipeline/dsl_validate_egress.go) already rejects such a
+// step at author time, so this is a client-side heads-up surfaced at
+// `crewship apply` plan time — it flags the doomed apply before the
+// round-trip to the server, it doesn't describe a step that "saves
+// then fails later."
 //
-// Add new advisory rules here as more "saves cleanly but fails at
-// runtime" gaps surface; keep the rules narrow so the warning channel
-// stays signal-rich.
+// Add new advisory rules here as more author-time-rejected gaps
+// surface; keep the rules narrow so the warning channel stays
+// signal-rich.
 func routinePlanWarnings(doc *kinds.RoutineDocument) []string {
 	if doc == nil {
 		return nil
@@ -37,7 +41,7 @@ func routinePlanWarnings(doc *kinds.RoutineDocument) []string {
 			continue
 		}
 		out = append(out, fmt.Sprintf(
-			"routine %q: step %q is type: code with runtime %q, which has no wired runner — invocations will fail until it is converted to type: agent_run with a shell-tool-enabled agent, or to runtime: expr for agentless probes (see docs/manifest/routine.md `Code-step limitation`)",
+			"routine %q: step %q is type: code with runtime %q, which has no wired runner — routines using it are rejected at save/apply/test_run; use runtime: expr or cel for agentless logic, or convert to type: agent_run with a shell-tool-enabled agent (see docs/manifest/routine.md `Code steps`)",
 			doc.Metadata.Slug, step.ID, codeStepRuntime(step),
 		))
 	}

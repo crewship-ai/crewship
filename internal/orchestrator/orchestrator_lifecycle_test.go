@@ -17,8 +17,8 @@ import (
 // ---------------------------------------------------------------------------
 // orchestrator_lifecycle.go — GetOrCreateContainer, Start, checkTTLs.
 //
-// Existing tests cover StopAccepting and most of RecoverFromCrash;
-// this fills the container-resolve, ticker-loop, and TTL-sweep gaps.
+// Existing tests cover StopAccepting; this fills the container-resolve,
+// ticker-loop, and TTL-sweep gaps.
 // ---------------------------------------------------------------------------
 
 // lifecycleFakeContainer is a tiny ContainerProvider that records the

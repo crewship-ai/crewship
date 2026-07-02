@@ -244,8 +244,15 @@ spec:
   inputs:
     - { name: channels, type: string, required: false, default: all,
         description: "Space-separated channel aliases or 'all'" }
+  # `pull` runs a shell command via an agent_run (shell-tool-enabled agent)
+  # rather than `type: code, runtime: bash` — bash/python/go code-step
+  # runtimes are schema-legal but have no sandboxed runner wired in this
+  # build and are rejected at apply time (see docs/manifest/routine.md
+  # "Code steps"). `runtime: expr`/`cel` cover deterministic agentless
+  # logic; real shell still needs an agent_run like this one.
   steps:
-    - { id: pull,      type: code,      code: { runtime: bash, code: "dce sync --all --json" } }
+    - { id: pull,      type: agent_run, agent_slug: herald,
+        prompt: "Run exactly one shell command: `dce sync --all --json`. Report its raw stdout verbatim, nothing else." }
     - { id: summarize, type: agent_run, agent_slug: herald,
         prompt: "Summarise the new Discord messages in input 'channels'." }
   credentials_required:
