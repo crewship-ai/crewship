@@ -105,3 +105,53 @@ describe("<IssuePageClient> — identifier resolution (static-export regression)
     expect(calledUrls.some((u) => u.includes("/api/v1/issues/_"))).toBe(false)
   })
 })
+
+describe("<IssuePageClient> — creator attribution", () => {
+  const setupFetch = (issue: Record<string, unknown>) => {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      writable: true,
+      value: { ...window.location, pathname: "/issues/OPS-4", href: "https://x/issues/OPS-4" },
+    })
+    global.fetch = vi.fn((url: string) => {
+      const u = String(url)
+      if (u.includes("/api/v1/issues/OPS-4")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(issue) }) as unknown as Promise<Response>
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) }) as unknown as Promise<Response>
+    }) as unknown as typeof fetch
+  }
+
+  afterEach(() => vi.restoreAllMocks())
+
+  it("shows 'Created by' with an agent badge for an agent-created issue", async () => {
+    setupFetch({
+      ...ISSUE,
+      created_by: { type: "agent", id: "agent-9", name: "Scout" },
+      authored_via: "agent_tool_call",
+    })
+    render(<IssuePageClient />)
+    await waitFor(() => expect(screen.getByTestId("issue-created-by")).toBeInTheDocument(), { timeout: 3000 })
+    expect(screen.getByTestId("issue-created-by").textContent).toContain("Created by Scout")
+    expect(screen.getByTestId("issue-creator-agent-badge")).toBeInTheDocument()
+  })
+
+  it("shows 'Created by' without an agent badge for a human-created issue", async () => {
+    setupFetch({
+      ...ISSUE,
+      created_by: { type: "user", id: "user-1", name: "Pavel Srba" },
+      authored_via: "user_api",
+    })
+    render(<IssuePageClient />)
+    await waitFor(() => expect(screen.getByTestId("issue-created-by")).toBeInTheDocument(), { timeout: 3000 })
+    expect(screen.getByTestId("issue-created-by").textContent).toContain("Created by Pavel Srba")
+    expect(screen.queryByTestId("issue-creator-agent-badge")).not.toBeInTheDocument()
+  })
+
+  it("omits the creator line entirely on a legacy issue without created_by", async () => {
+    setupFetch(ISSUE)
+    render(<IssuePageClient />)
+    await waitFor(() => expect(screen.getByText(/Fetch current weather data/)).toBeInTheDocument(), { timeout: 3000 })
+    expect(screen.queryByTestId("issue-created-by")).not.toBeInTheDocument()
+  })
+})

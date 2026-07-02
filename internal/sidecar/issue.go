@@ -47,6 +47,12 @@ func (s *Server) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 		"assignee_type":   "agent",
 		"author_agent_id": s.ipc.AgentID,
 	}
+	// Provenance (v108/v129): the chat this agent container is bound to.
+	// A run id is not part of the IPC identity today, so only the chat is
+	// forwarded; crewshipd stamps authored_via='agent_tool_call' itself.
+	if s.ipc.ChatID != "" {
+		body["author_chat_id"] = s.ipc.ChatID
+	}
 	if req.Description != "" {
 		body["description"] = req.Description
 	}

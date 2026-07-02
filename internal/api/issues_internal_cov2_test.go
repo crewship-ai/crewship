@@ -129,6 +129,7 @@ func TestCovII3_UpdateStatus_CommentInsertFailure_Warn_200(t *testing.T) {
 	req := httptest.NewRequest("PATCH", "/api/v1/internal/issues/ENG-1/status",
 		jsonBody(map[string]any{
 			"workspace_id": wsID, "status": "IN_PROGRESS", "comment": "starting work",
+			"agent_id": "agent-worker",
 		}))
 	req.SetPathValue("identifier", "ENG-1")
 	rr := httptest.NewRecorder()
@@ -161,7 +162,7 @@ func TestCovII3_CreateComment_FindIssueDBError_500(t *testing.T) {
 	h, db, wsID, _, _ := covII2NewIssueHandler(t)
 	db.Close()
 	req := httptest.NewRequest("POST", "/api/v1/internal/issues/ENG-1/comments",
-		jsonBody(map[string]any{"workspace_id": wsID, "body": "hi"}))
+		jsonBody(map[string]any{"workspace_id": wsID, "body": "hi", "agent_id": "agent-worker"}))
 	req.SetPathValue("identifier", "ENG-1")
 	rr := httptest.NewRecorder()
 	h.CreateComment(rr, req)
@@ -176,7 +177,7 @@ func TestCovII3_CreateComment_InsertFailure_500(t *testing.T) {
 	execOrFatal(t, db, `CREATE TRIGGER covii3_block_mc2 BEFORE INSERT ON mission_comments
 		BEGIN SELECT RAISE(ABORT, 'covii3 forced'); END`)
 	req := httptest.NewRequest("POST", "/api/v1/internal/issues/ENG-1/comments",
-		jsonBody(map[string]any{"workspace_id": wsID, "body": "hi"}))
+		jsonBody(map[string]any{"workspace_id": wsID, "body": "hi", "agent_id": "agent-worker"}))
 	req.SetPathValue("identifier", "ENG-1")
 	rr := httptest.NewRecorder()
 	h.CreateComment(rr, req)

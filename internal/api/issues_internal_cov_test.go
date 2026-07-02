@@ -355,13 +355,15 @@ func TestCovII2UpdateStatus_DoneSetsCompletedAt(t *testing.T) {
 	}
 }
 
-// TestCovII2UpdateStatus_WithComment_DefaultAuthor adds a comment with no
-// agent_id so author_id falls back to "system".
-func TestCovII2UpdateStatus_WithComment_DefaultAuthor(t *testing.T) {
+// TestCovII2UpdateStatus_WithComment_AgentAuthor adds a comment with an
+// agent_id and asserts the comment is attributed to that agent. (A comment
+// WITHOUT agent_id is now rejected — creator-attribution fix; see
+// TestInternalIssue_Comment_NoAgentIDRejected.)
+func TestCovII2UpdateStatus_WithComment_AgentAuthor(t *testing.T) {
 	h, db, wsID, crewID, leadID := covII2NewIssueHandler(t)
 	issueID := seedIssue(t, db, wsID, crewID, leadID, "ENG-1", "BACKLOG")
 
-	body := bytes.NewBufferString(`{"workspace_id":"` + wsID + `","status":"TODO","comment":"moving along"}`)
+	body := bytes.NewBufferString(`{"workspace_id":"` + wsID + `","status":"TODO","comment":"moving along","agent_id":"agent-worker"}`)
 	req := httptest.NewRequest("PATCH", "/", body)
 	req.SetPathValue("identifier", "ENG-1")
 	rr := httptest.NewRecorder()
@@ -372,13 +374,13 @@ func TestCovII2UpdateStatus_WithComment_DefaultAuthor(t *testing.T) {
 	if covII2CommentCount(t, db, issueID) != 1 {
 		t.Errorf("expected 1 comment after update-with-comment")
 	}
-	var authorID string
+	var authorType, authorID string
 	if err := db.QueryRowContext(context.Background(),
-		`SELECT author_id FROM mission_comments WHERE mission_id = ?`, issueID).Scan(&authorID); err != nil {
+		`SELECT author_type, author_id FROM mission_comments WHERE mission_id = ?`, issueID).Scan(&authorType, &authorID); err != nil {
 		t.Fatalf("read author: %v", err)
 	}
-	if authorID != "system" {
-		t.Errorf("author_id = %q, want system (default when agent_id empty)", authorID)
+	if authorType != "agent" || authorID != "agent-worker" {
+		t.Errorf("author = %s/%s, want agent/agent-worker", authorType, authorID)
 	}
 }
 
@@ -397,16 +399,17 @@ func TestCovII2UpdateStatus_DBError(t *testing.T) {
 }
 
 // ============================================================================
-// InternalIssueHandler.CreateComment — happy persistence, default author, 500
+// InternalIssueHandler.CreateComment — happy persistence, agent author, 500
 // ============================================================================
 
-// TestCovII2CreateComment_DefaultAuthor adds a comment without agent_id and
-// asserts the persisted row + default author "system" and the echoed body.
-func TestCovII2CreateComment_DefaultAuthor(t *testing.T) {
+// TestCovII2CreateComment_AgentAuthor adds a comment with an agent_id and
+// asserts the persisted row + author attribution and the echoed body.
+// (A comment without agent_id is now rejected — creator-attribution fix.)
+func TestCovII2CreateComment_AgentAuthor(t *testing.T) {
 	h, db, wsID, crewID, leadID := covII2NewIssueHandler(t)
 	issueID := seedIssue(t, db, wsID, crewID, leadID, "ENG-1", "BACKLOG")
 
-	body := bytes.NewBufferString(`{"workspace_id":"` + wsID + `","body":"a note"}`)
+	body := bytes.NewBufferString(`{"workspace_id":"` + wsID + `","body":"a note","agent_id":"agent-worker"}`)
 	req := httptest.NewRequest("POST", "/", body)
 	req.SetPathValue("identifier", "ENG-1")
 	rr := httptest.NewRecorder()
@@ -418,8 +421,8 @@ func TestCovII2CreateComment_DefaultAuthor(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if resp.AuthorID != "system" {
-		t.Errorf("author_id = %q, want system", resp.AuthorID)
+	if resp.AuthorType != "agent" || resp.AuthorID != "agent-worker" {
+		t.Errorf("author = %s/%s, want agent/agent-worker", resp.AuthorType, resp.AuthorID)
 	}
 	if resp.Body != "a note" {
 		t.Errorf("body = %q, want 'a note'", resp.Body)
@@ -433,7 +436,7 @@ func TestCovII2CreateComment_DefaultAuthor(t *testing.T) {
 func TestCovII2CreateComment_DBError(t *testing.T) {
 	h, db, wsID, _, _ := covII2NewIssueHandler(t)
 	db.Close()
-	body := bytes.NewBufferString(`{"workspace_id":"` + wsID + `","body":"x"}`)
+	body := bytes.NewBufferString(`{"workspace_id":"` + wsID + `","body":"x","agent_id":"agent-worker"}`)
 	req := httptest.NewRequest("POST", "/", body)
 	req.SetPathValue("identifier", "ENG-1")
 	rr := httptest.NewRecorder()

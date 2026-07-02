@@ -144,6 +144,18 @@ export interface Mission {
   routine_id?: string | null
   routine_slug?: string | null
   routine_name?: string | null
+  // Creator attribution (migration 129). Identifies WHO created the
+  // issue — a human via the API/UI or an agent via a sidecar tool call.
+  // Absent on legacy issues that predate the columns.
+  created_by?: IssueCreator | null
+  authored_via?: string | null
+}
+
+/** Who created an issue: a human user or an agent (via tool call). */
+export interface IssueCreator {
+  type: "user" | "agent"
+  id: string
+  name?: string
 }
 
 /** A color-coded label that can be attached to issues for categorization. */

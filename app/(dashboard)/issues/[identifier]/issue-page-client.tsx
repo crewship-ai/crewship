@@ -672,6 +672,19 @@ export function IssuePageClient() {
 
             {/* Footer metadata */}
             <div className="text-label text-muted-foreground/60 font-mono space-y-0.5 pt-4">
+              {issue.created_by && (
+                <div data-testid="issue-created-by">
+                  Created by {issue.created_by.name || issue.created_by.id}
+                  {issue.created_by.type === "agent" && (
+                    <span
+                      data-testid="issue-creator-agent-badge"
+                      className="ml-1.5 inline-flex items-center rounded border border-primary/30 bg-primary/10 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-primary"
+                    >
+                      agent
+                    </span>
+                  )}
+                </div>
+              )}
               <div>Created {formatDate(issue.created_at)}</div>
               <div>Updated {formatDate(issue.updated_at)}</div>
             </div>

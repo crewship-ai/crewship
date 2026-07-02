@@ -145,6 +145,37 @@ type issueResponse struct {
 	RoutineID   *string `json:"routine_id,omitempty"`
 	RoutineSlug *string `json:"routine_slug,omitempty"`
 	RoutineName *string `json:"routine_name,omitempty"`
+	// Creator attribution (v129). CreatedBy identifies WHO created the
+	// issue — a human (public API / slash command) or an agent (sidecar
+	// tool call). AuthoredVia is the v108 channel enum
+	// ('agent_tool_call', 'user_api', …). Both omitempty: legacy rows
+	// predate the columns and carry no attribution.
+	CreatedBy   *issueCreatorResponse `json:"created_by,omitempty"`
+	AuthoredVia *string               `json:"authored_via,omitempty"`
+}
+
+// issueCreatorResponse is the creator object on issue responses.
+// Type discriminates the ID namespace: "agent" → agents.id,
+// "user" → users.id. Name is resolved at read time (same pattern as
+// assignee_name) so a renamed agent/user shows its current name.
+type issueCreatorResponse struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+}
+
+// buildIssueCreator assembles the creator object from the raw columns.
+// Agent attribution wins if both are somehow set (they never should be —
+// the two create paths stamp exactly one).
+func buildIssueCreator(authorAgentID, createdByUserID, creatorName sql.NullString) *issueCreatorResponse {
+	switch {
+	case authorAgentID.Valid && authorAgentID.String != "":
+		return &issueCreatorResponse{Type: "agent", ID: authorAgentID.String, Name: creatorName.String}
+	case createdByUserID.Valid && createdByUserID.String != "":
+		return &issueCreatorResponse{Type: "user", ID: createdByUserID.String, Name: creatorName.String}
+	default:
+		return nil
+	}
 }
 
 type labelResponse struct {
@@ -278,7 +309,12 @@ func issueSelectQuery() string {
 		m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
 		m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
 		(SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count,
-		m.routine_id, p.slug, p.name
+		m.routine_id, p.slug, p.name,
+		m.author_agent_id, m.created_by_user_id, m.authored_via,
+		CASE
+			WHEN m.author_agent_id IS NOT NULL THEN (SELECT name FROM agents WHERE id = m.author_agent_id)
+			WHEN m.created_by_user_id IS NOT NULL THEN (SELECT full_name FROM users WHERE id = m.created_by_user_id)
+		END AS creator_name
 	FROM missions m
 	LEFT JOIN crews c ON m.crew_id = c.id
 	LEFT JOIN pipelines p ON m.routine_id = p.id AND p.workspace_id = m.workspace_id`
@@ -287,6 +323,7 @@ func issueSelectQuery() string {
 // scanIssueRow scans a row into an issueResponse.
 func scanIssueRow(row interface{ Scan(...interface{}) error }) (issueResponse, error) {
 	var issue issueResponse
+	var authorAgentID, createdByUserID, authoredVia, creatorName sql.NullString
 	err := row.Scan(
 		&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
 		&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
@@ -296,9 +333,14 @@ func scanIssueRow(row interface{ Scan(...interface{}) error }) (issueResponse, e
 		&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
 		&issue.SubIssuesCount,
 		&issue.RoutineID, &issue.RoutineSlug, &issue.RoutineName,
+		&authorAgentID, &createdByUserID, &authoredVia, &creatorName,
 	)
 	if err == nil {
 		issue.Labels = []labelResponse{}
+		issue.CreatedBy = buildIssueCreator(authorAgentID, createdByUserID, creatorName)
+		if authoredVia.Valid && authoredVia.String != "" {
+			issue.AuthoredVia = &authoredVia.String
+		}
 	}
 	return issue, err
 }

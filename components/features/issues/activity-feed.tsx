@@ -71,6 +71,14 @@ export function ActivityFeed({ activities }: { activities: IssueActivity[] }) {
               <div className="flex-1 min-w-0">
                 <span className="text-[11px] text-foreground/70">
                   <span className="text-foreground/90 font-medium">{a.actor_name || a.actor_id}</span>
+                  {a.actor_type === "agent" && (
+                    <span
+                      data-testid="activity-actor-agent-chip"
+                      className="ml-1 inline-flex items-center rounded border border-primary/30 bg-primary/10 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-primary align-middle"
+                    >
+                      agent
+                    </span>
+                  )}
                   {" "}
                   {actionLabel(a.action)}
                   {a.details && a.action === "status_changed" && (
