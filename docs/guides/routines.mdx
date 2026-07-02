@@ -863,6 +863,18 @@ While at least one routine run is in flight, the dashboard surfaces it from anyw
 
 All three surfaces share one workspace-scoped subscription (`GET /api/v1/workspaces/{ws}/pipeline-runs?status=active` + the `pipeline.run.*`/`pipeline.step.started` events, 3s poll while anything is active). `status=active` bundles `running`, `queued`, `paused` **and `waiting`** — the status a run parks in while a [HITL waitpoint](#hitl-waitpoints) awaits a decision.
 
+### Run warnings
+
+`before_all`/`after_all`/`on_failure` lifecycle hooks run best-effort: a failing `after_all` or `on_failure` hook (a teardown step like credential-release or cost-meter-close) never flips the run's terminal status — a `before_all` failure is different and fails the run outright, since nothing downstream ran. A failed `after_all`/`on_failure` hook is instead recorded as a structured **warning** on the run so it doesn't silently vanish into server logs while the run reports `completed`.
+
+Fetch it via `GET /api/v1/workspaces/{ws}/pipeline-runs/{runId}` — the response's `warnings` array (always present, empty when there are none) has one entry per failed hook:
+
+```json
+{ "stage": "hook after_all", "message": "credential release step timed out", "at": "2026-07-02T12:01:05Z" }
+```
+
+`crewship routine logs <run_id>` (the slug-free state lookup) prints a `Warnings:` section when the run has any, alongside the existing `Error:` line for the run's own terminal status.
+
 ### Per-step cost + duration
 
 Both the UI Runs sub-tab waterfall and `crewship routine logs <run_id> --slug X` surface the `cost_usd` and `duration_ms` fields the executor stamps on every `pipeline.step.completed` event. Same data, two presentation surfaces:

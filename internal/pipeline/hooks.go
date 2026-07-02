@@ -110,12 +110,19 @@ func (e *Executor) runHooksAround(ctx context.Context, in RunInput, runID, pipel
 			if hooks.AfterAll != nil {
 				if _, herr := e.runRoutineHook(ctx, hooks.AfterAll, in, runID, pipelineSlug); herr != nil {
 					e.persistWarn("hook after_all", runID, herr)
+					// A failed teardown hook (credential-release,
+					// cost-meter-close, ...) must not flip a COMPLETED
+					// run to FAILED, but it must also not vanish into
+					// server logs — record it so the run detail
+					// API/CLI can surface it.
+					e.recordRunWarning(ctx, runID, "hook after_all", herr)
 				}
 			}
 		case "FAILED":
 			if hooks.OnFailure != nil {
 				if _, herr := e.runRoutineHook(ctx, hooks.OnFailure, in, runID, pipelineSlug); herr != nil {
 					e.persistWarn("hook on_failure", runID, herr)
+					e.recordRunWarning(ctx, runID, "hook on_failure", herr)
 				}
 			}
 		}
