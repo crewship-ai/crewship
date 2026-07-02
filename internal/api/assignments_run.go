@@ -532,11 +532,22 @@ func (h *AssignmentHandler) runAssignment(
 }
 
 // finishAssignment updates the assignment and run records, then broadcasts the final event.
+//
+// The status UPDATE is a CAS: only a row that is not already terminal
+// may transition. Exactly one terminal writer wins per assignment —
+// the losing side (typically a driver goroutine finishing after the
+// stuck-RUNNING sweeper or boot recovery already failed the row) gets
+// false back and MUST NOT emit any completion signals; the winner
+// already emitted them, and a second, contradictory set (COMPLETED
+// after FAILED) would corrupt the timeline, double-fire the mission
+// callback, and double-pump the freed crew slot.
+//
+// Returns true when this call owned the terminal transition.
 
 func (h *AssignmentHandler) finishAssignment(
 	ctx context.Context,
 	assignmentID, runID, chatID, targetSlug, workspaceID, result, errMsg string,
-) {
+) bool {
 	now := time.Now().UTC().Format(time.RFC3339)
 	status := "COMPLETED"
 	if errMsg != "" {
@@ -551,10 +562,30 @@ func (h *AssignmentHandler) finishAssignment(
 		errVal = errMsg
 	}
 
-	if _, err := h.db.ExecContext(ctx,
-		`UPDATE assignments SET status=?, result_summary=?, error_message=?, finished_at=? WHERE id=?`,
-		status, resultVal, errVal, now, assignmentID); err != nil {
+	// CAS on "not already terminal" rather than status='RUNNING': early
+	// dispatch failures can reach here while the row is still PENDING
+	// (the RUNNING stamp itself failed), and those must still finish.
+	res, err := h.db.ExecContext(ctx,
+		`UPDATE assignments SET status=?, result_summary=?, error_message=?, finished_at=?
+		  WHERE id=? AND status NOT IN ('COMPLETED','FAILED','CANCELLED')`,
+		status, resultVal, errVal, now, assignmentID)
+	if err != nil {
+		// Unknown whether the transition landed — emit nothing. If it
+		// didn't land, the row is still RUNNING and the stuck-RUNNING
+		// sweeper will reclaim it; emitting on a failed UPDATE would
+		// announce a status the DB doesn't hold.
 		h.logger.Error("update assignment status", "error", err, "assignment_id", assignmentID)
+		return false
+	}
+	if n, raErr := res.RowsAffected(); raErr != nil {
+		h.logger.Error("update assignment status rows affected", "error", raErr, "assignment_id", assignmentID)
+		return false
+	} else if n == 0 {
+		// Lost the terminal CAS — a sweeper/recovery/other driver already
+		// finished this row and emitted the completion signals.
+		h.logger.Warn("assignment already terminal — suppressing late completion signals",
+			"assignment_id", assignmentID, "late_status", status)
+		return false
 	}
 
 	// Emit the terminal run.* journal entry — the source of truth post
@@ -680,7 +711,7 @@ func (h *AssignmentHandler) finishAssignment(
 	}
 
 	if h.hub == nil {
-		return
+		return true
 	}
 
 	if errMsg != "" {
@@ -710,6 +741,7 @@ func (h *AssignmentHandler) finishAssignment(
 	}
 
 	h.logger.Info("assignment finished", "assignment_id", assignmentID, "status", status)
+	return true
 }
 
 // List handles GET /api/v1/crews/{crewId}/assignments.

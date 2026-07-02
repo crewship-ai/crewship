@@ -30,12 +30,16 @@ package api
 //  2. SweepStuckRunning / StartStuckRunningSweeper — belt-and-braces
 //     ticker for in-process leaks (e.g. a dispatch goroutine that
 //     panicked between claimCrewSlot and runAssignment, the "case 3"
-//     the stuck-QUEUED sweeper header explicitly punts on). Uses a
-//     generous staleness bound so it can never race a healthy run.
+//     the stuck-QUEUED sweeper header explicitly punts on). Its
+//     staleness bound is per-assignment — max(the target agent's
+//     configured timeout_seconds + a grace margin, a generous floor)
+//     — so it can never race a healthy run, even one configured to
+//     run longer than the floor.
 
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -49,51 +53,53 @@ import (
 // below.
 const defaultRunningSweepInterval = 5 * time.Minute
 
-// defaultRunningStaleAfter is how long a row may sit RUNNING before
-// the sweeper declares it leaked and fails it. This is deliberately
-// generous — 2 hours — because unlike QUEUED (where any dwell beyond
-// the pump cadence is pathological), RUNNING rows are backed by real
-// agent executions whose duration is bounded only by the per-agent
-// timeout_seconds plus provisioning overhead (image build, container
-// boot). The bound must comfortably exceed the longest legitimate run
-// an operator configures; if an installation runs agents with
-// timeouts near or above 2h, this constant is the knob to raise
-// (promote to config if that ever happens in practice). A too-small
-// value is the dangerous direction: sweeping a live run marks it
-// FAILED while the driver later overwrites it COMPLETED, confusing
-// the timeline. Measured against COALESCE(running_at, started_at,
+// defaultRunningStaleAfter is the FLOOR on how long a row may sit
+// RUNNING before the sweeper declares it leaked and fails it. This is
+// deliberately generous — 2 hours — because unlike QUEUED (where any
+// dwell beyond the pump cadence is pathological), RUNNING rows are
+// backed by real agent executions whose duration is bounded only by
+// the per-agent timeout_seconds plus provisioning overhead (image
+// build, container boot). A too-small value is the dangerous
+// direction: sweeping a live run marks it FAILED, frees the crew slot
+// for a second concurrent exec, and sets up a FAILED-vs-COMPLETED
+// terminal collision when the still-live driver finishes (the
+// finishAssignment CAS makes the driver lose, but the run's real
+// result is discarded).
+//
+// The floor alone is NOT the whole bound: agents can legitimately be
+// configured with timeout_seconds at or above 2h, so the sweeper's
+// per-row staleness bound is max(agent timeout_seconds +
+// runningSweepGraceMargin, this floor) — see scanRunningStuck. The
+// dwell is measured against COALESCE(running_at, started_at,
 // created_at) — running_at is the dispatcher-side claim stamp,
 // started_at the runAssignment stamp, created_at the NOT NULL
 // fallback.
 const defaultRunningStaleAfter = 2 * time.Hour
 
-// failInterruptedAssignment CAS-transitions one RUNNING assignment to
-// FAILED with the given reason, then replays the normal failure
-// completion path. Returns handled=false (no error) when the row was
-// not RUNNING anymore — a live driver or a concurrent recovery path
-// finished it first; losing that race is the designed outcome.
-//
-// The CAS (WHERE status='RUNNING') is the whole concurrency story:
-// boot recovery, the ticker sweeper, and a still-live driver can all
-// aim at the same row, and exactly one transition wins. Only the
-// winner emits the completion signals.
-func (h *AssignmentHandler) failInterruptedAssignment(ctx context.Context, assignmentID, reason string) (bool, error) {
-	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := h.db.ExecContext(ctx, `
-		UPDATE assignments
-		   SET status = 'FAILED', error_message = ?, finished_at = ?
-		 WHERE id = ? AND status = 'RUNNING'`, reason, now, assignmentID)
-	if err != nil {
-		return false, fmt.Errorf("fail interrupted assignment %s: %w", assignmentID, err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("fail interrupted assignment %s rows affected: %w", assignmentID, err)
-	}
-	if n == 0 {
-		return false, nil
-	}
+// runningSweepGraceMargin is added on top of an agent's configured
+// timeout_seconds when computing the sweeper's per-row staleness
+// bound. It absorbs the overhead a legitimate run pays outside the
+// timed agent exec — image build, container boot, credential loading
+// — so a run that uses its full configured timeout is never swept
+// mid-flight just because provisioning ate a few extra minutes.
+const runningSweepGraceMargin = 15 * time.Minute
 
+// failInterruptedAssignment transitions one RUNNING assignment to
+// FAILED with the given reason via the normal failure completion path.
+// Returns handled=false (no error) when the row was not RUNNING
+// anymore — a live driver or a concurrent recovery path finished it
+// first; losing that race is the designed outcome.
+//
+// The terminal CAS lives inside finishAssignment (WHERE status is not
+// already terminal) and is the whole concurrency story: boot recovery,
+// the ticker sweeper, and a still-live driver can all aim at the same
+// row, and exactly one transition wins. Only the winner emits the
+// completion signals (WS assignment_failed on the session channel +
+// assignment.updated on the workspace channel, the queue pump for the
+// freed slot, the mission callback, and the mission completion
+// comment). runID="" skips the terminal run.* emit — recovery has no
+// run trace of its own (that is recoverOrphanedRuns' jurisdiction).
+func (h *AssignmentHandler) failInterruptedAssignment(ctx context.Context, assignmentID, reason string) (bool, error) {
 	// Routing fields for the completion signals. LEFT JOIN because a
 	// soft-deleted target agent must not block the recovery of its
 	// assignment row.
@@ -104,17 +110,23 @@ func (h *AssignmentHandler) failInterruptedAssignment(ctx context.Context, assig
 		  FROM assignments asn
 		  LEFT JOIN agents ag ON ag.id = asn.assigned_to_id
 		 WHERE asn.id = ?`, assignmentID).Scan(&chatID, &workspaceID, &targetSlug); err != nil {
-		// The row exists (we just updated it); a scan failure here is a
-		// real DB problem. The status transition already landed, so
-		// report the error but don't pretend the row is still leaked.
-		return true, fmt.Errorf("load routing fields for recovered assignment %s: %w", assignmentID, err)
+		if errors.Is(err, sql.ErrNoRows) {
+			// Row vanished between scan and recovery — nothing to free.
+			return false, nil
+		}
+		return false, fmt.Errorf("load routing fields for recovered assignment %s: %w", assignmentID, err)
+	}
+
+	if !h.finishAssignment(ctx, assignmentID, "", chatID, targetSlug.String, workspaceID, "", reason) {
+		// Lost the terminal CAS — a live driver (or another recovery
+		// pass) finished the row first and owns the completion signals.
+		return false, nil
 	}
 
 	// Audit trail: mirror the recovery into the journal. finishAssignment
-	// below only writes the terminal run.* entry when it has a runID —
-	// recovery has none (the run trace, if any, is recoverOrphanedRuns'
-	// jurisdiction) — so without this emit the timeline would show an
-	// assignment silently flipping FAILED.
+	// above only writes the terminal run.* entry when it has a runID —
+	// recovery passes none — so without this emit the timeline would
+	// show an assignment silently flipping FAILED.
 	if _, jerr := h.journal.Emit(ctx, journal.Entry{
 		WorkspaceID: workspaceID,
 		Type:        journal.EntryAssignmentFail,
@@ -130,15 +142,6 @@ func (h *AssignmentHandler) failInterruptedAssignment(ctx context.Context, assig
 	}); jerr != nil {
 		h.logger.Warn("assignment recovery journal emit failed", "error", jerr, "assignment_id", assignmentID)
 	}
-
-	// Replay the normal failure path so the lead's chat resolves exactly
-	// like an ordinary failed run: WS assignment_failed on the session
-	// channel + assignment.updated on the workspace channel, the queue
-	// pump for the freed slot, the mission callback, and the mission
-	// completion comment. Its unguarded UPDATE re-writes the same
-	// FAILED/reason values we just CAS'd in, which is idempotent.
-	// runID="" skips the terminal run.* emit (see journal note above).
-	h.finishAssignment(ctx, assignmentID, "", chatID, targetSlug.String, workspaceID, "", reason)
 	return true, nil
 }
 
@@ -182,20 +185,27 @@ func (h *AssignmentHandler) RecoverInterruptedRunning(ctx context.Context, start
 	return recovered, nil
 }
 
-// SweepStuckRunning fails RUNNING assignments whose dispatch stamp is
-// older than staleAfter — the in-process counterpart of the boot-time
-// recovery, catching slots leaked without a restart (crashed dispatch
-// goroutines, force-killed containers that never wrote a terminal
-// status). staleAfter <= 0 falls back to defaultRunningStaleAfter;
-// see that constant for why the bound is generous.
+// SweepStuckRunning fails RUNNING assignments that outlived their
+// per-row staleness bound — the in-process counterpart of the
+// boot-time recovery, catching slots leaked without a restart
+// (crashed dispatch goroutines, force-killed containers that never
+// wrote a terminal status).
+//
+// Unlike boot recovery (where every pre-boot RUNNING row is an orphan
+// by construction), the sweeper races live drivers, so the bound is
+// per-assignment: max(target agent's configured timeout_seconds +
+// runningSweepGraceMargin, staleAfter). An assignment whose configured
+// timeout (plus grace) has not elapsed always has a potentially live
+// driver and is never swept, no matter how far past staleAfter it is.
+// staleAfter <= 0 falls back to defaultRunningStaleAfter; see that
+// constant for why the floor is generous.
 //
 // Returns the number of assignments swept.
 func (h *AssignmentHandler) SweepStuckRunning(ctx context.Context, staleAfter time.Duration) (int, error) {
 	if staleAfter <= 0 {
 		staleAfter = defaultRunningStaleAfter
 	}
-	cutoff := time.Now().UTC().Add(-staleAfter).Format("2006-01-02 15:04:05.000")
-	ids, err := h.scanRunningOlderThan(ctx, cutoff)
+	ids, err := h.scanRunningStuck(ctx, time.Now(), staleAfter)
 	if err != nil {
 		return 0, fmt.Errorf("sweepStuckRunning: %w", err)
 	}
@@ -203,7 +213,7 @@ func (h *AssignmentHandler) SweepStuckRunning(ctx context.Context, staleAfter ti
 	swept := 0
 	for _, id := range ids {
 		handled, ferr := h.failInterruptedAssignment(ctx, id,
-			fmt.Sprintf("assignment stuck in RUNNING for over %s with no completion — failed by the stuck-RUNNING sweeper", staleAfter))
+			fmt.Sprintf("assignment stuck in RUNNING past its staleness bound (the agent's configured timeout + %s grace, floor %s) with no completion — failed by the stuck-RUNNING sweeper", runningSweepGraceMargin, staleAfter))
 		if ferr != nil {
 			h.logger.Error("sweep stuck RUNNING assignment failed", "assignment_id", id, "error", ferr)
 			continue
@@ -217,8 +227,9 @@ func (h *AssignmentHandler) SweepStuckRunning(ctx context.Context, staleAfter ti
 
 // scanRunningOlderThan returns the ids of RUNNING assignments whose
 // best-available dispatch stamp parses older than the cutoff (a
-// 'YYYY-MM-DD HH:MM:SS.SSS' UTC string). Shared by boot recovery and
-// the sweeper — the two differ only in cutoff semantics and reason.
+// 'YYYY-MM-DD HH:MM:SS.SSS' UTC string). Boot recovery only: at boot a
+// single absolute cutoff (process start) is exact, because no pre-boot
+// row can have a live driver regardless of its agent's timeout.
 func (h *AssignmentHandler) scanRunningOlderThan(ctx context.Context, cutoff string) ([]string, error) {
 	rows, err := h.db.QueryContext(ctx, `
 		SELECT id FROM assignments
@@ -229,7 +240,42 @@ func (h *AssignmentHandler) scanRunningOlderThan(ctx context.Context, cutoff str
 		return nil, fmt.Errorf("scan RUNNING assignments: %w", err)
 	}
 	defer rows.Close()
+	return collectAssignmentIDs(rows)
+}
 
+// scanRunningStuck returns the ids of RUNNING assignments whose dwell
+// (now minus best-available dispatch stamp) exceeds their per-row
+// staleness bound: max(target agent's timeout_seconds +
+// runningSweepGraceMargin, floor). Sweeper only — this is what lets an
+// operator configure timeout_seconds >= the floor without the sweeper
+// killing the run mid-flight.
+//
+// LEFT JOIN keeps rows whose target agent was hard-deleted sweepable
+// (COALESCE treats a missing timeout as 0, so the floor governs).
+// julianday() normalises the two timestamp shapes the codebase writes
+// (claimCrewSlot: 'YYYY-MM-DD HH:MM:SS.SSS'; runAssignment: RFC3339
+// with 'T'/'Z'); the day-difference is converted to seconds for the
+// comparison against the seconds-grain bound.
+func (h *AssignmentHandler) scanRunningStuck(ctx context.Context, now time.Time, floor time.Duration) ([]string, error) {
+	nowStr := now.UTC().Format("2006-01-02 15:04:05.000")
+	rows, err := h.db.QueryContext(ctx, `
+		SELECT asn.id FROM assignments asn
+		  LEFT JOIN agents ag ON ag.id = asn.assigned_to_id
+		 WHERE asn.status = 'RUNNING'
+		   AND (julianday(?) - julianday(COALESCE(asn.running_at, asn.started_at, asn.created_at))) * 86400.0
+		       > MAX(COALESCE(ag.timeout_seconds, 0) + ?, ?)
+		 ORDER BY asn.created_at ASC`,
+		nowStr, runningSweepGraceMargin.Seconds(), floor.Seconds())
+	if err != nil {
+		return nil, fmt.Errorf("scan stuck RUNNING assignments: %w", err)
+	}
+	defer rows.Close()
+	return collectAssignmentIDs(rows)
+}
+
+// collectAssignmentIDs drains a single-id-column result set. Shared by
+// the two RUNNING scans above.
+func collectAssignmentIDs(rows *sql.Rows) ([]string, error) {
 	var ids []string
 	for rows.Next() {
 		var id string

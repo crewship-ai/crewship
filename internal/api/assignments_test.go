@@ -287,6 +287,10 @@ func TestRunAssignment_CreatesAgentRunRecord(t *testing.T) {
 		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('worker1', 'crew1', ?, 'Viktor', 'viktor')`, wsID)
 	execOrFatal(t, db,
 		`INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES ('chat1', 'lead1', ?, 'CHAT', 'ACTIVE')`, wsID)
+	// The assignment row must exist: finishAssignment's terminal CAS
+	// refuses to emit completion signals for a row it could not
+	// transition (guard against late drivers overwriting swept rows).
+	insertAssignment(t, db, "assign-test", wsID, "chat1", "lead1", "worker1", "PENDING")
 
 	h := NewAssignmentHandler(db, nil, nil, "token", logger)
 	// Wire a real journal writer so runAssignment's emits land in DB

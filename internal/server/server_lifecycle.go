@@ -59,10 +59,13 @@ var (
 // Stuck-RUNNING assignment sweeper boot defaults — the in-process
 // companion of the boot-time RecoverInterruptedRunning call below.
 // RUNNING rows are backed by real agent executions, so the staleness
-// bound is deliberately generous (see goapi's defaultRunningStaleAfter
-// for the full rationale): it only exists to reclaim crew concurrency
-// slots leaked without a restart (e.g. a dispatch goroutine that died
-// between claiming the slot and running the agent).
+// value here is a deliberately generous FLOOR: the sweeper's actual
+// per-row bound is max(the target agent's configured timeout_seconds
+// plus a grace margin, this floor) — see goapi's
+// defaultRunningStaleAfter for the full rationale. It only exists to
+// reclaim crew concurrency slots leaked without a restart (e.g. a
+// dispatch goroutine that died between claiming the slot and running
+// the agent).
 //
 // Same var-not-const convention as the queued sweeper, for tests.
 var (

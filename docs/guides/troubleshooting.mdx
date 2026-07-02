@@ -268,10 +268,13 @@ This is now self-healing, on two layers:
   failure, the slot is freed, and any queued assignments behind it are
   dispatched immediately.
 - **While running**, a background sweeper (every 5 minutes) fails any
-  assignment stuck in `RUNNING` for over **2 hours** with no
-  completion. The bound is deliberately generous so it never touches a
-  long-but-healthy run; it only reclaims slots leaked by abnormal
-  conditions (e.g. a force-killed container that never reported back).
+  assignment stuck in `RUNNING` with no completion past its staleness
+  bound: the target agent's configured `timeout_seconds` plus a
+  15-minute grace margin, with a **2-hour floor**. Because the bound
+  tracks each agent's own timeout, a long-but-healthy run is never
+  touched — even one configured to run longer than the floor; the
+  sweeper only reclaims slots leaked by abnormal conditions (e.g. a
+  force-killed container that never reported back).
 
 If you still see a permanently spinning assignment on an older build,
 restarting the server after upgrading clears it. Both transitions land

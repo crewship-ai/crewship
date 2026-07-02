@@ -305,6 +305,112 @@ func TestSweepStuckRunning_FreesSlotForQueuedRow(t *testing.T) {
 	}
 }
 
+func TestSweepStuckRunning_RespectsConfiguredAgentTimeout(t *testing.T) {
+	// An agent may legitimately be configured with timeout_seconds well
+	// above the sweeper's floor. A RUNNING row older than the floor but
+	// younger than its own configured timeout (+ grace) still has a live
+	// driver by construction — sweeping it would double-book the crew
+	// slot and set up a FAILED-vs-COMPLETED terminal collision when the
+	// driver finishes.
+	h, db, _, agentIDs, chatID := stuckSweeperRig(t)
+	if _, err := db.Exec(`UPDATE agents SET timeout_seconds = ? WHERE id = ?`,
+		int((3 * time.Hour).Seconds()), agentIDs[0]); err != nil {
+		t.Fatalf("raise agent timeout: %v", err)
+	}
+	// 2.5h old: past the 2h floor, but within the agent's 3h timeout.
+	twoAndAHalfAgo := time.Now().UTC().Add(-150 * time.Minute).Format("2006-01-02 15:04:05.000")
+	seedRunningAt(t, db, "a_long_run", chatID, agentIDs[0], agentIDs[0], twoAndAHalfAgo)
+
+	swept, err := h.SweepStuckRunning(context.Background(), 2*time.Hour)
+	if err != nil {
+		t.Fatalf("SweepStuckRunning: %v", err)
+	}
+	if swept != 0 {
+		t.Errorf("swept = %d, want 0 (row within its agent's 3h timeout)", swept)
+	}
+	if got := assignmentStatus(t, db, "a_long_run"); got != "RUNNING" {
+		t.Errorf("a_long_run status = %q, want RUNNING (driver still live)", got)
+	}
+
+	// Once the row outlives timeout + grace, the sweeper must reclaim it.
+	fourHoursAgo := time.Now().UTC().Add(-4 * time.Hour).Format("2006-01-02 15:04:05.000")
+	if _, err := db.Exec(`UPDATE assignments SET running_at = ? WHERE id = 'a_long_run'`, fourHoursAgo); err != nil {
+		t.Fatalf("backdate running_at: %v", err)
+	}
+	swept, err = h.SweepStuckRunning(context.Background(), 2*time.Hour)
+	if err != nil {
+		t.Fatalf("SweepStuckRunning (past timeout): %v", err)
+	}
+	if swept != 1 {
+		t.Errorf("swept = %d, want 1 (row past configured timeout + grace)", swept)
+	}
+	if got := assignmentStatus(t, db, "a_long_run"); got != "FAILED" {
+		t.Errorf("a_long_run status = %q, want FAILED", got)
+	}
+}
+
+func TestFinishAssignment_LateDriver_CannotOverwriteSweptRow(t *testing.T) {
+	// Terminal-transition guard: after the sweeper (or any recovery path)
+	// failed a RUNNING row, a late driver's finishAssignment must lose the
+	// CAS — the row stays FAILED and the driver's duplicate terminal
+	// signals (mission callback, terminal run.* journal entry) are
+	// suppressed.
+	h, db, _, agentIDs, chatID := stuckSweeperRig(t)
+	rec := &recRecordingEmitter{}
+	h.SetJournal(rec)
+	cb := &recoveryMissionCallback{}
+	h.SetMissionCallback(cb)
+
+	past := time.Now().UTC().Add(-3 * time.Hour).Format("2006-01-02 15:04:05.000")
+	seedRunningAt(t, db, "a_collide", chatID, agentIDs[0], agentIDs[0], past)
+
+	swept, err := h.SweepStuckRunning(context.Background(), 2*time.Hour)
+	if err != nil {
+		t.Fatalf("SweepStuckRunning: %v", err)
+	}
+	if swept != 1 {
+		t.Fatalf("swept = %d, want 1", swept)
+	}
+	h.WaitDispatches()
+
+	cb.mu.Lock()
+	callsAfterSweep := len(cb.calls)
+	cb.mu.Unlock()
+	entriesAfterSweep := len(rec.snapshot())
+
+	// The still-live driver finishes late with a COMPLETED result.
+	h.finishAssignment(context.Background(), "a_collide", "run_late", chatID, "agent-sweep-a", "test-workspace-id", "late result", "")
+
+	var status string
+	var result, errMsg sql.NullString
+	if err := db.QueryRow(`SELECT status, result_summary, error_message FROM assignments WHERE id = 'a_collide'`).
+		Scan(&status, &result, &errMsg); err != nil {
+		t.Fatalf("load a_collide: %v", err)
+	}
+	if status != "FAILED" {
+		t.Errorf("status = %q, want FAILED (late driver must not overwrite the swept row)", status)
+	}
+	if result.Valid && result.String != "" {
+		t.Errorf("result_summary = %q, want empty (late result must be discarded)", result.String)
+	}
+	if !errMsg.Valid || !strings.Contains(errMsg.String, "stuck in RUNNING") {
+		t.Errorf("error_message = %q, want the sweeper's reason preserved", errMsg.String)
+	}
+
+	// No duplicate terminal signals from the losing driver.
+	cb.mu.Lock()
+	callsAfterLate := len(cb.calls)
+	cb.mu.Unlock()
+	if callsAfterLate != callsAfterSweep {
+		t.Errorf("mission callback calls = %d after late finish, want %d (no duplicate terminal callback)", callsAfterLate, callsAfterSweep)
+	}
+	for _, e := range rec.snapshot()[entriesAfterSweep:] {
+		if e.Type == journal.EntryRunCompleted {
+			t.Errorf("late driver emitted %s journal entry despite losing the terminal CAS", e.Type)
+		}
+	}
+}
+
 // ── StartStuckRunningSweeper ──────────────────────────────────────────
 
 func TestStartStuckRunningSweeper_TicksAndExits(t *testing.T) {
