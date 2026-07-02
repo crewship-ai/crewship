@@ -110,6 +110,12 @@ type Server struct {
 	// reaching back into the construction config.
 	agentMemoryBase string
 	crewMemoryBase  string
+	// memoryAgentSlug is the slug the sidecar's memory config was
+	// started for (cfg.Memory.AgentSlug). Crew members share one
+	// sidecar, so /mcp/memory/{slug} requests from OTHER members
+	// resolve their own .memory dir relative to agentMemoryBase's
+	// parent — see memoryAgentContextFor.
+	memoryAgentSlug string
 	// scrubber is the shared credential-pattern detector applied to
 	// memory writes in ModeBlock. nil disables scrubbing — primarily
 	// used in tests; production paths always wire one.
@@ -240,6 +246,7 @@ func NewServer(cfg ServerConfig) *Server {
 	// degrade without taking the other down.
 	if cfg.Memory != nil && cfg.Memory.Enabled && cfg.Memory.BasePath != "" {
 		s.agentMemoryBase = cfg.Memory.BasePath
+		s.memoryAgentSlug = cfg.Memory.AgentSlug
 		// Ensure the base directory exists before SQLite tries to open
 		// {basePath}/index.sqlite — on a freshly provisioned crew the
 		// `.memory` directory hasn't been created by anything else yet,
@@ -349,6 +356,15 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				// a crewship-memory server entry pointing here so the model
 				// gets native function calling for memory without curl gymnastics.
 				s.handleMemoryMCP(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/mcp/memory/"):
+				// Per-agent variant: crew members share one sidecar, and the
+				// legacy bare path can only serve the agent the sidecar was
+				// STARTED for. The orchestrator injects /mcp/memory/{slug}
+				// into each agent's MCP config so every member's memory
+				// calls resolve to its OWN .memory tier (CRE-137: alex's
+				// writes used to land in sam's directory).
+				s.handleMemoryMCPForAgent(w, r, strings.TrimPrefix(r.URL.Path, "/mcp/memory/"))
 				return
 			case r.Method == http.MethodPost && r.URL.Path == "/mcp/routines":
 				// In-container MCP server exposing the routine-authoring

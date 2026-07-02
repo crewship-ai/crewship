@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"path"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
@@ -543,49 +544,13 @@ func startSidecar(
 	// don't block sidecar startup — without these perms the path-validator
 	// fallback path still works for boot-context recall.
 	if memoryCfg != nil && memoryCfg.Enabled && memoryCfg.BasePath != "" {
-		paths := []string{memoryCfg.BasePath}
-		if memoryCfg.CrewMemoryPath != "" {
-			paths = append(paths, memoryCfg.CrewMemoryPath)
-		}
-		// Per-path subshell `|| true` so a failure on one path (e.g.
-		// the agent BasePath) doesn't block prep on the next (the crew
-		// shared CrewMemoryPath). `mkdir -p -- "..."` quotes the path
-		// so unusual characters can't break the script — paths today
-		// come from server config but defensive quoting is cheap.
-		var prepScript strings.Builder
-		for _, p := range paths {
-			fmt.Fprintf(&prepScript,
-				`(mkdir -p -- "%s" && chown -R 1001:1002 -- "%s" && chmod -R u+rwX,g+rwXs -- "%s") || true`+"\n",
-				p, p, p)
-		}
-		prepCfg := provider.ExecConfig{
-			ContainerID: containerID,
-			Cmd:         []string{"sh", "-c", prepScript.String()},
-			User:        "0:0",
-		}
-		prepResult, prepErr := container.Exec(ctx, prepCfg)
-		if prepErr != nil {
-			logger.Warn("memory dir perms prep exec failed (sidecar will boot anyway)", "error", prepErr)
-		} else {
-			// Drain the reader first so the docker stream closes, then
-			// inspect for a non-zero exit. `|| true` per path keeps the
-			// script exit at 0 in normal partial-failure cases; a
-			// non-zero here means a deeper docker-exec failure worth
-			// surfacing (shell missing, sh -c rejected, etc.).
-			var prepOut bytes.Buffer
-			if prepResult != nil && prepResult.Reader != nil {
-				_, _ = io.Copy(&prepOut, prepResult.Reader)
-				_ = prepResult.Reader.Close()
-			}
-			if prepResult != nil && prepResult.ExecID != "" {
-				if _, code, ierr := container.ExecInspect(ctx, prepResult.ExecID); ierr != nil {
-					logger.Debug("memory dir prep inspect failed", "error", ierr)
-				} else if code != 0 {
-					logger.Warn("memory dir perms prep exited non-zero (sidecar will boot anyway)",
-						"exit_code", code, "output", strings.TrimSpace(prepOut.String()))
-				}
-			}
-		}
+		// Prep EVERY crew member's memory dir, not just the requesting
+		// agent's: members share this sidecar, and the per-agent MCP
+		// path (/mcp/memory/<slug>, CRE-137) lets any of them write
+		// their own tier — which needs the same 1001:1002 g+rwXs perms
+		// the first agent gets.
+		paths := memoryPrepPaths(memoryCfg, crewMembers)
+		prepMemoryDirs(ctx, container, containerID, paths, logger)
 	}
 
 	// SECURITY: Base64-encode the credentials JSON to prevent shell injection.
@@ -665,5 +630,106 @@ func credTypeToProvider(c Credential) string {
 		return "FACTORY"
 	default:
 		return ""
+	}
+}
+
+// memoryPrepPaths returns every .memory directory the shared sidecar
+// may serve for this crew: the requesting agent's BasePath, the crew
+// shared path, and each crew member's own tier (siblings of BasePath
+// under the same agents root). Deduplicated, order-stable.
+func memoryPrepPaths(memoryCfg *SidecarMemoryConfig, crewMembers []SidecarCrewMember) []string {
+	seen := map[string]bool{}
+	var paths []string
+	add := func(p string) {
+		if p != "" && !seen[p] {
+			seen[p] = true
+			paths = append(paths, p)
+		}
+	}
+	add(memoryCfg.BasePath)
+	add(memoryCfg.CrewMemoryPath)
+	agentsRoot := path.Dir(path.Dir(memoryCfg.BasePath))
+	for _, m := range crewMembers {
+		if m.Slug == "" {
+			continue
+		}
+		add(path.Join(agentsRoot, m.Slug, ".memory"))
+	}
+	return paths
+}
+
+// prepMemoryDirs runs the one-shot root exec that pre-creates memory
+// directories with shared-write perms. The agent home
+// `/crew/agents/{slug}` and the crew share `/crew/shared` are
+// bind-mounted at chown 1001:1001 mode 0755 by the docker init
+// container — the sidecar (UID 1002) can't MkdirAll into either path
+// because group/other lack write, and any pre-existing `.memory`
+// subdir inherits the same restrictive perms.
+//
+// The script, per path:
+//   - pre-creates the `.memory` directory
+//   - chowns it to user=1001 (agent) group=1002 (sidecar)
+//   - applies setgid + g+rwx so new files/dirs inherit group 1002 with
+//     the container entrypoint's umask 0002 making them g+rw
+//
+// Both UIDs can then read+write the FTS5 SQLite index and plaintext
+// markdown tier files (#530). The `-R` also re-normalizes ownership of
+// files either party created since the last prep, keeping the
+// dual-writer (agent file edits + sidecar memory.write) arrangement
+// healthy across runs. Best-effort: failures are logged but never
+// block the run — without these perms the path-validator fallback path
+// still works for boot-context recall.
+//
+// Called from startSidecar (all crew members) and from the sidecar
+// REUSE branch in orchestrator_run.go (the incoming agent's paths) —
+// before CRE-137 the prep ran only for whichever agent started the
+// sidecar, so every other member's tier kept root-locked perms.
+func prepMemoryDirs(
+	ctx context.Context,
+	container provider.ContainerProvider,
+	containerID string,
+	paths []string,
+	logger *slog.Logger,
+) {
+	if len(paths) == 0 {
+		return
+	}
+	// Per-path subshell `|| true` so a failure on one path doesn't
+	// block prep on the next. `mkdir -p -- "..."` quotes the path so
+	// unusual characters can't break the script — paths today come
+	// from server config but defensive quoting is cheap.
+	var prepScript strings.Builder
+	for _, p := range paths {
+		fmt.Fprintf(&prepScript,
+			`(mkdir -p -- "%s" && chown -R 1001:1002 -- "%s" && chmod -R u+rwX,g+rwXs -- "%s") || true`+"\n",
+			p, p, p)
+	}
+	prepCfg := provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", prepScript.String()},
+		User:        "0:0",
+	}
+	prepResult, prepErr := container.Exec(ctx, prepCfg)
+	if prepErr != nil {
+		logger.Warn("memory dir perms prep exec failed (run continues)", "error", prepErr)
+		return
+	}
+	// Drain the reader first so the docker stream closes, then
+	// inspect for a non-zero exit. `|| true` per path keeps the
+	// script exit at 0 in normal partial-failure cases; a
+	// non-zero here means a deeper docker-exec failure worth
+	// surfacing (shell missing, sh -c rejected, etc.).
+	var prepOut bytes.Buffer
+	if prepResult != nil && prepResult.Reader != nil {
+		_, _ = io.Copy(&prepOut, prepResult.Reader)
+		_ = prepResult.Reader.Close()
+	}
+	if prepResult != nil && prepResult.ExecID != "" {
+		if _, code, ierr := container.ExecInspect(ctx, prepResult.ExecID); ierr != nil {
+			logger.Debug("memory dir prep inspect failed", "error", ierr)
+		} else if code != 0 {
+			logger.Warn("memory dir perms prep exited non-zero (run continues)",
+				"exit_code", code, "output", strings.TrimSpace(prepOut.String()))
+		}
 	}
 }

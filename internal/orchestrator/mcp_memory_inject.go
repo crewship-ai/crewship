@@ -24,13 +24,24 @@ const memoryMCPSidecarAddr = "127.0.0.1:9119"
 // memory.append_daily as native tool calls regardless of which CLI is
 // driving the container.
 //
+// agentSlug scopes the URL to the calling agent: crew members share one
+// sidecar, and the bare /mcp/memory path can only serve the agent the
+// sidecar was STARTED for — every other member's memory calls landed in
+// that first agent's .memory tier (CRE-137). A non-empty slug appends
+// /mcp/memory/<slug> so the sidecar resolves the caller's own tier.
+// Empty slug keeps the legacy bare path (solo containers, tests).
+//
 // Transport "http" means streamable-HTTP per MCP spec. All 5 supported
 // CLIs (Claude/Codex/Gemini/OpenCode/Droid) honour this transport — see
 // each adapter's writeMCP* for the wire-format translation.
-func memoryMCPSpec() mcpSpec {
+func memoryMCPSpec(agentSlug string) mcpSpec {
+	url := "http://" + memoryMCPSidecarAddr + "/mcp/memory"
+	if agentSlug != "" {
+		url += "/" + agentSlug
+	}
 	return mcpSpec{
 		Name:      MemoryMCPServerName,
-		URL:       "http://" + memoryMCPSidecarAddr + "/mcp/memory",
+		URL:       url,
 		Transport: "http",
 	}
 }
@@ -41,7 +52,7 @@ func memoryMCPSpec() mcpSpec {
 // "crewship-memory" win (we do not overwrite) so an operator who wants to
 // point the name at a hub/marketplace memory server can override the
 // default by declaring the name first in the crew MCP config.
-func injectMemoryMCP(in []mcpSpec) []mcpSpec {
+func injectMemoryMCP(in []mcpSpec, agentSlug string) []mcpSpec {
 	for _, s := range in {
 		if s.Name == MemoryMCPServerName {
 			return in
@@ -49,7 +60,7 @@ func injectMemoryMCP(in []mcpSpec) []mcpSpec {
 	}
 	out := make([]mcpSpec, 0, len(in)+1)
 	out = append(out, in...)
-	out = append(out, memoryMCPSpec())
+	out = append(out, memoryMCPSpec(agentSlug))
 	return out
 }
 
@@ -68,7 +79,7 @@ func injectMemoryMCP(in []mcpSpec) []mcpSpec {
 //     agent still runs).
 //   - The injected entry uses type="http" so Claude streams JSON-RPC over
 //     HTTP to the sidecar loopback the model's CLI shares.
-func injectMemoryMCPIntoClaudeJSON(in string) (string, error) {
+func injectMemoryMCPIntoClaudeJSON(in, agentSlug string) (string, error) {
 	var doc struct {
 		MCPServers map[string]json.RawMessage `json:"mcpServers"`
 	}
@@ -85,7 +96,7 @@ func injectMemoryMCPIntoClaudeJSON(in string) (string, error) {
 	}
 	entry := map[string]any{
 		"type": "http",
-		"url":  memoryMCPSpec().URL,
+		"url":  memoryMCPSpec(agentSlug).URL,
 		// alwaysLoad presents this server's tools (memory.read / write /
 		// search / append_daily) to the model EAGERLY at session start
 		// instead of deferring them behind a ToolSearch discovery hop. These
