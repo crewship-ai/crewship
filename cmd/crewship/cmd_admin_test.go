@@ -1,3 +1,5 @@
+//go:build !clionly
+
 package main
 
 import (
