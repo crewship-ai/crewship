@@ -61,11 +61,16 @@ type Executor struct {
 	runner   AgentRunner
 	emitter  Emitter
 
-	// egressAllowed gates the host of HTTP steps. Wired from server
-	// boot using the workspace's existing allowlist mechanism (the
-	// same one sidecar uses for agent_run egress). Nil = allow all,
-	// useful for tests; production wiring sets a real allowlist.
-	egressAllowed func(host string) bool
+	// egressAllowed gates the host of HTTP steps at the crew/workspace
+	// policy layer. Production wiring (NewWiredExecutor with a DB)
+	// installs NewCrewNetworkPolicyGate — the same crew network policy
+	// (crews.network_mode + crews.allowed_domains) the sidecar proxy
+	// enforces for agent_run container egress, so an http step cannot
+	// reach a host the crew's agents are already forbidden from.
+	// nil = the policy layer is absent (bare NewExecutor in unit
+	// tests); the routine-level egress_targets check and the httpsafe
+	// SSRF guard in runHTTPStep still apply.
+	egressAllowed func(ctx context.Context, scope RunScope, host string) error
 
 	// allowPrivateHTTP is a test-only escape hatch: when true,
 	// runHTTPStep skips the httpsafe SSRF guards (URL string check +
@@ -75,10 +80,12 @@ type Executor struct {
 	// setter for it. SetAllowPrivateHTTPForTesting is the only mutator.
 	allowPrivateHTTP bool
 
-	// credentialByType resolves a credential type ("slack", "stripe",
-	// etc.) to its decrypted value at run time. Nil = HTTP steps
-	// run without credential injection (public endpoints only).
-	credentialByType func(ctx context.Context, credType string) (string, error)
+	// credentialByType resolves a step's credential_ref.type to the
+	// decrypted value of a matching ACTIVE credential in the running
+	// workspace's vault. Production wiring (NewWiredExecutor with a
+	// DB) installs NewVaultCredentialResolver. Nil = HTTP steps run
+	// without credential injection (public endpoints only).
+	credentialByType func(ctx context.Context, scope RunScope, credType string) (string, error)
 
 	// codeRunner runs StepCode in a sandboxed container. Nil means
 	// code steps return a clear "not configured" error rather than
@@ -134,13 +141,27 @@ type Executor struct {
 	resumeRetryMax  time.Duration
 }
 
-// WithEgressGate wires the HTTP allowlist. Builders can call this
-// pattern (NewExecutor + WithEgressGate + WithCredentialResolver +
-// WithCodeRunner + WithWaitpointStore) to compose an executor with
-// the optional capabilities turned on. The package's tests stay
-// functional with the bare NewExecutor.
-func (e *Executor) WithEgressGate(allowed func(host string) bool) *Executor {
-	e.egressAllowed = allowed
+// RunScope identifies the run on whose behalf a step-level policy
+// decision is made: the workspace the run executes in and the crew
+// that authored the routine. Both come straight off RunInput —
+// runHTTPStep snapshots them so the egress gate and the credential
+// resolver can scope their lookups without threading the whole
+// RunInput into policy closures.
+type RunScope struct {
+	WorkspaceID  string
+	AuthorCrewID string
+}
+
+// WithEgressGate wires the crew/workspace-level HTTP host gate. The
+// gate returns nil to allow, or a descriptive error to block (the
+// error text lands verbatim in the operator-facing EgressBlockedError,
+// so make it actionable). Builders can chain this pattern (NewExecutor
+// + WithEgressGate + WithCredentialResolver + WithCodeRunner +
+// WithWaitpointStore) to compose an executor with the optional
+// capabilities turned on; production goes through NewWiredExecutor,
+// which installs NewCrewNetworkPolicyGate whenever a DB is supplied.
+func (e *Executor) WithEgressGate(gate func(ctx context.Context, scope RunScope, host string) error) *Executor {
+	e.egressAllowed = gate
 	return e
 }
 
@@ -155,10 +176,11 @@ func (e *Executor) SetAllowPrivateHTTPForTesting(v bool) {
 }
 
 // WithCredentialResolver wires HTTP credential injection. The
-// resolver receives the step's CredentialRef.Type and returns the
-// decrypted value (typically by querying the workspace credentials
-// table + encryption.Decrypt).
-func (e *Executor) WithCredentialResolver(fn func(ctx context.Context, credType string) (string, error)) *Executor {
+// resolver receives the run's scope plus the step's
+// CredentialRef.Type and returns the decrypted value (production:
+// NewVaultCredentialResolver — workspace credentials table +
+// encryption.Decrypt). The returned value must never be logged.
+func (e *Executor) WithCredentialResolver(fn func(ctx context.Context, scope RunScope, credType string) (string, error)) *Executor {
 	e.credentialByType = fn
 	return e
 }
@@ -1137,7 +1159,7 @@ func (e *Executor) dispatchStep(
 	case StepCallPipeline:
 		return e.runCallPipelineStep(ctx, step, in, parentRender, depth)
 	case StepHTTP:
-		return e.runHTTPStep(ctx, step, parentRender)
+		return e.runHTTPStep(ctx, step, parentRender, in)
 	case StepCode:
 		return e.runCodeStep(ctx, step, parentRender, in)
 	case StepWait:
@@ -1155,7 +1177,7 @@ func (e *Executor) dispatchStep(
 func (e *Executor) runStepHook(ctx context.Context, hook *Step, in RunInput, runID string, parentRender RenderContext) (string, error) {
 	switch hook.Type {
 	case StepHTTP:
-		out, _, _, err := e.runHTTPStep(ctx, *hook, parentRender)
+		out, _, _, err := e.runHTTPStep(ctx, *hook, parentRender, in)
 		return out, err
 	case StepCode:
 		out, _, _, err := e.runCodeStep(ctx, *hook, parentRender, in)

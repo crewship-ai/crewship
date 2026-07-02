@@ -54,7 +54,7 @@ func (e *Executor) runRoutineHook(ctx context.Context, hook *Step, in RunInput, 
 	}
 	switch hook.Type {
 	case StepHTTP:
-		out, _, _, err := e.runHTTPStep(ctx, *hook, render)
+		out, _, _, err := e.runHTTPStep(ctx, *hook, render, in)
 		return out, err
 	case StepCode:
 		out, _, _, err := e.runCodeStep(ctx, *hook, render, in)

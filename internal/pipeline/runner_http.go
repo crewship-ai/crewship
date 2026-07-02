@@ -14,10 +14,38 @@ import (
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
+// Egress rule names carried on EgressBlockedError so operators (and
+// tests) can tell WHICH layer denied a host without parsing prose.
+const (
+	// EgressRuleRoutineTargets — the routine's declared egress_targets
+	// list does not cover the host.
+	EgressRuleRoutineTargets = "routine_egress_targets"
+	// EgressRuleCrewNetworkPolicy — the authoring crew's network policy
+	// (crews.network_mode=restricted + allowed_domains) denies the host.
+	EgressRuleCrewNetworkPolicy = "crew_network_policy"
+)
+
+// EgressBlockedError is the structured error an http step (or hook)
+// fails with when a host is denied by an egress layer — on the first
+// request or on any redirect hop. It names the step, the host, the
+// rule that fired, and an operator-legible detail so the journal entry
+// tells the author exactly what to change.
+type EgressBlockedError struct {
+	StepID string // pipeline step (or hook) id
+	Host   string // the denied host (redirect targets included)
+	Rule   string // EgressRuleRoutineTargets | EgressRuleCrewNetworkPolicy
+	Detail string // actionable reason ("add X to egress_targets", ...)
+}
+
+func (e *EgressBlockedError) Error() string {
+	return fmt.Sprintf("http step %q: egress to host %q blocked by %s: %s",
+		e.StepID, e.Host, e.Rule, e.Detail)
+}
+
 // runHTTPStep handles a StepHTTP. Single outbound request,
 // template-substituted URL/body/headers, optional credential
 // injection from a workspace-typed reference. The runtime resolves
-// CredentialRef via the supplied Executor.credentialResolver.
+// CredentialRef via the supplied Executor.credentialByType.
 //
 // Why a separate file: HTTP step has its own security perimeter
 // (egress allowlist, credential injection, body size cap) that
@@ -26,11 +54,16 @@ import (
 // Returns (output, costUSD=0, durationMs, err). HTTP steps don't
 // burn LLM tokens, so cost is always 0 — pipeline cost reporting
 // stays accurate.
-func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender RenderContext) (string, float64, int64, error) {
+func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender RenderContext, in RunInput) (string, float64, int64, error) {
 	stepStart := time.Now()
 	if step.HTTP == nil {
 		return "", 0, 0, fmt.Errorf("http step missing body")
 	}
+	// Policy scope for the egress gate + credential resolver. Both
+	// fields come off RunInput: WorkspaceID is validated non-empty at
+	// the Run/RunDefinition boundary, AuthorCrewID is loaded from the
+	// pipeline row (and required for live RunDefinition calls).
+	scope := RunScope{WorkspaceID: in.WorkspaceID, AuthorCrewID: in.AuthorCrewID}
 
 	// Render templates on URL, body, and header values. We
 	// deliberately DO NOT render header keys — that's a misuse
@@ -42,8 +75,9 @@ func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender Rend
 	// Defence in depth: ValidateURL is the cheap scheme + literal-IP
 	// reject; SafeTransport below catches DNS aliases / rebinding.
 	// http+https are both permitted here — operators legitimately call
-	// intranet HTTP endpoints from pipeline steps, and the egress
-	// allowlist (set per-deployment) is the host-level gate.
+	// intranet HTTP endpoints from pipeline steps, and the crew
+	// network-policy gate + routine egress_targets below are the
+	// host-level gates.
 	//
 	// The test-only allowPrivateHTTP escape hatch routes around the
 	// SSRF check so unit tests can use httptest.NewServer (which binds
@@ -63,22 +97,36 @@ func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender Rend
 			return "", 0, 0, fmt.Errorf("http step %q: %w", step.ID, verr)
 		}
 	}
-	// Egress allowlist: enforce host check at the runtime even
-	// though sidecar already gates network for agent_run. For
-	// HTTP step we go direct, so the gate has to live here.
-	if e.egressAllowed != nil && !e.egressAllowed(parsed.Host) {
-		return "", 0, 0, fmt.Errorf("http step %q host %q not in egress allowlist", step.ID, parsed.Host)
+	// Crew/workspace egress policy: enforce the host check at the
+	// runtime even though sidecar already gates network for agent_run.
+	// For HTTP step we go direct, so the gate has to live here. NOT
+	// skipped under the allowPrivateHTTP test hatch — the hatch only
+	// bypasses the SSRF (private-IP) guards, never policy layers.
+	if e.egressAllowed != nil {
+		if gerr := e.egressAllowed(ctx, scope, parsed.Host); gerr != nil {
+			return "", 0, 0, &EgressBlockedError{
+				StepID: step.ID, Host: parsed.Host,
+				Rule: EgressRuleCrewNetworkPolicy, Detail: gerr.Error(),
+			}
+		}
 	}
 	// Per-routine egress_targets: when the routine declares a host
-	// allowlist, enforce it here (the deployment-level egressAllowed gate
-	// above is currently unwired, so without this the declared allowlist
-	// is silently ignored — a routine pinned to api.partner.com could
-	// exfiltrate to any public host). httpsafe already blocks private/
+	// allowlist, enforce it here. httpsafe already blocks private/
 	// link-local IPs; this restricts the *public* hosts to the declared
-	// set. Skipped under the allowPrivateHTTP test hatch, mirroring the
-	// httpsafe bypass above.
-	if !e.allowPrivateHTTP && !hostInEgressTargets(parsed.Hostname(), parentRender.EgressTargets) {
-		return "", 0, 0, fmt.Errorf("http step %q host %q not in routine egress_targets", step.ID, parsed.Hostname())
+	// set. Backward-compat contract (must match hostInEgressTargets +
+	// the DSL validator, which both treat egress_targets as OPTIONAL):
+	// an EMPTY list means "no routine-level restriction" — the crew
+	// policy gate above and the httpsafe guard remain the host-level
+	// gates. Tightening empty to deny-all would break every existing
+	// http routine that predates the declaration, so any future
+	// default-deny must ride a DSL version bump, not this check.
+	if !hostInEgressTargets(parsed.Hostname(), parentRender.EgressTargets) {
+		return "", 0, 0, &EgressBlockedError{
+			StepID: step.ID, Host: parsed.Hostname(),
+			Rule: EgressRuleRoutineTargets,
+			Detail: fmt.Sprintf("declared egress_targets %v do not cover this host — add it to the routine's egress_targets to allow",
+				parentRender.EgressTargets),
+		}
 	}
 
 	body := Render(step.HTTP.Body, parentRender)
@@ -104,11 +152,14 @@ func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender Rend
 	}
 
 	// Credential injection. Resolution is best-effort — if no
-	// resolver wired, we skip; if resolver returns empty, we skip
-	// + log. Failing here would block legitimate requests against
-	// public endpoints that don't need auth.
+	// resolver wired, we skip; if the resolver errors or returns
+	// empty (no ACTIVE credential of the declared type in the
+	// workspace vault), we skip. Failing here would block legitimate
+	// requests against public endpoints that don't need auth. The
+	// resolved value is injected into the outbound request ONLY —
+	// never logged, journaled, or surfaced in the step output.
 	if step.HTTP.CredentialRef != nil && e.credentialByType != nil {
-		credValue, credErr := e.credentialByType(rctx, step.HTTP.CredentialRef.Type)
+		credValue, credErr := e.credentialByType(rctx, scope, step.HTTP.CredentialRef.Type)
 		if credErr == nil && credValue != "" {
 			injectCredential(req, step.HTTP.CredentialRef, credValue)
 		}
@@ -143,14 +194,25 @@ func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender Rend
 					return fmt.Errorf("http step %q redirect %w", step.ID, err)
 				}
 			}
-			if e.egressAllowed != nil && !e.egressAllowed(redirReq.URL.Host) {
-				return fmt.Errorf("http step %q redirect to %q blocked by egress allowlist", step.ID, redirReq.URL.Host)
+			if e.egressAllowed != nil {
+				if gerr := e.egressAllowed(redirReq.Context(), scope, redirReq.URL.Host); gerr != nil {
+					return &EgressBlockedError{
+						StepID: step.ID, Host: redirReq.URL.Host,
+						Rule:   EgressRuleCrewNetworkPolicy,
+						Detail: "redirect target: " + gerr.Error(),
+					}
+				}
 			}
 			// Re-enforce the routine's egress_targets on every redirect
 			// hop, else a host in the allowlist could 302 to one that
 			// isn't (the classic allowlist-bypass-via-redirect).
-			if !e.allowPrivateHTTP && !hostInEgressTargets(redirReq.URL.Hostname(), parentRender.EgressTargets) {
-				return fmt.Errorf("http step %q redirect to %q not in routine egress_targets", step.ID, redirReq.URL.Hostname())
+			if !hostInEgressTargets(redirReq.URL.Hostname(), parentRender.EgressTargets) {
+				return &EgressBlockedError{
+					StepID: step.ID, Host: redirReq.URL.Hostname(),
+					Rule: EgressRuleRoutineTargets,
+					Detail: fmt.Sprintf("redirect target not covered by declared egress_targets %v",
+						parentRender.EgressTargets),
+				}
 			}
 			return nil
 		},
