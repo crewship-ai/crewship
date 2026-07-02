@@ -63,6 +63,12 @@ The same operations are also available on the REST API under `/api/v1/workspaces
     --schedule-prompt "check the queue" --schedule-enabled
   ```
 
+  Read it back with `crewship agent get <agent>` — when a cron is set the
+  detail view surfaces a **Schedule** row (`cron (enabled|disabled)`), the
+  **Schedule Prompt**, and the resolved **Next Run** / **Last Run**, so you can
+  confirm the cron is live without hitting the raw API. Clear it with
+  `--schedule-cron ''` (or pause with `--schedule-enabled=false`).
+
   Runs that the scheduler dispatches this way get the tighter routine turn cap automatically — the internal `orchestrator.RoutineMaxTurns` (20), applied to scheduled dispatches (not a CLI flag you pass).
 </Note>
 

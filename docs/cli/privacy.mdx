@@ -1,0 +1,89 @@
+---
+title: "Privacy Commands"
+description: "GDPR self-service for peer memory — consent and your peer cards."
+icon: "shield-user"
+---
+
+# crewship privacy
+
+Self-service controls for the **peer-memory** feature: decide whether
+crew agents may keep "peer cards" about you, see every card stored about
+you across the workspace, and delete them.
+
+Every action is scoped to **your own data** — no workspace-admin role is
+required. The server reads your user ID from the auth token and the
+routes address the literal `me`, so you can only ever act on yourself.
+Cross-user GDPR actions by admins go through a separate admin surface.
+
+```bash
+crewship privacy <group> <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `peer-consent get` | Show whether you've opted out of peer cards. |
+| `peer-consent set <on\|off>` | Opt out of (`on`) or back into (`off`) peer cards. |
+| `peer-cards list` | List every peer card stored about you. |
+| `peer-cards delete` | Delete every peer card stored about you. |
+
+---
+
+## `crewship privacy peer-consent`
+
+```bash
+crewship privacy peer-consent get
+crewship privacy peer-consent set on     # opt OUT (purges existing cards now)
+crewship privacy peer-consent set off    # opt back in
+```
+
+`set on` opts you **out**: every existing peer card about you in this
+workspace is purged immediately (the command reports how many were
+removed), and future extraction is blocked while opted out. `set off`
+opts back in — it does not recreate anything; agents may simply extract
+new cards going forward.
+
+Opting out is destructive, so it prompts for confirmation unless `--yes`.
+`set` also accepts `true`/`false` and `yes`/`no`.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--yes`, `-y` | `bool` | `false` | Skip the confirmation prompt when opting out. |
+
+---
+
+## `crewship privacy peer-cards`
+
+```bash
+crewship privacy peer-cards list
+crewship privacy peer-cards list -f json   # includes full card content
+crewship privacy peer-cards delete -y
+```
+
+`list` shows one row per card (`ID`, `AGENT`, `BYTES`, `UPDATED`). The
+full card content is returned by the API and surfaced with `-f json` —
+useful as a subject-access request ("show me everything you stored").
+
+`delete` removes every card about you across the workspace but does
+**not** opt you out — agents may re-extract new cards later unless you
+also run `peer-consent set on`.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--yes`, `-y` | `bool` | `false` | Skip the confirmation prompt. |
+
+---
+
+## API
+
+| CLI | Endpoint | Auth |
+|-----|----------|------|
+| `peer-consent get` | `GET /api/v1/users/me/peer-consent` | any authenticated member (self) |
+| `peer-consent set` | `PUT /api/v1/users/me/peer-consent` | any authenticated member (self) |
+| `peer-cards list` | `GET /api/v1/users/me/peer-cards` | any authenticated member (self) |
+| `peer-cards delete` | `DELETE /api/v1/users/me/peer-cards` | any authenticated member (self) |
+
+See also [`crewship memory`](/cli/memory) for the agent-facing memory
+tiers and [`crewship preferences`](/cli/preferences) for personal UI
+settings.

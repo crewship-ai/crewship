@@ -1,0 +1,87 @@
+---
+title: "Preferences Commands"
+description: "Read and write your personal, per-user UI preferences."
+icon: "sliders"
+---
+
+# crewship preferences
+
+Manage your own user preferences — small JSON settings the dashboard
+persists per user (theme, layout toggles, and similar). They are scoped
+to **your account**, not the workspace, so no elevated role is required:
+the endpoints key every row on the user ID from your auth token.
+
+```bash
+crewship preferences <subcommand> [flags]
+```
+
+<Note>
+  Preferences are stored as raw JSON, so `set` takes a JSON **literal** —
+  quote strings and booleans. `set theme dark` is rejected (not valid
+  JSON); `set theme '"dark"'` is correct.
+</Note>
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List all your preferences (`KEY`, `VALUE`). |
+| `set` | Set a preference key to a JSON value. |
+| `delete` | Delete a preference key. |
+
+---
+
+## `crewship preferences list`
+
+```bash
+crewship preferences list
+```
+
+Prints every preference as a `KEY` / `VALUE` table (values are the raw
+JSON as stored). Use `-f json` for a machine-readable map.
+
+---
+
+## `crewship preferences set`
+
+```bash
+crewship preferences set theme '"dark"'
+crewship preferences set sidebar '{"collapsed":true}'
+crewship preferences set density 3
+```
+
+The value must be valid JSON and is stored verbatim (the CLI does not
+re-encode it, so `true` is stored as the boolean `true`, not the string
+`"true"`). Values over 16 KB are rejected by the server.
+
+| Argument | Description |
+|----------|-------------|
+| `<key>` | Preference key (letters, digits, `-`, `_`, `.`). |
+| `<json-value>` | A JSON literal: `"dark"`, `true`, `3`, `{"collapsed":true}`. |
+
+---
+
+## `crewship preferences delete`
+
+```bash
+crewship preferences delete theme
+crewship preferences delete theme -y   # skip confirmation
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--yes`, `-y` | `bool` | `false` | Skip the confirmation prompt. |
+
+---
+
+## API
+
+| CLI | Endpoint | Auth |
+|-----|----------|------|
+| `preferences list` | `GET /api/v1/me/preferences` | any authenticated user (self) |
+| `preferences set` | `PUT /api/v1/me/preferences/{key}` | any authenticated user (self) |
+| `preferences delete` | `DELETE /api/v1/me/preferences/{key}` | any authenticated user (self) |
+
+See also [`crewship privacy`](/cli/privacy) for peer-memory consent and
+cards, and [`crewship config`](/cli/config) for CLI-side (not account)
+settings.

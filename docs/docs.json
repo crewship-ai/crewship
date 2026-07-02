@@ -310,7 +310,8 @@
             "pages": [
               "cli/memory",
               "cli/journal",
-              "cli/audit"
+              "cli/audit",
+              "cli/privacy"
             ]
           },
           {
@@ -352,6 +353,7 @@
             "expanded": false,
             "pages": [
               "cli/config",
+              "cli/preferences",
               "cli/server",
               "cli/system",
               "cli/instance",
