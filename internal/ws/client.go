@@ -277,6 +277,15 @@ func (c *Client) safeSend(data []byte) (sent bool) {
 	}
 }
 
+// agentBusyEventType is the chat-event name for a busy rejection (the chat
+// already has a live agent run — ErrAgentBusy). Rendered by the frontend's
+// agent_busy case, which reuses the error-bubble path and settles the
+// sender's composer state; delivered sender-only, never broadcast.
+const agentBusyEventType = "agent_busy"
+
+// agentBusyNotice is the user-facing text of the sender-only busy rejection.
+const agentBusyNotice = "The agent is currently replying to another message in this chat. Please wait for it to finish."
+
 type sendMessagePayload struct {
 	ChatID  string `json:"session_id"`
 	Content string `json:"content"`
@@ -514,6 +523,33 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 			// Don't emit error if context was cancelled (user requested stop)
 			if runCtx.Err() == context.Canceled {
 				streamFn(ChatEvent{Type: "done", Content: ""})
+				return
+			}
+			// Busy rejection (cross-user run exclusivity): the chat already has
+			// a live run, the bounced message was NOT persisted, and nothing may
+			// touch the shared session channel. Reply to the rejected sender
+			// alone via safeSend — the same sender-only mechanism the cancelKey
+			// guard above uses — with no seq (not part of the resumable stream)
+			// and NO terminal done: emitting agent_busy/done through streamFn
+			// would broadcast to every subscriber, and the winning user's client
+			// would finalize its live streaming turn and unlock its composer
+			// mid-generation. The frontend's agent_busy handler settles the
+			// sender's own composer state without needing a done.
+			if errors.Is(err, ErrAgentBusy) {
+				c.hub.logger.Info("send rejected: agent busy",
+					"session_id", payload.ChatID, "user_id", c.userID)
+				busy, merr := json.Marshal(ServerMessage{
+					Type:    "chat_event",
+					Channel: channel,
+					Payload: ChatEvent{
+						Type:     agentBusyEventType,
+						Content:  agentBusyNotice,
+						Metadata: map[string]any{"chat_id": payload.ChatID},
+					},
+				})
+				if merr == nil {
+					c.safeSend(busy)
+				}
 				return
 			}
 			c.hub.logger.Error("chat message error", "error", err, "session_id", payload.ChatID)

@@ -477,8 +477,40 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("crew %q provisioning kicked off; resend after build completes", info.CrewSlug)
 	}
 
-	// Agent IS responding (private chat, or @mentioned in a group). Persist +
-	// broadcast the human turn now that provisioning has cleared.
+	// Cross-sender exclusivity: at most one live agent run per chat, no
+	// matter which user's message triggered it. Two different users
+	// messaging the same group chat concurrently must never race two
+	// RunAgent execs into the same agent container/tmux session —
+	// interleaved stdout and corrupted tmux state. tryMarkRunStart shares
+	// the SAME per-chat counter Steer already uses (single source of
+	// truth): it atomically claims the run slot only if the chat is
+	// currently idle. The claim covers the REST of this call (persist +
+	// container setup + RunAgent), released via defer on every exit path
+	// (success, error, cancel).
+	//
+	// The claim MUST come before the user message is persisted/broadcast: a
+	// bounced send has to leave no trace. Persisting it would write a turn
+	// the agent never processes, and the busy notice invites a resend that
+	// would then duplicate the message in the transcript. Likewise the
+	// rejection must not emit ANY frame through streamFn — in production
+	// streamFn fans out on the shared session channel, so an agent_busy or
+	// terminal done here would reach every subscriber and make the WINNING
+	// user's client finalize its live streaming turn mid-generation. We
+	// return ws.ErrAgentBusy instead and the ws layer (handleSendMessage)
+	// replies to the rejected sender alone.
+	//
+	// The ws layer's cancelKey guard (handleSendMessage) already rejects a
+	// SAME user double-sending concurrently, so by the time we get here the
+	// only remaining race is a DIFFERENT user hitting the same chat.
+	if !b.tryMarkRunStart(chatID) {
+		b.logger.Info("rejecting send: agent already running for chat", "chat_id", chatID, "user_id", userID)
+		return fmt.Errorf("chat %s: %w", chatID, ws.ErrAgentBusy)
+	}
+	defer b.markRunEnd(chatID)
+
+	// Agent IS responding (private chat, or @mentioned in a group) and this
+	// send owns the run slot. Persist + broadcast the human turn now that
+	// provisioning has cleared.
 	if err := persistUserMsg(); err != nil {
 		b.logger.Error("failed to persist user message", "error", err)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})
@@ -722,11 +754,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 
 	startedAt := time.Now()
-	// Mark this chat as having a live run so a steering message arriving
-	// mid-turn (POST /chats/{id}/steer) is detected and QUEUED instead of
-	// racing a second Exec into the same container. Balanced by markRunEnd.
-	b.markRunStart(chatID)
-	defer b.markRunEnd(chatID)
+	// The run slot was already claimed (tryMarkRunStart, above) before
+	// container setup began — this keeps the chat marked "in flight" for
+	// the whole call so a steering message arriving mid-turn (POST
+	// /chats/{id}/steer) is detected and QUEUED instead of racing a second
+	// Exec into the same container. Released via the defer registered there.
 	runErr := b.orch.RunAgent(ctx, req, handler)
 	if runErr != nil {
 		// If context was cancelled (user pressed stop), don't emit error -- the hub
