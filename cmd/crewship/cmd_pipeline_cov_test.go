@@ -815,3 +815,43 @@ func TestPipelineRunsRunE_ServerSideErrors(t *testing.T) {
 		}
 	})
 }
+
+func TestPipelineRun_IdempotencyKeyFlag(t *testing.T) {
+	// API↔CLI parity: the run endpoint honours the Idempotency-Key
+	// header (+ idempotency_key_ttl_seconds body field), but the CLI
+	// had no way to send them — the DEDUPED path was unreachable from
+	// the terminal.
+	runPath := pipelinesPathCov() + "/email-fetch/run"
+
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	setupStubCLICov(t, stub)
+	stub.OnPost(runPath, clitest.JSONResponse(200, map[string]any{
+		"run_id": "run_orig", "status": "DEDUPED", "deduped": true,
+	}))
+	setFlagCov(t, pipelineRunCmd, "idempotency-key", "release-42")
+	setFlagCov(t, pipelineRunCmd, "idempotency-ttl", "120")
+
+	out, err := captureStdoutCov(t, func() error {
+		return pipelineRunCmd.RunE(pipelineRunCmd, []string{"email-fetch"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "DEDUPED") || !strings.Contains(out, "run_orig") {
+		t.Errorf("output should surface DEDUPED + the original run id; got:\n%s", out)
+	}
+
+	calls := stub.CallsFor("POST", runPath)
+	if len(calls) != 1 {
+		t.Fatalf("expected one run POST, got %d", len(calls))
+	}
+	if got := calls[0].Headers.Get("Idempotency-Key"); got != "release-42" {
+		t.Errorf("Idempotency-Key header: got %q want release-42", got)
+	}
+	var body map[string]any
+	clitest.MustDecodeJSONBody(calls[0].Body, &body)
+	if body["idempotency_key_ttl_seconds"] != float64(120) {
+		t.Errorf("idempotency_key_ttl_seconds: got %v want 120", body["idempotency_key_ttl_seconds"])
+	}
+}
