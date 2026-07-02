@@ -46,19 +46,17 @@ describe("checkChatMessageSize", () => {
         JSON.stringify({ type: "send_message", payload: JSON.stringify({ session_id: sessionId, content }) }),
       ).length
 
-    // Binary-search-free approach: start with a content string sized so the
-    // envelope lands under the limit, then pad up to (and past) the exact
-    // boundary one char at a time.
-    let content = ""
-    while (envelopeBytes(content) < WS_MAX_OUTBOUND_FRAME_BYTES) content += "a"
-    // Back off one char so we're exactly at (or one under) the limit.
-    content = content.slice(0, -1)
-    const atOrUnder = envelopeBytes(content)
-    expect(atOrUnder).toBeLessThanOrEqual(WS_MAX_OUTBOUND_FRAME_BYTES)
+    // ASCII "a" contributes exactly one UTF-8 byte to the encoded envelope
+    // (no JSON escaping), so pad straight to the boundary in one step.
+    // Growing one char at a time re-encodes the whole ~57 KB string per
+    // iteration (quadratic) and times out on slower CI runners.
+    const content = "a".repeat(WS_MAX_OUTBOUND_FRAME_BYTES - envelopeBytes(""))
+    const atLimit = envelopeBytes(content)
+    expect(atLimit).toBe(WS_MAX_OUTBOUND_FRAME_BYTES)
     expect(checkChatMessageSize(sessionId, content).ok).toBe(true)
 
-    const over = content + "a".repeat(WS_MAX_OUTBOUND_FRAME_BYTES - atOrUnder + 1)
-    expect(envelopeBytes(over)).toBeGreaterThan(WS_MAX_OUTBOUND_FRAME_BYTES)
+    const over = content + "a"
+    expect(envelopeBytes(over)).toBe(WS_MAX_OUTBOUND_FRAME_BYTES + 1)
     expect(checkChatMessageSize(sessionId, over).ok).toBe(false)
   })
 })
