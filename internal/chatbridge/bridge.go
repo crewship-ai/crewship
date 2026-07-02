@@ -477,15 +477,6 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("crew %q provisioning kicked off; resend after build completes", info.CrewSlug)
 	}
 
-	// Agent IS responding (private chat, or @mentioned in a group). Persist +
-	// broadcast the human turn now that provisioning has cleared.
-	if err := persistUserMsg(); err != nil {
-		b.logger.Error("failed to persist user message", "error", err)
-		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})
-		return fmt.Errorf("persist user message: %w", err)
-	}
-	broadcastUserMsg()
-
 	// Cross-sender exclusivity: at most one live agent run per chat, no
 	// matter which user's message triggered it. Two different users
 	// messaging the same group chat concurrently must never race two
@@ -493,29 +484,39 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// interleaved stdout and corrupted tmux state. tryMarkRunStart shares
 	// the SAME per-chat counter Steer already uses (single source of
 	// truth): it atomically claims the run slot only if the chat is
-	// currently idle. The claim covers the REST of this call (container
-	// setup + RunAgent), not just the RunAgent call itself, released via
-	// defer on every exit path (success, error, cancel).
+	// currently idle. The claim covers the REST of this call (persist +
+	// container setup + RunAgent), released via defer on every exit path
+	// (success, error, cancel).
+	//
+	// The claim MUST come before the user message is persisted/broadcast: a
+	// bounced send has to leave no trace. Persisting it would write a turn
+	// the agent never processes, and the busy notice invites a resend that
+	// would then duplicate the message in the transcript. Likewise the
+	// rejection must not emit ANY frame through streamFn — in production
+	// streamFn fans out on the shared session channel, so an agent_busy or
+	// terminal done here would reach every subscriber and make the WINNING
+	// user's client finalize its live streaming turn mid-generation. We
+	// return ws.ErrAgentBusy instead and the ws layer (handleSendMessage)
+	// replies to the rejected sender alone.
 	//
 	// The ws layer's cancelKey guard (handleSendMessage) already rejects a
 	// SAME user double-sending concurrently, so by the time we get here the
 	// only remaining race is a DIFFERENT user hitting the same chat.
 	if !b.tryMarkRunStart(chatID) {
 		b.logger.Info("rejecting send: agent already running for chat", "chat_id", chatID, "user_id", userID)
-		streamFn(ws.ChatEvent{
-			Type:    agentBusyEventType,
-			Content: "The agent is currently replying to another message in this chat. Please wait for it to finish.",
-			Metadata: map[string]any{
-				"chat_id": chatID,
-			},
-		})
-		streamFn(ws.ChatEvent{Type: "done", Content: ""})
-		if err := b.resolver.IncrementMessageCount(ctx, chatID, 1); err != nil {
-			b.logger.Warn("increment message count (agent busy)", "chat_id", chatID, "error", err)
-		}
-		return nil
+		return fmt.Errorf("chat %s: %w", chatID, ws.ErrAgentBusy)
 	}
 	defer b.markRunEnd(chatID)
+
+	// Agent IS responding (private chat, or @mentioned in a group) and this
+	// send owns the run slot. Persist + broadcast the human turn now that
+	// provisioning has cleared.
+	if err := persistUserMsg(); err != nil {
+		b.logger.Error("failed to persist user message", "error", err)
+		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})
+		return fmt.Errorf("persist user message: %w", err)
+	}
+	broadcastUserMsg()
 
 	// Auto-title: use first user message (truncated) as session title
 	title := content

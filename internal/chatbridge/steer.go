@@ -20,12 +20,6 @@ const steerMetadataKind = "queued_steer"
 // consistent with the other lifecycle events the chat surface consumes.
 const steerEventType = "steering_queued"
 
-// agentBusyEventType is the WS/chat event name announced when a message is
-// rejected because a run is already active for the chat (cross-user
-// exclusivity — see tryMarkRunStart). Distinct from "error" so the frontend
-// can render it as a transient/informational notice rather than a failure.
-const agentBusyEventType = "agent_busy"
-
 // SteerBroadcaster announces steering_queued events. *ws.Hub satisfies it
 // via BroadcastChannel("session", chatID, ...). Kept as a one-method
 // interface (not the concrete hub) so chatbridge stays free of a ws

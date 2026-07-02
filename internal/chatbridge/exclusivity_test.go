@@ -2,17 +2,35 @@ package chatbridge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/logcollector"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
+
+// countingResolver wraps mockResolver and counts IncrementMessageCount calls
+// so a test can assert the busy-rejection path never bumps the chat's
+// message count (nothing was persisted, so nothing may be counted).
+type countingResolver struct {
+	mockResolver
+	increments atomic.Int32
+}
+
+func (c *countingResolver) IncrementMessageCount(_ context.Context, _ string, _ int) error {
+	c.increments.Add(1)
+	return nil
+}
 
 // blockingContainer is a provider.ContainerProvider whose EnsureCrewRuntime
 // blocks until the test signals proceed (or the caller's ctx is cancelled),
@@ -119,24 +137,24 @@ func TestHandleChatMessage_CrossUserExclusivity(t *testing.T) {
 	}()
 	select {
 	case err := <-errB:
-		if err != nil {
-			t.Fatalf("expected the busy-rejection to return nil (handled, not an error), got: %v", err)
+		if !errors.Is(err, ws.ErrAgentBusy) {
+			t.Fatalf("expected the busy-rejection to return ws.ErrAgentBusy (so the ws layer can reply sender-only), got: %v", err)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("second sender was not rejected promptly — it appears to have started its own exec " +
 			"instead of bouncing off the already-active chat")
 	}
 
+	// The rejection must not emit ANY frame through streamFn: in production
+	// streamFn broadcasts on the shared session channel, so an agent_busy or
+	// terminal done here would reach the winning user's client too and
+	// finalize their live streaming turn. The sender-only notice is the ws
+	// layer's job (it maps ws.ErrAgentBusy to a private frame).
 	muB.Lock()
-	gotBusy := false
-	for _, e := range eventsB {
-		if e.Type == "agent_busy" {
-			gotBusy = true
-		}
-	}
+	gotEvents := append([]ws.ChatEvent(nil), eventsB...)
 	muB.Unlock()
-	if !gotBusy {
-		t.Errorf("expected an agent_busy event for the rejected concurrent sender, got events: %+v", eventsB)
+	if len(gotEvents) != 0 {
+		t.Errorf("expected NO stream frames for the rejected sender (sender-only reply is the ws layer's job), got: %+v", gotEvents)
 	}
 
 	// Let the winning run finish (with an error, so the test doesn't need a
@@ -159,6 +177,89 @@ func TestHandleChatMessage_CrossUserExclusivity(t *testing.T) {
 	}
 	if b.runInFlight(chatID) {
 		t.Error("expected the per-chat run lock to be released after the winning run finished")
+	}
+}
+
+// TestHandleChatMessage_BusyRejectionPersistsNothing is the regression test
+// for the persist-then-reject ordering bug: the run-slot claim must happen
+// BEFORE the bounced user's message is persisted/broadcast. On broken code
+// the loser's message was durably written to the conversation (a turn the
+// agent never processes), the message count was bumped, and agent_busy+done
+// frames went out through streamFn — so the invited resend duplicated the
+// message in the transcript. After the fix a bounced send leaves NO trace:
+// no persisted turn, no message-count bump, no stream frames.
+func TestHandleChatMessage_BusyRejectionPersistsNothing(t *testing.T) {
+	resolver := &countingResolver{mockResolver: mockResolver{info: exclusivityChatInfo()}}
+	ctr := &blockingContainer{
+		entered: make(chan struct{}),
+		proceed: make(chan struct{}),
+		err:     fmt.Errorf("boom"),
+	}
+
+	dir := t.TempDir()
+	logger := slog.Default()
+	convStore := conversation.NewStore(dir, logger)
+	logWriter := logcollector.NewWriter(dir, logger)
+	orch := orchestrator.New(ctr, &memState{data: make(map[string]map[string][]byte)}, logger)
+	b := New(orch, ctr, convStore, logWriter, resolver, BridgeConfig{}, logger)
+
+	const chatID = "chat-no-trace"
+
+	errA := make(chan error, 1)
+	go func() {
+		errA <- b.HandleChatMessage(context.Background(), "user-A", chatID, "hello from A", func(ws.ChatEvent) {})
+	}()
+	select {
+	case <-ctr.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the first run to reach container setup")
+	}
+
+	var muB sync.Mutex
+	var eventsB []ws.ChatEvent
+	streamFnB := func(e ws.ChatEvent) { muB.Lock(); eventsB = append(eventsB, e); muB.Unlock() }
+
+	err := b.HandleChatMessage(context.Background(), "user-B", chatID, "hello from B", streamFnB)
+	if !errors.Is(err, ws.ErrAgentBusy) {
+		t.Fatalf("expected ws.ErrAgentBusy from the bounced send, got: %v", err)
+	}
+
+	// (a) The bounced message must NOT be in the conversation store. The
+	// winner's message (persisted before it blocked on container setup) is
+	// the only user turn allowed.
+	msgs, readErr := convStore.Read(context.Background(), chatID, 0, 100)
+	if readErr != nil {
+		t.Fatalf("read conversation: %v", readErr)
+	}
+	for _, m := range msgs {
+		if m.Content == "hello from B" || m.AuthorUserID == "user-B" {
+			t.Errorf("bounced message was persisted to the conversation: %+v", m)
+		}
+	}
+
+	// (b) message_count must be untouched by the rejection.
+	if got := resolver.increments.Load(); got != 0 {
+		t.Errorf("expected no IncrementMessageCount calls for a bounced send, got %d", got)
+	}
+
+	// (c) No frames at all through streamFn — the busy notice is delivered
+	// sender-only by the ws layer, never on the shared stream.
+	muB.Lock()
+	gotEvents := append([]ws.ChatEvent(nil), eventsB...)
+	muB.Unlock()
+	if len(gotEvents) != 0 {
+		t.Errorf("expected no stream frames on the bounced send, got: %+v", gotEvents)
+	}
+
+	// Unblock and finish the winning run so the test tears down cleanly.
+	close(ctr.proceed)
+	select {
+	case <-errA:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the winning run to finish")
+	}
+	if b.runInFlight(chatID) {
+		t.Error("expected the run lock to be released after the winning run finished")
 	}
 }
 
