@@ -350,3 +350,52 @@ func TestHandleIssueCreate_UpstreamUnreachable(t *testing.T) {
 		t.Errorf("expected error label to contain 'issue create', got %q", result["error"])
 	}
 }
+
+// TestHandleIssueCreate_ForwardsChatProvenance asserts the sidecar forwards
+// its trusted IPC chat identity as author_chat_id (v108/v129 creator
+// attribution) — and omits the key entirely when the IPC config has no chat.
+func TestHandleIssueCreate_ForwardsChatProvenance(t *testing.T) {
+	var receivedBody map[string]interface{}
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		json.Unmarshal(b, &receivedBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{}`))
+	}))
+	defer mock.Close()
+
+	// With a chat bound: forwarded.
+	srv := newQueryServer(t, &IPCConfig{
+		BaseURL: mock.URL, Token: "t", CrewID: "c1", WorkspaceID: "w",
+		AgentID: "ipc-agent", ChatID: "chat-9",
+	}, nil)
+	req := httptest.NewRequest(http.MethodPost, "/issue/create",
+		strings.NewReader(`{"title":"Bug"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.handleIssueCreate(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", w.Code)
+	}
+	if receivedBody["author_chat_id"] != "chat-9" {
+		t.Errorf("expected author_chat_id=chat-9 forwarded from IPC, got %v", receivedBody["author_chat_id"])
+	}
+
+	// Without a chat bound: key omitted.
+	receivedBody = nil
+	srv = newQueryServer(t, &IPCConfig{
+		BaseURL: mock.URL, Token: "t", CrewID: "c1", WorkspaceID: "w", AgentID: "ipc-agent",
+	}, nil)
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/issue/create",
+		strings.NewReader(`{"title":"Bug"}`))
+	req.Header.Set("Content-Type", "application/json")
+	srv.handleIssueCreate(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", w.Code)
+	}
+	if _, ok := receivedBody["author_chat_id"]; ok {
+		t.Errorf("expected author_chat_id omitted when IPC has no chat, got %v", receivedBody["author_chat_id"])
+	}
+}

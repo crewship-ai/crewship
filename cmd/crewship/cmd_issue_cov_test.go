@@ -337,3 +337,75 @@ func TestIssueCmdStructure(t *testing.T) {
 		}
 	}
 }
+
+// ─── creator attribution ─────────────────────────────────────────────────
+
+func TestCreatorLabel(t *testing.T) {
+	cases := []struct {
+		name string
+		in   *issueCreator
+		want string
+	}{
+		{"nil (legacy issue)", nil, "-"},
+		{"agent with name", &issueCreator{Type: "agent", ID: "a1", Name: "Scout"}, "Scout (agent)"},
+		{"user with name", &issueCreator{Type: "user", ID: "u1", Name: "Demo User"}, "Demo User"},
+		{"agent without name falls back to id", &issueCreator{Type: "agent", ID: "a1"}, "a1 (agent)"},
+		{"user without name falls back to id", &issueCreator{Type: "user", ID: "u1"}, "u1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := creatorLabel(tc.in); got != tc.want {
+				t.Errorf("creatorLabel(%+v) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestIssueListRunE_CreatorColumn asserts the CREATOR column renders the
+// resolved creator (with the agent marker) and "-" for legacy rows.
+func TestIssueListRunE_CreatorColumn(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli6(t, stub)
+
+	payload := covIssueListPayload()
+	payload[0]["created_by"] = map[string]string{"type": "agent", "id": "agent-1", "name": "Scout"}
+	stub.OnGet("/api/v1/issues", clitest.JSONResponse(200, payload))
+
+	out, err := covCaptureStdoutCli6(t, func() error {
+		return issueListCmd.RunE(issueListCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "CREATOR") {
+		t.Errorf("list header missing CREATOR column: %q", out)
+	}
+	if !strings.Contains(out, "Scout (agent)") {
+		t.Errorf("agent-created issue must show creator with agent marker: %q", out)
+	}
+}
+
+// TestIssueGetRunE_CreatedByShown asserts the detail view renders the
+// "Created By" row for an agent-created issue.
+func TestIssueGetRunE_CreatedByShown(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli6(t, stub)
+
+	payload := covIssueDetailPayload()
+	payload["created_by"] = map[string]string{"type": "agent", "id": "agent-1", "name": "Scout"}
+	stub.OnGet("/api/v1/issues/ENG-1", clitest.JSONResponse(200, payload))
+	stub.OnGet(fmt.Sprintf("/api/v1/crews/%s/issues/ENG-1/comments", covCrewIDCli6),
+		clitest.JSONResponse(200, []map[string]any{}))
+
+	out, err := covCaptureStdoutCli6(t, func() error {
+		return issueGetCmd.RunE(issueGetCmd, []string{"ENG-1"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "Created By") || !strings.Contains(out, "Scout (agent)") {
+		t.Errorf("detail output missing creator attribution: %q", out)
+	}
+}

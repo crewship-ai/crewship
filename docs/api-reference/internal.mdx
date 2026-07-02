@@ -202,9 +202,9 @@ Since PR #234, runs are reconstructed from journal entries; these endpoints exis
 | `POST` | `/api/v1/internal/missions/{missionId}/start` | Transition mission to running. |
 | `GET` | `/api/v1/internal/issues` | List issues. |
 | `GET` | `/api/v1/internal/issues/{identifier}` | Get a specific issue. |
-| `POST` | `/api/v1/internal/issues` | Create issue. |
-| `PATCH` | `/api/v1/internal/issues/{identifier}` | Update issue status. |
-| `POST` | `/api/v1/internal/issues/{identifier}/comments` | Comment on issue. |
+| `POST` | `/api/v1/internal/issues` | Create issue. `author_agent_id` (validated against the crew/workspace) is persisted as the creator with `authored_via = agent_tool_call`; optional `author_chat_id` / `author_run_id` record provenance. |
+| `PATCH` | `/api/v1/internal/issues/{identifier}` | Update issue status. Writes a `mission_activity` audit row attributed to `agent_id` (or `system` when absent). A `comment` requires `agent_id`. |
+| `POST` | `/api/v1/internal/issues/{identifier}/comments` | Comment on issue. Requires `agent_id` — unattributed comments are rejected with `400`. |
 
 ### Keeper
 

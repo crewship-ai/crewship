@@ -92,6 +92,12 @@ Returns issues across the workspace with filtering, sorting, and pagination.
     "assignee_type": "agent",
     "assignee_id": "agent_789",
     "assignee_name": "Backend Dev",
+    "created_by": {
+      "type": "agent",
+      "id": "agent_789",
+      "name": "Backend Dev"
+    },
+    "authored_via": "agent_tool_call",
     "due_date": "2024-02-01",
     "sort_order": 0.0,
     "mission_type": "issue",
@@ -131,6 +137,8 @@ Returns issues across the workspace with filtering, sorting, and pagination.
 | `assignee_type` | string? | `"user"` or `"agent"` |
 | `assignee_id` | string? | Assignee ID |
 | `assignee_name` | string? | Resolved assignee name |
+| `created_by` | object? | Who created the issue: `{type, id, name}` where `type` is `"user"` (created via the API/UI) or `"agent"` (created by an agent tool call). `name` is resolved at read time like `assignee_name`. Omitted on issues that predate creator attribution |
+| `authored_via` | string? | Creation channel: `"user_api"` (human via API/UI/slash command) or `"agent_tool_call"` (agent via sidecar). Omitted on legacy issues |
 | `due_date` | string? | Due date |
 | `sort_order` | number | Manual sort order for board views |
 | `mission_type` | string | Always `"issue"` for issues |

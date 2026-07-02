@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"log/slog"
@@ -25,6 +26,21 @@ func NewInternalIssueHandler(db *sql.DB, hub *ws.Hub, logger *slog.Logger) *Inte
 	return &InternalIssueHandler{db: db, hub: hub, logger: logger}
 }
 
+// logActivity mirrors IssueHandler.logActivity's mission_activity insert so
+// agent-driven changes leave the same audit trail humans do. Best-effort:
+// errors are logged, never returned — the mutation itself already landed.
+// (No journal emit here; the internal handler has no journal wired, and the
+// activity row is what the issue UI's feed reads.)
+func (h *InternalIssueHandler) logActivity(ctx context.Context, missionID, actorType, actorID, action, details string) {
+	actID := generateCUID()
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := h.db.ExecContext(ctx,
+		`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		actID, missionID, actorType, actorID, action, details, now); err != nil {
+		h.logger.Error("insert mission activity", "action", action, "mission_id", missionID, "error", err)
+	}
+}
+
 // List handles GET /api/v1/internal/issues
 // Returns issues for a workspace, filtered by crew_id, status, assignee, etc.
 func (h *InternalIssueHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -41,7 +57,12 @@ func (h *InternalIssueHandler) List(w http.ResponseWriter, r *http.Request) {
 		       m.number, m.identifier, m.title, m.description, m.status,
 		       COALESCE(m.priority, 'none'), m.assignee_type, m.assignee_id,
 		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
-		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at
+		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
+		       m.author_agent_id, m.created_by_user_id, m.authored_via,
+		       CASE
+		           WHEN m.author_agent_id IS NOT NULL THEN (SELECT name FROM agents WHERE id = m.author_agent_id)
+		           WHEN m.created_by_user_id IS NOT NULL THEN (SELECT full_name FROM users WHERE id = m.created_by_user_id)
+		       END
 		FROM missions m
 		LEFT JOIN crews c ON m.crew_id = c.id
 		WHERE m.workspace_id = ?`
@@ -82,17 +103,23 @@ func (h *InternalIssueHandler) List(w http.ResponseWriter, r *http.Request) {
 	var result []issueResponse
 	for rows.Next() {
 		var i issueResponse
+		var authorAgentID, createdByUserID, authoredVia, creatorName sql.NullString
 		if err := rows.Scan(
 			&i.ID, &i.WorkspaceID, &i.CrewID, &i.CrewName, &i.CrewSlug,
 			&i.Number, &i.Identifier, &i.Title, &i.Description, &i.Status,
 			&i.Priority, &i.AssigneeType, &i.AssigneeID,
 			&i.DueDate, &i.SortOrder, &i.MissionType,
 			&i.LeadAgentID, &i.CreatedAt, &i.UpdatedAt, &i.CompletedAt,
+			&authorAgentID, &createdByUserID, &authoredVia, &creatorName,
 		); err != nil {
 			h.logger.Error("scan internal issue", "error", err)
 			continue
 		}
 		i.Labels = []labelResponse{}
+		i.CreatedBy = buildIssueCreator(authorAgentID, createdByUserID, creatorName)
+		if authoredVia.Valid && authoredVia.String != "" {
+			i.AuthoredVia = &authoredVia.String
+		}
 		result = append(result, i)
 	}
 	if result == nil {
@@ -111,12 +138,18 @@ func (h *InternalIssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var issue issueResponse
+	var authorAgentID, createdByUserID, authoredVia, creatorName sql.NullString
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
 		       m.number, m.identifier, m.title, m.description, m.status,
 		       COALESCE(m.priority, 'none'), m.assignee_type, m.assignee_id,
 		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
-		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at
+		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
+		       m.author_agent_id, m.created_by_user_id, m.authored_via,
+		       CASE
+		           WHEN m.author_agent_id IS NOT NULL THEN (SELECT name FROM agents WHERE id = m.author_agent_id)
+		           WHEN m.created_by_user_id IS NOT NULL THEN (SELECT full_name FROM users WHERE id = m.created_by_user_id)
+		       END
 		FROM missions m
 		LEFT JOIN crews c ON m.crew_id = c.id
 		WHERE m.identifier = ? AND m.workspace_id = ?`,
@@ -126,6 +159,7 @@ func (h *InternalIssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID,
 		&issue.DueDate, &issue.SortOrder, &issue.MissionType,
 		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
+		&authorAgentID, &createdByUserID, &authoredVia, &creatorName,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -135,6 +169,11 @@ func (h *InternalIssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, h.logger, "internal get issue", err)
 		return
 	}
+	issue.CreatedBy = buildIssueCreator(authorAgentID, createdByUserID, creatorName)
+	if authoredVia.Valid && authoredVia.String != "" {
+		issue.AuthoredVia = &authoredVia.String
+	}
+
 	// Load labels
 	issue.Labels = []labelResponse{}
 	labelRows, err := h.db.QueryContext(r.Context(), `
@@ -173,6 +212,8 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		AssigneeType  *string  `json:"assignee_type"`
 		AssigneeID    *string  `json:"assignee_id"`
 		AuthorAgentID string   `json:"author_agent_id"`
+		AuthorChatID  string   `json:"author_chat_id"`
+		AuthorRunID   string   `json:"author_run_id"`
 		Labels        []string `json:"labels"`
 	}
 	if err := readJSON(r, &req); err != nil {
@@ -271,15 +312,26 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	traceID := "issue-" + generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// Creator attribution (v129): this endpoint is only reachable through
+	// the sidecar's trusted IPC identity, so a supplied author_agent_id
+	// (validated against crew+workspace above) is THE creator and the
+	// channel is always the agent tool call. Chat/run provenance rides
+	// along when the sidecar has it (v108 columns).
+	nullable := func(s string) sql.NullString {
+		return sql.NullString{String: s, Valid: s != ""}
+	}
+
 	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id,
 		                      title, description, status, number, identifier,
 		                      priority, assignee_type, assignee_id,
+		                      author_agent_id, author_chat_id, author_run_id, authored_via,
 		                      sort_order, mission_type, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'BACKLOG', ?, ?, ?, ?, ?, 0, 'issue', ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'BACKLOG', ?, ?, ?, ?, ?, ?, ?, ?, 'agent_tool_call', 0, 'issue', ?, ?)`,
 		id, req.WorkspaceID, req.CrewID, leadAgentID, traceID,
 		req.Title, req.Description, number, identifier,
 		req.Priority, req.AssigneeType, req.AssigneeID,
+		nullable(req.AuthorAgentID), nullable(req.AuthorChatID), nullable(req.AuthorRunID),
 		now, now)
 	if err != nil {
 		internalError(w, r, h.logger, "insert issue", err)
@@ -348,7 +400,28 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Comments must carry a real author. mission_comments' CHECK only
+	// allows ('user','agent'), so an empty agent_id can't be attributed —
+	// pre-fix it was misfiled as an agent literally named "system".
+	// Reject up front, before any mutation lands.
+	if req.Comment != nil && *req.Comment != "" && req.AgentID == "" {
+		writeProblem(w, r, http.StatusBadRequest, "agent_id is required when adding a comment")
+		return
+	}
+
+	// Actor identity for the audit trail. The sidecar forwards its trusted
+	// IPC agent identity as agent_id; an empty value means a non-agent
+	// internal caller, attributed to "system" (mission_activity's CHECK
+	// allows it) rather than misfiled as an agent named "system".
+	actorType := "agent"
+	actorID := req.AgentID
+	if actorID == "" {
+		actorType = "system"
+		actorID = "system"
+	}
+
 	ub := newUpdate()
+	statusChanged := false
 
 	if req.Status != "" && req.Status != currentStatus {
 		allowed := validIssueTransitions[currentStatus]
@@ -364,6 +437,7 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		ub.Set("status", req.Status)
+		statusChanged = true
 		if req.Status == "DONE" || req.Status == "CANCELLED" {
 			ub.Set("completed_at", time.Now().UTC().Format(time.RFC3339))
 		}
@@ -378,21 +452,29 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 			internalError(w, r, h.logger, "update issue", err)
 			return
 		}
+
+		// Audit trail: mirror the human handlers' logActivity rows so
+		// agent-driven changes are just as visible in the activity feed.
+		// Best-effort — the update itself already committed.
+		if statusChanged {
+			h.logActivity(r.Context(), missionID, actorType, actorID,
+				"status_changed", currentStatus+" → "+req.Status)
+		}
+		if req.Priority != "" {
+			h.logActivity(r.Context(), missionID, actorType, actorID,
+				"priority_changed", req.Priority)
+		}
 	}
 
-	// Add comment if provided
+	// Add comment if provided. agent_id presence was validated above, so
+	// the author is always a real agent here.
 	if req.Comment != nil && *req.Comment != "" {
 		commentID := generateCUID()
 		now := time.Now().UTC().Format(time.RFC3339)
-		authorType := "agent"
-		authorID := req.AgentID
-		if authorID == "" {
-			authorID = "system"
-		}
 		_, err := h.db.ExecContext(r.Context(), `
 			INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			commentID, missionID, authorType, authorID, *req.Comment, now, now)
+			VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
+			commentID, missionID, req.AgentID, *req.Comment, now, now)
 		if err != nil {
 			h.logger.Error("insert internal comment", "error", err)
 		}
@@ -421,6 +503,13 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 		writeProblem(w, r, http.StatusBadRequest, "body and workspace_id are required")
 		return
 	}
+	// Comments must carry a real author: mission_comments' CHECK only
+	// allows ('user','agent'). Pre-fix, an empty agent_id was misfiled as
+	// an agent literally named "system" — reject instead.
+	if req.AgentID == "" {
+		writeProblem(w, r, http.StatusBadRequest, "agent_id is required")
+		return
+	}
 	// PR-F24 F-4: bound token may only comment on its own workspace's issues.
 	if !assertInternalTokenWorkspace(w, r, req.WorkspaceID) {
 		return
@@ -441,11 +530,9 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 
 	commentID := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
+	// agent_id presence was validated above — the author is always a real agent.
 	authorType := "agent"
 	authorID := req.AgentID
-	if authorID == "" {
-		authorID = "system"
-	}
 
 	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at)

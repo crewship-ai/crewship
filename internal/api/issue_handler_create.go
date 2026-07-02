@@ -197,19 +197,31 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Creator attribution (v129): this handler is only reachable with an
+	// authenticated user (JWT middleware + the role/capability gate above),
+	// so the caller IS the creator. Slash-command creates flow through this
+	// same handler and get stamped identically. NULL-safe for the
+	// theoretical no-user case rather than storing an empty string.
+	var createdByUserID sql.NullString
+	if callerID != "" {
+		createdByUserID = sql.NullString{String: callerID, Valid: true}
+	}
+
 	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id,
 		    title, description, status, number, identifier, priority,
 		    assignee_type, assignee_id, due_date, project_id, estimate,
 		    parent_issue_id, milestone_id, sort_order, mission_type,
 		    routine_id, routine_inputs_json,
+		    created_by_user_id, authored_via,
 		    created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'BACKLOG', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'issue', ?, COALESCE(?, '{}'), ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'BACKLOG', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'issue', ?, COALESCE(?, '{}'), ?, 'user_api', ?, ?)`,
 		id, wsID, crewID, leadAgentID, traceID,
 		req.Title, req.Description, issueNumber, identifier, req.Priority,
 		req.AssigneeType, req.AssigneeID, req.DueDate, req.ProjectID,
 		req.Estimate, req.ParentIssueID, req.MilestoneID,
 		req.RoutineID, routineInputsJSON,
+		createdByUserID,
 		now, now)
 	if err != nil {
 		internalError(w, r, h.logger, "insert issue", err)
@@ -260,6 +272,17 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: now,
 		UpdatedAt: now,
 		Labels:    []labelResponse{},
+	}
+	if callerID != "" {
+		// Resolve the display name the same way reads do (users.full_name);
+		// best-effort — the attribution object is still returned without a
+		// name if the lookup fails.
+		var creatorName sql.NullString
+		_ = h.db.QueryRowContext(r.Context(),
+			`SELECT full_name FROM users WHERE id = ?`, callerID).Scan(&creatorName)
+		resp.CreatedBy = &issueCreatorResponse{Type: "user", ID: callerID, Name: creatorName.String}
+		via := "user_api"
+		resp.AuthoredVia = &via
 	}
 
 	h.broadcastIssueEvent(wsID, "issue.created", map[string]string{"id": id})

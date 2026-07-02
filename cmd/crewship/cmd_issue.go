@@ -14,25 +14,52 @@ import (
 // ---------- types ----------
 
 type issueItem struct {
-	ID           string       `json:"id"`
-	CrewID       string       `json:"crew_id"`
-	CrewName     string       `json:"crew_name"`
-	CrewSlug     string       `json:"crew_slug"`
-	Number       *int         `json:"number"`
-	Identifier   *string      `json:"identifier"`
-	Title        string       `json:"title"`
-	Description  *string      `json:"description"`
-	Status       string       `json:"status"`
-	Priority     string       `json:"priority"`
-	AssigneeType *string      `json:"assignee_type"`
-	AssigneeID   *string      `json:"assignee_id"`
-	AssigneeName *string      `json:"assignee_name"`
-	DueDate      *string      `json:"due_date"`
-	MissionType  string       `json:"mission_type"`
-	CreatedAt    string       `json:"created_at"`
-	UpdatedAt    string       `json:"updated_at"`
-	Labels       []issueLabel `json:"labels"`
-	CommentCount int          `json:"comment_count"`
+	ID           string        `json:"id"`
+	CrewID       string        `json:"crew_id"`
+	CrewName     string        `json:"crew_name"`
+	CrewSlug     string        `json:"crew_slug"`
+	Number       *int          `json:"number"`
+	Identifier   *string       `json:"identifier"`
+	Title        string        `json:"title"`
+	Description  *string       `json:"description"`
+	Status       string        `json:"status"`
+	Priority     string        `json:"priority"`
+	AssigneeType *string       `json:"assignee_type"`
+	AssigneeID   *string       `json:"assignee_id"`
+	AssigneeName *string       `json:"assignee_name"`
+	DueDate      *string       `json:"due_date"`
+	MissionType  string        `json:"mission_type"`
+	CreatedBy    *issueCreator `json:"created_by"`
+	CreatedAt    string        `json:"created_at"`
+	UpdatedAt    string        `json:"updated_at"`
+	Labels       []issueLabel  `json:"labels"`
+	CommentCount int           `json:"comment_count"`
+}
+
+// issueCreator mirrors the API's created_by object: who created the issue —
+// a human ("user") or an agent ("agent"). Nil on legacy issues that predate
+// creator attribution.
+type issueCreator struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// creatorLabel renders the creator for table output: the resolved name
+// (falling back to the raw ID), suffixed with "(agent)" for agent-created
+// issues so authorship is visible at a glance. "-" when unattributed.
+func creatorLabel(c *issueCreator) string {
+	if c == nil {
+		return "-"
+	}
+	name := c.Name
+	if name == "" {
+		name = c.ID
+	}
+	if c.Type == "agent" {
+		return name + " (agent)"
+	}
+	return name
 }
 
 type issueLabel struct {
@@ -199,12 +226,13 @@ var issueListCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		headers := []string{"ID", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "CREW", "LABELS", "UPDATED"}
+		headers := []string{"ID", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "CREATOR", "CREW", "LABELS", "UPDATED"}
 		var rows [][]string
 		for _, iss := range issues {
 			id := derefStr(iss.Identifier, iss.ID[:min(12, len(iss.ID))])
 			title := truncateStr(iss.Title, 40)
 			assignee := derefStr(iss.AssigneeName, "-")
+			creator := truncateStr(creatorLabel(iss.CreatedBy), 24)
 			var labelNames []string
 			for _, l := range iss.Labels {
 				labelNames = append(labelNames, l.Name)
@@ -218,6 +246,7 @@ var issueListCmd = &cobra.Command{
 				iss.Status,
 				capitalizePriority(iss.Priority),
 				assignee,
+				creator,
 				iss.CrewSlug,
 				labels,
 				updated,
@@ -266,6 +295,7 @@ var issueGetCmd = &cobra.Command{
 			{"Mission Type", issue.MissionType},
 			{"Labels", strings.Join(labelNames, ", ")},
 			{"Comments", fmt.Sprintf("%d", issue.CommentCount)},
+			{"Created By", creatorLabel(issue.CreatedBy)},
 			{"Created", issueRelativeTime(issue.CreatedAt)},
 			{"Updated", issueRelativeTime(issue.UpdatedAt)},
 			{"ID", issue.ID},

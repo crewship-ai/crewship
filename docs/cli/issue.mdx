@@ -61,7 +61,7 @@ crewship issue list --search "auth flow"
 | `--search` | `string` | | Search issues by title or description. |
 | `--limit` | `int` | `50` | Maximum number of issues to return. |
 
-**Output columns:** ID, TITLE, STATUS, PRIORITY, ASSIGNEE, CREW, LABELS, UPDATED
+**Output columns:** ID, TITLE, STATUS, PRIORITY, ASSIGNEE, CREATOR, CREW, LABELS, UPDATED
 
 ---
 
@@ -76,9 +76,25 @@ crewship issue get BE-42
 
 The identifier can be the issue identifier (e.g., `BE-42`) or the full ID.
 
-**Output fields:** Identifier, Title, Status, Priority, Crew, Assignee, Assignee Type, Description, Due Date, Mission Type, Labels, Comments count, Created, Updated, ID.
+**Output fields:** Identifier, Title, Status, Priority, Crew, Assignee, Assignee Type, Description, Due Date, Mission Type, Labels, Comments count, Created By, Created, Updated, ID.
 
 Comments are displayed below the detail section.
+
+### Who created an issue
+
+Every issue records its creator. The `Created By` field (and the `CREATOR`
+column in `issue list`) shows the resolved name, suffixed with `(agent)` when
+the issue was created by an agent through a tool call rather than by a human:
+
+```
+Created By   Scout (agent)     # created by the "Scout" agent
+Created By   Pavel Srba        # created by a human via the API/UI
+Created By   -                 # legacy issue, predates creator attribution
+```
+
+In `--output json`, the same information is available as the `created_by`
+object (`{type, id, name}`, where `type` is `user` or `agent`) plus
+`authored_via` (`user_api` or `agent_tool_call`).
 
 ---
 

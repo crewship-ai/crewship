@@ -211,7 +211,7 @@ func TestInternalIssue_CreateComment_MissingFields(t *testing.T) {
 
 func TestInternalIssue_CreateComment_NotFound(t *testing.T) {
 	h, wsID, _, _, _ := newInternalIssueHandler(t)
-	body := bytes.NewBufferString(`{"workspace_id":"` + wsID + `","body":"x"}`)
+	body := bytes.NewBufferString(`{"workspace_id":"` + wsID + `","body":"x","agent_id":"agent-worker"}`)
 	req := httptest.NewRequest("POST", "/", body)
 	req.SetPathValue("identifier", "MISS")
 	rr := httptest.NewRecorder()

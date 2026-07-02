@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card"
 import { StatusIcon } from "./status-icon"
 import { PriorityIcon } from "./priority-icon"
 import { LabelBadge } from "./label-badge"
-import { Clock } from "lucide-react"
+import { Clock, UserRound } from "lucide-react"
 import { formatShortDate } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -54,12 +54,25 @@ export const IssueCard = memo(function IssueCard({ issue, onClick }: IssueCardPr
           <div className="flex items-center gap-1 shrink-0">
             <span className="text-[10px] text-foreground/50 truncate max-w-[80px]">{issue.assignee_name}</span>
             <div className="relative">
-              <AgentAvatar
-                seed={issue.assignee_id}
-                alt={issue.assignee_name || ""}
-                title={issue.assignee_name || ""}
-                className="h-4.5 w-4.5 rounded-full"
-              />
+              {issue.assignee_type === "user" ? (
+                // Human assignee: neutral user glyph — the DiceBear agent
+                // avatar would misrepresent a person as an agent.
+                <div
+                  data-testid="assignee-avatar-user"
+                  title={issue.assignee_name || ""}
+                  className="h-4.5 w-4.5 rounded-full bg-muted flex items-center justify-center"
+                >
+                  <UserRound aria-label={issue.assignee_name || "User assignee"} className="h-3 w-3 text-foreground/60" />
+                </div>
+              ) : (
+                <AgentAvatar
+                  data-testid="assignee-avatar-agent"
+                  seed={issue.assignee_id}
+                  alt={issue.assignee_name || ""}
+                  title={issue.assignee_name || ""}
+                  className="h-4.5 w-4.5 rounded-full"
+                />
+              )}
               {issue.status === "IN_PROGRESS" && (
                 <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-green-500 ring-1 ring-card agent-active-dot" />
               )}

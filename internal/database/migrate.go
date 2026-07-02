@@ -1518,6 +1518,12 @@ END;
 	// authored routines land 'proposed' for MANAGER+ approval) and the admin
 	// disable/enable airbag. See migrate_consts_v128_pipeline_status.go.
 	{version: 128, name: "pipeline_status", sql: migrationPipelineStatus},
+
+	// v129: creator attribution on missions/issues — author_agent_id
+	// (agent tool-call path) + created_by_user_id (public API path),
+	// completing the v108 provenance trio with WHO created the row.
+	// See migrate_consts_v129_issue_creator.go.
+	{version: 129, name: "issue_creator_attribution", sql: migrationIssueCreatorAttribution},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
