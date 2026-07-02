@@ -162,6 +162,48 @@ describe("useChat failure surfacing", () => {
     expect(reply.parts.map((p) => p.type)).toEqual(["text"])
   })
 
+  it("done with no reply surfaces the fallback error even when a teammate's message landed last (group chat)", () => {
+    const { result } = setup()
+    act(() => {
+      result.current.sendMessage("hi")
+    })
+
+    // A teammate's broadcast lands after our send but before any reply —
+    // it becomes the tail turn, carrying an authorUserId. A genuine
+    // zero-output done must still be caught; it must not be mistaken for
+    // "someone else already replied to our run" (issue #545 regression).
+    emit({ type: "user_message", content: "me too", metadata: { author_user_id: "teammate-1" } })
+    emit({ type: "done" })
+
+    expect(result.current.isStreaming).toBe(false)
+    expect(result.current.turns).toHaveLength(3)
+    const fallback = result.current.turns[2]
+    expect(fallback.role).toBe("assistant")
+    expect(fallback.parts[0].type).toBe("error")
+    expect(fallback.parts[0].content).toContain("no output")
+  })
+
+  it("does not fabricate an error when an assistant reply already streamed before a teammate's later message", () => {
+    const { result } = setup()
+    act(() => {
+      result.current.sendMessage("hi")
+    })
+    emit({ type: "text", content: "a real answer" })
+    act(() => {
+      const pending = rafQueue
+      rafQueue = []
+      for (const cb of pending) cb?.(0)
+    })
+    // Assistant reply already streamed and finalized before the teammate's
+    // message arrives — no synthetic error should be added.
+    emit({ type: "user_message", content: "thanks!", metadata: { author_user_id: "teammate-1" } })
+    emit({ type: "done" })
+
+    expect(result.current.isStreaming).toBe(false)
+    const errorParts = result.current.turns.flatMap((t) => t.parts).filter((p) => p.type === "error")
+    expect(errorParts).toHaveLength(0)
+  })
+
   it("loadHistory renders a persisted system error turn as an error bubble", () => {
     const { result } = setup()
     const ts = new Date()

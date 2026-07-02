@@ -904,8 +904,22 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       // as just the user's message is indistinguishable from a broken app,
       // so surface an explicit error turn. Assistant role so the Regenerate
       // retry affordance renders under it. Skipped for no_reply dones and
-      // for turns that already got a reply/error (last isn't our user turn).
-      if (!noReply && localRunPending && last?.role === "user" && !last.authorUserId) {
+      // for runs that already got a reply/error.
+      //
+      // The tail turn can't be trusted alone: in a group chat, a teammate's
+      // user_message broadcast can land after our send and become the last
+      // turn (it carries authorUserId), which would otherwise mask a real
+      // zero-output run. Walk back from the tail past any such teammate
+      // turns to find our own pending user turn; stop at anything else
+      // (an assistant/system turn means our run already got a reply).
+      let ownTurnStillPending = false
+      for (let i = cleaned.length - 1; i >= 0; i--) {
+        const t = cleaned[i]
+        if (t.role === "user" && t.authorUserId) continue
+        ownTurnStillPending = t.role === "user" && !t.authorUserId
+        break
+      }
+      if (!noReply && localRunPending && ownTurnStillPending) {
         return [
           ...cleaned,
           {
