@@ -92,7 +92,7 @@ Minimal valid routine:
 | `steps[]` | array of [Step](#step-types) | Sequential by default; DAG with `needs:`. |
 | `execution_tier` | object | `{preferred, fallback}` overriding workspace default. |
 | `estimated_cost_usd` | number | Author estimate; UI surfaces overrun warnings. |
-| `egress_targets` | array of string | Declared outbound hosts. Enforced for `http` step. |
+| `egress_targets` | array of string | Declared outbound hosts. Enforced at run time for every `http` step and `http` hook, including redirect hops; empty/omitted = unrestricted at the routine layer (the crew network policy and SSRF guards still apply). See [`http`](#http). |
 | `integrations_required` | array of string | Declared third-party integrations (Composio connector slugs like `"github"`, `"slack"`). **Declared AND enforced at run time** — see [Required integrations](#required-integrations) below. Slugs are lowercased/trimmed. |
 | `credentials_required` | array of CredReq | Declared credential needs (`type` + `scope`). Declared-only today (not yet enforced at run time). |
 | `resources` | object | Agent-declared capability manifest — `datastores[]` and `tools[]` the routine touches that **can't** be inferred from the step graph. **Declared AND enforced at run time** against the crew's container resources — see [Required resources](#required-resources) below. See [Capability manifest](#capability-manifest) below for the shape. |
@@ -359,13 +359,44 @@ Composition primitive. Save-time cycle detection rejects loops; runtime depth li
     "url": "{{ inputs.url }}",
     "max_response_bytes": 200000,
     "success_codes": [200],
-    "credential_ref": { "type": "github", "inject_as": "bearer" }
+    "credential_ref": { "type": "API_KEY", "inject_as": "bearer" }
   },
   "timeout_seconds": 30
 }
 ```
 
-Egress allowlist enforced both pre-flight AND on every redirect (CheckRedirect callback). Allowlist set per-workspace. Credential injection schemes: `bearer` (default), `header` with explicit name, `query` with explicit name.
+**Egress enforcement.** Every `http` step (and `http` hook) passes two host
+gates at run time, checked pre-flight AND on every redirect hop
+(CheckRedirect callback):
+
+1. **Routine layer — `egress_targets`.** When the routine declares
+   `egress_targets`, the request host must be one of the declared hosts or a
+   subdomain of one (`api.x.com` matches target `x.com`; `evilx.com` does
+   not). A routine that declares **no** `egress_targets` is unrestricted at
+   this layer — backward-compatible with every routine that predates the
+   field. The SSRF guard (private/link-local IPs, DNS-rebind-safe dialing)
+   applies regardless.
+2. **Crew layer — network policy.** The authoring crew's network policy
+   (`network_mode` + allowed domains — the same dial that governs the crew's
+   agent containers) also applies to direct `http` steps. Crews on the
+   default `free` mode are unaffected; a `restricted` crew's routines can
+   only reach the crew's allowed domains (exact host match, same as the
+   container proxy).
+
+A blocked request fails the step with a structured error naming the step,
+the host, and which layer denied it — before any bytes leave the server.
+
+**Credential injection.** `credential_ref.type` is resolved at run time
+against the workspace credential vault by **type** (case-insensitive match
+on the vault type, e.g. `API_KEY`, `GENERIC_SECRET`), never by ID — so a
+shared routine runs against any workspace holding a credential of the right
+type. Only `ACTIVE` credentials resolve; credentials pinned to another crew
+are invisible; when several match, the authoring crew's own credential wins
+over workspace-shared ones and the newest wins within each group (rotation).
+The decrypted value goes into the outbound request only — never into logs,
+the journal, or step output. If nothing matches, the request is sent without
+credentials (public endpoints keep working). Injection schemes: `bearer`
+(default), `header` with explicit name, `query` with explicit name.
 
 ### `wait`
 

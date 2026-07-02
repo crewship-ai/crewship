@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,7 +28,7 @@ func TestHTTPStep_GET_Success(t *testing.T) {
 		Type: StepHTTP,
 		HTTP: &HTTPStep{Method: "GET", URL: srv.URL},
 	}
-	out, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{})
+	out, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{}, RunInput{})
 	if err != nil {
 		t.Fatalf("http step: %v", err)
 	}
@@ -43,15 +45,23 @@ func TestHTTPStep_BlockedByEgressAllowlist(t *testing.T) {
 
 	store, resolver, cleanup := openExecutorTestDB(t)
 	defer cleanup()
-	exec := NewExecutor(store, resolver, nil, nil).WithEgressGate(func(host string) bool {
-		return false // deny everything
-	})
+	exec := NewExecutor(store, resolver, nil, nil).WithEgressGate(
+		func(_ context.Context, _ RunScope, host string) error {
+			return fmt.Errorf("denied by test gate")
+		})
 	exec.SetAllowPrivateHTTPForTesting(true)
 
 	step := Step{ID: "fetch", Type: StepHTTP, HTTP: &HTTPStep{Method: "GET", URL: srv.URL}}
-	_, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{})
-	if err == nil || !strings.Contains(err.Error(), "not in egress allowlist") {
-		t.Errorf("expected egress denial, got %v", err)
+	_, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{}, RunInput{})
+	var blocked *EgressBlockedError
+	if err == nil || !errors.As(err, &blocked) {
+		t.Fatalf("expected structured EgressBlockedError, got %v", err)
+	}
+	if blocked.Rule != EgressRuleCrewNetworkPolicy || blocked.StepID != "fetch" {
+		t.Errorf("blocked error fields: %+v", blocked)
+	}
+	if !strings.Contains(err.Error(), "denied by test gate") {
+		t.Errorf("gate detail missing from error: %v", err)
 	}
 }
 
@@ -68,7 +78,7 @@ func TestHTTPStep_NonSuccessStatusFails(t *testing.T) {
 	exec.SetAllowPrivateHTTPForTesting(true)
 
 	step := Step{ID: "fetch", Type: StepHTTP, HTTP: &HTTPStep{Method: "GET", URL: srv.URL}}
-	out, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{})
+	out, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{}, RunInput{})
 	if err == nil {
 		t.Fatal("expected non-success error")
 	}
@@ -88,7 +98,7 @@ func TestHTTPStep_BearerCredentialInjection(t *testing.T) {
 	store, resolver, cleanup := openExecutorTestDB(t)
 	defer cleanup()
 	exec := NewExecutor(store, resolver, nil, nil).WithCredentialResolver(
-		func(_ context.Context, t string) (string, error) { return "secret-token", nil },
+		func(_ context.Context, _ RunScope, t string) (string, error) { return "secret-token", nil },
 	)
 	exec.SetAllowPrivateHTTPForTesting(true)
 
@@ -99,7 +109,7 @@ func TestHTTPStep_BearerCredentialInjection(t *testing.T) {
 			CredentialRef: &CredentialRef{Type: "slack"},
 		},
 	}
-	if _, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{}); err != nil {
+	if _, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{}, RunInput{}); err != nil {
 		t.Fatalf("step: %v", err)
 	}
 	if seenAuth != "Bearer secret-token" {
@@ -130,7 +140,7 @@ func TestHTTPStep_TemplateSubstitution(t *testing.T) {
 		},
 	}
 	rctx := RenderContext{Inputs: map[string]any{"user": "pavel"}}
-	out, _, _, err := exec.runHTTPStep(context.Background(), step, rctx)
+	out, _, _, err := exec.runHTTPStep(context.Background(), step, rctx, RunInput{})
 	if err != nil {
 		t.Fatalf("step: %v", err)
 	}
@@ -155,7 +165,7 @@ func TestHTTPStep_MaxResponseBytesTruncates(t *testing.T) {
 		ID: "fetch", Type: StepHTTP,
 		HTTP: &HTTPStep{Method: "GET", URL: srv.URL, MaxResponseBytes: 100},
 	}
-	out, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{})
+	out, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{}, RunInput{})
 	if err != nil {
 		t.Fatalf("step: %v", err)
 	}
@@ -194,9 +204,13 @@ func TestHTTPStep_SSRFViaRedirectBlocked(t *testing.T) {
 
 	store, resolver, cleanup := openExecutorTestDB(t)
 	defer cleanup()
-	exec := NewExecutor(store, resolver, nil, nil).WithEgressGate(func(host string) bool {
-		return host == allowedHost // ONLY the entrypoint, NOT the redirect target
-	})
+	exec := NewExecutor(store, resolver, nil, nil).WithEgressGate(
+		func(_ context.Context, _ RunScope, host string) error {
+			if host == allowedHost { // ONLY the entrypoint, NOT the redirect target
+				return nil
+			}
+			return fmt.Errorf("host %q not allowed", host)
+		})
 	exec.SetAllowPrivateHTTPForTesting(true)
 
 	step := Step{
@@ -204,13 +218,14 @@ func TestHTTPStep_SSRFViaRedirectBlocked(t *testing.T) {
 		Type: StepHTTP,
 		HTTP: &HTTPStep{Method: "GET", URL: allowed.URL},
 	}
-	out, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{})
+	out, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{}, RunInput{})
 	if err == nil {
 		t.Fatalf("SSRF leak: expected redirect to be blocked; got out=%q", out)
 	}
-	if !strings.Contains(err.Error(), blockedHost) ||
-		!strings.Contains(err.Error(), "blocked by egress allowlist") {
-		t.Errorf("expected redirect-blocked error mentioning host, got %v", err)
+	var redirBlocked *EgressBlockedError
+	if !errors.As(err, &redirBlocked) || redirBlocked.Host != blockedHost ||
+		redirBlocked.Rule != EgressRuleCrewNetworkPolicy {
+		t.Errorf("expected structured redirect-blocked error naming %q, got %v", blockedHost, err)
 	}
 	if strings.Contains(out, "internal-metadata-secret") {
 		t.Errorf("blocked server's body leaked into step output: %q", out)

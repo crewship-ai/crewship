@@ -169,8 +169,8 @@ func TestExecutor_BuilderChain_AllOptionalsTogether(t *testing.T) {
 	// configured Executor instance.
 	e := newExecutorForOptionsTest(t)
 
-	gate := func(string) bool { return true }
-	resolver := func(_ context.Context, _ string) (string, error) { return "", nil }
+	gate := func(context.Context, RunScope, string) error { return nil }
+	resolver := func(_ context.Context, _ RunScope, _ string) (string, error) { return "", nil }
 	ws := &captureWaitpointStore{}
 	wsb := &captureWSBroadcaster{}
 	reg := NewRunRegistry()

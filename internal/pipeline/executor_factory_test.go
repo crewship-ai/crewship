@@ -104,18 +104,20 @@ func TestNewWiredExecutor_WiresEveryDependency(t *testing.T) {
 	// Layer 1 — explicit field assertions (same fields the HTTP
 	// handler's newExecutor has always wired).
 	checks := map[string]bool{
-		"store":         exec.store != nil,
-		"resolver":      exec.resolver != nil,
-		"runner":        exec.runner != nil,
-		"emitter":       exec.emitter != nil,
-		"waitpoints":    exec.waitpoints != nil,
-		"ws":            exec.ws != nil,
-		"runs":          exec.runs != nil,
-		"idempotency":   exec.idempotency != nil,
-		"stepOverrides": exec.stepOverrides != nil,
-		"runStore":      exec.runStore != nil,
-		"codeRunner":    exec.codeRunner != nil,
-		"signals":       exec.signals != nil,
+		"store":            exec.store != nil,
+		"resolver":         exec.resolver != nil,
+		"runner":           exec.runner != nil,
+		"emitter":          exec.emitter != nil,
+		"waitpoints":       exec.waitpoints != nil,
+		"ws":               exec.ws != nil,
+		"runs":             exec.runs != nil,
+		"idempotency":      exec.idempotency != nil,
+		"stepOverrides":    exec.stepOverrides != nil,
+		"runStore":         exec.runStore != nil,
+		"codeRunner":       exec.codeRunner != nil,
+		"signals":          exec.signals != nil,
+		"egressAllowed":    exec.egressAllowed != nil,
+		"credentialByType": exec.credentialByType != nil,
 	}
 	for field, ok := range checks {
 		if !ok {
@@ -126,11 +128,12 @@ func TestNewWiredExecutor_WiresEveryDependency(t *testing.T) {
 	// Layer 2 — reflection sweep. Fields listed here are the ONLY ones
 	// allowed to stay nil on a fully-wired executor; add a new field
 	// here only with a documented reason, otherwise wire it in
-	// NewWiredExecutor (and ExecutorDeps).
-	notFactoryWired := map[string]string{
-		"egressAllowed":    "per-workspace HTTP allowlist; no production call site wires it yet — when one does, it must go through ExecutorDeps",
-		"credentialByType": "per-workspace credential resolver; same status as egressAllowed",
-	}
+	// NewWiredExecutor (and ExecutorDeps). The list is EMPTY on
+	// purpose: the last two residents (egressAllowed, credentialByType)
+	// were the http-step security gap — DSL-validated egress_targets /
+	// credential_ref that no production executor actually enforced or
+	// resolved. Do not re-grow this list for security-relevant fields.
+	notFactoryWired := map[string]string{}
 	v := reflect.ValueOf(exec).Elem()
 	typ := v.Type()
 	for i := 0; i < typ.NumField(); i++ {
@@ -169,7 +172,8 @@ func TestNewWiredExecutor_NilOptionalsDegrade(t *testing.T) {
 	}
 	if exec.waitpoints != nil || exec.ws != nil || exec.runs != nil ||
 		exec.idempotency != nil || exec.stepOverrides != nil ||
-		exec.runStore != nil || exec.codeRunner != nil || exec.signals != nil {
+		exec.runStore != nil || exec.codeRunner != nil || exec.signals != nil ||
+		exec.egressAllowed != nil || exec.credentialByType != nil {
 		t.Error("optional deps left nil must stay nil (documented degraded behaviour)")
 	}
 }
