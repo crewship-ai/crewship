@@ -279,7 +279,8 @@ func (h *PipelineHandler) DeleteWebhook(w http.ResponseWriter, r *http.Request) 
 //
 // Dispatch is ASYNCHRONOUS: everything security-relevant (token
 // lookup, HMAC verification, rate limit, governance status,
-// idempotency reservation) runs synchronously in the request, then the
+// concurrency pre-check, idempotency reservation) runs synchronously
+// in the request, then the
 // run itself starts in a background goroutine and the sender gets a
 // 202 + {run_id, status: "PENDING"} immediately. Real senders
 // (GitHub/Stripe) time out deliveries in 5–10s while an agent_run
@@ -298,7 +299,11 @@ func (h *PipelineHandler) DeleteWebhook(w http.ResponseWriter, r *http.Request) 
 //   - 404 on unknown / disabled / deleted token (deliberate to
 //     avoid leaking which tokens exist)
 //   - 409 when the target routine is 'proposed'/'disabled' (governance)
-//   - 429 on per-token rate limit hit
+//   - 429 + Retry-After on per-token rate limit hit, or when the
+//     routine's concurrency gate is at capacity — checked
+//     synchronously against the same run registry the executor
+//     enforces, and WITHOUT consuming the idempotency key, so the
+//     sender's retry executes instead of dedupe-ing
 //   - 503 if the runner / webhook store isn't wired
 func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	if h.webhooks == nil || h.runner == nil {
@@ -418,6 +423,38 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Concurrency pre-check, synchronous — and it MUST come before the
+	// idempotency reservation below. An over-limit delivery answers
+	// 429 + Retry-After like the old synchronous handler did; a 202
+	// here would hand the sender a run_id for a run that dies on
+	// ErrConcurrencyLimitReached before any pipeline_runs row exists —
+	// the sender treats 202 as accepted and never retries, so the
+	// event would be permanently lost. Checking before the reservation
+	// also means a 429'd delivery never touches the idempotency store,
+	// so the sender's retry of the same key executes as a fresh run.
+	//
+	// PrecheckConcurrency reads the same run registry (same key render,
+	// same count-vs-max) the executor's Acquire enforces — same source
+	// of truth, evaluated early. It cannot RESERVE the slot, though, so
+	// a small TOCTOU window remains; the background goroutine below
+	// handles a residual ErrConcurrencyLimitReached explicitly. Parse
+	// or key-render errors fall through deliberately: the executor
+	// re-parses authoritatively and its failure path (Forget +
+	// RecordFire FAILED) surfaces them.
+	if h.runs != nil {
+		if dsl, derr := pipeline.Parse([]byte(target.DefinitionJSON)); derr == nil {
+			if cerr := h.runs.PrecheckConcurrency(r.Context(), dsl, wh.WorkspaceID, inputs); errors.Is(cerr, pipeline.ErrConcurrencyLimitReached) {
+				// Record the throttled attempt (parity with the old
+				// synchronous handler, which stamped FAILED before
+				// answering 429).
+				_ = h.webhooks.RecordFire(r.Context(), wh.ID, "", "FAILED")
+				w.Header().Set("Retry-After", "5")
+				replyError(w, http.StatusTooManyRequests, "concurrency limit reached")
+				return
+			}
+		}
+	}
+
 	// Idempotency reservation, synchronous — replays must resolve to
 	// the ORIGINAL run id in the 202, not mint a dangling handle.
 	//
@@ -501,8 +538,23 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 			// happened. Mirrors the executor's own Forget on its
 			// concurrency-rejection path.
 			_ = idem.Forget(context.Background(), wh.WorkspaceID, idemKey)
-			h.logger.Warn("webhook fire (async run)", "error", runErr,
-				"webhook_id", wh.ID, "run_id", runID)
+			if errors.Is(runErr, pipeline.ErrConcurrencyLimitReached) {
+				// Residual TOCTOU race: the synchronous pre-check above
+				// saw a free slot, but another dispatch Acquire'd it
+				// between our 202 and this run's Acquire (the pre-check
+				// reads the registry without reserving). The sender
+				// already holds a 202 it won't retry on, so make the
+				// loss recoverable and loud: the fire records FAILED
+				// below with this reason in the log, and the Forget
+				// above released the idempotency key so a sender/
+				// operator retry executes instead of DEDUPE-ing onto a
+				// run that never happened.
+				h.logger.Warn("webhook fire (async run): concurrency limit reached despite synchronous pre-check (TOCTOU window); fire recorded FAILED, idempotency key released so a retry can execute",
+					"webhook_id", wh.ID, "run_id", runID)
+			} else {
+				h.logger.Warn("webhook fire (async run)", "error", runErr,
+					"webhook_id", wh.ID, "run_id", runID)
+			}
 		}
 		// Bookkeeping on a fresh context: at shutdown dispatchCtx is
 		// already cancelled when the run winds down, and the terminal

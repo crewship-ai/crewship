@@ -612,7 +612,7 @@ crewship routine webhooks create --slug pr-review-structured \
 
 Output reveals the public URL and signing secret **once** (Stripe-style). External services POST event payload to `/api/v1/webhooks/{token}`. With HMAC, sender includes header `X-Crewship-Signature: sha256=<hex_hmac_of_body>`, validated server-side via `hmac.Equal` (timing-safe). Rate limited per token, per minute, default 60.
 
-**Delivery is asynchronous.** The endpoint verifies the signature, rate limit, and governance status synchronously, reserves a run id, then answers immediately:
+**Delivery is asynchronous.** The endpoint verifies the signature, rate limit, governance status, and the routine's `concurrency_key` gate synchronously, reserves a run id, then answers immediately:
 
 ```json
 HTTP/1.1 202 Accepted
@@ -627,7 +627,7 @@ crewship routine logs <run_id> --full   # full step-by-step journal timeline
 # or: GET /api/v1/workspaces/{wsId}/pipeline-runs/{runId}
 ```
 
-Redelivered events dedupe **synchronously**: a replay (same `Idempotency-Key` / `X-Crewship-Event-ID`, or identical bytes within the dedupe window) answers `202` with `"status": "DEDUPED"` and the **original** run's id — the routine executes exactly once. A `proposed`/`disabled` routine answers `409` (policy block, nothing dispatched). Runs that hit a `wait: approval` step park as `WAITING` and resume once the waitpoint is approved, exactly as with other triggers.
+Redelivered events dedupe **synchronously**: a replay (same `Idempotency-Key` / `X-Crewship-Event-ID`, or identical bytes within the dedupe window) answers `202` with `"status": "DEDUPED"` and the **original** run's id — the routine executes exactly once. A `proposed`/`disabled` routine answers `409` (policy block, nothing dispatched). A delivery arriving while the routine's `concurrency_key` gate is at capacity answers `429` with a `Retry-After` header **before** anything is dispatched — a 429 never consumes the idempotency key, so redelivering the same event later executes it normally. Runs that hit a `wait: approval` step park as `WAITING` and resume once the waitpoint is approved, exactly as with other triggers.
 
 <Warning>
 The signing secret is shown **once**. To rotate it: delete the webhook + create a new one. There is no in-place rotation by design.
