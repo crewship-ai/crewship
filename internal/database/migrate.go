@@ -1525,11 +1525,13 @@ END;
 	// See migrate_consts_v129_issue_creator.go.
 	{version: 129, name: "issue_creator_attribution", sql: migrationIssueCreatorAttribution},
 
-	// v129: structured, non-fatal warnings on pipeline_runs (e.g. a
+	// v131: structured, non-fatal warnings on pipeline_runs (e.g. a
 	// failed after_all/on_failure teardown hook) so they survive past
 	// the log line and are visible via the run-detail API/CLI instead
-	// of only slog.Warn. See migrate_consts_v129_run_warnings.go.
-	{version: 129, name: "run_warnings", sql: migrationRunWarnings},
+	// of only slog.Warn. See migrate_consts_v131_run_warnings.go.
+	// Deliberately skips 129/130 — both were claimed by other in-flight
+	// PRs (#760, #774) at authoring time; see the const file's comment.
+	{version: 131, name: "run_warnings", sql: migrationRunWarnings},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

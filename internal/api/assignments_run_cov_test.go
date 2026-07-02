@@ -432,9 +432,53 @@ func TestUserFacingAssignmentError(t *testing.T) {
 			want: "The run timed out. Details in the run journal.",
 		},
 		{
-			name: "timeout keyword classified as timeout",
-			raw:  "container error: operation timed out after 30s",
+			name: "anchored run-timed-out phrase classified as timeout",
+			raw:  "run timed out after 30m0s",
 			want: "The run timed out. Details in the run journal.",
+		},
+		{
+			name: "anchored execution-timed-out phrase classified as timeout",
+			raw:  "execution timed out",
+			want: "The run timed out. Details in the run journal.",
+		},
+		{
+			// "timeout" as a bare substring is NOT a run timeout: this is
+			// a configuration error and must fall to the generic branch,
+			// not tell the user their run timed out.
+			name: "timeout_seconds config error is NOT a timeout",
+			raw:  "invalid timeout_seconds configuration",
+			want: "The run failed. Details in the run journal.",
+		},
+		{
+			// Network-layer i/o timeout reaching the Docker daemon is an
+			// infrastructure failure, not a run timeout.
+			name: "dial i/o timeout is NOT a run timeout",
+			raw:  "execution error: dial tcp 127.0.0.1:2375: i/o timeout connecting to Docker daemon",
+			want: "The run failed. Details in the run journal.",
+		},
+		{
+			// A generic "timed out" mid-sentence (container-level op, not
+			// our run-timeout path) also collapses to generic now.
+			name: "unanchored timed-out substring is NOT a run timeout",
+			raw:  "container error: operation timed out after 30s",
+			want: "The run failed. Details in the run journal.",
+		},
+		{
+			// Curated reason produced by fix/assignments-running-recovery's
+			// boot-time crash recovery (failInterruptedAssignment). Tested
+			// against the literal string — NOT a shared constant — so this
+			// stays green regardless of which branch merges first.
+			name: "recovery: interrupted-by-restart reason passes through verbatim",
+			raw:  "interrupted by server restart — the run did not survive the previous process",
+			want: "interrupted by server restart — the run did not survive the previous process",
+		},
+		{
+			// Curated reason produced by the stuck-RUNNING sweeper in the
+			// same branch; carries a dynamic duration, so the classifier
+			// must match on the stable prefix.
+			name: "recovery: stuck-RUNNING sweeper reason passes through verbatim",
+			raw:  "assignment stuck in RUNNING for over 30m0s with no completion — failed by the stuck-RUNNING sweeper",
+			want: "assignment stuck in RUNNING for over 30m0s with no completion — failed by the stuck-RUNNING sweeper",
 		},
 		{
 			name: "backup-in-progress refusal kept verbatim",

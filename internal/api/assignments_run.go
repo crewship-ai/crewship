@@ -549,6 +549,21 @@ func (h *AssignmentHandler) runAssignment(
 // generic fallback) verbatim: they're either already curated,
 // actionable messages (no internals) or a well-known, non-sensitive
 // failure mode like a timeout.
+//
+// Curated recovery reasons (recoveryReason* prefixes below) are the
+// failure messages written by the assignment recovery paths — the
+// boot-time crash recovery and the stuck-RUNNING sweeper
+// (fix/assignments-running-recovery). They're authored as user-facing
+// copy (actionable, no internals), so collapsing them to the generic
+// fallback would strictly lose information. Matched by stable prefix
+// because the sweeper message carries a dynamic duration tail; the
+// prefixes must stay in sync with the literals in
+// failInterruptedAssignment's two call sites.
+const (
+	recoveryReasonInterruptedPrefix  = "interrupted by server restart"
+	recoveryReasonStuckRunningPrefix = "assignment stuck in RUNNING for over"
+)
+
 func userFacingAssignmentError(raw string) string {
 	if raw == "" {
 		return ""
@@ -556,9 +571,23 @@ func userFacingAssignmentError(raw string) string {
 	const journalHint = " Details in the run journal."
 	lower := strings.ToLower(raw)
 	switch {
+	case strings.HasPrefix(raw, recoveryReasonInterruptedPrefix),
+		strings.HasPrefix(raw, recoveryReasonStuckRunningPrefix):
+		// Curated recovery reasons pass through verbatim (see the
+		// constants' doc comment above).
+		return raw
 	case strings.Contains(lower, "context deadline exceeded"),
-		strings.Contains(lower, "timed out"),
-		strings.Contains(lower, "timeout"):
+		strings.Contains(lower, "run timed out"),
+		strings.Contains(lower, "execution timed out"):
+		// Only genuine run-timeout shapes: "context deadline exceeded"
+		// is what our own context.WithTimeout produces when the exec
+		// deadline expires and bubbles up through the error chain
+		// ("execution error: exec agent: … context deadline exceeded"),
+		// plus anchored self-authored phrases. A bare "timeout" /
+		// "timed out" substring is deliberately NOT enough — it would
+		// mislabel config errors ("invalid timeout_seconds
+		// configuration") and network errors ("dial tcp: i/o timeout")
+		// as run timeouts; those fall to the generic branch.
 		return "The run timed out." + journalHint
 	case strings.Contains(lower, "being backed up"):
 		// refuseIfBackupInProgress's curated refusal message — already
