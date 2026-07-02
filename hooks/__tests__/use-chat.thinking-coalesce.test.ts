@@ -96,6 +96,46 @@ describe("useChat thinking coalescence across transient parts", () => {
     expect(thinkingParts[1].content).toBe("second pass")
   })
 
+  it("suppresses thinking_tokens heartbeat system events entirely", () => {
+    // Claude Code emits `system` messages with subtype thinking_tokens as a
+    // progress heartbeat; the adapter forwards them with content = subtype.
+    // They must never render — the Thinking header already shows progress —
+    // and they must not fragment or pollute the turn.
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://x/ws", getToken: async () => "t", sessionId: "s1" }),
+    )
+
+    emit({ type: "thinking", content: "part one" })
+    for (let i = 0; i < 5; i++) {
+      emit({ type: "system", content: "thinking_tokens", metadata: { subtype: "thinking_tokens" } })
+    }
+    emit({ type: "thinking", content: " part two" })
+
+    const parts = result.current.turns[0].parts
+    expect(parts.filter((p) => p.type === "status")).toHaveLength(0)
+    const thinkingParts = parts.filter((p) => p.type === "thinking")
+    expect(thinkingParts).toHaveLength(1)
+    expect(thinkingParts[0].content).toBe("part one part two")
+  })
+
+  it("a burst of non-init system events keeps at most ONE status line", () => {
+    // Non-heartbeat system chatter (sidecar logs, api_retry, …) renders as
+    // the single quiet current-step line — replaced in place, never stacked.
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://x/ws", getToken: async () => "t", sessionId: "s1" }),
+    )
+
+    emit({ type: "thinking", content: "working" })
+    emit({ type: "system", content: "api_retry", metadata: { subtype: "api_retry" } })
+    emit({ type: "system", content: "sidecar: scrub", metadata: { subtype: "log" } })
+    emit({ type: "system", content: "api_retry", metadata: { subtype: "api_retry" } })
+
+    const parts = result.current.turns[0].parts
+    const statusParts = parts.filter((p) => p.type === "status")
+    expect(statusParts).toHaveLength(1)
+    expect(statusParts[0].content).toBe("api_retry")
+  })
+
   it("prunes the transient status line when the run errors", () => {
     const { result } = renderHook(() =>
       useChat({ wsUrl: "ws://x/ws", getToken: async () => "t", sessionId: "s1" }),

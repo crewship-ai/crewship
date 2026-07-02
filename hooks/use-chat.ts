@@ -824,23 +824,30 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
             },
           ]
         })
+      } else if (subtype === "thinking_tokens") {
+        // Heartbeat chatter: Claude Code emits a `system`/thinking_tokens
+        // message per reasoning progress tick and the adapter forwards it
+        // with content = subtype. Rendering these stacked a wall of
+        // "thinking_tokens" rows under the reply; the Thinking header's live
+        // timer already conveys the same signal. Drop them entirely.
+        return
       } else {
-        // Other system events (sidecar security logs, etc.) — add as status-like parts
+        // Other system events (sidecar security logs, api_retry, …) render
+        // as the single quiet current-step line — same replace-in-place
+        // policy as status events, never a stack of rows. Unlike status
+        // events they never open a new turn: trailing chatter after `done`
+        // must not resurrect a ghost status-only turn.
         setTurns((prev) => {
           const last = prev[prev.length - 1]
-          if (last?.role === "assistant" && last.isStreaming) {
-            return [
-              ...prev.slice(0, -1),
-              {
-                ...last,
-                parts: [
-                  ...last.parts,
-                  { id: uuid(), type: "status" as TurnPartType, content, timestamp: new Date() },
-                ],
-              },
-            ]
+          if (last?.role !== "assistant" || !last.isStreaming) return prev
+          const statusIdx = last.parts.findLastIndex((p) => p.type === "status")
+          const part = { id: uuid(), type: "status" as TurnPartType, content, timestamp: new Date() }
+          if (statusIdx >= 0) {
+            const updatedParts = [...last.parts]
+            updatedParts[statusIdx] = { ...updatedParts[statusIdx], content }
+            return [...prev.slice(0, -1), { ...last, parts: updatedParts }]
           }
-          return prev
+          return [...prev.slice(0, -1), { ...last, parts: [...last.parts, part] }]
         })
       }
     },
