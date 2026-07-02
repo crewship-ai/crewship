@@ -51,6 +51,27 @@ const MAX_RECONNECT_ATTEMPTS = 8
  *  these for application protocols. */
 const CLOSE_CODE_SESSION_REVOKED = 4401
 
+/** Maximum size, in UTF-8 encoded bytes, of an outbound WebSocket frame
+ *  this client will send. Set below the server's inbound frame cap
+ *  (wsMaxInboundFrameBytes = 64 KiB, internal/ws/hub.go:108) to leave
+ *  headroom for the JSON envelope. Exceeding the server cap is not a
+ *  graceful rejection: the x/net/websocket Conn returns ErrFrameTooLarge
+ *  from Receive, readPump treats that as a plain read error, and the
+ *  WHOLE connection is torn down — not just the oversize message.
+ *  Pre-flighting client-side (see callers of encodedByteLength below)
+ *  turns that silent disconnect into a visible, recoverable error.
+ *  Keep this in sync with hub.go's constant if it ever changes. */
+export const WS_MAX_OUTBOUND_FRAME_BYTES = 60 * 1024 // 60 KiB — ~4 KiB headroom under the 64 KiB server cap
+
+/** Byte length of `value` once UTF-8 encoded. Deliberately NOT
+ *  `value.length`: JS string length counts UTF-16 code units, which
+ *  undercounts every multi-byte character (emoji, CJK, combining marks,
+ *  …) relative to what actually goes over the wire — e.g. a 4-byte emoji
+ *  is length 2 in JS (a surrogate pair) but 4 bytes on the wire. */
+export function encodedByteLength(value: string): number {
+  return new TextEncoder().encode(value).length
+}
+
 // emitSessionExpired delegates to lib/api-fetch's shared emitter so a
 // WS-detected revocation reaches not just this tab's AuthProvider but
 // every other tab via the BroadcastChannel. Without this, only the
@@ -285,11 +306,18 @@ export function useWebSocket({
     }
   }, [])
 
+  // send() used to no-op silently when the socket wasn't OPEN, which meant
+  // a message typed/sent while disconnected just vanished with no signal
+  // to the caller. It now returns whether the frame was actually handed to
+  // the socket, so callers (e.g. the chat composer) can surface "not
+  // connected" instead of assuming success.
   const send = useCallback(
-    (msg: WSMessage) => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify(msg))
+    (msg: WSMessage): boolean => {
+      if (wsRef.current?.readyState !== WebSocket.OPEN) {
+        return false
       }
+      wsRef.current.send(JSON.stringify(msg))
+      return true
     },
     [],
   )
