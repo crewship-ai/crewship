@@ -119,7 +119,9 @@ describe("AssistantTurn dispatch", () => {
     render(<AssistantTurn turn={turn([part({ type: "thinking", content: "Pondering", isStreaming: true })])} onCopy={onCopy} onFileClick={onFileClick} />)
     const reasoning = screen.getByTestId("reasoning")
     expect(reasoning.getAttribute("data-streaming")).toBe("true")
-    expect(screen.getByTestId("reasoning-content").textContent).toBe("Pondering")
+    // ThinkingBlock appends a trailing space while streaming on purpose
+    // (Streamdown reflow workaround, see assistant-turn.tsx) — compare trimmed.
+    expect(screen.getByTestId("reasoning-content").textContent?.trim()).toBe("Pondering")
   })
 
   it("renders text part via MessageResponse", () => {
