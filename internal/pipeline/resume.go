@@ -290,6 +290,7 @@ func (e *Executor) runResumedRun(ctx context.Context, plan *resumePlan, logger *
 			TriggeredVia:    rec.TriggeredVia,
 			TriggeredByID:   rec.TriggeredByID,
 			resume:          true,
+			resumeReason:    plan.reason,
 			restoredOutputs: plan.restored,
 			restoredCostUSD: rec.CostUSD,
 			// Carried so Run can re-validate the definition against the
