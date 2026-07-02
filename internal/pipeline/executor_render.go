@@ -117,6 +117,14 @@ func mergeInputs(supplied map[string]any, dsl *DSL) map[string]any {
 	return out
 }
 
+// NewRunID mints a run id in the canonical "run_" shape. Exported for
+// dispatch paths that must know the id BEFORE the run executes — the
+// async webhook handler 202-responds with the id, reserves it against
+// the idempotency key, then starts the run in the background with
+// RunIDOverride so the sender's polling handle matches the run that
+// actually executes.
+func NewRunID() string { return generateRunID() }
+
 // generateRunID mints a "run_" CUID for journaling. Distinct from
 // generatePipelineID so journal queries can pattern-match either
 // kind without ambiguity.

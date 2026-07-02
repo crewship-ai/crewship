@@ -612,6 +612,23 @@ crewship routine webhooks create --slug pr-review-structured \
 
 Output reveals the public URL and signing secret **once** (Stripe-style). External services POST event payload to `/api/v1/webhooks/{token}`. With HMAC, sender includes header `X-Crewship-Signature: sha256=<hex_hmac_of_body>`, validated server-side via `hmac.Equal` (timing-safe). Rate limited per token, per minute, default 60.
 
+**Delivery is asynchronous.** The endpoint verifies the signature, rate limit, and governance status synchronously, reserves a run id, then answers immediately:
+
+```json
+HTTP/1.1 202 Accepted
+{"run_id": "run_c...", "status": "PENDING", "deduped": false}
+```
+
+The routine executes in the background under the returned `run_id`, so senders with short delivery timeouts (GitHub ~10s, Stripe ~5s) never time out on long agent runs — and a sender closing the connection early **cannot** cancel an in-flight run: the run's context derives from the server lifecycle, not the HTTP request. Poll the handle for the outcome:
+
+```bash
+crewship routine logs <run_id>          # persisted run state (status, step outputs, error)
+crewship routine logs <run_id> --full   # full step-by-step journal timeline
+# or: GET /api/v1/workspaces/{wsId}/pipeline-runs/{runId}
+```
+
+Redelivered events dedupe **synchronously**: a replay (same `Idempotency-Key` / `X-Crewship-Event-ID`, or identical bytes within the dedupe window) answers `202` with `"status": "DEDUPED"` and the **original** run's id — the routine executes exactly once. A `proposed`/`disabled` routine answers `409` (policy block, nothing dispatched). Runs that hit a `wait: approval` step park as `WAITING` and resume once the waitpoint is approved, exactly as with other triggers.
+
 <Warning>
 The signing secret is shown **once**. To rotate it: delete the webhook + create a new one. There is no in-place rotation by design.
 </Warning>

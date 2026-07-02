@@ -254,3 +254,199 @@ func TestPipelineWebhooks_Fire_SenderDisconnectDoesNotCancelRun(t *testing.T) {
 		t.Fatal("FireWebhook never returned")
 	}
 }
+
+// TestPipelineWebhooks_Fire_BadSignature_NothingDispatched pins
+// contract (3): async dispatch must not weaken the HMAC gate. A badly
+// signed delivery gets its 401 synchronously and NO background
+// goroutine — the runner is never invoked, no fire is recorded.
+func TestPipelineWebhooks_Fire_BadSignature_NothingDispatched(t *testing.T) {
+	runner := newBlockingRunner()
+	h, db, _, wsID := webhookHandlerRig(t)
+	h.SetRunner(runner)
+	seedAgentRunPipeline(t, db, wsID, "pln_sig", "sig-target")
+	wh := seedWebhookRow(t, db, wsID, "pln_sig", "sig-secret", true)
+
+	body := `{"hello":"forged"}`
+	req := httptest.NewRequest("POST", "/api/v1/webhooks/"+wh.Token, strings.NewReader(body))
+	req.SetPathValue("token", wh.Token)
+	req.Header.Set("X-Crewship-Signature", "deadbeef")
+	rr := httptest.NewRecorder()
+	h.FireWebhook(rr, req)
+
+	if rr.Code != 401 {
+		t.Fatalf("status = %d, want 401; body=%s", rr.Code, rr.Body.String())
+	}
+	// Returns immediately when nothing was spawned — and proves the
+	// 401 path never reaches the dispatch WaitGroup.
+	h.WaitWebhookDispatches()
+	if n := runner.callCount(); n != 0 {
+		t.Errorf("runner invoked %d times on a rejected signature, want 0", n)
+	}
+	var fireCount int64
+	if err := db.QueryRow(`SELECT fire_count FROM pipeline_webhooks WHERE id = ?`, wh.ID).Scan(&fireCount); err != nil {
+		t.Fatalf("read fire_count: %v", err)
+	}
+	if fireCount != 0 {
+		t.Errorf("fire_count = %d after a rejected signature, want 0", fireCount)
+	}
+}
+
+// TestPipelineWebhooks_Fire_Replay_DedupedToOriginalRun pins the
+// replay contract for async dispatch: the idempotency reservation
+// happens synchronously, so a redelivered event answers 202 with the
+// ORIGINAL run's id (status DEDUPED) instead of minting a dangling
+// handle — and the routine executes exactly once.
+func TestPipelineWebhooks_Fire_Replay_DedupedToOriginalRun(t *testing.T) {
+	runner := &stubRunner{output: "ok"}
+	h, db, _, wsID := webhookHandlerRig(t)
+	h.SetRunner(runner)
+	seedAgentRunPipeline(t, db, wsID, "pln_replay", "replay-target")
+	wh := seedWebhookRow(t, db, wsID, "pln_replay", "replay-secret", true)
+
+	body := `{"event":"deploy"}`
+	fire := func() map[string]any {
+		req := httptest.NewRequest("POST", "/api/v1/webhooks/"+wh.Token, strings.NewReader(body))
+		req.SetPathValue("token", wh.Token)
+		req.Header.Set("X-Crewship-Signature", covPSWSign("replay-secret", body))
+		req.Header.Set("Idempotency-Key", "evt-42")
+		rr := httptest.NewRecorder()
+		h.FireWebhook(rr, req)
+		if rr.Code != 202 {
+			t.Fatalf("status = %d, want 202; body=%s", rr.Code, rr.Body.String())
+		}
+		var resp map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return resp
+	}
+
+	first := fire()
+	if first["status"] != "PENDING" {
+		t.Errorf("first fire status = %v, want PENDING", first["status"])
+	}
+	firstRunID, _ := first["run_id"].(string)
+	if firstRunID == "" {
+		t.Fatal("first fire missing run_id")
+	}
+	h.WaitWebhookDispatches()
+
+	second := fire()
+	if second["status"] != "DEDUPED" || second["deduped"] != true {
+		t.Errorf("replay = %v, want status DEDUPED + deduped true", second)
+	}
+	if second["run_id"] != firstRunID {
+		t.Errorf("replay run_id = %v, want the original run's id %q", second["run_id"], firstRunID)
+	}
+	h.WaitWebhookDispatches()
+	if runner.calls != 1 {
+		t.Errorf("runner invoked %d times across a delivery + its replay, want exactly 1", runner.calls)
+	}
+}
+
+// TestPipelineWebhooks_Fire_ApprovalWait_ParksWaiting pins that the
+// async dispatch preserves the wait:approval parking semantics: the
+// background run parks promptly (status WAITING, run row 'waiting',
+// pending waitpoint), it does NOT hold the dispatch goroutine for the
+// approval, and the webhook records WAITING under the run id the 202
+// handed the sender.
+func TestPipelineWebhooks_Fire_ApprovalWait_ParksWaiting(t *testing.T) {
+	h, db, _, wsID := webhookHandlerRig(t)
+	h.SetRunner(&stubRunner{output: "ok"})
+	h.SetRunStore(pipeline.NewRunStore(db))
+	wpStore := pipeline.NewSQLWaitpointStore(db)
+	t.Cleanup(wpStore.Close)
+	h.SetWaitpointStore(wpStore)
+
+	def := `{"dsl_version":"1.0","name":"appr-hook","steps":[` +
+		`{"id":"gate","type":"wait","wait":{"kind":"approval","approval_prompt":"ship it?"}},` +
+		`{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := db.Exec(`
+		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at)
+		VALUES ('pln_appr', ?, 'appr-hook', 'appr-hook', ?, 'hash', ?, ?, ?)`,
+		wsID, def, now, now, now); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	wh := seedWebhookRow(t, db, wsID, "pln_appr", "appr-secret", true)
+
+	body := `{"pr":7}`
+	req := httptest.NewRequest("POST", "/api/v1/webhooks/"+wh.Token, strings.NewReader(body))
+	req.SetPathValue("token", wh.Token)
+	req.Header.Set("X-Crewship-Signature", covPSWSign("appr-secret", body))
+	rr := httptest.NewRecorder()
+	h.FireWebhook(rr, req)
+	if rr.Code != 202 {
+		t.Fatalf("status = %d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	respRunID, _ := resp["run_id"].(string)
+
+	// The dispatch goroutine must return promptly (parked, not blocked
+	// in WaitFor until the approval timeout).
+	drained := make(chan struct{})
+	go func() { h.WaitWebhookDispatches(); close(drained) }()
+	select {
+	case <-drained:
+	case <-time.After(5 * time.Second):
+		t.Fatal("dispatch goroutine still running — the approval wait blocks instead of parking")
+	}
+
+	recordedRunID, recordedStatus := waitForWebhookFire(t, db, wh.ID, 2*time.Second)
+	if recordedStatus != "WAITING" {
+		t.Errorf("recorded last_status = %q, want WAITING", recordedStatus)
+	}
+	if recordedRunID != respRunID {
+		t.Errorf("recorded last_run_id = %q, want the 202's run_id %q", recordedRunID, respRunID)
+	}
+
+	// Run row parked, waitpoint pending — the approval flow can pick
+	// it up exactly as with a synchronous trigger.
+	var runStatus string
+	if err := db.QueryRow(`SELECT status FROM pipeline_runs WHERE id = ?`, respRunID).Scan(&runStatus); err != nil {
+		t.Fatalf("read run row: %v", err)
+	}
+	if runStatus != "waiting" {
+		t.Errorf("pipeline_runs.status = %q, want waiting", runStatus)
+	}
+	var wpStatus string
+	if err := db.QueryRow(`SELECT status FROM pipeline_waitpoints WHERE pipeline_run_id = ?`, respRunID).Scan(&wpStatus); err != nil {
+		t.Fatalf("read waitpoint row: %v", err)
+	}
+	if wpStatus != "pending" {
+		t.Errorf("waitpoint status = %q, want pending", wpStatus)
+	}
+}
+
+// TestPipelineWebhooks_Fire_InactiveRoutine_409Synchronous pins that
+// the governance gate stays a SYNCHRONOUS sender-visible contract
+// under async dispatch: a 'proposed' routine answers 409 (policy
+// block), and nothing is dispatched in the background.
+func TestPipelineWebhooks_Fire_InactiveRoutine_409Synchronous(t *testing.T) {
+	runner := newBlockingRunner()
+	h, db, _, wsID := webhookHandlerRig(t)
+	h.SetRunner(runner)
+	seedAgentRunPipeline(t, db, wsID, "pln_gov", "gov-target")
+	if _, err := db.Exec(`UPDATE pipelines SET status = 'proposed' WHERE id = 'pln_gov'`); err != nil {
+		t.Fatalf("set status: %v", err)
+	}
+	wh := seedWebhookRow(t, db, wsID, "pln_gov", "gov-secret", true)
+
+	body := `{"event":"x"}`
+	req := httptest.NewRequest("POST", "/api/v1/webhooks/"+wh.Token, strings.NewReader(body))
+	req.SetPathValue("token", wh.Token)
+	req.Header.Set("X-Crewship-Signature", covPSWSign("gov-secret", body))
+	rr := httptest.NewRecorder()
+	h.FireWebhook(rr, req)
+
+	if rr.Code != 409 {
+		t.Fatalf("status = %d, want 409; body=%s", rr.Code, rr.Body.String())
+	}
+	h.WaitWebhookDispatches()
+	if n := runner.callCount(); n != 0 {
+		t.Errorf("runner invoked %d times for an inactive routine, want 0", n)
+	}
+}

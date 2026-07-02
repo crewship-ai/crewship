@@ -393,6 +393,14 @@ func routineStatusRunnable(status string) bool {
 	return status == "" || status == "active"
 }
 
+// StatusRunnable is the exported form of routineStatusRunnable, for
+// HTTP handlers that dispatch runs asynchronously and want to give the
+// sender a synchronous 409 for a 'proposed'/'disabled' routine instead
+// of a fire-and-forget 202 that dies in the background. The executor
+// still re-checks at run time — the governance airbag chokepoint below
+// stays authoritative for every dispatch path.
+func StatusRunnable(status string) bool { return routineStatusRunnable(status) }
+
 func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	if in.Mode == "" {
 		in.Mode = ModeRun

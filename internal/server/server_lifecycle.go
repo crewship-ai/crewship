@@ -104,6 +104,13 @@ func (s *Server) Start(ctx context.Context) error {
 				"interval", stuckQueueSweepInterval.String(),
 				"stale_after", stuckQueueStaleAfter.String())
 		}
+		// Async webhook dispatches (FireWebhook 202-then-run) derive
+		// their run context from the server lifecycle, not the HTTP
+		// request — a sender hanging up must not cancel an in-flight
+		// run, but shutdown (runCancel) must still stop it.
+		if pipes := s.apiRouter.PipelinesHandler; pipes != nil {
+			pipes.SetLifecycleContext(ctx)
+		}
 	}
 
 	// Re-attach mission orchestration loops lost in a previous crewshipd
@@ -340,6 +347,17 @@ func (s *Server) Shutdown() error {
 		s.logger.Error("ipc server shutdown error", "error", err)
 		if firstErr == nil {
 			firstErr = err
+		}
+	}
+
+	// Drain async webhook run goroutines BEFORE the journal writer
+	// closes so their terminal run entries still land. runCancel()
+	// above already cancelled their run context, so this returns as
+	// soon as in-flight executors observe the cancel and record
+	// their terminal state.
+	if s.apiRouter != nil {
+		if pipes := s.apiRouter.PipelinesHandler; pipes != nil {
+			pipes.WaitWebhookDispatches()
 		}
 	}
 

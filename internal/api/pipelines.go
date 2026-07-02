@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -40,6 +41,19 @@ type PipelineHandler struct {
 	// to the timestamp-based gate. Production wiring sets this to the
 	// process internal token at boot.
 	saveTokenSecret []byte
+
+	// lifecycleCtx is the context background webhook-dispatched runs
+	// derive from — the server's run context in production (cancelled
+	// at shutdown), context.Background() when unset. Deliberately NOT
+	// the HTTP request context: a webhook sender closing its connection
+	// must not cancel an in-flight run server-side.
+	lifecycleCtx context.Context
+
+	// webhookDispatchWG tracks the async FireWebhook run goroutines,
+	// mirroring AssignmentHandler.dispatchWG — graceful shutdown (and
+	// tests) drain in-flight dispatches via WaitWebhookDispatches
+	// instead of orphaning them mid-write.
+	webhookDispatchWG sync.WaitGroup
 }
 
 // NewPipelineHandler wires the pipeline subsystem against an
@@ -171,6 +185,33 @@ func (h *PipelineHandler) RunRegistry() *pipeline.RunRegistry {
 // endpoint return 503.
 func (h *PipelineHandler) SetWebhookStore(s *pipeline.WebhookStore) {
 	h.webhooks = s
+}
+
+// SetLifecycleContext wires the context async webhook dispatches
+// derive their run context from. Production passes the server's run
+// context (cancelled at shutdown) so background runs stop with the
+// process instead of racing the DB teardown. Unset → background runs
+// use context.Background().
+func (h *PipelineHandler) SetLifecycleContext(ctx context.Context) {
+	h.lifecycleCtx = ctx
+}
+
+// webhookDispatchContext resolves the base context for a background
+// webhook run.
+func (h *PipelineHandler) webhookDispatchContext() context.Context {
+	if h.lifecycleCtx != nil {
+		return h.lifecycleCtx
+	}
+	return context.Background()
+}
+
+// WaitWebhookDispatches blocks until every async webhook run goroutine
+// spawned so far has finished. Called during graceful shutdown after
+// the listener stops (and before the journal writer closes, so
+// terminal run entries still land); tests use it to drain
+// deterministically. Mirrors AssignmentHandler.WaitDispatches.
+func (h *PipelineHandler) WaitWebhookDispatches() {
+	h.webhookDispatchWG.Wait()
 }
 
 // newExecutor centralises Executor construction so every handler
