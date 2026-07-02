@@ -20,6 +20,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 func TestRecoverOrphanedRuns_SurfacesInterruptedChatReply(t *testing.T) {
@@ -65,8 +66,31 @@ func TestRecoverOrphanedRuns_SurfacesInterruptedChatReply(t *testing.T) {
 	s.journalWriter = journal.NewWriter(db.DB, logger, journal.WriterOptions{FlushSize: 1})
 	defer s.journalWriter.Close()
 
+	// Capture session-channel broadcasts through the seam the recovery
+	// path uses (the default wraps ws.Hub.Broadcast).
+	type sessionFrame struct {
+		chatID string
+		event  ws.ChatEvent
+	}
+	var frames []sessionFrame
+	s.broadcastSessionEvent = func(chatID string, event ws.ChatEvent) {
+		frames = append(frames, sessionFrame{chatID: chatID, event: event})
+	}
+
 	s.recoverOrphanedRuns(context.Background())
 	_ = s.journalWriter.Flush(context.Background())
+
+	// Live subscribers on session:c1 were told about the interruption —
+	// exactly once, and only for the chat orphan.
+	if len(frames) != 1 {
+		t.Fatalf("session broadcasts = %+v, want exactly one for c1", frames)
+	}
+	if frames[0].chatID != "c1" {
+		t.Errorf("broadcast chat = %q, want c1", frames[0].chatID)
+	}
+	if frames[0].event.Type != "error" || !strings.Contains(frames[0].event.Content, "interrupted by a server restart") {
+		t.Errorf("broadcast event = %+v, want error with restart copy", frames[0].event)
+	}
 
 	// The interrupted chat gained an explicit system/error turn so the
 	// user sees why there is no reply — on reload, not just live.

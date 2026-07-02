@@ -8,6 +8,13 @@ import { useWebSocket, type WSStatus, type WSMessage } from "@/hooks/use-websock
  *  A run is turn-capped so a healthy stream never approaches this. */
 const MAX_PENDING_EVENTS = 1000
 
+/** Copy shown when a run ends without the agent producing any reply (issue
+ *  #545). The backend streams the same copy as an explicit error event; this
+ *  constant is the client-side fallback for a `done` that arrives with no
+ *  reply turn at all (older server / lost error frame), so the transcript is
+ *  never left silently empty. */
+export const NO_OUTPUT_ERROR = "The agent returned no output — try again"
+
 /** uuid() is unavailable in non-secure (HTTP) contexts.
  *  Fall back to a simple Math.random-based UUID when needed. */
 function uuid(): string {
@@ -208,10 +215,17 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
         authorUserId: msg.authorUserId,
       })
     } else if (msg.role === "system") {
+      // Persisted system turns may carry structured parts (e.g. the error
+      // turn the backend writes for a zero-output run or a reply interrupted
+      // by a server restart). Honor them so reloads render the same error
+      // bubble the live stream showed, instead of downgrading to plain text.
+      const parts: TurnPart[] = msg.parts && msg.parts.length > 0
+        ? msg.parts.map((p, i) => historyPartToTurnPart(p, `${msg.id}-${i}`, msg.timestamp))
+        : [{ id: msg.id, type: msg.eventType === "error" ? "error" : "text", content: msg.content, timestamp: msg.timestamp }]
       turns.push({
         id: msg.id,
         role: "system",
-        parts: [{ id: msg.id, type: msg.eventType === "error" ? "error" : "text", content: msg.content, timestamp: msg.timestamp }],
+        parts,
         isStreaming: false,
         timestamp: msg.timestamp,
       })
@@ -270,6 +284,11 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
 export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamReset }: UseChatOptions) {
   const [turns, setTurns] = useState<ChatTurn[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
+  // Mirror of isStreaming for the (deps: []) event handlers — lets
+  // handleDoneEvent tell "a local send is pending" apart from an
+  // unsolicited done (another tab's run) without being re-created.
+  const isStreamingRef = useRef(false)
+  isStreamingRef.current = isStreaming
   const textBufferRef = useRef("")
   const thinkingBufferRef = useRef("")
   // Tracked in a ref so the (deps: []) WS handlers see the latest value without
@@ -848,6 +867,13 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     // ChatTurn.metadata.trace_id so feedback POSTs from this turn can
     // include the trace id for eval-mining correlation.
     const traceID = metadata && typeof metadata.trace_id === "string" ? (metadata.trace_id as string) : undefined
+    // A done marked no_reply legitimately carries no assistant turn (group
+    // chat where the agent wasn't @mentioned) — never synthesize an error
+    // for it.
+    const noReply = metadata?.no_reply === true
+    // Whether OUR run was pending when this done arrived. Captured before
+    // the setTurns updater (which React may invoke more than once).
+    const localRunPending = isStreamingRef.current
     setTurns((prev) => {
       // Remove any orphaned status-only assistant turns and finalize the streaming turn
       const cleaned = prev.filter((t) => {
@@ -871,6 +897,25 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
           finalTurn.metadata = { ...(last.metadata ?? {}), trace_id: traceID }
         }
         return [...cleaned.slice(0, -1), finalTurn]
+      }
+      // done arrived while OUR send was pending, but nothing replied — no
+      // assistant turn, no error event (zero-output run, #545, on a server
+      // that couldn't say more / a lost error frame). Leaving the transcript
+      // as just the user's message is indistinguishable from a broken app,
+      // so surface an explicit error turn. Assistant role so the Regenerate
+      // retry affordance renders under it. Skipped for no_reply dones and
+      // for turns that already got a reply/error (last isn't our user turn).
+      if (!noReply && localRunPending && last?.role === "user" && !last.authorUserId) {
+        return [
+          ...cleaned,
+          {
+            id: uuid(),
+            role: "assistant",
+            parts: [{ id: uuid(), type: "error" as TurnPartType, content: NO_OUTPUT_ERROR, timestamp: new Date() }],
+            isStreaming: false,
+            timestamp: new Date(),
+          },
+        ]
       }
       return cleaned
     })
@@ -928,11 +973,15 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
           { ...last, parts: [...finalizedParts, errorPart], isStreaming: false },
         ]
       }
+      // No open assistant turn (e.g. a zero-output run that streamed nothing
+      // before failing, #545). Render the error as an ASSISTANT turn so the
+      // chat's existing retry affordance — the Regenerate button under the
+      // last assistant turn — appears with the error bubble.
       return [
         ...prev,
         {
           id: uuid(),
-          role: "system",
+          role: "assistant",
           parts: [errorPart],
           isStreaming: false,
           timestamp: new Date(),

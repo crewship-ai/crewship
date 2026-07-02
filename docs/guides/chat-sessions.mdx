@@ -369,7 +369,7 @@ These query params are stable. Do not link to the Next.js internal route segment
 
 ## Common pitfalls
 
-<Accordion title="Footguns and surprising behaviour (13)">
+<Accordion title="Footguns and surprising behaviour (14)">
 
 - **Edit-and-resend truncates the active branch — but the tail isn't gone.** Editing a user message moves every message after it into `chat_branches`. The UI shows a small "view earlier branches" affordance, but a hurried operator may believe they've lost the alternate response. Train the muscle of opening the branch picker before assuming work is unrecoverable.
 - **Reactions are workspace-shared, not per-user-private.** A 👎 from one operator is visible to every other operator in the same workspace, and is also surfaced to the agent on the next turn. Use reactions as a deliberate signal — not as a private bookmark. If you need a private flag, use the [Inbox](/guides/inbox) pin instead.
@@ -383,6 +383,7 @@ These query params are stable. Do not link to the Next.js internal route segment
 - **Shallow router state evaporates on hard navigation.** `panel=files` survives in-app tab switches and back/forward, but a hard reload that hits a 3xx redirect (e.g. auth expiry → login → bounce) loses everything past `?session=…`. Bookmark with intent, not panic.
 - **WS reconnect dedupes by `request_id`, not by content.** Two genuinely different sends that collide on a re-used `request_id` will silently merge into one turn server-side. Use a fresh UUID per logical send.
 - **Right-panel tabs don't unsubscribe on inactive.** Switching from Terminal to Files stops the *render* of the terminal stream but the WS subscription stays live in the background. This is intentional (re-opening the tab is instant) but means a workspace with many open chat tabs holds many parallel sidecar exec streams — heavy for the sidecar.
+- **A turn never ends in silence — two explicit error states cover the edge cases.** A run that finishes without producing any output (a swallowed safety refusal, prompt-budget pressure, or the agent CLI exiting cleanly with no stdout) shows *"The agent returned no output — try again"* as an error bubble, and the run is recorded as FAILED. A reply cut off by a hard server stop (OOM/SIGKILL/power loss) gains *"The agent's reply was interrupted by a server restart — try again"* on the next boot. Both turns are persisted, so they appear on reload as well as live; use **Regenerate** (or resend) to retry.
 
 </Accordion>
 
