@@ -144,11 +144,17 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const session = useSession()
   const currentUserId = session.data?.user?.id ?? null
 
-  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, isStreaming, connectionStatus } = useChat({
+  // Bumped to force a history refetch when the server can't replay an in-flight
+  // run (resume_reset — the replay buffer overflowed). Rare; a safety net.
+  const [historyReloadNonce, setHistoryReloadNonce] = useState(0)
+  const requestHistoryReload = useCallback(() => setHistoryReloadNonce((n) => n + 1), [])
+
+  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, isStreaming, connectionStatus } = useChat({
     wsUrl: getWsUrl(),
     getToken: getWsToken,
     sessionId,
     currentUserId: currentUserId ?? undefined,
+    onStreamReset: requestHistoryReload,
   })
 
   useEffect(() => {
@@ -195,7 +201,11 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       if (cancelled) return
 
       if (result === "retry") {
-        // All attempts failed — do NOT wipe; only stop the loading spinner.
+        // All attempts failed — do NOT wipe existing turns; only stop the
+        // loading spinner. Still mark history "settled" so the streaming gate
+        // opens: otherwise a transient history 5xx would freeze the live stream
+        // (every seq'd event would buffer unseen behind the closed gate).
+        markHistoryUnavailable()
         setHistoryLoading(false)
         return
       }
@@ -216,7 +226,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
 
     void run()
     return () => { cancelled = true }
-  }, [sessionId, workspaceId, loadHistory])
+  }, [sessionId, workspaceId, loadHistory, markHistoryUnavailable, historyReloadNonce])
 
   // Group-chat participants → display-name map for author attribution. Empty
   // for a private 1:1 chat (the endpoint returns no participants), so the

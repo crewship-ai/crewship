@@ -75,6 +75,8 @@ func (c *Client) readPump() {
 		case "cancel_message":
 			c.hub.logger.Debug("cancel requested", "user_id", c.userID)
 			c.handleCancelMessage(msg)
+		case "resume":
+			c.handleResume(msg)
 		}
 	}
 }
@@ -326,6 +328,57 @@ func (c *Client) handleCancelMessage(msg ClientMessage) {
 	}
 }
 
+type resumePayload struct {
+	ChatID  string `json:"session_id"`
+	LastSeq int64  `json:"last_seq"`
+}
+
+// handleResume replays the in-flight run's buffered frames to a client that
+// (re)connected mid-generation, so it catches up on everything it missed. Replay
+// is offered ONLY while a run is still active: a completed run is already
+// persisted and served from chat history, so replaying it too would double it.
+// A truncated buffer answers with "resume_reset" telling the client to reload
+// history instead. Requires the same channel authorization as subscribe.
+func (c *Client) handleResume(msg ClientMessage) {
+	var payload resumePayload
+	raw := msg.Payload
+	if len(raw) > 0 && raw[0] == '"' {
+		var unwrapped string
+		if err := json.Unmarshal(raw, &unwrapped); err == nil {
+			raw = json.RawMessage(unwrapped)
+		}
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.ChatID == "" {
+		return
+	}
+
+	channel := "session:" + payload.ChatID
+	// Deny by default: same authorization gate as subscribe so a client can't
+	// replay another workspace's/session's stream by guessing a chat id.
+	if c.hub.channelAuth == nil || !c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, channel) {
+		c.hub.logger.Warn("resume denied", "user_id", c.userID, "channel", channel)
+		return
+	}
+
+	res := c.hub.streams.replay(channel, payload.LastSeq)
+	if !res.found || !res.active {
+		// No in-flight run (or it already finished + persisted) — history covers
+		// it; nothing to replay.
+		return
+	}
+	if res.reset {
+		// Buffer overflowed and can't serve a coherent replay — tell the client
+		// to reload history.
+		if data, err := json.Marshal(ServerMessage{Type: "resume_reset", Channel: channel}); err == nil {
+			c.safeSend(data)
+		}
+		return
+	}
+	for _, frame := range res.frames {
+		c.safeSend(frame)
+	}
+}
+
 func (c *Client) handleSendMessage(msg ClientMessage) {
 	c.hub.logger.Debug("handleSendMessage", "user_id", c.userID, "payload_len", len(msg.Payload))
 	if c.hub.chatHandler == nil {
@@ -387,8 +440,12 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 	go func() {
 		channel := "session:" + payload.ChatID
 
-		// Create a cancellable context for this run
-		runCtx, runCancel := context.WithCancel(c.ctx)
+		// Derive the run context from the HUB's server-lifetime context, NOT the
+		// client socket (c.ctx). A client disconnect (navigating away, refresh,
+		// network blip) must not cancel an in-flight generation — the run has to
+		// finish and persist server-side so the reply is never lost. Explicit
+		// Stop still cancels this run via cancelFns (handleCancelMessage).
+		runCtx, runCancel := context.WithCancel(c.hub.baseRunContext())
 		defer runCancel()
 
 		// Reject if a run is already in progress for this user+session
@@ -412,16 +469,37 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 			c.hub.cancelMu.Unlock()
 		}()
 
-		streamFn := func(event ChatEvent) {
-			msg := ServerMessage{
-				Type:    "chat_event",
-				Channel: channel,
-				Payload: event,
-			}
-			resp, _ := json.Marshal(msg)
-			c.safeSend(resp)
+		// Start (reset) this session's replay buffer for the run, and mark it
+		// ended once the run returns — a client that reconnects mid-run replays
+		// the buffered gap via the "resume" message.
+		startSeq := c.hub.streams.begin(channel)
+		defer c.hub.streams.end(channel)
 
-			c.hub.BroadcastExcept(channel, c, msg)
+		// emit stamps a per-session seq on msg, buffers the frame for replay, and
+		// fans out the EXACT bytes to the sender (direct) and every other/returning
+		// subscriber (dispatch), so all recipients see identical seq numbers.
+		emit := func(msg *ServerMessage) {
+			data, ok := c.hub.streams.record(channel, msg)
+			if !ok {
+				return
+			}
+			c.safeSend(data)
+			c.hub.dispatch(channel, data, func(cl *Client) bool { return cl != c })
+		}
+
+		// run_begin is the first frame of the run. It carries the baseline seq
+		// (from_seq = counter before this run) so any client — the sender, a
+		// second tab, or a client that reconnects mid-run and replays the buffer
+		// — can anchor its in-order reassembly without waiting for sequence
+		// numbers that belong to a previous run on the same channel.
+		emit(&ServerMessage{
+			Type:    "run_begin",
+			Channel: channel,
+			Payload: map[string]any{"from_seq": startSeq},
+		})
+
+		streamFn := func(event ChatEvent) {
+			emit(&ServerMessage{Type: "chat_event", Channel: channel, Payload: event})
 		}
 
 		err := c.hub.chatHandler.HandleChatMessage(
@@ -439,12 +517,13 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 				return
 			}
 			c.hub.logger.Error("chat message error", "error", err, "session_id", payload.ChatID)
-			errResp, _ := json.Marshal(ServerMessage{
-				Type:    "chat_event",
-				Channel: channel,
-				Payload: ChatEvent{Type: "error", Content: "an error occurred processing your message"},
-			})
-			c.safeSend(errResp)
+			// Route through streamFn (emit) so the error is seq'd, buffered for
+			// replay, and dispatched to EVERY subscriber — not just the still-
+			// connected originator. Follow with a terminal `done` so a second tab
+			// or a client that reconnects after the failure leaves the streaming
+			// state instead of spinning forever.
+			streamFn(ChatEvent{Type: "error", Content: "an error occurred processing your message"})
+			streamFn(ChatEvent{Type: "done", Content: ""})
 		}
 	}()
 }

@@ -25,6 +25,10 @@ interface UseWebSocketOptions {
   getToken: () => Promise<string | null>
   onMessage?: (msg: WSMessage) => void
   onStatusChange?: (status: WSStatus) => void
+  /** Fired every time the socket (re)connects (ws.onopen). Consumers use this
+   *  to (re)subscribe to channels and resume any in-flight stream after a
+   *  reconnect — a fresh socket has no server-side subscriptions. */
+  onConnect?: () => void
 }
 
 /** Exponential backoff with jitter: min(base * 2^attempt, max) + random(0, jitter) */
@@ -73,6 +77,7 @@ export function useWebSocket({
   getToken,
   onMessage,
   onStatusChange,
+  onConnect,
 }: UseWebSocketOptions) {
   const [status, setStatus] = useState<WSStatus>("disconnected")
   const wsRef = useRef<WebSocket | null>(null)
@@ -85,9 +90,11 @@ export function useWebSocket({
   // pass non-memoized functions.
   const onMessageRef = useRef(onMessage)
   const onStatusChangeRef = useRef(onStatusChange)
+  const onConnectRef = useRef(onConnect)
   const getTokenRef = useRef(getToken)
   useEffect(() => { onMessageRef.current = onMessage }, [onMessage])
   useEffect(() => { onStatusChangeRef.current = onStatusChange }, [onStatusChange])
+  useEffect(() => { onConnectRef.current = onConnect }, [onConnect])
   useEffect(() => { getTokenRef.current = getToken }, [getToken])
 
   const updateStatus = useCallback((s: WSStatus) => {
@@ -206,6 +213,9 @@ export function useWebSocket({
     ws.onopen = () => {
       reconnectAttemptsRef.current = 0
       updateStatus("connected")
+      // Re-establish subscriptions / resume in-flight streams on every
+      // (re)connect — the new socket starts with no server-side state.
+      onConnectRef.current?.()
     }
 
     ws.onmessage = (event) => {

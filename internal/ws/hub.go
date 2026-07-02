@@ -62,6 +62,18 @@ type Hub struct {
 	cancelMu     sync.Mutex
 	channelAuth  ChannelAuthorizer
 
+	// streams holds per-session replay buffers so an agent run's output can be
+	// resumed by a client that reconnects mid-generation. See session_stream.go.
+	streams *sessionStreams
+
+	// baseCtx is the hub's server-lifetime context, captured in Run. Agent runs
+	// derive their context from THIS, not from the originating client socket, so
+	// a client disconnect (navigating away, network blip) no longer cancels an
+	// in-flight generation — the run finishes and persists server-side. Explicit
+	// Stop still cancels via cancelFns. Guarded by baseCtxMu.
+	baseCtx   context.Context
+	baseCtxMu sync.RWMutex
+
 	// Counts events dropped because a client's send buffer was full. The
 	// channel-level dispatch (Broadcast, BroadcastExcept) uses a non-blocking
 	// send to avoid one slow consumer stalling the whole hub; we lose the
@@ -103,10 +115,17 @@ type ClientMessage struct {
 }
 
 // ServerMessage is a JSON message sent from the server to WebSocket clients.
+//
+// Seq is a per-session monotonic sequence number stamped on streamed chat
+// events so a reconnecting client can replay the gap and reassemble events in
+// order without duplicates (Last-Event-ID pattern). Zero/omitted for frames
+// that aren't part of a resumable run stream (heartbeats, workspace/crew
+// broadcasts, control frames).
 type ServerMessage struct {
 	Type    string      `json:"type"`
 	Channel string      `json:"channel,omitempty"`
 	Payload interface{} `json:"payload"`
+	Seq     int64       `json:"seq,omitempty"`
 }
 
 // ChannelMessage is an internal message routed to all subscribers of a channel.
@@ -202,18 +221,46 @@ func NewHub(logger *slog.Logger, chatHandler ChatHandler, jwtValidator *auth.JWT
 		unregister:   make(chan *Client),
 		broadcast:    make(chan ChannelMessage, 256),
 		cancelFns:    make(map[string]context.CancelFunc),
+		streams:      newSessionStreams(),
 	}
+}
+
+// baseRunContext returns the context an agent run should derive from — the
+// hub's server-lifetime context, so a client disconnect can't cancel the run.
+// Falls back to context.Background() if Run hasn't captured a context yet
+// (constructed-but-not-started hub, e.g. some unit tests).
+func (h *Hub) baseRunContext() context.Context {
+	h.baseCtxMu.RLock()
+	ctx := h.baseCtx
+	h.baseCtxMu.RUnlock()
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
 }
 
 // Run starts the hub's event loop, processing client registrations,
 // unregistrations, and broadcast messages until ctx is cancelled.
 func (h *Hub) Run(ctx context.Context) {
 	h.logger.Info("websocket hub started")
+	// Capture the server-lifetime context so agent runs derive from it rather
+	// than from the client socket (see baseRunContext / handleSendMessage).
+	h.baseCtxMu.Lock()
+	h.baseCtx = ctx
+	h.baseCtxMu.Unlock()
+
+	// Sweep ended session-replay buffers past their grace TTL so a completed
+	// run's buffer doesn't linger forever.
+	sweepTicker := time.NewTicker(sessionStreamSweepInterval)
+	defer sweepTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			h.logger.Info("websocket hub stopping")
 			return
+		case <-sweepTicker.C:
+			h.streams.sweep(time.Now())
 		case client := <-h.register:
 			h.mu.Lock()
 			h.clients[client] = true

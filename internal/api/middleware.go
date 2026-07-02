@@ -296,9 +296,20 @@ func (m *AuthMiddleware) RequireWorkspace(next http.Handler) http.Handler {
 			return
 		}
 
+		// Source order: ?workspace_id= (query) → {workspaceId} (path) →
+		// X-Workspace-ID (header). Query/path keep priority so the ~150
+		// existing callers behave byte-for-byte as before; the header is a
+		// fallback for surfaces that pass workspace out-of-band (the agent
+		// Memory tab, crew policy controls, privacy section). All three
+		// sources are attacker-controllable and equally validated against
+		// workspace membership below, so the header is a source of input,
+		// not of trust — reading it can't escalate privilege.
 		workspaceID := r.URL.Query().Get("workspace_id")
 		if workspaceID == "" {
 			workspaceID = r.PathValue("workspaceId")
+		}
+		if workspaceID == "" {
+			workspaceID = r.Header.Get("X-Workspace-ID")
 		}
 		if workspaceID == "" {
 			replyError(w, http.StatusBadRequest, "workspace_id is required")

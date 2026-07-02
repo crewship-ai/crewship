@@ -1,7 +1,12 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useWebSocket, type WSStatus } from "@/hooks/use-websocket"
+import { useWebSocket, type WSStatus, type WSMessage } from "@/hooks/use-websocket"
+
+/** Upper bound on out-of-order events held during reassembly. Past this, a gap
+ *  is assumed permanently lost and the stream skips ahead so it never freezes.
+ *  A run is turn-capped so a healthy stream never approaches this. */
+const MAX_PENDING_EVENTS = 1000
 
 /** uuid() is unavailable in non-secure (HTTP) contexts.
  *  Fall back to a simple Math.random-based UUID when needed. */
@@ -166,6 +171,10 @@ interface UseChatOptions {
    *  subscribers including the sender) so the message we already rendered
    *  optimistically doesn't appear twice. */
   currentUserId?: string
+  /** Called when the server can't replay an in-flight run (the replay buffer
+   *  overflowed): the chat surface should reload history rather than render a
+   *  partial stream. Optional — tests and simple callers omit it. */
+  onStreamReset?: () => void
 }
 
 /** Map a structured history part to a renderable TurnPart, coercing unknown
@@ -258,7 +267,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
  * Handles streaming text/thinking/tool events, turn grouping, history loading,
  * message editing, regeneration, and stop/cancel.
  */
-export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOptions) {
+export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamReset }: UseChatOptions) {
   const [turns, setTurns] = useState<ChatTurn[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const textBufferRef = useRef("")
@@ -283,6 +292,38 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
   // still flow through.
   const cancelledRef = useRef(false)
 
+  // --- Resumable-stream reassembly ---------------------------------------
+  // Streamed chat events carry a per-session monotonic seq (see internal/ws).
+  // On reconnect the client replays the gap, so the same event can arrive twice
+  // and out of order (replay interleaved with live). lastSeqRef is the highest
+  // contiguous seq applied; pendingRef holds out-of-order events keyed by seq
+  // until their predecessors arrive. This guarantees every event is applied
+  // exactly once, in order — the core "never lose (or double) text" invariant.
+  const lastSeqRef = useRef(0)
+  const pendingRef = useRef<Map<number, { eventType?: StreamEventType; content: string; metadata?: Record<string, unknown> }>>(new Map())
+  // Live/replayed events are held until the session's history has loaded, so a
+  // late-resolving history fetch can't clobber an already-rendered in-flight
+  // run (the mount race). loadHistory flips this true and drains.
+  const historyLoadedRef = useRef(false)
+  // Refs so the stable onConnect callback (passed to useWebSocket before `send`
+  // exists) can resubscribe/resume without being re-created.
+  const sendRef = useRef<((msg: WSMessage) => void) | null>(null)
+  const sessionIdRef = useRef(sessionId)
+  sessionIdRef.current = sessionId
+  // Set by the caller; invoked when history must be reloaded — either the server
+  // said the replay buffer overflowed (resume_reset) or we reconnected and a run
+  // may have finished/advanced while we were away.
+  const onStreamResetRef = useRef<(() => void) | null>(null)
+  onStreamResetRef.current = onStreamReset ?? null
+  // False until the socket's first open, so we can tell a fresh mount (history is
+  // already loading) from a reconnect (must reset + reload to recover a run that
+  // finished or advanced while disconnected).
+  const hasConnectedRef = useRef(false)
+  // After a truncated-buffer resume_reset there is no run_begin to re-anchor the
+  // cursor, so the next seq'd frame seen becomes the new baseline (the truncated
+  // middle is unrecoverable; we resync to the live tail).
+  const adoptNextSeqRef = useRef(false)
+
   // Reset stream-side state when session changes. We deliberately do NOT
   // reset turns here — that would cause a blank-canvas flash between the
   // old session and the new one's history fetch. The chat-panel calls
@@ -300,6 +341,11 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
       cancelAnimationFrame(rafIdRef.current)
       rafIdRef.current = null
     }
+    // Reset resumable-stream reassembly for the new session.
+    lastSeqRef.current = 0
+    pendingRef.current.clear()
+    historyLoadedRef.current = false
+    adoptNextSeqRef.current = false
   }, [sessionId])
 
   // Cancel any in-flight frame on unmount so the scheduled callback never
@@ -390,60 +436,49 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
   }, [])
 
   const handleThinkingEvent = useCallback(
-    (content: string, metadata: Record<string, unknown> | undefined) => {
-      // Streaming deltas (thinking_delta from backend) accumulate into one part.
-      // Complete thinking blocks create separate parts.
-      const isStreamingDelta = metadata?.streaming === true
-      if (isStreamingDelta) {
-        thinkingBufferRef.current += content
-      }
+    (content: string) => {
+      // A single reasoning pass is chunked into many `thinking` events by the
+      // adapter (thinking_delta) and the stdout scrubber (buffered-tail flushes
+      // that drop the streaming flag). We must NOT relabel each chunk a separate
+      // "Thought" card — the boundaries are arbitrary and split sentences. So we
+      // accumulate CONSECUTIVE thinking chunks into one part regardless of the
+      // streaming flag; a non-thinking event (text/tool) closes the block, so
+      // genuinely separate reasoning passes (e.g. think → tool → think) stay
+      // distinct.
       setTurns((prev) => {
         const last = prev[prev.length - 1]
         if (last?.role === "assistant" && last.isStreaming) {
-          if (isStreamingDelta) {
-            // Find existing streaming thinking part to accumulate into
-            const thinkingIdx = last.parts.findLastIndex(
-              (p) => p.type === "thinking" && p.isStreaming
-            )
-            if (thinkingIdx >= 0) {
-              const updatedParts = [...last.parts]
-              updatedParts[thinkingIdx] = {
-                ...updatedParts[thinkingIdx],
-                content: thinkingBufferRef.current,
-              }
-              return [...prev.slice(0, -1), { ...last, parts: updatedParts }]
+          const lastPart = last.parts[last.parts.length - 1]
+          if (lastPart?.type === "thinking") {
+            // Adjacent thinking chunk — append into the open block.
+            thinkingBufferRef.current += content
+            const updatedParts = [...last.parts]
+            updatedParts[updatedParts.length - 1] = {
+              ...lastPart,
+              content: thinkingBufferRef.current,
+              isStreaming: true,
             }
-            // First thinking delta — remove status parts, create new streaming thinking part
-            thinkingBufferRef.current = content
-            const cleanedParts = last.parts.filter((p) => p.type !== "status")
-            return [
-              ...prev.slice(0, -1),
-              {
-                ...last,
-                parts: [
-                  ...cleanedParts,
-                  { id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: true, timestamp: new Date() },
-                ],
-              },
-            ]
+            return [...prev.slice(0, -1), { ...last, parts: updatedParts }]
           }
-          // Complete thinking block — remove status parts, create a new non-streaming part
-          const cleanedParts = last.parts.filter((p) => p.type !== "status")
+          // First thinking chunk after text/tool/status — finalize any open
+          // streaming text part, drop status parts, open a fresh thinking block.
+          thinkingBufferRef.current = content
+          const cleanedParts = last.parts
+            .filter((p) => p.type !== "status")
+            .map((p) => (p.type === "text" && p.isStreaming ? { ...p, isStreaming: false } : p))
           return [
             ...prev.slice(0, -1),
             {
               ...last,
               parts: [
                 ...cleanedParts,
-                { id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: false, timestamp: new Date() },
+                { id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: true, timestamp: new Date() },
               ],
             },
           ]
         }
         // Create new assistant turn — remove any orphaned status-only turns
-        if (isStreamingDelta) {
-          thinkingBufferRef.current = content
-        }
+        thinkingBufferRef.current = content
         const cleaned = prev.filter((t) => {
           if (t.role === "assistant" && t.isStreaming && t.parts.every((p) => p.type === "status")) {
             return false
@@ -455,7 +490,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
           {
             id: uuid(),
             role: "assistant",
-            parts: [{ id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: !isStreamingDelta ? false : true, timestamp: new Date() }],
+            parts: [{ id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: true, timestamp: new Date() }],
             isStreaming: true,
             timestamp: new Date(),
           },
@@ -503,23 +538,26 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
   )
 
   const handleTextEvent = useCallback((content: string) => {
-    textBufferRef.current += content
     setTurns((prev) => {
       const last = prev[prev.length - 1]
       if (last?.role === "assistant" && last.isStreaming) {
-        // Find existing streaming text part
-        const textIdx = last.parts.findLastIndex(
-          (p) => p.type === "text" && p.isStreaming
-        )
-        if (textIdx >= 0) {
+        // Only accumulate into the IMMEDIATELY-preceding text part. Matching any
+        // earlier streaming text part (the old findLastIndex) merged text that
+        // arrived AFTER a tool_result back into the pre-tool bubble — so the
+        // final answer landed above the tool call and nothing rendered after it.
+        // A tool/thinking event between two text runs finalizes the first, so
+        // this check starts a new part in the correct position.
+        const lastPart = last.parts[last.parts.length - 1]
+        if (lastPart?.type === "text" && lastPart.isStreaming) {
+          textBufferRef.current += content
           const updatedParts = [...last.parts]
-          updatedParts[textIdx] = {
-            ...updatedParts[textIdx],
+          updatedParts[updatedParts.length - 1] = {
+            ...lastPart,
             content: textBufferRef.current,
           }
           return [...prev.slice(0, -1), { ...last, parts: updatedParts }]
         }
-        // First text arriving: remove status parts + close streaming thinking
+        // First text of a new run: remove status parts + close streaming thinking
         const cleanedParts = last.parts
           .filter((p) => p.type !== "status")
           .map((p) =>
@@ -591,6 +629,11 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
 
   const handleToolCallEvent = useCallback(
     (content: string, metadata: Record<string, unknown> | undefined) => {
+      // A tool ends the current text/thinking run: reset the accumulation
+      // buffers so any text/thinking that follows opens a fresh part in its
+      // correct position instead of appending to the pre-tool bubble.
+      textBufferRef.current = ""
+      thinkingBufferRef.current = ""
       setTurns((prev) => {
         const last = prev[prev.length - 1]
         const part: TurnPart = {
@@ -601,9 +644,14 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
           timestamp: new Date(),
         }
         if (last?.role === "assistant" && last.isStreaming) {
+          const finalizedParts = last.parts.map((p) =>
+            (p.type === "text" || p.type === "thinking") && p.isStreaming
+              ? { ...p, isStreaming: false }
+              : p
+          )
           return [
             ...prev.slice(0, -1),
-            { ...last, parts: [...last.parts, part] },
+            { ...last, parts: [...finalizedParts, part] },
           ]
         }
         return [
@@ -623,6 +671,10 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
 
   const handleToolResultEvent = useCallback(
     (content: string, metadata: Record<string, unknown> | undefined) => {
+      // Same as tool_call: the result closes the current text/thinking run so
+      // the model's follow-up answer opens a fresh part AFTER the result.
+      textBufferRef.current = ""
+      thinkingBufferRef.current = ""
       setTurns((prev) => {
         const last = prev[prev.length - 1]
         const part: TurnPart = {
@@ -633,16 +685,18 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
           timestamp: new Date(),
         }
         if (last?.role === "assistant" && last.isStreaming) {
-          // Try to mark matching tool_call as completed via tool_use_id
+          // Try to mark matching tool_call as completed via tool_use_id, and
+          // finalize any still-open streaming text/thinking part.
           const toolUseId = metadata?.tool_use_id as string | undefined
-          const updatedParts = toolUseId
-            ? last.parts.map((p) => {
-                if (p.type === "tool_call" && p.metadata?.tool_id === toolUseId) {
-                  return { ...p, metadata: { ...p.metadata, completed: true } }
-                }
-                return p
-              })
-            : last.parts
+          const updatedParts = last.parts.map((p) => {
+            if (toolUseId && p.type === "tool_call" && p.metadata?.tool_id === toolUseId) {
+              return { ...p, metadata: { ...p.metadata, completed: true } }
+            }
+            if ((p.type === "text" || p.type === "thinking") && p.isStreaming) {
+              return { ...p, isStreaming: false }
+            }
+            return p
+          })
           return [
             ...prev.slice(0, -1),
             { ...last, parts: [...updatedParts, part] },
@@ -864,9 +918,14 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
         timestamp: new Date(),
       }
       if (last?.role === "assistant" && last.isStreaming) {
+        // Finalize any open streaming parts (e.g. a thinking block) so they stop
+        // rendering a "thinking…" spinner on a turn that has actually errored.
+        const finalizedParts = last.parts.map((p) =>
+          p.isStreaming ? { ...p, isStreaming: false } : p,
+        )
         return [
           ...prev.slice(0, -1),
-          { ...last, parts: [...last.parts, errorPart], isStreaming: false },
+          { ...last, parts: [...finalizedParts, errorPart], isStreaming: false },
         ]
       }
       return [
@@ -885,12 +944,94 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
     setIsStreaming(false)
   }, [])
 
+  // applyChatEvent dispatches a single (already in-order) chat event to the
+  // per-type handlers. Text is coalesced per animation frame; every other event
+  // first flushes buffered text so nothing renders ahead of the text it
+  // followed on the wire.
+  const applyChatEvent = useCallback(
+    (eventType: StreamEventType | undefined, content: string, metadata?: Record<string, unknown>) => {
+      if (eventType === "text") {
+        pendingTextRef.current += content
+        scheduleTextFlush()
+        return
+      }
+      flushPendingText()
+      switch (eventType) {
+        case "status": handleStatusEvent(content); break
+        case "thinking": handleThinkingEvent(content); break
+        case "tool_call": handleToolCallEvent(content, metadata); break
+        case "tool_result": handleToolResultEvent(content, metadata); break
+        case "image": handleImageEvent(content, metadata); break
+        case "result": handleResultEvent(content, metadata); break
+        case "system": handleSystemEvent(content, metadata); break
+        case "done": handleDoneEvent(metadata); break
+        case "crew_provisioning": handleCrewProvisioningEvent(content, metadata); break
+        case "user_message": handleUserMessageEvent(content, metadata); break
+        case "error": handleErrorEvent(content); break
+      }
+    },
+    [
+      scheduleTextFlush, flushPendingText, handleStatusEvent, handleThinkingEvent,
+      handleToolCallEvent, handleToolResultEvent, handleImageEvent, handleResultEvent,
+      handleSystemEvent, handleDoneEvent, handleCrewProvisioningEvent, handleUserMessageEvent,
+      handleErrorEvent,
+    ],
+  )
+
+  // drainPending applies buffered events in strict seq order, as far as the
+  // contiguous run allows. Gated on history having loaded so a late history
+  // fetch can't wipe an already-rendered in-flight run.
+  const drainPending = useCallback(() => {
+    if (!historyLoadedRef.current) return
+    const p = pendingRef.current
+    for (;;) {
+      const next = p.get(lastSeqRef.current + 1)
+      if (next === undefined) break
+      p.delete(lastSeqRef.current + 1)
+      lastSeqRef.current += 1
+      applyChatEvent(next.eventType, next.content, next.metadata)
+    }
+  }, [applyChatEvent])
+
+  // ingestChatEvent reassembles the resumable stream: unseq'd events (legacy /
+  // non-run broadcasts) apply immediately; seq'd events are deduped and ordered.
+  const ingestChatEvent = useCallback(
+    (seq: number, eventType: StreamEventType | undefined, content: string, metadata?: Record<string, unknown>) => {
+      if (!seq) {
+        // No sequence number — not part of a resumable run stream (legacy
+        // server, or a non-run broadcast). Apply immediately, as before.
+        applyChatEvent(eventType, content, metadata)
+        return
+      }
+      // After a truncated resume_reset, adopt the first seq seen as the baseline
+      // so the live tail can drain (the dropped middle is unrecoverable).
+      if (adoptNextSeqRef.current) {
+        adoptNextSeqRef.current = false
+        if (seq - 1 > lastSeqRef.current) lastSeqRef.current = seq - 1
+      }
+      if (seq <= lastSeqRef.current) return // already applied — duplicate from replay∩live
+      pendingRef.current.set(seq, { eventType, content, metadata })
+      // Safety valve: if a gap never fills (a truly lost frame) the buffer would
+      // grow forever. Past the cap, skip to the smallest pending seq so the
+      // stream keeps moving rather than freezing.
+      if (pendingRef.current.size > MAX_PENDING_EVENTS) {
+        let min = Infinity
+        for (const k of pendingRef.current.keys()) if (k < min) min = k
+        if (min !== Infinity && min - 1 > lastSeqRef.current) lastSeqRef.current = min - 1
+      }
+      drainPending()
+    },
+    [applyChatEvent, drainPending],
+  )
+
   const handleMessage = useCallback(
     (msg: { type: string; payload?: string | Record<string, unknown>; channel?: string; [key: string]: unknown }) => {
+      const channelSessionId = msg.channel?.startsWith("session:") ? msg.channel.slice(8) : undefined
+      const envSeq = typeof msg.seq === "number" ? (msg.seq as number) : 0
+
       // Handle assignment lifecycle events
       const assignmentTypes: AssignmentEventType[] = ["assignment_created", "assignment_running", "assignment_completed", "assignment_failed"]
       if (assignmentTypes.includes(msg.type as AssignmentEventType)) {
-        const channelSessionId = msg.channel?.startsWith("session:") ? msg.channel.slice(8) : undefined
         if (channelSessionId && channelSessionId !== sessionId) return
         const payload = (typeof msg.payload === "object" && msg.payload !== null)
           ? msg.payload as Record<string, unknown>
@@ -899,6 +1040,37 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
         // the two render in arrival order.
         flushPendingText()
         handleAssignmentEvent(msg.type as AssignmentEventType, payload)
+        return
+      }
+
+      // run_begin anchors reassembly at the start of a run. Its own seq consumes
+      // the slot (no renderable content), so jump the baseline to it — this also
+      // rebases a fresh client that joined a channel whose counter already
+      // advanced on earlier runs. Never regress the baseline.
+      if (msg.type === "run_begin") {
+        if (channelSessionId && channelSessionId !== sessionId) return
+        // A fresh baseline supersedes any pending adopt-next resync.
+        adoptNextSeqRef.current = false
+        if (envSeq > lastSeqRef.current) {
+          lastSeqRef.current = envSeq
+          for (const k of pendingRef.current.keys()) {
+            if (k <= lastSeqRef.current) pendingRef.current.delete(k)
+          }
+          drainPending()
+        }
+        return
+      }
+
+      // resume_reset: the server couldn't replay the in-flight run (buffer
+      // overflow). Drop the stale cursor, resync to the live tail via adopt-next,
+      // and reload history so we don't render a partial/garbled stream.
+      if (msg.type === "resume_reset") {
+        if (channelSessionId && channelSessionId !== sessionId) return
+        lastSeqRef.current = 0
+        pendingRef.current.clear()
+        adoptNextSeqRef.current = true
+        historyLoadedRef.current = false
+        onStreamResetRef.current?.()
         return
       }
 
@@ -918,79 +1090,66 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
       const metadata = (payload.metadata as Record<string, unknown>) ?? undefined
 
       // Filter by session
-      const channelSessionId = msg.channel?.startsWith("session:") ? msg.channel.slice(8) : undefined
       if (channelSessionId && channelSessionId !== sessionId) return
 
-      // Text streams token-by-token: buffer and commit once per animation
-      // frame. Every other event commits the buffered text first (below)
-      // so nothing renders ahead of the text it followed on the wire.
-      if (eventType === "text") {
-        pendingTextRef.current += content
-        scheduleTextFlush()
-        return
-      }
-      flushPendingText()
-
-      switch (eventType) {
-        case "status":
-          handleStatusEvent(content)
-          break
-        case "thinking":
-          handleThinkingEvent(content, metadata)
-          break
-        case "tool_call":
-          handleToolCallEvent(content, metadata)
-          break
-        case "tool_result":
-          handleToolResultEvent(content, metadata)
-          break
-        case "image":
-          handleImageEvent(content, metadata)
-          break
-        case "result":
-          handleResultEvent(content, metadata)
-          break
-        case "system":
-          handleSystemEvent(content, metadata)
-          break
-        case "done":
-          handleDoneEvent(metadata)
-          break
-        case "crew_provisioning":
-          handleCrewProvisioningEvent(content, metadata)
-          break
-        case "user_message":
-          handleUserMessageEvent(content, metadata)
-          break
-        case "error":
-          handleErrorEvent(content)
-          break
-      }
+      // Reassemble in seq order (dedup + reorder) so replay-after-reconnect and
+      // the live stream never lose or double an event.
+      ingestChatEvent(envSeq, eventType, content, metadata)
     },
     [
       sessionId,
       handleAssignmentEvent,
-      handleStatusEvent,
-      handleThinkingEvent,
       flushPendingText,
-      scheduleTextFlush,
-      handleToolCallEvent,
-      handleToolResultEvent,
-      handleImageEvent,
-      handleResultEvent,
-      handleSystemEvent,
-      handleDoneEvent,
-      handleCrewProvisioningEvent,
-      handleUserMessageEvent,
-      handleErrorEvent,
+      ingestChatEvent,
+      drainPending,
     ],
   )
+
+  // subscribeAndResume (re)subscribes to the session channel and asks the server
+  // to replay any in-flight run from the last seq we applied. Stable (reads refs)
+  // so it can run before `send` exists.
+  const subscribeAndResume = useCallback(() => {
+    const sid = sessionIdRef.current
+    const s = sendRef.current
+    if (!sid || !s) return
+    s({ type: "subscribe", channel: "session:" + sid })
+    s({ type: "resume", payload: JSON.stringify({ session_id: sid, last_seq: lastSeqRef.current }) })
+  }, [])
+
+  // handleConnect fires on every socket (re)open. On a RECONNECT (not the first
+  // open) a run may have finished or advanced while we were disconnected, so we
+  // reset reassembly and reload history — that picks up the persisted reply
+  // (clearing a stale spinner) or lets resume replay a still-active run fresh.
+  const handleConnect = useCallback(() => {
+    if (hasConnectedRef.current) {
+      lastSeqRef.current = 0
+      pendingRef.current.clear()
+      adoptNextSeqRef.current = false
+      historyLoadedRef.current = false
+      onStreamResetRef.current?.()
+    }
+    hasConnectedRef.current = true
+    subscribeAndResume()
+  }, [subscribeAndResume])
 
   const { status, send } = useWebSocket({
     url: wsUrl,
     getToken,
     onMessage: handleMessage,
+    onConnect: handleConnect,
   })
+  sendRef.current = send
+
+  // The socket is app-scoped (URL has no session id), so switching chats does
+  // NOT reopen it and handleConnect won't refire. Subscribe + resume whenever
+  // the active session changes while connected. Cleanup unsubscribes the old
+  // channel so we stop receiving its fan-out.
+  useEffect(() => {
+    if (status !== "connected") return
+    const channel = "session:" + sessionId
+    subscribeAndResume()
+    return () => { sendRef.current?.({ type: "unsubscribe", channel }) }
+  }, [sessionId, status, subscribeAndResume])
 
   const sendMessage = useCallback(
     (content: string) => {
@@ -1115,7 +1274,21 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
     setIsStreaming(false)
     textBufferRef.current = ""
     thinkingBufferRef.current = ""
-  }, [])
+    // History is now the base. Release any in-flight run events that arrived via
+    // resume/live before the history fetch resolved, applying them ON TOP so a
+    // late history load can't wipe an already-streaming reply (the mount race).
+    historyLoadedRef.current = true
+    drainPending()
+  }, [drainPending])
+
+  // markHistoryUnavailable opens the streaming gate WITHOUT replacing turns, for
+  // when the history fetch fails outright. Without this a transient history 5xx
+  // would leave the gate shut forever and every subsequent streamed event would
+  // buffer unseen — a frozen chat. The existing turns are left intact.
+  const markHistoryUnavailable = useCallback(() => {
+    historyLoadedRef.current = true
+    drainPending()
+  }, [drainPending])
 
   // Derive flat messages for backwards compat (used by history loading)
   const messages: ChatMessage[] = turns.flatMap((turn) =>
@@ -1138,6 +1311,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId }: UseChatOp
     regenerateLastTurn,
     editAndResend,
     loadHistory,
+    markHistoryUnavailable,
     isStreaming,
     connectionStatus: status as WSStatus,
   }
