@@ -513,6 +513,9 @@ describe("regenerateLastTurn", () => {
 
   it("does nothing when there is no user turn", () => {
     const { result } = setup()
+    // Ignore the subscribe/resume sent on mount; assert regenerate itself sends
+    // nothing when there's no prior user turn.
+    mockSend.mockClear()
     act(() => {
       result.current.regenerateLastTurn()
     })

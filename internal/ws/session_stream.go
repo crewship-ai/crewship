@@ -44,6 +44,12 @@ const (
 	sessionStreamGraceTTL = 2 * time.Minute
 	// sessionStreamSweepInterval is how often the hub GCs ended buffers.
 	sessionStreamSweepInterval = 30 * time.Second
+	// sessionStreamCounterTTL bounds how long an idle per-channel seq counter is
+	// retained after its buffer is gone. Kept long so a still-connected client
+	// can't observe the counter reset to 0 under it (which would make it drop a
+	// later run's events); short enough that a busy server doesn't leak a map
+	// entry per chat forever.
+	sessionStreamCounterTTL = time.Hour
 )
 
 // bufferedFrame is one already-marshaled ServerMessage plus its seq.
@@ -52,38 +58,62 @@ type bufferedFrame struct {
 	data []byte
 }
 
-// sessionStream is the replay buffer for one channel's current run.
+// sessionStream is the replay buffer for one channel's current run(s).
 type sessionStream struct {
-	startSeq  int64 // seq value at run start; run frames are (startSeq, ...]
-	frames    []bufferedFrame
-	bytes     int
-	active    bool
-	truncated bool
-	endedAt   time.Time
+	startSeq   int64 // seq value at run start; run frames are (startSeq, ...]
+	frames     []bufferedFrame
+	bytes      int
+	activeRuns int // refcount of concurrent runs sharing this channel's buffer
+	truncated  bool
+	endedAt    time.Time
+}
+
+// counterState is the monotonic per-channel seq plus a last-touched timestamp so
+// idle counters can be reclaimed (see sweep).
+type counterState struct {
+	seq       int64
+	touchedAt time.Time
 }
 
 // sessionStreams owns all per-channel replay state.
 type sessionStreams struct {
 	mu       sync.Mutex
-	counters map[string]int64          // monotonic seq per channel (persists across runs)
-	streams  map[string]*sessionStream // current-run buffer per channel (reset each run)
+	counters map[string]*counterState  // monotonic seq per channel (persists across runs)
+	streams  map[string]*sessionStream // current-run buffer per channel
 }
 
 func newSessionStreams() *sessionStreams {
 	return &sessionStreams{
-		counters: make(map[string]int64),
+		counters: make(map[string]*counterState),
 		streams:  make(map[string]*sessionStream),
 	}
 }
 
-// begin resets the buffer for a channel at run start and returns the baseline
-// seq (the counter value before this run). The monotonic seq counter is
-// preserved across runs so sequence numbers never regress.
+func (s *sessionStreams) counterFor(channel string) *counterState {
+	cs := s.counters[channel]
+	if cs == nil {
+		cs = &counterState{}
+		s.counters[channel] = cs
+	}
+	cs.touchedAt = time.Now()
+	return cs
+}
+
+// begin starts a run on a channel and returns the baseline seq (the counter
+// value before this run). The monotonic seq counter is preserved across runs so
+// sequence numbers never regress. If a run is ALREADY active on this channel
+// (concurrent runs in a shared/group chat), the new run SHARES the existing
+// buffer via a refcount rather than wiping it — otherwise the second begin would
+// clobber the first run's frames and a resuming client would replay garbage.
 func (s *sessionStreams) begin(channel string) int64 {
 	s.mu.Lock()
-	start := s.counters[channel]
-	s.streams[channel] = &sessionStream{active: true, startSeq: start}
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	start := s.counterFor(channel).seq
+	if st := s.streams[channel]; st != nil && st.activeRuns > 0 {
+		st.activeRuns++
+	} else {
+		s.streams[channel] = &sessionStream{startSeq: start, activeRuns: 1}
+	}
 	return start
 }
 
@@ -97,10 +127,11 @@ func (s *sessionStreams) record(channel string, msg *ServerMessage) ([]byte, boo
 	defer s.mu.Unlock()
 
 	st := s.streams[channel]
-	active := st != nil && st.active
+	active := st != nil && st.activeRuns > 0
 	if active {
-		s.counters[channel]++
-		msg.Seq = s.counters[channel]
+		cs := s.counterFor(channel)
+		cs.seq++
+		msg.Seq = cs.seq
 	}
 
 	data, err := json.Marshal(msg)
@@ -123,14 +154,17 @@ func (s *sessionStreams) record(channel string, msg *ServerMessage) ([]byte, boo
 	return data, true
 }
 
-// end marks the run finished. The buffer lingers for the grace TTL (swept later)
-// but replay is only offered while active — a finished+persisted run is served
-// from history, so keeping the buffer replayable would double-render.
+// end marks one run finished (decrements the refcount). The buffer lingers for
+// the grace TTL once the LAST run ends; replay is only offered while at least
+// one run is active — a finished+persisted run is served from history, so
+// keeping the buffer replayable would double-render.
 func (s *sessionStreams) end(channel string) {
 	s.mu.Lock()
-	if st := s.streams[channel]; st != nil {
-		st.active = false
-		st.endedAt = time.Now()
+	if st := s.streams[channel]; st != nil && st.activeRuns > 0 {
+		st.activeRuns--
+		if st.activeRuns == 0 {
+			st.endedAt = time.Now()
+		}
 	}
 	s.mu.Unlock()
 }
@@ -164,7 +198,7 @@ func (s *sessionStreams) replay(channel string, afterSeq int64) replayResult {
 		return replayResult{found: false}
 	}
 	if st.truncated {
-		return replayResult{found: true, reset: true, active: st.active}
+		return replayResult{found: true, reset: true, active: st.activeRuns > 0}
 	}
 
 	from := afterSeq
@@ -177,17 +211,22 @@ func (s *sessionStreams) replay(channel string, afterSeq int64) replayResult {
 			frames = append(frames, f.data)
 		}
 	}
-	return replayResult{fromSeq: from, frames: frames, active: st.active, found: true}
+	return replayResult{fromSeq: from, frames: frames, active: st.activeRuns > 0, found: true}
 }
 
-// sweep drops ended buffers older than the grace TTL. Counters are retained
-// (cheap, one int64 per channel) so seq numbers stay monotonic if the same chat
-// runs again later.
+// sweep drops ended buffers older than the grace TTL, and reclaims per-channel
+// seq counters that have been idle past sessionStreamCounterTTL and have no live
+// buffer — so a long-lived server doesn't leak one map entry per chat forever.
 func (s *sessionStreams) sweep(now time.Time) {
 	s.mu.Lock()
 	for ch, st := range s.streams {
-		if !st.active && now.Sub(st.endedAt) > sessionStreamGraceTTL {
+		if st.activeRuns == 0 && now.Sub(st.endedAt) > sessionStreamGraceTTL {
 			delete(s.streams, ch)
+		}
+	}
+	for ch, cs := range s.counters {
+		if _, hasStream := s.streams[ch]; !hasStream && now.Sub(cs.touchedAt) > sessionStreamCounterTTL {
+			delete(s.counters, ch)
 		}
 	}
 	s.mu.Unlock()

@@ -517,12 +517,13 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 				return
 			}
 			c.hub.logger.Error("chat message error", "error", err, "session_id", payload.ChatID)
-			errResp, _ := json.Marshal(ServerMessage{
-				Type:    "chat_event",
-				Channel: channel,
-				Payload: ChatEvent{Type: "error", Content: "an error occurred processing your message"},
-			})
-			c.safeSend(errResp)
+			// Route through streamFn (emit) so the error is seq'd, buffered for
+			// replay, and dispatched to EVERY subscriber — not just the still-
+			// connected originator. Follow with a terminal `done` so a second tab
+			// or a client that reconnects after the failure leaves the streaming
+			// state instead of spinning forever.
+			streamFn(ChatEvent{Type: "error", Content: "an error occurred processing your message"})
+			streamFn(ChatEvent{Type: "done", Content: ""})
 		}
 	}()
 }

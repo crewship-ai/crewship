@@ -310,10 +310,19 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
   const sendRef = useRef<((msg: WSMessage) => void) | null>(null)
   const sessionIdRef = useRef(sessionId)
   sessionIdRef.current = sessionId
-  // Set by the caller; invoked when the server says the replay buffer overflowed
-  // (resume_reset) so history is reloaded instead of rendering a partial stream.
+  // Set by the caller; invoked when history must be reloaded — either the server
+  // said the replay buffer overflowed (resume_reset) or we reconnected and a run
+  // may have finished/advanced while we were away.
   const onStreamResetRef = useRef<(() => void) | null>(null)
   onStreamResetRef.current = onStreamReset ?? null
+  // False until the socket's first open, so we can tell a fresh mount (history is
+  // already loading) from a reconnect (must reset + reload to recover a run that
+  // finished or advanced while disconnected).
+  const hasConnectedRef = useRef(false)
+  // After a truncated-buffer resume_reset there is no run_begin to re-anchor the
+  // cursor, so the next seq'd frame seen becomes the new baseline (the truncated
+  // middle is unrecoverable; we resync to the live tail).
+  const adoptNextSeqRef = useRef(false)
 
   // Reset stream-side state when session changes. We deliberately do NOT
   // reset turns here — that would cause a blank-canvas flash between the
@@ -336,6 +345,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     lastSeqRef.current = 0
     pendingRef.current.clear()
     historyLoadedRef.current = false
+    adoptNextSeqRef.current = false
   }, [sessionId])
 
   // Cancel any in-flight frame on unmount so the scheduled callback never
@@ -908,9 +918,14 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
         timestamp: new Date(),
       }
       if (last?.role === "assistant" && last.isStreaming) {
+        // Finalize any open streaming parts (e.g. a thinking block) so they stop
+        // rendering a "thinking…" spinner on a turn that has actually errored.
+        const finalizedParts = last.parts.map((p) =>
+          p.isStreaming ? { ...p, isStreaming: false } : p,
+        )
         return [
           ...prev.slice(0, -1),
-          { ...last, parts: [...last.parts, errorPart], isStreaming: false },
+          { ...last, parts: [...finalizedParts, errorPart], isStreaming: false },
         ]
       }
       return [
@@ -988,6 +1003,12 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
         applyChatEvent(eventType, content, metadata)
         return
       }
+      // After a truncated resume_reset, adopt the first seq seen as the baseline
+      // so the live tail can drain (the dropped middle is unrecoverable).
+      if (adoptNextSeqRef.current) {
+        adoptNextSeqRef.current = false
+        if (seq - 1 > lastSeqRef.current) lastSeqRef.current = seq - 1
+      }
       if (seq <= lastSeqRef.current) return // already applied — duplicate from replay∩live
       pendingRef.current.set(seq, { eventType, content, metadata })
       // Safety valve: if a gap never fills (a truly lost frame) the buffer would
@@ -1028,6 +1049,8 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       // advanced on earlier runs. Never regress the baseline.
       if (msg.type === "run_begin") {
         if (channelSessionId && channelSessionId !== sessionId) return
+        // A fresh baseline supersedes any pending adopt-next resync.
+        adoptNextSeqRef.current = false
         if (envSeq > lastSeqRef.current) {
           lastSeqRef.current = envSeq
           for (const k of pendingRef.current.keys()) {
@@ -1039,9 +1062,14 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       }
 
       // resume_reset: the server couldn't replay the in-flight run (buffer
-      // overflow). Reload history rather than render a partial stream.
+      // overflow). Drop the stale cursor, resync to the live tail via adopt-next,
+      // and reload history so we don't render a partial/garbled stream.
       if (msg.type === "resume_reset") {
         if (channelSessionId && channelSessionId !== sessionId) return
+        lastSeqRef.current = 0
+        pendingRef.current.clear()
+        adoptNextSeqRef.current = true
+        historyLoadedRef.current = false
         onStreamResetRef.current?.()
         return
       }
@@ -1077,11 +1105,10 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     ],
   )
 
-  // resumeOnConnect (re)subscribes to the session channel and asks the server to
-  // replay any in-flight run from the last seq we applied. Stable (reads refs)
-  // so it can be handed to useWebSocket before `send` exists. Fires on every
-  // (re)connect — a fresh socket has no server-side subscription.
-  const resumeOnConnect = useCallback(() => {
+  // subscribeAndResume (re)subscribes to the session channel and asks the server
+  // to replay any in-flight run from the last seq we applied. Stable (reads refs)
+  // so it can run before `send` exists.
+  const subscribeAndResume = useCallback(() => {
     const sid = sessionIdRef.current
     const s = sendRef.current
     if (!sid || !s) return
@@ -1089,13 +1116,40 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     s({ type: "resume", payload: JSON.stringify({ session_id: sid, last_seq: lastSeqRef.current }) })
   }, [])
 
+  // handleConnect fires on every socket (re)open. On a RECONNECT (not the first
+  // open) a run may have finished or advanced while we were disconnected, so we
+  // reset reassembly and reload history — that picks up the persisted reply
+  // (clearing a stale spinner) or lets resume replay a still-active run fresh.
+  const handleConnect = useCallback(() => {
+    if (hasConnectedRef.current) {
+      lastSeqRef.current = 0
+      pendingRef.current.clear()
+      adoptNextSeqRef.current = false
+      historyLoadedRef.current = false
+      onStreamResetRef.current?.()
+    }
+    hasConnectedRef.current = true
+    subscribeAndResume()
+  }, [subscribeAndResume])
+
   const { status, send } = useWebSocket({
     url: wsUrl,
     getToken,
     onMessage: handleMessage,
-    onConnect: resumeOnConnect,
+    onConnect: handleConnect,
   })
   sendRef.current = send
+
+  // The socket is app-scoped (URL has no session id), so switching chats does
+  // NOT reopen it and handleConnect won't refire. Subscribe + resume whenever
+  // the active session changes while connected. Cleanup unsubscribes the old
+  // channel so we stop receiving its fan-out.
+  useEffect(() => {
+    if (status !== "connected") return
+    const channel = "session:" + sessionId
+    subscribeAndResume()
+    return () => { sendRef.current?.({ type: "unsubscribe", channel }) }
+  }, [sessionId, status, subscribeAndResume])
 
   const sendMessage = useCallback(
     (content: string) => {
@@ -1227,6 +1281,15 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     drainPending()
   }, [drainPending])
 
+  // markHistoryUnavailable opens the streaming gate WITHOUT replacing turns, for
+  // when the history fetch fails outright. Without this a transient history 5xx
+  // would leave the gate shut forever and every subsequent streamed event would
+  // buffer unseen — a frozen chat. The existing turns are left intact.
+  const markHistoryUnavailable = useCallback(() => {
+    historyLoadedRef.current = true
+    drainPending()
+  }, [drainPending])
+
   // Derive flat messages for backwards compat (used by history loading)
   const messages: ChatMessage[] = turns.flatMap((turn) =>
     turn.parts.map((part) => ({
@@ -1248,6 +1311,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     regenerateLastTurn,
     editAndResend,
     loadHistory,
+    markHistoryUnavailable,
     isStreaming,
     connectionStatus: status as WSStatus,
   }

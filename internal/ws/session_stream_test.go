@@ -156,6 +156,57 @@ func TestSessionStream_RecordWithoutActiveRunGetsNoSeq(t *testing.T) {
 	}
 }
 
+func TestSessionStream_ConcurrentRunsShareBufferNoClobber(t *testing.T) {
+	s := newSessionStreams()
+	ch := "session:c1"
+	s.begin(ch)                 // run A → activeRuns 1
+	recordEvent(t, s, ch, "a1") // seq 1
+	startB := s.begin(ch)       // run B concurrent → activeRuns 2, must NOT wipe A
+	if startB != 1 {
+		t.Fatalf("run B startSeq = %d, want 1 (shared counter)", startB)
+	}
+	recordEvent(t, s, ch, "b1") // seq 2
+
+	res := s.replay(ch, 0)
+	if len(res.frames) != 2 {
+		t.Fatalf("frames = %d, want 2 — a concurrent begin must not clobber the first run's buffer", len(res.frames))
+	}
+	if !res.active {
+		t.Fatal("active = false while two runs are in flight")
+	}
+	// One run ends — still active (refcount).
+	s.end(ch)
+	if r := s.replay(ch, 0); !r.active {
+		t.Fatal("buffer went inactive after only one of two runs ended (refcount broken)")
+	}
+	// Last run ends — now inactive.
+	s.end(ch)
+	if r := s.replay(ch, 0); r.active {
+		t.Fatal("buffer still active after the last run ended")
+	}
+}
+
+func TestSessionStream_SweepReclaimsIdleCounter(t *testing.T) {
+	s := newSessionStreams()
+	ch := "session:c1"
+	s.begin(ch)
+	recordEvent(t, s, ch, "a")
+	s.end(ch)
+	// Age the stream past its grace TTL and the counter past its (longer) TTL.
+	s.mu.Lock()
+	s.streams[ch].endedAt = time.Now().Add(-2 * sessionStreamGraceTTL)
+	s.counters[ch].touchedAt = time.Now().Add(-2 * sessionStreamCounterTTL)
+	s.mu.Unlock()
+	s.sweep(time.Now())
+
+	s.mu.Lock()
+	_, hasCounter := s.counters[ch]
+	s.mu.Unlock()
+	if hasCounter {
+		t.Error("idle counter not reclaimed after its buffer was swept and it aged past the TTL")
+	}
+}
+
 func TestSessionStream_SweepDropsEndedButKeepsCounter(t *testing.T) {
 	s := newSessionStreams()
 	ch := "session:c1"
