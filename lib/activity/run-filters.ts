@@ -133,6 +133,25 @@ export function activeFilterCount(f: RunFilter): number {
   return n
 }
 
+// ── URL deep-link ───────────────────────────────────────────────────
+
+// applyPipelineParam seeds a filter from the `?pipeline=<slug>` query
+// param — the deep-link the routine overview's "view all →" emits so
+// /activity opens pre-filtered to that routine. Deep-link intent is
+// "focus on this routine", so the slug REPLACES any previously-pinned
+// routines. Returns the base filter untouched (same reference) when
+// the param is absent/blank or already applied — callers use the
+// identity check to skip a redundant preference write.
+export function applyPipelineParam(
+  base: RunFilter,
+  pipelineParam: string | null | undefined,
+): RunFilter {
+  const slug = pipelineParam?.trim()
+  if (!slug) return base
+  if (base.routines?.length === 1 && base.routines[0] === slug) return base
+  return { ...base, routines: [slug] }
+}
+
 // ── Grouping ────────────────────────────────────────────────────────
 
 export type GroupAxis = "source" | "routine" | "crew" | "issue" | "none"

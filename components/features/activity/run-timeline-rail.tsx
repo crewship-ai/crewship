@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { ScrollText } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { useUserPreference } from "@/hooks/use-user-preference"
@@ -10,6 +11,7 @@ import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import {
   applyFilters,
+  applyPipelineParam,
   groupRuns,
   type GroupAxis,
   type RunFilter,
@@ -66,9 +68,10 @@ export function RunTimelineRail({
   }, [crewsProp, workspaceId])
 
   // Persisted user state
-  const [filter, setFilter] = useUserPreference<RunFilter>("activity.rail.filter", {
-    status: "all",
-  })
+  const [filter, setFilter, { ready: filterReady }] = useUserPreference<RunFilter>(
+    "activity.rail.filter",
+    { status: "all" },
+  )
   const [sort, setSort] = useUserPreference<SortAxis>("activity.rail.sort", "newest")
   // Default to grouping by routine: the routine is the superordinate entity a
   // run belongs to, so a run stream reads as "these routines, and their runs"
@@ -76,6 +79,26 @@ export function RunTimelineRail({
   // View menu; the choice persists.
   const [group, setGroup] = useUserPreference<GroupAxis>("activity.rail.group", "routine")
   const [search, setSearch] = useState("")
+
+  // Deep-link: /activity?pipeline=<slug> (routine overview's "view
+  // all →") pre-applies a routine filter. One-shot, and only after
+  // the filter preference has hydrated from the server — applying
+  // earlier would lose to the initial server sync, which overrides
+  // local state with the remote value (use-user-preference.ts). URL
+  // params stay the read-side source of truth, same convention as
+  // use-trace-selection's ?run/?step handling.
+  const pipelineParam = useSearchParams().get("pipeline")
+  const pipelineParamApplied = useRef(false)
+  useEffect(() => {
+    // Only latch once a param is actually present — a later client-
+    // side navigation that adds ?pipeline= without remounting the
+    // rail still gets its single application. After that the user
+    // owns the filter (clearing it must not be fought by re-applies).
+    if (!filterReady || pipelineParamApplied.current || !pipelineParam) return
+    pipelineParamApplied.current = true
+    const next = applyPipelineParam(filter, pipelineParam)
+    if (next !== filter) setFilter(next)
+  }, [filterReady, pipelineParam, filter, setFilter])
 
   // Owning-crew name per routine slug, derived once from crews + pipelines.
   // Shared by the routine-filter options (crew-grouped combobox) and the group

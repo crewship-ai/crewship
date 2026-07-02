@@ -329,7 +329,11 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                 transition={{ duration: 0.15 }}
                 className="absolute inset-0"
               >
-                <RoutinesInsightsView routines={pipelines} onSelect={handleSelect} />
+                <RoutinesInsightsView
+                  workspaceId={workspaceId}
+                  routines={pipelines}
+                  onSelect={handleSelect}
+                />
               </motion.div>
             )}
           </AnimatePresence>

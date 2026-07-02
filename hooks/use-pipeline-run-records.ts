@@ -15,7 +15,9 @@ export interface PipelineRunRecord {
   id: string
   pipeline_id: string
   pipeline_slug: string
-  status: "queued" | "running" | "completed" | "failed" | "cancelled" | "dry_run" | "interrupted"
+  // Mirrors internal/pipeline/runs.go RunStatus. "waiting" is
+  // non-terminal — the run is parked on a human approval (wait step).
+  status: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "dry_run" | "interrupted"
   mode: "run" | "test_run" | "dry_run"
   started_at: string
   ended_at?: string
@@ -29,6 +31,14 @@ export interface PipelineRunRecord {
   triggered_via: "manual" | "schedule" | "webhook" | "call_pipeline"
   triggered_by_id?: string
   idempotency_key?: string
+}
+
+// isActiveRunStatus mirrors the backend's in-flight set — RunStore
+// queries scope "active" to status IN ('queued','running','waiting')
+// (internal/pipeline/runs.go). Only these runs are cancellable via
+// POST /pipelines/runs/{runId}/cancel; terminal runs 404 there.
+export function isActiveRunStatus(status: string): boolean {
+  return status === "queued" || status === "running" || status === "waiting"
 }
 
 // usePipelineRunRecords fetches the pipeline_runs projection with
