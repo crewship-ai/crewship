@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -531,6 +532,74 @@ func (h *AssignmentHandler) runAssignment(
 	h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, result, "")
 }
 
+// userFacingAssignmentError maps an assignment's raw failure message to a
+// concise, safe-to-display string for the two USER-facing surfaces —
+// the chat "assignment_failed" broadcast and the durable mission
+// comment. Several call sites in this file compose errMsg by wrapping a
+// raw internal error (e.g. "execution error: %v", a container exec
+// failure, a crew-runtime-config resolution error) which can carry
+// container/exec internals (paths, stack fragments) that must never
+// reach chat history or a persisted mission comment. Those sinks keep
+// getting the sanitized string; the DB run record (assignments.
+// error_message) and the run journal entry built from the same errMsg
+// keep the raw text unchanged — see the two call sites in
+// finishAssignment below — so operators can still see the real cause.
+//
+// A handful of error classes are safe (and more useful than the
+// generic fallback) verbatim: they're either already curated,
+// actionable messages (no internals) or a well-known, non-sensitive
+// failure mode like a timeout.
+//
+// Curated recovery reasons (recoveryReason* prefixes below) are the
+// failure messages written by the assignment recovery paths — the
+// boot-time crash recovery and the stuck-RUNNING sweeper
+// (fix/assignments-running-recovery). They're authored as user-facing
+// copy (actionable, no internals), so collapsing them to the generic
+// fallback would strictly lose information. Matched by stable prefix
+// because the sweeper message carries a dynamic duration tail; the
+// prefixes must stay in sync with the literals in
+// failInterruptedAssignment's two call sites.
+const (
+	recoveryReasonInterruptedPrefix  = "interrupted by server restart"
+	recoveryReasonStuckRunningPrefix = "assignment stuck in RUNNING for over"
+)
+
+func userFacingAssignmentError(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	const journalHint = " Details in the run journal."
+	lower := strings.ToLower(raw)
+	switch {
+	case strings.HasPrefix(raw, recoveryReasonInterruptedPrefix),
+		strings.HasPrefix(raw, recoveryReasonStuckRunningPrefix):
+		// Curated recovery reasons pass through verbatim (see the
+		// constants' doc comment above).
+		return raw
+	case strings.Contains(lower, "context deadline exceeded"),
+		strings.Contains(lower, "run timed out"),
+		strings.Contains(lower, "execution timed out"):
+		// Only genuine run-timeout shapes: "context deadline exceeded"
+		// is what our own context.WithTimeout produces when the exec
+		// deadline expires and bubbles up through the error chain
+		// ("execution error: exec agent: … context deadline exceeded"),
+		// plus anchored self-authored phrases. A bare "timeout" /
+		// "timed out" substring is deliberately NOT enough — it would
+		// mislabel config errors ("invalid timeout_seconds
+		// configuration") and network errors ("dial tcp: i/o timeout")
+		// as run timeouts; those fall to the generic branch.
+		return "The run timed out." + journalHint
+	case strings.Contains(lower, "being backed up"):
+		// refuseIfBackupInProgress's curated refusal message — already
+		// actionable and carries no internals.
+		return raw
+	case raw == "orchestrator not available":
+		return "The agent runtime is temporarily unavailable." + journalHint
+	default:
+		return "The run failed." + journalHint
+	}
+}
+
 // finishAssignment updates the assignment and run records, then broadcasts the final event.
 
 func (h *AssignmentHandler) finishAssignment(
@@ -645,7 +714,11 @@ func (h *AssignmentHandler) finishAssignment(
 
 				var commentBody string
 				if errMsg != "" {
-					commentBody = fmt.Sprintf("**%s encountered an issue.** Error: %s", agentName, errMsg)
+					// Durable, user-facing surface — never the raw error (may
+					// carry container/exec internals). The full errMsg already
+					// landed in assignments.error_message + the run journal
+					// entry above, unsanitized, for operators.
+					commentBody = fmt.Sprintf("**%s encountered an issue.** %s", agentName, userFacingAssignmentError(errMsg))
 				} else if result != "" {
 					handoff := orchestrator.ParseHandoff(result)
 					if handoff.Parsed && handoff.Summary != "" {
@@ -684,11 +757,14 @@ func (h *AssignmentHandler) finishAssignment(
 	}
 
 	if errMsg != "" {
+		// Chat bubble — user-facing, same sanitization as the mission
+		// comment above. The raw errMsg already reached the DB run
+		// record + journal entry earlier in this function.
 		broadcastChannelEvent(h.hub, "session", chatID, "assignment_failed",
 			map[string]string{
 				"id":     assignmentID,
 				"target": targetSlug,
-				"error":  errMsg,
+				"error":  userFacingAssignmentError(errMsg),
 			})
 	} else {
 		broadcastChannelEvent(h.hub, "session", chatID, "assignment_completed",

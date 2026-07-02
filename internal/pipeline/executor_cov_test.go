@@ -704,6 +704,7 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     metadata_json       TEXT NOT NULL DEFAULT '{}',
     is_replay           INTEGER NOT NULL DEFAULT 0,
     replay_of           TEXT,
+    warnings_json       TEXT NOT NULL DEFAULT '[]',
     created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
 );`

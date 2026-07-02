@@ -150,6 +150,28 @@ Output formats:
 			if v, ok := run["current_step_id"].(string); ok && v != "" {
 				fmt.Printf("\nCurrent step: %s\n", v)
 			}
+			// Warnings are non-fatal, run-scoped issues — currently only a
+			// failed after_all/on_failure lifecycle hook (a teardown step
+			// like credential-release or cost-meter-close). They don't
+			// flip the run's status, so they'd otherwise be invisible
+			// outside server logs; surface them here like Error above.
+			if warnings, ok := run["warnings"].([]interface{}); ok && len(warnings) > 0 {
+				fmt.Printf("\nWarnings:\n")
+				for _, w := range warnings {
+					entry, ok := w.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					stage, _ := entry["stage"].(string)
+					message, _ := entry["message"].(string)
+					at, _ := entry["at"].(string)
+					if at != "" {
+						fmt.Printf("  - [%s] %s: %s\n", formatTimestamp(at), stage, message)
+					} else {
+						fmt.Printf("  - %s: %s\n", stage, message)
+					}
+				}
+			}
 			fmt.Printf("\n(For the full event-by-event timeline, re-run with --slug %v.)\n", run["pipeline_slug"])
 			return nil
 		}

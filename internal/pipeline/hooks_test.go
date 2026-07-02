@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -89,5 +90,113 @@ func TestRunHooksAround(t *testing.T) {
 	_, err = e.runHooksAround(ctx, in3, "run3", "slug", body)
 	if err != nil || !bodyRan {
 		t.Fatalf("resume must skip hooks and run body: bodyRan=%v err=%v", bodyRan, err)
+	}
+}
+
+// TestRunHooksAround_AfterAllFailure_RecordsRunWarning guards the fix for
+// the "invisible teardown hook failure" bug: after_all/on_failure hooks
+// are best-effort (must never flip a COMPLETED run to FAILED), but a
+// failure used to be dropped into slog.Warn ONLY — nothing landed on the
+// run record, so an operator had no way to discover a leaked credential
+// or an unclosed cost meter short of grepping server logs. The hook
+// failure must now show up as a structured warning on the run.
+func TestRunHooksAround_AfterAllFailure_RecordsRunWarning(t *testing.T) {
+	db := openStoreTestDB(t)
+	defer db.Close()
+	if _, err := db.Exec(runsProjectionDDL); err != nil {
+		t.Fatalf("runs ddl: %v", err)
+	}
+	runStore := NewRunStore(db)
+	e := &Executor{codeRunner: NewMultiCodeRunner(), runStore: runStore}
+	ctx := context.Background()
+
+	runID := "run-warn-1"
+	if err := runStore.Insert(ctx, &RunRecord{
+		ID: runID, WorkspaceID: "ws_test", PipelineID: "pln_x", PipelineSlug: "x", Status: RunStatusRunning,
+	}); err != nil {
+		t.Fatalf("seed run row: %v", err)
+	}
+
+	body := func() (*RunResult, error) {
+		return &RunResult{RunID: runID, Status: "COMPLETED"}, nil
+	}
+	in := RunInput{PipelineID: "p", dsl: &DSL{Hooks: &RoutineHooks{
+		// Unresolvable var -> runRoutineHook returns an error without
+		// running body — exactly the "teardown step failed" shape.
+		AfterAll: &Step{ID: "post", Type: StepCode, Code: &CodeStep{Runtime: "cel", Code: "missing.var > 1"}},
+	}}}
+
+	res, err := e.runHooksAround(ctx, in, runID, "slug", body)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	// Best-effort contract: the failing teardown hook must NOT flip the
+	// run's outcome.
+	if res.Status != "COMPLETED" {
+		t.Fatalf("after_all failure must not flip status, got %q", res.Status)
+	}
+
+	rec, err := runStore.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("run row: %v", err)
+	}
+	warnings := rec.Warnings()
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %d, want 1: %+v", len(warnings), warnings)
+	}
+	if warnings[0].Stage != "hook after_all" {
+		t.Errorf("stage = %q, want %q", warnings[0].Stage, "hook after_all")
+	}
+	if !strings.Contains(warnings[0].Message, "missing") {
+		t.Errorf("message = %q, want it to mention the hook error", warnings[0].Message)
+	}
+	if warnings[0].At.IsZero() {
+		t.Error("warning At timestamp not stamped")
+	}
+}
+
+// TestRunHooksAround_OnFailureFailure_RecordsRunWarning mirrors the
+// after_all case for on_failure: the run stays FAILED (its actual
+// outcome), but the teardown hook's own failure is additionally
+// recorded as a warning rather than only logged.
+func TestRunHooksAround_OnFailureFailure_RecordsRunWarning(t *testing.T) {
+	db := openStoreTestDB(t)
+	defer db.Close()
+	if _, err := db.Exec(runsProjectionDDL); err != nil {
+		t.Fatalf("runs ddl: %v", err)
+	}
+	runStore := NewRunStore(db)
+	e := &Executor{codeRunner: NewMultiCodeRunner(), runStore: runStore}
+	ctx := context.Background()
+
+	runID := "run-warn-2"
+	if err := runStore.Insert(ctx, &RunRecord{
+		ID: runID, WorkspaceID: "ws_test", PipelineID: "pln_x", PipelineSlug: "x", Status: RunStatusRunning,
+	}); err != nil {
+		t.Fatalf("seed run row: %v", err)
+	}
+
+	body := func() (*RunResult, error) {
+		return &RunResult{RunID: runID, Status: "FAILED", ErrorMessage: "step boom"}, nil
+	}
+	in := RunInput{PipelineID: "p", dsl: &DSL{Hooks: &RoutineHooks{
+		OnFailure: &Step{ID: "cleanup", Type: StepCode, Code: &CodeStep{Runtime: "cel", Code: "missing.var > 1"}},
+	}}}
+
+	res, err := e.runHooksAround(ctx, in, runID, "slug", body)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if res.Status != "FAILED" {
+		t.Fatalf("status = %q, want FAILED (the body's own outcome)", res.Status)
+	}
+
+	rec, err := runStore.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("run row: %v", err)
+	}
+	warnings := rec.Warnings()
+	if len(warnings) != 1 || warnings[0].Stage != "hook on_failure" {
+		t.Fatalf("warnings = %+v, want one entry with stage %q", warnings, "hook on_failure")
 	}
 }

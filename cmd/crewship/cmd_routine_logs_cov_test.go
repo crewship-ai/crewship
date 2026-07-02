@@ -79,6 +79,57 @@ func TestRoutineLogsRunE_SlugFreeTable(t *testing.T) {
 	}
 }
 
+// TestRoutineLogsRunE_SlugFreeTable_WarningsSection guards the fix for
+// the "invisible teardown hook failure" bug: a failed after_all/
+// on_failure lifecycle hook is now persisted as a structured warning on
+// the run and must render in the slug-free `routine logs <run_id>`
+// table output (the CLI parity for GET /pipeline-runs/{runId}'s new
+// `warnings` field), not just be discoverable via --json.
+func TestRoutineLogsRunE_SlugFreeTable_WarningsSection(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli8(t, stub.URL())
+	run := covPipelineRun()
+	run["warnings"] = []map[string]any{
+		{"stage": "hook after_all", "message": "credential release step timed out", "at": "2026-06-10T12:01:05Z"},
+	}
+	stub.OnGet("/api/v1/workspaces/"+covWSCli8+"/pipeline-runs/run_abc",
+		clitest.JSONResponse(200, run))
+
+	out := covCaptureStdoutCli8(t, func() {
+		if err := routineLogsCmd.RunE(routineLogsCmd, []string{"run_abc"}); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+	for _, want := range []string{"Warnings:", "hook after_all", "credential release step timed out"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("warnings section missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestRoutineLogsRunE_SlugFreeTable_NoWarningsSection confirms a run
+// with an empty warnings list (the common case) doesn't print the
+// section at all — no empty "Warnings:" header noise.
+func TestRoutineLogsRunE_SlugFreeTable_NoWarningsSection(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli8(t, stub.URL())
+	run := covPipelineRun()
+	run["warnings"] = []map[string]any{}
+	stub.OnGet("/api/v1/workspaces/"+covWSCli8+"/pipeline-runs/run_abc",
+		clitest.JSONResponse(200, run))
+
+	out := covCaptureStdoutCli8(t, func() {
+		if err := routineLogsCmd.RunE(routineLogsCmd, []string{"run_abc"}); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+	if strings.Contains(out, "Warnings:") {
+		t.Errorf("unexpected Warnings section for empty warnings:\n%s", out)
+	}
+}
+
 func TestRoutineLogsRunE_SlugFreeJSON(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()

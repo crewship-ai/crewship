@@ -370,7 +370,7 @@ func TestFinishAssignment_FailedWritesIssueComment(t *testing.T) {
 	}
 
 	h.finishAssignment(context.Background(), "asg-fin-2", "", chatID, "asg-worker", wsID,
-		"", "container exploded")
+		"", "container exploded: exec /bin/sh: no such file or directory")
 
 	var status, errMsg string
 	if err := h.db.QueryRow(
@@ -378,7 +378,9 @@ func TestFinishAssignment_FailedWritesIssueComment(t *testing.T) {
 		Scan(&status, &errMsg); err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	if status != "FAILED" || errMsg != "container exploded" {
+	// The DB run record is the operator-facing surface — it keeps the
+	// full raw error (container/exec internals and all) unchanged.
+	if status != "FAILED" || errMsg != "container exploded: exec /bin/sh: no such file or directory" {
 		t.Errorf("status=%q err=%q", status, errMsg)
 	}
 	var commentBody string
@@ -386,8 +388,14 @@ func TestFinishAssignment_FailedWritesIssueComment(t *testing.T) {
 		`SELECT body FROM mission_comments WHERE mission_id = ?`, chatID).Scan(&commentBody); err != nil {
 		t.Fatalf("query comment: %v", err)
 	}
-	if !strings.Contains(commentBody, "encountered an issue") || !strings.Contains(commentBody, "container exploded") {
-		t.Errorf("comment = %q", commentBody)
+	// The mission comment is user-facing and durable — it must NOT leak
+	// the raw exec internals, only a concise message pointing at the
+	// journal for detail.
+	if !strings.Contains(commentBody, "encountered an issue") || !strings.Contains(commentBody, "Details in the run journal") {
+		t.Errorf("comment = %q, want generic message pointing at the journal", commentBody)
+	}
+	if strings.Contains(commentBody, "no such file or directory") {
+		t.Errorf("comment leaks raw exec internals: %q", commentBody)
 	}
 	var action string
 	if err := h.db.QueryRow(
@@ -396,5 +404,105 @@ func TestFinishAssignment_FailedWritesIssueComment(t *testing.T) {
 	}
 	if action != "task_failed" {
 		t.Errorf("action = %q, want task_failed", action)
+	}
+}
+
+// TestUserFacingAssignmentError guards the hygiene fix directly: raw
+// internal errors (container/exec internals, stack fragments) must
+// never pass through unchanged to a user-facing surface, but a handful
+// of safe/useful classes (timeout, an already-curated refusal message)
+// keep their specific meaning instead of collapsing to the generic
+// fallback.
+func TestUserFacingAssignmentError(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		want    string // exact match when non-empty
+		mustNot string // substring that must NOT appear (raw-leak guard)
+	}{
+		{name: "empty", raw: "", want: ""},
+		{
+			name:    "raw exec internals collapse to generic",
+			raw:     `execution error: exec /bin/sh: exit status 127: "claude": file not found in $PATH`,
+			mustNot: "/bin/sh",
+		},
+		{
+			name: "context deadline exceeded classified as timeout",
+			raw:  "execution error: context deadline exceeded",
+			want: "The run timed out. Details in the run journal.",
+		},
+		{
+			name: "anchored run-timed-out phrase classified as timeout",
+			raw:  "run timed out after 30m0s",
+			want: "The run timed out. Details in the run journal.",
+		},
+		{
+			name: "anchored execution-timed-out phrase classified as timeout",
+			raw:  "execution timed out",
+			want: "The run timed out. Details in the run journal.",
+		},
+		{
+			// "timeout" as a bare substring is NOT a run timeout: this is
+			// a configuration error and must fall to the generic branch,
+			// not tell the user their run timed out.
+			name: "timeout_seconds config error is NOT a timeout",
+			raw:  "invalid timeout_seconds configuration",
+			want: "The run failed. Details in the run journal.",
+		},
+		{
+			// Network-layer i/o timeout reaching the Docker daemon is an
+			// infrastructure failure, not a run timeout.
+			name: "dial i/o timeout is NOT a run timeout",
+			raw:  "execution error: dial tcp 127.0.0.1:2375: i/o timeout connecting to Docker daemon",
+			want: "The run failed. Details in the run journal.",
+		},
+		{
+			// A generic "timed out" mid-sentence (container-level op, not
+			// our run-timeout path) also collapses to generic now.
+			name: "unanchored timed-out substring is NOT a run timeout",
+			raw:  "container error: operation timed out after 30s",
+			want: "The run failed. Details in the run journal.",
+		},
+		{
+			// Curated reason produced by fix/assignments-running-recovery's
+			// boot-time crash recovery (failInterruptedAssignment). Tested
+			// against the literal string — NOT a shared constant — so this
+			// stays green regardless of which branch merges first.
+			name: "recovery: interrupted-by-restart reason passes through verbatim",
+			raw:  "interrupted by server restart — the run did not survive the previous process",
+			want: "interrupted by server restart — the run did not survive the previous process",
+		},
+		{
+			// Curated reason produced by the stuck-RUNNING sweeper in the
+			// same branch; carries a dynamic duration, so the classifier
+			// must match on the stable prefix.
+			name: "recovery: stuck-RUNNING sweeper reason passes through verbatim",
+			raw:  "assignment stuck in RUNNING for over 30m0s with no completion — failed by the stuck-RUNNING sweeper",
+			want: "assignment stuck in RUNNING for over 30m0s with no completion — failed by the stuck-RUNNING sweeper",
+		},
+		{
+			name: "backup-in-progress refusal kept verbatim",
+			raw:  "workspace is being backed up; retry after the backup completes (check `crewship backup status`)",
+			want: "workspace is being backed up; retry after the backup completes (check `crewship backup status`)",
+		},
+		{
+			name: "orchestrator unavailable classified",
+			raw:  "orchestrator not available",
+			want: "The agent runtime is temporarily unavailable. Details in the run journal.",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := userFacingAssignmentError(c.raw)
+			if c.want != "" && got != c.want {
+				t.Errorf("userFacingAssignmentError(%q) = %q, want %q", c.raw, got, c.want)
+			}
+			if c.mustNot != "" && strings.Contains(got, c.mustNot) {
+				t.Errorf("userFacingAssignmentError(%q) = %q, must not contain %q", c.raw, got, c.mustNot)
+			}
+			if c.raw != "" && got == "" {
+				t.Errorf("userFacingAssignmentError(%q) returned empty for a non-empty input", c.raw)
+			}
+		})
 	}
 }

@@ -1631,3 +1631,20 @@ func (e *Executor) persistWarn(stage, runID string, err error) {
 		"error", err.Error(),
 	)
 }
+
+// recordRunWarning persists a non-fatal, run-scoped warning (currently:
+// a failed after_all/on_failure lifecycle hook) so it survives past the
+// slog.Warn line persistWarn already emits and is visible via the run
+// detail API/CLI. Best-effort like every other projection write in this
+// file: a store failure here only logs (via persistWarn's own shape) —
+// it must never fail, or mask the status of, the run it's attached to.
+// No-op when runStore isn't wired, runID is empty (draft/RunDefinition
+// runs), or err is nil.
+func (e *Executor) recordRunWarning(ctx context.Context, runID, stage string, err error) {
+	if err == nil || e.runStore == nil || runID == "" {
+		return
+	}
+	if werr := e.runStore.AppendWarning(ctx, runID, stage, err.Error()); werr != nil {
+		e.persistWarn(stage+" (warning persist)", runID, werr)
+	}
+}
