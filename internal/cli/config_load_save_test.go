@@ -20,6 +20,7 @@ import (
 func TestDefaultConfigDir_PointsAtHomeCrewship(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("CREWSHIP_CONFIG", "") // shell profiles export a per-clone path (issue #544 setup); keep the test hermetic
 
 	got, err := DefaultConfigDir()
 	if err != nil {
@@ -34,6 +35,7 @@ func TestDefaultConfigDir_PointsAtHomeCrewship(t *testing.T) {
 func TestDefaultConfigPath_AppendsConfigFile(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("CREWSHIP_CONFIG", "") // shell profiles export a per-clone path (issue #544 setup); keep the test hermetic
 	t.Setenv("CREWSHIP_CONFIG", "")
 
 	got, err := DefaultConfigPath()
@@ -54,6 +56,7 @@ func TestDefaultConfigPath_AppendsConfigFile(t *testing.T) {
 func TestDefaultConfigPath_CREWSHIP_CONFIG_OverridesHome(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("CREWSHIP_CONFIG", "") // shell profiles export a per-clone path (issue #544 setup); keep the test hermetic
 	override := filepath.Join(tmp, "instance-2.yaml")
 	t.Setenv("CREWSHIP_CONFIG", override)
 
@@ -73,6 +76,7 @@ func TestLoadConfig_NoFile_ReturnsEmptyConfigWithoutError(t *testing.T) {
 	// every read — the loader does it for them.
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("CREWSHIP_CONFIG", "") // shell profiles export a per-clone path (issue #544 setup); keep the test hermetic
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -90,6 +94,7 @@ func TestLoadConfig_NoFile_ReturnsEmptyConfigWithoutError(t *testing.T) {
 func TestLoadConfig_PresentFile_Parses(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("CREWSHIP_CONFIG", "") // shell profiles export a per-clone path (issue #544 setup); keep the test hermetic
 	dir := filepath.Join(tmp, ".crewship")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -136,6 +141,7 @@ plan_by_default: true
 func TestLoadConfig_MalformedYAML_Errors(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("CREWSHIP_CONFIG", "") // shell profiles export a per-clone path (issue #544 setup); keep the test hermetic
 	dir := filepath.Join(tmp, ".crewship")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -164,6 +170,7 @@ func TestLoadConfig_UnreadableFile_Errors(t *testing.T) {
 	}
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("CREWSHIP_CONFIG", "") // shell profiles export a per-clone path (issue #544 setup); keep the test hermetic
 	dir := filepath.Join(tmp, ".crewship")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -189,6 +196,7 @@ func TestLoadConfig_UnreadableFile_Errors(t *testing.T) {
 func TestSaveConfig_WritesFileWithSecurePerms(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("CREWSHIP_CONFIG", "") // shell profiles export a per-clone path (issue #544 setup); keep the test hermetic
 
 	cfg := &CLIConfig{
 		Server:    "http://x.example.com",
@@ -225,6 +233,7 @@ func TestSaveConfig_WritesFileWithSecurePerms(t *testing.T) {
 func TestSaveConfig_RoundTripsThroughLoadConfig(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("CREWSHIP_CONFIG", "") // shell profiles export a per-clone path (issue #544 setup); keep the test hermetic
 
 	orig := &CLIConfig{
 		Server:        "http://x:9090",
@@ -251,6 +260,7 @@ func TestSaveConfig_RoundTripsThroughLoadConfig(t *testing.T) {
 func TestSaveConfig_OverwritesExistingFile(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("CREWSHIP_CONFIG", "") // shell profiles export a per-clone path (issue #544 setup); keep the test hermetic
 
 	// First write.
 	if err := SaveConfig(&CLIConfig{Server: "first.example.com"}); err != nil {
@@ -276,6 +286,7 @@ func TestSaveConfig_DirAlreadyExists_NoError(t *testing.T) {
 	// directory carries over.
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("CREWSHIP_CONFIG", "") // shell profiles export a per-clone path (issue #544 setup); keep the test hermetic
 	dir := filepath.Join(tmp, ".crewship")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatalf("preseed dir: %v", err)

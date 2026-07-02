@@ -87,6 +87,10 @@ func redirectConfigHome(t *testing.T) string {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 	t.Setenv("USERPROFILE", dir)
+	// Shell profiles export a per-clone CREWSHIP_CONFIG (issue #544 multi-
+	// instance setup); it would beat the redirected HOME and point config
+	// IO at the developer's real per-instance file. Keep the test hermetic.
+	t.Setenv("CREWSHIP_CONFIG", "")
 	return filepath.Join(dir, ".crewship", "cli-config.yaml")
 }
 

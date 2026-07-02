@@ -7,7 +7,6 @@ package main
 // needs a workspace-wide call graph the local CLI can't see).
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -88,18 +87,24 @@ Server-side checks not run locally:
 			visited[s.ID] = true
 		}
 
-		jsonOut := resolvedFormat(cmd) == "json"
-		if jsonOut {
-			b, _ := json.MarshalIndent(map[string]interface{}{
+		f := resolvedFormatter(cmd)
+		if f.Format == "json" || f.Format == "yaml" || f.Format == "ndjson" {
+			payload := map[string]interface{}{
 				"source":      src,
 				"valid":       true,
 				"name":        dsl.Name,
 				"step_count":  len(dsl.Steps),
 				"input_count": len(dsl.Inputs),
 				"step_types":  collectStepTypes(dsl),
-			}, "", "  ")
-			fmt.Println(string(b))
-			return nil
+			}
+			switch f.Format {
+			case "yaml":
+				return f.YAML(payload)
+			case "ndjson":
+				return f.NDJSON(payload)
+			default:
+				return f.JSON(payload)
+			}
 		}
 		fmt.Printf("✓ %s is a valid routine DSL.\n", src)
 		fmt.Printf("  Name:      %s\n", dsl.Name)
