@@ -234,7 +234,11 @@ export const ReasoningTrigger = memo(
         {children ?? (
           <>
             <BrainIcon size={16} />
-            {getThinkingMessage(isStreaming, duration, elapsed)}
+            {/* aria-live off: the label ticks every second while streaming —
+                assistive tech must not announce each update. */}
+            <span aria-live="off">
+              {getThinkingMessage(isStreaming, duration, elapsed)}
+            </span>
             <ChevronDownIcon
               className={cn(
                 "size-4 transition-transform",

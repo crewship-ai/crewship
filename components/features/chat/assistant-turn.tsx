@@ -492,14 +492,15 @@ function StreamingProse({ content, streaming }: { content: string; streaming: bo
   )
 }
 
-/** One reasoning pass: collapsible block with live "Thinking… Ns" header,
- *  smooth-revealed content while streaming. */
+/** One reasoning block: collapsible, live "Thinking… Ns" header,
+ *  smooth-revealed content while streaming. Same trailing-space reflow
+ *  workaround as StreamingProse — the reasoning body is Streamdown too. */
 function ThinkingBlock({ part }: { part: TurnPart }) {
   const text = useSmoothText(part.content, !!part.isStreaming)
   return (
     <Reasoning isStreaming={part.isStreaming} defaultOpen={part.isStreaming}>
       <ReasoningTrigger />
-      <ReasoningContent>{text}</ReasoningContent>
+      <ReasoningContent>{part.isStreaming ? text + " " : text}</ReasoningContent>
     </Reasoning>
   )
 }
