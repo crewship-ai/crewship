@@ -157,8 +157,12 @@ func main() {
 	// built-in set and can warn-and-skip on name clashes.
 	registerSlashCommands()
 
-	if err := rootCmd.Execute(); err != nil {
-		exitWithError(err)
+	// ExecuteC (not Execute) so the error path can see the resolved
+	// command's flags — the legacy per-command --json bool must select
+	// the structured error envelope exactly like it selects success JSON.
+	cmd, err := rootCmd.ExecuteC()
+	if err != nil {
+		exitWithError(cmd, err)
 	}
 }
 
@@ -169,8 +173,11 @@ func main() {
 // emitted on stderr as a structured envelope in that same format, so an
 // agent driving the CLI parses failures the same way it parses successes —
 // stdout stays reserved for success output either way.
-func exitWithError(err error) {
+func exitWithError(cmd *cobra.Command, err error) {
 	format := cli.ResolveFormat(flagFormat, cliCfg)
+	if cmd != nil {
+		format = resolvedFormat(cmd)
+	}
 	switch format {
 	case "json", "ndjson":
 		enc := json.NewEncoder(os.Stderr)

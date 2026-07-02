@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -652,7 +653,9 @@ func waitForPipelineRun(cmd *cobra.Command, client *cli.Client, runID string, ti
 		}
 	})
 	if err != nil {
-		if ctx.Err() != nil {
+		// DeadlineExceeded only — a Ctrl-C (context.Canceled) must not
+		// masquerade as "timed out".
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("timed out after %s waiting for run %s — keep waiting with: crewship wait --routine %s",
 				time.Since(start).Truncate(time.Second), runID, runID)
 		}

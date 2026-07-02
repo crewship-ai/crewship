@@ -96,7 +96,14 @@ table. CI gates can branch on the top-level "failed" / "warned"
 counters or filter the per-check array.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fixMode, _ := cmd.Flags().GetBool("fix")
-		jsonOut := resolvedFormat(cmd) == "json"
+		// Doctor's machine output is a bespoke JSON document (checks +
+		// counters), not a formatter-rendered list — fail fast on formats
+		// it can't honor rather than silently degrading to the color table.
+		doctorFormat := resolvedFormat(cmd)
+		if doctorFormat != "json" && doctorFormat != "table" {
+			return fmt.Errorf("doctor supports --format table|json (got %q)", doctorFormat)
+		}
+		jsonOut := doctorFormat == "json"
 		parentCtx := cmd.Context()
 		if parentCtx == nil {
 			parentCtx = context.Background()

@@ -180,14 +180,14 @@ func TestFeedbackCreateListDelete(t *testing.T) {
 	s.OnPost("/api/v1/feedback", clitest.JSONResponse(201, map[string]any{"id": "cfb1"}))
 	s.OnGet("/api/v1/feedback", clitest.JSONResponse(200, map[string]any{
 		"feedback": []map[string]any{{
-			"id": "cfb1", "message_id": "cmsg1", "signal": "thumbs_down", "created_at": "2026-07-03T00:00:00Z",
+			"id": "cfb1", "message_id": "cmsg1", "signal": "not_helpful", "created_at": "2026-07-03T00:00:00Z",
 		}},
 	}))
 	s.OnDelete("/api/v1/feedback", clitest.EmptyResponse(204))
 	covSetupCli10(t, s.URL())
 
 	setFlagCovCli10(t, feedbackCreateCmd, "message", "cmsg1")
-	setFlagCovCli10(t, feedbackCreateCmd, "signal", "thumbs_down")
+	setFlagCovCli10(t, feedbackCreateCmd, "signal", "not_helpful")
 	feedbackCreateCmd.SetContext(context.Background())
 	if _, err := captureStdoutCovCli10(t, func() error {
 		return feedbackCreateCmd.RunE(feedbackCreateCmd, nil)
@@ -203,7 +203,7 @@ func TestFeedbackCreateListDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list RunE: %v", err)
 	}
-	if !strings.Contains(out, "thumbs_down") {
+	if !strings.Contains(out, "not_helpful") {
 		t.Errorf("list output missing signal: %q", out)
 	}
 	if got := s.CallsFor("GET", "/api/v1/feedback"); len(got) != 1 || !strings.Contains(got[0].Query, "message_id=cmsg1") {
@@ -211,7 +211,7 @@ func TestFeedbackCreateListDelete(t *testing.T) {
 	}
 
 	setFlagCovCli10(t, feedbackDeleteCmd, "message", "cmsg1")
-	setFlagCovCli10(t, feedbackDeleteCmd, "signal", "thumbs_down")
+	setFlagCovCli10(t, feedbackDeleteCmd, "signal", "not_helpful")
 	feedbackDeleteCmd.SetContext(context.Background())
 	if _, err := captureStdoutCovCli10(t, func() error {
 		return feedbackDeleteCmd.RunE(feedbackDeleteCmd, nil)

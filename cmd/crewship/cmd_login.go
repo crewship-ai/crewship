@@ -248,7 +248,13 @@ auth/network failure. The /workspaces fetch is the load-bearing call;
 the /cli-token/validate side-call is best-effort (a session-cookie
 user has no CLI token to validate).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		jsonOut := resolvedFormat(cmd) == "json"
+		// whoami's machine output is a bespoke JSON document — fail fast
+		// on formats it can't honor instead of degrading to human text.
+		whoamiFormat := resolvedFormat(cmd)
+		if whoamiFormat != "json" && whoamiFormat != "table" {
+			return fmt.Errorf("whoami supports --format table|json (got %q)", whoamiFormat)
+		}
+		jsonOut := whoamiFormat == "json"
 
 		if err := requireAuth(); err != nil {
 			return err

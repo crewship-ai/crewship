@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -152,6 +153,7 @@ var recipePreviewCmd = &cobra.Command{
 				existing = append(existing, name)
 			}
 		}
+		sort.Strings(existing) // map iteration order is random; agents diff this output
 		pairs := [][]string{
 			{"Crew slug", preview.ResolvedCrewSlug},
 			{"Slug free", fmt.Sprintf("%t", preview.CrewSlugAvailable)},

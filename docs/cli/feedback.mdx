@@ -1,25 +1,25 @@
 ---
 title: "Feedback"
-description: "Record and inspect typed feedback signals (thumbs, edit, regenerate) on messages."
+description: "Record and inspect typed feedback signals (helpful, not_helpful, inaccurate, unsafe, edit, regenerate) on messages."
 icon: "thumbs-up"
 ---
 
 # Feedback
 
-Typed feedback is structured eval signal — `thumbs_up` / `thumbs_down` / `edit` / `regenerate` bound to a message or trace. Distinct from chat reactions (social UI signal); feedback feeds evaluation and consolidation.
+Typed feedback is structured eval signal — `helpful` / `not_helpful` / `inaccurate` / `unsafe` / `edit` / `regenerate` bound to a message or trace. Distinct from chat reactions (social UI signal); feedback feeds evaluation and consolidation.
 
 ## `crewship feedback create`
 
 | Flag | Type | Effect |
 |---|---|---|
 | `--message` | string | Message id the signal binds to (required). |
-| `--signal` | string | `thumbs_up` \| `thumbs_down` \| `edit` \| `regenerate` (required). |
+| `--signal` | string | `helpful` \| `not_helpful` \| `inaccurate` \| `unsafe` \| `edit` \| `regenerate` (required). |
 | `--chat` | string | Chat id (optional). |
 | `--trace` | string | Trace id (optional). |
 | `--reason` | string | Free-text reason (optional). |
 
 ```bash
-crewship feedback create --message cmsg… --signal thumbs_down --reason "wrong file"
+crewship feedback create --message cmsg… --signal not_helpful --reason "wrong file"
 ```
 
 ## `crewship feedback list`
@@ -36,7 +36,7 @@ crewship feedback list --trace tr_… --format json
 Remove a signal from a message.
 
 ```bash
-crewship feedback delete --message cmsg… --signal thumbs_down
+crewship feedback delete --message cmsg… --signal not_helpful
 ```
 
 ## See also

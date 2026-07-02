@@ -92,14 +92,22 @@ Exit code reflects the terminal status (0 done, 1 failed, 2 cancelled,
 		}
 
 		// exitForPollError maps a poll failure to wait's exit-code
-		// contract: 3 when OUR --timeout fired, 4 otherwise.
+		// contract: 3 when OUR --timeout fired, 4 otherwise (including a
+		// Ctrl-C cancellation — that's an aborted wait, not a timeout).
 		exitForPollError := func(err error) {
-			if ctx.Err() != nil {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				if !quiet {
 					fmt.Fprintf(os.Stderr, "%s[wait]%s timeout after %s: %v\n",
 						cli.Yellow, cli.Reset, time.Since(start).Truncate(time.Second), ctx.Err())
 				}
 				os.Exit(3)
+			}
+			if errors.Is(ctx.Err(), context.Canceled) {
+				if !quiet {
+					fmt.Fprintf(os.Stderr, "%s[wait]%s cancelled after %s\n",
+						cli.Yellow, cli.Reset, time.Since(start).Truncate(time.Second))
+				}
+				os.Exit(4)
 			}
 			fmt.Fprintf(os.Stderr, "%s[wait]%s error: %v\n", cli.Red, cli.Reset, err)
 			os.Exit(4)

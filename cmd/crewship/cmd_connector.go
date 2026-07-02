@@ -128,23 +128,22 @@ var connectorVerifyCmd = &cobra.Command{
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
 		}
+		// stdout is success-only: a failed probe reports exclusively via
+		// the returned error (structured envelope on stderr in machine
+		// formats) so JSON consumers never see two competing documents.
 		f := newFormatter()
-		switch f.Format {
-		case "json", "yaml", "ndjson":
-			if err := f.Auto(out, nil, nil); err != nil {
-				return err
-			}
-		default:
-			if out.OK {
-				cli.PrintSuccess("Credentials verified.")
-			}
-		}
 		if !out.OK {
 			msg := out.Message
 			if msg == "" {
 				msg = "provider rejected the credentials"
 			}
 			return fmt.Errorf("verify failed: %s", msg)
+		}
+		switch f.Format {
+		case "json", "yaml", "ndjson":
+			return f.Auto(out, nil, nil)
+		default:
+			cli.PrintSuccess("Credentials verified.")
 		}
 		return nil
 	},

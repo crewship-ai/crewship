@@ -65,6 +65,10 @@ The default (table) output is an indented human-readable tree.`,
 		switch f.Format {
 		case "json", "yaml", "ndjson":
 			return f.Auto(manifest, nil, nil)
+		case "quiet":
+			// Script-friendly: one command path per line, nothing else.
+			printCommandPaths(manifest.Commands)
+			return nil
 		default:
 			printCommandTree(manifest.Commands, 0)
 			fmt.Printf("\n%sFull machine-readable manifest: crewship commands --format json%s\n", cli.Dim, cli.Reset)
@@ -114,6 +118,14 @@ func collectFlags(fs *pflag.FlagSet) []flagManifest {
 		})
 	})
 	return out
+}
+
+// printCommandPaths emits every command path, one per line — quiet mode.
+func printCommandPaths(cmds []commandManifest) {
+	for _, c := range cmds {
+		fmt.Println(c.Path)
+		printCommandPaths(c.Commands)
+	}
 }
 
 // printCommandTree renders the human view: an indented name + short tree.

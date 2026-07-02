@@ -29,15 +29,15 @@ type feedbackRow struct {
 var feedbackCmd = &cobra.Command{
 	Use:   "feedback",
 	Short: "Record and inspect typed feedback signals on messages",
-	Long: `Feedback is structured eval signal (thumbs_up / thumbs_down / edit /
-regenerate) bound to a message or trace — distinct from chat reactions,
-which are social UI signal.
+	Long: `Feedback is structured eval signal (helpful / not_helpful / inaccurate /
+unsafe / edit / regenerate) bound to a message or trace — distinct from
+chat reactions, which are social UI signal.
 
 Examples:
-  crewship feedback create --message <id> --signal thumbs_down --reason "wrong file"
+  crewship feedback create --message <id> --signal not_helpful --reason "wrong file"
   crewship feedback list --message <id>
   crewship feedback list --trace <trace-id>
-  crewship feedback delete --message <id> --signal thumbs_down`,
+  crewship feedback delete --message <id> --signal not_helpful`,
 }
 
 var feedbackCreateCmd = &cobra.Command{
@@ -181,7 +181,7 @@ var feedbackDeleteCmd = &cobra.Command{
 
 func init() {
 	feedbackCreateCmd.Flags().String("message", "", "message id the signal binds to (required)")
-	feedbackCreateCmd.Flags().String("signal", "", "signal type: thumbs_up | thumbs_down | edit | regenerate (required)")
+	feedbackCreateCmd.Flags().String("signal", "", "signal type: helpful | not_helpful | inaccurate | unsafe | edit | regenerate (required)")
 	feedbackCreateCmd.Flags().String("chat", "", "chat id (optional)")
 	feedbackCreateCmd.Flags().String("trace", "", "trace id (optional)")
 	feedbackCreateCmd.Flags().String("reason", "", "free-text reason (optional)")
