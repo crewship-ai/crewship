@@ -96,6 +96,37 @@ describe("useChat thinking coalescence across transient parts", () => {
     expect(thinkingParts[1].content).toBe("second pass")
   })
 
+  it("prunes the transient status line when the run errors", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://x/ws", getToken: async () => "t", sessionId: "s1" }),
+    )
+
+    emit({ type: "thinking", content: "working on it" })
+    emit({ type: "status", content: "thinking_tokens: 42" })
+    emit({ type: "error", content: "boom" })
+
+    const parts = result.current.turns[0].parts
+    expect(parts.some((p) => p.type === "status")).toBe(false)
+    expect(parts.some((p) => p.type === "error")).toBe(true)
+  })
+
+  it("prunes the transient status line on local stop", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://x/ws", getToken: async () => "t", sessionId: "s1" }),
+    )
+
+    emit({ type: "thinking", content: "working on it" })
+    emit({ type: "status", content: "thinking_tokens: 42" })
+    act(() => {
+      result.current.stopGeneration()
+    })
+
+    const parts = result.current.turns[0].parts
+    expect(parts.some((p) => p.type === "status")).toBe(false)
+    // The partial thinking is kept (never lose content), just finalized.
+    expect(parts.some((p) => p.type === "thinking" && !p.isStreaming)).toBe(true)
+  })
+
   it("still splits reasoning passes separated by a tool call", () => {
     const { result } = renderHook(() =>
       useChat({ wsUrl: "ws://x/ws", getToken: async () => "t", sessionId: "s1" }),

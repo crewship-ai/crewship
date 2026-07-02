@@ -312,7 +312,9 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const [pinNonce, setPinNonce] = useState(0)
   const lastUserTurnId = useMemo(() => {
     for (let i = turns.length - 1; i >= 0; i--) {
-      if (turns[i].role === "user") return turns[i].id
+      // Skip teammate messages (authorUserId set): in a group chat an
+      // incoming user_message must not retarget an active pin mid-stream.
+      if (turns[i].role === "user" && !turns[i].authorUserId) return turns[i].id
     }
     return null
   }, [turns])
@@ -360,12 +362,60 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     navigator.clipboard.writeText(content).catch(() => {})
   }, [])
 
+  // Regenerate/edit also stream a fresh reply, so they re-arm the pin just
+  // like a plain send — otherwise the scroll behavior is inconsistent.
+  const regenerateWithPin = useCallback(() => {
+    regenerateLastTurn()
+    setPinNonce((n) => n + 1)
+  }, [regenerateLastTurn])
+
+  const editAndResendWithPin = useCallback((turnId: string, newContent: string) => {
+    editAndResend(turnId, newContent)
+    setPinNonce((n) => n + 1)
+  }, [editAndResend])
+
   const handleSlashCommand = useCallback((id: string) => {
-    if (id === "regenerate") regenerateLastTurn()
+    if (id === "regenerate") regenerateWithPin()
     else if (id === "clear") loadHistory([])
-  }, [regenerateLastTurn, loadHistory])
+  }, [regenerateWithPin, loadHistory])
 
   const chatStatus = isStreaming ? "streaming" as const : "ready" as const
+
+  // One conversation surface, rendered by both the mobile-chat and desktop
+  // branches — the two copies had already drifted once; don't re-fork them.
+  const conversationEl = (
+    <Conversation>
+      <ConversationContent className="mx-auto w-full max-w-3xl">
+        {turns.length === 0 && !historyLoading && (
+          <ConversationEmptyState
+            icon={<Bot className="h-12 w-12" />}
+            title="Start a conversation"
+            description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
+          />
+        )}
+        <AnimatePresence key={sessionId} initial={false} mode="popLayout">
+          {turns.map((turn, idx) => (
+            <TurnRenderer
+              key={turn.id}
+              turn={turn}
+              onCopy={handleCopy}
+              onFileClick={noopFileClick}
+              isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
+              onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateWithPin : undefined}
+              onEditUserMessage={!isStreaming ? editAndResendWithPin : undefined}
+              animateAfter={animateAfter}
+              agentId={agentId}
+              chatId={sessionId}
+              resolveAuthorName={resolveAuthorName}
+            />
+          ))}
+        </AnimatePresence>
+        <StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />
+        <PinToTopSpacer pinNonce={pinNonce} pinTurnId={lastUserTurnId} sessionId={sessionId} />
+      </ConversationContent>
+      <ConversationScrollButton />
+    </Conversation>
+  )
 
   // Mobile: files-only mode -- just the file tree, no tabs
   if (mobilePanel === "files-only") {
@@ -422,37 +472,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           </span>
         </div>
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          <Conversation>
-            <ConversationContent className="mx-auto w-full max-w-3xl">
-              {turns.length === 0 && !historyLoading && (
-                <ConversationEmptyState
-                  icon={<Bot className="h-12 w-12" />}
-                  title="Start a conversation"
-                  description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
-                />
-              )}
-              <AnimatePresence key={sessionId} initial={false} mode="popLayout">
-                {turns.map((turn, idx) => (
-                  <TurnRenderer
-                    key={turn.id}
-                    turn={turn}
-                    onCopy={handleCopy}
-                    onFileClick={noopFileClick}
-                    isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
-                    onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
-                    onEditUserMessage={!isStreaming ? editAndResend : undefined}
-                    animateAfter={animateAfter}
-                    agentId={agentId}
-                    chatId={sessionId}
-                    resolveAuthorName={resolveAuthorName}
-                  />
-                ))}
-              </AnimatePresence>
-              <StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />
-              <PinToTopSpacer pinNonce={pinNonce} pinTurnId={lastUserTurnId} sessionId={sessionId} />
-            </ConversationContent>
-            <ConversationScrollButton />
-          </Conversation>
+          {conversationEl}
         </div>
         {turns.length === 0 && !historyLoading && (
           <div className="px-4 pb-2 shrink-0">
@@ -497,37 +517,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           </span>
         </div>
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          <Conversation>
-            <ConversationContent className="mx-auto w-full max-w-3xl">
-              {turns.length === 0 && !historyLoading && (
-                <ConversationEmptyState
-                  icon={<Bot className="h-12 w-12" />}
-                  title="Start a conversation"
-                  description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
-                />
-              )}
-              <AnimatePresence key={sessionId} initial={false} mode="popLayout">
-                {turns.map((turn, idx) => (
-                  <TurnRenderer
-                    key={turn.id}
-                    turn={turn}
-                    onCopy={handleCopy}
-                    onFileClick={noopFileClick}
-                    isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
-                    onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
-                    onEditUserMessage={!isStreaming ? editAndResend : undefined}
-                    animateAfter={animateAfter}
-                    agentId={agentId}
-                    chatId={sessionId}
-                    resolveAuthorName={resolveAuthorName}
-                  />
-                ))}
-              </AnimatePresence>
-              <StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />
-              <PinToTopSpacer pinNonce={pinNonce} pinTurnId={lastUserTurnId} sessionId={sessionId} />
-            </ConversationContent>
-            <ConversationScrollButton />
-          </Conversation>
+          {conversationEl}
         </div>
         {turns.length === 0 && !historyLoading && (
           <div className="mx-auto w-full max-w-3xl px-4 md:px-6 pb-2 shrink-0">

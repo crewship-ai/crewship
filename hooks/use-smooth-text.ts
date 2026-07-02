@@ -31,10 +31,12 @@ export function useSmoothText(text: string, streaming: boolean): string {
   if (streaming) everStreamedRef.current = true
 
   // Render reads stateRef (the source of truth); this state exists only to
-  // trigger a re-render when the reveal advances.
-  const [, setVisibleCount] = useState(() =>
-    streaming && canAnimate ? 0 : text.length,
-  )
+  // trigger a re-render when the reveal advances. It is a monotonic counter,
+  // NOT the visible count: the replacement-snap path mutates stateRef during
+  // render without setState, so a count-valued state could later be set to an
+  // equal (stale) value and React would bail out of the re-render, freezing
+  // the reveal on a truncated prefix.
+  const [, bumpRender] = useState(0)
   const stateRef = useRef({ visible: streaming && canAnimate ? 0 : text.length, lastTs: 0, carry: 0 })
   const textRef = useRef(text)
   const rafIdRef = useRef<number | null>(null)
@@ -73,7 +75,7 @@ export function useSmoothText(text: string, streaming: boolean): string {
       const lastCode = textRef.current.charCodeAt(next - 1)
       if (next < target && lastCode >= 0xd800 && lastCode <= 0xdbff) next += 1
       st.visible = next
-      setVisibleCount(next)
+      bumpRender((n) => n + 1)
       if (next < target) {
         rafIdRef.current = requestAnimationFrame(step)
       } else {

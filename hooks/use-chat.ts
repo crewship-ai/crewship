@@ -926,9 +926,12 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       if (last?.role === "assistant" && last.isStreaming) {
         // Finalize any open streaming parts (e.g. a thinking block) so they stop
         // rendering a "thinking…" spinner on a turn that has actually errored.
-        const finalizedParts = last.parts.map((p) =>
-          p.isStreaming ? { ...p, isStreaming: false } : p,
-        )
+        // Status parts are transient progress indicators — drop them here just
+        // like handleDoneEvent does, or an errored turn keeps a stale animated
+        // status row forever.
+        const finalizedParts = last.parts
+          .filter((p) => p.type !== "status")
+          .map((p) => (p.isStreaming ? { ...p, isStreaming: false } : p))
         return [
           ...prev.slice(0, -1),
           { ...last, parts: [...finalizedParts, errorPart], isStreaming: false },
@@ -1212,12 +1215,17 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
           ? {
               ...t,
               isStreaming: false,
-              parts: t.parts.map((p) =>
-                p.isStreaming ? { ...p, isStreaming: false } : p,
-              ),
+              // Drop transient status rows (mirrors handleDoneEvent) — a
+              // stopped turn must not keep a stale animated progress line.
+              parts: t.parts
+                .filter((p) => p.type !== "status")
+                .map((p) => (p.isStreaming ? { ...p, isStreaming: false } : p)),
             }
           : t,
-      ),
+      )
+      // A turn that held only status parts is now empty — drop it entirely
+      // (same as handleDoneEvent's orphaned status-only turn cleanup).
+      .filter((t) => !(t.role === "assistant" && t.parts.length === 0)),
     )
   }, [send, sessionId])
 

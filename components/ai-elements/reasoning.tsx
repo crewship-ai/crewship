@@ -15,6 +15,7 @@ import { math } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import { ChevronDownIcon } from "lucide-react";
 import { BrainIcon } from "@/components/ui/brain";
+import { formatDurationFloor } from "@/lib/time";
 import {
   createContext,
   memo,
@@ -177,24 +178,18 @@ export type ReasoningTriggerProps = ComponentProps<
   ) => ReactNode;
 };
 
-/** Format whole seconds as "Ns" / "Nm Ns" for reasoning headers. */
-const formatSeconds = (totalSeconds: number): string => {
-  if (totalSeconds < 60) return `${totalSeconds}s`;
-  return `${Math.floor(totalSeconds / 60)}m ${totalSeconds % 60}s`;
-};
-
 /** Collapsed-header label once reasoning is done. Exported for tests. */
 export const thoughtForLabel = (duration?: number): string => {
   if (duration === undefined) return "Thought for a few seconds";
   if (duration < 60) {
     return `Thought for ${duration} ${duration === 1 ? "second" : "seconds"}`;
   }
-  return `Thought for ${formatSeconds(duration)}`;
+  return `Thought for ${formatDurationFloor(duration * MS_IN_S)}`;
 };
 
 /** Live header label while reasoning streams. Exported for tests. */
 export const thinkingLiveLabel = (elapsed: number): string =>
-  elapsed >= 1 ? `Thinking… ${formatSeconds(elapsed)}` : "Thinking…";
+  elapsed >= 1 ? `Thinking… ${formatDurationFloor(elapsed * MS_IN_S)}` : "Thinking…";
 
 const defaultGetThinkingMessage = (
   isStreaming: boolean,

@@ -99,6 +99,26 @@ describe("useSmoothText", () => {
     expect(result.current).toBe("new")
   })
 
+  it("resumes revealing after a replace-then-append sequence (no frozen prefix)", () => {
+    // Regression: the replacement snap used to update only the internal ref;
+    // a later frame could then advance to a count equal to the stale state
+    // value, React would bail out of the re-render, and the reveal froze on
+    // the truncated prefix forever.
+    const { result, rerender } = renderHook(({ text }) => useSmoothText(text, true), {
+      initialProps: { text: "hello" },
+    })
+    for (let i = 0; i < 20 && result.current.length < 5; i++) frame()
+    expect(result.current).toBe("hello")
+
+    rerender({ text: "new" })
+    frame()
+    expect(result.current).toBe("new")
+
+    rerender({ text: "newer and longer content" })
+    for (let i = 0; i < 200 && result.current.length < 24; i++) frame()
+    expect(result.current).toBe("newer and longer content")
+  })
+
   it("never splits a surrogate pair at the reveal boundary", () => {
     const full = "👋".repeat(400)
     const { result } = renderHook(({ text }) => useSmoothText(text, true), {
