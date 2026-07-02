@@ -1,7 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { toast } from "sonner"
 import { useWebSocket, type WSStatus, type WSMessage } from "@/hooks/use-websocket"
+import { checkChatMessageSize } from "@/components/features/chat/hooks/use-message-submit"
 
 /** Upper bound on out-of-order events held during reassembly. Past this, a gap
  *  is assumed permanently lost and the stream skips ahead so it never freezes.
@@ -1240,6 +1242,17 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     const lastUserContent = turns[lastUserIdx].parts.find((p) => p.type === "text")?.content
     if (!lastUserContent) return
 
+    // Same pre-send guard the composer runs (checkChatMessageSize) — checked
+    // BEFORE any turn truncation or isStreaming flip. Without this, resending
+    // an oversize turn truncates the transcript locally, then the server
+    // kills the whole socket on the oversize frame: message gone, transcript
+    // tail already removed, panel stuck streaming with no error.
+    const sizeCheck = checkChatMessageSize(sessionId, lastUserContent)
+    if (!sizeCheck.ok) {
+      toast.error(sizeCheck.message)
+      return
+    }
+
     // Remove all turns after (and including) the last assistant turn
     setTurns((prev) => prev.slice(0, lastUserIdx + 1))
     setIsStreaming(true)
@@ -1263,10 +1276,24 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       const turnIdx = turns.findIndex((t) => t.id === turnId)
       if (turnIdx === -1 || turns[turnIdx].role !== "user") return
 
+      const trimmed = newContent.trim()
+
+      // Same pre-send guard the composer runs (checkChatMessageSize) — checked
+      // BEFORE any turn mutation or isStreaming flip. Without this, an oversize
+      // paste into an edit replaces the turn and truncates everything after it
+      // locally, then the server kills the whole socket on the oversize frame:
+      // message gone, transcript tail already removed, panel stuck streaming
+      // with no error. Leave the transcript and edit draft intact instead.
+      const sizeCheck = checkChatMessageSize(sessionId, trimmed)
+      if (!sizeCheck.ok) {
+        toast.error(sizeCheck.message)
+        return
+      }
+
       // Replace the user turn content and remove everything after
       const editedTurn: ChatTurn = {
         ...turns[turnIdx],
-        parts: [{ id: uuid(), type: "text", content: newContent.trim(), timestamp: new Date() }],
+        parts: [{ id: uuid(), type: "text", content: trimmed, timestamp: new Date() }],
       }
       setTurns(turns.slice(0, turnIdx).concat(editedTurn))
       setIsStreaming(true)
@@ -1278,7 +1305,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
         type: "send_message",
         payload: JSON.stringify({
           session_id: sessionId,
-          content: newContent.trim(),
+          content: trimmed,
         }),
       })
     },

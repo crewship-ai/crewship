@@ -3,12 +3,26 @@ import { renderHook, act } from "@testing-library/react"
 
 // Capture the onMessage handler useChat registers so tests can drive
 // stream events directly; stub the socket so nothing touches the network.
+// Keep the module's real WS_MAX_OUTBOUND_FRAME_BYTES/encodedByteLength exports
+// (via importOriginal) — checkChatMessageSize needs them to size the oversize
+// resend/edit-and-resend cases below.
 let captured: ((msg: unknown) => void) | undefined
 const mockSend = vi.fn()
-vi.mock("@/hooks/use-websocket", () => ({
-  useWebSocket: (opts: { onMessage?: (m: unknown) => void }) => {
-    captured = opts.onMessage
-    return { status: "connected", send: mockSend }
+vi.mock("@/hooks/use-websocket", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/use-websocket")>()
+  return {
+    ...actual,
+    useWebSocket: (opts: { onMessage?: (m: unknown) => void }) => {
+      captured = opts.onMessage
+      return { status: "connected", send: mockSend }
+    },
+  }
+})
+
+const toastError = vi.fn()
+vi.mock("sonner", () => ({
+  toast: {
+    error: (...args: unknown[]) => toastError(...args),
   },
 }))
 
@@ -522,6 +536,30 @@ describe("regenerateLastTurn", () => {
     expect(mockSend).not.toHaveBeenCalled()
     expect(result.current.isStreaming).toBe(false)
   })
+
+  it("blocks an oversize resend with a size error before truncating turns or sending", () => {
+    const { result } = setup()
+    const bigContent = "x".repeat(70_000)
+    act(() => {
+      result.current.sendMessage(bigContent)
+    })
+    dispatch(chatEvent("text", "first answer"))
+    flushFrames()
+    dispatch(chatEvent("done"))
+    expect(result.current.turns).toHaveLength(2)
+    mockSend.mockClear()
+
+    act(() => {
+      result.current.regenerateLastTurn()
+    })
+
+    expect(mockSend).not.toHaveBeenCalled()
+    expect(result.current.isStreaming).toBe(false)
+    // Transcript is untouched — no truncation happened before the guard fired.
+    expect(result.current.turns).toHaveLength(2)
+    expect(toastError).toHaveBeenCalledTimes(1)
+    expect(toastError.mock.calls[0][0]).toMatch(/too large/i)
+  })
 })
 
 describe("editAndResend", () => {
@@ -580,6 +618,26 @@ describe("editAndResend", () => {
     })
     expect(mockSend).not.toHaveBeenCalled()
     expect(result.current.turns).toHaveLength(2)
+  })
+
+  it("blocks an oversize edited message with a size error, leaving the transcript and edit draft intact", () => {
+    const { result } = setup()
+    seedConversation(result)
+    const userTurnId = result.current.turns[0].id
+    mockSend.mockClear()
+    const bigContent = "y".repeat(70_000)
+
+    act(() => {
+      result.current.editAndResend(userTurnId, bigContent)
+    })
+
+    expect(mockSend).not.toHaveBeenCalled()
+    expect(result.current.isStreaming).toBe(false)
+    // Turn content is unchanged and nothing was truncated before the guard fired.
+    expect(result.current.turns).toHaveLength(2)
+    expect(result.current.turns[0].parts[0].content).toBe("original")
+    expect(toastError).toHaveBeenCalledTimes(1)
+    expect(toastError.mock.calls[0][0]).toMatch(/too large/i)
   })
 })
 
