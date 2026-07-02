@@ -18,6 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { ChatPanel } from "@/components/features/chat/chat-panel"
 import { SessionsSidebar } from "@/components/features/chat/sessions-sidebar"
+import { withActiveSessionRead } from "@/components/features/chat/session-sort"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { apiFetch } from "@/lib/api-fetch"
 
@@ -178,6 +179,11 @@ export function ChatPageClient() {
   // POST'd a new chat, piling up empty "Untitled session" rows on every
   // visit (the sidebar would show 17+ stale entries within an hour).
   const [sessionsLoaded, setSessionsLoaded] = useState(false)
+  // Live mirror of sessionId for fetch callbacks whose effects don't (and
+  // shouldn't) re-run on session swaps — they need "the active session at
+  // response time" to zero its unread count, not a stale closure value.
+  const sessionIdRef = useRef(sessionId)
+  useEffect(() => { sessionIdRef.current = sessionId }, [sessionId])
   useEffect(() => {
     if (!agent || !workspaceId) return
     let cancelled = false
@@ -186,7 +192,9 @@ export function ChatPageClient() {
       .then((r) => (r.ok ? r.json() : []))
       .then((list: SessionRecord[]) => {
         if (!cancelled && Array.isArray(list)) {
-          setSessions(list)
+          // The active session is read by definition — this GET can race
+          // the mark-read PUT (GET served first → stale unread lands here).
+          setSessions(withActiveSessionRead(list, sessionIdRef.current))
           setSessionsLoaded(true)
         }
       })
@@ -194,24 +202,36 @@ export function ChatPageClient() {
     return () => { cancelled = true }
   }, [agent, workspaceId])
 
-  // Mark the selected session read: advances the server-side read cursor
-  // (unread badge source, migration v129) and clears the paired "agent
-  // replied" inbox notification. Fires whenever the viewed session
-  // changes; fire-and-forget — a failed call just leaves the badge until
-  // the next visit. Local state zeroes immediately so the sidebar badge
-  // never lags the click.
-  useEffect(() => {
-    if (!agent || !workspaceId || !sessionId) return
+  // Mark a session read: advances the server-side read cursor (unread
+  // badge source, migration v129) and clears the paired "agent replied"
+  // inbox notification. Fire-and-forget — a failed call just leaves the
+  // badge until the next visit. Local state zeroes immediately so the
+  // sidebar badge never lags.
+  const markSessionRead = useCallback((sid: string) => {
+    if (!agent || !workspaceId || !sid) return
     setSessions((prev) =>
-      prev.map((s) => (s.id === sessionId && s.unread_count ? { ...s, unread_count: 0 } : s)),
+      prev.map((s) => (s.id === sid && s.unread_count ? { ...s, unread_count: 0 } : s)),
     )
     apiFetch(
-      `/api/v1/agents/${agent.id}/chats/${encodeURIComponent(sessionId)}/read?workspace_id=${workspaceId}`,
+      `/api/v1/agents/${agent.id}/chats/${encodeURIComponent(sid)}/read?workspace_id=${workspaceId}`,
       { method: "PUT" },
     ).catch(() => {
       /* non-fatal: cursor advances on the next successful visit */
     })
-  }, [agent, workspaceId, sessionId])
+  }, [agent, workspaceId])
+
+  // Fires on selection/view change…
+  useEffect(() => {
+    if (sessionId) markSessionRead(sessionId)
+  }, [sessionId, markSessionRead])
+
+  // …and again when a watched reply settles (ChatPanel's isStreaming
+  // true→false). The server counted the just-persisted reply as unread
+  // after our selection-time cursor; without this re-fire the session
+  // grows a phantom badge the moment the user switches away.
+  const handleReplySettled = useCallback((sid: string) => {
+    markSessionRead(sid)
+  }, [markSessionRead])
 
   // If no ?session= specified: route to the freshest existing session
   // (pre-existing chats with the agent shouldn't be replaced by a new
@@ -322,10 +342,15 @@ export function ChatPageClient() {
       const created: { id: string } = await res.json()
       // Refetch the sessions list (POST returns only {id}, not the full
       // record, so we'd otherwise show a partial entry in the sidebar).
+      // Force-read the session the user is leaving AND the one being
+      // created — the refetched counts predate the mark-read PUT, so the
+      // just-watched session would otherwise pop a phantom unread badge.
       const listRes = await apiFetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}&limit=20`)
       if (listRes.ok) {
         const list: SessionRecord[] = await listRes.json()
-        if (Array.isArray(list)) setSessions(list)
+        if (Array.isArray(list)) {
+          setSessions(withActiveSessionRead(withActiveSessionRead(list, sessionIdRef.current), created.id))
+        }
       }
       selectSession(created.id)
     } catch (err) {
@@ -470,6 +495,7 @@ export function ChatPageClient() {
               initialInput={authoringSession?.id === sessionId ? authoringSession.prompt : undefined}
               autoSendInitial={authoringSession?.id === sessionId}
               onSend={handleSessionSend}
+              onReplySettled={handleReplySettled}
             />
           ) : (
             <div className="h-full grid place-items-center text-xs text-muted-foreground">

@@ -37,3 +37,22 @@ export function sortSessionsByActivity<T extends ActivitySortable>(sessions: T[]
       parseSessionTimestamp(a.last_activity_at ?? a.started_at),
   )
 }
+
+/**
+ * Force unread_count=0 on the currently active session in a fetched list.
+ *
+ * The session being viewed is read by definition, whatever the server row
+ * says — the list GET can race the mark-read PUT on mount (GET served
+ * first → stale non-zero count lands in state), and the "+ New session"
+ * refetch returns counts as of before the PUT committed. Input is not
+ * mutated; a null/absent active id is a no-op.
+ */
+export function withActiveSessionRead<T extends { id: string; unread_count?: number }>(
+  sessions: T[],
+  activeSessionId: string | null,
+): T[] {
+  if (!activeSessionId) return sessions
+  return sessions.map((s) =>
+    s.id === activeSessionId && (s.unread_count ?? 0) > 0 ? { ...s, unread_count: 0 } : s,
+  )
+}
