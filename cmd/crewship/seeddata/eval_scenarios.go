@@ -66,13 +66,12 @@ package seeddata
 // is ~$0.05-0.10 (system prompt + tool defs + base context) before
 // the worker even reads the routine prompt. A $0.05 cap leaves zero
 // budget for the actual work and trips the guardrail on every Opus
-// run regardless of routine complexity. The $0.01 cap on
+// run regardless of routine complexity. The tight cap on
 // `eval-cost-budget-haiku` is intentionally preserved — that scenario's
-// whole purpose is to trip the cap on tier escalation. The cap was
-// $0.005 originally; bumped to $0.01 on 2026-05-10 after Anthropic's
-// rate-card refresh nudged a single Haiku 4.5 echo to ~$0.007, which
-// would have made the happy path fail-by-design instead of the cap-
-// triggering escalation it was designed to test.
+// whole purpose is to trip the cap on tier escalation. Cap history:
+// $0.005 → $0.01 (2026-05-10, Anthropic rate-card refresh) → $0.02
+// (2026-07-02, measured Haiku echo hit ~$0.014 once the injected
+// system prompt grew — see the scenario's own comment).
 var EvalScenarios = []RoutineDef{
 	// ────────────────────────────────────────────────────────────────────
 	// 1. Pure transformation — extract-emails
@@ -646,19 +645,23 @@ var EvalScenarios = []RoutineDef{
 	{
 		Slug:        "eval-cost-budget-haiku",
 		Name:        "Eval: cost budget (Haiku-only)",
-		Description: "Trivial step capped at $0.01 — runs fine on Haiku, gets killed by the cost cap if a regression escalates it to Sonnet or Opus.",
+		Description: "Trivial step capped at $0.02 — runs fine on Haiku, gets killed by the cost cap if a regression escalates it to Sonnet or Opus.",
 		CrewSlug:    "quality",
 		Definition: map[string]interface{}{
 			"dsl_version":  "1.0",
 			"name":         "eval-cost-budget-haiku",
 			"display_name": "Eval: cost budget (Haiku-only)",
-			"description":  "Trivial step capped at $0.01 — runs fine on Haiku, gets killed by the cost cap if a regression escalates it to Sonnet or Opus.",
-			// $0.01 fits a Haiku 4.5 echo (~$0.007) while still flagging
-			// a regression to Sonnet (~$0.04+) or Opus (~$0.15+). The
-			// original $0.005 was tight to Haiku 4 pricing and started
-			// biting after Anthropic's rate-card refresh.
-			"estimated_cost_usd": 0.002,
-			"max_cost_usd":       0.01,
+			"description":  "Trivial step capped at $0.02 — runs fine on Haiku, gets killed by the cost cap if a regression escalates it to Sonnet or Opus.",
+			// The cap must sit BETWEEN the real Haiku cost and the real
+			// Sonnet cost of this step, or the sentinel loses its signal.
+			// Measured live (dev2, 2026-07-02): a Haiku echo costs ~$0.014
+			// because the injected system prompt (skills + routines +
+			// memory scaffold) dominates input tokens — the old $0.01 cap
+			// failed permanently on Haiku itself. $0.02 clears measured
+			// Haiku (~$0.014, less after the routines-block char budget)
+			// while still flagging Sonnet (~$0.04+) or Opus (~$0.15+).
+			"estimated_cost_usd": 0.004,
+			"max_cost_usd":       0.02,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
@@ -861,13 +864,13 @@ var EvalScenarios = []RoutineDef{
 	{
 		Slug:        "eval-idempotent-by-key",
 		Name:        "Eval: idempotency (concurrency_key)",
-		Description: "Routine gated by concurrency_key={{ inputs.key }}. Same key + same inputs ⇒ DEDUPED. Useful smoke for the dedupe path.",
+		Description: "Routine gated by concurrency_key={{ inputs.key }} — a concurrency slot per key (parallel same-key runs are serialized/rejected, NOT deduped). For DEDUPED semantics pass --idempotency-key on routine run (or the Idempotency-Key webhook header).",
 		CrewSlug:    "quality",
 		Definition: map[string]interface{}{
 			"dsl_version":        "1.0",
 			"name":               "eval-idempotent-by-key",
 			"display_name":       "Eval: idempotency (concurrency_key)",
-			"description":        "Routine gated by concurrency_key={{ inputs.key }}. Same key + same inputs ⇒ DEDUPED. Useful smoke for the dedupe path.",
+			"description":        "Routine gated by concurrency_key={{ inputs.key }} — a concurrency slot per key (parallel same-key runs are serialized/rejected, NOT deduped). For DEDUPED semantics pass --idempotency-key on routine run (or the Idempotency-Key webhook header).",
 			"estimated_cost_usd": 0.001,
 			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
