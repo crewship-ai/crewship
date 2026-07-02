@@ -24,6 +24,7 @@ import (
 	"database/sql"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/inbox"
@@ -123,6 +124,33 @@ func (n *Notifier) NotifyAssistantReply(ctx context.Context, rn chatbridge.Reply
 		delete(recipients, rn.AuthorUserID)
 	}
 
+	// Read cursors per recipient: a cursor at or past the reply's persist
+	// timestamp means a mark-read that raced us already covered this
+	// reply — upserting would resurrect a bell item the user has, by
+	// definition, read. Both sides use the fixed-width millisecond-ISO
+	// format, so >= is a plain string comparison. Zero RepliedAt (legacy
+	// caller) falls back to "now" — conservative: only a cursor from the
+	// future would suppress.
+	repliedAt := rn.RepliedAt
+	if repliedAt.IsZero() {
+		repliedAt = time.Now()
+	}
+	repliedAtISO := repliedAt.UTC().Format("2006-01-02T15:04:05.000Z")
+	cursors := map[string]string{}
+	if curRows, err := n.db.QueryContext(ctx,
+		`SELECT user_id, last_read_at FROM chat_read_cursors WHERE chat_id = ?`, rn.ChatID); err != nil {
+		n.logger.Warn("chatnotify: cursors lookup", "error", err, "chat_id", rn.ChatID)
+	} else {
+		defer curRows.Close()
+		for curRows.Next() {
+			var uid, lastRead string
+			if err := curRows.Scan(&uid, &lastRead); err == nil {
+				cursors[uid] = lastRead
+			}
+		}
+		_ = curRows.Err()
+	}
+
 	sessionChannel := "session:" + rn.ChatID
 	chatURL := "/chat/" + rn.AgentSlug + "?session=" + rn.ChatID
 	itemTitle := agentName + " replied"
@@ -134,6 +162,9 @@ func (n *Notifier) NotifyAssistantReply(ctx context.Context, rn chatbridge.Reply
 	for uid := range recipients {
 		if n.hub != nil && n.hub.IsUserSubscribed(sessionChannel, uid) {
 			continue // watching live — no bell needed
+		}
+		if cursor, ok := cursors[uid]; ok && cursor >= repliedAtISO {
+			continue // a racing mark-read already covered this reply
 		}
 		err := inbox.UpsertMessage(ctx, n.db, n.logger, inbox.Item{
 			WorkspaceID:  rn.WorkspaceID,

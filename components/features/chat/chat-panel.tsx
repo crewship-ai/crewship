@@ -83,12 +83,16 @@ interface ChatPanelProps {
    *  title a freshly-created session in the sidebar (matching the server's
    *  auto-title) so the new entry shows its name without a manual refresh. */
   onSend?: (sessionId: string, text: string) => void
+  /** Fired when a streamed reply settles (isStreaming true→false) for the
+   *  session being viewed — lets the parent re-fire mark-read so the reply
+   *  the user just watched doesn't linger as a server-side unread. */
+  onReplySettled?: (sessionId: string) => void
 }
 
 const noopFileClick = () => {}
 
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
-export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, sessionOrigin, initialInput, autoSendInitial, mobilePanel, onSend }: ChatPanelProps) {
+export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, sessionOrigin, initialInput, autoSendInitial, mobilePanel, onSend, onReplySettled }: ChatPanelProps) {
   const suggestionPack = getSuggestions(agentRole)
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
@@ -156,6 +160,22 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     currentUserId: currentUserId ?? undefined,
     onStreamReset: requestHistoryReload,
   })
+
+  // Reply-settled hook: when a stream the user watched in THIS session
+  // finishes (isStreaming true→false), tell the parent so it can re-fire
+  // mark-read — the server counted the just-persisted reply as unread,
+  // and without this the session grows a phantom badge the moment the
+  // user switches away. The ref pins the session the stream belonged to,
+  // so swapping sessions mid-stream never fires for the wrong one.
+  const streamingSessionRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (isStreaming) {
+      streamingSessionRef.current = sessionId
+    } else if (streamingSessionRef.current === sessionId) {
+      streamingSessionRef.current = null
+      onReplySettled?.(sessionId)
+    }
+  }, [isStreaming, sessionId, onReplySettled])
 
   useEffect(() => {
     // workspaceId is REQUIRED by GET /chats/{id}/messages — without it the

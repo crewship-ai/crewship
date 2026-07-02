@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { parseSessionTimestamp, sortSessionsByActivity } from "../session-sort"
+import {
+  parseSessionTimestamp,
+  sortSessionsByActivity,
+  withActiveSessionRead,
+} from "../session-sort"
 
 describe("parseSessionTimestamp", () => {
   it("parses ISO timestamps as UTC", () => {
@@ -66,5 +70,31 @@ describe("sortSessionsByActivity", () => {
     const before = rows.map((r) => r.id)
     sortSessionsByActivity(rows)
     expect(rows.map((r) => r.id)).toEqual(before)
+  })
+})
+
+describe("withActiveSessionRead", () => {
+  const s = (id: string, unread_count?: number) => ({ id, unread_count })
+
+  it("zeroes unread_count on the active session only", () => {
+    // Covers the mount race (list GET served before the mark-read PUT
+    // commits) and the "+ New session" refetch: the session being viewed
+    // is read by definition, whatever the fetched row says.
+    const rows = [s("a", 3), s("b", 2)]
+    const out = withActiveSessionRead(rows, "a")
+    expect(out.find((r) => r.id === "a")?.unread_count).toBe(0)
+    expect(out.find((r) => r.id === "b")?.unread_count).toBe(2)
+  })
+
+  it("is a no-op when no session is active or the active one is absent", () => {
+    const rows = [s("a", 3)]
+    expect(withActiveSessionRead(rows, null)).toEqual(rows)
+    expect(withActiveSessionRead(rows, "zzz")).toEqual(rows)
+  })
+
+  it("does not mutate the input rows", () => {
+    const rows = [s("a", 3)]
+    withActiveSessionRead(rows, "a")
+    expect(rows[0].unread_count).toBe(3)
   })
 })

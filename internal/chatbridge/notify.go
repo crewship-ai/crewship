@@ -3,6 +3,7 @@ package chatbridge
 import (
 	"context"
 	"strings"
+	"time"
 )
 
 // ReplyNotification describes one persisted assistant reply. The bridge
@@ -25,6 +26,12 @@ type ReplyNotification struct {
 	// ReplyText is the full flattened assistant text; the notifier owns
 	// preview truncation + credential scrubbing.
 	ReplyText string
+	// RepliedAt is the timestamp the assistant message was persisted
+	// with. The notifier compares it against each recipient's
+	// chat_read_cursors row: a cursor at or past this instant means a
+	// racing mark-read already covered the reply, so no bell item is
+	// (re-)raised for it.
+	RepliedAt time.Time
 }
 
 // ReplyNotifier receives a notification once per persisted assistant
@@ -43,9 +50,12 @@ func (b *Bridge) SetReplyNotifier(rn ReplyNotifier) {
 }
 
 // notifyReply announces a persisted assistant reply to the wired
-// notifier. Nil-safe and empty-safe: no notifier or a blank reply
-// (e.g. a run cancelled before any text) is a no-op.
-func (b *Bridge) notifyReply(ctx context.Context, chatID, authorUserID string, info *ChatInfo, replyText string) {
+// notifier. repliedAt must be the timestamp the assistant message was
+// persisted with (not "now" — the notifier compares it against read
+// cursors written by a racing mark-read). Nil-safe and empty-safe: no
+// notifier or a blank reply (e.g. a run cancelled before any text) is a
+// no-op.
+func (b *Bridge) notifyReply(ctx context.Context, chatID, authorUserID string, info *ChatInfo, replyText string, repliedAt time.Time) {
 	if b.replyNotifier == nil || strings.TrimSpace(replyText) == "" {
 		return
 	}
@@ -57,5 +67,6 @@ func (b *Bridge) notifyReply(ctx context.Context, chatID, authorUserID string, i
 		Visibility:   info.Visibility,
 		AuthorUserID: authorUserID,
 		ReplyText:    replyText,
+		RepliedAt:    repliedAt,
 	})
 }

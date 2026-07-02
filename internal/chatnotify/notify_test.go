@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/database"
@@ -207,6 +208,72 @@ func TestNotify_PreviewTruncatedAndScrubbed(t *testing.T) {
 	if got := len([]rune(body)); got > 140 {
 		t.Errorf("preview length = %d runes, want ≤140 (120 + ellipsis headroom)", got)
 	}
+}
+
+// A recipient whose read cursor already covers the reply timestamp must
+// NOT get a bell item — this is the mark-read vs in-flight-notifier race:
+// if MarkChatRead commits before the notifier runs, the upsert would
+// otherwise resurrect an item the cursor already supersedes.
+func TestNotify_SkipsRecipientWithFreshCursor(t *testing.T) {
+	db := newNotifyTestDB(t)
+	hub := &fakeHub{subscribed: map[string]bool{}}
+	n := New(db, hub, quietLogger())
+
+	rn := baseNotification()
+	rn.RepliedAt = mustTime(t, "2026-07-02T10:00:00.500Z")
+	// Cursor at the exact same millisecond as the reply — >= must absorb
+	// the boundary (the mark-read that raced us saw this reply).
+	if _, err := db.Exec(`INSERT INTO chat_read_cursors (user_id, chat_id, last_read_at)
+		VALUES ('u1', 'c1', '2026-07-02T10:00:00.500Z')`); err != nil {
+		t.Fatalf("seed cursor: %v", err)
+	}
+
+	n.NotifyAssistantReply(context.Background(), rn)
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items`).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("inbox rows = %d, want 0 (cursor >= reply timestamp)", count)
+	}
+	if len(hub.broadcasts) != 0 {
+		t.Errorf("broadcasts = %v, want none", hub.broadcasts)
+	}
+}
+
+// A stale cursor (older than the reply) must still notify — the skip is
+// strictly "cursor covers this reply", never "cursor exists".
+func TestNotify_NotifiesRecipientWithStaleCursor(t *testing.T) {
+	db := newNotifyTestDB(t)
+	hub := &fakeHub{subscribed: map[string]bool{}}
+	n := New(db, hub, quietLogger())
+
+	rn := baseNotification()
+	rn.RepliedAt = mustTime(t, "2026-07-02T10:00:00.500Z")
+	if _, err := db.Exec(`INSERT INTO chat_read_cursors (user_id, chat_id, last_read_at)
+		VALUES ('u1', 'c1', '2026-07-02T09:59:59.000Z')`); err != nil {
+		t.Fatalf("seed cursor: %v", err)
+	}
+
+	n.NotifyAssistantReply(context.Background(), rn)
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE target_user_id='u1'`).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("inbox rows = %d, want 1 (cursor is older than the reply)", count)
+	}
+}
+
+func mustTime(t *testing.T, iso string) time.Time {
+	t.Helper()
+	ts, err := time.Parse("2006-01-02T15:04:05.000Z", iso)
+	if err != nil {
+		t.Fatalf("parse %q: %v", iso, err)
+	}
+	return ts.UTC()
 }
 
 func TestNotify_EmptyReplyOrMissingChatIsNoop(t *testing.T) {

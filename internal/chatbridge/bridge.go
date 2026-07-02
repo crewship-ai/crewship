@@ -753,18 +753,19 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			// delta still has tool/thinking parts worth keeping (the old
 			// text-only gate discarded those, leaving the chat looking empty).
 			if acc.Text() != "" || len(partAcc.Parts()) > 0 {
+				repliedAt := time.Now().UTC()
 				_ = b.convStore.Append(cleanCtx, chatID, conversation.Message{
 					ID:        generateMsgID(),
 					AgentID:   info.AgentID,
 					Role:      conversation.RoleAssistant,
 					Content:   acc.Text(),
 					Parts:     partAcc.Parts(),
-					Timestamp: time.Now().UTC(),
+					Timestamp: repliedAt,
 				})
 				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 2)
 				// The partial reply is persisted — it counts as "a reply
 				// landed" for the never-miss-a-reply projection too.
-				b.notifyReply(cleanCtx, chatID, userID, info, acc.Text())
+				b.notifyReply(cleanCtx, chatID, userID, info, acc.Text(), repliedAt)
 			} else {
 				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 1)
 			}
@@ -805,6 +806,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		toolSummary = strings.Join(toolSummaries, "\n")
 	}
 
+	repliedAt := time.Now().UTC()
 	if err := b.convStore.Append(ctx, chatID, conversation.Message{
 		ID:          generateMsgID(),
 		AgentID:     info.AgentID,
@@ -812,7 +814,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		Content:     acc.Text(),
 		Parts:       partAcc.Parts(),
 		ToolSummary: toolSummary,
-		Timestamp:   time.Now().UTC(),
+		Timestamp:   repliedAt,
 	}); err != nil {
 		b.logger.Error("failed to persist assistant message", "error", err, "chat_id", chatID)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save response"})
@@ -827,8 +829,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// The reply is durably persisted — project it into the unified inbox
 	// for chat users who aren't watching this session live (never miss a
 	// reply). Runs after persist so a notification can never point at a
-	// reply that failed to save.
-	b.notifyReply(ctx, chatID, userID, info, acc.Text())
+	// reply that failed to save, and carries the persist timestamp so a
+	// racing mark-read (cursor >= repliedAt) suppresses it.
+	b.notifyReply(ctx, chatID, userID, info, acc.Text(), repliedAt)
 
 	// Stamp the active OTel trace id onto the "done" event so the
 	// frontend can attach it to the assistant turn. This is what

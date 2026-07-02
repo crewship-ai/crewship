@@ -64,6 +64,12 @@ func TestHandleChatMessage_NotifiesOnPersistedReply(t *testing.T) {
 	if n.ReplyText != "Hello world" {
 		t.Errorf("ReplyText = %q, want the persisted assistant text", n.ReplyText)
 	}
+	// RepliedAt must carry the persist timestamp — the notifier compares
+	// it against per-user read cursors to drop notifications a racing
+	// mark-read already covered.
+	if n.RepliedAt.IsZero() {
+		t.Error("RepliedAt is zero, want the assistant message persist time")
+	}
 }
 
 // A run that fails before producing a reply must not notify anyone.
