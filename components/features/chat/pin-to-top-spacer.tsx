@@ -28,9 +28,9 @@ function layoutTopWithin(el: HTMLElement, ancestor: HTMLElement): number | null 
 }
 
 /**
- * ChatGPT's signature scroll move: after you send a message, your question
- * anchors at the TOP of the viewport and the reply streams in below it,
- * instead of everything hugging the bottom edge.
+ * Pin-to-top scroll pattern: after you send a message, your question anchors
+ * at the TOP of the viewport and the reply streams in below it, instead of
+ * everything hugging the bottom edge.
  *
  * Mechanism: this invisible spacer sits at the end of the conversation
  * content. On send it grows so that "scrolled to bottom" places the sent

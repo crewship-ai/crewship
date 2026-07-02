@@ -9,7 +9,7 @@ import { useSmoothText } from "@/hooks/use-smooth-text"
 // input = full text-so-far + streaming flag, output = the prefix to render.
 describe("useSmoothText", () => {
   // Deterministic rAF: we capture callbacks and advance time manually.
-  let rafQueue: FrameRequestCallback[]
+  let rafQueue: Array<FrameRequestCallback | undefined>
   let now: number
 
   beforeEach(() => {
@@ -19,7 +19,11 @@ describe("useSmoothText", () => {
       rafQueue.push(cb)
       return rafQueue.length
     })
-    vi.stubGlobal("cancelAnimationFrame", () => {})
+    // A real cancel must prevent the frame from firing — a no-op stub would
+    // let canceled callbacks run and mask double-schedule bugs.
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+      rafQueue[id - 1] = undefined
+    })
   })
 
   /** Run one animation frame, advancing the clock by ms. */
@@ -28,7 +32,7 @@ describe("useSmoothText", () => {
     act(() => {
       const pending = rafQueue
       rafQueue = []
-      for (const cb of pending) cb(now)
+      for (const cb of pending) cb?.(now)
     })
   }
 

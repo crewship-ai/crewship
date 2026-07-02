@@ -16,7 +16,7 @@ const CATCHUP_PER_CHAR = 2.5
  * Raw WS deltas arrive in bursts, so rendering them directly makes whole
  * sentences pop in at once. This hook takes the full text-so-far and returns
  * the prefix to render, advanced every animation frame at a smoothed,
- * backlog-adaptive character rate (the Claude.ai / ChatGPT feel).
+ * backlog-adaptive character rate, the modern chat streaming feel.
  *
  * - `streaming=false` from the start (history load) returns the text as-is.
  * - When streaming ends mid-reveal, the tail finishes animating — no snap.

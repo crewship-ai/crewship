@@ -328,7 +328,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
 
   // Bumped on every locally-sent message; arms the pin-to-top spacer so the
   // just-sent question anchors at the viewport top while the reply streams
-  // in below it (the ChatGPT scroll pattern).
+  // in below it (the pin-to-top scroll pattern).
   const [pinNonce, setPinNonce] = useState(0)
   const lastUserTurnId = useMemo(() => {
     for (let i = turns.length - 1; i >= 0; i--) {
@@ -661,7 +661,7 @@ interface StreamingIndicatorProps {
 }
 
 /** Pre-first-token indicator: a shimmering "<name> is thinking…" label (the
- *  Claude.ai pattern) instead of generic bouncing dots. Shows only in the gap
+ *  reasoning-shimmer pattern) instead of generic bouncing dots. Shows only in the gap
  *  between sending and the first streamed event. */
 function StreamingIndicator({ isStreaming, turns, agentName }: StreamingIndicatorProps) {
   if (!isStreaming || turns.length === 0 || turns[turns.length - 1]?.role !== "user") return null
