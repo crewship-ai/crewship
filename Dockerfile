@@ -9,12 +9,19 @@
 # BuildKit (default on modern Docker; enable with DOCKER_BUILDKIT=1 on
 # old daemons) and the syntax directive above.
 
-FROM node:26-alpine AS frontend
-# node:26-alpine stopped bundling corepack by default, so `corepack enable`
-# alone now fails with "corepack: not found". Install it explicitly first;
-# `pnpm install` below then picks up the exact version pinned in
-# package.json's `packageManager` field, same as CI's pnpm/action-setup
-# (see .github/actions/setup-node-pnpm/action.yml).
+# Node 22 to match CI (NODE_VERSION: "22" in .github/workflows) and the
+# support matrix of the pinned prisma 7.8.0, whose preinstall only accepts
+# Node 20.19+/22.12+/24.0+. On node:26-alpine the Prisma CLI's WASM schema
+# parser corrupts every schema line to `""` under the emulated linux/arm64
+# build, so `pnpm prisma generate` dies with a wall of P1012 "This line is
+# invalid" errors even though the schema is valid. Bump only in lockstep
+# with CI + a Prisma release that declares Node 26 support.
+FROM node:22-alpine AS frontend
+# Newer node-alpine images stopped bundling corepack by default, so
+# `corepack enable` alone can fail with "corepack: not found". Install it
+# explicitly first; `pnpm install` below then picks up the exact version
+# pinned in package.json's `packageManager` field, same as CI's
+# pnpm/action-setup (see .github/actions/setup-node-pnpm/action.yml).
 RUN npm install -g corepack@latest && corepack enable pnpm
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
