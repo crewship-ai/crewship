@@ -86,3 +86,59 @@ describe("groupTurnParts", () => {
     }
   })
 })
+
+// The model interleaves thinking ↔ text ↔ tools freely (Haiku produces a dozen
+// short passes in one reply). Rendering each pass as its own "Thought for Ns"
+// card floods the transcript — ALL thinking of a turn must merge into ONE
+// chain-of-thought block at the position of the first pass, passes separated
+// by a paragraph break. Everything else keeps its on-wire order.
+describe("groupTurnParts thinking merge", () => {
+  it("merges interleaved thinking passes into a single node at the first position", () => {
+    const nodes = groupTurnParts([
+      part({ type: "thinking", content: "pass one" }),
+      part({ type: "text", content: "some prose" }),
+      part({ type: "thinking", content: "pass two" }),
+      part({ type: "text", content: "more prose" }),
+      part({ type: "thinking", content: "pass three" }),
+    ])
+    const thinkingNodes = nodes.filter((n) => n.kind === "part" && n.part.type === "thinking")
+    expect(thinkingNodes).toHaveLength(1)
+    expect(nodes[0].kind).toBe("part")
+    if (nodes[0].kind === "part") {
+      expect(nodes[0].part.type).toBe("thinking")
+      expect(nodes[0].part.content).toBe("pass one\n\npass two\n\npass three")
+    }
+    // prose keeps its order after the merged block
+    const texts = nodes.filter((n) => n.kind === "part" && n.part.type === "text")
+    expect(texts).toHaveLength(2)
+  })
+
+  it("merged block streams while any pass is still streaming", () => {
+    const nodes = groupTurnParts([
+      part({ type: "thinking", content: "done pass" }),
+      part({ type: "text", content: "prose" }),
+      part({ type: "thinking", content: "live pass", isStreaming: true }),
+    ])
+    const thinking = nodes.find((n) => n.kind === "part" && n.part.type === "thinking")
+    expect(thinking && thinking.kind === "part" ? thinking.part.isStreaming : false).toBe(true)
+  })
+
+  it("keeps a stable id (the first pass's id) so the React key doesn't remount", () => {
+    const nodes = groupTurnParts([
+      part({ id: "th-1", type: "thinking", content: "a" }),
+      part({ type: "text", content: "t" }),
+      part({ id: "th-2", type: "thinking", content: "b" }),
+    ])
+    const thinking = nodes.find((n) => n.kind === "part" && n.part.type === "thinking")
+    expect(thinking && thinking.kind === "part" ? thinking.part.id : "").toBe("th-1")
+  })
+
+  it("leaves a single thinking pass untouched", () => {
+    const nodes = groupTurnParts([
+      part({ id: "only", type: "thinking", content: "solo" }),
+      part({ type: "text", content: "t" }),
+    ])
+    const thinking = nodes.find((n) => n.kind === "part" && n.part.type === "thinking")
+    expect(thinking && thinking.kind === "part" ? thinking.part.content : "").toBe("solo")
+  })
+})

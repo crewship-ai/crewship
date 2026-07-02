@@ -88,18 +88,26 @@ export const Reasoning = memo(
     const hasEverStreamedRef = useRef(isStreaming);
     const [hasAutoClosed, setHasAutoClosed] = useState(false);
     const startTimeRef = useRef<number | null>(null);
+    // Total thinking time across episodes: a turn's merged reasoning block
+    // streams in several passes (think → text → think), so the timer must
+    // accumulate rather than restart from zero on each pass.
+    const accumulatedMsRef = useRef(0);
     const [elapsed, setElapsed] = useState(0);
 
-    // Track when streaming starts and compute duration
+    // Track streaming episodes and accumulate the total duration.
     useEffect(() => {
       if (isStreaming) {
         hasEverStreamedRef.current = true;
         if (startTimeRef.current === null) {
           startTimeRef.current = Date.now();
         }
+        // A new episode reopens the block; allow it to auto-close again when
+        // the final episode ends.
+        setHasAutoClosed(false);
       } else if (startTimeRef.current !== null) {
-        setDuration(Math.ceil((Date.now() - startTimeRef.current) / MS_IN_S));
+        accumulatedMsRef.current += Date.now() - startTimeRef.current;
         startTimeRef.current = null;
+        setDuration(Math.ceil(accumulatedMsRef.current / MS_IN_S));
       }
     }, [isStreaming, setDuration]);
 
@@ -109,7 +117,11 @@ export const Reasoning = memo(
       if (!isStreaming) return;
       const tick = () => {
         if (startTimeRef.current !== null) {
-          setElapsed(Math.floor((Date.now() - startTimeRef.current) / MS_IN_S));
+          setElapsed(
+            Math.floor(
+              (accumulatedMsRef.current + Date.now() - startTimeRef.current) / MS_IN_S
+            )
+          );
         }
       };
       tick();
