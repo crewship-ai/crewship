@@ -37,6 +37,10 @@ type Client struct {
 	// context.Background(); use WithContext to attach a cancellable
 	// context (e.g., for graceful shutdown via Ctrl-C).
 	ctx context.Context
+	// extraHeaders are applied to every request issued by Do/NewRequest.
+	// Set via WithHeader — per-call metadata like Idempotency-Key that
+	// the JSON body deliberately doesn't carry.
+	extraHeaders http.Header
 	// resolvedWorkspaceID caches the resolved CUID after first lookup
 	resolvedWorkspaceID string
 }
@@ -82,6 +86,23 @@ func (c *Client) WithTimeout(d time.Duration) *Client {
 	hc := *c.HTTPClient
 	hc.Timeout = d
 	clone.HTTPClient = &hc
+	return &clone
+}
+
+// WithHeader returns a shallow copy of the client that sends the given
+// header on every request. Chainable with WithTimeout/WithContext. Empty
+// key or value returns the client unchanged. The headers map is cloned so
+// the copy never mutates the parent client.
+func (c *Client) WithHeader(key, value string) *Client {
+	if key == "" || value == "" {
+		return c
+	}
+	clone := *c
+	clone.extraHeaders = c.extraHeaders.Clone()
+	if clone.extraHeaders == nil {
+		clone.extraHeaders = http.Header{}
+	}
+	clone.extraHeaders.Set(key, value)
 	return &clone
 }
 
@@ -134,6 +155,11 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
+	}
+	for key, values := range c.extraHeaders {
+		for _, v := range values {
+			req.Header.Add(key, v)
+		}
 	}
 	if err := c.applyAuth(req); err != nil {
 		return nil, err

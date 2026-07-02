@@ -171,7 +171,12 @@ func WriteFile(ctx context.Context, path string, content []byte, cfg WriteConfig
 	}
 
 	// 3. Filesystem path: MkdirAll, lock, tempfile, fsync, rename.
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	// 0o775 (not 0o755): inside agent containers the memory tree is
+	// dual-written by the agent (uid 1001, dir owner) and the sidecar
+	// (uid 1002, via group 1002 + setgid inherited from the prepped
+	// .memory root). A 0o755 subdir created by one party would lock
+	// the other out of it until the next root perms prep.
+	if err := os.MkdirAll(filepath.Dir(path), 0o775); err != nil {
 		return WriteResult{}, fmt.Errorf("mkdir parent: %w", err)
 	}
 

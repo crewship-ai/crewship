@@ -108,7 +108,7 @@ func setupMCPConfig(
 	// final Claude .mcp.json. Safe even when the operator declared
 	// crewship-memory themselves — injectMemoryMCPIntoClaudeJSON is a
 	// no-op in that case (the user entry wins, see injectMemoryMCP).
-	if injected, err := injectMemoryMCPIntoClaudeJSON(mcpJSON); err == nil {
+	if injected, err := injectMemoryMCPIntoClaudeJSON(mcpJSON, agentSlug); err == nil {
 		mcpJSON = injected
 	} else if logger != nil {
 		// Don't fail the whole run — the model can still operate without

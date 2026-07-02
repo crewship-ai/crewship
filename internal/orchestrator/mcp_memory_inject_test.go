@@ -10,7 +10,7 @@ import (
 // what the sidecar's handleMemoryMCP listens on (sidecar.DefaultAddr +
 // /mcp/memory) every adapter silently 404s the model's first memory call.
 func TestMemoryMCPSpec_PointsAtSidecarLoopback(t *testing.T) {
-	spec := memoryMCPSpec()
+	spec := memoryMCPSpec("")
 	if spec.Name != "crewship-memory" {
 		t.Errorf("server name = %q, want crewship-memory", spec.Name)
 	}
@@ -33,7 +33,7 @@ func TestMemoryMCPSpec_PointsAtSidecarLoopback(t *testing.T) {
 // injected. This is the "default-on" guarantee: every agent run with
 // MemoryEnabled true gets memory tools regardless of crew-level MCP config.
 func TestInjectMemoryMCP_AddsCrewshipEntry_WhenAbsent(t *testing.T) {
-	out := injectMemoryMCP(nil)
+	out := injectMemoryMCP(nil, "sam")
 	if len(out) != 1 {
 		t.Fatalf("expected 1 spec, got %d", len(out))
 	}
@@ -49,7 +49,7 @@ func TestInjectMemoryMCP_AddsCrewshipEntry_WhenAbsent(t *testing.T) {
 // expectations and we have no way to know what their server does.
 func TestInjectMemoryMCP_DoesNotOverrideUserEntry(t *testing.T) {
 	user := []mcpSpec{{Name: "crewship-memory", URL: "http://user.example/mcp"}}
-	out := injectMemoryMCP(user)
+	out := injectMemoryMCP(user, "sam")
 	if len(out) != 1 {
 		t.Fatalf("expected 1 spec, got %d", len(out))
 	}
@@ -63,7 +63,7 @@ func TestInjectMemoryMCP_DoesNotOverrideUserEntry(t *testing.T) {
 // alongside Linear, GitHub, etc.
 func TestInjectMemoryMCP_KeepsOtherEntries(t *testing.T) {
 	in := []mcpSpec{{Name: "linear", URL: "https://linear.example/mcp"}}
-	out := injectMemoryMCP(in)
+	out := injectMemoryMCP(in, "sam")
 	if len(out) != 2 {
 		t.Fatalf("expected 2 specs, got %d", len(out))
 	}
@@ -84,7 +84,7 @@ func TestInjectMemoryMCP_KeepsOtherEntries(t *testing.T) {
 // "alwaysLoad": true makes Claude Code present those schemas eagerly at session
 // start (no discovery hop). Claude-only .mcp.json field (v2.1.121+).
 func TestInjectMemoryMCPIntoClaudeJSON_SetsAlwaysLoad(t *testing.T) {
-	out, err := injectMemoryMCPIntoClaudeJSON(`{"mcpServers":{}}`)
+	out, err := injectMemoryMCPIntoClaudeJSON(`{"mcpServers":{}}`, "sam")
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -101,7 +101,7 @@ func TestInjectMemoryMCPIntoClaudeJSON_SetsAlwaysLoad(t *testing.T) {
 // onto an operator's own entry.
 func TestInjectMemoryMCPIntoClaudeJSON_PreservesUserEntry(t *testing.T) {
 	in := `{"mcpServers":{"crewship-memory":{"type":"http","url":"http://user/mcp"}}}`
-	out, err := injectMemoryMCPIntoClaudeJSON(in)
+	out, err := injectMemoryMCPIntoClaudeJSON(in, "sam")
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -110,5 +110,26 @@ func TestInjectMemoryMCPIntoClaudeJSON_PreservesUserEntry(t *testing.T) {
 	}
 	if strings.Contains(out, "alwaysLoad") {
 		t.Errorf("must not inject alwaysLoad onto a user-declared entry: %s", out)
+	}
+}
+
+// TestMemoryMCPSpec_PerAgentPath pins the CRE-137 fix: a non-empty
+// agent slug scopes the injected URL to /mcp/memory/<slug>, so every
+// crew member's memory calls resolve to its OWN tier instead of the
+// tier of whichever agent started the shared sidecar.
+func TestMemoryMCPSpec_PerAgentPath(t *testing.T) {
+	spec := memoryMCPSpec("sam")
+	if !strings.HasSuffix(spec.URL, "/mcp/memory/sam") {
+		t.Errorf("spec.URL = %q, want suffix /mcp/memory/sam", spec.URL)
+	}
+}
+
+func TestInjectMemoryMCPIntoClaudeJSON_PerAgentURL(t *testing.T) {
+	out, err := injectMemoryMCPIntoClaudeJSON(`{"mcpServers":{}}`, "alex")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(out, "/mcp/memory/alex") {
+		t.Errorf("injected URL must carry the agent slug; got %s", out)
 	}
 }

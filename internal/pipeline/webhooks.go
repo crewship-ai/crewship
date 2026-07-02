@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -231,6 +232,10 @@ func (w *Webhook) ValidateSignature(body []byte, providedHex string) bool {
 		// fire again.
 		return false
 	}
+	// Senders are instructed (create handler + CLI output) to use the
+	// GitHub-style "sha256=<hex>" header form; bare hex is accepted too
+	// for backwards compatibility with pre-existing integrations.
+	providedHex = strings.TrimPrefix(providedHex, "sha256=")
 	if providedHex == "" {
 		return false
 	}

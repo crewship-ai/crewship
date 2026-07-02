@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -66,6 +67,39 @@ func TestBuildSystemPromptBlock_FallsBackToCrewIDWhenNameMissing(t *testing.T) {
 	// Without the lookup map, the raw crew_id surfaces.
 	if !strings.Contains(out, "authored by: crew_a") {
 		t.Errorf("expected raw crew_a fallback: %q", out)
+	}
+}
+
+func TestBuildSystemPromptBlock_CharBudgetCapsEntries(t *testing.T) {
+	// Regression guard for prompt bloat: every agent exec pays for this
+	// block, so besides the entry cap there is a total character budget.
+	// A workspace full of long-description routines must not grow the
+	// block past the budget — overflow is summarised as "…and N more",
+	// keeping the full list one GET away instead of in every prompt.
+	db := openStoreTestDB(t)
+	defer db.Close()
+	store := NewStore(db)
+	longDesc := strings.Repeat("very detailed description ", 8) // ~200 chars after oneLine
+	for i := 0; i < systemPromptCap; i++ {
+		in := validSaveInput(fmt.Sprintf("routine-%02d", i))
+		in.Description = longDesc
+		if _, err := store.Save(context.Background(), in); err != nil {
+			t.Fatalf("save %d: %v", i, err)
+		}
+	}
+
+	out, err := BuildSystemPromptBlock(context.Background(), store, "ws_test", nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if len(out) > routinesPromptCharBudget+512 { // header/footer slack
+		t.Errorf("block exceeds char budget: %d bytes (budget %d)", len(out), routinesPromptCharBudget)
+	}
+	if !strings.Contains(out, "more routine(s) not shown") {
+		t.Errorf("expected overflow summary line; got %d bytes:\n%s", len(out), out[:200])
+	}
+	if !strings.Contains(out, "[END AVAILABLE ROUTINES]") {
+		t.Error("footer must survive truncation")
 	}
 }
 

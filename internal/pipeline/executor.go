@@ -690,6 +690,10 @@ type RunInput struct {
 	// window — see resumeDefinitionDrift). Set only by runResumedRun.
 	resumeDefinitionHash string
 	resumeCurrentStepID  string
+	// resumeReason names the resume cause for the journal summary:
+	// resumeReasonRestart (boot scan) or resumeReasonApproval
+	// (waitpoint approved in-process). Set only by runResumedRun.
+	resumeReason string
 }
 
 // costCapExceededMessage is the single wording for max_cost_usd
@@ -813,7 +817,7 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 			// The pipeline_runs row already exists (status=running
 			// from before the restart) — no fresh insert. Journal a
 			// resumed marker instead of a second run.started.
-			emit.emitRunResumed(ctx, in.Mode, len(in.restoredOutputs), len(dsl.Steps))
+			emit.emitRunResumed(ctx, in.Mode, len(in.restoredOutputs), len(dsl.Steps), in.resumeReason)
 		} else {
 			emit.emitRunStarted(ctx, in.Mode, fmt.Sprintf("%v", inputsForCtx), len(dsl.Steps))
 			// Persist the run row alongside the journal event when
@@ -1023,6 +1027,14 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 				return result, nil
 			}
 			if stepErr != nil {
+				// Fold the failed attempt's spend into the run total
+				// BEFORE bailing — runStepWithRetry reports the cost of
+				// every tier it burned alongside the error. Dropping it
+				// here made failed runs persist cost_usd=0, hiding
+				// exactly the expensive retried/escalated failures from
+				// spend analytics (the cost-cap branch below always
+				// recorded it, so the two failure paths disagreed).
+				result.CostUSD += stepCost
 				result.Status = "FAILED"
 				result.FailedAtStep = step.ID
 				result.ErrorMessage = stepErr.Error()

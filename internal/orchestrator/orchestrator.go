@@ -204,6 +204,13 @@ type Orchestrator struct {
 	tmuxCacheMu sync.RWMutex
 	tmuxCache   map[string]bool
 
+	// tmuxWarned de-duplicates the "tmux setup failed" warning per
+	// container. Missing tmux is a property of the container image, so
+	// re-warning on EVERY agent exec turned a one-time fact into the
+	// loudest line in the log (43× in an hour on dev2). First failure
+	// per container logs at Warn, repeats at Debug.
+	tmuxWarned sync.Map
+
 	// snapshotHashCache stores the most recent container.snapshot hash
 	// per container so the post-run probe can skip emitting a fresh
 	// journal entry when nothing actually changed. Stale entries (after

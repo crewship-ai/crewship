@@ -284,7 +284,7 @@ func renderEvalReport(cmd *cobra.Command, outcomes []scenarioOutcome, scenarios,
 		return f.JSON(map[string]any{
 			"scenarios": scenarios,
 			"tiers":     tiers,
-			"matrix":    matrix,
+			"matrix":    nestedMatrix(matrix, scenarios, tiers),
 			"outcomes":  outcomes,
 			"generated": time.Now().UTC().Format(time.RFC3339),
 		})
@@ -293,7 +293,7 @@ func renderEvalReport(cmd *cobra.Command, outcomes []scenarioOutcome, scenarios,
 		return f.YAML(map[string]any{
 			"scenarios": scenarios,
 			"tiers":     tiers,
-			"matrix":    matrix,
+			"matrix":    nestedMatrix(matrix, scenarios, tiers),
 			"outcomes":  outcomes,
 		})
 	}
@@ -395,6 +395,27 @@ func printMarkdownReport(cmd *cobra.Command, scenarios, tiers []string, matrix m
 
 func matrixKey(slug, tier string) string {
 	return slug + "\x00" + tier
+}
+
+// nestedMatrix converts the internal flat map (whose keys embed a raw
+// NUL separator — fine in-process, hostile in serialised output) into
+// {scenario: {tier: cell}} for the json/yaml reports. The empty
+// authored-tier column serialises as "(authored)", matching the table
+// and progress-line rendering.
+func nestedMatrix(matrix map[string]scenarioCell, scenarios, tiers []string) map[string]map[string]scenarioCell {
+	out := make(map[string]map[string]scenarioCell, len(scenarios))
+	for _, slug := range scenarios {
+		row := make(map[string]scenarioCell, len(tiers))
+		for _, tier := range tiers {
+			name := tier
+			if name == "" {
+				name = "(authored)"
+			}
+			row[name] = matrix[matrixKey(slug, tier)]
+		}
+		out[slug] = row
+	}
+	return out
 }
 
 func prettyTierNames(tiers []string) []string {

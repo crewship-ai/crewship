@@ -169,6 +169,39 @@ func TestBroadcast_EnrichesPayload(t *testing.T) {
 	}
 }
 
+// TestEmitRunResumed_ReasonInSummary pins the human-readable summary to
+// the actual resume cause. An approval-gate resume used to journal as
+// "resumed after restart" (emitRunResumed was written for the boot scan
+// and later reused by ResumeAfterApproval), which reads as "the server
+// restarted mid-run" on the activity rail.
+func TestEmitRunResumed_ReasonInSummary(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	cases := []struct {
+		reason      string
+		wantSummary string
+	}{
+		{resumeReasonRestart, "resumed after restart"},
+		{resumeReasonApproval, "resumed after approval"},
+		{"", "resumed after restart"}, // unset defaults to the boot-scan wording
+	}
+	for _, tc := range cases {
+		emitted := &captureEmitter{}
+		c := &pipelineEmitContext{
+			emitter: emitted, workspaceID: "ws1",
+			pipelineID: "pln_1", pipelineSlug: "gate", runID: "run_9",
+		}
+		c.emitRunResumed(ctx, ModeRun, 1, 2, tc.reason)
+		if len(emitted.entries) != 1 {
+			t.Fatalf("reason %q: %d entries", tc.reason, len(emitted.entries))
+		}
+		if got := emitted.entries[0].Summary; !strings.Contains(got, tc.wantSummary) {
+			t.Errorf("reason %q: summary %q, want it to contain %q", tc.reason, got, tc.wantSummary)
+		}
+	}
+}
+
 // TestEmitHelpers_NilReceiverIsSafe pins the `if c == nil` guard on
 // every emit helper — the executor calls them through a pointer that
 // can legitimately be nil on early-exit paths.
@@ -179,7 +212,7 @@ func TestEmitHelpers_NilReceiverIsSafe(t *testing.T) {
 	step := Step{ID: "s1", Type: StepAgentRun}
 
 	c.emitRunStarted(ctx, ModeRun, "x", 1)
-	c.emitRunResumed(ctx, ModeRun, 1, 2)
+	c.emitRunResumed(ctx, ModeRun, 1, 2, resumeReasonRestart)
 	c.emitStepStarted(ctx, step, 0, AdapterModel{})
 	c.emitStepCompleted(ctx, step, "out", 1, 0.1)
 	c.emitStepFailed(ctx, step, "class", "msg")
@@ -213,7 +246,7 @@ func TestEmitHelpers_BroadcastEveryEvent(t *testing.T) {
 	step := Step{ID: "s1", Type: StepAgentRun}
 
 	c.emitRunStarted(ctx, ModeRun, strings.Repeat("i", previewLen+50), 3)
-	c.emitRunResumed(ctx, ModeRun, 2, 3)
+	c.emitRunResumed(ctx, ModeRun, 2, 3, resumeReasonApproval)
 	c.emitStepStarted(ctx, step, 0, AdapterModel{Adapter: "claude", Model: "haiku"})
 	c.emitStepCompleted(ctx, step, "output", 12, 0.01)
 	c.emitStepFailed(ctx, step, "agent_run_error", "boom")

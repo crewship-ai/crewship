@@ -130,7 +130,14 @@ func (h *AuthHandler) ArmDeployRaceWindow(ctx context.Context, window time.Durat
 
 	publicURL := strings.TrimRight(os.Getenv("CREWSHIP_PUBLIC_URL"), "/")
 	if publicURL == "" {
-		publicURL = "http://localhost:8080"
+		// Fall back to the instance's actual port, not a hardcoded 8080 —
+		// multi-instance dev (dev.sh exports CREWSHIP_PORT=808N) printed a
+		// banner URL pointing at a different instance's bootstrap page.
+		port := os.Getenv("CREWSHIP_PORT")
+		if port == "" {
+			port = "8080"
+		}
+		publicURL = "http://localhost:" + port
 	}
 	bannerLine := strings.Repeat("─", 72)
 	h.logger.Warn(bannerLine)

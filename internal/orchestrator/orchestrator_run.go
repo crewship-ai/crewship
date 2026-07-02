@@ -543,6 +543,17 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				// so we always restart to pick up the latest set.
 				o.logger.Info("sidecar already running, reusing", "agent_id", req.AgentID, "container_id", req.ContainerID[:min(12, len(req.ContainerID))])
 				needStart = false
+				// The reused sidecar serves THIS agent's memory tier via the
+				// per-agent MCP path (CRE-137) — make sure the tier's dirs
+				// exist with the shared 1001:1002 perms even though
+				// startSidecar (which normally preps them) won't run. Also
+				// re-normalizes ownership of files written since the last
+				// prep, keeping the agent(1001)/sidecar(1002) dual-writer
+				// arrangement healthy.
+				if memoryCfg != nil && memoryCfg.Enabled && memoryCfg.BasePath != "" {
+					prepMemoryDirs(ctx, o.container, req.ContainerID,
+						memoryPrepPaths(memoryCfg, nil), o.logger)
+				}
 			} else {
 				o.logger.Warn("sidecar running with stale network policy, restarting",
 					"running_mode", health.NetworkMode, "desired_mode", desiredMode)
@@ -755,7 +766,12 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		var tmuxErr error
 		execCmd, tmuxErr = o.setupTmuxExec(ctx, req.ContainerID, cmd, req.AgentSlug, env)
 		if tmuxErr != nil {
-			o.logger.Warn("tmux setup failed, falling back to direct exec", "error", tmuxErr)
+			if _, seen := o.tmuxWarned.LoadOrStore(req.ContainerID, true); seen {
+				o.logger.Debug("tmux setup failed, falling back to direct exec", "error", tmuxErr)
+			} else {
+				o.logger.Warn("tmux setup failed, falling back to direct exec (further occurrences for this container log at debug)",
+					"error", tmuxErr, "container_id", req.ContainerID)
+			}
 			execCmd = append([]string{"stdbuf", "-oL"}, cmd...)
 		}
 	}

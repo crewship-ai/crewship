@@ -183,7 +183,20 @@ func (ts *TokenSyncer) Run(ctx context.Context) {
 	ts.logger.Info("token syncer starting", "interval", ts.interval)
 
 	if err := ts.sync(ctx); err != nil {
-		ts.logger.Warn("initial token sync failed", "error", err)
+		// Boot race, not an incident: on dev the internal-credentials
+		// endpoint is fronted by the Next.js dev server, which comes up
+		// a beat after this process. Retry once after a short grace
+		// before warning, so a plain startup doesn't open with a WARN.
+		ts.logger.Info("initial token sync failed, retrying shortly", "error", err)
+		select {
+		case <-ctx.Done():
+			ts.logger.Info("token syncer stopped")
+			return
+		case <-time.After(3 * time.Second):
+		}
+		if err := ts.sync(ctx); err != nil {
+			ts.logger.Warn("initial token sync failed after retry", "error", err)
+		}
 	}
 
 	ticker := time.NewTicker(ts.interval)

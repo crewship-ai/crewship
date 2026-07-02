@@ -68,11 +68,24 @@ var routineWaitpointsListCmd = &cobra.Command{
 		if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
+		// Machine formats (global -f/--format, or the legacy --json bool)
+		// pass the API rows through — the harness and any HITL automation
+		// extract the token from here, so the table must never be what a
+		// JSON consumer gets ("No pending waitpoints." broke jq parsing
+		// and made approval gates look like a product bug).
 		jsonOut, _ := cmd.Flags().GetBool("json")
-		if jsonOut {
-			b, _ := json.MarshalIndent(rows, "", "  ")
-			fmt.Println(string(b))
-			return nil
+		f := newFormatter()
+		if rows == nil {
+			rows = []waitpointRow{} // "[]", never "null"
+		}
+		if jsonOut || f.Format == "json" {
+			return f.JSON(rows)
+		}
+		switch f.Format {
+		case "yaml":
+			return f.YAML(rows)
+		case "ndjson":
+			return f.NDJSON(rows)
 		}
 		if len(rows) == 0 {
 			fmt.Println("No pending waitpoints.")

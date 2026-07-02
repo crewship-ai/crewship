@@ -518,3 +518,42 @@ func containsType(types []journal.EntryType, want journal.EntryType) bool {
 	}
 	return false
 }
+
+func TestExecutor_FailedRun_KeepsAccumulatedCost(t *testing.T) {
+	// Regression: a step that fails validation/outcomes after real LLM
+	// spend used to return early WITHOUT folding the failed attempt's
+	// cost into result.CostUSD, so the terminal run row recorded
+	// cost_usd=0 — exactly the expensive retried/escalated failures
+	// disappeared from spend analytics. The mock runner charges $0.001
+	// per call; a failing run must still report it.
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+	runner := newMockRunner()
+	runner.outputsBySlug["agent_lead"] = []string{"x"} // fails min_length=10
+	em := &captureEmitter{}
+	exec := NewExecutor(store, resolver, runner, em)
+
+	min := 10
+	dsl := &DSL{
+		Name: "demo",
+		Steps: []Step{
+			{
+				ID: "a", Type: StepAgentRun, AgentSlug: "agent_lead", Prompt: "x",
+				Validation: &Validation{MinLength: &min},
+				OnFail:     OnFailAbort,
+			},
+		},
+	}
+	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Status != "FAILED" {
+		t.Fatalf("status: got %q", res.Status)
+	}
+	if res.CostUSD <= 0 {
+		t.Errorf("failed run must keep the spend it incurred; CostUSD = %v, want > 0", res.CostUSD)
+	}
+}

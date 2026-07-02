@@ -11,6 +11,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/llm"
+	"github.com/crewship-ai/crewship/internal/lookout"
 )
 
 func newTestLogger() *slog.Logger {
@@ -371,5 +372,57 @@ func TestGatekeeper_InvalidLLMResponse_DeniesWithReason(t *testing.T) {
 	}
 	if resp.Decision != string(keeper.DecisionDeny) {
 		t.Errorf("expected DENY for invalid LLM response, got %s", resp.Decision)
+	}
+}
+
+// scopeCapturingProvider records the lookout scope present on the context
+// of each Complete call. Regression test for the paymaster deny-all bug:
+// the gatekeeper called Complete without attaching lookout.Scope, so the
+// paymaster middleware rejected every call with "workspace_id required"
+// and Keeper fell into deny-by-default.
+type scopeCapturingProvider struct {
+	mockProvider
+	capturedScope   lookout.Scope
+	capturedScopeOK bool
+}
+
+func (p *scopeCapturingProvider) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	p.capturedScope, p.capturedScopeOK = lookout.ScopeFromContext(ctx)
+	return p.mockProvider.Complete(ctx, req)
+}
+
+func TestGatekeeper_LLMCallCarriesLookoutScope(t *testing.T) {
+	p := &scopeCapturingProvider{mockProvider: mockProvider{
+		content: `{"decision":"ALLOW","reason":"ok","risk":2}`,
+	}}
+	g := gatekeeper.New(p, "test-model", newTestLogger())
+
+	req := gatekeeper.EvalRequest{
+		Request: keeper.Request{
+			WorkspaceID:       "ws_123",
+			RequestingCrewID:  "crew_456",
+			RequestingAgentID: "agent_789",
+			Intent:            "deploy the service to staging",
+		},
+		SecurityLevel:  keeper.SecurityLevelL3,
+		CredentialName: "deploy-key",
+		AgentName:      "DevBot",
+		CrewName:       "Dev Crew",
+	}
+
+	if _, err := g.Evaluate(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !p.capturedScopeOK {
+		t.Fatal("Complete was called without a lookout scope on the context")
+	}
+	if p.capturedScope.WorkspaceID != "ws_123" {
+		t.Errorf("scope WorkspaceID = %q, want ws_123", p.capturedScope.WorkspaceID)
+	}
+	if p.capturedScope.CrewID != "crew_456" {
+		t.Errorf("scope CrewID = %q, want crew_456", p.capturedScope.CrewID)
+	}
+	if p.capturedScope.AgentID != "agent_789" {
+		t.Errorf("scope AgentID = %q, want agent_789", p.capturedScope.AgentID)
 	}
 }

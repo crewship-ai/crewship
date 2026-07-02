@@ -2,8 +2,11 @@ package sidecar
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
+	"regexp"
 
 	"github.com/crewship-ai/crewship/internal/memory"
 )
@@ -86,6 +89,24 @@ type memoryMCPToolCallResult struct {
 // up — defence in depth means a future bug exposing this on a non-loopback
 // listener still needs to bypass two checks.
 func (s *Server) handleMemoryMCP(w http.ResponseWriter, r *http.Request) {
+	s.handleMemoryMCPForAgent(w, r, "")
+}
+
+// handleMemoryMCPForAgent is handleMemoryMCP with an explicit caller
+// identity. agentSlug "" means "the agent the sidecar was configured
+// for" (the legacy bare /mcp/memory path). A non-empty slug must
+// resolve to a crew member; unknown or path-hostile slugs are refused
+// before any request parsing so they can never influence a path join.
+func (s *Server) handleMemoryMCPForAgent(w http.ResponseWriter, r *http.Request, agentSlug string) {
+	ac, acErr := s.memoryAgentContextFor(agentSlug)
+	if acErr != nil {
+		writeJSONResponse(w, http.StatusOK, memoryMCPResponse{
+			JSONRPC: "2.0",
+			ID:      mcpNullID,
+			Error:   &memoryMCPRPCError{Code: -32602, Message: acErr.Error()},
+		})
+		return
+	}
 	defer r.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MiB cap — MCP requests are tiny
 	if err != nil {
@@ -124,7 +145,7 @@ func (s *Server) handleMemoryMCP(w http.ResponseWriter, r *http.Request) {
 	case "tools/list":
 		s.respondMemoryMCPToolsList(w, req)
 	case "tools/call":
-		s.respondMemoryMCPToolsCall(w, r, req)
+		s.respondMemoryMCPToolsCall(w, r, req, ac)
 	case "notifications/initialized", "notifications/cancelled":
 		// Spec-compliant notification: no response body, ack with 200.
 		// Clients that send these MUST NOT wait for a JSON-RPC response.
@@ -188,7 +209,7 @@ func (s *Server) respondMemoryMCPToolsList(w http.ResponseWriter, req memoryMCPR
 	})
 }
 
-func (s *Server) respondMemoryMCPToolsCall(w http.ResponseWriter, r *http.Request, req memoryMCPRequest) {
+func (s *Server) respondMemoryMCPToolsCall(w http.ResponseWriter, r *http.Request, req memoryMCPRequest, ac memory.AgentContext) {
 	var params struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
@@ -204,7 +225,7 @@ func (s *Server) respondMemoryMCPToolsCall(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	dispatcher := memory.NewDispatcher(s.memoryAgentContext())
+	dispatcher := memory.NewDispatcher(ac)
 	toolRes, err := dispatcher.Dispatch(r.Context(), memory.ToolCall{
 		Name: params.Name,
 		Args: params.Arguments,
@@ -254,4 +275,44 @@ func (s *Server) memoryAgentContext() memory.AgentContext {
 		ac.WorkspaceID = s.ipc.WorkspaceID
 	}
 	return ac
+}
+
+// memorySlugPattern is the only shape a per-agent memory slug may take.
+// Slugs are CUID-era kebab identifiers; anything else (path separators,
+// dots, percent-escapes) is rejected before it can reach a path join.
+var memorySlugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+
+// memoryAgentContextFor resolves the AgentContext for a crew member's
+// slug. Empty slug (or the sidecar's own configured slug) returns the
+// default context unchanged. Any other slug must (a) match the strict
+// slug shape and (b) be a known crew member — then its memory dir is
+// the sibling of the configured BasePath: <agents-root>/<slug>/.memory.
+func (s *Server) memoryAgentContextFor(slug string) (memory.AgentContext, error) {
+	ac := s.memoryAgentContext()
+	if slug == "" || slug == s.memoryAgentSlug {
+		return ac, nil
+	}
+	if !memorySlugPattern.MatchString(slug) {
+		return memory.AgentContext{}, fmt.Errorf("memory: invalid agent slug %q", slug)
+	}
+	var member *CrewMember
+	for i := range s.crewMembers {
+		if s.crewMembers[i].Slug == slug {
+			member = &s.crewMembers[i]
+			break
+		}
+	}
+	if member == nil {
+		return memory.AgentContext{}, fmt.Errorf("memory: unknown agent slug %q (not a crew member)", slug)
+	}
+	if s.agentMemoryBase == "" {
+		return memory.AgentContext{}, fmt.Errorf("memory: not configured on this sidecar")
+	}
+	// BasePath is <agents-root>/<own-slug>/.memory — hop two levels up
+	// to the agents root and join the member's slug. The slug pattern
+	// above guarantees the join can't traverse.
+	agentsRoot := filepath.Dir(filepath.Dir(s.agentMemoryBase))
+	ac.AgentMemoryDir = filepath.Join(agentsRoot, slug, ".memory")
+	ac.AgentID = member.ID
+	return ac, nil
 }
