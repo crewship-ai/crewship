@@ -175,40 +175,28 @@ func (h *PipelineHandler) SetWebhookStore(s *pipeline.WebhookStore) {
 
 // newExecutor centralises Executor construction so every handler
 // path picks up runner/emitter/waitpoints/ws wiring identically.
-// Refactored from the inline `pipeline.NewExecutor(...)` calls in
-// Run/DryRun/TestRun so a future capability (cost cap, PII gate)
-// only needs to be wired once.
+// Delegates to pipeline.NewWiredExecutor — the ONE production
+// construction path shared with the boot-resume scan, the cron
+// scheduler, and the pending-run dispatcher (cmd/crewship) — so a
+// future capability (cost cap, PII gate) wired into the factory lands
+// on every path at once instead of drifting per call site.
 func (h *PipelineHandler) newExecutor() *pipeline.Executor {
-	exec := pipeline.NewExecutor(h.store, h.resolver, h.runner, h.emitter)
-	if h.waitpoints != nil {
-		exec = exec.WithWaitpointStore(h.waitpoints)
-	}
-	if h.ws != nil {
-		exec = exec.WithWSBroadcaster(h.ws)
-	}
-	if h.runs != nil {
-		exec = exec.WithRunRegistry(h.runs)
-	}
-	if h.db != nil {
-		// Idempotency store is cheap to reconstruct per-run — it's a
-		// thin DB wrapper with no goroutines. Keeping construction
-		// here means tests don't need to set it explicitly.
-		exec = exec.WithIdempotencyStore(pipeline.NewIdempotencyStore(h.db))
-		// Step-override store is the same shape — a thin DB wrapper —
-		// so construct it here too. No-op at run time unless a step
-		// actually has an override row.
-		exec = exec.WithStepOverrides(pipeline.NewStepOverrideStore(h.db))
-	}
-	if h.runStore != nil {
-		exec = exec.WithRunStore(h.runStore)
-	}
-	if h.codeRunner != nil {
-		exec = exec.WithCodeRunner(h.codeRunner)
-	}
-	if h.signals != nil {
-		exec = exec.WithSignalRegistry(h.signals)
-	}
-	return exec
+	return pipeline.NewWiredExecutor(pipeline.ExecutorDeps{
+		Store:    h.store,
+		Resolver: h.resolver,
+		Runner:   h.runner,
+		Emitter:  h.emitter,
+		// DB derives the idempotency + step-override stores inside the
+		// factory — thin, goroutine-free DB wrappers, cheap to
+		// reconstruct per-run, impossible to forget at a call site.
+		DB:         h.db,
+		Waitpoints: h.waitpoints,
+		WS:         h.ws,
+		Runs:       h.runs,
+		RunStore:   h.runStore,
+		CodeRunner: h.codeRunner,
+		Signals:    h.signals,
+	})
 }
 
 // pipelineResponse is the wire shape returned by GET endpoints. We

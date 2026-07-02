@@ -444,7 +444,13 @@ var startCmd = &cobra.Command{
 			// they work in every deployment incl. the no-Docker llm_direct
 			// branch. Reserved runtimes (bash/python/go) fail closed with a
 			// wiring hint until a WASM/Starlark sandbox lands.
-			srv.APIRouter().PipelinesHandler.SetCodeRunner(pipeline.NewMultiCodeRunner())
+			//
+			// Hoisted to a variable because the boot-resume and scheduler
+			// executors below (pipeline.NewWiredExecutor) must wire the
+			// same runner — a resumed or cron-fired routine with a
+			// type:code step behaves exactly like an HTTP-driven one.
+			codeRunner := pipeline.NewMultiCodeRunner()
+			srv.APIRouter().PipelinesHandler.SetCodeRunner(codeRunner)
 			logger.Info("pipeline code runner wired (deterministic expr+cel runtimes; token-zero, no container)")
 
 			// Shared signal registry for wait:event input-stream injection
@@ -505,6 +511,22 @@ var startCmd = &cobra.Command{
 				logger.Info("pipeline WS broadcaster wired (live event push)")
 			}
 
+			// Interface-typed views of the optional deps for the
+			// executor factory calls below (boot resume + scheduler).
+			// Converted ONCE behind a nil check so a nil *ws.Hub or
+			// *SQLWaitpointStore can never reach an ExecutorDeps
+			// interface field as a typed-nil (non-nil interface
+			// wrapping a nil pointer would defeat the factory's
+			// nil-guard and panic at first use).
+			var pipelineWS pipeline.WSBroadcaster
+			if hub := srv.WSHub(); hub != nil {
+				pipelineWS = hub
+			}
+			var pipelineWaitpoints pipeline.WaitpointStore
+			if wpStore != nil {
+				pipelineWaitpoints = wpStore
+			}
+
 			// Run registry — process-singleton tracker for cancel +
 			// concurrency. Lives for the binary's lifetime; no Stop
 			// needed because runs are tracked, not goroutines.
@@ -552,20 +574,29 @@ var startCmd = &cobra.Command{
 			if runStore != nil {
 				ph := srv.APIRouter().PipelinesHandler
 				if pipelineResumeEnabled() && ph.Runner() != nil {
-					resumeExec := pipeline.NewExecutor(
-						pipeline.NewStore(deps.DB),
-						pipeline.NewResolver(deps.DB),
-						ph.Runner(),
-						ph.Emitter(),
-					).WithRunRegistry(runRegistry).
-						WithRunStore(runStore).
+					// Full wiring via the shared factory — a resumed run
+					// must be able to do everything an HTTP-driven run
+					// can (code steps, step overrides, wait:event
+					// signals, idempotency), not just the subset the old
+					// hand-rolled construction happened to include.
+					resumeExec := pipeline.NewWiredExecutor(pipeline.ExecutorDeps{
+						Store:      pipeline.NewStore(deps.DB),
+						Resolver:   pipeline.NewResolver(deps.DB),
+						Runner:     ph.Runner(),
+						Emitter:    ph.Emitter(),
+						DB:         deps.DB,
+						Waitpoints: pipelineWaitpoints,
+						WS:         pipelineWS,
+						Runs:       runRegistry,
+						RunStore:   runStore,
+						CodeRunner: codeRunner,
+						Signals:    signalRegistry,
+					}).
+						// Per-site difference, stated explicitly: only the
+						// boot scan fences on the pre-scheduler cutoff so
+						// it never double-enters a run started by THIS
+						// process lifetime.
 						WithResumeCutoff(pipelineBootCutoff)
-					if wpStore != nil {
-						resumeExec = resumeExec.WithWaitpointStore(wpStore)
-					}
-					if hub := srv.WSHub(); hub != nil {
-						resumeExec = resumeExec.WithWSBroadcaster(hub)
-					}
 					if resumed, interrupted, err := resumeExec.ResumeInterruptedRuns(ctx, logger); err != nil {
 						logger.Warn("pipeline run resume scan failed; falling back to interrupted stamp", "error", err)
 						if n, rerr := runStore.RecoverInterruptedAtBoot(ctx); rerr != nil {
@@ -607,33 +638,34 @@ var startCmd = &cobra.Command{
 				// independent executor is cleaner.
 				ph := srv.APIRouter().PipelinesHandler
 				schedPipelineStore := pipeline.NewStore(deps.DB)
-				schedExec := pipeline.NewExecutor(
-					schedPipelineStore,
-					pipeline.NewResolver(deps.DB),
-					ph.Runner(),
-					ph.Emitter(),
-				)
-				if hub := srv.WSHub(); hub != nil {
-					schedExec = schedExec.WithWSBroadcaster(hub)
-				}
-				// Scheduler-driven runs MUST share the same registry
-				// as HTTP-driven runs — otherwise a cron + manual run
-				// of the same concurrency_key would slip past the gate.
-				schedExec = schedExec.WithRunRegistry(runRegistry).
-					WithIdempotencyStore(pipeline.NewIdempotencyStore(deps.DB)).
-					WithRunStore(pipeline.NewRunStore(deps.DB)).
-					// Code runner + step overrides so cron- and deferred-
-					// dispatched runs of code-step / overridden routines
-					// behave like HTTP-driven ones. Without the code runner,
-					// a scheduled cost-spike-probe (a type:code routine)
-					// fails with "no CodeRunner wired".
-					WithCodeRunner(pipeline.NewMultiCodeRunner()).
-					WithStepOverrides(pipeline.NewStepOverrideStore(deps.DB)).
-					WithSignalRegistry(ph.SignalRegistry())
-				// Without WithRunStore here, scheduled runs would
-				// never land in the pipeline_runs projection — the
-				// /run-records endpoint and boot-time interrupted
-				// recovery would silently skip cron-triggered runs.
+				// Full wiring via the shared factory. Notably this gives
+				// cron-fired runs the WaitpointStore (a scheduled routine
+				// with a wait:approval step PARKS as waiting + lands an
+				// inbox approval instead of stalling into the 60s
+				// nil-store fallback — the old hand-rolled construction
+				// omitted it), and shares:
+				//   - runRegistry with HTTP-driven runs, so a cron +
+				//     manual run of the same concurrency_key cannot slip
+				//     past the gate;
+				//   - runStore, so scheduled runs land in the
+				//     pipeline_runs projection (/run-records endpoint +
+				//     boot-time recovery would otherwise skip them);
+				//   - codeRunner + step overrides + signal registry, so
+				//     code-step / overridden / wait:event routines behave
+				//     exactly like HTTP-driven ones.
+				schedExec := pipeline.NewWiredExecutor(pipeline.ExecutorDeps{
+					Store:      schedPipelineStore,
+					Resolver:   pipeline.NewResolver(deps.DB),
+					Runner:     ph.Runner(),
+					Emitter:    ph.Emitter(),
+					DB:         deps.DB,
+					Waitpoints: pipelineWaitpoints,
+					WS:         pipelineWS,
+					Runs:       runRegistry,
+					RunStore:   runStore,
+					CodeRunner: codeRunner,
+					Signals:    signalRegistry,
+				})
 				scheduler := pipeline.NewPipelineScheduler(schedStore, schedPipelineStore, schedExec, logger)
 				scheduler.Start(ctx)
 				defer scheduler.Stop()
