@@ -106,6 +106,65 @@ func TestAgentGetRunE_DetailWithRoleTitle(t *testing.T) {
 	}
 }
 
+func TestAgentGetRunE_ScheduleFields(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	agentID := "cagent7890abcdefghijklm"
+	cron := "*/5 * * * *"
+	prompt := "check the queue"
+	last := "2026-07-01T10:00:00Z"
+	next := "2026-07-02T10:05:00Z"
+	detail := agentDetailResponse{
+		ID: agentID, Name: "Riley", Slug: "riley", AgentRole: "AGENT",
+		Status: "IDLE", CLIAdapter: "CLAUDE_CODE", ToolProfile: "CODING",
+		MemoryEnabled: true, TimeoutSeconds: 600, CreatedAt: "2026-06-01T00:00:00Z",
+		ScheduleCron: &cron, SchedulePrompt: &prompt, ScheduleEnabled: true,
+		ScheduleLastRun: &last, ScheduleNextRun: &next,
+	}
+	s.OnGet("/api/v1/agents/"+agentID, clitest.JSONResponse(200, detail))
+	covSetupCli10(t, s.URL())
+
+	out, err := captureStdoutCovCli10(t, func() error {
+		return agentGetCmd.RunE(agentGetCmd, []string{agentID})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	// Schedule set + enabled → cron, prompt, enabled state and next/last run
+	// must all be visible so an operator can confirm what `agent update
+	// --schedule-cron` landed without hitting the raw API.
+	for _, want := range []string{"Schedule", cron, prompt, "enabled", next, last} {
+		if !strings.Contains(out, want) {
+			t.Errorf("schedule detail missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestAgentGetRunE_NoScheduleHidesRows verifies the schedule rows are omitted
+// entirely when no cron is set, so an unscheduled agent's detail view stays lean.
+func TestAgentGetRunE_NoScheduleHidesRows(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	agentID := "cagent7890abcdefghijklm"
+	detail := agentDetailResponse{
+		ID: agentID, Name: "Riley", Slug: "riley", AgentRole: "AGENT",
+		Status: "IDLE", CLIAdapter: "CLAUDE_CODE", ToolProfile: "CODING",
+		MemoryEnabled: true, TimeoutSeconds: 600, CreatedAt: "2026-06-01T00:00:00Z",
+	}
+	s.OnGet("/api/v1/agents/"+agentID, clitest.JSONResponse(200, detail))
+	covSetupCli10(t, s.URL())
+
+	out, err := captureStdoutCovCli10(t, func() error {
+		return agentGetCmd.RunE(agentGetCmd, []string{agentID})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if strings.Contains(out, "Schedule") {
+		t.Errorf("unscheduled agent should not render a Schedule row:\n%s", out)
+	}
+}
+
 func TestAgentGetRunE_ServerError(t *testing.T) {
 	s := clitest.NewStubServer()
 	defer s.Close()

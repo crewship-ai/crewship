@@ -127,6 +127,26 @@ var agentGetCmd = &cobra.Command{
 		if agent.RoleTitle != nil {
 			pairs = append([][]string{pairs[0], pairs[1], pairs[2], {"Role Title", *agent.RoleTitle}}, pairs[3:]...)
 		}
+		// Schedule rows only when a cron is actually configured — an
+		// unscheduled agent's detail stays lean. When set, show whether it's
+		// firing (enabled/disabled), the prompt, and the resolved last/next
+		// run so the operator can confirm the cron is live end-to-end.
+		if agent.ScheduleCron != nil && *agent.ScheduleCron != "" {
+			state := "disabled"
+			if agent.ScheduleEnabled {
+				state = "enabled"
+			}
+			pairs = append(pairs, []string{"Schedule", *agent.ScheduleCron + " (" + state + ")"})
+			if agent.SchedulePrompt != nil && *agent.SchedulePrompt != "" {
+				pairs = append(pairs, []string{"Schedule Prompt", *agent.SchedulePrompt})
+			}
+			if agent.ScheduleNextRun != nil && *agent.ScheduleNextRun != "" {
+				pairs = append(pairs, []string{"Next Run", *agent.ScheduleNextRun})
+			}
+			if agent.ScheduleLastRun != nil && *agent.ScheduleLastRun != "" {
+				pairs = append(pairs, []string{"Last Run", *agent.ScheduleLastRun})
+			}
+		}
 		return f.AutoDetail(agent, pairs)
 	},
 }
@@ -222,7 +242,16 @@ type agentDetailResponse struct {
 	TimeoutSeconds int             `json:"timeout_seconds"`
 	CreatedAt      string          `json:"created_at"`
 	Crew           *agentCrewShort `json:"crew"`
-	Count          struct {
+	// Schedule (cron) fields — the read side of the `agent update
+	// --schedule-*` flags. The API always returns these; surfacing them
+	// here lets an operator confirm a cron landed (and see last/next run)
+	// via the CLI instead of the raw API.
+	ScheduleCron    *string `json:"schedule_cron"`
+	SchedulePrompt  *string `json:"schedule_prompt"`
+	ScheduleEnabled bool    `json:"schedule_enabled"`
+	ScheduleLastRun *string `json:"schedule_last_run"`
+	ScheduleNextRun *string `json:"schedule_next_run"`
+	Count           struct {
 		Skills      int `json:"skills"`
 		Credentials int `json:"credentials"`
 	} `json:"_count"`

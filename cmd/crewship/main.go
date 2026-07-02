@@ -145,6 +145,8 @@ func init() {
 	rootCmd.AddCommand(notificationCmd)
 	rootCmd.AddCommand(labelCmd)
 	rootCmd.AddCommand(backupCmd)
+	rootCmd.AddCommand(preferencesCmd)
+	rootCmd.AddCommand(privacyCmd)
 }
 
 func main() {
