@@ -27,7 +27,7 @@ import { RoutinePreviewCard } from "./routine-preview-card"
 // by construction in groupRuns()), and leaf rows are paginated
 // "Show N more" so a 1000-run cron stream stays scrollable.
 
-const PAGE_SIZE = 8 // runs per group before we fold into "Show more"
+const PAGE_SIZE = 25 // runs per group before we fold into "Show more"
 
 interface RunGroupTreeProps {
   groups: RunGroup[]

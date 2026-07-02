@@ -162,21 +162,21 @@ function ViewMenu({
           <ArrowDownUp className="h-3 w-3" /> Sort
         </DropdownMenuLabel>
         <DropdownMenuRadioGroup value={sort} onValueChange={(v) => onSortChange(v as SortAxis)}>
-          <DropdownMenuRadioItem value="newest">Newest first</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="oldest">Oldest first</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="cost-desc">Cost (high → low)</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="duration-desc">Duration (high → low)</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="newest" className={RADIO_ITEM_CLS}>Newest first</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="oldest" className={RADIO_ITEM_CLS}>Oldest first</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="cost-desc" className={RADIO_ITEM_CLS}>Cost (high → low)</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="duration-desc" className={RADIO_ITEM_CLS}>Duration (high → low)</DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/60">
           <LayoutGrid className="h-3 w-3" /> Group
         </DropdownMenuLabel>
         <DropdownMenuRadioGroup value={group} onValueChange={(v) => onGroupChange(v as GroupAxis)}>
-          <DropdownMenuRadioItem value="source">Source</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="routine">Routine</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="crew">Crew</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="issue">Issue</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="none">None (flat)</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="source" className={RADIO_ITEM_CLS}>Source</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="routine" className={RADIO_ITEM_CLS}>Routine</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="crew" className={RADIO_ITEM_CLS}>Crew</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="issue" className={RADIO_ITEM_CLS}>Issue</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="none" className={RADIO_ITEM_CLS}>None (flat)</DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
         {onApplyView && (
           <>
@@ -188,6 +188,11 @@ function ViewMenu({
     </DropdownMenu>
   )
 }
+
+// Sort/Group items ship at text-sm (14px) from the dropdown primitive, which
+// read a size larger than the rest of the rail's menus (Filter facets, Saved
+// Views — all 11px items under 10px headers). Pull them onto the same scale.
+const RADIO_ITEM_CLS = "text-[11px]"
 
 const SORT_LABEL: Record<SortAxis, string> = {
   "newest": "Newest",
@@ -421,14 +426,18 @@ function RoutineSection({ filter, onChange, routines }: {
   return (
     <div className="space-y-1 pb-2">
       <SectionHeader Icon={Workflow} label="Routine" />
-      <Command className="bg-transparent">
+      {/* Force the cmdk group headings (crew names) onto the same 10px
+          uppercase scale as the other filter section headers — the primitive
+          ships them at 12px non-uppercase — and tighten the roomy default
+          item padding so the picker stays compact inside the popover. */}
+      <Command className="bg-transparent [&_[cmdk-group-heading]]:!text-[10px] [&_[cmdk-group-heading]]:!uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-item]]:!py-1">
         <CommandInput placeholder="Search routines…" className="h-7 text-[11px]" />
         <CommandList className="max-h-[168px]">
           <CommandEmpty className="py-3 text-center text-[10px] text-muted-foreground/50">
             No routines match.
           </CommandEmpty>
           {crewNames.map((crew) => (
-            <CommandGroup key={crew} heading={crew} className="text-[10px]">
+            <CommandGroup key={crew} heading={crew}>
               {byCrew.get(crew)!.map((r) => (
                 <CommandItem
                   key={r.slug}
