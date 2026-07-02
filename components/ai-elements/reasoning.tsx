@@ -15,6 +15,7 @@ import { math } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import { ChevronDownIcon } from "lucide-react";
 import { BrainIcon } from "@/components/ui/brain";
+import { formatDurationFloor } from "@/lib/time";
 import {
   createContext,
   memo,
@@ -34,6 +35,8 @@ interface ReasoningContextValue {
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;
   duration: number | undefined;
+  /** Whole seconds elapsed since streaming started; ticks live while open. */
+  elapsed: number;
 }
 
 const ReasoningContext = createContext<ReasoningContextValue | null>(null);
@@ -85,19 +88,46 @@ export const Reasoning = memo(
     const hasEverStreamedRef = useRef(isStreaming);
     const [hasAutoClosed, setHasAutoClosed] = useState(false);
     const startTimeRef = useRef<number | null>(null);
+    // Total thinking time across episodes: a turn's merged reasoning block
+    // streams in several passes (think → text → think), so the timer must
+    // accumulate rather than restart from zero on each pass.
+    const accumulatedMsRef = useRef(0);
+    const [elapsed, setElapsed] = useState(0);
 
-    // Track when streaming starts and compute duration
+    // Track streaming episodes and accumulate the total duration.
     useEffect(() => {
       if (isStreaming) {
         hasEverStreamedRef.current = true;
         if (startTimeRef.current === null) {
           startTimeRef.current = Date.now();
         }
+        // A new episode reopens the block; allow it to auto-close again when
+        // the final episode ends.
+        setHasAutoClosed(false);
       } else if (startTimeRef.current !== null) {
-        setDuration(Math.ceil((Date.now() - startTimeRef.current) / MS_IN_S));
+        accumulatedMsRef.current += Date.now() - startTimeRef.current;
         startTimeRef.current = null;
+        setDuration(Math.ceil(accumulatedMsRef.current / MS_IN_S));
       }
     }, [isStreaming, setDuration]);
+
+    // Live elapsed ticker while streaming — the header shows "Thinking… Ns"
+    // so a long reasoning pass reads as progress, not a hang.
+    useEffect(() => {
+      if (!isStreaming) return;
+      const tick = () => {
+        if (startTimeRef.current !== null) {
+          setElapsed(
+            Math.floor(
+              (accumulatedMsRef.current + Date.now() - startTimeRef.current) / MS_IN_S
+            )
+          );
+        }
+      };
+      tick();
+      const interval = setInterval(tick, MS_IN_S);
+      return () => clearInterval(interval);
+    }, [isStreaming]);
 
     // Auto-open when streaming starts (unless explicitly closed)
     useEffect(() => {
@@ -131,8 +161,8 @@ export const Reasoning = memo(
     );
 
     const contextValue = useMemo(
-      () => ({ duration, isOpen, isStreaming, setIsOpen }),
-      [duration, isOpen, isStreaming, setIsOpen]
+      () => ({ duration, isOpen, isStreaming, setIsOpen, elapsed }),
+      [duration, isOpen, isStreaming, setIsOpen, elapsed]
     );
 
     return (
@@ -153,17 +183,35 @@ export const Reasoning = memo(
 export type ReasoningTriggerProps = ComponentProps<
   typeof CollapsibleTrigger
 > & {
-  getThinkingMessage?: (isStreaming: boolean, duration?: number) => ReactNode;
+  getThinkingMessage?: (
+    isStreaming: boolean,
+    duration?: number,
+    elapsed?: number
+  ) => ReactNode;
 };
 
-const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
+/** Collapsed-header label once reasoning is done. Exported for tests. */
+export const thoughtForLabel = (duration?: number): string => {
+  if (duration === undefined) return "Thought for a few seconds";
+  if (duration < 60) {
+    return `Thought for ${duration} ${duration === 1 ? "second" : "seconds"}`;
+  }
+  return `Thought for ${formatDurationFloor(duration * MS_IN_S)}`;
+};
+
+/** Live header label while reasoning streams. Exported for tests. */
+export const thinkingLiveLabel = (elapsed: number): string =>
+  elapsed >= 1 ? `Thinking… ${formatDurationFloor(elapsed * MS_IN_S)}` : "Thinking…";
+
+const defaultGetThinkingMessage = (
+  isStreaming: boolean,
+  duration?: number,
+  elapsed?: number
+) => {
   if (isStreaming || duration === 0) {
-    return <Shimmer duration={1}>Thinking...</Shimmer>;
+    return <Shimmer duration={1.6}>{thinkingLiveLabel(elapsed ?? 0)}</Shimmer>;
   }
-  if (duration === undefined) {
-    return <p>Thought for a few seconds</p>;
-  }
-  return <p>Thought for {duration} seconds</p>;
+  return <p>{thoughtForLabel(duration)}</p>;
 };
 
 export const ReasoningTrigger = memo(
@@ -173,7 +221,7 @@ export const ReasoningTrigger = memo(
     getThinkingMessage = defaultGetThinkingMessage,
     ...props
   }: ReasoningTriggerProps) => {
-    const { isStreaming, isOpen, duration } = useReasoning();
+    const { isStreaming, isOpen, duration, elapsed } = useReasoning();
 
     return (
       <CollapsibleTrigger
@@ -186,7 +234,11 @@ export const ReasoningTrigger = memo(
         {children ?? (
           <>
             <BrainIcon size={16} />
-            {getThinkingMessage(isStreaming, duration)}
+            {/* aria-live off: the label ticks every second while streaming —
+                assistive tech must not announce each update. */}
+            <span aria-live="off">
+              {getThinkingMessage(isStreaming, duration, elapsed)}
+            </span>
             <ChevronDownIcon
               className={cn(
                 "size-4 transition-transform",

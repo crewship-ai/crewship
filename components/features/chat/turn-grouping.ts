@@ -33,7 +33,30 @@ function toolNameOf(p: TurnPart): string {
   return (typeof p.metadata?.tool_name === "string" ? (p.metadata.tool_name as string) : "") || p.content
 }
 
-export function groupTurnParts(parts: TurnPart[]): RenderNode[] {
+/** Merge every thinking pass of a turn into ONE part at the position of the
+ *  first pass. The model interleaves thinking ↔ text ↔ tools freely (a dozen
+ *  short passes per reply on fast models), and one "Thought for Ns" card per
+ *  pass floods the transcript — the user reads reasoning as a single chain.
+ *  Passes are joined with a paragraph break; the merged part keeps the first
+ *  pass's id (stable React key, no remount) and streams while ANY pass does. */
+function mergeThinkingParts(parts: TurnPart[]): TurnPart[] {
+  const passes = parts.filter((p) => p.type === "thinking")
+  if (passes.length <= 1) return parts
+  const merged: TurnPart = {
+    ...passes[0],
+    content: passes.map((p) => p.content.trim()).filter(Boolean).join("\n\n"),
+    isStreaming: passes.some((p) => p.isStreaming),
+  }
+  const out: TurnPart[] = []
+  for (const p of parts) {
+    if (p.type !== "thinking") out.push(p)
+    else if (p === passes[0]) out.push(merged)
+  }
+  return out
+}
+
+export function groupTurnParts(rawParts: TurnPart[]): RenderNode[] {
+  const parts = mergeThinkingParts(rawParts)
   const nodes: RenderNode[] = []
   let pending: ToolNode[] = []
 

@@ -144,6 +144,16 @@ export interface ChatMessage {
   metadata?: Record<string, unknown>
 }
 
+/** Drop transient status parts and (optionally) finalize any still-streaming
+ *  parts. Every event that closes or reshapes a turn (new text run, new
+ *  thinking pass, done, error, local stop) applies this same policy — one
+ *  helper so call sites can't drift. */
+function stripStatusParts(parts: TurnPart[], finalizeStreaming = true): TurnPart[] {
+  return parts
+    .filter((p) => p.type !== "status")
+    .map((p) => (finalizeStreaming && p.isStreaming ? { ...p, isStreaming: false } : p))
+}
+
 /** TurnPartTypes that the renderer knows how to display. Unknown/transport
  *  types coming from history are coerced to "text" so a stray value never
  *  renders as a raw label row. */
@@ -441,31 +451,35 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       // adapter (thinking_delta) and the stdout scrubber (buffered-tail flushes
       // that drop the streaming flag). We must NOT relabel each chunk a separate
       // "Thought" card — the boundaries are arbitrary and split sentences. So we
-      // accumulate CONSECUTIVE thinking chunks into one part regardless of the
-      // streaming flag; a non-thinking event (text/tool) closes the block, so
-      // genuinely separate reasoning passes (e.g. think → tool → think) stay
-      // distinct.
+      // accumulate thinking chunks into one part regardless of the streaming
+      // flag, looking PAST transient status parts (progress lines / non-init
+      // system logs) when locating the open block: the backend PartAccumulator
+      // ignores those when persisting, so if they split the live block, a
+      // streamed turn shows N "Thought for 1s" stubs where the reload shows one.
+      // A real content event (text/tool) still closes the block, so genuinely
+      // separate reasoning passes (e.g. think → tool → think) stay distinct.
       setTurns((prev) => {
         const last = prev[prev.length - 1]
         if (last?.role === "assistant" && last.isStreaming) {
-          const lastPart = last.parts[last.parts.length - 1]
-          if (lastPart?.type === "thinking") {
-            // Adjacent thinking chunk — append into the open block.
+          let anchorIdx = last.parts.length - 1
+          while (anchorIdx >= 0 && last.parts[anchorIdx].type === "status") anchorIdx--
+          const anchor = anchorIdx >= 0 ? last.parts[anchorIdx] : undefined
+          if (anchor?.type === "thinking" && anchor.isStreaming) {
+            // Same reasoning pass — append into the open block, leaving any
+            // trailing status line in place below it.
             thinkingBufferRef.current += content
             const updatedParts = [...last.parts]
-            updatedParts[updatedParts.length - 1] = {
-              ...lastPart,
+            updatedParts[anchorIdx] = {
+              ...anchor,
               content: thinkingBufferRef.current,
               isStreaming: true,
             }
             return [...prev.slice(0, -1), { ...last, parts: updatedParts }]
           }
-          // First thinking chunk after text/tool/status — finalize any open
+          // First thinking chunk after text/tool — finalize any open
           // streaming text part, drop status parts, open a fresh thinking block.
           thinkingBufferRef.current = content
-          const cleanedParts = last.parts
-            .filter((p) => p.type !== "status")
-            .map((p) => (p.type === "text" && p.isStreaming ? { ...p, isStreaming: false } : p))
+          const cleanedParts = stripStatusParts(last.parts)
           return [
             ...prev.slice(0, -1),
             {
@@ -558,11 +572,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
           return [...prev.slice(0, -1), { ...last, parts: updatedParts }]
         }
         // First text of a new run: remove status parts + close streaming thinking
-        const cleanedParts = last.parts
-          .filter((p) => p.type !== "status")
-          .map((p) =>
-            p.type === "thinking" && p.isStreaming ? { ...p, isStreaming: false } : p
-          )
+        const cleanedParts = stripStatusParts(last.parts)
         // New text part
         textBufferRef.current = content
         return [
@@ -818,23 +828,30 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
             },
           ]
         })
+      } else if (subtype === "thinking_tokens") {
+        // Heartbeat chatter: Claude Code emits a `system`/thinking_tokens
+        // message per reasoning progress tick and the adapter forwards it
+        // with content = subtype. Rendering these stacked a wall of
+        // "thinking_tokens" rows under the reply; the Thinking header's live
+        // timer already conveys the same signal. Drop them entirely.
+        return
       } else {
-        // Other system events (sidecar security logs, etc.) — add as status-like parts
+        // Other system events (sidecar security logs, api_retry, …) render
+        // as the single quiet current-step line — same replace-in-place
+        // policy as status events, never a stack of rows. Unlike status
+        // events they never open a new turn: trailing chatter after `done`
+        // must not resurrect a ghost status-only turn.
         setTurns((prev) => {
           const last = prev[prev.length - 1]
-          if (last?.role === "assistant" && last.isStreaming) {
-            return [
-              ...prev.slice(0, -1),
-              {
-                ...last,
-                parts: [
-                  ...last.parts,
-                  { id: uuid(), type: "status" as TurnPartType, content, timestamp: new Date() },
-                ],
-              },
-            ]
+          if (last?.role !== "assistant" || !last.isStreaming) return prev
+          const statusIdx = last.parts.findLastIndex((p) => p.type === "status")
+          const part = { id: uuid(), type: "status" as TurnPartType, content, timestamp: new Date() }
+          if (statusIdx >= 0) {
+            const updatedParts = [...last.parts]
+            updatedParts[statusIdx] = { ...updatedParts[statusIdx], content }
+            return [...prev.slice(0, -1), { ...last, parts: updatedParts }]
           }
-          return prev
+          return [...prev.slice(0, -1), { ...last, parts: [...last.parts, part] }]
         })
       }
     },
@@ -858,10 +875,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       })
       const last = cleaned[cleaned.length - 1]
       if (last?.role === "assistant" && last.isStreaming) {
-        const finalParts = last.parts
-          .map((p) => (p.isStreaming ? { ...p, isStreaming: false } : p))
-          // Remove status parts once done (they were just progress indicators)
-          .filter((p) => p.type !== "status")
+        const finalParts = stripStatusParts(last.parts)
         const finalTurn: ChatTurn = {
           ...last,
           parts: finalParts,
@@ -919,10 +933,9 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       }
       if (last?.role === "assistant" && last.isStreaming) {
         // Finalize any open streaming parts (e.g. a thinking block) so they stop
-        // rendering a "thinking…" spinner on a turn that has actually errored.
-        const finalizedParts = last.parts.map((p) =>
-          p.isStreaming ? { ...p, isStreaming: false } : p,
-        )
+        // rendering a "thinking…" spinner on a turn that has actually errored,
+        // and drop the transient status row like handleDoneEvent does.
+        const finalizedParts = stripStatusParts(last.parts)
         return [
           ...prev.slice(0, -1),
           { ...last, parts: [...finalizedParts, errorPart], isStreaming: false },
@@ -1206,12 +1219,15 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
           ? {
               ...t,
               isStreaming: false,
-              parts: t.parts.map((p) =>
-                p.isStreaming ? { ...p, isStreaming: false } : p,
-              ),
+              // Drop transient status rows (mirrors handleDoneEvent) — a
+              // stopped turn must not keep a stale animated progress line.
+              parts: stripStatusParts(t.parts),
             }
           : t,
-      ),
+      )
+      // A turn that held only status parts is now empty — drop it entirely
+      // (same as handleDoneEvent's orphaned status-only turn cleanup).
+      .filter((t) => !(t.role === "assistant" && t.parts.length === 0)),
     )
   }, [send, sessionId])
 

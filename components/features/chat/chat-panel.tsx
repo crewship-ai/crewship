@@ -30,7 +30,9 @@ import { useSession } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useDrawerStore } from "@/stores/drawer-store"
 
+import { Shimmer } from "@/components/ai-elements/shimmer"
 import { TurnRenderer } from "./turn-renderer"
+import { PinToTopSpacer } from "./pin-to-top-spacer"
 import { RightPanel } from "./right-panel"
 import { RightRail } from "./right-rail"
 import { RightDrawer } from "./right-drawer"
@@ -304,11 +306,25 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
 
   const composer = useComposerStore()
 
+  // Bumped on every locally-sent message; arms the pin-to-top spacer so the
+  // just-sent question anchors at the viewport top while the reply streams
+  // in below it (the pin-to-top scroll pattern).
+  const [pinNonce, setPinNonce] = useState(0)
+  const lastUserTurnId = useMemo(() => {
+    for (let i = turns.length - 1; i >= 0; i--) {
+      // Skip teammate messages (authorUserId set): in a group chat an
+      // incoming user_message must not retarget an active pin mid-stream.
+      if (turns[i].role === "user" && !turns[i].authorUserId) return turns[i].id
+    }
+    return null
+  }, [turns])
+
   const handleSubmit = useCallback(async (message: PromptInputMessage) => {
     const text = message.text?.trim()
     if (!text || isStreaming) return
     await ensureSession()
     sendMessage(text)
+    setPinNonce((n) => n + 1)
     onSend?.(sessionId, text)
     setInput("")
     composer.clearDraft(sessionId)
@@ -338,6 +354,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     if (isStreaming) return
     await ensureSession()
     sendMessage(suggestion)
+    setPinNonce((n) => n + 1)
     onSend?.(sessionId, suggestion)
   }, [isStreaming, sendMessage, ensureSession, sessionId, onSend])
 
@@ -345,12 +362,60 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     navigator.clipboard.writeText(content).catch(() => {})
   }, [])
 
+  // Regenerate/edit also stream a fresh reply, so they re-arm the pin just
+  // like a plain send — otherwise the scroll behavior is inconsistent.
+  const regenerateWithPin = useCallback(() => {
+    regenerateLastTurn()
+    setPinNonce((n) => n + 1)
+  }, [regenerateLastTurn])
+
+  const editAndResendWithPin = useCallback((turnId: string, newContent: string) => {
+    editAndResend(turnId, newContent)
+    setPinNonce((n) => n + 1)
+  }, [editAndResend])
+
   const handleSlashCommand = useCallback((id: string) => {
-    if (id === "regenerate") regenerateLastTurn()
+    if (id === "regenerate") regenerateWithPin()
     else if (id === "clear") loadHistory([])
-  }, [regenerateLastTurn, loadHistory])
+  }, [regenerateWithPin, loadHistory])
 
   const chatStatus = isStreaming ? "streaming" as const : "ready" as const
+
+  // One conversation surface, rendered by both the mobile-chat and desktop
+  // branches — the two copies had already drifted once; don't re-fork them.
+  const conversationEl = (
+    <Conversation>
+      <ConversationContent className="mx-auto w-full max-w-3xl">
+        {turns.length === 0 && !historyLoading && (
+          <ConversationEmptyState
+            icon={<Bot className="h-12 w-12" />}
+            title="Start a conversation"
+            description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
+          />
+        )}
+        <AnimatePresence key={sessionId} initial={false} mode="popLayout">
+          {turns.map((turn, idx) => (
+            <TurnRenderer
+              key={turn.id}
+              turn={turn}
+              onCopy={handleCopy}
+              onFileClick={noopFileClick}
+              isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
+              onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateWithPin : undefined}
+              onEditUserMessage={!isStreaming ? editAndResendWithPin : undefined}
+              animateAfter={animateAfter}
+              agentId={agentId}
+              chatId={sessionId}
+              resolveAuthorName={resolveAuthorName}
+            />
+          ))}
+        </AnimatePresence>
+        <StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />
+        <PinToTopSpacer pinNonce={pinNonce} pinTurnId={lastUserTurnId} sessionId={sessionId} />
+      </ConversationContent>
+      <ConversationScrollButton />
+    </Conversation>
+  )
 
   // Mobile: files-only mode -- just the file tree, no tabs
   if (mobilePanel === "files-only") {
@@ -407,36 +472,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           </span>
         </div>
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          <Conversation>
-            <ConversationContent className="mx-auto w-full max-w-3xl">
-              {turns.length === 0 && !historyLoading && (
-                <ConversationEmptyState
-                  icon={<Bot className="h-12 w-12" />}
-                  title="Start a conversation"
-                  description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
-                />
-              )}
-              <AnimatePresence key={sessionId} initial={false} mode="popLayout">
-                {turns.map((turn, idx) => (
-                  <TurnRenderer
-                    key={turn.id}
-                    turn={turn}
-                    onCopy={handleCopy}
-                    onFileClick={noopFileClick}
-                    isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
-                    onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
-                    onEditUserMessage={!isStreaming ? editAndResend : undefined}
-                    animateAfter={animateAfter}
-                    agentId={agentId}
-                    chatId={sessionId}
-                    resolveAuthorName={resolveAuthorName}
-                  />
-                ))}
-              </AnimatePresence>
-              <StreamingIndicator isStreaming={isStreaming} turns={turns} />
-            </ConversationContent>
-            <ConversationScrollButton />
-          </Conversation>
+          {conversationEl}
         </div>
         {turns.length === 0 && !historyLoading && (
           <div className="px-4 pb-2 shrink-0">
@@ -481,36 +517,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           </span>
         </div>
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          <Conversation>
-            <ConversationContent className="mx-auto w-full max-w-3xl">
-              {turns.length === 0 && !historyLoading && (
-                <ConversationEmptyState
-                  icon={<Bot className="h-12 w-12" />}
-                  title="Start a conversation"
-                  description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
-                />
-              )}
-              <AnimatePresence key={sessionId} initial={false} mode="popLayout">
-                {turns.map((turn, idx) => (
-                  <TurnRenderer
-                    key={turn.id}
-                    turn={turn}
-                    onCopy={handleCopy}
-                    onFileClick={noopFileClick}
-                    isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
-                    onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
-                    onEditUserMessage={!isStreaming ? editAndResend : undefined}
-                    animateAfter={animateAfter}
-                    agentId={agentId}
-                    chatId={sessionId}
-                    resolveAuthorName={resolveAuthorName}
-                  />
-                ))}
-              </AnimatePresence>
-              <StreamingIndicator isStreaming={isStreaming} turns={turns} />
-            </ConversationContent>
-            <ConversationScrollButton />
-          </Conversation>
+          {conversationEl}
         </div>
         {turns.length === 0 && !historyLoading && (
           <div className="mx-auto w-full max-w-3xl px-4 md:px-6 pb-2 shrink-0">
@@ -630,18 +637,17 @@ function OriginChip({ origin }: { origin?: string | null }) {
 interface StreamingIndicatorProps {
   isStreaming: boolean
   turns: { role: string }[]
+  agentName?: string
 }
 
-function StreamingIndicator({ isStreaming, turns }: StreamingIndicatorProps) {
+/** Pre-first-token indicator: a shimmering "<name> is thinking…" label (the
+ *  reasoning-shimmer pattern) instead of generic bouncing dots. Shows only in the gap
+ *  between sending and the first streamed event. */
+function StreamingIndicator({ isStreaming, turns, agentName }: StreamingIndicatorProps) {
   if (!isStreaming || turns.length === 0 || turns[turns.length - 1]?.role !== "user") return null
   return (
-    <div className="flex items-center gap-2 px-4 py-3 text-muted-foreground text-sm animate-in fade-in">
-      <span className="inline-flex gap-0.5">
-        <span className="animate-bounce [animation-delay:0ms]">·</span>
-        <span className="animate-bounce [animation-delay:150ms]">·</span>
-        <span className="animate-bounce [animation-delay:300ms]">·</span>
-      </span>
-      <span>Agent is thinking</span>
+    <div className="flex items-center gap-2 px-4 py-3 text-sm animate-in fade-in">
+      <Shimmer duration={1.6}>{`${agentName ?? "Agent"} is thinking…`}</Shimmer>
     </div>
   )
 }

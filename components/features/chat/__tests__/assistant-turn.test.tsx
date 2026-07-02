@@ -41,6 +41,13 @@ vi.mock("@/components/ai-elements/reasoning", () => ({
   ),
 }))
 
+// The smooth-reveal animation is covered by hooks/__tests__/use-smooth-text;
+// here it would make streaming parts render progressively across frames,
+// which is noise for dispatch assertions. Identity-mock it.
+vi.mock("@/hooks/use-smooth-text", () => ({
+  useSmoothText: (text: string) => text,
+}))
+
 vi.mock("@/components/ai-elements/tool", () => ({
   Tool: ({ children }: { children: React.ReactNode }) => <div data-testid="tool">{children}</div>,
   ToolContent: ({ children }: { children: React.ReactNode }) => <div data-testid="tool-content">{children}</div>,
