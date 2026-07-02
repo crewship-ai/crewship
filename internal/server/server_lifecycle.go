@@ -56,6 +56,20 @@ var (
 	stuckQueueStaleAfter    = 10 * time.Minute
 )
 
+// Stuck-RUNNING assignment sweeper boot defaults — the in-process
+// companion of the boot-time RecoverInterruptedRunning call below.
+// RUNNING rows are backed by real agent executions, so the staleness
+// bound is deliberately generous (see goapi's defaultRunningStaleAfter
+// for the full rationale): it only exists to reclaim crew concurrency
+// slots leaked without a restart (e.g. a dispatch goroutine that died
+// between claiming the slot and running the agent).
+//
+// Same var-not-const convention as the queued sweeper, for tests.
+var (
+	stuckRunningSweepInterval = 5 * time.Minute
+	stuckRunningStaleAfter    = 2 * time.Hour
+)
+
 // Server is the main crewship process, wiring together the HTTP server, IPC
 
 // stats collector, and all background goroutines. It blocks until ctx is done.
@@ -99,10 +113,37 @@ func (s *Server) Start(ctx context.Context) error {
 	// boots have no queue to sweep.
 	if s.apiRouter != nil {
 		if assign := s.apiRouter.Assignments(); assign != nil {
+			// Boot-time recovery for RUNNING assignments orphaned by a
+			// previous crash/restart. Dispatch goroutines are process-
+			// local, so a RUNNING row stamped before s.startedAt cannot
+			// have a live driver — without this it would hold its crew
+			// concurrency slot forever (claimCrewSlot counts RUNNING
+			// rows against the budget) and the delegating lead's chat
+			// would never resolve. Companion of recoverOrphanedRuns
+			// (which cleans the journal/agents side); this one owns the
+			// assignments table + the completion signals. Runs after
+			// wsHub.Run so the assignment_failed broadcasts recovery
+			// emits are drained instead of piling into the hub buffer,
+			// and before ReattachInProgressMissions so the mission
+			// engine re-attaches against settled assignment state.
+			if n, err := assign.RecoverInterruptedRunning(ctx, s.startedAt); err != nil {
+				s.logger.Error("recover interrupted RUNNING assignments", "error", err)
+			} else if n > 0 {
+				s.logger.Info("recovered interrupted RUNNING assignments", "count", n)
+			}
+
 			assign.StartStuckQueueSweeper(ctx, stuckQueueSweepInterval, stuckQueueStaleAfter)
 			s.logger.Info("stuck-queue sweeper started",
 				"interval", stuckQueueSweepInterval.String(),
 				"stale_after", stuckQueueStaleAfter.String())
+
+			// Belt-and-braces ticker for RUNNING slots leaked while the
+			// process stays up (no restart to trigger the recovery
+			// above). Generous staleness bound — see the vars' comment.
+			assign.StartStuckRunningSweeper(ctx, stuckRunningSweepInterval, stuckRunningStaleAfter)
+			s.logger.Info("stuck-running sweeper started",
+				"interval", stuckRunningSweepInterval.String(),
+				"stale_after", stuckRunningStaleAfter.String())
 		}
 	}
 

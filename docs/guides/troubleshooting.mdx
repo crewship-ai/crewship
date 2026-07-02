@@ -251,6 +251,36 @@ In the UI: log out and log back in. If the bootstrap user was reset
 
 </Accordion>
 
+<Accordion title='A delegated assignment shows "working on the task…" forever'>
+
+When a lead delegates work (`[Assignment] @agent is working on the
+task…` in the lead's chat), the sub-agent run lives in the server
+process. If the server crashes or restarts mid-run, that run is gone —
+and before v0.1.x the assignment row stayed `RUNNING` forever, which
+also blocked one of the crew's concurrency slots so every later
+delegation for that crew queued indefinitely.
+
+This is now self-healing, on two layers:
+
+- **On restart**, the server fails every assignment that was `RUNNING`
+  under the previous process with the reason
+  `interrupted by server restart`. The lead's chat resolves with the
+  failure, the slot is freed, and any queued assignments behind it are
+  dispatched immediately.
+- **While running**, a background sweeper (every 5 minutes) fails any
+  assignment stuck in `RUNNING` for over **2 hours** with no
+  completion. The bound is deliberately generous so it never touches a
+  long-but-healthy run; it only reclaims slots leaked by abnormal
+  conditions (e.g. a force-killed container that never reported back).
+
+If you still see a permanently spinning assignment on an older build,
+restarting the server after upgrading clears it. Both transitions land
+in the [Crew Journal](/guides/crew-journal) as `assignment.failed`
+entries attributed to `assignment_recovery`, so a post-mortem can tell
+recovery-failures apart from real agent failures.
+
+</Accordion>
+
 <Accordion title='"Sentry endpoint unreachable" in doctor'>
 
 WARN, not FAIL. Telemetry won't ship until the network heals; nothing
