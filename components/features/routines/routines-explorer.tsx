@@ -24,7 +24,10 @@ import {
 import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import type { Pipeline } from "@/hooks/use-pipelines"
+import { isAwaitingApproval, useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
+import { useTick } from "@/hooks/use-tick"
 import type { RoutineFilters } from "@/components/features/routines/routines-filter-sidebar"
+import { formatElapsedSince } from "./routine-cost-format"
 
 // RoutinesExplorer — the /routines left sidebar, built on the shared
 // sidebar-kit primitives (SidebarToolbar/Search/FilterButton/Section/
@@ -74,6 +77,10 @@ export function RoutinesExplorer({
 }: RoutinesExplorerProps) {
   const [statusOpen, setStatusOpen] = useState(true)
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false)
+
+  // Shared workspace live-runs subscription (one fetch loop app-wide,
+  // provided by the dashboard layout) — newest active run per slug.
+  const { bySlug: liveBySlug } = useActiveRoutineRuns()
 
   // Counts per status bucket (computed against the workspace-wide list,
   // not the post-status-filter view — otherwise switching to "Failed"
@@ -158,6 +165,12 @@ export function RoutinesExplorer({
     }
     return filtered
   }, [routines, search, filters])
+
+  // 1s re-render tick ONLY while a displayed routine has a live run,
+  // so the "· 0:12" elapsed segment counts up. Idle sidebar = no
+  // interval at all (useTick treats <=0 as off).
+  const hasLiveRow = displayed.some((p) => liveBySlug.has(p.slug))
+  useTick(hasLiveRow ? 1000 : 0)
 
   return (
     <div className="flex flex-col h-full">
@@ -304,8 +317,18 @@ export function RoutinesExplorer({
             {displayed.map((routine) => {
               const isSelected = selectedSlug === routine.slug
               const lastStatus = routine.last_invocation_status?.toLowerCase()
-              const statusTone =
-                lastStatus === "completed"
+              // Live run for this routine (shared workspace hook,
+              // matched by pipeline_slug) — the row "comes alive":
+              // pulsing dot + a sub-line with the current step and
+              // elapsed time (amber ⏸ variant while parked on a
+              // human approval).
+              const liveRun = liveBySlug.get(routine.slug)
+              const liveAwaiting = liveRun ? isAwaitingApproval(liveRun.status) : false
+              const statusTone = liveRun
+                ? liveAwaiting
+                  ? "bg-amber-500 animate-pulse"
+                  : "bg-blue-500 animate-pulse"
+                : lastStatus === "completed"
                   ? "bg-emerald-500"
                   : lastStatus === "failed"
                     ? "bg-rose-500"
@@ -322,11 +345,23 @@ export function RoutinesExplorer({
                       >
                         <span
                           aria-hidden
-                          title={lastStatus ?? "never invoked"}
+                          title={liveRun ? liveRun.status : (lastStatus ?? "never invoked")}
                           className={cn("h-2 w-2 shrink-0 rounded-full", statusTone)}
                         />
                         <span className="text-foreground/80 truncate flex-1">
                           {routine.name || routine.slug}
+                          {liveRun && (
+                            <span
+                              className={cn(
+                                "block truncate text-[10px]",
+                                liveAwaiting ? "text-amber-400" : "text-blue-300",
+                              )}
+                            >
+                              {liveAwaiting
+                                ? `⏸ awaiting approval · ${formatElapsedSince(liveRun.started_at)}`
+                                : `▶ ${liveRun.current_step_id || "starting…"} · ${formatElapsedSince(liveRun.started_at)}`}
+                            </span>
+                          )}
                         </span>
                         {routine.invocation_count > 0 && (
                           <span className="text-[10px] font-mono tabular-nums text-muted-foreground-soft shrink-0">

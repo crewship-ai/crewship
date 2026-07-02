@@ -78,3 +78,19 @@ export function formatStepCost(usd: number): string {
   // notation that's harder to scan in a column.
   return `$${usd.toFixed(4)}`
 }
+
+// formatElapsedSince — wall-clock elapsed for an in-flight run,
+// rendered with the same duration vocabulary as the step waterfall
+// (formatStepDuration) so "12.0s" means the same thing everywhere.
+// Empty string on an unparseable timestamp so callers can just skip
+// the segment; "0s" (not "—") for a run that started this instant —
+// a live surface should never show the "no data" dash for a run we
+// know is running.
+export function formatElapsedSince(startedAt: string, now = Date.now()): string {
+  const t = new Date(startedAt).getTime()
+  if (!Number.isFinite(t)) return ""
+  const ms = now - t
+  if (ms <= 0) return "0s"
+  const formatted = formatStepDuration(ms)
+  return formatted === "—" ? "" : formatted
+}

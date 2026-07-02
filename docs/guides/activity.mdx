@@ -160,6 +160,13 @@ The toolbar at the top of the rail shows a `[Filter • N]` badge counting activ
 
 Saved views land here too: a stored snapshot of `(filter, sort, group, search)` you can pin and reopen by name. The use case is "the things I check every morning" — failed runs in the last 24h grouped by crew, say.
 
+### URL pre-filters
+
+Two query params seed the rail's filter on arrival, each applied exactly once (after that the filter is yours — clearing it isn't fought by re-applies):
+
+- `/activity?pipeline=<slug>` — pins the routine filter to one routine. Emitted by the routine Overview tab's "view all →".
+- `/activity?status=active|completed|failed|all` — pre-selects a status bucket. Emitted by the header live-runs chip's "View all N running →". The `active` bucket covers `running`, `queued`, `paused` and `waiting` (a run parked on a HITL waitpoint approval).
+
 ### Keyboard nav
 
 - `↑` / `↓` — step between adjacent runs in the rail. Skipped if you're typing in the search field.

@@ -12,6 +12,7 @@ import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import {
   applyFilters,
   applyPipelineParam,
+  applyStatusParam,
   groupRuns,
   type GroupAxis,
   type RunFilter,
@@ -87,7 +88,8 @@ export function RunTimelineRail({
   // local state with the remote value (use-user-preference.ts). URL
   // params stay the read-side source of truth, same convention as
   // use-trace-selection's ?run/?step handling.
-  const pipelineParam = useSearchParams().get("pipeline")
+  const searchParams = useSearchParams()
+  const pipelineParam = searchParams.get("pipeline")
   const pipelineParamApplied = useRef(false)
   useEffect(() => {
     // Only latch once a param is actually present — a later client-
@@ -99,6 +101,19 @@ export function RunTimelineRail({
     const next = applyPipelineParam(filter, pipelineParam)
     if (next !== filter) setFilter(next)
   }, [filterReady, pipelineParam, filter, setFilter])
+
+  // Deep-link: /activity?status=active (the header live-runs chip's
+  // "View all N running →") pre-selects a status bucket. Same one-shot
+  // + hydration-gated semantics as ?pipeline= above; unknown values
+  // no-op via applyStatusParam's identity return.
+  const statusParam = searchParams.get("status")
+  const statusParamApplied = useRef(false)
+  useEffect(() => {
+    if (!filterReady || statusParamApplied.current || !statusParam) return
+    statusParamApplied.current = true
+    const next = applyStatusParam(filter, statusParam)
+    if (next !== filter) setFilter(next)
+  }, [filterReady, statusParam, filter, setFilter])
 
   // Owning-crew name per routine slug, derived once from crews + pipelines.
   // Shared by the routine-filter options (crew-grouped combobox) and the group
@@ -152,7 +167,9 @@ export function RunTimelineRail({
     const ofStatus = (statuses: string[]) =>
       runs.filter((r) => statuses.includes(r.status)).length
     return {
-      active: ofStatus(["running", "queued", "paused"]),
+      // Mirrors ACTIVE_STATUSES in run-filters.ts — "waiting" is a run
+      // parked on a human waitpoint approval, still in flight.
+      active: ofStatus(["running", "queued", "paused", "waiting"]),
       all: runs.length,
       completed: ofStatus(["completed"]),
       failed: ofStatus(["failed", "cancelled", "interrupted"]),
