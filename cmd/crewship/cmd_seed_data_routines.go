@@ -6,11 +6,15 @@ package main
 // maps from earlier phases, idempotent (409 conflict = skip).
 //
 // Routines are saved via the workspace-scoped /pipelines/save
-// endpoint (added in this PR alongside the UI authoring flow). The
-// admin user the seeder runs as has OWNER role, so we set
-// skip_test_gate=true — there's no live LLM available during seed
-// and the definitions are hand-curated, so the gate would just block
-// us. Real users authoring through the UI still hit the gate.
+// endpoint. The admin user the seeder runs as has OWNER role, so we set
+// both OWNER/ADMIN-only escape hatches:
+//   - skip_test_gate=true — there's no live LLM during seed and the
+//     definitions are hand-curated, so the test gate would just block us.
+//   - skip_governance_gate=true — the maker-checker risk gate would
+//     otherwise land every routine with an http/code step or
+//     credentials_required as 'proposed' (awaiting approval), leaving a
+//     freshly-seeded workspace full of un-runnable routines.
+// Real users authoring through the UI still hit both gates.
 
 import (
 	"context"
@@ -90,6 +94,15 @@ func seedRoutineSlice(ctx context.Context, client *cli.Client, wsID string, crew
 			"author_crew_id":       crewID,
 			"skip_test_gate":       true, // OWNER can skip; seed has no live LLM
 			"last_test_run_passed": true,
+			// skip_governance_gate: the seeder runs as OWNER and these
+			// definitions are hand-curated and trusted. Without this the
+			// maker-checker risk gate (http/code steps, credentials_required,
+			// unmet integrations) lands most starter routines as 'proposed' —
+			// so a freshly-seeded workspace is full of un-runnable "awaiting
+			// approval" routines whose scheduled runs then fail the
+			// active-status gate. Force them live. Real users authoring through
+			// the UI still hit the gate.
+			"skip_governance_gate": true,
 		}
 		path := fmt.Sprintf("/api/v1/workspaces/%s/pipelines/save", wsID)
 		resp, err := client.Post(path, body)

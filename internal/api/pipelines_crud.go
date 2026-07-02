@@ -516,12 +516,36 @@ type userSaveRequest struct {
 	// UI flows that have already test-run'd the definition through
 	// the /test_run endpoint and pass last_test_run_at + true here.
 	SkipTestGate bool `json:"skip_test_gate,omitempty"`
+	// SkipGovernanceGate forces a risky definition live as 'active'
+	// instead of landing it in the maker-checker 'proposed' queue.
+	// OWNER/ADMIN-only (403 for lower roles), symmetric with
+	// SkipTestGate. Used by the seeder — which runs as OWNER and ships
+	// hand-curated, trusted definitions — so a fresh workspace's
+	// starter routines are immediately runnable rather than 36 rows
+	// stuck "awaiting approval". Agent-authored routines (InternalSave)
+	// deliberately have no such escape hatch: their risky saves must
+	// still be reviewed.
+	SkipGovernanceGate bool `json:"skip_governance_gate,omitempty"`
 	// SaveToken is the HMAC-signed proof returned by /test_run that
 	// THIS user just successfully ran THIS definition_hash. When
 	// present and valid, supersedes the body-trust on
 	// last_test_run_at — that field can be omitted entirely. See
 	// pipelines_save_token.go for the threat model rationale.
 	SaveToken string `json:"save_token,omitempty"`
+}
+
+// denyNonPrivilegedFlag writes a 403 and returns true when a save escape-hatch
+// flag was set by a caller below OWNER/ADMIN. skip_test_gate and
+// skip_governance_gate both funnel through here so the OWNER/ADMIN allow-list
+// is defined once and can't drift between the two gates.
+func denyNonPrivilegedFlag(w http.ResponseWriter, role, flagName string, set bool) bool {
+	if set && role != "OWNER" && role != "ADMIN" {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": flagName + " requires OWNER or ADMIN role",
+		})
+		return true
+	}
+	return false
 }
 
 // Save is the workspace-scoped save endpoint that backs the UI's
@@ -553,10 +577,13 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "slug + definition required")
 		return
 	}
-	if body.SkipTestGate && role != "OWNER" && role != "ADMIN" {
-		writeJSON(w, http.StatusForbidden, map[string]string{
-			"error": "skip_test_gate requires OWNER or ADMIN role",
-		})
+	// Both save escape hatches are OWNER/ADMIN-only. One guard per flag, but the
+	// role allow-list lives in a single helper so a policy change (e.g. add a
+	// role, or tighten to OWNER-only) can't drift between the two gates.
+	if denyNonPrivilegedFlag(w, role, "skip_test_gate", body.SkipTestGate) {
+		return
+	}
+	if denyNonPrivilegedFlag(w, role, "skip_governance_gate", body.SkipGovernanceGate) {
 		return
 	}
 
@@ -600,6 +627,19 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 	// before they can run; safe ones go live as 'active'.
 	risky, riskReasons := h.classifyRoutineRisk(r.Context(), workspaceID, body.AuthorCrewID, dsl)
 
+	// skip_governance_gate (OWNER/ADMIN, checked above) forces the save live
+	// even when risky — the trusted-operator / seeder escape hatch. We still
+	// classify (for the audit trail below) but persist 'active' and raise no
+	// review item.
+	saveStatus := statusForRisk(risky)
+	if body.SkipGovernanceGate {
+		saveStatus = "active"
+		if risky {
+			h.logger.Info("pipeline save: governance gate skipped",
+				"user_id", user.ID, "role", role, "slug", body.Slug, "risk_reasons", riskReasons)
+		}
+	}
+
 	in := pipeline.SaveInput{
 		WorkspaceID:    workspaceID,
 		Slug:           body.Slug,
@@ -615,7 +655,7 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		// body's last_test_run_passed claim (it's forgeable — that's the whole
 		// reason the save_token exists). Only the two proof paths below flip it.
 		LastTestRunPassed: body.SkipTestGate,
-		Status:            statusForRisk(risky),
+		Status:            saveStatus,
 	}
 
 	// Two — and ONLY two — paths clear the test-gate for a user save:
@@ -670,6 +710,15 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 	// airbag invariant) must not spawn a misleading "awaiting approval" item.
 	if risky && saved.Status == "proposed" {
 		h.proposeRoutineInbox(r.Context(), workspaceID, saved, riskReasons, "Routine author ("+user.Email+")")
+	} else if body.SkipGovernanceGate && saved.Status == "active" {
+		// The trusted OWNER/ADMIN override supersedes maker-checker review. If
+		// this slug had a pending "awaiting approval" escalation from an earlier
+		// risky save, resolve it now — otherwise a stale approval card lingers
+		// for a routine that is already live, and a later reject could re-disable
+		// a running routine. Mirrors the Approve path's inbox resolution.
+		inbox.ResolveBySource(r.Context(), h.db, h.logger,
+			inbox.KindEscalation, routineProposalInboxSource(workspaceID, saved.Slug), "approved", user.ID)
+		h.broadcastInboxUpdated(workspaceID, "routine_governance_skipped")
 	}
 	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))
 }
