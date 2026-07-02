@@ -84,6 +84,7 @@ export type StreamEventType =
   | "image"
   | "crew_provisioning"
   | "user_message"
+  | "agent_busy"
 
 /** WebSocket event types for agent-to-agent task assignment lifecycle. */
 export type AssignmentEventType = "assignment_created" | "assignment_running" | "assignment_completed" | "assignment_failed"
@@ -968,6 +969,10 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
         case "crew_provisioning": handleCrewProvisioningEvent(content, metadata); break
         case "user_message": handleUserMessageEvent(content, metadata); break
         case "error": handleErrorEvent(content); break
+        // Cross-user run exclusivity (backend: chatbridge.HandleChatMessage):
+        // another sender's message is already being processed for this chat.
+        // Reuses the error rendering shape — additive case only, no new UI.
+        case "agent_busy": handleErrorEvent(content); break
       }
     },
     [

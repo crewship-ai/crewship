@@ -20,6 +20,12 @@ const steerMetadataKind = "queued_steer"
 // consistent with the other lifecycle events the chat surface consumes.
 const steerEventType = "steering_queued"
 
+// agentBusyEventType is the WS/chat event name announced when a message is
+// rejected because a run is already active for the chat (cross-user
+// exclusivity — see tryMarkRunStart). Distinct from "error" so the frontend
+// can render it as a transient/informational notice rather than a failure.
+const agentBusyEventType = "agent_busy"
+
 // SteerBroadcaster announces steering_queued events. *ws.Hub satisfies it
 // via BroadcastChannel("session", chatID, ...). Kept as a one-method
 // interface (not the concrete hub) so chatbridge stays free of a ws
@@ -55,6 +61,28 @@ func (b *Bridge) markRunEnd(chatID string) {
 		return
 	}
 	b.activeRuns[chatID]--
+}
+
+// tryMarkRunStart atomically claims the run slot for chatID: it succeeds
+// (and marks a run started, exactly like markRunStart) only if no run is
+// currently active for this chat; otherwise it leaves the counter
+// untouched and reports failure. This is the per-chat EXCLUSIVITY gate —
+// unlike markRunStart's unconditional increment (which intentionally
+// tolerates overlapping runs for Steer's bookkeeping), tryMarkRunStart is
+// how HandleChatMessage enforces "at most one live RunAgent exec per chat,
+// regardless of which user's message triggered it." Two different users
+// messaging the same group chat concurrently must never race two execs
+// into the same agent container/tmux session (interleaved stdout,
+// corrupted tmux state) — the loser bounces off this check instead of
+// ever touching the container.
+func (b *Bridge) tryMarkRunStart(chatID string) bool {
+	b.activeRunsMu.Lock()
+	defer b.activeRunsMu.Unlock()
+	if b.activeRuns[chatID] > 0 {
+		return false
+	}
+	b.activeRuns[chatID]++
+	return true
 }
 
 // runInFlight reports whether at least one run is currently live for chatID.
