@@ -22,10 +22,10 @@ import {
   PromptInputTextarea,
   PromptInputFooter,
   PromptInputSubmit,
-  type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input"
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
 import { useChat, type HistoryPart } from "@/hooks/use-chat"
+import { useMessageSubmit } from "./hooks/use-message-submit"
 import { useSession } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useDrawerStore } from "@/stores/drawer-store"
@@ -319,17 +319,31 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     return null
   }, [turns])
 
-  const handleSubmit = useCallback(async (message: PromptInputMessage) => {
-    const text = message.text?.trim()
-    if (!text || isStreaming) return
-    await ensureSession()
-    sendMessage(text)
+  // Guards against pasting a message whose encoded WS frame would exceed
+  // the server's inbound frame cap (64 KiB, internal/ws/hub.go) — sending
+  // one used to silently kill the connection (readPump treats an oversize
+  // frame as a read error and tears the socket down). Oversize messages
+  // are rejected locally with a toast; the draft is left intact so the
+  // user can trim and resend.
+  //
+  // Only fires when the message actually went out, so the pin-to-top
+  // nonce is bumped here too — a size-guard rejection must not re-arm
+  // the pin spacer.
+  const handleSent = useCallback(() => {
     setPinNonce((n) => n + 1)
-    onSend?.(sessionId, text)
     setInput("")
     composer.clearDraft(sessionId)
     composer.clearAttachments(sessionId)
-  }, [isStreaming, sendMessage, ensureSession, composer, sessionId, onSend])
+  }, [composer, sessionId])
+
+  const handleSubmit = useMessageSubmit({
+    sessionId,
+    isStreaming,
+    ensureSession,
+    sendMessage,
+    onSend,
+    onSent: handleSent,
+  })
 
   // Auto-send the initial prompt once, after the socket is connected.
   // The WS `send` silently drops while not OPEN, so we gate on

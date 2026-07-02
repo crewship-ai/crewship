@@ -105,6 +105,14 @@ const consecutiveDropsBeforeDisconnect = 128
 // small enough that an attacker can't use a single frame to amplify
 // fan-out across all subscribers on the channel. See D5 in the
 // 2026-05-14 chat/WS pentest agent report.
+//
+// An oversize frame isn't rejected gracefully: x/net/websocket returns
+// ErrFrameTooLarge from Receive, readPump treats that as a plain read
+// error, and the whole connection is torn down. The dashboard pre-flights
+// outbound frames against WS_MAX_OUTBOUND_FRAME_BYTES (hooks/use-websocket.ts)
+// so a large paste gets a client-side error instead of a silent
+// disconnect — keep that constant comfortably under this one if it ever
+// changes.
 const wsMaxInboundFrameBytes = 64 * 1024
 
 // ClientMessage is a JSON message received from a WebSocket client.
