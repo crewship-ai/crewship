@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "motion/react"
 import {
   ScrollText, Calendar, BarChart3, Workflow,
@@ -59,7 +60,17 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     authorAgentId: null,
     showEphemeral: false,
   })
-  const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
+  // Deep-link support: /routines?slug=<slug> selects that routine on arrival.
+  // Every routine link across the app (activity rail rows, trace side panel,
+  // routine preview card, overview nodes) points here via routineHref(); read
+  // the param so those links actually open the routine instead of dead-ending
+  // on the unfiltered list. Lazy-init so the detail panel is open on first
+  // paint, plus an effect to re-select when navigating in with a new slug.
+  const slugParam = useSearchParams().get("slug")
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(slugParam)
+  useEffect(() => {
+    if (slugParam) setSelectedSlug(slugParam)
+  }, [slugParam])
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
 

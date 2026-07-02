@@ -70,8 +70,25 @@ export function RunTimelineRail({
     status: "all",
   })
   const [sort, setSort] = useUserPreference<SortAxis>("activity.rail.sort", "newest")
-  const [group, setGroup] = useUserPreference<GroupAxis>("activity.rail.group", "source")
+  // Default to grouping by routine: the routine is the superordinate entity a
+  // run belongs to, so a run stream reads as "these routines, and their runs"
+  // rather than an undifferentiated ID list. Users can switch axis via the
+  // View menu; the choice persists.
+  const [group, setGroup] = useUserPreference<GroupAxis>("activity.rail.group", "routine")
   const [search, setSearch] = useState("")
+
+  // Owning-crew name per routine slug, derived once from crews + pipelines.
+  // Shared by the routine-filter options (crew-grouped combobox) and the group
+  // context below, so the two can never disagree on a routine's crew.
+  const crewNameByPipelineSlug = useMemo(() => {
+    const crewNameById = new Map(crews.map((c) => [c.id, c.name]))
+    const m = new Map<string, string>()
+    for (const p of pipelines) {
+      const cName = p.author_crew_id ? crewNameById.get(p.author_crew_id) : undefined
+      if (cName) m.set(p.slug, cName)
+    }
+    return m
+  }, [crews, pipelines])
 
   // Build filter dropdown options from the actual run set so we
   // never offer a filter dimension with zero matches.
@@ -82,11 +99,11 @@ export function RunTimelineRail({
       if (r.triggered_via) sourceSet.add(r.triggered_via as TriggerSource)
       if (r.pipeline_slug) slugSet.add(r.pipeline_slug)
     }
-    const routineList: { slug: string; name: string }[] = []
+    const routineList: { slug: string; name: string; crew?: string }[] = []
     const slugToName = new Map<string, string>()
     for (const r of runs) slugToName.set(r.pipeline_slug, r.pipeline_name || r.pipeline_slug)
     for (const slug of slugSet) {
-      routineList.push({ slug, name: slugToName.get(slug) ?? slug })
+      routineList.push({ slug, name: slugToName.get(slug) ?? slug, crew: crewNameByPipelineSlug.get(slug) })
     }
     routineList.sort((a, b) => a.name.localeCompare(b.name))
     return {
@@ -94,7 +111,7 @@ export function RunTimelineRail({
       routines: routineList,
       sources: Array.from(sourceSet),
     }
-  }, [runs, crews])
+  }, [runs, crews, crewNameByPipelineSlug])
 
   // Apply search via the same filter pipeline so the toolbar's
   // filter chip count and the body stay consistent.
@@ -140,21 +157,18 @@ export function RunTimelineRail({
       arr.push(r)
       runsByPipelineSlug.set(r.pipeline_slug, arr)
     }
-    const crewNameByPipelineSlug = new Map<string, string>()
-    for (const p of pipelines) {
-      const cName = p.author_crew_id ? crewNameById.get(p.author_crew_id) : undefined
-      if (cName) crewNameByPipelineSlug.set(p.slug, cName)
-    }
 
     return {
       cronBySlug,
       crewNameById,
       routineNameBySlug,
       runsByPipelineSlug,
+      // Reuse the shared slug→crew map (built above) rather than deriving it a
+      // second time — the routine filter and this context must agree.
       crewNameByPipelineSlug,
       scheduleByPipelineSlug,
     }
-  }, [schedules, crews, pipelines, runs])
+  }, [schedules, crews, pipelines, runs, crewNameByPipelineSlug])
 
   const groups = useMemo(
     () => groupRuns(sortedRuns, group, ctx),

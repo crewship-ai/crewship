@@ -1,12 +1,14 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import {
   Calendar,
   ChevronDown,
   ChevronRight,
   CircleDot,
   Clock,
+  ExternalLink,
   Loader2,
   PauseCircle,
   Webhook,
@@ -16,6 +18,7 @@ import { cn } from "@/lib/utils"
 import { selection } from "@/lib/interaction"
 import { relTime } from "@/lib/time"
 import { statusIcon, statusTint } from "@/lib/activity/run-status"
+import { routineHref } from "@/lib/routine-href"
 import type { RunGroup } from "@/lib/activity/run-filters"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import { RoutinePreviewCard } from "./routine-preview-card"
@@ -25,7 +28,7 @@ import { RoutinePreviewCard } from "./routine-preview-card"
 // by construction in groupRuns()), and leaf rows are paginated
 // "Show N more" so a 1000-run cron stream stays scrollable.
 
-const PAGE_SIZE = 8 // runs per group before we fold into "Show more"
+const PAGE_SIZE = 25 // runs per group before we fold into "Show more"
 
 interface RunGroupTreeProps {
   groups: RunGroup[]
@@ -195,7 +198,10 @@ function GroupNode({
             </ul>
           )}
 
-          {/* Leaf runs */}
+          {/* Leaf runs. A 'routine' group already names the routine in its
+              header, so we don't repeat it on every row; every other axis
+              (issue / crew / manual / sub-routine / all) leaves the row as
+              the only place the superordinate routine can appear. */}
           {group.runs && group.runs.length > 0 && (
             <RunRows
               runs={group.runs}
@@ -204,6 +210,7 @@ function GroupNode({
               selectedRunId={selectedRunId}
               onSelect={onSelectRun}
               accentBorder={accentBorder}
+              showRoutine={group.kind !== "routine"}
             />
           )}
         </div>
@@ -219,6 +226,7 @@ interface RunRowsProps {
   selectedRunId: string | null
   onSelect: (id: string) => void
   accentBorder: string
+  showRoutine: boolean
 }
 
 function RunRows({
@@ -228,6 +236,7 @@ function RunRows({
   selectedRunId,
   onSelect,
   accentBorder,
+  showRoutine,
 }: RunRowsProps) {
   const visibleCount = Math.min(runs.length, shownPage * PAGE_SIZE)
   const visible = runs.slice(0, visibleCount)
@@ -240,6 +249,7 @@ function RunRows({
           run={r}
           selected={selectedRunId === r.id}
           onSelect={() => onSelect(r.id)}
+          showRoutine={showRoutine}
         />
       ))}
       {hidden > 0 && (
@@ -262,19 +272,32 @@ interface RunRowProps {
   run: PipelineRun
   selected: boolean
   onSelect: () => void
+  // When true (every grouping axis except 'routine'), the row leads with the
+  // routine name — it's the only place the superordinate routine is visible.
+  showRoutine: boolean
 }
 
 function RunRow({
   run,
   selected,
   onSelect,
+  showRoutine,
 }: RunRowProps) {
   const tint = statusTint(run.status)
   const StatusIcon = statusIcon(run.status)
   const isWait = run.status === "paused"
+  const routineLabel = run.pipeline_name || run.pipeline_slug
+  const leadWithRoutine = showRoutine && !!routineLabel
+  // Deep-link to the routine's definition page (same helper every routine
+  // link uses). Null for a run with no slug — those rows keep their timestamp
+  // on hover since there's nothing to reveal in its place.
+  const href = run.pipeline_slug ? routineHref(run.pipeline_slug) : null
 
   return (
-    <li>
+    // group/run scopes the hover so the ↗ only reveals for THIS row, not the
+    // whole tree. The link is a sibling of the select button (not nested) so
+    // we don't bury an interactive element inside another.
+    <li className="group/run relative">
       <button
         type="button"
         onClick={onSelect}
@@ -290,16 +313,47 @@ function RunRow({
         <span className={cn("h-4 w-4 shrink-0 rounded-full p-0.5", tint.bg)}>
           <StatusIcon className={cn("h-full w-full", tint.icon)} aria-hidden="true" />
         </span>
-        <span className="min-w-0 flex-1 truncate">
-          <span className="font-mono text-[10px]">{shortId(run.id)}</span>
+        <span className="flex min-w-0 flex-1 items-baseline gap-1.5 truncate">
+          {leadWithRoutine ? (
+            <>
+              <span className="truncate">{routineLabel}</span>
+              <span className="shrink-0 font-mono text-[9px] text-muted-foreground/45">
+                {shortId(run.id)}
+              </span>
+            </>
+          ) : (
+            <span className="font-mono text-[10px]">{shortId(run.id)}</span>
+          )}
           {isWait && (
-            <span className="ml-1.5 text-[10px] text-amber-300">awaiting approval</span>
+            <span className="shrink-0 text-[10px] text-amber-300">awaiting approval</span>
           )}
         </span>
-        <span className="shrink-0 text-[10px] text-muted-foreground/50">
+        {/* Only fade the timestamp when there's a link to reveal in its
+            place — otherwise a slug-less row would blank on hover with
+            nothing behind it. Fade on focus-within too so the keyboard path
+            matches the hover path. */}
+        <span
+          className={cn(
+            "shrink-0 text-[10px] text-muted-foreground/50",
+            href && "group-hover/run:opacity-0 group-focus-within/run:opacity-0",
+          )}
+        >
           {relTime(run.started_at)}
         </span>
       </button>
+      {href && (
+        <Link
+          href={href}
+          aria-label={`Open routine ${routineLabel || run.pipeline_slug}`}
+          title={`Open routine ${routineLabel || run.pipeline_slug}`}
+          // opacity-0 by default; revealed on row hover AND on keyboard focus
+          // (focus-visible) so a tabbing user can see the control they've
+          // landed on instead of an invisible focus stop.
+          className="absolute right-2.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/60 opacity-0 transition hover:bg-white/[0.06] hover:text-foreground focus-visible:opacity-100 group-hover/run:opacity-100"
+        >
+          <ExternalLink className="h-3 w-3" />
+        </Link>
+      )}
     </li>
   )
 }
@@ -376,8 +430,12 @@ function KindBadge({ kind }: KindBadgeProps) {
 }
 
 function shortId(id: string): string {
-  // prn_8a3c7e9b4f → prn_8a3c
+  // Collapse the long opaque identifiers the rail shows into a scannable
+  // prefix — prn_8a3c7e9b4f → prn_8a3c, run_cmr3b05zh… → run_cmr3b0. The
+  // full id is still available on the run's trace panel; the row only needs
+  // enough to disambiguate at a glance.
   if (id.length > 12 && id.startsWith("prn_")) return id.slice(0, 8)
+  if (id.length > 14 && id.startsWith("run_")) return id.slice(0, 10)
   return id
 }
 

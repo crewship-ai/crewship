@@ -11,6 +11,7 @@ import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
+import { routineHref } from "@/lib/routine-href"
 
 // RoutinePreviewCard — hover-triggered card with rollup stats for one
 // routine. Shown when the user hovers a routine row in the rail tree;
@@ -121,7 +122,7 @@ export function RoutinePreviewCard({
 
         <div className="flex gap-1 border-t border-border p-2">
           <Link
-            href={`/routines?slug=${encodeURIComponent(slug)}`}
+            href={routineHref(slug)}
             className="flex flex-1 items-center justify-center gap-1 rounded bg-blue-500/15 px-2 py-1 text-[10px] text-blue-300 hover:bg-blue-500/25"
           >
             <ExternalLink className="h-3 w-3" />

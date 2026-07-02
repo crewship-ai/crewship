@@ -1,9 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import {
   ArrowDownUp,
   Calendar,
+  Check,
   LayoutGrid,
   PauseCircle,
   Users,
@@ -16,6 +17,14 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,7 +74,7 @@ export interface RailToolbarProps {
   // don't surface dimensions that have no data).
   options: {
     crews: { id: string; name: string }[]
-    routines: { slug: string; name: string }[]
+    routines: { slug: string; name: string; crew?: string }[]
     sources: TriggerSource[]
   }
   // Apply a saved view (filter + sort + group). Saved views now live inside
@@ -153,21 +162,21 @@ function ViewMenu({
           <ArrowDownUp className="h-3 w-3" /> Sort
         </DropdownMenuLabel>
         <DropdownMenuRadioGroup value={sort} onValueChange={(v) => onSortChange(v as SortAxis)}>
-          <DropdownMenuRadioItem value="newest">Newest first</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="oldest">Oldest first</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="cost-desc">Cost (high → low)</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="duration-desc">Duration (high → low)</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="newest" className={RADIO_ITEM_CLS}>Newest first</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="oldest" className={RADIO_ITEM_CLS}>Oldest first</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="cost-desc" className={RADIO_ITEM_CLS}>Cost (high → low)</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="duration-desc" className={RADIO_ITEM_CLS}>Duration (high → low)</DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/60">
           <LayoutGrid className="h-3 w-3" /> Group
         </DropdownMenuLabel>
         <DropdownMenuRadioGroup value={group} onValueChange={(v) => onGroupChange(v as GroupAxis)}>
-          <DropdownMenuRadioItem value="source">Source</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="routine">Routine</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="crew">Crew</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="issue">Issue</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="none">None (flat)</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="source" className={RADIO_ITEM_CLS}>Source</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="routine" className={RADIO_ITEM_CLS}>Routine</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="crew" className={RADIO_ITEM_CLS}>Crew</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="issue" className={RADIO_ITEM_CLS}>Issue</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="none" className={RADIO_ITEM_CLS}>None (flat)</DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
         {onApplyView && (
           <>
@@ -179,6 +188,11 @@ function ViewMenu({
     </DropdownMenu>
   )
 }
+
+// Sort/Group items ship at text-sm (14px) from the dropdown primitive, which
+// read a size larger than the rest of the rail's menus (Filter facets, Saved
+// Views — all 11px items under 10px headers). Pull them onto the same scale.
+const RADIO_ITEM_CLS = "text-[11px]"
 
 const SORT_LABEL: Record<SortAxis, string> = {
   "newest": "Newest",
@@ -375,11 +389,44 @@ function CrewSection({ filter, onChange, crews }: {
   )
 }
 
+// RoutineSection — a searchable, crew-grouped combobox. A flat checkbox list
+// doesn't survive a workspace with hundreds of routines; here you type to
+// filter and browse by owning crew. The global rail search already matches
+// routine name/slug, so this is the power-user multi-select on top of that.
+
+// Sentinel React key for the crewless bucket. Kept distinct from any real
+// crew name (its heading is "No crew") so a workspace crew literally named
+// "No crew" can't collide with the catch-all — the earlier "Other" key did.
+const NO_CREW_KEY = " no-crew"
+
 function RoutineSection({ filter, onChange, routines }: {
   filter: RunFilter
   onChange: (next: RunFilter) => void
-  routines: { slug: string; name: string }[]
+  routines: { slug: string; name: string; crew?: string }[]
 }) {
+  // Bucket routines under their owning crew (real crews sorted alphabetically),
+  // with crewless routines collected into a separate "No crew" group rendered
+  // last. Keeping crewless in its own bucket — rather than a magic "Other"
+  // string key — means a real crew of any name never merges with it.
+  const groups = useMemo(() => {
+    const byCrew = new Map<string, typeof routines>()
+    const noCrew: typeof routines = []
+    for (const r of routines) {
+      if (r.crew) {
+        const arr = byCrew.get(r.crew) ?? []
+        arr.push(r)
+        byCrew.set(r.crew, arr)
+      } else {
+        noCrew.push(r)
+      }
+    }
+    const ordered = Array.from(byCrew.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([crew, items]) => ({ key: crew, heading: crew, items }))
+    if (noCrew.length > 0) ordered.push({ key: NO_CREW_KEY, heading: "No crew", items: noCrew })
+    return ordered
+  }, [routines])
+
   const sel = new Set(filter.routines ?? [])
   if (routines.length === 0) return null
   const toggle = (slug: string) => {
@@ -387,20 +434,39 @@ function RoutineSection({ filter, onChange, routines }: {
     next.has(slug) ? next.delete(slug) : next.add(slug)
     onChange({ ...filter, routines: next.size === 0 ? undefined : Array.from(next) })
   }
+
   return (
     <div className="space-y-1 pb-2">
       <SectionHeader Icon={Workflow} label="Routine" />
-      <div className="max-h-[120px] overflow-y-auto px-3 space-y-0.5">
-        {routines.map((r) => (
-          <label
-            key={r.slug}
-            className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-[11px] hover:bg-white/[0.04]"
-          >
-            <input type="checkbox" checked={sel.has(r.slug)} onChange={() => toggle(r.slug)} className="h-3 w-3" />
-            <span className="truncate">{r.name}</span>
-          </label>
-        ))}
-      </div>
+      {/* Force the cmdk group headings (crew names) onto the same 10px
+          uppercase scale as the other filter section headers — the primitive
+          ships them at 12px non-uppercase — and tighten the roomy default
+          item padding so the picker stays compact inside the popover. */}
+      <Command className="bg-transparent [&_[cmdk-group-heading]]:!text-[10px] [&_[cmdk-group-heading]]:!uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-item]]:!py-1">
+        <CommandInput placeholder="Search routines…" className="h-7 text-[11px]" />
+        <CommandList className="max-h-[168px]">
+          <CommandEmpty className="py-3 text-center text-[10px] text-muted-foreground/50">
+            No routines match.
+          </CommandEmpty>
+          {groups.map((g) => (
+            <CommandGroup key={g.key} heading={g.heading}>
+              {g.items.map((r) => (
+                <CommandItem
+                  key={r.slug}
+                  // Include slug so search matches either the display name or
+                  // the slug the run rows show.
+                  value={`${r.name} ${r.slug}`}
+                  onSelect={() => toggle(r.slug)}
+                  className="text-[11px]"
+                >
+                  <Check className={cn("mr-2 h-3 w-3 shrink-0", sel.has(r.slug) ? "opacity-100" : "opacity-0")} />
+                  <span className="truncate">{r.name}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          ))}
+        </CommandList>
+      </Command>
     </div>
   )
 }
