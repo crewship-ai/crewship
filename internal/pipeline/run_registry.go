@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -139,6 +140,44 @@ func (r *RunRegistry) Acquire(parent context.Context, opts AcquireOpts) (context
 		r.mu.Unlock()
 	}
 	return ctx, release, nil
+}
+
+// PrecheckConcurrency reports whether a ModeRun dispatch of the given
+// DSL with the given inputs would be rejected by the concurrency gate
+// RIGHT NOW. It mirrors Executor.Run's Acquire gate exactly — the same
+// inputs-defaults merge, the same concurrency_key template render, and
+// the same count-vs-max comparison against this registry's live
+// entries — but does NOT reserve a slot. It exists for handlers that
+// dispatch runs asynchronously (FireWebhook's 202-then-run) and must
+// reject over-limit work synchronously (429 + Retry-After) before
+// handing the sender an accepted response.
+//
+// Because no slot is reserved, there is a TOCTOU window between this
+// check and the background Acquire: callers must still handle
+// ErrConcurrencyLimitReached from the eventual Run. The executor's
+// gate stays authoritative for every dispatch path.
+//
+// Returns nil when the DSL declares no concurrency_key (no gate) or a
+// slot is free; ErrConcurrencyLimitReached when the key is at
+// capacity; ErrConcurrencyKeyEmpty (wrapped) when the author asked for
+// a gate but the key renders empty — the same config error the
+// executor fails the run with.
+func (r *RunRegistry) PrecheckConcurrency(ctx context.Context, dsl *DSL, workspaceID string, inputs map[string]any) error {
+	if r == nil || dsl == nil || dsl.ConcurrencyKey == "" {
+		return nil
+	}
+	key, _, keyErr := renderConcurrencyKey(ctx, dsl.ConcurrencyKey, mergeInputs(inputs, dsl))
+	if keyErr != nil {
+		return fmt.Errorf("%w: template %q", keyErr, dsl.ConcurrencyKey)
+	}
+	max := dsl.MaxConcurrent
+	if max <= 0 {
+		max = 1
+	}
+	if r.Count(workspaceID, key) >= max {
+		return ErrConcurrencyLimitReached
+	}
+	return nil
 }
 
 // Cancel pre-empts an in-flight run by triggering its context. The

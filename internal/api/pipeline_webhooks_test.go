@@ -33,6 +33,9 @@ func webhookHandlerRig(t *testing.T) (*PipelineHandler, *sql.DB, string, string)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	h := NewPipelineHandler(db, logger, nil, nil)
 	h.SetWebhookStore(pipeline.NewWebhookStore(db))
+	// Drain async FireWebhook run goroutines before the test DB closes
+	// (registered after setupTestDB's cleanup, so it runs first).
+	t.Cleanup(h.WaitWebhookDispatches)
 	return h, db, userID, wsID
 }
 
