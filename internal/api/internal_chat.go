@@ -106,8 +106,13 @@ func (h *InternalHandler) IncrementMessageCount(w http.ResponseWriter, r *http.R
 	}
 	// Tenant scope (PR-F24 F-5): a bound token may only bump its own
 	// workspace's chats. A foreign chat id matches zero rows → 404 below.
-	mcQuery := "UPDATE chats SET message_count = message_count + ? WHERE id = ?"
-	mcArgs := []any{body.Delta, chatID}
+	//
+	// The bump doubles as the chat's activity heartbeat: every message
+	// append flows through here (bridge, scheduler, group-chat no-mention
+	// path), so last_activity_at is refreshed in the same statement and
+	// the Sessions sidebar orders by "newest message" for free.
+	mcQuery := "UPDATE chats SET message_count = message_count + ?, last_activity_at = ? WHERE id = ?"
+	mcArgs := []any{body.Delta, isoMillisNow(), chatID}
 	if scope := InternalTokenWorkspaceFromContext(r.Context()); scope != "" {
 		mcQuery += " AND workspace_id = ?"
 		mcArgs = append(mcArgs, scope)

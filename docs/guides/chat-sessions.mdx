@@ -187,7 +187,8 @@ The chat surface is small — no dedicated `/api-reference/chats` page yet; the 
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/v1/agents/{agentId}/chats` | Create a session. Body: `{session_id?, origin?}`. `origin` is one of `UI / CLI / WEBHOOK / CRON / AGENT` — anything else is stored as `NULL`. Returns `{"id": "<chatId>"}`. |
-| `GET` | `/api/v1/agents/{agentId}/chats` | List the agent's sessions. |
+| `GET` | `/api/v1/agents/{agentId}/chats` | List the agent's sessions, ordered by most recent activity. Each row carries `last_activity_at` (bumped on every message append) and `unread_count` — messages the **calling user** hasn't read, their own excluded. |
+| `PUT` | `/api/v1/agents/{agentId}/chats/{chatId}/read` | Mark the session read for the calling user: advances their per-chat read cursor (`unread_count` drops to 0) and clears the paired "agent replied" inbox notification. Returns `{chat_id, last_read_at}`. Cross-tenant or mis-nested ids return `404`. |
 
 ### Messages
 
@@ -297,6 +298,36 @@ A "session" is a `chats` row. Sessions persist across page reloads, browser sess
 Anything else (or empty) is stored as `NULL` so a rogue caller cannot shove arbitrary text into a UI-rendered chip. The Sessions sidebar renders a colored chip per origin — NULL rows show no chip. Sessions can be renamed, archived, or pinned; pinning floats a session to the top of the sidebar regardless of last-message timestamp.
 
 Chat sessions honor the workspace `preferred_language` — the agent replies in it. Set it with `crewship workspace update --language <code>` (see [`crewship workspace`](/cli/workspace)).
+
+### Unread badges & last activity
+
+The Sessions sidebar orders by **last activity** — a session jumps to the top whenever a message lands in it, regardless of when it was created (`chats.last_activity_at`, migration v129). Sessions with replies you haven't seen show a subtle blue **unread badge** (dot + count). Read state is **per user**: a `chat_read_cursors` row records the last moment *you* marked the chat read, and `unread_count` is everything appended after that cursor that you didn't write yourself. Opening a session marks it read automatically; the badge and the inbox notification clear together.
+
+From the CLI, the same data drives `crewship chat list` (an `UNREAD` column plus `LAST ACTIVITY` ordering), and `crewship chat read` is the mark-read parity command:
+
+```bash
+# Which sessions have replies I haven't seen?
+crewship chat list atlas
+# ID        TITLE            STATUS  MSGS  UNREAD  LAST ACTIVITY     ORIGIN
+# c_abc123  Deploy help      ACTIVE  6     2       2026-07-02 09:41  UI
+
+# Read the transcript, then clear the badge + bell item
+crewship chat c_abc123
+crewship chat read c_abc123            # agent auto-resolved from the chat
+crewship chat read c_abc123 --agent atlas   # skip the lookup scan
+```
+
+### "Your agent replied" notifications
+
+Long-running turns shouldn't require babysitting the tab. When an assistant reply is persisted for a session and a chat user is **not** currently viewing it (no live WebSocket subscription on `session:<chatId>`), Crewship writes a `message`-kind item into the [unified inbox](/guides/inbox): agent name, session title, a scrubbed ~120-character preview, and an **Open chat** deep link to `/chat/<agentSlug>?session=<chatId>`.
+
+Behavior worth knowing:
+
+- **Presence-aware.** Watching the reply stream in live means no notification — the bell only rings for replies you'd otherwise miss (closed tab, navigated away, network drop mid-run).
+- **One item per (user, session).** Repeated replies refresh the same unread bell item (timestamp + preview) instead of stacking; a new reply after you dismissed the old item re-notifies.
+- **Group chats** notify every participant except the person whose message triggered the run.
+- **Previews are scrubbed** through the same credential scrubber as logs, so a reply that quotes a token never leaks it into the inbox.
+- Opening the session (UI) or `crewship chat read` clears the item along with the badge.
 
 ### Faithful reload
 

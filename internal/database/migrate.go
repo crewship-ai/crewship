@@ -1525,12 +1525,16 @@ END;
 	// See migrate_consts_v129_issue_creator.go.
 	{version: 129, name: "issue_creator_attribution", sql: migrationIssueCreatorAttribution},
 
+	// v130: per-session unread + last-activity for chat (chats.
+	// last_activity_at column + chat_read_cursors table) so the
+	// Sessions sidebar can order by newest message and badge unread
+	// replies per user. See migrate_consts_v130_chat_unread.go.
+	{version: 130, name: "chat_unread", sql: migrationChatUnread},
+
 	// v131: structured, non-fatal warnings on pipeline_runs (e.g. a
 	// failed after_all/on_failure teardown hook) so they survive past
 	// the log line and are visible via the run-detail API/CLI instead
 	// of only slog.Warn. See migrate_consts_v131_run_warnings.go.
-	// Deliberately skips 129/130 — both were claimed by other in-flight
-	// PRs (#760, #774) at authoring time; see the const file's comment.
 	{version: 131, name: "run_warnings", sql: migrationRunWarnings},
 }
 
