@@ -516,6 +516,16 @@ type userSaveRequest struct {
 	// UI flows that have already test-run'd the definition through
 	// the /test_run endpoint and pass last_test_run_at + true here.
 	SkipTestGate bool `json:"skip_test_gate,omitempty"`
+	// SkipGovernanceGate forces a risky definition live as 'active'
+	// instead of landing it in the maker-checker 'proposed' queue.
+	// OWNER/ADMIN-only (403 for lower roles), symmetric with
+	// SkipTestGate. Used by the seeder — which runs as OWNER and ships
+	// hand-curated, trusted definitions — so a fresh workspace's
+	// starter routines are immediately runnable rather than 36 rows
+	// stuck "awaiting approval". Agent-authored routines (InternalSave)
+	// deliberately have no such escape hatch: their risky saves must
+	// still be reviewed.
+	SkipGovernanceGate bool `json:"skip_governance_gate,omitempty"`
 	// SaveToken is the HMAC-signed proof returned by /test_run that
 	// THIS user just successfully ran THIS definition_hash. When
 	// present and valid, supersedes the body-trust on
@@ -556,6 +566,12 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 	if body.SkipTestGate && role != "OWNER" && role != "ADMIN" {
 		writeJSON(w, http.StatusForbidden, map[string]string{
 			"error": "skip_test_gate requires OWNER or ADMIN role",
+		})
+		return
+	}
+	if body.SkipGovernanceGate && role != "OWNER" && role != "ADMIN" {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "skip_governance_gate requires OWNER or ADMIN role",
 		})
 		return
 	}
@@ -600,6 +616,19 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 	// before they can run; safe ones go live as 'active'.
 	risky, riskReasons := h.classifyRoutineRisk(r.Context(), workspaceID, body.AuthorCrewID, dsl)
 
+	// skip_governance_gate (OWNER/ADMIN, checked above) forces the save live
+	// even when risky — the trusted-operator / seeder escape hatch. We still
+	// classify (for the audit trail below) but persist 'active' and raise no
+	// review item.
+	saveStatus := statusForRisk(risky)
+	if body.SkipGovernanceGate {
+		saveStatus = "active"
+		if risky {
+			h.logger.Info("pipeline save: governance gate skipped",
+				"user_id", user.ID, "role", role, "slug", body.Slug, "risk_reasons", riskReasons)
+		}
+	}
+
 	in := pipeline.SaveInput{
 		WorkspaceID:    workspaceID,
 		Slug:           body.Slug,
@@ -615,7 +644,7 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		// body's last_test_run_passed claim (it's forgeable — that's the whole
 		// reason the save_token exists). Only the two proof paths below flip it.
 		LastTestRunPassed: body.SkipTestGate,
-		Status:            statusForRisk(risky),
+		Status:            saveStatus,
 	}
 
 	// Two — and ONLY two — paths clear the test-gate for a user save:

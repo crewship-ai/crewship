@@ -57,12 +57,15 @@ func TestSeedRoutineSlice_CreatedConflictAndSkip(t *testing.T) {
 	if !strings.Contains(stderr, `skipped (crew "missing-crew" not seeded)`) {
 		t.Errorf("skip log missing: %q", stderr)
 	}
-	// Body contract: skip_test_gate + author_crew_id present.
+	// Body contract: both OWNER escape hatches + author_crew_id present.
+	// skip_governance_gate keeps risky starter routines out of the
+	// maker-checker 'proposed' queue so a fresh workspace is runnable.
 	calls := s.CallsFor("POST", covPipelineSavePath)
 	if len(calls) != 2 {
 		t.Fatalf("save calls = %d", len(calls))
 	}
 	if !strings.Contains(string(calls[0].Body), `"skip_test_gate":true`) ||
+		!strings.Contains(string(calls[0].Body), `"skip_governance_gate":true`) ||
 		!strings.Contains(string(calls[0].Body), `"author_crew_id":"`+covCrewIDCli10+`"`) {
 		t.Errorf("save body wrong: %s", calls[0].Body)
 	}

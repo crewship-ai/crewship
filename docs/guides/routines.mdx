@@ -534,6 +534,10 @@ Otherwise it's **safe** — only `agent_run` / `transform` / `call_pipeline` / `
 
 A `proposed` (or `disabled`) routine refuses `run` / `run_batch` with `409 Conflict` — `"routine is awaiting approval"` or `"routine is disabled"`. `dry_run` always previews a saved routine, so it's never blocked.
 
+<Note>
+**OWNER/ADMIN escape hatch — `skip_governance_gate`.** Symmetric with `skip_test_gate`: passing `"skip_governance_gate": true` on the user save (`POST /api/v1/workspaces/{ws}/pipelines/save`) forces a risky definition live as `active` and raises **no** review item. Honored **only** for OWNER/ADMIN (lower roles get `403`); it is deliberately **not** available on the agent/sidecar save path (`InternalSave`), so agent-authored risky routines are always reviewed. This is what the `crewship seed` flow uses so a freshly-seeded workspace's hand-curated starter routines are immediately runnable instead of stuck "awaiting approval". Use it only for DSL you trust.
+</Note>
+
 ### Approve / reject (MANAGER+)
 
 ```bash
