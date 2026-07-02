@@ -1133,7 +1133,7 @@ Accepts either `target_pipeline_slug` (UI-friendly) or `target_pipeline_id` (CLI
 | `name` | string | no | Falls back to the pipeline slug |
 | `target_pipeline_slug` | string | one-of | -- |
 | `target_pipeline_id` | string | one-of | -- |
-| `target_pipeline_version` | integer | no | Pin to a specific version; default = always head |
+| `target_pipeline_version` | integer | no | Pin every fire to this immutable routine version; default (`null`) = always head. A fire whose pinned version no longer exists **fails** (recorded `FAILED` + a `failed_run` inbox alert) — it never silently falls back to head. |
 | `cron_expr` | string | yes | 5-field cron |
 | `timezone` | string | no | IANA name (e.g. `"Europe/Prague"`); default UTC |
 | `inputs` | object | no | Static inputs passed on every fire |
@@ -1153,7 +1153,7 @@ Accepts either `target_pipeline_slug` (UI-friendly) or `target_pipeline_id` (CLI
 PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}
 ```
 
-**Whole-row replace semantics** -- the caller sends the post-edit state, missing fields fall back to the existing row.
+**Whole-row replace semantics** -- the caller sends the post-edit state, missing fields fall back to the existing row. This includes `target_pipeline_version`: an absent field keeps the existing version pin, an explicit `"target_pipeline_version": null` clears it (fires track head again).
 
 **Auth:** `OWNER` or `ADMIN` (`canRole "manage"`).
 
@@ -1241,7 +1241,7 @@ POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks
 | `name` | string | no | Falls back to the pipeline slug |
 | `target_pipeline_slug` | string | one-of | -- |
 | `target_pipeline_id` | string | one-of | -- |
-| `target_pipeline_version` | integer | no | -- |
+| `target_pipeline_version` | integer | no | Pin every dispatch to this immutable routine version; default (`null`) = always head. A dispatch whose pinned version no longer exists answers `409` — never a silent head run. |
 | `signing_secret` | string | no | Used for HMAC-SHA256 verification of the `X-Crewship-Signature` header. **If omitted, the server auto-generates a 32-byte hex secret** -- HMAC verification is mandatory on every webhook, so `signing_secret_set` is always `true`. |
 | `inputs_template` | object | no | Merged on top of the default `{event, raw, headers}` envelope when the webhook fires (the three reserved keys cannot be overridden) |
 | `enabled` | boolean | no | Default `true` |

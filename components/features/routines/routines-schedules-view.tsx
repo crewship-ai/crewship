@@ -20,7 +20,7 @@ interface RoutinesSchedulesViewProps {
   onSelect: (slug: string) => void
 }
 
-function statusTone(status: string | undefined): "emerald" | "rose" | "blue" | "default" {
+function statusTone(status: string | undefined): "emerald" | "rose" | "blue" | "amber" | "default" {
   switch (status?.toLowerCase()) {
     case "succeeded":
     case "success":
@@ -31,6 +31,10 @@ function statusTone(status: string | undefined): "emerald" | "rose" | "blue" | "
       return "rose"
     case "running":
       return "blue"
+    // WAITING = the cron-fired run parked on a human approval gate —
+    // healthy and non-terminal, so amber (attention), never rose.
+    case "waiting":
+      return "amber"
     default:
       return "default"
   }

@@ -53,6 +53,40 @@ crewship routine schedules now <schedule_id>
 
 The same operations are also available on the REST API under `/api/v1/workspaces/{ws}/pipeline-schedules` -- the CLI is a thin wrapper around those endpoints, so server-side behavior (cron parsing, 30 s tick resolution, timezone handling) is identical.
 
+### Pinning a schedule to a routine version
+
+By default a schedule fires the routine's **head** (latest) version -- an edit to the routine immediately changes what the next tick runs. For production schedules that must not drift when an agent (or teammate) edits the routine, pin the schedule to an immutable version:
+
+```bash
+crewship routine versions daily-digest          # see the version history
+crewship routine schedules create --slug daily-digest \
+  --cron "0 8 * * *" --pin-version 3            # every fire executes v3
+crewship routine schedules update <schedule_id> --pin-version 4   # re-pin
+crewship routine schedules update <schedule_id> --unpin           # track head again
+```
+
+Pinning semantics:
+
+- A pinned schedule executes exactly the pinned version's definition on every fire, no matter how far head has moved. The run record stores the executed version (`pipeline_version`) and that version's `definition_hash`, so the Runs view always shows what actually ran.
+- The pin survives unrelated updates: patching the cron, timezone, name, inputs, or enabled state keeps the existing pin. Only an explicit `--pin-version N` / `--unpin` (API: `target_pipeline_version: N` / `: null`) changes it.
+- **If the pinned version no longer exists**, the fire **fails** with a legible error and raises the standard scheduled-run-failed inbox alert (MANAGER-targeted). It deliberately does **not** fall back to head -- silently running an unexpected definition is the exact hazard pinning exists to prevent. Fix by re-pinning to an existing version or unpinning.
+- Governance still reads the live routine: a `disabled` or `proposed` routine refuses to fire even when pinned, and per-step operator overrides apply on top of the pinned definition just as they do on head.
+- A pinned run that parks on an approval gate resumes against the same pinned version, even if head moved while it waited.
+- Webhooks support the identical pin (`target_pipeline_version` on the webhook; `crewship routine webhooks create --pin-version N`). A webhook whose pinned version is missing answers `409` instead of dispatching.
+
+The schedules list shows the pin in the ROUTINE column as `slug@vN`.
+
+### Fire outcomes (`last_status`)
+
+Each fire records one of:
+
+| Status | Meaning |
+|--------|---------|
+| `COMPLETED` | The run finished successfully. |
+| `FAILED` | The run errored (or the pinned version was missing). A `failed_run` inbox alert is raised for MANAGERs. |
+| `SKIPPED` | The target routine is not active (`proposed` / `disabled`); the tick advanced quietly. |
+| `WAITING` | The run parked on a human approval gate (`wait` step). This is a **healthy, non-terminal** outcome -- the run resumes when the approval lands. No failure alert is raised; the waitpoint itself creates the approval inbox card. |
+
 <Note>
   Per-agent `schedule_cron` fields described elsewhere in this guide are a separate legacy path. New work should go through `crewship routine schedules` against a saved routine.
 

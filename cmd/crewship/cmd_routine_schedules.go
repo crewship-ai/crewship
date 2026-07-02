@@ -46,6 +46,19 @@ type scheduleRow struct {
 	UpdatedAt             string                 `json:"updated_at"`
 }
 
+// routineCell renders the ROUTINE column for trigger lists: the target
+// slug, suffixed with "@vN" when the trigger is pinned to a specific
+// routine version (target_pipeline_version). Pinned triggers execute
+// that immutable version instead of head, so the pin must be visible
+// at a glance — "daily-digest@v3" reads as "fires v3, not whatever the
+// routine looks like today".
+func routineCell(slug string, pinnedVersion *int) string {
+	if pinnedVersion == nil {
+		return slug
+	}
+	return fmt.Sprintf("%s@v%d", slug, *pinnedVersion)
+}
+
 // wakeCell renders the WAKE column: the probe slug plus woke/checked
 // telemetry once the gate has actually run ("cost-probe 3/96" = 96
 // checks, 3 fires). "—" = ungated.
@@ -84,6 +97,8 @@ Examples:
       --name "daily-summary" --cron "0 9 * * *" --inputs '{"text":"…"}'
   crewship routine schedules create --slug cost-report \
       --cron "*/15 * * * *" --wake-slug cost-spike-probe   # LLM only on spike
+  crewship routine schedules create --slug daily-digest \
+      --cron "0 8 * * *" --pin-version 3   # always fire v3, ignore later edits
   crewship routine schedules enable <schedule_id>
   crewship routine schedules disable <schedule_id>
   crewship routine schedules update <schedule_id> --cron "0 8 * * *"
@@ -166,7 +181,7 @@ var routineSchedulesListCmd = &cobra.Command{
 				enabled = "yes"
 			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				shortID(s.ID), s.Name, s.TargetPipelineSlug, s.CronExpr, s.Timezone, enabled, wakeCell(s), next)
+				shortID(s.ID), s.Name, routineCell(s.TargetPipelineSlug, s.TargetPipelineVersion), s.CronExpr, s.Timezone, enabled, wakeCell(s), next)
 		}
 		return w.Flush()
 	},
@@ -215,6 +230,13 @@ var routineSchedulesCreateCmd = &cobra.Command{
 			"inputs":               inputs,
 			"enabled":              enabled,
 		}
+		if cmd.Flags().Changed("pin-version") {
+			pin, _ := cmd.Flags().GetInt("pin-version")
+			if pin < 1 {
+				return fmt.Errorf("--pin-version must be a positive routine version number")
+			}
+			body["target_pipeline_version"] = pin
+		}
 		if wakeSlug != "" {
 			body["wake_pipeline_slug"] = wakeSlug
 			if wakeInputsJSON != "" {
@@ -248,6 +270,9 @@ var routineSchedulesCreateCmd = &cobra.Command{
 		_ = json.NewDecoder(resp.Body).Decode(&out)
 		fmt.Printf("Schedule created: %s (%s @ %s)\n", out.Name, out.CronExpr, out.Timezone)
 		fmt.Printf("  ID:     %s\n", out.ID)
+		if out.TargetPipelineVersion != nil {
+			fmt.Printf("  Pinned: v%d (fires execute this version, not head)\n", *out.TargetPipelineVersion)
+		}
 		if out.WakePipelineSlug != "" {
 			fmt.Printf("  Wake:   %s (routine fires only when the probe's output is truthy)\n", out.WakePipelineSlug)
 		}
@@ -284,6 +309,21 @@ var routineSchedulesUpdateCmd = &cobra.Command{
 			}
 			body["inputs"] = inputs
 		}
+		unpin, _ := cmd.Flags().GetBool("unpin")
+		if cmd.Flags().Changed("pin-version") {
+			if unpin {
+				return fmt.Errorf("--pin-version and --unpin are mutually exclusive")
+			}
+			pin, _ := cmd.Flags().GetInt("pin-version")
+			if pin < 1 {
+				return fmt.Errorf("--pin-version must be a positive routine version number")
+			}
+			body["target_pipeline_version"] = pin
+		}
+		if unpin {
+			// Explicit null clears the pin (absent field keeps it).
+			body["target_pipeline_version"] = nil
+		}
 		noWake, _ := cmd.Flags().GetBool("no-wake")
 		wakeSlug, _ := cmd.Flags().GetString("wake-slug")
 		if noWake && wakeSlug != "" {
@@ -308,7 +348,7 @@ var routineSchedulesUpdateCmd = &cobra.Command{
 			body["wake_inputs"] = wakeInputs
 		}
 		if len(body) == 0 {
-			return fmt.Errorf("at least one of --cron / --timezone / --name / --enabled / --inputs / --wake-slug / --wake-inputs / --no-wake required")
+			return fmt.Errorf("at least one of --cron / --timezone / --name / --enabled / --inputs / --pin-version / --unpin / --wake-slug / --wake-inputs / --no-wake required")
 		}
 		if err := requireAuth(); err != nil {
 			return err
@@ -476,6 +516,7 @@ func init() {
 	routineSchedulesCreateCmd.Flags().Bool("enabled", true, "create the schedule already enabled (default true)")
 	routineSchedulesCreateCmd.Flags().String("wake-slug", "", "wake gate: agentless probe routine evaluated before each fire — the main routine runs only when the probe's output is truthy")
 	routineSchedulesCreateCmd.Flags().String("wake-inputs", "", "JSON object passed to the wake probe on each tick (requires --wake-slug)")
+	routineSchedulesCreateCmd.Flags().Int("pin-version", 0, "pin the schedule to a specific routine version — every fire executes that immutable version instead of head (see 'crewship routine versions <slug>'); if the version is later deleted the fire FAILS with an inbox alert rather than silently running head")
 
 	routineSchedulesUpdateCmd.Flags().String("name", "", "new schedule name")
 	routineSchedulesUpdateCmd.Flags().String("cron", "", "new cron expression")
@@ -485,6 +526,8 @@ func init() {
 	routineSchedulesUpdateCmd.Flags().String("wake-slug", "", "set/replace the wake gate's agentless probe routine")
 	routineSchedulesUpdateCmd.Flags().String("wake-inputs", "", "replace the wake probe's inputs JSON object")
 	routineSchedulesUpdateCmd.Flags().Bool("no-wake", false, "remove the wake gate (schedule fires on every tick again)")
+	routineSchedulesUpdateCmd.Flags().Int("pin-version", 0, "pin (or re-pin) the schedule to a specific routine version; fires execute that immutable version instead of head")
+	routineSchedulesUpdateCmd.Flags().Bool("unpin", false, "remove the version pin (fires track head again); updates that mention neither --pin-version nor --unpin keep the existing pin")
 
 	routineSchedulesDeleteCmd.Flags().Bool("yes", false, "skip the interactive confirmation prompt")
 

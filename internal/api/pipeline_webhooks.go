@@ -423,6 +423,26 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Pin pre-check, synchronous — same reasoning as the governance
+	// pre-check above: a webhook pinned to a deleted routine version
+	// must answer 409 to the SENDER, never fall back to head silently
+	// (the executor re-checks authoritatively via PinnedVersion, but
+	// by then the sender already holds a 202 for a run that will
+	// fail). The pinned definition also feeds the concurrency
+	// pre-check below so the key renders from what will actually run.
+	targetDefinitionJSON := target.DefinitionJSON
+	if wh.TargetPipelineVersion != nil {
+		ver, verr := h.store.GetVersion(r.Context(), wh.TargetPipelineID, *wh.TargetPipelineVersion)
+		if verr != nil {
+			_ = h.webhooks.RecordFire(r.Context(), wh.ID, "", "FAILED")
+			replyError(w, http.StatusConflict, fmt.Sprintf(
+				"routine %q has no version %d (was it deleted? update or unpin the webhook)",
+				target.Slug, *wh.TargetPipelineVersion))
+			return
+		}
+		targetDefinitionJSON = ver.DefinitionJSON
+	}
+
 	// Concurrency pre-check, synchronous — and it MUST come before the
 	// idempotency reservation below. An over-limit delivery answers
 	// 429 + Retry-After like the old synchronous handler did; a 202
@@ -442,7 +462,7 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	// re-parses authoritatively and its failure path (Forget +
 	// RecordFire FAILED) surfaces them.
 	if h.runs != nil {
-		if dsl, derr := pipeline.Parse([]byte(target.DefinitionJSON)); derr == nil {
+		if dsl, derr := pipeline.Parse([]byte(targetDefinitionJSON)); derr == nil {
 			if cerr := h.runs.PrecheckConcurrency(r.Context(), dsl, wh.WorkspaceID, inputs); errors.Is(cerr, pipeline.ErrConcurrencyLimitReached) {
 				// Record the throttled attempt (parity with the old
 				// synchronous handler, which stamped FAILED before
@@ -514,7 +534,12 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer h.webhookDispatchWG.Done()
 		res, runErr := exec.Run(dispatchCtx, pipeline.RunInput{
-			PipelineID:    wh.TargetPipelineID,
+			PipelineID: wh.TargetPipelineID,
+			// Honour the pin: a webhook with target_pipeline_version
+			// set executes that immutable version, not head. The
+			// synchronous pre-check above already 409'd a missing
+			// version; the executor re-verifies authoritatively.
+			PinnedVersion: wh.TargetPipelineVersion,
 			WorkspaceID:   wh.WorkspaceID,
 			Inputs:        inputs,
 			Mode:          pipeline.ModeRun,

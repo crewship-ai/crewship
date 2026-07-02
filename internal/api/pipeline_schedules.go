@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -322,10 +323,27 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Decode to raw keys first so pointer-typed fields can distinguish
+	// "absent — keep existing" from an explicit null. Matters for the
+	// version pin: without this, ANY unrelated PATCH (cron tweak,
+	// rename, disable) would silently unpin a production schedule back
+	// onto head — the exact hazard pinning exists to prevent.
+	rawBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		replyError(w, http.StatusBadRequest, "could not read body")
+		return
+	}
 	var body scheduleRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.Unmarshal(rawBody, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
+	}
+	var rawKeys map[string]json.RawMessage
+	_ = json.Unmarshal(rawBody, &rawKeys)
+	if _, pinMentioned := rawKeys["target_pipeline_version"]; !pinMentioned {
+		// Absent → keep the existing pin. Explicit null (key present,
+		// body.TargetPipelineVersion == nil) clears it.
+		body.TargetPipelineVersion = existing.TargetPipelineVersion
 	}
 
 	pipelineID := existing.TargetPipelineID
@@ -584,7 +602,11 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 
 	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
-		PipelineID:    p.ID,
+		PipelineID: p.ID,
+		// Force-fire honours the schedule's version pin exactly like the
+		// cron path — `schedules now` exists to smoke-test what the cron
+		// will do, so it must execute the same definition.
+		PinnedVersion: sched.TargetPipelineVersion,
 		WorkspaceID:   workspaceID,
 		Inputs:        inputs,
 		Mode:          pipeline.ModeRun,
@@ -596,6 +618,13 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Retry-After", "5")
 			replyError(w, http.StatusTooManyRequests,
 				"concurrency limit reached for this pipeline: another run with the same concurrency_key is already in flight")
+			return
+		}
+		// The schedule pins a version that no longer exists — a config
+		// problem on the schedule, not a server fault. 409 with the
+		// executor's legible error (names routine + version).
+		if errors.Is(err, pipeline.ErrPinnedVersionNotFound) {
+			replyError(w, http.StatusConflict, err.Error())
 			return
 		}
 		h.logger.Error("schedule run: exec", "error", err, "schedule", scheduleID)

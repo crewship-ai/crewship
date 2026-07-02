@@ -148,7 +148,7 @@ var routineWebhooksListCmd = &cobra.Command{
 				enabled = "yes"
 			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\t%d\t%s\n",
-				shortID(h.ID), h.Name, h.TargetPipelineSlug, hmac, h.FireCount, lastStatus, h.RateLimitPerMin, enabled)
+				shortID(h.ID), h.Name, routineCell(h.TargetPipelineSlug, h.TargetPipelineVersion), hmac, h.FireCount, lastStatus, h.RateLimitPerMin, enabled)
 		}
 		return w.Flush()
 	},
@@ -177,6 +177,13 @@ var routineWebhooksCreateCmd = &cobra.Command{
 			"target_pipeline_slug": slug,
 			"rate_limit_per_min":   rateLimit,
 			"enabled":              true,
+		}
+		if cmd.Flags().Changed("pin-version") {
+			pin, _ := cmd.Flags().GetInt("pin-version")
+			if pin < 1 {
+				return fmt.Errorf("--pin-version must be a positive routine version number")
+			}
+			body["target_pipeline_version"] = pin
 		}
 		if hmac != "" {
 			body["signing_secret"] = hmac
@@ -225,7 +232,7 @@ var routineWebhooksCreateCmd = &cobra.Command{
 		fmt.Println("Webhook created.")
 		fmt.Printf("  ID:        %s\n", w.ID)
 		fmt.Printf("  Name:      %s\n", w.Name)
-		fmt.Printf("  Routine:   %s\n", w.TargetPipelineSlug)
+		fmt.Printf("  Routine:   %s\n", routineCell(w.TargetPipelineSlug, w.TargetPipelineVersion))
 		fmt.Printf("  Public URL: %s\n", publicURL)
 		fmt.Printf("  Rate limit: %d / minute\n", w.RateLimitPerMin)
 		if w.SigningSecret != "" {
@@ -361,6 +368,7 @@ func init() {
 	routineWebhooksCreateCmd.Flags().Int("rate-limit", 60, "max fires per minute per webhook (default 60)")
 	routineWebhooksCreateCmd.Flags().String("inputs-template", "", "JSON template merged with the request body to form routine inputs")
 	routineWebhooksCreateCmd.Flags().String("base-url", "", "override the public base URL printed in the response (defaults to server URL)")
+	routineWebhooksCreateCmd.Flags().Int("pin-version", 0, "pin the webhook to a specific routine version — every fire executes that immutable version instead of head; if the version is later deleted the fire FAILS (409) rather than silently running head")
 
 	routineWebhooksUrlCmd.Flags().String("base-url", "", "override the public base URL")
 	routineWebhooksDeleteCmd.Flags().Bool("yes", false, "skip the interactive confirmation prompt")

@@ -21,6 +21,16 @@ var ErrPipelineNotFound = errors.New("pipeline: target pipeline not found")
 // only flagged at runtime.
 var ErrMaxDepthExceeded = fmt.Errorf("pipeline: max nested depth %d exceeded", MaxNestedPipelineDepth)
 
+// ErrPinnedVersionNotFound is returned by Run when the caller pinned
+// the run to a specific pipeline version (RunInput.PinnedVersion —
+// schedules/webhooks with target_pipeline_version set) and that
+// version row no longer exists. Deliberately a hard failure, never a
+// silent fall-back to head: the pin exists precisely so an unexpected
+// definition can't run at 3 AM, and quietly substituting head would
+// recreate that hazard. Trigger dispatch paths match on this sentinel
+// to produce a legible operator-facing error.
+var ErrPinnedVersionNotFound = errors.New("pipeline: pinned routine version no longer exists")
+
 // suspendError is the internal sentinel a wait(approval) step returns when a
 // top-level foreground run should PARK (return WAITING) instead of blocking
 // the caller in WaitFor for up to the approval timeout. It carries the
@@ -441,6 +451,28 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	if in.Mode == ModeRun && !routineStatusRunnable(p.Status) {
 		return nil, fmt.Errorf("%w: status=%s", ErrRoutineNotActive, p.Status)
 	}
+	// Version pinning: a trigger carrying target_pipeline_version
+	// (schedule, webhook, force-fire, resume of a pinned run) executes
+	// that immutable version's definition instead of head. The pinned
+	// clone keeps every governance/identity field from the live row —
+	// only the definition (and its hash, stamped on the run row) is
+	// substituted, so the status gate above and the author-identity
+	// rules below still read the current row. A missing version is a
+	// hard, legible failure — see ErrPinnedVersionNotFound.
+	if in.PinnedVersion != nil {
+		v, verr := e.store.GetVersion(ctx, p.ID, *in.PinnedVersion)
+		if verr != nil {
+			if errors.Is(verr, ErrNotFound) {
+				return nil, fmt.Errorf("%w: routine %q has no version %d (was it deleted? update or unpin the trigger)",
+					ErrPinnedVersionNotFound, p.Slug, *in.PinnedVersion)
+			}
+			return nil, fmt.Errorf("executor: load pinned version %d of %q: %w", *in.PinnedVersion, p.Slug, verr)
+		}
+		pinned := *p
+		pinned.DefinitionJSON = v.DefinitionJSON
+		pinned.DefinitionHash = v.DefinitionHash
+		p = &pinned
+	}
 	dsl, err := Parse([]byte(p.DefinitionJSON))
 	if err != nil {
 		return nil, fmt.Errorf("executor: parse stored DSL: %w", err)
@@ -646,6 +678,17 @@ type RunInput struct {
 	// wins (explicit author intent overrides batch-level override).
 	// Empty (default) preserves existing per-step tier resolution.
 	TierOverride Complexity
+	// PinnedVersion, when non-nil, makes Run execute that immutable
+	// pipeline_versions row's definition instead of head. Set by the
+	// cron scheduler / webhook dispatch / schedule force-fire when the
+	// trigger carries target_pipeline_version, and by the resume path
+	// for runs that were started pinned. The executed version is
+	// recorded on the run row (pipeline_runs.pipeline_version). A pin
+	// pointing at a missing version fails the run with
+	// ErrPinnedVersionNotFound — never a silent head fallback.
+	// Per-step operator overrides (v121) still apply on top of the
+	// pinned definition, same as they do on head.
+	PinnedVersion *int
 	// TriggeredVia / TriggeredByID feed the run-record's audit
 	// trail so dashboards can answer "which runs came from a
 	// schedule vs a webhook vs a manual click." Default empty =
@@ -1553,9 +1596,14 @@ func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipe
 		// existence gate alone cannot see. (pipeline_version is NOT
 		// used for this: the version store dedupes by content hash,
 		// so head_version can point at a stale row after an A→B→A
-		// edit cycle.)
+		// edit cycle.) For a pinned run, in.pipeline already carries
+		// the pinned version's definition + hash (substituted in Run).
 		rec.DefinitionHash = in.pipeline.DefinitionHash
 	}
+	// Record which pinned version actually executed (nil = head).
+	// buildResumePlan reads this back so a parked pinned run resumes
+	// against the same immutable definition.
+	rec.PipelineVersion = in.PinnedVersion
 	if err := e.runStore.Insert(ctx, rec); err != nil {
 		e.persistWarn("run start", runID, err)
 	}
