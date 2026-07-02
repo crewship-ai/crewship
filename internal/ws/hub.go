@@ -297,6 +297,26 @@ func (h *Hub) ConnectionCount() int {
 	return int(h.connCount.Load())
 }
 
+// IsUserSubscribed reports whether any of userID's live connections is
+// currently subscribed to the given channel (e.g. "session:<chatId>").
+// The chat reply notifier uses this as its presence signal: a user
+// watching the session live doesn't need an inbox "agent replied" item.
+// Nil-safe so headless callers (tests, CLI-only servers) can hold a nil
+// hub.
+func (h *Hub) IsUserSubscribed(channel, userID string) bool {
+	if h == nil {
+		return false
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for client := range h.channels[channel] {
+		if client.userID == userID {
+			return true
+		}
+	}
+	return false
+}
+
 // SetChatHandler replaces the current chat message handler.
 func (h *Hub) SetChatHandler(handler ChatHandler) {
 	h.chatHandler = handler

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react"
 import { Search, Terminal, AlertTriangle, MonitorSmartphone } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { parseSessionTimestamp, sortSessionsByActivity } from "./session-sort"
 
 export interface SessionRow {
   id: string
@@ -18,6 +19,12 @@ export interface SessionRow {
   /** Server signal that the last message in the session was an error.
    *  Optional — undefined means we don't know. */
   last_message_error?: boolean | null
+  /** Bumped on every message append (migration v129) — drives ordering.
+   *  Optional for optimistic client-inserted rows; falls back to started_at. */
+  last_activity_at?: string | null
+  /** Messages the requesting user hasn't read (their own excluded).
+   *  Optional — undefined renders no badge. */
+  unread_count?: number
 }
 
 export interface SessionsSidebarProps {
@@ -36,9 +43,9 @@ export interface SessionsSidebarProps {
 }
 
 function formatTime(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ""
-  const diffMs = Date.now() - d.getTime()
+  const ms = parseSessionTimestamp(iso)
+  if (!ms) return ""
+  const diffMs = Date.now() - ms
   const m = Math.floor(diffMs / 60000)
   if (m < 1) return "just now"
   if (m < 60) return `${m}m`
@@ -93,7 +100,9 @@ export function SessionsSidebar({
   const showEmpty = showEmptyOverride
 
   const visible = useMemo(() => {
-    let out = sessions
+    // Newest activity first — the server already orders this way, but
+    // optimistic client inserts (new session rows) need re-sorting.
+    let out = sortSessionsByActivity(sessions)
     if (!showEmpty) {
       // Always keep the active session visible even if 0-msg, so the
       // user can see + return to a freshly-created chat they're about
@@ -151,6 +160,9 @@ export function SessionsSidebar({
               const active = s.id === activeSessionId
               const tag = originTag(s)
               const TagIcon = tag?.icon
+              // Unread badge: only for non-active sessions — the open one
+              // is being read right now (mark-read fires on selection).
+              const unread = !active && (s.unread_count ?? 0) > 0 ? s.unread_count! : 0
               return (
                 <button
                   key={s.id}
@@ -162,10 +174,29 @@ export function SessionsSidebar({
                   )}
                 >
                   <div className="flex items-center justify-between gap-2 mb-0.5">
-                    <span className={cn("text-xs truncate", s.title ? "text-foreground" : "text-muted-foreground italic")}>
+                    <span
+                      className={cn(
+                        "text-xs truncate",
+                        s.title ? "text-foreground" : "text-muted-foreground italic",
+                        unread > 0 && "font-medium",
+                      )}
+                    >
                       {s.title || "Untitled session"}
                     </span>
-                    <span className="text-[10px] text-muted-foreground shrink-0">{formatTime(s.started_at)}</span>
+                    <span className="flex items-center gap-1.5 shrink-0">
+                      {unread > 0 && (
+                        <span
+                          aria-label={`${unread} unread message${unread === 1 ? "" : "s"}`}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-[10px] leading-none"
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full bg-blue-400" aria-hidden />
+                          {unread > 99 ? "99+" : unread}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-muted-foreground">
+                        {formatTime(s.last_activity_at ?? s.started_at)}
+                      </span>
+                    </span>
                   </div>
                   <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                     {/* Status pill */}

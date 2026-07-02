@@ -64,6 +64,10 @@ interface SessionRecord {
   /** Backend tag added in migration v59 — UI / CLI / WEBHOOK / CRON
    *  / AGENT. Older rows that pre-date the migration are NULL. */
   origin?: string | null
+  /** Bumped on every message append (migration v129); drives sidebar order. */
+  last_activity_at?: string | null
+  /** Per-user unread messages in this session (own messages excluded). */
+  unread_count?: number
 }
 
 /**
@@ -190,6 +194,25 @@ export function ChatPageClient() {
     return () => { cancelled = true }
   }, [agent, workspaceId])
 
+  // Mark the selected session read: advances the server-side read cursor
+  // (unread badge source, migration v129) and clears the paired "agent
+  // replied" inbox notification. Fires whenever the viewed session
+  // changes; fire-and-forget — a failed call just leaves the badge until
+  // the next visit. Local state zeroes immediately so the sidebar badge
+  // never lags the click.
+  useEffect(() => {
+    if (!agent || !workspaceId || !sessionId) return
+    setSessions((prev) =>
+      prev.map((s) => (s.id === sessionId && s.unread_count ? { ...s, unread_count: 0 } : s)),
+    )
+    apiFetch(
+      `/api/v1/agents/${agent.id}/chats/${encodeURIComponent(sessionId)}/read?workspace_id=${workspaceId}`,
+      { method: "PUT" },
+    ).catch(() => {
+      /* non-fatal: cursor advances on the next successful visit */
+    })
+  }, [agent, workspaceId, sessionId])
+
   // If no ?session= specified: route to the freshest existing session
   // (pre-existing chats with the agent shouldn't be replaced by a new
   // empty one). Only POST a new session when there are genuinely none.
@@ -246,7 +269,15 @@ export function ChatPageClient() {
     setSessions((prev) =>
       prev.map((s) =>
         s.id === sid
-          ? { ...s, title: s.title ?? autoTitle, message_count: Math.max(s.message_count, 1) }
+          ? {
+              ...s,
+              title: s.title ?? autoTitle,
+              message_count: Math.max(s.message_count, 1),
+              // Mirror the server-side activity bump so the sidebar
+              // (ordered by last activity) floats this session to the
+              // top immediately, without a refetch.
+              last_activity_at: new Date().toISOString(),
+            }
           : s,
       ),
     )

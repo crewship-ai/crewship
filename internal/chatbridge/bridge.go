@@ -185,6 +185,12 @@ type Bridge struct {
 	// the ws.Hub is built in the server boot sequence, same as the
 	// ProvisioningEnqueuer.
 	steerBroadcaster SteerBroadcaster
+
+	// replyNotifier projects persisted assistant replies into the
+	// unified inbox for users who aren't watching the session live.
+	// Optional (nil = disabled); wired via SetReplyNotifier. See
+	// notify.go.
+	replyNotifier ReplyNotifier
 }
 
 // SetProvisioningEnqueuer wires the auto-provision trigger after Bridge
@@ -756,6 +762,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 					Timestamp: time.Now().UTC(),
 				})
 				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 2)
+				// The partial reply is persisted — it counts as "a reply
+				// landed" for the never-miss-a-reply projection too.
+				b.notifyReply(cleanCtx, chatID, userID, info, acc.Text())
 			} else {
 				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 1)
 			}
@@ -814,6 +823,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	if err := b.resolver.IncrementMessageCount(ctx, chatID, 2); err != nil {
 		b.logger.Warn("failed to update message count", "chat_id", chatID, "error", err)
 	}
+
+	// The reply is durably persisted — project it into the unified inbox
+	// for chat users who aren't watching this session live (never miss a
+	// reply). Runs after persist so a notification can never point at a
+	// reply that failed to save.
+	b.notifyReply(ctx, chatID, userID, info, acc.Text())
 
 	// Stamp the active OTel trace id onto the "done" event so the
 	// frontend can attach it to the assistant turn. This is what

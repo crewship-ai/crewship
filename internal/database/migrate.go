@@ -1518,6 +1518,12 @@ END;
 	// authored routines land 'proposed' for MANAGER+ approval) and the admin
 	// disable/enable airbag. See migrate_consts_v128_pipeline_status.go.
 	{version: 128, name: "pipeline_status", sql: migrationPipelineStatus},
+
+	// v129: per-session unread + last-activity for chat (chats.
+	// last_activity_at column + chat_read_cursors table) so the
+	// Sessions sidebar can order by newest message and badge unread
+	// replies per user. See migrate_consts_v129_chat_unread.go.
+	{version: 129, name: "chat_unread", sql: migrationChatUnread},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
