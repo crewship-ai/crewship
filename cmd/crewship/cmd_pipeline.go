@@ -143,6 +143,21 @@ var pipelineListCmd = &cobra.Command{
 		if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
+		// Machine formats pass the API rows through untouched — the human
+		// table below truncates descriptions and drops fields, so it must
+		// never be what -f json/yaml consumers get.
+		f := newFormatter()
+		if rows == nil {
+			rows = []pipelineRowJSON{} // "[]", never "null"
+		}
+		switch f.Format {
+		case "json":
+			return f.JSON(rows)
+		case "yaml":
+			return f.YAML(rows)
+		case "ndjson":
+			return f.NDJSON(rows)
+		}
 		if len(rows) == 0 {
 			fmt.Println("No routines registered yet.")
 			fmt.Println("Save one via: crewship routine save --name … --definition file.json --author-crew <crew_id>")

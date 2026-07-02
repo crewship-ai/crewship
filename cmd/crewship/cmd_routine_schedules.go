@@ -127,6 +127,24 @@ var routineSchedulesListCmd = &cobra.Command{
 			}
 			rows = out
 		}
+		// Machine formats (global -f/--format, or the legacy --json bool)
+		// pass the API rows through — full IDs included, so scripts can
+		// feed them straight into `schedules now <id>` / `update <id>`.
+		// The human table below truncates IDs via shortID.
+		jsonOut, _ := cmd.Flags().GetBool("json")
+		f := newFormatter()
+		if rows == nil {
+			rows = []scheduleRow{} // "[]", never "null"
+		}
+		if jsonOut || f.Format == "json" {
+			return f.JSON(rows)
+		}
+		switch f.Format {
+		case "yaml":
+			return f.YAML(rows)
+		case "ndjson":
+			return f.NDJSON(rows)
+		}
 		if len(rows) == 0 {
 			if slugFilter != "" {
 				fmt.Printf("No schedules for routine %q.\n", slugFilter)
@@ -134,12 +152,6 @@ var routineSchedulesListCmd = &cobra.Command{
 				fmt.Println("No schedules in this workspace.")
 			}
 			fmt.Println("Create one: crewship routine schedules create --slug <routine> --cron '0 9 * * *'")
-			return nil
-		}
-		jsonOut, _ := cmd.Flags().GetBool("json")
-		if jsonOut {
-			b, _ := json.MarshalIndent(rows, "", "  ")
-			fmt.Println(string(b))
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)

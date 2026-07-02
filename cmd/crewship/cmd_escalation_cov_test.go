@@ -278,3 +278,46 @@ func TestEscalationPendingCountRunE_APIError(t *testing.T) {
 		t.Errorf("expected API error; got %v", err)
 	}
 }
+
+func TestEscalationListRunE_JSONPassesThroughAPIFields(t *testing.T) {
+	// Regression: the CLI re-marshalled a truncated struct, dropping
+	// type/metadata/credential_id/action/... from --format json. That
+	// made it impossible to filter CREDENTIAL escalations by type from
+	// scripts (live find on dev2 — the test-harness credentials suite
+	// polls exactly that).
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli8(t, stub.URL())
+	cliCfg.Format = "json"
+
+	stub.OnGet("/api/v1/crews/"+covCrewIDCli8+"/escalations", clitest.JSONResponse(200, []map[string]any{
+		{"id": "esc-cred", "from_slug": "morgan", "reason": "need pager token",
+			"status": "PENDING", "created_at": "2026-07-02T00:00:00Z",
+			"type": "CREDENTIAL", "metadata": `{"name":"PAGER_TOKEN"}`,
+			"credential_id": "cred_123", "action": nil},
+	}))
+	covSetFlagCli8(t, escalationListCmd, "crew", covCrewIDCli8)
+
+	out := covCaptureStdoutCli8(t, func() {
+		if err := escalationListCmd.RunE(escalationListCmd, nil); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("output not JSON: %v\n%s", err, out)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0]["type"] != "CREDENTIAL" {
+		t.Errorf("type must survive to JSON output; got %v", rows[0]["type"])
+	}
+	if rows[0]["credential_id"] != "cred_123" {
+		t.Errorf("credential_id must survive to JSON output; got %v", rows[0]["credential_id"])
+	}
+	if rows[0]["metadata"] != `{"name":"PAGER_TOKEN"}` {
+		t.Errorf("metadata must survive to JSON output; got %v", rows[0]["metadata"])
+	}
+}

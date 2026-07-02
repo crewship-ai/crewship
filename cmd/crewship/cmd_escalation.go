@@ -72,14 +72,27 @@ var escalationListCmd = &cobra.Command{
 			return err
 		}
 
+		// Mirror of the API's escalationItem (internal/api/escalation_handler.go
+		// ListEscalations) — --format json must pass every server field
+		// through. The CLI used to re-marshal a truncated subset, which made
+		// e.g. filtering CREDENTIAL escalations by .type impossible.
 		var escalations []struct {
-			ID        string  `json:"id"`
-			FromName  string  `json:"from_name"`
-			FromSlug  string  `json:"from_slug"`
-			Reason    string  `json:"reason"`
-			Status    string  `json:"status"`
-			CreatedAt string  `json:"created_at"`
-			Context   *string `json:"context"`
+			ID                 string  `json:"id"`
+			Type               string  `json:"type"`
+			FromName           string  `json:"from_name"`
+			FromSlug           string  `json:"from_slug"`
+			Reason             string  `json:"reason"`
+			Context            *string `json:"context"`
+			Metadata           *string `json:"metadata"`
+			PeerConversationID *string `json:"peer_conversation_id"`
+			Status             string  `json:"status"`
+			Resolution         *string `json:"resolution"`
+			Action             *string `json:"action"`
+			RedirectTo         *string `json:"redirect_to"`
+			ResolvedBy         *string `json:"resolved_by"`
+			ResolvedAt         *string `json:"resolved_at"`
+			CreatedAt          string  `json:"created_at"`
+			CredentialID       *string `json:"credential_id"`
 		}
 		if err := cli.ReadJSON(resp, &escalations); err != nil {
 			return err
@@ -102,7 +115,7 @@ var escalationListCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		headers := []string{"ID", "FROM", "REASON", "STATUS", "CREATED"}
+		headers := []string{"ID", "TYPE", "FROM", "REASON", "STATUS", "CREATED"}
 		var rows [][]string
 		for _, e := range escalations {
 			reason := e.Reason
@@ -113,7 +126,7 @@ var escalationListCmd = &cobra.Command{
 			if len(idStr) > 12 {
 				idStr = idStr[:12]
 			}
-			rows = append(rows, []string{idStr, e.FromSlug, reason, e.Status, e.CreatedAt})
+			rows = append(rows, []string{idStr, e.Type, e.FromSlug, reason, e.Status, e.CreatedAt})
 		}
 		return f.Auto(escalations, headers, rows)
 	},

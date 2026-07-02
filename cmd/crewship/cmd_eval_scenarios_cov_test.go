@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -408,6 +409,45 @@ func TestRenderEvalReport_YAML(t *testing.T) {
 	}
 	if !strings.Contains(out, "matrix:") || !strings.Contains(out, "eval-a") {
 		t.Errorf("yaml report wrong: %q", out)
+	}
+}
+
+func TestRenderEvalReport_JSON_NestedMatrixKeys(t *testing.T) {
+	// Regression: the JSON report serialised the internal flat matrix
+	// whose keys embed a raw NUL separator ("slug\x00tier") — hostile
+	// to every downstream consumer. Machine output must use nested
+	// {scenario: {tier: cell}} objects, with "(authored)" for the
+	// empty-tier column.
+	saveCLIState(t)
+	covSetFormat(t, "json")
+	outcomes := []scenarioOutcome{
+		{Scenario: "eval-a", Tier: "fast", Attempt: 1, Status: "COMPLETED", DurationMs: 100, CostUSD: 0.01},
+		{Scenario: "eval-a", Tier: "", Attempt: 1, Status: "COMPLETED", DurationMs: 100, CostUSD: 0.01},
+	}
+
+	out, err := covCaptureStdoutCli6(t, func() error {
+		return renderEvalReport(evalScenariosCmd, outcomes, []string{"eval-a"}, []string{"", "fast"})
+	})
+	if err != nil {
+		t.Fatalf("renderEvalReport: %v", err)
+	}
+	if strings.Contains(out, "\x00") {
+		t.Errorf("JSON report must not contain NUL separators:\n%s", out)
+	}
+	var doc struct {
+		Matrix map[string]map[string]struct {
+			Pass  int `json:"Pass"`
+			Total int `json:"Total"`
+		} `json:"matrix"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("report not parseable as nested matrix: %v\n%s", err, out)
+	}
+	if doc.Matrix["eval-a"]["fast"].Total != 1 {
+		t.Errorf("nested matrix missing eval-a/fast cell: %v", doc.Matrix)
+	}
+	if doc.Matrix["eval-a"]["(authored)"].Total != 1 {
+		t.Errorf("empty tier must serialise as (authored): %v", doc.Matrix)
 	}
 }
 

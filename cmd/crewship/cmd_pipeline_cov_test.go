@@ -855,3 +855,34 @@ func TestPipelineRun_IdempotencyKeyFlag(t *testing.T) {
 		t.Errorf("idempotency_key_ttl_seconds: got %v want 120", body["idempotency_key_ttl_seconds"])
 	}
 }
+
+func TestPipelineList_FormatJSON(t *testing.T) {
+	// Regression: `routine list -f json` printed the human table,
+	// ignoring the global format flag. Combined with the table
+	// truncating IDs there was no scriptable way to enumerate routines.
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	setupStubCLICov(t, stub)
+	cliCfg.Format = "json"
+	stub.OnGet(pipelinesPathCov(), clitest.JSONResponse(200, []map[string]any{
+		{"id": "pln_full_id_here", "slug": "email-fetch", "name": "Email Fetch",
+			"description": "d", "status": "active", "invocation_count": 3},
+	}))
+
+	out, err := captureStdoutCov(t, func() error {
+		return pipelineListCmd.RunE(pipelineListCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("-f json output must be JSON: %v\n%s", err, out)
+	}
+	if len(rows) != 1 || rows[0]["slug"] != "email-fetch" {
+		t.Errorf("unexpected rows: %v", rows)
+	}
+	if rows[0]["id"] != "pln_full_id_here" {
+		t.Errorf("full id must be present in JSON output; got %v", rows[0]["id"])
+	}
+}
