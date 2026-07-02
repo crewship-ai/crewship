@@ -58,6 +58,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"chat_branches":           IntentInclude,
 	"chat_attachments":        IntentInclude,
 	"chat_participants":       IntentInclude,
+	"chat_read_cursors":       IntentInclude,
 	"message_reactions":       IntentInclude,
 	"workspace_files":         IntentInclude,
 	"memory_relations":        IntentInclude,

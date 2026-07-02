@@ -390,21 +390,23 @@ var chatListCmd = &cobra.Command{
 		}
 
 		var chats []struct {
-			ID           string  `json:"id"`
-			Title        *string `json:"title"`
-			Status       string  `json:"status"`
-			MessageCount int     `json:"message_count"`
-			StartedAt    string  `json:"started_at"`
-			CreatedAt    string  `json:"created_at"`
-			EndedAt      *string `json:"ended_at"`
-			Origin       *string `json:"origin"`
+			ID             string  `json:"id"`
+			Title          *string `json:"title"`
+			Status         string  `json:"status"`
+			MessageCount   int     `json:"message_count"`
+			StartedAt      string  `json:"started_at"`
+			CreatedAt      string  `json:"created_at"`
+			EndedAt        *string `json:"ended_at"`
+			Origin         *string `json:"origin"`
+			LastActivityAt string  `json:"last_activity_at"`
+			UnreadCount    int     `json:"unread_count"`
 		}
 		if err := getJSON(client, "/api/v1/agents/"+agentID+"/chats", &chats); err != nil {
 			return err
 		}
 
 		f := newFormatter()
-		headers := []string{"ID", "TITLE", "STATUS", "MSGS", "STARTED", "ORIGIN"}
+		headers := []string{"ID", "TITLE", "STATUS", "MSGS", "UNREAD", "LAST ACTIVITY", "ORIGIN"}
 		var rows [][]string
 		for _, c := range chats {
 			title := "-"
@@ -415,17 +417,85 @@ var chatListCmd = &cobra.Command{
 			if c.Origin != nil && *c.Origin != "" {
 				origin = *c.Origin
 			}
-			started := c.StartedAt
-			if t, err := time.Parse(time.RFC3339, started); err == nil {
-				started = t.Format("2006-01-02 15:04")
+			// Server orders by last activity and falls back to started_at
+			// when a legacy row predates the column.
+			activity := c.LastActivityAt
+			if activity == "" {
+				activity = c.StartedAt
+			}
+			if t, err := time.Parse(time.RFC3339, activity); err == nil {
+				activity = t.Format("2006-01-02 15:04")
+			}
+			unread := "-"
+			if c.UnreadCount > 0 {
+				unread = fmt.Sprintf("%d", c.UnreadCount)
 			}
 			rows = append(rows, []string{
 				c.ID, title, c.Status,
 				fmt.Sprintf("%d", c.MessageCount),
-				started, origin,
+				unread, activity, origin,
 			})
 		}
 		return f.Auto(chats, headers, rows)
+	},
+}
+
+// chatReadCmd marks a chat session as read for the calling user — CLI
+// parity for PUT /api/v1/agents/{agentId}/chats/{chatId}/read. Clears the
+// UNREAD column in `crewship chat list` and the paired "agent replied"
+// inbox notification. The agent is auto-resolved from the chat (same
+// lookup as `chat attach`); pass --agent to skip the scan.
+var chatReadCmd = &cobra.Command{
+	Use:   "read <chat-id>",
+	Short: "Mark a chat session as read (clears its unread badge and inbox notification)",
+	Long: `Advance your read cursor on a chat session to now. The session's unread
+count drops to zero and any "agent replied" inbox notification for it is
+marked read.
+
+Examples:
+  crewship chat read c_abc123
+  crewship chat read c_abc123 --agent atlas`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		chatID := args[0]
+
+		agentOverride, _ := cmd.Flags().GetString("agent")
+		var agentID string
+		if agentOverride != "" {
+			agentID, err = resolveAgentID(client, agentOverride)
+			if err != nil {
+				return err
+			}
+		} else {
+			agentID, err = lookupChatAgentID(client, chatID)
+			if err != nil {
+				return fmt.Errorf("resolve agent for chat %s: %w (pass --agent to override)", chatID, err)
+			}
+		}
+
+		path := "/api/v1/agents/" + url.PathEscape(agentID) +
+			"/chats/" + url.PathEscape(chatID) + "/read"
+		var res struct {
+			ChatID     string `json:"chat_id"`
+			LastReadAt string `json:"last_read_at"`
+		}
+		if err := putJSON(client, path, map[string]string{}, &res); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		switch f.Format {
+		case "json":
+			return f.JSON(res)
+		case "yaml":
+			return f.YAML(res)
+		}
+		cli.PrintSuccess(fmt.Sprintf("Chat %s marked read.", chatID))
+		return nil
 	},
 }
 
@@ -586,6 +656,8 @@ func init() {
 
 	chatAttachCmd.Flags().String("agent", "", "Override the auto-resolved agent slug or ID")
 
+	chatReadCmd.Flags().String("agent", "", "Override the auto-resolved agent slug or ID")
+
 	chatSteerCmd.Flags().StringP("message", "m", "", "Steering message text (required)")
 
 	chatReactCmd.AddCommand(chatReactAddCmd)
@@ -601,5 +673,6 @@ func init() {
 	chatCmd.AddCommand(chatParticipantsCmd)
 	chatCmd.AddCommand(chatAttachCmd)
 	chatCmd.AddCommand(chatListCmd)
+	chatCmd.AddCommand(chatReadCmd)
 	chatCmd.AddCommand(chatSteerCmd)
 }

@@ -264,6 +264,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// Agent chats & runs
 	r.mux.Handle("GET /api/v1/agents/{agentId}/chats", authed(wsCtx(http.HandlerFunc(agents.ListChats))))
 	r.mux.Handle("POST /api/v1/agents/{agentId}/chats", authed(wsCtx(http.HandlerFunc(agents.CreateChat))))
+	// Mark-read: advances the caller's per-chat read cursor (unread badge
+	// source) and clears the paired "agent replied" inbox item.
+	r.mux.Handle("PUT /api/v1/agents/{agentId}/chats/{chatId}/read", authed(wsCtx(http.HandlerFunc(agents.MarkChatRead))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}/runs", authed(wsCtx(http.HandlerFunc(agents.ListRuns))))
 
 	// PR-E F6 — PERSONA endpoints (agent + crew flavors). Persona

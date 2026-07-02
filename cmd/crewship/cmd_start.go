@@ -20,6 +20,7 @@ import (
 
 	api "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
+	"github.com/crewship-ai/crewship/internal/chatnotify"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/crashreport"
@@ -285,6 +286,14 @@ var startCmd = &cobra.Command{
 			apiRouter.SetSteerer(bridge)
 		}
 		bridge.SetSteerBroadcaster(srv.WSHub())
+
+		// Never-miss-a-reply: project persisted assistant replies into
+		// the unified inbox for chat users who aren't watching the
+		// session live (WS presence check). Needs the DB + hub, so it's
+		// wired here rather than at Bridge construction.
+		if deps.DB != nil {
+			bridge.SetReplyNotifier(chatnotify.New(deps.DB, srv.WSHub(), logger))
+		}
 
 		// Wire the API router's ProvisioningHandler into chatbridge so the
 		// "send first message at unprovisioned crew" path can auto-trigger
