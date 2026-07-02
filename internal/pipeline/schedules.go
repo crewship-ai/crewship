@@ -36,9 +36,15 @@ type Schedule struct {
 	InputsJSON            string // raw JSON; parsed lazily at fire time
 	Enabled               bool
 	LastRunAt             *time.Time
-	LastStatus            string
-	LastRunID             string
-	NextRunAt             *time.Time
+	// LastStatus is the outcome of the last main-routine fire:
+	//   COMPLETED — run finished successfully
+	//   FAILED    — run errored (a MANAGER inbox alert was raised)
+	//   SKIPPED   — target routine not active (proposed/disabled)
+	//   WAITING   — run parked on a human approval gate (healthy,
+	//               non-terminal; resumes when the approval lands)
+	LastStatus string
+	LastRunID  string
+	NextRunAt  *time.Time
 
 	// Wake gate. When WakePipelineID is set, each cron tick first
 	// runs that (agentless — enforced at API save time) probe
@@ -429,7 +435,14 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 	}
 
 	in := RunInput{
-		PipelineID:    pipeline.ID,
+		PipelineID: pipeline.ID,
+		// Honour the pin: a schedule with target_pipeline_version set
+		// executes that immutable version, not head — that is the whole
+		// point of pinning a production schedule (see Schedule doc). A
+		// missing pinned version surfaces as ErrPinnedVersionNotFound
+		// from the executor and lands in the FAILED + alert path below —
+		// never a silent head fallback.
+		PinnedVersion: sched.TargetPipelineVersion,
 		WorkspaceID:   sched.WorkspaceID,
 		Inputs:        inputs,
 		Mode:          ModeRun,
@@ -457,8 +470,18 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 	runID := ""
 	if res != nil {
 		runID = res.RunID
-		if runErr == nil && res.Status == "COMPLETED" {
-			status = "COMPLETED"
+		if runErr == nil {
+			switch res.Status {
+			case "COMPLETED":
+				status = "COMPLETED"
+			case "WAITING":
+				// The run parked on a human approval (wait step) — a
+				// healthy, NON-terminal outcome, not a failure. Record it
+				// as WAITING so the schedules list shows the truth, and
+				// skip the failed-run alert below (the waitpoint itself
+				// already raised its own approval inbox card).
+				status = "WAITING"
+			}
 		}
 	}
 	if runErr != nil {

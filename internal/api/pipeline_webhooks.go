@@ -385,10 +385,15 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 
 	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
-		PipelineID:  wh.TargetPipelineID,
-		WorkspaceID: wh.WorkspaceID,
-		Inputs:      inputs,
-		Mode:        pipeline.ModeRun,
+		PipelineID: wh.TargetPipelineID,
+		// Honour the pin: a webhook with target_pipeline_version set
+		// executes that immutable version, not head. A missing pinned
+		// version surfaces as ErrPinnedVersionNotFound below — a legible
+		// 409, never a silent head fallback.
+		PinnedVersion: wh.TargetPipelineVersion,
+		WorkspaceID:   wh.WorkspaceID,
+		Inputs:        inputs,
+		Mode:          pipeline.ModeRun,
 		// Idempotency cascade (audit A17.2 chain follow-up):
 		//   1. Explicit header from the sender (Idempotency-Key /
 		//      X-Crewship-Event-ID) takes precedence -- this is the
@@ -409,7 +414,10 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	runID := ""
 	if res != nil {
 		runID = res.RunID
-		if err == nil && (res.Status == "COMPLETED" || res.Status == "DEDUPED") {
+		// WAITING is a healthy park on a human approval gate (non-
+		// terminal), not a failure — record it as such so the webhook's
+		// last_status tells the truth.
+		if err == nil && (res.Status == "COMPLETED" || res.Status == "DEDUPED" || res.Status == "WAITING") {
 			status = res.Status
 		}
 	}
@@ -428,6 +436,13 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		// webhook sender sees it's a policy block, not a server fault.
 		if errors.Is(err, pipeline.ErrRoutineNotActive) {
 			replyError(w, http.StatusConflict, "routine is not active (awaiting approval or disabled)")
+			return
+		}
+		// Pinned-version-missing is likewise a policy/config problem on
+		// the webhook, not a server fault. The executor's error names the
+		// routine + version so the operator can fix or unpin the trigger.
+		if errors.Is(err, pipeline.ErrPinnedVersionNotFound) {
+			replyError(w, http.StatusConflict, err.Error())
 			return
 		}
 		h.logger.Warn("webhook fire", "error", err, "webhook_id", wh.ID)

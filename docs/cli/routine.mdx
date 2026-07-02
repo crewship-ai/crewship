@@ -405,7 +405,9 @@ crewship routine schedules list --slug summarize-text
 crewship routine schedules list --json
 ```
 
-**Output columns:** ID, NAME, ROUTINE, CRON, TZ, ENABLED, NEXT
+**Output columns:** ID, NAME, ROUTINE, CRON, TZ, ENABLED, WAKE, NEXT
+
+A schedule pinned to a specific routine version shows the pin in the ROUTINE column as `slug@vN` (e.g. `daily-digest@v3`). The `--json` output carries it as `target_pipeline_version`, plus `last_status` (`COMPLETED` | `FAILED` | `SKIPPED` | `WAITING` — `WAITING` means the run parked on an approval gate, which is healthy, not a failure).
 
 ### `schedules create`
 
@@ -426,10 +428,11 @@ crewship routine schedules create \
 | `--timezone` | | IANA timezone (default: `UTC`; for host-local, pass an IANA zone such as `America/Los_Angeles` or read it from `cat /etc/timezone` / `timedatectl show -p Timezone --value`) |
 | `--inputs` | | JSON object passed as inputs on each tick |
 | `--enabled` | | Create enabled (default true) |
+| `--pin-version` | | Pin every fire to this immutable routine version instead of head (see the [Scheduling guide](/guides/scheduling)). If the pinned version is later deleted, fires **fail with an inbox alert** — they never silently fall back to head. |
 
 ### `schedules update <id>`
 
-Pass any subset of `--cron / --timezone / --name / --enabled / --inputs` to update.
+Pass any subset of `--cron / --timezone / --name / --enabled / --inputs / --pin-version / --unpin` to update. An existing version pin survives updates that don't mention it; `--pin-version N` re-pins, `--unpin` removes the pin so fires track head again.
 
 ### `schedules enable <id>` / `schedules disable <id>`
 
@@ -437,7 +440,7 @@ Toggle without altering the cron expression.
 
 ### `schedules now <id>`
 
-Force-fire ad-hoc (out-of-cycle invocation for testing).
+Force-fire ad-hoc (out-of-cycle invocation for testing). Honours the schedule's version pin — it executes exactly what the next cron tick would, and answers `409` if the pinned version no longer exists.
 
 ### `schedules delete <id>`
 
@@ -462,6 +465,8 @@ crewship routine webhooks list --slug pr-review-structured
 
 **Output columns:** ID, NAME, ROUTINE, HMAC, FIRES, LAST STATUS, RATE/MIN, ENABLED
 
+A version-pinned webhook shows the pin in the ROUTINE column as `slug@vN`. LAST STATUS is `COMPLETED` | `FAILED` | `DEDUPED` | `WAITING` (`WAITING` = the dispatched run parked on an approval gate — healthy, resumes on approval).
+
 ### `webhooks create`
 
 ```bash
@@ -484,6 +489,7 @@ crewship routine webhooks create \
 | `--rate-limit` | | Max fires per minute (default 60) |
 | `--inputs-template` | | JSON template merged with the request body |
 | `--base-url` | | Override the public base URL printed |
+| `--pin-version` | | Pin every fire to this immutable routine version instead of head. A fire whose pinned version no longer exists answers `409` — never a silent head run. |
 
 ### `webhooks url <id>`
 

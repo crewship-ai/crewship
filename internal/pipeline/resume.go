@@ -209,7 +209,21 @@ func (e *Executor) buildResumePlan(ctx context.Context, rec *RunRecord) (*resume
 	if err != nil {
 		return nil, "pipeline not loadable: " + err.Error()
 	}
-	dsl, err := Parse([]byte(p.DefinitionJSON))
+	// A pinned run (started from a schedule/webhook with
+	// target_pipeline_version) must resume against the SAME immutable
+	// version it started on — validating against head would strand
+	// every parked pinned run the moment head moves. Versions are
+	// immutable, so the drift gate below then compares the stamped
+	// hash against the very definition that will re-execute.
+	definitionJSON, currentHash := p.DefinitionJSON, p.DefinitionHash
+	if rec.PipelineVersion != nil {
+		v, verr := e.store.GetVersion(ctx, rec.PipelineID, *rec.PipelineVersion)
+		if verr != nil {
+			return nil, fmt.Sprintf("pinned version %d not loadable: %v", *rec.PipelineVersion, verr)
+		}
+		definitionJSON, currentHash = v.DefinitionJSON, v.DefinitionHash
+	}
+	dsl, err := Parse([]byte(definitionJSON))
 	if err != nil {
 		return nil, "stored definition no longer parses: " + err.Error()
 	}
@@ -222,7 +236,7 @@ func (e *Executor) buildResumePlan(ctx context.Context, rec *RunRecord) (*resume
 	}
 	// Drift gate — shared with Run's resume re-validation (see
 	// resumeDefinitionDrift for the rationale behind each check).
-	if reason := resumeDefinitionDrift(rec.DefinitionHash, p.DefinitionHash, dsl, restored, rec.CurrentStepID); reason != "" {
+	if reason := resumeDefinitionDrift(rec.DefinitionHash, currentHash, dsl, restored, rec.CurrentStepID); reason != "" {
 		return nil, reason
 	}
 
@@ -280,6 +294,10 @@ func (e *Executor) runResumedRun(ctx context.Context, plan *resumePlan, logger *
 			RunIDOverride:   rec.ID,
 			TriggeredVia:    rec.TriggeredVia,
 			TriggeredByID:   rec.TriggeredByID,
+			// Re-pin: the run started on this immutable version, so the
+			// resume must execute it too. Run's own drift re-check then
+			// compares the stamped hash against the pinned definition.
+			PinnedVersion:   rec.PipelineVersion,
 			resume:          true,
 			restoredOutputs: plan.restored,
 			restoredCostUSD: rec.CostUSD,
