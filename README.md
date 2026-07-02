@@ -134,17 +134,20 @@ brew install crewship-ai/tap/crewship
 # Any Unix — signed installer (fetch the script direct from the repo)
 curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash
 
-# Self-hosted — Docker
-# `:latest` auto-tracks the most recent stable release. Pin a specific tag
-# (e.g. `:v0.1.0-beta.1`) once you've validated it in your environment.
-docker pull ghcr.io/crewship-ai/crewship:latest
+# Self-hosted — Docker Compose (builds the image from source; brokers all
+# Docker API access through a docker-socket-proxy sidecar)
+git clone https://github.com/crewship-ai/crewship.git
+cd crewship
+cp .env.example .env   # then set NEXTAUTH_SECRET + ENCRYPTION_KEY (both required)
+docker compose -f docker/docker-compose.prod.yml up -d
 ```
 
 > The short `crewship.ai/install` redirect lands once the project website
-> goes live; until then, fetch the script straight from the repo as
-> shown above.
+> goes live (coming soon); until then, fetch the script straight from the
+> repo as shown above.
 
-Then bring it up:
+Then bring it up (Homebrew / curl installs only — the Docker Compose
+stack above already starts the server):
 
 ```bash
 crewship start
@@ -153,10 +156,12 @@ crewship start
 Defaults: HTTP on `:8080`, SQLite at `~/.crewship/crewship.db`.
 Override with `CREWSHIP_PORT` / `--db file:/path`. Container runtime
 required (Docker, Podman, Colima, OrbStack, or Apple Containers) —
-`crewship doctor` autodetects and tells you what's missing.
+`crewship doctor` autodetects and tells you what's missing. Full details,
+including custom install dirs and air-gapped installs, in
+[docs/guides/install](docs/guides/install.mdx).
 
-On first load the web UI walks a 6-step onboarding wizard (workspace
-→ crew → agent → credentials → done). Demo data: `crewship seed`.
+On first load the web UI walks a 3-step onboarding wizard (workspace
+→ crew → adapter/API key → launch). Demo data: `crewship seed`.
 
 ## After install — what now?
 
@@ -175,8 +180,8 @@ something is missing. Run it first; it never starts the server.
 
 `crewship start` boots the daemon in the foreground (Ctrl-C stops
 it). Run with `--background` on macOS/Linux to detach. The
-six-step onboarding wizard in the browser walks you through
-workspace → crew → agent → credentials → done.
+three-step onboarding wizard in the browser walks you through
+workspace → crew → adapter/API key → launch.
 
 Stuck? Common patterns by platform:
 
@@ -215,15 +220,16 @@ read -rs -p "Anthropic API key: " KEY && \
   printf '%s' "$KEY" | crewship credential create \
     --name anthropic-key --type API_KEY --provider ANTHROPIC --value-stdin && \
   unset KEY
-crewship agent create --name "Viktor" --crew eng --role LEAD \
+crewship agent create --name "Viktor" --slug viktor --crew eng --role LEAD \
   --cli-adapter CLAUDE_CODE --tool-profile CODING --system-prompt @prompts/lead.md
+crewship credential assign anthropic-key viktor --env-var-name ANTHROPIC_API_KEY
 crewship doctor                                       # verifies Docker, ports, DB, sidecar reachability
 ```
 
 Then talk to the agent from the same shell:
 
 ```bash
-crewship ask viktor "scaffold a Go HTTP service with a /health endpoint"
+crewship ask --agent viktor "scaffold a Go HTTP service with a /health endpoint"
 ```
 
 Full CLI reference: [docs/cli/overview.mdx](docs/cli/overview.mdx)
@@ -336,7 +342,8 @@ Covenant 2.1 applies in every project space.
 
 ## Community & links
 
-- **Docs:** [docs.crewship.ai](https://docs.crewship.ai)
+- **Docs:** [docs/](docs/) in this repo (Mintlify-rendered source); the
+  hosted [docs.crewship.ai](https://docs.crewship.ai) site is coming soon
 - **Discord:** community help + showcase (invite link on
   [crewship.ai](https://crewship.ai))
 - **Reddit:** [r/Crewship](https://reddit.com/r/Crewship) for
