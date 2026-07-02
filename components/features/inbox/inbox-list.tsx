@@ -149,10 +149,21 @@ const GROUP_DIMS: {
 // Smart buckets give the Linear-style "what needs me vs what's FYI" split
 // the flat kind list can't. Order is intentional (decisions first); the
 // rank drives group sorting so "Decisions needed" always sits on top.
-const SMART_ORDER: Record<string, number> = {
+// Agent replies sit right under decisions: they're the "continue the
+// conversation where you left off" items, not advisories — burying them
+// under a page of FYI rows made them effectively invisible.
+// Exported for tests.
+export const SMART_ORDER: Record<string, number> = {
   "sm:decisions": 0,
-  "sm:review": 1,
-  "sm:fyi": 2,
+  "sm:replies": 1,
+  "sm:review": 2,
+  "sm:fyi": 3,
+}
+
+/** Valid in-app chat deep link from a reply notification's payload. */
+function chatUrlOf(item: InboxItem): string | null {
+  const v = item.payload?.chat_url
+  return typeof v === "string" && v.startsWith("/") ? v : null
 }
 
 function payloadString(item: InboxItem, key: string): string {
@@ -166,7 +177,7 @@ function payloadString(item: InboxItem, key: string): string {
 // crewName resolves a crew_id to its human name so the Crew grouping
 // shows "Engineering" instead of a raw "cmqtg…" id (the key stays the id
 // so the bucket is stable even before names have loaded).
-function groupOf(
+export function groupOf(
   item: InboxItem,
   dim: GroupDim,
   crewName?: (id: string) => string,
@@ -174,11 +185,15 @@ function groupOf(
   switch (dim) {
     case "smart": {
       // Decisions = something an agent is blocked on (waitpoint /
-      // escalation / any blocking row). Review = a non-blocking nudge
-      // tied to an issue ("ENG-6 ready for review"). Everything else is
-      // FYI (advisories, failed-run notices).
+      // escalation / any blocking row). Replies = an agent answered a
+      // chat while the user was away (payload carries the chat deep
+      // link). Review = a non-blocking nudge tied to an issue ("ENG-6
+      // ready for review"). Everything else is FYI (advisories,
+      // failed-run notices).
       if (item.kind === "waitpoint" || item.kind === "escalation" || item.blocking)
         return { key: "sm:decisions", label: "Decisions needed" }
+      if (item.kind === "message" && chatUrlOf(item))
+        return { key: "sm:replies", label: "Agent replies" }
       if (item.kind === "message" && payloadString(item, "issue_identifier"))
         return { key: "sm:review", label: "Needs review" }
       return { key: "sm:fyi", label: "FYI / advisories" }
@@ -947,12 +962,16 @@ function InboxRow({
 }) {
   const meta = metaFor(item.kind)
   const Icon = meta.icon
+  // Chat replies get a direct deep link on the row itself — "continue where
+  // you left off" must be one click, not row → detail → Open chat. Opening
+  // the chat marks it read server-side, which also clears this inbox item.
+  const chatUrl = chatUrlOf(item)
   return (
     <ListRow
       selected={selected}
       onSelect={onSelect}
       className={cn(
-        "items-start gap-2 px-3 py-2.5",
+        "group/inboxrow items-start gap-2 px-3 py-2.5",
         item.state === "resolved" && "opacity-60",
       )}
     >
@@ -997,6 +1016,17 @@ function InboxRow({
           <span className="shrink-0">{relTime(item.created_at)}</span>
         </div>
       </div>
+      {chatUrl && !selectMode && (
+        <Link
+          href={chatUrl}
+          onClick={(e) => e.stopPropagation()}
+          aria-label="Open chat"
+          className="mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-md border border-white/[0.08] px-1.5 py-0.5 text-[10px] text-muted-foreground opacity-0 transition-opacity hover:bg-white/[0.06] hover:text-foreground focus-visible:opacity-100 group-hover/inboxrow:opacity-100"
+        >
+          <MessageSquare className="h-3 w-3" />
+          Open chat
+        </Link>
+      )}
       <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/30" />
     </ListRow>
   )
@@ -1540,10 +1570,9 @@ export function KindActions({
       // chat_url instead — deep link straight into the session.
       return (
         <div className="flex items-center gap-2">
-          {typeof item.payload?.chat_url === "string" &&
-            (item.payload.chat_url as string).startsWith("/") && (
+          {chatUrlOf(item) && (
               <Button asChild size="sm" className="gap-1.5">
-                <Link href={item.payload.chat_url as string}>
+                <Link href={chatUrlOf(item) as string}>
                   <MessageSquare className="h-3 w-3" />
                   Open chat
                 </Link>

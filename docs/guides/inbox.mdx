@@ -21,6 +21,8 @@ Four kinds of items get written through to `inbox_items` (migration v85) the mom
 | `failed_run` | A `pipeline_run` reaches the `failed` terminal state | Retry (re-fires the routine with the same inputs) or Cancel |
 | `message` | The orchestrator broadcasts a notification — e.g. "ENG-12 ready for review" — addressed at a user or role. Also carries **"your agent replied"** chat notifications: when an assistant reply lands in a session you aren't currently viewing, one per-user item appears with a scrubbed preview (repeated replies refresh it in place instead of stacking). See [Chat & Sessions](/guides/chat-sessions#your-agent-replied-notifications). | One-click jump to the linked issue or the **Open chat** deep link, or Dismiss. Opening the chat (or `crewship chat read`) clears it automatically. |
 
+Chat-reply items get priority placement: under Smart grouping they form their own **Agent replies** group directly beneath *Decisions needed* (never buried in FYI), and each row shows an **Open chat** quick action on hover that deep-links straight into the session — continue the conversation in one click; opening it clears the item.
+
 Items are **written by source-of-truth handlers**, not synthesised by the inbox. So:
 
 - Approving a waitpoint via `/inbox` cascades back through `pipeline.waitpoints.CompleteApproval` — the run resumes, the journal records the decision, and the inbox row flips to `resolved` via `inbox.ResolveBySource`.
