@@ -24,12 +24,18 @@ import type { SubSpanKind, SubSpanStatus } from "@/lib/trace/types"
 // (PipelineRun) but kept minimal + all-optional so a list-row record (no
 // step_outputs / sub_spans) and a full run detail both satisfy it.
 export interface MiniRun {
+  id?: string
   status?: string
   current_step_id?: string
   failed_at_step?: string
   step_outputs?: Record<string, unknown> | null
   // Raw wire sub_spans map keyed by step id; mapSubSpans normalizes it.
   sub_spans?: Record<string, unknown> | null
+  // tags — per-run labels set at run-create time (run_tags join table).
+  // Only the single-run detail endpoint (GetRun) returns this; list
+  // endpoints (ListRuns/ListRunRecords) omit it. Best-effort: absent on
+  // older runs or when the runStore isn't wired server-side.
+  tags?: string[] | null
 }
 
 export type MiniStepStatus = "success" | "failed" | "running" | "pending" | "none"

@@ -56,6 +56,23 @@ var (
 	stuckQueueStaleAfter    = 10 * time.Minute
 )
 
+// Stuck-RUNNING assignment sweeper boot defaults — the in-process
+// companion of the boot-time RecoverInterruptedRunning call below.
+// RUNNING rows are backed by real agent executions, so the staleness
+// value here is a deliberately generous FLOOR: the sweeper's actual
+// per-row bound is max(the target agent's configured timeout_seconds
+// plus a grace margin, this floor) — see goapi's
+// defaultRunningStaleAfter for the full rationale. It only exists to
+// reclaim crew concurrency slots leaked without a restart (e.g. a
+// dispatch goroutine that died between claiming the slot and running
+// the agent).
+//
+// Same var-not-const convention as the queued sweeper, for tests.
+var (
+	stuckRunningSweepInterval = 5 * time.Minute
+	stuckRunningStaleAfter    = 2 * time.Hour
+)
+
 // Server is the main crewship process, wiring together the HTTP server, IPC
 
 // stats collector, and all background goroutines. It blocks until ctx is done.
@@ -99,10 +116,44 @@ func (s *Server) Start(ctx context.Context) error {
 	// boots have no queue to sweep.
 	if s.apiRouter != nil {
 		if assign := s.apiRouter.Assignments(); assign != nil {
+			// Boot-time recovery for RUNNING assignments orphaned by a
+			// previous crash/restart. Dispatch goroutines are process-
+			// local, so a RUNNING row stamped before s.startedAt cannot
+			// have a live driver — without this it would hold its crew
+			// concurrency slot forever (claimCrewSlot counts RUNNING
+			// rows against the budget) and the delegating lead's chat
+			// would never resolve. Companion of recoverOrphanedRuns
+			// (which cleans the journal/agents side); this one owns the
+			// assignments table + the completion signals. Runs after
+			// wsHub.Run so the assignment_failed broadcasts recovery
+			// emits are drained instead of piling into the hub buffer,
+			// and before ReattachInProgressMissions so the mission
+			// engine re-attaches against settled assignment state.
+			if n, err := assign.RecoverInterruptedRunning(ctx, s.startedAt); err != nil {
+				s.logger.Error("recover interrupted RUNNING assignments", "error", err)
+			} else if n > 0 {
+				s.logger.Info("recovered interrupted RUNNING assignments", "count", n)
+			}
+
 			assign.StartStuckQueueSweeper(ctx, stuckQueueSweepInterval, stuckQueueStaleAfter)
 			s.logger.Info("stuck-queue sweeper started",
 				"interval", stuckQueueSweepInterval.String(),
 				"stale_after", stuckQueueStaleAfter.String())
+
+			// Belt-and-braces ticker for RUNNING slots leaked while the
+			// process stays up (no restart to trigger the recovery
+			// above). Generous staleness bound — see the vars' comment.
+			assign.StartStuckRunningSweeper(ctx, stuckRunningSweepInterval, stuckRunningStaleAfter)
+			s.logger.Info("stuck-running sweeper started",
+				"interval", stuckRunningSweepInterval.String(),
+				"stale_after", stuckRunningStaleAfter.String())
+		}
+		// Async webhook dispatches (FireWebhook 202-then-run) derive
+		// their run context from the server lifecycle, not the HTTP
+		// request — a sender hanging up must not cancel an in-flight
+		// run, but shutdown (runCancel) must still stop it.
+		if pipes := s.apiRouter.PipelinesHandler; pipes != nil {
+			pipes.SetLifecycleContext(ctx)
 		}
 	}
 
@@ -343,6 +394,17 @@ func (s *Server) Shutdown() error {
 		}
 	}
 
+	// Drain async webhook run goroutines BEFORE the journal writer
+	// closes so their terminal run entries still land. runCancel()
+	// above already cancelled their run context, so this returns as
+	// soon as in-flight executors observe the cancel and record
+	// their terminal state.
+	if s.apiRouter != nil {
+		if pipes := s.apiRouter.PipelinesHandler; pipes != nil {
+			pipes.WaitWebhookDispatches()
+		}
+	}
+
 	s.logWriter.Close()
 	s.convStore.Close()
 	// Detach the file-watcher's journal pointer BEFORE closing the
@@ -492,6 +554,12 @@ func (a *convStoreAdapter) SearchConversations(ctx context.Context, agentID, que
 // terminal state, then reset any agent still flagged RUNNING that
 // has no live run anymore.
 
+// interruptedChatMessage is the user-facing copy appended to a chat
+// whose in-flight reply was killed by a hard server stop (SIGKILL/OOM/
+// power loss). Matches the actionable one-liner style of the
+// chatbridge's error copy.
+const interruptedChatMessage = "The agent's reply was interrupted by a server restart — try again"
+
 func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 	if s.journalWriter == nil {
 		// Without a journal writer we can't write the cancel entries —
@@ -502,6 +570,10 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 
 	type orphan struct {
 		id, agentID, workspaceID string
+		// chatID is the chats row the run was replying into, extracted
+		// from the run.started payload. Empty for non-chat runs (routine
+		// dispatch, assignments) — those get journal cleanup only.
+		chatID string
 	}
 	// GROUP BY trace_id + workspace_id deduplicates the result set when
 	// a retried CreateRun wrote multiple run.started entries for the
@@ -510,7 +582,8 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 	// MIN(rowid) just picks one canonical row to read agent_id off.
 	var orphans []orphan
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT je1.trace_id, MAX(je1.agent_id), je1.workspace_id
+		SELECT je1.trace_id, MAX(je1.agent_id), je1.workspace_id,
+		       MAX(COALESCE(json_extract(je1.payload, '$.chat_id'), ''))
 		FROM journal_entries je1
 		WHERE je1.entry_type = 'run.started'
 		  AND NOT EXISTS (
@@ -526,7 +599,7 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 	}
 	for rows.Next() {
 		var o orphan
-		if scanErr := rows.Scan(&o.id, &o.agentID, &o.workspaceID); scanErr == nil {
+		if scanErr := rows.Scan(&o.id, &o.agentID, &o.workspaceID, &o.chatID); scanErr == nil {
 			orphans = append(orphans, o)
 		}
 	}
@@ -558,6 +631,53 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 		// SELECT counts traces with no terminal entry.
 		if err := s.journalWriter.Flush(ctx); err != nil {
 			s.logger.Warn("flush journal before agent reset", "error", err)
+		}
+
+		// Surface the interruption to the CHAT each run was replying
+		// into. Journal/agent cleanup alone leaves the user's message
+		// with no assistant turn and no explanation — total silence.
+		// Append an explicit system/error turn (same store + parts
+		// shape the chatbridge persists, so history reloads render it
+		// as an error bubble), bump the chat's message count, and
+		// broadcast it on the session channel for anything already
+		// subscribed. Scoped inside the journalWriter branch on
+		// purpose: the notify must only happen when the trace was
+		// actually terminalized above, otherwise the still-open trace
+		// would be re-detected — and re-announced — on every boot.
+		//
+		// Resumable-stream note: this frame goes through Hub.Broadcast,
+		// NOT through the per-run replay buffer (streams.begin/record),
+		// so it carries no seq and clients apply it immediately — it
+		// can't perturb run_begin/resume reassembly for later runs.
+		for _, o := range orphans {
+			if o.chatID == "" || s.convStore == nil {
+				continue
+			}
+			if err := s.convStore.Append(ctx, o.chatID, conversation.Message{
+				ID:        fmt.Sprintf("msg_recovery_%s", o.id),
+				AgentID:   o.agentID,
+				Role:      conversation.RoleSystem,
+				Content:   interruptedChatMessage,
+				Parts:     []conversation.Part{{Type: "error", Content: interruptedChatMessage}},
+				Timestamp: time.Now().UTC(),
+			}); err != nil {
+				s.logger.Warn("recover orphaned runs: persist interrupted-reply turn",
+					"chat_id", o.chatID, "run_id", o.id, "error", err)
+				continue
+			}
+			if _, err := s.db.ExecContext(ctx,
+				`UPDATE chats SET message_count = message_count + 1 WHERE id = ?`,
+				o.chatID); err != nil {
+				s.logger.Warn("recover orphaned runs: bump message count",
+					"chat_id", o.chatID, "error", err)
+			}
+			if s.broadcastSessionEvent != nil {
+				s.broadcastSessionEvent(o.chatID, ws.ChatEvent{
+					Type:     "error",
+					Content:  interruptedChatMessage,
+					Metadata: map[string]any{"reason": "server_restart", "run_id": o.id},
+				})
+			}
 		}
 	}
 

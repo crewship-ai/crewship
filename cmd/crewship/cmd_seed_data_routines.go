@@ -1,7 +1,7 @@
 package main
 
-// Routine seeding — populates a fresh workspace with 5 starter
-// routines so the /routines page isn't empty on first boot. Mirrors
+// Routine seeding — populates a fresh workspace with the starter
+// routine library so the /routines page isn't empty on first boot. Mirrors
 // seedIssues' pattern: independent function, takes the crew/agent ID
 // maps from earlier phases, idempotent (409 conflict = skip).
 //

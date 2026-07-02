@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"log/slog"
@@ -140,6 +141,65 @@ func TestPipelineRuns_GetRun_HappyPath_Returns200WithEnrichedRow(t *testing.T) {
 	// guard.
 	if resp["pipeline_name"] != "ping-hosts" {
 		t.Errorf("pipeline_name = %v, want ping-hosts (join broken?)", resp["pipeline_name"])
+	}
+	// A run with no recorded warnings must still surface an (empty) list,
+	// not a missing/null field — keeps the CLI/UI from needing a nil guard.
+	warnings, ok := resp["warnings"].([]any)
+	if !ok {
+		t.Fatalf("warnings field missing or wrong type: %v (%T)", resp["warnings"], resp["warnings"])
+	}
+	if len(warnings) != 0 {
+		t.Errorf("warnings = %v, want empty", warnings)
+	}
+}
+
+// TestPipelineRuns_GetRun_SurfacesHookWarnings guards the fix for the
+// "invisible teardown hook failure" bug: a failed after_all/on_failure
+// lifecycle hook is persisted to pipeline_runs.warnings_json
+// (pipeline.RunStore.AppendWarning) and must be visible on the run
+// detail response — previously it only reached slog.Warn, with no API
+// surface at all.
+func TestPipelineRuns_GetRun_SurfacesHookWarnings(t *testing.T) {
+	h, db, userID, wsID := runsHandlerRig(t)
+	seedRunsPipeline(t, db, wsID, "pln_b", "nightly-cleanup")
+	seedRunRow(t, db, wsID, "pln_b", "nightly-cleanup", "prn_warn", "completed")
+
+	runStore := pipeline.NewRunStore(db)
+	if err := runStore.AppendWarning(context.Background(), "prn_warn", "hook after_all", "credential release step timed out"); err != nil {
+		t.Fatalf("seed warning: %v", err)
+	}
+
+	req := withWorkspaceUser(
+		httptest.NewRequest("GET", "/api/v1/workspaces/"+wsID+"/pipeline-runs/prn_warn", nil),
+		userID, wsID, "OWNER",
+	)
+	req.SetPathValue("runId", "prn_warn")
+	rr := httptest.NewRecorder()
+	h.GetRun(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	warnings, ok := resp["warnings"].([]any)
+	if !ok || len(warnings) != 1 {
+		t.Fatalf("warnings = %v, want a single entry", resp["warnings"])
+	}
+	entry, ok := warnings[0].(map[string]any)
+	if !ok {
+		t.Fatalf("warning entry = %v, want object", warnings[0])
+	}
+	if entry["stage"] != "hook after_all" {
+		t.Errorf("stage = %v, want %q", entry["stage"], "hook after_all")
+	}
+	if entry["message"] != "credential release step timed out" {
+		t.Errorf("message = %v, want the seeded warning text", entry["message"])
+	}
+	if entry["at"] == nil || entry["at"] == "" {
+		t.Errorf("at = %v, want a timestamp", entry["at"])
 	}
 }
 

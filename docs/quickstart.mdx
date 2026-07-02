@@ -67,12 +67,16 @@ That's it. The runtime is now serving on your hardware. No agents have been crea
     ```bash
     git clone https://github.com/crewship-ai/crewship.git
     cd crewship
+
+    # NEXTAUTH_SECRET and ENCRYPTION_KEY are REQUIRED — set them in .env first.
+    cp .env.example .env   # then fill in the two secrets
     docker compose -f docker/docker-compose.prod.yml up -d
-    # ENCRYPTION_KEY + NEXTAUTH_SECRET are auto-generated and persisted
-    # to the container's data volume on first boot. Set them via
-    # docker-compose `environment:` only if you want to manage secrets
-    # yourself (e.g. via Docker secrets or an external vault).
     ```
+
+    The compose file declares both secrets with the `${VAR:?... is required}`
+    form, so the stack refuses to start if either is unset. See the
+    [Docker Compose install guide](/guides/install#docker-compose) for the
+    full defaults table and the socket-proxy security model.
   </Tab>
   <Tab title="From source">
     ```bash
@@ -214,6 +218,7 @@ For pinned versions, custom install directories, and air-gapped install paths se
     crewship agent create \
       --crew dev-team \
       --name "Alice" \
+      --slug alice \
       --role AGENT \
       --system-prompt "Senior full-stack developer specializing in Go and React."
     ```

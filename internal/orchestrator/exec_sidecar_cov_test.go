@@ -275,15 +275,23 @@ func TestStartSidecar_SuccessPayloadShape(t *testing.T) {
 		t.Fatalf("expected 2 execs (prep + launch), got %d", len(calls))
 	}
 	prep, launch := calls[0], calls[1]
-	if prep.User != "0:0" {
-		t.Errorf("memory prep must run as root, got %q", prep.User)
+	// NOT root: agent containers drop ALL capabilities, so a root exec
+	// cannot chown (no CAP_CHOWN) — the prep runs as the agent uid with
+	// the sidecar gid and uses owner rights only (mkdir/chgrp/chmod).
+	if prep.User != "1001:1002" {
+		t.Errorf("memory prep must run as 1001:1002 (capability-free), got %q", prep.User)
 	}
 	prepScript := covScript(prep)
 	if !strings.Contains(prepScript, "/crew/agents/bob/.memory") || !strings.Contains(prepScript, "/crew/shared/.memory") {
 		t.Errorf("prep script missing memory paths: %q", prepScript)
 	}
-	if !strings.Contains(prepScript, "chown -R 1001:1002") {
-		t.Errorf("prep script must chown to 1001:1002: %q", prepScript)
+	// Every crew member's tier is prepped, not just the requesting
+	// agent's — members share the sidecar (CRE-137).
+	if !strings.Contains(prepScript, "/crew/agents/eva/.memory") {
+		t.Errorf("prep script must cover crew members' tiers: %q", prepScript)
+	}
+	if !strings.Contains(prepScript, "chgrp -R 1002") || strings.Contains(prepScript, "chown") {
+		t.Errorf("prep script must chgrp (owner right) — chown needs CAP_CHOWN which is dropped: %q", prepScript)
 	}
 	if launch.User != "1002:1002" {
 		t.Errorf("sidecar must run as UID 1002, got %q", launch.User)

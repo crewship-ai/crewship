@@ -99,14 +99,17 @@ var routineWebhooksListCmd = &cobra.Command{
 			rows = out
 		}
 		jsonOut, _ := cmd.Flags().GetBool("json")
-		if jsonOut {
-			// Redact tokens + secrets from --json output. The list
+		f := newFormatter()
+		if jsonOut || f.Format == "json" || f.Format == "yaml" || f.Format == "ndjson" {
+			// Redact tokens + secrets from machine output. The list
 			// endpoint returns webhook tokens (the public URL
 			// segment) and signing_secret_set flags; piping --json
 			// to a log/share could leak the public URL or
 			// inadvertently confirm secret-set state for sensitive
 			// webhooks. The user can fetch the full record via the
-			// `url` subcommand when they explicitly need it.
+			// `url` subcommand when they explicitly need it. IDs stay
+			// full-length so scripts can feed them to delete/update —
+			// the human table below truncates them via shortID.
 			redacted := make([]webhookRow, len(rows))
 			for i, r := range rows {
 				redacted[i] = r
@@ -115,9 +118,14 @@ var routineWebhooksListCmd = &cobra.Command{
 				}
 				redacted[i].SigningSecret = ""
 			}
-			b, _ := json.MarshalIndent(redacted, "", "  ")
-			fmt.Println(string(b))
-			return nil
+			switch {
+			case f.Format == "yaml":
+				return f.YAML(redacted)
+			case f.Format == "ndjson":
+				return f.NDJSON(redacted)
+			default:
+				return f.JSON(redacted)
+			}
 		}
 		if len(rows) == 0 {
 			fmt.Println("No webhooks in this workspace.")

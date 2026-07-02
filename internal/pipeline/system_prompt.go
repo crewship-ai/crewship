@@ -18,6 +18,15 @@ import (
 // most useful routines.
 const systemPromptCap = 30
 
+// routinesPromptCharBudget bounds the TOTAL size of the block. The
+// entry cap alone doesn't: 30 entries with 200-char descriptions plus
+// author/usage lines is ~12 KB (~3k tokens) injected into EVERY agent
+// exec — measured live on dev2, it pushed the minimum cost of a
+// trivial Haiku step past the seeded $0.01 cost-cap sentinel. When the
+// budget is hit, remaining routines collapse into one "…N more" line;
+// the full list stays one GET /pipelines away.
+const routinesPromptCharBudget = 6000
+
 // BuildSystemPromptBlock returns the [AVAILABLE ROUTINES] system-
 // prompt block for the named workspace, or "" if no routines exist.
 // Returning empty when zero routines means agents in fresh workspaces
@@ -67,33 +76,47 @@ func BuildSystemPromptBlock(ctx context.Context, store *Store, workspaceID strin
 	b.WriteString("  Do NOT curl the save endpoint — use the tool.\n\n")
 	b.WriteString("Currently registered routines in this workspace (top by usage):\n\n")
 
+	shown := 0
 	for _, p := range pipes {
 		// Per-entry: slug, description, last status, used by N
 		// crews, authored by. Extra fields are deliberately
 		// minimal — the LLM mainly needs slug + description to
 		// decide if a pipeline is the right fit; everything else
 		// is signal-of-trustworthiness.
-		fmt.Fprintf(&b, "- slug: %s\n", p.Slug)
+		var entry strings.Builder
+		fmt.Fprintf(&entry, "- slug: %s\n", p.Slug)
 		if p.Description != "" {
-			fmt.Fprintf(&b, "  description: %s\n", oneLine(p.Description))
+			fmt.Fprintf(&entry, "  description: %s\n", oneLine(p.Description))
 		}
 		if p.AuthorCrewID != "" {
 			authorLabel := p.AuthorCrewID
 			if name, ok := crewNameByID[p.AuthorCrewID]; ok && name != "" {
 				authorLabel = name
 			}
-			fmt.Fprintf(&b, "  authored by: %s\n", authorLabel)
+			fmt.Fprintf(&entry, "  authored by: %s\n", authorLabel)
 		}
 		if p.InvocationCount > 0 {
 			status := "completed"
 			if p.LastInvocationStatus != "" {
 				status = strings.ToLower(p.LastInvocationStatus)
 			}
-			fmt.Fprintf(&b, "  used: %d invocations · last status: %s\n", p.InvocationCount, status)
+			fmt.Fprintf(&entry, "  used: %d invocations · last status: %s\n", p.InvocationCount, status)
 		} else {
-			b.WriteString("  used: not yet invoked\n")
+			entry.WriteString("  used: not yet invoked\n")
 		}
-		b.WriteString("\n")
+		entry.WriteString("\n")
+
+		// Char budget: entries are already popularity-ordered, so
+		// stopping here keeps the most-used routines and folds the
+		// tail into one summary line.
+		if b.Len()+entry.Len() > routinesPromptCharBudget {
+			break
+		}
+		b.WriteString(entry.String())
+		shown++
+	}
+	if rest := len(pipes) - shown; rest > 0 {
+		fmt.Fprintf(&b, "…%d more routine(s) not shown (prompt budget) — GET http://localhost:9119/pipelines for the full list.\n\n", rest)
 	}
 	b.WriteString("[END AVAILABLE ROUTINES]")
 	return b.String(), nil

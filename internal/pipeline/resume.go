@@ -41,6 +41,9 @@ type resumePlan struct {
 	rec      *RunRecord
 	inputs   map[string]any
 	restored map[string]string
+	// reason distinguishes the boot-scan path from the in-process
+	// approval path in the journal (see resumeReason* constants).
+	reason string
 }
 
 // resumeDefinitionDrift is the shared drift gate for resume-from-step:
@@ -131,6 +134,9 @@ func (e *Executor) ResumeInterruptedRuns(ctx context.Context, logger *slog.Logge
 			continue
 		}
 		plan, reason := e.buildResumePlan(ctx, rec)
+		if plan != nil {
+			plan.reason = resumeReasonRestart
+		}
 		if plan == nil {
 			if markErr := e.runStore.MarkInterrupted(ctx, rec.ID, "not resumable after restart: "+reason); markErr != nil {
 				logger.Warn("pipeline resume: interrupted fallback write failed",
@@ -183,6 +189,9 @@ func (e *Executor) ResumeAfterApproval(runID string, logger *slog.Logger) {
 		return
 	}
 	plan, reason := e.buildResumePlan(ctx, rec)
+	if plan != nil {
+		plan.reason = resumeReasonApproval
+	}
 	if plan == nil {
 		markCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = e.runStore.MarkInterrupted(markCtx, rec.ID, "not resumable after approval: "+reason)
@@ -299,6 +308,7 @@ func (e *Executor) runResumedRun(ctx context.Context, plan *resumePlan, logger *
 			// compares the stamped hash against the pinned definition.
 			PinnedVersion:   rec.PipelineVersion,
 			resume:          true,
+			resumeReason:    plan.reason,
 			restoredOutputs: plan.restored,
 			restoredCostUSD: rec.CostUSD,
 			// Carried so Run can re-validate the definition against the

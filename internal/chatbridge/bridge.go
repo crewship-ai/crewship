@@ -20,6 +20,13 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// noOutputChatMessage is the user-facing copy for a run that finished
+// cleanly but produced zero output (issue #545 — safety refusal
+// swallowed by the adapter, prompt-budget pressure, or the agent CLI
+// exiting 0 with no stdout). Kept short and actionable, matching the
+// generic-error copy style used elsewhere in the chat stream.
+const noOutputChatMessage = "The agent returned no output — try again"
+
 // AgentStatusPendingReview is the agents.status sentinel set by the
 // hire endpoint when the per-crew autonomy policy returns
 // DecisionInboxApprove (guided autonomy). The chatbridge refuses to
@@ -369,7 +376,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		if err := b.resolver.IncrementMessageCount(ctx, chatID, 1); err != nil {
 			b.logger.Warn("increment message count (group, no mention)", "error", err)
 		}
-		streamFn(ws.ChatEvent{Type: "done", Content: ""})
+		// no_reply marks a done that INTENTIONALLY carries no assistant
+		// turn (the agent wasn't @mentioned), so the frontend's
+		// "done arrived but nothing replied → show the no-output error"
+		// fallback doesn't misfire on the sender.
+		streamFn(ws.ChatEvent{Type: "done", Content: "", Metadata: map[string]any{"no_reply": true}})
 		return nil
 	}
 
@@ -477,8 +488,40 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("crew %q provisioning kicked off; resend after build completes", info.CrewSlug)
 	}
 
-	// Agent IS responding (private chat, or @mentioned in a group). Persist +
-	// broadcast the human turn now that provisioning has cleared.
+	// Cross-sender exclusivity: at most one live agent run per chat, no
+	// matter which user's message triggered it. Two different users
+	// messaging the same group chat concurrently must never race two
+	// RunAgent execs into the same agent container/tmux session —
+	// interleaved stdout and corrupted tmux state. tryMarkRunStart shares
+	// the SAME per-chat counter Steer already uses (single source of
+	// truth): it atomically claims the run slot only if the chat is
+	// currently idle. The claim covers the REST of this call (persist +
+	// container setup + RunAgent), released via defer on every exit path
+	// (success, error, cancel).
+	//
+	// The claim MUST come before the user message is persisted/broadcast: a
+	// bounced send has to leave no trace. Persisting it would write a turn
+	// the agent never processes, and the busy notice invites a resend that
+	// would then duplicate the message in the transcript. Likewise the
+	// rejection must not emit ANY frame through streamFn — in production
+	// streamFn fans out on the shared session channel, so an agent_busy or
+	// terminal done here would reach every subscriber and make the WINNING
+	// user's client finalize its live streaming turn mid-generation. We
+	// return ws.ErrAgentBusy instead and the ws layer (handleSendMessage)
+	// replies to the rejected sender alone.
+	//
+	// The ws layer's cancelKey guard (handleSendMessage) already rejects a
+	// SAME user double-sending concurrently, so by the time we get here the
+	// only remaining race is a DIFFERENT user hitting the same chat.
+	if !b.tryMarkRunStart(chatID) {
+		b.logger.Info("rejecting send: agent already running for chat", "chat_id", chatID, "user_id", userID)
+		return fmt.Errorf("chat %s: %w", chatID, ws.ErrAgentBusy)
+	}
+	defer b.markRunEnd(chatID)
+
+	// Agent IS responding (private chat, or @mentioned in a group) and this
+	// send owns the run slot. Persist + broadcast the human turn now that
+	// provisioning has cleared.
 	if err := persistUserMsg(); err != nil {
 		b.logger.Error("failed to persist user message", "error", err)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})
@@ -722,11 +765,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 
 	startedAt := time.Now()
-	// Mark this chat as having a live run so a steering message arriving
-	// mid-turn (POST /chats/{id}/steer) is detected and QUEUED instead of
-	// racing a second Exec into the same container. Balanced by markRunEnd.
-	b.markRunStart(chatID)
-	defer b.markRunEnd(chatID)
+	// The run slot was already claimed (tryMarkRunStart, above) before
+	// container setup began — this keeps the chat marked "in flight" for
+	// the whole call so a steering message arriving mid-turn (POST
+	// /chats/{id}/steer) is detected and QUEUED instead of racing a second
+	// Exec into the same container. Released via the defer registered there.
 	runErr := b.orch.RunAgent(ctx, req, handler)
 	if runErr != nil {
 		// If context was cancelled (user pressed stop), don't emit error -- the hub
@@ -770,6 +813,47 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}
 		streamFn(ws.ChatEvent{Type: "error", Content: runErr.Error()})
 		return fmt.Errorf("run agent: %w", runErr)
+	}
+
+	// Issue #545 — the run finished "successfully" but emitted ZERO output
+	// (no text, no tool activity, no image). Causes: a safety refusal the
+	// adapter swallowed, prompt-budget pressure pushing the response to 0
+	// tokens, or the agent CLI exiting cleanly with no stdout. Silence here
+	// is indistinguishable from a broken app, so surface it explicitly on
+	// BOTH surfaces: an error event (then a terminal done) for live
+	// viewers, and a persisted system/error turn so a later reload shows
+	// the failure too. The run is recorded FAILED, not COMPLETED — a run
+	// that answered nothing didn't complete anything.
+	if acc.Text() == "" && len(partAcc.Parts()) == 0 {
+		b.logger.Warn("agent run produced no output; surfacing error to chat (#545)",
+			"chat_id", chatID, "run_id", runID, "agent_slug", info.AgentSlug)
+		noOutputErr := "agent returned no output (#545)"
+		if err := b.resolver.UpdateRun(ctx, runID, "FAILED", nil, &noOutputErr, map[string]interface{}{
+			"duration_ms": time.Since(startedAt).Milliseconds(),
+			"reason":      "no_output",
+		}); err != nil {
+			b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
+		}
+		if err := b.convStore.Append(ctx, chatID, conversation.Message{
+			ID:        generateMsgID(),
+			AgentID:   info.AgentID,
+			Role:      conversation.RoleSystem,
+			Content:   noOutputChatMessage,
+			Parts:     []conversation.Part{{Type: "error", Content: noOutputChatMessage}},
+			Timestamp: time.Now().UTC(),
+		}); err != nil {
+			b.logger.Error("failed to persist no-output error turn", "error", err, "chat_id", chatID)
+		}
+		if err := b.resolver.IncrementMessageCount(ctx, chatID, 2); err != nil {
+			b.logger.Warn("failed to update message count", "chat_id", chatID, "error", err)
+		}
+		streamFn(ws.ChatEvent{
+			Type:     "error",
+			Content:  noOutputChatMessage,
+			Metadata: map[string]any{"reason": "no_output"},
+		})
+		streamFn(ws.ChatEvent{Type: "done", Content: ""})
+		return nil
 	}
 
 	exitCode := 0

@@ -325,7 +325,11 @@
       "required": ["runtime", "code"],
       "additionalProperties": false,
       "properties": {
-        "runtime": { "type": "string", "enum": ["python", "go", "bash"] },
+        "runtime": {
+          "type": "string",
+          "enum": ["expr", "cel", "python", "go", "bash"],
+          "description": "Only 'expr' and 'cel' have a sandboxed runner wired in this build (deterministic, token-zero). 'python' | 'go' | 'bash' are schema-legal but rejected at author time — see docs/manifest/routine.md 'Code steps'."
+        },
         "version": { "type": "string", "description": "Optional runtime version pin." },
         "code": { "type": "string", "description": "Script body. Template-substitutable. Inputs auto-mapped to CREWSHIP_INPUT_<NAME> env vars." },
         "env": {

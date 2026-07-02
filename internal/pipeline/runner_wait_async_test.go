@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
@@ -34,7 +35,8 @@ func TestRun_ApprovalWaitStep_ReturnsWaiting(t *testing.T) {
 	defer wpStore.Close()
 	p := saveResumePipeline(t, store, "appr-linear", asyncApprovalLinearDSL)
 
-	exec := NewExecutor(store, NewResolver(db), newMockRunner(), &captureEmitter{}).
+	em := &captureEmitter{}
+	exec := NewExecutor(store, NewResolver(db), newMockRunner(), em).
 		WithRunStore(runStore).
 		WithWaitpointStore(wpStore)
 
@@ -96,6 +98,23 @@ func TestRun_ApprovalWaitStep_ReturnsWaiting(t *testing.T) {
 	rec, _ = runStore.Get(ctx, res.RunID)
 	if rec.Status != RunStatusCompleted {
 		t.Fatalf("after approval+resume status: got %q, want completed", rec.Status)
+	}
+
+	// The resumed marker must carry the APPROVAL wording end-to-end
+	// (plan.reason → RunInput.resumeReason → emitRunResumed). A unit
+	// test on the emitter alone missed a broken link in this chain
+	// once — the live journal read "resumed after restart" for an
+	// approval resume.
+	em.mu.Lock()
+	sawApprovalResume := false
+	for _, e := range em.entries {
+		if strings.Contains(e.Summary, "resumed after approval") {
+			sawApprovalResume = true
+		}
+	}
+	em.mu.Unlock()
+	if !sawApprovalResume {
+		t.Error("journal must record 'resumed after approval' for a waitpoint resume")
 	}
 }
 
@@ -314,5 +333,7 @@ func resumeAndAwait(t *testing.T, exec *Executor, runStore *RunStore, runID stri
 	if plan == nil {
 		t.Fatalf("resume plan nil: %s", reason)
 	}
+	// Mirror ResumeAfterApproval: these helpers drive the approval path.
+	plan.reason = resumeReasonApproval
 	exec.runResumedRun(ctx, plan, slog.Default())
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -276,12 +277,33 @@ func (h *PipelineHandler) DeleteWebhook(w http.ResponseWriter, r *http.Request) 
 // secret embedded in the token itself plus optional HMAC verification
 // via X-Crewship-Signature.
 //
+// Dispatch is ASYNCHRONOUS: everything security-relevant (token
+// lookup, HMAC verification, rate limit, governance status,
+// concurrency pre-check, idempotency reservation) runs synchronously
+// in the request, then the
+// run itself starts in a background goroutine and the sender gets a
+// 202 + {run_id, status: "PENDING"} immediately. Real senders
+// (GitHub/Stripe) time out deliveries in 5–10s while an agent_run
+// routine can take minutes — and the run context derives from the
+// server lifecycle, NOT the request, so a sender hanging up cannot
+// cancel an in-flight run server-side (wasted tokens). Poll the run_id
+// via GET /pipeline-runs/{runId} (CLI: `crewship routine logs <run_id>`)
+// for the outcome.
+//
 // Returns:
-//   - 202 with { run_id } on accepted (run starts async)
+//   - 202 with { run_id, status: "PENDING" } on accepted (run runs
+//     in the background under the returned id)
+//   - 202 with { run_id, status: "DEDUPED", deduped: true } on an
+//     idempotency-key replay — run_id is the ORIGINAL run's id
 //   - 401 on HMAC mismatch
 //   - 404 on unknown / disabled / deleted token (deliberate to
 //     avoid leaking which tokens exist)
-//   - 429 on per-token rate limit hit
+//   - 409 when the target routine is 'proposed'/'disabled' (governance)
+//   - 429 + Retry-After on per-token rate limit hit, or when the
+//     routine's concurrency gate is at capacity — checked
+//     synchronously against the same run registry the executor
+//     enforces, and WITHOUT consuming the idempotency key, so the
+//     sender's retry executes instead of dedupe-ing
 //   - 503 if the runner / webhook store isn't wired
 func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	if h.webhooks == nil || h.runner == nil {
@@ -383,76 +405,192 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	exec := h.newExecutor()
-	res, err := exec.Run(r.Context(), pipeline.RunInput{
-		PipelineID: wh.TargetPipelineID,
-		// Honour the pin: a webhook with target_pipeline_version set
-		// executes that immutable version, not head. A missing pinned
-		// version surfaces as ErrPinnedVersionNotFound below — a legible
-		// 409, never a silent head fallback.
-		PinnedVersion: wh.TargetPipelineVersion,
-		WorkspaceID:   wh.WorkspaceID,
-		Inputs:        inputs,
-		Mode:          pipeline.ModeRun,
-		// Idempotency cascade (audit A17.2 chain follow-up):
-		//   1. Explicit header from the sender (Idempotency-Key /
-		//      X-Crewship-Event-ID) takes precedence -- this is the
-		//      semantic id the sender wants to dedupe on.
-		//   2. Falls back to a synthetic key derived from
-		//      sha256(token + body + signature). Same wire bytes
-		//      from the same webhook within the
-		//      DefaultIdempotencyTTL window deduplicate
-		//      automatically, regardless of whether the sender opted
-		//      in to a header. Closes the replay-attack vector LIVE-
-		//      verified in audit H-iter5-A17.2 (a captured POST
-		//      replayed mid-window used to re-fire the pipeline).
-		// The synthetic key is salted by the webhook token so two
-		// webhooks happening to receive the same body don't collide.
-		IdempotencyKey: webhookIdempotencyKey(r, body, wh.Token),
-	})
-	status := "FAILED"
-	runID := ""
-	if res != nil {
-		runID = res.RunID
-		// WAITING is a healthy park on a human approval gate (non-
-		// terminal), not a failure — record it as such so the webhook's
-		// last_status tells the truth.
-		if err == nil && (res.Status == "COMPLETED" || res.Status == "DEDUPED" || res.Status == "WAITING") {
-			status = res.Status
-		}
-	}
-	_ = h.webhooks.RecordFire(r.Context(), wh.ID, runID, status)
-
+	// Governance pre-check, synchronous. The executor re-checks at run
+	// time (its airbag chokepoint stays authoritative), but a
+	// 'proposed'/'disabled' routine must answer 409 to the SENDER —
+	// fire-and-forgetting a 202 for a policy-blocked routine would
+	// leave the operator debugging a run that never existed.
+	target, err := h.store.GetByID(r.Context(), wh.TargetPipelineID)
 	if err != nil {
-		// Concurrency-rejected webhooks: signal 429 so the sender
-		// can retry instead of recording a generic 5xx.
-		if errors.Is(err, pipeline.ErrConcurrencyLimitReached) {
-			w.Header().Set("Retry-After", "5")
-			replyError(w, http.StatusTooManyRequests, "concurrency limit reached")
-			return
-		}
-		// Governance airbag: a 'proposed'/'disabled' routine refuses to run
-		// from the executor. Surface it as 409 (not a generic 5xx) so the
-		// webhook sender sees it's a policy block, not a server fault.
-		if errors.Is(err, pipeline.ErrRoutineNotActive) {
-			replyError(w, http.StatusConflict, "routine is not active (awaiting approval or disabled)")
-			return
-		}
-		// Pinned-version-missing is likewise a policy/config problem on
-		// the webhook, not a server fault. The executor's error names the
-		// routine + version so the operator can fix or unpin the trigger.
-		if errors.Is(err, pipeline.ErrPinnedVersionNotFound) {
-			replyError(w, http.StatusConflict, err.Error())
-			return
-		}
-		h.logger.Warn("webhook fire", "error", err, "webhook_id", wh.ID)
+		_ = h.webhooks.RecordFire(r.Context(), wh.ID, "", "FAILED")
+		h.logger.Warn("webhook fire: load target pipeline", "error", err, "webhook_id", wh.ID)
 		replyError(w, http.StatusInternalServerError, "pipeline run failed")
 		return
 	}
+	if !pipeline.StatusRunnable(target.Status) {
+		_ = h.webhooks.RecordFire(r.Context(), wh.ID, "", "FAILED")
+		replyError(w, http.StatusConflict, "routine is not active (awaiting approval or disabled)")
+		return
+	}
+
+	// Pin pre-check, synchronous — same reasoning as the governance
+	// pre-check above: a webhook pinned to a deleted routine version
+	// must answer 409 to the SENDER, never fall back to head silently
+	// (the executor re-checks authoritatively via PinnedVersion, but
+	// by then the sender already holds a 202 for a run that will
+	// fail). The pinned definition also feeds the concurrency
+	// pre-check below so the key renders from what will actually run.
+	targetDefinitionJSON := target.DefinitionJSON
+	if wh.TargetPipelineVersion != nil {
+		ver, verr := h.store.GetVersion(r.Context(), wh.TargetPipelineID, *wh.TargetPipelineVersion)
+		if verr != nil {
+			_ = h.webhooks.RecordFire(r.Context(), wh.ID, "", "FAILED")
+			replyError(w, http.StatusConflict, fmt.Sprintf(
+				"routine %q has no version %d (was it deleted? update or unpin the webhook)",
+				target.Slug, *wh.TargetPipelineVersion))
+			return
+		}
+		targetDefinitionJSON = ver.DefinitionJSON
+	}
+
+	// Concurrency pre-check, synchronous — and it MUST come before the
+	// idempotency reservation below. An over-limit delivery answers
+	// 429 + Retry-After like the old synchronous handler did; a 202
+	// here would hand the sender a run_id for a run that dies on
+	// ErrConcurrencyLimitReached before any pipeline_runs row exists —
+	// the sender treats 202 as accepted and never retries, so the
+	// event would be permanently lost. Checking before the reservation
+	// also means a 429'd delivery never touches the idempotency store,
+	// so the sender's retry of the same key executes as a fresh run.
+	//
+	// PrecheckConcurrency reads the same run registry (same key render,
+	// same count-vs-max) the executor's Acquire enforces — same source
+	// of truth, evaluated early. It cannot RESERVE the slot, though, so
+	// a small TOCTOU window remains; the background goroutine below
+	// handles a residual ErrConcurrencyLimitReached explicitly. Parse
+	// or key-render errors fall through deliberately: the executor
+	// re-parses authoritatively and its failure path (Forget +
+	// RecordFire FAILED) surfaces them.
+	if h.runs != nil {
+		if dsl, derr := pipeline.Parse([]byte(targetDefinitionJSON)); derr == nil {
+			if cerr := h.runs.PrecheckConcurrency(r.Context(), dsl, wh.WorkspaceID, inputs); errors.Is(cerr, pipeline.ErrConcurrencyLimitReached) {
+				// Record the throttled attempt (parity with the old
+				// synchronous handler, which stamped FAILED before
+				// answering 429).
+				_ = h.webhooks.RecordFire(r.Context(), wh.ID, "", "FAILED")
+				w.Header().Set("Retry-After", "5")
+				replyError(w, http.StatusTooManyRequests, "concurrency limit reached")
+				return
+			}
+		}
+	}
+
+	// Idempotency reservation, synchronous — replays must resolve to
+	// the ORIGINAL run id in the 202, not mint a dangling handle.
+	//
+	// Idempotency cascade (audit A17.2 chain follow-up):
+	//   1. Explicit header from the sender (Idempotency-Key /
+	//      X-Crewship-Event-ID) takes precedence -- this is the
+	//      semantic id the sender wants to dedupe on.
+	//   2. Falls back to a synthetic key derived from
+	//      sha256(token + body + signature). Same wire bytes
+	//      from the same webhook within the
+	//      DefaultIdempotencyTTL window deduplicate
+	//      automatically, regardless of whether the sender opted
+	//      in to a header. Closes the replay-attack vector LIVE-
+	//      verified in audit H-iter5-A17.2 (a captured POST
+	//      replayed mid-window used to re-fire the pipeline).
+	// The synthetic key is salted by the webhook token so two
+	// webhooks happening to receive the same body don't collide.
+	//
+	// The run id is pre-allocated HERE so the 202 can hand the sender
+	// a pollable handle before the run starts; RunIDOverride below
+	// makes the executor journal under the same id.
+	idemKey := webhookIdempotencyKey(r, body, wh.Token)
+	runID := pipeline.NewRunID()
+	idem := pipeline.NewIdempotencyStore(h.db)
+	resolvedRunID, isNew, err := idem.LookupOrReserve(
+		r.Context(), wh.WorkspaceID, idemKey, runID, wh.TargetPipelineID, pipeline.DefaultIdempotencyTTL,
+	)
+	if err != nil {
+		h.logger.Warn("webhook fire: idempotency reserve", "error", err, "webhook_id", wh.ID)
+		replyError(w, http.StatusInternalServerError, "pipeline run failed")
+		return
+	}
+	if !isNew {
+		// Duplicate delivery — answer with the original run's id so
+		// retried webhooks see a stable success response. No dispatch.
+		_ = h.webhooks.RecordFire(r.Context(), wh.ID, resolvedRunID, "DEDUPED")
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"run_id":  resolvedRunID,
+			"status":  "DEDUPED",
+			"deduped": true,
+		})
+		return
+	}
+
+	// Async dispatch. The run context derives from the server
+	// lifecycle (NOT r.Context()) so the sender closing its connection
+	// cannot cancel the run; the WaitGroup lets graceful shutdown
+	// drain in-flight runs (same pattern as assignments_run.go).
+	//
+	// IdempotencyKey is deliberately NOT passed to the executor: the
+	// reservation above already maps idemKey → runID, and a second
+	// LookupOrReserve inside exec.Run would see its own reservation as
+	// a duplicate and short-circuit the run to DEDUPED.
+	exec := h.newExecutor()
+	dispatchCtx := h.webhookDispatchContext()
+	h.webhookDispatchWG.Add(1)
+	go func() {
+		defer h.webhookDispatchWG.Done()
+		res, runErr := exec.Run(dispatchCtx, pipeline.RunInput{
+			PipelineID: wh.TargetPipelineID,
+			// Honour the pin: a webhook with target_pipeline_version
+			// set executes that immutable version, not head. The
+			// synchronous pre-check above already 409'd a missing
+			// version; the executor re-verifies authoritatively.
+			PinnedVersion: wh.TargetPipelineVersion,
+			WorkspaceID:   wh.WorkspaceID,
+			Inputs:        inputs,
+			Mode:          pipeline.ModeRun,
+			RunIDOverride: runID,
+		})
+		status := "FAILED"
+		firedRunID := ""
+		if res != nil {
+			firedRunID = res.RunID
+			if runErr == nil {
+				// Record the executor's verdict verbatim — COMPLETED,
+				// FAILED, CANCELLED, or WAITING (run parked on a
+				// `wait: approval` step; resolving the waitpoint
+				// resumes it to a terminal state).
+				status = res.Status
+			}
+		}
+		if runErr != nil {
+			// Free the reservation so the sender can retry the same
+			// key instead of dedupe-ing onto a run that never
+			// happened. Mirrors the executor's own Forget on its
+			// concurrency-rejection path.
+			_ = idem.Forget(context.Background(), wh.WorkspaceID, idemKey)
+			if errors.Is(runErr, pipeline.ErrConcurrencyLimitReached) {
+				// Residual TOCTOU race: the synchronous pre-check above
+				// saw a free slot, but another dispatch Acquire'd it
+				// between our 202 and this run's Acquire (the pre-check
+				// reads the registry without reserving). The sender
+				// already holds a 202 it won't retry on, so make the
+				// loss recoverable and loud: the fire records FAILED
+				// below with this reason in the log, and the Forget
+				// above released the idempotency key so a sender/
+				// operator retry executes instead of DEDUPE-ing onto a
+				// run that never happened.
+				h.logger.Warn("webhook fire (async run): concurrency limit reached despite synchronous pre-check (TOCTOU window); fire recorded FAILED, idempotency key released so a retry can execute",
+					"webhook_id", wh.ID, "run_id", runID)
+			} else {
+				h.logger.Warn("webhook fire (async run)", "error", runErr,
+					"webhook_id", wh.ID, "run_id", runID)
+			}
+		}
+		// Bookkeeping on a fresh context: at shutdown dispatchCtx is
+		// already cancelled when the run winds down, and the terminal
+		// record must still land.
+		_ = h.webhooks.RecordFire(context.Background(), wh.ID, firedRunID, status)
+	}()
+
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"run_id":  res.RunID,
-		"status":  res.Status,
-		"deduped": res.Deduped,
+		"run_id":  runID,
+		"status":  "PENDING",
+		"deduped": false,
 	})
 }
 

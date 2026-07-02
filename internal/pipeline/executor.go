@@ -71,11 +71,16 @@ type Executor struct {
 	runner   AgentRunner
 	emitter  Emitter
 
-	// egressAllowed gates the host of HTTP steps. Wired from server
-	// boot using the workspace's existing allowlist mechanism (the
-	// same one sidecar uses for agent_run egress). Nil = allow all,
-	// useful for tests; production wiring sets a real allowlist.
-	egressAllowed func(host string) bool
+	// egressAllowed gates the host of HTTP steps at the crew/workspace
+	// policy layer. Production wiring (NewWiredExecutor with a DB)
+	// installs NewCrewNetworkPolicyGate — the same crew network policy
+	// (crews.network_mode + crews.allowed_domains) the sidecar proxy
+	// enforces for agent_run container egress, so an http step cannot
+	// reach a host the crew's agents are already forbidden from.
+	// nil = the policy layer is absent (bare NewExecutor in unit
+	// tests); the routine-level egress_targets check and the httpsafe
+	// SSRF guard in runHTTPStep still apply.
+	egressAllowed func(ctx context.Context, scope RunScope, host string) error
 
 	// allowPrivateHTTP is a test-only escape hatch: when true,
 	// runHTTPStep skips the httpsafe SSRF guards (URL string check +
@@ -85,10 +90,12 @@ type Executor struct {
 	// setter for it. SetAllowPrivateHTTPForTesting is the only mutator.
 	allowPrivateHTTP bool
 
-	// credentialByType resolves a credential type ("slack", "stripe",
-	// etc.) to its decrypted value at run time. Nil = HTTP steps
-	// run without credential injection (public endpoints only).
-	credentialByType func(ctx context.Context, credType string) (string, error)
+	// credentialByType resolves a step's credential_ref.type to the
+	// decrypted value of a matching ACTIVE credential in the running
+	// workspace's vault. Production wiring (NewWiredExecutor with a
+	// DB) installs NewVaultCredentialResolver. Nil = HTTP steps run
+	// without credential injection (public endpoints only).
+	credentialByType func(ctx context.Context, scope RunScope, credType string) (string, error)
 
 	// codeRunner runs StepCode in a sandboxed container. Nil means
 	// code steps return a clear "not configured" error rather than
@@ -144,13 +151,27 @@ type Executor struct {
 	resumeRetryMax  time.Duration
 }
 
-// WithEgressGate wires the HTTP allowlist. Builders can call this
-// pattern (NewExecutor + WithEgressGate + WithCredentialResolver +
-// WithCodeRunner + WithWaitpointStore) to compose an executor with
-// the optional capabilities turned on. The package's tests stay
-// functional with the bare NewExecutor.
-func (e *Executor) WithEgressGate(allowed func(host string) bool) *Executor {
-	e.egressAllowed = allowed
+// RunScope identifies the run on whose behalf a step-level policy
+// decision is made: the workspace the run executes in and the crew
+// that authored the routine. Both come straight off RunInput —
+// runHTTPStep snapshots them so the egress gate and the credential
+// resolver can scope their lookups without threading the whole
+// RunInput into policy closures.
+type RunScope struct {
+	WorkspaceID  string
+	AuthorCrewID string
+}
+
+// WithEgressGate wires the crew/workspace-level HTTP host gate. The
+// gate returns nil to allow, or a descriptive error to block (the
+// error text lands verbatim in the operator-facing EgressBlockedError,
+// so make it actionable). Builders can chain this pattern (NewExecutor
+// + WithEgressGate + WithCredentialResolver + WithCodeRunner +
+// WithWaitpointStore) to compose an executor with the optional
+// capabilities turned on; production goes through NewWiredExecutor,
+// which installs NewCrewNetworkPolicyGate whenever a DB is supplied.
+func (e *Executor) WithEgressGate(gate func(ctx context.Context, scope RunScope, host string) error) *Executor {
+	e.egressAllowed = gate
 	return e
 }
 
@@ -165,10 +186,11 @@ func (e *Executor) SetAllowPrivateHTTPForTesting(v bool) {
 }
 
 // WithCredentialResolver wires HTTP credential injection. The
-// resolver receives the step's CredentialRef.Type and returns the
-// decrypted value (typically by querying the workspace credentials
-// table + encryption.Decrypt).
-func (e *Executor) WithCredentialResolver(fn func(ctx context.Context, credType string) (string, error)) *Executor {
+// resolver receives the run's scope plus the step's
+// CredentialRef.Type and returns the decrypted value (production:
+// NewVaultCredentialResolver — workspace credentials table +
+// encryption.Decrypt). The returned value must never be logged.
+func (e *Executor) WithCredentialResolver(fn func(ctx context.Context, scope RunScope, credType string) (string, error)) *Executor {
 	e.credentialByType = fn
 	return e
 }
@@ -402,6 +424,14 @@ func (e *Executor) WithPipelineResolver(p PipelineResolver) *Executor {
 func routineStatusRunnable(status string) bool {
 	return status == "" || status == "active"
 }
+
+// StatusRunnable is the exported form of routineStatusRunnable, for
+// HTTP handlers that dispatch runs asynchronously and want to give the
+// sender a synchronous 409 for a 'proposed'/'disabled' routine instead
+// of a fire-and-forget 202 that dies in the background. The executor
+// still re-checks at run time — the governance airbag chokepoint below
+// stays authoritative for every dispatch path.
+func StatusRunnable(status string) bool { return routineStatusRunnable(status) }
 
 func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	if in.Mode == "" {
@@ -703,6 +733,10 @@ type RunInput struct {
 	// window — see resumeDefinitionDrift). Set only by runResumedRun.
 	resumeDefinitionHash string
 	resumeCurrentStepID  string
+	// resumeReason names the resume cause for the journal summary:
+	// resumeReasonRestart (boot scan) or resumeReasonApproval
+	// (waitpoint approved in-process). Set only by runResumedRun.
+	resumeReason string
 }
 
 // costCapExceededMessage is the single wording for max_cost_usd
@@ -826,7 +860,7 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 			// The pipeline_runs row already exists (status=running
 			// from before the restart) — no fresh insert. Journal a
 			// resumed marker instead of a second run.started.
-			emit.emitRunResumed(ctx, in.Mode, len(in.restoredOutputs), len(dsl.Steps))
+			emit.emitRunResumed(ctx, in.Mode, len(in.restoredOutputs), len(dsl.Steps), in.resumeReason)
 		} else {
 			emit.emitRunStarted(ctx, in.Mode, fmt.Sprintf("%v", inputsForCtx), len(dsl.Steps))
 			// Persist the run row alongside the journal event when
@@ -1036,6 +1070,14 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 				return result, nil
 			}
 			if stepErr != nil {
+				// Fold the failed attempt's spend into the run total
+				// BEFORE bailing — runStepWithRetry reports the cost of
+				// every tier it burned alongside the error. Dropping it
+				// here made failed runs persist cost_usd=0, hiding
+				// exactly the expensive retried/escalated failures from
+				// spend analytics (the cost-cap branch below always
+				// recorded it, so the two failure paths disagreed).
+				result.CostUSD += stepCost
 				result.Status = "FAILED"
 				result.FailedAtStep = step.ID
 				result.ErrorMessage = stepErr.Error()
@@ -1180,7 +1222,7 @@ func (e *Executor) dispatchStep(
 	case StepCallPipeline:
 		return e.runCallPipelineStep(ctx, step, in, parentRender, depth)
 	case StepHTTP:
-		return e.runHTTPStep(ctx, step, parentRender)
+		return e.runHTTPStep(ctx, step, parentRender, in)
 	case StepCode:
 		return e.runCodeStep(ctx, step, parentRender, in)
 	case StepWait:
@@ -1198,7 +1240,7 @@ func (e *Executor) dispatchStep(
 func (e *Executor) runStepHook(ctx context.Context, hook *Step, in RunInput, runID string, parentRender RenderContext) (string, error) {
 	switch hook.Type {
 	case StepHTTP:
-		out, _, _, err := e.runHTTPStep(ctx, *hook, parentRender)
+		out, _, _, err := e.runHTTPStep(ctx, *hook, parentRender, in)
 		return out, err
 	case StepCode:
 		out, _, _, err := e.runCodeStep(ctx, *hook, parentRender, in)
@@ -1678,4 +1720,21 @@ func (e *Executor) persistWarn(stage, runID string, err error) {
 		"run_id", runID,
 		"error", err.Error(),
 	)
+}
+
+// recordRunWarning persists a non-fatal, run-scoped warning (currently:
+// a failed after_all/on_failure lifecycle hook) so it survives past the
+// slog.Warn line persistWarn already emits and is visible via the run
+// detail API/CLI. Best-effort like every other projection write in this
+// file: a store failure here only logs (via persistWarn's own shape) —
+// it must never fail, or mask the status of, the run it's attached to.
+// No-op when runStore isn't wired, runID is empty (draft/RunDefinition
+// runs), or err is nil.
+func (e *Executor) recordRunWarning(ctx context.Context, runID, stage string, err error) {
+	if err == nil || e.runStore == nil || runID == "" {
+		return
+	}
+	if werr := e.runStore.AppendWarning(ctx, runID, stage, err.Error()); werr != nil {
+		e.persistWarn(stage+" (warning persist)", runID, werr)
+	}
 }

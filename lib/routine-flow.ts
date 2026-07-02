@@ -402,3 +402,17 @@ export function buildPlainSteps(dsl: unknown): PlainStep[] {
   })
   return out
 }
+
+/**
+ * isAgentless reads the routine-level `agentless` flag from the parsed
+ * DSL — the token-zero guarantee (internal/pipeline: an agentless
+ * routine's save-time validator rejects agent_run, call_pipeline, and
+ * eval.online steps, so it can never invoke an LLM). Only the detail
+ * endpoint returns `definition`; the routine list response omits it,
+ * so this can't be computed from a list-row Pipeline today. Defensive:
+ * any non-boolean/missing value reads as false.
+ */
+export function isAgentless(dsl: unknown): boolean {
+  const def = asRecord(dsl)
+  return def?.["agentless"] === true
+}

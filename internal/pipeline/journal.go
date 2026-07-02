@@ -139,14 +139,27 @@ func (c *pipelineEmitContext) emitRunStarted(ctx context.Context, mode RunMode, 
 	c.broadcast("pipeline.run.started", payload)
 }
 
-// emitRunResumed records that a previously in-flight run was
-// re-entered at boot from its persisted step state. Reuses
+// Resume reasons — thread through RunInput.resumeReason so the journal
+// summary names the actual cause instead of blaming every resume on a
+// server restart (an approval-gate resume used to read "resumed after
+// restart" on the activity rail).
+const (
+	resumeReasonRestart  = "restart"  // boot-time scan re-entering an in-flight run
+	resumeReasonApproval = "approval" // waitpoint approved, run un-parked in-process
+)
+
+// emitRunResumed records that a previously in-flight run was re-entered
+// from its persisted step state — at boot (reason "restart") or after a
+// waitpoint approval (reason "approval"). Reuses
 // EntryPipelineRunStarted with a resumed=true marker — a dedicated
 // entry type would require a journal migration for what is
 // semantically a (re)start; mirrors the emitStepSkipped precedent.
-func (c *pipelineEmitContext) emitRunResumed(ctx context.Context, mode RunMode, restoredSteps, stepCount int) {
+func (c *pipelineEmitContext) emitRunResumed(ctx context.Context, mode RunMode, restoredSteps, stepCount int, reason string) {
 	if c == nil {
 		return
+	}
+	if reason == "" {
+		reason = resumeReasonRestart
 	}
 	payload := map[string]any{
 		"mode":              string(mode),
@@ -155,6 +168,7 @@ func (c *pipelineEmitContext) emitRunResumed(ctx context.Context, mode RunMode, 
 		"invoking_agent_id": c.invokingAgentID,
 		"step_count":        stepCount,
 		"resumed":           true,
+		"resume_reason":     reason,
 		"restored_steps":    restoredSteps,
 	}
 	_, _ = c.emitter.Emit(ctx, journal.Entry{
@@ -165,7 +179,7 @@ func (c *pipelineEmitContext) emitRunResumed(ctx context.Context, mode RunMode, 
 		Severity:    journal.SeverityInfo,
 		ActorType:   journal.ActorOrchestrator,
 		ActorID:     c.runID,
-		Summary:     "Pipeline " + c.pipelineSlug + " resumed after restart",
+		Summary:     "Pipeline " + c.pipelineSlug + " resumed after " + reason,
 		Payload:     mergePayload(payload, "pipeline_id", c.pipelineID, "pipeline_slug", c.pipelineSlug, "run_id", c.runID),
 	})
 	c.broadcast("pipeline.run.started", payload)

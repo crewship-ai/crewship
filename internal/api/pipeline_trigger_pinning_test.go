@@ -115,6 +115,9 @@ func TestPipelineWebhooks_Fire_PinnedVersion_ExecutesPinned(t *testing.T) {
 	if runID == "" {
 		t.Fatalf("no run_id in response: %v", resp)
 	}
+	// Fire is async since the 202 rewrite — drain the dispatch before
+	// asserting on the run row.
+	h.WaitWebhookDispatches()
 	rec, err := runStore.Get(t.Context(), runID)
 	if err != nil {
 		t.Fatalf("load run row: %v", err)
@@ -196,11 +199,10 @@ func TestPipelineWebhooks_Fire_WaitingRun_RecordsWaiting(t *testing.T) {
 	if rr.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202; body=%s", rr.Code, rr.Body.String())
 	}
-	var resp map[string]any
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
-	if resp["status"] != "WAITING" {
-		t.Fatalf("response status: got %v, want WAITING (did the run park?)", resp["status"])
-	}
+	// Async fire: the 202 hands back a pollable handle (status PENDING);
+	// the parked outcome shows up on the webhook record once the
+	// dispatch drains.
+	h.WaitWebhookDispatches()
 
 	got, err := pipeline.NewWebhookStore(db).GetByID(t.Context(), wh.ID)
 	if err != nil {

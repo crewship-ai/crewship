@@ -178,6 +178,18 @@ func TestWebhook_ValidateSignature(t *testing.T) {
 	if w.ValidateSignature([]byte("tampered"), digest) {
 		t.Error("tampered body must reject")
 	}
+
+	// The create handler and CLI instruct senders to use the GitHub-style
+	// "sha256=<hex>" form — both spellings must verify against the same body.
+	if !w.ValidateSignature(body, "sha256="+digest) {
+		t.Error("sha256=-prefixed digest must pass")
+	}
+	if w.ValidateSignature(body, "sha256="+strings.Repeat("0", 64)) {
+		t.Error("sha256=-prefixed wrong digest must reject")
+	}
+	if w.ValidateSignature(body, "sha256=") {
+		t.Error("bare sha256= prefix with no digest must reject")
+	}
 }
 
 // TestScanWebhook_DeletedAtBranch scans a soft-deleted row directly —

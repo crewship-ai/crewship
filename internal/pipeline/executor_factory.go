@@ -30,11 +30,18 @@ type ExecutorDeps struct {
 	Runner   AgentRunner
 	Emitter  Emitter
 
-	// DB, when non-nil, derives the idempotency + step-override stores.
-	// Both are thin, goroutine-free DB wrappers, so constructing them
-	// here (rather than accepting instances) makes them impossible to
+	// DB, when non-nil, derives the idempotency + step-override stores
+	// AND the http-step security perimeter: the crew network-policy
+	// egress gate (NewCrewNetworkPolicyGate) and the workspace vault
+	// credential resolver (NewVaultCredentialResolver). All four are
+	// thin, goroutine-free DB wrappers, so constructing them here
+	// (rather than accepting instances) makes them impossible to
 	// forget at a call site — the exact omission class this factory
-	// exists to close.
+	// exists to close. The two security wires earned their place the
+	// hard way: WithEgressGate / WithCredentialResolver existed for
+	// months with ZERO production callers, so http steps ran with
+	// allow-all crew egress and could never receive vault credentials
+	// while the DSL kept validating egress_targets / credential_ref.
 	DB *sql.DB
 
 	// Optional capabilities. Nil → documented degraded behaviour (see
@@ -67,6 +74,16 @@ func NewWiredExecutor(d ExecutorDeps) *Executor {
 	if d.DB != nil {
 		exec = exec.WithIdempotencyStore(NewIdempotencyStore(d.DB))
 		exec = exec.WithStepOverrides(NewStepOverrideStore(d.DB))
+		// http-step security perimeter — both read the same DB the
+		// rest of the run uses, so any production executor (HTTP
+		// handler, boot resume, cron scheduler, pending dispatcher)
+		// enforces the crew network policy and resolves vault
+		// credentials identically. Back-compat contract lives on the
+		// implementations: crews without a policy stay 'free', and a
+		// routine with no egress_targets stays unrestricted at the
+		// routine layer.
+		exec = exec.WithEgressGate(NewCrewNetworkPolicyGate(d.DB))
+		exec = exec.WithCredentialResolver(NewVaultCredentialResolver(d.DB))
 	}
 	if d.RunStore != nil {
 		exec = exec.WithRunStore(d.RunStore)

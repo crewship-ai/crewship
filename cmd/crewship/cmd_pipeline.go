@@ -143,6 +143,21 @@ var pipelineListCmd = &cobra.Command{
 		if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
+		// Machine formats pass the API rows through untouched — the human
+		// table below truncates descriptions and drops fields, so it must
+		// never be what -f json/yaml consumers get.
+		f := newFormatter()
+		if rows == nil {
+			rows = []pipelineRowJSON{} // "[]", never "null"
+		}
+		switch f.Format {
+		case "json":
+			return f.JSON(rows)
+		case "yaml":
+			return f.YAML(rows)
+		case "ndjson":
+			return f.NDJSON(rows)
+		}
 		if len(rows) == 0 {
 			fmt.Println("No routines registered yet.")
 			fmt.Println("Save one via: crewship routine save --name … --definition file.json --author-crew <crew_id>")
@@ -496,9 +511,20 @@ var pipelineRunCmd = &cobra.Command{
 		if v, _ := cmd.Flags().GetInt("priority"); v != 0 {
 			runBody["priority"] = v
 		}
+		// Idempotency: the key rides the standard Idempotency-Key header
+		// (same contract as webhook dispatch); the TTL bounds the dedupe
+		// window server-side. A duplicate key within the window returns
+		// the ORIGINAL run with status DEDUPED instead of executing again.
+		runClient := client.WithTimeout(evalRunTimeout)
+		if v, _ := cmd.Flags().GetString("idempotency-key"); v != "" {
+			runClient = runClient.WithHeader("Idempotency-Key", v)
+			if ttl, _ := cmd.Flags().GetInt("idempotency-ttl"); ttl > 0 {
+				runBody["idempotency_key_ttl_seconds"] = ttl
+			}
+		}
 		// Synchronous run — blocks on the agent (and grader loop); lift the
 		// per-call timeout above the 30s default.
-		resp, err := client.WithTimeout(evalRunTimeout).Do("POST", fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/run", ws, args[0]), runBody)
+		resp, err := runClient.Do("POST", fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/run", ws, args[0]), runBody)
 		if err != nil {
 			return err
 		}
@@ -544,6 +570,10 @@ var pipelineRunCmd = &cobra.Command{
 			}
 			fmt.Printf("%s: pending %s fires at %s\n", verb, result.PendingID, result.FireAt)
 			fmt.Printf("  cancel: crewship routine pending cancel %s\n", result.PendingID)
+			return nil
+		}
+		if result.Status == "DEDUPED" {
+			fmt.Printf("Run %s: DEDUPED (duplicate Idempotency-Key within the dedupe window — this is the original run's id, nothing executed)\n", result.RunID)
 			return nil
 		}
 		fmt.Printf("Run %s: %s (%dms, $%.4f)\n", result.RunID, result.Status, result.DurationMs, result.CostUSD)
@@ -870,6 +900,8 @@ func init() {
 	pipelineRunCmd.Flags().Int("debounce-window", 0, "debounce window in seconds (default 30) — fires this long after the last trigger")
 	pipelineRunCmd.Flags().Int("debounce-max", 0, "max debounce extension in seconds (a continuously-retriggered key still fires by then)")
 	pipelineRunCmd.Flags().Int("priority", 0, "dispatch priority for deferred runs (higher fires first)")
+	pipelineRunCmd.Flags().String("idempotency-key", "", "dedupe key — a duplicate key within the TTL window returns the original run as DEDUPED instead of executing again (sent as the Idempotency-Key header)")
+	pipelineRunCmd.Flags().Int("idempotency-ttl", 0, "dedupe window in seconds for --idempotency-key (0 = server default, 24h)")
 
 	pipelineDryRunCmd.Flags().String("inputs", "", "JSON inputs for the dry-run preview")
 

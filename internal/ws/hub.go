@@ -35,6 +35,18 @@ type ChatHandler interface {
 	HandleChatMessage(ctx context.Context, userID, sessionID, content string, streamFn func(event ChatEvent), opts ...ChatMessageOption) error
 }
 
+// ErrAgentBusy is returned (possibly wrapped) by ChatHandler.HandleChatMessage
+// when the chat already has a live agent run (cross-user run exclusivity —
+// see chatbridge.Bridge.tryMarkRunStart). The rejection carries NO stream
+// frames: the handler must not emit anything through streamFn, because in
+// production streamFn fans out on the shared session channel and an
+// agent_busy/done pair there would reach every subscriber — the WINNING
+// user's client would render the busy notice in its own transcript and
+// treat the terminal done as its run ending (finalizing the live turn and
+// unlocking the composer mid-generation). handleSendMessage maps this error
+// to a private, sender-only agent_busy frame instead.
+var ErrAgentBusy = errors.New("agent is already running for this chat")
+
 // ChatEvent is a streaming event sent from an agent run back to the client,
 // such as text output, tool calls, thinking steps, or completion signals.
 type ChatEvent struct {
@@ -105,6 +117,14 @@ const consecutiveDropsBeforeDisconnect = 128
 // small enough that an attacker can't use a single frame to amplify
 // fan-out across all subscribers on the channel. See D5 in the
 // 2026-05-14 chat/WS pentest agent report.
+//
+// An oversize frame isn't rejected gracefully: x/net/websocket returns
+// ErrFrameTooLarge from Receive, readPump treats that as a plain read
+// error, and the whole connection is torn down. The dashboard pre-flights
+// outbound frames against WS_MAX_OUTBOUND_FRAME_BYTES (hooks/use-websocket.ts)
+// so a large paste gets a client-side error instead of a silent
+// disconnect — keep that constant comfortably under this one if it ever
+// changes.
 const wsMaxInboundFrameBytes = 64 * 1024
 
 // ClientMessage is a JSON message received from a WebSocket client.

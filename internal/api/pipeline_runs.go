@@ -116,6 +116,7 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		pipelineName, issueIdentifier                    sql.NullString
 		metadataJSON, replayOf                           sql.NullString
 		isReplay                                         int64
+		warningsJSON                                     sql.NullString
 	)
 	// Same LEFT JOIN as ListWorkspaceRuns so /pipeline-runs/{id}
 	// returns the human pipeline name + issue identifier without
@@ -132,7 +133,7 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		       r.ended_at, r.error_message, r.failed_at_step,
 		       r.cost_usd, r.duration_ms,
 		       r.triggered_via, r.triggered_by_id, r.idempotency_key, r.inputs_json,
-		       r.metadata_json, r.is_replay, r.replay_of,
+		       r.metadata_json, r.is_replay, r.replay_of, r.warnings_json,
 		       p.name, m.identifier
 		FROM pipeline_runs r
 		LEFT JOIN pipelines p ON r.pipeline_id = p.id
@@ -149,7 +150,7 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		&endedAt, &errorMessage, &failedAtStep,
 		&costUSD, &durationMs,
 		&triggeredVia, &triggeredByID, &idempotencyKey, &inputsJSON,
-		&metadataJSON, &isReplay, &replayOf,
+		&metadataJSON, &isReplay, &replayOf, &warningsJSON,
 		&pipelineName, &issueIdentifier,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -177,6 +178,15 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 	var metadata map[string]interface{}
 	if metadataJSON.Valid && metadataJSON.String != "" {
 		_ = json.Unmarshal([]byte(metadataJSON.String), &metadata)
+	}
+	// warnings surfaces non-fatal, run-scoped issues (currently: a failed
+	// after_all/on_failure lifecycle hook — see pipeline.RunStore.
+	// AppendWarning) that don't flip the terminal status but must not be
+	// silently dropped into server logs. Always an array, never null/
+	// missing, so the CLI/UI can render it without a nil guard.
+	warnings := []pipeline.RunWarning{}
+	if warningsJSON.Valid && warningsJSON.String != "" && warningsJSON.String != "[]" {
+		_ = json.Unmarshal([]byte(warningsJSON.String), &warnings)
 	}
 	// Tags live in the run_tags join table; best-effort fetch so a tag
 	// query failure doesn't sink the whole run detail.
@@ -213,6 +223,7 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		"is_replay":        isReplay != 0,
 		"replay_of":        replayOf.String,
 		"tags":             tags,
+		"warnings":         warnings,
 		// sub_spans is the DEEP trace data: for an agent_run step, the
 		// agent's individual tool calls (Bash/Write/Read/MCP/HTTP) captured
 		// as run.agent_span journal entries, keyed by step_id. A run that

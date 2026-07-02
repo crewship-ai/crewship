@@ -509,8 +509,9 @@ type RenderContext struct {
 	// EgressTargets is the routine's declared host allowlist. When
 	// non-empty, an http step (or http hook) may only reach a host in
 	// this set — enforced in runHTTPStep alongside the httpsafe
-	// private-IP/rebind guard. Empty leaves the httpsafe guard as the
-	// only host-level gate (back-compat for routines that declare none).
+	// private-IP/rebind guard. Empty means no ROUTINE-level restriction
+	// (back-compat for routines that declare none); the crew
+	// network-policy gate and the httpsafe guard still apply.
 	EgressTargets []string
 }
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/llm"
+	"github.com/crewship-ai/crewship/internal/lookout"
 )
 
 // llmCallTimeout caps how long we wait on the Keeper LLM provider before
@@ -278,6 +279,18 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 
 	prompt := g.buildPrompt(req)
 	g.logger.Debug("keeper: LLM prompt", "prompt_len", len(prompt))
+
+	// Attach lookout scope so the paymaster middleware can attribute the
+	// spend. Without it, Scope.WorkspaceID is empty and Complete fails
+	// with "paymaster: workspace_id required" — which the error branch
+	// below turns into deny-by-default, silently disabling every
+	// LLM-judged Keeper decision. Mirrors the explicit re-attach in
+	// internal/pipeline/runner_llm.go, which documents the same trap.
+	ctx = lookout.WithScope(ctx, lookout.Scope{
+		WorkspaceID: req.Request.WorkspaceID,
+		CrewID:      req.Request.RequestingCrewID,
+		AgentID:     req.Request.RequestingAgentID,
+	})
 
 	// Audit M4: bound the upstream call so an unresponsive provider can't
 	// pin a keeper goroutine. Caller's deadline (if any) still wins via

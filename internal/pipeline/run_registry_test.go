@@ -99,6 +99,98 @@ func TestRunRegistry_Acquire_DefaultMaxOne(t *testing.T) {
 	}
 }
 
+// TestRunRegistry_PrecheckConcurrency pins that the non-reserving
+// pre-check mirrors Acquire's gate exactly: same inputs-defaults
+// merge, same concurrency_key template render, same count-vs-max
+// (MaxConcurrent <= 0 → 1). Async dispatch paths (FireWebhook) use it
+// to answer a synchronous 429 before handing out a 202.
+func TestRunRegistry_PrecheckConcurrency(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("no gate declared", func(t *testing.T) {
+		r := NewRunRegistry()
+		if err := r.PrecheckConcurrency(ctx, &DSL{}, "ws_test", nil); err != nil {
+			t.Errorf("no concurrency_key must pass, got %v", err)
+		}
+	})
+
+	t.Run("free slot passes, held slot rejects", func(t *testing.T) {
+		r := NewRunRegistry()
+		dsl := &DSL{ConcurrencyKey: "serial"} // MaxConcurrent 0 → 1
+		if err := r.PrecheckConcurrency(ctx, dsl, "ws_test", nil); err != nil {
+			t.Fatalf("free slot must pass, got %v", err)
+		}
+		_, release, err := r.Acquire(ctx, AcquireOpts{
+			RunID: "run_a", WorkspaceID: "ws_test", ConcurrencyKey: "serial",
+		})
+		if err != nil {
+			t.Fatalf("acquire: %v", err)
+		}
+		if err := r.PrecheckConcurrency(ctx, dsl, "ws_test", nil); !errors.Is(err, ErrConcurrencyLimitReached) {
+			t.Errorf("held slot: want ErrConcurrencyLimitReached, got %v", err)
+		}
+		// Another workspace competes for its own slots only.
+		if err := r.PrecheckConcurrency(ctx, dsl, "ws_other", nil); err != nil {
+			t.Errorf("other workspace must pass, got %v", err)
+		}
+		release()
+		if err := r.PrecheckConcurrency(ctx, dsl, "ws_test", nil); err != nil {
+			t.Errorf("released slot must pass again, got %v", err)
+		}
+	})
+
+	t.Run("max_concurrent honoured", func(t *testing.T) {
+		r := NewRunRegistry()
+		dsl := &DSL{ConcurrencyKey: "k", MaxConcurrent: 2}
+		_, release, err := r.Acquire(ctx, AcquireOpts{
+			RunID: "run_a", WorkspaceID: "ws_test", ConcurrencyKey: "k", MaxConcurrent: 2,
+		})
+		if err != nil {
+			t.Fatalf("acquire: %v", err)
+		}
+		defer release()
+		if err := r.PrecheckConcurrency(ctx, dsl, "ws_test", nil); err != nil {
+			t.Errorf("1 of 2 slots held must pass, got %v", err)
+		}
+	})
+
+	t.Run("templated key renders through inputs and defaults", func(t *testing.T) {
+		r := NewRunRegistry()
+		dsl := &DSL{
+			ConcurrencyKey: "{{ inputs.account_id }}",
+			Inputs:         []InputSpec{{Name: "account_id", Default: "acct_default"}},
+		}
+		_, release, err := r.Acquire(ctx, AcquireOpts{
+			RunID: "run_a", WorkspaceID: "ws_test", ConcurrencyKey: "acct_42",
+		})
+		if err != nil {
+			t.Fatalf("acquire: %v", err)
+		}
+		defer release()
+		// Supplied input renders to the held key → limit.
+		if err := r.PrecheckConcurrency(ctx, dsl, "ws_test", map[string]any{"account_id": "acct_42"}); !errors.Is(err, ErrConcurrencyLimitReached) {
+			t.Errorf("same rendered key: want ErrConcurrencyLimitReached, got %v", err)
+		}
+		// Different tenant renders to a different key → free.
+		if err := r.PrecheckConcurrency(ctx, dsl, "ws_test", map[string]any{"account_id": "acct_7"}); err != nil {
+			t.Errorf("different rendered key must pass, got %v", err)
+		}
+		// Omitted input falls back to the DSL default (defaults-merged
+		// exactly like Executor.Run's gate).
+		if err := r.PrecheckConcurrency(ctx, dsl, "ws_test", nil); err != nil {
+			t.Errorf("defaulted key must pass, got %v", err)
+		}
+	})
+
+	t.Run("empty rendered key surfaces the config error", func(t *testing.T) {
+		r := NewRunRegistry()
+		dsl := &DSL{ConcurrencyKey: "{{ inputs.missing }}"}
+		if err := r.PrecheckConcurrency(ctx, dsl, "ws_test", nil); !errors.Is(err, ErrConcurrencyKeyEmpty) {
+			t.Errorf("want ErrConcurrencyKeyEmpty, got %v", err)
+		}
+	})
+}
+
 func TestRunRegistry_Cancel_TripsContext(t *testing.T) {
 	r := NewRunRegistry()
 	ctx, release, err := r.Acquire(context.Background(), AcquireOpts{

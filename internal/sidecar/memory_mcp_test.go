@@ -198,3 +198,125 @@ func newMemoryMCPTestServer(t *testing.T) *Server {
 // helpers in this file consult it directly — avoids a future test addition
 // having to re-add the import.
 var _ = memory.ToolSchemas
+
+// newMultiAgentMemoryMCPTestServer mirrors the real container layout
+// (/crew/agents/<slug>/.memory) with TWO crew members sharing one
+// sidecar — the shape in which the memory-identity bug lived: the
+// sidecar was configured with the FIRST agent's BasePath and every
+// other member's memory calls landed in that first agent's tier.
+func newMultiAgentMemoryMCPTestServer(t *testing.T) (*Server, string) {
+	t.Helper()
+	root := t.TempDir()
+	agentsRoot := filepath.Join(root, "agents")
+	alphaBase := filepath.Join(agentsRoot, "alpha", ".memory")
+	betaBase := filepath.Join(agentsRoot, "beta", ".memory")
+	crewBase := filepath.Join(root, "shared", ".memory")
+	for _, p := range []string{alphaBase, betaBase, crewBase} {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return &Server{
+		agentMemoryBase: alphaBase,
+		memoryAgentSlug: "alpha",
+		crewMemoryBase:  crewBase,
+		crewMembers: []CrewMember{
+			{ID: "agent-1", Slug: "alpha"},
+			{ID: "agent-2", Slug: "beta"},
+		},
+		ipc: &IPCConfig{
+			AgentID:     "agent-1",
+			AgentSlug:   "alpha",
+			CrewID:      "crew-1",
+			WorkspaceID: "ws-1",
+		},
+	}, agentsRoot
+}
+
+// TestMemoryMCP_PerAgentPath_WritesToCallersDir is the regression test
+// for the cross-agent memory misroute: beta's memory.write via
+// /mcp/memory/beta must land in beta's .memory dir, NOT in alpha's
+// (the agent the sidecar was started for).
+func TestMemoryMCP_PerAgentPath_WritesToCallersDir(t *testing.T) {
+	s, agentsRoot := newMultiAgentMemoryMCPTestServer(t)
+
+	body := `{"jsonrpc":"2.0","id":7,"method":"tools/call",
+		"params":{"name":"memory.write",
+		         "arguments":{"tier":"AGENT","content":"beta remembers\n","mode":"replace"}}}`
+	req := httptest.NewRequest("POST", "/mcp/memory/beta", strings.NewReader(body))
+	req.Host = "127.0.0.1:9119"
+	w := httptest.NewRecorder()
+
+	s.handleMemoryMCPForAgent(w, req, "beta")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	got, err := os.ReadFile(filepath.Join(agentsRoot, "beta", ".memory", "AGENT.md"))
+	if err != nil {
+		t.Fatalf("beta AGENT.md not written: %v (body=%s)", err, w.Body.String())
+	}
+	if string(got) != "beta remembers\n" {
+		t.Fatalf("beta AGENT.md = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(agentsRoot, "alpha", ".memory", "AGENT.md")); !os.IsNotExist(err) {
+		t.Fatalf("alpha's memory must stay untouched by beta's write (stat err=%v)", err)
+	}
+}
+
+// TestMemoryMCP_PerAgentPath_UnknownSlugRejected: a slug that is not a
+// crew member must be refused — never resolved to an arbitrary path.
+func TestMemoryMCP_PerAgentPath_UnknownSlugRejected(t *testing.T) {
+	s, agentsRoot := newMultiAgentMemoryMCPTestServer(t)
+
+	for _, slug := range []string{"zeta", "../evil", "beta/../alpha", "beta%2F.."} {
+		body := `{"jsonrpc":"2.0","id":8,"method":"tools/call",
+			"params":{"name":"memory.write","arguments":{"tier":"AGENT","content":"x","mode":"replace"}}}`
+		req := httptest.NewRequest("POST", "/mcp/memory/"+strings.ReplaceAll(slug, "%", "%25"), strings.NewReader(body))
+		req.Host = "127.0.0.1:9119"
+		w := httptest.NewRecorder()
+
+		s.handleMemoryMCPForAgent(w, req, slug)
+
+		var resp struct {
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("slug %q: decode: %v (body=%s)", slug, err, w.Body.String())
+		}
+		if resp.Error == nil {
+			t.Errorf("slug %q: expected JSON-RPC error, got %s", slug, w.Body.String())
+		}
+	}
+	if _, err := os.Stat(filepath.Join(agentsRoot, "evil")); !os.IsNotExist(err) {
+		t.Fatal("traversal slug must not create paths outside agents root")
+	}
+}
+
+// TestMemoryMCP_PerAgentPath_OwnSlugMatchesLegacy: the configured
+// agent's own slug resolves to exactly the same context as the legacy
+// bare /mcp/memory path.
+func TestMemoryMCP_PerAgentPath_OwnSlugMatchesLegacy(t *testing.T) {
+	s, agentsRoot := newMultiAgentMemoryMCPTestServer(t)
+
+	body := `{"jsonrpc":"2.0","id":9,"method":"tools/call",
+		"params":{"name":"memory.write",
+		         "arguments":{"tier":"AGENT","content":"alpha remembers\n","mode":"replace"}}}`
+	req := httptest.NewRequest("POST", "/mcp/memory/alpha", strings.NewReader(body))
+	req.Host = "127.0.0.1:9119"
+	w := httptest.NewRecorder()
+
+	s.handleMemoryMCPForAgent(w, req, "alpha")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
+	}
+	got, err := os.ReadFile(filepath.Join(agentsRoot, "alpha", ".memory", "AGENT.md"))
+	if err != nil {
+		t.Fatalf("alpha AGENT.md not written: %v", err)
+	}
+	if string(got) != "alpha remembers\n" {
+		t.Fatalf("alpha AGENT.md = %q", got)
+	}
+}

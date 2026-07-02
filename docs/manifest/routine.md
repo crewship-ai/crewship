@@ -69,8 +69,11 @@ spec:
   estimated_cost_usd: 0.05              # optional — author estimate
   estimated_duration_seconds: 180       # optional — author estimate
   max_cost_usd: 0.50                    # optional — runtime cost cap (aborts run)
-  egress_targets:                       # optional — enforced for `http` steps
-    - <hostname>
+  egress_targets:                       # optional — enforced at run time for
+    - <hostname>                        #   `http` steps + hooks (redirects too);
+                                        #   omitted = unrestricted at this layer.
+                                        #   The authoring crew's network policy
+                                        #   (restricted mode) applies on top.
 
   # ---- manifest-only nested triggers ----
   schedules:                            # optional — 0..N cron triggers
@@ -655,7 +658,7 @@ spec:
     before_all:                 # setup — its FAILURE aborts the run
       id: claim
       type: http
-      http: { method: POST, url: "https://ops.example.com/claim", credential_ref: { type: ops } }
+      http: { method: POST, url: "https://ops.example.com/claim", credential_ref: { type: GENERIC_SECRET } }
     after_all:                  # on COMPLETED — best-effort
       id: release
       type: http
@@ -675,6 +678,11 @@ and the steps never execute. `after_all` runs after a COMPLETED run,
 `on_failure` after a FAILED run — both best-effort (logged, never change
 the run's outcome). Hooks fire only on the **top-level** run (not nested
 `call_pipeline` expansions) and are skipped on resume re-entry + dry-run.
+
+`http` hooks live inside the same security perimeter as `http` steps: the
+routine's `egress_targets` and the authoring crew's network policy gate the
+host (redirects included), and `credential_ref.type` resolves against the
+workspace credential vault by type at run time.
 
 ## Declarative cron
 

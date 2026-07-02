@@ -57,6 +57,28 @@ func (b *Bridge) markRunEnd(chatID string) {
 	b.activeRuns[chatID]--
 }
 
+// tryMarkRunStart atomically claims the run slot for chatID: it succeeds
+// (and marks a run started, exactly like markRunStart) only if no run is
+// currently active for this chat; otherwise it leaves the counter
+// untouched and reports failure. This is the per-chat EXCLUSIVITY gate —
+// unlike markRunStart's unconditional increment (which intentionally
+// tolerates overlapping runs for Steer's bookkeeping), tryMarkRunStart is
+// how HandleChatMessage enforces "at most one live RunAgent exec per chat,
+// regardless of which user's message triggered it." Two different users
+// messaging the same group chat concurrently must never race two execs
+// into the same agent container/tmux session (interleaved stdout,
+// corrupted tmux state) — the loser bounces off this check instead of
+// ever touching the container.
+func (b *Bridge) tryMarkRunStart(chatID string) bool {
+	b.activeRunsMu.Lock()
+	defer b.activeRunsMu.Unlock()
+	if b.activeRuns[chatID] > 0 {
+		return false
+	}
+	b.activeRuns[chatID]++
+	return true
+}
+
 // runInFlight reports whether at least one run is currently live for chatID.
 func (b *Bridge) runInFlight(chatID string) bool {
 	b.activeRunsMu.Lock()

@@ -116,6 +116,41 @@ type RunRecord struct {
 	ReplayOf  string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// WarningsJSON is a JSON array of RunWarning entries — non-fatal
+	// issues attached to the run (currently: failed after_all /
+	// on_failure lifecycle hooks) that don't flip the terminal status
+	// but must not be silently dropped. Defaults to '[]'. Use
+	// Warnings() to decode.
+	WarningsJSON string
+}
+
+// RunWarning is one non-fatal, run-scoped warning surfaced on the run
+// record. Distinct from ErrorMessage: a run can carry warnings while
+// still finishing COMPLETED — the main body succeeded, only a
+// best-effort side channel (e.g. a teardown hook releasing a
+// credential or closing a cost meter) failed. Structured (not just a
+// log line) so the API/CLI can render it without scraping slog output.
+type RunWarning struct {
+	// Stage identifies where the warning originated, e.g. "hook after_all"
+	// or "hook on_failure" — matches the `stage` label persistWarn already
+	// logs, so a warning here can be cross-referenced with server logs.
+	Stage   string    `json:"stage"`
+	Message string    `json:"message"`
+	At      time.Time `json:"at"`
+}
+
+// Warnings decodes WarningsJSON. Empty/invalid JSON decodes to nil
+// (no warnings) rather than erroring — a run detail read should never
+// fail just because the warnings side-channel is malformed.
+func (r *RunRecord) Warnings() []RunWarning {
+	if r == nil || r.WarningsJSON == "" || r.WarningsJSON == "[]" {
+		return nil
+	}
+	var out []RunWarning
+	if err := json.Unmarshal([]byte(r.WarningsJSON), &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 // RunStore is the thin DB access layer. Keep methods small and
@@ -165,6 +200,9 @@ func (s *RunStore) Insert(ctx context.Context, r *RunRecord) error {
 	if r.MetadataJSON == "" {
 		r.MetadataJSON = "{}"
 	}
+	if r.WarningsJSON == "" {
+		r.WarningsJSON = "[]"
+	}
 	if r.StartedAt.IsZero() {
 		r.StartedAt = time.Now().UTC()
 	}
@@ -184,15 +222,15 @@ INSERT INTO pipeline_runs (
     error_message, failed_at_step, error_fingerprint,
     invoking_crew_id, invoking_agent_id, invoking_user_id,
     triggered_via, triggered_by_id, idempotency_key,
-    inputs_json, concurrency_key, metadata_json, is_replay, replay_of, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    inputs_json, concurrency_key, metadata_json, is_replay, replay_of, warnings_json, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.WorkspaceID, r.PipelineID, r.PipelineSlug, nullableIntPtr(r.PipelineVersion), nullableStr(r.DefinitionHash),
 		string(r.Status), string(r.Mode), formatRFC3339(r.StartedAt), nullableTime(r.EndedAt), nullableStr(r.CurrentStepID),
 		r.StepOutputsJSON, nullableStr(r.Output), r.CostUSD, r.DurationMs,
 		nullableStr(r.ErrorMessage), nullableStr(r.FailedAtStep), nullableStr(r.ErrorFingerprint),
 		nullableStr(r.InvokingCrewID), nullableStr(r.InvokingAgentID), nullableStr(r.InvokingUserID),
 		string(r.TriggeredVia), nullableStr(r.TriggeredByID), nullableStr(r.IdempotencyKey),
-		r.InputsJSON, nullableStr(r.ConcurrencyKey), r.MetadataJSON, boolToInt(r.IsReplay), nullableStr(r.ReplayOf), formatRFC3339(r.CreatedAt), formatRFC3339(r.UpdatedAt))
+		r.InputsJSON, nullableStr(r.ConcurrencyKey), r.MetadataJSON, boolToInt(r.IsReplay), nullableStr(r.ReplayOf), r.WarningsJSON, formatRFC3339(r.CreatedAt), formatRFC3339(r.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("pipeline_runs: insert: %w", err)
 	}
@@ -299,6 +337,52 @@ WHERE id = ?`,
 		fp,
 		in.CostUSD, in.DurationMs, formatRFC3339(in.EndedAt), in.RunID)
 	return err
+}
+
+// AppendWarning adds one non-fatal warning to the run's warnings_json
+// array. Read-modify-write under a transaction: warnings are rare (at
+// most a couple per run — currently only failed after_all/on_failure
+// hooks), so the extra round trip is cheap and far simpler than a SQL
+// JSON-array append expression. Never touches status/error_message/
+// ended_at — a warning must not look like (or race) the terminal
+// write those columns carry.
+func (s *RunStore) AppendWarning(ctx context.Context, runID, stage, message string) error {
+	if runID == "" {
+		return errors.New("pipeline_runs: run id required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("pipeline_runs: append warning: begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+
+	var raw string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(warnings_json,'[]') FROM pipeline_runs WHERE id = ?`, runID,
+	).Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrRunNotFoundInStore
+		}
+		return fmt.Errorf("pipeline_runs: append warning: read: %w", err)
+	}
+	var warnings []RunWarning
+	if raw != "" {
+		// A malformed existing array shouldn't block recording the new
+		// warning — start fresh rather than fail the write.
+		_ = json.Unmarshal([]byte(raw), &warnings)
+	}
+	warnings = append(warnings, RunWarning{Stage: stage, Message: message, At: time.Now().UTC()})
+	out, err := json.Marshal(warnings)
+	if err != nil {
+		return fmt.Errorf("pipeline_runs: append warning: marshal: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE pipeline_runs SET warnings_json = ?, updated_at = datetime('now','subsec') WHERE id = ?`,
+		string(out), runID,
+	); err != nil {
+		return fmt.Errorf("pipeline_runs: append warning: write: %w", err)
+	}
+	return tx.Commit()
 }
 
 // Get fetches a single run by id. Returns ErrRunNotFound on miss.
@@ -463,6 +547,7 @@ SELECT id, workspace_id, pipeline_id, pipeline_slug, pipeline_version,
        triggered_via, COALESCE(triggered_by_id,''), COALESCE(idempotency_key,''),
        inputs_json, COALESCE(concurrency_key,''),
        COALESCE(metadata_json,'{}'), COALESCE(is_replay,0), COALESCE(replay_of,''),
+       COALESCE(warnings_json,'[]'),
        created_at, updated_at
 FROM pipeline_runs`
 
@@ -492,6 +577,7 @@ func scanRun(row scanRunRow) (*RunRecord, error) {
 		&triggeredVia, &r.TriggeredByID, &r.IdempotencyKey,
 		&r.InputsJSON, &r.ConcurrencyKey,
 		&r.MetadataJSON, &isReplay, &r.ReplayOf,
+		&r.WarningsJSON,
 		&createdAt, &updatedAt,
 	); err != nil {
 		return nil, err
