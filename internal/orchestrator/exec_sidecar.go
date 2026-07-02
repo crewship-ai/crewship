@@ -658,7 +658,7 @@ func memoryPrepPaths(memoryCfg *SidecarMemoryConfig, crewMembers []SidecarCrewMe
 	return paths
 }
 
-// prepMemoryDirs runs the one-shot root exec that pre-creates memory
+// prepMemoryDirs runs the one-shot exec that pre-creates memory
 // directories with shared-write perms. The agent home
 // `/crew/agents/{slug}` and the crew share `/crew/shared` are
 // bind-mounted at chown 1001:1001 mode 0755 by the docker init
@@ -666,24 +666,34 @@ func memoryPrepPaths(memoryCfg *SidecarMemoryConfig, crewMembers []SidecarCrewMe
 // because group/other lack write, and any pre-existing `.memory`
 // subdir inherits the same restrictive perms.
 //
+// The exec runs as user=1001 group=1002 — NOT root. Agent containers
+// drop ALL capabilities, so a root exec cannot chown (no CAP_CHOWN) —
+// the original #530 prep silently failed on every cap-dropped
+// container ("Operation not permitted" swallowed by the per-path
+// `|| true`; verified live on dev2 2026-07-02). uid 1001 needs no
+// capability for any of this: it owns the tree, mkdir inherits
+// 1001:1002 from the exec identity, POSIX lets an owner chgrp to any
+// group in the process's group set, and chmod is an owner right.
+//
 // The script, per path:
-//   - pre-creates the `.memory` directory
-//   - chowns it to user=1001 (agent) group=1002 (sidecar)
+//   - pre-creates the `.memory` directory (owned 1001:1002 by the
+//     exec identity)
+//   - chgrps existing content to group 1002 (sidecar)
 //   - applies setgid + g+rwx so new files/dirs inherit group 1002 with
 //     the container entrypoint's umask 0002 making them g+rw
 //
 // Both UIDs can then read+write the FTS5 SQLite index and plaintext
-// markdown tier files (#530). The `-R` also re-normalizes ownership of
-// files either party created since the last prep, keeping the
-// dual-writer (agent file edits + sidecar memory.write) arrangement
-// healthy across runs. Best-effort: failures are logged but never
-// block the run — without these perms the path-validator fallback path
-// still works for boot-context recall.
+// markdown tier files (#530). The `-R` also re-normalizes group of
+// files the agent created since the last prep, keeping the dual-writer
+// (agent file edits + sidecar memory.write) arrangement healthy across
+// runs. Best-effort: failures are logged but never block the run —
+// without these perms the path-validator fallback path still works for
+// boot-context recall.
 //
 // Called from startSidecar (all crew members) and from the sidecar
 // REUSE branch in orchestrator_run.go (the incoming agent's paths) —
 // before CRE-137 the prep ran only for whichever agent started the
-// sidecar, so every other member's tier kept root-locked perms.
+// sidecar, so every other member's tier kept locked-down perms.
 func prepMemoryDirs(
 	ctx context.Context,
 	container provider.ContainerProvider,
@@ -697,17 +707,21 @@ func prepMemoryDirs(
 	// Per-path subshell `|| true` so a failure on one path doesn't
 	// block prep on the next. `mkdir -p -- "..."` quotes the path so
 	// unusual characters can't break the script — paths today come
-	// from server config but defensive quoting is cheap.
+	// from server config but defensive quoting is cheap. chgrp -R may
+	// EPERM on individual sidecar-owned files (uid 1002); those are
+	// already group 1002, so that failure mode is benign — hence `;`
+	// between the steps rather than `&&` (a partial chgrp must not
+	// skip the chmod).
 	var prepScript strings.Builder
 	for _, p := range paths {
 		fmt.Fprintf(&prepScript,
-			`(mkdir -p -- "%s" && chown -R 1001:1002 -- "%s" && chmod -R u+rwX,g+rwXs -- "%s") || true`+"\n",
+			`(mkdir -p -- "%s"; chgrp -R 1002 -- "%s"; chmod -R u+rwX,g+rwXs -- "%s") || true`+"\n",
 			p, p, p)
 	}
 	prepCfg := provider.ExecConfig{
 		ContainerID: containerID,
 		Cmd:         []string{"sh", "-c", prepScript.String()},
-		User:        "0:0",
+		User:        "1001:1002",
 	}
 	prepResult, prepErr := container.Exec(ctx, prepCfg)
 	if prepErr != nil {
