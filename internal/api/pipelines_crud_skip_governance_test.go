@@ -67,6 +67,57 @@ func TestCovPCSave_SkipGovernanceGate_ManagerForbidden_403(t *testing.T) {
 	}
 }
 
+// pendingProposalCount counts the routine's UNRESOLVED maker-checker
+// escalations (ResolveBySource flips state to 'resolved' rather than deleting).
+func pendingProposalCount(t *testing.T, h *PipelineHandler, wsID, slug string) int {
+	t.Helper()
+	var n int
+	if err := h.db.QueryRow(
+		`SELECT COUNT(*) FROM inbox_items WHERE workspace_id = ? AND source_id = ? AND kind = 'escalation' AND state != 'resolved'`,
+		wsID, routineProposalInboxSource(wsID, slug)).Scan(&n); err != nil {
+		t.Fatalf("count pending inbox: %v", err)
+	}
+	return n
+}
+
+// A risky routine saved as 'proposed' raises an approval escalation. When an
+// OWNER later force-activates it via skip_governance_gate, that escalation must
+// be resolved — otherwise a stale "awaiting approval" card lingers for a
+// routine that is already live (and a later reject could re-disable it).
+func TestCovPCSave_SkipGovernanceGate_ResolvesStaleProposalInbox(t *testing.T) {
+	h, userID, wsID, crewID := covPCHandler(t)
+
+	// 1) Risky save without the flag → proposed + a pending escalation.
+	req1 := httptest.NewRequest("POST", "/x", strings.NewReader(skipGovSaveBody("stale-inbox", crewID, true, false)))
+	req1 = withWorkspaceUser(req1, userID, wsID, "OWNER")
+	rr1 := httptest.NewRecorder()
+	h.Save(rr1, req1)
+	if rr1.Code != http.StatusCreated {
+		t.Fatalf("first save status = %d, want 201; body=%s", rr1.Code, rr1.Body.String())
+	}
+	if got := routineStatus(t, h, wsID, "stale-inbox"); got != "proposed" {
+		t.Fatalf("after first save status = %q, want proposed", got)
+	}
+	if n := pendingProposalCount(t, h, wsID, "stale-inbox"); n != 1 {
+		t.Fatalf("pending escalations after propose = %d, want 1", n)
+	}
+
+	// 2) Re-save with skip_governance_gate → active + escalation resolved.
+	req2 := httptest.NewRequest("POST", "/x", strings.NewReader(skipGovSaveBody("stale-inbox", crewID, true, true)))
+	req2 = withWorkspaceUser(req2, userID, wsID, "OWNER")
+	rr2 := httptest.NewRecorder()
+	h.Save(rr2, req2)
+	if rr2.Code != http.StatusCreated {
+		t.Fatalf("re-save status = %d, want 201; body=%s", rr2.Code, rr2.Body.String())
+	}
+	if got := routineStatus(t, h, wsID, "stale-inbox"); got != "active" {
+		t.Errorf("after skip re-save status = %q, want active", got)
+	}
+	if n := pendingProposalCount(t, h, wsID, "stale-inbox"); n != 0 {
+		t.Errorf("pending escalations after skip re-save = %d, want 0 (resolved)", n)
+	}
+}
+
 // Regression guard: without the flag, an OWNER's risky routine still lands
 // 'proposed' — the escape hatch must be opt-in, not the default.
 func TestCovPCSave_RiskyWithoutSkipGovernance_StillProposed(t *testing.T) {
