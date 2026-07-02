@@ -755,7 +755,12 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		var tmuxErr error
 		execCmd, tmuxErr = o.setupTmuxExec(ctx, req.ContainerID, cmd, req.AgentSlug, env)
 		if tmuxErr != nil {
-			o.logger.Warn("tmux setup failed, falling back to direct exec", "error", tmuxErr)
+			if _, seen := o.tmuxWarned.LoadOrStore(req.ContainerID, true); seen {
+				o.logger.Debug("tmux setup failed, falling back to direct exec", "error", tmuxErr)
+			} else {
+				o.logger.Warn("tmux setup failed, falling back to direct exec (further occurrences for this container log at debug)",
+					"error", tmuxErr, "container_id", req.ContainerID)
+			}
 			execCmd = append([]string{"stdbuf", "-oL"}, cmd...)
 		}
 	}
