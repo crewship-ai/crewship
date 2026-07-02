@@ -70,7 +70,11 @@ export function RunTimelineRail({
     status: "all",
   })
   const [sort, setSort] = useUserPreference<SortAxis>("activity.rail.sort", "newest")
-  const [group, setGroup] = useUserPreference<GroupAxis>("activity.rail.group", "source")
+  // Default to grouping by routine: the routine is the superordinate entity a
+  // run belongs to, so a run stream reads as "these routines, and their runs"
+  // rather than an undifferentiated ID list. Users can switch axis via the
+  // View menu; the choice persists.
+  const [group, setGroup] = useUserPreference<GroupAxis>("activity.rail.group", "routine")
   const [search, setSearch] = useState("")
 
   // Build filter dropdown options from the actual run set so we
@@ -82,11 +86,19 @@ export function RunTimelineRail({
       if (r.triggered_via) sourceSet.add(r.triggered_via as TriggerSource)
       if (r.pipeline_slug) slugSet.add(r.pipeline_slug)
     }
-    const routineList: { slug: string; name: string }[] = []
+    const routineList: { slug: string; name: string; crew?: string }[] = []
     const slugToName = new Map<string, string>()
     for (const r of runs) slugToName.set(r.pipeline_slug, r.pipeline_name || r.pipeline_slug)
+    // Crew per routine — powers the hierarchical (crew-grouped) routine filter
+    // so hundreds of routines stay browseable instead of one flat list.
+    const crewNameById = new Map(crews.map((c) => [c.id, c.name]))
+    const crewBySlug = new Map<string, string>()
+    for (const p of pipelines) {
+      const cName = p.author_crew_id ? crewNameById.get(p.author_crew_id) : undefined
+      if (cName) crewBySlug.set(p.slug, cName)
+    }
     for (const slug of slugSet) {
-      routineList.push({ slug, name: slugToName.get(slug) ?? slug })
+      routineList.push({ slug, name: slugToName.get(slug) ?? slug, crew: crewBySlug.get(slug) })
     }
     routineList.sort((a, b) => a.name.localeCompare(b.name))
     return {
@@ -94,7 +106,7 @@ export function RunTimelineRail({
       routines: routineList,
       sources: Array.from(sourceSet),
     }
-  }, [runs, crews])
+  }, [runs, crews, pipelines])
 
   // Apply search via the same filter pipeline so the toolbar's
   // filter chip count and the body stay consistent.

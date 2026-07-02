@@ -4,6 +4,7 @@ import { useState } from "react"
 import {
   ArrowDownUp,
   Calendar,
+  Check,
   LayoutGrid,
   PauseCircle,
   Users,
@@ -16,6 +17,14 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,7 +74,7 @@ export interface RailToolbarProps {
   // don't surface dimensions that have no data).
   options: {
     crews: { id: string; name: string }[]
-    routines: { slug: string; name: string }[]
+    routines: { slug: string; name: string; crew?: string }[]
     sources: TriggerSource[]
   }
   // Apply a saved view (filter + sort + group). Saved views now live inside
@@ -375,10 +384,16 @@ function CrewSection({ filter, onChange, crews }: {
   )
 }
 
+// RoutineSection — a searchable, crew-grouped combobox. A flat checkbox list
+// doesn't survive a workspace with hundreds of routines; here you type to
+// filter and browse by owning crew. The global rail search already matches
+// routine name/slug, so this is the power-user multi-select on top of that.
+const ROUTINE_OTHER_CREW = "Other"
+
 function RoutineSection({ filter, onChange, routines }: {
   filter: RunFilter
   onChange: (next: RunFilter) => void
-  routines: { slug: string; name: string }[]
+  routines: { slug: string; name: string; crew?: string }[]
 }) {
   const sel = new Set(filter.routines ?? [])
   if (routines.length === 0) return null
@@ -387,20 +402,50 @@ function RoutineSection({ filter, onChange, routines }: {
     next.has(slug) ? next.delete(slug) : next.add(slug)
     onChange({ ...filter, routines: next.size === 0 ? undefined : Array.from(next) })
   }
+
+  // Bucket routines under their owning crew, then order crews alphabetically
+  // with the catch-all "Other" (no resolvable crew) last.
+  const byCrew = new Map<string, typeof routines>()
+  for (const r of routines) {
+    const key = r.crew ?? ROUTINE_OTHER_CREW
+    const arr = byCrew.get(key) ?? []
+    arr.push(r)
+    byCrew.set(key, arr)
+  }
+  const crewNames = Array.from(byCrew.keys()).sort((a, b) => {
+    if (a === ROUTINE_OTHER_CREW) return 1
+    if (b === ROUTINE_OTHER_CREW) return -1
+    return a.localeCompare(b)
+  })
+
   return (
     <div className="space-y-1 pb-2">
       <SectionHeader Icon={Workflow} label="Routine" />
-      <div className="max-h-[120px] overflow-y-auto px-3 space-y-0.5">
-        {routines.map((r) => (
-          <label
-            key={r.slug}
-            className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-[11px] hover:bg-white/[0.04]"
-          >
-            <input type="checkbox" checked={sel.has(r.slug)} onChange={() => toggle(r.slug)} className="h-3 w-3" />
-            <span className="truncate">{r.name}</span>
-          </label>
-        ))}
-      </div>
+      <Command className="bg-transparent">
+        <CommandInput placeholder="Search routines…" className="h-7 text-[11px]" />
+        <CommandList className="max-h-[168px]">
+          <CommandEmpty className="py-3 text-center text-[10px] text-muted-foreground/50">
+            No routines match.
+          </CommandEmpty>
+          {crewNames.map((crew) => (
+            <CommandGroup key={crew} heading={crew} className="text-[10px]">
+              {byCrew.get(crew)!.map((r) => (
+                <CommandItem
+                  key={r.slug}
+                  // Include slug so search matches either the display name or
+                  // the slug the run rows show.
+                  value={`${r.name} ${r.slug}`}
+                  onSelect={() => toggle(r.slug)}
+                  className="text-[11px]"
+                >
+                  <Check className={cn("mr-2 h-3 w-3 shrink-0", sel.has(r.slug) ? "opacity-100" : "opacity-0")} />
+                  <span className="truncate">{r.name}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          ))}
+        </CommandList>
+      </Command>
     </div>
   )
 }
