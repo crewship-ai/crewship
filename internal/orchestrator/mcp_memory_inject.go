@@ -1,6 +1,11 @@
 package orchestrator
 
-import "encoding/json"
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/crewship-ai/crewship/internal/provider"
+)
 
 // MemoryMCPServerName is the canonical name every adapter advertises for
 // the in-container memory MCP server. MUST match
@@ -46,13 +51,34 @@ func memoryMCPSpec(agentSlug string) mcpSpec {
 	}
 }
 
+// memorySinkReady reports whether the in-container memory sidecar is
+// reachable on :9119 right now — the readiness probe (Kubernetes
+// readiness-probe model) the injection gates on. It reuses checkSidecar
+// so there is one liveness definition. Sidecars are container-scoped and
+// persistent, so a warm crew container (any prior Full run) returns true
+// even for a SkipSidecar worker — which is correct, the sink IS up. A
+// cold first-touch returns false, so the memory tool is withheld.
+func memorySinkReady(ctx context.Context, ctr provider.ContainerProvider, containerID string) bool {
+	return checkSidecar(ctx, ctr, containerID) != nil
+}
+
 // injectMemoryMCP returns the spec list with crewship-memory appended IF
 // it isn't already present. Idempotent: re-running on an output it
 // already injected is a no-op. User-defined entries named
 // "crewship-memory" win (we do not overwrite) so an operator who wants to
 // point the name at a hub/marketplace memory server can override the
 // default by declaring the name first in the crew MCP config.
-func injectMemoryMCP(in []mcpSpec, agentSlug string) []mcpSpec {
+// sinkReady health-gates the injection (2b — health-gated capability
+// advertisement, per Circuit Breaker / "never route to a down backend").
+// When the memory sidecar isn't reachable we do NOT advertise the tool:
+// a model that can't see memory.write reports "I couldn't persist that"
+// instead of calling a dead :9119 and getting a false success. This is
+// the structural half of closing the silent-loss class — the durable-
+// write handler (2a) is the other half for when the sink IS up.
+func injectMemoryMCP(in []mcpSpec, agentSlug string, sinkReady bool) []mcpSpec {
+	if !sinkReady {
+		return in
+	}
 	for _, s := range in {
 		if s.Name == MemoryMCPServerName {
 			return in
@@ -79,7 +105,11 @@ func injectMemoryMCP(in []mcpSpec, agentSlug string) []mcpSpec {
 //     agent still runs).
 //   - The injected entry uses type="http" so Claude streams JSON-RPC over
 //     HTTP to the sidecar loopback the model's CLI shares.
-func injectMemoryMCPIntoClaudeJSON(in, agentSlug string) (string, error) {
+func injectMemoryMCPIntoClaudeJSON(in, agentSlug string, sinkReady bool) (string, error) {
+	// 2b: don't advertise a tool whose backend is down (see injectMemoryMCP).
+	if !sinkReady {
+		return in, nil
+	}
 	var doc struct {
 		MCPServers map[string]json.RawMessage `json:"mcpServers"`
 	}

@@ -687,3 +687,49 @@ func TestDispatch_Write_LessonsTier_Rejected(t *testing.T) {
 		t.Errorf("lessons.md should NOT exist after rejected write")
 	}
 }
+
+// TestDispatch_Write_DurableFailClosed is the 2a end-to-end guarantee at
+// the memory.write tool surface: when the durable persist cannot complete,
+// the tool returns IsError (so the model reports failure) AND the prior
+// content is preserved intact — never a false "ok" over a lost/torn write.
+// Failure is injected by making the memory dir read-only so the atomic
+// tempfile can't be created; the .lock is pre-created so we exercise the
+// write step, not the lock step.
+func TestDispatch_Write_DurableFailClosed(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions; skip RO-dir failure injection")
+	}
+	ctx := testAgentCtx(t)
+	agentPath := filepath.Join(ctx.AgentMemoryDir, "AGENT.md")
+	if err := os.WriteFile(agentPath, []byte("ORIGINAL"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-create the lock sentinel so lock acquisition doesn't need dir
+	// write permission — isolates the durable-write step.
+	if err := os.WriteFile(agentPath+".lock", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(ctx.AgentMemoryDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(ctx.AgentMemoryDir, 0o755) })
+
+	d := NewDispatcher(ctx)
+	res, err := d.Dispatch(context.Background(), ToolCall{
+		Name: "memory.write",
+		Args: json.RawMessage(`{"tier":"AGENT","mode":"replace","content":"REPLACEMENT"}`),
+	})
+	if err != nil {
+		t.Fatalf("dispatcher should not return a Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected IsError=true when the durable persist fails; got %+v", res)
+	}
+	got, rerr := os.ReadFile(agentPath)
+	if rerr != nil {
+		t.Fatalf("read back: %v", rerr)
+	}
+	if string(got) != "ORIGINAL" {
+		t.Fatalf("original content must be preserved on failed write; got %q", got)
+	}
+}

@@ -51,7 +51,7 @@ func TestInjectRoutinesMCP_DoesNotOverrideUserEntry(t *testing.T) {
 // TestInjectRoutinesMCP_CoexistsWithMemory verifies both servers land when
 // both injectors run (the real adapter path) — distinct names, both present.
 func TestInjectRoutinesMCP_CoexistsWithMemory(t *testing.T) {
-	specs := injectMemoryMCP(nil, "")
+	specs := injectMemoryMCP(nil, "", true)
 	specs = injectRoutinesMCP(specs)
 	names := map[string]bool{}
 	for _, s := range specs {

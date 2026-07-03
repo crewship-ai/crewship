@@ -33,7 +33,7 @@ func TestMemoryMCPSpec_PointsAtSidecarLoopback(t *testing.T) {
 // injected. This is the "default-on" guarantee: every agent run with
 // MemoryEnabled true gets memory tools regardless of crew-level MCP config.
 func TestInjectMemoryMCP_AddsCrewshipEntry_WhenAbsent(t *testing.T) {
-	out := injectMemoryMCP(nil, "sam")
+	out := injectMemoryMCP(nil, "sam", true)
 	if len(out) != 1 {
 		t.Fatalf("expected 1 spec, got %d", len(out))
 	}
@@ -49,7 +49,7 @@ func TestInjectMemoryMCP_AddsCrewshipEntry_WhenAbsent(t *testing.T) {
 // expectations and we have no way to know what their server does.
 func TestInjectMemoryMCP_DoesNotOverrideUserEntry(t *testing.T) {
 	user := []mcpSpec{{Name: "crewship-memory", URL: "http://user.example/mcp"}}
-	out := injectMemoryMCP(user, "sam")
+	out := injectMemoryMCP(user, "sam", true)
 	if len(out) != 1 {
 		t.Fatalf("expected 1 spec, got %d", len(out))
 	}
@@ -63,7 +63,7 @@ func TestInjectMemoryMCP_DoesNotOverrideUserEntry(t *testing.T) {
 // alongside Linear, GitHub, etc.
 func TestInjectMemoryMCP_KeepsOtherEntries(t *testing.T) {
 	in := []mcpSpec{{Name: "linear", URL: "https://linear.example/mcp"}}
-	out := injectMemoryMCP(in, "sam")
+	out := injectMemoryMCP(in, "sam", true)
 	if len(out) != 2 {
 		t.Fatalf("expected 2 specs, got %d", len(out))
 	}
@@ -84,7 +84,7 @@ func TestInjectMemoryMCP_KeepsOtherEntries(t *testing.T) {
 // "alwaysLoad": true makes Claude Code present those schemas eagerly at session
 // start (no discovery hop). Claude-only .mcp.json field (v2.1.121+).
 func TestInjectMemoryMCPIntoClaudeJSON_SetsAlwaysLoad(t *testing.T) {
-	out, err := injectMemoryMCPIntoClaudeJSON(`{"mcpServers":{}}`, "sam")
+	out, err := injectMemoryMCPIntoClaudeJSON(`{"mcpServers":{}}`, "sam", true)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -101,7 +101,7 @@ func TestInjectMemoryMCPIntoClaudeJSON_SetsAlwaysLoad(t *testing.T) {
 // onto an operator's own entry.
 func TestInjectMemoryMCPIntoClaudeJSON_PreservesUserEntry(t *testing.T) {
 	in := `{"mcpServers":{"crewship-memory":{"type":"http","url":"http://user/mcp"}}}`
-	out, err := injectMemoryMCPIntoClaudeJSON(in, "sam")
+	out, err := injectMemoryMCPIntoClaudeJSON(in, "sam", true)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -125,11 +125,64 @@ func TestMemoryMCPSpec_PerAgentPath(t *testing.T) {
 }
 
 func TestInjectMemoryMCPIntoClaudeJSON_PerAgentURL(t *testing.T) {
-	out, err := injectMemoryMCPIntoClaudeJSON(`{"mcpServers":{}}`, "alex")
+	out, err := injectMemoryMCPIntoClaudeJSON(`{"mcpServers":{}}`, "alex", true)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
 	if !strings.Contains(out, "/mcp/memory/alex") {
 		t.Errorf("injected URL must carry the agent slug; got %s", out)
+	}
+}
+
+// TestInjectMemoryMCP_HealthGated is the 2b guarantee (health-gated
+// capability advertisement — Circuit Breaker / "don't advertise a
+// backend that's down"). When the memory sink is not reachable the
+// tool MUST NOT be advertised to the model, so a SkipSidecar worker in
+// a genuinely cold container degrades explicitly (no memory tool)
+// instead of getting a false ACK from a dead :9119.
+func TestInjectMemoryMCP_HealthGated(t *testing.T) {
+	hasMem := func(specs []mcpSpec) bool {
+		for _, s := range specs {
+			if s.Name == MemoryMCPServerName {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("sink ready -> advertised", func(t *testing.T) {
+		out := injectMemoryMCP(nil, "riley", true)
+		if !hasMem(out) {
+			t.Fatal("memory tool must be advertised when the sink is ready")
+		}
+	})
+
+	t.Run("sink down -> not advertised", func(t *testing.T) {
+		out := injectMemoryMCP(nil, "riley", false)
+		if hasMem(out) {
+			t.Fatal("memory tool must NOT be advertised when the sink is down (silent-loss class)")
+		}
+	})
+}
+
+// TestInjectMemoryMCPIntoClaudeJSON_HealthGated is the Claude .mcp.json
+// twin of the 2b guarantee.
+func TestInjectMemoryMCPIntoClaudeJSON_HealthGated(t *testing.T) {
+	const empty = `{"mcpServers":{}}`
+
+	ready, err := injectMemoryMCPIntoClaudeJSON(empty, "riley", true)
+	if err != nil {
+		t.Fatalf("ready: unexpected error: %v", err)
+	}
+	if !strings.Contains(ready, MemoryMCPServerName) {
+		t.Fatal("memory tool must be present in Claude config when the sink is ready")
+	}
+
+	down, err := injectMemoryMCPIntoClaudeJSON(empty, "riley", false)
+	if err != nil {
+		t.Fatalf("down: unexpected error: %v", err)
+	}
+	if strings.Contains(down, MemoryMCPServerName) {
+		t.Fatal("memory tool must be absent from Claude config when the sink is down")
 	}
 }

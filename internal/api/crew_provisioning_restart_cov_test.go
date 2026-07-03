@@ -87,13 +87,13 @@ func covCPRRequest(wsID, role, crewID string) *http.Request {
 func TestCovCPRFindCrewContainer(t *testing.T) {
 	t.Run("nil docker returns empty", func(t *testing.T) {
 		h := covCPRHandler(t, setupTestDB(t), nil)
-		id, err := h.findCrewContainer(context.Background(), "alpha")
+		id, err := h.findCrewContainer(context.Background(), "crew-cpr", "alpha")
 		if err != nil || id != "" {
 			t.Fatalf("want empty/nil, got id=%q err=%v", id, err)
 		}
 	})
 
-	t.Run("match by name", func(t *testing.T) {
+	t.Run("match by name (default prefix)", func(t *testing.T) {
 		cli, _ := covCPRFakeDocker(t, func(w http.ResponseWriter, r *http.Request) {
 			if !strings.HasSuffix(r.URL.Path, "/containers/json") {
 				t.Errorf("unexpected path %s", r.URL.Path)
@@ -101,16 +101,54 @@ func TestCovCPRFindCrewContainer(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
 				{"Id":"other","Names":["/something-else"]},
-				{"Id":"cid-123","Names":["/crewship-team-alpha"]}
+				{"Id":"cid-123","Names":["/crewship-team-alpha-crew-cpr"]}
 			]`))
 		})
 		h := covCPRHandler(t, setupTestDB(t), cli)
-		id, err := h.findCrewContainer(context.Background(), "alpha")
+		id, err := h.findCrewContainer(context.Background(), "crew-cpr", "alpha")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if id != "cid-123" {
 			t.Fatalf("id = %q, want cid-123", id)
+		}
+	})
+
+	// The real provider names crew containers "<prefix>-team-<slug>-<crewID>"
+	// (instance prefix for multi-instance isolation + crew id suffix from the
+	// C1 cross-tenant fix). The matcher must find that, not a hardcoded
+	// "crewship-team-<slug>". Regression for the dev2 "restarted:0" no-op.
+	t.Run("match instance-prefixed C1 name", func(t *testing.T) {
+		cli, _ := covCPRFakeDocker(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[
+				{"Id":"other","Names":["/crewship-2-team-beta-crew-other"]},
+				{"Id":"cid-c1","Names":["/crewship-2-team-alpha-crew-cpr"]}
+			]`))
+		})
+		h := covCPRHandler(t, setupTestDB(t), cli)
+		id, err := h.findCrewContainer(context.Background(), "crew-cpr", "alpha")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if id != "cid-c1" {
+			t.Fatalf("id = %q, want cid-c1", id)
+		}
+	})
+
+	// A different crew that happens to share the slug (cross-workspace) must
+	// NOT match — the crew id in the suffix is what disambiguates (C1).
+	t.Run("same slug different crew id does not match", func(t *testing.T) {
+		cli, _ := covCPRFakeDocker(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[
+				{"Id":"foreign","Names":["/crewship-team-alpha-crew-elsewhere"]}
+			]`))
+		})
+		h := covCPRHandler(t, setupTestDB(t), cli)
+		id, err := h.findCrewContainer(context.Background(), "crew-cpr", "alpha")
+		if err != nil || id != "" {
+			t.Fatalf("want empty (no cross-crew match), got id=%q err=%v", id, err)
 		}
 	})
 
@@ -120,7 +158,7 @@ func TestCovCPRFindCrewContainer(t *testing.T) {
 			_, _ = w.Write([]byte(`[]`))
 		})
 		h := covCPRHandler(t, setupTestDB(t), cli)
-		id, err := h.findCrewContainer(context.Background(), "alpha")
+		id, err := h.findCrewContainer(context.Background(), "crew-cpr", "alpha")
 		if err != nil || id != "" {
 			t.Fatalf("want empty/nil, got id=%q err=%v", id, err)
 		}
@@ -131,7 +169,7 @@ func TestCovCPRFindCrewContainer(t *testing.T) {
 			http.Error(w, `{"message":"boom"}`, http.StatusInternalServerError)
 		})
 		h := covCPRHandler(t, setupTestDB(t), cli)
-		_, err := h.findCrewContainer(context.Background(), "alpha")
+		_, err := h.findCrewContainer(context.Background(), "crew-cpr", "alpha")
 		if err == nil {
 			t.Fatal("expected error from daemon failure")
 		}
@@ -161,7 +199,7 @@ func TestCovCPRAgentsPendingRestartCount(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			switch {
 			case strings.HasSuffix(r.URL.Path, "/containers/json"):
-				_, _ = w.Write([]byte(`[{"Id":"cid-1","Names":["/crewship-team-alpha"]}]`))
+				_, _ = w.Write([]byte(`[{"Id":"cid-1","Names":["/crewship-team-alpha-crew-cpr"]}]`))
 			case strings.Contains(r.URL.Path, "/containers/cid-1/json"):
 				_, _ = w.Write([]byte(`{"Id":"cid-1","Config":{"Image":"img:current"}}`))
 			default:
@@ -181,7 +219,7 @@ func TestCovCPRAgentsPendingRestartCount(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			switch {
 			case strings.HasSuffix(r.URL.Path, "/containers/json"):
-				_, _ = w.Write([]byte(`[{"Id":"cid-1","Names":["/crewship-team-alpha"]}]`))
+				_, _ = w.Write([]byte(`[{"Id":"cid-1","Names":["/crewship-team-alpha-crew-cpr"]}]`))
 			case strings.Contains(r.URL.Path, "/containers/cid-1/json"):
 				_, _ = w.Write([]byte(`{"Id":"cid-1","Config":{"Image":"img:old"}}`))
 			}
@@ -198,7 +236,7 @@ func TestCovCPRAgentsPendingRestartCount(t *testing.T) {
 		cli, _ := covCPRFakeDocker(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			if strings.HasSuffix(r.URL.Path, "/containers/json") {
-				_, _ = w.Write([]byte(`[{"Id":"cid-1","Names":["/crewship-team-alpha"]}]`))
+				_, _ = w.Write([]byte(`[{"Id":"cid-1","Names":["/crewship-team-alpha-crew-cpr"]}]`))
 				return
 			}
 			http.Error(w, `{"message":"inspect failed"}`, http.StatusInternalServerError)
@@ -297,7 +335,7 @@ func TestCovCPRRestartCrewAgents(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			switch {
 			case strings.HasSuffix(r.URL.Path, "/containers/json"):
-				_, _ = w.Write([]byte(`[{"Id":"cid-9","Names":["/crewship-team-alpha"]}]`))
+				_, _ = w.Write([]byte(`[{"Id":"cid-9","Names":["/crewship-team-alpha-crew-cpr"]}]`))
 			case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/containers/cid-9"):
 				if r.URL.Query().Get("force") != "1" {
 					t.Errorf("expected force=1 removal, got query %q", r.URL.RawQuery)
@@ -346,7 +384,7 @@ func TestCovCPRRestartCrewAgents(t *testing.T) {
 		cli, _ := covCPRFakeDocker(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			if strings.HasSuffix(r.URL.Path, "/containers/json") {
-				_, _ = w.Write([]byte(`[{"Id":"cid-9","Names":["/crewship-team-alpha"]}]`))
+				_, _ = w.Write([]byte(`[{"Id":"cid-9","Names":["/crewship-team-alpha-crew-cpr"]}]`))
 				return
 			}
 			http.Error(w, `{"message":"cannot remove"}`, http.StatusConflict)

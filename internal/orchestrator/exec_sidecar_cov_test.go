@@ -399,3 +399,17 @@ func TestStartSidecar_HealthCheckFailure(t *testing.T) {
 		t.Errorf("error must carry the captured output: %v", err)
 	}
 }
+
+// covHealthySidecar is a covContainer route that answers the sidecar
+// health probe (checkSidecar) with an OK status, so the 2b health gate
+// treats the memory sink as reachable. Tests that want to exercise
+// memory-tool injection wire this as the container route.
+func covHealthySidecar(cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	if strings.Contains(covScript(cfg), "9119/health") {
+		return &provider.ExecResult{
+			ExecID: "cov-health",
+			Reader: io.NopCloser(strings.NewReader(`{"status":"ok","network_mode":"free"}`)),
+		}, nil
+	}
+	return nil, nil
+}

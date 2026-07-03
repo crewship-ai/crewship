@@ -227,6 +227,16 @@ echo "## New Fact\nUser prefers dark mode" >> ~/.memory/AGENT.md
 echo "## Decision\nUse PostgreSQL 16 for all DBs" >> /crew/shared/.memory/CREW.md
 ```
 
+The preferred write surface is the `memory.write` tool the sidecar exposes over MCP. It is **durable and fail-closed**:
+
+- A successful `memory.write` is `fsync`'d and atomically renamed into place before it returns — a write the tool reports as done is on stable storage, never merely in the page cache.
+- If the persist cannot complete, the tool returns an **`isError` result** (the model sees the failure and reports it) instead of a false "done". Success therefore *means* durability.
+- The tool is **health-gated**: `memory.write` / `memory.read` are only advertised to the model when the memory sidecar is actually reachable. If the sink is down, the model doesn't see a memory tool at all and degrades explicitly ("I couldn't persist that") rather than calling a dead endpoint and getting a phantom success. Because sidecars are container-scoped and persistent, any warm crew container keeps the tools available across runs.
+
+<Note>
+Recall (the `[AGENT MEMORY]` injection below) reads the file **directly** and does not depend on the sidecar, so an agent always reads back its durable memory even on a path that skips the sidecar. Writing mid-session is what needs the sink — see [Memory observability](/guides/memory-observability) for the authoritative way to verify a write landed (and why `memory hybrid` can lag it).
+</Note>
+
 ### 2. Reading Memory (System Prompt Injection)
 
 When a session starts, the orchestrator reads memory files and injects them into the system prompt:
