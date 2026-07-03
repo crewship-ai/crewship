@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -11,6 +12,13 @@ import (
 // command RunE paths and restores them at test end. These globals are set by
 // the root Cobra PersistentPreRun in production; tests manipulate them
 // directly to exercise validation paths without touching the network.
+//
+// It also neutralises the CREWSHIP_* environment overrides for the test's
+// duration: developers using per-clone env routing (CREWSHIP_SERVER pointing
+// a shell at dev2) would otherwise have those variables beat the stub-server
+// config these tests set, and the token-host guard then fails every RunE
+// with a mismatch error. os.Unsetenv + Cleanup instead of t.Setenv so tests
+// that opt into t.Parallel() elsewhere in the same file don't panic.
 func saveCLIState(t *testing.T) {
 	t.Helper()
 	origCfg := cliCfg
@@ -21,6 +29,13 @@ func saveCLIState(t *testing.T) {
 		flagServer = origServer
 		flagWorkspace = origWorkspace
 	})
+	for _, key := range []string{"CREWSHIP_SERVER", "CREWSHIP_WORKSPACE", "CREWSHIP_TOKEN", "CREWSHIP_PROFILE"} {
+		key := key
+		if orig, had := os.LookupEnv(key); had {
+			os.Unsetenv(key)
+			t.Cleanup(func() { os.Setenv(key, orig) })
+		}
+	}
 }
 
 func TestExposeCmdStructure(t *testing.T) {

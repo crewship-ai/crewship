@@ -202,6 +202,7 @@ crewship backup delete old.tar.zst --force
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--force` | `bool` | `false` | Delete without interactive confirmation. Required in non-TTY sessions. |
+| `--yes` | `bool` | `false` | Alias for `--force` — the CLI-wide pre-confirmation convention. |
 
 ---
 
@@ -230,6 +231,7 @@ crewship backup unlock --force
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--force` | `bool` | `false` | Skip interactive confirmation. Required in non-TTY sessions. |
+| `--yes` | `bool` | `false` | Alias for `--force` — the CLI-wide pre-confirmation convention. |
 
 <Warning>
   Forcibly releasing a live backup's lock lets a second backup start

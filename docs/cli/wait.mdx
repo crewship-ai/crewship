@@ -8,6 +8,8 @@ icon: "hourglass"
 
 `cmd/crewship/cmd_wait.go` polls a run's status until it transitions to a final state, then exits with a status-aware code so scripts can act on the outcome without re-parsing JSON.
 
+The run id may be an **agent run or a routine (pipeline) run** — the agent-run endpoint is probed first, and a 404 falls through to the routine-run endpoint, so callers don't have to know which subsystem produced the id.
+
 ## `crewship wait <run-id>`
 
 | Flag | Type | Default | Effect |
@@ -15,6 +17,9 @@ icon: "hourglass"
 | `--timeout <dur>` | duration | `30m` | Hard ceiling on the wait. `0` = forever. |
 | `--interval <dur>` | duration | `2s` | Poll cadence. Values ≤ 0 fall back to `2s`. |
 | `-q`, `--quiet` | bool | `false` | Print only the terminal status string (no `[wait]` log lines, no `[done]` banner). |
+| `--routine` | bool | `false` | Treat `<run-id>` as a routine run id and skip the agent-run probe. |
+
+A routine run parked on a human approval (status `waiting`) is **not** terminal — wait keeps polling until the waitpoint is approved/rejected and the run finishes, or `--timeout` fires.
 
 When neither `--quiet` nor a structured `--format` (`json`/`yaml`/`ndjson`) is set, status transitions are logged to stderr as `[wait] <run> status=<S> elapsed=<dur>` and the final state lands on stdout as `[done] <run> status=COMPLETED elapsed=12s`.
 
@@ -22,11 +27,11 @@ When neither `--quiet` nor a structured `--format` (`json`/`yaml`/`ndjson`) is s
 
 | Code | Meaning |
 |---|---|
-| `0` | `COMPLETED` |
-| `1` | `FAILED` |
+| `0` | `COMPLETED` (or a routine `dry_run`) |
+| `1` | `FAILED` (or a routine `interrupted` by a server restart) |
 | `2` | `CANCELLED` |
 | `3` | `TIMEOUT` — server-reported, or `--timeout` reached |
-| `4` | Network/auth error before any status could be read |
+| `4` | Network/auth error before any status could be read, or the id matched neither run kind |
 
 ### Examples
 
@@ -37,6 +42,9 @@ crewship wait "$RUN" && echo "done" || echo "broke"
 crewship wait r_abc --interval 500ms --timeout 5m
 crewship wait r_abc --quiet                       # prints "COMPLETED" or similar
 crewship wait r_abc --format json                 # full RunDetail on completion
+
+# Routine runs work too — e.g. the run_id from `crewship routine run`
+crewship wait prun_xyz --routine --timeout 10m
 ```
 
 ## See also

@@ -73,12 +73,11 @@ var routineWaitpointsListCmd = &cobra.Command{
 		// extract the token from here, so the table must never be what a
 		// JSON consumer gets ("No pending waitpoints." broke jq parsing
 		// and made approval gates look like a product bug).
-		jsonOut, _ := cmd.Flags().GetBool("json")
-		f := newFormatter()
+		f := resolvedFormatter(cmd)
 		if rows == nil {
 			rows = []waitpointRow{} // "[]", never "null"
 		}
-		if jsonOut || f.Format == "json" {
+		if f.Format == "json" {
 			return f.JSON(rows)
 		}
 		switch f.Format {
@@ -217,7 +216,7 @@ func decideWaitpoint(token string, approved bool, comment string) error {
 }
 
 func init() {
-	routineWaitpointsListCmd.Flags().Bool("json", false, "output as JSON for scripting")
+	routineWaitpointsListCmd.Flags().Bool("json", false, "Deprecated alias for --format json")
 
 	routineWaitpointsApproveCmd.Flags().String("comment", "", "decision comment forwarded to the parked run as the wait step's output")
 	routineWaitpointsRejectCmd.Flags().String("comment", "", "rejection reason forwarded to the parked run")

@@ -111,6 +111,33 @@ crewship memory reindex -p /path/to/crew-root -S crew
 
 Returns non-zero exit code if all reindex operations fail.
 
+### hybrid
+
+Search workspace memory **through the server's hybrid engine** — full-text chunks plus episodic journal recall, merged and ranked. Unlike `search` (local filesystem FTS), this requires a login token and works from any machine.
+
+```bash
+crewship memory hybrid "deploy runbook"
+crewship memory hybrid "API key rotation" --limit 5 --scope crew_shared --crew backend
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--limit` | `10` | Maximum hits. |
+| `--scope` | _(all visible)_ | `own` (agent-only) or `crew_shared` (crew-bound). |
+| `--crew` | | Crew slug or id for `crew_shared` scope. |
+
+### versions (server API)
+
+The `memory versions` group mirrors `log`/`show`/`restore` **over the running server's API** — use these from any machine; the direct-DB commands below only work on the server host. The workspace comes from the auth context.
+
+```bash
+crewship memory versions list "crew:<crew_id>/learned-x.md" --limit 20
+crewship memory versions show "crew:<crew_id>/learned-x.md" <sha> > recovered.md
+crewship memory versions restore "crew:<crew_id>/learned-x.md" <sha> <canonical-path> --tier learned
+```
+
+`restore` requires OWNER/ADMIN, prompts for confirmation (`--yes` skips), and the server confines `<canonical-path>` to its configured memory root.
+
 ### log
 
 List the `memory_versions` audit chain for a path, newest-first. **Reads the local DB directly** (`openAdminDB` — same DB the server uses) rather than going through the API; that means it works without a running server but the binary must run on the same host as the data dir.

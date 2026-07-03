@@ -439,7 +439,7 @@ to stdout instead of the human-readable two-liner. The exit code
 contract is unchanged so a CI script can if-branch on the command's
 exit status without re-parsing the output.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		jsonOut, _ := cmd.Flags().GetBool("json")
+		jsonOut := resolvedFormat(cmd) == "json"
 
 		if err := requireAuth(); err != nil {
 			return err
@@ -517,7 +517,7 @@ func init() {
 	}
 
 	tokenListCmd.Flags().Int("warn-stale-days", 90, "Flag tokens older / unused longer than N days (0 disables)")
-	tokenValidateCmd.Flags().Bool("json", false, "Emit machine-readable JSON to stdout instead of human-readable text")
+	tokenValidateCmd.Flags().Bool("json", false, "Deprecated alias for --format json")
 	tokenRevokeCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
 	tokenCmd.AddCommand(tokenListCmd)

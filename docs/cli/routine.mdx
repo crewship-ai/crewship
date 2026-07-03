@@ -119,11 +119,15 @@ crewship routine run eval-extract-emails --tier-override smart
 | `--inputs` | JSON inputs for the run |
 | `--invoking-crew` | crew_id recorded as the invoker (cross-crew reuse audit) |
 | `--tier-override` | force every `agent_run` step onto `trivial`/`fast`/`moderate`/`smart`. Step-level `model_override` still wins. Empty (default) = use authored complexity. Used by the eval suite to diff weak vs strong worker tiers without DSL changes. |
+| `--wait` | block until the run reaches a terminal status — keeps polling through `WAITING` approvals and `DEDUPED` originals instead of returning the receipt. |
+| `--wait-timeout` | maximum time `--wait` polls before giving up (default `30m`, `0` = forever). |
 
 Output: `run_id`, `status`, `output`, `duration_ms`, `cost_usd`.
 
 <Note>
 If the routine hits a `kind: approval` gate, `run` terminates with **`status: WAITING`** (exit 0, not a failure): it prints `paused at approval step: <id>` plus the waitpoint token and the `approve`/`reject` command hints, then releases its execution slot. Resume it with [`crewship routine waitpoints approve|reject <token>`](#crewship-routine-waitpoints). See [HITL waitpoints](/guides/routines#hitl-waitpoints).
+
+With `--wait`, the CLI instead keeps polling the run until the approval is resolved and the run finishes — the "trigger and get the real outcome" path for scripts and agents. You can also wait later with [`crewship wait --routine <run_id>`](/cli/wait). Deferred receipts (`SCHEDULED` from `--delay`/`--debounce-key`) have no run id yet and are not waitable.
 </Note>
 
 ### Common errors

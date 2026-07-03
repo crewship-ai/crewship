@@ -146,12 +146,11 @@ var routineSchedulesListCmd = &cobra.Command{
 		// pass the API rows through — full IDs included, so scripts can
 		// feed them straight into `schedules now <id>` / `update <id>`.
 		// The human table below truncates IDs via shortID.
-		jsonOut, _ := cmd.Flags().GetBool("json")
-		f := newFormatter()
+		f := resolvedFormatter(cmd)
 		if rows == nil {
 			rows = []scheduleRow{} // "[]", never "null"
 		}
-		if jsonOut || f.Format == "json" {
+		if f.Format == "json" {
 			return f.JSON(rows)
 		}
 		switch f.Format {
@@ -506,7 +505,7 @@ func shortID(id string) string {
 
 func init() {
 	routineSchedulesListCmd.Flags().String("slug", "", "filter to schedules targeting this routine slug")
-	routineSchedulesListCmd.Flags().Bool("json", false, "output as JSON for scripting")
+	routineSchedulesListCmd.Flags().Bool("json", false, "Deprecated alias for --format json")
 
 	routineSchedulesCreateCmd.Flags().String("slug", "", "target routine slug (REQUIRED)")
 	routineSchedulesCreateCmd.Flags().String("name", "", "human-readable schedule name (default: '<slug> schedule')")

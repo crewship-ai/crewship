@@ -207,6 +207,7 @@
             "icon": "terminal",
             "pages": [
               "cli/overview",
+              "cli/commands",
               "cli/start",
               "cli/login",
               "cli/version",
@@ -238,6 +239,7 @@
               "cli/agent",
               "cli/ask",
               "cli/chat",
+              "cli/feedback",
               "cli/run",
               "cli/resume",
               "cli/retry",
@@ -289,6 +291,8 @@
             "pages": [
               "cli/skill",
               "cli/integration",
+              "cli/recipe",
+              "cli/connector",
               "cli/mcp",
               "cli/mcp-calls"
             ]
@@ -451,7 +455,9 @@
           {
             "group": "Changelog",
             "icon": "rss",
-            "pages": ["changelog/overview"]
+            "pages": [
+              "changelog/overview"
+            ]
           }
         ]
       }

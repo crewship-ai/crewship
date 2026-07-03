@@ -113,7 +113,11 @@ func TestConversationSearchAcceptance(t *testing.T) {
 	}
 
 	cmd := exec.Command(bin, "conversation", "search", agentID, "deploy", "--limit", "13")
-	cmd.Env = append(os.Environ(), "CREWSHIP_CONFIG="+cfgPath)
+	// Clear the per-clone CREWSHIP_* overrides a developer shell exports
+	// (issue #544 setup) — an inherited CREWSHIP_SERVER would beat the stub
+	// config's server and trip the token-host guard.
+	cmd.Env = append(os.Environ(),
+		"CREWSHIP_CONFIG="+cfgPath, "CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE=")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run conversation search: %v\noutput: %s", err, out)
@@ -163,7 +167,8 @@ func TestConversationSearchAcceptance_JSON(t *testing.T) {
 	}
 
 	cmd := exec.Command(bin, "conversation", "search", agentID, "nope", "--format", "json")
-	cmd.Env = append(os.Environ(), "CREWSHIP_CONFIG="+cfgPath)
+	cmd.Env = append(os.Environ(),
+		"CREWSHIP_CONFIG="+cfgPath, "CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE=")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run: %v\noutput: %s", err, out)

@@ -66,7 +66,6 @@ Examples:
 		statusFilter, _ := cmd.Flags().GetString("status")
 		tagFilter, _ := cmd.Flags().GetString("tag")
 		limit, _ := cmd.Flags().GetInt("limit")
-		jsonMode, _ := cmd.Flags().GetBool("json")
 		if limit <= 0 || limit > 500 {
 			limit = 50
 		}
@@ -104,10 +103,18 @@ Examples:
 		if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
-		if jsonMode {
-			b, _ := json.MarshalIndent(rows, "", "  ")
-			fmt.Println(string(b))
-			return nil
+		// Machine formats pass the API rows through with full IDs.
+		f := resolvedFormatter(cmd)
+		if rows == nil {
+			rows = []runRecordRow{} // "[]", never "null"
+		}
+		switch f.Format {
+		case "json":
+			return f.JSON(rows)
+		case "yaml":
+			return f.YAML(rows)
+		case "ndjson":
+			return f.NDJSON(rows)
 		}
 		if len(rows) == 0 {
 			if statusFilter != "" {
@@ -156,6 +163,6 @@ func init() {
 	routineRecordsCmd.Flags().String("status", "", "filter by status: queued | running | completed | failed | cancelled | interrupted | dry_run")
 	routineRecordsCmd.Flags().String("tag", "", "filter by run tag (e.g. batch:<id>)")
 	routineRecordsCmd.Flags().Int("limit", 50, "max number of records to return (1-500)")
-	routineRecordsCmd.Flags().Bool("json", false, "output as JSON for scripting")
+	routineRecordsCmd.Flags().Bool("json", false, "Deprecated alias for --format json")
 	pipelineCmd.AddCommand(routineRecordsCmd)
 }

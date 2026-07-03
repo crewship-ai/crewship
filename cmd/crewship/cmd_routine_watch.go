@@ -57,7 +57,10 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		slug := args[0]
-		jsonMode, _ := cmd.Flags().GetBool("json")
+		// json and ndjson both mean "JSON Lines" here — watch is a stream,
+		// so there is no array form for them to differ on.
+		watchFormat := resolvedFormat(cmd)
+		jsonMode := watchFormat == "json" || watchFormat == "ndjson"
 		once, _ := cmd.Flags().GetBool("once")
 		runIDFilter, _ := cmd.Flags().GetString("run-id")
 		intervalFlag, _ := cmd.Flags().GetDuration("interval")
@@ -233,7 +236,7 @@ func colourize(kind string) string {
 }
 
 func init() {
-	routineWatchCmd.Flags().Bool("json", false, "emit JSON Lines instead of human-readable text")
+	routineWatchCmd.Flags().Bool("json", false, "Deprecated alias for --format json")
 	routineWatchCmd.Flags().Bool("once", false, "exit after the first run completes (CI-friendly)")
 	routineWatchCmd.Flags().String("run-id", "", "filter to events for one run_id only")
 	routineWatchCmd.Flags().Duration("interval", 2*time.Second, "poll interval (default 2s; min 500ms recommended)")

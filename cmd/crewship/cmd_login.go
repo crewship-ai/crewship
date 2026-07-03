@@ -248,7 +248,13 @@ auth/network failure. The /workspaces fetch is the load-bearing call;
 the /cli-token/validate side-call is best-effort (a session-cookie
 user has no CLI token to validate).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		jsonOut, _ := cmd.Flags().GetBool("json")
+		// whoami's machine output is a bespoke JSON document — fail fast
+		// on formats it can't honor instead of degrading to human text.
+		whoamiFormat := resolvedFormat(cmd)
+		if whoamiFormat != "json" && whoamiFormat != "table" {
+			return fmt.Errorf("whoami supports --format table|json (got %q)", whoamiFormat)
+		}
+		jsonOut := whoamiFormat == "json"
 
 		if err := requireAuth(); err != nil {
 			return err
@@ -379,7 +385,7 @@ func init() {
 	loginCmd.Flags().StringVar(&loginCodeFlag, "code", "", "Pairing code from the browser (with --pair)")
 	loginCmd.Flags().StringVar(&loginAdapterHint, "adapter", "", "Optional adapter hint (telemetry): CLAUDE_CODE | GEMINI_CLI | CODEX_CLI | OPENCODE | CURSOR_CLI | FACTORY_DROID")
 
-	whoamiCmd.Flags().Bool("json", false, "Emit machine-readable JSON to stdout instead of human-readable text")
+	whoamiCmd.Flags().Bool("json", false, "Deprecated alias for --format json")
 }
 
 // loginWithPairing redeems a device-code shown in the browser

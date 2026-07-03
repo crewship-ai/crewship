@@ -1,0 +1,47 @@
+---
+title: "Commands"
+description: "Dump the full CLI command tree as a machine-readable manifest."
+icon: "list-tree"
+---
+
+# Commands
+
+`crewship commands` prints every command, subcommand, and flag the CLI supports — generated from the live command tree, so it can never drift from the binary it ships in.
+
+This is the **agent-facing capability manifest**: read it once to learn the whole surface instead of scraping `--help` page by page.
+
+```bash
+# Human view: indented tree of names + one-liners
+crewship commands
+
+# Machine view: full manifest
+crewship commands --format json | jq '.commands[].path'
+crewship commands --format json | jq '.commands[] | select(.path=="routine") .commands[].path'
+```
+
+## Manifest shape
+
+```json
+{
+  "version": "1.2.3",
+  "global_flags": [
+    {"name": "format", "shorthand": "f", "type": "string", "default": "", "usage": "…"}
+  ],
+  "commands": [
+    {
+      "path": "routine run",
+      "use": "run <slug>",
+      "short": "…",
+      "flags": [{"name": "wait", "type": "bool", "default": "false", "usage": "…"}],
+      "commands": []
+    }
+  ]
+}
+```
+
+Hidden commands and cobra's built-in help plumbing are excluded.
+
+## See also
+
+- [CLI Overview](/cli/overview) — global flags, exit codes, machine-readable errors.
+- [`crewship completion`](/cli/completion) — shell tab-completion.

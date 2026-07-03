@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -191,6 +192,18 @@ func ResolveDefaultAgent(flagVal string, cfg *CLIConfig) string {
 		return cfg.DefaultAgent
 	}
 	return ""
+}
+
+// EnvToken returns the CREWSHIP_TOKEN environment variable, trimmed.
+//
+// This is the non-interactive auth path for CI jobs and agent containers:
+// no `crewship login`, no config file on disk — the credential is scoped
+// to the shell. When set it wins over any stored config/profile token and
+// is exempt from token-host binding (the operator provided it for this
+// exact environment; the #571 guard exists for the *persisted* token that
+// a hostile --server flag could otherwise exfiltrate).
+func EnvToken() string {
+	return strings.TrimSpace(os.Getenv("CREWSHIP_TOKEN"))
 }
 
 // ResolveFormat returns the effective output format from flag > config > default.

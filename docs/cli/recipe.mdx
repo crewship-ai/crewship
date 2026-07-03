@@ -1,0 +1,53 @@
+---
+title: "Recipe"
+description: "Browse and install crew recipes — 1-click crew + credentials + MCP templates."
+icon: "package"
+---
+
+# Recipe
+
+Recipes are curated crew templates baked into the server (`internal/recipes`): one install atomically creates the crew, its credentials, and its MCP servers. The same catalogue powers the dashboard's 1-click install; these commands give scripts and agents the identical flow.
+
+## `crewship recipe list`
+
+List the catalogue. Machine formats (`--format json|yaml|ndjson`) pass the full recipe objects through.
+
+```bash
+crewship recipe list
+crewship recipe list --format json | jq '.[].slug'
+```
+
+## `crewship recipe get <slug>`
+
+Show one recipe's full definition — credentials it needs (env var names, labels, types) and the MCP servers it provisions.
+
+## `crewship recipe preview <slug>`
+
+Dry-run an install against the current workspace: which credentials are already present (they'll be reused), which are still needed, and what crew slug the install will resolve to (suffixes `-2`/`-3` when taken).
+
+```bash
+crewship recipe preview code-review-crew
+```
+
+The table output ends with a ready-to-paste install command listing exactly the `--credential` flags still needed.
+
+## `crewship recipe install <slug>`
+
+Install the recipe into the current workspace. Everything lands in one transaction — a failure at any step rolls back the whole install.
+
+| Flag | Type | Effect |
+|---|---|---|
+| `--credential` | `ENV_VAR=value` (repeatable) | Secret values for credentials the workspace doesn't have yet. |
+| `--label` | `ENV_VAR=label` (repeatable) | Optional human label per credential. |
+
+```bash
+crewship recipe install code-review-crew --credential GITHUB_TOKEN=ghp_xxx
+crewship recipe install standup-crew        # all credentials already present
+```
+
+Credentials the workspace already has (matched by env var name) are reused automatically. A missing required value fails with HTTP 400 and a `missing_credentials` list (visible under `error.extensions` with `--format json`).
+
+## See also
+
+- [`crewship connector`](/cli/connector) — install a single integration rather than a whole crew template.
+- [`crewship crew`](/cli/crew) — manage the crew a recipe created.

@@ -214,7 +214,7 @@ func TestBackupUnlockRunE_NonInteractiveRequiresForce(t *testing.T) {
 	// go test runs with a non-TTY stdin, so the interactive prompt is
 	// unreachable and the command must refuse outright.
 	err := backupUnlockCmd.RunE(backupUnlockCmd, nil)
-	if err == nil || !strings.Contains(err.Error(), "refusing to unlock without --force") {
+	if err == nil || !strings.Contains(err.Error(), "refusing to unlock without --yes (or --force)") {
 		t.Fatalf("expected refusal, got %v", err)
 	}
 	if n := len(stub.Calls()); n != 0 {

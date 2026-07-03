@@ -65,10 +65,10 @@ non-interactive session --force is mandatory.`,
 		if err := requireWorkspace(); err != nil {
 			return err
 		}
-		force, _ := cmd.Flags().GetBool("force")
+		force := skipConfirm(cmd)
 		if !force {
 			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				return fmt.Errorf("refusing to unlock without --force in a non-interactive session")
+				return fmt.Errorf("refusing to unlock without --yes (or --force) in a non-interactive session")
 			}
 			fmt.Fprint(os.Stderr, "Force-release the backup lock for this workspace? [y/N] ")
 			reader := bufio.NewReader(os.Stdin)

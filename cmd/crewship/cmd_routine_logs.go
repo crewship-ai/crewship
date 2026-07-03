@@ -46,7 +46,20 @@ Output formats:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		runID := args[0]
 		slug, _ := cmd.Flags().GetString("slug")
-		jsonMode, _ := cmd.Flags().GetBool("json")
+		f := resolvedFormatter(cmd)
+		// machineEmit renders v in the resolved machine format; ok=false
+		// means "table mode — caller renders the human view".
+		machineEmit := func(v interface{}) (bool, error) {
+			switch f.Format {
+			case "json":
+				return true, f.JSON(v)
+			case "yaml":
+				return true, f.YAML(v)
+			case "ndjson":
+				return true, f.NDJSON(v)
+			}
+			return false, nil
+		}
 		full, _ := cmd.Flags().GetBool("full")
 		if err := requireAuth(); err != nil {
 			return err
@@ -78,10 +91,8 @@ Output formats:
 			if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
 				return fmt.Errorf("decode response: %w", err)
 			}
-			if jsonMode {
-				b, _ := json.MarshalIndent(entries, "", "  ")
-				fmt.Println(string(b))
-				return nil
+			if done, err := machineEmit(entries); done {
+				return err
 			}
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "TIME\tLEVEL\tEVENT\tSUMMARY")
@@ -112,10 +123,8 @@ Output formats:
 			if err := json.NewDecoder(resp.Body).Decode(&run); err != nil {
 				return fmt.Errorf("decode response: %w", err)
 			}
-			if jsonMode {
-				b, _ := json.MarshalIndent(run, "", "  ")
-				fmt.Println(string(b))
-				return nil
+			if done, err := machineEmit(run); done {
+				return err
 			}
 			// Pretty summary. Tabwriter for the header rows, then a
 			// stand-alone block for current step / error if present.
@@ -218,10 +227,8 @@ Output formats:
 			matched[i], matched[j] = matched[j], matched[i]
 		}
 
-		if jsonMode {
-			b, _ := json.MarshalIndent(matched, "", "  ")
-			fmt.Println(string(b))
-			return nil
+		if done, err := machineEmit(matched); done {
+			return err
 		}
 
 		// Pretty timeline. `pipeline.step.completed` events carry
@@ -355,7 +362,7 @@ func parseTime(s string) time.Time {
 
 func init() {
 	routineLogsCmd.Flags().String("slug", "", "routine slug the run belongs to (optional; enables full journal timeline)")
-	routineLogsCmd.Flags().Bool("json", false, "JSON output for jq / scripting")
+	routineLogsCmd.Flags().Bool("json", false, "Deprecated alias for --format json")
 	routineLogsCmd.Flags().Bool("full", false, "Full per-run journal timeline via the run-logs endpoint (no --slug needed)")
 	pipelineCmd.AddCommand(routineLogsCmd)
 }
