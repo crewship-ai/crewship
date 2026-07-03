@@ -8,28 +8,37 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"strings"
 
 	"github.com/docker/docker/api/types/container"
 )
 
-const crewContainerPrefix = "crewship-team-"
-
-// findCrewContainer returns the live Docker container ID for the given crew
-// slug, or "" if no container is running. Returns an error only on a real
-// Docker failure — "no container found" is the empty-string success path.
-
-func (h *ProvisioningHandler) findCrewContainer(ctx context.Context, slug string) (string, error) {
+// findCrewContainer returns the live Docker container ID for the given crew,
+// or "" if no container is running. Returns an error only on a real Docker
+// failure — "no container found" is the empty-string success path.
+//
+// The docker provider names crew containers "<prefix>-team-<slug>-<crewID>"
+// (crewResourceName): the prefix is instance-specific for multi-instance
+// isolation ("crewship", "crewship-2", …) and the trailing crew id is the
+// C1 cross-tenant fix (two workspaces may share a slug; the globally-unique
+// crew id disambiguates). Matching the old hardcoded "crewship-team-<slug>"
+// therefore found NOTHING on any instance-prefixed or post-C1 deployment,
+// so RestartCrewAgents silently returned {restarted:0} without dropping the
+// container. We match on the stable tail "-team-<slug>-<crewID>", which is
+// prefix-agnostic and can't cross-match a same-slug crew in another
+// workspace (the crew id is unique).
+func (h *ProvisioningHandler) findCrewContainer(ctx context.Context, crewID, slug string) (string, error) {
 	if h.docker == nil {
 		return "", nil
 	}
-	name := crewContainerPrefix + slug
+	suffix := "-team-" + slug + "-" + crewID
 	containers, err := h.docker.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
 		return "", err
 	}
 	for _, c := range containers {
 		for _, n := range c.Names {
-			if n == "/"+name {
+			if strings.HasSuffix(strings.TrimPrefix(n, "/"), suffix) {
 				return c.ID, nil
 			}
 		}
@@ -44,7 +53,7 @@ func (h *ProvisioningHandler) findCrewContainer(ctx context.Context, slug string
 // surfacing a 500 here would block the whole status response).
 
 func (h *ProvisioningHandler) agentsPendingRestartCount(ctx context.Context, crewID, slug, cachedImage string) int {
-	containerID, err := h.findCrewContainer(ctx, slug)
+	containerID, err := h.findCrewContainer(ctx, crewID, slug)
 	if err != nil || containerID == "" {
 		return 0
 	}
@@ -110,7 +119,7 @@ func (h *ProvisioningHandler) RestartCrewAgents(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	containerID, err := h.findCrewContainer(r.Context(), slug)
+	containerID, err := h.findCrewContainer(r.Context(), crewID, slug)
 	if err != nil {
 		h.logger.Error("list containers for restart", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")

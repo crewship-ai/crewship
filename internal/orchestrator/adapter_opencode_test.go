@@ -50,6 +50,15 @@ func (f *adapterTestContainer) Exec(_ context.Context, cfg provider.ExecConfig) 
 	if f.execResult != nil {
 		return f.execResult, nil
 	}
+	// Answer the sidecar health probe (checkSidecar) as OK so the 2b
+	// health gate treats the memory sink as reachable — these adapter
+	// tests model a container with a live sidecar, which is when the
+	// memory MCP server is expected to be advertised.
+	if len(cfg.Cmd) >= 3 && strings.Contains(cfg.Cmd[2], "9119/health") {
+		return &provider.ExecResult{
+			Reader: io.NopCloser(strings.NewReader(`{"status":"ok","network_mode":"free"}`)),
+		}, nil
+	}
 	// Default: empty success. Each call gets its own io.NopCloser so the
 	// caller can Close() independently.
 	return &provider.ExecResult{Reader: io.NopCloser(strings.NewReader(""))}, nil

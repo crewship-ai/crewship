@@ -579,7 +579,15 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 		}, nil
 	}
 
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	// 2a: durable, atomic persist — a memory.write that returns success
+	// MUST be on stable storage (fsync'd) and never leave a torn file. The
+	// old os.WriteFile only reached the page cache and truncated in place,
+	// so "ok" could be returned for a write a crash would lose, and an
+	// interrupted write corrupted the file. writeFileDurable fails closed:
+	// on any error the prior content is intact and we return is_error, so
+	// the model (which surfaces is_error — verified on dev2) reports the
+	// failure instead of a false "DONE".
+	if err := writeFileDurable(path, data, 0o644); err != nil {
 		return ToolResult{IsError: true, Content: "memory.write: " + err.Error()}, nil
 	}
 

@@ -127,6 +127,18 @@ The content endpoint refuses to follow symlinks (`EvalSymlinks` rejects payload_
 - **`written_by` is the provenance field.** `"audit-watcher"` means the watcher caught the write; `"sidecar"` means the agent went through `/memory/write`. Don't filter `written_by != "audit-watcher"` thinking you're filtering out the watcher's noise — you'd be hiding ~75% of real-world writes.
 - **Stats recomputes on every read.** It does not read a cached snapshot. On large workspaces (>100k rows) the query can take several seconds. There's no rate limit; cache client-side if you poll.
 - **Content endpoint reads from disk, not from the DB blob.** The `memory_versions` row records SHA + path; the content endpoint resolves the path, verifies the SHA, and streams the bytes. If the on-disk file has drifted from what the row claims (manual edit, restored backup, etc.) the endpoint returns 500 with `blob integrity check failed (sha mismatch)` and logs at error level. This is the only place that mismatch surfaces — keep an eye on it after restore operations.
+- **`memory hybrid` / FTS search LAGS the file — it is not authoritative for "did this write land".** The hybrid/FTS index is a *projection* that is rebuilt asynchronously (audit watcher, reindex). A write can be durably on disk in `AGENT.md` and still return **no results** from `crewship memory hybrid` for a short window. Never assert "the write was lost" from an empty hybrid search. The **authoritative** read of what an agent will actually recall is the canonical file itself:
+
+  ```bash
+  # Authoritative: the exact bytes the agent reads back next session.
+  crewship memory versions list  <agent-memory-path>   # newest-first, server API
+  crewship memory versions show  <version-id>           # raw content of a version
+
+  # Behavioural confirmation (drives the orchestrator's direct file read):
+  crewship ask --agent <slug> "print <fact> from your memory, or NONE"
+  ```
+
+  Reach for `memory hybrid` for discovery/ranking, not for durability checks.
 
 ## Related
 

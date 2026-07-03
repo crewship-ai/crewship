@@ -82,7 +82,8 @@ func TestRestartCrewAgents_RealDocker(t *testing.T) {
 		}
 	}
 
-	containerName := crewContainerPrefix + slug
+	// Mirror the provider's real naming: <prefix>-team-<slug>-<crewID>.
+	containerName := "crewship-team-" + slug + "-" + crewID
 	createResp, err := docker.ContainerCreate(ctx, &container.Config{
 		Image: "alpine:3",
 		Cmd:   []string{"sleep", "60"},

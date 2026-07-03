@@ -180,7 +180,10 @@ func TestSetupMCPConfig_MergeError(t *testing.T) {
 
 func TestSetupMCPConfig_LegacyServerList(t *testing.T) {
 	t.Parallel()
-	c := &covContainer{}
+	// 2b: crewship-memory is now advertised only when the memory sidecar
+	// is reachable. Make the fake sidecar report healthy so this test
+	// exercises injection into a legacy server list (its original intent).
+	c := &covContainer{route: covHealthySidecar}
 	servers := []MCPServerConfig{
 		{Name: "files", Transport: "stdio", Command: "node", Args: []string{"server.js"}},
 	}

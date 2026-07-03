@@ -42,6 +42,14 @@ func (c *captureContainer) ContainerStatus(_ context.Context, _ string) (*provid
 	return &provider.ContainerStatus{State: "running"}, nil
 }
 func (c *captureContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	// Report the memory sidecar as healthy so the 2b health gate advertises
+	// the memory MCP server (these tests model a live-sidecar container).
+	if len(cfg.Cmd) >= 3 && strings.Contains(cfg.Cmd[2], "9119/health") {
+		return &provider.ExecResult{
+			ExecID: "health",
+			Reader: io.NopCloser(strings.NewReader(`{"status":"ok","network_mode":"free"}`)),
+		}, nil
+	}
 	if len(cfg.Cmd) == 3 && cfg.Cmd[0] == "sh" && cfg.Cmd[1] == "-c" {
 		matches := scriptArgsRE.FindStringSubmatch(cfg.Cmd[2])
 		if len(matches) == 3 {
