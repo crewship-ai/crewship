@@ -23,6 +23,13 @@ type levelController struct {
 	baseline slog.Level // the configured level to revert to
 	timer    *time.Timer
 	expires  time.Time
+	// gen fences stale TTL callbacks. time.Timer.Stop() does NOT stop an
+	// already-fired callback goroutine that's blocked on c.mu — so a revert
+	// timer whose SetLevel has been superseded could otherwise acquire the
+	// lock late and clobber the newer override back to baseline. Each
+	// set/reset bumps gen; a callback captures its gen and no-ops if it no
+	// longer matches.
+	gen uint64
 }
 
 // ctrl is the single process-wide controller. There is exactly one root
@@ -59,11 +66,16 @@ func (c *levelController) set(l slog.Level, ttl time.Duration) slog.Level {
 	prev := c.lv.Level()
 	c.lv.Set(l)
 	c.stopTimerLocked()
+	c.gen++
 	if ttl > 0 && l != c.baseline {
+		gen := c.gen
 		c.expires = time.Now().Add(ttl)
 		c.timer = time.AfterFunc(ttl, func() {
 			c.mu.Lock()
 			defer c.mu.Unlock()
+			if c.gen != gen {
+				return // superseded by a newer set/reset while this timer fired
+			}
 			c.lv.Set(c.baseline)
 			c.stopTimerLocked()
 		})
@@ -76,6 +88,7 @@ func (c *levelController) reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.lv.Set(c.baseline)
+	c.gen++
 	c.stopTimerLocked()
 }
 

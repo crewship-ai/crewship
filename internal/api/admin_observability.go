@@ -17,10 +17,28 @@ import (
 type AdminObservabilityHandler struct {
 	logger    *slog.Logger
 	startedAt time.Time
+	// diskUsage and dataDir are injected so Health depends on provider
+	// functions rather than reaching into the filesystem directly — keeps
+	// the handler testable/mockable and matches the repo's "no direct infra
+	// access from handlers" convention. Defaulted to the real implementations
+	// in the constructor.
+	diskUsage func(path string) (diskusage.Stats, error)
+	dataDir   func() (string, error)
 }
 
 func NewAdminObservabilityHandler(logger *slog.Logger) *AdminObservabilityHandler {
-	return &AdminObservabilityHandler{logger: logger, startedAt: time.Now()}
+	return &AdminObservabilityHandler{
+		logger:    logger,
+		startedAt: time.Now(),
+		diskUsage: diskusage.Usage,
+		dataDir: func() (string, error) {
+			d, err := database.DefaultDataDir()
+			if err != nil {
+				return "", err
+			}
+			return d.Root, nil
+		},
+	}
 }
 
 // logLevelResponse is the wire shape for GET/PUT /api/v1/admin/log-level.
@@ -67,11 +85,16 @@ func (h *AdminObservabilityHandler) SetLogLevel(w http.ResponseWriter, r *http.R
 		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
-	ttl := time.Duration(body.TTLSeconds) * time.Second
-	const maxTTL = 24 * time.Hour
-	if ttl > maxTTL {
-		ttl = maxTTL
+	// Clamp the raw seconds BEFORE converting: time.Duration(n)*time.Second
+	// overflows int64 for extreme n and can wrap to a small/negative value
+	// that slips past a post-multiply cap. 0 = no expiry (until next change).
+	const maxTTLSeconds = int(24 * time.Hour / time.Second)
+	if body.TTLSeconds < 0 {
+		body.TTLSeconds = 0
+	} else if body.TTLSeconds > maxTTLSeconds {
+		body.TTLSeconds = maxTTLSeconds
 	}
+	ttl := time.Duration(body.TTLSeconds) * time.Second
 	prev, err := logging.SetLevel(body.Level, ttl)
 	if err != nil {
 		replyError(w, http.StatusBadRequest, err.Error())
@@ -105,12 +128,15 @@ func (h *AdminObservabilityHandler) Health(w http.ResponseWriter, r *http.Reques
 		"uptime_seconds": int(time.Since(h.startedAt).Seconds()),
 		"log_level":      currentLogLevel(),
 	}
-	if dir, err := database.DefaultDataDir(); err == nil {
-		if du, derr := diskusage.Usage(dir.Root); derr == nil {
-			resp["disk"] = du
-		} else {
-			resp["disk"] = map[string]any{"path": dir.Root, "error": derr.Error()}
-		}
+	// Surface every failure mode distinctly so an operator polling during an
+	// incident can tell "disk info intentionally absent" from "data-dir
+	// resolution broke" from "statfs failed".
+	if dir, err := h.dataDir(); err != nil {
+		resp["disk"] = map[string]any{"error": err.Error()}
+	} else if du, derr := h.diskUsage(dir); derr == nil {
+		resp["disk"] = du
+	} else {
+		resp["disk"] = map[string]any{"path": dir, "error": derr.Error()}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

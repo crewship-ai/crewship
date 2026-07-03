@@ -3,11 +3,13 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/diskusage"
 	"github.com/crewship-ai/crewship/internal/logging"
 )
 
@@ -71,6 +73,62 @@ func TestAdminObservability_SetLogLevel_RejectsBadLevel(t *testing.T) {
 	}
 	if cur, _, _ := logging.LevelState(); cur != "info" {
 		t.Errorf("live level changed to %q on a rejected set", cur)
+	}
+}
+
+func TestAdminObservability_Health_InjectedDiskProvider(t *testing.T) {
+	h := NewAdminObservabilityHandler(logging.New("info", "json", nil))
+	// Inject fakes so the test never touches the real filesystem — the
+	// point of the provider-function fields.
+	h.dataDir = func() (string, error) { return "/fake/data", nil }
+	h.diskUsage = func(path string) (diskusage.Stats, error) {
+		return diskusage.Stats{Path: path, TotalBytes: 100, FreeBytes: 40, UsedBytes: 60, UsedPct: 60}, nil
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/admin/health", nil)
+	ctx := context.WithValue(r.Context(), ctxRole, "OWNER")
+	r = r.WithContext(ctx)
+	w := httptest.NewRecorder()
+	h.Health(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp struct {
+		Disk struct {
+			Path    string  `json:"path"`
+			UsedPct float64 `json:"used_pct"`
+		} `json:"disk"`
+		LogLevel struct {
+			Level string `json:"level"`
+		} `json:"log_level"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Disk.Path != "/fake/data" || resp.Disk.UsedPct != 60 {
+		t.Errorf("disk = %+v, want injected fake", resp.Disk)
+	}
+	if resp.LogLevel.Level != "info" {
+		t.Errorf("log_level.level = %q, want info", resp.LogLevel.Level)
+	}
+}
+
+func TestAdminObservability_Health_SurfacesDataDirError(t *testing.T) {
+	h := NewAdminObservabilityHandler(logging.New("info", "json", nil))
+	h.dataDir = func() (string, error) { return "", errors.New("unresolvable data dir") }
+
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/admin/health", nil)
+	r = r.WithContext(context.WithValue(r.Context(), ctxRole, "OWNER"))
+	w := httptest.NewRecorder()
+	h.Health(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (health still reports what it can)", w.Code)
+	}
+	// The disk section must carry the error, not be silently omitted.
+	if !strings.Contains(w.Body.String(), "unresolvable data dir") {
+		t.Errorf("data-dir error not surfaced in disk section: %s", w.Body.String())
 	}
 }
 

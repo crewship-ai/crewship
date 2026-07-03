@@ -85,6 +85,30 @@ func TestLevelControl_TTLAutoReverts(t *testing.T) {
 	}
 }
 
+// TestLevelControl_SupersededTTLDoesNotClobber pins the fix for the race
+// where a fired-but-not-yet-run TTL callback reverts to baseline AFTER a newer
+// override replaced it. We set a short TTL, immediately supersede it with a
+// long one, then wait well past the first TTL: the level must stay at the
+// second override, never snap back to baseline.
+func TestLevelControl_SupersededTTLDoesNotClobber(t *testing.T) {
+	defer ResetLevel()
+	_ = New("info", "json", io.Discard)
+
+	if _, err := SetLevel("debug", 20*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	// Supersede before (or as) the first timer fires.
+	if _, err := SetLevel("warn", 10*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	// Wait well past the first TTL so its callback has certainly run.
+	time.Sleep(120 * time.Millisecond)
+
+	if cur, _, exp := LevelState(); cur != "warn" || exp.IsZero() {
+		t.Fatalf("level=%s expiresZero=%v — stale TTL clobbered the newer override (want warn, active expiry)", cur, exp.IsZero())
+	}
+}
+
 func TestSetLevel_RejectsUnknown(t *testing.T) {
 	defer ResetLevel()
 	_ = New("info", "json", io.Discard)

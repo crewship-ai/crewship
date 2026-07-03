@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// `crewship admin log-level` and `crewship admin health` drive the admin
+// `crewship system log-level` and `crewship system health` drive the admin-gated
 // observability API (runtime log-level toggle + disk/health read). CLI parity
 // for /api/v1/admin/log-level and /api/v1/admin/health.
 
@@ -19,9 +19,9 @@ Flip a misbehaving instance to debug, catch the repro in the logs, and let
 it auto-revert with --ttl so a forgotten debug switch doesn't firehose the
 logs (itself a disk-fill risk).
 
-  crewship admin log-level                       # current level
-  crewship admin log-level set --level debug --ttl 15m
-  crewship admin log-level set --level info      # revert now`,
+  crewship system log-level                       # current level
+  crewship system log-level set --level debug --ttl 15m
+  crewship system log-level set --level info      # revert now`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, err := requireAuthAndWorkspace()
 		if err != nil {
@@ -67,8 +67,8 @@ var systemHealthCmd = &cobra.Command{
 for the data-dir volume — the signal that flags a filling disk before it
 hits 100%.
 
-  crewship admin health
-  crewship admin health -f json | jq '.disk.used_pct'`,
+  crewship system health
+  crewship system health -f json | jq '.disk.used_pct'`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, err := requireAuthAndWorkspace()
 		if err != nil {

@@ -13,24 +13,32 @@ type Stats struct {
 	UsedPct    float64 `json:"used_pct"`
 }
 
-// Usage returns capacity stats for the filesystem that holds path. FreeBytes
-// is the space available to an unprivileged process (matching what `df`
-// reports as "Avail"), so UsedPct lines up with the number an operator sees.
+// Usage returns capacity stats for the filesystem that holds path, computed
+// the same way `df` does so the numbers match what an operator sees:
+//
+//   - FreeBytes is space available to an unprivileged process (statfs Bavail
+//     → df "Avail").
+//   - UsedBytes counts reserved-but-not-free blocks as used (Total − Bfree →
+//     df "Used"), so it doesn't understate usage on ext4-style filesystems
+//     that reserve ~5% for root.
+//   - UsedPct = Used / (Used + Avail) × 100 (df "Use%"), which reaches 100%
+//     exactly when an unprivileged writer can no longer allocate — the
+//     disk-fill condition this exists to surface.
 func Usage(path string) (Stats, error) {
-	total, free, err := rawUsage(path)
+	total, freeAll, avail, err := rawUsage(path)
 	if err != nil {
 		return Stats{Path: path}, err
 	}
 	s := Stats{
 		Path:       path,
 		TotalBytes: total,
-		FreeBytes:  free,
+		FreeBytes:  avail,
 	}
-	if total >= free {
-		s.UsedBytes = total - free
+	if total >= freeAll {
+		s.UsedBytes = total - freeAll
 	}
-	if total > 0 {
-		s.UsedPct = float64(s.UsedBytes) / float64(total) * 100
+	if denom := s.UsedBytes + avail; denom > 0 {
+		s.UsedPct = float64(s.UsedBytes) / float64(denom) * 100
 	}
 	return s, nil
 }
