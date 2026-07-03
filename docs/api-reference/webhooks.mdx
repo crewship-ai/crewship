@@ -30,6 +30,22 @@ X-Signature: <hex(HMAC-SHA256(body, secret))>
 
 This binds the signature to the exact payload, so a leaked header from one request can't be replayed against a different body.
 
+**Replay protection (optional, recommended).** Add an `X-Timestamp` header (unix
+seconds). When present, the signature must cover `"{timestamp}.{body}"` and the
+timestamp must be within **5 minutes** of the server clock — a captured signed
+request replayed after that window is rejected with `400`, and the timestamp
+itself can't be swapped because it is part of the signed material:
+
+```
+X-Timestamp: 1751558400
+X-Signature: <hex(HMAC-SHA256("1751558400." + body, secret))>
+```
+
+Requests without `X-Timestamp` keep the body-only scheme above (backward
+compatible). When a signature is present it is also used as the dedup identity
+(instead of any client-supplied `Idempotency-Key`), so a replay can't force a
+second run by supplying a fresh key.
+
 **`X-Webhook-Secret` (deprecated).** The per-agent secret sent in plaintext:
 
 ```
@@ -56,7 +72,8 @@ Both schemes validate using constant-time comparison. This endpoint does **not**
 | Header | Required | Description |
 |---|---|---|
 | `Content-Type` | Yes | `application/json` |
-| `X-Signature` | One of | Preferred. Hex HMAC-SHA256 of the raw body, keyed by the agent's webhook secret. |
+| `X-Signature` | One of | Preferred. Hex HMAC-SHA256 of the raw body (or `"{timestamp}.{body}"` when `X-Timestamp` is set), keyed by the agent's webhook secret. |
+| `X-Timestamp` | Optional | Unix seconds. Enables replay protection: the signature must cover `"{timestamp}.{body}"` and the timestamp must be within 5 minutes of now. |
 | `X-Webhook-Secret` | One of | **Deprecated** (sunset 2026-12-31). Per-agent webhook secret in plaintext. |
 
 ### Request Body
@@ -94,6 +111,8 @@ The webhook returns immediately. Agent execution happens asynchronously.
 **`202 Accepted`** on success — the body is `{"status": "accepted"}`. The status reflects the fire-and-forget contract: the agent run is enqueued asynchronously, and `202` (not `200`) signals "we received it, work has not finished".
 
 **`401 Unauthorized`** if neither `X-Signature` nor `X-Webhook-Secret` is provided, or the supplied signature/secret is invalid.
+
+**`400 Bad Request`** if `X-Timestamp` is present but unparseable or outside the 5-minute tolerance (a stale or replayed signed request).
 
 ### What Happens Behind the Scenes
 

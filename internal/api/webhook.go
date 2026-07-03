@@ -25,6 +25,13 @@ import (
 // doesn't pass headers, and internal/webhook is out of scope to change).
 type webhookIdempotencyKeyCtxKey struct{}
 
+// webhookSignatureCtxKey carries the request's X-Signature from ServeHTTP into
+// trigger. When present it binds the dedup key to the (secret-signed, therefore
+// attacker-unforgeable) signature instead of the client-controlled
+// Idempotency-Key — so a replay of a captured signed delivery collapses to one
+// run and a sender can't grind distinct keys to bypass the dedup window.
+type webhookSignatureCtxKey struct{}
+
 // webhookIdempotencyPipelineID is the synthetic pipeline_id label written
 // into the shared pipeline_run_idempotency table for webhook-originated
 // reservations. The table's pipeline_id column is NOT NULL but is only a
@@ -120,6 +127,12 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if key := r.Header.Get("Idempotency-Key"); key != "" {
 		r = r.WithContext(context.WithValue(r.Context(), webhookIdempotencyKeyCtxKey{}, key))
 	}
+	// The signature (verified downstream against the agent's secret) is a
+	// stronger dedup identity than the client-controlled Idempotency-Key —
+	// stash it so trigger can prefer it (see agentWebhookIdempotencyKey).
+	if sig := r.Header.Get("X-Signature"); sig != "" {
+		r = r.WithContext(context.WithValue(r.Context(), webhookSignatureCtxKey{}, sig))
+	}
 	h.handler.ServeHTTP(w, r)
 }
 
@@ -131,13 +144,20 @@ func (h *WebhookHandler) lookupSecret(ctx context.Context, crewID, agentID strin
 }
 
 // webhookIdempotencyKey resolves the dedup key for a webhook delivery.
-// It returns the caller-supplied Idempotency-Key (stashed in ctx by
-// ServeHTTP) when present, otherwise a deterministic synthetic key over
-// the agent id + payload (event/source/data). The synthetic fallback
-// means an external system that re-fires the identical event without a
-// key still collapses to a single run, while distinct events produce
-// distinct keys.
+// Preference order:
+//  1. The X-Signature (stashed by ServeHTTP) — it is HMAC'd with the agent's
+//     secret, so it is attacker-unforgeable and stable across retries of the
+//     same delivery. Using it stops a replay of a captured signed webhook from
+//     bypassing the dedup window by grinding a fresh Idempotency-Key.
+//  2. The caller-supplied Idempotency-Key (legacy secret path, un-migrated
+//     senders).
+//  3. A deterministic synthetic key over agent id + payload — an external
+//     system that re-fires the identical event without a key still collapses to
+//     a single run, while distinct events produce distinct keys.
 func agentWebhookIdempotencyKey(ctx context.Context, agentID string, payload webhook.WebhookPayload) string {
+	if sig, ok := ctx.Value(webhookSignatureCtxKey{}).(string); ok && sig != "" {
+		return "whsig-" + sig
+	}
 	if v, ok := ctx.Value(webhookIdempotencyKeyCtxKey{}).(string); ok && v != "" {
 		return v
 	}

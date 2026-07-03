@@ -25,7 +25,15 @@ func ComputeHMAC(message []byte, secret string) string {
 
 // ValidateHMAC verifies that the given hex-encoded signature matches the
 // HMAC-SHA256 of message computed with the provided secret.
+//
+// An empty secret or signature is rejected outright (fail-safe defaults): with
+// an empty secret, ComputeHMAC still returns a valid HMAC over the message, so a
+// caller with a blank/misconfigured secret would otherwise accept anything a
+// sender signed with the empty key. ValidateSecret has the same guard.
 func ValidateHMAC(message []byte, signature, secret string) bool {
+	if secret == "" || signature == "" {
+		return false
+	}
 	expected := ComputeHMAC(message, secret)
 	return hmac.Equal([]byte(signature), []byte(expected))
 }
