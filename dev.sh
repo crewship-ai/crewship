@@ -40,6 +40,34 @@ ok()   { echo -e "${GREEN}[crewship${S}]${NC} $*"; }
 warn() { echo -e "${YELLOW}[crewship${S}]${NC} $*"; }
 err()  { echo -e "${RED}[crewship${S}]${NC} $*" >&2; }
 
+# guard_log_size caps a service log so a crash-loop can't fill the disk.
+# Origin: a wedged journal writer on one dev slot spammed a non-retriable
+# error 10x/s and grew /tmp/crewship-N-go.log to 69 GB, taking the whole
+# host to 100% disk. Backgrounds a watcher (bounded by the owning process's
+# life) that truncates the log in place once it passes the cap.
+#
+# Truncate in place (`: > file`) — NOT rename — so the writer's open fd stays
+# valid and the disk space is actually reclaimed; a mv would leak the space
+# to the held-open inode. The warning is deliberately LOUD: a log that keeps
+# hitting the cap is a crash-loop symptom we want surfaced, not silently
+# rotated into oblivion (that just hides the underlying bug).
+guard_log_size() {
+  local f="$1" owner="$2"
+  local cap=$((50 * 1024 * 1024)) # 50 MB
+  (
+    while kill -0 "$owner" 2>/dev/null; do
+      local sz
+      sz=$(wc -c < "$f" 2>/dev/null || echo 0)
+      if (( sz > cap )); then
+        warn "log $f passed $((cap / 1024 / 1024))MB — truncating. Likely a crash-loop; check for repeated ERRORs in $f"
+        : > "$f"
+      fi
+      sleep 30
+    done
+  ) &
+  disown 2>/dev/null || true
+}
+
 is_running() {
   local pid_file="$1"
   if [[ -f "$pid_file" ]]; then
@@ -337,6 +365,7 @@ start_go() {
   ) > "$GO_LOG" 2>&1 &
 
   echo $! > "$GO_PID_FILE"
+  guard_log_size "$GO_LOG" "$(cat "$GO_PID_FILE")"
 
   local attempts=0
   while [[ $attempts -lt 15 ]]; do
@@ -371,6 +400,7 @@ start_next() {
   ) > "$NEXT_LOG" 2>&1 &
 
   echo $! > "$NEXT_PID_FILE"
+  guard_log_size "$NEXT_LOG" "$(cat "$NEXT_PID_FILE")"
 
   local attempts=0
   while [[ $attempts -lt 20 ]]; do
