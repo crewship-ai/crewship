@@ -78,7 +78,9 @@ The default (table) output is an indented human-readable tree.`,
 }
 
 // collectCommands walks the cobra tree depth-first, skipping hidden
-// commands and cobra's built-in help/completion plumbing.
+// commands and cobra's auto-generated `help` command. `completion` is
+// kept — it's a real user-facing command (docs/cli/completion.mdx), not
+// plumbing an agent should be blind to.
 func collectCommands(parent *cobra.Command, prefix string) []commandManifest {
 	children := parent.Commands()
 	out := make([]commandManifest, 0, len(children))

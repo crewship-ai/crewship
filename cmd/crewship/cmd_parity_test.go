@@ -126,13 +126,22 @@ func TestConnectorVerify_FailedProbeIsNonZero(t *testing.T) {
 	}))
 	covSetupCli10(t, s.URL())
 	setFlagCovCli10(t, connectorVerifyCmd, "field", "SLACK_TOKEN=bad")
-	connectorVerifyCmd.SetContext(context.Background())
-
-	_, err := captureStdoutCovCli10(t, func() error {
-		return connectorVerifyCmd.RunE(connectorVerifyCmd, []string{"slack"})
-	})
-	if err == nil || !strings.Contains(err.Error(), "invalid token") {
-		t.Errorf("verify with ok=false should fail with the probe message, got %v", err)
+	// A failed probe must report via the returned error ONLY — nothing on
+	// stdout, so a JSON consumer never sees a success body competing with
+	// the stderr error envelope. Assert both the format-driven and the
+	// default paths so the success-only-stdout contract can't regress.
+	for _, format := range []string{"", "json"} {
+		flagFormat = format
+		connectorVerifyCmd.SetContext(context.Background())
+		out, err := captureStdoutCovCli10(t, func() error {
+			return connectorVerifyCmd.RunE(connectorVerifyCmd, []string{"slack"})
+		})
+		if err == nil || !strings.Contains(err.Error(), "invalid token") {
+			t.Errorf("format=%q: verify with ok=false should fail with the probe message, got %v", format, err)
+		}
+		if strings.TrimSpace(out) != "" {
+			t.Errorf("format=%q: failed verify leaked to stdout: %q", format, out)
+		}
 	}
 }
 
