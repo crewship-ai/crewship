@@ -46,6 +46,19 @@ The `canRole()` function in Go maps roles to three internal actions:
   In the current implementation, MEMBER and VIEWER have identical permissions (both map to `read` only). The distinction exists in the schema for future granularity (e.g., MEMBER may gain `send_message` or `run_agent` permissions).
 </Note>
 
+### Control-plane mutations require MANAGER+
+
+Role gates are enforced **per handler** (via `requireRole` / `canRole`), not declared at route registration. The following control-plane mutation endpoints require `MANAGER`+ (the `create`/`update` tier) — a plain `MEMBER` or `VIEWER` is refused with `403`:
+
+- **Crew-template deploy** — `POST /crew-templates/{slug}/deploy` (creates a full crew + agents)
+- **Pipeline-run control** — `replay`, `bulk_replay`, `signal`, `metadata`, and `pending/{id}/cancel`
+- **Routine step overrides** — `PUT`/`DELETE .../steps/{stepId}/override`
+- **Checkpoints** — `restore`, `fork`, `delete`
+
+<Warning>
+  Because gating is per-handler rather than route-declared, a new mutation route can ship without a gate. The [`TestMutationRoutes_RejectViewer`](https://github.com/crewship-ai/crewship) regression test guards these specific endpoints; a walkable route-table that makes "every mutation route declares a role" a build-time invariant is a planned follow-up.
+</Warning>
+
 ### Signup Control
 
 New user registration is controlled by the `CREWSHIP_ALLOW_SIGNUP` environment variable (or `auth.allow_signup` in YAML config). When disabled, only existing users can invite new members.

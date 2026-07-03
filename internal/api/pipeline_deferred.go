@@ -133,6 +133,9 @@ func (h *PipelineHandler) ListPendingRuns(w http.ResponseWriter, r *http.Request
 // CancelPendingRun cancels a not-yet-fired deferred run.
 // POST /api/v1/workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel
 func (h *PipelineHandler) CancelPendingRun(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "update") {
+		return
+	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	pendingID := r.PathValue("pendingId")
 	if pendingID == "" {

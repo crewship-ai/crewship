@@ -201,6 +201,11 @@ func (h *CartographerHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
+	// Restoring a checkpoint rewinds crew state — a control-plane mutation,
+	// MANAGER+ (update).
+	if !requireRole(w, r, "update") {
+		return
+	}
 	id := r.PathValue("id")
 	if id == "" {
 		replyError(w, http.StatusBadRequest, "id required")
@@ -236,6 +241,9 @@ func (h *CartographerHandler) Fork(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
 		replyError(w, http.StatusUnauthorized, "workspace required")
+		return
+	}
+	if !requireRole(w, r, "update") {
 		return
 	}
 	user := UserFromContext(r.Context())
@@ -283,6 +291,11 @@ func (h *CartographerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
 		replyError(w, http.StatusUnauthorized, "workspace required")
+		return
+	}
+	// Deleting a checkpoint is a control-plane mutation — MANAGER+ (update),
+	// consistent with restore/fork (checkpoints are operational crew state).
+	if !requireRole(w, r, "update") {
 		return
 	}
 	id := r.PathValue("id")

@@ -14,6 +14,9 @@ import (
 // later steps as {{ run.metadata.x }}.
 // PATCH /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata
 func (h *PipelineHandler) UpdateRunMetadata(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "update") {
+		return
+	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	runID := r.PathValue("runId")
 	if runID == "" {
@@ -51,6 +54,9 @@ func (h *PipelineHandler) UpdateRunMetadata(w http.ResponseWriter, r *http.Reque
 // payload as its output.
 // POST /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal
 func (h *PipelineHandler) SignalRun(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "update") {
+		return
+	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	runID := r.PathValue("runId")
 	if runID == "" {
