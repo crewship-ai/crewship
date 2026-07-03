@@ -28,9 +28,13 @@ func New(level, format string, w io.Writer) *slog.Logger {
 		w = os.Stdout
 	}
 
-	lvl := parseLevel(level)
+	// Bind the handler to the process-wide runtime level (a slog.Leveler)
+	// rather than a fixed slog.Level, so an operator can flip verbosity on
+	// the live logger via SetLevel without a restart. setBaseline records
+	// the configured level as the revert target and applies it now.
+	ctrl.setBaseline(parseLevel(level))
 	opts := &slog.HandlerOptions{
-		Level:       lvl,
+		Level:       ctrl.lv,
 		ReplaceAttr: redactAttr,
 	}
 

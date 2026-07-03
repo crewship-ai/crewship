@@ -29,6 +29,13 @@ func (r *Router) registerAdminRoutes() {
 	r.mux.Handle("GET /api/v1/admin/users", authed(wsCtx(http.HandlerFunc(admin.ListUsers))))
 	r.mux.Handle("GET /api/v1/admin/workspaces", authed(wsCtx(http.HandlerFunc(admin.ListWorkspaces))))
 
+	// Admin observability: runtime log-level toggle + disk/health read
+	// (OWNER/ADMIN via the handler's canRole "manage" check).
+	obs := NewAdminObservabilityHandler(r.logger)
+	r.mux.Handle("GET /api/v1/admin/log-level", authed(wsCtx(http.HandlerFunc(obs.GetLogLevel))))
+	r.mux.Handle("PUT /api/v1/admin/log-level", authed(wsCtx(http.HandlerFunc(obs.SetLogLevel))))
+	r.mux.Handle("GET /api/v1/admin/health", authed(wsCtx(http.HandlerFunc(obs.Health))))
+
 	// Keeper admin log
 	keeperLog := NewKeeperLogHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/admin/keeper/requests", authed(wsCtx(http.HandlerFunc(keeperLog.List))))

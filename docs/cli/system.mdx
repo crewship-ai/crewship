@@ -157,6 +157,38 @@ negative      anthropic  claude-haiku-4-5   5.0s     explicit
 
 The timeout column renders in seconds when >=1s and milliseconds below that, so the 3-30s span the MVP defaults use stays readable without mental math.
 
+## `crewship system log-level`
+
+Show or change the server's log level **at runtime — no restart needed**. Backs `GET/PUT /api/v1/admin/log-level` (OWNER/ADMIN). The change takes effect on the live logger immediately, so you can flip a misbehaving instance to `debug`, catch the repro, and revert — without a restart that would lose the state you're trying to observe.
+
+```bash
+crewship system log-level                          # current level, baseline, expiry
+crewship system log-level set --level debug --ttl 15m
+crewship system log-level set --level info         # revert now
+```
+
+| Flag (on `set`) | Description |
+|---|---|
+| `--level` | `debug` \| `info` \| `warn` \| `error` (required). |
+| `--ttl` | Auto-revert to the configured baseline after this duration (e.g. `15m`). `0` = until the next explicit change. Capped server-side at 24h. |
+
+<Warning>
+`--ttl` exists for a reason: a forgotten `debug` on a busy instance is a firehose that can itself fill the disk. Prefer a bounded window (`--ttl 15m`) over an open-ended flip.
+</Warning>
+
+Output fields: `level` (live), `baseline` (the configured level it reverts to), `expires_at` (RFC3339, present only while a timed override is active).
+
+## `crewship system health`
+
+Report the running server's uptime, current log level, and **disk headroom** for the data-dir volume. Backs `GET /api/v1/admin/health` (OWNER/ADMIN). The disk figure is the signal that flags a filling volume before it hits 100%.
+
+```bash
+crewship system health
+crewship system health -f json | jq '.disk.used_pct'
+```
+
+`disk` reports `total_bytes` / `free_bytes` / `used_bytes` / `used_pct` for the default data-dir filesystem (`free_bytes` matches `df` "Avail"). A custom `DATABASE_URL` on a different volume isn't reflected — the default location is the volume that fills in practice (DB + agent outputs + logs all live under it).
+
 ## See also
 
 - [`crewship doctor`](/cli/doctor) — pre-flight diagnostics including container runtime detection, port binding, DB perms.
