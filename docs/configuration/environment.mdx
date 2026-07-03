@@ -137,6 +137,7 @@ These are off by default and intended for operators debugging performance.
 | `CREWSHIP_NEXTJS_URL` | Auto-derived from port | Internal URL for self-referencing API calls |
 | `CREWSHIP_INTERNAL_TOKEN` | Auto-generated on first boot | Token for sidecar-to-crewshipd IPC authentication. Same auto-gen + persist path as `NEXTAUTH_SECRET`; **stays stable across restarts** once the file exists. |
 | `CREWSHIP_ALLOW_SIGNUP` | `false` | Allow new user registration (`true` or `1`) |
+| `CREWSHIP_BOOTSTRAP_WINDOW` | _(unset — open until first admin)_ | Opt-in finite first-run window. Unset (default), `/bootstrap` stays open until the first admin account exists (the empty user table is the gate). Set to a positive Go duration (e.g. `5m`, `30s`, `1h`) to arm a deploy-race window that refuses `/bootstrap` with `410` after it elapses — for instances exposed to the internet before they're bootstrapped. Invalid or non-positive values are ignored (falls back to the open-until-admin default). |
 
 <Note>
   As of PR #446 (`internal/secrets`), `NEXTAUTH_SECRET`, `ENCRYPTION_KEY` and `CREWSHIP_INTERNAL_TOKEN` are all bootstrapped on first start: missing values are generated with `crypto/rand`, persisted atomically to `<dataDir>/secrets.env` at mode `0600`, and re-exported into the process environment so existing `os.Getenv` call sites see them unchanged. Explicit env vars override the file; partial persistence is handled (one missing key is filled, the other valid keys are preserved). For clustered deployments, set them explicitly via your secret manager.

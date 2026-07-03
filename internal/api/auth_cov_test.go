@@ -88,8 +88,9 @@ func TestCovAuthArmWindow_AlreadyBootstrapped(t *testing.T) {
 }
 
 // TestCovAuthArmWindow_NonPositiveDurationDefaults exercises the
-// window<=0 clamp to defaultBootstrapWindow on an empty DB — the
-// resulting window must be open.
+// window<=0 default (no-expiry mode) on an empty DB — the resulting
+// window must be open (and stays open until the first admin exists;
+// see TestAuthBootstrap_NoExpiryDefault).
 func TestCovAuthArmWindow_NonPositiveDurationDefaults(t *testing.T) {
 	t.Parallel()
 	h, _, _ := covAuthHandler(t, false)

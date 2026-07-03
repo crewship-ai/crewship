@@ -28,24 +28,29 @@ type AuthHandler struct {
 	sessions    sessions.Store
 	allowSignup bool
 
-	// bootstrapDeadline is the timestamp after which POST /api/v1/bootstrap
-	// stops accepting requests on an empty database. Set by ArmDeployRaceWindow
-	// at server start (defaults to 5 minutes) — a fixed first-run window
-	// pattern. The operator hits /bootstrap from a browser, completes the
-	// form, and the deadline becomes moot the moment users.count > 0. If
-	// the window elapses without a bootstrap, the server starts refusing
-	// /bootstrap requests with a clear "expired, please restart" error so
-	// an internet-reachable instance that nobody bootstrapped doesn't sit
-	// permanently open to whichever scanner finds the URL first.
+	// bootstrap window state gates POST /api/v1/bootstrap on an empty
+	// database. Armed by ArmDeployRaceWindow at server start.
 	//
-	// Three states matter:
-	//   bootstrapArmed=false                — never attempted (test harness)
-	//                                         or arming failed (fail-closed)
-	//   bootstrapArmed=true,  deadline set  — window open until deadline
-	//   bootstrapArmed=true,  deadline zero — window consumed by a
-	//                                         successful bootstrap, or
-	//                                         users table was already
-	//                                         populated at arm time
+	// DEFAULT (bootstrapNoExpiry=true): the window stays open until the
+	// first admin exists — the empty users table is the gate, not a clock.
+	// This matches the GitLab/Grafana first-run pattern: the operator hits
+	// /bootstrap from a browser whenever they get to it. The window becomes
+	// moot the moment users.count > 0.
+	//
+	// OPT-IN hardening (CREWSHIP_BOOTSTRAP_WINDOW=<duration> → deadline set):
+	// arms a FINITE window that refuses /bootstrap after the deadline, so an
+	// internet-reachable instance nobody bootstrapped doesn't sit open to
+	// whichever scanner finds the URL first. For public deploys that want
+	// the deploy-race protection.
+	//
+	// Four states matter:
+	//   bootstrapArmed=false                   — never attempted (test harness)
+	//                                            or arming failed (fail-closed)
+	//   armed=true, noExpiry=true              — open until first admin (default)
+	//   armed=true, deadline set (future)      — open until that deadline (opt-in)
+	//   armed=true, noExpiry=false, deadline   — window consumed by a successful
+	//     zero (or past)                         bootstrap, expired, or users
+	//                                            table already populated at arm
 	//
 	// Without the explicit `armed` flag, a transient DB error during
 	// ArmDeployRaceWindow would leave deadline=zero and the handler
@@ -54,6 +59,7 @@ type AuthHandler struct {
 	// (allow, dev-mode) from "arming failed" (refuse, fail-closed).
 	bootstrapMu        sync.Mutex
 	bootstrapArmed     bool
+	bootstrapNoExpiry  bool
 	bootstrapDeadline  time.Time
 	bootstrapArmingErr error
 }
@@ -64,29 +70,26 @@ func NewAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidato
 	return &AuthHandler{db: db, logger: logger, validator: validator, sessions: sessionsStore, allowSignup: allowSignup}
 }
 
-// defaultBootstrapWindow is the fixed first-run window applied when
-// the caller passes a non-positive duration to ArmDeployRaceWindow.
-// Five minutes is long enough for a human operator to open the URL
-// after `crewship start`, short enough that an unbootstrapped
-// instance left running on a public IP doesn't sit indefinitely open
-// to whichever scanner finds it first.
-const defaultBootstrapWindow = 5 * time.Minute
-
-// ArmDeployRaceWindow opens the bootstrap window for the configured
-// duration when the users table is empty. Called from server.New
-// before the HTTP listener accepts traffic.
+// ArmDeployRaceWindow opens the bootstrap window when the users table
+// is empty. Called from server.New before the HTTP listener accepts
+// traffic.
 //
-// Fixed-duration first-run window: bootstrap is open for a known
-// interval after startup; outside that window the handler refuses.
-// The operator who started the server is expected to open the
-// bootstrap URL within the window — typically seconds after
-// `crewship start`. An operator who needs a longer window passes a
-// larger duration; headless / CI deploys hit `crewship init` against
-// the same endpoint within the window.
+// window <= 0 (the default): NO-EXPIRY mode — bootstrap stays open
+// until the first admin exists. The empty users table is the gate, so
+// the operator can open the /bootstrap URL whenever they get to it
+// (GitLab/Grafana first-run behaviour). This is what unset
+// CREWSHIP_BOOTSTRAP_WINDOW yields.
 //
-// When users.count > 0 this is a no-op (armed=true, deadline=zero):
-// bootstrap is already closed because Bootstrap itself refuses with
-// 410 once a user exists.
+// window > 0: FINITE deploy-race window (opt-in via
+// CREWSHIP_BOOTSTRAP_WINDOW=<duration>). Bootstrap is open only for
+// that interval after startup; afterwards the handler refuses so an
+// internet-reachable instance nobody bootstrapped doesn't sit open to
+// whichever scanner finds the URL first. Headless / CI deploys hit
+// `crewship init` against the same endpoint.
+//
+// When users.count > 0 this is a no-op (armed=true, no-expiry off,
+// deadline=zero): bootstrap is already closed because Bootstrap itself
+// refuses with 410 once a user exists.
 //
 // On error (e.g. transient DB blip): armed stays false and the
 // stored error is preserved. bootstrapWindowOpen() then fails closed
@@ -94,9 +97,6 @@ const defaultBootstrapWindow = 5 * time.Minute
 // "no window so allow". This is the security-conservative choice for
 // the deploy-race vector the window exists to defend against.
 func (h *AuthHandler) ArmDeployRaceWindow(ctx context.Context, window time.Duration) error {
-	if window <= 0 {
-		window = defaultBootstrapWindow
-	}
 	var count int
 	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&count); err != nil {
 		// Fail-closed: record the error so subsequent bootstrap
@@ -116,6 +116,7 @@ func (h *AuthHandler) ArmDeployRaceWindow(ctx context.Context, window time.Durat
 		// agree: bootstrap is closed.
 		h.bootstrapMu.Lock()
 		h.bootstrapArmed = true
+		h.bootstrapNoExpiry = false
 		h.bootstrapDeadline = time.Time{}
 		h.bootstrapArmingErr = nil
 		h.bootstrapMu.Unlock()
@@ -123,9 +124,18 @@ func (h *AuthHandler) ArmDeployRaceWindow(ctx context.Context, window time.Durat
 	}
 	h.bootstrapMu.Lock()
 	h.bootstrapArmed = true
-	h.bootstrapDeadline = time.Now().Add(window)
 	h.bootstrapArmingErr = nil
+	if window <= 0 {
+		// Default: open until the first admin exists, no deadline.
+		h.bootstrapNoExpiry = true
+		h.bootstrapDeadline = time.Time{}
+	} else {
+		// Opt-in finite deploy-race window.
+		h.bootstrapNoExpiry = false
+		h.bootstrapDeadline = time.Now().Add(window)
+	}
 	deadline := h.bootstrapDeadline
+	noExpiry := h.bootstrapNoExpiry
 	h.bootstrapMu.Unlock()
 
 	publicURL := strings.TrimRight(os.Getenv("CREWSHIP_PUBLIC_URL"), "/")
@@ -146,9 +156,14 @@ func (h *AuthHandler) ArmDeployRaceWindow(ctx context.Context, window time.Durat
 	h.logger.Warn("  Open this URL in your browser and fill in the form:")
 	h.logger.Warn("       " + publicURL + "/bootstrap")
 	h.logger.Warn("")
-	h.logger.Warn("  Window closes at: " + deadline.Format(time.RFC3339))
-	h.logger.Warn("  After that, restart the server to arm a new window,")
-	h.logger.Warn("  or use 'crewship init' from this host for headless setup.")
+	if noExpiry {
+		h.logger.Warn("  This window stays open until you create the admin account.")
+		h.logger.Warn("  Or use 'crewship init' from this host for headless setup.")
+	} else {
+		h.logger.Warn("  Window closes at: " + deadline.Format(time.RFC3339))
+		h.logger.Warn("  After that, restart the server to arm a new window,")
+		h.logger.Warn("  or use 'crewship init' from this host for headless setup.")
+	}
 	h.logger.Warn(bannerLine)
 	return nil
 }
@@ -174,6 +189,12 @@ func (h *AuthHandler) bootstrapWindowOpen() bool {
 	if !h.bootstrapArmed {
 		return false
 	}
+	if h.bootstrapNoExpiry {
+		// Default mode: open until the first admin exists. The Bootstrap
+		// handler's users.count > 0 short-circuit is what ultimately
+		// closes it; closeBootstrapWindow clears this on success.
+		return true
+	}
 	if h.bootstrapDeadline.IsZero() {
 		return false
 	}
@@ -192,12 +213,14 @@ func (h *AuthHandler) bootstrapArmingFailed() bool {
 	return !h.bootstrapArmed && h.bootstrapArmingErr != nil
 }
 
-// closeBootstrapWindow zeroes the deadline so subsequent bootstrap
-// calls return 410 even if they arrive before the original deadline.
+// closeBootstrapWindow zeroes the deadline AND clears no-expiry mode so
+// subsequent bootstrap calls return 410 — even in the default open-until-
+// admin mode and even if they arrive before any original deadline.
 // Called by Bootstrap on success — one-shot semantics.
 func (h *AuthHandler) closeBootstrapWindow() {
 	h.bootstrapMu.Lock()
 	defer h.bootstrapMu.Unlock()
+	h.bootstrapNoExpiry = false
 	h.bootstrapDeadline = time.Time{}
 }
 
