@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -382,6 +383,19 @@ func (s *PipelineScheduler) tick(ctx context.Context) {
 	}
 }
 
+// scheduledFireIdempotencyKey derives a deterministic idempotency key for one
+// OCCURRENCE of a trigger, so a re-fire of the same occurrence — a duplicate
+// tick within the interval, or a process restart before the trigger's next_run
+// is advanced — dedupes at the executor's LookupOrReserve chokepoint, while the
+// next occurrence (a distinct bucket) gets a fresh key and fires normally.
+// Grounds the cron/deferred paths in exactly-once semantics (idempotency keys,
+// per Stripe/AWS). The executor SILENTLY IGNORES an empty key — which is exactly
+// why these two trigger sites double-fired before this key was populated.
+func scheduledFireIdempotencyKey(kind, id, bucket string) string {
+	sum := sha256.Sum256([]byte(kind + "\x00" + id + "\x00" + bucket))
+	return kind + "-" + hex.EncodeToString(sum[:16])
+}
+
 func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 	// Compute the next run BEFORE invoking — if the run takes longer
 	// than the cron interval (e.g. minutely cron + 90s pipeline),
@@ -434,6 +448,16 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 		_ = json.Unmarshal([]byte(sched.InputsJSON), &inputs)
 	}
 
+	// Bucket = the occurrence identity. next_run_at is the timestamp that made
+	// this row due; it stays fixed across a mid-run restart (recordRun advances
+	// it only after the run returns) and is distinct for the next occurrence.
+	// Defensive fallback (should never be nil for a due row): a minute bucket so
+	// distinct minutes still fire and we never dedupe forever.
+	occBucket := time.Now().UTC().Truncate(time.Minute).Format(time.RFC3339)
+	if sched.NextRunAt != nil {
+		occBucket = sched.NextRunAt.UTC().Format(time.RFC3339)
+	}
+
 	in := RunInput{
 		PipelineID: pipeline.ID,
 		// Honour the pin: a schedule with target_pipeline_version set
@@ -448,6 +472,9 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 		Mode:          ModeRun,
 		TriggeredVia:  TriggeredViaSchedule,
 		TriggeredByID: sched.ID,
+		// Exactly-once on the cron path: dedupe a re-fire of the same
+		// occurrence (duplicate tick / restart before next_run_at advanced).
+		IdempotencyKey: scheduledFireIdempotencyKey("sched", sched.ID, occBucket),
 	}
 
 	res, runErr := s.executor.Run(ctx, in)

@@ -45,6 +45,12 @@ func openFactoryTestDB(t *testing.T) *sql.DB {
 	if _, err := db.ExecContext(context.Background(), scheduleSchemaSQL); err != nil {
 		t.Fatalf("schedule schema: %v", err)
 	}
+	// A factory-wired executor wires the idempotency store whenever DB != nil
+	// (NewWiredExecutor), so the rig must carry the idempotency table to match
+	// production — the cron/deferred trigger paths now always set a key.
+	if _, err := db.ExecContext(context.Background(), idempotencySchemaSQL); err != nil {
+		t.Fatalf("idempotency schema: %v", err)
+	}
 	if _, err := db.ExecContext(context.Background(), `
 CREATE TABLE IF NOT EXISTS routine_step_overrides (
     pipeline_id    TEXT NOT NULL,

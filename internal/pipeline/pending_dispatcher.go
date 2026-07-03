@@ -122,6 +122,11 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 		TriggeredByID: pr.ID,
 		Tags:          tags,
 		MetadataJSON:  pr.MetadataJSON,
+		// Each pending row is a one-shot fired once (MarkFired claims it above);
+		// key on the row ID as a second guard so a re-dispatch of the same row
+		// (debounce coalescing, restart) dedupes at the executor rather than
+		// producing a second run.
+		IdempotencyKey: scheduledFireIdempotencyKey("pending", pr.ID, "once"),
 	})
 	if runErr != nil {
 		d.logger.Warn("pending dispatcher: run failed", "error", runErr, "pending_id", pr.ID)
