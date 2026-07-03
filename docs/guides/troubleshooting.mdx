@@ -100,6 +100,22 @@ whatever socket it finds — no further config needed.
 
 </Accordion>
 
+<Accordion title="Chat shows a specific container-start error (not just a spinner)">
+
+When the runtime can't start, the chat now streams a **classified** error with
+a machine-readable `code` in the event metadata, instead of a generic "failed to
+start agent container". The full raw cause is in the run journal / server logs.
+
+| Code | Meaning | Fix |
+|---|---|---|
+| `legacy_volume_conflict` | The crew still has a pre-C1 slug-scoped Docker volume that must be migrated/removed first. | Remove the stale volume, then retry (see [Migrating from the legacy image](/guides/devcontainers#migrating-from-the-legacy-agent-runtime-image)). |
+| `image_missing` | The recorded cached image was pruned from the local daemon. | Reprovision the crew, then retry. |
+| `resource_limit` | The daemon refused the container on a memory/CPU limit. | Lower the crew's limits or free host resources. |
+| `provision_failed` | Container create/start/network step failed. | Check the run journal; often a transient daemon error — retry. |
+| `internal` | Unclassified. | Check server logs for the raw cause. |
+
+</Accordion>
+
 <Accordion title='"Agent exited with code 123"'>
 
 Specific to Claude Code adapter. **Almost always missing or invalid

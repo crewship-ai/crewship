@@ -651,7 +651,13 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 
 		cID, err := b.container.EnsureCrewRuntime(ctx, cc)
 		if err != nil {
-			streamFn(ws.ChatEvent{Type: "error", Content: "failed to start agent container"})
+			// Classify the cause into a closed set so the user gets an
+			// actionable message + machine-readable code instead of the opaque
+			// "failed to start agent container". The raw error still flows to
+			// logs / the run record via the wrapped return below.
+			code, msg := classifyCrewRuntimeError(err)
+			b.logger.Warn("ensure crew runtime failed", "crew_slug", info.CrewSlug, "code", code, "error", err)
+			streamFn(ws.ChatEvent{Type: "error", Content: msg, Metadata: map[string]any{"code": code}})
 			return fmt.Errorf("ensure team runtime: %w", err)
 		}
 		// Start sidecars after the agent runtime is ready so the
@@ -936,4 +942,46 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	streamFn(doneEvt)
 
 	return nil
+}
+
+// classifyCrewRuntimeError maps a raw EnsureCrewRuntime failure to a stable code
+// + a safe, actionable user message. Like userFacingAssignmentError it is a
+// substring classifier (the provider wraps most causes as %w strings, not typed
+// sentinels), and it never leaks the raw daemon text — that goes to logs / the
+// run record via the caller's wrapped return. Codes are a closed set the UI /
+// agent can branch on: legacy_volume_conflict, image_missing, resource_limit,
+// provision_failed, internal.
+func classifyCrewRuntimeError(err error) (code, message string) {
+	raw := ""
+	if err != nil {
+		raw = err.Error()
+	}
+	lower := strings.ToLower(raw)
+	const hint = " Details are in the run journal / server logs."
+	switch {
+	case strings.Contains(lower, "legacy") && strings.Contains(lower, "volume"):
+		return "legacy_volume_conflict",
+			"This crew has a legacy storage volume that must be migrated or removed before it can start." + hint
+	case strings.Contains(lower, "image missing"),
+		strings.Contains(lower, "reprovision"),
+		strings.Contains(lower, "needs reprovisioning"):
+		return "image_missing",
+			"The crew's container image is missing locally — reprovision the crew, then retry." + hint
+	case strings.Contains(lower, "resource limit"),
+		strings.Contains(lower, "memory limit"),
+		strings.Contains(lower, "cpu limit"),
+		strings.Contains(lower, "insufficient memory"),
+		strings.Contains(lower, "out of memory"):
+		return "resource_limit",
+			"The agent container was refused because of a resource limit (memory/CPU)." + hint
+	case strings.Contains(lower, "container create"),
+		strings.Contains(lower, "container start"),
+		strings.Contains(lower, "start existing container"),
+		strings.Contains(lower, "ensure image"),
+		strings.Contains(lower, "ensure network"):
+		return "provision_failed",
+			"The agent container failed to start (provisioning error)." + hint
+	default:
+		return "internal", "The agent container could not be started." + hint
+	}
 }
