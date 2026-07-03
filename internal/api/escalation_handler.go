@@ -87,11 +87,6 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	escalationID := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	var contextVal interface{}
-	if body.Context != "" {
-		contextVal = body.Context
-	}
-
 	escalationType := body.Type
 	if escalationType == "" {
 		escalationType = "TEXT"
@@ -125,17 +120,48 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	var credentialName string
 	if escalationType == "CREDENTIAL" {
 		if proposal, ok := parseCredentialProposal(body.Metadata); ok {
-			cid, created := h.createPendingCredential(r.Context(), body.WorkspaceID, fromAgentID, proposal)
-			if created {
+			cid, outcome := h.createPendingCredential(r.Context(), body.WorkspaceID, fromAgentID, proposal)
+			switch outcome {
+			case pendingCredStaged:
 				credentialID = cid
 				credentialName = proposal.Name
+			case pendingCredNameConflict:
+				// Recoverable: no credential was staged, but a human should still
+				// be told. Lead the escalation with a note so the reporter isn't
+				// left thinking a one-click approval is waiting. (Secret already
+				// discarded; redaction below still runs.)
+				body.Context = prependEscalationNote(body.Context,
+					fmt.Sprintf("A credential named %q already exists, so the agent's proposed value was NOT staged and has been discarded — supply or rotate it manually.", proposal.Name))
+			case pendingCredInvalidType:
+				body.Context = prependEscalationNote(body.Context,
+					fmt.Sprintf("The proposed credential type %q is not recognized, so the value was NOT staged and has been discarded — a human must supply the credential.", proposal.Type))
+			case pendingCredNoApprover:
+				// Hard failure: nothing can approve the credential and the secret
+				// is gone. Fail LOUD instead of recording a PENDING escalation that
+				// falsely claims a proposal is waiting (doctrine: never fake success).
+				h.logger.Warn("escalation credential proposal rejected: no workspace owner",
+					"workspace_id", body.WorkspaceID, "from", body.FromSlug)
+				replyError(w, http.StatusServiceUnavailable,
+					"credential proposal could not be stored: no workspace owner is configured to approve it")
+				return
+			case pendingCredVaultError:
+				h.logger.Warn("escalation credential proposal rejected: vault error",
+					"workspace_id", body.WorkspaceID, "from", body.FromSlug)
+				replyError(w, http.StatusServiceUnavailable,
+					"credential proposal could not be stored: vault error — retry")
+				return
 			}
-			body.Metadata = proposal.redactedMetadata(cid)
+			body.Metadata = proposal.redactedMetadata(cid) // cid=="" on the note paths
 		} else if metadataCarriesValue(body.Metadata) {
 			// Malformed proposal that still embeds a secret (e.g. missing name) —
 			// never persist or journal it raw. Drop to a redacted marker.
 			body.Metadata = `{"redacted":true}`
 		}
+	}
+
+	var contextVal interface{}
+	if body.Context != "" {
+		contextVal = body.Context
 	}
 
 	var metadataVal interface{}

@@ -108,9 +108,9 @@ func TestCreatePendingCredential_Success(t *testing.T) {
 	ensureEncryptionKey(t)
 	h, ownerID, wsID, _, agentID := covEscFixture(t)
 	p := credentialProposal{Name: "REDIS_URL", Type: "SECRET", Provider: "NONE", Value: "redis://:p@h:6379/0"}
-	credID, ok := h.createPendingCredential(context.Background(), wsID, agentID, p)
-	if !ok || credID == "" {
-		t.Fatalf("createPendingCredential ok=%v id=%q, want success", ok, credID)
+	credID, res := h.createPendingCredential(context.Background(), wsID, agentID, p)
+	if res != pendingCredStaged || credID == "" {
+		t.Fatalf("createPendingCredential res=%v id=%q, want staged", res, credID)
 	}
 	status, encVal, actorType, actorID, createdBy, deleted := credRow(t, h, credID)
 	if status != "PENDING_APPROVAL" {
@@ -135,10 +135,10 @@ func TestCreatePendingCredential_Success(t *testing.T) {
 
 func TestCreatePendingCredential_InvalidType_Fallback(t *testing.T) {
 	h, _, wsID, _, agentID := covEscFixture(t)
-	_, ok := h.createPendingCredential(context.Background(), wsID, agentID,
+	_, res := h.createPendingCredential(context.Background(), wsID, agentID,
 		credentialProposal{Name: "X", Type: "BOGUS", Value: "v"})
-	if ok {
-		t.Fatal("invalid type should not create a pending credential")
+	if res != pendingCredInvalidType {
+		t.Fatalf("invalid type res=%v, want pendingCredInvalidType", res)
 	}
 }
 
@@ -148,10 +148,10 @@ func TestCreatePendingCredential_NameCollision_Fallback(t *testing.T) {
 		(id, workspace_id, name, encrypted_value, type, provider, scope, status, created_by, created_at, updated_at)
 		VALUES ('existing', ?, 'DUP', 'enc', 'SECRET', 'NONE', 'WORKSPACE', 'ACTIVE', ?, datetime('now'), datetime('now'))`,
 		wsID, ownerID)
-	_, ok := h.createPendingCredential(context.Background(), wsID, agentID,
+	_, res := h.createPendingCredential(context.Background(), wsID, agentID,
 		credentialProposal{Name: "DUP", Type: "SECRET", Value: "v"})
-	if ok {
-		t.Fatal("name collision with a live credential should fall back (no pending row)")
+	if res != pendingCredNameConflict {
+		t.Fatalf("name collision res=%v, want pendingCredNameConflict (no pending row)", res)
 	}
 	var n int
 	h.db.QueryRow(`SELECT COUNT(*) FROM credentials WHERE workspace_id=? AND name='DUP'`, wsID).Scan(&n)
@@ -271,10 +271,10 @@ func seedLinkedEscalation(t *testing.T, h *QueryHandler, escID, wsID, crewID, ag
 func TestApprovePendingCredential_Activates(t *testing.T) {
 	ensureEncryptionKey(t)
 	h, userID, wsID, crewID, agentID := covEscFixture(t)
-	credID, ok := h.createPendingCredential(context.Background(), wsID, agentID,
+	credID, res := h.createPendingCredential(context.Background(), wsID, agentID,
 		credentialProposal{Name: "REDIS_URL", Type: "SECRET", Value: "v"})
-	if !ok {
-		t.Fatal("setup: pending credential not created")
+	if res != pendingCredStaged {
+		t.Fatalf("setup: pending credential not created (res=%v)", res)
 	}
 	seedLinkedEscalation(t, h, "esc-app", wsID, crewID, agentID, credID)
 
@@ -302,10 +302,10 @@ func TestApprovePendingCredential_Activates(t *testing.T) {
 func TestRejectPendingCredential_SoftDeletes(t *testing.T) {
 	ensureEncryptionKey(t)
 	h, userID, wsID, crewID, agentID := covEscFixture(t)
-	credID, ok := h.createPendingCredential(context.Background(), wsID, agentID,
+	credID, res := h.createPendingCredential(context.Background(), wsID, agentID,
 		credentialProposal{Name: "REDIS_URL", Type: "SECRET", Value: "v"})
-	if !ok {
-		t.Fatal("setup: pending credential not created")
+	if res != pendingCredStaged {
+		t.Fatalf("setup: pending credential not created (res=%v)", res)
 	}
 	seedLinkedEscalation(t, h, "esc-rej", wsID, crewID, agentID, credID)
 
@@ -330,10 +330,10 @@ func TestRejectPendingCredential_SoftDeletes(t *testing.T) {
 func TestResolveEscalation_ThroughRequireWorkspace(t *testing.T) {
 	ensureEncryptionKey(t)
 	h, userID, wsID, crewID, agentID := covEscFixture(t)
-	credID, ok := h.createPendingCredential(context.Background(), wsID, agentID,
+	credID, res := h.createPendingCredential(context.Background(), wsID, agentID,
 		credentialProposal{Name: "REDIS_URL", Type: "SECRET", Value: "v"})
-	if !ok {
-		t.Fatal("setup: pending credential not created")
+	if res != pendingCredStaged {
+		t.Fatalf("setup: pending credential not created (res=%v)", res)
 	}
 	seedLinkedEscalation(t, h, "esc-mw", wsID, crewID, agentID, credID)
 

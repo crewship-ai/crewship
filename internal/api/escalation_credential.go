@@ -86,21 +86,58 @@ func parseCredentialProposal(metadata string) (credentialProposal, bool) {
 	return p, true
 }
 
+// pendingCredResult classifies the outcome of staging an agent-proposed
+// credential so the caller can react honestly. The distinction matters: a
+// recoverable mismatch (name collision, unknown type) should still surface a
+// plain escalation to a human, but a hard failure (no approver, vault error)
+// must NOT be recorded as a PENDING escalation that falsely claims a proposal
+// is waiting for one-click approval when the secret has already been discarded.
+type pendingCredResult int
+
+const (
+	// pendingCredStaged: the credential row was created PENDING_APPROVAL; the
+	// caller links it, redacts the metadata, and records the escalation.
+	pendingCredStaged pendingCredResult = iota
+	// pendingCredNameConflict: a live credential already uses the proposed name
+	// (we never auto-rename). Recoverable — record a plain escalation with a
+	// human-readable note, no credential link.
+	pendingCredNameConflict
+	// pendingCredInvalidType: the proposal's Type is unknown. Recoverable —
+	// record a plain escalation with a note, no credential link.
+	pendingCredInvalidType
+	// pendingCredNoApprover: no workspace OWNER exists to attribute/approve the
+	// credential. Hard failure — the caller must NOT record an escalation.
+	pendingCredNoApprover
+	// pendingCredVaultError: encrypt or insert failed. Hard failure — the caller
+	// must NOT record an escalation (the agent should retry).
+	pendingCredVaultError
+)
+
+// prependEscalationNote puts a human-readable note at the top of an
+// escalation's context, keeping any agent-supplied body below a blank line. Used
+// when a credential proposal could not be staged but a plain escalation is still
+// warranted, so the reporter isn't left thinking a one-click approval is waiting.
+func prependEscalationNote(existing, note string) string {
+	if strings.TrimSpace(existing) == "" {
+		return note
+	}
+	return note + "\n\n" + existing
+}
+
 // createPendingCredential inserts an agent-proposed credential in
 // PENDING_APPROVAL state. Such a row is filtered out of every credential
 // delivery path (agent_config, keeper, models, auto-assign), so no agent can
 // use it until a human flips it to ACTIVE via ResolveEscalation.
 //
-// Returns (credentialID, true) on success. (─, false) means "could not create a
-// pending row — fall back to a plain escalation": invalid type, a live name
-// collision (we never auto-rename, which would break the agent's env-var
-// mapping), no workspace owner to attribute the row to, or an encrypt/insert
-// failure. The escalation itself still gets created either way.
-func (h *QueryHandler) createPendingCredential(ctx context.Context, wsID, fromAgentID string, p credentialProposal) (string, bool) {
+// Returns (credentialID, pendingCredStaged) on success. On failure the second
+// return classifies why (see pendingCredResult); the credentialID is "". The
+// caller decides — from the class — whether a plain escalation is still
+// warranted (recoverable) or the whole request must fail loud (hard failure).
+func (h *QueryHandler) createPendingCredential(ctx context.Context, wsID, fromAgentID string, p credentialProposal) (string, pendingCredResult) {
 	if msg := validateCredentialType(p.Type); msg != "" {
 		h.logger.Warn("pending credential: invalid type, falling back to plain escalation",
 			"type", p.Type, "agent_id", fromAgentID)
-		return "", false
+		return "", pendingCredInvalidType
 	}
 
 	// credentials.created_by is NOT NULL → users(id); an agent has no human
@@ -113,9 +150,9 @@ func (h *QueryHandler) createPendingCredential(ctx context.Context, wsID, fromAg
 		WHERE workspace_id = ? AND role = 'OWNER'
 		ORDER BY created_at ASC LIMIT 1
 	`, wsID).Scan(&ownerID); err != nil {
-		h.logger.Warn("pending credential: no workspace owner to attribute, falling back",
+		h.logger.Warn("pending credential: no workspace owner to attribute",
 			"workspace_id", wsID, "error", err)
-		return "", false
+		return "", pendingCredNoApprover
 	}
 
 	// Clear any soft-deleted same-name row so the INSERT can't trip the
@@ -132,13 +169,13 @@ func (h *QueryHandler) createPendingCredential(ctx context.Context, wsID, fromAg
 		wsID, p.Name).Scan(&existing); err == nil && existing > 0 {
 		h.logger.Warn("pending credential: name already in use, falling back to plain escalation",
 			"name", p.Name)
-		return "", false
+		return "", pendingCredNameConflict
 	}
 
 	enc, err := encryption.Encrypt(p.Value)
 	if err != nil {
 		h.logger.Error("pending credential: encrypt", "error", err)
-		return "", false
+		return "", pendingCredVaultError
 	}
 
 	credID := generateCUID()
@@ -150,7 +187,7 @@ func (h *QueryHandler) createPendingCredential(ctx context.Context, wsID, fromAg
 		VALUES (?, ?, ?, '', ?, ?, ?, 'WORKSPACE', 1, 'PENDING_APPROVAL', ?, ?, ?, 'agent', ?)`,
 		credID, wsID, p.Name, enc, p.Type, p.Provider, ownerID, now, now, fromAgentID); err != nil {
 		h.logger.Error("pending credential: insert", "error", err, "name", p.Name)
-		return "", false
+		return "", pendingCredVaultError
 	}
 
 	if auditErr := RecordCredentialEvent(ctx, h.db, h.logger, credID,
@@ -164,5 +201,5 @@ func (h *QueryHandler) createPendingCredential(ctx context.Context, wsID, fromAg
 
 	h.logger.Info("agent proposed credential (pending approval)",
 		"credential_id", credID, "name", p.Name, "agent_id", fromAgentID)
-	return credID, true
+	return credID, pendingCredStaged
 }
