@@ -6,7 +6,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -260,91 +259,38 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	// Get crew info
-	var issuePrefix sql.NullString
-	var crewSlug string
-	err = tx.QueryRowContext(r.Context(),
-		`SELECT issue_prefix, slug FROM crews WHERE id = ? AND workspace_id = ?`,
-		req.CrewID, req.WorkspaceID).Scan(&issuePrefix, &crewSlug)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeProblem(w, r, http.StatusNotFound, "Crew not found")
-			return
-		}
-		internalError(w, r, h.logger, "get crew for issue", err)
-		return
-	}
-
-	prefix := issuePrefix.String
-	if prefix == "" {
-		slug := strings.ToUpper(crewSlug)
-		if len(slug) > 3 {
-			slug = slug[:3]
-		}
-		prefix = slug
-	}
-
-	// Atomic counter
-	var number int
-	err = tx.QueryRowContext(r.Context(),
-		`INSERT INTO issue_counters(crew_id, next_number) VALUES(?, 1)
-		 ON CONFLICT(crew_id) DO UPDATE SET next_number = issue_counters.next_number + 1
-		 RETURNING next_number`, req.CrewID).Scan(&number)
-	if err != nil {
-		internalError(w, r, h.logger, "issue counter", err)
-		return
-	}
-
-	identifier := prefix + "-" + strconv.Itoa(number)
-
-	// Find lead agent
-	var leadAgentID string
-	err = tx.QueryRowContext(r.Context(),
-		`SELECT id FROM agents WHERE crew_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL LIMIT 1`,
-		req.CrewID).Scan(&leadAgentID)
-	if err != nil {
-		h.logger.Error("find lead agent", "error", err)
-		writeProblem(w, r, http.StatusBadRequest, "Crew has no LEAD agent")
-		return
-	}
-
-	id := generateCUID()
-	traceID := "issue-" + generateCUID()
-	now := time.Now().UTC().Format(time.RFC3339)
-
 	// Creator attribution (v129): this endpoint is only reachable through
 	// the sidecar's trusted IPC identity, so a supplied author_agent_id
 	// (validated against crew+workspace above) is THE creator and the
 	// channel is always the agent tool call. Chat/run provenance rides
-	// along when the sidecar has it (v108 columns).
-	nullable := func(s string) sql.NullString {
-		return sql.NullString{String: s, Valid: s != ""}
-	}
-
-	_, err = tx.ExecContext(r.Context(), `
-		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id,
-		                      title, description, status, number, identifier,
-		                      priority, assignee_type, assignee_id,
-		                      author_agent_id, author_chat_id, author_run_id, authored_via,
-		                      sort_order, mission_type, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'BACKLOG', ?, ?, ?, ?, ?, ?, ?, ?, 'agent_tool_call', 0, 'issue', ?, ?)`,
-		id, req.WorkspaceID, req.CrewID, leadAgentID, traceID,
-		req.Title, req.Description, number, identifier,
-		req.Priority, req.AssigneeType, req.AssigneeID,
-		nullable(req.AuthorAgentID), nullable(req.AuthorChatID), nullable(req.AuthorRunID),
-		now, now)
-	if err != nil {
+	// along when the sidecar has it (v108 columns). All issue creation goes
+	// through insertIssueTx — the single chokepoint shared with the
+	// recurring-issue dispatcher.
+	id, identifier, err := insertIssueTx(r.Context(), tx, h.logger, issueSpec{
+		WorkspaceID:   req.WorkspaceID,
+		CrewID:        req.CrewID,
+		Title:         req.Title,
+		Description:   req.Description,
+		Priority:      req.Priority,
+		AssigneeType:  req.AssigneeType,
+		AssigneeID:    req.AssigneeID,
+		Labels:        req.Labels,
+		AuthoredVia:   "agent_tool_call",
+		AuthorAgentID: req.AuthorAgentID,
+		AuthorChatID:  req.AuthorChatID,
+		AuthorRunID:   req.AuthorRunID,
+	})
+	switch {
+	case errors.Is(err, errIssueCrewNotFound):
+		writeProblem(w, r, http.StatusNotFound, "Crew not found")
+		return
+	case errors.Is(err, errIssueNoLeadAgent):
+		h.logger.Error("find lead agent", "crew_id", req.CrewID)
+		writeProblem(w, r, http.StatusBadRequest, "Crew has no LEAD agent")
+		return
+	case err != nil:
 		internalError(w, r, h.logger, "insert issue", err)
 		return
-	}
-
-	// Labels
-	for _, labelID := range req.Labels {
-		if _, err := tx.ExecContext(r.Context(),
-			`INSERT OR IGNORE INTO mission_labels(mission_id, label_id) VALUES(?, ?)`,
-			id, labelID); err != nil {
-			h.logger.Error("insert issue label", "issue_id", id, "error", err)
-		}
 	}
 
 	if err := tx.Commit(); err != nil {
