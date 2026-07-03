@@ -158,11 +158,14 @@ func TestWriter_EmitAfterClose_PersistsInline(t *testing.T) {
 	}
 }
 
-// TestWriter_PersistBatch_RollbackOnPartialFailure confirms an invalid row
-// inside a batch aborts the whole batch — no partial writes.
+// TestWriter_PersistBatch_RollbackOnPartialFailure confirms the batch tx is
+// atomic (no partial commit) AND that a permanently-invalid row no longer
+// wedges the stream: after the batch-level rollback, the writer isolates the
+// poison per-entry, drops it, and commits the two valid rows. (Before the
+// dev3 disk-fill fix this batch was retained and retried forever, committing
+// 0 rows and spamming an ERROR each tick.)
 //
-// We force a write failure by trying to insert into a workspace whose
-// foreign key constraint we add for this test.
+// We force the failure with a CHECK constraint that only 'ws_ok' satisfies.
 func TestWriter_PersistBatch_RollbackOnPartialFailure(t *testing.T) {
 	// Need a fresh DB with a constrained workspace ID column so we can
 	// reliably trigger one row's constraint violation while others would
@@ -223,19 +226,26 @@ func TestWriter_PersistBatch_RollbackOnPartialFailure(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	// All three rows should be retained in-batch (none committed) on the
-	// first failed attempt. The retry path keeps trying. The contract
-	// we test here: under no circumstance is the DB left with a partial
-	// commit (no row sneaked through while another rolled back).
+	// The batch-level insert rolls back atomically (no partial commit),
+	// then per-entry isolation drops the CHECK-violating row and commits
+	// the two valid ones. Exactly 2 rows land — never 1 or 3, and never 0
+	// (which would mean the poison wedged the whole batch as it used to).
 	var n int64
 	if err := db.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM journal_entries").Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	// Either 0 (CHECK violation rolls everything back) or 3 (all valid
-	// — wouldn't happen here) — but never 1 or 2 (partial commit).
-	if n == 1 || n == 2 {
-		t.Fatalf("partial commit detected: %d rows committed", n)
+	if n != 2 {
+		t.Fatalf("committed rows = %d, want 2 (poison dropped, both valid rows kept)", n)
+	}
+	// The invalid row must not have sneaked in.
+	var bad int64
+	if err := db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM journal_entries WHERE summary = 'INVALID'").Scan(&bad); err != nil {
+		t.Fatalf("count invalid: %v", err)
+	}
+	if bad != 0 {
+		t.Fatalf("invalid row committed (%d) — CHECK should have rejected it", bad)
 	}
 }
 

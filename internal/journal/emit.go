@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -258,23 +259,62 @@ func (w *Writer) run() {
 		if len(batch) == 0 {
 			return
 		}
-		if err := w.persistBatch(context.Background(), batch); err != nil {
-			persistFailures++
-			w.logger.Error("journal batch write failed — retaining batch for retry",
-				"err", err, "n", len(batch), "consecutive_failures", persistFailures)
-			// Hard cap so a permanently broken DB doesn't OOM the
-			// process. 64 MB worth of Entry structs is ~30k rows;
-			// far beyond that we start dropping oldest with a loud
-			// error so the failure is still observable.
-			if estimateBatchBytes(batch) > maxBatchRetryBytes {
-				w.logger.Error("journal batch exceeded retry cap — dropping oldest half",
-					"n", len(batch))
-				batch = batch[len(batch)/2:]
+		err := w.persistBatch(context.Background(), batch)
+		if err == nil {
+			persistFailures = 0
+			batch = batch[:0]
+			return
+		}
+		// A permanent error (constraint violation, un-marshalable payload)
+		// will fail identically on every retry. Because the batch commits
+		// as ONE transaction, a single poison entry rolls back — and thus
+		// blocks — every other entry in the batch, forever: the retry loop
+		// then spams an ERROR each tick and never drains, wedging the whole
+		// audit stream and filling the disk. Isolate the poison by retrying
+		// entry-by-entry: the good rows commit, and only the row(s) that
+		// fail permanently are dropped (loudly, with identity). Transient
+		// failures (DB locked/busy) fall through to the retain-and-retry
+		// path below unchanged, so the durability contract still holds for
+		// recoverable outages.
+		if isPermanentDBError(err) {
+			kept := batch[:0]
+			dropped := 0
+			for _, e := range batch {
+				perr := w.persistOne(context.Background(), e)
+				switch {
+				case perr == nil:
+					// committed
+				case isPermanentDBError(perr):
+					w.logger.Error("journal entry permanently rejected — dropping to unblock the stream",
+						"err", perr, "entry_id", e.ID, "entry_type", e.Type,
+						"workspace_id", e.WorkspaceID, "mission_id", e.MissionID)
+					dropped++
+				default:
+					// transient for this specific entry — keep for retry
+					kept = append(kept, e)
+				}
+			}
+			batch = kept
+			// Dropping the poison is forward progress: reset the failure
+			// counter so a later transient blip starts its own backoff.
+			if dropped > 0 {
+				persistFailures = 0
 			}
 			return
 		}
-		persistFailures = 0
-		batch = batch[:0]
+
+		persistFailures++
+		w.logger.Error("journal batch write failed — retaining batch for retry",
+			"err", err, "n", len(batch), "consecutive_failures", persistFailures)
+		// Hard cap so a permanently broken DB doesn't OOM the
+		// process. 64 MB worth of Entry structs is ~30k rows;
+		// far beyond that we start dropping oldest with a loud
+		// error so the failure is still observable.
+		if estimateBatchBytes(batch) > maxBatchRetryBytes {
+			w.logger.Error("journal batch exceeded retry cap — dropping oldest half",
+				"n", len(batch))
+			batch = batch[len(batch)/2:]
+		}
 	}
 
 	for {
@@ -334,6 +374,25 @@ func (w *Writer) run() {
 // during shutdown.
 func (w *Writer) persistOne(ctx context.Context, e Entry) error {
 	return w.persistBatch(ctx, []Entry{e})
+}
+
+// isPermanentDBError reports whether err will fail identically on every
+// retry, so retrying it can never succeed and only wedges the batch.
+//
+// Permanent: SQLite constraint violations (FOREIGN KEY / UNIQUE / NOT NULL
+// / CHECK — all surface as "constraint failed" from modernc.org/sqlite) and
+// a payload/refs value that won't marshal ("journal: marshal …"). Everything
+// else — "database is locked"/"busy", context deadline, a dropped connection
+// — is treated as transient and retained for retry, so a recoverable outage
+// never drops an audit entry. Classify conservatively: only errors we are
+// confident are deterministic count as permanent.
+func isPermanentDBError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "constraint failed") ||
+		strings.Contains(s, "journal: marshal")
 }
 
 const insertSQL = `INSERT INTO journal_entries
