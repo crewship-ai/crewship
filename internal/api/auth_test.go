@@ -277,10 +277,10 @@ func TestAuthBootstrap_WindowExpired(t *testing.T) {
 	v := newTestJWTValidator(t)
 	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
 
-	// Arm normally, then manually rewind the deadline to a past
-	// timestamp. ArmDeployRaceWindow clamps non-positive durations
-	// to the default 5-minute window, so we can't shortcut via a
-	// negative duration — we drive the post-arm state directly.
+	// Arm a FINITE window (armBootstrapForTest passes a positive
+	// duration = the opt-in hardening mode), then manually rewind the
+	// deadline to a past timestamp to simulate expiry — we drive the
+	// post-arm state directly rather than sleeping.
 	armBootstrapForTest(t, h)
 	h.bootstrapMu.Lock()
 	h.bootstrapDeadline = time.Now().Add(-time.Minute)
@@ -295,6 +295,74 @@ func TestAuthBootstrap_WindowExpired(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "window expired") {
 		t.Errorf("body=%q, want explanation mentioning 'window expired'", rr.Body.String())
+	}
+}
+
+// TestAuthBootstrap_NoExpiryDefault verifies the DEFAULT behaviour
+// (ArmDeployRaceWindow with a non-positive duration): the bootstrap
+// window stays open until the first admin exists, with NO time
+// deadline. This matches the GitLab/Grafana first-run pattern — the
+// empty users table is the gate, not a clock.
+func TestAuthBootstrap_NoExpiryDefault(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	v := newTestJWTValidator(t)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
+
+	// Default arming (duration <= 0) => no-expiry mode.
+	if err := h.ArmDeployRaceWindow(context.Background(), 0); err != nil {
+		t.Fatalf("arm: %v", err)
+	}
+	if !h.bootstrapWindowOpen() {
+		t.Fatal("window should be open right after arming in no-expiry mode")
+	}
+	// Even a deadline far in the past must NOT close a no-expiry window —
+	// only creating the first admin closes it.
+	h.bootstrapMu.Lock()
+	h.bootstrapDeadline = time.Now().Add(-time.Hour)
+	h.bootstrapMu.Unlock()
+	if !h.bootstrapWindowOpen() {
+		t.Error("no-expiry window must stay open regardless of any deadline value")
+	}
+
+	// A real bootstrap still succeeds...
+	body := bytes.NewBufferString(`{"full_name":"Admin","email":"a@b.com","password":"longenough"}`)
+	req := httptest.NewRequest("POST", "/api/v1/auth/bootstrap", body)
+	rr := httptest.NewRecorder()
+	h.Bootstrap(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("bootstrap status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	// ...and consumes the window even in no-expiry mode.
+	if h.bootstrapWindowOpen() {
+		t.Error("window must be closed after a successful bootstrap")
+	}
+}
+
+// TestAuthBootstrap_FiniteWindowOptIn verifies the opt-in hardening
+// path: a positive duration (CREWSHIP_BOOTSTRAP_WINDOW) arms a finite
+// deploy-race window that closes on its deadline — the pre-existing
+// behaviour, now opt-in for internet-facing deploys.
+func TestAuthBootstrap_FiniteWindowOptIn(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	v := newTestJWTValidator(t)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
+
+	if err := h.ArmDeployRaceWindow(context.Background(), time.Hour); err != nil {
+		t.Fatalf("arm: %v", err)
+	}
+	if !h.bootstrapWindowOpen() {
+		t.Fatal("finite window should be open right after arming")
+	}
+	// Rewind past the deadline → closed.
+	h.bootstrapMu.Lock()
+	h.bootstrapDeadline = time.Now().Add(-time.Minute)
+	h.bootstrapMu.Unlock()
+	if h.bootstrapWindowOpen() {
+		t.Error("finite window must close once its deadline passes")
 	}
 }
 

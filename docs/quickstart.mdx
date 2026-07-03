@@ -112,7 +112,7 @@ For pinned versions, custom install directories, and air-gapped install paths se
 
         Single-form bootstrap, no token to copy from anywhere.
 
-        **Deploy-race safety.** The server arms a short startup window (default 5 minutes) during which the bootstrap endpoint accepts requests; afterwards it refuses with 410 until restart. An unbootstrapped instance reachable on the public internet doesn't sit indefinitely open for the first scanner. If you miss the window, restart `crewship start` to arm a new one.
+        **No rush by default.** The bootstrap page stays open until you create the first admin — the empty user table is the gate, so take your time (the same first-run pattern as GitLab/Grafana). Once an admin exists, `/bootstrap` is closed for good.
       </Tab>
       <Tab title="CLI / headless / CI">
         For Ansible, Terraform, GitOps, or any provisioning flow where launching a browser isn't an option:
@@ -129,7 +129,7 @@ For pinned versions, custom install directories, and air-gapped install paths se
     </Tabs>
 
     <Note>
-      **The 5-minute deploy-race window applies to both paths.** `crewship init` POSTs to the same `/api/v1/bootstrap` endpoint that the browser form does, so it's bound by the same window — after the deadline, both paths return `410 Bootstrap window expired — restart the server to open a new one` until you restart. For unattended provisioning where the bootstrap call might land minutes-to-hours after the server boots, restart the server immediately before the CLI call so the window is fresh.
+      **Hardening for public instances (opt-in).** If you expose a fresh instance to the internet *before* bootstrapping it, set `CREWSHIP_BOOTSTRAP_WINDOW=5m` (any Go duration) to arm a finite deploy-race window: `/bootstrap` accepts requests only for that interval after startup, then returns `410 Bootstrap window expired — restart the server to open a new one` so a scanner can't grab the admin account. Both the browser form and `crewship init` POST the same `/api/v1/bootstrap` endpoint and share the window; for unattended provisioning that lands minutes-to-hours after boot, restart the server immediately before the call so the window is fresh. Left unset (the default), bootstrap simply stays open until the first admin exists.
     </Note>
   </Step>
 

@@ -136,6 +136,14 @@ type AuthConfig struct {
 	AllowSignup    bool          `yaml:"allow_signup"`
 	GoogleClientID string        `yaml:"google_client_id"`
 	GoogleSecret   string        `yaml:"google_client_secret"`
+
+	// BootstrapWindow controls the first-run /bootstrap window. Zero (the
+	// default) keeps bootstrap open until the first admin exists — the empty
+	// users table is the gate (GitLab-style first run). A positive value
+	// (env CREWSHIP_BOOTSTRAP_WINDOW=<duration>, e.g. "5m") opts into a
+	// finite deploy-race window that refuses /bootstrap after it elapses —
+	// for instances exposed to the internet before they're bootstrapped.
+	BootstrapWindow time.Duration `yaml:"bootstrap_window"`
 }
 
 // LLMProxyConfig holds settings for the LLM proxy that tracks token usage
@@ -424,6 +432,13 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if val, ok := envBool("CREWSHIP_ALLOW_SIGNUP"); ok {
 		cfg.Auth.AllowSignup = val
+	}
+	if v := os.Getenv("CREWSHIP_BOOTSTRAP_WINDOW"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.Auth.BootstrapWindow = d
+		} else {
+			slog.Warn("ignoring invalid CREWSHIP_BOOTSTRAP_WINDOW (want a positive Go duration like 5m; default keeps bootstrap open until the first admin)", "value", v, "error", err)
+		}
 	}
 	if v := os.Getenv("GOOGLE_CLIENT_ID"); v != "" {
 		cfg.Auth.GoogleClientID = v

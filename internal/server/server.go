@@ -833,7 +833,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 				func() {
 					armCtx, armCancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer armCancel()
-					if err := authH.ArmDeployRaceWindow(armCtx, 0); err != nil {
+					if err := authH.ArmDeployRaceWindow(armCtx, cfg.Auth.BootstrapWindow); err != nil {
 						logger.Error("bootstrap: deploy-race window arm failed",
 							"error", err,
 							"impact", "fail-closed: /api/v1/bootstrap returns 503 via bootstrapArmingFailed() until the database is reachable and the server is restarted")
