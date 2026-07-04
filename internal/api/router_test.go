@@ -304,8 +304,9 @@ func TestCrewCreate_WithNetworkPolicy(t *testing.T) {
 		t.Errorf("allowed_domains = %v, want [github.com api.github.com]", crew.AllowedDomains)
 	}
 
-	// Verify default create (no network_mode) returns "free"
-	body2 := bytes.NewBufferString(`{"name":"Free Team","slug":"free-team"}`)
+	// Verify default create (no network_mode) returns the fail-safe "restricted"
+	// with an empty allowlist (LLM providers still reachable via DefaultAllowedDomains).
+	body2 := bytes.NewBufferString(`{"name":"Default Team","slug":"default-team"}`)
 	req2 := httptest.NewRequest("POST", "/api/v1/crews?workspace_id="+wsID, body2)
 	ctx2 := withUser(req2.Context(), &AuthUser{ID: userID})
 	ctx2 = withWorkspace(ctx2, wsID, "OWNER")
@@ -322,11 +323,11 @@ func TestCrewCreate_WithNetworkPolicy(t *testing.T) {
 	if err := json.Unmarshal(rr2.Body.Bytes(), &crew2); err != nil {
 		t.Fatalf("decode crew2 response: %v", err)
 	}
-	if crew2.NetworkMode != "free" {
-		t.Errorf("default network_mode = %q, want free", crew2.NetworkMode)
+	if crew2.NetworkMode != "restricted" {
+		t.Errorf("default network_mode = %q, want restricted (fail-safe default)", crew2.NetworkMode)
 	}
 	if crew2.AllowedDomains == nil || len(crew2.AllowedDomains) != 0 {
-		t.Errorf("default allowed_domains = %v, want []", crew2.AllowedDomains)
+		t.Errorf("default allowed_domains = %v, want [] (empty allowlist)", crew2.AllowedDomains)
 	}
 
 	// Verify invalid network_mode is rejected

@@ -146,11 +146,14 @@ func TestCovCruCreate_Happy_DefaultsAndDBRow(t *testing.T) {
 	if ttl.Valid {
 		t.Errorf("ttl = %v, want NULL by default", ttl.Int64)
 	}
-	if networkMode != "free" {
-		t.Errorf("network_mode = %q, want free", networkMode)
+	// Fail-safe default: new crews are 'restricted' with an empty allowlist
+	// (NULL allowed_domains → the gate falls back to DefaultAllowedDomains, so
+	// LLM providers still work while arbitrary egress is denied).
+	if networkMode != "restricted" {
+		t.Errorf("network_mode = %q, want restricted (fail-safe default)", networkMode)
 	}
 	if domains.Valid {
-		t.Errorf("allowed_domains = %q, want NULL in free mode", domains.String)
+		t.Errorf("allowed_domains = %q, want NULL (empty allowlist) by default", domains.String)
 	}
 }
 

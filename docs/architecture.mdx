@@ -167,8 +167,10 @@ The sidecar (`internal/sidecar/`) is an HTTP proxy running inside each crew cont
 
 | Mode | Behavior |
 |------|----------|
-| **free** (default) | Allow all outbound connections |
-| **restricted** | Only allow connections to allowlisted domains |
+| **restricted** (default for new crews) | Only allow connections to allowlisted domains (the default allowed domains below + any the crew adds) |
+| **free** | Allow all outbound connections (opt in per crew) |
+
+New crews default to **restricted** with an empty allowlist (fail-safe defaults) — the default allowed domains below still make LLM/CLI providers reachable, so agents work out of the box while arbitrary egress is denied. A denied request emits a `network.egress` journal entry (visible in Crow's Nest) naming the policy, so the operator can add the host to `allowed_domains`. Crews created before this change keep their existing `free` mode (grandfathered).
 
 Default allowed domains (from `internal/sidecar/allowlist.go` — each entry exists for a specific CLI):
 

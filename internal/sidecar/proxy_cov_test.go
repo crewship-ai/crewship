@@ -107,7 +107,7 @@ func TestCovHandleConnectTunnelSuccess(t *testing.T) {
 		Allowlist: NewDomainAllowlist(nil),
 		Logger:    covLogger(),
 		FreeMode:  true,
-		OnEgress: func(host, method, provider string, statusCode int) {
+		OnEgress: func(host, method, provider string, statusCode int, denied bool) {
 			mu.Lock()
 			defer mu.Unlock()
 			egressHost, egressMethod, egressStatus = host, method, statusCode
@@ -184,7 +184,7 @@ func TestCovHandleConnectDialFailure(t *testing.T) {
 		Allowlist: NewDomainAllowlist(nil),
 		Logger:    covLogger(),
 		FreeMode:  true,
-		OnEgress: func(host, method, provider string, statusCode int) {
+		OnEgress: func(host, method, provider string, statusCode int, denied bool) {
 			mu.Lock()
 			defer mu.Unlock()
 			egressMethod, egressStatus = method, statusCode
@@ -275,7 +275,7 @@ func TestCovHandleHTTPTransportErrorFiresObserver(t *testing.T) {
 		Allowlist: NewDomainAllowlist(nil),
 		Logger:    covLogger(),
 		FreeMode:  true,
-		OnEgress: func(host, method, provider string, statusCode int) {
+		OnEgress: func(host, method, provider string, statusCode int, denied bool) {
 			mu.Lock()
 			defer mu.Unlock()
 			gotHost, gotProvider, gotStatus = host, provider, statusCode
@@ -321,7 +321,7 @@ func TestCovReverseProxyInjectsKeyAndObservesUsage(t *testing.T) {
 		FreeMode:         true,
 		BillingMode:      "metered",
 		SubscriptionPlan: "Max 20x",
-		OnEgress: func(host, method, provider string, statusCode int) {
+		OnEgress: func(host, method, provider string, statusCode int, denied bool) {
 			mu.Lock()
 			defer mu.Unlock()
 			egressStatus = statusCode
@@ -393,7 +393,7 @@ func TestCovReverseProxyUpstreamErrorFiresObserver(t *testing.T) {
 		Allowlist: NewDomainAllowlist(nil),
 		Logger:    covLogger(),
 		FreeMode:  true,
-		OnEgress: func(host, method, provider string, statusCode int) {
+		OnEgress: func(host, method, provider string, statusCode int, denied bool) {
 			mu.Lock()
 			defer mu.Unlock()
 			gotStatus = statusCode

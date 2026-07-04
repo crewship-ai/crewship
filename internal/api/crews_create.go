@@ -117,8 +117,14 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("free deleted crew slug", "slug", req.Slug, "error", err)
 	}
 
-	// Validate and prepare network policy fields
-	networkMode := "free"
+	// Validate and prepare network policy fields.
+	// Fail-safe default (Saltzer & Schroeder): NEW crews default to
+	// 'restricted' with an empty allowlist, so an unconfigured crew reaches only
+	// DefaultAllowedDomains (LLM/CLI providers) — the agent still works, but
+	// arbitrary egress is denied by default instead of allowed. Existing crews
+	// keep whatever the v18 migration set (grandfathered 'free'); callers opt
+	// back into 'free' explicitly per crew.
+	networkMode := "restricted"
 	var allowedDomainsDB *string
 	if req.NetworkMode != nil && *req.NetworkMode != "" {
 		mode := strings.ToLower(*req.NetworkMode)
