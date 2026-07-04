@@ -20,10 +20,17 @@ func validateStepGates(st Step, agentSlugs map[string]struct{}) error {
 	}
 
 	switch st.OnFail {
-	case "", OnFailEscalateTier, OnFailAbort, OnFailRetryStep:
+	case "", OnFailEscalateTier, OnFailAbort:
 		// ok
+	case OnFailRetryStep:
+		// retry_step has no per-step retry budget implemented — the executor
+		// degrades it to abort, i.e. the opposite of its promise. Reject it at
+		// authoring time (loud) instead of shipping a routine that silently
+		// misbehaves. Use escalate_tier (re-runs at the next tier with the
+		// failure reason injected) until a real budget lands.
+		return fmt.Errorf("pipeline: step %q on_fail %q is not implemented (use escalate_tier or abort)", st.ID, st.OnFail)
 	default:
-		return fmt.Errorf("pipeline: step %q on_fail %q invalid (allowed: escalate_tier|abort|retry_step)", st.ID, st.OnFail)
+		return fmt.Errorf("pipeline: step %q on_fail %q invalid (allowed: escalate_tier|abort)", st.ID, st.OnFail)
 	}
 
 	// Outcomes (rubric-based grading) is only meaningful on
@@ -72,8 +79,10 @@ func validateStepGates(st Step, agentSlugs map[string]struct{}) error {
 			return fmt.Errorf("pipeline: step %q outcomes.max_iterations too high (max 10)", st.ID)
 		}
 		switch st.Outcomes.OnFail {
-		case "", OnFailEscalateTier, OnFailAbort, OnFailRetryStep:
+		case "", OnFailEscalateTier, OnFailAbort:
 			// ok
+		case OnFailRetryStep:
+			return fmt.Errorf("pipeline: step %q outcomes.on_fail %q is not implemented (use escalate_tier or abort)", st.ID, st.Outcomes.OnFail)
 		default:
 			return fmt.Errorf("pipeline: step %q outcomes.on_fail %q invalid", st.ID, st.Outcomes.OnFail)
 		}

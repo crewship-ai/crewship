@@ -456,7 +456,13 @@ type OnFailAction string
 const (
 	OnFailEscalateTier OnFailAction = "escalate_tier"
 	OnFailAbort        OnFailAction = "abort"
-	OnFailRetryStep    OnFailAction = "retry_step"
+	// OnFailRetryStep is NOT implemented — there is no per-step retry budget, so
+	// the executor could only degrade it to abort (the opposite of its promise).
+	// It is REJECTED at validation (dsl_validate_gates.go); use escalate_tier,
+	// which re-runs at the next tier with the failure reason injected. The const
+	// is retained so the executor can emit a clear error for any pre-existing
+	// stored routine that still carries it. Re-enable when a real budget lands.
+	OnFailRetryStep OnFailAction = "retry_step"
 )
 
 // RetryPolicy controls how the executor retries a failed step. This
