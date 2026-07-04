@@ -9,6 +9,7 @@ import (
 	neturl "net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -179,8 +180,21 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 		metadata = req.EvidencePack
 	}
 
+	// Identity is the canonical sidecar AgentSlug — NEVER the caller-supplied
+	// `from`. Any agent in the crew container can POST to /escalate; if we
+	// forwarded req.From verbatim, a compromised agent could set from=<peer>
+	// and the escalation (and any credential proposal it carries) would be
+	// attributed to and owned by a sibling agent, breaking non-repudiation.
+	// This mirrors keeper_bridge.go, which already closed the identical spoof on
+	// the credential path. The backend token is workspace-bound (not
+	// agent-bound), so the sidecar is the only place that holds the acting
+	// agent's true identity.
+	if from := strings.TrimSpace(req.From); from != "" && from != s.ipc.AgentSlug {
+		s.logger.Warn("escalate: ignoring from in request body; using canonical sidecar identity",
+			"received", from, "canonical_slug", s.ipc.AgentSlug)
+	}
 	body := map[string]string{
-		"from_slug":    req.From,
+		"from_slug":    s.ipc.AgentSlug,
 		"reason":       req.Reason,
 		"context":      req.Context,
 		"type":         req.Type,

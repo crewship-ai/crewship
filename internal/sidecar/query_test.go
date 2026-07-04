@@ -254,6 +254,53 @@ func TestHandleEscalate_MissingFields(t *testing.T) {
 	}
 }
 
+// TestHandleEscalate_SlugSpoofIgnored — a compromised agent that POSTs
+// from=<peer-slug> must NOT be able to raise an escalation attributed to that
+// peer. The sidecar forwards its canonical AgentSlug, ignoring the body's from.
+// RED on main: from_slug is forwarded verbatim, so the spoofed "viktor" reaches
+// crewshipd.
+func TestHandleEscalate_SlugSpoofIgnored(t *testing.T) {
+	var receivedBody map[string]string
+	mockCrewshipd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/internal/escalations" && r.Method == http.MethodPost {
+			bodyBytes, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(bodyBytes, &receivedBody)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"escalation_id":"esc-1","status":"PENDING"}`))
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v1/internal/escalations/") && strings.HasSuffix(r.URL.Path, "/wait") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status":"RESOLVED","resolution":"ok","action":"approve"}`))
+			return
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer mockCrewshipd.Close()
+
+	srv := newQueryServer(t, &IPCConfig{
+		BaseURL:     mockCrewshipd.URL,
+		Token:       "secret-token",
+		AgentSlug:   "nela", // the sidecar's true identity
+		CrewID:      "crew-1",
+		WorkspaceID: "ws-1",
+		ChatID:      "chat-1",
+	}, nil)
+
+	// The caller spoofs a sibling agent's slug.
+	req := httptest.NewRequest(http.MethodPost, "/escalate",
+		strings.NewReader(`{"from":"viktor","reason":"r"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.handleEscalate(w, req)
+
+	if got := receivedBody["from_slug"]; got != "nela" {
+		t.Errorf("from_slug forwarded as %q — slug spoofing not blocked (must be the canonical nela)", got)
+	}
+}
+
 func TestHandleEscalate_ForwardsToCrewshipd(t *testing.T) {
 	var receivedToken string
 	var receivedBody map[string]string
@@ -284,6 +331,7 @@ func TestHandleEscalate_ForwardsToCrewshipd(t *testing.T) {
 	srv := newQueryServer(t, &IPCConfig{
 		BaseURL:     mockCrewshipd.URL,
 		Token:       "secret-token",
+		AgentSlug:   "nela",
 		CrewID:      "crew-1",
 		WorkspaceID: "ws-1",
 		ChatID:      "chat-1",
