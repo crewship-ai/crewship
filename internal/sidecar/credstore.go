@@ -118,6 +118,34 @@ func (cs *CredStore) Remove(id string) {
 	cs.creds = filtered
 }
 
+// Reap removes every credential whose ID is NOT in keep, returning how many
+// were removed. It is the revocation-reaper's primitive: the sidecar has no
+// plaintext supply line after boot, so we never re-add or replace tokens — we
+// only drop the ones crewshipd no longer lists as live (revoked/deleted). A nil
+// or empty keep set is treated literally (removes everything); callers must only
+// invoke this after a SUCCESSFUL fetch so a transient error can't nuke valid
+// keys.
+func (cs *CredStore) Reap(keep map[string]struct{}) int {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	filtered := cs.creds[:0]
+	removed := 0
+	for _, c := range cs.creds {
+		if _, ok := keep[c.ID]; ok {
+			filtered = append(filtered, c)
+		} else {
+			removed++
+		}
+	}
+	cs.creds = filtered
+	if removed > 0 {
+		// Round-robin indices may now point past the end of a shrunk tier.
+		cs.idx = make(map[ProviderType]int)
+	}
+	return removed
+}
+
 // Count returns the number of credentials for a provider.
 func (cs *CredStore) Count(provider ProviderType) int {
 	cs.mu.RLock()
