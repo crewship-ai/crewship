@@ -43,6 +43,8 @@ type Schedule struct {
 	//   SKIPPED   — target routine not active (proposed/disabled)
 	//   WAITING   — run parked on a human approval gate (healthy,
 	//               non-terminal; resumes when the approval lands)
+	//   DEDUPED   — a re-fire of the same occurrence hit the idempotency
+	//               chokepoint; the original run owns the result (healthy)
 	LastStatus string
 	LastRunID  string
 	NextRunAt  *time.Time
@@ -508,6 +510,14 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 				// skip the failed-run alert below (the waitpoint itself
 				// already raised its own approval inbox card).
 				status = "WAITING"
+			case "DEDUPED":
+				// A re-fire of the same occurrence (duplicate tick / restart
+				// before next_run_at advanced) hit the idempotency chokepoint —
+				// the original run owns the result. That's a SUCCESSFUL dedup,
+				// not a failure: record it as DEDUPED and skip the MANAGER alert
+				// below (without this it falls through to FAILED and raises a
+				// false alarm for a healthy idempotency hit).
+				status = "DEDUPED"
 			}
 		}
 	}

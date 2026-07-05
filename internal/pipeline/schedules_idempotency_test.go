@@ -2,8 +2,8 @@ package pipeline
 
 import (
 	"context"
-	"io"
 	"log/slog"
+	"os"
 	"testing"
 	"time"
 )
@@ -26,7 +26,7 @@ func TestScheduledFireIsIdempotent(t *testing.T) {
 	store := deps.Store
 	p := saveResumePipeline(t, store, "cron-idem", agentStepDef)
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	scheduler := NewPipelineScheduler(NewScheduleStore(db), store, exec, logger)
 
 	occ := time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
@@ -68,7 +68,7 @@ func TestScheduledFire_DistinctOccurrences_BothRun(t *testing.T) {
 	store := deps.Store
 	p := saveResumePipeline(t, store, "cron-idem2", agentStepDef)
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	scheduler := NewPipelineScheduler(NewScheduleStore(db), store, exec, logger)
 
 	mk := func(occ time.Time) *Schedule {
@@ -92,5 +92,55 @@ func TestScheduledFire_DistinctOccurrences_BothRun(t *testing.T) {
 	}
 	if n != 2 {
 		t.Fatalf("run count = %d, want 2 (distinct occurrences must both fire)", n)
+	}
+}
+
+// A deduped re-fire must be recorded as DEDUPED, never FAILED — otherwise the
+// idempotency hit (added by this change) raises a false MANAGER failure alert.
+// RED before the DEDUPED case: the second fire falls through to FAILED.
+func TestScheduledFire_DedupedRecordedNotFailed(t *testing.T) {
+	db := openFactoryTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	runner := newMockRunner()
+	runner.outputsBySlug["agent_lead"] = []string{"ok"}
+	deps := fullExecutorDeps(t, db, runner)
+	exec := NewWiredExecutor(deps)
+	store := deps.Store
+	p := saveResumePipeline(t, store, "cron-idem3", agentStepDef)
+
+	// Seed a real schedule row so recordRun persists last_status.
+	if _, err := db.Exec(`INSERT INTO pipeline_schedules (id, workspace_id, name, target_pipeline_id, cron_expr)
+		VALUES ('psched_dd', 'ws_test', 'idem', ?, '0 8 * * *')`, p.ID); err != nil {
+		t.Fatalf("seed schedule: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	scheduler := NewPipelineScheduler(NewScheduleStore(db), store, exec, logger)
+	occ := time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
+	mk := func() *Schedule {
+		o := occ
+		return &Schedule{
+			ID:               "psched_dd",
+			WorkspaceID:      "ws_test",
+			TargetPipelineID: p.ID,
+			CronExpr:         "0 8 * * *",
+			Timezone:         "UTC",
+			NextRunAt:        &o,
+		}
+	}
+	scheduler.fireOne(ctx, mk())
+	scheduler.fireOne(ctx, mk()) // same occurrence → deduped
+
+	var lastStatus string
+	if err := db.QueryRow(`SELECT COALESCE(last_status,'') FROM pipeline_schedules WHERE id='psched_dd'`).Scan(&lastStatus); err != nil {
+		t.Fatalf("read last_status: %v", err)
+	}
+	if lastStatus == "FAILED" {
+		t.Fatalf("deduped re-fire recorded last_status=FAILED (false failure + MANAGER alert); want DEDUPED")
+	}
+	if lastStatus != "DEDUPED" {
+		t.Errorf("last_status = %q, want DEDUPED", lastStatus)
 	}
 }
