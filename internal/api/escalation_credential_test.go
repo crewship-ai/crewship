@@ -142,6 +142,19 @@ func TestCreatePendingCredential_InvalidType_Fallback(t *testing.T) {
 	}
 }
 
+// A transient owner-lookup failure (here: the table is gone) must be classified
+// as a vault error, NOT "no approver" — the former is retryable, the latter a
+// permanent config problem. Only sql.ErrNoRows means no-owner.
+func TestCreatePendingCredential_OwnerLookupError_IsVaultError(t *testing.T) {
+	h, _, wsID, _, agentID := covEscFixture(t)
+	execOrFatal(t, h.db, `DROP TABLE workspace_members`)
+	_, res := h.createPendingCredential(context.Background(), wsID, agentID,
+		credentialProposal{Name: "X", Type: "SECRET", Value: "v"})
+	if res != pendingCredVaultError {
+		t.Fatalf("owner lookup DB error res=%v, want pendingCredVaultError (transient, not no-approver)", res)
+	}
+}
+
 func TestCreatePendingCredential_NameCollision_Fallback(t *testing.T) {
 	h, ownerID, wsID, _, agentID := covEscFixture(t)
 	execOrFatal(t, h.db, `INSERT INTO credentials

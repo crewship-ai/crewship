@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -150,9 +152,16 @@ func (h *QueryHandler) createPendingCredential(ctx context.Context, wsID, fromAg
 		WHERE workspace_id = ? AND role = 'OWNER'
 		ORDER BY created_at ASC LIMIT 1
 	`, wsID).Scan(&ownerID); err != nil {
-		h.logger.Warn("pending credential: no workspace owner to attribute",
-			"workspace_id", wsID, "error", err)
-		return "", pendingCredNoApprover
+		// No OWNER row is a permanent config problem (fail loud, don't stage);
+		// any other DB error is transient — surface it as a vault error so the
+		// agent retries instead of being told "no approver" forever.
+		if errors.Is(err, sql.ErrNoRows) {
+			h.logger.Warn("pending credential: no workspace owner to attribute",
+				"workspace_id", wsID)
+			return "", pendingCredNoApprover
+		}
+		h.logger.Error("pending credential: owner lookup failed", "workspace_id", wsID, "error", err)
+		return "", pendingCredVaultError
 	}
 
 	// Clear any soft-deleted same-name row so the INSERT can't trip the
