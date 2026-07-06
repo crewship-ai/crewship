@@ -596,13 +596,22 @@ func (s *PipelineScheduler) runWakeCheck(ctx context.Context, sched *Schedule) (
 	if sched.WakeInputsJSON != "" {
 		_ = json.Unmarshal([]byte(sched.WakeInputsJSON), &wakeInputs)
 	}
+	// The wake probe is an arbitrary user routine that CAN have side effects, so
+	// a re-fire of the same occurrence must dedupe too (not just the main run).
+	// Key it on the occurrence with a "wake" discriminator so it never collides
+	// with the main run's key for the same tick.
+	wakeBucket := time.Now().UTC().Truncate(time.Minute).Format(time.RFC3339)
+	if sched.NextRunAt != nil {
+		wakeBucket = sched.NextRunAt.UTC().Format(time.RFC3339)
+	}
 	res, err := s.executor.Run(ctx, RunInput{
-		PipelineID:    sched.WakePipelineID,
-		WorkspaceID:   sched.WorkspaceID,
-		Inputs:        wakeInputs,
-		Mode:          ModeRun,
-		TriggeredVia:  TriggeredViaWakeCheck,
-		TriggeredByID: sched.ID,
+		PipelineID:     sched.WakePipelineID,
+		WorkspaceID:    sched.WorkspaceID,
+		Inputs:         wakeInputs,
+		Mode:           ModeRun,
+		TriggeredVia:   TriggeredViaWakeCheck,
+		TriggeredByID:  sched.ID,
+		IdempotencyKey: scheduledFireIdempotencyKey("sched-wake", sched.ID, wakeBucket),
 	})
 	if err != nil || res == nil || res.Status != "COMPLETED" {
 		errMsg := ""
