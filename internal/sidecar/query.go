@@ -115,11 +115,23 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		req.From = actorSlug
 		tokenAuthed = true
 	}
-	if !tokenAuthed && !s.isCrewMember(req.From) {
-		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
-			"error": fmt.Sprintf("from %q is not a member of this crew", req.From),
-		})
-		return
+	if !tokenAuthed {
+		if s.tokensProvisioned() {
+			// Per-agent tokens are in force for this crew; a token-less request
+			// is a downgrade/impersonation attempt (a sibling omitting the
+			// Authorization header to fall through to the spoofable membership
+			// check). Refuse — do NOT accept a caller-supplied `from`.
+			writeJSONResponse(w, http.StatusForbidden, map[string]string{
+				"error": "per-agent token required",
+			})
+			return
+		}
+		if !s.isCrewMember(req.From) {
+			writeJSONResponse(w, http.StatusBadRequest, map[string]string{
+				"error": fmt.Sprintf("from %q is not a member of this crew", req.From),
+			})
+			return
+		}
 	}
 	// Build IPC request body
 	body := map[string]interface{}{
@@ -239,11 +251,23 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 	// credential proposal it carries) to the boot agent. Validating membership
 	// rejects a slug outside the crew while keeping correct per-agent
 	// attribution.
-	if !tokenAuthed && !s.isCrewMember(req.From) {
-		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
-			"error": fmt.Sprintf("from %q is not a member of this crew", req.From),
-		})
-		return
+	if !tokenAuthed {
+		if s.tokensProvisioned() {
+			// Per-agent tokens are in force for this crew; a token-less request
+			// is a downgrade/impersonation attempt (a sibling omitting the
+			// Authorization header to fall through to the spoofable membership
+			// check). Refuse — do NOT accept a caller-supplied `from`.
+			writeJSONResponse(w, http.StatusForbidden, map[string]string{
+				"error": "per-agent token required",
+			})
+			return
+		}
+		if !s.isCrewMember(req.From) {
+			writeJSONResponse(w, http.StatusBadRequest, map[string]string{
+				"error": fmt.Sprintf("from %q is not a member of this crew", req.From),
+			})
+			return
+		}
 	}
 	body := map[string]string{
 		"from_slug":    req.From,

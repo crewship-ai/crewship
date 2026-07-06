@@ -106,15 +106,50 @@ func TestHandleEscalate_UnknownTokenRejected(t *testing.T) {
 	}
 }
 
-// TestHandleEscalate_NoTokenFallsBack — with no bearer token, the pre-#812
-// membership-validated `from` behaviour is preserved (no regression for
-// legacy callers): a member `from` is honoured verbatim.
-func TestHandleEscalate_NoTokenFallsBack(t *testing.T) {
+// TestHandleEscalate_NoTokenRejectedWhenProvisioned — once per-agent tokens are
+// in force for the crew, a request with NO bearer token is a downgrade attempt
+// (a sibling omitting the header to reach the spoofable membership check) and is
+// refused. This closes the opt-out that would otherwise leave #812 opt-in.
+func TestHandleEscalate_NoTokenRejectedWhenProvisioned(t *testing.T) {
 	var captured map[string]string
 	backend := mockEscalationBackend(t, &captured)
 	defer backend.Close()
 
-	srv := escalateTokenServer(t, backend.URL)
+	srv := escalateTokenServer(t, backend.URL) // boots WITH per-agent tokens
+
+	req := httptest.NewRequest(http.MethodPost, "/escalate",
+		strings.NewReader(`{"from":"riley","reason":"r"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.handleEscalate(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (token-less request must be refused when tokens are provisioned); body: %s", w.Code, w.Body.String())
+	}
+	if captured != nil {
+		t.Fatalf("a token-less spoof must never reach crewshipd; got body %v", captured)
+	}
+}
+
+// TestHandleEscalate_LegacyNoTokensFallsBack — a genuinely token-less
+// (un-upgraded) deployment keeps the pre-#812 membership-validated `from`
+// behaviour, so upgrading the server binary doesn't break crews whose agents
+// don't yet carry tokens.
+func TestHandleEscalate_LegacyNoTokensFallsBack(t *testing.T) {
+	var captured map[string]string
+	backend := mockEscalationBackend(t, &captured)
+	defer backend.Close()
+
+	// No AgentToken, no CrewMember AuthTokens → tokensProvisioned() == false.
+	srv := newQueryServer(t, &IPCConfig{
+		BaseURL: backend.URL, Token: "secret-token",
+		AgentID: "agent-nela", AgentSlug: "nela",
+		CrewID: "crew-1", WorkspaceID: "ws-1", ChatID: "chat-1",
+	}, []CrewMember{
+		{ID: "agent-nela", Slug: "nela"},
+		{ID: "agent-riley", Slug: "riley"},
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/escalate",
 		strings.NewReader(`{"from":"riley","reason":"r"}`))
@@ -124,10 +159,10 @@ func TestHandleEscalate_NoTokenFallsBack(t *testing.T) {
 	srv.handleEscalate(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+		t.Fatalf("status = %d, want 200 (legacy fallback); body: %s", w.Code, w.Body.String())
 	}
 	if got := captured["from_slug"]; got != "riley" {
-		t.Fatalf("from_slug = %q, want riley (fallback membership attribution)", got)
+		t.Fatalf("from_slug = %q, want riley (legacy membership attribution)", got)
 	}
 }
 

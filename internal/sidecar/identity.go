@@ -58,20 +58,45 @@ func (s *Server) actingIdentity(r *http.Request) (agentID, slug string, present,
 	return "", "", true, false
 }
 
+// tokensProvisioned reports whether this sidecar was booted with any per-agent
+// auth token (the boot agent or any peer). When true, per-agent identity is IN
+// FORCE for the crew, so a request that presents NO token is a downgrade
+// attempt — a sibling omitting the Authorization header to fall through to the
+// spoofable membership check — and must be refused rather than accepted. Only a
+// genuinely token-less (legacy / un-upgraded) deployment has this return false,
+// where the #796 membership fallback still applies for backward compatibility.
+func (s *Server) tokensProvisioned() bool {
+	if s.ipc != nil && s.ipc.AgentToken != "" {
+		return true
+	}
+	for i := range s.crewMembers {
+		if s.crewMembers[i].AuthToken != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // actingAgentID resolves the acting agent's ID for provenance/attribution on
 // routes that record "which agent did this" (issue authorship, port-expose,
 // pipeline authoring, keeper requests, …). It layers over actingIdentity:
 //
 //   - a valid per-agent token overrides the boot identity → (tokenAgentID, true)
 //   - an unrecognized token is a forgery → ("", false); callers 403
-//   - no token → fall back to the boot identity (s.ipc.AgentID) → (bootID, true)
+//   - no token, but the crew HAS tokens → downgrade attempt → ("", false); 403
+//   - no token and NO tokens provisioned (legacy) → boot identity → (bootID, true)
 //
 // This keeps every ambient-identity route consistent: a shared-container
 // sibling can no longer have its action attributed to (or performed as) the
-// boot agent, while legacy callers that carry no token keep working.
+// boot agent, and — once tokens are provisioned — cannot drop the token to slip
+// back into the boot identity either. Only a fully token-less deployment falls
+// back.
 func (s *Server) actingAgentID(r *http.Request) (id string, ok bool) {
 	actorID, _, present, matched := s.actingIdentity(r)
 	if !present {
+		if s.tokensProvisioned() {
+			return "", false
+		}
 		if s.ipc != nil {
 			return s.ipc.AgentID, true
 		}

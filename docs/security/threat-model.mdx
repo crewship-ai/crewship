@@ -424,10 +424,15 @@ presented bearer token against that roster to resolve the **acting** agent:
 - a valid token is **authoritative** and overrides any `from`/URL slug in
   the request (a spoofed `from` naming a real sibling no longer wins);
 - a token that matches no crew member is **refused** (403 / JSON-RPC error);
-- with **no** token the route falls back to the prior behaviour —
-  membership-validated `from` for escalate/query, URL slug for the memory
-  path — so legacy callers keep working. Because the master never enters a
-  container, the token cannot be forged from inside the agent process.
+- with **no** token, the request is **refused** whenever the crew has
+  per-agent tokens provisioned (the normal case after this change) — a
+  sibling cannot drop the `Authorization` header to fall through to the
+  spoofable membership check. Only a genuinely token-less (un-upgraded)
+  deployment falls back to the prior behaviour (membership-validated `from`
+  for escalate/query, URL slug for the memory path), so upgrading the binary
+  doesn't break crews whose agents don't yet carry tokens. Because the master
+  never enters a container, the token cannot be forged from inside the agent
+  process.
 
 The raw LLM-proxy cost ledger still attributes usage to the boot agent:
 provider API calls carry the provider key, not a per-agent token, so the
