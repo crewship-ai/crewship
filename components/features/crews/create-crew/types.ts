@@ -79,7 +79,11 @@ export const INITIAL_STATE: WizardState = {
   memoryMB: 4096,
   cpus: 2,
   ttlHours: null,
-  networkMode: "free",
+  // Fail-safe default matches the backend: a wizard-created crew is restricted
+  // (empty allowlist → LLM/CLI providers still reach via DefaultAllowedDomains).
+  // Without this the dashboard's submit always sent network_mode:"free"
+  // explicitly, so the API's restricted default never applied to the main path.
+  networkMode: "restricted",
   allowedDomains: [],
   runtimeImage: "",
   devcontainerConfig: "",

@@ -108,7 +108,7 @@ The `CrewConfig` struct is passed to `EnsureCrewRuntime` when creating or ensuri
 | `Slug` | `string` | Crew slug (used in container naming) |
 | `MemoryMB` | `int` | Memory limit in megabytes |
 | `CPUs` | `float64` | CPU limit (fractional for Docker, integer-only for Apple) |
-| `NetworkMode` | `string` | `"free"` (default) or `"restricted"` |
+| `NetworkMode` | `string` | `"restricted"` (default for new crews) or `"free"` |
 | `AllowedDomains` | `[]string` | Domains allowed when NetworkMode is `"restricted"` |
 | `TTLHours` | `int` | Auto-stop after idle period; 0 = no TTL |
 | `Image` | `string` | Custom runtime image; empty = provider default |

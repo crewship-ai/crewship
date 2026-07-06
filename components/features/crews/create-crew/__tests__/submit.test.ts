@@ -101,7 +101,7 @@ describe("submitCrew — blank mode", () => {
       container_memory_mb: 2048,
       container_cpus: 1,
       container_ttl_hours: 4,
-      network_mode: "free",
+      network_mode: "restricted",
     })
   })
 
@@ -213,7 +213,7 @@ describe("submitCrew — browse (template) mode", () => {
       container_memory_mb: 2048,
       container_cpus: 1,
       container_ttl_hours: 4,
-      network_mode: "free",
+      network_mode: "restricted",
     })
   })
 

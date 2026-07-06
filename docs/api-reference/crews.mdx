@@ -141,7 +141,7 @@ POST /api/v1/crews?workspace_id={workspaceId}
 | `container_memory_mb` | integer | No | `4096` | Container memory limit in MB |
 | `container_cpus` | number | No | `2.0` | Container CPU limit |
 | `container_ttl_hours` | integer | No | `null` | Container time-to-live in hours |
-| `network_mode` | string | No | `"free"` | `"free"` or `"restricted"` |
+| `network_mode` | string | No | `"restricted"` | `"free"` or `"restricted"` (new crews default to `restricted` with an empty allowlist — LLM/CLI providers stay reachable; arbitrary egress is denied) |
 | `allowed_domains` | string[] | No | `[]` | Allowed domains when `network_mode` is `"restricted"` (ignored otherwise) |
 | `runtime_image` | string | No | `null` | Custom runtime image; existence is validated against the registry before insert |
 | `devcontainer_config` | string | No | `null` | Raw devcontainer.json (max 100 KB; parsed for syntax) |

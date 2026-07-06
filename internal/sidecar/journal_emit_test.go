@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -306,7 +307,7 @@ func TestSidecar_BuildEgressObserver_NilIPC_Noop(t *testing.T) {
 			t.Fatalf("egress observer panicked with nil IPC: %v", r)
 		}
 	}()
-	obs("api.anthropic.com", "POST", "anthropic", 200) // must not panic
+	obs("api.anthropic.com", "POST", "anthropic", 200, false) // must not panic
 }
 
 // TestSidecar_BuildEgressObserver_HitsBackend wires the observer up to
@@ -325,7 +326,7 @@ func TestSidecar_BuildEgressObserver_HitsBackend(t *testing.T) {
 
 	s := newJournalTestServer(backend.URL)
 	obs := s.buildEgressObserver()
-	obs("api.anthropic.com", "POST", "anthropic", 200)
+	obs("api.anthropic.com", "POST", "anthropic", 200, false)
 
 	select {
 	case req := <-hit:
@@ -362,7 +363,7 @@ func TestSidecar_BuildEgressObserver_TransportError_SummaryDiffers(t *testing.T)
 
 	s := newJournalTestServer(backend.URL)
 	obs := s.buildEgressObserver()
-	obs("api.openai.com", "GET", "", 0) // status 0 == transport failed
+	obs("api.openai.com", "GET", "", 0, false) // status 0 == transport failed
 
 	select {
 	case req := <-hit:
@@ -377,6 +378,39 @@ func TestSidecar_BuildEgressObserver_TransportError_SummaryDiffers(t *testing.T)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("egress observer never reached backend")
+	}
+}
+
+// A policy-denied egress must surface as a LOUD, self-explanatory journal entry
+// (denied=true payload + a "BLOCKED by network policy" summary) — not just a
+// sidecar log line — so a restricted crew's blocked traffic is visible.
+func TestSidecar_BuildEgressObserver_Denied_IsLoud(t *testing.T) {
+	hit := make(chan journalEmitRequest, 1)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req journalEmitRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		w.WriteHeader(http.StatusOK)
+		hit <- req
+	}))
+	defer backend.Close()
+
+	s := newJournalTestServer(backend.URL)
+	obs := s.buildEgressObserver()
+	obs("evil.example.com", "CONNECT", "", http.StatusForbidden, true)
+
+	select {
+	case req := <-hit:
+		if req.Type != "network.egress" {
+			t.Errorf("type = %q, want network.egress", req.Type)
+		}
+		if got, _ := req.Payload["denied"].(bool); !got {
+			t.Errorf("payload.denied = %v, want true", req.Payload["denied"])
+		}
+		if !strings.Contains(req.Summary, "BLOCKED by network policy") {
+			t.Errorf("summary = %q, want it to name the policy denial", req.Summary)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("denied egress observer never reached backend")
 	}
 }
 

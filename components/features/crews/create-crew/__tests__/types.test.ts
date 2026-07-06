@@ -33,8 +33,8 @@ describe("create-crew/types", () => {
       expect(INITIAL_STATE.ttlHours).toBeNull()
     })
 
-    it("starts in free network mode", () => {
-      expect(INITIAL_STATE.networkMode).toBe("free")
+    it("starts in restricted network mode (fail-safe default, matches backend)", () => {
+      expect(INITIAL_STATE.networkMode).toBe("restricted")
       expect(INITIAL_STATE.allowedDomains).toEqual([])
     })
   })

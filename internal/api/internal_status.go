@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/database"
 )
 
 // nilIfEmpty returns nil for empty strings, otherwise a pointer to the string.
@@ -112,9 +114,9 @@ func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err := h.db.ExecContext(r.Context(), `
-		INSERT INTO crews (id, workspace_id, name, slug, description, icon, color, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		crewID, wsID, body.Name, body.Slug, body.Description, icon, color, now, now)
+		INSERT INTO crews (id, workspace_id, name, slug, description, icon, color, network_mode, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		crewID, wsID, body.Name, body.Slug, body.Description, icon, color, database.DefaultCrewNetworkMode, now, now)
 	if err != nil {
 		h.logger.Error("internal create crew", "error", err)
 		replyError(w, http.StatusInternalServerError, "failed to create crew")

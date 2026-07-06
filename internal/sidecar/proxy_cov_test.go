@@ -107,7 +107,7 @@ func TestCovHandleConnectTunnelSuccess(t *testing.T) {
 		Allowlist: NewDomainAllowlist(nil),
 		Logger:    covLogger(),
 		FreeMode:  true,
-		OnEgress: func(host, method, provider string, statusCode int) {
+		OnEgress: func(host, method, provider string, statusCode int, denied bool) {
 			mu.Lock()
 			defer mu.Unlock()
 			egressHost, egressMethod, egressStatus = host, method, statusCode
@@ -166,6 +166,59 @@ func TestCovHandleConnectTunnelSuccess(t *testing.T) {
 	}
 }
 
+// TestCovHandleConnectDenied_LoudDenial drives the REAL proxy deny branch
+// (handleConnect allowlist block) end-to-end and asserts OnEgress fires with
+// denied=true + a 403 — not just the observer called directly. This is the core
+// new behavior of the restricted-egress PR: a policy denial is loud.
+func TestCovHandleConnectDenied_LoudDenial(t *testing.T) {
+	var mu sync.Mutex
+	var gotHost string
+	var gotStatus int
+	var gotDenied bool
+
+	proxy := NewProxy(ProxyConfig{
+		CredStore: NewCredStore(),
+		Allowlist: NewDomainAllowlist([]string{"allowed.example.com"}), // target NOT listed
+		Logger:    covLogger(),
+		FreeMode:  false,
+		OnEgress: func(host, method, provider string, statusCode int, denied bool) {
+			mu.Lock()
+			defer mu.Unlock()
+			gotHost, gotStatus, gotDenied = host, statusCode, denied
+		},
+	})
+	proxySrv := httptest.NewServer(proxy)
+	defer proxySrv.Close()
+
+	conn, err := net.Dial("tcp", strings.TrimPrefix(proxySrv.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	fmt.Fprintf(conn, "CONNECT blocked.example.com:443 HTTP/1.1\r\nHost: blocked.example.com:443\r\n\r\n")
+	statusLine, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		t.Fatalf("read CONNECT status line: %v", err)
+	}
+	if !strings.Contains(statusLine, "403") {
+		t.Fatalf("CONNECT to non-allowlisted host status = %q, want 403", statusLine)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !gotDenied {
+		t.Error("OnEgress denied = false, want true for a policy-blocked CONNECT (denial must be loud)")
+	}
+	if gotStatus != http.StatusForbidden {
+		t.Errorf("egress status = %d, want 403", gotStatus)
+	}
+	if gotHost != "blocked.example.com:443" {
+		t.Errorf("egress host = %q, want blocked.example.com:443", gotHost)
+	}
+}
+
 func TestCovHandleConnectDialFailure(t *testing.T) {
 	// Grab a port that is guaranteed closed.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -184,7 +237,7 @@ func TestCovHandleConnectDialFailure(t *testing.T) {
 		Allowlist: NewDomainAllowlist(nil),
 		Logger:    covLogger(),
 		FreeMode:  true,
-		OnEgress: func(host, method, provider string, statusCode int) {
+		OnEgress: func(host, method, provider string, statusCode int, denied bool) {
 			mu.Lock()
 			defer mu.Unlock()
 			egressMethod, egressStatus = method, statusCode
@@ -275,7 +328,7 @@ func TestCovHandleHTTPTransportErrorFiresObserver(t *testing.T) {
 		Allowlist: NewDomainAllowlist(nil),
 		Logger:    covLogger(),
 		FreeMode:  true,
-		OnEgress: func(host, method, provider string, statusCode int) {
+		OnEgress: func(host, method, provider string, statusCode int, denied bool) {
 			mu.Lock()
 			defer mu.Unlock()
 			gotHost, gotProvider, gotStatus = host, provider, statusCode
@@ -321,7 +374,7 @@ func TestCovReverseProxyInjectsKeyAndObservesUsage(t *testing.T) {
 		FreeMode:         true,
 		BillingMode:      "metered",
 		SubscriptionPlan: "Max 20x",
-		OnEgress: func(host, method, provider string, statusCode int) {
+		OnEgress: func(host, method, provider string, statusCode int, denied bool) {
 			mu.Lock()
 			defer mu.Unlock()
 			egressStatus = statusCode
@@ -393,7 +446,7 @@ func TestCovReverseProxyUpstreamErrorFiresObserver(t *testing.T) {
 		Allowlist: NewDomainAllowlist(nil),
 		Logger:    covLogger(),
 		FreeMode:  true,
-		OnEgress: func(host, method, provider string, statusCode int) {
+		OnEgress: func(host, method, provider string, statusCode int, denied bool) {
 			mu.Lock()
 			defer mu.Unlock()
 			gotStatus = statusCode

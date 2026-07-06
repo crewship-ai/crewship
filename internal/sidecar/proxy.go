@@ -42,7 +42,7 @@ var hopByHopHeaders = []string{
 // request was to a known LLM endpoint, empty otherwise. Useful for
 // Crow's Nest filters that want to separate "agent talked to Anthropic"
 // from "agent fetched generic HTTPS".
-type EgressObserver func(host, method, provider string, statusCode int)
+type EgressObserver func(host, method, provider string, statusCode int, denied bool)
 
 // LLMCallObserver fires after a known LLM provider call returns, with the
 // parsed token usage and rate-limit signal. Wired by ServerConfig at
@@ -148,6 +148,12 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if !p.freeMode && !p.allowlist.IsAllowed(host) {
 		p.logger.Warn("blocked request to non-allowed domain", "host", host)
+		// Make the denial LOUD: emit a network.egress journal entry so a
+		// restricted crew's blocked traffic surfaces in Crow's Nest, not just
+		// the sidecar log (the operator can then add the host to allowed_domains).
+		if p.onEgress != nil {
+			p.onEgress(host, r.Method, "", http.StatusForbidden, true)
+		}
 		http.Error(w, "domain not allowed", http.StatusForbidden)
 		return
 	}
@@ -200,7 +206,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		// success from the journal's perspective. statusCode 0 marks the
 		// "transport error" case distinctly from any HTTP 5xx response.
 		if p.onEgress != nil {
-			p.onEgress(host, r.Method, string(provider), 0)
+			p.onEgress(host, r.Method, string(provider), 0, false)
 		}
 		return
 	}
@@ -211,7 +217,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// method / provider / status keeps PII and credentials out of the
 	// journal — path and body are deliberately excluded.
 	if p.onEgress != nil {
-		p.onEgress(host, r.Method, string(provider), resp.StatusCode)
+		p.onEgress(host, r.Method, string(provider), resp.StatusCode, false)
 	}
 
 	// Copy response headers
@@ -232,6 +238,9 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 
 	if !p.freeMode && !p.allowlist.IsAllowed(host) {
 		p.logger.Warn("blocked CONNECT to non-allowed domain", "host", host)
+		if p.onEgress != nil {
+			p.onEgress(host, http.MethodConnect, "", http.StatusForbidden, true)
+		}
 		http.Error(w, "domain not allowed", http.StatusForbidden)
 		return
 	}
@@ -242,7 +251,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		p.logger.Error("CONNECT dial failed", "host", host, "error", err)
 		http.Error(w, "failed to connect", http.StatusBadGateway)
 		if p.onEgress != nil {
-			p.onEgress(host, http.MethodConnect, "", 0)
+			p.onEgress(host, http.MethodConnect, "", 0, false)
 		}
 		return
 	}
@@ -253,7 +262,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// connection to host X" which is the level of resolution Crow's Nest
 	// needs — we deliberately do NOT decrypt or inspect the tunnel.
 	if p.onEgress != nil {
-		p.onEgress(host, http.MethodConnect, "", http.StatusOK)
+		p.onEgress(host, http.MethodConnect, "", http.StatusOK, false)
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -337,14 +346,14 @@ func (p *Proxy) handleReverseProxy(w http.ResponseWriter, r *http.Request) {
 		p.logger.Error("reverse proxy upstream failed", "path", r.URL.Path, "error", err)
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		if p.onEgress != nil {
-			p.onEgress("api.anthropic.com", r.Method, string(ProviderAnthropic), 0)
+			p.onEgress("api.anthropic.com", r.Method, string(ProviderAnthropic), 0, false)
 		}
 		return
 	}
 	defer resp.Body.Close()
 
 	if p.onEgress != nil {
-		p.onEgress("api.anthropic.com", r.Method, string(ProviderAnthropic), resp.StatusCode)
+		p.onEgress("api.anthropic.com", r.Method, string(ProviderAnthropic), resp.StatusCode, false)
 	}
 
 	for k, vv := range resp.Header {

@@ -186,7 +186,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
       color: expect.any(String),
       container_memory_mb: expect.any(Number),
       container_cpus: expect.any(Number),
-      network_mode: "free",
+      network_mode: "restricted", // fail-safe default (wizard INITIAL_STATE)
     })
   })
 

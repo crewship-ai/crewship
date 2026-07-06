@@ -86,9 +86,9 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, logger *slog.Logger, j 
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	if _, err = tx.ExecContext(ctx, `
-		INSERT INTO crews (id, workspace_id, name, slug, icon, color, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		crewID, wsID, crewName, crewSlug, icon, color, now, now); err != nil {
+		INSERT INTO crews (id, workspace_id, name, slug, icon, color, network_mode, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		crewID, wsID, crewName, crewSlug, icon, color, database.DefaultCrewNetworkMode, now, now); err != nil {
 		return nil, fmt.Errorf("create crew: %w", err)
 	}
 

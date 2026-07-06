@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/recipes"
 )
@@ -313,9 +314,9 @@ func (h *RecipeHandler) Install(w http.ResponseWriter, r *http.Request) {
 			candidate = fmt.Sprintf("%s-%d", rec.CrewSlug, attempt+1)
 		}
 		_, insertErr := tx.ExecContext(r.Context(), `
-			INSERT INTO crews (id, workspace_id, name, slug, icon, color, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			crewID, workspaceID, rec.Name, candidate, rec.Icon, rec.Color, now, now)
+			INSERT INTO crews (id, workspace_id, name, slug, icon, color, network_mode, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			crewID, workspaceID, rec.Name, candidate, rec.Icon, rec.Color, database.DefaultCrewNetworkMode, now, now)
 		if insertErr == nil {
 			resolvedSlug = candidate
 			break

@@ -20,7 +20,7 @@ import (
 // The journal entry is the persistence + UI surface, which can tolerate
 // being a few milliseconds behind the wire.
 func (s *Server) buildEgressObserver() EgressObserver {
-	return func(host, method, provider string, statusCode int) {
+	return func(host, method, provider string, statusCode int, denied bool) {
 		// Drop the emit entirely when IPC isn't configured — we have no
 		// way to reach crewshipd, and a background goroutine that fails
 		// 20 req/sec would fill the sidecar logs for no reason.
@@ -30,9 +30,9 @@ func (s *Server) buildEgressObserver() EgressObserver {
 
 		// Spawn a small goroutine so the proxy RoundTrip path returns
 		// immediately. The closure captures only stable values (host,
-		// method, provider, statusCode) plus s, so there's no lifetime
-		// issue with the request body or response.
-		go func(host, method, provider string, status int) {
+		// method, provider, statusCode, denied) plus s, so there's no
+		// lifetime issue with the request body or response.
+		go func(host, method, provider string, status int, denied bool) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 
@@ -46,11 +46,17 @@ func (s *Server) buildEgressObserver() EgressObserver {
 			}
 
 			summary := fmt.Sprintf("%s %s → %d", method, host, status)
-			if status == 0 {
+			switch {
+			case denied:
+				// Self-explanatory denial: name the policy so the operator knows
+				// to add the host to the crew's allowed_domains (not a remote 403).
+				payload["denied"] = true
+				summary = fmt.Sprintf("%s %s → BLOCKED by network policy (not in allowed_domains)", method, host)
+			case status == 0:
 				summary = fmt.Sprintf("%s %s → transport error", method, host)
 			}
 			s.emitJournal(ctx, "network.egress", summary, payload, nil)
-		}(host, method, provider, statusCode)
+		}(host, method, provider, statusCode, denied)
 	}
 }
 
