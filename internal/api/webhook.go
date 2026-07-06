@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/untrusted"
 	"github.com/crewship-ai/crewship/internal/webhook"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -340,9 +341,14 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		h.logger.Warn("failed to create run record", "error", err)
 	}
 
-	// 5. Build user message from payload
-	userMsg := fmt.Sprintf("Webhook event received:\nEvent: %s\nSource: %s\nData: %+v",
-		payload.Event, payload.Source, payload.Data)
+	// 5. Build user message from payload. The payload fields (event/source/
+	// data) are attacker-controlled external input, so they are neutralized
+	// through the ingress trust fence (issue #808) before reaching the model
+	// — nonce-fenced and injection-scanned, never interpolated raw. The
+	// "webhook" source label is caller-derived, not read from payload.Source
+	// (which is itself untrusted).
+	userMsg := "Webhook event received:\n" + untrusted.Wrap("webhook",
+		fmt.Sprintf("Event: %s\nSource: %s\nData: %+v", payload.Event, payload.Source, payload.Data))
 
 	// 6. Run agent (async)
 	// WithoutCancel preserves the request's OTel trace span + auth values so
