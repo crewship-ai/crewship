@@ -481,6 +481,33 @@ the connection-only model.
 | GDPR cascade (Art. 17) | ✅ shipped — migration v107 + `DELETE /api/v1/admin/users/{id}/data` |
 | GDPR export (Art. 15) | ✅ shipped — `GET /api/v1/admin/users/{id}/data` |
 
+## Layer 6 — Authorization chokepoint (complete mediation)
+
+Above the tenant-isolation checks, every workspace-scoped **mutation**
+endpoint (`POST`/`PUT`/`PATCH`/`DELETE`) declares the role it requires **at
+route registration** and a single middleware enforces that declaration before
+the handler runs. Previously authorization was a hand-placed `requireRole` /
+`canRole` call inside each handler, so one forgotten call left a state-changing
+endpoint silently open to any workspace member (it fails **open** — the
+mutation just succeeds). That is precisely how a control-plane route shipped
+ungated more than once.
+
+The fix follows Saltzer & Schroeder **complete mediation**: `authedMut(method,
+pattern, role, handler)` (`internal/api/rbac_routes.go`) records `{method,
+pattern, role}` into a walkable table and mounts the route behind
+`RequireAuth → RequireWorkspace → requireRoleMW(role)`. Two build-time tests
+(`internal/api/route_authz_invariant_test.go`) turn the invariant into a
+compile-gate: one walks the recorded table and fails if any mutation route
+lacks a declared role; the other fails if a mutation route is still registered
+through the legacy `authed(...)` chain. **A new mutation route that forgets its
+role declaration fails the build** rather than shipping open.
+
+Out of scope for this layer, because each is a distinct trust boundary
+uniformly mediated by its own single wrapper: the X-Internal-Token sidecar
+surface (`internalAuth`) and the public token/HMAC dispatch routes (pipeline
+webhooks, waitpoint callbacks, bootstrap/signup). See
+[RBAC](/security/rbac) for the role tiers and the declared-role classes.
+
 ## Reporting issues
 
 Security issues go to
