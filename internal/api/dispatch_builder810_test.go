@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -72,7 +73,10 @@ func TestBuildAssignmentRunRequest_ThroughBuilder(t *testing.T) {
 	}
 	target := targetAgentInfo{ID: "agent-1", Slug: "eva", CrewSlug: "ops"}
 
-	req := h.buildAssignmentRunRequest(context.Background(), body, target, nil, "cid-1", "AGENT", true)
+	req, err := h.buildAssignmentRunRequest(context.Background(), body, target, "cid-1", "AGENT", true)
+	if err != nil {
+		t.Fatalf("builder returned error: %v", err)
+	}
 
 	if fr.gotAgentID != "agent-1" || fr.gotWorkspaceID != "ws-1" {
 		t.Errorf("resolver called with (%q,%q), want (agent-1,ws-1)", fr.gotAgentID, fr.gotWorkspaceID)
@@ -122,7 +126,10 @@ func TestBuildPeerQueryRequest_ThroughBuilder(t *testing.T) {
 	target := targetAgentInfo{ID: "agent-1", Slug: "eva", CrewSlug: "ops"}
 
 	peerBlock := "[PEER QUERY from @sam]\nAnswer concisely."
-	req := h.buildPeerQueryRequest(context.Background(), body, target, nil, "cid-1", peerBlock)
+	req, err := h.buildPeerQueryRequest(context.Background(), body, target, "cid-1", peerBlock)
+	if err != nil {
+		t.Fatalf("builder returned error: %v", err)
+	}
 
 	if !strings.Contains(req.SystemPrompt, "[SKILLS AVAILABLE]") {
 		t.Errorf("SystemPrompt lost the assembled prompt: %q", req.SystemPrompt)
@@ -144,24 +151,43 @@ func TestBuildPeerQueryRequest_ThroughBuilder(t *testing.T) {
 	}
 }
 
-// TestBuildAssignmentRunRequest_FallsBackWithoutResolver proves that with no
-// resolver wired (unit-test / degraded), the builder still returns a runnable
-// request from the raw target — the legacy path is preserved so nothing hard-
-// breaks, it just misses prompt assembly + MCP (the pre-#810 behaviour).
-func TestBuildAssignmentRunRequest_FallsBackWithoutResolver(t *testing.T) {
+// TestBuildAssignmentRunRequest_NoResolverFailsClosed: with no resolver wired,
+// the builder returns an ERROR rather than a legacy raw build — the single
+// builder is the only dispatch path (there is no MCP-blind fallback).
+func TestBuildAssignmentRunRequest_NoResolverFailsClosed(t *testing.T) {
 	h := &AssignmentHandler{logger: testLogger()} // resolver nil
-	body := createAssignmentBody{Task: "t", CrewID: "c", WorkspaceID: "", ChatID: "chat-1", AuthorAgentID: "a"}
+	body := createAssignmentBody{Task: "t", CrewID: "c", ChatID: "chat-1", AuthorAgentID: "a"}
 	target := targetAgentInfo{ID: "agent-1", Slug: "eva", SystemPrompt: "legacy", CLIAdapter: "CLAUDE_CODE"}
 
-	req := h.buildAssignmentRunRequest(context.Background(), body, target, nil, "cid-1", "AGENT", true)
+	if _, err := h.buildAssignmentRunRequest(context.Background(), body, target, "cid-1", "AGENT", true); err == nil {
+		t.Fatal("expected an error with no resolver wired (fail closed), got nil")
+	}
+}
 
-	if req.SystemPrompt != "legacy" {
-		t.Errorf("fallback should use raw system prompt, got %q", req.SystemPrompt)
+// TestBuildAssignmentRunRequest_ResolverErrorFailsClosed: a resolve failure must
+// NOT silently fall back to a legacy build. It returns an error so the
+// assignment fails loudly instead of dispatching an MCP-blind, HITL-inert,
+// unassembled-prompt run (the silent-degrade regression this PR removes).
+func TestBuildAssignmentRunRequest_ResolverErrorFailsClosed(t *testing.T) {
+	fr := &fakeAgentResolver{err: fmt.Errorf("resolve boom")}
+	h := &AssignmentHandler{logger: testLogger(), resolver: fr}
+	body := createAssignmentBody{Task: "t", CrewID: "c", WorkspaceID: "ws-1", ChatID: "chat-1"}
+	target := targetAgentInfo{ID: "agent-1", Slug: "eva"}
+
+	if _, err := h.buildAssignmentRunRequest(context.Background(), body, target, "cid-1", "AGENT", true); err == nil {
+		t.Fatal("resolver error must fail closed (no legacy degrade), got nil error")
 	}
-	if req.AgentID != "agent-1" || req.ContainerID != "cid-1" || req.SkipConvHistory != true {
-		t.Errorf("fallback request malformed: %+v", req)
-	}
-	if req.AuthorAgentID != "a" {
-		t.Errorf("attribution should still thread in fallback: %q", req.AuthorAgentID)
+}
+
+// TestBuildPeerQueryRequest_ResolverErrorFailsClosed mirrors the assignment
+// case for the peer-query path.
+func TestBuildPeerQueryRequest_ResolverErrorFailsClosed(t *testing.T) {
+	fr := &fakeAgentResolver{err: fmt.Errorf("resolve boom")}
+	h := &QueryHandler{logger: testLogger(), resolver: fr}
+	body := createQueryBody{TargetSlug: "eva", Question: "q", FromSlug: "sam", CrewID: "c", WorkspaceID: "ws-1", ChatID: "chat-1"}
+	target := targetAgentInfo{ID: "agent-1", Slug: "eva"}
+
+	if _, err := h.buildPeerQueryRequest(context.Background(), body, target, "cid-1", "[PEER QUERY]"); err == nil {
+		t.Fatal("resolver error must fail closed (no legacy degrade), got nil error")
 	}
 }

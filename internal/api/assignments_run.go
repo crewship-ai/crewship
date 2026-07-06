@@ -139,14 +139,6 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load target agent credentials
-	creds, err := h.loadAgentCredentials(r.Context(), target.ID)
-	if err != nil {
-		h.logger.Error("load agent credentials", "agent_id", target.ID, "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-
 	// Create assignment record in PENDING state (group_id = chat_id for mission linkage)
 	assignmentID := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -289,7 +281,7 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	h.dispatchWG.Add(1)
 	go func() {
 		defer h.dispatchWG.Done()
-		h.runAssignment(context.Background(), assignmentID, body, target, creds)
+		h.runAssignment(context.Background(), assignmentID, body, target)
 	}()
 
 	writeJSON(w, http.StatusCreated, map[string]string{
@@ -305,7 +297,6 @@ func (h *AssignmentHandler) runAssignment(
 	assignmentID string,
 	body createAssignmentBody,
 	target targetAgentInfo,
-	creds []orchestrator.Credential,
 ) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -483,7 +474,16 @@ func (h *AssignmentHandler) runAssignment(
 		skipSidecar = false
 	}
 
-	req := h.buildAssignmentRunRequest(ctx, body, target, creds, containerID, agentRole, skipSidecar)
+	req, buildErr := h.buildAssignmentRunRequest(ctx, body, target, containerID, agentRole, skipSidecar)
+	if buildErr != nil {
+		// Fail closed: the single builder could not assemble the request (no
+		// resolver / resolve failure). Surface it as an assignment failure
+		// rather than dispatch an MCP-blind, HITL-inert degraded run.
+		h.logger.Error("assignment dispatch build failed", "error", buildErr, "assignment_id", assignmentID)
+		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
+			fmt.Sprintf("dispatch error: %v", buildErr))
+		return
+	}
 
 	// Refuse the run if a backup currently holds the workspace's
 	// advisory lock. Otherwise this execution would write agent
@@ -517,80 +517,53 @@ func (h *AssignmentHandler) runAssignment(
 }
 
 // buildAssignmentRunRequest constructs the AgentRunRequest for an assignment
-// (mission task or sidecar /assign) run. When a resolver is wired (#810,
-// production) it funnels through the ONE request-builder so the sub-agent
-// gets the ASSEMBLED system prompt (skills, persona, ethos, connected
-// integrations), its MCP servers, installed skills, and the crew-policy
-// ApprovalMode that revives the harbormaster HITL gate — the mission path
-// previously read raw system_prompt_legacy with NO MCP. Without a resolver
-// (unit tests / resolver unavailable) it falls back to that legacy build so
-// existing callers keep working.
+// (mission task or sidecar /assign) run. It funnels EXCLUSIVELY through the ONE
+// request-builder (ChatInfo.ToAgentRunRequest), so the sub-agent gets the
+// ASSEMBLED system prompt (skills, persona, ethos, connected integrations), its
+// MCP servers, installed skills, and the crew-policy ApprovalMode that arms the
+// harbormaster HITL gate.
+//
+// There is NO legacy raw-system_prompt fallback. A missing resolver or a
+// resolve failure returns an ERROR — the assignment fails LOUDLY rather than
+// silently dispatching an MCP-blind, HITL-inert, unassembled-prompt degraded
+// run. (The mission/peer paths used to read raw system_prompt_legacy with no
+// MCP; the earlier #810 cut kept that as a fallback and re-introduced a
+// silent-degrade on resolve error — this removes it.) Production always wires
+// the resolver; the error path exists so a resolver blip surfaces instead of
+// quietly shipping a broken agent.
 func (h *AssignmentHandler) buildAssignmentRunRequest(
 	ctx context.Context,
 	body createAssignmentBody,
 	target targetAgentInfo,
-	creds []orchestrator.Credential,
 	containerID, agentRole string,
 	skipSidecar bool,
-) orchestrator.AgentRunRequest {
-	var req orchestrator.AgentRunRequest
-	built := false
-	if h.resolver != nil {
-		info, rerr := h.resolver.ResolveAgent(ctx, target.ID, body.WorkspaceID)
-		if rerr != nil {
-			h.logger.Warn("assignment: resolve agent config failed; falling back to legacy build",
-				"agent_id", target.ID, "error", rerr)
-		} else if info != nil {
-			req = info.ToAgentRunRequest(chatbridge.AgentRunOverrides{
-				ChatID:          body.ChatID,
-				ContainerID:     containerID,
-				UserMessage:     body.Task,
-				LLMModel:        info.LLMModel,
-				TimeoutSecs:     info.TimeoutSecs,
-				MemoryMB:        info.MemoryMB,
-				CPUs:            info.CPUs,
-				AuthorAgentID:   body.AuthorAgentID,
-				CreatedByUserID: body.CreatedByUserID,
-			})
-			req.MissionID = body.MissionID
-			built = true
-		}
+) (orchestrator.AgentRunRequest, error) {
+	if h.resolver == nil {
+		return orchestrator.AgentRunRequest{}, fmt.Errorf("assignment dispatch: no agent resolver wired")
 	}
-	if !built {
-		// Legacy raw build — no prompt assembly, no MCP. Preserved as a
-		// fallback so resolver-less callers (tests) are unaffected; #810
-		// wires the resolver in production so this branch isn't hit there.
-		req = orchestrator.AgentRunRequest{
-			AgentID:         target.ID,
-			AgentSlug:       target.Slug,
-			CrewID:          body.CrewID,
-			CrewSlug:        target.CrewSlug,
-			MissionID:       body.MissionID,
-			WorkspaceID:     body.WorkspaceID,
-			CLIAdapter:      target.CLIAdapter,
-			LLMModel:        target.LLMModel,
-			SystemPrompt:    target.SystemPrompt,
-			ToolProfile:     target.ToolProfile,
-			Credentials:     creds,
-			TimeoutSecs:     target.TimeoutSeconds,
-			MemoryEnabled:   target.MemoryEnabled,
-			AuthorAgentID:   body.AuthorAgentID,
-			CreatedByUserID: body.CreatedByUserID,
-		}
-		// Workspace language preference (the builder path gets this from
-		// the resolved ChatInfo).
-		if h.db != nil {
-			var lang string
-			_ = h.db.QueryRowContext(ctx,
-				`SELECT COALESCE(preferred_language, '') FROM workspaces WHERE id = ?`,
-				body.WorkspaceID).Scan(&lang)
-			req.PreferredLanguage = lang
-		}
+	info, rerr := h.resolver.ResolveAgent(ctx, target.ID, body.WorkspaceID)
+	if rerr != nil {
+		return orchestrator.AgentRunRequest{}, fmt.Errorf("assignment dispatch: resolve agent %s: %w", target.ID, rerr)
 	}
+	if info == nil {
+		return orchestrator.AgentRunRequest{}, fmt.Errorf("assignment dispatch: resolver returned no config for agent %s", target.ID)
+	}
+	req := info.ToAgentRunRequest(chatbridge.AgentRunOverrides{
+		ChatID:          body.ChatID,
+		ContainerID:     containerID,
+		UserMessage:     body.Task,
+		LLMModel:        info.LLMModel,
+		TimeoutSecs:     info.TimeoutSecs,
+		MemoryMB:        info.MemoryMB,
+		CPUs:            info.CPUs,
+		AuthorAgentID:   body.AuthorAgentID,
+		CreatedByUserID: body.CreatedByUserID,
+	})
+	req.MissionID = body.MissionID
 
-	// Dispatch-specific fields applied to both paths. AgentRole/SkipSidecar
-	// are decided by the caller (LEAD planning vs. worker), not the agent's
-	// stored role; SkipConvHistory is always true for sub-agent runs.
+	// Dispatch-specific fields. AgentRole/SkipSidecar are decided by the caller
+	// (LEAD planning vs. worker), not the agent's stored role; SkipConvHistory
+	// is always true for sub-agent runs.
 	req.ChatID = body.ChatID
 	req.ContainerID = containerID
 	req.UserMessage = body.Task
@@ -608,7 +581,7 @@ func (h *AssignmentHandler) buildAssignmentRunRequest(
 	// planner keeps its configured model. Unset env leaves the model
 	// untouched — no silent quality downgrade.
 	req.LLMModel = resolveSubAgentModel(req.LLMModel, body.LeadPlanning, os.Getenv)
-	return req
+	return req, nil
 }
 
 // userFacingAssignmentError maps an assignment's raw failure message to a

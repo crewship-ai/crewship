@@ -163,14 +163,6 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load target agent credentials
-	creds, err := h.loadAgentCredentials(r.Context(), target.ID)
-	if err != nil {
-		h.logger.Error("load agent credentials", "agent_id", target.ID, "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-
 	// Create peer_conversations record
 	convID := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -316,7 +308,16 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 Answer concisely. This is a quick question, not a task.
 Question: %s`, body.FromSlug, body.Question)
 
-	req := h.buildPeerQueryRequest(r.Context(), body, target, creds, containerID, peerQueryBlock)
+	req, buildErr := h.buildPeerQueryRequest(r.Context(), body, target, containerID, peerQueryBlock)
+	if buildErr != nil {
+		// Fail closed: the single builder could not assemble the request (no
+		// resolver / resolve failure). Fail the query loudly rather than answer
+		// with an MCP-blind, unassembled-prompt degraded run.
+		h.logger.Error("peer query dispatch build failed", "error", buildErr, "query_id", convID)
+		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "", buildErr.Error(), startTime)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to dispatch peer query", "query_id": convID})
+		return
+	}
 
 	// Guard against running while a backup holds the workspace lock.
 	guardRelease, guardErr := refuseIfBackupInProgress(r.Context(), h.db, body.WorkspaceID)
@@ -357,75 +358,52 @@ Question: %s`, body.FromSlug, body.Question)
 	})
 }
 
-// buildPeerQueryRequest constructs the AgentRunRequest for a peer query.
-// When a resolver is wired (#810, production) it funnels through the ONE
-// request-builder so the answering agent gets its ASSEMBLED system prompt
-// (skills, persona, connected integrations), MCP servers, installed skills,
-// and the crew-policy ApprovalMode — the peer path previously read raw
-// system_prompt_legacy with NO MCP. peerQueryBlock is prepended to the
-// assembled prompt. Without a resolver (unit tests) it falls back to the
-// legacy raw build.
+// buildPeerQueryRequest constructs the AgentRunRequest for a peer query. It
+// funnels EXCLUSIVELY through the ONE request-builder (ChatInfo.ToAgentRunRequest),
+// so the answering agent gets its ASSEMBLED system prompt (skills, persona,
+// connected integrations), MCP servers, installed skills, and the crew-policy
+// ApprovalMode. peerQueryBlock is prepended to the assembled prompt.
+//
+// There is NO legacy raw-system_prompt fallback. A missing resolver or a
+// resolve failure returns an ERROR — the peer query fails LOUDLY rather than
+// answering with an MCP-blind, unassembled-prompt degraded run (the peer path
+// used to read raw system_prompt_legacy with no MCP, and the earlier #810 cut
+// kept it as a silent-degrade fallback on resolve error). Production always
+// wires the resolver.
 func (h *QueryHandler) buildPeerQueryRequest(
 	ctx context.Context,
 	body createQueryBody,
 	target targetAgentInfo,
-	creds []orchestrator.Credential,
 	containerID, peerQueryBlock string,
-) orchestrator.AgentRunRequest {
-	var req orchestrator.AgentRunRequest
-	if h.resolver != nil {
-		info, rerr := h.resolver.ResolveAgent(ctx, target.ID, body.WorkspaceID)
-		if rerr != nil {
-			h.logger.Warn("peer query: resolve agent config failed; falling back to legacy build",
-				"agent_id", target.ID, "error", rerr)
-		} else if info != nil {
-			// Prepend the peer-query block to the assembled prompt.
-			if info.SystemPrompt != "" {
-				info.SystemPrompt += "\n\n"
-			}
-			info.SystemPrompt += peerQueryBlock
-			req = info.ToAgentRunRequest(chatbridge.AgentRunOverrides{
-				ChatID:      body.ChatID,
-				ContainerID: containerID,
-				UserMessage: body.Question,
-				LLMModel:    info.LLMModel,
-				TimeoutSecs: info.TimeoutSecs,
-				MemoryMB:    info.MemoryMB,
-				CPUs:        info.CPUs,
-			})
-			req.AgentRole = "AGENT"
-			req.SkipSidecar = true     // Sidecar already running on 9119 in this container
-			req.SkipConvHistory = true // Fresh context for peer queries
-			return req
-		}
+) (orchestrator.AgentRunRequest, error) {
+	if h.resolver == nil {
+		return orchestrator.AgentRunRequest{}, fmt.Errorf("peer query dispatch: no agent resolver wired")
 	}
-
-	// Legacy raw build — no prompt assembly, no MCP.
-	systemPrompt := target.SystemPrompt
-	if systemPrompt != "" {
-		systemPrompt += "\n\n"
+	info, rerr := h.resolver.ResolveAgent(ctx, target.ID, body.WorkspaceID)
+	if rerr != nil {
+		return orchestrator.AgentRunRequest{}, fmt.Errorf("peer query dispatch: resolve agent %s: %w", target.ID, rerr)
 	}
-	systemPrompt += peerQueryBlock
-	return orchestrator.AgentRunRequest{
-		AgentID:         target.ID,
-		AgentSlug:       target.Slug,
-		AgentRole:       "AGENT",
-		CrewID:          body.CrewID,
-		CrewSlug:        target.CrewSlug,
-		WorkspaceID:     body.WorkspaceID,
-		ChatID:          body.ChatID,
-		ContainerID:     containerID,
-		CLIAdapter:      target.CLIAdapter,
-		LLMModel:        target.LLMModel,
-		SystemPrompt:    systemPrompt,
-		UserMessage:     body.Question,
-		ToolProfile:     target.ToolProfile,
-		Credentials:     creds,
-		TimeoutSecs:     target.TimeoutSeconds,
-		MemoryEnabled:   target.MemoryEnabled,
-		SkipSidecar:     true, // Sidecar already running on 9119 in this container
-		SkipConvHistory: true, // Fresh context for peer queries
+	if info == nil {
+		return orchestrator.AgentRunRequest{}, fmt.Errorf("peer query dispatch: resolver returned no config for agent %s", target.ID)
 	}
+	// Prepend the peer-query block to the assembled prompt.
+	if info.SystemPrompt != "" {
+		info.SystemPrompt += "\n\n"
+	}
+	info.SystemPrompt += peerQueryBlock
+	req := info.ToAgentRunRequest(chatbridge.AgentRunOverrides{
+		ChatID:      body.ChatID,
+		ContainerID: containerID,
+		UserMessage: body.Question,
+		LLMModel:    info.LLMModel,
+		TimeoutSecs: info.TimeoutSecs,
+		MemoryMB:    info.MemoryMB,
+		CPUs:        info.CPUs,
+	})
+	req.AgentRole = "AGENT"
+	req.SkipSidecar = true     // Sidecar already running on 9119 in this container
+	req.SkipConvHistory = true // Fresh context for peer queries
+	return req, nil
 }
 
 // finishQuery updates peer_conversations and agent_runs records.

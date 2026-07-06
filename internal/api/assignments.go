@@ -304,11 +304,6 @@ func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestr
 		return fmt.Errorf("lookup agent %s: %w", req.AgentID, err)
 	}
 
-	creds, err := h.loadAgentCredentials(ctx, target.ID)
-	if err != nil {
-		return fmt.Errorf("load credentials for agent %s: %w", target.ID, err)
-	}
-
 	// Inject trace context into task for observability
 	task := req.Task
 	if req.TraceID != "" {
@@ -385,7 +380,7 @@ func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestr
 		h.emitAssignmentUnqueued(ctx, req.AssignmentID, req.ChatID, req.WorkspaceID, req.CrewID)
 	}
 
-	h.runAssignment(ctx, req.AssignmentID, body, target, creds)
+	h.runAssignment(ctx, req.AssignmentID, body, target)
 	return nil
 }
 

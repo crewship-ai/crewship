@@ -314,7 +314,7 @@ func TestRunAssignment_CreatesAgentRunRecord(t *testing.T) {
 	}
 
 	// Call runAssignment directly — it will fail at orchestrator (nil) but the journal entries should exist
-	h.runAssignment(context.Background(), "assign-test", body, target, nil)
+	h.runAssignment(context.Background(), "assign-test", body, target)
 	_ = jw.Flush(context.Background())
 
 	// Verify run.started + run.failed journal entries exist with the target agent.

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
@@ -34,6 +35,14 @@ func covQH3Rig(t *testing.T) (h *QueryHandler, wsID, crewID, askerID, targetID, 
 		t.Fatalf("seed chat: %v", err)
 	}
 	h = NewQueryHandler(db, nil, nil, "internal-test-token", newTestLogger())
+	// #810: peer-query dispatch funnels exclusively through the request-builder,
+	// so wire a resolver returning the target's config (production always has
+	// one). Without it buildPeerQueryRequest fails closed and these tests never
+	// reach the execution/backup path they exercise.
+	h.resolver = &fakeAgentResolver{info: &chatbridge.ChatInfo{
+		AgentID: targetID, AgentSlug: "qh3-to", AgentRole: "AGENT",
+		CrewID: crewID, CrewSlug: "qh3", WorkspaceID: wsID, CLIAdapter: "CLAUDE_CODE",
+	}}
 	return
 }
 
@@ -99,29 +108,10 @@ func TestQH3_Create_BoundTokenGates(t *testing.T) {
 	})
 }
 
-// ---- Create: credential decrypt failure ----
-
-func TestQH3_Create_CredentialDecryptError500(t *testing.T) {
-	setTestEncryptionKeyParallelSafe(t)
-	h, wsID, crewID, _, targetID, chatID := covQH3Rig(t)
-	userID := "test-user-id"
-	if _, err := h.db.Exec(`
-		INSERT INTO credentials (id, workspace_id, name, type, encrypted_value, created_by, created_at, updated_at)
-		VALUES ('cred-qh3-bad', ?, 'bad', 'API_KEY', 'not-encrypted-garbage', ?, datetime('now'), datetime('now'))`,
-		wsID, userID); err != nil {
-		t.Fatalf("seed credential: %v", err)
-	}
-	if _, err := h.db.Exec(`
-		INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, created_at)
-		VALUES ('ac-qh3', ?, 'cred-qh3-bad', 'BAD_KEY', 1, datetime('now'))`, targetID); err != nil {
-		t.Fatalf("seed agent_credentials: %v", err)
-	}
-
-	rr := covQH3Post(t, h, covQH3Body(wsID, crewID, chatID), "")
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500; body=%s", rr.Code, rr.Body.String())
-	}
-}
+// (TestQH3_Create_CredentialDecryptError500 removed: #810 routes the peer path
+// exclusively through the resolver-backed builder, so Create no longer loads or
+// decrypts credentials directly — the decrypt happens inside ResolveAgent, and
+// a resolve failure is covered by TestBuildPeerQueryRequest_ResolverErrorFailsClosed.)
 
 // ---- Create: execution path past container creation ----
 
