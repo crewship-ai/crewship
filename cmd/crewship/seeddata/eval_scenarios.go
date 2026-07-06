@@ -596,7 +596,7 @@ var EvalScenarios = []RoutineDef{
 					"type":       "agent_run",
 					"agent_slug": agentSlugRef("casey"),
 					"complexity": "fast",
-					"on_fail":    "retry_step",
+					"on_fail":    "escalate_tier",
 					"prompt": "Write a 3-bullet summary of the topic below. Each bullet on its own line, " +
 						"each line starting with '- ', between 5 and 25 words. No preamble, no closing remark.\n\n" +
 						"Topic:\n{{ inputs.topic }}",
