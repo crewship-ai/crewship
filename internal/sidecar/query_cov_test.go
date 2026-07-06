@@ -134,7 +134,7 @@ func TestCovQuery_EnvDepthLimitEnforced(t *testing.T) {
 	srv := NewServer(ServerConfig{
 		Addr: "127.0.0.1:0", Logger: covLogger(),
 		IPC:         &IPCConfig{BaseURL: "http://127.0.0.1:1", Token: "t"},
-		CrewMembers: []CrewMember{{Slug: "nela"}},
+		CrewMembers: []CrewMember{{Slug: "nela"}, {Slug: "viktor"}},
 	})
 
 	req := httptest.NewRequest("POST", "http://localhost:9119/query",
@@ -157,7 +157,7 @@ func TestCovQuery_CrewshipdDown(t *testing.T) {
 	srv := NewServer(ServerConfig{
 		Addr: "127.0.0.1:0", Logger: covLogger(),
 		IPC:         &IPCConfig{BaseURL: mock.URL, Token: "t"},
-		CrewMembers: []CrewMember{{Slug: "nela"}},
+		CrewMembers: []CrewMember{{Slug: "nela"}, {Slug: "viktor"}},
 	})
 	req := httptest.NewRequest("POST", "http://localhost:9119/query",
 		strings.NewReader(`{"target":"nela","question":"what db?","from":"viktor"}`))
@@ -181,7 +181,7 @@ func TestCovQuery_InvalidUpstreamResponse(t *testing.T) {
 	srv := NewServer(ServerConfig{
 		Addr: "127.0.0.1:0", Logger: covLogger(),
 		IPC:         &IPCConfig{BaseURL: mock.URL, Token: "t"},
-		CrewMembers: []CrewMember{{Slug: "nela"}},
+		CrewMembers: []CrewMember{{Slug: "nela"}, {Slug: "viktor"}},
 	})
 	req := httptest.NewRequest("POST", "http://localhost:9119/query",
 		strings.NewReader(`{"target":"nela","question":"what db?","from":"viktor"}`))
@@ -202,7 +202,8 @@ func covEscalate(t *testing.T, baseURL string) *httptest.ResponseRecorder {
 	t.Helper()
 	srv := NewServer(ServerConfig{
 		Addr: "127.0.0.1:0", Logger: covLogger(),
-		IPC: &IPCConfig{BaseURL: baseURL, Token: "t", CrewID: "crew-1", WorkspaceID: "ws-1", ChatID: "chat-1"},
+		IPC:         &IPCConfig{BaseURL: baseURL, Token: "t", CrewID: "crew-1", WorkspaceID: "ws-1", ChatID: "chat-1"},
+		CrewMembers: []CrewMember{{Slug: "nela"}},
 	})
 	req := httptest.NewRequest("POST", "http://localhost:9119/escalate",
 		strings.NewReader(`{"from":"nela","reason":"need a decision"}`))
