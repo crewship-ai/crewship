@@ -30,6 +30,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 		CREATE TABLE missions (id TEXT PRIMARY KEY, workspace_id TEXT, crew_id TEXT, lead_agent_id TEXT,
 			trace_id TEXT UNIQUE, title TEXT, description TEXT, status TEXT DEFAULT 'PLANNING',
 			plan TEXT, workflow_template TEXT, total_token_count INTEGER, total_estimated_cost REAL,
+			author_agent_id TEXT, created_by_user_id TEXT,
 			created_at TEXT, updated_at TEXT, completed_at TEXT);
 		CREATE TABLE mission_tasks (id TEXT PRIMARY KEY, mission_id TEXT, assigned_agent_id TEXT,
 			title TEXT, description TEXT, status TEXT DEFAULT 'PENDING', task_order INTEGER DEFAULT 0,

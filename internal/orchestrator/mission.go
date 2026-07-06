@@ -35,6 +35,13 @@ type DispatchRequest struct {
 	TraceID      string // mission trace ID for end-to-end observability
 	MissionID    string
 	LeadPlanning bool // when true, dispatch as LEAD with sidecar (for task planning phase)
+
+	// Creator attribution ([4], #810). Copied from the mission's v129
+	// columns (author_agent_id / created_by_user_id) so the run record +
+	// journal attribute the work to whoever reported it, not just the
+	// executing agent. Both empty for legacy missions with no creator.
+	CreatedByUserID string
+	AuthorAgentID   string
 }
 
 // MissionEngine manages the lifecycle of missions and their tasks.
@@ -136,6 +143,8 @@ type missionState struct {
 	LeadAgentID        string
 	TraceID            string
 	WorkspaceID        string
+	AuthorAgentID      string // v129 mission creator attribution ([4], #810)
+	CreatedByUserID    string // v129 mission creator attribution ([4], #810)
 	cancel             context.CancelFunc
 	planningDispatched bool // true after lead planning dispatch (prevents re-dispatch)
 }
@@ -212,12 +221,15 @@ func (e *MissionEngine) StartMission(ctx context.Context, missionID string) erro
 
 	var ms missionState
 	var crewSlug string
+	var authorAgentID, createdByUserID sql.NullString
 	err := e.db.QueryRowContext(ctx, `
-		SELECT m.id, m.title, m.crew_id, m.lead_agent_id, m.trace_id, m.workspace_id, c.slug
+		SELECT m.id, m.title, m.crew_id, m.lead_agent_id, m.trace_id, m.workspace_id, c.slug,
+		       m.author_agent_id, m.created_by_user_id
 		FROM missions m
 		JOIN crews c ON c.id = m.crew_id
 		WHERE m.id = ?`, missionID).Scan(
 		&ms.ID, &ms.Title, &ms.CrewID, &ms.LeadAgentID, &ms.TraceID, &ms.WorkspaceID, &crewSlug,
+		&authorAgentID, &createdByUserID,
 	)
 	if err != nil {
 		e.mu.Lock()
@@ -229,6 +241,8 @@ func (e *MissionEngine) StartMission(ctx context.Context, missionID string) erro
 		return fmt.Errorf("load mission: %w", err)
 	}
 	ms.CrewSlug = crewSlug
+	ms.AuthorAgentID = authorAgentID.String
+	ms.CreatedByUserID = createdByUserID.String
 
 	mCtx, cancel := context.WithTimeout(ctx, missionTimeoutDefault)
 	ms.cancel = cancel

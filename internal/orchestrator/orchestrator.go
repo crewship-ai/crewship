@@ -67,6 +67,35 @@ type AgentRunRequest struct {
 	// system jobs), in which case no peer card is injected.
 	RoleTitle      string
 	OpenedByUserID string
+
+	// Creator attribution ([4], #810). Captured on missions (v129:
+	// author_agent_id / created_by_user_id) but never threaded into the
+	// run, so run + journal showed the executor, not the reporter.
+	// Exactly one is typically set: CreatedByUserID for a human-authored
+	// mission (public API), AuthorAgentID for an agent-authored one
+	// (sidecar tool-call). Both empty for chat/system runs with no
+	// distinct reporter. Plain strings (no FK) so attribution survives
+	// the referenced actor being deleted, mirroring the v129 columns.
+	CreatedByUserID string
+	AuthorAgentID   string
+
+	// MemoryBinding is the seam the memory Ledger Store.Write plugs into
+	// (dev3 spec). Declared here so the one request-builder carries it and
+	// the two specs don't diverge on the field-set; the Ledger schema +
+	// Store.Write wiring land in dev3's separate PR and must be reconciled
+	// before either ships. Not consumed by the orchestrator yet.
+	MemoryBinding MemoryBinding
+}
+
+// MemoryBinding scopes an agent run's durable memory writes for the memory
+// Ledger (dev3 spec). AgentSlug is the write scope and MUST be non-empty
+// when Enabled. Carried by AgentRunRequest so every dispatch path advertises
+// the same binding; the Store.Write implementation is out of scope for #810.
+type MemoryBinding struct {
+	Enabled   bool
+	AgentSlug string // write scope — MUST be non-empty when Enabled
+	Tier      string
+	Profile   string
 }
 
 // SkillBundle is a single agent-installed skill rendered as a SKILL.md

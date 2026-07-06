@@ -466,6 +466,16 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// registered in router_internal.go.
 	assign := NewAssignmentHandler(r.db, r.orch, r.hub, r.internalToken, r.logger)
 	assign.SetJournal(r.Journal())
+	// #810: route mission / sidecar-assign dispatch through the one
+	// request-builder so sub-agents get the assembled prompt + MCP + skills
+	// + crew-policy ApprovalMode instead of raw system_prompt_legacy. Shares
+	// the same in-process internal-resolve URL the webhook path uses.
+	if dispatchBaseURL := r.internalLoopbackURL; dispatchBaseURL != "" || r.internalBaseURL != "" {
+		if dispatchBaseURL == "" {
+			dispatchBaseURL = r.internalBaseURL
+		}
+		assign.SetResolver(chatbridge.NewIPCResolver(dispatchBaseURL, r.internalToken, r.logger))
+	}
 	// Stash on the Router so the server boot path can start the
 	// stuck-QUEUED sweeper on this same instance (Assignments()).
 	r.assignmentHandler = assign
@@ -485,6 +495,13 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// router_internal.go using the same instance.
 	queries := NewQueryHandler(r.db, r.orch, r.hub, r.internalToken, r.logger)
 	queries.SetJournal(r.Journal())
+	// #810: same builder routing for the peer-query path.
+	if dispatchBaseURL := r.internalLoopbackURL; dispatchBaseURL != "" || r.internalBaseURL != "" {
+		if dispatchBaseURL == "" {
+			dispatchBaseURL = r.internalBaseURL
+		}
+		queries.SetResolver(chatbridge.NewIPCResolver(dispatchBaseURL, r.internalToken, r.logger))
+	}
 	// Provisioning gate for the peer-query path: registerCrewsRoutes (which sets
 	// r.provisioning) runs before this, so a cold target crew builds its image
 	// before a peer query runs instead of booting the bare base.

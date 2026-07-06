@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -26,9 +27,18 @@ type QueryHandler struct {
 	internalToken string
 	journal       journal.Emitter
 	provisioner   crewProvisioner
+	// resolver funnels the peer-query run through the one request-builder
+	// (#810). nil → the legacy raw-SQL build (system_prompt_legacy, no MCP).
+	resolver agentConfigResolver
 
 	escalationMu      sync.Mutex
 	escalationWaiters map[string]chan escalationResult
+}
+
+// SetResolver wires the agent-config resolver so a peer query builds its run
+// through the one request-builder (#810). nil leaves the legacy path.
+func (h *QueryHandler) SetResolver(rz agentConfigResolver) {
+	h.resolver = rz
 }
 
 // SetProvisioner wires the dispatch-time provisioning gate (same as
@@ -299,38 +309,14 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Build the peer query system prompt by prepending the [PEER QUERY] block
+	// The [PEER QUERY] block is prepended to the ASSEMBLED system prompt so
+	// the answering agent keeps its skills/persona/MCP context but knows this
+	// is a quick question, not a task.
 	peerQueryBlock := fmt.Sprintf(`[PEER QUERY from @%s]
 Answer concisely. This is a quick question, not a task.
 Question: %s`, body.FromSlug, body.Question)
 
-	systemPrompt := target.SystemPrompt
-	if systemPrompt != "" {
-		systemPrompt += "\n\n"
-	}
-	systemPrompt += peerQueryBlock
-
-	// Build env vars with depth for anti-loop
-	req := orchestrator.AgentRunRequest{
-		AgentID:         target.ID,
-		AgentSlug:       target.Slug,
-		AgentRole:       "AGENT",
-		CrewID:          body.CrewID,
-		CrewSlug:        target.CrewSlug,
-		WorkspaceID:     body.WorkspaceID,
-		ChatID:          body.ChatID,
-		ContainerID:     containerID,
-		CLIAdapter:      target.CLIAdapter,
-		LLMModel:        target.LLMModel,
-		SystemPrompt:    systemPrompt,
-		UserMessage:     body.Question,
-		ToolProfile:     target.ToolProfile,
-		Credentials:     creds,
-		TimeoutSecs:     target.TimeoutSeconds,
-		MemoryEnabled:   target.MemoryEnabled,
-		SkipSidecar:     true, // Sidecar already running on 9119 in this container
-		SkipConvHistory: true, // Fresh context for peer queries
-	}
+	req := h.buildPeerQueryRequest(r.Context(), body, target, creds, containerID, peerQueryBlock)
 
 	// Guard against running while a backup holds the workspace lock.
 	guardRelease, guardErr := refuseIfBackupInProgress(r.Context(), h.db, body.WorkspaceID)
@@ -369,6 +355,77 @@ Question: %s`, body.FromSlug, body.Question)
 		"response": result,
 		"status":   "COMPLETED",
 	})
+}
+
+// buildPeerQueryRequest constructs the AgentRunRequest for a peer query.
+// When a resolver is wired (#810, production) it funnels through the ONE
+// request-builder so the answering agent gets its ASSEMBLED system prompt
+// (skills, persona, connected integrations), MCP servers, installed skills,
+// and the crew-policy ApprovalMode — the peer path previously read raw
+// system_prompt_legacy with NO MCP. peerQueryBlock is prepended to the
+// assembled prompt. Without a resolver (unit tests) it falls back to the
+// legacy raw build.
+func (h *QueryHandler) buildPeerQueryRequest(
+	ctx context.Context,
+	body createQueryBody,
+	target targetAgentInfo,
+	creds []orchestrator.Credential,
+	containerID, peerQueryBlock string,
+) orchestrator.AgentRunRequest {
+	var req orchestrator.AgentRunRequest
+	if h.resolver != nil {
+		info, rerr := h.resolver.ResolveAgent(ctx, target.ID, body.WorkspaceID)
+		if rerr != nil {
+			h.logger.Warn("peer query: resolve agent config failed; falling back to legacy build",
+				"agent_id", target.ID, "error", rerr)
+		} else if info != nil {
+			// Prepend the peer-query block to the assembled prompt.
+			if info.SystemPrompt != "" {
+				info.SystemPrompt += "\n\n"
+			}
+			info.SystemPrompt += peerQueryBlock
+			req = info.ToAgentRunRequest(chatbridge.AgentRunOverrides{
+				ChatID:      body.ChatID,
+				ContainerID: containerID,
+				UserMessage: body.Question,
+				LLMModel:    info.LLMModel,
+				TimeoutSecs: info.TimeoutSecs,
+				MemoryMB:    info.MemoryMB,
+				CPUs:        info.CPUs,
+			})
+			req.AgentRole = "AGENT"
+			req.SkipSidecar = true     // Sidecar already running on 9119 in this container
+			req.SkipConvHistory = true // Fresh context for peer queries
+			return req
+		}
+	}
+
+	// Legacy raw build — no prompt assembly, no MCP.
+	systemPrompt := target.SystemPrompt
+	if systemPrompt != "" {
+		systemPrompt += "\n\n"
+	}
+	systemPrompt += peerQueryBlock
+	return orchestrator.AgentRunRequest{
+		AgentID:         target.ID,
+		AgentSlug:       target.Slug,
+		AgentRole:       "AGENT",
+		CrewID:          body.CrewID,
+		CrewSlug:        target.CrewSlug,
+		WorkspaceID:     body.WorkspaceID,
+		ChatID:          body.ChatID,
+		ContainerID:     containerID,
+		CLIAdapter:      target.CLIAdapter,
+		LLMModel:        target.LLMModel,
+		SystemPrompt:    systemPrompt,
+		UserMessage:     body.Question,
+		ToolProfile:     target.ToolProfile,
+		Credentials:     creds,
+		TimeoutSecs:     target.TimeoutSeconds,
+		MemoryEnabled:   target.MemoryEnabled,
+		SkipSidecar:     true, // Sidecar already running on 9119 in this container
+		SkipConvHistory: true, // Fresh context for peer queries
+	}
 }
 
 // finishQuery updates peer_conversations and agent_runs records.

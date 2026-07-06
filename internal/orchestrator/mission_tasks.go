@@ -453,16 +453,18 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 	if e.dispatcher != nil {
 		go func() {
 			dispatchErr := e.dispatcher.DispatchAssignment(dispatchCtx, DispatchRequest{
-				AssignmentID: assignmentID,
-				AgentID:      *task.AssignedAgentID,
-				AgentSlug:    agentSlug,
-				CrewID:       agentCrewID,
-				CrewSlug:     agentCrewSlug,
-				WorkspaceID:  ms.WorkspaceID,
-				ChatID:       ms.ID,
-				Task:         taskBrief,
-				TraceID:      ms.TraceID,
-				MissionID:    ms.ID,
+				AssignmentID:    assignmentID,
+				AgentID:         *task.AssignedAgentID,
+				AgentSlug:       agentSlug,
+				CrewID:          agentCrewID,
+				CrewSlug:        agentCrewSlug,
+				WorkspaceID:     ms.WorkspaceID,
+				ChatID:          ms.ID,
+				Task:            taskBrief,
+				TraceID:         ms.TraceID,
+				MissionID:       ms.ID,
+				AuthorAgentID:   ms.AuthorAgentID,
+				CreatedByUserID: ms.CreatedByUserID,
 			})
 			if dispatchErr != nil {
 				e.logger.Error("dispatch assignment failed",

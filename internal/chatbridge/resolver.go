@@ -93,6 +93,10 @@ type chatResolveResponse struct {
 	// where every message runs the agent. Resolver populates from
 	// chats.visibility.
 	Visibility string `json:"visibility,omitempty"`
+
+	// ApprovalMode is the harbormaster gate mode derived from the crew's
+	// autonomy_level policy (#810). "none"|"async"|"sync"; empty → none.
+	ApprovalMode string `json:"approval_mode,omitempty"`
 }
 
 // installedSkillEntry mirrors internal/api.installedSkillResponse.
@@ -560,6 +564,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		OpenedByUserID:     data.OpenedByUserID,
 		RoleTitle:          data.RoleTitle,
 		Visibility:         data.Visibility,
+		ApprovalMode:       data.ApprovalMode,
 	}, nil
 }
 

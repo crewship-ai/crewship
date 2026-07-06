@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -29,6 +30,12 @@ type createAssignmentBody struct {
 	MissionID    string                    `json:"mission_id,omitempty"` // optional — mission this assignment belongs to; threaded into journal entries so Cartographer checkpoints can anchor on per-mission journal cursors.
 	CrewMembers  []orchestrator.CrewMember `json:"-"`                    // populated internally for mission dispatches
 	LeadPlanning bool                      `json:"-"`                    // when true, run as LEAD with sidecar
+	// Creator attribution ([4], #810) — copied from the mission's v129
+	// columns by the mission engine so the run record + journal attribute
+	// the work to the reporter, not just the executor. Empty for a sidecar
+	// /assign chat run with no distinct reporter.
+	AuthorAgentID   string `json:"-"`
+	CreatedByUserID string `json:"-"`
 }
 
 // Create handles POST /api/v1/internal/assignments.
@@ -313,6 +320,23 @@ func (h *AssignmentHandler) runAssignment(
 	// `GET /api/v1/journal?mission_id={missionID}`. Empty is safe: nullable()
 	// persists NULL so the missions FK is never tripped on a chat-only run.
 	missionID := body.MissionID
+	// Creator attribution ([4], #810) — attribute the run to whoever
+	// reported the mission (human or authoring agent), not just the
+	// executing target. Threaded from missions v129 columns → DispatchRequest
+	// → body. Omitted when empty (sidecar /assign chat run, legacy mission).
+	runStartedPayload := map[string]any{
+		"trigger_type":     "ASSIGNMENT",
+		"chat_id":          body.ChatID,
+		"assignment_id":    assignmentID,
+		"assigned_by_chat": body.ChatID,
+		"target_slug":      body.TargetSlug,
+	}
+	if body.CreatedByUserID != "" {
+		runStartedPayload["created_by_user_id"] = body.CreatedByUserID
+	}
+	if body.AuthorAgentID != "" {
+		runStartedPayload["author_agent_id"] = body.AuthorAgentID
+	}
 	if _, err := h.journal.Emit(ctx, journal.Entry{
 		WorkspaceID: body.WorkspaceID,
 		AgentID:     target.ID,
@@ -321,15 +345,9 @@ func (h *AssignmentHandler) runAssignment(
 		Severity:    journal.SeverityInfo,
 		ActorType:   journal.ActorOrchestrator,
 		Summary:     fmt.Sprintf("run %s started (assignment)", shortRunID(runID)),
-		Payload: map[string]any{
-			"trigger_type":     "ASSIGNMENT",
-			"chat_id":          body.ChatID,
-			"assignment_id":    assignmentID,
-			"assigned_by_chat": body.ChatID,
-			"target_slug":      body.TargetSlug,
-		},
-		Refs:    map[string]any{"assignment_id": assignmentID},
-		TraceID: runID,
+		Payload:     runStartedPayload,
+		Refs:        map[string]any{"assignment_id": assignmentID},
+		TraceID:     runID,
 	}); err != nil {
 		h.logger.Error("create run record for assignment", "error", err, "assignment_id", assignmentID)
 		runID = "" // prevent finishAssignment from emitting a terminal entry
@@ -465,41 +483,7 @@ func (h *AssignmentHandler) runAssignment(
 		skipSidecar = false
 	}
 
-	req := orchestrator.AgentRunRequest{
-		AgentID:         target.ID,
-		AgentSlug:       target.Slug,
-		AgentRole:       agentRole,
-		CrewID:          body.CrewID,
-		CrewSlug:        target.CrewSlug,
-		MissionID:       body.MissionID,
-		WorkspaceID:     body.WorkspaceID,
-		ChatID:          body.ChatID,
-		ContainerID:     containerID,
-		CLIAdapter:      target.CLIAdapter,
-		LLMModel:        target.LLMModel,
-		SystemPrompt:    target.SystemPrompt,
-		UserMessage:     body.Task,
-		ToolProfile:     target.ToolProfile,
-		Credentials:     creds,
-		TimeoutSecs:     target.TimeoutSeconds,
-		MemoryEnabled:   target.MemoryEnabled,
-		CrewMembers:     body.CrewMembers,
-		SkipSidecar:     skipSidecar,
-		SkipConvHistory: true,
-	}
-	// Cost lever: route worker (non-lead-planning) sub-agents to a cheaper
-	// model when the operator opts in via CREWSHIP_SUBAGENT_MODEL. Delegated
-	// workers do bounded sub-tasks and rarely need the top tier; the lead
-	// planner keeps its configured model because it does the reasoning. Unset
-	// env leaves the target's own model untouched — no silent quality downgrade.
-	req.LLMModel = resolveSubAgentModel(target.LLMModel, body.LeadPlanning, os.Getenv)
-
-	// Load workspace language preference
-	var lang string
-	_ = h.db.QueryRowContext(ctx,
-		`SELECT COALESCE(preferred_language, '') FROM workspaces WHERE id = ?`,
-		body.WorkspaceID).Scan(&lang)
-	req.PreferredLanguage = lang
+	req := h.buildAssignmentRunRequest(ctx, body, target, creds, containerID, agentRole, skipSidecar)
 
 	// Refuse the run if a backup currently holds the workspace's
 	// advisory lock. Otherwise this execution would write agent
@@ -530,6 +514,101 @@ func (h *AssignmentHandler) runAssignment(
 	}
 
 	h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, result, "")
+}
+
+// buildAssignmentRunRequest constructs the AgentRunRequest for an assignment
+// (mission task or sidecar /assign) run. When a resolver is wired (#810,
+// production) it funnels through the ONE request-builder so the sub-agent
+// gets the ASSEMBLED system prompt (skills, persona, ethos, connected
+// integrations), its MCP servers, installed skills, and the crew-policy
+// ApprovalMode that revives the harbormaster HITL gate — the mission path
+// previously read raw system_prompt_legacy with NO MCP. Without a resolver
+// (unit tests / resolver unavailable) it falls back to that legacy build so
+// existing callers keep working.
+func (h *AssignmentHandler) buildAssignmentRunRequest(
+	ctx context.Context,
+	body createAssignmentBody,
+	target targetAgentInfo,
+	creds []orchestrator.Credential,
+	containerID, agentRole string,
+	skipSidecar bool,
+) orchestrator.AgentRunRequest {
+	var req orchestrator.AgentRunRequest
+	built := false
+	if h.resolver != nil {
+		info, rerr := h.resolver.ResolveAgent(ctx, target.ID, body.WorkspaceID)
+		if rerr != nil {
+			h.logger.Warn("assignment: resolve agent config failed; falling back to legacy build",
+				"agent_id", target.ID, "error", rerr)
+		} else if info != nil {
+			req = info.ToAgentRunRequest(chatbridge.AgentRunOverrides{
+				ChatID:          body.ChatID,
+				ContainerID:     containerID,
+				UserMessage:     body.Task,
+				LLMModel:        info.LLMModel,
+				TimeoutSecs:     info.TimeoutSecs,
+				MemoryMB:        info.MemoryMB,
+				CPUs:            info.CPUs,
+				AuthorAgentID:   body.AuthorAgentID,
+				CreatedByUserID: body.CreatedByUserID,
+			})
+			req.MissionID = body.MissionID
+			built = true
+		}
+	}
+	if !built {
+		// Legacy raw build — no prompt assembly, no MCP. Preserved as a
+		// fallback so resolver-less callers (tests) are unaffected; #810
+		// wires the resolver in production so this branch isn't hit there.
+		req = orchestrator.AgentRunRequest{
+			AgentID:         target.ID,
+			AgentSlug:       target.Slug,
+			CrewID:          body.CrewID,
+			CrewSlug:        target.CrewSlug,
+			MissionID:       body.MissionID,
+			WorkspaceID:     body.WorkspaceID,
+			CLIAdapter:      target.CLIAdapter,
+			LLMModel:        target.LLMModel,
+			SystemPrompt:    target.SystemPrompt,
+			ToolProfile:     target.ToolProfile,
+			Credentials:     creds,
+			TimeoutSecs:     target.TimeoutSeconds,
+			MemoryEnabled:   target.MemoryEnabled,
+			AuthorAgentID:   body.AuthorAgentID,
+			CreatedByUserID: body.CreatedByUserID,
+		}
+		// Workspace language preference (the builder path gets this from
+		// the resolved ChatInfo).
+		if h.db != nil {
+			var lang string
+			_ = h.db.QueryRowContext(ctx,
+				`SELECT COALESCE(preferred_language, '') FROM workspaces WHERE id = ?`,
+				body.WorkspaceID).Scan(&lang)
+			req.PreferredLanguage = lang
+		}
+	}
+
+	// Dispatch-specific fields applied to both paths. AgentRole/SkipSidecar
+	// are decided by the caller (LEAD planning vs. worker), not the agent's
+	// stored role; SkipConvHistory is always true for sub-agent runs.
+	req.ChatID = body.ChatID
+	req.ContainerID = containerID
+	req.UserMessage = body.Task
+	req.AgentRole = agentRole
+	req.SkipSidecar = skipSidecar
+	req.SkipConvHistory = true
+	// Mission dispatches pass an explicit peer-context member list; prefer it
+	// so a LEAD sees exactly the teammates the engine intends.
+	if len(body.CrewMembers) > 0 {
+		req.CrewMembers = body.CrewMembers
+	}
+	// Cost lever: route worker (non-lead-planning) sub-agents to a cheaper
+	// model when the operator opts in via CREWSHIP_SUBAGENT_MODEL. Delegated
+	// workers do bounded sub-tasks and rarely need the top tier; the lead
+	// planner keeps its configured model. Unset env leaves the model
+	// untouched — no silent quality downgrade.
+	req.LLMModel = resolveSubAgentModel(req.LLMModel, body.LeadPlanning, os.Getenv)
+	return req
 }
 
 // userFacingAssignmentError maps an assignment's raw failure message to a

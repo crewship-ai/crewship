@@ -254,17 +254,19 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 	if e.dispatcher != nil {
 		go func() {
 			dispatchErr := e.dispatcher.DispatchAssignment(dispatchCtx, DispatchRequest{
-				AssignmentID: assignmentID,
-				AgentID:      ms.LeadAgentID,
-				AgentSlug:    agentSlug,
-				CrewID:       ms.CrewID,
-				CrewSlug:     ms.CrewSlug,
-				WorkspaceID:  ms.WorkspaceID,
-				ChatID:       ms.ID,
-				Task:         b.String(),
-				TraceID:      ms.TraceID,
-				MissionID:    ms.ID,
-				LeadPlanning: true, // run as LEAD with sidecar enabled
+				AssignmentID:    assignmentID,
+				AgentID:         ms.LeadAgentID,
+				AgentSlug:       agentSlug,
+				CrewID:          ms.CrewID,
+				CrewSlug:        ms.CrewSlug,
+				WorkspaceID:     ms.WorkspaceID,
+				ChatID:          ms.ID,
+				Task:            b.String(),
+				TraceID:         ms.TraceID,
+				MissionID:       ms.ID,
+				LeadPlanning:    true, // run as LEAD with sidecar enabled
+				AuthorAgentID:   ms.AuthorAgentID,
+				CreatedByUserID: ms.CreatedByUserID,
 			})
 			if dispatchErr != nil {
 				e.logger.Error("lead planning dispatch failed",

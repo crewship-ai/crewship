@@ -129,6 +129,14 @@ type ChatInfo struct {
 	// @mentioned) or "private"/empty for a normal 1:1 chat. Sourced from
 	// chats.visibility by the resolver.
 	Visibility string
+
+	// ApprovalMode is the harbormaster HITL gate mode ("none"|"async"|
+	// "sync") derived from the crew's autonomy_level policy by the resolver
+	// (#810). Empty is treated as "none". Threaded through the builder so
+	// EVERY dispatch path (chat, pipeline, cron, webhook, mission, peer)
+	// stamps it onto the run — before this it was never set and the gate
+	// short-circuited Approved on every path.
+	ApprovalMode string
 }
 
 // ProvisioningEnqueueResult mirrors api.EnqueueResult shape locally so the
