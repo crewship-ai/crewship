@@ -129,3 +129,71 @@ func TestRecurringIssueCreate_NextRunIsUTC(t *testing.T) {
 		t.Errorf("next_run = %q, want UTC-computed %q (Create used wall-clock instead of UTC)", got, wantUTC)
 	}
 }
+
+// Fix #2b (review of #823): the fire-idempotency reservation is made BEFORE the
+// insert+advance transaction. If that tx fails (or commit fails) WITHOUT
+// advancing next_run, the reservation must be released — otherwise the row
+// stays due, every later tick re-derives the same key, sees isNew=false, and
+// the occurrence is silently DROPPED for the 24h TTL. RED before the fix: the
+// second fire is deduped against the leaked reservation and creates nothing.
+func TestRecurringIssueDispatcher_ReleasesReservationOnTxFailure(t *testing.T) {
+	ctx := context.Background()
+	h, _, wsID, crewID := covRIFixture(t)
+	seedAgentRow(t, h.db, "lead-id", wsID, crewID, "Lead", "lead-id", "LEAD")
+
+	row := recurringDueRow{
+		id:            "ri-txfail",
+		workspaceID:   wsID,
+		crewID:        crewID,
+		title:         "TxFail",
+		cronExpr:      "*/5 * * * *",
+		nextRunBucket: "2020-01-01T00:00:00Z",
+	}
+	execOrFatal(t, h.db, `INSERT INTO recurring_issues
+		(id, workspace_id, crew_id, title, cron_expression, enabled, next_run, run_count, created_at)
+		VALUES (?, ?, ?, ?, ?, 1, ?, 0, datetime('now'))`,
+		row.id, wsID, crewID, row.title, row.cronExpr, row.nextRunBucket)
+
+	// Force the in-tx schedule advance to abort, simulating a transient failure
+	// after the reservation was taken. A control table gates the trigger so the
+	// retry can succeed once cleared.
+	execOrFatal(t, h.db, `CREATE TABLE _fail_switch (on_ INTEGER)`)
+	execOrFatal(t, h.db, `INSERT INTO _fail_switch VALUES (1)`)
+	execOrFatal(t, h.db, `CREATE TRIGGER _abort_advance BEFORE UPDATE ON recurring_issues
+		WHEN (SELECT COUNT(*) FROM _fail_switch) > 0
+		BEGIN SELECT RAISE(ABORT, 'injected advance failure'); END`)
+
+	d := NewRecurringIssueDispatcher(h.db, nil, newTestLogger())
+
+	count := func() int {
+		var n int
+		if err := h.db.QueryRow(
+			`SELECT COUNT(*) FROM missions WHERE crew_id=? AND authored_via='recurring'`, crewID).Scan(&n); err != nil {
+			t.Fatalf("count issues: %v", err)
+		}
+		return n
+	}
+	reservations := func() int {
+		var n int
+		if err := h.db.QueryRow(`SELECT COUNT(*) FROM pipeline_run_idempotency WHERE workspace_id=?`, wsID).Scan(&n); err != nil {
+			t.Fatalf("count reservations: %v", err)
+		}
+		return n
+	}
+
+	d.fireOne(ctx, row) // reservation taken, insert rolled back by the aborted advance
+	if got := count(); got != 0 {
+		t.Fatalf("failed fire created %d issues, want 0 (tx must roll back)", got)
+	}
+	if got := reservations(); got != 0 {
+		t.Fatalf("reservation leaked after failed fire: %d rows, want 0 (must be released)", got)
+	}
+
+	// Clear the injected failure; the SAME occurrence must now fire — proving it
+	// wasn't dropped for the TTL.
+	execOrFatal(t, h.db, `DELETE FROM _fail_switch`)
+	d.fireOne(ctx, row)
+	if got := count(); got != 1 {
+		t.Fatalf("occurrence dropped after a transient failure: retry created %d issues, want 1", got)
+	}
+}

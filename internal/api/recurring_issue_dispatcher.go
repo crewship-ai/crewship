@@ -165,10 +165,26 @@ func (d *RecurringIssueDispatcher) fireOne(ctx context.Context, row recurringDue
 	// it due — stable across restart, distinct per occurrence). Reuse the
 	// existing pipeline_run_idempotency table (no new migration); the row id
 	// stands in for the synthetic run/pipeline labels.
+	// releaseReservation frees the occurrence key. It MUST be called on any
+	// failure path that returns WITHOUT advancing next_run — otherwise the
+	// reservation persists for its 24h TTL while the row stays due, so every
+	// subsequent tick re-derives the same key, sees isNew=false, and silently
+	// drops the occurrence until the reservation expires. Only reserved==true
+	// (this call created the row) releases; a duplicate must not delete the
+	// owner's reservation.
+	var reserved bool
+	idemStore := pipeline.NewIdempotencyStore(d.db)
+	idemKey := scheduledFireIdempotencyKey("recurring_issue", row.id, row.nextRunBucket)
+	releaseReservation := func() {
+		if !reserved || row.nextRunBucket == "" {
+			return
+		}
+		if ferr := idemStore.Forget(ctx, row.workspaceID, idemKey); ferr != nil {
+			d.logger.Warn("recurring issue dispatcher: release reservation failed", "id", row.id, "error", ferr)
+		}
+	}
 	if row.nextRunBucket != "" {
-		key := scheduledFireIdempotencyKey("recurring_issue", row.id, row.nextRunBucket)
-		store := pipeline.NewIdempotencyStore(d.db)
-		_, isNew, ierr := store.LookupOrReserve(ctx, row.workspaceID, key, row.id, row.id, 0)
+		_, isNew, ierr := idemStore.LookupOrReserve(ctx, row.workspaceID, idemKey, row.id, row.id, 0)
 		if ierr != nil {
 			// Fail closed: another replica may own this fire, or the store is
 			// unavailable. Skip without advancing — the owning replica advances
@@ -184,6 +200,7 @@ func (d *RecurringIssueDispatcher) fireOne(ctx context.Context, row recurringDue
 			// Don't insert, don't advance.
 			return
 		}
+		reserved = true
 	}
 
 	var labels []string
@@ -202,6 +219,7 @@ func (d *RecurringIssueDispatcher) fireOne(ctx context.Context, row recurringDue
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		d.logger.Error("recurring issue dispatcher: begin tx", "id", row.id, "error", err)
+		releaseReservation() // next_run not advanced — free the key so the next tick retries
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
@@ -244,10 +262,18 @@ func (d *RecurringIssueDispatcher) fireOne(ctx context.Context, row recurringDue
 		`UPDATE recurring_issues SET next_run = ?, last_run = ?, run_count = run_count + 1, updated_at = ? WHERE id = ?`,
 		nextRun, nowStr, nowStr, row.id); uerr != nil {
 		d.logger.Error("recurring issue dispatcher: advance schedule", "id", row.id, "error", uerr)
+		// Roll back FIRST: an aborted statement still holds the write lock until
+		// the tx closes, and releaseReservation writes on another connection —
+		// forgetting before the rollback would deadlock on the held lock.
+		_ = tx.Rollback()
+		releaseReservation() // next_run not advanced — free the key so the next tick retries
 		return
 	}
 	if err := tx.Commit(); err != nil {
 		d.logger.Error("recurring issue dispatcher: commit", "id", row.id, "error", err)
+		// A failed Commit finalizes the tx (connection released), so the key
+		// can be freed safely — insert+advance rolled back, next_run unchanged.
+		releaseReservation()
 		return
 	}
 
