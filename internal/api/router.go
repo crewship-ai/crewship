@@ -46,10 +46,19 @@ func (b *keeperWSBroadcaster) BroadcastKeeperEvent(workspaceID string, event map
 }
 
 type Router struct {
-	mux             *http.ServeMux
-	db              *sql.DB
-	logger          *slog.Logger
-	authMw          *AuthMiddleware
+	mux    *http.ServeMux
+	db     *sql.DB
+	logger *slog.Logger
+	authMw *AuthMiddleware
+	// mutationRoutes records the {method, pattern, role} of every mutation
+	// route registered through authedMut / authedSelfMut. It is the walkable
+	// route table http.ServeMux refuses to expose — the enumeration test
+	// (route_authz_invariant_test.go) iterates it to assert complete
+	// mediation: every state-changing endpoint declares a role at
+	// registration, so a new mutation route that forgets its gate fails the
+	// build instead of shipping silently open (Saltzer & Schroeder). See
+	// rbac_routes.go for the recording wrappers.
+	mutationRoutes  []mutRoute
 	sessionsStore   sessions.Store
 	socketPath      string
 	internalToken   string

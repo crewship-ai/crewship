@@ -26,31 +26,31 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.PipelinesHandler = pipes // expose for orchestrator wiring
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines", authed(wsCtx(http.HandlerFunc(pipes.List))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Get))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run", authed(wsCtx(http.HandlerFunc(pipes.Run))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch", authed(wsCtx(http.HandlerFunc(pipes.RunBatch))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run", roleCreate, pipes.Run)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch", roleCreate, pipes.RunBatch)
 	// Per-step prompt/model override layer (v121) — tweak a step without
 	// bumping the routine version.
-	r.mux.Handle("PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags", authed(wsCtx(http.HandlerFunc(pipes.AddPipelineTags))))
-	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags/{tag}", authed(wsCtx(http.HandlerFunc(pipes.RemovePipelineTag))))
+	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags", roleCreate, pipes.AddPipelineTags)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags/{tag}", roleCreate, pipes.RemovePipelineTag)
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/overrides", authed(wsCtx(http.HandlerFunc(pipes.ListStepOverrides))))
-	r.mux.Handle("PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override", authed(wsCtx(http.HandlerFunc(pipes.SetStepOverride))))
-	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override", authed(wsCtx(http.HandlerFunc(pipes.DeleteStepOverride))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run", authed(wsCtx(http.HandlerFunc(pipes.DryRun))))
+	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override", roleCreate, pipes.SetStepOverride)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override", roleCreate, pipes.DeleteStepOverride)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run", roleCreate, pipes.DryRun)
 	// Public draft-validation gate behind the UI "Test run" button: dry-run
 	// validates an UNSAVED definition and mints the save_token Save verifies.
 	// Distinct from /internal/pipelines/test_run (sidecar, X-Internal-Token) —
 	// this one is JWT-authed so a browser/CLI can reach it. Literal "test_run"
 	// beats the {slug} catch-all in net/http matching, so no ordering hazard.
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/test_run", authed(wsCtx(http.HandlerFunc(pipes.TestRun))))
-	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Delete))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/test_run", roleCreate, pipes.TestRun)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}", roleManage, pipes.Delete)
 	// Routine governance (maker-checker + admin airbag). approve/reject are
 	// MANAGER+ (canRole "create"); disable/enable are OWNER/ADMIN
 	// (canRole "manage"). Literal sub-segments beat the {slug} catch-all in
 	// net/http's matcher, so no ordering hazard.
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/approve", authed(wsCtx(http.HandlerFunc(pipes.Approve))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/reject", authed(wsCtx(http.HandlerFunc(pipes.Reject))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/disable", authed(wsCtx(http.HandlerFunc(pipes.Disable))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/enable", authed(wsCtx(http.HandlerFunc(pipes.Enable))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/approve", roleCreate, pipes.Approve)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/reject", roleCreate, pipes.Reject)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/disable", roleManage, pipes.Disable)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/enable", roleManage, pipes.Enable)
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs", authed(wsCtx(http.HandlerFunc(pipes.ListRuns))))
 	// run-records hits the v83 pipeline_runs table directly — column-typed
 	// reads beat the LIKE+json_extract scan ListRuns does over journal_entries.
@@ -63,29 +63,29 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// required. Distinct from /internal/pipelines/save which the
 	// sidecar uses with X-Internal-Token; this route uses normal
 	// JWT auth and records authorship as the calling user.
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/save", authed(wsCtx(http.HandlerFunc(pipes.Save))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/save", roleCreate, pipes.Save)
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions", authed(wsCtx(http.HandlerFunc(pipes.ListVersions))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions/{n}", authed(wsCtx(http.HandlerFunc(pipes.GetVersion))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback", authed(wsCtx(http.HandlerFunc(pipes.Rollback))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback", roleManage, pipes.Rollback)
 	// Marketplace prep: portable JSON bundles for cross-workspace
 	// transfer. Export is read-only; import requires author_crew_id
 	// in the body since bundles are deliberately
 	// installation-independent.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/export", authed(wsCtx(http.HandlerFunc(pipes.ExportPipeline))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/import", authed(wsCtx(http.HandlerFunc(pipes.ImportPipeline))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/import", roleCreate, pipes.ImportPipeline)
 	// Waitpoints — StepWait approval persistence + UI inbox surface.
 	// Pending waitpoints flow into the same Inbox as Keeper approvals.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/waitpoints", authed(wsCtx(http.HandlerFunc(pipes.ListPendingWaitpoints))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve", authed(wsCtx(http.HandlerFunc(pipes.ApproveWaitpoint))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve", roleCreate, pipes.ApproveWaitpoint)
 	// Pipeline schedules — cron triggers for saved pipelines (the
 	// Routines integration). CRUD-only; the scheduler runs in-process
 	// in cmd_start and reads the table directly.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-schedules", authed(wsCtx(http.HandlerFunc(pipes.ListSchedules))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipeline-schedules", authed(wsCtx(http.HandlerFunc(pipes.CreateSchedule))))
-	r.mux.Handle("PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}", authed(wsCtx(http.HandlerFunc(pipes.UpdateSchedule))))
-	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}", authed(wsCtx(http.HandlerFunc(pipes.DeleteSchedule))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-schedules", roleInline, pipes.CreateSchedule)
+	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}", roleManage, pipes.UpdateSchedule)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}", roleManage, pipes.DeleteSchedule)
 	// Force-fire a schedule out of cycle (CLI: `routine schedules now`).
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run", authed(wsCtx(http.HandlerFunc(pipes.RunSchedule))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run", roleCreate, pipes.RunSchedule)
 	// Run control — cancel + active list. The cancel API is the
 	// other half of concurrency control: a stuck run holds a slot
 	// until either it finishes or the operator pre-empts it.
@@ -99,28 +99,28 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs", authed(wsCtx(http.HandlerFunc(pipes.ListWorkspaceRuns))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}", authed(wsCtx(http.HandlerFunc(pipes.GetRun))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/tree", authed(wsCtx(http.HandlerFunc(pipes.GetRunTree))))
-	r.mux.Handle("PATCH /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata", authed(wsCtx(http.HandlerFunc(pipes.UpdateRunMetadata))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal", authed(wsCtx(http.HandlerFunc(pipes.SignalRun))))
+	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata", roleCreate, pipes.UpdateRunMetadata)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal", roleCreate, pipes.SignalRun)
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/logs", authed(wsCtx(http.HandlerFunc(pipes.RunLogs))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel", authed(wsCtx(http.HandlerFunc(pipes.CancelRun))))
-	// Observability (trigger.dev-informed): replay a failed run with its
-	// original inputs, bulk-replay a fingerprint group, and list failures
-	// bucketed by fingerprint. errors/bulk_replay are registered before
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel", roleManage, pipes.CancelRun)
+	// Observability (replay-with-original-inputs pattern): replay a failed run
+	// with its original inputs, bulk-replay a fingerprint group, and list
+	// failures bucketed by fingerprint. errors/bulk_replay are registered before
 	// the {runId} replay so the literal segments win net/http matching.
 	// Deferred dispatch (delay/ttl/debounce/priority) — list + cancel
 	// parked triggers. Registered before {slug} routes so the literal
 	// "pending" segment wins net/http matching.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/pending", authed(wsCtx(http.HandlerFunc(pipes.ListPendingRuns))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel", authed(wsCtx(http.HandlerFunc(pipes.CancelPendingRun))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel", roleCreate, pipes.CancelPendingRun)
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/runs/errors", authed(wsCtx(http.HandlerFunc(pipes.ListErrorGroups))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay", authed(wsCtx(http.HandlerFunc(pipes.BulkReplayRuns))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/replay", authed(wsCtx(http.HandlerFunc(pipes.ReplayRun))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay", roleCreate, pipes.BulkReplayRuns)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/replay", roleCreate, pipes.ReplayRun)
 	// Pipeline webhooks — event-driven trigger surface alongside
 	// cron schedules. CRUD requires auth; the public dispatch
 	// endpoint authenticates via the token + optional HMAC instead.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-webhooks", authed(wsCtx(http.HandlerFunc(pipes.ListWebhooks))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks", authed(wsCtx(http.HandlerFunc(pipes.CreateWebhook))))
-	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}", authed(wsCtx(http.HandlerFunc(pipes.DeleteWebhook))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-webhooks", roleCreate, pipes.CreateWebhook)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}", roleManage, pipes.DeleteWebhook)
 	// Public dispatch — no `authed` wrapper. The token in the path
 	// is the auth surface; signing_secret + HMAC layered on top.
 	r.mux.HandleFunc("POST /api/v1/webhooks/{token}", pipes.FireWebhook)

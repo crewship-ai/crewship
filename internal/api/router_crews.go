@@ -59,23 +59,23 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 
 	// Workspaces (auth only, no workspace context needed)
 	r.mux.Handle("GET /api/v1/workspaces", authed(http.HandlerFunc(ws.List)))
-	r.mux.Handle("POST /api/v1/workspaces", authed(http.HandlerFunc(ws.Create)))
+	r.authedSelfMut("POST", "/api/v1/workspaces", ws.Create)
 
 	// Workspace detail (require workspace context via path param)
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}", authed(wsCtx(http.HandlerFunc(ws.Get))))
-	r.mux.Handle("PATCH /api/v1/workspaces/{workspaceId}", authed(wsCtx(http.HandlerFunc(ws.Update))))
+	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}", roleManage, ws.Update)
 
 	// Workspace members
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/members", authed(wsCtx(http.HandlerFunc(ws.ListMembers))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/members", authed(wsCtx(http.HandlerFunc(ws.AddMember))))
-	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/members/{memberId}", authed(wsCtx(http.HandlerFunc(ws.RemoveMember))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/members", roleManage, ws.AddMember)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/members/{memberId}", roleManage, ws.RemoveMember)
 	// PRD-SLASH-CAPABILITIES-2026 §6.7 — per-member capability
-	// grant/revoke surface. Admin-only (handler-side gate); both
-	// routes JWT-authed + workspace-scoped.
+	// grant/revoke surface. The PATCH is ADMIN+ enforced at registration
+	// (authedMut/roleManage); the GET is read-only, JWT-authed +
+	// workspace-scoped.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities",
 		authed(wsCtx(http.HandlerFunc(ws.GetMemberCapabilities))))
-	r.mux.Handle("PATCH /api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities",
-		authed(wsCtx(http.HandlerFunc(ws.PatchMemberCapabilities))))
+	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities", roleManage, ws.PatchMemberCapabilities)
 	// Bulk variant — drives the Members capability grid in one
 	// round-trip instead of N+1 fan-out across per-member endpoints.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/members/capabilities",
@@ -83,15 +83,15 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 
 	// Workspace invitations
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/invitations", authed(wsCtx(http.HandlerFunc(ws.ListInvitations))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/invitations", authed(wsCtx(http.HandlerFunc(ws.CreateInvitation))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/invitations", roleManage, ws.CreateInvitation)
 
 	// Crews (require workspace context)
 	r.mux.Handle("GET /api/v1/crews", authed(wsCtx(http.HandlerFunc(crews.List))))
-	r.mux.Handle("POST /api/v1/crews", authed(wsCtx(http.HandlerFunc(crews.Create))))
+	r.authedMut("POST", "/api/v1/crews", roleCreate, crews.Create)
 	r.mux.Handle("GET /api/v1/crews/{crewId}", authed(wsCtx(http.HandlerFunc(crews.Get))))
-	r.mux.Handle("PATCH /api/v1/crews/{crewId}", authed(wsCtx(http.HandlerFunc(crews.Update))))
-	r.mux.Handle("PUT /api/v1/crews/{crewId}", authed(wsCtx(http.HandlerFunc(crews.Update))))
-	r.mux.Handle("DELETE /api/v1/crews/{crewId}", authed(wsCtx(http.HandlerFunc(crews.Delete))))
+	r.authedMut("PATCH", "/api/v1/crews/{crewId}", roleManage, crews.Update)
+	r.authedMut("PUT", "/api/v1/crews/{crewId}", roleManage, crews.Update)
+	r.authedMut("DELETE", "/api/v1/crews/{crewId}", roleManage, crews.Delete)
 
 	// Per-crew autonomy policy (PR-B F2). Workspace-scoped list +
 	// per-crew GET/PUT. PUT invalidates the shared resolver cache so
@@ -102,20 +102,20 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	policies.SetJournal(r.Journal())
 	r.mux.Handle("GET /api/v1/policies", authed(wsCtx(http.HandlerFunc(policies.List))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/policy", authed(wsCtx(http.HandlerFunc(policies.Get))))
-	r.mux.Handle("PUT /api/v1/crews/{crewId}/policy", authed(wsCtx(http.HandlerFunc(policies.Put))))
+	r.authedMut("PUT", "/api/v1/crews/{crewId}/policy", roleCreate, policies.Put)
 
 	// Crew members
 	r.mux.Handle("GET /api/v1/crews/{crewId}/members", authed(wsCtx(http.HandlerFunc(crews.ListMembers))))
-	r.mux.Handle("POST /api/v1/crews/{crewId}/members", authed(wsCtx(http.HandlerFunc(crews.AddMember))))
-	r.mux.Handle("PATCH /api/v1/crews/{crewId}/members/{memberId}", authed(wsCtx(http.HandlerFunc(crews.UpdateMemberRole))))
-	r.mux.Handle("DELETE /api/v1/crews/{crewId}/members/{memberId}", authed(wsCtx(http.HandlerFunc(crews.RemoveMember))))
-	r.mux.Handle("POST /api/v1/crews/{crewId}/apply-avatar-style", authed(wsCtx(http.HandlerFunc(crews.ApplyAvatarStyle))))
+	r.authedMut("POST", "/api/v1/crews/{crewId}/members", roleCreate, crews.AddMember)
+	r.authedMut("PATCH", "/api/v1/crews/{crewId}/members/{memberId}", roleManage, crews.UpdateMemberRole)
+	r.authedMut("DELETE", "/api/v1/crews/{crewId}/members/{memberId}", roleManage, crews.RemoveMember)
+	r.authedMut("POST", "/api/v1/crews/{crewId}/apply-avatar-style", roleManage, crews.ApplyAvatarStyle)
 
 	// Crew Connections
 	conns := NewCrewConnectionHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/crew-connections", authed(wsCtx(http.HandlerFunc(conns.List))))
-	r.mux.Handle("POST /api/v1/crew-connections", authed(wsCtx(http.HandlerFunc(conns.Create))))
-	r.mux.Handle("DELETE /api/v1/crew-connections/{connectionId}", authed(wsCtx(http.HandlerFunc(conns.Delete))))
+	r.authedMut("POST", "/api/v1/crew-connections", roleCreate, conns.Create)
+	r.authedMut("DELETE", "/api/v1/crew-connections/{connectionId}", roleCreate, conns.Delete)
 
 	// Integrations (MCP Gateway)
 	integrations := NewIntegrationHandler(r.db, r.logger)
@@ -124,19 +124,19 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	}
 	// Workspace-level integrations
 	r.mux.Handle("GET /api/v1/integrations", authed(wsCtx(http.HandlerFunc(integrations.ListWorkspaceIntegrations))))
-	r.mux.Handle("POST /api/v1/integrations", authed(wsCtx(http.HandlerFunc(integrations.CreateWorkspaceIntegration))))
+	r.authedMut("POST", "/api/v1/integrations", roleManage, integrations.CreateWorkspaceIntegration)
 	r.mux.Handle("GET /api/v1/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.GetWorkspaceIntegration))))
-	r.mux.Handle("PATCH /api/v1/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.UpdateWorkspaceIntegration))))
-	r.mux.Handle("DELETE /api/v1/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.DeleteWorkspaceIntegration))))
-	r.mux.Handle("POST /api/v1/integrations/{integrationId}/test", authed(wsCtx(http.HandlerFunc(integrations.TestWorkspaceIntegrationConnection))))
+	r.authedMut("PATCH", "/api/v1/integrations/{integrationId}", roleManage, integrations.UpdateWorkspaceIntegration)
+	r.authedMut("DELETE", "/api/v1/integrations/{integrationId}", roleManage, integrations.DeleteWorkspaceIntegration)
+	r.authedMut("POST", "/api/v1/integrations/{integrationId}/test", roleCreate, integrations.TestWorkspaceIntegrationConnection)
 	// All crew integrations (cross-crew overview for Integrations page)
 	r.mux.Handle("GET /api/v1/integrations/crews", authed(wsCtx(http.HandlerFunc(integrations.ListAllCrewIntegrations))))
 	// Crew-level integrations
 	r.mux.Handle("GET /api/v1/crews/{crewId}/integrations", authed(wsCtx(http.HandlerFunc(integrations.ListCrewIntegrations))))
-	r.mux.Handle("POST /api/v1/crews/{crewId}/integrations", authed(wsCtx(http.HandlerFunc(integrations.CreateCrewIntegration))))
-	r.mux.Handle("PATCH /api/v1/crews/{crewId}/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.UpdateCrewIntegration))))
-	r.mux.Handle("DELETE /api/v1/crews/{crewId}/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.DeleteCrewIntegration))))
-	r.mux.Handle("POST /api/v1/crews/{crewId}/integrations/{integrationId}/test", authed(wsCtx(http.HandlerFunc(integrations.TestCrewIntegrationConnection))))
+	r.authedMut("POST", "/api/v1/crews/{crewId}/integrations", roleCreate, integrations.CreateCrewIntegration)
+	r.authedMut("PATCH", "/api/v1/crews/{crewId}/integrations/{integrationId}", roleManage, integrations.UpdateCrewIntegration)
+	r.authedMut("DELETE", "/api/v1/crews/{crewId}/integrations/{integrationId}", roleManage, integrations.DeleteCrewIntegration)
+	r.authedMut("POST", "/api/v1/crews/{crewId}/integrations/{integrationId}/test", roleCreate, integrations.TestCrewIntegrationConnection)
 	// Composio managed integrations — read-only inventory (auth-config catalog
 	// + connected accounts grouped by user_id). Two literal path segments after
 	// /integrations so it never collides with the /{integrationId} wildcard.
@@ -146,78 +146,78 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/integrations/composio/tools", authed(wsCtx(http.HandlerFunc(composioH.ListTools))))
 	r.mux.Handle("GET /api/v1/integrations/composio/triggers", authed(wsCtx(http.HandlerFunc(composioH.ListTriggerTypes))))
 	r.mux.Handle("GET /api/v1/integrations/composio/triggers/active", authed(wsCtx(http.HandlerFunc(composioH.ListActiveTriggers))))
-	r.mux.Handle("POST /api/v1/integrations/composio/triggers", authed(wsCtx(http.HandlerFunc(composioH.CreateTrigger))))
+	r.authedMut("POST", "/api/v1/integrations/composio/triggers", roleManage, composioH.CreateTrigger)
 	r.mux.Handle("GET /api/v1/integrations/composio/settings", authed(wsCtx(http.HandlerFunc(composioH.GetSettings))))
-	r.mux.Handle("PUT /api/v1/integrations/composio/settings", authed(wsCtx(http.HandlerFunc(composioH.UpsertSettings))))
-	r.mux.Handle("DELETE /api/v1/integrations/composio/settings", authed(wsCtx(http.HandlerFunc(composioH.DeleteSettings))))
-	r.mux.Handle("POST /api/v1/integrations/composio/connect", authed(wsCtx(http.HandlerFunc(composioH.Connect))))
+	r.authedMut("PUT", "/api/v1/integrations/composio/settings", roleManage, composioH.UpsertSettings)
+	r.authedMut("DELETE", "/api/v1/integrations/composio/settings", roleManage, composioH.DeleteSettings)
+	r.authedMut("POST", "/api/v1/integrations/composio/connect", roleManage, composioH.Connect)
 	// Default connector — inspect (read) / provision (manage) the workspace-wide
 	// default Composio MCP server every agent inherits when
 	// COMPOSIO_DEFAULT_CONNECTOR is ON and the agent has no per-agent binding.
 	r.mux.Handle("GET /api/v1/integrations/composio/default", authed(wsCtx(http.HandlerFunc(composioH.GetDefault))))
-	r.mux.Handle("PUT /api/v1/integrations/composio/default", authed(wsCtx(http.HandlerFunc(composioH.SetDefault))))
+	r.authedMut("PUT", "/api/v1/integrations/composio/default", roleManage, composioH.SetDefault)
 	// Agent access binding — assign a Composio user (its connected accounts/
 	// tools) to a specific agent, persisting the credential + workspace MCP
 	// server + agent binding the runtime resolver already reads.
 	r.mux.Handle("GET /api/v1/integrations/composio/agents/{agentId}/bind", authed(wsCtx(http.HandlerFunc(composioH.ListAgentBindings))))
-	r.mux.Handle("POST /api/v1/integrations/composio/agents/{agentId}/bind", authed(wsCtx(http.HandlerFunc(composioH.BindAgent))))
-	r.mux.Handle("DELETE /api/v1/integrations/composio/agents/{agentId}/bind", authed(wsCtx(http.HandlerFunc(composioH.UnbindAgent))))
+	r.authedMut("POST", "/api/v1/integrations/composio/agents/{agentId}/bind", roleManage, composioH.BindAgent)
+	r.authedMut("DELETE", "/api/v1/integrations/composio/agents/{agentId}/bind", roleManage, composioH.UnbindAgent)
 	// Connected-account management — revoke/refresh/delete a Composio connected
 	// account (manage-gated; proxies the matching Composio lifecycle call).
-	r.mux.Handle("POST /api/v1/integrations/composio/accounts/{accountId}/revoke", authed(wsCtx(http.HandlerFunc(composioH.RevokeAccount))))
-	r.mux.Handle("POST /api/v1/integrations/composio/accounts/{accountId}/refresh", authed(wsCtx(http.HandlerFunc(composioH.RefreshAccount))))
-	r.mux.Handle("DELETE /api/v1/integrations/composio/accounts/{accountId}", authed(wsCtx(http.HandlerFunc(composioH.DeleteAccount))))
+	r.authedMut("POST", "/api/v1/integrations/composio/accounts/{accountId}/revoke", roleManage, composioH.RevokeAccount)
+	r.authedMut("POST", "/api/v1/integrations/composio/accounts/{accountId}/refresh", roleManage, composioH.RefreshAccount)
+	r.authedMut("DELETE", "/api/v1/integrations/composio/accounts/{accountId}", roleManage, composioH.DeleteAccount)
 	// Connectors — curated manifest catalog + install flow. List/Get are
 	// catalog browse (auth only, no workspace context); Verify/Install
 	// mutate workspace state and gate on MANAGER+ via wsCtx-resolved role.
 	connectorsH := NewConnectorHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/connectors", authed(http.HandlerFunc(connectorsH.List)))
 	r.mux.Handle("GET /api/v1/connectors/{connectorId}", authed(http.HandlerFunc(connectorsH.Get)))
-	r.mux.Handle("POST /api/v1/connectors/{connectorId}/verify", authed(wsCtx(http.HandlerFunc(connectorsH.Verify))))
-	r.mux.Handle("POST /api/v1/connectors/{connectorId}/install", authed(wsCtx(http.HandlerFunc(connectorsH.Install))))
+	r.authedMut("POST", "/api/v1/connectors/{connectorId}/verify", roleCreate, connectorsH.Verify)
+	r.authedMut("POST", "/api/v1/connectors/{connectorId}/install", roleCreate, connectorsH.Install)
 	// Recipes — 1-click curated bundles (CONNECTIONS.md §6)
 	recipesH := NewRecipeHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/recipes", authed(http.HandlerFunc(recipesH.List)))
 	r.mux.Handle("GET /api/v1/recipes/{slug}", authed(http.HandlerFunc(recipesH.Get)))
 	r.mux.Handle("GET /api/v1/recipes/{slug}/preview", authed(wsCtx(http.HandlerFunc(recipesH.Preview))))
-	r.mux.Handle("POST /api/v1/recipes/{slug}/install", authed(wsCtx(http.HandlerFunc(recipesH.Install))))
+	r.authedMut("POST", "/api/v1/recipes/{slug}/install", roleManage, recipesH.Install)
 	// Credential audit timeline (CONNECTIONS.md §4.3 inline drawer)
 	r.mux.Handle("GET /api/v1/credentials/{credentialId}/audit", authed(wsCtx(http.HandlerFunc(creds.AuditTimeline))))
 	// Credential rotation w/ grace overlap (CONNECTIONS.md §7.1, MUST-add #1)
-	r.mux.Handle("POST /api/v1/credentials/{credentialId}/rotate", authed(wsCtx(http.HandlerFunc(creds.Rotate))))
+	r.authedMut("POST", "/api/v1/credentials/{credentialId}/rotate", roleManage, creds.Rotate)
 	r.mux.Handle("GET /api/v1/credentials/{credentialId}/rotations", authed(wsCtx(http.HandlerFunc(creds.ListRotations))))
-	r.mux.Handle("DELETE /api/v1/credential-rotations/{rotationId}", authed(wsCtx(http.HandlerFunc(creds.CancelRotation))))
+	r.authedMut("DELETE", "/api/v1/credential-rotations/{rotationId}", roleManage, creds.CancelRotation)
 	// Per-tool granularity (Cursor parity, CONNECTIONS.md §3.1)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/integrations/{integrationId}/tools", authed(wsCtx(http.HandlerFunc(integrations.ListCrewIntegrationTools))))
-	r.mux.Handle("PATCH /api/v1/crews/{crewId}/integrations/{integrationId}/tools/{toolName}", authed(wsCtx(http.HandlerFunc(integrations.UpdateCrewIntegrationTool))))
-	r.mux.Handle("POST /api/v1/crews/{crewId}/integrations/{integrationId}/tools/refresh", authed(wsCtx(http.HandlerFunc(integrations.RefreshCrewIntegrationTools))))
+	r.authedMut("PATCH", "/api/v1/crews/{crewId}/integrations/{integrationId}/tools/{toolName}", roleManage, integrations.UpdateCrewIntegrationTool)
+	r.authedMut("POST", "/api/v1/crews/{crewId}/integrations/{integrationId}/tools/refresh", roleManage, integrations.RefreshCrewIntegrationTools)
 	// Agent MCP bindings
 	r.mux.Handle("GET /api/v1/agents/{agentId}/integrations", authed(wsCtx(http.HandlerFunc(integrations.ListAgentBindings))))
-	r.mux.Handle("POST /api/v1/agents/{agentId}/integrations", authed(wsCtx(http.HandlerFunc(integrations.CreateAgentBinding))))
-	r.mux.Handle("PATCH /api/v1/agents/{agentId}/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.UpdateAgentBinding))))
-	r.mux.Handle("DELETE /api/v1/agents/{agentId}/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.DeleteAgentBinding))))
+	r.authedMut("POST", "/api/v1/agents/{agentId}/integrations", roleCreate, integrations.CreateAgentBinding)
+	r.authedMut("PATCH", "/api/v1/agents/{agentId}/integrations/{integrationId}", roleCreate, integrations.UpdateAgentBinding)
+	r.authedMut("DELETE", "/api/v1/agents/{agentId}/integrations/{integrationId}", roleCreate, integrations.DeleteAgentBinding)
 	// Resolve effective integrations for an agent (cascade: workspace → crew → agent bindings)
 	r.mux.Handle("GET /api/v1/agents/{agentId}/integrations/resolved", authed(wsCtx(http.HandlerFunc(integrations.ResolveAgentIntegrations))))
 
 	// Workflow Templates
 	templates := NewTemplateHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/templates", authed(wsCtx(http.HandlerFunc(templates.List))))
-	r.mux.Handle("POST /api/v1/templates", authed(wsCtx(http.HandlerFunc(templates.Create))))
+	r.authedMut("POST", "/api/v1/templates", roleCreate, templates.Create)
 	r.mux.Handle("GET /api/v1/templates/{templateId}", authed(wsCtx(http.HandlerFunc(templates.Get))))
-	r.mux.Handle("PATCH /api/v1/templates/{templateId}", authed(wsCtx(http.HandlerFunc(templates.Update))))
-	r.mux.Handle("DELETE /api/v1/templates/{templateId}", authed(wsCtx(http.HandlerFunc(templates.Delete))))
+	r.authedMut("PATCH", "/api/v1/templates/{templateId}", roleCreate, templates.Update)
+	r.authedMut("DELETE", "/api/v1/templates/{templateId}", roleCreate, templates.Delete)
 
 	// Crew Templates (blueprints)
 	crewTmpl := NewCrewTemplateHandler(r.db, r.logger)
 	crewTmpl.SetJournal(r.Journal())
 	r.mux.Handle("GET /api/v1/crew-templates", authed(wsCtx(http.HandlerFunc(crewTmpl.List))))
 	r.mux.Handle("GET /api/v1/crew-templates/{slug}", authed(wsCtx(http.HandlerFunc(crewTmpl.Get))))
-	r.mux.Handle("POST /api/v1/crew-templates/{slug}/deploy", authed(wsCtx(http.HandlerFunc(crewTmpl.Deploy))))
+	r.authedMut("POST", "/api/v1/crew-templates/{slug}/deploy", roleCreate, crewTmpl.Deploy)
 
 	// AI crew wizard
 	crewAI := NewCrewAIHandler(r.db, r.logger)
 	crewAI.SetJournal(r.Journal())
-	r.mux.Handle("POST /api/v1/crew-ai-suggest", authed(wsCtx(http.HandlerFunc(crewAI.Suggest))))
+	r.authedMut("POST", "/api/v1/crew-ai-suggest", roleCreate, crewAI.Suggest)
 
 	// Model discovery — live-or-curated per provider. The agent update path
 	// reuses this same resolver to validate llm_model, so the handler is also
@@ -234,39 +234,39 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/agents/crews-status", authed(wsCtx(http.HandlerFunc(agents.CrewsStatus))))
 	r.mux.Handle("GET /api/v1/agent-load", authed(wsCtx(http.HandlerFunc(agents.Load))))
 	r.mux.Handle("GET /api/v1/agents", authed(wsCtx(http.HandlerFunc(agents.List))))
-	r.mux.Handle("POST /api/v1/agents", authed(wsCtx(http.HandlerFunc(agents.Create))))
+	r.authedMut("POST", "/api/v1/agents", roleInline, agents.Create)
 	// PR-D F5 ephemeral lifecycle endpoints. Hire creates a new
 	// short-lived agent gated by the per-crew autonomy policy.
 	// Rehire resets the TTL on an existing ephemeral (typically a
 	// ghost) so the operator can extend a hire without losing the
 	// agent's memory continuity.
-	r.mux.Handle("POST /api/v1/agents/hire", authed(wsCtx(http.HandlerFunc(agents.Hire))))
-	r.mux.Handle("POST /api/v1/agents/{agentId}/rehire", authed(wsCtx(http.HandlerFunc(agents.Rehire))))
+	r.authedMut("POST", "/api/v1/agents/hire", roleCreate, agents.Hire)
+	r.authedMut("POST", "/api/v1/agents/{agentId}/rehire", roleCreate, agents.Rehire)
 	// Approve-hire flips a guided-autonomy ephemeral from
 	// PENDING_REVIEW to IDLE, releasing the chatbridge guard so the
 	// agent can serve messages. Paired with the blocking inbox
 	// waitpoint written by Hire when policy returns InboxApprove.
-	r.mux.Handle("POST /api/v1/agents/{agentId}/approve-hire", authed(wsCtx(http.HandlerFunc(agents.ApproveHire))))
+	r.authedMut("POST", "/api/v1/agents/{agentId}/approve-hire", roleCreate, agents.ApproveHire)
 	r.mux.Handle("GET /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Get))))
-	r.mux.Handle("PATCH /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Update))))
-	r.mux.Handle("DELETE /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Delete))))
+	r.authedMut("PATCH", "/api/v1/agents/{agentId}", roleInline, agents.Update)
+	r.authedMut("DELETE", "/api/v1/agents/{agentId}", roleInline, agents.Delete)
 
 	// Agent skills
 	r.mux.Handle("GET /api/v1/agents/{agentId}/skills", authed(wsCtx(http.HandlerFunc(agents.ListSkills))))
-	r.mux.Handle("POST /api/v1/agents/{agentId}/skills", authed(wsCtx(http.HandlerFunc(agents.AddSkill))))
-	r.mux.Handle("DELETE /api/v1/agents/{agentId}/skills/{skillId}", authed(wsCtx(http.HandlerFunc(agents.RemoveSkill))))
+	r.authedMut("POST", "/api/v1/agents/{agentId}/skills", roleCreate, agents.AddSkill)
+	r.authedMut("DELETE", "/api/v1/agents/{agentId}/skills/{skillId}", roleCreate, agents.RemoveSkill)
 
 	// Agent credentials
 	r.mux.Handle("GET /api/v1/agents/{agentId}/credentials", authed(wsCtx(http.HandlerFunc(agents.ListCredentials))))
-	r.mux.Handle("POST /api/v1/agents/{agentId}/credentials", authed(wsCtx(http.HandlerFunc(agents.AddCredential))))
-	r.mux.Handle("DELETE /api/v1/agents/{agentId}/credentials/{assignmentId}", authed(wsCtx(http.HandlerFunc(agents.RemoveCredential))))
+	r.authedMut("POST", "/api/v1/agents/{agentId}/credentials", roleManage, agents.AddCredential)
+	r.authedMut("DELETE", "/api/v1/agents/{agentId}/credentials/{assignmentId}", roleManage, agents.RemoveCredential)
 
 	// Agent chats & runs
 	r.mux.Handle("GET /api/v1/agents/{agentId}/chats", authed(wsCtx(http.HandlerFunc(agents.ListChats))))
-	r.mux.Handle("POST /api/v1/agents/{agentId}/chats", authed(wsCtx(http.HandlerFunc(agents.CreateChat))))
+	r.authedMut("POST", "/api/v1/agents/{agentId}/chats", roleSelf, agents.CreateChat)
 	// Mark-read: advances the caller's per-chat read cursor (unread badge
 	// source) and clears the paired "agent replied" inbox item.
-	r.mux.Handle("PUT /api/v1/agents/{agentId}/chats/{chatId}/read", authed(wsCtx(http.HandlerFunc(agents.MarkChatRead))))
+	r.authedMut("PUT", "/api/v1/agents/{agentId}/chats/{chatId}/read", roleSelf, agents.MarkChatRead)
 	r.mux.Handle("GET /api/v1/agents/{agentId}/runs", authed(wsCtx(http.HandlerFunc(agents.ListRuns))))
 
 	// PR-E F6 — PERSONA endpoints (agent + crew flavors). Persona
@@ -275,13 +275,13 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// other agent-initiated actions.
 	persona := NewPersonaHandler(r.db, r.logger, r.outputBasePath, r.PolicyResolver())
 	r.mux.Handle("GET /api/v1/agents/{agentId}/persona", authed(wsCtx(http.HandlerFunc(persona.GetAgentPersona))))
-	r.mux.Handle("PUT /api/v1/agents/{agentId}/persona", authed(wsCtx(http.HandlerFunc(persona.PutAgentPersona))))
-	r.mux.Handle("DELETE /api/v1/agents/{agentId}/persona", authed(wsCtx(http.HandlerFunc(persona.DeleteAgentPersona))))
+	r.authedMut("PUT", "/api/v1/agents/{agentId}/persona", roleCreate, persona.PutAgentPersona)
+	r.authedMut("DELETE", "/api/v1/agents/{agentId}/persona", roleCreate, persona.DeleteAgentPersona)
 	r.mux.Handle("GET /api/v1/agents/{agentId}/persona/history", authed(wsCtx(http.HandlerFunc(persona.GetAgentPersonaHistory))))
-	r.mux.Handle("POST /api/v1/agents/{agentId}/persona/suggest", authed(wsCtx(http.HandlerFunc(persona.SuggestAgentPersona))))
+	r.authedMut("POST", "/api/v1/agents/{agentId}/persona/suggest", roleCreate, persona.SuggestAgentPersona)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/persona", authed(wsCtx(http.HandlerFunc(persona.GetCrewPersona))))
-	r.mux.Handle("PUT /api/v1/crews/{crewId}/persona", authed(wsCtx(http.HandlerFunc(persona.PutCrewPersona))))
-	r.mux.Handle("DELETE /api/v1/crews/{crewId}/persona", authed(wsCtx(http.HandlerFunc(persona.DeleteCrewPersona))))
+	r.authedMut("PUT", "/api/v1/crews/{crewId}/persona", roleCreate, persona.PutCrewPersona)
+	r.authedMut("DELETE", "/api/v1/crews/{crewId}/persona", roleCreate, persona.DeleteCrewPersona)
 
 	// PR-G F4.1 UX — per-agent self-learning posture (v106). Flag
 	// governs whether keeper evaluator ALLOW decisions auto-apply
@@ -290,13 +290,13 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// approval contract that protects production agents.
 	learning := NewLearningHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/agents/{agentId}/learning", authed(wsCtx(http.HandlerFunc(learning.Get))))
-	r.mux.Handle("PATCH /api/v1/agents/{agentId}/learning", authed(wsCtx(http.HandlerFunc(learning.Patch))))
+	r.authedMut("PATCH", "/api/v1/agents/{agentId}/learning", roleManage, learning.Patch)
 
 	// PR-E F6 — Peer card endpoints (per-agent operator view).
 	peers := NewPeerCardHandler(r.db, r.logger, r.outputBasePath)
 	r.mux.Handle("GET /api/v1/agents/{agentId}/peers", authed(wsCtx(http.HandlerFunc(peers.ListAgentPeers))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}/peers/{userId}", authed(wsCtx(http.HandlerFunc(peers.GetAgentPeer))))
-	r.mux.Handle("DELETE /api/v1/agents/{agentId}/peers/{userId}", authed(wsCtx(http.HandlerFunc(peers.DeleteAgentPeer))))
+	r.authedMut("DELETE", "/api/v1/agents/{agentId}/peers/{userId}", roleSelf, peers.DeleteAgentPeer)
 
 	// PR-E F6 — GDPR primitives. User-facing /users/me/* — every
 	// authenticated user can act on their own peer cards without
@@ -304,26 +304,26 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// lives behind /admin/users/{id}/data in Phase 2.
 	privacy := NewUserPeerPrivacyHandler(r.db, r.logger, r.outputBasePath)
 	r.mux.Handle("GET /api/v1/users/me/peer-consent", authed(wsCtx(http.HandlerFunc(privacy.GetConsent))))
-	r.mux.Handle("PUT /api/v1/users/me/peer-consent", authed(wsCtx(http.HandlerFunc(privacy.PutConsent))))
+	r.authedMut("PUT", "/api/v1/users/me/peer-consent", roleSelf, privacy.PutConsent)
 	r.mux.Handle("GET /api/v1/users/me/peer-cards", authed(wsCtx(http.HandlerFunc(privacy.GetMyCards))))
-	r.mux.Handle("DELETE /api/v1/users/me/peer-cards", authed(wsCtx(http.HandlerFunc(privacy.DeleteMyCards))))
+	r.authedMut("DELETE", "/api/v1/users/me/peer-cards", roleSelf, privacy.DeleteMyCards)
 
 	// Credentials (require workspace context + manage role for create)
 	r.mux.Handle("GET /api/v1/credentials", authed(wsCtx(http.HandlerFunc(creds.List))))
-	r.mux.Handle("POST /api/v1/credentials", authed(wsCtx(http.HandlerFunc(creds.Create))))
-	r.mux.Handle("POST /api/v1/credentials/test", authed(http.HandlerFunc(creds.Test)))
-	r.mux.Handle("POST /api/v1/credentials/{credentialId}/test", authed(wsCtx(http.HandlerFunc(creds.TestStored))))
+	r.authedMut("POST", "/api/v1/credentials", roleInline, creds.Create)
+	r.authedSelfMut("POST", "/api/v1/credentials/test", creds.Test)
+	r.authedMut("POST", "/api/v1/credentials/{credentialId}/test", roleCreate, creds.TestStored)
 	r.mux.Handle("GET /api/v1/credentials/default-env-var", authed(http.HandlerFunc(creds.DefaultEnvVar)))
 	r.mux.Handle("GET /api/v1/credentials/{credentialId}", authed(wsCtx(http.HandlerFunc(creds.Get))))
-	r.mux.Handle("PATCH /api/v1/credentials/{credentialId}", authed(wsCtx(http.HandlerFunc(creds.Update))))
-	r.mux.Handle("PUT /api/v1/credentials/{credentialId}", authed(wsCtx(http.HandlerFunc(creds.Update))))
-	r.mux.Handle("DELETE /api/v1/credentials/{credentialId}", authed(wsCtx(http.HandlerFunc(creds.Delete))))
+	r.authedMut("PATCH", "/api/v1/credentials/{credentialId}", roleCreate, creds.Update)
+	r.authedMut("PUT", "/api/v1/credentials/{credentialId}", roleCreate, creds.Update)
+	r.authedMut("DELETE", "/api/v1/credentials/{credentialId}", roleManage, creds.Delete)
 
 	// Skills (require auth)
 	r.mux.Handle("GET /api/v1/skills", authed(wsCtx(http.HandlerFunc(skills.List))))
 	r.mux.Handle("GET /api/v1/skills/{skillId}", authed(wsCtx(http.HandlerFunc(skills.Get))))
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/skills/import", authed(wsCtx(http.HandlerFunc(skills.Import))))
-	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId}", authed(wsCtx(http.HandlerFunc(skills.Delete))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/import", roleCreate, skills.Import)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/skills/{skillId}", roleManage, skills.Delete)
 	skillGen := NewSkillGenerateHandler(r.db, r.logger)
 	// Same stash-for-reuse pattern as creds above — the internal
 	// /api/v1/internal/skills/generate adapter shares the instance
@@ -332,9 +332,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// Path param name MUST match what the wsCtx middleware reads — the
 	// pattern is {workspaceId} everywhere else in the API, and changing
 	// it broke the workspace lookup on this route in the prior commit.
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/skills/generate", authed(wsCtx(http.HandlerFunc(skillGen.Generate))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/generate", roleInline, skillGen.Generate)
 	skillBulk := NewSkillBulkImportHandler(r.db, r.logger)
-	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/skills/bulk-import", authed(wsCtx(http.HandlerFunc(skillBulk.Import))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/bulk-import", roleCreate, skillBulk.Import)
 
 	// Devcontainer feature catalog (auth required, no workspace context needed).
 	// Stash the handler on the router so cmd_start can wire it into chatbridge
@@ -356,13 +356,13 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 
 	// Crew provisioning (require workspace context)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/provision", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionStatus))))
-	r.mux.Handle("POST /api/v1/crews/{crewId}/provision", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionTrigger))))
-	r.mux.Handle("POST /api/v1/crews/{crewId}/rebuild", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionRebuild))))
-	r.mux.Handle("POST /api/v1/crews/{crewId}/restart-agents", authed(wsCtx(http.HandlerFunc(provisioning.RestartCrewAgents))))
+	r.authedMut("POST", "/api/v1/crews/{crewId}/provision", roleCreate, provisioning.ProvisionTrigger)
+	r.authedMut("POST", "/api/v1/crews/{crewId}/rebuild", roleCreate, provisioning.ProvisionRebuild)
+	r.authedMut("POST", "/api/v1/crews/{crewId}/restart-agents", roleCreate, provisioning.RestartCrewAgents)
 
 	// Devcontainer image cache management (GC)
 	r.mux.Handle("GET /api/v1/cache/images", authed(wsCtx(http.HandlerFunc(provisioning.CacheList))))
-	r.mux.Handle("DELETE /api/v1/cache/images/{tag}", authed(wsCtx(http.HandlerFunc(provisioning.CacheDelete))))
+	r.authedMut("DELETE", "/api/v1/cache/images/{tag}", roleManage, provisioning.CacheDelete)
 
 	return provisioning
 }

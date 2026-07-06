@@ -33,7 +33,7 @@ func (r *Router) registerAdminRoutes() {
 	// (OWNER/ADMIN via the handler's canRole "manage" check).
 	obs := NewAdminObservabilityHandler(r.logger)
 	r.mux.Handle("GET /api/v1/admin/log-level", authed(wsCtx(http.HandlerFunc(obs.GetLogLevel))))
-	r.mux.Handle("PUT /api/v1/admin/log-level", authed(wsCtx(http.HandlerFunc(obs.SetLogLevel))))
+	r.authedMut("PUT", "/api/v1/admin/log-level", roleManage, obs.SetLogLevel)
 	r.mux.Handle("GET /api/v1/admin/health", authed(wsCtx(http.HandlerFunc(obs.Health))))
 
 	// Keeper admin log
@@ -51,7 +51,7 @@ func (r *Router) registerAdminRoutes() {
 	// on whom, scope, and operator-supplied reason.
 	gdprH := NewAdminGDPRHandler(r.db, r.logger, r.outputBasePath)
 	r.mux.Handle("GET /api/v1/admin/users/{userId}/data", authed(wsCtx(http.HandlerFunc(gdprH.ExportUserData))))
-	r.mux.Handle("DELETE /api/v1/admin/users/{userId}/data", authed(wsCtx(http.HandlerFunc(gdprH.DeleteUserData))))
+	r.authedMut("DELETE", "/api/v1/admin/users/{userId}/data", roleManage, gdprH.DeleteUserData)
 
 	// Memory stats — operator observability for the memory subsystem.
 	// Reads memory_versions directly; the audit watcher (Iter 1 of
@@ -93,7 +93,7 @@ func (r *Router) registerAdminRoutes() {
 	memCfg := NewMemoryConfigHandler(r.db, r.logger)
 	memCfg.SetJournal(r.Journal())
 	r.mux.Handle("GET /api/v1/admin/memory/config", authed(wsCtx(http.HandlerFunc(memCfg.Get))))
-	r.mux.Handle("PATCH /api/v1/admin/memory/config", authed(wsCtx(http.HandlerFunc(memCfg.Patch))))
+	r.authedMut("PATCH", "/api/v1/admin/memory/config", roleManage, memCfg.Patch)
 
 	// Backups (admin-only; require workspace context for scoping).
 	// Adapt the concrete Docker client to backup.DockerOps so the
@@ -118,18 +118,18 @@ func (r *Router) registerAdminRoutes() {
 	if r.journal != nil {
 		backupH.SetJournal(r.journal)
 	}
-	r.mux.Handle("POST /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.Create))))
+	r.authedMut("POST", "/api/v1/admin/backups", roleManage, backupH.Create)
 	r.mux.Handle("GET /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.List))))
 	r.mux.Handle("GET /api/v1/admin/backups/status", authed(wsCtx(http.HandlerFunc(backupH.Status))))
 	r.mux.Handle("GET /api/v1/admin/backups/metrics", authed(wsCtx(http.HandlerFunc(backupH.Metrics))))
-	r.mux.Handle("DELETE /api/v1/admin/backups/status", authed(wsCtx(http.HandlerFunc(backupH.Unlock))))
+	r.authedMut("DELETE", "/api/v1/admin/backups/status", roleManage, backupH.Unlock)
 	r.mux.Handle("GET /api/v1/admin/backups/inspect", authed(wsCtx(http.HandlerFunc(backupH.Inspect))))
 	r.mux.Handle("GET /api/v1/admin/backups/verify", authed(wsCtx(http.HandlerFunc(backupH.Verify))))
-	r.mux.Handle("POST /api/v1/admin/backups/rotate", authed(wsCtx(http.HandlerFunc(backupH.Rotate))))
+	r.authedMut("POST", "/api/v1/admin/backups/rotate", roleManage, backupH.Rotate)
 	r.mux.Handle("GET /api/v1/admin/backups/download", authed(wsCtx(http.HandlerFunc(backupH.Download))))
-	r.mux.Handle("POST /api/v1/admin/backups/restore", authed(wsCtx(http.HandlerFunc(backupH.Restore))))
-	r.mux.Handle("POST /api/v1/admin/backups/self-test", authed(wsCtx(http.HandlerFunc(backupH.SelfTest))))
-	r.mux.Handle("DELETE /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.Delete))))
+	r.authedMut("POST", "/api/v1/admin/backups/restore", roleManage, backupH.Restore)
+	r.authedMut("POST", "/api/v1/admin/backups/self-test", roleManage, backupH.SelfTest)
+	r.authedMut("DELETE", "/api/v1/admin/backups", roleManage, backupH.Delete)
 
 	// Legacy C1 resources (admin-only). Detect/remove pre-C1 slug-only crew
 	// docker resources that survive nuke+reseed and block agent container
@@ -146,7 +146,7 @@ func (r *Router) registerAdminRoutes() {
 	}
 	legacyH := NewLegacyResourceHandler(r.db, r.logger, legacyPruner, legacyDetector)
 	r.mux.Handle("GET /api/v1/admin/legacy-resources", authed(wsCtx(http.HandlerFunc(legacyH.Detect))))
-	r.mux.Handle("POST /api/v1/admin/prune-legacy-resources", authed(wsCtx(http.HandlerFunc(legacyH.Prune))))
+	r.authedMut("POST", "/api/v1/admin/prune-legacy-resources", roleManage, legacyH.Prune)
 
 	// Crew runtime teardown (admin-only). Removes the LIVE id-scoped docker
 	// containers+volumes of every crew in the workspace — the docker half of a
@@ -160,5 +160,5 @@ func (r *Router) registerAdminRoutes() {
 		}
 	}
 	crewRuntimeH := NewCrewRuntimeHandler(r.db, r.logger, runtimePruner)
-	r.mux.Handle("POST /api/v1/admin/prune-crew-runtimes", authed(wsCtx(http.HandlerFunc(crewRuntimeH.Prune))))
+	r.authedMut("POST", "/api/v1/admin/prune-crew-runtimes", roleManage, crewRuntimeH.Prune)
 }
