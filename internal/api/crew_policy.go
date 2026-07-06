@@ -105,6 +105,12 @@ func (h *CrewPolicyHandler) Get(w http.ResponseWriter, r *http.Request) {
 // rule documented in PRD §6 F2. On success, invalidates the
 // resolver cache so the next Resolve sees the new state immediately.
 func (h *CrewPolicyHandler) Put(w http.ResponseWriter, r *http.Request) {
+	// Setting the crew autonomy/governance policy (e.g. flipping to full
+	// autonomy) is a control-plane mutation — MANAGER+. Was membership-only, so
+	// a VIEWER could change a crew's autonomy level.
+	if !requireRole(w, r, "update") {
+		return
+	}
 	crewID := r.PathValue("crewId")
 	if crewID == "" {
 		replyError(w, http.StatusBadRequest, "crew id required")

@@ -202,6 +202,7 @@ func doPolicyRequest(h *CrewPolicyHandler, method, path string, body any, worksp
 	// the context fields the handlers read.
 	ctx := context.WithValue(req.Context(), ctxWorkspaceID, workspaceID)
 	ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: userID})
+	ctx = context.WithValue(ctx, ctxRole, "MANAGER") // policy Put now requires MANAGER+
 	req = req.WithContext(ctx)
 
 	// http.Request.PathValue needs the route to be matched through a

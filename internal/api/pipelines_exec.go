@@ -66,6 +66,11 @@ type runRequestBody struct {
 // the workspace WebSocket channel and watch for pipeline.* journal
 // entries — the run id in the response payload joins them.
 func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
+	// Running a routine spawns execution (control-plane) — MANAGER+. Gating only
+	// ReplayRun left this primary run path membership-only.
+	if !requireRole(w, r, "create") {
+		return
+	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	slug := r.PathValue("slug")
 	if h.runner == nil {
@@ -790,6 +795,10 @@ LIMIT ?`, workspaceID, entryFilter, p.ID, limit)
 // from internal/pipeline). The corresponding pipeline run goroutine
 // is parked on WaitFor(token); this call wakes it.
 func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Request) {
+	// Approving a human-in-the-loop waitpoint releases a gated run — MANAGER+.
+	if !requireRole(w, r, "update") {
+		return
+	}
 	if h.waitpoints == nil {
 		replyError(w, http.StatusServiceUnavailable, "waitpoint store not wired")
 		return

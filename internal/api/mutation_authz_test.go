@@ -42,6 +42,7 @@ func TestMutationRoutes_RejectViewer(t *testing.T) {
 	pipes := NewPipelineHandler(db, logger, nil, nil)
 	carto := NewCartographerHandler(db, logger)
 	tmpl := NewCrewTemplateHandler(db, logger)
+	policies := NewCrewPolicyHandler(db, nil, logger)
 
 	call := func(h http.HandlerFunc, method, target, body string, pv map[string]string) int {
 		rr := httptest.NewRecorder()
@@ -58,6 +59,10 @@ func TestMutationRoutes_RejectViewer(t *testing.T) {
 		pv     map[string]string
 	}{
 		{"crew-template deploy", tmpl.Deploy, "POST", "/x", `{"crew_name":"x"}`, map[string]string{"slug": "t"}},
+		{"crew policy put", policies.Put, "PUT", "/x", `{}`, map[string]string{"crewId": "c"}},
+		{"pipeline run", pipes.Run, "POST", "/x", `{}`, map[string]string{"slug": "p"}},
+		{"pipeline run_batch", pipes.RunBatch, "POST", "/x", `{}`, map[string]string{"slug": "p"}},
+		{"pipeline waitpoint approve", pipes.ApproveWaitpoint, "POST", "/x", `{}`, map[string]string{"token": "tok"}},
 		{"step-override set", pipes.SetStepOverride, "PUT", "/x", `{}`, map[string]string{"slug": "p", "stepId": "s"}},
 		{"step-override delete", pipes.DeleteStepOverride, "DELETE", "/x", "", map[string]string{"slug": "p", "stepId": "s"}},
 		{"run replay", pipes.ReplayRun, "POST", "/x", "", map[string]string{"runId": "r"}},

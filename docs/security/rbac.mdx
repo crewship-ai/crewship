@@ -51,9 +51,11 @@ The `canRole()` function in Go maps roles to three internal actions:
 Role gates are enforced **per handler** (via `requireRole` / `canRole`), not declared at route registration. The following control-plane mutation endpoints require `MANAGER`+ (the `create`/`update` tier) — a plain `MEMBER` or `VIEWER` is refused with `403`:
 
 - **Crew-template deploy** — `POST /crew-templates/{slug}/deploy` (creates a full crew + agents)
+- **Crew policy** — `PUT /crews/{id}/policy` (autonomy/governance level)
+- **Routine execution** — `POST /pipelines/{slug}/run`, `/run_batch`, and waitpoint `approve`
 - **Pipeline-run control** — `replay`, `bulk_replay`, `signal`, `metadata`, and `pending/{id}/cancel`
 - **Routine step overrides** — `PUT`/`DELETE .../steps/{stepId}/override`
-- **Checkpoints** — `restore`, `fork`, `delete`
+- **Checkpoints** — `create`, `restore`, `fork`, `delete`
 
 <Warning>
   Because gating is per-handler rather than route-declared, a new mutation route can ship without a gate. The [`TestMutationRoutes_RejectViewer`](https://github.com/crewship-ai/crewship) regression test guards these specific endpoints; a walkable route-table that makes "every mutation route declares a role" a build-time invariant is a planned follow-up.
