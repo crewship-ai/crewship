@@ -325,7 +325,8 @@ A CI lint-gate (`TestIngressFenceGate`) fails the build if a new caller interpol
 
 | Threat | Layer that handles it |
 |---|---|
-| External webhook/issue payload carries "ignore previous instructions" | **Ingress trust fence** (nonce-fenced as data) + Layer 5 scanner on Crewship's own calls |
+| External **webhook** payload carries "ignore previous instructions" | **Ingress trust fence** (nonce-fenced as data) + Layer 5 scanner on Crewship's own calls |
+| External **issue/mission or tool-output** payload carries an injection | **Partially** — Layer 5 scanner on Crewship's own LLM calls; the ingress trust fence extends to these sites in **M1** (only the webhook site is fenced today — see the M0/M1 note above) |
 | Agent tries to read API keys from env | Layer 2 (sidecar — keys aren't there) |
 | Agent tries to echo a stolen key in output | Layer 3 (scrubber redacts) |
 | Agent tries to reach an arbitrary URL | Layer 2 (allowlist denies) + container network policy |

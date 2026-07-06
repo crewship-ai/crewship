@@ -30,7 +30,8 @@ func TestIngressFenceGate(t *testing.T) {
 	// fields) extends this list once those sites are fenced.
 	const forbiddenField = "payload.Data"
 	sanctionedMarkers := []string{
-		"untrusted.Wrap(", // fenced before reaching the model
+		"untrusted.Wrap(", // package-level fence call
+		"fence.Wrap(",     // fence instance (e.g. h.fence.Wrap) — also neutralized
 		`\x00`,            // hash-only sink (idempotency key), not a prompt
 	}
 

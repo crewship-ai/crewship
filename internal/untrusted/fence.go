@@ -49,6 +49,12 @@ const nonceBytes = 16
 type Fence struct {
 	scan     func(string) lookout.ScanResult
 	newNonce func() string
+	// onFlag, when set, is invoked whenever Wrap fences content the scanner
+	// rated at elevated suspicion (medium or higher). It gives ops visibility
+	// into injection attempts at the chokepoint without changing the
+	// annotate-don't-block behavior. Set once at construction (WithObserver)
+	// before any Wrap call, so no synchronization is needed.
+	onFlag func(source, suspicion string, findings int)
 }
 
 // New returns a Fence backed by the real lookout scanner and a crypto/rand
@@ -58,6 +64,15 @@ func New() *Fence {
 		scan:     lookout.ScanInput,
 		newNonce: randomNonce,
 	}
+}
+
+// WithObserver registers a callback invoked when Wrap fences content rated at
+// elevated suspicion (medium/high/critical). Optional — the fence still
+// annotates and never blocks; this only surfaces the flag to logs/metrics.
+// Call before serving; returns the receiver for chaining.
+func (f *Fence) WithObserver(fn func(source, suspicion string, findings int)) *Fence {
+	f.onFlag = fn
+	return f
 }
 
 // defaultFence backs the package-level Wrap convenience. It is stateless
@@ -88,6 +103,12 @@ func (f *Fence) Wrap(source, content string) string {
 	suspicion := "none"
 	if res := f.scan(content); len(res.Findings) > 0 {
 		suspicion = string(res.HighestSeverity())
+		// Surface elevated suspicion (medium+) to the optional observer so ops
+		// can alert/meter injection attempts. Low findings are noise (a single
+		// zero-width rune, a lone "developer mode" mention) and stay silent.
+		if f.onFlag != nil && suspicion != string(lookout.SeverityLow) {
+			f.onFlag(sanitizeSource(source), suspicion, len(res.Findings))
+		}
 	}
 
 	var b strings.Builder
