@@ -16,7 +16,7 @@
 # build, so `pnpm prisma generate` dies with a wall of P1012 "This line is
 # invalid" errors even though the schema is valid. Bump only in lockstep
 # with CI + a Prisma release that declares Node 26 support.
-FROM node:22-alpine AS frontend
+FROM node:26-alpine AS frontend
 # Newer node-alpine images stopped bundling corepack by default, so
 # `corepack enable` alone can fail with "corepack: not found". Install it
 # explicitly first; `pnpm install` below then picks up the exact version
