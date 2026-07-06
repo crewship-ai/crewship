@@ -179,7 +179,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		}
 		// Typed-slug confirmation gate — the wipe is irreversible and
 		// deletes the entire workspace. --yes bypasses for CI.
-		if err := confirmNuke(cmd, client, cli.ResolveServer(flagServer, cliCfg)); err != nil {
+		if err := confirmNuke(cmd, client, seedTargetServer()); err != nil {
 			return err
 		}
 		if err := seedNuke(ctx, client); err != nil {
@@ -430,12 +430,30 @@ func runSeed(cmd *cobra.Command, args []string) error {
 // instantiated on the first agent run. We trigger one short agent run as
 // a warm-up so the server endpoint finds a running container to pause.
 
+// seedTargetServer resolves the server the whole seed flow talks to
+// (bootstrap, nuke confirmation, smoke test, backup warmup). It uses
+// EffectiveServer — NOT ResolveServer — so an explicit --profile /
+// CREWSHIP_PROFILE wins over a shell CREWSHIP_SERVER, matching newAPIClient()
+// and every authenticated call in the same command.
+//
+// The bug this fixes: seedBootstrap's unauthenticated POST used ResolveServer,
+// whose precedence is flag > CREWSHIP_SERVER > cfg.Server. In a shell that
+// exports CREWSHIP_SERVER (the documented multi-clone convention), `crewship
+// seed --profile prod` sent bootstrap to CREWSHIP_SERVER while newAPIClient
+// sent every authenticated call to the profile server — silently splitting one
+// seed across two instances and surfacing as a bogus "DB already initialized"
+// when CREWSHIP_SERVER pointed at an already-bootstrapped instance.
+// See TestSeedTargetServerHonoursProfileOverEnv.
+func seedTargetServer() string {
+	return cli.EffectiveServer(flagServer, flagProfile, cliCfg)
+}
+
 func seedBootstrap(ctx context.Context, password string) (*cli.Client, string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, "", err
 	}
 	fmt.Fprintln(os.Stderr, "Bootstrapping...")
-	server := cli.ResolveServer(flagServer, cliCfg)
+	server := seedTargetServer()
 
 	// Try bootstrap (works only on empty DB). Bind ctx so Ctrl-C can
 	// interrupt the in-flight HTTP call instead of blocking on the
