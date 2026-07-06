@@ -1536,6 +1536,12 @@ END;
 	// the log line and are visible via the run-detail API/CLI instead
 	// of only slog.Warn. See migrate_consts_v131_run_warnings.go.
 	{version: 131, name: "run_warnings", sql: migrationRunWarnings},
+
+	// v132: opt-in per-agent policy requiring inbound webhooks to use the
+	// timestamped (replay-resistant) signature scheme; rejects body-only HMAC
+	// and plaintext secret with 400 when set. Defaults off. See
+	// migrate_consts_v132_webhook_require_timestamp.go and issue #815.
+	{version: 132, name: "webhook_require_timestamp", sql: migrationWebhookRequireTimestamp},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

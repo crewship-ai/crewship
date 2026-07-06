@@ -46,6 +46,24 @@ compatible). When a signature is present it is also used as the dedup identity
 (instead of any client-supplied `Idempotency-Key`), so a replay can't force a
 second run by supplying a fresh key.
 
+**Enforcing timestamps per agent.** The timestamped scheme is optional by
+default so un-migrated senders don't break — but a body-only signature stays
+replayable indefinitely (bounded only by the dedup window). Once an agent's
+sender emits `X-Timestamp`, flip the agent to **require** it:
+
+```bash
+crewship agent update <agent> --webhook-require-timestamp
+# turn it back off:
+crewship agent update <agent> --webhook-require-timestamp=false
+```
+
+(API: `PATCH /api/v1/agents/{id}` with `{"webhook_require_timestamp": true}`;
+the current value is echoed on `GET /api/v1/agents/{id}` and in
+`crewship agent get`.) With it on, a body-only HMAC and the deprecated
+plaintext `X-Webhook-Secret` are both rejected with `400` pointing at the
+`{timestamp}.{body}` scheme — closing the replay window entirely for that
+agent.
+
 **`X-Webhook-Secret` (deprecated).** The per-agent secret sent in plaintext:
 
 ```

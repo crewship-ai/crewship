@@ -190,7 +190,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
 	var a agentResponse
-	var memEnabled, schedEnabled int
+	var memEnabled, schedEnabled, whRequireTS int
 	var crewName, crewSlug, crewColor, crewAvatarStyle *string
 	var createdByUserID sql.NullString
 	var ephemeral int
@@ -200,6 +200,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 			a.system_prompt_legacy, a.avatar_seed, a.avatar_style, a.timeout_seconds,
 			a.tool_profile, a.memory_enabled, a.cli_tools,
 			a.schedule_cron, a.schedule_prompt, a.schedule_enabled, a.schedule_last_run, a.schedule_next_run,
+			a.webhook_require_timestamp,
 			a.mcp_config_json,
 			a.created_at, a.updated_at,
 			a.created_by_user_id,
@@ -216,6 +217,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle,
 		&a.TimeoutSeconds, &a.ToolProfile, &memEnabled, &a.CLITools,
 		&a.ScheduleCron, &a.SchedulePrompt, &schedEnabled, &a.ScheduleLastRun, &a.ScheduleNextRun,
+		&whRequireTS,
 		&a.MCPConfigJSON,
 		&a.CreatedAt, &a.UpdatedAt,
 		&createdByUserID,
@@ -233,6 +235,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	a.MemoryEnabled = memEnabled == 1
 	a.ScheduleEnabled = schedEnabled == 1
+	a.WebhookRequireTimestamp = whRequireTS == 1
 	if createdByUserID.Valid {
 		a.CreatedByUserID = createdByUserID.String
 	}

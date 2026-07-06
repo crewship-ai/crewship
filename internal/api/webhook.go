@@ -117,7 +117,30 @@ func NewWebhookHandler(
 	}
 
 	wh.handler = webhook.NewHandler(logger, wh.lookupSecret, wh.trigger)
+	// Per-agent replay policy (#815): the handler asks this before accepting a
+	// body-only or plaintext-secret delivery. Read locally from the agents
+	// table (this process owns the DB) rather than over the internal IPC hop.
+	wh.handler.SetRequireTimestampLookup(wh.lookupRequireTimestamp)
 	return wh
+}
+
+// lookupRequireTimestamp reports whether the agent mandates the timestamped
+// webhook signature scheme (webhook_require_timestamp, #815). A nil db (test
+// wiring) or a missing row yields false — the timestamp stays optional.
+func (h *WebhookHandler) lookupRequireTimestamp(ctx context.Context, _, agentID string) (bool, error) {
+	if h.db == nil {
+		return false, nil
+	}
+	var require sql.NullBool
+	err := h.db.QueryRowContext(ctx,
+		`SELECT webhook_require_timestamp FROM agents WHERE id = ?`, agentID).Scan(&require)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return require.Valid && require.Bool, nil
 }
 
 // ServeHTTP dispatches incoming webhook requests to the underlying webhook handler.

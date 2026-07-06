@@ -147,6 +147,11 @@ var agentGetCmd = &cobra.Command{
 				pairs = append(pairs, []string{"Last Run", *agent.ScheduleLastRun})
 			}
 		}
+		// Surface the webhook replay policy only when it's on (#815) — the
+		// default-off case stays off the lean detail view.
+		if agent.WebhookRequireTimestamp {
+			pairs = append(pairs, []string{"Webhook Auth", "timestamped signature required"})
+		}
 		return f.AutoDetail(agent, pairs)
 	},
 }
@@ -191,6 +196,7 @@ func init() {
 	agentUpdateCmd.Flags().String("schedule-cron", "", "Cron expression to run the agent on a schedule (e.g. '*/5 * * * *'); empty clears it")
 	agentUpdateCmd.Flags().String("schedule-prompt", "", "Prompt the scheduled run sends to the agent")
 	agentUpdateCmd.Flags().Bool("schedule-enabled", false, "Enable/disable the agent's cron schedule")
+	agentUpdateCmd.Flags().Bool("webhook-require-timestamp", false, "Require inbound webhooks to use the timestamped signature scheme (rejects replayable body-only/plaintext deliveries)")
 	agentUpdateCmd.Flags().String("avatar-seed", "", "Avatar seed")
 	agentUpdateCmd.Flags().String("avatar-style", "", "Avatar style")
 
@@ -251,7 +257,10 @@ type agentDetailResponse struct {
 	ScheduleEnabled bool    `json:"schedule_enabled"`
 	ScheduleLastRun *string `json:"schedule_last_run"`
 	ScheduleNextRun *string `json:"schedule_next_run"`
-	Count           struct {
+	// WebhookRequireTimestamp is the read side of `agent update
+	// --webhook-require-timestamp` (#815).
+	WebhookRequireTimestamp bool `json:"webhook_require_timestamp"`
+	Count                   struct {
 		Skills      int `json:"skills"`
 		Credentials int `json:"credentials"`
 	} `json:"_count"`
