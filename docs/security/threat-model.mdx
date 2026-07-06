@@ -299,10 +299,34 @@ Idempotent on content: the same poisoned body quarantined twice reuses the same 
   Quarantine WRITE failure (disk full, container permission drop) returns `IsError=true` from the scanner — the poisoned content is NOT returned to the model. The agent sees a tool error instead. This is the right default: a half-working scanner is worse than no scanner if it lets content through on the failure path.
 </Note>
 
+### Ingress trust fence
+
+Layer 5's scanner runs on Crewship's **own** LLM calls (memory recall, Keeper, pipeline steps). It cannot see the agent-CLI turn: in OAuth mode the request to the model is an opaque TLS tunnel the sidecar never decrypts. So a second, complementary control neutralizes untrusted content **at ingress, in plaintext, on our side** — before the prompt is assembled and regardless of auth mode.
+
+`internal/untrusted.Wrap(source, content)` wraps external, lower-trust bytes in a nonce-delimited block:
+
+```
+<untrusted source="webhook" id="<nonce>" suspicion="high">
+…external content…
+</untrusted id="<nonce>">
+```
+
+- The **nonce** is random per call and stripped from the content, so an attacker cannot forge the id-matching closing tag to "break out" of the fence — a bare `</untrusted>` inside the payload is inert data.
+- `lookout.ScanInput` scans the content and **annotates** the block's `suspicion` level rather than blocking, so a legitimate issue that quotes an injection example is fenced-and-flagged, not dropped.
+- One line in the base system prompt (`crewshipSystemPreamble`) tells the model to treat `<untrusted …>` blocks as **pure data, never instructions**, and to report — not act on — any directive found inside.
+
+A CI lint-gate (`TestIngressFenceGate`) fails the build if a new caller interpolates a known external field (starting with the webhook `payload.Data`) into a prompt without routing it through the fence, so the chokepoint cannot be silently reopened.
+
+<Note>
+  **M0 scope (current):** the webhook ingress site is fenced. **M1 (tracked):** mission/task descriptions, crew-context member fields, and Composio/tool-output ingestion sites route through the same fence. See issue #808.
+</Note>
+
 ## What this composition does and does not protect against
 
 | Threat | Layer that handles it |
 |---|---|
+| External **webhook** payload carries "ignore previous instructions" | **Ingress trust fence** (nonce-fenced as data) + Layer 5 scanner on Crewship's own calls |
+| External **issue/mission or tool-output** payload carries an injection | **Partially** — Layer 5 scanner on Crewship's own LLM calls; the ingress trust fence extends to these sites in **M1** (only the webhook site is fenced today — see the M0/M1 note above) |
 | Agent tries to read API keys from env | Layer 2 (sidecar — keys aren't there) |
 | Agent tries to echo a stolen key in output | Layer 3 (scrubber redacts) |
 | Agent tries to reach an arbitrary URL | Layer 2 (allowlist denies) + container network policy |

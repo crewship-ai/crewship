@@ -122,9 +122,10 @@ The webhook returns immediately. Agent execution happens asynchronously.
 3. **Chat session creation** -- a webhook-scoped chat session is created or reused (`webhook-{agentId}`)
 4. **Container startup** -- the crew's container runtime is ensured running
 5. **Run record creation** -- a run record with trigger type `WEBHOOK` is created
-6. **Agent execution** -- the agent is started asynchronously with a 10-minute timeout
-7. **Log streaming** -- agent output is streamed to the log collector and broadcast via WebSocket on `workspace:{workspaceId}`
-8. **Run completion** -- the run record is updated with status (`COMPLETED` or `FAILED`), exit code, duration, and error message
+6. **Ingress trust fence** -- the payload (`event`, `source`, `data`) is external, attacker-controlled input, so it is wrapped in a nonce-delimited `<untrusted …>` block and injection-scanned before it becomes the agent's user message. The agent's system prompt instructs it to treat fenced blocks as pure data, never as instructions. See [Ingress trust fence](/security/threat-model#ingress-trust-fence).
+7. **Agent execution** -- the agent is started asynchronously with a 10-minute timeout
+8. **Log streaming** -- agent output is streamed to the log collector and broadcast via WebSocket on `workspace:{workspaceId}`
+9. **Run completion** -- the run record is updated with status (`COMPLETED` or `FAILED`), exit code, duration, and error message
 </Accordion>
 
 ### Prerequisites

@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/untrusted"
 	"github.com/crewship-ai/crewship/internal/webhook"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -77,6 +78,10 @@ type WebhookHandler struct {
 	container provider.ContainerProvider
 	logWriter *logcollector.Writer
 	idem      *pipeline.IdempotencyStore
+	// fence neutralizes the untrusted webhook payload before it reaches the
+	// prompt (#808). It carries an observer that logs elevated-suspicion
+	// ingress so ops can see injection attempts at the chokepoint.
+	fence *untrusted.Fence
 
 	// agentRatePerMin / agentMaxConcurrent gate agent-webhook dispatch
 	// (R4#3). Defaulted in the constructor; overridable (tests tighten
@@ -109,6 +114,13 @@ func NewWebhookHandler(
 		agentMaxConcurrent: defaultAgentWebhookMaxConcurrent,
 		agentRuns:          pipeline.NewRunRegistry(),
 	}
+	// Fence with an observer so a webhook payload the scanner rates medium+ is
+	// logged (source + suspicion + finding count) — visibility into injection
+	// attempts without changing the annotate-don't-block contract.
+	wh.fence = untrusted.New().WithObserver(func(source, suspicion string, findings int) {
+		logger.Warn("untrusted webhook ingress flagged for likely injection",
+			"source", source, "suspicion", suspicion, "findings", findings)
+	})
 	// Webhook re-delivery dedup reuses the pipeline idempotency primitive
 	// (shared pipeline_run_idempotency table) so we don't add a new table.
 	// nil db (test wiring) leaves idem nil and dedup is skipped.
@@ -340,9 +352,14 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		h.logger.Warn("failed to create run record", "error", err)
 	}
 
-	// 5. Build user message from payload
-	userMsg := fmt.Sprintf("Webhook event received:\nEvent: %s\nSource: %s\nData: %+v",
-		payload.Event, payload.Source, payload.Data)
+	// 5. Build user message from payload. The payload fields (event/source/
+	// data) are attacker-controlled external input, so they are neutralized
+	// through the ingress trust fence (issue #808) before reaching the model
+	// — nonce-fenced and injection-scanned, never interpolated raw. The
+	// "webhook" source label is caller-derived, not read from payload.Source
+	// (which is itself untrusted).
+	userMsg := "Webhook event received:\n" + h.fence.Wrap("webhook",
+		fmt.Sprintf("Event: %s\nSource: %s\nData: %+v", payload.Event, payload.Source, payload.Data))
 
 	// 6. Run agent (async)
 	// WithoutCancel preserves the request's OTel trace span + auth values so
