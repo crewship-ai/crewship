@@ -162,11 +162,13 @@ func TestHandleQuery_ForwardsToCrewshipd(t *testing.T) {
 	srv := newQueryServer(t, &IPCConfig{
 		BaseURL:     mockCrewshipd.URL,
 		Token:       "secret-token",
+		AgentSlug:   "viktor",
 		CrewID:      "crew-1",
 		WorkspaceID: "ws-1",
 		ChatID:      "chat-1",
 	}, []CrewMember{
 		{Slug: "nela", Name: "Nela"},
+		{Slug: "viktor", Name: "Viktor"},
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/query",
@@ -196,6 +198,9 @@ func TestHandleQuery_ForwardsToCrewshipd(t *testing.T) {
 	if forwarded["crew_id"] != "crew-1" {
 		t.Errorf("expected crew_id=crew-1, got %v", forwarded["crew_id"])
 	}
+	if forwarded["from_slug"] != "viktor" {
+		t.Errorf("expected from_slug=viktor (canonical), got %v", forwarded["from_slug"])
+	}
 
 	var result map[string]interface{}
 	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
@@ -203,6 +208,55 @@ func TestHandleQuery_ForwardsToCrewshipd(t *testing.T) {
 	}
 	if result["query_id"] != "q-123" {
 		t.Errorf("expected query_id=q-123, got %v", result["query_id"])
+	}
+}
+
+// TestHandleQuery_MemberAttribution — the peer-query path attributes to the
+// caller-supplied from validated as a crew member (same shared-sidecar contract
+// as escalation): a second member (riley) is preserved (not collapsed to the
+// boot agent), and a non-member from is refused.
+func TestHandleQuery_MemberAttribution(t *testing.T) {
+	var receivedBody string
+	mockCrewshipd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		receivedBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"query_id":"q-1","response":"ok","status":"COMPLETED"}`))
+	}))
+	defer mockCrewshipd.Close()
+
+	srv := newQueryServer(t, &IPCConfig{
+		BaseURL:     mockCrewshipd.URL,
+		Token:       "secret-token",
+		AgentSlug:   "nela", // boot agent of the shared sidecar
+		CrewID:      "crew-1",
+		WorkspaceID: "ws-1",
+		ChatID:      "chat-1",
+	}, []CrewMember{{Slug: "bob", Name: "Bob"}, {Slug: "riley", Name: "Riley"}})
+
+	// A different crew member queries a peer through nela's shared sidecar.
+	req := httptest.NewRequest(http.MethodPost, "/query",
+		strings.NewReader(`{"target":"bob","question":"q?","from":"riley"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.handleQuery(w, req)
+	var forwarded map[string]interface{}
+	if err := json.Unmarshal([]byte(receivedBody), &forwarded); err != nil {
+		t.Fatalf("invalid forwarded body: %v", err)
+	}
+	if forwarded["from_slug"] != "riley" {
+		t.Fatalf("from_slug = %v, want riley — a sibling's query must not be collapsed to the boot agent", forwarded["from_slug"])
+	}
+
+	// A non-member from is refused.
+	req2 := httptest.NewRequest(http.MethodPost, "/query",
+		strings.NewReader(`{"target":"bob","question":"q?","from":"ghost"}`))
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	srv.handleQuery(w2, req2)
+	if w2.Code != http.StatusBadRequest {
+		t.Errorf("non-member from: status = %d, want 400", w2.Code)
 	}
 }
 
@@ -254,6 +308,64 @@ func TestHandleEscalate_MissingFields(t *testing.T) {
 	}
 }
 
+// TestHandleEscalate_MultiMemberAttribution pins the shared-sidecar contract:
+// the per-crew sidecar serves EVERY crew agent, so it must attribute an
+// escalation to the caller-supplied `from` (validated as a crew member), NOT to
+// the boot agent (s.ipc.AgentSlug). A second crew member (riley) escalating
+// through a sidecar booted by nela must be recorded as riley — collapsing it to
+// nela would mis-attribute every sibling's escalation (and credential proposal).
+// A `from` outside the crew is rejected.
+func TestHandleEscalate_MultiMemberAttribution(t *testing.T) {
+	var receivedBody map[string]string
+	mockCrewshipd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/internal/escalations" && r.Method == http.MethodPost {
+			bodyBytes, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(bodyBytes, &receivedBody)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"escalation_id":"esc-1","status":"PENDING"}`))
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v1/internal/escalations/") && strings.HasSuffix(r.URL.Path, "/wait") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status":"RESOLVED","resolution":"ok","action":"approve"}`))
+			return
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer mockCrewshipd.Close()
+
+	srv := newQueryServer(t, &IPCConfig{
+		BaseURL:     mockCrewshipd.URL,
+		Token:       "secret-token",
+		AgentSlug:   "nela", // the agent that booted the shared sidecar
+		CrewID:      "crew-1",
+		WorkspaceID: "ws-1",
+		ChatID:      "chat-1",
+	}, []CrewMember{{Slug: "nela"}, {Slug: "riley"}})
+
+	// A DIFFERENT crew member escalates through nela's shared sidecar.
+	req := httptest.NewRequest(http.MethodPost, "/escalate",
+		strings.NewReader(`{"from":"riley","reason":"r"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.handleEscalate(w, req)
+	if got := receivedBody["from_slug"]; got != "riley" {
+		t.Fatalf("from_slug = %q, want riley — a sibling's escalation must not be collapsed to the boot agent nela", got)
+	}
+
+	// A `from` that isn't a crew member is refused (can't attribute it).
+	req2 := httptest.NewRequest(http.MethodPost, "/escalate",
+		strings.NewReader(`{"from":"ghost","reason":"r"}`))
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	srv.handleEscalate(w2, req2)
+	if w2.Code != http.StatusBadRequest {
+		t.Errorf("non-member from: status = %d, want 400", w2.Code)
+	}
+}
+
 func TestHandleEscalate_ForwardsToCrewshipd(t *testing.T) {
 	var receivedToken string
 	var receivedBody map[string]string
@@ -284,10 +396,11 @@ func TestHandleEscalate_ForwardsToCrewshipd(t *testing.T) {
 	srv := newQueryServer(t, &IPCConfig{
 		BaseURL:     mockCrewshipd.URL,
 		Token:       "secret-token",
+		AgentSlug:   "nela",
 		CrewID:      "crew-1",
 		WorkspaceID: "ws-1",
 		ChatID:      "chat-1",
-	}, nil)
+	}, []CrewMember{{Slug: "nela"}})
 
 	req := httptest.NewRequest(http.MethodPost, "/escalate",
 		strings.NewReader(`{"from":"nela","reason":"API conflict","context":"Viktor changed endpoints"}`))
@@ -354,7 +467,7 @@ func TestHandleEscalate_BlocksUntilResolution(t *testing.T) {
 		CrewID:      "c1",
 		WorkspaceID: "ws1",
 		ChatID:      "ch1",
-	}, nil)
+	}, []CrewMember{{Slug: "nela"}})
 
 	req := httptest.NewRequest(http.MethodPost, "/escalate",
 		strings.NewReader(`{"from":"nela","reason":"need help"}`))
@@ -409,7 +522,7 @@ func TestHandleEscalate_TimeoutReturnsStatus(t *testing.T) {
 		CrewID:      "c1",
 		WorkspaceID: "ws1",
 		ChatID:      "ch1",
-	}, nil)
+	}, []CrewMember{{Slug: "nela"}})
 
 	req := httptest.NewRequest(http.MethodPost, "/escalate",
 		strings.NewReader(`{"from":"nela","reason":"need help"}`))
@@ -456,7 +569,7 @@ func TestHandleEscalate_ForwardsEvidencePack(t *testing.T) {
 		CrewID:      "c1",
 		WorkspaceID: "ws1",
 		ChatID:      "ch1",
-	}, nil)
+	}, []CrewMember{{Slug: "nela"}})
 
 	// Uses proper JSON escaping for the evidence_pack payload.
 	reqBody := `{"from":"nela","reason":"Permission denied","evidence_pack":"{\"task_title\":\"Process invoices\",\"agent_slug\":\"nela\",\"error\":\"403 forbidden\"}"}`

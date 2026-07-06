@@ -40,6 +40,20 @@ type escalateRequest struct {
 	EvidencePack string `json:"evidence_pack"`
 }
 
+// isCrewMember reports whether slug names an agent in this crew. It is the
+// membership check both peer-query and escalation use to validate a
+// caller-supplied `from`/target slug (mirrors memory_mcp.go's CRE-137 check) —
+// the shared per-crew sidecar can't cryptographically bind identity, so it at
+// least refuses attribution to a slug outside the crew.
+func (s *Server) isCrewMember(slug string) bool {
+	for _, m := range s.crewMembers {
+		if m.Slug == slug {
+			return true
+		}
+	}
+	return false
+}
+
 // handleQuery handles POST /query from agents wanting to ask a peer a question.
 // The query is synchronous — the caller blocks until the target agent responds.
 func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
@@ -77,20 +91,23 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate that the target is a known crew member slug
-	found := false
-	for _, m := range s.crewMembers {
-		if m.Slug == req.Target {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !s.isCrewMember(req.Target) {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
 			"error": fmt.Sprintf("target %q not found in crew", req.Target),
 		})
 		return
 	}
 
+	// Attribute the query to the caller-supplied `from`, validated as a real
+	// crew member (same CRE-137 membership check as handleEscalate). The shared
+	// per-crew sidecar can't override with a single boot identity without
+	// mis-attributing every sibling's query.
+	if !s.isCrewMember(req.From) {
+		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("from %q is not a member of this crew", req.From),
+		})
+		return
+	}
 	// Build IPC request body
 	body := map[string]interface{}{
 		"target_slug":  req.Target,
@@ -179,6 +196,21 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 		metadata = req.EvidencePack
 	}
 
+	// Attribute the escalation to the caller-supplied `from`, but validate it is
+	// a real member of THIS crew (mirrors CRE-137's /mcp/memory/<slug>
+	// membership check). The per-crew sidecar is SHARED across the crew's
+	// agents, so s.ipc.AgentSlug is only the agent that booted it — overriding
+	// with it would mis-attribute every sibling agent's escalation (and any
+	// credential proposal it carries) to the boot agent. Validating membership
+	// rejects a slug outside the crew while keeping correct per-agent
+	// attribution. (Cross-member spoofing within one shared container is a known
+	// limit of the shared-sidecar model; closing it fully needs per-agent auth.)
+	if !s.isCrewMember(req.From) {
+		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("from %q is not a member of this crew", req.From),
+		})
+		return
+	}
 	body := map[string]string{
 		"from_slug":    req.From,
 		"reason":       req.Reason,
