@@ -117,7 +117,7 @@ The webhook returns immediately. Agent execution happens asynchronously.
 ### What Happens Behind the Scenes
 
 <Accordion title="Webhook execution pipeline">
-1. **Auth validation** -- the agent's webhook secret is looked up via the internal IPC resolver; an `X-Signature` is verified as an HMAC of the body, otherwise a plaintext `X-Webhook-Secret` is compared (constant-time)
+1. **Auth validation** -- the agent's webhook secret is looked up via the internal IPC resolver; an `X-Signature` is verified as an HMAC of the body (or of `"{timestamp}.{body}"` when `X-Timestamp` is present, which must also be within the freshness window), otherwise a plaintext `X-Webhook-Secret` is compared (constant-time)
 2. **Agent config resolution** -- the agent's full configuration (CLI adapter, LLM model, credentials, etc.) is resolved
 3. **Chat session creation** -- a webhook-scoped chat session is created or reused (`webhook-{agentId}`)
 4. **Container startup** -- the crew's container runtime is ensured running

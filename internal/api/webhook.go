@@ -156,7 +156,13 @@ func (h *WebhookHandler) lookupSecret(ctx context.Context, crewID, agentID strin
 //     a single run, while distinct events produce distinct keys.
 func agentWebhookIdempotencyKey(ctx context.Context, agentID string, payload webhook.WebhookPayload) string {
 	if sig, ok := ctx.Value(webhookSignatureCtxKey{}).(string); ok && sig != "" {
-		return "whsig-" + sig
+		// Canonicalize the hex so equivalent spellings (upper/lower case) can't
+		// be ground into distinct dedup identities, and scope by agent so two
+		// same-workspace agents can't collide on identical signature material.
+		if raw, err := hex.DecodeString(sig); err == nil {
+			sig = hex.EncodeToString(raw)
+		}
+		return "whsig-" + agentID + "-" + sig
 	}
 	if v, ok := ctx.Value(webhookIdempotencyKeyCtxKey{}).(string); ok && v != "" {
 		return v

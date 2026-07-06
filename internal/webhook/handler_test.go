@@ -264,7 +264,7 @@ func TestWebhookHMAC_TamperedTimestamp_Rejected(t *testing.T) {
 	body := []byte(`{"event":"alert"}`)
 	oldTS := strconv.FormatInt(time.Now().Add(-30*time.Minute).Unix(), 10)
 	sig := ComputeHMAC([]byte(oldTS+"."+string(body)), secret) // signed with the OLD ts
-	freshTS := strconv.FormatInt(time.Now().Unix(), 10)         // attacker forwards a fresh ts
+	freshTS := strconv.FormatInt(time.Now().Unix(), 10)        // attacker forwards a fresh ts
 
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, signedTSRequest(t, body, freshTS, sig))

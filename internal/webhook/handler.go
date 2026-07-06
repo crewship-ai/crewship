@@ -70,11 +70,15 @@ func (h *Handler) timestampFresh(ts string) bool {
 	if tol <= 0 {
 		tol = DefaultTimestampTolerance
 	}
-	delta := now().Sub(time.Unix(secs, 0))
-	if delta < 0 {
-		delta = -delta
-	}
-	return delta <= tol
+	// Compare in seconds against non-overflowing bounds rather than via
+	// time.Sub: an absurd far-future/far-past X-Timestamp (e.g. math.MaxInt64)
+	// would overflow the int64-nanosecond Duration (~292y max) and could wrap
+	// back inside the tolerance, letting a replay defeat the freshness check.
+	// nowSec±tolSec can't overflow (now ~1.7e9, tol ~300s); secs is only
+	// compared, never used in arithmetic.
+	tolSec := int64(tol / time.Second)
+	nowSec := now().Unix()
+	return secs >= nowSec-tolSec && secs <= nowSec+tolSec
 }
 
 // ServeHTTP handles incoming webhook POST requests by validating the
