@@ -79,10 +79,17 @@ func (s *Server) handleExposePort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// #812: attribute the exposed port to the ACTING agent (per-agent token),
+	// not the boot agent of the shared sidecar. Forged token → 403.
+	agentID, ok := s.actingAgentID(r)
+	if !ok {
+		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
+		return
+	}
 	ipcPayload := map[string]interface{}{
 		"workspace_id": s.ipc.WorkspaceID,
 		"crew_id":      s.ipc.CrewID,
-		"agent_id":     s.ipc.AgentID,
+		"agent_id":     agentID,
 		"container_id": s.ipc.ContainerID,
 		"port":         req.Port,
 		"description":  req.Description,

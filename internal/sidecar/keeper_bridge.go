@@ -135,13 +135,22 @@ func (s *Server) handleKeeperRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Identity is the canonical sidecar AgentID — ignore any slug the
-	// caller provided. See keeperRequestBody comment for the why.
+	// Identity is the ACTING agent derived from the per-agent bearer token
+	// (#812), never a caller-supplied slug. A valid token overrides the boot
+	// identity (the shared sidecar can't otherwise tell which crew member is
+	// requesting the credential); an unrecognized token is a forgery and is
+	// refused. With no token we fall back to the boot AgentID. Credential
+	// access is attribution-critical, so this closes the sibling-impersonation
+	// hole for the vault too.
+	agentID, ok := s.actingAgentID(r)
+	if !ok {
+		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
+		return
+	}
 	if slug := strings.TrimSpace(req.AgentSlug); slug != "" && slug != s.ipc.AgentSlug {
 		s.logger.Warn("keeper bridge: ignoring agent_slug in request body",
 			"received_slug", slug, "canonical_slug", s.ipc.AgentSlug)
 	}
-	agentID := s.ipc.AgentID
 
 	// Build the internal keeper request payload
 	ipcPayload := map[string]string{
@@ -267,13 +276,17 @@ func (s *Server) handleKeeperExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Identity is the canonical sidecar AgentID — ignore any slug the
-	// caller provided. See keeperRequestBody comment for the why.
+	// Identity is the ACTING agent derived from the per-agent bearer token
+	// (#812), never a caller-supplied slug. See handleKeeperRequest.
+	execAgentID, ok := s.actingAgentID(r)
+	if !ok {
+		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
+		return
+	}
 	if slug := strings.TrimSpace(req.AgentSlug); slug != "" && slug != s.ipc.AgentSlug {
 		s.logger.Warn("keeper bridge: ignoring agent_slug in execute body",
 			"received_slug", slug, "canonical_slug", s.ipc.AgentSlug)
 	}
-	execAgentID := s.ipc.AgentID
 
 	// Build the IPC payload. Critically:
 	// - requesting_agent_id resolved from crew members or IPC default (not the request body)

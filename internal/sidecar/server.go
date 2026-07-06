@@ -42,6 +42,12 @@ type IPCConfig struct {
 	WorkspaceID string `json:"workspace_id"`
 	ChatID      string `json:"chat_id"`
 	ContainerID string `json:"container_id"`
+	// AgentToken is the per-agent derived bearer token for the BOOT agent
+	// (the one this sidecar's IPC config was minted for). #812: the sidecar
+	// matches an inbound Authorization: Bearer token against this and each
+	// crew member's AuthToken to resolve the ACTING agent's true identity,
+	// so a shared-container sibling can't impersonate the boot agent.
+	AgentToken string `json:"agent_token,omitempty"`
 }
 
 // CrewMember describes a crew member accessible for lead assignment routing.
@@ -51,6 +57,11 @@ type CrewMember struct {
 	Name      string `json:"name"`
 	RoleTitle string `json:"role_title"`
 	ChatID    string `json:"chat_id,omitempty"`
+	// AuthToken is this member's per-agent derived bearer token (#812). The
+	// sidecar constant-time-matches an inbound bearer token against every
+	// member's AuthToken to attribute a call to the ACTING agent rather than
+	// a caller-supplied `from`/slug that any sibling could spoof.
+	AuthToken string `json:"auth_token,omitempty"`
 }
 
 // NetworkPolicyConfig configures per-crew network access mode.

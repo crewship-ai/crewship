@@ -435,6 +435,16 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	var env []string
 	if sidecarEnabled {
 		env = BuildEnvVarsSidecar(req, keeperEnabled)
+		// #812: hand THIS agent its own per-agent bearer token. The agent
+		// presents it (Authorization: Bearer $CREWSHIP_AGENT_TOKEN) on sidecar
+		// calls — escalate/query curls and the memory MCP config — so the
+		// shared per-crew sidecar can resolve the ACTING agent's identity from
+		// the token instead of a spoofable `from`/slug. Fail-closed empty when
+		// internal auth is unconfigured; the sidecar then falls back to the
+		// #796 membership-validated behaviour.
+		if agentTok := agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger); agentTok != "" {
+			env = append(env, "CREWSHIP_AGENT_TOKEN="+agentTok)
+		}
 		// Surface the credential-isolation gap: any plaintext credential that
 		// lands in the agent env (readable by the agent process). Actionable
 		// exposures (SECRET with Keeper off) warn so an operator can close them;
@@ -494,9 +504,15 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				WorkspaceID: req.WorkspaceID,
 				ChatID:      req.ChatID,
 				ContainerID: req.ContainerID,
+				// #812: the boot agent's own per-agent token. req.CrewMembers
+				// excludes self, so the boot agent's identity would otherwise be
+				// missing from the sidecar's token→identity roster.
+				AgentToken: agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger),
 			}
 		}
-		// Convert crew members to sidecar format for target validation
+		// Convert crew members to sidecar format for target validation.
+		// #812: mint each member's per-agent token so the sidecar's roster can
+		// map an inbound bearer token to the ACTING crew member.
 		var sidecarMembers []SidecarCrewMember
 		for _, m := range req.CrewMembers {
 			sidecarMembers = append(sidecarMembers, SidecarCrewMember{
@@ -505,6 +521,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				Name:      m.Name,
 				RoleTitle: m.RoleTitle,
 				ChatID:    m.ChatID,
+				AuthToken: agentAuthToken(ipcToken, req.WorkspaceID, m.ID, o.logger),
 			})
 		}
 		// Build network policy for sidecar.

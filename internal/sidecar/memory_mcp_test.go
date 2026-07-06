@@ -3,6 +3,7 @@ package sidecar
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -318,5 +319,101 @@ func TestMemoryMCP_PerAgentPath_OwnSlugMatchesLegacy(t *testing.T) {
 	}
 	if string(got) != "alpha remembers\n" {
 		t.Fatalf("alpha AGENT.md = %q", got)
+	}
+}
+
+// newTokenMemoryMCPTestServer is newMultiAgentMemoryMCPTestServer with
+// per-agent bearer tokens wired (#812), so the acting identity can be
+// resolved from the token instead of the URL slug.
+func newTokenMemoryMCPTestServer(t *testing.T) (*Server, string) {
+	t.Helper()
+	root := t.TempDir()
+	agentsRoot := filepath.Join(root, "agents")
+	alphaBase := filepath.Join(agentsRoot, "alpha", ".memory")
+	betaBase := filepath.Join(agentsRoot, "beta", ".memory")
+	crewBase := filepath.Join(root, "shared", ".memory")
+	for _, p := range []string{alphaBase, betaBase, crewBase} {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return &Server{
+		agentMemoryBase: alphaBase,
+		memoryAgentSlug: "alpha",
+		crewMemoryBase:  crewBase,
+		logger:          slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		crewMembers: []CrewMember{
+			{ID: "agent-1", Slug: "alpha", AuthToken: "tok-alpha"},
+			{ID: "agent-2", Slug: "beta", AuthToken: "tok-beta"},
+		},
+		ipc: &IPCConfig{
+			AgentID:     "agent-1",
+			AgentSlug:   "alpha",
+			AgentToken:  "tok-alpha",
+			CrewID:      "crew-1",
+			WorkspaceID: "ws-1",
+		},
+	}, agentsRoot
+}
+
+// TestMemoryMCP_TokenOverridesURLSlug — #812: the per-agent token is the
+// source of truth. A request carrying beta's token but hitting
+// /mcp/memory/alpha (a spoofed URL slug) must write to BETA's tier, not
+// alpha's.
+func TestMemoryMCP_TokenOverridesURLSlug(t *testing.T) {
+	s, agentsRoot := newTokenMemoryMCPTestServer(t)
+
+	body := `{"jsonrpc":"2.0","id":11,"method":"tools/call",
+		"params":{"name":"memory.write",
+		         "arguments":{"tier":"AGENT","content":"beta via token\n","mode":"replace"}}}`
+	req := httptest.NewRequest("POST", "/mcp/memory/alpha", strings.NewReader(body))
+	req.Host = "127.0.0.1:9119"
+	req.Header.Set("Authorization", "Bearer tok-beta")
+	w := httptest.NewRecorder()
+
+	s.handleMemoryMCPForAgent(w, req, "alpha")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
+	}
+	got, err := os.ReadFile(filepath.Join(agentsRoot, "beta", ".memory", "AGENT.md"))
+	if err != nil {
+		t.Fatalf("beta AGENT.md not written (token identity ignored?): %v; body=%s", err, w.Body.String())
+	}
+	if string(got) != "beta via token\n" {
+		t.Fatalf("beta AGENT.md = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(agentsRoot, "alpha", ".memory", "AGENT.md")); !os.IsNotExist(err) {
+		t.Fatalf("spoofed URL slug must not write to alpha's tier (stat err=%v)", err)
+	}
+}
+
+// TestMemoryMCP_UnknownTokenRejected — a forged bearer token is refused
+// before any path resolution.
+func TestMemoryMCP_UnknownTokenRejected(t *testing.T) {
+	s, agentsRoot := newTokenMemoryMCPTestServer(t)
+
+	body := `{"jsonrpc":"2.0","id":12,"method":"tools/call",
+		"params":{"name":"memory.write","arguments":{"tier":"AGENT","content":"x\n","mode":"replace"}}}`
+	req := httptest.NewRequest("POST", "/mcp/memory/beta", strings.NewReader(body))
+	req.Host = "127.0.0.1:9119"
+	req.Header.Set("Authorization", "Bearer tok-forged")
+	w := httptest.NewRecorder()
+
+	s.handleMemoryMCPForAgent(w, req, "beta")
+
+	var resp struct {
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v (body=%s)", err, w.Body.String())
+	}
+	if resp.Error == nil {
+		t.Errorf("forged token must yield a JSON-RPC error, got %s", w.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(agentsRoot, "beta", ".memory", "AGENT.md")); !os.IsNotExist(err) {
+		t.Fatalf("forged token must not write anything (stat err=%v)", err)
 	}
 }

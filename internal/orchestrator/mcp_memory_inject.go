@@ -48,6 +48,13 @@ func memoryMCPSpec(agentSlug string) mcpSpec {
 		Name:      MemoryMCPServerName,
 		URL:       url,
 		Transport: "http",
+		// #812: present the per-agent bearer token so the sidecar resolves the
+		// ACTING agent from authentication, not the URL slug (which any crew
+		// member sharing the container could point at a sibling). The ${VAR}
+		// form is expanded per-adapter from the agent's env — CREWSHIP_AGENT_TOKEN
+		// is set in exec_env by the orchestrator. When the env var is unset
+		// (internal auth off) the sidecar simply falls back to the URL-slug path.
+		Headers: map[string]string{"Authorization": "Bearer ${CREWSHIP_AGENT_TOKEN}"},
 	}
 }
 
@@ -127,6 +134,10 @@ func injectMemoryMCPIntoClaudeJSON(in, agentSlug string, sinkReady bool) (string
 	entry := map[string]any{
 		"type": "http",
 		"url":  memoryMCPSpec(agentSlug).URL,
+		// #812: per-agent bearer token — Claude Code expands ${VAR} in headers
+		// from the agent's env (CREWSHIP_AGENT_TOKEN). Lets the sidecar attribute
+		// memory calls to the authenticated agent, not the caller-supplied slug.
+		"headers": map[string]string{"Authorization": "Bearer ${CREWSHIP_AGENT_TOKEN}"},
 		// alwaysLoad presents this server's tools (memory.read / write /
 		// search / append_daily) to the model EAGERLY at session start
 		// instead of deferring them behind a ToolSearch discovery hop. These
