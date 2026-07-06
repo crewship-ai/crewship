@@ -1,8 +1,10 @@
 import { Folder, Database, Bug, Search } from "lucide-react"
 import {
-  SiGithub, SiGooglecloud, SiSlack, SiLinear, SiNotion,
+  SiGithub, SiGooglecloud, SiLinear, SiNotion,
   SiStripe, SiSupabase, SiDatadog, SiCloudflare, SiGitlab, SiSentry,
 } from "react-icons/si"
+// Slack was removed from react-icons/si in 5.7.0 — vendored locally.
+import { SiSlack } from "@/components/icons/si-fallback"
 import type { MCPTemplate } from "../types"
 
 // --- Provider imports (add new providers here) ---

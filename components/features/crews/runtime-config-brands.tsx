@@ -19,10 +19,12 @@ import {
   SiHugo, SiVite, SiWebpack,
   SiJulia, SiLua, SiPerl, SiR, SiHaskell,
   SiGraphql,
-  SiOpenai, SiAnthropic,
-  SiHeroku, SiVercel, SiCloudflare, SiFlydotio,
+  SiAnthropic,
+  SiVercel, SiCloudflare, SiFlydotio,
   SiOllama, SiSentry, SiDatadog, SiRailway, SiNetlify,
 } from "react-icons/si"
+// OpenAI/Heroku were removed from react-icons/si in 5.7.0 — vendored locally.
+import { SiOpenai, SiHeroku } from "@/components/icons/si-fallback"
 
 // Brand-icon and brand-color tables for the feature picker, plus the
 // shared featureRefToTool helper that maps an OCI ref to a known slug.
