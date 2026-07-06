@@ -109,7 +109,7 @@ That gives you the pass-rate + cost variance you need to decide between `complex
       "type": "agent_run",
       "agent_slug": "daniel",
       "complexity": "fast",
-      "on_fail": "retry_step",
+      "on_fail": "escalate_tier",
       "prompt": "Write a 3-bullet summary of the topic. Each bullet starts with '- ', between 5 and 25 words. No preamble.\n\nTopic:\n{{ inputs.topic }}",
       "validation": {
         "min_length": 30,

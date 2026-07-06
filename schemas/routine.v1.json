@@ -176,7 +176,7 @@
         },
         "on_fail": {
           "type": "string",
-          "enum": ["escalate_tier", "abort", "retry_step"],
+          "enum": ["escalate_tier", "abort"],
           "default": "escalate_tier",
           "description": "Behavior when step's validation gate fails."
         },
@@ -241,7 +241,7 @@
         },
         "on_fail": {
           "type": "string",
-          "enum": ["escalate_tier", "abort", "retry_step"],
+          "enum": ["escalate_tier", "abort"],
           "default": "abort",
           "description": "Behaviour when the rubric ultimately can't be satisfied after max_iterations is exhausted."
         },
@@ -285,7 +285,7 @@
         "max_length": { "type": "integer", "minimum": 0 },
         "on_validation_fail": {
           "type": "string",
-          "enum": ["escalate_tier", "abort", "retry_step"]
+          "enum": ["escalate_tier", "abort"]
         }
       }
     },
