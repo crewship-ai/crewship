@@ -103,9 +103,9 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal", roleCreate, pipes.SignalRun)
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/logs", authed(wsCtx(http.HandlerFunc(pipes.RunLogs))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel", roleManage, pipes.CancelRun)
-	// Observability (trigger.dev-informed): replay a failed run with its
-	// original inputs, bulk-replay a fingerprint group, and list failures
-	// bucketed by fingerprint. errors/bulk_replay are registered before
+	// Observability (replay-with-original-inputs pattern): replay a failed run
+	// with its original inputs, bulk-replay a fingerprint group, and list
+	// failures bucketed by fingerprint. errors/bulk_replay are registered before
 	// the {runId} replay so the literal segments win net/http matching.
 	// Deferred dispatch (delay/ttl/debounce/priority) — list + cancel
 	// parked triggers. Registered before {slug} routes so the literal

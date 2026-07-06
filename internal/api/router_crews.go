@@ -70,8 +70,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/members", roleManage, ws.AddMember)
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/members/{memberId}", roleManage, ws.RemoveMember)
 	// PRD-SLASH-CAPABILITIES-2026 §6.7 — per-member capability
-	// grant/revoke surface. Admin-only (handler-side gate); both
-	// routes JWT-authed + workspace-scoped.
+	// grant/revoke surface. The PATCH is ADMIN+ enforced at registration
+	// (authedMut/roleManage); the GET is read-only, JWT-authed +
+	// workspace-scoped.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities",
 		authed(wsCtx(http.HandlerFunc(ws.GetMemberCapabilities))))
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities", roleManage, ws.PatchMemberCapabilities)
