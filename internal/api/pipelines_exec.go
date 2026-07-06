@@ -116,6 +116,15 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 	invokingCrew := r.Header.Get("X-Crewship-Invoking-Crew")
 	invokingAgent := r.Header.Get("X-Crewship-Invoking-Agent")
 
+	// invoking_user_id is the authenticated caller — the person who
+	// triggered this run. notify steps targeting `to: trigger` deliver
+	// their inbox update to this user; empty (service/token calls) makes
+	// `to: trigger` fall back to a workspace-wide notice.
+	invokingUser := ""
+	if u := UserFromContext(r.Context()); u != nil {
+		invokingUser = u.ID
+	}
+
 	// Idempotency-Key header dedupes webhook redeliveries: a second
 	// request with the same key (within 24h) returns the original
 	// run id with status=DEDUPED instead of executing twice. Falls
@@ -189,6 +198,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID:       workspaceID,
 		InvokingCrewID:    invokingCrew,
 		InvokingAgentID:   invokingAgent,
+		InvokingUserID:    invokingUser,
 		Inputs:            body.Inputs,
 		Mode:              pipeline.ModeRun,
 		IdempotencyKey:    idempotencyKey,

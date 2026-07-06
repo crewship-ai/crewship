@@ -149,7 +149,7 @@
         },
         "type": {
           "type": "string",
-          "enum": ["agent_run", "call_pipeline", "http", "code", "wait", "transform"]
+          "enum": ["agent_run", "call_pipeline", "http", "code", "wait", "transform", "notify"]
         },
         "complexity": {
           "type": "string",
@@ -193,7 +193,8 @@
         "http": { "$ref": "#/$defs/HTTPStep" },
         "code": { "$ref": "#/$defs/CodeStep" },
         "wait": { "$ref": "#/$defs/WaitStep" },
-        "transform": { "$ref": "#/$defs/TransformStep" }
+        "transform": { "$ref": "#/$defs/TransformStep" },
+        "notify": { "$ref": "#/$defs/NotifyStep" }
       },
       "allOf": [
         {
@@ -219,6 +220,10 @@
         {
           "if": { "properties": { "type": { "const": "transform" } } },
           "then": { "required": ["transform"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "notify" } } },
+          "then": { "required": ["notify"] }
         }
       ]
     },
@@ -359,6 +364,25 @@
       "properties": {
         "input": { "type": "string", "description": "Template-substitutable; usually {{ steps.X.output }}." },
         "expression": { "type": "string", "description": "jq-flavored projection: '.path' / '.items[0]' / '.a + .b' etc." }
+      }
+    },
+    "NotifyStep": {
+      "type": "object",
+      "required": ["to"],
+      "additionalProperties": false,
+      "description": "Non-blocking inbox message pushed mid-run. Renders title/body from the run context, scrubs secrets, and posts to a recipient's inbox, then continues. At least one of title/body is required.",
+      "properties": {
+        "to": {
+          "type": "string",
+          "description": "Recipient selector: 'workspace' (default), 'trigger' (the user who ran it; workspace fallback if unattended), 'user:<id>', 'role:OWNER', or 'role:MANAGER'. Template-substitutable."
+        },
+        "title": { "type": "string", "description": "Inbox card title (rendered, secret-redacted, truncated)." },
+        "body": { "type": "string", "description": "Markdown body (rendered, secret-redacted). Usually {{ steps.X.output }}." },
+        "priority": {
+          "type": "string",
+          "enum": ["urgent", "high", "medium", "low"],
+          "description": "Inbox priority. Default medium."
+        }
       }
     }
   }
