@@ -162,6 +162,7 @@ func TestHandleQuery_ForwardsToCrewshipd(t *testing.T) {
 	srv := newQueryServer(t, &IPCConfig{
 		BaseURL:     mockCrewshipd.URL,
 		Token:       "secret-token",
+		AgentSlug:   "viktor",
 		CrewID:      "crew-1",
 		WorkspaceID: "ws-1",
 		ChatID:      "chat-1",
@@ -196,6 +197,9 @@ func TestHandleQuery_ForwardsToCrewshipd(t *testing.T) {
 	if forwarded["crew_id"] != "crew-1" {
 		t.Errorf("expected crew_id=crew-1, got %v", forwarded["crew_id"])
 	}
+	if forwarded["from_slug"] != "viktor" {
+		t.Errorf("expected from_slug=viktor (canonical), got %v", forwarded["from_slug"])
+	}
 
 	var result map[string]interface{}
 	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
@@ -203,6 +207,44 @@ func TestHandleQuery_ForwardsToCrewshipd(t *testing.T) {
 	}
 	if result["query_id"] != "q-123" {
 		t.Errorf("expected query_id=q-123, got %v", result["query_id"])
+	}
+}
+
+// TestHandleQuery_SlugSpoofIgnored — the peer-query path must attribute the
+// question to the sidecar's canonical AgentSlug, not the caller-supplied from,
+// mirroring the escalation fix. RED before the fix: from=viktor reaches the peer.
+func TestHandleQuery_SlugSpoofIgnored(t *testing.T) {
+	var receivedBody string
+	mockCrewshipd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		receivedBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"query_id":"q-1","response":"ok","status":"COMPLETED"}`))
+	}))
+	defer mockCrewshipd.Close()
+
+	srv := newQueryServer(t, &IPCConfig{
+		BaseURL:     mockCrewshipd.URL,
+		Token:       "secret-token",
+		AgentSlug:   "nela", // the sidecar's true identity
+		CrewID:      "crew-1",
+		WorkspaceID: "ws-1",
+		ChatID:      "chat-1",
+	}, []CrewMember{{Slug: "bob", Name: "Bob"}})
+
+	req := httptest.NewRequest(http.MethodPost, "/query",
+		strings.NewReader(`{"target":"bob","question":"q?","from":"viktor"}`)) // spoofed sibling
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.handleQuery(w, req)
+
+	var forwarded map[string]interface{}
+	if err := json.Unmarshal([]byte(receivedBody), &forwarded); err != nil {
+		t.Fatalf("invalid forwarded body: %v", err)
+	}
+	if forwarded["from_slug"] != "nela" {
+		t.Errorf("from_slug forwarded as %v — peer-query slug spoofing not blocked (must be canonical nela)", forwarded["from_slug"])
 	}
 }
 

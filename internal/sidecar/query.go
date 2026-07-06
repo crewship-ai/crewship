@@ -92,11 +92,19 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Identity is the canonical sidecar AgentSlug, NOT the caller-supplied
+	// `from` — same non-repudiation guard as handleEscalate. Without it a
+	// compromised agent could ask a peer a question (or drive peer-query depth)
+	// attributed to a sibling agent.
+	if from := strings.TrimSpace(req.From); from != "" && from != s.ipc.AgentSlug {
+		s.logger.Warn("query: ignoring from in request body; using canonical sidecar identity",
+			"received", from, "canonical_slug", s.ipc.AgentSlug)
+	}
 	// Build IPC request body
 	body := map[string]interface{}{
 		"target_slug":  req.Target,
 		"question":     req.Question,
-		"from_slug":    req.From,
+		"from_slug":    s.ipc.AgentSlug,
 		"crew_id":      s.ipc.CrewID,
 		"workspace_id": s.ipc.WorkspaceID,
 		"chat_id":      s.ipc.ChatID,
