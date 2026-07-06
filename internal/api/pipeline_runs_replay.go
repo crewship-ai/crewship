@@ -80,6 +80,10 @@ func (h *PipelineHandler) replayRun(r *http.Request, workspaceID, runID string) 
 // ReplayRun re-runs a single prior run with its original inputs.
 // POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/replay
 func (h *PipelineHandler) ReplayRun(w http.ResponseWriter, r *http.Request) {
+	// Replaying spawns a fresh run — a control-plane mutation, MANAGER+ (create).
+	if !requireRole(w, r, "create") {
+		return
+	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	runID := r.PathValue("runId")
 	if runID == "" {
@@ -108,6 +112,9 @@ type bulkReplayBody struct {
 // either an explicit run_ids list or all runs under a fingerprint.
 // POST /api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay
 func (h *PipelineHandler) BulkReplayRuns(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "create") {
+		return
+	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if h.runStore == nil {
 		replyError(w, http.StatusServiceUnavailable, "run store not wired")

@@ -191,6 +191,9 @@ func (s *stubRunner) RunStep(_ context.Context, _ pipeline.AgentStepRequest) (pi
 // authMw.RequireWorkspace middleware used in production.
 func withWorkspaceCtx(req *http.Request, workspaceID string) *http.Request {
 	ctx := context.WithValue(req.Context(), ctxWorkspaceID, workspaceID)
+	// MANAGER so the now-gated mutating routes (run / run_batch / approve) pass
+	// the role check; read routes are unaffected (canRole "read" = any role).
+	ctx = context.WithValue(ctx, ctxRole, "MANAGER")
 	return req.WithContext(ctx)
 }
 

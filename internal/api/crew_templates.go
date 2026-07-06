@@ -358,6 +358,11 @@ func (h *CrewTemplateHandler) Get(w http.ResponseWriter, r *http.Request) {
 // Deploy handles POST /api/v1/crew-templates/{slug}/deploy
 // Creates a crew + all agents from the template in a single transaction.
 func (h *CrewTemplateHandler) Deploy(w http.ResponseWriter, r *http.Request) {
+	// Deploy creates a full crew + agents (it bypasses the gated POST /crews),
+	// so it must gate role, not just membership. MANAGER+ (create).
+	if !requireRole(w, r, "create") {
+		return
+	}
 	slug := r.PathValue("slug")
 	wsID := WorkspaceIDFromContext(r.Context())
 

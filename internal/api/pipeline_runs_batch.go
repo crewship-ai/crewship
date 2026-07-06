@@ -36,6 +36,9 @@ type batchRunBody struct {
 // returns each run's id + status.
 // POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch
 func (h *PipelineHandler) RunBatch(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "create") {
+		return
+	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	slug := r.PathValue("slug")
 	if h.runner == nil {

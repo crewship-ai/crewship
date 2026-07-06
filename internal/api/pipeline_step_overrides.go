@@ -15,6 +15,9 @@ import (
 // SetStepOverride upserts a prompt/model override for one step.
 // PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override
 func (h *PipelineHandler) SetStepOverride(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "update") {
+		return
+	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	slug := r.PathValue("slug")
 	stepID := r.PathValue("stepId")
@@ -76,6 +79,9 @@ func (h *PipelineHandler) SetStepOverride(w http.ResponseWriter, r *http.Request
 // DeleteStepOverride removes a step's override (reverts to authored).
 // DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override
 func (h *PipelineHandler) DeleteStepOverride(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "update") {
+		return
+	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	slug := r.PathValue("slug")
 	stepID := r.PathValue("stepId")
