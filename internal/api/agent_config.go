@@ -10,6 +10,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/composio"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/policy"
 )
 
 // -----------------------------------------------------------------------------
@@ -269,6 +270,20 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		installedSkills = nil
 	}
 
+	// [HITL] approval_mode — derive the harbormaster gate mode from the
+	// crew's autonomy_level policy (#810). This is what the request-builder
+	// stamps onto every dispatched run; before this it was never set and the
+	// gate short-circuited Approved on every path. nil resolver (tests /
+	// policy disabled) → "" → ModeNone, i.e. today's behaviour.
+	approvalMode := ""
+	if h.policyResolver != nil && data.crewID.Valid && data.crewID.String != "" {
+		if pol, perr := h.policyResolver.Resolve(r.Context(), data.crewID.String); perr != nil {
+			h.logger.Warn("resolve crew policy for approval_mode", "crew_id", data.crewID.String, "error", perr)
+		} else {
+			approvalMode = policy.ApprovalModeForLevel(pol.AutonomyLevel)
+		}
+	}
+
 	resp := map[string]interface{}{
 		"agent_id":              agentID,
 		"agent_slug":            data.agentSlug,
@@ -303,6 +318,7 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		"agent_mcp_config_json": data.agentMCPConfigJSON.String,
 		"installed_skills":      installedSkills,
 		"crew_resources":        crewResources,
+		"approval_mode":         approvalMode,
 	}
 	// PR-E F6 — opener identity + role title for the orchestrator's
 	// PERSONA / peer card injection. opener is "" for agent-only

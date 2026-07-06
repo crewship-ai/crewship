@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -39,6 +40,17 @@ type crewProvisioner interface {
 	RuntimeProvisionSink(crewID, workspaceID string) func(devcontainer.ProvisionEvent)
 }
 
+// agentConfigResolver resolves an agent ID to its full runtime config —
+// the ASSEMBLED system prompt (skills, persona, ethos, connected
+// integrations), MCP servers, installed skills, credentials, resource
+// limits, and the crew-policy approval_mode. Satisfied by
+// *chatbridge.IPCResolver. Injected so mission/peer dispatch funnels
+// through the same builder as chat/pipeline/webhook (#810) instead of
+// reading raw system_prompt_legacy with no MCP.
+type agentConfigResolver interface {
+	ResolveAgent(ctx context.Context, agentID, workspaceID string) (*chatbridge.ChatInfo, error)
+}
+
 type AssignmentHandler struct {
 	db              *sql.DB
 	orch            *orchestrator.Orchestrator
@@ -48,6 +60,10 @@ type AssignmentHandler struct {
 	missionCallback MissionCallback
 	journal         journal.Emitter
 	provisioner     crewProvisioner
+	// resolver funnels dispatch through the one request-builder (#810).
+	// nil → the legacy raw-SQL build (system_prompt_legacy, no MCP) so
+	// tests that construct the handler without a resolver are unaffected.
+	resolver agentConfigResolver
 
 	// dispatchWG tracks the async runAssignment/dispatchByID goroutines
 	// spawned by Create and pumpAndDispatch. Nothing in the request path
@@ -81,6 +97,13 @@ func NewAssignmentHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.H
 
 func (h *AssignmentHandler) SetMissionCallback(cb MissionCallback) {
 	h.missionCallback = cb
+}
+
+// SetResolver wires the agent-config resolver so mission/sidecar-assign
+// dispatch builds its run through the one request-builder (#810). nil
+// leaves the legacy raw-SQL path in place.
+func (h *AssignmentHandler) SetResolver(rz agentConfigResolver) {
+	h.resolver = rz
 }
 
 // SetProvisioner wires the dispatch-time provisioning gate so a cold crew is
@@ -281,11 +304,6 @@ func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestr
 		return fmt.Errorf("lookup agent %s: %w", req.AgentID, err)
 	}
 
-	creds, err := h.loadAgentCredentials(ctx, target.ID)
-	if err != nil {
-		return fmt.Errorf("load credentials for agent %s: %w", target.ID, err)
-	}
-
 	// Inject trace context into task for observability
 	task := req.Task
 	if req.TraceID != "" {
@@ -296,14 +314,16 @@ func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestr
 	crewMembers := h.loadCrewMembers(ctx, req.CrewID, req.AgentID)
 
 	body := createAssignmentBody{
-		TargetSlug:   target.Slug,
-		Task:         task,
-		CrewID:       req.CrewID,
-		WorkspaceID:  req.WorkspaceID,
-		ChatID:       req.ChatID,
-		MissionID:    req.MissionID,
-		CrewMembers:  crewMembers,
-		LeadPlanning: req.LeadPlanning,
+		TargetSlug:      target.Slug,
+		Task:            task,
+		CrewID:          req.CrewID,
+		WorkspaceID:     req.WorkspaceID,
+		ChatID:          req.ChatID,
+		MissionID:       req.MissionID,
+		CrewMembers:     crewMembers,
+		LeadPlanning:    req.LeadPlanning,
+		AuthorAgentID:   req.AuthorAgentID,
+		CreatedByUserID: req.CreatedByUserID,
 	}
 
 	h.logger.Info("dispatching mission assignment",
@@ -360,7 +380,7 @@ func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestr
 		h.emitAssignmentUnqueued(ctx, req.AssignmentID, req.ChatID, req.WorkspaceID, req.CrewID)
 	}
 
-	h.runAssignment(ctx, req.AssignmentID, body, target, creds)
+	h.runAssignment(ctx, req.AssignmentID, body, target)
 	return nil
 }
 

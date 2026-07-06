@@ -402,34 +402,25 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 			defer releaseSlot()
 		}
 
-		req := orchestrator.AgentRunRequest{
-			AgentID:       info.AgentID,
-			AgentSlug:     info.AgentSlug,
-			AgentRole:     info.AgentRole,
-			CrewID:        info.CrewID,
-			CrewSlug:      info.CrewSlug,
-			WorkspaceID:   info.WorkspaceID,
-			ChatID:        chatID,
-			ContainerID:   containerID,
-			CLIAdapter:    info.CLIAdapter,
-			LLMModel:      info.LLMModel,
-			SystemPrompt:  info.SystemPrompt,
-			UserMessage:   userMsg,
-			ToolProfile:   info.ToolProfile,
-			Credentials:   info.Credentials,
-			TimeoutSecs:   info.TimeoutSecs,
-			MemoryEnabled: info.MemoryEnabled,
-			// Externally-triggered runs are forced to restricted egress
-			// regardless of the crew's own mode: the payload comes from outside,
-			// so it must not be able to drive a `free` crew's agent to arbitrary
-			// hosts. The crew's allowed_domains still apply (empty → the sidecar's
-			// DefaultAllowedDomains, so LLM/CLI providers keep working).
-			NetworkMode:    "restricted",
-			AllowedDomains: info.AllowedDomains,
-			MemoryMB:       info.MemoryMB,
-			CPUs:           info.CPUs,
-			TTLHours:       info.TTLHours,
-		}
+		// Build through the ONE request-builder (#810) so the webhook-
+		// triggered agent carries its MCP servers, installed skills, persona,
+		// and the crew-policy ApprovalMode — not just the fields this literal
+		// used to copy by hand.
+		req := info.ToAgentRunRequest(chatbridge.AgentRunOverrides{
+			ChatID:      chatID,
+			ContainerID: containerID,
+			UserMessage: userMsg,
+			LLMModel:    info.LLMModel,
+			TimeoutSecs: info.TimeoutSecs,
+			MemoryMB:    info.MemoryMB,
+			CPUs:        info.CPUs,
+		})
+		// Externally-triggered runs are forced to restricted egress regardless
+		// of the crew's own mode: the payload comes from outside, so it must
+		// not be able to drive a `free` crew's agent to arbitrary hosts. The
+		// crew's allowed_domains still apply (empty → the sidecar's
+		// DefaultAllowedDomains, so LLM/CLI providers keep working).
+		req.NetworkMode = "restricted"
 
 		logBuf := logcollector.NewOutputBuffer(h.logWriter, info.CrewID, info.AgentSlug)
 		defer logBuf.Close()

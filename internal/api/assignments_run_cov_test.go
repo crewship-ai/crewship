@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
@@ -35,6 +36,14 @@ func covAsgRig(t *testing.T) (h *AssignmentHandler, wsID, crewID, leadID, worker
 		t.Fatalf("seed chat: %v", err)
 	}
 	h = NewAssignmentHandler(db, nil, nil, "internal-test-token", newTestLogger())
+	// #810: dispatch funnels exclusively through the request-builder, so wire a
+	// resolver returning the worker's config (production always has one). Without
+	// it buildAssignmentRunRequest fails closed and these tests never reach the
+	// execution/backup path they exercise.
+	h.resolver = &fakeAgentResolver{info: &chatbridge.ChatInfo{
+		AgentID: workerID, AgentSlug: "asg-worker", AgentRole: "AGENT",
+		CrewID: crewID, CrewSlug: "asg", WorkspaceID: wsID, CLIAdapter: "CLAUDE_CODE",
+	}}
 	return
 }
 
@@ -189,7 +198,7 @@ func TestRunAssignment_NoOrchestrator_FailsAssignment(t *testing.T) {
 		TargetSlug: "asg-worker", Task: "t", CrewID: crewID, WorkspaceID: wsID, ChatID: chatID,
 	}
 	target := targetAgentInfo{ID: workerID, Slug: "asg-worker", Name: "Worker", CrewSlug: "asg"}
-	h.runAssignment(context.Background(), "asg-run-1", body, target, nil)
+	h.runAssignment(context.Background(), "asg-run-1", body, target)
 
 	var status, errMsg string
 	var started, finished string
@@ -231,7 +240,7 @@ func TestRunAssignment_MissionScoped_StampsMissionID(t *testing.T) {
 	}
 	target := targetAgentInfo{ID: workerID, Slug: "asg-worker", Name: "Worker", CrewSlug: "asg"}
 	// No orchestrator → fails fast, but run.started + assignment.running emit first.
-	h.runAssignment(context.Background(), "asg-run-m", body, target, nil)
+	h.runAssignment(context.Background(), "asg-run-m", body, target)
 
 	if err := jw.Flush(context.Background()); err != nil {
 		t.Fatalf("flush: %v", err)
@@ -265,7 +274,7 @@ func TestRunAssignment_ChatOnly_NoMissionID_NoFKViolation(t *testing.T) {
 		// MissionID intentionally empty — chat-only run, no missions row.
 	}
 	target := targetAgentInfo{ID: workerID, Slug: "asg-worker", Name: "Worker", CrewSlug: "asg"}
-	h.runAssignment(context.Background(), "asg-run-chat", body, target, nil)
+	h.runAssignment(context.Background(), "asg-run-chat", body, target)
 
 	if err := jw.Flush(context.Background()); err != nil {
 		t.Fatalf("flush: %v", err)
@@ -292,7 +301,7 @@ func TestRunAssignment_ContainerError_FailsAssignment(t *testing.T) {
 		TargetSlug: "asg-worker", Task: "t", CrewID: crewID, WorkspaceID: wsID, ChatID: chatID,
 	}
 	target := targetAgentInfo{ID: workerID, Slug: "asg-worker", Name: "Worker", CrewSlug: "asg"}
-	h.runAssignment(context.Background(), "asg-run-2", body, target, nil)
+	h.runAssignment(context.Background(), "asg-run-2", body, target)
 
 	var status, errMsg string
 	if err := h.db.QueryRow(

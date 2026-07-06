@@ -430,32 +430,25 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 		})
 	}
 
-	// 5. Build AgentRunRequest
-	req := orchestrator.AgentRunRequest{
-		AgentID:      info.AgentID,
-		AgentSlug:    info.AgentSlug,
-		AgentRole:    info.AgentRole,
-		CrewID:       info.CrewID,
-		CrewSlug:     info.CrewSlug,
-		WorkspaceID:  info.WorkspaceID,
-		ChatID:       chatID,
-		ContainerID:  containerID,
-		CLIAdapter:   info.CLIAdapter,
-		LLMModel:     info.LLMModel,
-		SystemPrompt: info.SystemPrompt,
-		UserMessage:  prompt,
-		ToolProfile:  info.ToolProfile,
-		Credentials:  info.Credentials,
-		TimeoutSecs:  info.TimeoutSecs,
+	// 5. Build AgentRunRequest through the ONE request-builder (#810). The
+	// scheduler previously hand-built this literal and silently dropped
+	// MCPServers, Skills, RoleTitle, MCP-JSON, and MemoryMB/CPUs/TTL — so a
+	// cron-dispatched agent ran tool-blind and without its resource limits.
+	// Funnelling through ToAgentRunRequest carries the full field-set
+	// (incl. the crew-policy ApprovalMode that revives the HITL gate).
+	req := info.ToAgentRunRequest(chatbridge.AgentRunOverrides{
+		ChatID:      chatID,
+		ContainerID: containerID,
+		UserMessage: prompt,
+		LLMModel:    info.LLMModel,
+		TimeoutSecs: info.TimeoutSecs,
+		MemoryMB:    info.MemoryMB,
+		CPUs:        info.CPUs,
 		// Unattended runs get a tighter turn cap than interactive chat — no
 		// human is watching a scheduled job, so a stuck loop would otherwise
 		// burn to the wall-clock timeout. See orchestrator.RoutineMaxTurns.
-		MaxTurns:       orchestrator.RoutineMaxTurns,
-		MemoryEnabled:  info.MemoryEnabled,
-		CrewMembers:    info.CrewMembers,
-		NetworkMode:    info.NetworkMode,
-		AllowedDomains: info.AllowedDomains,
-	}
+		MaxTurns: orchestrator.RoutineMaxTurns,
+	})
 
 	// 6. Create run record
 	runMeta := map[string]interface{}{
