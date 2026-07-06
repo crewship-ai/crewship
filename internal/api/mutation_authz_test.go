@@ -65,6 +65,7 @@ func TestMutationRoutes_RejectViewer(t *testing.T) {
 		{"run signal", pipes.SignalRun, "POST", "/x", `{}`, map[string]string{"runId": "r"}},
 		{"run metadata", pipes.UpdateRunMetadata, "PATCH", "/x", `{}`, map[string]string{"runId": "r"}},
 		{"pending cancel", pipes.CancelPendingRun, "POST", "/x", "", map[string]string{"pendingId": "p"}},
+		{"checkpoint create", carto.Create, "POST", "/x", `{}`, map[string]string{"missionId": "m"}},
 		{"checkpoint restore", carto.Restore, "POST", "/x", "", map[string]string{"id": "c"}},
 		{"checkpoint fork", carto.Fork, "POST", "/x", "", map[string]string{"id": "c"}},
 		{"checkpoint delete", carto.Delete, "DELETE", "/x", "", map[string]string{"id": "c"}},

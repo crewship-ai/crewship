@@ -94,6 +94,11 @@ func (h *CartographerHandler) Create(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
+	// Creating a checkpoint mutates crew state — MANAGER+ (update), consistent
+	// with restore/fork/delete. Without this it was membership-only.
+	if !requireRole(w, r, "update") {
+		return
+	}
 	user := UserFromContext(r.Context())
 	userID := ""
 	if user != nil {
