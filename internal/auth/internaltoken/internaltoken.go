@@ -57,6 +57,13 @@ const derivationContext = "crewship internal-token workspace binding v1\x00"
 // The trailing NUL delimits the context from the signed payload.
 const callerSigContext = "crewship internal-token caller-identity v1\x00"
 
+// agentDerivationContext domain-separates the per-agent token HMAC
+// (DeriveAgentToken) from the workspace-binding and caller-identity HMACs
+// so a token minted for one purpose can never validate for another even
+// though all three run over the same master key. The trailing NUL delimits
+// the context from the (workspace_id, agent_id) tuple.
+const agentDerivationContext = "crewship internal-token agent binding v1\x00"
+
 // DeriveWorkspaceToken returns the workspace-bound internal token for
 // workspaceID, derived from the master internal token. Returns ""
 // when either input is empty — an empty master means internal auth is
@@ -111,6 +118,43 @@ func mac(master, workspaceID string) string {
 	m := hmac.New(sha256.New, []byte(master))
 	m.Write([]byte(derivationContext))
 	m.Write([]byte(workspaceID))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+// AgentPrefix marks a per-agent derived token on the wire (#812). It is not
+// a secret; it lets a reader distinguish a per-agent token from a
+// workspace-bound one at a glance in logs/config.
+const AgentPrefix = "agtv1"
+
+// DeriveAgentToken returns the per-agent bearer token for (workspaceID,
+// agentID), derived from the master internal token (#812). The shared
+// per-crew sidecar can't trust a caller-supplied `from`/slug — any crew
+// member could claim a sibling's identity. A per-agent token can't be
+// forged from inside the container (the master never enters it) and maps to
+// exactly one agent, so the sidecar can attribute a call to the ACTING agent
+// instead of the boot agent or an advisory body field.
+//
+// Format: agtv1.<workspace_id>.<agent_id>.<hex(HMAC-SHA256(master, ctx ||
+// workspace_id || NUL || agent_id))>. The workspace_id and agent_id segments
+// are informational (the sidecar matches the whole token by constant-time
+// equality against the roster it was minted with); the MAC binds them.
+//
+// Returns "" when any input is empty — an empty master means internal auth
+// is unconfigured, and a token bound to an empty workspace or agent must
+// never exist. Callers must treat "" as "do not issue".
+func DeriveAgentToken(master, workspaceID, agentID string) string {
+	if master == "" || workspaceID == "" || agentID == "" {
+		return ""
+	}
+	return AgentPrefix + "." + workspaceID + "." + agentID + "." + agentMAC(master, workspaceID, agentID)
+}
+
+func agentMAC(master, workspaceID, agentID string) string {
+	m := hmac.New(sha256.New, []byte(master))
+	m.Write([]byte(agentDerivationContext))
+	m.Write([]byte(workspaceID))
+	m.Write([]byte{0})
+	m.Write([]byte(agentID))
 	return hex.EncodeToString(m.Sum(nil))
 }
 

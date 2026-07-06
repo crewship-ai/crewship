@@ -40,12 +40,20 @@ func (s *Server) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// #812: attribute authorship to the ACTING agent from its per-agent bearer
+	// token, not the boot agent that started the shared sidecar. Forged token → 403.
+	authorAgentID, ok := s.actingAgentID(r)
+	if !ok {
+		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
+		return
+	}
+
 	body := map[string]interface{}{
 		"workspace_id":    s.ipc.WorkspaceID,
 		"crew_id":         crewID,
 		"title":           req.Title,
 		"assignee_type":   "agent",
-		"author_agent_id": s.ipc.AgentID,
+		"author_agent_id": authorAgentID,
 	}
 	// Provenance (v108/v129): the chat this agent container is bound to.
 	// A run id is not part of the IPC identity today, so only the chat is

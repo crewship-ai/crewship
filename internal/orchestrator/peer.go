@@ -13,6 +13,7 @@ const (
 	peerContextQueryPrefix = `
 To ask a crew member a question:
   curl -s -X POST http://localhost:9119/query \
+    -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{"target":"<slug>","question":"<question>","from":"`
 
@@ -21,6 +22,7 @@ The response will contain the crew member's answer.
 
 To escalate to the lead (when you discover something needs a decision):
   curl -s -X POST http://localhost:9119/escalate \
+    -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{"from":"`
 

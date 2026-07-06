@@ -98,11 +98,24 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Attribute the query to the caller-supplied `from`, validated as a real
-	// crew member (same CRE-137 membership check as handleEscalate). The shared
-	// per-crew sidecar can't override with a single boot identity without
-	// mis-attributing every sibling's query.
-	if !s.isCrewMember(req.From) {
+	// #812: attribute the query to the ACTING agent derived from its per-agent
+	// bearer token. A valid token overrides any `from` in the body (closing
+	// intra-crew impersonation); a token matching no member is refused. With no
+	// token we fall back to the #796 membership-validated `from`.
+	tokenAuthed := false
+	if actorID, actorSlug, present, ok := s.actingIdentity(r); present {
+		if !ok {
+			writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
+			return
+		}
+		if req.From != "" && req.From != actorSlug {
+			s.logger.Warn("query: ignoring spoofed from-slug, attributing to authenticated agent",
+				"claimed_from", req.From, "acting_slug", actorSlug, "acting_agent_id", actorID)
+		}
+		req.From = actorSlug
+		tokenAuthed = true
+	}
+	if !tokenAuthed && !s.isCrewMember(req.From) {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
 			"error": fmt.Sprintf("from %q is not a member of this crew", req.From),
 		})
@@ -185,6 +198,28 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
+
+	// #812: derive the ACTING agent from the per-agent bearer token. A valid
+	// token is authoritative — it overrides any `from` in the body, closing
+	// the intra-crew impersonation that #796's membership check couldn't (a
+	// spoofed `from` naming a real sibling passed that check). A token that
+	// matches no crew member is a forgery and is refused. With no token we
+	// fall back to #796's membership-validated `from` (advisory attribution),
+	// so legacy callers keep working.
+	tokenAuthed := false
+	if actorID, actorSlug, present, ok := s.actingIdentity(r); present {
+		if !ok {
+			writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
+			return
+		}
+		if req.From != "" && req.From != actorSlug {
+			s.logger.Warn("escalate: ignoring spoofed from-slug, attributing to authenticated agent",
+				"claimed_from", req.From, "acting_slug", actorSlug, "acting_agent_id", actorID)
+		}
+		req.From = actorSlug
+		tokenAuthed = true
+	}
+
 	if req.From == "" || req.Reason == "" {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "from and reason required"})
 		return
@@ -196,16 +231,15 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 		metadata = req.EvidencePack
 	}
 
-	// Attribute the escalation to the caller-supplied `from`, but validate it is
-	// a real member of THIS crew (mirrors CRE-137's /mcp/memory/<slug>
+	// Fallback attribution (no per-agent token): validate the caller-supplied
+	// `from` is a real member of THIS crew (mirrors CRE-137's /mcp/memory/<slug>
 	// membership check). The per-crew sidecar is SHARED across the crew's
 	// agents, so s.ipc.AgentSlug is only the agent that booted it — overriding
 	// with it would mis-attribute every sibling agent's escalation (and any
 	// credential proposal it carries) to the boot agent. Validating membership
 	// rejects a slug outside the crew while keeping correct per-agent
-	// attribution. (Cross-member spoofing within one shared container is a known
-	// limit of the shared-sidecar model; closing it fully needs per-agent auth.)
-	if !s.isCrewMember(req.From) {
+	// attribution.
+	if !tokenAuthed && !s.isCrewMember(req.From) {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
 			"error": fmt.Sprintf("from %q is not a member of this crew", req.From),
 		})
@@ -333,8 +367,15 @@ func (s *Server) handleReportConfidence(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// #812: attribute the confidence report to the ACTING agent (per-agent
+	// token), not the boot agent of the shared sidecar. Forged token → 403.
+	agentID, ok := s.actingAgentID(r)
+	if !ok {
+		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
+		return
+	}
 	body := map[string]interface{}{
-		"agent_id":     s.ipc.AgentID,
+		"agent_id":     agentID,
 		"crew_id":      s.ipc.CrewID,
 		"workspace_id": s.ipc.WorkspaceID,
 		"chat_id":      s.ipc.ChatID,

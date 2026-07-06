@@ -39,6 +39,27 @@ func sidecarIPCToken(master, workspaceID string, logger *slog.Logger) string {
 	return internaltoken.DeriveWorkspaceToken(master, workspaceID)
 }
 
+// agentAuthToken returns the per-agent bearer token to inject into an agent's
+// env + MCP config (#812). It extends sidecarIPCToken's workspace binding down
+// to the individual agent — HMAC(master, workspaceID‖agentID) — so a shared
+// per-crew sidecar can attribute a call to the ACTING agent instead of a
+// caller-supplied `from`/slug that any sibling could spoof.
+//
+// Fail closed exactly like sidecarIPCToken: an empty master, workspace, or
+// agent id yields "" (no token), so the sidecar's identity resolution refuses
+// the call rather than falling back to a process-wide secret or a wildcard.
+func agentAuthToken(master, workspaceID, agentID string, logger *slog.Logger) string {
+	if master == "" {
+		return ""
+	}
+	if workspaceID == "" || agentID == "" {
+		logger.Error("per-agent token: empty workspace_id or agent_id — refusing to issue",
+			"workspace_id", workspaceID, "agent_id", agentID)
+		return ""
+	}
+	return internaltoken.DeriveAgentToken(master, workspaceID, agentID)
+}
+
 // PreRunInstallPackages installs system packages as root before the agent starts.
 // The agent runs as UID 1001 (non-root) and cannot install apt packages itself.
 // This function runs `apt-get install` as root (UID 0), then the agent exec
@@ -423,6 +444,10 @@ type SidecarIPCConfig struct {
 	WorkspaceID string `json:"workspace_id"`
 	ChatID      string `json:"chat_id"`
 	ContainerID string `json:"container_id"`
+	// AgentToken is the boot agent's per-agent bearer token (#812). The sidecar
+	// matches an inbound Authorization: Bearer token against this + each crew
+	// member's AuthToken to resolve the ACTING agent's identity.
+	AgentToken string `json:"agent_token,omitempty"`
 }
 
 // SidecarCrewMember describes a crew member accessible to lead agents for assignment.
@@ -432,6 +457,9 @@ type SidecarCrewMember struct {
 	Name      string `json:"name"`
 	RoleTitle string `json:"role_title"`
 	ChatID    string `json:"chat_id,omitempty"`
+	// AuthToken is this member's per-agent bearer token (#812) — see
+	// SidecarIPCConfig.AgentToken.
+	AuthToken string `json:"auth_token,omitempty"`
 }
 
 // SidecarNetworkPolicy configures crew-level network access for the sidecar.

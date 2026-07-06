@@ -68,6 +68,14 @@ func (s *Server) handleConnectionSendMessage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// #812: attribute the outbound crew message to the ACTING agent (per-agent
+	// token), not the boot agent of the shared sidecar. Forged token → 403.
+	fromAgentID, ok := s.actingAgentID(r)
+	if !ok {
+		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
+		return
+	}
+
 	// Build the crewshipd request with injected identity (agent cannot override).
 	contentStr := string(agentReq.Content)
 	// If content is a JSON string (quoted), unquote it.
@@ -78,7 +86,7 @@ func (s *Server) handleConnectionSendMessage(w http.ResponseWriter, r *http.Requ
 	body := map[string]interface{}{
 		"from_crew_id":  s.ipc.CrewID,
 		"to_crew_id":    targetCrewID,
-		"from_agent_id": s.ipc.AgentID,
+		"from_agent_id": fromAgentID,
 		"workspace_id":  s.ipc.WorkspaceID,
 		"content":       contentStr,
 	}

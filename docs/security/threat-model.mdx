@@ -398,6 +398,42 @@ was the only line of defense (the token itself was a single global
 secret and `internalWsCtx` trusted whatever `?workspace_id` was
 passed); the cryptographic binding now enforces it server-side.
 
+### Per-agent identity on the shared sidecar
+
+The sidecar is shared **per crew** — several agents run in one container
+behind one sidecar — so a workspace-bound token (identical for every
+agent in the workspace) and the sidecar's boot identity (`s.ipc.AgentSlug`,
+frozen to whichever agent started the container) cannot tell **which**
+crew member is making a given call. Agent-facing routes that once trusted
+a caller-supplied `from`/slug (`/escalate`, `/query`, the per-agent memory
+path `/mcp/memory/<slug>`, and the Keeper credential routes) therefore let
+any sibling in the crew impersonate a peer — including on a `CREDENTIAL`
+escalation, which is a non-repudiation gap for the vault.
+
+To close it, the orchestrator mints a **per-agent token** for every agent
+— `agtv1.<workspace_id>.<agent_id>.<HMAC-SHA256(master,
+agent_derivation_context || workspace_id || NUL || agent_id)>`, derived by
+`internaltoken.DeriveAgentToken`. It is delivered to each agent as
+`$CREWSHIP_AGENT_TOKEN` in its environment and injected as an
+`Authorization: Bearer` header into its memory MCP config, and the sidecar
+is booted with the whole crew's token→identity roster (the boot agent's
+token via `IPCConfig.AgentToken`, each member's via
+`CrewMember.AuthToken`). On each call the sidecar constant-time-matches the
+presented bearer token against that roster to resolve the **acting** agent:
+
+- a valid token is **authoritative** and overrides any `from`/URL slug in
+  the request (a spoofed `from` naming a real sibling no longer wins);
+- a token that matches no crew member is **refused** (403 / JSON-RPC error);
+- with **no** token the route falls back to the prior behaviour —
+  membership-validated `from` for escalate/query, URL slug for the memory
+  path — so legacy callers keep working. Because the master never enters a
+  container, the token cannot be forged from inside the agent process.
+
+The raw LLM-proxy cost ledger still attributes usage to the boot agent:
+provider API calls carry the provider key, not a per-agent token, so the
+proxy has no per-request identity to bind — an accepted limitation of the
+metering path, distinct from the identity-bearing agent routes above.
+
 ### Resolved exception — Keeper Phase 2 family
 
 The `/api/v1/internal/keeper/{skill-review,behavior,memory-health,

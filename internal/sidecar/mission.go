@@ -111,9 +111,16 @@ func (s *Server) handleMissionCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// #812: attribute mission leadership to the ACTING agent (per-agent
+	// token), not merely the boot agent of the shared sidecar. Forged token → 403.
+	leadAgentID, ok := s.actingAgentID(r)
+	if !ok {
+		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
+		return
+	}
 	body := map[string]interface{}{
 		"title":         req.Title,
-		"lead_agent_id": s.ipc.AgentID,
+		"lead_agent_id": leadAgentID,
 		"crew_id":       crewID,
 		"workspace_id":  s.ipc.WorkspaceID,
 		"tasks":         tasks,
