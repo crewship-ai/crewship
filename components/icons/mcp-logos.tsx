@@ -2,12 +2,14 @@
 
 import * as React from "react"
 import {
-  SiGithub, SiGooglecloud, SiSlack, SiLinear, SiNotion,
+  SiGithub, SiGooglecloud, SiLinear, SiNotion,
   SiStripe, SiSupabase, SiDatadog, SiCloudflare, SiGitlab, SiSentry,
-  SiPostgresql, SiBrave, SiAirtable, SiZendesk, SiHubspot, SiTwilio,
-  SiOpenai, SiAnthropic, SiVercel, SiDocker, SiKubernetes,
+  SiPostgresql, SiBrave, SiAirtable, SiZendesk, SiHubspot,
+  SiAnthropic, SiVercel, SiDocker, SiKubernetes,
   SiJira, SiAsana, SiTrello, SiDiscord, SiTelegram,
 } from "react-icons/si"
+// Slack/Twilio/OpenAI were removed from react-icons/si in 5.7.0 — vendored locally.
+import { SiSlack, SiTwilio, SiOpenai } from "@/components/icons/si-fallback"
 import { Folder, Database, Bug, Search, Plug, Globe, Terminal, Cloud } from "lucide-react"
 
 // Lookup map: registry name (lower-case) → icon component. Falls back

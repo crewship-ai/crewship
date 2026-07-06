@@ -13,13 +13,14 @@ import {
   SiPython,
   SiGnubash,
   SiGit,
-  SiSlack,
   SiDiscord,
   SiGithub,
   SiNotion,
   SiGooglecalendar,
   SiZapier,
 } from "react-icons/si"
+// Slack was removed from react-icons/si in 5.7.0 — vendored locally.
+import { SiSlack } from "@/components/icons/si-fallback"
 import { brandIconKey, type BrandIconKey } from "@/lib/routine-flow"
 
 // brand-icons — single source of truth mapping a BrandIconKey (derived in

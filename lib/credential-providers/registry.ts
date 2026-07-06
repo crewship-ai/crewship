@@ -17,18 +17,18 @@ import { Key, KeyRound, ShieldCheck, User, Lock } from "lucide-react"
 
 import {
   // AI / inference
-  SiAnthropic, SiOpenai, SiGooglegemini, SiHuggingface,
+  SiAnthropic, SiGooglegemini, SiHuggingface,
   SiPerplexity, SiReplicate, SiOllama, SiElevenlabs,
   // Cloud / infra
   SiGooglecloud, SiCloudflare, SiVercel, SiNetlify,
-  SiRailway, SiRender, SiDigitalocean, SiHeroku,
+  SiRailway, SiRender, SiDigitalocean,
   SiSupabase, SiFirebase, SiPlanetscale,
   // Source control / dev
   SiGithub, SiGitlab, SiBitbucket, SiCodeberg, SiJetbrains,
   SiReplit, SiGitpod, SiCodesandbox,
   // Communication
-  SiSlack, SiDiscord, SiTelegram, SiWhatsapp, SiSignal,
-  SiTwilio, SiSendgrid, SiMailgun, SiResend, SiMailchimp,
+  SiDiscord, SiTelegram, SiWhatsapp, SiSignal,
+  SiMailgun, SiResend, SiMailchimp,
   SiZoom,
   // Productivity / docs
   SiNotion, SiLinear, SiAsana, SiTrello, SiJira, SiAtlassian,
@@ -73,7 +73,7 @@ import {
   SiTensorflow, SiPytorch, SiPandas, SiNumpy, SiScikitlearn,
   SiKeras, SiMlflow, SiNvidia, SiIntel,
   // CRM / marketing
-  SiZoho, SiSalesforce, SiHubspot, SiZapier, SiMake,
+  SiZoho, SiHubspot, SiZapier, SiMake,
   // CMS / web
   SiWebflow, SiWordpress, SiGhost, SiContentful, SiSanity,
   SiStrapi, SiStoryblok,
@@ -84,6 +84,11 @@ import {
 import {
   AWSIcon, CursorIcon, FactoryIcon, CustomCLIIcon,
 } from "@/components/icons/provider-icons"
+// Slack/OpenAI/Twilio/Heroku/SendGrid/Salesforce were removed from
+// react-icons/si in 5.7.0 — vendored locally with the same signature.
+import {
+  SiSlack, SiOpenai, SiTwilio, SiHeroku, SiSendgrid, SiSalesforce,
+} from "@/components/icons/si-fallback"
 
 export type IconComponent = ComponentType<SVGProps<SVGSVGElement>>
 
