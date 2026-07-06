@@ -146,9 +146,15 @@ func (h *WebhookHandler) lookupSecret(ctx context.Context, crewID, agentID strin
 // webhookIdempotencyKey resolves the dedup key for a webhook delivery.
 // Preference order:
 //  1. The X-Signature (stashed by ServeHTTP) — it is HMAC'd with the agent's
-//     secret, so it is attacker-unforgeable and stable across retries of the
-//     same delivery. Using it stops a replay of a captured signed webhook from
-//     bypassing the dedup window by grinding a fresh Idempotency-Key.
+//     secret, so it is attacker-unforgeable. Using it stops a replay of a
+//     captured signed webhook from bypassing the dedup window by grinding a
+//     fresh Idempotency-Key. KNOWN LIMITATION: for TIMESTAMPED signatures the
+//     signature covers "timestamp.body", so a legitimate retry that re-signs
+//     with a fresh timestamp produces a different signature and is treated as a
+//     NEW delivery (a second run). A captured request replayed verbatim still
+//     dedupes (same timestamp+sig). Fully fixing timestamped-retry dedup needs a
+//     stable delivery id (Svix webhook-id header) — tracked as a follow-up; not
+//     resolved by this PR.
 //  2. The caller-supplied Idempotency-Key (legacy secret path, un-migrated
 //     senders).
 //  3. A deterministic synthetic key over agent id + payload — an external
