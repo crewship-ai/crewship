@@ -10,7 +10,11 @@ A recurring issue is a **template** that produces a fresh backlog issue on every
 
 Implementation: `internal/api/recurring_issue_handler.go`. Backed by the `recurring_issues` table.
 
-The cron expression is parsed and validated **at write time** using the standard 5-field syntax (`Minute | Hour | DayOfMonth | Month | DayOfWeek`); the parser is `github.com/robfig/cron/v3`. The next fire time is computed on create and on every cron change and stored in `next_run`, so the dispatcher can wake by index without re-parsing.
+The cron expression is parsed and validated **at write time** using the standard 5-field syntax (`Minute | Hour | DayOfMonth | Month | DayOfWeek`); the parser is `github.com/robfig/cron/v3`. The next fire time is computed on create and on every cron change and stored in `next_run`, so the dispatcher can wake by index without re-parsing. `next_run` is always computed in **UTC** — including the very first fire — so it matches how the dispatcher advances the schedule; a non-UTC server no longer interprets the first fire differently from every subsequent one.
+
+**Creator attribution.** The user who creates the template is recorded on the row (`created_by`). Every fired issue is then attributed to that user (`created_by_user_id`), so the [Issues](/api-reference/issues) API surfaces the creator instead of omitting it. Templates created before attribution was captured leave the creator unset and the fired issue omits it.
+
+**Fire idempotency.** Each occurrence reserves a durable key (`sha256(kind‖id‖next_run-bucket)`) in the shared `pipeline_run_idempotency` table before inserting, so two dispatcher replicas racing the same due row create the issue exactly once — the same scheme the pipeline scheduler uses.
 
 <Note>
   All endpoints require an authenticated session and workspace context.

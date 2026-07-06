@@ -35,6 +35,12 @@ type issueSpec struct {
 	AuthorAgentID string
 	AuthorChatID  string
 	AuthorRunID   string
+	// CreatedByUserID is the human that created this row (v129 attribution).
+	// The recurring dispatcher threads the template's created_by so a fired
+	// issue is attributed to whoever set up the schedule; empty on the agent
+	// path (that path stamps AuthorAgentID instead). Optional — stored NULL
+	// when empty so both-NULL legacy rows keep omitting the creator.
+	CreatedByUserID string
 }
 
 // Sentinel errors so callers can map to their transport (HTTP status, log).
@@ -114,13 +120,13 @@ func insertIssueTx(ctx context.Context, tx *sql.Tx, logger *slog.Logger, s issue
 		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id,
 		                      title, description, status, number, identifier,
 		                      priority, assignee_type, assignee_id, project_id, milestone_id,
-		                      author_agent_id, author_chat_id, author_run_id, authored_via,
+		                      author_agent_id, author_chat_id, author_run_id, created_by_user_id, authored_via,
 		                      sort_order, mission_type, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'BACKLOG', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'issue', ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'BACKLOG', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'issue', ?, ?)`,
 		id, s.WorkspaceID, s.CrewID, leadAgentID, traceID,
 		s.Title, s.Description, number, identifier,
 		priority, s.AssigneeType, s.AssigneeID, s.ProjectID, s.MilestoneID,
-		nullable(s.AuthorAgentID), nullable(s.AuthorChatID), nullable(s.AuthorRunID), authoredVia,
+		nullable(s.AuthorAgentID), nullable(s.AuthorChatID), nullable(s.AuthorRunID), nullable(s.CreatedByUserID), authoredVia,
 		now, now)
 	if err != nil {
 		return "", "", err

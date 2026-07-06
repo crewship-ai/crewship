@@ -116,6 +116,10 @@ func (h *RecurringIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	wsID := WorkspaceIDFromContext(r.Context())
+	callerID := ""
+	if caller := UserFromContext(r.Context()); caller != nil {
+		callerID = caller.ID
+	}
 
 	var req struct {
 		CrewID         string  `json:"crew_id"`
@@ -155,7 +159,11 @@ func (h *RecurringIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid cron expression: "+err.Error())
 		return
 	}
-	nextRun := schedule.Next(time.Now()).UTC().Format(time.RFC3339)
+	// Compute the first next_run in UTC so it matches how the dispatcher
+	// advances the schedule (time.Now().UTC()). Using local wall-clock here
+	// would interpret the first fire differently from every subsequent one on
+	// a non-UTC server (#813).
+	nextRun := schedule.Next(time.Now().UTC()).UTC().Format(time.RFC3339)
 
 	// Verify crew belongs to workspace
 	var crewExists int
@@ -170,14 +178,21 @@ func (h *RecurringIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	id := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// Capture the creator so fired issues can be attributed back to whoever
+	// set up the template (v129). NULL-safe for the theoretical no-user case.
+	var createdBy sql.NullString
+	if callerID != "" {
+		createdBy = sql.NullString{String: callerID, Valid: true}
+	}
+
 	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO recurring_issues (id, workspace_id, crew_id, title, description, priority,
 		    project_id, milestone_id, assignee_type, assignee_id, labels_json,
-		    cron_expression, enabled, next_run, run_count, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0, ?)`,
+		    cron_expression, enabled, next_run, run_count, created_at, created_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0, ?, ?)`,
 		id, wsID, req.CrewID, req.Title, req.Description, req.Priority,
 		req.ProjectID, req.MilestoneID, req.AssigneeType, req.AssigneeID, req.LabelsJSON,
-		req.CronExpression, nextRun, now)
+		req.CronExpression, nextRun, now, createdBy)
 	if err != nil {
 		internalError(w, r, h.logger, "insert recurring issue", err)
 		return
@@ -298,7 +313,7 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusBadRequest, "Invalid cron expression: "+err.Error())
 			return
 		}
-		nextRun := schedule.Next(time.Now()).UTC().Format(time.RFC3339)
+		nextRun := schedule.Next(time.Now().UTC()).UTC().Format(time.RFC3339)
 		ub.Set("cron_expression", *req.CronExpression)
 		ub.Set("next_run", nextRun)
 	}
