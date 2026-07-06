@@ -174,6 +174,23 @@ Each scheduled trigger follows this sequence:
   </Step>
 </Steps>
 
+### At-most-once firing
+
+Each scheduled *occurrence* fires **at most once**. The scheduler derives a
+deterministic idempotency key from the schedule and the occurrence's `next_run_at`,
+so a duplicate tick within the same window — or a process restart that happens
+**after** the run started but **before** `next_run_at` is advanced — is deduped
+rather than run a second time. The next occurrence has a distinct `next_run_at`,
+so it gets a fresh key and fires normally. The wake-check probe and deferred
+(pending) runs are keyed the same way and likewise fire at most once.
+
+This is **at-most-once, not exactly-once**: the dedup key is reserved *before*
+the run executes, so a crash *between* the reservation and execution drops that
+occurrence (it is not retried) rather than running it twice. If the idempotency
+store is unreachable a scheduled fire fails **closed** (recorded `FAILED` +
+alerted), never double-run. Duplicate protection is the guarantee; delivery is
+best-effort.
+
 ## Timeout
 
 Each scheduled run has a **45-minute timeout**. If the agent does not complete within this window, the context is cancelled and the run is marked as failed.
