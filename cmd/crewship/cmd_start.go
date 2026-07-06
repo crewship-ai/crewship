@@ -693,7 +693,7 @@ var startCmd = &cobra.Command{
 				// recurring_issues template and advances its schedule. Without
 				// it, recurring issues had CRUD + a next_run column but no
 				// runtime consumer — they looked scheduled and never fired.
-				recurringIssues := api.NewRecurringIssueDispatcher(deps.DB, nil, logger)
+				recurringIssues := api.NewRecurringIssueDispatcher(deps.DB, srv.WSHub(), logger)
 				recurringIssues.Start(ctx)
 				defer recurringIssues.Stop()
 				logger.Info("recurring-issue dispatcher wired (cron triggers; 30s tick)")
