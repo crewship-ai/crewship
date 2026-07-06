@@ -117,7 +117,12 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 	// to status = 'ACTIVE' so an EXPIRED/ERROR/REVOKED token is never decrypted
 	// and injected. The gate rides the exact same condition that already
 	// controls value exposure, so the management view is unaffected.
-	statusClause := "status IN ('ACTIVE', 'EXPIRED', 'ERROR')"
+	// RATE_LIMITED is included in the metadata set: the sidecar's credential
+	// reaper reaps any boot-time credential NOT returned here, so excluding a
+	// transiently RATE_LIMITED key would permanently evict a still-valid key
+	// (until container restart). Only genuinely-gone credentials (REVOKED /
+	// deleted_at) must be absent so the reaper drops exactly those.
+	statusClause := "status IN ('ACTIVE', 'EXPIRED', 'ERROR', 'RATE_LIMITED')"
 	if includeValues {
 		statusClause = "status = 'ACTIVE'"
 	}

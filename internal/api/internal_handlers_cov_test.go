@@ -1184,3 +1184,34 @@ func TestCovIICredentialAdapterGuards(t *testing.T) {
 		}
 	})
 }
+
+// TestCovIIListCredentials_RateLimitedKept guards the credstore-reaper contract:
+// the sidecar reaps any boot credential absent from this metadata list, so a
+// transiently RATE_LIMITED key MUST still be returned (kept), while a REVOKED
+// key MUST be absent (reaped). RED before the RATE_LIMITED status-clause fix.
+func TestCovIIListCredentials_RateLimitedKept(t *testing.T) {
+	setTestEncryptionKey(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	covIISeedAICred(t, db, "cred-rl", wsID, userID, "rl-key", "sk-ant-rl")
+	covIISeedAICred(t, db, "cred-rev", wsID, userID, "rev-key", "sk-ant-rev")
+	execOrFatal(t, db, `UPDATE credentials SET status='RATE_LIMITED' WHERE id='cred-rl'`)
+	execOrFatal(t, db, `UPDATE credentials SET status='REVOKED' WHERE id='cred-rev'`)
+
+	h := &InternalHandler{db: db, logger: newTestLogger(), journal: &emitRecorder{}}
+	req := httptest.NewRequest(http.MethodGet, "/x?workspace_id="+wsID, nil)
+	req.RemoteAddr = "192.0.2.10:5000" // metadata path
+	rec := httptest.NewRecorder()
+	h.ListCredentials(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "cred-rl") {
+		t.Errorf("RATE_LIMITED credential missing from metadata → reaper would evict a valid key: %s", body)
+	}
+	if strings.Contains(body, "cred-rev") {
+		t.Errorf("REVOKED credential must be absent from metadata (so the reaper drops it): %s", body)
+	}
+}

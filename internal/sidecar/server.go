@@ -647,6 +647,11 @@ func (s *Server) Start(ctx context.Context) error {
 		}()
 	}
 
+	// Reconcile the in-memory credential snapshot against crewshipd so a
+	// credential revoked after boot stops being served within one interval.
+	// No-op without an IPC config (standalone/tests).
+	go s.startCredentialReaper(ctx)
+
 	// Connect to MCP servers in the background (don't block startup)
 	if s.mcpGateway != nil {
 		go func() {
