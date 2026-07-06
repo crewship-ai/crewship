@@ -22,7 +22,7 @@ Compared to other layers in Crewship:
 |-------|-------|-----------|----------|
 | **Routine** | atomic | AI-authored OR human DSL | One repeatable AI workflow |
 | **Recipe** *(future)* | composite | Marketplace template | Crew + agents + integrations + routines bundled |
-| **Cyclic Issue** *(future)* | issue-tracker | recurring user issue | "Standup every Monday" without leaving Issues |
+| **Recurring Issue** | issue-tracker | recurring user issue | "Standup every Monday" without leaving Issues — a cron dispatcher stamps a fresh issue on each fire (see [Recurring Issues](/api-reference/recurring-issues)) |
 
 The user-facing label is **Routine** across web UI, CLI, agent system prompts and marketing surfaces. The backend identifier (database table, Go package, HTTP route paths) remains `pipelines` for backwards compatibility.
 
