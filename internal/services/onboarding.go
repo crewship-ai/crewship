@@ -95,9 +95,9 @@ func (s *OnboardingService) Setup(ctx context.Context, p SetupParams) (*SetupRes
 		// Create crew
 		crewID := s.idFunc()
 		if _, err = tx.ExecContext(ctx, `
-			INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?)
-		`, crewID, p.WorkspaceID, p.CrewName, p.CrewSlug, p.Now, p.Now); err != nil {
+			INSERT INTO crews (id, workspace_id, name, slug, network_mode, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`, crewID, p.WorkspaceID, p.CrewName, p.CrewSlug, database.DefaultCrewNetworkMode, p.Now, p.Now); err != nil {
 			s.logger.Error("insert crew", "error", err)
 			return nil, err
 		}

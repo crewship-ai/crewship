@@ -170,7 +170,9 @@ The sidecar (`internal/sidecar/`) is an HTTP proxy running inside each crew cont
 | **restricted** (default for new crews) | Only allow connections to allowlisted domains (the default allowed domains below + any the crew adds) |
 | **free** | Allow all outbound connections (opt in per crew) |
 
-New crews default to **restricted** with an empty allowlist (fail-safe defaults) — the default allowed domains below still make LLM/CLI providers reachable, so agents work out of the box while arbitrary egress is denied. A denied request emits a `network.egress` journal entry (visible in Crow's Nest) naming the policy, so the operator can add the host to `allowed_domains`. Crews created before this change keep their existing `free` mode (grandfathered).
+New crews default to **restricted** with an empty allowlist (fail-safe defaults) — the default allowed domains below still make LLM/CLI providers reachable, so agents work out of the box while arbitrary egress is denied. This default applies to **every** creation path (dashboard wizard, API/CLI, recipes, crew-template deploy, onboarding, internal) via a single shared default, so no path silently creates a `free` crew. A denied request emits a `network.egress` journal entry (visible in Crow's Nest) naming the policy, so the operator can add the host to `allowed_domains`. Crews created before this change keep their existing `free` mode (grandfathered).
+
+**Externally-triggered runs are always confined:** a webhook-initiated run executes under `restricted` egress regardless of the crew's own mode (the payload comes from outside the trust boundary), while the crew's `allowed_domains` still apply.
 
 Default allowed domains (from `internal/sidecar/allowlist.go` — each entry exists for a specific CLI):
 

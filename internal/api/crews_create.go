@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/license"
 )
@@ -124,7 +125,7 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// arbitrary egress is denied by default instead of allowed. Existing crews
 	// keep whatever the v18 migration set (grandfathered 'free'); callers opt
 	// back into 'free' explicitly per crew.
-	networkMode := "restricted"
+	networkMode := database.DefaultCrewNetworkMode
 	var allowedDomainsDB *string
 	if req.NetworkMode != nil && *req.NetworkMode != "" {
 		mode := strings.ToLower(*req.NetworkMode)

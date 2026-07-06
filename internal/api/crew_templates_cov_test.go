@@ -266,6 +266,17 @@ func TestCovCTDeployWithSlugAndCredentials(t *testing.T) {
 		t.Errorf("crew rows = %d, want 1", crewCount)
 	}
 
+	// A template-deployed crew must default to the fail-safe restricted egress,
+	// not the schema's legacy 'free' (this deploy path was the RBAC-exploited one
+	// and previously created unrestricted crews).
+	var deployedMode string
+	if err := db.QueryRow(`SELECT network_mode FROM crews WHERE id = ?`, dep.CrewID).Scan(&deployedMode); err != nil {
+		t.Fatalf("query crew network_mode: %v", err)
+	}
+	if deployedMode != "restricted" {
+		t.Errorf("deployed crew network_mode = %q, want restricted (fail-safe default)", deployedMode)
+	}
+
 	// DB state: both agents created with template-derived slugs.
 	var agentCount int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM agents WHERE crew_id = ?`, dep.CrewID).Scan(&agentCount); err != nil {
