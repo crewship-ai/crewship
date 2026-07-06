@@ -708,10 +708,13 @@ HTTP/1.1 202 Accepted
 The routine executes in the background under the returned `run_id`, so senders with short delivery timeouts (GitHub ~10s, Stripe ~5s) never time out on long agent runs — and a sender closing the connection early **cannot** cancel an in-flight run: the run's context derives from the server lifecycle, not the HTTP request. Poll the handle for the outcome:
 
 ```bash
-crewship routine logs <run_id>          # persisted run state (status, step outputs, error)
+crewship routine result <run_id>        # just the deliverable (the run's final output)
+crewship routine logs <run_id>          # persisted run state (status, step outputs, error, output)
 crewship routine logs <run_id> --full   # full step-by-step journal timeline
 # or: GET /api/v1/workspaces/{wsId}/pipeline-runs/{runId}
 ```
+
+`routine result` answers "what did run X produce?" — it re-fetches the run and prints the final `output` (structured JSON is pretty-printed; `--format json` for scripting). `routine logs` now includes the output too; use `result` when the deliverable is all you want.
 
 Redelivered events dedupe **synchronously**: a replay (same `Idempotency-Key` / `X-Crewship-Event-ID`, or identical bytes within the dedupe window) answers `202` with `"status": "DEDUPED"` and the **original** run's id — the routine executes exactly once. A `proposed`/`disabled` routine answers `409` (policy block, nothing dispatched). A delivery arriving while the routine's `concurrency_key` gate is at capacity answers `429` with a `Retry-After` header **before** anything is dispatched — a 429 never consumes the idempotency key, so redelivering the same event later executes it normally. Runs that hit a `wait: approval` step park as `WAITING` and resume once the waitpoint is approved, exactly as with other triggers.
 

@@ -181,7 +181,12 @@ Output formats:
 					}
 				}
 			}
-			fmt.Printf("\n(For the full event-by-event timeline, re-run with --slug %v.)\n", run["pipeline_slug"])
+			// The deliverable. logs used to print everything EXCEPT the
+			// answer; surface it here (and via `routine result <run>`).
+			if v, ok := run["output"].(string); ok && v != "" {
+				fmt.Printf("\nFinal output:\n%s\n", indent(prettyOutput(v), "  "))
+			}
+			fmt.Printf("\n(For the full event-by-event timeline, re-run with --slug %v. For just the deliverable: crewship routine result %v.)\n", run["pipeline_slug"], run["id"])
 			return nil
 		}
 
