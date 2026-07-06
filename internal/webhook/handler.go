@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -25,12 +26,22 @@ type SecretLookup func(ctx context.Context, crewID, agentID string) (string, err
 // and parsed payload to initiate an agent run.
 type TriggerFunc func(ctx context.Context, crewID, agentID string, payload WebhookPayload) error
 
+// DefaultTimestampTolerance bounds how far an X-Timestamp may be from now for a
+// timestamped signature to be accepted. Matches Stripe's default (5 min) — wide
+// enough to absorb clock skew, narrow enough that a captured signed webhook is
+// useless once the window passes.
+const DefaultTimestampTolerance = 5 * time.Minute
+
 // Handler is an HTTP handler that validates incoming webhook requests using
 // a shared secret and triggers agent runs on success.
 type Handler struct {
 	logger       *slog.Logger
 	lookupSecret SecretLookup
 	trigger      TriggerFunc
+	// tolerance / now back the optional timestamped-signature replay defense.
+	// now is a seam for tests; nil means time.Now.
+	tolerance time.Duration
+	now       func() time.Time
 }
 
 // NewHandler creates a webhook Handler with the given secret lookup and trigger functions.
@@ -39,7 +50,35 @@ func NewHandler(logger *slog.Logger, lookup SecretLookup, trigger TriggerFunc) *
 		logger:       logger,
 		lookupSecret: lookup,
 		trigger:      trigger,
+		tolerance:    DefaultTimestampTolerance,
+		now:          time.Now,
 	}
+}
+
+// timestampFresh reports whether the unix-seconds timestamp string is within
+// tolerance of now. Empty/unparseable → not fresh.
+func (h *Handler) timestampFresh(ts string) bool {
+	secs, err := strconv.ParseInt(ts, 10, 64)
+	if err != nil {
+		return false
+	}
+	now := time.Now
+	if h.now != nil {
+		now = h.now
+	}
+	tol := h.tolerance
+	if tol <= 0 {
+		tol = DefaultTimestampTolerance
+	}
+	// Compare in seconds against non-overflowing bounds rather than via
+	// time.Sub: an absurd far-future/far-past X-Timestamp (e.g. math.MaxInt64)
+	// would overflow the int64-nanosecond Duration (~292y max) and could wrap
+	// back inside the tolerance, letting a replay defeat the freshness check.
+	// nowSec±tolSec can't overflow (now ~1.7e9, tol ~300s); secs is only
+	// compared, never used in arithmetic.
+	tolSec := int64(tol / time.Second)
+	nowSec := now().Unix()
+	return secs >= nowSec-tolSec && secs <= nowSec+tolSec
 }
 
 // ServeHTTP handles incoming webhook POST requests by validating the
@@ -99,7 +138,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Auth check after body read so HMAC validation has the bytes it signs.
 	switch {
 	case providedSig != "":
-		if !ValidateHMAC(body, providedSig, expectedSecret) {
+		// Optional replay defense (Stripe/Svix scheme): when the sender includes
+		// X-Timestamp, the signature must cover "timestamp.body" AND the
+		// timestamp must be fresh — so a captured signed webhook is useless once
+		// the tolerance window passes, and the timestamp itself can't be swapped
+		// (it's in the signed material). Absent X-Timestamp, fall back to the
+		// body-only HMAC for backward compatibility (senders not yet migrated).
+		if ts := r.Header.Get("X-Timestamp"); ts != "" {
+			if !h.timestampFresh(ts) {
+				h.logger.Warn("webhook stale or invalid timestamp", "crew_id", crewID, "agent_id", agentID)
+				http.Error(w, "stale or invalid timestamp", http.StatusBadRequest)
+				return
+			}
+			signed := append([]byte(ts+"."), body...)
+			if !ValidateHMAC(signed, providedSig, expectedSecret) {
+				h.logger.Warn("webhook invalid HMAC signature (timestamped)", "crew_id", crewID, "agent_id", agentID)
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+		} else if !ValidateHMAC(body, providedSig, expectedSecret) {
 			h.logger.Warn("webhook invalid HMAC signature", "crew_id", crewID, "agent_id", agentID)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
