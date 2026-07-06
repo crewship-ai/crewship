@@ -11,8 +11,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/crewship-ai/crewship/schemas"
 	"github.com/spf13/cobra"
+
+	"github.com/crewship-ai/crewship/schemas"
 )
 
 var routineSchemaCmd = &cobra.Command{

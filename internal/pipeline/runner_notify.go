@@ -100,7 +100,13 @@ func (e *Executor) runNotifyStep(ctx context.Context, step Step, parentRender Re
 		slog.Default().Warn("notify step skipped: no inbox notifier wired", "run", runID, "step", step.ID)
 		return "notified:skipped", 0, time.Since(stepStart).Milliseconds(), nil
 	}
-	if err := e.notifier.Notify(ctx, item); err != nil {
+	// Bound the delivery so a stalled inbox write can't hold the run open:
+	// this is a fire-and-forget update, not part of the run's critical
+	// path. A timeout collapses into the same non-fatal WARN as any other
+	// delivery failure.
+	notifyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := e.notifier.Notify(notifyCtx, item); err != nil {
 		// A delivery failure is non-fatal: the routine did its work, the
 		// bell just didn't ring. Log at WARN and carry on.
 		slog.Default().Warn("notify step delivery failed", "run", runID, "step", step.ID, "error", err)

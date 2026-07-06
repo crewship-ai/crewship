@@ -383,7 +383,11 @@
           "enum": ["urgent", "high", "medium", "low"],
           "description": "Inbox priority. Default medium."
         }
-      }
+      },
+      "anyOf": [
+        { "required": ["title"] },
+        { "required": ["body"] }
+      ]
     }
   }
 }
