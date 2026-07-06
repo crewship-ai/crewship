@@ -167,9 +167,9 @@ func containsCaseSensitive(s, sub string) bool {
 // outcomesOnFail returns the OnFail action for outcomes failures,
 // defaulting to abort. We don't reuse the step's OnFail because
 // validation failures and outcomes failures may want different
-// escalation strategies — a banned-token validation might warrant
-// escalate_tier, but a rubric miss might warrant retry_step with
-// grader feedback (when retry budgets land in Phase 2).
+// escalation strategies — e.g. a banned-token validation might warrant
+// escalate_tier while a rubric miss aborts. (retry_step is rejected at
+// validation until a per-step retry budget exists — see dsl_validate_gates.go.)
 func outcomesOnFail(step Step) OnFailAction {
 	if step.Outcomes != nil && step.Outcomes.OnFail != "" {
 		return step.Outcomes.OnFail
