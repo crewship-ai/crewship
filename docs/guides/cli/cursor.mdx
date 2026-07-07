@@ -49,7 +49,19 @@ cursor-agent -p --output-format stream-json --stream-partial-output \
 
 ## MCP
 
-Configured at `/output/<slug>/.cursor/mcp.json`:
+<Warning>
+**MCP is inactive for Cursor in Crewship today.** `cursorAdapter.SupportsMCP()`
+returns `false` because `cursor-agent`'s headless (`-p`) mode does not actually
+invoke MCP servers even with `--approve-mcps` set (upstream forum #143045,
+#148397 — only the interactive TUI honours MCP). Because the orchestrator gates
+`WriteMCPConfig` on `SupportsMCP()`, the `.cursor/mcp.json` below is **not
+written** and no MCP tools fire. The writer + `--approve-mcps` wiring are kept
+in the tree so the moment upstream fixes headless MCP, flipping `SupportsMCP()`
+to `true` is the only change needed. The schema documented here is the shape it
+will produce.
+</Warning>
+
+Would be configured at `/output/<slug>/.cursor/mcp.json`:
 
 ```json
 {
@@ -91,6 +103,6 @@ JSONL per [cursor.com/docs/cli/reference/output-format](https://cursor.com/docs/
 
 **Write tool hangs forever** — `--force` flag missing from adapter command (regression check `cli_adapter_versions_test.go`).
 
-**MCP servers listed but never invoke** — `--approve-mcps` missing when MCP configured. The adapter only adds it when `req.MCPServers`, `req.CrewMCPConfigJSON`, or `req.AgentMCPConfigJSON` is non-empty.
+**MCP tools never fire** — expected: headless Cursor doesn't invoke MCP servers (see the MCP warning above; `SupportsMCP()` is `false`, so `.cursor/mcp.json` isn't even written). The adapter still adds `--approve-mcps` when `req.MCPServers`, `req.CrewMCPConfigJSON`, or `req.AgentMCPConfigJSON` is non-empty, ready for the day upstream fixes this.
 
 **`tool_call:completed` events lost on reconnect** — known upstream regression (forum #157593). `model_call_id` + `timestamp_ms` are captured by parser to enable chat-bridge dedup.

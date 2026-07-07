@@ -12,10 +12,14 @@ Onboarding is the path Crewship takes a fresh installation through on its very f
 
 Two surfaces drive it. The web wizard at `/onboarding` (`app/(onboarding)/onboarding/page.tsx`) is the default experience — a multi-step form that walks the operator through workspace naming, admin account creation, LLM provider selection, and first-crew templating, with a live preview pane on the right showing the chat surface that's being provisioned. The CLI mirror `crewship setup` (`cmd/crewship/cmd_setup.go`) covers headless installs and CI-driven provisioning, accepting the same inputs as flags and emitting the same final state.
 
-Behind both surfaces the onboarding service (`internal/api/onboarding.go` and `internal/services/onboarding.go`) is the single funnel: it validates inputs, resolves the chosen LLM provider against the same `resolveLLMProvider` registry that the agents API uses (so a value accepted here cannot be rejected later when the first agent runs), encrypts and stores the API key as an `AI_CLI_TOKEN`-typed credential (regardless of provider — see `insertOnboardingCredential` in `internal/api/onboarding.go`), creates the workspace + admin user + first crew rows transactionally, and marks setup complete. After that flag flips, both `/onboarding` and the bootstrap auth page redirect to the regular sign-in flow — the wizard is intentionally one-shot.
+Behind both surfaces the onboarding service (`internal/api/onboarding.go` and `internal/services/onboarding.go`) is the single funnel: it validates inputs, resolves the chosen LLM provider against the same `resolveLLMProvider` registry that the agents API uses (so a value accepted here cannot be rejected later when the first agent runs), encrypts and stores the supplied credential as an `AI_CLI_TOKEN`-typed credential (regardless of provider — see `insertOnboardingCredential` in `internal/api/onboarding.go`), creates the workspace + admin user + first crew rows transactionally, and marks setup complete.
+
+<Note>
+Onboarding takes a **CLI token**, not a raw provider API key. For Anthropic it expects a Claude Code OAuth token (`sk-ant-oat…`, produced by `claude setup-token`) and `validateOnboardingCredential` rejects a raw account key (`sk-ant-api…`) with a fix-it message, then probes `api.anthropic.com` to confirm the token works before completing. On the CLI, `crewship setup` takes this as `--token` (the older `--api-key` alias is deprecated).
+</Note> After that flag flips, both `/onboarding` and the bootstrap auth page redirect to the regular sign-in flow — the wizard is intentionally one-shot.
 
 ## Related
 
 - [First Crew](/guides/first-crew) — what the wizard's "first crew" step actually provisions.
-- [Credentials](/guides/credentials) — how the LLM API key entered during onboarding is encrypted and surfaced to agents.
+- [Credentials](/guides/credentials) — how the CLI token entered during onboarding is encrypted and surfaced to agents.
 - [Installation](/guides/installation) — getting the binary onto the host before the wizard can run.

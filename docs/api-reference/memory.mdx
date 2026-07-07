@@ -196,7 +196,7 @@ Returns the audit chain for one canonical memory path, newest-first.
 | Param | Type | Default | Description |
 |---|---|---|---|
 | `path` | string | -- | Required. Canonical memory path (e.g. `agent:martin/AGENT.md`). 400 when omitted. |
-| `limit` | integer | `20` | Max rows to return. Positive values are accepted and clamped to a hard ceiling of `1000`; non-positive or non-numeric values fall back to the default. |
+| `limit` | integer | `50` | Max rows to return. Applies only when the query string is present: a positive value is clamped to a hard ceiling of `500`; a non-positive or non-numeric value returns `400`. Omitting `limit` uses the default. |
 
 **Response:** `200 OK`
 
@@ -241,7 +241,7 @@ Returns the audit chain for one canonical memory path, newest-first.
 
 | Status | Condition |
 |---|---|
-| `400` | Missing `path` query parameter. |
+| `400` | Missing `path` query parameter, or a `limit` that is non-positive / non-numeric. |
 | `401` | No workspace context in the session. |
 | `500` | Underlying `memory.LogVersions` query failed. |
 

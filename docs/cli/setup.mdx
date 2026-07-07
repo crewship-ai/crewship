@@ -27,6 +27,7 @@ Requires an authenticated session (`crewship login`). Errors with `not logged in
 | `--model <model>` | (adapter default) | LLM model. Defaults to the adapter's recommended model (`claude-sonnet-4-6`, `gemini-2.5-pro`, `gpt-5.5`, `composer`, …). |
 | `--token <token>` | (prompted, hidden input) | The **CLI token** for the chosen adapter — output of `claude setup-token`, `gemini auth print-token`, etc. **Not** the vendor's account-level API key. |
 | `--api-key <token>` | `""` | Deprecated alias for `--token`. Will be removed. |
+| `--telemetry` | (server default) | Enable anonymous crash reporting; `--telemetry=false` opts out. Omitted, the server's version-based default is kept (prerelease on, stable off); interactive runs always ask. |
 | `--yes` | `false` | Skip interactive prompts; every required value must be supplied via flags. |
 
 When `--token` is not passed, the command falls back to the adapter's conventional env var (`ANTHROPIC_API_KEY` for `CLAUDE_CODE`/`OPENCODE`, `GOOGLE_API_KEY` for `GEMINI_CLI`, `OPENAI_API_KEY` for `CODEX_CLI`, `CURSOR_API_KEY`, `FACTORY_API_KEY`). Only when that's empty does it prompt.
@@ -62,10 +63,14 @@ crewship setup
 # Choice [1]: 1
 # Paste your Claude Code (Anthropic) CLI token (input is hidden): ********
 # Agent language (e.g. English, Čeština) [English]: English
+# Send anonymous crash reports to help improve Crewship? (change anytime: crewship telemetry on|off) [Y/n]: y
 # ✓ Workspace ready — crew "software-development" deployed with 4 agents.
 ```
 
-Each prompt has a sensible default; bare Enter accepts the first option.
+Each prompt has a sensible default; bare Enter accepts the first option. The
+telemetry prompt's default follows the server's current state (prerelease
+builds default yes, stable builds default no), and any explicit `--telemetry`
+flag skips it entirely.
 
 ### Scripted / CI
 

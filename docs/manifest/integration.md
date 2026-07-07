@@ -155,10 +155,40 @@ spec:
 
 ## CLI reference
 
-There is no dedicated `crewship integration` per-kind admin command —
-integrations are authored through the manifest pipeline (or installed
-as part of a [Connector](/manifest/connector) / [Recipe](/manifest/recipe)). The
-relevant CLI surface is the global apply/export flow:
+Integrations have both a declarative manifest surface (the `apply` /
+`export` flow) and a dedicated imperative `crewship integration` command
+group (registered as `integrationCmd` in
+`cmd/crewship/cmd_integration.go`). The imperative commands are handy for
+one-off break-glass work; the manifest path is the version-controlled
+complement.
+
+Workspace-scoped commands:
+
+| Command | Description |
+|---|---|
+| `crewship integration list` | List workspace integrations. |
+| `crewship integration add` | Create a workspace integration. |
+| `crewship integration get <id-or-name>` | Show one workspace integration. |
+| `crewship integration remove <id-or-name>` | Delete a workspace integration. |
+| `crewship integration enable <id-or-name>` / `disable <id-or-name>` | Toggle the runtime connect. |
+| `crewship integration test <id-or-name>` | Probe the connection. |
+| `crewship integration crews-overview` | List integrations across every crew. |
+
+Crew-scoped CRUD lives under the `crew` subcommand:
+
+| Command | Description |
+|---|---|
+| `crewship integration crew list <crew-slug>` | List a crew's integrations. |
+| `crewship integration crew create <crew-slug>` | Create a crew-scoped integration. |
+| `crewship integration crew update <crew-slug> <integration-id>` | Patch a crew-scoped integration. |
+| `crewship integration crew delete <crew-slug> <integration-id>` | Delete a crew-scoped integration. |
+| `crewship integration crew test <crew-slug> <integration-id>` | Probe a crew-scoped integration. |
+
+Agent-binding subcommands (`bind`, `unbind`, `agent-bindings <agent-slug>`,
+`resolve <agent-slug>`) and the per-tool `tools` / per-binding `agent`
+groups round out the surface.
+
+The declarative flow:
 
 | Command | Description |
 |---|---|

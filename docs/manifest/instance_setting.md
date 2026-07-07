@@ -41,8 +41,10 @@ introduce drift.
 For each `(key, value)` in `spec.settings`:
 
 1. **Resolve `${ENV_VAR}` placeholders** in the value (see below).
-2. **Look up the current remote value** via
-   `GET /api/v1/instance/settings/{key}`.
+2. **Look up the current remote value** in the snapshot Plan fetches
+   once via `GET /api/v1/instance/settings` (the full key/value list) and
+   indexes by key. There is no per-key `GET` in the plan path — the
+   whole map is pulled in a single call.
 3. **Compare**:
    - If the remote value equals the resolved manifest value, emit an
      **Unchanged** plan item.

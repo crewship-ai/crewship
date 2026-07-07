@@ -27,8 +27,8 @@ Both commands route through the per-crew `autonomy_level` policy gate (PR-B F2).
 |---|---|---|
 | `strict` | **Rejected** (403) — ephemeral spawn is forbidden on compliance-grade crews. | **Rejected** (403) — same reason. |
 | `guided` | **Pending review** (202) — agent row created with `status='PENDING_REVIEW'`. Chatbridge refuses to start the agent until an operator approves via inbox. | Same — re-promotion of a ghost still requires operator approval. |
-| `trusted` | **Live immediately** (201) + non-blocking inbox notification. | Same. |
-| `full` | **Live immediately** (201) + journal-only logging. | Same. |
+| `trusted` | **Live immediately** (201) + journal-only logging (`decision=auto_log_journal`; no inbox row). | Same. |
+| `full` | **Live immediately** (201) + journal-only logging (`decision=auto_journal`). | Same. |
 
 See [Autonomy + self-learning](/guides/autonomy-and-self-learning) for the matrix and where to set the autonomy level.
 
@@ -61,22 +61,28 @@ crewship hire \
 ```json
 {
   "id": "agt_…",
-  "slug": "incident-responder-a3f8",
   "crew_id": "crw_…",
-  "crew_slug": "on-call",
-  "ephemeral": true,
+  "workspace_id": "ws_…",
+  "slug": "incident-responder-a3f8",
+  "name": "incident-responder-a3f8",
   "status": "IDLE",
+  "ephemeral": true,
   "expires_at": "2026-05-22T05:42:00Z",
+  "expired_at": null,
+  "parent_lead_id": null,
   "hire_reason": "2026-05-21T01:42:00Z: P1 incident #4582 needs sustained eyes-on",
-  "decision": "auto_log_inbox",
-  "policy": { "autonomy_level": "trusted", "behavior_mode": "warn" }
+  "pending_review": false,
+  "decision": "auto_log_journal"
 }
 ```
+
+(Shape mirrors `hireResponse` in `internal/api/agents_hire.go`. `inbox_item_id` is added only when a `guided` hire creates a blocking inbox waitpoint.)
 
 | Field | Notes |
 |---|---|
 | `status` | `IDLE` for `trusted`/`full` crews; `PENDING_REVIEW` for `guided` crews (chatbridge refuses to start until approved via inbox). |
-| `decision` | The policy decision that landed this hire — `auto_journal` (full) / `auto_log_inbox` (trusted) / `inbox_approve` (guided) / `rejected` (strict). |
+| `decision` | The policy decision that landed this hire — `auto_journal` (full) / `auto_log_journal` (trusted) / `inbox_approve` (guided) / `rejected` (strict). |
+| `pending_review` | `true` only for `guided` hires (mirrors `status=PENDING_REVIEW`). |
 | `expires_at` | RFC3339 UTC. Set to `now() + ttl_minutes`. |
 | `hire_reason` | Accumulating history — each hire/rehire appends `<timestamp>: <reason>`. |
 
@@ -95,22 +101,18 @@ best-effort and never blocks the hire:
 
 ### Exit codes
 
-| Code | Meaning |
+The CLI exits `0` on success (a `201` live hire or a `202` pending-review hire) and `1` on any failure — the error text printed to stderr names the cause. Common failure causes and the message they carry:
+
+| Cause | What you'll see |
 |---|---|
-| `0` | Hire succeeded (201 or 202). |
-| `2` | Validation failure — missing required flag, TTL out of range, unknown crew/template. |
-| `3` | Policy rejection (`strict` crew refused `ephemeral_spawn` — exit message names the autonomy_level). |
-| `4` | Quota exceeded (`crews.max_ephemeral_agents` reached — exit message names the live count + max). |
-| `5` | Network / server error (5xx). |
+| Validation failure | Missing required flag (`--crew is required`, `--template is required`, `--reason is required`). |
+| Policy rejection (`strict` crew) | Server `403` — the response body names the `autonomy_level` that forbids `ephemeral_spawn`. |
+| Quota exceeded | Server `429` — the body names the live count and `crews.max_ephemeral_agents` max. |
+| Network / server error | The underlying HTTP/transport error (e.g. `5xx`). |
 
 ### `--ttl` clamping
 
-```bash
-$ crewship hire --crew ops --template debug --reason x --ttl 10
-warning: --ttl 10 below minimum (30); using 30
-```
-
-The server-side clamp is authoritative (the CLI just warns). An out-of-range TTL still produces a successful hire at the clamped value; the warning lets the operator know their input was adjusted.
+The clamp is entirely server-side and silent — the CLI forwards `ttl_minutes` as-is and does not pre-validate or warn. An out-of-range value (e.g. `--ttl 10`) still produces a successful hire; the server clamps it into `[30, 1440]` and the effective value comes back in `expires_at` (`now() + clamped_ttl`). Read `expires_at` on the response to confirm the TTL that actually landed.
 
 ---
 
@@ -129,6 +131,7 @@ crewship rehire incident-responder-a3f8 \
 | `agent` (positional) | yes | — | Slug or ID of the ephemeral agent. Can be a ghost (`expired_at != NULL`) — that's the canonical rehire case — or a still-live ephemeral whose operator wants to extend before it ghosts. |
 | `--reason` | yes | — | Audit text appended to `hire_reason`. |
 | `--ttl` | optional | `30` | New TTL in minutes. Resets `expires_at` to `now() + ttl`. Cobra registers `0` (server treats as default) and applies the same `[30, 1440]` clamp as hire; effective default `30`. |
+| `--yes` | optional | `false` | Skip the interactive confirmation prompt (`-y` shorthand). |
 
 ### Effect on the agent row
 
@@ -147,10 +150,22 @@ crewship rehire incident-responder-a3f8 \
 
 ### Exit codes
 
-Same as `hire` (0 / 2 / 3 / 4 / 5). Rehire-specific:
+Same as `hire`: `0` on success, `1` on any failure with the cause in the stderr message. Rehire-specific failures:
 
-- Exit `2` when the agent isn't ephemeral (you can't rehire a permanent agent — the lifecycle doesn't apply).
-- Exit `3` when the policy rejects rehire on a `strict` crew (matches the hire rejection — re-promoting a ghost still needs policy approval).
+- The agent isn't ephemeral (you can't rehire a permanent agent — the lifecycle doesn't apply).
+- The policy rejects rehire on a `strict` crew (matches the hire rejection — re-promoting a ghost still needs policy approval).
+
+---
+
+## `crewship hire approve`
+
+Approve a `guided`-autonomy hire that is parked in `PENDING_REVIEW`, flipping it to `IDLE` so it can serve work. This is the terminal counterpart to the UI inbox "Approve" button.
+
+```bash
+crewship hire approve incident-responder-a3f8
+```
+
+Takes the ephemeral agent's slug or ID (printed by `crewship hire` and shown in `crewship agent list`) as its single positional argument, and calls `POST /api/v1/agents/{id}/approve-hire`. A `409` comes back if the agent isn't in `PENDING_REVIEW` (already approved, or hired under a non-`guided` autonomy level).
 
 ---
 

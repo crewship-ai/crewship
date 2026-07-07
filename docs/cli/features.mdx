@@ -32,12 +32,12 @@ crewship features list [flags]
 
 ```bash
 crewship features list --search node
-# NAME                CATEGORY  SIZE  REF
-# Node.js             runtime   ~50M  ghcr.io/devcontainers/features/node:1
-# pnpm                runtime    ~5M  ghcr.io/devcontainers-extra/features/pnpm:2
+# NAME                CATEGORY  SOURCE          SIZE  REF
+# Node.js             runtime   devcontainers   ~50M  ghcr.io/devcontainers/features/node:1
+# pnpm                runtime   devcontainers   ~5M   ghcr.io/devcontainers-extra/features/pnpm:2
 ```
 
-Columns: `NAME`, `CATEGORY` (`runtime`, `tool`, `language`, ...), `SIZE` (rough on-disk impact), `REF` (the OCI ref to paste into `devcontainer_config.features`).
+Columns: `NAME`, `CATEGORY` (`runtime`, `tool`, `language`, ...), `SOURCE` (feature publisher, with ` · <tier>` appended when the catalog entry carries a tier), `SIZE` (rough on-disk impact), `REF` (the OCI ref to paste into `devcontainer_config.features`).
 
 ### info
 
@@ -54,6 +54,8 @@ crewship features info ghcr.io/devcontainers/features/python:1
 # Name        : Python
 # Ref         : ghcr.io/devcontainers/features/python:1
 # Category    : languages
+# Publisher   : devcontainers
+# Tier        : official
 # Description : Installs the specified Python version, pip, and pipx. Supports virtual environments.
 # Icon        : code
 # Size Hint   : ~80 MB
@@ -73,12 +75,17 @@ Lists the curated base images recommended by Crewship for crew runtimes. Same se
 
 ```bash
 crewship features base-images
-# IMAGE                                                       LABEL                                     DESCRIPTION
-# mcr.microsoft.com/devcontainers/javascript-node:22-bookworm Node 22 (Debian) [RECOMMENDED]            Node.js 22 + npm + git + curl. Best for Claude Code and most AI workloads.
-# mcr.microsoft.com/devcontainers/base:bookworm               Debian 12 (bookworm)                       Minimal Debian with common utilities. Add features/runtimes as needed.
-# debian:bookworm-slim                                        Debian 12 (slim)                           Smaller glibc-based base, broad compatibility.
-# ubuntu:24.04                                                Ubuntu 24.04 LTS                           Familiar, large package archive.
+# IMAGE                                                       LABEL                          DESCRIPTION
+# mcr.microsoft.com/devcontainers/javascript-node:22-bookworm Node 22 (Debian) [RECOMMENDED] Node.js 22 + npm + git + curl. Best for Claude Code and most AI workloads.
+# mcr.microsoft.com/devcontainers/base:bookworm               Debian 12 (bookworm)           Minimal Debian with common utilities. Add features/runtimes as needed.
+# mcr.microsoft.com/devcontainers/base:ubuntu-24.04           Ubuntu 24.04                   Ubuntu LTS with common utilities.
+# mcr.microsoft.com/devcontainers/python:3.12-bookworm        Python 3.12 (Debian)           Python 3.12 + pip + venv pre-installed on Debian.
+# mcr.microsoft.com/devcontainers/go:1.23-bookworm            Go 1.23 (Debian)               Go 1.23 toolchain on Debian.
+# mcr.microsoft.com/devcontainers/universal:2                 Universal (kitchen sink)       Node + Python + Go + Rust + Java + Ruby pre-installed. ~8GB.
+# mcr.microsoft.com/devcontainers/base:alpine-3.20            Alpine 3.20 (experimental)     Tiny (~7MB). WARNING: musl incompatible with Claude Code.
 ```
+
+The full catalog also includes Rust (`mcr.microsoft.com/devcontainers/rust:bookworm`) and Java 21 (`mcr.microsoft.com/devcontainers/java:21-bookworm`) entries.
 
 The `[RECOMMENDED]` tag is appended to the label of the curated default(s); there is no separate "default" column. Operators are not restricted to this list — any glibc-based Linux image works. The catalog is what the UI offers in the runtime picker, and the source of truth lives in `cmd/crewship/cmd_features.go` (`baseImagesCatalog`).
 

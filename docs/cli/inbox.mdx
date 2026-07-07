@@ -19,10 +19,12 @@ Auth: every subcommand requires `crewship login` plus an active workspace. The i
 | Command | Purpose |
 | --- | --- |
 | `inbox list` | List inbox items (default: unread only). |
+| `inbox get <id>` | Show a single item with its full body + structured payload. |
 | `inbox count` | Print the bell-badge unread count (cheaper than `list` for polling). |
 | `inbox read <id>` | Mark an item as read. |
 | `inbox unread <id>` | Flip an item back to unread. |
 | `inbox resolve <id>` | Mark resolved, optionally recording the action taken. |
+| `inbox archive <id>` | Resolve with `resolved_action=archived` (Gmail-style clear without a decision). |
 | `inbox bulk read` | Bulk-mark items as read. |
 | `inbox bulk resolve` | Bulk-mark items as resolved. |
 
@@ -89,12 +91,16 @@ done
 ### Mark an item
 
 ```bash
+crewship inbox get inbox_abc123           # full body + payload for one item
 crewship inbox read inbox_abc123
-crewship inbox unread inbox_abc123        # flip back
+crewship inbox unread inbox_abc123        # flip back (also restores an archived item)
 crewship inbox resolve inbox_abc123 --action approved
 crewship inbox resolve inbox_abc123 --action retried
 crewship inbox resolve inbox_abc123       # generic, no action
+crewship inbox archive inbox_abc123       # resolve with action=archived, no decision
 ```
+
+`inbox get <id>` (backed by `GET /api/v1/inbox/{id}`) is the detail counterpart of `list` — it returns the markdown body and the structured `payload` that the list view omits. `inbox archive <id>` maps to a `resolved` PATCH with `resolved_action=archived`; only non-decision kinds (messages, failed-run notices, advisories) archive — the server `409`s an archive on a source-managed waitpoint/escalation.
 
 `resolve` is the inbox-side only — it does **not** call the source endpoint. To actually approve a waitpoint through to the executor, use `crewship approvals approve <id>`. To resolve an escalation lifecycle, use `crewship escalation resolve <id>`. The inbox row tracks the decision; the source endpoint enacts it.
 
@@ -111,9 +117,15 @@ crewship inbox bulk read --all-unread
 crewship inbox bulk resolve --ids inbox_abc,inbox_def --action acknowledged
 ```
 
-The bulk loop is sequential, not concurrent: the CLI still loops per-item client-side. The server now exposes [`POST /api/v1/inbox/bulk`](/api-reference/inbox#post-apiv1inboxbulk) (the web UI uses it for one-request group triage); wiring the CLI to that endpoint is a follow-up. Per-item failures are reported but **do not abort the loop** — a stale id won't void a 200-item clean-up. The final line is `N ok / M failed`, and the process exits non-zero if any item failed.
+Bulk operations submit the whole id set to the server-side [`POST /api/v1/inbox/bulk`](/api-reference/inbox#post-apiv1inboxbulk) endpoint (one request flips many rows), chunked at 500 ids per call — the endpoint's id cap. On a `resolve` the server **skips** decision items (source-managed waitpoints/escalations and blocking rows) rather than closing them. The final line summarises the aggregated counts:
 
-If `--all-unread` returns exactly the page cap (500), the CLI refuses to proceed silently and tells you to re-run or narrow with `--ids`, so the tail isn't lost.
+```
+N updated · M skipped · K not found
+```
+
+A stale or already-resolved id lands in `not found` / `skipped`; it does not fail the command (the process exits `0`). Only a transport error or a non-2xx bulk response exits non-zero.
+
+If `--all-unread` returns exactly the page cap (500), the CLI refuses to proceed and changes nothing, telling you to re-run after the batch or narrow with `--ids`, so the tail isn't lost.
 
 ## Sources
 
@@ -131,8 +143,7 @@ The inbox is *human-attention-scoped*. The lower-level per-entity event log live
 - **`either --ids <csv> or --all-unread is required`** — bulk command needs one of them.
 - **`--ids and --all-unread are mutually exclusive`** — pick one.
 - **`--ids parsed to empty list (got "")`** — comma-string was blank after trimming.
-- **`more than 500 unread items — re-run after this batch, or pass --ids to target a specific subset`** — server cap hit on `--all-unread`. Re-run will hit the next 500.
-- **`N of M items failed`** — non-zero exit when any bulk row failed. Stderr lists the failed ids.
+- **`hit the 500 unread-item page cap; no items were changed …  pass --ids to target a specific subset`** — `--all-unread` returned a full page and can't tell whether more remain, so it changes nothing. Re-run after clearing this batch, or target explicit `--ids`.
 
 ## See also
 

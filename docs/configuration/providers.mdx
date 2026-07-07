@@ -74,13 +74,13 @@ The runtime image is pulled automatically if not present locally. The provider l
 
 #### Container Naming
 
-Containers follow the naming convention: `{prefix}team-{crew-slug}`
+Containers follow the naming convention `{prefix}-team-{crew-slug}-{crew-id}`, built by `crewResourceName` in `internal/provider/docker/docker.go`. The prefix defaults to `crewship` when `container.container_prefix` is empty. The crew id (a globally-unique UUID) is appended to prevent cross-tenant container-name collisions (audit C1).
 
 | Scenario | Container Name |
 |----------|---------------|
-| Default | `crewship-team-engineering` |
-| With prefix `prod` | `prod-team-engineering` |
-| Multi-instance | `crewship_1-team-engineering` |
+| Default | `crewship-team-engineering-{crewID}` |
+| With prefix `prod` | `prod-team-engineering-{crewID}` |
+| Multi-instance | `crewship_1-team-engineering-{crewID}` |
 
 #### Provider Interfaces
 
@@ -112,6 +112,18 @@ The `CrewConfig` struct is passed to `EnsureCrewRuntime` when creating or ensuri
 | `AllowedDomains` | `[]string` | Domains allowed when NetworkMode is `"restricted"` |
 | `TTLHours` | `int` | Auto-stop after idle period; 0 = no TTL |
 | `Image` | `string` | Custom runtime image; empty = provider default |
+| `CachedImage` | `string` | Provisioned Docker image tag; empty = use `Image` or default |
+| `ContainerEnv` | `map[string]string` | Extra env vars from `devcontainer.json` `containerEnv` (`CREWSHIP_*` keys reserved and skipped) |
+
+<Note>
+  `CrewConfig` (`internal/provider/container.go`) carries additional
+  devcontainer-derived fields applied to the container's `HostConfig` at
+  create time — `Privileged`, `Init`, `CapAdd`, `SecurityOpt`,
+  `ExtraMounts`, `PostStartCommands`, `InitHookEnabled`, and `Services`
+  (sidecar service containers). The table above lists the fields most
+  operators set directly; the rest are populated from the crew's
+  devcontainer feature resolution.
+</Note>
 
 ### Apple Container Provider
 

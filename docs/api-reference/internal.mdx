@@ -37,9 +37,12 @@ One row per documented internal route, grouped by family. See [Route catalog](#r
 | `POST` | [/api/v1/internal/agents](#agents-and-crews) | Create an agent programmatically |
 | `POST` | [/api/v1/internal/agents/hire](#agents-and-crews) | LEAD-initiated ephemeral hire |
 | `GET` | [/api/v1/internal/crew-connections](#agents-and-crews) | List crew connections |
+| `POST` | [/api/v1/internal/pipelines/test_run](#pipelines-routines-and-skills) | Test-run an agent-authored pipeline (step 1 of save) |
 | `POST` | [/api/v1/internal/pipelines/save](#pipelines-routines-and-skills) | Save an agent-authored pipeline definition |
+| `POST` | [/api/v1/internal/pipelines/run](#pipelines-routines-and-skills) | Run a saved routine (the `run_routine` MCP tool) |
 | `POST` | [/api/v1/internal/routines/schedules](#pipelines-routines-and-skills) | Slash-action mirror — create a pipeline schedule |
 | `POST` | [/api/v1/internal/skills/generate](#pipelines-routines-and-skills) | Slash-action mirror — LLM-author a SKILL.md |
+| `POST` | [/api/v1/internal/skills/author](#pipelines-routines-and-skills) | Slash-action mirror — propose/author a skill |
 | `POST` | [/api/v1/internal/runs](#runs) | Create a run row |
 | `PATCH` | [/api/v1/internal/runs/\{runId\}](#runs) | Update run status / metrics |
 | `POST` | [/api/v1/internal/crew-messages](#crew-messaging-and-files) | Send a peer message |
@@ -126,7 +129,7 @@ Sourced from the per-domain `internal/api/router_*.go` files (split by domain in
 | `POST` | `/api/v1/internal/credentials` | Slash-action mirror — create a credential. Requires `X-Caller-User-Id`. See [Slash-action mirrors](#slash-action-mirrors). |
 | `POST` | `/api/v1/internal/credentials/{credentialId}/rotate` | Slash-action mirror — rotate a credential. Requires `X-Caller-User-Id`. See [Slash-action mirrors](#slash-action-mirrors). |
 
-The `POST` create/rotate routes are registered only when the public `CredentialHandler` is wired (`router_internal.go:80-84`); test routers that omit it skip the mirror.
+The `POST` create/rotate routes are registered only when the public `CredentialHandler` is wired (`router_internal.go:99-102`); test routers that omit it skip the mirror.
 
 ### Chats
 
@@ -149,7 +152,7 @@ The `POST` create/rotate routes are registered only when the public `CredentialH
 | `POST` | `/api/v1/internal/agents/hire` | LEAD-initiated ephemeral hire — sidecar `/spawn` proxies here. See [Ephemeral hire](#ephemeral-hire). |
 | `GET` | `/api/v1/internal/crew-connections` | List crew connections. |
 
-The `POST .../agents/hire` route is registered only when the public `AgentHandler` is wired (`router_internal.go:60-63`); the nil-safe adapter returns `500` otherwise.
+The `POST .../agents/hire` route is registered only when the public `AgentHandler` is wired (`router_internal.go:75-78`); the nil-safe adapter returns `500` otherwise.
 
 ### Pipelines, routines, and skills
 
@@ -157,11 +160,14 @@ These are the trusted forward-targets for agent-authored pipelines and the sidec
 
 | Method | Path | Purpose |
 |---|---|---|
+| `POST` | `/api/v1/internal/pipelines/test_run` | Test-run an agent-authored pipeline before save (step 1 of the agent save flow). Same internal-token trust as save; the public `test_run` is JWT-authed. |
 | `POST` | `/api/v1/internal/pipelines/save` | Save an agent-authored pipeline definition. See [Pipeline save](#pipeline-save). |
+| `POST` | `/api/v1/internal/pipelines/run` | Run a saved routine — the sidecar→main forward for the `run_routine` MCP tool. The public run route rejects the internal token, so agents invoke saved routines through this surface (workspace + invoker identity injected from IPC). |
 | `POST` | `/api/v1/internal/routines/schedules` | Slash-action mirror — create a pipeline schedule (routine). See [Slash-action mirrors](#slash-action-mirrors). |
 | `POST` | `/api/v1/internal/skills/generate` | Slash-action mirror — LLM-author a SKILL.md. See [Slash-action mirrors](#slash-action-mirrors). |
+| `POST` | `/api/v1/internal/skills/author` | Slash-action mirror — propose/author a skill via the skill-proposal handler. Registered only when the `SkillProposedHandler` is wired (`router_internal.go:95-98`). |
 
-`routines/schedules` is registered only when the `PipelineHandler` is wired (`router_internal.go:72-75`); `skills/generate` only when the `SkillGenerateHandler` is wired (`router_internal.go:76-79`).
+`routines/schedules` is registered only when the `PipelineHandler` is wired (`router_internal.go:87-90`); `skills/generate` only when the `SkillGenerateHandler` is wired (`router_internal.go:91-94`). `pipelines/test_run` / `save` / `run` are always registered on the `PipelineHandler`.
 
 ### Runs
 
@@ -214,7 +220,7 @@ Since PR #234, runs are reconstructed from journal entries; these endpoints exis
 | `GET` | `/api/v1/internal/keeper/request/{requestId}` | Fetch the status / decision of a previously submitted request. |
 | `POST` | `/api/v1/internal/keeper/execute` | Sidecar forwards a sealed credential-use request after gatekeeper approval. See the [Keeper section](#keeper) for the full request flow. |
 
-Keeper Phase 2 (aux-LLM evaluators, PR-C / PRD §6 F4). All four are wrapped in `internalAuth` **and** `internalWsCtx` (which reads `?workspace_id=` into the request context — see the [Authentication](#authentication) known-exception note). They are always registered, returning a deterministic `503` ("evaluator not configured") until the evaluators are wired (`router_internal.go:164-183`).
+Keeper Phase 2 (aux-LLM evaluators, PR-C / PRD §6 F4). All four are wrapped in `internalAuth` **and** `internalWsCtx` (which reads `?workspace_id=` into the request context — see the [Authentication](#authentication) known-exception note). They are always registered, returning a deterministic `503` ("evaluator not configured") until the evaluators are wired (`router_internal.go:177-202`).
 
 | Method | Path | Purpose |
 |---|---|---|

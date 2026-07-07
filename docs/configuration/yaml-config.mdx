@@ -9,7 +9,7 @@ icon: "file-code"
 Crewship can be configured via a YAML file passed at startup. Environment variables override YAML values. The config is loaded and validated in `internal/config/config.go`.
 
 <Info>
-  The config file has ten top-level sections: `server`, `ipc`, `container`, `storage`, `state`, `logging`, `auth`, `llm_proxy`, `keeper`, and `license`. The [Complete Reference](#complete-reference) below shows every field with its default; [Section Details](#section-details) explains the load-bearing ones.
+  The config file has eleven top-level sections: `server`, `ipc`, `container`, `storage`, `state`, `logging`, `auth`, `llm_proxy`, `keeper`, `license`, and `composio`. The [Complete Reference](#complete-reference) below shows every field with its default; [Section Details](#section-details) explains the load-bearing ones.
 </Info>
 
 ## Loading Order
@@ -85,11 +85,19 @@ llm_proxy:
 keeper:
   enabled: false
   ollama_url: "http://localhost:11434"
-  model: "claude-haiku-4-5"
+  model: ""                     # No default — REQUIRED (non-empty) when enabled: true,
+                                # else startup validation fails. e.g. "claude-haiku-4-5"
 
 # License
 license:
   file_path: ""                 # Path to license file
+
+# Composio managed integrations
+composio:
+  enabled: false                # Derived: setting api_key auto-enables it
+  api_key: ""                   # Composio project API key ("ak_…")
+  base_url: ""                  # Optional Composio API host override
+  default_connector: false      # Give every agent a workspace-wide default connector
 ```
 
 ## Section Details
@@ -195,7 +203,7 @@ The LLM proxy manages token usage tracking and provider health monitoring.
 keeper:
   enabled: false
   ollama_url: "http://localhost:11434"
-  model: "claude-haiku-4-5"
+  model: ""   # no built-in default; set a model (e.g. "claude-haiku-4-5") before enabling
 ```
 
 <Tip>

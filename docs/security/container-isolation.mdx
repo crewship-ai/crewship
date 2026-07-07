@@ -66,20 +66,20 @@ container:
 
 ### Container Creation Security
 
-Containers are created with these security measures (`internal/provider/docker/docker.go`):
+Containers are created with these security measures (`internal/provider/docker/docker_container.go`):
 
-- **Cap-drop ALL:** All Linux capabilities are dropped
-- **Cap-add NET_RAW:** Re-added after dropping ALL (allows ICMP/ping for network diagnostics)
+- **Cap-drop ALL:** All Linux capabilities are dropped (`CapDrop: ["ALL"]`)
+- **No default cap-add:** By default no capabilities are re-added. `NET_RAW` was removed from the default set (it enables `AF_PACKET`/DNS-tunneling exfiltration). Devcontainer features may opt into an explicit allowlist (e.g. `NET_BIND_SERVICE`) via `team.CapAdd`.
 - **SecurityOpt no-new-privileges:** Blocks execution of setuid binaries inside the container
 - **Non-root execution:** Agent processes run as UID 1001
-- **Read-only filesystem:** System directories are read-only (`ReadonlyRootfs: true`)
-- **tmpfs /tmp (500M):** Writable temp directory, not persistent across restarts
+- **Read-only filesystem:** Root filesystem is read-only (`ReadonlyRootfs: true`), relaxed only for privileged crews (DinD)
+- **tmpfs /tmp (500M):** Writable temp directory (`rw,size=500m`), not persistent across restarts
 - **PID limit: 200:** Prevents fork bomb attacks (`PidsLimit: 200`)
-- **Memory limits:** Configurable per-crew (`default_memory_mb`, default 512 MB)
-- **CPU limits:** Configurable per-crew (`default_cpus`, default 1.0)
+- **Memory limits:** Configurable per-crew (`default_memory_mb`, default 8192 MB / 8 GiB)
+- **CPU limits:** Configurable per-crew (`default_cpus`, default 2.0)
 - **Network isolation:** Containers connect to a dedicated Docker bridge network
 - **ExtraHosts:** `host.docker.internal:host-gateway` enables container-to-host communication
-- **Named volumes:** `crewship-home-{slug}` and `crewship-tools-{slug}` for persistent home and tools directories
+- **Named volumes:** `crewship-home-{slug}-{crewID}` and `crewship-tools-{slug}-{crewID}` for persistent home and tools directories (namespaced by crew ID to prevent cross-tenant collisions)
 
 ## Network Policy
 
@@ -231,6 +231,7 @@ The Docker provider (`internal/provider/docker/docker.go`) auto-detects the cont
 | `~/.rd/docker.sock` | Rancher Desktop |
 | `~/.docker/run/docker.sock` | Docker Desktop (macOS) |
 | `/run/user/{uid}/podman/podman.sock` | Podman (rootless) |
+| `~/.local/share/containers/podman/machine/podman.sock` | Podman machine (macOS) |
 | `/run/podman/podman.sock` | Podman (root) |
 | `/run/containerd/containerd.sock` | nerdctl |
 </Accordion>

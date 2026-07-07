@@ -34,8 +34,9 @@ Response:
   "provider": "ANTHROPIC",
   "source": "live",
   "models": [
+    { "id": "claude-fable-5", "display_name": "Claude Fable 5", "provider": "anthropic" },
     { "id": "claude-opus-4-8", "display_name": "Claude Opus 4.8", "provider": "anthropic" },
-    { "id": "claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6", "provider": "anthropic" }
+    { "id": "claude-sonnet-5", "display_name": "Claude Sonnet 5", "provider": "anthropic" }
   ]
 }
 ```
@@ -75,9 +76,10 @@ crewship model list --provider ollama
 Output (table format):
 
 ```
-anthropic models  (source=live, 2 total)
+anthropic models  (source=live, 3 total)
+  claude-fable-5                   Claude Fable 5
   claude-opus-4-8                  Claude Opus 4.8
-  claude-sonnet-4-6
+  claude-sonnet-5                  Claude Sonnet 5
 ```
 
 `--format json` / `--format yaml` emit the full payload, including the `source`

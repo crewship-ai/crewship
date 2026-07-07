@@ -22,12 +22,15 @@ import { cn } from "@/lib/utils"
  */
 export const MODEL_META: Record<string, { description: string; badge?: string; legacy?: boolean }> = {
   // Anthropic — current
-  "claude-opus-4-7":            { description: "Latest · most capable · 1M context", badge: "Latest" },
-  "claude-sonnet-4-6":          { description: "Balanced speed and capability · default pick", badge: "Default" },
+  "claude-fable-5":             { description: "Most capable · premium flagship · 1M context", badge: "Premium" },
+  "claude-opus-4-8":            { description: "Flagship Opus · most capable general tier · 1M context", badge: "Latest" },
+  "claude-sonnet-5":            { description: "Balanced speed and capability · default pick", badge: "Default" },
   "claude-haiku-4-5-20251001":  { description: "Fast and cheap · quick replies", badge: "Fast" },
   // Anthropic — legacy
-  "claude-opus-4-20250514":     { description: "Older Opus 4 — superseded by 4.7", badge: "Legacy", legacy: true },
-  "claude-sonnet-4-20250514":   { description: "Older Sonnet 4 — superseded by 4.6", badge: "Legacy", legacy: true },
+  "claude-opus-4-7":            { description: "Older Opus — superseded by 4.8", badge: "Legacy", legacy: true },
+  "claude-sonnet-4-6":          { description: "Older Sonnet — superseded by Sonnet 5", badge: "Legacy", legacy: true },
+  "claude-opus-4-20250514":     { description: "Older Opus 4 — superseded by 4.8", badge: "Legacy", legacy: true },
+  "claude-sonnet-4-20250514":   { description: "Older Sonnet 4 — superseded by Sonnet 5", badge: "Legacy", legacy: true },
   "claude-3-5-sonnet-20241022": { description: "Pre-4.x flagship", badge: "Legacy", legacy: true },
   "claude-3-5-haiku-20241022":  { description: "Pre-4.x fast tier", badge: "Legacy", legacy: true },
   // OpenAI

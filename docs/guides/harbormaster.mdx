@@ -96,6 +96,8 @@ CREATE TABLE approvals_queue (
 - `GET /api/v1/approvals?status=pending&limit=50` -- inbox. Status defaults to `pending`; use `?status=all` for full history.
 - `GET /api/v1/approvals/{id}` -- full request including payload.
 - `POST /api/v1/approvals/{id}/decide` -- body `{"status":"approved|denied","comment":"..."}`. **Requires OWNER or ADMIN** workspace role; 403 otherwise.
+- `POST /api/v1/approvals/{id}/cancel` -- withdraw a still-pending request without approving or denying it (flips the row to `cancelled`, records no approve/deny decision). Use when the request is moot.
+- `POST /api/v1/approvals/reset-auto-tuning` -- body `{"tool":"..."}`. Clears the rolling `gate_reward_history` window for one tool (see [Reward-adjusted gating](#reward-adjusted-gating)).
 
 Cross-tenant IDs return 404 with the "not found" shape. Deciding a non-pending row returns 409 (`already decided`).
 
@@ -114,9 +116,10 @@ crewship approvals list                             # inbox
 crewship approvals list --status approved --limit 100
 crewship approvals approve <id> --comment "looks safe"
 crewship approvals deny <id>   --comment "wrong mission"
+crewship approvals cancel <id> --comment "request is moot"   # withdraw, no decision
 ```
 
-See [`crewship approvals`](/cli/approvals) for the full command surface. Pending requests resolve by `approve`, `deny`, or the server-side timeout sweeper.
+See [`crewship approvals`](/cli/approvals) for the full command surface. Pending requests resolve by `approve`, `deny`, `cancel`, or the server-side timeout sweeper.
 
 ## Hook integration
 

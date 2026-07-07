@@ -58,8 +58,8 @@ Detectors (in `injection.go`):
 | `role_override` | Phrases like "ignore previous instructions", "you are now", "disregard system prompt". |
 | `system_prompt_leak` | Attempts to exfiltrate the system prompt. |
 | `jailbreak` | Known jailbreak trope patterns (DAN, hypothetical framings, translations-as-evasion). |
-| `zero_width_unicode` | ZWJ/ZWNJ/ZWSP sequences. |
-| `rtl_override_unicode` | RTL override codepoints (U+202E, U+2066-2069). |
+| `zero_width_unicode` | ZWSP/ZWNJ/ZWJ/BOM codepoints. |
+| `rtl_override_unicode` | RTL override codepoint (U+202E), escalated by per-1024-rune density. |
 | `lakera_detected` | External Lakera Guard verdict when enabled. |
 
 The guard is wired into [`llm.Middleware`](/guides/llm-middleware) so every `Complete()` call is scanned. The `Stream()` path runs through the **same** `lookoutCaller` chain (`internal/llm/middleware.go`), scanning every user/tool message synchronously before the first token flows.
@@ -91,9 +91,9 @@ Sanitize uses **offset-based replacement** (`Finding.Position` + `Finding.MatchE
 Wire a callback to a notification target (Slack, PagerDuty, the [hooks](/guides/hooks) subsystem) so guardrail trips don't just land in the journal:
 
 ```go
-ctx = lookout.WithGuardListener(ctx, func(ctx context.Context, direction string, f lookout.Finding) {
+ctx = lookout.WithGuardListener(ctx, func(ctx context.Context, direction string, findings []lookout.Finding) {
     // synchronous — keep cheap or dispatch async inside
-    notify(direction, f)
+    notify(direction, findings)
 })
 ```
 
@@ -119,21 +119,21 @@ Defined in `secrets.go`:
 
 | Kind | Pattern |
 |---|---|
-| `secret_openai` | `sk-[A-Za-z0-9]{32,}` / project-scoped `sk-proj-...` |
-| `secret_anthropic` | `sk-ant-api03-...` |
-| `secret_aws` | AKIA / ASIA IDs + 40-char secret pairs |
-| `secret_github_pat` | GitHub PAT — `ghp_`, `github_pat_`, or a legacy 40-char hex token |
-| `secret_github_oauth` | GitHub OAuth token — `gho_` |
-| `secret_github_app` | GitHub App installation token — `ghs_` |
-| `secret_bearer_token` | `Bearer <long-b64>` |
-| `secret_password` | `password=...`, `PASSWORD: ...` in env-var-shaped strings |
-| `secret_api_key` | Generic `api_key=...`, `X-API-Key: ...` |
+| `secret_openai` | `sk-[A-Za-z0-9]{20,}` |
+| `secret_anthropic` | `sk-ant-[A-Za-z0-9_-]{40,}` |
+| `secret_aws` | `AKIA` access key IDs (`AKIA` + 16 chars) |
+| `secret_github_pat` | GitHub PAT — `ghp_` + 36 chars |
+| `secret_github_oauth` | GitHub OAuth token — `gho_` + 36 chars |
+| `secret_github_app` | GitHub server token — `ghs_` + 36 chars |
+| `secret_bearer_token` | `Bearer <token>` (≥20 chars) |
+| `secret_password` | quoted `password=...` / `password: "..."` assignments |
+| `secret_api_key` | Generic `api_key=...`, `X-API-Key: ...` assignments |
 
 The stored finding carries `kind` and a redacted `detail` like `"openai API key (prefix: sk-...)"`. The raw match is never emitted.
 
 ## Tool-arg schema validation
 
-`lookout.ValidateArgs(schemaJSON, args)` runs draft-07 JSON Schema over a tool call's arguments. Use it before dispatching:
+`lookout.ValidateArgs(schema, args)` runs a minimal JSON-Schema-shaped validator (`type` / `properties` / `required` / `items` / `enum` / `additionalProperties`) over a tool call's arguments. `schema` is a `lookout.Schema` struct, not a raw JSON string. Use it before dispatching:
 
 ```go
 if err := lookout.ValidateArgs(mySchema, toolArgs); err != nil {
@@ -141,9 +141,11 @@ if err := lookout.ValidateArgs(mySchema, toolArgs); err != nil {
 }
 ```
 
-`ValidateArgs` returns `error` (nil on pass). Unknown-key and type mismatches
-produce a non-nil error with a message pointing at the offending path. Empty
-schema = pass.
+`ValidateArgs` returns `error` (nil on pass) — concretely `*ArgsInvalidError`,
+whose `Path` points at the offending dotted JSON path. Type mismatches, missing
+`required` fields, and out-of-`enum` values all produce a non-nil error;
+unknown keys are rejected only when the schema sets `additionalProperties:
+false`. Empty schema (`Type == ""`) = pass.
 
 ## Adding a detector
 

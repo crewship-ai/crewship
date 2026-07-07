@@ -7,7 +7,7 @@ icon: "bell"
 Per-user activity feed. Other handlers create rows by calling the internal `CreateNotification` helper (`internal/api/notification_handler.go`); the user-facing endpoints below let the frontend list, count, mark read, and dismiss them. Every new row also fans out over WebSocket on the `user:{userID}` channel as `notification.created` so the dashboard updates without polling.
 
 <Note>
-  All endpoints below require an authenticated session. Notifications are strictly per-user — every query scopes to `user_id = <session user>`, and a row belonging to another user is indistinguishable from one that doesn't exist (`404`).
+  All endpoints below require an authenticated session **and** workspace context — the routes are wrapped in the `RequireWorkspace` middleware, so a `workspace_id` (query param, `{workspaceId}` path value, or `X-Workspace-ID` header) must be present and the caller must be a member, or the request fails at the middleware (`400` when absent, `403` when not a member). Data scoping is nonetheless strictly per-user: every query filters on `user_id = <session user>`, and a row belonging to another user is indistinguishable from one that doesn't exist (`404`).
 </Note>
 
 ## Endpoints

@@ -29,7 +29,7 @@ Requires an authenticated session and a selected workspace (`requireAuthAndWorks
 | `--filter <jq-expr>` | `""` | Pipe JSON output through `jq <expr>` (requires `jq` in `$PATH`). |
 | `--watch <duration>` | `""` | Auto-refresh every duration (e.g. `5s`, `1m`). Minimum 1s. |
 
-The global `--format` flag (`table` / `json` / `yaml` / `ndjson` / `quiet`) is honoured. JSON / YAML / `--filter` paths bypass the table formatter and emit the raw entry list with `run_id`, `agent_id`, and `entries`.
+The global `--format` flag (`table` / `json` / `yaml` / `ndjson` / `quiet`) is honoured. JSON / YAML / `--filter` paths bypass the table formatter and emit the raw entry list with `run_id`, `agent_id`, `entries`, and — when the run resolved one — the `model` it actually ran on.
 
 ## Examples
 

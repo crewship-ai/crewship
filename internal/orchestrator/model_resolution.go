@@ -5,14 +5,17 @@ import (
 	"strings"
 )
 
-// modelFamily extracts the coarse Claude model family (opus / sonnet / haiku)
-// from a model id such as "claude-opus-4-8", "claude-sonnet-4-5-20250101" or
-// "us.anthropic.claude-opus-4-8". Returns "" for any id without a recognised
-// family token (other providers, or a blank id) so callers treat it as
-// "don't compare" rather than forcing a false mismatch.
+// modelFamily extracts the coarse Claude model family (fable / opus / sonnet /
+// haiku) from a model id such as "claude-fable-5", "claude-opus-4-8",
+// "claude-sonnet-4-5-20250101" or "us.anthropic.claude-opus-4-8". Returns ""
+// for any id without a recognised family token (other providers, or a blank
+// id) so callers treat it as "don't compare" rather than forcing a false
+// mismatch.
 func modelFamily(model string) string {
 	m := strings.ToLower(model)
 	switch {
+	case strings.Contains(m, "fable"):
+		return "fable"
 	case strings.Contains(m, "opus"):
 		return "opus"
 	case strings.Contains(m, "sonnet"):

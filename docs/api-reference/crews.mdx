@@ -39,6 +39,7 @@ All crew endpoints require authentication and workspace context (the `workspace_
 | GET | [`/api/v1/crews/{crewId}/escalations`](#list-escalations) | List crew escalations |
 | PATCH | [`/api/v1/escalations/{escalationId}/resolve`](#resolve-escalation) | Resolve an escalation |
 | GET | [`/api/v1/escalations/pending-count`](#pending-escalation-count) | Count pending escalations |
+| GET | [`/api/v1/activity`](#activity-feed) | Unified cross-crew activity feed |
 
 ---
 
@@ -705,3 +706,54 @@ GET /api/v1/escalations/pending-count?workspace_id={workspaceId}
 ```
 
 Returns count of pending escalations across the workspace.
+
+---
+
+## Activity Feed
+
+```
+GET /api/v1/activity?workspace_id={workspaceId}
+```
+
+A unified, time-sorted feed that merges three activity sources — task **assignments**, agent **peer conversations**, and **escalations** — into one workspace-wide stream, newest first (`internal/api/activity_handler.go:214`). Each source is queried for `limit + offset` rows and the merged result is sorted by `created_at` and paged in memory, so the correct page is present even when one activity type dominates the head of the feed.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `workspace_id` | string | -- | Required. Workspace to read. |
+| `agent_id` | string | -- | Optional. Narrow the feed to one agent (`internal/api/activity_handler.go:217`). |
+| `crew_id` | string | -- | Optional. Narrow the feed to one crew (`internal/api/activity_handler.go:218`). |
+| `limit` | integer | `30` | Page size; clamped to a max of `100` (`internal/api/activity_handler.go:221`). |
+| `offset` | integer | `0` | Rows to skip in the merged feed. |
+
+**Response:** `200 OK` — a JSON array of activity items (empty `[]` when nothing matches or the page is past the end).
+
+```json
+[
+  {
+    "id": "act-uuid",
+    "type": "escalation",
+    "status": "open",
+    "summary": "Escalated: deploy script keeps failing",
+    "detail": "Third retry failed on the same step.",
+    "from_name": "Martin",
+    "from_slug": "martin",
+    "to_name": "Alena",
+    "to_slug": "alena",
+    "crew_name": "Engineering",
+    "crew_slug": "engineering",
+    "crew_color": "blue",
+    "created_at": "2026-06-30T14:02:11Z"
+  }
+]
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | Activity source: `assignment`, `peer_conversation`, or `escalation` (`internal/api/activity_handler.go:13`). |
+| `detail` | string? | Longer body text; `null` when the source has none (`internal/api/activity_handler.go:16`). |
+| `from_name` / `from_slug` | string | Originating agent (`internal/api/activity_handler.go:17-18`). |
+| `to_name` / `to_slug` | string? | Target agent, when the activity has one (`internal/api/activity_handler.go:19-20`). |
+| `crew_name` / `crew_slug` | string | Crew the activity belongs to (`internal/api/activity_handler.go:21-22`). |
+| `crew_color` | string? | Crew color tag, when set (`internal/api/activity_handler.go:23`). |

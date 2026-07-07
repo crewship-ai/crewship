@@ -27,9 +27,15 @@ type modelPrice struct {
 // Where a 2026 number is in flux (Gemini 3.x, GPT-5.5 nano), we picked the
 // nearest published tier and noted the assumption; tighten on next sweep.
 var priceTable = map[string]modelPrice{
-	// Anthropic — Claude 4.x family. Opus 4.7 corrected from $15/$75 to $5/$25
-	// on 2026-04-30 (provider repriced in early 2026; ledger was 3× over).
+	// Anthropic — Claude 5 / 4.x family. Opus 4.7 corrected from $15/$75 to
+	// $5/$25 on 2026-04-30 (provider repriced in early 2026; ledger was 3× over).
+	// Fable 5 is the premium flagship (above Opus tier). Sonnet 5 carries the
+	// standard $3/$15 sticker here — the $2/$10 intro promo (through 2026-08-31)
+	// is deliberately not encoded so the ledger never under-bills once it lapses.
+	"anthropic/claude-fable-5":    {InputPerM: 10.00, OutputPerM: 50.00, CachedInputPerM: 1.00, CacheWritePerM: 12.50},
+	"anthropic/claude-opus-4-8":   {InputPerM: 5.00, OutputPerM: 25.00, CachedInputPerM: 0.50, CacheWritePerM: 6.25},
 	"anthropic/claude-opus-4-7":   {InputPerM: 5.00, OutputPerM: 25.00, CachedInputPerM: 0.50, CacheWritePerM: 6.25},
+	"anthropic/claude-sonnet-5":   {InputPerM: 3.00, OutputPerM: 15.00, CachedInputPerM: 0.30, CacheWritePerM: 3.75},
 	"anthropic/claude-sonnet-4-6": {InputPerM: 3.00, OutputPerM: 15.00, CachedInputPerM: 0.30, CacheWritePerM: 3.75},
 	"anthropic/claude-haiku-4-5":  {InputPerM: 1.00, OutputPerM: 5.00, CachedInputPerM: 0.10, CacheWritePerM: 1.25},
 
@@ -87,7 +93,7 @@ var priceTable = map[string]modelPrice{
 // alternative (median tier) silently undercharges for top-tier models,
 // which defeats the warn/exceed signal exactly when operators need it.
 var providerFallback = map[string]modelPrice{
-	"anthropic": {InputPerM: 5.00, OutputPerM: 25.00, CachedInputPerM: 0.50, CacheWritePerM: 6.25},   // Opus-tier (reasoning ceiling)
+	"anthropic": {InputPerM: 10.00, OutputPerM: 50.00, CachedInputPerM: 1.00, CacheWritePerM: 12.50}, // Fable-tier (premium ceiling)
 	"openai":    {InputPerM: 20.00, OutputPerM: 80.00, CachedInputPerM: 5.00, CacheWritePerM: 20.00}, // o3-pro tier (reasoning ceiling)
 	"google":    {InputPerM: 2.50, OutputPerM: 15.00, CachedInputPerM: 0.625, CacheWritePerM: 2.50},  // gemini-2.5-pro upper tier
 	"xai":       {InputPerM: 2.00, OutputPerM: 6.00, CachedInputPerM: 2.00, CacheWritePerM: 2.00},    // grok-4-equivalent

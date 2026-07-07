@@ -6,7 +6,7 @@ icon: "sparkles"
 
 # crewship ask
 
-`ask` is the low-friction prompt — type a question, get an answer, no agent slug to remember. The agent resolves from `--agent`, then the saved `default-agent` config key, then (in a TTY) an interactive picker. Designed for shell pipelines like `git diff | crewship ask "review this"`. Defined in `cmd/crewship/cmd_ask.go`.
+`ask` is the low-friction prompt — type a question, get an answer, no agent slug to remember. The agent resolves from `--agent`, then the `CREWSHIP_DEFAULT_AGENT` env var, then the saved `default-agent` config key, then (in a TTY) an interactive picker. Designed for shell pipelines like `git diff | crewship ask "review this"`. Defined in `cmd/crewship/cmd_ask.go`.
 
 ```bash
 crewship ask [prompt] [flags]
@@ -26,6 +26,7 @@ Auth: requires `crewship login` plus a workspace context. Both checks are skippe
 | `-q`, `--quiet` | `false` | Only print the agent's text — no `[agent: …]` / `[done]` banners on stderr. |
 | `--no-stream` | `false` | Wait for `done`, print only the final text. |
 | `--timeout <secs>` | `0` | HTTP timeout in seconds; `0` = no timeout. |
+| `--max-turns <n>` | `0` | Cap the agent loop at N turns for this run (`0` = adapter default, 50 interactive). |
 | `--with-git-diff` | `false` | Append `git diff` as context. |
 | `--with-git-staged` | `false` | Append `git diff --staged` as context. |
 | `--with-git-log` | `false` | Append the last 20 commits. |

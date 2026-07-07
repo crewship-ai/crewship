@@ -35,7 +35,7 @@ The cron expression is parsed and validated **at write time** using the standard
 |---|---|---|
 | `id` | string (CUID) | |
 | `crew_id` | string | Owning crew. Verified against `workspace_id` on create. |
-| `crew_name` | string | Pre-joined from `crews.name` for display — empty string if the crew was deleted. |
+| `crew_name` | string | Pre-joined from `crews.name` for display. Omitted from the response (`omitempty`) when the crew was deleted (the join yields an empty string). |
 | `title` | string | Template title used verbatim on each fire. |
 | `description` | string \| null | Template description (Markdown). |
 | `priority` | string | One of `low`, `normal`, `high`, `urgent`, or `none`. Defaults to `none` when omitted on create. |

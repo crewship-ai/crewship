@@ -50,6 +50,7 @@ Errors follow [RFC 7807 Problem Details](https://datatracker.ietf.org/doc/html/r
 | `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/import`](#import-pipeline-bundle) | Create a pipeline from a bundle |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/waitpoints`](#list-pending-waitpoints) | Pending approval waitpoints |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve`](#approve-reject-waitpoint) | Approve / reject a waitpoint |
+| `POST` | [`/api/v1/waitpoint-tokens/{token}`](#complete-a-waitpoint-by-token-public-callback) | Public token callback — complete a waitpoint with no JWT |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/pipeline-schedules`](#list-schedules) | Cron schedules |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/pipeline-schedules`](#create-schedule) | Create a schedule |
 | `PATCH` | [`/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}`](#update-schedule) | Update a schedule |
@@ -1078,6 +1079,45 @@ Completes a pending approval. Decider identity is taken from the JWT user contex
 | `400` | Missing `token` or invalid body |
 | `409` | Waitpoint already decided or expired |
 | `503` | Waitpoint store not wired, or the wired implementation does not support completion |
+
+### Complete a waitpoint by token (public callback)
+
+```
+POST /api/v1/waitpoint-tokens/{token}
+```
+
+The **public** sibling of the approve endpoint (`trigger.dev` `wait.forToken` parity). An external system holding a waitpoint token completes the wait via an HTTP callback — **no workspace JWT required**: the high-entropy `token` in the path is the auth surface, the same model as the [public webhook dispatch endpoint](/api-reference/webhooks). This lets a human-in-the-loop or external-task wait be resolved by a third party (approval service, CI job, vendor webhook) rather than only through the inbox. The token and its `callback_url` are surfaced on the pending-waitpoints listing (`internal/api/router_pipelines.go:127-131`).
+
+**Auth:** none — the path token is the credential. The completion is attributed to the sentinel decider `external-callback` (not a user id) so audit queries can distinguish callback completions from inbox approvals (`internal/api/pipeline_waitpoint_callback.go:61-64`).
+
+**Request body:** optional. A bare `POST` with no body means "the external task finished, continue the run".
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `approved` | boolean | no | Defaults to `true`. Set `false` to deny the waitpoint (`internal/api/pipeline_waitpoint_callback.go:44-47`). |
+| `payload` | any (JSON) | no | Stored on the waitpoint for the resumed step to read (`internal/api/pipeline_waitpoint_callback.go:48-51`). |
+
+```json
+{
+  "approved": true,
+  "payload": { "ticket": "OPS-4821", "result": "passed" }
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{ "ok": true, "approved": true }
+```
+
+On success the parked run is resumed via the same path as the authed approve handler (`internal/api/pipeline_waitpoint_callback.go:74-84`).
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `token`, or an unparseable request body (`internal/api/pipeline_waitpoint_callback.go:26-42`) |
+| `409` | Waitpoint already decided or expired (`internal/api/pipeline_waitpoint_callback.go:65-67`) |
+| `500` | Completion failed for any other reason (`internal/api/pipeline_waitpoint_callback.go:69-71`) |
+| `503` | Waitpoint store not wired, or the wired implementation does not support completion (`internal/api/pipeline_waitpoint_callback.go:22-24,56-59`) |
 
 ---
 

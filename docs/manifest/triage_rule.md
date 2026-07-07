@@ -165,18 +165,24 @@ spec:
 
 ## CLI reference
 
-The existing `crewship triage` surface is intentionally minimal —
-list + process only. Per-rule CRUD is **manifest-driven**: there is no
-`crewship triage create / get / delete` subcommand today, and the only
-declarative path is `crewship apply`. The manifest pipeline uses the
-underlying CRUD REST endpoints (see the mapping table below) under the
-hood.
+The `crewship triage` surface (`cmd/crewship/cmd_admin_extras.go`) offers
+full CRUD plus the processor: `list`, `process`, `create`, `update`,
+`delete` (no `get`). Note the CLI `create` / `update` use a simpler
+**title-pattern** model — a single `--pattern` matched via `--match-type`
+(`contains` \| `regex` \| `exact`) against the issue title, taking entity
+**IDs** for the action flags — which is a different shape from the
+manifest's structured `match` / `actions` blocks. Reach for
+`crewship apply` when you need multi-condition matches (body, from-agent,
+from-crew) or multi-action rules expressed by slug.
 
 | Command                                              | Description                                          |
 | ---------------------------------------------------- | ---------------------------------------------------- |
 | `crewship triage list`                               | List every triage rule in the workspace.             |
 | `crewship triage process`                            | Evaluate all enabled rules against the backlog (one-shot manual fire). |
-| `crewship apply --file triage.yaml`                  | Create / update rules from a manifest. |
+| `crewship triage create --name … --pattern … --match-type contains` | Create a rule (flag-based title-pattern model). |
+| `crewship triage update <rule-id>`                   | Update a rule by id (`--enabled`, `--priority`, `--position`, …). |
+| `crewship triage delete <rule-id>`                   | Delete a rule by id (`-y` to skip the confirm prompt). |
+| `crewship apply --file triage.yaml`                  | Create / update rules from a manifest (full match/actions model). |
 | `crewship apply --file triage.yaml --replace --yes`  | Destructive recreate (delete-then-create per rule).  |
 | `crewship export workspace`                          | Round-trip — emits one `TriageRule` doc per stored row. |
 

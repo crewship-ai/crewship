@@ -52,7 +52,7 @@ claude --print --output-format stream-json --include-partial-messages \
        -- <user message>
 ```
 
-`--bare` disables auto-discovery of `~/.claude/CLAUDE.md`, plugins, hooks, skills, and MCP — Crewship sets all of those explicitly via flags. **It is appended only when the agent's credential is an API key.** Claude Code 2.x changed the `--bare` auth contract: it now strictly requires `ANTHROPIC_API_KEY` (or an `apiKeyHelper` via `--settings`) and IGNORES `CLAUDE_CODE_OAUTH_TOKEN`. To keep OAuth-seeded workspaces working (`AI_CLI_TOKEN` credentials with `sk-ant-oat*` values), the adapter drops `--bare` when it detects OAuth on the run, so the normal Claude auth flow can pick up `CLAUDE_CODE_OAUTH_TOKEN`. API-key runs keep the isolation win. See `internal/orchestrator/adapter_claude.go:21-50`.
+`--bare` disables auto-discovery of `~/.claude/CLAUDE.md`, plugins, hooks, skills, and MCP — Crewship sets all of those explicitly via flags. **It is appended only when the agent's credential is an API key.** Claude Code 2.x changed the `--bare` auth contract: it now strictly requires `ANTHROPIC_API_KEY` (or an `apiKeyHelper` via `--settings`) and IGNORES `CLAUDE_CODE_OAUTH_TOKEN`. To keep OAuth-seeded workspaces working (`AI_CLI_TOKEN` credentials with `sk-ant-oat*` values), the adapter drops `--bare` when it detects OAuth on the run, so the normal Claude auth flow can pick up `CLAUDE_CODE_OAUTH_TOKEN`. API-key runs keep the isolation win. See `claudeCodeAdapter.BuildCommand` in `internal/orchestrator/adapter_claude.go` (OAuth detection at lines 84-101).
 
 `--tools` is **always** passed with the agent's per-profile built-in allowlist (`MINIMAL` → `Read,Glob,Grep,ToolSearch`; `CODING` → `+Write,Edit,Bash,WebFetch,WebSearch`; `FULL` → `+NotebookEdit`). This removes harness-internal tools (`TaskCreate`, `Agent`, `Workflow`, `Cron*`, …) that have no Crewship backing from the agent's context. `ToolSearch` is kept so deferred MCP tools (crewship-memory, Composio) stay discoverable; MCP tools themselves are not affected by `--tools`. See [Tool profiles & the built-in tool allowlist](/guides/cli-adapters#tool-profiles-the-built-in-tool-allowlist).
 
@@ -78,6 +78,15 @@ Configured at `/crew/agents/<slug>/.mcp.json`. Standard schema:
 ```
 
 Env-var refs `${VAR}` resolve from the agent container's process env at MCP server spawn time. Crewship's `injectMCPCredentialEnvVars` populates them from workspace credentials.
+
+<Note>
+`setupMCPConfig` auto-injects two sidecar-hosted servers into `.mcp.json`:
+`crewship-memory` (`http://127.0.0.1:9119/mcp/memory/<slug>`) and
+`crewship-routines` (`.../mcp/routines`) — so the model gets native
+`memory.*` and routine-authoring tools even when no other MCP source is
+declared. This is why `--mcp-config` is always passed. A user-declared server
+of the same name wins.
+</Note>
 
 ## Memory
 

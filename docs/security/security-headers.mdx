@@ -27,7 +27,12 @@ Code of record:
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | Leak only origin — not path — to cross-origin navigations. |
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` | Explicitly deny powerful features the UI does not use. |
 | `Cross-Origin-Opener-Policy` | `same-origin` | Isolate the browsing context so a top-level cross-origin opener cannot access `window` references (Spectre / XS-Leak hardening). |
+| `Cross-Origin-Embedder-Policy` | `credentialless` | Opt the page into cross-origin isolation while stripping credentials from cross-origin `no-cors` fetches — keeps CDN images / third-party badges that lack CORP headers working. Not set on `/exposed/`. |
+| `Cross-Origin-Resource-Policy` | `same-origin` | This origin's own resources must never be embedded from a different origin. Not set on `/exposed/`. |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | Force HTTPS for a year, including subdomains. `preload` is deliberately omitted (opting into Chrome's preload list is a one-way door). Not set on `/exposed/`. |
 | `Content-Security-Policy` | path-aware (see below) | Lockdown for API / health / WS surfaces; SPA-friendly policy for the bundled Next.js UI. |
+
+`X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy`, and `Permissions-Policy` are stamped by both `api.SecurityHeaders` (API router) and `server.securityHeadersMiddleware` (outer wrapper). `Cross-Origin-Opener-Policy`, `Cross-Origin-Embedder-Policy`, `Cross-Origin-Resource-Policy`, and `Strict-Transport-Security` are set only by the outer `server.securityHeadersMiddleware`.
 
 ### Path-aware CSP
 
@@ -35,12 +40,14 @@ Code of record:
 
 | Path | CSP value |
 |---|---|
-| SPA UI (anything outside `/api/`, `/healthz`, `/readyz`, `/metrics`, `/ws*`, `/exposed/`) | `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` |
+| SPA UI (anything outside `/api/`, `/healthz`, `/readyz`, `/metrics`, `/ws`, `/ws/terminal`, `/exposed/`) | `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://logos.composio.dev; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` |
 | API / health / WebSocket | `default-src 'none'; frame-ancestors 'none'; base-uri 'none'` (reapplied by `api.SecurityHeaders` inside the API router so the lockdown survives even if the outer wrapper is bypassed) |
-| `/exposed/` (port-exposed user apps) | **No CSP header.** Upstream owns its own policy; the reverse proxy does not stamp ours on arbitrary HTML/JS. |
+| `/exposed/` (port-exposed user apps) | **No CSP header** — and no HSTS / COEP / CORP either. Upstream owns its own policy; the reverse proxy does not stamp ours on arbitrary HTML/JS. |
+
+The SPA `img-src` allows one extra host, `https://logos.composio.dev`, which serves the managed-integration brand logos (Gmail, GitHub, Slack, …) shown in the connector catalog — scoped to that one host, not a blanket `https:`.
 
 <Note>
-  HSTS is intentionally **not** set: the single binary must support plain-HTTP deployments (dev, on-prem behind a TLS-terminating reverse proxy). Set HSTS at the reverse proxy when TLS is in front.
+  HSTS **is** set (`max-age=31536000; includeSubDomains`) on every non-`/exposed/` response, so a browser that reaches Crewship over HTTPS is pinned to it for a year. `preload` is omitted on purpose. For plain-HTTP dev the header is inert (browsers ignore HSTS delivered over HTTP). When you terminate TLS at a reverse proxy in front of Crewship, the header still rides through; there is nothing extra to configure at the proxy.
 </Note>
 
 ## Per-IP rate limiting
@@ -50,9 +57,12 @@ Code of record:
 | Route family | Limit | Handler |
 |---|---|---|
 | `/api/auth/*`, `/api/v1/auth/*`, `/api/v1/bootstrap` | **10 req/min** per IP | Auth endpoints — strict because these gate the entire system. |
+| `/api/v1/credentials/test`, stored-credential test paths | **60 req/min** per IP | Credential-test endpoints hit external provider APIs; a tighter bucket keeps them from being used as a free key-validation oracle for stolen secrets. |
 | `/api/*` (all other) | **120 req/min** per IP | Public API endpoints. |
 | `/api/v1/internal/*` | **no rate limit** | Sidecar IPC. Authenticated via `X-Internal-Token`, not IP. |
 | Static UI / other paths | **no rate limit** | Served from the embedded Next.js export. |
+
+The limiter can be disabled entirely (dev only) by setting `CREWSHIP_RATELIMIT_DISABLED` — but in production (`CREWSHIP_ENV=prod`/`production`) the toggle is ignored and the limiter always runs.
 
 Dispatch happens in `Router.routeWithRateLimiting`:
 
@@ -60,6 +70,7 @@ Dispatch happens in `Router.routeWithRateLimiting`:
 // Skip rate limiting for internal routes (sidecar IPC, X-Internal-Token auth)
 if strings.HasPrefix(path, "/api/v1/internal/") { r.mux.ServeHTTP(w, req); return }
 if strings.HasPrefix(path, "/api/auth/") || … { r.authRateLimitedMux.ServeHTTP(…); return }
+if path == "/api/v1/credentials/test" || … { r.credTestRateLimitedMux.ServeHTTP(…); return }
 if strings.HasPrefix(path, "/api/")          { r.apiRateLimitedMux.ServeHTTP(…);  return }
 r.mux.ServeHTTP(w, req)
 ```
@@ -72,21 +83,33 @@ r.mux.ServeHTTP(w, req)
   ```http
   HTTP/1.1 429 Too Many Requests
   Retry-After: 60
+  X-RateLimit-Limit: 120
+  X-RateLimit-Remaining: 0
+  X-RateLimit-Reset: 1717000000
   Content-Type: application/json
 
   {"error": "Too many requests"}
   ```
+  `X-RateLimit-Limit` is the bucket burst (the per-minute limit); `X-RateLimit-Reset` is a Unix timestamp 60 s out. The values come from the limiter's own state, not hard-coded, so well-behaved clients can back off intelligently.
 
 ### IP extraction
 
-`extractIP` picks the client address in this order — callers **must** run Crewship behind a reverse proxy that either strips or rewrites these headers if they cannot be trusted:
+`extractIP` (`internal/api/ratelimit.go`) honours `X-Forwarded-For` / `X-Real-IP` **only when the immediate connecting hop (`r.RemoteAddr`) is itself a trusted proxy.** Untrusted clients cannot spoof their way into a fresh token bucket:
 
-1. `X-Forwarded-For` — split on comma, **only the first entry is used**. If the header is `1.2.3.4, 10.0.0.1`, the client IP is `1.2.3.4`.
-2. `X-Real-IP` — used if `X-Forwarded-For` is absent.
-3. `r.RemoteAddr` (host portion) — final fallback.
+1. If the immediate hop is **not** in the trusted-proxy set, forwarding headers are ignored and the client IP is `r.RemoteAddr` (host portion).
+2. If the immediate hop **is** a trusted proxy, `X-Forwarded-For` is parsed **right to left**, skipping trusted-proxy hops, and the first untrusted entry is returned. `X-Real-IP` is consulted only if that yields nothing.
+3. `r.RemoteAddr` (host portion) is the final fallback.
+
+The trusted-proxy set defaults to loopback (`127.0.0.0/8`, `::1/128`). Operators behind a non-local reverse proxy must add its address:
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `CREWSHIP_TRUSTED_PROXY_CIDRS` | loopback only | Comma-separated CIDRs (or bare IPs) of proxies whose `X-Forwarded-For` / `X-Real-IP` headers are trusted. Invalid entries are dropped at startup with a stderr warning; loopback is always kept as a floor. |
+
+Right-to-left parsing defeats the append-style proxy spoof: with nginx's default `proxy_add_x_forwarded_for`, an attacker who pre-seeds `X-Forwarded-For: 8.8.8.8` produces `8.8.8.8, <real-attacker-ip>`, and the right-to-left walk correctly reads the real client past the forged prefix.
 
 <Warning>
-  If Crewship is exposed directly to the internet without a proxy, any client can spoof `X-Forwarded-For` to bypass per-IP rate limits. Run behind a reverse proxy (nginx, Caddy, Traefik) that overwrites these headers from the true connecting peer.
+  If you run a non-local reverse proxy (nginx, Caddy, Traefik) without setting `CREWSHIP_TRUSTED_PROXY_CIDRS`, its address is **not** trusted, so every request is keyed by the proxy's IP and all clients share one bucket. Set the CIDR so the true client IP is used. Conversely, exposing Crewship directly to the internet is safe against XFF spoofing by default — the headers are ignored unless the peer is a trusted proxy.
 </Warning>
 
 ## OAuth CSRF state
@@ -105,7 +128,7 @@ Guarantees:
 
 ```
 POST /api/auth/google/start
-  → generate 16 random bytes, base64url-encode
+  → generate 32 random bytes (256-bit), base64url-encode
   → INSERT INTO oauth_states (state, redirect_uri, [code_verifier])
   → 307 redirect to provider with ?state=<token>
 

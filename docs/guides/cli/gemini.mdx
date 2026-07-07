@@ -43,6 +43,7 @@ gemini -p "[SYSTEM]\n<preamble>\n\n[USER]\n<msg>" --output-format stream-json -m
 - `-p` — non-interactive prompt mode
 - `--output-format stream-json` — JSONL events (PR #10883)
 - `-m` — model selector
+- `--approval-mode plan` — appended **only for the `MINIMAL` profile** (Gemini's read-only mode; its named-tool allowlist `--allowed-tools` is deprecated in favour of the Policy Engine). `CODING`/`FULL` keep the default flow.
 - System prompt folded into prompt body since headless mode has no `--system-instruction` flag
 
 ## MCP
@@ -65,7 +66,11 @@ Configured at `/output/<slug>/.gemini/settings.json`:
 }
 ```
 
-Crewship prefers `httpUrl` (HTTP streaming, current) over `url` (SSE, legacy). Env-var syntax `${VAR}` or `$VAR` (POSIX); both expanded by gemini-cli at MCP spawn.
+Crewship prefers `httpUrl` (HTTP streaming, current) over `url` (SSE, legacy) — `url` is only emitted when the source explicitly declares `sse` transport. Env-var syntax `${VAR}` or `$VAR` (POSIX); both expanded by gemini-cli at MCP spawn.
+
+<Note>
+Crewship also auto-injects two sidecar-hosted servers into `.gemini/settings.json` (`injectMemoryMCP` + `injectRoutinesMCP`): `crewship-memory` (`http://127.0.0.1:9119/mcp/memory/<slug>`) and `crewship-routines` (`.../mcp/routines`), both emitted as `httpUrl` entries. A user-declared server of the same name wins.
+</Note>
 
 ## Memory
 

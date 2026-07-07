@@ -48,9 +48,14 @@ Every agent runs in its own Linux container. The defaults applied in
 - **UID 1001** (`agent`) for the agent process; UID 1002 for the
   per-agent sidecar.
 - **`CapDrop: ["ALL"]`** as the starting capability set.
-- **`CapAdd: ["NET_RAW"]`** is added back so the agent can use `ping`
-  and other ICMP-shaped probes inside its sandbox. This is the one
-  capability that survives the drop.
+- **No capabilities are added back by default** — `CapAdd` starts
+  empty. `NET_RAW` used to be granted (for `ping`) but was removed:
+  it lets a process open `AF_PACKET` sockets, a DNS-tunnelling exfil
+  primitive that can carry stolen secrets out via base64-encoded
+  subdomain lookups even when the egress allowlist blocks every other
+  domain. A crew that genuinely needs raw sockets / ICMP can opt in
+  through `team.CapAdd`, which the devcontainer-features parser
+  restricts to an explicit allowlist (`NET_BIND_SERVICE` today).
 - **`no-new-privileges`** security opt + **read-only root filesystem**
   + **PID limit** + **memory + CPU quotas** + tmpfs `/tmp` with a 500 MB
   cap.
@@ -78,9 +83,9 @@ guarantees are whatever the host runtime provides.
 ### Blast radius if the agent escapes
 
 If a non-privileged agent breaks out of the container runtime it
-gets the host process namespace as UID 1001, with `CapDrop: ALL +
-NET_RAW` capabilities, no Docker socket, read-only root, and the
-quotas above. This is the standard rootless-container failure mode;
+gets the host process namespace as UID 1001, with `CapDrop: ALL` and
+an empty `CapAdd` (no `NET_RAW` unless the crew explicitly opted in),
+no Docker socket, read-only root, and the quotas above. This is the standard rootless-container failure mode;
 operators are expected to layer host hardening (SELinux, AppArmor,
 seccomp, kernel patching) on top.
 
@@ -205,14 +210,14 @@ flowchart TD
     src[/"Content source<br/>(memory file read OR tool_result return)"/]
     src --> scan{"ScanContent()<br/>internal/memory/quarantine.go"}
 
-    scan -->|"Step 1: cheap"| u{"Invisible-unicode<br/>14 codepoints<br/>(ZWSP/BIDI/BOM)"}
+    scan -->|"Step 1: cheap"| u{"Invisible-unicode<br/>Unicode Cf category<br/>+ 3 Hangul fillers"}
     u -->|hit| hit
     u -->|miss| ascii{"Pure ASCII<br/>fast path?"}
 
     ascii -->|"yes — skip homoglyph"| rules
     ascii -->|"no — NFKD + fold"| rules
 
-    rules{"Step 2: 9 regex rules<br/>+ URL exfil + persistence"}
+    rules{"Step 2: 11 regex rules<br/>(injection + exfil + persistence)"}
     rules -->|hit| hit
     rules -->|miss| b64{"Step 3: base64 blocks ≥ 60 chars?"}
 
@@ -246,13 +251,13 @@ flowchart TD
 
 <Accordion title="All rule families (unicode, regex, exfiltration, persistence, base64, homoglyph, tool-return)">
 
-**Invisible-unicode codepoints (14)** — zero-width spaces (ZWSP, ZWNJ, ZWJ), BIDI overrides (LRM/RLM/LRE/RLE/LRO/RLO), directional isolates (LRI/RLI/FSI/PDI), and the byte-order mark. Source-file numeric literals so the rule file itself stays free of the codepoints it scans for. Cheap check; runs first.
+**Invisible-unicode — class-based** — the scanner flags any codepoint in Unicode's **Cf (Format)** category via `unicode.Is(unicode.Cf, ch)`, which covers every invisible-format codepoint that exists today (zero-width spaces ZWSP/ZWNJ/ZWJ, BIDI overrides LRM/RLM/LRE/RLE/LRO/RLO, directional isolates LRI/RLI/FSI/PDI, byte-order mark, the TAG block, SOFT HYPHEN, ARABIC LETTER MARK, …) and any added in future Unicode revisions — so it never lags a new codepoint the way a curated list would. Three **Hangul filler** codepoints (`U+115F`, `U+1160`, `U+3164`) are added by an explicit allowlist because they render empty but are category Lo, not Cf. Cheap check; runs first.
 
-**Prompt-injection regex (9 rules, line-anchored, case-insensitive)** — `ignore previous|all|prior instructions`, `you are now DAN|<role>`, `disregard rules|instructions|the above|system|previous`, `<!-- ignore ... -->` HTML smuggling, plus the five exfiltration / persistence patterns below.
+**Prompt-injection regex (11 rules total, line-anchored, case-insensitive)** — 4 prompt-injection patterns (`ignore previous|all|prior instructions`, `you are now DAN|<role>`, `disregard rules|instructions|the above|system|previous`, `<!-- ignore ... -->` HTML smuggling) plus the 5 exfiltration and 2 persistence patterns below.
 
-**Exfiltration patterns** — `curl $TOKEN/...`, `cat .env | nc|curl|...`, `aws s3 cp ... .ssh/...|id_rsa`, plus the round-PR-F4 **URL exfil rules** (`https?://...?<param>=$TOKEN|API_KEY|SECRET|...` and `https?://.../$TOKEN|...`). The URL rules catch the "send to attacker.com/?data=$ENV" pattern beyond the existing curl-only rules.
+**Exfiltration patterns (5)** — `curl $TOKEN/...`, `cat .env | nc|curl|...`, `aws s3 cp ... .ssh/...|id_rsa`, plus the round-PR-F4 **URL exfil rules** (`https?://...?<param>=$TOKEN|API_KEY|SECRET|...` and `https?://.../$TOKEN|...`). The URL rules catch the "send to attacker.com/?data=$ENV" pattern beyond the existing curl-only rules.
 
-**Persistence patterns** — `>> ~/.ssh/authorized_keys`, `| crontab -` from stdin.
+**Persistence patterns (2)** — `>> ~/.ssh/authorized_keys`, `| crontab -` from stdin.
 
 **Base64 deobfuscation (PR-F4)** — for every base64-shaped block ≥ 60 chars in the content, attempt decode; if the decoded text matches any of the existing rules above, flag with category `base64_obfuscation` and pattern `<rule>_base64`. False-positive guard: a 50% printable-character threshold on the decoded payload, so lorem-ipsum-shaped base64 (e.g. binary blobs in test fixtures) doesn't trip the gate. JWT-shape payloads are explicitly tested as benign.
 
@@ -351,9 +356,9 @@ describes the **current implementation**, with these gaps:
   unchecked. Operators who need hard egress control must layer Docker
   network policies (`--internal`, custom networks, egress firewall)
   on top.
-- **`NET_RAW` is added back** so the agent can `ping`. Acceptable for
-  the convenience trade-off, but operators with stricter requirements
-  can drop it in their crew security profile.
+- **`NET_RAW` is dropped by default** (it was previously granted for
+  `ping`). Crews that need raw sockets / ICMP must opt in explicitly
+  via `team.CapAdd`, which is restricted to a capability allowlist.
 - **Privileged crews bypass most of Layer 1.** Anything flagged
   `Privileged: true` is outside this threat model.
 - **Container-runtime isolation is the host's responsibility.** The
@@ -540,7 +545,7 @@ the connection-only model.
 | Cross-crew messaging / shared files (`/internal/crew-messages`, `/internal/crew-files`) connection-only auth | ✅ closed — caller-supplied crew IDs must resolve to the token's bound workspace (R-2) |
 | F4 handler body-workspace drop | ⏳ PR-F25 (eliminate body workspace param — cleanup, no longer a security gap) |
 | Lessons memory tier agent-author write | ✅ closed — dispatcher rejects `tier="lessons"` |
-| Memory file injection scan (READ path) | ✅ — 9 rules + 14 unicode codepoints |
+| Memory file injection scan (READ path) | ✅ — 11 regex rules + full Unicode Cf category (+ 3 Hangul fillers) |
 | Memory scanner v2 (base64 / homoglyph / URL exfil) | ✅ shipped — PR-F4 |
 | Memory scanner — tool-result path | ✅ partial — Claude `tool_result` wired; per-adapter sweep is PR-F4 follow-up |
 | GDPR cascade (Art. 17) | ✅ shipped — migration v107 + `DELETE /api/v1/admin/users/{id}/data` |

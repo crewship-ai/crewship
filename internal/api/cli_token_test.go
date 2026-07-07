@@ -656,6 +656,56 @@ func TestCLITokenCreate_Scopes_Validated(t *testing.T) {
 			t.Errorf("unscoped path broke: status = %d, body=%s", rr.Code, rr.Body.String())
 		}
 	})
+
+	// Regression: the "Admin (OWNER only)" UI tier emits <resource>:* for
+	// every resource, including workspace:*. That scope was missing from
+	// knownScopes, so token creation 400'd with "unknown scope: workspace:*"
+	// even though canScope already honours resource-level wildcards. An
+	// OWNER must be able to issue it, mirroring the other <resource>:* forms.
+	t.Run("owner_can_issue_workspace_star", func(t *testing.T) {
+		db := setupTestDB(t)
+		h := NewCLITokenHandler(db, logger)
+		userID := seedTestUser(t, db)
+		seedTestWorkspace(t, db, userID) // makes userID OWNER
+		body, _ := json.Marshal(map[string]any{
+			"name":   "admin-tier",
+			"scopes": []string{"workspace:*"},
+		})
+		req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+		req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+		rr := httptest.NewRecorder()
+		h.Create(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("OWNER issuing workspace:* = %d, want 200; body=%s", rr.Code, rr.Body.String())
+		}
+	})
+
+	// Security: workspace:* grants workspace:admin via canScope's
+	// resource-wildcard, so it must sit behind the same ADMIN gate as
+	// workspace:admin / "*". A MANAGER must NOT be able to ladder up by
+	// issuing it. Without the scopesPermittedByRole fix this returns 200.
+	t.Run("workspace_star_over_privileged_for_manager_403", func(t *testing.T) {
+		db := setupTestDB(t)
+		h := NewCLITokenHandler(db, logger)
+		const u = "u-mgr"
+		execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES (?, 'mgr@x', 'Mgr')`, u)
+		execOrFatal(t, db, `INSERT INTO workspaces (id, name, slug) VALUES ('w-mgr', 'W', 'w-mgr')`)
+		execOrFatal(t, db, `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('wm-mgr', 'w-mgr', ?, 'MANAGER')`, u)
+		body, _ := json.Marshal(map[string]any{
+			"name":   "ladder",
+			"scopes": []string{"workspace:*"},
+		})
+		req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+		req = req.WithContext(withUser(req.Context(), &AuthUser{ID: u}))
+		rr := httptest.NewRecorder()
+		h.Create(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("MANAGER issuing workspace:* = %d, want 403; body=%s", rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), "workspace:*") {
+			t.Errorf("403 body must name the offending scope; got %s", rr.Body.String())
+		}
+	})
 }
 
 // TestIsCLIToken_AcceptsBothTiers proves the prefix matcher returns

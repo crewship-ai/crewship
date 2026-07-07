@@ -16,7 +16,7 @@ crewship ws <subcommand> [flags]
 The active workspace is stored in `~/.crewship/cli-config.yaml` under `workspace` (slug or id). It is sent as `workspace_id=` on every API request by the CLI client, so switching workspaces is purely client-side — no server round-trip.
 
 <Note>
-**Auth:** `list`, `use`, and `get` require `crewship login`; mutations additionally require an active workspace context. Role gates apply server-side — `OWNER`/`ADMIN` to update or invite, `MEMBER+` to read.
+**Auth:** `list`, `get`, and `create` require `crewship login` (`create` clears the workspace context server-side — it makes a new one). `update`, all `member` operations, and `invite` additionally require an active workspace. `use` only writes the local config and validates the slug against the server when you're already logged in. Role gates apply server-side — `OWNER`/`ADMIN` to update or invite, `MEMBER+` to read.
 </Note>
 
 ## Subcommands

@@ -14,57 +14,46 @@ Crew templates create a complete team in one step -- a crew with pre-configured 
 
 ### Seed Data Crews
 
-The built-in seed data (`cmd/crewship/seeddata/`) provides four crew templates:
+The built-in seed data (`cmd/crewship/seeddata/builtin/crews.yaml` +
+`agents.yaml`) provisions three demo crews with seven agents total:
 
 <Tabs>
   <Tab title="Engineering">
-    **Slug:** `engineering` | **Icon:** `terminal` | **Color:** Blue
+    **Slug:** `engineering` | **Icon:** `terminal` | **Color:** `#3B82F6` (blue)
 
-    | Agent | Role | Agent Role | Profile | Adapter |
-    |-------|------|-----------|---------|---------|
-    | Tomas | Technical Architect | LEAD | FULL | CLAUDE_CODE |
-    | Viktor | Backend Engineer | AGENT | CODING | CLAUDE_CODE |
-    | Nela | Frontend Engineer | AGENT | CODING | CLAUDE_CODE |
-    | Martin | Infrastructure Engineer | AGENT | CODING | CLAUDE_CODE |
-
-    **Skills:** network-probe, script-runner, file-crafter, web-scraper, system-inspector
+    | Agent | Role | Agent Role | Profile | Skills |
+    |-------|------|-----------|---------|--------|
+    | Alex | Engineering Lead | LEAD | FULL | network-probe, script-runner, file-crafter, routine-author |
+    | Sam | Backend Engineer | AGENT | CODING | script-runner, file-crafter, system-inspector |
+    | Robin | Frontend Engineer | AGENT | CODING | file-crafter, web-scraper |
   </Tab>
 
   <Tab title="Quality">
-    **Slug:** `quality` | **Icon:** `shield-check` | **Color:** Green
+    **Slug:** `quality` | **Icon:** `shield-check` | **Color:** `#10B981` (green)
 
-    | Agent | Role | Agent Role | Profile | Adapter |
-    |-------|------|-----------|---------|---------|
-    | Eva | Quality Director | LEAD | FULL | CLAUDE_CODE |
-    | Daniel | Code Reviewer | AGENT | MINIMAL | CLAUDE_CODE |
-    | Petra | Test Engineer | AGENT | CODING | CLAUDE_CODE |
-    | Jakub | Security Analyst | AGENT | MINIMAL | CLAUDE_CODE |
-
-    **Skills:** script-runner, file-crafter, system-inspector
+    | Agent | Role | Agent Role | Profile | Skills |
+    |-------|------|-----------|---------|--------|
+    | Jordan | QA Lead | LEAD | FULL | script-runner, file-crafter, routine-author |
+    | Casey | Test & Review Engineer | AGENT | CODING | system-inspector, script-runner, file-crafter |
   </Tab>
 
-  <Tab title="DevOps">
-    **Slug:** `devops` | **Icon:** `server` | **Color:** Red
+  <Tab title="Ops">
+    **Slug:** `ops` | **Icon:** `server` | **Color:** `#EF4444` (red)
 
-    | Agent | Role | Agent Role | Profile | Adapter |
-    |-------|------|-----------|---------|---------|
-    | Ondrej | SRE Lead | LEAD | FULL | CLAUDE_CODE |
-    | Radek | Platform Engineer | AGENT | CODING | CLAUDE_CODE |
-
-    **Skills:** network-probe, system-inspector
-  </Tab>
-
-  <Tab title="Research">
-    **Slug:** `research` | **Icon:** `telescope` | **Color:** Cyan
-
-    | Agent | Role | Agent Role | Profile | Adapter |
-    |-------|------|-----------|---------|---------|
-    | Lucie | Research Director | LEAD | FULL | CLAUDE_CODE |
-    | Filip | Data Analyst | AGENT | CODING | CLAUDE_CODE |
-
-    **Skills:** web-scraper, script-runner
+    | Agent | Role | Agent Role | Profile | Skills |
+    |-------|------|-----------|---------|--------|
+    | Morgan | SRE / Ops Lead | LEAD | FULL | network-probe, system-inspector, routine-author |
+    | Riley | Platform Engineer | AGENT | CODING | web-scraper, script-runner, network-probe |
   </Tab>
 </Tabs>
+
+Every seed agent runs the `CLAUDE_CODE` adapter. Skill assignments are the
+per-agent map in `cmd/crewship/seeddata/skills.go` (`SkillAssignments`); the
+catalog of five installable skills — `network-probe`, `file-crafter`,
+`web-scraper`, `script-runner`, `system-inspector` — lives in
+`builtin/skills.yaml`. `routine-author` is a bundled first-party skill
+installed on server startup (not in that catalog) and is assigned to each
+crew's LEAD.
 
 ### Agent Configuration
 
@@ -81,7 +70,7 @@ Each seed agent has these settings:
 
 ### System Prompts
 
-Each agent has a dedicated system prompt file in `cmd/crewship/seeddata/prompts/{slug}.md`. These prompts define the agent's persona, expertise areas, communication style, and behavioral guidelines.
+Each agent has a dedicated system prompt file in `cmd/crewship/seeddata/prompts/{prompt_slug}.md` (the `prompt_slug` matches the agent slug — e.g. `prompts/alex.md`). These prompts define the agent's persona, expertise areas, communication style, and behavioral guidelines.
 
 ## Workflow Templates
 
@@ -141,24 +130,34 @@ type TemplateStep struct {
 
 ### Using Templates
 
-Lead agents can reference templates when creating missions via the sidecar:
+A lead agent lists the available templates, then replicates the pattern it
+wants by shaping the mission's tasks — `/mission/create` has no `template`
+field, so the lead expresses the dependency graph directly via each task's
+`depends_on` and `max_iterations` (mirrors `TemplateStep.DependsOn` /
+`MaxIterations`). Both endpoints are served by the sidecar on `:9119`
+(`internal/sidecar/mission.go`).
 
 ```bash
-# List available templates
+# List available templates (GET /mission/templates → orchestrator.ListTemplates)
 curl -s http://localhost:9119/mission/templates
 
-# Create a mission with the dev-test-loop template
+# Create a mission shaped like the dev-test-loop template
 curl -s -X POST http://localhost:9119/mission/create \
   -H "Content-Type: application/json" \
   -d '{
     "title": "Implement auth module",
-    "template": "dev-test-loop",
     "tasks": [
-      {"title": "Write auth handlers", "assigned_to": "viktor"},
-      {"title": "Test auth flow", "assigned_to": "petra"}
+      {"title": "Write auth handlers", "assigned_to": "sam", "max_iterations": 3},
+      {"title": "Test auth flow", "assigned_to": "casey", "depends_on": ["Write auth handlers"], "max_iterations": 3}
     ]
   }'
 ```
+
+<Note>
+`assigned_to` is an agent **slug** within the caller's own crew; use
+`assigned_to_id` (agent ID) to delegate cross-crew. `crew_id` in the request
+body is ignored — the sidecar always uses the trusted IPC crew identity.
+</Note>
 
 ## Credential Templates
 
@@ -166,14 +165,26 @@ The seed data also includes credential templates in `cmd/crewship/seeddata/crede
 
 ### Anthropic Credential
 
-The `ResolveAnthropicCredential` function auto-detects the credential type:
+`ResolveAnthropicCredential` reads `SEED_ANTHROPIC_API_KEY` (falling back to a
+`demo-placeholder-*` value when unset) and auto-detects the credential type
+from the value prefix:
 
 | Prefix | Type | Env Var Name |
 |--------|------|-------------|
 | `sk-ant-oat` | `AI_CLI_TOKEN` | `CLAUDE_CODE_OAUTH_TOKEN` |
 | Other | `API_KEY` | `ANTHROPIC_API_KEY` |
 
-### Google Credential
+### GitHub Credential (optional)
 
-Optional Google credentials from `SEED_GOOGLE_EMAIL` and `SEED_GOOGLE_PASSWORD` environment variables, stored as a JSON object under the `SECRET` type.
+`ResolveGitHubCredential` seeds a credential only when `SEED_GITHUB_TOKEN` is
+set. It is type `CLI_TOKEN` (not `API_KEY`) with env var `GH_TOKEN` — mounted
+into the container as a `0400` file plus an env var so the in-container `gh`
+CLI authenticates with zero extra setup.
+
+### Google Credential (optional)
+
+`ResolveGoogleCredential` seeds a credential only when **both**
+`SEED_GOOGLE_EMAIL` and `SEED_GOOGLE_PASSWORD` are set. It is named
+`GOOGLE_API_CREDENTIALS`, stored as a JSON object (`{"email":…,"password":…}`)
+under the `SECRET` type.
 

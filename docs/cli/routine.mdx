@@ -26,6 +26,10 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Core | `run <slug>` | Invoke a routine against the live execution tier |
 | Core | `dry-run <slug>` | Preview what a routine would do without invoking agents |
 | Core | `delete <slug>` | Soft-delete a routine |
+| Governance | `approve <slug>` | Approve a proposed routine (MANAGER+) — flips it live |
+| Governance | `reject <slug>` | Reject a proposed routine (MANAGER+) — removes it |
+| Governance | `disable <slug>` | Disable a routine (OWNER/ADMIN) — cancels in-flight runs, refuses new ones |
+| Governance | `enable <slug>` | Re-enable a disabled routine (OWNER/ADMIN) |
 | Diagnostics | `doctor <slug>` | Preflight checklist — catches blind alleys before `run` |
 | Diagnostics | `bench <slug>` | Variance characterisation — N runs, pass-rate + cost/latency stats |
 | Runs | `runs <slug>` | List recent runs from journal |
@@ -34,11 +38,20 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Runs | `logs <run_id>` | Full journal trace for a run (post-mortem) |
 | Runs | `cancel <run_id>` | Cancel an in-flight run |
 | Runs | `watch <slug>` | Stream live run + step events |
+| Runs | `tree <run_id>` | Show a run and its child runs (call_pipeline / deferred / replay) |
+| Runs | `replay <run_id>` | Re-run a prior run with its original inputs (marked `is_replay`) |
+| Runs | `metadata <run_id>` | Mutate a run's metadata scratchpad (set / increment / append) |
+| Runs | `signal <run_id>` | Deliver a payload to a running run's `wait:event` step |
+| Failures | `errors` | List failed runs grouped by error fingerprint |
+| Failures | `bulk-replay` | Replay all failed runs under a fingerprint (after a fix) |
+| Deferred | `pending ...` | List or cancel deferred (delayed/debounced) routine triggers |
 | Versions | `versions <slug>` | List version history |
 | Versions | `rollback <slug> --to N` | Roll back to version N |
+| Authoring | `validate [file.json]` | Validate DSL offline (no server call) |
+| Authoring | `tag <slug> ...` | Add or remove discovery tags on a routine definition |
+| Authoring | `step-override <slug> ...` | Override a step's prompt/model without bumping the routine version |
 | Bundles | `export <slug>` | Export bundle JSON to stdout |
 | Bundles | `import [bundle.json]` | Import bundle from file or stdin |
-| Authoring | `validate [file.json]` | Validate DSL offline (no server call) |
 | Triggers | `schedules ...` | Cron schedule CRUD |
 | Triggers | `webhooks ...` | Webhook CRUD |
 | HITL | `waitpoints ...` | Approval inbox + decisions |
@@ -60,6 +73,8 @@ crewship routine list --order name
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--order` | `popularity` | Sort: `popularity` (invocation_count DESC), `recent` (updated_at DESC), `name` (alpha) |
+| `--status` | (unset) | Filter by governance status: `active`, `proposed`, `disabled` |
+| `--tag` | (unset) | Filter routines by definition tag (cross-crew discovery) |
 
 **Output columns:** SLUG, INVOC, LAST STATUS, AUTHOR CREW, DESCRIPTION
 
@@ -121,6 +136,15 @@ crewship routine run eval-extract-emails --tier-override smart
 | `--tier-override` | force every `agent_run` step onto `trivial`/`fast`/`moderate`/`smart`. Step-level `model_override` still wins. Empty (default) = use authored complexity. Used by the eval suite to diff weak vs strong worker tiers without DSL changes. |
 | `--wait` | block until the run reaches a terminal status — keeps polling through `WAITING` approvals and `DEDUPED` originals instead of returning the receipt. |
 | `--wait-timeout` | maximum time `--wait` polls before giving up (default `30m`, `0` = forever). |
+| `--metadata` | JSON object stored on the run + exposed to steps (e.g. `'{"source":"manual"}'`) |
+| `--tag` | Attach tag(s) to the run for filtering/grouping (repeatable; max 10) |
+| `--batch` | Path to a JSONL / JSON-array file of input sets — fan out N runs (tagged `batch:<id>`) |
+| `--delay` | Defer the run N seconds (parked in `pending_runs`; returns `SCHEDULED`) |
+| `--ttl` | Expire a deferred run if not dispatched within N seconds |
+| `--priority` | Dispatch priority for deferred runs (higher fires first) |
+| `--debounce-key` | Coalesce burst triggers sharing this key into one run |
+| `--debounce-window` | Debounce window in seconds (default 30) — fires this long after the last trigger |
+| `--debounce-max` | Max debounce extension in seconds (a continuously-retriggered key still fires by then) |
 
 Output: `run_id`, `status`, `output`, `duration_ms`, `cost_usd`.
 
@@ -133,6 +157,54 @@ With `--wait`, the CLI instead keeps polling the run until the approval is resol
 ### Common errors
 
 - **API error (500): `pipeline: concurrency_key rendered to empty value (referenced input missing or empty)`** — the DSL declared a `concurrency_key` template that references an input you didn't supply, and the template has no literal text to fall back on. See [Troubleshooting in the routines guide](/guides/routines#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value) for the four fixes.
+
+---
+
+## `crewship routine approve <slug>`
+
+Approve a routine sitting in `proposed` status — the maker-checker checkpoint that flips it live so crews can invoke it. Requires the **MANAGER+** role.
+
+```bash
+crewship routine approve monthly-billing-digest
+```
+
+Backed by `POST /api/v1/workspaces/{ws}/pipelines/{slug}/approve`. Output: `Routine <slug> → <status>`. A `403` role error or `409` "routine is awaiting approval" run refusal is rendered from the server's Problem Details response.
+
+---
+
+## `crewship routine reject <slug>`
+
+Reject a proposed routine, removing it. Requires the **MANAGER+** role.
+
+```bash
+crewship routine reject monthly-billing-digest
+```
+
+Backed by `POST /api/v1/workspaces/{ws}/pipelines/{slug}/reject`. Output: `Routine <slug> → <status>`.
+
+---
+
+## `crewship routine disable <slug>`
+
+Airbag switch: disable an active routine. Cancels any in-flight runs and refuses new invocations (`run` then returns `409 routine is disabled`). Requires the **OWNER/ADMIN** role.
+
+```bash
+crewship routine disable runaway-routine
+```
+
+Backed by `POST /api/v1/workspaces/{ws}/pipelines/{slug}/disable`. Output: `Routine <slug> → <status>`; when runs are cancelled a second line reports `  cancelled N in-flight run(s)`.
+
+---
+
+## `crewship routine enable <slug>`
+
+Re-enable a disabled routine so it accepts invocations again. Requires the **OWNER/ADMIN** role.
+
+```bash
+crewship routine enable runaway-routine
+```
+
+Backed by `POST /api/v1/workspaces/{ws}/pipelines/{slug}/enable`. Output: `Routine <slug> → <status>`.
 
 ---
 
@@ -209,6 +281,7 @@ crewship routine records eval-extract-emails --json | jq '.[] | select(.cost_usd
 |------|-------------|
 | `--limit` | Max records to return, 1–500 (default 50) |
 | `--status` | Filter: `queued`/`running`/`completed`/`failed`/`cancelled`/`interrupted`/`dry_run` |
+| `--tag` | Filter by run tag (e.g. `batch:<id>`) |
 | `--json` | Emit JSON for scripting |
 
 Falls back with a clear message to `crewship routine runs <slug>` when the server predates v83.
@@ -265,6 +338,7 @@ The `DURATION` and `COST` columns surface the per-step `duration_ms` / `cost_usd
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--slug` | | Routine slug the run belongs to (optional; enables full journal timeline) |
+| `--full` | `false` | Full per-run journal timeline via the run-logs endpoint (no `--slug` needed) |
 | `--json` | `false` | JSON output for scripting |
 
 Pair with `routine watch` for live observation and `routine logs` for post-hoc forensics.
@@ -323,6 +397,66 @@ Exit code 0 = valid, 1 = invalid. CI-friendly:
 ```
 
 Runs the same parse + validate + step-id-uniqueness checks the server would, **except** cross-routine cycle detection (which needs the workspace's full call graph) and slug uniqueness (which needs the DB).
+
+---
+
+## `crewship routine tag <slug>`
+
+Add or remove discovery tags on a routine **definition** — distinct from run tags. Definition tags power cross-crew discovery via `routine list --tag <tag>`. Pass `--add` (repeatable) and/or `--remove`; at least one is required.
+
+```bash
+crewship routine tag invoice-parser --add billing --add finance
+crewship routine tag invoice-parser --remove finance
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--add` | string (repeatable) | | Tag(s) to add |
+| `--remove` | string | | A single tag to remove |
+
+Adds are sent as `PUT /api/v1/workspaces/{ws}/pipelines/{slug}/tags`; a removal is `DELETE /api/v1/workspaces/{ws}/pipelines/{slug}/tags/{tag}`. When both flags are passed, the add runs first (`Tagged … +[…]`), then the removal (`Untagged … -…`).
+
+---
+
+## `crewship routine step-override`
+
+Override a single step's prompt or model **without bumping the routine version** — the change applies on the next run and can be cleared to revert to the authored value. A parent command with three children.
+
+### `step-override set <slug> <step_id>`
+
+Set a prompt and/or model override for one step. Pass at least one of `--prompt` / `--model`.
+
+```bash
+crewship routine step-override set pr-review extract --model claude/claude-sonnet-4-6
+crewship routine step-override set pr-review extract --prompt "Extract entities as JSON…"
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--prompt` | string | | Replacement prompt for the step |
+| `--model` | string | | Model/tier override for the step |
+
+Backed by `PUT /api/v1/workspaces/{ws}/pipelines/{slug}/steps/{step_id}/override`.
+
+### `step-override clear <slug> <step_id>`
+
+Remove a step's override, reverting it to the authored prompt/model.
+
+```bash
+crewship routine step-override clear pr-review extract
+```
+
+Backed by `DELETE /api/v1/workspaces/{ws}/pipelines/{slug}/steps/{step_id}/override`.
+
+### `step-override list <slug>`
+
+List the active step overrides for a routine.
+
+```bash
+crewship routine step-override list pr-review
+```
+
+Backed by `GET /api/v1/workspaces/{ws}/pipelines/{slug}/overrides`. **Output columns:** STEP, MODEL, PROMPT (truncated to 50 chars). No overrides prints `No step overrides — routine runs as authored.`
 
 ---
 
@@ -402,6 +536,126 @@ Signals the run goroutine. Run terminates at the next safe point and emits `pipe
 
 ---
 
+## `crewship routine tree <run_id>`
+
+Show a run together with its child runs — those spawned via `call_pipeline` steps, deferred dispatch, or replay. Useful for tracing a fan-out or a parent→child chain end-to-end.
+
+```bash
+crewship routine tree run_cmox10oci00016b48aacd
+```
+
+Backed by `GET /api/v1/workspaces/{ws}/pipeline-runs/{run_id}/tree`.
+
+**Output columns:** RUN ID, PARENT (`(root)` for the top run), ROUTINE, STATUS, VIA (`triggered_via`), COST.
+
+---
+
+## `crewship routine replay <run_id>`
+
+Re-run a prior run with its original captured inputs. The new run is stamped `is_replay=true` + `replay_of=<run_id>` (steps can short-circuit side effects via `{{ env.is_replay }}`) and inherits the source run's tags so it groups with the original.
+
+```bash
+crewship routine replay run_cmox10oci00016b48aacd
+```
+
+Backed by `POST /api/v1/workspaces/{ws}/pipelines/runs/{run_id}/replay`. Output: `Replayed <run_id> → new run <new_id>: <status> ($cost)`, plus the run output if non-empty.
+
+---
+
+## `crewship routine metadata <run_id>`
+
+Mutate a run's metadata scratchpad. Later steps read the result as `{{ run.metadata.x }}`. Each flag takes a JSON object; pass at least one.
+
+```bash
+crewship routine metadata run_cmox... --set '{"stage":"done"}'
+crewship routine metadata run_cmox... --increment '{"count":1}'
+crewship routine metadata run_cmox... --append '{"errors":"oops"}'
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--set` | JSON object | | Keys to set outright |
+| `--increment` | JSON object | | Numeric keys to add to |
+| `--append` | JSON object | | Array keys to push a value onto |
+
+Backed by `PATCH /api/v1/workspaces/{ws}/pipeline-runs/{run_id}/metadata`. Prints the updated metadata object.
+
+---
+
+## `crewship routine signal <run_id>`
+
+Deliver a payload to a running run parked on a `wait:event` step (input-stream injection). The payload becomes that wait step's output.
+
+```bash
+crewship routine signal run_cmox... --event approval-received --payload "shipit"
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--event` | string | | **Required.** The `event_type` the `wait:event` step is waiting on |
+| `--payload` | string | | String payload that becomes the wait step's output |
+
+Backed by `POST /api/v1/workspaces/{ws}/pipeline-runs/{run_id}/signal`.
+
+---
+
+## `crewship routine errors`
+
+List the workspace's failed runs bucketed by a stable error fingerprint (failing step + normalized message) so like failures group together. Pick a fingerprint and replay the whole bucket with [`bulk-replay`](#crewship-routine-bulk-replay).
+
+```bash
+crewship routine errors
+crewship routine errors --limit 100
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--limit` | int | `50` | Max fingerprint groups to list |
+
+Backed by `GET /api/v1/workspaces/{ws}/pipelines/runs/errors`. **Output columns:** FINGERPRINT, COUNT, ROUTINE, STEP, SAMPLE ERROR (truncated to 60 chars). No failures prints `No failed runs. 🎉`.
+
+---
+
+## `crewship routine bulk-replay`
+
+Replay every failed run under one fingerprint — the fix-and-retry companion to `errors`. Ship the fix, grab the fingerprint, then re-trigger the whole bucket.
+
+```bash
+crewship routine bulk-replay --fingerprint a1b2c3d4
+crewship routine bulk-replay --fingerprint a1b2c3d4 --limit 200
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--fingerprint` | string | | **Required.** Error fingerprint to replay (from `routine errors`) |
+| `--limit` | int | `50` | Max runs to replay from the group |
+
+Backed by `POST /api/v1/workspaces/{ws}/pipelines/runs/bulk_replay`. Output: `Bulk replay: <replayed>/<requested> runs re-triggered for fingerprint <fp>`.
+
+---
+
+## `crewship routine pending`
+
+List or cancel deferred routine triggers — the parked dispatches created by `run --delay`, `--ttl`, `--debounce-key`, or `--priority`. A parent command with two children.
+
+### `pending list`
+
+```bash
+crewship routine pending list
+```
+
+Backed by `GET /api/v1/workspaces/{ws}/pipelines/pending`. **Output columns:** PENDING ID, ROUTINE, PRIORITY, DEBOUNCE KEY, FIRES AT. Nothing pending prints `No deferred triggers pending.`
+
+### `pending cancel <pending_id>`
+
+```bash
+crewship routine pending cancel pend_abc123
+```
+
+Cancels a trigger before it fires. Backed by `POST /api/v1/workspaces/{ws}/pipelines/pending/{pending_id}/cancel`.
+
+---
+
 ## `crewship routine schedules`
 
 Manage cron-driven triggers. Scheduler runs in-process and ticks every 30s.
@@ -438,10 +692,12 @@ crewship routine schedules create \
 | `--inputs` | | JSON object passed as inputs on each tick |
 | `--enabled` | | Create enabled (default true) |
 | `--pin-version` | | Pin every fire to this immutable routine version instead of head (see the [Scheduling guide](/guides/scheduling)). If the pinned version is later deleted, fires **fail with an inbox alert** — they never silently fall back to head. |
+| `--wake-slug` | | Wake gate: agentless probe routine evaluated before each fire — the main routine runs only when the probe's output is truthy. |
+| `--wake-inputs` | | JSON object passed to the wake probe on each tick (requires `--wake-slug`). |
 
 ### `schedules update <id>`
 
-Pass any subset of `--cron / --timezone / --name / --enabled / --inputs / --pin-version / --unpin` to update. An existing version pin survives updates that don't mention it; `--pin-version N` re-pins, `--unpin` removes the pin so fires track head again.
+Pass any subset of `--cron / --timezone / --name / --enabled / --inputs / --pin-version / --unpin / --wake-slug / --wake-inputs / --no-wake` to update. An existing version pin survives updates that don't mention it; `--pin-version N` re-pins, `--unpin` removes the pin so fires track head again. Likewise the wake gate is preserved unless touched: `--wake-slug` sets/replaces the probe, `--wake-inputs` replaces its inputs, and `--no-wake` removes the gate so the schedule fires on every tick again (`--no-wake` and `--wake-slug`/`--wake-inputs` are mutually exclusive).
 
 ### `schedules enable <id>` / `schedules disable <id>`
 
@@ -550,11 +806,13 @@ All routine subcommands accept these global flags:
 
 | Flag | Env | Description |
 |------|-----|-------------|
-| `--server` | `CREWSHIP_SERVER` | Server URL (default `http://localhost:8080`) |
-| `--workspace` | `CREWSHIP_WORKSPACE` | Workspace ID or slug |
-| `--format` | | `table | json | yaml | quiet` |
+| `-s`, `--server` | `CREWSHIP_SERVER` | Server URL (default `http://localhost:8080`) |
+| `-w`, `--workspace` | `CREWSHIP_WORKSPACE` | Workspace ID or slug |
+| `-f`, `--format` | | `table \| json \| yaml \| ndjson \| quiet` (default `table`) |
+| `--profile` | `CREWSHIP_PROFILE` | Server profile to target (manage with `crewship server`) |
+| `--server-allow-mismatch` | `CREWSHIP_ALLOW_SERVER_MISMATCH` | Send the stored auth token to a `--server` host that differs from the one it was issued for |
 | `--no-color` | | Disable ANSI colour output |
-| `--verbose` | | Verbose request/response logging |
+| `-v`, `--verbose` | | Verbose request/response logging |
 
 ## See also
 

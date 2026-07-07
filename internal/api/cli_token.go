@@ -174,6 +174,7 @@ var knownScopes = map[string]struct{}{
 	"skills:*":          {},
 	"skills:read":       {},
 	"skills:write":      {},
+	"workspace:*":       {},
 	"workspace:admin":   {},
 	"workspace:read":    {},
 	"webhooks:*":        {},
@@ -200,7 +201,9 @@ func scopesPermittedByRole(role string, scopes []string) string {
 	rank := roleRank[role]
 	for _, s := range scopes {
 		switch s {
-		case "*", "workspace:admin":
+		case "*", "workspace:admin", "workspace:*":
+			// workspace:* grants workspace:admin via canScope's
+			// resource-wildcard, so it needs the same ADMIN gate.
 			if rank < roleRank["ADMIN"] {
 				return s
 			}

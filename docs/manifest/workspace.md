@@ -114,7 +114,9 @@ detailed source semantics.
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `slug` | string | **yes** | Idempotency key; the `SKILL.md` front-matter `name:` should match. |
-| `inline` / `path` / `source` | string | one-of | The `SKILL.md` body source. |
+| `inline` / `path` / `source` | string | one-of | The `SKILL.md` body source (`source` is an `https://…` URL). |
+| `ref` | string | no | Git ref / tag / sha to pin a `source:` checkout. |
+| `digest` | string | no | `sha256:…` integrity digest for a `source:` body. |
 | `allow_unsafe_license` | bool | no | Bypass the SPDX gate. |
 
 ### `spec.crews[]`

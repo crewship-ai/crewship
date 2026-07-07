@@ -59,7 +59,7 @@ func TestLookupPrice_Direct(t *testing.T) {
 		{"trim whitespace", "  anthropic  ", "  claude-opus-4-7  ", 5.0, 25.0},
 		{"ollama wildcard", "ollama", "llama3:70b", 0, 0},
 		{"local wildcard", "local", "anything", 0, 0},
-		{"anthropic fallback", "anthropic", "totally-new-model", 5.0, 25.0},
+		{"anthropic fallback", "anthropic", "totally-new-model", 10.0, 50.0},
 		{"openai fallback", "openai", "totally-new-model", 20.0, 80.0},
 		{"google fallback", "google", "totally-new-model", 2.5, 15.0},
 		{"unknown provider → zeros", "unknown-vendor", "some-model", 0, 0},

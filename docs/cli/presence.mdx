@@ -71,7 +71,7 @@ crewship presence roster --format json
 
 - Roster is workspace-scoped; there is no way to see another workspace's roster from the CLI.
 - Cross-tenant crew IDs return 404 with the same shape as "no such crew" so existence is not leaked.
-- Empty roster output (`(roster empty - no presence entries for scope)`) means either the agents have never emitted a status or the sweeper flipped them all offline and someone purged the rows -- check the journal's `agent.status_change` history.
+- Empty roster output (`(roster empty — no presence entries for scope)`) means either the agents have never emitted a status or the sweeper flipped them all offline and someone purged the rows -- check the journal's `agent.status_change` history.
 
 ## Related
 

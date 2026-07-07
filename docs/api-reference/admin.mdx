@@ -21,6 +21,7 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | `GET` | [/api/v1/admin/users/\{userId\}/data](#get-api-v1-admin-users-userid-data) | GDPR Art. 15 — export every row referencing a user |
 | `DELETE` | [/api/v1/admin/users/\{userId\}/data](#delete-api-v1-admin-users-userid-data) | GDPR Art. 17 — cascade purge a user's data |
 | `GET` | [/api/v1/admin/workspaces](#get-api-v1-admin-workspaces) | Workspace details with member/agent/crew counts |
+| `GET` | [/api/v1/audit](#get-api-v1-audit) | Paginated, filterable workspace audit log |
 | `GET` | [/api/v1/admin/memory/stats](#get-api-v1-admin-memory-stats) | Memory subsystem totals + per-tier/per-agent rollups |
 | `GET` | [/api/v1/admin/memory/versions](#get-api-v1-admin-memory-versions) | Row-level drill-down into `memory_versions` |
 | `GET` | [/api/v1/admin/memory/versions/\{id\}/content](#get-api-v1-admin-memory-versions-id-content) | Raw blob bytes for a single memory version |
@@ -257,6 +258,68 @@ Lists workspace details with member, agent, and crew counts.
 <Note>
   This endpoint is scoped to the current workspace only. It does not list other workspaces in the system.
 </Note>
+
+## Audit log
+
+The workspace audit trail — every `audit_logs` row for the current workspace, newest first. Requires the manage permission (ADMIN or OWNER).
+
+## GET /api/v1/audit
+
+Returns a paginated, filterable list of audit-log entries for the current workspace, joined to the acting user for email/name display (`internal/api/audit.go:44`).
+
+**Required role:** ADMIN or OWNER (`canRole(role, "manage")` — `internal/api/audit.go:48`)
+
+### Query Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | integer | `1` | 1-based page number; clamped to `1_000_000` to avoid offset overflow (`internal/api/audit.go:53-62`). |
+| `limit` | integer | `50` | Page size; values `< 1` or `> 100` reset to `50` (`internal/api/audit.go:63-66`). |
+| `action` | string | -- | Exact-match filter on `action`. |
+| `entity_type` | string | -- | Exact-match filter on `entity_type`. |
+| `entity_id` | string | -- | Exact-match filter on `entity_id`. |
+| `user_id` | string | -- | Exact-match filter on the acting user. |
+| `date_from` | string | -- | Lower bound on `created_at` (inclusive). |
+| `date_to` | string | -- | Upper bound on `created_at` (inclusive). |
+| `search` | string | -- | Case-insensitive `LIKE` across `action`, `entity_type`, and the joined user's email + full name (`internal/api/audit.go:133-143`). |
+
+### Response
+
+```json
+{
+  "data": [
+    {
+      "id": "audit-uuid",
+      "workspace_id": "ws-uuid",
+      "user_id": "user-uuid",
+      "action": "agent.update",
+      "entity_type": "agent",
+      "entity_id": "agent-uuid",
+      "metadata": "{\"field\":\"llm_model\"}",
+      "ip_address": "203.0.113.7",
+      "user_agent": "crewship-cli/0.4.1",
+      "created_at": "2026-06-30T14:02:11Z",
+      "user_email": "demo@crewship.ai",
+      "user_name": "Demo User"
+    }
+  ],
+  "pagination": { "page": 1, "limit": 50, "total": 128, "total_pages": 3 }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `user_id` | string? | Acting user; `null` for system-generated events (`internal/api/audit.go:25`). |
+| `metadata` | string? | Free-form JSON string captured with the event (`internal/api/audit.go:29`). |
+| `ip_address` / `user_agent` | string? | Request context, when recorded (`internal/api/audit.go:30-31`). |
+| `user_email` / `user_name` | string? | Joined from `users`; omitted (`omitempty`) when the row has no user (`internal/api/audit.go:33-34`). |
+| `data` | array | Always present; empty array when no rows match (`internal/api/audit.go:173-175`). |
+| `pagination` | object | `page`, `limit`, `total`, `total_pages` (`internal/api/audit.go:186-191`). |
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Page returned. |
+| `403` | Caller lacks the manage permission (`internal/api/audit.go:48-51`). |
 
 ## Memory admin
 

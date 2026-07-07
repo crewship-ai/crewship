@@ -69,11 +69,14 @@ POST /api/v1/internal/port-expose
 
 | Field | Type | Description |
 |---|---|---|
-| `port` | integer | Port number (1-65535) inside the crew container. |
+| `workspace_id` | string | Owning workspace. Required (the sidecar supplies it; re-verified against the DB agent↔crew↔workspace boundary). |
+| `crew_id` | string | Owning crew. Required (sidecar-supplied). |
+| `agent_id` | string | Requesting agent. Required (sidecar-supplied). |
+| `port` | integer | Port number (1-65535) inside the crew container. Required. |
 | `description` | string | Operator-facing name; surfaced in the audit list. Max 200 chars. |
 | `container_id` | string | Container to target. Required (the sidecar supplies it). |
 | `chat_id` | string | Optional — associates the expose with a chat session for UI surfacing. |
-| `ttl_seconds` | integer | Lifetime in seconds. Server clamps to a max of 24 hours. |
+| `ttl_seconds` | integer | Lifetime in seconds. Server clamps to a max of 24 hours (`MaxTTL`); zero/negative falls back to the 1-hour default. |
 
 **Response:** `201 Created`
 

@@ -18,7 +18,8 @@ spec:
   project_slug: q2-roadmap       # required — slug of a Project in the same bundle/workspace
   description: Public 1.0 release
   target_date: "2026-06-15"      # optional — YYYY-MM-DD
-  status: planned                # optional — planned | active | completed (default: planned)
+  status: planned                # optional — planned | active | completed
+                                 #   (omit → server defaults to "active")
 ```
 
 ### Field reference
@@ -33,7 +34,7 @@ spec:
 | `spec.project_slug` | **yes** | string | Must reference an existing `Project` (declared earlier in the bundle or already on the server). |
 | `spec.description` | no | string | Free-form prose; rendered in the milestone detail panel. |
 | `spec.target_date` | no | string | `YYYY-MM-DD`. Empty means no deadline. |
-| `spec.status` | no | enum | `planned` \| `active` \| `completed`. Defaults to `planned` in the manifest. |
+| `spec.status` | no | enum | `planned` \| `active` \| `completed`. The manifest sends no default; when omitted the create handler stores `active` (`milestone_handler.go` — `if req.Status == "" { req.Status = "active" }`). |
 
 ## Examples
 
@@ -157,7 +158,13 @@ Fails with a `slug already exists` error if any declared milestone already exist
 
 ### `ApplyReplace`
 
-For each declared milestone, emits `Action=Delete` followed by `Action=Create`. Use this only when the milestone identity should be reset (e.g. you've changed the name and want a fresh row rather than a rename). Apply also deletes any milestones in the project that the manifest no longer declares — be careful, this is the destructive mode.
+The milestone kind does **not** implement a distinct replace path today:
+`MilestoneDocument.Plan` only ever emits `Create` / `Update` / `Unchanged`
+(there is no `PlanReplace`, and the apply loop calls `Plan` regardless of
+mode). So even under `--replace` a declared milestone is upserted, not
+delete-then-recreated, and milestones the manifest no longer declares are
+**not** pruned. To reset a milestone's identity, delete it explicitly
+(`crewship project milestone delete <id>`) before re-applying.
 
 ## Round-trip via export
 

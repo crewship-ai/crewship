@@ -16,6 +16,7 @@ An **agent** is an AI coding agent with a configurable role, CLI adapter, skills
 |---|---|---|
 | GET | [/api/v1/agents/crews-status](#crews-status) | Lightweight agent counts by status for toolbar/dashboard widgets |
 | GET | [/api/v1/agent-load](#agent-load) | Agent load metrics across the workspace |
+| GET | [/api/v1/models](#model-discovery) | Enumerate the models a provider can serve (live or curated) |
 | GET | [/api/v1/agents](#list-agents) | List agents (optionally filtered by crew) |
 | POST | [/api/v1/agents](#create-agent) | Create a new agent |
 | GET | [/api/v1/agents/{agentId}](#get-agent) | Get a single agent |
@@ -93,6 +94,59 @@ GET /api/v1/agent-load?workspace_id={workspaceId}
 ```
 
 Returns agent load metrics across the workspace.
+
+---
+
+## Model Discovery
+
+Enumerate the models an LLM provider can serve, so an operator (or an agent building a `POST`/`PATCH /api/v1/agents` request) doesn't have to guess a model identifier. Discovery is **live when possible, curated when not** (`internal/api/models.go:84`): if the workspace has an active `API_KEY` credential for the provider, Crewship queries the provider's own models API; otherwise it returns a hand-maintained curated fallback. The `source` field reports which path was taken. See the [Model discovery guide](/guides/model-discovery) for the CLI equivalent (`crewship model list`) and the `llm_model` validation this same resolver drives on [agent update](#update-agent).
+
+### List Models
+
+```
+GET /api/v1/models?provider={PROVIDER}&workspace_id={workspaceId}
+```
+
+**Auth:** Any authenticated workspace member (`authed` + workspace context; the active provider credential is read from the resolved workspace) (`internal/api/router_crews.go:230`).
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `provider` | string | Yes | Provider to enumerate. Case-insensitive; upper-cased server-side. One of `ANTHROPIC`, `OPENAI`, `GOOGLE`, `OLLAMA` (`internal/api/models.go:45-50`). |
+| `workspace_id` | string | Yes | Workspace whose provider credential is used for live listing. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "provider": "ANTHROPIC",
+  "source": "live",
+  "models": [
+    { "id": "claude-opus-4-8", "display_name": "Claude Opus 4.8", "provider": "anthropic" },
+    { "id": "claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6", "provider": "anthropic" }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `provider` | string | Echo of the resolved (upper-cased) provider (`internal/api/models.go:36`). |
+| `source` | string | `"live"` when the provider's own API answered, `"curated"` when the static fallback was used (`internal/api/models.go:37`). |
+| `models` | array | Always a JSON array (never `null`), even when empty (`internal/api/models.go:120`). |
+| `models[].id` | string | Model identifier to pass as `llm_model` (`internal/llm/provider.go:100`). |
+| `models[].display_name` | string | Human-readable name; omitted when the provider gives none (`internal/llm/provider.go:101`). |
+| `models[].provider` | string | Lower-case provider tag on the model (`internal/llm/provider.go:102`). |
+
+<Note>
+  **`OLLAMA` has no curated fallback.** Its model set is whatever the local daemon has pulled, so there is no sensible static list. When the daemon can't be reached the endpoint returns **`502`** rather than an empty list, so "daemon unreachable" is never mistaken for "no models installed" (`internal/api/models.go:103-107`). `GOOGLE` has no live lister yet and always resolves to its curated set (`internal/api/models.go:78`).
+</Note>
+
+| Status | Condition |
+|---|---|
+| `200` | Model set returned (`source` reports live vs curated). |
+| `400` | `provider` missing, or not one of `ANTHROPIC`/`OPENAI`/`GOOGLE`/`OLLAMA` (`internal/api/models.go:88-96`). |
+| `502` | `OLLAMA` daemon unreachable and no curated fallback exists (`internal/api/models.go:104`). |
 
 ---
 
