@@ -6,6 +6,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { usePipelineRuns } from "@/hooks/use-pipeline-runs"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { useTrace } from "@/hooks/use-trace"
+import { useStepIO } from "@/hooks/use-step-io"
 import { useTraceSelection } from "@/hooks/use-trace-selection"
 import { useWorkspaceAgents } from "@/hooks/use-workspace-agents"
 import { useRunWaitpoints } from "@/hooks/use-run-waitpoints"
@@ -221,9 +222,19 @@ export function ActivityTracePage() {
   // the side panel renders as a waterfall. mapSubSpans is defensive +
   // returns [] when the run recorded none, so this is safe even when
   // sub_spans is absent (older runs / non-agent steps).
+  //
+  // The main poll (useTrace) omits per-span input/output to keep the hot
+  // payload flat (#863); useStepIO fetches the OPENED step's I/O on demand.
+  // Prefer that (has input/output) and fall back to the light poll's
+  // metadata-only spans while it loads — the waterfall renders either way,
+  // only the expanded action's input/output arrives a beat later.
+  const { spans: stepIOSpans } = useStepIO(workspaceId, runId, stepId)
   const selectedSubSpans = useMemo(
-    () => (stepId ? mapSubSpans(run?.sub_spans?.[stepId]) : []),
-    [stepId, run?.sub_spans],
+    () =>
+      mapSubSpans(
+        stepIOSpans ?? (stepId ? run?.sub_spans?.[stepId] : undefined),
+      ),
+    [stepIOSpans, stepId, run?.sub_spans],
   )
 
   const isFailedStep = run?.failed_at_step === stepId

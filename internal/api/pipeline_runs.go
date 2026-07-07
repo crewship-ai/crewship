@@ -229,9 +229,21 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		// as run.agent_span journal entries, keyed by step_id. A run that
 		// recorded none (old run, agent with no tool calls, LLMRunner mode)
 		// gets an empty object — same shape, no error.
-		"sub_spans": h.loadRunAgentSpans(r.Context(), workspaceID, runID),
+		"sub_spans": h.loadRunAgentSpans(r.Context(), workspaceID, runID, resolveIOStep(r)),
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// resolveIOStep reads the sub-span I/O gate from the GetRun query (#863):
+//   - ?io_step=<stepId> → inline input/output only for that step's spans
+//     (what the detail panel fetches when a step is opened)
+//   - ?include_io=1     → inline for every span (a full dump; e.g. the CLI)
+//   - neither           → omit I/O bodies (the light poll payload)
+func resolveIOStep(r *http.Request) string {
+	if r.URL.Query().Get("include_io") == "1" {
+		return "*"
+	}
+	return r.URL.Query().Get("io_step")
 }
 
 // runAgentSpanQueryLimit bounds how many sub-spans GetRun pulls for one run.
@@ -245,7 +257,15 @@ const runAgentSpanQueryLimit = 2000
 // journal entries, anchored to the run via trace_id) and returns them grouped
 // by step_id, each step's slice ordered by seq. Best-effort: a query failure
 // logs and yields an empty (non-nil) map so the run detail still renders.
-func (h *PipelineHandler) loadRunAgentSpans(ctx context.Context, workspaceID, runID string) map[string][]map[string]any {
+//
+// ioStep gates the HEAVY per-span input/output bodies (#863): "" omits them
+// from every span (the light poll payload — the Activity canvas refetches this
+// on every step event + a 3s tick, and only needs the waterfall metadata);
+// "*" includes them for all spans; a specific step id includes them only for
+// that step's spans (what the detail panel fetches for the OPENED step). The
+// cheap truncated flags are ALWAYS surfaced so the "truncated" chip renders in
+// the light view. Response shape is backward-compatible — fields just absent.
+func (h *PipelineHandler) loadRunAgentSpans(ctx context.Context, workspaceID, runID, ioStep string) map[string][]map[string]any {
 	out := map[string][]map[string]any{}
 	if h.db == nil || workspaceID == "" || runID == "" {
 		return out
@@ -280,17 +300,22 @@ func (h *PipelineHandler) loadRunAgentSpans(ctx context.Context, workspaceID, ru
 		if d, ok := p["detail"]; ok {
 			span["detail"] = d
 		}
-		if in, ok := p["input"]; ok {
-			span["input"] = in
-		}
-		if o, ok := p["output"]; ok {
-			span["output"] = o
-		}
+		// Truncated flags are cheap — always surface them so the light poll
+		// view can still show a "truncated" chip before the body is fetched.
 		if it, ok := p["input_truncated"]; ok {
 			span["input_truncated"] = it
 		}
 		if ot, ok := p["output_truncated"]; ok {
 			span["output_truncated"] = ot
+		}
+		// Heavy I/O bodies — only for the requested step (or all, or none).
+		if ioStep == "*" || ioStep == stepID {
+			if in, ok := p["input"]; ok {
+				span["input"] = in
+			}
+			if o, ok := p["output"]; ok {
+				span["output"] = o
+			}
 		}
 		if a, ok := p["attributes"]; ok {
 			span["attributes"] = a

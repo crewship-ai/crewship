@@ -192,6 +192,8 @@ For an `agent_run` step, the detail panel carries a **waterfall of the agent's i
 
 Both are captured for every CLI adapter (the recorder taps the shared tool-call/tool-result stream, so it's adapter-agnostic) and size-bounded per action — **input at 2 KB** (args are context) and **output at 16 KB** (roomy on purpose: a strict-JSON deliverable, like a month of parsed transactions, must survive whole, since a JSON body cut mid-object no longer renders as structured data) — plus a per-step cap of 200 actions, so a chatty agent can't bloat the journal. When a value *is* cut, it's marked `...(truncated)` and the action shows a **`truncated` chip** — the full, untruncated result is always on the step's **Output** tab (`run.step_outputs`), so the cap never hides data, it just points at where the whole thing lives. Secrets in an argument or a result are redacted before capture. The same data is returned by `GET /api/v1/workspaces/{ws}/pipeline-runs/{runId}` under each step's `sub_spans[]`, and renders through the same shared `OutputView` as the Input/Output tabs.
 
+The per-action **input/output bodies are fetched lazily**: the live canvas poll (which refetches this run on every step event + a 3 s tick) requests only span *metadata* — name, status, duration, and the truncated flags — so a watched long run's payload stays flat as actions accumulate. Opening a step's Actions tab fetches that one step's I/O on demand (`?io_step=<stepId>`; `?include_io=1` returns it for every step, e.g. for a CLI dump). The `truncated` chips render in the light view too, before the body arrives.
+
 URL state is the single source of truth for selection (`useTraceSelection`):
 
 ```

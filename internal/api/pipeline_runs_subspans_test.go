@@ -51,7 +51,7 @@ func TestLoadRunAgentSpans_GroupsByStepOrderedBySeq(t *testing.T) {
 	insert("j2", "stepA", 0, "bash", "Bash", "ok", nil)
 	insert("j3", "stepB", 0, "mcp_tool", "save_routine", "error", map[string]string{"tool": "mcp__crewship-routines__save_routine"})
 
-	spans := h.loadRunAgentSpans(context.Background(), wsID, runID)
+	spans := h.loadRunAgentSpans(context.Background(), wsID, runID, "")
 
 	if len(spans) != 2 {
 		t.Fatalf("expected 2 step groups, got %d (%v)", len(spans), spans)
@@ -78,6 +78,65 @@ func TestLoadRunAgentSpans_GroupsByStepOrderedBySeq(t *testing.T) {
 	}
 }
 
+func TestLoadRunAgentSpans_LazyIOGating(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := &PipelineHandler{
+		db:     db,
+		logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+	}
+	runID := "run_io_gate"
+
+	insertIO := func(id, stepID string) {
+		payload := map[string]any{
+			"run_id": runID, "step_id": stepID, "seq": 0, "kind": "bash", "name": "Bash",
+			"status": "ok", "started_at": "2026-06-30T09:00:00Z", "duration_ms": 10,
+			"input": `{"command":"x"}`, "output": "big result", "output_truncated": true,
+		}
+		raw, _ := json.Marshal(payload)
+		if _, err := db.Exec(`INSERT INTO journal_entries
+			(id, workspace_id, ts, entry_type, severity, priority, actor_type, actor_id, summary, payload, refs, trace_id)
+			VALUES (?, ?, '2026-06-30T09:00:00.000Z', ?, 'info', 'normal', 'orchestrator', ?, 's', ?, '{}', ?)`,
+			id, wsID, string(journal.EntryRunAgentSpan), runID, string(raw), runID); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+	insertIO("a", "stepA")
+	insertIO("b", "stepB")
+
+	hasIO := func(span map[string]any) bool {
+		_, hasIn := span["input"]
+		_, hasOut := span["output"]
+		return hasIn || hasOut
+	}
+
+	// Light (default): NO input/output on any span, but the truncated flag
+	// stays so the chip can render.
+	light := h.loadRunAgentSpans(context.Background(), wsID, runID, "")
+	if hasIO(light["stepA"][0]) || hasIO(light["stepB"][0]) {
+		t.Errorf("light view leaked I/O: %+v", light)
+	}
+	if light["stepA"][0]["output_truncated"] != true {
+		t.Errorf("truncated flag dropped from light view: %+v", light["stepA"][0])
+	}
+
+	// Scoped to stepA: only stepA carries I/O.
+	scoped := h.loadRunAgentSpans(context.Background(), wsID, runID, "stepA")
+	if !hasIO(scoped["stepA"][0]) {
+		t.Errorf("opened step missing I/O: %+v", scoped["stepA"][0])
+	}
+	if hasIO(scoped["stepB"][0]) {
+		t.Errorf("non-opened step leaked I/O: %+v", scoped["stepB"][0])
+	}
+
+	// include_io=1 → "*": every span carries I/O.
+	all := h.loadRunAgentSpans(context.Background(), wsID, runID, "*")
+	if !hasIO(all["stepA"][0]) || !hasIO(all["stepB"][0]) {
+		t.Errorf("include_io=* missing I/O somewhere: %+v", all)
+	}
+}
+
 func TestLoadRunAgentSpans_EmptyForRunWithNone(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
@@ -88,7 +147,7 @@ func TestLoadRunAgentSpans_EmptyForRunWithNone(t *testing.T) {
 		logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 	}
 
-	spans := h.loadRunAgentSpans(context.Background(), wsID, "run_with_no_spans")
+	spans := h.loadRunAgentSpans(context.Background(), wsID, "run_with_no_spans", "")
 	if spans == nil {
 		t.Fatal("expected non-nil empty map, got nil")
 	}
