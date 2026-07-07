@@ -282,6 +282,14 @@ const (
 	EntryProvisioningComplete EntryType = "provisioning.complete"
 	EntryProvisioningFailed   EntryType = "provisioning.failed"
 
+	// EntryProvisioningBuildFailed is the durable record of a devcontainer
+	// feature-BUILD failure, carrying the bounded, scrubbed BuildKit stderr
+	// tail in Payload["detail"] (plus Payload["error"] and ["tag"]). It is the
+	// post-hoc diagnostic surface (#829): the live WS event is ephemeral, so
+	// this journal row is what `crewship crew provision status` reads back after
+	// the in-memory job's TTL to show WHY a build failed.
+	EntryProvisioningBuildFailed EntryType = "provisioning.build_failed"
+
 	// EntryProvisioningStep is one fine-grained, structured step in the
 	// container-preparation pipeline (resolve_features → image_build →
 	// per-feature install → container_create → containerEnv_apply → ready, plus

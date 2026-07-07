@@ -90,6 +90,11 @@ const (
 	ProvStepReady             = "ready"
 	ProvStepCacheHit          = "provision.cache_hit"
 	ProvStepFailed            = "provision.failed"
+	// ProvStepBuildFailed marks the feature-BUILD failure event that carries
+	// the bounded BuildKit stderr tail in Detail. The caller's sink routes it
+	// to a durable journal.EntryProvisioningBuildFailed so the tail is
+	// retrievable post hoc (#829), not only in the live stream.
+	ProvStepBuildFailed = "provision.build_failed"
 )
 
 // Stable status constants for ProvisionEvent.Status.
