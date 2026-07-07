@@ -26,7 +26,24 @@ import (
 // source when the mount comes up). Other paths use the legacy /output
 // tree ("<id>/..."), where agent-generated output files live. Traversal
 // and absolute paths are rejected.
+// safeCrewID reports whether a crew id from the request path is a single
+// clean path component safe to join into a storage key — no slash, no
+// backslash, no "." / ".." / empty, and unchanged by filepath.Clean (so an
+// encoded-slash value can't collapse a key out of its intended subtree).
+func safeCrewID(crewID string) bool {
+	if crewID == "" || crewID == "." || crewID == ".." || strings.ContainsAny(crewID, `/\`) {
+		return false
+	}
+	return filepath.Clean(crewID) == crewID
+}
+
 func resolveCrewFileKey(crewID, path string) (string, bool) {
+	// crewID comes from r.PathValue("id") and is joined into the storage
+	// key below (see safeCrewID) — reject anything that isn't a single
+	// clean path component so filepath.Join can't escape the crews/ prefix.
+	if !safeCrewID(crewID) {
+		return "", false
+	}
 	clean := filepath.Clean(path)
 	if clean == "" || clean == "." || strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
 		return "", false
@@ -43,6 +60,13 @@ func resolveCrewFileKey(crewID, path string) (string, bool) {
 func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("id")
 	agentSlug := r.URL.Query().Get("agent_slug")
+
+	// Same crew-id join hazard as resolveCrewFileKey: dir is built from
+	// crewID below, so reject an unsafe id before it reaches filepath.Join.
+	if !safeCrewID(crewID) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid crew id"})
+		return
+	}
 
 	if s.storage == nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "files": []interface{}{}})

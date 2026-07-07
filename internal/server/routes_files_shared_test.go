@@ -123,3 +123,32 @@ func TestHandleFileDownload_SharedRoundTrip(t *testing.T) {
 		t.Errorf("download body = %q, want payload", got)
 	}
 }
+
+// TestResolveCrewFileKey_RejectsUnsafeCrewID pins the CodeRabbit Major on
+// this PR: r.PathValue("id") can decode to a value carrying a slash or
+// dot-dot (an encoded-slash URL), and filepath.Join("crews", crewID, ...)
+// would collapse the key out of the crews/ prefix — worst case into
+// ANOTHER crew's shared tree. The crew id must be a single clean path
+// component before it is joined into a storage key.
+func TestResolveCrewFileKey_RejectsUnsafeCrewID(t *testing.T) {
+	for _, id := range []string{
+		"../elsewhere",
+		"..",
+		"a/b",
+		"crews/other",
+		`a\b`,
+		".",
+		"",
+		"../crews/victim",
+	} {
+		t.Run(id, func(t *testing.T) {
+			if key, ok := resolveCrewFileKey(id, "shared/x.py"); ok {
+				t.Fatalf("crewID %q must be rejected, got key %q", id, key)
+			}
+		})
+	}
+	// Sane CUID-shaped id keeps working.
+	if _, ok := resolveCrewFileKey("cmr9bella0046b7ac37ed", "shared/x.py"); !ok {
+		t.Fatal("valid crew id rejected")
+	}
+}
