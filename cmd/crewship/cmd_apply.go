@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -124,6 +125,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 		Mode:         mode,
 		Secrets:      secrets,
 		SkipTestGate: skipTestGate,
+		BaseDir:      manifestBaseDir(path),
 	})
 	if err != nil {
 		return err
@@ -151,6 +153,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 		Secrets:      secrets,
 		Yes:          yes,
 		SkipTestGate: skipTestGate,
+		BaseDir:      manifestBaseDir(path),
 		OnReport:     func(string) { /* plan already printed */ },
 	})
 	// Any error from Apply means nothing was committed past the
@@ -367,4 +370,13 @@ func confirmInteractive(prompt string) bool {
 	}
 	line = strings.ToLower(strings.TrimSpace(line))
 	return line == "y" || line == "yes"
+}
+
+// manifestBaseDir returns the directory relative CrewFile.Src paths resolve
+// against: the manifest file's directory, or "" (= process cwd) for stdin.
+func manifestBaseDir(file string) string {
+	if file == "" || file == "-" {
+		return ""
+	}
+	return filepath.Dir(file)
 }

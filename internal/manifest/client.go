@@ -1,12 +1,14 @@
 package manifest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -47,6 +49,27 @@ func (a *cliAdapter) Delete(ctx context.Context, path string) (*http.Response, e
 	return a.inner.WithContext(ctx).Delete(path)
 }
 func (a *cliAdapter) GetWorkspaceID() string { return a.inner.GetWorkspaceID() }
+
+// PutBytes issues a raw-body PUT (application/octet-stream) — the standard
+// Do path JSON-encodes bodies, which is wrong for file uploads. Built via
+// NewRequest so workspace injection AND the issue #571 token-host guard run
+// here too (mirrors cmd/crewship putBytes).
+func (a *cliAdapter) PutBytes(ctx context.Context, path string, body []byte) (*http.Response, error) {
+	req, err := a.inner.NewRequest(ctx, http.MethodPut, path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	return a.inner.HTTPClient.Do(req)
+}
+
+// rawPutter is the optional capability an APIClient can implement to
+// support raw-body uploads (crew file delivery). Kept out of APIClient so
+// existing fakes/tests stay source-compatible; Client.SaveCrewFile fails
+// loudly when the capability is missing rather than silently no-op'ing.
+type rawPutter interface {
+	PutBytes(ctx context.Context, path string, body []byte) (*http.Response, error)
+}
 
 // NewClientFromCLI is the production constructor: wraps a
 // *cli.Client (which the CLI builds via newAPIClient) in a ctx-
@@ -733,4 +756,24 @@ func decodeJSON(r io.Reader, v any) error {
 		return nil
 	}
 	return json.Unmarshal(data, v)
+}
+
+// SaveCrewFile uploads bytes into the crew's shared volume via the same
+// PUT /crews/{id}/files/save endpoint `crewship crew files save` uses.
+// destPath is the already-normalized "shared/..." path.
+func (c *Client) SaveCrewFile(ctx context.Context, crewID, destPath string, data []byte) error {
+	rp, ok := c.api.(rawPutter)
+	if !ok {
+		return fmt.Errorf("crew file upload not supported by this API client (missing raw PUT capability)")
+	}
+	resp, err := rp.PutBytes(ctx,
+		"/api/v1/crews/"+url.PathEscape(crewID)+"/files/save?path="+url.QueryEscape(destPath), data)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("crew file save %s: HTTP %d", destPath, resp.StatusCode)
+	}
+	return nil
 }

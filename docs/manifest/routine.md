@@ -499,15 +499,20 @@ steps:
   `exec.command` journal entry (command + exit code + duration) for audit.
 
 **Delivering the script.** The script must exist in `/crew/shared` before the
-run. Today, push it with the CLI after provisioning the crew:
+run. The declarative way is the crew manifest's `files:` block — the script
+travels WITH the workspace and re-applies on every `crewship apply`:
 
-```text
-crewship crew files save <crew> shared/scripts/parse_vypis.py --file scripts/parse_vypis.py
+```yaml
+spec:
+  files:
+    - src: scripts/parse_vypis.py
+      dest: shared/scripts/parse_vypis.py
 ```
 
-`/crew/shared` is a runtime mount, so re-run this after a container rebuild.
-(Bundling scripts *with* the routine so they materialize automatically at
-provision time is tracked in the Routines 2.0 PRD.)
+(See `docs/manifest/crew.md` "spec.files[]". Max 1 MiB per file.) For a
+one-off push to a live crew, `crewship crew files save <crew>
+shared/scripts/parse_vypis.py --file scripts/parse_vypis.py` still works —
+but it does not survive the next rebuild the way the manifest block does.
 
 **Caveat — egress.** Per-step egress is **not** enforced at exec: a script
 inherits the crew container's global network policy (only `http` steps honor

@@ -123,6 +123,32 @@ wire shape mirrors the server's `serviceWire`.
 | `volumes` | []object | no | Named volumes `{ name, mount }`. Bind mounts (path-like names) are rejected; mounts must be unique. |
 | `healthcheck` | object | no | Docker healthcheck `{ test, interval, timeout, retries, start_period }`. Duration strings must parse via Go's `time.ParseDuration` ("5s", "1m"); `retries` non-negative. |
 
+### `spec.files[]`
+
+Local files (scripts, fixtures, configs) delivered into the crew's **shared
+volume** at `crewship apply` time — visible in-container under `/crew/shared`.
+This is how a routine's deterministic scripts travel *with* the manifest
+instead of a manual `crewship crew files save` after every rebuild. Re-applied
+on every `apply` (idempotent PUT through the same `/files/save` endpoint).
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `src` | string | **yes** | Local path, resolved relative to the manifest file's directory (absolute allowed). Max **1 MiB** per file; directories rejected — list files individually. |
+| `dest` | string | no | In-crew path under `shared/` (e.g. `shared/scripts/parse.py`); `/crew/shared/...` spellings normalize. Default: `shared/<basename(src)>`. Traversal and paths outside `shared/` are rejected at validate time. |
+
+```yaml
+spec:
+  files:
+    - src: scripts/parse_vypis.py
+      dest: shared/scripts/parse_vypis.py
+    - src: scripts/verify.py
+      dest: shared/scripts/verify.py
+```
+
+A `type: script` routine step (see `docs/manifest/routine.md` "Script steps")
+can then run them token-zero: `path: scripts/parse_vypis.py`. A missing or
+oversized local file fails the plan (and `--dry-run`), not mid-apply.
+
 ## Examples
 
 ### Minimal

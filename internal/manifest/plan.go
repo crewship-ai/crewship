@@ -791,6 +791,11 @@ func (pb *planBuilder) planCrewChildren(ctx context.Context, crewSlug, crewID st
 				})
 		}
 	}
+
+	// Declarative crew files (scripts/fixtures) → the shared volume.
+	if err := pb.planCrewFiles(crewSlug, crewID, spec.Files); err != nil {
+		return err
+	}
 	return nil
 }
 

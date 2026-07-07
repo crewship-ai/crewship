@@ -150,6 +150,25 @@ type CrewSpec struct {
 	// two crews can both declare `pg-data` and get isolated
 	// stores.
 	Services []Service `yaml:"services,omitempty" json:"services,omitempty"`
+
+	// Files are local files (scripts, fixtures, configs) delivered into
+	// the crew's shared volume at apply time — visible in-container under
+	// /crew/shared. This is how a routine's deterministic scripts travel
+	// WITH the workspace manifest instead of a manual `crew files save`
+	// after every rebuild. Src resolves relative to the manifest file;
+	// Dest defaults to shared/<basename(src)> and must stay under shared/.
+	// Each file is capped at 1 MiB (externalize bigger assets).
+	Files []CrewFile `yaml:"files,omitempty" json:"files,omitempty"`
+}
+
+// CrewFile is one local file to deliver into the crew shared volume.
+type CrewFile struct {
+	// Src is the local path, relative to the manifest file's directory
+	// (absolute paths allowed).
+	Src string `yaml:"src" json:"src"`
+	// Dest is the in-crew path under shared/ (e.g. "shared/scripts/parse.py").
+	// "/crew/"-prefixed forms are normalized. Empty = shared/<basename(src)>.
+	Dest string `yaml:"dest,omitempty" json:"dest,omitempty"`
 }
 
 // Service is one sidecar container the crew needs. Each entry maps
