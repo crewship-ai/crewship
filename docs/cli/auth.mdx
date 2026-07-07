@@ -24,25 +24,24 @@ crewship auth <subcommand>
 
 ## `auth passwd`
 
-Change your password. Prompts for the current and new password when run
-interactively (no echo); pass `--current` / `--new` for scripting. The new
-password must be at least 8 characters.
+Change your password. Interactively it prompts (no echo) for the current
+password, then the new password twice. The new password must be at least
+8 characters.
+
+Passwords are **never** passed as flags — that would leak them into shell
+history and process listings. For scripting, pipe two lines on stdin: the
+current password first, the new password second.
 
 Changing your password **signs out your other active sessions** — the
 session you run this from stays logged in. It calls
 [`POST /api/v1/users/me/password`](/api-reference/auth#post-api-v1-users-me-password).
 
-| Flag | Default | Effect |
-| --- | --- | --- |
-| `--current <string>` | (prompt) | Current password. Prompts without echo if omitted. |
-| `--new <string>` | (prompt) | New password (min 8 chars). Prompts twice (with confirmation) if omitted. |
-
 ```bash
 # Interactive (recommended) — prompts for current + new, no echo:
 crewship auth passwd
 
-# Non-interactive (CI/scripts):
-crewship auth passwd --current "$OLD_PW" --new "$NEW_PW"
+# Non-interactive (CI/scripts) — current on line 1, new on line 2:
+printf '%s\n%s\n' "$OLD_PW" "$NEW_PW" | crewship auth passwd
 ```
 
 <Note>

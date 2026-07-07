@@ -98,28 +98,36 @@ func (h *WorkspaceHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Last-OWNER guard: refuse demoting the only remaining OWNER.
-	if currentRole == "OWNER" && req.Role != "OWNER" {
-		var ownerCount int
-		if err := h.db.QueryRowContext(r.Context(),
-			"SELECT COUNT(*) FROM workspace_members WHERE workspace_id = ? AND role = 'OWNER'",
-			workspaceID).Scan(&ownerCount); err != nil {
-			h.logger.Error("count workspace owners", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
-			return
-		}
-		if ownerCount <= 1 {
-			replyError(w, http.StatusConflict, "Cannot demote the last owner of the workspace")
-			return
-		}
-	}
-
+	// Last-OWNER guard, folded INTO the UPDATE so the owner-count check and
+	// the write are a single atomic statement — two concurrent demotions
+	// can't both observe >1 owner and leave the workspace with none. The
+	// row exists (verified above), so RowsAffected == 0 means the guard
+	// subquery blocked a last-owner demotion → 409.
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := h.db.ExecContext(r.Context(),
-		"UPDATE workspace_members SET role = ?, updated_at = ? WHERE id = ? AND workspace_id = ?",
-		req.Role, now, memberID, workspaceID); err != nil {
+	res, err := h.db.ExecContext(r.Context(), `
+		UPDATE workspace_members
+		SET role = ?, updated_at = ?
+		WHERE id = ? AND workspace_id = ?
+		  AND NOT (
+		    role = 'OWNER'
+		    AND ? != 'OWNER'
+		    AND (SELECT COUNT(*) FROM workspace_members
+		         WHERE workspace_id = ? AND role = 'OWNER') <= 1
+		  )`,
+		req.Role, now, memberID, workspaceID, req.Role, workspaceID)
+	if err != nil {
 		h.logger.Error("update workspace member role", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		h.logger.Error("rows affected for member role update", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if affected == 0 {
+		replyError(w, http.StatusConflict, "Cannot demote the last owner of the workspace")
 		return
 	}
 

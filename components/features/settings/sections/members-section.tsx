@@ -206,10 +206,16 @@ function MemberRoleControl({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="h-7 text-xs">Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="h-7 text-xs" disabled={saving}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="h-7 text-xs"
-              onClick={() => { if (pendingRole) void applyRole(pendingRole) }}
+              disabled={saving}
+              onClick={(e) => {
+                // Keep the dialog open while the PATCH is in flight; a
+                // second click can't fire a duplicate request.
+                e.preventDefault()
+                if (pendingRole && !saving) void applyRole(pendingRole)
+              }}
             >
               Change role
             </AlertDialogAction>

@@ -7,6 +7,7 @@ package api
 
 import (
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -125,6 +126,13 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 		replyError(w, http.StatusBadRequest, "new password must be at least 8 characters")
 		return
 	}
+	// bcrypt silently truncates — and GenerateFromPassword errors —
+	// past 72 bytes, so reject over-long input as a 400 rather than
+	// letting it become a 500.
+	if len(req.NewPassword) > 72 {
+		replyError(w, http.StatusBadRequest, "new password must be at most 72 bytes")
+		return
+	}
 
 	var hashed sql.NullString
 	err := h.db.QueryRowContext(r.Context(),
@@ -165,7 +173,15 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	revoked := h.revokeOtherSessions(r, user.ID, user.SessionID)
+	// Revoking sibling sessions is part of the password-rotation security
+	// contract — if it fails we must NOT report success, or the caller
+	// believes their old sessions are dead when they may still be live.
+	revoked, err := h.revokeOtherSessions(r, user.ID, user.SessionID)
+	if err != nil {
+		h.logger.Error("revoke sessions on password change", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success":          true,
@@ -175,24 +191,24 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 
 // revokeOtherSessions invalidates every active session for the user
 // except keepSid (the caller's current session). When keepSid is empty
-// (CLI-token auth — no user_sessions row) all sessions are revoked.
-func (h *UserProfileHandler) revokeOtherSessions(r *http.Request, userID, keepSid string) int {
+// (CLI-token auth — no user_sessions row) all sessions are revoked. A
+// non-nil error means the security guarantee could not be met and the
+// caller must fail the request.
+func (h *UserProfileHandler) revokeOtherSessions(r *http.Request, userID, keepSid string) (int, error) {
 	if h.sessions == nil {
-		return 0
+		return 0, nil
 	}
 	ctx := r.Context()
 	if keepSid == "" {
 		n, err := h.sessions.RevokeAllForUser(ctx, userID, sessions.ReasonPasswordChange)
 		if err != nil {
-			h.logger.Error("revoke all sessions on password change", "error", err)
-			return 0
+			return 0, fmt.Errorf("revoke all sessions: %w", err)
 		}
-		return int(n)
+		return int(n), nil
 	}
 	list, err := h.sessions.ListActiveForUser(ctx, userID)
 	if err != nil {
-		h.logger.Error("list sessions on password change", "error", err)
-		return 0
+		return 0, fmt.Errorf("list active sessions: %w", err)
 	}
 	count := 0
 	for _, s := range list {
@@ -200,10 +216,9 @@ func (h *UserProfileHandler) revokeOtherSessions(r *http.Request, userID, keepSi
 			continue
 		}
 		if err := h.sessions.Revoke(ctx, s.ID, sessions.ReasonPasswordChange); err != nil {
-			h.logger.Warn("revoke sibling session", "session_id", s.ID, "error", err)
-			continue
+			return count, fmt.Errorf("revoke sibling session %s: %w", s.ID, err)
 		}
 		count++
 	}
-	return count
+	return count, nil
 }

@@ -50,6 +50,19 @@ describe("ProfileSection editing (#867.1)", () => {
     await waitFor(() => expect(screen.getByText("Ada B. Lovelace")).toBeTruthy())
   })
 
+  it("shows a save error inline while staying in edit mode (#883 review)", async () => {
+    renderProfile()
+    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }))
+    fireEvent.change(screen.getByLabelText(/full name/i), { target: { value: "X" } })
+
+    apiFetch.mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({ error: "boom" }) })
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+
+    // Error is visible AND the input is still rendered (edit mode intact).
+    await waitFor(() => expect(screen.getByText("boom")).toBeTruthy())
+    expect(screen.getByLabelText(/full name/i)).toBeTruthy()
+  })
+
   it("posts a password change and confirms sessions were signed out", async () => {
     renderProfile()
     fireEvent.click(screen.getByRole("button", { name: /^change$/i }))

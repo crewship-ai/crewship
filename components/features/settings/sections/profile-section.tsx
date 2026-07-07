@@ -371,26 +371,37 @@ export function ProfileSection({
         </SettingsRow>
         <SettingsRow label="Full name">
           {editingName ? (
-            <div className="flex items-center gap-1.5">
-              <Input
-                value={nameDraft}
-                onChange={(e) => setNameDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void saveName()
-                  if (e.key === "Escape") setEditingName(false)
-                }}
-                autoFocus
-                maxLength={100}
-                aria-label="Full name"
-                className="h-7 w-48 text-xs"
-                disabled={savingName}
-              />
-              <Button size="sm" className="h-7 text-xs" onClick={() => void saveName()} disabled={savingName}>
-                {savingName ? <Spinner className="h-3 w-3" /> : "Save"}
-              </Button>
-              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setEditingName(false)} disabled={savingName}>
-                Cancel
-              </Button>
+            <div className="flex flex-col items-end gap-1">
+              <div className="flex items-center gap-1.5">
+                <Input
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void saveName()
+                    if (e.key === "Escape") { setNameError(null); setEditingName(false) }
+                  }}
+                  autoFocus
+                  maxLength={100}
+                  aria-label="Full name"
+                  className="h-7 w-48 text-xs"
+                  disabled={savingName}
+                />
+                <Button size="sm" className="h-7 text-xs" onClick={() => void saveName()} disabled={savingName}>
+                  {savingName ? <Spinner className="h-3 w-3" /> : "Save"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs"
+                  onClick={() => { setNameError(null); setEditingName(false) }}
+                  disabled={savingName}
+                >
+                  Cancel
+                </Button>
+              </div>
+              {/* Show save failures inline while still editing — the user
+                  stays in the editor and can retry. */}
+              {nameError && <span className="text-[11px] text-destructive">{nameError}</span>}
             </div>
           ) : (
             <div className="flex items-center gap-2">
@@ -401,11 +412,6 @@ export function ProfileSection({
             </div>
           )}
         </SettingsRow>
-        {nameError && !editingName && (
-          <SettingsRow label="">
-            <span className="text-[11px] text-destructive">{nameError}</span>
-          </SettingsRow>
-        )}
         <SettingsRow label="Password">
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground tracking-[0.2em]">••••••••</span>

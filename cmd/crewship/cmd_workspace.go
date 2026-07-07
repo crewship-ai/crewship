@@ -320,10 +320,14 @@ var workspaceMemberListCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		headers := []string{"ID", "EMAIL", "NAME", "ROLE", "JOINED"}
+		// MEMBER ID is the workspace_members row id — the identifier the
+		// `member role` / `member remove` commands PATCH/DELETE by. Show it
+		// first so the CLI advertises the same id the API consumes; USER ID
+		// stays for cross-referencing user-scoped commands.
+		headers := []string{"MEMBER ID", "USER ID", "EMAIL", "NAME", "ROLE", "JOINED"}
 		var rows [][]string
 		for _, m := range members {
-			rows = append(rows, []string{truncateID(m.UserID, 12), m.Email, m.FullName, m.Role, m.CreatedAt})
+			rows = append(rows, []string{m.ID, truncateID(m.UserID, 12), m.Email, m.FullName, m.Role, m.CreatedAt})
 		}
 		return f.Auto(members, headers, rows)
 	},

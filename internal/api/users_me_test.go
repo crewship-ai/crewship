@@ -103,6 +103,21 @@ func TestChangePassword_ShortNew_BadRequest(t *testing.T) {
 	}
 }
 
+func TestChangePassword_OverLongNew_BadRequest(t *testing.T) {
+	h, _, userID := newProfileRig(t)
+	// 73 bytes — past bcrypt's 72-byte limit; must 400, not 500.
+	long := ""
+	for i := 0; i < 73; i++ {
+		long += "a"
+	}
+	rr := httptest.NewRecorder()
+	h.ChangePassword(rr, selfReq(t, "POST", "/api/v1/users/me/password",
+		map[string]string{"current_password": "oldpassword1", "new_password": long}, userID, ""))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestChangePassword_Success_RehashesAndKeepsCurrentSession(t *testing.T) {
 	h, store, userID := newProfileRig(t)
 
