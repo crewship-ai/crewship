@@ -1,0 +1,52 @@
+---
+title: "auth"
+description: "Self-service account management from the CLI — change your own password."
+icon: "user-lock"
+---
+
+# crewship auth
+
+Self-service account commands. Login, logout, and whoami stay top-level
+(`crewship login` / `logout` / `whoami`); `auth` hosts the newer account
+mutations.
+
+```bash
+crewship auth <subcommand>
+```
+
+**Auth:** requires `crewship login`.
+
+## Subcommands
+
+| Command | Purpose |
+| --- | --- |
+| `auth passwd` | Change your own account password. |
+
+## `auth passwd`
+
+Change your password. Prompts for the current and new password when run
+interactively (no echo); pass `--current` / `--new` for scripting. The new
+password must be at least 8 characters.
+
+Changing your password **signs out your other active sessions** — the
+session you run this from stays logged in. It calls
+[`POST /api/v1/users/me/password`](/api-reference/auth#post-api-v1-users-me-password).
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--current <string>` | (prompt) | Current password. Prompts without echo if omitted. |
+| `--new <string>` | (prompt) | New password (min 8 chars). Prompts twice (with confirmation) if omitted. |
+
+```bash
+# Interactive (recommended) — prompts for current + new, no echo:
+crewship auth passwd
+
+# Non-interactive (CI/scripts):
+crewship auth passwd --current "$OLD_PW" --new "$NEW_PW"
+```
+
+<Note>
+Editing your display name is available in the web UI (Settings → Profile),
+backed by [`PATCH /api/v1/users/me`](/api-reference/auth#patch-api-v1-users-me).
+A CLI verb for it may follow.
+</Note>

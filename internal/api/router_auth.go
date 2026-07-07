@@ -61,6 +61,13 @@ func (r *Router) registerAuthRoutes() {
 	r.mux.Handle("GET /api/v1/auth/sessions", authed(http.HandlerFunc(sessionsH.List)))
 	r.authedSelfMut("POST", "/api/v1/auth/sessions/{id}/revoke", sessionsH.Revoke)
 
+	// Self-service profile (auth required, no workspace context) — edit
+	// own name + change own password (#867.1). Password change revokes
+	// the caller's other active sessions.
+	profileH := NewUserProfileHandler(r.db, r.logger, r.sessionsStore)
+	r.authedSelfMut("PATCH", "/api/v1/users/me", profileH.UpdateProfile)
+	r.authedSelfMut("POST", "/api/v1/users/me/password", profileH.ChangePassword)
+
 	// CLI token management (auth required)
 	cliTokenH := NewCLITokenHandler(r.db, r.logger)
 	r.authedSelfMut("POST", "/api/v1/auth/cli-token", cliTokenH.Create)

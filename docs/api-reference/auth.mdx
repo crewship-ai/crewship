@@ -29,6 +29,8 @@ All `/api/v1/auth/*` routes are mounted behind a rate limit of 10 req/min/IP. Ro
 | GET | [`/api/v1/auth/cli-token/validate`](#get-api-v1-auth-cli-token-validate) | Validate the current CLI token |
 | GET | [`/api/v1/auth/cli-tokens`](#get-api-v1-auth-cli-tokens) | List the caller's CLI tokens |
 | DELETE | [`/api/v1/auth/cli-tokens/{tokenId}`](#delete-api-v1-auth-cli-tokens-tokenid) | Revoke a CLI token |
+| PATCH | [`/api/v1/users/me`](#patch-api-v1-users-me) | Update your own profile (full name) |
+| POST | [`/api/v1/users/me/password`](#post-api-v1-users-me-password) | Change your own password |
 | POST | [`/api/v1/auth/forgot`](#post-api-v1-auth-forgot) | Request a password-reset email |
 | POST | [`/api/v1/auth/reset`](#post-api-v1-auth-reset) | Consume a reset token, set a new password |
 
@@ -470,6 +472,67 @@ Marks a token revoked. Subsequent uses are rejected by the auth middleware (`Val
 |---|---|
 | `404` | Token doesn't exist or belongs to a different user. |
 | `500` | DB error during the revoke write. |
+
+---
+
+## User profile (self-service)
+
+Every authenticated user can edit their own identity and rotate their own
+password without any workspace role. Both routes read the caller from the
+session (or CLI token) — there is no user id in the path.
+
+### `PATCH /api/v1/users/me`
+
+Update your own profile. **Auth required.**
+
+Currently only `full_name` is editable. Email changes require a
+re-verification flow and are intentionally out of scope; an `email` field
+in the body is ignored.
+
+**Request body:**
+
+| Field | Type | Description |
+|---|---|---|
+| `full_name` | string | 1-100 characters (trimmed). |
+
+**Response:** `200 OK` — `{ "id", "email", "full_name", "avatar_url" }`.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `full_name`, or length outside 1-100 |
+| `401` | Not authenticated |
+
+### `POST /api/v1/users/me/password`
+
+Change your own password. **Auth required.**
+
+Verifies the current password, stores a fresh bcrypt hash (cost 12), then
+revokes every **other** active session for you (reason `password_change`)
+— the session you called this from stays signed in. CLI-token callers
+have no browser session to preserve, so all browser sessions are revoked.
+
+**Request body:**
+
+| Field | Type | Description |
+|---|---|---|
+| `current_password` | string | Your existing password. |
+| `new_password` | string | At least 8 characters. |
+
+**Response:** `200 OK` — `{ "success": true, "sessions_revoked": <n> }`.
+
+| Status | Condition |
+|---|---|
+| `400` | `new_password` shorter than 8 chars, or the account has no password set (OAuth-only — use recovery) |
+| `401` | Not authenticated, or `current_password` is incorrect |
+
+Drive it from the CLI with [`crewship auth passwd`](/cli/auth).
+
+<Note>
+Avatar upload (`avatar_url`) is not yet wired — it needs a storage-backed
+upload + an authenticated serve endpoint and is tracked as a follow-up.
+The field is returned by `PATCH /users/me` but is currently only
+populated by Google sign-in.
+</Note>
 
 ---
 

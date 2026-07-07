@@ -26,6 +26,7 @@ Errors follow [RFC 7807 Problem Details](https://datatracker.ietf.org/doc/html/r
 | `GET` | [`/api/v1/workspaces/{workspaceId}/members`](#list-members) | All members of the workspace |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/members`](#add-member) | Add an existing user by user ID |
 | `DELETE` | [`/api/v1/workspaces/{workspaceId}/members/{memberId}`](#remove-member) | Remove a member (not the `OWNER`) |
+| `PATCH` | [`/api/v1/workspaces/{workspaceId}/members/{memberId}`](#change-member-role) | Change a member's role (`MANAGER+`, ladder-guarded) |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities`](#get-member-capabilities) | Resolved capability set for one member |
 | `PATCH` | [`/api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities`](#update-member-capabilities) | Mutate one member's capability set |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/members/capabilities`](#list-all-member-capabilities-bulk) | Capabilities for every member in one call |
@@ -287,6 +288,44 @@ Removes a workspace member. **You cannot remove the workspace OWNER.**
 |---|---|
 | `403` | Caller not `OWNER`/`ADMIN`, **or** target member is the `OWNER` |
 | `404` | `memberId` not found in this workspace |
+
+---
+
+### Change member role
+
+```
+PATCH /api/v1/workspaces/{workspaceId}/members/{memberId}
+```
+
+Changes a member's workspace role. Gated at `MANAGER+` (`canRole "create"`),
+then subject to the role ladder enforced in the handler.
+
+**Auth:** `MANAGER` or above, plus the ladder:
+
+- You may only **grant a role strictly below your own** (`roleRank[new] >= roleRank[caller]` is rejected). An `OWNER` can therefore grant up to `ADMIN`, an `ADMIN` up to `MANAGER`, and so on. This means ownership is **not** transferable through this endpoint.
+- You may not modify a member ranked **above** your own.
+- The **last `OWNER`** cannot be demoted.
+
+**Request body:**
+
+| Field | Type | Description |
+|---|---|---|
+| `role` | string | Target role: one of `OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`. |
+
+**Response:** `200 OK`
+
+```json
+{ "status": "updated", "member_id": "mem_abc123", "role": "MANAGER" }
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Unknown role, or invalid body |
+| `403` | Caller below `MANAGER`; target ranked above the caller; or granted role ≥ caller's own |
+| `404` | `memberId` not found in this workspace |
+| `409` | Demoting the last `OWNER` |
+
+Drive it from the CLI with [`crewship workspace member role`](/cli/workspace).
 
 ---
 
