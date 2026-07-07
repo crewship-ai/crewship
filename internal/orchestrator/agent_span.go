@@ -47,6 +47,12 @@ type RunAgentSpan struct {
 	// Without it you can see that `python3 parse.py` ran but never what it
 	// returned. Empty when the tool produced no textual result.
 	Output string `json:"output,omitempty"`
+	// InputTruncated / OutputTruncated flag that the capped Input/Output was
+	// cut at its byte cap — surfaced to the UI as a "truncated" chip so a
+	// result cut mid-JSON reads as bounded-on-purpose, not a mystery. The full
+	// output survives on the step's Output tab (run.step_outputs).
+	InputTruncated  bool `json:"input_truncated,omitempty"`
+	OutputTruncated bool `json:"output_truncated,omitempty"`
 }
 
 const (
@@ -61,17 +67,21 @@ const (
 	// journal row. Truncation is rune-safe and marked.
 	RunAgentSpanDetailMaxBytes = 2048
 
-	// RunAgentSpanIOMaxBytes caps the captured Input (full args JSON) and
-	// Output (tool_result tail) per span. A `cat bigfile` result or a Write
-	// with a large `content` arg would otherwise bloat the journal row —
-	// each span is its own journal entry, but 200 spans/step × unbounded I/O
-	// is unbounded. 2048 B is ~30 lines of output: enough to interpret what
-	// a step did without persisting file contents wholesale.
-	RunAgentSpanIOMaxBytes = 2048
+	// RunAgentSpanInputMaxBytes caps the captured Input (full args JSON). The
+	// args are context (a Write's target path, a Bash `description`) — 2 KB is
+	// plenty; a Write's large `content` arg doesn't need to round-trip whole.
+	RunAgentSpanInputMaxBytes = 2048
 
-	// RunAgentSpanOutputMaxBytes is the output-tail cap, kept as a distinct
-	// name so the capture site and tests read intentfully. Same bound as I/O.
-	RunAgentSpanOutputMaxBytes = RunAgentSpanIOMaxBytes
+	// RunAgentSpanOutputMaxBytes caps the captured Output (tool_result tail).
+	// Deliberately roomier than the input cap: the output IS the deliverable
+	// this feature exists to surface — a strict-JSON result (e.g. a month of
+	// parsed transactions) must survive whole, and a truncated JSON body is
+	// unparseable (the UI drops from the JSON viewer to plain text). 16 KB
+	// holds a substantial structured result; the 200-span/step cap still
+	// bounds the pathological chatty-agent case, and anything past the cap is
+	// flagged (OutputTruncated) with the full text available on the step's
+	// Output tab. A `cat bigfile` is still bounded here, by design.
+	RunAgentSpanOutputMaxBytes = 16 * 1024
 )
 
 // DeriveSpanKind maps a CLI tool name to the coarse sub-span kind the trace
@@ -190,7 +200,7 @@ func captureInput(input map[string]any) (string, bool) {
 	// the tool_call input map). Redaction may break strict JSON validity —
 	// acceptable: the FE renders it best-effort as text when it can't parse.
 	scrubbed := spanDetailScrubber.Scrub(string(raw))
-	return truncateBytes(scrubbed, RunAgentSpanIOMaxBytes)
+	return truncateBytes(scrubbed, RunAgentSpanInputMaxBytes)
 }
 
 // captureOutput scrubs + caps a tool_result body for the Output field. The
@@ -322,18 +332,20 @@ func (r *AgentSpanRecorder) Observe(ev AgentEvent) {
 			dur = 0
 		}
 		span := RunAgentSpan{
-			RunID:      r.runID,
-			StepID:     r.stepID,
-			Seq:        r.seq,
-			Kind:       kind,
-			Name:       deriveSpanName(p.name),
-			Detail:     detail,
-			StartedAt:  p.startedAt,
-			DurationMs: dur,
-			Status:     status,
-			Attributes: deriveSpanAttributes(p.name, kind, r.model, input),
-			Input:      inputJSON,
-			Output:     outputTail,
+			RunID:           r.runID,
+			StepID:          r.stepID,
+			Seq:             r.seq,
+			Kind:            kind,
+			Name:            deriveSpanName(p.name),
+			Detail:          detail,
+			StartedAt:       p.startedAt,
+			DurationMs:      dur,
+			Status:          status,
+			Attributes:      deriveSpanAttributes(p.name, kind, r.model, input),
+			Input:           inputJSON,
+			Output:          outputTail,
+			InputTruncated:  iTrunc,
+			OutputTruncated: oTrunc,
 		}
 		r.seq++
 		r.sink(span)

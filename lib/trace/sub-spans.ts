@@ -69,6 +69,10 @@ function toSubSpan(
   const detail = typeof o.detail === "string" ? o.detail : undefined
   const input = typeof o.input === "string" ? o.input : undefined
   const output = typeof o.output === "string" ? o.output : undefined
+  // Only set when true so the normalized span stays minimal (an absent flag
+  // is `undefined`, which toEqual-based tests and the UI both treat as "no").
+  const inputTruncated = o.input_truncated === true ? true : undefined
+  const outputTruncated = o.output_truncated === true ? true : undefined
   const startedAt =
     typeof o.started_at === "string" && o.started_at ? o.started_at : undefined
   const durationMs =
@@ -89,6 +93,8 @@ function toSubSpan(
       attributes: toAttributes(o.attributes),
       input,
       output,
+      inputTruncated,
+      outputTruncated,
     },
     seq,
     idx,

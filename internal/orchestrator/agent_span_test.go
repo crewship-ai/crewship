@@ -229,7 +229,8 @@ func TestAgentSpanRecorder_OutputInputScrubbedAndTruncated(t *testing.T) {
 		t.Errorf("Input leaked secret: %q", got[0].Input)
 	}
 
-	// A tool_result larger than the output cap is bounded and marked.
+	// A tool_result larger than the output cap is bounded, marked, AND flags
+	// the span so the UI can show a "truncated — see step Output" chip.
 	bigOut := strings.Repeat("z", RunAgentSpanOutputMaxBytes+500)
 	rec.Observe(makeToolCall("t2", "Read", map[string]any{"file_path": "/big"}, t0))
 	rec.Observe(toolResultWith("t2", bigOut, t0.Add(time.Millisecond)))
@@ -238,6 +239,33 @@ func TestAgentSpanRecorder_OutputInputScrubbedAndTruncated(t *testing.T) {
 	}
 	if !strings.HasSuffix(got[1].Output, "...(truncated)") {
 		t.Errorf("Output missing truncation marker")
+	}
+	if !got[1].OutputTruncated {
+		t.Errorf("OutputTruncated flag not set on a truncated span")
+	}
+
+	// The output cap is deliberately roomy (a strict-JSON deliverable — a
+	// month of transactions — must survive whole): an 8 KB result fits under
+	// the cap and is NOT truncated, where the old 2 KB cap would have cut it.
+	midOut := strings.Repeat("j", 8*1024)
+	if 8*1024 >= RunAgentSpanOutputMaxBytes {
+		t.Fatalf("test assumes output cap > 8 KB, got %d", RunAgentSpanOutputMaxBytes)
+	}
+	rec.Observe(makeToolCall("t3", "Bash", map[string]any{"command": "python3 parse.py"}, t0))
+	rec.Observe(toolResultWith("t3", midOut, t0.Add(time.Millisecond)))
+	if got[2].OutputTruncated || strings.HasSuffix(got[2].Output, "...(truncated)") {
+		t.Errorf("8 KB output should fit under the cap, got truncated (len=%d)", len(got[2].Output))
+	}
+
+	// Input keeps the tighter 2 KB cap and flags its own truncation.
+	bigCmd := strings.Repeat("x", RunAgentSpanInputMaxBytes+500)
+	rec.Observe(makeToolCall("t4", "Bash", map[string]any{"command": bigCmd}, t0))
+	rec.Observe(toolResultWith("t4", "ok", t0.Add(time.Millisecond)))
+	if !got[3].InputTruncated {
+		t.Errorf("InputTruncated flag not set on a truncated-input span")
+	}
+	if !strings.HasSuffix(got[3].Input, "...(truncated)") {
+		t.Errorf("Input missing truncation marker")
 	}
 }
 

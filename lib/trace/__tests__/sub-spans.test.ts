@@ -49,6 +49,26 @@ describe("mapSubSpans", () => {
     expect(s.input).toBeUndefined()
   })
 
+  it("threads input/output truncation flags, minimal when unset (#847 review)", () => {
+    const [t] = mapSubSpans([
+      {
+        kind: "read",
+        name: "Read",
+        status: "ok",
+        output: "big JSON…(truncated)",
+        output_truncated: true,
+        input: "{}...(truncated)",
+        input_truncated: true,
+      },
+    ])
+    expect(t.outputTruncated).toBe(true)
+    expect(t.inputTruncated).toBe(true)
+
+    const [u] = mapSubSpans([{ kind: "bash", name: "a", status: "ok", output: "ok" }])
+    expect(u.outputTruncated).toBeUndefined()
+    expect(u.inputTruncated).toBeUndefined()
+  })
+
   it("orders by seq, not array order, stable on ties", () => {
     const spans = mapSubSpans([
       { kind: "bash", name: "third", seq: 2, status: "ok" },

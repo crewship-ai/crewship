@@ -44,6 +44,12 @@ func emitRunAgentSpan(ctx context.Context, emitter Emitter, workspaceID, crewID 
 	if span.Output != "" {
 		payload["output"] = span.Output
 	}
+	if span.InputTruncated {
+		payload["input_truncated"] = true
+	}
+	if span.OutputTruncated {
+		payload["output_truncated"] = true
+	}
 	if len(span.Attributes) > 0 {
 		payload["attributes"] = span.Attributes
 	}
