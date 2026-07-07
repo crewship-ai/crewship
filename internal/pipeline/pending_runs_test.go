@@ -15,6 +15,9 @@ func newPendingDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A :memory: DB is per-connection; pin the pool to one connection so
+	// concurrent dispatch goroutines all see the same table.
+	db.SetMaxOpenConns(1)
 	_, err = db.Exec(`
 CREATE TABLE pending_runs (
     id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, pipeline_id TEXT NOT NULL,
