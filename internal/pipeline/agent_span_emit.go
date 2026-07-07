@@ -38,6 +38,12 @@ func emitRunAgentSpan(ctx context.Context, emitter Emitter, workspaceID, crewID 
 	if span.Detail != "" {
 		payload["detail"] = span.Detail
 	}
+	if span.Input != "" {
+		payload["input"] = span.Input
+	}
+	if span.Output != "" {
+		payload["output"] = span.Output
+	}
 	if len(span.Attributes) > 0 {
 		payload["attributes"] = span.Attributes
 	}

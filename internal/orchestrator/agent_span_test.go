@@ -164,6 +164,83 @@ func TestAgentSpanRecorder_PerStepCapAndDetailTruncation(t *testing.T) {
 	}
 }
 
+// toolResultWith builds a tool_result event carrying a specific output body so
+// the Output-capture path can be exercised (makeToolResult hard-codes "ok").
+func toolResultWith(toolUseID, content string, ts time.Time) AgentEvent {
+	return AgentEvent{
+		Type:      "tool_result",
+		Content:   content,
+		Metadata:  map[string]interface{}{"tool_use_id": toolUseID},
+		Timestamp: ts,
+	}
+}
+
+func TestAgentSpanRecorder_CapturesOutputAndInput(t *testing.T) {
+	var got []RunAgentSpan
+	rec := NewAgentSpanRecorder("run_1", "step_a", func(s RunAgentSpan) { got = append(got, s) })
+	t0 := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+
+	// The whole point of #847: you can see WHAT the agent ran (input args) and
+	// WHAT it returned (output), not just the one-field command detail.
+	rec.Observe(makeToolCall("t1", "Bash", map[string]any{
+		"command":     "python3 parse_vypis.py",
+		"description": "parse the statement",
+	}, t0))
+	rec.Observe(toolResultWith("t1", "parsed 42 rows\nwrote out.json", t0.Add(1200*time.Millisecond)))
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(got))
+	}
+	s := got[0]
+	if s.Output != "parsed 42 rows\nwrote out.json" {
+		t.Errorf("Output = %q, want the tool_result body", s.Output)
+	}
+	// Input is the FULL input map as JSON — the "args" acceptance asks for,
+	// carrying both command and description (detail only carries `command`).
+	if !strings.Contains(s.Input, "python3 parse_vypis.py") || !strings.Contains(s.Input, "parse the statement") {
+		t.Errorf("Input = %q, want full input JSON (command + description)", s.Input)
+	}
+	// A tool with no input args leaves Input empty rather than a bare "{}".
+	rec.Observe(makeToolCall("t2", "Read", map[string]any{}, t0.Add(2*time.Second)))
+	rec.Observe(toolResultWith("t2", "file body", t0.Add(2*time.Second+time.Millisecond)))
+	if got[1].Input != "" {
+		t.Errorf("empty-input span Input = %q, want empty", got[1].Input)
+	}
+}
+
+func TestAgentSpanRecorder_OutputInputScrubbedAndTruncated(t *testing.T) {
+	var got []RunAgentSpan
+	rec := NewAgentSpanRecorder("run_1", "step_a", func(s RunAgentSpan) { got = append(got, s) })
+	t0 := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+
+	// Defense-in-depth: even though the stream scrubber runs upstream, the
+	// recorder re-scrubs input args + output before they are persisted, so a
+	// leaked token never lands verbatim in the journal.
+	// Assembled from fragments so the full token literal never lands in source
+	// (keeps the repo secret scanner quiet); at runtime it's a valid ghp_ shape
+	// the scrubber matches.
+	secret := "ghp_" + strings.Repeat("a", 12) + "1234567890"
+	rec.Observe(makeToolCall("t1", "Bash", map[string]any{"command": "curl -H 'auth: " + secret + "'"}, t0))
+	rec.Observe(toolResultWith("t1", "server said token "+secret+" ok", t0.Add(time.Millisecond)))
+	if strings.Contains(got[0].Output, secret) {
+		t.Errorf("Output leaked secret: %q", got[0].Output)
+	}
+	if strings.Contains(got[0].Input, secret) {
+		t.Errorf("Input leaked secret: %q", got[0].Input)
+	}
+
+	// A tool_result larger than the output cap is bounded and marked.
+	bigOut := strings.Repeat("z", RunAgentSpanOutputMaxBytes+500)
+	rec.Observe(makeToolCall("t2", "Read", map[string]any{"file_path": "/big"}, t0))
+	rec.Observe(toolResultWith("t2", bigOut, t0.Add(time.Millisecond)))
+	if len(got[1].Output) > RunAgentSpanOutputMaxBytes+len("...(truncated)") {
+		t.Errorf("Output not truncated: len=%d", len(got[1].Output))
+	}
+	if !strings.HasSuffix(got[1].Output, "...(truncated)") {
+		t.Errorf("Output missing truncation marker")
+	}
+}
+
 func TestAgentSpanRecorder_NoToolCallsNoSpans(t *testing.T) {
 	called := false
 	rec := NewAgentSpanRecorder("run_1", "step_a", func(s RunAgentSpan) { called = true })

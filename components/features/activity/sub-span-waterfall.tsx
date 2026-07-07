@@ -157,7 +157,14 @@ function SpanDetail({
         )}
       </dl>
 
-      {span.detail && <OutputView value={span.detail} />}
+      {/* input (full args) supersedes the one-field command detail; detail is
+          the fallback for older runs captured before input was persisted. */}
+      {span.input ? (
+        <SpanIO label="input" value={span.input} />
+      ) : (
+        span.detail && <SpanIO label="command" value={span.detail} />
+      )}
+      {span.output && <SpanIO label="output" value={span.output} />}
 
       {span.attributes.artifact_path && (
         <button
@@ -170,6 +177,20 @@ function SpanDetail({
           <span className="text-muted-foreground/50">open</span>
         </button>
       )}
+    </div>
+  )
+}
+
+// SpanIO renders one labeled input/command/output block through the shared
+// OutputView so a script's args and result read like the agent's chat output
+// (markdown/JSON/code highlighted) instead of a wall of monospace.
+function SpanIO({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="space-y-1">
+      <div className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground/50">
+        {label}
+      </div>
+      <OutputView value={value} />
     </div>
   )
 }

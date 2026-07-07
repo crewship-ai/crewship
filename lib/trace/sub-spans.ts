@@ -67,6 +67,8 @@ function toSubSpan(
   const name =
     typeof o.name === "string" && o.name.trim() ? o.name : kind
   const detail = typeof o.detail === "string" ? o.detail : undefined
+  const input = typeof o.input === "string" ? o.input : undefined
+  const output = typeof o.output === "string" ? o.output : undefined
   const startedAt =
     typeof o.started_at === "string" && o.started_at ? o.started_at : undefined
   const durationMs =
@@ -85,6 +87,8 @@ function toSubSpan(
       durationMs,
       status,
       attributes: toAttributes(o.attributes),
+      input,
+      output,
     },
     seq,
     idx,

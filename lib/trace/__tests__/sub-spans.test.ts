@@ -26,6 +26,29 @@ describe("mapSubSpans", () => {
     })
   })
 
+  it("carries output + input through when present (#847)", () => {
+    const [s] = mapSubSpans([
+      {
+        kind: "bash",
+        name: "python3",
+        detail: "python3 parse_vypis.py",
+        status: "ok",
+        input: '{"command":"python3 parse_vypis.py","description":"parse"}',
+        output: "parsed 42 rows\nwrote out.json",
+      },
+    ])
+    expect(s.input).toBe('{"command":"python3 parse_vypis.py","description":"parse"}')
+    expect(s.output).toBe("parsed 42 rows\nwrote out.json")
+  })
+
+  it("leaves output/input undefined when absent or non-string", () => {
+    const [s] = mapSubSpans([
+      { kind: "bash", name: "a", status: "ok", output: 42, input: { not: "a string" } },
+    ])
+    expect(s.output).toBeUndefined()
+    expect(s.input).toBeUndefined()
+  })
+
   it("orders by seq, not array order, stable on ties", () => {
     const spans = mapSubSpans([
       { kind: "bash", name: "third", seq: 2, status: "ok" },

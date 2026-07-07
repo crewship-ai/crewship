@@ -181,6 +181,15 @@ Clicking any step node opens a right-hand detail panel with:
 - **Heatmap context** — duration and cost from the journal's `pipeline.step.completed` event.
 - **Error message** — for failed steps, the captured error and which step the run failed at.
 
+### Agent action drill-down
+
+For an `agent_run` step, the detail panel carries a **waterfall of the agent's internal tool calls** — every Bash command, file `Read`/`Write`/`Edit`, and MCP tool call the agent made inside that step, positioned by start time and duration (`lib/trace/sub-spans.ts`, persisted as `run.agent_span` journal entries). Expand any action to see:
+
+- **input** — the full (scrubbed, capped) arguments the tool was called with — e.g. the exact `python3 parse_vypis.py` command and its `description`, or an MCP call's params. Older runs fall back to a one-line **command** summary.
+- **output** — the tool result body (scrubbed, capped tail): a script's stdout, a file's contents, an MCP reply. This is what lets you confirm *a deterministic script actually ran and what it returned*, post-hoc and from another session — not just that it was invoked.
+
+Both are captured for every CLI adapter (the recorder taps the shared tool-call/tool-result stream, so it's adapter-agnostic) and both are size-bounded per action (2 KB each, marked `...(truncated)`) and per step (200 actions), so a chatty agent can't bloat the journal. Secrets in an argument or a result are redacted before capture. The same data is returned by `GET /api/v1/workspaces/{ws}/pipeline-runs/{runId}` under each step's `sub_spans[]`.
+
 URL state is the single source of truth for selection (`useTraceSelection`):
 
 ```
