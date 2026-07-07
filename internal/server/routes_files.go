@@ -14,9 +14,59 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
+// resolveCrewFileKey maps a client-supplied crew file path to a storage
+// key, reporting whether it is valid.
+//
+// Paths under "shared/" (or the bare "shared") route to the crew's
+// /crew/shared bind source (storage key "crews/<id>/shared/..."), so a
+// bundled file — a Crew manifest `files:` entry with dest "shared/..." —
+// lands exactly where EnsureCrewRuntime mounts /crew. That is what makes
+// bundled scripts reach the container even for an agentless crew whose
+// container is provisioned lazily (the file already sits on the bind
+// source when the mount comes up). Other paths use the legacy /output
+// tree ("<id>/..."), where agent-generated output files live. Traversal
+// and absolute paths are rejected.
+// safeCrewID reports whether a crew id from the request path is a single
+// clean path component safe to join into a storage key — no slash, no
+// backslash, no "." / ".." / empty, and unchanged by filepath.Clean (so an
+// encoded-slash value can't collapse a key out of its intended subtree).
+func safeCrewID(crewID string) bool {
+	if crewID == "" || crewID == "." || crewID == ".." || strings.ContainsAny(crewID, `/\`) {
+		return false
+	}
+	return filepath.Clean(crewID) == crewID
+}
+
+func resolveCrewFileKey(crewID, path string) (string, bool) {
+	// crewID comes from r.PathValue("id") and is joined into the storage
+	// key below (see safeCrewID) — reject anything that isn't a single
+	// clean path component so filepath.Join can't escape the crews/ prefix.
+	if !safeCrewID(crewID) {
+		return "", false
+	}
+	clean := filepath.Clean(path)
+	if clean == "" || clean == "." || strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
+		return "", false
+	}
+	if clean == "shared" || strings.HasPrefix(clean, "shared/") {
+		return filepath.Join("crews", crewID, clean), true
+	}
+	if clean == crewID || strings.HasPrefix(clean, crewID+"/") {
+		return clean, true
+	}
+	return "", false
+}
+
 func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("id")
 	agentSlug := r.URL.Query().Get("agent_slug")
+
+	// Same crew-id join hazard as resolveCrewFileKey: dir is built from
+	// crewID below, so reject an unsafe id before it reaches filepath.Join.
+	if !safeCrewID(crewID) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid crew id"})
+		return
+	}
 
 	if s.storage == nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "files": []interface{}{}})
@@ -41,7 +91,14 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid subdir"})
 			return
 		}
-		dir = filepath.Join(dir, cleaned)
+		// A "shared/..." subdir lists the crew's /crew/shared bind tree
+		// (crews/<id>/shared/...) — where bundled `files:` live — rather
+		// than the /output tree. Keeps list consistent with save/download.
+		if agentSlug == "" && (cleaned == "shared" || strings.HasPrefix(cleaned, "shared/")) {
+			dir = filepath.Join("crews", crewID, cleaned)
+		} else {
+			dir = filepath.Join(dir, cleaned)
+		}
 	}
 
 	recursive := r.URL.Query().Get("recursive") == "true"
@@ -89,15 +146,10 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sanitize path to prevent directory traversal
-	cleanPath := filepath.Clean(filePath)
-	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
-		http.Error(w, "invalid path", http.StatusBadRequest)
-		return
-	}
-
-	// Validate the path belongs to this crew (path from List is crew_id/agent/file)
-	if !strings.HasPrefix(cleanPath, crewID+"/") {
+	// Route + sanitize: "shared/..." → crew bind tree, "<id>/..." → output
+	// tree; traversal/absolute rejected. (Path from List is crew_id/agent/file.)
+	storageKey, ok := resolveCrewFileKey(crewID, filePath)
+	if !ok {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
@@ -107,7 +159,7 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reader, err := s.storage.Read(r.Context(), cleanPath)
+	reader, err := s.storage.Read(r.Context(), storageKey)
 	if err != nil {
 		http.Error(w, "file not found", http.StatusNotFound)
 		return
@@ -131,13 +183,8 @@ func (s *Server) handleFileSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cleanPath := filepath.Clean(filePath)
-	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
-		http.Error(w, "invalid path", http.StatusBadRequest)
-		return
-	}
-
-	if !strings.HasPrefix(cleanPath, crewID+"/") {
+	storageKey, ok := resolveCrewFileKey(crewID, filePath)
+	if !ok {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
@@ -148,7 +195,7 @@ func (s *Server) handleFileSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	defer r.Body.Close()
-	if err := s.storage.Write(r.Context(), cleanPath, r.Body); err != nil {
+	if err := s.storage.Write(r.Context(), storageKey, r.Body); err != nil {
 		s.logger.Error("file save failed", "path", filePath, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save file"})
 		return
