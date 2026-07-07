@@ -22,7 +22,7 @@ Different from [`crewship run list`](/cli/run):
 | `--status <state>` | string | (unset) | Filter by status: `running`, `completed`, `failed`. Server-side `?status=`. |
 | `--agent <slug-or-id>` | string | (unset) | Filter by agent. Resolved to ID before the request. |
 | `--prompts` | bool | `false` | Also fetch the first user message per run. 4-way concurrent; failures degrade silently. |
-| `--watch` | bool | `false` | Re-render on interval (shared `addWatchFlag` helper). |
+| `--watch <duration>` | string | `""` (off) | Auto-refresh on an interval, e.g. `5s`, `1m` (min 1s). Shared `addWatchFlag` helper. |
 
 ### Examples
 

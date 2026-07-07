@@ -30,6 +30,7 @@ All Crewship configuration can be set via environment variables. These override 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CREWSHIP_CONTAINER_PROVIDER` | `docker` | Container provider: `docker`, `apple`, `auto` (Kubernetes provider on the v0.2 roadmap) |
+| `CREWSHIP_RUNTIME` | (unset — uses `container.default_runtime`, else `runc`) | Overrides the OCI runtime handed to Docker for crew containers (`runc`, `runsc`, `kata-runtime`, `sysbox-runc`). Wins over the YAML `container.default_runtime`. Read by `internal/provider/docker/docker_container.go`. |
 | `CREWSHIP_CONTAINER_NETWORK` | `crewship-agents` | Docker bridge network name |
 | `CREWSHIP_CONTAINER_PREFIX` | (empty) | Container name prefix for multi-instance isolation |
 | `CREWSHIP_RUNTIME_IMAGE` | `debian:bookworm-slim` | Default agent runtime image for crews without an explicit `runtime_image`. Any glibc-based Linux image works — Crewship bind-mounts the sidecar and entrypoint at runtime. |
@@ -77,6 +78,8 @@ All Crewship configuration can be set via environment variables. These override 
 |----------|---------|-------------|
 | `CREWSHIP_TRUSTED_PROXY_CIDRS` | (unset — only loopback `127.0.0.0/8` and `::1/128` trusted) | Comma-separated list of CIDR ranges whose `X-Forwarded-For` header the rate limiter and client-IP extractor will trust. Set this to the address(es) of your reverse proxy (nginx/Caddy/load balancer) so per-IP throttles see the real client IP. Leaving it unset means any non-loopback client presenting a forged `X-Forwarded-For` is ignored (the header is only honoured from trusted hops). Read by `internal/api/ratelimit.go`. |
 | `CREWSHIP_ENV` | (unset — treated as non-prod) | Deployment environment label. When set to `prod` or `production` (case-insensitive), the server **refuses to start** if rate limiting has been disabled, and tightens WebSocket origin enforcement. Any other value (or unset) is treated as non-production. Read by `internal/api/ratelimit.go` and `internal/ws/hub.go`. |
+| `CREWSHIP_RATELIMIT_DISABLED` | (unset — limiter on) | **Dev only.** Set truthy to disable the per-IP rate limiter. **Ignored in production** — when `CREWSHIP_ENV=prod`/`production` the limiter always runs regardless of this flag. Legacy alias `CREWSHIP_DISABLE_RATELIMIT` is also honoured. Read by `internal/api/ratelimit.go`. |
+| `CREWSHIP_INTERNAL_ALLOW_ANY` | (unset — network gate on) | **Dev only.** When set to the literal string `true` (strict equality — `1`/`yes` are ignored), disables the internal-IPC network gate so `X-Internal-Token` becomes the sole guard on `/api/v1/internal/*`. Only safe behind a trusted reverse proxy. Read by `internal/api/internal.go`. |
 
 ## Metrics
 
@@ -135,18 +138,20 @@ These are off by default and intended for operators debugging performance.
 |----------|---------|-------------|
 | `NEXTAUTH_SECRET` | Auto-generated on first boot | JWT signing secret for user authentication. Generated via `crypto/rand` (32 bytes → 64 hex chars) and persisted to `<dataDir>/secrets.env` on first start; subsequent boots read the file back. Explicit env vars always win, so Vault / Kubernetes secret mounts / `EnvironmentFile=` keep working unchanged. |
 | `CREWSHIP_NEXTJS_URL` | Auto-derived from port | Internal URL for self-referencing API calls |
-| `CREWSHIP_INTERNAL_TOKEN` | Auto-generated on first boot | Token for sidecar-to-crewshipd IPC authentication. Same auto-gen + persist path as `NEXTAUTH_SECRET`; **stays stable across restarts** once the file exists. |
+| `CREWSHIP_INTERNAL_TOKEN` | Auto-generated per boot | Token for sidecar-to-crewshipd IPC authentication. Generated fresh with `crypto/rand` on every start when unset (`internal/config/config.go`) — it is **not** part of the persisted `secrets.env` bootstrap, so it **rotates on each restart**. That is fine for single-binary mode (the sidecar receives the current token when it is spawned). Pin an explicit value only when multiple instances must share one IPC bus. |
+| `CREWSHIP_ADMIN_TOKEN_HMAC_KEY` | Auto-generated on first boot | 256-bit hex HMAC key for hashing ADMIN-tier CLI tokens at rest (`cli_tokens` table). Kept separate from `ENCRYPTION_KEY` so a DB dump alone cannot offline-crack admin tokens. Bootstrapped + persisted to `<dataDir>/secrets.env` like `ENCRYPTION_KEY` (32 bytes → 64 hex chars), so the ADMIN tier works out of the box. Read via `internal/secrets/bootstrap.go`. |
+| `CREWSHIP_FORCE_SECURE_COOKIES` | (unset — off) | Set truthy to force the `Secure` flag on auth cookies even when the `X-Forwarded-Proto` header is dropped by a proxy. Set behind any HTTPS edge. Read by `internal/api/nextauth.go`. |
 | `CREWSHIP_ALLOW_SIGNUP` | `false` | Allow new user registration (`true` or `1`) |
 | `CREWSHIP_BOOTSTRAP_WINDOW` | _(unset — open until first admin)_ | Opt-in finite first-run window. Unset (default), `/bootstrap` stays open until the first admin account exists (the empty user table is the gate). Set to a positive Go duration (e.g. `5m`, `30s`, `1h`) to arm a deploy-race window that refuses `/bootstrap` with `410` after it elapses — for instances exposed to the internet before they're bootstrapped. Invalid or non-positive values are ignored (falls back to the open-until-admin default). |
 
 <Note>
-  As of PR #446 (`internal/secrets`), `NEXTAUTH_SECRET`, `ENCRYPTION_KEY` and `CREWSHIP_INTERNAL_TOKEN` are all bootstrapped on first start: missing values are generated with `crypto/rand`, persisted atomically to `<dataDir>/secrets.env` at mode `0600`, and re-exported into the process environment so existing `os.Getenv` call sites see them unchanged. Explicit env vars override the file; partial persistence is handled (one missing key is filled, the other valid keys are preserved). For clustered deployments, set them explicitly via your secret manager.
+  As of PR #446 (`internal/secrets`), the three **persisted** secrets — `ENCRYPTION_KEY`, `NEXTAUTH_SECRET`, and `CREWSHIP_ADMIN_TOKEN_HMAC_KEY` (the `managed` list in `internal/secrets/bootstrap.go`) — are bootstrapped on first start: missing values are generated with `crypto/rand`, persisted atomically to `<dataDir>/secrets.env` at mode `0600`, and re-exported into the process environment so existing `os.Getenv` call sites see them unchanged. Explicit env vars override the file; partial persistence is handled (one missing key is filled, the other valid keys are preserved). `CREWSHIP_INTERNAL_TOKEN` is handled separately — the config loader generates it per boot when unset and does **not** persist it, so it rotates on each restart. For clustered deployments, set all four explicitly via your secret manager.
 </Note>
 
 ### Auto-Derived Values
 
 - `CREWSHIP_NEXTJS_URL`: If not explicitly set, defaults to `http://localhost:{CREWSHIP_PORT}`. In single-binary mode, the internal resolver calls itself on the same port.
-- `CREWSHIP_INTERNAL_TOKEN`: Auto-generated on first boot and persisted (see Note above). Stays stable across restarts.
+- `CREWSHIP_INTERNAL_TOKEN`: Generated fresh per boot by the config loader when unset; **not** persisted, so it rotates on restart. Pin it explicitly only for multi-instance IPC bus sharing.
 
 ## Encryption
 
@@ -191,8 +196,8 @@ These variables tag every cost-ledger row written from inside an agent run. The 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CREWSHIP_BILLING_MODE` | `metered` | `metered` (per-token \$ math) or `flat_rate` (subscription credential, marginal cost = \$0). Source: `internal/orchestrator/exec_env.go:142,153`, `internal/sidecar/server.go:168`. |
-| `CREWSHIP_SUBSCRIPTION_PLAN` | (empty) | Display label for flat-rate credentials. Currently the orchestrator hard-codes `"Anthropic Max"` for the OAuth Claude Code path; future credential types (`"Cursor Ultra"`, `"ChatGPT Plus"`) will surface their own labels. Set when `CREWSHIP_BILLING_MODE=flat_rate`; the Paymaster surfaces it on the Subscriptions panel. Source: `internal/orchestrator/exec_env.go:143`, `internal/sidecar/server.go:172`. |
+| `CREWSHIP_BILLING_MODE` | `metered` | `metered` (per-token \$ math) or `flat_rate` (subscription credential, marginal cost = \$0). Source: `internal/orchestrator/exec_env.go` (`exec_env.go:241,252`), `internal/sidecar/server.go:211`. |
+| `CREWSHIP_SUBSCRIPTION_PLAN` | (empty) | Display label for flat-rate credentials. Currently the orchestrator hard-codes `"Anthropic Max"` for the OAuth Claude Code path; future credential types (`"Cursor Ultra"`, `"ChatGPT Plus"`) will surface their own labels. Set when `CREWSHIP_BILLING_MODE=flat_rate`; the Paymaster surfaces it on the Subscriptions panel. Source: `internal/orchestrator/exec_env.go`, `internal/sidecar/server.go:215`. |
 
 <Note>
   Operators do **not** set these manually for normal use. They are propagated automatically based on the credential's auth type (API key → `metered`, OAuth/subscription → `flat_rate`). They are listed here only for sidecar-image authors and tooling that intercepts the orchestrator handoff.
@@ -214,6 +219,24 @@ See [Paymaster](/guides/paymaster) for the full billing-mode model and [Migratio
 | `CREWSHIP_PIPELINE_RUNNER` | (unset — orchestrator runner) | Selects the pipeline execution backend. Set to `llm_direct` to run pipeline steps through the in-process LLM runner instead of spawning orchestrator containers (also the automatic fallback when no container provider is available). Read by `cmd/crewship/cmd_start.go`. |
 | `CREWSHIP_FORECAST_RATES` | (built-in rate table) | Overrides the provider price table used by `crewship cost forecast`. Format: `Name,inPerM,outPerM;Name,inPerM,outPerM;…` (USD per million tokens). Malformed entries fall back to the defaults with a one-time stderr warning. Read by `cmd/crewship/cmd_cost_forecast.go`. |
 | `CREWSHIP_QUERY_DEPTH` | `0` | Default crew-to-crew query recursion depth when a request does not specify one. Hard-capped at `2` (deeper queries are rejected to prevent loops). Read by `internal/sidecar/query.go`. |
+| `CREWSHIP_NOTIFY_LONG_RUN` | (built-in threshold) | Threshold in **seconds** above which the CLI emits a "long run" notification for an agent run. Read by `cmd/crewship/cmd_notify.go`. |
+
+## Backup webhooks
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_BACKUP_WEBHOOK_URL` | (unset — no webhook) | URL `POST`ed on every backup completion. Read by `internal/backup/webhook.go`. |
+| `CREWSHIP_BACKUP_WEBHOOK_SECRET` | (unset) | HMAC signing key for the backup-webhook payload, so the receiver can verify authenticity. Read by `internal/backup/webhook.go`. |
+
+## Operational skip flags (dev / CI)
+
+These bypass safety or convenience behaviours. Never set them in production.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_SKIP_MIGRATION_BACKUP` | (unset) | Set to `1` to skip the pre-migration `crewship.db` snapshot. **Never in production.** Read by `internal/database/backup_pre_migrate.go`. |
+| `CREWSHIP_SKIP_UPDATE_CHECK` | (unset) | Set to `1` to skip the daily "new version available" probe. Read by `internal/update/check.go`. |
+| `CREWSHIP_SKIP_SIDECAR` | (unset) | Set to `1` to bypass fail-fast sidecar autodetect (tests / container-less runs only). Also documented under [Container](#container). Read by `internal/config/config.go`. |
 
 ## License
 

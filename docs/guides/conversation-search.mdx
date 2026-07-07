@@ -55,7 +55,7 @@ Arguments and flags:
 |-----------------|---------|
 | `<agent-slug-or-id>` | The agent whose conversations to search. A slug is resolved to its id. |
 | `<query>` | The search text. Remaining args are joined with spaces. FTS5 operators (`OR`, `NEAR`, `*`) are treated as literal words, not query syntax. |
-| `--limit <n>` | Maximum number of hits (1–100). Defaults to 20; out-of-range values are clamped. |
+| `--limit <n>` | Maximum number of hits (1–100). Defaults to 20; out-of-range values (`≤0` or `>100`) fall back to the default of 20. |
 | `--format json\|yaml` | Emit the raw result envelope instead of the table view. |
 
 Each hit shows its timestamp, the message role (`user` / `assistant`), the
@@ -79,7 +79,7 @@ Request body:
 |-------|----------|-------|
 | `agent_id` | yes | Must belong to the caller's workspace. |
 | `query` | yes | Free text. Operators are neutralised to literal words. |
-| `limit` | no | 1–100; defaults to 20, out-of-range values are clamped. |
+| `limit` | no | 1–100; defaults to 20. Out-of-range values (`≤0` or `>100`) fall back to the default of 20. |
 
 Response:
 

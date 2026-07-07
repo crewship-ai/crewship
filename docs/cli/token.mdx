@@ -53,18 +53,23 @@ crewship token create
 crewship token create "ci-runner"
 ```
 
-Output:
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--output-file <path>` | string | (unset) | Write the bare token to this file (mode `0600`) instead of stdout. Stdout gets only a confirmation line. |
+| `--quiet` | bool | `false` | Print **only** the bare token to stdout (for `$(...)` capture); the "sensitive" advisory rides stderr. |
+
+Output (default mode — the token value and its warning go to **stderr**, the metadata to stdout, so a naive `> file` redirect doesn't silently persist the bearer):
 
 ```
 Token created: ci-runner
 ID:     tok_abc12345
 Token:  crewship_cli_eyJ...
 
-Store this token securely — it won't be shown again.
+Store this token securely — it won't be shown again. (Use --output-file to write it straight to a 0600 file, or --quiet for capture.)
 ```
 
 <Tip>
-  The bearer is stored only at creation. Capture it now — there is no way to retrieve it later.
+  The bearer is stored only at creation. Capture it now — there is no way to retrieve it later. For CI, prefer `--output-file` (0600 file) or `TOKEN=$(crewship token create --quiet)`.
 </Tip>
 
 ---
@@ -96,10 +101,13 @@ Atomic-ish replacement: creates a new token (carrying the old name with a rotati
 | Flag | Type | Default | Effect |
 |---|---|---|---|
 | `--name <text>` | string | `"<old name> (rotated YYYY-MM-DD)"` | Override the new token's name. |
+| `--output-file <path>` | string | (unset) | Write the bare new token to this file (mode `0600`) instead of stdout. |
+| `--quiet` | bool | `false` | Print only the bare new token to stdout (for `$(...)` capture); advisory goes to stderr. |
 
 ```bash
 crewship token rotate tok_abc12345
 crewship token rotate tok_abc12345 --name "ci-runner v2"
+crewship token rotate tok_abc12345 --output-file ~/.crewship-ci-token
 ```
 
 <Warning>

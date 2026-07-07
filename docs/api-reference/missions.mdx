@@ -384,7 +384,7 @@ Tasks can only be added to missions in `PLANNING` or `IN_PROGRESS` state. If any
 PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId}?workspace_id={workspaceId}
 ```
 
-**Request Body:** All fields optional. (`internal/api/task_handler.go:146`)
+**Request Body:** All fields optional. (`internal/api/task_handler.go:160` — `updateTaskRequest`)
 
 | Field | Type | Description |
 |---|---|---|
@@ -398,8 +398,9 @@ PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId}?workspace_id={w
 | `output_path` | string | Output file path |
 | `token_count` | integer | Token usage |
 | `estimated_cost` | number | Estimated cost in USD |
+| `max_iterations` | integer | Max retry iterations (0–`maxTaskIterations`) |
 
-`status` and `depends_on` cannot be set in the same request — the handler returns `400` with "Cannot update status and depends_on in the same request" (`internal/api/task_handler.go:359`). `task_order`, `max_iterations`, and `approval_required` are not currently mutable through this endpoint.
+`status` and `depends_on` cannot be set in the same request — the handler returns `400` with "Cannot update status and depends_on in the same request" (`internal/api/task_handler.go:382`). `task_order` and `approval_required` are not currently mutable through this endpoint.
 
 **Task Status Transitions:**
 

@@ -19,7 +19,7 @@ Lists escalations under one crew via `GET /api/v1/crews/{crewId}/escalations`. `
 | `--limit <n>` | int | `0` | Cap rows returned **client-side** (0 = unbounded). Server has no `limit=` yet. |
 | `--since <window>` | string | (unset) | Client-side filter — `1h`, `24h`, `7d`, or RFC3339. |
 
-Table columns: `ID`, `FROM`, `REASON` (50-char truncated), `STATUS`, `CREATED`.
+Table columns: `ID`, `TYPE`, `FROM`, `REASON` (50-char truncated), `STATUS`, `CREATED`.
 
 ```bash
 crewship escalation list --crew backend-team
@@ -35,10 +35,14 @@ crewship escalation list --crew backend-team --format json | jq
 | Flag | Type | Default | Effect |
 |---|---|---|---|
 | `--resolution <text>` | string | (unset) | Free-form notes recorded with the resolve. |
+| `--action <verb>` | string | `approve` | Resolution action: `approve`, `reject`, or `redirect`. The server defaults a missing action to `approve`. |
+| `--redirect-to <slug>` | string | (unset) | Agent slug to redirect to. **Requires `--action redirect`** (and `--action redirect` requires this flag). |
 
 ```bash
 crewship escalation resolve esc_abc
 crewship escalation resolve esc_abc --resolution "false alarm — rotation completed at 14:02"
+crewship escalation resolve esc_abc --action reject --resolution "not approved"
+crewship escalation resolve esc_abc --action redirect --redirect-to viktor
 ```
 
 Prints `Escalation <id> resolved.` on success.

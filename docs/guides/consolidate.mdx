@@ -80,7 +80,7 @@ Preserved indefinitely (never compacted):
 
 ### Archive layer (PR #212)
 
-Migration 55 added `journal_entries_archived` so compaction is no longer destructive. The aged row is copied verbatim except for `payload`, which is truncated to 400 characters with a trailing `…[truncated]` marker. The archive table has the same workspace/ts indexes as the base, so historical forensic queries still work — they just have to include the archive table:
+Migration 55 added `journal_entries_archived` so compaction is no longer destructive. The aged row is copied into the archive with its `summary` truncated to 200 chars and its `payload` truncated to 400 chars (stored in the `compressed_payload` column); the pre-truncation size is recorded in `original_size_bytes`. There is no trailing marker — the copy is a plain `substr`. The archive table has the same workspace/ts indexes as the base, so historical forensic queries still work — they just have to include the archive table:
 
 ```sql
 SELECT id, ts, entry_type, summary

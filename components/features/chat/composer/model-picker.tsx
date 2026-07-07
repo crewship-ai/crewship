@@ -8,17 +8,25 @@ import { apiFetch } from "@/lib/api-fetch"
 
 const FALLBACK_MODELS: ModelOption[] = [
   {
-    id: "claude-opus-4-7",
-    label: "Opus 4.7",
+    id: "claude-fable-5",
+    label: "Fable 5",
     provider: "Anthropic",
-    description: "Most capable, best for complex analysis",
+    description: "Most capable, premium flagship for hardest work",
+    badge: "Premium",
+  },
+  {
+    id: "claude-opus-4-8",
+    label: "Opus 4.8",
+    provider: "Anthropic",
+    description: "Flagship, best for complex analysis",
     badge: "Pro",
   },
   {
-    id: "claude-sonnet-4-6",
-    label: "Sonnet 4.6",
+    id: "claude-sonnet-5",
+    label: "Sonnet 5",
     provider: "Anthropic",
     description: "Balanced speed and capability",
+    badge: "Default",
   },
   {
     id: "claude-haiku-4-5",

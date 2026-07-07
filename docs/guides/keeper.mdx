@@ -36,7 +36,7 @@ Credentials are classified into four security levels:
 
 | Level | Sensitivity | Examples | Default Keeper Behavior |
 |-------|------------|---------|------------------------|
-| **L1** | Low | npm tokens, read-only APIs | Auto-allow when intent >= 10 non-whitespace chars **and** >= 3 distinct non-whitespace chars (request, not /execute) |
+| **L1** | Low | npm tokens, read-only APIs | Auto-allow when intent >= 10 non-whitespace chars **and** >= 5 distinct non-whitespace chars, and the intent isn't injection-shaped (request, not /execute) |
 | **L2** | Medium | GitHub write, DB read | LLM evaluation required |
 | **L3** | High | SSH keys, DB admin, AWS | LLM evaluation + possible escalation |
 | **L4** | Critical | Production admin, payment | Human approval (future) |
@@ -44,20 +44,29 @@ Credentials are classified into four security levels:
 ## L1 Auto-Allow Fast Path
 
 For L1 credentials, Keeper skips the LLM entirely when:
-1. The security level is L1
-2. The intent string has at least 10 non-whitespace characters
-3. The intent contains at least 3 **distinct** non-whitespace characters (blocks trivial filler like `"aaaaaaaaaa"`)
-4. The request is NOT a `/keeper/execute` request
+1. The request is a credential-access flow (`RequestType` empty or `access`) — F4.x request types always reach the LLM
+2. The security level is L1
+3. The intent string has at least 10 non-whitespace characters
+4. The intent contains at least 5 **distinct** non-whitespace characters (blocks trivial filler like `"aaaaaaaaaa"` or `"aaabbbcccddd"`)
+5. The intent doesn't look like a prompt injection (`looksLikeIntentInjection` — e.g. no `ignore previous`, `system:`, or a JSON `{...}` brace pair)
+6. The request is NOT a `/keeper/execute` request
 
 ```go
 // internal/keeper/gatekeeper/gatekeeper.go
 const minIntentLength = 10
+const l1MinDistinctChars = 5
 
-if req.Command == "" &&
+if isAccessFlow &&
+    req.Command == "" &&
     req.SecurityLevel == keeper.SecurityLevelL1 &&
     len(intent) >= minIntentLength &&
-    hasMinDistinctChars(intent, 3) {
-    return GatekeeperResponse{Decision: "ALLOW", Reason: "L1 auto-approved", RiskScore: 1}, nil
+    hasMinDistinctChars(intent, l1MinDistinctChars) &&
+    !looksLikeIntentInjection(intent) {
+    return GatekeeperResponse{
+        Decision:  "ALLOW",
+        Reason:    "L1 credential with stated intent — auto-approved",
+        RiskScore: 1,
+    }, nil
 }
 ```
 

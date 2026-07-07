@@ -72,6 +72,16 @@ Telemetry: DISABLED
   to enable:  crewship telemetry on
 ```
 
+Or when no explicit choice has been recorded yet (never-booted DB, or a
+stable build that hasn't been opted in). The message reflects the
+build's default — prerelease/dev builds settle to ENABLED on the next
+`crewship start`, stable builds stay DISABLED until you opt in:
+
+```
+$ crewship telemetry status
+Telemetry: not yet configured. This prerelease/dev build defaults to ENABLED on the next `crewship start` — opt out now with `crewship telemetry off`.
+```
+
 The `endpoint` line shows **where** events would route plus **why**:
 
 - `vendor default (compiled in)` — DSN baked into the binary at

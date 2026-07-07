@@ -11,6 +11,7 @@ icon: "play"
 ```bash
 crewship run <agent-slug> [prompt] [flags]
 crewship run list
+crewship run insights
 ```
 
 Each invocation creates a new chat by default (origin=`CLI`, so the web UI sidebar tags it). Pass `--chat <chat-id>` to continue an existing thread. Auth: `crewship login` plus workspace context. Both checks are skipped in `--dry-run` / `--estimate` offline modes.
@@ -21,6 +22,7 @@ Each invocation creates a new chat by default (origin=`CLI`, so the web UI sideb
 | --- | --- |
 | `run <agent-slug> [prompt]` | Start (or continue) a streamed run. |
 | `run list` | List recent runs across every agent in the workspace (`GET /api/v1/runs`). |
+| `run insights` | Fleet-ops snapshot over a window — outcome split, duration percentiles, and breakdowns by trigger/crew/model across **all** runs (`GET /api/v1/runs/insights`). |
 
 ## Flags
 
@@ -30,6 +32,7 @@ Each invocation creates a new chat by default (origin=`CLI`, so the web UI sideb
 | `--interactive` | `false` | Drop into a REPL after the first prompt. Ctrl-D exits, Ctrl-C cancels the current turn. |
 | `--chat <chat-id>` | (unset) | Continue an existing chat instead of creating one. |
 | `--no-stream` | `false` | Wait for completion and print the final text only. |
+| `--max-turns <n>` | `0` | Cap the agent loop at N turns for this run (`0` = adapter default, `50` interactive). |
 | `-q`, `--quiet` | `false` | Suppress `[agent: …]` / `[thinking]` / `[done]` stderr chatter. |
 | `--timeout <secs>` | `0` | HTTP timeout (`0` = unbounded). |
 | `--with-git-diff` | `false` | Append `git diff` as context. |
@@ -119,6 +122,26 @@ crewship run list
 ```
 
 Use `--format json` for piping (`crewship run list --format json | jq '.[] | select(.status=="FAILED")'`).
+
+### Fleet-ops insights
+
+```bash
+crewship run insights
+crewship run insights --window 7d
+crewship run insights --window 30d --format json
+```
+
+`run insights` aggregates **every** run in the workspace (not just routine runs)
+over a window into an ops snapshot: success/fail split, duration percentiles
+(p50/p95), and breakdowns by trigger, crew, and model. Backed by
+`GET /api/v1/runs/insights?window=<w>`.
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--window <w>` | `24h` | Aggregation window — one of `24h`, `7d`, `30d`. |
+
+Honours the global `--format json` / `--format yaml` for scripting; the default
+is a human-readable table.
 
 ## Streaming protocol
 

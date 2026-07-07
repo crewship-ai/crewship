@@ -34,6 +34,7 @@ All integration endpoints require authentication and workspace context (except w
 | `PATCH` | [`/api/v1/agents/{agentId}/integrations/{integrationId}`](#update-agent-binding) | Update an agent binding |
 | `DELETE` | [`/api/v1/agents/{agentId}/integrations/{integrationId}`](#delete-agent-binding) | Delete an agent binding |
 | `GET` | [`/api/v1/agents/{agentId}/integrations/resolved`](#resolve-agent-integrations) | Resolve effective integrations |
+| `GET` | [`/api/v1/mcp-tool-calls`](#mcp-tool-call-audit) | Audit trail of MCP tool invocations |
 | `GET` | [`/api/v1/oauth/providers`](#list-oauth-providers) | List OAuth providers |
 | `POST` | [`/api/v1/oauth/initiate`](#initiate-oauth-flow) | Start an OAuth flow |
 | `GET` | [`/api/v1/oauth/callback`](#oauth-callback) | Handle the OAuth callback |
@@ -987,6 +988,64 @@ GET /api/v1/agents/{agentId}/integrations/resolved?workspace_id={workspaceId}
 Returns the effective set of MCP servers for an agent after cascading workspace, crew, and agent-level configurations. Includes resolved credentials.
 
 **Response:** `200 OK` -- array of resolved integration objects.
+
+---
+
+## MCP Tool Call Audit
+
+```
+GET /api/v1/mcp-tool-calls?workspace_id={workspaceId}
+```
+
+Returns the workspace's MCP tool-invocation audit trail — one row per tool call an agent made through an MCP server — newest first, capped at **200** rows (`internal/api/mcp_audit.go:69`). Use the filters to scope to a single agent, server, status, or time window.
+
+**Auth:** authenticated workspace member (`authed` + workspace context — `internal/api/router_orchestration.go:416`). `workspace_id` is required (`internal/api/mcp_audit.go:38`).
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `workspace_id` | string | Required. Workspace whose tool calls are returned. |
+| `agent_id` | string | Optional. Filter to one agent (`internal/api/mcp_audit.go:48`). |
+| `server_id` | string | Optional. Filter to one MCP server (`mcp_server_id`) (`internal/api/mcp_audit.go:52`). |
+| `status` | string | Optional. Filter by call status (`internal/api/mcp_audit.go:56`). |
+| `since` | string | Optional. Lower bound on `created_at` (`datetime()`-parsed, inclusive) (`internal/api/mcp_audit.go:60`). |
+| `until` | string | Optional. Upper bound on `created_at` (inclusive) (`internal/api/mcp_audit.go:64`). |
+
+**Response:** `200 OK` — a JSON array (empty `[]` when nothing matches — `internal/api/mcp_audit.go:96-99`).
+
+```json
+[
+  {
+    "id": "mcp-call-uuid",
+    "workspace_id": "ws-uuid",
+    "crew_id": "crew-uuid",
+    "agent_id": "agent-uuid",
+    "mcp_server_id": "srv-uuid",
+    "mcp_server_scope": "crew",
+    "tool_name": "search_files",
+    "input_hash": "sha256:…",
+    "status": "success",
+    "duration_ms": 142,
+    "error_message": null,
+    "created_at": "2026-06-30T14:02:11Z"
+  }
+]
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `crew_id` | string? | Owning crew; `null` for workspace-scoped servers (`internal/api/mcp_audit.go:23`). |
+| `mcp_server_scope` | string | Scope the server was bound at, e.g. `workspace` / `crew` (`internal/api/mcp_audit.go:26`). |
+| `input_hash` | string? | Hash of the tool input (arguments are not stored in cleartext) (`internal/api/mcp_audit.go:28`). |
+| `status` | string | Call outcome (e.g. `success`, `error`) (`internal/api/mcp_audit.go:29`). |
+| `duration_ms` | integer? | Wall-clock duration; `null` when not recorded (`internal/api/mcp_audit.go:30`). |
+| `error_message` | string? | Failure detail; `null` on success (`internal/api/mcp_audit.go:31`). |
+
+| Status | Condition |
+|---|---|
+| `200` | Audit rows returned (possibly empty). |
+| `400` | `workspace_id` missing (`internal/api/mcp_audit.go:38-41`). |
 
 ---
 

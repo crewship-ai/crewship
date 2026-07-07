@@ -43,14 +43,19 @@ Beyond these, use the global `--format json` / `--format yaml` for scripting.
 
 ```bash
 crewship session list
-# ID                CURRENT  CREATED           LAST USED         IP             USER AGENT
-# sess_abc1234567   yes      2026-05-19 09:02  2026-05-19 14:51  10.0.4.7       Mozilla/5.0 (Macintosh; In
-# sess_xyz9876543   -        2026-04-30 11:18  2026-05-18 16:30  198.51.100.42  Mozilla/5.0 (Windows NT 1
+# ID                STATUS   CREATED           LAST USED         IP             USER AGENT
+# sess_abc1234567   current  2026-05-19 09:02  2026-05-19 14:51  10.0.4.7       Mozilla/5.0 (Macintosh; In
+# sess_xyz9876543   stale    2026-04-30 11:18  2026-05-18 16:30  198.51.100.42  Mozilla/5.0 (Windows NT 1
 ```
 
+The `STATUS` column is one of `current` (the session backing the token you're
+using right now), `active` (used within `--warn-stale-days`), or `stale` (older
+than the threshold). When any stale sessions are found, a table-mode footer
+suggests revoking them; the hint is suppressed in JSON output.
+
 <Warning>
-  `CURRENT` flags the session that owns the token you're using right now —
-  revoking that row logs you out. Re-run `crewship login` to continue.
+  `STATUS = current` flags the session that owns the token you're using right
+  now — revoking that row logs you out. Re-run `crewship login` to continue.
 </Warning>
 
 ### Audit dump for compliance

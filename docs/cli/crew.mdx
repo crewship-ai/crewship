@@ -51,9 +51,14 @@ List all crews in the workspace.
 
 ```bash
 crewship crew list
+crewship crew list --runtime
 ```
 
-**Output columns:** SLUG, NAME, AGENTS, NETWORK, MEMORY, CPUS
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--runtime` | `bool` | `false` | Append runtime image, cached image, and provisioning-status columns. |
+
+**Output columns:** SLUG, NAME, AGENTS, NETWORK, MEMORY, CPUS (plus runtime/cached-image/provisioning columns when `--runtime` is set).
 
 ---
 
@@ -83,7 +88,7 @@ crewship crew create --name "Backend Team" --memory-mb 4096 --cpus 2.0
 | `--slug` | `string` | _(auto from name)_ | Crew slug. |
 | `--description` | `string` | | Description. |
 | `--color` | `string` | | Hex color (e.g. `#3B82F6`). |
-| `--icon` | `string` | | Emoji icon. |
+| `--icon` | `string` | | Lucide icon name (e.g. `code`, `rocket`, `terminal`). |
 | `--memory-mb` | `int` | `0` | Container memory limit in MB. |
 | `--cpus` | `float64` | `0` | Container CPU limit. |
 | `--ttl` | `int` | `0` | Auto-stop after idle hours (0 = never stop). |
@@ -105,7 +110,7 @@ crewship crew update <slug-or-id> --memory-mb 8192 --cpus 4.0
 | `--name` | `string` | | Crew name. |
 | `--description` | `string` | | Description. |
 | `--color` | `string` | | Hex color. |
-| `--icon` | `string` | | Emoji icon. |
+| `--icon` | `string` | | Lucide icon name (e.g. `code`, `rocket`, `terminal`). |
 | `--memory-mb` | `int` | | Container memory limit in MB. |
 | `--cpus` | `float64` | | Container CPU limit. |
 | `--ttl` | `int` | `-1` | Auto-stop after idle hours (0 = disable TTL). |

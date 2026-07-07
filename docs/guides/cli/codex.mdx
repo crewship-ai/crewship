@@ -48,7 +48,7 @@ codex exec --json --sandbox <mode> --model <m> -- "[SYSTEM]\n<preamble>\n\n[USER
 
 - `exec` — non-interactive subcommand (NOT `--quiet`, that flag doesn't exist)
 - `--json` — newline-delimited JSON events on stdout
-- `--sandbox` — `read-only` (MINIMAL/CONSULTATIVE profile) | `workspace-write` (CODING) | `danger-full-access` (never opted into)
+- `--sandbox` — `read-only` (`MINIMAL` profile) | `workspace-write` (all other profiles — `CODING`/`FULL`) | `danger-full-access` (never opted into)
 - `--` separator prevents user message dash-prefixed tokens from being parsed as flags
 - System prompt is folded into the user message body with `[SYSTEM]/[USER]` delimiters because Codex `exec` has no system-prompt flag
 
@@ -70,6 +70,16 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/work"]
 ```
 
 `Authorization: Bearer ${TOKEN}` headers are translated to `bearer_token_env_var = "TOKEN"`. Generic `X-API-Key: ${KEY}` headers go to `env_http_headers = { "X-API-Key" = "KEY" }`. Literal headers go to `http_headers = { ... }`.
+
+<Note>
+Two sidecar-hosted MCP servers are auto-injected into every generated config
+(`injectMemoryMCP` + `injectRoutinesMCP`): `crewship-memory`
+(`http://127.0.0.1:9119/mcp/memory/<slug>`) and `crewship-routines`
+(`.../mcp/routines`) — both `http` transport. They give the model native
+`memory.read/write/search/append_daily` and `save_routine`/`list_routines`
+tools regardless of CLI. A user-declared server of the same name wins (no
+overwrite).
+</Note>
 
 ## Memory
 

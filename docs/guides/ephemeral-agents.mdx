@@ -42,7 +42,7 @@ crewship hire \
 |---|---|
 | `--crew` | Crew slug or ID to hire into. The agent is bound to this crew's MCP config, network policy, and autonomy_level. |
 | `--template` | Built-in agent template the hire is provisioned from. Defines the agent's role, system prompt skeleton, and CLI adapter. |
-| `--ttl` | Time-to-live in minutes. Clamped server-side to [30, 1440] (30 min minimum to avoid trivial-hire abuse, 24 hr maximum to enforce the "ephemeral" framing — for longer work, hire a permanent agent). Default 60. |
+| `--ttl` | Time-to-live in minutes. Defaults to **30** when omitted or `≤0` (`defaultHireTTLMinutes`); values above **1440** (24 hr) are capped at 1440 (`maxHireTTLMinutes`) to enforce the "ephemeral" framing — for longer work, hire a permanent agent. A positive value below 30 is accepted as-is; there is no enforced lower bound. |
 | `--reason` | **Required.** Appended to `agents.hire_reason` as a chronological history (rehires also append, so the column reads as a narrative of the agent's lifecycle). |
 | `--parent-lead` | Optional — links the hire to the lead agent that initiated it (for `LEAD`-driven hires from inside a container via the sidecar `/spawn` endpoint). |
 
@@ -62,7 +62,7 @@ A `guided`-crew hire lands as `PENDING_REVIEW`. The inbox shows the hire request
 1. Flips `agents.status` from `PENDING_REVIEW` to `IDLE` (atomic UPDATE with WHERE guard so a concurrent fire / soft-delete returns 404 instead of silently writing nothing)
 2. Resolves the inbox row via `inbox.ResolveBySource`
 3. Writes a `agent.hire_approved` journal entry
-4. Broadcasts an `agent.ready` WebSocket event so the UI repaints the agent card from PENDING_REVIEW chip to a normal status badge
+4. Broadcasts an `agent.hire_approved` WebSocket event so the UI repaints the agent card from the PENDING_REVIEW chip to a normal status badge
 
 The operator can also "fire" the pending agent by deleting it from the crew page — same path as deleting any agent. No separate "deny hire" endpoint exists today (tracked as PR-F follow-up); fire is the explicit reject path.
 
@@ -124,7 +124,7 @@ crewship rehire <agent-slug-or-id> \
 | Flag | Purpose |
 |---|---|
 | `agent` (positional) | Slug or ID of the ghost (or live ephemeral — rehiring a live one extends TTL without ghosting first). |
-| `--ttl` | New TTL in minutes. Same [30, 1440] clamping. Resets `expires_at` to `now() + ttl`. |
+| `--ttl` | New TTL in minutes. Same default-30 / cap-1440 handling as `hire`. Resets `expires_at` to `now() + ttl`. |
 | `--reason` | **Required.** Appended to `hire_reason` history (so the column shows e.g. "initial hire for #4582 — extended for sustained-fire investigation"). |
 
 Effect on the DB row:

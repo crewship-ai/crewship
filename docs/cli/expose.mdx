@@ -35,10 +35,14 @@ crewship expose list --crew backend-team --status all --format json
 |---|---|---|---|
 | `--crew <slug-or-id>` | string | (required) | Crew the exposure belongs to. |
 | `--reason <text>` | string | (unset) | Human-readable reason recorded in the audit row. |
+| `-y`, `--yes` | bool | `false` | Skip the interactive confirmation prompt. |
+
+Revoke prompts for confirmation (`Revoke port exposure "<id>" on crew "<slug>"?`) before it fires; pass `--yes` to skip it in scripts.
 
 ```bash
 crewship expose revoke exp_abc --crew backend-team
 crewship expose revoke exp_abc --crew backend-team --reason "demo finished, tearing it down"
+crewship expose revoke exp_abc --crew backend-team --yes
 ```
 
 Success: `Exposure <id> revoked.`

@@ -258,7 +258,7 @@ The CLI calls this from the operator's machine to exchange the code for a fresh 
 
 ```json
 {
-  "cli_token": "crewship_cli_3f9a4d2b8e7c1f5a0d6b9e2c4f8a1d3b5e7c9f1a",
+  "cli_token": "crewship_cli_3f9a4d2b8e7c1f5a0d6b9e2c4f8a1d3b5e7c9f1a2b4d6e8f0a1c3e5d7b9f0a1c",
   "user_id": "u_01HVY...",
   "email": "petra@example.com"
 }
@@ -339,7 +339,7 @@ Flips `revoked_at` on a single session owned by the caller. The 404 path covers 
 
 Long-lived bearer tokens used by `crewship` CLI invocations and CI agents. Tokens are minted once, only the SHA-256 hash is stored, and the raw value is returned exactly once in the `create` response -- the rest of the surface returns metadata only.
 
-Token format: `crewship_cli_` + 40 hex chars (20 random bytes). `IsCLIToken` is the helper the auth middleware uses to detect this prefix before falling through to JWE validation.
+Token format: `crewship_cli_` + 64 hex chars (32 random bytes, 256-bit entropy). ADMIN-tier tokens carry the `crewship_admin_` prefix instead. `IsCLIToken` is the helper the auth middleware uses to detect either prefix before falling through to JWE validation.
 
 ### `POST /api/v1/auth/cli-token`
 
@@ -362,14 +362,14 @@ Mints a new token for the calling user.
 |---|---|---|
 | `name` | string | Optional. Defaults to `"CLI token"`. Free-form label rendered in the Settings list. |
 | `tier` | string | Optional. `STANDARD` (default) or `ADMIN`. `STANDARD` tokens never expire unless `expires_in_seconds` is given; `ADMIN` tokens are OWNER-only, HMAC-signed, and default to a bounded lifetime (capped server-side). |
-| `expires_in_seconds` | integer | Optional. TTL in seconds from issue time. `0`/omitted means "tier default" (STANDARD: no expiry; ADMIN: the server's default ADMIN lifetime, clamped to the ADMIN max and floored at 60s). |
+| `expires_in_seconds` | integer | Optional. TTL in seconds from issue time. `0`/omitted means "tier default" (STANDARD: no expiry; ADMIN: the server's default ADMIN lifetime, clamped to the 7-day ADMIN max). An explicit ADMIN TTL below 60s is **rejected with `400`**, not floored. |
 | `scopes` | string[] | Optional. Narrows the token below the caller's full workspace role. Empty list = full role (historical behaviour). Each entry must be a known `resource:action` scope (e.g. `agents:read`, `crews:write`, `workspace:admin`, or wildcards `*` / `agents:*`); an unknown scope is `400`, a scope exceeding the caller's role is `403`. |
 
 **Response:** `200 OK`
 
 ```json
 {
-  "token": "crewship_cli_3f9a4d2b8e7c1f5a0d6b9e2c4f8a1d3b5e7c9f1a",
+  "token": "crewship_cli_3f9a4d2b8e7c1f5a0d6b9e2c4f8a1d3b5e7c9f1a2b4d6e8f0a1c3e5d7b9f0a1c",
   "id": "clt_01HVZ...",
   "name": "ci-runner",
   "tier": "STANDARD",

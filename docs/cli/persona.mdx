@@ -44,18 +44,16 @@ crewship persona <subcommand> [flags]
 crewship persona view <agent-slug>
 ```
 
-Prints the resolved persona — agent-layer file if present, otherwise crew default, otherwise the per-role synthesised stub — along with the layer marker and byte count.
+Prints the resolved persona — agent-layer file if present, otherwise crew default, otherwise the per-role synthesised stub — along with a header line showing the source layer and byte count, then the content.
 
 ```text
-Layer:        agent       (842 / 1500 bytes)
-From default: false
-─────
+=== agent persona (source: agent, 842/1500 bytes) ===
 # Engineer
 
 Focus on backend services. Prefer async over sync...
 ```
 
-`From default` is `true` only when neither agent nor crew has a file on disk and the response is the `You are the {role}...` synthesised text — useful when reviewing a freshly-onboarded crew.
+The header's `source` is the resolved layer (`agent` or `crew`). When neither agent nor crew has a file on disk and the response is the `You are the {role}...` synthesised text (`from_default: true` on the wire), the source reads `synthesized default` — useful when reviewing a freshly-onboarded crew.
 
 ---
 
@@ -109,11 +107,12 @@ This is a **Phase-2 stub**. When an agent's [`POST /persona/suggest`](/api-refer
 ## `crewship persona crew`
 
 ```bash
-crewship persona crew <crew-slug>              # default subcommand: view
-crewship persona crew view <crew-slug>
-crewship persona crew edit <crew-slug>
-crewship persona crew reset <crew-slug>
+crewship persona crew <crew-slug> view
+crewship persona crew <crew-slug> edit
+crewship persona crew <crew-slug> reset
 ```
+
+The verb comes **after** the crew slug (`crewship persona crew <crew-slug> <verb>`), and both arguments are required — the command takes a minimum of two positional args and errors with a usage hint if the verb is omitted.
 
 Same verbs against the crew-default layer at [`/api/v1/crews/{crewId}/persona`](/api-reference/crews#crew-persona). There is **no `suggest`** equivalent — agents propose only into their own layer, and the operator authors crew defaults directly.
 

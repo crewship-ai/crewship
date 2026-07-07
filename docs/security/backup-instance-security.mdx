@@ -82,7 +82,9 @@ the runner compares it to `instance_config.hostname` of the TARGET:
   `RotateAuthKeys`, but it is not wired into the `crewship backup
   restore` CLI flow — the restore command's flag set is
   `--as-workspace`, `--as-crew`, `--passphrase-file`, `--use-keyring`,
-  and `--dry-run` (see `cmd/crewship/cmd_backup_lifecycle.go`).
+  `--dry-run`, and `--replace` (registered in
+  `cmd/crewship/cmd_backup.go`; handler in
+  `cmd/crewship/cmd_backup_lifecycle.go`).
   Operators performing a cross-host DR restore should manually rotate
   `NEXTAUTH_SECRET` before the next `crewshipd` start to invalidate
   any session tokens from the source host.

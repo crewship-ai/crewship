@@ -255,8 +255,10 @@ crewship backup restore /tmp/crewship-workspace-acme-*.tar.zst \
 # ⚠ Docker phase skipped (--as-workspace supplied).
 #   Provision the new crews with `crewship crew provision`.
 
-# Stand the crews up under the new slug:
-crewship crew provision --workspace=acme-migrated --all
+# Stand the crews up under the new slug — provision each crew by slug
+# (provision takes one crew per call):
+crewship crew provision <crew-slug>
+crewship crew provision <another-crew-slug>
 ```
 
 Once the new instance has parity (sanity-check via the UI), users get the new URL, and `acme` on the old host gets archived to cold storage before its workspace row is deleted.
@@ -589,7 +591,7 @@ runtime errors that point at schema drift:
   </Step>
   <Step title="Stop crewship">
     ```bash
-    crewship stop  # or kill -TERM if needed
+    sudo systemctl stop crewshipd  # or Ctrl-C / kill -TERM the `crewship start` process
     ```
   </Step>
   <Step title="Replace the current DB with the snapshot">

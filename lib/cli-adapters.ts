@@ -54,14 +54,19 @@ export interface CLIAdapterConfig {
 
 // ===== ANTHROPIC =====
 // Source: https://platform.claude.com/docs/en/about-claude/models/overview
-// claude-opus-4-7 / claude-sonnet-4-6 are valid API strings (alias = canonical
-// for these versions). Haiku 4.5 has alias `claude-haiku-4-5` resolving to
-// the dated `claude-haiku-4-5-20251001`. Anything claude-3-* / claude-*-4-2025*
-// is deprecated (retiring 2026-06-15) and removed from the picker.
+// claude-fable-5 is the premium flagship (most capable); claude-opus-4-8 and
+// claude-sonnet-5 are the current Opus/Sonnet tiers. All are bare aliases =
+// canonical for their version. Haiku 4.5 has alias `claude-haiku-4-5` resolving
+// to the dated `claude-haiku-4-5-20251001`. Superseded 4.7/4.6 aliases stay
+// selectable under "legacy"; anything claude-3-* / claude-*-4-2025* is
+// deprecated (retiring 2026-06-15) and removed from the picker.
 const ANTHROPIC_MODELS: ModelOption[] = [
-  { value: "claude-opus-4-7", label: "Claude Opus 4.7", category: "frontier" },
-  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", category: "frontier" },
+  { value: "claude-fable-5", label: "Claude Fable 5", category: "frontier" },
+  { value: "claude-opus-4-8", label: "Claude Opus 4.8", category: "frontier" },
+  { value: "claude-sonnet-5", label: "Claude Sonnet 5", category: "frontier" },
   { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", category: "fast" },
+  { value: "claude-opus-4-7", label: "Claude Opus 4.7", category: "legacy" },
+  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", category: "legacy" },
   { value: "claude-opus-4-6", label: "Claude Opus 4.6", category: "legacy" },
   { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5", category: "legacy" },
   { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5", category: "legacy" },
@@ -101,8 +106,11 @@ const GOOGLE_MODELS: ModelOption[] = [
 // Composer model. cursor-agent --list-models shows the live per-account list.
 const CURSOR_MODELS: ModelOption[] = [
   { value: "composer", label: "Cursor Composer", category: "frontier" },
-  { value: "claude-opus-4-7", label: "Claude Opus 4.7 (Cursor)", category: "frontier" },
-  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (Cursor)", category: "frontier" },
+  { value: "claude-fable-5", label: "Claude Fable 5 (Cursor)", category: "frontier" },
+  { value: "claude-opus-4-8", label: "Claude Opus 4.8 (Cursor)", category: "frontier" },
+  { value: "claude-sonnet-5", label: "Claude Sonnet 5 (Cursor)", category: "frontier" },
+  { value: "claude-opus-4-7", label: "Claude Opus 4.7 (Cursor)", category: "legacy" },
+  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (Cursor)", category: "legacy" },
   { value: "claude-haiku-4-5", label: "Claude Haiku 4.5 (Cursor)", category: "fast" },
   { value: "gpt-5.5", label: "GPT-5.5 (Cursor)", category: "frontier" },
   { value: "gpt-5.4", label: "GPT-5.4 (Cursor)", category: "frontier" },
@@ -117,10 +125,13 @@ const CURSOR_MODELS: ModelOption[] = [
 // Bare IDs (no provider prefix). -fast variants are premium-tier multiplier.
 // Custom format: custom:Display-Name-Index.
 const DROID_MODELS: ModelOption[] = [
-  { value: "claude-opus-4-7", label: "Claude Opus 4.7 (Droid)", category: "frontier" },
-  { value: "claude-opus-4-6", label: "Claude Opus 4.6 (Droid)", category: "frontier" },
-  { value: "claude-opus-4-6-fast", label: "Claude Opus 4.6 Fast (Droid)", category: "frontier" },
-  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (Droid)", category: "frontier" },
+  { value: "claude-fable-5", label: "Claude Fable 5 (Droid)", category: "frontier" },
+  { value: "claude-opus-4-8", label: "Claude Opus 4.8 (Droid)", category: "frontier" },
+  { value: "claude-sonnet-5", label: "Claude Sonnet 5 (Droid)", category: "frontier" },
+  { value: "claude-opus-4-7", label: "Claude Opus 4.7 (Droid)", category: "legacy" },
+  { value: "claude-opus-4-6", label: "Claude Opus 4.6 (Droid)", category: "legacy" },
+  { value: "claude-opus-4-6-fast", label: "Claude Opus 4.6 Fast (Droid)", category: "legacy" },
+  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (Droid)", category: "legacy" },
   { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (Droid)", category: "fast" },
   { value: "gpt-5.5", label: "GPT-5.5 (Droid)", category: "frontier" },
   { value: "gpt-5.5-fast", label: "GPT-5.5 Fast (Droid)", category: "frontier" },
@@ -142,8 +153,11 @@ const DROID_MODELS: ModelOption[] = [
 // OpenCode accepts "provider/model" strings across 75+ providers. Curated
 // list of the most-deployed combinations.
 const OPENCODE_MODELS: ModelOption[] = [
-  { value: "anthropic/claude-opus-4-7", label: "Anthropic / Claude Opus 4.7", category: "frontier" },
-  { value: "anthropic/claude-sonnet-4-6", label: "Anthropic / Claude Sonnet 4.6", category: "frontier" },
+  { value: "anthropic/claude-fable-5", label: "Anthropic / Claude Fable 5", category: "frontier" },
+  { value: "anthropic/claude-opus-4-8", label: "Anthropic / Claude Opus 4.8", category: "frontier" },
+  { value: "anthropic/claude-sonnet-5", label: "Anthropic / Claude Sonnet 5", category: "frontier" },
+  { value: "anthropic/claude-opus-4-7", label: "Anthropic / Claude Opus 4.7", category: "legacy" },
+  { value: "anthropic/claude-sonnet-4-6", label: "Anthropic / Claude Sonnet 4.6", category: "legacy" },
   { value: "anthropic/claude-haiku-4-5", label: "Anthropic / Claude Haiku 4.5", category: "fast" },
   { value: "openai/gpt-5.5", label: "OpenAI / GPT-5.5", category: "frontier" },
   { value: "openai/gpt-5.4", label: "OpenAI / GPT-5.4", category: "frontier" },
@@ -186,7 +200,7 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     provider: "ANTHROPIC",
     envVar: "ANTHROPIC_API_KEY",
     models: ANTHROPIC_MODELS,
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "claude-sonnet-5",
     description: "Anthropic's coding agent",
     status: "production",
   },
@@ -196,7 +210,7 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     provider: "ANTHROPIC",
     envVar: "ANTHROPIC_API_KEY",
     models: OPENCODE_MODELS,
-    defaultModel: "anthropic/claude-sonnet-4-6",
+    defaultModel: "anthropic/claude-sonnet-5",
     description: "Open-source multi-provider CLI",
     status: "experimental",
   },
@@ -238,7 +252,7 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     provider: "FACTORY",
     envVar: "FACTORY_API_KEY",
     models: DROID_MODELS,
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "claude-sonnet-5",
     description: "Factory's autonomous coding agent",
     status: "experimental",
   },

@@ -26,6 +26,7 @@ Issues are crew-scoped tracker items: each carries a human-readable identifier (
 | `PATCH` | [`/api/v1/issues/bulk`](#bulk-update) | Bulk-update up to 100 issues |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/subtasks`](#list-sub-issues) | List an issue's sub-issues |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/activity`](#list-activity) | List an issue's activity log |
+| `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/runs`](#list-runs) | List an issue's agent task-runs |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/comments`](#list-comments) | List comments on an issue |
 | `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/comments`](#create-comment) | Add a comment |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/relations`](#list-relations) | List relations |
@@ -529,6 +530,56 @@ Returns the activity log for an issue (status changes, assignments, reviews). Li
 ```
 
 **Activity Actions:** `status_changed`, `assignee_changed`, `priority_changed`, `review_approved`, `review_changes_requested`
+
+---
+
+## Runs
+
+The agent executions behind an issue. Issues run on the mission engine (not pipelines), so a "run" is a mission task backed by an `assignments` row.
+
+### List Runs
+
+```
+GET /api/v1/crews/{crewId}/issues/{identifier}/runs?workspace_id={workspaceId}
+```
+
+Lists the agent task-runs for an issue — each mission task joined to its `assignments` row (execution status, timing, result, error). Newest-first, capped at 100 rows.
+
+**Auth:** any authenticated workspace member (`read`).
+
+**Response:** `200 OK` — a JSON **array** (never `null`).
+
+```json
+[
+  {
+    "id": "asg_abc",
+    "status": "completed",
+    "agent_name": "Backend Dev",
+    "task": "Refresh token handling",
+    "started_at": "2026-01-15T10:00:00Z",
+    "ended_at": "2026-01-15T10:04:12Z",
+    "duration_ms": 252000,
+    "result_summary": "Patched refresh path and added a regression test.",
+    "error_message": ""
+  }
+]
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Assignment (run) ID |
+| `status` | string | Assignment status |
+| `agent_name` | string? | Resolved name of the assigned agent (omitted when empty) |
+| `task` | string? | Task text (omitted when empty) |
+| `started_at` | string? | Start timestamp (omitted when empty) |
+| `ended_at` | string? | Finish timestamp (omitted when empty) |
+| `duration_ms` | integer | Elapsed time in ms; `0` when timing can't be derived |
+| `result_summary` | string? | Agent-authored result prose, truncated for the list (omitted when empty) |
+| `error_message` | string? | Failure detail, truncated for the list (omitted when empty) |
+
+| Status | Condition |
+|---|---|
+| `404` | Issue not found in the supplied crew + workspace |
 
 ---
 

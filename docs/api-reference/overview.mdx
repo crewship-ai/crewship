@@ -102,14 +102,18 @@ Permission mapping:
 |---|---|
 | `read` | Any authenticated member |
 | `create` | `OWNER`, `ADMIN`, `MANAGER` |
+| `update` | `OWNER`, `ADMIN`, `MANAGER` |
 | `manage` | `OWNER`, `ADMIN` |
+| `delete` | `OWNER`, `ADMIN` |
+
+These are the five action gates checked by `canRole` (`internal/api/helpers.go:438`). `create`/`update` share the same tier, as do `manage`/`delete`.
 
 ---
 
 ## Request Format
 
 - **Content-Type:** `application/json`
-- **Body size limit:** 1 MB
+- **Body size limit:** 16 MiB on the authed API surface (`maxAPIBodyBytes`, `internal/api/middleware.go`). Oversized `Content-Length` is rejected up front with `413`; chunked/unlabelled bodies are bounded by a `MaxBytesReader` backstop. Individual handlers may impose a stricter cap (e.g. user preferences at 16 KB).
 - **Timestamps:** ISO 8601 / RFC 3339 in UTC (e.g., `2024-01-15T10:30:00Z`)
 - **IDs:** CUID strings (e.g., `cm1a2b3c4d5e6f7g8h9i`)
 - **Slugs:** Lowercase alphanumeric with hyphens, 2-50 characters (regex: `^[a-z0-9][a-z0-9_-]*$`)

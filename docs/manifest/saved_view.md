@@ -147,11 +147,15 @@ succeeds in one command.
 
 ## CLI reference
 
+The command is `crewship saved-view` (aliases: `saved-views`, `view`), defined in `cmd/crewship/cmd_admin_extras.go`.
+
 | Command | Description |
 |---|---|
 | `crewship saved-view list` | List every saved view visible to the current user (own + shared). |
+| `crewship saved-view create --name <n> --filters <json>` | Create a view (flag-based; `--filters`/`--sort` are raw JSON, `--view-type`, `--shared`). |
+| `crewship saved-view update <view-id>` | Update a view by id (owner-only; `--name`, `--filters`, `--sort`, `--shared`, `--default`). |
 | `crewship saved-view delete <view-id>` | Delete a saved view (owner-only). Takes the **view id**, not a slug — saved views have no slug column server-side. |
-| `crewship apply -f saved-view.yaml` | Create or update from a manifest |
+| `crewship apply -f saved-view.yaml` | Create or update from a manifest (structured `filter`/`sort` blocks). |
 | `crewship export workspace` | Include saved views in the workspace export |
 
 ## REST endpoint mapping

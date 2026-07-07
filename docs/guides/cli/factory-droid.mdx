@@ -68,7 +68,11 @@ Configured at `/output/<slug>/.factory/mcp.json`:
 }
 ```
 
-Droid REQUIRES `type: stdio | http` discriminator on every server (Crewship's writer always emits it).
+Droid REQUIRES `type: stdio | http` discriminator on every server (Crewship's writer always emits it — `stdio` when `command` is set, `http` when `url` is set).
+
+<Note>
+Crewship auto-injects two sidecar-hosted servers into `.factory/mcp.json` (`injectMemoryMCP` + `injectRoutinesMCP`): `crewship-memory` (`http://127.0.0.1:9119/mcp/memory/<slug>`) and `crewship-routines` (`.../mcp/routines`), both `type: http`. A user-declared server of the same name wins.
+</Note>
 
 ## Memory
 

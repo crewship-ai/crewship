@@ -84,15 +84,19 @@ the update-available banner in the web UI.)
 
 ## Update available?
 
-Both `crewship version` and `crewship doctor` print a banner if a
-newer release is available. Suppress via env:
+`crewship version` itself does **not** hit the network — it only prints
+the compiled-in metadata above. The update-availability banner is
+printed by [`crewship doctor`](/cli/doctor) and logged at boot by
+[`crewship start`](/cli/start); both call `internal/update.Check`.
+
+Suppress that check via env:
 
 ```bash
-CREWSHIP_SKIP_UPDATE_CHECK=1 crewship version
+CREWSHIP_SKIP_UPDATE_CHECK=1 crewship doctor
 ```
 
-The check is HTTP GET to GitHub Releases API, cached 24h in
-`~/.crewship/cache/`. Skips silently for `version=dev` (local builds).
+The check is an HTTP GET to the GitHub Releases API, cached 24h, and
+skips silently for `version=dev` (local `go build` / `go run`).
 
 ## Related
 

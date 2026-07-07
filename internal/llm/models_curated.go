@@ -14,9 +14,11 @@ import "strings"
 // renders it top-to-bottom presents the recommended default first.
 var curatedModels = map[string][]ModelInfo{
 	"anthropic": {
+		{ID: "claude-fable-5", DisplayName: "Claude Fable 5", Provider: "anthropic"},
 		{ID: "claude-opus-4-8", DisplayName: "Claude Opus 4.8", Provider: "anthropic"},
 		{ID: "claude-opus-4-7", DisplayName: "Claude Opus 4.7", Provider: "anthropic"},
 		{ID: "claude-opus-4-6", DisplayName: "Claude Opus 4.6", Provider: "anthropic"},
+		{ID: "claude-sonnet-5", DisplayName: "Claude Sonnet 5", Provider: "anthropic"},
 		{ID: "claude-sonnet-4-6", DisplayName: "Claude Sonnet 4.6", Provider: "anthropic"},
 		{ID: "claude-haiku-4-5", DisplayName: "Claude Haiku 4.5", Provider: "anthropic"},
 	},

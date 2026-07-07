@@ -14,6 +14,8 @@ escalation is raised on your crew, and similar events.
 crewship notification <subcommand> [flags]
 ```
 
+Command aliases: `notifications`, `notif`.
+
 ## Subcommands
 
 | Command | Description |
@@ -74,13 +76,17 @@ crewship notification read-all
 
 ## `crewship notification delete`
 
-Delete a single notification. The action is immediate — there is no
-confirmation prompt — so wrap in `--dry-run` upstream tooling if you
-need a check before commit.
+Delete a single notification. Prompts for confirmation unless `--yes`
+is passed; a non-interactive session refuses to proceed without it.
 
 ```bash
 crewship notification delete <id>
-crewship notification delete <id>  # alias: remove, rm
+crewship notification delete <id> --yes   # skip the prompt
+crewship notification rm <id>             # alias
 ```
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--yes` | `-y` | `bool` | `false` | Skip the confirmation prompt. |
 
 Aliases: `remove`, `rm`.

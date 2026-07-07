@@ -34,6 +34,17 @@ spec: { … }
 
 Multi-document YAML is supported via `---` separators — each document is independently typed by its own `apiVersion` + `kind`.
 
+<Note>
+  This page documents the two workspace-bundle kinds, **`Crew`** and
+  **`Workspace`**. The apply pipeline also accepts additional
+  declarative kinds — `Project`, `Label`, `Milestone`, `WorkflowTemplate`,
+  `TriageRule`, `RecurringIssue`, `SavedView`, `Routine`, `FeatureFlag`,
+  `InstanceSetting`, `Recipe`, `CrewTemplate`, `Connector`, `Hook`,
+  `Skill`, and `Issue` — whose document types live under
+  `internal/manifest/kinds`. They share the same `apiVersion` +
+  `metadata` envelope but are out of scope for this schema reference.
+</Note>
+
 ## `metadata`
 
 Shared between both kinds. Only `slug` is load-bearing for apply (it's the idempotency key); the rest is descriptive.
@@ -189,6 +200,17 @@ Sidecar container that runs alongside the agent on the crew's bridge network. Ag
 | `ports` | `[]string` | — | `"5432"` or `"5432/tcp"`. Container-internal only. |
 | `volumes` | `[]ServiceVolume` | — | Named volumes only. Bind mounts to host paths are rejected for portability. |
 | `healthcheck` | `ServiceHealthcheck` | — | Provisioner waits for `HEALTHY` before starting the agent. |
+| `auto_credentials` | `[]AutoCredential` | — | Secrets Crewship generates and manages for the sidecar. Each entry produces an `AUTO_MANAGED` credential row (attributed to the crew's lead agent), is injected into this sidecar's env, and is appended to every crew agent's `env_refs`. Known images (`postgres:*`, `mysql:*`, `mongo:*`, …) get a sugar default merged in. **Refused when the service publishes a port to the host** (external attack surface needs an operator-chosen credential). |
+
+### `AutoCredential`
+
+| Field | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `name` | string | (required) | Workspace-unique credential name **and** the default env-var name on the sidecar + every crew agent. Use `SCREAMING_SNAKE_CASE`. |
+| `inject_as_env` | string | `name` | Overrides the env-var name the sidecar receives (e.g. `MARIADB_ROOT_PASSWORD`). |
+| `inject_to_agents` | bool | `true` | When `false`, the sidecar uses the secret internally but no agent picks it up. |
+| `length` | int | `32` bytes (64 hex chars) | Random bytes generated before hex-encoding. Minimum `16`; below that the validator refuses the row. |
+| `description` | string | — | Shown in the UI on the "Created by \<agent\>" row. |
 
 ### `ServiceVolume`
 

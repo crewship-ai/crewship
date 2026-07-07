@@ -170,7 +170,7 @@ A successful cascade returns:
 | `completed_at` | `TEXT` | NULL while in progress |
 | `status` | `TEXT NOT NULL` CHECK IN `('in_progress','completed','failed')` | Defaults to `in_progress` |
 | `error` | `TEXT` | Populated on `status='failed'` |
-| `reason` | `TEXT` | **Required for `action='delete'`** via column-level CHECK |
+| `reason` | `TEXT` | **Required for `action='delete'`** via a table-level CHECK (`action <> 'delete' OR length(trim(reason)) > 0`) |
 
 Indexes:
 

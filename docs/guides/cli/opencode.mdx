@@ -80,7 +80,12 @@ OpenCode-specific:
 - `type: local` (stdio) or `remote` (HTTP/SSE)
 - `command` is an ARRAY (binary + args together)
 - env field is `environment` (NOT `env`)
+- Each entry carries `"enabled": true`
 - Env-var syntax is `{env:VAR}` (NOT `${VAR}`) — Crewship translates standard `${VAR}` form on write
+
+<Note>
+Crewship auto-injects two sidecar-hosted servers under `mcp` (`injectMemoryMCP` + `injectRoutinesMCP`): `crewship-memory` and `crewship-routines`, both `type: remote` pointing at `http://127.0.0.1:9119/mcp/memory/<slug>` and `.../mcp/routines`. A user-declared server of the same name wins.
+</Note>
 
 ## Memory
 

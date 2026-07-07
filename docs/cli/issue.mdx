@@ -30,6 +30,8 @@ crewship issue <subcommand> [flags]
 | `stop` | Stop an issue (cancel running tasks) |
 | `review` | Review an issue (approve or request changes) |
 | `activity` | Show the activity timeline for an issue |
+| `runs` | List runs triggered by an issue |
+| `changes` | Show the git diff produced by work on an issue |
 | `subtasks` | List sub-issues of an issue (aliases: `subissues`, `sub-issues`) |
 | `relate` | Create a relation between two issues |
 | `relations` | List relations for an issue (alias: `relates`) |
@@ -113,8 +115,8 @@ crewship issue create --crew backend-team --title "Add caching" --assignee vikto
 | `--title` | `string` | _(required)_ | Issue title. |
 | `--description` | `string` | | Issue description. |
 | `--priority` | `string` | `none` | Priority: `none`, `low`, `medium`, `high`, `urgent`. |
-| `--assignee` | `string` | | Assignee agent slug or user email. |
-| `--assignee-type` | `string` | `agent` | Assignee type: `agent` or `user`. |
+| `--assignee` | `string` | | Assignee agent slug (resolved to an agent ID client-side). |
+| `--assignee-type` | `string` | `agent` | Assignee type. Only `agent` is currently supported — any other value is rejected. |
 | `--labels` | `string` | | Comma-separated label IDs. |
 | `--due-date` | `string` | | Due date in ISO 8601 format. |
 | `--project-id` | `string` | | Attach to a project (ID). |
@@ -141,8 +143,8 @@ crewship issue update BE-42 --priority urgent --assignee franta
 | `--description` | `string` | | New description. |
 | `--status` | `string` | | New status: `BACKLOG`, `TODO`, `IN_PROGRESS`, `REVIEW`, `DONE`, `FAILED`, `CANCELLED`, `DUPLICATE`. |
 | `--priority` | `string` | | New priority: `none`, `low`, `medium`, `high`, `urgent`. |
-| `--assignee` | `string` | | New assignee (agent slug). |
-| `--assignee-type` | `string` | | Assignee type: `agent` or `user`. |
+| `--assignee` | `string` | | New assignee (agent slug). Empty string clears the assignee. |
+| `--assignee-type` | `string` | | Assignee type. Only `agent` is currently supported — any other value is rejected. |
 | `--due-date` | `string` | | Due date (ISO 8601). |
 | `--project-id` | `string` | | Project ID (empty string = unlink). |
 | `--milestone-id` | `string` | | Milestone ID (empty string = unlink). |
@@ -262,6 +264,35 @@ crewship issue activity BE-42 --format json | jq '.[] | select(.action=="status_
 ```
 
 **Output columns:** WHEN (relative time), ACTOR (`type/name`), ACTION, DETAILS (truncated to 60 chars).
+
+---
+
+## `crewship issue runs`
+
+List the runs triggered by an issue — the data the dashboard's issue "Runs" tab shows. Hits `GET /api/v1/crews/{crewId}/issues/{ident}/runs` after resolving `<identifier>` to its crew via `fetchIssue`.
+
+```bash
+crewship issue runs BE-42
+```
+
+**Output columns:** AGENT, TASK (truncated to 28), STATUS, STARTED (relative time), DURATION, RESULT (error message or result summary; ANSI-sanitised, truncated to 50 chars).
+
+---
+
+## `crewship issue changes`
+
+Show the base-branch git diff produced by the crew working an issue — the data the dashboard's issue "Changes" tab renders. Hits `GET /api/v1/crews/{crewId}/git-diff`.
+
+```bash
+crewship issue changes BE-42
+crewship issue changes BE-42 --patch   # print the raw unified diff
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--patch` | `bool` | `false` | Print the raw unified diff instead of the per-file summary. |
+
+Without `--patch`, prints a per-file summary table (**STATUS, FILE, +, −**). When the crew workspace has no git repo, prints `No git repository in this crew's workspace — nothing to diff.`; with no changes against the base branch, prints `No changes against the base branch.`
 
 ---
 

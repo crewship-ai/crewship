@@ -139,8 +139,9 @@ Multiple templates may be declared in one file; each is applied independently. T
 
 ```bash
 crewship workflow list                          # GET /api/v1/workflow-templates
-crewship workflow get <slug>                    # GET /api/v1/workflow-templates/{id}, slug→id resolved
+crewship workflow get <slug>                    # lists + matches by name client-side
 crewship workflow create -f workflow.yaml       # POST /api/v1/workflow-templates
+crewship workflow update <slug> -f workflow.yaml # PATCH /api/v1/workflow-templates/{id}, slug→id resolved
 crewship workflow delete <slug>                 # DELETE /api/v1/workflow-templates/{id}
 crewship apply --file workflow.yaml             # manifest pipeline (preferred for repeatable setups)
 crewship export workspace                       # emits one document per non-builtin template

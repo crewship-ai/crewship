@@ -177,7 +177,7 @@ API: `GET/PUT /api/v1/crews/{crewId}/policy` (ADMIN+ for PUT)
 
 UI: **Agent Canvas → Settings → Learning posture** panel. A single switch with a one-paragraph explainer of what flipping it ON actually changes (so operators don't flip without understanding the consequence). Requires a reason field when dirty.
 
-CLI: not yet exposed — operator must use the API directly.
+CLI: `crewship agent update <id> --self-learning[=false] --learning-reason "…"` (must be run on its own — it can't be combined with other field updates in the same command).
 
 API: `GET/PATCH /api/v1/agents/{agentId}/learning` (ADMIN+ for PATCH)
 

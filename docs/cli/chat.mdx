@@ -26,6 +26,7 @@ Auth: every subcommand requires an authenticated session (`crewship login`) and 
 | `chat react add <chat-id> <msg-id> <emoji>` | Add an emoji reaction to a single message. |
 | `chat react remove <chat-id> <msg-id> <emoji>` | Remove your reaction (`rm` / `delete` aliases). |
 | `chat react list <chat-id> <msg-id>` | List reactions with counts and whether the caller already reacted. |
+| `chat steer <chat-id>` | Queue a mid-turn steering message for a chat (applied on the next turn if a run is in flight). |
 | `chat participants list <chat-id>` | List the humans in a group chat (columns `USER ID` / `EMAIL` / `NAME` / `ROLE`). Prints `No participants (private chat).` when empty. Alias: `members`. |
 | `chat participants add <chat-id> <user-id>` | Add a workspace user. Adding the first participant promotes the chat to a group, after which the agent only replies when @mentioned. |
 | `chat participants remove <chat-id> <user-id>` | Remove a user (`rm` / `delete` aliases). Cannot remove the chat owner. |
@@ -58,6 +59,19 @@ The upload is one multipart POST to `POST /api/v1/agents/{agentId}/chats/{chatId
 | `--agent <slug-or-id>` | (auto) | Override the auto-resolved agent (same lookup as `chat attach`). |
 
 Calls `PUT /api/v1/agents/{agentId}/chats/{chatId}/read`. Your read cursor advances to now: `UNREAD` in `chat list` drops to 0 for the session, and the "agent replied" inbox item for it flips to read. Read state is per user — marking a shared group chat read doesn't touch anyone else's badge.
+
+### `chat steer <chat-id>`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `-m`, `--message <text>` | (required) | Steering message text. The text is scanned for prompt-injection before it is accepted. |
+
+The message POSTs to `POST /api/v1/chats/{chatId}/steer`. If a run is in flight, the message is held and applied on the next turn rather than interrupting the running one (live mid-turn injection is a planned follow-up).
+
+```bash
+crewship chat steer c_abc123 --message "focus on the auth bug first"
+crewship chat steer c_abc123 -m "use the staging DB, not prod"
+```
 
 ### `chat participants add <chat-id> <user-id>`
 

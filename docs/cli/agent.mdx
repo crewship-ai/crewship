@@ -61,7 +61,7 @@ Show detailed information about an agent.
 crewship agent get <slug-or-id>
 ```
 
-**Output fields:** Name, Slug, ID, Role, Role Title, Crew, Status, CLI Adapter, Tool Profile, Memory, Timeout, Created, Skills count, Credentials count.
+**Output fields:** Name, Slug, ID, Role, Role Title (only when set), Crew, Status, CLI Adapter, Tool Profile, Memory, Timeout, Created, Skills count, Credentials count. When a cron schedule is configured, additional rows appear: Schedule (`<cron> (enabled|disabled)`), Schedule Prompt, Next Run, and Last Run.
 
 ---
 
@@ -121,8 +121,19 @@ crewship agent update <slug-or-id> --role LEAD --memory
 | `--memory` | `bool` | `false` | Enable memory. |
 | `--lead-mode` | `string` | | Lead mode. |
 | `--timeout` | `int` | `0` | Timeout in seconds. |
+| `--schedule-cron` | `string` | | Cron expression to run the agent on a schedule (e.g. `*/5 * * * *`); empty string clears it. |
+| `--schedule-prompt` | `string` | | Prompt the scheduled run sends to the agent. |
+| `--schedule-enabled` | `bool` | `false` | Enable/disable the agent's cron schedule. |
+| `--self-learning` | `bool` | `false` | Enable/disable per-agent self-learning. Goes through a separate audited endpoint (`PATCH /api/v1/agents/{id}/learning`), so it cannot be combined with any other field update in one command, and requires `--learning-reason`. |
+| `--learning-reason` | `string` | | Audit reason recorded with the `--self-learning` change (required when `--self-learning` is set). |
 | `--avatar-seed` | `string` | | Avatar seed. |
 | `--avatar-style` | `string` | | Avatar style. |
+
+<Note>
+`--self-learning` is applied via its own audited endpoint and cannot be
+mixed with other field updates in the same invocation — run it on its own:
+`crewship agent update <id> --self-learning[=false] --learning-reason "…"`.
+</Note>
 
 ---
 
@@ -243,6 +254,39 @@ crewship agent mcp <agent-slug> --set-file agent-mcp.json
 <Note>
 The JSON must contain a `"mcpServers"` object at the top level. `--set` and `--set-file` are mutually exclusive. `--resolved` cannot be combined with set operations.
 </Note>
+
+### MCP bindings subcommands
+
+Beyond the bare config form above, `agent mcp` has CRUD subcommands over per-agent MCP server bindings (backed by `/api/v1/agents/{id}/integrations`):
+
+```bash
+crewship agent mcp list <agent>                       # list bindings
+crewship agent mcp add <agent> <integration-id>       # bind an integration
+crewship agent mcp update <agent> <binding-id>        # patch a binding
+crewship agent mcp remove <agent> <binding-id>        # delete a binding (aliases: rm, delete)
+```
+
+**`add`** — binds a workspace or crew integration to the agent.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--scope` | `string` | `workspace` | Integration scope: `workspace` or `crew`. |
+| `--credential` | `string` | | Credential ID to attach to this binding. |
+| `--cred-type` | `string` | | Credential type: `bearer`, `api_key`, `basic`. |
+| `--env-var` | `string` | | Env var name to inject the credential under (stdio MCP servers). |
+| `--enabled` | `bool` | `true` | Whether the binding is active at creation time. |
+
+**`update`** — patch an existing binding (at least one flag required).
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--enabled` | `bool` | `false` | Set enabled/disabled state. |
+| `--credential` | `string` | | Replace bound credential (empty string unsets). |
+| `--cred-type` | `string` | | Replace credential type. |
+| `--env-var` | `string` | | Replace env var name (empty string unsets). |
+| `--tools` | `string` | | Comma-separated tool allowlist written to `config_override_json` (empty clears the override). |
+
+**List output columns:** ID, SERVER, SCOPE, ENABLED, CREDENTIAL.
 
 ---
 

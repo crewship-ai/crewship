@@ -60,8 +60,9 @@ crewship backup create --scope=workspace --use-keyring
 | `--recipient` | `string` | | AGE X25519 public key (`age1…`) for asymmetric encryption. |
 | `--output` | `string` | `~/.crewship/backups` | Override the output directory on the server. |
 
-`--recipient`, `--passphrase-file`, and `--no-encrypt` are mutually
-exclusive.
+`--recipient` is mutually exclusive with both `--passphrase-file` and
+`--no-encrypt` (each combination is rejected). `--no-encrypt` also wins
+over a passphrase — it skips the prompt entirely and writes plaintext.
 
 The CLI prompts twice for a passphrase to guard against typos. In a
 non-interactive session without `--passphrase-file` / `--use-keyring`,

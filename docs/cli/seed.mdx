@@ -114,10 +114,12 @@ Implies `--wait-provision`. Picks the first provisioned crew (preferring `resear
 | --- | --- | --- |
 | 1. Bootstrap / auth | Hits `/api/v1/bootstrap` on a fresh DB; falls back to existing CLI token | Fatal |
 | 0. Nuke (if `--nuke`) | Wipes workspace contents | Fatal |
+| 1b. RBAC users (if `--with-users`) | Adds four extra members (`ADMIN`/`MANAGER`/`MEMBER`/`VIEWER`) before crews land | Non-fatal (logs and continues) |
 | 2. Crews + members | Creates four crews and links the admin user | Fatal |
 | 2a. Crew connections | All-pairs bidirectional `crew_connections` so missions can hand off | Non-fatal (logs and continues) |
 | 2b. Provision crews | Triggers devcontainer image builds in parallel | Errors deferred to end |
 | 3. Agents | Inserts agents with system prompts | Fatal |
+| 3b. Agent memory (if `--with-memory`) | Pre-seeds each agent's memory tiers | Non-fatal (logs and continues) |
 | 4–5. Skills + assignments | Workspace skills + per-agent skill bindings | Fatal |
 | 6–7. Credentials + assignments | Demo API keys + per-agent credential bindings | Fatal |
 | 8–9. Integrations + bindings | MCP servers, GitHub/Slack stubs | Fatal |

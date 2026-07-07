@@ -6,7 +6,7 @@ icon: "inbox"
 
 # Inbox
 
-The inbox is the unified human-in-the-loop surface for the workspace. Rows are written by source-of-truth handlers (`waitpoint create`, `escalation create`, `run-failure terminal`, generic agent messages); these three endpoints are the **read + state-flip surface** the UI consumes — no inserts. For the source endpoints that create inbox items (and the conflict rules about how items get resolved), see the [Inbox guide](/guides/inbox).
+The inbox is the unified human-in-the-loop surface for the workspace. Rows are written by source-of-truth handlers (`waitpoint create`, `escalation create`, `run-failure terminal`, generic agent messages); these endpoints are the **read + state-flip surface** the UI consumes — no inserts (the one destructive op is an ADMIN purge). For the source endpoints that create inbox items (and the conflict rules about how items get resolved), see the [Inbox guide](/guides/inbox).
 
 <Note>
   All endpoints require an authenticated session and a workspace context.
@@ -18,8 +18,10 @@ The inbox is the unified human-in-the-loop surface for the workspace. Rows are w
 |---|---|---|
 | GET | [`/api/v1/inbox`](#get-apiv1inbox) | List items (newest-first, with unread count) |
 | GET | [`/api/v1/inbox/count`](#get-apiv1inboxcount) | Unread count for the bell badge |
+| GET | [`/api/v1/inbox/{id}`](#get-apiv1inboxid) | Fetch a single item (full body + payload) |
 | PATCH | [`/api/v1/inbox/{id}`](#patch-apiv1inboxid) | Flip an item's state |
 | POST | [`/api/v1/inbox/bulk`](#post-apiv1inboxbulk) | Apply one state transition to many items in a single request |
+| DELETE | [`/api/v1/inbox`](#delete-apiv1inbox) | Purge items in the workspace (ADMIN only) |
 
 ---
 
@@ -73,7 +75,7 @@ Paginated, newest-first list. The UI calls this on first load and after every WS
 
 | Query param | Type | Default | Notes |
 |---|---|---|---|
-| `state` | `unread` \| `read` \| `resolved` \| `all` | `all` | Linear-Triage default — resolved items stay visible-but-dimmed. Invalid value → `400 invalid state`. |
+| `state` | `unread` \| `read` \| `resolved` \| `active` \| `all` | `all` | Linear-Triage default — resolved items stay visible-but-dimmed. `active` returns everything not resolved (unread + read). `""` behaves like `all`. Invalid value → `400 invalid state`. |
 | `kind` | string | (unset) | Narrows by item type. |
 | `limit` | int | `100` | Capped at `500`. |
 
@@ -113,6 +115,23 @@ Bell-badge endpoint. Same visibility predicate as List, cheaper payload — no J
 ```json
 { "unread_count": 7 }
 ```
+
+### `GET /api/v1/inbox/{id}`
+
+Fetch a single item with its full body and parsed `payload` — the detail
+the list view omits. Backs `crewship inbox get <id>` and the web detail
+pane. Visibility is enforced exactly like List / PATCH: an id in another
+workspace, or one targeted at another user/role, returns `404` (never a
+leak of an item you can't see).
+
+**Response:** `200 OK` — a single [item object](#item-shape) (same shape
+as one `rows[]` entry from List).
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `id`. |
+| `401` | No workspace context. |
+| `404` | Unknown id, or an id not visible to the caller. |
 
 ## Updating state
 
@@ -207,6 +226,36 @@ Returns `200` with a per-id breakdown:
 - `not_found` — ids that didn't resolve to a visible row (wrong workspace / target, or already gone).
 
 A single `inbox.updated` event broadcasts for the whole batch — see the [WebSocket section](#websocket-event) below.
+
+## Purge
+
+Bulk-clear inbox rows for the whole workspace — an operator cleanup, not a
+per-user action. Unlike List / PATCH / bulk, purge does **not** apply the
+per-user visibility clause: it deletes the whole workspace partition
+regardless of who each row was targeted at. Because that's destructive and
+cross-user, it's gated on the `manage` role (OWNER/ADMIN).
+
+### `DELETE /api/v1/inbox`
+
+| Query param | Type | Notes |
+|---|---|---|
+| `kind` | `waitpoint` \| `escalation` \| `failed_run` \| `message` | Optional. Scopes the delete to one kind (the common case: drop the `failed_run` spam a broken routine piled up without touching pending waitpoints/escalations). Any other value → `400`. With no `kind`, **every** row in the workspace is deleted. |
+
+**Response:** `200 OK`
+
+```json
+{ "deleted": 42 }
+```
+
+Emits a single `inbox.updated` (payload `{ "purge": "true" }`) when at
+least one row was deleted, so open inboxes repaint their list + bell badge.
+
+| Status | Condition |
+|---|---|
+| `400` | `kind` present but not one of the four valid kinds. |
+| `401` | No workspace context. |
+| `403` | Caller is not OWNER/ADMIN. |
+| `500` | DB error. |
 
 ## WebSocket event
 

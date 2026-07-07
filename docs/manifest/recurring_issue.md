@@ -207,13 +207,15 @@ a brand-new workspace.
 
 ## CLI reference
 
-The standalone `crewship recurring` command (`cmd/crewship/cmd_admin_extras.go`) is intentionally minimal — list + delete only. Per-row create/update/enable/disable is **manifest-driven**: there is no `crewship recurring create / get / enable / disable` subcommand today; reach for `crewship apply` instead.
+The `crewship recurring` command (`cmd/crewship/cmd_admin_extras.go`) offers `list`, `create`, `update`, and `delete` (there is no `get`, `enable`, or `disable` subcommand — enable/disable is the `--enabled` flag on `recurring update`). The CLI `create` / `update` take flags (`--crew`, `--title`, `--cron`, `--project`, `--assignee`, …) that resolve to entity **IDs**; the manifest instead resolves **slugs** and can express the full template in one file, so reach for `crewship apply` for repeatable, slug-based setups.
 
 | Command | Description |
 |---|---|
 | `crewship recurring list` | List recurring-issue schedules in the current workspace. |
+| `crewship recurring create --crew <id> --title <t> --cron "<expr>"` | Create a schedule (flag-based; takes crew/project/assignee **IDs**). |
+| `crewship recurring update <id>` | Update a schedule by row id (`--enabled`, `--cron`, `--title`, …). |
 | `crewship recurring delete <id>` | Delete one schedule by row id. |
-| `crewship apply --file recurring.yaml` | Declarative create / update / delete — the only path for authoring schedules. Toggling `spec.enabled: true\|false` in the manifest is how you enable/disable. |
+| `crewship apply --file recurring.yaml` | Declarative create / update / delete by slug. Toggling `spec.enabled: true\|false` in the manifest is how you enable/disable. |
 | `crewship apply --file recurring.yaml --dry-run` | Plan-only — shows the per-row create/update/delete the apply would perform. |
 | `crewship export workspace` | Includes every recurring issue the user can read. |
 

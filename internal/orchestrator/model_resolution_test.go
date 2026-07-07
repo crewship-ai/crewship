@@ -10,6 +10,8 @@ import (
 
 func TestModelFamily(t *testing.T) {
 	cases := map[string]string{
+		"claude-fable-5":               "fable",
+		"claude-sonnet-5":              "sonnet",
 		"claude-opus-4-8":              "opus",
 		"claude-sonnet-4-5-20250101":   "sonnet",
 		"claude-haiku-4-5-20251001":    "haiku",
@@ -66,6 +68,20 @@ func TestLogResolvedModel_WarnOnFamilyFallback(t *testing.T) {
 	// Second line is the loud fallback warning.
 	if lines[1]["level"] != "WARN" {
 		t.Errorf("expected WARN on opus→sonnet fallback, got %+v", lines[1])
+	}
+}
+
+func TestLogResolvedModel_WarnOnFableFallback(t *testing.T) {
+	var buf bytes.Buffer
+	// Asked for the premium Fable tier, subscription served Opus — loud warn.
+	logResolvedModel(captureSlog(&buf), "agent_1", "claude-fable-5", "claude-opus-4-8")
+
+	lines := decodeLogLines(t, &buf)
+	if len(lines) != 2 {
+		t.Fatalf("expected Info + Warn (2 lines), got %d: %s", len(lines), buf.String())
+	}
+	if lines[1]["level"] != "WARN" {
+		t.Errorf("expected WARN on fable→opus fallback, got %+v", lines[1])
 	}
 }
 

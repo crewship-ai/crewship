@@ -17,6 +17,7 @@ Every endpoint is workspace-scoped via the session context.
 | Method | Endpoint | Purpose |
 |---|---|---|
 | GET | [`/api/v1/runs`](#list-runs) | List runs with KPI tiles and pagination |
+| GET | [`/api/v1/runs/insights`](#fleet-insights) | Fleet-ops aggregate (totals, latency, breakdowns) over a window |
 | GET | [`/api/v1/runs/{id}`](#get-a-single-run) | Get one run by trace id |
 
 ---
@@ -61,6 +62,7 @@ Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadat
       "error_message": null,
       "exit_code": 0,
       "metadata": {"tags": ["urgent", "compliance"]},
+      "model": "claude-opus-4-6",
       "created_at": "2026-04-30T10:00:00Z"
     }
   ],
@@ -87,6 +89,7 @@ Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadat
 | `data[].error_message` | string? | Pulled from `terminal.payload.error_message`. Null on success. |
 | `data[].exit_code` | integer? | Pulled from `terminal.payload.exit_code`. Null while running. |
 | `data[].metadata` | object? | Pulled from `started.payload.metadata`. Free-shape per orchestrator. |
+| `data[].model` | string? | The model the run actually resolved to (session-init ground truth). Omitted (`omitempty`) when unknown — older runs, non-Claude adapters. |
 | `data[].agent_name` / `agent_slug` | string? | Enriched from the `agents` table by the handler (one extra workspace-scoped SELECT per page). |
 | `data[].crew_name` | string? | Enriched via the `agents.crew_id` → `crews.name` join. |
 | `stats.running` | integer | Distinct trace_ids with `run.started` and no terminal in the workspace. |
@@ -101,6 +104,59 @@ Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadat
 | 401 | Not authenticated. |
 | 403 | Authenticated, but not a member of the resolved workspace. |
 | 500 | DB error. |
+
+---
+
+## Fleet insights
+
+```
+GET /api/v1/runs/insights
+```
+
+Returns a fleet-operations aggregate over **all** runs in the workspace for a
+time window — including ad-hoc agent/chat runs, not just routine invocations.
+Backed by `journal.RunInsights`; the handler resolves per-agent counts into a
+crew rollup and a display-named top-agents leaderboard (one workspace-scoped
+`agents`→`crews` join).
+
+**Query parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `window` | string | One of `24h`, `7d`, `30d`. Defaults to `24h` when omitted. Any other value → `400`. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "window": "24h",
+  "totals": { "total": 128, "succeeded": 119, "failed": 7, "running": 2 },
+  "duration": { "p50_ms": 4200, "p95_ms": 31000 },
+  "by_trigger": [ { "key": "USER", "total": 90, "failed": 3 } ],
+  "by_model": [ { "key": "claude-opus-4-6", "total": 70, "failed": 2 } ],
+  "by_crew": [ { "id": "crew_eng", "name": "Backend", "total": 60, "failed": 4 } ],
+  "top_agents": [ { "id": "agt_viktor", "name": "Viktor", "crew_name": "Backend", "total": 42, "failed": 1 } ],
+  "truncated": false
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `window` | string | The resolved window (`24h` / `7d` / `30d`). |
+| `totals` | object | `total`, `succeeded`, `failed`, `running` run counts for the window. |
+| `duration` | object | `p50_ms` / `p95_ms` run-duration percentiles. |
+| `by_trigger` | array | Per-trigger breakdown: `{ key, total, failed }`. Always an array (never `null`). |
+| `by_model` | array | Per-model breakdown: `{ key, total, failed }`. |
+| `by_crew` | array | Per-crew rollup: `{ id, name, total, failed }`. Crewless agents bucket under `id: ""` / `name: "—"`. Capped at the top 8 by total. |
+| `top_agents` | array | Leaderboard: `{ id, name, crew_name, total, failed }`. Capped at the top 8 by total. |
+| `truncated` | bool | `true` when the underlying scan hit its row cap before covering the full window. |
+
+| Status | Condition |
+|---|---|
+| `400` | `window` is not one of `24h` / `7d` / `30d`, or no `workspace_id` resolved (`RequireWorkspace` rejects before the handler runs). |
+| `401` | Not authenticated. |
+| `403` | Authenticated, but not a member of the resolved workspace. |
+| `500` | Journal aggregate query failed. |
 
 ---
 
@@ -137,6 +193,7 @@ Returns a single run by trace id. The response shape is identical to one element
   "error_message": null,
   "exit_code": 0,
   "metadata": {"tags": ["urgent", "compliance"]},
+  "model": "claude-opus-4-6",
   "created_at": "2026-04-30T10:00:00Z"
 }
 ```

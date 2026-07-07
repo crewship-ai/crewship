@@ -22,7 +22,8 @@ Every command inherits these persistent flags:
 |------|-------|------|---------|-------------|
 | `--server` | `-s` | `string` | `http://localhost:8080` | Server URL. Also via `CREWSHIP_SERVER` env var. |
 | `--workspace` | `-w` | `string` | _(from config)_ | Workspace ID or slug. Also via `CREWSHIP_WORKSPACE` env var. |
-| `--format` | `-f` | `string` | `table` | Output format: `table`, `json`, `yaml`, `ndjson`, or `quiet`. A few commands still accept a legacy `--json` bool — it is a deprecated alias for `--format json`. |
+| `--profile` | | `string` | | Server profile to target (manage with `crewship server`). Also via `CREWSHIP_PROFILE` env var. |
+| `--format` | `-f` | `string` | `table` | Output format: `table`, `json`, `yaml`, `ndjson`, or `quiet`. |
 | `--verbose` | `-v` | `bool` | `false` | Verbose output. |
 | `--no-color` | | `bool` | `false` | Disable ANSI colors. |
 | `--server-allow-mismatch` | | `bool` | `false` | Allow sending the stored auth token to a `--server` host that differs from the one it was issued for. Also via `CREWSHIP_ALLOW_SERVER_MISMATCH` env var. |
@@ -351,13 +352,13 @@ crewship prompt delete sec-review
 Open a web UI deep-link in your default browser.
 
 ```bash
-crewship open chat c_abc123
+crewship open chat viktor
 crewship open mission MIS-42
 crewship open journal
 crewship open --print-only mission MIS-42
 ```
 
-Resources: `dashboard`, `activity`, `agents`, `agent <slug>`, `crews`, `crew <slug>`, `chat <id>`, `mission <id>`, `journal`, `approvals`, `integrations`, `routines`, `issues`, `runs`, `settings`, `admin`, `audit`, `credentials`.
+Resources: `inbox` (`dashboard`, `home`), `activity`, `agents`, `agent <slug>`, `crews`, `crew <slug>`, `chat <agent-slug>`, `mission <id>`, `journal`, `approvals`, `integrations`, `routines`, `issues [id]`, `runs`, `settings`, `admin`, `audit`, `credentials`.
 
 ### `crewship chat`
 
@@ -651,6 +652,7 @@ All list and detail commands support `--format` (`-f`):
 | `table` | Human-readable table (default). |
 | `json` | JSON output, suitable for piping to `jq`. |
 | `yaml` | YAML output. |
+| `ndjson` | Newline-delimited JSON (one record per line), for streaming pipelines. |
 | `quiet` | Minimal output (IDs only). |
 
 ```bash
@@ -676,7 +678,7 @@ reference.
 | `crewship expose` | Audit (`list`) and tear down (`revoke`) agent-initiated port exposures for a crew | See [Port-expose API](/api-reference/port-expose) |
 | `crewship integration` | Manage workspace integrations (Linear, GitHub App, Slack, …) | See the [Integrations guide](/guides/integrations) |
 | `crewship mcp` | Inspect, register, and remove MCP servers attached to an agent | See the [MCP / multi-CLI guide](/guides/mcp-multi-cli) |
-| `crewship notify` | Send a one-off notification to the active operator (used by routines) | — |
+| `crewship notify` | Manage desktop notifications (`enable` / `disable` / `status` / `test` / `send`) | — |
 | `crewship routine` | Manage workspace routines (declarative DSL workflows; alias: `pipeline`) | See the [Routines guide](/guides/routines) |
 | `crewship plan` | Run the default agent in read-only PLAN mode (architect mode; no tools, no changes) | — |
 | `crewship project` | Manage projects (and `project milestone` subcommands) inside the issue tracker | — |

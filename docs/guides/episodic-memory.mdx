@@ -84,44 +84,55 @@ Added in PR #212 alongside the memory uplift.
 -- Insert/update/delete triggers keep it in lockstep with the base table.
 -- Powers the ?q= parameter on /api/v1/journal and the BM25 leg of HybridRecall.
 CREATE VIRTUAL TABLE journal_entries_fts USING fts5(
-  summary, payload, content='journal_entries', content_rowid='rowid'
+  summary, payload,
+  content='journal_entries', content_rowid='rowid',
+  tokenize='porter ascii'
 );
 
--- Compaction sink. Aged rows from journal_entries land here with payload
--- truncated to 400 chars before being deleted from the base table.
+-- Compaction sink. Aged rows from journal_entries land here with the payload
+-- copied into compressed_payload (truncated to 400 chars) before being
+-- deleted from the base table; original_size_bytes records the pre-truncation size.
 CREATE TABLE journal_entries_archived (
-  id           TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
-  ts           TEXT NOT NULL,
-  entry_type   TEXT NOT NULL,
-  severity     TEXT NOT NULL,
-  summary      TEXT NOT NULL,
-  payload      TEXT NOT NULL,                 -- 400-char truncation
-  archived_at  TEXT NOT NULL
+  id                  TEXT PRIMARY KEY,
+  workspace_id        TEXT NOT NULL,
+  crew_id             TEXT,
+  agent_id            TEXT,
+  mission_id          TEXT,
+  ts                  TEXT NOT NULL,
+  archived_at         TEXT NOT NULL,
+  entry_type          TEXT NOT NULL,
+  severity            TEXT NOT NULL,
+  priority            TEXT NOT NULL DEFAULT 'normal',
+  actor_type          TEXT NOT NULL,
+  actor_id            TEXT,
+  summary             TEXT NOT NULL,
+  compressed_payload  TEXT NOT NULL DEFAULT '{}',  -- payload truncated to 400 chars
+  original_size_bytes INTEGER NOT NULL DEFAULT 0
 );
 
--- embedding relation graph: similarity edges linking related embeddings.
+-- embedding relation graph: similarity + curated edges linking related entries.
 CREATE TABLE memory_relations (
-  src_entry_id TEXT NOT NULL,
-  dst_entry_id TEXT NOT NULL,
-  relation     TEXT NOT NULL,                 -- 'similar' | 'supports' | 'contradicts'
-  weight       REAL NOT NULL DEFAULT 0.0,     -- cosine for 'similar', 1.0 for hand-asserted
-  created_at   TEXT NOT NULL,
-  PRIMARY KEY (src_entry_id, dst_entry_id, relation)
+  entry_id         TEXT NOT NULL,
+  related_entry_id TEXT NOT NULL,
+  relation_kind    TEXT NOT NULL,               -- 'similar' | 'supports' | 'refutes' | 'duplicates'
+  score            REAL NOT NULL DEFAULT 0,      -- cosine for 'similar', 1.0 for curated kinds
+  created_at       TEXT NOT NULL,
+  PRIMARY KEY (entry_id, related_entry_id, relation_kind)
 );
 
 -- Daily 5-metric health score per workspace (and optionally per crew).
 CREATE TABLE memory_health_snapshots (
-  workspace_id   TEXT NOT NULL,
-  crew_id        TEXT,                        -- NULL = workspace-aggregate
-  snapshot_date  TEXT NOT NULL,               -- YYYY-MM-DD UTC
-  freshness      REAL NOT NULL,
-  coverage       REAL NOT NULL,
-  coherence      REAL NOT NULL,
-  efficiency     REAL NOT NULL,
-  reachability   REAL NOT NULL,
-  score          REAL NOT NULL,               -- weighted sum (see below)
-  PRIMARY KEY (workspace_id, crew_id, snapshot_date)
+  id           TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  crew_id      TEXT,                            -- NULL = workspace-aggregate
+  computed_at  TEXT NOT NULL,
+  freshness    REAL NOT NULL,
+  coverage     REAL NOT NULL,
+  coherence    REAL NOT NULL,
+  efficiency   REAL NOT NULL,
+  reachability REAL NOT NULL,
+  overall      REAL NOT NULL,                   -- weighted sum (see below)
+  details      TEXT NOT NULL DEFAULT '{}'
 );
 ```
 </Accordion>
@@ -175,12 +186,12 @@ with `k_RRF = 60` (the value used in the original RRF paper; further tuning had 
 
 Embeddings live in isolation by default; `memory_relations` lets us treat them as a graph. Two relation types are populated automatically:
 
-- **`similar`** — `LinkSimilarOnIndex` runs at insert time: for the freshly-indexed entry, query the existing embedding pool, take the **top-3 cosine matches above 0.80**, write `(src=new, dst=match, relation='similar', weight=cosine)` rows. Edges are unidirectional (the new entry points to its predecessors); the inverse direction is implied at read time.
-- **`supports`** — `LinkSupports` is called by the consolidator when it derives a rule from one or more journal entries. The rule entry points to every supporting evidence entry: `relation='supports', weight=1.0`. This is what makes consolidated rules traceable back to their evidence.
+- **`similar`** — `LinkSimilarOnIndex` runs at insert time: for the freshly-indexed entry, query the existing embedding pool, take the **top-3 cosine matches above 0.80**, and write `similar` rows. Edges are **symmetric** — both `(entry_id=new, related_entry_id=match)` and the reverse `(entry_id=match, related_entry_id=new)` are inserted with `relation_kind='similar', score=cosine`, so a cosine relation reads the same from either end.
+- **`supports`** — `LinkSupports` is called by the consolidator when it derives a rule from one or more journal entries. The rule entry points (directionally) to every supporting evidence entry: `relation_kind='supports', score=1.0`. This is what makes consolidated rules traceable back to their evidence.
 
-A future `contradicts` relation is reserved in the schema but not populated today.
+The `relation_kind` CHECK also reserves `refutes` and `duplicates`; neither is populated automatically today.
 
-Read-side use: when injecting recalled hits into a prompt, the orchestrator can optionally walk one hop along `similar` edges to deepen context without paying for another embedding round-trip. Disabled by default; enable per-agent by setting `agent.memory_walk_depth = 1`.
+Read-side use: `RelationsFor(entryID)` returns an entry's outbound edges and is consumed by the health computer (Reachability metric) and debug tooling. Prompt-time relation-walking to deepen recalled context is not wired into the orchestrator's injection path today.
 
 ## Recall API
 
@@ -303,7 +314,7 @@ If the embedder is nil (Ollama unreachable at startup), `Recall` returns an empt
 | **Efficiency** | 15% | Average cosine of the top-K hit distribution — high means recalls return distinct, relevant entries; low means the index returns noise. |
 | **Reachability** | 15% | Fraction of embeddings reachable via at least one `memory_relations` edge. |
 
-The composite `score` is reported with three colour bands:
+The composite `overall` score (exposed as `overall` in the API/DB row) is reported with three colour bands:
 
 | Band | Range | Meaning |
 |---|---|---|

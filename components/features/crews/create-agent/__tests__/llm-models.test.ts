@@ -52,11 +52,11 @@ describe("LLM models per provider", () => {
       // than positional MODELS_BY_PROVIDER[0], so reordering models[]
       // can't silently shift the UI default. The literal values mirror
       // CLI_ADAPTERS[*].defaultModel exactly — update both files together.
-      expect(defaultModelForProvider("ANTHROPIC")).toBe("claude-sonnet-4-6")
+      expect(defaultModelForProvider("ANTHROPIC")).toBe("claude-sonnet-5")
       expect(defaultModelForProvider("OPENAI")).toBe("gpt-5.5")
       expect(defaultModelForProvider("GOOGLE")).toBe("gemini-2.5-pro")
       expect(defaultModelForProvider("CURSOR")).toBe("composer")
-      expect(defaultModelForProvider("FACTORY")).toBe("claude-sonnet-4-6")
+      expect(defaultModelForProvider("FACTORY")).toBe("claude-sonnet-5")
     })
 
     it("falls back to first MODELS_BY_PROVIDER entry for providers without a matching adapter", () => {
@@ -65,10 +65,10 @@ describe("LLM models per provider", () => {
       expect(defaultModelForProvider("OLLAMA")).toBe(MODELS_BY_PROVIDER.OLLAMA[0])
     })
 
-    it("ANTHROPIC default is a current Claude (Opus or Sonnet, not legacy 4-1)", () => {
+    it("ANTHROPIC default is a current Claude (Fable/Opus/Sonnet, not legacy 4-1)", () => {
       // Defaulting to a stale model on every provider switch would silently
-      // downgrade users. Pin to the 4-x family.
-      expect(defaultModelForProvider("ANTHROPIC")).toMatch(/^claude-(opus|sonnet)-4-/)
+      // downgrade users. Pin to a current family (Fable 5 / Opus 4.8 / Sonnet 5).
+      expect(defaultModelForProvider("ANTHROPIC")).toMatch(/^claude-(fable|opus|sonnet)-(4-[6-9]|[5-9])/)
     })
   })
 

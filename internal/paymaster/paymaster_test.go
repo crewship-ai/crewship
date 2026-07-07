@@ -146,6 +146,29 @@ func TestEstimate(t *testing.T) {
 			want: 0.0001 + 0.00025,
 		},
 		{
+			name:     "fable 5 premium flagship",
+			provider: "anthropic", model: "claude-fable-5",
+			in: 1000, out: 500,
+			// Premium tier: $10 input / $50 output per 1M.
+			// 1000 * 10/1e6 + 500 * 50/1e6
+			want: 0.01 + 0.025,
+		},
+		{
+			name:     "opus 4.8",
+			provider: "anthropic", model: "claude-opus-4-8",
+			in: 1000, out: 1000,
+			// Opus tier: $5 input / $25 output per 1M.
+			want: 0.005 + 0.025,
+		},
+		{
+			name:     "sonnet 5 (sticker, not intro promo)",
+			provider: "anthropic", model: "claude-sonnet-5",
+			in: 1000, out: 500,
+			// Standard $3/$15 sticker — intro $2/$10 deliberately not encoded.
+			// 1000 * 3/1e6 + 500 * 15/1e6
+			want: 0.003 + 0.0075,
+		},
+		{
 			name:     "ollama free",
 			provider: "ollama", model: "llama3:70b",
 			in: 1_000_000, out: 1_000_000,
@@ -196,9 +219,11 @@ func TestEstimate(t *testing.T) {
 			name:     "anthropic fallback for unknown model",
 			provider: "anthropic", model: "claude-future-99",
 			in: 1000, out: 500,
-			// Conservative fallback: Opus-tier ($5/$25 per 1M).
-			// 1000 * 5/1e6 + 500 * 25/1e6 = 0.005 + 0.0125
-			want: 0.005 + 0.0125,
+			// Conservative fallback: Fable-tier ($10/$50 per 1M) — the premium
+			// ceiling, so an unknown Anthropic model over-estimates rather than
+			// silently under-billing a flagship.
+			// 1000 * 10/1e6 + 500 * 50/1e6 = 0.01 + 0.025
+			want: 0.01 + 0.025,
 		},
 		{
 			name:     "google fallback for unknown model",
