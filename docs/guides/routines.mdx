@@ -44,7 +44,7 @@ Crewship is unusual among workflow systems because **agents author routines**, n
     Open `/routines`, click **+ New routine**, pick a starter template, edit the DSL JSON, click **Test & Save**. Test_run runs against the execution tier; on pass the routine is persisted with `authored_via=user_api` and the JWT user as author. An **existing** routine's DSL is also fully editable in-place from its detail page's **Editor / JSON** tab (CodeMirror, format + revert + copy) — see the note below on how that path's Save differs from Test & Save.
   </Card>
   <Card title="CLI" icon="terminal">
-    `crewship routine save --name "..." --definition file.json --author-crew <crew_id>`. The server validates the DSL on save (same gate as the UI). CI-friendly: validate offline first with `crewship routine validate file.json`, then save.
+    `crewship routine save --name "..." --definition file.json --author-crew <crew_id>`. The server validates the DSL on save (same gate as the UI). CI-friendly: validate offline first with `crewship routine validate file.json`, then save. Print the machine-readable authoring contract with `crewship routine schema` (wire it into an editor for autocomplete, or hand it to an agent authoring a routine).
   </Card>
 </CardGroup>
 
@@ -101,7 +101,7 @@ Minimal valid routine:
 | `max_concurrent` | integer | Cap on simultaneous runs sharing the resolved `concurrency_key`. Defaults to `1` when `concurrency_key` is set (strict per-key serialisation); ignored otherwise. |
 | `guardrails` | object | Per-routine [Lookout](/guides/lookout) policy. `guardrails.input.prompt_injection.action`: `block` (default) \| `sanitize` \| `log`. |
 | `eval` | object | Continuous online grading. See [Online eval](#online-eval-sampler) below. |
-| `agentless` | boolean | Token-zero guarantee: the routine may only contain `http` / `code` / `wait` / `transform` steps and can never invoke an LLM. See [Agentless routines](#agentless-routines). |
+| `agentless` | boolean | Token-zero guarantee: the routine may only contain `http` / `code` / `wait` / `transform` / `notify` steps and can never invoke an LLM. See [Agentless routines](#agentless-routines). |
 
 ### InputSpec
 
@@ -484,6 +484,32 @@ These are schema-legal runtime names but have **no sandboxed runner wired**. As 
 ```
 
 Pure-Go data reshaping with a tiny jq-flavoured subset. No LLM, no network — fully deterministic. Useful for wiring step outputs without paying for another agent_run.
+
+### `notify`
+
+```json
+{
+  "id": "tell_client",
+  "type": "notify",
+  "to": "trigger",
+  "title": "Invoices parsed",
+  "body": "Parsed {{ steps.extract.output }} invoices.\n\n{{ steps.summarize.output }}",
+  "priority": "medium"
+}
+```
+
+A **non-blocking** inbox message pushed mid-run — the push, author-controlled complement to `wait: approval` (which blocks for a decision). `notify` posts a rendered update and continues, so you can drop progress pings anywhere in the DAG ("extracted 3 invoices") and a final result at the end. No LLM, no network.
+
+| Field | Notes |
+| --- | --- |
+| `to` | Recipient. `workspace` (default — anyone in the workspace), `trigger` (the user who triggered the run; falls back to a workspace-wide notice for unattended triggers like schedules), `user:<id>`, `role:OWNER`, `role:MANAGER`. Template-substitutable, e.g. `user:{{ inputs.assignee }}`. |
+| `title` | Inbox card title. Rendered, secret-redacted, truncated. |
+| `body` | Markdown body. Rendered from the run context (`{{ steps.X.output }}`, `{{ inputs.* }}`) and secret-redacted. At least one of `title`/`body` is required. |
+| `priority` | `urgent` \| `high` \| `medium` \| `low`. Default `medium`. |
+
+The message lands **live** (WebSocket broadcast to members) and **scrubbed** (secrets in mid-run outputs are redacted before insert). Delivery is **best-effort**: a routine whose notification can't be written never fails on that account — the run's real work is already done. Retries are **idempotent** — each `notify` is keyed on `(run, step)`, so a re-run doesn't double-post. Routine updates carry a `routine_update` subkind so the inbox can keep them in their own lane, separate from approvals and escalations.
+
+For the zero-config version — a desktop ping when a run *ends* (success or failure) without authoring a step — run it with `crewship routine run <slug> --wait` and enable notifications (`crewship notify enable`).
 
 ### Conditional `if`
 

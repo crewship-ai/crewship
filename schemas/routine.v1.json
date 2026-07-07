@@ -15,8 +15,8 @@
     },
     "name": {
       "type": "string",
-      "pattern": "^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]?$",
-      "description": "Workspace-unique slug. Kebab-case, 1-64 chars, alpha-num + hyphens, no leading/trailing hyphen."
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "description": "Workspace-unique slug. 1-64 chars, lowercase alpha-num + hyphen/underscore, must start with alpha-num (matches server slugRE)."
     },
     "display_name": {
       "type": "string",
@@ -81,9 +81,47 @@
       "minItems": 1,
       "items": { "$ref": "#/$defs/Step" },
       "description": "Ordered (or DAG-structured via needs[]) sequence of steps. At least one step required."
+    },
+    "agentless": {
+      "type": "boolean",
+      "description": "Token-zero guarantee: the routine may only contain http/code/wait/transform/notify steps and can never invoke an LLM. See Agentless routines in docs/guides/routines."
+    },
+    "integrations_required": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Third-party integrations (Composio) the author crew must have connected before the routine runs. Lowercased/trimmed; gated at run time."
+    },
+    "hooks": {
+      "$ref": "#/$defs/RoutineHooks",
+      "description": "Routine-level lifecycle steps (before_all / after_all / on_failure)."
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Agent-declared capability manifest — datastores/tools the routine's container needs. Gated at run time. See docs/guides/routines 'resources block'."
+    },
+    "guardrails": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Per-routine input/output safety-scanning configuration. See docs/guides/routines."
+    },
+    "eval": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Continuous grading of production runs (online sampler + offline regression suite). See docs/guides/routines 'Observability'."
     }
   },
   "$defs": {
+    "RoutineHooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Routine-level lifecycle steps run around the main step graph. Each is a Step restricted to deterministic side-channel types (code | http | transform) — no agent_run (a hook must not recurse or spend tokens). before_all aborts the run on failure; after_all runs after a COMPLETED run; on_failure after a FAILED run.",
+      "properties": {
+        "before_all": { "$ref": "#/$defs/Step" },
+        "after_all": { "$ref": "#/$defs/Step" },
+        "on_failure": { "$ref": "#/$defs/Step" }
+      }
+    },
     "InputSpec": {
       "type": "object",
       "required": ["name", "type"],
@@ -149,7 +187,7 @@
         },
         "type": {
           "type": "string",
-          "enum": ["agent_run", "call_pipeline", "http", "code", "wait", "transform"]
+          "enum": ["agent_run", "call_pipeline", "http", "code", "wait", "transform", "notify"]
         },
         "complexity": {
           "type": "string",
@@ -184,16 +222,19 @@
         "outcomes": { "$ref": "#/$defs/Outcomes" },
         "agent_slug": { "type": "string", "description": "Used by agent_run." },
         "prompt": { "type": "string", "description": "Used by agent_run + call_pipeline." },
-        "nested_inputs": {
+        "inputs": {
           "type": "object",
           "additionalProperties": true,
           "description": "Used by call_pipeline. Inputs forwarded to the nested routine."
         },
         "pipeline_slug": { "type": "string", "description": "Used by call_pipeline." },
+        "retry": { "$ref": "#/$defs/RetryPolicy" },
+        "hooks": { "$ref": "#/$defs/StepHooks" },
         "http": { "$ref": "#/$defs/HTTPStep" },
         "code": { "$ref": "#/$defs/CodeStep" },
         "wait": { "$ref": "#/$defs/WaitStep" },
-        "transform": { "$ref": "#/$defs/TransformStep" }
+        "transform": { "$ref": "#/$defs/TransformStep" },
+        "notify": { "$ref": "#/$defs/NotifyStep" }
       },
       "allOf": [
         {
@@ -219,6 +260,10 @@
         {
           "if": { "properties": { "type": { "const": "transform" } } },
           "then": { "required": ["transform"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "notify" } } },
+          "then": { "required": ["notify"] }
         }
       ]
     },
@@ -327,8 +372,8 @@
       "properties": {
         "runtime": {
           "type": "string",
-          "enum": ["expr", "cel", "python", "go", "bash"],
-          "description": "Only 'expr' and 'cel' have a sandboxed runner wired in this build (deterministic, token-zero). 'python' | 'go' | 'bash' are schema-legal but rejected at author time — see docs/manifest/routine.md 'Code steps'."
+          "enum": ["expr", "cel"],
+          "description": "Sandboxed, deterministic, token-zero runners wired in this build. 'python' | 'go' | 'bash' are NOT wired and are rejected at author time — use expr/cel for agentless logic, or an agent_run step. See docs/manifest/routine.md 'Code steps'."
         },
         "version": { "type": "string", "description": "Optional runtime version pin." },
         "code": { "type": "string", "description": "Script body. Template-substitutable. Inputs auto-mapped to CREWSHIP_INPUT_<NAME> env vars." },
@@ -359,6 +404,51 @@
       "properties": {
         "input": { "type": "string", "description": "Template-substitutable; usually {{ steps.X.output }}." },
         "expression": { "type": "string", "description": "jq-flavored projection: '.path' / '.items[0]' / '.a + .b' etc." }
+      }
+    },
+    "NotifyStep": {
+      "type": "object",
+      "required": ["to"],
+      "additionalProperties": false,
+      "description": "Non-blocking inbox message pushed mid-run. Renders title/body from the run context, scrubs secrets, and posts to a recipient's inbox, then continues. At least one of title/body is required.",
+      "properties": {
+        "to": {
+          "type": "string",
+          "description": "Recipient selector: 'workspace' (default), 'trigger' (the user who ran it; workspace fallback if unattended), 'user:<id>', 'role:OWNER', or 'role:MANAGER'. Template-substitutable."
+        },
+        "title": { "type": "string", "description": "Inbox card title (rendered, secret-redacted, truncated)." },
+        "body": { "type": "string", "description": "Markdown body (rendered, secret-redacted). Usually {{ steps.X.output }}." },
+        "priority": {
+          "type": "string",
+          "enum": ["urgent", "high", "medium", "low"],
+          "description": "Inbox priority. Default medium."
+        }
+      },
+      "anyOf": [
+        { "required": ["title"] },
+        { "required": ["body"] }
+      ]
+    },
+    "RetryPolicy": {
+      "type": "object",
+      "required": ["max_attempts"],
+      "additionalProperties": false,
+      "description": "Per-step retry policy for transient failures.",
+      "properties": {
+        "max_attempts": { "type": "integer", "minimum": 1, "description": "Total attempts including the first." },
+        "backoff": { "type": "string", "enum": ["constant", "exponential"], "description": "Delay growth between attempts. Default constant." },
+        "initial_delay_ms": { "type": "integer", "minimum": 0, "description": "First retry delay. Default 1000." },
+        "max_delay_ms": { "type": "integer", "minimum": 0, "description": "Delay ceiling for exponential backoff. Default 60000." },
+        "retry_on": { "type": "array", "items": { "type": "string" }, "description": "Error classes/substrings that qualify for retry. Empty = retry any transient failure." }
+      }
+    },
+    "StepHooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per-step lifecycle steps: before runs ahead of this step (its failure fails the step); after runs once the step completes (best-effort). Restricted to code | http | transform.",
+      "properties": {
+        "before": { "$ref": "#/$defs/Step" },
+        "after": { "$ref": "#/$defs/Step" }
       }
     }
   }

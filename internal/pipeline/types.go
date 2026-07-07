@@ -294,6 +294,12 @@ type Step struct {
 	// step's output, no LLM, no network.
 	Transform *TransformStep `json:"transform,omitempty"`
 
+	// notify fields (Type == StepNotify). Non-blocking inbox message —
+	// pushes a rendered progress/result update to a recipient mid-run,
+	// then continues. The push, author-controlled complement to
+	// wait:approval (which blocks).
+	Notify *NotifyStep `json:"notify,omitempty"`
+
 	// Hooks are per-step lifecycle steps (Wave 4.1): before runs ahead
 	// of this step (its failure fails the step), after runs once this
 	// step completes. Same deterministic-side-channel restriction as
@@ -417,6 +423,33 @@ type TransformStep struct {
 	Expression string `json:"expression"` // jq-flavored projection
 }
 
+// NotifyStep is a non-blocking inbox notification (Type == StepNotify).
+// It renders a title/body from the run context and posts a `message` to a
+// recipient's inbox mid-run, then continues — the push, author-controlled
+// complement to wait:approval (which blocks). Multiple notify steps may
+// appear anywhere in the DAG (progress updates + a final result). Delivery
+// is best-effort: a notification that can't be written never fails the run
+// (the routine's actual work is already done). See docs/guides + #842.
+type NotifyStep struct {
+	// To selects the recipient, resolved server-side against the run's
+	// workspace. One of:
+	//   - "workspace" (or empty) — anyone in the workspace (the default)
+	//   - "trigger" — the user who triggered the run; falls back to
+	//     workspace when the run has no attributed user (e.g. scheduled)
+	//   - "user:<id>" — a specific workspace member
+	//   - "role:OWNER" / "role:MANAGER" — everyone with that role
+	// Template-substituted, so authors can target dynamically
+	// (e.g. "user:{{ inputs.assignee }}").
+	To string `json:"to"`
+	// Title is the inbox card title (rendered, secret-redacted, truncated).
+	Title string `json:"title,omitempty"`
+	// Body is the markdown body (rendered, secret-redacted). At least one
+	// of Title/Body must be set.
+	Body string `json:"body,omitempty"`
+	// Priority is urgent|high|medium|low. Empty defaults to medium.
+	Priority string `json:"priority,omitempty"`
+}
+
 // StepType is the closed set of step kinds the executor recognises.
 // Adding a new kind requires updating the parser, the executor switch,
 // and the runtime tier resolver. Keep the list short and well-tested.
@@ -429,6 +462,7 @@ const (
 	StepCode         StepType = "code"
 	StepWait         StepType = "wait"
 	StepTransform    StepType = "transform"
+	StepNotify       StepType = "notify"
 )
 
 // Complexity tags a step's reasoning depth, mapping to a workspace-

@@ -669,11 +669,17 @@ func waitForPipelineRun(cmd *cobra.Command, client *cli.Client, runID string, ti
 		detail.ID, strings.ToUpper(detail.Status), detail.DurationMs, detail.CostUSD)
 	switch strings.ToLower(detail.Status) {
 	case "failed", "interrupted":
+		// Parity with agent runs (cmd_run.go): ping the operator who
+		// walked away from an unattended --wait, so a routine failure
+		// isn't silent. Respects the same opt-in + long-run threshold.
+		maybeNotifyRunComplete(start, detail.PipelineSlug, "FAILED")
 		fmt.Printf("  failed at step: %s\n  error: %s\n", detail.FailedAtStep, detail.ErrorMessage)
 		return fmt.Errorf("routine run failed")
 	case "cancelled":
 		return fmt.Errorf("routine run cancelled")
 	}
+	// Success terminal — notify like agent runs do on "done".
+	maybeNotifyRunComplete(start, detail.PipelineSlug, "COMPLETED")
 	if detail.Output != "" {
 		fmt.Println("\nFinal output:")
 		fmt.Println(indent(detail.Output, "  "))

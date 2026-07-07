@@ -140,6 +140,19 @@ type Executor struct {
 	// real store at boot so list-active-runs + boot-recovery work.
 	runStore *RunStore
 
+	// notifier delivers non-blocking notify-step messages to the inbox.
+	// Production wiring (NewWiredExecutor with a DB) installs a writer
+	// backed by inbox.Insert. Nil = notify steps are a best-effort no-op
+	// with a wiring warning (they never fail the run).
+	notifier InboxNotifier
+
+	// memberCheck reports whether a user is a member of a workspace, so a
+	// notify step targeting `user:<id>` can degrade to a workspace notice
+	// (rather than silently black-holing the message) when the id isn't a
+	// member. Production wiring installs NewWorkspaceMemberChecker(db).
+	// Nil = the guard is skipped (target trusted as-is).
+	memberCheck func(ctx context.Context, workspaceID, userID string) (bool, error)
+
 	// resumeCutoff is the process-boot fence for the boot resume scan
 	// (see WithResumeCutoff). Zero = the scan uses its own entry time.
 	resumeCutoff time.Time
@@ -654,8 +667,14 @@ type RunInput struct {
 	AuthorAgentID   string
 	InvokingCrewID  string
 	InvokingAgentID string
-	Inputs          map[string]any
-	Mode            RunMode
+	// InvokingUserID is the workspace user who triggered the run, when
+	// known (manual/UI/CLI triggers). Empty for unattended triggers
+	// (schedule, nested call_pipeline). Consumed by notify steps that
+	// target `to: trigger`; empty → the notification falls back to a
+	// workspace-wide notice.
+	InvokingUserID string
+	Inputs         map[string]any
+	Mode           RunMode
 	// IdempotencyKey, when non-empty, makes Run dedupe via the wired
 	// IdempotencyStore: a duplicate request with the same
 	// (workspace_id, key) within the TTL returns the original run id
@@ -1229,6 +1248,8 @@ func (e *Executor) dispatchStep(
 		return e.runWaitStep(ctx, step, parentRender, in, runID, depth)
 	case StepTransform:
 		return e.runTransformStep(step, parentRender)
+	case StepNotify:
+		return e.runNotifyStep(ctx, step, parentRender, in, runID)
 	default:
 		return "", 0, 0, fmt.Errorf("unsupported step type %q", step.Type)
 	}
@@ -1581,6 +1602,7 @@ func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipe
 		StartedAt:       startedAt,
 		InvokingCrewID:  in.InvokingCrewID,
 		InvokingAgentID: in.InvokingAgentID,
+		InvokingUserID:  in.InvokingUserID,
 		IdempotencyKey:  in.IdempotencyKey,
 		InputsJSON:      string(inputsRaw),
 		TriggeredVia:    in.TriggeredVia,
@@ -1701,7 +1723,7 @@ func (e *Executor) persistRunTerminal(runCtx context.Context, runID string, in R
 	if err := e.runStore.MarkTerminal(ctx, terminal); err != nil {
 		e.persistWarn("run terminal", runID, err)
 	}
-	_ = in // reserved for future invoking_user_id passthrough
+	_ = in // invoking_user_id is persisted at run-record creation (see persistRunStart)
 }
 
 // persistWarn centralises the "best-effort persistence failed" log
