@@ -1,5 +1,7 @@
 package pipeline
 
+import "sort"
+
 // Canonical registry of `type: code` step runtimes.
 //
 // A step whose runtime has no wired CodeRunner saves-but-fails: it
@@ -45,4 +47,36 @@ func IsWiredCodeRuntime(rt string) bool {
 // runtime name (wired or reserved-unwired).
 func IsKnownCodeRuntime(rt string) bool {
 	return knownCodeRuntimes[rt]
+}
+
+// WiredCodeRuntimes returns the sorted `type: code` runtimes an author can
+// actually use in this build (a CodeRunner is wired). Exported for the
+// capabilities dump so an AI author picks a runtime that won't 03:00-cron
+// fail. Source of truth is wiredCodeRuntimes.
+func WiredCodeRuntimes() []string {
+	return sortedKeys(wiredCodeRuntimes)
+}
+
+// ReservedCodeRuntimes returns the sorted runtime names that are
+// syntactically legal but UNWIRED (no runner) — reserved for a future
+// sandbox. Naming one is a "no wired runner" author error, so the
+// capabilities dump lists them separately as "don't use yet".
+func ReservedCodeRuntimes() []string {
+	out := make([]string, 0)
+	for rt := range knownCodeRuntimes {
+		if !wiredCodeRuntimes[rt] {
+			out = append(out, rt)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

@@ -52,6 +52,28 @@ Crewship is unusual among workflow systems because **agents author routines**, n
 **Editing an existing routine's DSL bypasses the test-run gate.** The **Editor / JSON** tab's Save button posts straight to `/pipelines/save` with `skip_test_gate: true` — it does not send the definition through `test_run` first. The server only honors that flag for **OWNER/ADMIN** (lower roles get `403`), so this is a fast lane for trusted operators, not a hole in the gate: a MEMBER/MANAGER can view and copy the DSL from this tab but can't save an edit without going through the create flow's Test & Save. A follow-up will chain `test_run → save_token → save` behind one button so any MANAGER+ role can edit safely.
 </Note>
 
+## Authoring with AI (one-shot)
+
+Handing a routine to an LLM to author (Claude Code over the CLI, or an in-container agent) used to mean piecing the palette together from ~8 commands — `routine schema` for the DSL, `crew config` for the container, separate calls for integrations, agents, and runtimes — and still guessing which runtimes are actually wired. `crewship routine capabilities <crew>` collapses that into **one discovery dump**:
+
+```bash
+crewship routine capabilities acct              # readable summary
+crewship routine capabilities acct -f json      # full machine-readable bundle
+crewship routine capabilities acct -f json | claude -p "write a routine that reconciles this month's invoices"
+```
+
+The bundle carries everything needed to write a `routine validate`-clean DSL on the first try:
+
+- **`schema`** — the routine DSL JSON schema (the same bytes as `routine schema`), nested inline so the whole contract travels in one response.
+- **`container`** — the crew's resolved devcontainer capabilities: `datastores` (host/port to declare under `resources.datastores`) and installed CLI `tools`.
+- **`integrations`** — connected integrations WITH their **enabled tool names** (`GMAIL_FETCH_EMAIL`, …), so the author references real tools, not guesses.
+- **`agents`** — the crew's agent slugs, which `agent_run` steps reference.
+- **`runtimes`** — the truth about what's wired in this build: `code.wired` (`expr`, `cel`) vs `code.reserved_unwired` (`python`/`go`/`bash` — legal names but **no runner**, so don't use them), and the `type: script` interpreter inference table (`.py → python3`, …).
+
+**In-container parity.** An agent working inside a crew container gets the identical bundle via the `discover_capabilities` MCP tool on the `crewship-routines` server (alongside `save_routine` / `list_routines` / `run_routine`) — scoped to its own crew, no arguments. Call it first when authoring so `save_routine` passes its test-run gate on the first attempt. The in-session `[CONNECTED INTEGRATIONS]` system-prompt block also now names each integration's enabled tools, so an agent answering a live request knows exactly which tools to reach for.
+
+Backed by `GET /api/v1/crews/{crewId}/capabilities`.
+
 ## DSL anatomy
 
 Minimal valid routine:

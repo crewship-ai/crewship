@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -194,6 +195,25 @@ func (s *Server) listPipelines(ctx context.Context, rawQuery string) (int, []byt
 	res, err := s.ipcRequestJSON(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return http.StatusBadGateway, mustJSON(map[string]string{"error": "pipeline-list request failed: " + err.Error()})
+	}
+	return res.status, res.body
+}
+
+// crewCapabilities forwards the one-shot authoring dump for the sidecar's OWN
+// crew so an in-container agent has the same discovery surface as `crewship
+// routine capabilities`. Crew + workspace come from IPC, never the caller —
+// an agent can only introspect its own crew's capabilities.
+func (s *Server) crewCapabilities(ctx context.Context) (int, []byte) {
+	if s.ipc == nil {
+		return http.StatusServiceUnavailable, mustJSON(map[string]string{"error": "IPC not configured"})
+	}
+	if s.ipc.CrewID == "" {
+		return http.StatusBadRequest, mustJSON(map[string]string{"error": "no crew context for capabilities"})
+	}
+	path := "/api/v1/crews/" + s.ipc.CrewID + "/capabilities?workspace_id=" + url.QueryEscape(s.ipc.WorkspaceID)
+	res, err := s.ipcRequestJSON(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return http.StatusBadGateway, mustJSON(map[string]string{"error": "capabilities request failed: " + err.Error()})
 	}
 	return res.status, res.body
 }

@@ -82,6 +82,19 @@ var scriptInterpreterByExt = map[string]string{
 	".go":   "go run",
 }
 
+// ScriptInterpreterExtensions returns a copy of the extension→interpreter
+// inference table for `type: script` steps. Exported for the capabilities
+// dump so an AI author knows which interpreters a script step resolves to (and
+// can omit `script.interpreter` for a known extension). A copy — callers must
+// not mutate the internal table.
+func ScriptInterpreterExtensions() map[string]string {
+	out := make(map[string]string, len(scriptInterpreterByExt))
+	for ext, interp := range scriptInterpreterByExt {
+		out[ext] = interp
+	}
+	return out
+}
+
 // resolveScriptPath cleans a declared path and anchors it under the crew
 // shared root, rejecting traversal or absolute paths that escape the root.
 // Returns the absolute in-container path.
