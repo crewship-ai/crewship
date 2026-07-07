@@ -72,35 +72,52 @@ func TestRoutineSchema_AllStepTypesCovered(t *testing.T) {
 	}
 }
 
-// TestRoutineSchema_AllTopLevelFieldsCovered is the regression guard for
-// the #831 defect class: the schema's top-level object is
-// additionalProperties:false, so any DSL field the parser accepts but the
-// schema omits makes a valid, skill-authored routine fail schema
-// validation (IDE + external linters) even though the server saves it.
-// Reflect over the DSL struct and assert every json-tagged field has a
-// matching schema property — so a new top-level field can't drift out of
-// the published contract again.
-func TestRoutineSchema_AllTopLevelFieldsCovered(t *testing.T) {
+// TestRoutineSchema_AllFieldsCovered is the regression guard for the #831
+// defect class: an object in the schema is additionalProperties:false, so
+// any Go field the parser accepts but the schema omits makes a valid,
+// skill-authored routine fail schema validation (IDE + external linters)
+// even though the server saves + runs it. Reflect over the source-of-truth
+// structs at EVERY level that maps to an additionalProperties:false object
+// (DSL top-level AND $defs.Step) and assert every json-tagged field has a
+// matching schema property — so a new field can't drift out of the
+// published contract again, at any depth.
+func TestRoutineSchema_AllFieldsCovered(t *testing.T) {
 	raw, err := os.ReadFile(schemaPath(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var doc map[string]interface{}
 	_ = json.Unmarshal(raw, &doc)
-	props, _ := doc["properties"].(map[string]interface{})
+	defs, _ := doc["$defs"].(map[string]interface{})
 
-	typ := reflect.TypeOf(DSL{})
-	for i := 0; i < typ.NumField(); i++ {
-		tag := typ.Field(i).Tag.Get("json")
-		if tag == "" || tag == "-" {
-			continue // internal / unserialized field
-		}
-		name := strings.Split(tag, ",")[0]
-		if name == "" {
-			continue
-		}
-		if _, ok := props[name]; !ok {
-			t.Errorf("DSL field %s (json:%q) has no schema property — additionalProperties:false will reject a routine that uses it; add it to schemas/routine.v1.json", typ.Field(i).Name, name)
+	propsOf := func(m map[string]interface{}) map[string]interface{} {
+		p, _ := m["properties"].(map[string]interface{})
+		return p
+	}
+	stepDef, _ := defs["Step"].(map[string]interface{})
+
+	cases := []struct {
+		name  string
+		typ   reflect.Type
+		props map[string]interface{}
+	}{
+		{"DSL", reflect.TypeOf(DSL{}), propsOf(doc)},
+		{"Step", reflect.TypeOf(Step{}), propsOf(stepDef)},
+	}
+	for _, c := range cases {
+		for i := 0; i < c.typ.NumField(); i++ {
+			tag := c.typ.Field(i).Tag.Get("json")
+			if tag == "" || tag == "-" {
+				continue // internal / unserialized field
+			}
+			name := strings.Split(tag, ",")[0]
+			if name == "" {
+				continue
+			}
+			if _, ok := c.props[name]; !ok {
+				t.Errorf("%s field %s (json:%q) has no schema property in %s — additionalProperties:false will reject a routine that uses it; add it to schemas/routine.v1.json",
+					c.name, c.typ.Field(i).Name, name, c.name)
+			}
 		}
 	}
 }

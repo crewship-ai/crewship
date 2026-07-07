@@ -222,12 +222,14 @@
         "outcomes": { "$ref": "#/$defs/Outcomes" },
         "agent_slug": { "type": "string", "description": "Used by agent_run." },
         "prompt": { "type": "string", "description": "Used by agent_run + call_pipeline." },
-        "nested_inputs": {
+        "inputs": {
           "type": "object",
           "additionalProperties": true,
           "description": "Used by call_pipeline. Inputs forwarded to the nested routine."
         },
         "pipeline_slug": { "type": "string", "description": "Used by call_pipeline." },
+        "retry": { "$ref": "#/$defs/RetryPolicy" },
+        "hooks": { "$ref": "#/$defs/StepHooks" },
         "http": { "$ref": "#/$defs/HTTPStep" },
         "code": { "$ref": "#/$defs/CodeStep" },
         "wait": { "$ref": "#/$defs/WaitStep" },
@@ -426,6 +428,28 @@
         { "required": ["title"] },
         { "required": ["body"] }
       ]
+    },
+    "RetryPolicy": {
+      "type": "object",
+      "required": ["max_attempts"],
+      "additionalProperties": false,
+      "description": "Per-step retry policy for transient failures.",
+      "properties": {
+        "max_attempts": { "type": "integer", "minimum": 1, "description": "Total attempts including the first." },
+        "backoff": { "type": "string", "enum": ["constant", "exponential"], "description": "Delay growth between attempts. Default constant." },
+        "initial_delay_ms": { "type": "integer", "minimum": 0, "description": "First retry delay. Default 1000." },
+        "max_delay_ms": { "type": "integer", "minimum": 0, "description": "Delay ceiling for exponential backoff. Default 60000." },
+        "retry_on": { "type": "array", "items": { "type": "string" }, "description": "Error classes/substrings that qualify for retry. Empty = retry any transient failure." }
+      }
+    },
+    "StepHooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per-step lifecycle steps: before runs ahead of this step (its failure fails the step); after runs once the step completes (best-effort). Restricted to code | http | transform.",
+      "properties": {
+        "before": { "$ref": "#/$defs/Step" },
+        "after": { "$ref": "#/$defs/Step" }
+      }
     }
   }
 }
