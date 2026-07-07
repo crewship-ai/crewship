@@ -1542,6 +1542,12 @@ END;
 	// and plaintext secret with 400 when set. Defaults off. See
 	// migrate_consts_v132_webhook_require_timestamp.go and issue #815.
 	{version: 132, name: "webhook_require_timestamp", sql: migrationWebhookRequireTimestamp},
+
+	// v133: outbound notification channels (email + signed webhook) that
+	// a run's terminal path fans out to on completion/failure. Secret is
+	// encrypted at rest; soft-deleted. See
+	// migrate_consts_v133_notification_channels.go and issue #850.
+	{version: 133, name: "notification_channels", sql: migrationNotificationChannels},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

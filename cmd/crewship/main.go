@@ -121,6 +121,7 @@ func init() {
 	rootCmd.AddCommand(inboxCmd)
 	rootCmd.AddCommand(pipelineCmd)
 	rootCmd.AddCommand(checkpointCmd)
+	rootCmd.AddCommand(notifyChannelCmd)
 	rootCmd.AddCommand(consolidateCmd)
 	rootCmd.AddCommand(evalCmd)
 	rootCmd.AddCommand(hooksCmd)

@@ -158,11 +158,32 @@ func (r *RunRecord) Warnings() []RunWarning {
 // without inventing a higher-level transaction abstraction.
 type RunStore struct {
 	db *sql.DB
+	// terminalNotifier, if set, fires after a run is committed to a
+	// completed/failed terminal state. It runs on the finalize path so
+	// scheduled runs (no connected client) still emit outbound
+	// notifications; the callback must return promptly (fan out on its
+	// own goroutine) so it never slows the terminal write. Optional.
+	terminalNotifier TerminalNotifier
 }
+
+// TerminalNotifier is invoked once a run reaches a completed/failed
+// terminal state. Wired via SetTerminalNotifier; the concrete
+// implementation (internal/notify) loads the full record and dispatches
+// to the workspace's outbound channels. Kept as a func so the pipeline
+// package has no dependency on the notify subsystem (wiring lives in
+// cmd_start.go).
+type TerminalNotifier func(ctx context.Context, runID string, status RunStatus)
 
 // NewRunStore wraps a DB handle.
 func NewRunStore(db *sql.DB) *RunStore {
 	return &RunStore{db: db}
+}
+
+// SetTerminalNotifier registers a callback fired after a run commits to
+// a completed/failed terminal state. Idempotent to overwrite; pass nil
+// to clear.
+func (s *RunStore) SetTerminalNotifier(fn TerminalNotifier) {
+	s.terminalNotifier = fn
 }
 
 // ErrRunNotFoundInStore signals that a Get-by-id (or any lookup)
@@ -336,7 +357,18 @@ WHERE id = ?`,
 		string(in.Status), nullableStr(in.Output), nullableStr(in.ErrorMessage), nullableStr(in.FailedAtStep),
 		fp,
 		in.CostUSD, in.DurationMs, formatRFC3339(in.EndedAt), in.RunID)
-	return err
+	if err != nil {
+		return err
+	}
+	// Fan out to outbound notification channels once the terminal state
+	// is durably committed. Only completed/failed notify — cancelled and
+	// interrupted are operational states, not run outcomes worth paging
+	// on. Best-effort: the callback owns its own async/error handling and
+	// must not affect the run.
+	if s.terminalNotifier != nil && (in.Status == RunStatusCompleted || in.Status == RunStatusFailed) {
+		s.terminalNotifier(ctx, in.RunID, in.Status)
+	}
+	return nil
 }
 
 // AppendWarning adds one non-fatal warning to the run's warnings_json
