@@ -159,7 +159,8 @@ describe("<ActivityBell> badge", () => {
 
   it("keeps the emerald badge semantics for agent-only activity", () => {
     h.agentItems = [
-      { id: "a1", kind: "agent", label: "Casey", href: "/activity?run=a1" },
+      // Agent runs deep-link to the agent's chat, not the pipeline trace (#846).
+      { id: "a1", kind: "agent", label: "Casey", href: "/chat/casey" },
     ]
     render(<ActivityBell />)
     const badge = screen.getByTestId("activity-live-badge")
