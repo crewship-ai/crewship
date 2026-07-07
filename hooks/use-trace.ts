@@ -15,14 +15,12 @@ import type { PipelineDSL } from "@/lib/trace/types"
 // broadcasts pipeline.step.* events that hot-path UI updates, and the run
 // row itself is small.
 //
-// NOTE (#847 follow-up): GetRun now inlines each agent sub-span's captured
-// input/output (up to 16 KB output/span) under `sub_spans`, so on a long
-// run being watched this polled payload grows as live actions accumulate.
-// Today only the SELECTED step's spans are consumed (activity-trace-page
-// maps `run.sub_spans[stepId]`), so the planned mitigation is to drop
-// sub-span I/O from the poll and lazy-fetch it with `?include_io=1` only
-// for the open step (see GetRun). Deferred as its own change — a LAN
-// self-host doesn't feel it; hosted will want it.
+// This poll is INTENTIONALLY light on sub-span I/O (#863): GetRun omits each
+// agent sub-span's input/output (up to 16 KB output/span) unless asked, so the
+// payload stays flat as live actions accumulate on a long watched run. Only
+// span metadata (kind/name/detail/status/duration + truncated flags) comes
+// through here — enough for the canvas waterfall. The OPENED step's I/O is
+// fetched separately on demand by useStepIO (`?io_step=<id>`).
 //
 // Refresh triggers:
 //   - pipeline.step.* event for this run → refetch run
