@@ -17,10 +17,6 @@ type fakeExecutor struct {
 	inFlight  int32
 	maxInWork int32
 	completed int32
-
-	mu      sync.Mutex
-	fired   []string // pending IDs seen, in claim order
-	runIDby func(pr PendingRun) string
 }
 
 func (f *fakeExecutor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
@@ -31,10 +27,6 @@ func (f *fakeExecutor) Run(ctx context.Context, in RunInput) (*RunResult, error)
 			break
 		}
 	}
-	f.mu.Lock()
-	f.fired = append(f.fired, in.TriggeredByID)
-	f.mu.Unlock()
-
 	if f.delay > 0 {
 		select {
 		case <-time.After(f.delay):
