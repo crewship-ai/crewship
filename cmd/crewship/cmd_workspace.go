@@ -279,6 +279,54 @@ var workspaceUpdateCmd = &cobra.Command{
 	},
 }
 
+// workspaceDeleteCmd deletes a workspace. Owner-only and irreversible
+// (soft-delete cascade over crews + agents), so it requires the operator
+// to re-type the slug via --confirm, mirroring the type-the-slug UI
+// confirm (#866.2). The typed slug is sent as confirm_slug; the server
+// re-validates it, the last-workspace guard, and OWNER role.
+var workspaceDeleteCmd = &cobra.Command{
+	Use:   "delete [slug-or-id]",
+	Short: "Delete a workspace (owner only, irreversible)",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+
+		wsID := cli.ResolveWorkspace(flagWorkspace, cliCfg)
+		if len(args) > 0 {
+			wsID = args[0]
+		}
+		if wsID == "" {
+			return fmt.Errorf("no workspace specified")
+		}
+
+		confirm, _ := cmd.Flags().GetString("confirm")
+		if confirm == "" {
+			return fmt.Errorf("--confirm <slug> is required: re-type the workspace slug to confirm deletion")
+		}
+
+		if err := confirmAction(cmd, fmt.Sprintf(
+			"Permanently delete workspace %q and ALL its crews & agents? This cannot be undone.", wsID)); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		client.WorkspaceID = wsID
+		resp, err := client.Do("DELETE", "/api/v1/workspaces/"+wsID, map[string]string{"confirm_slug": confirm})
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		resp.Body.Close()
+
+		cli.PrintSuccess("Workspace deleted.")
+		return nil
+	},
+}
+
 // workspaceMemberCmd groups member management subcommands.
 var workspaceMemberCmd = &cobra.Command{
 	Use:     "member",
@@ -566,6 +614,9 @@ func init() {
 	workspaceMemberAddCmd.Flags().String("role", "MEMBER", "Role: MEMBER|ADMIN")
 	workspaceMemberRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
+	workspaceDeleteCmd.Flags().String("confirm", "", "Workspace slug, re-typed to confirm deletion (required)")
+	workspaceDeleteCmd.Flags().BoolP("yes", "y", false, "Skip the interactive confirmation prompt")
+
 	workspaceInviteCreateCmd.Flags().String("role", "MEMBER", "Role: MEMBER|ADMIN")
 	// Mirror the role flag on the parent so `workspace invite <email> --role ADMIN` works.
 	workspaceInviteCmd.Flags().String("role", "MEMBER", "Role: MEMBER|ADMIN")
@@ -583,6 +634,7 @@ func init() {
 	workspaceCmd.AddCommand(workspaceGetCmd)
 	workspaceCmd.AddCommand(workspaceCreateCmd)
 	workspaceCmd.AddCommand(workspaceUpdateCmd)
+	workspaceCmd.AddCommand(workspaceDeleteCmd)
 	workspaceCmd.AddCommand(workspaceMemberCmd)
 	workspaceCmd.AddCommand(workspaceInviteCmd)
 }

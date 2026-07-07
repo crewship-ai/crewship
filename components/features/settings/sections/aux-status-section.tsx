@@ -30,12 +30,17 @@ interface AuxStatusResponse {
   slots: AuxSlot[]
 }
 
+// Keys MUST match the backend slot ids emitted by
+// GET /api/v1/system/aux-status (llm.Slot constants in
+// internal/llm/aux.go: curator, keeper, behavior, memory_health,
+// negative). A mismatch here silently blanks the description column
+// (#866.4).
 const SLOT_DESCRIPTIONS: Record<string, string> = {
   curator: "Daily skill review + memory consolidation routines",
+  keeper: "Keeper evaluator gate — lesson / skill / escalation decisions",
   behavior: "F4.2 behavior monitor post-tool-call evaluations",
-  memory_search: "F1 memory.search ranking auxiliary",
-  skill_review: "F4.1 skill activation / archive recommendations",
-  negative_learning: "F4.4 negative lesson capture",
+  memory_health: "F1 memory-health audit + consolidation scoring",
+  negative: "F4.4 negative lesson capture",
 }
 
 function SourcePill({ source }: { source: AuxSlot["source"] }) {
@@ -97,7 +102,15 @@ export function AuxStatusSection() {
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Auxiliary models</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold">Auxiliary models</h2>
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wider"
+            title="This tab is a read-only diagnostic. Slots are configured via YAML (per-workspace overrides are on the roadmap)."
+          >
+            read-only
+          </span>
+        </div>
         <Button
           type="button"
           variant="outline"

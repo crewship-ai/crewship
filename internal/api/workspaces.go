@@ -72,6 +72,15 @@ func NewWorkspaceHandler(db *sql.DB, logger *slog.Logger) *WorkspaceHandler {
 // SetLicense attaches the license for enforcing workspace member limits.
 func (h *WorkspaceHandler) SetLicense(lic *license.License) { h.license = lic }
 
+// workspaceCounts is the nested `_count` object the settings UI reads
+// (settings-layout.tsx: org._count.{crews,agents,members}). Always
+// emitted — the FE relies on it for the General-tab usage numbers.
+type workspaceCounts struct {
+	Crews   int `json:"crews"`
+	Agents  int `json:"agents"`
+	Members int `json:"members"`
+}
+
 type workspaceResponse struct {
 	ID                string  `json:"id"`
 	Name              string  `json:"name"`
@@ -81,9 +90,24 @@ type workspaceResponse struct {
 	CreatedAt         string  `json:"created_at"`
 	UpdatedAt         string  `json:"updated_at"`
 	CurrentUserRole   *string `json:"currentUserRole,omitempty"`
-	CrewCount         int     `json:"_count_crews,omitempty"`
-	AgentCount        int     `json:"_count_agents,omitempty"`
-	MemberCount       int     `json:"_count_members,omitempty"`
+	// Nested `_count` is the canonical shape the frontend consumes
+	// (#866.1). The flat `_count_*` keys are retained one release for
+	// back-compat with any older client and should be removed after.
+	Count       *workspaceCounts `json:"_count,omitempty"`
+	CrewCount   int              `json:"_count_crews,omitempty"`
+	AgentCount  int              `json:"_count_agents,omitempty"`
+	MemberCount int              `json:"_count_members,omitempty"`
+}
+
+// fillNestedCount mirrors the flat scan targets into the nested `_count`
+// object so both shapes stay in lockstep no matter which query path
+// populated the row.
+func (ws *workspaceResponse) fillNestedCount() {
+	ws.Count = &workspaceCounts{
+		Crews:   ws.CrewCount,
+		Agents:  ws.AgentCount,
+		Members: ws.MemberCount,
+	}
 }
 
 // List returns all workspaces the authenticated user belongs to.
@@ -124,6 +148,7 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
+		ws.fillNestedCount()
 		result = append(result, ws)
 	}
 	if err := rows.Err(); err != nil {
@@ -163,6 +188,7 @@ func (h *WorkspaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws.CurrentUserRole = &role
+	ws.fillNestedCount()
 
 	writeJSON(w, http.StatusOK, ws)
 }

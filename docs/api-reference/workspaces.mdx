@@ -23,6 +23,7 @@ Errors follow [RFC 7807 Problem Details](https://datatracker.ietf.org/doc/html/r
 | `POST` | [`/api/v1/workspaces`](#create-workspace) | Provision a workspace, caller becomes `OWNER` |
 | `GET` | [`/api/v1/workspaces/{workspaceId}`](#get-workspace) | Fetch a single workspace |
 | `PATCH` | [`/api/v1/workspaces/{workspaceId}`](#update-workspace) | Partial update of workspace fields |
+| `DELETE` | [`/api/v1/workspaces/{workspaceId}`](#delete-workspace) | Soft-delete the workspace + cascade (`OWNER` only) |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/members`](#list-members) | All members of the workspace |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/members`](#add-member) | Add an existing user by user ID |
 | `DELETE` | [`/api/v1/workspaces/{workspaceId}/members/{memberId}`](#remove-member) | Remove a member (not the `OWNER`) |
@@ -93,6 +94,7 @@ Returns every workspace the authenticated user belongs to, ordered by `created_a
     "created_at": "2026-04-12T09:18:22Z",
     "updated_at": "2026-05-09T14:02:11Z",
     "currentUserRole": "OWNER",
+    "_count": { "crews": 4, "agents": 12, "members": 7 },
     "_count_crews": 4,
     "_count_agents": 12,
     "_count_members": 7
@@ -108,9 +110,10 @@ Returns every workspace the authenticated user belongs to, ordered by `created_a
 | `logo_url` | string? | URL to workspace logo |
 | `preferred_language` | string? | Canonical language name (e.g. `"Czech"`, `"English"`) -- see [language list](#preferred_language-values) |
 | `currentUserRole` | string | Caller's role in this workspace (`OWNER` / `ADMIN` / `MANAGER` / `MEMBER` / `VIEWER`) |
-| `_count_crews` | integer | Number of non-deleted crews (omitted from the JSON when `0`) |
-| `_count_agents` | integer | Number of non-deleted agents (omitted when `0`) |
-| `_count_members` | integer | Number of workspace members (omitted when `0`) |
+| `_count` | object | Canonical nested usage counts: `{ crews, agents, members }`. Always present (zeros included). Prefer this over the flat keys below. |
+| `_count_crews` | integer | Deprecated flat alias for `_count.crews` (omitted when `0`; retained one release for back-compat) |
+| `_count_agents` | integer | Deprecated flat alias for `_count.agents` (omitted when `0`) |
+| `_count_members` | integer | Deprecated flat alias for `_count.members` (omitted when `0`) |
 | `created_at` / `updated_at` | string | RFC 3339 timestamp |
 
 ### Create workspace
@@ -185,9 +188,40 @@ Partial update -- only provided fields are changed. Setting `preferred_language`
 | `403` | Caller is not `OWNER`/`ADMIN` |
 | `409` | New `slug` already taken |
 
-<Note>
-There is no `DELETE /workspaces/{workspaceId}` endpoint and no `crewship workspace delete` command. Workspace deletion is handled out-of-band (a direct operation on the host database); deleting the last workspace would orphan its owner, so it is intentionally not exposed through the API or CLI.
-</Note>
+---
+
+### Delete workspace
+
+```
+DELETE /api/v1/workspaces/{workspaceId}
+```
+
+Soft-deletes the workspace and cascade-soft-deletes its crews and agents
+(`deleted_at` is set; membership join rows are removed). Deleted crews stop
+serving dispatches immediately; their runtime containers are reaped by the
+orchestrator's idle-TTL lifecycle, the same path a single crew deletion
+relies on.
+
+**Auth:** `OWNER` only. The route sits behind `canRole "manage"` (`ADMIN+`)
+at the router, and the handler additionally requires the caller to be the
+workspace `OWNER`.
+
+**Request body:**
+
+| Field | Type | Description |
+|---|---|---|
+| `confirm_slug` | string | Must exactly equal the workspace's `slug`. Type-the-slug confirmation guarding against accidental deletion. |
+
+**Response:** `200 OK` -- `{ "success": true }`.
+
+| Status | Condition |
+|---|---|
+| `400` | `confirm_slug` does not match the workspace slug, or invalid body |
+| `403` | Caller is not the workspace `OWNER` |
+| `404` | Workspace not found (or already deleted) |
+| `409` | This is the caller's only workspace — refused so the owner is not orphaned |
+
+Drive it from the CLI with [`crewship workspace delete`](/cli/workspace).
 
 ---
 
