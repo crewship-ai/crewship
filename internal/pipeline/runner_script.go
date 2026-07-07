@@ -10,7 +10,14 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/scrubber"
 )
+
+// scriptAuditScrubber redacts secrets from the journaled command line —
+// rendered args can carry a templated credential ({{ inputs.token }}), and the
+// journal is broadcast to workspace members. Same pattern as the agent-span
+// detail scrubber (internal/orchestrator/agent_span.go).
+var scriptAuditScrubber = scrubber.New()
 
 // ScriptRunner execs a bundled script inside the crew's own container —
 // the same hardened sandbox (non-root 1001, cap-drop ALL, no-new-privileges,
@@ -180,7 +187,14 @@ func (e *Executor) runScriptStep(ctx context.Context, step Step, parentRender Re
 	// Audit: record WHAT ran (argv), its exit code + duration, as an
 	// exec.command journal entry keyed to the run — a durable, post-hoc trail
 	// of every script a routine executed. Best-effort; never fails the step.
-	e.emitScriptAudit(ctx, in, runID, step.ID, interp, abs, args, res.ExitCode, dur)
+	// When the runner itself errored the process outcome is unknown — report
+	// exit_code -1 rather than a false 0 ("ran clean") for an exec that may
+	// never have started.
+	exitForAudit := res.ExitCode
+	if runErr != nil && exitForAudit == 0 {
+		exitForAudit = -1
+	}
+	e.emitScriptAudit(ctx, in, runID, step.ID, interp, abs, args, exitForAudit, dur, runErr)
 
 	if runErr != nil {
 		return res.Stdout, 0, dur, fmt.Errorf("script step %q: %w (stderr: %s)", step.ID, runErr, truncateForGraderLog(res.Stderr))
@@ -195,9 +209,24 @@ func (e *Executor) runScriptStep(ctx context.Context, step Step, parentRender Re
 // argv, exit code, and duration of a script step. This is the "complete audit"
 // half of first-class scripts: the run tree already carries the step + its
 // stdout output; this entry captures the command itself for post-hoc review.
-func (e *Executor) emitScriptAudit(ctx context.Context, in RunInput, runID, stepID, interp, absPath string, args []string, exitCode int, durMs int64) {
+func (e *Executor) emitScriptAudit(ctx context.Context, in RunInput, runID, stepID, interp, absPath string, args []string, exitCode int, durMs int64, runErr error) {
 	argv := append(append([]string{}, strings.Fields(interp)...), append([]string{absPath}, args...)...)
-	command := strings.Join(argv, " ")
+	// Rendered args can carry a templated secret — scrub before the command
+	// line is persisted / broadcast.
+	command := scriptAuditScrubber.Scrub(strings.Join(argv, " "))
+	payload := map[string]any{
+		"run_id":      runID,
+		"step_id":     stepID,
+		"kind":        "script",
+		"command":     command,
+		"interpreter": interp,
+		"path":        absPath,
+		"exit_code":   exitCode,
+		"duration_ms": durMs,
+	}
+	if runErr != nil {
+		payload["error"] = scriptAuditScrubber.Scrub(runErr.Error())
+	}
 	_, _ = ensureEmitter(e.emitter).Emit(ctx, journal.Entry{
 		WorkspaceID: in.WorkspaceID,
 		CrewID:      in.AuthorCrewID,
@@ -206,16 +235,7 @@ func (e *Executor) emitScriptAudit(ctx context.Context, in RunInput, runID, step
 		ActorID:     runID,
 		Summary:     fmt.Sprintf("script step %s: %s", stepID, command),
 		TraceID:     runID,
-		Payload: map[string]any{
-			"run_id":      runID,
-			"step_id":     stepID,
-			"kind":        "script",
-			"command":     command,
-			"interpreter": interp,
-			"path":        absPath,
-			"exit_code":   exitCode,
-			"duration_ms": durMs,
-		},
+		Payload:     payload,
 	})
 }
 
@@ -271,7 +291,19 @@ func (r *OrchestratorRunner) RunScript(ctx context.Context, req ScriptRunRequest
 		env = append(env, k+"="+v)
 	}
 
-	execRes, err := r.container.Exec(ctx, provider.ExecConfig{
+	// Enforce the step timeout. The exec attach read below does NOT observe
+	// ctx on its own (a hijacked Docker stream blocks until EOF), so a
+	// watcher closes the reader when the deadline fires — otherwise a hung
+	// script (infinite loop, blocked read) would park this executor
+	// goroutine forever.
+	execCtx := ctx
+	if req.TimeoutSec > 0 {
+		var cancel context.CancelFunc
+		execCtx, cancel = context.WithTimeout(ctx, time.Duration(req.TimeoutSec)*time.Second)
+		defer cancel()
+	}
+
+	execRes, err := r.container.Exec(execCtx, provider.ExecConfig{
 		ContainerID: containerID,
 		Cmd:         cmd,
 		Env:         env,
@@ -280,9 +312,37 @@ func (r *OrchestratorRunner) RunScript(ctx context.Context, req ScriptRunRequest
 	if err != nil {
 		return ScriptRunResult{}, fmt.Errorf("script runner: exec: %w", err)
 	}
+	readDone := make(chan struct{})
+	go func() {
+		select {
+		case <-execCtx.Done():
+			_ = execRes.Reader.Close() // unblock the pending read
+		case <-readDone:
+		}
+	}()
 	stdout, _ := io.ReadAll(io.LimitReader(execRes.Reader, int64(maxBytes)))
+	close(readDone)
 	_ = execRes.Reader.Close()
-	_, exitCode, _ := r.container.ExecInspect(ctx, execRes.ExecID)
+
+	if execCtx.Err() != nil {
+		// Deadline fired (or the run was cancelled) mid-exec. The in-container
+		// process is NOT force-killed by closing the attach — it stays bounded
+		// by the container's pid/mem caps and TTL. Report honestly.
+		return ScriptRunResult{Stdout: string(stdout), ExitCode: -1},
+			fmt.Errorf("script runner: script timed out after %ds (in-container process may still be running)", req.TimeoutSec)
+	}
+
+	running, exitCode, inspErr := r.container.ExecInspect(execCtx, execRes.ExecID)
+	if inspErr != nil {
+		// Unknown outcome must NOT read as success — a failed inspect would
+		// otherwise default exitCode to 0 and falsely mark the step COMPLETED.
+		return ScriptRunResult{Stdout: string(stdout), ExitCode: -1},
+			fmt.Errorf("script runner: exec inspect failed (outcome unknown, refusing to assume exit 0): %w", inspErr)
+	}
+	if running {
+		return ScriptRunResult{Stdout: string(stdout), ExitCode: -1},
+			fmt.Errorf("script runner: process still reported running after stream EOF — outcome unknown")
+	}
 
 	res := ScriptRunResult{Stdout: string(stdout), ExitCode: exitCode}
 
