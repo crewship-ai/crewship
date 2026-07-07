@@ -82,7 +82,8 @@ func TestRoutineResultRunE_FormatJSON(t *testing.T) {
 		ID: "run_x", Status: "completed", Output: "done",
 	}))
 	covSetupCli10(t, s.URL())
-	setFlagCovCli10(t, routineResultCmd, "json", "true")
+	// Output routes through the global --format flag (no local --json).
+	flagFormat = "json"
 
 	out, err := captureStdoutCovCli10(t, func() error {
 		return routineResultCmd.RunE(routineResultCmd, []string{"run_x"})
@@ -92,6 +93,32 @@ func TestRoutineResultRunE_FormatJSON(t *testing.T) {
 	}
 	if !strings.Contains(out, `"output": "done"`) {
 		t.Errorf("json envelope missing output field:\n%s", out)
+	}
+}
+
+func TestRoutineResultRunE_FailedRun(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnGet(covResultPath, clitest.JSONResponse(200, cli.PipelineRunDetail{
+		ID: "run_x", Status: "failed", Output: "",
+		ErrorMessage: "step summarize timed out", FailedAtStep: "summarize",
+	}))
+	covSetupCli10(t, s.URL())
+
+	out, err := captureStdoutCovCli10(t, func() error {
+		return routineResultCmd.RunE(routineResultCmd, []string{"run_x"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "FAILED") {
+		t.Errorf("status line missing FAILED:\n%s", out)
+	}
+	if !strings.Contains(out, "step summarize timed out") || !strings.Contains(out, "summarize") {
+		t.Errorf("error message / failed step missing:\n%s", out)
+	}
+	if !strings.Contains(out, "no final output recorded") {
+		t.Errorf("failed run with no output should say so:\n%s", out)
 	}
 }
 

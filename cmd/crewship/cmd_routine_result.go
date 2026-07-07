@@ -101,6 +101,7 @@ func prettyOutput(s string) string {
 }
 
 func init() {
-	routineResultCmd.Flags().Bool("json", false, "Deprecated alias for --format json")
+	// No local --json: this is a new command, so output routes through the
+	// global --format/-f flag (resolvedFormatter). See format_helpers.go.
 	pipelineCmd.AddCommand(routineResultCmd)
 }
