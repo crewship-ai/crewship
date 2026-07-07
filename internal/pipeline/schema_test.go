@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -67,6 +68,39 @@ func TestRoutineSchema_AllStepTypesCovered(t *testing.T) {
 	for _, want := range expected {
 		if !have[string(want)] {
 			t.Errorf("schema enum missing step type %q", want)
+		}
+	}
+}
+
+// TestRoutineSchema_AllTopLevelFieldsCovered is the regression guard for
+// the #831 defect class: the schema's top-level object is
+// additionalProperties:false, so any DSL field the parser accepts but the
+// schema omits makes a valid, skill-authored routine fail schema
+// validation (IDE + external linters) even though the server saves it.
+// Reflect over the DSL struct and assert every json-tagged field has a
+// matching schema property — so a new top-level field can't drift out of
+// the published contract again.
+func TestRoutineSchema_AllTopLevelFieldsCovered(t *testing.T) {
+	raw, err := os.ReadFile(schemaPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]interface{}
+	_ = json.Unmarshal(raw, &doc)
+	props, _ := doc["properties"].(map[string]interface{})
+
+	typ := reflect.TypeOf(DSL{})
+	for i := 0; i < typ.NumField(); i++ {
+		tag := typ.Field(i).Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue // internal / unserialized field
+		}
+		name := strings.Split(tag, ",")[0]
+		if name == "" {
+			continue
+		}
+		if _, ok := props[name]; !ok {
+			t.Errorf("DSL field %s (json:%q) has no schema property — additionalProperties:false will reject a routine that uses it; add it to schemas/routine.v1.json", typ.Field(i).Name, name)
 		}
 	}
 }

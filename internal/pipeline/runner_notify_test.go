@@ -103,19 +103,22 @@ func TestRunNotifyStep_TargetResolution(t *testing.T) {
 		invokingUser string
 		wantUser     string
 		wantRole     string
-		wantErr      bool
 	}{
-		{"workspace", "u1", "", "", false},
-		{"", "u1", "", "", false},
-		{"trigger", "u_trig", "u_trig", "", false},
-		{"trigger", "", "", "", false}, // no attributed user → workspace fallback
-		{"user:u_bob", "u1", "u_bob", "", false},
-		{"role:MANAGER", "u1", "", "MANAGER", false},
-		{"role:owner", "u1", "", "OWNER", false}, // case-insensitive
-		{"role:VIEWER", "u1", "", "", true},      // not a targetable role
-		{"user:", "u1", "", "", true},            // empty id
-		{"crew:sales", "u1", "", "", true},       // deferred to Phase 1
-		{"garbage", "u1", "", "", true},
+		{"workspace", "u1", "", ""},
+		{"", "u1", "", ""},
+		{"trigger", "u_trig", "u_trig", ""},
+		{"trigger", "", "", ""}, // no attributed user → workspace fallback
+		{"user:u_bob", "u1", "u_bob", ""},
+		{"role:MANAGER", "u1", "", "MANAGER"},
+		{"role:owner", "u1", "", "OWNER"}, // case-insensitive
+		// Bad / unsupported targets DEGRADE to a workspace notice at run
+		// time — a notify step must never fail the run. The literal forms
+		// are rejected at author time (see TestResolveNotifyTarget +
+		// TestValidate_NotifyStep); this covers the run-time safety net.
+		{"role:VIEWER", "u1", "", ""},
+		{"user:", "u1", "", ""},
+		{"crew:sales", "u1", "", ""}, // deferred to Phase 1
+		{"garbage", "u1", "", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.to+"/"+tc.invokingUser, func(t *testing.T) {
@@ -123,17 +126,11 @@ func TestRunNotifyStep_TargetResolution(t *testing.T) {
 			exec := notifyExecutor(fake)
 			step := Step{ID: "n", Type: StepNotify, Notify: &NotifyStep{To: tc.to, Body: "hi"}}
 			_, _, _, err := exec.runNotifyStep(context.Background(), step, RenderContext{}, notifyRunInput("ws_1", tc.invokingUser), "run_1")
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("to=%q: want error, got none", tc.to)
-				}
-				if len(fake.items) != 0 {
-					t.Errorf("to=%q: bad target must not emit an inbox item", tc.to)
-				}
-				return
-			}
 			if err != nil {
-				t.Fatalf("to=%q: unexpected error: %v", tc.to, err)
+				t.Fatalf("to=%q: notify must never fail the run, got %v", tc.to, err)
+			}
+			if len(fake.items) != 1 {
+				t.Fatalf("to=%q: want 1 inbox item (targeted or degraded), got %d", tc.to, len(fake.items))
 			}
 			it := fake.items[0]
 			if it.TargetUserID != tc.wantUser {
@@ -143,6 +140,72 @@ func TestRunNotifyStep_TargetResolution(t *testing.T) {
 				t.Errorf("to=%q: TargetRole = %q, want %q", tc.to, it.TargetRole, tc.wantRole)
 			}
 		})
+	}
+}
+
+// TestResolveNotifyTarget pins the PURE resolver's error contract — the
+// one author-time Validate relies on. (runNotifyStep degrades on these at
+// run time; Validate rejects the literal forms up front.)
+func TestResolveNotifyTarget(t *testing.T) {
+	ok := []struct{ to, wantUser, wantRole string }{
+		{"", "", ""}, {"workspace", "", ""},
+		{"trigger", "u_trig", ""},
+		{"user:u_bob", "u_bob", ""},
+		{"role:MANAGER", "", "MANAGER"}, {"role:owner", "", "OWNER"},
+	}
+	for _, tc := range ok {
+		u, r, err := resolveNotifyTarget(tc.to, "u_trig")
+		if err != nil || u != tc.wantUser || r != tc.wantRole {
+			t.Errorf("resolveNotifyTarget(%q) = (%q,%q,%v), want (%q,%q,nil)", tc.to, u, r, err, tc.wantUser, tc.wantRole)
+		}
+	}
+	for _, bad := range []string{"role:VIEWER", "user:", "crew:sales", "garbage"} {
+		if _, _, err := resolveNotifyTarget(bad, "u_trig"); err == nil {
+			t.Errorf("resolveNotifyTarget(%q) should error", bad)
+		}
+	}
+}
+
+// TestRunNotifyStep_UnresolvableTemplatedTargetDegrades: a templated `to`
+// that renders empty at run time (input not supplied) must degrade to a
+// workspace notice, not fail the run.
+func TestRunNotifyStep_UnresolvableTemplatedTargetDegrades(t *testing.T) {
+	fake := &fakeInboxNotifier{}
+	exec := notifyExecutor(fake)
+	step := Step{ID: "n", Type: StepNotify, Notify: &NotifyStep{To: "user:{{ inputs.assignee }}", Body: "hi"}}
+	// No inputs → renders "user:" → unresolvable.
+	_, _, _, err := exec.runNotifyStep(context.Background(), step, RenderContext{}, notifyRunInput("ws_1", ""), "run_1")
+	if err != nil {
+		t.Fatalf("templated-empty target must not fail the run, got %v", err)
+	}
+	if len(fake.items) != 1 || fake.items[0].TargetUserID != "" {
+		t.Errorf("expected a workspace-degraded item, got %+v", fake.items)
+	}
+}
+
+// TestRunNotifyStep_MembershipGuard: a user: target that isn't a workspace
+// member degrades to workspace; a member keeps the target.
+func TestRunNotifyStep_MembershipGuard(t *testing.T) {
+	step := Step{ID: "n", Type: StepNotify, Notify: &NotifyStep{To: "user:u_bob", Body: "hi"}}
+
+	// Non-member → degrade to workspace.
+	fakeA := &fakeInboxNotifier{}
+	execA := notifyExecutor(fakeA).WithMemberChecker(func(_ context.Context, _, _ string) (bool, error) { return false, nil })
+	if _, _, _, err := execA.runNotifyStep(context.Background(), step, RenderContext{}, notifyRunInput("ws_1", ""), "run_1"); err != nil {
+		t.Fatal(err)
+	}
+	if fakeA.items[0].TargetUserID != "" {
+		t.Errorf("non-member target should degrade to workspace, got %q", fakeA.items[0].TargetUserID)
+	}
+
+	// Member → keep the target.
+	fakeB := &fakeInboxNotifier{}
+	execB := notifyExecutor(fakeB).WithMemberChecker(func(_ context.Context, _, _ string) (bool, error) { return true, nil })
+	if _, _, _, err := execB.runNotifyStep(context.Background(), step, RenderContext{}, notifyRunInput("ws_1", ""), "run_1"); err != nil {
+		t.Fatal(err)
+	}
+	if fakeB.items[0].TargetUserID != "u_bob" {
+		t.Errorf("member target should be kept, got %q", fakeB.items[0].TargetUserID)
 	}
 }
 
@@ -186,18 +249,6 @@ func TestRunNotifyStep_DryRunNoSideEffect(t *testing.T) {
 	}
 	if !strings.Contains(out, "preview") {
 		t.Errorf("dry-run marker = %q, want a preview marker", out)
-	}
-}
-
-// TestRunNotifyStep_DryRunStillValidatesTarget: a bad `to` must surface
-// in the draft dry-run (the save gate), not only at real-run time.
-func TestRunNotifyStep_DryRunStillValidatesTarget(t *testing.T) {
-	exec := notifyExecutor(&fakeInboxNotifier{})
-	in := notifyRunInput("ws_1", "")
-	in.Mode = ModeDryRun
-	step := Step{ID: "n", Type: StepNotify, Notify: &NotifyStep{To: "role:VIEWER", Body: "hi"}}
-	if _, _, _, err := exec.runNotifyStep(context.Background(), step, RenderContext{}, in, "run_1"); err == nil {
-		t.Fatal("dry-run must reject an invalid target")
 	}
 }
 

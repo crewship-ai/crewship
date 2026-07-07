@@ -101,6 +101,11 @@ Examples:
 		// X --once` exits immediately on the first poll because the
 		// previous run's run.completed is in the response window.
 		firstPollSeen := false
+		// watchStart anchors the completion notification's long-run
+		// threshold — parity with `routine run --wait` (cmd_pipeline.go),
+		// so an operator who walked away from `watch --once` gets the same
+		// OS ping when the run finishes.
+		watchStart := time.Now()
 
 		ticker := time.NewTicker(intervalFlag)
 		defer ticker.Stop()
@@ -140,7 +145,7 @@ Examples:
 				rows[i], rows[j] = rows[j], rows[i]
 			}
 
-			var lastTerminal string
+			var lastTerminal, lastTerminalStatus string
 			for _, r := range rows {
 				if runIDFilter != "" && r.RunID != runIDFilter {
 					continue
@@ -175,11 +180,19 @@ Examples:
 				}
 				if r.EntryType == "pipeline.run.completed" || r.EntryType == "pipeline.run.failed" {
 					lastTerminal = r.RunID
+					lastTerminalStatus = "COMPLETED"
+					if r.EntryType == "pipeline.run.failed" {
+						lastTerminalStatus = "FAILED"
+					}
 				}
 			}
 			firstPollSeen = true
 
 			if once && lastTerminal != "" && (runIDFilter == "" || lastTerminal == runIDFilter) {
+				// Ping the operator who walked away, like agent runs and
+				// `routine run --wait` do (respects the same opt-in +
+				// long-run threshold).
+				maybeNotifyRunComplete(watchStart, slug, lastTerminalStatus)
 				fmt.Fprintln(os.Stderr, "Run terminated; exiting (--once).")
 				break loop
 			}

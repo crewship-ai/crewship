@@ -91,6 +91,9 @@ func NewWiredExecutor(d ExecutorDeps) *Executor {
 		// production executor (HTTP handler, boot resume, cron scheduler,
 		// pending dispatcher) can deliver routine notifications.
 		exec = exec.WithInboxNotifier(&sqlInboxNotifier{db: d.DB, logger: slog.Default()})
+		// notify-step membership guard (user:<id> → workspace fallback on
+		// a non-member id, instead of a silent black hole).
+		exec = exec.WithMemberChecker(NewWorkspaceMemberChecker(d.DB))
 	}
 	if d.RunStore != nil {
 		exec = exec.WithRunStore(d.RunStore)

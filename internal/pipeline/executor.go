@@ -146,6 +146,13 @@ type Executor struct {
 	// with a wiring warning (they never fail the run).
 	notifier InboxNotifier
 
+	// memberCheck reports whether a user is a member of a workspace, so a
+	// notify step targeting `user:<id>` can degrade to a workspace notice
+	// (rather than silently black-holing the message) when the id isn't a
+	// member. Production wiring installs NewWorkspaceMemberChecker(db).
+	// Nil = the guard is skipped (target trusted as-is).
+	memberCheck func(ctx context.Context, workspaceID, userID string) (bool, error)
+
 	// resumeCutoff is the process-boot fence for the boot resume scan
 	// (see WithResumeCutoff). Zero = the scan uses its own entry time.
 	resumeCutoff time.Time

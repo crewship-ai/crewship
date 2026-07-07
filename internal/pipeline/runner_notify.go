@@ -38,31 +38,63 @@ func (e *Executor) WithInboxNotifier(n InboxNotifier) *Executor {
 	return e
 }
 
+// WithMemberChecker wires the workspace-membership guard for notify steps
+// that target `user:<id>`. Without it, the guard is skipped and the id is
+// trusted as-is.
+func (e *Executor) WithMemberChecker(fn func(ctx context.Context, workspaceID, userID string) (bool, error)) *Executor {
+	e.memberCheck = fn
+	return e
+}
+
 // runNotifyStep handles StepNotify: a non-blocking push of a rendered
 // message to a recipient's inbox mid-run. It renders title/body from the
 // run context, scrubs secrets, resolves the target, and emits a `message`
 // inbox item keyed on run:step (idempotent on retry), then returns so the
-// DAG continues. Delivery is best-effort — a missing sink or a write error
-// is logged, never fatal (the routine's real work is already done). An
-// invalid `to` / priority IS fatal: that's an author mistake, surfaced in
-// the draft dry-run save gate.
+// DAG continues. Delivery is best-effort and NEVER fails the run — the
+// routine's real work is already done. A literal malformed `to`/`priority`
+// is caught at author time (offline Validate / draft dry-run save gate);
+// at run time we degrade rather than crash, so a templated target that
+// renders empty (e.g. `user:{{ inputs.assignee }}` → `user:`) or a typo'd
+// member id can never take the run down with it.
 func (e *Executor) runNotifyStep(ctx context.Context, step Step, parentRender RenderContext, in RunInput, runID string) (string, float64, int64, error) {
 	stepStart := time.Now()
 	if step.Notify == nil {
 		return "", 0, 0, fmt.Errorf("notify step %q missing notify body", step.ID)
 	}
 
-	// Resolve the target first so a misconfigured `to` fails fast — in a
-	// draft dry-run too, before any real run.
+	// Resolve the target. A run-time resolution failure (templated `to`
+	// rendered empty, malformed input value) must NOT fail the run — the
+	// non-blocking contract. Author mistakes with LITERAL targets are
+	// already rejected by validateNotifyTarget at save/dry-run; here we
+	// degrade to a workspace-wide notice so the update still lands.
 	toRaw := strings.TrimSpace(Render(step.Notify.To, parentRender))
-	targetUserID, targetRole, err := resolveNotifyTarget(toRaw, in.InvokingUserID)
-	if err != nil {
-		return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("notify step %q: %w", step.ID, err)
+	targetUserID, targetRole, terr := resolveNotifyTarget(toRaw, in.InvokingUserID)
+	if terr != nil {
+		slog.Default().Warn("notify step: unresolvable target — falling back to workspace notice",
+			"run", runID, "step", step.ID, "to", toRaw, "error", terr)
+		targetUserID, targetRole = "", ""
 	}
 
-	// dry_run preview: render + validate but never write to the inbox.
+	// dry_run preview: render but never write to the inbox.
 	if in.Mode == ModeDryRun {
 		return "notified:preview", 0, time.Since(stepStart).Milliseconds(), nil
+	}
+
+	// Membership guard: a `user:` target that isn't in the workspace would
+	// be a silent black hole — the row inserts, but nobody can ever see it.
+	// Degrade to a workspace notice + WARN so a typo'd id doesn't swallow
+	// the message. (A DB error checking membership fails open to the intended
+	// target rather than dropping it.)
+	if targetUserID != "" && e.memberCheck != nil {
+		switch member, merr := e.memberCheck(ctx, in.WorkspaceID, targetUserID); {
+		case merr != nil:
+			slog.Default().Warn("notify step: membership check failed — targeting user anyway",
+				"run", runID, "step", step.ID, "user", targetUserID, "error", merr)
+		case !member:
+			slog.Default().Warn("notify step: target user not in workspace — falling back to workspace notice",
+				"run", runID, "step", step.ID, "user", targetUserID)
+			targetUserID = ""
+		}
 	}
 
 	senderName := "routine"
@@ -112,7 +144,39 @@ func (e *Executor) runNotifyStep(ctx context.Context, step Step, parentRender Re
 		slog.Default().Warn("notify step delivery failed", "run", runID, "step", step.ID, "error", err)
 		return "notified:error", 0, time.Since(stepStart).Milliseconds(), nil
 	}
+	// Push it live. inbox.Insert only writes the row; the "inbox.updated"
+	// WS fan-out lives in the API handler layer, so without this a routine
+	// notify would only surface on the next poll. Broadcasting here makes
+	// open inboxes + bell badges repaint immediately (use-inbox.ts
+	// invalidates on any inbox.updated). Best-effort: e.ws is nil in tests.
+	if e.ws != nil {
+		e.ws.BroadcastWorkspace(in.WorkspaceID, "inbox.updated", map[string]string{
+			"source":  "routine_notify",
+			"run_id":  runID,
+			"step_id": step.ID,
+		})
+	}
 	return "notified:" + item.SourceID, 0, time.Since(stepStart).Milliseconds(), nil
+}
+
+// NewWorkspaceMemberChecker returns a membership predicate backed by the
+// workspace_members table — used by notify steps to avoid posting to a
+// user id that isn't in the workspace (a silent black hole). Nil db or
+// empty ids report "not a member" without a query.
+func NewWorkspaceMemberChecker(db *sql.DB) func(ctx context.Context, workspaceID, userID string) (bool, error) {
+	return func(ctx context.Context, workspaceID, userID string) (bool, error) {
+		if db == nil || workspaceID == "" || userID == "" {
+			return false, nil
+		}
+		var exists int
+		err := db.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?)`,
+			workspaceID, userID).Scan(&exists)
+		if err != nil {
+			return false, err
+		}
+		return exists == 1, nil
+	}
 }
 
 // resolveNotifyTarget maps a notify `to` selector to inbox targeting
