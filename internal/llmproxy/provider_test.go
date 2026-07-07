@@ -3,6 +3,7 @@ package llmproxy
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -10,8 +11,15 @@ import (
 	"time"
 )
 
+// testLogger discards output. It MUST write to io.Discard, not nil: a
+// slog.NewTextHandler(nil, …) has a nil io.Writer, and while the LevelError
+// threshold filters Info/Warn/Debug (so it usually looks fine), the FIRST
+// Error-level record it actually handles calls nil.Write and panics. That was
+// an intermittent CI flake in the CredentialMonitor tests (persistStatus logs
+// at Error on request failure, hit only under httptest-teardown timing) —
+// different test name each run, same nil-writer panic. See #855.
 func testLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(nil, &slog.HandlerOptions{Level: slog.LevelError}))
+	return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 }
 
 func TestTokenPool_SelectToken_RoundRobin(t *testing.T) {
