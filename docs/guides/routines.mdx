@@ -785,6 +785,20 @@ crewship routine logs <run_id> --full   # full step-by-step journal timeline
 
 `routine result` answers "what did run X produce?" — it re-fetches the run and prints the final `output` (structured JSON is pretty-printed; `--format json` for scripting). `routine logs` now includes the output too; use `result` when the deliverable is all you want.
 
+### Client-facing views
+
+The commands above are operator-shaped (run ids, tiers, cost columns, `entry_type` labels). Three affordances turn a run into something you can put in front of a non-engineer:
+
+- **Live progress** — `crewship routine watch <slug> --progress` collapses the raw event tail into **one updating status line**: `▶ reconcile-invoices · step 2/4 (verify) · RUNNING · $0.0021 · 12s`. Step count comes from the routine definition; cost + elapsed from the run's events. It exits when the run finishes. (Without `--progress`, `watch` stays the ANSI event tail for CI/scripting.)
+- **Shareable report** — `crewship routine report <run_id>` assembles a run into a readable document: inputs → each step's outcome + output → the final deliverable → cost & duration. **Markdown** by default (paste into a ticket/chat); `-f html -o run.html` writes a self-contained page to hand to a customer (output is HTML-escaped — no injection from run data).
+- **Redacted mode** — `--client` on `result`, `report`, and `logs` drops the internal noise (run-id, cost, tier, mode, trigger, `entry_type` labels) and renders status in plain words (`Succeeded` / `Failed`), leaving just the routine name, inputs, and deliverable.
+
+```bash
+crewship routine watch reconcile-invoices --progress
+crewship routine report run_abc123 -f html -o run.html
+crewship routine result run_abc123 --client        # plain: "Acct — Succeeded" + the output
+```
+
 Redelivered events dedupe **synchronously**: a replay (same `Idempotency-Key` / `X-Crewship-Event-ID`, or identical bytes within the dedupe window) answers `202` with `"status": "DEDUPED"` and the **original** run's id — the routine executes exactly once. A `proposed`/`disabled` routine answers `409` (policy block, nothing dispatched). A delivery arriving while the routine's `concurrency_key` gate is at capacity answers `429` with a `Retry-After` header **before** anything is dispatched — a 429 never consumes the idempotency key, so redelivering the same event later executes it normally. Runs that hit a `wait: approval` step park as `WAITING` and resume once the waitpoint is approved, exactly as with other triggers.
 
 <Warning>
