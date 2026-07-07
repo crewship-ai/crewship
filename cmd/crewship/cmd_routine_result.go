@@ -52,6 +52,24 @@ Structured (JSON) output is pretty-printed. Pair with 'routine logs
 			return f.NDJSON(detail)
 		}
 
+		// Client view (#840): plain status + the deliverable only — no run id,
+		// no cost/duration. Something you can forward to a customer as-is.
+		if resultClient {
+			name := detail.PipelineName
+			if name == "" {
+				name = detail.PipelineSlug
+			}
+			fmt.Printf("%s — %s\n", name, statusWord(detail.Status))
+			if detail.ErrorMessage != "" {
+				fmt.Printf("%s\n", detail.ErrorMessage)
+			}
+			if detail.Output != "" {
+				fmt.Println()
+				fmt.Println(prettyOutput(detail.Output))
+			}
+			return nil
+		}
+
 		// Human view: one status line, the error (if any), then the
 		// deliverable.
 		fmt.Printf("Run %s: %s", detail.ID, strings.ToUpper(detail.Status))
@@ -100,8 +118,11 @@ func prettyOutput(s string) string {
 	return string(b)
 }
 
+var resultClient bool
+
 func init() {
 	// No local --json: this is a new command, so output routes through the
 	// global --format/-f flag (resolvedFormatter). See format_helpers.go.
+	routineResultCmd.Flags().BoolVar(&resultClient, "client", false, "redacted client-facing view: routine name, plain status, and the deliverable only (no run-id / cost)")
 	pipelineCmd.AddCommand(routineResultCmd)
 }

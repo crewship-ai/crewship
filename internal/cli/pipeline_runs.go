@@ -29,6 +29,11 @@ type PipelineRunDetail struct {
 	FailedAtStep string  `json:"failed_at_step"`
 	CostUSD      float64 `json:"cost_usd"`
 	DurationMs   int64   `json:"duration_ms"`
+	// Inputs + StepOutputs power `routine report` — the run's declared inputs
+	// and each step's output (keyed by step_id). Values are decoded loosely
+	// (a step output is usually a string but may be structured).
+	Inputs      map[string]any `json:"inputs"`
+	StepOutputs map[string]any `json:"step_outputs"`
 }
 
 // IsTerminal reports whether the pipeline run reached a status that will

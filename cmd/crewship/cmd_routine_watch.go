@@ -62,6 +62,7 @@ Examples:
 		watchFormat := resolvedFormat(cmd)
 		jsonMode := watchFormat == "json" || watchFormat == "ndjson"
 		once, _ := cmd.Flags().GetBool("once")
+		progressMode, _ := cmd.Flags().GetBool("progress")
 		runIDFilter, _ := cmd.Flags().GetString("run-id")
 		intervalFlag, _ := cmd.Flags().GetDuration("interval")
 		if intervalFlag <= 0 {
@@ -76,6 +77,13 @@ Examples:
 		}
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
+
+		// Progress mode needs the routine's step count for "step N/M". Fetched
+		// once, best-effort — 0 renders as "N/?" rather than failing the watch.
+		totalSteps := 0
+		if progressMode {
+			totalSteps = fetchRoutineStepCount(client, ws, slug)
+		}
 
 		// Set up Ctrl-C / SIGTERM handler so an interactive watch
 		// exits cleanly without "operation timed out" mess.
@@ -143,6 +151,27 @@ Examples:
 			// chronological order.
 			for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
 				rows[i], rows[j] = rows[j], rows[i]
+			}
+
+			// Progress mode: collapse the whole window into ONE updating
+			// status line a non-engineer can read, instead of the raw event
+			// tail. Recomputed each poll, so it's correct whether we attached
+			// at run start or mid-flight.
+			if progressMode {
+				p := computeProgress(rows, totalSteps, runIDFilter, time.Now())
+				// \r returns to line start, \033[K clears to end of line, so a
+				// shorter line doesn't leave stale trailing chars.
+				fmt.Printf("\r\033[K%s", formatProgressLine(p, slug))
+				if p != nil && p.Terminal {
+					fmt.Println() // finalize the line
+					status := "COMPLETED"
+					if p.Failed {
+						status = "FAILED"
+					}
+					maybeNotifyRunComplete(watchStart, slug, status)
+					break loop // progress watches one run to completion
+				}
+				continue
 			}
 
 			var lastTerminal, lastTerminalStatus string
@@ -251,6 +280,7 @@ func colourize(kind string) string {
 func init() {
 	routineWatchCmd.Flags().Bool("json", false, "Deprecated alias for --format json")
 	routineWatchCmd.Flags().Bool("once", false, "exit after the first run completes (CI-friendly)")
+	routineWatchCmd.Flags().Bool("progress", false, "client-facing progress: one updating status line (step N/M · cost · elapsed) instead of the raw event tail; exits when the run finishes")
 	routineWatchCmd.Flags().String("run-id", "", "filter to events for one run_id only")
 	routineWatchCmd.Flags().Duration("interval", 2*time.Second, "poll interval (default 2s; min 500ms recommended)")
 	routineWatchCmd.Flags().Duration("since", 5*time.Minute, "lookback window on first poll (currently informational; full window per page)")

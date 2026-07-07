@@ -129,26 +129,39 @@ Output formats:
 			}
 			// Pretty summary. Tabwriter for the header rows, then a
 			// stand-alone block for current step / error if present.
+			// --client (#840): a redacted, customer-facing summary — routine
+			// name, plain-word status, and the deliverable; no run-id, mode,
+			// cost, tier, trigger, or issue-tracker noise.
+			logsClient, _ := cmd.Flags().GetBool("client")
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintf(w, "Run:\t%v\n", run["id"])
-			fmt.Fprintf(w, "Routine:\t%v (%v)\n", run["pipeline_name"], run["pipeline_slug"])
-			fmt.Fprintf(w, "Status:\t%v\n", run["status"])
-			fmt.Fprintf(w, "Mode:\t%v\n", run["mode"])
-			fmt.Fprintf(w, "Started:\t%v\n", run["started_at"])
-			if v, ok := run["ended_at"]; ok && v != nil && v != "" {
-				fmt.Fprintf(w, "Ended:\t%v\n", v)
+			if !logsClient {
+				fmt.Fprintf(w, "Run:\t%v\n", run["id"])
 			}
-			if v, ok := run["duration_ms"]; ok && v != nil {
-				fmt.Fprintf(w, "Duration:\t%vms\n", v)
+			fmt.Fprintf(w, "Routine:\t%v\n", run["pipeline_name"])
+			if !logsClient {
+				fmt.Fprintf(w, "  slug:\t%v\n", run["pipeline_slug"])
 			}
-			if v, ok := run["cost_usd"]; ok && v != nil {
-				fmt.Fprintf(w, "Cost:\t$%v\n", v)
-			}
-			if v, ok := run["triggered_via"]; ok && v != nil && v != "" {
-				fmt.Fprintf(w, "Triggered via:\t%v\n", v)
-			}
-			if v, ok := run["issue_identifier"]; ok && v != nil && v != "" {
-				fmt.Fprintf(w, "Issue:\t%v\n", v)
+			if logsClient {
+				fmt.Fprintf(w, "Status:\t%s\n", statusWord(fmt.Sprintf("%v", run["status"])))
+			} else {
+				fmt.Fprintf(w, "Status:\t%v\n", run["status"])
+				fmt.Fprintf(w, "Mode:\t%v\n", run["mode"])
+				fmt.Fprintf(w, "Started:\t%v\n", run["started_at"])
+				if v, ok := run["ended_at"]; ok && v != nil && v != "" {
+					fmt.Fprintf(w, "Ended:\t%v\n", v)
+				}
+				if v, ok := run["duration_ms"]; ok && v != nil {
+					fmt.Fprintf(w, "Duration:\t%vms\n", v)
+				}
+				if v, ok := run["cost_usd"]; ok && v != nil {
+					fmt.Fprintf(w, "Cost:\t$%v\n", v)
+				}
+				if v, ok := run["triggered_via"]; ok && v != nil && v != "" {
+					fmt.Fprintf(w, "Triggered via:\t%v\n", v)
+				}
+				if v, ok := run["issue_identifier"]; ok && v != nil && v != "" {
+					fmt.Fprintf(w, "Issue:\t%v\n", v)
+				}
 			}
 			_ = w.Flush()
 			if v, ok := run["error_message"].(string); ok && v != "" {
@@ -209,7 +222,9 @@ Output formats:
 					fmt.Printf("\n(No step outputs recorded for this run.)\n")
 				}
 			}
-			fmt.Printf("\n(For the full event-by-event timeline, re-run with --slug %v. For just the deliverable: crewship routine result %v.)\n", run["pipeline_slug"], run["id"])
+			if !logsClient {
+				fmt.Printf("\n(For the full event-by-event timeline, re-run with --slug %v. For just the deliverable: crewship routine result %v.)\n", run["pipeline_slug"], run["id"])
+			}
 			return nil
 		}
 
@@ -393,5 +408,6 @@ func init() {
 	routineLogsCmd.Flags().Bool("json", false, "Deprecated alias for --format json")
 	routineLogsCmd.Flags().Bool("full", false, "Full per-run journal timeline via the run-logs endpoint (no --slug needed)")
 	routineLogsCmd.Flags().Bool("show-outputs", false, "Print the full per-step outputs of the run (untruncated) — post-hoc 'what did each step return?' for the slug-free state view")
+	routineLogsCmd.Flags().Bool("client", false, "redacted client-facing summary: routine name, plain status, and the deliverable (no run-id / mode / cost / tier / trigger)")
 	pipelineCmd.AddCommand(routineLogsCmd)
 }
