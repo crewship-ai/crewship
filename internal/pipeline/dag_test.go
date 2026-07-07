@@ -2,7 +2,9 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -332,6 +334,178 @@ func TestExecutor_DAG_FanOutObservesConcurrency(t *testing.T) {
 	}
 	if got := runner.maxObs.Load(); got < 5 {
 		t.Errorf("expected at least 5 concurrent leaves, observed max %d", got)
+	}
+}
+
+func TestDeriveAutoNeeds(t *testing.T) {
+	dsl := &DSL{Steps: []Step{
+		{ID: "a", Raw: json.RawMessage(`{"prompt":"start"}`)},
+		{ID: "b", Raw: json.RawMessage(`{"prompt":"use {{ steps.a.output }}"}`)},
+		{ID: "c", Raw: json.RawMessage(`{"prompt":"independent"}`)},
+		// author-declared needs must win over derivation.
+		{ID: "d", Needs: []string{"a"}, Raw: json.RawMessage(`{"prompt":"{{ steps.b.output }} {{ steps.c.output }}"}`)},
+		// self- and unknown refs are ignored.
+		{ID: "e", Raw: json.RawMessage(`{"prompt":"{{ steps.e.output }} {{ steps.ghost.output }} {{ steps.a.output }}"}`)},
+	}}
+	out := deriveAutoNeeds(dsl)
+	got := map[string][]string{}
+	for _, s := range out.Steps {
+		got[s.ID] = s.Needs
+	}
+	want := map[string][]string{
+		"a": nil, "b": {"a"}, "c": nil, "d": {"a"}, "e": {"a"},
+	}
+	for id, w := range want {
+		if strings.Join(got[id], ",") != strings.Join(w, ",") {
+			t.Errorf("step %s needs = %v, want %v", id, got[id], w)
+		}
+	}
+	// Original DSL must not be mutated.
+	if dsl.Steps[1].Needs != nil {
+		t.Errorf("deriveAutoNeeds mutated the input DSL")
+	}
+}
+
+// TestExecutor_Parallelism_Auto_FansOutIndependent: 5 sibling steps with
+// no `needs:` and no data refs run concurrently under parallelism:auto.
+func TestExecutor_Parallelism_Auto_FansOutIndependent(t *testing.T) {
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+	runner := &concurrentCounterRunner{}
+	exec := NewExecutor(store, resolver, runner, nil)
+
+	var steps []Step
+	for i := 0; i < 5; i++ {
+		steps = append(steps, Step{ID: "s" + strconv.Itoa(i), Type: StepAgentRun, AgentSlug: "x"})
+	}
+	res, err := exec.RunDefinition(context.Background(),
+		&DSL{Name: "x", Parallelism: ParallelismAuto, Steps: steps},
+		RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "COMPLETED" {
+		t.Fatalf("status: %s (%s)", res.Status, res.ErrorMessage)
+	}
+	if got := runner.maxObs.Load(); got < 5 {
+		t.Errorf("auto should fan out 5 independent steps; observed max %d", got)
+	}
+}
+
+// TestExecutor_Parallelism_ExplicitDefault_StaysLinear: the SAME 5
+// independent steps with NO parallelism field (default explicit) run
+// one-at-a-time — existing routines are unaffected.
+func TestExecutor_Parallelism_ExplicitDefault_StaysLinear(t *testing.T) {
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+	runner := &concurrentCounterRunner{}
+	exec := NewExecutor(store, resolver, runner, nil)
+
+	var steps []Step
+	for i := 0; i < 5; i++ {
+		steps = append(steps, Step{ID: "s" + strconv.Itoa(i), Type: StepAgentRun, AgentSlug: "x"})
+	}
+	res, err := exec.RunDefinition(context.Background(),
+		&DSL{Name: "x", Steps: steps}, // no Parallelism → explicit default
+		RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "COMPLETED" {
+		t.Fatalf("status: %s", res.Status)
+	}
+	if got := runner.maxObs.Load(); got != 1 {
+		t.Errorf("explicit default must stay serial; observed max concurrency %d", got)
+	}
+}
+
+// TestExecutor_Parallelism_Auto_RespectsDataDeps: under auto, a step that
+// references {{ steps.a.output }} runs AFTER a even without explicit needs.
+func TestExecutor_Parallelism_Auto_RespectsDataDeps(t *testing.T) {
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+	runner := newTrackingRunner(60 * time.Millisecond)
+	exec := NewExecutor(store, resolver, runner, nil)
+
+	dsl := &DSL{Name: "x", Parallelism: ParallelismAuto, Steps: []Step{
+		{ID: "a", Type: StepAgentRun, AgentSlug: "agent_a", Raw: json.RawMessage(`{"agent_slug":"agent_a"}`)},
+		{ID: "b", Type: StepAgentRun, AgentSlug: "agent_b", Raw: json.RawMessage(`{"agent_slug":"agent_b","prompt":"{{ steps.a.output }}"}`)},
+	}}
+	res, err := exec.RunDefinition(context.Background(), dsl,
+		RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "COMPLETED" {
+		t.Fatalf("status: %s (%s)", res.Status, res.ErrorMessage)
+	}
+	runner.mu.Lock()
+	aSpan := runner.timeline["agent_a"]
+	bSpan := runner.timeline["agent_b"]
+	runner.mu.Unlock()
+	// b must start at/after a ends (data dependency derived from the ref).
+	if bSpan[0].Before(aSpan[1]) {
+		t.Errorf("b started before a finished: a=%v b=%v (data dep not honored)", aSpan, bSpan)
+	}
+}
+
+// TestExecutor_Parallelism_Off_ForcesLinear: `off` runs serially even
+// when steps declare `needs:` (debugging escape hatch).
+func TestExecutor_Parallelism_Off_ForcesLinear(t *testing.T) {
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+	runner := &concurrentCounterRunner{}
+	exec := NewExecutor(store, resolver, runner, nil)
+
+	steps := []Step{{ID: "root", Type: StepAgentRun, AgentSlug: "x"}}
+	for i := 0; i < 4; i++ {
+		steps = append(steps, Step{ID: "leaf" + strconv.Itoa(i), Type: StepAgentRun, AgentSlug: "x", Needs: []string{"root"}})
+	}
+	res, err := exec.RunDefinition(context.Background(),
+		&DSL{Name: "x", Parallelism: ParallelismOff, Steps: steps},
+		RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "COMPLETED" {
+		t.Fatalf("status: %s", res.Status)
+	}
+	if got := runner.maxObs.Load(); got != 1 {
+		t.Errorf("off must force serial even with needs; observed max %d", got)
+	}
+}
+
+// TestExecutor_DAG_WaveConcurrencyIsBounded: a 50-wide wave must not
+// spawn 50 concurrent steps — the semaphore caps it at dagWaveConcurrency
+// so a fan-out can't stampede the provider.
+func TestExecutor_DAG_WaveConcurrencyIsBounded(t *testing.T) {
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+	runner := &concurrentCounterRunner{}
+	exec := NewExecutor(store, resolver, runner, nil)
+
+	steps := []Step{{ID: "root", Type: StepAgentRun, AgentSlug: "x"}}
+	for i := 0; i < 50; i++ {
+		steps = append(steps, Step{
+			ID: "leaf_" + strconv.Itoa(i), Type: StepAgentRun, AgentSlug: "x",
+			Needs: []string{"root"},
+		})
+	}
+	res, err := exec.RunDefinition(context.Background(), &DSL{Name: "x", Steps: steps}, RunInput{
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "COMPLETED" {
+		t.Fatalf("status: %s (%s)", res.Status, res.ErrorMessage)
+	}
+	if got := runner.maxObs.Load(); got > dagWaveConcurrency {
+		t.Errorf("wave concurrency %d exceeded cap %d", got, dagWaveConcurrency)
+	}
+	// Sanity: it should actually parallelize up to the cap, not run serial.
+	if got := runner.maxObs.Load(); got < 2 {
+		t.Errorf("expected parallel execution, observed max %d", got)
 	}
 }
 

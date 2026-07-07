@@ -99,8 +99,25 @@ type DSL struct {
 	// Agentless routines are what makes schedule wake gates free:
 	// pipeline_schedules.wake_pipeline_id may only reference an
 	// agentless routine.
-	Agentless bool   `json:"agentless,omitempty"`
-	Steps     []Step `json:"steps"`
+	Agentless bool `json:"agentless,omitempty"`
+
+	// Parallelism selects how independent steps are scheduled:
+	//   "explicit" (default, and empty ⇒ explicit) — DAG parallelism only
+	//     when a step declares `needs:`; otherwise the linear loop runs
+	//     steps in source order (GitHub-Actions parity). Existing routines
+	//     keep their exact behaviour.
+	//   "auto" — independence is derived from data flow: a step that
+	//     references no prior step's output ({{ steps.X }}) has no implicit
+	//     dependency and runs in the first wave, so a fan-out of N sibling
+	//     steps runs concurrently (bounded) without hand-wiring `needs:`.
+	//     Author-declared `needs:` still win. Opt-in — it changes the
+	//     implicit "depends on previous" semantics, so it is never applied
+	//     without the author asking for it.
+	//   "off" — force sequential source-order execution even if steps
+	//     declare `needs:` (an escape hatch for debugging / strict order).
+	Parallelism string `json:"parallelism,omitempty"`
+
+	Steps []Step `json:"steps"`
 }
 
 // EvalConfig groups eval-time configuration. Currently scoped to

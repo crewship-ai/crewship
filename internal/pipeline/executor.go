@@ -970,13 +970,29 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		}
 	}
 
-	// DAG dispatch — if any step declares `needs:` AND we're not in
-	// dry-run (which still wants the linear "what would execute"
-	// preview), switch to the parallel scheduler. The linear loop
-	// below stays the no-DAG path, so existing pipelines keep their
-	// exact behaviour.
-	if in.Mode != ModeDryRun && hasNeeds(dsl) {
-		return e.runDAG(ctx, in, depth, dsl, result, pipelineID, pipelineSlug, runID, emit, inputsForCtx, renderEnv, startedAt)
+	// DAG dispatch — dry-run always takes the linear "what would execute"
+	// preview (graph rendering is the UI's concern). Otherwise the
+	// scheduler is selected by parallelism mode:
+	//   explicit (default): DAG only when a step declares `needs:` — the
+	//     linear loop below stays the no-DAG path, so existing routines
+	//     keep their exact behaviour.
+	//   auto: derive independence from data flow and run the DAG so
+	//     independent siblings fan out (bounded). call_pipeline can't run
+	//     in a DAG, so a routine containing one falls back to linear.
+	//   off: force the linear loop even if `needs:` are declared.
+	if in.Mode != ModeDryRun {
+		switch parallelismMode(dsl) {
+		case ParallelismAuto:
+			if !hasCallPipeline(dsl) {
+				return e.runDAG(ctx, in, depth, deriveAutoNeeds(dsl), result, pipelineID, pipelineSlug, runID, emit, inputsForCtx, renderEnv, startedAt)
+			}
+		case ParallelismOff:
+			// force sequential — fall through to the linear loop.
+		default: // explicit
+			if hasNeeds(dsl) {
+				return e.runDAG(ctx, in, depth, dsl, result, pipelineID, pipelineSlug, runID, emit, inputsForCtx, renderEnv, startedAt)
+			}
+		}
 	}
 
 	for i := range dsl.Steps {

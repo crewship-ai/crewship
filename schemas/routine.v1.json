@@ -86,6 +86,11 @@
       "type": "boolean",
       "description": "Token-zero guarantee: the routine may only contain http/code/wait/transform/notify steps and can never invoke an LLM. See Agentless routines in docs/guides/routines."
     },
+    "parallelism": {
+      "type": "string",
+      "enum": ["explicit", "auto", "off"],
+      "description": "How independent steps are scheduled. 'explicit' (default, and when omitted): parallel DAG only where a step declares needs[]; otherwise steps run in source order. 'auto': independence is derived from data flow — a step that references no prior step's {{ steps.X }} output runs in the first wave, so sibling steps fan out concurrently (bounded) without hand-wiring needs[]. 'off': force sequential source-order execution even if needs[] are declared. Opt-in: 'auto' changes the implicit depends-on-previous semantics, so existing routines are unaffected unless they set it."
+    },
     "integrations_required": {
       "type": "array",
       "items": { "type": "string" },

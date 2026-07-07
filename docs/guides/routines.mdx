@@ -551,7 +551,31 @@ Any step can carry `"if": "{{ inputs.run_summary }}"`. The placeholder is render
 }
 ```
 
-Steps with no overlapping `needs` execute in parallel (one goroutine wave per ready set). Final output picks the unique leaf node; for multi-leaf DAGs the first leaf in source order wins.
+Steps with no overlapping `needs` execute in parallel (one goroutine wave per ready set, **bounded** so a wide fan-out can't stampede the provider into rate limits). Final output picks the unique leaf node; for multi-leaf DAGs the first leaf in source order wins.
+
+### `parallelism` — auto-derive the DAG
+
+By default a routine is **sequential** unless you wire `needs:` (GitHub-Actions parity: no `needs` = depends on the previous step). Set a routine-level `parallelism` to change how independent steps are scheduled:
+
+| Value | Behaviour |
+| --- | --- |
+| `explicit` *(default; also when omitted)* | Parallel only where a step declares `needs:`. Existing routines are unaffected. |
+| `auto` | Independence is **derived from data flow**: a step that references no prior step's `{{ steps.X }}` output has no implicit dependency and runs in the first wave. A fan-out of N sibling steps runs concurrently (bounded) with **zero** hand-wired `needs:`. Author-declared `needs:` still win. A routine containing a `call_pipeline` step falls back to sequential (call_pipeline can't run inside a DAG). |
+| `off` | Force sequential source-order execution even if `needs:` are declared — a debugging escape hatch. |
+
+```json
+{
+  "name": "summarize-inbox",
+  "parallelism": "auto",
+  "steps": [
+    { "id": "t1", "type": "agent_run", "agent_slug": "writer", "prompt": "Summarize thread 1" },
+    { "id": "t2", "type": "agent_run", "agent_slug": "writer", "prompt": "Summarize thread 2" },
+    { "id": "t3", "type": "agent_run", "agent_slug": "writer", "prompt": "Summarize thread 3" }
+  ]
+}
+```
+
+The three summaries reference nothing upstream, so under `auto` they run in **one wave** (~1× wall-clock) instead of one-after-another — no `needs:` required. `auto` is **opt-in** because it changes the implicit "depends on previous" semantics; a routine you didn't mark keeps running exactly as before.
 
 ## Lifecycle hooks (`before_all` / `after_all` / `on_failure`)
 

@@ -4,10 +4,92 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// dagWaveConcurrency caps how many steps in a DAG wave execute at once.
+// Each step may provision a crew runtime and hit the LLM provider, so an
+// unbounded wide wave stampedes into rate limits. Sized in the 8–16 band:
+// high enough that typical fan-outs run fully parallel, low enough not to
+// trip provider 429s.
+const dagWaveConcurrency = 12
+
+// Parallelism modes (DSL.Parallelism). Empty resolves to explicit.
+const (
+	ParallelismExplicit = "explicit"
+	ParallelismAuto     = "auto"
+	ParallelismOff      = "off"
+)
+
+// parallelismMode resolves DSL.Parallelism to a canonical mode; empty (or
+// unknown, which the validator rejects at save time) ⇒ explicit — today's
+// behaviour, so existing routines are unaffected.
+func parallelismMode(dsl *DSL) string {
+	switch dsl.Parallelism {
+	case ParallelismAuto:
+		return ParallelismAuto
+	case ParallelismOff:
+		return ParallelismOff
+	default:
+		return ParallelismExplicit
+	}
+}
+
+// stepRefRE matches a template reference to another step's output, e.g.
+// {{ steps.parse.output }} captures "parse".
+var stepRefRE = regexp.MustCompile(`steps\.([a-zA-Z0-9_-]+)`)
+
+// hasCallPipeline reports whether any step is a call_pipeline — those
+// can't run inside a DAG (they need their own nested scheduler), so
+// parallelism:auto falls back to linear when one is present.
+func hasCallPipeline(dsl *DSL) bool {
+	for i := range dsl.Steps {
+		if dsl.Steps[i].Type == StepCallPipeline {
+			return true
+		}
+	}
+	return false
+}
+
+// deriveAutoNeeds returns a copy of dsl whose steps have Needs populated
+// from data-flow references ({{ steps.X }}), for parallelism:auto. A step
+// that already declares Needs keeps them (author intent wins); self- and
+// unknown references are ignored. The original DSL is not mutated — the
+// derived copy is handed to the DAG scheduler, which re-renders each step
+// against a fresh snapshot, so a step with no data reference simply sees
+// empty upstream (exactly as today) if it was mis-grouped.
+func deriveAutoNeeds(dsl *DSL) *DSL {
+	ids := make(map[string]bool, len(dsl.Steps))
+	for i := range dsl.Steps {
+		ids[dsl.Steps[i].ID] = true
+	}
+	out := *dsl
+	out.Steps = make([]Step, len(dsl.Steps))
+	copy(out.Steps, dsl.Steps)
+	for i := range out.Steps {
+		st := &out.Steps[i]
+		if len(st.Needs) > 0 {
+			continue
+		}
+		seen := map[string]bool{}
+		var needs []string
+		for _, m := range stepRefRE.FindAllSubmatch(st.Raw, -1) {
+			ref := string(m[1])
+			if ref == st.ID || !ids[ref] || seen[ref] {
+				continue
+			}
+			seen[ref] = true
+			needs = append(needs, ref)
+		}
+		sort.Strings(needs)
+		st.Needs = needs
+	}
+	return &out
+}
 
 // hasNeeds reports whether any step in the DSL declares an explicit
 // `needs:` array. The runDSL dispatcher uses this to decide between
@@ -183,6 +265,14 @@ func (e *Executor) runDAG(
 	var firstErr atomic.Value  // holds *dagStepFailure
 	var suspended atomic.Value // holds *suspendError (wait-step park; not a failure)
 
+	// Bound wave fan-out: a wide wave (e.g. 50 independent steps) would
+	// otherwise spawn one goroutine per step, each calling EnsureCrewRuntime
+	// + RunAgent — stampeding the provider into 429s (backoff → slower than
+	// serial). A buffered-channel semaphore caps how many steps execute at
+	// once; the slot is released as each step finishes. Shared across waves
+	// (waves are sequential — wg.Wait between them — so reuse is safe).
+	sem := make(chan struct{}, dagWaveConcurrency)
+
 	for {
 		// Compute the ready set: completed[needs[*]] && !completed[id]
 		ready := make([]*Step, 0, len(dsl.Steps))
@@ -218,9 +308,15 @@ func (e *Executor) runDAG(
 		var wg sync.WaitGroup
 		for _, sp := range ready {
 			step := sp
+			// Acquire a bounded slot before spawning. A cancelled DAG
+			// (peer failed) still drains: every spawned goroutine releases,
+			// so the acquire always makes progress; remaining steps spawn,
+			// see dagCtx.Err(), and return fast.
+			sem <- struct{}{}
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
+				defer func() { <-sem }()
 				if dagCtx.Err() != nil {
 					return
 				}
