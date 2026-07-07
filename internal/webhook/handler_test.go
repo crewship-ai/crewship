@@ -317,3 +317,140 @@ func TestHMAC(t *testing.T) {
 		t.Fatal("expected HMAC to fail with different message")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Per-agent require_timestamp policy (#815)
+// ---------------------------------------------------------------------------
+
+// requireTSHandler builds a handler whose secret resolves for crew-1/agent-1
+// and whose require-timestamp policy is fixed to `require` (or errors when
+// lookErr is set). fired reports whether the trigger dispatched.
+func requireTSHandler(secret string, require bool, lookErr error, fired *bool) *Handler {
+	lookup := func(_ context.Context, crewID, agentID string) (string, error) {
+		if crewID == "crew-1" && agentID == "agent-1" {
+			return secret, nil
+		}
+		return "", fmt.Errorf("not found")
+	}
+	trigger := func(_ context.Context, _, _ string, _ WebhookPayload) error {
+		*fired = true
+		return nil
+	}
+	h := NewHandler(slog.Default(), lookup, trigger)
+	h.SetRequireTimestampLookup(func(_ context.Context, _, _ string) (bool, error) {
+		return require, lookErr
+	})
+	return h
+}
+
+func bodyOnlySigRequest(t *testing.T, body []byte, sig string) *http.Request {
+	t.Helper()
+	req := httptest.NewRequest("POST", "/api/v1/webhooks/team-1/agent-1/trigger", bytes.NewReader(body))
+	req.SetPathValue("crewId", "crew-1")
+	req.SetPathValue("agentId", "agent-1")
+	req.Header.Set("X-Signature", sig)
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+// require_timestamp ON + a valid body-only HMAC → 400, no dispatch. The
+// signature is cryptographically valid; it is refused purely because the
+// agent mandates the replay-resistant timestamped scheme.
+func TestWebhookRequireTimestamp_RejectsBodyOnly(t *testing.T) {
+	const secret = "shared-secret-xyz"
+	fired := false
+	h := requireTSHandler(secret, true, nil, &fired)
+	body := []byte(`{"event":"alert"}`)
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, bodyOnlySigRequest(t, body, ComputeHMAC(body, secret)))
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("body-only sig under require_timestamp: status=%d, want 400 (body=%s)", w.Code, w.Body.String())
+	}
+	if fired {
+		t.Error("a body-only webhook must NOT dispatch when require_timestamp is on")
+	}
+}
+
+// require_timestamp ON + a fresh timestamped signature → 202, dispatches.
+func TestWebhookRequireTimestamp_AcceptsTimestamped(t *testing.T) {
+	const secret = "shared-secret-xyz"
+	fired := false
+	h := requireTSHandler(secret, true, nil, &fired)
+	body := []byte(`{"event":"alert"}`)
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	sig := ComputeHMAC([]byte(ts+"."+string(body)), secret)
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, signedTSRequest(t, body, ts, sig))
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("timestamped sig under require_timestamp: status=%d, want 202 (body=%s)", w.Code, w.Body.String())
+	}
+	if !fired {
+		t.Error("a valid timestamped webhook must dispatch")
+	}
+}
+
+// require_timestamp ON + deprecated plaintext secret → 400, no dispatch. The
+// plaintext path carries no timestamp, so it is the most replayable shape and
+// is refused outright.
+func TestWebhookRequireTimestamp_RejectsPlaintextSecret(t *testing.T) {
+	const secret = "shared-secret-xyz"
+	fired := false
+	h := requireTSHandler(secret, true, nil, &fired)
+
+	req := httptest.NewRequest("POST", "/api/v1/webhooks/team-1/agent-1/trigger", nil)
+	req.SetPathValue("crewId", "crew-1")
+	req.SetPathValue("agentId", "agent-1")
+	req.Header.Set("X-Webhook-Secret", secret)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("plaintext secret under require_timestamp: status=%d, want 400", w.Code)
+	}
+	if fired {
+		t.Error("plaintext secret must NOT dispatch when require_timestamp is on")
+	}
+}
+
+// require_timestamp OFF (policy returns false) → a body-only HMAC still works,
+// preserving backward compatibility for un-migrated senders.
+func TestWebhookRequireTimestamp_OffAllowsBodyOnly(t *testing.T) {
+	const secret = "shared-secret-xyz"
+	fired := false
+	h := requireTSHandler(secret, false, nil, &fired)
+	body := []byte(`{"event":"alert"}`)
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, bodyOnlySigRequest(t, body, ComputeHMAC(body, secret)))
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("body-only sig with policy off: status=%d, want 202", w.Code)
+	}
+	if !fired {
+		t.Error("body-only webhook should dispatch when require_timestamp is off")
+	}
+}
+
+// A policy lookup error fails toward availability: the base HMAC auth still
+// runs and a valid body-only signature is accepted (never a hard 400 on a
+// transient DB blip).
+func TestWebhookRequireTimestamp_LookupErrorFailsOpen(t *testing.T) {
+	const secret = "shared-secret-xyz"
+	fired := false
+	h := requireTSHandler(secret, false, fmt.Errorf("db down"), &fired)
+	body := []byte(`{"event":"alert"}`)
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, bodyOnlySigRequest(t, body, ComputeHMAC(body, secret)))
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("policy lookup error should not reject a valid webhook: status=%d, want 202", w.Code)
+	}
+	if !fired {
+		t.Error("valid webhook should dispatch despite a policy lookup error")
+	}
+}

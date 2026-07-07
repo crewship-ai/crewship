@@ -385,15 +385,21 @@ func (s *PipelineScheduler) tick(ctx context.Context) {
 	}
 }
 
-// scheduledFireIdempotencyKey derives a deterministic idempotency key for one
+// ScheduledFireIdempotencyKey derives a deterministic idempotency key for one
 // OCCURRENCE of a trigger, so a re-fire of the same occurrence — a duplicate
 // tick within the interval, or a process restart before the trigger's next_run
-// is advanced — dedupes at the executor's LookupOrReserve chokepoint, while the
-// next occurrence (a distinct bucket) gets a fresh key and fires normally.
+// is advanced — dedupes at the LookupOrReserve chokepoint, while the next
+// occurrence (a distinct bucket) gets a fresh key and fires normally.
 // Grounds the cron/deferred paths in exactly-once semantics (idempotency keys,
 // per Stripe/AWS). The executor SILENTLY IGNORES an empty key — which is exactly
 // why these two trigger sites double-fired before this key was populated.
-func scheduledFireIdempotencyKey(kind, id, bucket string) string {
+//
+// Exported so all firing paths share one dedup discipline: the pipeline cron
+// scheduler and deferred dispatcher here, plus the agent scheduler
+// (internal/scheduler, #816) and recurring-issue dispatcher (#813), which fire
+// outside the pipeline executor and must reserve against the shared
+// pipeline_run_idempotency table directly.
+func ScheduledFireIdempotencyKey(kind, id, bucket string) string {
 	sum := sha256.Sum256([]byte(kind + "\x00" + id + "\x00" + bucket))
 	return kind + "-" + hex.EncodeToString(sum[:16])
 }
@@ -476,7 +482,7 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 		TriggeredByID: sched.ID,
 		// Exactly-once on the cron path: dedupe a re-fire of the same
 		// occurrence (duplicate tick / restart before next_run_at advanced).
-		IdempotencyKey: scheduledFireIdempotencyKey("sched", sched.ID, occBucket),
+		IdempotencyKey: ScheduledFireIdempotencyKey("sched", sched.ID, occBucket),
 	}
 
 	res, runErr := s.executor.Run(ctx, in)
@@ -611,7 +617,7 @@ func (s *PipelineScheduler) runWakeCheck(ctx context.Context, sched *Schedule) (
 		Mode:           ModeRun,
 		TriggeredVia:   TriggeredViaWakeCheck,
 		TriggeredByID:  sched.ID,
-		IdempotencyKey: scheduledFireIdempotencyKey("sched-wake", sched.ID, wakeBucket),
+		IdempotencyKey: ScheduledFireIdempotencyKey("sched-wake", sched.ID, wakeBucket),
 	})
 	if err != nil || res == nil || res.Status != "COMPLETED" {
 		errMsg := ""

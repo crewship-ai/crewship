@@ -31,6 +31,7 @@ type CrewMember struct {
 const leadContextStaticTail = `
 To assign a task to a crew member, use your bash tool:
   curl -s -X POST http://localhost:9119/assign \
+    -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{"target":"<slug>","task":"<description>"}'
 To wait for and get the result:
@@ -39,6 +40,7 @@ To wait for and get the result:
 
 To ask a crew member a quick question (not a task):
   curl -s -X POST http://localhost:9119/query \
+    -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{"target":"<slug>","question":"<question>"}'
 
@@ -66,6 +68,7 @@ If a result lacks summary or has low confidence, request clarification before pr
 
 To create a multi-task mission (advanced orchestration):
   curl -s -X POST http://localhost:9119/mission/create \
+    -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{"title":"...","description":"...","tasks":[
       {"title":"...","assigned_to":"<slug>","task_order":1},
@@ -90,6 +93,7 @@ Use this when:
 Do NOT use this for ongoing work — hire a permanent agent instead.
 
   curl -s -X POST http://localhost:9119/spawn \
+    -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{"crew_slug":"<your-crew>","template_slug":"<from /crew-templates>",
          "model":"claude-haiku-4-5","ttl_minutes":60,

@@ -12,6 +12,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -92,6 +93,12 @@ type InternalHandler struct {
 	// 6h cron stays as the safety net). Wired via SetPostRunTrigger
 	// from router_orchestration.go once the consolidator is ready.
 	postRunTrigger postRunTriggerHook
+	// policyResolver maps the resolved agent's crew autonomy_level to the
+	// harbormaster HITL gate mode surfaced as approval_mode in the resolve
+	// response (#810). nil → approval_mode is "" (ModeNone), i.e. today's
+	// behaviour — so tests that construct the handler without a resolver are
+	// unaffected. Wired at router build time.
+	policyResolver *policy.Resolver
 }
 
 // postRunTriggerHook is the narrow interface UpdateRun calls. The
@@ -127,6 +134,13 @@ func (h *InternalHandler) SetJournal(j journal.Emitter) {
 // SetKeeperEnabled toggles whether Keeper is advertised as enabled in the agent config.
 func (h *InternalHandler) SetKeeperEnabled(enabled bool) {
 	h.keeperEnabled.Store(enabled)
+}
+
+// SetPolicyResolver wires the per-crew autonomy policy resolver used to
+// derive approval_mode in the agent-config resolve response (#810). nil is
+// safe — approval_mode falls back to "" (harbormaster ModeNone).
+func (h *InternalHandler) SetPolicyResolver(r *policy.Resolver) {
+	h.policyResolver = r
 }
 
 // SetComposioDefaultConnector arms (or disarms) the default-connector

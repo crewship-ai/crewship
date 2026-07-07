@@ -21,8 +21,8 @@ func (r *Router) registerAuthRoutes() {
 	onboardingSvc := services.NewOnboardingService(r.db, r.logger, generateCUID)
 	onboarding := NewOnboardingHandler(r.db, onboardingSvc, r.logger)
 	r.mux.Handle("GET /api/v1/onboarding/status", authed(http.HandlerFunc(onboarding.Status)))
-	r.mux.Handle("POST /api/v1/onboarding/complete", authed(http.HandlerFunc(onboarding.Complete)))
-	r.mux.Handle("POST /api/v1/onboarding/setup", authed(http.HandlerFunc(onboarding.Setup)))
+	r.authedSelfMut("POST", "/api/v1/onboarding/complete", onboarding.Complete)
+	r.authedSelfMut("POST", "/api/v1/onboarding/setup", onboarding.Setup)
 
 	// Auth (no auth required)
 	// Stash the handler on the Router so server.New can arm the bootstrap
@@ -59,14 +59,14 @@ func (r *Router) registerAuthRoutes() {
 	// session owned by the caller (or 404 to avoid enumeration).
 	sessionsH := NewSessionsHandler(r.db, r.logger, r.sessionsStore)
 	r.mux.Handle("GET /api/v1/auth/sessions", authed(http.HandlerFunc(sessionsH.List)))
-	r.mux.Handle("POST /api/v1/auth/sessions/{id}/revoke", authed(http.HandlerFunc(sessionsH.Revoke)))
+	r.authedSelfMut("POST", "/api/v1/auth/sessions/{id}/revoke", sessionsH.Revoke)
 
 	// CLI token management (auth required)
 	cliTokenH := NewCLITokenHandler(r.db, r.logger)
-	r.mux.Handle("POST /api/v1/auth/cli-token", authed(http.HandlerFunc(cliTokenH.Create)))
+	r.authedSelfMut("POST", "/api/v1/auth/cli-token", cliTokenH.Create)
 	r.mux.Handle("GET /api/v1/auth/cli-token/validate", authed(http.HandlerFunc(cliTokenH.Validate)))
 	r.mux.Handle("GET /api/v1/auth/cli-tokens", authed(http.HandlerFunc(cliTokenH.List)))
-	r.mux.Handle("DELETE /api/v1/auth/cli-tokens/{tokenId}", authed(http.HandlerFunc(cliTokenH.Revoke)))
+	r.authedSelfMut("DELETE", "/api/v1/auth/cli-tokens/{tokenId}", cliTokenH.Revoke)
 
 	// CLI pairing — device-code handoff. Mounted under /api/v1/auth/
 	// so it inherits the auth-tier rate limit (10 req/min/IP). /start
@@ -74,7 +74,7 @@ func (r *Router) registerAuthRoutes() {
 	// code); /redeem is intentionally unauthenticated — the code IS
 	// the credential, single-use, 10-min TTL.
 	pairH := NewCliPairHandler(r.db, r.logger)
-	r.mux.Handle("POST /api/v1/auth/pair/start", authed(http.HandlerFunc(pairH.Start)))
+	r.authedSelfMut("POST", "/api/v1/auth/pair/start", pairH.Start)
 	r.mux.Handle("GET /api/v1/auth/pair/poll", authed(http.HandlerFunc(pairH.Poll)))
 	r.mux.HandleFunc("POST /api/v1/auth/pair/redeem", pairH.Redeem)
 

@@ -127,7 +127,7 @@ func runSmokeTest(ctx context.Context, agentIDs map[string]string, timeout time.
 		return slugs[i] < slugs[j]
 	})
 
-	server := cli.ResolveServer(flagServer, cliCfg)
+	server := seedTargetServer()
 	crewshipBin := os.Args[0]
 
 	results := make([]smokeTestResult, 0, len(slugs))
@@ -158,7 +158,7 @@ func runSmokeTest(ctx context.Context, agentIDs map[string]string, timeout time.
 // --test-backup flow on transient rate-limiting.
 
 func warmupAgentForBackupTest(ctx context.Context, agentSlug string) error {
-	server := cli.ResolveServer(flagServer, cliCfg)
+	server := seedTargetServer()
 	backoff := 10 * time.Second
 	for attempt := 1; attempt <= 4; attempt++ {
 		ctx2, cancel := context.WithTimeout(ctx, 90*time.Second)

@@ -94,8 +94,24 @@ func validateStepEgress(st Step) error {
 		if st.Transform.Expression == "" {
 			return fmt.Errorf("pipeline: step %q (transform) missing expression", st.ID)
 		}
+	case StepNotify:
+		if st.Notify == nil {
+			return fmt.Errorf("pipeline: step %q (notify) missing notify body", st.ID)
+		}
+		if st.Notify.To == "" {
+			return fmt.Errorf("pipeline: step %q (notify) missing to (workspace, trigger, user:<id>, role:OWNER, role:MANAGER)", st.ID)
+		}
+		if st.Notify.Title == "" && st.Notify.Body == "" {
+			return fmt.Errorf("pipeline: step %q (notify) needs at least a title or body", st.ID)
+		}
+		if err := validateNotifyTarget(st.Notify.To); err != nil {
+			return fmt.Errorf("pipeline: step %q (notify) %w", st.ID, err)
+		}
+		if st.Notify.Priority != "" && !isValidNotifyPriority(st.Notify.Priority) {
+			return fmt.Errorf("pipeline: step %q (notify) priority %q invalid (allowed: urgent high medium low)", st.ID, st.Notify.Priority)
+		}
 	default:
-		return fmt.Errorf("pipeline: step %q has unsupported type %q (allowed: agent_run, call_pipeline, http, code, wait, transform)", st.ID, st.Type)
+		return fmt.Errorf("pipeline: step %q has unsupported type %q (allowed: agent_run, call_pipeline, http, code, wait, transform, notify)", st.ID, st.Type)
 	}
 	return nil
 }

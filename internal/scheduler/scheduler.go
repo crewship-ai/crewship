@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/robfig/cron/v3"
 )
@@ -38,6 +39,17 @@ type Scheduler struct {
 	logger    *slog.Logger
 	cfg       Config
 	parser    cron.Parser // shared, immutable after construction
+
+	// idem gives at-most-once fire semantics per occurrence (#816). The agent
+	// scheduler fires through the orchestrator directly — it has no pipeline
+	// executor idempotency chokepoint — so it reserves each occurrence against
+	// the shared pipeline_run_idempotency table itself. Nil when db is nil
+	// (test wiring without a DB): idempotency is then skipped.
+	idem *pipeline.IdempotencyStore
+	// nowFn is the clock used to derive the occurrence bucket. Overridable in
+	// tests so a duplicate-tick / distinct-occurrence pair is deterministic;
+	// defaults to time.Now.
+	nowFn func() time.Time
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -71,6 +83,10 @@ func New(
 	// which would let a schedule register but then trip the "unparsable cron"
 	// branch in updateTimestamps and clear schedule_next_run on every refresh.
 	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+	var idem *pipeline.IdempotencyStore
+	if db != nil {
+		idem = pipeline.NewIdempotencyStore(db)
+	}
 	return &Scheduler{
 		c:         cron.New(cron.WithParser(parser)),
 		db:        db,
@@ -82,6 +98,8 @@ func New(
 		logger:    logger,
 		cfg:       cfg,
 		parser:    parser,
+		idem:      idem,
+		nowFn:     time.Now,
 		ctx:       ctx,
 		cancel:    cancel,
 		entryMap:  make(map[string]cron.EntryID),
@@ -269,6 +287,30 @@ func (s *Scheduler) UpdateSchedule(ctx context.Context, agentID, cronExpr, promp
 	return nil
 }
 
+// occurrenceBucket returns the identity of the occurrence currently firing —
+// the agent's schedule_next_run (the due timestamp that triggered this fire).
+// This is shared state in the DB, so two replicas (or a duplicate tick) firing
+// the same occurrence derive the same idempotency key regardless of local
+// clock, and it is stable across a mid-run restart. Normalized to UTC RFC3339
+// so equivalent spellings collapse to one key. Falls back to the current
+// wall-clock minute only when schedule_next_run is absent (e.g. a force-fired
+// agent with no persisted schedule), which still dedupes a same-minute
+// duplicate on a single instance.
+func (s *Scheduler) occurrenceBucket(ctx context.Context, agentID string) string {
+	if s.db != nil {
+		var nextRun sql.NullString
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT schedule_next_run FROM agents WHERE id = ?`, agentID).Scan(&nextRun); err == nil &&
+			nextRun.Valid && nextRun.String != "" {
+			if t, perr := time.Parse(time.RFC3339, nextRun.String); perr == nil {
+				return t.UTC().Format(time.RFC3339)
+			}
+			return nextRun.String
+		}
+	}
+	return s.nowFn().UTC().Truncate(time.Minute).Format(time.RFC3339)
+}
+
 func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 	ctx, cancel := context.WithTimeout(s.ctx, 45*time.Minute)
 	defer cancel()
@@ -282,6 +324,54 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 		prompt = "This is a scheduled run. Execute your primary tasks."
 	}
 
+	// 0. Fire idempotency (#816). This scheduler fires through the
+	// orchestrator directly, so — unlike the pipeline scheduler, which dedupes
+	// at the executor's LookupOrReserve chokepoint — it must reserve the
+	// occurrence itself before any side effect. Without this, a duplicate tick
+	// (double registration of the same schedule) or a process restart after a
+	// run started but before updateTimestamps advanced schedule_next_run would
+	// re-fire the SAME occurrence and produce a second agent run. The key is
+	// (agent-sched, agentID, occurrence): a re-fire of the same occurrence
+	// dedupes while the next occurrence — a distinct bucket — fires normally.
+	// The occurrence bucket is schedule_next_run (the due timestamp that
+	// triggered this fire), read from the DB: it is SHARED state, so two
+	// replicas firing the same occurrence — even with skewed clocks that
+	// straddle a minute boundary — read the identical value and derive the
+	// identical key (a wall-clock minute bucket would diverge and double-fire).
+	// It is also stable across a mid-run restart (updateTimestamps advances it
+	// only after the run completes). Shares the pipeline_run_idempotency table +
+	// key scheme with the three other firing paths (#788).
+	var idemKey string
+	if s.idem != nil && ag.Workspace != "" {
+		bucket := s.occurrenceBucket(ctx, ag.ID)
+		idemKey = pipeline.ScheduledFireIdempotencyKey("agent-sched", ag.ID, bucket)
+		_, isNew, err := s.idem.LookupOrReserve(ctx, ag.Workspace, idemKey, runID, ag.ID, pipeline.DefaultIdempotencyTTL)
+		if err != nil {
+			// Fail closed — a missing/unreachable store must not cause a
+			// double-fire. Skip this occurrence; the next tick retries. Do NOT
+			// advance timestamps: the occurrence didn't run.
+			s.logger.Error("scheduled: idempotency reserve failed, skipping fire", "agent", ag.Slug, "error", err)
+			return
+		}
+		if !isNew {
+			// Another tick/replica already owns this occurrence. Skip silently
+			// (no run record, no timestamp advance — the owner handles both).
+			s.logger.Info("scheduled: duplicate occurrence deduped, skipping fire", "agent", ag.Slug, "run_id", runID)
+			return
+		}
+	}
+	// releaseReservation frees the occurrence key so a legitimate retry isn't
+	// poisoned when the fire fails BEFORE the agent run actually starts
+	// (mirrors the executor's Forget-on-early-reject). Once RunAgent is
+	// invoked the reservation stands.
+	releaseReservation := func() {
+		if idemKey != "" && s.idem != nil {
+			if fErr := s.idem.Forget(ctx, ag.Workspace, idemKey); fErr != nil {
+				s.logger.Warn("scheduled: failed to release idempotency reservation", "agent", ag.Slug, "error", fErr)
+			}
+		}
+	}
+
 	// 1. Create chat
 	if err := s.resolver.CreateChat(ctx, chatbridge.CreateChatRequest{
 		ChatID:      chatID,
@@ -290,6 +380,7 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 		Title:       fmt.Sprintf("Scheduled: %s", ag.Name),
 	}); err != nil {
 		s.logger.Error("scheduled: create chat failed", "agent", ag.Slug, "error", err)
+		releaseReservation()
 		s.updateTimestamps(ag.ID, ag.Cron, true)
 		return
 	}
@@ -298,6 +389,7 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 	info, err := s.resolver.ResolveChat(ctx, chatID)
 	if err != nil {
 		s.logger.Error("scheduled: resolve chat failed", "agent", ag.Slug, "error", err)
+		releaseReservation()
 		s.updateTimestamps(ag.ID, ag.Cron, true)
 		return
 	}
@@ -321,6 +413,7 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 		})
 		if err != nil {
 			s.logger.Error("scheduled: container failed", "agent", ag.Slug, "error", err)
+			releaseReservation()
 			s.updateTimestamps(ag.ID, ag.Cron, true)
 			return
 		}
@@ -337,32 +430,25 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 		})
 	}
 
-	// 5. Build AgentRunRequest
-	req := orchestrator.AgentRunRequest{
-		AgentID:      info.AgentID,
-		AgentSlug:    info.AgentSlug,
-		AgentRole:    info.AgentRole,
-		CrewID:       info.CrewID,
-		CrewSlug:     info.CrewSlug,
-		WorkspaceID:  info.WorkspaceID,
-		ChatID:       chatID,
-		ContainerID:  containerID,
-		CLIAdapter:   info.CLIAdapter,
-		LLMModel:     info.LLMModel,
-		SystemPrompt: info.SystemPrompt,
-		UserMessage:  prompt,
-		ToolProfile:  info.ToolProfile,
-		Credentials:  info.Credentials,
-		TimeoutSecs:  info.TimeoutSecs,
+	// 5. Build AgentRunRequest through the ONE request-builder (#810). The
+	// scheduler previously hand-built this literal and silently dropped
+	// MCPServers, Skills, RoleTitle, MCP-JSON, and MemoryMB/CPUs/TTL — so a
+	// cron-dispatched agent ran tool-blind and without its resource limits.
+	// Funnelling through ToAgentRunRequest carries the full field-set
+	// (incl. the crew-policy ApprovalMode that revives the HITL gate).
+	req := info.ToAgentRunRequest(chatbridge.AgentRunOverrides{
+		ChatID:      chatID,
+		ContainerID: containerID,
+		UserMessage: prompt,
+		LLMModel:    info.LLMModel,
+		TimeoutSecs: info.TimeoutSecs,
+		MemoryMB:    info.MemoryMB,
+		CPUs:        info.CPUs,
 		// Unattended runs get a tighter turn cap than interactive chat — no
 		// human is watching a scheduled job, so a stuck loop would otherwise
 		// burn to the wall-clock timeout. See orchestrator.RoutineMaxTurns.
-		MaxTurns:       orchestrator.RoutineMaxTurns,
-		MemoryEnabled:  info.MemoryEnabled,
-		CrewMembers:    info.CrewMembers,
-		NetworkMode:    info.NetworkMode,
-		AllowedDomains: info.AllowedDomains,
-	}
+		MaxTurns: orchestrator.RoutineMaxTurns,
+	})
 
 	// 6. Create run record
 	runMeta := map[string]interface{}{

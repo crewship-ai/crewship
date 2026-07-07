@@ -204,6 +204,18 @@ func testDB(t *testing.T) *sql.DB {
 			schedule_last_run TEXT,
 			schedule_next_run TEXT
 		);
+		-- Shared fire-idempotency table (production v81); the scheduler reserves
+		-- each occurrence here (#816). Without it LookupOrReserve errors and the
+		-- fail-closed path suppresses every fire.
+		CREATE TABLE IF NOT EXISTS pipeline_run_idempotency (
+			workspace_id     TEXT NOT NULL,
+			idempotency_key  TEXT NOT NULL,
+			run_id           TEXT NOT NULL,
+			pipeline_id      TEXT NOT NULL,
+			created_at       TEXT NOT NULL DEFAULT (datetime('now','subsec')),
+			expires_at       TEXT NOT NULL,
+			PRIMARY KEY (workspace_id, idempotency_key)
+		);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatalf("create schema: %v", err)
@@ -741,5 +753,119 @@ func TestUpdateTimestamps_ErrorOnly(t *testing.T) {
 	}
 	if !nextRun.Valid || nextRun.String == "" {
 		t.Error("expected schedule_next_run to be set")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fire idempotency (#816)
+// ---------------------------------------------------------------------------
+
+// newIdemFireScheduler builds a scheduler + resolver wired for a real agent
+// run so a fire produces exactly one createdRun. The clock is pinned so the
+// occurrence-minute bucket is deterministic.
+func newIdemFireScheduler(t *testing.T, db *sql.DB, clock func() time.Time) (*Scheduler, *mockResolver) {
+	t.Helper()
+	resolver := &mockResolver{
+		resolveInfo: &chatbridge.ChatInfo{
+			AgentID: "a1", AgentSlug: "bob", AgentRole: "AGENT",
+			CrewID: "crew1", CrewSlug: "alpha", CLIAdapter: "CLAUDE_CODE",
+			WorkspaceID: "ws1",
+		},
+	}
+	container := &mockContainer{ensureID: "container-123"}
+	orch := orchestrator.New(container, newMemState(), testLogger())
+	s := newTestScheduler(db, resolver, container, orch)
+	s.nowFn = clock
+	return s, resolver
+}
+
+// setNextRun pins an agent's schedule_next_run — the occurrence identity the
+// fire-idempotency key buckets on.
+func setNextRun(t *testing.T, db *sql.DB, agentID, ts string) {
+	t.Helper()
+	if _, err := db.Exec(`UPDATE agents SET schedule_next_run = ? WHERE id = ?`, ts, agentID); err != nil {
+		t.Fatalf("set schedule_next_run: %v", err)
+	}
+}
+
+// TestScheduledFireIsIdempotent: two fires of the SAME occurrence (identical
+// schedule_next_run) produce exactly one agent run — the multi-replica /
+// mid-run-restart case. RED before #816 — triggerAgent minted a fresh runID
+// each call and reserved nothing, so a duplicate fire made a second run. The
+// second fire re-pins the same schedule_next_run to model a sibling replica (or
+// a restart) reading the occurrence before this instance advanced it.
+func TestScheduledFireIsIdempotent(t *testing.T) {
+	db := testDB(t)
+	seedCrew(t, db, "crew1", "ws1", "Alpha", "alpha")
+	seedAgent(t, db, "a1", "bob", "Bob", "crew1", "ws1", "* * * * *", "do work", true)
+
+	s, resolver := newIdemFireScheduler(t, db, func() time.Time { return time.Date(2026, 7, 6, 8, 0, 0, 0, time.UTC) })
+	ag := scheduledAgent{ID: "a1", Slug: "bob", Name: "Bob", CrewID: "crew1", CrewSlug: "alpha", Cron: "* * * * *", Prompt: "do work", Workspace: "ws1"}
+
+	// The two fires straddle a wall-clock minute boundary (:59 then :01 of the
+	// next minute) but target the SAME occurrence (schedule_next_run=08:00:00) —
+	// the skewed-replica case. A wall-clock-minute bucket would derive two
+	// different keys and double-fire; the occurrence bucket derives one key and
+	// dedupes.
+	setNextRun(t, db, "a1", "2026-07-06T08:00:00Z")
+	s.nowFn = func() time.Time { return time.Date(2026, 7, 6, 8, 0, 59, 0, time.UTC) }
+	s.triggerAgent(ag) // replica A — reserves occurrence 08:00, runs
+	setNextRun(t, db, "a1", "2026-07-06T08:00:00Z")
+	s.nowFn = func() time.Time { return time.Date(2026, 7, 6, 8, 1, 1, 0, time.UTC) }
+	s.triggerAgent(ag) // replica B, next wall-clock minute, same occurrence — must dedupe
+
+	resolver.mu.Lock()
+	defer resolver.mu.Unlock()
+	if len(resolver.createdRuns) != 1 {
+		t.Fatalf("same occurrence across skewed clocks produced %d runs, want exactly 1", len(resolver.createdRuns))
+	}
+}
+
+// TestScheduledFire_DistinctOccurrences_BothRun guards against over-dedup: two
+// fires with DIFFERENT schedule_next_run values are distinct occurrences and
+// BOTH fire.
+func TestScheduledFire_DistinctOccurrences_BothRun(t *testing.T) {
+	db := testDB(t)
+	seedCrew(t, db, "crew1", "ws1", "Alpha", "alpha")
+	seedAgent(t, db, "a1", "bob", "Bob", "crew1", "ws1", "* * * * *", "do work", true)
+
+	fixed := time.Date(2026, 7, 6, 8, 0, 30, 0, time.UTC)
+	s, resolver := newIdemFireScheduler(t, db, func() time.Time { return fixed })
+	ag := scheduledAgent{ID: "a1", Slug: "bob", Name: "Bob", CrewID: "crew1", CrewSlug: "alpha", Cron: "* * * * *", Prompt: "do work", Workspace: "ws1"}
+
+	setNextRun(t, db, "a1", "2026-07-06T08:00:00Z")
+	s.triggerAgent(ag) // occurrence 08:00
+	setNextRun(t, db, "a1", "2026-07-06T08:01:00Z")
+	s.triggerAgent(ag) // occurrence 08:01 — distinct, fires
+
+	resolver.mu.Lock()
+	defer resolver.mu.Unlock()
+	if len(resolver.createdRuns) != 2 {
+		t.Fatalf("distinct occurrences produced %d runs, want 2", len(resolver.createdRuns))
+	}
+}
+
+// TestScheduledFire_ReserveErrorFailsClosed: if the idempotency store errors,
+// the fire is skipped (no run) rather than risking a double-fire.
+func TestScheduledFire_ReserveErrorFailsClosed(t *testing.T) {
+	db := testDB(t)
+	seedCrew(t, db, "crew1", "ws1", "Alpha", "alpha")
+	seedAgent(t, db, "a1", "bob", "Bob", "crew1", "ws1", "* * * * *", "do work", true)
+
+	fixed := time.Date(2026, 7, 6, 8, 0, 30, 0, time.UTC)
+	s, resolver := newIdemFireScheduler(t, db, func() time.Time { return fixed })
+
+	// Drop the idempotency table so LookupOrReserve errors.
+	if _, err := db.Exec(`DROP TABLE pipeline_run_idempotency`); err != nil {
+		t.Fatalf("drop table: %v", err)
+	}
+
+	ag := scheduledAgent{ID: "a1", Slug: "bob", Name: "Bob", CrewID: "crew1", CrewSlug: "alpha", Cron: "* * * * *", Prompt: "do work", Workspace: "ws1"}
+	s.triggerAgent(ag)
+
+	resolver.mu.Lock()
+	defer resolver.mu.Unlock()
+	if len(resolver.createdRuns) != 0 {
+		t.Fatalf("fail-closed violated: reserve error still produced %d runs, want 0", len(resolver.createdRuns))
 	}
 }

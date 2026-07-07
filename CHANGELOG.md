@@ -166,6 +166,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **`crewship seed` now bootstraps against the selected `--profile`, not
+  `CREWSHIP_SERVER`.** The seed flow's unauthenticated bootstrap POST (and
+  the `--nuke` confirmation, smoke test, and backup warmup) resolved their
+  target with `ResolveServer`, whose precedence is `--server` >
+  `CREWSHIP_SERVER` > config. Every *authenticated* call in the same command
+  uses `EffectiveServer`, under which an explicit `--profile` /
+  `CREWSHIP_PROFILE` wins over `CREWSHIP_SERVER`. So in a shell that exports
+  `CREWSHIP_SERVER` (the documented multi-clone convention), `crewship seed
+  --profile prod` sent bootstrap to `CREWSHIP_SERVER` while everything else
+  went to the profile server — silently splitting one seed across two
+  instances and surfacing as a bogus `DB already initialized` when
+  `CREWSHIP_SERVER` pointed at an already-bootstrapped instance. The seed
+  flow now routes every call through one `seedTargetServer()` helper backed
+  by `EffectiveServer`.
+
 - **Episodic indexer now starts at server boot.** The journal-embedding
   sweeper (`episodic.NewIndexer`) was fully implemented and tested but
   never constructed in production, so `HybridRecall` always queried an

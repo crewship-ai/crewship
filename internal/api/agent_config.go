@@ -10,6 +10,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/composio"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/policy"
 )
 
 // -----------------------------------------------------------------------------
@@ -269,6 +270,20 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		installedSkills = nil
 	}
 
+	// [HITL] approval_mode — derive the harbormaster gate mode from the
+	// crew's autonomy_level policy (#810). This is what the request-builder
+	// stamps onto every dispatched run; before this it was never set and the
+	// gate short-circuited Approved on every path. nil resolver (tests /
+	// policy disabled) → "" → ModeNone, i.e. today's behaviour.
+	approvalMode := ""
+	if h.policyResolver != nil && data.crewID.Valid && data.crewID.String != "" {
+		if pol, perr := h.policyResolver.Resolve(r.Context(), data.crewID.String); perr != nil {
+			h.logger.Warn("resolve crew policy for approval_mode", "crew_id", data.crewID.String, "error", perr)
+		} else {
+			approvalMode = policy.ApprovalModeForLevel(pol.AutonomyLevel)
+		}
+	}
+
 	resp := map[string]interface{}{
 		"agent_id":              agentID,
 		"agent_slug":            data.agentSlug,
@@ -303,6 +318,7 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		"agent_mcp_config_json": data.agentMCPConfigJSON.String,
 		"installed_skills":      installedSkills,
 		"crew_resources":        crewResources,
+		"approval_mode":         approvalMode,
 	}
 	// PR-E F6 — opener identity + role title for the orchestrator's
 	// PERSONA / peer card injection. opener is "" for agent-only
@@ -1175,12 +1191,14 @@ func (h *InternalHandler) buildKeeperBlock(agentSlug string, creds []mcpCredEntr
 	keeperBlock.WriteString("Some credentials require explicit approval before use.\n")
 	keeperBlock.WriteString("You do NOT have these credentials in your environment. To access them:\n\n")
 	keeperBlock.WriteString("  curl -s -X POST http://localhost:9119/keeper/request \\\n")
+	keeperBlock.WriteString("    -H \"Authorization: Bearer $CREWSHIP_AGENT_TOKEN\" \\\n")
 	keeperBlock.WriteString("    -H \"Content-Type: application/json\" \\\n")
 	fmt.Fprintf(&keeperBlock, "    -d '{\"credential_name\":\"<NAME>\",\"intent\":\"<why you need it>\",\"agent_slug\":\"%s\"}'\n\n", agentSlug)
 	keeperBlock.WriteString("The Keeper (AI gatekeeper) will evaluate your request and respond with ALLOW or DENY.\n")
 	keeperBlock.WriteString("If ALLOW, the response contains the credential value. If DENY, do NOT retry — explain to the user why access was denied.\n\n")
 	keeperBlock.WriteString("To execute a command with a credential (without seeing the value):\n")
 	keeperBlock.WriteString("  curl -s -X POST http://localhost:9119/keeper/execute \\\n")
+	keeperBlock.WriteString("    -H \"Authorization: Bearer $CREWSHIP_AGENT_TOKEN\" \\\n")
 	keeperBlock.WriteString("    -H \"Content-Type: application/json\" \\\n")
 	fmt.Fprintf(&keeperBlock, "    -d '{\"credential_name\":\"<NAME>\",\"intent\":\"<why>\",\"command\":\"<shell command>\",\"agent_slug\":\"%s\"}'\n\n", agentSlug)
 	keeperBlock.WriteString("Keeper-guarded credentials available to you:\n")

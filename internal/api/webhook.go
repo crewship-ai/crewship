@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/untrusted"
 	"github.com/crewship-ai/crewship/internal/webhook"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -77,6 +78,10 @@ type WebhookHandler struct {
 	container provider.ContainerProvider
 	logWriter *logcollector.Writer
 	idem      *pipeline.IdempotencyStore
+	// fence neutralizes the untrusted webhook payload before it reaches the
+	// prompt (#808). It carries an observer that logs elevated-suspicion
+	// ingress so ops can see injection attempts at the chokepoint.
+	fence *untrusted.Fence
 
 	// agentRatePerMin / agentMaxConcurrent gate agent-webhook dispatch
 	// (R4#3). Defaulted in the constructor; overridable (tests tighten
@@ -109,6 +114,13 @@ func NewWebhookHandler(
 		agentMaxConcurrent: defaultAgentWebhookMaxConcurrent,
 		agentRuns:          pipeline.NewRunRegistry(),
 	}
+	// Fence with an observer so a webhook payload the scanner rates medium+ is
+	// logged (source + suspicion + finding count) — visibility into injection
+	// attempts without changing the annotate-don't-block contract.
+	wh.fence = untrusted.New().WithObserver(func(source, suspicion string, findings int) {
+		logger.Warn("untrusted webhook ingress flagged for likely injection",
+			"source", source, "suspicion", suspicion, "findings", findings)
+	})
 	// Webhook re-delivery dedup reuses the pipeline idempotency primitive
 	// (shared pipeline_run_idempotency table) so we don't add a new table.
 	// nil db (test wiring) leaves idem nil and dedup is skipped.
@@ -117,7 +129,30 @@ func NewWebhookHandler(
 	}
 
 	wh.handler = webhook.NewHandler(logger, wh.lookupSecret, wh.trigger)
+	// Per-agent replay policy (#815): the handler asks this before accepting a
+	// body-only or plaintext-secret delivery. Read locally from the agents
+	// table (this process owns the DB) rather than over the internal IPC hop.
+	wh.handler.SetRequireTimestampLookup(wh.lookupRequireTimestamp)
 	return wh
+}
+
+// lookupRequireTimestamp reports whether the agent mandates the timestamped
+// webhook signature scheme (webhook_require_timestamp, #815). A nil db (test
+// wiring) or a missing row yields false — the timestamp stays optional.
+func (h *WebhookHandler) lookupRequireTimestamp(ctx context.Context, _, agentID string) (bool, error) {
+	if h.db == nil {
+		return false, nil
+	}
+	var require sql.NullBool
+	err := h.db.QueryRowContext(ctx,
+		`SELECT webhook_require_timestamp FROM agents WHERE id = ?`, agentID).Scan(&require)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return require.Valid && require.Bool, nil
 }
 
 // ServeHTTP dispatches incoming webhook requests to the underlying webhook handler.
@@ -340,9 +375,14 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		h.logger.Warn("failed to create run record", "error", err)
 	}
 
-	// 5. Build user message from payload
-	userMsg := fmt.Sprintf("Webhook event received:\nEvent: %s\nSource: %s\nData: %+v",
-		payload.Event, payload.Source, payload.Data)
+	// 5. Build user message from payload. The payload fields (event/source/
+	// data) are attacker-controlled external input, so they are neutralized
+	// through the ingress trust fence (issue #808) before reaching the model
+	// — nonce-fenced and injection-scanned, never interpolated raw. The
+	// "webhook" source label is caller-derived, not read from payload.Source
+	// (which is itself untrusted).
+	userMsg := "Webhook event received:\n" + h.fence.Wrap("webhook",
+		fmt.Sprintf("Event: %s\nSource: %s\nData: %+v", payload.Event, payload.Source, payload.Data))
 
 	// 6. Run agent (async)
 	// WithoutCancel preserves the request's OTel trace span + auth values so
@@ -362,34 +402,25 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 			defer releaseSlot()
 		}
 
-		req := orchestrator.AgentRunRequest{
-			AgentID:       info.AgentID,
-			AgentSlug:     info.AgentSlug,
-			AgentRole:     info.AgentRole,
-			CrewID:        info.CrewID,
-			CrewSlug:      info.CrewSlug,
-			WorkspaceID:   info.WorkspaceID,
-			ChatID:        chatID,
-			ContainerID:   containerID,
-			CLIAdapter:    info.CLIAdapter,
-			LLMModel:      info.LLMModel,
-			SystemPrompt:  info.SystemPrompt,
-			UserMessage:   userMsg,
-			ToolProfile:   info.ToolProfile,
-			Credentials:   info.Credentials,
-			TimeoutSecs:   info.TimeoutSecs,
-			MemoryEnabled: info.MemoryEnabled,
-			// Externally-triggered runs are forced to restricted egress
-			// regardless of the crew's own mode: the payload comes from outside,
-			// so it must not be able to drive a `free` crew's agent to arbitrary
-			// hosts. The crew's allowed_domains still apply (empty → the sidecar's
-			// DefaultAllowedDomains, so LLM/CLI providers keep working).
-			NetworkMode:    "restricted",
-			AllowedDomains: info.AllowedDomains,
-			MemoryMB:       info.MemoryMB,
-			CPUs:           info.CPUs,
-			TTLHours:       info.TTLHours,
-		}
+		// Build through the ONE request-builder (#810) so the webhook-
+		// triggered agent carries its MCP servers, installed skills, persona,
+		// and the crew-policy ApprovalMode — not just the fields this literal
+		// used to copy by hand.
+		req := info.ToAgentRunRequest(chatbridge.AgentRunOverrides{
+			ChatID:      chatID,
+			ContainerID: containerID,
+			UserMessage: userMsg,
+			LLMModel:    info.LLMModel,
+			TimeoutSecs: info.TimeoutSecs,
+			MemoryMB:    info.MemoryMB,
+			CPUs:        info.CPUs,
+		})
+		// Externally-triggered runs are forced to restricted egress regardless
+		// of the crew's own mode: the payload comes from outside, so it must
+		// not be able to drive a `free` crew's agent to arbitrary hosts. The
+		// crew's allowed_domains still apply (empty → the sidecar's
+		// DefaultAllowedDomains, so LLM/CLI providers keep working).
+		req.NetworkMode = "restricted"
 
 		logBuf := logcollector.NewOutputBuffer(h.logWriter, info.CrewID, info.AgentSlug)
 		defer logBuf.Close()

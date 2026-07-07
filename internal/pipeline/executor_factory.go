@@ -1,6 +1,9 @@
 package pipeline
 
-import "database/sql"
+import (
+	"database/sql"
+	"log/slog"
+)
 
 // ExecutorDeps bundles every dependency a production Executor needs so
 // that ALL construction sites share one wiring path (NewWiredExecutor):
@@ -84,6 +87,13 @@ func NewWiredExecutor(d ExecutorDeps) *Executor {
 		// routine layer.
 		exec = exec.WithEgressGate(NewCrewNetworkPolicyGate(d.DB))
 		exec = exec.WithCredentialResolver(NewVaultCredentialResolver(d.DB))
+		// notify-step inbox sink — same DB the run uses, so every
+		// production executor (HTTP handler, boot resume, cron scheduler,
+		// pending dispatcher) can deliver routine notifications.
+		exec = exec.WithInboxNotifier(&sqlInboxNotifier{db: d.DB, logger: slog.Default()})
+		// notify-step membership guard (user:<id> → workspace fallback on
+		// a non-member id, instead of a silent black hole).
+		exec = exec.WithMemberChecker(NewWorkspaceMemberChecker(d.DB))
 	}
 	if d.RunStore != nil {
 		exec = exec.WithRunStore(d.RunStore)

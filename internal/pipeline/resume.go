@@ -298,6 +298,7 @@ func (e *Executor) runResumedRun(ctx context.Context, plan *resumePlan, logger *
 			WorkspaceID:     rec.WorkspaceID,
 			InvokingCrewID:  rec.InvokingCrewID,
 			InvokingAgentID: rec.InvokingAgentID,
+			InvokingUserID:  rec.InvokingUserID,
 			Inputs:          plan.inputs,
 			Mode:            ModeRun,
 			RunIDOverride:   rec.ID,

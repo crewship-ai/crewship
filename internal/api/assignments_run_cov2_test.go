@@ -320,7 +320,7 @@ func TestAsgCov2_RunAssignment_ExecutionError(t *testing.T) {
 		TargetSlug: "asg-worker", Task: "do it", CrewID: crewID,
 		WorkspaceID: wsID, ChatID: chatID,
 	}
-	h.runAssignment(context.Background(), asgID, body, covAsg2Target(workerID), nil)
+	h.runAssignment(context.Background(), asgID, body, covAsg2Target(workerID))
 
 	var status, errMsg string
 	if err := h.db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM assignments WHERE id = ?`, asgID).
@@ -348,7 +348,7 @@ func TestAsgCov2_RunAssignment_LeadPlanning(t *testing.T) {
 		TargetSlug: "asg-worker", Task: "plan it", CrewID: crewID,
 		WorkspaceID: wsID, ChatID: chatID, LeadPlanning: true,
 	}
-	h.runAssignment(context.Background(), asgID, body, covAsg2Target(workerID), nil)
+	h.runAssignment(context.Background(), asgID, body, covAsg2Target(workerID))
 
 	var status string
 	if err := h.db.QueryRow(`SELECT status FROM assignments WHERE id = ?`, asgID).Scan(&status); err != nil {
@@ -378,7 +378,7 @@ func TestAsgCov2_RunAssignment_BackupGuardRefusal(t *testing.T) {
 		TargetSlug: "asg-worker", Task: "t", CrewID: crewID,
 		WorkspaceID: wsID, ChatID: chatID,
 	}
-	h.runAssignment(context.Background(), asgID, body, covAsg2Target(workerID), nil)
+	h.runAssignment(context.Background(), asgID, body, covAsg2Target(workerID))
 
 	var status, errMsg string
 	if err := h.db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM assignments WHERE id = ?`, asgID).

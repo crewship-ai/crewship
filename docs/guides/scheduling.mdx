@@ -176,20 +176,31 @@ Each scheduled trigger follows this sequence:
 
 ### At-most-once firing
 
-Each scheduled *occurrence* fires **at most once**. The scheduler derives a
-deterministic idempotency key from the schedule and the occurrence's `next_run_at`,
-so a duplicate tick within the same window — or a process restart that happens
-**after** the run started but **before** `next_run_at` is advanced — is deduped
-rather than run a second time. The next occurrence has a distinct `next_run_at`,
-so it gets a fresh key and fires normally. The wake-check probe and deferred
-(pending) runs are keyed the same way and likewise fire at most once.
+Each scheduled *occurrence* fires **at most once**. Before any side effect
+(chat, container, run record), the scheduler reserves the occurrence in a shared
+idempotency table using a deterministic key derived from the agent id and the
+occurrence's minute bucket. A duplicate tick within the same minute — or a
+process restart that happens **after** a run started but **before** the
+schedule's `next_run` was advanced — resolves to the existing reservation and is
+**skipped** rather than run a second time. The next occurrence falls in a
+distinct minute bucket, gets a fresh key, and fires normally.
 
-This is **at-most-once, not exactly-once**: the dedup key is reserved *before*
-the run executes, so a crash *between* the reservation and execution drops that
+This is **at-most-once, not exactly-once**: the key is reserved *before* the run
+executes, so a crash *between* the reservation and execution drops that
 occurrence (it is not retried) rather than running it twice. If the idempotency
-store is unreachable a scheduled fire fails **closed** (recorded `FAILED` +
-alerted), never double-run. Duplicate protection is the guarantee; delivery is
-best-effort.
+store is unreachable the fire fails **closed** — the occurrence is skipped, never
+double-run. Duplicate protection is the guarantee; delivery is best-effort.
+
+The agent scheduler, the routine (pipeline) scheduler, its wake-check probe, and
+deferred (pending) runs all share **one** dedup discipline — the same
+`pipeline_run_idempotency` table and the `ScheduledFireIdempotencyKey` helper —
+so every firing path is at-most-once.
+
+<Note>
+  This is **single-instance** protection. Running multiple replicas would still
+  double-fire (each replica runs its own in-memory cron); true multi-replica
+  exactly-once needs leader election, tracked separately.
+</Note>
 
 ## Timeout
 

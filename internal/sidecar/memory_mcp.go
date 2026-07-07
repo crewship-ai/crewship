@@ -98,7 +98,30 @@ func (s *Server) handleMemoryMCP(w http.ResponseWriter, r *http.Request) {
 // resolve to a crew member; unknown or path-hostile slugs are refused
 // before any request parsing so they can never influence a path join.
 func (s *Server) handleMemoryMCPForAgent(w http.ResponseWriter, r *http.Request, agentSlug string) {
-	ac, acErr := s.memoryAgentContextFor(agentSlug)
+	// #812: the URL slug is caller-supplied and any crew member sharing this
+	// container could hit /mcp/memory/<sibling>. When a per-agent bearer token
+	// is present it is authoritative — the acting agent's slug from the token
+	// wins and the URL slug becomes a cross-check (warn on mismatch). A token
+	// that matches no crew member is a forgery and is refused before any path
+	// resolution. With no token we keep the CRE-137 URL-slug behaviour so
+	// legacy adapters (and solo containers) still work.
+	effectiveSlug := agentSlug
+	if actorID, actorSlug, present, ok := s.actingIdentity(r); present {
+		if !ok {
+			writeJSONResponse(w, http.StatusOK, memoryMCPResponse{
+				JSONRPC: "2.0",
+				ID:      mcpNullID,
+				Error:   &memoryMCPRPCError{Code: -32001, Message: "unrecognized agent token"},
+			})
+			return
+		}
+		if agentSlug != "" && agentSlug != actorSlug {
+			s.logger.Warn("memory mcp: url slug does not match authenticated agent, using token identity",
+				"url_slug", agentSlug, "acting_slug", actorSlug, "acting_agent_id", actorID)
+		}
+		effectiveSlug = actorSlug
+	}
+	ac, acErr := s.memoryAgentContextFor(effectiveSlug)
 	if acErr != nil {
 		writeJSONResponse(w, http.StatusOK, memoryMCPResponse{
 			JSONRPC: "2.0",

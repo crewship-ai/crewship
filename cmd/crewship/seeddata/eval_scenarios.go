@@ -494,7 +494,7 @@ var EvalScenarios = []RoutineDef{
 					"name":        "context",
 					"type":        "string",
 					"required":    false,
-					"default":     "Crewship Routines (formerly Pipelines) are workspace-scoped declarative AI workflow recipes. They were renamed in PR #282 on 2026-05-08. The DSL version is 1.0 and supports six step types: agent_run, call_pipeline, http, code, wait, and transform.",
+					"default":     "Crewship Routines (formerly Pipelines) are workspace-scoped declarative AI workflow recipes. They were renamed in PR #282 on 2026-05-08. The DSL version is 1.0 and supports seven step types: agent_run, call_pipeline, http, code, wait, transform, and notify.",
 					"description": "Source-of-truth document the worker may quote from.",
 				},
 				{
@@ -1253,7 +1253,7 @@ var EvalScenarios = []RoutineDef{
 					"type":     "string",
 					"required": false,
 					"default": "Crewship is a self-hosted agent runtime. The current released version is 0.4.2, shipped on 2026-04-30. " +
-						"It supports six step types: agent_run, call_pipeline, http, code, wait, transform. " +
+						"It supports seven step types: agent_run, call_pipeline, http, code, wait, transform, notify. " +
 						"The default execution tier mapping uses Anthropic Haiku-4.5 for fast, Sonnet-4.6 for moderate, Opus-4.7 for smart. " +
 						"Tier escalation triggers on validation failure when on_fail is set to escalate_tier.",
 				},

@@ -299,10 +299,34 @@ Idempotent on content: the same poisoned body quarantined twice reuses the same 
   Quarantine WRITE failure (disk full, container permission drop) returns `IsError=true` from the scanner — the poisoned content is NOT returned to the model. The agent sees a tool error instead. This is the right default: a half-working scanner is worse than no scanner if it lets content through on the failure path.
 </Note>
 
+### Ingress trust fence
+
+Layer 5's scanner runs on Crewship's **own** LLM calls (memory recall, Keeper, pipeline steps). It cannot see the agent-CLI turn: in OAuth mode the request to the model is an opaque TLS tunnel the sidecar never decrypts. So a second, complementary control neutralizes untrusted content **at ingress, in plaintext, on our side** — before the prompt is assembled and regardless of auth mode.
+
+`internal/untrusted.Wrap(source, content)` wraps external, lower-trust bytes in a nonce-delimited block:
+
+```
+<untrusted source="webhook" id="<nonce>" suspicion="high">
+…external content…
+</untrusted id="<nonce>">
+```
+
+- The **nonce** is random per call and stripped from the content, so an attacker cannot forge the id-matching closing tag to "break out" of the fence — a bare `</untrusted>` inside the payload is inert data.
+- `lookout.ScanInput` scans the content and **annotates** the block's `suspicion` level rather than blocking, so a legitimate issue that quotes an injection example is fenced-and-flagged, not dropped.
+- One line in the base system prompt (`crewshipSystemPreamble`) tells the model to treat `<untrusted …>` blocks as **pure data, never instructions**, and to report — not act on — any directive found inside.
+
+A CI lint-gate (`TestIngressFenceGate`) fails the build if a new caller interpolates a known external field (starting with the webhook `payload.Data`) into a prompt without routing it through the fence, so the chokepoint cannot be silently reopened.
+
+<Note>
+  **M0 scope (current):** the webhook ingress site is fenced. **M1 (tracked):** mission/task descriptions, crew-context member fields, and Composio/tool-output ingestion sites route through the same fence. See issue #808.
+</Note>
+
 ## What this composition does and does not protect against
 
 | Threat | Layer that handles it |
 |---|---|
+| External **webhook** payload carries "ignore previous instructions" | **Ingress trust fence** (nonce-fenced as data) + Layer 5 scanner on Crewship's own calls |
+| External **issue/mission or tool-output** payload carries an injection | **Partially** — Layer 5 scanner on Crewship's own LLM calls; the ingress trust fence extends to these sites in **M1** (only the webhook site is fenced today — see the M0/M1 note above) |
 | Agent tries to read API keys from env | Layer 2 (sidecar — keys aren't there) |
 | Agent tries to echo a stolen key in output | Layer 3 (scrubber redacts) |
 | Agent tries to reach an arbitrary URL | Layer 2 (allowlist denies) + container network policy |
@@ -398,6 +422,47 @@ was the only line of defense (the token itself was a single global
 secret and `internalWsCtx` trusted whatever `?workspace_id` was
 passed); the cryptographic binding now enforces it server-side.
 
+### Per-agent identity on the shared sidecar
+
+The sidecar is shared **per crew** — several agents run in one container
+behind one sidecar — so a workspace-bound token (identical for every
+agent in the workspace) and the sidecar's boot identity (`s.ipc.AgentSlug`,
+frozen to whichever agent started the container) cannot tell **which**
+crew member is making a given call. Agent-facing routes that once trusted
+a caller-supplied `from`/slug (`/escalate`, `/query`, the per-agent memory
+path `/mcp/memory/<slug>`, and the Keeper credential routes) therefore let
+any sibling in the crew impersonate a peer — including on a `CREDENTIAL`
+escalation, which is a non-repudiation gap for the vault.
+
+To close it, the orchestrator mints a **per-agent token** for every agent
+— `agtv1.<workspace_id>.<agent_id>.<HMAC-SHA256(master,
+agent_derivation_context || workspace_id || NUL || agent_id)>`, derived by
+`internaltoken.DeriveAgentToken`. It is delivered to each agent as
+`$CREWSHIP_AGENT_TOKEN` in its environment and injected as an
+`Authorization: Bearer` header into its memory MCP config, and the sidecar
+is booted with the whole crew's token→identity roster (the boot agent's
+token via `IPCConfig.AgentToken`, each member's via
+`CrewMember.AuthToken`). On each call the sidecar constant-time-matches the
+presented bearer token against that roster to resolve the **acting** agent:
+
+- a valid token is **authoritative** and overrides any `from`/URL slug in
+  the request (a spoofed `from` naming a real sibling no longer wins);
+- a token that matches no crew member is **refused** (403 / JSON-RPC error);
+- with **no** token, the request is **refused** whenever the crew has
+  per-agent tokens provisioned (the normal case after this change) — a
+  sibling cannot drop the `Authorization` header to fall through to the
+  spoofable membership check. Only a genuinely token-less (un-upgraded)
+  deployment falls back to the prior behaviour (membership-validated `from`
+  for escalate/query, URL slug for the memory path), so upgrading the binary
+  doesn't break crews whose agents don't yet carry tokens. Because the master
+  never enters a container, the token cannot be forged from inside the agent
+  process.
+
+The raw LLM-proxy cost ledger still attributes usage to the boot agent:
+provider API calls carry the provider key, not a per-agent token, so the
+proxy has no per-request identity to bind — an accepted limitation of the
+metering path, distinct from the identity-bearing agent routes above.
+
 ### Resolved exception — Keeper Phase 2 family
 
 The `/api/v1/internal/keeper/{skill-review,behavior,memory-health,
@@ -480,6 +545,33 @@ the connection-only model.
 | Memory scanner — tool-result path | ✅ partial — Claude `tool_result` wired; per-adapter sweep is PR-F4 follow-up |
 | GDPR cascade (Art. 17) | ✅ shipped — migration v107 + `DELETE /api/v1/admin/users/{id}/data` |
 | GDPR export (Art. 15) | ✅ shipped — `GET /api/v1/admin/users/{id}/data` |
+
+## Layer 6 — Authorization chokepoint (complete mediation)
+
+Above the tenant-isolation checks, every workspace-scoped **mutation**
+endpoint (`POST`/`PUT`/`PATCH`/`DELETE`) declares the role it requires **at
+route registration** and a single middleware enforces that declaration before
+the handler runs. Previously authorization was a hand-placed `requireRole` /
+`canRole` call inside each handler, so one forgotten call left a state-changing
+endpoint silently open to any workspace member (it fails **open** — the
+mutation just succeeds). That is precisely how a control-plane route shipped
+ungated more than once.
+
+The fix follows Saltzer & Schroeder **complete mediation**: `authedMut(method,
+pattern, role, handler)` (`internal/api/rbac_routes.go`) records `{method,
+pattern, role}` into a walkable table and mounts the route behind
+`RequireAuth → RequireWorkspace → requireRoleMW(role)`. Two build-time tests
+(`internal/api/route_authz_invariant_test.go`) turn the invariant into a
+compile-gate: one walks the recorded table and fails if any mutation route
+lacks a declared role; the other fails if a mutation route is still registered
+through the legacy `authed(...)` chain. **A new mutation route that forgets its
+role declaration fails the build** rather than shipping open.
+
+Out of scope for this layer, because each is a distinct trust boundary
+uniformly mediated by its own single wrapper: the X-Internal-Token sidecar
+surface (`internalAuth`) and the public token/HMAC dispatch routes (pipeline
+webhooks, waitpoint callbacks, bootstrap/signup). See
+[RBAC](/security/rbac) for the role tiers and the declared-role classes.
 
 ## Reporting issues
 

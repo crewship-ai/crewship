@@ -22,6 +22,16 @@ type WebhookPayload struct {
 // SecretLookup retrieves the expected webhook secret for a given crew and agent pair.
 type SecretLookup func(ctx context.Context, crewID, agentID string) (string, error)
 
+// RequireTimestampLookup reports whether the (crew, agent) requires a
+// timestamped signature. When it returns true, the replayable auth shapes —
+// a body-only HMAC (no X-Timestamp) and the deprecated plaintext secret — are
+// rejected, forcing the Stripe/Svix `ts.body` scheme whose freshness window
+// bounds replay. Optional: a nil lookup (or one returning false) leaves the
+// timestamp optional, preserving backward compatibility for un-migrated
+// senders. A lookup error is treated as "not required" (the base HMAC auth
+// still applies) so a transient DB blip can't reject every delivery.
+type RequireTimestampLookup func(ctx context.Context, crewID, agentID string) (bool, error)
+
 // TriggerFunc is called after a webhook is validated, passing the crew/agent IDs
 // and parsed payload to initiate an agent run.
 type TriggerFunc func(ctx context.Context, crewID, agentID string, payload WebhookPayload) error
@@ -38,10 +48,21 @@ type Handler struct {
 	logger       *slog.Logger
 	lookupSecret SecretLookup
 	trigger      TriggerFunc
+	// requireTimestamp, when set, decides per (crew, agent) whether the
+	// timestamped signature scheme is mandatory. nil = never required.
+	requireTimestamp RequireTimestampLookup
 	// tolerance / now back the optional timestamped-signature replay defense.
 	// now is a seam for tests; nil means time.Now.
 	tolerance time.Duration
 	now       func() time.Time
+}
+
+// SetRequireTimestampLookup wires the optional per-agent require-timestamp
+// policy. Without it every agent keeps the backward-compatible default
+// (timestamp optional). Returns the receiver for chaining.
+func (h *Handler) SetRequireTimestampLookup(f RequireTimestampLookup) *Handler {
+	h.requireTimestamp = f
+	return h
 }
 
 // NewHandler creates a webhook Handler with the given secret lookup and trigger functions.
@@ -135,6 +156,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Per-agent policy: does this agent mandate the timestamped scheme? When it
+	// does, the two replayable shapes (body-only HMAC, plaintext secret) are
+	// rejected below. A lookup error fails toward availability — the base HMAC
+	// auth still runs — so a transient DB blip can't 400 every delivery.
+	requireTS := false
+	if h.requireTimestamp != nil {
+		if req, lookErr := h.requireTimestamp(r.Context(), crewID, agentID); lookErr != nil {
+			h.logger.Warn("webhook require-timestamp lookup failed; treating as optional",
+				"crew_id", crewID, "agent_id", agentID, "error", lookErr)
+		} else {
+			requireTS = req
+		}
+	}
+
 	// Auth check after body read so HMAC validation has the bytes it signs.
 	switch {
 	case providedSig != "":
@@ -143,7 +178,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// timestamp must be fresh — so a captured signed webhook is useless once
 		// the tolerance window passes, and the timestamp itself can't be swapped
 		// (it's in the signed material). Absent X-Timestamp, fall back to the
-		// body-only HMAC for backward compatibility (senders not yet migrated).
+		// body-only HMAC for backward compatibility (senders not yet migrated),
+		// UNLESS this agent requires the timestamped scheme.
 		if ts := r.Header.Get("X-Timestamp"); ts != "" {
 			if !h.timestampFresh(ts) {
 				h.logger.Warn("webhook stale or invalid timestamp", "crew_id", crewID, "agent_id", agentID)
@@ -156,12 +192,26 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
+		} else if requireTS {
+			// Body-only HMAC is replayable indefinitely; this agent opted into
+			// mandatory timestamping. Reject with a clear pointer at the scheme.
+			h.logger.Warn("webhook body-only signature rejected; agent requires timestamped signatures", "crew_id", crewID, "agent_id", agentID)
+			http.Error(w, "this agent requires a timestamped signature: send X-Timestamp and sign \"<timestamp>.<body>\"", http.StatusBadRequest)
+			return
 		} else if !ValidateHMAC(body, providedSig, expectedSecret) {
 			h.logger.Warn("webhook invalid HMAC signature", "crew_id", crewID, "agent_id", agentID)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 	case providedSecret != "":
+		if requireTS {
+			// The deprecated plaintext path carries no timestamp and is the most
+			// replayable shape of all — refuse it outright when timestamping is
+			// mandatory.
+			h.logger.Warn("webhook plaintext secret rejected; agent requires timestamped signatures", "crew_id", crewID, "agent_id", agentID)
+			http.Error(w, "this agent requires a timestamped signature: use X-Signature over \"<timestamp>.<body>\" with X-Timestamp", http.StatusBadRequest)
+			return
+		}
 		if !ValidateSecret(providedSecret, expectedSecret) {
 			h.logger.Warn("webhook invalid secret", "crew_id", crewID, "agent_id", agentID)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)

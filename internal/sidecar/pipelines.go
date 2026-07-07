@@ -62,7 +62,14 @@ func (s *Server) handlePipelinesSave(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
-	status, respBody := s.savePipeline(r.Context(), body)
+	// #812: attribute authorship to the ACTING agent (per-agent token),
+	// not the boot agent of the shared sidecar. Forged token → 403.
+	authorAgentID, ok := s.actingAgentID(r)
+	if !ok {
+		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
+		return
+	}
+	status, respBody := s.savePipeline(r.Context(), body, authorAgentID)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = w.Write(respBody)
@@ -84,7 +91,11 @@ func (s *Server) handlePipelinesSave(w http.ResponseWriter, r *http.Request) {
 //     (so the model gets the exact parse error to fix and retry)
 //   - 422 + a structured hint when test_run ran but did not COMPLETE
 //   - 4xx/5xx + an {"error": ...} JSON body for the local failure modes
-func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest) (int, []byte) {
+//
+// authorAgentID is the ACTING agent resolved from the per-agent bearer token
+// by the calling handler (#812) — the shared sidecar's boot AgentID is only a
+// fallback when no token was presented.
+func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest, authorAgentID string) (int, []byte) {
 	if s.ipc == nil {
 		return http.StatusServiceUnavailable, mustJSON(map[string]string{"error": "IPC not configured"})
 	}
@@ -153,7 +164,7 @@ func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest) (i
 		"description":          body.Description,
 		"definition":           body.Definition,
 		"author_crew_id":       s.ipc.CrewID,
-		"author_agent_id":      s.ipc.AgentID,
+		"author_agent_id":      authorAgentID,
 		"author_chat_id":       s.ipc.ChatID,
 		"last_test_run_at":     now,
 		"last_test_run_passed": true,
@@ -201,7 +212,9 @@ type routineRunRequest struct {
 // + invoking crew/agent come from s.ipc, and the forward targets the internal
 // run endpoint (the public run route is JWT-authed and rejects the internal
 // token, exactly as it does for save's test_run/save steps).
-func (s *Server) runPipeline(ctx context.Context, body routineRunRequest) (int, []byte) {
+// invokingAgentID is the ACTING agent resolved from the per-agent bearer
+// token by the calling handler (#812), falling back to the boot AgentID.
+func (s *Server) runPipeline(ctx context.Context, body routineRunRequest, invokingAgentID string) (int, []byte) {
 	if s.ipc == nil {
 		return http.StatusServiceUnavailable, mustJSON(map[string]string{"error": "IPC not configured"})
 	}
@@ -213,7 +226,7 @@ func (s *Server) runPipeline(ctx context.Context, body routineRunRequest) (int, 
 		"slug":              body.Slug,
 		"inputs":            body.Inputs,
 		"invoking_crew_id":  s.ipc.CrewID,
-		"invoking_agent_id": s.ipc.AgentID,
+		"invoking_agent_id": invokingAgentID,
 	})
 	if err != nil {
 		return http.StatusInternalServerError, mustJSON(map[string]string{"error": "marshal run body"})
@@ -290,13 +303,20 @@ func (s *Server) handlePipelinesRun(w http.ResponseWriter, r *http.Request, slug
 	if body.DryRun {
 		suffix = "/dry_run"
 	}
+	// #812: attribute the run to the ACTING agent (per-agent token), not the
+	// boot agent of the shared sidecar. Forged token → 403.
+	invokingAgentID, ok := s.actingAgentID(r)
+	if !ok {
+		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
+		return
+	}
 	path := "/api/v1/workspaces/" + s.ipc.WorkspaceID + "/pipelines/" + slug + suffix
 	// Inject invoker identity headers — captured by the public Run
 	// handler and threaded into RunInput.InvokingCrewID /
 	// InvokingAgentID. Without them, the executor records the run
 	// as "user-driven" which loses the cross-crew-reuse signal.
 	r.Header.Set("X-Crewship-Invoking-Crew", s.ipc.CrewID)
-	r.Header.Set("X-Crewship-Invoking-Agent", s.ipc.AgentID)
+	r.Header.Set("X-Crewship-Invoking-Agent", invokingAgentID)
 	s.proxyIPCJSON(w, r, http.MethodPost, path, "pipeline-run", bodyJSON)
 }
 

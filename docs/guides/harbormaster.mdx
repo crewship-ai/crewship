@@ -56,6 +56,19 @@ A rule fires when ANY of its non-zero conditions match. `RequireWhen(tool, args)
 
 The orchestrator wires this via `approvalGateAdapter` in `internal/server/orchestrator_adapters.go`, which uses `NewEvaluatorWithDefaults()`.
 
+## Where the run-level mode comes from
+
+Before a run starts, the orchestrator calls the gate once with tool `agent_run`. The mode for that check — `none`, `async`, or `sync` — is derived from the run's crew **[autonomy level](/guides/autonomy-and-self-learning)** and stamped onto the dispatch request by the single request-builder that every path (chat, pipeline, cron, webhook, mission, peer) funnels through. The mapping is:
+
+| Autonomy level | Gate mode | Meaning |
+|---|---|---|
+| `strict` | `sync` | Every gated action blocks for a human decision. |
+| `guided` | `sync` | Writes need an OK (default for new crews). |
+| `trusted` | `async` | Gated actions log to the inbox; the agent keeps going. |
+| `full` | `none` | Autonomous — the gate is bypassed, journal-only. |
+
+Because the run-level mode is now sourced from policy on **every** dispatch path, the gate is live everywhere, not just interactive chat. Note that the baked-in default rule set does not match the `agent_run` tool, so raising a crew to `sync` does not block ordinary runs on its own — it takes effect once a rule matches the run (custom `agent_run` rules, cost, or a production target). The mode governs whether the rules are consulted at all.
+
 ## Queue schema
 
 ```sql

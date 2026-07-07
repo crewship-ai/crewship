@@ -611,16 +611,19 @@ var pipelineRunCmd = &cobra.Command{
 		}
 		if result.Output != "" {
 			fmt.Println("\nFinal output:")
-			fmt.Println(indent(result.Output, "  "))
+			fmt.Println(indent(prettyOutput(result.Output), "  "))
 		}
 		if len(result.StepOutputs) > 0 {
 			fmt.Println("\nStep outputs:")
 			for id, out := range result.StepOutputs {
-				preview := out
-				if len(preview) > 200 {
-					preview = preview[:200] + "..."
+				// Pretty-print structured output in full; only truncate
+				// long free-text (prettyOutput returns non-JSON unchanged,
+				// so equality means "not JSON").
+				rendered := prettyOutput(out)
+				if rendered == out && len(rendered) > 200 {
+					rendered = rendered[:200] + "..."
 				}
-				fmt.Printf("  [%s]\n%s\n", id, indent(preview, "    "))
+				fmt.Printf("  [%s]\n%s\n", id, indent(rendered, "    "))
 			}
 		}
 		return nil
@@ -666,11 +669,17 @@ func waitForPipelineRun(cmd *cobra.Command, client *cli.Client, runID string, ti
 		detail.ID, strings.ToUpper(detail.Status), detail.DurationMs, detail.CostUSD)
 	switch strings.ToLower(detail.Status) {
 	case "failed", "interrupted":
+		// Parity with agent runs (cmd_run.go): ping the operator who
+		// walked away from an unattended --wait, so a routine failure
+		// isn't silent. Respects the same opt-in + long-run threshold.
+		maybeNotifyRunComplete(start, detail.PipelineSlug, "FAILED")
 		fmt.Printf("  failed at step: %s\n  error: %s\n", detail.FailedAtStep, detail.ErrorMessage)
 		return fmt.Errorf("routine run failed")
 	case "cancelled":
 		return fmt.Errorf("routine run cancelled")
 	}
+	// Success terminal — notify like agent runs do on "done".
+	maybeNotifyRunComplete(start, detail.PipelineSlug, "COMPLETED")
 	if detail.Output != "" {
 		fmt.Println("\nFinal output:")
 		fmt.Println(indent(detail.Output, "  "))

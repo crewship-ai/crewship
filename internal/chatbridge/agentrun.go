@@ -33,6 +33,14 @@ type AgentRunOverrides struct {
 	// message). 0 leaves orchestrator.AgentRunRequest.MaxTurns unset so the
 	// adapter falls back to its interactive default.
 	MaxTurns int
+
+	// CreatedByUserID / AuthorAgentID carry creator attribution ([4], #810)
+	// for dispatch paths that know the reporter — the mission engine threads
+	// the mission's v129 columns here so the run + journal attribute the work
+	// to whoever asked for it, not just the executing agent. Both empty for
+	// chat / system runs with no distinct reporter.
+	CreatedByUserID string
+	AuthorAgentID   string
 }
 
 // ToAgentRunRequest maps a resolved ChatInfo plus the per-call overrides
@@ -77,5 +85,13 @@ func (info ChatInfo) ToAgentRunRequest(o AgentRunOverrides) orchestrator.AgentRu
 		Skills:             info.InstalledSkills,
 		OpenedByUserID:     info.OpenedByUserID,
 		RoleTitle:          info.RoleTitle,
+		// #810 — HITL gate mode from crew policy (resolver-populated) and
+		// creator attribution from the dispatching caller. Setting these in
+		// the ONE builder is what makes the invariant structural: no path
+		// can dispatch a run that silently skips the gate or loses the
+		// reporter.
+		ApprovalMode:    info.ApprovalMode,
+		CreatedByUserID: o.CreatedByUserID,
+		AuthorAgentID:   o.AuthorAgentID,
 	}
 }

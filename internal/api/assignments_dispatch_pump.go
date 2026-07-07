@@ -67,11 +67,6 @@ func (h *AssignmentHandler) dispatchByID(ctx context.Context, assignmentID strin
 		return fmt.Errorf("dispatchByID: load target agent for %s: %w", assignmentID, err)
 	}
 
-	creds, err := h.loadAgentCredentials(ctx, target.ID)
-	if err != nil {
-		return fmt.Errorf("dispatchByID: load credentials for %s: %w", assignmentID, err)
-	}
-
 	body := createAssignmentBody{
 		TargetSlug:  target.Slug,
 		Task:        task,
@@ -102,7 +97,7 @@ func (h *AssignmentHandler) dispatchByID(ctx context.Context, assignmentID strin
 		"target", target.Slug,
 	)
 
-	h.runAssignment(ctx, assignmentID, body, target, creds)
+	h.runAssignment(ctx, assignmentID, body, target)
 	return nil
 }
 

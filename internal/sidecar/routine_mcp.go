@@ -215,6 +215,15 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// #812: resolve the ACTING agent from the per-agent bearer token for
+	// authorship/invocation attribution. A forged token is refused.
+	actingAgentID, idOK := s.actingAgentID(r)
+	if !idOK {
+		s.writeRoutinesMCPToolResult(w, req, http.StatusForbidden,
+			mustJSON(map[string]string{"error": "unrecognized agent token"}))
+		return
+	}
+
 	var status int
 	var bodyBytes []byte
 	switch params.Name {
@@ -227,7 +236,7 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 				return
 			}
 		}
-		status, bodyBytes = s.savePipeline(r.Context(), save)
+		status, bodyBytes = s.savePipeline(r.Context(), save, actingAgentID)
 	case "list_routines":
 		status, bodyBytes = s.listPipelines(r.Context(), "")
 	case "run_routine":
@@ -239,7 +248,7 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 				return
 			}
 		}
-		status, bodyBytes = s.runPipeline(r.Context(), run)
+		status, bodyBytes = s.runPipeline(r.Context(), run, actingAgentID)
 	default:
 		// Unknown tool — surface as a recoverable MCP tool error (isError)
 		// so the model can correct the name and retry, matching the memory

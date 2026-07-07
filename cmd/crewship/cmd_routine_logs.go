@@ -182,6 +182,11 @@ Output formats:
 					}
 				}
 			}
+			// The deliverable. logs used to print everything EXCEPT the
+			// answer; surface it here (and via `routine result <run>`).
+			if v, ok := run["output"].(string); ok && v != "" {
+				fmt.Printf("\nFinal output:\n%s\n", indent(prettyOutput(v), "  "))
+			}
 			// --show-outputs: dump the FULL per-step outputs recorded on
 			// the run. GET /pipeline-runs/{runId} already parses
 			// step_outputs_json into this map (the UI iterates it), but the
@@ -204,7 +209,7 @@ Output formats:
 					fmt.Printf("\n(No step outputs recorded for this run.)\n")
 				}
 			}
-			fmt.Printf("\n(For the full event-by-event timeline, re-run with --slug %v.)\n", run["pipeline_slug"])
+			fmt.Printf("\n(For the full event-by-event timeline, re-run with --slug %v. For just the deliverable: crewship routine result %v.)\n", run["pipeline_slug"], run["id"])
 			return nil
 		}
 

@@ -215,6 +215,10 @@ var agentUpdateCmd = &cobra.Command{
 			v, _ := flags.GetBool("schedule-enabled")
 			body["schedule_enabled"] = v
 		}
+		if flags.Changed("webhook-require-timestamp") {
+			v, _ := flags.GetBool("webhook-require-timestamp")
+			body["webhook_require_timestamp"] = v
+		}
 
 		// self_learning lives behind its own audited endpoint
 		// (PATCH /agents/{id}/learning), not the generic agent PATCH, so it

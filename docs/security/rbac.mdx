@@ -46,20 +46,46 @@ The `canRole()` function in Go maps roles to three internal actions:
   In the current implementation, MEMBER and VIEWER have identical permissions (both map to `read` only). The distinction exists in the schema for future granularity (e.g., MEMBER may gain `send_message` or `run_agent` permissions).
 </Note>
 
-### Control-plane mutations require MANAGER+
+### Mutation routes declare their role at registration (complete mediation)
 
-Role gates are enforced **per handler** (via `requireRole` / `canRole`), not declared at route registration. The following control-plane mutation endpoints require `MANAGER`+ (the `create`/`update` tier) — a plain `MEMBER` or `VIEWER` is refused with `403`:
+Every state-changing endpoint (`POST`/`PUT`/`PATCH`/`DELETE`) declares the
+role it requires **at route registration**, and a single middleware enforces
+that declaration before the handler runs. This is Saltzer & Schroeder
+*complete mediation*: authorization is a property of the route table, not a
+hand-placed check a new handler might forget.
 
-- **Crew-template deploy** — `POST /crew-templates/{slug}/deploy` (creates a full crew + agents)
-- **Crew policy** — `PUT /crews/{id}/policy` (autonomy/governance level)
-- **Routine execution** — `POST /pipelines/{slug}/run`, `/run_batch`, and waitpoint `approve`
-- **Pipeline-run control** — `replay`, `bulk_replay`, `signal`, `metadata`, and `pending/{id}/cancel`
-- **Routine step overrides** — `PUT`/`DELETE .../steps/{stepId}/override`
-- **Checkpoints** — `create`, `restore`, `fork`, `delete`
+Workspace-scoped mutations register through `authedMut(method, pattern, role, handler)`
+(`internal/api/rbac_routes.go`), which records `{method, pattern, role}` into a
+walkable table and mounts the route behind `RequireAuth → RequireWorkspace →
+requireRoleMW(role)`. The declared role is one of:
 
-<Warning>
-  Because gating is per-handler rather than route-declared, a new mutation route can ship without a gate. The [`TestMutationRoutes_RejectViewer`](https://github.com/crewship-ai/crewship) regression test guards these specific endpoints; a walkable route-table that makes "every mutation route declares a role" a build-time invariant is a planned follow-up.
-</Warning>
+- **`create`** — `MANAGER`+ (the create/update tier). A `MEMBER`/`VIEWER` is refused `403`.
+- **`manage`** — `ADMIN`+ (the manage/delete tier, e.g. workspace/member administration, feature flags, backups, approvals, hooks, GDPR data deletion).
+- **`self`** — self-scoped: the handler enforces ownership by `user_id` (own preferences, reactions, notifications, a saved view the caller owns, inbox items the caller can see).
+- **`inline`** — the handler runs a layered gate the middleware must not pre-empt: the role-**or**-capability gate (a `MEMBER` holding an explicit capability passes) or the per-agent owner / per-crew-elevation gate. The middleware guarantees workspace membership and passes through; the handler decides.
+
+Control-plane mutations gated at `MANAGER`+ include crew-template deploy, crew
+policy, routine execution/control (`run`, `replay`, `bulk_replay`, `signal`,
+`metadata`, `dry_run`, `test_run`, tags, step overrides), checkpoints, agent /
+crew persona edits, and crew-composition suggestions.
+
+<Note>
+  Two tests make this a **build-time invariant**
+  (`internal/api/route_authz_invariant_test.go`):
+  `TestEveryMutationRouteDeclaresRole` walks the recorded route table and fails
+  if any mutation route lacks a declared role, and
+  `TestNoLegacyAuthedMutationRegistration` fails if a mutation route is
+  registered through the old `authed(...)` chain instead of `authedMut` /
+  `authedSelfMut`. Adding a new mutation route without declaring its role
+  **fails the build** — the omission that previously slipped past review can no
+  longer ship. The pre-existing inline `requireRole` / `canRole` checks are
+  kept as belt-and-suspenders behind the middleware.
+</Note>
+
+The X-Internal-Token sidecar surface and the public token/HMAC dispatch routes
+(webhooks, waitpoint callbacks, bootstrap/signup) are a separate trust boundary,
+each uniformly mediated by its own single wrapper, and are out of scope for the
+workspace-role invariant.
 
 ### Signup Control
 

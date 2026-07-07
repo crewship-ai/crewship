@@ -186,3 +186,59 @@ func TestSignCaller_DomainSeparatedFromWorkspaceMAC(t *testing.T) {
 		t.Error("caller-identity MAC collides with workspace-binding MAC (missing domain separation)")
 	}
 }
+
+func TestDeriveAgentToken_Properties(t *testing.T) {
+	t.Parallel()
+	master := "master-secret"
+	a := DeriveAgentToken(master, "ws_1", "agent_a")
+	b := DeriveAgentToken(master, "ws_1", "agent_b")
+	if a == "" || b == "" {
+		t.Fatal("expected non-empty per-agent tokens")
+	}
+	if a == b {
+		t.Fatal("distinct agents must get distinct tokens")
+	}
+	// Deterministic: same inputs → same token (the sidecar re-derives the
+	// roster it matches against).
+	if a != DeriveAgentToken(master, "ws_1", "agent_a") {
+		t.Fatal("derivation is not deterministic")
+	}
+	// Never leaks the master.
+	if strings.Contains(a, master) {
+		t.Fatal("per-agent token leaks the master secret")
+	}
+	// Same agent id in a different workspace must not collide (cross-tenant).
+	if a == DeriveAgentToken(master, "ws_2", "agent_a") {
+		t.Fatal("token must be bound to the workspace, not just the agent id")
+	}
+	// A different master yields a different token (unforgeable from inside a
+	// container that never sees the master).
+	if a == DeriveAgentToken("other-master", "ws_1", "agent_a") {
+		t.Fatal("token must depend on the master secret")
+	}
+}
+
+func TestDeriveAgentToken_EmptyInputsFailClosed(t *testing.T) {
+	t.Parallel()
+	if DeriveAgentToken("", "ws", "a") != "" {
+		t.Error("empty master must not issue a token")
+	}
+	if DeriveAgentToken("m", "", "a") != "" {
+		t.Error("empty workspace must not issue a token")
+	}
+	if DeriveAgentToken("m", "ws", "") != "" {
+		t.Error("empty agent id must not issue a token")
+	}
+}
+
+func TestDeriveAgentToken_DomainSeparated(t *testing.T) {
+	t.Parallel()
+	// The per-agent MAC must not collide with the workspace-binding MAC even
+	// over the same key material + workspace id (an agent token must never
+	// validate as a workspace token or vice versa).
+	master := "shared-key"
+	agentMac := DeriveAgentToken(master, "ws_x", "ws_x")
+	if strings.HasSuffix(agentMac, mac(master, "ws_x")) {
+		t.Error("per-agent MAC collides with workspace-binding MAC (missing domain separation)")
+	}
+}

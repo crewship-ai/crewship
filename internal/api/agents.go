@@ -254,23 +254,27 @@ type agentResponse struct {
 	// PR-E replaces it with the PERSONA.md memory tier (per-agent with
 	// crew-level default). New write paths should target PERSONA via the
 	// F1 memory.write tool. Reads remain valid until PR-E migration.
-	SystemPrompt    *string        `json:"system_prompt"`
-	AvatarSeed      *string        `json:"avatar_seed"`
-	AvatarStyle     *string        `json:"avatar_style"`
-	TimeoutSeconds  int            `json:"timeout_seconds"`
-	ToolProfile     string         `json:"tool_profile"`
-	MemoryEnabled   bool           `json:"memory_enabled"`
-	CLITools        *string        `json:"cli_tools"`
-	ScheduleCron    *string        `json:"schedule_cron"`
-	SchedulePrompt  *string        `json:"schedule_prompt"`
-	ScheduleEnabled bool           `json:"schedule_enabled"`
-	ScheduleLastRun *string        `json:"schedule_last_run"`
-	ScheduleNextRun *string        `json:"schedule_next_run"`
-	MCPConfigJSON   *string        `json:"mcp_config_json,omitempty"`
-	CreatedAt       string         `json:"created_at"`
-	UpdatedAt       string         `json:"updated_at"`
-	Crew            *agentCrewInfo `json:"crew"`
-	Count           agentCounts    `json:"_count"`
+	SystemPrompt    *string `json:"system_prompt"`
+	AvatarSeed      *string `json:"avatar_seed"`
+	AvatarStyle     *string `json:"avatar_style"`
+	TimeoutSeconds  int     `json:"timeout_seconds"`
+	ToolProfile     string  `json:"tool_profile"`
+	MemoryEnabled   bool    `json:"memory_enabled"`
+	CLITools        *string `json:"cli_tools"`
+	ScheduleCron    *string `json:"schedule_cron"`
+	SchedulePrompt  *string `json:"schedule_prompt"`
+	ScheduleEnabled bool    `json:"schedule_enabled"`
+	ScheduleLastRun *string `json:"schedule_last_run"`
+	ScheduleNextRun *string `json:"schedule_next_run"`
+	// WebhookRequireTimestamp opts this agent into mandatory timestamped
+	// webhook signatures (#815); replayable body-only/plaintext deliveries are
+	// then rejected 400.
+	WebhookRequireTimestamp bool           `json:"webhook_require_timestamp"`
+	MCPConfigJSON           *string        `json:"mcp_config_json,omitempty"`
+	CreatedAt               string         `json:"created_at"`
+	UpdatedAt               string         `json:"updated_at"`
+	Crew                    *agentCrewInfo `json:"crew"`
+	Count                   agentCounts    `json:"_count"`
 	// Patch M3 — surfaces the agent's creator to the UI. The
 	// per-agent edit gate (canEditAgent) lets the user identified
 	// here edit/delete the agent without workspace ADMIN role; the

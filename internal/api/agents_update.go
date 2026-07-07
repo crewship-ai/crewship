@@ -63,8 +63,9 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"timeout_seconds": "timeout_seconds", "tool_profile": "tool_profile",
 		"memory_enabled": "memory_enabled", "cli_tools": "cli_tools", "crew_id": "crew_id",
 		"schedule_cron": "schedule_cron", "schedule_prompt": "schedule_prompt",
-		"schedule_enabled": "schedule_enabled",
-		"mcp_config_json":  "mcp_config_json",
+		"schedule_enabled":          "schedule_enabled",
+		"mcp_config_json":           "mcp_config_json",
+		"webhook_require_timestamp": "webhook_require_timestamp",
 	}
 
 	// Validate slug format if being updated
@@ -268,7 +269,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	ub := newUpdate()
 	for jsonKey, col := range allowed {
 		if val, ok := body[jsonKey]; ok {
-			if col == "memory_enabled" || col == "schedule_enabled" {
+			if col == "memory_enabled" || col == "schedule_enabled" || col == "webhook_require_timestamp" {
 				if b, ok := val.(bool); ok {
 					if b {
 						val = 1

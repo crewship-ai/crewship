@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 )
@@ -184,5 +186,47 @@ func TestInjectMemoryMCPIntoClaudeJSON_HealthGated(t *testing.T) {
 	}
 	if strings.Contains(down, MemoryMCPServerName) {
 		t.Fatal("memory tool must be absent from Claude config when the sink is down")
+	}
+}
+
+// TestMemoryMCPSpec_CarriesAgentTokenHeader — #812: the injected memory MCP
+// server presents the per-agent bearer token so the sidecar resolves the
+// ACTING agent from authentication, not the caller-supplied URL slug.
+func TestMemoryMCPSpec_CarriesAgentTokenHeader(t *testing.T) {
+	spec := memoryMCPSpec("sam")
+	got := spec.Headers["Authorization"]
+	if got != "Bearer ${CREWSHIP_AGENT_TOKEN}" {
+		t.Errorf("Authorization header = %q, want Bearer ${CREWSHIP_AGENT_TOKEN}", got)
+	}
+}
+
+func TestInjectMemoryMCPIntoClaudeJSON_CarriesAgentTokenHeader(t *testing.T) {
+	out, err := injectMemoryMCPIntoClaudeJSON(`{"mcpServers":{}}`, "alex", true)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(out, `Bearer ${CREWSHIP_AGENT_TOKEN}`) {
+		t.Errorf("Claude MCP entry missing per-agent auth header: %s", out)
+	}
+}
+
+// TestAgentAuthToken_DerivesPerAgent — the orchestrator helper mints a
+// distinct, deterministic token per (workspace, agent) and fails closed on
+// empty inputs.
+func TestAgentAuthToken_DerivesPerAgent(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+	a := agentAuthToken("master", "ws-1", "agent-a", log)
+	b := agentAuthToken("master", "ws-1", "agent-b", log)
+	if a == "" || b == "" || a == b {
+		t.Fatalf("expected distinct non-empty tokens, got a=%q b=%q", a, b)
+	}
+	if agentAuthToken("", "ws-1", "agent-a", log) != "" {
+		t.Error("empty master must yield empty token (fail closed)")
+	}
+	if agentAuthToken("master", "", "agent-a", log) != "" {
+		t.Error("empty workspace must yield empty token (fail closed)")
+	}
+	if agentAuthToken("master", "ws-1", "", log) != "" {
+		t.Error("empty agent id must yield empty token (fail closed)")
 	}
 }
