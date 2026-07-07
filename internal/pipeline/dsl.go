@@ -106,6 +106,11 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 	if dsl.Name == "" {
 		return errors.New("pipeline: name required")
 	}
+	switch dsl.Parallelism {
+	case "", ParallelismExplicit, ParallelismAuto, ParallelismOff:
+	default:
+		return fmt.Errorf("pipeline: parallelism %q invalid (allowed: explicit, auto, off)", dsl.Parallelism)
+	}
 	if !slugRE.MatchString(dsl.Name) {
 		return fmt.Errorf("pipeline: name %q must be lowercase kebab-case (1–64 chars, a-z 0-9 - _)", dsl.Name)
 	}
