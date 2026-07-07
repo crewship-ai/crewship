@@ -316,13 +316,14 @@ func (c *pipelineEmitContext) emitStepSkipped(ctx context.Context, step Step, co
 // (which is the terminal outcome) — the UI shows retry events as
 // amber breadcrumbs in the run timeline so observers can see
 // "this step needed 2 attempts" without the run going red.
-func (c *pipelineEmitContext) emitStepRetry(ctx context.Context, step Step, attempt int, errorMessage string, sleepFor time.Duration) {
+func (c *pipelineEmitContext) emitStepRetry(ctx context.Context, step Step, attempt, maxAttempts int, errorMessage string, sleepFor time.Duration) {
 	if c == nil {
 		return
 	}
 	p := map[string]any{
 		"step_id":               step.ID,
 		"attempt":               attempt,
+		"max":                   maxAttempts,
 		"error_message_preview": truncateForPreview(errorMessage),
 		"sleep_ms":              sleepFor.Milliseconds(),
 	}
@@ -333,10 +334,10 @@ func (c *pipelineEmitContext) emitStepRetry(ctx context.Context, step Step, atte
 		Severity:    journal.SeverityWarn,
 		ActorType:   journal.ActorOrchestrator,
 		ActorID:     c.runID,
-		Summary:     "Pipeline " + c.pipelineSlug + " step " + step.ID + " retrying (attempt " + intToA(attempt) + ")",
+		Summary:     "Pipeline " + c.pipelineSlug + " step " + step.ID + " retrying (attempt " + intToA(attempt) + "/" + intToA(maxAttempts) + ")",
 		Payload:     mergePayload(p, "pipeline_id", c.pipelineID, "pipeline_slug", c.pipelineSlug, "run_id", c.runID, "kind", "retry"),
 	})
-	c.broadcast("pipeline.step.retry", p)
+	c.broadcast("pipeline.step.retrying", p)
 }
 
 func intToA(n int) string {

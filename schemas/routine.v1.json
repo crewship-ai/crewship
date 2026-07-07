@@ -469,13 +469,22 @@
       "type": "object",
       "required": ["max_attempts"],
       "additionalProperties": false,
-      "description": "Per-step retry policy for transient failures.",
+      "description": "Per-step retry policy for transient EXECUTION failures (HTTP 5xx, timeouts, rate limits, net blips). Distinct from on_fail, which handles a validation/rubric failure. The loop is cost-aware: it stops mid-retry rather than breaching max_cost_usd.",
       "properties": {
-        "max_attempts": { "type": "integer", "minimum": 1, "description": "Total attempts including the first." },
-        "backoff": { "type": "string", "enum": ["constant", "exponential"], "description": "Delay growth between attempts. Default constant." },
-        "initial_delay_ms": { "type": "integer", "minimum": 0, "description": "First retry delay. Default 1000." },
-        "max_delay_ms": { "type": "integer", "minimum": 0, "description": "Delay ceiling for exponential backoff. Default 60000." },
-        "retry_on": { "type": "array", "items": { "type": "string" }, "description": "Error classes/substrings that qualify for retry. Empty = retry any transient failure." }
+        "max_attempts": { "type": "integer", "minimum": 1, "maximum": 10, "description": "Total attempts including the first. Capped at 10." },
+        "backoff": { "$ref": "#/$defs/BackoffPolicy" },
+        "retry_on": { "type": "string", "description": "CEL predicate deciding whether an error is retryable. Sees `error` (message string) and `transient` (bool: the built-in 429/5xx/timeout classifier). Must evaluate to bool. Empty = retry any error. E.g. 'transient' or 'error.contains(\"429\")' or 'error.matches(\"(?i)timeout\")'." }
+      }
+    },
+    "BackoffPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Delay growth between retry attempts. First retry waits min_ms; each subsequent delay is multiplied by factor and clamped at max_ms.",
+      "properties": {
+        "min_ms": { "type": "integer", "minimum": 0, "description": "First retry delay. Default 1000." },
+        "max_ms": { "type": "integer", "minimum": 0, "description": "Delay ceiling. Default 60000." },
+        "factor": { "type": "number", "minimum": 1, "description": "Multiplier per attempt. Default 2.0. 1.0 = constant." },
+        "jitter": { "type": "boolean", "description": "Full jitter — actual sleep is uniform in [0, delay). Default true." }
       }
     },
     "StepHooks": {

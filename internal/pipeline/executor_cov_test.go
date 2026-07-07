@@ -484,12 +484,17 @@ func TestExecutor_RunnerError_EscalatesToFallbackTier(t *testing.T) {
 	}
 }
 
-func TestExecutor_Validation_RetryStepNotImplemented(t *testing.T) {
+// retry_step's budget is for transient EXECUTION errors (runStepWithRetry).
+// On a VALIDATION failure — a non-transient bad output — it normalises to
+// escalate_tier, so with no fallback tier the run exhausts and FAILS with
+// the validation reason (not the old "retry_step not yet implemented").
+func TestExecutor_RetryStep_ValidationFailureExhaustsTiers(t *testing.T) {
 	store, resolver, cleanup := openExecutorTestDB(t)
 	defer cleanup()
 	runner := newMockRunner()
 	runner.outputsBySlug["worker"] = []string{"short"}
 	exec := NewExecutor(store, resolver, runner, nil)
+	exec.sleepFn = instantSleep
 
 	dsl := &DSL{Name: "retry-step", Steps: []Step{
 		{ID: "s1", Type: StepAgentRun, AgentSlug: "worker", Prompt: "go",
@@ -502,8 +507,14 @@ func TestExecutor_Validation_RetryStepNotImplemented(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if res.Status != "FAILED" || !strings.Contains(res.ErrorMessage, "retry_step not yet implemented") {
-		t.Errorf("retry_step: %+v", res)
+	if res.Status != "FAILED" {
+		t.Errorf("expected FAILED, got %+v", res)
+	}
+	if strings.Contains(res.ErrorMessage, "not yet implemented") {
+		t.Errorf("retry_step is implemented now; stale error: %q", res.ErrorMessage)
+	}
+	if !strings.Contains(res.ErrorMessage, "below min 100") {
+		t.Errorf("expected the validation reason to surface, got %q", res.ErrorMessage)
 	}
 }
 
@@ -601,12 +612,18 @@ func TestExecutor_Outcomes_Paths(t *testing.T) {
 		}
 	})
 
-	t.Run("grader reject with retry_step degrades to abort", func(t *testing.T) {
+	t.Run("grader reject with retry_step normalises to escalate_tier", func(t *testing.T) {
+		// retry_step's budget is for transient execution errors; a rubric
+		// miss on unchanged output normalises to escalate_tier, so it
+		// exhausts tiers rather than the old "not implemented" dead-end.
 		exec, _, cleanup := mkExec(t, `{"passed":false,"per_criterion":{"tone":false},"feedback":"too rude"}`, nil)
 		defer cleanup()
 		res := runIt(t, exec, mkDSL(OnFailRetryStep))
-		if res.Status != "FAILED" || !strings.Contains(res.ErrorMessage, "retry_step requires per-step budget") {
+		if res.Status != "FAILED" || !strings.Contains(res.ErrorMessage, "exhausting tiers") {
 			t.Errorf("retry_step: %+v", res)
+		}
+		if strings.Contains(res.ErrorMessage, "not yet implemented") || strings.Contains(res.ErrorMessage, "requires per-step budget") {
+			t.Errorf("stale retry_step error: %q", res.ErrorMessage)
 		}
 	})
 

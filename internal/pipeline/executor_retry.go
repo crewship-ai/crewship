@@ -35,25 +35,39 @@ func (e *Executor) runStepWithRetry(
 	emit *pipelineEmitContext,
 	parentRender RenderContext,
 	depth int,
+	priorCostUSD float64,
 ) (string, float64, int64, error) {
+	// on_fail: retry_step with no explicit retry: block is sugar for the
+	// default policy (desugared at the chokepoint, no separate layer).
 	rp := step.Retry
+	if rp == nil && step.OnFail == OnFailRetryStep {
+		rp = defaultRetryPolicy()
+	}
 	if rp == nil || rp.MaxAttempts <= 1 {
 		return e.runStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit, parentRender, depth)
 	}
 
 	maxAttempts := rp.MaxAttempts
-	if maxAttempts > 10 {
+	if maxAttempts > retryMaxAttemptsCeiling {
 		// Cap to keep a runaway retry from monopolising the run
 		// budget. 10 attempts is the conventional ceiling.
-		maxAttempts = 10
+		maxAttempts = retryMaxAttemptsCeiling
 	}
-	initialDelay := time.Duration(rp.InitialDelayMs) * time.Millisecond
-	if initialDelay <= 0 {
-		initialDelay = time.Second
+	minDelay, maxDelay, factor, jitter := resolveBackoff(rp.Backoff)
+
+	// Compile the retry_on predicate once (nil = retry any error). It is
+	// validated at save time, so a compile failure here is a stored-row
+	// anomaly: fall back to retry-any rather than silently never retrying.
+	classifier, cerr := compileRetryOn(rp.RetryOn)
+	if cerr != nil {
+		classifier = nil
 	}
-	maxDelay := time.Duration(rp.MaxDelayMs) * time.Millisecond
-	if maxDelay <= 0 {
-		maxDelay = time.Minute
+
+	// Cost ceiling: reading in.dsl keeps the retry loop honest about the
+	// run-level budget so it stops mid-retry instead of overrunning it.
+	var maxCost float64
+	if in.dsl != nil {
+		maxCost = in.dsl.MaxCostUSD
 	}
 
 	var (
@@ -62,7 +76,7 @@ func (e *Executor) runStepWithRetry(
 		lastErr error
 		costSum float64
 	)
-	delay := initialDelay
+	delay := minDelay
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return "", costSum, 0, err
@@ -79,96 +93,115 @@ func (e *Executor) runStepWithRetry(
 			return out, costSum, dur, err
 		}
 		lastOut, lastDur, lastErr = out, dur, err
-		if !shouldRetry(err, rp.RetryOn) || attempt == maxAttempts {
+		// Stop retrying the moment the accumulated run cost would breach
+		// the cap — the next attempt is unaffordable, so surface the cost
+		// cap failure rather than burning budget we don't have.
+		if maxCost > 0 && priorCostUSD+costSum > maxCost {
+			return lastOut, costSum, lastDur, errors.New(costCapExceededMessage(priorCostUSD+costSum, maxCost, step.ID))
+		}
+		if !evalRetryOn(classifier, err) || attempt == maxAttempts {
 			break
 		}
-		emit.emitStepRetry(ctx, step, attempt, err.Error(), delay)
-		// Full jitter: actual sleep is uniform in [0, delay). Without
-		// jitter, N agents that hit the same upstream 429/5xx all
-		// retry in lockstep and stampede the recovery moment. The
-		// AWS Architecture Blog post on "Exponential Backoff And
-		// Jitter" documents the canonical analysis. We keep the
-		// deterministic upper bound for tests by floor'ing very
-		// small delays.
+		// Full jitter (the default): actual sleep is uniform in [0, delay)
+		// so concurrent runs hitting the same upstream don't stampede the
+		// recovery moment. e.applyJitter is injectable for deterministic
+		// tests; jitter:false in the policy keeps the exact schedule.
 		actualDelay := delay
-		if delay > 50*time.Millisecond {
-			actualDelay = time.Duration(mathrand.Int64N(int64(delay)))
+		if jitter {
+			actualDelay = e.applyJitter(delay)
 		}
-		select {
-		case <-ctx.Done():
+		emit.emitStepRetry(ctx, step, attempt, maxAttempts, err.Error(), actualDelay)
+		if !e.retrySleep(ctx, actualDelay) {
 			return "", costSum, 0, ctx.Err()
-		case <-time.After(actualDelay):
 		}
-		if rp.Backoff == "exponential" {
-			delay *= 2
-			if delay > maxDelay {
-				delay = maxDelay
-			}
+		delay = time.Duration(float64(delay) * factor)
+		if delay > maxDelay {
+			delay = maxDelay
 		}
 	}
 	return lastOut, costSum, lastDur, lastErr
 }
 
-// shouldRetry tests whether the error matches the policy's RetryOn
-// allowlist. Empty list = retry on any error (most permissive).
-// Substring match is intentional — error wrapping makes exact-match
-// brittle, and the typical patterns ("timeout", "5xx", "rate limit")
-// are durable substrings.
-func shouldRetry(err error, retryOn []string) bool {
-	if err == nil {
-		return false
+// retryMaxAttemptsCeiling caps MaxAttempts to keep a runaway retry from
+// monopolising the run budget.
+const retryMaxAttemptsCeiling = 10
+
+// Backoff defaults, applied to any zero-value BackoffPolicy field.
+const (
+	defaultRetryMaxAttempts = 3
+	defaultBackoffMinMs     = 1000
+	defaultBackoffMaxMs     = 60000
+	defaultBackoffFactor    = 2.0
+)
+
+// defaultRetryPolicy is the policy `on_fail: retry_step` desugars to:
+// three attempts, exponential backoff 1s→60s, full jitter, retry any
+// error. Enough to absorb a transient blip without unbounded spend.
+func defaultRetryPolicy() *RetryPolicy {
+	return &RetryPolicy{MaxAttempts: defaultRetryMaxAttempts}
+}
+
+// resolveBackoff turns a (possibly nil / partially-filled) BackoffPolicy
+// into concrete loop parameters, applying defaults and clamping so the
+// loop can't be handed a nonsensical schedule (max < min, factor < 1).
+func resolveBackoff(bp *BackoffPolicy) (minDelay, maxDelay time.Duration, factor float64, jitter bool) {
+	minMs, maxMs, f, j := defaultBackoffMinMs, defaultBackoffMaxMs, defaultBackoffFactor, true
+	if bp != nil {
+		if bp.MinMs > 0 {
+			minMs = bp.MinMs
+		}
+		if bp.MaxMs > 0 {
+			maxMs = bp.MaxMs
+		}
+		if bp.Factor > 0 {
+			f = bp.Factor
+		}
+		if bp.Jitter != nil {
+			j = *bp.Jitter
+		}
 	}
-	if len(retryOn) == 0 {
+	if f < 1 {
+		f = 1 // factor < 1 would shrink the delay each attempt; clamp to constant
+	}
+	minDelay = time.Duration(minMs) * time.Millisecond
+	maxDelay = time.Duration(maxMs) * time.Millisecond
+	if maxDelay < minDelay {
+		maxDelay = minDelay
+	}
+	return minDelay, maxDelay, f, j
+}
+
+// retrySleep pauses the retry loop for d, returning false if the context
+// is cancelled during the wait. Injectable via e.sleepFn so tests drive
+// the backoff schedule without real wall-clock delays.
+func (e *Executor) retrySleep(ctx context.Context, d time.Duration) bool {
+	if e.sleepFn != nil {
+		return e.sleepFn(ctx, d)
+	}
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
 		return true
 	}
-	msg := err.Error()
-	for _, sub := range retryOn {
-		if sub == "" {
-			continue
-		}
-		if containsCaseFold(msg, sub) {
-			return true
-		}
-	}
-	return false
 }
 
-// containsCaseFold is strings.Contains with ASCII case folding.
-// Keeps "Timeout" / "timeout" / "TIMEOUT" all matching the same
-// retry allowlist entry — error message casing is inconsistent
-// across runners and we don't want callers second-guessing it.
-func containsCaseFold(s, substr string) bool {
-	if len(substr) > len(s) {
-		return false
+// applyJitter maps a base delay to the actual sleep. Default is full
+// jitter (uniform in [0, d)); injectable via e.jitterFn so tests can
+// force a deterministic value.
+func (e *Executor) applyJitter(d time.Duration) time.Duration {
+	if e.jitterFn != nil {
+		return e.jitterFn(d)
 	}
-	return indexCaseFold(s, substr) >= 0
-}
-
-func indexCaseFold(s, substr string) int {
-	if len(substr) == 0 {
+	if d <= 0 {
 		return 0
 	}
-	for i := 0; i+len(substr) <= len(s); i++ {
-		match := true
-		for j := 0; j < len(substr); j++ {
-			a := s[i+j]
-			b := substr[j]
-			if a >= 'A' && a <= 'Z' {
-				a += 'a' - 'A'
-			}
-			if b >= 'A' && b <= 'Z' {
-				b += 'a' - 'A'
-			}
-			if a != b {
-				match = false
-				break
-			}
-		}
-		if match {
-			return i
-		}
-	}
-	return -1
+	return time.Duration(mathrand.Int64N(int64(d)))
 }
 
 // retryAttemptsPerTier caps the same-tier transient retry loop in
@@ -217,7 +250,7 @@ func (e *Executor) runRunnerWithTransientRetry(
 		if err != nil {
 			lastErr = err
 			if attempt < retryAttemptsPerTier && isTransientRunnerError(err) {
-				emit.emitStepRetry(ctx, step, attempt, err.Error(), transientRetryBackoff)
+				emit.emitStepRetry(ctx, step, attempt, retryAttemptsPerTier, err.Error(), transientRetryBackoff)
 				if !sleepWithJitter(ctx, transientRetryBackoff) {
 					return AgentStepResult{}, ctx.Err()
 				}
@@ -228,7 +261,7 @@ func (e *Executor) runRunnerWithTransientRetry(
 		// Empty success body — treat as transient on first attempt.
 		if attempt < retryAttemptsPerTier && strings.TrimSpace(res.Output) == "" {
 			lastErr = fmt.Errorf("agent runner returned empty output")
-			emit.emitStepRetry(ctx, step, attempt, "empty output", transientRetryBackoff)
+			emit.emitStepRetry(ctx, step, attempt, retryAttemptsPerTier, "empty output", transientRetryBackoff)
 			if !sleepWithJitter(ctx, transientRetryBackoff) {
 				return AgentStepResult{}, ctx.Err()
 			}

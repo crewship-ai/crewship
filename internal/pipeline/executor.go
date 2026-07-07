@@ -168,6 +168,13 @@ type Executor struct {
 	// WithResumeRetryBackoff). Zero = production defaults.
 	resumeRetryBase time.Duration
 	resumeRetryMax  time.Duration
+
+	// sleepFn / jitterFn make the per-step retry backoff (runStepWithRetry)
+	// injectable so tests drive the retry schedule deterministically without
+	// real wall-clock delays. Nil = production behaviour (real timer sleep,
+	// full jitter via math/rand). Set only from tests.
+	sleepFn  func(ctx context.Context, d time.Duration) bool
+	jitterFn func(d time.Duration) time.Duration
 }
 
 // RunScope identifies the run on whose behalf a step-level policy
@@ -1105,7 +1112,7 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		case ModeRun:
 			emit.emitStepStarted(ctx, step, i, tier)
 
-			output, stepCost, stepDur, stepErr := e.runStepWithRetry(ctx, step, renderedPrompt, tier, fallback, in, runID, pipelineID, emit, ctxRender, depth)
+			output, stepCost, stepDur, stepErr := e.runStepWithRetry(ctx, step, renderedPrompt, tier, fallback, in, runID, pipelineID, emit, ctxRender, depth, result.CostUSD)
 			// Suspend: the wait step parked on an approval. NOT a failure —
 			// return WAITING promptly so the caller (and slot) is released.
 			// MarkWaiting + step-output persistence already happened in
@@ -1373,7 +1380,10 @@ func (e *Executor) runAgentStep(
 
 	attempts := append([]AdapterModel{primary}, fallback...)
 	onFail := step.OnFail
-	if onFail == "" {
+	// retry_step's retry budget is spent by runStepWithRetry (on EXECUTION
+	// errors) before we reach here; for the validation / outcomes gate — a
+	// non-transient failure — it behaves as the default (escalate_tier).
+	if onFail == "" || onFail == OnFailRetryStep {
 		onFail = OnFailEscalateTier
 	}
 
@@ -1429,9 +1439,6 @@ func (e *Executor) runAgentStep(
 			case OnFailAbort:
 				return "", totalCost, time.Since(startTotal).Milliseconds(),
 					fmt.Errorf("validation failed: %s", reason)
-			case OnFailRetryStep:
-				return "", totalCost, time.Since(startTotal).Milliseconds(),
-					fmt.Errorf("validation failed (retry_step not yet implemented): %s", reason)
 			case OnFailEscalateTier:
 				continue
 			}
@@ -1467,15 +1474,6 @@ func (e *Executor) runAgentStep(
 			case OnFailAbort:
 				return "", totalCost, time.Since(startTotal).Milliseconds(),
 					fmt.Errorf("outcomes failed: %s", reason)
-			case OnFailRetryStep:
-				// Append grader feedback to the prompt so the
-				// next worker attempt has the failure reason in
-				// context. We don't yet implement a per-step
-				// retry budget (separate from tier escalation);
-				// for now retry_step degrades to abort with
-				// feedback embedded in the error.
-				return "", totalCost, time.Since(startTotal).Milliseconds(),
-					fmt.Errorf("outcomes failed and retry_step requires per-step budget (not yet implemented): %s", reason)
 			case OnFailEscalateTier:
 				// fall through to escalation
 			}

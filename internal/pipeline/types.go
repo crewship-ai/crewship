@@ -538,12 +538,14 @@ type OnFailAction string
 const (
 	OnFailEscalateTier OnFailAction = "escalate_tier"
 	OnFailAbort        OnFailAction = "abort"
-	// OnFailRetryStep is NOT implemented — there is no per-step retry budget, so
-	// the executor could only degrade it to abort (the opposite of its promise).
-	// It is REJECTED at validation (dsl_validate_gates.go); use escalate_tier,
-	// which re-runs at the next tier with the failure reason injected. The const
-	// is retained so the executor can emit a clear error for any pre-existing
-	// stored routine that still carries it. Re-enable when a real budget lands.
+	// OnFailRetryStep is author-friendly sugar: a step that declares
+	// `on_fail: retry_step` but no explicit `retry:` block is given the
+	// DEFAULT retry policy (see defaultRetryPolicy) at the runStepWithRetry
+	// chokepoint. It covers the common "just retry this on a transient blip"
+	// case without spelling out max_attempts/backoff. For the validation /
+	// outcomes gate (a non-transient failure), retry_step is normalised to
+	// escalate_tier — the retry budget is for EXECUTION errors, not for
+	// re-running an output that failed its schema/rubric gate unchanged.
 	OnFailRetryStep OnFailAction = "retry_step"
 )
 
@@ -555,20 +557,41 @@ const (
 // a step with both Retry=3 and OnFail=escalate_tier tries the same
 // tier 3 times then bumps tier on validation fail.
 //
-// Backoff modes:
-//   - "constant"    — InitialDelayMs between every attempt
-//   - "exponential" — InitialDelayMs * 2^(attempt-1), capped at MaxDelayMs
+// The retry loop is also cost-aware: if the run's accumulated cost
+// would breach DSL.MaxCostUSD, the loop stops mid-retry rather than
+// burning the rest of the budget on attempts that can't be afforded.
 //
-// RetryOn is an optional allowlist of substring matches against the
-// error message. Empty = retry on any error. Use this to scope
-// retries: e.g. ["timeout", "5"] only retries timeouts and 5xx,
-// never retries 4xx or validation errors.
+// RetryOn is an optional CEL predicate deciding whether a given error
+// is retryable. The expression sees two variables:
+//   - error     (string) — the error message
+//   - transient (bool)   — whether the platform classifies it as a
+//     transient upstream failure (429 / 5xx / timeout / net blip)
+//
+// It must evaluate to bool. Empty = retry on ANY error. Examples:
+//
+//	retry_on: 'transient'                         // shorthand for the built-in classifier
+//	retry_on: 'error.contains("429")'             // only rate limits
+//	retry_on: 'error.matches("(?i)timeout|5\\d\\d")'  // case-insensitive
 type RetryPolicy struct {
-	MaxAttempts    int      `json:"max_attempts"`
-	Backoff        string   `json:"backoff,omitempty"`          // constant | exponential (default constant)
-	InitialDelayMs int      `json:"initial_delay_ms,omitempty"` // default 1000
-	MaxDelayMs     int      `json:"max_delay_ms,omitempty"`     // default 60000
-	RetryOn        []string `json:"retry_on,omitempty"`
+	MaxAttempts int            `json:"max_attempts"`
+	Backoff     *BackoffPolicy `json:"backoff,omitempty"`
+	RetryOn     string         `json:"retry_on,omitempty"` // CEL predicate; empty = retry any error
+}
+
+// BackoffPolicy tunes the delay between retry attempts. The first
+// retry waits MinMs; each subsequent delay is multiplied by Factor and
+// clamped at MaxMs. With Jitter (the default), the ACTUAL sleep is
+// uniform in [0, delay) — full jitter, so N agents that all trip the
+// same upstream 429 don't retry in lockstep and stampede the recovery
+// moment (AWS "Exponential Backoff And Jitter"). Factor 1.0 = constant.
+//
+// Zero-value fields fall back to the package defaults
+// (defaultBackoffMinMs / defaultBackoffMaxMs / defaultBackoffFactor).
+type BackoffPolicy struct {
+	MinMs  int     `json:"min_ms,omitempty"` // first retry delay; default 1000
+	MaxMs  int     `json:"max_ms,omitempty"` // delay ceiling; default 60000
+	Factor float64 `json:"factor,omitempty"` // growth per attempt; default 2.0 (1.0 = constant)
+	Jitter *bool   `json:"jitter,omitempty"` // full jitter in [0, delay); default true
 }
 
 // Validation gates a step's output before its result is exposed to
