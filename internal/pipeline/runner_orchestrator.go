@@ -57,6 +57,15 @@ type OrchestratorRunner struct {
 	convStore *conversation.Store
 	journalE  journal.Emitter
 	logger    *slog.Logger
+	// crewRuntime resolves a crew's full PROVISIONED container config
+	// (cached image, mounts, caps, env, limits) by crew id, so a script
+	// step's cold-crew container launches from the provisioned image —
+	// which has the interpreters (python3, …) — rather than the bare base.
+	// Nil = fall back to a minimal {ID} config (reuses a warm container;
+	// a cold create would use the base image). Injected from cmd_start
+	// (which can import internal/api's BuildCrewRuntimeConfig without the
+	// import cycle internal/pipeline → internal/api would create).
+	crewRuntime func(ctx context.Context, crewID, workspaceID string) (provider.CrewConfig, error)
 }
 
 // OrchestratorRunnerDeps bundles the runner's dependencies. Passed
@@ -73,6 +82,10 @@ type OrchestratorRunnerDeps struct {
 	ConvStore *conversation.Store  // optional
 	Journal   journal.Emitter      // optional
 	Logger    *slog.Logger
+	// CrewRuntime resolves a crew id → provisioned CrewConfig for script
+	// steps (see the field doc on OrchestratorRunner). Optional: nil falls
+	// back to a minimal {ID} config.
+	CrewRuntime func(ctx context.Context, crewID, workspaceID string) (provider.CrewConfig, error) // optional
 }
 
 // NewOrchestratorRunner returns a runner wired against the supplied
@@ -95,14 +108,15 @@ func NewOrchestratorRunner(deps OrchestratorRunnerDeps) (*OrchestratorRunner, er
 		deps.Logger = slog.Default()
 	}
 	return &OrchestratorRunner{
-		db:        deps.DB,
-		orch:      deps.Orch,
-		container: deps.Container,
-		resolver:  deps.Resolver,
-		logWriter: deps.LogWriter,
-		convStore: deps.ConvStore,
-		journalE:  deps.Journal,
-		logger:    deps.Logger,
+		db:          deps.DB,
+		orch:        deps.Orch,
+		container:   deps.Container,
+		resolver:    deps.Resolver,
+		logWriter:   deps.LogWriter,
+		convStore:   deps.ConvStore,
+		journalE:    deps.Journal,
+		logger:      deps.Logger,
+		crewRuntime: deps.CrewRuntime,
 	}, nil
 }
 

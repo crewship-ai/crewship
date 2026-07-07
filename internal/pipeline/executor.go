@@ -102,6 +102,12 @@ type Executor struct {
 	// trying to exec the script in-process.
 	codeRunner CodeRunner
 
+	// scriptRunner execs StepScript (a bundled script) in the crew's own
+	// container. Nil means script steps return a clear "not configured"
+	// error rather than silently succeeding. Production wiring installs
+	// the OrchestratorRunner (which resolves the crew container).
+	scriptRunner ScriptRunner
+
 	// stepOverrides, when wired, patches each run's DSL at start with
 	// per-step prompt/model overrides (v121) so an operator can nudge a
 	// step without bumping the routine version. Nil = run as authored.
@@ -226,6 +232,14 @@ func (e *Executor) WithStepOverrides(s *StepOverrideStore) *Executor {
 // return a clear error instead of silently no-op'ing.
 func (e *Executor) WithCodeRunner(r CodeRunner) *Executor {
 	e.codeRunner = r
+	return e
+}
+
+// WithScriptRunner wires StepScript execution (bundled scripts exec'd in the
+// crew container). Without it, script steps return a clear "not configured"
+// error instead of silently no-op'ing.
+func (e *Executor) WithScriptRunner(r ScriptRunner) *Executor {
+	e.scriptRunner = r
 	return e
 }
 
@@ -1250,6 +1264,8 @@ func (e *Executor) dispatchStep(
 		return e.runTransformStep(step, parentRender)
 	case StepNotify:
 		return e.runNotifyStep(ctx, step, parentRender, in, runID)
+	case StepScript:
+		return e.runScriptStep(ctx, step, parentRender, in, runID)
 	default:
 		return "", 0, 0, fmt.Errorf("unsupported step type %q", step.Type)
 	}

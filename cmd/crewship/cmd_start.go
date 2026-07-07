@@ -28,6 +28,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/provider/apple"
 	"github.com/crewship-ai/crewship/internal/provider/bbolt"
 	"github.com/crewship-ai/crewship/internal/provider/docker"
@@ -387,6 +388,8 @@ var startCmd = &cobra.Command{
 				// — should never happen in `crewship start`).
 				pipeRunner := pipeline.NewLLMRunner(deps.DB, srv.JournalWriter(), logger)
 				srv.APIRouter().PipelinesHandler.SetRunner(pipeRunner)
+				// No SetScriptRunner here: the no-Docker LLMRunner can't exec in a
+				// crew container, so type:script steps correctly fail closed.
 				reason := "no Docker provider"
 				if runnerMode == "llm_direct" {
 					reason = "CREWSHIP_PIPELINE_RUNNER=llm_direct"
@@ -418,11 +421,21 @@ var startCmd = &cobra.Command{
 					// but never the agent's tool calls.
 					Journal: srv.JournalWriter(),
 					Logger:  logger,
+					// CrewRuntime lets a script step resolve the crew's PROVISIONED
+					// container config (with interpreters) so a cold crew doesn't
+					// launch from the bare base. Injected here because internal/api
+					// can't be imported by internal/pipeline (cycle).
+					CrewRuntime: func(ctx context.Context, crewID, workspaceID string) (provider.CrewConfig, error) {
+						return api.BuildCrewRuntimeConfig(ctx, deps.DB, crewID, workspaceID)
+					},
 				})
 				if err != nil {
 					logger.Error("pipeline orchestrator runner construct failed", "error", err)
 				} else {
 					srv.APIRouter().PipelinesHandler.SetRunner(pipeRunner)
+					// Same object implements ScriptRunner (RunScript) — wire it so
+					// type:script steps exec in the crew container.
+					srv.APIRouter().PipelinesHandler.SetScriptRunner(pipeRunner)
 					logger.Info("pipeline runner wired (orchestrator mode — agent runs in its container via CLI adapter)")
 				}
 			}
@@ -589,17 +602,18 @@ var startCmd = &cobra.Command{
 					// signals, idempotency), not just the subset the old
 					// hand-rolled construction happened to include.
 					resumeExec := pipeline.NewWiredExecutor(pipeline.ExecutorDeps{
-						Store:      pipeline.NewStore(deps.DB),
-						Resolver:   pipeline.NewResolver(deps.DB),
-						Runner:     ph.Runner(),
-						Emitter:    ph.Emitter(),
-						DB:         deps.DB,
-						Waitpoints: pipelineWaitpoints,
-						WS:         pipelineWS,
-						Runs:       runRegistry,
-						RunStore:   runStore,
-						CodeRunner: codeRunner,
-						Signals:    signalRegistry,
+						Store:        pipeline.NewStore(deps.DB),
+						Resolver:     pipeline.NewResolver(deps.DB),
+						Runner:       ph.Runner(),
+						Emitter:      ph.Emitter(),
+						DB:           deps.DB,
+						Waitpoints:   pipelineWaitpoints,
+						WS:           pipelineWS,
+						Runs:         runRegistry,
+						RunStore:     runStore,
+						CodeRunner:   codeRunner,
+						ScriptRunner: ph.ScriptRunner(),
+						Signals:      signalRegistry,
 					}).
 						// Per-site difference, stated explicitly: only the
 						// boot scan fences on the pre-scheduler cutoff so
@@ -663,17 +677,18 @@ var startCmd = &cobra.Command{
 				//     code-step / overridden / wait:event routines behave
 				//     exactly like HTTP-driven ones.
 				schedExec := pipeline.NewWiredExecutor(pipeline.ExecutorDeps{
-					Store:      schedPipelineStore,
-					Resolver:   pipeline.NewResolver(deps.DB),
-					Runner:     ph.Runner(),
-					Emitter:    ph.Emitter(),
-					DB:         deps.DB,
-					Waitpoints: pipelineWaitpoints,
-					WS:         pipelineWS,
-					Runs:       runRegistry,
-					RunStore:   runStore,
-					CodeRunner: codeRunner,
-					Signals:    signalRegistry,
+					Store:        schedPipelineStore,
+					Resolver:     pipeline.NewResolver(deps.DB),
+					Runner:       ph.Runner(),
+					Emitter:      ph.Emitter(),
+					DB:           deps.DB,
+					Waitpoints:   pipelineWaitpoints,
+					WS:           pipelineWS,
+					Runs:         runRegistry,
+					RunStore:     runStore,
+					CodeRunner:   codeRunner,
+					ScriptRunner: ph.ScriptRunner(),
+					Signals:      signalRegistry,
 				})
 				scheduler := pipeline.NewPipelineScheduler(schedStore, schedPipelineStore, schedExec, logger)
 				scheduler.Start(ctx)

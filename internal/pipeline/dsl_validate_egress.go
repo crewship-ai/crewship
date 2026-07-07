@@ -110,8 +110,19 @@ func validateStepEgress(st Step) error {
 		if st.Notify.Priority != "" && !isValidNotifyPriority(st.Notify.Priority) {
 			return fmt.Errorf("pipeline: step %q (notify) priority %q invalid (allowed: urgent high medium low)", st.ID, st.Notify.Priority)
 		}
+	case StepScript:
+		if st.Script == nil {
+			return fmt.Errorf("pipeline: step %q (script) missing script body", st.ID)
+		}
+		abs, err := resolveScriptPath(st.Script.Path)
+		if err != nil {
+			return fmt.Errorf("pipeline: step %q (script) %w", st.ID, err)
+		}
+		if _, err := resolveInterpreter(st.Script.Interpreter, abs); err != nil {
+			return fmt.Errorf("pipeline: step %q (script) %w", st.ID, err)
+		}
 	default:
-		return fmt.Errorf("pipeline: step %q has unsupported type %q (allowed: agent_run, call_pipeline, http, code, wait, transform, notify)", st.ID, st.Type)
+		return fmt.Errorf("pipeline: step %q has unsupported type %q (allowed: agent_run, call_pipeline, http, code, wait, transform, notify, script)", st.ID, st.Type)
 	}
 	return nil
 }

@@ -187,7 +187,7 @@
         },
         "type": {
           "type": "string",
-          "enum": ["agent_run", "call_pipeline", "http", "code", "wait", "transform", "notify"]
+          "enum": ["agent_run", "call_pipeline", "http", "code", "wait", "transform", "notify", "script"]
         },
         "complexity": {
           "type": "string",
@@ -234,7 +234,8 @@
         "code": { "$ref": "#/$defs/CodeStep" },
         "wait": { "$ref": "#/$defs/WaitStep" },
         "transform": { "$ref": "#/$defs/TransformStep" },
-        "notify": { "$ref": "#/$defs/NotifyStep" }
+        "notify": { "$ref": "#/$defs/NotifyStep" },
+        "script": { "$ref": "#/$defs/ScriptStep" }
       },
       "allOf": [
         {
@@ -264,6 +265,10 @@
         {
           "if": { "properties": { "type": { "const": "notify" } } },
           "then": { "required": ["notify"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "script" } } },
+          "then": { "required": ["script"] }
         }
       ]
     },
@@ -381,6 +386,32 @@
           "type": "object",
           "additionalProperties": { "type": "string" },
           "description": "Additional env vars (template-substitutable values)."
+        }
+      }
+    },
+    "ScriptStep": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "description": "Execs a BUNDLED script that lives in the crew shared dir (delivered with the routine / via `crewship crew files save`) inside the crew container. Deterministic, token-zero — the first-class replacement for 'agent_run whose prompt tells the LLM to shell out'. Stdout is the step output; exit != 0 fails the step.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to the script under /crew/shared (e.g. 'scripts/parse_vypis.py'). Traversal + absolute paths escaping /crew/shared are rejected."
+        },
+        "interpreter": {
+          "type": "string",
+          "description": "Interpreter to run the script with (e.g. python3, bash, node). Inferred from the extension (.py→python3, .sh→bash, .js→node, …) when omitted."
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Arguments passed to the script (template-substitutable). Passed as argv — never through a shell, so they cannot inject."
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Additional env vars (template-substitutable values). Declared inputs also flow as CREWSHIP_INPUT_<NAME>."
         }
       }
     },

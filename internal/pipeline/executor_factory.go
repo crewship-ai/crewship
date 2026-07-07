@@ -55,6 +55,12 @@ type ExecutorDeps struct {
 	RunStore   *RunStore       // nil → no pipeline_runs persistence / boot recovery
 	CodeRunner CodeRunner      // nil → type:code steps fail closed with a wiring hint
 	Signals    *SignalRegistry // nil → wait:event fails closed
+
+	// ScriptRunner execs type:script steps (bundled scripts) in the crew
+	// container. nil → script steps fail closed with a wiring hint. In
+	// production this is the same OrchestratorRunner passed as Runner
+	// (it implements both AgentRunner and ScriptRunner).
+	ScriptRunner ScriptRunner
 }
 
 // NewWiredExecutor builds a fully-wired Executor from the dependency
@@ -100,6 +106,9 @@ func NewWiredExecutor(d ExecutorDeps) *Executor {
 	}
 	if d.CodeRunner != nil {
 		exec = exec.WithCodeRunner(d.CodeRunner)
+	}
+	if d.ScriptRunner != nil {
+		exec = exec.WithScriptRunner(d.ScriptRunner)
 	}
 	if d.Signals != nil {
 		exec = exec.WithSignalRegistry(d.Signals)

@@ -73,17 +73,18 @@ func fullExecutorDeps(t *testing.T, db *sql.DB, runner AgentRunner) ExecutorDeps
 	wpStore := NewSQLWaitpointStore(db)
 	t.Cleanup(wpStore.Close)
 	return ExecutorDeps{
-		Store:      NewStore(db),
-		Resolver:   NewResolver(db),
-		Runner:     runner,
-		Emitter:    &captureEmitter{},
-		DB:         db,
-		Waitpoints: wpStore,
-		WS:         &captureWSBroadcaster{},
-		Runs:       NewRunRegistry(),
-		RunStore:   NewRunStore(db),
-		CodeRunner: NewMultiCodeRunner(),
-		Signals:    NewSignalRegistry(),
+		Store:        NewStore(db),
+		Resolver:     NewResolver(db),
+		Runner:       runner,
+		Emitter:      &captureEmitter{},
+		DB:           db,
+		Waitpoints:   wpStore,
+		WS:           &captureWSBroadcaster{},
+		Runs:         NewRunRegistry(),
+		RunStore:     NewRunStore(db),
+		CodeRunner:   NewMultiCodeRunner(),
+		Signals:      NewSignalRegistry(),
+		ScriptRunner: &fakeScriptRunner{},
 	}
 }
 
@@ -121,6 +122,7 @@ func TestNewWiredExecutor_WiresEveryDependency(t *testing.T) {
 		"stepOverrides":    exec.stepOverrides != nil,
 		"runStore":         exec.runStore != nil,
 		"codeRunner":       exec.codeRunner != nil,
+		"scriptRunner":     exec.scriptRunner != nil,
 		"signals":          exec.signals != nil,
 		"egressAllowed":    exec.egressAllowed != nil,
 		"credentialByType": exec.credentialByType != nil,

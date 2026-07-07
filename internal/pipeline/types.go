@@ -300,6 +300,12 @@ type Step struct {
 	// wait:approval (which blocks).
 	Notify *NotifyStep `json:"notify,omitempty"`
 
+	// script fields (Type == StepScript). Execs a bundled script in the
+	// crew's own container — deterministic, token-zero (no LLM). The
+	// first-class replacement for "agent_run whose prompt tells the LLM
+	// to shell out to a script": faster, cheaper, and reproducible.
+	Script *ScriptStep `json:"script,omitempty"`
+
 	// Hooks are per-step lifecycle steps (Wave 4.1): before runs ahead
 	// of this step (its failure fails the step), after runs once this
 	// step completes. Same deterministic-side-channel restriction as
@@ -388,6 +394,30 @@ type CodeStep struct {
 	Env map[string]string `json:"env,omitempty"`
 }
 
+// ScriptStep execs a BUNDLED script that already lives in the crew's shared
+// dir (delivered with the routine / via `crewship crew files save`) inside the
+// crew's own container. Unlike CodeStep (inline source, sandbox runtime), a
+// script step points at a real file — the right shape for a multi-file program
+// with dependencies (e.g. a PDF parser). It is deterministic and token-zero.
+//
+// Path resolves under /crew/shared (traversal + absolute-escape rejected).
+// Interpreter is inferred from the extension (.py→python3, .sh→bash, …) unless
+// set explicitly. Args + Env values are template-substituted like an agent_run
+// prompt; declared inputs also flow as CREWSHIP_INPUT_<NAME>. Interpreter, path
+// and args are assembled into an argv (no shell), so args cannot inject.
+//
+// Security: the crew container is already hardened (non-root 1001, cap-drop
+// ALL, no-new-privileges, read-only rootfs) — the same sandbox the crew's
+// agents run in. Caveat: per-step egress is NOT enforced at exec (only http
+// steps honor egress_targets); a script inherits the container's global
+// network policy.
+type ScriptStep struct {
+	Path        string            `json:"path"`                  // under /crew/shared, e.g. "scripts/parse_vypis.py"
+	Interpreter string            `json:"interpreter,omitempty"` // e.g. python3 | bash | node; default inferred from extension
+	Args        []string          `json:"args,omitempty"`        // template-substituted; passed as argv
+	Env         map[string]string `json:"env,omitempty"`         // template-substituted values
+}
+
 // WaitStep pauses the run until the configured condition resolves.
 // Three kinds in MVP: human approval (token in DB, UI completes),
 // datetime (sleep until ISO timestamp), event (waits for a journal
@@ -463,6 +493,7 @@ const (
 	StepWait         StepType = "wait"
 	StepTransform    StepType = "transform"
 	StepNotify       StepType = "notify"
+	StepScript       StepType = "script"
 )
 
 // Complexity tags a step's reasoning depth, mapping to a workspace-

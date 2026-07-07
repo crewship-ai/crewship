@@ -67,6 +67,16 @@ func crewNeedsProvision(devcontainerCfgJSON, miseJSON string) bool {
 // the already-running container. Callers should log if services_json is set and
 // the container is being cold-created. (Tracked for the resolver-unification
 // follow-up.)
+// BuildCrewRuntimeConfig resolves a crew's full PROVISIONED container config
+// (cached image, mounts, caps, env, resource limits) by crew id — exported so
+// the pipeline script-step runner (wired in cmd/crewship, which can import this
+// package without the internal/pipeline → internal/api import cycle) can
+// EnsureCrewRuntime from the provisioned image rather than the bare base. A
+// cold crew launched from base lacks the interpreters a script step needs.
+func BuildCrewRuntimeConfig(ctx context.Context, db *sql.DB, crewID, workspaceID string) (provider.CrewConfig, error) {
+	return buildCrewRuntimeConfig(ctx, db, crewID, workspaceID)
+}
+
 func buildCrewRuntimeConfig(ctx context.Context, db *sql.DB, crewID, workspaceID string) (provider.CrewConfig, error) {
 	var (
 		slug                       string
