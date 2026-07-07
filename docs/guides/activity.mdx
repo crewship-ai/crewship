@@ -176,10 +176,12 @@ Two query params seed the rail's filter on arrival, each applied exactly once (a
 
 Clicking any step node opens a right-hand detail panel with:
 
-- **Rendered prompt / URL / code body / expression** (whichever kind the step is), with template placeholders highlighted.
-- **Output** — the recorded text from `run.step_outputs[stepId]`, truncated with a "show full" expander.
+- **Input** — the step's declared DSL inputs with `{{ steps.X.output }}` / `{{ inputs.Y }}` refs resolved against the run's outputs (a `resolved` badge marks what flowed in from upstream). Every value renders through the shared content-aware renderer: a markdown prompt shows **formatted** (headings, bold, links, fenced code via shiki), JSON shows pretty / as a table, other code is syntax-highlighted — no plain-text `<pre>` walls. Each renderable value carries a **raw ⇄ rendered** toggle for copy-paste fidelity.
+- **Output** — the recorded text from `run.step_outputs[stepId]`, through the same renderer (markdown / JSON / code detected automatically) with the same raw toggle.
 - **Heatmap context** — duration and cost from the journal's `pipeline.step.completed` event.
 - **Error message** — for failed steps, the captured error and which step the run failed at.
+
+The renderer is one shared component (`components/features/activity/output-view.tsx`) driven by pure detection (`lib/output-language.ts` `analyzeOutput`) — the same treatment the agent's chat reply gets, so a step's input/output reads consistently across the Input, Output, and per-action drill-down surfaces.
 
 URL state is the single source of truth for selection (`useTraceSelection`):
 
