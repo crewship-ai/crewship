@@ -102,7 +102,51 @@ type Provider struct {
 	// Set by daemonSharesHostFS (daemon-locality probe) in New(); tests set it
 	// explicitly.
 	checkVolumeMountpoint bool
+
+	// warmCrew caches "crew <id>'s container <cid> was confirmed running at
+	// <t>" so a burst of same-crew EnsureCrewRuntime calls — a DAG wave, or a
+	// prewarm immediately followed by the first step — skips the host-wide
+	// container lookup entirely within warmCrewTTL. Keyed by crew id, value
+	// warmCrewEntry. Best-effort: a stale hit at most returns a container that
+	// died inside the TTL window, which the step's exec then surfaces as a
+	// normal failure — never a silent wrong result.
+	warmCrew sync.Map // crew_id (string) → warmCrewEntry
 }
+
+// warmCrewTTL bounds how long a "container running" fact is trusted without
+// re-checking the daemon. Short enough that a crashed container is noticed
+// within a couple of steps, long enough to cover a whole DAG wave.
+const warmCrewTTL = 3 * time.Second
+
+type warmCrewEntry struct {
+	id      string
+	expires time.Time
+}
+
+// warmHit returns the cached running container id for a crew when the entry
+// is still fresh, evicting an expired one.
+func (p *Provider) warmHit(crewID string) (string, bool) {
+	v, ok := p.warmCrew.Load(crewID)
+	if !ok {
+		return "", false
+	}
+	e := v.(warmCrewEntry)
+	if time.Now().After(e.expires) {
+		p.warmCrew.Delete(crewID)
+		return "", false
+	}
+	return e.id, true
+}
+
+// setWarm records that crewID's container is running (extends the TTL).
+func (p *Provider) setWarm(crewID, containerID string) {
+	p.warmCrew.Store(crewID, warmCrewEntry{id: containerID, expires: time.Now().Add(warmCrewTTL)})
+}
+
+// evictWarm drops any cached fact for a crew — called whenever we tear a
+// container down so a follow-up call re-reconciles instead of trusting a
+// dead id.
+func (p *Provider) evictWarm(crewID string) { p.warmCrew.Delete(crewID) }
 
 // lockForCrew returns the mutex for a given crew, creating it on first
 // use. Cheap: load from sync.Map first, only LoadOrStore if missing.

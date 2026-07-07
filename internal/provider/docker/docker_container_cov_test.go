@@ -70,6 +70,7 @@ type covRT struct {
 	execInspectN    map[string]int
 	execCreateCount int
 	volumeCreates   int
+	listCount       int // number of host-wide ContainerList calls
 }
 
 func (f *covRT) handler() http.HandlerFunc {
@@ -83,6 +84,7 @@ func (f *covRT) handler() http.HandlerFunc {
 		jsonHdr := func() { w.Header().Set("Content-Type", "application/json") }
 		switch {
 		case strings.HasSuffix(path, "/containers/json"):
+			f.listCount++
 			if f.listStatus >= 400 {
 				http.Error(w, `{"message":"list failed"}`, f.listStatus)
 				return

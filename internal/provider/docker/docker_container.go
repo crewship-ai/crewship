@@ -448,6 +448,16 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	mu.Lock()
 	defer mu.Unlock()
 
+	// Warm fast path: within warmCrewTTL a recently-confirmed running
+	// container short-circuits the whole reconcile — network ensure, legacy
+	// migration, and (the expensive part) the host-wide container lookup. A
+	// DAG wave's sibling steps on the same crew all hit this in the same few
+	// milliseconds; without it each paid a full host scan under this mutex.
+	if cid, ok := p.warmHit(team.ID); ok {
+		emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "warm cache hit"})
+		return cid, nil
+	}
+
 	p.logger.Debug("EnsureCrewRuntime", "crew_id", team.ID, "crew_slug", team.Slug)
 	// Ensure network exists (auto-recreate if deleted at runtime)
 	if p.cfg.Network != "" {
@@ -503,7 +513,10 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	}
 
 	p.logger.Debug("listing containers")
-	// Check if container already exists
+	// Check if container already exists. This host-wide list is the cold-path
+	// cost the warm cache above short-circuits: only the FIRST same-crew call
+	// in a warmCrewTTL window reaches here; a DAG wave's remaining steps (and
+	// a prewarmed run's first step) hit the cache and skip it entirely.
 	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
 		return "", fmt.Errorf("list containers: %w", err)
@@ -539,6 +552,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 					timeout := 10
 					_ = p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})
 					_ = p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true})
+					p.evictWarm(team.ID)
 					break // fall through to create new container
 				}
 				// Check required mounts: /crew, /home/agent (volume), /opt/crew-tools (volume).
@@ -561,9 +575,11 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 					timeout := 10
 					_ = p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})
 					_ = p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true})
+					p.evictWarm(team.ID)
 					break // fall through to create new container
 				}
 				if c.State == "running" {
+					p.setWarm(team.ID, c.ID)
 					emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "reused running container", Tag: reusedImage})
 					return c.ID, nil
 				}
@@ -586,6 +602,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 					timeout := 10
 					_ = p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})
 					_ = p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true})
+					p.evictWarm(team.ID)
 					break // fall through to create new container
 				}
 				if err := p.client.ContainerStart(ctx, c.ID, container.StartOptions{}); err != nil {
@@ -604,6 +621,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				// template authors actually want. If a future use case needs
 				// ephemeral hooks that re-run on each restart, add a
 				// per-feature opt-in flag rather than flipping this default.
+				p.setWarm(team.ID, c.ID)
 				emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "restarted stopped container", Tag: reusedImage})
 				return c.ID, nil
 			}
@@ -973,6 +991,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	hooks = append(hooks, team.PostStartCommands...)
 	p.runPostStartCommands(ctx, resp.ID, hooks)
 
+	p.setWarm(team.ID, resp.ID)
 	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage})
 	return resp.ID, nil
 }
