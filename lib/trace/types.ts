@@ -17,6 +17,8 @@ export type StepKind =
   | "code"
   | "wait"
   | "transform"
+  | "notify"
+  | "script"
 
 export type StepStatus =
   | "pending"

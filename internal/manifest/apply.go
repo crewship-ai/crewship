@@ -102,6 +102,10 @@ type Options struct {
 	// happening before save. See pipelines_crud.Save.
 	SkipTestGate bool
 	OnReport     func(line string)
+	// BaseDir is the directory the manifest file was loaded from —
+	// relative CrewFile.Src paths resolve against it. Empty = process
+	// working directory (stdin manifests).
+	BaseDir string
 }
 
 // ErrConfirmationRequired is returned by Apply when the plan

@@ -4,10 +4,12 @@ import { memo, useEffect, useRef, useState, type ReactNode } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import {
   ArrowLeftRight,
+  BellRing,
   Check,
   CircleDot,
   Globe,
   PauseCircle,
+  FileCode2,
   ScrollText,
   Sparkles,
   Terminal,
@@ -53,6 +55,8 @@ const KIND_VISUAL: Record<StepKind, { Icon: LucideIcon; label: string; tint: str
   code: { Icon: Terminal, label: "code", tint: "text-amber-300" },
   wait: { Icon: PauseCircle, label: "wait", tint: "text-blue-300" },
   call_pipeline: { Icon: ScrollText, label: "sub-routine", tint: "text-violet-300" },
+  notify: { Icon: BellRing, label: "notify", tint: "text-pink-300" },
+  script: { Icon: FileCode2, label: "script", tint: "text-lime-300" },
 }
 
 // Trigger isn't a real step kind — it's a synthetic node for the

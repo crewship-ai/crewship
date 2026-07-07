@@ -124,6 +124,7 @@ func (v *validator) checkCrewSpec(meta Metadata, spec *CrewSpec, wsCreds map[str
 	v.checkSkills(crewLabel, spec.Skills)
 	v.checkMCPServers(crewLabel, spec.MCPServers, mergeCredIndex(wsCreds, spec.Credentials))
 	v.checkServices(crewLabel, spec.Services, mergeCredIndex(wsCreds, spec.Credentials))
+	v.checkFiles(crewLabel, spec.Files)
 
 	if len(spec.Agents) == 0 {
 		v.errf("%s: at least one agent is required", crewLabel)

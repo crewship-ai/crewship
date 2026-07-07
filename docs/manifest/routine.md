@@ -456,8 +456,68 @@ steps:
 
 Trade-off: an agent_run is ~30× more expensive than a raw shell
 exec because it goes through the LLM. For pure shell probes that's
-acceptable as a stopgap; the proper fix is to land a Docker-backed
-CodeRunner — tracked separately from this doc.
+acceptable as a stopgap — but for a **real, multi-file program** (a PDF
+parser, a reconciliation script) the proper primitive is a **`type: script`
+step** (below), which runs your bundled script directly, token-zero.
+
+## Script steps (`type: script`) — bundled scripts, deterministic, token-zero
+
+A `script` step runs a **bundled script that already lives in the crew's shared
+dir** (`/crew/shared`) directly inside the crew container — the same hardened
+sandbox (non-root 1001, `--cap-drop=ALL`, no-new-privileges, read-only rootfs)
+the crew's agents run in. Unlike `code` steps (inline source, restricted to the
+`expr`/`cel` runtimes) a script step points at a real **file**, so it's the
+right shape for a multi-file program with dependencies. It is **deterministic**
+and **token-zero** — no LLM in the loop — the first-class replacement for
+"an `agent_run` whose prompt tells the model to shell out to a script."
+
+```yaml
+steps:
+  - id: parse
+    type: script
+    script:
+      path: scripts/parse_vypis.py     # under /crew/shared; traversal rejected
+      interpreter: python3             # optional — inferred from .py/.sh/.js/…
+      args: ["{{ inputs.file }}"]      # template-substituted; passed as argv
+      env:
+        MODE: "{{ inputs.mode }}"      # extra env (rendered)
+```
+
+- **Path** resolves under `/crew/shared` — `..` traversal and absolute paths
+  outside the shared dir are rejected at author time.
+- **Interpreter** is inferred from the extension (`.py`→`python3`, `.sh`→`bash`,
+  `.js`→`node`, `.rb`→`ruby`, `.go`→`go run`, …) unless you set it explicitly.
+- **Inputs** flow two ways: `args` and `env` values are template-substituted
+  (`{{ inputs.x }}` / `{{ steps.y.output }}`) exactly like an `agent_run`
+  prompt, and every declared routine input also arrives as
+  `CREWSHIP_INPUT_<NAME>`. `interpreter`, `path`, and `args` are assembled into
+  an argv (never a shell string), so arguments cannot inject.
+- **Output**: the script's **stdout** becomes the step output (flows to
+  `{{ steps.parse.output }}`) — write only your payload (e.g. strict JSON) to
+  stdout and diagnostics to stderr; a non-zero exit code **fails the step**
+  (stderr is surfaced in the error). Every script exec is recorded as an
+  `exec.command` journal entry (command + exit code + duration) for audit.
+
+**Delivering the script.** The script must exist in `/crew/shared` before the
+run. The declarative way is the crew manifest's `files:` block — the script
+travels WITH the workspace and re-applies on every `crewship apply`:
+
+```yaml
+spec:
+  files:
+    - src: scripts/parse_vypis.py
+      dest: shared/scripts/parse_vypis.py
+```
+
+(See `docs/manifest/crew.md` "spec.files[]". Max 1 MiB per file.) For a
+one-off push to a live crew, `crewship crew files save <crew>
+shared/scripts/parse_vypis.py --file scripts/parse_vypis.py` still works —
+but it does not survive the next rebuild the way the manifest block does.
+
+**Caveat — egress.** Per-step egress is **not** enforced at exec: a script
+inherits the crew container's global network policy (only `http` steps honor
+`egress_targets`). Keep network-touching logic in `http` steps, or scope the
+crew's `allowed_domains`.
 
 ## Approval gates (`type: wait`, kind `approval`)
 

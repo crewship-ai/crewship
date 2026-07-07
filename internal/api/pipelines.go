@@ -20,20 +20,21 @@ import (
 // stub in tests) so the handler can be wired and tested before the
 // real orchestrator integration lands.
 type PipelineHandler struct {
-	db         *sql.DB
-	logger     *slog.Logger
-	store      *pipeline.Store
-	resolver   *pipeline.Resolver
-	runner     pipeline.AgentRunner
-	emitter    pipeline.Emitter
-	waitpoints pipeline.WaitpointStore  // optional; nil → wait approval steps fall back to in-memory timeout
-	ws         pipeline.WSBroadcaster   // optional; nil → no live pipeline event push to frontend
-	schedules  *pipeline.ScheduleStore  // optional; nil → schedule endpoints return 503
-	runs       *pipeline.RunRegistry    // optional; nil → cancel endpoint returns 503
-	webhooks   *pipeline.WebhookStore   // optional; nil → webhook endpoints return 503
-	runStore   *pipeline.RunStore       // optional; nil → list-runs falls back to journal LIKE scan, no persistence
-	codeRunner pipeline.CodeRunner      // optional; nil → type:code steps fail closed with a wiring hint
-	signals    *pipeline.SignalRegistry // optional; shared registry for wait:event signal delivery (Wave 4.3)
+	db           *sql.DB
+	logger       *slog.Logger
+	store        *pipeline.Store
+	resolver     *pipeline.Resolver
+	runner       pipeline.AgentRunner
+	emitter      pipeline.Emitter
+	waitpoints   pipeline.WaitpointStore  // optional; nil → wait approval steps fall back to in-memory timeout
+	ws           pipeline.WSBroadcaster   // optional; nil → no live pipeline event push to frontend
+	schedules    *pipeline.ScheduleStore  // optional; nil → schedule endpoints return 503
+	runs         *pipeline.RunRegistry    // optional; nil → cancel endpoint returns 503
+	webhooks     *pipeline.WebhookStore   // optional; nil → webhook endpoints return 503
+	runStore     *pipeline.RunStore       // optional; nil → list-runs falls back to journal LIKE scan, no persistence
+	codeRunner   pipeline.CodeRunner      // optional; nil → type:code steps fail closed with a wiring hint
+	scriptRunner pipeline.ScriptRunner    // optional; nil → type:script steps fail closed with a wiring hint
+	signals      *pipeline.SignalRegistry // optional; shared registry for wait:event signal delivery (Wave 4.3)
 	// saveTokenSecret signs the optional save_token returned by
 	// /test_run and verified by /save. Lets save flows skip the body-
 	// trust on last_test_run_at (callers can otherwise mint timestamps;
@@ -90,6 +91,21 @@ func (h *PipelineHandler) SetRunner(r pipeline.AgentRunner) {
 // token-zero pipeline.ExprCodeRunner at boot (cmd_start.go).
 func (h *PipelineHandler) SetCodeRunner(r pipeline.CodeRunner) {
 	h.codeRunner = r
+}
+
+// SetScriptRunner wires execution of type:script steps (bundled scripts exec'd
+// in the crew container). Without it, script steps fail closed with a wiring
+// hint. Production wires the OrchestratorRunner at boot (cmd_start.go) — the
+// same object as the AgentRunner, which implements both interfaces.
+func (h *PipelineHandler) SetScriptRunner(r pipeline.ScriptRunner) {
+	h.scriptRunner = r
+}
+
+// ScriptRunner returns the wired script-step runner (may be nil) so the
+// unattended executor construction paths (boot resume, cron scheduler in
+// cmd_start.go) reuse the same runner as the HTTP path.
+func (h *PipelineHandler) ScriptRunner() pipeline.ScriptRunner {
+	return h.scriptRunner
 }
 
 // SetSaveTokenSecret enables the HMAC-signed save_token flow so save
@@ -230,13 +246,14 @@ func (h *PipelineHandler) newExecutor() *pipeline.Executor {
 		// DB derives the idempotency + step-override stores inside the
 		// factory — thin, goroutine-free DB wrappers, cheap to
 		// reconstruct per-run, impossible to forget at a call site.
-		DB:         h.db,
-		Waitpoints: h.waitpoints,
-		WS:         h.ws,
-		Runs:       h.runs,
-		RunStore:   h.runStore,
-		CodeRunner: h.codeRunner,
-		Signals:    h.signals,
+		DB:           h.db,
+		Waitpoints:   h.waitpoints,
+		WS:           h.ws,
+		Runs:         h.runs,
+		RunStore:     h.runStore,
+		CodeRunner:   h.codeRunner,
+		ScriptRunner: h.scriptRunner,
+		Signals:      h.signals,
 	})
 }
 
