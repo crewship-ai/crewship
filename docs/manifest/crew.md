@@ -149,6 +149,12 @@ A `type: script` routine step (see `docs/manifest/routine.md` "Script steps")
 can then run them token-zero: `path: scripts/parse_vypis.py`. A missing or
 oversized local file fails the plan (and `--dry-run`), not mid-apply.
 
+Bundled files are written to the crew's `/crew/shared` bind source on the
+host, so they are present the moment the crew container comes up — including
+crews that have **no agents** and whose container is provisioned lazily on
+the first routine run. Inspect them with `crewship crew files list <crew>
+--path shared`.
+
 ## Examples
 
 ### Minimal
