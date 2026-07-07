@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -185,6 +186,28 @@ Output formats:
 			// answer; surface it here (and via `routine result <run>`).
 			if v, ok := run["output"].(string); ok && v != "" {
 				fmt.Printf("\nFinal output:\n%s\n", indent(prettyOutput(v), "  "))
+			}
+			// --show-outputs: dump the FULL per-step outputs recorded on
+			// the run. GET /pipeline-runs/{runId} already parses
+			// step_outputs_json into this map (the UI iterates it), but the
+			// human view never surfaced it — so post-hoc "what did this step
+			// actually return?" required reading the DB or --format json.
+			// Untruncated on purpose: the whole point is to see the parse
+			// output that a truncated preview hid.
+			if showOutputs, _ := cmd.Flags().GetBool("show-outputs"); showOutputs {
+				if so, ok := run["step_outputs"].(map[string]interface{}); ok && len(so) > 0 {
+					ids := make([]string, 0, len(so))
+					for id := range so {
+						ids = append(ids, id)
+					}
+					sort.Strings(ids)
+					fmt.Printf("\nStep outputs:\n")
+					for _, id := range ids {
+						fmt.Printf("  [%s]\n%v\n", id, so[id])
+					}
+				} else {
+					fmt.Printf("\n(No step outputs recorded for this run.)\n")
+				}
 			}
 			fmt.Printf("\n(For the full event-by-event timeline, re-run with --slug %v. For just the deliverable: crewship routine result %v.)\n", run["pipeline_slug"], run["id"])
 			return nil
@@ -369,5 +392,6 @@ func init() {
 	routineLogsCmd.Flags().String("slug", "", "routine slug the run belongs to (optional; enables full journal timeline)")
 	routineLogsCmd.Flags().Bool("json", false, "Deprecated alias for --format json")
 	routineLogsCmd.Flags().Bool("full", false, "Full per-run journal timeline via the run-logs endpoint (no --slug needed)")
+	routineLogsCmd.Flags().Bool("show-outputs", false, "Print the full per-step outputs of the run (untruncated) — post-hoc 'what did each step return?' for the slug-free state view")
 	pipelineCmd.AddCommand(routineLogsCmd)
 }

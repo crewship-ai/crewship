@@ -237,9 +237,14 @@ Fetch the full journal trace for a single run. Post-mortem and CI-diagnostics su
 
 ```bash
 crewship routine logs run_cmox10oci00016b48aacd
+crewship routine logs run_cmox10oci00016b48aacd --show-outputs
 crewship routine logs run_cmox10oci00016b48aacd --slug eval-extract-emails
 crewship routine logs run_cmox... --slug eval-... --json | jq '.events[] | select(.type=="pipeline.step.failed")'
 ```
+
+<Note>
+`--show-outputs` prints the **full, untruncated** output each step returned (from the run's persisted `step_outputs`), for post-mortem "what did this step actually return?" debugging — the slug-free state view previously showed only status/error, and `routine run` truncates step outputs to a preview. Works on the slug-free form (`routine logs <run_id> --show-outputs`); the whole run map (including `step_outputs`) is also available via `--format json`.
+</Note>
 
 Example output (table mode, with `--slug`):
 

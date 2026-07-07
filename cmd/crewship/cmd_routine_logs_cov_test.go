@@ -356,3 +356,38 @@ func TestRoutineLogsRunE_SlugAPIError(t *testing.T) {
 		t.Errorf("expected API error; got %v", err)
 	}
 }
+
+// TestRoutineLogsRunE_ShowOutputs is the DX fix: post-hoc inspection of what
+// each step of a completed run actually returned. `routine logs <run>` fetches
+// GET /pipeline-runs/{runId} (which already carries step_outputs), but the
+// human-readable state view never printed them — only `routine run` did, and
+// only truncated. --show-outputs prints the FULL per-step outputs.
+func TestRoutineLogsRunE_ShowOutputs(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli8(t, stub.URL())
+	run := covPipelineRun()
+	full := strings.Repeat("Z", 400) // longer than any preview truncation
+	run["step_outputs"] = map[string]any{
+		"extract":   full,
+		"summarize": "the bank statement parsed to 3 line items",
+	}
+	stub.OnGet("/api/v1/workspaces/"+covWSCli8+"/pipeline-runs/run_abc",
+		clitest.JSONResponse(200, run))
+
+	if err := routineLogsCmd.Flags().Set("show-outputs", "true"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = routineLogsCmd.Flags().Set("show-outputs", "false") })
+
+	out := covCaptureStdoutCli8(t, func() {
+		if err := routineLogsCmd.RunE(routineLogsCmd, []string{"run_abc"}); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+	for _, want := range []string{"Step outputs:", "[extract]", "[summarize]", full, "the bank statement parsed to 3 line items"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("show-outputs missing %q:\n%s", want, out)
+		}
+	}
+}
