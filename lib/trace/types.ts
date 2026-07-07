@@ -120,6 +120,16 @@ export interface SubSpan {
   durationMs?: number
   status: SubSpanStatus
   attributes: SubSpanAttributes
+  // Full tool input (scrubbed + capped JSON) — the args the agent invoked
+  // the tool with. Absent on older runs / tools with no args (#847).
+  input?: string
+  // tool_result body (scrubbed + capped tail) — what the call returned.
+  // Absent when the tool produced no textual result (#847).
+  output?: string
+  // Set when the captured input / output was cut at its byte cap — drives a
+  // "truncated" chip so a result cut mid-JSON reads as bounded-on-purpose.
+  inputTruncated?: boolean
+  outputTruncated?: boolean
 }
 
 // Edges parsed from `{{ steps.X.output[.path] }}` references in any

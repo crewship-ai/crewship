@@ -280,6 +280,18 @@ func (h *PipelineHandler) loadRunAgentSpans(ctx context.Context, workspaceID, ru
 		if d, ok := p["detail"]; ok {
 			span["detail"] = d
 		}
+		if in, ok := p["input"]; ok {
+			span["input"] = in
+		}
+		if o, ok := p["output"]; ok {
+			span["output"] = o
+		}
+		if it, ok := p["input_truncated"]; ok {
+			span["input_truncated"] = it
+		}
+		if ot, ok := p["output_truncated"]; ok {
+			span["output_truncated"] = ot
+		}
 		if a, ok := p["attributes"]; ok {
 			span["attributes"] = a
 		}

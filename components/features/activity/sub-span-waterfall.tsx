@@ -157,7 +157,16 @@ function SpanDetail({
         )}
       </dl>
 
-      {span.detail && <OutputView value={span.detail} />}
+      {/* input (full args) supersedes the one-field command detail; detail is
+          the fallback for older runs captured before input was persisted. */}
+      {span.input ? (
+        <SpanIO label="input" value={span.input} truncated={span.inputTruncated} />
+      ) : (
+        span.detail && <SpanIO label="command" value={span.detail} />
+      )}
+      {span.output && (
+        <SpanIO label="output" value={span.output} truncated={span.outputTruncated} />
+      )}
 
       {span.attributes.artifact_path && (
         <button
@@ -170,6 +179,40 @@ function SpanDetail({
           <span className="text-muted-foreground/50">open</span>
         </button>
       )}
+    </div>
+  )
+}
+
+// SpanIO renders one labeled input/command/output block through the shared
+// OutputView so a script's args and result read like the agent's chat output
+// (markdown/JSON/code highlighted) instead of a wall of monospace. When the
+// value was capped, a "truncated" chip explains the cut and points at the
+// step Output tab (which carries the full, untruncated result).
+function SpanIO({
+  label,
+  value,
+  truncated,
+}: {
+  label: string
+  value: string
+  truncated?: boolean
+}) {
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-1.5">
+        <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground/50">
+          {label}
+        </span>
+        {truncated && (
+          <span
+            className="rounded border border-amber-500/30 px-1 text-[9px] text-amber-300"
+            title="Capped at the per-action byte limit — see the step's Output tab for the full result."
+          >
+            truncated
+          </span>
+        )}
+      </div>
+      <OutputView value={value} />
     </div>
   )
 }

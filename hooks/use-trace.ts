@@ -10,10 +10,19 @@ import type { PipelineDSL } from "@/lib/trace/types"
 //   - the run row (status, step_outputs, error_message…)
 //   - the pipeline DSL (steps, edges)
 //
-// Both come from the same backend in two requests. We polled approach
-// instead of subscribing to a single SSE stream because the data is
-// small (~5KB combined) and the realtime layer already broadcasts
-// pipeline.step.* events that hot-path UI updates without a refetch.
+// Both come from the same backend in two requests. We poll instead of
+// subscribing to a single SSE stream because the realtime layer already
+// broadcasts pipeline.step.* events that hot-path UI updates, and the run
+// row itself is small.
+//
+// NOTE (#847 follow-up): GetRun now inlines each agent sub-span's captured
+// input/output (up to 16 KB output/span) under `sub_spans`, so on a long
+// run being watched this polled payload grows as live actions accumulate.
+// Today only the SELECTED step's spans are consumed (activity-trace-page
+// maps `run.sub_spans[stepId]`), so the planned mitigation is to drop
+// sub-span I/O from the poll and lazy-fetch it with `?include_io=1` only
+// for the open step (see GetRun). Deferred as its own change — a LAN
+// self-host doesn't feel it; hosted will want it.
 //
 // Refresh triggers:
 //   - pipeline.step.* event for this run → refetch run
