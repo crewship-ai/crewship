@@ -36,6 +36,9 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override", roleCreate, pipes.SetStepOverride)
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override", roleCreate, pipes.DeleteStepOverride)
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run", roleCreate, pipes.DryRun)
+	// Single-step debug: execute ONE agent_run step against a fixture, no DAG,
+	// no persisted run record. The "unit test for a step" (see StepRun).
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/step_run", roleCreate, pipes.StepRun)
 	// Public draft-validation gate behind the UI "Test run" button: dry-run
 	// validates an UNSAVED definition and mints the save_token Save verifies.
 	// Distinct from /internal/pipelines/test_run (sidecar, X-Internal-Token) —
