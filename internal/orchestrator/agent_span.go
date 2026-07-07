@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"encoding/json"
 	"net/url"
 	"strings"
 	"time"
@@ -34,6 +35,24 @@ type RunAgentSpan struct {
 	DurationMs int64             `json:"duration_ms"`
 	Status     string            `json:"status"` // ok|error|running
 	Attributes map[string]string `json:"attributes,omitempty"`
+	// Input is the FULL tool input marshalled to JSON (scrubbed + capped) — the
+	// "args" the agent invoked the tool with. Detail carries only the single
+	// most-descriptive field (command / path); Input carries everything else
+	// (a Bash `description`, a Write `content`, an MCP tool's params). Empty
+	// when the tool had no input args. This is the "what did it run" half of
+	// #847; Output is the "what did it return" half.
+	Input string `json:"input,omitempty"`
+	// Output is the tool_result body (scrubbed + capped tail) — the mechanical
+	// result of the call (a script's stdout, a file's contents, an MCP reply).
+	// Without it you can see that `python3 parse.py` ran but never what it
+	// returned. Empty when the tool produced no textual result.
+	Output string `json:"output,omitempty"`
+	// InputTruncated / OutputTruncated flag that the capped Input/Output was
+	// cut at its byte cap — surfaced to the UI as a "truncated" chip so a
+	// result cut mid-JSON reads as bounded-on-purpose, not a mystery. The full
+	// output survives on the step's Output tab (run.step_outputs).
+	InputTruncated  bool `json:"input_truncated,omitempty"`
+	OutputTruncated bool `json:"output_truncated,omitempty"`
 }
 
 const (
@@ -47,6 +66,22 @@ const (
 	// file path) so a megabyte heredoc piped into Bash can't bloat the
 	// journal row. Truncation is rune-safe and marked.
 	RunAgentSpanDetailMaxBytes = 2048
+
+	// RunAgentSpanInputMaxBytes caps the captured Input (full args JSON). The
+	// args are context (a Write's target path, a Bash `description`) — 2 KB is
+	// plenty; a Write's large `content` arg doesn't need to round-trip whole.
+	RunAgentSpanInputMaxBytes = 2048
+
+	// RunAgentSpanOutputMaxBytes caps the captured Output (tool_result tail).
+	// Deliberately roomier than the input cap: the output IS the deliverable
+	// this feature exists to surface — a strict-JSON result (e.g. a month of
+	// parsed transactions) must survive whole, and a truncated JSON body is
+	// unparseable (the UI drops from the JSON viewer to plain text). 16 KB
+	// holds a substantial structured result; the 200-span/step cap still
+	// bounds the pathological chatty-agent case, and anything past the cap is
+	// flagged (OutputTruncated) with the full text available on the step's
+	// Output tab. A `cat bigfile` is still bounded here, by design.
+	RunAgentSpanOutputMaxBytes = 16 * 1024
 )
 
 // DeriveSpanKind maps a CLI tool name to the coarse sub-span kind the trace
@@ -131,17 +166,52 @@ func deriveSpanAttributes(tool, kind, model string, input map[string]any) map[st
 	return attrs
 }
 
-// truncateDetail bounds s at RunAgentSpanDetailMaxBytes on a rune boundary and
-// appends a marker. Returns (result, wasTruncated).
-func truncateDetail(s string) (string, bool) {
-	if len(s) <= RunAgentSpanDetailMaxBytes {
+// truncateBytes bounds s at max bytes on a rune boundary and appends a marker.
+// Returns (result, wasTruncated). Shared by detail, input, and output capping.
+func truncateBytes(s string, max int) (string, bool) {
+	if len(s) <= max {
 		return s, false
 	}
-	cut := RunAgentSpanDetailMaxBytes
-	for cut > 0 && cut > RunAgentSpanDetailMaxBytes-4 && (s[cut]&0xc0) == 0x80 {
+	cut := max
+	for cut > 0 && cut > max-4 && (s[cut]&0xc0) == 0x80 {
 		cut--
 	}
 	return s[:cut] + "...(truncated)", true
+}
+
+// truncateDetail bounds the span detail at RunAgentSpanDetailMaxBytes.
+func truncateDetail(s string) (string, bool) {
+	return truncateBytes(s, RunAgentSpanDetailMaxBytes)
+}
+
+// captureInput marshals a tool's full input map to JSON, scrubs secrets, and
+// caps it. Returns ("", false) for an empty map (a bare "{}" is noise) or a
+// marshal failure — losing the args view must never break span capture.
+func captureInput(input map[string]any) (string, bool) {
+	if len(input) == 0 {
+		return "", false
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return "", false
+	}
+	// Scrub AFTER marshalling: a token in an arg value would otherwise be
+	// persisted verbatim (wrapScrubHandler only scrubs event.Content, never
+	// the tool_call input map). Redaction may break strict JSON validity —
+	// acceptable: the FE renders it best-effort as text when it can't parse.
+	scrubbed := spanDetailScrubber.Scrub(string(raw))
+	return truncateBytes(scrubbed, RunAgentSpanInputMaxBytes)
+}
+
+// captureOutput scrubs + caps a tool_result body for the Output field. The
+// stream scrubber already redacted event.Content upstream; re-scrubbing here
+// keeps the recorder self-contained (and safe when driven from a raw stream in
+// tests). Idempotent — a second pass over already-redacted text is a no-op.
+func captureOutput(content string) (string, bool) {
+	if content == "" {
+		return "", false
+	}
+	return truncateBytes(spanDetailScrubber.Scrub(content), RunAgentSpanOutputMaxBytes)
 }
 
 type pendingToolUse struct {
@@ -244,8 +314,13 @@ func (r *AgentSpanRecorder) Observe(ev AgentEvent) {
 		if input == nil {
 			input = map[string]any{}
 		}
-		detail, truncated := truncateDetail(deriveSpanDetail(p.name, input))
-		if truncated {
+		detail, dTrunc := truncateDetail(deriveSpanDetail(p.name, input))
+		inputJSON, iTrunc := captureInput(p.input)
+		outputTail, oTrunc := captureOutput(ev.Content)
+		// Count truncation once per span (not per field): the metric answers
+		// "how many spans had something shortened", so a long command whose
+		// detail AND input both truncate is one bounded span, not two.
+		if dTrunc || iTrunc || oTrunc {
 			r.truncated++
 		}
 		status := "ok"
@@ -257,16 +332,20 @@ func (r *AgentSpanRecorder) Observe(ev AgentEvent) {
 			dur = 0
 		}
 		span := RunAgentSpan{
-			RunID:      r.runID,
-			StepID:     r.stepID,
-			Seq:        r.seq,
-			Kind:       kind,
-			Name:       deriveSpanName(p.name),
-			Detail:     detail,
-			StartedAt:  p.startedAt,
-			DurationMs: dur,
-			Status:     status,
-			Attributes: deriveSpanAttributes(p.name, kind, r.model, input),
+			RunID:           r.runID,
+			StepID:          r.stepID,
+			Seq:             r.seq,
+			Kind:            kind,
+			Name:            deriveSpanName(p.name),
+			Detail:          detail,
+			StartedAt:       p.startedAt,
+			DurationMs:      dur,
+			Status:          status,
+			Attributes:      deriveSpanAttributes(p.name, kind, r.model, input),
+			Input:           inputJSON,
+			Output:          outputTail,
+			InputTruncated:  iTrunc,
+			OutputTruncated: oTrunc,
 		}
 		r.seq++
 		r.sink(span)

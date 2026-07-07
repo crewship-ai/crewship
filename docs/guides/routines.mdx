@@ -564,6 +564,25 @@ crewship routine step-override clear my-routine summarize
 
 Only non-empty fields win — a prompt-only override leaves the authored model untouched. Full reference: [Per-step prompt/model override](/manifest/routine).
 
+## Debug a single step (`step-run`)
+
+Iterating on one step's prompt shouldn't cost a whole pipeline run. `crewship routine step-run` executes a **single `agent_run` step against an input fixture**, in isolation — no upstream steps, no DAG, no persisted run record — and prints the step output, validation verdict, and cost:
+
+```bash
+crewship routine step-run parse-invoice extract --input @sample.json
+# a downstream step that consumes an upstream output — seed it with --outputs:
+crewship routine step-run reconcile-invoices reconcile \
+  --input @sample.json --outputs '{"parse":"{\"total\":42}"}'
+crewship routine step-run parse-invoice extract --input '{"name":"a.pdf"}' --tier-override fast
+```
+
+- **`--input`** is the step's inputs fixture — a JSON object, inline or `@file.json`. The step's `{{ inputs.X }}` refs resolve against it.
+- **`--outputs`** seeds upstream `{{ steps.X.output }}` refs — a JSON object mapping `step_id` → that step's output (a string, or any JSON value, which is stringified). **Most non-first steps read an upstream output** (a `reconcile` step reads `{{ steps.parse.output }}`), so without `--outputs` those refs render **empty** and you'd be iterating on a prompt that never sees production's real data — so the command **warns loudly** (`⚠ prompt references {{ steps.parse.output }} but no --outputs fixture was provided…`) when a referenced upstream output isn't seeded. Still no DAG traversal — the fixture stands in for upstream steps; nothing upstream executes.
+- **`--tier-override`** (`trivial|fast|moderate|smart`) swaps the step's tier for cheap structural iteration; a step-level `model_override` still wins.
+- The response is marked `simulated: true` — it does **not** create a run record, so it never shows up in `routine records`/metrics or pollutes the run trace.
+
+This is the "unit test for one step": seconds instead of the full pipeline. It complements the two tools that leave a gap — `routine dry-run` renders prompts but **executes nothing**, and a full `run` executes everything but is slow and costs real tokens. Backed by `POST /api/v1/workspaces/{ws}/pipelines/{slug}/step_run`.
+
 ## Agentless routines
 
 Declare `"agentless": true` to get a **token-zero guarantee**: the routine can never invoke an LLM, no matter who edits it later. This is what makes high-frequency automation (health checks, metric probes, TLS expiry watches) free to run on a tight cron.

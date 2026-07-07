@@ -498,6 +498,32 @@ func Render(s string, ctx RenderContext) string {
 	})
 }
 
+// ReferencedStepOutputs returns the distinct upstream step ids a template
+// reads via {{ steps.<id>.output[.path] }}. The single-step debug path
+// (/step_run) uses it to WARN when a step's prompt depends on an upstream
+// output the caller didn't seed (--outputs): otherwise the ref renders empty
+// and the debug run silently exercises a different prompt than production —
+// exactly the misleading iteration step-run exists to prevent.
+func ReferencedStepOutputs(template string) []string {
+	var ids []string
+	seen := map[string]bool{}
+	for _, m := range templateRE.FindAllStringSubmatch(template, -1) {
+		body := strings.TrimSpace(m[1])
+		parts := strings.SplitN(body, ".", 3)
+		if len(parts) < 3 || parts[0] != "steps" {
+			continue
+		}
+		if parts[2] != "output" && !strings.HasPrefix(parts[2], "output.") {
+			continue
+		}
+		if id := parts[1]; id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
 // RenderContext carries the data a single render call needs. The
 // executor builds a fresh one for every step (with the previous
 // step's outputs accumulated in StepOutputs).

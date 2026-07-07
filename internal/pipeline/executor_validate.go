@@ -11,6 +11,14 @@ import (
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v5"
 )
 
+// ValidateStepOutput is the exported entry point for one-off callers
+// outside the executor (e.g. the /step_run debug endpoint) that need a
+// step's validation verdict without driving a full run. It is a thin
+// wrapper over the internal validateOutput — same order and semantics.
+func ValidateStepOutput(output string, v *Validation) (ok bool, reason string) {
+	return validateOutput(output, v)
+}
+
 // validateOutput applies a step's Validation to the candidate output.
 // Returns ok=true on success; otherwise reason describes which check
 // failed.
