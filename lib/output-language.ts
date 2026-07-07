@@ -116,6 +116,30 @@ export function detectRawLanguage(text: string): DetectedLanguage | "text" {
   return "text"
 }
 
+// Prose-markdown signals (no fenced code block). Bold, links, and
+// blockquotes are unambiguous — they have no meaning in YAML/bash/log
+// output, so any one of them is a confident markdown vote. An ATX
+// heading is also strong but a leading `# comment` in a config file
+// mimics it, so headings only count when the doc isn't YAML-shaped.
+const MD_BOLD_RE = /(\*\*|__)(?=\S)[\s\S]+?\1/ //     **bold** / __bold__
+const MD_LINK_RE = /\[[^\]\n]+\]\([^)\n]+\)/ //        [text](url)
+const MD_QUOTE_RE = /^[ \t]*>[ \t]+\S/m //             > blockquote
+const MD_HEADING_RE = /^[ \t]*#{1,6}[ \t]+\S/m //      # Heading
+
+/** True when non-fenced text carries prose-markdown structure (headings,
+ *  bold, links, blockquotes) and should render through the markdown
+ *  renderer rather than as a plain-text `<pre>` wall. Conservative:
+ *  logs are excluded outright, and a bare heading is discounted when the
+ *  body reads as YAML (a `# comment` above `key: value` lines). */
+export function looksLikeMarkdown(text: string): boolean {
+  if (!text.trim() || LOG_RE.test(text)) return false
+  if (MD_BOLD_RE.test(text) || MD_LINK_RE.test(text) || MD_QUOTE_RE.test(text)) {
+    return true
+  }
+  if (MD_HEADING_RE.test(text) && !looksLikeYaml(text)) return true
+  return false
+}
+
 /** Top-level decision: classify how an output string should render.
  *  Never throws. */
 export function analyzeOutput(value: string): OutputAnalysis {
@@ -128,7 +152,10 @@ export function analyzeOutput(value: string): OutputAnalysis {
   if (hasCodeFence(value)) return { kind: "markdown" }
   // 2. Whole value is a JSON object/array.
   if (isJson(value)) return { kind: "json" }
-  // 3. Raw single-language block, or plain log/text.
+  // 3. Prose markdown (headings / bold / links / quotes, no fence) — a
+  //    markdown prompt or reply that would otherwise read as a <pre> wall.
+  if (looksLikeMarkdown(value)) return { kind: "markdown" }
+  // 4. Raw single-language block, or plain log/text.
   const lang = detectRawLanguage(value)
   if (lang === "json") return { kind: "json" }
   if (lang === "text") return { kind: "text" }

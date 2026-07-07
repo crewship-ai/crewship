@@ -34,7 +34,7 @@ import {
   type StepFileTouch,
 } from "@/lib/trace/collect-step-files"
 import { JSONViewer } from "./json-viewer"
-import { OutputView } from "./output-view"
+import { OutputView, OutputWithRawToggle } from "./output-view"
 import { SubSpanWaterfall } from "./sub-span-waterfall"
 import { SubSpanIcon, SUB_SPAN_STATUS_COLOR } from "./sub-span-visual"
 import { useAgentFile } from "@/hooks/use-agent-file"
@@ -205,7 +205,7 @@ export function TraceSidePanel({
               <InputView step={step} stepOutputs={stepOutputs} runInputs={runInputs} />
             )}
             {tab === "output" && (
-              <OutputView
+              <OutputWithRawToggle
                 value={output}
                 emptyLabel="This step produced no output yet."
               />
@@ -330,9 +330,6 @@ function InputView({
 
 function InputEntry({ entry }: { entry: ResolvedInputEntry }) {
   const { key, value, hasRefs } = entry
-  const isStructured = value !== null && typeof value === "object"
-  const asText = typeof value === "string" ? value : null
-  const isLong = asText !== null && (asText.length > 80 || asText.includes("\n"))
 
   return (
     <div>
@@ -349,13 +346,10 @@ function InputEntry({ entry }: { entry: ResolvedInputEntry }) {
           </span>
         )}
       </div>
-      {isStructured || isLong ? (
-        <OutputView value={value} />
-      ) : (
-        <code className="block break-words rounded bg-background/60 px-2 py-1 font-mono text-[11px] text-foreground/85">
-          {asText ?? String(value)}
-        </code>
-      )}
+      {/* Every value — including short scalars and a markdown/JSON prompt —
+          goes through the same renderer: analyzeOutput picks markdown/code/
+          JSON, with a raw toggle for copy-paste fidelity (#851). */}
+      <OutputWithRawToggle value={value} />
     </div>
   )
 }
