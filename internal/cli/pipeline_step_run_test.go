@@ -33,7 +33,7 @@ func TestStepRunRoutine_PostsFixtureAndDecodesVerdict(t *testing.T) {
 
 	c := NewClient(srv.URL, "tok", testWorkspaceCUID)
 	res, err := c.StepRunRoutine(context.Background(), "parse-invoice", "extract",
-		map[string]any{"name": "sample.pdf"}, "fast")
+		map[string]any{"name": "sample.pdf"}, map[string]string{"parse": "{\"total\":42}"}, "fast")
 	if err != nil {
 		t.Fatalf("StepRunRoutine: %v", err)
 	}
@@ -43,6 +43,9 @@ func TestStepRunRoutine_PostsFixtureAndDecodesVerdict(t *testing.T) {
 	}
 	if inputs, _ := gotBody["inputs"].(map[string]any); inputs["name"] != "sample.pdf" {
 		t.Errorf("inputs not forwarded: %+v", gotBody["inputs"])
+	}
+	if so, _ := gotBody["step_outputs"].(map[string]any); so["parse"] != `{"total":42}` {
+		t.Errorf("step_outputs not forwarded: %+v", gotBody["step_outputs"])
 	}
 	// Response decoded.
 	if !res.Valid || res.Model != "claude-haiku-4-5" || !res.Simulated || res.CostUSD != 0.0021 {
@@ -60,7 +63,7 @@ func TestStepRunRoutine_OmitsEmptyOptionalFields(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "tok", testWorkspaceCUID)
-	if _, err := c.StepRunRoutine(context.Background(), "demo", "a", nil, ""); err != nil {
+	if _, err := c.StepRunRoutine(context.Background(), "demo", "a", nil, nil, ""); err != nil {
 		t.Fatalf("StepRunRoutine: %v", err)
 	}
 	if _, ok := gotBody["inputs"]; ok {
@@ -69,19 +72,22 @@ func TestStepRunRoutine_OmitsEmptyOptionalFields(t *testing.T) {
 	if _, ok := gotBody["tier_override"]; ok {
 		t.Error("empty tier_override should be omitted from the body")
 	}
+	if _, ok := gotBody["step_outputs"]; ok {
+		t.Error("empty step_outputs should be omitted from the body")
+	}
 }
 
 func TestStepRunRoutine_Validation(t *testing.T) {
 	c := NewClient("http://127.0.0.1:0", "tok", testWorkspaceCUID)
-	if _, err := c.StepRunRoutine(context.Background(), "", "a", nil, ""); err == nil {
+	if _, err := c.StepRunRoutine(context.Background(), "", "a", nil, nil, ""); err == nil {
 		t.Error("expected error for empty slug")
 	}
-	if _, err := c.StepRunRoutine(context.Background(), "demo", "", nil, ""); err == nil {
+	if _, err := c.StepRunRoutine(context.Background(), "demo", "", nil, nil, ""); err == nil {
 		t.Error("expected error for empty step id")
 	}
 	// No workspace on the client → error.
 	cNoWs := NewClient("http://127.0.0.1:0", "tok", "")
-	if _, err := cNoWs.StepRunRoutine(context.Background(), "demo", "a", nil, ""); err == nil ||
+	if _, err := cNoWs.StepRunRoutine(context.Background(), "demo", "a", nil, nil, ""); err == nil ||
 		!strings.Contains(err.Error(), "workspace") {
 		t.Errorf("expected workspace error, got %v", err)
 	}

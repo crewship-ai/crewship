@@ -13,25 +13,27 @@ import (
 // isolation, without a persisted run record. Only the fields the CLI
 // renders are decoded; unknown members pass through untouched.
 type StepRunResult struct {
-	StepID           string  `json:"step_id"`
-	StepType         string  `json:"step_type"`
-	Adapter          string  `json:"adapter"`
-	Model            string  `json:"model"`
-	RenderedPrompt   string  `json:"rendered_prompt"`
-	Output           string  `json:"output"`
-	Valid            bool    `json:"valid"`
-	ValidationReason string  `json:"validation_reason"`
-	CostUSD          float64 `json:"cost_usd"`
-	TokensIn         int     `json:"tokens_in"`
-	TokensOut        int     `json:"tokens_out"`
-	DurationMs       int64   `json:"duration_ms"`
-	Simulated        bool    `json:"simulated"`
+	StepID           string   `json:"step_id"`
+	StepType         string   `json:"step_type"`
+	Adapter          string   `json:"adapter"`
+	Model            string   `json:"model"`
+	RenderedPrompt   string   `json:"rendered_prompt"`
+	Output           string   `json:"output"`
+	Valid            bool     `json:"valid"`
+	ValidationReason string   `json:"validation_reason"`
+	CostUSD          float64  `json:"cost_usd"`
+	TokensIn         int      `json:"tokens_in"`
+	TokensOut        int      `json:"tokens_out"`
+	DurationMs       int64    `json:"duration_ms"`
+	Simulated        bool     `json:"simulated"`
+	Warnings         []string `json:"warnings"`
 }
 
 // StepRunRoutine executes a single agent_run step of a routine against the
-// supplied input fixture and returns its output + validation verdict + cost,
-// without running the rest of the pipeline or writing a run record.
-func (c *Client) StepRunRoutine(ctx context.Context, slug, stepID string, inputs map[string]any, tierOverride string) (*StepRunResult, error) {
+// supplied input fixture (and optional seeded upstream step outputs) and
+// returns its output + validation verdict + cost, without running the rest of
+// the pipeline or writing a run record.
+func (c *Client) StepRunRoutine(ctx context.Context, slug, stepID string, inputs map[string]any, stepOutputs map[string]string, tierOverride string) (*StepRunResult, error) {
 	if strings.TrimSpace(slug) == "" {
 		return nil, errors.New("routine slug required")
 	}
@@ -45,6 +47,9 @@ func (c *Client) StepRunRoutine(ctx context.Context, slug, stepID string, inputs
 	reqBody := map[string]any{"step_id": stepID}
 	if len(inputs) > 0 {
 		reqBody["inputs"] = inputs
+	}
+	if len(stepOutputs) > 0 {
+		reqBody["step_outputs"] = stepOutputs
 	}
 	if tierOverride != "" {
 		reqBody["tier_override"] = tierOverride

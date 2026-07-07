@@ -48,6 +48,63 @@ func TestParseInputFixture(t *testing.T) {
 	}
 }
 
+func TestParseOutputsFixture(t *testing.T) {
+	// Inline object: string value verbatim, object value stringified to JSON.
+	m, err := parseOutputsFixture(`{"parse":"raw text","verify":{"ok":true}}`)
+	if err != nil {
+		t.Fatalf("inline: %v", err)
+	}
+	if m["parse"] != "raw text" {
+		t.Errorf("string value not verbatim: %q", m["parse"])
+	}
+	if m["verify"] != `{"ok":true}` {
+		t.Errorf("object value not stringified: %q", m["verify"])
+	}
+	// Empty → nil, no error.
+	if m2, err := parseOutputsFixture(""); err != nil || m2 != nil {
+		t.Errorf("empty: got %+v, %v", m2, err)
+	}
+	// @file.
+	dir := t.TempDir()
+	fp := filepath.Join(dir, "out.json")
+	if err := os.WriteFile(fp, []byte(`{"parse":"from file"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if m3, err := parseOutputsFixture("@" + fp); err != nil || m3["parse"] != "from file" {
+		t.Errorf("@file: got %+v, %v", m3, err)
+	}
+	// Non-object JSON → error.
+	if _, err := parseOutputsFixture(`["a","b"]`); err == nil {
+		t.Error("expected error for non-object outputs fixture")
+	}
+	// Missing file → error.
+	if _, err := parseOutputsFixture("@/no/such/outputs.json"); err == nil {
+		t.Error("expected error for missing outputs file")
+	}
+}
+
+func TestRoutineStepRunRunE_PrintsWarnings(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnPost(covStepRunPath, clitest.JSONResponse(200, cli.StepRunResult{
+		StepID: "reconcile", StepType: "agent_run", Adapter: "claude_code", Model: "m",
+		Output: "ok", Valid: true, Simulated: true,
+		Warnings: []string{`prompt references {{ steps.parse.output }} but no --outputs fixture was provided for "parse"`},
+	}))
+	covSetupCli10(t, s.URL())
+	defer func() { stepRunInput = ""; stepRunOutputs = ""; stepRunTierOverride = "" }()
+
+	out, err := captureStdoutCovCli10(t, func() error {
+		return routineStepRunCmd.RunE(routineStepRunCmd, []string{"parse-invoice", "reconcile"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "⚠") || !strings.Contains(out, "steps.parse.output") {
+		t.Errorf("warning not surfaced in human output:\n%s", out)
+	}
+}
+
 func TestRoutineStepRunRunE_PrintsVerdictAndOutput(t *testing.T) {
 	s := clitest.NewStubServer()
 	defer s.Close()

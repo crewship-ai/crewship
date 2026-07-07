@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -13,6 +14,12 @@ import (
 type stepRunRequestBody struct {
 	StepID string         `json:"step_id"`
 	Inputs map[string]any `json:"inputs"`
+	// StepOutputs seeds upstream `{{ steps.<id>.output }}` refs so a step that
+	// consumes another step's output can be debugged in isolation with a
+	// fixture standing in for the DAG (most non-first steps do). step_id →
+	// raw output string; no upstream execution happens. Absent → those refs
+	// render empty and the response WARNs.
+	StepOutputs map[string]string `json:"step_outputs,omitempty"`
 	// TierOverride replaces the step's complexity for this one execution
 	// (trivial | fast | moderate | smart); any other value is ignored. A
 	// step-level model_override always wins over this.
@@ -38,6 +45,11 @@ type stepRunResponse struct {
 	// Simulated is always true — a signal to any consumer that this did NOT
 	// produce a real run record (no run id, not in metrics/records).
 	Simulated bool `json:"simulated"`
+	// Warnings surfaces debug-loop hazards — chiefly a prompt that references
+	// an upstream `{{ steps.X.output }}` the caller didn't seed via
+	// step_outputs, which rendered empty (so you'd be iterating on a prompt
+	// that never sees production's real upstream data).
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // StepRun POST /workspaces/{wsId}/pipelines/{slug}/step_run
@@ -117,10 +129,26 @@ func (h *PipelineHandler) StepRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Render the step prompt against the fixture. No StepOutputs — there are
-	// no upstream steps in an isolated step-run; a `{{ steps.X.output }}` ref
-	// resolves to empty, which is the correct "not available here" behaviour.
-	rendered := pipeline.Render(step.Prompt, pipeline.RenderContext{Inputs: body.Inputs})
+	// Render the step prompt against the fixture + any seeded upstream outputs.
+	// Most non-first steps consume `{{ steps.X.output }}`; step_outputs stands
+	// in for the DAG so those steps can be debugged in isolation. WARN loudly
+	// when a referenced upstream output wasn't seeded — it rendered empty, so
+	// you'd be iterating on a prompt that never sees production's real data.
+	var warnings []string
+	for _, ref := range pipeline.ReferencedStepOutputs(step.Prompt) {
+		if _, ok := body.StepOutputs[ref]; !ok {
+			warnings = append(warnings, fmt.Sprintf(
+				"prompt references {{ steps.%s.output }} but no --outputs fixture was provided for %q — it rendered empty; the step is seeing different input than a real run",
+				ref, ref))
+		}
+	}
+	if len(warnings) > 0 {
+		h.logger.Warn("step_run: unseeded upstream output refs", "slug", slug, "step", body.StepID, "count", len(warnings))
+	}
+	rendered := pipeline.Render(step.Prompt, pipeline.RenderContext{
+		Inputs:      body.Inputs,
+		StepOutputs: body.StepOutputs,
+	})
 
 	// Resolve the tier, mirroring the executor: an explicit step ModelOverride
 	// always wins; otherwise an accepted --tier-override replaces complexity.
@@ -176,5 +204,6 @@ func (h *PipelineHandler) StepRun(w http.ResponseWriter, r *http.Request) {
 		TokensOut:        res.TokensOut,
 		DurationMs:       res.DurationMs,
 		Simulated:        true,
+		Warnings:         warnings,
 	})
 }

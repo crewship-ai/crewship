@@ -91,6 +91,57 @@ func TestPipelinesAPI_StepRun_ExecutesSingleStep(t *testing.T) {
 	}
 }
 
+func TestPipelinesAPI_StepRun_SeedsUpstreamOutputsAndWarns(t *testing.T) {
+	db := openSmokeDB(t)
+	defer db.Close()
+	// A downstream step whose prompt consumes an upstream step's output —
+	// the common case (verify/reconcile read {{ steps.parse.output }}).
+	def := `{"name":"acct","steps":[{"id":"reconcile","type":"agent_run","agent_slug":"agent_lead","prompt":"Reconcile {{ steps.parse.output }} for {{ inputs.month }}"}]}`
+	insertRawPipeline(t, db, "acct", def)
+	runner := &recordingRunner{output: "ok"}
+	h := NewPipelineHandler(db, slog.Default(), runner, nil)
+
+	// WITH --outputs: the upstream ref renders the seeded value, no warning.
+	body := strings.NewReader(`{"step_id":"reconcile","inputs":{"month":"June"},"step_outputs":{"parse":"{\"total\":42}"}}`)
+	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", body), "ws_smoke")
+	req.SetPathValue("slug", "acct")
+	w := httptest.NewRecorder()
+	h.StepRun(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", w.Code, w.Body.String())
+	}
+	var out map[string]any
+	_ = json.NewDecoder(w.Body).Decode(&out)
+	if runner.last.Prompt != `Reconcile {"total":42} for June` {
+		t.Errorf("upstream output not seeded into prompt: %q", runner.last.Prompt)
+	}
+	if _, hasWarn := out["warnings"]; hasWarn {
+		t.Errorf("did not expect warnings when outputs seeded: %+v", out["warnings"])
+	}
+
+	// WITHOUT --outputs: the ref renders empty AND the response warns.
+	body2 := strings.NewReader(`{"step_id":"reconcile","inputs":{"month":"June"}}`)
+	req2 := withWorkspaceCtx(httptest.NewRequest("POST", "/x", body2), "ws_smoke")
+	req2.SetPathValue("slug", "acct")
+	w2 := httptest.NewRecorder()
+	h.StepRun(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("status2: %d", w2.Code)
+	}
+	var out2 map[string]any
+	_ = json.NewDecoder(w2.Body).Decode(&out2)
+	warns, _ := out2["warnings"].([]any)
+	if len(warns) != 1 {
+		t.Fatalf("expected 1 warning for unseeded upstream ref, got %+v", out2["warnings"])
+	}
+	if s, _ := warns[0].(string); !strings.Contains(s, "parse") {
+		t.Errorf("warning should name the missing step: %q", s)
+	}
+	if runner.last.Prompt != `Reconcile  for June` {
+		t.Errorf("unseeded ref should render empty, got %q", runner.last.Prompt)
+	}
+}
+
 func TestPipelinesAPI_StepRun_503WithoutRunner(t *testing.T) {
 	db := openSmokeDB(t)
 	defer db.Close()
