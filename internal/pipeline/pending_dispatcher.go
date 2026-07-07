@@ -8,35 +8,62 @@ import (
 	"time"
 )
 
+// defaultDispatchConcurrency bounds how many claimed rows dispatch at
+// once. Deferred runs each hold an executor slot for the whole routine,
+// so this caps how many concurrent provider-bound runs one sweep can
+// launch. Sized in the 8–16 band from #834: high enough that co-due
+// runs start together, low enough not to stampede the provider.
+const defaultDispatchConcurrency = 12
+
+// runExecutor is the slice of *Executor the dispatcher needs. Narrowing
+// to an interface keeps executor.go untouched while letting tests inject
+// a fake slow runner to prove concurrency.
+type runExecutor interface {
+	Run(ctx context.Context, in RunInput) (*RunResult, error)
+}
+
 // PendingRunDispatcher fires deferred runs (pending_runs, v122). Every
 // tick it expires past-ttl rows, then dispatches due rows — highest
-// priority first — through the executor. Mirrors PipelineScheduler's
+// priority first — through the executor. Each claimed row is dispatched
+// on its own goroutine, bounded by a worker pool, so a single slow run
+// no longer blocks every other co-due run (the old serial+synchronous
+// sweep had throughput 1/run-duration). Mirrors PipelineScheduler's
 // lifecycle so cmd_start.go wires it the same way.
+//
+// Ordering: priority is best-effort at claim time — rows are claimed in
+// priority order but then run concurrently, so completion order is not
+// guaranteed. MarkFired is an atomic winner-takes-once claim, so a
+// following sweep (or a replica) can never double-fire an in-flight row.
 type PendingRunDispatcher struct {
-	store    *PendingRunStore
-	executor *Executor
-	logger   *slog.Logger
-	tick     time.Duration
+	store          *PendingRunStore
+	executor       runExecutor
+	logger         *slog.Logger
+	tick           time.Duration
+	maxConcurrency int
 
-	stopCh    chan struct{}
-	stopped   chan struct{}
+	sem     chan struct{}  // bounded worker pool; sized at first sweep
+	wg      sync.WaitGroup // tracks in-flight dispatch goroutines
+	stopCh  chan struct{}
+	stopped chan struct{}
+
 	startOnce sync.Once
 	stopOnce  sync.Once
 }
 
 // NewPendingRunDispatcher builds the dispatcher. A 5s tick keeps short
 // delays responsive without hammering the DB.
-func NewPendingRunDispatcher(store *PendingRunStore, executor *Executor, logger *slog.Logger) *PendingRunDispatcher {
+func NewPendingRunDispatcher(store *PendingRunStore, executor runExecutor, logger *slog.Logger) *PendingRunDispatcher {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &PendingRunDispatcher{
-		store:    store,
-		executor: executor,
-		logger:   logger,
-		tick:     5 * time.Second,
-		stopCh:   make(chan struct{}),
-		stopped:  make(chan struct{}),
+		store:          store,
+		executor:       executor,
+		logger:         logger,
+		tick:           5 * time.Second,
+		maxConcurrency: defaultDispatchConcurrency,
+		stopCh:         make(chan struct{}),
+		stopped:        make(chan struct{}),
 	}
 }
 
@@ -54,9 +81,19 @@ func (d *PendingRunDispatcher) Stop() {
 }
 
 // run is the dispatch loop: sweep once on start, then on every tick
-// until the stop signal or context cancellation.
+// until the stop signal or context cancellation. Defers run last-in-
+// first-out, so in-flight dispatch goroutines drain (wg.Wait) before
+// the loop signals it has stopped — Stop() therefore returns only once
+// every fired run has been handed off.
 func (d *PendingRunDispatcher) run(ctx context.Context) {
 	defer close(d.stopped)
+	defer d.wg.Wait()
+
+	if d.maxConcurrency < 1 {
+		d.maxConcurrency = defaultDispatchConcurrency
+	}
+	d.sem = make(chan struct{}, d.maxConcurrency)
+
 	t := time.NewTicker(d.tick)
 	defer t.Stop()
 	d.sweep(ctx)
@@ -72,7 +109,11 @@ func (d *PendingRunDispatcher) run(ctx context.Context) {
 	}
 }
 
-// sweep expires past-ttl rows, then fires the due rows (priority-first).
+// sweep expires past-ttl rows, then dispatches the due rows. Rows are
+// walked in priority order; each is handed to a bounded worker pool so
+// co-due runs start together instead of queueing behind the slowest.
+// The pool acquire is interruptible so a Stop() mid-sweep abandons the
+// not-yet-dispatched tail promptly rather than blocking on a full pool.
 func (d *PendingRunDispatcher) sweep(ctx context.Context) {
 	now := time.Now().UTC()
 	if n, err := d.store.ExpireDue(ctx, now); err != nil {
@@ -86,7 +127,22 @@ func (d *PendingRunDispatcher) sweep(ctx context.Context) {
 		return
 	}
 	for _, pr := range due {
-		d.fireOne(ctx, pr)
+		// Acquire a pool slot before spawning so total in-flight stays
+		// bounded (no unbounded goroutine growth across sweeps). Bail if
+		// we're stopping or the context is cancelled.
+		select {
+		case d.sem <- struct{}{}:
+		case <-d.stopCh:
+			return
+		case <-ctx.Done():
+			return
+		}
+		d.wg.Add(1)
+		go func(pr PendingRun) {
+			defer d.wg.Done()
+			defer func() { <-d.sem }()
+			d.fireOne(ctx, pr)
+		}(pr)
 	}
 }
 
