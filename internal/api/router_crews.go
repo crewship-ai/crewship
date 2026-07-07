@@ -89,6 +89,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/crews", authed(wsCtx(http.HandlerFunc(crews.List))))
 	r.authedMut("POST", "/api/v1/crews", roleCreate, crews.Create)
 	r.mux.Handle("GET /api/v1/crews/{crewId}", authed(wsCtx(http.HandlerFunc(crews.Get))))
+	// One-shot authoring dump: DSL schema + container caps + integration tools
+	// + agents + runtimes (#862). Literal "capabilities" beats the {crewId}
+	// catch-all in net/http matching, so no ordering hazard.
+	r.mux.Handle("GET /api/v1/crews/{crewId}/capabilities", authed(wsCtx(http.HandlerFunc(crews.Capabilities))))
 	r.authedMut("PATCH", "/api/v1/crews/{crewId}", roleManage, crews.Update)
 	r.authedMut("PUT", "/api/v1/crews/{crewId}", roleManage, crews.Update)
 	r.authedMut("DELETE", "/api/v1/crews/{crewId}", roleManage, crews.Delete)

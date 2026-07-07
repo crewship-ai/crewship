@@ -90,6 +90,10 @@ type mcpServerEntry struct {
 	CredType    string            `json:"cred_type,omitempty"`
 	CredHeader  string            `json:"cred_header,omitempty"`
 	EnvVarName  string            `json:"env_var_name,omitempty"`
+	// Tools are the server's enabled tool names (mcp_tool_bindings) — surfaced
+	// in the [CONNECTED INTEGRATIONS] prompt block so the agent sees WHAT it
+	// can do per integration, not just that one is connected (#862 slice 3).
+	Tools []string `json:"tools,omitempty"`
 }
 
 // mcpServerRow is a raw DB row for an MCP server definition. icon
@@ -1120,7 +1124,48 @@ func (h *InternalHandler) resolveAgentMCPServers(r *http.Request, data *agentCon
 		}
 	}
 
+	// Attach each server's enabled tool names in ONE batch query so the
+	// [CONNECTED INTEGRATIONS] block can name what the agent can DO per
+	// integration (#862). N servers, one query — no per-server round trip.
+	h.attachEnabledToolNames(r, mcpServers)
+
 	return mcpServers
+}
+
+// attachEnabledToolNames populates entry.Tools for each server from
+// mcp_tool_bindings (enabled != 0) in a single IN-clause query. Best-effort:
+// a query failure leaves Tools empty (the block still lists the integration
+// label), never blanking the whole agent config.
+func (h *InternalHandler) attachEnabledToolNames(r *http.Request, servers []mcpServerEntry) {
+	if len(servers) == 0 {
+		return
+	}
+	placeholders := make([]string, len(servers))
+	args := make([]any, len(servers))
+	for i, s := range servers {
+		placeholders[i] = "?"
+		args[i] = s.ID
+	}
+	rows, err := h.db.QueryContext(r.Context(),
+		`SELECT mcp_server_id, tool_name FROM mcp_tool_bindings
+		 WHERE enabled != 0 AND mcp_server_id IN (`+strings.Join(placeholders, ",")+`)
+		 ORDER BY tool_name ASC`, args...)
+	if err != nil {
+		h.logger.Warn("attach tool names for connected integrations", "error", err)
+		return
+	}
+	defer rows.Close()
+
+	byServer := make(map[string][]string, len(servers))
+	for rows.Next() {
+		var sid, tool string
+		if rows.Scan(&sid, &tool) == nil {
+			byServer[sid] = append(byServer[sid], tool)
+		}
+	}
+	for i := range servers {
+		servers[i].Tools = byServer[servers[i].ID]
+	}
 }
 
 // buildDefaultComposioEntry synthesises the default Composio MCP server entry
@@ -1228,7 +1273,10 @@ func (h *InternalHandler) buildKeeperBlock(agentSlug string, creds []mcpCredEntr
 // tools rather than disclaim access — without having to be told to "go look at
 // the MCP server" first.
 func buildConnectedIntegrationsBlock(servers []mcpServerEntry) string {
-	labels := make([]string, 0, len(servers))
+	// Each line pairs the integration label with its enabled tool names so the
+	// agent knows the exact tools to call (#862), not just that an app is
+	// connected. Tools omitted → the label alone still surfaces the integration.
+	lines := make([]string, 0, len(servers))
 	for _, s := range servers {
 		label := strings.TrimSpace(s.DisplayName)
 		if label == "" {
@@ -1237,17 +1285,21 @@ func buildConnectedIntegrationsBlock(servers []mcpServerEntry) string {
 		if label == "" {
 			continue // unlabeled server — nothing useful to surface
 		}
-		labels = append(labels, label)
+		if len(s.Tools) > 0 {
+			lines = append(lines, label+": "+strings.Join(s.Tools, ", "))
+		} else {
+			lines = append(lines, label)
+		}
 	}
-	if len(labels) == 0 {
+	if len(lines) == 0 {
 		return ""
 	}
 
 	var b strings.Builder
 	b.WriteString("[CONNECTED INTEGRATIONS]\n")
 	b.WriteString("The following third-party integrations are connected and available to you RIGHT NOW through your tools. They are already authenticated on the user's behalf — you do NOT need the user to log in, paste credentials, or do anything manually.\n\n")
-	for _, label := range labels {
-		fmt.Fprintf(&b, "- %s\n", label)
+	for _, line := range lines {
+		fmt.Fprintf(&b, "- %s\n", line)
 	}
 	b.WriteString("\nWhen a request relates to one of these apps, use the matching tools directly to fulfil it. Do NOT tell the user you have no access, and do NOT ask them to do it themselves. Only state that a specific operation isn't possible AFTER you have checked the tools available for that app and confirmed none of them cover it.\n")
 	b.WriteString("[END CONNECTED INTEGRATIONS]")

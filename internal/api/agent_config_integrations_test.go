@@ -63,3 +63,21 @@ func TestBuildConnectedIntegrationsBlock(t *testing.T) {
 		t.Error("block should not contain an empty bullet for an unlabeled server")
 	}
 }
+
+// TestBuildConnectedIntegrationsBlock_ToolNames verifies #862 slice 3: when a
+// server carries enabled tool names they render inline ("Gmail: TOOL, …") so
+// the agent knows WHAT it can do, and a server with no tools still lists its
+// label alone.
+func TestBuildConnectedIntegrationsBlock_ToolNames(t *testing.T) {
+	block := buildConnectedIntegrationsBlock([]mcpServerEntry{
+		{Name: "gmail", DisplayName: "Gmail", Tools: []string{"GMAIL_FETCH_EMAIL", "GMAIL_SEND"}},
+		{Name: "github", DisplayName: "GitHub"}, // no tools → label only
+	})
+	if !strings.Contains(block, "Gmail: GMAIL_FETCH_EMAIL, GMAIL_SEND") {
+		t.Errorf("tool names not rendered inline:\n%s", block)
+	}
+	// The tool-less integration still appears, as a bare label (no trailing ": ").
+	if !strings.Contains(block, "- GitHub\n") {
+		t.Errorf("tool-less integration should list its bare label:\n%s", block)
+	}
+}

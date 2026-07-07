@@ -75,6 +75,15 @@ var routineMCPListSchema = json.RawMessage(`{
 	"additionalProperties": false
 }`)
 
+// routineMCPDiscoverSchema is the schema for the read-only
+// discover_capabilities tool. Takes no arguments — the crew is the sidecar's
+// own crew, derived from IPC, never the caller.
+var routineMCPDiscoverSchema = json.RawMessage(`{
+	"type": "object",
+	"properties": {},
+	"additionalProperties": false
+}`)
+
 // routineMCPTools is the stable, ordered tool catalog tools/list returns.
 // Order is fixed so adapters that snapshot the catalog see a deterministic
 // payload (map iteration order is unspecified in Go).
@@ -103,6 +112,16 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 			"run result/status is returned so you can report the outcome. Do NOT shell out to curl — " +
 			"call this tool directly.",
 		InputSchema: routineMCPRunSchema,
+	},
+	{
+		Name: "discover_capabilities",
+		Description: "Return, in ONE bundle, everything needed to author a valid routine for THIS crew: " +
+			"the routine DSL JSON schema, the crew's container capabilities (datastores + installed CLIs), " +
+			"connected integrations WITH their enabled tool names, the crew's agent slugs (for agent_run " +
+			"steps), and the runtimes actually wired in this build (type: code expr/cel; type: script " +
+			"interpreters). Call this FIRST when authoring a routine so save_routine passes on the first " +
+			"try — do not guess agent slugs, tool names, or runtimes.",
+		InputSchema: routineMCPDiscoverSchema,
 	},
 }
 
@@ -239,6 +258,8 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 		status, bodyBytes = s.savePipeline(r.Context(), save, actingAgentID)
 	case "list_routines":
 		status, bodyBytes = s.listPipelines(r.Context(), "")
+	case "discover_capabilities":
+		status, bodyBytes = s.crewCapabilities(r.Context())
 	case "run_routine":
 		var run routineRunRequest
 		if len(params.Arguments) > 0 {
