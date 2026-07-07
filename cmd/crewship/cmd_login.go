@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -574,84 +575,9 @@ func loginInteractive(serverURL string) error {
 	}
 
 	client := cli.NewClient(serverURL, "", "")
-
-	// Step 1: Get CSRF token
-	csrfResp, err := client.Get("/api/auth/csrf")
+	sessionToken, err := exchangeCredentialsForSession(client, serverURL, email, password)
 	if err != nil {
-		return fmt.Errorf("CSRF request failed: %w", err)
-	}
-
-	var csrfBody struct {
-		CSRFToken string `json:"csrfToken"`
-	}
-	if err := cli.ReadJSON(csrfResp, &csrfBody); err != nil {
-		return fmt.Errorf("parse CSRF: %w", err)
-	}
-
-	// Extract CSRF cookie
-	var csrfCookie string
-	for _, c := range csrfResp.Cookies() {
-		if strings.Contains(c.Name, "csrf-token") {
-			csrfCookie = c.Value
-			break
-		}
-	}
-
-	// Step 2: Login with credentials
-	loginBody := map[string]interface{}{
-		"email":     email,
-		"password":  password,
-		"csrfToken": csrfBody.CSRFToken,
-		"redirect":  "false",
-		"json":      "true",
-	}
-
-	req, err := json.Marshal(loginBody)
-	if err != nil {
-		return fmt.Errorf("marshal login body: %w", err)
-	}
-	httpReq, err := http.NewRequest("POST", serverURL+"/api/auth/callback/credentials", strings.NewReader(string(req)))
-	if err != nil {
-		return fmt.Errorf("create login request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if csrfCookie != "" {
-		// This is a CLIENT-side AddCookie on an outgoing http.Request, not a
-		// server-side Set-Cookie response. Secure/HttpOnly attributes are
-		// meaningful only on response cookies (browser enforces at storage
-		// time), so the missing flags are correct here.
-		httpReq.AddCookie(&http.Cookie{Name: "authjs.csrf-token", Value: csrfCookie}) // nosemgrep: cookie-missing-secure,cookie-missing-httponly
-	}
-
-	httpResp, err := client.HTTPClient.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("login request failed: %w", err)
-	}
-	defer httpResp.Body.Close()
-
-	var loginResult struct {
-		OK    bool   `json:"ok"`
-		Error string `json:"error"`
-	}
-	if err := cli.ReadJSON(httpResp, &loginResult); err != nil {
-		return fmt.Errorf("parse login response: %w", err)
-	}
-
-	if !loginResult.OK {
-		return fmt.Errorf("login failed: invalid credentials")
-	}
-
-	// Extract session token from cookies
-	var sessionToken string
-	for _, c := range httpResp.Cookies() {
-		if strings.Contains(c.Name, "session-token") {
-			sessionToken = c.Value
-			break
-		}
-	}
-
-	if sessionToken == "" {
-		return fmt.Errorf("login succeeded but no session token received")
+		return err
 	}
 
 	// Step 3: Try to generate a CLI token via the dedicated endpoint
@@ -686,4 +612,110 @@ func loginInteractive(serverURL string) error {
 
 	cli.PrintSuccess(savedTokenMessage("Login successful!", profile))
 	return nil
+}
+
+// errInvalidCredentials is returned only when the server genuinely rejected the
+// email/password (or the account is locked) — a 200 response with ok:false.
+// CSRF and other server-side failures return a different, descriptive error so
+// a user with the correct password is never told their credentials are wrong.
+var errInvalidCredentials = errors.New("invalid email or password")
+
+// exchangeCredentialsForSession runs the NextAuth credentials flow: fetch a
+// CSRF token+cookie from /api/auth/csrf, then POST the login to
+// /api/auth/callback/credentials. It returns the session-token cookie value.
+//
+// The CSRF cookie is re-sent under the server's *actual* cookie name. Over
+// HTTPS the server names it __Host-authjs.csrf-token and looks it up by that
+// exact name (internal/api/nextauth.go csrfCookieName), so a hardcoded
+// "authjs.csrf-token" is never found and every HTTPS login fails CSRF.
+func exchangeCredentialsForSession(client *cli.Client, serverURL, email, password string) (string, error) {
+	// Step 1: CSRF token + cookie.
+	csrfResp, err := client.Get("/api/auth/csrf")
+	if err != nil {
+		return "", fmt.Errorf("CSRF request failed: %w", err)
+	}
+	// Capture the cookie's actual NAME as well as its value. The server names
+	// it by transport (__Host-authjs.csrf-token over HTTPS, authjs.csrf-token
+	// over plain HTTP) and looks it up by that exact name on the callback.
+	var csrfCookieName, csrfCookie string
+	for _, c := range csrfResp.Cookies() {
+		if strings.Contains(c.Name, "csrf-token") {
+			csrfCookieName, csrfCookie = c.Name, c.Value
+			break
+		}
+	}
+	var csrfBody struct {
+		CSRFToken string `json:"csrfToken"`
+	}
+	if err := cli.ReadJSON(csrfResp, &csrfBody); err != nil {
+		return "", fmt.Errorf("parse CSRF: %w", err)
+	}
+
+	// Step 2: login with credentials.
+	loginBody := map[string]interface{}{
+		"email":     email,
+		"password":  password,
+		"csrfToken": csrfBody.CSRFToken,
+		"redirect":  "false",
+		"json":      "true",
+	}
+	req, err := json.Marshal(loginBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal login body: %w", err)
+	}
+	httpReq, err := http.NewRequest("POST", serverURL+"/api/auth/callback/credentials", strings.NewReader(string(req)))
+	if err != nil {
+		return "", fmt.Errorf("create login request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if csrfCookieName != "" {
+		// Client-side AddCookie on an outgoing request; Secure/HttpOnly are
+		// response-only attributes and meaningless here. Re-send under the
+		// server's real cookie name — hardcoding "authjs.csrf-token" would
+		// miss the __Host- name and fail CSRF on every HTTPS server.
+		httpReq.AddCookie(&http.Cookie{Name: csrfCookieName, Value: csrfCookie}) // nosemgrep: cookie-missing-secure,cookie-missing-httponly
+	}
+
+	httpResp, err := client.HTTPClient.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("login request failed: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(httpResp.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("read login response: %w", err)
+	}
+	var loginResult struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(body, &loginResult) // best-effort; status is the primary signal
+
+	// A non-2xx status is a server-side rejection — CSRF mismatch (403), bad
+	// request (400), or a 5xx — NOT a wrong password. Surface what actually
+	// failed so a user with correct credentials is never told they're wrong.
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		detail := loginResult.Error
+		if detail == "" {
+			detail = strings.TrimSpace(string(body))
+		}
+		if strings.Contains(strings.ToLower(detail), "csrf") {
+			return "", fmt.Errorf("login failed: server rejected the CSRF token (HTTP %d: %s) — an auth handshake bug, not a wrong password", httpResp.StatusCode, detail)
+		}
+		return "", fmt.Errorf("login failed: server returned HTTP %d: %s", httpResp.StatusCode, detail)
+	}
+
+	// 200 with ok:false is the deliberate generic credentials error: wrong
+	// password, empty fields, or a locked account (the server won't say which).
+	if !loginResult.OK {
+		return "", errInvalidCredentials
+	}
+
+	for _, c := range httpResp.Cookies() {
+		if strings.Contains(c.Name, "session-token") {
+			return c.Value, nil
+		}
+	}
+	return "", fmt.Errorf("login succeeded but no session token received")
 }
