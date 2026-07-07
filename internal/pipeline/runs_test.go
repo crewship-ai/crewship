@@ -105,6 +105,53 @@ func TestRunStore_Get_NotFound(t *testing.T) {
 	}
 }
 
+func TestRunStore_TerminalNotifier_FiresOnCompletedAndFailed(t *testing.T) {
+	store, db := openRunsTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	type fired struct {
+		runID  string
+		status RunStatus
+	}
+	var got []fired
+	store.SetTerminalNotifier(func(_ context.Context, runID string, status RunStatus) {
+		got = append(got, fired{runID, status})
+	})
+
+	seed := func(id string) {
+		if err := store.Insert(ctx, &RunRecord{
+			ID: id, WorkspaceID: "ws_runs", PipelineID: "pln_a", PipelineSlug: "demo",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed("run_ok")
+	seed("run_bad")
+	seed("run_cancel")
+
+	if err := store.MarkTerminal(ctx, MarkTerminalInput{RunID: "run_ok", Status: RunStatusCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkTerminal(ctx, MarkTerminalInput{RunID: "run_bad", Status: RunStatusFailed, FailedAtStep: "s1", ErrorMessage: "boom"}); err != nil {
+		t.Fatal(err)
+	}
+	// Cancelled is terminal but must NOT notify — operational, not an outcome.
+	if err := store.MarkTerminal(ctx, MarkTerminalInput{RunID: "run_cancel", Status: RunStatusCancelled}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 notifications (completed+failed), got %d: %+v", len(got), got)
+	}
+	if got[0].runID != "run_ok" || got[0].status != RunStatusCompleted {
+		t.Errorf("first notify = %+v", got[0])
+	}
+	if got[1].runID != "run_bad" || got[1].status != RunStatusFailed {
+		t.Errorf("second notify = %+v", got[1])
+	}
+}
+
 func TestRunStore_LifecycleTransitions(t *testing.T) {
 	store, db := openRunsTestDB(t)
 	defer db.Close()

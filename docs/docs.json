@@ -68,7 +68,8 @@
                 "pages": [
                   "guides/routines",
                   "guides/routines-cookbook",
-                  "guides/routines-migration"
+                  "guides/routines-migration",
+                  "guides/notifications"
                 ]
               },
               {

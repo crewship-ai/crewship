@@ -19,6 +19,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/consolidate"
+	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
@@ -204,6 +205,16 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedMut("POST", "/api/v1/checkpoints/{id}/restore", roleCreate, ch.Restore)
 	r.authedMut("POST", "/api/v1/checkpoints/{id}/fork", roleCreate, ch.Fork)
 	r.authedMut("DELETE", "/api/v1/checkpoints/{id}", roleCreate, ch.Delete)
+
+	// Notification channels: outbound e-mail + signed-webhook delivery on
+	// run completion/failure (#850). Writes are MANAGER+. The mailer is
+	// resolved from env (RESEND_*) here, mirroring the recovery handler;
+	// an email channel is rejected at create when no transport is wired.
+	nch := NewNotifyChannelHandler(r.db, mailer.NewFromEnv(), r.logger)
+	r.mux.Handle("GET /api/v1/notification-channels", authed(wsCtx(http.HandlerFunc(nch.List))))
+	r.authedMut("POST", "/api/v1/notification-channels", roleCreate, nch.Create)
+	r.authedMut("DELETE", "/api/v1/notification-channels/{id}", roleCreate, nch.Delete)
+	r.authedMut("POST", "/api/v1/notification-channels/{id}/test", roleCreate, nch.Test)
 
 	// Paymaster: cost + budget read endpoints backed by the cost_ledger
 	// rollup queries. Writes to the ledger happen inside the LLM

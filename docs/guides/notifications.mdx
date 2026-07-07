@@ -1,0 +1,114 @@
+---
+title: "Outbound notifications"
+description: "Email and signed-webhook delivery when a routine run completes or fails — reach people who aren't watching the in-product inbox."
+icon: "bell"
+---
+
+## Two halves of the same story
+
+Crewship notifies you about routine runs on two surfaces:
+
+- **In-product** — the [`notify` step](/guides/routines#notify) posts live, scrubbed updates into the inbox mid-run, and a run's end pings connected desktops. Great while you're at your desk.
+- **Outbound** (this page) — **email** and **signed webhooks** fire when a run reaches a terminal **completed** or **failed** state, so the news reaches someone who isn't looking at Crewship: an on-call admin, a Slack relay, an incident bot, your own service.
+
+Outbound channels are **workspace-scoped** and configured once. Each channel subscribes to the outcomes it cares about — by default **failures only**, so a routine that runs hourly doesn't flood an inbox with success pings. Opt into completions with `--events completed` (or `--events all`).
+
+<Note>
+Managing channels requires **MANAGER+**. A signing secret is shown **once** at creation — store it then; it can never be read back.
+</Note>
+
+## Channel types
+
+### Webhook (signed)
+
+A webhook channel POSTs a JSON payload to your URL and signs it so you can verify the request really came from your Crewship instance.
+
+```json
+{
+  "event": "run.failed",
+  "run_id": "run_abc123",
+  "routine": "nightly-report",
+  "status": "failed",
+  "output_preview": "…first 1KB of the run's (scrubbed) output…",
+  "triggered_by": "user_42"
+}
+```
+
+Headers:
+
+| Header | Value |
+| --- | --- |
+| `X-Crewship-Signature` | `sha256=<hex>` — HMAC-SHA256 of the **raw request body**, keyed on the channel secret |
+| `X-Crewship-Event` | `run.completed` or `run.failed` |
+
+Verify it (Go):
+
+```go
+import "crypto/hmac"; import "crypto/sha256"; import "encoding/hex"
+
+func valid(body []byte, header, secret string) bool {
+    mac := hmac.New(sha256.New, []byte(secret))
+    mac.Write(body)
+    expected := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+    return hmac.Equal([]byte(header), []byte(expected))
+}
+```
+
+Delivery is **best-effort with retries**: 3 attempts with exponential backoff. A `5xx` or `429` is retried; a `4xx` (other than `429`) is treated as a permanent client error and dropped. A failing channel is logged — it **never fails the run** that triggered it.
+
+### Email
+
+An email channel sends via the instance mailer. **Email delivery must be configured** (`RESEND_API_KEY` and `RESEND_FROM` set on the server) — otherwise creating an email channel is rejected with a clear error, so you learn at configuration time rather than silently losing notifications (**fail-closed**).
+
+## Payload safety
+
+The `output_preview` is passed through the secret **scrubber** (the same redaction the `notify` step uses) and **capped at 1KB** before it leaves the instance — API keys and tokens in a run's output never reach a webhook body or an email.
+
+## CLI
+
+```bash
+# Add a signed-webhook channel (secret auto-generated and printed once).
+# Default: notifies on failures only.
+crewship notifychannel add --type webhook --url https://hooks.example.com/crewship
+
+# Notify on both completion and failure
+crewship notifychannel add --type webhook --url https://hooks.example.com/crewship --events all
+
+# Add an email channel (requires a configured mailer)
+crewship notifychannel add --type email --to ops@example.com
+
+# List the workspace's channels (secrets never shown)
+crewship notifychannel list
+
+# Send a synthetic test event to verify the receiver/secret
+crewship notifychannel test nch_abc123
+
+# Remove a channel
+crewship notifychannel rm nch_abc123 --yes
+```
+
+Provide your own webhook secret with `--secret <value>` instead of letting Crewship generate one.
+
+## API
+
+All routes are workspace-scoped (the workspace comes from your auth context) and mutations require **MANAGER+**.
+
+| Method | Path | Role | Purpose |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/notification-channels` | member | List channels (secrets redacted) |
+| `POST` | `/api/v1/notification-channels` | MANAGER+ | Create a channel |
+| `POST` | `/api/v1/notification-channels/{id}/test` | MANAGER+ | Send a test event |
+| `DELETE` | `/api/v1/notification-channels/{id}` | MANAGER+ | Delete a channel |
+
+Create body (`events` is optional — defaults to `["run.failed"]`; accepts `completed`, `failed`, or `all`):
+
+```json
+{ "type": "webhook", "url": "https://hooks.example.com/crewship", "events": ["all"] }
+{ "type": "email", "to": "ops@example.com" }
+```
+
+The create response for a webhook includes the `secret` field **once** — the only time it is ever returned.
+
+## How it fires
+
+Delivery is hooked on the run's **terminal write** in the pipeline finalize path — not on the CLI — so **scheduled runs** with no connected client notify exactly the same as interactive ones. Only `completed` and `failed` outcomes fire (and then only to channels subscribed to that outcome); `cancelled` and `interrupted` are operational states and are intentionally silent. Fan-out is asynchronous and best-effort, so it never slows or fails the run.

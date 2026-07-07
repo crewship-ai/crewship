@@ -511,6 +511,8 @@ The message lands **live** (WebSocket broadcast to members) and **scrubbed** (se
 
 For the zero-config version — a desktop ping when a run *ends* (success or failure) without authoring a step — run it with `crewship routine run <slug> --wait` and enable notifications (`crewship notify enable`).
 
+To reach **outside** Crewship when a run completes or fails — email or a signed webhook to an admin, a Slack relay, or your own service — configure [outbound notification channels](/guides/notifications). The `notify` step is the in-product half; outbound channels are the half that reaches people who aren't watching the inbox.
+
 ### Conditional `if`
 
 Any step can carry `"if": "{{ inputs.run_summary }}"`. The placeholder is rendered as a plain string — empty / `false` / `0` / `no` / `off` (case-insensitive) → step skipped and marked `<skipped>` in StepOutputs; anything else counts as truthy. Templates are plain substitution, not expression evaluation, so put the boolean upstream (e.g. set `inputs.run_summary` from the caller) rather than writing `==` / `!=` inside the `if` value.

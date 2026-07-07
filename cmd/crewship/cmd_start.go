@@ -27,6 +27,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/mailer"
+	"github.com/crewship-ai/crewship/internal/notify"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/provider/apple"
@@ -520,6 +522,51 @@ var startCmd = &cobra.Command{
 				runStore = pipeline.NewRunStore(deps.DB)
 				srv.APIRouter().PipelinesHandler.SetRunStore(runStore)
 				logger.Info("pipeline_runs store wired (persistent per-run state; v83)")
+
+				// Outbound notification channels (#850): when a run
+				// commits to a completed/failed terminal state, fan out
+				// to the workspace's e-mail / signed-webhook channels.
+				// Hooked on the RunStore finalize path (not the CLI) so
+				// scheduled runs with no connected client still notify.
+				// Async + best-effort: delivery never slows or fails a run.
+				notifyDispatcher := notify.NewDispatcher(
+					notify.NewChannelStore(deps.DB), mailer.NewFromEnv(), logger)
+				rs := runStore
+				rs.SetTerminalNotifier(func(_ context.Context, runID string, status pipeline.RunStatus) {
+					et := notify.EventTypeForStatus(string(status))
+					if et == "" {
+						return
+					}
+					go func() {
+						// Best-effort delivery touches the network and
+						// manager-configured URLs/secrets/payloads; a panic
+						// here must never take down the server (this
+						// goroutine is detached from any request). Recover
+						// and log — the run itself already committed.
+						defer func() {
+							if r := recover(); r != nil {
+								logger.Error("outbound notification goroutine panicked",
+									"panic", r, "run_id", runID)
+							}
+						}()
+						bg, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+						defer cancel()
+						rec, err := rs.Get(bg, runID)
+						if err != nil || rec == nil {
+							return
+						}
+						notifyDispatcher.Dispatch(bg, notify.NotificationEvent{
+							Type:          et,
+							WorkspaceID:   rec.WorkspaceID,
+							RunID:         rec.ID,
+							RoutineSlug:   rec.PipelineSlug,
+							Status:        string(status),
+							OutputPreview: rec.Output,
+							TriggeredBy:   rec.InvokingUserID,
+						})
+					}()
+				})
+				logger.Info("outbound notification channels wired (email + signed webhook on run terminal; #850)")
 			}
 
 			// Wire WS broadcaster so pipeline run + step events
