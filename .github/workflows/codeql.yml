@@ -52,21 +52,73 @@ permissions:
   actions: read
 
 jobs:
+  # Router: on pull_request, run each language's analysis only when that
+  # language's sources (or its dependency manifests) changed. A Go-only PR
+  # skips the JS pass and vice versa; a workflow/docs-only PR skips both
+  # (~6 runner-minutes saved per PR). push to main and the weekly schedule
+  # always run both, so nothing lands or lingers unanalyzed.
+  changes:
+    name: Detect changed languages
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      include: ${{ steps.matrix.outputs.include }}
+    steps:
+      - id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        with:
+          filters: |
+            go:
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+            js:
+              - '**/*.ts'
+              - '**/*.tsx'
+              - '**/*.js'
+              - '**/*.jsx'
+              - '**/*.mjs'
+              - '**/*.cjs'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+
+      # Compose the analyze matrix. `matrix` context is not available in a
+      # job-level `if`, so per-language skipping is done by building the
+      # include list dynamically: languages a PR didn't touch never get a
+      # runner at all. Build-mode notes live here now: `manual` + an
+      # explicit Go build gives full control over compilation flags —
+      # CodeQL's autobuild can miss tagged builds; manual mode is what
+      # release.yml uses too.
+      - id: matrix
+        env:
+          IS_PR: ${{ github.event_name == 'pull_request' }}
+          GO_CHANGED: ${{ steps.filter.outputs.go }}
+          JS_CHANGED: ${{ steps.filter.outputs.js }}
+        run: |
+          set -euo pipefail
+          entries=()
+          if [ "$IS_PR" != "true" ] || [ "$GO_CHANGED" = "true" ]; then
+            entries+=('{"language":"go","build-mode":"manual"}')
+          fi
+          if [ "$IS_PR" != "true" ] || [ "$JS_CHANGED" = "true" ]; then
+            entries+=('{"language":"javascript-typescript","build-mode":"none"}')
+          fi
+          include="[$(IFS=,; echo "${entries[*]-}")]"
+          echo "include=$include" >> "$GITHUB_OUTPUT"
+          echo "analyze matrix: $include"
+
   analyze:
     name: Analyze ${{ matrix.language }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: changes
+    # Empty include (docs/CI-only PR) would fail matrix expansion — guard it.
+    if: needs.changes.outputs.include != '[]'
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - language: go
-            # `manual` build-mode + an explicit Go build step gives us full
-            # control over the compilation flags. CodeQL's autobuild can
-            # miss tagged builds; manual mode is what release.yml uses too.
-            build-mode: manual
-          - language: javascript-typescript
-            build-mode: none
+        include: ${{ fromJSON(needs.changes.outputs.include) }}
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
