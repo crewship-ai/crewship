@@ -65,9 +65,11 @@ func TestBuildCredRemoveScript(t *testing.T) {
 	}
 }
 
-// seedFileMountCred wires ws → crew → agent → credential → agent_credentials
-// with the given mount_type, returning the credential id.
-func seedFileMountCred(t *testing.T, db *sql.DB, mountType string) (wsID, credID string) {
+// seedFileMountCred wires ws → crew → agent → credential (of credType) →
+// agent_credentials, returning the credential id. Whether the reconciler acts
+// is decided by credType (file-materialized vs sidecar-injected), NOT by the
+// vestigial agent_credentials.mount_type (always 'env' — nothing sets 'file').
+func seedFileMountCred(t *testing.T, db *sql.DB, credType string) (wsID, credID string) {
 	t.Helper()
 	userID := seedTestUser(t, db)
 	wsID = seedTestWorkspace(t, db, userID)
@@ -77,13 +79,14 @@ func seedFileMountCred(t *testing.T, db *sql.DB, mountType string) (wsID, credID
 	// Insert directly (no encryption dep — reconcile reads type/slug/env only).
 	if _, err := db.Exec(
 		`INSERT INTO credentials (id, workspace_id, name, encrypted_value, type, provider, scope, status, created_by, created_at, updated_at)
-		 VALUES (?, ?, 'gh', 'x', 'SECRET', 'GITHUB', 'WORKSPACE', 'ACTIVE', ?, datetime('now'), datetime('now'))`,
-		credID, wsID, userID); err != nil {
+		 VALUES (?, ?, 'gh', 'x', ?, 'GITHUB', 'WORKSPACE', 'ACTIVE', ?, datetime('now'), datetime('now'))`,
+		credID, wsID, credType, userID); err != nil {
 		t.Fatalf("seed credential: %v", err)
 	}
+	// mount_type left at its 'env' default on purpose — it must not matter.
 	if _, err := db.Exec(
-		`INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, mount_type)
-		 VALUES ('ac-rec', 'agent-rec', ?, 'GH_TOKEN', 0, ?)`, credID, mountType); err != nil {
+		`INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority)
+		 VALUES ('ac-rec', 'agent-rec', ?, 'GH_TOKEN', 0)`, credID); err != nil {
 		t.Fatalf("seed agent_credentials: %v", err)
 	}
 	return wsID, credID
@@ -91,7 +94,7 @@ func seedFileMountCred(t *testing.T, db *sql.DB, mountType string) (wsID, credID
 
 func TestReconcileRevokedCredential_FileMount_ExecsRemoveAsUID1001(t *testing.T) {
 	db := setupTestDB(t)
-	wsID, credID := seedFileMountCred(t, db, "file")
+	wsID, credID := seedFileMountCred(t, db, "SECRET")
 
 	var calls []provider.ExecConfig
 	h := NewCredentialHandler(db, newTestLogger())
@@ -117,9 +120,11 @@ func TestReconcileRevokedCredential_FileMount_ExecsRemoveAsUID1001(t *testing.T)
 	}
 }
 
-func TestReconcileRevokedCredential_EnvMount_NoExec(t *testing.T) {
+// A sidecar-injected type (API_KEY) never touches disk, so revoking it must
+// not exec anything — the distinction is the TYPE, not the (unused) mount_type.
+func TestReconcileRevokedCredential_NonFileType_NoExec(t *testing.T) {
 	db := setupTestDB(t)
-	wsID, credID := seedFileMountCred(t, db, "env") // env-mounted → no /secrets file
+	wsID, credID := seedFileMountCred(t, db, "API_KEY")
 
 	var calls []provider.ExecConfig
 	h := NewCredentialHandler(db, newTestLogger())
@@ -127,13 +132,13 @@ func TestReconcileRevokedCredential_EnvMount_NoExec(t *testing.T) {
 
 	h.reconcileRevokedCredential(context.Background(), credID, wsID)
 	if len(calls) != 0 {
-		t.Fatalf("env-mounted cred must not exec (nothing on disk); got %d calls", len(calls))
+		t.Fatalf("non-file type (API_KEY) must not exec (nothing on disk); got %d calls", len(calls))
 	}
 }
 
 func TestReconcileRevokedCredential_NilContainer_NoOp(t *testing.T) {
 	db := setupTestDB(t)
-	wsID, credID := seedFileMountCred(t, db, "file")
+	wsID, credID := seedFileMountCred(t, db, "SECRET")
 	h := NewCredentialHandler(db, newTestLogger()) // no SetContainer → container nil
 	// Must not panic.
 	h.reconcileRevokedCredential(context.Background(), credID, wsID)
@@ -141,7 +146,7 @@ func TestReconcileRevokedCredential_NilContainer_NoOp(t *testing.T) {
 
 func TestReconcileRevokedCredential_ExecError_Tolerated(t *testing.T) {
 	db := setupTestDB(t)
-	wsID, credID := seedFileMountCred(t, db, "file")
+	wsID, credID := seedFileMountCred(t, db, "SECRET")
 
 	var calls []provider.ExecConfig
 	h := NewCredentialHandler(db, newTestLogger())

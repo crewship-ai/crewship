@@ -88,16 +88,21 @@ func (h *CredentialHandler) reconcileRevokedCredential(ctx context.Context, cred
 		return
 	}
 
-	// Which agents mount this credential as a file, and where. mount_type is
-	// on the per-agent link; type (path layout) is on the credential. Only
-	// live agents in live crews have a running container to reach.
+	// Which agents hold this credential, and where. Whether it lives on disk
+	// is decided by the credential TYPE (credSecretPaths, mirroring the boot
+	// materializer exec_sidecar.go), NOT by agent_credentials.mount_type —
+	// that column is vestigial: migration v94 adds it DEFAULT 'env' but no
+	// code path ever sets it to 'file', so filtering on it here would match
+	// nothing and remove nothing. Non-file types (API_KEY/AI_CLI_TOKEN/OAUTH2)
+	// fall out below when credSecretPaths returns no paths. Only live agents
+	// in live crews have a running container to reach.
 	rows, err := h.db.QueryContext(ctx, `
 		SELECT a.slug, cr.id, cr.slug, ac.env_var_name, c.type
 		FROM agent_credentials ac
 		JOIN agents a       ON a.id = ac.agent_id AND a.deleted_at IS NULL
 		JOIN credentials c  ON c.id = ac.credential_id
 		JOIN crews cr       ON cr.id = a.crew_id AND cr.deleted_at IS NULL
-		WHERE ac.credential_id = ? AND ac.mount_type = 'file' AND c.workspace_id = ?`,
+		WHERE ac.credential_id = ? AND c.workspace_id = ?`,
 		credentialID, workspaceID)
 	if err != nil {
 		h.logger.Warn("revoke reconcile: query file mounts", "credential_id", credentialID, "error", err)
