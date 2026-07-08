@@ -31,7 +31,7 @@ COPY . .
 RUN pnpm prisma generate
 RUN pnpm build
 
-FROM golang:1.26.4-alpine AS backend
+FROM golang:1.26.5-alpine AS backend
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
