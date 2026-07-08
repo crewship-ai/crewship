@@ -209,30 +209,70 @@ jobs:
             --output-certificate dist/checksums.txt.pem \
             dist/checksums.txt
 
-      # Rolling pre-release: delete and recreate to ensure assets reflect HEAD.
-      # gh release delete is idempotent enough — if the release doesn't exist
-      # yet (first nightly), --cleanup-tag is a no-op.
-      - name: Replace rolling nightly release
+      # Publish an immutable, unique per-run pre-release.
+      #
+      # The repo has immutable releases enabled (it protects the cosign/SBOM/
+      # checksums provenance of tagged stable releases). Immutable releases
+      # forbid reusing a tag name — so the old rolling `nightly` tag (delete +
+      # recreate every run) is dead: `gh release create nightly` 422s with
+      # "tag_name was used by an immutable release". Instead each run cuts a
+      # unique, sortable tag:
+      #
+      #   nightly-<UTC-date>-r<run_number>
+      #
+      # run_number is unique per workflow run, so two pushes on the same day
+      # (Nightly runs on every push to main) get distinct tags — a per-DAY tag
+      # would hit the same immutable wall on the second run. A re-run of the
+      # SAME run reuses the tag; we detect the existing release and skip rather
+      # than double-publishing onto an immutable tag. The rolling
+      # `ghcr.io/…:nightly` Docker image is unaffected — that is a GHCR tag,
+      # not a git tag.
+      - name: Publish nightly pre-release (immutable, per-run)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          gh release delete nightly --yes --cleanup-tag 2>/dev/null || true
-          # Compose notes after deletion so failures from gh delete don't strand
-          # an in-progress release.
-          NOTES="Rolling pre-release built from main @ ${GITHUB_SHA:0:7}.
+          TAG="nightly-$(date -u +%Y%m%d)-r${{ github.run_number }}"
+          TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          ASSETS=$(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name 'checksums.txt' -o -name '*.sig' -o -name '*.pem' \) | tr '\n' ' ')
+          NOTES="Nightly pre-release built from main @ ${GITHUB_SHA:0:7} (${TS}).
 
           **Not for production.** Use a tagged release for stable workloads.
-          Docker: \`docker pull ghcr.io/${{ github.repository_owner }}/crewship:nightly\`"
-          gh release create nightly \
-            --prerelease \
-            --title "Nightly (main @ ${GITHUB_SHA:0:7})" \
-            --notes "$NOTES" \
-            --target "$GITHUB_SHA" \
-            dist/*.tar.gz dist/*.zip dist/checksums.txt dist/*.sig dist/*.pem 2>/dev/null || \
-          gh release create nightly \
-            --prerelease \
-            --title "Nightly (main @ ${GITHUB_SHA:0:7})" \
-            --notes "$NOTES" \
-            --target "$GITHUB_SHA" \
-            $(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name 'checksums.txt' -o -name '*.sig' -o -name '*.pem' \) | tr '\n' ' ')
+          Docker: \`docker pull ghcr.io/${{ github.repository_owner }}/crewship:nightly\`
+          Latest nightly binaries: \`gh release list --repo ${REPO} | grep -m1 nightly-\` (or query the API's latest prerelease)."
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "::notice::Release $TAG already exists (workflow re-run); skipping create to avoid recreating an immutable tag."
+          else
+            gh release create "$TAG" \
+              --prerelease \
+              --title "Nightly $TAG (main @ ${GITHUB_SHA:0:7})" \
+              --notes "$NOTES" \
+              --target "$GITHUB_SHA" \
+              $ASSETS
+          fi
+
+      # Prune old nightly pre-releases so unique-per-run tags don't accumulate
+      # forever. Deleting an immutable release IS allowed (only reusing a tag
+      # name is forbidden, which unique tags never do). Keep ~7 days of
+      # nightlies; drop the rest along with their tags.
+      - name: Prune old nightly pre-releases
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          CUTOFF=$(date -u -d '7 days ago' +%s)
+          OLD=$(gh release list --repo "$REPO" --limit 200 --json tagName,isPrerelease,createdAt \
+            | jq -r --argjson cutoff "$CUTOFF" \
+                '[.[] | select(.isPrerelease and (.tagName | startswith("nightly-")) and ((.createdAt | fromdateiso8601) < $cutoff))] | .[].tagName')
+          if [ -z "$OLD" ]; then
+            echo "No nightly pre-releases older than 7 days to prune."
+            exit 0
+          fi
+          echo "$OLD" | while read -r tag; do
+            [ -z "$tag" ] && continue
+            echo "Pruning old nightly release $tag"
+            gh release delete "$tag" --repo "$REPO" --yes --cleanup-tag || true
+          done
