@@ -141,12 +141,21 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 		if err := validateStepGates(st, agentSlugs); err != nil {
 			return err
 		}
+		if err := validateStepOutputGate(st); err != nil {
+			return err
+		}
 		if err := validateStepHooks(st); err != nil {
 			return err
 		}
 	}
 
 	if err := validateHooks(dsl); err != nil {
+		return err
+	}
+	if err := validateEgressTargets(dsl); err != nil {
+		return err
+	}
+	if err := validateConcurrencyKey(dsl); err != nil {
 		return err
 	}
 

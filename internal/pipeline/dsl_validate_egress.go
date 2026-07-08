@@ -126,3 +126,26 @@ func validateStepEgress(st Step) error {
 	}
 	return nil
 }
+
+// validateEgressTargets rejects a routine-level egress entry that can never
+// match a real host. The runtime allowlist (hostInEgressTargets) is a
+// literal + subdomain-suffix match, NOT a glob: `*`, `*.*` and an empty host
+// match nothing, so an allowlist that contains one is dead config — it
+// silently denies every http step's egress instead of allowing it. Reject it
+// at author time so the mistake surfaces before save, not as mystery
+// connection failures at run time.
+//
+// Note this is the OPPOSITE of "allow all": unrestricted egress is expressed
+// by OMITTING egress_targets entirely (an empty list means no routine-level
+// gate). Loopback hosts (localhost / 127.*) are real, matchable targets and
+// stay a doctor WARN, not a Validate error — they're legitimate on dev /
+// self-hosted boxes, so save/validate don't block them.
+func validateEgressTargets(dsl *DSL) error {
+	for _, host := range dsl.EgressTargets {
+		switch host {
+		case "*", "*.*", "":
+			return fmt.Errorf("pipeline: egress_targets entry %q matches no host at run time — targets are literal/subdomain-suffix matched, not globbed, so this dead entry silently denies all egress; list the real hostnames, or omit egress_targets entirely for unrestricted egress", host)
+		}
+	}
+	return nil
+}

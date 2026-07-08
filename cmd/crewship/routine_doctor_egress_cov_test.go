@@ -78,7 +78,7 @@ func TestCheckEgressTargets_Wildcards(t *testing.T) {
 			if got[0].Level != doctorWarn {
 				t.Errorf("Level: got %q want WARN", got[0].Level)
 			}
-			if !strings.Contains(got[0].Message, "wildcard") {
+			if !strings.Contains(got[0].Message, "matches no host") {
 				t.Errorf("Message: got %q", got[0].Message)
 			}
 		})
@@ -121,7 +121,7 @@ func TestCheckEgressTargets_CollectsAllIssues(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("want 2 issues, got %d: %+v", len(got), got)
 	}
-	if !strings.Contains(got[0].Message, "wildcard") {
+	if !strings.Contains(got[0].Message, "matches no host") {
 		t.Errorf("first issue: got %q", got[0].Message)
 	}
 	if !strings.Contains(got[1].Message, "loopback") {
