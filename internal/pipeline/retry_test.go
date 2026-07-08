@@ -5,7 +5,15 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
+
+// instantSleep is a fake retry clock: it records nothing and returns
+// immediately, honouring cancellation. Installed on the Executor so
+// retry tests exercise the loop without real backoff wall-clock.
+func instantSleep(ctx context.Context, _ time.Duration) bool {
+	return ctx.Err() == nil
+}
 
 func TestExecutor_Retry_HappyPath_NoRetry(t *testing.T) {
 	store, resolver, cleanup := openExecutorTestDB(t)
@@ -13,10 +21,11 @@ func TestExecutor_Retry_HappyPath_NoRetry(t *testing.T) {
 	runner := newMockRunner()
 	runner.outputsBySlug["agent_lead"] = []string{"ok"}
 	exec := NewExecutor(store, resolver, runner, nil)
+	exec.sleepFn = instantSleep
 
 	dsl := &DSL{Name: "x", Steps: []Step{
 		{ID: "s1", Type: StepAgentRun, AgentSlug: "agent_lead", Prompt: "go",
-			Retry: &RetryPolicy{MaxAttempts: 3, InitialDelayMs: 1}},
+			Retry: &RetryPolicy{MaxAttempts: 3}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
 		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
@@ -38,10 +47,7 @@ func TestExecutor_Retry_RetriesOnError(t *testing.T) {
 	runner := newMockRunner()
 	// Two errors, then success. The mock advances errBySlug on every
 	// call but outputsBySlug only when no error fires, so "finally ok"
-	// is what the third (successful) call returns. Earlier this test
-	// had two padding empties before the success — those used to be
-	// no-ops, but the new transient-retry layer treats empty success
-	// output as retryable, which the test isn't trying to exercise.
+	// is what the third (successful) call returns.
 	runner.errBySlug["agent_lead"] = []error{
 		errors.New("transient blip"),
 		errors.New("transient blip"),
@@ -49,10 +55,11 @@ func TestExecutor_Retry_RetriesOnError(t *testing.T) {
 	}
 	runner.outputsBySlug["agent_lead"] = []string{"finally ok"}
 	exec := NewExecutor(store, resolver, runner, nil)
+	exec.sleepFn = instantSleep
 
 	dsl := &DSL{Name: "x", Steps: []Step{
 		{ID: "s1", Type: StepAgentRun, AgentSlug: "agent_lead", Prompt: "go",
-			Retry: &RetryPolicy{MaxAttempts: 3, InitialDelayMs: 1}},
+			Retry: &RetryPolicy{MaxAttempts: 3}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
 		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
@@ -80,10 +87,11 @@ func TestExecutor_Retry_GivesUpAfterMaxAttempts(t *testing.T) {
 		errors.New("blip 4"),
 	}
 	exec := NewExecutor(store, resolver, runner, nil)
+	exec.sleepFn = instantSleep
 
 	dsl := &DSL{Name: "x", Steps: []Step{
 		{ID: "s1", Type: StepAgentRun, AgentSlug: "agent_lead", Prompt: "go",
-			Retry: &RetryPolicy{MaxAttempts: 2, InitialDelayMs: 1}},
+			Retry: &RetryPolicy{MaxAttempts: 2}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
 		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
@@ -99,7 +107,7 @@ func TestExecutor_Retry_GivesUpAfterMaxAttempts(t *testing.T) {
 	}
 }
 
-func TestExecutor_Retry_RetryOnAllowlist(t *testing.T) {
+func TestExecutor_Retry_RetryOnPredicate_NoMatchNoRetry(t *testing.T) {
 	store, resolver, cleanup := openExecutorTestDB(t)
 	defer cleanup()
 	runner := newMockRunner()
@@ -108,10 +116,11 @@ func TestExecutor_Retry_RetryOnAllowlist(t *testing.T) {
 		errors.New("validation failed: bad input"),
 	}
 	exec := NewExecutor(store, resolver, runner, nil)
+	exec.sleepFn = instantSleep
 
 	dsl := &DSL{Name: "x", Steps: []Step{
 		{ID: "s1", Type: StepAgentRun, AgentSlug: "agent_lead", Prompt: "go",
-			Retry: &RetryPolicy{MaxAttempts: 3, InitialDelayMs: 1, RetryOn: []string{"timeout", "5xx"}}},
+			Retry: &RetryPolicy{MaxAttempts: 3, RetryOn: `error.matches("(?i)timeout|5\\d\\d")`}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
 		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
@@ -130,7 +139,7 @@ func TestExecutor_Retry_RetryOnAllowlist(t *testing.T) {
 	}
 }
 
-func TestExecutor_Retry_RetryOnMatch_RetriesUntilSuccess(t *testing.T) {
+func TestExecutor_Retry_RetryOnPredicate_MatchRetriesUntilSuccess(t *testing.T) {
 	store, resolver, cleanup := openExecutorTestDB(t)
 	defer cleanup()
 	runner := newMockRunner()
@@ -141,10 +150,11 @@ func TestExecutor_Retry_RetryOnMatch_RetriesUntilSuccess(t *testing.T) {
 	}
 	runner.outputsBySlug["agent_lead"] = []string{"", "ok"}
 	exec := NewExecutor(store, resolver, runner, nil)
+	exec.sleepFn = instantSleep
 
 	dsl := &DSL{Name: "x", Steps: []Step{
 		{ID: "s1", Type: StepAgentRun, AgentSlug: "agent_lead", Prompt: "go",
-			Retry: &RetryPolicy{MaxAttempts: 3, InitialDelayMs: 1, RetryOn: []string{"timeout"}}},
+			Retry: &RetryPolicy{MaxAttempts: 3, RetryOn: `error.matches("(?i)timeout")`}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
 		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
@@ -157,25 +167,5 @@ func TestExecutor_Retry_RetryOnMatch_RetriesUntilSuccess(t *testing.T) {
 	}
 	if got := len(runner.calls); got != 2 {
 		t.Errorf("expected 2 calls (1 fail + 1 success), got %d", got)
-	}
-}
-
-func TestShouldRetry_CaseFold(t *testing.T) {
-	cases := []struct {
-		err     string
-		allow   []string
-		want    bool
-		comment string
-	}{
-		{"connection TIMEOUT", []string{"timeout"}, true, "uppercase TIMEOUT matches lower allowlist"},
-		{"got 502 bad gateway", []string{"5"}, true, "loose substring"},
-		{"validation error", []string{"timeout"}, false, "no match"},
-		{"anything", nil, true, "empty allowlist = retry on any"},
-	}
-	for _, c := range cases {
-		got := shouldRetry(errors.New(c.err), c.allow)
-		if got != c.want {
-			t.Errorf("%s: shouldRetry(%q, %v) = %v, want %v", c.comment, c.err, c.allow, got, c.want)
-		}
 	}
 }

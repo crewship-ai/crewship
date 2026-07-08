@@ -507,7 +507,12 @@ func (e *Executor) executeOneStep(
 
 	emit.emitStepStarted(ctx, *step, stepIdx, tier)
 
-	output, stepCost, stepDur, stepErr := e.runStepWithRetry(ctx, *step, renderedPrompt, tier, fallback, in, runID, pipelineID, emit, ctxRender, depth)
+	// Snapshot the run cost so the retry loop's cost-cap check reads a
+	// stable prior total (concurrent siblings mutate result.CostUSD).
+	resMu.Lock()
+	priorCost := result.CostUSD
+	resMu.Unlock()
+	output, stepCost, stepDur, stepErr := e.runStepWithRetry(ctx, *step, renderedPrompt, tier, fallback, in, runID, pipelineID, emit, ctxRender, depth, priorCost)
 	if stepErr != nil {
 		// Suspend (wait-step park) is not a failure: record it separately and
 		// stop scheduling. The runDAG loop checks `suspended` before firstErr.

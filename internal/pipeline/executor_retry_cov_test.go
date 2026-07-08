@@ -31,19 +31,18 @@ func TestRunStepWithRetry_NonRetryableBreaksImmediately(t *testing.T) {
 		return AgentStepResult{}, errors.New("hard validation wall")
 	})
 	step := Step{ID: "s", Type: StepAgentRun, AgentSlug: "a", Prompt: "p",
-		// MaxAttempts above the cap exercises the clamp; zero delays
-		// exercise the defaults. RetryOn that never matches keeps the
-		// loop from sleeping at all.
-		Retry: &RetryPolicy{MaxAttempts: 20, RetryOn: []string{"", "rate limit"}}}
+		// MaxAttempts above the cap exercises the clamp. A retry_on that
+		// never matches keeps the loop from sleeping at all.
+		Retry: &RetryPolicy{MaxAttempts: 20, RetryOn: `error.contains("rate limit")`}}
 
 	_, _, _, err := exec.runStepWithRetry(context.Background(), step, "p", AdapterModel{}, nil,
 		RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun},
-		"r", "p", &pipelineEmitContext{emitter: nopEmitter{}}, RenderContext{}, 0)
+		"r", "p", &pipelineEmitContext{emitter: nopEmitter{}}, RenderContext{}, 0, 0)
 	if err == nil || !strings.Contains(err.Error(), "hard validation wall") {
 		t.Fatalf("expected the runner error, got %v", err)
 	}
 	if calls != 1 {
-		t.Errorf("non-matching RetryOn must not retry, got %d calls", calls)
+		t.Errorf("non-matching retry_on must not retry, got %d calls", calls)
 	}
 }
 
@@ -53,14 +52,15 @@ func TestRunStepWithRetry_ExponentialBackoffCapsAndExhausts(t *testing.T) {
 		calls++
 		return AgentStepResult{}, errors.New("flaky upstream")
 	})
+	exec.sleepFn = instantSleep
 	emitted := &captureEmitter{}
 	step := Step{ID: "s", Type: StepAgentRun, AgentSlug: "a", Prompt: "p",
-		Retry: &RetryPolicy{MaxAttempts: 3, InitialDelayMs: 60, MaxDelayMs: 70, Backoff: "exponential"}}
+		Retry: &RetryPolicy{MaxAttempts: 3, Backoff: &BackoffPolicy{MinMs: 60, MaxMs: 70}}}
 
 	start := time.Now()
 	_, _, _, err := exec.runStepWithRetry(context.Background(), step, "p", AdapterModel{}, nil,
 		RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun},
-		"r", "p", &pipelineEmitContext{emitter: emitted}, RenderContext{}, 0)
+		"r", "p", &pipelineEmitContext{emitter: emitted}, RenderContext{}, 0, 0)
 	if err == nil || !strings.Contains(err.Error(), "flaky upstream") {
 		t.Fatalf("expected exhausted error, got %v", err)
 	}
@@ -98,7 +98,7 @@ func TestRunStepWithRetry_PreCancelledContext(t *testing.T) {
 		Retry: &RetryPolicy{MaxAttempts: 2}}
 	_, _, _, err := exec.runStepWithRetry(ctx, step, "p", AdapterModel{}, nil,
 		RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun},
-		"r", "p", &pipelineEmitContext{emitter: nopEmitter{}}, RenderContext{}, 0)
+		"r", "p", &pipelineEmitContext{emitter: nopEmitter{}}, RenderContext{}, 0, 0)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled, got %v", err)
 	}
@@ -110,50 +110,15 @@ func TestRunStepWithRetry_CancelDuringBackoffSleep(t *testing.T) {
 		cancel() // cancel while the loop is about to sleep
 		return AgentStepResult{}, errors.New("boom once")
 	})
-	// 40ms delay stays under the 50ms jitter threshold → deterministic
-	// fixed-length sleep, raced against the already-cancelled ctx.
+	// Real (non-injected) retrySleep raced against the already-cancelled
+	// ctx: the sleep's ctx.Done() branch must win and surface Canceled.
 	step := Step{ID: "s", Type: StepAgentRun, AgentSlug: "a", Prompt: "p",
-		Retry: &RetryPolicy{MaxAttempts: 3, InitialDelayMs: 40}}
+		Retry: &RetryPolicy{MaxAttempts: 3, Backoff: &BackoffPolicy{MinMs: 40}}}
 	_, _, _, err := exec.runStepWithRetry(ctx, step, "p", AdapterModel{}, nil,
 		RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun},
-		"r", "p", &pipelineEmitContext{emitter: nopEmitter{}}, RenderContext{}, 0)
+		"r", "p", &pipelineEmitContext{emitter: nopEmitter{}}, RenderContext{}, 0, 0)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled from the sleep select, got %v", err)
-	}
-}
-
-func TestShouldRetry(t *testing.T) {
-	t.Parallel()
-	if shouldRetry(nil, nil) {
-		t.Error("nil error never retries")
-	}
-	if !shouldRetry(errors.New("anything"), nil) {
-		t.Error("empty allowlist retries on any error")
-	}
-	if shouldRetry(errors.New("hard fail"), []string{"", "timeout"}) {
-		t.Error("non-matching allowlist must not retry (empty entries skipped)")
-	}
-	if !shouldRetry(errors.New("HTTP 503 Service Unavailable"), []string{"503"}) {
-		t.Error("matching substring must retry")
-	}
-	if !shouldRetry(errors.New("Request TIMEOUT after 30s"), []string{"timeout"}) {
-		t.Error("case-folded match must retry")
-	}
-}
-
-func TestCaseFoldHelpers(t *testing.T) {
-	t.Parallel()
-	if containsCaseFold("ab", "abc") {
-		t.Error("needle longer than haystack")
-	}
-	if idx := indexCaseFold("anything", ""); idx != 0 {
-		t.Errorf("empty needle should index 0, got %d", idx)
-	}
-	if idx := indexCaseFold("xxTimeOutyy", "TIMEOUT"); idx != 2 {
-		t.Errorf("case-folded index: %d", idx)
-	}
-	if idx := indexCaseFold("nope", "timeout"); idx != -1 {
-		t.Errorf("miss should be -1, got %d", idx)
 	}
 }
 

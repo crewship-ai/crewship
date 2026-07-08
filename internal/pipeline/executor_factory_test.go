@@ -141,7 +141,13 @@ func TestNewWiredExecutor_WiresEveryDependency(t *testing.T) {
 	// were the http-step security gap — DSL-validated egress_targets /
 	// credential_ref that no production executor actually enforced or
 	// resolved. Do not re-grow this list for security-relevant fields.
-	notFactoryWired := map[string]string{}
+	notFactoryWired := map[string]string{
+		// Test-only injection points for the retry backoff clock — nil in
+		// production (real timer sleep + full jitter via math/rand); set
+		// only from tests to drive the schedule deterministically.
+		"sleepFn":  "test-only retry-clock override; production uses real time",
+		"jitterFn": "test-only retry-jitter override; production uses math/rand",
+	}
 	v := reflect.ValueOf(exec).Elem()
 	typ := v.Type()
 	for i := 0; i < typ.NumField(); i++ {
