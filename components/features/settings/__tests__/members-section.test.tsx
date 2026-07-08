@@ -49,10 +49,14 @@ describe("MembersSection capability grid gating (#866.3)", () => {
   beforeEach(() => cleanup())
 
   it("surfaces the per-member capability section for OWNER/ADMIN callers", () => {
-    renderSection("OWNER")
     // The collapsible trigger renders only when isAdmin — its content
     // (CapabilityGrid) mounts lazily on expand, so the trigger label is
-    // the reliable admin-gate signal.
+    // the reliable admin-gate signal. Both OWNER and ADMIN must pass.
+    renderSection("OWNER")
+    expect(screen.getByText(/Per-member capabilities/i)).toBeTruthy()
+
+    cleanup()
+    renderSection("ADMIN")
     expect(screen.getByText(/Per-member capabilities/i)).toBeTruthy()
   })
 

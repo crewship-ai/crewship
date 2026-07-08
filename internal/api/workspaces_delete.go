@@ -74,9 +74,25 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// The DB opens transactions with _txlock=immediate
+	// (internal/database/database.go), so BeginTx acquires the write lock
+	// up front. Read the "only workspace" count INSIDE this tx so it is
+	// serialized with the delete — otherwise two concurrent deletes could
+	// both observe another workspace and both commit, leaving the owner
+	// with none.
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.logger.Error("begin delete tx", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	defer tx.Rollback()
+
 	// Refuse deleting the caller's only workspace.
 	var otherCount int
-	if err := h.db.QueryRowContext(r.Context(), `
+	if err := tx.QueryRowContext(r.Context(), `
 		SELECT COUNT(*) FROM workspaces w
 		JOIN workspace_members wm ON wm.workspace_id = w.id AND wm.user_id = ?
 		WHERE w.deleted_at IS NULL AND w.id != ?
@@ -89,16 +105,6 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusConflict, "Cannot delete your only workspace")
 		return
 	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	tx, err := h.db.BeginTx(r.Context(), nil)
-	if err != nil {
-		h.logger.Error("begin delete tx", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	defer tx.Rollback()
 
 	// Cascade order: children first, join rows, then the workspace itself.
 	if _, err := tx.ExecContext(r.Context(),
