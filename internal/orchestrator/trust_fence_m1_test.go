@@ -77,7 +77,7 @@ func TestTrustFenceM1_MissionBrief_FencesTaskDescription(t *testing.T) {
 	wsID, crewID, leadID, agentID := seedTestData(t, db)
 	missionID := createTestMission(t, db, wsID, crewID, leadID)
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError + 1}))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	engine := NewMissionEngine(db, nil, nil, logger)
 
 	ms := &missionState{
