@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
 )
@@ -79,7 +80,47 @@ func setupTestDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	t.Cleanup(func() { db.Close() })
+	// Deterministic teardown for the whole package (#892).
+	//
+	// Several handlers spawn *detached* background workers on purpose —
+	// EvalHandler.Replay/Regression fire a `context.WithoutCancel` goroutine
+	// so the terminal run-status write survives the request context. In a real
+	// server that's correct; in a test it means a goroutine keeps writing to
+	// this DB after the test body returns. There is no handle to join them from
+	// here, so the old bare `db.Close()` left two intermittent failures that
+	// wandered between whichever cov test happened to be cleaning up while a
+	// neighbour's worker was still flushing:
+	//
+	//   - `sql: database is closed` bursts — the straggler's next query races
+	//     the close.
+	//   - `TempDir RemoveAll: unlinkat …: directory not empty` — the straggler
+	//     re-touches the WAL (`-wal`/`-shm`) in the window between RemoveAll
+	//     unlinking the sidecars and its final rmdir.
+	//
+	// Fix: quiesce the DB deterministically before Go's t.TempDir RemoveAll
+	// runs (this cleanup is registered after t.TempDir, so LIFO puts it first).
+	// db.Close() prevents any NEW query from starting and waits for in-flight
+	// ones, so once it returns no straggler can create a file. We fold the WAL
+	// back with a TRUNCATE checkpoint first (clean, empty sidecars on close)
+	// and then best-effort unlink any `-wal`/`-shm` that linger, with a short
+	// bounded retry to cover a worker that grew the WAL during the close.
+	t.Cleanup(func() {
+		// Best-effort: a checkpoint can return SQLITE_BUSY if a straggler still
+		// holds the writer; the explicit unlink below is the backstop.
+		_, _ = db.DB.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+		_ = db.Close()
+		// After Close returns, all connections are gone and no goroutine can
+		// reopen this handle, so the sidecars are safe to remove. Retry briefly
+		// in case the filesystem hasn't released a just-closed handle yet.
+		for _, suffix := range []string{"-wal", "-shm"} {
+			for attempt := 0; attempt < 20; attempt++ {
+				if err := os.Remove(dst + suffix); err == nil || os.IsNotExist(err) {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+	})
 	return db.DB
 }
 

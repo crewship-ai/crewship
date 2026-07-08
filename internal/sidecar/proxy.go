@@ -273,11 +273,26 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
 		return
 	}
-	clientConn, _, err := hijacker.Hijack()
+	clientConn, clientBuf, err := hijacker.Hijack()
 	if err != nil {
 		targetConn.Close()
 		http.Error(w, "hijack failed", http.StatusInternalServerError)
 		return
+	}
+
+	// The hijacked bufio.Reader may already hold client bytes the HTTP server
+	// read past the CONNECT request line (a client that pipelines its first
+	// tunnel payload — TLS ClientHello, or a raw write — into the same segment
+	// as the CONNECT). Those bytes live in clientBuf, NOT in the raw socket, so
+	// splicing clientConn directly would drop them and the tunnel would stall
+	// until a deadline (the intermittent `tunnel read: i/o timeout`, #892).
+	// Flush any buffered remainder to the target before raw splicing.
+	if n := clientBuf.Reader.Buffered(); n > 0 {
+		if pending, perr := clientBuf.Reader.Peek(n); perr == nil {
+			if _, werr := targetConn.Write(pending); werr != nil {
+				p.logger.Error("CONNECT flush buffered client bytes failed", "host", host, "error", werr)
+			}
+		}
 	}
 
 	go transfer(targetConn, clientConn)
