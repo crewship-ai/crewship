@@ -121,7 +121,14 @@ func TestCovHandleConnectTunnelSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	// Generous hang-guard, NOT a latency assertion. The success path returns
+	// as soon as the echoed bytes arrive (sub-ms locally); the deadline only
+	// exists so a genuinely wedged tunnel fails the test instead of hanging.
+	// The old 5s bound flaked on CI (`tunnel read: i/o timeout`) purely from
+	// runner CPU contention while the splice goroutine was still scheduled —
+	// a timing artifact unrelated to the diffs it tripped (#892). 30s is far
+	// above any real scheduling delay without slowing the happy path.
+	conn.SetDeadline(time.Now().Add(30 * time.Second))
 
 	target := echoLn.Addr().String()
 	fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", target, target)
@@ -163,6 +170,83 @@ func TestCovHandleConnectTunnelSuccess(t *testing.T) {
 	defer mu.Unlock()
 	if egressHost != target || egressMethod != http.MethodConnect || egressStatus != http.StatusOK {
 		t.Errorf("egress = (%q, %q, %d), want (%q, CONNECT, 200)", egressHost, egressMethod, egressStatus, target)
+	}
+}
+
+// TestCovHandleConnectPipelinedFirstBytes deterministically reproduces the
+// intermittent tunnel stall (#892): a client that writes its first tunnel
+// payload in the SAME segment as the CONNECT request leaves those bytes in the
+// bufio.Reader the HTTP server hands back from Hijack — NOT in the raw socket.
+// The old handleConnect discarded that buffer and spliced the raw conn, so the
+// pipelined bytes were lost and the peer waited for data that never arrived
+// (the flake surfaced as `tunnel read: i/o timeout` under scheduling skew,
+// where the server's background read happened to slurp the first byte). Sending
+// the payload glued to the CONNECT makes the buffering deterministic rather than
+// scheduling-dependent, so this test fails hard (times out) without the drain
+// and passes with it — a real regression pin, not a timing knob.
+func TestCovHandleConnectPipelinedFirstBytes(t *testing.T) {
+	echoLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer echoLn.Close()
+	go func() {
+		conn, err := echoLn.Accept()
+		if err != nil {
+			return
+		}
+		io.Copy(conn, conn)
+		conn.Close()
+	}()
+
+	proxy := NewProxy(ProxyConfig{
+		CredStore: NewCredStore(),
+		Allowlist: NewDomainAllowlist(nil),
+		Logger:    covLogger(),
+		FreeMode:  true,
+	})
+	proxySrv := httptest.NewServer(proxy)
+	defer proxySrv.Close()
+
+	conn, err := net.Dial("tcp", strings.TrimPrefix(proxySrv.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(30 * time.Second))
+
+	target := echoLn.Addr().String()
+	const payload = "first-bytes-after-connect"
+	// CONNECT headers AND the first payload in ONE write — the server reads them
+	// together, so `payload` lands in the hijacked bufio.Reader.
+	fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n%s", target, target, payload)
+
+	br := bufio.NewReader(conn)
+	statusLine, err := br.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read CONNECT status line: %v", err)
+	}
+	if !strings.HasPrefix(statusLine, "HTTP/1.1 200") {
+		t.Fatalf("CONNECT status line = %q, want HTTP/1.1 200", statusLine)
+	}
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read CONNECT headers: %v", err)
+		}
+		if line == "\r\n" || line == "\n" {
+			break
+		}
+	}
+
+	// The pipelined payload must have been forwarded to the echo target and
+	// come back — WITHOUT the client sending anything more.
+	buf := make([]byte, len(payload))
+	if _, err := io.ReadFull(br, buf); err != nil {
+		t.Fatalf("tunnel read (pipelined first bytes lost?): %v", err)
+	}
+	if string(buf) != payload {
+		t.Errorf("echoed %q, want %q", string(buf), payload)
 	}
 }
 
