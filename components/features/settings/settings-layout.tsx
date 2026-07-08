@@ -164,6 +164,7 @@ export function SettingsLayout() {
         <ProfileSection
           userName={session?.user?.name}
           userEmail={session?.user?.email}
+          userAvatarUrl={currentMember?.user?.avatar_url}
           role={role}
           workspaceName={org?.name}
           joinedAt={currentMember?.created_at}

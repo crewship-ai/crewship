@@ -21,6 +21,7 @@ crewship auth <subcommand>
 | Command | Purpose |
 | --- | --- |
 | `auth passwd` | Change your own account password. |
+| `auth avatar` | Upload or clear your profile picture. |
 
 ## `auth passwd`
 
@@ -42,6 +43,21 @@ crewship auth passwd
 
 # Non-interactive (CI/scripts) — current on line 1, new on line 2:
 printf '%s\n%s\n' "$OLD_PW" "$NEW_PW" | crewship auth passwd
+```
+
+## `auth avatar`
+
+Upload a new profile picture, or clear it back to initials. The image must
+be a **PNG, JPEG, or WebP** no larger than **2 MB**; it's served from an
+authenticated endpoint so other members see it on the roster and in chat.
+Backed by [`POST`/`DELETE /api/v1/users/me/avatar`](/api-reference/auth#post-api-v1-users-me-avatar).
+
+```bash
+# Upload or replace:
+crewship auth avatar ./me.png
+
+# Remove, back to initials:
+crewship auth avatar --clear
 ```
 
 <Note>

@@ -95,4 +95,63 @@ describe("ProfileSection editing (#867.1)", () => {
     // No password POST should have been issued.
     expect(apiFetch.mock.calls.some((c) => c[0] === "/api/v1/users/me/password")).toBe(false)
   })
+
+  // #889 — avatar upload.
+  it("uploads a selected image via multipart POST and renders it", async () => {
+    renderProfile()
+    const input = screen.getByLabelText(/upload profile picture/i) as HTMLInputElement
+
+    const returnedUrl = "/api/v1/users/u1/avatar?v=42"
+    apiFetch.mockResolvedValueOnce(ok({ id: "u1", email: "ada@example.com", avatar_url: returnedUrl }))
+
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "me.png", { type: "image/png" })
+    fireEvent.change(input, { target: { files: [file] } })
+
+    await waitFor(() => {
+      const call = apiFetch.mock.calls.find((c) => c[0] === "/api/v1/users/me/avatar")
+      expect(call).toBeTruthy()
+      expect(call![1]).toMatchObject({ method: "POST" })
+      expect(call![1].body).toBeInstanceOf(FormData)
+    })
+    // The returned URL is rendered as an <img>.
+    await waitFor(() => {
+      const img = screen.getByRole("img", { name: /your avatar/i }) as HTMLImageElement
+      expect(img.getAttribute("src")).toBe(returnedUrl)
+    })
+  })
+
+  it("rejects a non-image file client-side without calling the API", async () => {
+    renderProfile()
+    const input = screen.getByLabelText(/upload profile picture/i) as HTMLInputElement
+
+    const file = new File(["hello"], "notes.txt", { type: "text/plain" })
+    fireEvent.change(input, { target: { files: [file] } })
+
+    await waitFor(() => expect(screen.getByText(/must be a png, jpeg, or webp/i)).toBeTruthy())
+    expect(apiFetch.mock.calls.some((c) => c[0] === "/api/v1/users/me/avatar")).toBe(false)
+  })
+
+  it("clears the avatar via DELETE and falls back to initials", async () => {
+    render(
+      <ProfileSection
+        userName="Ada Lovelace"
+        userEmail="ada@example.com"
+        userAvatarUrl="/api/v1/users/u1/avatar?v=1"
+        role="OWNER"
+        workspaceName="Acme"
+      />,
+    )
+    expect(screen.getByRole("img", { name: /your avatar/i })).toBeTruthy()
+
+    apiFetch.mockResolvedValueOnce(ok({ id: "u1", email: "ada@example.com", avatar_url: null }))
+    fireEvent.click(screen.getByRole("button", { name: /^remove$/i }))
+
+    await waitFor(() => {
+      const call = apiFetch.mock.calls.find((c) => c[0] === "/api/v1/users/me/avatar")
+      expect(call).toBeTruthy()
+      expect(call![1]).toMatchObject({ method: "DELETE" })
+    })
+    // Image gone → initials shown.
+    await waitFor(() => expect(screen.queryByRole("img", { name: /your avatar/i })).toBeNull())
+  })
 })

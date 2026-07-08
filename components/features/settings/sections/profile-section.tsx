@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
   LogOut,
@@ -162,6 +162,7 @@ const EXPIRY_PRESETS: Array<{ label: string; value: number }> = [
 interface ProfileSectionProps {
   userName?: string | null
   userEmail?: string | null
+  userAvatarUrl?: string | null
   role?: string | null
   workspaceName?: string | null
   joinedAt?: string | null
@@ -169,14 +170,77 @@ interface ProfileSectionProps {
   onSignOut?: () => void
 }
 
+// Client-side avatar guardrails — mirror the server (#889) so the user gets
+// instant feedback instead of a round-trip rejection.
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024
+const AVATAR_ACCEPT = "image/png,image/jpeg,image/webp"
+
 // ── Component ───────────────────────────────────────────────────────
 
 export function ProfileSection({
-  userName, userEmail, role, workspaceName, joinedAt, sessionExpires, onSignOut,
+  userName, userEmail, userAvatarUrl, role, workspaceName, joinedAt, sessionExpires, onSignOut,
 }: ProfileSectionProps) {
   // ── Editable profile (name) state (#867.1) ──
   const [displayName, setDisplayName] = useState<string | null | undefined>(userName)
   useEffect(() => { setDisplayName(userName) }, [userName])
+
+  // ── Avatar upload state (#889) ──
+  const [avatarUrl, setAvatarUrl] = useState<string | null | undefined>(userAvatarUrl)
+  useEffect(() => { setAvatarUrl(userAvatarUrl) }, [userAvatarUrl])
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [avatarUploading, setAvatarUploading] = useState(false)
+  const [avatarError, setAvatarError] = useState<string | null>(null)
+
+  const onPickAvatar = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    // Reset the input so re-selecting the same file re-triggers onChange.
+    e.target.value = ""
+    if (!file) return
+    setAvatarError(null)
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      setAvatarError("Must be a PNG, JPEG, or WebP image")
+      return
+    }
+    if (file.size > AVATAR_MAX_BYTES) {
+      setAvatarError("Image must be 2MB or smaller")
+      return
+    }
+    setAvatarUploading(true)
+    try {
+      const form = new FormData()
+      form.append("file", file)
+      // No Content-Type header — the browser sets the multipart boundary.
+      const res = await apiFetch("/api/v1/users/me/avatar", { method: "POST", body: form })
+      const body = await res.json().catch(() => null)
+      if (!res.ok) {
+        setAvatarError((body?.detail ?? body?.error) || "Upload failed")
+        return
+      }
+      setAvatarUrl(body?.avatar_url ?? null)
+    } catch {
+      setAvatarError("Upload failed")
+    } finally {
+      setAvatarUploading(false)
+    }
+  }, [])
+
+  const removeAvatar = useCallback(async () => {
+    setAvatarError(null)
+    setAvatarUploading(true)
+    try {
+      const res = await apiFetch("/api/v1/users/me/avatar", { method: "DELETE" })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        setAvatarError((body?.detail ?? body?.error) || "Could not remove avatar")
+        return
+      }
+      setAvatarUrl(null)
+    } catch {
+      setAvatarError("Could not remove avatar")
+    } finally {
+      setAvatarUploading(false)
+    }
+  }, [])
   const [editingName, setEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState("")
   const [savingName, setSavingName] = useState(false)
@@ -368,8 +432,51 @@ export function ProfileSection({
       {/* ── Account ── */}
       <SettingsCard title="Account" description="Your identity on this instance">
         <SettingsRow label="Profile picture">
-          <div className="h-7 w-7 rounded-full bg-primary ring-2 ring-border flex items-center justify-center text-primary-foreground text-[10px] font-semibold">
-            {initials}
+          <div className="flex flex-col items-end gap-1.5">
+            <div className="flex items-center gap-2.5">
+              {avatarUrl ? (
+                <img
+                  src={avatarUrl}
+                  alt="Your avatar"
+                  className="h-9 w-9 rounded-full object-cover ring-2 ring-border"
+                />
+              ) : (
+                <div className="h-9 w-9 rounded-full bg-primary ring-2 ring-border flex items-center justify-center text-primary-foreground text-xs font-semibold">
+                  {initials}
+                </div>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={AVATAR_ACCEPT}
+                className="hidden"
+                onChange={onPickAvatar}
+                aria-label="Upload profile picture"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2.5 text-xs"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={avatarUploading}
+              >
+                {avatarUploading ? <Spinner className="h-3 w-3" /> : (avatarUrl ? "Change" : "Upload")}
+              </Button>
+              {avatarUrl && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+                  onClick={() => void removeAvatar()}
+                  disabled={avatarUploading}
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
+            {avatarError
+              ? <span className="text-[11px] text-destructive">{avatarError}</span>
+              : <span className="text-[10px] text-muted-foreground">PNG, JPEG, or WebP · max 2MB</span>}
           </div>
         </SettingsRow>
         <SettingsRow label="Email">

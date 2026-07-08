@@ -2,8 +2,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -120,6 +124,82 @@ func readSecretLine(r *bufio.Reader) (string, error) {
 	return strings.TrimRight(line, "\r\n"), nil
 }
 
+var authAvatarClear bool
+
+var authAvatarCmd = &cobra.Command{
+	Use:   "avatar [image-path]",
+	Short: "Upload or clear your profile picture",
+	Long: `Upload your own avatar (PNG, JPEG, or WebP; max 2MB) or clear it back
+to initials.
+
+    crewship auth avatar ./me.png     # upload/replace
+    crewship auth avatar --clear      # remove, back to initials
+
+The image is served from an authenticated endpoint; other members see it
+on the roster and in chat.`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		if authAvatarClear {
+			return cobra.NoArgs(cmd, args)
+		}
+		return cobra.ExactArgs(1)(cmd, args)
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		// User-scoped endpoint — no workspace context.
+		client.WorkspaceID = ""
+
+		if authAvatarClear {
+			resp, err := client.Delete("/api/v1/users/me/avatar")
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			if err := cli.CheckError(resp); err != nil {
+				return err
+			}
+			cli.PrintSuccess("Avatar cleared — back to initials.")
+			return nil
+		}
+
+		localPath := args[0]
+		fh, err := os.Open(localPath)
+		if err != nil {
+			return fmt.Errorf("open %s: %w", localPath, err)
+		}
+		defer fh.Close()
+
+		// 2MB server cap → assemble in memory (streaming buys nothing here).
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		fw, err := mw.CreateFormFile("file", filepath.Base(localPath))
+		if err != nil {
+			return fmt.Errorf("multipart form: %w", err)
+		}
+		if _, err := io.Copy(fw, fh); err != nil {
+			return fmt.Errorf("multipart copy: %w", err)
+		}
+		if err := mw.Close(); err != nil {
+			return fmt.Errorf("multipart close: %w", err)
+		}
+
+		resp, err := postMultipart(cmd.Context(), client, "/api/v1/users/me/avatar", mw.FormDataContentType(), &buf)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		cli.PrintSuccess("Avatar updated.")
+		return nil
+	},
+}
+
 func init() {
 	authCmd.AddCommand(authPasswdCmd)
+	authAvatarCmd.Flags().BoolVar(&authAvatarClear, "clear", false, "remove your avatar (back to initials)")
+	authCmd.AddCommand(authAvatarCmd)
 }
