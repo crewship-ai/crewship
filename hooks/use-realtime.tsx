@@ -49,6 +49,10 @@ export type RealtimeEventType =
   | "crew.created"
   | "crew.updated"
   | "crew.deleted"
+  // Broadcast on the workspace channel after a workspace is cascade-deleted
+  // (#866/#890). Lets other connected tabs/users of the now-gone workspace
+  // redirect out instead of hammering dead endpoints.
+  | "workspace.deleted"
   | "agent.log"
   | "file.event"
   | "container.stats"
@@ -96,6 +100,9 @@ const VALID_REALTIME_TYPES: Set<string> = new Set([
   "escalation.created",
   "escalation.resolved", "mission.updated", "task.updated",
   "peer_conversation.updated", "crew.created", "crew.updated", "crew.deleted",
+  // Without this in the allowlist, workspace.deleted is dropped by
+  // handleMessage and the redirect-on-delete listener never fires (#890).
+  "workspace.deleted",
   "agent.log", "file.event", "container.stats",
   "provision.started", "provision.progress", "provision.event", "provision.completed", "provision.failed",
   // Pipeline run events — RunsView + WaitpointRunDetail subscribe.
