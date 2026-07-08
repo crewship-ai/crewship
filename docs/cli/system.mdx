@@ -48,6 +48,18 @@ crewship system keeper
 
 **Output:** Status (enabled/disabled), Ollama URL, Model, Ollama status (online/offline), Secret credential count.
 
+<Note>
+Keeper status is **workspace-scoped** and requires the **ADMIN** or **OWNER**
+role in the active workspace — the Ollama endpoint/model and request counts are
+operational data, not exposed to every member. The request stats you see are
+scoped to that workspace's agents.
+
+A **MEMBER** gets a `403` explaining the role requirement; run the command
+against a workspace where you're an admin (`crewship workspace use <slug>` or
+`--workspace <slug>`). If no workspace is set at all, the CLI stops early with a
+"no workspace set" error rather than calling the server.
+</Note>
+
 ---
 
 ## `crewship system stats`
