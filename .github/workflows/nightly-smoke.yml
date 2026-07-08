@@ -1,12 +1,15 @@
 name: Nightly Smoke
 
-# Runs immediately after nightly.yml publishes a fresh rolling `nightly`
-# release. The release smoke-test.yml is gated on `release: published`
-# with strict tag-name assertions (it expects v-prefixed semver), so it
-# does not cover the nightly channel cleanly. This workflow is the
-# nightly-specific equivalent: it pulls the archive from the rolling
-# release, checks it boots, talks to its own health endpoint, and that
-# the cosign signature on checksums.txt verifies.
+# Runs immediately after nightly.yml publishes a fresh per-run
+# `nightly-<date>-r<run_number>` pre-release (#895 — the repo has
+# immutable releases enabled, so the old rolling `nightly` tag name is
+# burned for good; see #894). The release smoke-test.yml is gated on
+# `release: published` with strict tag-name assertions (it expects
+# v-prefixed semver), so it does not cover the nightly channel cleanly.
+# This workflow is the nightly-specific equivalent: it resolves the
+# pre-release the triggering Nightly run published, pulls its archive,
+# checks it boots, talks to its own health endpoint, and that the
+# cosign signature on checksums.txt verifies.
 #
 # A red check here means the most recent main commit produced a binary
 # that beta testers shouldn't install. The signal to the maintainer is
@@ -51,37 +54,77 @@ jobs:
           # interpolates them inline. CodeQL js/actions/code-injection
           # flags ${{ github.* }} in run: blocks even though these
           # values are not attacker-controllable in this workflow
-          # (PR title / branch name don't reach github.repository).
-          # Matches the pattern PR #483 landed in migration-lint.yml.
+          # (PR title / branch name don't reach github.repository, and
+          # workflow_run.head_sha comes from Nightly, which only runs
+          # on pushes to main). Matches the pattern PR #483 landed in
+          # migration-lint.yml.
           REPO: ${{ github.repository }}
+          # Empty on workflow_dispatch — the resolve step falls back to
+          # the newest nightly pre-release for manual triage runs.
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
         shell: bash
         run: |
           set -euo pipefail
+          # Resolve WHICH per-run pre-release to smoke (#895 replaced
+          # the rolling `nightly` tag with immutable per-run tags).
+          # workflow_run gives us the exact commit the triggering
+          # Nightly built, so we pin the smoke verdict to THAT release
+          # rather than "newest" — a concurrent later publish must not
+          # let this run report green/red for the wrong artifact. On
+          # workflow_dispatch (manual triage) there is no triggering
+          # run, so newest wins.
+          #
+          # Defense-in-depth: only tags matching the exact shape
+          # nightly.yml mints are eligible, and the tag is regex-gated
+          # again before use — a maintainer-created release with an
+          # odd name can neither be selected nor smuggle shell
+          # metacharacters into the commands below.
+          TAG=$(gh api "repos/$REPO/releases?per_page=30" --jq '
+            [ .[]
+              | select(.prerelease == true)
+              | select(.tag_name | test("^nightly-[0-9]{8}-r[0-9]+$"))
+              | select((env.TARGET_SHA == "") or (.target_commitish == env.TARGET_SHA))
+            ] | sort_by(.created_at) | reverse | (first // empty) | .tag_name')
+          if [ -z "${TAG:-}" ]; then
+            if [ -n "${TARGET_SHA:-}" ]; then
+              echo "::error::no nightly-* pre-release targets ${TARGET_SHA} — the triggering Nightly run reported success but its publish step produced nothing this smoke can verify."
+            else
+              echo "::error::no nightly-* pre-releases exist — run the Nightly workflow first."
+            fi
+            exit 1
+          fi
+          case "$TAG" in
+            nightly-*) ;;
+            *) echo "::error::resolved tag '$TAG' escaped the nightly-* filter — refusing to proceed"; exit 1 ;;
+          esac
+          echo "Resolved nightly release: $TAG"
+          echo "NIGHTLY_TAG=$TAG" >> "$GITHUB_ENV"
           # Resolve the exact asset name from the Releases API instead
-          # of post-download globbing. The rolling `nightly` release is
-          # delete-and-recreate per Nightly run, so it SHOULD only
-          # carry one matching archive — but a partial publish or a
-          # future change uploading multiple snapshot variants would
-          # leave stale assets behind, and a glob+head silently
-          # validates whichever sorted first. Fail loudly on >1 match.
-          mapfile -t MATCHES < <(gh release view nightly \
+          # of post-download globbing. Per-run releases are immutable
+          # (assets can't be added after publish), so >1 match means
+          # the publish itself uploaded multiple snapshot variants —
+          # a nightly.yml bug, not stale leftovers. Zero matches means
+          # a partial publish (create succeeded, uploads died). Fail
+          # loudly on both rather than validating whichever asset
+          # sorts first.
+          mapfile -t MATCHES < <(gh release view "$TAG" \
             --repo "$REPO" \
             --json assets \
             --jq '.assets[].name | select(test("linux_amd64\\.tar\\.gz$"))')
           if [ "${#MATCHES[@]}" -eq 0 ]; then
-            echo "::error::no linux_amd64 archive on the nightly release"
+            echo "::error::no linux_amd64 archive on release $TAG — partial publish? (create succeeded, asset upload died; immutable releases can't be repaired in place — delete the release and re-run Nightly)"
             exit 1
           fi
           if [ "${#MATCHES[@]}" -gt 1 ]; then
-            echo "::error::expected exactly one linux_amd64 archive on the nightly release, got ${#MATCHES[@]}:"
+            echo "::error::expected exactly one linux_amd64 archive on release $TAG, got ${#MATCHES[@]}:"
             printf '  %s\n' "${MATCHES[@]}"
-            echo "::error::a previous Nightly run likely left a stale asset; delete it via the Releases UI and re-run."
+            echo "::error::nightly.yml uploaded multiple snapshot variants — fix the publish step."
             exit 1
           fi
           ARCHIVE="${MATCHES[0]}"
           echo "Resolved archive: $ARCHIVE"
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
-          gh release download nightly \
+          gh release download "$TAG" \
             --repo "$REPO" \
             --pattern "$ARCHIVE" \
             --pattern 'checksums.txt' \
