@@ -43,6 +43,13 @@ func TestRoutineImportCmd_TransportError(t *testing.T) {
 	flagServer = ""
 	flagWorkspace = ""
 	covWithStdin(t, `{"slug":"x"}`)
+	// --crew is required and CUID-shaped so resolution needs no lookup; the
+	// error we assert must come from the (unreachable) import POST.
+	_ = routineImportCmd.Flags().Set("crew", "cimportcrew00000000000000")
+	t.Cleanup(func() {
+		_ = routineImportCmd.Flags().Set("crew", "")
+		routineImportCmd.Flags().Lookup("crew").Changed = false
+	})
 	cliCfg = &cli.CLIConfig{Token: "tk", Workspace: covWSCli3, Server: "http://127.0.0.1:1"}
 	if err := routineImportCmd.RunE(routineImportCmd, nil); err == nil {
 		t.Fatal("expected transport error")

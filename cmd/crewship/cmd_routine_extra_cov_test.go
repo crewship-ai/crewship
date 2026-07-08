@@ -312,6 +312,17 @@ func TestRoutineImportCmd(t *testing.T) {
 	importPath := "/api/v1/workspaces/" + covWSCli3 + "/pipelines/import"
 	bundle := `{"slug":"imported","definition":{}}`
 
+	// --crew is now required (the author crew that owns the imported routine).
+	// A CUID-shaped value resolves without an extra /crews lookup.
+	const crewCUID = "cimportcrew00000000000000"
+	if err := routineImportCmd.Flags().Set("crew", crewCUID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = routineImportCmd.Flags().Set("crew", "")
+		routineImportCmd.Flags().Lookup("crew").Changed = false
+	})
+
 	t.Run("from file", func(t *testing.T) {
 		stub := covStub(t)
 		stub.OnPost(importPath, clitest.JSONResponse(200, map[string]string{"slug": "imported", "id": "p1"}))
@@ -327,9 +338,15 @@ func TestRoutineImportCmd(t *testing.T) {
 		if !strings.Contains(out, `Imported routine "imported" (id=p1).`) {
 			t.Errorf("import message wrong: %q", out)
 		}
+		// Body is re-encoded with the author crew stamped in (no longer
+		// verbatim). It must carry both the original slug and author_crew_id.
 		calls := stub.CallsFor("POST", importPath)
-		if len(calls) != 1 || string(calls[0].Body) != bundle {
-			t.Errorf("bundle not forwarded verbatim: %+v", calls)
+		if len(calls) != 1 {
+			t.Fatalf("expected 1 import POST, got %d", len(calls))
+		}
+		body := string(calls[0].Body)
+		if !strings.Contains(body, `"slug":"imported"`) || !strings.Contains(body, `"author_crew_id":"`+crewCUID+`"`) {
+			t.Errorf("import body missing slug or author_crew_id: %s", body)
 		}
 	})
 

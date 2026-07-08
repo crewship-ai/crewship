@@ -528,6 +528,80 @@ These are schema-legal runtime names but have **no sandboxed runner wired**. As 
 `runtime: bash`, `python`, and `go` are **not executable today** and are **rejected when you save, apply, or test-run a routine that uses them** — the error names the offending step and suggests `expr`/`cel` or an `agent_run` conversion. Only `expr` and `cel` are wired.
 </Warning>
 
+### `script`
+
+The `script` step is the **deterministic backbone** of a routine: it runs a **bundled script file** — Python, bash, Node, any language your crew's devcontainer installs — inside the crew's own container, **token-zero** (no LLM). It's the first-class replacement for the old workaround of an `agent_run` step whose prompt merely *told* an agent to shell out to a script: faster (no model turn), cheaper (no tokens), and reproducible (the same input always yields the same output).
+
+A routine is not an LLM chain — it's **deterministic scripts (the fast, cheap, 100%-reliable backbone) + agent steps (judgment, where the output legitimately varies)**. The proven pattern: a `script` step does the mechanical heavy lifting (parse a bank statement, reconcile, verify a checksum), and a downstream `agent_run` applies judgment to its output.
+
+```json
+{
+  "id": "parse",
+  "type": "script",
+  "script": {
+    "path": "scripts/parse_vypis.py",
+    "interpreter": "python3",
+    "args": ["{{ inputs.period }}"]
+  }
+}
+```
+
+Then a downstream step consumes the script's stdout as `{{ steps.parse.output }}`:
+
+```json
+{
+  "id": "reconcile",
+  "type": "agent_run",
+  "agent_slug": "accountant",
+  "needs": ["parse"],
+  "prompt": "Reconcile these parsed movements and flag anomalies:\n{{ steps.parse.output }}"
+}
+```
+
+**How it runs.** The script executes in the crew container as the non-root agent user (`1001:1001`) via the same exec path an agent's own shell tool uses — so it's exactly as sandboxed as the crew already is: `--cap-drop=ALL`, `no-new-privileges`, read-only rootfs with a writable `/tmp`, and the container's pid/mem/cpu caps. **stdout** becomes the step's downstream output; a **non-zero exit code** fails the step; **stderr** is captured for the error/audit but never contaminates stdout. Every script step is recorded as a scrubbed `exec.command` journal entry (the exact argv, exit code, duration) for a durable post-hoc audit.
+
+**Path + interpreter.** `path` resolves under the crew's shared dir (`/crew/shared/`); traversal or an absolute escape is rejected. `interpreter` is optional — it's inferred from the file extension when omitted:
+
+| Extension | Interpreter | | Extension | Interpreter |
+|-----------|-------------|-|-----------|-------------|
+| `.py` | `python3` | | `.rb` | `ruby` |
+| `.sh` / `.bash` | `bash` | | `.pl` | `perl` |
+| `.js` / `.mjs` / `.cjs` | `node` | | `.php` | `php` |
+| `.ts` | `node` | | `.go` | `go run` |
+
+An unknown extension with no explicit `interpreter` is an author-time error. The `interpreter`, `path`, and `args` are assembled into an **argv** (no shell), so args can never inject.
+
+**Inputs** flow two ways, exactly like `code` steps: every declared routine input is exposed as `CREWSHIP_INPUT_<NAME_UPPER>` in the script's environment, and `script.args` / `script.env` values are template-substituted (`{{ inputs.x }}` / `{{ steps.y.output }}`) before the run. A default 300 s timeout applies (override with the step's `timeout_sec`); stdout is capped at 1 MB.
+
+#### Deliver the script into the crew
+
+A `script` step points at a file that must already live in the crew's shared dir. **Don't** hand-copy it or bake a base64 blob into the manifest — declare it on the crew and let `crewship apply` deliver it. Add a `files:` block to the crew manifest:
+
+```yaml
+kind: crew
+metadata:
+  slug: accounting
+spec:
+  files:
+    - src: scripts/parse_vypis.py        # local path, relative to the manifest
+      dest: shared/scripts/parse_vypis.py # lands at /crew/shared/scripts/parse_vypis.py
+```
+
+`crewship apply` materializes each file into the crew's shared dir via the same validated `/files/save` path the `crewship crew files` CLI uses — idempotent, re-delivered when the source changes. (Ad-hoc, you can also `crewship crew files save accounting shared/scripts/parse_vypis.py --file parse_vypis.py`, but the manifest is the durable, declarative path.)
+
+<Info>
+**A script is a crew asset**, not a routine field — it lives in the crew's shared dir and is shared by every routine that crew authors. The crew manifest `files:` block is the **source of truth**. See below for how a script still travels with `routine export`/`import`.
+</Info>
+
+<Warning>
+**Per-step egress is NOT enforced at exec.** A `script` step (like an agent's shell) inherits the crew container's **global** network policy; only `http` steps honor a step's `egress_targets`. Don't rely on a `script` step for per-step network isolation — put outbound calls that need an allowlist in an `http` step.
+</Warning>
+
+#### Scaffold and portability
+
+- **Scaffold** a script-backed routine with `crewship routine init --script` — it emits a `script` step feeding a downstream `agent_run`, with delivery instructions in the description.
+- **Portable bundles.** `crewship routine export` inlines every referenced script file (base64) from the routine's author crew, so a portable routine travels with its backbone — **recipe + scripts + agent judgment**. `crewship routine import --crew <slug>` re-materializes the inlined scripts into the target crew (same `/files/save` path). A script whose destination already exists with **different** content fails loudly — pass `--force` to overwrite (remember: a crew script is shared across routines, so overwriting may affect another routine). `--no-scripts` on either command skips inlining/materializing. Even with inlining, the crew manifest remains the source of truth; export/import is a portability convenience.
+
 ### `transform`
 
 ```json
@@ -976,7 +1050,7 @@ Run state is persisted to the `pipeline_runs` table at every step boundary: when
 At boot, the server scans for runs left in `queued`/`running` from the previous process lifetime and **resumes them from the next unfinished step**:
 
 - **Completed steps are restored, not re-executed.** Their outputs feed downstream `{{ steps.X.output }}` templates exactly as if the process had never died.
-- **The in-flight step re-executes from scratch** — at-least-once semantics. For an `agent_run` step this means the agent call is re-issued (and re-billed); `http`/`code` steps with external side effects may fire twice. Design steps to be idempotent where that matters.
+- **The in-flight step re-executes from scratch** — at-least-once semantics. For an `agent_run` step this means the agent call is re-issued (and re-billed); `http`/`code`/`script` steps with external side effects may fire twice. Design steps to be idempotent where that matters.
 - **Runs parked on a `wait` approval step re-attach to the original waitpoint token.** No duplicate approval card is created; the pending inbox item stays answerable across the restart, and approving it resumes the run.
 - **DAG runs (`needs:`) resume at wave granularity** — the parallel scheduler flushes state when each wave completes, so a kill mid-wave re-executes that wave's unfinished steps.
 - **`call_pipeline` boundaries are NOT persisted.** A kill while a nested pipeline is executing re-runs the **entire nested pipeline** on resume — the parent's `call_pipeline` step is the unit of recovery, and the nested run's own per-step progress is not checkpointed. Keep nested pipelines short or idempotent if a mid-flight kill matters to you.
