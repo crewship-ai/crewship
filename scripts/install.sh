@@ -182,10 +182,16 @@ verify_cosign() {
 }
 
 # ---------- install ----------
-install_binary() {
+# install_file <src> <dst_dir> <name>: move src → dst_dir/name (+x),
+# using sudo only when the destination isn't writable. Shared by the
+# crewship binary and its runtime companions (crewship-sidecar,
+# entrypoint.sh) so they all land in the same directory — which is where
+# `crewship start` autodetects the sidecar + entrypoint.
+install_file() {
   src=$1
   dst_dir=$2
-  dst="${dst_dir}/crewship"
+  name=$3
+  dst="${dst_dir}/${name}"
 
   if [ -w "$dst_dir" ]; then
     mv "$src" "$dst"
@@ -215,6 +221,26 @@ install_binary() {
   and re-run."
   fi
   ok "installed: $dst"
+}
+
+install_binary() {
+  install_file "$1" "$2" "crewship"
+}
+
+# install_companions places the sidecar + entrypoint.sh next to the
+# crewship binary when the archive carries them (release archives from the
+# packaging fix onward do; older tags don't — hence the -f guards, so the
+# installer degrades gracefully rather than failing on an old release).
+# `crewship start` autodetects both from the binary's own directory
+# (internal/config/config.go autodetectSidecarPaths).
+install_companions() {
+  extract_dir=$1
+  dst_dir=$2
+  for name in crewship-sidecar entrypoint.sh; do
+    if [ -f "${extract_dir}/${name}" ]; then
+      install_file "${extract_dir}/${name}" "$dst_dir" "$name"
+    fi
+  done
 }
 
 # ---------- post-install hints ----------
@@ -284,6 +310,9 @@ main() {
 
   DEST=$(pick_install_dir)
   install_binary "${TMP}/crewship" "$DEST"
+  # Runtime companions (sidecar + entrypoint.sh) so `crewship start` boots
+  # without a Makefile. Best-effort: absent on pre-fix release tags.
+  install_companions "${TMP}" "$DEST"
 
   # Sanity check — the binary we just installed must run.
   if ! "${DEST}/crewship" version >/dev/null 2>&1; then
