@@ -182,18 +182,26 @@ jobs:
           set -euo pipefail
           tar -xzf "$ARCHIVE"
           ls -la crewship
-          # Packaging contract (#858): the full archive must ship the
-          # sidecar + entrypoint.sh next to the binary, or `crewship start`
-          # refuses to boot for anyone who installs the tarball. Assert both
-          # are present so the regression that shipped a binary-only archive
-          # can never recur silently.
+          # Packaging contract (#858): the full archive must ship the sidecar
+          # + entrypoint.sh next to the binary (else `crewship start` refuses
+          # to boot for a tarball install), AND the legal/docs files an
+          # explicit goreleaser `files:` block would otherwise drop (an
+          # Apache-2.0 binary without its LICENSE is a compliance bug). Assert
+          # both classes so neither regression can recur silently.
           for f in crewship-sidecar entrypoint.sh; do
             if [ ! -f "$f" ]; then
               echo "::error::archive is missing '$f' — full archive must bundle the sidecar runtime (#858)"
               exit 1
             fi
           done
-          echo "packaging ok: crewship + crewship-sidecar + entrypoint.sh"
+          for pat in 'LICENSE*' 'README*' 'CHANGELOG*'; do
+            # shellcheck disable=SC2086
+            if ! ls $pat >/dev/null 2>&1; then
+              echo "::error::archive is missing $pat — explicit files: block dropped goreleaser's default docs/legal files (#858)"
+              exit 1
+            fi
+          done
+          echo "packaging ok: crewship + crewship-sidecar + entrypoint.sh + LICENSE/README/CHANGELOG"
 
       - name: Probe `crewship version`
         # Nightly uses a snapshot version (no semver tag), so we just

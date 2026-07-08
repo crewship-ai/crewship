@@ -113,11 +113,16 @@ archives:
       - crewship
       - crewship-sidecar
     format: tar.gz
-    # entrypoint.sh is the other host-side file autodetectSidecarPaths looks
-    # for (next to the binary); ship it at the archive root so an unpacked
-    # `crewship start` finds both without a Makefile. strip_parent drops the
-    # scripts/ prefix so it lands as ./entrypoint.sh.
+    # An explicit `files:` REPLACES goreleaser's defaults, so the legal/docs
+    # files it bundles by default (LICENSE*, README*, CHANGELOG*) must be
+    # listed back explicitly — an Apache-2.0 binary shipping without its
+    # LICENSE is a compliance bug. entrypoint.sh is the host-side file
+    # autodetectSidecarPaths looks for next to the binary; strip_parent drops
+    # the scripts/ prefix so it lands at the archive root as ./entrypoint.sh.
     files:
+      - LICENSE*
+      - README*
+      - CHANGELOG*
       - src: scripts/entrypoint.sh
         dst: .
         strip_parent: true
