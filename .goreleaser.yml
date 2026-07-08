@@ -81,11 +81,51 @@ builds:
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
 
+  # crewship-sidecar — the per-container agent runtime shim. `crewship start`
+  # autodetects it next to the crewship binary (internal/config/config.go
+  # autodetectSidecarPaths) and bind-mounts it into every crew container at
+  # /usr/local/bin/crewship-sidecar. Without it in the archive, a
+  # tarball-installed `crewship start` refused to boot ("run 'make
+  # build:sidecar'") — a Makefile the user doesn't have. Bundled ONLY in the
+  # full `default` archive; the CLI-only build never launches containers.
+  - id: crewship-sidecar
+    main: ./cmd/crewship-sidecar
+    binary: crewship-sidecar
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
 archives:
   - id: default
     builds:
       - crewship
+      - crewship-sidecar
     format: tar.gz
+    # An explicit `files:` REPLACES goreleaser's defaults, so the legal/docs
+    # files it bundles by default (LICENSE*, README*, CHANGELOG*) must be
+    # listed back explicitly — an Apache-2.0 binary shipping without its
+    # LICENSE is a compliance bug. entrypoint.sh is the host-side file
+    # autodetectSidecarPaths looks for next to the binary; strip_parent drops
+    # the scripts/ prefix so it lands at the archive root as ./entrypoint.sh.
+    files:
+      - LICENSE*
+      - README*
+      - CHANGELOG*
+      - src: scripts/entrypoint.sh
+        dst: .
+        strip_parent: true
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
   - id: cli
@@ -156,8 +196,13 @@ brews:
     license: "Apache-2.0"
     conflicts:
       - crewship-cli
+    # Install the sidecar + entrypoint.sh alongside crewship so
+    # autodetectSidecarPaths (which checks the binary's own directory first)
+    # finds them and `crewship start` boots without a Makefile.
     install: |
       bin.install "crewship"
+      bin.install "crewship-sidecar"
+      bin.install "entrypoint.sh"
     test: |
       system "#{bin}/crewship", "version"
     commit_msg_template: "chore: update crewship formula to {{ .Tag }}"

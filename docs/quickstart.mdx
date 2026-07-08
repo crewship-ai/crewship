@@ -160,7 +160,7 @@ For pinned versions, custom install directories, and air-gapped install paths se
     ```bash
     crewship doctor
     ```
-    Verifies Docker is running and all runtime dependencies are met. The sidecar binary is embedded in the crewship binary at build time, so no separate pre-build step is required.
+    Verifies Docker is running and all runtime dependencies are met. The `crewship-sidecar` binary and `entrypoint.sh` ship **alongside** `crewship` in the release archive (and the Homebrew formula), and `crewship start` autodetects them from the binary's own directory — so no separate build step is required.
   </Step>
 
   <Step title="(Optional) Opt out of crash reporting">

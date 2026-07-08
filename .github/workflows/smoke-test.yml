@@ -109,6 +109,25 @@ jobs:
           set -euo pipefail
           tar -xzf "${{ steps.archive.outputs.name }}"
           ls -la crewship
+          # Packaging contract (#858): the full archive must bundle the
+          # sidecar + entrypoint.sh next to the binary (else a tarball install
+          # can't `crewship start`), AND the legal/docs files an explicit
+          # goreleaser `files:` block would otherwise drop (Apache-2.0 binary
+          # without its LICENSE = compliance bug). Assert both classes.
+          for f in crewship-sidecar entrypoint.sh; do
+            if [ ! -f "$f" ]; then
+              echo "::error::archive is missing '$f' — full archive must bundle the sidecar runtime (#858)"
+              exit 1
+            fi
+          done
+          for pat in 'LICENSE*' 'README*' 'CHANGELOG*'; do
+            # shellcheck disable=SC2086
+            if ! ls $pat >/dev/null 2>&1; then
+              echo "::error::archive is missing $pat — explicit files: block dropped goreleaser's default docs/legal files (#858)"
+              exit 1
+            fi
+          done
+          echo "packaging ok: crewship + crewship-sidecar + entrypoint.sh + LICENSE/README/CHANGELOG"
 
       - name: Probe `crewship version`
         # Assert non-zero exit AND that the printed version contains the tag —
@@ -165,12 +184,10 @@ jobs:
           NEXTAUTH_SECRET: "00000000000000000000000000000000000000000000000000000000deadbeef"
           ENCRYPTION_KEY: "11111111111111111111111111111111111111111111111111111111cafebabe"
           CREWSHIP_PORT: "9090"
-          # The release archive ships only the `crewship` binary; without a
-          # crewship-sidecar next to it, config load refuses to start. For a
-          # "did the binary even launch" probe the sidecar is out of scope —
-          # skip it. (That the archive can't boot as-shipped without this is
-          # a packaging gap tracked under #858.)
-          CREWSHIP_SKIP_SIDECAR: "1"
+          # No CREWSHIP_SKIP_SIDECAR here (#858 packaging fix): the archive now
+          # bundles crewship-sidecar + entrypoint.sh next to the binary, so
+          # this probe boots exactly as a tarball user's install would —
+          # proving the archive is bootable as-shipped.
         shell: bash
         run: |
           set -euo pipefail
