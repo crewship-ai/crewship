@@ -108,14 +108,19 @@ WHERE pipeline_id = ? AND debounce_key = ? AND status = 'pending'`,
 			fireAt = cap
 		}
 	}
+	// Coalescing adopts the LATEST trigger's payload (inputs/tags/metadata),
+	// so it must also adopt its invoking user — otherwise a run that fires
+	// with user B's inputs would notify user A (the original enqueuer) on a
+	// `to: trigger` step. Attribution follows the payload it belongs to.
 	if _, err := s.db.ExecContext(ctx, `
 UPDATE pending_runs
 SET inputs_json = ?, tags_json = ?, metadata_json = ?, tier_override = ?,
-    priority = ?, fire_at = ?, expires_at = ?, updated_at = datetime('now','subsec')
+    priority = ?, fire_at = ?, expires_at = ?, invoking_user_id = ?,
+    updated_at = datetime('now','subsec')
 WHERE id = ?`,
 		orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
 		nullableStr(pr.TierOverride), pr.Priority, fireAt.UTC().Format(time.RFC3339Nano),
-		nullableTime(pr.ExpiresAt), existingID); err != nil {
+		nullableTime(pr.ExpiresAt), nullableStr(pr.InvokingUserID), existingID); err != nil {
 		return "", false, fmt.Errorf("pending_runs: coalesce: %w", err)
 	}
 	return existingID, true, nil

@@ -157,3 +157,43 @@ func TestPendingDispatcher_NoDoubleFire(t *testing.T) {
 		t.Fatalf("double-fire: expected 5 runs, got %d", got)
 	}
 }
+
+// capturingExecutor records the RunInput of the last Run so a test can
+// assert what the dispatcher threaded through.
+type capturingExecutor struct {
+	mu   sync.Mutex
+	last RunInput
+}
+
+func (c *capturingExecutor) Run(_ context.Context, in RunInput) (*RunResult, error) {
+	c.mu.Lock()
+	c.last = in
+	c.mu.Unlock()
+	return &RunResult{RunID: "run_" + in.TriggeredByID, Status: "COMPLETED"}, nil
+}
+
+// TestDispatcher_ThreadsInvokingUser proves a deferred run's enqueuing user
+// reaches the executor's RunInput, so a `to: trigger` notify in that run
+// resolves to the real triggerer (#842 Phase 1, deferred half).
+func TestDispatcher_ThreadsInvokingUser(t *testing.T) {
+	store := NewPendingRunStore(newPendingDB(t))
+	ctx := context.Background()
+	if _, _, err := store.Enqueue(ctx, PendingRun{
+		ID: "p1", WorkspaceID: "w", PipelineID: "pl", PipelineSlug: "s",
+		InvokingUserID: "usr_trigger", FireAt: time.Now().Add(-time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	exec := &capturingExecutor{}
+	d := NewPendingRunDispatcher(store, exec, nil)
+	d.Start(ctx)
+	waitFor(t, 2*time.Second, func() bool {
+		exec.mu.Lock()
+		defer exec.mu.Unlock()
+		return exec.last.InvokingUserID != ""
+	})
+	d.Stop()
+	if exec.last.InvokingUserID != "usr_trigger" {
+		t.Errorf("dispatcher RunInput.InvokingUserID = %q, want usr_trigger", exec.last.InvokingUserID)
+	}
+}

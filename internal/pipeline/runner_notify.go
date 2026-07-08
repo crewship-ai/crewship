@@ -85,12 +85,23 @@ func (e *Executor) runNotifyStep(ctx context.Context, step Step, parentRender Re
 	// non-blocking contract. Author mistakes with LITERAL targets are
 	// already rejected by validateNotifyTarget at save/dry-run; here we
 	// degrade to a workspace-wide notice so the update still lands.
+	// degraded tracks whether the author's intended recipient could NOT be
+	// honoured and the notice fell back to a workspace-wide notice. It changes
+	// the return marker (notified:degraded) and surfaces a run warning, so a
+	// silent fallback isn't indistinguishable from a targeted delivery — in
+	// particular a templated `to` that renders to an unsupported `crew:<slug>`
+	// (which can only be caught here at run time, not at save) is visible on
+	// the run rather than a server-log-only footnote.
+	degraded := false
 	toRaw := strings.TrimSpace(Render(step.Notify.To, parentRender))
 	targetUserID, targetRole, terr := resolveNotifyTarget(toRaw, in.InvokingUserID)
 	if terr != nil {
 		slog.Default().Warn("notify step: unresolvable target — falling back to workspace notice",
 			"run", runID, "step", step.ID, "to", toRaw, "error", terr)
+		e.recordRunWarning(ctx, runID, "notify:"+step.ID,
+			fmt.Errorf("target %q not delivered as addressed — sent as a workspace notice instead: %w", toRaw, terr))
 		targetUserID, targetRole = "", ""
+		degraded = true
 	}
 
 	// dry_run preview: render but never write to the inbox.
@@ -111,7 +122,10 @@ func (e *Executor) runNotifyStep(ctx context.Context, step Step, parentRender Re
 		case !member:
 			slog.Default().Warn("notify step: target user not in workspace — falling back to workspace notice",
 				"run", runID, "step", step.ID, "user", targetUserID)
+			e.recordRunWarning(ctx, runID, "notify:"+step.ID,
+				fmt.Errorf("target user %q is not a workspace member — sent as a workspace notice instead", targetUserID))
 			targetUserID = ""
+			degraded = true
 		}
 	}
 
@@ -191,6 +205,12 @@ func (e *Executor) runNotifyStep(ctx context.Context, step Step, parentRender Re
 			"run_id":  runID,
 			"step_id": step.ID,
 		})
+	}
+	// A degraded delivery landed (as a workspace notice), but NOT to the
+	// recipient the author addressed — mark it distinctly so the step output
+	// and run detail don't read as a clean targeted send.
+	if degraded {
+		return "notified:degraded:" + item.SourceID, 0, time.Since(stepStart).Milliseconds(), nil
 	}
 	return "notified:" + item.SourceID, 0, time.Since(stepStart).Milliseconds(), nil
 }

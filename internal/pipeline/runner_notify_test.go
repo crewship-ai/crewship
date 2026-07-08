@@ -183,6 +183,39 @@ func TestRunNotifyStep_SoftCap_FailsOpen(t *testing.T) {
 	}
 }
 
+// TestRunNotifyStep_TemplatedCrewDegradesVisibly pins the run-time behaviour
+// of a templated `to` that renders to an unsupported crew:<slug> (the only
+// way crew: reaches run time — literal crew: is rejected at save). It must
+// NOT fail the run (non-blocking contract) but ALSO must not look like a
+// clean targeted send: the notice degrades to a workspace notice AND the
+// step output is marked `notified:degraded` so it's distinguishable.
+func TestRunNotifyStep_TemplatedCrewDegradesVisibly(t *testing.T) {
+	fake := &fakeInboxNotifier{}
+	exec := notifyExecutor(fake)
+
+	step := Step{ID: "n", Type: StepNotify, Notify: &NotifyStep{
+		To:   "crew:{{ inputs.team }}", // renders to crew:sales at run time
+		Body: "done",
+	}}
+	render := RenderContext{Inputs: map[string]any{"team": "sales"}}
+	in := notifyRunInput("ws_1", "u_trig")
+
+	out, _, _, err := exec.runNotifyStep(context.Background(), step, render, in, "run_1")
+	if err != nil {
+		t.Fatalf("templated crew: must not fail the run: %v", err)
+	}
+	if !strings.HasPrefix(out, "notified:degraded") {
+		t.Errorf("output = %q, want notified:degraded prefix (silent fallback would be a bug)", out)
+	}
+	if len(fake.items) != 1 {
+		t.Fatalf("degraded notice should still land as a workspace notice, got %d items", len(fake.items))
+	}
+	if fake.items[0].TargetUserID != "" || fake.items[0].TargetRole != "" {
+		t.Errorf("degraded notice must be workspace-wide (empty target), got user=%q role=%q",
+			fake.items[0].TargetUserID, fake.items[0].TargetRole)
+	}
+}
+
 // TestRunNotifyStep_TargetResolution pins how the `to` field maps to
 // inbox targeting, including the trigger→workspace fallback.
 func TestRunNotifyStep_TargetResolution(t *testing.T) {

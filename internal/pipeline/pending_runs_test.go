@@ -66,6 +66,46 @@ func TestPendingRuns_InvokingUserRoundTrip(t *testing.T) {
 	}
 }
 
+// TestPendingRuns_CoalesceAdoptsLatestInvokingUser pins that a debounce
+// coalesce adopts the LATEST trigger's invoking user alongside its inputs —
+// otherwise a run firing with user B's inputs would notify user A (the
+// original enqueuer) on a `to: trigger` step.
+func TestPendingRuns_CoalesceAdoptsLatestInvokingUser(t *testing.T) {
+	db := newPendingDB(t)
+	s := NewPendingRunStore(db)
+	ctx := context.Background()
+	soon := time.Now().Add(time.Second)
+
+	// User A enqueues a debounced trigger.
+	if _, coalesced, err := s.Enqueue(ctx, PendingRun{
+		ID: "p_a", WorkspaceID: "w", PipelineID: "pl", PipelineSlug: "s",
+		DebounceKey: "k1", InvokingUserID: "user_A", FireAt: soon,
+	}); err != nil || coalesced {
+		t.Fatalf("first enqueue: coalesced=%v err=%v", coalesced, err)
+	}
+	// User B re-triggers the same key → coalesces into the existing row.
+	id, coalesced, err := s.Enqueue(ctx, PendingRun{
+		ID: "p_b", WorkspaceID: "w", PipelineID: "pl", PipelineSlug: "s",
+		DebounceKey: "k1", InvokingUserID: "user_B", FireAt: soon,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !coalesced || id != "p_a" {
+		t.Fatalf("second enqueue should coalesce into p_a, got id=%q coalesced=%v", id, coalesced)
+	}
+	due, err := s.DueRuns(ctx, time.Now().Add(2*time.Second), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(due) != 1 {
+		t.Fatalf("want 1 coalesced row, got %d", len(due))
+	}
+	if due[0].InvokingUserID != "user_B" {
+		t.Errorf("coalesced InvokingUserID = %q, want user_B (latest triggerer)", due[0].InvokingUserID)
+	}
+}
+
 func TestPendingRuns_DueAndPriorityOrder(t *testing.T) {
 	db := newPendingDB(t)
 	s := NewPendingRunStore(db)
