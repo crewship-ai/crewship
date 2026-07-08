@@ -8,8 +8,10 @@ icon: "arrow-up"
 
 Crewship is a single binary plus a `crewship-sidecar` runtime that ships
 alongside it. Upgrading swaps the binary; the database migrates itself on the
-next start, behind an automatic snapshot so a bad upgrade is a one-step
-rollback.
+next start, behind an automatic snapshot. Rolling back a **binary** is one
+step (`self-update` keeps a `.bak`), but once migrations have run, recovery
+**also** requires restoring that pre-migration snapshot — see
+[Rollback / downgrade](#rollback-downgrade) below.
 
 ## Upgrade: `crewship self-update`
 

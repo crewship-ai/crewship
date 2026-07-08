@@ -178,6 +178,42 @@ func TestRestoreBackup(t *testing.T) {
 	}
 }
 
+// TestRestoreBackups_AllFiles pins the multi-file rollback: after the binary
+// AND a companion are backed up and swapped, RestoreBackups returns BOTH to
+// their prior bytes — so a failed sanity check never leaves a new binary
+// beside a stale (or new-but-orphaned) sidecar.
+func TestRestoreBackups_AllFiles(t *testing.T) {
+	dir := t.TempDir()
+	exe := dir + "/crewship"
+	side := dir + "/crewship-sidecar"
+	if err := os.WriteFile(exe, []byte("OLD-BIN"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(side, []byte("OLD-SIDE"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{exe, side} {
+		if err := copyFile(p, p+backupSuffix); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := atomicReplace(exe, []byte("NEW-BIN")); err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicReplace(side, []byte("NEW-SIDE")); err != nil {
+		t.Fatal(err)
+	}
+	if err := RestoreBackups([]string{exe, side}); err != nil {
+		t.Fatalf("RestoreBackups: %v", err)
+	}
+	if b, _ := os.ReadFile(exe); string(b) != "OLD-BIN" {
+		t.Errorf("binary not restored: %q", b)
+	}
+	if b, _ := os.ReadFile(side); string(b) != "OLD-SIDE" {
+		t.Errorf("companion not restored: %q", b)
+	}
+}
+
 func buildTarGz(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	var buf strings.Builder

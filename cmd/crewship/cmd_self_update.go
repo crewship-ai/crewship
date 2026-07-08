@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/update"
 	"github.com/spf13/cobra"
@@ -104,10 +105,15 @@ func runSelfUpdate(ctx context.Context, checkOnly bool) error {
 			return fmt.Errorf("self-update failed (binary unchanged): %w", err)
 		}
 		// Sanity-check the freshly swapped binary actually runs; on failure
-		// roll back to the backup so a bad swap never leaves crewship broken.
-		out, verr := exec.CommandContext(ctx, exePath, "version").CombinedOutput()
+		// roll back every swapped file (binary + companions) so a bad swap
+		// never leaves crewship broken or in a mixed state. Bound the probe
+		// so a hung bad build fails fast into the rollback rather than
+		// stalling self-update indefinitely.
+		sanityCtx, sanityCancel := context.WithTimeout(ctx, 30*time.Second)
+		out, verr := exec.CommandContext(sanityCtx, exePath, "version").CombinedOutput()
+		sanityCancel()
 		if verr != nil {
-			restoreErr := update.RestoreBackup(exePath)
+			restoreErr := update.RestoreBackups(result.Replaced)
 			if restoreErr != nil {
 				return fmt.Errorf(
 					"updated binary failed its version sanity check: %w\n%s\n"+

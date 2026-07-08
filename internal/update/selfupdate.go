@@ -222,30 +222,13 @@ func ApplyInstallerUpdate(ctx context.Context, tag, exePath string, cliOnly bool
 	}
 
 	binDir := filepath.Dir(exePath)
-	backup := exePath + backupSuffix
-	// Back up the current binary first so a mid-update failure (or a failed
-	// sanity check) is a one-step restore.
-	if err := copyFile(exePath, backup); err != nil {
-		return nil, fmt.Errorf("back up current binary: %w", err)
-	}
 
-	res := &SelfUpdateResult{
-		FromVersion: fromVersion,
-		ToVersion:   strings.TrimPrefix(tag, "v"),
-		BackupPath:  backup,
-	}
-	// Swap the running binary in place at exePath.
-	if err := atomicReplace(exePath, newBinary); err != nil {
-		_ = RestoreBackup(exePath)
-		return nil, fmt.Errorf("replace %s: %w", exePath, err)
-	}
-	res.Replaced = append(res.Replaced, exePath)
-
-	// Companions live beside the binary and are only present in the full
-	// archive; swap one only if this install already had it (don't newly
-	// introduce files the install lacked). A companion failure rolls the
-	// whole update back — a new server with a stale sidecar is worse than
-	// no update.
+	// Assemble the full set of files to swap up front: the running binary,
+	// then any companion (full build only) that BOTH ships in the archive and
+	// already exists beside the binary (don't newly introduce files the
+	// install lacked). Every target is swapped and rolled back as one unit —
+	// a partial swap (new server + stale sidecar) is worse than no update.
+	targets := []payloadTarget{{path: exePath, data: newBinary}}
 	if !cliOnly {
 		for _, name := range companions {
 			payload, inArchive := extracted[name]
@@ -254,28 +237,73 @@ func ApplyInstallerUpdate(ctx context.Context, tag, exePath string, cliOnly bool
 			}
 			dst := filepath.Join(binDir, name)
 			if _, err := os.Stat(dst); err != nil {
-				continue
+				continue // companion not present in this install — leave as-is
 			}
-			if err := atomicReplace(dst, payload); err != nil {
-				_ = RestoreBackup(exePath)
-				return nil, fmt.Errorf("replace companion %s (rolled back binary): %w", name, err)
-			}
-			res.Replaced = append(res.Replaced, dst)
+			targets = append(targets, payloadTarget{path: dst, data: payload})
 		}
+	}
+
+	// Back up every target BEFORE swapping any, so a mid-swap failure can
+	// restore ALL of them (not just the binary) to a consistent prior state.
+	for _, t := range targets {
+		if err := copyFile(t.path, t.path+backupSuffix); err != nil {
+			return nil, fmt.Errorf("back up %s: %w", t.path, err)
+		}
+	}
+
+	res := &SelfUpdateResult{
+		FromVersion: fromVersion,
+		ToVersion:   strings.TrimPrefix(tag, "v"),
+		BackupPath:  exePath + backupSuffix,
+	}
+	for i, t := range targets {
+		if err := atomicReplace(t.path, t.data); err != nil {
+			// Roll back every file swapped so far (including this failed one's
+			// prior state via its backup) so the install stays consistent.
+			_ = RestoreBackups(pathsOf(targets[:i+1]))
+			return nil, fmt.Errorf("replace %s (rolled back %d file(s)): %w", t.path, i+1, err)
+		}
+		res.Replaced = append(res.Replaced, t.path)
 	}
 	return res, nil
 }
 
-// RestoreBackup swaps the "<exePath>.bak" backup back over exePath — the
-// rollback the caller invokes when the freshly-swapped binary fails its
-// version sanity check.
-func RestoreBackup(exePath string) error {
-	backup := exePath + backupSuffix
-	data, err := os.ReadFile(backup)
-	if err != nil {
-		return fmt.Errorf("read backup %s: %w", backup, err)
+// payloadTarget pairs a destination path with the bytes to write there.
+type payloadTarget struct {
+	path string
+	data []byte
+}
+
+func pathsOf(ts []payloadTarget) []string {
+	out := make([]string, len(ts))
+	for i, t := range ts {
+		out[i] = t.path
 	}
-	return atomicReplace(exePath, data)
+	return out
+}
+
+// RestoreBackup swaps the "<path>.bak" backup back over path — the rollback
+// primitive for a single file.
+func RestoreBackup(path string) error {
+	data, err := os.ReadFile(path + backupSuffix)
+	if err != nil {
+		return fmt.Errorf("read backup %s: %w", path+backupSuffix, err)
+	}
+	return atomicReplace(path, data)
+}
+
+// RestoreBackups restores every path from its "<path>.bak" backup — the
+// rollback the caller invokes when the freshly-swapped binary fails its
+// sanity check, so the binary AND its companions return together. It attempts
+// every path even if one fails, returning the first error.
+func RestoreBackups(paths []string) error {
+	var firstErr error
+	for _, p := range paths {
+		if err := RestoreBackup(p); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 // copyFile copies src → dst preserving 0755, used to stage the pre-update
