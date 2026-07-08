@@ -221,6 +221,9 @@ jobs:
       - name: Probe health endpoint via `crewship start --no-docker`
         # Port 9091 instead of 9090 (release smoke uses 9090) so a
         # rare parallel run on the same runner pool doesn't collide.
+        # The port is set via CREWSHIP_PORT — `crewship start` has no
+        # --port flag (internal/config reads the env; the first live
+        # run of this probe failed with "unknown flag: --port").
         #
         # NEXTAUTH_SECRET / ENCRYPTION_KEY are required at startup by
         # server.New() (since #375 — used to be a silent fall-back
@@ -232,10 +235,17 @@ jobs:
         env:
           NEXTAUTH_SECRET: "00000000000000000000000000000000000000000000000000000000deadbeef"
           ENCRYPTION_KEY: "11111111111111111111111111111111111111111111111111111111cafebabe"
+          CREWSHIP_PORT: "9091"
+          # The release archive ships only the `crewship` binary; without a
+          # crewship-sidecar next to it, config load refuses to start. For a
+          # "did the binary even launch" probe the sidecar is out of scope —
+          # skip it. (That the archive can't boot as-shipped without this is
+          # a packaging gap tracked under #858.)
+          CREWSHIP_SKIP_SIDECAR: "1"
         shell: bash
         run: |
           set -euo pipefail
-          (./crewship start --no-docker --port 9091 >/tmp/crewship-start.log 2>&1 || true) &
+          (./crewship start --no-docker >/tmp/crewship-start.log 2>&1 || true) &
           SERVER_PID=$!
           trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
 
