@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/license"
+	wshub "github.com/crewship-ai/crewship/internal/ws"
 )
 
 // validLanguages maps language name → true for validation.
@@ -61,6 +62,7 @@ type WorkspaceHandler struct {
 	db      *sql.DB
 	logger  *slog.Logger
 	license *license.License
+	hub     *wshub.Hub
 }
 
 // NewWorkspaceHandler creates a WorkspaceHandler with the given database and logger.
@@ -71,6 +73,10 @@ func NewWorkspaceHandler(db *sql.DB, logger *slog.Logger) *WorkspaceHandler {
 
 // SetLicense attaches the license for enforcing workspace member limits.
 func (h *WorkspaceHandler) SetLicense(lic *license.License) { h.license = lic }
+
+// SetHub attaches the WebSocket hub so mutations (currently workspace
+// deletion) broadcast realtime events to connected clients.
+func (h *WorkspaceHandler) SetHub(hub *wshub.Hub) { h.hub = hub }
 
 // workspaceCounts is the nested `_count` object the settings UI reads
 // (settings-layout.tsx: org._count.{crews,agents,members}). Always

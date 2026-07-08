@@ -9,6 +9,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // Tests for DELETE /api/v1/workspaces/{id} (#866.2).
@@ -162,5 +165,55 @@ func TestWorkspaceDelete_Missing_NotFound(t *testing.T) {
 	h.Delete(rr, deleteReq(t, userID, "no-such-ws", "OWNER", "whatever"))
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// SetHub wires the realtime hub used to broadcast workspace.deleted /
+// crew.deleted after a successful cascade (#881).
+func TestWorkspaceDelete_SetHub_AssignsHub(t *testing.T) {
+	h, _, _ := deleteRig(t)
+	if h.hub != nil {
+		t.Fatal("hub should be nil pre-SetHub")
+	}
+	hub := ws.NewHub(slog.New(slog.NewTextHandler(os.Stderr, nil)), nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
+	h.SetHub(hub)
+	if h.hub != hub {
+		t.Fatalf("hub = %p, want %p", h.hub, hub)
+	}
+}
+
+// With a hub attached, a successful delete runs the broadcast path
+// (crew.deleted per crew + workspace.deleted) without blocking — the
+// hub's broadcast channel is buffered, so no Run() loop is required for
+// the handler to complete. Guards against a regression that would
+// deadlock the request on a realtime send.
+func TestWorkspaceDelete_WithHub_BroadcastsAndSucceeds(t *testing.T) {
+	h, userID, wsID := deleteRig(t)
+	hub := ws.NewHub(slog.New(slog.NewTextHandler(os.Stderr, nil)), nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
+	h.SetHub(hub)
+	seedOtherWorkspace(t, h, "ws-other", "other", userID)
+	seedCrew(t, h.db, "c1", wsID, "Crew 1", "c1")
+
+	done := make(chan int, 1)
+	go func() {
+		rr := httptest.NewRecorder()
+		h.Delete(rr, deleteReq(t, userID, wsID, "OWNER", "test"))
+		done <- rr.Code
+	}()
+	select {
+	case code := <-done:
+		if code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("delete handler blocked on broadcast (hub send deadlock)")
+	}
+
+	var del sql.NullString
+	if err := h.db.QueryRow("SELECT deleted_at FROM workspaces WHERE id = ?", wsID).Scan(&del); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if !del.Valid {
+		t.Fatalf("workspace not soft-deleted")
 	}
 }

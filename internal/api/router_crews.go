@@ -20,6 +20,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	wsCtx := r.authMw.RequireWorkspace
 
 	ws := NewWorkspaceHandler(r.db, r.logger)
+	if r.hub != nil {
+		ws.SetHub(r.hub)
+	}
 	crews := NewCrewHandler(r.db, r.logger)
 	crewSocket := r.socketPath
 	if crewSocket == "" {

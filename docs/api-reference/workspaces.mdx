@@ -202,6 +202,11 @@ serving dispatches immediately; their runtime containers are reaped by the
 orchestrator's idle-TTL lifecycle, the same path a single crew deletion
 relies on.
 
+On success the server broadcasts realtime events on the workspace channel —
+a `crew.deleted` per removed crew and a final `workspace.deleted`
+(`{ id, slug }`) — so connected clients redirect/refresh without a manual
+reload.
+
 **Auth:** `OWNER` only. The route sits behind `canRole "manage"` (`ADMIN+`)
 at the router, and the handler additionally requires the caller to be the
 workspace `OWNER`.

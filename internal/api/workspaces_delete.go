@@ -119,6 +119,33 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
+	// Snapshot the crew ids we're about to soft-delete so we can emit a
+	// crew.deleted per crew after commit (parity with single-crew delete).
+	// Fully drained + closed before the next Exec on this tx connection.
+	var crewIDs []string
+	crewRows, err := tx.QueryContext(r.Context(),
+		"SELECT id FROM crews WHERE workspace_id = ? AND deleted_at IS NULL", workspaceID)
+	if err != nil {
+		h.logger.Error("snapshot crews for delete broadcast", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	for crewRows.Next() {
+		var id string
+		if err := crewRows.Scan(&id); err != nil {
+			crewRows.Close()
+			h.logger.Error("scan crew id for delete broadcast", "error", err)
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		crewIDs = append(crewIDs, id)
+	}
+	crewRows.Close()
+	if err := crewRows.Err(); err != nil {
+		h.logger.Error("iterate crews for delete broadcast", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
 	if _, err := tx.ExecContext(r.Context(),
 		"UPDATE crews SET deleted_at = ? WHERE workspace_id = ? AND deleted_at IS NULL", now, workspaceID); err != nil {
 		h.logger.Error("cascade soft-delete crews", "error", err)
@@ -143,6 +170,18 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
+
+	// Realtime: tell connected clients the workspace (and its crews) are
+	// gone so open settings / roster / crew views redirect or refresh
+	// without a manual reload. Best-effort, post-commit — a nil hub or a
+	// send failure never affects the delete outcome.
+	for _, cid := range crewIDs {
+		broadcastWorkspaceEvent(h.hub, workspaceID, "crew.deleted", map[string]string{"id": cid})
+	}
+	broadcastWorkspaceEvent(h.hub, workspaceID, "workspace.deleted", map[string]string{
+		"id":   workspaceID,
+		"slug": slug,
+	})
 
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
