@@ -120,6 +120,34 @@ func NewOrchestratorRunner(deps OrchestratorRunnerDeps) (*OrchestratorRunner, er
 	}, nil
 }
 
+// PrewarmCrew warms the crew's container ahead of a run's first step (#836).
+// It resolves the crew's PROVISIONED container config by crew id — no agent
+// resolution needed, the runtime image is a crew-level property — and calls
+// EnsureCrewRuntime, the same idempotent primitive RunStep uses. Concurrent
+// prewarms for one crew serialize on the provider's per-crew lock and collapse
+// to a single container start. No run row, LLM call, or cost event is produced;
+// this only provisions the runtime, off the critical path.
+//
+// crewRuntime is the same resolver a cold script step uses; when it's absent or
+// errors we fall back to a minimal {ID} config — EnsureCrewRuntime then reuses
+// a warm container (a cold create would use the base image, same as today).
+func (r *OrchestratorRunner) PrewarmCrew(ctx context.Context, crewID, workspaceID string) error {
+	if r.container == nil || crewID == "" {
+		return nil
+	}
+	cfg := provider.CrewConfig{ID: crewID}
+	if r.crewRuntime != nil {
+		if c, err := r.crewRuntime(ctx, crewID, workspaceID); err == nil {
+			cfg = c
+		} else {
+			r.logger.Debug("prewarm: crew runtime config unavailable, using minimal config",
+				"crew_id", crewID, "error", err)
+		}
+	}
+	_, err := r.container.EnsureCrewRuntime(ctx, cfg)
+	return err
+}
+
 // RunStep is the AgentRunner contract entry point. Each call is one
 // LLM-equivalent invocation against the agent identified by the
 // (AuthorCrewID, AgentSlug) pair on the request. We deliberately
