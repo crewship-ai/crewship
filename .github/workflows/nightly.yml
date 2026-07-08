@@ -180,6 +180,18 @@ jobs:
           args: release --snapshot --clean --skip=publish,homebrew
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          # Pin the version goreleaser builds against instead of deriving it
+          # from git. The "Replace rolling nightly release" step below creates a
+          # rolling `nightly` git tag; `fetch-depth: 0` above pulls it back into
+          # every subsequent checkout, and goreleaser — even with --snapshot —
+          # parses the latest tag as semver up front and dies with
+          # "failed to parse tag 'nightly' as semver" (#886). GORELEASER_CURRENT_TAG
+          # overrides that lookup with a valid, deterministic semver so the
+          # nightly build no longer depends on the rolling tag's (non-semver)
+          # name. It only affects the {{.Version}} string baked into snapshot
+          # artifacts (already "nightly-<sha>" via the ldflags path), not what
+          # gets published — we upload via `gh release` ourselves.
+          GORELEASER_CURRENT_TAG: v0.0.0-nightly
           # goreleaser's `signs:` block uses the GitHub Actions OIDC token to
           # request a Fulcio short-lived cert (keyless cosign). The token is
           # injected automatically because the workflow has `id-token: write`.
