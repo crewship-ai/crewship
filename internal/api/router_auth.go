@@ -65,8 +65,15 @@ func (r *Router) registerAuthRoutes() {
 	// own name + change own password (#867.1). Password change revokes
 	// the caller's other active sessions.
 	profileH := NewUserProfileHandler(r.db, r.logger, r.sessionsStore)
+	profileH.SetAvatarRoot(r.storagePath)
 	r.authedSelfMut("PATCH", "/api/v1/users/me", profileH.UpdateProfile)
 	r.authedSelfMut("POST", "/api/v1/users/me/password", profileH.ChangePassword)
+	// Avatar (#889): upload/clear are self-scoped mutations; the serve route
+	// is authed-only (any signed-in user fetches a member's avatar by id, so
+	// rosters render — an unauth request 401s at RequireAuth).
+	r.authedSelfMut("POST", "/api/v1/users/me/avatar", profileH.UploadAvatar)
+	r.authedSelfMut("DELETE", "/api/v1/users/me/avatar", profileH.DeleteAvatar)
+	r.mux.Handle("GET /api/v1/users/{id}/avatar", authed(http.HandlerFunc(profileH.ServeAvatar)))
 
 	// CLI token management (auth required)
 	cliTokenH := NewCLITokenHandler(r.db, r.logger)

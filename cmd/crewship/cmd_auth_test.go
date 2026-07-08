@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -78,6 +79,60 @@ func TestAuthPasswd_RunE_RejectsShortNew(t *testing.T) {
 	}
 	if len(stub.CallsFor("POST", "/api/v1/users/me/password")) != 0 {
 		t.Errorf("no server call should be made for a too-short password")
+	}
+}
+
+// CLI parity for `crewship auth avatar <path>` (#889) — uploads a file to
+// the user-scoped avatar endpoint via multipart.
+func TestAuthAvatar_RunE_UploadsFile(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	avatarURL := "/api/v1/users/u1/avatar?v=1"
+	stub.OnPost("/api/v1/users/me/avatar",
+		clitest.JSONResponse(200, map[string]any{"id": "u1", "email": "a@b.c", "avatar_url": avatarURL}))
+	setStubCLI(t, stub.URL())
+
+	img := filepath.Join(t.TempDir(), "me.png")
+	if err := os.WriteFile(img, []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0}, 0o644); err != nil {
+		t.Fatalf("write temp png: %v", err)
+	}
+
+	out := captureStdoutCovCli2(t, func() {
+		if err := authAvatarCmd.RunE(authAvatarCmd, []string{img}); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+
+	if n := len(stub.CallsFor("POST", "/api/v1/users/me/avatar")); n != 1 {
+		t.Fatalf("want exactly 1 POST, got %d", n)
+	}
+	if !strings.Contains(strings.ToLower(out), "avatar updated") {
+		t.Errorf("expected success message, got: %s", out)
+	}
+}
+
+// `crewship auth avatar --clear` DELETEs the avatar; no path arg required.
+func TestAuthAvatar_RunE_Clear(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	stub.OnDelete("/api/v1/users/me/avatar",
+		clitest.JSONResponse(200, map[string]any{"id": "u1", "email": "a@b.c", "avatar_url": nil}))
+	setStubCLI(t, stub.URL())
+
+	authAvatarClear = true
+	defer func() { authAvatarClear = false }()
+
+	out := captureStdoutCovCli2(t, func() {
+		if err := authAvatarCmd.RunE(authAvatarCmd, nil); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+
+	if n := len(stub.CallsFor("DELETE", "/api/v1/users/me/avatar")); n != 1 {
+		t.Fatalf("want exactly 1 DELETE, got %d", n)
+	}
+	if !strings.Contains(strings.ToLower(out), "cleared") {
+		t.Errorf("expected cleared message, got: %s", out)
 	}
 }
 

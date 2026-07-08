@@ -1,9 +1,9 @@
 package api
 
 // Self-service profile endpoints (#867.1). Every authenticated user can
-// edit their own identity fields and change their own password without
-// needing any workspace role. Avatar upload is tracked separately (needs
-// a StorageProvider + authed serve endpoint) and is not wired here.
+// edit their own identity fields, change their own password, and upload
+// their own avatar (users_avatar.go, #889) without needing any workspace
+// role.
 
 import (
 	"database/sql"
@@ -25,6 +25,11 @@ type UserProfileHandler struct {
 	db       *sql.DB
 	logger   *slog.Logger
 	sessions sessions.Store
+	// avatarRoot is the storage base for uploaded avatars (the router's
+	// storagePath). Empty when storage isn't configured — avatar upload/serve
+	// then fail closed rather than writing to an unintended location. Set via
+	// SetAvatarRoot, mirroring MissionHandler.SetStoragePath.
+	avatarRoot string
 }
 
 // NewUserProfileHandler wires the profile handler. sessions may be nil
@@ -33,6 +38,10 @@ type UserProfileHandler struct {
 func NewUserProfileHandler(db *sql.DB, logger *slog.Logger, store sessions.Store) *UserProfileHandler {
 	return &UserProfileHandler{db: db, logger: logger, sessions: store}
 }
+
+// SetAvatarRoot points avatar storage at the given base path (the router's
+// storagePath). Avatars land under <root>/avatars/<userID>.
+func (h *UserProfileHandler) SetAvatarRoot(root string) { h.avatarRoot = root }
 
 type userProfileResponse struct {
 	ID        string  `json:"id"`

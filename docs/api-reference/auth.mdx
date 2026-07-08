@@ -527,13 +527,38 @@ have no browser session to preserve, so all browser sessions are revoked.
 
 Drive it from the CLI with [`crewship auth passwd`](/cli/auth).
 
-<Note>
-Avatar upload (`avatar_url`) is not yet wired — it needs a storage-backed
-upload + an authenticated serve endpoint and is tracked in
-[#889](https://github.com/crewship-ai/crewship/issues/889). The field is
-returned by `PATCH /users/me` but is currently only populated by Google
-sign-in.
-</Note>
+### `POST /api/v1/users/me/avatar`
+
+Upload (or replace) your own avatar. **Auth required.** `multipart/form-data`
+with a single `file` field.
+
+- Max **2 MB**; the content type is sniffed from the bytes and must be
+  **PNG, JPEG, or WebP** (a mismatched or unsupported type is a `400`).
+- Stored server-side; `avatar_url` is set to the authenticated serve
+  endpoint below (with a `?v=` cache-buster so a replacement refreshes).
+
+**Response:** `200 OK` — the profile object `{ "id", "email", "full_name", "avatar_url" }`.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `file` field, empty file, over 2 MB, or not a PNG/JPEG/WebP |
+| `401` | Not authenticated |
+| `503` | Avatar storage is not configured on this instance |
+
+### `DELETE /api/v1/users/me/avatar`
+
+Clear your avatar back to initials. **Auth required.** Removes the stored
+file (if any) and sets `avatar_url` to `null`. **Response:** `200 OK` — the
+profile object.
+
+### `GET /api/v1/users/{id}/avatar`
+
+Stream a user's avatar bytes with the correct `Content-Type`. **Auth
+required** — any signed-in user may fetch a member's avatar (rosters render
+each other); an unauthenticated request is `401`. `404` when the user has no
+uploaded avatar. This is the URL `avatar_url` points at after an upload.
+
+Drive avatars from the CLI with [`crewship auth avatar`](/cli/auth).
 
 ---
 
