@@ -152,13 +152,31 @@ jobs:
         # returning HTTP 200 inside the polling loop.
         #
         # Port 9090 avoids the default 8080 which CI runners often have
-        # something else listening on.
+        # something else listening on. Set via CREWSHIP_PORT — `crewship
+        # start` has no --port flag (internal/config reads the env; the
+        # flag variant fails with "unknown flag: --port", caught by the
+        # first live nightly-smoke probe run).
+        #
+        # NEXTAUTH_SECRET / ENCRYPTION_KEY are required at startup by
+        # server.New() (since #375). Deterministic 64-hex throwaways let
+        # the probe reach /api/health; without them the binary dies in
+        # server construction and the probe times out.
+        env:
+          NEXTAUTH_SECRET: "00000000000000000000000000000000000000000000000000000000deadbeef"
+          ENCRYPTION_KEY: "11111111111111111111111111111111111111111111111111111111cafebabe"
+          CREWSHIP_PORT: "9090"
+          # The release archive ships only the `crewship` binary; without a
+          # crewship-sidecar next to it, config load refuses to start. For a
+          # "did the binary even launch" probe the sidecar is out of scope —
+          # skip it. (That the archive can't boot as-shipped without this is
+          # a packaging gap tracked under #858.)
+          CREWSHIP_SKIP_SIDECAR: "1"
         shell: bash
         run: |
           set -euo pipefail
           # Boot the server in the background. --no-docker keeps it SQLite-only,
           # which is what we want for a "did the binary even launch" smoke.
-          (./crewship start --no-docker --port 9090 >/tmp/crewship-start.log 2>&1 || true) &
+          (./crewship start --no-docker >/tmp/crewship-start.log 2>&1 || true) &
           SERVER_PID=$!
           trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
 
