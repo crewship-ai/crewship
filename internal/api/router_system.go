@@ -79,5 +79,8 @@ func (r *Router) registerSystemRoutes() {
 	// WithAuxiliaryModels still see the MVP defaults rather than
 	// 5 empty rows.
 	auxStatus := NewAuxStatusHandler(r.AuxModels(), r.logger)
-	r.mux.Handle("GET /api/v1/system/aux-status", authed(http.HandlerFunc(auxStatus.Status)))
+	// ADMIN+ floor (#868): aux-status enumerates provider + model id for every
+	// slot (incl. Keeper) — the same operational-metadata leak class #893
+	// closed for /system/keeper, so it sits behind the same admin floor.
+	r.authedAdmin("GET", "/api/v1/system/aux-status", auxStatus.Status)
 }

@@ -21,6 +21,9 @@ interface NavItem {
   label: string
   icon: LucideIcon
   badge?: string
+  // Hidden from the nav for non-ADMIN roles. Aux-status is ADMIN+ on the
+  // backend (#868) — surfacing the tab to a MEMBER would just 403.
+  adminOnly?: boolean
 }
 
 interface NavSection {
@@ -42,7 +45,7 @@ const sections: NavSection[] = [
     items: [
       { key: "general", label: "General", icon: Building },
       { key: "crews", label: "Crews & Containers", icon: Box },
-      { key: "aux-models", label: "Auxiliary Models", icon: Cpu },
+      { key: "aux-models", label: "Auxiliary Models", icon: Cpu, adminOnly: true },
       { key: "connections", label: "Connections", icon: Link2 },
       { key: "members", label: "Members", icon: Users },
       { key: "audit", label: "Audit Log", icon: Activity },
@@ -54,9 +57,10 @@ interface SettingsNavProps {
   activeTab: string
   onTabChange: (tab: string) => void
   workspaceName?: string
+  isAdmin?: boolean
 }
 
-export function SettingsNav({ activeTab, onTabChange, workspaceName }: SettingsNavProps) {
+export function SettingsNav({ activeTab, onTabChange, workspaceName, isAdmin }: SettingsNavProps) {
   // Universal search doubles as a command-finder here — type "audit" to jump
   // straight to Audit Log. Filters the nav live; Enter opens the first match.
   const [query, setQuery] = useState("")
@@ -65,9 +69,14 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName }: SettingsN
   const filtered = useMemo(
     () =>
       sections
-        .map((s) => ({ ...s, items: s.items.filter((i) => !q || i.label.toLowerCase().includes(q)) }))
+        .map((s) => ({
+          ...s,
+          items: s.items.filter(
+            (i) => (isAdmin || !i.adminOnly) && (!q || i.label.toLowerCase().includes(q)),
+          ),
+        }))
         .filter((s) => s.items.length > 0),
-    [q],
+    [q, isAdmin],
   )
 
   const firstMatch = filtered[0]?.items[0]?.key

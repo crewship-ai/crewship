@@ -55,10 +55,11 @@ type auxStatusResponse struct {
 // Status returns the resolved AuxModel for every Slot.
 // GET /api/v1/system/aux-status
 func (h *AuxStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
-	// Auth gate mirrors keeper_status.go — any authenticated user can
-	// read the assignment; the values are non-secret diagnostic
-	// metadata (provider name + model id + timeout). If we ever store
-	// API keys inside AuxModel we MUST narrow this to admin.
+	// ADMIN+ floor is enforced at the route (authedAdmin, #868): the slot
+	// rows expose provider + model id for every evaluator including Keeper —
+	// operational metadata a workspace MEMBER should not enumerate (same
+	// class as /system/keeper, closed in #893). This nil-check is
+	// defence-in-depth; RequireAuth already guarantees a user upstream.
 	user := UserFromContext(r.Context())
 	if user == nil {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
