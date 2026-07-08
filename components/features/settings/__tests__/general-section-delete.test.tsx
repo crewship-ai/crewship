@@ -65,9 +65,13 @@ describe("GeneralSection delete flow (#881)", () => {
     })
   })
 
-  it("surfaces an RFC7807 problem detail on failure", async () => {
+  it("surfaces the server error message on failure", async () => {
+    // The delete endpoint returns the legacy { error } shape (replyError);
+    // mock that, not { detail }, so the test exercises the branch the
+    // endpoint actually returns. (The handler's RFC 7807 conversion is
+    // tracked as a follow-up — the FE already reads detail ?? error.)
     apiFetch.mockResolvedValueOnce({
-      ok: false, status: 409, json: async () => ({ detail: "Cannot delete your only workspace" }),
+      ok: false, status: 409, json: async () => ({ error: "Cannot delete your only workspace" }),
     })
     const dialog = openDeleteDialog()
     fireEvent.change(within(dialog).getByLabelText(/confirm workspace slug/i), { target: { value: "acme" } })
