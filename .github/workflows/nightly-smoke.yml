@@ -100,25 +100,30 @@ jobs:
           echo "Resolved nightly release: $TAG"
           echo "NIGHTLY_TAG=$TAG" >> "$GITHUB_ENV"
           # Resolve the exact asset name from the Releases API instead
-          # of post-download globbing. Per-run releases are immutable
-          # (assets can't be added after publish), so >1 match means
-          # the publish itself uploaded multiple snapshot variants —
-          # a nightly.yml bug, not stale leftovers. Zero matches means
-          # a partial publish (create succeeded, uploads died). Fail
-          # loudly on both rather than validating whichever asset
-          # sorts first.
+          # of post-download globbing. goreleaser publishes TWO archive
+          # families per platform since #444 — crewship_<v>_… (the full
+          # server binary this smoke boots) and crewship-cli_<v>_… (the
+          # clionly build, which has no `start`) — so the pattern must
+          # anchor on the server prefix; a bare *linux_amd64.tar.gz*
+          # match is ambiguous and once picked the CLI archive. Within
+          # the server family, exactly one match is expected: per-run
+          # releases are immutable (assets can't be added after
+          # publish), so >1 means the publish itself uploaded duplicate
+          # server variants and 0 means a partial publish (create
+          # succeeded, uploads died). Fail loudly on both rather than
+          # validating whichever asset sorts first.
           mapfile -t MATCHES < <(gh release view "$TAG" \
             --repo "$REPO" \
             --json assets \
-            --jq '.assets[].name | select(test("linux_amd64\\.tar\\.gz$"))')
+            --jq '.assets[].name | select(test("^crewship_.*_linux_amd64\\.tar\\.gz$"))')
           if [ "${#MATCHES[@]}" -eq 0 ]; then
-            echo "::error::no linux_amd64 archive on release $TAG — partial publish? (create succeeded, asset upload died; immutable releases can't be repaired in place — delete the release and re-run Nightly)"
+            echo "::error::no crewship_ server linux_amd64 archive on release $TAG — partial publish? (create succeeded, asset upload died; immutable releases can't be repaired in place — delete the release and re-run Nightly)"
             exit 1
           fi
           if [ "${#MATCHES[@]}" -gt 1 ]; then
-            echo "::error::expected exactly one linux_amd64 archive on release $TAG, got ${#MATCHES[@]}:"
+            echo "::error::expected exactly one crewship_ server linux_amd64 archive on release $TAG, got ${#MATCHES[@]}:"
             printf '  %s\n' "${MATCHES[@]}"
-            echo "::error::nightly.yml uploaded multiple snapshot variants — fix the publish step."
+            echo "::error::nightly.yml uploaded duplicate server variants — fix the publish step."
             exit 1
           fi
           ARCHIVE="${MATCHES[0]}"
