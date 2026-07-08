@@ -142,6 +142,20 @@ INFO  applying migration  version=62  name=add_paymaster_billing_modes
 The `_migrations` table records the applied set and refuses to apply a version-name pair that disagrees with what the code expects — this catches the classic "two PRs both claimed version N with different SQL" footgun loudly at startup.
 </Note>
 
+### Version-skew guard (no accidental downgrade)
+
+Migrations are **forward-only**. If `crewshipd` boots over a database whose highest applied migration is *newer* than the binary knows how to apply — i.e. a **newer** Crewship already migrated it and you've since started an **older** binary — it **refuses to start** rather than run against a schema it doesn't understand (which would silently write partial or malformed rows). The startup error names both versions and the two recovery paths:
+
+```
+database schema is at v134 but this Crewship binary only understands up to v130:
+the database was migrated by a NEWER Crewship. … either upgrade this binary to a
+build that includes migration v134 (or newer), or restore the pre-migration
+snapshot taken before the upgrade ("<database>.pre-migrate-*.bak", alongside your
+database file).
+```
+
+The `*.pre-migrate-*.bak` snapshot is the one Crewship takes automatically before applying pending migrations (see below) — so a bad upgrade is a one-step rollback: put the old binary back **and** restore the matching snapshot.
+
 ## Restoring from a backup that pre-dates a column
 
 The backup subsystem (`internal/backup/runner.go`) records the migrations applied at backup time. On restore, every migration the **target** has but the **source** lacked runs its `restoreBackfill` hook (when defined) against the freshly-inserted rows — so a restore from a v59 bundle into a v62 server populates the new columns sanely instead of leaving them at the SQL DEFAULT. Pure `ADD COLUMN` migrations that rely on the DB default need no hook; complex ones (e.g. backfilling a JSON column) provide one.

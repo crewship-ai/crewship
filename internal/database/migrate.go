@@ -21,6 +21,17 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 		return fmt.Errorf("create migrations table: %w", err)
 	}
 
+	// Version-skew guard (forward-only). If the DB carries a migration
+	// version this binary has never heard of, a NEWER Crewship already
+	// migrated it: the schema has tables/columns/semantics this binary
+	// can't reason about, so continuing would run — and write — against a
+	// schema it doesn't understand (silent corruption). Refuse loudly with
+	// a recovery path. The apply loop below would otherwise skip straight
+	// past every known version and never notice the extra one.
+	if err := guardVersionSkew(ctx, db); err != nil {
+		return err
+	}
+
 	for _, m := range migrations {
 		var appliedName string
 		err := db.QueryRowContext(ctx, "SELECT name FROM _migrations WHERE version = ?", m.version).Scan(&appliedName)
@@ -86,6 +97,47 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 		}
 	}
 
+	return nil
+}
+
+// maxKnownMigrationVersion is the highest schema version this binary can
+// apply — the ceiling the version-skew guard compares the DB against.
+func maxKnownMigrationVersion() int {
+	max := 0
+	for _, m := range migrations {
+		if m.version > max {
+			max = m.version
+		}
+	}
+	return max
+}
+
+// guardVersionSkew refuses to run when the database's highest applied
+// migration exceeds what this binary knows how to apply (a downgrade /
+// version skew). Migrations are forward-only and this binary has no code
+// for the newer schema, so the only safe outcomes are: upgrade the binary,
+// or restore the pre-migration snapshot taken before the upgrade. A fresh
+// DB (nothing applied) passes. Read errors are surfaced, not swallowed —
+// booting blind past this check is the failure mode it exists to prevent.
+func guardVersionSkew(ctx context.Context, db *sql.DB) error {
+	var maxApplied sql.NullInt64
+	if err := db.QueryRowContext(ctx, `SELECT MAX(version) FROM _migrations`).Scan(&maxApplied); err != nil {
+		return fmt.Errorf("version-skew guard: read applied migrations: %w", err)
+	}
+	if !maxApplied.Valid {
+		return nil // fresh DB — nothing applied yet
+	}
+	known := maxKnownMigrationVersion()
+	if int(maxApplied.Int64) > known {
+		return fmt.Errorf(
+			"database schema is at v%d but this Crewship binary only understands up to v%d: "+
+				"the database was migrated by a NEWER Crewship. Migrations are forward-only, so this "+
+				"binary cannot safely run against a newer schema. To recover, either upgrade this binary "+
+				"to a build that includes migration v%d (or newer), or restore the pre-migration snapshot "+
+				"taken before the upgrade (named \"<database>.pre-migrate-*.bak\", alongside your database file).",
+			maxApplied.Int64, known, maxApplied.Int64,
+		)
+	}
 	return nil
 }
 
