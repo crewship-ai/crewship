@@ -16,7 +16,7 @@ crewship ws <subcommand> [flags]
 The active workspace is stored in `~/.crewship/cli-config.yaml` under `workspace` (slug or id). It is sent as `workspace_id=` on every API request by the CLI client, so switching workspaces is purely client-side — no server round-trip.
 
 <Note>
-**Auth:** `list`, `get`, and `create` require `crewship login` (`create` clears the workspace context server-side — it makes a new one). `update`, all `member` operations, and `invite` additionally require an active workspace. `use` only writes the local config and validates the slug against the server when you're already logged in. Role gates apply server-side — `OWNER`/`ADMIN` to update or invite, `MEMBER+` to read.
+**Auth:** `list`, `get`, and `create` require `crewship login` (`create` clears the workspace context server-side — it makes a new one). `update`, all `member` operations, and `invite` additionally require an active workspace. `use` only writes the local config and validates the slug against the server when you're already logged in. Role gates apply server-side — `OWNER`/`ADMIN` to update or invite, `OWNER` only to `delete`, `MEMBER+` to read.
 </Note>
 
 ## Subcommands
@@ -28,6 +28,7 @@ The active workspace is stored in `~/.crewship/cli-config.yaml` under `workspace
 | `workspace get [slug-or-id]` | Show workspace details (defaults to the active one). |
 | `workspace create` | Create a new workspace (you become its OWNER). |
 | `workspace update` | Patch mutable fields on the current workspace. |
+| `workspace delete [slug-or-id]` | Delete a workspace (OWNER only, irreversible). Requires `--confirm <slug>`. |
 | `workspace member list` | List members of the active workspace. |
 | `workspace member add <user-id>` | Add an existing user to the workspace. |
 | `workspace member role <member-id> <ROLE>` | Change a member's role (`MANAGER+`, ladder-guarded). |
@@ -56,6 +57,16 @@ Only flags you actually set are sent — passing nothing returns `no fields to u
 | `--name <string>` | Rename the workspace. |
 | `--slug <string>` | Change the slug (URLs flip immediately). |
 | `--language <code>` | Preferred reply language for agents (e.g. `cs`, `en`). Reinforced at the top and bottom of every agent prompt — including chat sessions, assignments, and pipelines — so the agent answers in this language. |
+
+### `workspace delete`
+
+Deletes a workspace and everything under it. Soft-delete with cascade over
+crews and agents; `OWNER` only, and refused if it is your only workspace.
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--confirm <slug>` | (required) | Re-type the workspace slug to confirm. Sent as `confirm_slug`; the server re-validates it. |
+| `-y`, `--yes` | `false` | Skip the interactive confirmation prompt (the `--confirm` slug is still required). |
 
 ### `workspace member add`
 
@@ -119,6 +130,16 @@ crewship workspace create \
 ```bash
 crewship workspace update --name "ACME Platform Team" --language cs
 ```
+
+### Delete a workspace
+
+```bash
+# OWNER only, irreversible. Re-type the slug to confirm.
+crewship workspace delete acme-robotics --confirm acme-robotics --yes
+```
+
+Refused with `409` if it is your only workspace, and with `403` if you are
+not the `OWNER`.
 
 ### Member management
 

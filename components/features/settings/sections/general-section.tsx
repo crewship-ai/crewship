@@ -45,6 +45,11 @@ export function GeneralSection({
   const [saveError, setSaveError] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [confirmSlug, setConfirmSlug] = useState("")
+  // The backend requires the caller to re-type the slug (confirm_slug),
+  // so the destructive action stays disabled until it matches exactly.
+  const slugConfirmed = confirmSlug === orgSlug
 
   const isDirty = formName !== orgName || formSlug !== orgSlug
 
@@ -101,18 +106,29 @@ export function GeneralSection({
   }
 
   async function handleDelete() {
-    if (isDeleting) return
+    if (isDeleting || !slugConfirmed) return
     setIsDeleting(true)
+    setDeleteError(null)
     try {
-      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, { method: "DELETE" })
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        // The server re-validates confirm_slug against the workspace slug.
+        body: JSON.stringify({ confirm_slug: confirmSlug }),
+      })
       if (res.ok) {
+        setDeleteOpen(false)
         onDelete()
       } else {
         const body = await res.json().catch(() => null)
-        setDeleteError(typeof body?.error === "string" ? body.error : "Failed to delete workspace")
+        // RFC 7807 problems use `detail`; legacy errors use `error`.
+        const msg = body?.detail ?? body?.error
+        setDeleteError(typeof msg === "string" ? msg : "Failed to delete workspace")
+        setDeleteOpen(false)
       }
     } catch {
       setDeleteError("Failed to delete workspace")
+      setDeleteOpen(false)
     } finally {
       setIsDeleting(false)
     }
@@ -265,7 +281,10 @@ export function GeneralSection({
                 Permanently delete all crews, agents, and data
               </div>
             </div>
-            <AlertDialog>
+            <AlertDialog
+              open={deleteOpen}
+              onOpenChange={(o) => { setDeleteOpen(o); if (!o) setConfirmSlug("") }}
+            >
               <AlertDialogTrigger asChild>
                 <Button variant="destructive" size="sm" className="h-7 px-2.5 text-xs">
                   Delete workspace
@@ -278,12 +297,29 @@ export function GeneralSection({
                     This will permanently delete all crews, agents, credentials, and data. This cannot be undone.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel className="h-7 text-xs">Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={handleDelete}
-                    className="h-7 text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                <div className="space-y-1.5 py-1">
+                  <label htmlFor="confirm-slug" className="text-[11px] text-muted-foreground">
+                    Type <span className="font-mono font-medium text-foreground">{orgSlug}</span> to confirm
+                  </label>
+                  <Input
+                    id="confirm-slug"
+                    value={confirmSlug}
+                    onChange={(e) => setConfirmSlug(e.target.value)}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    aria-label="Confirm workspace slug"
+                    placeholder={orgSlug}
+                    className="h-8 text-xs font-mono"
                     disabled={isDeleting}
+                  />
+                </div>
+                <AlertDialogFooter>
+                  <AlertDialogCancel className="h-7 text-xs" disabled={isDeleting}>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={(e) => { e.preventDefault(); void handleDelete() }}
+                    className="h-7 text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    disabled={isDeleting || !slugConfirmed}
                   >
                     {isDeleting && <Spinner className="h-3 w-3 mr-1.5" />}
                     {isDeleting ? "Deleting…" : "Delete workspace"}

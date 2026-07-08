@@ -20,6 +20,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	wsCtx := r.authMw.RequireWorkspace
 
 	ws := NewWorkspaceHandler(r.db, r.logger)
+	if r.hub != nil {
+		ws.SetHub(r.hub)
+	}
 	crews := NewCrewHandler(r.db, r.logger)
 	crewSocket := r.socketPath
 	if crewSocket == "" {
@@ -64,6 +67,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// Workspace detail (require workspace context via path param)
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}", authed(wsCtx(http.HandlerFunc(ws.Get))))
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}", roleManage, ws.Update)
+	// Delete is OWNER-only + slug-confirm + last-workspace guard, all
+	// enforced inside the handler; the route gate is roleManage (ADMIN+)
+	// so a MANAGER never even reaches the finer OWNER check (#866.2).
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}", roleManage, ws.Delete)
 
 	// Workspace members
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/members", authed(wsCtx(http.HandlerFunc(ws.ListMembers))))

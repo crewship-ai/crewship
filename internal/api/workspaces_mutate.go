@@ -205,6 +205,7 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
+	ws.fillNestedCount()
 
 	writeJSON(w, http.StatusOK, ws)
 }
