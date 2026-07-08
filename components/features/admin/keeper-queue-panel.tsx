@@ -54,28 +54,28 @@ const SUBTABS: SubTab[] = [
     label: "Skill review",
     icon: Sparkles,
     prdRef: "F4.1",
-    emptyHint: "No skill reviews pending. Skills queued for crew inclusion appear here.",
+    emptyHint: "No skill reviews recorded yet. Skill-inclusion evaluations appear here as they run.",
   },
   {
     key: "behavior",
     label: "Behavior",
     icon: Activity,
     prdRef: "F4.2",
-    emptyHint: "No behavior reviews pending. Sampled post-tool-call checks appear here.",
+    emptyHint: "No behavior reviews recorded yet. Sampled post-tool-call checks appear here as they run.",
   },
   {
     key: "memory_health",
     label: "Memory health",
     icon: Brain,
     prdRef: "F4.3",
-    emptyHint: "No memory health reviews pending. Daily AGENT.md / CREW.md sweeps appear here.",
+    emptyHint: "No memory health reviews recorded yet. Daily AGENT.md / CREW.md sweeps appear here as they run.",
   },
   {
     key: "negative_learning",
     label: "Negative learning",
     icon: BookOpen,
     prdRef: "F4.4",
-    emptyHint: "No negative-learning proposals pending. Failure-driven lessons appear here.",
+    emptyHint: "No negative-learning entries recorded yet. Failure-driven lessons appear here as they run.",
   },
 ]
 
@@ -173,12 +173,14 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
       <div className="flex items-end justify-between gap-3">
         <div>
           <h3 className="text-body font-medium text-foreground/80 leading-none">
-            Keeper Phase 2 reviews
+            Keeper review log
           </h3>
           <p className="text-[11px] text-muted-foreground mt-1 leading-snug max-w-2xl">
-            Pending reviews from the four Phase-2 evaluator paths
-            (skills, behavior, memory health, negative learning). Click a
-            row to see the full LLM prompt and raw response.
+            A read-only record of the four Phase-2 evaluator paths (skills,
+            behavior, memory health, negative learning). These are
+            observations for audit, not an action queue — there is no
+            approve/reject here. Click a row to inspect the full LLM prompt
+            and raw response.
           </p>
         </div>
         <Button
@@ -278,8 +280,8 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
             title={activeTab.label}
             description={
               rows.length === 0
-                ? `0 reviews · ${activeTab.prdRef}`
-                : `${rows.length} review${rows.length === 1 ? "" : "s"} · ${activeTab.prdRef}`
+                ? `0 entries · ${activeTab.prdRef}`
+                : `${rows.length} entr${rows.length === 1 ? "y" : "ies"} · ${activeTab.prdRef}`
             }
           >
             {rows.length === 0 ? (

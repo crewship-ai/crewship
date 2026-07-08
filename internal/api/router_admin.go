@@ -32,7 +32,7 @@ func (r *Router) registerAdminRoutes() {
 	r.authedAdmin("GET", "/api/v1/admin/workspaces", admin.ListWorkspaces)
 
 	// Admin observability: runtime log-level toggle + disk/health read.
-	obs := NewAdminObservabilityHandler(r.logger)
+	obs := NewAdminObservabilityHandler(r.db, r.logger)
 	r.authedAdmin("GET", "/api/v1/admin/log-level", obs.GetLogLevel)
 	r.authedMut("PUT", "/api/v1/admin/log-level", roleManage, obs.SetLogLevel)
 	r.authedAdmin("GET", "/api/v1/admin/health", obs.Health)

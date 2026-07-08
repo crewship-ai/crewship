@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"database/sql"
 	"log/slog"
 	"net/http"
 	"time"
@@ -16,6 +18,7 @@ import (
 // the signal that would have flagged the log-volume fill before it hit 100%.
 type AdminObservabilityHandler struct {
 	logger    *slog.Logger
+	db        *sql.DB // for the Health DB-liveness probe; may be nil in unit tests that don't exercise it
 	startedAt time.Time
 	// diskUsage and dataDir are injected so Health depends on provider
 	// functions rather than reaching into the filesystem directly — keeps
@@ -26,9 +29,10 @@ type AdminObservabilityHandler struct {
 	dataDir   func() (string, error)
 }
 
-func NewAdminObservabilityHandler(logger *slog.Logger) *AdminObservabilityHandler {
+func NewAdminObservabilityHandler(db *sql.DB, logger *slog.Logger) *AdminObservabilityHandler {
 	return &AdminObservabilityHandler{
 		logger:    logger,
+		db:        db,
 		startedAt: time.Now(),
 		diskUsage: diskusage.Usage,
 		dataDir: func() (string, error) {
@@ -127,6 +131,18 @@ func (h *AdminObservabilityHandler) Health(w http.ResponseWriter, r *http.Reques
 	resp := map[string]any{
 		"uptime_seconds": int(time.Since(h.startedAt).Seconds()),
 		"log_level":      currentLogLevel(),
+	}
+	// Real DB liveness probe. The admin overview's health dots were
+	// hardcoded green (#868); a bounded ping means a wedged/locked SQLite
+	// file actually shows red instead of lying "connected".
+	if h.db != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		if err := h.db.PingContext(ctx); err != nil {
+			resp["db"] = map[string]any{"connected": false, "error": err.Error()}
+		} else {
+			resp["db"] = map[string]any{"connected": true}
+		}
+		cancel()
 	}
 	// Surface every failure mode distinctly so an operator polling during an
 	// incident can tell "disk info intentionally absent" from "data-dir
