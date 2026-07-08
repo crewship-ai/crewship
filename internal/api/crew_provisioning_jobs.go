@@ -510,10 +510,18 @@ func (h *ProvisioningHandler) emitProvisionEvent(ctx context.Context, crewID, wo
 	// under a dedicated, durable type so ProvisionStatus can read it back post
 	// hoc (#829). Every other step stays a generic provisioning.step row.
 	entryType := journal.EntryProvisioningStep
+	emitCtx := ctx
 	if ev.Step == devcontainer.ProvStepBuildFailed {
 		entryType = journal.EntryProvisioningBuildFailed
+		// This is the whole point of #829: the durable diagnostic row MUST
+		// land even when the provisioning ctx was already cancelled (build
+		// timeout / client disconnect). journal.Emit races the queue send
+		// against ctx.Done(), so a cancelled ctx can non-deterministically
+		// drop the entry. Detach from cancellation (values preserved) —
+		// same durability intent as markJobFailed's context.Background().
+		emitCtx = context.WithoutCancel(ctx)
 	}
-	_, _ = h.journal.Emit(ctx, journal.Entry{
+	_, _ = h.journal.Emit(emitCtx, journal.Entry{
 		WorkspaceID: workspaceID,
 		CrewID:      crewID,
 		Type:        entryType,

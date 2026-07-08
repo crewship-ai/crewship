@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
@@ -73,5 +74,54 @@ func TestProvisionStatus_SurfacesBuildFailureFromJournal(t *testing.T) {
 	}
 	if joined := strings.Join(resp.LogTail, "\n"); !strings.Contains(joined, "nonexistent-pkg") {
 		t.Errorf("log_tail missing the failing-step output: %q", joined)
+	}
+}
+
+// The durable build-failed row MUST land even when the provisioning ctx was
+// already cancelled (build timeout / client disconnect). journal.Emit races
+// the queue send against ctx.Done(), so a cancelled ctx can drop the entry;
+// emitProvisionEvent detaches the build_failed write with context.WithoutCancel.
+// Emitting several under an already-cancelled ctx amplifies the race so a
+// regression (dropping the WithoutCancel) reliably fails.
+func TestEmitProvisionEvent_BuildFailedSurvivesCancelledCtx(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	t.Cleanup(h.Stop)
+	w := journal.NewWriter(db, logger, journal.WriterOptions{})
+	h.SetJournal(w)
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'C', 'cancel-829')`, "crew-cancel", wsID)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled — mirrors a provisioning timeout / disconnect
+
+	const n = 5
+	for i := 0; i < n; i++ {
+		h.emitProvisionEvent(ctx, "crew-cancel", wsID, devcontainer.ProvisionEvent{
+			Step:   devcontainer.ProvStepBuildFailed,
+			Status: devcontainer.ProvStatusFailed,
+			Tag:    "crewship-feat:test",
+			Error:  "building feature image: exit code 100",
+			Detail: "#8 E: Unable to locate package nope\n#8 ERROR: did not complete",
+		})
+	}
+	if err := w.Flush(context.Background()); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	entries, _, err := journal.List(context.Background(), db, journal.Query{
+		WorkspaceID: wsID,
+		CrewID:      "crew-cancel",
+		Types:       []journal.EntryType{journal.EntryProvisioningBuildFailed},
+		Limit:       100,
+	})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != n {
+		t.Errorf("build-failed rows must survive a cancelled ctx: got %d, want %d", len(entries), n)
 	}
 }
