@@ -91,25 +91,27 @@ func collectScriptPaths(definition []byte) ([]string, error) {
 }
 
 // scriptCrewFilePath maps a script-step path to the crew shared-file path the
-// `/files/{download,save}` endpoints expect ("shared/…"). Mirrors the runner's
-// path fence (internal/pipeline/runner_script.go resolveScriptPath) and the
-// manifest crew-file normalizer: the path must resolve strictly under the crew
-// shared root; traversal or an absolute escape is rejected.
+// `/files/{download,save}` endpoints expect ("shared/…").
+//
+// It MIRRORS the runner's path fence byte-for-byte (internal/pipeline/
+// runner_script.go resolveScriptPath): a relative path is anchored under
+// /crew/shared/ (so "shared/scripts/x.py" resolves to /crew/shared/shared/
+// scripts/x.py, NOT /crew/shared/scripts/x.py — there is deliberately no
+// "shared/"-prefix special case), an absolute path is cleaned as-is, and the
+// result must live strictly under the crew shared root or it's rejected.
+// Diverging here would make export/import touch a file the routine never runs.
 func scriptCrewFilePath(p string) (string, error) {
 	p = strings.TrimSpace(p)
 	if p == "" {
 		return "", fmt.Errorf("empty script path")
 	}
+	const root = "/crew/shared/"
 	var abs string
 	if strings.HasPrefix(p, "/") {
 		abs = path.Clean(p)
-	} else if strings.HasPrefix(p, "shared/") {
-		// already crew-file-relative
-		abs = path.Clean("/crew/" + p)
 	} else {
-		abs = path.Clean("/crew/shared/" + p)
+		abs = path.Clean(root + p)
 	}
-	const root = "/crew/shared/"
 	if !strings.HasPrefix(abs, root) {
 		return "", fmt.Errorf("script path %q must resolve under %s (no traversal, no absolute escape)", p, root)
 	}

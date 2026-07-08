@@ -85,8 +85,13 @@ func TestScriptCrewFilePath(t *testing.T) {
 	}{
 		{"scripts/parse.py", "shared/scripts/parse.py", true},
 		{"/crew/shared/scripts/verify.py", "shared/scripts/verify.py", true},
-		{"shared/scripts/x.py", "shared/scripts/x.py", true}, // already shared-prefixed relative
-		{"../../etc/passwd", "", false},                      // traversal escapes shared
+		// A "shared/"-prefixed RELATIVE path is NOT special-cased: the runner
+		// (internal/pipeline/runner_script.go resolveScriptPath) prepends
+		// /crew/shared/ to every relative path, so it execs
+		// /crew/shared/shared/scripts/x.py. We must map to the SAME location or
+		// export/import would touch a file the routine never runs.
+		{"shared/scripts/x.py", "shared/shared/scripts/x.py", true},
+		{"../../etc/passwd", "", false}, // traversal escapes shared
 		{"", "", false},
 	}
 	for _, c := range cases {
