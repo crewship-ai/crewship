@@ -55,11 +55,13 @@ func (e *Executor) runStepWithRetry(
 	}
 	minDelay, maxDelay, factor, jitter := resolveBackoff(rp.Backoff)
 
-	// Compile the retry_on predicate once (nil = retry any error). It is
-	// validated at save time, so a compile failure here is a stored-row
-	// anomaly: fall back to retry-any rather than silently never retrying.
-	classifier, cerr := compileRetryOn(rp.RetryOn)
-	if cerr != nil {
+	// Compile the retry_on predicate once (nil program = retry any error).
+	// It is validated at save time, so a compile failure here is a
+	// stored-row anomaly. Fail SAFE: do NOT retry (a broken predicate must
+	// not silently degrade to retry-ANY, which could hammer an upstream on
+	// an error the author never meant to retry).
+	classifier, retryOnBroken := compileRetryOn(rp.RetryOn)
+	if retryOnBroken != nil {
 		classifier = nil
 	}
 
@@ -93,13 +95,22 @@ func (e *Executor) runStepWithRetry(
 			return out, costSum, dur, err
 		}
 		lastOut, lastDur, lastErr = out, dur, err
-		// Stop retrying the moment the accumulated run cost would breach
-		// the cap — the next attempt is unaffordable, so surface the cost
-		// cap failure rather than burning budget we don't have.
-		if maxCost > 0 && priorCostUSD+costSum > maxCost {
-			return lastOut, costSum, lastDur, errors.New(costCapExceededMessage(priorCostUSD+costSum, maxCost, step.ID))
+		// Predictive cost guard: stop BEFORE the attempt that would breach
+		// the cap, not after. If the running total is already at the cap,
+		// or the NEXT attempt (estimated at the average per-attempt cost so
+		// far) would push it over, give up now. The real failure is WRAPPED,
+		// not masked, so the caller still sees why the step was failing.
+		if maxCost > 0 {
+			spent := priorCostUSD + costSum
+			avgPerAttempt := costSum / float64(attempt)
+			if spent >= maxCost || spent+avgPerAttempt > maxCost {
+				return lastOut, costSum, lastDur, fmt.Errorf("%s: %w",
+					retryBudgetExhaustedMessage(spent, avgPerAttempt, maxCost, step.ID), lastErr)
+			}
 		}
-		if !evalRetryOn(classifier, err) || attempt == maxAttempts {
+		// A retry_on that failed to compile at run time (stored-row anomaly)
+		// disables retries entirely — fail safe rather than retry-ANY.
+		if retryOnBroken != nil || !evalRetryOn(classifier, err) || attempt == maxAttempts {
 			break
 		}
 		// Full jitter (the default): actual sleep is uniform in [0, delay)
@@ -139,6 +150,25 @@ const (
 // error. Enough to absorb a transient blip without unbounded spend.
 func defaultRetryPolicy() *RetryPolicy {
 	return &RetryPolicy{MaxAttempts: defaultRetryMaxAttempts}
+}
+
+// stepHasExplicitRetry reports whether the author opted the step into the
+// per-step retry policy — either a `retry:` block or `on_fail: retry_step`
+// (which desugars to the default policy). When true, that policy OWNS the
+// transient-retry concern, so the inner same-tier transient loop stands
+// down to avoid multiplying provider calls (see runRunnerWithTransientRetry).
+func stepHasExplicitRetry(step Step) bool {
+	return step.Retry != nil || step.OnFail == OnFailRetryStep
+}
+
+// retryBudgetExhaustedMessage explains a cost-cap-triggered stop inside the
+// retry loop. Distinct from the run-level costCapExceededMessage (post-step
+// gate): here we stopped PREDICTIVELY, before an attempt that would breach.
+// Keeps the "cost cap" phrase so downstream failure classification still
+// recognises the budget stop.
+func retryBudgetExhaustedMessage(spent, avgPerAttempt, cap float64, stepID string) string {
+	return fmt.Sprintf("cost cap would be exceeded: $%.4f spent on step %q, next retry (~$%.4f) would breach cap $%.4f",
+		spent, stepID, avgPerAttempt, cap)
 }
 
 // resolveBackoff turns a (possibly nil / partially-filled) BackoffPolicy
@@ -242,15 +272,25 @@ func (e *Executor) runRunnerWithTransientRetry(
 		err     error
 		lastErr error
 	)
-	for attempt := 1; attempt <= retryAttemptsPerTier; attempt++ {
+	// Composition guard: when the step carries an explicit retry policy, that
+	// policy owns transient retries (with the author's backoff + retry_on), so
+	// this inner same-tier loop stands down to a single attempt. Otherwise a
+	// step with retry.max_attempts=N and T tiers could reach N × T × 2 provider
+	// calls; standing down bounds it to N × T (the escalation chain is a
+	// separate concern and still runs).
+	perTier := retryAttemptsPerTier
+	if stepHasExplicitRetry(step) {
+		perTier = 1
+	}
+	for attempt := 1; attempt <= perTier; attempt++ {
 		if cerr := ctx.Err(); cerr != nil {
 			return AgentStepResult{}, cerr
 		}
 		res, err = e.runner.RunStep(ctx, req)
 		if err != nil {
 			lastErr = err
-			if attempt < retryAttemptsPerTier && isTransientRunnerError(err) {
-				emit.emitStepRetry(ctx, step, attempt, retryAttemptsPerTier, err.Error(), transientRetryBackoff)
+			if attempt < perTier && isTransientRunnerError(err) {
+				emit.emitStepRetry(ctx, step, attempt, perTier, err.Error(), transientRetryBackoff)
 				if !sleepWithJitter(ctx, transientRetryBackoff) {
 					return AgentStepResult{}, ctx.Err()
 				}
@@ -259,9 +299,9 @@ func (e *Executor) runRunnerWithTransientRetry(
 			return res, err
 		}
 		// Empty success body — treat as transient on first attempt.
-		if attempt < retryAttemptsPerTier && strings.TrimSpace(res.Output) == "" {
+		if attempt < perTier && strings.TrimSpace(res.Output) == "" {
 			lastErr = fmt.Errorf("agent runner returned empty output")
-			emit.emitStepRetry(ctx, step, attempt, retryAttemptsPerTier, "empty output", transientRetryBackoff)
+			emit.emitStepRetry(ctx, step, attempt, perTier, "empty output", transientRetryBackoff)
 			if !sleepWithJitter(ctx, transientRetryBackoff) {
 				return AgentStepResult{}, ctx.Err()
 			}

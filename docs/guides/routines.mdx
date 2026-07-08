@@ -373,18 +373,22 @@ has no services and no notable tools.
 
 | Field | Meaning |
 | --- | --- |
-| `max_attempts` | Total attempts including the first. Capped at 10. |
+| `max_attempts` | Total attempts including the first. Must be `1`–`10` (rejected at save time otherwise). |
 | `backoff.min_ms` | First retry delay. Default `1000`. |
 | `backoff.max_ms` | Delay ceiling. Default `60000`. |
 | `backoff.factor` | Multiplier per attempt. Default `2.0`; `1.0` = constant. |
 | `backoff.jitter` | Full jitter — actual sleep is uniform in `[0, delay)`. Default `true`. Keeps a fleet of runs that all trip the same upstream 429 from retrying in lockstep. |
 | `retry_on` | A **CEL** predicate deciding whether a given error is retryable. Empty = retry any error. |
 
-`retry_on` sees two variables: `error` (the message string) and `transient` (a bool from the built-in 429/5xx/timeout/net-blip classifier). It must evaluate to `bool`. Examples: `'transient'` (shorthand), `'error.contains("429")'`, `'error.matches("(?i)timeout|5\\d\\d")'`. A predicate that doesn't compile — or doesn't return a bool — is rejected at save time.
+`retry_on` sees three variables: `error` (the message string), `transient` (a bool from the built-in 429/5xx/timeout/net-blip classifier), and `status` (the HTTP status parsed from the error, `0` if none — handy for `http` steps). It must evaluate to `bool`. Examples: `'transient'` (shorthand), `'status == 429'`, `'status >= 500'`, `'error.contains("429")'`, `'error.matches("(?i)timeout|5\\d\\d")'`. A predicate that doesn't compile — or doesn't return a bool — is rejected at save time; if a stored routine somehow carries a broken one, the runtime **fails safe and does not retry** rather than retrying on every error.
 
-The loop is **cost-aware**: if the next attempt would push the run's accumulated cost past `max_cost_usd`, the retry loop stops mid-way and fails with a cost-cap error rather than burning the rest of the budget. Each retry emits a `pipeline.step.retrying` event (`attempt N/M`) so the recovery is visible in the run trace without the run going red.
+The loop is **cost-aware and predictive**: after each failed attempt it estimates the next attempt's cost from the running average, and if that would push the run's accumulated cost past `max_cost_usd` it stops *before* spending into the red — surfacing the underlying failure (wrapped, not masked) rather than a bare budget error. Each retry emits a `pipeline.step.retrying` event (`attempt N/M`) so the recovery is visible in the run trace without the run going red.
 
 `on_fail: retry_step` with no explicit `retry:` block is shorthand for the default policy: 3 attempts, exponential backoff 1s→60s, full jitter, retry any error.
+
+<Warning>
+**Retries re-execute the step.** A retried step runs its side effects again — an `http` POST, a script that writes a row, an agent that sends a message. Only add a `retry:` policy (or `on_fail: retry_step`) to steps that are **idempotent**, or scope `retry_on` to failure classes where the side effect provably did not land (e.g. a connection error before the request was sent). For non-idempotent work, prefer an idempotency key on the downstream API over a blind retry. When a step carries an explicit retry policy, the built-in same-tier transient retry stands down (the policy owns retries), so provider calls stay bounded at `max_attempts` × tiers rather than multiplying.
+</Warning>
 
 ### `call_pipeline`
 

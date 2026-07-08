@@ -98,6 +98,12 @@ func validateRetryPolicy(st Step) error {
 	if rp.MaxAttempts < 1 {
 		return fmt.Errorf("pipeline: step %q retry.max_attempts must be >= 1 (got %d)", st.ID, rp.MaxAttempts)
 	}
+	// Match the schema's `maximum: 10` here so save-time validation and the
+	// runtime clamp (retryMaxAttemptsCeiling) agree — an author asking for 50
+	// attempts gets a loud error, not a silent clamp to 10 at run time.
+	if rp.MaxAttempts > retryMaxAttemptsCeiling {
+		return fmt.Errorf("pipeline: step %q retry.max_attempts must be <= %d (got %d)", st.ID, retryMaxAttemptsCeiling, rp.MaxAttempts)
+	}
 	if bp := rp.Backoff; bp != nil {
 		if bp.MinMs < 0 || bp.MaxMs < 0 {
 			return fmt.Errorf("pipeline: step %q retry.backoff delays cannot be negative", st.ID)

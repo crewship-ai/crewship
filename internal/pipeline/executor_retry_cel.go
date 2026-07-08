@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -15,6 +17,9 @@ import (
 //	error     (string) — err.Error()
 //	transient (bool)   — isTransientRunnerError(err): the built-in
 //	                     429/5xx/timeout/net-blip classifier
+//	status    (int)    — HTTP status parsed from the error (0 if none);
+//	                     lets an http step retry on `status == 429` or
+//	                     `status >= 500` without substring-matching
 //
 // The expression must evaluate to bool. Empty retry_on = retry any
 // error (compileRetryOn returns a nil program, evalRetryOn treats nil
@@ -32,9 +37,33 @@ func getRetryCelEnv() (*cel.Env, error) {
 		retryCelEnv, retryCelEnvErr = cel.NewEnv(
 			cel.Variable("error", cel.StringType),
 			cel.Variable("transient", cel.BoolType),
+			cel.Variable("status", cel.IntType),
 		)
 	})
 	return retryCelEnv, retryCelEnvErr
+}
+
+// httpStatusRE matches the http runner's "got HTTP <code>" failure
+// format (runner_http.go) and, as a fallback, a standalone 3-digit HTTP
+// status token in an error from another source.
+var httpStatusRE = regexp.MustCompile(`(?i)HTTP (\d{3})\b`)
+var bareStatusRE = regexp.MustCompile(`\b([1-5]\d{2})\b`)
+
+// extractHTTPStatus pulls an HTTP status code out of an error message,
+// returning 0 when there isn't one. It prefers the explicit "HTTP <code>"
+// shape the http step emits, then falls back to any 1xx–5xx token so a
+// wrapped upstream client error ("503 Service Unavailable") still exposes
+// `status` to the predicate.
+func extractHTTPStatus(msg string) int {
+	if m := httpStatusRE.FindStringSubmatch(msg); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		return n
+	}
+	if m := bareStatusRE.FindStringSubmatch(msg); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		return n
+	}
+	return 0
 }
 
 // compileRetryOn compiles a retry_on predicate. Empty/whitespace expr
@@ -75,9 +104,11 @@ func evalRetryOn(prg cel.Program, err error) bool {
 	if prg == nil {
 		return true
 	}
+	msg := err.Error()
 	out, _, evalErr := prg.Eval(map[string]any{
-		"error":     err.Error(),
+		"error":     msg,
 		"transient": isTransientRunnerError(err),
+		"status":    extractHTTPStatus(msg),
 	})
 	if evalErr != nil {
 		return false

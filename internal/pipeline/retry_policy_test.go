@@ -128,10 +128,47 @@ func TestRetryPolicy_RetryOnMismatch_AbortsImmediately(t *testing.T) {
 	}
 }
 
-// max_cost_usd trips MID-retry: each attempt costs money (execution
-// succeeds, validation gate rejects it), so the retry loop stops the
-// moment the accumulated run cost breaches the cap rather than burning
-// the full MaxAttempts budget.
+// Composition with the inner same-tier transient retry: an explicit step
+// retry policy OWNS transient retries, so the inner loop stands down. A
+// transient 429 on every attempt therefore costs exactly MaxAttempts provider
+// calls — not MaxAttempts × 2. Also exercises the `status` CEL variable
+// end-to-end (retry_on: "status == 429").
+func TestRetryPolicy_ExplicitPolicyDisablesInnerTransientRetry(t *testing.T) {
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+	var calls int
+	fn := runnerFunc(func(_ context.Context, _ AgentStepRequest) (AgentStepResult, error) {
+		calls++
+		return AgentStepResult{}, errors.New("upstream returned HTTP 429 too many requests")
+	})
+	exec := NewExecutor(store, resolver, fn, nil)
+	exec.sleepFn = instantSleep
+
+	dsl := &DSL{Name: "x", Steps: []Step{
+		{ID: "s1", Type: StepAgentRun, AgentSlug: "worker", Prompt: "go",
+			Retry: &RetryPolicy{MaxAttempts: 3, RetryOn: "status == 429"}},
+	}}
+	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Status != "FAILED" {
+		t.Errorf("expected FAILED after exhausting attempts, got %s", res.Status)
+	}
+	// 3 step attempts × 1 provider call each (inner transient loop stood down)
+	// = 3. Without the composition guard this would be 6 (each attempt's inner
+	// loop retrying the 429 once more).
+	if calls != 3 {
+		t.Errorf("explicit retry policy must bound provider calls to MaxAttempts: got %d, want 3", calls)
+	}
+}
+
+// max_cost_usd trips MID-retry, PREDICTIVELY: each attempt costs money
+// (execution succeeds, validation gate rejects it), so the retry loop stops
+// BEFORE the attempt that would breach the cap — and wraps the real failure
+// rather than masking it.
 func TestRetryPolicy_CostCapEndsRetryMidLoop(t *testing.T) {
 	store, resolver, cleanup := openExecutorTestDB(t)
 	defer cleanup()
@@ -160,13 +197,19 @@ func TestRetryPolicy_CostCapEndsRetryMidLoop(t *testing.T) {
 	if res.Status != "FAILED" {
 		t.Fatalf("expected FAILED, got %s", res.Status)
 	}
-	if !strings.Contains(res.ErrorMessage, "cost cap exceeded") {
+	if !strings.Contains(res.ErrorMessage, "cost cap") {
 		t.Errorf("expected a cost-cap failure, got %q", res.ErrorMessage)
 	}
-	// $1/attempt, cap $2.5: attempts 1+2 stay under, attempt 3 breaches →
-	// the loop stops at 3, well short of MaxAttempts=5.
-	if calls != 3 {
-		t.Errorf("cost cap must end the retry loop mid-way: got %d attempts, want 3", calls)
+	// The real failure must be WRAPPED, not masked, so an operator still sees
+	// WHY the step was failing.
+	if !strings.Contains(res.ErrorMessage, "below min 100") {
+		t.Errorf("cost-cap error must wrap the underlying failure, got %q", res.ErrorMessage)
+	}
+	// $1/attempt, cap $2.5: after attempt 2 (spent $2.0) the next (~$1.0) would
+	// breach, so the loop stops PREDICTIVELY at 2 — before overspending, and
+	// well short of MaxAttempts=5.
+	if calls != 2 {
+		t.Errorf("predictive cost cap must stop before the breaching attempt: got %d, want 2", calls)
 	}
 }
 
@@ -268,5 +311,70 @@ func TestRetryOnClassifier(t *testing.T) {
 	// A syntactically invalid expression is rejected too.
 	if _, err := compileRetryOn("error.("); err == nil {
 		t.Error("invalid CEL must fail to compile")
+	}
+}
+
+func TestExtractHTTPStatus(t *testing.T) {
+	cases := map[string]int{
+		`http step "x" got HTTP 429 (success codes: [200])`: 429,
+		"upstream returned HTTP 503 service unavailable":    503,
+		"503 Service Unavailable":                           503,
+		"connection refused":                                0,
+		"took 250ms":                                        0, // no word boundary after 250 (→ms), so not misread as a status
+		"":                                                  0,
+	}
+	for msg, want := range cases {
+		if got := extractHTTPStatus(msg); got != want {
+			t.Errorf("extractHTTPStatus(%q) = %d, want %d", msg, got, want)
+		}
+	}
+}
+
+func TestRetryOn_StatusVariable(t *testing.T) {
+	prg, err := compileRetryOn("status >= 500")
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if !evalRetryOn(prg, errors.New(`http step "x" got HTTP 503`)) {
+		t.Error("503 should match status >= 500")
+	}
+	if evalRetryOn(prg, errors.New(`http step "x" got HTTP 404`)) {
+		t.Error("404 should not match status >= 500")
+	}
+}
+
+// A retry_on that fails to compile at run time (a stored-row anomaly that
+// slipped past save-time validation) must FAIL SAFE — no retry — rather than
+// degrade to retry-ANY. Constructed by calling runStepWithRetry directly with
+// an invalid predicate (Validate would normally reject it).
+func TestRunStepWithRetry_BrokenRetryOnDoesNotRetry(t *testing.T) {
+	calls := 0
+	exec := retryHarness(t, func(_ context.Context, _ AgentStepRequest) (AgentStepResult, error) {
+		calls++
+		return AgentStepResult{}, errors.New("some transient 503")
+	})
+	exec.sleepFn = instantSleep
+	step := Step{ID: "s", Type: StepAgentRun, AgentSlug: "a", Prompt: "p",
+		Retry: &RetryPolicy{MaxAttempts: 5, RetryOn: "this is not ( valid cel"}}
+	_, _, _, err := exec.runStepWithRetry(context.Background(), step, "p", AdapterModel{}, nil,
+		RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun},
+		"r", "p", &pipelineEmitContext{emitter: nopEmitter{}}, RenderContext{}, 0, 0)
+	if err == nil {
+		t.Fatal("expected the runner error to surface")
+	}
+	if calls != 1 {
+		t.Errorf("a broken retry_on must not retry (fail safe): got %d calls, want 1", calls)
+	}
+}
+
+func TestValidateRetryPolicy_MaxAttemptsCeiling(t *testing.T) {
+	// > ceiling is rejected loudly (matches schema maximum:10), not clamped.
+	err := validateRetryPolicy(Step{ID: "s", Retry: &RetryPolicy{MaxAttempts: 50}})
+	if err == nil || !strings.Contains(err.Error(), "must be <= 10") {
+		t.Errorf("max_attempts=50 must be rejected, got %v", err)
+	}
+	// The ceiling itself is fine.
+	if err := validateRetryPolicy(Step{ID: "s", Retry: &RetryPolicy{MaxAttempts: 10}}); err != nil {
+		t.Errorf("max_attempts=10 must be accepted, got %v", err)
 	}
 }

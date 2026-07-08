@@ -473,7 +473,7 @@
       "properties": {
         "max_attempts": { "type": "integer", "minimum": 1, "maximum": 10, "description": "Total attempts including the first. Capped at 10." },
         "backoff": { "$ref": "#/$defs/BackoffPolicy" },
-        "retry_on": { "type": "string", "description": "CEL predicate deciding whether an error is retryable. Sees `error` (message string) and `transient` (bool: the built-in 429/5xx/timeout classifier). Must evaluate to bool. Empty = retry any error. E.g. 'transient' or 'error.contains(\"429\")' or 'error.matches(\"(?i)timeout\")'." }
+        "retry_on": { "type": "string", "description": "CEL predicate deciding whether an error is retryable. Sees `error` (message string), `transient` (bool: the built-in 429/5xx/timeout classifier), and `status` (int: HTTP status parsed from the error, 0 if none). Must evaluate to bool. Empty = retry any error. E.g. 'transient' or 'status == 429' or 'status >= 500' or 'error.contains(\"429\")'." }
       }
     },
     "BackoffPolicy": {
