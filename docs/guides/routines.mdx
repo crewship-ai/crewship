@@ -1241,6 +1241,8 @@ Fixes, in order of preference:
 2. **Set a default on the InputSpec.** If the input is genuinely optional but you still want a tenant-style gate, add `"default": "global"` (or any non-empty sentinel) to the `InputSpec`. The platform merges defaults before rendering the key.
 3. **Use a literal prefix.** A template like `"vendor-alert-{{ inputs.vendor_id }}"` always renders non-empty (the literal `vendor-alert-` survives even when `vendor_id` is missing); the key still gates, just less granularly.
 4. **Drop the gate.** If you genuinely don't want concurrency control, omit `concurrency_key` entirely (do NOT set it to `""` — that's the *unset* sentinel).
+
+**Catch it before you ship.** `crewship routine validate` (and `save`) now reject a `concurrency_key` that *can* render fully empty — one built entirely from `{{ inputs.X }}` refs where none is `required: true`/defaulted. Applying fix #2 (anchor a referenced input) or fix #3 (a literal prefix) satisfies the check, so the empty-render failure is caught at author time instead of on the first bad run.
 </Accordion>
 </AccordionGroup>
 

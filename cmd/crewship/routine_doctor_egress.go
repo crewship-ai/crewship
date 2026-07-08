@@ -31,8 +31,8 @@ func checkEgressTargets(def map[string]interface{}) []doctorCheck {
 			issues = append(issues, doctorCheck{
 				Name:    "egress_allowlist",
 				Level:   doctorWarn,
-				Message: fmt.Sprintf("egress_targets contains wildcard %q", host),
-				Hint:    "wildcards open the routine to SSRF; pin to specific hostnames",
+				Message: fmt.Sprintf("egress_targets entry %q matches no host at run time", host),
+				Hint:    "targets are literal/subdomain-suffix matched, not globbed — this dead entry silently denies all egress; list real hostnames, or drop egress_targets entirely for unrestricted egress",
 			})
 			continue
 		}

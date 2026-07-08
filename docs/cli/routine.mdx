@@ -223,7 +223,7 @@ Checks performed:
 - `author_crew` — author crew exists, has a devcontainer config, provisioning status is `completed` (not `in_progress` or `failed`)
 - `agent_slugs` — every step's `agent_slug` and every `outcomes.grader_agent_slug` resolves to an agent in the **author crew** (runtime resolution is crew-scoped)
 - `credential:<TYPE>` — every entry in `credentials_required` has an active workspace credential of that type
-- `egress_allowlist` — `egress_targets` declared when `http` steps are present; no wildcards or loopback hosts (`*`, `localhost`, `127.0.0.0/8`)
+- `egress_allowlist` — `egress_targets` declared when `http` steps are present; no dead entries that match no host (`*`, `*.*`, empty) or loopback hosts (`localhost`, `127.0.0.0/8`)
 - `cost_cap` — `max_cost_usd` is set and is at least 1.5× `estimated_cost_usd`
 - `validation:<step_id>` — gates are structurally satisfiable (`min_length ≤ max_length`, no string in both `must_contain` and `must_not_contain`)
 
@@ -381,7 +381,7 @@ The cost figure is an order-of-magnitude estimate (flat token-density heuristic,
 
 ## `crewship routine validate [file.json]`
 
-Offline DSL validation with **no server call**. Reads from the file argument or stdin if absent.
+Offline DSL validation with **no server call** (by default). Reads from the file argument or stdin if absent.
 
 ```bash
 crewship routine validate routine.json
@@ -396,7 +396,30 @@ Exit code 0 = valid, 1 = invalid. CI-friendly:
   run: crewship routine validate routines/*.json
 ```
 
-Runs the same parse + validate + step-id-uniqueness checks the server would, **except** cross-routine cycle detection (which needs the workspace's full call graph) and slug uniqueness (which needs the DB).
+Runs the same parse + validate + step-id-uniqueness checks the server would, **except** cross-routine cycle detection (which needs the workspace's full call graph) and slug uniqueness (which needs the DB). Beyond the schema checks, `validate` catches three authoring mistakes that used to only surface at `save` or the first run:
+
+- **`concurrency_key` that can render empty** — a key built entirely from `{{ inputs.X }}` refs where none is `required: true`/defaulted (e.g. `"{{ inputs.account_id }}"` with `account_id` optional) is rejected: a run that omits the inputs renders the key empty and dies at run time (`concurrency_key rendered to empty value`). Anchor one referenced input, or add literal text (`"tenant-{{ inputs.account_id }}"` always renders non-empty) — both accepted.
+- **Unsatisfiable output gates** — a step whose `validation` has `min_length > max_length`, or the same token in both `must_contain` and `must_not_contain`, is rejected: no output could ever pass it.
+- **Dead egress entry** — an `egress_targets` value of `*`, `*.*`, or an empty host matches **no** real host at run time (targets are literal/subdomain-suffix matched, not globbed), so it silently denies every `http` step's egress. Rejected at author time. List real hostnames instead, or omit `egress_targets` entirely for unrestricted egress. (Loopback hosts like `localhost`/`127.*` are matchable and stay a `doctor` warning, not a hard error — legitimate on dev boxes.)
+
+### Resolving agent slugs offline
+
+By default `validate` skips the "does this `agent_slug` exist?" check because it needs the crew roster. Supply the roster to make typos fail here instead of at `save`:
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--agents` | comma-separated slugs | Resolve `agent_slug` references against this list — fully offline, ideal for CI/airgapped checks |
+| `--author-crew` | crew slug or ID | Resolve against the crew's **live** roster (one `GET /api/v1/agents` call). Mutually exclusive with `--agents` |
+
+```bash
+# Airgapped: you enumerate the roster
+crewship routine validate r.json --agents triage,writer,editor
+
+# One server call to fetch the author crew's roster
+crewship routine validate r.json --author-crew growth
+```
+
+A typo'd `agent_slug` (or an `outcomes.grader_agent_slug`) not in the resolved set fails validation, naming the step.
 
 ---
 

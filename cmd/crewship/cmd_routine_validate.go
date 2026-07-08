@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/spf13/cobra"
 )
@@ -38,11 +39,18 @@ The local check runs:
   3. Template reference checks (inputs.X / steps.Y.output)
   4. Step ID uniqueness, needs[] references valid
   5. JSON Schema subset checks on validation blocks
+  6. concurrency_key input bindings (referenced inputs are required or defaulted)
+  7. Unsatisfiable output gates (min_length>max_length, must_contain∩must_not_contain)
+  8. Wildcard egress_targets (SSRF-open '*'/'*.*'/empty host)
+
+Resolve agent_slug references offline so typos fail here, not at save:
+  crewship routine validate r.json --agents triage,writer
+  crewship routine validate r.json --author-crew growth   # one server call
 
 Server-side checks not run locally:
-  - Agent slug existence in author crew (needs DB)
   - Cross-routine call_pipeline cycle detection (needs workspace)
   - Slug uniqueness against existing routines (needs DB)
+  - Agent slug existence, unless --agents/--author-crew is given
 `,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -67,11 +75,23 @@ Server-side checks not run locally:
 			src = "<stdin>"
 		}
 
+		// Resolve the agent-slug set the validator checks agent_slug
+		// references against. Default (no flags) is nil → the existence
+		// check is skipped and validate stays fully offline, as before.
+		// --agents enumerates the crew roster locally (airgapped/CI);
+		// --author-crew fetches it with one server call so typos fail
+		// pre-save instead of at save. A flag/auth error is returned
+		// as a normal cobra error (not an exit-1 validation failure).
+		agentSlugs, err := resolveValidateAgentSlugs(cmd)
+		if err != nil {
+			return err
+		}
+
 		dsl, err := pipeline.Parse(raw)
 		if err != nil {
 			return printValidationError(src, "parse", err)
 		}
-		if err := pipeline.Validate(dsl, nil, nil); err != nil {
+		if err := pipeline.Validate(dsl, agentSlugs, nil); err != nil {
 			return printValidationError(src, "validate", err)
 		}
 
@@ -124,6 +144,75 @@ Server-side checks not run locally:
 	},
 }
 
+// resolveValidateAgentSlugs turns the --agents / --author-crew flags into the
+// agent-slug set pipeline.Validate resolves agent_slug references against.
+//
+//	neither flag     → nil  (skip the existence check; validate stays offline)
+//	--agents a,b,c   → {a,b,c}  (airgapped: caller enumerates the roster)
+//	--author-crew C  → the crew's live roster (one GET /api/v1/agents call)
+//
+// The two flags are mutually exclusive — --agents is the offline override,
+// --author-crew is the server-backed convenience; combining them is ambiguous.
+func resolveValidateAgentSlugs(cmd *cobra.Command) (map[string]struct{}, error) {
+	crew, _ := cmd.Flags().GetString("author-crew")
+	agents, _ := cmd.Flags().GetStringSlice("agents")
+	if crew != "" && len(agents) > 0 {
+		return nil, fmt.Errorf("--author-crew and --agents are mutually exclusive (pick one)")
+	}
+	if len(agents) > 0 {
+		return slugSet(agents), nil
+	}
+	if crew != "" {
+		return fetchCrewAgentSlugs(crew)
+	}
+	return nil, nil
+}
+
+// slugSet builds a lookup set from a --agents list, trimming whitespace and
+// dropping empties (so "a, b, ,c" → {a,b,c}).
+func slugSet(list []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(list))
+	for _, s := range list {
+		if s = strings.TrimSpace(s); s != "" {
+			out[s] = struct{}{}
+		}
+	}
+	return out
+}
+
+// fetchCrewAgentSlugs returns the live agent-slug roster for a crew. This is
+// the ONE place `routine validate` contacts the server — gated behind the
+// --author-crew flag — so the default validate stays offline.
+func fetchCrewAgentSlugs(crew string) (map[string]struct{}, error) {
+	if err := requireAuth(); err != nil {
+		return nil, err
+	}
+	if err := requireWorkspace(); err != nil {
+		return nil, err
+	}
+	client := newAPIClient()
+	crewID, err := resolveCrewID(client, crew)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Get("/api/v1/agents?crew_id=" + crewID)
+	if err != nil {
+		return nil, err
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return nil, err
+	}
+	var agents []agentListItem
+	if err := cli.ReadJSON(resp, &agents); err != nil {
+		return nil, err
+	}
+	out := make(map[string]struct{}, len(agents))
+	for _, a := range agents {
+		out[a.Slug] = struct{}{}
+	}
+	return out, nil
+}
+
 func printValidationError(src, phase string, err error) error {
 	fmt.Fprintf(os.Stderr, "✗ %s failed at %s phase:\n  %v\n", src, phase, err)
 	os.Exit(1)
@@ -145,5 +234,7 @@ func collectStepTypes(dsl *pipeline.DSL) []string {
 
 func init() {
 	routineValidateCmd.Flags().Bool("json", false, "Deprecated alias for --format json")
+	routineValidateCmd.Flags().StringSlice("agents", nil, "Agent slugs to resolve agent_slug references against, offline (e.g. --agents triage,writer). Typos then fail validate, not save.")
+	routineValidateCmd.Flags().String("author-crew", "", "Resolve agent_slug references against this crew's live roster (one server call). Mutually exclusive with --agents.")
 	pipelineCmd.AddCommand(routineValidateCmd)
 }
