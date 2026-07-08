@@ -158,8 +158,10 @@ function MemberRoleControl({
       )
       if (!res.ok) {
         const body = await res.json().catch(() => null)
-        const msg = typeof body?.error === "string" ? body.error : "Failed to change role"
-        toast.error(msg)
+        // The role endpoint returns RFC 7807 problems (`detail`); fall back
+        // to the legacy `error` shape for older responses.
+        const raw = body?.detail ?? body?.error
+        toast.error(typeof raw === "string" ? raw : "Failed to change role")
         return
       }
       toast.success(`Role changed to ${role}`)

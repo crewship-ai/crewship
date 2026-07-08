@@ -163,6 +163,34 @@ func TestMemberRole_NotFound(t *testing.T) {
 	}
 }
 
+// Error responses are RFC 7807 problem+json (detail/status/title), not
+// the legacy {error} shape (#883 review).
+func TestMemberRole_ErrorsAreProblemJSON(t *testing.T) {
+	h, _, wsID := roleRig(t)
+	seedMember(t, h, wsID, "m-admin", "u-admin", "admin@x.io", "ADMIN")
+	seedMember(t, h, wsID, "m-target", "u-target", "target@x.io", "MEMBER")
+
+	rr := httptest.NewRecorder()
+	h.UpdateMemberRole(rr, roleReq(t, "u-admin", wsID, "ADMIN", "m-target", "ADMIN")) // grant ceiling → 403
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rr.Code)
+	}
+	var prob struct {
+		Status int    `json:"status"`
+		Detail string `json:"detail"`
+		Title  string `json:"title"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &prob); err != nil {
+		t.Fatalf("unmarshal problem: %v; body=%s", err, rr.Body.String())
+	}
+	if prob.Status != http.StatusForbidden {
+		t.Fatalf("problem.status = %d, want 403", prob.Status)
+	}
+	if prob.Detail == "" {
+		t.Fatalf("problem.detail empty; body=%s", rr.Body.String())
+	}
+}
+
 // A non-privileged caller (below MANAGER) is refused defensively even if
 // the route gate were misconfigured.
 func TestMemberRole_CallerBelowManager_Forbidden(t *testing.T) {

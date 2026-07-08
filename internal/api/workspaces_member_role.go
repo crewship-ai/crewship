@@ -43,26 +43,36 @@ func (h *WorkspaceHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Reque
 		callerUID = user.ID
 	}
 
+	// forbid emits an RFC 7807 problem (403) while preserving the RBAC
+	// audit trail replyForbidden used to write. This surface returns
+	// problem+json throughout so clients get a consistent error shape.
+	forbid := func(action, resource, detail string) {
+		h.logger.Warn("rbac: access denied",
+			"user_id", callerUID, "role", callerRole,
+			"action", action, "resource", resource)
+		writeProblem(w, r, http.StatusForbidden, detail)
+	}
+
 	if memberID == "" {
-		replyError(w, http.StatusBadRequest, "memberId is required")
+		writeProblem(w, r, http.StatusBadRequest, "memberId is required")
 		return
 	}
 
 	// Defensive MANAGER+ floor. The route gate (roleCreate) already
 	// enforces this; keep it here so the handler is safe under any wiring.
 	if roleRank[callerRole] < roleRank["MANAGER"] {
-		replyForbidden(w, h.logger, callerUID, callerRole,
-			"workspace_member.update_role", "workspace:"+workspaceID+"/member:"+memberID)
+		forbid("workspace_member.update_role", "workspace:"+workspaceID+"/member:"+memberID,
+			"You need at least the MANAGER role to change member roles")
 		return
 	}
 
 	var req updateWorkspaceMemberRoleRequest
 	if err := readJSON(r, &req); err != nil {
-		replyError(w, http.StatusBadRequest, "Invalid JSON body")
+		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	if _, ok := roleRank[req.Role]; !ok {
-		replyError(w, http.StatusBadRequest,
+		writeProblem(w, r, http.StatusBadRequest,
 			"role must be one of OWNER, ADMIN, MANAGER, MEMBER, VIEWER")
 		return
 	}
@@ -73,28 +83,28 @@ func (h *WorkspaceHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Reque
 		"SELECT role FROM workspace_members WHERE id = ? AND workspace_id = ?",
 		memberID, workspaceID).Scan(&currentRole)
 	if err == sql.ErrNoRows {
-		replyError(w, http.StatusNotFound, "Member not found")
+		writeProblem(w, r, http.StatusNotFound, "Member not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("lookup workspace member for role update", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	// Cannot reshape a member ranked above your own.
 	if roleRank[currentRole] > roleRank[callerRole] {
-		replyForbidden(w, h.logger, callerUID, callerRole,
-			"workspace_member.update_role",
-			"workspace:"+workspaceID+"/member:"+memberID+"/current:"+currentRole)
+		forbid("workspace_member.update_role",
+			"workspace:"+workspaceID+"/member:"+memberID+"/current:"+currentRole,
+			"You cannot modify a member ranked above your own role")
 		return
 	}
 
 	// Cannot grant a role at or above your own (ladder ceiling).
 	if roleRank[req.Role] >= roleRank[callerRole] {
-		replyForbidden(w, h.logger, callerUID, callerRole,
-			"workspace_member.grant_role",
-			"workspace:"+workspaceID+"/member:"+memberID+"/role:"+req.Role)
+		forbid("workspace_member.grant_role",
+			"workspace:"+workspaceID+"/member:"+memberID+"/role:"+req.Role,
+			"You cannot grant a role at or above your own")
 		return
 	}
 
@@ -117,17 +127,17 @@ func (h *WorkspaceHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Reque
 		req.Role, now, memberID, workspaceID, req.Role, workspaceID)
 	if err != nil {
 		h.logger.Error("update workspace member role", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
 		h.logger.Error("rows affected for member role update", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if affected == 0 {
-		replyError(w, http.StatusConflict, "Cannot demote the last owner of the workspace")
+		writeProblem(w, r, http.StatusConflict, "Cannot demote the last owner of the workspace")
 		return
 	}
 

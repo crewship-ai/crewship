@@ -529,9 +529,10 @@ Drive it from the CLI with [`crewship auth passwd`](/cli/auth).
 
 <Note>
 Avatar upload (`avatar_url`) is not yet wired — it needs a storage-backed
-upload + an authenticated serve endpoint and is tracked as a follow-up.
-The field is returned by `PATCH /users/me` but is currently only
-populated by Google sign-in.
+upload + an authenticated serve endpoint and is tracked in
+[#889](https://github.com/crewship-ai/crewship/issues/889). The field is
+returned by `PATCH /users/me` but is currently only populated by Google
+sign-in.
 </Note>
 
 ---
