@@ -118,6 +118,47 @@ else
   skip "agent self-service credential" "jq missing"
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "4. Revocation removes the credential (file-based /secrets, #814)"
+# ─────────────────────────────────────────────────────────────────────────────
+# A CLI_TOKEN is delivered as a file under /secrets/{agent-slug}/ (not
+# wire-injected). Deleting it revokes access; the server also removes the
+# materialized file from any RUNNING crew container (exec'd as UID 1001).
+#
+# The CLI can observe the revoke itself (credential gone from list). It
+# CANNOT read /secrets — that tree is deliberately never exposed by the API —
+# so "the file is physically gone from the container" is verified on the
+# server host during dev2 validation (docker exec … 'ls /secrets/<slug>'),
+# not from here. This section pins the CLI-observable contract.
+REV_NAME="HARNESS_REVOKE_$(nonce TOK | tr '-' '_')"
+info "Creating a file-delivered CLI_TOKEN $REV_NAME and assigning to morgan…"
+if printf 'revoke-me-token' | cs credential create \
+      --name "$REV_NAME" --type CLI_TOKEN --provider CUSTOM_CLI \
+      --env-var-name "$REV_NAME" --value-stdin >/dev/null 2>&1 \
+   && cs credential assign "$REV_NAME" morgan --env-var-name "$REV_NAME" >/dev/null 2>&1; then
+  _pass "file-based credential '$REV_NAME' created + assigned"
+
+  if cs credential delete "$REV_NAME" >/dev/null 2>&1; then
+    _pass "credential delete '$REV_NAME' (revoke)"
+  else
+    _fail "credential delete '$REV_NAME'"
+  fi
+
+  if have jq; then
+    still="$(cs credential list --format json 2>/dev/null | jq -e --arg n "$REV_NAME" '.[] | select(.name==$n)' 2>/dev/null)"
+    if [ -z "$still" ]; then
+      _pass "revoked credential no longer appears in list"
+    else
+      _fail "revoked credential still in list"
+    fi
+  else
+    skip "revoked-credential list assertion" "jq missing"
+  fi
+  info "On dev2: docker exec <crew-container> ls /secrets/morgan/ should NOT list $REV_NAME after the delete above."
+else
+  _fail "file-based credential '$REV_NAME' create/assign"
+fi
+
 info "Cleanup note: harness credentials are prefixed HARNESS_ — remove with:"
 info "  crewship credential list --format json | jq -r '.[]|select(.name|startswith(\"HARNESS_\")).name'"
 

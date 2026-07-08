@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // CredentialHandler provides CRUD endpoints for managing encrypted credentials (API keys, tokens, OAuth).
@@ -13,6 +16,10 @@ import (
 type CredentialHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
+	// container reaches running crew containers to reconcile file-based
+	// /secrets on revoke (#814). nil when Docker isn't wired (tests,
+	// --no-docker) — reconciliation then no-ops. Set via SetContainer.
+	container provider.ContainerProvider
 }
 
 // NewCredentialHandler creates a CredentialHandler with the given database and logger.
@@ -20,6 +27,10 @@ type CredentialHandler struct {
 func NewCredentialHandler(db *sql.DB, logger *slog.Logger) *CredentialHandler {
 	return &CredentialHandler{db: db, logger: logger}
 }
+
+// SetContainer wires the container provider used to remove revoked file-based
+// credentials from running containers (#814).
+func (h *CredentialHandler) SetContainer(cp provider.ContainerProvider) { h.container = cp }
 
 type credentialResponse struct {
 	ID           string   `json:"id"`
@@ -270,6 +281,16 @@ func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		map[string]any{"deleted_by": deletedBy, "soft_delete": true}); recErr != nil {
 		h.logger.Warn("record REVOKE audit event", "error", recErr, "credential_id", credID)
 	}
+
+	// Reach into any running crew container and remove this credential's
+	// materialized /secrets file(s) so a revoke actually takes effect for a
+	// live agent, not just on the next boot (#814). Detached from the request
+	// context + bounded, so a client disconnect can't abort the removal and a
+	// wedged exec can't hang the response; best-effort (the DB revoke above
+	// already succeeded).
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
+	defer cancel()
+	h.reconcileRevokedCredential(rctx, credID, workspaceID)
 
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }

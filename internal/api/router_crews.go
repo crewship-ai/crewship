@@ -53,6 +53,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 		agents.SetLicense(r.license)
 	}
 	creds := NewCredentialHandler(r.db, r.logger)
+	// Revoke → remove file-based /secrets from running containers (#814).
+	// Reuses the container provider already wired for the keeper's exec path;
+	// nil (tests / --no-docker) makes reconciliation a no-op.
+	creds.SetContainer(r.keeperContainer)
 	// Stash on the router so registerInternalRoutes can wire the
 	// /api/v1/internal/credentials Create + Rotate adapter against
 	// the same instance the public surface uses.
