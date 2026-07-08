@@ -77,13 +77,14 @@ describe("useActiveRuns href per kind", () => {
     expect(agent!.href).toBe(`/chat/${encodeURIComponent("sběrač dokladů")}`)
   })
 
-  it("falls back to the chat index when an agent run has no slug", async () => {
+  it("falls back to /crews when an agent run has no slug", async () => {
     mockFeeds([{ id: "a3", status: "RUNNING", agent_name: "Nameless" }], [])
     const { result } = renderHook(() => useActiveRuns("ws-1"))
 
     await waitFor(() => expect(result.current.runs.length).toBe(1))
     const agent = result.current.runs.find((r) => r.kind === "agent")
-    // Never /activity?run=<id> — that 404s for agent ids.
-    expect(agent!.href).toBe("/chat")
+    // Never /activity?run=<id> (404s for agent ids) and never /chat
+    // (no page in the static export) — /crews is a real route.
+    expect(agent!.href).toBe("/crews")
   })
 })

@@ -36,10 +36,11 @@ export interface ActiveRunItem {
 const traceHref = (runId: string) => `/activity?run=${encodeURIComponent(runId)}`
 // Agent (chat) runs have NO pipeline trace — /activity?run=<id> would 404
 // ("Trace unavailable"). They deep-link to the agent's chat instead, keyed
-// by slug (Crews → agent → Chat). With no slug we can't target one agent, so
-// fall back to the chat index rather than the 404-ing trace.
+// by slug (Crews → agent → Chat). With no slug we can't target one agent;
+// fall back to /crews (a real route) rather than /chat — the chat index has
+// no page in the static export, so /chat would itself 404.
 const agentChatHref = (slug: string | undefined) =>
-  slug ? `/chat/${encodeURIComponent(slug)}` : "/chat"
+  slug ? `/chat/${encodeURIComponent(slug)}` : "/crews"
 // Steady safety poll. WS events make updates near-instant; this only backstops
 // dropped frames / runs whose start event we never saw.
 const POLL_MS = 6000
