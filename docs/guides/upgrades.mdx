@@ -24,14 +24,22 @@ crewship self-update --check    # report whether a newer release exists, change 
 
 | Install method | What `self-update` does |
 |---|---|
-| **Homebrew** (`brew install crewship-ai/tap/crewship`) | Runs `brew upgrade crewship` for you. |
-| **Installer / tarball** (`install.sh`, or a downloaded archive) | Downloads the release asset for your OS/arch, **verifies its SHA-256** against the signed `checksums.txt`, and **atomically swaps** the binary in place — plus the bundled `crewship-sidecar` and `entrypoint.sh` when they sit alongside it. Then it re-runs the new binary's `version` as a sanity check. |
+| **Homebrew** (`brew install crewship-ai/tap/crewship`) | Runs `brew upgrade <formula>` for you (`crewship` or `crewship-cli`, whichever you have). |
+| **Installer / tarball** (`install.sh`, or a downloaded archive) | Downloads the release asset for your OS/arch **and build variant** (full `crewship` vs `crewship-cli`), **verifies its SHA-256** against `checksums.txt`, backs up the current binary to `<binary>.bak`, then **atomically swaps** the running binary in place — plus the bundled `crewship-sidecar` and `entrypoint.sh` when they sit alongside it. It re-runs the new binary's `version` as a sanity check and **rolls back from the backup** if that fails. |
 | **System package / read-only path** (apt, rpm, a container image) | Refuses to overwrite a file it doesn't own, and prints the exact command to use instead (`apt-get install --only-upgrade crewship`, `dnf upgrade crewship`, `docker pull …`, or a reinstall via `install.sh`). |
 
 The download is checksum-verified before anything is swapped, and the swap is
 atomic (write-temp-then-rename), so an interrupted update never leaves a
-half-written binary. `self-update` only acts when a newer release actually
-exists — otherwise it reports you're already current and exits.
+half-written binary. The previous binary is kept at `<binary>.bak` for a
+manual rollback. `self-update` only acts when a newer release actually exists
+— otherwise it reports you're already current and exits.
+
+<Note>
+The SHA-256 check confirms the download matches the published `checksums.txt`;
+it does **not** verify the file's cosign signature. To verify provenance
+end-to-end (Sigstore keyless signature), use `install.sh` with `cosign`
+installed, or verify manually per the release notes.
+</Note>
 
 <Note>
 `self-update` needs a released binary. A development build (`version` = `dev`,

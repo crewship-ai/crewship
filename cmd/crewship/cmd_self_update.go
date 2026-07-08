@@ -46,13 +46,15 @@ func runSelfUpdate(ctx context.Context, checkOnly bool) error {
 		return fmt.Errorf("this is a development build (version %q) — self-update only works on released binaries", version)
 	}
 
-	res, err := update.Check(ctx, version)
+	// Explicit command → CheckExplicit: always fresh (no 24h cache) and it
+	// ignores CREWSHIP_SKIP_UPDATE_CHECK (that env only mutes the passive
+	// boot banner, not a self-update the user typed on purpose).
+	res, err := update.CheckExplicit(ctx, version)
 	if err != nil {
 		return fmt.Errorf("checking for updates: %w", err)
 	}
 	if res == nil {
-		fmt.Println("update check skipped (dev build or CREWSHIP_SKIP_UPDATE_CHECK=1)")
-		return nil
+		return fmt.Errorf("cannot self-update a development build (version %q)", version)
 	}
 
 	if !res.Newer {
@@ -81,11 +83,14 @@ func runSelfUpdate(ctx context.Context, checkOnly bool) error {
 
 	switch update.DetectChannel(exePath, dirWritable(binDir)) {
 	case update.ChannelHomebrew:
-		fmt.Println("\nInstalled via Homebrew — upgrading with 'brew upgrade crewship'…")
-		brew := exec.CommandContext(ctx, "brew", "upgrade", "crewship")
+		// Read the formula from the Cellar path so a crewship-cli install
+		// upgrades crewship-cli, not the wrong crewship formula.
+		formula := update.FormulaFromPath(exePath, cliOnlyVariant)
+		fmt.Printf("\nInstalled via Homebrew — upgrading with 'brew upgrade %s'…\n", formula)
+		brew := exec.CommandContext(ctx, "brew", "upgrade", formula)
 		brew.Stdout, brew.Stderr, brew.Stdin = os.Stdout, os.Stderr, os.Stdin
 		if err := brew.Run(); err != nil {
-			return fmt.Errorf("brew upgrade crewship failed: %w", err)
+			return fmt.Errorf("brew upgrade %s failed: %w", formula, err)
 		}
 		return nil
 
@@ -94,20 +99,29 @@ func runSelfUpdate(ctx context.Context, checkOnly bool) error {
 
 	default: // ChannelInstaller
 		fmt.Printf("\nDownloading %s and swapping %s…\n", res.Latest, exePath)
-		result, err := update.ApplyInstallerUpdate(ctx, res.Latest, binDir, version)
+		result, err := update.ApplyInstallerUpdate(ctx, res.Latest, exePath, cliOnlyVariant, version)
 		if err != nil {
 			return fmt.Errorf("self-update failed (binary unchanged): %w", err)
 		}
-		// Sanity-check the freshly swapped binary actually runs.
+		// Sanity-check the freshly swapped binary actually runs; on failure
+		// roll back to the backup so a bad swap never leaves crewship broken.
 		out, verr := exec.CommandContext(ctx, exePath, "version").CombinedOutput()
 		if verr != nil {
+			restoreErr := update.RestoreBackup(exePath)
+			if restoreErr != nil {
+				return fmt.Errorf(
+					"updated binary failed its version sanity check: %w\n%s\n"+
+						"AND rollback failed: %v — restore manually from %s, or reinstall:\n"+
+						"  curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash",
+					verr, out, restoreErr, result.BackupPath)
+			}
 			return fmt.Errorf(
 				"updated binary failed its version sanity check: %w\n%s\n"+
-					"Reinstall with the official installer if crewship no longer runs:\n"+
-					"  curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash",
-				verr, out)
+					"rolled back to the previous version (%s) — no change applied",
+				verr, out, result.FromVersion)
 		}
 		fmt.Printf("Updated crewship %s → %s (replaced: %v)\n", result.FromVersion, result.ToVersion, result.Replaced)
+		fmt.Printf("Previous binary kept at %s for rollback.\n", result.BackupPath)
 		fmt.Println("Migrations (if any) run on the next 'crewship start'; a pre-migration snapshot is taken automatically.")
 		return nil
 	}

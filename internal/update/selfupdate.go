@@ -70,11 +70,34 @@ func isHomebrewPath(p string) bool {
 }
 
 // AssetNameForTag returns the release archive filename for this platform,
-// mirroring the goreleaser name_template and scripts/install.sh:
-// crewship_<version-without-v>_<os>_<arch>.tar.gz.
-func AssetNameForTag(tag string) string {
+// mirroring the goreleaser name_template and scripts/install.sh. cliOnly
+// selects the crewship-cli_… archive (the clionly build) instead of the full
+// crewship_… one — downloading the wrong family would swap a lightweight CLI
+// install for the ~2× larger full server binary (or vice-versa).
+func AssetNameForTag(tag string, cliOnly bool) string {
 	v := strings.TrimPrefix(strings.TrimSpace(tag), "v")
-	return fmt.Sprintf("crewship_%s_%s_%s.tar.gz", v, runtime.GOOS, runtime.GOARCH)
+	prefix := "crewship"
+	if cliOnly {
+		prefix = "crewship-cli"
+	}
+	return fmt.Sprintf("%s_%s_%s_%s.tar.gz", prefix, v, runtime.GOOS, runtime.GOARCH)
+}
+
+// FormulaFromPath returns the Homebrew formula name for a brew-managed
+// binary, read from the Cellar/<formula>/ segment of the resolved path so a
+// crewship-cli install upgrades the crewship-cli formula, not crewship. Falls
+// back to the build variant when the path carries no Cellar segment.
+func FormulaFromPath(execPath string, cliOnly bool) string {
+	parts := strings.Split(filepath.ToSlash(execPath), "/")
+	for i, p := range parts {
+		if p == "Cellar" && i+1 < len(parts) && parts[i+1] != "" {
+			return parts[i+1]
+		}
+	}
+	if cliOnly {
+		return "crewship-cli"
+	}
+	return "crewship"
 }
 
 // downloadURL is the release asset URL for a given tag + filename.
@@ -131,8 +154,13 @@ var companions = []string{"crewship-sidecar", "entrypoint.sh"}
 type SelfUpdateResult struct {
 	FromVersion string
 	ToVersion   string
-	Replaced    []string // basenames swapped (crewship + any companions)
+	Replaced    []string // paths swapped (the binary + any companions)
+	BackupPath  string   // the "<binary>.bak" kept for rollback
 }
+
+// backupSuffix is appended to the running binary before it is swapped, so a
+// failed sanity check (or the operator) can restore the previous version.
+const backupSuffix = ".bak"
 
 // httpGet fetches a URL body with a bounded timeout, failing on non-200.
 func httpGet(ctx context.Context, url string) ([]byte, error) {
@@ -160,12 +188,18 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 }
 
 // ApplyInstallerUpdate downloads the release archive for `tag`, verifies its
-// checksum against the signed checksums.txt, and atomically swaps the
-// crewship binary (plus any companions already installed beside it) in
-// binDir. It does NOT decide whether an update is warranted — the caller
-// gates on update.Check first. binDir must be writable (installer channel).
-func ApplyInstallerUpdate(ctx context.Context, tag, binDir, fromVersion string) (*SelfUpdateResult, error) {
-	asset := AssetNameForTag(tag)
+// sha256 against checksums.txt, backs up the CURRENT binary to
+// "<exePath>.bak", and atomically swaps in the new one — the running binary
+// at exePath itself (not a reconstructed <dir>/crewship, so a renamed binary
+// is still updated in place), plus any companions already installed beside
+// it (full build only; the CLI archive has none). It does NOT decide whether
+// an update is warranted — the caller gates on the version check first.
+// binDir (= dir of exePath) must be writable (installer channel).
+//
+// On any error after the backup is taken, the binary is restored so a failed
+// update never leaves the operator with a broken install.
+func ApplyInstallerUpdate(ctx context.Context, tag, exePath string, cliOnly bool, fromVersion string) (*SelfUpdateResult, error) {
+	asset := AssetNameForTag(tag, cliOnly)
 	archive, err := httpGet(ctx, downloadURL(tag, asset))
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", asset, err)
@@ -178,35 +212,80 @@ func ApplyInstallerUpdate(ctx context.Context, tag, binDir, fromVersion string) 
 		return nil, err
 	}
 
-	// Extract the files we care about from the tar.gz into memory.
 	extracted, err := extractArchive(archive)
 	if err != nil {
 		return nil, fmt.Errorf("extract %s: %w", asset, err)
 	}
-	if _, ok := extracted["crewship"]; !ok {
+	newBinary, ok := extracted["crewship"]
+	if !ok {
 		return nil, fmt.Errorf("archive %s did not contain a crewship binary", asset)
 	}
 
-	res := &SelfUpdateResult{FromVersion: fromVersion, ToVersion: strings.TrimPrefix(tag, "v")}
-	// Always swap crewship; swap a companion only if one already lives beside
-	// the binary (don't newly introduce files an existing install lacked).
-	for _, name := range append([]string{"crewship"}, companions...) {
-		payload, inArchive := extracted[name]
-		if !inArchive {
-			continue
-		}
-		dst := filepath.Join(binDir, name)
-		if name != "crewship" {
-			if _, err := os.Stat(dst); err != nil {
-				continue // companion not present in this install — leave as-is
+	binDir := filepath.Dir(exePath)
+	backup := exePath + backupSuffix
+	// Back up the current binary first so a mid-update failure (or a failed
+	// sanity check) is a one-step restore.
+	if err := copyFile(exePath, backup); err != nil {
+		return nil, fmt.Errorf("back up current binary: %w", err)
+	}
+
+	res := &SelfUpdateResult{
+		FromVersion: fromVersion,
+		ToVersion:   strings.TrimPrefix(tag, "v"),
+		BackupPath:  backup,
+	}
+	// Swap the running binary in place at exePath.
+	if err := atomicReplace(exePath, newBinary); err != nil {
+		_ = RestoreBackup(exePath)
+		return nil, fmt.Errorf("replace %s: %w", exePath, err)
+	}
+	res.Replaced = append(res.Replaced, exePath)
+
+	// Companions live beside the binary and are only present in the full
+	// archive; swap one only if this install already had it (don't newly
+	// introduce files the install lacked). A companion failure rolls the
+	// whole update back — a new server with a stale sidecar is worse than
+	// no update.
+	if !cliOnly {
+		for _, name := range companions {
+			payload, inArchive := extracted[name]
+			if !inArchive {
+				continue
 			}
+			dst := filepath.Join(binDir, name)
+			if _, err := os.Stat(dst); err != nil {
+				continue
+			}
+			if err := atomicReplace(dst, payload); err != nil {
+				_ = RestoreBackup(exePath)
+				return nil, fmt.Errorf("replace companion %s (rolled back binary): %w", name, err)
+			}
+			res.Replaced = append(res.Replaced, dst)
 		}
-		if err := atomicReplace(dst, payload); err != nil {
-			return nil, fmt.Errorf("replace %s: %w", name, err)
-		}
-		res.Replaced = append(res.Replaced, name)
 	}
 	return res, nil
+}
+
+// RestoreBackup swaps the "<exePath>.bak" backup back over exePath — the
+// rollback the caller invokes when the freshly-swapped binary fails its
+// version sanity check.
+func RestoreBackup(exePath string) error {
+	backup := exePath + backupSuffix
+	data, err := os.ReadFile(backup)
+	if err != nil {
+		return fmt.Errorf("read backup %s: %w", backup, err)
+	}
+	return atomicReplace(exePath, data)
+}
+
+// copyFile copies src → dst preserving 0755, used to stage the pre-update
+// backup. dst is overwritten if it exists (a stale .bak from a prior update).
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o755)
 }
 
 // atomicReplace writes payload to a temp file in the same directory, chmod

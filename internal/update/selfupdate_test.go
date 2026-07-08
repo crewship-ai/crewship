@@ -35,17 +35,44 @@ func TestDetectChannel(t *testing.T) {
 }
 
 // TestAssetNameForTag pins the archive name to the goreleaser name_template
-// (crewship_<version-without-v>_<os>_<arch>.tar.gz) so self-update downloads
-// exactly what CI published — matching scripts/install.sh.
+// so self-update downloads exactly what CI published — the full build maps to
+// crewship_<v>_<os>_<arch>.tar.gz and the CLI-only build to
+// crewship-cli_<v>_… (never the other way, or a crewship-cli install would be
+// silently swapped for the full server binary).
 func TestAssetNameForTag(t *testing.T) {
-	got := AssetNameForTag("v0.1.0")
-	want := "crewship_0.1.0_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"
-	if got != want {
-		t.Errorf("AssetNameForTag = %q, want %q", got, want)
+	full := "crewship_0.1.0_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"
+	cli := "crewship-cli_0.1.0_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"
+	if got := AssetNameForTag("v0.1.0", false); got != full {
+		t.Errorf("full AssetNameForTag = %q, want %q", got, full)
 	}
-	// Leading v is optional on input.
-	if AssetNameForTag("0.1.0") != want {
-		t.Errorf("AssetNameForTag without leading v = %q, want %q", AssetNameForTag("0.1.0"), want)
+	if got := AssetNameForTag("0.1.0", false); got != full { // leading v optional
+		t.Errorf("full AssetNameForTag (no v) = %q, want %q", got, full)
+	}
+	if got := AssetNameForTag("v0.1.0", true); got != cli {
+		t.Errorf("cli AssetNameForTag = %q, want %q", got, cli)
+	}
+}
+
+// TestFormulaFromPath pins that the Homebrew formula name is read from the
+// Cellar/<formula>/ segment of the resolved path — so a crewship-cli install
+// upgrades via `brew upgrade crewship-cli`, not the wrong `crewship` formula.
+func TestFormulaFromPath(t *testing.T) {
+	cases := []struct {
+		path string
+		cli  bool
+		want string
+	}{
+		{"/opt/homebrew/Cellar/crewship/0.1.0/bin/crewship", false, "crewship"},
+		{"/usr/local/Cellar/crewship-cli/0.1.0/bin/crewship", true, "crewship-cli"},
+		{"/home/linuxbrew/.linuxbrew/Cellar/crewship-cli/2.0/bin/crewship", true, "crewship-cli"},
+		// No Cellar segment (unexpected): fall back to the build variant.
+		{"/opt/homebrew/bin/crewship", true, "crewship-cli"},
+		{"/opt/homebrew/bin/crewship", false, "crewship"},
+	}
+	for _, tc := range cases {
+		if got := FormulaFromPath(tc.path, tc.cli); got != tc.want {
+			t.Errorf("FormulaFromPath(%q, cli=%v) = %q, want %q", tc.path, tc.cli, got, tc.want)
+		}
 	}
 }
 
@@ -121,6 +148,33 @@ func TestExtractAndAtomicReplace(t *testing.T) {
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != 1 {
 		t.Errorf("expected only the swapped file, got %d entries", len(entries))
+	}
+}
+
+// TestRestoreBackup pins the rollback path: after the binary is backed up
+// and swapped, RestoreBackup puts the original bytes back at exePath — the
+// recovery the command runs when the new binary fails its sanity check.
+func TestRestoreBackup(t *testing.T) {
+	dir := t.TempDir()
+	exe := dir + "/crewship"
+	if err := os.WriteFile(exe, []byte("OLD"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate ApplyInstallerUpdate's backup + swap.
+	if err := copyFile(exe, exe+backupSuffix); err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicReplace(exe, []byte("NEW-BROKEN")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(exe); string(got) != "NEW-BROKEN" {
+		t.Fatalf("pre-restore = %q", got)
+	}
+	if err := RestoreBackup(exe); err != nil {
+		t.Fatalf("RestoreBackup: %v", err)
+	}
+	if got, _ := os.ReadFile(exe); string(got) != "OLD" {
+		t.Errorf("after restore = %q, want OLD", got)
 	}
 }
 

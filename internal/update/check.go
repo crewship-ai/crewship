@@ -127,6 +127,38 @@ func Check(ctx context.Context, currentVersion string) (*Result, error) {
 	return result, nil
 }
 
+// CheckExplicit is the update check behind an EXPLICIT `crewship self-update`
+// (or `--check`): it always hits the network — no 24h disk cache — and
+// ignores CREWSHIP_SKIP_UPDATE_CHECK (that env mutes the passive boot banner,
+// not a command the user typed on purpose). Dev builds still short-circuit:
+// there's no released version to compare against. Compare with Check, which
+// powers the cached, opt-out-able background banner.
+func CheckExplicit(ctx context.Context, currentVersion string) (*Result, error) {
+	if currentVersion == "" || currentVersion == "dev" {
+		return nil, nil
+	}
+	current := normalizeVersion(currentVersion)
+	if !semver.IsValid(current) {
+		return nil, fmt.Errorf("invalid current version %q", currentVersion)
+	}
+	url := LatestReleaseURL
+	if semver.Prerelease(current) != "" {
+		url = LatestReleasesURL
+	}
+	latest, notes, htmlURL, err := fetchLatest(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	return &Result{
+		Current:   currentVersion,
+		Latest:    latest,
+		Newer:     semver.Compare(normalizeVersion(latest), current) > 0,
+		URL:       htmlURL,
+		Notes:     notes,
+		CheckedAt: time.Now().UTC(),
+	}, nil
+}
+
 // fetchLatest hits the GitHub Releases API. When `url` is the single-release
 // endpoint we get a JSON object; when it's the list endpoint we get an
 // array and pick the first entry (GitHub returns them newest-first).
