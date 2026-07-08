@@ -31,10 +31,16 @@ export interface ActiveRunItem {
   href: string
 }
 
-// Clicking a run jumps straight to its live trace on the Activity canvas.
-// Routine runs render as a trace keyed by run_id; agent runs land on the
-// Activity rail (their run id selects on the rail when present).
+// Clicking a run jumps to where its live output actually lives. Routine
+// runs render as a pipeline trace keyed by run_id on the Activity canvas.
 const traceHref = (runId: string) => `/activity?run=${encodeURIComponent(runId)}`
+// Agent (chat) runs have NO pipeline trace — /activity?run=<id> would 404
+// ("Trace unavailable"). They deep-link to the agent's chat instead, keyed
+// by slug (Crews → agent → Chat). With no slug we can't target one agent;
+// fall back to /crews (a real route) rather than /chat — the chat index has
+// no page in the static export, so /chat would itself 404.
+const agentChatHref = (slug: string | undefined) =>
+  slug ? `/chat/${encodeURIComponent(slug)}` : "/crews"
 // Steady safety poll. WS events make updates near-instant; this only backstops
 // dropped frames / runs whose start event we never saw.
 const POLL_MS = 6000
@@ -87,7 +93,7 @@ export function useActiveRuns(workspaceId: string | null | undefined) {
             label: str(row, "agent_name", "agent_slug", "agent_id") ?? "Agent run",
             sublabel: str(row, "trigger_type"),
             startedAt: str(row, "started_at", "created_at"),
-            href: traceHref(id),
+            href: agentChatHref(str(row, "agent_slug")),
           })
         }
       }
