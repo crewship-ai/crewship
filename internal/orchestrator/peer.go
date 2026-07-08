@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"fmt"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/untrusted"
 )
 
 // peerContextQueryPrefix through peerContextTail hold the three static spans
@@ -61,7 +63,10 @@ func BuildPeerContext(members []CrewMember, selfSlug string) string {
 			fmt.Fprintf(&b, "- %s (@%s)", m.Name, m.Slug)
 		}
 		if m.Description != "" {
-			fmt.Fprintf(&b, ": %s", m.Description)
+			// Fence the member's free-text description before it reaches a peer
+			// agent's prompt — same ingress-trust boundary as the lead context
+			// (#808 M1). Structural @slug/name/role stay unfenced.
+			fmt.Fprintf(&b, ": %s", untrusted.Wrap("crew_member", m.Description))
 		}
 		b.WriteString("\n")
 	}

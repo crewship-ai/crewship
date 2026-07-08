@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/untrusted"
 )
 
 // ResolveReadyTasks returns tasks that have all dependencies completed
@@ -234,7 +236,9 @@ func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState,
 		fmt.Fprintf(&b, "Name: %s\n", missionTitle.String)
 	}
 	if missionDesc.Valid && missionDesc.String != "" {
-		fmt.Fprintf(&b, "Goal: %s\n", missionDesc.String)
+		// Mission goal originates from an external issue/ticket body — fence it
+		// as untrusted data before the agent reads it (#808 M1).
+		fmt.Fprintf(&b, "Goal: %s\n", untrusted.Wrap("mission_task", missionDesc.String))
 	}
 
 	// DAG overview — list all tasks so the agent knows the bigger picture
@@ -281,7 +285,11 @@ func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState,
 			if len(bd) > 500 {
 				bd = bd[:500] + "..."
 			}
-			b.WriteString(fmt.Sprintf("@%s: %s\n\n", n, bd))
+			// Issue/mission comment bodies are external, lower-trust content —
+			// fence each one so a comment can't smuggle an instruction override
+			// into the agent's prompt (#808 M1). The author handle @n stays
+			// unfenced (it's a short structural label, not free-form body text).
+			fmt.Fprintf(&b, "@%s: %s\n\n", n, untrusted.Wrap("mission_comment", bd))
 		}
 		rows.Close()
 	}
@@ -290,7 +298,12 @@ func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState,
 	b.WriteString("[YOUR ASSIGNMENT]\n")
 	b.WriteString(fmt.Sprintf("Task: %s\n", task.Title))
 	if task.Description != nil && *task.Description != "" {
-		b.WriteString(fmt.Sprintf("Instructions: %s\n", *task.Description))
+		// The task description is the untrusted issue/ticket body the agent is
+		// told to act on — the single widest-open ingress site (#808 M1). Fence
+		// it as data so a body that says "ignore previous instructions" is
+		// examined, never obeyed. Task.Title stays unfenced (short structural
+		// label, surfaced in the DAG list and headers).
+		fmt.Fprintf(&b, "Instructions: %s\n", untrusted.Wrap("mission_task", *task.Description))
 	}
 	if task.Iteration > 1 {
 		b.WriteString(fmt.Sprintf("Iteration: %d — this is a retry. Fix the issues from the previous attempt.\n", task.Iteration))

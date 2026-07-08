@@ -180,22 +180,33 @@ func TestBuildMissionBrief_HandoffDepsCommentsAndRetry(t *testing.T) {
 	e := newLifecycleEngine(t, db)
 	brief := e.buildMissionBrief(context.Background(), ms, task, allTasks)
 
+	// The untrusted external fields — mission goal, issue-comment bodies, and
+	// the task description — are now routed through the ingress trust fence
+	// (#808 M1), so their content sits inside an <untrusted …> block on its own
+	// line rather than glued to the "Goal:"/"@Bob:"/"Instructions:" label. The
+	// content still appears verbatim; assert on the content (not the old single-
+	// line label+content form) plus the fence wrapper itself.
 	for _, want := range []string{
 		"IMPORTANT: You are part of a multi-agent mission pipeline",
 		"[MISSION]",
-		"Goal: Ship the feature",
+		"Ship the feature", // mission goal, now fenced
 		"[INPUT FROM PREVIOUS TASKS]",
 		"implemented the parser",
 		"Artifacts: parser.go",
 		"Confidence: high",
 		"[ISSUE COMMENTS]",
-		"@Bob: I found the root cause",
-		"@Pavel: Please also update docs",
+		"I found the root cause",  // agent comment body, now fenced
+		"Please also update docs", // user comment body, now fenced
+		"@Bob:",                   // author handle stays unfenced
+		"@Pavel:",                 // author handle stays unfenced
 		"[YOUR ASSIGNMENT]",
-		"Instructions: Wire the parser into the pipeline",
+		"Wire the parser into the pipeline", // task description, now fenced
 		"Iteration: 2",
 		"---HANDOFF---",
 		"Execute this task NOW",
+		// Fence wrappers present for the untrusted sources.
+		`<untrusted source="mission_task"`,
+		`<untrusted source="mission_comment"`,
 	} {
 		if !strings.Contains(brief, want) {
 			t.Errorf("brief missing %q:\n%.1500s", want, brief)
