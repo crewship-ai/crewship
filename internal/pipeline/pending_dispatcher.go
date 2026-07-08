@@ -15,11 +15,23 @@ import (
 // runs start together, low enough not to stampede the provider.
 const defaultDispatchConcurrency = 12
 
+// prewarmTimeout bounds a single prewarm attempt so a wedged provider can't
+// leak the off-critical-path goroutine long past the run it was warming for.
+const prewarmTimeout = 2 * time.Minute
+
 // runExecutor is the slice of *Executor the dispatcher needs. Narrowing
 // to an interface keeps executor.go untouched while letting tests inject
 // a fake slow runner to prove concurrency.
 type runExecutor interface {
 	Run(ctx context.Context, in RunInput) (*RunResult, error)
+}
+
+// runPrewarmer is the optional capability the dispatcher uses to warm a run's
+// crew container at claim time, ahead of the blocking Run (#836). The
+// production *Executor implements it; a bare fake in a test may not, so it's
+// probed via a type assertion.
+type runPrewarmer interface {
+	PrewarmForRun(ctx context.Context, pipelineID, workspaceID string)
 }
 
 // PendingRunDispatcher fires deferred runs (pending_runs, v122). Every
@@ -157,6 +169,23 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 	}
 	if !claimed {
 		return // already fired/cancelled/expired by someone else
+	}
+
+	// Prewarm the crew's container off the critical path: kick provisioning at
+	// claim so the run's first agent step finds it warm instead of paying cold
+	// container start inline (#836). Best-effort, idempotent (the provider's
+	// per-crew lock collapses concurrent claims for one crew to a single start),
+	// and side-effect-free (no run/cost event) — a miss only forfeits the
+	// latency it was trying to save. Runs concurrently with the Run dispatch
+	// below, overlapping the container start with routine/agent resolution.
+	if pw, ok := d.executor.(runPrewarmer); ok {
+		d.wg.Add(1)
+		go func() {
+			defer d.wg.Done()
+			pctx, cancel := context.WithTimeout(ctx, prewarmTimeout)
+			defer cancel()
+			pw.PrewarmForRun(pctx, pr.PipelineID, pr.WorkspaceID)
+		}()
 	}
 
 	var inputs map[string]any
