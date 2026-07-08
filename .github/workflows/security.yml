@@ -1,13 +1,35 @@
 name: Security
 
 # CRE-122 supply chain + quality gates.
-# Runs on every PR and push to main. All checks run in parallel.
+#
+# Right-sized per event (2026-07-08 — after two advisory-DB updates in two
+# days turned every open PR red for reasons unrelated to their diffs):
+#
+#   pull_request  — gitleaks always (secrets can leak in any file); the
+#                   dependency/vuln scanners run ONLY when the PR can
+#                   actually change their result (Go code / dependency
+#                   manifests — see the `changes` router job). A docs- or
+#                   CI-only PR pays ~20s, not ~7 runner-minutes.
+#   push to main  — full battery, always. Nothing lands unscanned.
+#   schedule      — full battery daily against main, so a NEW advisory in
+#                   the govulncheck/OSV DBs is caught within a day even
+#                   with zero commits — and files/updates a tracking issue
+#                   (see scheduled-report) instead of reddening unrelated
+#                   PRs one by one.
+#
+# All checks run in parallel.
 
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
+  schedule:
+    # Daily advisory sweep on main. 05:23 UTC = before the EU workday,
+    # off the on-the-hour Actions rush.
+    - cron: '23 5 * * *'
+  # Manual full run for triage.
+  workflow_dispatch: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -22,6 +44,38 @@ env:
   GO_VERSION: "1.26.5"
 
 jobs:
+  # ── Router: which scanner inputs can this PR have changed? ──
+  # Consulted only on pull_request; on push/schedule/dispatch every
+  # downstream `if:` short-circuits on the event name and runs the full
+  # battery. dorny/paths-filter reads the PR file list via the API, so no
+  # checkout is needed and the job costs ~5s.
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      gocode: ${{ steps.filter.outputs.gocode }}
+      deps: ${{ steps.filter.outputs.deps }}
+    steps:
+      - id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        with:
+          filters: |
+            # govulncheck is call-path based: NEW Go code can newly reach a
+            # vulnerable function even with unchanged deps — so Go sources
+            # count, not just the module files.
+            gocode:
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+            deps:
+              - 'go.mod'
+              - 'go.sum'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+
   # ── Secret scan: gitleaks ──
   # Uses the gitleaks CLI binary directly (free, MIT licensed) instead of
   # gitleaks/gitleaks-action@v2, which requires a paid license key for
@@ -86,6 +140,11 @@ jobs:
     name: Go Vuln Scan
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    needs: changes
+    # PR: only when Go code or module files changed — an unchanged dep
+    # graph + unchanged call graph cannot produce a new finding, and the
+    # daily schedule below owns "a new advisory landed in the DB".
+    if: github.event_name != 'pull_request' || needs.changes.outputs.gocode == 'true'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -153,6 +212,12 @@ jobs:
     name: Grype Source Scan
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Not on PRs at all: grype is warn-only (fail-build: false), its
+    # dependency coverage overlaps osv-scanner + the external
+    # Dependency-Track SBOM pipeline, and its SARIF lands in the Security
+    # tab — none of which a PR author acts on pre-merge. main pushes +
+    # the daily schedule keep the Security tab current.
+    if: github.event_name != 'pull_request'
     # SARIF upload to the GitHub Security tab requires write access to
     # security-events. Granted only to this job (least-privilege).
     permissions:
@@ -188,6 +253,10 @@ jobs:
     name: License Check
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    needs: changes
+    # PR: only when dependency manifests changed — license posture cannot
+    # move without them. Full runs on main pushes + daily schedule.
+    if: github.event_name != 'pull_request' || needs.changes.outputs.deps == 'true'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -228,6 +297,11 @@ jobs:
     name: OSV Scanner
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    needs: changes
+    # PR: only when dependency manifests changed — osv-scanner reads
+    # lockfiles, nothing else in a diff can move its result. Full runs on
+    # main pushes + daily schedule.
+    if: github.event_name != 'pull_request' || needs.changes.outputs.deps == 'true'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -257,3 +331,66 @@ jobs:
             echo "::warning::osv-scanner: ${count:-non-zero exit}. See run log for the table. Phase 1 = warn-only; baseline still being drained by Dependabot."
           fi
           exit 0
+
+  # ── Scheduled-run alerting: file an issue instead of reddening PRs ──
+  # The daily schedule is the sentinel for "a new advisory landed in the
+  # DB with zero code changes" (it happened twice on 2026-07-07/08:
+  # goldmark GO-2026-5320, then crypto/tls GO-2026-5856 — each turned
+  # every open PR red). When a scheduled scan fails, this job files ONE
+  # tracking issue (or comments on the existing open one) so the finding
+  # has an owner and a thread, and PR authors are not the alarm channel.
+  scheduled-report:
+    name: Scheduled scan alert
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [gitleaks, govulncheck, grype, license-check, osv-scan]
+    if: always() && github.event_name == 'schedule'
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: File or update the alert issue on failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Job results, one per line, for the failure filter below.
+          RESULTS: |
+            gitleaks=${{ needs.gitleaks.result }}
+            govulncheck=${{ needs.govulncheck.result }}
+            grype=${{ needs.grype.result }}
+            license-check=${{ needs.license-check.result }}
+            osv-scan=${{ needs.osv-scan.result }}
+        run: |
+          set -euo pipefail
+          failed=$(echo "$RESULTS" | grep -E '=(failure|cancelled)$' || true)
+          if [ -z "$failed" ]; then
+            echo "All scheduled scans green — nothing to report."
+            exit 0
+          fi
+          echo "Failed scans:"; echo "$failed"
+          # --force makes label creation idempotent across runs.
+          gh label create security-scan-alert --repo "$REPO" \
+            --color B60205 \
+            --description "Automated: scheduled security scan failed on main" \
+            --force
+          body="Scheduled security scan on \`main\` failed.
+
+          \`\`\`
+          $failed
+          \`\`\`
+
+          Run: $RUN_URL
+
+          Typical cause: a new advisory landed in the govulncheck/OSV DB (updated ~daily) — check the run log for the GO-YYYY-NNNN id, then bump the dependency/toolchain or add a dated, justified allowlist entry (see the govulncheck job header + THIRD-PARTY-NOTICES.md). Close this issue when the scheduled run is green again."
+          existing=$(gh issue list --repo "$REPO" --label security-scan-alert \
+            --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+            echo "Updated existing alert issue #$existing"
+          else
+            gh issue create --repo "$REPO" \
+              --title "Scheduled security scan failed on main" \
+              --label security-scan-alert \
+              --body "$body"
+          fi
