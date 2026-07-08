@@ -159,26 +159,30 @@ type createTokenRequest struct {
 // recognised by canScope but listed here so an operator running
 // `crewship cli-token create --scopes <list>` from a tab-complete
 // shell sees the menu.
+//
+// The vocabulary is deliberately limited to scopes that actually gate a
+// route today (enforced by TestEveryMintableScopeMapsToARoute — every entry
+// here must be satisfiable against at least one recorded mutation route).
+// That is why there are no `<resource>:read` scopes and no `agents:run`:
+// reads are not scope-gated in this pass (GET routes register outside the
+// mutation chokepoint), and the agent-invocation surface is currently
+// ownership-gated (scopeSelf) rather than resource-scoped. Offering those
+// scopes would let an operator mint a "restricted" token that silently
+// grants or gates nothing. They return when read-scoping / invocation-scoping
+// lands and a route requires them — see scopeForRoute in rbac_routes.go.
 var knownScopes = map[string]struct{}{
 	"*":                 {},
 	"agents:*":          {},
-	"agents:read":       {},
 	"agents:write":      {},
-	"agents:run":        {},
 	"crews:*":           {},
-	"crews:read":        {},
 	"crews:write":       {},
 	"credentials:*":     {},
-	"credentials:read":  {},
 	"credentials:write": {},
 	"skills:*":          {},
-	"skills:read":       {},
 	"skills:write":      {},
 	"workspace:*":       {},
 	"workspace:admin":   {},
-	"workspace:read":    {},
 	"webhooks:*":        {},
-	"webhooks:read":     {},
 	"webhooks:write":    {},
 }
 
@@ -188,9 +192,13 @@ var knownScopes = map[string]struct{}{
 // issuer's role permits. A MANAGER cannot issue a `workspace:admin`
 // token — that would let them ladder up.
 //
-// Conservative defaults: MEMBER / VIEWER can only issue read-only
-// scopes. MANAGER can issue read + write but not workspace:admin
-// or the all-encompassing "*". ADMIN / OWNER can issue anything.
+// Conservative defaults: every scope in the current vocabulary is a
+// write- or admin-level grant, so MANAGER is the floor for the
+// <resource>:write / <resource>:* scopes and ADMIN for workspace:admin /
+// workspace:* / "*". MEMBER / VIEWER therefore cannot narrow a token to any
+// scope below their own reach — they can still mint an unscoped token, which
+// carries their (lower) full role. When read scopes return they belong here
+// with a MEMBER/VIEWER floor.
 //
 // Returns the offending scope (or "" on success) so the API error
 // can name it directly instead of a generic "denied".
@@ -209,8 +217,7 @@ func scopesPermittedByRole(role string, scopes []string) string {
 			}
 		case "agents:write", "crews:write", "credentials:write",
 			"skills:write", "webhooks:write",
-			"agents:*", "crews:*", "credentials:*", "skills:*", "webhooks:*",
-			"agents:run":
+			"agents:*", "crews:*", "credentials:*", "skills:*", "webhooks:*":
 			if rank < roleRank["MANAGER"] {
 				return s
 			}

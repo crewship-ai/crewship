@@ -162,7 +162,8 @@ func TestRequireRoleMW_Enforcement(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.role+"/"+c.callerRole, func(t *testing.T) {
-			mw := r.requireRoleMW(c.role, h)
+			// scopeSelf isolates the role gate under test from the scope gate.
+			mw := r.requireRoleScopeMW(c.role, scopeSelf, h)
 			rr := httptest.NewRecorder()
 			req := withWorkspaceUser(httptest.NewRequest("POST", "/x", nil), "u1", "w1", c.callerRole)
 			mw.ServeHTTP(rr, req)

@@ -41,13 +41,13 @@ func TestCovCT3_ScopesPermittedByRole(t *testing.T) {
 		want   string
 	}{
 		{"VIEWER", nil, ""},
-		{"MEMBER", []string{"agents:read"}, ""},
+		{"MEMBER", nil, ""}, // unscoped token is always permitted
 		{"MEMBER", []string{"agents:write"}, "agents:write"},
 		{"MANAGER", []string{"agents:write", "crews:*"}, ""},
 		{"MANAGER", []string{"workspace:admin"}, "workspace:admin"},
 		{"MANAGER", []string{"*"}, "*"},
 		{"ADMIN", []string{"*", "workspace:admin"}, ""},
-		{"OWNER", []string{"agents:run"}, ""},
+		{"OWNER", []string{"agents:write"}, ""},
 	}
 	for _, c := range cases {
 		if got := scopesPermittedByRole(c.role, c.scopes); got != c.want {

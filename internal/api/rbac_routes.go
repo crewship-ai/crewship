@@ -25,13 +25,22 @@ package api
 // front of them. This is a registration refactor only — it does not change the
 // 5-tier role model or the v109 capability layer.
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
 
 // mutRoute is one entry in the walkable mutation route table.
 type mutRoute struct {
 	Method  string
 	Pattern string
 	Role    string
+	// Scope is the CLI-token scope required to call the route (#864). It is
+	// the scope analogue of Role: declared at registration, enforced from the
+	// declaration in requireRoleScopeMW, and asserted present by the
+	// enumeration invariant. scopeSelf marks an ownership-gated route where a
+	// resource scope does not apply.
+	Scope string
 }
 
 // Mutation role declarations. The value is the *capability class* a route
@@ -64,6 +73,89 @@ const (
 	roleInline = "inline"
 )
 
+// scopeSelf marks a mutation route as scope-exempt: the route acts on the
+// caller's OWN resources (own preferences, own notifications, own inbox, own
+// saved views, a chat the caller participates in), so it is gated by
+// ownership in the handler, not by a resource capability. A CLI token acting
+// on its own principal cannot exceed any resource scope, so canScope is not
+// consulted for these. Recorded (not skipped) so the scope enumeration
+// invariant still sees the route as declared. Every roleSelf / authedSelfMut
+// route resolves to scopeSelf.
+const scopeSelf = "self"
+
+// scopeForRoute maps a workspace-scoped mutation route to the CLI-token scope
+// required to call it, drawn from the mintable vocabulary (knownScopes). The
+// policy lives in this one readable table so the enumeration invariant can
+// prove every mutation route resolves to a real scope, exactly as the Role
+// declaration does for #824.
+//
+// Granularity (MVP, #864): the five resource families that have a first-class
+// scope — agents, crews, credentials, skills, webhooks — map to their
+// <resource>:write scope. The broad workspace-management surface (projects,
+// issues, pipelines, integrations, admin, feature-flags, …) has no dedicated
+// scope in the current vocabulary and maps to workspace:admin — the honest
+// "this is workspace administration" gate. Finer scopes for that surface are
+// a deliberate follow-up (would expand knownScopes + the New Token dialog).
+// Reads are not scope-gated in this pass: GET routes register through a
+// separate wrapper outside the mutation route table, so read-scoping is the
+// other tracked follow-up. An unmapped resource returns "" — fail-closed: the
+// enumeration test fails the build, and requireRoleScopeMW denies scoped
+// tokens at runtime.
+func scopeForRoute(pattern string) string {
+	segs := strings.Split(strings.TrimPrefix(pattern, "/api/v1/"), "/")
+	if len(segs) == 0 || segs[0] == "" {
+		return ""
+	}
+	has := func(want string) bool {
+		for _, seg := range segs {
+			if seg == want {
+				return true
+			}
+		}
+		return false
+	}
+	switch segs[0] {
+	case "agents":
+		// Agent sub-resources borrow the target resource's scope so a token
+		// scoped to credentials/skills can manage them on an agent.
+		if has("credentials") {
+			return "credentials:write"
+		}
+		if has("skills") {
+			return "skills:write"
+		}
+		return "agents:write"
+	case "crews", "crew-connections", "crew-templates", "crew-ai-suggest":
+		return "crews:write"
+	case "credentials", "credential-rotations":
+		return "credentials:write"
+	case "skills":
+		return "skills:write"
+	case "notification-channels":
+		return "webhooks:write"
+	case "workspaces":
+		// Nested resources under /workspaces/{id}/… carry their own scope;
+		// everything else at the workspace level is administration.
+		if has("skills") {
+			return "skills:write"
+		}
+		if has("pipeline-webhooks") {
+			return "webhooks:write"
+		}
+		return "workspace:admin"
+	case "admin", "integrations", "connectors", "recipes", "templates",
+		"projects", "milestones", "labels", "relations", "feature-flags",
+		"instance", "issues", "journal", "checkpoints", "missions",
+		"approvals", "inbox", "hooks", "consolidate", "eval", "mcp-registry",
+		"oauth", "escalations", "cache", "recurring-issues", "triage",
+		"triage-rules", "workflow-templates", "saved-views", "memory",
+		"notifications", "users", "conversations":
+		return "workspace:admin"
+	default:
+		return ""
+	}
+}
+
 // isDeclaredRole reports whether role is one of the recognised declarations.
 // The enumeration test uses it so a typo'd or empty role fails the build.
 func isDeclaredRole(role string) bool {
@@ -76,16 +168,20 @@ func isDeclaredRole(role string) bool {
 }
 
 // recordMut appends a route's declared policy to the walkable table.
-func (r *Router) recordMut(method, pattern, role string) {
-	r.mutationRoutes = append(r.mutationRoutes, mutRoute{Method: method, Pattern: pattern, Role: role})
+func (r *Router) recordMut(method, pattern, role, scope string) {
+	r.mutationRoutes = append(r.mutationRoutes, mutRoute{Method: method, Pattern: pattern, Role: role, Scope: scope})
 }
 
-// requireRoleMW enforces a declared role from the route registration. For the
-// concrete-role classes it runs the same canRole gate the handlers used to run
-// inline; for the roleSelf / roleInline sentinels it passes through to the
-// handler, which owns the finer-grained decision (membership is already
-// established by RequireWorkspace upstream).
-func (r *Router) requireRoleMW(role string, h http.HandlerFunc) http.Handler {
+// requireRoleScopeMW enforces a declared role AND scope from the route
+// registration. For the concrete-role classes it runs the same canRole gate
+// the handlers used to run inline; for the roleSelf / roleInline sentinels it
+// passes the role decision through to the handler. The scope gate (#864) is
+// orthogonal to the role: a CLI token issued with a restricted scope set must
+// additionally carry the route's scope, regardless of the caller's role.
+// scopeSelf routes are ownership-gated and scope-exempt, and canScope returns
+// true for unrestricted / JWT callers — so the scope gate only ever bites a
+// scoped CLI token, closing the fail-open hole where scopes did nothing.
+func (r *Router) requireRoleScopeMW(role, scope string, h http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch role {
 		case roleSelf, roleInline:
@@ -96,19 +192,31 @@ func (r *Router) requireRoleMW(role string, h http.HandlerFunc) http.Handler {
 				return
 			}
 		}
+		if scope != scopeSelf && !canScope(req.Context(), scope) {
+			writeProblem(w, req, http.StatusForbidden, "Forbidden")
+			return
+		}
 		h(w, req)
 	})
 }
 
 // authedMut registers a workspace-scoped mutation route: authentication +
-// workspace membership + the declared role, enforced from the declaration.
-// It records the policy so the enumeration invariant can see it. This is the
+// workspace membership + the declared role + the route's scope, all enforced
+// from the declaration. The scope is resolved from the route pattern
+// (scopeForRoute); roleSelf routes are ownership-gated and recorded scopeSelf.
+// It records the policy so the enumeration invariants can see it. This is the
 // single mediation point every state-changing, workspace-scoped endpoint flows
 // through.
 func (r *Router) authedMut(method, pattern, role string, h http.HandlerFunc) {
-	r.recordMut(method, pattern, role)
+	scope := scopeForRoute(pattern)
+	if role == roleSelf {
+		// Self-scoped: gated by ownership in the handler, not a resource
+		// capability. Mark scope-exempt regardless of the path's family.
+		scope = scopeSelf
+	}
+	r.recordMut(method, pattern, role, scope)
 	r.mux.Handle(method+" "+pattern,
-		r.authMw.RequireAuth(r.authMw.RequireWorkspace(r.requireRoleMW(role, h))))
+		r.authMw.RequireAuth(r.authMw.RequireWorkspace(r.requireRoleScopeMW(role, scope, h))))
 }
 
 // authedSelfMut registers a session-scoped mutation route that has no
@@ -119,6 +227,6 @@ func (r *Router) authedMut(method, pattern, role string, h http.HandlerFunc) {
 // sentinel — declared, not skipped. Preserves the prior `authed(...)` chain
 // exactly (RequireAuth only, no RequireWorkspace).
 func (r *Router) authedSelfMut(method, pattern string, h http.HandlerFunc) {
-	r.recordMut(method, pattern, roleSelf)
+	r.recordMut(method, pattern, roleSelf, scopeSelf)
 	r.mux.Handle(method+" "+pattern, r.authMw.RequireAuth(h))
 }

@@ -516,7 +516,7 @@ func TestCovCLITokenCreate_ScopedNoMembership403(t *testing.T) {
 	userID := seedTestUser(t, db) // no workspace membership seeded
 	h := NewCLITokenHandler(db, newTestLogger())
 
-	body, _ := json.Marshal(map[string]any{"name": "t", "scopes": []string{"agents:read"}})
+	body, _ := json.Marshal(map[string]any{"name": "t", "scopes": []string{"agents:write"}})
 	req := httptest.NewRequest("POST", "/api/v1/cli-tokens", bytes.NewReader(body))
 	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
 	rr := httptest.NewRecorder()
