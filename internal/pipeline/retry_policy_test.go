@@ -318,15 +318,49 @@ func TestExtractHTTPStatus(t *testing.T) {
 	cases := map[string]int{
 		`http step "x" got HTTP 429 (success codes: [200])`: 429,
 		"upstream returned HTTP 503 service unavailable":    503,
-		"503 Service Unavailable":                           503,
-		"connection refused":                                0,
-		"took 250ms":                                        0, // no word boundary after 250 (→ms), so not misread as a status
-		"":                                                  0,
+		// Only the explicit "HTTP <code>" shape counts — a bare 3-digit
+		// token must NOT be misread as a status (request ids, timings, etc.).
+		"503 Service Unavailable": 0,
+		"connection refused":      0,
+		"took 250ms":              0,
+		"request 500 of 999":      0,
+		"":                        0,
 	}
 	for msg, want := range cases {
 		if got := extractHTTPStatus(msg); got != want {
 			t.Errorf("extractHTTPStatus(%q) = %d, want %d", msg, got, want)
 		}
+	}
+}
+
+// A retry: {max_attempts: 1} policy retries nothing, so it must NOT disable
+// the inner same-tier transient retry floor — otherwise an inert retry block
+// would leave the step with FEWER retries than a plain step. A transient 429
+// on the first call should still be reissued once on the same tier (2 calls).
+func TestRetryPolicy_MaxAttemptsOne_KeepsTransientFloor(t *testing.T) {
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+	var calls int
+	fn := runnerFunc(func(_ context.Context, _ AgentStepRequest) (AgentStepResult, error) {
+		calls++
+		return AgentStepResult{}, errors.New("upstream returned HTTP 429 too many requests")
+	})
+	exec := NewExecutor(store, resolver, fn, nil)
+	exec.sleepFn = instantSleep
+
+	dsl := &DSL{Name: "x", Steps: []Step{
+		{ID: "s1", Type: StepAgentRun, AgentSlug: "worker", Prompt: "go",
+			Retry: &RetryPolicy{MaxAttempts: 1}},
+	}}
+	if _, err := exec.RunDefinition(context.Background(), dsl, RunInput{
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
+	}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	// max_attempts:1 → no step-level retry, but the inner transient floor
+	// still reissues the 429 once = 2 provider calls (not 1).
+	if calls != retryAttemptsPerTier {
+		t.Errorf("max_attempts:1 must keep the transient floor: got %d calls, want %d", calls, retryAttemptsPerTier)
 	}
 }
 

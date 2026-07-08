@@ -43,23 +43,19 @@ func getRetryCelEnv() (*cel.Env, error) {
 	return retryCelEnv, retryCelEnvErr
 }
 
-// httpStatusRE matches the http runner's "got HTTP <code>" failure
-// format (runner_http.go) and, as a fallback, a standalone 3-digit HTTP
-// status token in an error from another source.
-var httpStatusRE = regexp.MustCompile(`(?i)HTTP (\d{3})\b`)
-var bareStatusRE = regexp.MustCompile(`\b([1-5]\d{2})\b`)
+// httpStatusRE matches the http runner's explicit "HTTP <code>" failure
+// format (runner_http.go: `got HTTP %d`). We deliberately match ONLY this
+// shape — a bare "\b\d{3}\b" fallback would misread request IDs, byte
+// counts, model names, or timings ("...took 503 units") as a status and
+// silently change retry behaviour. `status` is 0 for any error that isn't
+// an http step's status failure; `transient` / `error.contains(...)` cover
+// the rest.
+var httpStatusRE = regexp.MustCompile(`(?i)\bHTTP (\d{3})\b`)
 
 // extractHTTPStatus pulls an HTTP status code out of an error message,
-// returning 0 when there isn't one. It prefers the explicit "HTTP <code>"
-// shape the http step emits, then falls back to any 1xx–5xx token so a
-// wrapped upstream client error ("503 Service Unavailable") still exposes
-// `status` to the predicate.
+// returning 0 when the error doesn't carry an explicit "HTTP <code>".
 func extractHTTPStatus(msg string) int {
 	if m := httpStatusRE.FindStringSubmatch(msg); m != nil {
-		n, _ := strconv.Atoi(m[1])
-		return n
-	}
-	if m := bareStatusRE.FindStringSubmatch(msg); m != nil {
 		n, _ := strconv.Atoi(m[1])
 		return n
 	}

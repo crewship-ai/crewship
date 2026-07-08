@@ -152,13 +152,22 @@ func defaultRetryPolicy() *RetryPolicy {
 	return &RetryPolicy{MaxAttempts: defaultRetryMaxAttempts}
 }
 
-// stepHasExplicitRetry reports whether the author opted the step into the
-// per-step retry policy — either a `retry:` block or `on_fail: retry_step`
-// (which desugars to the default policy). When true, that policy OWNS the
-// transient-retry concern, so the inner same-tier transient loop stands
-// down to avoid multiplying provider calls (see runRunnerWithTransientRetry).
+// stepHasExplicitRetry reports whether the author opted the step into an
+// ACTIVE per-step retry policy — a `retry:` block that actually retries
+// (max_attempts > 1) or `on_fail: retry_step` (which desugars to the default
+// 3-attempt policy). When true, that policy OWNS the transient-retry concern,
+// so the inner same-tier transient loop stands down to avoid multiplying
+// provider calls (see runRunnerWithTransientRetry).
+//
+// A `retry: {max_attempts: 1}` policy retries nothing, so it must NOT disable
+// the inner transient floor — otherwise adding an inert retry block would
+// perversely REMOVE the same-tier retry a plain step gets, leaving the step
+// with fewer retries than none at all.
 func stepHasExplicitRetry(step Step) bool {
-	return step.Retry != nil || step.OnFail == OnFailRetryStep
+	if step.Retry != nil {
+		return step.Retry.MaxAttempts > 1
+	}
+	return step.OnFail == OnFailRetryStep
 }
 
 // retryBudgetExhaustedMessage explains a cost-cap-triggered stop inside the
