@@ -168,7 +168,7 @@ func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, f
 
 	// Capture a bounded tail of the BuildKit log so a build failure carries the
 	// output of the failing step without flooding the journal/WS on success.
-	logTail := newBoundedLog(buildLogTailCap)
+	logTail := newBoundedLog(buildLogTailLineCap, buildLogTailByteCap)
 	if err := p.builder.Build(ctx, contextDir, featTag, func(line string) {
 		logTail.add(line)
 		p.logger.Debug("buildkit", "line", line)
@@ -181,10 +181,19 @@ func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, f
 			Error:      err.Error(),
 			DurationMs: elapsedMs(buildStart),
 		})
-		// Surface the failing-step output as its own event so the tail is
-		// queryable independent of the (potentially truncated) Error field.
+		// Persist the failing-step output as a dedicated build-failed event
+		// carrying BOTH the error and the scrubbed tail. The sink routes it to
+		// a durable provisioning.build_failed journal row so `crew provision
+		// status` can show WHY the build failed after the live stream is gone
+		// (#829) — not just the (potentially truncated) top-level Error.
 		if tail := buildLogScrubber.Scrub(logTail.tail()); tail != "" {
-			emitProvision(sink, ProvisionEvent{Step: ProvStepImageBuildStart, Status: ProvStatusFailed, Tag: featTag, Detail: tail})
+			emitProvision(sink, ProvisionEvent{
+				Step:   ProvStepBuildFailed,
+				Status: ProvStatusFailed,
+				Tag:    featTag,
+				Error:  err.Error(),
+				Detail: tail,
+			})
 		}
 		return "", fmt.Errorf("building feature image: %w", err)
 	}
@@ -196,31 +205,51 @@ func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, f
 	return featTag, nil
 }
 
-// buildLogTailCap bounds how many trailing BuildKit log lines we retain for a
-// failure event — enough to see the failing RUN's output, capped so a verbose
-// successful build never balloons memory or the failure payload.
-const buildLogTailCap = 40
+// buildLogTailLineCap / buildLogTailByteCap bound the trailing BuildKit log we
+// retain for a failure event — enough to see the failing RUN's output, capped
+// on BOTH lines and bytes so a verbose build (or a few pathologically long
+// lines) never balloons memory or the durable failure payload (#829).
+const (
+	buildLogTailLineCap = 100
+	buildLogTailByteCap = 8 * 1024
+)
 
-// boundedLog keeps only the last `cap` lines appended to it — a fixed-size tail
-// buffer for capturing the end of a build log cheaply.
+// boundedLog keeps only the last `lineCap` lines appended to it — a fixed-size
+// tail buffer for capturing the end of a build log cheaply. tail() additionally
+// clamps the joined result to byteCap bytes.
 type boundedLog struct {
-	cap   int
-	lines []string
+	lineCap int
+	byteCap int
+	lines   []string
 }
 
-func newBoundedLog(cap int) *boundedLog { return &boundedLog{cap: cap} }
+func newBoundedLog(lineCap, byteCap int) *boundedLog {
+	return &boundedLog{lineCap: lineCap, byteCap: byteCap}
+}
 
 func (b *boundedLog) add(line string) {
 	b.lines = append(b.lines, line)
-	if len(b.lines) > b.cap {
-		// Re-slice to the last cap lines; copy to release the head storage.
-		tail := make([]string, b.cap)
-		copy(tail, b.lines[len(b.lines)-b.cap:])
+	if len(b.lines) > b.lineCap {
+		// Re-slice to the last lineCap lines; copy to release the head storage.
+		tail := make([]string, b.lineCap)
+		copy(tail, b.lines[len(b.lines)-b.lineCap:])
 		b.lines = tail
 	}
 }
 
-func (b *boundedLog) tail() string { return strings.Join(b.lines, "\n") }
+// tail joins the retained lines and, if the result exceeds byteCap, keeps only
+// the trailing byteCap bytes — the failing step's output is at the END — cut
+// forward to the next line boundary so we never emit a partial leading line.
+func (b *boundedLog) tail() string {
+	joined := strings.Join(b.lines, "\n")
+	if b.byteCap > 0 && len(joined) > b.byteCap {
+		joined = joined[len(joined)-b.byteCap:]
+		if nl := strings.IndexByte(joined, '\n'); nl >= 0 && nl+1 <= len(joined) {
+			joined = joined[nl+1:]
+		}
+	}
+	return joined
+}
 
 // stageBuildContext materializes a build context directory for the given
 // features: it writes the generated Dockerfile and copies each feature's

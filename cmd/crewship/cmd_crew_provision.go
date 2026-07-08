@@ -130,10 +130,30 @@ var crewProvisionStatusCmd = &cobra.Command{
 		if result.Total > 0 {
 			pairs = append(pairs, []string{"Step", fmt.Sprintf("%d/%d %s", result.Step, result.Total, result.Message)})
 		}
+		if result.Error != "" {
+			pairs = append(pairs, []string{"Error", result.Error})
+		}
 		if result.AgentsPendingRestart > 0 {
 			pairs = append(pairs, []string{"Agents pending restart", fmt.Sprintf("%d", result.AgentsPendingRestart)})
 		}
-		return f.AutoDetail(result, pairs)
+		if err := f.AutoDetail(result, pairs); err != nil {
+			return err
+		}
+		// Build log tail (#829): the BuildKit stderr that explains a failed
+		// build. Machine formats already carry log_tail in the serialized
+		// result, so only render the block for the human table.
+		switch f.Format {
+		case "json", "yaml", "ndjson", "quiet":
+		default:
+			if len(result.LogTail) > 0 {
+				fmt.Println()
+				fmt.Println("Build log (tail):")
+				for _, line := range result.LogTail {
+					fmt.Println("  " + line)
+				}
+			}
+		}
+		return nil
 	},
 }
 

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -240,12 +241,104 @@ func (h *ProvisioningHandler) ProvisionStatus(w http.ResponseWriter, r *http.Req
 		if completedAt != "" {
 			resp["completed_at"] = completedAt
 		}
+	} else if fail, ok := h.latestBuildFailure(r.Context(), workspaceID, crewID); ok {
+		// No live job, but the crew's most recent BUILD outcome was a
+		// failure — surface it durably (#829) from the journal so the
+		// BuildKit stderr tail explaining WHY is visible after the
+		// in-memory job's TTL / a server restart, not just live.
+		status = "failed"
+		if fail.errMsg != "" {
+			resp["error"] = fail.errMsg
+		}
+		if len(fail.logTail) > 0 {
+			resp["log_tail"] = fail.logTail
+		}
+		if fail.at != "" {
+			resp["completed_at"] = fail.at
+		}
 	} else if cachedImage.Valid && cachedImage.String != "" {
 		status = "completed"
 	}
 	resp["status"] = status
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// durableBuildFailure is the post-hoc view of a feature-build failure,
+// reconstructed from the journal when no in-memory job survives.
+type durableBuildFailure struct {
+	errMsg  string
+	logTail []string
+	at      string
+}
+
+// latestBuildFailure reports whether the crew's most recent provisioning
+// outcome was a failure, returning the persisted error + (when available) the
+// scrubbed BuildKit tail. It reads the newest terminal among build_failed /
+// failed / complete (List returns newest-first) so a failure later fixed by a
+// successful rebuild does not linger as "failed".
+//
+// Two rows can describe one failed build: the enriched provisioning.build_failed
+// (error + tail) emitted mid-build, and the coarse provisioning.failed emitted
+// by markJobFailed just after. We surface the failure off whichever is newest,
+// then recover the tail from the most recent build_failed. This closes two
+// fail-open gaps: a build that failed with an EMPTY tail (no build_failed row)
+// still surfaces via provisioning.failed, and a plain provisioning.failed is no
+// longer invisible to status.
+func (h *ProvisioningHandler) latestBuildFailure(ctx context.Context, workspaceID, crewID string) (durableBuildFailure, bool) {
+	terminal, _, err := journal.List(ctx, h.db, journal.Query{
+		WorkspaceID: workspaceID,
+		CrewID:      crewID,
+		Types: []journal.EntryType{
+			journal.EntryProvisioningBuildFailed,
+			journal.EntryProvisioningFailed,
+			journal.EntryProvisioningComplete,
+		},
+		Limit: 1,
+	})
+	if err != nil || len(terminal) == 0 {
+		return durableBuildFailure{}, false
+	}
+	e := terminal[0]
+	if e.Type == journal.EntryProvisioningComplete {
+		return durableBuildFailure{}, false // most recent outcome was a success
+	}
+
+	out := durableBuildFailure{at: e.TS.Format(time.RFC3339)}
+	out.errMsg = payloadString(e.Payload, "error")
+	if s := payloadString(e.Payload, "detail"); s != "" { // build_failed carries the tail directly
+		out.logTail = strings.Split(s, "\n")
+	}
+
+	// If the terminal row was the coarse `failed`, recover the tail from the
+	// most recent build_failed that post-dates the last success.
+	if len(out.logTail) == 0 {
+		bf, _, ferr := journal.List(ctx, h.db, journal.Query{
+			WorkspaceID: workspaceID,
+			CrewID:      crewID,
+			Types:       []journal.EntryType{journal.EntryProvisioningBuildFailed, journal.EntryProvisioningComplete},
+			Limit:       1,
+		})
+		if ferr == nil && len(bf) > 0 && bf[0].Type == journal.EntryProvisioningBuildFailed {
+			if s := payloadString(bf[0].Payload, "detail"); s != "" {
+				out.logTail = strings.Split(s, "\n")
+			}
+			if out.errMsg == "" {
+				out.errMsg = payloadString(bf[0].Payload, "error")
+			}
+		}
+	}
+	return out, true
+}
+
+// payloadString reads a string value from a journal payload, tolerating a nil
+// map / missing key / non-string value.
+func payloadString(payload map[string]any, key string) string {
+	if payload == nil {
+		return ""
+	}
+	s, _ := payload[key].(string)
+	return s
 }
 
 // EnqueueResult captures the outcome of EnqueueForCrew so callers can tell
@@ -451,10 +544,25 @@ func (h *ProvisioningHandler) emitProvisionEvent(ctx context.Context, crewID, wo
 	if ev.Status != "" {
 		summary += " (" + ev.Status + ")"
 	}
-	_, _ = h.journal.Emit(ctx, journal.Entry{
+	// The feature-build failure carries the BuildKit stderr tail — persist it
+	// under a dedicated, durable type so ProvisionStatus can read it back post
+	// hoc (#829). Every other step stays a generic provisioning.step row.
+	entryType := journal.EntryProvisioningStep
+	emitCtx := ctx
+	if ev.Step == devcontainer.ProvStepBuildFailed {
+		entryType = journal.EntryProvisioningBuildFailed
+		// This is the whole point of #829: the durable diagnostic row MUST
+		// land even when the provisioning ctx was already cancelled (build
+		// timeout / client disconnect). journal.Emit races the queue send
+		// against ctx.Done(), so a cancelled ctx can non-deterministically
+		// drop the entry. Detach from cancellation (values preserved) —
+		// same durability intent as markJobFailed's context.Background().
+		emitCtx = context.WithoutCancel(ctx)
+	}
+	_, _ = h.journal.Emit(emitCtx, journal.Entry{
 		WorkspaceID: workspaceID,
 		CrewID:      crewID,
-		Type:        journal.EntryProvisioningStep,
+		Type:        entryType,
 		Severity:    severity,
 		ActorType:   journal.ActorOrchestrator,
 		Summary:     summary,

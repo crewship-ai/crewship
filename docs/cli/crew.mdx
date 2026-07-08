@@ -351,6 +351,8 @@ crewship crew provision <slug-or-id> --no-watch
 
 Check provisioning status for a crew. Prints the current status, cached image tag, config hash, and resolved devcontainer config. Pass `--watch` to stream live progress until the build completes. Exit code is always `0` — branch on the `Status` field (`ready`, `building`, `failed`, `not-provisioned`) in downstream scripts rather than relying on the exit code.
 
+When the most recent build **failed**, the command also prints the persisted `Error` and a **Build log (tail)** — the last ~100 lines / 8 KB of BuildKit stderr (secret-scrubbed) that name the failing step. This is read back from the provisioning journal, so it survives a server restart and the live stream ending: you can debug a failed feature build after the fact without having watched it happen. `-f json` returns the same tail under `log_tail`.
+
 ```bash
 crewship crew provision status <slug-or-id>
 crewship crew provision status <slug-or-id> --watch
