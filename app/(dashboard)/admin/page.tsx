@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import {
   LayoutDashboard, Building, Users, Server, Shield, Database, ListTodo, FileLock,
+  AlertTriangle,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -14,7 +15,7 @@ import {
   SidebarToolbar, SidebarSearch, SidebarSection, SidebarRow, SIDEBAR_WIDTH,
 } from "@/components/layout/sidebar-kit"
 
-import type { TabKey, Stats, AdminOrg, AdminUser, KeeperStatus, KeeperLogEntry } from "./types"
+import type { TabKey, Stats, AdminOrg, AdminUser, KeeperStatus, KeeperLogEntry, AdminHealth, LicenseInfo, TelemetryInfo } from "./types"
 import { useAdminWebSocket } from "./hooks/use-admin-websocket"
 import { OverviewTab } from "./tabs/overview-tab"
 import { RuntimeTab } from "./tabs/runtime-tab"
@@ -58,14 +59,14 @@ const sections: NavSection[] = [
   {
     label: "Infrastructure",
     items: [
-      { key: "providers", label: "Providers", icon: Server },
+      { key: "providers", label: "Runtime", icon: Server },
     ],
   },
   {
     label: "Security",
     items: [
       { key: "security", label: "Keeper", icon: Shield },
-      { key: "reviews", label: "P2 reviews", icon: ListTodo },
+      { key: "reviews", label: "Keeper reviews", icon: ListTodo },
     ],
   },
   {
@@ -100,7 +101,13 @@ export default function AdminPage() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [orgs, setOrgs] = useState<AdminOrg[]>([])
   const [users, setUsers] = useState<AdminUser[]>([])
+  const [health, setHealth] = useState<AdminHealth | null>(null)
+  const [license, setLicense] = useState<LicenseInfo | null>(null)
+  const [telemetry, setTelemetry] = useState<TelemetryInfo | null>(null)
   const [loading, setLoading] = useState(true)
+  // A 403/500/network failure on the primary fetches must be visible, not a
+  // silently empty table (#868). Populated by fetchData; cleared on success.
+  const [fetchError, setFetchError] = useState<string | null>(null)
 
   const [runtimeAvailable, setRuntimeAvailable] = useState<boolean | null>(null)
   const [runtimeInfo, setRuntimeInfo] = useState<{ runtime: string; version: string; socket: string } | null>(null)
@@ -161,17 +168,42 @@ export default function AdminPage() {
     async function fetchData() {
       setLoading(true)
       try {
-        const [statsRes, orgsRes, usersRes] = await Promise.all([
+        const [statsRes, orgsRes, usersRes, healthRes, licenseRes, telemetryRes] = await Promise.all([
           apiFetch(`/api/v1/admin/stats?workspace_id=${workspaceId}`),
           apiFetch(`/api/v1/admin/workspaces?workspace_id=${workspaceId}`),
           apiFetch(`/api/v1/admin/users?workspace_id=${workspaceId}`),
+          apiFetch(`/api/v1/admin/health?workspace_id=${workspaceId}`),
+          apiFetch(`/api/v1/system/license?workspace_id=${workspaceId}`),
+          apiFetch(`/api/v1/system/telemetry`),
         ])
+        if (cancelled) return
 
-        if (statsRes.ok && !cancelled) setStats(await statsRes.json())
-        if (orgsRes.ok && !cancelled) setOrgs(await orgsRes.json())
-        if (usersRes.ok && !cancelled) setUsers(await usersRes.json())
-      } catch {
-        // silently fail
+        // Surface a failure on any of the three core tables instead of
+        // rendering them empty — the whole point of the honesty pass (#868).
+        const failed = [
+          ["stats", statsRes],
+          ["workspaces", orgsRes],
+          ["users", usersRes],
+        ].filter(([, res]) => !(res as Response).ok) as [string, Response][]
+        if (failed.length > 0) {
+          const [, first] = failed[0]
+          setFetchError(
+            `Failed to load ${failed.map(([n]) => n).join(", ")} (HTTP ${first.status}${first.status === 403 ? " — needs ADMIN or OWNER" : ""}).`,
+          )
+        } else {
+          setFetchError(null)
+        }
+
+        if (statsRes.ok) setStats(await statsRes.json())
+        if (orgsRes.ok) setOrgs(await orgsRes.json())
+        if (usersRes.ok) setUsers(await usersRes.json())
+        // Health/license/telemetry feed the overview cards; a miss there just
+        // degrades those cards, it isn't a table-load failure.
+        if (healthRes.ok) setHealth(await healthRes.json())
+        if (licenseRes.ok) setLicense(await licenseRes.json())
+        if (telemetryRes.ok) setTelemetry(await telemetryRes.json())
+      } catch (e) {
+        if (!cancelled) setFetchError(e instanceof Error ? e.message : "Network error loading admin data.")
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -226,6 +258,9 @@ export default function AdminPage() {
           stats={stats}
           runtimeAvailable={runtimeAvailable}
           runtimeInfo={runtimeInfo}
+          health={health}
+          license={license}
+          telemetry={telemetry}
         />
       )
     }
@@ -291,7 +326,7 @@ export default function AdminPage() {
         title="Admin Console"
         ariaLabel="Admin Console"
         meta={
-          <span className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground/60">Owner</span>
+          <span className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground/60">{role ?? ""}</span>
         }
       />
 
@@ -338,6 +373,15 @@ export default function AdminPage() {
             <div className="flex items-center gap-2">
               <activeItem.icon className="h-3.5 w-3.5 text-foreground/50" />
               <h1 className="text-body font-medium text-foreground/80">{activeItem.label}</h1>
+            </div>
+          )}
+          {fetchError && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300"
+            >
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span>{fetchError}</span>
             </div>
           )}
           {renderContent()}

@@ -5,6 +5,7 @@ import { RefreshCw } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { apiFetch } from "@/lib/api-fetch"
+import { useWorkspace } from "@/hooks/use-workspace"
 
 // PR-G F3 UI surface — auxiliary model slot diagnostic panel.
 //
@@ -59,6 +60,7 @@ function SourcePill({ source }: { source: AuxSlot["source"] }) {
 }
 
 export function AuxStatusSection() {
+  const { workspaceId } = useWorkspace()
   const [slots, setSlots] = useState<AuxSlot[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
@@ -67,7 +69,9 @@ export function AuxStatusSection() {
     setLoading(true)
     setErr(null)
     try {
-      const res = await apiFetch("/api/v1/system/aux-status")
+      // aux-status is ADMIN+ (#868) — the endpoint resolves the caller's role
+      // from the workspace, so the id must be supplied.
+      const res = await apiFetch(`/api/v1/system/aux-status?workspace_id=${workspaceId ?? ""}`)
       if (!res.ok) {
         setErr(`Failed (HTTP ${res.status})`)
         return
@@ -93,7 +97,7 @@ export function AuxStatusSection() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [workspaceId])
 
   useEffect(() => {
     void load()

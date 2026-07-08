@@ -27,6 +27,29 @@ export interface AdminUser {
   role: string | null
 }
 
+/** Live health probe for the overview status dots — GET /api/v1/admin/health. */
+export interface AdminHealth {
+  uptime_seconds: number
+  db?: { connected: boolean; error?: string }
+  disk?: { path?: string; error?: string; free_bytes?: number; total_bytes?: number; used_pct?: number }
+}
+
+/** License edition + limits — GET /api/v1/system/license (read-only). */
+export interface LicenseInfo {
+  edition: string
+  licensee_org?: string
+  max_crews: number
+  max_agents_per_crew: number
+  max_members: number
+  features: string[]
+}
+
+/** Crash/usage telemetry consent — GET /api/v1/system/telemetry (read-only; flipped via CLI). */
+export interface TelemetryInfo {
+  enabled: boolean
+  install_id?: string
+}
+
 /** Runtime status of the Keeper (Ollama-based credential gatekeeper) subsystem. */
 export interface KeeperStatus {
   enabled: boolean

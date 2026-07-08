@@ -62,6 +62,9 @@ export function initialSettingsTab(search: string): string {
 export function SettingsLayout() {
   const { session, signOut } = useAuth()
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
+  // Admin console floor is ADMIN+ (#868/#893); the Aux tab reads an ADMIN+
+  // endpoint, so gate its nav entry + content to match.
+  const isAdmin = role === "OWNER" || role === "ADMIN"
   const { abilities } = useAbilities()
 
   const isMobile = useIsMobile()
@@ -176,6 +179,15 @@ export function SettingsLayout() {
       return <CrewsContainersSection workspaceId={workspaceId} />
     }
     if (activeTab === "aux-models") {
+      // Deep-link guard: a non-admin hitting ?tab=aux-models would only 403
+      // the ADMIN+ endpoint, so don't render the tab for them.
+      if (!isAdmin) {
+        return (
+          <div className="bg-card border border-border rounded-lg p-6">
+            <p className="text-body text-muted-foreground">Auxiliary models are visible to workspace admins only.</p>
+          </div>
+        )
+      }
       return <AuxStatusSection />
     }
     if (activeTab === "connections" && workspaceId) {
@@ -228,6 +240,7 @@ export function SettingsLayout() {
           activeTab={activeTab}
           onTabChange={handleTabChange}
           workspaceName={org?.name}
+          isAdmin={isAdmin}
         />
       )}
 
@@ -242,6 +255,7 @@ export function SettingsLayout() {
               activeTab={activeTab}
               onTabChange={handleTabChange}
               workspaceName={org?.name}
+              isAdmin={isAdmin}
             />
           </SheetContent>
         </Sheet>

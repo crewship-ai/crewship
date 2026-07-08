@@ -25,7 +25,7 @@ func obsReq(method, body, role string) *httptest.ResponseRecorder {
 	ctx = context.WithValue(ctx, ctxRole, role)
 	r = r.WithContext(ctx)
 	w := httptest.NewRecorder()
-	h := NewAdminObservabilityHandler(logging.New("info", "json", nil))
+	h := NewAdminObservabilityHandler(nil, logging.New("info", "json", nil))
 	switch method {
 	case http.MethodPut:
 		h.SetLogLevel(w, r)
@@ -77,7 +77,7 @@ func TestAdminObservability_SetLogLevel_RejectsBadLevel(t *testing.T) {
 }
 
 func TestAdminObservability_Health_InjectedDiskProvider(t *testing.T) {
-	h := NewAdminObservabilityHandler(logging.New("info", "json", nil))
+	h := NewAdminObservabilityHandler(nil, logging.New("info", "json", nil))
 	// Inject fakes so the test never touches the real filesystem — the
 	// point of the provider-function fields.
 	h.dataDir = func() (string, error) { return "/fake/data", nil }
@@ -115,7 +115,7 @@ func TestAdminObservability_Health_InjectedDiskProvider(t *testing.T) {
 }
 
 func TestAdminObservability_Health_SurfacesDataDirError(t *testing.T) {
-	h := NewAdminObservabilityHandler(logging.New("info", "json", nil))
+	h := NewAdminObservabilityHandler(nil, logging.New("info", "json", nil))
 	h.dataDir = func() (string, error) { return "", errors.New("unresolvable data dir") }
 
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/admin/health", nil)
@@ -129,6 +129,42 @@ func TestAdminObservability_Health_SurfacesDataDirError(t *testing.T) {
 	// The disk section must carry the error, not be silently omitted.
 	if !strings.Contains(w.Body.String(), "unresolvable data dir") {
 		t.Errorf("data-dir error not surfaced in disk section: %s", w.Body.String())
+	}
+}
+
+// The overview health dots must reflect reality (#868): Health pings the DB
+// and reports connected true on a live handle, false with an error once the
+// handle is closed.
+func TestAdminObservability_Health_DBProbe(t *testing.T) {
+	db := setupTestDB(t)
+	h := NewAdminObservabilityHandler(db, logging.New("info", "json", nil))
+
+	call := func() map[string]any {
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/admin/health", nil)
+		r = r.WithContext(context.WithValue(r.Context(), ctxRole, "OWNER"))
+		w := httptest.NewRecorder()
+		h.Health(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (body: %s)", w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		dbSection, ok := resp["db"].(map[string]any)
+		if !ok {
+			t.Fatalf("db section missing/wrong type: %v", resp["db"])
+		}
+		return dbSection
+	}
+
+	if got := call(); got["connected"] != true {
+		t.Errorf("live DB: connected = %v, want true", got["connected"])
+	}
+
+	_ = db.Close()
+	if got := call(); got["connected"] != false {
+		t.Errorf("closed DB: connected = %v, want false (body must show red)", got["connected"])
 	}
 }
 

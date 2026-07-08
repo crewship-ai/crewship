@@ -73,7 +73,7 @@ const mobileNavSections = [
     label: "System",
     items: [
       { title: "Settings", href: "/settings", icon: Settings },
-      { title: "Admin", href: "/admin", icon: ShieldCheck, ownerOnly: true },
+      { title: "Admin", href: "/admin", icon: ShieldCheck, adminOnly: true },
     ],
   },
 ]
@@ -569,7 +569,8 @@ export function AppToolbar() {
                 <div key={section.label}>
                   <div className="px-3 py-1 text-micro uppercase tracking-wider font-semibold text-muted-foreground">{section.label}</div>
                   {section.items
-                    .filter((item) => !("ownerOnly" in item && item.ownerOnly && role !== "OWNER"))
+                    // Admin console floor is ADMIN+ (#868/#893), matching the sidebar + backend.
+                    .filter((item) => !("adminOnly" in item && item.adminOnly && role !== "OWNER" && role !== "ADMIN"))
                     .map((item) => {
                       const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href))
                       const disabled = "disabled" in item && item.disabled

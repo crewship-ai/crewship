@@ -80,6 +80,7 @@ func TestAdminFloor_MemberDeniedAdminSurface(t *testing.T) {
 		"/api/v1/admin/backups",
 		"/api/v1/admin/keeper/requests",
 		"/api/v1/system/keeper",
+		"/api/v1/system/aux-status",
 	}
 	for _, p := range floored {
 		if code := adminFloorGet(r, memberTok, p).Code; code != http.StatusForbidden {

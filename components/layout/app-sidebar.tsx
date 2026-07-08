@@ -71,7 +71,7 @@ const navSections = [
     items: [
       { title: "Marketplace", href: "/marketplace", icon: Store, badge: "FUTURE" as const },
       { title: "Settings", href: "/settings", icon: Settings },
-      { title: "Admin", href: "/admin", icon: ShieldCheck, badge: "OWNER" as const },
+      { title: "Admin", href: "/admin", icon: ShieldCheck, badge: "ADMIN" as const },
     ],
   },
 ]
@@ -99,7 +99,9 @@ export function AppSidebar() {
               <SidebarMenu>
                 {section.items
                   .filter((item) => {
-                    if (item.badge === "OWNER" && role !== "OWNER") return false
+                    // Admin console floor is ADMIN+ (#868/#893) — keep the nav
+                    // entry in lockstep so an ADMIN sees the console they can drive.
+                    if (item.badge === "ADMIN" && role !== "OWNER" && role !== "ADMIN") return false
                     return true
                   })
                   .map((item) => {

@@ -6,7 +6,11 @@ icon: "shield-check"
 
 # Keeper Reviews — admin panel workflow
 
-The **Admin → Keeper Reviews** panel surfaces every Keeper Phase 2 decision the platform has logged. Four sub-tabs correspond to the four F4 evaluators (PRD §6 F4.1–4.4); each row is one evaluator decision with the full LLM prompt + response retained for forensic inspection.
+The **Admin → Keeper reviews** panel surfaces every Keeper Phase 2 decision the platform has logged. Four sub-tabs correspond to the four F4 evaluators (PRD §6 F4.1–4.4); each row is one evaluator decision with the full LLM prompt + response retained for forensic inspection.
+
+<Note>
+The panel is a **read-only audit log**, not an action queue — there is no approve/reject button in the panel itself. Operator actions (confirming a lifecycle transition, approving a lesson) happen in the **inbox**, which is where the evaluators route their blocking rows. See "Operator action" in the decision tables below.
+</Note>
 
 This page is the **operator playbook** — how to read the panel, what to do with each row, when to override an evaluator decision. For the per-endpoint API reference see [Admin API → Keeper Phase 2](/api-reference/admin#keeper-phase-2--f4-evaluators); for the gate that controls auto-apply behaviour see [Autonomy + self-learning](/guides/autonomy-and-self-learning).
 
