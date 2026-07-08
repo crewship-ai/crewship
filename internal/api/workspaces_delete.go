@@ -39,18 +39,18 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	user := UserFromContext(r.Context())
 	if user == nil {
-		replyError(w, http.StatusUnauthorized, "Unauthorized")
+		writeProblemContentType(w, r, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	if role != "OWNER" {
-		replyError(w, http.StatusForbidden, "Only the workspace owner can delete a workspace")
+		writeProblemContentType(w, r, http.StatusForbidden, "Only the workspace owner can delete a workspace")
 		return
 	}
 
 	var req deleteWorkspaceRequest
 	if err := readJSON(r, &req); err != nil {
-		replyError(w, http.StatusBadRequest, "Invalid JSON body")
+		writeProblemContentType(w, r, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
@@ -60,17 +60,17 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(),
 		"SELECT slug FROM workspaces WHERE id = ? AND deleted_at IS NULL", workspaceID).Scan(&slug)
 	if err == sql.ErrNoRows {
-		replyError(w, http.StatusNotFound, "Workspace not found")
+		writeProblemContentType(w, r, http.StatusNotFound, "Workspace not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("load workspace for delete", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	if req.ConfirmSlug != slug {
-		replyError(w, http.StatusBadRequest, "confirm_slug does not match the workspace slug")
+		writeProblemContentType(w, r, http.StatusBadRequest, "confirm_slug does not match the workspace slug")
 		return
 	}
 
@@ -85,7 +85,7 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		h.logger.Error("begin delete tx", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer tx.Rollback()
@@ -98,11 +98,11 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		WHERE w.deleted_at IS NULL AND w.id != ?
 	`, user.ID, workspaceID).Scan(&otherCount); err != nil {
 		h.logger.Error("count other workspaces", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if otherCount == 0 {
-		replyError(w, http.StatusConflict, "Cannot delete your only workspace")
+		writeProblemContentType(w, r, http.StatusConflict, "Cannot delete your only workspace")
 		return
 	}
 
@@ -110,13 +110,13 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.ExecContext(r.Context(),
 		"UPDATE agents SET deleted_at = ? WHERE workspace_id = ? AND deleted_at IS NULL", now, workspaceID); err != nil {
 		h.logger.Error("cascade soft-delete agents", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if _, err := tx.ExecContext(r.Context(),
 		"DELETE FROM crew_members WHERE crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)", workspaceID); err != nil {
 		h.logger.Error("cascade delete crew_members", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	// Snapshot the crew ids we're about to soft-delete so we can emit a
@@ -127,7 +127,7 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		"SELECT id FROM crews WHERE workspace_id = ? AND deleted_at IS NULL", workspaceID)
 	if err != nil {
 		h.logger.Error("snapshot crews for delete broadcast", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	for crewRows.Next() {
@@ -135,7 +135,7 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		if err := crewRows.Scan(&id); err != nil {
 			crewRows.Close()
 			h.logger.Error("scan crew id for delete broadcast", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		crewIDs = append(crewIDs, id)
@@ -143,31 +143,31 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	crewRows.Close()
 	if err := crewRows.Err(); err != nil {
 		h.logger.Error("iterate crews for delete broadcast", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if _, err := tx.ExecContext(r.Context(),
 		"UPDATE crews SET deleted_at = ? WHERE workspace_id = ? AND deleted_at IS NULL", now, workspaceID); err != nil {
 		h.logger.Error("cascade soft-delete crews", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if _, err := tx.ExecContext(r.Context(),
 		"DELETE FROM workspace_members WHERE workspace_id = ?", workspaceID); err != nil {
 		h.logger.Error("cascade delete workspace_members", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if _, err := tx.ExecContext(r.Context(),
 		"UPDATE workspaces SET deleted_at = ? WHERE id = ?", now, workspaceID); err != nil {
 		h.logger.Error("soft-delete workspace", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
 		h.logger.Error("commit delete tx", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		writeProblemContentType(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

@@ -3,12 +3,34 @@
 import { useCallback } from "react"
 import { toast } from "sonner"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { useWorkspace } from "@/hooks/use-workspace"
 
 function asString(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined
 }
 
 export function RealtimeToasts() {
+  const { workspaceId } = useWorkspace()
+
+  // The current workspace was deleted out from under this tab (#890). The
+  // deleting tab redirects itself via onDelete; this catches every OTHER
+  // connected tab/user still sitting in it. Guard by id — the provider only
+  // subscribes to the current workspace channel, but stay defensive. Toast
+  // first, then hard-redirect to "/" (mirrors settings-layout's onDelete) so
+  // the app re-resolves to a live workspace instead of hammering dead routes.
+  useRealtimeEvent(
+    "workspace.deleted",
+    useCallback((event) => {
+      const deletedId = asString(event.payload.id)
+      if (!workspaceId || deletedId !== workspaceId) return
+      toast.error("This workspace was deleted", {
+        description: "Redirecting you out…",
+        duration: 3000,
+      })
+      window.setTimeout(() => { window.location.href = "/" }, 1200)
+    }, [workspaceId]),
+  )
+
   useRealtimeEvent(
     "escalation.created",
     useCallback((event) => {

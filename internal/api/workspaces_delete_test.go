@@ -57,6 +57,35 @@ func TestWorkspaceDelete_NonOwner_Forbidden(t *testing.T) {
 	}
 }
 
+// The error paths emit RFC 7807 problem+json (#890): the correct
+// Content-Type plus the full {type,title,status,detail,instance} object —
+// not the legacy {error} shape or a bare application/json.
+func TestWorkspaceDelete_ErrorIsProblemJSON(t *testing.T) {
+	h, userID, wsID := deleteRig(t)
+	rr := httptest.NewRecorder()
+	// Non-owner → 403, a representative error path.
+	h.Delete(rr, deleteReq(t, userID, wsID, "ADMIN", "test"))
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/problem+json" {
+		t.Errorf("Content-Type = %q, want application/problem+json", ct)
+	}
+	var prob struct {
+		Type     string `json:"type"`
+		Title    string `json:"title"`
+		Status   int    `json:"status"`
+		Detail   string `json:"detail"`
+		Instance string `json:"instance"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &prob); err != nil {
+		t.Fatalf("unmarshal problem: %v", err)
+	}
+	if prob.Status != http.StatusForbidden || prob.Detail == "" || prob.Title == "" || prob.Type == "" {
+		t.Errorf("problem body incomplete: %+v", prob)
+	}
+}
+
 // Guard 2: the typed slug must match. A wrong slug is a 400, no delete.
 func TestWorkspaceDelete_WrongSlug_BadRequest(t *testing.T) {
 	h, userID, wsID := deleteRig(t)
