@@ -1,0 +1,78 @@
+---
+title: "Upgrading & Downgrading"
+description: "Keep crewship current with a single command, and roll back safely when an upgrade goes wrong."
+icon: "arrow-up"
+---
+
+# Upgrading & Downgrading
+
+Crewship is a single binary plus a `crewship-sidecar` runtime that ships
+alongside it. Upgrading swaps the binary; the database migrates itself on the
+next start, behind an automatic snapshot so a bad upgrade is a one-step
+rollback.
+
+## Upgrade: `crewship self-update`
+
+One command, whatever platform you're on:
+
+```bash
+crewship self-update            # upgrade to the latest release
+crewship self-update --check    # report whether a newer release exists, change nothing
+```
+
+`self-update` picks the right mechanism from how crewship was installed:
+
+| Install method | What `self-update` does |
+|---|---|
+| **Homebrew** (`brew install crewship-ai/tap/crewship`) | Runs `brew upgrade crewship` for you. |
+| **Installer / tarball** (`install.sh`, or a downloaded archive) | Downloads the release asset for your OS/arch, **verifies its SHA-256** against the signed `checksums.txt`, and **atomically swaps** the binary in place — plus the bundled `crewship-sidecar` and `entrypoint.sh` when they sit alongside it. Then it re-runs the new binary's `version` as a sanity check. |
+| **System package / read-only path** (apt, rpm, a container image) | Refuses to overwrite a file it doesn't own, and prints the exact command to use instead (`apt-get install --only-upgrade crewship`, `dnf upgrade crewship`, `docker pull …`, or a reinstall via `install.sh`). |
+
+The download is checksum-verified before anything is swapped, and the swap is
+atomic (write-temp-then-rename), so an interrupted update never leaves a
+half-written binary. `self-update` only acts when a newer release actually
+exists — otherwise it reports you're already current and exits.
+
+<Note>
+`self-update` needs a released binary. A development build (`version` = `dev`,
+e.g. `go run ./cmd/crewship`) refuses — there's nothing to compare against.
+</Note>
+
+### Migrations run on the next start
+
+`self-update` swaps the binary only. Schema migrations apply on the **next
+`crewship start`**, and Crewship takes a **pre-migration snapshot** first
+(`<database>.pre-migrate-v<from>-to-v<to>-<timestamp>.bak`, next to your DB).
+So the upgrade flow is:
+
+```bash
+crewship self-update
+crewship start          # migrations apply here, after an automatic snapshot
+```
+
+## Rollback / downgrade
+
+Migrations are **forward-only**. An older binary will **refuse to start**
+against a database a newer binary already migrated — with an error naming
+both versions — rather than silently corrupt data it doesn't understand:
+
+```
+database schema is at v134 but this Crewship binary only understands up to v130:
+the database was migrated by a NEWER Crewship. … either upgrade this binary … or
+restore the pre-migration snapshot taken before the upgrade.
+```
+
+So downgrading is **two steps, not one**:
+
+1. **Reinstall the older binary.** Homebrew: `brew install crewship-ai/tap/crewship@<version>` (or `brew uninstall` + install the pinned tag). Installer: `CREWSHIP_VERSION=vX.Y.Z curl -fsSL …/install.sh | bash`.
+2. **Restore the matching pre-migration snapshot** — the `*.pre-migrate-*.bak` file taken just before the upgrade you're undoing. Stop crewship, replace the live database file with the snapshot, and start the older binary.
+
+Skipping step 2 leaves the newer schema in place, which the older binary
+rejects on start (by design). See [Migrations](/guides/migrations) for the
+version-skew guard and snapshot naming.
+
+## Related
+
+- [Migrations](/guides/migrations) — the forward-only guard + pre-migration snapshots.
+- [Backup & restore](/guides/backup) — full backup bundles vs. the automatic migration snapshots.
+- [`crewship doctor`](/cli/doctor) — reports when a newer release is available.
