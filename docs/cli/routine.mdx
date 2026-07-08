@@ -35,7 +35,7 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Runs | `runs <slug>` | List recent runs from journal |
 | Runs | `records <slug>` | List runs from `pipeline_runs` projection (v83) |
 | Runs | `active` | List in-flight runs across the workspace |
-| Runs | `result <run_id>` | Print a run's final deliverable — output **and the files it produced** |
+| Runs | `result <run_id>` | Print a run's final deliverable — output **and the files that changed on its crew during the run** |
 | Runs | `logs <run_id>` | Full journal trace for a run (post-mortem) |
 | Runs | `cancel <run_id>` | Cancel an in-flight run |
 | Runs | `watch <slug>` | Stream live run + step events |
@@ -164,10 +164,10 @@ With `--wait`, the CLI instead keeps polling the run until the approval is resol
 ## `crewship routine result <run_id>`
 
 Prints a finished run's **deliverable**: the final output, followed by a
-**Files produced:** section listing the artefacts the run wrote (e.g.
-`report.pdf`, `summary.md`) with a fetch hint. For a document-processing
-routine the files *are* the deliverable, so this is the one view that
-surfaces them.
+**Files changed during this run** section listing the artefacts on the
+run's crew that were written inside the run window (e.g. `report.pdf`,
+`summary.md`) with a fetch hint. For a document-processing routine the
+files *are* the deliverable, so this is the one view that surfaces them.
 
 ```bash
 crewship routine result run_abc123
@@ -179,19 +179,33 @@ Run run_abc123: COMPLETED (1200ms, $0.0042)
 Final output:
   The quarterly report is ready.
 
-Files produced:
+Files changed during this run:
   report.pdf                     1.2 KB  crew_x/writer/report.pdf
   summary.md                      340 B  crews/crew_x/shared/summary.md
   fetch: crewship crew files get crew_x <path>
 ```
 
-Files are associated with the run by matching each file's modification
-time against the run's `[started_at, ended_at]` window under the run's
-crew (agent `/output` + `/crew/shared`) — no executor changes, so it works
-for any past run. Two runs on the same crew with overlapping windows can
-cross-attribute a file. The `--client` view also lists produced files
-after the redacted deliverable. Backed by
-[`GET …/pipeline-runs/{runId}/files`](/api-reference/workspaces#run-produced-files).
+<Warning>
+This is a **correlation, not proof of authorship.** Files are matched by
+comparing each file's modification time against the run's
+`[started_at, ended_at]` window under the run's crew (agent `/output` +
+`/crew/shared`) — no executor changes, so it works for any past run. That
+means the list can also include:
+
+- files written by a **concurrent chat session** on the same crew while
+  the run was in flight;
+- files from **another run** on the same crew whose window overlapped;
+- files authored earlier but **re-saved** during the window (an mtime
+  bump with no content change).
+
+Read it as "what changed on the crew while this ran", not "what this run
+uniquely produced".
+</Warning>
+
+The `--client` view lists the same files **by bare name only** — the
+internal crew id, agent-slug paths, and the `crew files get` fetch hint
+are stripped so the output is safe to forward to a customer. Backed by
+[`GET …/pipeline-runs/{runId}/files`](/api-reference/workspaces#run-window-file-changes).
 
 ---
 

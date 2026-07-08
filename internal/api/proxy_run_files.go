@@ -55,7 +55,7 @@ func (h *ProxyHandler) RunFiles(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("runId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if !canRole(RoleFromContext(r.Context()), "read") {
-		replyError(w, http.StatusForbidden, "Forbidden")
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -68,12 +68,12 @@ func (h *ProxyHandler) RunFiles(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN pipelines p ON pr.pipeline_id = p.id AND p.workspace_id = pr.workspace_id
 		WHERE pr.id = ? AND pr.workspace_id = ?`, runID, workspaceID).Scan(&crewID, &startedAt, &endedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		replyError(w, http.StatusNotFound, "Run not found")
+		writeProblem(w, r, http.StatusNotFound, "Run not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("resolve run for files", "error", err, "run_id", runID)
-		replyError(w, http.StatusInternalServerError, "Failed to resolve run")
+		writeProblem(w, r, http.StatusInternalServerError, "Failed to resolve run")
 		return
 	}
 	if !crewID.Valid || crewID.String == "" {

@@ -24,9 +24,17 @@ type issueRunDTO struct {
 }
 
 // parseRunTime accepts the timestamp shapes the engine + SQLite defaults
-// emit (RFC3339[Nano] from Go, "2006-01-02 15:04:05" from datetime('now')).
+// emit: RFC3339[Nano] from Go, "2006-01-02 15:04:05" from datetime('now'),
+// and the fractional "2006-01-02 15:04:05.999" written by
+// datetime('now','subsec') — the shape MarkInterrupted/RecoverInterrupted
+// stamp into ended_at (internal/pipeline/runs.go). The plain-second layout
+// already covers the fractional case because time.Parse tolerates a
+// trailing fraction the layout doesn't name; the explicit subsec layout is
+// kept as a defensive pin (guarded by TestRunFiles_InterruptedRun_SubsecEndedAt)
+// so a future switch to a stricter parser can't silently widen the run→files
+// window to now() for interrupted runs (#891).
 func parseRunTime(s string) (time.Time, bool) {
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05"} {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05.999999999", "2006-01-02 15:04:05"} {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t, true
 		}

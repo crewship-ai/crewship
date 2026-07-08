@@ -99,6 +99,57 @@ func TestRunFiles_WindowFilters(t *testing.T) {
 	}
 }
 
+// An interrupted/recovered run stamps ended_at via datetime('now','subsec')
+// → "2006-01-02 15:04:05.999" (space + fractional). parseRunTime must honor
+// that upper bound; if it ever failed to parse, the window would widen to
+// now() and a file written long after the run crashed would get mislabelled
+// as belonging to it. (Go's time.Parse already tolerates the trailing
+// fraction, so this passes today — the test pins that contract so a future
+// stricter parser can't silently regress interrupted runs. #891.)
+func TestRunFiles_InterruptedRun_SubsecEndedAt(t *testing.T) {
+	const subsec = "2006-01-02 15:04:05.999999999"
+	start := time.Date(2026, 7, 1, 10, 0, 0, 123000000, time.UTC)
+	end := time.Date(2026, 7, 1, 11, 0, 0, 456000000, time.UTC)
+
+	output := []ipcFileInfo{
+		fi("crew-rf/writer/report.pdf", "report.pdf", start.Add(30*time.Minute), false), // in window ✓
+		// Written after the run was interrupted but before now() — the pre-fix
+		// widened window would have swept this in.
+		fi("crew-rf/writer/leaked.pdf", "leaked.pdf", end.Add(90*time.Minute), false), // after ended_at ✗
+	}
+	sock := runFilesIPC(t, output, nil)
+	h := newProxyHandlerForTest(t, sock)
+	userID := seedTestUser(t, h.db)
+	wsID := seedTestWorkspace(t, h.db, userID)
+	seedCrewRow(t, h.db, "crew-rf", wsID, "RF", "rf")
+	// started_at parses fine (RFC3339); only ended_at is the subsec shape, so
+	// this isolates the upper-bound widening the review flagged: a pre-fix
+	// unparseable ended_at falls back to now() and sweeps in leaked.pdf.
+	seedRunForFiles(t, h, wsID, "crew-rf", "run-int",
+		start.Format(time.RFC3339Nano), end.Format(subsec))
+
+	req := httptest.NewRequest("GET", "/api/v1/workspaces/"+wsID+"/pipeline-runs/run-int/files", nil)
+	req.SetPathValue("runId", "run-int")
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.RunFiles(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp runFilesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Files) != 1 || resp.Files[0].Name != "report.pdf" {
+		names := []string{}
+		for _, f := range resp.Files {
+			names = append(names, f.Name)
+		}
+		t.Fatalf("files = %v, want exactly [report.pdf] (subsec ended_at must bound the window)", names)
+	}
+}
+
 func TestRunFiles_RunNotFound(t *testing.T) {
 	sock := runFilesIPC(t, nil, nil)
 	h := newProxyHandlerForTest(t, sock)

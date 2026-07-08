@@ -68,7 +68,7 @@ Structured (JSON) output is pretty-printed. Pair with 'routine logs
 				fmt.Println()
 				fmt.Println(prettyOutput(detail.Output))
 			}
-			printRunFiles(cmd, client, runID, detail.IsTerminal())
+			printRunFiles(cmd, client, runID, detail.IsTerminal(), true)
 			return nil
 		}
 
@@ -95,32 +95,45 @@ Structured (JSON) output is pretty-printed. Pair with 'routine logs
 		} else {
 			fmt.Printf("\n(run is %s — no final output yet)\n", strings.ToLower(detail.Status))
 		}
-		printRunFiles(cmd, client, runID, detail.IsTerminal())
+		printRunFiles(cmd, client, runID, detail.IsTerminal(), false)
 		return nil
 	},
 }
 
-// printRunFiles appends the "Files produced:" section — the files the run
-// wrote, resolved by the run→files endpoint (#839). Best-effort: a fetch
-// error never fails the command (the deliverable output already printed),
-// and the "(none)" line only shows for a finished run so an in-flight run
-// isn't mislabelled as producing nothing.
-func printRunFiles(cmd *cobra.Command, client *cli.Client, runID string, terminal bool) {
+// printRunFiles appends the "Files changed during this run" section — the
+// files on the run's crew whose mtime falls inside the run window, resolved
+// by the run→files endpoint (#839). This is a *correlation*, not proof of
+// authorship: a concurrent chat session on the same crew, an overlapping
+// run, or a file merely re-saved (mtime bump) all land here too. The copy
+// says "changed during this run" rather than "produced" for that reason.
+//
+// Best-effort: a fetch error never fails the command (the deliverable
+// output already printed), and the "(none)" line only shows for a finished
+// run so an in-flight run isn't mislabelled as changing nothing.
+//
+// In the redacted --client view (client=true) files are shown by bare name
+// only — the internal crew id and agent-slug paths, plus the crew-scoped
+// fetch hint, stay out of anything forwarded to a customer.
+func printRunFiles(cmd *cobra.Command, client *cli.Client, runID string, terminal, clientView bool) {
 	res, err := client.GetRunFiles(cmd.Context(), runID)
 	if err != nil || res == nil {
 		return
 	}
 	if len(res.Files) == 0 {
 		if terminal {
-			fmt.Println("\nFiles produced: (none)")
+			fmt.Println("\nFiles changed during this run: (none)")
 		}
 		return
 	}
-	fmt.Println("\nFiles produced:")
+	fmt.Println("\nFiles changed during this run:")
 	for _, f := range res.Files {
+		if clientView {
+			fmt.Printf("  %-28s %10s\n", f.Name, formatBytes(f.Size))
+			continue
+		}
 		fmt.Printf("  %-28s %10s  %s\n", f.Name, formatBytes(f.Size), f.Path)
 	}
-	if res.CrewID != "" {
+	if !clientView && res.CrewID != "" {
 		fmt.Printf("  fetch: crewship crew files get %s <path>\n", res.CrewID)
 	}
 }
