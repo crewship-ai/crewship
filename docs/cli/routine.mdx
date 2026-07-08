@@ -223,7 +223,7 @@ Checks performed:
 - `author_crew` — author crew exists, has a devcontainer config, provisioning status is `completed` (not `in_progress` or `failed`)
 - `agent_slugs` — every step's `agent_slug` and every `outcomes.grader_agent_slug` resolves to an agent in the **author crew** (runtime resolution is crew-scoped)
 - `credential:<TYPE>` — every entry in `credentials_required` has an active workspace credential of that type
-- `egress_allowlist` — `egress_targets` declared when `http` steps are present; no dead entries that match no host (`*`, `*.*`, empty) or loopback hosts (`localhost`, `127.0.0.0/8`)
+- `egress_allowlist` — `egress_targets` declared when `http` steps are present; no dead entries that match no host (`*`, `*.*`, empty); **warns** on loopback hosts (`localhost`, `127.0.0.0/8`) — legitimate on dev boxes, so a warning, not a failure
 - `cost_cap` — `max_cost_usd` is set and is at least 1.5× `estimated_cost_usd`
 - `validation:<step_id>` — gates are structurally satisfiable (`min_length ≤ max_length`, no string in both `must_contain` and `must_not_contain`)
 

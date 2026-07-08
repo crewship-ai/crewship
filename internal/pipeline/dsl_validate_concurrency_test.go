@@ -129,6 +129,31 @@ func TestValidate_Concurrency_MultiRefAnchoredByOneRequiredOK(t *testing.T) {
 	}
 }
 
+func TestValidate_Concurrency_NestedRefDoesNotAnchor(t *testing.T) {
+	dsl := concurrencyProbeDSL()
+	// "{{ inputs.account.id }}" is a pure-template key with no literal. Even
+	// though `account` is required, the runtime renders the .id sub-field
+	// independently — empty if it's absent — so the required root must NOT
+	// anchor the key. Without a literal or a bare anchoring ref this can render
+	// empty and must be rejected.
+	dsl.ConcurrencyKey = "{{ inputs.account.id }}"
+	dsl.Inputs = []InputSpec{{Name: "account", Type: "object", Required: true}}
+	if err := Validate(dsl, nil, nil); err == nil {
+		t.Fatal("a nested ref (inputs.account.id) must not anchor on the required root — key can still render empty")
+	}
+}
+
+func TestValidate_Concurrency_NestedRefWithLiteralOK(t *testing.T) {
+	dsl := concurrencyProbeDSL()
+	// A literal prefix rescues the nested ref: "acct-{{ inputs.account.id }}"
+	// always renders at least "acct-".
+	dsl.ConcurrencyKey = "acct-{{ inputs.account.id }}"
+	dsl.Inputs = []InputSpec{{Name: "account", Type: "object", Required: true}}
+	if err := Validate(dsl, nil, nil); err != nil {
+		t.Fatalf("literal prefix must rescue a nested-ref key, got: %v", err)
+	}
+}
+
 func TestValidate_Concurrency_MultiRefAllOptionalRejected(t *testing.T) {
 	dsl := concurrencyProbeDSL()
 	// Pure-template, no literal, every ref optional+defaultless → a caller

@@ -66,10 +66,13 @@ func concurrencyRefAnchors(ref string, declared map[string]InputSpec) bool {
 	if len(parts) < 2 || parts[0] != "inputs" {
 		return false
 	}
-	// inputs.X.sub is a JSON path into a structured input; anchor on the root.
+	// inputs.X.sub is a JSON path into a structured input. A required/defaulted
+	// X guarantees nothing about the SUB-field, which the runtime renders
+	// independently (empty if the sub-path is absent) — so a nested ref can
+	// never anchor the key. Only a bare, top-level input can.
 	name := parts[1]
-	if dot := strings.IndexByte(name, '.'); dot >= 0 {
-		name = name[:dot]
+	if strings.IndexByte(name, '.') >= 0 {
+		return false
 	}
 	spec, ok := declared[name]
 	if !ok {

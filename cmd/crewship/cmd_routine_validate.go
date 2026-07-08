@@ -41,7 +41,7 @@ The local check runs:
   5. JSON Schema subset checks on validation blocks
   6. concurrency_key input bindings (referenced inputs are required or defaulted)
   7. Unsatisfiable output gates (min_length>max_length, must_contain∩must_not_contain)
-  8. Wildcard egress_targets (SSRF-open '*'/'*.*'/empty host)
+  8. Dead egress_targets entries — '*'/'*.*'/empty host match no host at run time
 
 Resolve agent_slug references offline so typos fail here, not at save:
   crewship routine validate r.json --agents triage,writer
