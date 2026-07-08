@@ -38,6 +38,12 @@ RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     go mod download
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
+# schemas/ is a root-level package (embed.go + routine.v1.json) imported by
+# internal/api and cmd/crewship (#849). It must be copied like any other
+# source dir or the in-image `go build ./cmd/crewship` fails to resolve
+# github.com/crewship-ai/crewship/schemas (#886). Regular CI hides this
+# because it builds from a full checkout; this stage copies dirs selectively.
+COPY schemas/ ./schemas/
 COPY web/ ./web/
 COPY --from=frontend /app/out ./web/out
 ARG VERSION=dev
