@@ -81,6 +81,9 @@ const ALL_TABS: TabKey[] = sections.flatMap((s) => s.items.map((i) => i.key))
 export default function AdminPage() {
   const router = useRouter()
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
+  // Admin console floor is ADMIN+ (#865) — kept in lockstep with the backend
+  // ADMIN+ route floor so an ADMIN can open the console they can already drive.
+  const isAdmin = role === "OWNER" || role === "ADMIN"
   const [tab, setTab] = useState<TabKey>("overview")
   // Universal search doubles as a command-finder — filters the nav live.
   const [navQuery, setNavQuery] = useState("")
@@ -111,14 +114,17 @@ export default function AdminPage() {
   const [selectedKeeperEntry, setSelectedKeeperEntry] = useState<KeeperLogEntry | null>(null)
 
   const { keeperLiveEvents, keeperWsStatus } = useAdminWebSocket({
-    enabled: role === "OWNER" && tab === "security",
+    enabled: isAdmin && tab === "security",
     workspaceId,
   })
 
   const checkRuntime = useCallback(async () => {
     setRuntimeChecking(true)
     try {
-      const res = await apiFetch("/api/v1/system/runtime")
+      // Pass workspace_id so the backend resolves this caller as ADMIN+ and
+      // returns full host detail (versions/sockets) rather than the redacted
+      // availability-only shape non-admin surfaces get (#865).
+      const res = await apiFetch(`/api/v1/system/runtime?workspace_id=${workspaceId}`)
       if (!res.ok) {
         setRuntimeAvailable(false)
         return
@@ -137,18 +143,18 @@ export default function AdminPage() {
     } finally {
       setRuntimeChecking(false)
     }
-  }, [])
+  }, [workspaceId])
 
   useEffect(() => {
     if (wsLoading) return
-    if (role !== "OWNER") {
+    if (!isAdmin) {
       router.push("/")
       return
     }
   }, [wsLoading, role, router])
 
   useEffect(() => {
-    if (!workspaceId || role !== "OWNER") return
+    if (!workspaceId || !isAdmin) return
 
     let cancelled = false
 
@@ -178,7 +184,7 @@ export default function AdminPage() {
   const fetchKeeperData = useCallback(async () => {
     setKeeperLoading(true)
     try {
-      const statusRes = await apiFetch("/api/v1/system/keeper")
+      const statusRes = await apiFetch(`/api/v1/system/keeper?workspace_id=${workspaceId}`)
       if (statusRes.ok) setKeeperStatus(await statusRes.json())
 
       if (workspaceId) {
@@ -193,14 +199,14 @@ export default function AdminPage() {
   }, [workspaceId])
 
   useEffect(() => {
-    if (role === "OWNER") checkRuntime()
+    if (isAdmin) checkRuntime()
   }, [role, checkRuntime])
 
   useEffect(() => {
-    if (role === "OWNER" && tab === "security") fetchKeeperData()
+    if (isAdmin && tab === "security") fetchKeeperData()
   }, [role, tab, fetchKeeperData])
 
-  if (wsLoading || role !== "OWNER") {
+  if (wsLoading || !isAdmin) {
     return (
       <div className="p-4 md:p-6">
         <Skeleton className="h-8 w-48 mb-3" />

@@ -230,3 +230,25 @@ func (r *Router) authedSelfMut(method, pattern string, h http.HandlerFunc) {
 	r.recordMut(method, pattern, roleSelf, scopeSelf)
 	r.mux.Handle(method+" "+pattern, r.authMw.RequireAuth(h))
 }
+
+// adminRoute is one entry in the walkable admin-console read route table.
+type adminRoute struct {
+	Method  string
+	Pattern string
+}
+
+// authedAdmin registers an admin-console READ route behind the ADMIN+ floor
+// (#865). The admin surface exposes cross-user / cross-workspace operational
+// data (stats, user/workspace listings, keeper audit, backups, memory
+// versions); before this it registered as authed(wsCtx(...)) with no role, so
+// any workspace MEMBER could read it while the destructive mutations behind
+// the same console were already ADMIN+. authedAdmin gates the reads at
+// roleManage (OWNER/ADMIN) from the registration — reusing the mutation
+// chokepoint (requireRoleScopeMW) with scopeSelf, since reads are not
+// scope-gated — and records the route so the floor invariant can enumerate it
+// and a forgotten gate is a build failure, not a review catch.
+func (r *Router) authedAdmin(method, pattern string, h http.HandlerFunc) {
+	r.adminRoutes = append(r.adminRoutes, adminRoute{Method: method, Pattern: pattern})
+	r.mux.Handle(method+" "+pattern,
+		r.authMw.RequireAuth(r.authMw.RequireWorkspace(r.requireRoleScopeMW(roleManage, scopeSelf, h))))
+}

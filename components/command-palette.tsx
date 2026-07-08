@@ -130,7 +130,11 @@ interface CommandPaletteProps {
 
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const router = useRouter()
-  const { workspaceId } = useWorkspace()
+  const { workspaceId, role } = useWorkspace()
+  // The Admin console is ADMIN+ (#865); the sidebar/toolbar already filter it,
+  // so the palette must too — otherwise a MEMBER sees an "Admin" command that
+  // just bounces them off /admin.
+  const isAdmin = role === "OWNER" || role === "ADMIN"
 
   const [agents, setAgents] = useState<AgentResult[]>([])
   const [crews, setCrews] = useState<CrewResult[]>([])
@@ -348,7 +352,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
         <CommandSeparator />
         <CommandGroup heading="Navigation">
-          {NAV_ITEMS.map((item) => (
+          {NAV_ITEMS.filter((item) => item.href !== "/admin" || isAdmin).map((item) => (
             <CommandItem
               key={item.href}
               value={`go to ${item.title}`}

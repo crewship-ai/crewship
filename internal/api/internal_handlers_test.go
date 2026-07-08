@@ -1780,7 +1780,9 @@ func TestAdmin_ListUsers_Forbidden(t *testing.T) {
 	db := setupTestDB(t)
 	h := NewAdminHandler(db, testLogger())
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req = req.WithContext(withWorkspace(req.Context(), "ws", "ADMIN"))
+	// The admin floor is ADMIN+ (#865): a below-floor MEMBER is refused. (ADMIN
+	// now clears it — see TestAdmin_ListUsers_OK-style coverage / the floor test.)
+	req = req.WithContext(withWorkspace(req.Context(), "ws", "MEMBER"))
 	w := httptest.NewRecorder()
 	h.ListUsers(w, req)
 	if w.Code != http.StatusForbidden {
@@ -2167,7 +2169,9 @@ func TestKeeperStatus_OK(t *testing.T) {
 	db := setupTestDB(t)
 	h := NewKeeperStatusHandler(db, nil, nil, testLogger())
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: "u1"}))
+	// Keeper status is workspace-scoped now (#865) — it requires a workspace in
+	// context (the route supplies it via authedAdmin/RequireWorkspace).
+	req = withWorkspaceUser(req, "u1", "ws1", "OWNER")
 	w := httptest.NewRecorder()
 	h.Status(w, req)
 	if w.Code != http.StatusOK {

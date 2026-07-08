@@ -81,6 +81,18 @@ func (h *SystemHandler) Runtime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Redact host detail for non-admins (#865). Container versions and socket
+	// paths are host infrastructure info; the runtime banner, onboarding, and
+	// crew docker tab only need to know whether a runtime is available. ADMIN+
+	// callers — resolved by OptionalWorkspaceRole when the request carries a
+	// workspace_id (the admin console passes X-Workspace-ID) — get the full
+	// detail. A role-less or below-ADMIN caller gets the bare availability flag
+	// instead of a 403 so those non-admin surfaces keep working.
+	if !canRole(RoleFromContext(r.Context()), "manage") {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"available": true})
+		return
+	}
+
 	// Primary runtime is the first detected one
 	primary := runtimes[0]
 	writeJSON(w, http.StatusOK, map[string]interface{}{

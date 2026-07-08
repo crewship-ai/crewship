@@ -58,7 +58,13 @@ type Router struct {
 	// registration, so a new mutation route that forgets its gate fails the
 	// build instead of shipping silently open (Saltzer & Schroeder). See
 	// rbac_routes.go for the recording wrappers.
-	mutationRoutes  []mutRoute
+	mutationRoutes []mutRoute
+	// adminRoutes records the {method, pattern} of every admin-console READ
+	// route registered through authedAdmin — the GET surface behind the
+	// ADMIN+ floor (#865). Mutations already carry roleManage via authedMut;
+	// this is the read half. The floor invariant walks it (and source-scans
+	// router_admin.go) so an admin read that forgets its gate fails the build.
+	adminRoutes     []adminRoute
 	sessionsStore   sessions.Store
 	socketPath      string
 	internalToken   string

@@ -38,10 +38,22 @@ type keeperStatusResponse struct {
 
 // Status returns the current Keeper configuration and health status.
 // GET /api/v1/system/keeper
+//
+// Gated ADMIN+ at the route (authedAdmin, #865) — the Ollama URL/model and
+// request stats are operational data, not for every workspace member. The
+// request counts are scoped to the caller's workspace: keeper_requests has no
+// direct workspace_id, so we filter through the requesting agent's workspace
+// exactly as the keeper audit log does (keeper_log.go), instead of the old
+// instance-wide COUNT that leaked cross-tenant volume.
 func (h *KeeperStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		replyError(w, http.StatusBadRequest, "workspace context required")
 		return
 	}
 
@@ -60,16 +72,17 @@ func (h *KeeperStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 		resp.OllamaOnline = probeOllama(r.Context(), resp.OllamaURL)
 	}
 
-	// Query request stats from DB
+	// Query request stats from DB, scoped to this workspace's agents.
 	if h.db != nil {
+		const inWorkspace = ` WHERE requesting_agent_id IN (SELECT id FROM agents WHERE workspace_id = ?)`
 		h.db.QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM keeper_requests`).Scan(&resp.TotalRequests)
+			`SELECT COUNT(*) FROM keeper_requests`+inWorkspace, workspaceID).Scan(&resp.TotalRequests)
 		h.db.QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM keeper_requests WHERE decision='ALLOW'`).Scan(&resp.AllowCount)
+			`SELECT COUNT(*) FROM keeper_requests`+inWorkspace+` AND decision='ALLOW'`, workspaceID).Scan(&resp.AllowCount)
 		h.db.QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM keeper_requests WHERE decision='DENY'`).Scan(&resp.DenyCount)
+			`SELECT COUNT(*) FROM keeper_requests`+inWorkspace+` AND decision='DENY'`, workspaceID).Scan(&resp.DenyCount)
 		h.db.QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM keeper_requests WHERE decision='ESCALATE'`).Scan(&resp.EscalateCount)
+			`SELECT COUNT(*) FROM keeper_requests`+inWorkspace+` AND decision='ESCALATE'`, workspaceID).Scan(&resp.EscalateCount)
 	}
 
 	writeJSON(w, http.StatusOK, resp)

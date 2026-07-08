@@ -49,7 +49,15 @@ func (r *Router) registerSystemRoutes() {
 	// so each request re-reads the current r.version value at call time.
 	// CodeRabbit caught this on review.
 	system := NewSystemHandler(r.logger, r.version)
-	r.mux.Handle("GET /api/v1/system/runtime", authed(http.HandlerFunc(system.Runtime)))
+	// Runtime info is reachable by any authed user (the runtime banner, the
+	// crew docker tab, and onboarding all probe it — sometimes before a
+	// workspace exists), but host detail (container versions, socket paths) is
+	// redacted to a bare availability flag unless the caller resolves to
+	// ADMIN+ in a workspace (#865). OptionalWorkspaceRole stamps the role when
+	// a workspace_id is supplied and never fails when it isn't, so the
+	// role-less callers keep working with the redacted shape.
+	r.mux.Handle("GET /api/v1/system/runtime",
+		authed(r.authMw.OptionalWorkspaceRole(http.HandlerFunc(system.Runtime))))
 	r.mux.Handle("GET /api/v1/system/version", authed(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		NewSystemHandler(r.logger, r.version).Version(w, req)
 	})))
@@ -58,9 +66,12 @@ func (r *Router) registerSystemRoutes() {
 	licenseH := NewLicenseHandler(r.license)
 	r.mux.Handle("GET /api/v1/system/license", authed(http.HandlerFunc(licenseH.Status)))
 
-	// Keeper status (auth required)
+	// Keeper status — ADMIN+ floor (#865). Exposes the Ollama URL/model and
+	// per-workspace request stats, so it carries the same floor as the rest of
+	// the admin console instead of the old auth-only gate that leaked
+	// instance-wide data to any member.
 	keeperStatus := NewKeeperStatusHandler(r.db, r.keeperConfig, r.keeperGK, r.logger)
-	r.mux.Handle("GET /api/v1/system/keeper", authed(http.HandlerFunc(keeperStatus.Status)))
+	r.authedAdmin("GET", "/api/v1/system/keeper", keeperStatus.Status)
 
 	// PR-B F3 aux-status (auth required). Diagnostic read of the
 	// resolved provider/model/timeout per Slot. Pulls config through
