@@ -18,11 +18,11 @@ func NewAdminHandler(db *sql.DB, logger *slog.Logger) *AdminHandler {
 }
 
 // Stats returns aggregate counts (workspaces, users, agents, running) for the current workspace.
-// GET /api/v1/admin/stats — requires OWNER role.
+// GET /api/v1/admin/stats — requires ADMIN+ (OWNER or ADMIN).
 func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
-	if role != "OWNER" {
-		replyError(w, http.StatusForbidden, "Forbidden: OWNER only")
+	if !canRole(role, "manage") {
+		replyError(w, http.StatusForbidden, "Forbidden: ADMIN or OWNER only")
 		return
 	}
 
@@ -69,11 +69,11 @@ func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListUsers returns all members of the current workspace with their user details.
-// GET /api/v1/admin/users — requires OWNER role.
+// GET /api/v1/admin/users — requires ADMIN+ (OWNER or ADMIN).
 func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
-	if role != "OWNER" {
-		replyError(w, http.StatusForbidden, "Forbidden: OWNER only")
+	if !canRole(role, "manage") {
+		replyError(w, http.StatusForbidden, "Forbidden: ADMIN or OWNER only")
 		return
 	}
 
@@ -143,11 +143,11 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListWorkspaces returns the current workspace with member, agent, and crew counts.
-// GET /api/v1/admin/workspaces — requires OWNER role.
+// GET /api/v1/admin/workspaces — requires ADMIN+ (OWNER or ADMIN).
 func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
-	if role != "OWNER" {
-		replyError(w, http.StatusForbidden, "Forbidden: OWNER only")
+	if !canRole(role, "manage") {
+		replyError(w, http.StatusForbidden, "Forbidden: ADMIN or OWNER only")
 		return
 	}
 

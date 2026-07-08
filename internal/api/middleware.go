@@ -348,6 +348,56 @@ func (m *AuthMiddleware) RequireWorkspace(next http.Handler) http.Handler {
 	})
 }
 
+// OptionalWorkspaceRole resolves the caller's workspace + role from the same
+// sources as RequireWorkspace (?workspace_id / {workspaceId} / X-Workspace-ID)
+// and stamps them into the context WHEN resolvable, but never fails: a missing
+// workspace_id or a non-membership leaves the context untouched and the request
+// proceeds. It is for endpoints that are reachable without a workspace but want
+// to vary their response by role when one is available — e.g. /system/runtime,
+// which returns a bare availability flag to anyone but full host detail
+// (versions, socket paths) only to ADMIN+ (#865). Must wrap a handler that runs
+// after RequireAuth so the user is present; with no user it is a no-op.
+func (m *AuthMiddleware) OptionalWorkspaceRole(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := UserFromContext(r.Context())
+		if user == nil || m.db == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		workspaceID := r.URL.Query().Get("workspace_id")
+		if workspaceID == "" {
+			workspaceID = r.PathValue("workspaceId")
+		}
+		if workspaceID == "" {
+			workspaceID = r.Header.Get("X-Workspace-ID")
+		}
+		if workspaceID == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		var resolvedID, role string
+		err := m.db.QueryRowContext(r.Context(),
+			`SELECT wm.workspace_id, wm.role
+			   FROM workspace_members wm
+			   JOIN workspaces w ON w.id = wm.workspace_id
+			  WHERE wm.user_id = ?
+			    AND (w.id = ? OR w.slug = ?)
+			    AND w.deleted_at IS NULL
+			  LIMIT 1`,
+			user.ID, workspaceID, workspaceID,
+		).Scan(&resolvedID, &role)
+		if err != nil {
+			// Not a member / unknown workspace — proceed unprivileged rather
+			// than 403; the handler decides what a role-less caller may see.
+			next.ServeHTTP(w, r)
+			return
+		}
+		ctx := context.WithValue(r.Context(), ctxWorkspaceID, resolvedID)
+		ctx = context.WithValue(ctx, ctxRole, role)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 func extractToken(r *http.Request) string {
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimPrefix(h, "Bearer ")

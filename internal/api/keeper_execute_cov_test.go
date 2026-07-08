@@ -459,7 +459,9 @@ func TestCovKEStatus_Success(t *testing.T) {
 	h := NewKeeperStatusHandler(db, cfg, gk, newTestLogger())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/system/keeper", nil)
-	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: "u1"}))
+	// Counts are workspace-scoped now (#865); run in the fixture's workspace so
+	// the two seeded requests (agent lives in wsID) are counted.
+	req = withWorkspaceUser(req, "u1", wsID, "OWNER")
 	w := httptest.NewRecorder()
 	h.Status(w, req)
 

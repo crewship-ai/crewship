@@ -135,6 +135,17 @@ Scopes use the shape `<resource>:<action>`. The recognised vocabulary is deliber
 
 **Backward compatibility.** A token minted **without** `scopes` (the default, and every token issued before enforcement) carries the **full role** of the issuing user — unchanged behavior. Scopes only ever *narrow* a token; you can never mint one above your own role.
 
+### The admin authorization floor
+
+The admin console and everything behind it sit on one uniform floor: **ADMIN+ (ADMIN or OWNER)**. This is enforced at the route table, not per-handler, so the read surface and the destructive mutations can't drift apart.
+
+- **`/admin/*` and the admin console** — every admin route requires ADMIN+. Reads (stats, users, workspaces, memory versions, backups listing, keeper audit) go through the same floor as the mutations they sit next to, so an ADMIN who can drive the destructive APIs can also open the console that fronts them. A below-floor MEMBER/VIEWER gets **403**.
+- **`GET /api/v1/system/keeper`** — ADMIN+, and its request counts are **scoped to your workspace** (previously it returned instance-wide totals to any authenticated user). It also reports the configured Ollama URL/model, which is why it carries the admin floor.
+- **`GET /api/v1/system/runtime`** — reachable by any authenticated user (the runtime banner and onboarding probe it), but **host detail is redacted** unless you resolve to ADMIN+ in a workspace: non-admins get `{ "available": true|false }`, admins additionally get container versions and socket paths. Pass `?workspace_id=<id>` so the server can resolve your role.
+- **GDPR endpoints** keep their documented separation (see the [Admin CLI](/guides/admin-cli) and data-handling guides) — the erase/export routes are ADMIN+ like the rest of the surface.
+
+Roles rank VIEWER < MEMBER < MANAGER < ADMIN < OWNER; "ADMIN+" means ADMIN or OWNER. The floor is pinned by a route-table invariant test, so a new admin route that forgets the gate fails the build.
+
 ### Recovery flow walkthrough
 
 If a user forgets their password and the mailer is configured:

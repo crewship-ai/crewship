@@ -5,7 +5,6 @@ package api
 // All require workspace context and (per-handler) OWNER role.
 
 import (
-	"net/http"
 	"os"
 
 	"github.com/crewship-ai/crewship/internal/backup"
@@ -16,29 +15,31 @@ import (
 // audit is grouped here because the audit_logs surface is a
 // workspace admin tool, not part of any feature domain.
 func (r *Router) registerAdminRoutes() {
-	authed := r.authMw.RequireAuth
-	wsCtx := r.authMw.RequireWorkspace
+	// Every admin READ route flows through authedAdmin (ADMIN+ floor, #865);
+	// every admin MUTATION through authedMut (roleManage). Neither the raw
+	// authed/wsCtx chain nor an inline-only role check is used here anymore —
+	// the floor is declared at registration and enforced from the route table,
+	// so a new admin route that forgets its gate fails the floor invariant.
 
-	// Audit logs (require workspace context + manage role)
+	// Audit logs
 	audit := NewAuditHandler(r.db, r.logger)
-	r.mux.Handle("GET /api/v1/audit", authed(wsCtx(http.HandlerFunc(audit.List))))
+	r.authedAdmin("GET", "/api/v1/audit", audit.List)
 
-	// Admin (require workspace context + OWNER)
+	// Admin
 	admin := NewAdminHandler(r.db, r.logger)
-	r.mux.Handle("GET /api/v1/admin/stats", authed(wsCtx(http.HandlerFunc(admin.Stats))))
-	r.mux.Handle("GET /api/v1/admin/users", authed(wsCtx(http.HandlerFunc(admin.ListUsers))))
-	r.mux.Handle("GET /api/v1/admin/workspaces", authed(wsCtx(http.HandlerFunc(admin.ListWorkspaces))))
+	r.authedAdmin("GET", "/api/v1/admin/stats", admin.Stats)
+	r.authedAdmin("GET", "/api/v1/admin/users", admin.ListUsers)
+	r.authedAdmin("GET", "/api/v1/admin/workspaces", admin.ListWorkspaces)
 
-	// Admin observability: runtime log-level toggle + disk/health read
-	// (OWNER/ADMIN via the handler's canRole "manage" check).
+	// Admin observability: runtime log-level toggle + disk/health read.
 	obs := NewAdminObservabilityHandler(r.logger)
-	r.mux.Handle("GET /api/v1/admin/log-level", authed(wsCtx(http.HandlerFunc(obs.GetLogLevel))))
+	r.authedAdmin("GET", "/api/v1/admin/log-level", obs.GetLogLevel)
 	r.authedMut("PUT", "/api/v1/admin/log-level", roleManage, obs.SetLogLevel)
-	r.mux.Handle("GET /api/v1/admin/health", authed(wsCtx(http.HandlerFunc(obs.Health))))
+	r.authedAdmin("GET", "/api/v1/admin/health", obs.Health)
 
 	// Keeper admin log
 	keeperLog := NewKeeperLogHandler(r.db, r.logger)
-	r.mux.Handle("GET /api/v1/admin/keeper/requests", authed(wsCtx(http.HandlerFunc(keeperLog.List))))
+	r.authedAdmin("GET", "/api/v1/admin/keeper/requests", keeperLog.List)
 
 	// PR-F F6: Admin GDPR cascade endpoints — Art. 15 access +
 	// Art. 17 erasure across the four cascadable tables
@@ -50,7 +51,7 @@ func (r *Router) registerAdminRoutes() {
 	// writes a gdpr_actions audit row (v107) recording who acted
 	// on whom, scope, and operator-supplied reason.
 	gdprH := NewAdminGDPRHandler(r.db, r.logger, r.outputBasePath)
-	r.mux.Handle("GET /api/v1/admin/users/{userId}/data", authed(wsCtx(http.HandlerFunc(gdprH.ExportUserData))))
+	r.authedAdmin("GET", "/api/v1/admin/users/{userId}/data", gdprH.ExportUserData)
 	r.authedMut("DELETE", "/api/v1/admin/users/{userId}/data", roleManage, gdprH.DeleteUserData)
 
 	// Memory stats — operator observability for the memory subsystem.
@@ -60,7 +61,7 @@ func (r *Router) registerAdminRoutes() {
 	// dashboard numbers stay correct regardless of which path the
 	// agent took.
 	memStats := NewMemoryStatsHandler(r.db, r.logger)
-	r.mux.Handle("GET /api/v1/admin/memory/stats", authed(wsCtx(http.HandlerFunc(memStats.Stats))))
+	r.authedAdmin("GET", "/api/v1/admin/memory/stats", memStats.Stats)
 
 	// Memory versions list — row-level drill-down into
 	// memory_versions. Stats (above) is the aggregate; this
@@ -68,7 +69,7 @@ func (r *Router) registerAdminRoutes() {
 	// path prefix / time range, paginated via keyset cursor.
 	// Iter 7 of the memory-hardening series.
 	memVer := NewMemoryVersionsListHandler(r.db, r.logger)
-	r.mux.Handle("GET /api/v1/admin/memory/versions", authed(wsCtx(http.HandlerFunc(memVer.List))))
+	r.authedAdmin("GET", "/api/v1/admin/memory/versions", memVer.List)
 
 	// Memory version content — operator drill-down into the
 	// actual bytes of a specific memory_versions row. Pairs
@@ -79,8 +80,7 @@ func (r *Router) registerAdminRoutes() {
 	// content-addressed path the rest of the memory pipeline
 	// uses; empty disables the endpoint (503).
 	memContent := NewMemoryVersionsContentHandler(r.db, r.logger, r.memoryVersionsBlobRoot)
-	r.mux.Handle("GET /api/v1/admin/memory/versions/{id}/content",
-		authed(wsCtx(http.HandlerFunc(memContent.Content))))
+	r.authedAdmin("GET", "/api/v1/admin/memory/versions/{id}/content", memContent.Content)
 
 	// Memory config — read + partial write of
 	// workspaces.memory_config. Iter 4 wired the per-workspace
@@ -92,7 +92,7 @@ func (r *Router) registerAdminRoutes() {
 	// over time.
 	memCfg := NewMemoryConfigHandler(r.db, r.logger)
 	memCfg.SetJournal(r.Journal())
-	r.mux.Handle("GET /api/v1/admin/memory/config", authed(wsCtx(http.HandlerFunc(memCfg.Get))))
+	r.authedAdmin("GET", "/api/v1/admin/memory/config", memCfg.Get)
 	r.authedMut("PATCH", "/api/v1/admin/memory/config", roleManage, memCfg.Patch)
 
 	// Backups (admin-only; require workspace context for scoping).
@@ -119,14 +119,14 @@ func (r *Router) registerAdminRoutes() {
 		backupH.SetJournal(r.journal)
 	}
 	r.authedMut("POST", "/api/v1/admin/backups", roleManage, backupH.Create)
-	r.mux.Handle("GET /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.List))))
-	r.mux.Handle("GET /api/v1/admin/backups/status", authed(wsCtx(http.HandlerFunc(backupH.Status))))
-	r.mux.Handle("GET /api/v1/admin/backups/metrics", authed(wsCtx(http.HandlerFunc(backupH.Metrics))))
+	r.authedAdmin("GET", "/api/v1/admin/backups", backupH.List)
+	r.authedAdmin("GET", "/api/v1/admin/backups/status", backupH.Status)
+	r.authedAdmin("GET", "/api/v1/admin/backups/metrics", backupH.Metrics)
 	r.authedMut("DELETE", "/api/v1/admin/backups/status", roleManage, backupH.Unlock)
-	r.mux.Handle("GET /api/v1/admin/backups/inspect", authed(wsCtx(http.HandlerFunc(backupH.Inspect))))
-	r.mux.Handle("GET /api/v1/admin/backups/verify", authed(wsCtx(http.HandlerFunc(backupH.Verify))))
+	r.authedAdmin("GET", "/api/v1/admin/backups/inspect", backupH.Inspect)
+	r.authedAdmin("GET", "/api/v1/admin/backups/verify", backupH.Verify)
 	r.authedMut("POST", "/api/v1/admin/backups/rotate", roleManage, backupH.Rotate)
-	r.mux.Handle("GET /api/v1/admin/backups/download", authed(wsCtx(http.HandlerFunc(backupH.Download))))
+	r.authedAdmin("GET", "/api/v1/admin/backups/download", backupH.Download)
 	r.authedMut("POST", "/api/v1/admin/backups/restore", roleManage, backupH.Restore)
 	r.authedMut("POST", "/api/v1/admin/backups/self-test", roleManage, backupH.SelfTest)
 	r.authedMut("DELETE", "/api/v1/admin/backups", roleManage, backupH.Delete)
@@ -145,7 +145,7 @@ func (r *Router) registerAdminRoutes() {
 		}
 	}
 	legacyH := NewLegacyResourceHandler(r.db, r.logger, legacyPruner, legacyDetector)
-	r.mux.Handle("GET /api/v1/admin/legacy-resources", authed(wsCtx(http.HandlerFunc(legacyH.Detect))))
+	r.authedAdmin("GET", "/api/v1/admin/legacy-resources", legacyH.Detect)
 	r.authedMut("POST", "/api/v1/admin/prune-legacy-resources", roleManage, legacyH.Prune)
 
 	// Crew runtime teardown (admin-only). Removes the LIVE id-scoped docker
