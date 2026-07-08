@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"fmt"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/untrusted"
 )
 
 // MemberIntegration represents an MCP integration available to a crew member.
@@ -139,7 +141,12 @@ func BuildLeadContext(members []CrewMember) string {
 			fmt.Fprintf(&b, "- %s (@%s)", m.Name, m.Slug)
 		}
 		if m.Description != "" {
-			fmt.Fprintf(&b, ": %s", m.Description)
+			// A member's free-text description is attacker-influenceable (agents
+			// can be provisioned by lower-trust callers), so fence it as data
+			// before it lands in the lead's prompt (#808 M1). The @slug/name/role
+			// identifiers above stay unfenced — the delegation protocol reads them
+			// structurally.
+			fmt.Fprintf(&b, ": %s", untrusted.Wrap("crew_member", m.Description))
 		}
 		b.WriteString("\n")
 		if len(m.Integrations) > 0 {
