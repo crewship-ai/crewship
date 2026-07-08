@@ -534,6 +534,13 @@ with a single `file` field.
 
 - Max **2 MB**; the content type is sniffed from the bytes and must be
   **PNG, JPEG, or WebP** (a mismatched or unsupported type is a `400`).
+- The image header is decoded (`image.DecodeConfig`) to reject a file that
+  isn't a real, parseable image, and each side is capped at **4096 px**
+  (decompression-bomb defense) — a corrupt or over-large image is a `400`.
+- **EXIF/metadata is preserved.** The bytes are stored verbatim, so any EXIF
+  (incl. GPS) in a JPEG survives. This is an accepted trade-off for a
+  self-uploaded avatar; stripping would require a full re-encode (and webp
+  re-encode isn't in the Go stdlib). Strip client-side first if that matters.
 - Stored server-side; `avatar_url` is set to the authenticated serve
   endpoint below (with a `?v=` cache-buster so a replacement refreshes).
 
