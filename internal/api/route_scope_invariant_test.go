@@ -57,6 +57,43 @@ func TestEveryMutationRouteDeclaresScope(t *testing.T) {
 	}
 }
 
+// TestEveryMintableScopeMapsToARoute is the REVERSE invariant of
+// TestEveryMutationRouteDeclaresScope: it asserts the vocabulary carries no
+// dead weight — every scope a user can MINT (knownScopes) is satisfiable
+// against at least one recorded mutation route. A mintable scope that maps to
+// no route is a lie: an operator scopes a token to it expecting least
+// privilege, but the token can never exercise that grant (and a read-shaped
+// scope silently gates nothing, because reads are not scope-gated yet). The
+// forward invariant only checks routes→vocabulary; without this reverse check,
+// a scope like agents:run or crews:read can sit in the New Token dialog,
+// validate at issue time, and do absolutely nothing — which is exactly the gap
+// that shipped past green CI.
+func TestEveryMintableScopeMapsToARoute(t *testing.T) {
+	r, err := NewRouter(setupTestDB(t), "this-is-a-32-char-test-secret-pad", newTestLogger())
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+	satisfiesSomeRoute := func(scope string) bool {
+		// A token holding exactly {scope}: does it satisfy any route's required
+		// scope (directly or via wildcard subsumption)?
+		ctx := context.WithValue(context.Background(), ctxTokenScopes, stringSet{scope: {}})
+		for _, mr := range r.mutationRoutes {
+			if mr.Scope == scopeSelf || mr.Scope == "" {
+				continue
+			}
+			if canScope(ctx, mr.Scope) {
+				return true
+			}
+		}
+		return false
+	}
+	for scope := range knownScopes {
+		if !satisfiesSomeRoute(scope) {
+			t.Errorf("mintable scope %q maps to no mutation route — a token scoped to it can exercise nothing. Remove it from knownScopes (and the New Token dialog + auth.mdx) until a route requires it, or wire the route that should require it.", scope)
+		}
+	}
+}
+
 // TestScopeForRoute pins the resource→scope mapping: the five first-class
 // families resolve to their own scope, nested sub-resources borrow the target
 // resource's scope, the broad workspace surface maps to workspace:admin, and

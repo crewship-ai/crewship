@@ -117,17 +117,23 @@ interface CLIToken {
 // the source of truth at issue time, the UI just mirrors the list
 // so users can pick from a menu instead of typing strings.
 //
-// Grouped by resource for the dialog's three-column layout. Each
-// group's "*" wildcard is the top-of-group selector; selecting it
-// disables the per-action checkboxes (the user has chosen "all
-// actions on this resource").
+// Grouped by resource for the dialog's layout. Each group's "*"
+// wildcard is the top-of-group selector; selecting it disables the
+// per-action checkboxes (the user has chosen "all actions on this
+// resource").
+//
+// Only actions that actually gate a route are offered — reads are not
+// scope-gated yet and there is no route-mapped agents:run, so those would
+// mint tokens that grant/gate nothing. This mirrors the backend allowlist
+// (and the reverse invariant TestEveryMintableScopeMapsToARoute). They come
+// back here when a route requires them.
 const SCOPE_GROUPS: Array<{ resource: string; actions: string[] }> = [
-  { resource: "agents", actions: ["read", "write", "run"] },
-  { resource: "crews", actions: ["read", "write"] },
-  { resource: "credentials", actions: ["read", "write"] },
-  { resource: "skills", actions: ["read", "write"] },
-  { resource: "webhooks", actions: ["read", "write"] },
-  { resource: "workspace", actions: ["read", "admin"] },
+  { resource: "agents", actions: ["write"] },
+  { resource: "crews", actions: ["write"] },
+  { resource: "credentials", actions: ["write"] },
+  { resource: "skills", actions: ["write"] },
+  { resource: "webhooks", actions: ["write"] },
+  { resource: "workspace", actions: ["admin"] },
 ]
 
 // Token-tier visual marker. Distinct colour from workspace-role so
@@ -512,7 +518,7 @@ export function ProfileSection({
                   </Label>
                   <p className="text-[10px] text-muted-foreground">
                     Leave empty for unrestricted token (full role permissions).
-                    Pick scopes to narrow — e.g. <code className="font-mono">agents:run</code> for a CI runner that only spawns agents.
+                    Pick scopes to narrow — e.g. <code className="font-mono">agents:write</code> for a CI bot that only manages agents.
                   </p>
                   <div className="grid grid-cols-3 gap-x-3 gap-y-1.5 border border-border/40 rounded-md p-2.5 bg-muted/20">
                     {SCOPE_GROUPS.map((group) => (

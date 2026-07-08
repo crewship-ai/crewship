@@ -107,32 +107,31 @@ Store `token` in CI secrets and pass it as `Authorization: Bearer <token>` on su
 
 #### Scoping a token (least privilege)
 
-Pass `scopes` when minting to restrict what the token can do — a CI token that only triggers agent runs never needs to delete crews or read credentials:
+Pass `scopes` when minting to restrict what the token can do — a CI token that only manages agents never needs to delete crews or rotate credentials:
 
 ```bash
 curl -sX POST https://crewship.example.com/api/v1/auth/cli-token \
   -H "Cookie: $SESSION_COOKIE" \
-  -d '{"name":"ci-agents","scopes":["agents:write","crews:read"]}'
+  -d '{"name":"ci-agents","scopes":["agents:write"]}'
 ```
 
-Scopes use the shape `<resource>:<action>`. The recognised vocabulary:
+Scopes use the shape `<resource>:<action>`. The recognised vocabulary is deliberately limited to scopes that actually gate a route today — every scope you can mint maps to at least one endpoint (enforced by a test), so a "restricted" token is never a token that silently grants nothing:
 
 | Resource | Scopes |
 |----------|--------|
-| `agents` | `agents:read`, `agents:write`, `agents:run`, `agents:*` |
-| `crews` | `crews:read`, `crews:write`, `crews:*` |
-| `credentials` | `credentials:read`, `credentials:write`, `credentials:*` |
-| `skills` | `skills:read`, `skills:write`, `skills:*` |
-| `webhooks` | `webhooks:read`, `webhooks:write`, `webhooks:*` (outbound notification channels) |
-| `workspace` | `workspace:read`, `workspace:admin`, `workspace:*` (workspace administration) |
+| `agents` | `agents:write`, `agents:*` |
+| `crews` | `crews:write`, `crews:*` |
+| `credentials` | `credentials:write`, `credentials:*` |
+| `skills` | `skills:write`, `skills:*` |
+| `webhooks` | `webhooks:write`, `webhooks:*` (outbound notification channels) |
+| `workspace` | `workspace:admin`, `workspace:*` (workspace administration) |
 | _all_ | `*` |
 
 **How scopes are enforced.** Every state-changing route (`POST`/`PUT`/`PATCH`/`DELETE`) declares the scope it requires; the route-table chokepoint checks it right after the role check, so enforcement can't be forgotten per-handler. A restricted token missing the route's scope is refused with **403** before the handler runs. Semantics:
 
-- **Wildcards subsume:** `agents:*` satisfies any `agents:*` route; `*` satisfies everything.
-- **No read⇒write implication:** an `agents:read` token cannot call an `agents:write` route.
+- **Wildcards subsume:** `agents:*` satisfies any `agents` route; `*` satisfies everything.
 - **Least privilege is coarse today:** the broad workspace-management surface (projects, issues, pipelines, integrations, admin, feature flags, …) currently maps to `workspace:admin`. Finer scopes for that surface are planned.
-- **Reads are not scope-gated yet** — a scoped token can still read; scoping applies to mutations. Read scoping is a planned follow-up.
+- **No `:read` scopes yet.** Reads are not scope-gated in this pass (GET routes register outside the mutation chokepoint), and there is no route-mapped `agents:run` — so those scopes aren't offered rather than shipped as no-ops. They return when a route requires them (read-scoping / invocation-scoping are tracked follow-ups). A scoped token can still read.
 
 **Backward compatibility.** A token minted **without** `scopes` (the default, and every token issued before enforcement) carries the **full role** of the issuing user — unchanged behavior. Scopes only ever *narrow* a token; you can never mint one above your own role.
 

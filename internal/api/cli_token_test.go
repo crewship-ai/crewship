@@ -622,7 +622,7 @@ func TestCLITokenCreate_Scopes_Validated(t *testing.T) {
 		seedTestWorkspace(t, db, userID) // makes userID OWNER
 		body, _ := json.Marshal(map[string]any{
 			"name":   "ci-bot",
-			"scopes": []string{"agents:read", "agents:run"},
+			"scopes": []string{"agents:write", "credentials:write"},
 		})
 		req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
 		req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
