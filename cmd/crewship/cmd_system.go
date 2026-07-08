@@ -2,12 +2,30 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 )
+
+// keeperPermissionHint turns the server's bare "403 Forbidden" for
+// `system keeper` into an actionable message. The route is ADMIN+ in the
+// caller's workspace (#893); a MEMBER should learn *why* they're blocked
+// rather than see a raw RFC-7807 "Forbidden". Non-403 errors pass through
+// unchanged so the underlying status/detail is preserved.
+func keeperPermissionHint(err error) error {
+	var apiErr *cli.APIError
+	if errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden {
+		ws := cli.ResolveWorkspace(flagWorkspace, cliCfg)
+		return cli.WithExitCode(fmt.Errorf(
+			"API error (403): keeper status requires ADMIN or OWNER role in workspace %q — ask a workspace admin or switch workspaces with 'crewship workspace use <slug>'",
+			ws), cli.ExitAuth)
+	}
+	return err
+}
 
 var systemCmd = &cobra.Command{
 	Use:   "system",
@@ -91,16 +109,24 @@ var systemKeeperCmd = &cobra.Command{
 		if err := requireAuth(); err != nil {
 			return err
 		}
+		// #893 moved GET /api/v1/system/keeper behind authedAdmin
+		// (RequireWorkspace → roleManage), so the route is now
+		// workspace-scoped and ADMIN+. Sending the active workspace id
+		// (the default the client already resolves) is mandatory —
+		// clearing it, as this command used to for the old instance-wide
+		// route, makes RequireWorkspace hard-400 for everyone (#896).
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
 
 		client := newAPIClient()
-		client.WorkspaceID = ""
 
 		resp, err := client.Get("/api/v1/system/keeper")
 		if err != nil {
 			return err
 		}
 		if err := cli.CheckError(resp); err != nil {
-			return err
+			return keeperPermissionHint(err)
 		}
 
 		var keeper struct {
