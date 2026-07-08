@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -67,6 +68,7 @@ Structured (JSON) output is pretty-printed. Pair with 'routine logs
 				fmt.Println()
 				fmt.Println(prettyOutput(detail.Output))
 			}
+			printRunFiles(cmd, client, runID, detail.IsTerminal())
 			return nil
 		}
 
@@ -86,17 +88,41 @@ Structured (JSON) output is pretty-printed. Pair with 'routine logs
 		if detail.Output != "" {
 			fmt.Println("\nFinal output:")
 			fmt.Println(indent(prettyOutput(detail.Output), "  "))
-			return nil
-		}
-		// No output — distinguish "run produced nothing" from "not done yet"
-		// so the absence isn't read as a silent bug.
-		if detail.IsTerminal() {
+		} else if detail.IsTerminal() {
+			// No output — distinguish "run produced nothing" from "not done
+			// yet" so the absence isn't read as a silent bug.
 			fmt.Println("\n(no final output recorded for this run)")
 		} else {
 			fmt.Printf("\n(run is %s — no final output yet)\n", strings.ToLower(detail.Status))
 		}
+		printRunFiles(cmd, client, runID, detail.IsTerminal())
 		return nil
 	},
+}
+
+// printRunFiles appends the "Files produced:" section — the files the run
+// wrote, resolved by the run→files endpoint (#839). Best-effort: a fetch
+// error never fails the command (the deliverable output already printed),
+// and the "(none)" line only shows for a finished run so an in-flight run
+// isn't mislabelled as producing nothing.
+func printRunFiles(cmd *cobra.Command, client *cli.Client, runID string, terminal bool) {
+	res, err := client.GetRunFiles(cmd.Context(), runID)
+	if err != nil || res == nil {
+		return
+	}
+	if len(res.Files) == 0 {
+		if terminal {
+			fmt.Println("\nFiles produced: (none)")
+		}
+		return
+	}
+	fmt.Println("\nFiles produced:")
+	for _, f := range res.Files {
+		fmt.Printf("  %-28s %10s  %s\n", f.Name, formatBytes(f.Size), f.Path)
+	}
+	if res.CrewID != "" {
+		fmt.Printf("  fetch: crewship crew files get %s <path>\n", res.CrewID)
+	}
 }
 
 // prettyOutput indents a JSON object/array for readability and returns any

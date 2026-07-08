@@ -73,6 +73,48 @@ func (c *Client) GetPipelineRun(ctx context.Context, id string) (*PipelineRunDet
 	return &detail, nil
 }
 
+// RunFile is one artefact a run produced, as returned by
+// GET /api/v1/workspaces/{ws}/pipeline-runs/{runId}/files. Path is the
+// crew-scoped storage path usable with `crew files download`.
+type RunFile struct {
+	Path    string `json:"path"`
+	Name    string `json:"name"`
+	Size    int64  `json:"size"`
+	ModTime string `json:"mod_time"`
+}
+
+// RunFilesResult is the run→files response: the resolved crew plus the
+// files whose mtime fell inside the run window.
+type RunFilesResult struct {
+	CrewID string    `json:"crew_id"`
+	Files  []RunFile `json:"files"`
+}
+
+// GetRunFiles lists the files a routine run produced, scoped to the
+// client's workspace.
+func (c *Client) GetRunFiles(ctx context.Context, id string) (*RunFilesResult, error) {
+	if strings.TrimSpace(id) == "" {
+		return nil, errors.New("run id required")
+	}
+	ws := c.getWorkspaceID(ctx)
+	if ws == "" {
+		return nil, errors.New("workspace required to look up run files")
+	}
+	resp, err := c.WithContext(ctx).Get(
+		"/api/v1/workspaces/" + url.PathEscape(ws) + "/pipeline-runs/" + url.PathEscape(id) + "/files")
+	if err != nil {
+		return nil, fmt.Errorf("get run files %q: %w", id, err)
+	}
+	if err := CheckError(resp); err != nil {
+		return nil, fmt.Errorf("get run files %q: %w", id, err)
+	}
+	var out RunFilesResult
+	if err := ReadJSON(resp, &out); err != nil {
+		return nil, fmt.Errorf("decode run files %q: %w", id, err)
+	}
+	return &out, nil
+}
+
 // PollPipelineRun polls GetPipelineRun(id) at `interval` until the run
 // reaches a terminal status, ctx is cancelled, or ctx's deadline passes.
 // The shape mirrors PollRun (agent runs) so `crewship wait` can drive

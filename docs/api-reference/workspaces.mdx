@@ -44,6 +44,7 @@ Errors follow [RFC 7807 Problem Details](https://datatracker.ietf.org/doc/html/r
 | `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/runs/active`](#list-active-runs-in-memory-registry) | In-flight runs (this replica) |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/pipeline-runs`](#list-workspace-runs-cross-pipeline-feed) | Cross-pipeline run feed |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}`](#get-pipeline-run) | Persisted state of one run |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/files`](#run-produced-files) | Files a run produced (mtime-windowed) |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel`](#cancel-pipeline-run) | Cancel an in-flight run |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions`](#list-versions) | Pipeline version history |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions/{n}`](#get-one-version) | One version with full DSL |
@@ -922,6 +923,37 @@ Returns the persisted state of a single run from `pipeline_runs`, joined to `pip
 | Status | Condition |
 |---|---|
 | `404` | Run not found in this workspace |
+
+### Run produced files
+
+```
+GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/files
+```
+
+Lists the files a run produced — the deliverable for document-processing routines. Read-time, non-invasive: the run is resolved to its crew (`invoking_crew_id`, falling back to the pipeline's `author_crew_id`), the crew's host files are listed over the same IPC path the agent/crew file endpoints use (agent `/output` + `/crew/shared`), and only files whose modification time falls inside the run's `[started_at, ended_at]` window are returned. A still-running run uses "now" as the upper bound.
+
+**Auth:** `read` capability (any non-empty role). The resolved crew is re-validated against the workspace before its files are read (tenant guard).
+
+**Response:** `200 OK`
+
+```json
+{
+  "crew_id": "crew_x",
+  "files": [
+    { "path": "crew_x/writer/report.pdf", "name": "report.pdf", "size": 1234, "mod_time": "2026-07-01T10:30:00Z" }
+  ]
+}
+```
+
+A run with no resolvable/in-workspace crew returns `{ "crew_id": "", "files": [] }`. Download a listed file via [`crew files download`](/api-reference/workspaces#file-endpoints) / `crewship crew files get <crew_id> <path>`.
+
+| Status | Condition |
+|---|---|
+| `404` | Run not found in this workspace |
+
+<Note>
+The mtime-window heuristic can cross-attribute a file when two runs on the same crew have overlapping windows. It intentionally does **not** modify the pipeline executor — see the `routine result` [CLI docs](/cli/routine#crewship-routine-result-run-id).
+</Note>
 
 ### Cancel pipeline run
 
