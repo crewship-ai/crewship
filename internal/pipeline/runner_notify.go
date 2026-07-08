@@ -204,6 +204,14 @@ func resolveNotifyTarget(to, invokingUserID string) (userID, role string, err er
 		default:
 			return "", "", fmt.Errorf("to: role:%s not targetable (allowed: OWNER, MANAGER)", r)
 		}
+	case strings.HasPrefix(to, "crew:"):
+		// crew:<slug> targeting is deferred to #842 Phase 2: crews are groups
+		// of agents, the inbox targets users, and there is no crew→user
+		// ("human audience of a crew") mapping in the schema yet. Reject it
+		// loudly here — at save via validateNotifyTarget, and at run time for a
+		// templated target that renders to crew:<slug> — so the author knows
+		// it's coming rather than being surprised by a silent no-op.
+		return "", "", fmt.Errorf("to %q not yet supported — crew targeting lands in Phase 2 (issue #842); for now target trigger, user:<id>, role:OWNER/MANAGER, or workspace", to)
 	default:
 		return "", "", fmt.Errorf("to %q unsupported (allowed: workspace, trigger, user:<id>, role:OWNER, role:MANAGER)", to)
 	}
