@@ -226,6 +226,7 @@
             "pages": [
               "cli/init",
               "cli/setup",
+              "cli/auth",
               "cli/session",
               "cli/token",
               "cli/me",

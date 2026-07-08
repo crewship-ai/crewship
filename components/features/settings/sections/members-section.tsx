@@ -15,6 +15,9 @@ import {
 import {
   Collapsible, CollapsibleContent, CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select"
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
 import { CapabilityGrid } from "@/components/admin/capability-grid"
 import { cn } from "@/lib/utils"
@@ -58,6 +61,14 @@ const roleCls: Record<string, string> = {
   VIEWER: "bg-muted text-muted-foreground border-border",
 }
 
+// Role rank mirrors the backend `roleRank` (internal/api/helpers.go). Used
+// only to decide which members the caller may edit and which roles the
+// dropdown may offer; the server re-enforces the full ladder.
+const roleRank: Record<string, number> = {
+  VIEWER: 1, MEMBER: 2, MANAGER: 3, ADMIN: 4, OWNER: 5,
+}
+const ROLE_ORDER = ["VIEWER", "MEMBER", "MANAGER", "ADMIN", "OWNER"]
+
 const roleSummaries: { role: string; summary: string }[] = [
   { role: "Owner", summary: "All permissions" },
   { role: "Admin", summary: "All permissions except billing transfer" },
@@ -92,6 +103,129 @@ function initials(name: string | null, email: string): string {
     return name.slice(0, 2).toUpperCase()
   }
   return email.slice(0, 2).toUpperCase()
+}
+
+// ── Member role control ──────────────────────────────────────────────
+
+// Renders a role dropdown when the caller may change this member's role,
+// otherwise a static badge. The caller may edit a member only when they
+// strictly outrank them (and it isn't their own row); the offered roles
+// are those strictly below the caller's own — matching the server-side
+// ladder (grant-below-own, no-modify-superior). A confirm dialog gates
+// the actual PATCH.
+function MemberRoleControl({
+  member,
+  workspaceId,
+  callerRole,
+  isSelf,
+  onRefresh,
+}: {
+  member: Member
+  workspaceId: string
+  callerRole?: string
+  isSelf: boolean
+  onRefresh: () => void
+}) {
+  const [pendingRole, setPendingRole] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  const callerRank = callerRole ? roleRank[callerRole] ?? 0 : 0
+  const canEdit = !isSelf && callerRank > (roleRank[member.role] ?? 0)
+  // Grantable roles: strictly below the caller's own rank.
+  const options = ROLE_ORDER.filter((r) => (roleRank[r] ?? 0) < callerRank)
+
+  const staticBadge = (
+    <Badge
+      variant="outline"
+      className={cn("text-[10px] font-medium", roleCls[member.role] ?? "")}
+    >
+      {member.role}
+    </Badge>
+  )
+
+  if (!canEdit || options.length === 0) return staticBadge
+
+  async function applyRole(role: string) {
+    setSaving(true)
+    try {
+      const res = await apiFetch(
+        `/api/v1/workspaces/${workspaceId}/members/${member.id}?workspace_id=${workspaceId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role }),
+        },
+      )
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        // The role endpoint returns RFC 7807 problems (`detail`); fall back
+        // to the legacy `error` shape for older responses.
+        const raw = body?.detail ?? body?.error
+        toast.error(typeof raw === "string" ? raw : "Failed to change role")
+        return
+      }
+      toast.success(`Role changed to ${role}`)
+      onRefresh()
+    } catch {
+      toast.error("Failed to change role")
+    } finally {
+      setSaving(false)
+      setPendingRole(null)
+    }
+  }
+
+  return (
+    <>
+      <Select
+        value={member.role}
+        onValueChange={(v) => { if (v !== member.role) setPendingRole(v) }}
+        disabled={saving}
+      >
+        <SelectTrigger
+          className="h-6 w-[104px] text-[10px] px-2"
+          aria-label={`Change role for ${member.user.full_name ?? member.user.email}`}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((r) => (
+            <SelectItem key={r} value={r} className="text-xs">{r}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      <AlertDialog open={pendingRole !== null} onOpenChange={(o) => { if (!o) setPendingRole(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-sm">Change member role</AlertDialogTitle>
+            <AlertDialogDescription className="text-xs">
+              Change{" "}
+              <span className="font-medium text-foreground">
+                {member.user.full_name ?? member.user.email}
+              </span>{" "}
+              from <span className="font-medium">{member.role}</span> to{" "}
+              <span className="font-medium">{pendingRole}</span>?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="h-7 text-xs" disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="h-7 text-xs"
+              disabled={saving}
+              onClick={(e) => {
+                // Keep the dialog open while the PATCH is in flight; a
+                // second click can't fire a duplicate request.
+                e.preventDefault()
+                if (pendingRole && !saving) void applyRole(pendingRole)
+              }}
+            >
+              Change role
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  )
 }
 
 // ── Component ────────────────────────────────────────────────────────
@@ -170,14 +304,15 @@ export function MembersSection({
                 </div>
               </div>
 
-              {/* Right: role badge + joined + remove */}
+              {/* Right: role control + joined + remove */}
               <div className="flex items-center gap-2.5 shrink-0">
-                <Badge
-                  variant="outline"
-                  className={cn("text-[10px] font-medium", roleCls[member.role] ?? "")}
-                >
-                  {member.role}
-                </Badge>
+                <MemberRoleControl
+                  member={member}
+                  workspaceId={workspaceId}
+                  callerRole={callerRole}
+                  isSelf={isSelf}
+                  onRefresh={onRefresh}
+                />
                 <span className="text-[10px] text-muted-foreground font-mono tabular-nums w-[52px] text-right">
                   {relativeTime(member.created_at)}
                 </span>

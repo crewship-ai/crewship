@@ -69,6 +69,11 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/members", authed(wsCtx(http.HandlerFunc(ws.ListMembers))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/members", roleManage, ws.AddMember)
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/members/{memberId}", roleManage, ws.RemoveMember)
+	// Member role change (#867.2). MANAGER+ at the route (roleCreate); the
+	// ladder (grant-below-own, no-modify-superior, last-owner) is enforced
+	// in the handler. Literal path — the "/capabilities" suffix routes
+	// below win their more-specific match, so no ordering hazard.
+	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/members/{memberId}", roleCreate, ws.UpdateMemberRole)
 	// PRD-SLASH-CAPABILITIES-2026 §6.7 — per-member capability
 	// grant/revoke surface. The PATCH is ADMIN+ enforced at registration
 	// (authedMut/roleManage); the GET is read-only, JWT-authed +

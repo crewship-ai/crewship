@@ -30,6 +30,7 @@ The active workspace is stored in `~/.crewship/cli-config.yaml` under `workspace
 | `workspace update` | Patch mutable fields on the current workspace. |
 | `workspace member list` | List members of the active workspace. |
 | `workspace member add <user-id>` | Add an existing user to the workspace. |
+| `workspace member role <member-id> <ROLE>` | Change a member's role (`MANAGER+`, ladder-guarded). |
 | `workspace member remove <user-id>` | Remove a member (prompts unless `-y`). |
 | `workspace member capabilities ...` | Manage per-member capability grants (aliases: `caps`, `capability`). See [below](#workspace-member-capabilities). |
 | `workspace invite [email]` | Invite by email (shortcut for `invite create`). |
@@ -61,6 +62,18 @@ Only flags you actually set are sent — passing nothing returns `no fields to u
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--role <ROLE>` | `MEMBER` | One of `MEMBER` or `ADMIN`. Owners are seeded at workspace-create time. |
+
+### `workspace member role`
+
+```bash
+crewship workspace member role <member-id> <ROLE>
+```
+
+`<member-id>` is the membership row id from `workspace member list`;
+`<ROLE>` is one of `OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`
+(case-insensitive). `MANAGER+` only, and subject to the server ladder:
+you can only grant a role below your own, cannot modify a member ranked
+above you, and cannot demote the last `OWNER`.
 
 ### `workspace member remove`
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -319,10 +320,14 @@ var workspaceMemberListCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		headers := []string{"ID", "EMAIL", "NAME", "ROLE", "JOINED"}
+		// MEMBER ID is the workspace_members row id — the identifier the
+		// `member role` / `member remove` commands PATCH/DELETE by. Show it
+		// first so the CLI advertises the same id the API consumes; USER ID
+		// stays for cross-referencing user-scoped commands.
+		headers := []string{"MEMBER ID", "USER ID", "EMAIL", "NAME", "ROLE", "JOINED"}
 		var rows [][]string
 		for _, m := range members {
-			rows = append(rows, []string{truncateID(m.UserID, 12), m.Email, m.FullName, m.Role, m.CreatedAt})
+			rows = append(rows, []string{m.ID, truncateID(m.UserID, 12), m.Email, m.FullName, m.Role, m.CreatedAt})
 		}
 		return f.Auto(members, headers, rows)
 	},
@@ -360,6 +365,46 @@ var workspaceMemberAddCmd = &cobra.Command{
 		resp.Body.Close()
 
 		cli.PrintSuccess(fmt.Sprintf("Member added with role %s.", role))
+		return nil
+	},
+}
+
+var workspaceMemberRoleCmd = &cobra.Command{
+	Use:   "role <member-id> <ROLE>",
+	Short: "Change a member's workspace role",
+	Long: `Change a workspace member's role.
+
+MANAGER+ only, subject to the ladder: you can only grant a role below your
+own, you cannot modify a member ranked above you, and the last OWNER
+cannot be demoted. <member-id> is the membership row id from
+'workspace member list'. <ROLE> is one of OWNER, ADMIN, MANAGER, MEMBER,
+VIEWER.`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		memberID := args[0]
+		role := strings.ToUpper(args[1])
+
+		client := newAPIClient()
+		wsID := client.GetWorkspaceID()
+		resp, err := client.Patch("/api/v1/workspaces/"+wsID+"/members/"+memberID, map[string]string{
+			"role": role,
+		})
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		resp.Body.Close()
+
+		cli.PrintSuccess(fmt.Sprintf("Member role changed to %s.", role))
 		return nil
 	},
 }
@@ -527,6 +572,7 @@ func init() {
 
 	workspaceMemberCmd.AddCommand(workspaceMemberListCmd)
 	workspaceMemberCmd.AddCommand(workspaceMemberAddCmd)
+	workspaceMemberCmd.AddCommand(workspaceMemberRoleCmd)
 	workspaceMemberCmd.AddCommand(workspaceMemberRemoveCmd)
 
 	workspaceInviteCmd.AddCommand(workspaceInviteListCmd)

@@ -207,6 +207,7 @@ export function SettingsLayout() {
           workspaceId={workspaceId}
           currentUserId={session?.user?.id}
           canInvite={abilities.can("create", "Member")}
+          callerRole={role ?? undefined}
           onRefresh={handleRefresh}
         />
       )

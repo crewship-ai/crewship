@@ -168,8 +168,87 @@ interface ProfileSectionProps {
 export function ProfileSection({
   userName, userEmail, role, workspaceName, joinedAt, sessionExpires, onSignOut,
 }: ProfileSectionProps) {
-  const initials = (userName ?? "U").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
+  // ── Editable profile (name) state (#867.1) ──
+  const [displayName, setDisplayName] = useState<string | null | undefined>(userName)
+  useEffect(() => { setDisplayName(userName) }, [userName])
+  const [editingName, setEditingName] = useState(false)
+  const [nameDraft, setNameDraft] = useState("")
+  const [savingName, setSavingName] = useState(false)
+  const [nameError, setNameError] = useState<string | null>(null)
+
+  // ── Change-password dialog state (#867.1) ──
+  const [pwOpen, setPwOpen] = useState(false)
+  const [pwCurrent, setPwCurrent] = useState("")
+  const [pwNew, setPwNew] = useState("")
+  const [pwConfirm, setPwConfirm] = useState("")
+  const [pwSaving, setPwSaving] = useState(false)
+  const [pwError, setPwError] = useState<string | null>(null)
+  const [pwDone, setPwDone] = useState(false)
+
+  const initials = (displayName ?? "U").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
   const expiresIn = useTimeUntil(sessionExpires)
+
+  const startEditName = useCallback(() => {
+    setNameDraft(displayName ?? "")
+    setNameError(null)
+    setEditingName(true)
+  }, [displayName])
+
+  const saveName = useCallback(async () => {
+    const trimmed = nameDraft.trim()
+    if (trimmed.length < 1 || trimmed.length > 100) {
+      setNameError("Name must be 1-100 characters")
+      return
+    }
+    setSavingName(true)
+    setNameError(null)
+    try {
+      const res = await apiFetch("/api/v1/users/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ full_name: trimmed }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        setNameError(typeof body?.error === "string" ? body.error : "Failed to save name")
+        return
+      }
+      setDisplayName(trimmed)
+      setEditingName(false)
+    } catch {
+      setNameError("Failed to save name")
+    } finally {
+      setSavingName(false)
+    }
+  }, [nameDraft])
+
+  const resetPwForm = useCallback(() => {
+    setPwCurrent(""); setPwNew(""); setPwConfirm(""); setPwError(null); setPwDone(false)
+  }, [])
+
+  const changePassword = useCallback(async () => {
+    if (pwNew.length < 8) { setPwError("New password must be at least 8 characters"); return }
+    if (pwNew !== pwConfirm) { setPwError("New passwords do not match"); return }
+    setPwSaving(true)
+    setPwError(null)
+    try {
+      const res = await apiFetch("/api/v1/users/me/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current_password: pwCurrent, new_password: pwNew }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        setPwError(typeof body?.error === "string" ? body.error : "Failed to change password")
+        return
+      }
+      setPwDone(true)
+    } catch {
+      setPwError("Failed to change password")
+    } finally {
+      setPwSaving(false)
+    }
+  }, [pwCurrent, pwNew, pwConfirm])
 
   // ── Token state ──
   const [tokens, setTokens] = useState<CLIToken[]>([])
@@ -291,12 +370,110 @@ export function ProfileSection({
           {userEmail ? <CopyableText value={userEmail} mono /> : <span className="text-xs text-muted-foreground">Not set</span>}
         </SettingsRow>
         <SettingsRow label="Full name">
-          <span className="text-xs text-muted-foreground">{userName ?? "Not set"}</span>
+          {editingName ? (
+            <div className="flex flex-col items-end gap-1">
+              <div className="flex items-center gap-1.5">
+                <Input
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void saveName()
+                    if (e.key === "Escape") { setNameError(null); setEditingName(false) }
+                  }}
+                  autoFocus
+                  maxLength={100}
+                  aria-label="Full name"
+                  className="h-7 w-48 text-xs"
+                  disabled={savingName}
+                />
+                <Button size="sm" className="h-7 text-xs" onClick={() => void saveName()} disabled={savingName}>
+                  {savingName ? <Spinner className="h-3 w-3" /> : "Save"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs"
+                  onClick={() => { setNameError(null); setEditingName(false) }}
+                  disabled={savingName}
+                >
+                  Cancel
+                </Button>
+              </div>
+              {/* Show save failures inline while still editing — the user
+                  stays in the editor and can retry. */}
+              {nameError && <span className="text-[11px] text-destructive">{nameError}</span>}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">{displayName ?? "Not set"}</span>
+              <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2" onClick={startEditName}>
+                Edit
+              </Button>
+            </div>
+          )}
         </SettingsRow>
         <SettingsRow label="Password">
-          <span className="text-xs text-muted-foreground tracking-[0.2em]">••••••••</span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground tracking-[0.2em]">••••••••</span>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 text-[10px] px-2"
+              onClick={() => { resetPwForm(); setPwOpen(true) }}
+            >
+              Change
+            </Button>
+          </div>
         </SettingsRow>
       </SettingsCard>
+
+      {/* ── Change password dialog ── */}
+      <AlertDialog open={pwOpen} onOpenChange={(o) => { setPwOpen(o); if (!o) resetPwForm() }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-sm">Change password</AlertDialogTitle>
+            <AlertDialogDescription className="text-xs">
+              {pwDone
+                ? "Password changed. Your other sessions have been signed out."
+                : "Enter your current password and choose a new one (at least 8 characters). This signs out your other sessions."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {!pwDone && (
+            <div className="space-y-3 py-1">
+              <div className="space-y-1">
+                <Label htmlFor="pw-current" className="text-xs">Current password</Label>
+                <Input id="pw-current" type="password" value={pwCurrent} autoComplete="current-password"
+                  onChange={(e) => setPwCurrent(e.target.value)} className="h-8 text-xs" disabled={pwSaving} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="pw-new" className="text-xs">New password</Label>
+                <Input id="pw-new" type="password" value={pwNew} autoComplete="new-password"
+                  onChange={(e) => setPwNew(e.target.value)} className="h-8 text-xs" disabled={pwSaving} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="pw-confirm" className="text-xs">Confirm new password</Label>
+                <Input id="pw-confirm" type="password" value={pwConfirm} autoComplete="new-password"
+                  onChange={(e) => setPwConfirm(e.target.value)} className="h-8 text-xs" disabled={pwSaving} />
+              </div>
+              {pwError && <p className="text-[11px] text-destructive">{pwError}</p>}
+            </div>
+          )}
+
+          <AlertDialogFooter>
+            {pwDone ? (
+              <AlertDialogAction className="h-7 text-xs" onClick={() => setPwOpen(false)}>Done</AlertDialogAction>
+            ) : (
+              <>
+                <AlertDialogCancel className="h-7 text-xs" disabled={pwSaving}>Cancel</AlertDialogCancel>
+                <Button className="h-7 text-xs" onClick={() => void changePassword()} disabled={pwSaving}>
+                  {pwSaving ? <Spinner className="h-3 w-3" /> : "Change password"}
+                </Button>
+              </>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* ── Workspace ── */}
       <SettingsCard title="Workspace" description="Your current organization and role">
