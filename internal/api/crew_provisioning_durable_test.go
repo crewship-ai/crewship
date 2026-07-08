@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
@@ -77,51 +78,126 @@ func TestProvisionStatus_SurfacesBuildFailureFromJournal(t *testing.T) {
 	}
 }
 
-// The durable build-failed row MUST land even when the provisioning ctx was
-// already cancelled (build timeout / client disconnect). journal.Emit races
-// the queue send against ctx.Done(), so a cancelled ctx can drop the entry;
-// emitProvisionEvent detaches the build_failed write with context.WithoutCancel.
-// Emitting several under an already-cancelled ctx amplifies the race so a
-// regression (dropping the WithoutCancel) reliably fails.
-func TestEmitProvisionEvent_BuildFailedSurvivesCancelledCtx(t *testing.T) {
+// ctxCaptureEmitter records, per entry type, whether the context handed to
+// Emit was already cancelled. Lets us assert DETERMINISTICALLY that the
+// build_failed write is detached from cancellation — rather than probabilistically
+// via the journal.Emit queue-vs-ctx.Done race.
+type ctxCaptureEmitter struct {
+	mu        sync.Mutex
+	cancelled map[journal.EntryType]bool
+}
+
+func (c *ctxCaptureEmitter) Emit(ctx context.Context, e journal.Entry) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cancelled == nil {
+		c.cancelled = map[journal.EntryType]bool{}
+	}
+	c.cancelled[e.Type] = ctx.Err() != nil
+	return e.ID, nil
+}
+
+func (c *ctxCaptureEmitter) Flush(context.Context) error { return nil }
+
+func (c *ctxCaptureEmitter) wasCancelled(t journal.EntryType) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cancelled[t]
+}
+
+// The durable build-failed row MUST be written on a context that isn't
+// cancelled even when the incoming provisioning ctx already is (build timeout /
+// client disconnect) — journal.Emit races the queue send against ctx.Done(),
+// so a cancelled ctx can drop the entry. emitProvisionEvent detaches ONLY the
+// build_failed write with context.WithoutCancel; every other step keeps the
+// caller's ctx.
+func TestEmitProvisionEvent_BuildFailedDetachesFromCancellation(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
 	t.Cleanup(h.Stop)
-	w := journal.NewWriter(db, logger, journal.WriterOptions{})
-	h.SetJournal(w)
-
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'C', 'cancel-829')`, "crew-cancel", wsID)
+	capture := &ctxCaptureEmitter{}
+	h.SetJournal(capture)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already cancelled — mirrors a provisioning timeout / disconnect
 
-	const n = 5
-	for i := 0; i < n; i++ {
-		h.emitProvisionEvent(ctx, "crew-cancel", wsID, devcontainer.ProvisionEvent{
-			Step:   devcontainer.ProvStepBuildFailed,
-			Status: devcontainer.ProvStatusFailed,
-			Tag:    "crewship-feat:test",
-			Error:  "building feature image: exit code 100",
-			Detail: "#8 E: Unable to locate package nope\n#8 ERROR: did not complete",
-		})
+	// build_failed must be emitted on a NON-cancelled ctx (WithoutCancel).
+	h.emitProvisionEvent(ctx, "crew-cancel", "ws-1", devcontainer.ProvisionEvent{
+		Step:   devcontainer.ProvStepBuildFailed,
+		Status: devcontainer.ProvStatusFailed,
+		Error:  "building feature image: exit code 100",
+		Detail: "#8 ERROR: did not complete",
+	})
+	if capture.wasCancelled(journal.EntryProvisioningBuildFailed) {
+		t.Error("build_failed must be emitted on a non-cancelled ctx so the durable row survives")
+	}
+
+	// A regular step keeps the caller's (cancelled) ctx — we only detach the
+	// one durable diagnostic row, not every provisioning emit.
+	h.emitProvisionEvent(ctx, "crew-cancel", "ws-1", devcontainer.ProvisionEvent{
+		Step:   devcontainer.ProvStepFeatureInstall,
+		Status: devcontainer.ProvStatusStarted,
+	})
+	if !capture.wasCancelled(journal.EntryProvisioningStep) {
+		t.Error("only build_failed should be detached; a regular step must keep the caller's ctx")
+	}
+}
+
+// Fail-open gap closed: a build that failed with an EMPTY BuildKit tail emits
+// no provisioning.build_failed row, only the coarse provisioning.failed from
+// markJobFailed. ProvisionStatus must still surface status=failed with the
+// error (just no log_tail) rather than collapsing to idle.
+func TestProvisionStatus_SurfacesPlainFailedWithoutTail(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	t.Cleanup(h.Stop)
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'C', 'plainfail-829')`, "crew-pf", wsID)
+
+	w := journal.NewWriter(db, logger, journal.WriterOptions{})
+	if _, err := w.Emit(context.Background(), journal.Entry{
+		WorkspaceID: wsID, CrewID: "crew-pf",
+		Type:      journal.EntryProvisioningFailed,
+		Severity:  journal.SeverityWarn,
+		ActorType: journal.ActorOrchestrator,
+		Summary:   "provisioning failed for crew crew-pf",
+		Payload:   map[string]any{"error": "provision: mise install failed", "crew_id": "crew-pf"},
+	}); err != nil {
+		t.Fatalf("emit: %v", err)
 	}
 	if err := w.Flush(context.Background()); err != nil {
 		t.Fatalf("flush: %v", err)
 	}
 
-	entries, _, err := journal.List(context.Background(), db, journal.Query{
-		WorkspaceID: wsID,
-		CrewID:      "crew-cancel",
-		Types:       []journal.EntryType{journal.EntryProvisioningBuildFailed},
-		Limit:       100,
-	})
-	if err != nil {
-		t.Fatalf("list: %v", err)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/crews/{crewId}/provisioning", h.ProvisionStatus)
+	req := httptest.NewRequest("GET", "/api/v1/crews/crew-pf/provisioning", nil)
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d; body: %s", rr.Code, rr.Body.String())
 	}
-	if len(entries) != n {
-		t.Errorf("build-failed rows must survive a cancelled ctx: got %d, want %d", len(entries), n)
+	var resp struct {
+		Status  string   `json:"status"`
+		Error   string   `json:"error"`
+		LogTail []string `json:"log_tail"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Status != "failed" {
+		t.Errorf("a plain provisioning.failed must surface status=failed, got %q", resp.Status)
+	}
+	if !strings.Contains(resp.Error, "mise install failed") {
+		t.Errorf("error must surface, got %q", resp.Error)
+	}
+	if len(resp.LogTail) != 0 {
+		t.Errorf("no build tail was captured, log_tail must be empty, got %v", resp.LogTail)
 	}
 }

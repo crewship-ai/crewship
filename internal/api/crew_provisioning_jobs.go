@@ -272,35 +272,73 @@ type durableBuildFailure struct {
 	at      string
 }
 
-// latestBuildFailure reports whether the crew's most recent BUILD terminal
-// outcome was a failure, returning the persisted error + scrubbed BuildKit
-// tail. It compares the latest provisioning.build_failed against the latest
-// provisioning.complete (List returns newest-first) so a failure that was
-// later fixed by a successful rebuild does not linger as "failed".
+// latestBuildFailure reports whether the crew's most recent provisioning
+// outcome was a failure, returning the persisted error + (when available) the
+// scrubbed BuildKit tail. It reads the newest terminal among build_failed /
+// failed / complete (List returns newest-first) so a failure later fixed by a
+// successful rebuild does not linger as "failed".
+//
+// Two rows can describe one failed build: the enriched provisioning.build_failed
+// (error + tail) emitted mid-build, and the coarse provisioning.failed emitted
+// by markJobFailed just after. We surface the failure off whichever is newest,
+// then recover the tail from the most recent build_failed. This closes two
+// fail-open gaps: a build that failed with an EMPTY tail (no build_failed row)
+// still surfaces via provisioning.failed, and a plain provisioning.failed is no
+// longer invisible to status.
 func (h *ProvisioningHandler) latestBuildFailure(ctx context.Context, workspaceID, crewID string) (durableBuildFailure, bool) {
-	entries, _, err := journal.List(ctx, h.db, journal.Query{
+	terminal, _, err := journal.List(ctx, h.db, journal.Query{
 		WorkspaceID: workspaceID,
 		CrewID:      crewID,
-		Types:       []journal.EntryType{journal.EntryProvisioningBuildFailed, journal.EntryProvisioningComplete},
-		Limit:       1,
+		Types: []journal.EntryType{
+			journal.EntryProvisioningBuildFailed,
+			journal.EntryProvisioningFailed,
+			journal.EntryProvisioningComplete,
+		},
+		Limit: 1,
 	})
-	if err != nil || len(entries) == 0 {
+	if err != nil || len(terminal) == 0 {
 		return durableBuildFailure{}, false
 	}
-	e := entries[0]
-	if e.Type != journal.EntryProvisioningBuildFailed {
-		return durableBuildFailure{}, false // most recent build outcome was a success
+	e := terminal[0]
+	if e.Type == journal.EntryProvisioningComplete {
+		return durableBuildFailure{}, false // most recent outcome was a success
 	}
+
 	out := durableBuildFailure{at: e.TS.Format(time.RFC3339)}
-	if e.Payload != nil {
-		if s, ok := e.Payload["error"].(string); ok {
-			out.errMsg = s
-		}
-		if s, ok := e.Payload["detail"].(string); ok && s != "" {
-			out.logTail = strings.Split(s, "\n")
+	out.errMsg = payloadString(e.Payload, "error")
+	if s := payloadString(e.Payload, "detail"); s != "" { // build_failed carries the tail directly
+		out.logTail = strings.Split(s, "\n")
+	}
+
+	// If the terminal row was the coarse `failed`, recover the tail from the
+	// most recent build_failed that post-dates the last success.
+	if len(out.logTail) == 0 {
+		bf, _, ferr := journal.List(ctx, h.db, journal.Query{
+			WorkspaceID: workspaceID,
+			CrewID:      crewID,
+			Types:       []journal.EntryType{journal.EntryProvisioningBuildFailed, journal.EntryProvisioningComplete},
+			Limit:       1,
+		})
+		if ferr == nil && len(bf) > 0 && bf[0].Type == journal.EntryProvisioningBuildFailed {
+			if s := payloadString(bf[0].Payload, "detail"); s != "" {
+				out.logTail = strings.Split(s, "\n")
+			}
+			if out.errMsg == "" {
+				out.errMsg = payloadString(bf[0].Payload, "error")
+			}
 		}
 	}
 	return out, true
+}
+
+// payloadString reads a string value from a journal payload, tolerating a nil
+// map / missing key / non-string value.
+func payloadString(payload map[string]any, key string) string {
+	if payload == nil {
+		return ""
+	}
+	s, _ := payload[key].(string)
+	return s
 }
 
 // EnqueueResult captures the outcome of EnqueueForCrew so callers can tell
