@@ -26,6 +26,11 @@ type PendingRun struct {
 	FireAt        time.Time
 	ExpiresAt     *time.Time
 	DebounceMaxAt *time.Time
+	// InvokingUserID is the workspace user who enqueued this deferred run,
+	// threaded through to the fired run so a notify step can resolve
+	// `to: trigger` to a real recipient (issue #842 Phase 1). Empty for
+	// service/token triggers → `to: trigger` falls back to a workspace notice.
+	InvokingUserID string
 }
 
 // PendingRunStore is the DB access layer for deferred dispatch.
@@ -65,12 +70,13 @@ func (s *PendingRunStore) Enqueue(ctx context.Context, pr PendingRun) (string, b
 INSERT INTO pending_runs (
     id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
     tier_override, priority, debounce_key, fire_at, expires_at, debounce_max_at,
-    status, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now','subsec'), datetime('now','subsec'))`,
+    invoking_user_id, status, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now','subsec'), datetime('now','subsec'))`,
 		pr.ID, pr.WorkspaceID, pr.PipelineID, pr.PipelineSlug,
 		orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
 		nullableStr(pr.TierOverride), pr.Priority, nullableStr(pr.DebounceKey),
-		pr.FireAt.UTC().Format(time.RFC3339Nano), nullableTime(pr.ExpiresAt), nullableTime(pr.DebounceMaxAt))
+		pr.FireAt.UTC().Format(time.RFC3339Nano), nullableTime(pr.ExpiresAt), nullableTime(pr.DebounceMaxAt),
+		nullableStr(pr.InvokingUserID))
 	if err != nil {
 		// Debounce race: a concurrent trigger with the same key inserted
 		// first, so the partial-unique index rejects this one. Both
@@ -138,7 +144,7 @@ func (s *PendingRunStore) DueRuns(ctx context.Context, now time.Time, limit int)
 	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
-       COALESCE(tier_override,''), priority
+       COALESCE(tier_override,''), priority, COALESCE(invoking_user_id,'')
 FROM pending_runs
 WHERE status = 'pending' AND fire_at <= ?
 ORDER BY priority DESC, created_at ASC
@@ -151,7 +157,8 @@ LIMIT ?`, now.UTC().Format(time.RFC3339Nano), limit)
 	for rows.Next() {
 		var pr PendingRun
 		if err := rows.Scan(&pr.ID, &pr.WorkspaceID, &pr.PipelineID, &pr.PipelineSlug,
-			&pr.InputsJSON, &pr.TagsJSON, &pr.MetadataJSON, &pr.TierOverride, &pr.Priority); err != nil {
+			&pr.InputsJSON, &pr.TagsJSON, &pr.MetadataJSON, &pr.TierOverride, &pr.Priority,
+			&pr.InvokingUserID); err != nil {
 			return nil, err
 		}
 		out = append(out, pr)

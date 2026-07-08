@@ -1600,6 +1600,7 @@ END;
 	// encrypted at rest; soft-deleted. See
 	// migrate_consts_v133_notification_channels.go and issue #850.
 	{version: 133, name: "notification_channels", sql: migrationNotificationChannels},
+	{version: 134, name: "pending_run_invoking_user", sql: migrationPendingRunInvokingUser},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

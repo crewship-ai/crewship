@@ -95,6 +95,94 @@ func TestRunNotifyStep_PostsMessageToInbox(t *testing.T) {
 	}
 }
 
+// fakeNoticeCounter reports a fixed prior-notice count per (run, recipient)
+// key so the soft-cap tests can drive runNotifyStep to either side of the
+// cap without a real inbox. recipientKey mirrors the production counter's
+// grouping: user id, else role, else "" for a workspace notice.
+type fakeNoticeCounter struct {
+	counts map[string]int
+	calls  int
+	err    error
+}
+
+func (c *fakeNoticeCounter) count(_ context.Context, _, runID, targetUserID, targetRole string) (int, error) {
+	c.calls++
+	if c.err != nil {
+		return 0, c.err
+	}
+	recip := targetUserID
+	if recip == "" {
+		recip = targetRole
+	}
+	return c.counts[runID+"|"+recip], nil
+}
+
+// TestRunNotifyStep_SoftCap_SkipsOverCap pins the per-recipient anti-spam
+// soft cap: once a run has already delivered perRunNotifyCap notices to a
+// recipient, a further notify to that SAME recipient is dropped (non-fatal,
+// no inbox write) while the run continues.
+func TestRunNotifyStep_SoftCap_SkipsOverCap(t *testing.T) {
+	fake := &fakeInboxNotifier{}
+	counter := &fakeNoticeCounter{counts: map[string]int{
+		"run_1|u_bob": perRunNotifyCap, // already at the cap for u_bob
+	}}
+	exec := notifyExecutor(fake).WithNoticeCounter(counter.count)
+
+	step := Step{ID: "n", Type: StepNotify, Notify: &NotifyStep{To: "user:u_bob", Body: "flood"}}
+	out, _, _, err := exec.runNotifyStep(context.Background(), step, RenderContext{}, notifyRunInput("ws_1", ""), "run_1")
+	if err != nil {
+		t.Fatalf("runNotifyStep must not fail the run when capped: %v", err)
+	}
+	if len(fake.items) != 0 {
+		t.Fatalf("over-cap notice must NOT be written, got %d items", len(fake.items))
+	}
+	if !strings.HasPrefix(out, "notified:capped") {
+		t.Errorf("output marker = %q, want notified:capped", out)
+	}
+}
+
+// TestRunNotifyStep_SoftCap_UnderCapPosts confirms a notice below the cap
+// is delivered normally, and that the cap is per-recipient: a different
+// recipient with its own budget is unaffected.
+func TestRunNotifyStep_SoftCap_UnderCapPosts(t *testing.T) {
+	fake := &fakeInboxNotifier{}
+	counter := &fakeNoticeCounter{counts: map[string]int{
+		"run_1|u_bob": perRunNotifyCap,     // bob is capped …
+		"run_1|u_ann": perRunNotifyCap - 1, // … ann still has one slot
+	}}
+	exec := notifyExecutor(fake).WithNoticeCounter(counter.count)
+
+	step := Step{ID: "n", Type: StepNotify, Notify: &NotifyStep{To: "user:u_ann", Body: "hi"}}
+	out, _, _, err := exec.runNotifyStep(context.Background(), step, RenderContext{}, notifyRunInput("ws_1", ""), "run_1")
+	if err != nil {
+		t.Fatalf("runNotifyStep: %v", err)
+	}
+	if len(fake.items) != 1 {
+		t.Fatalf("under-cap notice must be written, got %d items", len(fake.items))
+	}
+	if strings.HasPrefix(out, "notified:capped") {
+		t.Errorf("under-cap notice wrongly marked capped: %q", out)
+	}
+}
+
+// TestRunNotifyStep_SoftCap_FailsOpen pins the best-effort contract: a
+// counter error must NOT drop the notice or fail the run — anti-spam is a
+// courtesy, delivery is the priority.
+func TestRunNotifyStep_SoftCap_FailsOpen(t *testing.T) {
+	fake := &fakeInboxNotifier{}
+	counter := &fakeNoticeCounter{err: errors.New("db down")}
+	exec := notifyExecutor(fake).WithNoticeCounter(counter.count)
+
+	step := Step{ID: "n", Type: StepNotify, Notify: &NotifyStep{To: "user:u_bob", Body: "hi"}}
+	_, _, _, err := exec.runNotifyStep(context.Background(), step, RenderContext{}, notifyRunInput("ws_1", ""), "run_1")
+	if err != nil {
+		t.Fatalf("counter error must not fail the run: %v", err)
+	}
+	if len(fake.items) != 1 {
+		t.Fatalf("counter error must fail open (deliver), got %d items", len(fake.items))
+	}
+}
+
 // TestRunNotifyStep_TargetResolution pins how the `to` field maps to
 // inbox targeting, including the trigger→workspace fallback.
 func TestRunNotifyStep_TargetResolution(t *testing.T) {

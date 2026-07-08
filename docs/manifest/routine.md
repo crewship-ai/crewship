@@ -675,7 +675,10 @@ model. Endpoints: `PUT|DELETE /pipelines/{slug}/steps/{stepId}/override`,
 A trigger that carries a delay or a debounce key is parked in
 `pending_runs` instead of running immediately; an in-process dispatcher
 (5s tick) fires due rows **highest-priority-first** and expires rows past
-their ttl. Immediate runs (no delay/debounce) are unchanged.
+their ttl. Immediate runs (no delay/debounce) are unchanged. The user who
+enqueued the deferred trigger is carried onto the fired run, so a
+[`notify`](/guides/routines) step's `to: trigger` reaches them when it
+finally runs — not a workspace-wide fallback.
 
 ```
 # fire 60s from now, expire if not dispatched within 5 min, high priority

@@ -25,6 +25,7 @@ CREATE TABLE pending_runs (
     tags_json TEXT NOT NULL DEFAULT '[]', metadata_json TEXT NOT NULL DEFAULT '{}',
     tier_override TEXT, priority INTEGER NOT NULL DEFAULT 0, debounce_key TEXT,
     fire_at TEXT NOT NULL, expires_at TEXT, debounce_max_at TEXT,
+    invoking_user_id TEXT,
     status TEXT NOT NULL DEFAULT 'pending', fired_run_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now','subsec')));
@@ -34,6 +35,35 @@ CREATE UNIQUE INDEX idx_pending_runs_debounce ON pending_runs (pipeline_id, debo
 		t.Fatal(err)
 	}
 	return db
+}
+
+// TestPendingRuns_InvokingUserRoundTrip pins the deferred-run half of
+// `to: trigger` (issue #842 Phase 1): the user who enqueued a delayed /
+// debounced run is persisted with the pending row and handed back to the
+// dispatcher via DueRuns, so a notify step in that run can target the real
+// triggering user instead of falling back to a workspace-wide notice.
+func TestPendingRuns_InvokingUserRoundTrip(t *testing.T) {
+	db := newPendingDB(t)
+	s := NewPendingRunStore(db)
+	ctx := context.Background()
+	past := time.Now().Add(-time.Minute)
+
+	if _, _, err := s.Enqueue(ctx, PendingRun{
+		ID: "p_u", WorkspaceID: "w", PipelineID: "pl", PipelineSlug: "s",
+		InvokingUserID: "usr_trigger", FireAt: past,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	due, err := s.DueRuns(ctx, time.Now(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(due) != 1 {
+		t.Fatalf("want 1 due row, got %d", len(due))
+	}
+	if due[0].InvokingUserID != "usr_trigger" {
+		t.Errorf("InvokingUserID = %q, want usr_trigger (deferred trigger threading)", due[0].InvokingUserID)
+	}
 }
 
 func TestPendingRuns_DueAndPriorityOrder(t *testing.T) {

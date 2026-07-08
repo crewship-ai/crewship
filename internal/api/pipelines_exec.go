@@ -188,7 +188,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// ttl elapses first). Immediate runs (no delay/debounce) fall through
 	// to the synchronous path below unchanged.
 	if h.db != nil && (body.DelaySeconds > 0 || body.DebounceKey != "") {
-		h.enqueueDeferredRun(w, r, workspaceID, p, body)
+		h.enqueueDeferredRun(w, r, workspaceID, invokingUser, p, body)
 		return
 	}
 

@@ -205,8 +205,12 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 		TierOverride:  Complexity(pr.TierOverride),
 		TriggeredVia:  TriggeredViaSchedule,
 		TriggeredByID: pr.ID,
-		Tags:          tags,
-		MetadataJSON:  pr.MetadataJSON,
+		// Thread the enqueuing user through so a notify step's `to: trigger`
+		// in this deferred run resolves to them (issue #842 Phase 1); empty
+		// keeps the workspace-notice fallback.
+		InvokingUserID: pr.InvokingUserID,
+		Tags:           tags,
+		MetadataJSON:   pr.MetadataJSON,
 		// Each pending row is a one-shot fired once (MarkFired claims it above);
 		// key on the row ID as a second guard so a re-dispatch of the same row
 		// (debounce coalescing, restart) dedupes at the executor rather than

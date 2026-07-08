@@ -159,6 +159,13 @@ type Executor struct {
 	// Nil = the guard is skipped (target trusted as-is).
 	memberCheck func(ctx context.Context, workspaceID, userID string) (bool, error)
 
+	// noticeCounter reports how many routine-update notices a run has
+	// already delivered to a given recipient, so a notify step can enforce
+	// a per-recipient soft cap (anti-spam) and drop further notices once a
+	// run has flooded one inbox. Production wiring installs
+	// NewRunNoticeCounter(db). Nil = the cap is skipped (delivery uncapped).
+	noticeCounter func(ctx context.Context, workspaceID, runID, targetUserID, targetRole string) (int, error)
+
 	// resumeCutoff is the process-boot fence for the boot resume scan
 	// (see WithResumeCutoff). Zero = the scan uses its own entry time.
 	resumeCutoff time.Time

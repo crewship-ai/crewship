@@ -100,6 +100,9 @@ func NewWiredExecutor(d ExecutorDeps) *Executor {
 		// notify-step membership guard (user:<id> → workspace fallback on
 		// a non-member id, instead of a silent black hole).
 		exec = exec.WithMemberChecker(NewWorkspaceMemberChecker(d.DB))
+		// notify-step per-recipient anti-spam soft cap — bounds how many
+		// routine notices one run can pile on a single inbox (perRunNotifyCap).
+		exec = exec.WithNoticeCounter(NewRunNoticeCounter(d.DB))
 	}
 	if d.RunStore != nil {
 		exec = exec.WithRunStore(d.RunStore)
