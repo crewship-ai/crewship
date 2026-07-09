@@ -97,7 +97,11 @@ the restore is itself reversible.`,
 		}
 
 		if err := database.RestoreSnapshot(dbPath, target); err != nil {
-			return fmt.Errorf("restore failed (database unchanged): %w", err)
+			// RestoreSnapshot does all fallible prep before the atomic swap,
+			// so the live DB file is left in place on error — but a
+			// .before-restore-* copy may already have been written, so point
+			// there rather than promising nothing changed.
+			return fmt.Errorf("restore failed — database file left in place; a .before-restore-* copy may exist beside it: %w", err)
 		}
 		fmt.Printf("Restored %s from %s\n", dbPath, filepath.Base(target))
 		fmt.Println("Start the matching (older) crewship binary now; it will boot against the restored schema.")

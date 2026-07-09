@@ -72,23 +72,29 @@ the database was migrated by a NEWER Crewship. … either upgrade this binary �
 restore the pre-migration snapshot taken before the upgrade.
 ```
 
-So downgrading is **two steps, not one**:
+Do it in this order — **restore the snapshot with your CURRENT binary first,
+then reinstall the older one**. `crewship db restore-snapshot` was introduced
+alongside the version-skew guard, so the older binary you're rolling back to
+may not have the command; run it from the newer binary that's still installed,
+before you replace it:
 
-1. **Reinstall the older binary.** Homebrew: `brew install crewship-ai/tap/crewship@<version>` (or `brew uninstall` + install the pinned tag). Installer: `CREWSHIP_VERSION=vX.Y.Z curl -fsSL …/install.sh | bash`.
-2. **Restore the matching pre-migration snapshot** with `crewship db restore-snapshot`:
+1. **Stop `crewshipd`** (a running server holds the database open).
+2. **Restore the matching pre-migration snapshot** with the current binary:
 
 ```bash
-# Stop crewshipd first — a running server holds the database open.
 crewship db restore-snapshot --list     # show snapshots (newest first, with v<from>→v<to>)
 crewship db restore-snapshot            # restore the most recent, or
 crewship db restore-snapshot <file>.bak # restore a specific one
 ```
 
-`restore-snapshot` refuses to run while a local server is up, only accepts a
-genuine `*.pre-migrate-*.bak` snapshot of your database, and copies the
-current database aside to `<db>.before-restore-<ts>` first — so the restore is
-itself reversible. Then start the older binary; it boots against the restored
-schema.
+3. **Reinstall the older binary.** Homebrew: `brew install crewship-ai/tap/crewship@<version>` (or `brew uninstall` + install the pinned tag). Installer: `CREWSHIP_VERSION=vX.Y.Z curl -fsSL …/install.sh | bash`.
+4. **Start the older binary** — it boots against the restored schema.
+
+`restore-snapshot` probes for a local server and refuses if it finds one, but
+that check is best-effort — **stop `crewshipd` yourself first** regardless. It
+only accepts a genuine `*.pre-migrate-*.bak` snapshot of your database, and
+copies the current database aside to `<db>.before-restore-<ts>` before the
+swap, so the restore is itself reversible.
 
 Skipping step 2 leaves the newer schema in place, which the older binary
 rejects on start (by design). See [Migrations](/guides/migrations) for the

@@ -111,25 +111,42 @@ func RestoreSnapshot(dbPath, snapshotPath string) error {
 		return fmt.Errorf("snapshot %q is not a SQLite database", snapshotPath)
 	}
 
-	// Reversible: stash the current DB before overwriting it.
+	// Reversible: stash the current DB before touching anything. A read
+	// failure here is FATAL — silently skipping the stash and then
+	// overwriting would discard the one safety net exactly when the DB is
+	// present. All fallible prep (validation, snapshot read, header check,
+	// this stash, and staging the temp file below) happens BEFORE any
+	// destructive step, so an error at any point leaves the live DB intact.
 	if _, err := os.Stat(dbPath); err == nil {
+		cur, rerr := os.ReadFile(dbPath)
+		if rerr != nil {
+			return fmt.Errorf("stash current db before restore (read %s): %w", dbPath, rerr)
+		}
 		aside := dbPath + ".before-restore-" + time.Now().UTC().Format("20060102T150405Z")
-		if cur, rerr := os.ReadFile(dbPath); rerr == nil {
-			if werr := os.WriteFile(aside, cur, 0o600); werr != nil {
-				return fmt.Errorf("stash current db before restore: %w", werr)
-			}
+		if werr := os.WriteFile(aside, cur, 0o600); werr != nil {
+			return fmt.Errorf("stash current db before restore (write %s): %w", aside, werr)
 		}
 	}
 
-	// Drop WAL/SHM so a stale WAL isn't replayed over the restored file.
+	// Stage the restored bytes to a temp file in the same dir first, so the
+	// final swap is an atomic rename — a failure staging it leaves the live
+	// DB untouched.
+	tmp := dbPath + ".restore-tmp"
+	if err := os.WriteFile(tmp, snapData, 0o600); err != nil {
+		return fmt.Errorf("stage restored db: %w", err)
+	}
+	defer os.Remove(tmp) // no-op after a successful rename
+
+	// Drop WAL/SHM so a stale WAL isn't replayed over the restored file, then
+	// atomically swap the staged copy into place. If the rename fails the
+	// original DB file is still present (rename never partially applies).
 	for _, suffix := range []string{"-wal", "-shm"} {
 		if err := os.Remove(dbPath + suffix); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove %s%s: %w", dbPath, suffix, err)
 		}
 	}
-
-	if err := os.WriteFile(dbPath, snapData, 0o600); err != nil {
-		return fmt.Errorf("write restored db: %w", err)
+	if err := os.Rename(tmp, dbPath); err != nil {
+		return fmt.Errorf("swap restored db into place: %w", err)
 	}
 	return nil
 }
