@@ -6,6 +6,7 @@ import {
   getModelsForAdapter,
   getProviderLabel,
   getModelLabel,
+  isLocalModel,
 } from "@/lib/cli-adapters"
 
 describe("CLI_ADAPTERS registry", () => {
@@ -220,5 +221,23 @@ describe("model catalog completeness", () => {
     expect(values).not.toContain("claude-3-5-haiku-20241022")
     expect(values).not.toContain("claude-sonnet-4-20250514") // retiring 2026-06-15
     expect(values).not.toContain("claude-opus-4-20250514")
+  })
+})
+
+// #944 — local-model (Ollama) path
+describe("isLocalModel + local model registry", () => {
+  it("flags ollama/-prefixed models as local, everything else as cloud", () => {
+    expect(isLocalModel("ollama/qwen3-coder:30b")).toBe(true)
+    expect(isLocalModel("ollama/devstral:24b")).toBe(true)
+    expect(isLocalModel("anthropic/claude-sonnet-5")).toBe(false)
+    expect(isLocalModel("claude-sonnet-5")).toBe(false)
+    expect(isLocalModel("")).toBe(false)
+    expect(isLocalModel(undefined)).toBe(false)
+  })
+
+  it("OPENCODE registry offers the curated local shortlist with the local category", () => {
+    const locals = CLI_ADAPTERS.OPENCODE.models.filter((m) => isLocalModel(m.value))
+    expect(locals.map((m) => m.value)).toEqual(["ollama/qwen3-coder:30b", "ollama/devstral:24b"])
+    for (const m of locals) expect(m.category).toBe("local")
   })
 })

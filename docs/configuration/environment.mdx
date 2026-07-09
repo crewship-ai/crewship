@@ -182,6 +182,12 @@ These are off by default and intended for operators debugging performance.
   Setting `KEEPER_OLLAMA_URL` auto-enables Keeper (unless `KEEPER_ENABLED` is explicitly `false`). This means you only need to set the URL to activate Keeper.
 </Tip>
 
+## Local models (coding agents)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_LOCAL_MODEL_BASE_URL` | _(none — disabled)_ | OpenAI-compatible endpoint (Ollama, LM Studio, llama.cpp) for agents using `ollama/…` models via the OpenCode adapter. Must be reachable **from inside crew containers**, e.g. `http://host.docker.internal:11434/v1`. Distinct from `KEEPER_OLLAMA_URL`, which serves the daemon's internal Keeper layer. See [CLI adapters → Local models](/guides/cli-adapters#local-models--no-api-key-ollama). |
+
 ## LLM Proxy
 
 | Variable | Default | Description |

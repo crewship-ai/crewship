@@ -13,7 +13,7 @@ export interface ModelOption {
   value: string
   label: string
   /** Optional category for grouping in the picker UI. */
-  category?: "frontier" | "reasoning" | "fast" | "cheap" | "legacy"
+  category?: "frontier" | "reasoning" | "fast" | "cheap" | "legacy" | "local"
 }
 
 /**
@@ -182,7 +182,24 @@ const OPENCODE_MODELS: ModelOption[] = [
   { value: "minimax/minimax-m2.7", label: "MiniMax / M2.7", category: "cheap" },
   { value: "openrouter/anthropic/claude-sonnet-4-6", label: "OpenRouter / Claude Sonnet 4.6", category: "frontier" },
   { value: "openrouter/openai/gpt-5.5", label: "OpenRouter / GPT-5.5", category: "frontier" },
+  // Local models (#944) — served by the operator's OpenAI-compatible
+  // endpoint (Ollama et al.); requires CREWSHIP_LOCAL_MODEL_BASE_URL on the
+  // server and NO API key. Curated, tested shortlist only: community and
+  // upstream issues (anomalyco/opencode#1034, #4428) show tool-calling
+  // reliability degrades sharply below this tier, so we don't offer a
+  // free-form "any Ollama model" picker.
+  { value: "ollama/qwen3-coder:30b", label: "Ollama / Qwen3 Coder 30B (local)", category: "local" },
+  { value: "ollama/devstral:24b", label: "Ollama / Devstral Small 24B (local)", category: "local" },
 ]
+
+/**
+ * True when the model routes to the operator's local OpenAI-compatible
+ * endpoint (Ollama et al.) and therefore needs no provider API key.
+ * Mirrors localModelPrefix in internal/orchestrator/exec_env.go — keep in sync.
+ */
+export function isLocalModel(model?: string): boolean {
+  return typeof model === "string" && model.startsWith("ollama/")
+}
 
 /**
  * Registry of all supported CLI adapters with their provider, models, and icon.
@@ -214,7 +231,8 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     defaultModel: "anthropic/claude-sonnet-5",
     description: "Open-source multi-provider CLI",
     status: "experimental",
-    caveat: "Cost + model reporting wired; awaiting live smoke validation.",
+    caveat:
+      "Cost + model reporting wired; awaiting live smoke validation. Local (ollama/…) models need CREWSHIP_LOCAL_MODEL_BASE_URL on the server and no API key.",
   },
   CODEX_CLI: {
     label: "Codex CLI",

@@ -76,3 +76,25 @@ func TestProviderForHost(t *testing.T) {
 		}
 	}
 }
+
+// #944 — OpenCode is BYOK across providers; the default allowlist must
+// cover every provider whose API key we accept into the agent env
+// (exec_env.go apiKeyEnvVarsForAdapter) and whose models the frontend
+// registry advertises (lib/cli-adapters.ts OPENCODE_MODELS). Otherwise
+// restricted-mode crews silently egress-block the provider the user paid for.
+func TestDefaultAllowedDomains_CoverOpenCodeBYOKProviders(t *testing.T) {
+	al := NewDomainAllowlist(DefaultAllowedDomains)
+	for _, host := range []string{
+		"openrouter.ai",    // OpenRouter
+		"api.x.ai",         // xAI Grok
+		"api.groq.com",     // Groq
+		"api.deepseek.com", // DeepSeek
+		"api.moonshot.ai",  // Moonshot Kimi (global endpoint)
+		"api.z.ai",         // Z.ai GLM
+		"api.minimax.io",   // MiniMax (global endpoint)
+	} {
+		if !al.IsAllowed(host) {
+			t.Errorf("DefaultAllowedDomains missing BYOK provider host %q", host)
+		}
+	}
+}

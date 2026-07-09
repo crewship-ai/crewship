@@ -21,6 +21,14 @@ const DEFAULT_DOMAINS = [
   "api2.cursor.sh",
   "api.factory.ai",
   "app.factory.ai",
+  // OpenCode BYOK providers (#944)
+  "openrouter.ai",
+  "api.x.ai",
+  "api.groq.com",
+  "api.deepseek.com",
+  "api.moonshot.ai",
+  "api.z.ai",
+  "api.minimax.io",
 ]
 
 interface CrewNetworkPolicyProps {

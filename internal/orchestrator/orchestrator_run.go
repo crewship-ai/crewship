@@ -419,7 +419,12 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	keeperEnabled := o.keeperEnabled
 	ipcBaseURL := o.ipcBaseURL
 	ipcToken := o.ipcToken
+	localModelBaseURL := o.localModelBaseURL
 	o.mu.RUnlock()
+
+	// #944: thread the operator's local-model endpoint into the request so
+	// the env builders and the network policy below see one consistent value.
+	req.LocalModelBaseURL = localModelBaseURL
 
 	if !sidecarEnabled && !req.SkipSidecar {
 		// Visible signal that the sidecar is OFF at runtime — pre-fix the
@@ -539,6 +544,9 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			// calls can pass through the sidecar proxy.
 			domains := append([]string{}, req.AllowedDomains...)
 			domains = append(domains, mcpStdioDomains(req.MCPServers)...)
+			// #944: allow the operator-configured local-model endpoint —
+			// empty unless this run actually uses an ollama/… model.
+			domains = append(domains, localModelExtraDomains(req)...)
 			networkPolicy = &SidecarNetworkPolicy{
 				Mode:           "restricted",
 				AllowedDomains: domains,
