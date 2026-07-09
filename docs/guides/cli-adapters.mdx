@@ -21,7 +21,7 @@ Adding another vendor is intentionally small: one new `case` in `BuildCLICommand
 | `CLAUDE_CODE` | `claude --print --output-format stream-json --include-partial-messages --dangerously-skip-permissions --verbose` | `--system-prompt` flag | `AGENTS.md` + canonical memory file set written to CWD | stream-JSON on stdout | Supports `--model`, `--mcp-config <path>`. `--tools` is **always** passed with the per-profile built-in allowlist (see below). Default. |
 | `CODEX_CLI` | `codex exec --json --sandbox <mode>` | `[SYSTEM]/[USER]` prepend in the prompt body (Codex has no system-prompt flag) | `AGENTS.md` written into CWD before exec | NDJSON | `--sandbox` is always passed: `read-only` for `tool_profile=MINIMAL`, `workspace-write` otherwise. |
 | `GEMINI_CLI` | `gemini -p <message> --output-format stream-json` | `[SYSTEM]/[USER]` prepend (no documented `--system-instruction` flag in headless mode) | `GEMINI.md` + canonical memory file set | NDJSON | Uses `-p` for the user message. `tool_profile=MINIMAL` adds `--approval-mode plan` (read-only); `--allowed-tools` is deprecated upstream. |
-| `OPENCODE` | `opencode run --format json` | `[SYSTEM]/[USER]` prepend | `AGENTS.md` written into CWD before exec | single JSON object (no streaming) | sst.dev's BYOK CLI; works with any provider. |
+| `OPENCODE` | `opencode run --format json` | `[SYSTEM]/[USER]` prepend | `AGENTS.md` written into CWD before exec | JSONL (one event per line: `step_start`, `text`, `tool_use`, `step_finish`, `error`) | BYOK CLI (now maintained under `anomalyco/opencode`); works with any provider. Run cost + tokens are read from `step_finish` and the resolved model is surfaced to run records. |
 | `CURSOR_CLI` | `cursor-agent -p --output-format stream-json` | `[SYSTEM]/[USER]` prepend (no `--system-prompt` flag in headless mode) | `.cursor/rules/`, `AGENTS.md`, `CLAUDE.md` written into CWD | stream-JSON on stdout (same shape as Claude Code) | Added 2026-04. `-m <model>` for model override. |
 | `FACTORY_DROID` | `droid exec --auto {low\|medium\|high} -o stream-json` | `[SYSTEM]/[USER]` prepend | `AGENTS.md` + `.factory/AGENTS.md` written into CWD | stream-JSON (NDJSON) | Added 2026-04. Tiered autonomy — see below. |
 
@@ -80,6 +80,17 @@ The default is `medium` because the API normalises an empty `ToolProfile` to `CO
 <Warning>
   `--auto high` is reachable by setting an agent's `tool_profile` to `FULL`. Factory's docs warn this tier can perform destructive operations without further confirmation, so gate `FULL` agents behind a Harbormaster approval rather than making it the default.
 </Warning>
+
+## OpenCode (`OPENCODE`)
+
+`opencode run --format json` is OpenCode's non-interactive mode. Output is JSONL — one flat event envelope per line. The adapter maps them as follows:
+
+- `text` / `reasoning` events carry the part's **accumulated** text so far (not deltas); the parser emits only the new suffix per part, so chat output never double-appends.
+- `tool_use` events surface tool lifecycle (`pending`/`running` → tool call, `completed`/`error` → tool result).
+- `step_finish` carries the run's cost (USD) and token counts (`input`, `output`, `reasoning`, `cache`); Paymaster reads both, and the resolved `provider/model` is surfaced onto the run record.
+- If the process exits before its final `step_finish` (a known upstream bug, `anomalyco/opencode#26855`), the orchestrator synthesizes a terminal result so the run finalizes cleanly — cost records zero for that run.
+
+Model selection uses OpenCode's `provider/model` form (e.g. `anthropic/claude-sonnet-5`) passed via `--model`. OpenCode is BYOK: the selected provider's API key must be available to the agent (see the [credentials guide](/guides/credentials)). Note that Anthropic **subscription** OAuth (Claude Pro/Max) is not usable through OpenCode — Anthropic's terms restrict subscription tokens to Claude Code, so Anthropic models via OpenCode require an API key.
 
 ## Adapters that are deliberately NOT supported
 

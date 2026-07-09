@@ -187,11 +187,12 @@ const OPENCODE_MODELS: ModelOption[] = [
 /**
  * Registry of all supported CLI adapters with their provider, models, and icon.
  *
- * Status reflects v0.1.0-beta.1 release notes: only Claude Code has parity
- * testing + production-grade prompt scrubbers. Others are scaffolded —
- * Cursor's MCP path is broken upstream in headless mode, Codex's stream
- * parser is a stub (no incremental events surface during a run). Update
- * the `status` and `caveat` here when each adapter's gaps are closed.
+ * Status reflects live-validation coverage: only Claude Code has been
+ * parity-tested against real production runs. The other five ship complete
+ * command builders + stream parsers (fixture-tested in CI) but await live
+ * smoke validation; Cursor's MCP path is additionally broken upstream in
+ * headless mode. Update the `status` and `caveat` here when each adapter's
+ * gaps are closed.
  */
 export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
   CLAUDE_CODE: {
@@ -213,6 +214,7 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     defaultModel: "anthropic/claude-sonnet-5",
     description: "Open-source multi-provider CLI",
     status: "experimental",
+    caveat: "Cost + model reporting wired; awaiting live smoke validation.",
   },
   CODEX_CLI: {
     label: "Codex CLI",
@@ -223,7 +225,7 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     defaultModel: "gpt-5.5",
     description: "OpenAI's coding agent",
     status: "experimental",
-    caveat: "Live event stream not yet parsed — results appear only after the run finishes.",
+    caveat: "Not yet parity-tested against live runs.",
   },
   GEMINI_CLI: {
     label: "Gemini CLI",

@@ -77,22 +77,29 @@ func TestParseOpenCode_ToolUseLifecycle(t *testing.T) {
 }
 
 // TestParseOpenCode_StepFinish — usage + cost. snake_case "step_finish" (NOT
-// hyphenated "step-finish" the pre-rewrite parser assumed).
+// hyphenated "step-finish" the pre-rewrite parser assumed). Since #943 the
+// envelope fans out to a system bootstrap event (model for Crow's Nest)
+// followed by a result event whose keys match ParseResultUsage
+// (total_cost_usd + usage.*).
 func TestParseOpenCode_StepFinish(t *testing.T) {
 	line := []byte(`{"type":"step_finish","sessionID":"s","part":{"tokens":{"input":80,"output":20},"cost":0.0042,"providerID":"anthropic","modelID":"claude-sonnet-4-6"}}`)
 	var got []AgentEvent
 	parseOpenCodeStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
 
-	if len(got) != 1 || got[0].Type != "result" {
-		t.Fatalf("step_finish wrong: %+v", got)
+	if len(got) != 2 || got[0].Type != "system" || got[1].Type != "result" {
+		t.Fatalf("step_finish must emit system bootstrap + result: %+v", got)
 	}
-	meta, ok := got[0].Metadata.(map[string]interface{})
-	if !ok {
-		t.Fatalf("Metadata is not map[string]interface{}: %#v", got[0].Metadata)
+	sysMeta := got[0].Metadata.(map[string]interface{})
+	if sysMeta["model"] != "anthropic/claude-sonnet-4-6" {
+		t.Errorf("bootstrap model wrong: %v", sysMeta["model"])
 	}
-	cost, ok := meta["cost_usd"].(float64)
+	meta, ok := got[1].Metadata.(map[string]interface{})
 	if !ok {
-		t.Fatalf("cost_usd missing or wrong type: %#v", meta["cost_usd"])
+		t.Fatalf("Metadata is not map[string]interface{}: %#v", got[1].Metadata)
+	}
+	cost, ok := meta["total_cost_usd"].(float64)
+	if !ok {
+		t.Fatalf("total_cost_usd missing or wrong type: %#v", meta["total_cost_usd"])
 	}
 	if cost != 0.0042 {
 		t.Errorf("cost lost: %v", cost)

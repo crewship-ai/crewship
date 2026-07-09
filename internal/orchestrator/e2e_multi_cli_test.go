@@ -42,6 +42,10 @@ import (
 //          > testdata/cli-fixtures/droid.ndjson
 //   3. Commit the updated fixtures + bump pinnedNpmVersion in
 //      cli_adapter_versions_test.go.
+//
+// NOTE: opencode.ndjson is currently authored from the documented upstream
+// schema (#943), not captured — replace it with a real capture on the next
+// dev2 smoke run before promoting the adapter's status to production.
 
 // adapterFixtureContract pins the minimum AgentEvent set every CLI adapter
 // must emit when given a canonical "say hello" prompt. If a future CLI
@@ -81,8 +85,8 @@ func TestE2E_AllAdaptersFixtureReplay(t *testing.T) {
 		{
 			adapter:        "OPENCODE",
 			fixtureFile:    "opencode.ndjson",
-			mustHaveTypes:  []string{"text", "result"},
-			mustHaveModel:  false, // opencode does not emit a system bootstrap
+			mustHaveTypes:  []string{"system", "text", "result"},
+			mustHaveModel:  true, // #943: model surfaced from step_finish metadata
 			mustHaveResult: true,
 		},
 		{

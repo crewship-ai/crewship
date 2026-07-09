@@ -117,6 +117,27 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	adapter := getAdapter(req.CLIAdapter)
 	useStreamJSON := adapter.UseStreamJSON()
 
+	// Track whether the CLI delivered a terminal envelope. Some CLIs
+	// (observed: opencode, anomalyco/opencode#26855) can exit before
+	// emitting their final result event; without one, run finalization
+	// records no usage and consumers that key off the terminal envelope see
+	// a run that never "ended". The wrapped handler feeds the synthesis
+	// check after the read loop.
+	sawResult := false
+	sawError := false
+	streamHandler := handler
+	if useStreamJSON && handler != nil {
+		streamHandler = func(e AgentEvent) {
+			switch e.Type {
+			case "result":
+				sawResult = true
+			case "error":
+				sawError = true
+			}
+			handler(e)
+		}
+	}
+
 	// Crow's Nest: capture the first 16 KB of raw stdout+stderr so the live
 	// terminal panel can show a replayable snapshot. We deliberately do NOT
 	// emit per-line — at 50 lines/sec that would flood the journal. The live
@@ -156,7 +177,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 		}
 
 		if useStreamJSON {
-			adapter.ParseStreamLine(line, handler)
+			adapter.ParseStreamLine(line, streamHandler)
 		} else {
 			if handler != nil {
 				handler(AgentEvent{
@@ -170,6 +191,28 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 
 	if err := scanner.Err(); err != nil && ctx.Err() == nil {
 		o.logger.Debug("scanner error", "error", err, "agent_id", req.AgentID)
+	}
+
+	// Terminal-envelope resilience: the CLI produced output but exited
+	// without a result event (and without a fatal error event, which owns
+	// its own finalization path). Synthesize a non-error terminal result so
+	// downstream finalization has an envelope — usage stays absent, which
+	// ParseResultUsage reads as zeros. Flagged via subtype so observability
+	// can count occurrences per adapter.
+	if useStreamJSON && handler != nil && !sawResult && !sawError &&
+		ctx.Err() == nil && totalBytes > 0 {
+		o.logger.Warn("stream ended without terminal result — synthesizing",
+			"agent_id", req.AgentID,
+			"adapter", req.CLIAdapter,
+		)
+		handler(AgentEvent{
+			Type: "result",
+			Metadata: map[string]interface{}{
+				"subtype":  "stream_eof_synthetic",
+				"is_error": false,
+			},
+			Timestamp: time.Now(),
+		})
 	}
 
 	// Diagnostic Warn when an agent run ends without producing any

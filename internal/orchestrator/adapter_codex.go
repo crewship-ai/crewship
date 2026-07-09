@@ -72,11 +72,9 @@ func (codexAdapter) BuildCommand(req AgentRunRequest) []string {
 	return cmd
 }
 
-// UseStreamJSON returns true: --json emits newline-delimited events
-// (parser_codex.go consumes them). The parser is currently a stub — until it
-// ships the live event stream falls through the parser as no-ops, which means
-// the agent surfaces no incremental UI events but the run still completes and
-// the journal entry captures the raw output for debugging.
+// UseStreamJSON returns true: --json emits newline-delimited events and
+// parser_codex.go fully consumes them (thread.started bootstrap, item
+// lifecycle, turn.completed/failed usage envelopes, errors).
 func (codexAdapter) UseStreamJSON() bool { return true }
 
 func (codexAdapter) ParseStreamLine(line []byte, handler EventHandler) {
