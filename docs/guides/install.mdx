@@ -1,6 +1,6 @@
 ---
 title: "Install"
-description: "Three supported ways to install Crewship: Homebrew tap, signed curl | bash installer, or Docker Compose."
+description: "Supported ways to install Crewship: Homebrew tap, signed curl | bash installer, Debian/RPM packages, or Docker."
 icon: "download"
 ---
 
@@ -13,17 +13,20 @@ runtime if you intend to run agents (Docker, Podman, Colima, OrbStack,
 Apple Containers, or Rancher Desktop).
 
 Pick the install path that matches how you run software locally — the
-three below are first-class and tested on every release.
+options below are first-class and tested on every release.
 
-<CardGroup cols={3}>
+<CardGroup cols={2}>
   <Card title="Homebrew" icon="apple" href="#homebrew">
     macOS and Linuxbrew — one command, auto-upgrades.
   </Card>
   <Card title="curl | bash" icon="terminal" href="#curl--bash">
     OS-agnostic install script with SHA-256 + cosign verification.
   </Card>
-  <Card title="Docker Compose" icon="docker" href="#docker-compose">
-    Containerised, host doesn't need Go or Node.
+  <Card title="Debian / RPM packages" icon="box" href="#debian--rpm-packages">
+    `apt`/`dnf`-managed install with a bundled systemd service.
+  </Card>
+  <Card title="Docker" icon="docker" href="#docker-compose">
+    Official multi-arch image, or Compose from source.
   </Card>
 </CardGroup>
 
@@ -121,6 +124,61 @@ Use it only for offline mirror testing — never for normal installs.
 5. Extracts and moves the `crewship` binary into the install directory.
 
 Source: [`scripts/install.sh`](https://github.com/crewship-ai/crewship/blob/main/scripts/install.sh).
+
+## Debian / RPM packages
+
+Every release publishes native `.deb` and `.rpm` packages (amd64 + arm64)
+alongside the archives. They install the `crewship` and `crewship-sidecar`
+binaries, the `entrypoint.sh` runtime helper, and a **systemd unit** so a VM or
+bare-metal host runs Crewship as a managed service.
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install ./crewship_<version>_linux_amd64.deb
+
+# Fedora / RHEL / openSUSE
+sudo dnf install ./crewship_<version>_linux_amd64.rpm
+```
+
+The package **creates a locked `crewship` service account** (and adds it to the
+`docker` group when Docker is installed), installs the unit, but deliberately
+**does not enable or start it**. There are no secrets to configure first —
+`crewship` auto-generates `ENCRYPTION_KEY` and `NEXTAUTH_SECRET` on first start
+and persists them under `/var/lib/crewship`:
+
+```bash
+# Enable + start when ready
+sudo systemctl enable --now crewship
+sudo systemctl status crewship
+
+# Dashboard-only (no Docker)? Set the knob first, then start:
+echo 'CREWSHIP_ARGS=--no-docker' | sudo tee -a /etc/crewship/crewship.env
+sudo systemctl enable --now crewship
+
+# Or try it in the foreground without Docker:
+sudo -u crewship CREWSHIP_DATA_DIR=/var/lib/crewship crewship start --no-docker
+```
+
+| Path | Purpose |
+|---|---|
+| `/usr/bin/crewship`, `/usr/bin/crewship-sidecar` | the binaries (on `PATH`) |
+| `/usr/libexec/crewship/entrypoint.sh` | agent-container entrypoint (autodetected) |
+| `/usr/lib/systemd/system/crewship.service` | the service unit |
+| `/etc/crewship/crewship.env` | optional overrides (**config file — survives upgrades**) |
+| `/var/lib/crewship` | database, auto-generated `secrets.env`, snapshots, memory blobs |
+
+**Upgrades** go through the package manager (`apt-get install --only-upgrade
+crewship` / `dnf upgrade crewship`). The postinstall runs `systemctl
+try-restart`, so a **running** service picks up the new binary automatically
+(with its pre-migration snapshot) while a stopped one is left alone. On these
+installs `crewship self-update` deliberately refuses and points you back at
+`apt`/`dnf` — see [Upgrading & Downgrading](/guides/upgrades#install-channels--their-upgrade-path).
+
+<Note>
+Package signing (GPG for `apt`/`dnf` repositories) and macOS notarization are
+tracked follow-ups. Until then, verify package integrity against the release
+`checksums.txt`, and use the official APT/DNF repository once it's published.
+</Note>
 
 ## Docker Compose
 

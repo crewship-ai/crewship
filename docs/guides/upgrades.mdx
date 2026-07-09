@@ -60,6 +60,57 @@ crewship self-update
 crewship start          # migrations apply here, after an automatic snapshot
 ```
 
+## Install channels & their upgrade path
+
+Beyond Homebrew and the installer, Crewship ships native Linux packages and an
+official container image. Each has its own upgrade command — and `self-update`
+knows to step aside for the ones a package manager owns.
+
+| Channel | Install | Upgrade |
+|---|---|---|
+| **Homebrew** | `brew install crewship-ai/tap/crewship` | `crewship self-update` (delegates to `brew upgrade`) |
+| **Installer / tarball** | `curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh \| bash` | `crewship self-update` (checksum-verified in-place swap) |
+| **Debian / Ubuntu (`.deb`)** | `apt-get install ./crewship_<ver>_linux_amd64.deb` | `apt-get update && apt-get install --only-upgrade crewship` |
+| **Fedora / RHEL (`.rpm`)** | `dnf install ./crewship_<ver>_linux_amd64.rpm` | `dnf upgrade crewship` |
+| **Docker** | `docker pull ghcr.io/crewship-ai/crewship:latest` | `docker pull …` the new tag, recreate the container |
+
+On a package-managed install, `crewship self-update` **refuses to overwrite the
+binary** (the package manager owns it) and prints the matching `apt`/`dnf`/
+`docker` command instead — so you never end up with a binary your package
+database doesn't know about.
+
+### Debian / RPM packages + systemd
+
+The `.deb` and `.rpm` install:
+
+- `crewship` and `crewship-sidecar` into `/usr/bin`,
+- `entrypoint.sh` into `/usr/libexec/crewship/` (autodetected — no config needed),
+- a **systemd unit** at `/usr/lib/systemd/system/crewship.service`,
+- a config file at `/etc/crewship/crewship.env` (optional overrides; your edits survive upgrades).
+
+The package **does not enable or start the service** — that's your call. There
+are no secrets to set first: `crewship` auto-generates `ENCRYPTION_KEY` and
+`NEXTAUTH_SECRET` on first start and persists them under `/var/lib/crewship`.
+
+```bash
+# Enable + start
+sudo systemctl enable --now crewship
+
+# Dashboard-only (no Docker)? Set the knob first:
+echo 'CREWSHIP_ARGS=--no-docker' | sudo tee -a /etc/crewship/crewship.env
+sudo systemctl enable --now crewship
+
+# Or try it without Docker in the foreground:
+sudo -u crewship CREWSHIP_DATA_DIR=/var/lib/crewship crewship start --no-docker
+```
+
+The service runs as the unprivileged `crewship` user (created by the package)
+and stores its database under `/var/lib/crewship`. On **upgrade**, the package
+manager swaps the binary and the postinstall runs `systemctl try-restart` — it
+restarts the service **only if it was already running**, so an upgrade applies
+the new binary (and its automatic pre-migration snapshot) without ever starting
+a service you'd chosen to keep stopped.
+
 ## Rollback / downgrade
 
 Migrations are **forward-only**. An older binary will **refuse to start**

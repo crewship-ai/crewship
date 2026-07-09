@@ -235,6 +235,73 @@ brews:
       system "#{bin}/crewship", "version"
     commit_msg_template: "chore: update crewship-cli formula to {{ .Tag }}"
 
+# Native Linux packages (#858 phase 4). deb + rpm carry the same companion set
+# as the tar.gz archive — crewship, crewship-sidecar, entrypoint.sh — plus a
+# systemd unit. The package manager owns the upgrade (stop -> swap -> start);
+# the postinstall try-restarts an already-running service, never enables a
+# stopped one. No package signing here yet: like macOS notarization it's a
+# documented follow-up; integrity today comes from the release checksums.
+nfpms:
+  - id: packages
+    package_name: crewship
+    # crewship (full daemon+UI) and the sidecar shim. The CLI-only build is a
+    # separate Homebrew story and is intentionally not packaged here.
+    # `builds` (not `ids`): the pinned goreleaser v2.6.1 nfpm schema uses
+    # `builds`; `ids` only exists in newer goreleaser and fails the release
+    # pipeline (caught by the #933 pre-merge smoke).
+    builds:
+      - crewship
+      - crewship-sidecar
+    vendor: Crewship
+    homepage: "https://crewship.ai"
+    maintainer: "Crewship <support@crewship.ai>"
+    description: "Self-hosted runtime for AI coding agents — daemon + CLI + web UI in one binary"
+    license: "Apache-2.0"
+    formats:
+      - deb
+      - rpm
+    # Both binaries go to /usr/bin: crewship-sidecar is a real, namespaced
+    # binary so it's fine on PATH — only entrypoint.sh (a bare shell script)
+    # would pollute it, so that one lands in libexec instead (mirrors #920).
+    bindir: /usr/bin
+    contents:
+      # autodetectSidecarPaths probes <bin>/../libexec/crewship/entrypoint.sh
+      # for exactly this FHS layout, so `crewship start` boots with no override.
+      - src: scripts/entrypoint.sh
+        dst: /usr/libexec/crewship/entrypoint.sh
+        file_info:
+          mode: 0755
+      # /usr/lib/systemd/system is the canonical vendor unit dir on merged-/usr
+      # distros (/lib is a compat symlink to it on Debian/Ubuntu; Fedora dropped
+      # the symlink), so install to the real location.
+      - src: packaging/crewship.service
+        dst: /usr/lib/systemd/system/crewship.service
+        file_info:
+          mode: 0644
+      # Shipped as a config file so operator overrides survive upgrades
+      # (noreplace = never overwrite an existing /etc/crewship/crewship.env).
+      # Optional knobs only — the crypto secrets auto-generate under the data
+      # dir, so this file ships with no secrets.
+      - src: packaging/crewship.env.example
+        dst: /etc/crewship/crewship.env
+        type: "config|noreplace"
+        file_info:
+          mode: 0640
+      # A pristine copy always refreshed on upgrade, so operators can diff new
+      # optional knobs against their edited env file.
+      - src: packaging/crewship.env.example
+        dst: /etc/crewship/crewship.env.example
+        file_info:
+          mode: 0644
+    scripts:
+      postinstall: packaging/nfpm/postinstall.sh
+      preremove: packaging/nfpm/preremove.sh
+    # Recommend Docker but don't hard-require it: agents need a runtime, but a
+    # dashboard-only host runs with CREWSHIP_ARGS=--no-docker. A weak/Recommends
+    # dep is advisory — an unsatisfiable one is skipped, never a hard failure.
+    recommends:
+      - docker-ce
+
 release:
   github:
     owner: crewship-ai

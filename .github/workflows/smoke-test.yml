@@ -251,3 +251,102 @@ jobs:
             echo "::error::container 'crewship version' output did not contain tag ${TAG}"
             exit 1
           fi
+
+  packages:
+    name: Smoke ${{ matrix.pkg }} package
+    # Installs the release .deb / .rpm into a pristine distro container and
+    # boots `crewship start --no-docker`, proving a package install is bootable
+    # as-shipped (#858 phase 4). This is the FHS layout the tarball smoke can't
+    # cover: crewship in /usr/bin, entrypoint.sh in /usr/libexec/crewship, and
+    # autodetect must find both with no CREWSHIP_*_PATH override.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pkg: deb
+            image: debian:bookworm-slim
+          - pkg: rpm
+            image: fedora:41
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - name: Download package for tag
+        run: |
+          set -euo pipefail
+          # Base distro images are minimal; install curl (+ CA certs) so we can
+          # fetch the public release asset over HTTPS. gh isn't in stock repos.
+          if [ "${{ matrix.pkg }}" = "deb" ]; then
+            apt-get update
+            apt-get install -y --no-install-recommends ca-certificates curl
+          elif ! command -v curl >/dev/null 2>&1; then
+            # Fedora already ships curl-minimal (provides /usr/bin/curl); only
+            # install if a truly minimal image lacks it, avoiding a
+            # curl/curl-minimal swap conflict.
+            dnf install -y curl
+          fi
+          VERSION="${TAG#v}"
+          # goreleaser nfpm file name mirrors the archive shape:
+          # crewship_<version>_linux_amd64.{deb,rpm}. Runner arch is amd64.
+          ASSET="crewship_${VERSION}_linux_amd64.${{ matrix.pkg }}"
+          mkdir -p /pkg
+          # Public repo: the release asset is downloadable without auth.
+          curl -fSL \
+            "https://github.com/${{ github.repository }}/releases/download/${TAG}/${ASSET}" \
+            -o "/pkg/${ASSET}"
+
+      - name: Install package
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.pkg }}" = "deb" ]; then
+            # --no-install-recommends: the package Recommends docker-ce, which
+            # isn't in stock Debian repos; a smoke host doesn't need it.
+            apt-get install -y --no-install-recommends /pkg/crewship_*_linux_amd64.deb
+          else
+            dnf install -y /pkg/crewship_*_linux_amd64.rpm
+          fi
+          # Assert the FHS layout the systemd unit + autodetect rely on.
+          test -x /usr/bin/crewship
+          test -x /usr/bin/crewship-sidecar
+          test -f /usr/libexec/crewship/entrypoint.sh
+          test -f /usr/lib/systemd/system/crewship.service
+          test -f /etc/crewship/crewship.env
+          crewship version
+
+      - name: Probe `crewship start --no-docker` health endpoint
+        # Boots exactly as a package install would: crewship from /usr/bin,
+        # entrypoint.sh autodetected from /usr/libexec/crewship — no
+        # CREWSHIP_*_PATH override, no CREWSHIP_SKIP_SIDECAR. Proves the FHS
+        # autodetect candidate (issue #858 ph4) works against a real package.
+        env:
+          NEXTAUTH_SECRET: "00000000000000000000000000000000000000000000000000000000deadbeef"
+          ENCRYPTION_KEY: "11111111111111111111111111111111111111111111111111111111cafebabe"
+          CREWSHIP_PORT: "9090"
+          CREWSHIP_DATA_DIR: "/tmp/crewship-data"
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/crewship-data
+          (crewship start --no-docker >/tmp/crewship-start.log 2>&1 || true) &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+
+          STATUS=0
+          for _ in $(seq 1 120); do
+            if curl -sf --max-time 1 http://localhost:9090/api/health >/dev/null 2>&1; then
+              STATUS=200
+              break
+            fi
+            sleep 0.25
+          done
+
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::health endpoint did not return 200 within 30s (${{ matrix.pkg }} package)"
+            echo "---- crewship start log ----"
+            cat /tmp/crewship-start.log || true
+            exit 1
+          fi
+          echo "${{ matrix.pkg }} package boots and serves /api/health"

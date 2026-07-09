@@ -591,26 +591,31 @@ func resolveSidecarPaths(cfg *Config, binDir, cwd string) error {
 //     where the archive bundles it at the root (#914);
 //   - <binDir>/../libexec — the Homebrew layout, where the formula installs it
 //     into the Cellar's libexec to keep it out of the user's global bin (#920);
+//   - <binDir>/../libexec/crewship — the deb/rpm FHS layout, where the package
+//     puts runtime companions in a package-private libexec subdir (#858 ph4);
 //   - /usr/local/bin — a legacy manual-copy fallback.
 func sidecarBinaryCandidates(binDir string) []string {
 	var c []string
 	if binDir != "" {
 		c = append(c, filepath.Join(binDir, "crewship-sidecar"))
 		c = append(c, filepath.Join(binDir, "..", "libexec", "crewship-sidecar"))
+		c = append(c, filepath.Join(binDir, "..", "libexec", "crewship", "crewship-sidecar"))
 	}
 	c = append(c, "/usr/local/bin/crewship-sidecar")
 	return c
 }
 
 // entrypointCandidates lists where entrypoint.sh may live, in priority order:
-// the tar.gz sibling and Homebrew libexec layouts (as for the sidecar binary),
-// then a source checkout's scripts/entrypoint.sh (and cwd sibling), then the
-// legacy /usr/local/share location.
+// the tar.gz sibling, Homebrew libexec, and deb/rpm FHS libexec/crewship
+// layouts (as for the sidecar binary), then a source checkout's
+// scripts/entrypoint.sh (and cwd sibling), then the legacy /usr/local/share
+// location.
 func entrypointCandidates(binDir, cwd string) []string {
 	var c []string
 	if binDir != "" {
 		c = append(c, filepath.Join(binDir, "entrypoint.sh"))
 		c = append(c, filepath.Join(binDir, "..", "libexec", "entrypoint.sh"))
+		c = append(c, filepath.Join(binDir, "..", "libexec", "crewship", "entrypoint.sh"))
 	}
 	if cwd != "" {
 		c = append(c, filepath.Join(cwd, "scripts", "entrypoint.sh"))
