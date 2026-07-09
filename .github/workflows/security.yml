@@ -394,3 +394,109 @@ jobs:
               --label security-scan-alert \
               --body "$body"
           fi
+
+  # ── Code scanning drift sentinel ──
+  # The scanners above (govulncheck/OSV/gitleaks) own DEPENDENCY + secret
+  # drift. CodeQL (.github/workflows/codeql.yml) owns CODE-level findings
+  # (injection, taint, path traversal) and posts them to the Security tab
+  # as "Code scanning alerts" — but nothing turns a fresh CodeQL alert into
+  # an owned, threaded work item. This job closes that gap: once a day it
+  # counts the OPEN code-scanning alerts and, if any exist, files or
+  # updates ONE idempotent tracking issue (same pattern as scheduled-report
+  # above) so a newly-introduced injection/traversal sink can't silently
+  # re-accumulate the way the original 449-alert backlog did. Green (zero
+  # open) closes the loop by commenting + closing the tracking issue.
+  code-scanning-report:
+    name: Code scanning drift sentinel
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      # Read the repository's code-scanning alerts…
+      security-events: read
+      # …and file/close the tracking issue.
+      issues: write
+    steps:
+      - name: Count open code-scanning alerts and file/close the tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # Pull every open alert (paginated) and summarise by rule +
+          # severity. `|| true` on the API call tolerates the "Code
+          # scanning is not enabled" 404 on forks/first-run without
+          # failing the whole security workflow.
+          alerts_json=$(gh api --paginate \
+            "repos/${REPO}/code-scanning/alerts?state=open&per_page=100" 2>/dev/null || echo '[]')
+          # --paginate concatenates JSON arrays as separate documents; slurp
+          # them back into one array before counting.
+          count=$(echo "$alerts_json" | jq -s 'add // [] | length')
+          echo "Open code-scanning alerts: ${count}"
+
+          label="code-scanning-alert"
+          gh label create "$label" --repo "$REPO" \
+            --color D93F0B \
+            --description "Automated: open CodeQL / code-scanning alerts on main" \
+            --force
+
+          existing=$(gh issue list --repo "$REPO" --label "$label" \
+            --state open --json number --jq '.[0].number // empty')
+
+          if [ "$count" -eq 0 ]; then
+            # Clean state: close any open tracking issue so the label only
+            # ever flags a real, current backlog.
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" --repo "$REPO" \
+                --body "✅ Code scanning is clean — 0 open alerts as of $RUN_URL. Closing."
+              gh issue close "$existing" --repo "$REPO" \
+                --reason completed
+              echo "Closed tracking issue #$existing (zero open alerts)."
+            else
+              echo "Zero open alerts and no tracking issue — nothing to do."
+            fi
+            exit 0
+          fi
+
+          # Non-zero: build a by-rule / by-severity breakdown table. jq
+          # emits the fully-formed markdown rows so the shell only has to
+          # interpolate them into the issue body.
+          breakdown=$(echo "$alerts_json" | jq -s -r '
+            add // []
+            | group_by(.rule.id)
+            | map({
+                rule: .[0].rule.id,
+                sev: (.[0].rule.security_severity_level // .[0].rule.severity // "n/a"),
+                n: length
+              })
+            | sort_by(-.n)
+            | .[]
+            | "| \(.n) | \(.sev) | `\(.rule)` |"
+          ')
+          # Plain double-quoted assignment (same pattern as scheduled-report
+          # above) — avoids heredoc indentation pitfalls inside the YAML
+          # block scalar.
+          body="**${count}** open code-scanning (CodeQL) alert(s) on \`main\`.
+
+          | count | severity | rule |
+          |------:|----------|------|
+          ${breakdown}
+
+          Scan: $RUN_URL
+          Alerts: https://github.com/${REPO}/security/code-scanning?query=is%3Aopen
+
+          Each alert must be **fixed** or **dismissed with a reason** (false-positive / won't-fix). This issue auto-closes when the daily sweep sees 0 open alerts."
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+            echo "Updated tracking issue #$existing (${count} open)."
+          else
+            gh issue create --repo "$REPO" \
+              --title "Code scanning: ${count} open alert(s) on main" \
+              --label "$label" \
+              --body "$body"
+            echo "Filed new tracking issue (${count} open)."
+          fi
