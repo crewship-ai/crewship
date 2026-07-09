@@ -125,9 +125,19 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	// check after the read loop.
 	sawResult := false
 	sawError := false
+	// PR-F4 "scan path 2" (#947): every adapter's parser emits tool_result
+	// events through this wrapper — it is the single production seam
+	// (ParseStreamLine has no other caller) — so the MINJA tool-return scan
+	// runs here for the parsers that emit directly. Claude's parser routes
+	// its blocks through emitToolResultBlock (scan path 1, same scan
+	// function), so it is skipped to avoid double-scanning.
+	scanHere := !adapterSelfScansToolResults(adapter)
 	streamHandler := handler
 	if useStreamJSON && handler != nil {
 		streamHandler = func(e AgentEvent) {
+			if scanHere {
+				e = scanToolResultEvent(e)
+			}
 			switch e.Type {
 			case "result":
 				sawResult = true
@@ -288,9 +298,10 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 // Scope (this is "scan path 1" — Claude assistant/tool_result blocks
 // routed through this helper). Per-adapter tool_result emission in
 // parser_codex.go / parser_gemini.go / parser_droid.go / parser_cursor.go
-// / parser_opencode.go emits directly without going through this
-// function — "scan path 2" will wrap those once the seam consolidates
-// (tracked separately, see PR-F4 roadmap).
+// / parser_opencode.go emits directly and is covered by "scan path 2":
+// the streamHandler wrapper in streamOutput runs the same
+// scanToolResultEvent on every tool_result event those parsers emit
+// (#947). Both paths share one scan implementation so they can't drift.
 //
 // Quarantine to disk is intentionally NOT attempted here: tool results
 // are ephemeral (no canonical on-disk source path), and the orchestrator
@@ -313,28 +324,59 @@ func emitToolResultBlock(block contentBlock, parentID string, handler EventHandl
 	if block.IsError {
 		meta["is_error"] = true
 	}
-	content := block.Text
-	if hit := memory.ScanContent(content); hit != nil {
-		// Replace the poisoned text with a safe placeholder. Mention
-		// category + pattern so the model knows why the tool result
-		// was redacted (matches the read-path UX).
-		content = fmt.Sprintf(
-			"[BLOCKED: tool_result scan hit category=%s pattern=%s. "+
-				"Original tool output was suppressed because it contained "+
-				"a prompt-injection or exfiltration signature. "+
-				"This placeholder is a safe substitute.]",
-			hit.Category, hit.Pattern,
-		)
-		meta["scan_quarantined"] = true
-		meta["scan_category"] = hit.Category
-		meta["scan_pattern"] = hit.Pattern
-	}
-	handler(AgentEvent{
+	handler(scanToolResultEvent(AgentEvent{
 		Type:      "tool_result",
-		Content:   content,
+		Content:   block.Text,
 		Metadata:  meta,
 		Timestamp: time.Now(),
-	})
+	}))
+}
+
+// adapterSelfScansToolResults reports whether the adapter's parser already
+// routes its tool_result blocks through emitToolResultBlock (scan path 1),
+// in which case the streamOutput chokepoint must not scan again. Only the
+// Claude parser does; every other adapter emits tool_result directly and
+// relies on scan path 2. The TestToolResultScan_AllAdapters matrix guards
+// this mapping — a new adapter that self-scans must be added here AND
+// asserted there.
+func adapterSelfScansToolResults(a CLIAdapter) bool {
+	return a.Name() == "CLAUDE_CODE"
+}
+
+// scanToolResultEvent is the shared MINJA tool-return scan (PR-F4).
+// Non-tool_result events pass through untouched. On a scanner hit the
+// poisoned content is replaced with a safe placeholder naming category +
+// pattern (matches the memory read-path UX) and the event metadata is
+// tagged so journal/UI can render the quarantine state.
+//
+// Quarantine to disk is intentionally NOT attempted here: tool results
+// are ephemeral (no canonical on-disk source path) and this scope has no
+// AgentContext handle. The placeholder is what matters — the poisoned
+// text never reaches the model's re-injected context.
+func scanToolResultEvent(e AgentEvent) AgentEvent {
+	if e.Type != "tool_result" {
+		return e
+	}
+	hit := memory.ScanContent(e.Content)
+	if hit == nil {
+		return e
+	}
+	e.Content = fmt.Sprintf(
+		"[BLOCKED: tool_result scan hit category=%s pattern=%s. "+
+			"Original tool output was suppressed because it contained "+
+			"a prompt-injection or exfiltration signature. "+
+			"This placeholder is a safe substitute.]",
+		hit.Category, hit.Pattern,
+	)
+	meta, _ := e.Metadata.(map[string]interface{})
+	if meta == nil {
+		meta = map[string]interface{}{}
+	}
+	meta["scan_quarantined"] = true
+	meta["scan_category"] = hit.Category
+	meta["scan_pattern"] = hit.Pattern
+	e.Metadata = meta
+	return e
 }
 
 // emitImageBlock sends an image event for the given content block.
