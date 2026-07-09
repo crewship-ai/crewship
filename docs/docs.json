@@ -141,7 +141,8 @@
                 "pages": [
                   "guides/backup",
                   "guides/migrations",
-                  "guides/troubleshooting"
+                  "guides/troubleshooting",
+                  "guides/upgrades"
                 ]
               }
             ]
