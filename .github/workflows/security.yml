@@ -427,11 +427,24 @@ jobs:
           set -euo pipefail
 
           # Pull every open alert (paginated) and summarise by rule +
-          # severity. `|| true` on the API call tolerates the "Code
-          # scanning is not enabled" 404 on forks/first-run without
-          # failing the whole security workflow.
-          alerts_json=$(gh api --paginate \
-            "repos/${REPO}/code-scanning/alerts?state=open&per_page=100" 2>/dev/null || echo '[]')
+          # severity. Only an explicit 404 ("code scanning is not
+          # enabled", forks/first-run) may be treated as an empty set.
+          # Any other failure (5xx, rate limit, auth) must FAIL the job:
+          # a swallowed transient error is indistinguishable from
+          # "0 alerts" and would falsely close the tracking issue as
+          # clean while hundreds of alerts remain open.
+          api_stderr=$(mktemp)
+          if alerts_json=$(gh api --paginate \
+            "repos/${REPO}/code-scanning/alerts?state=open&per_page=100" 2>"$api_stderr"); then
+            :
+          elif grep -q "HTTP 404" "$api_stderr"; then
+            echo "Code scanning not enabled (HTTP 404) — treating as zero alerts."
+            alerts_json='[]'
+          else
+            echo "::error::code-scanning alert query failed (not a 404) — refusing to report a clean state."
+            cat "$api_stderr"
+            exit 1
+          fi
           # --paginate concatenates JSON arrays as separate documents; slurp
           # them back into one array before counting.
           count=$(echo "$alerts_json" | jq -s 'add // [] | length')
@@ -495,7 +508,7 @@ jobs:
             echo "Updated tracking issue #$existing (${count} open)."
           else
             gh issue create --repo "$REPO" \
-              --title "Code scanning: ${count} open alert(s) on main" \
+              --title "Code scanning: open alerts on main (tracking)" \
               --label "$label" \
               --body "$body"
             echo "Filed new tracking issue (${count} open)."
