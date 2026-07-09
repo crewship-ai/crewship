@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"syscall"
 )
 
 // MemoryReadResponse is the success envelope for GET /memory/read.
@@ -79,10 +80,21 @@ func (s *Server) handleMemoryRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	content, err := os.ReadFile(target)
+	// Open the resolved target with O_NOFOLLOW (see readRegularNoFollow):
+	// safeJoinUnder validated the path lexically, but a symlink swapped in at
+	// the final component between that check and this read would otherwise
+	// redirect the read outside the tier base. The no-follow open closes that
+	// TOCTOU gap; a symlink/FIFO/dir target is refused, not followed.
+	content, err := readRegularNoFollow(target)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeJSONResponse(w, http.StatusNotFound, map[string]string{"error": "file not found"})
+			return
+		}
+		if errors.Is(err, syscall.ELOOP) {
+			// Final component was a symlink — treat as an illegal path, same
+			// stance as safeJoinUnder's traversal rejection (no path echo).
+			writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "illegal file path"})
 			return
 		}
 		s.logger.Error("memory read failed", "error", err, "scope", scope, "file", file)

@@ -14,7 +14,13 @@ import (
 // flock(2) state lives per-fd, so a persistent on-disk lockfile does
 // not "stay locked" across runs.
 func (l *writeLock) Lock() error {
-	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_RDWR, 0o600)
+	// O_NOFOLLOW refuses to open the sentinel if its final component is a
+	// symlink (open fails with ELOOP), so an attacker who can plant a symlink
+	// where the lockfile lives can't steer this O_CREATE|O_RDWR open onto an
+	// arbitrary file (review #926). We deliberately do NOT add O_EXCL: the
+	// sentinel is a persistent on-disk file that legitimate repeated locks
+	// reuse, and O_EXCL would fail every lock after the first.
+	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return fmt.Errorf("open lockfile: %w", err)
 	}
