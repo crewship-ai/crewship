@@ -15,7 +15,7 @@ func TestSidecarBinaryCandidates_IncludesLibexec(t *testing.T) {
 	binDir := "/opt/homebrew/Cellar/crewship/1.2.3/bin"
 	got := sidecarBinaryCandidates(binDir)
 
-	wantNextTo := filepath.Join(binDir, "crewship-sidecar")           // tar.gz / installer
+	wantNextTo := filepath.Join(binDir, "crewship-sidecar")                                   // tar.gz / installer
 	wantLibexec := filepath.Clean(filepath.Join(binDir, "..", "libexec", "crewship-sidecar")) // brew
 	assertContainsPath(t, got, wantNextTo, "tar.gz sibling")
 	assertContainsPath(t, got, wantLibexec, "homebrew libexec")
