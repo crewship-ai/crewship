@@ -204,6 +204,64 @@ func TestHandleFileSave_OverwriteRoutesThroughContainer(t *testing.T) {
 	}
 }
 
+// TestHandleFileSave_UnchangedSharedIsNoOp is the #931 fix: re-delivering
+// BYTE-IDENTICAL content to a shared file must short-circuit as a no-op —
+// never touching the container — so an unchanged apply/redelivery succeeds even
+// on a STOPPED crew (where the container route would otherwise 409). Setup: the
+// host Write fails EACCES and the container is down; only the content-equality
+// short-circuit can make this a 200.
+func TestHandleFileSave_UnchangedSharedIsNoOp(t *testing.T) {
+	base, _ := localfs.New(t.TempDir())
+	key := "crews/crewX/shared/scripts/parse_check.sh"
+	content := "echo hi\n"
+	if err := base.Write(context.Background(), key, strings.NewReader(content)); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	stor := &permOverwriteStorage{StorageProvider: base, failKey: key}
+	ctr := &recordingContainer{mockContainer: &mockContainer{}, execErr: errors.New("container not running")}
+	s := newContainerFallbackServer(t, stor, ctr)
+
+	req := httptest.NewRequest("PUT", "/crews/crewX/files/save?path=shared/scripts/parse_check.sh",
+		strings.NewReader(content)) // identical bytes
+	req.SetPathValue("id", "crewX")
+	rec := httptest.NewRecorder()
+	s.ipcMux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unchanged redelivery on stopped crew: status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "container") {
+		t.Errorf("no-op should not mention the container: %s", rec.Body.String())
+	}
+	if ctr.gotStdin != nil {
+		t.Errorf("no-op must not route through the container (exec was called)")
+	}
+}
+
+// TestHandleFileSave_ChangedSharedStillErrorsOnStoppedCrew guards the gate: a
+// CHANGED file on a stopped crew must still surface the clean 409, not be
+// wrongly short-circuited.
+func TestHandleFileSave_ChangedSharedStillErrorsOnStoppedCrew(t *testing.T) {
+	base, _ := localfs.New(t.TempDir())
+	key := "crews/crewX/shared/scripts/parse_check.sh"
+	if err := base.Write(context.Background(), key, strings.NewReader("echo OLD\n")); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	stor := &permOverwriteStorage{StorageProvider: base, failKey: key}
+	ctr := &recordingContainer{mockContainer: &mockContainer{}, execErr: errors.New("container not running")}
+	s := newContainerFallbackServer(t, stor, ctr)
+
+	req := httptest.NewRequest("PUT", "/crews/crewX/files/save?path=shared/scripts/parse_check.sh",
+		strings.NewReader("echo NEW\n")) // changed bytes
+	req.SetPathValue("id", "crewX")
+	rec := httptest.NewRecorder()
+	s.ipcMux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("changed content on stopped crew: status = %d, want 409, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestHandleFileSave_OverwriteContainerDown: when the crew container is not
 // running, the overwrite can't complete — surface a clear 409, not a 500.
 func TestHandleFileSave_OverwriteContainerDown(t *testing.T) {
