@@ -3,10 +3,10 @@ Description=Crewship — self-hosted runtime for AI coding agents
 Documentation=https://docs.crewship.ai
 After=network-online.target
 Wants=network-online.target
-# Docker is optional: `crewship start` runs the dashboard without it, and
-# `--no-docker` skips it entirely. A hard `Requires=docker.service` would
-# refuse to boot on hosts that don't run agents locally, so we only order
-# after it when present.
+# Docker is optional here: `crewship start` needs a container runtime to run
+# agents, but a dashboard-only host can pass --no-docker (see CREWSHIP_ARGS
+# below). A hard Requires=docker.service would break the --no-docker case, so
+# we only order after it when present.
 After=docker.service
 
 [Service]
@@ -14,21 +14,27 @@ Type=simple
 User=crewship
 Group=crewship
 
-# Secrets + operator overrides live here. The package ships a template with
-# empty values (see /etc/crewship/crewship.env); crewship start refuses to
-# boot until NEXTAUTH_SECRET and ENCRYPTION_KEY are set, printing the exact
-# openssl commands to generate them. The leading '-' keeps the unit valid
-# if an operator removes the file to supply the vars another way.
+# Optional operator overrides only. The two crypto secrets (ENCRYPTION_KEY,
+# NEXTAUTH_SECRET) are NOT required here: crewship auto-generates them on first
+# start and persists them to <data dir>/secrets.env (mode 0600). This file is
+# for changing the port, runtime image, or CREWSHIP_ARGS below. The leading '-'
+# keeps the unit valid when the file is absent.
 EnvironmentFile=-/etc/crewship/crewship.env
 
 # systemd creates and owns /var/lib/crewship for the service user; point the
-# data dir there so the SQLite DB, snapshots and memory blobs persist across
-# upgrades (the package manager only swaps the binary).
+# data dir there so the SQLite DB, the auto-generated secrets.env, snapshots and
+# memory blobs persist across upgrades (the package manager only swaps binaries).
 StateDirectory=crewship
 Environment=CREWSHIP_DATA_DIR=/var/lib/crewship
 WorkingDirectory=/var/lib/crewship
 
-ExecStart=/usr/bin/crewship start
+# `crewship start` refuses to boot without a container runtime unless --no-docker
+# is passed. A host that runs agents needs Docker AND the crewship service user
+# in the `docker` group (the package postinstall adds it when docker is present).
+# A dashboard-only host sets CREWSHIP_ARGS=--no-docker in the env file above.
+# The unquoted variable is word-split by systemd, so "--no-docker" arrives as one
+# argument; empty (the default) adds nothing.
+ExecStart=/usr/bin/crewship start $CREWSHIP_ARGS
 
 Restart=on-failure
 RestartSec=5

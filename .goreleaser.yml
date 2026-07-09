@@ -268,12 +268,17 @@ nfpms:
         dst: /usr/libexec/crewship/entrypoint.sh
         file_info:
           mode: 0755
+      # /usr/lib/systemd/system is the canonical vendor unit dir on merged-/usr
+      # distros (/lib is a compat symlink to it on Debian/Ubuntu; Fedora dropped
+      # the symlink), so install to the real location.
       - src: packaging/crewship.service
-        dst: /lib/systemd/system/crewship.service
+        dst: /usr/lib/systemd/system/crewship.service
         file_info:
           mode: 0644
-      # Shipped as a config file so operator-populated secrets survive upgrades
+      # Shipped as a config file so operator overrides survive upgrades
       # (noreplace = never overwrite an existing /etc/crewship/crewship.env).
+      # Optional knobs only — the crypto secrets auto-generate under the data
+      # dir, so this file ships with no secrets.
       - src: packaging/crewship.env.example
         dst: /etc/crewship/crewship.env
         type: "config|noreplace"
@@ -288,14 +293,11 @@ nfpms:
     scripts:
       postinstall: packaging/nfpm/postinstall.sh
       preremove: packaging/nfpm/preremove.sh
-    # Recommend Docker but don't hard-require it: the dashboard runs without it
-    # and `--no-docker` is a supported mode.
+    # Recommend Docker but don't hard-require it: agents need a runtime, but a
+    # dashboard-only host runs with CREWSHIP_ARGS=--no-docker. A weak/Recommends
+    # dep is advisory — an unsatisfiable one is skipped, never a hard failure.
     recommends:
       - docker-ce
-    overrides:
-      rpm:
-        recommends:
-          - docker-ce
 
 release:
   github:

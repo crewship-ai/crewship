@@ -312,7 +312,7 @@ jobs:
           test -x /usr/bin/crewship
           test -x /usr/bin/crewship-sidecar
           test -f /usr/libexec/crewship/entrypoint.sh
-          test -f /lib/systemd/system/crewship.service
+          test -f /usr/lib/systemd/system/crewship.service
           test -f /etc/crewship/crewship.env
           crewship version
 

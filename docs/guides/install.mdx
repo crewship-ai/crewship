@@ -137,24 +137,25 @@ bare-metal host runs Crewship as a managed service.
 sudo apt-get install ./crewship_<version>_linux_amd64.deb
 
 # Fedora / RHEL / openSUSE
-sudo dnf install ./crewship-<version>.linux_amd64.rpm
+sudo dnf install ./crewship_<version>_linux_amd64.rpm
 ```
 
-The package **creates a locked `crewship` service account** and installs the
-unit, but deliberately **does not enable or start it** — you opt in after
-setting the required secrets:
+The package **creates a locked `crewship` service account** (and adds it to the
+`docker` group when Docker is installed), installs the unit, but deliberately
+**does not enable or start it**. There are no secrets to configure first —
+`crewship` auto-generates `ENCRYPTION_KEY` and `NEXTAUTH_SECRET` on first start
+and persists them under `/var/lib/crewship`:
 
 ```bash
-# 1. Generate the two required secrets into the env file
-sudo sh -c 'printf "NEXTAUTH_SECRET=%s\nENCRYPTION_KEY=%s\n" \
-  "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" >> /etc/crewship/crewship.env'
-# (then delete the empty NEXTAUTH_SECRET=/ENCRYPTION_KEY= template lines)
-
-# 2. Enable + start the service
+# Enable + start when ready
 sudo systemctl enable --now crewship
 sudo systemctl status crewship
 
-# Or try it in the foreground without Docker (dashboard only):
+# Dashboard-only (no Docker)? Set the knob first, then start:
+echo 'CREWSHIP_ARGS=--no-docker' | sudo tee -a /etc/crewship/crewship.env
+sudo systemctl enable --now crewship
+
+# Or try it in the foreground without Docker:
 sudo -u crewship CREWSHIP_DATA_DIR=/var/lib/crewship crewship start --no-docker
 ```
 
@@ -162,9 +163,9 @@ sudo -u crewship CREWSHIP_DATA_DIR=/var/lib/crewship crewship start --no-docker
 |---|---|
 | `/usr/bin/crewship`, `/usr/bin/crewship-sidecar` | the binaries (on `PATH`) |
 | `/usr/libexec/crewship/entrypoint.sh` | agent-container entrypoint (autodetected) |
-| `/lib/systemd/system/crewship.service` | the service unit |
-| `/etc/crewship/crewship.env` | secrets + overrides (**config file — survives upgrades**) |
-| `/var/lib/crewship` | database, snapshots, memory blobs |
+| `/usr/lib/systemd/system/crewship.service` | the service unit |
+| `/etc/crewship/crewship.env` | optional overrides (**config file — survives upgrades**) |
+| `/var/lib/crewship` | database, auto-generated `secrets.env`, snapshots, memory blobs |
 
 **Upgrades** go through the package manager (`apt-get install --only-upgrade
 crewship` / `dnf upgrade crewship`). The postinstall runs `systemctl

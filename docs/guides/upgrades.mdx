@@ -71,7 +71,7 @@ knows to step aside for the ones a package manager owns.
 | **Homebrew** | `brew install crewship-ai/tap/crewship` | `crewship self-update` (delegates to `brew upgrade`) |
 | **Installer / tarball** | `curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh \| bash` | `crewship self-update` (checksum-verified in-place swap) |
 | **Debian / Ubuntu (`.deb`)** | `apt-get install ./crewship_<ver>_linux_amd64.deb` | `apt-get update && apt-get install --only-upgrade crewship` |
-| **Fedora / RHEL (`.rpm`)** | `dnf install ./crewship-<ver>.linux_amd64.rpm` | `dnf upgrade crewship` |
+| **Fedora / RHEL (`.rpm`)** | `dnf install ./crewship_<ver>_linux_amd64.rpm` | `dnf upgrade crewship` |
 | **Docker** | `docker pull ghcr.io/crewship-ai/crewship:latest` | `docker pull …` the new tag, recreate the container |
 
 On a package-managed install, `crewship self-update` **refuses to overwrite the
@@ -85,22 +85,22 @@ The `.deb` and `.rpm` install:
 
 - `crewship` and `crewship-sidecar` into `/usr/bin`,
 - `entrypoint.sh` into `/usr/libexec/crewship/` (autodetected — no config needed),
-- a **systemd unit** at `/lib/systemd/system/crewship.service`,
-- a config file at `/etc/crewship/crewship.env` (your edits survive upgrades).
+- a **systemd unit** at `/usr/lib/systemd/system/crewship.service`,
+- a config file at `/etc/crewship/crewship.env` (optional overrides; your edits survive upgrades).
 
-The package **does not enable or start the service** — that's your call. First
-set the two required secrets, then enable it:
+The package **does not enable or start the service** — that's your call. There
+are no secrets to set first: `crewship` auto-generates `ENCRYPTION_KEY` and
+`NEXTAUTH_SECRET` on first start and persists them under `/var/lib/crewship`.
 
 ```bash
-# 1. Generate the required secrets into the env file
-sudo sh -c 'printf "NEXTAUTH_SECRET=%s\nENCRYPTION_KEY=%s\n" \
-  "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" >> /etc/crewship/crewship.env'
-# (then delete the empty NEXTAUTH_SECRET=/ENCRYPTION_KEY= template lines)
-
-# 2. Enable + start
+# Enable + start
 sudo systemctl enable --now crewship
 
-# Or try it without Docker first (dashboard only):
+# Dashboard-only (no Docker)? Set the knob first:
+echo 'CREWSHIP_ARGS=--no-docker' | sudo tee -a /etc/crewship/crewship.env
+sudo systemctl enable --now crewship
+
+# Or try it without Docker in the foreground:
 sudo -u crewship CREWSHIP_DATA_DIR=/var/lib/crewship crewship start --no-docker
 ```
 
