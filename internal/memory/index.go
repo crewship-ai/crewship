@@ -11,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/pathsafe"
 )
 
 // Reindex scans all markdown files in the memory directory and rebuilds
@@ -172,12 +174,16 @@ func (e *Engine) ReindexPath(ctx context.Context, relPath string) (int, error) {
 
 	// Resolve the file key exactly as ReindexContext does (filepath.Rel of the
 	// cleaned join) so the DELETE here matches the `file` column a prior full
-	// reindex would have written. Reject anything that escapes the base.
-	clean := filepath.Clean(relPath)
-	if clean == "." || clean == "" || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+	// reindex would have written. pathsafe.Join is the shared guard that
+	// rejects absolute paths, NUL bytes, and any "../" escape and confines the
+	// result under basePath.
+	if clean := filepath.Clean(relPath); clean == "." || clean == "" {
 		return 0, fmt.Errorf("reindex path: illegal relative path %q", relPath)
 	}
-	fpath := filepath.Join(e.basePath, clean)
+	fpath, err := pathsafe.Join(e.basePath, relPath)
+	if err != nil {
+		return 0, fmt.Errorf("reindex path: illegal relative path %q: %w", relPath, err)
+	}
 	fileKey, err := filepath.Rel(e.basePath, fpath)
 	if err != nil {
 		fileKey = filepath.Base(fpath)

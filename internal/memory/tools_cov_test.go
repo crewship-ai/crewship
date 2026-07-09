@@ -45,6 +45,9 @@ func TestResolvePath_AllTiers(t *testing.T) {
 		{name: "daily explicit key", d: d, tier: "daily", key: "2026-06-01", want: filepath.Join(ac.AgentMemoryDir, "daily", "2026-06-01.md")},
 		{name: "daily traversal key", d: d, tier: "daily", key: "../evil", wantErr: "invalid daily key"},
 		{name: "daily slash key", d: d, tier: "daily", key: `a\b`, wantErr: "invalid daily key"},
+		// NUL smuggling slips past the ContainsAny/".." guard but the
+		// shared pathsafe.Join confinement layer rejects it.
+		{name: "daily NUL key", d: d, tier: "daily", key: "x\x00y", wantErr: "invalid daily key"},
 		{name: "peers happy", d: d, tier: "peers", key: "user-1", want: filepath.Join(ac.AgentMemoryDir, "peers", "user-1.md")},
 		{name: "peers empty key", d: d, tier: "peers", wantErr: "requires 'key'"},
 		{name: "peers traversal key", d: d, tier: "peers", key: "../x", wantErr: "invalid peer key"},

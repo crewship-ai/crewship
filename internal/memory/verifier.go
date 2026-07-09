@@ -41,6 +41,19 @@ const (
 // Empty list disables the citation check (no errors, just no
 // validation). Operators with bind-mounted source repos pass the
 // repo roots here.
+//
+// NOTE (2026-07): CitationSearchRoots is currently UNWIRED in
+// production — no runtime code path populates it (grep: only tests set
+// it). With an empty root list resolveCitation short-circuits before it
+// touches the filesystem, so the os.Stat / os.Open sinks inside the
+// citation resolver (flagged by CodeQL go/path-injection) are
+// unreachable in every shipping configuration. Even once wired, the
+// roots are OPERATOR-configured (not agent-controlled) and every
+// resolved candidate is confined by a separator-anchored prefix check
+// against its root before the stat/open. The CodeQL alerts on those two
+// lines are therefore dismissed as not-reachable / false-positive; if
+// this field is ever wired to an agent-influenced value, route the
+// citation join through internal/pathsafe.Join first.
 type VerifierConfig struct {
 	Mode                VerifierMode
 	CitationSearchRoots []string
