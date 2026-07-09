@@ -149,10 +149,18 @@ func CheckExplicit(ctx context.Context, currentVersion string) (*Result, error) 
 	if err != nil {
 		return nil, err
 	}
+	// Guard the fetched tag: semver.Compare treats an invalid version as
+	// less than any valid one, so a non-semver tag (e.g. a `nightly-*`
+	// release surfacing on the list endpoint) must NOT be reported as a
+	// newer release to upgrade to. Refuse rather than offer a bogus target.
+	normLatest := normalizeVersion(latest)
+	if !semver.IsValid(normLatest) {
+		return nil, fmt.Errorf("latest release tag %q is not valid semver", latest)
+	}
 	return &Result{
 		Current:   currentVersion,
 		Latest:    latest,
-		Newer:     semver.Compare(normalizeVersion(latest), current) > 0,
+		Newer:     semver.Compare(normLatest, current) > 0,
 		URL:       htmlURL,
 		Notes:     notes,
 		CheckedAt: time.Now().UTC(),

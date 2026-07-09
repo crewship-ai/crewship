@@ -162,6 +162,12 @@ type SelfUpdateResult struct {
 // failed sanity check (or the operator) can restore the previous version.
 const backupSuffix = ".bak"
 
+// maxDownloadBytes bounds a single release download. The full archive is
+// ~55 MB; 200 MB leaves generous headroom while capping a hostile or runaway
+// response. Exceeding it is an explicit error (below), never a silent
+// truncation that would later surface as a confusing checksum mismatch.
+const maxDownloadBytes = 200 << 20
+
 // httpGet fetches a URL body with a bounded timeout, failing on non-200.
 func httpGet(ctx context.Context, url string) ([]byte, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -182,9 +188,16 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GET %s: status %d", url, resp.StatusCode)
 	}
-	// Cap at 200 MB — the full archive is ~55 MB; this bounds a hostile or
-	// runaway response without truncating a legitimate download.
-	return io.ReadAll(io.LimitReader(resp.Body, 200<<20))
+	// Read one byte past the cap so an oversize body is DETECTED (and errors)
+	// rather than silently truncated to maxDownloadBytes.
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDownloadBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxDownloadBytes {
+		return nil, fmt.Errorf("GET %s: response exceeds %d bytes (refusing to truncate)", url, maxDownloadBytes)
+	}
+	return data, nil
 }
 
 // ApplyInstallerUpdate downloads the release archive for `tag`, verifies its
