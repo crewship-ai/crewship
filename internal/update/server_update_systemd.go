@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -41,6 +42,47 @@ func (s *SystemdService) systemctl(ctx context.Context, args ...string) error {
 		return fmt.Errorf("systemctl %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// UnitEnvPort returns the CREWSHIP_PORT the unit runs with, read from systemd's
+// resolved environment for the unit (`systemctl show -p Environment`), or 0 if
+// it can't be determined. This is how `self-update --systemd` learns the port
+// the server actually listens on even when `sudo` scrubbed CREWSHIP_PORT from
+// its own environment.
+func (s *SystemdService) UnitEnvPort(ctx context.Context) int {
+	var out []byte
+	var err error
+	if s.run != nil {
+		// Test seam: the injected runner can't return stdout, so a mocked
+		// SystemdService reports "unknown" (0). Real lookups go through exec.
+		return 0
+	}
+	out, err = exec.CommandContext(ctx, "systemctl", "show", s.Unit, "--property=Environment").Output()
+	if err != nil {
+		return 0
+	}
+	return parseCrewshipPort(string(out))
+}
+
+// parseCrewshipPort extracts CREWSHIP_PORT from the `Environment=` line printed
+// by `systemctl show -p Environment` (space-separated KEY=VALUE pairs on a
+// single "Environment=..." line). Returns 0 when absent or unparseable.
+func parseCrewshipPort(showOutput string) int {
+	for _, line := range strings.Split(showOutput, "\n") {
+		line = strings.TrimSpace(line)
+		rest, ok := strings.CutPrefix(line, "Environment=")
+		if !ok {
+			continue
+		}
+		for _, kv := range strings.Fields(rest) {
+			if v, ok := strings.CutPrefix(kv, "CREWSHIP_PORT="); ok {
+				if p, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && p > 0 {
+					return p
+				}
+			}
+		}
+	}
+	return 0
 }
 
 func (s *SystemdService) Stop(ctx context.Context) error {

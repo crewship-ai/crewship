@@ -30,6 +30,28 @@ func TestSystemdService_StopStartArgs(t *testing.T) {
 	}
 }
 
+func TestParseCrewshipPort(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want int
+	}{
+		{"present among others", "Environment=FOO=bar CREWSHIP_PORT=9090 BAZ=qux\n", 9090},
+		{"only var", "Environment=CREWSHIP_PORT=8443", 8443},
+		{"absent", "Environment=FOO=bar\n", 0},
+		{"no environment line", "MainPID=1234\n", 0},
+		{"empty", "", 0},
+		{"unparseable value", "Environment=CREWSHIP_PORT=notaport", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseCrewshipPort(tc.in); got != tc.want {
+				t.Errorf("parseCrewshipPort(%q) = %d, want %d", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestHTTPHealthChecker_HealthyImmediately(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

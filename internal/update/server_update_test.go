@@ -38,13 +38,30 @@ func (m *mockService) Start(_ context.Context) error {
 	return err
 }
 
-// baseDeps builds a ServerUpdateDeps whose swap succeeds, health passes, and
-// rollback records that it ran. Individual tests override fields.
+// healthSeq returns a HealthChecker that yields the given results in order,
+// then nil once exhausted. Lets a test model "new binary unhealthy, rolled-back
+// old binary healthy" as [err, nil].
+func healthSeq(results ...error) (HealthChecker, *int) {
+	calls := 0
+	hc := func(_ context.Context) error {
+		r := error(nil)
+		if calls < len(results) {
+			r = results[calls]
+		}
+		calls++
+		return r
+	}
+	return hc, &calls
+}
+
+// baseDeps builds a ServerUpdateDeps whose prepare + commit succeed, health
+// passes, and rollback records that it ran. Individual tests override fields.
 func baseDeps(m *mockService, swapped []string) (*ServerUpdateDeps, *bool) {
 	rolledBack := false
 	deps := &ServerUpdateDeps{
 		Manager: m,
-		Swap: func(_ context.Context) (*SelfUpdateResult, error) {
+		Prepare: func(_ context.Context) (any, error) { return "prepared", nil },
+		Commit: func(_ context.Context, prepared any) (*SelfUpdateResult, error) {
 			return &SelfUpdateResult{FromVersion: "1.0.0", ToVersion: "1.1.0", Replaced: swapped, BackupPath: "/usr/local/bin/crewship.bak"}, nil
 		},
 		Health: func(_ context.Context) error { return nil },
@@ -76,33 +93,64 @@ func TestRunServerUpdate_HappyPath(t *testing.T) {
 	}
 }
 
+func TestRunServerUpdate_PrepareFailsBeforeStop(t *testing.T) {
+	m := &mockService{}
+	deps, _ := baseDeps(m, nil)
+	deps.Prepare = func(_ context.Context) (any, error) {
+		return nil, errors.New("checksum mismatch")
+	}
+	commitCalled := false
+	deps.Commit = func(_ context.Context, _ any) (*SelfUpdateResult, error) {
+		commitCalled = true
+		return nil, nil
+	}
+
+	out, err := RunServerUpdate(context.Background(), *deps)
+	if err == nil {
+		t.Fatal("expected error when prepare (download/verify) fails")
+	}
+	// Pre-fetch failure must never stop the service or swap anything.
+	if len(m.events) != 0 {
+		t.Errorf("service was touched despite a prepare failure: %v", m.events)
+	}
+	if commitCalled {
+		t.Error("commit ran despite a prepare failure")
+	}
+	if out.RolledBack {
+		t.Error("nothing was swapped; RolledBack should be false")
+	}
+	if !strings.Contains(err.Error(), "untouched") {
+		t.Errorf("prepare-failure error should say the server is untouched; got: %v", err)
+	}
+}
+
 func TestRunServerUpdate_StopFailsBeforeSwap(t *testing.T) {
 	m := &mockService{stopErr: []error{errors.New("unit is masked")}}
 	deps, _ := baseDeps(m, []string{"/usr/local/bin/crewship"})
-	swapCalled := false
-	inner := deps.Swap
-	deps.Swap = func(ctx context.Context) (*SelfUpdateResult, error) {
-		swapCalled = true
-		return inner(ctx)
+	commitCalled := false
+	inner := deps.Commit
+	deps.Commit = func(ctx context.Context, p any) (*SelfUpdateResult, error) {
+		commitCalled = true
+		return inner(ctx, p)
 	}
 
 	out, err := RunServerUpdate(context.Background(), *deps)
 	if err == nil {
 		t.Fatal("expected error when the service can't be stopped")
 	}
-	if swapCalled {
-		t.Error("swap must not run if the service could not be stopped")
+	if commitCalled {
+		t.Error("commit must not run if the service could not be stopped")
 	}
 	if out.RolledBack {
 		t.Error("nothing was swapped; RolledBack should be false")
 	}
 }
 
-func TestRunServerUpdate_SwapFailsRestartsOldBinary(t *testing.T) {
+func TestRunServerUpdate_CommitFailsRestartsOldBinary(t *testing.T) {
 	m := &mockService{}
 	deps, rolledBack := baseDeps(m, nil)
-	deps.Swap = func(_ context.Context) (*SelfUpdateResult, error) {
-		return nil, errors.New("checksum mismatch")
+	deps.Commit = func(_ context.Context, _ any) (*SelfUpdateResult, error) {
+		return nil, errors.New("cross-device rename")
 	}
 
 	out, err := RunServerUpdate(context.Background(), *deps)
@@ -123,7 +171,8 @@ func TestRunServerUpdate_SwapFailsRestartsOldBinary(t *testing.T) {
 }
 
 func TestRunServerUpdate_NewBinaryFailsToStart_RollsBack(t *testing.T) {
-	// Start #1 (new binary) fails; after rollback Start #2 (old binary) succeeds.
+	// Start #1 (new binary) fails; after rollback Start #2 (old binary) succeeds
+	// and its post-rollback health probe passes.
 	m := &mockService{startErr: []error{errors.New("exec format error")}}
 	swapped := []string{"/usr/local/bin/crewship", "/usr/local/bin/crewship-sidecar"}
 	deps, _ := baseDeps(m, swapped)
@@ -147,15 +196,21 @@ func TestRunServerUpdate_NewBinaryFailsToStart_RollsBack(t *testing.T) {
 	if got := strings.Join(m.events, ","); got != "stop,start,start" {
 		t.Errorf("call sequence = %q, want stop,start,start", got)
 	}
-	if rollbackPaths == nil {
-		t.Error("rollback function was not invoked")
+	// A failed START (not health) means migrations never ran, so no
+	// restore-snapshot guidance should appear.
+	if strings.Contains(err.Error(), "restore-snapshot") {
+		t.Errorf("a failed-to-start rollback should not mention restore-snapshot: %v", err)
 	}
 }
 
-func TestRunServerUpdate_UnhealthyRollsBackWithSnapshotHint(t *testing.T) {
+func TestRunServerUpdate_UnhealthyRollsBack_OldRecovers(t *testing.T) {
+	// New binary unhealthy; rolled-back old binary comes back healthy. The
+	// message carries the soft snapshot note (migrations ran) but not the
+	// urgent NOW escalation.
 	m := &mockService{}
 	deps, _ := baseDeps(m, []string{"/usr/local/bin/crewship"})
-	deps.Health = func(_ context.Context) error { return errors.New("health probe timed out") }
+	hc, _ := healthSeq(errors.New("health probe timed out"), nil) // new: unhealthy, old: healthy
+	deps.Health = hc
 
 	out, err := RunServerUpdate(context.Background(), *deps)
 	if err == nil {
@@ -164,14 +219,39 @@ func TestRunServerUpdate_UnhealthyRollsBackWithSnapshotHint(t *testing.T) {
 	if !out.RolledBack {
 		t.Error("an unhealthy new binary must be rolled back")
 	}
-	// The new binary may already have migrated the DB, so the error must point
-	// the operator at restore-snapshot for the schema half of the rollback.
 	if !strings.Contains(err.Error(), "restore-snapshot") {
-		t.Errorf("unhealthy rollback error should mention restore-snapshot; got: %v", err)
+		t.Errorf("post-migration rollback should mention restore-snapshot (soft): %v", err)
+	}
+	if strings.Contains(err.Error(), "NOW") {
+		t.Errorf("old binary recovered, so the urgent NOW escalation should NOT fire: %v", err)
 	}
 	// stop(old) -> start(new) -> stop(new, unhealthy) -> start(old)
 	if got := strings.Join(m.events, ","); got != "stop,start,stop,start" {
 		t.Errorf("call sequence = %q, want stop,start,stop,start", got)
+	}
+}
+
+func TestRunServerUpdate_UnhealthyRollsBack_OldAlsoBroken_UrgentSnapshot(t *testing.T) {
+	// New binary unhealthy AND the rolled-back old binary is ALSO unhealthy —
+	// the classic post-migration skew-guard crash loop. The operator must be
+	// told to restore the snapshot NOW.
+	m := &mockService{}
+	deps, _ := baseDeps(m, []string{"/usr/local/bin/crewship"})
+	hc, calls := healthSeq(errors.New("new: 503"), errors.New("old: skew guard refuses to boot"))
+	deps.Health = hc
+
+	out, err := RunServerUpdate(context.Background(), *deps)
+	if err == nil {
+		t.Fatal("expected error when both new and rolled-back binaries are unhealthy")
+	}
+	if !out.RolledBack {
+		t.Error("the binary was restored, so RolledBack should be true even though it's unhealthy")
+	}
+	if *calls != 2 {
+		t.Errorf("expected 2 health probes (new + post-rollback old), got %d", *calls)
+	}
+	if !strings.Contains(err.Error(), "snapshot NOW") {
+		t.Errorf("a broken rolled-back binary after migrations must demand restore-snapshot NOW; got: %v", err)
 	}
 }
 
@@ -186,7 +266,7 @@ func TestRunServerUpdate_RollbackFailureIsCritical(t *testing.T) {
 		t.Fatal("expected error when rollback itself fails")
 	}
 	// A failed rollback is the worst case — the message must flag manual
-	// recovery and name the backup path.
+	// recovery and, since migrations ran, the snapshot.
 	if !strings.Contains(err.Error(), "manual") {
 		t.Errorf("failed-rollback error should call for manual recovery; got: %v", err)
 	}

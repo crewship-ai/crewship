@@ -71,6 +71,8 @@ new binary is bad:
 ```bash
 sudo crewship self-update --systemd             # unit defaults to "crewship"
 sudo crewship self-update --systemd --service crewshipd --health-timeout 90s
+sudo crewship self-update --systemd --port 9090       # non-default port
+sudo crewship self-update --systemd --health-url http://127.0.0.1:9090/healthz
 ```
 
 <Note>
@@ -78,22 +80,30 @@ The flag is `--systemd`, not `--server`: the global `-s`/`--server` flag already
 means "the crewship server URL", which `self-update` doesn't use.
 </Note>
 
-The sequence is **stop → swap → start → health-check**:
+The sequence is **prepare → stop → swap → start → health-check**:
 
-1. **Stop** the systemd unit (so the binary is swapped without a live process).
-2. **Swap** the binary + companions in place (checksum-verified; the previous
-   binary is kept as `<binary>.bak`).
-3. **Start** the unit on the new binary — migrations run here, behind the
+1. **Prepare** — download the new release and verify its checksum **before**
+   touching the running server, so a bad download never causes downtime.
+2. **Stop** the systemd unit (so the binary is swapped without a live process).
+3. **Swap** the binary + companions in place (the previous binary is kept as
+   `<binary>.bak`).
+4. **Start** the unit on the new binary — migrations run here, behind the
    automatic pre-migration snapshot.
-4. **Health-check** `http://127.0.0.1:<CREWSHIP_PORT>/healthz` until it returns
-   `200`, up to `--health-timeout` (default 60s).
+5. **Health-check** the server until it returns `200`, up to `--health-timeout`
+   (default 60s).
+
+The health URL defaults to `http://127.0.0.1:<port>/healthz`. The port is read
+from the running unit's environment (via `systemctl`), because `sudo` scrubs
+your own `CREWSHIP_PORT` — so it works even on a non-default port. Override with
+`--port` or the full `--health-url` when needed.
 
 If the new binary **fails to start** or **never becomes healthy**, `--systemd`
 **automatically rolls back**: it stops the new server, restores the previous
-binary from `.bak`, and starts it again — so a bad release doesn't leave your
-server down. Because migrations run in step 3, a rollback may also need the
-**schema** rolled back: if the restored old binary then refuses to boot with a
-version-skew error, restore the pre-migration snapshot too:
+binary from `.bak`, starts it again, and **health-checks the restored server
+too**. Because migrations run in step 4, that rollback can leave the *old*
+binary crash-looping on the version-skew guard (it can't boot against the
+newer schema). When that happens `--systemd` says so explicitly and tells you
+to restore the pre-migration snapshot **now**:
 
 ```bash
 crewship db restore-snapshot        # see "Rollback / downgrade" below

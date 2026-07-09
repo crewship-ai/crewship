@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/update"
@@ -17,6 +19,8 @@ var (
 	selfUpdateSystemd    bool
 	selfUpdateService    string
 	selfUpdateHealthWait time.Duration
+	selfUpdateHealthURL  string
+	selfUpdatePort       int
 )
 
 var selfUpdateCmd = &cobra.Command{
@@ -60,6 +64,10 @@ func init() {
 		"systemd unit to orchestrate with --systemd")
 	selfUpdateCmd.Flags().DurationVar(&selfUpdateHealthWait, "health-timeout", 60*time.Second,
 		"how long --systemd waits for the new server to become healthy before rolling back")
+	selfUpdateCmd.Flags().StringVar(&selfUpdateHealthURL, "health-url", "",
+		"full health-check URL for --systemd (overrides --port; default http://127.0.0.1:<port>/healthz)")
+	selfUpdateCmd.Flags().IntVar(&selfUpdatePort, "port", 0,
+		"server port to health-check with --systemd (default: read from the unit's env, else CREWSHIP_PORT, else 8080)")
 }
 
 func runSelfUpdate(ctx context.Context, checkOnly bool) error {
@@ -183,21 +191,23 @@ func runServerSelfUpdate(ctx context.Context, latestTag, exePath string) error {
 		return err
 	}
 
-	// Health URL: the local server's /healthz on its configured port. No
-	// --port flag exists; the server reads CREWSHIP_PORT (default 8080).
-	port := os.Getenv("CREWSHIP_PORT")
-	if port == "" {
-		port = "8080"
-	}
-	healthURL := fmt.Sprintf("http://127.0.0.1:%s/healthz", port)
-
-	fmt.Printf("\nServer upgrade of unit %q: stop → swap → start → health-check (up to %s)…\n",
-		selfUpdateService, selfUpdateHealthWait)
+	healthURL := resolveHealthURL(ctx, svc)
+	fmt.Printf("\nServer upgrade of unit %q: stop → swap → start → health-check %s (up to %s)…\n",
+		selfUpdateService, healthURL, selfUpdateHealthWait)
 
 	out, uerr := update.RunServerUpdate(ctx, update.ServerUpdateDeps{
 		Manager: svc,
-		Swap: func(ctx context.Context) (*update.SelfUpdateResult, error) {
-			return update.ApplyInstallerUpdate(ctx, latestTag, exePath, cliOnlyVariant, version)
+		// Pre-fetch + verify the release BEFORE the service is stopped, so a
+		// download/checksum failure never causes downtime.
+		Prepare: func(ctx context.Context) (any, error) {
+			return update.PrepareInstallerUpdate(ctx, latestTag, exePath, cliOnlyVariant, version)
+		},
+		Commit: func(_ context.Context, prepared any) (*update.SelfUpdateResult, error) {
+			p, ok := prepared.(*update.PreparedUpdate)
+			if !ok {
+				return nil, fmt.Errorf("internal error: unexpected prepared update type %T", prepared)
+			}
+			return p.Commit()
 		},
 		Health:   update.HTTPHealthChecker(healthURL, selfUpdateHealthWait, time.Second),
 		Rollback: update.RestoreBackups,
@@ -205,7 +215,7 @@ func runServerSelfUpdate(ctx context.Context, latestTag, exePath string) error {
 	})
 	if uerr != nil {
 		// out.RolledBack is already reflected in uerr's message (which names the
-		// rollback + any restore-snapshot hint). Exit non-zero either way so
+		// rollback + any restore-snapshot guidance). Exit non-zero either way so
 		// automation notices the upgrade didn't take.
 		return fmt.Errorf("server upgrade failed: %w", uerr)
 	}
@@ -214,6 +224,36 @@ func runServerSelfUpdate(ctx context.Context, latestTag, exePath string) error {
 		out.Result.FromVersion, out.Result.ToVersion, selfUpdateService)
 	fmt.Printf("Previous binary kept at %s for rollback.\n", out.Result.BackupPath)
 	return nil
+}
+
+// resolveHealthURL picks the URL the health probe hits, in priority order:
+//   - --health-url (explicit override),
+//   - http://127.0.0.1:<port>/healthz where <port> is --port, else the port the
+//     RUNNING unit uses (read from systemd, which survives `sudo` stripping our
+//     env), else CREWSHIP_PORT from our own env, else 8080.
+//
+// Reading the port from the unit matters because `sudo crewship self-update`
+// runs with a scrubbed environment, so CREWSHIP_PORT set for the service is not
+// visible to us — asking systemd is how we learn the port the server actually
+// listens on.
+func resolveHealthURL(ctx context.Context, svc *update.SystemdService) string {
+	if selfUpdateHealthURL != "" {
+		return selfUpdateHealthURL
+	}
+	port := selfUpdatePort
+	if port == 0 {
+		if p := svc.UnitEnvPort(ctx); p > 0 {
+			port = p
+		} else if v := strings.TrimSpace(os.Getenv("CREWSHIP_PORT")); v != "" {
+			if p, err := strconv.Atoi(v); err == nil && p > 0 {
+				port = p
+			}
+		}
+	}
+	if port == 0 {
+		port = 8080
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
 }
 
 // dirWritable reports whether this process can create files in dir — the
