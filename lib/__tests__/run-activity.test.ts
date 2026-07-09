@@ -148,7 +148,15 @@ describe("humanizeEntry", () => {
   })
 
   it("noise types are dropped (null)", () => {
-    for (const t of ["exec.output_chunk", "container.metrics", "container.snapshot", "llm.cache_hit", "agent.status_change"]) {
+    for (const t of [
+      "exec.output_chunk",
+      "container.metrics",
+      "container.snapshot",
+      "llm.cache_hit",
+      "agent.status_change",
+      "pipeline.step.started",
+      "pipeline.step.container_ready",
+    ]) {
       expect(humanizeEntry(entry({ entry_type: t }))).toBeNull()
     }
   })

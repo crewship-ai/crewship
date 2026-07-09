@@ -295,6 +295,9 @@ func (e *Executor) runRunnerWithTransientRetry(
 		if cerr := ctx.Err(); cerr != nil {
 			return AgentStepResult{}, cerr
 		}
+		// Stamp the transient-retry attempt so a re-entry's container-ready
+		// record is distinguishable from the first attempt's (same step_id).
+		req.Attempt = attempt
 		res, err = e.runner.RunStep(ctx, req)
 		if err != nil {
 			lastErr = err

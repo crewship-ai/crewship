@@ -52,6 +52,10 @@ const NOISE_TYPES = new Set<string>([
   // and dry_run has its own dedicated report surface.
   "pipeline.step.started",
   "pipeline.dry_run",
+  // Per-step container-acquire timing — a sub-second diagnostic for the
+  // prewarm metric, not a human-timeline highlight. It stays visible in
+  // `routine logs --full`; the rail keeps it out.
+  "pipeline.step.container_ready",
 ])
 
 // ---- small payload accessors (payload is free-form JSON) -------------------

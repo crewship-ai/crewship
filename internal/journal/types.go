@@ -212,6 +212,16 @@ const (
 	EntryPipelineStepValidation EntryType = "pipeline.step.validation_failed"
 	EntryPipelineDryRun         EntryType = "pipeline.dry_run"
 
+	// EntryPipelineStepContainerReady records how long a step spent acquiring
+	// its crew container (the EnsureCrewRuntime call), isolating the
+	// container-provision cost from the LLM/tool time buried in the step's
+	// total duration. It is what the #902 prewarm shortens: a prewarmed run's
+	// first step finds the container warm (small duration_ms), a cold run pays
+	// the provision inline (large duration_ms). Exposed via `routine logs` so
+	// claim→first-step is measurable without guessing (#911). trace_id ==
+	// run.id, payload carries step_id + duration_ms.
+	EntryPipelineStepContainerReady EntryType = "pipeline.step.container_ready"
+
 	// EntryRunAgentSpan is one INTERNAL action of an agent_run step — a single
 	// tool the agent invoked (Bash/Write/Edit/Read/MCP/HTTP). It is the leaf of
 	// the drillable run-trace tree (run → step → tool). trace_id == run.id (so

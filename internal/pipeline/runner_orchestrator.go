@@ -183,6 +183,12 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 	//    if already running. This is the same primitive the chat
 	//    handler uses; pipelines don't get a separate container
 	//    pool, they share the crew's existing runtime.
+	// Time the container acquire so `routine logs` can isolate the
+	// provision cost from the LLM/tool time in the step's total duration —
+	// the quantity the #902 prewarm shortens (#911). A warm hit is near-zero;
+	// a cold provision is seconds. Emitted as its own run-keyed journal entry
+	// after a successful ensure.
+	containerAcquireStart := time.Now()
 	containerID, err := r.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
 		ID:          info.CrewID,
 		Slug:        info.CrewSlug,
@@ -201,6 +207,14 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 	if err != nil {
 		return AgentStepResult{}, fmt.Errorf("ensure container: %w", err)
 	}
+	emitStepContainerReady(ctx, r.journalE, req.WorkspaceID, info.CrewID, containerReady{
+		RunID:       req.PipelineRunID,
+		PipelineID:  req.PipelineID,
+		StepID:      req.StepID,
+		ContainerID: containerID,
+		DurationMs:  time.Since(containerAcquireStart).Milliseconds(),
+		Attempt:     req.Attempt,
+	})
 
 	// 4. Synthetic chat session. We mint a fresh chat per step so
 	//    journal/audit can join: pipeline_run -> step -> chat ->

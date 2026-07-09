@@ -870,6 +870,13 @@ type AgentStepRequest struct {
 	// through the executor's runner). Empty leaves the lookout default
 	// (block on high-severity match).
 	InputGuardAction string
+
+	// Attempt is the 1-based same-tier transient-retry attempt this call
+	// represents (set by runRunnerWithTransientRetry). It flows into the
+	// container-ready journal payload so the two records a retried step
+	// produces for the same step_id are distinguishable. 0 = not tracked
+	// (a direct RunStep call outside the executor's retry loop).
+	Attempt int
 }
 
 // AgentStepResult is the executor's view of a completed step. The
