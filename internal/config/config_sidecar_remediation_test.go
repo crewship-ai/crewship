@@ -15,10 +15,12 @@ func TestSidecarBinaryCandidates_IncludesLibexec(t *testing.T) {
 	binDir := "/opt/homebrew/Cellar/crewship/1.2.3/bin"
 	got := sidecarBinaryCandidates(binDir)
 
-	wantNextTo := filepath.Join(binDir, "crewship-sidecar")                                   // tar.gz / installer
-	wantLibexec := filepath.Clean(filepath.Join(binDir, "..", "libexec", "crewship-sidecar")) // brew
+	wantNextTo := filepath.Join(binDir, "crewship-sidecar")                                           // tar.gz / installer
+	wantLibexec := filepath.Clean(filepath.Join(binDir, "..", "libexec", "crewship-sidecar"))         // brew
+	wantFHS := filepath.Clean(filepath.Join(binDir, "..", "libexec", "crewship", "crewship-sidecar")) // deb/rpm FHS
 	assertContainsPath(t, got, wantNextTo, "tar.gz sibling")
 	assertContainsPath(t, got, wantLibexec, "homebrew libexec")
+	assertContainsPath(t, got, wantFHS, "FHS package libexec/crewship")
 }
 
 // TestEntrypointCandidates_IncludesLibexec pins the entrypoint.sh half of
@@ -32,9 +34,11 @@ func TestEntrypointCandidates_IncludesLibexec(t *testing.T) {
 
 	wantNextTo := filepath.Join(binDir, "entrypoint.sh")
 	wantLibexec := filepath.Clean(filepath.Join(binDir, "..", "libexec", "entrypoint.sh"))
+	wantFHS := filepath.Clean(filepath.Join(binDir, "..", "libexec", "crewship", "entrypoint.sh"))
 	wantScripts := filepath.Join(cwd, "scripts", "entrypoint.sh")
 	assertContainsPath(t, got, wantNextTo, "tar.gz sibling")
 	assertContainsPath(t, got, wantLibexec, "homebrew libexec")
+	assertContainsPath(t, got, wantFHS, "FHS package libexec/crewship")
 	assertContainsPath(t, got, wantScripts, "source checkout scripts/")
 }
 
@@ -71,6 +75,43 @@ func TestAutodetectSidecarPaths_LibexecLayout(t *testing.T) {
 	}
 	if cfg.Container.EntrypointPath != entry {
 		t.Errorf("EntrypointPath = %q, want libexec %q", cfg.Container.EntrypointPath, entry)
+	}
+}
+
+// TestAutodetectSidecarPaths_FHSPackageLayout drives autodetect against the
+// deb/rpm layout (#858 phase 4): crewship + crewship-sidecar in /usr/bin,
+// entrypoint.sh under /usr/libexec/crewship. `crewship start` must boot from a
+// package install without any CREWSHIP_*_PATH override.
+func TestAutodetectSidecarPaths_FHSPackageLayout(t *testing.T) {
+	t.Setenv("CREWSHIP_SKIP_SIDECAR", "")
+	t.Setenv("CREWSHIP_SIDECAR_PATH", "")
+	t.Setenv("CREWSHIP_ENTRYPOINT_PATH", "")
+
+	root := t.TempDir() // stands in for /usr
+	binDir := filepath.Join(root, "bin")
+	libexecPkg := filepath.Join(root, "libexec", "crewship")
+	for _, d := range []string{binDir, libexecPkg} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sidecar := filepath.Join(binDir, "crewship-sidecar") // real binary stays in bin
+	entry := filepath.Join(libexecPkg, "entrypoint.sh")  // script moved out of bin
+	for _, p := range []string{sidecar, entry} {
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := Default()
+	if err := resolveSidecarPaths(cfg, binDir, root); err != nil {
+		t.Fatalf("resolveSidecarPaths against an FHS package layout: %v", err)
+	}
+	if cfg.Container.SidecarBinaryPath != sidecar {
+		t.Errorf("SidecarBinaryPath = %q, want %q", cfg.Container.SidecarBinaryPath, sidecar)
+	}
+	if cfg.Container.EntrypointPath != entry {
+		t.Errorf("EntrypointPath = %q, want FHS libexec %q", cfg.Container.EntrypointPath, entry)
 	}
 }
 

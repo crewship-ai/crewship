@@ -1,0 +1,47 @@
+[Unit]
+Description=Crewship — self-hosted runtime for AI coding agents
+Documentation=https://docs.crewship.ai
+After=network-online.target
+Wants=network-online.target
+# Docker is optional: `crewship start` runs the dashboard without it, and
+# `--no-docker` skips it entirely. A hard `Requires=docker.service` would
+# refuse to boot on hosts that don't run agents locally, so we only order
+# after it when present.
+After=docker.service
+
+[Service]
+Type=simple
+User=crewship
+Group=crewship
+
+# Secrets + operator overrides live here. The package ships a template with
+# empty values (see /etc/crewship/crewship.env); crewship start refuses to
+# boot until NEXTAUTH_SECRET and ENCRYPTION_KEY are set, printing the exact
+# openssl commands to generate them. The leading '-' keeps the unit valid
+# if an operator removes the file to supply the vars another way.
+EnvironmentFile=-/etc/crewship/crewship.env
+
+# systemd creates and owns /var/lib/crewship for the service user; point the
+# data dir there so the SQLite DB, snapshots and memory blobs persist across
+# upgrades (the package manager only swaps the binary).
+StateDirectory=crewship
+Environment=CREWSHIP_DATA_DIR=/var/lib/crewship
+WorkingDirectory=/var/lib/crewship
+
+ExecStart=/usr/bin/crewship start
+
+Restart=on-failure
+RestartSec=5
+# Give the server time to flush the DB + write the pre-migration snapshot on
+# stop — the package manager's upgrade is stop -> swap binary -> start, and a
+# truncated shutdown mid-snapshot would defeat the downgrade path.
+TimeoutStopSec=30
+
+# Hardening: the daemon needs its data dir and (optionally) the Docker socket,
+# nothing else. Kept conservative so a misbehaving agent process can't roam.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
