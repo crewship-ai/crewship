@@ -590,7 +590,7 @@ spec:
 `crewship apply` materializes each file into the crew's shared dir via the same validated `/files/save` path the `crewship crew files` CLI uses — idempotent, re-delivered when the source changes. (Ad-hoc, you can also `crewship crew files save accounting shared/scripts/parse_vypis.py --file parse_vypis.py`, but the manifest is the durable, declarative path.)
 
 <Note>
-**Overwriting a shared file needs the crew container running.** A first-time delivery writes the shared tree host-side, but once a crew is provisioned its container (UID 1001) owns `/crew/shared`, so an **overwrite** — re-delivery of changed content, or `routine import --force` — is routed through the running container as that UID. If the crew container is stopped, the overwrite returns `409` with a "start the crew and retry" message rather than a silent failure.
+**Overwriting a shared file needs the crew container running.** A first-time delivery writes the shared tree host-side, but once a crew is provisioned its container (UID 1001) owns `/crew/shared`, so an **overwrite of changed content** — re-delivery of a modified file, or `routine import --force` — is routed through the running container as that UID. If the crew container is stopped, that overwrite returns `409` with a "start the crew and retry" message rather than a silent failure. **Re-delivering identical content is always a no-op** (it succeeds even on a stopped crew), so a steady-state `crewship apply` never needs the container running.
 </Note>
 
 <Info>

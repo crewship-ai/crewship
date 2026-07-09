@@ -231,6 +231,30 @@ func (s *Server) handleFileSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// #931 no-op short-circuit: if the existing file is byte-identical, skip the
+	// write entirely. Reading a shared file is allowed even when it's owned by
+	// the crew's UID 1001 (the tree is world-readable), so this lets an
+	// UNCHANGED apply/redelivery succeed even on a STOPPED crew — instead of
+	// 409ing on the container route it would otherwise need. It also saves an
+	// exec on every steady-state apply.
+	//
+	// The existing file is STREAMED against the already-buffered body (32 KiB
+	// chunks, early-exit on the first mismatch) — no second full load, so peak
+	// memory is one body buffer, not two. The body itself is unavoidably
+	// buffered: the request stream is single-use and a diverging write still
+	// needs the full bytes for the host/container replay below. (Skipping the
+	// body buffer on a match would mean reconstructing the matched prefix from
+	// the existing file on divergence — not worth the complexity for the
+	// KB-scale scripts this path carries, capped at 32 MiB regardless.)
+	if existing, rerr := s.storage.Read(r.Context(), storageKey); rerr == nil {
+		equal, cmpErr := readerEqualsBytes(existing, body)
+		existing.Close()
+		if cmpErr == nil && equal {
+			writeJSON(w, http.StatusOK, map[string]string{"status": "unchanged", "path": filePath})
+			return
+		}
+	}
+
 	werr := s.storage.Write(r.Context(), storageKey, bytes.NewReader(body))
 	if werr != nil {
 		// #922: after a crew is provisioned, the entrypoint chowns /crew (the
@@ -353,6 +377,31 @@ func containerSaveErrorResponse(err error) (int, string) {
 			"file is owned by the crew runtime; it can only be overwritten while the crew container is running — start the crew and retry"
 	default:
 		return http.StatusInternalServerError, "failed to save file"
+	}
+}
+
+// readerEqualsBytes reports whether the stream r is byte-for-byte equal to
+// want, reading r in fixed chunks so a large existing file is never fully
+// buffered (only the incoming body — already in memory — is held). A read error
+// is surfaced so the caller falls back to a normal write rather than a false
+// "unchanged".
+func readerEqualsBytes(r io.Reader, want []byte) (bool, error) {
+	buf := make([]byte, 32*1024)
+	off := 0
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			if off+n > len(want) || !bytes.Equal(buf[:n], want[off:off+n]) {
+				return false, nil
+			}
+			off += n
+		}
+		if err == io.EOF {
+			return off == len(want), nil
+		}
+		if err != nil {
+			return false, err
+		}
 	}
 }
 
