@@ -24,8 +24,14 @@ func newClientCrewFileIO(ctx context.Context, client *cli.Client) *clientCrewFil
 }
 
 func (c *clientCrewFileIO) download(crewID, crewPath string) ([]byte, bool, error) {
-	resp, err := c.client.Get("/api/v1/crews/" + url.PathEscape(crewID) +
-		"/files/download?path=" + url.QueryEscape(crewPath))
+	// Build a ctx-aware request (like putBytes) so a download honors the
+	// command context — Ctrl-C cancels it, matching save's behavior.
+	req, err := c.client.NewRequest(c.ctx, http.MethodGet,
+		"/api/v1/crews/"+url.PathEscape(crewID)+"/files/download?path="+url.QueryEscape(crewPath), nil)
+	if err != nil {
+		return nil, false, err
+	}
+	resp, err := c.client.HTTPClient.Do(req)
 	if err != nil {
 		return nil, false, err
 	}

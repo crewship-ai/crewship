@@ -80,33 +80,34 @@ func TestCollectScriptPaths_NoScriptSteps(t *testing.T) {
 
 func TestScriptCrewFilePath(t *testing.T) {
 	cases := []struct {
-		in, want string
-		ok       bool
+		name, in, want string
+		ok             bool
 	}{
-		{"scripts/parse.py", "shared/scripts/parse.py", true},
-		{"/crew/shared/scripts/verify.py", "shared/scripts/verify.py", true},
+		{"relative", "scripts/parse.py", "shared/scripts/parse.py", true},
+		{"absolute under shared", "/crew/shared/scripts/verify.py", "shared/scripts/verify.py", true},
 		// A "shared/"-prefixed RELATIVE path is NOT special-cased: the runner
 		// (internal/pipeline/runner_script.go resolveScriptPath) prepends
 		// /crew/shared/ to every relative path, so it execs
 		// /crew/shared/shared/scripts/x.py. We must map to the SAME location or
 		// export/import would touch a file the routine never runs.
-		{"shared/scripts/x.py", "shared/shared/scripts/x.py", true},
-		{"../../etc/passwd", "", false}, // traversal escapes shared
-		{"", "", false},
+		{"shared-prefixed relative", "shared/scripts/x.py", "shared/shared/scripts/x.py", true},
+		{"relative traversal escapes shared", "../../etc/passwd", "", false},
+		{"absolute path outside shared", "/etc/passwd", "", false},
+		{"absolute under /crew but not shared", "/crew/output/x.py", "", false},
+		{"empty", "", "", false},
 	}
 	for _, c := range cases {
-		got, err := scriptCrewFilePath(c.in)
-		if c.ok && err != nil {
-			t.Errorf("scriptCrewFilePath(%q) unexpected err: %v", c.in, err)
-			continue
-		}
-		if !c.ok && err == nil {
-			t.Errorf("scriptCrewFilePath(%q) = %q, want error", c.in, got)
-			continue
-		}
-		if c.ok && got != c.want {
-			t.Errorf("scriptCrewFilePath(%q) = %q, want %q", c.in, got, c.want)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			got, err := scriptCrewFilePath(c.in)
+			switch {
+			case c.ok && err != nil:
+				t.Fatalf("scriptCrewFilePath(%q) unexpected err: %v", c.in, err)
+			case !c.ok && err == nil:
+				t.Fatalf("scriptCrewFilePath(%q) = %q, want error", c.in, got)
+			case c.ok && got != c.want:
+				t.Fatalf("scriptCrewFilePath(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
 	}
 }
 
