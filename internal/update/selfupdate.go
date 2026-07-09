@@ -69,6 +69,20 @@ func isHomebrewPath(p string) bool {
 	return strings.Contains(filepath.ToSlash(p), "/Cellar/")
 }
 
+// errSelfUpdateUnsupported returns a non-nil, actionable error when
+// self-update cannot run on the given platform. Windows is gated for
+// now (#945): the release asset there is a .zip (not .tar.gz, so
+// AssetNameForTag/extractArchive would mis-resolve it), and Windows
+// refuses to rename over a running .exe, so the atomic-swap contract of
+// Commit cannot hold. Full support (zip extraction + rename-self-aside
+// swap) is phase B (#946).
+func errSelfUpdateUnsupported(goos string) error {
+	if goos == "windows" {
+		return fmt.Errorf("self-update is not yet supported on Windows — download the latest crewship-cli zip from https://github.com/crewship-ai/crewship/releases and replace crewship.exe manually")
+	}
+	return nil
+}
+
 // AssetNameForTag returns the release archive filename for this platform,
 // mirroring the goreleaser name_template and scripts/install.sh. cliOnly
 // selects the crewship-cli_… archive (the clionly build) instead of the full
@@ -239,6 +253,9 @@ type PreparedUpdate struct {
 // failure here leaves the install untouched. binDir (= dir of exePath) must be
 // writable at Commit time (installer channel).
 func PrepareInstallerUpdate(ctx context.Context, tag, exePath string, cliOnly bool, fromVersion string) (*PreparedUpdate, error) {
+	if err := errSelfUpdateUnsupported(runtime.GOOS); err != nil {
+		return nil, err
+	}
 	asset := AssetNameForTag(tag, cliOnly)
 	archive, err := httpGet(ctx, downloadURL(tag, asset))
 	if err != nil {

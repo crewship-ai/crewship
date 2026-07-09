@@ -252,6 +252,32 @@ if you add a feature that needs another endpoint.
 The full container threat model is documented in the
 [Security threat model](/security/threat-model).
 
+## Windows (CLI-only)
+
+Each release ships a native Windows build of the **CLI-only** binary —
+`crewship-cli_<version>_windows_amd64.zip` (and `_arm64.zip`) on the
+[releases page](https://github.com/crewship-ai/crewship/releases). It
+drives a Crewship server running elsewhere (a Linux box, a NAS, WSL):
+
+```powershell
+# Unpack anywhere on PATH, then point it at your server:
+$env:CREWSHIP_SERVER = "http://your-server:8080"
+crewship.exe login
+crewship.exe whoami
+```
+
+Current Windows limitations:
+
+- **No local daemon yet** — `crewship start` (the full server + agents)
+  is not built for Windows. Run the server in WSL2 or Docker Desktop
+  and use the Windows CLI against it. Native daemon support is tracked
+  in [#946](https://github.com/crewship-ai/crewship/issues/946).
+- **`self-update` is disabled** — download the newer zip and replace
+  `crewship.exe` manually (Windows cannot swap a running executable;
+  also #946).
+- SHA-256 checksums cover the zip (`checksums.txt` on the release);
+  verify with `Get-FileHash -Algorithm SHA256 crewship-cli_*.zip`.
+
 ## Verifying the install
 
 After any of the three paths:

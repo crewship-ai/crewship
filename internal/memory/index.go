@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pathsafe"
@@ -281,8 +280,13 @@ func hashContent(data []byte) string {
 // against an indexer that's reading hundreds of files in a tight loop.
 // Acceptable residual risk; documented for follow-up if the threat
 // model widens.
+//
+// The open itself is platform-split (index_nofollow_unix.go /
+// index_nofollow_windows.go): Unix uses O_NOFOLLOW|O_NONBLOCK, Windows
+// opens the reparse point itself and rejects it — same contract, the
+// final path component is never followed if it is a symlink.
 func readRegularNoFollow(path string) ([]byte, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	f, err := openNoFollow(path)
 	if err != nil {
 		return nil, err
 	}

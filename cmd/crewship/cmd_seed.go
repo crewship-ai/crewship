@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -658,10 +659,10 @@ func readBody(resp *http.Response) ([]byte, error) {
 func readSetupTokenFile() string {
 	candidates := []string{}
 	if base := os.Getenv("CREWSHIP_STORAGE_BASE_PATH"); base != "" {
-		candidates = append(candidates, base+"/initial_setup_token")
+		candidates = append(candidates, filepath.Join(base, "initial_setup_token"))
 	}
 	if h, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates, h+"/.crewship/initial_setup_token")
+		candidates = append(candidates, filepath.Join(h, ".crewship", "initial_setup_token"))
 	}
 	for _, p := range candidates {
 		f, err := os.Open(p)

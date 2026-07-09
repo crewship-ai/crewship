@@ -78,9 +78,12 @@ builds:
     flags:
       - -trimpath
       - -tags=clionly
+    # windows is CLI-only for now (#945): the full daemon build stays
+    # darwin/linux until phase B (#946) lands IPC/hooks/packaging work.
     goos:
       - darwin
       - linux
+      - windows
     goarch:
       - amd64
       - arm64
@@ -141,6 +144,11 @@ archives:
     builds:
       - crewship-cli
     format: tar.gz
+    # Windows convention is zip; AssetNameForTag (internal/update) and any
+    # installer must pick .zip for GOOS=windows.
+    format_overrides:
+      - goos: windows
+        format: zip
     name_template: >-
       {{ .ProjectName }}-cli_{{ .Version }}_{{ .Os }}_{{ .Arch }}
 
