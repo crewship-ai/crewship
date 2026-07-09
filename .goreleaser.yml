@@ -310,6 +310,17 @@ nfpms:
     # dep is advisory — an unsatisfiable one is skipped, never a hard failure.
     recommends:
       - docker-ce
+    # Embedded GPG signatures (#932), verified with `dpkg-sig --verify` / `rpm -K`.
+    # CONDITIONAL: signs only when GPG_KEY_PATH is set (release.yml materializes
+    # it from the GPG_SIGNING_KEY secret). Empty → nfpm skips signing, so
+    # snapshot builds and secret-less forks still produce (unsigned) packages.
+    # Passphrase (if the key has one) is read from NFPM_PACKAGES_PASSPHRASE.
+    deb:
+      signature:
+        key_file: '{{ if index .Env "GPG_KEY_PATH" }}{{ .Env.GPG_KEY_PATH }}{{ end }}'
+    rpm:
+      signature:
+        key_file: '{{ if index .Env "GPG_KEY_PATH" }}{{ .Env.GPG_KEY_PATH }}{{ end }}'
 
 release:
   github:
