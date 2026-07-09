@@ -70,6 +70,11 @@ func (c *captureEmitter) Emit(_ context.Context, e journal.Entry) (string, error
 	return "id_" + string(e.Type), nil
 }
 
+// Flush satisfies the wider journal.Emitter interface (Emit + Flush) so a
+// captureEmitter can also stand in wherever a journal.Emitter is required
+// (e.g. the OrchestratorRunner's journalE). No buffering here — a no-op.
+func (c *captureEmitter) Flush(_ context.Context) error { return nil }
+
 func (c *captureEmitter) typesEmitted() []journal.EntryType {
 	c.mu.Lock()
 	defer c.mu.Unlock()

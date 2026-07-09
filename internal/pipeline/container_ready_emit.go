@@ -15,6 +15,10 @@ type containerReady struct {
 	StepID      string
 	ContainerID string
 	DurationMs  int64
+	// Attempt is the 1-based transient-retry attempt (0 = untracked). A
+	// retried step emits one record per attempt for the same step_id; the
+	// field keeps them apart without documenting an exception.
+	Attempt int
 }
 
 // emitStepContainerReady records how long a routine step spent acquiring its
@@ -41,6 +45,9 @@ func emitStepContainerReady(ctx context.Context, emitter Emitter, workspaceID, c
 	}
 	if cr.ContainerID != "" {
 		payload["container_id"] = cr.ContainerID
+	}
+	if cr.Attempt > 0 {
+		payload["attempt"] = cr.Attempt
 	}
 	_, _ = emitter.Emit(ctx, journal.Entry{
 		WorkspaceID: workspaceID,

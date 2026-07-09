@@ -213,6 +213,7 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		StepID:      req.StepID,
 		ContainerID: containerID,
 		DurationMs:  time.Since(containerAcquireStart).Milliseconds(),
+		Attempt:     req.Attempt,
 	})
 
 	// 4. Synthetic chat session. We mint a fresh chat per step so

@@ -1120,7 +1120,7 @@ Every routine run emits a sequence of journal entries:
 
 - `pipeline.run.started` — once at run begin
 - `pipeline.step.started` — per step
-- `pipeline.step.container_ready` — per agent step: how long the step spent acquiring its crew container (`duration_ms`). This isolates the container-provision cost from the LLM/tool time in the step's total duration — so you can read the effect of container prewarming directly (a warm hit is near-zero, a cold provision is seconds) instead of guessing under LLM-latency noise. Visible in `routine logs <run_id> --full`.
+- `pipeline.step.container_ready` — per agent step: how long the step spent acquiring its crew container (`duration_ms`). This isolates the container-provision cost from the LLM/tool time in the step's total duration — so you can read the effect of container prewarming directly (a warm hit is near-zero, a cold provision is seconds) instead of guessing under LLM-latency noise. A transiently-retried step emits one record per attempt, distinguished by an `attempt` field in the payload. Visible in `routine logs <run_id> --full` (kept off the compact activity rail).
 - `pipeline.step.completed` / `pipeline.step.failed` / `pipeline.step.validation_failed` — per step terminal
 - `pipeline.run.completed` / `pipeline.run.failed` — once at run end
 
