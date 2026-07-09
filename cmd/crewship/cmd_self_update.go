@@ -6,10 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/update"
 	"github.com/spf13/cobra"
 )
@@ -67,7 +66,7 @@ func init() {
 	selfUpdateCmd.Flags().StringVar(&selfUpdateHealthURL, "health-url", "",
 		"full health-check URL for --systemd (overrides --port; default http://127.0.0.1:<port>/healthz)")
 	selfUpdateCmd.Flags().IntVar(&selfUpdatePort, "port", 0,
-		"server port to health-check with --systemd (default: read from the unit's env, else CREWSHIP_PORT, else 8080)")
+		"server port to health-check with --systemd (default: the unit's env via systemctl, else config, else 8080)")
 }
 
 func runSelfUpdate(ctx context.Context, checkOnly bool) error {
@@ -229,31 +228,57 @@ func runServerSelfUpdate(ctx context.Context, latestTag, exePath string) error {
 // resolveHealthURL picks the URL the health probe hits, in priority order:
 //   - --health-url (explicit override),
 //   - http://127.0.0.1:<port>/healthz where <port> is --port, else the port the
-//     RUNNING unit uses (read from systemd, which survives `sudo` stripping our
-//     env), else CREWSHIP_PORT from our own env, else 8080.
+//     RUNNING unit uses (read from systemd via `systemctl show`, which survives
+//     `sudo` stripping our env), else the server's own config (YAML + surviving
+//     env, via config.Load), else 8080.
 //
 // Reading the port from the unit matters because `sudo crewship self-update`
 // runs with a scrubbed environment, so CREWSHIP_PORT set for the service is not
-// visible to us — asking systemd is how we learn the port the server actually
-// listens on.
+// visible to us — asking systemd (and then the config file) is how we learn the
+// port the server actually listens on.
 func resolveHealthURL(ctx context.Context, svc *update.SystemdService) string {
 	if selfUpdateHealthURL != "" {
 		return selfUpdateHealthURL
 	}
 	port := selfUpdatePort
 	if port == 0 {
-		if p := svc.UnitEnvPort(ctx); p > 0 {
-			port = p
-		} else if v := strings.TrimSpace(os.Getenv("CREWSHIP_PORT")); v != "" {
-			if p, err := strconv.Atoi(v); err == nil && p > 0 {
-				port = p
-			}
-		}
+		// Sudo-proof source #1: the running unit's resolved environment, which
+		// carries CREWSHIP_PORT even though sudo scrubbed it from ours.
+		port = svc.UnitEnvPort(ctx)
+	}
+	if port == 0 {
+		// Source #2: the config the server itself reads (YAML file + any
+		// surviving CREWSHIP_PORT env), exactly as `crewship start` resolves
+		// the port. Best-effort.
+		port = configServerPort()
 	}
 	if port == 0 {
 		port = 8080
 	}
 	return fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
+}
+
+// configServerPort resolves the port the way `crewship start` does — via
+// config.Load (YAML config file + CREWSHIP_PORT env) — so --systemd probes the
+// right port when the operator set it in the config rather than the unit env.
+// Best-effort: any load failure yields 0 and the caller falls back. Sidecar
+// autodetect is irrelevant to a port read, so it's skipped so the load can't
+// error on a host without the sidecar staged.
+func configServerPort() int {
+	prev, had := os.LookupEnv("CREWSHIP_SKIP_SIDECAR")
+	_ = os.Setenv("CREWSHIP_SKIP_SIDECAR", "1")
+	defer func() {
+		if had {
+			_ = os.Setenv("CREWSHIP_SKIP_SIDECAR", prev)
+		} else {
+			_ = os.Unsetenv("CREWSHIP_SKIP_SIDECAR")
+		}
+	}()
+	cfg, err := config.Load("")
+	if err != nil || cfg == nil {
+		return 0
+	}
+	return cfg.Server.Port
 }
 
 // dirWritable reports whether this process can create files in dir — the
