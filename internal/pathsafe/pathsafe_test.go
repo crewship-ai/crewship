@@ -57,20 +57,3 @@ func TestJoin_EmptyRootRejected(t *testing.T) {
 		t.Error("Join with empty root should be rejected")
 	}
 }
-
-func TestJoin_NoSiblingPrefixEscape(t *testing.T) {
-	// root="/a/b" must not admit a sibling like "/a/bevil" — the
-	// separator-anchored prefix check is what prevents this. Since Join
-	// only accepts relative rel, exercise the boundary via Under, which
-	// shares the rule.
-	root := filepath.FromSlash("/a/b")
-	if Under(root, filepath.FromSlash("/a/bevil/x")) {
-		t.Error("Under admitted a sibling directory sharing a name prefix")
-	}
-	if !Under(root, filepath.FromSlash("/a/b/x")) {
-		t.Error("Under rejected a legitimate descendant")
-	}
-	if !Under(root, root) {
-		t.Error("Under rejected the root itself")
-	}
-}

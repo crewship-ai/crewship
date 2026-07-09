@@ -81,17 +81,3 @@ func Join(root, rel string) (string, error) {
 	}
 	return joined, nil
 }
-
-// Under reports whether `path` (already absolute or cleaned by the
-// caller) sits at or under `root`, using the same separator-anchored
-// prefix rule as Join. It is the containment predicate used by callers
-// that build a path via other means (e.g. after EvalSymlinks) and only
-// need the yes/no check.
-func Under(root, path string) bool {
-	if root == "" || path == "" {
-		return false
-	}
-	cleanRoot := filepath.Clean(root)
-	cleanPath := filepath.Clean(path)
-	return cleanPath == cleanRoot || strings.HasPrefix(cleanPath, cleanRoot+string(filepath.Separator))
-}
