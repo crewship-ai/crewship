@@ -12,7 +12,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var selfUpdateCheckOnly bool
+var (
+	selfUpdateCheckOnly  bool
+	selfUpdateSystemd    bool
+	selfUpdateService    string
+	selfUpdateHealthWait time.Duration
+)
 
 var selfUpdateCmd = &cobra.Command{
 	Use:   "self-update",
@@ -29,6 +34,11 @@ How it upgrades depends on how crewship was installed:
 
 Use --check to see whether a newer release exists without changing anything.
 
+For a long-running install managed by systemd (a VM or bare-metal server),
+add --systemd: crewship stops the service, swaps the binary, starts it again,
+and health-checks the new server — automatically rolling back to the previous
+binary if it fails to start or comes up unhealthy.
+
 Database migrations run on the NEXT 'crewship start'; a pre-migration
 snapshot is taken automatically, so a bad upgrade is a one-step rollback
 (reinstall the old version + restore the snapshot). See the upgrades guide.`,
@@ -40,6 +50,16 @@ snapshot is taken automatically, so a bad upgrade is a one-step rollback
 func init() {
 	selfUpdateCmd.Flags().BoolVar(&selfUpdateCheckOnly, "check", false,
 		"only report whether a newer release exists; make no changes")
+	// --systemd, not --server: the root command already owns a persistent
+	// -s/--server flag (the crewship server URL), which self-update does not
+	// use (it talks to GitHub + the local service manager). Reusing the name
+	// would shadow that global flag on this command.
+	selfUpdateCmd.Flags().BoolVar(&selfUpdateSystemd, "systemd", false,
+		"orchestrate a systemd-managed upgrade: stop → swap → start → health-check, with auto-rollback")
+	selfUpdateCmd.Flags().StringVar(&selfUpdateService, "service", "crewship",
+		"systemd unit to orchestrate with --systemd")
+	selfUpdateCmd.Flags().DurationVar(&selfUpdateHealthWait, "health-timeout", 60*time.Second,
+		"how long --systemd waits for the new server to become healthy before rolling back")
 }
 
 func runSelfUpdate(ctx context.Context, checkOnly bool) error {
@@ -82,7 +102,23 @@ func runSelfUpdate(ctx context.Context, checkOnly bool) error {
 	}
 	binDir := filepath.Dir(exePath)
 
-	switch update.DetectChannel(exePath, dirWritable(binDir)) {
+	channel := update.DetectChannel(exePath, dirWritable(binDir))
+
+	// --systemd orchestrates a self-installed systemd binary. Homebrew
+	// and package-manager installs manage their own service lifecycle, so
+	// refuse there and point at the right tool rather than fighting it.
+	if selfUpdateSystemd && channel != update.ChannelInstaller {
+		switch channel {
+		case update.ChannelHomebrew:
+			return fmt.Errorf("--systemd is for a self-managed systemd install; this is a Homebrew install — " +
+				"run 'brew upgrade' and restart the service via brew services / your unit")
+		default:
+			return fmt.Errorf("--systemd is for a self-managed systemd install; this binary is package-managed — " +
+				"upgrade via apt/dnf (the package restarts the service for you)")
+		}
+	}
+
+	switch channel {
 	case update.ChannelHomebrew:
 		// Read the formula from the Cellar path so a crewship-cli install
 		// upgrades crewship-cli, not the wrong crewship formula.
@@ -99,6 +135,9 @@ func runSelfUpdate(ctx context.Context, checkOnly bool) error {
 		return fmt.Errorf("%s", update.PackagedChannelGuidance(exePath))
 
 	default: // ChannelInstaller
+		if selfUpdateSystemd {
+			return runServerSelfUpdate(ctx, res.Latest, exePath)
+		}
 		fmt.Printf("\nDownloading %s and swapping %s…\n", res.Latest, exePath)
 		result, err := update.ApplyInstallerUpdate(ctx, res.Latest, exePath, cliOnlyVariant, version)
 		if err != nil {
@@ -131,6 +170,50 @@ func runSelfUpdate(ctx context.Context, checkOnly bool) error {
 		fmt.Println("Migrations (if any) run on the next 'crewship start'; a pre-migration snapshot is taken automatically.")
 		return nil
 	}
+}
+
+// runServerSelfUpdate orchestrates a systemd-managed in-place upgrade: stop →
+// swap → start → health-check, auto-rolling-back to the previous binary if the
+// new one fails. The stop/swap/start/health/rollback state machine lives in
+// internal/update (RunServerUpdate) and is unit-tested with a mock service
+// manager; here we just wire the production collaborators.
+func runServerSelfUpdate(ctx context.Context, latestTag, exePath string) error {
+	svc, err := update.NewSystemdService(selfUpdateService)
+	if err != nil {
+		return err
+	}
+
+	// Health URL: the local server's /healthz on its configured port. No
+	// --port flag exists; the server reads CREWSHIP_PORT (default 8080).
+	port := os.Getenv("CREWSHIP_PORT")
+	if port == "" {
+		port = "8080"
+	}
+	healthURL := fmt.Sprintf("http://127.0.0.1:%s/healthz", port)
+
+	fmt.Printf("\nServer upgrade of unit %q: stop → swap → start → health-check (up to %s)…\n",
+		selfUpdateService, selfUpdateHealthWait)
+
+	out, uerr := update.RunServerUpdate(ctx, update.ServerUpdateDeps{
+		Manager: svc,
+		Swap: func(ctx context.Context) (*update.SelfUpdateResult, error) {
+			return update.ApplyInstallerUpdate(ctx, latestTag, exePath, cliOnlyVariant, version)
+		},
+		Health:   update.HTTPHealthChecker(healthURL, selfUpdateHealthWait, time.Second),
+		Rollback: update.RestoreBackups,
+		Log:      func(m string) { fmt.Println("  " + m) },
+	})
+	if uerr != nil {
+		// out.RolledBack is already reflected in uerr's message (which names the
+		// rollback + any restore-snapshot hint). Exit non-zero either way so
+		// automation notices the upgrade didn't take.
+		return fmt.Errorf("server upgrade failed: %w", uerr)
+	}
+
+	fmt.Printf("Upgraded crewship %s → %s and restarted unit %q (healthy).\n",
+		out.Result.FromVersion, out.Result.ToVersion, selfUpdateService)
+	fmt.Printf("Previous binary kept at %s for rollback.\n", out.Result.BackupPath)
+	return nil
 }
 
 // dirWritable reports whether this process can create files in dir — the

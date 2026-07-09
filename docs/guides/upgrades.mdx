@@ -60,6 +60,52 @@ crewship self-update
 crewship start          # migrations apply here, after an automatic snapshot
 ```
 
+### Server installs (systemd): `self-update --systemd`
+
+On a long-running install managed by systemd — a VM or bare-metal server, the
+way our own production and dev slots run — a plain `self-update` swaps the
+binary but leaves the **old** process running until you restart it yourself.
+`--systemd` orchestrates the whole cutover and rolls back automatically if the
+new binary is bad:
+
+```bash
+sudo crewship self-update --systemd             # unit defaults to "crewship"
+sudo crewship self-update --systemd --service crewshipd --health-timeout 90s
+```
+
+<Note>
+The flag is `--systemd`, not `--server`: the global `-s`/`--server` flag already
+means "the crewship server URL", which `self-update` doesn't use.
+</Note>
+
+The sequence is **stop → swap → start → health-check**:
+
+1. **Stop** the systemd unit (so the binary is swapped without a live process).
+2. **Swap** the binary + companions in place (checksum-verified; the previous
+   binary is kept as `<binary>.bak`).
+3. **Start** the unit on the new binary — migrations run here, behind the
+   automatic pre-migration snapshot.
+4. **Health-check** `http://127.0.0.1:<CREWSHIP_PORT>/healthz` until it returns
+   `200`, up to `--health-timeout` (default 60s).
+
+If the new binary **fails to start** or **never becomes healthy**, `--systemd`
+**automatically rolls back**: it stops the new server, restores the previous
+binary from `.bak`, and starts it again — so a bad release doesn't leave your
+server down. Because migrations run in step 3, a rollback may also need the
+**schema** rolled back: if the restored old binary then refuses to boot with a
+version-skew error, restore the pre-migration snapshot too:
+
+```bash
+crewship db restore-snapshot        # see "Rollback / downgrade" below
+```
+
+<Note>
+`--systemd` only applies to a **self-installed** binary (installer/tarball) that
+a systemd unit runs. A Homebrew or `.deb`/`.rpm` install manages its own
+service lifecycle, so `--systemd` refuses there and points you at `brew upgrade`
+or `apt`/`dnf` (the package's postinstall restarts a running service for you).
+</Note>
+
 ## Install channels & their upgrade path
 
 Beyond Homebrew and the installer, Crewship ships native Linux packages and an
