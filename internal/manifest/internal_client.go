@@ -59,6 +59,20 @@ func (a *internalClient) Put(ctx context.Context, path string, body any) (*inter
 
 func (a *internalClient) WorkspaceID() string { return a.inner.api.GetWorkspaceID() }
 
+// PutBytes issues a raw-body (octet-stream) PUT, delegating to the same
+// rawPutter capability Client.SaveCrewFile uses. It satisfies
+// internalapi.RawBytesPutter so the SPEC-2 kinds crew planner can deliver
+// `files:` through the identical /files/save endpoint the legacy path uses.
+// Returns a loud error when the underlying APIClient lacks raw-PUT support
+// rather than degrading to a corrupt JSON-encoded body.
+func (a *internalClient) PutBytes(ctx context.Context, path string, data []byte) (*internalapi.Response, error) {
+	rp, ok := a.inner.api.(rawPutter)
+	if !ok {
+		return nil, fmt.Errorf("manifest: raw PUT not supported by the underlying APIClient (%T) — crew-file delivery needs octet-stream PUT", a.inner.api)
+	}
+	return wrapResponse(rp.PutBytes(ctx, path, data))
+}
+
 func wrapResponse(resp *http.Response, err error) (*internalapi.Response, error) {
 	if err != nil {
 		return nil, err

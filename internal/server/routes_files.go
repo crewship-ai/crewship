@@ -5,11 +5,16 @@ package server
 // realtime path. Extracted from routes.go for readability.
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
@@ -170,7 +175,7 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	if _, err := io.Copy(w, reader); err != nil {
-		s.logger.Error("file download stream error", "path", filePath, "error", err)
+		s.logger.Error("file download stream error", "path", sanitizeLogPath(filePath), "error", err)
 	}
 }
 
@@ -195,13 +200,174 @@ func (s *Server) handleFileSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	defer r.Body.Close()
-	if err := s.storage.Write(r.Context(), storageKey, r.Body); err != nil {
-		s.logger.Error("file save failed", "path", filePath, "error", err)
+
+	// Only shared-tree keys can hit the #922 ownership-handoff overwrite path
+	// (the entrypoint chowns /crew to UID 1001 after provisioning), so only
+	// they need to be buffered for a possible container replay. Agent /output
+	// writes stream straight to storage exactly as before — no size cap, no
+	// second copy in memory.
+	cpath, isShared := crewSharedContainerPath(crewID, storageKey)
+	if !isShared {
+		if err := s.storage.Write(r.Context(), storageKey, r.Body); err != nil {
+			s.logger.Error("file save failed", "path", sanitizeLogPath(filePath), "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save file"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "saved", "path": filePath})
+		return
+	}
+
+	// Shared tree: buffer (capped) so an EACCES overwrite can be replayed
+	// through the container as UID 1001 (the reader is single-use).
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxCrewFileSaveBytes+1))
+	if err != nil {
+		s.logger.Error("file save read failed", "path", sanitizeLogPath(filePath), "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read request body"})
+		return
+	}
+	if int64(len(body)) > maxCrewFileSaveBytes {
+		writeJSON(w, http.StatusRequestEntityTooLarge,
+			map[string]string{"error": fmt.Sprintf("file exceeds %d byte limit", maxCrewFileSaveBytes)})
+		return
+	}
+
+	werr := s.storage.Write(r.Context(), storageKey, bytes.NewReader(body))
+	if werr != nil {
+		// #922: after a crew is provisioned, the entrypoint chowns /crew (the
+		// bind source of "crews/<id>/shared/...") to the agent UID 1001, so a
+		// host-side overwrite by the server UID fails with EACCES. Re-route the
+		// write through the container as 1001 — the tree owner — mirroring the
+		// exec-as-1001 pattern the credential materializer uses.
+		if s.container != nil && errors.Is(werr, fs.ErrPermission) {
+			if cerr := s.writeCrewSharedFileViaContainer(r.Context(), crewID, cpath, body); cerr != nil {
+				s.logger.Error("file save via container failed", "path", sanitizeLogPath(filePath), "error", cerr)
+				status, msg := containerSaveErrorResponse(cerr)
+				writeJSON(w, status, map[string]string{"error": msg})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"status": "saved", "path": filePath})
+			return
+		}
+		s.logger.Error("file save failed", "path", sanitizeLogPath(filePath), "error", werr)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save file"})
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved", "path": filePath})
+}
+
+// maxCrewFileSaveBytes bounds a single crew-file save. Crew scripts/config are
+// small; the cap only exists so a buffered body can't exhaust server memory.
+const maxCrewFileSaveBytes int64 = 32 << 20 // 32 MiB
+
+var (
+	errCrewNotFound             = errors.New("crew not found")
+	errCrewContainerUnavailable = errors.New("crew container unavailable")
+)
+
+// crewSharedContainerPath maps a "crews/<id>/shared/..." storage key to the
+// absolute path inside the crew container, where <OutputBasePath>/crews/<id>
+// is bind-mounted at /crew (docker provider buildMounts). Reports false for
+// keys outside that crew's shared subtree — the /output tree stays host-side.
+func crewSharedContainerPath(crewID, storageKey string) (string, bool) {
+	prefix := "crews/" + crewID + "/"
+	if !strings.HasPrefix(storageKey, prefix) {
+		return "", false
+	}
+	rel := strings.TrimPrefix(storageKey, prefix)
+	if rel != "shared" && !strings.HasPrefix(rel, "shared/") {
+		return "", false
+	}
+	return "/crew/" + rel, true
+}
+
+// writeCrewSharedFileViaContainer writes content to containerPath inside the
+// crew container as UID 1001 — the owner of the provisioned /crew tree — so an
+// overwrite the server UID can't do host-side (#922) still lands. The write is
+// atomic (temp file in the destination dir, then mv -f), and paths pass via env
+// so a crafted destination can't break out of the shell command.
+func (s *Server) writeCrewSharedFileViaContainer(ctx context.Context, crewID, containerPath string, content []byte) error {
+	var slug string
+	if s.db != nil {
+		_ = s.db.QueryRowContext(ctx, "SELECT slug FROM crews WHERE id = ?", crewID).Scan(&slug)
+	}
+	if slug == "" {
+		return errCrewNotFound
+	}
+	containerName := s.container.CrewContainerName(crewID, slug)
+
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	// Atomic write as UID 1001, fenced to /crew/shared. The realpath check
+	// runs INSIDE the container (defence-in-depth on top of the host-side
+	// resolveCrewFileKey fence): even if the agent planted a symlink inside
+	// the shared tree that redirects the resolved destination dir outside
+	// /crew/shared, the write is refused before any bytes land. Paths pass via
+	// env so a crafted destination can't break out of the shell command.
+	const script = `set -eu; d=$(dirname "$DEST"); mkdir -p "$d"; ` +
+		`rp=$(realpath "$d"); case "$rp" in /crew/shared|/crew/shared/*) ;; ` +
+		`*) echo "refuse: destination escapes /crew/shared" >&2; exit 3 ;; esac; ` +
+		`tmp=$(mktemp "$d/.crewship-save.XXXXXX"); cat > "$tmp"; ` +
+		`chmod 0664 "$tmp"; mv -f "$tmp" "$DEST"`
+	result, err := s.container.Exec(ctx, provider.ExecConfig{
+		ContainerID: containerName,
+		Cmd:         []string{"sh", "-c", script},
+		Env:         []string{"DEST=" + containerPath},
+		User:        "1001:1001",
+		Stdin:       bytes.NewReader(content),
+	})
+	if err != nil {
+		// The crew container isn't running (or doesn't exist) — nothing to
+		// exec into. Callers surface this as a 409 with an actionable message.
+		return fmt.Errorf("%w: %v", errCrewContainerUnavailable, err)
+	}
+	defer result.Reader.Close()
+	// Drain stdout/stderr to EOF so the exec has finished before we inspect
+	// its exit code.
+	_, _ = io.Copy(io.Discard, io.LimitReader(result.Reader, 64*1024))
+
+	// Only the exit code decides success. We deliberately do NOT gate on the
+	// ExecInspect "running" flag: after draining the attached stream to EOF the
+	// process has finished, but the daemon can still momentarily report
+	// running=true before it finalizes the exit code — treating that as a
+	// failure produced spurious errors on a write that actually succeeded.
+	_, code, ierr := s.container.ExecInspect(ctx, result.ExecID)
+	if ierr != nil {
+		return fmt.Errorf("inspect container write: %w", ierr)
+	}
+	if code != 0 {
+		return fmt.Errorf("container write exited %d", code)
+	}
+	return nil
+}
+
+// containerSaveErrorResponse maps a container-write failure to an HTTP status
+// and a message the CLI can relay.
+func containerSaveErrorResponse(err error) (int, string) {
+	switch {
+	case errors.Is(err, errCrewNotFound):
+		return http.StatusNotFound, "crew not found"
+	case errors.Is(err, errCrewContainerUnavailable):
+		return http.StatusConflict,
+			"file is owned by the crew runtime; it can only be overwritten while the crew container is running — start the crew and retry"
+	default:
+		return http.StatusInternalServerError, "failed to save file"
+	}
+}
+
+// sanitizeLogPath strips CR/LF and other control characters from a
+// user-supplied path before it enters a log record, defusing log-forging
+// (CodeQL "log entries created from user input"). slog escapes these in its
+// JSON handler, but sanitizing at the source also protects a text handler and
+// satisfies the static check.
+func sanitizeLogPath(p string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return '_'
+		}
+		return r
+	}, p)
 }
 
 func sanitizeDownloadFilename(name string) string {

@@ -217,7 +217,7 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 		if err != nil {
 			return fmt.Errorf("crew %q: lookup remote: %w", doc.Metadata.Slug, err)
 		}
-		items, err := doc.Plan(ctx, c, remote)
+		items, err := doc.Plan(ctx, c, remote, kinds.PlanCrewOptions{BaseDir: pb.opts.BaseDir})
 		if err != nil {
 			return fmt.Errorf("crew %q: plan: %w", doc.Metadata.Slug, err)
 		}

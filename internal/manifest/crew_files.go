@@ -3,67 +3,29 @@ package manifest
 import (
 	"context"
 	"fmt"
-	"os"
-	"path"
-	"path/filepath"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/manifest/crewfile"
 )
 
-// crewFileMaxBytes caps one delivered crew file at 1 MiB — same budget as an
-// inline code-step body and the script step's stdout cap. Bigger assets
-// belong in object storage or the devcontainer image, not the manifest flow.
-const crewFileMaxBytes = 1 << 20
+// crewFileMaxBytes / crewFileSharedPrefix are retained as local aliases; the
+// canonical values (and the normalize/load logic) live in the shared crewfile
+// leaf package so the SPEC-2 kinds path enforces the identical fence + cap.
+const (
+	crewFileMaxBytes     = crewfile.MaxBytes
+	crewFileSharedPrefix = crewfile.SharedPrefix
+)
 
-// crewFileSharedPrefix is the only in-crew tree a manifest file may target.
-// It maps to /crew/shared inside the container — the same root the script
-// step's path fence anchors to (internal/pipeline/runner_script.go).
-const crewFileSharedPrefix = "shared/"
-
-// normalizeCrewFileDest resolves a CrewFile's destination to the canonical
-// "shared/..." form: defaults to shared/<basename(src)>, accepts
-// "/crew/shared/..." spellings, and rejects traversal or any path outside
-// the shared tree (the crew's /output, /secrets, agent homes are off-limits
-// to declarative delivery on purpose).
+// normalizeCrewFileDest delegates to the shared leaf so both apply paths
+// normalize destinations identically.
 func normalizeCrewFileDest(src, dest string) (string, error) {
-	d := strings.TrimSpace(dest)
-	if d == "" {
-		s := strings.TrimSpace(src)
-		if s == "" {
-			return "", fmt.Errorf("src is required")
-		}
-		d = crewFileSharedPrefix + path.Base(filepath.ToSlash(s))
-	}
-	d = strings.TrimPrefix(filepath.ToSlash(d), "/crew/")
-	d = strings.TrimPrefix(d, "/")
-	clean := path.Clean(d)
-	if !strings.HasPrefix(clean, crewFileSharedPrefix) || clean == crewFileSharedPrefix {
-		return "", fmt.Errorf("dest %q must be a file under %s (no traversal; e.g. shared/scripts/parse.py)", dest, crewFileSharedPrefix)
-	}
-	return clean, nil
+	return crewfile.NormalizeDest(src, dest)
 }
 
-// loadCrewFile reads a CrewFile's source from disk, resolving a relative Src
-// against baseDir (the manifest file's directory), and enforces the size cap.
+// loadCrewFile delegates to the shared leaf so both apply paths enforce the
+// same source-existence + size checks.
 func loadCrewFile(baseDir, src string) ([]byte, error) {
-	s := strings.TrimSpace(src)
-	if s == "" {
-		return nil, fmt.Errorf("src is required")
-	}
-	p := s
-	if !filepath.IsAbs(p) {
-		p = filepath.Join(baseDir, p)
-	}
-	info, err := os.Stat(p)
-	if err != nil {
-		return nil, fmt.Errorf("src %q: %w", src, err)
-	}
-	if info.IsDir() {
-		return nil, fmt.Errorf("src %q is a directory — list files individually", src)
-	}
-	if info.Size() > crewFileMaxBytes {
-		return nil, fmt.Errorf("src %q is %d bytes, exceeds the %d-byte crew-file cap — ship big assets via the devcontainer image or object storage", src, info.Size(), crewFileMaxBytes)
-	}
-	return os.ReadFile(p)
+	return crewfile.Load(baseDir, src)
 }
 
 // checkFiles validates a crew's declarative file list: src present, dest

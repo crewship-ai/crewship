@@ -25,6 +25,8 @@
 // behaviour.
 package manifest
 
+import "github.com/crewship-ai/crewship/internal/manifest/crewfile"
+
 // APIVersion is the version string the parser recognises. Future
 // breaking changes bump this to v2; v1 stays supported indefinitely
 // (the server accepts every past version it has ever shipped).
@@ -161,15 +163,10 @@ type CrewSpec struct {
 	Files []CrewFile `yaml:"files,omitempty" json:"files,omitempty"`
 }
 
-// CrewFile is one local file to deliver into the crew shared volume.
-type CrewFile struct {
-	// Src is the local path, relative to the manifest file's directory
-	// (absolute paths allowed).
-	Src string `yaml:"src" json:"src"`
-	// Dest is the in-crew path under shared/ (e.g. "shared/scripts/parse.py").
-	// "/crew/"-prefixed forms are normalized. Empty = shared/<basename(src)>.
-	Dest string `yaml:"dest,omitempty" json:"dest,omitempty"`
-}
+// CrewFile is one local file to deliver into the crew shared volume. Aliased
+// to the shared leaf type so the legacy and SPEC-2 apply paths carry an
+// identical shape (see internal/manifest/crewfile).
+type CrewFile = crewfile.File
 
 // Service is one sidecar container the crew needs. Each entry maps
 // 1-to-1 to a `docker run` invocation against a crew-scoped bridge
