@@ -9,7 +9,11 @@ package api
 // can stash them on the Router for later setter wiring (scheduler,
 // chatbridge auto-provision).
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/crewship-ai/crewship/internal/config"
+)
 
 // registerCrewsRoutes wires the entire "crews + agents + connections"
 // surface. Constructs its own handlers; the only cross-domain
@@ -26,7 +30,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	crews := NewCrewHandler(r.db, r.logger)
 	crewSocket := r.socketPath
 	if crewSocket == "" {
-		crewSocket = "/tmp/crewship.sock"
+		crewSocket = config.DefaultSocketPath()
 	}
 	crews.SetSocketPath(crewSocket)
 	if r.hub != nil {

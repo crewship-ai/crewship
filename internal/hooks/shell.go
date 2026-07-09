@@ -89,7 +89,10 @@ func shellHandler(ctx context.Context, h Hook, ec EventContext) (Result, error) 
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(cctx, "sh", "-c", command) // nosemgrep: dangerous-exec-command — intentional; trust model documented above (hook config = owner-only, env sanitized, timeout bounded)
+	// Per-OS shell: `sh -c` on POSIX hosts, `cmd.exe /c` on Windows (#946).
+	// The trust model is documented above (hook config = owner-only, env
+	// sanitized, timeout bounded).
+	cmd := shellCommand(cctx, command)
 	// Put the shell and every child it spawns in a fresh process group so
 	// context timeout can kill the whole subtree. Without Setpgid, Linux
 	// only sends SIGKILL to the immediate sh child and a grandchild
@@ -104,16 +107,15 @@ func shellHandler(ctx context.Context, h Hook, ec EventContext) (Result, error) 
 			`{"_truncated":true,"_original_bytes":%d,"_note":"payload exceeded %d-byte cap; consult journal entry for full body"}`,
 			len(payloadJSON), maxShellPayloadBytes))
 	}
-	cmd.Env = []string{
-		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		"CREWSHIP_EVENT=" + string(ec.Event),
-		"CREWSHIP_WORKSPACE_ID=" + ec.WorkspaceID,
-		"CREWSHIP_CREW_ID=" + ec.CrewID,
-		"CREWSHIP_AGENT_ID=" + ec.AgentID,
-		"CREWSHIP_MISSION_ID=" + ec.MissionID,
-		"CREWSHIP_TOOL_NAME=" + ec.ToolName,
-		"CREWSHIP_PAYLOAD=" + string(payloadJSON),
-	}
+	cmd.Env = append(hookBaseEnv(),
+		"CREWSHIP_EVENT="+string(ec.Event),
+		"CREWSHIP_WORKSPACE_ID="+ec.WorkspaceID,
+		"CREWSHIP_CREW_ID="+ec.CrewID,
+		"CREWSHIP_AGENT_ID="+ec.AgentID,
+		"CREWSHIP_MISSION_ID="+ec.MissionID,
+		"CREWSHIP_TOOL_NAME="+ec.ToolName,
+		"CREWSHIP_PAYLOAD="+string(payloadJSON),
+	)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

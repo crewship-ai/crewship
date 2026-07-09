@@ -62,7 +62,7 @@ detect_os() {
     Linux)   echo linux ;;
     Darwin)  echo darwin ;;
     MINGW*|MSYS*|CYGWIN*)
-      err "This installer targets Linux/macOS. On Windows, grab crewship-cli_*_windows_*.zip from https://github.com/${REPO}/releases (CLI against a remote server; the local daemon still needs WSL or Docker: https://github.com/${REPO}#install)" ;;
+      err "This installer targets Linux/macOS. On Windows, grab crewship_*_windows_*.zip (full daemon, needs Docker Desktop) or crewship-cli_*_windows_*.zip (CLI against a remote server) from https://github.com/${REPO}/releases" ;;
     *) err "unsupported OS: $(uname -s)" ;;
   esac
 }

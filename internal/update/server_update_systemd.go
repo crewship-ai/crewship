@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,12 @@ type SystemdService struct {
 // systemctl isn't on PATH (so `--server` fails fast on a non-systemd host with
 // an actionable message rather than a cryptic exec error mid-upgrade).
 func NewSystemdService(unit string) (*SystemdService, error) {
+	if runtime.GOOS != "linux" {
+		// systemd exists only on Linux; say so directly instead of the
+		// generic not-on-PATH message (#946 — windows daemon support).
+		return nil, fmt.Errorf("systemd-managed server upgrade is only available on Linux (this host is %s). "+
+			"Upgrade the binary with 'crewship self-update' and restart the server yourself", runtime.GOOS)
+	}
 	if _, err := exec.LookPath("systemctl"); err != nil {
 		return nil, fmt.Errorf("systemctl not found on PATH: --server manages a systemd service, " +
 			"which this host doesn't appear to run. Upgrade the binary directly with 'crewship self-update', " +

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
+	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -443,7 +444,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Crewshipd proxy + agent runtime routes (require IPC socket)
 	socketPath := r.socketPath
 	if socketPath == "" {
-		socketPath = "/tmp/crewship.sock"
+		socketPath = config.DefaultSocketPath()
 	}
 	proxy := NewProxyHandler(r.db, r.logger, socketPath)
 	r.mux.Handle("GET /api/v1/crewshipd", authed(wsCtx(http.HandlerFunc(proxy.CrewshipdHealth))))

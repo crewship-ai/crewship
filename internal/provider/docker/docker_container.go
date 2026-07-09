@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -697,11 +698,16 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// Fix ownership for container user (1001:1001). The host process may not
 	// run as root, so os.Chown can fail. In that case we use a short-lived
 	// Docker container (running as root) to chown the bind-mount paths.
-	needsDockerChown := false
-	for _, dir := range allDirs {
-		if err := os.Chown(dir, 1001, 1001); err != nil {
-			needsDockerChown = true
-			break
+	// Windows has no host-side chown at all (os.Chown always errors), so
+	// skip straight to the in-container path — Docker Desktop's file
+	// sharing surfaces uid mapping inside the VM, where chown works.
+	needsDockerChown := goruntime.GOOS == "windows"
+	if !needsDockerChown {
+		for _, dir := range allDirs {
+			if err := os.Chown(dir, 1001, 1001); err != nil {
+				needsDockerChown = true
+				break
+			}
 		}
 	}
 	if needsDockerChown {

@@ -2,6 +2,8 @@ package update
 
 import (
 	"archive/tar"
+	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -69,32 +71,38 @@ func isHomebrewPath(p string) bool {
 	return strings.Contains(filepath.ToSlash(p), "/Cellar/")
 }
 
-// errSelfUpdateUnsupported returns a non-nil, actionable error when
-// self-update cannot run on the given platform. Windows is gated for
-// now (#945): the release asset there is a .zip (not .tar.gz, so
-// AssetNameForTag/extractArchive would mis-resolve it), and Windows
-// refuses to rename over a running .exe, so the atomic-swap contract of
-// Commit cannot hold. Full support (zip extraction + rename-self-aside
-// swap) is phase B (#946).
-func errSelfUpdateUnsupported(goos string) error {
-	if goos == "windows" {
-		return fmt.Errorf("self-update is not yet supported on Windows — download the latest crewship-cli zip from https://github.com/crewship-ai/crewship/releases and replace crewship.exe manually")
-	}
-	return nil
-}
-
 // AssetNameForTag returns the release archive filename for this platform,
 // mirroring the goreleaser name_template and scripts/install.sh. cliOnly
 // selects the crewship-cli_… archive (the clionly build) instead of the full
 // crewship_… one — downloading the wrong family would swap a lightweight CLI
 // install for the ~2× larger full server binary (or vice-versa).
 func AssetNameForTag(tag string, cliOnly bool) string {
+	return assetNameFor(tag, cliOnly, runtime.GOOS, runtime.GOARCH)
+}
+
+// assetNameFor is the GOOS/GOARCH-injectable core of AssetNameForTag.
+// Windows archives are .zip (goreleaser format_overrides, #945/#946);
+// everything else keeps the historical .tar.gz.
+func assetNameFor(tag string, cliOnly bool, goos, goarch string) string {
 	v := strings.TrimPrefix(strings.TrimSpace(tag), "v")
 	prefix := "crewship"
 	if cliOnly {
 		prefix = "crewship-cli"
 	}
-	return fmt.Sprintf("%s_%s_%s_%s.tar.gz", prefix, v, runtime.GOOS, runtime.GOARCH)
+	ext := ".tar.gz"
+	if goos == "windows" {
+		ext = ".zip"
+	}
+	return fmt.Sprintf("%s_%s_%s_%s%s", prefix, v, goos, goarch, ext)
+}
+
+// binaryNameFor is the base name of the crewship binary inside a release
+// archive for the given GOOS — goreleaser appends .exe on windows.
+func binaryNameFor(goos string) string {
+	if goos == "windows" {
+		return "crewship.exe"
+	}
+	return "crewship"
 }
 
 // FormulaFromPath returns the Homebrew formula name for a brew-managed
@@ -270,9 +278,6 @@ type PreparedUpdate struct {
 // failure here leaves the install untouched. binDir (= dir of exePath) must be
 // writable at Commit time (installer channel).
 func PrepareInstallerUpdate(ctx context.Context, tag, exePath string, cliOnly bool, fromVersion string) (*PreparedUpdate, error) {
-	if err := errSelfUpdateUnsupported(runtime.GOOS); err != nil {
-		return nil, err
-	}
 	asset := AssetNameForTag(tag, cliOnly)
 	archive, err := httpGet(ctx, downloadURL(tag, asset))
 	if err != nil {
@@ -309,9 +314,9 @@ func PrepareInstallerUpdate(ctx context.Context, tag, exePath string, cliOnly bo
 	if err != nil {
 		return nil, fmt.Errorf("extract %s: %w", asset, err)
 	}
-	newBinary, ok := extracted["crewship"]
+	newBinary, ok := extracted[binaryNameFor(runtime.GOOS)]
 	if !ok {
-		return nil, fmt.Errorf("archive %s did not contain a crewship binary", asset)
+		return nil, fmt.Errorf("archive %s did not contain a %s binary", asset, binaryNameFor(runtime.GOOS))
 	}
 
 	binDir := filepath.Dir(exePath)
@@ -370,6 +375,12 @@ func (p *PreparedUpdate) Commit() (*SelfUpdateResult, error) {
 			return nil, fmt.Errorf("replace %s (rolled back %d file(s)): %w", t.path, i+1, err)
 		}
 		res.Replaced = append(res.Replaced, t.path)
+	}
+	// A rename-aside swap (windows) parks the previous binary at
+	// <path>.old; try to clear the parked copies now. The running exe's
+	// own .old survives until the next update run — expected.
+	for _, t := range p.targets {
+		CleanupSwapArtifacts(t.path)
 	}
 	return res, nil
 }
@@ -443,22 +454,103 @@ func atomicReplace(dst string, payload []byte) error {
 	if err := os.Chmod(tmpName, 0o755); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, dst)
+	if err := os.Rename(tmpName, dst); err != nil {
+		// Windows refuses to rename over the running executable
+		// (ERROR_ACCESS_DENIED); park the destination aside first —
+		// renaming a running exe IS legal there — then land the payload
+		// (#946). Non-windows rename failures are real errors.
+		if runtime.GOOS == "windows" {
+			return replaceViaRenameAside(tmpName, dst)
+		}
+		return err
+	}
+	return nil
 }
 
-// extractArchive pulls the crewship binary + companions out of a gzip'd tar
-// into memory, keyed by base name. Other archive members (LICENSE, README)
-// are ignored.
-func extractArchive(gz []byte) (map[string][]byte, error) {
+// swapAsideSuffix marks the previous binary parked by a rename-aside swap.
+// It cannot be deleted while it is the running process's image, so it is
+// cleaned up best-effort after the swap and on the next self-update run.
+const swapAsideSuffix = ".old"
+
+// replaceViaRenameAside implements the Windows-legal binary swap: move dst
+// out of the way to dst+".old" (allowed even while dst is executing), then
+// rename the payload into place. The parked .old is left for
+// CleanupSwapArtifacts — deleting it here would fail while the old image
+// is still mapped.
+func replaceViaRenameAside(tmpName, dst string) error {
+	aside := dst + swapAsideSuffix
+	// A stale .old from an earlier update blocks the park rename once the
+	// old process has exited; clear it if possible.
+	_ = os.Remove(aside)
+	if err := os.Rename(dst, aside); err != nil {
+		return fmt.Errorf("park %s aside: %w", dst, err)
+	}
+	if err := os.Rename(tmpName, dst); err != nil {
+		// Try to put the original back so the install isn't left headless.
+		_ = os.Rename(aside, dst)
+		return fmt.Errorf("land new binary at %s: %w", dst, err)
+	}
+	return nil
+}
+
+// CleanupSwapArtifacts best-effort removes the ".old" file a rename-aside
+// swap parks next to the binary. Callers invoke it at the start of a
+// self-update run (the previous update's .old is no longer executing) and
+// after a successful Commit; failures are expected while the parked image
+// is still running and are silently ignored.
+func CleanupSwapArtifacts(exePath string) {
+	_ = os.Remove(exePath + swapAsideSuffix)
+}
+
+// extractArchive pulls the crewship binary + companions out of a release
+// archive into memory, keyed by base name. The container format is sniffed
+// from magic bytes: gzip'd tar for unix archives, zip for windows (#946).
+// Other archive members (LICENSE, README) are ignored.
+func extractArchive(raw []byte) (map[string][]byte, error) {
+	wanted := map[string]bool{"crewship": true, "crewship.exe": true}
+	for _, c := range companions {
+		wanted[c] = true
+	}
+	if len(raw) >= 4 && raw[0] == 'P' && raw[1] == 'K' {
+		return extractZip(raw, wanted)
+	}
+	return extractTarGz(raw, wanted)
+}
+
+// extractZip is the windows-archive branch of extractArchive.
+func extractZip(raw []byte, wanted map[string]bool) (map[string][]byte, error) {
+	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		return nil, err
+	}
+	out := map[string][]byte{}
+	for _, f := range zr.File {
+		base := filepath.Base(f.Name)
+		if !wanted[base] {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil, err
+		}
+		// Cap a single member at 200 MB (same bound as the download).
+		buf, err := io.ReadAll(io.LimitReader(rc, 200<<20))
+		rc.Close()
+		if err != nil {
+			return nil, err
+		}
+		out[base] = buf
+	}
+	return out, nil
+}
+
+// extractTarGz is the unix-archive branch of extractArchive.
+func extractTarGz(gz []byte, wanted map[string]bool) (map[string][]byte, error) {
 	gr, err := gzip.NewReader(strings.NewReader(string(gz)))
 	if err != nil {
 		return nil, err
 	}
 	defer gr.Close()
-	wanted := map[string]bool{"crewship": true}
-	for _, c := range companions {
-		wanted[c] = true
-	}
 	out := map[string][]byte{}
 	tr := tar.NewReader(gr)
 	for {

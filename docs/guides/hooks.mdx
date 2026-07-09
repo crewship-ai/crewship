@@ -70,7 +70,7 @@ const (
 
 ### shell
 
-Runs a command via `exec.CommandContext`. Event context is passed as env vars (`CREWSHIP_EVENT`, `CREWSHIP_AGENT_ID`, `CREWSHIP_MISSION_ID`, `CREWSHIP_PAYLOAD`, ...). Stdout is captured as `Result.Payload`.
+Runs a command via `exec.CommandContext` under the host shell — `sh -c` on Linux/macOS, `cmd.exe /c` on Windows (write the command line in cmd syntax there). Event context is passed as env vars (`CREWSHIP_EVENT`, `CREWSHIP_AGENT_ID`, `CREWSHIP_MISSION_ID`, `CREWSHIP_PAYLOAD`, ...); the environment is otherwise sanitized to a pinned system PATH (plus `SystemRoot`/`ComSpec` on Windows). Stdout is captured as `Result.Payload`.
 
 Shell hooks require `OWNER` role at registration time -- an ADMIN cannot create a shell hook because arbitrary code execution on the host is a privilege escalation vector. The store enforces this via a register-time argument, not a row property:
 

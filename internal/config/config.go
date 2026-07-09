@@ -194,6 +194,7 @@ type ComposioConfig struct {
 
 // Default returns a Config populated with sensible defaults for all settings.
 func Default() *Config {
+	paths := platformDefaultPaths()
 	return &Config{
 		Server: ServerConfig{
 			Host:            "0.0.0.0",
@@ -201,7 +202,7 @@ func Default() *Config {
 			ShutdownTimeout: 10 * time.Second,
 		},
 		IPC: IPCConfig{
-			SocketPath: "/tmp/crewship.sock",
+			SocketPath: paths.Socket,
 		},
 		Container: ContainerConfig{
 			Provider:       "docker",
@@ -221,12 +222,12 @@ func Default() *Config {
 		},
 		Storage: StorageConfig{
 			Provider: "localfs",
-			BasePath: "/var/lib/crewship",
-			LogPath:  "/var/log/crewship",
+			BasePath: paths.Base,
+			LogPath:  paths.Log,
 		},
 		State: StateConfig{
 			Provider: "bbolt",
-			BoltPath: "/var/lib/crewship/state.db",
+			BoltPath: paths.Bolt,
 		},
 		Logging: LoggingConfig{
 			Level:  "info",

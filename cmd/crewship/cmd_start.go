@@ -137,12 +137,14 @@ var startCmd = &cobra.Command{
 			//     ("" or "/var/lib/crewship/state.db"), the operator
 			//     made an explicit choice and we leave it alone.
 			//
-			// The literal `/var/lib/crewship/state.db` is the one in
-			// internal/config/config.go:190. If that default ever
-			// moves, this check needs to follow it; a regression test
-			// in internal/config covers that the rewritten path
-			// actually creates and the default does not.
-			defaulted := cfg.State.BoltPath == "" || cfg.State.BoltPath == "/var/lib/crewship/state.db"
+			// config.DefaultBoltPath() is the platform default (unix:
+			// /var/lib/crewship/state.db, windows: %ProgramData%). The
+			// unix literal stays as an extra alias so a config file
+			// written on one platform doesn't pin a windows daemon to a
+			// path it can't create.
+			defaulted := cfg.State.BoltPath == "" ||
+				cfg.State.BoltPath == config.DefaultBoltPath() ||
+				cfg.State.BoltPath == "/var/lib/crewship/state.db"
 			if !cfgBoltPathFromEnv() && defaulted {
 				cfg.State.BoltPath = filepath.Join(dataDir.Root, "state.db")
 			}
