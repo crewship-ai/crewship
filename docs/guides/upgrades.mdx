@@ -60,6 +60,62 @@ crewship self-update
 crewship start          # migrations apply here, after an automatic snapshot
 ```
 
+### Server installs (systemd): `self-update --systemd`
+
+On a long-running install managed by systemd — a VM or bare-metal server, the
+way our own production and dev slots run — a plain `self-update` swaps the
+binary but leaves the **old** process running until you restart it yourself.
+`--systemd` orchestrates the whole cutover and rolls back automatically if the
+new binary is bad:
+
+```bash
+sudo crewship self-update --systemd             # unit defaults to "crewship"
+sudo crewship self-update --systemd --service crewshipd --health-timeout 90s
+sudo crewship self-update --systemd --port 9090       # non-default port
+sudo crewship self-update --systemd --health-url http://127.0.0.1:9090/healthz
+```
+
+<Note>
+The flag is `--systemd`, not `--server`: the global `-s`/`--server` flag already
+means "the crewship server URL", which `self-update` doesn't use.
+</Note>
+
+The sequence is **prepare → stop → swap → start → health-check**:
+
+1. **Prepare** — download the new release and verify its checksum **before**
+   touching the running server, so a bad download never causes downtime.
+2. **Stop** the systemd unit (so the binary is swapped without a live process).
+3. **Swap** the binary + companions in place (the previous binary is kept as
+   `<binary>.bak`).
+4. **Start** the unit on the new binary — migrations run here, behind the
+   automatic pre-migration snapshot.
+5. **Health-check** the server until it returns `200`, up to `--health-timeout`
+   (default 60s).
+
+The health URL defaults to `http://127.0.0.1:<port>/healthz`. The port is read
+from the running unit's environment (via `systemctl`), because `sudo` scrubs
+your own `CREWSHIP_PORT` — so it works even on a non-default port. Override with
+`--port` or the full `--health-url` when needed.
+
+If the new binary **fails to start** or **never becomes healthy**, `--systemd`
+**automatically rolls back**: it stops the new server, restores the previous
+binary from `.bak`, starts it again, and **health-checks the restored server
+too**. Because migrations run in step 4, that rollback can leave the *old*
+binary crash-looping on the version-skew guard (it can't boot against the
+newer schema). When that happens `--systemd` says so explicitly and tells you
+to restore the pre-migration snapshot **now**:
+
+```bash
+crewship db restore-snapshot        # see "Rollback / downgrade" below
+```
+
+<Note>
+`--systemd` only applies to a **self-installed** binary (installer/tarball) that
+a systemd unit runs. A Homebrew or `.deb`/`.rpm` install manages its own
+service lifecycle, so `--systemd` refuses there and points you at `brew upgrade`
+or `apt`/`dnf` (the package's postinstall restarts a running service for you).
+</Note>
+
 ## Install channels & their upgrade path
 
 Beyond Homebrew and the installer, Crewship ships native Linux packages and an

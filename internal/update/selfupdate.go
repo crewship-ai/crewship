@@ -212,6 +212,33 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 // On any error after the backup is taken, the binary is restored so a failed
 // update never leaves the operator with a broken install.
 func ApplyInstallerUpdate(ctx context.Context, tag, exePath string, cliOnly bool, fromVersion string) (*SelfUpdateResult, error) {
+	prepared, err := PrepareInstallerUpdate(ctx, tag, exePath, cliOnly, fromVersion)
+	if err != nil {
+		return nil, err
+	}
+	return prepared.Commit()
+}
+
+// PreparedUpdate is a fully downloaded + verified update, staged in memory and
+// ready to swap onto disk with Commit. Splitting prepare (network) from commit
+// (disk swap) lets the server-upgrade orchestration (RunServerUpdate) fetch and
+// verify the new binary BEFORE it stops the service — so a download/checksum
+// failure never causes downtime, and the stop→swap→start window is as short as
+// a couple of local file writes.
+type PreparedUpdate struct {
+	targets     []payloadTarget
+	fromVersion string
+	toVersion   string
+	backupPath  string
+}
+
+// PrepareInstallerUpdate downloads the release archive for `tag`, verifies its
+// sha256 against checksums.txt, extracts it, and assembles the set of files to
+// swap (the running binary at exePath plus any companion that both ships in the
+// archive and already exists beside it). It performs NO disk changes — a
+// failure here leaves the install untouched. binDir (= dir of exePath) must be
+// writable at Commit time (installer channel).
+func PrepareInstallerUpdate(ctx context.Context, tag, exePath string, cliOnly bool, fromVersion string) (*PreparedUpdate, error) {
 	asset := AssetNameForTag(tag, cliOnly)
 	archive, err := httpGet(ctx, downloadURL(tag, asset))
 	if err != nil {
@@ -256,24 +283,37 @@ func ApplyInstallerUpdate(ctx context.Context, tag, exePath string, cliOnly bool
 		}
 	}
 
+	return &PreparedUpdate{
+		targets:     targets,
+		fromVersion: fromVersion,
+		toVersion:   strings.TrimPrefix(tag, "v"),
+		backupPath:  exePath + backupSuffix,
+	}, nil
+}
+
+// Commit backs up every target then atomically swaps in the prepared bytes. On
+// any mid-swap failure it restores every file swapped so far, so the install
+// stays consistent (no new-server + stale-sidecar mix). This is the only
+// disk-mutating half of an installer update.
+func (p *PreparedUpdate) Commit() (*SelfUpdateResult, error) {
 	// Back up every target BEFORE swapping any, so a mid-swap failure can
 	// restore ALL of them (not just the binary) to a consistent prior state.
-	for _, t := range targets {
+	for _, t := range p.targets {
 		if err := copyFile(t.path, t.path+backupSuffix); err != nil {
 			return nil, fmt.Errorf("back up %s: %w", t.path, err)
 		}
 	}
 
 	res := &SelfUpdateResult{
-		FromVersion: fromVersion,
-		ToVersion:   strings.TrimPrefix(tag, "v"),
-		BackupPath:  exePath + backupSuffix,
+		FromVersion: p.fromVersion,
+		ToVersion:   p.toVersion,
+		BackupPath:  p.backupPath,
 	}
-	for i, t := range targets {
+	for i, t := range p.targets {
 		if err := atomicReplace(t.path, t.data); err != nil {
 			// Roll back every file swapped so far (including this failed one's
 			// prior state via its backup) so the install stays consistent.
-			_ = RestoreBackups(pathsOf(targets[:i+1]))
+			_ = RestoreBackups(pathsOf(p.targets[:i+1]))
 			return nil, fmt.Errorf("replace %s (rolled back %d file(s)): %w", t.path, i+1, err)
 		}
 		res.Replaced = append(res.Replaced, t.path)
