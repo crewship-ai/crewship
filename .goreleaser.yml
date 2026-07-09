@@ -246,7 +246,10 @@ nfpms:
     package_name: crewship
     # crewship (full daemon+UI) and the sidecar shim. The CLI-only build is a
     # separate Homebrew story and is intentionally not packaged here.
-    ids:
+    # `builds` (not `ids`): the pinned goreleaser v2.6.1 nfpm schema uses
+    # `builds`; `ids` only exists in newer goreleaser and fails the release
+    # pipeline (caught by the #933 pre-merge smoke).
+    builds:
       - crewship
       - crewship-sidecar
     vendor: Crewship
