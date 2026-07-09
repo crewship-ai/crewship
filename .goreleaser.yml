@@ -196,13 +196,15 @@ brews:
     license: "Apache-2.0"
     conflicts:
       - crewship-cli
-    # Install the sidecar + entrypoint.sh alongside crewship so
-    # autodetectSidecarPaths (which checks the binary's own directory first)
-    # finds them and `crewship start` boots without a Makefile.
+    # Only crewship is a user command, so it alone lands in bin. The runtime
+    # companions (crewship-sidecar + entrypoint.sh) go to libexec: shipping a
+    # bare entrypoint.sh into the global bin polluted PATH and risked name
+    # collisions (issue #920). autodetectSidecarPaths probes <bin>/../libexec
+    # (the Cellar sibling), so `crewship start` still finds them.
     install: |
       bin.install "crewship"
-      bin.install "crewship-sidecar"
-      bin.install "entrypoint.sh"
+      libexec.install "crewship-sidecar"
+      libexec.install "entrypoint.sh"
     test: |
       system "#{bin}/crewship", "version"
     commit_msg_template: "chore: update crewship formula to {{ .Tag }}"

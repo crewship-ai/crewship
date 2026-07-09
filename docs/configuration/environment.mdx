@@ -328,8 +328,10 @@ CREWSHIP_PORT=8080
 CREWSHIP_CONTAINER_PROVIDER=docker
 CREWSHIP_SIDECAR_ENABLED=true
 CREWSHIP_RUNTIME_IMAGE=debian:bookworm-slim
-# CREWSHIP_SIDECAR_PATH and CREWSHIP_ENTRYPOINT_PATH are normally autodetected
-# from `make build:sidecar` output. Override when running from an unusual layout.
+# CREWSHIP_SIDECAR_PATH and CREWSHIP_ENTRYPOINT_PATH are normally autodetected:
+# the release tar.gz/installer ships them next to crewship, Homebrew under
+# libexec, and a source build emits them via `make build:sidecar`. Override only
+# when running from an unusual layout.
 # CREWSHIP_SIDECAR_PATH=/opt/crewship/crewship-sidecar
 # CREWSHIP_ENTRYPOINT_PATH=/opt/crewship/entrypoint.sh
 
