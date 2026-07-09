@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"runtime"
@@ -59,6 +60,11 @@ func main() {
 	// handler here would leave those log-injection sinks open even after
 	// the server side is fixed.
 	logger := logging.New("debug", "json", os.Stderr)
+	// Also claim the process-wide default: a handful of constructors
+	// (memory executor, sidecar server, memory watcher) fall back to
+	// slog.Default() when built without an explicit logger — without this
+	// line those fallbacks would bypass the neutralizer barrier above.
+	slog.SetDefault(logger)
 
 	// Read configuration from stdin as JSON.
 	// The orchestrator pipes credentials and memory config at startup to

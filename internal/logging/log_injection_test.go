@@ -3,6 +3,9 @@ package logging
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 )
@@ -94,5 +97,53 @@ func TestNeutralizeControl_CleanStringUnchanged(t *testing.T) {
 	in := "a normal value with spaces, punctuation! and\tone tab"
 	if got := neutralizeControl(in); got != in {
 		t.Errorf("clean string mutated: got %q want %q", got, in)
+	}
+}
+
+// TestLogInjection_ErrorAttrNeutralized pins the KindAny/error path: an
+// error whose text carries a newline (the most common tainted non-string
+// attr — dial/parse errors embed remote-controlled text) must not forge a
+// second log line.
+func TestLogInjection_ErrorAttrNeutralized(t *testing.T) {
+	var buf bytes.Buffer
+	logger := New("debug", "json", &buf)
+
+	logger.Info("op failed", "error", errors.New("dial failed\nFAKE-LEVEL forged line"))
+
+	out := strings.TrimRight(buf.String(), "\n")
+	if strings.Contains(out, "\n") {
+		t.Fatalf("error attr forged a second line: %q", out)
+	}
+	if !strings.Contains(out, `dial failed\\n`) && !strings.Contains(out, `dial failed\n`) {
+		t.Errorf("expected escaped newline in error attr, got: %q", out)
+	}
+}
+
+// TestRingHandler_CapturesNeutralizedAndRedacted pins the ring buffer's
+// capture path: the ring stores values BEFORE the inner handler's
+// ReplaceAttr hook runs, so it must apply the same redact+neutralize
+// barrier itself — no raw newlines and no unredacted secrets at rest.
+func TestRingHandler_CapturesNeutralizedAndRedacted(t *testing.T) {
+	buffer := NewRingBuffer(8)
+	inner := slog.NewJSONHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug})
+	logger := slog.New(NewRingHandler(inner, buffer))
+
+	logger.Info("m\nforged-msg",
+		"user_input", "evil\nFAKE-LINE",
+		"auth", "Bearer sk-abc123def456ghi789jkl012mno345pqr")
+
+	recs := buffer.Entries(8)
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 captured record, got %d", len(recs))
+	}
+	rec := recs[0]
+	if strings.Contains(rec.Message, "\n") {
+		t.Errorf("ring stored raw newline in message: %q", rec.Message)
+	}
+	if strings.Contains(rec.Attrs["user_input"], "\n") {
+		t.Errorf("ring stored raw newline in attr: %q", rec.Attrs["user_input"])
+	}
+	if strings.Contains(rec.Attrs["auth"], "sk-abc123def456ghi789jkl012mno345pqr") {
+		t.Errorf("ring stored unredacted secret: %q", rec.Attrs["auth"])
 	}
 }

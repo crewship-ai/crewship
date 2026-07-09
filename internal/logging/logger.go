@@ -85,6 +85,18 @@ func redactAttr(groups []string, a slog.Attr) slog.Attr {
 		}
 		return a
 	}
+	// Errors are the most common tainted non-string attr (dial/parse errors
+	// embed remote-controlled text) and the built-in JSON handler would
+	// otherwise marshal them opaquely. Stringify through the same
+	// redact+neutralize path; other KindAny values pass through untouched
+	// (documented gap: neutralization is only guaranteed for string and
+	// error attr values).
+	if a.Value.Kind() == slog.KindAny {
+		if err, ok := a.Value.Any().(error); ok && err != nil {
+			a.Value = slog.StringValue(sanitizeForCapture(err.Error()))
+		}
+		return a
+	}
 	if a.Value.Kind() != slog.KindString {
 		return a
 	}
@@ -92,15 +104,22 @@ func redactAttr(groups []string, a slog.Attr) slog.Attr {
 	if s == "" {
 		return a
 	}
-	redacted, _ := lookout.Redact(s)
-	// Neutralize AFTER redaction so the secret detector sees the original
-	// bytes; the escaped form is only what lands on the wire.
-	out := neutralizeControl(redacted)
+	out := sanitizeForCapture(s)
 	if out == s {
 		return a
 	}
 	a.Value = slog.StringValue(out)
 	return a
+}
+
+// sanitizeForCapture runs the secret redactor first (so it sees the
+// original bytes) and then the control-character neutralizer. Shared by
+// the ReplaceAttr hook and the debug ring buffer's raw capture path.
+func sanitizeForCapture(s string) string {
+	redacted, _ := lookout.Redact(s)
+	// Neutralize AFTER redaction so the secret detector sees the original
+	// bytes; the escaped form is only what lands on the wire.
+	return neutralizeControl(redacted)
 }
 
 // neutralizeControl escapes CR, LF, and every other C0 control character

@@ -124,18 +124,22 @@ func (h *RingHandler) Handle(ctx context.Context, r slog.Record) error {
 	// steady-state logging path (short info/debug lines with no attrs) then
 	// costs zero allocations here. Two branches so the hot path avoids a
 	// per-attr nil check on the populated-handler-attrs side.
+	// The ring captures raw record values BEFORE the inner handler's
+	// ReplaceAttr hook runs, so it must apply the same redact+neutralize
+	// barrier itself — otherwise the debug ring would retain unredacted
+	// secrets and unescaped control bytes that every wire sink escapes.
 	var attrs map[string]string
 	if len(h.attrs) > 0 {
 		attrs = make(map[string]string, len(h.attrs))
 		for _, a := range h.attrs {
-			attrs[a.Key] = a.Value.String()
+			attrs[a.Key] = sanitizeForCapture(a.Value.String())
 		}
 		r.Attrs(func(a slog.Attr) bool {
 			key := a.Key
 			if h.group != "" {
 				key = h.group + "." + key
 			}
-			attrs[key] = a.Value.String()
+			attrs[key] = sanitizeForCapture(a.Value.String())
 			return true
 		})
 	} else {
@@ -147,7 +151,7 @@ func (h *RingHandler) Handle(ctx context.Context, r slog.Record) error {
 			if h.group != "" {
 				key = h.group + "." + key
 			}
-			attrs[key] = a.Value.String()
+			attrs[key] = sanitizeForCapture(a.Value.String())
 			return true
 		})
 	}
@@ -155,7 +159,7 @@ func (h *RingHandler) Handle(ctx context.Context, r slog.Record) error {
 	h.buffer.Append(LogRecord{
 		Time:    r.Time,
 		Level:   r.Level.String(),
-		Message: r.Message,
+		Message: sanitizeForCapture(r.Message),
 		Attrs:   attrs,
 	})
 
