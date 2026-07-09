@@ -260,8 +260,8 @@ func Load(path string) (*Config, error) {
 	// Since the legacy agent-runtime image (with baked-in sidecar) has been
 	// removed, these bind mounts are now mandatory — any Linux base image the
 	// user brings needs them injected from the host. Fail fast if missing so
-	// the operator sees "run 'make build:sidecar'" instead of a cryptic
-	// runtime crash inside the agent container.
+	// the operator sees an actionable reinstall hint (sidecarReinstallHint)
+	// instead of a cryptic runtime crash inside the agent container.
 	if err := autodetectSidecarPaths(cfg); err != nil {
 		return nil, err
 	}
@@ -512,29 +512,38 @@ func deriveSidecarEnabled(cfg *Config) {
 // agent-runtime image was retired, both paths are mandatory: any user-provided
 // base image (debian, ubuntu, mcr devcontainers/base, ...) has no sidecar of
 // its own, so we bind-mount ours from the host. If detection fails, we return
-// a descriptive error so operators see "run 'make build:sidecar'" rather than
-// a container crashloop.
+// an actionable error (see sidecarReinstallHint) rather than a container
+// crashloop.
 //
 // Escape hatch: set CREWSHIP_SKIP_SIDECAR=1 for unit tests / envs that never
 // launch containers (e.g. the API handler test suite).
 func autodetectSidecarPaths(cfg *Config) error {
-	// Resolve the directory containing the crewship binary. If os.Executable
-	// fails for some reason, fall back to the current working directory.
+	// Resolve the directory containing the crewship binary. EvalSymlinks first
+	// so a Homebrew-symlinked crewship in $(brew --prefix)/bin resolves to its
+	// real Cellar directory — that is where the libexec companions actually
+	// live (issue #920); the top-level prefix has no libexec symlink to follow.
 	var binDir string
-	var sidecarTried, entrypointTried []string
 	if exe, err := os.Executable(); err == nil {
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = resolved
+		}
 		if abs, err := filepath.Abs(exe); err == nil {
 			binDir = filepath.Dir(abs)
 		}
 	}
+	cwd, _ := os.Getwd()
+	return resolveSidecarPaths(cfg, binDir, cwd)
+}
+
+// resolveSidecarPaths is the testable core of autodetectSidecarPaths: given the
+// resolved binary directory and working directory, it probes the known layouts
+// and fills SidecarBinaryPath / EntrypointPath. Split out so tests can drive a
+// simulated install tree instead of the test binary's own location.
+func resolveSidecarPaths(cfg *Config, binDir, cwd string) error {
+	var sidecarTried, entrypointTried []string
 
 	if cfg.Container.SidecarBinaryPath == "" {
-		candidates := []string{}
-		if binDir != "" {
-			candidates = append(candidates, filepath.Join(binDir, "crewship-sidecar"))
-		}
-		candidates = append(candidates, "/usr/local/bin/crewship-sidecar")
-		for _, c := range candidates {
+		for _, c := range sidecarBinaryCandidates(binDir) {
 			c = filepath.Clean(c)
 			sidecarTried = append(sidecarTried, c)
 			if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
@@ -546,16 +555,7 @@ func autodetectSidecarPaths(cfg *Config) error {
 	}
 
 	if cfg.Container.EntrypointPath == "" {
-		candidates := []string{}
-		if binDir != "" {
-			candidates = append(candidates, filepath.Join(binDir, "entrypoint.sh"))
-		}
-		if cwd, err := os.Getwd(); err == nil {
-			candidates = append(candidates, filepath.Join(cwd, "scripts", "entrypoint.sh"))
-			candidates = append(candidates, filepath.Join(cwd, "entrypoint.sh"))
-		}
-		candidates = append(candidates, "/usr/local/share/crewship/entrypoint.sh")
-		for _, c := range candidates {
+		for _, c := range entrypointCandidates(binDir, cwd) {
 			c = filepath.Clean(c)
 			entrypointTried = append(entrypointTried, c)
 			if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
@@ -572,17 +572,67 @@ func autodetectSidecarPaths(cfg *Config) error {
 
 	if cfg.Container.SidecarBinaryPath == "" {
 		return fmt.Errorf(
-			"sidecar binary not found (tried %v); run 'make build:sidecar' or set CREWSHIP_SIDECAR_PATH (or CREWSHIP_SKIP_SIDECAR=1 to bypass in tests)",
-			sidecarTried,
+			"crewship-sidecar not found (tried %v); %s",
+			sidecarTried, sidecarReinstallHint("CREWSHIP_SIDECAR_PATH"),
 		)
 	}
 	if cfg.Container.EntrypointPath == "" {
 		return fmt.Errorf(
-			"entrypoint.sh not found (tried %v); run 'make build:sidecar' or set CREWSHIP_ENTRYPOINT_PATH (or CREWSHIP_SKIP_SIDECAR=1 to bypass in tests)",
-			entrypointTried,
+			"entrypoint.sh not found (tried %v); %s",
+			entrypointTried, sidecarReinstallHint("CREWSHIP_ENTRYPOINT_PATH"),
 		)
 	}
 	return nil
+}
+
+// sidecarBinaryCandidates lists where crewship-sidecar may live, in priority
+// order across the supported install layouts:
+//   - next to the crewship binary — the release tar.gz / install.sh layout,
+//     where the archive bundles it at the root (#914);
+//   - <binDir>/../libexec — the Homebrew layout, where the formula installs it
+//     into the Cellar's libexec to keep it out of the user's global bin (#920);
+//   - /usr/local/bin — a legacy manual-copy fallback.
+func sidecarBinaryCandidates(binDir string) []string {
+	var c []string
+	if binDir != "" {
+		c = append(c, filepath.Join(binDir, "crewship-sidecar"))
+		c = append(c, filepath.Join(binDir, "..", "libexec", "crewship-sidecar"))
+	}
+	c = append(c, "/usr/local/bin/crewship-sidecar")
+	return c
+}
+
+// entrypointCandidates lists where entrypoint.sh may live, in priority order:
+// the tar.gz sibling and Homebrew libexec layouts (as for the sidecar binary),
+// then a source checkout's scripts/entrypoint.sh (and cwd sibling), then the
+// legacy /usr/local/share location.
+func entrypointCandidates(binDir, cwd string) []string {
+	var c []string
+	if binDir != "" {
+		c = append(c, filepath.Join(binDir, "entrypoint.sh"))
+		c = append(c, filepath.Join(binDir, "..", "libexec", "entrypoint.sh"))
+	}
+	if cwd != "" {
+		c = append(c, filepath.Join(cwd, "scripts", "entrypoint.sh"))
+		c = append(c, filepath.Join(cwd, "entrypoint.sh"))
+	}
+	c = append(c, "/usr/local/share/crewship/entrypoint.sh")
+	return c
+}
+
+// sidecarReinstallHint is the actionable remediation for a missing sidecar
+// companion. Since #914 the release archive bundles crewship-sidecar +
+// entrypoint.sh next to the binary, so the fix for a *released* install is a
+// reinstall — not `make build:sidecar`, a Makefile target only a source
+// checkout has. pathEnv is the per-file override env var to mention.
+func sidecarReinstallHint(pathEnv string) string {
+	return "the release archive bundles it next to crewship — reinstall to restore it:\n" +
+		"  • Homebrew:  brew reinstall crewship\n" +
+		"  • installer: curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash\n" +
+		"  • tarball:   re-extract the release .tar.gz (it ships crewship-sidecar + entrypoint.sh)\n" +
+		"Or point " + pathEnv + " at an existing copy. " +
+		"Set CREWSHIP_SKIP_SIDECAR=1 to run without a sidecar; " +
+		"from a source checkout, 'make build:sidecar' builds it."
 }
 
 func generateRandomToken(bytes int) (string, error) {

@@ -91,14 +91,18 @@ Extend the main [environment reference](/configuration/environment). These gover
 `internal/config/config.go:autodetectSidecarPaths` walks these candidates and picks the first hit:
 
 **Sidecar binary**
-1. `{dir of crewship executable}/crewship-sidecar`
-2. `/usr/local/bin/crewship-sidecar`
+1. `{dir of crewship executable}/crewship-sidecar` — tar.gz / installer layout
+2. `{dir of crewship executable}/../libexec/crewship-sidecar` — Homebrew layout
+3. `/usr/local/bin/crewship-sidecar`
 
 **Entrypoint script**
-1. `{dir of crewship executable}/entrypoint.sh`
-2. `{cwd}/scripts/entrypoint.sh`
-3. `{cwd}/entrypoint.sh`
-4. `/usr/local/share/crewship/entrypoint.sh`
+1. `{dir of crewship executable}/entrypoint.sh` — tar.gz / installer layout
+2. `{dir of crewship executable}/../libexec/entrypoint.sh` — Homebrew layout
+3. `{cwd}/scripts/entrypoint.sh`
+4. `{cwd}/entrypoint.sh`
+5. `/usr/local/share/crewship/entrypoint.sh`
+
+The executable directory is resolved through symlinks first, so a Homebrew-symlinked `crewship` on your `PATH` resolves to its real Cellar directory (where the `libexec` sibling lives).
 
 If either remains empty and `CREWSHIP_SKIP_SIDECAR != 1`, `config.Load` returns a descriptive error and the server refuses to start.
 
