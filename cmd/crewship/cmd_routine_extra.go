@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -242,7 +243,13 @@ var routineExportCmd = &cobra.Command{
 	Long: `Writes the full routine bundle (definition + version history) to
 stdout. Pipe to a file: 'crewship routine export my-routine > bundle.json'.
 The output is the same shape that 'crewship routine import' consumes,
-suitable for transferring routines between workspaces.`,
+suitable for transferring routines between workspaces.
+
+A routine's ` + "`type: script`" + ` step files are inlined into the bundle
+(base64) from the routine's author crew, so a portable routine travels with
+its deterministic backbone — recipe + scripts + agent judgment. The crew
+manifest ` + "`files:`" + ` block remains the source of truth; inlining is a
+portability convenience. Pass --no-scripts to export the recipe alone.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -252,6 +259,7 @@ suitable for transferring routines between workspaces.`,
 			return err
 		}
 		includeHistory, _ := cmd.Flags().GetBool("include-history")
+		noScripts, _ := cmd.Flags().GetBool("no-scripts")
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
 		path := fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/export", ws, args[0])
@@ -266,9 +274,62 @@ suitable for transferring routines between workspaces.`,
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		_, err = io.Copy(os.Stdout, resp.Body)
+		raw, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+		if !noScripts {
+			raw, err = augmentBundleWithScripts(cmd.Context(), client, ws, args[0], raw)
+			if err != nil {
+				return err
+			}
+		}
+		_, err = os.Stdout.Write(raw)
 		return err
 	},
+}
+
+// augmentBundleWithScripts inlines the routine's script-step files into the
+// export bundle. Resolves the routine's author crew (that's where the scripts
+// live), downloads each, and adds a top-level `scripts` array. A routine with
+// no script steps returns the bundle unchanged.
+func augmentBundleWithScripts(ctx context.Context, client *cli.Client, ws, slug string, raw []byte) ([]byte, error) {
+	var bundle map[string]any
+	if err := json.Unmarshal(raw, &bundle); err != nil {
+		return nil, fmt.Errorf("decode export bundle: %w", err)
+	}
+	pipeMap, _ := bundle["pipeline"].(map[string]any)
+	if pipeMap == nil {
+		return raw, nil
+	}
+	defRaw, err := json.Marshal(pipeMap["definition"])
+	if err != nil {
+		return nil, fmt.Errorf("re-encode definition: %w", err)
+	}
+	paths, err := collectScriptPaths(defRaw)
+	if err != nil {
+		return nil, err
+	}
+	if len(paths) == 0 {
+		return raw, nil
+	}
+	// Resolve the author crew — scripts are a crew asset delivered there.
+	var p struct {
+		AuthorCrewID string `json:"author_crew_id"`
+	}
+	if err := getJSON(client, fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s", ws, slug), &p); err != nil {
+		return nil, fmt.Errorf("resolve author crew for script inlining: %w", err)
+	}
+	entries, err := inlineScripts(newClientCrewFileIO(ctx, client), p.AuthorCrewID, defRaw)
+	if err != nil {
+		return nil, err
+	}
+	bundle["scripts"] = entries
+	out, err := json.MarshalIndent(bundle, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("re-encode bundle: %w", err)
+	}
+	return out, nil
 }
 
 // ---- import ----
@@ -280,10 +341,17 @@ var routineImportCmd = &cobra.Command{
 from the given file argument or from stdin if no argument. Existing
 routines with the same slug are updated; new routines are created.
 
+--crew names the author crew that will OWN the imported routine (required —
+it resolves the routine's agent slugs). Any scripts inlined in the bundle are
+materialized into that crew's shared dir via the same /files/save path
+'crewship apply' uses. A script whose dest already exists with DIFFERENT
+content fails loudly — pass --force to overwrite (a crew script is shared
+across routines). --no-scripts imports the recipe without materializing.
+
 Examples:
-  crewship routine import bundle.json
-  cat bundle.json | crewship routine import
-  crewship routine export src-routine | crewship routine import  (cross-workspace copy)
+  crewship routine import bundle.json --crew acct
+  cat bundle.json | crewship routine import --crew acct
+  crewship routine export src-routine | crewship routine import --crew acct
 `,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -310,18 +378,48 @@ Examples:
 				return fmt.Errorf("empty bundle (no file argument and stdin is empty)")
 			}
 		}
-		// Validate JSON before sending so a typo at the keyboard
-		// gets a local error instead of a 400 from the server.
-		var probe any
-		if err := json.Unmarshal(raw, &probe); err != nil {
+
+		// Decode the bundle first so a keyboard typo is a local error, not a
+		// 400 — and so an invalid bundle fails before we demand a crew.
+		var bundle map[string]any
+		if err := json.Unmarshal(raw, &bundle); err != nil {
 			return fmt.Errorf("bundle is not valid JSON: %w", err)
 		}
 
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
+
+		crewSlug, _ := cmd.Flags().GetString("crew")
+		if crewSlug == "" {
+			return fmt.Errorf("--crew is required (the author crew that will own the imported routine)")
+		}
+		crewID, err := resolveCrewID(client, crewSlug)
+		if err != nil {
+			return err
+		}
+		force, _ := cmd.Flags().GetBool("force")
+		noScripts, _ := cmd.Flags().GetBool("no-scripts")
+
+		if !noScripts {
+			scripts, err := decodeBundleScripts(bundle)
+			if err != nil {
+				return err
+			}
+			if err := materializeScripts(newClientCrewFileIO(cmd.Context(), client), crewID, scripts, force); err != nil {
+				return err
+			}
+			if n := len(scripts); n > 0 {
+				fmt.Fprintf(os.Stderr, "%s[materialized %d script(s) into crew %s]%s\n", cli.Dim, n, crewSlug, cli.Reset)
+			}
+		}
+		bundle["author_crew_id"] = crewID
+		body, err := json.Marshal(bundle)
+		if err != nil {
+			return fmt.Errorf("re-encode bundle: %w", err)
+		}
 		resp, err := client.Post(
 			fmt.Sprintf("/api/v1/workspaces/%s/pipelines/import", ws),
-			bytes.NewReader(raw),
+			bytes.NewReader(body),
 		)
 		if err != nil {
 			return err
@@ -330,16 +428,16 @@ Examples:
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		body, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(resp.Body)
 		var out struct {
 			Slug string `json:"slug"`
 			ID   string `json:"id"`
 		}
-		_ = json.Unmarshal(body, &out)
+		_ = json.Unmarshal(respBody, &out)
 		if out.Slug != "" {
 			fmt.Printf("Imported routine %q (id=%s).\n", out.Slug, out.ID)
 		} else {
-			fmt.Println(string(body))
+			fmt.Println(string(respBody))
 		}
 		return nil
 	},
@@ -398,6 +496,10 @@ func init() {
 	routineRollbackCmd.Flags().Int("to", 0, "target version to roll back to (REQUIRED)")
 	_ = routineRollbackCmd.MarkFlagRequired("to")
 	routineExportCmd.Flags().Bool("include-history", false, "include all versions in the bundle (otherwise just HEAD)")
+	routineExportCmd.Flags().Bool("no-scripts", false, "export the recipe alone; do not inline `type: script` files")
+	routineImportCmd.Flags().String("crew", "", "author crew slug/id that will own the imported routine (REQUIRED)")
+	routineImportCmd.Flags().Bool("force", false, "overwrite an existing crew script whose content differs")
+	routineImportCmd.Flags().Bool("no-scripts", false, "import the recipe without materializing inlined scripts")
 
 	// `versions` is both a list (when invoked alone) AND a parent of
 	// `versions show`. Cobra handles the dual role fine — args route

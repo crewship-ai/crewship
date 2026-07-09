@@ -41,6 +41,45 @@ const routineSkeleton = `{
 }
 `
 
+// routineScriptSkeleton is the scaffold emitted by `routine init --script`:
+// a deterministic, token-zero `type: script` step (the Pillar-1 backbone)
+// feeding a downstream agent_run that applies judgment to the script's output.
+// JSON has no comments, so the delivery instructions (the script must be
+// materialized into the crew's shared dir first) live in the description.
+const routineScriptSkeleton = `{
+  "dsl_version": "1.0",
+  "name": "my-script-routine",
+  "display_name": "My Script Routine",
+  "description": "Script-backed scaffold from 'crewship routine init --script'. The 'parse' step runs a bundled script (scripts/parse.py) in your crew container — deterministic, token-zero. DELIVER THE SCRIPT FIRST: add it to your crew manifest 'files:' block (src: scripts/parse.py, dest: shared/scripts/parse.py) then 'crewship apply', or 'crewship crew files save <crew> shared/scripts/parse.py --file parse.py'. 'crewship routine export' then inlines the script so the routine travels with it. Replace agent_slug with a real agent in your author crew.",
+  "inputs": [
+    {
+      "name": "period",
+      "type": "string",
+      "required": true,
+      "description": "Passed to the script as an argv arg AND as CREWSHIP_INPUT_PERIOD"
+    }
+  ],
+  "steps": [
+    {
+      "id": "parse",
+      "type": "script",
+      "script": {
+        "path": "scripts/parse.py",
+        "interpreter": "python3",
+        "args": ["{{ inputs.period }}"]
+      }
+    },
+    {
+      "id": "review",
+      "type": "agent_run",
+      "agent_slug": "your-agent",
+      "needs": ["parse"],
+      "prompt": "Review this deterministic parse output and flag anomalies:\n{{ steps.parse.output }}"
+    }
+  ]
+}
+`
+
 var routineInitCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Scaffold a new routine — a minimal skeleton or a clone of an existing one",
@@ -50,10 +89,13 @@ var routineInitCmd = &cobra.Command{
   crewship routine init                          # minimal valid skeleton to stdout
   crewship routine init -o new.json              # ...to a file
   crewship routine init --from summarize-text -o new.json   # clone an existing routine's definition
+  crewship routine init --script -o new.json     # script-backed scaffold (deterministic backbone)
 
 --from clones the live definition of an existing routine (via the same
 export path 'routine export' uses) as a valid, edit-ready starting point.
-Without --from you get a one-step agent_run skeleton.
+--script scaffolds a deterministic 'type: script' step (a bundled script
+run token-zero in the crew container) feeding a downstream agent_run.
+Without either you get a one-step agent_run skeleton.
 
 The output is a routine DSL (what 'routine validate' and 'routine apply'
 consume), not a full export bundle.`,
@@ -61,15 +103,22 @@ consume), not a full export bundle.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		from, _ := cmd.Flags().GetString("from")
 		outPath, _ := cmd.Flags().GetString("output")
+		script, _ := cmd.Flags().GetBool("script")
+		if from != "" && script {
+			return fmt.Errorf("--from and --script are mutually exclusive")
+		}
 
 		var payload []byte
-		if from != "" {
+		switch {
+		case from != "":
 			def, err := fetchRoutineDefinition(from)
 			if err != nil {
 				return err
 			}
 			payload = def
-		} else {
+		case script:
+			payload = []byte(routineScriptSkeleton)
+		default:
 			payload = []byte(routineSkeleton)
 		}
 
@@ -130,6 +179,7 @@ func fetchRoutineDefinition(slug string) ([]byte, error) {
 
 func init() {
 	routineInitCmd.Flags().String("from", "", "Clone an existing routine's definition by slug")
+	routineInitCmd.Flags().Bool("script", false, "Scaffold a script-backed routine (a deterministic `type: script` step feeding an agent_run)")
 	routineInitCmd.Flags().StringP("output", "o", "", "Write to a file instead of stdout")
 	pipelineCmd.AddCommand(routineInitCmd)
 }
