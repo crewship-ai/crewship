@@ -634,12 +634,14 @@ A **non-blocking** inbox message pushed mid-run — the push, author-controlled 
 
 | Field | Notes |
 | --- | --- |
-| `to` | Recipient. `workspace` (default — anyone in the workspace), `trigger` (the user who triggered the run; falls back to a workspace-wide notice for unattended triggers like schedules), `user:<id>`, `role:OWNER`, `role:MANAGER`. Template-substitutable, e.g. `user:{{ inputs.assignee }}`. |
+| `to` | Recipient. `workspace` (default — anyone in the workspace), `trigger` (the user who triggered the run — including **deferred** runs started with `--delay`/`--debounce-key`; falls back to a workspace-wide notice only for genuinely unattended triggers like cron schedules and service-token calls that carry no user), `user:<id>`, `role:OWNER`, `role:MANAGER`. Template-substitutable, e.g. `user:{{ inputs.assignee }}`. `crew:<slug>` is **not yet supported** — it's rejected at save/validate (and at run time for a template that renders to `crew:…`) and tracked for a later release. |
 | `title` | Inbox card title. Rendered, secret-redacted, truncated. |
 | `body` | Markdown body. Rendered from the run context (`{{ steps.X.output }}`, `{{ inputs.* }}`) and secret-redacted. At least one of `title`/`body` is required. |
 | `priority` | `urgent` \| `high` \| `medium` \| `low`. Default `medium`. |
 
 The message lands **live** (WebSocket broadcast to members) and **scrubbed** (secrets in mid-run outputs are redacted before insert). Delivery is **best-effort**: a routine whose notification can't be written never fails on that account — the run's real work is already done. Retries are **idempotent** — each `notify` is keyed on `(run, step)`, so a re-run doesn't double-post. Routine updates carry a `routine_update` subkind so the inbox can keep them in their own lane, separate from approvals and escalations.
+
+**Anti-spam soft cap.** A single run may deliver at most **20 notices to any one recipient** — enough for progress + result pings, low enough that a routine dropping a `notify` into every step of a wide DAG can't bury someone's inbox. It's a *soft* cap: once a recipient hits it, further notices to them in that run are quietly dropped (logged), never a run failure. The cap is per `(run, recipient)`, so notifying several people each gets its own budget, and a schedule firing repeatedly is unaffected — each run is a fresh budget.
 
 For the zero-config version — a desktop ping when a run *ends* (success or failure) without authoring a step — run it with `crewship routine run <slug> --wait` and enable notifications (`crewship notify enable`).
 

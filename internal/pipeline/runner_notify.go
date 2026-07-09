@@ -38,6 +38,24 @@ func (e *Executor) WithInboxNotifier(n InboxNotifier) *Executor {
 	return e
 }
 
+// perRunNotifyCap is the per-recipient soft cap on routine-update notices a
+// single run may deliver to one inbox. A DAG that puts a notify in every
+// step (progress spam) or targets one user from many branches shouldn't be
+// able to dump an unbounded pile of cards on that recipient. It's a SOFT
+// cap: once reached, further notices to that recipient are dropped with a
+// WARN — never a run failure. The bound is per (run, recipient), so a run
+// notifying several people each gets its own budget, and a scheduled routine
+// firing repeatedly is unaffected (each run has a fresh, distinct run id).
+const perRunNotifyCap = 20
+
+// WithNoticeCounter wires the per-recipient anti-spam counter for notify
+// steps. Without it, the soft cap is skipped and delivery is uncapped
+// (dev/test/misconfig). Production installs NewRunNoticeCounter(db).
+func (e *Executor) WithNoticeCounter(fn func(ctx context.Context, workspaceID, runID, targetUserID, targetRole string) (int, error)) *Executor {
+	e.noticeCounter = fn
+	return e
+}
+
 // WithMemberChecker wires the workspace-membership guard for notify steps
 // that target `user:<id>`. Without it, the guard is skipped and the id is
 // trusted as-is.
@@ -67,12 +85,23 @@ func (e *Executor) runNotifyStep(ctx context.Context, step Step, parentRender Re
 	// non-blocking contract. Author mistakes with LITERAL targets are
 	// already rejected by validateNotifyTarget at save/dry-run; here we
 	// degrade to a workspace-wide notice so the update still lands.
+	// degraded tracks whether the author's intended recipient could NOT be
+	// honoured and the notice fell back to a workspace-wide notice. It changes
+	// the return marker (notified:degraded) and surfaces a run warning, so a
+	// silent fallback isn't indistinguishable from a targeted delivery — in
+	// particular a templated `to` that renders to an unsupported `crew:<slug>`
+	// (which can only be caught here at run time, not at save) is visible on
+	// the run rather than a server-log-only footnote.
+	degraded := false
 	toRaw := strings.TrimSpace(Render(step.Notify.To, parentRender))
 	targetUserID, targetRole, terr := resolveNotifyTarget(toRaw, in.InvokingUserID)
 	if terr != nil {
 		slog.Default().Warn("notify step: unresolvable target — falling back to workspace notice",
 			"run", runID, "step", step.ID, "to", toRaw, "error", terr)
+		e.recordRunWarning(ctx, runID, "notify:"+step.ID,
+			fmt.Errorf("target %q not delivered as addressed — sent as a workspace notice instead: %w", toRaw, terr))
 		targetUserID, targetRole = "", ""
+		degraded = true
 	}
 
 	// dry_run preview: render but never write to the inbox.
@@ -93,7 +122,28 @@ func (e *Executor) runNotifyStep(ctx context.Context, step Step, parentRender Re
 		case !member:
 			slog.Default().Warn("notify step: target user not in workspace — falling back to workspace notice",
 				"run", runID, "step", step.ID, "user", targetUserID)
+			e.recordRunWarning(ctx, runID, "notify:"+step.ID,
+				fmt.Errorf("target user %q is not a workspace member — sent as a workspace notice instead", targetUserID))
 			targetUserID = ""
+			degraded = true
+		}
+	}
+
+	// Per-recipient anti-spam soft cap: if this run has already delivered
+	// perRunNotifyCap notices to the resolved recipient, drop this one. The
+	// cap is enforced at the notify chokepoint (not the inbox writer) so it
+	// counts only routine notices for THIS run, keyed on the same target the
+	// item will carry. Best-effort: a counter error fails OPEN (deliver) —
+	// anti-spam is a courtesy, the update landing is the priority.
+	if e.noticeCounter != nil {
+		switch prior, cerr := e.noticeCounter(ctx, in.WorkspaceID, runID, targetUserID, targetRole); {
+		case cerr != nil:
+			slog.Default().Warn("notify step: notice count failed — delivering uncapped",
+				"run", runID, "step", step.ID, "error", cerr)
+		case prior >= perRunNotifyCap:
+			slog.Default().Warn("notify step: per-recipient soft cap reached — dropping notice",
+				"run", runID, "step", step.ID, "user", targetUserID, "role", targetRole, "cap", perRunNotifyCap)
+			return "notified:capped", 0, time.Since(stepStart).Milliseconds(), nil
 		}
 	}
 
@@ -156,6 +206,12 @@ func (e *Executor) runNotifyStep(ctx context.Context, step Step, parentRender Re
 			"step_id": step.ID,
 		})
 	}
+	// A degraded delivery landed (as a workspace notice), but NOT to the
+	// recipient the author addressed — mark it distinctly so the step output
+	// and run detail don't read as a clean targeted send.
+	if degraded {
+		return "notified:degraded:" + item.SourceID, 0, time.Since(stepStart).Milliseconds(), nil
+	}
 	return "notified:" + item.SourceID, 0, time.Since(stepStart).Milliseconds(), nil
 }
 
@@ -176,6 +232,44 @@ func NewWorkspaceMemberChecker(db *sql.DB) func(ctx context.Context, workspaceID
 			return false, err
 		}
 		return exists == 1, nil
+	}
+}
+
+// NewRunNoticeCounter returns the production per-recipient notice counter
+// backing perRunNotifyCap. It counts routine-update `message` items already
+// written for this run (SourceID = "<run>:<step>", so the "<run>:" prefix
+// selects exactly this run's notices) to the same recipient the pending
+// item will target. Recipient match mirrors resolveNotifyTarget's output:
+//   - user:  target_user_id = <id>
+//   - role:  target_role = <ROLE> with no user (a role notice)
+//   - workspace: neither set
+//
+// Nil db reports 0 (cap disabled) so callers never fail the run over it.
+func NewRunNoticeCounter(db *sql.DB) func(ctx context.Context, workspaceID, runID, targetUserID, targetRole string) (int, error) {
+	return func(ctx context.Context, workspaceID, runID, targetUserID, targetRole string) (int, error) {
+		if db == nil || workspaceID == "" || runID == "" {
+			return 0, nil
+		}
+		// The stored id is "ibx_message_<run>:<step>"; match on source_id,
+		// which the writer sets to "<run>:<step>", via the "<run>:" prefix.
+		// LIKE metacharacters (%, _) can't appear in a cuid run id, so no
+		// escaping is needed.
+		prefix := runID + ":%"
+		var n int
+		err := db.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM inbox_items
+			WHERE workspace_id = ?
+			  AND kind = ?
+			  AND source_id LIKE ?
+			  AND target_user_id IS ?
+			  AND target_role IS ?`,
+			workspaceID, inbox.KindMessage, prefix,
+			nullableStr(targetUserID), nullableStr(targetRole),
+		).Scan(&n)
+		if err != nil {
+			return 0, err
+		}
+		return n, nil
 	}
 }
 
@@ -204,6 +298,14 @@ func resolveNotifyTarget(to, invokingUserID string) (userID, role string, err er
 		default:
 			return "", "", fmt.Errorf("to: role:%s not targetable (allowed: OWNER, MANAGER)", r)
 		}
+	case strings.HasPrefix(to, "crew:"):
+		// crew:<slug> targeting is deferred to #842 Phase 2: crews are groups
+		// of agents, the inbox targets users, and there is no crew→user
+		// ("human audience of a crew") mapping in the schema yet. Reject it
+		// loudly here — at save via validateNotifyTarget, and at run time for a
+		// templated target that renders to crew:<slug> — so the author knows
+		// it's coming rather than being surprised by a silent no-op.
+		return "", "", fmt.Errorf("to %q not yet supported — crew targeting lands in Phase 2 (issue #842); for now target trigger, user:<id>, role:OWNER/MANAGER, or workspace", to)
 	default:
 		return "", "", fmt.Errorf("to %q unsupported (allowed: workspace, trigger, user:<id>, role:OWNER, role:MANAGER)", to)
 	}

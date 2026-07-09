@@ -16,7 +16,7 @@ const maxDeferralSeconds = 30 * 24 * 3600
 
 // enqueueDeferredRun parks a delayed/debounced trigger in pending_runs.
 // Always writes the HTTP response (scheduled receipt or error).
-func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Request, workspaceID string, p *pipeline.Pipeline, body runRequestBody) {
+func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Request, workspaceID, invokingUser string, p *pipeline.Pipeline, body runRequestBody) {
 	// Bound every duration field so a huge value can't overflow the
 	// fire_at/expires_at arithmetic (which would wrap negative and fire
 	// immediately). Reject rather than clamp so the caller sees the limit.
@@ -81,6 +81,10 @@ func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Requ
 		FireAt:        fireAt,
 		ExpiresAt:     expiresAt,
 		DebounceMaxAt: debounceMaxAt,
+		// Carry the triggering user so a notify step's `to: trigger` in the
+		// deferred run reaches the person who scheduled it, not a workspace
+		// notice (issue #842 Phase 1). Empty for service/token triggers.
+		InvokingUserID: invokingUser,
 	})
 	if err != nil {
 		h.logger.Error("enqueue deferred run", "error", err, "slug", p.Slug)

@@ -101,6 +101,46 @@ func TestWorkspaceMemberChecker_RealDB(t *testing.T) {
 	}
 }
 
+// TestRunNoticeCounter_RealDB exercises the production per-recipient cap
+// counter against the real inbox_items schema: it must count only THIS
+// run's routine notices to the SAME recipient — matching NULL targets for
+// a workspace notice and an exact id for a user notice — so the soft cap
+// counts the right rows.
+func TestRunNoticeCounter_RealDB(t *testing.T) {
+	db := newNotifyIntegrationDB(t)
+	mustExec(t, db, `INSERT INTO workspaces (id, name, slug) VALUES ('ws1','ws','ws')`)
+	n := &sqlInboxNotifier{db: db, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+
+	// Two notices to u_bob and one to workspace (NULL target), all in run_1;
+	// plus one notice in a different run that must NOT be counted.
+	insert := func(source, user string) {
+		if err := n.Notify(context.Background(), inbox.Item{
+			WorkspaceID: "ws1", Kind: inbox.KindMessage, SourceID: source,
+			TargetUserID: user, Title: "t", SenderType: "pipeline",
+			Payload: map[string]interface{}{"subkind": "routine_update"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert("run_1:s1", "u_bob")
+	insert("run_1:s2", "u_bob")
+	insert("run_1:s3", "")      // workspace notice (NULL target)
+	insert("run_2:s1", "u_bob") // different run — excluded
+
+	count := NewRunNoticeCounter(db)
+	ctx := context.Background()
+
+	if got, err := count(ctx, "ws1", "run_1", "u_bob", ""); err != nil || got != 2 {
+		t.Errorf("u_bob in run_1: got (%d,%v), want (2,nil)", got, err)
+	}
+	if got, err := count(ctx, "ws1", "run_1", "", ""); err != nil || got != 1 {
+		t.Errorf("workspace notice in run_1: got (%d,%v), want (1,nil)", got, err)
+	}
+	if got, err := count(ctx, "ws1", "run_1", "u_other", ""); err != nil || got != 0 {
+		t.Errorf("unrelated recipient: got (%d,%v), want (0,nil)", got, err)
+	}
+}
+
 func mustExec(t *testing.T, db *sql.DB, q string) {
 	t.Helper()
 	if _, err := db.Exec(q); err != nil {
