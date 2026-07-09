@@ -12,6 +12,15 @@ before:
   hooks:
     - go mod tidy
 
+# Snapshot builds (goreleaser release --snapshot) get a digit-leading version.
+# The default derives from `git describe`, which on this repo yields
+# `nightly-<date>-r<n>` — and dpkg REJECTS a package whose Version doesn't start
+# with a digit ("version number does not start with digit"), so a snapshot .deb
+# won't install (verified on Proxmox; requirement for the pre-merge smoke, #933).
+# Real releases use a proper vX.Y.Z tag and ignore this template.
+snapshot:
+  version_template: "0.0.0-snapshot-{{ .ShortCommit }}"
+
 builds:
   # Full binary — daemon + server + embedded Next.js UI + CLI. ~55 MB.
   # The one most users want. Shipped as `crewship` in Homebrew.
