@@ -4,11 +4,18 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
+
+// opencodeTestLogger keeps streamOutput's diagnostics visible at Warn+
+// without the Info noise slog.Default() would emit into test output.
+func opencodeTestLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+}
 
 // opencode_parity_test.go locks the #943 production-parity contract for the
 // OPENCODE adapter: Paymaster-readable usage, Crow's Nest model surfacing,
@@ -141,7 +148,7 @@ func opencodeStreamReq() AgentRunRequest {
 // and the streamed text must be preserved.
 func TestStreamOutput_SynthesizesTerminalResultOnEarlyExit(t *testing.T) {
 	t.Parallel()
-	o := New(nil, newMemState(), slog.Default())
+	o := New(nil, newMemState(), opencodeTestLogger())
 	o.SetJournal(&chunkRecorder{})
 
 	stream := `{"type":"text","sessionID":"ses_eof","part":{"id":"p1","text":"partial answer"}}` + "\n"
@@ -179,7 +186,7 @@ func TestStreamOutput_SynthesizesTerminalResultOnEarlyExit(t *testing.T) {
 // must produce exactly one result — no synthetic duplicate.
 func TestStreamOutput_NoSyntheticResultWhenStepFinishArrived(t *testing.T) {
 	t.Parallel()
-	o := New(nil, newMemState(), slog.Default())
+	o := New(nil, newMemState(), opencodeTestLogger())
 	o.SetJournal(&chunkRecorder{})
 
 	stream := `{"type":"text","sessionID":"ses_ok","part":{"id":"p1","text":"hi"}}` + "\n" + opencodeStepFinishLine + "\n"
@@ -201,7 +208,7 @@ func TestStreamOutput_NoSyntheticResultWhenStepFinishArrived(t *testing.T) {
 // synthetic non-error result would mask the failure.
 func TestStreamOutput_NoSyntheticResultAfterErrorEvent(t *testing.T) {
 	t.Parallel()
-	o := New(nil, newMemState(), slog.Default())
+	o := New(nil, newMemState(), opencodeTestLogger())
 	o.SetJournal(&chunkRecorder{})
 
 	stream := `{"type":"error","sessionID":"ses_err","error":"provider returned 500"}` + "\n"
