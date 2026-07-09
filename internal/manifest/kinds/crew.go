@@ -73,13 +73,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/manifest/crewfile"
 	"github.com/crewship-ai/crewship/internal/manifest/internalapi"
 )
+
+// CrewFile is one local file to deliver into the crew's shared volume.
+// Aliased to the shared leaf type so the standalone kind:Crew path and the
+// legacy combined-manifest path carry an identical shape and fence (#921).
+type CrewFile = crewfile.File
 
 // ── Constants & shared regex ──────────────────────────────────────────────
 
@@ -155,6 +162,14 @@ type CrewSpec struct {
 	// element of the services_json array on the crew row. Empty
 	// slice = no sidecars (column nulled on update, omitted on create).
 	Services []Service `yaml:"services,omitempty" json:"services,omitempty"`
+
+	// Files declares local files to deliver into the crew's shared tree
+	// (/crew/shared). Each is materialized at apply via the same
+	// validated /files/save path the legacy combined manifest uses —
+	// so a standalone `kind: Crew` document delivers `files:` identically
+	// (before #921 this block was silently dropped on the SPEC-2 path).
+	// Delivery happens AFTER the crew create/update in the same Plan.
+	Files []CrewFile `yaml:"files,omitempty" json:"files,omitempty"`
 }
 
 // Devcontainer models the subset of devcontainer.json fields the
@@ -387,6 +402,35 @@ func (d *CrewDocument) Validate(_ internalapi.WorkspaceContext) error {
 	if err := validateCrewServices(d.Metadata.Slug, d.Spec.Services); err != nil {
 		return err
 	}
+
+	// Files: src present, dest normalizable under shared/, no dup dests.
+	// Same offline fence as the legacy path's checkFiles — filesystem
+	// existence/size is deferred to Plan (which has the manifest BaseDir).
+	if err := validateCrewFiles(d.Metadata.Slug, d.Spec.Files); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateCrewFiles enforces the offline shape of a crew's `files:` block:
+// src present, dest normalizable under shared/, unique dests. Mirrors the
+// legacy checkFiles so both apply paths reject the same manifests.
+func validateCrewFiles(crewSlug string, files []CrewFile) error {
+	seen := map[string]bool{}
+	for i := range files {
+		f := &files[i]
+		if strings.TrimSpace(f.Src) == "" {
+			return fmt.Errorf("crew %q: spec.files[%d] missing src", crewSlug, i)
+		}
+		dest, err := crewfile.NormalizeDest(f.Src, f.Dest)
+		if err != nil {
+			return fmt.Errorf("crew %q: spec.files[%d]: %w", crewSlug, i, err)
+		}
+		if seen[dest] {
+			return fmt.Errorf("crew %q: spec.files[%d]: duplicate dest %q", crewSlug, i, dest)
+		}
+		seen[dest] = true
+	}
 	return nil
 }
 
@@ -487,13 +531,24 @@ func validateCrewServices(crewSlug string, services []Service) error {
 // The crew PATCH endpoint treats nil fields as "leave alone" and
 // non-nil as "overwrite" — matching how we want the manifest to
 // behave for fields it declares.
-func (d *CrewDocument) Plan(_ context.Context, _ internalapi.Client, remote *CrewRemote) ([]internalapi.PlanItem, error) {
-	if remote == nil {
+func (d *CrewDocument) Plan(_ context.Context, _ internalapi.Client, remote *CrewRemote, opts ...PlanCrewOptions) ([]internalapi.PlanItem, error) {
+	var opt PlanCrewOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+
+	var crewItem internalapi.PlanItem
+	// crewID is the existing id for an update ("" for a create — the
+	// file-delivery closures resolve it by slug after the create runs).
+	crewID := ""
+
+	switch {
+	case remote == nil:
 		body, err := d.createBody()
 		if err != nil {
 			return nil, fmt.Errorf("crew %q: assemble create body: %w", d.Metadata.Slug, err)
 		}
-		return []internalapi.PlanItem{{
+		crewItem = internalapi.PlanItem{
 			Kind:        "crew",
 			Slug:        d.Metadata.Slug,
 			Action:      internalapi.ActionCreate,
@@ -505,36 +560,120 @@ func (d *CrewDocument) Plan(_ context.Context, _ internalapi.Client, remote *Cre
 				}
 				return checkStatus(resp, "create crew "+d.Metadata.Slug)
 			},
-		}}, nil
-	}
-
-	patch, err := d.updatePatch(remote)
-	if err != nil {
-		return nil, fmt.Errorf("crew %q: build update patch: %w", d.Metadata.Slug, err)
-	}
-	if len(patch) == 0 {
-		return []internalapi.PlanItem{{
-			Kind:        "crew",
-			Slug:        d.Metadata.Slug,
-			Action:      internalapi.ActionUnchanged,
-			Description: fmt.Sprintf("crew %q already matches manifest", d.Metadata.Slug),
-		}}, nil
-	}
-
-	crewID := remote.ID
-	return []internalapi.PlanItem{{
-		Kind:        "crew",
-		Slug:        d.Metadata.Slug,
-		Action:      internalapi.ActionUpdate,
-		Description: fmt.Sprintf("update crew %q (%d field(s))", d.Metadata.Slug, len(patch)),
-		Exec: func(ctx context.Context, c internalapi.Client) error {
-			resp, err := c.Patch(ctx, "/api/v1/crews/"+crewID, patch)
-			if err != nil {
-				return fmt.Errorf("PATCH /api/v1/crews/%s: %w", crewID, err)
+		}
+	default:
+		crewID = remote.ID
+		patch, err := d.updatePatch(remote)
+		if err != nil {
+			return nil, fmt.Errorf("crew %q: build update patch: %w", d.Metadata.Slug, err)
+		}
+		if len(patch) == 0 {
+			crewItem = internalapi.PlanItem{
+				Kind:        "crew",
+				Slug:        d.Metadata.Slug,
+				Action:      internalapi.ActionUnchanged,
+				Description: fmt.Sprintf("crew %q already matches manifest", d.Metadata.Slug),
 			}
-			return checkStatus(resp, "update crew "+d.Metadata.Slug)
-		},
-	}}, nil
+		} else {
+			crewItem = internalapi.PlanItem{
+				Kind:        "crew",
+				Slug:        d.Metadata.Slug,
+				Action:      internalapi.ActionUpdate,
+				Description: fmt.Sprintf("update crew %q (%d field(s))", d.Metadata.Slug, len(patch)),
+				Exec: func(ctx context.Context, c internalapi.Client) error {
+					resp, err := c.Patch(ctx, "/api/v1/crews/"+crewID, patch)
+					if err != nil {
+						return fmt.Errorf("PATCH /api/v1/crews/%s: %w", crewID, err)
+					}
+					return checkStatus(resp, "update crew "+d.Metadata.Slug)
+				},
+			}
+		}
+	}
+
+	items := []internalapi.PlanItem{crewItem}
+	fileItems, err := d.planCrewFiles(crewID, opt.BaseDir)
+	if err != nil {
+		return nil, err
+	}
+	return append(items, fileItems...), nil
+}
+
+// PlanCrewOptions carries plan-time inputs the CrewDocument can't derive from
+// the manifest document alone. BaseDir is the directory of the manifest file,
+// used to resolve relative `files:` src paths (mirrors the legacy planner's
+// opts.BaseDir).
+type PlanCrewOptions struct {
+	BaseDir string
+}
+
+// planCrewFiles emits one crew-file plan item per declared file, mirroring the
+// legacy manifest planCrewFiles. crewID is "" for a create (the closure
+// resolves it by slug after the crew-create item runs). Existence + size are
+// checked at plan time so a missing/oversized src fails --dry-run, not
+// mid-apply. Delivery re-reads the source and PUTs the bytes through the same
+// /files/save endpoint the legacy path and `crewship crew files save` use.
+func (d *CrewDocument) planCrewFiles(crewID, baseDir string) ([]internalapi.PlanItem, error) {
+	if len(d.Spec.Files) == 0 {
+		return nil, nil
+	}
+	items := make([]internalapi.PlanItem, 0, len(d.Spec.Files))
+	for i := range d.Spec.Files {
+		f := d.Spec.Files[i]
+		dest, err := crewfile.NormalizeDest(f.Src, f.Dest)
+		if err != nil {
+			return nil, fmt.Errorf("crew %q: files[%d]: %w", d.Metadata.Slug, i, err)
+		}
+		if _, err := crewfile.Load(baseDir, f.Src); err != nil {
+			return nil, fmt.Errorf("crew %q: files[%d]: %w", d.Metadata.Slug, i, err)
+		}
+		action := internalapi.ActionUpdate
+		if crewID == "" {
+			action = internalapi.ActionCreate
+		}
+		src := f.Src
+		id := crewID
+		slug := d.Metadata.Slug
+		items = append(items, internalapi.PlanItem{
+			Kind:        "crew-file",
+			Slug:        slug + "/" + dest,
+			Action:      action,
+			Description: fmt.Sprintf("deliver %s to crew %q", dest, slug),
+			Exec: func(ctx context.Context, c internalapi.Client) error {
+				cid := id
+				if cid == "" {
+					remote, err := LookupCrewRemoteBySlug(ctx, c, slug)
+					if err != nil || remote == nil {
+						return fmt.Errorf("crew %q not found for file upload: %v", slug, err)
+					}
+					cid = remote.ID
+				}
+				data, err := crewfile.Load(baseDir, src)
+				if err != nil {
+					return err
+				}
+				return putCrewFile(ctx, c, cid, dest, data)
+			},
+		})
+	}
+	return items, nil
+}
+
+// putCrewFile PUTs raw file bytes to the crew's /files/save endpoint via the
+// client's optional raw-bytes capability. It fails loudly when the client
+// can't do an octet-stream PUT rather than corrupting the file through a
+// JSON-encoded body.
+func putCrewFile(ctx context.Context, c internalapi.Client, crewID, dest string, data []byte) error {
+	rp, ok := c.(internalapi.RawBytesPutter)
+	if !ok {
+		return fmt.Errorf("crew file upload not supported by this client (no raw-bytes PUT)")
+	}
+	resp, err := rp.PutBytes(ctx,
+		"/api/v1/crews/"+url.PathEscape(crewID)+"/files/save?path="+url.QueryEscape(dest), data)
+	if err != nil {
+		return fmt.Errorf("save crew file %s: %w", dest, err)
+	}
+	return checkStatus(resp, "save crew file "+dest)
 }
 
 // ── Body builders ────────────────────────────────────────────────────────

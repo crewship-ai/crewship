@@ -5,11 +5,16 @@ package server
 // realtime path. Extracted from routes.go for readability.
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
@@ -195,13 +200,133 @@ func (s *Server) handleFileSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	defer r.Body.Close()
-	if err := s.storage.Write(r.Context(), storageKey, r.Body); err != nil {
-		s.logger.Error("file save failed", "path", filePath, "error", err)
+	// Buffer the body up front: a shared-tree overwrite may need to be
+	// replayed through the container (the reader is single-use), and we cap
+	// the size so a runaway upload can't exhaust memory.
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxCrewFileSaveBytes+1))
+	if err != nil {
+		s.logger.Error("file save read failed", "path", filePath, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read request body"})
+		return
+	}
+	if int64(len(body)) > maxCrewFileSaveBytes {
+		writeJSON(w, http.StatusRequestEntityTooLarge,
+			map[string]string{"error": fmt.Sprintf("file exceeds %d byte limit", maxCrewFileSaveBytes)})
+		return
+	}
+
+	werr := s.storage.Write(r.Context(), storageKey, bytes.NewReader(body))
+	if werr != nil {
+		// #922: after a crew is provisioned, the entrypoint chowns /crew (the
+		// bind source of "crews/<id>/shared/...") to the agent UID 1001, so a
+		// host-side overwrite by the server UID fails with EACCES. Re-route the
+		// write through the container as 1001 — the tree owner — mirroring the
+		// exec-as-1001 pattern the credential materializer uses. Only shared
+		// keys hit this; the /output tree stays host-writable.
+		if cpath, isShared := crewSharedContainerPath(crewID, storageKey); isShared &&
+			s.container != nil && errors.Is(werr, fs.ErrPermission) {
+			if cerr := s.writeCrewSharedFileViaContainer(r.Context(), crewID, cpath, body); cerr != nil {
+				s.logger.Error("file save via container failed", "path", filePath, "error", cerr)
+				status, msg := containerSaveErrorResponse(cerr)
+				writeJSON(w, status, map[string]string{"error": msg})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"status": "saved", "path": filePath})
+			return
+		}
+		s.logger.Error("file save failed", "path", filePath, "error", werr)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save file"})
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved", "path": filePath})
+}
+
+// maxCrewFileSaveBytes bounds a single crew-file save. Crew scripts/config are
+// small; the cap only exists so a buffered body can't exhaust server memory.
+const maxCrewFileSaveBytes int64 = 32 << 20 // 32 MiB
+
+var (
+	errCrewNotFound             = errors.New("crew not found")
+	errCrewContainerUnavailable = errors.New("crew container unavailable")
+)
+
+// crewSharedContainerPath maps a "crews/<id>/shared/..." storage key to the
+// absolute path inside the crew container, where <OutputBasePath>/crews/<id>
+// is bind-mounted at /crew (docker provider buildMounts). Reports false for
+// keys outside that crew's shared subtree — the /output tree stays host-side.
+func crewSharedContainerPath(crewID, storageKey string) (string, bool) {
+	prefix := "crews/" + crewID + "/"
+	if !strings.HasPrefix(storageKey, prefix) {
+		return "", false
+	}
+	rel := strings.TrimPrefix(storageKey, prefix)
+	if rel != "shared" && !strings.HasPrefix(rel, "shared/") {
+		return "", false
+	}
+	return "/crew/" + rel, true
+}
+
+// writeCrewSharedFileViaContainer writes content to containerPath inside the
+// crew container as UID 1001 — the owner of the provisioned /crew tree — so an
+// overwrite the server UID can't do host-side (#922) still lands. The write is
+// atomic (temp file in the destination dir, then mv -f), and paths pass via env
+// so a crafted destination can't break out of the shell command.
+func (s *Server) writeCrewSharedFileViaContainer(ctx context.Context, crewID, containerPath string, content []byte) error {
+	var slug string
+	if s.db != nil {
+		_ = s.db.QueryRowContext(ctx, "SELECT slug FROM crews WHERE id = ?", crewID).Scan(&slug)
+	}
+	if slug == "" {
+		return errCrewNotFound
+	}
+	containerName := s.container.CrewContainerName(crewID, slug)
+
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	const script = `set -eu; d=$(dirname "$DEST"); mkdir -p "$d"; ` +
+		`tmp=$(mktemp "$d/.crewship-save.XXXXXX"); cat > "$tmp"; ` +
+		`chmod 0664 "$tmp"; mv -f "$tmp" "$DEST"`
+	result, err := s.container.Exec(ctx, provider.ExecConfig{
+		ContainerID: containerName,
+		Cmd:         []string{"sh", "-c", script},
+		Env:         []string{"DEST=" + containerPath},
+		User:        "1001:1001",
+		Stdin:       bytes.NewReader(content),
+	})
+	if err != nil {
+		// The crew container isn't running (or doesn't exist) — nothing to
+		// exec into. Callers surface this as a 409 with an actionable message.
+		return fmt.Errorf("%w: %v", errCrewContainerUnavailable, err)
+	}
+	defer result.Reader.Close()
+	// Drain stdout/stderr to EOF so the exec has finished before we inspect
+	// its exit code.
+	_, _ = io.Copy(io.Discard, io.LimitReader(result.Reader, 64*1024))
+
+	running, code, ierr := s.container.ExecInspect(ctx, result.ExecID)
+	if ierr != nil {
+		return fmt.Errorf("inspect container write: %w", ierr)
+	}
+	if running || code != 0 {
+		return fmt.Errorf("container write exited %d", code)
+	}
+	return nil
+}
+
+// containerSaveErrorResponse maps a container-write failure to an HTTP status
+// and a message the CLI can relay.
+func containerSaveErrorResponse(err error) (int, string) {
+	switch {
+	case errors.Is(err, errCrewNotFound):
+		return http.StatusNotFound, "crew not found"
+	case errors.Is(err, errCrewContainerUnavailable):
+		return http.StatusConflict,
+			"file is owned by the crew runtime; it can only be overwritten while the crew container is running — start the crew and retry"
+	default:
+		return http.StatusInternalServerError, "failed to save file"
+	}
 }
 
 func sanitizeDownloadFilename(name string) string {

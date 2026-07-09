@@ -105,6 +105,16 @@ type Client interface {
 	WorkspaceID() string
 }
 
+// RawBytesPutter is the optional capability a Client implements to PUT a raw
+// octet-stream body (NOT JSON). Crew-file delivery needs it: the
+// /crews/{id}/files/save endpoint takes the file bytes verbatim, so routing
+// them through Client.Put (which JSON-encodes the body, mangling []byte into a
+// base64 string) would corrupt the file. Kinds type-assert for this and fail
+// loudly when it is absent rather than silently shipping a broken payload.
+type RawBytesPutter interface {
+	PutBytes(ctx context.Context, path string, data []byte) (*Response, error)
+}
+
 // SlugLookup is a thin reference used by WorkspaceContext for FK
 // validation. Name is included so validators can produce
 // human-readable error messages ("project 'Q2 Roadmap' (slug=q2-roadmap)
