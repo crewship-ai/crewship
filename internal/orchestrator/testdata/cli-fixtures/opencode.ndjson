@@ -1,3 +1,5 @@
-{"type":"text","sessionID":"ses-1","part":{"id":"p1","text":"Hello"}}
-{"type":"text","sessionID":"ses-1","part":{"id":"p2","text":" world"}}
-{"type":"step_finish","sessionID":"ses-1","part":{"tokens":{"input":10,"output":2},"cost":0.00002,"providerID":"anthropic","modelID":"claude-sonnet-4-6"}}
+{"type":"step_start","sessionID":"ses_fixture","part":{"id":"stp_1"}}
+{"type":"text","sessionID":"ses_fixture","part":{"id":"prt_1","text":"Hello"}}
+{"type":"text","sessionID":"ses_fixture","part":{"id":"prt_1","text":"Hello! How can I help you today?"}}
+{"type":"tool_use","sessionID":"ses_fixture","part":{"id":"prt_2","tool":"bash","state":{"status":"completed","input":{"command":"echo hi"},"output":"hi\n","metadata":{"exit":0},"time":{"start":1751980000000,"end":1751980000100}}}}
+{"type":"step_finish","sessionID":"ses_fixture","part":{"id":"stp_1","reason":"stop","cost":0.0021,"tokens":{"input":1204,"output":58,"reasoning":0,"cache":{"read":0,"write":0}},"providerID":"anthropic","modelID":"claude-sonnet-4-6"}}

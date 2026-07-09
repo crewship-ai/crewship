@@ -42,6 +42,10 @@ import (
 //          > testdata/cli-fixtures/droid.ndjson
 //   3. Commit the updated fixtures + bump pinnedNpmVersion in
 //      cli_adapter_versions_test.go.
+//
+// NOTE: opencode.ndjson is currently authored from the documented upstream
+// schema (#943), not captured — replace it with a real capture on the next
+// dev2 smoke run before promoting the adapter's status to production.
 
 // adapterFixtureContract pins the minimum AgentEvent set every CLI adapter
 // must emit when given a canonical "say hello" prompt. If a future CLI
@@ -81,8 +85,8 @@ func TestE2E_AllAdaptersFixtureReplay(t *testing.T) {
 		{
 			adapter:        "OPENCODE",
 			fixtureFile:    "opencode.ndjson",
-			mustHaveTypes:  []string{"text", "result"},
-			mustHaveModel:  false, // opencode does not emit a system bootstrap
+			mustHaveTypes:  []string{"system", "text", "result"},
+			mustHaveModel:  true, // #943: model surfaced from step_finish metadata
 			mustHaveResult: true,
 		},
 		{
@@ -127,10 +131,16 @@ func TestE2E_AllAdaptersFixtureReplay(t *testing.T) {
 				}
 				a.ParseStreamLine([]byte(line), func(e AgentEvent) {
 					seenTypes[e.Type]++
-					// Look for the model field in any system or result event metadata.
-					if meta, ok := e.Metadata.(map[string]interface{}); ok {
-						if model, ok := meta["model"].(string); ok && model != "" {
-							seenModel = true
+					// The model must ride on the system bootstrap envelope —
+					// that is what the shared Accumulator captures for the
+					// run record (buffering_handler.go). A model that only
+					// appears in result metadata would leave Crow's Nest
+					// blank, so scope the assertion to system events.
+					if e.Type == "system" {
+						if meta, ok := e.Metadata.(map[string]interface{}); ok {
+							if model, ok := meta["model"].(string); ok && model != "" {
+								seenModel = true
+							}
 						}
 					}
 					if e.Type == "result" {
@@ -145,7 +155,7 @@ func TestE2E_AllAdaptersFixtureReplay(t *testing.T) {
 				}
 			}
 			if c.mustHaveModel && !seenModel {
-				t.Errorf("%s: no model name surfaced in any event metadata — Crow's Nest 'agent runs on X' display will be blank", c.adapter)
+				t.Errorf("%s: no model name on any system bootstrap event — Crow's Nest 'agent runs on X' display will be blank", c.adapter)
 			}
 			if c.mustHaveResult && !seenResult {
 				t.Errorf("%s: no terminal result event — Paymaster cannot record run cost", c.adapter)

@@ -17,10 +17,16 @@ import (
 // Canonical non-interactive form per opencode.ai/docs/cli/ is `opencode run
 // <message>`. Relevant flags:
 //   - --format        : default | json   (NOT --output-format — different name)
-//     json emits a single raw JSON event blob, not a stream
+//     json emits JSONL — one flat event envelope per line (step_start,
+//     text, tool_use, step_finish, error); parseOpenCodeStreamJSON consumes
+//     it line-by-line like every other stream-JSON adapter
 //   - --model, -m     : "provider/model" — e.g. anthropic/claude-sonnet-4-6
 //   - --continue, -c  : resume last session
 //   - --session, -s   : resume specific session
+//
+// Known upstream caveat (anomalyco/opencode#26855): the process can exit
+// before emitting the final step_finish envelope. streamOutput synthesizes a
+// terminal result in that case so run finalization never hangs on it.
 //
 // Native MCP support exists upstream via the `mcp` section of opencode.json;
 // SetupSystemPrompt drops AGENTS.md (system instructions) into the work
@@ -54,10 +60,8 @@ func (opencodeAdapter) BuildCommand(req AgentRunRequest) []string {
 	return cmd
 }
 
-// UseStreamJSON returns true: --format json emits a JSON object that
-// parseOpenCodeStreamJSON handles as a single event. (Unlike Cursor/Gemini/
-// Claude, opencode does not currently expose a streaming JSONL mode — the
-// whole response is buffered until completion.)
+// UseStreamJSON returns true: --format json emits JSONL and
+// parseOpenCodeStreamJSON consumes one event envelope per line.
 func (opencodeAdapter) UseStreamJSON() bool { return true }
 
 func (opencodeAdapter) ParseStreamLine(line []byte, handler EventHandler) {
