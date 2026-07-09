@@ -175,7 +175,7 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	if _, err := io.Copy(w, reader); err != nil {
-		s.logger.Error("file download stream error", "path", filePath, "error", err)
+		s.logger.Error("file download stream error", "path", sanitizeLogPath(filePath), "error", err)
 	}
 }
 
@@ -205,7 +205,7 @@ func (s *Server) handleFileSave(w http.ResponseWriter, r *http.Request) {
 	// the size so a runaway upload can't exhaust memory.
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxCrewFileSaveBytes+1))
 	if err != nil {
-		s.logger.Error("file save read failed", "path", filePath, "error", err)
+		s.logger.Error("file save read failed", "path", sanitizeLogPath(filePath), "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read request body"})
 		return
 	}
@@ -226,7 +226,7 @@ func (s *Server) handleFileSave(w http.ResponseWriter, r *http.Request) {
 		if cpath, isShared := crewSharedContainerPath(crewID, storageKey); isShared &&
 			s.container != nil && errors.Is(werr, fs.ErrPermission) {
 			if cerr := s.writeCrewSharedFileViaContainer(r.Context(), crewID, cpath, body); cerr != nil {
-				s.logger.Error("file save via container failed", "path", filePath, "error", cerr)
+				s.logger.Error("file save via container failed", "path", sanitizeLogPath(filePath), "error", cerr)
 				status, msg := containerSaveErrorResponse(cerr)
 				writeJSON(w, status, map[string]string{"error": msg})
 				return
@@ -234,7 +234,7 @@ func (s *Server) handleFileSave(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]string{"status": "saved", "path": filePath})
 			return
 		}
-		s.logger.Error("file save failed", "path", filePath, "error", werr)
+		s.logger.Error("file save failed", "path", sanitizeLogPath(filePath), "error", werr)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save file"})
 		return
 	}
@@ -327,6 +327,20 @@ func containerSaveErrorResponse(err error) (int, string) {
 	default:
 		return http.StatusInternalServerError, "failed to save file"
 	}
+}
+
+// sanitizeLogPath strips CR/LF and other control characters from a
+// user-supplied path before it enters a log record, defusing log-forging
+// (CodeQL "log entries created from user input"). slog escapes these in its
+// JSON handler, but sanitizing at the source also protects a text handler and
+// satisfies the static check.
+func sanitizeLogPath(p string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return '_'
+		}
+		return r
+	}, p)
 }
 
 func sanitizeDownloadFilename(name string) string {
