@@ -192,6 +192,11 @@ jobs:
       - name: Go build
         run: go build ./cmd/crewship
 
+      # #945 — Windows CLI port regression gate. Only the clionly build
+      # is Windows-clean today; the full daemon build is phase B (#946).
+      - name: Go build (windows clionly cross-compile)
+        run: GOOS=windows GOARCH=amd64 go build -tags clionly ./cmd/crewship
+
       - name: Go test
         # -timeout 15m: the internal/api package suite has grown past
         # the Go default 10m (PR-A native memory tools + PR-D ephemeral

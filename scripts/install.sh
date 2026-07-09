@@ -62,7 +62,7 @@ detect_os() {
     Linux)   echo linux ;;
     Darwin)  echo darwin ;;
     MINGW*|MSYS*|CYGWIN*)
-      err "Native Windows binaries are not published during the beta. Run Crewship via WSL (re-run this script inside WSL) or Docker: https://github.com/${REPO}#install" ;;
+      err "This installer targets Linux/macOS. On Windows, grab crewship-cli_*_windows_*.zip from https://github.com/${REPO}/releases (CLI against a remote server; the local daemon still needs WSL or Docker: https://github.com/${REPO}#install)" ;;
     *) err "unsupported OS: $(uname -s)" ;;
   esac
 }

@@ -94,6 +94,9 @@ func writeClipboard(s string) error {
 		{"wl-copy", nil},
 		{"xclip", []string{"-selection", "clipboard"}},
 		{"xsel", []string{"--clipboard", "--input"}},
+		// Windows: clip.exe reads stdin and writes the clipboard —
+		// same pipe contract as the Unix helpers above.
+		{"clip.exe", nil},
 	}
 	for _, c := range candidates {
 		if _, err := exec.LookPath(c.name); err != nil {
@@ -111,7 +114,7 @@ func writeClipboard(s string) error {
 		_ = stdin.Close()
 		return cmd.Wait()
 	}
-	return fmt.Errorf("no clipboard helper found (install pbcopy/wl-copy/xclip/xsel)")
+	return fmt.Errorf("no clipboard helper found (install pbcopy/wl-copy/xclip/xsel; clip.exe on Windows)")
 }
 
 func init() {

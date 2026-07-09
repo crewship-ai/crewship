@@ -228,6 +228,10 @@ func readClipboard(ctx context.Context, max int) ([]byte, error) {
 		{"wl-paste", nil},
 		{"xclip", []string{"-selection", "clipboard", "-o"}},
 		{"xsel", []string{"--clipboard", "--output"}},
+		// Windows: no native paste .exe exists (clip.exe is write-only),
+		// so read goes through PowerShell. -Raw preserves newlines
+		// instead of returning a line array.
+		{"powershell.exe", []string{"-NoProfile", "-Command", "Get-Clipboard -Raw"}},
 	}
 	for _, c := range candidates {
 		if _, err := exec.LookPath(c.name); err != nil {
@@ -244,7 +248,7 @@ func readClipboard(ctx context.Context, max int) ([]byte, error) {
 		}
 		return out, nil
 	}
-	return nil, fmt.Errorf("no clipboard helper found (install pbpaste/wl-paste/xclip/xsel)")
+	return nil, fmt.Errorf("no clipboard helper found (install pbpaste/wl-paste/xclip/xsel, or PowerShell on Windows)")
 }
 
 // resolveBase returns the base prompt and whether stdin was consumed by @-.

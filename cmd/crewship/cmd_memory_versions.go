@@ -246,13 +246,13 @@ func defaultBlobRoot() (string, error) {
 	// data-dir resolution does. Override env var matches
 	// database.DefaultDataDir's contract.
 	if override := strings.TrimSpace(os.Getenv("CREWSHIP_DATA_DIR")); override != "" {
-		return override + "/memory/versions", nil
+		return filepath.Join(override, "memory", "versions"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return home + "/.crewship/memory/versions", nil
+	return filepath.Join(home, ".crewship", "memory", "versions"), nil
 }
 
 // canonicalPathIsSafe rejects empty paths + traversal attempts + any

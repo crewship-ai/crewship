@@ -3,8 +3,6 @@ package sidecar
 import (
 	"fmt"
 	"io"
-	"os"
-	"syscall"
 )
 
 // readRegularNoFollow reads path safely for the memory-read surface, mirroring
@@ -18,8 +16,13 @@ import (
 //     forever).
 //   - After open we re-Stat via the fd and reject anything that isn't a
 //     regular file (sockets, devices, FIFOs that survived O_NONBLOCK, dirs).
+//
+// The open is platform-split (memory_read_nofollow_unix.go /
+// memory_read_nofollow_windows.go), mirroring internal/memory — the
+// sidecar itself only runs in Linux containers, but this package is
+// compiled into the crewship binary on every platform.
 func readRegularNoFollow(path string) ([]byte, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	f, err := openNoFollow(path)
 	if err != nil {
 		return nil, err
 	}
