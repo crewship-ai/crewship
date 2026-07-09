@@ -6,12 +6,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"os/signal"
 	"runtime"
 	"syscall"
 
+	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/sidecar"
 )
 
@@ -51,7 +51,14 @@ func main() {
 	// Without this, the sidecar dies as soon as the shell wrapper exits.
 	signal.Ignore(syscall.SIGPIPE)
 
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	// Route through logging.New (not a raw slog handler) so the sidecar's
+	// logs get the same central ReplaceAttr treatment the server does:
+	// secret redaction AND CR/LF + control-char neutralization
+	// (CWE-117 / log-injection). The sidecar logs user-derived values
+	// (proxy targets, memory paths, agent IDs), so an un-neutralized
+	// handler here would leave those log-injection sinks open even after
+	// the server side is fixed.
+	logger := logging.New("debug", "json", os.Stderr)
 
 	// Read configuration from stdin as JSON.
 	// The orchestrator pipes credentials and memory config at startup to
