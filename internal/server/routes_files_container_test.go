@@ -55,6 +55,69 @@ func (p *permOverwriteStorage) Write(ctx context.Context, path string, r io.Read
 	return p.StorageProvider.Write(ctx, path, r)
 }
 
+// zeroReader yields an endless stream of NUL bytes — used to synthesize an
+// oversized body without allocating it.
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
+}
+
+// countingStorage records how many bytes each Write streamed, proving the
+// /output path streams the body straight through (no cap, no buffering).
+type countingStorage struct {
+	provider.StorageProvider
+	wrote int64
+}
+
+func (c *countingStorage) Write(_ context.Context, _ string, r io.Reader) error {
+	n, err := io.Copy(io.Discard, r)
+	c.wrote = n
+	return err
+}
+
+// TestHandleFileSave_SharedOverCapReturns413: a shared-tree write bigger than
+// the buffer cap is rejected with 413 (the cap only exists because shared
+// writes are buffered for a possible container replay).
+func TestHandleFileSave_SharedOverCapReturns413(t *testing.T) {
+	base, _ := localfs.New(t.TempDir())
+	s := newContainerFallbackServer(t, base, &recordingContainer{mockContainer: &mockContainer{}})
+
+	body := io.LimitReader(zeroReader{}, maxCrewFileSaveBytes+1)
+	req := httptest.NewRequest("PUT", "/crews/crewX/files/save?path=shared/big.bin", body)
+	req.SetPathValue("id", "crewX")
+	rec := httptest.NewRecorder()
+	s.ipcMux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized shared write: status = %d, want 413, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleFileSave_OutputStreamsUncapped: an agent /output write is NOT
+// buffered or capped — it streams straight to storage even past the shared cap.
+func TestHandleFileSave_OutputStreamsUncapped(t *testing.T) {
+	cs := &countingStorage{}
+	s := newContainerFallbackServer(t, cs, &recordingContainer{mockContainer: &mockContainer{}})
+
+	size := maxCrewFileSaveBytes + 4096 // over the shared cap on purpose
+	body := io.LimitReader(zeroReader{}, size)
+	req := httptest.NewRequest("PUT", "/crews/crewX/files/save?path=crewX/report.bin", body)
+	req.SetPathValue("id", "crewX")
+	rec := httptest.NewRecorder()
+	s.ipcMux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("output write: status = %d, want 200 (uncapped stream), body=%s", rec.Code, rec.Body.String())
+	}
+	if cs.wrote != size {
+		t.Errorf("streamed %d bytes to /output, want %d (must not be capped/buffered)", cs.wrote, size)
+	}
+}
+
 // recordingContainer captures the Exec the save fallback routes through it.
 type recordingContainer struct {
 	*mockContainer
@@ -132,6 +195,12 @@ func TestHandleFileSave_OverwriteRoutesThroughContainer(t *testing.T) {
 	}
 	if dest != "/crew/shared/scripts/parse_check.sh" {
 		t.Errorf("DEST env = %q, want /crew/shared/scripts/parse_check.sh", dest)
+	}
+	// The in-container script must fence the resolved dir to /crew/shared
+	// (defence-in-depth against a symlink planted inside the shared tree).
+	script := strings.Join(ctr.gotCfg.Cmd, " ")
+	if !strings.Contains(script, "realpath") || !strings.Contains(script, "/crew/shared") {
+		t.Errorf("container script missing realpath fence to /crew/shared: %q", script)
 	}
 }
 
