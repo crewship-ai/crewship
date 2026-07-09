@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/pathsafe"
 )
 
 // AgentContext carries the per-call routing data the dispatcher needs
@@ -67,6 +69,15 @@ const (
 	capDailyBytes   = 30000
 	capPeerBytes    = 1500
 	softCapPct      = 0.80
+
+	// maxSearchLimit is the hard upper bound on the number of hits
+	// memory.search returns. It is BOTH the clamp applied to the
+	// agent-supplied `limit` and the constant used to pre-size the
+	// result slice — deriving the slice capacity from the (untrusted)
+	// request field would be an unbounded-allocation sink even though
+	// the clamp already bounds it in practice. Using the constant keeps
+	// the allocation provably O(1) and independent of request input.
+	maxSearchLimit = 20
 )
 
 // validTiers is the closed enum the dispatcher accepts. Keep in sync
@@ -667,8 +678,8 @@ func (d *Dispatcher) handleSearch(ctx context.Context, raw json.RawMessage) (Too
 	if strings.TrimSpace(a.Q) == "" {
 		return ToolResult{IsError: true, Content: "memory.search: q is required"}, nil
 	}
-	if a.Limit <= 0 || a.Limit > 20 {
-		a.Limit = 20
+	if a.Limit <= 0 || a.Limit > maxSearchLimit {
+		a.Limit = maxSearchLimit
 	}
 	if a.Tier != "" {
 		if _, ok := validTiers[a.Tier]; !ok {
@@ -689,7 +700,11 @@ func (d *Dispatcher) handleSearch(ctx context.Context, raw json.RawMessage) (Too
 		SHA256      string `json:"quarantine_sha256"`
 		Placeholder string `json:"placeholder"`
 	}
-	hits := make([]hit, 0, a.Limit)
+	// Pre-size from the constant, never from a.Limit: a.Limit is
+	// request-controlled and feeding it to make() is an uncontrolled-
+	// allocation sink. maxSearchLimit is the same value a.Limit is
+	// clamped to above, so behaviour is unchanged.
+	hits := make([]hit, 0, maxSearchLimit)
 	var quarantined []quarantineNote
 	needle := strings.ToLower(a.Q)
 	for _, p := range files {
@@ -807,10 +822,17 @@ func (d *Dispatcher) resolvePath(tier, key string) (string, error) {
 		if key == "" {
 			key = d.now().Format("2006-01-02")
 		}
+		// key must be a single path segment; the pathsafe.Join below
+		// then confines the result under AgentMemoryDir (rejects any
+		// residual traversal / NUL / absolute smuggling in one place).
 		if strings.ContainsAny(key, `/\`) || strings.Contains(key, "..") {
 			return "", fmt.Errorf("invalid daily key %q", key)
 		}
-		return filepath.Join(d.ctx.AgentMemoryDir, "daily", key+".md"), nil
+		p, err := pathsafe.Join(d.ctx.AgentMemoryDir, filepath.Join("daily", key+".md"))
+		if err != nil {
+			return "", fmt.Errorf("invalid daily key %q: %w", key, err)
+		}
+		return p, nil
 	case "peers":
 		if key == "" {
 			return "", errors.New("peers tier requires 'key' (user slug)")
@@ -818,7 +840,11 @@ func (d *Dispatcher) resolvePath(tier, key string) (string, error) {
 		if strings.ContainsAny(key, `/\`) || strings.Contains(key, "..") {
 			return "", fmt.Errorf("invalid peer key %q", key)
 		}
-		return filepath.Join(d.ctx.AgentMemoryDir, "peers", key+".md"), nil
+		p, err := pathsafe.Join(d.ctx.AgentMemoryDir, filepath.Join("peers", key+".md"))
+		if err != nil {
+			return "", fmt.Errorf("invalid peer key %q: %w", key, err)
+		}
+		return p, nil
 	default:
 		return "", fmt.Errorf("unknown tier %q", tier)
 	}

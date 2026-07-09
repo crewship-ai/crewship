@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/memory"
+	"github.com/crewship-ai/crewship/internal/pathsafe"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
@@ -301,16 +302,15 @@ func (s *Server) memoryScrubber() *scrubber.Scrubber {
 // caller passing `foo/../../etc/passwd` doesn't slip through by
 // normalising "foo/.." away in isolation.
 func safeJoinUnder(base, rel string) (string, error) {
-	if rel == "" {
+	// Lexical confinement: pathsafe.Join rejects absolute paths, NUL
+	// bytes, and any "../" traversal, and guarantees the returned value
+	// is base or a descendant of base. This is the single shared guard
+	// (also used by the in-process memory dispatcher) so the read/write
+	// HTTP surface and the tool surface stay byte-for-byte consistent.
+	cleaned, err := pathsafe.Join(base, rel)
+	if err != nil {
 		return "", errIllegalPath
 	}
-	if filepath.IsAbs(rel) {
-		return "", errIllegalPath
-	}
-	joined := filepath.Join(base, rel)
-	cleaned := filepath.Clean(joined)
-	// Ensure cleaned begins with base + separator (or equals base
-	// for the unlikely empty-rel case which we already rejected).
 	absBase, err := filepath.Abs(base)
 	if err != nil {
 		return "", err
@@ -318,9 +318,6 @@ func safeJoinUnder(base, rel string) (string, error) {
 	absCleaned, err := filepath.Abs(cleaned)
 	if err != nil {
 		return "", err
-	}
-	if !strings.HasPrefix(absCleaned, absBase+string(filepath.Separator)) && absCleaned != absBase {
-		return "", errIllegalPath
 	}
 
 	// Final-component symlink guard (finding MEM, 2026-06 audit). The agent
