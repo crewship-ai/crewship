@@ -1,31 +1,48 @@
 name: Release Smoke Test
 
-# Runs AFTER goreleaser successfully publishes a GitHub release. The point is
-# to catch the embarrassing case where a release tag ships a binary that
-# segfaults on `crewship version` or returns 500 from `crewship doctor`.
+# TWO ways this runs:
 #
-# Failure of this workflow does NOT delete or yank the release — publishing
-# was already successful and rolling it back automatically would create a
-# race with users who started downloading. A red check on this workflow is
-# the signal to either ship a patch tag (v0.1.1) or manually mark the
-# release as a pre-release / delete it via the GitHub UI.
+# 1. workflow_run on the "Release" workflow — the post-release smoke. It does
+#    NOT use `release: published`: goreleaser creates the release with the
+#    built-in GITHUB_TOKEN, and GitHub deliberately suppresses `release`/`push`
+#    events for token-created refs (loop prevention), so `release: published`
+#    NEVER fired — every post-release smoke was dead (#933). Chaining off the
+#    Release *workflow* completing sidesteps that with no extra secret.
+#
+# 2. pull_request (path-gated) — the pre-merge smoke: build a goreleaser
+#    snapshot and install the .deb in a container BEFORE merge, so packaging
+#    regressions are caught on the PR that makes them, not after a tag ships.
+#
+# Failure of the post-release run does NOT yank the release (publishing already
+# succeeded); it signals "ship a patch tag or pull the release manually".
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  pull_request:
+    paths:
+      - ".goreleaser.yml"
+      - "packaging/**"
+      - "scripts/install.sh"
+      - ".github/workflows/smoke-test.yml"
 
 permissions:
   contents: read
   packages: read
 
 env:
-  # The release tag (e.g. v0.1.0-beta.1) shared by every matrix entry. Pulled
-  # from github.event.release.tag_name so a manual re-run on a specific
-  # release targets the right artifacts.
-  TAG: ${{ github.event.release.tag_name }}
+  # The release tag (e.g. v0.1.0-beta.1) for the post-release jobs. On a
+  # workflow_run triggered by a tag push, head_branch is the tag name. Empty on
+  # pull_request events (those jobs don't use it — they build a snapshot).
+  TAG: ${{ github.event.workflow_run.head_branch }}
+  GO_VERSION: "1.26.5"
 
 jobs:
   binary:
     name: Smoke ${{ matrix.os }} / ${{ matrix.arch }}
+    # Post-release only: needs a published release to download. Skip on PRs (the
+    # pull_request trigger is for the pre-merge package-smoke job below).
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
     # Pinning the macOS arm64 runner to macos-14 explicitly: macos-latest still
     # rotates between intel and arm64 hosts at the time of writing, and we want
     # the smoke test to actually exercise the darwin/arm64 archive — not silently
@@ -221,6 +238,7 @@ jobs:
 
   docker:
     name: Smoke Docker image
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -259,6 +277,7 @@ jobs:
     # as-shipped (#858 phase 4). This is the FHS layout the tarball smoke can't
     # cover: crewship in /usr/bin, entrypoint.sh in /usr/libexec/crewship, and
     # autodetect must find both with no CREWSHIP_*_PATH override.
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -350,3 +369,64 @@ jobs:
             exit 1
           fi
           echo "${{ matrix.pkg }} package boots and serves /api/health"
+
+  # Pre-merge package smoke: build a goreleaser snapshot and install the .deb in
+  # a debian:12 container BEFORE merge, so a broken postinstall / layout / asset
+  # name is caught on the PR that changes packaging — not after a release tag
+  # (the post-release jobs above only run once a release exists). Path-gated via
+  # the pull_request `paths:` filter at the top of this workflow.
+  package-smoke-pr:
+    name: Pre-merge package smoke (deb)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # The full `crewship` build embeds web/out (//go:embed all:out). The
+      # package smoke only exercises install + boot + /healthz, not the UI, so a
+      # stub satisfies the embed without a full (slow) frontend build.
+      - name: Stub embedded UI for the snapshot build
+        run: |
+          mkdir -p web/out
+          printf '<!doctype html><title>crewship snapshot</title>' > web/out/index.html
+
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+        with:
+          version: "v2.6.1"
+          install-only: true
+
+      # snapshot.version_template in .goreleaser.yml forces a digit-leading
+      # version (raw `nightly-…` snapshot versions are rejected by dpkg —
+      # verified on Proxmox, see #927). Skip the release-only pipes.
+      - name: Build snapshot packages
+        run: goreleaser release --snapshot --clean --skip=publish,sign,sbom,validate,homebrew
+
+      - name: Install .deb in debian:12 and boot
+        run: |
+          set -euo pipefail
+          ls -1 dist/*.deb
+          docker run --rm -v "$PWD/dist:/pkg" debian:12 bash -euo pipefail -c '
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl /pkg/crewship_*_linux_amd64.deb
+            # FHS layout the unit + autodetect rely on
+            test -x /usr/bin/crewship
+            test -x /usr/bin/crewship-sidecar
+            test -f /usr/libexec/crewship/entrypoint.sh
+            test -f /usr/lib/systemd/system/crewship.service
+            crewship version
+            mkdir -p /var/lib/crewship
+            env CREWSHIP_DATA_DIR=/var/lib/crewship CREWSHIP_PORT=9090 crewship start --no-docker >/tmp/cw.log 2>&1 &
+            for _ in $(seq 1 60); do
+              if curl -sf --max-time 1 http://127.0.0.1:9090/healthz >/dev/null 2>&1; then
+                echo "deb install boots and serves /healthz"; exit 0
+              fi
+              sleep 1
+            done
+            echo "::error::package did not serve /healthz within 60s"; cat /tmp/cw.log; exit 1
+          '
