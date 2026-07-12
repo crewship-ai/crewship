@@ -88,6 +88,20 @@ type pipelineEmitContext struct {
 	pipelineID      string
 	pipelineSlug    string
 	runID           string
+	// depth/dryRun gate the RUN-LEVEL broadcasts (failed/completed):
+	// emitRunStarted was always gated at its call site on depth==0 &&
+	// !dry-run, but the terminal emits weren't — a failing call_pipeline
+	// child toasted once per nesting level and a draft validation
+	// (dry-run) raised a workspace-wide failure toast. Journal entries
+	// are NOT gated — per-run observability isn't the noise problem.
+	depth  int
+	dryRun bool
+}
+
+// broadcastRunLevel reports whether run-level events from this context
+// should reach the workspace WS channel: top-level, real runs only.
+func (c *pipelineEmitContext) broadcastRunLevel() bool {
+	return c != nil && c.depth == 0 && !c.dryRun
 }
 
 // broadcast pushes a typed event to the workspace channel. Centralised
@@ -403,16 +417,30 @@ func (c *pipelineEmitContext) emitRunCompleted(ctx context.Context, totalDuratio
 		Summary:     "Pipeline " + c.pipelineSlug + " completed",
 		Payload:     mergePayload(p, "pipeline_id", c.pipelineID, "pipeline_slug", c.pipelineSlug, "run_id", c.runID),
 	})
-	c.broadcast("pipeline.run.completed", p)
+	if c.broadcastRunLevel() {
+		c.broadcast("pipeline.run.completed", p)
+	}
 }
 
 func (c *pipelineEmitContext) emitRunFailed(ctx context.Context, failedStepID, errorMessage string) {
 	if c == nil {
 		return
 	}
+	// Status rides the broadcast so the frontend can suppress the
+	// failure toast for user cancels. The cancel path emits from the
+	// step loop with the already-canceled run ctx, BEFORE the outer
+	// Run() relabels the row CANCELLED — so ctx cancellation is the
+	// signal available at this point. A real failure racing a later
+	// cancel may label CANCELLED, which errs in the quiet direction
+	// the user asked for by cancelling.
+	status := "FAILED"
+	if ctx.Err() != nil {
+		status = "CANCELLED"
+	}
 	p := map[string]any{
 		"failed_at_step": failedStepID,
 		"error_message":  truncateForPreview(errorMessage),
+		"status":         status,
 	}
 	_, _ = c.emitter.Emit(ctx, journal.Entry{
 		WorkspaceID: c.workspaceID,
@@ -425,5 +453,7 @@ func (c *pipelineEmitContext) emitRunFailed(ctx context.Context, failedStepID, e
 		Summary:     "Pipeline " + c.pipelineSlug + " failed at step " + failedStepID,
 		Payload:     mergePayload(p, "pipeline_id", c.pipelineID, "pipeline_slug", c.pipelineSlug, "run_id", c.runID),
 	})
-	c.broadcast("pipeline.run.failed", p)
+	if c.broadcastRunLevel() {
+		c.broadcast("pipeline.run.failed", p)
+	}
 }

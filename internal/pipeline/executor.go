@@ -859,6 +859,8 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		pipelineID:      pipelineID,
 		pipelineSlug:    pipelineSlug,
 		runID:           runID,
+		depth:           depth,
+		dryRun:          in.Mode == ModeDryRun,
 	}
 
 	// Render-context env carries safe runtime metadata that templates

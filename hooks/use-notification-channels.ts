@@ -93,7 +93,7 @@ export function useNotificationChannels(workspaceId: string | null | undefined) 
       )
       if (!res.ok) {
         const errBody = await res.json().catch(() => null)
-        throw new Error(errBody?.error ?? `create channel: ${res.status}`)
+        throw new Error(errBody?.error ?? errBody?.detail ?? `create channel: ${res.status}`)
       }
       const out: CreatedChannel = await res.json()
       await refresh()
@@ -111,7 +111,7 @@ export function useNotificationChannels(workspaceId: string | null | undefined) 
       )
       if (!res.ok && res.status !== 404) {
         const errBody = await res.json().catch(() => null)
-        throw new Error(errBody?.error ?? `delete channel: ${res.status}`)
+        throw new Error(errBody?.error ?? errBody?.detail ?? `delete channel: ${res.status}`)
       }
       await refresh()
     },
@@ -127,7 +127,7 @@ export function useNotificationChannels(workspaceId: string | null | undefined) 
       )
       if (!res.ok) {
         const errBody = await res.json().catch(() => null)
-        throw new Error(errBody?.error ?? `test send: ${res.status}`)
+        throw new Error(errBody?.error ?? errBody?.detail ?? `test send: ${res.status}`)
       }
     },
     [workspaceId],
