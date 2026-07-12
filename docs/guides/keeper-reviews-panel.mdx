@@ -39,12 +39,19 @@ Backend reads from one source of truth — `GET /api/v1/admin/keeper/requests?li
 
 ### F4.1 Skill Review
 
-Cron-fires daily 03:00 UTC. Every skill in the workspace gets evaluated against:
+Cron-fires daily 03:00 UTC. Every skill **with at least one enabled
+assignment on a live agent** gets evaluated against:
 
 - `last_used_at` (when did any agent last invoke it)
 - `assignments` (how many agents have it assigned)
 - `stats.invocations_30d` + `stats.failures_30d`
 - `failure_snippets` (last 3 failure excerpts, if any)
+
+Skills nobody has assigned are skipped: there is no workspace to bill the
+review's LLM call to and no workspace inbox to notify, so a review would
+burn spend on an outcome no one sees. The next assignment picks the skill
+back up on the following daily sweep. The review call itself is billed to
+the first (alphabetical) workspace using the skill.
 
 The evaluator returns one of:
 

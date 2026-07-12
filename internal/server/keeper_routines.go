@@ -186,6 +186,33 @@ func loadSkillSweepInputs(
 			`SELECT COUNT(*) FROM agent_skills WHERE skill_id = ? AND enabled = 1`,
 			id).Scan(&assignments)
 
+		// Billing workspace for the review's LLM call (CRE-138). The
+		// catalog is global, but the paymaster requires a non-empty
+		// workspace_id pre-flight — the old hard-coded "" made every
+		// review call fail with "paymaster: workspace_id required" and
+		// collapse to deny-all. One review per skill, billed
+		// deterministically to the first (ASC) workspace with an enabled
+		// assignment on a live agent — the same population WriteInboxItem
+		// fans its notifications out to.
+		var billingWS string
+		_ = db.QueryRowContext(ctx, `
+			SELECT a.workspace_id
+			  FROM agent_skills sk
+			  JOIN agents a ON a.id = sk.agent_id
+			 WHERE sk.skill_id = ? AND sk.enabled = 1
+			   AND a.deleted_at IS NULL AND a.workspace_id != ''
+			 ORDER BY a.workspace_id ASC
+			 LIMIT 1`, id).Scan(&billingWS)
+		if billingWS == "" {
+			// No live enabled assignment → no workspace to bill and no
+			// workspace WriteInboxItem could notify. Reviewing would burn
+			// LLM spend on an outcome nobody sees; the next assignment
+			// picks the skill back up on the following daily sweep.
+			logger.Info("keeper.skill_review: skipping skill with no live assignment",
+				"skill_id", id)
+			continue
+		}
+
 		// Aggregate stats from skill_invocations within the lookback
 		// window. Per-skill cost is modest (one indexed COUNT/SUM); the
 		// outer ORDER BY id keeps caller logging deterministic.
@@ -215,7 +242,7 @@ func loadSkillSweepInputs(
 				ID:             id,
 				Name:           name,
 				Description:    desc,
-				WorkspaceID:    "", // global catalog; F4.1 prompt tolerates empty
+				WorkspaceID:    billingWS, // paymaster billing scope (CRE-138)
 				LifecycleState: skills.LifecycleState(lifecycle),
 				LastUsedAt:     lastUsed,
 				Assignments:    assignments,
