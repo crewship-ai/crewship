@@ -13,6 +13,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // OnlineSampler is the ADLC phase-7 worker that watches completed
@@ -87,8 +88,17 @@ type OnlineSampler struct {
 	// (now - 1h, "") which conservatively re-scans the last hour;
 	// the partial UNIQUE INDEX on eval_runs(pipeline_run_id) WHERE
 	// kind='online' makes any re-handled row collapse to a no-op.
-	watermark   time.Time
-	watermarkID string
+	//
+	// watermarkStr carries the RAW ended_at string of the last handled
+	// row (#990): the SQL cursor compares strings, and re-formatting the
+	// parsed time would change the width against legacy rows whose
+	// stored fractions RFC3339Nano truncated — a legacy row would then
+	// compare greater than its own reformatted value and be re-picked
+	// every tick. Empty (startup / parse failure) falls back to the
+	// fixed-width render of the watermark time.
+	watermark    time.Time
+	watermarkStr string
+	watermarkID  string
 
 	// backoffSkips counts how many upcoming ticks to skip due to a
 	// persistent entropy outage. Set by runOnce on cryptoSample()
@@ -259,8 +269,12 @@ func (s *OnlineSampler) runOnce(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Fixed-width bound (#990): the SQL below compares ended_at strings
+	// lexicographically, and RFC3339Nano's trailing-zero truncation makes
+	// "…02.5Z" sort AFTER "…02.500123456Z" — a run ending on the boundary
+	// second was skipped for a tick.
 	scanEnd := time.Now().UTC()
-	scanEndStr := scanEnd.Format(time.RFC3339Nano)
+	scanEndStr := tsformat.Format(scanEnd)
 
 	totalScanned := 0
 	totalEnqueued := 0
@@ -284,7 +298,13 @@ func (s *OnlineSampler) runOnce(ctx context.Context) {
 	// retryable error we hold the watermark but still move the
 	// cursor so we don't loop on the same window — the next tick
 	// will rescan everything we paused on.
-	startTS := s.watermark.Format(time.RFC3339Nano)
+	// Prefer the raw stored string of the last handled row so the cursor
+	// predicate matches byte-for-byte regardless of the row's fraction
+	// width; fixed-width render is the startup/parse-failure fallback.
+	startTS := s.watermarkStr
+	if startTS == "" {
+		startTS = tsformat.Format(s.watermark)
+	}
 	startID := s.watermarkID
 	lastHandledTS := startTS
 	lastHandledID := startID
@@ -419,6 +439,7 @@ LIMIT ?
 	parsed, err := time.Parse(time.RFC3339Nano, lastHandledTS)
 	if err == nil {
 		s.watermark = parsed.UTC()
+		s.watermarkStr = lastHandledTS
 		s.watermarkID = lastHandledID
 	} else {
 		// Defensive: never advance to garbage. The startup watermark is

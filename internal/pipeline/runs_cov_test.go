@@ -267,8 +267,10 @@ func TestRunsNullableHelpers(t *testing.T) {
 	if nullableTime(&zero) != nil {
 		t.Error("zero time should map to nil")
 	}
+	// Fixed-width fractional seconds (#990): trailing zeros must NOT be
+	// truncated, or same-second strings compare in the wrong order in SQL.
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	if got := nullableTime(&now); got != "2026-01-02T03:04:05Z" {
+	if got := nullableTime(&now); got != "2026-01-02T03:04:05.000000000Z" {
 		t.Errorf("non-zero time: %v", got)
 	}
 
