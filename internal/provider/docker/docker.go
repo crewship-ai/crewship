@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,7 +54,8 @@ type Config struct {
 // DetectResult contains info about the detected container runtime.
 type DetectResult struct {
 	Runtime string // "docker" | "podman" | "colima" | "orbstack" | "rancher" | "nerdctl"
-	Socket  string // socket path used
+	Socket  string // socket path used (display); on Windows the npipe path
+	Host    string // full Docker client URL (unix://…, npipe://…, or DOCKER_HOST verbatim)
 	Version string // server version string
 }
 
@@ -169,39 +171,64 @@ func (p *Provider) lockForMigration(slug string) *sync.Mutex {
 	return actual.(*sync.Mutex)
 }
 
-// socketCandidate is a socket path + label for auto-detection.
+// socketCandidate is a probe-able endpoint for auto-detection: path is what
+// os.Stat checks for existence, host is the Docker-client URL to dial it.
 type socketCandidate struct {
 	path    string
+	host    string
 	runtime string
 }
 
-// candidateSockets returns Docker-API-compatible sockets to try, in priority order.
-// Covers Docker Desktop, Colima, OrbStack, Rancher Desktop, Podman (rootless/root), and nerdctl.
+// candidateSockets returns Docker-API-compatible endpoints to try, in
+// priority order for this host OS.
 func candidateSockets() []socketCandidate {
 	home, _ := os.UserHomeDir()
-	uid := strconv.Itoa(os.Getuid())
+	return candidateSocketsFor(goruntime.GOOS, home, os.Getuid())
+}
 
-	candidates := []socketCandidate{
-		// Docker Desktop / Engine defaults
-		{"/var/run/docker.sock", "docker"},
-		// Colima (macOS)
-		{filepath.Join(home, ".colima", "default", "docker.sock"), "colima"},
-		// OrbStack (macOS)
-		{filepath.Join(home, ".orbstack", "run", "docker.sock"), "orbstack"},
-		// Rancher Desktop (macOS/Linux)
-		{filepath.Join(home, ".rd", "docker.sock"), "rancher"},
-		// Docker Desktop (macOS new path)
-		{filepath.Join(home, ".docker", "run", "docker.sock"), "docker"},
-		// Podman rootless
-		{filepath.Join("/run/user", uid, "podman", "podman.sock"), "podman"},
-		// Podman machine (macOS)
-		{filepath.Join(home, ".local", "share", "containers", "podman", "machine", "podman.sock"), "podman"},
-		// Podman root
-		{"/run/podman/podman.sock", "podman"},
-		// containerd/nerdctl
-		{"/run/containerd/containerd.sock", "nerdctl"},
+// candidateSocketsFor is the OS-injectable core of candidateSockets. Unix
+// covers Docker Desktop, Colima, OrbStack, Rancher Desktop, Podman
+// (rootless/root), and nerdctl; Windows (#946) covers Docker Desktop's
+// named pipe (every unix path is meaningless there, and os.Getuid()
+// returns -1). The rootless-podman candidate is only offered for a real
+// (non-negative) uid so a junk /run/user/-1/... path never enters the
+// probe list.
+func candidateSocketsFor(goos, home string, uid int) []socketCandidate {
+	if goos == "windows" {
+		return []socketCandidate{
+			// Docker Desktop / Podman Desktop expose this pipe name.
+			{`\\.\pipe\docker_engine`, "npipe:////./pipe/docker_engine", "docker"},
+		}
 	}
 
+	unixSock := func(path, rt string) socketCandidate {
+		return socketCandidate{path, "unix://" + path, rt}
+	}
+	candidates := []socketCandidate{
+		// Docker Desktop / Engine defaults
+		unixSock("/var/run/docker.sock", "docker"),
+		// Colima (macOS)
+		unixSock(filepath.Join(home, ".colima", "default", "docker.sock"), "colima"),
+		// OrbStack (macOS)
+		unixSock(filepath.Join(home, ".orbstack", "run", "docker.sock"), "orbstack"),
+		// Rancher Desktop (macOS/Linux)
+		unixSock(filepath.Join(home, ".rd", "docker.sock"), "rancher"),
+		// Docker Desktop (macOS new path)
+		unixSock(filepath.Join(home, ".docker", "run", "docker.sock"), "docker"),
+	}
+	if uid >= 0 {
+		// Podman rootless
+		candidates = append(candidates,
+			unixSock(filepath.Join("/run/user", strconv.Itoa(uid), "podman", "podman.sock"), "podman"))
+	}
+	candidates = append(candidates,
+		// Podman machine (macOS)
+		unixSock(filepath.Join(home, ".local", "share", "containers", "podman", "machine", "podman.sock"), "podman"),
+		// Podman root
+		unixSock("/run/podman/podman.sock", "podman"),
+		// containerd/nerdctl
+		unixSock("/run/containerd/containerd.sock", "nerdctl"),
+	)
 	return candidates
 }
 
@@ -238,7 +265,7 @@ func Detect(ctx context.Context) (*DetectResult, error) {
 				ver = comp.Version
 			}
 		}
-		return &DetectResult{Runtime: rt, Socket: host, Version: ver}, nil
+		return &DetectResult{Runtime: rt, Socket: host, Host: host, Version: ver}, nil
 	}
 
 	// Try candidate sockets in order, using a short per-socket timeout so a
@@ -249,7 +276,7 @@ func Detect(ctx context.Context) (*DetectResult, error) {
 			continue
 		}
 		cli, err := client.NewClientWithOpts(
-			client.WithHost("unix://"+c.path),
+			client.WithHost(c.host),
 			client.WithAPIVersionNegotiation(),
 		)
 		if err != nil {
@@ -276,7 +303,7 @@ func Detect(ctx context.Context) (*DetectResult, error) {
 			}
 		}
 		cli.Close()
-		return &DetectResult{Runtime: rt, Socket: c.path, Version: ver}, nil
+		return &DetectResult{Runtime: rt, Socket: c.path, Host: c.host, Version: ver}, nil
 	}
 
 	return nil, fmt.Errorf("no Docker-compatible runtime found (tried Docker, Podman, Colima, OrbStack, Rancher Desktop)")
@@ -300,7 +327,7 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 	if os.Getenv("DOCKER_HOST") != "" {
 		opts = append(opts, client.FromEnv)
 	} else {
-		opts = append(opts, client.WithHost("unix://"+detected.Socket))
+		opts = append(opts, client.WithHost(detected.Host))
 	}
 	opts = append(opts, client.WithAPIVersionNegotiation())
 

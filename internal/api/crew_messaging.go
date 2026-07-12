@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -419,9 +420,14 @@ func (h *CrewMessagingHandler) WriteFile(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Chown to agent user (1001:1001) so container can read it.
-	if err := os.Chown(absPath, 1001, 1001); err != nil {
-		h.logger.Warn("chown uploaded file failed", "path", absPath, "error", err)
+	// Chown to agent user (1001:1001) so container can read it. Best-effort:
+	// a non-root host can't chown (the container-side init fixes ownership),
+	// and Windows has no host chown at all — skip there instead of warning
+	// on every upload.
+	if runtime.GOOS != "windows" {
+		if err := os.Chown(absPath, 1001, 1001); err != nil {
+			h.logger.Warn("chown uploaded file failed", "path", absPath, "error", err)
+		}
 	}
 
 	h.logAudit(r, writeWorkspaceID, "file_written", requesterCrewID, targetCrewID, "", map[string]string{

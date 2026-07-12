@@ -35,16 +35,11 @@ builds:
     # chain below — verifiers compare hashes against signed digests.
     flags:
       - -trimpath
-    # Windows omitted: internal/memory uses syscall.O_NOFOLLOW for
-    # TOCTOU-safe markdown reads, which is a Unix-only constant. Proper
-    # Windows support needs a build-tagged file split (index_unix.go /
-    # index_windows.go). Most Windows users run Crewship via Docker or
-    # WSL during the beta period.
-    #
-    # Darwin lives in the separate crewship-darwin build below (#953): the
-    # darwin archive must bundle the LINUX sidecar (it is bind-mounted into
-    # Linux agent containers, never exec'd on the host), which needs its own
-    # archive definition — and archives can't vary files per-goos.
+    # crewship is Linux-only. Both macOS (#953) and Windows (#946) live in
+    # their own builds below (crewship-darwin / crewship-windows): each of
+    # those archives must bundle the LINUX sidecar (it is bind-mounted into
+    # Linux agent containers, never exec'd on the host), and archives can't
+    # vary files per-goos — so each OS needs its own build + archive pair.
     goos:
       - linux
     goarch:
@@ -77,6 +72,30 @@ builds:
       - -trimpath
     goos:
       - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+      - -X github.com/crewship-ai/crewship/internal/crashreport.DSN={{ envOrDefault "SENTRY_DSN" "" }}
+
+  # Full daemon for Windows (#946). Separate build id so the windows
+  # archive (default-windows below) can bundle the LINUX sidecar +
+  # entrypoint.sh — agents always run in Linux containers, so the
+  # bind-mount sources must be Linux artifacts even on a Windows host
+  # (same reasoning as crewship-darwin above).
+  - id: crewship-windows
+    main: ./cmd/crewship
+    binary: crewship
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    goos:
+      - windows
     goarch:
       - amd64
       - arm64
@@ -184,6 +203,27 @@ archives:
     builds:
       - crewship-darwin
     format: tar.gz
+    files:
+      - LICENSE*
+      - README*
+      - CHANGELOG*
+      - src: scripts/entrypoint.sh
+        dst: .
+        strip_parent: true
+      - src: dist/crewship-sidecar_linux_{{ .Arch }}*/crewship-sidecar
+        dst: .
+        strip_parent: true
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+  # Windows full-daemon archive (#946). Same LINUX-sidecar bundling as
+  # default-darwin (agents run in Linux containers under Docker Desktop's
+  # WSL 2 backend); resolveSidecarPaths finds crewship-sidecar next to
+  # crewship.exe. Zip is the Windows convention; same name_template as
+  # `default` so AssetNameForTag resolves it.
+  - id: default-windows
+    builds:
+      - crewship-windows
+    format: zip
     files:
       - LICENSE*
       - README*

@@ -109,6 +109,11 @@ func runSelfUpdate(ctx context.Context, checkOnly bool) error {
 	}
 	binDir := filepath.Dir(exePath)
 
+	// A previous rename-aside swap (windows, #946) may have parked the old
+	// binary at crewship.exe.old — it wasn't deletable while still running.
+	// It is now; clear it before anything else.
+	update.CleanupSwapArtifacts(exePath)
+
 	channel := update.DetectChannel(exePath, dirWritable(binDir))
 
 	// --systemd orchestrates a self-installed systemd binary. Homebrew

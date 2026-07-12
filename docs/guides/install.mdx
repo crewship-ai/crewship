@@ -278,12 +278,17 @@ if you add a feature that needs another endpoint.
 The full container threat model is documented in the
 [Security threat model](/security/threat-model).
 
-## Windows (CLI-only)
+## Windows
 
-Each release ships a native Windows build of the **CLI-only** binary —
-`crewship-cli_<version>_windows_amd64.zip` (and `_arm64.zip`) on the
-[releases page](https://github.com/crewship-ai/crewship/releases). It
-drives a Crewship server running elsewhere (a Linux box, a NAS, WSL):
+Each release ships two native Windows builds (beta) on the
+[releases page](https://github.com/crewship-ai/crewship/releases):
+
+- `crewship-cli_<version>_windows_<arch>.zip` — the lightweight CLI for
+  driving a Crewship server running elsewhere (a Linux box, a NAS, WSL).
+- `crewship_<version>_windows_<arch>.zip` — the **full daemon**: server,
+  dashboard, and agent orchestration on your Windows machine.
+
+### CLI against a remote server
 
 ```powershell
 # Unpack anywhere on PATH, then point it at your server:
@@ -292,17 +297,38 @@ crewship.exe login
 crewship.exe whoami
 ```
 
-Current Windows limitations:
+### Full daemon (requires Docker Desktop)
 
-- **No local daemon yet** — `crewship start` (the full server + agents)
-  is not built for Windows. Run the server in WSL2 or Docker Desktop
-  and use the Windows CLI against it. Native daemon support is tracked
-  in [#946](https://github.com/crewship-ai/crewship/issues/946).
-- **`self-update` is disabled** — download the newer zip and replace
-  `crewship.exe` manually (Windows cannot swap a running executable;
-  also #946).
-- SHA-256 checksums cover the zip (`checksums.txt` on the release);
-  verify with `Get-FileHash -Algorithm SHA256 crewship-cli_*.zip`.
+Agents always run in **Linux containers** — install
+[Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)
+(WSL 2 backend) first. The daemon finds it via the `docker_engine` named
+pipe automatically; a custom engine needs `DOCKER_HOST` set.
+
+```powershell
+# Unpack the full zip anywhere on PATH — keep crewship-sidecar and
+# entrypoint.sh next to crewship.exe (they are Linux artifacts the
+# daemon mounts into agent containers; they never run on Windows).
+crewship.exe start
+```
+
+Windows specifics:
+
+- Data lives under `%USERPROFILE%\.crewship` by default, as on other
+  platforms. Server-style installs that set `DATABASE_URL` explicitly
+  get machine-wide defaults under `%ProgramData%\crewship` (instead of
+  the Unix `/var/lib/crewship`).
+- [Hook](/guides/hooks) commands run under `cmd.exe /c` instead of
+  `sh -c` — write hook command lines in cmd syntax.
+- `crewship self-update` works: the running `crewship.exe` is parked as
+  `crewship.exe.old` during the swap and cleaned up on the next run.
+- `self-update --server` (systemd orchestration) is Linux-only; on
+  Windows update the binary and restart the daemon yourself.
+- SHA-256 checksums cover both zips (`checksums.txt` on the release);
+  verify with `Get-FileHash -Algorithm SHA256 crewship_*.zip`.
+
+Windows support is **beta**: the daemon is CI-cross-compiled and the
+container path relies on Docker Desktop's WSL 2 file sharing. Report
+issues with the `windows` label.
 
 ## Verifying the install
 

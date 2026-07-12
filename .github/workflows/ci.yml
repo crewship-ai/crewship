@@ -192,8 +192,9 @@ jobs:
       - name: Go build
         run: go build ./cmd/crewship
 
-      # #945 — Windows CLI port regression gate. Only the clionly build
-      # is Windows-clean today; the full daemon build is phase B (#946).
+      # #945/#946 — Windows port regression gates: the clionly CLI and the
+      # full daemon must both stay windows-clean. The embed placeholder from
+      # setup-go-embed satisfies web/out for the full build.
       - name: Go build (windows clionly cross-compile)
         run: GOOS=windows GOARCH=amd64 go build -tags clionly ./cmd/crewship
 
@@ -203,6 +204,12 @@ jobs:
       # snapshot. Costs seconds — the build cache is already warm.
       - name: Go build (clionly, host OS)
         run: go build -tags clionly ./cmd/crewship
+
+      # #946 — the full daemon must stay windows-clean too (IPC/hooks/docker
+      # detection/self-update all have OS branches). The embed placeholder
+      # from setup-go-embed satisfies web/out for the full build.
+      - name: Go build (windows full-daemon cross-compile)
+        run: GOOS=windows GOARCH=amd64 go build ./...
 
       - name: Go test
         # -timeout 15m: the internal/api package suite has grown past
