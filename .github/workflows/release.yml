@@ -99,6 +99,22 @@ jobs:
         with:
           cosign-release: v2.6.3
 
+      # Materialize the deb/rpm signing key from the GPG_SIGNING_KEY secret, if
+      # configured (#932). CONDITIONAL: when the secret is absent the packages
+      # are simply unsigned (GPG_KEY_PATH stays empty → nfpm skips signing), so
+      # a fork or a not-yet-provisioned repo still releases. See packaging/SIGNING.md.
+      - name: Prepare package signing key (if configured)
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+        run: |
+          if [ -n "$GPG_SIGNING_KEY" ]; then
+            printf '%s' "$GPG_SIGNING_KEY" | base64 -d > "$RUNNER_TEMP/crewship-signing.asc"
+            echo "GPG_KEY_PATH=$RUNNER_TEMP/crewship-signing.asc" >> "$GITHUB_ENV"
+            echo "deb/rpm signing enabled"
+          else
+            echo "::notice::GPG_SIGNING_KEY not set — deb/rpm packages will be UNSIGNED (see #932)"
+          fi
+
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
           # Pin to a specific v2 minor — `~> v2` allows v3 once released,
@@ -112,6 +128,9 @@ jobs:
           # with telemetry disabled at the link level — safer than failing
           # the release on a missing secret.
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          # nfpm reads the signing-key passphrase from NFPM_<ID>_PASSPHRASE
+          # (nfpms id = "packages"). Empty when the key has no passphrase.
+          NFPM_PACKAGES_PASSPHRASE: ${{ secrets.GPG_SIGNING_PASSPHRASE }}
 
   # Multi-arch Docker image published to GHCR alongside the binary release.
   # Runs in parallel with `release` because the two share no artifacts — the

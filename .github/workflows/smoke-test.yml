@@ -352,6 +352,37 @@ jobs:
           fi
           crewship version
 
+      - name: Verify package signature (if signed)
+        # GPG signing is conditional (#932): a release built without the
+        # GPG_SIGNING_KEY secret is unsigned, so an unsigned package is a soft
+        # SKIP here (keeps the smoke green until the key is provisioned). A
+        # package that IS signed but with a bad/invalid signature FAILS.
+        run: |
+          set -uo pipefail
+          PKG=$(ls /pkg/crewship_*_linux_amd64.${{ matrix.pkg }} | head -1)
+          if [ "${{ matrix.pkg }}" = "deb" ]; then
+            apt-get install -y --no-install-recommends dpkg-sig >/dev/null 2>&1 || true
+            OUT=$(dpkg-sig --verify "$PKG" 2>&1 || true)
+            echo "$OUT"
+            if echo "$OUT" | grep -q "GOODSIG"; then
+              echo "deb signature OK"
+            elif echo "$OUT" | grep -qiE "NOSIG|no signature|processing"; then
+              echo "::notice::deb is unsigned — skipping signature check (GPG_SIGNING_KEY not provisioned, #932)"
+            else
+              echo "::error::deb signature present but not GOODSIG"; exit 1
+            fi
+          else
+            OUT=$(rpm -K "$PKG" 2>&1 || true)
+            echo "$OUT"
+            if echo "$OUT" | grep -qi "signatures OK"; then
+              echo "rpm signature OK"
+            elif echo "$OUT" | grep -qi "NOT OK"; then
+              echo "::error::rpm signature check failed"; exit 1
+            else
+              echo "::notice::rpm is unsigned (digests only) — skipping signature check (GPG_SIGNING_KEY not provisioned, #932)"
+            fi
+          fi
+
       - name: Probe `crewship start --no-docker` health endpoint
         # Boots exactly as a package install would: crewship from /usr/bin,
         # entrypoint.sh autodetected from /usr/libexec/crewship — no
