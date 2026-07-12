@@ -39,10 +39,16 @@ manual rollback. `self-update` only acts when a newer release actually exists
 — otherwise it reports you're already current and exits.
 
 <Note>
-The SHA-256 check confirms the download matches the published `checksums.txt`;
-it does **not** verify the file's cosign signature. To verify provenance
-end-to-end (Sigstore keyless signature), use `install.sh` with `cosign`
-installed, or verify manually per the release notes.
+`self-update` verifies provenance end-to-end, no `cosign` binary needed: it
+checks the **Sigstore keyless signature** on `checksums.txt` — the certificate
+must chain to the embedded production Fulcio CA, carry this repo's
+`release.yml` workflow identity, and be issued via GitHub Actions OIDC —
+before trusting any checksum in it. Only then is the archive's SHA-256
+compared. A release with missing or invalid signature assets is refused.
+Operators mirroring releases without signatures (air-gapped setups, forks
+signing under a different identity) can bypass the gate with
+`CREWSHIP_SKIP_SIGNATURE_VERIFY=1` — this prints a loud warning, because it
+means trusting the download origin alone.
 </Note>
 
 <Note>
