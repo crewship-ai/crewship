@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/hooks/use-auth"
+import { serverFetch } from "@/lib/server-base"
 
 /**
  * Single-form first-run bootstrap with a time-bounded window.
@@ -47,8 +48,8 @@ export default function BootstrapPage() {
   const [checking, setChecking] = useState(true)
 
   useEffect(() => {
-    // eslint-disable-next-line no-restricted-syntax -- first-run bootstrap gate: runs before any account exists; raw fetch by design
-    fetch("/api/v1/system/setup-status")
+     
+    serverFetch("/api/v1/system/setup-status")
       .then((r) => (r.ok ? r.json() : { needs_bootstrap: true }))
       .then((d) => {
         if (!d.needs_bootstrap) {
@@ -73,8 +74,8 @@ export default function BootstrapPage() {
     }
     setLoading(true)
     try {
-      // eslint-disable-next-line no-restricted-syntax -- first-run bootstrap (creates the first admin); no session exists yet, raw fetch by design
-      const res = await fetch("/api/v1/bootstrap", {
+       
+      const res = await serverFetch("/api/v1/bootstrap", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ full_name: fullName, email, password }),

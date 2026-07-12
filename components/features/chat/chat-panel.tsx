@@ -41,11 +41,11 @@ import { ReconnectBanner } from "./messages/reconnect-banner"
 import type { FileEntry } from "./chat-tree-row"
 import { getSuggestions } from "@/lib/agent-suggestions"
 import { apiFetch } from "@/lib/api-fetch"
+import { resolveWsBase } from "@/lib/server-base"
 
 function getWsUrl(): string {
-  if (typeof window === "undefined") return ""
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
-  return `${proto}//${window.location.host}/ws`
+  const base = resolveWsBase()
+  return base === "" ? "" : `${base}/ws`
 }
 
 interface ChatPanelProps {

@@ -1,5 +1,6 @@
 "use client"
 
+import { resolveWsBase } from "@/lib/server-base"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { broadcastSessionExpired } from "@/lib/api-fetch"
@@ -330,11 +331,11 @@ export function useWebSocket({
   return { status, send, disconnect, reconnect: () => { void connect() } }
 }
 
-/** Compute WS URL from window.location at runtime. Always correct regardless
- *  of SSR, env var caching, or deployment topology.  Uses the same host:port
- *  as the page — in dev mode, dev-server.mjs proxies /ws to the Go backend. */
+/** Compute WS URL at runtime via the server-base seam (lib/server-base.ts).
+ *  Same-origin default derives from window.location exactly as before
+ *  (dev-server.mjs proxies /ws to the Go backend); a desktop shell's
+ *  configured server base routes the socket to the chosen crewshipd. */
 function resolveWsUrl(): string {
-  if (typeof window === "undefined") return ""
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
-  return `${proto}//${window.location.host}/ws`
+  const base = resolveWsBase()
+  return base === "" ? "" : `${base}/ws`
 }

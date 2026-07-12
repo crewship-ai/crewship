@@ -23,6 +23,7 @@ import { getAdapterBrand, ADAPTER_TOKEN_GUIDE, ADAPTER_TOKEN_CMD, ADAPTER_CLI_IN
 import { LANGUAGES } from "@/lib/languages"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
+import { serverFetch } from "@/lib/server-base"
 import {
   OnboardingPreview,
   TEMPLATES,
@@ -160,8 +161,8 @@ export default function OnboardingPage() {
 
   // Already-onboarded gate
   useEffect(() => {
-    // eslint-disable-next-line no-restricted-syntax -- onboarding setup flow: pre-completion gate, raw fetch by design (not part of the steady-state authed app)
-    fetch("/api/v1/onboarding/status")
+     
+    serverFetch("/api/v1/onboarding/status")
       .then((r) => (r.ok ? r.json() : { completed: false }))
       .then((d) => {
         if (d.completed) {
@@ -179,8 +180,8 @@ export default function OnboardingPage() {
     // type into the input before /api/auth/session resolves without
     // having their typing overwritten — the setter sees the latest
     // committed value and only applies the prefill when it's empty.
-    // eslint-disable-next-line no-restricted-syntax -- onboarding prefill probe; auth endpoint, raw fetch by design
-    fetch("/api/auth/session")
+     
+    serverFetch("/api/auth/session")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         const name = d?.user?.name || d?.user?.email
@@ -192,8 +193,8 @@ export default function OnboardingPage() {
   }, [])
 
   useEffect(() => {
-    // eslint-disable-next-line no-restricted-syntax -- onboarding runtime-readiness probe; raw fetch by design (setup flow)
-    fetch("/api/v1/system/runtime")
+     
+    serverFetch("/api/v1/system/runtime")
       .then((r) => (r.ok ? r.json() : { available: false }))
       .then((d) => setRuntimeReady(Boolean(d.available)))
       .catch(() => setRuntimeReady(false))
@@ -204,8 +205,8 @@ export default function OnboardingPage() {
   // builds default off (internal/crashreport.DefaultOptIn). On any fetch
   // failure the checkbox stays unticked — the privacy-preserving default.
   useEffect(() => {
-    // eslint-disable-next-line no-restricted-syntax -- onboarding telemetry-consent seed; raw fetch by design (setup flow)
-    fetch("/api/v1/system/telemetry")
+     
+    serverFetch("/api/v1/system/telemetry")
       .then((r) => (r.ok ? r.json() : { enabled: false }))
       .then((d) => setTelemetryOptIn(Boolean(d.enabled)))
       .catch(() => undefined)
@@ -270,8 +271,8 @@ export default function OnboardingPage() {
     //   idle → starting → pending (success) | failed (error)
     setPairStatus("starting")
     try {
-      // eslint-disable-next-line no-restricted-syntax -- CLI pairing start during onboarding; auth endpoint, raw fetch by design
-      const res = await fetch("/api/v1/auth/pair/start", {
+       
+      const res = await serverFetch("/api/v1/auth/pair/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ adapter_hint: adapter }),
@@ -386,8 +387,8 @@ export default function OnboardingPage() {
         pairingMode: mode === "cli",
         telemetryOptIn,
       })
-      // eslint-disable-next-line no-restricted-syntax -- onboarding setup submit; raw fetch by design (setup flow, not steady-state authed app)
-      const res = await fetch("/api/v1/onboarding/setup", {
+       
+      const res = await serverFetch("/api/v1/onboarding/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -455,8 +456,8 @@ export default function OnboardingPage() {
 
   async function handleSkip() {
     try {
-      // eslint-disable-next-line no-restricted-syntax -- onboarding completion marker; raw fetch by design (setup flow)
-      await fetch("/api/v1/onboarding/complete", { method: "POST" })
+       
+      await serverFetch("/api/v1/onboarding/complete", { method: "POST" })
     } catch {
       // ignore
     }

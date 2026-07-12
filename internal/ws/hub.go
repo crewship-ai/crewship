@@ -543,6 +543,16 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 				}
 				originHost := u.Hostname()
 				if originHost != host {
+					// CREWSHIP_ALLOWED_ORIGINS — the same operator
+					// allowlist the HTTP layer's EnforceOrigin consults
+					// (internal/api/origin_check.go) — extends to the
+					// WS upgrade, production included. Without it a
+					// desktop shell (Origin: tauri://localhost) could
+					// make every authed HTTP call but never open the
+					// realtime socket.
+					if wsOriginAllowlisted(origin) {
+						return nil
+					}
 					if isProduction || (originHost != "localhost" && originHost != "127.0.0.1") {
 						return fmt.Errorf("origin %q not allowed for host %q", origin, req.Host)
 					}
@@ -597,4 +607,27 @@ type ChannelAuthorizer interface {
 // SetChannelAuthorizer sets the authorizer used to check channel subscription permissions.
 func (h *Hub) SetChannelAuthorizer(auth ChannelAuthorizer) {
 	h.channelAuth = auth
+}
+
+// wsOriginAllowlisted reports whether origin exactly matches an entry in
+// CREWSHIP_ALLOWED_ORIGINS. Matching mirrors internal/api/origin_check.go:
+// exact string equality after trimming whitespace and a trailing slash —
+// no suffix/host tricks (those enabled bypasses on the HTTP side and were
+// deliberately removed there). The env var is read per handshake, not at
+// package init, so tests can t.Setenv and operators can restart-free tools
+// that re-exec the server pick up changes; one env read per connection is
+// noise next to the JWT validation above.
+func wsOriginAllowlisted(origin string) bool {
+	raw := os.Getenv("CREWSHIP_ALLOWED_ORIGINS")
+	if strings.TrimSpace(raw) == "" {
+		return false
+	}
+	origin = strings.TrimRight(strings.TrimSpace(origin), "/")
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimRight(strings.TrimSpace(item), "/")
+		if item != "" && item == origin {
+			return true
+		}
+	}
+	return false
 }

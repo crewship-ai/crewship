@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { serverFetch } from "@/lib/server-base"
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("")
@@ -17,8 +18,8 @@ export default function ForgotPasswordPage() {
     e.preventDefault()
     setLoading(true)
     try {
-      // eslint-disable-next-line no-restricted-syntax -- pre-session password-reset request; raw fetch by design (no session to refresh)
-      await fetch("/api/v1/auth/forgot", {
+       
+      await serverFetch("/api/v1/auth/forgot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
