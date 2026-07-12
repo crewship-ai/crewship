@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -22,6 +23,18 @@ import (
 // CLI from starting; they degrade to a warning. The CLI must keep
 // working without user-defined commands.
 func registerSlashCommands() {
+	// Startup fast-path: when argv[1] is a built-in command, no slash
+	// command can possibly be listed or dispatched (built-ins always win —
+	// see the collision policy above), so skip the readdir + per-file parse
+	// of ~/.crewship/commands entirely. `crewship version`, `crewship run …`
+	// etc. stay free of filesystem work they can't use. The shadow warning
+	// consequently only prints on invocations that actually load slash
+	// commands (help/completion/unknown arg) — exactly the surfaces where
+	// the collision is visible.
+	if !shouldLoadSlashCommands(os.Args) {
+		return
+	}
+
 	// Startup-time registration uses Background — the calling shell's
 	// cobra context isn't bound yet at init() time. A slow commands
 	// directory is bounded by os.ReadDir's own timeout characteristics
@@ -45,6 +58,36 @@ func registerSlashCommands() {
 		}
 		rootCmd.AddCommand(makeSlashCobra(sc))
 	}
+}
+
+// shouldLoadSlashCommands reports whether this invocation can possibly list
+// or dispatch a user-defined slash command. Help/completion surfaces, global
+// flags, and unknown first args must load; a built-in first arg (name or
+// alias) never can, so the scan is skipped.
+func shouldLoadSlashCommands(args []string) bool {
+	if len(args) < 2 {
+		return true // bare `crewship` renders the full help listing
+	}
+	first := args[1]
+	if strings.HasPrefix(first, "-") {
+		return true // global flag (--help and friends enumerate commands)
+	}
+	switch first {
+	case "help", "completion", "__complete", "__completeNoDesc", "commands":
+		// These enumerate the command tree — slash commands included.
+		return true
+	}
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == first {
+			return false // built-in wins; a slash command can't shadow it
+		}
+		for _, a := range c.Aliases {
+			if a == first {
+				return false
+			}
+		}
+	}
+	return true // unknown — could be a slash command
 }
 
 // makeSlashCobra wraps one loaded SlashCommand into a cobra.Command that

@@ -306,6 +306,12 @@ func (c *Client) resolveWorkspaceID(ctx context.Context) (string, error) {
 		c.resolvedWorkspaceID = c.WorkspaceID
 		return c.WorkspaceID, nil
 	}
+	// Cross-process disk cache: skips the /workspaces preflight round-trip
+	// that every slug-configured invocation otherwise pays (see slugcache.go).
+	if id := lookupSlugCache(c.BaseURL, c.WorkspaceID); id != "" {
+		c.resolvedWorkspaceID = id
+		return id, nil
+	}
 	// Resolve slug to ID by calling workspaces list (without workspace_id param)
 	id, err := c.resolveWorkspaceSlug(ctx, c.WorkspaceID)
 	if err != nil {
@@ -318,6 +324,7 @@ func (c *Client) resolveWorkspaceID(ctx context.Context) (string, error) {
 		return c.WorkspaceID, nil
 	}
 	c.resolvedWorkspaceID = id
+	storeSlugCache(c.BaseURL, c.WorkspaceID, id)
 	return id, nil
 }
 
