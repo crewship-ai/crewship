@@ -1051,6 +1051,7 @@ func (s *Server) RegisterKeeperRoutines(sched *scheduler.Scheduler) {
 	skillReg, memReg := registerKeeperPhase2Routines(
 		sched,
 		s.db,
+		s.wsHub,
 		s.keeperPhase2.skillReview,
 		s.keeperPhase2.memoryHealth,
 		s.logger,

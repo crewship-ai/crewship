@@ -276,24 +276,6 @@ func printPersona(cmd *cobra.Command, kind string, p personaResponse) {
 	fmt.Fprintln(out, p.Content)
 }
 
-// putJSON is the local PUT helper — the api_helpers.go file has GET /
-// POST / DELETE but not PUT. Inlined here so we don't need a cross-
-// package edit just for one new method.
-func putJSON(client *cli.Client, path string, body any, out any) error {
-	resp, err := client.Do("PUT", path, body)
-	if err != nil {
-		return err
-	}
-	if err := cli.CheckError(resp); err != nil {
-		return err
-	}
-	if out == nil {
-		_ = resp.Body.Close()
-		return nil
-	}
-	return cli.ReadJSON(resp, out)
-}
-
 // openInEditor writes seed to a temp file with the given extension,
 // shells out to $EDITOR (vi as fallback), and returns the edited
 // contents. Used by both edit subcommands so the seed-and-read

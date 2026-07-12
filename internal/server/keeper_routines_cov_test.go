@@ -58,13 +58,13 @@ func TestRegisterKeeperPhase2Routines_NilSchedOrDB(t *testing.T) {
 	t.Parallel()
 	db := krDB(t)
 
-	skillReg, memReg := registerKeeperPhase2Routines(nil, db, covSkillEval(`{}`), covMemEval(`{}`), krLogger())
+	skillReg, memReg := registerKeeperPhase2Routines(nil, db, nil, covSkillEval(`{}`), covMemEval(`{}`), krLogger())
 	if skillReg || memReg {
 		t.Errorf("nil scheduler: got (%v,%v), want (false,false)", skillReg, memReg)
 	}
 
 	sched := covScheduler(t, db)
-	skillReg, memReg = registerKeeperPhase2Routines(sched, nil, covSkillEval(`{}`), covMemEval(`{}`), krLogger())
+	skillReg, memReg = registerKeeperPhase2Routines(sched, nil, nil, covSkillEval(`{}`), covMemEval(`{}`), krLogger())
 	if skillReg || memReg {
 		t.Errorf("nil db: got (%v,%v), want (false,false)", skillReg, memReg)
 	}
@@ -89,7 +89,7 @@ func TestRegisterKeeperPhase2Routines_PerEvaluatorIndependence(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sched := covScheduler(t, db)
-			skillReg, memReg := registerKeeperPhase2Routines(sched, db, tc.skill, tc.mem, krLogger())
+			skillReg, memReg := registerKeeperPhase2Routines(sched, db, nil, tc.skill, tc.mem, krLogger())
 			if skillReg != tc.wantSkill || memReg != tc.wantMem {
 				t.Errorf("got (%v,%v), want (%v,%v)", skillReg, memReg, tc.wantSkill, tc.wantMem)
 			}
@@ -118,7 +118,7 @@ func TestRunSkillReviewSweep_AllowMarksSkillVerified(t *testing.T) {
 	db := krDB(t)
 	covSeedSkillFixtures(t, db)
 
-	runSkillReviewSweep(context.Background(), db,
+	runSkillReviewSweep(context.Background(), db, nil,
 		covSkillEval(`{"decision":"ALLOW","reason":"actively used","risk":1}`), krLogger())
 
 	var verification string
@@ -134,7 +134,7 @@ func TestRunSkillReviewSweep_EmptyCatalogIsNoOp(t *testing.T) {
 	t.Parallel()
 	db := krDB(t)
 
-	runSkillReviewSweep(context.Background(), db,
+	runSkillReviewSweep(context.Background(), db, nil,
 		covSkillEval(`{"decision":"ALLOW","reason":"n/a","risk":1}`), krLogger())
 
 	var inboxRows int
@@ -154,7 +154,7 @@ func TestRunSkillReviewSweep_LoadErrorAborts(t *testing.T) {
 
 	// Contract: a load failure logs and returns without panicking — the
 	// daily cron must survive a transiently broken DB.
-	runSkillReviewSweep(context.Background(), db,
+	runSkillReviewSweep(context.Background(), db, nil,
 		covSkillEval(`{"decision":"ALLOW","reason":"n/a","risk":1}`), krLogger())
 }
 
@@ -245,7 +245,7 @@ func TestRunMemoryHealthSweep_DenyTriggersConsolidationInbox(t *testing.T) {
 	db := krDB(t)
 	covSeedCrews(t, db)
 
-	runMemoryHealthSweep(context.Background(), db,
+	runMemoryHealthSweep(context.Background(), db, nil,
 		covMemEval(`{"decision":"DENY","reason":"memory bloated","risk":6}`), krLogger())
 
 	// DENY (no contradictions) → AutoConsolidate → one memory_consolidation
@@ -273,7 +273,7 @@ func TestRunMemoryHealthSweep_EscalateWritesAdvisoryInbox(t *testing.T) {
 	db := krDB(t)
 	covSeedCrews(t, db)
 
-	runMemoryHealthSweep(context.Background(), db,
+	runMemoryHealthSweep(context.Background(), db, nil,
 		covMemEval(`{"decision":"ESCALATE","reason":"mixed signals","risk":5}`), krLogger())
 
 	// The memory-health advisory is a system notification (kind=message),
@@ -301,7 +301,7 @@ func TestRunMemoryHealthSweep_NoCrewsIsNoOp(t *testing.T) {
 	t.Parallel()
 	db := krDB(t)
 
-	runMemoryHealthSweep(context.Background(), db,
+	runMemoryHealthSweep(context.Background(), db, nil,
 		covMemEval(`{"decision":"DENY","reason":"n/a","risk":5}`), krLogger())
 
 	var rows int
@@ -319,7 +319,7 @@ func TestRunMemoryHealthSweep_LoadErrorAborts(t *testing.T) {
 	_ = db.Close()
 
 	// Same fail-soft contract as the skill sweep: log + return.
-	runMemoryHealthSweep(context.Background(), db,
+	runMemoryHealthSweep(context.Background(), db, nil,
 		covMemEval(`{"decision":"ALLOW","reason":"n/a","risk":1}`), krLogger())
 }
 
