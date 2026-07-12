@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // RunRecord is the shape the eval_runs handler returns for the list
@@ -40,7 +42,7 @@ func InsertReplayRun(ctx context.Context, db *sql.DB, r RunRecord) error {
 		(id, workspace_id, kind, mission_id, status, seed, created_by, created_at)
 		VALUES (?, ?, 'replay', ?, 'queued', ?, ?, ?)`,
 		r.ID, r.WorkspaceID, r.MissionID, r.Seed, nullStr(r.CreatedBy),
-		time.Now().UTC().Format(time.RFC3339Nano))
+		tsformat.Format(time.Now()))
 	return err
 }
 
@@ -53,7 +55,7 @@ func InsertRegressionRun(ctx context.Context, db *sql.DB, r RunRecord) error {
 		(id, workspace_id, kind, baseline_mission_id, candidate_mission_id, status, created_by, created_at)
 		VALUES (?, ?, 'regression', ?, ?, 'queued', ?, ?)`,
 		r.ID, r.WorkspaceID, r.BaselineMissionID, r.CandidateMissionID,
-		nullStr(r.CreatedBy), time.Now().UTC().Format(time.RFC3339Nano))
+		nullStr(r.CreatedBy), tsformat.Format(time.Now()))
 	return err
 }
 
@@ -63,7 +65,7 @@ func InsertRegressionRun(ctx context.Context, db *sql.DB, r RunRecord) error {
 func UpdateRunStatus(ctx context.Context, db *sql.DB, id, status, result, signature string, totalTokens int64, totalCostUSD float64, regressed bool) error {
 	completedAt := sql.NullString{}
 	if status == "completed" || status == "failed" {
-		completedAt = sql.NullString{Valid: true, String: time.Now().UTC().Format(time.RFC3339Nano)}
+		completedAt = sql.NullString{Valid: true, String: tsformat.Format(time.Now())}
 	}
 	_, err := db.ExecContext(ctx, `UPDATE eval_runs SET
 		status = ?,
