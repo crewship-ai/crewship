@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"mime/multipart"
@@ -91,9 +92,20 @@ func covWPMServeWebhook(h *WebhookHandler, crewID, agentID string, body []byte, 
 
 // ---- webhook.go via ServeHTTP ----
 
+// covWPMSeedWebhookAgent seeds user + workspace + a crew-scoped agent row
+// carrying the webhook secret. lookupSecret reads the agents table directly
+// (crew-scoped, #999 — no secret over IPC), so the signature-validation flows
+// below authenticate against a seeded row instead of a resolver stub.
+func covWPMSeedWebhookAgent(t *testing.T, db *sql.DB, crewID, agentID, secret string) {
+	t.Helper()
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	seedWebhookSecretAgent(t, db, wsID, crewID, agentID, secret)
+}
+
 func TestCovWPMWebhookMissingSignatureUnauthorized(t *testing.T) {
-	resolver := &fakeChatResolver{lookupReturnSecret: "s3cr3t"}
-	h := NewWebhookHandler(setupTestDB(t), newTestLogger(), resolver, nil, nil, nil, nil)
+	// 401 fires before any secret lookup — no agent row needed.
+	h := NewWebhookHandler(setupTestDB(t), newTestLogger(), &fakeChatResolver{}, nil, nil, nil, nil)
 
 	rr := covWPMServeWebhook(h, "crew-1", "agent-1", []byte(`{"event":"x"}`), nil)
 	if rr.Code != http.StatusUnauthorized {
@@ -102,10 +114,10 @@ func TestCovWPMWebhookMissingSignatureUnauthorized(t *testing.T) {
 }
 
 func TestCovWPMWebhookSecretLookupFailureNotFound(t *testing.T) {
-	// lookupSecret bubbles the resolver error; the inner handler maps it to
-	// 404. Exercises webhook.go lookupSecret's error pass-through.
-	resolver := &fakeChatResolver{lookupReturnErr: errors.New("no such agent")}
-	h := NewWebhookHandler(setupTestDB(t), newTestLogger(), resolver, nil, nil, nil, nil)
+	// lookupSecret errors for an agent with no row in the agents table; the
+	// inner handler maps it to 404. Exercises webhook.go lookupSecret's
+	// error pass-through.
+	h := NewWebhookHandler(setupTestDB(t), newTestLogger(), &fakeChatResolver{}, nil, nil, nil, nil)
 
 	rr := covWPMServeWebhook(h, "crew-1", "agent-unknown", []byte(`{}`),
 		map[string]string{"X-Signature": "deadbeef"})
@@ -115,8 +127,9 @@ func TestCovWPMWebhookSecretLookupFailureNotFound(t *testing.T) {
 }
 
 func TestCovWPMWebhookInvalidHMACUnauthorized(t *testing.T) {
-	resolver := &fakeChatResolver{lookupReturnSecret: "correct-secret"}
-	h := NewWebhookHandler(setupTestDB(t), newTestLogger(), resolver, nil, nil, nil, nil)
+	db := setupTestDB(t)
+	covWPMSeedWebhookAgent(t, db, "crew-1", "agent-1", "correct-secret")
+	h := NewWebhookHandler(db, newTestLogger(), &fakeChatResolver{}, nil, nil, nil, nil)
 
 	rr := covWPMServeWebhook(h, "crew-1", "agent-1", []byte(`{"event":"x"}`),
 		map[string]string{"X-Signature": "not-the-right-hmac"})
@@ -126,17 +139,17 @@ func TestCovWPMWebhookInvalidHMACUnauthorized(t *testing.T) {
 }
 
 func TestCovWPMWebhookValidHMACTriggerResolveAgentError500(t *testing.T) {
-	// Valid signature → handler calls trigger → trigger's ResolveAgent
-	// fails → "resolve agent: ..." → inner handler maps trigger error to
-	// 500. Covers webhook.go trigger up to the ResolveAgent branch through
-	// the real HTTP path (not a direct trigger() call).
+	// Valid signature (against the seeded secret) → handler calls trigger →
+	// trigger's ResolveAgent fails → "resolve agent: ..." → inner handler
+	// maps trigger error to 500. Covers webhook.go trigger up to the
+	// ResolveAgent branch through the real HTTP path (not a direct
+	// trigger() call).
 	body := []byte(`{"event":"deploy","source":"github"}`)
 	secret := "shared-secret"
-	resolver := &fakeChatResolver{
-		lookupReturnSecret: secret,
-		resolveReturnErr:   errors.New("agent vanished"),
-	}
-	h := NewWebhookHandler(setupTestDB(t), newTestLogger(), resolver, nil, nil, nil, nil)
+	db := setupTestDB(t)
+	covWPMSeedWebhookAgent(t, db, "crew-1", "agent-1", secret)
+	resolver := &fakeChatResolver{resolveReturnErr: errors.New("agent vanished")}
+	h := NewWebhookHandler(db, newTestLogger(), resolver, nil, nil, nil, nil)
 
 	rr := covWPMServeWebhook(h, "crew-1", "agent-1", body,
 		map[string]string{"X-Signature": webhook.ComputeHMAC(body, secret)})
@@ -152,8 +165,9 @@ func TestCovWPMWebhookEnsureCrewRuntimeError500(t *testing.T) {
 	// CreateChat + EnsureCrewRuntime-error span of trigger.
 	body := []byte(`{"event":"deploy"}`)
 	secret := "shared-secret"
+	db := setupTestDB(t)
+	covWPMSeedWebhookAgent(t, db, "crew-1", "agent-1", secret)
 	resolver := &fakeChatResolver{
-		lookupReturnSecret: secret,
 		resolveReturnInfo: &chatbridge.ChatInfo{
 			AgentID:     "agent-1",
 			AgentSlug:   "ag",
@@ -163,7 +177,7 @@ func TestCovWPMWebhookEnsureCrewRuntimeError500(t *testing.T) {
 		},
 	}
 	container := &covWPMContainerProvider{ensureErr: errors.New("docker down")}
-	h := NewWebhookHandler(setupTestDB(t), newTestLogger(), resolver, nil, nil, container, nil)
+	h := NewWebhookHandler(db, newTestLogger(), resolver, nil, nil, container, nil)
 
 	rr := covWPMServeWebhook(h, "crew-1", "agent-1", body,
 		map[string]string{"X-Signature": webhook.ComputeHMAC(body, secret)})

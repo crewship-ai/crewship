@@ -67,10 +67,6 @@ func (m *mockResolver) ResolveAgent(_ context.Context, _, _ string) (*chatbridge
 	return m.resolveInfo, m.resolveErr
 }
 
-func (m *mockResolver) GetWebhookSecret(_ context.Context, _, _ string) (string, error) {
-	return "", nil
-}
-
 func (m *mockResolver) CreateRun(_ context.Context, runID, agentID, chatID, wsID, triggerType string, _ map[string]interface{}) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

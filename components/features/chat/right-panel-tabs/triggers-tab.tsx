@@ -19,7 +19,10 @@ interface AgentScheduleInfo {
   schedule_enabled: boolean
   schedule_last_run: string | null
   schedule_next_run: string | null
-  webhook_secret: string | null
+  // Presence flag only — the secret value is show-once (#999) and never
+  // returned by any read endpoint. Rotate via
+  // `crewship agent rotate-webhook-secret <slug>`.
+  webhook_secret_set?: boolean
   crew_id: string | null
   slug: string
 }
@@ -118,7 +121,10 @@ export function TriggersTab({ agentId, workspaceId }: TriggersTabProps) {
               </button>
             </div>
             <p className="text-micro text-muted-foreground">
-              POST with JSON body. {agent.webhook_secret ? "Secret header required." : "No secret configured."}
+              POST with JSON body.{" "}
+              {agent.webhook_secret_set
+                ? "Signature header required — rotate the secret via `crewship agent rotate-webhook-secret`."
+                : "No secret configured."}
             </p>
           </div>
         ) : (

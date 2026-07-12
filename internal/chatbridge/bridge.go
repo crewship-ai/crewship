@@ -48,13 +48,10 @@ type ChatResolver interface {
 	// resolves the id via a workspace-joined query) pass it so the
 	// server-side scope engages; callers without a known workspace pass "".
 	ResolveAgent(ctx context.Context, agentID, workspaceID string) (*ChatInfo, error)
-	// GetWebhookSecret retrieves the webhook secret for an agent. crewID is
-	// an OPTIONAL tenant scope sent as ?crew_id= so the server constrains
-	// the lookup to the (crew, agent) pair the webhook URL named — without
-	// it any caller could fetch any agent's secret across crew boundaries
-	// and forge a validly-signed webhook. Empty crewID keeps the legacy
-	// id-only behavior for callers that don't know the crew.
-	GetWebhookSecret(ctx context.Context, crewID, agentID string) (string, error)
+	// NOTE: GetWebhookSecret was removed from this interface (#999). The
+	// webhook trigger handler now reads agents.webhook_secret straight from
+	// its local DB (crew-scoped) — the signing secret must never transit an
+	// IPC/HTTP hop in plaintext, and no other consumer existed.
 	CreateRun(ctx context.Context, runID, agentID, chatID, workspaceID, triggerType string, metadata map[string]interface{}) error
 	UpdateRun(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}) error
 	IncrementMessageCount(ctx context.Context, chatID string, delta int) error

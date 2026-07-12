@@ -413,8 +413,10 @@ than per-user JWTs. Tokens come in two forms:
   tenant), since the auth middleware cannot inspect bodies.
 - **The master token** (`CREWSHIP_INTERNAL_TOKEN`) never enters a
   container. It remains valid for host-side trusted callers (the chat
-  bridge resolver, the webhook secret resolver, and the LLM proxy cost
-  monitor) that dial the internal API in-process over **loopback**
+  bridge resolver and the LLM proxy cost monitor; the former webhook
+  secret resolver was removed — the trigger handler now reads the
+  secret from its local DB, never over IPC) that dial the internal
+  API in-process over **loopback**
   (127.0.0.1 / ::1). Because the master's bound scope is empty it
   authorizes every workspace, so a copy leaked into a crew container
   would otherwise retain full cross-tenant power. To cap that blast
@@ -544,7 +546,7 @@ the connection-only model.
 | `self_learning_enabled` cross-tenant lookup | ✅ closed asymmetric — `workspace_id` in WHERE clause |
 | F4 handler body / ctx workspace consistency | ✅ closed — `assertBodyWorkspaceMatchesCtx` |
 | F4 handler body / ctx workspace symmetric forgery | ✅ closed — PR-F24 workspace-bound `X-Internal-Token` (HMAC-derived, validated in middleware) |
-| Bound token, no `?workspace_id` → unscoped reach (webhook secret / list credentials / agent+chat resolve) | ✅ closed — `requireInternal` injects bound workspace as mandatory scope (F-1, F-2, F-3) |
+| Bound token, no `?workspace_id` → unscoped reach (list credentials / agent+chat resolve; the webhook-secret read endpoint was removed outright) | ✅ closed — `requireInternal` injects bound workspace as mandatory scope (F-1, F-2, F-3) |
 | Body-workspace internal routes (cost / journal / pipeline save / issue / mission / assignment / query / escalation / confidence) | ✅ closed — in-handler `assertInternalTokenWorkspace` binding check (F-4) |
 | Path-param mutations cross-tenant (chat count/title, run finalize, credential status) | ✅ closed — `WHERE workspace_id = <bound>` from context (F-5) |
 | Leaked master token replayed from a container | ✅ mitigated — master accepted only from a loopback origin (F-6); residual capped to the host trust boundary |

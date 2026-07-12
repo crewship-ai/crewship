@@ -103,40 +103,12 @@ func setPathValue(r *http.Request, key, val string) *http.Request {
 }
 
 // ---------------------------------------------------------------------------
-// F-1 CRITICAL — GetWebhookSecret cross-tenant secret theft.
-// ws-A token, no workspace query, asking for ws-B's agent secret → 404.
+// F-1 CRITICAL — GetWebhookSecret cross-tenant secret theft: the internal
+// GET .../agents/{agentId}/webhook-secret endpoint was removed outright
+// (#999) — the webhook trigger path reads the secret from the local DB and
+// the raw value never crosses the internal API, so there is no handler left
+// to scope. The crew-scoped DB lookup is pinned in webhook_secret_sec_test.go.
 // ---------------------------------------------------------------------------
-func TestSecBinding_F1_WebhookSecretCrossTenant(t *testing.T) {
-	h, ids := seedScope(t)
-	rr := httptest.NewRecorder()
-	req := setPathValue(
-		boundReq(http.MethodGet, "/x", nil, scopeMaster, ids.wsA),
-		"agentId", ids.agentB)
-	h.requireInternal(http.HandlerFunc(h.GetWebhookSecret)).ServeHTTP(rr, req)
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (ws-A token must not read ws-B webhook secret); body=%s",
-			rr.Code, rr.Body.String())
-	}
-	if bytes.Contains(rr.Body.Bytes(), []byte("secret-b-stolen")) {
-		t.Fatalf("ws-B webhook secret leaked across tenant boundary: %s", rr.Body.String())
-	}
-}
-
-// Own-workspace still works.
-func TestSecBinding_F1_WebhookSecretOwnTenant(t *testing.T) {
-	h, ids := seedScope(t)
-	rr := httptest.NewRecorder()
-	req := setPathValue(
-		boundReq(http.MethodGet, "/x", nil, scopeMaster, ids.wsA),
-		"agentId", ids.agentA)
-	h.requireInternal(http.HandlerFunc(h.GetWebhookSecret)).ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 for own-workspace secret; body=%s", rr.Code, rr.Body.String())
-	}
-	if !bytes.Contains(rr.Body.Bytes(), []byte("secret-a")) {
-		t.Fatalf("own webhook secret not returned: %s", rr.Body.String())
-	}
-}
 
 // ---------------------------------------------------------------------------
 // F-2 HIGH — ResolveChat / ResolveAgent cross-tenant config read.

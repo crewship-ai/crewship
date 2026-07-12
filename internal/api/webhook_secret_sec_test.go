@@ -1,97 +1,62 @@
 package api
 
 import (
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"strings"
+	"context"
 	"testing"
 )
 
-// TestSecWebhookCrossWorkspaceDenied is the regression guard for the
-// cross-workspace webhook-secret leak: GetWebhookSecret used to look up
-// `SELECT webhook_secret FROM agents WHERE id = ?` with the agentID
-// straight from the path and no tenant scoping, so any internal caller
-// (or the public webhook trigger flow) could fetch ANY agent's webhook
-// secret across workspace boundaries and forge signed webhooks.
+// TestSecWebhookCrossCrewDenied is the regression guard for the cross-tenant
+// webhook-secret leak. The secret used to be fetched via the internal IPC
+// endpoint (GET .../agents/{agentId}/webhook-secret) by agent id, so the raw
+// value round-tripped over IPC in plaintext JSON and, pre-scoping, ANY caller
+// could fetch ANY agent's secret and forge signed webhooks. Post-#999 that
+// endpoint is gone: (*WebhookHandler).lookupSecret reads the agents table
+// directly, scoped by the crew named in the webhook URL (`AND crew_id = ?`).
 //
-// Seed two workspaces; the target agent lives in WS-B and has a secret.
-// A caller scoped to WS-A asks for WS-B's agent → must get 404 (not 403:
-// we don't leak existence) and the secret must NOT appear in the body.
-//
-// Pre-fix this returned 200 + the secret. Post-fix it returns 404.
-func TestSecWebhookCrossWorkspaceDenied(t *testing.T) {
-	setTestEncryptionKey(t)
+// Seed the victim agent in crew-a with a secret; a lookup under crew-b must
+// return an error and an empty secret — never the value.
+func TestSecWebhookCrossCrewDenied(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
-	wsA := seedTestWorkspace(t, db, userID) // "test-workspace-id"
+	wsID := seedTestWorkspace(t, db, userID)
+	seedWebhookSecretAgent(t, db, wsID, "crew-a", "victim-agent", "whsec_victim")
 
-	// Second workspace (seedTestWorkspace uses a fixed ID, so insert WS-B
-	// directly).
-	wsB := "ws-b"
-	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'B', 'b')`, wsB); err != nil {
-		t.Fatalf("insert ws-b: %v", err)
+	h := NewWebhookHandler(db, newTestLogger(), &fakeChatResolver{}, nil, nil, nil, nil)
+
+	secret, err := h.lookupSecret(context.Background(), "crew-b", "victim-agent")
+	if err == nil {
+		t.Fatal("cross-crew lookup succeeded; want error (crew scoping must engage)")
 	}
-
-	// Victim agent in WS-B with a secret.
-	if _, err := db.Exec(
-		`INSERT INTO agents (id, workspace_id, name, slug, status, webhook_secret)
-		 VALUES ('victim-agent', ?, 'Victim', 'victim', 'IDLE', 'whsec_victim')`, wsB); err != nil {
-		t.Fatalf("insert victim agent: %v", err)
-	}
-
-	h := NewInternalHandler(db, "tok", covICILogger())
-
-	// Attacker scoped to WS-A reaches for WS-B's agent.
-	req := httptest.NewRequest("GET",
-		"/api/v1/internal/agents/victim-agent/webhook-secret?workspace_id="+wsA, nil)
-	req.SetPathValue("agentId", "victim-agent")
-	rr := httptest.NewRecorder()
-	h.GetWebhookSecret(rr, req)
-
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("cross-workspace fetch: status = %d, want 404, body: %s", rr.Code, rr.Body.String())
-	}
-	if strings.Contains(rr.Body.String(), "whsec_victim") {
-		t.Fatalf("cross-workspace fetch leaked the secret: body = %s", rr.Body.String())
+	if secret != "" {
+		t.Fatalf("cross-crew lookup leaked the secret: %q", secret)
 	}
 }
 
-// TestSecWebhookSameWorkspaceAllowed is the positive companion: a caller
-// scoped to the agent's own workspace still gets the secret (the fix must
-// not break the legitimate same-tenant lookup).
-func TestSecWebhookSameWorkspaceAllowed(t *testing.T) {
-	setTestEncryptionKey(t)
+// TestSecWebhookSameCrewAllowed is the positive companion: the crew the agent
+// actually lives in still resolves the secret, and so does the legacy id-only
+// form (empty crewID — webhook URLs minted before crew scoping existed). The
+// fix must not break legitimate deliveries.
+func TestSecWebhookSameCrewAllowed(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
-	wsB := "ws-b"
-	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'B', 'b')`, wsB); err != nil {
-		t.Fatalf("insert ws-b: %v", err)
-	}
-	_ = userID
+	wsID := seedTestWorkspace(t, db, userID)
+	seedWebhookSecretAgent(t, db, wsID, "crew-a", "victim-agent", "whsec_victim")
 
-	if _, err := db.Exec(
-		`INSERT INTO agents (id, workspace_id, name, slug, status, webhook_secret)
-		 VALUES ('victim-agent', ?, 'Victim', 'victim', 'IDLE', 'whsec_victim')`, wsB); err != nil {
-		t.Fatalf("insert agent: %v", err)
+	h := NewWebhookHandler(db, newTestLogger(), &fakeChatResolver{}, nil, nil, nil, nil)
+
+	got, err := h.lookupSecret(context.Background(), "crew-a", "victim-agent")
+	if err != nil {
+		t.Fatalf("same-crew lookup: %v", err)
+	}
+	if got != "whsec_victim" {
+		t.Errorf("same-crew secret = %q, want whsec_victim", got)
 	}
 
-	h := NewInternalHandler(db, "tok", covICILogger())
-
-	req := httptest.NewRequest("GET",
-		"/api/v1/internal/agents/victim-agent/webhook-secret?workspace_id="+wsB, nil)
-	req.SetPathValue("agentId", "victim-agent")
-	rr := httptest.NewRecorder()
-	h.GetWebhookSecret(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("same-workspace fetch: status = %d, want 200, body: %s", rr.Code, rr.Body.String())
+	got, err = h.lookupSecret(context.Background(), "", "victim-agent")
+	if err != nil {
+		t.Fatalf("legacy id-only lookup: %v", err)
 	}
-	var resp map[string]string
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if resp["webhook_secret"] != "whsec_victim" {
-		t.Errorf("webhook_secret = %q, want whsec_victim", resp["webhook_secret"])
+	if got != "whsec_victim" {
+		t.Errorf("legacy id-only secret = %q, want whsec_victim", got)
 	}
 }

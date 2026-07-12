@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,9 +14,6 @@ import (
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
-
-// ErrNoWebhookSecret is returned when an agent has no webhook secret configured.
-var ErrNoWebhookSecret = errors.New("no webhook secret configured")
 
 // IPCResolver implements ChatResolver by making HTTP calls to the internal API
 // endpoints, authenticated with X-Internal-Token headers.
@@ -351,42 +347,6 @@ func (r *IPCResolver) ResolveAgent(ctx context.Context, agentID, workspaceID str
 		resolveURL += "?workspace_id=" + url.QueryEscape(workspaceID)
 	}
 	return r.resolve(ctx, resolveURL)
-}
-
-// GetWebhookSecret retrieves the webhook secret for an agent via the internal API.
-// When crewID is non-empty it is sent as ?crew_id= so the server scopes the
-// lookup to the (crew, agent) pair — the cross-crew leak guard.
-func (r *IPCResolver) GetWebhookSecret(ctx context.Context, crewID, agentID string) (string, error) {
-	u := fmt.Sprintf("%s/api/v1/internal/agents/%s/webhook-secret", r.baseURL, url.PathEscape(agentID))
-	if crewID != "" {
-		u += "?crew_id=" + url.QueryEscape(crewID)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("X-Internal-Token", r.internalToken)
-
-	resp, err := r.httpClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("get webhook secret returned %d", resp.StatusCode)
-	}
-
-	var data struct {
-		Secret string `json:"webhook_secret"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return "", err
-	}
-	if data.Secret == "" {
-		return "", fmt.Errorf("%w: agent %s", ErrNoWebhookSecret, agentID)
-	}
-	return data.Secret, nil
 }
 
 func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo, error) {
