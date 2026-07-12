@@ -7,9 +7,9 @@
 //   * CredentialDetailSheet     (inline value rewrite, mode="edit")
 //
 // The wizardised "Connect service" flow (OAuth handshakes, setup-token,
-// PAT-with-test) lives separately and stays intact — that codepath
-// genuinely needs the provider as a first-class step. This form is the
-// flat "paste a secret" path Doppler/Vercel are built around.
+// PAT-with-test) was removed — it never got mounted. Reviving OAuth
+// from /credentials is tracked separately. This form is the flat
+// "paste a secret" path Doppler/Vercel are built around.
 
 import * as React from "react"
 import { Eye, EyeOff, ChevronDown, ChevronRight, X, Plus, Check, ChevronsUpDown, FlaskConical, CheckCircle2, XCircle } from "lucide-react"

@@ -480,7 +480,11 @@ export default function CredentialsPage() {
             </Card>
           ) : (
             <Card className="overflow-hidden p-0">
-              <Table>
+              {/* min-w keeps the fixed-width columns intact on narrow
+                  screens; the Table's built-in overflow-x-auto container
+                  (see components/ui/table.tsx) turns that into horizontal
+                  scroll instead of column crush. */}
+              <Table className="min-w-[720px]">
                 <TableHeader className="sticky top-0 z-10 bg-card/95 backdrop-blur">
                   <TableRow>
                     <TableHead className="w-[28px]"></TableHead>
