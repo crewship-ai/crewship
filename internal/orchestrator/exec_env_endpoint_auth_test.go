@@ -99,4 +99,30 @@ func TestLocalModelToken_ReportedAsEnvExposure(t *testing.T) {
 			t.Errorf("no auth token → no OPENCODE_CONFIG_CONTENT exposure, got %+v", ex)
 		}
 	}
+
+	// #974 review: the auth is resolved for every agent in a workspace with an
+	// authed ENDPOINT_URL, but OPENCODE_CONFIG_CONTENT is only actually emitted
+	// for the OpenCode/ollama path. A mismatched-adapter run must NOT report a
+	// phantom exposure.
+	mismatch := localModelReq()
+	mismatch.CLIAdapter = "CLAUDE" // config env is not emitted for this adapter
+	mismatch.LocalModelAPIKey = "sk-resolved-but-unused"
+	for _, ex := range AgentEnvCredentialExposures(mismatch, true) {
+		if ex.EnvVarName == "OPENCODE_CONFIG_CONTENT" {
+			t.Errorf("non-OpenCode adapter → no OPENCODE_CONFIG_CONTENT exposure (config env isn't emitted), got %+v", ex)
+		}
+	}
+
+	// Headers-only auth (no apiKey) on the active path still exposes.
+	headersOnly := localModelReq()
+	headersOnly.LocalModelHeaders = map[string]string{"X-Api-Key": "v"}
+	foundHeaders := false
+	for _, ex := range AgentEnvCredentialExposures(headersOnly, true) {
+		if ex.EnvVarName == "OPENCODE_CONFIG_CONTENT" {
+			foundHeaders = true
+		}
+	}
+	if !foundHeaders {
+		t.Error("headers-only endpoint auth on the OpenCode path must be reported as an exposure")
+	}
 }

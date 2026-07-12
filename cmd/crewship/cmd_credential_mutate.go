@@ -300,10 +300,13 @@ Examples:
 			return fmt.Errorf("--value or --value-stdin is required")
 		}
 
-		// #974 S1: for an authenticated ENDPOINT_URL, fold the new base URL +
-		// token/headers into the one-object JSON the server stores, exactly as
-		// `credential create` does — otherwise rotating drops the token and the
-		// server (post-fix) rejects the bare value.
+		// #974 S1: for an authenticated ENDPOINT_URL, re-pass the token/headers
+		// with --auth-token/--header and they get folded into the one-object
+		// JSON the server stores, exactly as `credential create` does. The
+		// server-side gate rejects a bare *token* (not a URL); note a rotate of
+		// an authed endpoint with only a bare new *URL* still drops the stored
+		// token (the server does not merge the old object) — always re-pass the
+		// auth material when rotating an authenticated endpoint.
 		authToken, _ := flags.GetString("auth-token")
 		headerPairs, _ := flags.GetStringArray("header")
 		if authToken != "" || len(headerPairs) > 0 {

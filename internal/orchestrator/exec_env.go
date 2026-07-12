@@ -541,7 +541,14 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 	// driver dials the endpoint directly, so the sidecar reverse-proxy cannot
 	// inject them — they are exposed to the agent process, like a CONNECT-
 	// tunneled API key. Not actionable via config (it is the endpoint's auth).
-	if req.LocalModelAPIKey != "" || len(req.LocalModelHeaders) > 0 {
+	//
+	// Gate on localModelConfigEnv's active condition (OPENCODE adapter + base
+	// URL + ollama model), not just the presence of auth material: the auth is
+	// resolved for every agent in a workspace that has an authed ENDPOINT_URL
+	// credential, but OPENCODE_CONFIG_CONTENT is only actually placed in the
+	// env for the OpenCode/ollama path. Otherwise we'd report a phantom
+	// exposure for a Claude/mismatched-adapter run.
+	if _, active := localModelConfigEnv(req); active && (req.LocalModelAPIKey != "" || len(req.LocalModelHeaders) > 0) {
 		out = append(out, CredentialEnvExposure{
 			EnvVarName: "OPENCODE_CONFIG_CONTENT",
 			Type:       "ENDPOINT_URL",
