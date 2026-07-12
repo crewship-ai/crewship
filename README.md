@@ -16,6 +16,14 @@
   <a href="https://golang.org/doc/devel/release.html"><img src="https://img.shields.io/badge/go-1.26-00ADD8.svg?logo=go" alt="Go 1.26" /></a>
 </p>
 
+<p align="center">
+  <a href="https://docs.crewship.ai">Documentation</a> ·
+  <a href="https://docs.crewship.ai/quickstart">Quickstart</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="https://github.com/crewship-ai/crewship/discussions">Discussions</a>
+</p>
+
 > **Status: v0.1 beta — open beta.** APIs and data models are still
 > moving; pin a tag (or commit SHA) if you ship to production. The
 > [Beta status & limitations](#beta-status--limitations) section below
@@ -23,6 +31,35 @@
 > also [CHANGELOG.md](CHANGELOG.md) and [RELEASING.md](RELEASING.md).
 
 ---
+
+## Why Crewship?
+
+A CLI coding agent is brilliant for an afternoon and gone by the
+evening. The session ends and the context evaporates; nothing it
+learned carries into tomorrow. Two agents can't share a working
+directory, a database, or a conclusion. Your API keys sit in
+environment variables inside the same process that executes
+model-generated shell commands. And when something goes wrong, there is
+no record of which call did what, with which credential, at what cost.
+
+Crewship is the missing runtime layer. It turns one-shot CLI sessions
+into **crews**: persistent teams of agents that share a real Linux
+machine, keep memory between runs, hand work to each other, and leave
+an auditable trail behind everything they do — all on hardware you
+control.
+
+- **Persistent, not ephemeral.** Agents keep per-agent and crew-shared
+  memory across sessions; conversations, artifacts, and the journal
+  survive restarts and pack into portable encrypted backups.
+- **A real machine, not a sandbox toy.** Each crew gets its own Linux
+  container — agents install services, run databases, mount volumes,
+  and build a working system together.
+- **Keys stay out of agent reach.** Credentials live AES-256-GCM
+  encrypted at rest and are injected per-request by a separate sidecar
+  process; agent stdout is scrubbed before it leaves the container.
+- **Everything on your terms.** Single Go binary, SQLite, your Docker
+  host, your LLM keys or subscription. No SaaS control plane phoning
+  home.
 
 ## What is Crewship?
 
@@ -42,10 +79,68 @@ portable encrypted backups.
 You bring the API keys. Crewship keeps them off disk, off the wire,
 and out of agent processes.
 
+## Quickstart (60 seconds)
+
+```bash
+brew install crewship-ai/tap/crewship   # or: curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash
+crewship doctor                         # checks container runtime, ports, data dir
+crewship start                          # daemon on :8080, SQLite at ~/.crewship
+open http://localhost:8080              # 3-step wizard: admin → workspace/crew → API key
+```
+
+A container runtime is required (Docker, Podman, Colima, OrbStack, or
+Apple Containers) — `crewship doctor` autodetects yours and prints the
+exact install command if one is missing. Prefer the terminal end to
+end? See the [CLI walkthrough](#first-crew--cli-walkthrough) below.
+
+## Architecture
+
+One Go binary hosts the REST/WebSocket API, the embedded web UI, and
+the orchestrator. Every crew runs in its own hardened container, and
+every credential-touching path crosses a process boundary before it
+gets anywhere near an agent:
+
+```mermaid
+flowchart LR
+    you([You / CI / webhooks]) -->|HTTP + WS :8080| daemon
+
+    subgraph host["Your hardware — trusted"]
+        daemon["crewshipd<br/>REST · WS · embedded UI<br/>orchestrator · journal"]
+        db[("SQLite (WAL)<br/>AES-256-GCM credential vault")]
+        daemon --- db
+    end
+
+    subgraph crew["Crew container — untrusted, per crew"]
+        direction TB
+        agent["Agent CLI (Claude Code)<br/>non-root UID 1001<br/>read-only root · cap-drop ALL"]
+        sidecar["crewship-sidecar (UID 1002)<br/>credentials · memory · MCP · Keeper"]
+        agent -->|"localhost:9119"| sidecar
+    end
+
+    daemon -->|provisions + exec| crew
+    sidecar -->|internal API, token-authed| daemon
+    agent -->|"stdout → scrubber → journal"| daemon
+    agent -->|egress allowlist| llm["LLM / external APIs"]
+```
+
+Three trust zones, one rule each:
+
+| Zone | Holds | Never holds |
+| --- | --- | --- |
+| **Daemon (host)** | Decrypted vault, journal, orchestration | Model-generated code execution |
+| **Sidecar (in-container, UID 1002)** | Per-request credential injection, memory index | Long-term secrets on disk |
+| **Agent (in-container, UID 1001)** | Code, tools, the actual work | Raw credentials — output is scrubbed on the way out |
+
+The full model — including the Keeper gatekeeper, prompt-injection
+fences, and what happens when each boundary fails — is documented in
+the [threat model](https://docs.crewship.ai/security/threat-model).
+
 ## What's in the box
 
 Labels: ✅ **stable** in v0.1 beta · 🟡 **early** (works but contract
 may shift) · 🚧 **WIP** (scaffolded, not yet usable end-to-end).
+
+**Runtime & agents**
 
 - ✅ **Real Linux containers** — one per crew, isolated network,
   non-root UID, read-only root, cap-drop ALL. Agents can install,
@@ -57,38 +152,47 @@ may shift) · 🚧 **WIP** (scaffolded, not yet usable end-to-end).
   Droid have adapter scaffolds in `internal/orchestrator/adapter_*.go`,
   but only Claude Code is exercised across the full feature set. Other
   adapters may run but lack the parity testing required for beta sign-off.
+- ✅ **Skills as portable playbooks** — author or import a `SKILL.md`,
+  attach to one agent or a whole crew. Tested with the Claude Code
+  adapter.
+- 🟡 **Episodic memory & Consolidate** — packages exist; full
+  auto-wiring lands in v0.2.
+
+**Security & governance**
+
 - ✅ **Encrypted credential vault** — AES-256-GCM at rest, piped over a
   Unix socket to a sidecar (UID 1002) that injects per-request, never
   to the agent process directly.
 - ✅ **Outbound scrubber** — 13+ credential patterns redacted from
   agent stdout before it leaves the container.
-- ✅ **Skills as portable playbooks** — author or import a `SKILL.md`,
-  attach to one agent or a whole crew. Tested with the Claude Code
-  adapter.
+- ✅ **Keeper (credential gatekeeper)** — optional rule-based gate on
+  which credentials a given agent can pull from the sidecar.
+- ✅ **Lookout (input guard)** — argument injection and prompt-injection
+  guardrails on LLM inputs.
+- ✅ **Harbormaster (approvals)** — risky tool calls pause for human
+  sign-off; the agent waits. `crewship approvals` CLI + web UI.
+
+**Operations & observability**
+
+- ✅ **Crew Journal** — append-only event stream: every LLM call, tool
+  use, prompt, response, decision. Searchable (FTS5), exportable.
+- ✅ **Paymaster (cost ledger)** — every LLM call recorded with token
+  counts and dollar cost; per-workspace budgets enforced. `crewship cost`
+  + `/api/v1/paymaster/*`.
+- ✅ **Backup & restore** — Age-encrypted bundles capture an entire
+  workspace or crew (code, data, conversations, journal) so nothing
+  agents create disappears.
+- ✅ **Single binary** — Next.js static export embedded into the Go
+  server. No Node.js at runtime, no separate services to deploy.
+
+**Automation**
+
 - 🟡 **Routines** — JSON DSL for AI-authored workflows. Six step types
   (`agent_run`, `call_pipeline`, `http`, `code`, `wait`, `transform`),
   DAG parallelism via `needs[]`, cron + HMAC-signed webhooks,
   human-in-the-loop waitpoints, immutable version history. The schema
   may evolve in beta — see
-  [`docs/guides/routines.mdx`](docs/guides/routines.mdx).
-- ✅ **Harbormaster (approvals)** — risky tool calls pause for human
-  sign-off; the agent waits. `crewship approvals` CLI + web UI.
-- ✅ **Paymaster (cost ledger)** — every LLM call recorded with token
-  counts and dollar cost; per-workspace budgets enforced. `crewship cost`
-  + `/api/v1/paymaster/*`.
-- ✅ **Lookout (input guard)** — argument injection and prompt-injection
-  guardrails on LLM inputs.
-- ✅ **Keeper (credential gatekeeper)** — optional rule-based gate on
-  which credentials a given agent can pull from the sidecar.
-- ✅ **Crew Journal** — append-only event stream: every LLM call, tool
-  use, prompt, response, decision. Searchable (FTS5), exportable.
-- ✅ **Backup & restore** — Age-encrypted bundles capture an entire
-  workspace or crew (code, data, conversations, journal) so nothing
-  agents create disappears.
-- 🟡 **Episodic memory & Consolidate** — packages exist; full
-  auto-wiring lands in v0.2.
-- ✅ **Single binary** — Next.js static export embedded into the Go
-  server. No Node.js at runtime, no separate services to deploy.
+  [routines guide](https://docs.crewship.ai/guides/routines).
 
 ## Beta status & limitations
 
@@ -124,8 +228,9 @@ Found a beta-blocker? [Open an issue][issues] — the
 
 ## Install
 
-Three supported paths — pick whichever fits your machine. Full details
-in [docs/guides/install](docs/guides/install.mdx).
+Three supported paths — pick whichever fits your machine. Full details,
+including deb/rpm packages, custom install dirs, and air-gapped
+installs, in [docs.crewship.ai/guides/install](https://docs.crewship.ai/guides/install).
 
 ```bash
 # macOS / Linux — Homebrew
@@ -142,30 +247,8 @@ cp .env.example .env   # then set NEXTAUTH_SECRET + ENCRYPTION_KEY (both require
 docker compose -f docker/docker-compose.prod.yml up -d
 ```
 
-> The short `crewship.ai/install` redirect lands once the project website
-> goes live (coming soon); until then, fetch the script straight from the
-> repo as shown above.
-
 Then bring it up (Homebrew / curl installs only — the Docker Compose
 stack above already starts the server):
-
-```bash
-crewship start
-```
-
-Defaults: HTTP on `:8080`, SQLite at `~/.crewship/crewship.db`.
-Override with `CREWSHIP_PORT` / `--db file:/path`. Container runtime
-required (Docker, Podman, Colima, OrbStack, or Apple Containers) —
-`crewship doctor` autodetects and tells you what's missing. Full details,
-including custom install dirs and air-gapped installs, in
-[docs/guides/install](docs/guides/install.mdx).
-
-On first load the web UI walks a 3-step onboarding wizard (workspace
-→ crew → adapter/API key → launch). Demo data: `crewship seed`.
-
-## After install — what now?
-
-The first thing to run after a fresh install:
 
 ```bash
 crewship doctor      # checks container runtime, ports, data dir, deps
@@ -173,15 +256,12 @@ crewship start       # boots the daemon on :8080
 open http://localhost:8080
 ```
 
-`crewship doctor` is the friendly diagnostic — it tells you which
-container runtime it found (Docker / Podman / OrbStack / Colima /
-Apple Containers), whether port 8080 is free, and what to install if
-something is missing. Run it first; it never starts the server.
-
-`crewship start` boots the daemon in the foreground (Ctrl-C stops
-it). Run with `--background` on macOS/Linux to detach. The
-three-step onboarding wizard in the browser walks you through
-workspace → crew → adapter/API key → launch.
+Defaults: HTTP on `:8080`, SQLite at `~/.crewship/crewship.db`.
+Override with `CREWSHIP_PORT` / `--db file:/path`. `crewship start`
+runs in the foreground (Ctrl-C stops it); add `--background` on
+macOS/Linux to detach. On first load the web UI walks the onboarding
+flow (admin account → workspace/crew → adapter/API key → launch).
+Demo data: `crewship seed`.
 
 Stuck? Common patterns by platform:
 
@@ -204,7 +284,7 @@ crewship doctor      # tells you which runtime, exact install command
 
 Full onboarding walkthrough, including the equivalent CLI flow for
 the wizard, lives in
-[docs/guides/onboarding](docs/guides/onboarding.mdx).
+[docs.crewship.ai/guides/onboarding](https://docs.crewship.ai/guides/onboarding).
 
 ## First crew — CLI walkthrough
 
@@ -232,11 +312,10 @@ Then talk to the agent from the same shell:
 crewship ask --agent viktor "scaffold a Go HTTP service with a /health endpoint"
 ```
 
-Full CLI reference: [docs/cli/overview.mdx](docs/cli/overview.mdx)
-(or [docs.crewship.ai/cli](https://docs.crewship.ai/cli) once the docs
-site is live). Pair an already-running server with a fresh CLI install
-via [docs/guides/cli-pairing.mdx](docs/guides/cli-pairing.mdx) — same
-device-code flow Claude Code itself uses.
+Full CLI reference: [docs.crewship.ai/cli](https://docs.crewship.ai/cli).
+Pair an already-running server with a fresh CLI install via
+[docs.crewship.ai/guides/cli-pairing](https://docs.crewship.ai/guides/cli-pairing)
+— same device-code flow Claude Code itself uses.
 
 ## Build from source (developers)
 
@@ -342,8 +421,9 @@ Covenant 2.1 applies in every project space.
 
 ## Community & links
 
-- **Docs:** [docs/](docs/) in this repo (Mintlify-rendered source); the
-  hosted [docs.crewship.ai](https://docs.crewship.ai) site is coming soon
+- **Docs:** [docs.crewship.ai](https://docs.crewship.ai) (source lives
+  in [docs/](docs/), Mintlify-rendered)
+- **Website:** [crewship.ai](https://crewship.ai)
 - **Discord:** community help + showcase (invite link on
   [crewship.ai](https://crewship.ai))
 - **Reddit:** [r/Crewship](https://reddit.com/r/Crewship) for
