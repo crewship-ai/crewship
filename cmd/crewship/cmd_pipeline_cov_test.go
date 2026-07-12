@@ -251,6 +251,9 @@ func TestPipelineSaveRunE(t *testing.T) {
 		stub := clitest.NewStubServer()
 		defer stub.Close()
 		setupStubCLICov(t, stub)
+		stub.OnGet("/api/v1/crews", clitest.JSONResponse(200, []map[string]string{
+			{"id": "ccrewa000000000000001", "slug": "crew_a"},
+		}))
 		stub.OnPost(pipelinesPathCov()+"/test_run", clitest.JSONResponse(200, map[string]any{
 			"status": "DRY_RUN_OK", "save_token": "mint-abc123",
 		}))
@@ -292,8 +295,9 @@ func TestPipelineSaveRunE(t *testing.T) {
 		if saveBody["slug"] != "email-fetch-v2" {
 			t.Errorf("save slug: got %v want email-fetch-v2 (slugified from name)", saveBody["slug"])
 		}
-		if saveBody["author_crew_id"] != "crew_a" {
-			t.Errorf("save body author_crew_id: got %v want crew_a", saveBody["author_crew_id"])
+		// --author-crew took the slug "crew_a"; the body carries the resolved CUID (#997).
+		if saveBody["author_crew_id"] != "ccrewa000000000000001" {
+			t.Errorf("save body author_crew_id: got %v want the resolved CUID", saveBody["author_crew_id"])
 		}
 		// The minted token is forwarded as the proof — body-trust fields gone.
 		if saveBody["save_token"] != "mint-abc123" {
@@ -677,9 +681,12 @@ func TestPipelineSaveRunE_ServerSideErrors(t *testing.T) {
 		setFlagCov(t, pipelineSaveCmd, "author-crew", "crew_a")
 	}
 
-	// passingTestRun stubs the dry-run validation step so the flow reaches the
-	// /save call the subtests below exercise.
+	// passingTestRun stubs the crew resolution + dry-run validation steps so
+	// the flow reaches the /save call the subtests below exercise.
 	passingTestRun := func(stub *clitest.StubServer) {
+		stub.OnGet("/api/v1/crews", clitest.JSONResponse(200, []map[string]string{
+			{"id": "ccrewa000000000000001", "slug": "crew_a"},
+		}))
 		stub.OnPost(pipelinesPathCov()+"/test_run", clitest.JSONResponse(200, map[string]any{
 			"status": "DRY_RUN_OK", "save_token": "tok",
 		}))
