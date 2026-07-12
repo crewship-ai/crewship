@@ -296,7 +296,16 @@ Examples:
 				value = scanner.Text()
 			}
 		}
-		if value == "" {
+		authToken, _ := flags.GetString("auth-token")
+		headerPairs, _ := flags.GetStringArray("header")
+		rotatingEndpointAuth := authToken != "" || len(headerPairs) > 0
+
+		// For a plain rotate we require a new value up front. For an
+		// ENDPOINT_URL token rotation (--auth-token/--header) the base URL can
+		// be omitted — we fetch the current one so the operator can rotate JUST
+		// the token without re-typing the URL (and without silently dropping it,
+		// the bug this guards against).
+		if value == "" && !rotatingEndpointAuth {
 			return fmt.Errorf("--value or --value-stdin is required")
 		}
 
@@ -308,6 +317,44 @@ Examples:
 		credID, err := resolveCredentialID(client, args[0])
 		if err != nil {
 			return err
+		}
+
+		// #961/#974: rebuild the one-object ENDPOINT_URL value when rotating its
+		// auth token/headers. Without this, `rotate --value <token>` would
+		// overwrite the whole {baseURL,apiKey,headers} object with a bare token
+		// and the endpoint would silently vanish at run time. `--value` (if
+		// given) is the new base URL; otherwise we keep the current baseURL,
+		// fetched from the credential's read view (which echoes baseURL only).
+		if rotatingEndpointAuth {
+			baseURL := value
+			if baseURL == "" {
+				metaResp, metaErr := client.Get("/api/v1/credentials/" + credID)
+				if metaErr != nil {
+					return fmt.Errorf("could not fetch current endpoint to preserve its base URL: %w", metaErr)
+				}
+				if err := cli.CheckError(metaResp); err != nil {
+					return err
+				}
+				var cred struct {
+					Type        string `json:"type"`
+					EndpointURL string `json:"endpoint_url"`
+				}
+				if err := cli.ReadJSON(metaResp, &cred); err != nil {
+					return err
+				}
+				if cred.Type != "ENDPOINT_URL" {
+					return fmt.Errorf("--auth-token/--header are only valid when rotating an ENDPOINT_URL credential (got %s)", cred.Type)
+				}
+				if cred.EndpointURL == "" {
+					return fmt.Errorf("could not determine the current base URL; pass --value with the endpoint URL")
+				}
+				baseURL = cred.EndpointURL
+			}
+			v, err := buildEndpointCredentialValue(baseURL, authToken, headerPairs)
+			if err != nil {
+				return err
+			}
+			value = v
 		}
 
 		body := map[string]interface{}{"value": value}

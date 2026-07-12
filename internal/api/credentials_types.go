@@ -231,7 +231,14 @@ func buildEndpointValue(baseURL, apiKey string, headers map[string]string) (stri
 // resolver can reuse the exact same gate before handing a stored URL to
 // OpenCode's config.
 func validateEndpointURL(value string) string {
-	baseURL, _, _, err := parseEndpointValue(value)
+	// Length cap (#974): a credential value is a URL (± a small JSON envelope),
+	// never a megabyte. Bound it so a pathological value can't sail past the
+	// per-type validation into the vault. 8 KiB is generous for baseURL + a
+	// token + a handful of headers.
+	if len(value) > 8192 {
+		return "endpoint value is too large (max 8 KiB)"
+	}
+	baseURL, apiKey, headers, err := parseEndpointValue(value)
 	if err != nil {
 		if strings.TrimSpace(value) == "" {
 			return "endpoint URL is required for ENDPOINT_URL credentials"
@@ -248,6 +255,12 @@ func validateEndpointURL(value string) string {
 	if u.Host == "" {
 		return "endpoint URL must include a host (e.g. http://host:11434/v1)"
 	}
+	// Reject embedded userinfo (#974): http://user:pass@host smuggles a
+	// credential into the URL, which then leaks into the displayed baseURL and
+	// any logs. Auth belongs in --auth-token/--header, not the URL.
+	if u.User != nil {
+		return "endpoint URL must not embed credentials (user:pass@…); use --auth-token or --header instead"
+	}
 	// SSRF create-time gate (#961): reject a literal IP that no legitimate
 	// endpoint could ever be — cloud metadata (169.254.169.254), link-local,
 	// multicast, reserved. These are hard-blocked even for crews that opt in
@@ -257,8 +270,21 @@ func validateEndpointURL(value string) string {
 	// but the private-egress opt-in is per-crew, so the authoritative decision
 	// is made at run time; rejecting private literals at create would break
 	// the legitimate on-prem/LAN case (e.g. http://192.168.1.222:11434/v1).
-	if ip := net.ParseIP(u.Hostname()); ip != nil && httpsafe.IsHardBlockedIP(ip) {
+	ip := net.ParseIP(u.Hostname())
+	if ip != nil && httpsafe.IsHardBlockedIP(ip) {
 		return "endpoint URL points at a link-local/metadata/reserved address (" + ip.String() + "), which is never a valid model endpoint"
+	}
+	// TLS requirement when auth is attached (#974): a bearer token/custom header
+	// sent over plaintext http leaks on the wire. Require https UNLESS the host
+	// is a private/loopback IP literal (an on-prem LAN Ollama behind an auth
+	// proxy on a trusted network is a legitimate http case). A hostname over
+	// http with a token is rejected — DNS could point it off-LAN — so use https
+	// or an RFC1918/loopback literal.
+	if (apiKey != "" || len(headers) > 0) && u.Scheme == "http" {
+		privateLiteral := ip != nil && httpsafe.IsBlockedIP(ip) // RFC1918/loopback (hard already rejected above)
+		if !privateLiteral {
+			return "attaching an auth token/header to an http:// endpoint would send it in cleartext; use https, or an http endpoint on a private/LAN address (e.g. http://192.168.1.10:11434/v1)"
+		}
 	}
 	return ""
 }

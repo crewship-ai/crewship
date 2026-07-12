@@ -113,11 +113,11 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	// scope check so cross-workspace rotation attempts 404. The
 	// existing soft-delete filter applies — rotating a deleted
 	// credential makes no sense.
-	var oldEncrypted string
+	var oldEncrypted, credType string
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT encrypted_value FROM credentials
+		SELECT encrypted_value, type FROM credentials
 		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		credID, workspaceID).Scan(&oldEncrypted)
+		credID, workspaceID).Scan(&oldEncrypted, &credType)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "Credential not found")
@@ -126,6 +126,22 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("read credential for rotate", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
+	}
+
+	// Type-aware validation on rotate. Historically Rotate stored the new
+	// value opaquely — fine for bare secrets, but an ENDPOINT_URL credential
+	// carries a structured {baseURL,apiKey,headers} value (#961), and a naive
+	// `rotate --value <new-token>` would overwrite the whole object with a bare
+	// string, silently dropping baseURL/headers. At run time the resolver then
+	// fails validateEndpointURL and the endpoint disappears with no error. Gate
+	// ENDPOINT_URL rotations through the same validator Create/Update use so a
+	// bare non-URL value is rejected here (the CLI's --auth-token path rebuilds
+	// the full object, preserving baseURL). See cmd_credential_mutate.go.
+	if credType == CredTypeEndpointURL {
+		if msg := validateEndpointURL(req.Value); msg != "" {
+			replyError(w, http.StatusBadRequest, msg)
+			return
+		}
 	}
 
 	newEncrypted, err := encryption.Encrypt(req.Value)

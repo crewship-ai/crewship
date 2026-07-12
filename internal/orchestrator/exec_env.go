@@ -377,7 +377,13 @@ func localModelConfigEnv(req AgentRunRequest) (string, bool) {
 	// #961: optional auth for an authenticated endpoint. apiKey → the
 	// @ai-sdk/openai-compatible driver auto-adds `Authorization: Bearer`;
 	// headers is the escape hatch for Basic/custom-header/non-bearer schemes.
-	// Both live only in this generated config JSON, never in the agent env.
+	// The token/headers ride inside this OPENCODE_CONFIG_CONTENT value, which
+	// IS an env var in the agent container — so, like other BYO credentials,
+	// they are readable by the agent process (see AgentEnvCredentialExposures).
+	// They are not routed through the sidecar reverse-proxy the way the managed
+	// Anthropic key is; a BYO endpoint is dialed directly, so the token must
+	// travel to the OpenCode client somehow, and the config JSON keeps it out
+	// of the argv/process list at least.
 	p.Options.APIKey = req.LocalModelAPIKey
 	if len(req.LocalModelHeaders) > 0 {
 		p.Options.Headers = req.LocalModelHeaders
@@ -521,6 +527,23 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 					Actionable: true,
 				})
 			}
+		}
+	}
+
+	// Local-model endpoint auth (#961/#974): the ENDPOINT_URL credential's
+	// bearer token / custom headers ride inside OPENCODE_CONFIG_CONTENT, which
+	// is an env var — so they are agent-readable like the other BYO credentials
+	// above. A BYO endpoint is dialed directly (not through the sidecar
+	// reverse-proxy), so the token cannot be isolated the way the managed
+	// Anthropic key is; report it so the exposure surface is complete rather
+	// than silently omitting it.
+	if req.LocalModelAPIKey != "" || len(req.LocalModelHeaders) > 0 {
+		if _, ok := localModelConfigEnv(req); ok {
+			out = append(out, CredentialEnvExposure{
+				EnvVarName: "OPENCODE_CONFIG_CONTENT",
+				Type:       "ENDPOINT_URL",
+				Reason:     "the local-model endpoint's auth token/headers are embedded in OPENCODE_CONFIG_CONTENT; a BYO endpoint is dialed directly, so it cannot be isolated behind the sidecar reverse-proxy",
+			})
 		}
 	}
 

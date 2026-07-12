@@ -80,9 +80,11 @@ func TestValidateEndpointURL_AcceptsJSONAndBare(t *testing.T) {
 		value  string
 		wantOK bool
 	}{
-		"bare http":         {"http://host:11434/v1", true},
-		"bare https":        {"https://host/v1", true},
-		"json with baseURL": {`{"baseURL":"http://host:11434","apiKey":"sk-x"}`, true},
+		"bare http":  {"http://host:11434/v1", true},
+		"bare https": {"https://host/v1", true},
+		// #974: http + token on a hostname is now rejected (cleartext token);
+		// use https for an authenticated JSON endpoint.
+		"json with baseURL": {`{"baseURL":"https://host:11434","apiKey":"sk-x"}`, true},
 		"bare non-url":      {"not a url", false},
 		"bare ftp scheme":   {"ftp://host/x", false},
 		"json missing base": {`{"apiKey":"sk-x"}`, false},

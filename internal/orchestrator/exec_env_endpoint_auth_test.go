@@ -73,13 +73,29 @@ func TestOpencodeLocalConfigEnv_NoAuthOmitsFields(t *testing.T) {
 
 // The auth token must never be added to the credential-exposure surface —
 // it lives only in the generated config JSON, not the container env.
-func TestLocalModelToken_NotInEnvExposures(t *testing.T) {
+// #974: the endpoint auth token rides inside OPENCODE_CONFIG_CONTENT, which IS
+// an env var — so it must be REPORTED as an env exposure (the earlier contract,
+// and the code comment, wrongly claimed it never reached the env). A BYO
+// endpoint is dialed directly and cannot be isolated behind the sidecar proxy.
+func TestLocalModelToken_IsReportedAsEnvExposure(t *testing.T) {
 	req := localModelReq()
-	req.LocalModelAPIKey = "sk-should-not-be-exposed"
+	req.LocalModelAPIKey = "sk-endpoint-token"
 	exposures := AgentEnvCredentialExposures(req, true)
+	found := false
 	for _, ex := range exposures {
-		if strings.Contains(ex.EnvVarName, "LOCAL_MODEL") || strings.Contains(ex.Reason, "local-model") {
-			t.Errorf("local-model token must not be an env exposure, got %+v", ex)
+		if ex.EnvVarName == "OPENCODE_CONFIG_CONTENT" && ex.Type == "ENDPOINT_URL" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("endpoint token must be reported as an OPENCODE_CONFIG_CONTENT exposure, got %+v", exposures)
+	}
+
+	// No token → no such exposure.
+	noAuth := localModelReq()
+	for _, ex := range AgentEnvCredentialExposures(noAuth, true) {
+		if ex.EnvVarName == "OPENCODE_CONFIG_CONTENT" {
+			t.Errorf("no exposure expected without a token, got %+v", ex)
 		}
 	}
 }

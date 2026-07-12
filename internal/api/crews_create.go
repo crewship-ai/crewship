@@ -249,8 +249,20 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Enabling private-network egress is a privileged, security-sensitive
+	// toggle (#974): it lets a crew's sandbox reach RFC1918/loopback hosts —
+	// in a shared-host/multi-tenant deployment that's the surface of other
+	// tenants' containers and host services. Crew *update* already gates this
+	// at "manage" (ADMIN); creation must match, otherwise a MANAGER (who can
+	// "create" but not "manage") could self-grant private egress by creating a
+	// crew with the flag set. Creating a crew with the flag FALSE stays a
+	// MANAGER-level action.
 	allowPrivateEndpoints := 0
 	if req.AllowPrivateEndpoints {
+		if !canRole(role, "manage") {
+			replyError(w, http.StatusForbidden, "enabling allow_private_endpoints requires an ADMIN (manage) role")
+			return
+		}
 		allowPrivateEndpoints = 1
 	}
 	_, err = h.db.ExecContext(r.Context(),

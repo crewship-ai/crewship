@@ -108,16 +108,29 @@ func New() *Scrubber {
 		re:   regexp.MustCompile(`AKIA[0-9A-Z]{16}`),
 	})
 
-	// JWT Bearer tokens in Authorization headers
+	// Bearer tokens in Authorization headers. The first pattern names the
+	// classic JWT shape; the second is a generic fallback for any other
+	// bearer (a reverse-proxy / LiteLLM virtual key in front of a BYO model
+	// endpoint is a random opaque string, not a JWT — #974). The `(?i)`
+	// makes the scheme case-insensitive; the 12-char floor avoids redacting
+	// prose like "Bearer with me". Ordering: JWT first so JWTs get the
+	// specific [REDACTED:bearer_token] marker, generic bearers get the plain one.
 	s.patterns = append(s.patterns, pattern{
 		name: "bearer_token",
 		re:   regexp.MustCompile(`Bearer\s+eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+`),
 	})
+	s.patterns = append(s.patterns, pattern{
+		name: "bearer_token",
+		re:   regexp.MustCompile(`(?i)bearer\s+[a-zA-Z0-9._~+/=-]{12,}`),
+	})
 
-	// Generic password/secret patterns in JSON or env var format
+	// Generic password/secret patterns in JSON or env var format. `(?i)` on
+	// the key alternation catches camelCase forms — notably `"apiKey":` as
+	// emitted in OPENCODE_CONFIG_CONTENT for an authenticated BYO endpoint
+	// (#974) — which the previous case-sensitive `apikey` missed.
 	s.patterns = append(s.patterns, pattern{
 		name: "",
-		re:   regexp.MustCompile(`"(?:password|secret|token|api_key|apikey|secret_key)":\s*"[^"]+"`),
+		re:   regexp.MustCompile(`(?i)"(?:password|secret|token|api_key|apikey|secret_key)":\s*"[^"]+"`),
 	})
 	s.patterns = append(s.patterns, pattern{
 		name: "",
@@ -216,7 +229,7 @@ func stripZeroWidth(s string) string {
 }
 
 var (
-	jsonKVRe = regexp.MustCompile(`^("(?:password|secret|token|api_key|apikey|secret_key)":\s*)"[^"]+"$`)
+	jsonKVRe = regexp.MustCompile(`(?i)^("(?:password|secret|token|api_key|apikey|secret_key)":\s*)"[^"]+"$`)
 	envKVRe  = regexp.MustCompile(`^((?:PASSWORD|SECRET|SECRET_KEY|API_KEY|APIKEY)=)`)
 )
 
