@@ -71,7 +71,23 @@ build\:go: build\:sidecar
 # container's arch — NOT host-native. On macOS a native build produces a
 # Mach-O binary that fails in-container with exit 255 (misreported as a
 # glibc/musl mismatch). Mirrors dev.sh's arch mapping.
-SIDECAR_GOARCH := $(shell case "$$(uname -m)" in arm64|aarch64) echo arm64 ;; x86_64|amd64) echo amd64 ;; *) go env GOARCH ;; esac)
+# Host-arch → GOARCH mapping WITHOUT $(shell case …): GNU Make terminates
+# $(shell) at the first unbalanced ")" — the one closing "aarch64)" — so
+# the shell got an unterminated `case` and the recipe got the leaked rest
+# ("Syntax error: end of file unexpected"). Broke every `make build:sidecar`
+# since the case expression landed; CI never runs this target, deploys do.
+UNAME_M := $(shell uname -m)
+ifeq ($(UNAME_M),arm64)
+  SIDECAR_GOARCH := arm64
+else ifeq ($(UNAME_M),aarch64)
+  SIDECAR_GOARCH := arm64
+else ifeq ($(UNAME_M),x86_64)
+  SIDECAR_GOARCH := amd64
+else ifeq ($(UNAME_M),amd64)
+  SIDECAR_GOARCH := amd64
+else
+  SIDECAR_GOARCH := $(shell go env GOARCH)
+endif
 build\:sidecar:
 	CGO_ENABLED=0 GOOS=linux GOARCH=$(SIDECAR_GOARCH) go build -trimpath -ldflags="-s -w" -o crewship-sidecar ./cmd/crewship-sidecar
 	cp scripts/entrypoint.sh ./entrypoint.sh
