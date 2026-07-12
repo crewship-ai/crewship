@@ -237,7 +237,7 @@ describe("isLocalModel + local model registry", () => {
 
   it("OPENCODE registry offers the curated local shortlist with the local category", () => {
     const locals = CLI_ADAPTERS.OPENCODE.models.filter((m) => isLocalModel(m.value))
-    expect(locals.map((m) => m.value)).toEqual(["ollama/qwen3-coder:30b", "ollama/devstral:24b"])
+    expect(locals.map((m) => m.value)).toEqual(["ollama/qwen2.5-coder:7b", "ollama/qwen3-coder:30b", "ollama/devstral:24b"])
     for (const m of locals) expect(m.category).toBe("local")
   })
 })

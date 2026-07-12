@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
@@ -13,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/paymaster"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 )
@@ -369,6 +371,27 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 	//    surfaced any. CLI adapters that wrap CLI tools may not —
 	//    that's fine, we report zero rather than fabricating.
 	costUSD, tokIn, tokOut := orchestrator.ParseResultUsage(acc.ResultMeta())
+
+	// Local-model observability (#974/U3): a run on a local ("ollama/…")
+	// endpoint costs $0 and its traffic never reaches the sidecar's cost path
+	// (that only tags known cloud hosts), so without this it produces no
+	// cost_ledger row and `paymaster` shows zero tokens for local work. Record
+	// the parsed token counts here at $0. Gated to local models so cloud runs —
+	// whose ledger rows come from the sidecar — are never double-counted.
+	if strings.HasPrefix(llmModel, "ollama/") && (tokIn > 0 || tokOut > 0) {
+		if _, err := paymaster.Record(ctx, r.db, r.journalE, paymaster.Call{
+			Scope:        paymaster.Scope{WorkspaceID: req.WorkspaceID, CrewID: info.CrewID, AgentID: agentID},
+			Provider:     "ollama",
+			Model:        strings.TrimPrefix(llmModel, "ollama/"),
+			InputTokens:  int64(tokIn),
+			OutputTokens: int64(tokOut),
+			CostUSD:      0,
+			BillingMode:  paymaster.BillingMetered,
+			Tags:         map[string]any{"source": "local_model", "run_id": req.PipelineRunID},
+		}); err != nil {
+			r.logger.Warn("record local-model usage", "run_id", req.PipelineRunID, "error", err)
+		}
+	}
 
 	return AgentStepResult{
 		Output:     acc.Text(),
