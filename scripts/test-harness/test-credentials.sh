@@ -138,7 +138,7 @@ if printf 'revoke-me-token' | cs credential create \
    && cs credential assign "$REV_NAME" morgan --env-var-name "$REV_NAME" >/dev/null 2>&1; then
   _pass "file-based credential '$REV_NAME' created + assigned"
 
-  if cs credential delete "$REV_NAME" >/dev/null 2>&1; then
+  if cs credential delete "$REV_NAME" --yes >/dev/null 2>&1; then
     _pass "credential delete '$REV_NAME' (revoke)"
   else
     _fail "credential delete '$REV_NAME'"
