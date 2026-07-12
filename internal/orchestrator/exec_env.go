@@ -435,6 +435,18 @@ func localModelExtraDomains(req AgentRunRequest) []string {
 	return []string{host}
 }
 
+// effectiveAllowPrivateEndpoints resolves the per-run private-endpoint egress
+// decision (#974-S5): the per-crew opt-in (crewFlag, set by a workspace ADMIN)
+// only takes effect when the instance-level ceiling (instanceCap, operator
+// deploy config) is ALSO enabled. This AND is the single source of truth,
+// collapsed into req.AllowPrivateEndpoints before either consumer — the
+// host-side literal-IP gate (localModelExtraDomains) or the sidecar dial-time
+// SSRF guard — reads it. Link-local/metadata stay hard-blocked in httpsafe
+// regardless of this decision.
+func effectiveAllowPrivateEndpoints(crewFlag, instanceCap bool) bool {
+	return crewFlag && instanceCap
+}
+
 // CredentialEnvExposure describes a credential whose plaintext value is placed
 // directly into the agent container's environment by BuildEnvVarsSidecar, and is
 // therefore readable by the agent process (e.g. via `env` or /proc/self/environ).

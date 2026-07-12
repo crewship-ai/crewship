@@ -149,6 +149,16 @@ crewship crew update <crew> --allow-private-endpoints
 
 This narrowly permits RFC1918/loopback for that crew's agents. **Cloud-metadata and link-local addresses (`169.254.169.254`, `fe80::/10`, and their IPv4-mapped forms) stay hard-blocked even with the opt-in** — there is no legitimate model endpoint there. A crew in `free` network mode is unaffected (it already opted out of egress limits).
 
+<Warning>
+**Multi-tenant / cloud operators:** the per-crew `--allow-private-endpoints` flag is set by a workspace ADMIN, so on a shared instance it is not sufficient on its own — the effective decision is `instance-cap AND crew-flag`. Private-endpoint egress stays **off for the whole instance** unless the operator enables it at deploy time:
+
+```bash
+CREWSHIP_ALLOW_PRIVATE_ENDPOINTS=true   # (or local_models.allow_private_endpoints in config)
+```
+
+Default is **off**, so a hosted instance is safe out of the box: a tenant admin cannot self-grant egress into the host's private network (other tenants' containers, host services) by toggling a crew flag. A single-tenant self-host operator sets this once. Link-local/metadata stay hard-blocked regardless. This ceiling lives in operator-controlled deploy config, which tenants cannot reach — unlike workspace settings.
+</Warning>
+
 **Which models actually work:** we ship a curated shortlist — Qwen3 Coder 30B (A3B; runs on a single 24 GB GPU at 4-bit) and Devstral Small 24B (built for agent workflows). This is deliberate: below roughly this tier, community reports and upstream issues (`anomalyco/opencode#1034`, `#4428`) show local models "think about" tool calls but emit them as text instead of executing — the agent looks alive but nothing happens. Generic chat models under ~14B will frustrate you; frontier cloud models remain meaningfully stronger for hard tasks. Expect local models to handle routine, well-scoped work.
 
 ## Adapters that are deliberately NOT supported

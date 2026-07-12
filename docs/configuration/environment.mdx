@@ -92,6 +92,7 @@ All Crewship configuration can be set via environment variables. These override 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CREWSHIP_HOOKS_ALLOW_PRIVATE` | (unset — private destinations blocked) | Set to `1`/`true`/`yes`/`on` to allow hook/webhook handlers to dial loopback and RFC1918 private addresses. Off by default so a misconfigured hook cannot reach localhost services or internal LAN hosts. Link-local (cloud metadata IMDS `169.254.169.254`), multicast, and unspecified addresses stay blocked regardless of this flag. Read by `internal/hooks/http.go`. |
+| `CREWSHIP_ALLOW_PRIVATE_ENDPOINTS` | (unset — private endpoints blocked) | Instance-level ceiling for a crew's `--allow-private-endpoints` opt-in on a BYO local-model `ENDPOINT_URL`. Set to `1`/`true`/`yes`/`on` to let crews (that also set their flag) point agents at loopback/RFC1918/LAN endpoints — e.g. an on-prem Ollama or `host.docker.internal`. Off by default so a hosted/multi-tenant instance is safe out of the box: a workspace admin cannot self-grant egress into the host's private network. The effective decision is `instance-cap AND crew-flag`. Link-local/metadata stay hard-blocked regardless. Read by `internal/config/config.go` (`local_models.allow_private_endpoints`). |
 
 ## Profiling & observability
 

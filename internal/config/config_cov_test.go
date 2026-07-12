@@ -308,3 +308,24 @@ func TestEnvOverrides_LocalModelBaseURL(t *testing.T) {
 		t.Errorf("LocalModels.BaseURL = %q, want %q", got, want)
 	}
 }
+
+// #974-S5 — instance-level private-endpoint cap. Default false so a hosted
+// instance is safe out of the box; enabled only by explicit operator opt-in.
+func TestEnvOverrides_AllowPrivateEndpoints(t *testing.T) {
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.LocalModels.AllowPrivateEndpoints {
+		t.Error("LocalModels.AllowPrivateEndpoints default = true, want false (safe default)")
+	}
+
+	t.Setenv("CREWSHIP_ALLOW_PRIVATE_ENDPOINTS", "true")
+	cfg, err = Load("")
+	if err != nil {
+		t.Fatalf("Load with env: %v", err)
+	}
+	if !cfg.LocalModels.AllowPrivateEndpoints {
+		t.Error("LocalModels.AllowPrivateEndpoints with env=true = false, want true")
+	}
+}

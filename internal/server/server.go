@@ -202,6 +202,10 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		orch.SetLocalModelBaseURL(cfg.LocalModels.BaseURL)
 		logger.Info("local model endpoint enabled for coding agents", "base_url", cfg.LocalModels.BaseURL)
 	}
+	orch.SetAllowPrivateEndpoints(cfg.LocalModels.AllowPrivateEndpoints)
+	if cfg.LocalModels.AllowPrivateEndpoints {
+		logger.Warn("private-endpoint egress enabled at instance level (CREWSHIP_ALLOW_PRIVATE_ENDPOINTS) — crews may now reach RFC1918/loopback endpoints they opt into; link-local/metadata stay blocked")
+	}
 
 	// Calculate IPC base URL for containers to reach this server.
 	hostAddr := "host.docker.internal" // default for Docker

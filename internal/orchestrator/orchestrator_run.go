@@ -420,7 +420,25 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	ipcBaseURL := o.ipcBaseURL
 	ipcToken := o.ipcToken
 	localModelBaseURL := o.localModelBaseURL
+	allowPrivateInstance := o.allowPrivateEndpoints
 	o.mu.RUnlock()
+
+	// #974-S5: the effective private-endpoint decision is the AND of the
+	// per-crew opt-in (req.AllowPrivateEndpoints, set by a workspace ADMIN via
+	// the crew flag) and the instance-level ceiling (operator deploy config).
+	// Collapse it here, before either consumer reads it — localModelExtraDomains
+	// (the host-side literal-IP gate) and the SidecarNetworkPolicy (the dial-time
+	// resolve-then-pin guard) both key off req.AllowPrivateEndpoints, so
+	// overwriting it once keeps them consistent. A workspace admin cannot
+	// self-grant private egress on a hosted instance where the operator hasn't
+	// opted in. Link-local/metadata remain hard-blocked in httpsafe regardless.
+	if req.AllowPrivateEndpoints && !allowPrivateInstance {
+		o.allowPrivateInstanceDenyWarned.Do(func() {
+			o.logger.Warn("crew requested private-endpoint egress but it is disabled by instance policy; set CREWSHIP_ALLOW_PRIVATE_ENDPOINTS=true to allow private/LAN endpoints",
+				"crew", req.CrewSlug, "agent", req.AgentSlug)
+		})
+	}
+	req.AllowPrivateEndpoints = effectiveAllowPrivateEndpoints(req.AllowPrivateEndpoints, allowPrivateInstance)
 
 	// #955: the local-model endpoint is now resolved from the vault
 	// (ENDPOINT_URL credential, per-agent → workspace default) and arrives on

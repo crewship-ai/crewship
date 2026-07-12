@@ -105,6 +105,45 @@ ALLOWED_DOMAINS=(
     "sentry.io"
 )
 
+# #974-S6 (defense-in-depth): filter resolved IPs before seeding the L3
+# allowset. A domain that resolves to an internal IP at startup would
+# otherwise be silently permitted at L3 even though the sidecar's dial-time
+# SSRF guard blocks it — so a misconfigured/rebinding allowed_domain can't
+# open a hole to the host's private network. Hard ranges (link-local/metadata,
+# loopback, this-net, multicast, reserved) are ALWAYS skipped; RFC1918/CGNAT
+# are skipped unless private-endpoint egress is enabled at the instance level.
+# Default-safe: with the flag unset, only genuinely-public IPs are added, which
+# is exactly what the public ALLOWED_DOMAINS above should resolve to anyway.
+case "$(printf '%s' "${CREWSHIP_ALLOW_PRIVATE_ENDPOINTS:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on|y|t) ALLOW_PRIVATE=1 ;;
+    *)                  ALLOW_PRIVATE=0 ;;
+esac
+
+# is_blocked_ip <ipv4> — prints a reason and returns 0 if the IP must NOT be
+# added to the allowset; returns 1 (add it) otherwise.
+is_blocked_ip() {
+    local ip="$1" o1 o2 o3 o4
+    IFS='.' read -r o1 o2 o3 o4 <<< "$ip"
+    # Hard tier — never overridable.
+    if [ "$o1" -eq 0 ] || [ "$o1" -eq 127 ] \
+       || { [ "$o1" -eq 169 ] && [ "$o2" -eq 254 ]; } \
+       || [ "$o1" -ge 224 ]; then
+        echo "hard-blocked (link-local/metadata/loopback/reserved)"
+        return 0
+    fi
+    # Private tier — RFC1918 + CGNAT (100.64.0.0/10), relaxable via instance opt-in.
+    if [ "$o1" -eq 10 ] \
+       || { [ "$o1" -eq 172 ] && [ "$o2" -ge 16 ] && [ "$o2" -le 31 ]; } \
+       || { [ "$o1" -eq 192 ] && [ "$o2" -eq 168 ]; } \
+       || { [ "$o1" -eq 100 ] && [ "$o2" -ge 64 ] && [ "$o2" -le 127 ]; }; then
+        if [ "$ALLOW_PRIVATE" != "1" ]; then
+            echo "private (RFC1918/CGNAT) — set CREWSHIP_ALLOW_PRIVATE_ENDPOINTS to allow"
+            return 0
+        fi
+    fi
+    return 1
+}
+
 for domain in "${ALLOWED_DOMAINS[@]}"; do
     echo "Resolving $domain..."
     ips=$(dig +noall +answer +short A "$domain" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || true)
@@ -113,6 +152,10 @@ for domain in "${ALLOWED_DOMAINS[@]}"; do
         continue
     fi
     while read -r ip; do
+        if reason=$(is_blocked_ip "$ip"); then
+            echo "WARN: skipping $domain -> $ip: $reason" >&2
+            continue
+        fi
         ipset add allowed-domains "$ip" 2>/dev/null || true
     done <<< "$ips"
 done

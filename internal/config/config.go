@@ -63,6 +63,18 @@ type Config struct {
 // reaches the Docker host). Empty = the local-model path is disabled.
 type LocalModelsConfig struct {
 	BaseURL string `yaml:"base_url"`
+
+	// AllowPrivateEndpoints is the INSTANCE-level ceiling for the per-crew
+	// allow_private_endpoints opt-in (#961/#974-S5). A crew flag only relaxes
+	// the SSRF private-tier (RFC1918/loopback) when this is ALSO true — the
+	// effective decision is instanceCap AND crewFlag. Default false, so a
+	// hosted/multi-tenant instance is safe out of the box: a workspace ADMIN
+	// cannot self-grant egress into the host's private network by toggling a
+	// crew flag. A single-tenant self-host operator opts in via deploy config
+	// (CREWSHIP_ALLOW_PRIVATE_ENDPOINTS), which is operator-controlled and
+	// tenant-inaccessible — unlike instance_settings, which is only
+	// workspace-role gated. Link-local/metadata stay hard-blocked regardless.
+	AllowPrivateEndpoints bool `yaml:"allow_private_endpoints"`
 }
 
 // LicenseConfig holds the path to the license key file.
@@ -480,6 +492,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("CREWSHIP_LOCAL_MODEL_BASE_URL"); v != "" {
 		cfg.LocalModels.BaseURL = v
+	}
+	if v, ok := envBool("CREWSHIP_ALLOW_PRIVATE_ENDPOINTS"); ok {
+		cfg.LocalModels.AllowPrivateEndpoints = v
 	}
 	if v := os.Getenv("COMPOSIO_API_KEY"); v != "" {
 		cfg.Composio.APIKey = v

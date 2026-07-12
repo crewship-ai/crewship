@@ -217,10 +217,19 @@ type Orchestrator struct {
 	// CREWSHIP_LOCAL_MODEL_BASE_URL env fallback at most once per process so
 	// it doesn't spam the log on every run.
 	localModelEnvFallbackWarned sync.Once
-	statsRegister               StatsRegisterFunc
-	mu                          sync.RWMutex
-	accepting                   bool
-	crews                       map[string]*crewState
+	// allowPrivateEndpoints is the instance-level ceiling for the per-crew
+	// allow_private_endpoints opt-in (#974-S5). A crew's flag only takes
+	// effect when this is also true (effective = instanceCap AND crewFlag).
+	// Set from cfg.LocalModels.AllowPrivateEndpoints via SetAllowPrivateEndpoints.
+	allowPrivateEndpoints bool
+	// allowPrivateInstanceDenyWarned logs — at most once per process — that a
+	// crew requested private-endpoint egress but the instance cap is off, so
+	// operators understand why a LAN endpoint is being blocked.
+	allowPrivateInstanceDenyWarned sync.Once
+	statsRegister                  StatsRegisterFunc
+	mu                             sync.RWMutex
+	accepting                      bool
+	crews                          map[string]*crewState
 
 	// runSem bounds concurrent agent-run exec fan-outs. RunAgent acquires a
 	// token before its container.Exec fan-out (sidecar start, the mkdir/setup
@@ -1038,6 +1047,18 @@ func (o *Orchestrator) SetLocalModelBaseURL(baseURL string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.localModelBaseURL = baseURL
+}
+
+// SetAllowPrivateEndpoints sets the instance-level ceiling for the per-crew
+// allow_private_endpoints opt-in (#974-S5). When false (the default), no crew
+// can relax the SSRF private-tier — a workspace ADMIN's crew flag is inert
+// unless the operator has enabled private egress at deploy time
+// (CREWSHIP_ALLOW_PRIVATE_ENDPOINTS / local_models.allow_private_endpoints).
+// Link-local/metadata stay hard-blocked regardless of this setting.
+func (o *Orchestrator) SetAllowPrivateEndpoints(allow bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.allowPrivateEndpoints = allow
 }
 
 // warnLocalModelEnvFallbackOnce logs a one-time deprecation notice when a run
