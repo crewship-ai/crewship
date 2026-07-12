@@ -60,7 +60,11 @@ func ollamaDiscoveryClient() *http.Client {
 					if err != nil {
 						return err
 					}
-					ip := net.ParseIP(host)
+					// ParseIPStripZone so a zoned IPv6 link-local literal
+					// (fe80::1%eth0) is normalized and caught — net.ParseIP
+					// returns nil for it, which would fall through to allow
+					// (#988 review).
+					ip := httpsafe.ParseIPStripZone(host)
 					if ip == nil {
 						return nil // resolver produces concrete IPs on real dials
 					}

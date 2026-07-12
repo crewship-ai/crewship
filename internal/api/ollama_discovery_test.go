@@ -98,3 +98,17 @@ func TestResolveModels_OllamaWorkspaceEndpoint(t *testing.T) {
 		t.Errorf("fail-open got %v/%q, want the server-global model", models, source)
 	}
 }
+
+// #988 review: a zoned IPv6 link-local literal (fe80::1%eth0) must be rejected
+// at BOTH create time and dial time — net.ParseIP returns nil for the zone,
+// which previously let it slip past the hard-block gate.
+func TestValidateEndpointURL_RejectsZonedLinkLocal(t *testing.T) {
+	for _, v := range []string{
+		"http://[fe80::1%25eth0]:11434/v1",
+		"http://[fe80::1%25en0]:11434",
+	} {
+		if msg := validateEndpointURL(v); msg == "" {
+			t.Errorf("zoned link-local literal %q must be rejected at create time", v)
+		}
+	}
+}

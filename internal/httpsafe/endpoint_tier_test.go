@@ -60,3 +60,16 @@ func TestEndpointTiers(t *testing.T) {
 		}
 	}
 }
+
+// #988 review: a zoned IPv6 link-local literal must normalize + block.
+func TestParseIPStripZone(t *testing.T) {
+	if ip := ParseIPStripZone("fe80::1%eth0"); ip == nil || !IsHardBlockedIP(ip) {
+		t.Errorf("fe80::1%%eth0 should parse (zone stripped) and be hard-blocked, got %v", ip)
+	}
+	if ip := ParseIPStripZone("169.254.169.254"); ip == nil || !IsHardBlockedIP(ip) {
+		t.Error("plain metadata IP should still parse+block")
+	}
+	if ip := ParseIPStripZone("not-an-ip.example.com"); ip != nil {
+		t.Errorf("a hostname must return nil (defer to resolve-time guard), got %v", ip)
+	}
+}

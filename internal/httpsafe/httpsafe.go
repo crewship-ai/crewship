@@ -130,6 +130,20 @@ func IsBlockedIP(ip net.IP) bool {
 	return ipInAny(ip, blockedCIDRs)
 }
 
+// ParseIPStripZone parses an IP literal, first stripping any IPv6 zone
+// identifier (e.g. "fe80::1%eth0" → "fe80::1"). Plain net.ParseIP returns nil
+// for a zoned literal, which would let a zoned link-local address slip past an
+// `ip != nil && IsBlockedIP(ip)` check at both credential-create and dial time.
+// Returns nil for a non-IP host (a real hostname), so callers keep their
+// "not a literal → defer to resolve-time guard" behaviour. Use this instead of
+// net.ParseIP wherever an IsBlocked* check gates an SSRF-sensitive dial.
+func ParseIPStripZone(host string) net.IP {
+	if i := strings.IndexByte(host, '%'); i >= 0 {
+		host = host[:i]
+	}
+	return net.ParseIP(host)
+}
+
 // IsHardBlockedIP reports whether ip is in a range that must be refused
 // even when a caller has opted in to private-network egress: link-local
 // (cloud metadata 169.254.169.254 and its IPv4-mapped form), multicast,
