@@ -1,7 +1,7 @@
 package docker
 
 // One-time startup scrub of legacy host-side secrets dirs (secret lifecycle
-// hardening). Before /secrets became a tmpfs (secretsTmpfsMount), every crew
+// hardening). Before /secrets became a tmpfs (secretsTmpfsSpec), every crew
 // persisted cleartext credential files under OutputBasePath/secrets/<crew-id>.
 // EnsureCrewRuntime scrubs a crew's dir when that crew is (re)provisioned,
 // but deleted and dormant crews never reach that path — their cleartext would

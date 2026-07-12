@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/mount"
 	dockernetwork "github.com/docker/docker/api/types/network"
+	"strings"
 )
 
 func TestConfigDefaults(t *testing.T) {
@@ -71,8 +71,12 @@ func TestBuildMountsIncludesSidecarBinds(t *testing.T) {
 // a host bind mount — cleartext SSH keys / passwords written at agent-run
 // setup must not persist on the host disk nor land in backups. The tmpfs is
 // owned by the agent UID (1001) so the per-run `mkdir -p /secrets/<slug>`
-// (exec'd as 1001 under CapDrop=ALL) still works: tmpfs defaults to
-// root:root, and a root-owned 0700 mount would break every credential write.
+// (exec'd as 1001 under CapDrop=ALL) still works.
+//
+// The mount MUST go through HostConfig.Tmpfs, NOT the Mounts API: the daemon
+// rejects uid/gid in mount.TmpfsOptions.Options ("invalid mount config for
+// type \"tmpfs\": invalid option: uid" — reproduced live on Engine 29.3.0),
+// while the --tmpfs option-string path accepts them.
 func TestBuildMountsSecretsIsTmpfs(t *testing.T) {
 	p := &Provider{cfg: Config{
 		SidecarBinaryPath: "/host/path/crewship-sidecar",
@@ -82,44 +86,20 @@ func TestBuildMountsSecretsIsTmpfs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildMounts: %v", err)
 	}
-
-	var secrets *mount.Mount
 	for i := range mounts {
 		if mounts[i].Target == "/secrets" {
-			secrets = &mounts[i]
-			break
+			t.Fatalf("/secrets must not be in the Mounts list (type %q) — the daemon rejects uid/gid TmpfsOptions there; it belongs in HostConfig.Tmpfs", mounts[i].Type)
 		}
 	}
-	if secrets == nil {
-		t.Fatal("no mount targeting /secrets")
-	}
-	if secrets.Type != mount.TypeTmpfs {
-		t.Fatalf("/secrets mount type = %q, want tmpfs (host bind persists cleartext secrets)", secrets.Type)
-	}
-	if secrets.Source != "" {
-		t.Errorf("/secrets tmpfs must have no host source, got %q", secrets.Source)
-	}
-	opts := secrets.TmpfsOptions
-	if opts == nil {
-		t.Fatal("/secrets tmpfs has no TmpfsOptions (size/mode/uid limits required)")
-	}
-	if opts.SizeBytes != secretsTmpfsSizeBytes || opts.SizeBytes <= 0 {
-		t.Errorf("SizeBytes = %d, want %d", opts.SizeBytes, secretsTmpfsSizeBytes)
-	}
-	if opts.Mode != 0o700 {
-		t.Errorf("Mode = %o, want 0700", opts.Mode)
-	}
-	var haveUID, haveGID bool
-	for _, o := range opts.Options {
-		if len(o) == 2 && o[0] == "uid" && o[1] == "1001" {
-			haveUID = true
-		}
-		if len(o) == 2 && o[0] == "gid" && o[1] == "1001" {
-			haveGID = true
+
+	spec := secretsTmpfsSpec
+	for _, want := range []string{"uid=1001", "gid=1001", "mode=0700", "size=16m", "noexec", "nosuid", "rw"} {
+		if !strings.Contains(spec, want) {
+			t.Errorf("secretsTmpfsSpec = %q, missing %q", spec, want)
 		}
 	}
-	if !haveUID || !haveGID {
-		t.Errorf("tmpfs Options = %v, want uid=1001 and gid=1001 (agent must own the mount root)", opts.Options)
+	if strings.Contains(spec, "exec,") && !strings.Contains(spec, "noexec") {
+		t.Errorf("secretsTmpfsSpec must be noexec, got %q", spec)
 	}
 }
 

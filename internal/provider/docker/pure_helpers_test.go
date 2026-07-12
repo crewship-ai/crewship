@@ -159,10 +159,12 @@ func TestBuildMounts_FullLayout(t *testing.T) {
 		mtype    mount.Type
 		readOnly bool
 	}{
-		"/workspace":                      {source: "/ws", mtype: mount.TypeBind, readOnly: false},
-		"/output":                         {source: "/out", mtype: mount.TypeBind, readOnly: false},
-		"/crew":                           {source: "/crew", mtype: mount.TypeBind, readOnly: false},
-		"/secrets":                        {source: "", mtype: mount.TypeTmpfs, readOnly: false},
+		"/workspace": {source: "/ws", mtype: mount.TypeBind, readOnly: false},
+		"/output":    {source: "/out", mtype: mount.TypeBind, readOnly: false},
+		"/crew":      {source: "/crew", mtype: mount.TypeBind, readOnly: false},
+		// /secrets is deliberately absent: it rides HostConfig.Tmpfs
+		// (secretsTmpfsSpec), not the Mounts API — the daemon rejects
+		// uid/gid options on a Mounts-API tmpfs.
 		"/home/agent":                     {source: "crewship-home-eng-ckcrew1", mtype: mount.TypeVolume, readOnly: false},
 		"/opt/crew-tools":                 {source: "crewship-tools-eng-ckcrew1", mtype: mount.TypeVolume, readOnly: false},
 		"/usr/local/bin/crewship-sidecar": {source: "/h/sidecar", mtype: mount.TypeBind, readOnly: true},

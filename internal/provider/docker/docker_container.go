@@ -573,6 +573,15 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 							"container", containerName, "mount_type", m.Type)
 					}
 				}
+				// /secrets rides HostConfig.Tmpfs (not the Mounts API — see
+				// secretsTmpfsSpec), so it never appears in inspect.Mounts.
+				// A container lacking the Tmpfs entry predates the current
+				// mount shape (or was created by hand) — recreate it.
+				if !needsRecreate && (inspect.HostConfig == nil || inspect.HostConfig.Tmpfs["/secrets"] == "") {
+					needsRecreate = true
+					p.logger.Info("/secrets tmpfs entry missing from HostConfig, will recreate container",
+						"container", containerName)
+				}
 				for dest, found := range requiredMounts {
 					if !found {
 						needsRecreate = true
@@ -680,7 +689,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	workspacePath := filepath.Join(p.cfg.OutputBasePath, "workspaces", team.ID)
 	crewPath := filepath.Join(p.cfg.OutputBasePath, "crews", team.ID)
 
-	// /secrets is an in-memory tmpfs now (see secretsTmpfsMount) — no host
+	// /secrets is an in-memory tmpfs now (see secretsTmpfsSpec) — no host
 	// dir. Earlier versions bind-mounted OutputBasePath/secrets/<crew-id>,
 	// which persisted cleartext credentials on the host disk; scrub any
 	// leftover from that era so old secrets don't outlive the fix.
@@ -911,6 +920,10 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		Mounts: crewMounts,
 		Tmpfs: map[string]string{
 			"/tmp": "rw,size=500m",
+			// In-memory /secrets owned by the agent UID; must be here and
+			// not in Mounts — the daemon rejects uid/gid TmpfsOptions on a
+			// Mounts-API tmpfs (see secretsTmpfsSpec).
+			"/secrets": secretsTmpfsSpec,
 		},
 		NetworkMode: container.NetworkMode(p.cfg.Network),
 	}
