@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -10,6 +11,37 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
+
+// buildEndpointCredentialValue folds an ENDPOINT_URL base URL plus an optional
+// bearer token and repeatable `K=V` headers into the one-object JSON the server
+// stores (#961). The token/headers never appear in the plaintext value shown by
+// `credential list`. Returns the compact JSON string.
+func buildEndpointCredentialValue(baseURL, authToken string, headerPairs []string) (string, error) {
+	headers := map[string]string{}
+	for _, hp := range headerPairs {
+		k, v, ok := strings.Cut(hp, "=")
+		k = strings.TrimSpace(k)
+		if !ok || k == "" {
+			return "", fmt.Errorf("--header must be KEY=VALUE, got %q", hp)
+		}
+		headers[k] = strings.TrimSpace(v)
+	}
+	if authToken == "" && len(headers) == 0 {
+		return strings.TrimSpace(baseURL), nil
+	}
+	obj := map[string]interface{}{"baseURL": strings.TrimSpace(baseURL)}
+	if authToken != "" {
+		obj["apiKey"] = authToken
+	}
+	if len(headers) > 0 {
+		obj["headers"] = headers
+	}
+	raw, err := json.Marshal(obj)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
 
 var credCreateCmd = &cobra.Command{
 	Use:   "create",
@@ -46,6 +78,23 @@ var credCreateCmd = &cobra.Command{
 
 		if value == "" {
 			return fmt.Errorf("--value or --value-stdin is required")
+		}
+
+		// #961: an ENDPOINT_URL credential may carry an auth token + custom
+		// headers for an authenticated Ollama-behind-proxy / LiteLLM endpoint.
+		// When either is set, fold {baseURL,apiKey,headers} into the stored
+		// value as one credential object; with neither it stays a bare URL.
+		authToken, _ := flags.GetString("auth-token")
+		headerPairs, _ := flags.GetStringArray("header")
+		if authToken != "" || len(headerPairs) > 0 {
+			if credType != "ENDPOINT_URL" {
+				return fmt.Errorf("--auth-token/--header are only valid with --type ENDPOINT_URL")
+			}
+			v, err := buildEndpointCredentialValue(value, authToken, headerPairs)
+			if err != nil {
+				return err
+			}
+			value = v
 		}
 
 		secLevel, _ := flags.GetInt("security-level")
