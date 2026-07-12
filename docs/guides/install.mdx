@@ -58,6 +58,13 @@ The two formulae declare `conflicts:` against each other, so Homebrew refuses to
 Running a daemon-only subcommand from the CLI-only binary produces cobra's `unknown command "start"` error. If you need to bring up a daemon, install the full formula instead.
 </Note>
 
+<Note>
+The bundled `crewship-sidecar` is **always a Linux binary**, even in the macOS
+archive and Homebrew formula — it is bind-mounted into your Linux agent
+containers and executed there, never on the host. Don't be surprised when
+`file` reports it as an ELF executable on a Mac; that's by design (#953).
+</Note>
+
 The tap is auto-resolved from the prefixed name, so you do not need a separate `brew tap` step. Upgrades follow the normal flow:
 
 ```bash
