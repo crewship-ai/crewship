@@ -182,6 +182,14 @@ paths = [
   # same verified false-positive class as internal/services/onboarding_test.go
   # and the internal/encryption/* test vectors. No production credential.
   '''cmd/crewship/cmd_backup_lifecycle_cov_test\.go$''',
+
+  # Package-signing setup doc (issue #932/#942). Prose that explains how a
+  # maintainer configures GPG signing — it references `GPG_SIGNING_KEY` (a
+  # GitHub-secret NAME, never a value) and a `gpg --full-generate-key <<'KEY'`
+  # heredoc marker; generic-api-key fires on those tokens. No real key: the
+  # doc is explicitly "blocked on secret" and the signing key lives only as a
+  # repo/org secret, never in the tree.
+  '''packaging/SIGNING\.md$''',
 ]
 
 # Strings that look like secrets but are documented placeholders.
