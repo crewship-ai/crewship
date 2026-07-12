@@ -17,6 +17,9 @@ QUICK=0
 tests=(test-memory.sh test-delegation.sh test-notifications.sh test-orchestration.sh test-credentials.sh)
 (( QUICK == 0 )) && tests+=(test-determinism.sh)
 [[ "${WITH_GITHUB:-0}" == "1" ]] && tests+=(test-realworld-github.sh)
+# Local-Ollama scenario is macOS-only and self-skips when Ollama isn't reachable,
+# so it's safe to always include; opt out with WITH_OLLAMA=0.
+[[ "${WITH_OLLAMA:-1}" == "1" ]] && tests+=(test-ollama-local.sh)
 
 declare -a results=()
 overall=0

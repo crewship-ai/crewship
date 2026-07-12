@@ -89,6 +89,33 @@ func ResolveGoogleCredential() *CredentialDef {
 	}
 }
 
+// ResolveOllamaEndpointCredential returns the local-model ENDPOINT_URL
+// credential for the opt-in Ollama demo, or nil unless CREWSHIP_SEED_OLLAMA=1.
+// It points OpenCode's openai-compatible driver at a host Ollama over the
+// Docker host-gateway (host.docker.internal, added to every container by the
+// docker provider on macOS and Linux). SEED_OLLAMA_ENDPOINT overrides the URL
+// for a non-default Ollama host/port.
+//
+// Reaching host.docker.internal is a PRIVATE address, so it additionally
+// requires the operator to set CREWSHIP_ALLOW_PRIVATE_ENDPOINTS=1 on the
+// server (default-off SSRF fence) — the seeded row is inert until then.
+func ResolveOllamaEndpointCredential() *CredentialDef {
+	if os.Getenv("CREWSHIP_SEED_OLLAMA") != "1" {
+		return nil
+	}
+	url := os.Getenv("SEED_OLLAMA_ENDPOINT")
+	if url == "" {
+		url = "http://host.docker.internal:11434/v1"
+	}
+	return &CredentialDef{
+		Name:        "OLLAMA_ENDPOINT",
+		Description: "Local Ollama endpoint for the OpenCode local-model demo (workspace default)",
+		Type:        "ENDPOINT_URL",
+		Provider:    "OLLAMA",
+		Value:       url,
+	}
+}
+
 // marshalJSON marshals v to a JSON string. Panics on error (should never
 // happen for simple map types used in seed data).
 func marshalJSON(v any) string {

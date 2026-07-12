@@ -24,7 +24,9 @@ func seedCrews(ctx context.Context, client *cli.Client, userID string) (map[stri
 	ids := map[string]string{} // slug → id
 	linked := 0
 
-	for _, c := range seeddata.Crews {
+	// ActiveCrews applies the env gate (opt-in demo crews like local-Ollama are
+	// excluded unless CREWSHIP_SEED_OLLAMA=1), so the default seed is unchanged.
+	for _, c := range seeddata.ActiveCrews() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -33,6 +35,9 @@ func seedCrews(ctx context.Context, client *cli.Client, userID string) (map[stri
 			"slug":  c.Slug,
 			"color": c.Color,
 			"icon":  c.Icon,
+		}
+		if c.AllowPrivateEndpoints {
+			body["allow_private_endpoints"] = true
 		}
 		if c.RuntimeImage != "" {
 			body["runtime_image"] = c.RuntimeImage
@@ -158,7 +163,7 @@ func seedAgents(ctx context.Context, client *cli.Client, crewIDs map[string]stri
 	fmt.Fprintln(os.Stderr, "Creating agents...")
 	ids := map[string]string{} // slug → id
 
-	for _, a := range seeddata.Agents {
+	for _, a := range seeddata.ActiveAgents() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -405,6 +410,21 @@ func seedCredentials(ctx context.Context, client *cli.Client, agentIDs map[strin
 		}
 	} else {
 		fmt.Fprintln(os.Stderr, "  Skipping GitHub credential (set SEED_GITHUB_TOKEN)")
+	}
+
+	// Local Ollama endpoint (optional, CREWSHIP_SEED_OLLAMA=1). Workspace-scoped
+	// ENDPOINT_URL — resolved as the workspace default for OpenCode agents on an
+	// ollama/* model, so no per-agent assignment is needed. Inert until the
+	// operator also sets CREWSHIP_ALLOW_PRIVATE_ENDPOINTS=1 (host.docker.internal
+	// is a private address blocked by the default-on SSRF fence).
+	if ollamaCred := seeddata.ResolveOllamaEndpointCredential(); ollamaCred != nil {
+		if _, err := seedOneCredential(client, *ollamaCred); err != nil {
+			cli.PrintWarning("Ollama endpoint credential: " + err.Error())
+		} else {
+			fmt.Fprintf(os.Stderr, "  + Local-model endpoint %s → %s (needs CREWSHIP_ALLOW_PRIVATE_ENDPOINTS=1)\n", ollamaCred.Name, ollamaCred.Value)
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "  Skipping Ollama endpoint (set CREWSHIP_SEED_OLLAMA=1)")
 	}
 
 	return nil

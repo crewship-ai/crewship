@@ -296,25 +296,19 @@ Examples:
 				value = scanner.Text()
 			}
 		}
-		if value == "" {
-			return fmt.Errorf("--value or --value-stdin is required")
-		}
+		authChanged := flags.Changed("auth-token")
+		headerChanged := flags.Changed("header")
+		rotatingEndpointAuth := authChanged || headerChanged
 
-		// #974 S1: for an authenticated ENDPOINT_URL, re-pass the token/headers
-		// with --auth-token/--header and they get folded into the one-object
-		// JSON the server stores, exactly as `credential create` does. The
-		// server-side gate rejects a bare *token* (not a URL); note a rotate of
-		// an authed endpoint with only a bare new *URL* still drops the stored
-		// token (the server does not merge the old object) — always re-pass the
-		// auth material when rotating an authenticated endpoint.
-		authToken, _ := flags.GetString("auth-token")
-		headerPairs, _ := flags.GetStringArray("header")
-		if authToken != "" || len(headerPairs) > 0 {
-			built, err := buildEndpointCredentialValue(value, authToken, headerPairs)
-			if err != nil {
-				return err
-			}
-			value = built
+		// For a plain rotate we require a new value up front. For an ENDPOINT_URL
+		// field rotation (--auth-token/--header) the base URL can be omitted —
+		// the SERVER merges the changed field(s) over the stored value, keeping
+		// the rest. The CLI must NOT hand-build a full {baseURL,apiKey,headers}
+		// JSON here: it can't read the existing token/headers (secrets are never
+		// returned), so building the object client-side would silently drop the
+		// fields it can't see. Send only what changed and let the server merge.
+		if value == "" && !rotatingEndpointAuth {
+			return fmt.Errorf("--value or --value-stdin is required")
 		}
 
 		if err := confirmAction(cmd, fmt.Sprintf("Rotate credential %q? The old value will be scrubbed after the grace window.", args[0])); err != nil {
@@ -327,7 +321,53 @@ Examples:
 			return err
 		}
 
-		body := map[string]interface{}{"value": value}
+		body := map[string]interface{}{}
+		if rotatingEndpointAuth {
+			// Guard REGARDLESS of whether --value was passed: --auth-token/--header
+			// on a non-ENDPOINT_URL credential would otherwise be misapplied (a
+			// full-value rotate storing a JSON blob as, say, a GITHUB secret).
+			metaResp, metaErr := client.Get("/api/v1/credentials/" + credID)
+			if metaErr != nil {
+				return fmt.Errorf("could not fetch credential to validate its type: %w", metaErr)
+			}
+			if err := cli.CheckError(metaResp); err != nil {
+				return err
+			}
+			var cred struct {
+				Type string `json:"type"`
+			}
+			if err := cli.ReadJSON(metaResp, &cred); err != nil {
+				return err
+			}
+			if cred.Type != "ENDPOINT_URL" {
+				return fmt.Errorf("--auth-token/--header are only valid when rotating an ENDPOINT_URL credential (got %s)", cred.Type)
+			}
+			// Send only the changed field(s); the server merges over the stored
+			// value so unspecified fields (headers when rotating the token, or
+			// vice versa) are preserved.
+			if value != "" {
+				body["endpoint_base_url"] = value
+			}
+			if authChanged {
+				authToken, _ := flags.GetString("auth-token")
+				body["endpoint_auth_token"] = authToken
+			}
+			if headerChanged {
+				headerPairs, _ := flags.GetStringArray("header")
+				headers := map[string]string{}
+				for _, hp := range headerPairs {
+					k, v, ok := strings.Cut(hp, "=")
+					k = strings.TrimSpace(k)
+					if !ok || k == "" {
+						return fmt.Errorf("--header must be KEY=VALUE, got %q", hp)
+					}
+					headers[k] = strings.TrimSpace(v)
+				}
+				body["endpoint_headers"] = headers
+			}
+		} else {
+			body["value"] = value
+		}
 		if flags.Changed("grace-seconds") {
 			gs, _ := flags.GetInt("grace-seconds")
 			if gs < 0 || gs > 604800 {
