@@ -263,6 +263,88 @@ func (h *AgentHandler) MarkChatRead(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// DeleteChat removes a chat session and its conversation history.
+// DELETE /api/v1/agents/{agentId}/chats/{chatId}
+//
+// Added for #998: routine iterate's one-shot grader/optimizer calls used
+// to strand two orphan chats per round in the agent's session sidebar.
+// The gate is creator-or-agent-editor: the chat's creator may always
+// remove their own session (a MEMBER cleaning up after themselves), and
+// anyone who can edit the agent (canEditAgent — OWNER/ADMIN, MANAGER
+// with ownership/crew elevation) may remove any of its chats.
+func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	chatID := r.PathValue("chatId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	user := UserFromContext(r.Context())
+	if workspaceID == "" || user == nil {
+		replyError(w, http.StatusUnauthorized, "auth required")
+		return
+	}
+
+	// Scope check mirrors MarkChatRead: cross-tenant / mis-nested ids 404
+	// without leaking existence.
+	var createdBy sql.NullString
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT created_by FROM chats WHERE id = ? AND agent_id = ? AND workspace_id = ?`,
+		chatID, agentID, workspaceID).Scan(&createdBy)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "Chat not found")
+		return
+	}
+	if err != nil {
+		h.logger.Error("delete chat lookup", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if !createdBy.Valid || createdBy.String != user.ID {
+		role := RoleFromContext(r.Context())
+		ok, err := canEditAgent(r.Context(), h.db, user.ID, role, agentID)
+		if err != nil {
+			h.logger.Error("delete chat gate", "error", err)
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		if !ok {
+			replyForbidden(w, h.logger, user.ID, role, "chat.delete", "chat:"+chatID)
+			return
+		}
+	}
+
+	// Chat + messages + read cursors go together — a partial delete would
+	// leave orphaned history rows no surface can reach.
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.logger.Error("delete chat begin tx", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, stmt := range []struct{ q, arg string }{
+		{`DELETE FROM conversation_messages WHERE session_id = ?`, chatID},
+		{`DELETE FROM chat_read_cursors WHERE chat_id = ?`, chatID},
+		{`DELETE FROM chats WHERE id = ?`, chatID},
+	} {
+		if _, err := tx.ExecContext(r.Context(), stmt.q, stmt.arg); err != nil {
+			h.logger.Error("delete chat", "error", err, "chat_id", chatID)
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("delete chat commit", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	h.broadcastAgentEvent("chat_deleted", workspaceID, map[string]string{
+		"agent_id": agentID,
+		"chat_id":  chatID,
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ListRuns returns all execution runs for a given agent, ordered by most recent first.
 // GET /api/v1/agents/{agentId}/runs
 //
