@@ -167,18 +167,6 @@ func NewKeeperPhase2Handler(
 	}
 }
 
-// resolveGovernance fetches the workspace watchdog settings (#1001 M0)
-// once per request. A lookup error falls back to the zero Settings —
-// legacy MANAGER fanout — because the F4 write path must never fail on
-// a governance projection read.
-func (h *KeeperPhase2Handler) resolveGovernance(ctx context.Context, workspaceID string) governance.Settings {
-	gov, _, err := governance.Get(ctx, h.db, workspaceID)
-	if err != nil {
-		h.logger.Warn("keeper_phase2: governance lookup failed", "error", err, "workspace_id", workspaceID)
-	}
-	return gov
-}
-
 // notifyKeeperInbox pushes the realtime inbox invalidation after an F4
 // inbox write — the same contract as the keeper_request.go credential path
 // (#1001 M0), so F4 findings stop depending on manual refresh. A configured
@@ -366,7 +354,7 @@ func (h *KeeperPhase2Handler) HandleSkillReview(w http.ResponseWriter, r *http.R
 	}
 
 	if res.Decision == keeper.DecisionEscalate || res.Decision == keeper.DecisionDeny {
-		gov := h.resolveGovernance(r.Context(), body.WorkspaceID)
+		gov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
 		title := fmt.Sprintf("Skill review: %s (%s)", body.SkillName, res.Decision)
 		_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
 			WorkspaceID:  body.WorkspaceID,
@@ -470,7 +458,7 @@ func (h *KeeperPhase2Handler) HandleBehavior(w http.ResponseWriter, r *http.Requ
 	switch res.PolicyDecision {
 	case policy.DecisionInboxApprove, policy.DecisionAutoLogInbox,
 		policy.DecisionBlockInbox:
-		gov := h.resolveGovernance(r.Context(), body.WorkspaceID)
+		gov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
 		title := fmt.Sprintf("Behavior monitor: %s on %s (%s)", body.AgentName, body.ToolName, res.Decision)
 		_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
 			WorkspaceID:  body.WorkspaceID,
@@ -586,7 +574,7 @@ func (h *KeeperPhase2Handler) HandleMemoryHealth(w http.ResponseWriter, r *http.
 	}
 
 	if res.Decision == keeper.DecisionEscalate {
-		gov := h.resolveGovernance(r.Context(), body.WorkspaceID)
+		gov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
 		title := fmt.Sprintf("Memory health: %s (overall %.0f)", body.CrewName, res.OverallScore)
 		_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
 			WorkspaceID:  body.WorkspaceID,
@@ -687,7 +675,7 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 
 	// Resolved once — both inbox writes below (gated lesson proposal,
 	// ESCALATE/DENY surface) share the same targeting decision.
-	gov := h.resolveGovernance(r.Context(), body.WorkspaceID)
+	gov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
 
 	// PR-G F4.1 UX — self_learning gate on the ALLOW path. The
 	// evaluator's WriteLesson=true says "this lesson is worth keeping",

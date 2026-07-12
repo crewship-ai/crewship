@@ -28,8 +28,8 @@ the governance layer is the per-workspace overlay: whether the behavioral
 watchdog is enabled, which OWNER/ADMIN member receives escalations, and the
 risk score (1-10) at or above which a DENY decision is also notified.
 
-An unconfigured workspace inherits the server config; the first write
-creates the explicit per-workspace row, which wins from then on.
+The behavioral watchdog is opt-in and default OFF per workspace — it only runs
+once an OWNER/ADMIN enables it. Each subcommand updates exactly one setting.
 
 Examples:
   crewship keeper status
@@ -72,23 +72,12 @@ func getKeeperGovernance(client *cli.Client) (keeperGovernance, error) {
 	return gov, nil
 }
 
-// putKeeperGovernance writes the full governance state back. The PUT is a
-// whole-row replace server-side, so callers must merge: GET first, change
-// one field, send everything (deny_notify_min_risk omitted only when the
-// GET returned an out-of-range value, letting the server default to 7).
-func putKeeperGovernance(client *cli.Client, gov keeperGovernance) (keeperGovernance, error) {
-	body := struct {
-		Enabled               bool   `json:"enabled"`
-		SecurityContactUserID string `json:"security_contact_user_id"`
-		DenyNotifyMinRisk     *int   `json:"deny_notify_min_risk,omitempty"`
-	}{
-		Enabled:               gov.Enabled,
-		SecurityContactUserID: gov.SecurityContactUserID,
-	}
-	if gov.DenyNotifyMinRisk >= 1 && gov.DenyNotifyMinRisk <= 10 {
-		body.DenyNotifyMinRisk = &gov.DenyNotifyMinRisk
-	}
-
+// putKeeperGovernanceFields sends a partial update: only the fields present in
+// body are changed server-side, the rest of the row is left untouched. Each
+// subcommand sends exactly its own field, so there is no read-merge-write
+// (which could echo a stale value back and clobber a setting) and concurrent
+// single-field edits commute instead of overwriting each other.
+func putKeeperGovernanceFields(client *cli.Client, body map[string]any) (keeperGovernance, error) {
 	var out keeperGovernance
 	if err := putJSON(client, "/api/v1/admin/keeper/governance", body, &out); err != nil {
 		return keeperGovernance{}, keeperPermissionHint(err)
@@ -99,7 +88,7 @@ func putKeeperGovernance(client *cli.Client, gov keeperGovernance) (keeperGovern
 // printKeeperGovernance renders the governance block of the human output.
 // Shared by status and every mutation so the shape can't drift.
 func printKeeperGovernance(gov keeperGovernance) {
-	configured := "no (inheriting server config)"
+	configured := "no (opt-in — off by default)"
 	if gov.Configured {
 		configured = "yes"
 	}
@@ -169,21 +158,15 @@ Examples:
 	},
 }
 
-// setKeeperWatchdogEnabled is the shared read-merge-write behind
-// enable/disable: contact and threshold are preserved verbatim.
+// setKeeperWatchdogEnabled flips only the enabled flag; contact and threshold
+// are untouched by the partial update.
 func setKeeperWatchdogEnabled(enabled bool) error {
 	client, err := requireAuthAndWorkspace()
 	if err != nil {
 		return err
 	}
 
-	gov, err := getKeeperGovernance(client)
-	if err != nil {
-		return err
-	}
-	gov.Enabled = enabled
-
-	out, err := putKeeperGovernance(client, gov)
+	out, err := putKeeperGovernanceFields(client, map[string]any{"enabled": enabled})
 	if err != nil {
 		return err
 	}
@@ -279,13 +262,7 @@ Examples:
 			}
 		}
 
-		gov, err := getKeeperGovernance(client)
-		if err != nil {
-			return err
-		}
-		gov.SecurityContactUserID = contactID
-
-		out, err := putKeeperGovernance(client, gov)
+		out, err := putKeeperGovernanceFields(client, map[string]any{"security_contact_user_id": contactID})
 		if err != nil {
 			return err
 		}
@@ -322,13 +299,7 @@ Examples:
 			return err
 		}
 
-		gov, err := getKeeperGovernance(client)
-		if err != nil {
-			return err
-		}
-		gov.DenyNotifyMinRisk = risk
-
-		out, err := putKeeperGovernance(client, gov)
+		out, err := putKeeperGovernanceFields(client, map[string]any{"deny_notify_min_risk": risk})
 		if err != nil {
 			return err
 		}

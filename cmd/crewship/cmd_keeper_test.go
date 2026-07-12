@@ -166,43 +166,46 @@ func TestKeeperStatusRunE_HappyPath(t *testing.T) {
 	}
 }
 
-func TestKeeperEnableRunE_PreservesContactAndThreshold(t *testing.T) {
-	m := startKeeperMock(t) // gov: enabled=false, contact=u-contact, risk=4
+// assertPartialPut checks the PUT body carries exactly the one expected field
+// (partial update — no read-merge echo of untouched settings) and that the
+// mutation issued no governance GET.
+func assertPartialPut(t *testing.T, m *keeperMock, wantKey string, wantVal any) {
+	t.Helper()
+	body := m.decodePut(t)
+	if body[wantKey] != wantVal {
+		t.Errorf("PUT %s: got %v want %v", wantKey, body[wantKey], wantVal)
+	}
+	for _, other := range []string{"enabled", "security_contact_user_id", "deny_notify_min_risk"} {
+		if other == wantKey {
+			continue
+		}
+		if _, ok := body[other]; ok {
+			t.Errorf("partial PUT must not carry %q; body=%v", other, body)
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.govGets != 0 {
+		t.Errorf("mutation must not GET governance (no read-merge); got %d", m.govGets)
+	}
+}
+
+func TestKeeperEnableRunE_SendsEnabledOnly(t *testing.T) {
+	m := startKeeperMock(t)
 
 	if err := keeperEnableCmd.RunE(keeperEnableCmd, nil); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-
-	body := m.decodePut(t)
-	if body["enabled"] != true {
-		t.Errorf("PUT enabled: got %v want true", body["enabled"])
-	}
-	if body["security_contact_user_id"] != "u-contact" {
-		t.Errorf("PUT contact not preserved: got %v", body["security_contact_user_id"])
-	}
-	if body["deny_notify_min_risk"] != float64(4) {
-		t.Errorf("PUT threshold not preserved: got %v", body["deny_notify_min_risk"])
-	}
+	assertPartialPut(t, m, "enabled", true)
 }
 
-func TestKeeperDisableRunE_PreservesContactAndThreshold(t *testing.T) {
+func TestKeeperDisableRunE_SendsEnabledOnly(t *testing.T) {
 	m := startKeeperMock(t)
-	m.gov["enabled"] = true
 
 	if err := keeperDisableCmd.RunE(keeperDisableCmd, nil); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-
-	body := m.decodePut(t)
-	if body["enabled"] != false {
-		t.Errorf("PUT enabled: got %v want false", body["enabled"])
-	}
-	if body["security_contact_user_id"] != "u-contact" {
-		t.Errorf("PUT contact not preserved: got %v", body["security_contact_user_id"])
-	}
-	if body["deny_notify_min_risk"] != float64(4) {
-		t.Errorf("PUT threshold not preserved: got %v", body["deny_notify_min_risk"])
-	}
+	assertPartialPut(t, m, "enabled", false)
 }
 
 func TestKeeperContactRunE_ResolvesEmailToUserID(t *testing.T) {
@@ -211,18 +214,7 @@ func TestKeeperContactRunE_ResolvesEmailToUserID(t *testing.T) {
 	if err := keeperContactCmd.RunE(keeperContactCmd, []string{"admin@example.com"}); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-
-	body := m.decodePut(t)
-	if body["security_contact_user_id"] != "u-admin" {
-		t.Errorf("PUT contact: got %v want u-admin", body["security_contact_user_id"])
-	}
-	// Merge must preserve the other two fields.
-	if body["enabled"] != false {
-		t.Errorf("PUT enabled not preserved: got %v", body["enabled"])
-	}
-	if body["deny_notify_min_risk"] != float64(4) {
-		t.Errorf("PUT threshold not preserved: got %v", body["deny_notify_min_risk"])
-	}
+	assertPartialPut(t, m, "security_contact_user_id", "u-admin")
 }
 
 func TestKeeperContactRunE_NotFoundExitCode(t *testing.T) {
@@ -258,7 +250,6 @@ func TestKeeperContactRunE_RejectsNonAdminRole(t *testing.T) {
 
 func TestKeeperContactRunE_Clear(t *testing.T) {
 	m := startKeeperMock(t)
-	m.gov["enabled"] = true
 
 	if err := keeperContactCmd.Flags().Set("clear", "true"); err != nil {
 		t.Fatalf("set --clear: %v", err)
@@ -268,17 +259,8 @@ func TestKeeperContactRunE_Clear(t *testing.T) {
 	if err := keeperContactCmd.RunE(keeperContactCmd, nil); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-
-	body := m.decodePut(t)
-	if body["security_contact_user_id"] != "" {
-		t.Errorf("PUT contact: got %v want empty", body["security_contact_user_id"])
-	}
-	if body["enabled"] != true {
-		t.Errorf("PUT enabled not preserved: got %v", body["enabled"])
-	}
-	if body["deny_notify_min_risk"] != float64(4) {
-		t.Errorf("PUT threshold not preserved: got %v", body["deny_notify_min_risk"])
-	}
+	// --clear sends an explicit empty contact (present key = clear, not "leave").
+	assertPartialPut(t, m, "security_contact_user_id", "")
 }
 
 func TestKeeperContactRunE_RequiresEmailOrClear(t *testing.T) {
@@ -291,24 +273,13 @@ func TestKeeperContactRunE_RequiresEmailOrClear(t *testing.T) {
 	}
 }
 
-func TestKeeperThresholdRunE_MergesEnabledAndContact(t *testing.T) {
+func TestKeeperThresholdRunE_SendsThresholdOnly(t *testing.T) {
 	m := startKeeperMock(t)
-	m.gov["enabled"] = true
 
 	if err := keeperThresholdCmd.RunE(keeperThresholdCmd, []string{"9"}); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-
-	body := m.decodePut(t)
-	if body["deny_notify_min_risk"] != float64(9) {
-		t.Errorf("PUT threshold: got %v want 9", body["deny_notify_min_risk"])
-	}
-	if body["enabled"] != true {
-		t.Errorf("PUT enabled not preserved: got %v", body["enabled"])
-	}
-	if body["security_contact_user_id"] != "u-contact" {
-		t.Errorf("PUT contact not preserved: got %v", body["security_contact_user_id"])
-	}
+	assertPartialPut(t, m, "deny_notify_min_risk", float64(9))
 }
 
 func TestKeeperThresholdRunE_RejectsInvalidValues(t *testing.T) {

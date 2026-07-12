@@ -5,9 +5,10 @@ package database
 // watchdog and route its findings from the dashboard instead of editing the
 // server's env (issue #1001, M0).
 //
-// One row per workspace (workspace_id PK). No row means "inherit the server
-// config" — existing deployments keep their env-driven behavior on upgrade;
-// an explicit row always wins. security_contact_user_id targets the snitch
+// One row per workspace (workspace_id PK). No row means the behavioral
+// watchdog is OFF for that workspace — it is opt-in and only runs once an
+// OWNER/ADMIN enables it (the credential-access gatekeeper enforcement stays
+// server-configured and is unaffected). security_contact_user_id targets the snitch
 // inbox items at a named admin (empty = the legacy TargetRole MANAGER
 // fanout). deny_notify_min_risk is the risk score (1–10) at or above which a
 // DENY decision also lands in the inbox — ESCALATE always does.

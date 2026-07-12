@@ -80,7 +80,7 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     canManage = true
   })
 
-  it("renders inherited-from-server hint and effective switch state when unconfigured", async () => {
+  it("renders the switch off (opt-in default) when unconfigured, regardless of server engine", async () => {
     mockRoutes({
       configured: false,
       enabled: false,
@@ -90,9 +90,11 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
 
     const sw = await screen.findByTestId("keeper-governance-switch")
-    // Unconfigured → switch reflects the inherited server state (on).
-    expect(sw).toHaveAttribute("aria-checked", "true")
-    expect(screen.getByText(/inherited from server: on/i)).toBeInTheDocument()
+    // Opt-in, default OFF: an unconfigured workspace shows the switch off even
+    // though the server engine is on (the engine is shown only as context).
+    expect(sw).toHaveAttribute("aria-checked", "false")
+    expect(screen.getByText(/off by default \(opt-in\)/i)).toBeInTheDocument()
+    expect(screen.getByText(/server engine is on/i)).toBeInTheDocument()
     expect(screen.getByTestId("keeper-governance-risk")).toHaveValue(7)
     // Pristine form → Save disabled.
     expect(screen.getByTestId("keeper-governance-save")).toBeDisabled()

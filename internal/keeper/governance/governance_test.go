@@ -103,38 +103,43 @@ func TestUpsertClampsRisk(t *testing.T) {
 	}
 }
 
-func TestEffectiveInheritsServerDefaultWithoutRow(t *testing.T) {
+func TestResolveDefaultsOffWithoutRow(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if s := Effective(ctx, db, "ws1", true); !s.Enabled {
-		t.Fatal("no row + serverDefault=true must be enabled")
+	// Opt-in default: an unconfigured workspace resolves to disabled with the
+	// default DENY-notify threshold — no server inheritance.
+	s := Resolve(ctx, db, nil, "ws1")
+	if s.Enabled {
+		t.Fatal("no row must resolve to disabled (opt-in default OFF)")
 	}
-	if s := Effective(ctx, db, "ws1", false); s.Enabled {
-		t.Fatal("no row + serverDefault=false must be disabled")
+	if s.DenyNotifyMinRisk != DefaultDenyNotifyMinRisk {
+		t.Fatalf("DenyNotifyMinRisk = %d, want default %d", s.DenyNotifyMinRisk, DefaultDenyNotifyMinRisk)
 	}
 
-	// Explicit row wins over the server default in both directions.
+	// An explicit enabled row wins.
+	if err := Upsert(ctx, db, "ws1", Settings{Enabled: true, DenyNotifyMinRisk: 5}, ""); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if s := Resolve(ctx, db, nil, "ws1"); !s.Enabled || s.DenyNotifyMinRisk != 5 {
+		t.Fatalf("explicit enabled row not honored: %+v", s)
+	}
+
+	// An explicit disabled row also wins (stays off).
 	if err := Upsert(ctx, db, "ws1", Settings{Enabled: false, DenyNotifyMinRisk: 7}, ""); err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
-	if s := Effective(ctx, db, "ws1", true); s.Enabled {
-		t.Fatal("explicit disabled row must beat serverDefault=true")
-	}
-	if err := Upsert(ctx, db, "ws1", Settings{Enabled: true, DenyNotifyMinRisk: 7}, ""); err != nil {
-		t.Fatalf("Upsert: %v", err)
-	}
-	if s := Effective(ctx, db, "ws1", false); !s.Enabled {
-		t.Fatal("explicit enabled row must beat serverDefault=false")
+	if s := Resolve(ctx, db, nil, "ws1"); s.Enabled {
+		t.Fatal("explicit disabled row must resolve to disabled")
 	}
 }
 
-func TestEffectiveSurvivesNilDBAndEmptyWorkspace(t *testing.T) {
-	if s := Effective(context.Background(), nil, "ws1", true); !s.Enabled || s.DenyNotifyMinRisk != DefaultDenyNotifyMinRisk {
+func TestResolveSurvivesNilDBAndEmptyWorkspace(t *testing.T) {
+	if s := Resolve(context.Background(), nil, nil, "ws1"); s.Enabled || s.DenyNotifyMinRisk != DefaultDenyNotifyMinRisk {
 		t.Fatalf("nil db fallback wrong: %+v", s)
 	}
 	db := openTestDB(t)
-	if s := Effective(context.Background(), db, "", false); s.Enabled {
+	if s := Resolve(context.Background(), db, nil, ""); s.Enabled {
 		t.Fatalf("empty workspace fallback wrong: %+v", s)
 	}
 }

@@ -10,10 +10,10 @@
 //   PUT /api/v1/admin/keeper/governance  ← { enabled,
 //        security_contact_user_id, deny_notify_min_risk }        (OWNER/ADMIN)
 //
-// "No row" semantics: configured=false means the workspace inherits the
-// server-level config (KEEPER_ENABLED) — we surface that inherited state
-// inline and pre-set the switch to the effective value. The first save
-// creates the explicit row, which wins from then on.
+// "No row" semantics: the behavioral watchdog is opt-in and default OFF per
+// workspace — configured=false means it has never been enabled here, so the
+// switch shows off. The server engine flag (serverEnabled) is shown only as
+// context; it governs the credential-access gatekeeper, not this switch.
 //
 // The security contact must be an OWNER/ADMIN workspace member (the
 // backend rejects anything else with a 400), so the picker is filtered
@@ -64,8 +64,8 @@ const MANAGER_FANOUT = "__managers__"
 
 export interface KeeperGovernancePanelProps {
   workspaceId: string | null | undefined
-  /** Server-level keeper enabled flag (GET /system/keeper) — the value an
-   *  unconfigured workspace inherits. */
+  /** Server-level keeper engine flag (GET /system/keeper) — shown as context
+   *  only; the per-workspace watchdog toggle is independent (opt-in). */
   serverEnabled: boolean
 }
 
@@ -129,9 +129,9 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
 
       setConfigured(gov.configured)
       const next: FormState = {
-        // Unconfigured workspace → switch reflects the effective (inherited)
-        // server state so flipping it saves what the operator actually sees.
-        enabled: gov.configured ? gov.enabled : serverEnabled,
+        // Opt-in, default OFF: an unconfigured workspace shows the switch off
+        // (gov.enabled is false server-side until explicitly enabled).
+        enabled: gov.enabled,
         contact: gov.security_contact_user_id ?? "",
         risk: String(gov.deny_notify_min_risk ?? 7),
       }
@@ -262,8 +262,8 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
         label="Watchdog enabled"
         description={
           configured
-            ? "Explicit workspace setting — overrides the server default."
-            : `Not configured for this workspace — inherited from server: ${serverEnabled ? "on" : "off"}. Saving pins an explicit setting.`
+            ? `Behavioral monitoring for this workspace. Server engine is ${serverEnabled ? "on" : "off"}.`
+            : `Off by default (opt-in) — enable to start behavioral monitoring for this workspace. Server engine is ${serverEnabled ? "on" : "off"}.`
         }
       >
         <Switch

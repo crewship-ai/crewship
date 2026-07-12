@@ -98,18 +98,6 @@ func registerKeeperPhase2Routines(
 	return skillRegistered, memoryRegistered
 }
 
-// sweepGovernance resolves the workspace watchdog settings (#1001 M0)
-// for a sweep inbox write. A lookup error falls back to the zero
-// Settings — legacy MANAGER fanout — because a governance projection
-// read must never fail the sweep.
-func sweepGovernance(ctx context.Context, db *sql.DB, logger *slog.Logger, workspaceID string) governance.Settings {
-	gov, _, err := governance.Get(ctx, db, workspaceID)
-	if err != nil {
-		logger.Warn("keeper sweep: governance lookup failed", "error", err, "workspace_id", workspaceID)
-	}
-	return gov
-}
-
 // broadcastSweepInbox pushes the workspace inbox invalidation after a
 // successful sweep insert so findings repaint open inboxes immediately
 // instead of on the next poll (precedent: pipeline/runner_notify.go).
@@ -398,7 +386,7 @@ func (p *sqlSkillPersister) WriteInboxItem(ctx context.Context, skillID, reason 
 		// the whole point of the fanout.
 		// Per-workspace resolution — each workspace in the fanout has
 		// its own security contact (or none).
-		gov := sweepGovernance(ctx, p.db, p.logger, workspaceID)
+		gov := governance.Resolve(ctx, p.db, p.logger, workspaceID)
 		if err := inbox.Insert(ctx, p.db, p.logger, inbox.Item{
 			WorkspaceID:  workspaceID,
 			Kind:         inbox.KindEscalation,
@@ -550,7 +538,7 @@ func (p *sqlMemoryHealthPersister) TriggerConsolidation(ctx context.Context, wor
 	// write fails.
 	p.logger.Info("keeper.memory_health_check: auto-consolidation triggered",
 		"workspace_id", workspaceID, "crew_id", crewID, "reason", reason)
-	gov := sweepGovernance(ctx, p.db, p.logger, workspaceID)
+	gov := governance.Resolve(ctx, p.db, p.logger, workspaceID)
 	if err := inbox.Insert(ctx, p.db, p.logger, inbox.Item{
 		WorkspaceID:  workspaceID,
 		Kind:         inbox.KindMemoryConsolidation,
@@ -601,7 +589,7 @@ func (p *sqlMemoryHealthPersister) WriteInboxItem(ctx context.Context, workspace
 			"workspace_id", workspaceID, "crew_id", crewID)
 		return nil
 	}
-	gov := sweepGovernance(ctx, p.db, p.logger, workspaceID)
+	gov := governance.Resolve(ctx, p.db, p.logger, workspaceID)
 	if err := inbox.Insert(ctx, p.db, p.logger, inbox.Item{
 		WorkspaceID:  workspaceID,
 		Kind:         inbox.KindMessage,

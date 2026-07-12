@@ -298,16 +298,19 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// Workspace watchdog governance (#1001 M0): a configured security
 	// contact highlights the snitch for a named admin (TargetUserID) while
 	// KEEPING the MANAGER fanout, so the escalation stays visible to every
-	// manager as a fallback (the inbox visibility filter ORs the two). An
-	// opted-in workspace also gets high-risk DENYs.
-	gov, govConfigured, gerr := governance.Get(r.Context(), h.db, body.WorkspaceID)
-	if gerr != nil {
-		h.logger.Warn("keeper: governance lookup failed", "error", gerr, "workspace_id", body.WorkspaceID)
-	}
+	// manager as a fallback (the inbox visibility filter ORs the two). The
+	// high-risk DENY notify is opt-in and gated on the workspace watchdog
+	// being enabled — Resolve returns disabled for an unconfigured workspace
+	// (default OFF), matching the behavior hook so the two paths agree on
+	// what "enabled" means.
+	gov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
 
+	// inbox.Insert returns its SQL error; only broadcast on a real write so
+	// a failed projection doesn't flash a phantom bell update with nothing
+	// behind it.
 	inboxWritten := false
 	if gkResp.Decision == string(keeper.DecisionEscalate) {
-		inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+		if err := inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
 			WorkspaceID:  body.WorkspaceID,
 			Kind:         inbox.KindEscalation,
 			SourceID:     reqID,
@@ -332,17 +335,18 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				"reason":          gkResp.Reason,
 				"risk_score":      gkResp.RiskScore,
 			},
-		})
-		inboxWritten = true
+		}); err == nil {
+			inboxWritten = true
+		}
 	}
 
 	// High-risk DENY notify (#1001 M0): opt-in per workspace. A DENY is
 	// already enforced — the item is informational (non-blocking), it
 	// exists so the admin *hears about* an agent probing past its fence
 	// instead of discovering it in the log next week.
-	if govConfigured && gov.Enabled &&
+	if gov.Enabled &&
 		gkResp.Decision == string(keeper.DecisionDeny) && gkResp.RiskScore >= gov.DenyNotifyMinRisk {
-		inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+		if err := inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
 			WorkspaceID:  body.WorkspaceID,
 			Kind:         inbox.KindEscalation,
 			SourceID:     reqID,
@@ -367,8 +371,9 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				"reason":          gkResp.Reason,
 				"risk_score":      gkResp.RiskScore,
 			},
-		})
-		inboxWritten = true
+		}); err == nil {
+			inboxWritten = true
+		}
 	}
 
 	// Realtime push (#1001 M0): Keeper was the only inbox producer that

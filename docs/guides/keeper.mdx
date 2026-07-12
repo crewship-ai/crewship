@@ -234,20 +234,21 @@ restart needed:
 
 | Setting | What it does | Default |
 |---------|-------------|---------|
-| **Watchdog enabled** | Master toggle for behavior monitoring + DENY notifications in this workspace | Inherits the server config until explicitly set |
-| **Security contact** | A named OWNER/ADMIN whose inbox receives Keeper findings directly (realtime) | Unset — findings fan out to the MANAGER role |
+| **Watchdog enabled** | Master toggle for behavior monitoring + DENY notifications in this workspace | **Off (opt-in)** — enable per workspace |
+| **Security contact** | A named OWNER/ADMIN the escalation is highlighted for (via the inbox item's target) | Unset — findings go to all MANAGER+ members |
 | **Notify on DENY at risk ≥ N** | High-risk DENY decisions (1–10 scale) also land in the inbox as non-blocking items — ESCALATE always does | 7 |
 
-Keeper findings push an `inbox.updated` event in realtime, so the bell badge
-updates without a refresh; a configured security contact additionally gets a
-direct `notification.created` ping on their user channel.
+When a security contact is set the escalation targets that person **and** keeps
+the MANAGER fanout, so managers still see it as a fallback. Keeper findings push
+an `inbox.updated` event in realtime, so the bell badge updates without a
+manual refresh.
 
 <Note>
-  A workspace with no explicit setting **inherits the server config** —
-  upgrading Crewship never silently changes what the watchdog does. The
-  workspace toggle governs the *behavioral* layer only: the credential-access
-  gatekeeper enforcement stays server-configured (`KEEPER_ENABLED`), so an
-  in-app toggle can never weaken credential isolation.
+  The behavioral watchdog is **opt-in and default OFF per workspace** — it only
+  runs once an OWNER/ADMIN enables it. The workspace toggle governs the
+  *behavioral* layer only: the credential-access gatekeeper enforcement stays
+  server-configured (`KEEPER_ENABLED`), so an in-app toggle can never weaken
+  credential isolation.
 </Note>
 
 ### API + CLI

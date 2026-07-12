@@ -58,13 +58,12 @@ func (o *postToolCallObserver) Observe(obs orchestrator.ToolCallObservation) {
 	if hook == nil {
 		return
 	}
-	// Workspace watchdog toggle (#1001 M0). serverDefault=true because the
-	// hook being installed at all means the instance is configured for
-	// behavior monitoring — an unconfigured workspace inherits that, an
-	// explicit in-app "disabled" row switches its monitoring off. One PK
-	// lookup per observation; the observer already runs off the hot path.
+	// Workspace watchdog toggle (#1001 M0). The behavioral watchdog is
+	// opt-in per workspace (default OFF): an unconfigured workspace is not
+	// monitored until an OWNER/ADMIN enables it. One PK lookup per sampled
+	// observation; the observer already runs off the hot path.
 	gctx, gcancel := context.WithTimeout(context.Background(), 2*time.Second)
-	enabled := governance.Effective(gctx, o.db, obs.WorkspaceID, true).Enabled
+	enabled := governance.Resolve(gctx, o.db, o.logger, obs.WorkspaceID).Enabled
 	gcancel()
 	if !enabled {
 		return

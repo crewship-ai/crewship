@@ -4,17 +4,18 @@
 // decision also lands in the inbox.
 //
 // Resolution contract: an explicit workspace row always wins; no row means
-// "inherit the server config" so existing env-driven deployments keep their
-// behavior on upgrade. The resolver is read on hot paths (the behavior hook
-// fires per sampled tool call), so Effective never returns an error — a
-// failed read falls back to the server default and the caller's next sample
-// retries naturally.
+// the watchdog is OFF for that workspace — it is opt-in and default OFF, only
+// running once an OWNER/ADMIN enables it. The resolver is read on hot paths
+// (the behavior hook fires per sampled tool call), so Resolve never returns an
+// error — a failed read falls back to disabled (fail-safe: monitoring off,
+// never a spurious escalation) and the caller's next sample retries naturally.
 package governance
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -38,7 +39,7 @@ type Settings struct {
 }
 
 // Get returns the explicit workspace row. found is false when the workspace
-// has never been configured in-app (callers then inherit the server config).
+// has never been configured in-app (the watchdog is then off — see Resolve).
 func Get(ctx context.Context, db *sql.DB, workspaceID string) (Settings, bool, error) {
 	var (
 		s       Settings
@@ -88,17 +89,29 @@ func Upsert(ctx context.Context, db *sql.DB, workspaceID string, s Settings, upd
 	return nil
 }
 
-// Effective resolves the watchdog settings a caller should act on: the
-// explicit workspace row when present, otherwise the server default
-// (serverDefault = whether the env-configured watchdog is on for this
-// instance). Never errors — a failed read behaves as unconfigured.
-func Effective(ctx context.Context, db *sql.DB, workspaceID string, serverDefault bool) Settings {
+// Resolve returns the watchdog settings a caller should act on: the explicit
+// workspace row when present, otherwise the opt-in default (disabled, default
+// DENY-notify threshold). The watchdog is default-OFF per workspace (#1001) —
+// a workspace only participates once an OWNER/ADMIN explicitly enables it, so
+// an unconfigured workspace resolves to Enabled=false regardless of the server
+// config. This is the single fetch-and-warn seam every read site shares
+// (behavior hook, credential DENY-notify, F4 endpoints, sweeps); it never
+// errors — a failed read behaves as unconfigured (fail-safe: monitoring off,
+// never a spurious escalation). logger may be nil.
+func Resolve(ctx context.Context, db *sql.DB, logger *slog.Logger, workspaceID string) Settings {
+	def := Settings{DenyNotifyMinRisk: DefaultDenyNotifyMinRisk}
 	if db == nil || workspaceID == "" {
-		return Settings{Enabled: serverDefault, DenyNotifyMinRisk: DefaultDenyNotifyMinRisk}
+		return def
 	}
 	s, found, err := Get(ctx, db, workspaceID)
-	if err != nil || !found {
-		return Settings{Enabled: serverDefault, DenyNotifyMinRisk: DefaultDenyNotifyMinRisk}
+	if err != nil {
+		if logger != nil {
+			logger.Warn("keeper governance: resolve failed", "error", err, "workspace_id", workspaceID)
+		}
+		return def
+	}
+	if !found {
+		return def
 	}
 	return s
 }
