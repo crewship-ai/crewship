@@ -368,7 +368,7 @@ Examples:
 			}
 		}
 		if !found {
-			return fmt.Errorf("token %s not found (run 'crewship token list')", oldID)
+			return cli.NotFoundf("token %s not found (run 'crewship token list')", oldID)
 		}
 
 		// Allow --name override; otherwise carry the old name with a

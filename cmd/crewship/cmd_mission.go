@@ -187,7 +187,7 @@ func resolveMission(client *cli.Client, missionID string) (crewID, fullMissionID
 			return m.CrewID, m.ID, nil
 		}
 	}
-	return "", "", fmt.Errorf("mission not found: %s", missionID)
+	return "", "", cli.NotFoundf("mission not found: %s", missionID)
 }
 
 func findLeadAgent(client *cli.Client, crewID string) (string, error) {

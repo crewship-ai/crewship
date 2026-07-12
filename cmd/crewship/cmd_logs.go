@@ -129,7 +129,7 @@ func logsFollow(client *cli.Client, agentID, agentSlug string) error {
 		return fmt.Errorf("get WS token for follow: %w", err)
 	}
 
-	server := cli.ResolveServer(flagServer, cliCfg)
+	server := streamServerURL()
 	ws, err := cli.NewWSClient(server, wsToken)
 	if err != nil {
 		return err

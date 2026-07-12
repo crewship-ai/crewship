@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"net/url"
 	"strings"
 
@@ -147,7 +146,7 @@ var runtimesInfoCmd = &cobra.Command{
 			}
 		}
 
-		return fmt.Errorf("runtime not found: %s", tool)
+		return cli.NotFoundf("runtime not found: %s", tool)
 	},
 }
 

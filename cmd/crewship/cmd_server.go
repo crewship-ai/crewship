@@ -171,7 +171,7 @@ var serverUseCmd = &cobra.Command{
 			return err
 		}
 		if cfg.Servers == nil || cfg.Servers[name] == nil {
-			return fmt.Errorf("no such profile %q (see 'crewship server list')", name)
+			return cli.NotFoundf("no such profile %q (see 'crewship server list')", name)
 		}
 		cfg.Current = name
 		if err := cli.SaveConfig(cfg); err != nil {
@@ -194,7 +194,7 @@ var serverRemoveCmd = &cobra.Command{
 			return err
 		}
 		if cfg.Servers == nil || cfg.Servers[name] == nil {
-			return fmt.Errorf("no such profile %q", name)
+			return cli.NotFoundf("no such profile %q", name)
 		}
 		delete(cfg.Servers, name)
 		if cfg.Current == name {

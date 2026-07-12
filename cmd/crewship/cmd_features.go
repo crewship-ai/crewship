@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"net/url"
 
 	"github.com/spf13/cobra"
@@ -119,7 +118,7 @@ var featuresInfoCmd = &cobra.Command{
 			}
 		}
 
-		return fmt.Errorf("feature not found: %s", ref)
+		return cli.NotFoundf("feature not found: %s", ref)
 	},
 }
 
