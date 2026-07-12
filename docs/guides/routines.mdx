@@ -1031,6 +1031,8 @@ What makes this different from looping in a chat window:
 
 The rubric is the contract; write it like a brief to a colleague. Grader and optimizer are ordinary crew agents — a dedicated "reviewer" persona works well as the grader. Full flag reference in the [CLI docs](/cli/routine#crewship-routine-iterate-slug).
 
+Housekeeping is automatic: the one-shot grader/optimizer chat sessions are deleted after each call (they'd otherwise pile up in the agent's session sidebar), and if a later round errors mid-loop the summary table still prints for the rounds already scored — you never lose the scores you paid for.
+
 ## Bundle export / import
 
 Routines are portable across workspaces:
