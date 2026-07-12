@@ -4,11 +4,14 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/spf13/cobra"
 )
@@ -17,6 +20,34 @@ var (
 	restoreSnapshotList bool
 	restoreSnapshotYes  bool
 )
+
+// warnDBLocalOnly prints a stderr notice when the CLI's effective server
+// target is a non-local host: `crewship db` never touches that remote.
+func warnDBLocalOnly(dbPath string) {
+	srv := cli.EffectiveServer(flagServer, flagProfile, cliCfg)
+	if srv == "" || isLoopbackServerURL(srv) {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"note: your CLI targets %s, but 'crewship db' only touches the LOCAL database at %s\n",
+		srv, dbPath)
+}
+
+// isLoopbackServerURL reports whether the server URL points at this host.
+func isLoopbackServerURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
 
 var dbCmd = &cobra.Command{
 	Use:   "db",
@@ -49,6 +80,14 @@ the restore is itself reversible.`,
 			return fmt.Errorf("resolve data dir: %w", err)
 		}
 		dbPath := dd.DatabasePath()
+
+		// `db` is host-side maintenance on the LOCAL SQLite file. When the
+		// CLI is pointed at a remote server (profile / CREWSHIP_SERVER /
+		// --server), say so explicitly — silently doing local-disk work
+		// while the operator believes they are targeting a remote instance
+		// is worse than a noisy line. (Contrast: `nuke` acts through the
+		// remote API and is the model for remote-destructive commands.)
+		warnDBLocalOnly(dbPath)
 
 		snaps, err := database.ListSnapshots(dbPath)
 		if err != nil {

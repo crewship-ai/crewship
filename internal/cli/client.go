@@ -394,11 +394,14 @@ func (c *Client) Delete(path string) (*http.Response, error) {
 // ReadJSON decodes a JSON response body into v and closes the body.
 func ReadJSON(resp *http.Response, v interface{}) error {
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
-	if err != nil {
-		return fmt.Errorf("read response: %w", err)
-	}
-	if err := json.Unmarshal(data, v); err != nil {
+	// Streaming decode straight off the (capped) body: the previous
+	// ReadAll+Unmarshal made a full []byte copy of every response before a
+	// second parse pass — at ~275 call sites, that doubled peak allocation
+	// on large list payloads. The 10 MB LimitReader stays as the safety cap;
+	// a body past it fails the decode (truncated JSON) rather than silently
+	// producing a half-decoded value.
+	dec := json.NewDecoder(io.LimitReader(resp.Body, 10<<20))
+	if err := dec.Decode(v); err != nil {
 		return fmt.Errorf("decode response: %w", err)
 	}
 	return nil
