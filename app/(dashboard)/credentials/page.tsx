@@ -1,10 +1,12 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
 import { motion } from "motion/react"
+import { toast } from "sonner"
 import {
   Key, Plus, Pencil, Trash2, Clock, AlertTriangle,
-  ArrowUpDown,
+  ArrowUpDown, RefreshCw,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PageShell } from "@/components/layout/page-shell"
@@ -130,10 +132,16 @@ export default function CredentialsPage() {
   const [credentials, setCredentials] = React.useState<Credential[]>([])
   const [workspaceId, setWorkspaceId] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
+  const [loadError, setLoadError] = React.useState<string | null>(null)
   const [addOpen, setAddOpen] = React.useState(false)
   const [editOpen, setEditOpen] = React.useState(false)
   const [editCredential, setEditCredential] = React.useState<CredentialData | null>(null)
   const canManage = abilities.can("create", "Credential")
+  // Row-action gating mirrors the backend: PATCH allows MANAGER
+  // ("update"), DELETE is OWNER/ADMIN only ("manage" → CASL "delete").
+  // Hiding what would 403 beats letting users click into dead-ends.
+  const canUpdate = abilities.can("update", "Credential")
+  const canDelete = abilities.can("delete", "Credential")
   const [activeTab, setActiveTab] = React.useState<"all" | "needs">("all")
   const [search, setSearch] = React.useState("")
   const [filterTag, setFilterTag] = React.useState<string>("all")
@@ -148,55 +156,69 @@ export default function CredentialsPage() {
   const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false)
   const [bulkDeleting, setBulkDeleting] = React.useState(false)
 
+  // Both fetchers THROW on failure so loadData can surface a real
+  // error state — a failed fetch must never render as "no credentials
+  // yet" (which invites re-creating secrets that already exist).
   const fetchWorkspace = React.useCallback(async () => {
+    let res: Response
     try {
-      const res = await apiFetch("/api/v1/workspaces")
-      if (!res.ok) return null
-      const orgs: Org[] = await res.json() ?? []
-      if (orgs.length > 0) {
-        setWorkspaceId(orgs[0].id)
-        return orgs[0].id
-      }
+      res = await apiFetch("/api/v1/workspaces")
     } catch {
-      // silently fail
+      throw new Error("Network error while loading the workspace.")
+    }
+    if (!res.ok) throw new Error(`Loading the workspace failed (HTTP ${res.status}).`)
+    const orgs: Org[] = await res.json() ?? []
+    if (orgs.length > 0) {
+      setWorkspaceId(orgs[0].id)
+      return orgs[0].id
     }
     return null
   }, [])
 
   const fetchCredentials = React.useCallback(async (oid: string) => {
+    let res: Response
     try {
-      const res = await apiFetch(`/api/v1/credentials?workspace_id=${oid}`)
-      if (!res.ok) return
-      const data = await res.json()
-      const normalised: Credential[] = (Array.isArray(data) ? data : []).map((c: Credential) => ({
-        ...c,
-        last_used_at: c.last_used_at ?? null,
-        last_used_ips: Array.isArray(c.last_used_ips) ? c.last_used_ips : [],
-        tags: Array.isArray(c.tags) ? c.tags : [],
-      }))
-      setCredentials(normalised)
+      res = await apiFetch(`/api/v1/credentials?workspace_id=${oid}`)
     } catch {
-      // silently fail
+      throw new Error("Network error while loading credentials.")
     }
+    if (!res.ok) throw new Error(`Loading credentials failed (HTTP ${res.status}).`)
+    const data = await res.json()
+    const normalised: Credential[] = (Array.isArray(data) ? data : []).map((c: Credential) => ({
+      ...c,
+      last_used_at: c.last_used_at ?? null,
+      last_used_ips: Array.isArray(c.last_used_ips) ? c.last_used_ips : [],
+      tags: Array.isArray(c.tags) ? c.tags : [],
+    }))
+    setCredentials(normalised)
   }, [])
 
   const loadData = React.useCallback(async () => {
     setLoading(true)
-    let oid = workspaceId
-    if (!oid) {
-      oid = await fetchWorkspace()
+    setLoadError(null)
+    try {
+      let oid = workspaceId
+      if (!oid) {
+        oid = await fetchWorkspace()
+      }
+      if (oid) {
+        await fetchCredentials(oid)
+      }
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Something went wrong while loading credentials.")
+    } finally {
+      setLoading(false)
     }
-    if (oid) {
-      await fetchCredentials(oid)
-    }
-    setLoading(false)
   }, [workspaceId, fetchWorkspace, fetchCredentials])
 
   React.useEffect(() => { loadData() }, [loadData])
 
-  function handleRefresh() {
-    if (workspaceId) fetchCredentials(workspaceId)
-  }
+  const handleRefresh = React.useCallback(() => {
+    if (!workspaceId) return
+    fetchCredentials(workspaceId).catch((err) => {
+      setLoadError(err instanceof Error ? err.message : "Something went wrong while loading credentials.")
+    })
+  }, [workspaceId, fetchCredentials])
 
   function handleEdit(credential: Credential) {
     setEditCredential({
@@ -238,11 +260,28 @@ export default function CredentialsPage() {
     setBulkDeleting(true)
     const ids = Array.from(selectedIds)
     try {
-      for (const id of ids) {
-        await apiFetch(`/api/v1/credentials/${id}?workspace_id=${workspaceId}`, { method: "DELETE" })
+      const results = await Promise.allSettled(
+        ids.map((id) =>
+          apiFetch(`/api/v1/credentials/${id}?workspace_id=${workspaceId}`, { method: "DELETE" }),
+        ),
+      )
+      const failedIds = ids.filter((_, i) => {
+        const r = results[i]
+        return r.status === "rejected" || !r.value.ok
+      })
+      const deleted = ids.length - failedIds.length
+      if (failedIds.length === 0) {
+        toast.success(`${deleted} credential${deleted === 1 ? "" : "s"} deleted`)
+        setSelectedIds(new Set())
+      } else {
+        // Keep the failures selected so the user can retry the exact
+        // remainder in one click instead of re-hunting the rows.
+        toast.error(
+          `${deleted} deleted, ${failedIds.length} failed — the failed credential${failedIds.length === 1 ? " stays" : "s stay"} selected`,
+        )
+        setSelectedIds(new Set(failedIds))
       }
       handleRefresh()
-      setSelectedIds(new Set())
       setBulkDeleteOpen(false)
     } finally { setBulkDeleting(false) }
   }
@@ -354,7 +393,20 @@ export default function CredentialsPage() {
       description="Shared secrets, API keys, and CLI tokens for your agents"
       actions={headerActions}
     >
-      {credentials.length === 0 ? (
+      {loadError ? (
+        // Load failure — visually and semantically distinct from the
+        // empty state: red accent, explicit error copy, and a Retry
+        // affordance. Never claims "no credentials yet".
+        <Card className="p-12 text-center border-red-500/30 bg-red-500/[0.03]" role="alert">
+          <AlertTriangle className="mx-auto h-6 w-6 text-red-400" />
+          <h2 className="mt-3 text-sm font-medium text-foreground">Couldn&apos;t load credentials</h2>
+          <p className="mt-1 text-xs text-muted-foreground">{loadError}</p>
+          <Button size="sm" variant="outline" className="mt-4" onClick={loadData}>
+            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+            Retry
+          </Button>
+        </Card>
+      ) : credentials.length === 0 ? (
         <EmptyState
           icon={Key}
           title="No credentials yet"
@@ -502,6 +554,8 @@ export default function CredentialsPage() {
                       key={cred.id}
                       cred={cred}
                       selected={selectedIds.has(cred.id)}
+                      canUpdate={canUpdate}
+                      canDelete={canDelete}
                       onToggleSelect={() => toggleSelected(cred.id)}
                       onOpen={() => { setDetailCredential(cred); setDetailOpen(true) }}
                       onEdit={() => handleEdit(cred)}
@@ -591,7 +645,7 @@ export default function CredentialsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {selectedIds.size > 0 && (
+      {canDelete && selectedIds.size > 0 && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 rounded-full border border-white/15 bg-zinc-950/95 backdrop-blur shadow-2xl px-4 py-2 flex items-center gap-3 text-xs">
           <span className="font-medium">{selectedIds.size} selected</span>
           <button type="button" onClick={() => setBulkDeleteOpen(true)} className="text-red-400 hover:text-red-300">
@@ -620,6 +674,10 @@ export default function CredentialsPage() {
 interface CredentialRowProps {
   cred: Credential
   selected: boolean
+  /** CASL "update" on Credential — shows the Edit row action. */
+  canUpdate: boolean
+  /** CASL "delete" on Credential — shows Delete + the bulk-select checkbox. */
+  canDelete: boolean
   onToggleSelect: () => void
   onOpen: () => void
   onEdit: () => void
@@ -628,7 +686,7 @@ interface CredentialRowProps {
 
 // Single row, single style. Provider is an icon prefix on the name —
 // not a column, not a group header. Type is a tiny inline badge.
-function CredentialRow({ cred, selected, onToggleSelect, onOpen, onEdit, onDelete }: CredentialRowProps) {
+function CredentialRow({ cred, selected, canUpdate, canDelete, onToggleSelect, onOpen, onEdit, onDelete }: CredentialRowProps) {
   const derived = deriveStatus(cred)
   const brand = getBrand(cred.provider)
   const BrandIcon = brand.Icon
@@ -643,13 +701,18 @@ function CredentialRow({ cred, selected, onToggleSelect, onOpen, onEdit, onDelet
       onClick={onOpen}
     >
       <TableCell onClick={(e) => e.stopPropagation()}>
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={onToggleSelect}
-          className="h-3.5 w-3.5 cursor-pointer accent-blue-500"
-          aria-label={`Select ${cred.name}`}
-        />
+        {/* Bulk-select only exists to feed bulk delete — hide it from
+            roles that can't delete so it doesn't promise an action
+            that would 403. */}
+        {canDelete && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            className="h-3.5 w-3.5 cursor-pointer accent-blue-500"
+            aria-label={`Select ${cred.name}`}
+          />
+        )}
       </TableCell>
       <TableCell>
         <span
@@ -682,13 +745,22 @@ function CredentialRow({ cred, selected, onToggleSelect, onOpen, onEdit, onDelet
             {TYPE_LABEL[cred.type]}
           </Badge>
           {derived === "Pending" && (
-            <Badge
-              variant="outline"
-              className="text-[9px] h-4 px-1 border-amber-400/40 text-amber-300 font-mono shrink-0"
-              title="Proposed by an agent — approve it in the inbox to make it usable"
+            // Deep-link straight to the inbox — the approve/reject
+            // action lives there, so "go approve it" must be one
+            // click, not a copy-the-hint-and-navigate scavenger hunt.
+            <Link
+              href="/inbox"
+              onClick={(e) => e.stopPropagation()}
+              className="shrink-0"
+              title="Proposed by an agent — approve or reject it in the inbox"
             >
-              Pending approval
-            </Badge>
+              <Badge
+                variant="outline"
+                className="text-[9px] h-4 px-1 border-amber-400/40 text-amber-300 font-mono hover:border-amber-300/70 hover:text-amber-200 transition-colors"
+              >
+                Pending approval →
+              </Badge>
+            </Link>
           )}
           {expiresIn !== null && expiresIn >= 0 && expiresIn <= 30 && (
             <Badge
@@ -737,14 +809,18 @@ function CredentialRow({ cred, selected, onToggleSelect, onOpen, onEdit, onDelet
       </TableCell>
       <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-end gap-0.5">
-          <Button variant="ghost" size="icon-xs" onClick={onEdit} title="Edit">
-            <Pencil className="h-3.5 w-3.5" />
-            <span className="sr-only">Edit</span>
-          </Button>
-          <Button variant="ghost" size="icon-xs" onClick={onDelete} title="Delete">
-            <Trash2 className="h-3.5 w-3.5 text-destructive" />
-            <span className="sr-only">Delete</span>
-          </Button>
+          {canUpdate && (
+            <Button variant="ghost" size="icon-xs" onClick={onEdit} title="Edit">
+              <Pencil className="h-3.5 w-3.5" />
+              <span className="sr-only">Edit</span>
+            </Button>
+          )}
+          {canDelete && (
+            <Button variant="ghost" size="icon-xs" onClick={onDelete} title="Delete">
+              <Trash2 className="h-3.5 w-3.5 text-destructive" />
+              <span className="sr-only">Delete</span>
+            </Button>
+          )}
         </div>
       </TableCell>
     </TableRow>
