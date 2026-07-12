@@ -107,6 +107,11 @@ const (
 	// pendingCredInvalidType: the proposal's Type is unknown. Recoverable —
 	// record a plain escalation with a note, no credential link.
 	pendingCredInvalidType
+	// pendingCredValueTooLarge: the proposed value exceeds
+	// maxCredentialValueLen — the same cap create/update/rotate enforce;
+	// without it the escalation flow would be the one uncapped path into
+	// the vault. Recoverable — plain escalation with a note.
+	pendingCredValueTooLarge
 	// pendingCredNoApprover: no workspace OWNER exists to attribute/approve the
 	// credential. Hard failure — the caller must NOT record an escalation.
 	pendingCredNoApprover
@@ -140,6 +145,11 @@ func (h *QueryHandler) createPendingCredential(ctx context.Context, wsID, fromAg
 		h.logger.Warn("pending credential: invalid type, falling back to plain escalation",
 			"type", p.Type, "agent_id", fromAgentID)
 		return "", pendingCredInvalidType
+	}
+	if len(p.Value) > maxCredentialValueLen {
+		h.logger.Warn("pending credential: value exceeds cap, falling back to plain escalation",
+			"bytes", len(p.Value), "agent_id", fromAgentID)
+		return "", pendingCredValueTooLarge
 	}
 
 	// credentials.created_by is NOT NULL → users(id); an agent has no human
@@ -199,14 +209,12 @@ func (h *QueryHandler) createPendingCredential(ctx context.Context, wsID, fromAg
 		return "", pendingCredVaultError
 	}
 
-	if auditErr := RecordCredentialEvent(ctx, h.db, h.logger, credID,
+	recordCredentialEventBestEffort(ctx, h.db, h.logger, credID,
 		AuditEventCreated, fromAgentID, "", map[string]any{
 			"status":     "PENDING_APPROVAL",
 			"actor_type": "agent",
 			"proposed":   true,
-		}); auditErr != nil {
-		h.logger.Warn("pending credential: audit", "error", auditErr)
-	}
+		})
 
 	h.logger.Info("agent proposed credential (pending approval)",
 		"credential_id", credID, "name", p.Name, "agent_id", fromAgentID)

@@ -333,9 +333,7 @@ func (h *CredentialHandler) TestStored(w http.ResponseWriter, r *http.Request) {
 	if res.Error != "" {
 		meta["error"] = res.Error
 	}
-	if recErr := RecordCredentialEvent(r.Context(), h.db, h.logger, credID, AuditEventTest, "", clientIP(r), meta); recErr != nil {
-		h.logger.Warn("record TEST audit event", "error", recErr, "credential_id", credID)
-	}
+	recordCredentialEventBestEffort(r.Context(), h.db, h.logger, credID, AuditEventTest, "", clientIP(r), meta)
 
 	writeJSON(w, http.StatusOK, res)
 }

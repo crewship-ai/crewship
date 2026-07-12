@@ -142,6 +142,21 @@ func TestCreatePendingCredential_InvalidType_Fallback(t *testing.T) {
 	}
 }
 
+// The escalation flow must enforce the same value cap as create/update/rotate —
+// otherwise an agent proposal is the one uncapped path into the vault.
+func TestCreatePendingCredential_ValueTooLarge_Fallback(t *testing.T) {
+	h, _, wsID, _, agentID := covEscFixture(t)
+	_, res := h.createPendingCredential(context.Background(), wsID, agentID,
+		credentialProposal{Name: "X", Type: "SECRET", Value: strings.Repeat("a", maxCredentialValueLen+1)})
+	if res != pendingCredValueTooLarge {
+		t.Fatalf("oversized value res=%v, want pendingCredValueTooLarge", res)
+	}
+	var n int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM credentials WHERE workspace_id = ?`, wsID).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("credentials rows = %d (err=%v), want 0 — oversized value must not be staged", n, err)
+	}
+}
+
 // A transient owner-lookup failure (here: the table is gone) must be classified
 // as a vault error, NOT "no approver" — the former is retryable, the latter a
 // permanent config problem. Only sql.ErrNoRows means no-owner.

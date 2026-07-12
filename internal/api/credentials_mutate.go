@@ -434,20 +434,23 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit credential", "error", err)
+	// Stamp the timeline so the detail-sheet Audit tab shows when the
+	// credential first appeared. INSIDE the create tx (audit
+	// reliability): a credential must not materialize without its
+	// CREATED event — if the audit insert fails, the whole create
+	// rolls back instead of silently dropping the compliance row.
+	if recErr := RecordCredentialEventTx(r.Context(), tx, credID, AuditEventCreated, "", clientIP(r),
+		map[string]any{"created_by": user.ID, "provider": req.Provider, "type": req.Type}); recErr != nil {
+		tx.Rollback()
+		h.logger.Error("record CREATED audit event", "error", recErr, "credential_id", credID)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
-	// Stamp the timeline so the detail-sheet Audit tab shows when the
-	// credential first appeared. Outside the create tx — best-effort.
-	if recErr := RecordCredentialEvent(r.Context(), h.db, h.logger, credID, AuditEventCreated, "", clientIP(r),
-		map[string]any{"created_by": user.ID, "provider": req.Provider, "type": req.Type}); recErr != nil {
-		// TODO(metrics): when an OpenTelemetry counter is wired into
-		// this package, increment credential_audit_record_failures
-		// here so ops can alarm on lost compliance events.
-		h.logger.Warn("record CREATED audit event", "error", recErr, "credential_id", credID)
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("commit credential", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
 	}
 
 	respCrewIDs := crewIDs
@@ -578,6 +581,11 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 			valueSent = true
 			valueStr = s
 		}
+	}
+	// Per-value size cap (mirrors validateCredentialPayload on Create).
+	if valueSent && len(valueStr) > maxCredentialValueLen {
+		replyError(w, http.StatusBadRequest, credentialValueTooLongMsg)
+		return
 	}
 	typeChanged := mergedType != currentType
 
@@ -826,25 +834,29 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit credential update", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-
 	// Inline value rewrite (Vercel-parity quick rotation) is logically
 	// a rotation — no grace overlap, but the timeline must still see
-	// it. Outside the tx so a slow audit insert never rolls back the
-	// rotation itself.
+	// it. INSIDE the tx (audit reliability): the value swap and its
+	// ROTATE event commit or roll back together, so the timeline can
+	// never miss a rotation that actually happened.
 	if valueRotated {
 		var rotatedBy string
 		if u := UserFromContext(r.Context()); u != nil {
 			rotatedBy = u.ID
 		}
-		if recErr := RecordCredentialEvent(r.Context(), h.db, h.logger, credID, AuditEventRotate, "", clientIP(r),
+		if recErr := RecordCredentialEventTx(r.Context(), tx, credID, AuditEventRotate, "", clientIP(r),
 			map[string]any{"mode": "inline", "rotated_by": rotatedBy}); recErr != nil {
-			h.logger.Warn("record inline-rotate audit event", "error", recErr, "credential_id", credID)
+			tx.Rollback()
+			h.logger.Error("record inline-rotate audit event", "error", recErr, "credential_id", credID)
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("commit credential update", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
 	}
 
 	h.Get(w, r)
