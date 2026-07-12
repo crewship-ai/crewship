@@ -39,20 +39,26 @@ var ErrBlocked = errors.New("httpsafe: blocked outbound connection to private/in
 // scheme, missing host, etc.).
 var ErrInvalidURL = errors.New("httpsafe: invalid outbound URL")
 
-// blockedV4 / blockedV6 list the IP ranges SafeTransport's dialer
-// refuses. The full list mirrors what the skills package already
-// enforces (CGNAT, documentation, multicast, ipv6 ULA) so SSRF defence
-// is uniform across both surfaces.
-var blockedCIDRs = mustCIDRs(
+// The blocked ranges split into two tiers so a caller can offer an
+// explicit "allow private network" opt-in (e.g. a crew pointing an
+// agent at an on-prem/LAN model endpoint) WITHOUT ever opening the
+// ranges that have no legitimate self-host use:
+//
+//   - hardBlockedCIDRs: link-local (incl. cloud metadata 169.254.169.254),
+//     multicast, reserved/benchmark/documentation, unspecified, NAT64.
+//     Refused ALWAYS — the opt-in never relaxes these.
+//   - privateReachableCIDRs: RFC1918, CGNAT, loopback, IPv6 ULA. Refused
+//     by default; a caller may opt in to reach these (a real LAN Ollama
+//     lives here, and so does host.docker.internal's gateway).
+//
+// IsBlockedIP (unchanged behaviour) refuses the union — every existing
+// caller keeps the strict default. IsBlockedIPForEndpoint(ip, allowPrivate)
+// is the opt-in-aware variant.
+var hardBlockedCIDRs = mustCIDRs(
 	"0.0.0.0/8",
-	"10.0.0.0/8",
-	"100.64.0.0/10",
-	"127.0.0.0/8",
 	"169.254.0.0/16",
-	"172.16.0.0/12",
 	"192.0.0.0/24",
 	"192.0.2.0/24",
-	"192.168.0.0/16",
 	"198.18.0.0/15",
 	"198.51.100.0/24",
 	"203.0.113.0/24",
@@ -60,13 +66,25 @@ var blockedCIDRs = mustCIDRs(
 	"240.0.0.0/4",
 	"255.255.255.255/32",
 	"::/128",
-	"::1/128",
 	"64:ff9b::/96",
 	"100::/64",
-	"fc00::/7",
 	"fe80::/10",
 	"ff00::/8",
 )
+
+var privateReachableCIDRs = mustCIDRs(
+	"10.0.0.0/8",
+	"100.64.0.0/10",
+	"127.0.0.0/8",
+	"172.16.0.0/12",
+	"192.168.0.0/16",
+	"::1/128",
+	"fc00::/7",
+)
+
+// blockedCIDRs is the union of both tiers — the strict default the
+// existing SSRF surfaces (SafeTransport, ValidateURL, IsBlockedIP) rely on.
+var blockedCIDRs = append(append([]*net.IPNet{}, hardBlockedCIDRs...), privateReachableCIDRs...)
 
 func mustCIDRs(specs ...string) []*net.IPNet {
 	out := make([]*net.IPNet, 0, len(specs))
@@ -80,22 +98,50 @@ func mustCIDRs(specs ...string) []*net.IPNet {
 	return out
 }
 
-// IsBlockedIP reports whether the given IP literal sits in a range
-// SafeTransport refuses to dial. Exported for callers that already
-// resolved the address themselves (e.g. WS upgrade flows).
-func IsBlockedIP(ip net.IP) bool {
+func ipInAny(ip net.IP, cidrs []*net.IPNet) bool {
 	if ip == nil {
 		return false
 	}
+	// To4 collapses an IPv4-mapped IPv6 address (::ffff:169.254.169.254)
+	// to its 4-byte form so the v4 CIDRs match it — this is the classic
+	// SSRF bypass and must be normalised before every containment check.
 	if v4 := ip.To4(); v4 != nil {
 		ip = v4
 	}
-	for _, c := range blockedCIDRs {
+	for _, c := range cidrs {
 		if c.Contains(ip) {
 			return true
 		}
 	}
 	return false
+}
+
+// IsBlockedIP reports whether the given IP literal sits in a range
+// SafeTransport refuses to dial (the strict union of both tiers).
+// Exported for callers that already resolved the address themselves
+// (e.g. WS upgrade flows).
+func IsBlockedIP(ip net.IP) bool {
+	return ipInAny(ip, blockedCIDRs)
+}
+
+// IsHardBlockedIP reports whether ip is in a range that must be refused
+// even when a caller has opted in to private-network egress: link-local
+// (cloud metadata 169.254.169.254 and its IPv4-mapped form), multicast,
+// reserved/benchmark/documentation, unspecified, NAT64. No legitimate
+// self-hosted endpoint lives here.
+func IsHardBlockedIP(ip net.IP) bool {
+	return ipInAny(ip, hardBlockedCIDRs)
+}
+
+// IsBlockedIPForEndpoint is the opt-in-aware gate. When allowPrivate is
+// false it behaves exactly like IsBlockedIP (strict). When true it blocks
+// only the hard tier — RFC1918/loopback/ULA/CGNAT become reachable, but
+// link-local metadata and friends stay blocked.
+func IsBlockedIPForEndpoint(ip net.IP, allowPrivate bool) bool {
+	if allowPrivate {
+		return IsHardBlockedIP(ip)
+	}
+	return IsBlockedIP(ip)
 }
 
 // ValidateURL parses raw and returns the parsed value when it is safe

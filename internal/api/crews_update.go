@@ -17,24 +17,25 @@ import (
 )
 
 type updateCrewRequest struct {
-	Name               *string   `json:"name"`
-	Slug               *string   `json:"slug"`
-	Description        *string   `json:"description"`
-	Color              *string   `json:"color"`
-	Icon               *string   `json:"icon"`
-	AvatarStyle        *string   `json:"avatar_style"`
-	ContainerMemoryMB  *int      `json:"container_memory_mb"`
-	ContainerCPUs      *float64  `json:"container_cpus"`
-	ContainerTTLHours  *int      `json:"container_ttl_hours"`
-	NetworkMode        *string   `json:"network_mode"`
-	AllowedDomains     *[]string `json:"allowed_domains"`
-	MCPConfigJSON      *string   `json:"mcp_config_json"`
-	EscalationConfig   *string   `json:"escalation_config"`
-	IssuePrefix        *string   `json:"issue_prefix"`
-	RuntimeImage       *string   `json:"runtime_image"`
-	DevcontainerConfig *string   `json:"devcontainer_config"`
-	MiseConfig         *string   `json:"mise_config"`
-	ServicesJSON       *string   `json:"services_json"`
+	Name                  *string   `json:"name"`
+	Slug                  *string   `json:"slug"`
+	Description           *string   `json:"description"`
+	Color                 *string   `json:"color"`
+	Icon                  *string   `json:"icon"`
+	AvatarStyle           *string   `json:"avatar_style"`
+	ContainerMemoryMB     *int      `json:"container_memory_mb"`
+	ContainerCPUs         *float64  `json:"container_cpus"`
+	ContainerTTLHours     *int      `json:"container_ttl_hours"`
+	NetworkMode           *string   `json:"network_mode"`
+	AllowedDomains        *[]string `json:"allowed_domains"`
+	AllowPrivateEndpoints *bool     `json:"allow_private_endpoints"`
+	MCPConfigJSON         *string   `json:"mcp_config_json"`
+	EscalationConfig      *string   `json:"escalation_config"`
+	IssuePrefix           *string   `json:"issue_prefix"`
+	RuntimeImage          *string   `json:"runtime_image"`
+	DevcontainerConfig    *string   `json:"devcontainer_config"`
+	MiseConfig            *string   `json:"mise_config"`
+	ServicesJSON          *string   `json:"services_json"`
 	// MaxEphemeralAgents is the hire-flow quota (see v103 migration
 	// + agents_hire.go). PR-G surfaces this on the policy panel so
 	// operators can raise/lower the cap without dropping to the CLI.
@@ -315,6 +316,14 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			ub.SetNull("allowed_domains")
 		}
 	}
+	// #961 private-endpoint egress opt-in.
+	if req.AllowPrivateEndpoints != nil {
+		v := 0
+		if *req.AllowPrivateEndpoints {
+			v = 1
+		}
+		ub.Set("allow_private_endpoints", v)
+	}
 	// If mode was not explicitly set in this request, check the current DB mode.
 	// Skip persisting allowed_domains when effective mode is free to prevent hidden state.
 	if !updatedModeFree && req.NetworkMode == nil && req.AllowedDomains != nil {
@@ -359,7 +368,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var updatedDomainsJSON *string
 	err = h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
-			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains,
+			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains, c.allow_private_endpoints,
 			c.mcp_config_json, c.escalation_config,
 			c.runtime_image, c.devcontainer_config, c.mise_config, c.cached_image, c.config_hash,
 			c.max_ephemeral_agents,
@@ -370,7 +379,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		WHERE c.id = ? AND c.deleted_at IS NULL
 	`, crewID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
-		&c.ContainerTTLHours, &c.NetworkMode, &updatedDomainsJSON,
+		&c.ContainerTTLHours, &c.NetworkMode, &updatedDomainsJSON, &c.AllowPrivateEndpoints,
 		&c.MCPConfigJSON, &c.EscalationConfig,
 		&c.RuntimeImage, &c.DevcontainerConfig, &c.MiseConfig, &c.CachedImage, &c.ConfigHash,
 		&c.MaxEphemeralAgents,
@@ -404,7 +413,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// re-reads services_json on EnsureCrewRuntime, and a reused
 	// warm container skips that path. Runs after response is sent
 	// to avoid SQLite lock contention.
-	if req.NetworkMode != nil || req.AllowedDomains != nil || req.ServicesJSON != nil {
+	if req.NetworkMode != nil || req.AllowedDomains != nil || req.ServicesJSON != nil || req.AllowPrivateEndpoints != nil {
 		// WithoutCancel preserves the request's OTel span + auth values
 		// so the async IPC stop is observable, while shedding the
 		// request's cancellation -- the 200 has already been flushed.

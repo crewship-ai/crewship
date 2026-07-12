@@ -3,9 +3,12 @@ package orchestrator
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
 // BuildEnvVars constructs the environment variables for a container exec,
@@ -405,7 +408,25 @@ func localModelExtraDomains(req AgentRunRequest) []string {
 	if err != nil || u.Hostname() == "" {
 		return nil
 	}
-	return []string{u.Hostname()}
+	host := u.Hostname()
+	// SSRF fence (#961): if the endpoint host is a literal IP, gate it here
+	// before it ever reaches the sidecar allowlist. Hard-blocked ranges
+	// (link-local/metadata/reserved) are refused unconditionally; RFC1918/
+	// loopback are refused unless the crew opted into private-endpoint egress.
+	// A non-literal hostname (e.g. host.docker.internal, which may resolve only
+	// inside the container's network) is passed through — the sidecar does the
+	// authoritative resolve-then-pin check at dial time, where it can actually
+	// resolve the name. This keeps the host-side check synchronous and correct
+	// for names crewshipd itself can't resolve.
+	if ip := net.ParseIP(host); ip != nil {
+		if httpsafe.IsBlockedIPForEndpoint(ip, req.AllowPrivateEndpoints) {
+			// Refuse silently here — not added to the allowlist, so the
+			// deny-by-default sidecar blocks it and emits the loud
+			// network.egress journal entry the operator sees.
+			return nil
+		}
+	}
+	return []string{host}
 }
 
 // CredentialEnvExposure describes a credential whose plaintext value is placed

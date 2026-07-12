@@ -560,8 +560,9 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			// empty unless this run actually uses an ollama/… model.
 			domains = append(domains, localModelExtraDomains(req)...)
 			networkPolicy = &SidecarNetworkPolicy{
-				Mode:           "restricted",
-				AllowedDomains: domains,
+				Mode:                  "restricted",
+				AllowedDomains:        domains,
+				AllowPrivateEndpoints: req.AllowPrivateEndpoints,
 			}
 		default:
 			o.logger.Error("unknown network mode, refusing to start sidecar", "mode", req.NetworkMode)

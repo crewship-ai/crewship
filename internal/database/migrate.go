@@ -1601,6 +1601,7 @@ END;
 	// migrate_consts_v133_notification_channels.go and issue #850.
 	{version: 133, name: "notification_channels", sql: migrationNotificationChannels},
 	{version: 134, name: "pending_run_invoking_user", sql: migrationPendingRunInvokingUser},
+	{version: 135, name: "crew_allow_private_endpoints", sql: migrationCrewAllowPrivateEndpoints},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

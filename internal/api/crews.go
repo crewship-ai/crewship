@@ -161,28 +161,32 @@ type crewCountResponse struct {
 }
 
 type crewResponse struct {
-	ID                 string   `json:"id"`
-	WorkspaceID        string   `json:"workspace_id"`
-	Name               string   `json:"name"`
-	Slug               string   `json:"slug"`
-	Description        *string  `json:"description"`
-	Color              *string  `json:"color"`
-	Icon               *string  `json:"icon"`
-	AvatarStyle        *string  `json:"avatar_style"`
-	ContainerMemoryMB  int      `json:"container_memory_mb"`
-	ContainerCPUs      float64  `json:"container_cpus"`
-	ContainerTTLHours  *int     `json:"container_ttl_hours"`
-	NetworkMode        string   `json:"network_mode"`
-	AllowedDomains     []string `json:"allowed_domains"`
-	MCPConfigJSON      *string  `json:"mcp_config_json,omitempty"`
-	EscalationConfig   *string  `json:"escalation_config,omitempty"`
-	RuntimeImage       *string  `json:"runtime_image,omitempty"`
-	DevcontainerConfig *string  `json:"devcontainer_config,omitempty"`
-	MiseConfig         *string  `json:"mise_config,omitempty"`
-	ServicesJSON       *string  `json:"services_json,omitempty"`
-	CachedImage        *string  `json:"cached_image,omitempty"`
-	ConfigHash         *string  `json:"config_hash,omitempty"`
-	IssuePrefix        *string  `json:"issue_prefix"`
+	ID                string   `json:"id"`
+	WorkspaceID       string   `json:"workspace_id"`
+	Name              string   `json:"name"`
+	Slug              string   `json:"slug"`
+	Description       *string  `json:"description"`
+	Color             *string  `json:"color"`
+	Icon              *string  `json:"icon"`
+	AvatarStyle       *string  `json:"avatar_style"`
+	ContainerMemoryMB int      `json:"container_memory_mb"`
+	ContainerCPUs     float64  `json:"container_cpus"`
+	ContainerTTLHours *int     `json:"container_ttl_hours"`
+	NetworkMode       string   `json:"network_mode"`
+	AllowedDomains    []string `json:"allowed_domains"`
+	// AllowPrivateEndpoints (#961) opts this crew into reaching a
+	// private/LAN model endpoint (RFC1918/loopback); link-local/metadata
+	// stay blocked regardless. Default false = strict SSRF fence.
+	AllowPrivateEndpoints bool    `json:"allow_private_endpoints"`
+	MCPConfigJSON         *string `json:"mcp_config_json,omitempty"`
+	EscalationConfig      *string `json:"escalation_config,omitempty"`
+	RuntimeImage          *string `json:"runtime_image,omitempty"`
+	DevcontainerConfig    *string `json:"devcontainer_config,omitempty"`
+	MiseConfig            *string `json:"mise_config,omitempty"`
+	ServicesJSON          *string `json:"services_json,omitempty"`
+	CachedImage           *string `json:"cached_image,omitempty"`
+	ConfigHash            *string `json:"config_hash,omitempty"`
+	IssuePrefix           *string `json:"issue_prefix"`
 	// MaxEphemeralAgents is the per-crew quota enforced by the hire
 	// flow (see agents_hire.go). Surfaced on the crew response so the
 	// PR-G policy panel can render + PATCH it without a second fetch.
