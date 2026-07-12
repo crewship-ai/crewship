@@ -68,9 +68,11 @@ func TestCovCRRotate_InsertRotationError500(t *testing.T) {
 	}
 }
 
-// TestCovCRRotate_AuditFailureStill200 drops the audit table — the rotation
-// must still succeed because the audit insert is best-effort by design.
-func TestCovCRRotate_AuditFailureStill200(t *testing.T) {
+// TestCovCRRotate_AuditFailureRollsBack drops the audit table — the ROTATE
+// audit row rides the rotate transaction (credentials hardening B4), so a
+// failed audit insert must fail the rotation instead of silently dropping
+// the compliance event. Inverts the pre-hardening best-effort contract.
+func TestCovCRRotate_AuditFailureRollsBack(t *testing.T) {
 	setTestEncryptionKeyParallelSafe(t)
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
@@ -85,8 +87,15 @@ func TestCovCRRotate_AuditFailureStill200(t *testing.T) {
 	req.SetPathValue("credentialId", credID)
 	rec := httptest.NewRecorder()
 	h.Rotate(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200 despite audit failure; body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500 (audit rides the rotate tx); body=%s", rec.Code, rec.Body.String())
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM credential_rotations WHERE credential_id = ?`, credID).Scan(&n); err != nil {
+		t.Fatalf("count rotations: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("rotation row persisted (%d) despite failed audit insert", n)
 	}
 }
 

@@ -97,8 +97,20 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	user := UserFromContext(r.Context())
-	if !canRole(role, "manage") {
-		replyError(w, http.StatusForbidden, "Forbidden")
+	callerUserID := ""
+	if user != nil {
+		callerUserID = user.ID
+	}
+
+	// Layered gate (mirrors Create): ADMIN+ passes via role; a
+	// MANAGER/MEMBER holding an explicit credential.rotate capability
+	// also passes — that's the "oncall user can rotate a leaked token
+	// without blanket vault-add reach" grant, which the internal
+	// sidecar mirror already honoured but this public route ignored.
+	if !requireRoleOrCapabilityOrForbid(w, r, h.logger, h.db,
+		workspaceID, callerUserID, role,
+		CapabilityCredentialRotate, "credential.rotate", "credential:"+credID,
+		"manage") {
 		return
 	}
 	if user == nil {
@@ -115,6 +127,17 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	// token keeps the existing baseURL), required otherwise.
 	if strings.TrimSpace(req.Value) == "" && !req.hasEndpointFields() {
 		replyError(w, http.StatusBadRequest, "value required")
+		return
+	}
+	// Per-value size cap (mirrors validateCredentialPayload on Create).
+	// ENDPOINT_URL rotations get the stricter 2048-byte cap during the
+	// merge below; this bounds every other type's rotated value.
+	if len(req.Value) > maxCredentialValueLen {
+		replyError(w, http.StatusBadRequest, credentialValueTooLongMsg)
+		return
+	}
+	if req.EndpointToken != nil && len(*req.EndpointToken) > maxCredentialValueLen {
+		replyError(w, http.StatusBadRequest, "endpoint_auth_token is too long (max 65536 bytes)")
 		return
 	}
 
@@ -214,18 +237,20 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit rotate tx", "error", err)
+	// Audit rides the rotate tx (audit reliability): the value swap,
+	// the grace-window row, and the ROTATE event commit or roll back
+	// together — a rotation can never happen without its timeline row.
+	if err := RecordCredentialEventTx(r.Context(), tx, credID, AuditEventRotate, "", clientIP(r),
+		map[string]any{"rotation_id": rotationID, "grace_seconds": graceSec, "rotated_by": user.ID}); err != nil {
+		h.logger.Error("record rotation audit event", "error", err, "credential_id", credID)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
-	// Audit goes outside the rotate tx so a slow audit insert can't
-	// roll back the rotation itself. Failures here are logged but
-	// don't 5xx the rotation.
-	if err := RecordCredentialEvent(r.Context(), h.db, h.logger, credID, AuditEventRotate, "", clientIP(r),
-		map[string]any{"rotation_id": rotationID, "grace_seconds": graceSec, "rotated_by": user.ID}); err != nil {
-		h.logger.Warn("record rotation audit event", "error", err, "credential_id", credID)
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("commit rotate tx", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
 	}
 
 	// TODO(sidecar-fallback): a follow-up ticket wires the sidecar's
@@ -350,8 +375,18 @@ func (h *CredentialHandler) CancelRotation(w http.ResponseWriter, r *http.Reques
 	rotationID := r.PathValue("rotationId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
-	if !canRole(role, "manage") {
-		replyError(w, http.StatusForbidden, "Forbidden")
+	callerUserID := ""
+	if u := UserFromContext(r.Context()); u != nil {
+		callerUserID = u.ID
+	}
+
+	// Same layered gate as Rotate: ending a grace window early is part
+	// of the rotation lifecycle, so the same credential.rotate
+	// capability covers it.
+	if !requireRoleOrCapabilityOrForbid(w, r, h.logger, h.db,
+		workspaceID, callerUserID, role,
+		CapabilityCredentialRotate, "credential.rotation.cancel", "rotation:"+rotationID,
+		"manage") {
 		return
 	}
 

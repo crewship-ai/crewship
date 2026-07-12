@@ -90,7 +90,11 @@ func TestCM3_Create_CrewJunctionFails500(t *testing.T) {
 	}
 }
 
-func TestCM3_Create_AuditEventWarn_StillCreates(t *testing.T) {
+// The CREATED audit row rides the create transaction (credentials
+// hardening B4): a failed audit insert rolls the whole create back
+// instead of minting a silently unaudited credential. Inverts the
+// pre-hardening best-effort contract.
+func TestCM3_Create_AuditEventFailure_RollsBack(t *testing.T) {
 	h, userID, wsID := covCM3Rig(t)
 	if _, err := h.db.Exec(`
 		CREATE TRIGGER cm3_block_audit BEFORE INSERT ON credential_audit
@@ -98,8 +102,15 @@ func TestCM3_Create_AuditEventWarn_StillCreates(t *testing.T) {
 		t.Fatalf("create trigger: %v", err)
 	}
 	rr := covCMCreate(t, h, userID, wsID, "OWNER", `{"name":"cm3-d","value":"v","type":"API_KEY"}`)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201 despite audit failure; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (audit rides the create tx); body=%s", rr.Code, rr.Body.String())
+	}
+	var n int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM credentials WHERE name = 'cm3-d'`).Scan(&n); err != nil {
+		t.Fatalf("count credentials: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("credential row persisted (%d) despite failed audit insert", n)
 	}
 }
 
@@ -200,10 +211,18 @@ func TestCM3_Update_CrewJunctionFails500(t *testing.T) {
 	}
 }
 
-func TestCM3_Update_InlineRotateAuditWarn_StillUpdates(t *testing.T) {
+// The inline-rotate ROTATE audit row rides the update transaction
+// (credentials hardening B4): a failed audit insert rolls the value
+// rewrite back so the timeline can never miss a rotation that
+// happened. Inverts the pre-hardening best-effort contract.
+func TestCM3_Update_InlineRotateAuditFailure_RollsBack(t *testing.T) {
 	h, userID, wsID := covCM3Rig(t)
 	credID := covCM3Seed(t, h, userID, wsID, "cm3-rot")
-	// Fail only ROTATE audit inserts; the value rewrite itself commits.
+	var encBefore string
+	if err := h.db.QueryRow(`SELECT encrypted_value FROM credentials WHERE id = ?`, credID).Scan(&encBefore); err != nil {
+		t.Fatalf("read encrypted_value: %v", err)
+	}
+	// Fail only ROTATE audit inserts.
 	if _, err := h.db.Exec(`
 		CREATE TRIGGER cm3_block_rotate BEFORE INSERT ON credential_audit
 		WHEN NEW.event_type = 'ROTATE'
@@ -211,7 +230,14 @@ func TestCM3_Update_InlineRotateAuditWarn_StillUpdates(t *testing.T) {
 		t.Fatalf("create trigger: %v", err)
 	}
 	rr := covCMUpdate(t, h, userID, wsID, "OWNER", credID, `{"value":"rotated-value"}`)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 despite audit failure; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (audit rides the update tx); body=%s", rr.Code, rr.Body.String())
+	}
+	var encAfter string
+	if err := h.db.QueryRow(`SELECT encrypted_value FROM credentials WHERE id = ?`, credID).Scan(&encAfter); err != nil {
+		t.Fatalf("read encrypted_value: %v", err)
+	}
+	if encAfter != encBefore {
+		t.Fatal("encrypted_value changed despite failed audit insert — inline rotate is not atomic with its audit row")
 	}
 }

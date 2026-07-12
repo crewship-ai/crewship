@@ -379,6 +379,14 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	// Scrub the credential value from any output it may have leaked into.
 	// Add encoding variants (base64, URL) to catch exfiltration attempts like
 	// "echo $TOKEN | base64" that would otherwise bypass literal-only scrubbing.
+	//
+	// TODO(scrubber): this inline block predates (and was the template for)
+	// scrubber.AddSecretValues, which registers the identical literal +
+	// base64/url/hex/reversed patterns. Replace the block with
+	// `s.AddSecretValues(plainValue)` once the keeper_request/execute
+	// route-binding rework lands — swapping now would change the redaction
+	// marker ([REDACTED:keeper-secret] → [REDACTED:secret-value]) and churn
+	// a file a parallel branch owns.
 	s := scrubber.New()
 	if plainValue != "" {
 		if err := s.AddPattern("keeper-secret", regexp.QuoteMeta(plainValue)); err != nil {

@@ -320,10 +320,8 @@ func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	// rows survive soft-delete (no FK cascade), so the historical
 	// record is preserved.
 	deletedBy := callerUserID
-	if recErr := RecordCredentialEvent(r.Context(), h.db, h.logger, credID, AuditEventRevoke, "", clientIP(r),
-		map[string]any{"deleted_by": deletedBy, "soft_delete": true}); recErr != nil {
-		h.logger.Warn("record REVOKE audit event", "error", recErr, "credential_id", credID)
-	}
+	recordCredentialEventBestEffort(r.Context(), h.db, h.logger, credID, AuditEventRevoke, "", clientIP(r),
+		map[string]any{"deleted_by": deletedBy, "soft_delete": true})
 
 	// Reach into any running crew container and remove this credential's
 	// materialized /secrets file(s) so a revoke actually takes effect for a

@@ -199,14 +199,12 @@ func (h *QueryHandler) createPendingCredential(ctx context.Context, wsID, fromAg
 		return "", pendingCredVaultError
 	}
 
-	if auditErr := RecordCredentialEvent(ctx, h.db, h.logger, credID,
+	recordCredentialEventBestEffort(ctx, h.db, h.logger, credID,
 		AuditEventCreated, fromAgentID, "", map[string]any{
 			"status":     "PENDING_APPROVAL",
 			"actor_type": "agent",
 			"proposed":   true,
-		}); auditErr != nil {
-		h.logger.Warn("pending credential: audit", "error", auditErr)
-	}
+		})
 
 	h.logger.Info("agent proposed credential (pending approval)",
 		"credential_id", credID, "name", p.Name, "agent_id", fromAgentID)

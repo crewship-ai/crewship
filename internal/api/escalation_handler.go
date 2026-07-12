@@ -434,7 +434,7 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 			} else if rows, _ := res.RowsAffected(); rows == 0 {
 				h.logger.Warn("approve pending credential: no pending row to activate", "credential_id", credentialID.String)
 			} else {
-				_ = RecordCredentialEvent(r.Context(), h.db, h.logger, credentialID.String,
+				recordCredentialEventBestEffort(r.Context(), h.db, h.logger, credentialID.String,
 					AuditEventApproved, "", "", map[string]any{"approved_by": approverID})
 			}
 		case "reject":
@@ -447,7 +447,7 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 			} else if rows, _ := res.RowsAffected(); rows == 0 {
 				h.logger.Warn("reject pending credential: no pending row to delete", "credential_id", credentialID.String)
 			} else {
-				_ = RecordCredentialEvent(r.Context(), h.db, h.logger, credentialID.String,
+				recordCredentialEventBestEffort(r.Context(), h.db, h.logger, credentialID.String,
 					AuditEventRejected, "", "", map[string]any{"rejected_by": approverID})
 			}
 		}

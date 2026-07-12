@@ -73,11 +73,10 @@ func maybeRecordSidecarUse(ctx context.Context, db *sql.DB, logger *slog.Logger,
 		return
 	}
 
-	if err := RecordCredentialEvent(ctx, db, logger, credID, AuditEventUse, "" /* agent unknown at this layer */, ip, map[string]any{"source": "sidecar_fetch"}); err != nil {
-		if logger != nil {
-			logger.Warn("sidecar use audit: record failed", "credential_id", credID, "error", err)
-		}
-	}
+	// USE debounce stays best-effort by design: an audit hiccup must
+	// never fail (or slow) the sidecar credential fetch. The drop
+	// counter + stable log event replace the old silent Warn.
+	recordCredentialEventBestEffort(ctx, db, logger, credID, AuditEventUse, "" /* agent unknown at this layer */, ip, map[string]any{"source": "sidecar_fetch"})
 }
 
 // ListCredentials returns active credentials for the sidecar.
