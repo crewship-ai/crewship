@@ -287,7 +287,10 @@ func validateEndpointURL(value string) string {
 	// but the private-egress opt-in is per-crew, so the authoritative decision
 	// is made at run time; rejecting private literals at create would break
 	// the legitimate on-prem/LAN case (e.g. http://192.168.1.222:11434/v1).
-	if ip := net.ParseIP(u.Hostname()); ip != nil && httpsafe.IsHardBlockedIP(ip) {
+	// ParseIPStripZone (not net.ParseIP) so a zoned link-local literal like
+	// fe80::1%eth0 — which net.ParseIP returns nil for — can't slip past this
+	// hard-block gate (#988 review).
+	if ip := httpsafe.ParseIPStripZone(u.Hostname()); ip != nil && httpsafe.IsHardBlockedIP(ip) {
 		return "endpoint URL points at a link-local/metadata/reserved address (" + ip.String() + "), which is never a valid model endpoint"
 	}
 	return ""
