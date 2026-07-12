@@ -173,3 +173,32 @@ per-code-path enforcement tends to diverge from the intended guarantee.
 T1 (precondition proven) → T2 (most likely real hole) → T3 (no coverage, high impact) → T6 (sharpest
 fail-silent) → T9 (cheap, measures T2) → rest. T1/T6/T9 are runnable against dev3 today; T2/T3/T13 want
 a harness script driving a real agent container.
+
+---
+
+## Shipped — harness suites (PR #1018)
+
+Four opt-in suites in `scripts/test-harness/` (`WITH_KEEPER_SECURITY=1 ./run-all.sh`), all run live
+against dev3:
+
+| Suite | Live dev3 | Realises |
+|---|---|---|
+| `test-keeper-ingress-fence.sh` | **49 pass / 0 fail** (+5 WARN) | T1 precondition, L0.1/L0.2 + method/token/body fuzz, info-leak, public-auth regression, timing probe |
+| `test-keeper-toctou.sh` | **16 pass / 0 fail / 2 skip** | rotate scrub, grace-cancel, concurrent-rotate race, unassign/reassign binding, delete, peer isolation; SKIP T2/T10 |
+| `test-keeper-audit-integrity.sh` | pass (agent-driven) | lifecycle/monotonic timeline, REVOKE, approve+deny escalation, keeper fields; SKIP T6/T7 |
+| `test-keeper-load.sh` | **6 pass / 0 fail / 2 skip** | p50/p95/p99 latency, write-burst health, limiter, pending-count consistency; SKIP T8/T9 |
+
+### GitHub issues (findings — Linear not used)
+- **#1020 [HIGH]** internal keeper surface internet-reachable; network gate defeated behind proxy (T1).
+- **#1021 [MED]** fail-silent audit-row swallow on access/execute (T6).
+- **#1022 [MED]** command denylist + fixed-encoding scrubber exfil surface (T3).
+- **#1023 [MED]** deferred escalate→approve→resume untested TOCTOU twin (T2).
+- **#1024 [LOW]** ROTATE/REVOKE events missing from `credential audit` timeline.
+
+### Test-authoring gotchas found live
+- `credential get` does **not** expose the assignment list (`agents`/`assigned_agents` are null even after a
+  successful assign) — use `_count_agent_credentials` from `credential list` to observe a binding.
+- `credential rotation-cancel` takes a **rotation id**, not the credential name — fetch it from
+  `credential rotations <cred>` and pick the ACTIVE one.
+- An ellipsis `…` placed immediately after `$VAR` in a bash string is parsed as part of the variable name
+  under `set -u` — use `${VAR}` or a space.
