@@ -367,6 +367,11 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 		}
 	}
 
+	// One-time scrub of legacy host-side secrets dirs left behind by the
+	// pre-tmpfs bind-mount era — deleted/dormant crews never reach the
+	// per-crew removal in EnsureCrewRuntime (see secrets_sweep.go).
+	p.sweepLegacySecretsDirs(ctx)
+
 	return p, nil
 }
 
@@ -585,9 +590,11 @@ const secretsTmpfsSizeBytes = 16 * 1024 * 1024
 // and the per-run `mkdir -p /secrets/<slug>` execs as 1001. uid/gid mount
 // options hand the mount root to the agent UID at mount time. The uid/gid
 // TmpfsOptions require Docker Engine >= 26 (API 1.45); an older daemon
-// silently drops them, leaving the mount root-owned 0700 — the credential
-// writer then fails loudly (writeCredentialFiles surfaces the non-zero exit)
-// instead of silently persisting secrets anywhere.
+// silently drops them, leaving the mount root-owned 0700 — the orchestrator
+// then ABORTS any run that carries file-mounted credentials with an error
+// naming this requirement (orchestrator_run.go, mkdir-preflight and
+// writeCredentialFiles failure paths) instead of starting the agent with
+// zero credentials or persisting secrets anywhere.
 func secretsTmpfsMount() mount.Mount {
 	return mount.Mount{
 		Type:   mount.TypeTmpfs,

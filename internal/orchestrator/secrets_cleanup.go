@@ -15,11 +15,25 @@ package orchestrator
 // whose CLI exec is still alive when RunAgent returns (detached tmux session)
 // keeps its hold forever; that fails safe (files persist inside the tmpfs
 // until container stop, exactly the pre-change behaviour).
+//
+// Two TOCTOU windows are closed explicitly:
+//
+//  1. Retain happens BEFORE the credential write (orchestrator_run.go). If it
+//     came after, a finishing run of the same agent could hit count→0 and rm
+//     the files the starting run just wrote.
+//  2. The last-holder decision and the rm exec are not atomic — the exec can
+//     lag seconds behind. cleanupAgentSecrets therefore serializes with the
+//     credential write via a per-key mutex (agentSecretsLock) AND re-checks
+//     the hold count under that lock before running the rm: a run that
+//     retained meanwhile vetoes the cleanup, and a run that retains during
+//     the rm blocks on the lock until the rm finishes, then writes fresh
+//     files after it.
 
 import (
 	"context"
 	"io"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -92,6 +106,32 @@ func (o *Orchestrator) releaseAgentSecrets(containerID, agentSlug string) bool {
 	return true
 }
 
+// secretsHoldCount returns the current number of live holds for the key.
+func (o *Orchestrator) secretsHoldCount(containerID, agentSlug string) int {
+	o.secretsHoldsMu.Lock()
+	defer o.secretsHoldsMu.Unlock()
+	return o.secretsHolds[secretsHoldKey(containerID, agentSlug)]
+}
+
+// agentSecretsLock returns the per-key mutex serializing the cleanup rm exec
+// against credential writes for the same container+agent. Entries are small
+// and bounded by #agents × #containers, so they are never evicted (evicting
+// one while another goroutine still holds the lock would defeat the point).
+func (o *Orchestrator) agentSecretsLock(containerID, agentSlug string) *sync.Mutex {
+	key := secretsHoldKey(containerID, agentSlug)
+	o.secretsHoldsMu.Lock()
+	defer o.secretsHoldsMu.Unlock()
+	if o.secretsKeyLocks == nil {
+		o.secretsKeyLocks = make(map[string]*sync.Mutex)
+	}
+	lk, ok := o.secretsKeyLocks[key]
+	if !ok {
+		lk = &sync.Mutex{}
+		o.secretsKeyLocks[key] = lk
+	}
+	return lk
+}
+
 // cleanupAgentSecrets removes /secrets/<agentSlug> from the container,
 // exec'd as the agent UID. Best-effort with its own bounded context (the
 // run's ctx may already be cancelled when this fires): a stopped container
@@ -104,6 +144,19 @@ func (o *Orchestrator) cleanupAgentSecrets(containerID, agentSlug string) {
 	script := buildSecretsCleanupScript(agentSlug)
 	if script == "" {
 		o.logger.Warn("post-run secrets cleanup skipped: unsafe agent slug", "agent_slug", agentSlug)
+		return
+	}
+	// Serialize against credential writes and re-check the holds under the
+	// lock (TOCTOU window #2, see the package doc): a run that retained
+	// between our caller's last-holder decision and this point still needs
+	// the files — skip; a run that retains after this check blocks on the
+	// same lock until our rm finishes, then writes fresh files after it.
+	lk := o.agentSecretsLock(containerID, agentSlug)
+	lk.Lock()
+	defer lk.Unlock()
+	if n := o.secretsHoldCount(containerID, agentSlug); n > 0 {
+		o.logger.Debug("post-run secrets cleanup skipped: agent retained again",
+			"agent_slug", agentSlug, "holds", n)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), secretsCleanupTimeout)
