@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -45,6 +46,10 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 				env = append(env, envVar+"="+cred.PlainValue)
 			}
 		}
+	}
+
+	if e, ok := localModelConfigEnv(req); ok {
+		env = append(env, e)
 	}
 
 	return env
@@ -308,7 +313,74 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		}
 	}
 
+	if e, ok := localModelConfigEnv(req); ok {
+		env = append(env, e)
+	}
+
 	return env
+}
+
+// localModelPrefix marks an LLMModel as targeting the operator's local
+// OpenAI-compatible endpoint. Mirrors isLocalModel in lib/cli-adapters.ts —
+// keep both in sync.
+const localModelPrefix = "ollama/"
+
+// localModelConfigEnv builds the OPENCODE_CONFIG_CONTENT entry for the
+// local-model path (#944): an OPENCODE agent selecting an "ollama/…" model on
+// a server with cfg.LocalModels.BaseURL configured gets a generated provider
+// block pointing OpenCode's openai-compatible driver at that endpoint. The
+// JSON is always marshalled from a fixed struct — no user-controlled JSON
+// reaches the env, so a hostile model name can't smuggle extra config keys.
+func localModelConfigEnv(req AgentRunRequest) (string, bool) {
+	if req.CLIAdapter != "OPENCODE" || req.LocalModelBaseURL == "" {
+		return "", false
+	}
+	modelID := strings.TrimPrefix(req.LLMModel, localModelPrefix)
+	if modelID == req.LLMModel || modelID == "" {
+		return "", false // not an ollama/… model
+	}
+	type providerCfg struct {
+		NPM     string `json:"npm"`
+		Name    string `json:"name"`
+		Options struct {
+			BaseURL string `json:"baseURL"`
+		} `json:"options"`
+		Models map[string]struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	p := providerCfg{
+		NPM:  "@ai-sdk/openai-compatible",
+		Name: "Ollama (local)",
+	}
+	p.Options.BaseURL = req.LocalModelBaseURL
+	p.Models = map[string]struct {
+		Name string `json:"name"`
+	}{modelID: {Name: modelID}}
+	cfg := map[string]any{"provider": map[string]providerCfg{"ollama": p}}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		// Statically-shaped struct — marshal cannot realistically fail; treat
+		// as "path disabled" rather than plumbing an error into env building.
+		return "", false
+	}
+	return "OPENCODE_CONFIG_CONTENT=" + string(raw), true
+}
+
+// localModelExtraDomains returns the local endpoint's host when the
+// local-model path is active, so restricted network mode auto-allowlists the
+// traffic the operator explicitly enabled (same pattern as mcpStdioDomains).
+// Empty in every other case — the exception never widens egress for crews
+// that don't use a local model.
+func localModelExtraDomains(req AgentRunRequest) []string {
+	if _, ok := localModelConfigEnv(req); !ok {
+		return nil
+	}
+	u, err := url.Parse(req.LocalModelBaseURL)
+	if err != nil || u.Hostname() == "" {
+		return nil
+	}
+	return []string{u.Hostname()}
 }
 
 // CredentialEnvExposure describes a credential whose plaintext value is placed
@@ -441,6 +513,12 @@ func apiKeyEnvVarsForAdapter(adapter string) map[string]struct{} {
 			"XAI_API_KEY":        {},
 			"GROQ_API_KEY":       {},
 			"DEEPSEEK_API_KEY":   {},
+			// #944: remaining providers the OPENCODE model registry
+			// advertises (lib/cli-adapters.ts) — env-var names follow the
+			// models.dev/AI-SDK provider conventions OpenCode reads.
+			"MOONSHOT_API_KEY": {},
+			"ZAI_API_KEY":      {},
+			"MINIMAX_API_KEY":  {},
 		}
 	case "CURSOR_CLI":
 		return map[string]struct{}{"CURSOR_API_KEY": {}}

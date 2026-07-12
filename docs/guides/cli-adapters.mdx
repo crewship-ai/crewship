@@ -92,6 +92,24 @@ The default is `medium` because the API normalises an empty `ToolProfile` to `CO
 
 Model selection uses OpenCode's `provider/model` form (e.g. `anthropic/claude-sonnet-5`) passed via `--model`. OpenCode is BYOK: the selected provider's API key must be available to the agent (see the [credentials guide](/guides/credentials)). Note that Anthropic **subscription** OAuth (Claude Pro/Max) is not usable through OpenCode — Anthropic's terms restrict subscription tokens to Claude Code, so Anthropic models via OpenCode require an API key.
 
+In **restricted** network mode the sidecar's default allowlist covers every provider the model picker offers (Anthropic, OpenAI, Google, OpenRouter, xAI, Groq, DeepSeek, Moonshot, Z.ai, MiniMax) — no manual `allowed_domains` entry needed for them.
+
+### Local models — no API key (Ollama)
+
+OpenCode can route to a local, OpenAI-compatible model server instead of a cloud provider. This is the zero-subscription path: no API key, no per-token cost, data never leaves your network.
+
+1. **Run a model server the containers can reach.** With [Ollama](https://ollama.com) on the same host as `crewship`: `ollama pull qwen3-coder:30b && ollama serve`.
+2. **Point Crewship at it** (server-level opt-in; the path is off until you set this):
+
+   ```bash
+   CREWSHIP_LOCAL_MODEL_BASE_URL=http://host.docker.internal:11434/v1
+   ```
+
+   The URL is resolved **from inside crew containers** — `host.docker.internal` reaches the Docker host (Crewship maps it via `host-gateway` on Linux too). Don't use `localhost`; that's the container itself.
+3. **Pick a local model** on an OpenCode agent: `ollama/qwen3-coder:30b` or `ollama/devstral:24b`. The onboarding wizard and agent form make the API key optional for these. At run time the orchestrator injects the generated provider block via `OPENCODE_CONFIG_CONTENT`; in restricted network mode the endpoint's host is auto-allowlisted for that run only.
+
+**Which models actually work:** we ship a curated shortlist — Qwen3 Coder 30B (A3B; runs on a single 24 GB GPU at 4-bit) and Devstral Small 24B (built for agent workflows). This is deliberate: below roughly this tier, community reports and upstream issues (`anomalyco/opencode#1034`, `#4428`) show local models "think about" tool calls but emit them as text instead of executing — the agent looks alive but nothing happens. Generic chat models under ~14B will frustrate you; frontier cloud models remain meaningfully stronger for hard tasks. Expect local models to handle routine, well-scoped work.
+
 ## Adapters that are deliberately NOT supported
 
 `BuildCLICommand` only ships adapters for CLI agents that meet four criteria. CLI agents that don't meet all four are skipped today. Adding a new adapter is a one-line change once the upstream surface stabilises; open a GitHub issue to discuss before opening a PR.

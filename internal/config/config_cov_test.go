@@ -287,3 +287,24 @@ func TestAutodetect_FindsEntrypointInCwdScripts(t *testing.T) {
 		t.Errorf("EntrypointPath = %q, want autodetected %q", cfg.Container.EntrypointPath, entry)
 	}
 }
+
+// #944 — local-model endpoint for coding agents (OpenCode/Ollama path).
+// Off by default (empty), enabled only by explicit operator opt-in.
+func TestEnvOverrides_LocalModelBaseURL(t *testing.T) {
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.LocalModels.BaseURL != "" {
+		t.Errorf("LocalModels.BaseURL default = %q, want empty (disabled)", cfg.LocalModels.BaseURL)
+	}
+
+	t.Setenv("CREWSHIP_LOCAL_MODEL_BASE_URL", "http://host.docker.internal:11434/v1")
+	cfg, err = Load("")
+	if err != nil {
+		t.Fatalf("Load with env: %v", err)
+	}
+	if got, want := cfg.LocalModels.BaseURL, "http://host.docker.internal:11434/v1"; got != want {
+		t.Errorf("LocalModels.BaseURL = %q, want %q", got, want)
+	}
+}

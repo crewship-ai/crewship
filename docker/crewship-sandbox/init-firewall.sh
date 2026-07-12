@@ -75,6 +75,15 @@ ALLOWED_DOMAINS=(
     "api.anthropic.com"
     "api.openai.com"
     "generativelanguage.googleapis.com"
+    # OpenCode BYOK providers (#944) — keep in sync with
+    # internal/sidecar/allowlist.go DefaultAllowedDomains
+    "openrouter.ai"
+    "api.x.ai"
+    "api.groq.com"
+    "api.deepseek.com"
+    "api.moonshot.ai"
+    "api.z.ai"
+    "api.minimax.io"
     # Package registries
     "registry.npmjs.org"
     "registry.yarnpkg.com"

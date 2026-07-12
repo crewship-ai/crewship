@@ -198,6 +198,10 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	if cfg.Keeper.Enabled {
 		orch.SetKeeperEnabled(true)
 	}
+	if cfg.LocalModels.BaseURL != "" {
+		orch.SetLocalModelBaseURL(cfg.LocalModels.BaseURL)
+		logger.Info("local model endpoint enabled for coding agents", "base_url", cfg.LocalModels.BaseURL)
+	}
 
 	// Calculate IPC base URL for containers to reach this server.
 	hostAddr := "host.docker.internal" // default for Docker

@@ -34,6 +34,19 @@ var DefaultAllowedDomains = []string{
 	// Factory Droid
 	"api.factory.ai", // Factory Droid (legacy)
 	"app.factory.ai", // Factory Droid CLI installer + API base
+
+	// OpenCode BYOK providers (#944) — every provider whose models the
+	// frontend registry advertises (lib/cli-adapters.ts OPENCODE_MODELS)
+	// and whose API key exec_env.go accepts into the agent env. Without
+	// these, restricted-mode crews silently egress-block the provider the
+	// user configured.
+	"openrouter.ai",    // OpenRouter gateway
+	"api.x.ai",         // xAI Grok
+	"api.groq.com",     // Groq
+	"api.deepseek.com", // DeepSeek
+	"api.moonshot.ai",  // Moonshot Kimi (global endpoint)
+	"api.z.ai",         // Z.ai GLM
+	"api.minimax.io",   // MiniMax (global endpoint)
 }
 
 // DomainAllowlist controls which outbound domains the agent is allowed to reach.

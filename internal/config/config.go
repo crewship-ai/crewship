@@ -51,6 +51,18 @@ type Config struct {
 	Keeper    KeeperConfig    `yaml:"keeper"`
 	License   LicenseConfig   `yaml:"license"`
 	Composio  ComposioConfig  `yaml:"composio"`
+
+	LocalModels LocalModelsConfig `yaml:"local_models"`
+}
+
+// LocalModelsConfig points coding agents at an OpenAI-compatible local
+// model server (Ollama, LM Studio, llama.cpp). Distinct from
+// Keeper.OllamaURL, which serves the daemon's own internal Keeper layer:
+// this URL is handed to agent CLIs *inside crew containers*, so it must be
+// reachable from the container's perspective ("host.docker.internal"
+// reaches the Docker host). Empty = the local-model path is disabled.
+type LocalModelsConfig struct {
+	BaseURL string `yaml:"base_url"`
 }
 
 // LicenseConfig holds the path to the license key file.
@@ -465,6 +477,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("CREWSHIP_LICENSE_FILE"); v != "" {
 		cfg.License.FilePath = v
+	}
+	if v := os.Getenv("CREWSHIP_LOCAL_MODEL_BASE_URL"); v != "" {
+		cfg.LocalModels.BaseURL = v
 	}
 	if v := os.Getenv("COMPOSIO_API_KEY"); v != "" {
 		cfg.Composio.APIKey = v

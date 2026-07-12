@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
-import { CLI_ADAPTERS, CLI_ADAPTER_KEYS, getModelsForAdapter } from "@/lib/cli-adapters"
+import { CLI_ADAPTERS, CLI_ADAPTER_KEYS, getModelsForAdapter, isLocalModel } from "@/lib/cli-adapters"
 import { buildOnboardingSetupBody } from "@/lib/onboarding-setup"
 import { getAdapterBrand, ADAPTER_TOKEN_GUIDE, ADAPTER_TOKEN_CMD, ADAPTER_CLI_INSTALL } from "@/lib/cli-adapter-brand"
 import { LANGUAGES } from "@/lib/languages"
@@ -353,12 +353,15 @@ export default function OnboardingPage() {
    * Claude (the CLI token is for the user's terminal, not the agents).
    * In CLI mode we ALSO require the pair to be consumed so the local
    * CLI is ready to drive the workspace.
+   *
+   * Exception (#944): local (ollama/…) models talk to the operator's own
+   * endpoint and need no provider credential, so the key becomes optional.
    */
   const canContinue = () => {
     if (step === 1) return workspaceName.trim().length >= 2
     if (step === 2) return crewSlug !== null
     if (step === 3) {
-      const keyOK = apiKey.trim().length >= 8
+      const keyOK = apiKey.trim().length >= 8 || isLocalModel(model)
       if (mode === "browser") return keyOK
       if (mode === "cli") return keyOK && pairStatus === "consumed"
     }
@@ -630,8 +633,10 @@ export default function OnboardingPage() {
                     <div>
                       <h2 className="text-2xl font-semibold tracking-tight">How will you work?</h2>
                       <p className="text-sm text-muted-foreground mt-1">
-                        Drive Crewship from your terminal or stay in the browser. Either way the agents need an
-                        API key below to call their model.
+                        Drive Crewship from your terminal or stay in the browser.{" "}
+                        {isLocalModel(model)
+                          ? "Your local model runs without an API key — just confirm the setup below."
+                          : "Either way the agents need an API key below to call their model."}
                       </p>
                     </div>
 
@@ -876,20 +881,30 @@ export default function OnboardingPage() {
                         placeholder="CLI token (not your account API key)"
                         className="font-mono text-xs h-10"
                       />
-                      {ADAPTER_TOKEN_CMD[adapter] && (
+                      {isLocalModel(model) && (
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                          Local model selected — no API key needed. Leave this empty unless you also
+                          want cloud models later. Requires{" "}
+                          <code className="font-mono text-foreground/80">CREWSHIP_LOCAL_MODEL_BASE_URL</code>{" "}
+                          on the server.
+                        </p>
+                      )}
+                      {!isLocalModel(model) && ADAPTER_TOKEN_CMD[adapter] && (
                         <div className="rounded-md border border-border bg-muted/40 p-2.5 font-mono text-[11px] leading-relaxed">
                           <span className="text-muted-foreground">Run this on your machine, paste the output above:</span>
                           <div className="text-emerald-500 mt-1 select-all">$ {ADAPTER_TOKEN_CMD[adapter]}</div>
                         </div>
                       )}
-                      <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        This is the{" "}
-                        <strong className="text-foreground/80">CLI token</strong>
-                        {" "}from <code className="font-mono text-foreground/80">{ADAPTER_TOKEN_CMD[adapter] ?? "<cli> setup-token"}</code>,{" "}
-                        <em>not</em> the raw account API key from the provider's console. The agents use the
-                        CLI token via the same OAuth flow your local CLI does — pasting an sk-ant-api… key
-                        here won&apos;t work.
-                      </p>
+                      {!isLocalModel(model) && (
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                          This is the{" "}
+                          <strong className="text-foreground/80">CLI token</strong>
+                          {" "}from <code className="font-mono text-foreground/80">{ADAPTER_TOKEN_CMD[adapter] ?? "<cli> setup-token"}</code>,{" "}
+                          <em>not</em> the raw account API key from the provider's console. The agents use the
+                          CLI token via the same OAuth flow your local CLI does — pasting an sk-ant-api… key
+                          here won&apos;t work.
+                        </p>
+                      )}
                     </div>
 
                     {/* Adapter install hint — only relevant in CLI mode */}

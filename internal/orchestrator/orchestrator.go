@@ -50,6 +50,7 @@ type AgentRunRequest struct {
 	SkipConvHistory    bool         // When true, skip injecting conversation history (used by assignment sub-agents)
 	NetworkMode        string       // "free" (default) or "restricted" — crew-level network policy
 	AllowedDomains     []string     // Extra allowed domains for restricted mode
+	LocalModelBaseURL  string       // OpenAI-compatible local model endpoint (#944); populated by RunAgent from server config, empty = local models disabled
 	MemoryMB           int
 	CPUs               float64
 	TTLHours           int
@@ -205,10 +206,14 @@ type Orchestrator struct {
 	keeperEnabled  bool
 	ipcBaseURL     string
 	ipcToken       string
-	statsRegister  StatsRegisterFunc
-	mu             sync.RWMutex
-	accepting      bool
-	crews          map[string]*crewState
+	// localModelBaseURL is the OpenAI-compatible local model endpoint
+	// (cfg.LocalModels.BaseURL) threaded into each AgentRunRequest; see
+	// SetLocalModelBaseURL.
+	localModelBaseURL string
+	statsRegister     StatsRegisterFunc
+	mu                sync.RWMutex
+	accepting         bool
+	crews             map[string]*crewState
 
 	// runSem bounds concurrent agent-run exec fan-outs. RunAgent acquires a
 	// token before its container.Exec fan-out (sidecar start, the mkdir/setup
@@ -1015,6 +1020,17 @@ func (o *Orchestrator) KeeperEnabled() bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	return o.keeperEnabled
+}
+
+// SetLocalModelBaseURL sets the OpenAI-compatible local model endpoint
+// (Ollama, LM Studio, llama.cpp) handed to agent CLIs that select an
+// "ollama/…" model (#944). The URL must be reachable from inside crew
+// containers (e.g. http://host.docker.internal:11434/v1). Empty disables
+// the local-model path.
+func (o *Orchestrator) SetLocalModelBaseURL(baseURL string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.localModelBaseURL = baseURL
 }
 
 // SetIPCConfig sets the crewshipd internal API base URL and token.
