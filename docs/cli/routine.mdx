@@ -51,6 +51,7 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Authoring | `validate [file.json]` | Validate DSL offline (no server call) |
 | Authoring | `tag <slug> ...` | Add or remove discovery tags on a routine definition |
 | Authoring | `step-override <slug> ...` | Override a step's prompt/model without bumping the routine version |
+| Authoring | `iterate <slug>` | Scored improvement loop: run → grade → optimize → save new version |
 | Bundles | `export <slug>` | Export bundle JSON to stdout |
 | Bundles | `import [bundle.json] --crew <slug>` | Import bundle from file or stdin into an author crew |
 | Triggers | `schedules ...` | Cron schedule CRUD |
@@ -114,6 +115,7 @@ crewship routine save \
 | `--author-crew` | ✓ | crew_id that owns this routine |
 | `--author-agent` | | agent_id that authored (optional but recommended) |
 | `--sample-inputs` | | JSON inputs the test_run uses |
+| `--change-summary` | | One-line note stored on the version row (shown by `routine versions` and the versions UI) |
 
 ---
 
@@ -562,6 +564,55 @@ crewship routine versions summarize-text
 ```
 
 **Output columns:** VERSION, HEAD, PARENT, HASH, AUTHOR, CREATED, SUMMARY. The `*` marker tags the current HEAD.
+
+## `crewship routine iterate <slug>`
+
+Run a scored improvement loop over a saved routine: run → a **grader**
+agent scores the output against your rubric (`{"score": 0-100,
+"feedback": "..."}`) → below target, an **optimizer** agent rewrites the
+definition → local validation → you confirm → the definition saves as a
+**new immutable version** whose `change_summary` records the round and
+score (`iterate round 2: score 74/100 — misses the TL;DR`). The loop
+stops at `--target` or after `--rounds`.
+
+```bash
+crewship routine iterate summarize-text \
+  --rubric ./rubric.md --inputs '{"text": "..."}' \
+  --grader reviewer --optimizer lead --author-crew eng \
+  --rounds 3 --target 90
+```
+
+| Flag | Required | Default | Description |
+|------|:---:|---------|-------------|
+| `--rubric` | ✓ | | Grading contract: file path or literal text. Write it like a brief to a colleague. |
+| `--grader` | ✓ | | Agent slug that scores each run against the rubric |
+| `--author-crew` | ✓ | | Crew slug/id that owns the routine (agent slugs resolve against it) |
+| `--optimizer` | | the grader | Agent slug that rewrites the definition between rounds |
+| `--rounds` | | `3` | Maximum improvement rounds (1–10) |
+| `--target` | | `90` | Stop when the grader score reaches this |
+| `--inputs` | | | JSON inputs passed to every run |
+| `-y`, `--yes` | | `false` | Skip the per-round save confirmation |
+| `--run-timeout` | | `10m` | Timeout for each synchronous routine run |
+| `--max-turns` | | server default | Max turns for grader/optimizer agent calls |
+
+Guardrails, by construction:
+
+- **Every save goes through the normal gates** — the server-side
+  test-run gate and governance maker-checker apply exactly as for a
+  human author. A definition that gains risky steps (`http`, `code`,
+  egress) lands as **`proposed`** and the loop stops with a message;
+  the optimizer prompt also instructs against adding such steps.
+- **Everything is versioned** — each accepted round is one row in
+  `routine versions`; `crewship routine rollback <slug> --to N` undoes
+  any of it.
+- **Human-in-the-loop by default** — each save asks for confirmation;
+  `--yes` is for unattended runs and stays auditable via the version
+  trail.
+- A run parked on an approval waitpoint aborts the loop (iterate does
+  not drive approval flows); deferred/deduped runs abort too.
+
+Exit summary lists per-round status, score, and whether a version was
+saved; `--format json` emits the same machine-readable.
 
 ## `crewship routine rollback <slug>`
 

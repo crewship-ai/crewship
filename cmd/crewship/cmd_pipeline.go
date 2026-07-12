@@ -303,6 +303,7 @@ reuse contract).`,
 		authorCrew, _ := cmd.Flags().GetString("author-crew")
 		authorAgent, _ := cmd.Flags().GetString("author-agent")
 		sampleInputsRaw, _ := cmd.Flags().GetString("sample-inputs")
+		changeSummary, _ := cmd.Flags().GetString("change-summary")
 
 		if definitionPath == "" {
 			return fmt.Errorf("--definition <path> required")
@@ -372,6 +373,9 @@ reuse contract).`,
 			"description":    description,
 			"definition":     json.RawMessage(definitionRaw),
 			"author_crew_id": authorCrew,
+		}
+		if changeSummary != "" {
+			saveBody["change_summary"] = changeSummary
 		}
 		// Forward the proof token when the server minted one. A server without
 		// a signing secret returns none; the save then relies on the server-side
@@ -967,6 +971,7 @@ func init() {
 	pipelineSaveCmd.Flags().String("author-crew", "", "crew_id that owns this routine (REQUIRED)")
 	pipelineSaveCmd.Flags().String("author-agent", "", "agent_id that authored this routine (optional but recommended)")
 	pipelineSaveCmd.Flags().String("sample-inputs", "", "JSON inputs the test_run uses to validate the DSL")
+	pipelineSaveCmd.Flags().String("change-summary", "", "one-line note stored on the version row (shown by 'routine versions' and the versions UI)")
 
 	pipelineRunCmd.Flags().String("inputs", "", "JSON inputs for the run (e.g. '{\"since\":\"yesterday\"}')")
 	pipelineRunCmd.Flags().String("invoking-crew", "", "crew_id to record as the invoker (cross-crew reuse audit)")

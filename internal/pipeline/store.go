@@ -296,13 +296,17 @@ func (s *Store) saveVersionTx(ctx context.Context, tx *sql.Tx, pipelineID string
 		authorID = "unknown"
 	}
 
+	changeSummary := sql.NullString{}
+	if s := sanitizeChangeSummary(in.ChangeSummary); s != "" {
+		changeSummary = sql.NullString{String: s, Valid: true}
+	}
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO pipeline_versions (
     id, pipeline_id, version, definition_json, definition_hash,
     author_type, author_id, parent_version, change_summary, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		generateVersionID(), pipelineID, newVersion, in.DefinitionJSON, hash,
-		authorType, authorID, parentVal,
+		authorType, authorID, parentVal, changeSummary,
 		now.Format(time.RFC3339Nano),
 	)
 	if err != nil {
@@ -689,4 +693,29 @@ func isUniqueViolation(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "UNIQUE constraint failed") ||
 		strings.Contains(msg, "constraint failed: UNIQUE")
+}
+
+// sanitizeChangeSummary bounds and cleans the caller-supplied version note
+// before it is persisted: control characters (ANSI/OSC escapes, CR/LF) are
+// stripped so `routine versions` and the versions UI can render the value
+// raw without terminal-injection risk, and length is capped at 500 runes so
+// a multi-megabyte body can't balloon every versions listing. Empty after
+// sanitization = NULL (handled by the caller).
+func sanitizeChangeSummary(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	cleaned := make([]rune, 0, len(s))
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			cleaned = append(cleaned, ' ')
+			continue
+		}
+		cleaned = append(cleaned, r)
+	}
+	if len(cleaned) > 500 {
+		cleaned = append(cleaned[:499], '…')
+	}
+	return strings.TrimSpace(string(cleaned))
 }

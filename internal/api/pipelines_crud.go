@@ -495,6 +495,9 @@ type internalSaveRequest struct {
 	AuthorRunID       string          `json:"author_run_id"`
 	LastTestRunAt     string          `json:"last_test_run_at"` // RFC3339
 	LastTestRunPassed bool            `json:"last_test_run_passed"`
+	// ChangeSummary is an optional one-line provenance note recorded on the
+	// pipeline_versions row (surfaced in the versions UI and CLI).
+	ChangeSummary string `json:"change_summary,omitempty"`
 }
 
 // userSaveRequest is the body shape for the workspace-scoped save
@@ -532,6 +535,10 @@ type userSaveRequest struct {
 	// last_test_run_at — that field can be omitted entirely. See
 	// pipelines_save_token.go for the threat model rationale.
 	SaveToken string `json:"save_token,omitempty"`
+	// ChangeSummary is an optional one-line provenance note recorded on the
+	// pipeline_versions row (surfaced in the versions UI and `routine
+	// versions`). `routine iterate` writes its round/score here.
+	ChangeSummary string `json:"change_summary,omitempty"`
 }
 
 // denyNonPrivilegedFlag writes a 403 and returns true when a save escape-hatch
@@ -656,6 +663,7 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		// reason the save_token exists). Only the two proof paths below flip it.
 		LastTestRunPassed: body.SkipTestGate,
 		Status:            saveStatus,
+		ChangeSummary:     body.ChangeSummary,
 	}
 
 	// Two — and ONLY two — paths clear the test-gate for a user save:
@@ -814,6 +822,7 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 		},
 		LastTestRunPassed: body.LastTestRunPassed,
 		Status:            statusForRisk(risky),
+		ChangeSummary:     body.ChangeSummary,
 	}
 	if t, err := parseRFC3339(body.LastTestRunAt); err == nil {
 		in.LastTestRunAt = &t
