@@ -197,6 +197,13 @@ jobs:
       - name: Go build (windows clionly cross-compile)
         run: GOOS=windows GOARCH=amd64 go build -tags clionly ./cmd/crewship
 
+      # Host-OS clionly build: the Windows step proves the clionly graph
+      # compiles for GOOS=windows, but a break scoped to the unix side of
+      # a build-tag split would only surface at the nightly goreleaser
+      # snapshot. Costs seconds — the build cache is already warm.
+      - name: Go build (clionly, host OS)
+        run: go build -tags clionly ./cmd/crewship
+
       - name: Go test
         # -timeout 15m: the internal/api package suite has grown past
         # the Go default 10m (PR-A native memory tools + PR-D ephemeral
@@ -208,6 +215,48 @@ jobs:
         # already gives the runner enough wall-clock; this aligns the
         # go test -timeout to match.
         run: go test ./... -count=1 -timeout 15m
+
+  # ── Go: cross-platform test matrix ──
+  #
+  # The linux/amd64 `go` job above is the primary gate; this matrix closes
+  # the two release-coverage gaps the CLI audit flagged: darwin binaries
+  # shipped without `go test` ever running on macOS (the post-release smoke
+  # test only runs `crewship version`), and no arm64 runtime coverage
+  # existed at all (goreleaser cross-BUILDS linux/darwin arm64, but nothing
+  # executed the code). macos-14 and ubuntu-24.04-arm are both arm64, so
+  # together with the amd64 job all four released GOOS/GOARCH combos get
+  # compile coverage and three get runtime coverage. Docker-dependent tests
+  # skip themselves when no daemon is present (macOS runners have none).
+  go-platforms:
+    needs: [merge-conflict-markers]
+    name: Go (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            runner: macos-14
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Go build
+        run: go build ./cmd/crewship
+
+      - name: Go test
+        # -short would defeat the purpose; run the full suite. 20m test
+        # timeout mirrors the amd64 job's headroom — macOS runners are
+        # slower than ubuntu for the SQLite-heavy internal/api package.
+        run: go test ./... -count=1 -timeout 20m
 
   # ── Go lint: golangci-lint ──
   go-lint:
