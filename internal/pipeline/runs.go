@@ -71,10 +71,10 @@ type RunRecord struct {
 	PipelineID   string
 	PipelineSlug string
 	// PipelineVersion mirrors pipelines.head_version at insert time.
-	// NULL = unknown/HEAD. Note it is NOT a reliable drift signal: the
-	// version store dedupes by content hash, so an edit cycle A→B→A
-	// leaves head_version pointing at B's row while the live
-	// definition is A. DefinitionHash below is the drift gate.
+	// NULL = unknown/HEAD. DefinitionHash below is the drift gate:
+	// it compares content directly, independent of version
+	// bookkeeping, and stays valid against pre-#996 rows where a
+	// dedup'd A→B→A save left head_version stale.
 	PipelineVersion *int
 	// DefinitionHash is sha256(definition_json) of the pipeline AS IT
 	// WAS when the run started (migration v114). Boot-time resume

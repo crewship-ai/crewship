@@ -16,6 +16,7 @@ import { Card, EmptyState, Pill } from "./_shared"
 
 interface PipelineVersion {
   version: number
+  is_head?: boolean
   parent_version: number | null
   definition_hash: string
   author_type: string
@@ -59,7 +60,7 @@ export function RoutineVersionsTab({ workspaceId, slug, onRolledBack }: Props) {
   const rollback = async (target: number) => {
     if (
       !confirm(
-        `Rollback to v${target}? Current head will become a new version pointing back at v${target}'s definition.`,
+        `Rollback to v${target}? HEAD repoints at v${target} and its definition goes live. History is preserved.`,
       )
     )
       return
@@ -108,13 +109,19 @@ export function RoutineVersionsTab({ workspaceId, slug, onRolledBack }: Props) {
         <EmptyState
           icon={History}
           title="No version history yet"
-          description="The first save creates v1; subsequent edits append. Every save is immutable — rolling back creates a new HEAD pointing at an older definition."
+          description="The first save creates v1; subsequent edits append. Every version is immutable — rolling back repoints HEAD at an older definition."
         />
       </Card>
     )
   }
 
-  const headVersion = versions[0]?.version
+  // HEAD comes from the server (pipelines.head_version) — after a rollback
+  // it sits on an OLDER row, so versions[0] (max version) is only a
+  // fallback for servers predating the is_head field (#996).
+  const serverMarksHead = versions.some((v) => v.is_head)
+  const headVersion = serverMarksHead
+    ? versions.find((v) => v.is_head)?.version
+    : versions[0]?.version
 
   return (
     <Card title="Version history" subtitle={`${versions.length} total · head v${headVersion}`}>

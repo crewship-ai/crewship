@@ -245,16 +245,23 @@ INSERT INTO pipelines (
 // and we don't want to break tests that use the older minimal
 // schema. Production builds always have v79 applied.
 func (s *Store) saveVersionTx(ctx context.Context, tx *sql.Tx, pipelineID string, in SaveInput, hash string, now time.Time) error {
-	// Detect dedup: if a row already exists with this hash, we
-	// don't need to insert (re-saving identical content is a no-op
-	// at the version level too). Hand off to a SELECT inside the
-	// tx for atomicity.
-	var existing int
+	// Detect dedup: if a row already exists with this hash, we don't
+	// insert a new one — but head_version must REPOINT at that row
+	// (#996). The caller just wrote this content into
+	// pipelines.definition_json, so skipping the head update would
+	// leave head_version at the previous version while different
+	// content runs (the A→B→A edit cycle), and every head-derived
+	// surface (versions UI/CLI, pinned-run bookkeeping) would lie.
+	var existingVersion int
 	if err := tx.QueryRowContext(ctx,
-		`SELECT 1 FROM pipeline_versions WHERE pipeline_id = ? AND definition_hash = ? LIMIT 1`,
+		`SELECT version FROM pipeline_versions WHERE pipeline_id = ? AND definition_hash = ? LIMIT 1`,
 		pipelineID, hash,
-	).Scan(&existing); err == nil {
-		// Already have this version — no-op.
+	).Scan(&existingVersion); err == nil {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE pipelines SET head_version = ? WHERE id = ?`, existingVersion, pipelineID,
+		); err != nil {
+			return fmt.Errorf("repoint head (dedup): %w", err)
+		}
 		return nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		// Likely "no such table: pipeline_versions" on pre-v79

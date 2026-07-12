@@ -365,8 +365,17 @@ func (h *PipelineHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "list versions")
 		return
 	}
+	// HEAD comes from pipelines.head_version — after a rollback it points
+	// at an older row, so clients must not infer it from MAX(version) (#996).
+	head, err := h.store.HeadVersion(r.Context(), p.ID)
+	if err != nil {
+		h.logger.Error("pipeline list versions: head", "error", err)
+		replyError(w, http.StatusInternalServerError, "list versions")
+		return
+	}
 	type versionRow struct {
 		Version       int    `json:"version"`
+		IsHead        bool   `json:"is_head"`
 		Hash          string `json:"definition_hash"`
 		AuthorType    string `json:"author_type"`
 		AuthorID      string `json:"author_id"`
@@ -378,6 +387,7 @@ func (h *PipelineHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
 	for _, v := range versions {
 		out = append(out, versionRow{
 			Version:       v.Version,
+			IsHead:        v.Version == head,
 			Hash:          v.DefinitionHash,
 			AuthorType:    v.AuthorType,
 			AuthorID:      v.AuthorID,

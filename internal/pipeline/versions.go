@@ -47,8 +47,9 @@ type PipelineVersion struct {
 //
 // Returns the persisted version. If a version with the same
 // definition_hash already exists for this pipeline, returns the
-// existing row (idempotent) and does NOT bump head_version —
-// re-saving identical content is a no-op.
+// existing row (idempotent) and REPOINTS head_version at it (#996) —
+// no new row, but the head pointer follows the saved content so an
+// A→B→A cycle never leaves head_version on B while A is live.
 func (s *Store) SaveVersion(ctx context.Context, in SaveVersionInput) (*PipelineVersion, error) {
 	if in.PipelineID == "" {
 		return nil, errors.New("SaveVersion: pipeline_id required")
@@ -70,7 +71,14 @@ SELECT id, version FROM pipeline_versions
 WHERE pipeline_id = ? AND definition_hash = ?
 LIMIT 1`, in.PipelineID, hash).Scan(&existingVersionID, &existingVersionNum)
 	if err == nil {
-		// Already exists — return it without bumping head.
+		// Already exists — repoint head at the existing row (#996)
+		// and return it. No new version number is minted.
+		if _, err := s.db.ExecContext(ctx,
+			`UPDATE pipelines SET head_version = ?, updated_at = ? WHERE id = ?`,
+			existingVersionNum, time.Now().UTC().Format(time.RFC3339Nano), in.PipelineID,
+		); err != nil {
+			return nil, fmt.Errorf("SaveVersion: repoint head (dedup): %w", err)
+		}
 		return s.getVersionByID(ctx, existingVersionID)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -236,6 +244,25 @@ WHERE id = ? AND deleted_at IS NULL`,
 		return nil, ErrNotFound
 	}
 	return s.GetByID(ctx, pipelineID)
+}
+
+// HeadVersion returns pipelines.head_version for the given pipeline —
+// the version row whose content is live in definition_json. Display
+// surfaces (versions API/CLI/UI) derive the HEAD marker from this,
+// never from MAX(version): after a rollback (or a dedup'd A→B→A save)
+// the head points at an OLDER row (#996).
+func (s *Store) HeadVersion(ctx context.Context, pipelineID string) (int, error) {
+	var head int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT head_version FROM pipelines WHERE id = ? AND deleted_at IS NULL`, pipelineID,
+	).Scan(&head)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("HeadVersion: %w", err)
+	}
+	return head, nil
 }
 
 // getVersionByID is the internal lookup by pipeline_versions.id —

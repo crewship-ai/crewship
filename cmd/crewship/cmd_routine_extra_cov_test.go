@@ -74,6 +74,40 @@ func TestRoutineVersionsCmd(t *testing.T) {
 		}
 	})
 
+	t.Run("head marker follows is_head after rollback", func(t *testing.T) {
+		// #996: after a rollback the server marks the rolled-back row as
+		// head. The CLI must render "*" on THAT row — not guess the max
+		// version (which is what made `routine versions` show the stale
+		// pre-rollback HEAD on dev1).
+		stub := covStub(t)
+		stub.OnGet(versionsPath, clitest.JSONResponse(200, []pipelineVersionRow{
+			{Version: 3, DefinitionHash: "cccc", AuthorType: "user", AuthorID: "u1", CreatedAt: "2026-06-01"},
+			{Version: 2, DefinitionHash: "bbbb", AuthorType: "agent", AuthorID: "a1", CreatedAt: "2026-05-01", IsHead: true},
+			{Version: 1, DefinitionHash: "aaaa", AuthorType: "agent", AuthorID: "a1", CreatedAt: "2026-04-01"},
+		}))
+		out := covCaptureStdoutCli3(t, func() {
+			if err := routineVersionsCmd.RunE(routineVersionsCmd, []string{"my-routine"}); err != nil {
+				t.Errorf("RunE: %v", err)
+			}
+		})
+		for _, line := range strings.Split(out, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) == 0 {
+				continue
+			}
+			switch fields[0] {
+			case "v2":
+				if len(fields) < 2 || fields[1] != "*" {
+					t.Errorf("v2 must carry the head marker: %q", line)
+				}
+			case "v3":
+				if len(fields) > 1 && fields[1] == "*" {
+					t.Errorf("v3 must NOT carry the head marker after rollback: %q", line)
+				}
+			}
+		}
+	})
+
 	t.Run("empty history", func(t *testing.T) {
 		stub := covStub(t)
 		stub.OnGet(versionsPath, clitest.JSONResponse(200, []pipelineVersionRow{}))
