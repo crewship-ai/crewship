@@ -27,9 +27,12 @@ func TestResilienceNetworkRecreate(t *testing.T) {
 	// EnsureCrewRuntime requires sidecar+entrypoint bind-mount sources.
 	// Create placeholder files so the provider passes its fail-fast validation;
 	// the test doesn't exercise sidecar IPC, only network/container lifecycle.
+	// The sidecar placeholder must carry the ELF magic — buildMounts rejects
+	// non-ELF sidecars since #953 (it is bind-mounted into Linux containers
+	// and exec'd there; this test never execs it).
 	sidecarPath := filepath.Join(tmpDir, "crewship-sidecar")
 	entrypointPath := filepath.Join(tmpDir, "entrypoint.sh")
-	if err := os.WriteFile(sidecarPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	if err := os.WriteFile(sidecarPath, []byte("\x7fELF placeholder - never exec'd by this test"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(entrypointPath, []byte("#!/bin/sh\nexec sleep infinity\n"), 0o755); err != nil {
