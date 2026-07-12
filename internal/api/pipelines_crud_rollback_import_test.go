@@ -241,3 +241,33 @@ func TestImportPipeline_ValidationFailure_AgentSlugMissing_422(t *testing.T) {
 		t.Errorf("hint = %q, want mention of agent slugs", resp["hint"])
 	}
 }
+
+// TestRollback_TargetVersionField is the contract regression for the field
+// name BOTH real clients send: the CLI (`routine rollback --to N` posts
+// {"target_version": N}, cmd_routine_extra.go) and the versions UI
+// (routine-versions-tab.tsx posts {target_version}). The handler used to
+// decode only {"version": N}, so every client's rollback 400'd with
+// "version must be >= 1" — discovered live on dev1 during #987 E2E.
+func TestRollback_TargetVersionField(t *testing.T) {
+	h, userID, wsID := newPipelineHandlerForCRUDTest(t)
+	seedPipelineWithVersions(t, h, wsID, "pln-rbt", "rbt-slug", 2)
+
+	req := httptest.NewRequest("POST", "/x", strings.NewReader(`{"target_version":1}`))
+	req.SetPathValue("slug", "rbt-slug")
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Rollback(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("target_version rollback: code = %d, want 200 (body: %s)", rr.Code, rr.Body.String())
+	}
+
+	// Legacy {"version": N} must keep working for any older caller.
+	req2 := httptest.NewRequest("POST", "/x", strings.NewReader(`{"version":1}`))
+	req2.SetPathValue("slug", "rbt-slug")
+	req2 = withWorkspaceUser(req2, userID, wsID, "OWNER")
+	rr2 := httptest.NewRecorder()
+	h.Rollback(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Errorf("legacy version rollback: code = %d, want 200 (body: %s)", rr2.Code, rr2.Body.String())
+	}
+}
