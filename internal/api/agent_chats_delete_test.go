@@ -51,6 +51,21 @@ func deleteChatReq(t *testing.T, h *AgentHandler, userID, wsID, role, agentID, c
 func TestDeleteChat_CreatorDeletesOwnChat(t *testing.T) {
 	h, userID, wsID := covAUHandler(t)
 	seedChatForDelete(t, h, wsID, "agent-dc", "chat-dc-1", userID)
+	// "Agent replied" bell for this chat — must be cleared with the chat,
+	// otherwise the inbox keeps an unread item deep-linking to a 404.
+	if _, err := h.db.Exec(
+		`INSERT INTO inbox_items (id, workspace_id, kind, source_id, title, state)
+		 VALUES ('inb-dc-1', ?, 'message', ?, 'Agent replied', 'unread')`,
+		wsID, chatReplyInboxSourceID("chat-dc-1", userID)); err != nil {
+		t.Fatalf("seed inbox item: %v", err)
+	}
+	// An unrelated message item must survive.
+	if _, err := h.db.Exec(
+		`INSERT INTO inbox_items (id, workspace_id, kind, source_id, title, state)
+		 VALUES ('inb-other', ?, 'message', ?, 'Other reply', 'unread')`,
+		wsID, chatReplyInboxSourceID("chat-unrelated", userID)); err != nil {
+		t.Fatalf("seed unrelated inbox item: %v", err)
+	}
 
 	rr := deleteChatReq(t, h, userID, wsID, "MEMBER", "agent-dc", "chat-dc-1")
 	if rr.Code != http.StatusNoContent {
@@ -64,6 +79,14 @@ func TestDeleteChat_CreatorDeletesOwnChat(t *testing.T) {
 	_ = h.db.QueryRow(`SELECT COUNT(*) FROM conversation_messages WHERE session_id = 'chat-dc-1'`).Scan(&n)
 	if n != 0 {
 		t.Error("chat messages must be gone with the chat")
+	}
+	_ = h.db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE id = 'inb-dc-1'`).Scan(&n)
+	if n != 0 {
+		t.Error("chat-reply inbox item must be gone with the chat")
+	}
+	_ = h.db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE id = 'inb-other'`).Scan(&n)
+	if n != 1 {
+		t.Error("unrelated inbox item must survive the delete")
 	}
 }
 

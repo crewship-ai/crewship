@@ -313,7 +313,10 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Chat + messages + read cursors go together — a partial delete would
-	// leave orphaned history rows no surface can reach.
+	// leave orphaned history rows no surface can reach. The per-user
+	// "agent replied" inbox items go too (source_id = chat_reply_<chat>_<user>,
+	// see chatReplyInboxSourceID): leaving them would keep stale unread
+	// bells whose "Open chat" deep link now 404s.
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		h.logger.Error("delete chat begin tx", "error", err)
@@ -321,12 +324,17 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
-	for _, stmt := range []struct{ q, arg string }{
-		{`DELETE FROM conversation_messages WHERE session_id = ?`, chatID},
-		{`DELETE FROM chat_read_cursors WHERE chat_id = ?`, chatID},
-		{`DELETE FROM chats WHERE id = ?`, chatID},
+	for _, stmt := range []struct {
+		q    string
+		args []any
+	}{
+		{`DELETE FROM conversation_messages WHERE session_id = ?`, []any{chatID}},
+		{`DELETE FROM chat_read_cursors WHERE chat_id = ?`, []any{chatID}},
+		{`DELETE FROM inbox_items WHERE workspace_id = ? AND kind = 'message' AND source_id LIKE ? ESCAPE '\'`,
+			[]any{workspaceID, `chat\_reply\_` + escapeLikeWildcards(chatID) + `\_%`}},
+		{`DELETE FROM chats WHERE id = ?`, []any{chatID}},
 	} {
-		if _, err := tx.ExecContext(r.Context(), stmt.q, stmt.arg); err != nil {
+		if _, err := tx.ExecContext(r.Context(), stmt.q, stmt.args...); err != nil {
 			h.logger.Error("delete chat", "error", err, "chat_id", chatID)
 			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
@@ -337,6 +345,10 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
+	h.broadcastAgentEvent("inbox.updated", workspaceID, map[string]string{
+		"source": "chat_deleted",
+		"chat":   chatID,
+	})
 
 	h.broadcastAgentEvent("chat_deleted", workspaceID, map[string]string{
 		"agent_id": agentID,

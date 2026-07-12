@@ -248,6 +248,14 @@ func runIterateRounds(client *cli.Client, ws, slug string, p iterateLoopParams, 
 		fmt.Fprintf(os.Stderr, "  score %d/100 — %s\n", score.Score, truncateLine(score.Feedback, 120))
 
 		row := iterateRound{Round: round, RunID: run.RunID, RunStatus: run.Status, Score: score.Score, Feedback: score.Feedback, CostUSD: run.CostUSD}
+		// Once a round is graded its score is paid for — every exit after
+		// this point (optimize/validate/save failure included) must land
+		// the row in history so the partial summary shows THIS round too,
+		// not just the ones before it.
+		fail := func(err error) error {
+			*history = append(*history, row)
+			return err
+		}
 
 		// 3. Target reached → done. Only a COMPLETED run can satisfy the
 		// target — a FAILED run with a generous grader is not success.
@@ -267,7 +275,7 @@ func runIterateRounds(client *cli.Client, ws, slug string, p iterateLoopParams, 
 		if bundle == nil {
 			bundle, err = iterateFetchBundle(client, ws, slug)
 			if err != nil {
-				return fmt.Errorf("round %d export: %w", round, err)
+				return fail(fmt.Errorf("round %d export: %w", round, err))
 			}
 		}
 
@@ -275,11 +283,11 @@ func runIterateRounds(client *cli.Client, ws, slug string, p iterateLoopParams, 
 		fmt.Fprintf(os.Stderr, "🛠 optimizing with %s...\n", optimizerSlug)
 		optText, err := askAgentText(client, optimizerID, buildOptimizePrompt(bundle.Pipeline.Definition, rubric, score, run.Output, run.ErrorMessage), maxTurns, agentTimeout)
 		if err != nil {
-			return fmt.Errorf("round %d optimize: %w", round, err)
+			return fail(fmt.Errorf("round %d optimize: %w", round, err))
 		}
 		newDef, err := extractDefinitionJSON(optText)
 		if err != nil {
-			return fmt.Errorf("round %d: optimizer %s returned no valid definition JSON: %w", round, optimizerSlug, err)
+			return fail(fmt.Errorf("round %d: optimizer %s returned no valid definition JSON: %w", round, optimizerSlug, err))
 		}
 
 		// Structural injection guard: run output flows through grader
@@ -291,16 +299,16 @@ func runIterateRounds(client *cli.Client, ws, slug string, p iterateLoopParams, 
 		// but "safe-typed" additions (notify targets, new egress hosts on an
 		// existing http step) must fail closed here too.
 		if err := validateNoNewCapabilities(bundle.Pipeline.Definition, newDef); err != nil {
-			return fmt.Errorf("round %d: optimizer output rejected: %w", round, err)
+			return fail(fmt.Errorf("round %d: optimizer output rejected: %w", round, err))
 		}
 
 		// 6. Local validation before touching the server.
 		dsl, err := pipeline.Parse(newDef)
 		if err != nil {
-			return fmt.Errorf("round %d: optimizer produced an unparseable DSL: %w", round, err)
+			return fail(fmt.Errorf("round %d: optimizer produced an unparseable DSL: %w", round, err))
 		}
 		if err := pipeline.Validate(dsl, crewSlugs, nil); err != nil {
-			return fmt.Errorf("round %d: optimizer produced an invalid DSL: %w", round, err)
+			return fail(fmt.Errorf("round %d: optimizer produced an invalid DSL: %w", round, err))
 		}
 
 		// 7. Confirm.
@@ -317,7 +325,7 @@ func runIterateRounds(client *cli.Client, ws, slug string, p iterateLoopParams, 
 		// 8. Save (two-step test_run → save; server gates apply).
 		saved, err := iterateSaveDefinition(client, ws, slug, bundle.Pipeline.Name, bundle.Pipeline.Description, authorCrewID, summary, newDef)
 		if err != nil {
-			return fmt.Errorf("round %d save: %w", round, err)
+			return fail(fmt.Errorf("round %d save: %w", round, err))
 		}
 		row.SavedVersion = true
 		*history = append(*history, row)

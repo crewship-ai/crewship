@@ -554,6 +554,13 @@ Examples:
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
+		f := newFormatter()
+		switch f.Format {
+		case "json":
+			return f.JSON(map[string]string{"chat_id": chatID, "status": "deleted"})
+		case "yaml":
+			return f.YAML(map[string]string{"chat_id": chatID, "status": "deleted"})
+		}
 		cli.PrintSuccess(fmt.Sprintf("Chat %s deleted.", chatID))
 		return nil
 	},

@@ -37,20 +37,28 @@ type collectResult struct {
 // socket, and unattended runs must not hang forever on ReadMessage;
 // timeout 0 means no deadline (interactive `ask` blocks until the server
 // closes the stream). Reads happen on a goroutine; the deadline fires on
-// the select. After a timeout the reader goroutine stays parked on the
-// stalled ReadMessage until the caller closes the socket — the buffered
-// channel lets its final send complete so the goroutine never leaks on a
-// blocked send.
+// the select. Every return path closes `stop`, which unblocks a send the
+// reader goroutine may be parked on after the collector returns — without
+// it, a source that keeps emitting past done/timeout would strand the
+// goroutine on a blocked send forever (the caller's socket Close unblocks
+// ReadMessage, not a channel send). The goroutine then exits after at
+// most one more ReadMessage.
 func collectAgentStream(src chatEventSource, timeout time.Duration) collectResult {
 	type wsRead struct {
 		msg *cli.WSMessage
 		err error
 	}
-	reads := make(chan wsRead, 1)
+	reads := make(chan wsRead)
+	stop := make(chan struct{})
+	defer close(stop)
 	go func() {
 		for {
 			msg, err := src.ReadMessage()
-			reads <- wsRead{msg, err}
+			select {
+			case reads <- wsRead{msg, err}:
+			case <-stop:
+				return
+			}
 			if err != nil {
 				return
 			}
