@@ -379,9 +379,15 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   }, [regenerateWithPin, loadHistory])
 
   // Opt-in virtualized list (localStorage crewship.virtualChat=1) — mounts
-  // only the viewport instead of every turn. Read once per mount; flipping
-  // the flag requires a reload, which is fine for an experimental gate.
-  const [useVirtualChat] = useState(() => virtualChatEnabled())
+  // only the viewport instead of every turn. Initialized false and flipped
+  // post-mount: reading localStorage during the hydration render made the
+  // client tree diverge from the prerendered HTML (recoverable React 19
+  // hydration error for flag users). One post-mount swap is the price of
+  // an experimental gate; flipping the flag still requires a reload.
+  const [useVirtualChat, setUseVirtualChat] = useState(false)
+  useEffect(() => {
+    if (virtualChatEnabled()) setUseVirtualChat(true)
+  }, [])
 
   // One conversation surface, rendered by both the mobile-chat and desktop
   // branches — the two copies had already drifted once; don't re-fork them.

@@ -18,7 +18,13 @@ import { TurnRenderer } from "./turn-renderer"
  *  Known tradeoffs vs the classic path (why this is flagged):
  *  - no pin-to-top spacer (the just-sent question doesn't anchor to the
  *    viewport top while the reply streams; follow-bottom is used instead),
- *  - no popLayout exit animations for removed turns.
+ *  - no popLayout exit animations for removed turns,
+ *  - conversation-search jump (data-turn-id querySelector + scrollIntoView)
+ *    can't reach unmounted off-window turns — needs virtuoso scrollToIndex
+ *    threading before the flag defaults on,
+ *  - scroll restore after a session switch relies on followOutput; a
+ *    history *replace* may land mid-list (wire scrollToIndex on
+ *    historyLoading→false before defaulting on).
  */
 export function virtualChatEnabled(): boolean {
   if (typeof window === "undefined") return false
@@ -53,6 +59,17 @@ interface VirtualConversationProps {
  * only while the user is already there — scrolling up to read history is
  * never hijacked by incoming tokens.
  */
+// Stable component map for Virtuoso: an inline `Footer: () => …` closure is
+// a NEW component type every render, so React remounted the footer subtree
+// per token batch while streaming (StreamingIndicator's fade-in replayed —
+// visible flicker). The footer node travels through Virtuoso's `context`
+// prop instead; the type stays referentially stable.
+type VirtuosoCtx = { footer: React.ReactNode }
+const VirtuosoFooter = ({ context }: { context?: VirtuosoCtx }) => (
+  <div className="mx-auto w-full max-w-3xl px-4">{context?.footer}</div>
+)
+const VIRTUOSO_COMPONENTS = { Footer: VirtuosoFooter }
+
 export function VirtualConversation({
   turns,
   sessionId,
@@ -103,11 +120,8 @@ export function VirtualConversation({
         initialTopMostItemIndex={Math.max(0, turns.length - 1)}
         increaseViewportBy={{ top: 600, bottom: 600 }}
         className="h-full"
-        components={{
-          Footer: () => (
-            <div className="mx-auto w-full max-w-3xl px-4">{footer}</div>
-          ),
-        }}
+        context={{ footer }}
+        components={VIRTUOSO_COMPONENTS}
         itemContent={(idx, turn) => (
           <div className="mx-auto w-full max-w-3xl px-4 pb-8">
             <TurnRenderer
