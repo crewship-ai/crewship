@@ -108,20 +108,25 @@ func New() *Scrubber {
 		re:   regexp.MustCompile(`AKIA[0-9A-Z]{16}`),
 	})
 
-	// JWT Bearer tokens in Authorization headers
+	// Bearer tokens in Authorization headers. Matches JWT-shaped AND opaque
+	// tokens (an authenticated local-model endpoint / LiteLLM proxy issues
+	// opaque bearers, not JWTs — #974 S2). 12+ non-space chars after "Bearer".
 	s.patterns = append(s.patterns, pattern{
 		name: "bearer_token",
-		re:   regexp.MustCompile(`Bearer\s+eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+`),
+		re:   regexp.MustCompile(`(?i)Bearer\s+\S{12,}`),
 	})
 
-	// Generic password/secret patterns in JSON or env var format
+	// Generic password/secret patterns in JSON or env var format.
+	// Case-insensitive so camelCase `"apiKey":` (emitted into
+	// OPENCODE_CONFIG_CONTENT by the local-model endpoint, #974 S2) is caught
+	// alongside snake_case and SCREAMING_CASE variants.
 	s.patterns = append(s.patterns, pattern{
 		name: "",
-		re:   regexp.MustCompile(`"(?:password|secret|token|api_key|apikey|secret_key)":\s*"[^"]+"`),
+		re:   regexp.MustCompile(`(?i)"(?:password|secret|token|api_key|apikey|secret_key)":\s*"[^"]+"`),
 	})
 	s.patterns = append(s.patterns, pattern{
 		name: "",
-		re:   regexp.MustCompile(`(?:PASSWORD|SECRET|SECRET_KEY|API_KEY|APIKEY)=[^\s]{6,}`),
+		re:   regexp.MustCompile(`(?i)(?:PASSWORD|SECRET|SECRET_KEY|API_KEY|APIKEY)=[^\s]{6,}`),
 	})
 
 	return s
@@ -216,8 +221,10 @@ func stripZeroWidth(s string) string {
 }
 
 var (
-	jsonKVRe = regexp.MustCompile(`^("(?:password|secret|token|api_key|apikey|secret_key)":\s*)"[^"]+"$`)
-	envKVRe  = regexp.MustCompile(`^((?:PASSWORD|SECRET|SECRET_KEY|API_KEY|APIKEY)=)`)
+	// Case-insensitive to preserve the key of camelCase secrets like
+	// `"apiKey":` (kept in sync with the generic patterns in New(), #974 S2).
+	jsonKVRe = regexp.MustCompile(`(?i)^("(?:password|secret|token|api_key|apikey|secret_key)":\s*)"[^"]+"$`)
+	envKVRe  = regexp.MustCompile(`(?i)^((?:PASSWORD|SECRET|SECRET_KEY|API_KEY|APIKEY)=)`)
 )
 
 // scrubGeneric handles patterns like "password": "value" -> "password": "[REDACTED]"

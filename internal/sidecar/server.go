@@ -68,6 +68,10 @@ type CrewMember struct {
 type NetworkPolicyConfig struct {
 	Mode           string   `json:"mode"`            // "free" or "restricted"
 	AllowedDomains []string `json:"allowed_domains"` // extra allowed domains for restricted mode
+	// AllowPrivateEndpoints (#961) lets the proxy's dial-time SSRF guard reach
+	// RFC1918/loopback (a crew-opted-in private/LAN model endpoint). Link-local
+	// and cloud-metadata addresses stay blocked regardless of this flag.
+	AllowPrivateEndpoints bool `json:"allow_private_endpoints,omitempty"`
 }
 
 // MCPServerInput describes an MCP server to connect to via the gateway.
@@ -175,7 +179,9 @@ func NewServer(cfg ServerConfig) *Server {
 	// Unrestricted egress is opt-in via an explicit Mode:"free" policy.
 	// Unknown modes likewise default to restricted to prevent silent egress.
 	freeMode := false // default when no policy is set: restricted (fail closed)
+	allowPrivateEndpoints := false
 	if cfg.NetworkPolicy != nil {
+		allowPrivateEndpoints = cfg.NetworkPolicy.AllowPrivateEndpoints
 		switch cfg.NetworkPolicy.Mode {
 		case "free":
 			freeMode = true
@@ -231,6 +237,7 @@ func NewServer(cfg ServerConfig) *Server {
 		Scrubber:         scrubber.New(),
 		Logger:           cfg.Logger,
 		FreeMode:         freeMode,
+		AllowPrivate:     allowPrivateEndpoints,
 		OnEgress:         s.buildEgressObserver(),
 		OnLLMCall:        s.buildLLMCallObserver(),
 		BillingMode:      billingMode,

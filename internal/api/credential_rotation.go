@@ -113,11 +113,11 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	// scope check so cross-workspace rotation attempts 404. The
 	// existing soft-delete filter applies — rotating a deleted
 	// credential makes no sense.
-	var oldEncrypted string
+	var oldEncrypted, credType string
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT encrypted_value FROM credentials
+		SELECT encrypted_value, type FROM credentials
 		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		credID, workspaceID).Scan(&oldEncrypted)
+		credID, workspaceID).Scan(&oldEncrypted, &credType)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "Credential not found")
@@ -126,6 +126,19 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("read credential for rotate", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
+	}
+
+	// #974 S1: a typed value must survive rotation. ENDPOINT_URL stores a
+	// {baseURL,apiKey,headers} JSON object; rotate previously stored the new
+	// value opaquely, so a bare `rotate --value <token>` overwrote the whole
+	// object with a non-URL string and the endpoint silently failed
+	// validateEndpointURL at run time (vanished). Gate the rotated value
+	// through the same shape check create uses.
+	if credType == string(CredTypeEndpointURL) {
+		if msg := validateEndpointURL(req.Value); msg != "" {
+			replyError(w, http.StatusBadRequest, msg)
+			return
+		}
 	}
 
 	newEncrypted, err := encryption.Encrypt(req.Value)

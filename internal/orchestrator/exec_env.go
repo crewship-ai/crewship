@@ -3,9 +3,13 @@ package orchestrator
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
 // BuildEnvVars constructs the environment variables for a container exec,
@@ -374,7 +378,11 @@ func localModelConfigEnv(req AgentRunRequest) (string, bool) {
 	// #961: optional auth for an authenticated endpoint. apiKey → the
 	// @ai-sdk/openai-compatible driver auto-adds `Authorization: Bearer`;
 	// headers is the escape hatch for Basic/custom-header/non-bearer schemes.
-	// Both live only in this generated config JSON, never in the agent env.
+	// NOTE (#974 S2): OPENCODE_CONFIG_CONTENT is itself an agent env var, so
+	// apiKey/headers DO land in the agent environment — the openai-compatible
+	// driver dials the endpoint directly, so the sidecar proxy can't isolate
+	// them. They are reported by AgentEnvCredentialExposures and redacted from
+	// logs by the scrubber's (case-insensitive) apiKey pattern.
 	p.Options.APIKey = req.LocalModelAPIKey
 	if len(req.LocalModelHeaders) > 0 {
 		p.Options.Headers = req.LocalModelHeaders
@@ -392,6 +400,29 @@ func localModelConfigEnv(req AgentRunRequest) (string, bool) {
 	return "OPENCODE_CONFIG_CONTENT=" + string(raw), true
 }
 
+// allowPrivateEndpointsEnvVar is the instance-level ceiling for private-network
+// model endpoints (#974 S5). Default off: a per-crew allow_private_endpoints
+// opt-in only takes effect when the operator has also enabled it host-wide, so
+// a workspace admin cannot self-grant RFC1918/loopback egress on a shared or
+// cloud host. Mirrors CREWSHIP_HOOKS_ALLOW_PRIVATE (internal/hooks/http.go).
+const allowPrivateEndpointsEnvVar = "CREWSHIP_ALLOW_PRIVATE_ENDPOINTS"
+
+// instanceAllowsPrivateEndpoints reports whether the host operator has enabled
+// private-network model endpoints instance-wide. ANDed with the per-crew flag.
+func instanceAllowsPrivateEndpoints() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(allowPrivateEndpointsEnvVar))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
+// effectiveAllowPrivateEndpoints ANDs the per-crew opt-in with the instance-
+// level ceiling (#974 S5). Private-network egress requires BOTH.
+func effectiveAllowPrivateEndpoints(crewFlag bool) bool {
+	return crewFlag && instanceAllowsPrivateEndpoints()
+}
+
 // localModelExtraDomains returns the local endpoint's host when the
 // local-model path is active, so restricted network mode auto-allowlists the
 // traffic the operator explicitly enabled (same pattern as mcpStdioDomains).
@@ -405,7 +436,25 @@ func localModelExtraDomains(req AgentRunRequest) []string {
 	if err != nil || u.Hostname() == "" {
 		return nil
 	}
-	return []string{u.Hostname()}
+	host := u.Hostname()
+	// SSRF fence (#961): if the endpoint host is a literal IP, gate it here
+	// before it ever reaches the sidecar allowlist. Hard-blocked ranges
+	// (link-local/metadata/reserved) are refused unconditionally; RFC1918/
+	// loopback are refused unless the crew opted into private-endpoint egress.
+	// A non-literal hostname (e.g. host.docker.internal, which may resolve only
+	// inside the container's network) is passed through — the sidecar does the
+	// authoritative resolve-then-pin check at dial time, where it can actually
+	// resolve the name. This keeps the host-side check synchronous and correct
+	// for names crewshipd itself can't resolve.
+	if ip := net.ParseIP(host); ip != nil {
+		if httpsafe.IsBlockedIPForEndpoint(ip, req.AllowPrivateEndpoints) {
+			// Refuse silently here — not added to the allowlist, so the
+			// deny-by-default sidecar blocks it and emits the loud
+			// network.egress journal entry the operator sees.
+			return nil
+		}
+	}
+	return []string{host}
 }
 
 // CredentialEnvExposure describes a credential whose plaintext value is placed
@@ -485,6 +534,26 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 				Reason:     "CLI tools read credentials from env vars, which cannot be proxied",
 			})
 		}
+	}
+
+	// Local-model endpoint auth (#961/#974 S2): the apiKey/headers are embedded
+	// in OPENCODE_CONFIG_CONTENT (an agent env var). The openai-compatible
+	// driver dials the endpoint directly, so the sidecar reverse-proxy cannot
+	// inject them — they are exposed to the agent process, like a CONNECT-
+	// tunneled API key. Not actionable via config (it is the endpoint's auth).
+	//
+	// Gate on localModelConfigEnv's active condition (OPENCODE adapter + base
+	// URL + ollama model), not just the presence of auth material: the auth is
+	// resolved for every agent in a workspace that has an authed ENDPOINT_URL
+	// credential, but OPENCODE_CONFIG_CONTENT is only actually placed in the
+	// env for the OpenCode/ollama path. Otherwise we'd report a phantom
+	// exposure for a Claude/mismatched-adapter run.
+	if _, active := localModelConfigEnv(req); active && (req.LocalModelAPIKey != "" || len(req.LocalModelHeaders) > 0) {
+		out = append(out, CredentialEnvExposure{
+			EnvVarName: "OPENCODE_CONFIG_CONTENT",
+			Type:       "ENDPOINT_URL",
+			Reason:     "the local-model endpoint auth token/headers are embedded in the OpenCode config env var; the openai-compatible driver dials the endpoint directly, so the sidecar proxy cannot isolate them",
+		})
 	}
 
 	// SECRET credentials: isolated behind the Keeper request/execute flow when

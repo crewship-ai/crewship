@@ -62,6 +62,16 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	}
 	o.mu.RUnlock()
 
+	// #974 S5: AND the per-crew private-endpoint opt-in with the instance-level
+	// ceiling here, at the single point every downstream consumer reads the
+	// flag from (the sidecar network policy and the host-side allowlist
+	// pre-check both read req.AllowPrivateEndpoints). Default-off instance cap
+	// means a workspace admin who flips the per-crew flag cannot self-grant
+	// private egress on a shared/cloud host — the operator must also set
+	// CREWSHIP_ALLOW_PRIVATE_ENDPOINTS. Normalizing once (rather than at each
+	// read site) keeps a future third consumer safe by construction.
+	req.AllowPrivateEndpoints = effectiveAllowPrivateEndpoints(req.AllowPrivateEndpoints)
+
 	// Open the outermost OTel span for this agent invocation. Every
 	// downstream LLM call, tool execution, and sub-agent fan-out becomes
 	// a child of this span via context propagation. We capture the
@@ -560,8 +570,9 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			// empty unless this run actually uses an ollama/… model.
 			domains = append(domains, localModelExtraDomains(req)...)
 			networkPolicy = &SidecarNetworkPolicy{
-				Mode:           "restricted",
-				AllowedDomains: domains,
+				Mode:                  "restricted",
+				AllowedDomains:        domains,
+				AllowPrivateEndpoints: req.AllowPrivateEndpoints,
 			}
 		default:
 			o.logger.Error("unknown network mode, refusing to start sidecar", "mode", req.NetworkMode)

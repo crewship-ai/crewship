@@ -71,6 +71,29 @@ func TestCovCruCreate_BadJSON(t *testing.T) {
 	}
 }
 
+// #974 S4: allow_private_endpoints is an ADMIN ("manage") capability. A MANAGER
+// can create crews but must NOT be able to self-grant private egress by setting
+// the flag at create time (crews_update.go already gates flipping it at manage).
+func TestCovCruCreate_ManagerCannotSelfGrantPrivateEndpoints(t *testing.T) {
+	h, _, userID, wsID := covCruNewCrew(t)
+	rr := covCruDoCreate(h, userID, wsID, "MANAGER",
+		`{"name":"Priv","slug":"priv","allow_private_endpoints":true}`)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("manager create with allow_private_endpoints=true = %d, want 403", rr.Code)
+	}
+	// A MANAGER creating a normal crew (flag absent/false) still succeeds.
+	rr = covCruDoCreate(h, userID, wsID, "MANAGER", `{"name":"Normal","slug":"normal"}`)
+	if rr.Code >= 300 {
+		t.Errorf("manager create without the flag = %d, want 2xx", rr.Code)
+	}
+	// An ADMIN may set it.
+	rr = covCruDoCreate(h, userID, wsID, "ADMIN",
+		`{"name":"AdminPriv","slug":"admin-priv","allow_private_endpoints":true}`)
+	if rr.Code >= 300 {
+		t.Errorf("admin create with the flag = %d, want 2xx", rr.Code)
+	}
+}
+
 func TestCovCruCreate_Validation(t *testing.T) {
 	h, _, userID, wsID := covCruNewCrew(t)
 

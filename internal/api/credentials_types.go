@@ -21,8 +21,11 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
 // CredentialType is a string alias used to document intent at call
@@ -181,6 +184,11 @@ type endpointValue struct {
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
+// maxEndpointValueLen caps the stored ENDPOINT_URL value (baseURL + optional
+// token + headers JSON). Generous for any real endpoint; bounds storage and
+// the OPENCODE_CONFIG_CONTENT env var it is inlined into (#974 S7).
+const maxEndpointValueLen = 2048
+
 // parseEndpointValue decodes a stored ENDPOINT_URL credential value into its
 // base URL and optional auth material. A value that begins with "{" is parsed
 // as the JSON object above (and must carry a non-empty baseURL); anything else
@@ -228,7 +236,13 @@ func buildEndpointValue(baseURL, apiKey string, headers map[string]string) (stri
 // resolver can reuse the exact same gate before handing a stored URL to
 // OpenCode's config.
 func validateEndpointURL(value string) string {
-	baseURL, _, _, err := parseEndpointValue(value)
+	// #974 S7: cap the stored value. It is later inlined verbatim into
+	// OPENCODE_CONFIG_CONTENT; an unbounded value is both a storage and an
+	// env-bloat vector. 2 KiB is generous for baseURL+token+headers.
+	if len(value) > maxEndpointValueLen {
+		return "endpoint value is too long (max 2048 bytes)"
+	}
+	baseURL, apiKey, headers, err := parseEndpointValue(value)
 	if err != nil {
 		if strings.TrimSpace(value) == "" {
 			return "endpoint URL is required for ENDPOINT_URL credentials"
@@ -244,6 +258,37 @@ func validateEndpointURL(value string) string {
 	}
 	if u.Host == "" {
 		return "endpoint URL must include a host (e.g. http://host:11434/v1)"
+	}
+	// #974 S7: reject userinfo (http://user:pass@host). It smuggles a
+	// credential into the URL where it evades the auth-token handling, and
+	// user@host display confusion is a phishing/SSRF-adjacent footgun.
+	if u.User != nil {
+		return "endpoint URL must not embed credentials (user:pass@host); pass a token via --auth-token instead"
+	}
+	// #974 S3: a bearer token / custom headers attached to a plaintext http
+	// endpoint would be sent in cleartext. Require https UNLESS the host is a
+	// loopback or RFC1918 literal — the on-prem/LAN Ollama case where the
+	// operator controls the wire and TLS is often absent.
+	if apiKey != "" || len(headers) > 0 {
+		allowPlaintext := false
+		if ip := net.ParseIP(u.Hostname()); ip != nil && (ip.IsLoopback() || ip.IsPrivate()) {
+			allowPlaintext = true
+		}
+		if u.Scheme != "https" && !allowPlaintext {
+			return "an endpoint with an auth token or custom headers must use https, or the token would be sent in cleartext (http is allowed only for a loopback/private-network host)"
+		}
+	}
+	// SSRF create-time gate (#961): reject a literal IP that no legitimate
+	// endpoint could ever be — cloud metadata (169.254.169.254), link-local,
+	// multicast, reserved. These are hard-blocked even for crews that opt in
+	// to private-network egress, so refusing them at create time is a pure
+	// win (clear error now vs a silent run-time refusal later). A literal
+	// RFC1918/loopback IP is allowed HERE — the credential is workspace-scoped
+	// but the private-egress opt-in is per-crew, so the authoritative decision
+	// is made at run time; rejecting private literals at create would break
+	// the legitimate on-prem/LAN case (e.g. http://192.168.1.222:11434/v1).
+	if ip := net.ParseIP(u.Hostname()); ip != nil && httpsafe.IsHardBlockedIP(ip) {
+		return "endpoint URL points at a link-local/metadata/reserved address (" + ip.String() + "), which is never a valid model endpoint"
 	}
 	return ""
 }

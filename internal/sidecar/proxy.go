@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
@@ -63,16 +65,17 @@ type LLMCallObserver func(usage LLMUsage, quota QuotaInfo, mode, plan string)
 // Proxy is an HTTP forward proxy that intercepts agent outbound requests,
 // injects LLM API credentials, and blocks non-allowed domains.
 type Proxy struct {
-	credStore   *CredStore
-	allowlist   *DomainAllowlist
-	scrubber    *scrubber.Scrubber
-	logger      *slog.Logger
-	transport   http.RoundTripper
-	freeMode    bool
-	onEgress    EgressObserver
-	onLLMCall   LLMCallObserver
-	billingMode string // "metered" | "flat_rate" | "" — set from env at startup
-	subPlan     string // human label for flat-rate (e.g. "Anthropic Max 20×")
+	credStore    *CredStore
+	allowlist    *DomainAllowlist
+	scrubber     *scrubber.Scrubber
+	logger       *slog.Logger
+	transport    http.RoundTripper
+	freeMode     bool
+	allowPrivate bool // #961: permit RFC1918/loopback dial targets (crew opt-in); link-local/metadata always blocked
+	onEgress     EgressObserver
+	onLLMCall    LLMCallObserver
+	billingMode  string // "metered" | "flat_rate" | "" — set from env at startup
+	subPlan      string // human label for flat-rate (e.g. "Anthropic Max 20×")
 }
 
 // ProxyConfig configures the sidecar proxy.
@@ -82,6 +85,10 @@ type ProxyConfig struct {
 	Scrubber  *scrubber.Scrubber
 	Logger    *slog.Logger
 	FreeMode  bool // When true, skip domain allowlist checks (allow all domains)
+	// AllowPrivate (#961) permits the dial-time SSRF guard to reach
+	// RFC1918/loopback destinations (a crew-opted-in private/LAN endpoint).
+	// Link-local and cloud-metadata addresses stay blocked regardless.
+	AllowPrivate bool
 	// OnEgress is invoked after a successful upstream request. Optional —
 	// leaving it nil disables observability emits. The proxy holds the
 	// callback by reference (no copy), so installing a new observer
@@ -102,24 +109,57 @@ type ProxyConfig struct {
 // NewProxy creates a forward proxy with credential injection.
 func NewProxy(cfg ProxyConfig) *Proxy {
 	return &Proxy{
-		credStore:   cfg.CredStore,
-		allowlist:   cfg.Allowlist,
-		scrubber:    cfg.Scrubber,
-		logger:      cfg.Logger,
-		freeMode:    cfg.FreeMode,
-		onEgress:    cfg.OnEgress,
-		onLLMCall:   cfg.OnLLMCall,
-		billingMode: cfg.BillingMode,
-		subPlan:     cfg.SubscriptionPlan,
+		credStore:    cfg.CredStore,
+		allowlist:    cfg.Allowlist,
+		scrubber:     cfg.Scrubber,
+		logger:       cfg.Logger,
+		freeMode:     cfg.FreeMode,
+		allowPrivate: cfg.AllowPrivate,
+		onEgress:     cfg.OnEgress,
+		onLLMCall:    cfg.OnLLMCall,
+		billingMode:  cfg.BillingMode,
+		subPlan:      cfg.SubscriptionPlan,
 		transport: &http.Transport{
-			DialContext: (&net.Dialer{
-				Timeout:   10 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
+			// #961: resolve-then-pin SSRF guard. The allowlist matches a
+			// hostname string; this closes the DNS-rebinding gap by checking
+			// every resolved IP at dial time and connecting to that exact IP.
+			// FreeMode is the operator's explicit opt-out of egress limits, so
+			// the guard permits private targets there too (no free-mode regression);
+			// the fence's teeth are in restricted mode, where the local-model
+			// endpoint path lives.
+			DialContext:         ssrfDialContext(cfg.AllowPrivate || cfg.FreeMode),
 			MaxIdleConns:        100,
 			IdleConnTimeout:     90 * time.Second,
 			TLSHandshakeTimeout: 10 * time.Second,
 		},
+	}
+}
+
+// ssrfDialContext returns a DialContext that resolves the target host,
+// refuses any resolved IP a workspace endpoint must never reach (link-local
+// / cloud metadata / reserved always; RFC1918 / loopback unless allowPrivate),
+// then connects to the exact validated IP so a second resolution can't
+// rebind to an internal address between the check and the dial.
+func ssrfDialContext(allowPrivate bool) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, fmt.Errorf("sidecar: invalid dial address %q: %w", addr, err)
+		}
+		ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+		if err != nil {
+			return nil, fmt.Errorf("sidecar: DNS resolution failed for %s: %w", host, err)
+		}
+		if len(ips) == 0 {
+			return nil, fmt.Errorf("sidecar: no addresses for %s", host)
+		}
+		for _, ip := range ips {
+			if httpsafe.IsBlockedIPForEndpoint(ip.IP, allowPrivate) {
+				return nil, fmt.Errorf("sidecar: refusing to dial blocked address %s (host %s)", ip.IP, host)
+			}
+		}
+		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
 	}
 }
 
@@ -245,8 +285,12 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Establish TCP tunnel
-	targetConn, err := net.DialTimeout("tcp", host, 10*time.Second)
+	// Establish TCP tunnel through the resolve-then-pin SSRF guard (#961):
+	// an allowlisted hostname whose DNS now points at 169.254.169.254 /
+	// RFC1918 / loopback is refused here even though the string matched.
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	targetConn, err := ssrfDialContext(p.allowPrivate || p.freeMode)(ctx, "tcp", host)
 	if err != nil {
 		p.logger.Error("CONNECT dial failed", "host", host, "error", err)
 		http.Error(w, "failed to connect", http.StatusBadGateway)

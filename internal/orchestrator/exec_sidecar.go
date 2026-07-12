@@ -466,6 +466,10 @@ type SidecarCrewMember struct {
 type SidecarNetworkPolicy struct {
 	Mode           string   `json:"mode"`
 	AllowedDomains []string `json:"allowed_domains,omitempty"`
+	// AllowPrivateEndpoints (#961) lets the sidecar's dial-time SSRF guard
+	// permit RFC1918/loopback destinations (a crew-opted-in on-prem/LAN model
+	// endpoint). Link-local/metadata stay blocked regardless.
+	AllowPrivateEndpoints bool `json:"allow_private_endpoints,omitempty"`
 }
 
 func startSidecar(

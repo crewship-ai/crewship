@@ -105,6 +105,21 @@ ALLOWED_DOMAINS=(
     "sentry.io"
 )
 
+# Refuse a resolved IP that falls in a private/loopback/link-local range
+# (#974 S6). An allowlisted domain — or a hostile/misconfigured resolver —
+# must not be able to smuggle the sandbox onto the host LAN or the cloud
+# metadata service (169.254.169.254) via an internal A record. This is L3
+# defense-in-depth: the sidecar proxy already does the authoritative
+# resolve-then-pin at dial, but L3 does not re-validate what it ipset-adds,
+# so filter here too. 169.254.0.0/16 covers link-local AND the IMDS IP.
+is_private_ip() {
+    case "$1" in
+        10.*|127.*|169.254.*|192.168.*) return 0 ;;
+        172.1[6-9].*|172.2[0-9].*|172.3[0-1].*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 for domain in "${ALLOWED_DOMAINS[@]}"; do
     echo "Resolving $domain..."
     ips=$(dig +noall +answer +short A "$domain" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || true)
@@ -113,6 +128,10 @@ for domain in "${ALLOWED_DOMAINS[@]}"; do
         continue
     fi
     while read -r ip; do
+        if is_private_ip "$ip"; then
+            echo "WARN: $domain resolved to private/metadata IP $ip, skipping" >&2
+            continue
+        fi
         ipset add allowed-domains "$ip" 2>/dev/null || true
     done <<< "$ips"
 done

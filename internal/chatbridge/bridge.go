@@ -83,25 +83,26 @@ type ChatInfo struct {
 	// → orchestrator applies the deprecated env fallback.
 	LocalModelBaseURL string
 	// LocalModelAPIKey / LocalModelHeaders carry optional endpoint auth (#961).
-	LocalModelAPIKey   string
-	LocalModelHeaders  map[string]string
-	SystemPrompt       string
-	ToolProfile        string
-	Credentials        []orchestrator.Credential
-	TimeoutSecs        int
-	WorkspaceID        string
-	MemoryEnabled      bool
-	CrewMembers        []orchestrator.CrewMember
-	NetworkMode        string
-	AllowedDomains     []string
-	MemoryMB           int
-	CPUs               float64
-	TTLHours           int
-	RuntimeImage       string
-	CachedImage        string
-	DevcontainerConfig string
-	MiseConfig         string
-	ServicesJSON       string
+	LocalModelAPIKey      string
+	LocalModelHeaders     map[string]string
+	SystemPrompt          string
+	ToolProfile           string
+	Credentials           []orchestrator.Credential
+	TimeoutSecs           int
+	WorkspaceID           string
+	MemoryEnabled         bool
+	CrewMembers           []orchestrator.CrewMember
+	NetworkMode           string
+	AllowedDomains        []string
+	AllowPrivateEndpoints bool
+	MemoryMB              int
+	CPUs                  float64
+	TTLHours              int
+	RuntimeImage          string
+	CachedImage           string
+	DevcontainerConfig    string
+	MiseConfig            string
+	ServicesJSON          string
 	// ServiceEnvLookup resolves a credential env-var name to its
 	// plaintext value (for env_refs in services_json). Nil is a
 	// safe default — env_refs that can't be resolved are simply

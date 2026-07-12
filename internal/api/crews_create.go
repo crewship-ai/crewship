@@ -17,19 +17,20 @@ import (
 )
 
 type createCrewRequest struct {
-	Name               string   `json:"name"`
-	Slug               string   `json:"slug"`
-	Description        *string  `json:"description"`
-	Color              *string  `json:"color"`
-	Icon               *string  `json:"icon"`
-	ContainerMemoryMB  *int     `json:"container_memory_mb"`
-	ContainerCPUs      *float64 `json:"container_cpus"`
-	ContainerTTLHours  *int     `json:"container_ttl_hours"`
-	NetworkMode        *string  `json:"network_mode"`
-	AllowedDomains     []string `json:"allowed_domains"`
-	RuntimeImage       *string  `json:"runtime_image"`
-	DevcontainerConfig *string  `json:"devcontainer_config"`
-	MiseConfig         *string  `json:"mise_config"`
+	Name                  string   `json:"name"`
+	Slug                  string   `json:"slug"`
+	Description           *string  `json:"description"`
+	Color                 *string  `json:"color"`
+	Icon                  *string  `json:"icon"`
+	ContainerMemoryMB     *int     `json:"container_memory_mb"`
+	ContainerCPUs         *float64 `json:"container_cpus"`
+	ContainerTTLHours     *int     `json:"container_ttl_hours"`
+	NetworkMode           *string  `json:"network_mode"`
+	AllowedDomains        []string `json:"allowed_domains"`
+	AllowPrivateEndpoints bool     `json:"allow_private_endpoints"`
+	RuntimeImage          *string  `json:"runtime_image"`
+	DevcontainerConfig    *string  `json:"devcontainer_config"`
+	MiseConfig            *string  `json:"mise_config"`
 	// ServicesJSON is an opaque JSON document describing sidecar
 	// services (Redis, Postgres, MySQL, etc.) that the docker
 	// provider should run alongside the agent container. Validated
@@ -248,10 +249,23 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	allowPrivateEndpoints := 0
+	if req.AllowPrivateEndpoints {
+		// #974 S4: private-endpoint egress is an ADMIN-tier ("manage") capability
+		// — crews_update.go gates flipping this flag at manage. Create is only
+		// gated at "create" (MANAGER+), so without this per-field check a MANAGER
+		// could self-grant private egress (reach RFC1918/host services) by
+		// setting the flag at create time. Mirror the update-side gate.
+		if !canRole(role, "manage") {
+			replyError(w, http.StatusForbidden, "allow_private_endpoints requires ADMIN")
+			return
+		}
+		allowPrivateEndpoints = 1
+	}
 	_, err = h.db.ExecContext(r.Context(),
-		`INSERT INTO crews (id, workspace_id, name, slug, description, color, icon, container_memory_mb, container_cpus, container_ttl_hours, network_mode, allowed_domains, runtime_image, devcontainer_config, mise_config, services_json, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		crewID, workspaceID, req.Name, req.Slug, req.Description, req.Color, req.Icon, memoryMB, cpus, ttlHours, networkMode, allowedDomainsDB, req.RuntimeImage, req.DevcontainerConfig, req.MiseConfig, req.ServicesJSON, now, now)
+		`INSERT INTO crews (id, workspace_id, name, slug, description, color, icon, container_memory_mb, container_cpus, container_ttl_hours, network_mode, allowed_domains, allow_private_endpoints, runtime_image, devcontainer_config, mise_config, services_json, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		crewID, workspaceID, req.Name, req.Slug, req.Description, req.Color, req.Icon, memoryMB, cpus, ttlHours, networkMode, allowedDomainsDB, allowPrivateEndpoints, req.RuntimeImage, req.DevcontainerConfig, req.MiseConfig, req.ServicesJSON, now, now)
 	if err != nil {
 		h.logger.Error("insert crew", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
@@ -259,24 +273,25 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, crewResponse{
-		ID:                 crewID,
-		WorkspaceID:        workspaceID,
-		Name:               req.Name,
-		Slug:               req.Slug,
-		Description:        req.Description,
-		Color:              req.Color,
-		Icon:               req.Icon,
-		ContainerMemoryMB:  memoryMB,
-		ContainerCPUs:      cpus,
-		ContainerTTLHours:  ttlHours,
-		NetworkMode:        networkMode,
-		AllowedDomains:     allowedDomainsOut,
-		RuntimeImage:       req.RuntimeImage,
-		DevcontainerConfig: req.DevcontainerConfig,
-		MiseConfig:         req.MiseConfig,
-		ServicesJSON:       req.ServicesJSON,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:                    crewID,
+		WorkspaceID:           workspaceID,
+		Name:                  req.Name,
+		Slug:                  req.Slug,
+		Description:           req.Description,
+		Color:                 req.Color,
+		Icon:                  req.Icon,
+		ContainerMemoryMB:     memoryMB,
+		ContainerCPUs:         cpus,
+		ContainerTTLHours:     ttlHours,
+		NetworkMode:           networkMode,
+		AllowedDomains:        allowedDomainsOut,
+		AllowPrivateEndpoints: req.AllowPrivateEndpoints,
+		RuntimeImage:          req.RuntimeImage,
+		DevcontainerConfig:    req.DevcontainerConfig,
+		MiseConfig:            req.MiseConfig,
+		ServicesJSON:          req.ServicesJSON,
+		CreatedAt:             now,
+		UpdatedAt:             now,
 	})
 
 	h.broadcastCrewEvent("crew.created", workspaceID, map[string]string{

@@ -276,3 +276,23 @@ var errLiveDown = errTest("live provider down")
 type errTest string
 
 func (e errTest) Error() string { return string(e) }
+
+// OLLAMA model discovery uses the daemon's server-global KEEPER_OLLAMA_URL.
+// (Resolving the workspace ENDPOINT_URL here — "#974 U2" — was reverted from
+// this PR: dialing a tenant-controlled URL from the host network is a
+// daemon-side SSRF that needs its own opt-in/guard; deferred to a follow-up.)
+func TestModelsList_OllamaUsesServerGlobal(t *testing.T) {
+	var gotURL string
+	build := func(provider, apiKey, ollamaURL string) (llm.ModelLister, bool) {
+		if provider == "OLLAMA" {
+			gotURL = ollamaURL
+			return &fakeLister{models: []llm.ModelInfo{{ID: "ollama/x"}}}, true
+		}
+		return nil, false
+	}
+	h, wsID, _ := newModelsHandler(t, build)
+	doModelsList(t, h, wsID, "?provider=OLLAMA")
+	if gotURL != "http://ollama.test:11434" {
+		t.Errorf("fallback lister built with %q, want the server-global URL", gotURL)
+	}
+}

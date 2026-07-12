@@ -135,6 +135,18 @@ crewship credential create --name ollama-prod --provider OLLAMA --type ENDPOINT_
 
 The token and headers are **encrypted and never displayed** — `crewship credential list/get` shows only the base URL. They travel to OpenCode inside the generated `OPENCODE_CONFIG_CONTENT` (`options.apiKey` / `options.headers`), never as an agent environment variable. Existing bare-URL credentials keep working unchanged (no auth).
 
+#### Private endpoints & the SSRF fence
+
+A workspace-configured endpoint URL is a destination the sandbox will dial, so it's guarded against pointing an agent at internal infrastructure (an SSRF vector, acute in multi-tenant/cloud). By default the fence **blocks** any endpoint whose host resolves into a private range — RFC1918 (`10/8`, `172.16/12`, `192.168/16`), loopback (`127/8`, `::1`), IPv6 ULA (`fc00::/7`) — checked at credential-create time (literal IPs) **and** at dial time (the sidecar re-resolves the host and connects to the exact validated IP, defeating DNS-rebinding).
+
+A legitimate on-prem / LAN Ollama (or `host.docker.internal`, whose Docker gateway is a private IP) lives in those ranges, so enable it **per crew**:
+
+```bash
+crewship crew update <crew> --allow-private-endpoints
+```
+
+This narrowly permits RFC1918/loopback for that crew's agents. **Cloud-metadata and link-local addresses (`169.254.169.254`, `fe80::/10`, and their IPv4-mapped forms) stay hard-blocked even with the opt-in** — there is no legitimate model endpoint there. A crew in `free` network mode is unaffected (it already opted out of egress limits).
+
 **Which models actually work:** we ship a curated shortlist — Qwen3 Coder 30B (A3B; runs on a single 24 GB GPU at 4-bit) and Devstral Small 24B (built for agent workflows). This is deliberate: below roughly this tier, community reports and upstream issues (`anomalyco/opencode#1034`, `#4428`) show local models "think about" tool calls but emit them as text instead of executing — the agent looks alive but nothing happens. Generic chat models under ~14B will frustrate you; frontier cloud models remain meaningfully stronger for hard tasks. Expect local models to handle routine, well-scoped work.
 
 ## Adapters that are deliberately NOT supported

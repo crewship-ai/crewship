@@ -487,8 +487,10 @@ func init() {
 	credAuditCmd.Flags().Int("limit", 50, "Max audit events to return (1-500)")
 	credDefaultEnvVarCmd.Flags().String("provider", "", "Provider: GITHUB|GITLAB|VERCEL|AWS|KUBERNETES (required)")
 
-	credRotateCmd.Flags().String("value", "", "New credential value (visible in process list, prefer --value-stdin)")
+	credRotateCmd.Flags().String("value", "", "New credential value — the URL for ENDPOINT_URL (visible in process list, prefer --value-stdin)")
 	credRotateCmd.Flags().Bool("value-stdin", false, "Read new value from stdin (secure)")
+	credRotateCmd.Flags().String("auth-token", "", "ENDPOINT_URL only: new bearer token for the endpoint; without this a rotate would drop the stored token")
+	credRotateCmd.Flags().StringArray("header", nil, "ENDPOINT_URL only: extra request header KEY=VALUE (repeatable)")
 	credRotateCmd.Flags().Int("grace-seconds", 0, "Grace overlap in seconds (default 24h server-side, max 7d)")
 	credRotateCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 

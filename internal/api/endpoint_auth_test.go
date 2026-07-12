@@ -80,9 +80,11 @@ func TestValidateEndpointURL_AcceptsJSONAndBare(t *testing.T) {
 		value  string
 		wantOK bool
 	}{
-		"bare http":         {"http://host:11434/v1", true},
-		"bare https":        {"https://host/v1", true},
-		"json with baseURL": {`{"baseURL":"http://host:11434","apiKey":"sk-x"}`, true},
+		"bare http":  {"http://host:11434/v1", true},
+		"bare https": {"https://host/v1", true},
+		// A token over http is only allowed for a loopback/private literal
+		// (#974 S3) — use https here for a public-looking host.
+		"json with baseURL": {`{"baseURL":"https://host:11434","apiKey":"sk-x"}`, true},
 		"bare non-url":      {"not a url", false},
 		"bare ftp scheme":   {"ftp://host/x", false},
 		"json missing base": {`{"apiKey":"sk-x"}`, false},
@@ -98,6 +100,44 @@ func TestValidateEndpointURL_AcceptsJSONAndBare(t *testing.T) {
 			}
 			if !tc.wantOK && msg == "" {
 				t.Errorf("expected invalid, got empty message")
+			}
+		})
+	}
+}
+
+// #974 S7: userinfo smuggling and oversized values must be rejected.
+func TestValidateEndpointURL_RejectsUserinfoAndOverlong(t *testing.T) {
+	if msg := validateEndpointURL("http://user:pass@host:11434/v1"); msg == "" {
+		t.Error("userinfo in the URL must be rejected (S7)")
+	}
+	long := "http://host/" + strings.Repeat("a", maxEndpointValueLen)
+	if msg := validateEndpointURL(long); msg == "" {
+		t.Error("an over-long endpoint value must be rejected (S7)")
+	}
+}
+
+// #974 S3: a token/headers over plaintext http is only allowed for a
+// loopback/private literal; a public http host with auth must be rejected.
+func TestValidateEndpointURL_HTTPSRequiredWithAuth(t *testing.T) {
+	cases := map[string]struct {
+		value  string
+		wantOK bool
+	}{
+		"token over https public":        {`{"baseURL":"https://api.example.com","apiKey":"sk-x"}`, true},
+		"token over http public":         {`{"baseURL":"http://api.example.com","apiKey":"sk-x"}`, false},
+		"header over http public":        {`{"baseURL":"http://api.example.com","headers":{"X-Key":"v"}}`, false},
+		"token over http loopback":       {`{"baseURL":"http://127.0.0.1:11434","apiKey":"sk-x"}`, true},
+		"token over http private LAN":    {`{"baseURL":"http://192.168.1.222:11434","apiKey":"sk-x"}`, true},
+		"no auth over http public is ok": {"http://api.example.com/v1", true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			msg := validateEndpointURL(tc.value)
+			if tc.wantOK && msg != "" {
+				t.Errorf("expected valid, got %q", msg)
+			}
+			if !tc.wantOK && msg == "" {
+				t.Error("expected rejection, got empty message")
 			}
 		})
 	}

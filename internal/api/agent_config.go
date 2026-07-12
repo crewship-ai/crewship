@@ -39,22 +39,23 @@ type agentConfigData struct {
 	// the workspace has no preference set.
 	preferredLanguage string
 
-	crewID                 sql.NullString
-	crewSlug               sql.NullString
-	crewName               sql.NullString
-	crewNetworkMode        sql.NullString
-	crewAllowedDomains     sql.NullString
-	crewMemoryMB           sql.NullInt64
-	crewCPUs               sql.NullFloat64
-	crewTTLHours           sql.NullInt64
-	crewRuntimeImage       sql.NullString
-	crewCachedImage        sql.NullString
-	crewCachedRequirements sql.NullString
-	crewDevcontainerConfig sql.NullString
-	crewMiseConfig         sql.NullString
-	crewServicesJSON       sql.NullString
-	crewMCPConfigJSON      sql.NullString
-	agentMCPConfigJSON     sql.NullString
+	crewID                    sql.NullString
+	crewSlug                  sql.NullString
+	crewName                  sql.NullString
+	crewNetworkMode           sql.NullString
+	crewAllowedDomains        sql.NullString
+	crewAllowPrivateEndpoints int
+	crewMemoryMB              sql.NullInt64
+	crewCPUs                  sql.NullFloat64
+	crewTTLHours              sql.NullInt64
+	crewRuntimeImage          sql.NullString
+	crewCachedImage           sql.NullString
+	crewCachedRequirements    sql.NullString
+	crewDevcontainerConfig    sql.NullString
+	crewMiseConfig            sql.NullString
+	crewServicesJSON          sql.NullString
+	crewMCPConfigJSON         sql.NullString
+	agentMCPConfigJSON        sql.NullString
 }
 
 // memberIntegrationEntry describes an MCP integration available to a crew member.
@@ -289,40 +290,41 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 	}
 
 	resp := map[string]interface{}{
-		"agent_id":              agentID,
-		"agent_slug":            data.agentSlug,
-		"agent_role":            roleStr,
-		"agent_status":          data.agentStatus,
-		"crew_id":               crewIDStr,
-		"crew_slug":             crewSlugStr,
-		"container_id":          "",
-		"cli_adapter":           data.cliAdapter,
-		"llm_model":             llmModelStr,
-		"system_prompt":         sysPrompt,
-		"tool_profile":          data.toolProfile,
-		"credentials":           creds,
-		"timeout_seconds":       data.timeoutSecs,
-		"workspace_id":          data.wsID,
-		"preferred_language":    data.preferredLanguage,
-		"memory_enabled":        data.memoryEnabled,
-		"crew_members":          crewMembers,
-		"network_mode":          networkMode,
-		"allowed_domains":       allowedDomains,
-		"memory_mb":             memoryMB,
-		"cpus":                  cpus,
-		"ttl_hours":             ttlHours,
-		"mcp_servers":           mcpServers,
-		"runtime_image":         data.crewRuntimeImage.String,
-		"cached_image":          data.crewCachedImage.String,
-		"cached_requirements":   data.crewCachedRequirements.String,
-		"devcontainer_config":   data.crewDevcontainerConfig.String,
-		"mise_config":           data.crewMiseConfig.String,
-		"services_json":         data.crewServicesJSON.String,
-		"crew_mcp_config_json":  data.crewMCPConfigJSON.String,
-		"agent_mcp_config_json": data.agentMCPConfigJSON.String,
-		"installed_skills":      installedSkills,
-		"crew_resources":        crewResources,
-		"approval_mode":         approvalMode,
+		"agent_id":                agentID,
+		"agent_slug":              data.agentSlug,
+		"agent_role":              roleStr,
+		"agent_status":            data.agentStatus,
+		"crew_id":                 crewIDStr,
+		"crew_slug":               crewSlugStr,
+		"container_id":            "",
+		"cli_adapter":             data.cliAdapter,
+		"llm_model":               llmModelStr,
+		"system_prompt":           sysPrompt,
+		"tool_profile":            data.toolProfile,
+		"credentials":             creds,
+		"timeout_seconds":         data.timeoutSecs,
+		"workspace_id":            data.wsID,
+		"preferred_language":      data.preferredLanguage,
+		"memory_enabled":          data.memoryEnabled,
+		"crew_members":            crewMembers,
+		"network_mode":            networkMode,
+		"allowed_domains":         allowedDomains,
+		"allow_private_endpoints": data.crewAllowPrivateEndpoints != 0,
+		"memory_mb":               memoryMB,
+		"cpus":                    cpus,
+		"ttl_hours":               ttlHours,
+		"mcp_servers":             mcpServers,
+		"runtime_image":           data.crewRuntimeImage.String,
+		"cached_image":            data.crewCachedImage.String,
+		"cached_requirements":     data.crewCachedRequirements.String,
+		"devcontainer_config":     data.crewDevcontainerConfig.String,
+		"mise_config":             data.crewMiseConfig.String,
+		"services_json":           data.crewServicesJSON.String,
+		"crew_mcp_config_json":    data.crewMCPConfigJSON.String,
+		"agent_mcp_config_json":   data.agentMCPConfigJSON.String,
+		"installed_skills":        installedSkills,
+		"crew_resources":          crewResources,
+		"approval_mode":           approvalMode,
 	}
 	// #955/#961: the local-model endpoint resolved from the vault (per-agent
 	// ENDPOINT_URL cred → workspace default), replacing the server-global
@@ -375,7 +377,7 @@ func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agent
 		SELECT a.slug, a.name, a.status, a.role_title, a.agent_role, a.cli_adapter, a.system_prompt_legacy,
 			a.tool_profile, a.timeout_seconds, a.memory_enabled,
 			c2.id, c2.slug, c2.name, a.workspace_id, a.llm_model,
-			c2.network_mode, c2.allowed_domains,
+			c2.network_mode, c2.allowed_domains, COALESCE(c2.allow_private_endpoints, 0),
 			c2.container_memory_mb, c2.container_cpus, c2.container_ttl_hours,
 			c2.runtime_image, c2.cached_image, c2.cached_requirements,
 			c2.devcontainer_config, c2.mise_config, c2.services_json,
@@ -391,7 +393,7 @@ func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agent
 	err := h.db.QueryRowContext(r.Context(), query, args...).Scan(&d.agentSlug, &d.agentName, &d.agentStatus, &d.roleTitle, &d.agentRole, &d.cliAdapter, &d.systemPrompt,
 		&d.toolProfile, &d.timeoutSecs, &d.memoryEnabled,
 		&d.crewID, &d.crewSlug, &d.crewName, &d.wsID, &d.llmModel,
-		&d.crewNetworkMode, &d.crewAllowedDomains,
+		&d.crewNetworkMode, &d.crewAllowedDomains, &d.crewAllowPrivateEndpoints,
 		&d.crewMemoryMB, &d.crewCPUs, &d.crewTTLHours,
 		&d.crewRuntimeImage, &d.crewCachedImage, &d.crewCachedRequirements,
 		&d.crewDevcontainerConfig, &d.crewMiseConfig, &d.crewServicesJSON,
