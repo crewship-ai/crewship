@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/localmodel"
 )
 
 // #961 Feature A — an ENDPOINT_URL credential may store either a bare URL
@@ -61,11 +62,11 @@ func TestParseEndpointValue(t *testing.T) {
 
 func TestBuildEndpointValue_RoundTrip(t *testing.T) {
 	// No auth → stays a bare URL (human-readable in a raw row).
-	if v, err := buildEndpointValue("http://h:11434/v1", "", nil); err != nil || v != "http://h:11434/v1" {
+	if v, err := localmodel.Build("http://h:11434/v1", "", nil); err != nil || v != "http://h:11434/v1" {
 		t.Fatalf("bare round-trip: v=%q err=%v", v, err)
 	}
 	// With auth → JSON that parses back to the same parts.
-	v, err := buildEndpointValue("https://h/v1", "sk-1", map[string]string{"A": "b"})
+	v, err := localmodel.Build("https://h/v1", "sk-1", map[string]string{"A": "b"})
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -98,6 +99,35 @@ func TestValidateEndpointURL_AcceptsJSONAndBare(t *testing.T) {
 			}
 			if !tc.wantOK && msg == "" {
 				t.Errorf("expected invalid, got empty message")
+			}
+		})
+	}
+}
+
+// Header/CRLF-injection guard: a custom header whose name or value carries
+// CR/LF (or a name that isn't an RFC 7230 token) must be rejected at create
+// time — the map flows verbatim into OPENCODE_CONFIG_CONTENT and onto the wire.
+func TestValidateEndpointURL_RejectsHeaderInjection(t *testing.T) {
+	cases := map[string]struct {
+		value  string
+		wantOK bool
+	}{
+		"clean header accepted":      {`{"baseURL":"https://h/v1","headers":{"X-Tenant":"acme"}}`, true},
+		"CRLF in value rejected":     {`{"baseURL":"https://h/v1","headers":{"X-Tenant":"acme\r\nX-Injected: evil"}}`, false},
+		"CRLF in name rejected":      {`{"baseURL":"https://h/v1","headers":{"X-Bad\r\nInjected":"v"}}`, false},
+		"LF in value rejected":       {`{"baseURL":"https://h/v1","headers":{"X-Tenant":"a\nb"}}`, false},
+		"space in name rejected":     {`{"baseURL":"https://h/v1","headers":{"Bad Name":"v"}}`, false},
+		"colon in name rejected":     {`{"baseURL":"https://h/v1","headers":{"X:Bad":"v"}}`, false},
+		"empty header name rejected": {`{"baseURL":"https://h/v1","headers":{"":"v"}}`, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			msg := validateEndpointURL(tc.value)
+			if tc.wantOK && msg != "" {
+				t.Errorf("expected accepted, got %q", msg)
+			}
+			if !tc.wantOK && msg == "" {
+				t.Errorf("expected rejected, got empty message")
 			}
 		})
 	}

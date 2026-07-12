@@ -2,45 +2,34 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/localmodel"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
-// buildEndpointCredentialValue folds an ENDPOINT_URL base URL plus an optional
-// bearer token and repeatable `K=V` headers into the one-object JSON the server
-// stores (#961). The token/headers never appear in the plaintext value shown by
-// `credential list`. Returns the compact JSON string.
+// buildEndpointCredentialValue parses the CLI's repeatable `K=V` headers into a
+// map, then delegates JSON construction to localmodel.Build — the single source
+// of truth for the stored ENDPOINT_URL shape shared with the server (#961). The
+// token/headers never appear in the plaintext value shown by `credential list`.
 func buildEndpointCredentialValue(baseURL, authToken string, headerPairs []string) (string, error) {
-	headers := map[string]string{}
+	var headers map[string]string
 	for _, hp := range headerPairs {
 		k, v, ok := strings.Cut(hp, "=")
 		k = strings.TrimSpace(k)
 		if !ok || k == "" {
 			return "", fmt.Errorf("--header must be KEY=VALUE, got %q", hp)
 		}
+		if headers == nil {
+			headers = map[string]string{}
+		}
 		headers[k] = strings.TrimSpace(v)
 	}
-	if authToken == "" && len(headers) == 0 {
-		return strings.TrimSpace(baseURL), nil
-	}
-	obj := map[string]interface{}{"baseURL": strings.TrimSpace(baseURL)}
-	if authToken != "" {
-		obj["apiKey"] = authToken
-	}
-	if len(headers) > 0 {
-		obj["headers"] = headers
-	}
-	raw, err := json.Marshal(obj)
-	if err != nil {
-		return "", err
-	}
-	return string(raw), nil
+	return localmodel.Build(baseURL, authToken, headers)
 }
 
 var credCreateCmd = &cobra.Command{

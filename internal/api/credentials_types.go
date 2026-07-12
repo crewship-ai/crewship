@@ -19,10 +19,13 @@ package api
 // so users can actually pick it.
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
+
+	"golang.org/x/net/http/httpguts"
+
+	"github.com/crewship-ai/crewship/internal/localmodel"
 )
 
 // CredentialType is a string alias used to document intent at call
@@ -169,56 +172,13 @@ func validateCredentialPayload(req *createCredentialRequest) string {
 	return ""
 }
 
-// endpointValue is the structured on-disk shape of an ENDPOINT_URL
-// credential (#961 Feature A). A credential may store EITHER a bare URL
-// string (the #957 shape, still supported) OR this JSON object carrying an
-// optional auth token / custom headers for an authenticated Ollama-behind-
-// proxy or LiteLLM endpoint. Endpoint + key + headers = one credential
-// object, matching how OpenRouter/LiteLLM/Dify/OpenCode model a BYO endpoint.
-type endpointValue struct {
-	BaseURL string            `json:"baseURL"`
-	APIKey  string            `json:"apiKey,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
-}
-
 // parseEndpointValue decodes a stored ENDPOINT_URL credential value into its
-// base URL and optional auth material. A value that begins with "{" is parsed
-// as the JSON object above (and must carry a non-empty baseURL); anything else
-// is treated as a bare base URL (the #957 back-compat shape) with no auth.
-// Callers that only need the display URL can ignore apiKey/headers — the read
-// path uses this to echo baseURL while never surfacing the secret.
+// base URL and optional auth material. Thin wrapper over the shared leaf
+// package (localmodel.Parse) so the on-disk shape has one source of truth
+// across the server and the CLI. The read path uses this to echo baseURL while
+// never surfacing the secret.
 func parseEndpointValue(value string) (baseURL, apiKey string, headers map[string]string, err error) {
-	v := strings.TrimSpace(value)
-	if v == "" {
-		return "", "", nil, fmt.Errorf("endpoint value is empty")
-	}
-	if strings.HasPrefix(v, "{") {
-		var ev endpointValue
-		if e := json.Unmarshal([]byte(v), &ev); e != nil {
-			return "", "", nil, fmt.Errorf("endpoint value is not valid JSON: %w", e)
-		}
-		if strings.TrimSpace(ev.BaseURL) == "" {
-			return "", "", nil, fmt.Errorf("endpoint JSON must include a non-empty baseURL")
-		}
-		return strings.TrimSpace(ev.BaseURL), ev.APIKey, ev.Headers, nil
-	}
-	return v, "", nil, nil
-}
-
-// buildEndpointValue serialises a base URL plus optional auth token/headers
-// into the stored credential value. With no auth it returns the bare URL (so
-// simple endpoints keep the #957 plaintext-URL shape and stay human-readable
-// in a raw DB row); with auth it returns the compact JSON object.
-func buildEndpointValue(baseURL, apiKey string, headers map[string]string) (string, error) {
-	baseURL = strings.TrimSpace(baseURL)
-	if apiKey == "" && len(headers) == 0 {
-		return baseURL, nil
-	}
-	raw, err := json.Marshal(endpointValue{BaseURL: baseURL, APIKey: apiKey, Headers: headers})
-	if err != nil {
-		return "", err
-	}
-	return string(raw), nil
+	return localmodel.Parse(value)
 }
 
 // validateEndpointURL enforces that an ENDPOINT_URL credential value carries an
@@ -228,7 +188,7 @@ func buildEndpointValue(baseURL, apiKey string, headers map[string]string) (stri
 // resolver can reuse the exact same gate before handing a stored URL to
 // OpenCode's config.
 func validateEndpointURL(value string) string {
-	baseURL, _, _, err := parseEndpointValue(value)
+	baseURL, _, headers, err := parseEndpointValue(value)
 	if err != nil {
 		if strings.TrimSpace(value) == "" {
 			return "endpoint URL is required for ENDPOINT_URL credentials"
@@ -244,6 +204,26 @@ func validateEndpointURL(value string) string {
 	}
 	if u.Host == "" {
 		return "endpoint URL must include a host (e.g. http://host:11434/v1)"
+	}
+	if msg := validateEndpointHeaders(headers); msg != "" {
+		return msg
+	}
+	return ""
+}
+
+// validateEndpointHeaders guards the optional custom headers on an ENDPOINT_URL
+// credential against header/CRLF injection: the map flows verbatim into
+// OPENCODE_CONFIG_CONTENT and then onto the wire, so a name or value carrying
+// CR/LF (or a name that isn't an RFC 7230 token) could smuggle extra request
+// headers or split the request. Rejects before the credential is stored.
+func validateEndpointHeaders(headers map[string]string) string {
+	for name, val := range headers {
+		if name == "" || !httpguts.ValidHeaderFieldName(name) {
+			return fmt.Sprintf("endpoint header name %q is not a valid HTTP header name (letters, digits and !#$%%&'*+-.^_`|~ only, no spaces or control characters)", name)
+		}
+		if !httpguts.ValidHeaderFieldValue(val) {
+			return fmt.Sprintf("endpoint header %q has an invalid value (control characters such as CR/LF are not allowed)", name)
+		}
 	}
 	return ""
 }
