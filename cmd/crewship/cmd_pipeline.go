@@ -163,7 +163,7 @@ var pipelineListCmd = &cobra.Command{
 		}
 		if len(rows) == 0 {
 			fmt.Println("No routines registered yet.")
-			fmt.Println("Save one via: crewship routine save --name … --definition file.json --author-crew <crew_id>")
+			fmt.Println("Save one via: crewship routine save --name … --definition file.json --author-crew <crew-slug-or-id>")
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
