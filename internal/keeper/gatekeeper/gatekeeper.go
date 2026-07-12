@@ -457,7 +457,7 @@ func (g *Gatekeeper) buildSkillReviewPrompt(req EvalRequest) string {
 	if len(in.FailureSnippets) > 0 {
 		sb.WriteString("Recent failures (top 5):\n")
 		for i, s := range in.FailureSnippets {
-			fmt.Fprintf(&sb, "  %d. %s\n", i+1, truncateSnippet(s, 240))
+			fmt.Fprintf(&sb, "  %d. %q\n", i+1, truncateSnippet(s, 240))
 		}
 	}
 	sb.WriteString("========================================\n\n")

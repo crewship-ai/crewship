@@ -87,6 +87,19 @@ func TestSecGatekeeper_SkillReviewPromptEscapesDescription(t *testing.T) {
 	assertSnippetEscaped(t, g.buildSkillReviewPrompt(req))
 }
 
+func TestSecGatekeeper_SkillReviewPromptEscapesFailureSnippet(t *testing.T) {
+	g := secTestGatekeeper()
+	req := EvalRequest{
+		AgentName: "viktor",
+		CrewName:  "alpha",
+		SkillReview: &SkillReviewInput{
+			SkillName:       "deploy",
+			FailureSnippets: []string{injectionPayload}, // from EntryRunFailed journal (agent-produced)
+		},
+	}
+	assertSnippetEscaped(t, g.buildSkillReviewPrompt(req))
+}
+
 func TestSecGatekeeper_NegativeLearningPromptEscapesTrigger(t *testing.T) {
 	g := secTestGatekeeper()
 	req := EvalRequest{
