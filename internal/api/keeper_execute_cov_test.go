@@ -488,6 +488,53 @@ func TestCovKEStatus_Success(t *testing.T) {
 	}
 }
 
+// TestCovKEStatus_SecretCount covers the secret_count field: workspace-scoped
+// COUNT of type='SECRET' credentials that are ACTIVE and not soft-deleted.
+// The CLI (`crewship system keeper`) has always printed this field; it was
+// documented output but the server never returned it (docs/cli/system.mdx:49).
+func TestCovKEStatus_SecretCount(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, _, _, _ := seedKeeperFixture(t, db) // seeds one ACTIVE SECRET cred in wsID
+
+	// None of these may count: a soft-deleted SECRET, a non-SECRET type, and
+	// an ACTIVE SECRET in a different workspace. The fixture already seeded
+	// the canonical test user/workspace, so create only a second workspace.
+	userID := "test-user-id" // seeded by seedKeeperFixture → seedTestUser
+	otherWS := "cov-sc-other-ws"
+	execOrFatal(t, db, `INSERT INTO workspaces (id, name, slug) VALUES (?, 'Other', 'cov-sc-other')`, otherWS)
+	execOrFatal(t, db,
+		`INSERT INTO credentials (id, workspace_id, name, type, encrypted_value, created_by, deleted_at)
+		 VALUES ('cov-sc-deleted', ?, 'gone-secret', 'SECRET', 'v1:aW52YWxpZA==', ?, datetime('now'))`,
+		wsID, userID)
+	execOrFatal(t, db,
+		`INSERT INTO credentials (id, workspace_id, name, type, encrypted_value, created_by)
+		 VALUES ('cov-sc-apikey', ?, 'plain-key', 'API_KEY', 'v1:aW52YWxpZA==', ?)`,
+		wsID, userID)
+	execOrFatal(t, db,
+		`INSERT INTO credentials (id, workspace_id, name, type, encrypted_value, created_by)
+		 VALUES ('cov-sc-otherws', ?, 'foreign-secret', 'SECRET', 'v1:aW52YWxpZA==', ?)`,
+		otherWS, userID)
+
+	h := NewKeeperStatusHandler(db, nil, nil, newTestLogger())
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/system/keeper", nil)
+	req = withWorkspaceUser(req, "u1", wsID, "OWNER")
+	w := httptest.NewRecorder()
+	h.Status(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		SecretCount int `json:"secret_count"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.SecretCount != 1 {
+		t.Errorf("expected secret_count=1 (fixture's ACTIVE SECRET only), got %d", resp.SecretCount)
+	}
+}
+
 // --- KeeperLogHandler.List branches -----------------------------------------
 
 // TestCovKELog_Unauthenticated covers the nil-user → 401 branch.

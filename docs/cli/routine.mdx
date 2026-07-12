@@ -52,7 +52,7 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Authoring | `tag <slug> ...` | Add or remove discovery tags on a routine definition |
 | Authoring | `step-override <slug> ...` | Override a step's prompt/model without bumping the routine version |
 | Bundles | `export <slug>` | Export bundle JSON to stdout |
-| Bundles | `import [bundle.json]` | Import bundle from file or stdin |
+| Bundles | `import [bundle.json] --crew <slug>` | Import bundle from file or stdin into an author crew |
 | Triggers | `schedules ...` | Cron schedule CRUD |
 | Triggers | `webhooks ...` | Webhook CRUD |
 | HITL | `waitpoints ...` | Approval inbox + decisions |
@@ -585,16 +585,23 @@ crewship routine export summarize-text --include-history > bundle-with-versions.
 | Flag | Description |
 |------|-------------|
 | `--include-history` | Include all version chain entries (default: HEAD only) |
+| `--no-scripts` | Export the recipe alone; do not inline `type: script` files |
 
-Output: `crewship-pipeline-bundle/v1` JSON to stdout. Suitable for pipe to `routine import` or commit to git.
+Output: `crewship-pipeline-bundle/v1` JSON to stdout. By default any `type: script` files the routine references are inlined into the bundle so it is portable. Suitable for pipe to `routine import` or commit to git.
 
 ## `crewship routine import [bundle.json]`
 
 ```bash
-crewship routine import bundle.json
-cat bundle.json | crewship routine import
-crewship routine export src-routine | crewship routine import   # cross-workspace copy
+crewship routine import bundle.json --crew acct
+cat bundle.json | crewship routine import --crew acct
+crewship routine export src-routine | crewship routine import --crew acct   # cross-workspace copy
 ```
+
+| Flag | Required | Description |
+|------|:---:|-------------|
+| `--crew` | ✓ | Author crew slug/id that will own the imported routine (resolves its agent slugs; inlined scripts materialize into this crew's shared dir) |
+| `--force` | | Overwrite an existing crew script whose content differs (a crew script is shared across routines, so a differing dest fails loudly by default) |
+| `--no-scripts` | | Import the recipe without materializing inlined scripts |
 
 Pre-validates JSON locally before sending — typos at the keyboard get a local error rather than a 400 from the server.
 
