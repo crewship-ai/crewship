@@ -269,12 +269,19 @@ type agentResponse struct {
 	// WebhookRequireTimestamp opts this agent into mandatory timestamped
 	// webhook signatures (#815); replayable body-only/plaintext deliveries are
 	// then rejected 400.
-	WebhookRequireTimestamp bool           `json:"webhook_require_timestamp"`
-	MCPConfigJSON           *string        `json:"mcp_config_json,omitempty"`
-	CreatedAt               string         `json:"created_at"`
-	UpdatedAt               string         `json:"updated_at"`
-	Crew                    *agentCrewInfo `json:"crew"`
-	Count                   agentCounts    `json:"_count"`
+	WebhookRequireTimestamp bool `json:"webhook_require_timestamp"`
+	// WebhookSecretSet reports whether a webhook signing secret is
+	// configured. The secret value itself is show-once (#999) — never
+	// readable back; POST .../webhook-secret/rotate mints and returns a
+	// new one exactly once. Pointer + omitempty: only the Get handler
+	// computes it, so list responses omit the field rather than reporting
+	// a false "not configured".
+	WebhookSecretSet *bool          `json:"webhook_secret_set,omitempty"`
+	MCPConfigJSON    *string        `json:"mcp_config_json,omitempty"`
+	CreatedAt        string         `json:"created_at"`
+	UpdatedAt        string         `json:"updated_at"`
+	Crew             *agentCrewInfo `json:"crew"`
+	Count            agentCounts    `json:"_count"`
 	// Patch M3 — surfaces the agent's creator to the UI. The
 	// per-agent edit gate (canEditAgent) lets the user identified
 	// here edit/delete the agent without workspace ADMIN role; the

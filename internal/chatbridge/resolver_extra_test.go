@@ -3,7 +3,6 @@ package chatbridge
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -316,63 +315,6 @@ func TestResolveAgentNotFound(t *testing.T) {
 	t.Cleanup(ts.Close)
 	r := NewIPCResolver(ts.URL, "tok", slog.Default())
 	if _, err := r.ResolveAgent(context.Background(), "missing", ""); err == nil {
-		t.Fatal("expected error")
-	}
-}
-
-// ---------- GetWebhookSecret ----------
-
-func TestGetWebhookSecretSuccess(t *testing.T) {
-	t.Parallel()
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"webhook_secret":"sek"}`))
-	}))
-	t.Cleanup(ts.Close)
-	r := NewIPCResolver(ts.URL, "tok", slog.Default())
-	got, err := r.GetWebhookSecret(context.Background(), "", "agent-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "sek" {
-		t.Errorf("secret: %q", got)
-	}
-}
-
-func TestGetWebhookSecretMissingMapsToErr(t *testing.T) {
-	t.Parallel()
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"webhook_secret":""}`))
-	}))
-	t.Cleanup(ts.Close)
-	r := NewIPCResolver(ts.URL, "tok", slog.Default())
-	_, err := r.GetWebhookSecret(context.Background(), "", "a1")
-	if !errors.Is(err, ErrNoWebhookSecret) {
-		t.Errorf("err = %v, want ErrNoWebhookSecret", err)
-	}
-}
-
-func TestGetWebhookSecretBadStatus(t *testing.T) {
-	t.Parallel()
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-	}))
-	t.Cleanup(ts.Close)
-	r := NewIPCResolver(ts.URL, "tok", slog.Default())
-	if _, err := r.GetWebhookSecret(context.Background(), "", "a1"); err == nil {
-		t.Fatal("expected error")
-	}
-}
-
-func TestGetWebhookSecretBadJSON(t *testing.T) {
-	t.Parallel()
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`not-json`))
-	}))
-	t.Cleanup(ts.Close)
-	r := NewIPCResolver(ts.URL, "tok", slog.Default())
-	if _, err := r.GetWebhookSecret(context.Background(), "", "a1"); err == nil {
 		t.Fatal("expected error")
 	}
 }

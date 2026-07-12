@@ -67,10 +67,6 @@ func (c *capResolver) ResolveAgent(context.Context, string, string) (*ChatInfo, 
 	return c.info, nil
 }
 
-func (c *capResolver) GetWebhookSecret(context.Context, string, string) (string, error) {
-	return "", nil
-}
-
 func (c *capResolver) CreateRun(_ context.Context, runID, _, _, _, _ string, _ map[string]interface{}) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

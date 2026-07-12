@@ -208,6 +208,7 @@ func init() {
 	agentCmd.AddCommand(agentGetCmd)
 	agentCmd.AddCommand(agentCreateCmd)
 	agentCmd.AddCommand(agentUpdateCmd)
+	agentCmd.AddCommand(agentRotateWebhookSecretCmd)
 	agentCmd.AddCommand(agentDeleteCmd)
 	agentCmd.AddCommand(agentRunsCmd)
 	agentCmd.AddCommand(agentStopCmd)

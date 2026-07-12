@@ -274,6 +274,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Get))))
 	r.authedMut("PATCH", "/api/v1/agents/{agentId}", roleInline, agents.Update)
 	r.authedMut("DELETE", "/api/v1/agents/{agentId}", roleInline, agents.Delete)
+	// Webhook signing secret is show-once (#999): no read endpoint exists,
+	// rotate mints + returns the new value exactly once. Gate is inline
+	// (canEditAgent) — same as Update.
+	r.authedMut("POST", "/api/v1/agents/{agentId}/webhook-secret/rotate", roleInline, agents.RotateWebhookSecret)
 
 	// Agent skills
 	r.mux.Handle("GET /api/v1/agents/{agentId}/skills", authed(wsCtx(http.HandlerFunc(agents.ListSkills))))
