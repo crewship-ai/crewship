@@ -97,6 +97,12 @@ type chatResolveResponse struct {
 	// ApprovalMode is the harbormaster gate mode derived from the crew's
 	// autonomy_level policy (#810). "none"|"async"|"sync"; empty → none.
 	ApprovalMode string `json:"approval_mode,omitempty"`
+
+	// LocalModelBaseURL is the OpenAI-compatible local-model endpoint the
+	// server resolved from the vault (per-agent ENDPOINT_URL cred → workspace
+	// default, #955). Empty → the orchestrator applies the deprecated
+	// CREWSHIP_LOCAL_MODEL_BASE_URL env fallback.
+	LocalModelBaseURL string `json:"local_model_base_url,omitempty"`
 }
 
 // installedSkillEntry mirrors internal/api.installedSkillResponse.
@@ -561,6 +567,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		CrewMCPConfigJSON:  data.CrewMCPConfigJSON,
 		AgentMCPConfigJSON: data.AgentMCPConfigJSON,
 		InstalledSkills:    convertInstalledSkills(data.InstalledSkills),
+		LocalModelBaseURL:  data.LocalModelBaseURL,
 		OpenedByUserID:     data.OpenedByUserID,
 		RoleTitle:          data.RoleTitle,
 		Visibility:         data.Visibility,

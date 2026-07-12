@@ -106,6 +106,34 @@ func TestValidateCredentialPayload(t *testing.T) {
 			name: "OAUTH2 (legacy) still accepted with no extra fields",
 			req:  createCredentialRequest{Type: "OAUTH2", Value: "pending_oauth"},
 		},
+		{
+			name: "ENDPOINT_URL accepts http URL",
+			req:  createCredentialRequest{Type: "ENDPOINT_URL", Value: "http://host.docker.internal:11434/v1"},
+		},
+		{
+			name: "ENDPOINT_URL accepts https URL",
+			req:  createCredentialRequest{Type: "ENDPOINT_URL", Value: "https://ollama.example.com/v1"},
+		},
+		{
+			name:    "ENDPOINT_URL rejects bare text (no scheme)",
+			req:     createCredentialRequest{Type: "ENDPOINT_URL", Value: "not a url"},
+			wantErr: "must use http or https",
+		},
+		{
+			name:    "ENDPOINT_URL rejects non-http scheme",
+			req:     createCredentialRequest{Type: "ENDPOINT_URL", Value: "ftp://host:21/x"},
+			wantErr: "must use http or https",
+		},
+		{
+			name:    "ENDPOINT_URL rejects PEM pasted by mistake",
+			req:     createCredentialRequest{Type: "ENDPOINT_URL", Value: pkcs8PEM},
+			wantErr: "valid URL",
+		},
+		{
+			name:    "ENDPOINT_URL rejects scheme-only",
+			req:     createCredentialRequest{Type: "ENDPOINT_URL", Value: "http://"},
+			wantErr: "must include a host",
+		},
 	}
 
 	for _, tt := range tests {

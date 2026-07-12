@@ -323,6 +323,11 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		"installed_skills":      installedSkills,
 		"crew_resources":        crewResources,
 		"approval_mode":         approvalMode,
+		// #955: the local-model endpoint resolved from the vault
+		// (per-agent ENDPOINT_URL cred → workspace default), replacing the
+		// server-global CREWSHIP_LOCAL_MODEL_BASE_URL. "" when none is set,
+		// in which case the orchestrator applies the deprecated env fallback.
+		"local_model_base_url": resolveLocalModelEndpoint(r.Context(), h.db, h.logger, data.wsID, creds),
 	}
 	// PR-E F6 — opener identity + role title for the orchestrator's
 	// PERSONA / peer card injection. opener is "" for agent-only
