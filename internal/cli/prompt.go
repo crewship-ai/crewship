@@ -6,10 +6,22 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"golang.org/x/term"
 )
+
+// shellCommand returns the platform shell invocation for a --with-cmd
+// string. The Windows crewship-cli build (#945) has no `sh` on PATH, so the
+// historical unconditional `sh -c` failed there — cmd.exe's /c is the
+// equivalent.
+func shellCommand(c string) (string, []string) {
+	if runtime.GOOS == "windows" {
+		return "cmd", []string{"/c", c}
+	}
+	return "sh", []string{"-c", c}
+}
 
 // PromptOptions controls how BuildPrompt assembles a final prompt
 // from positional args, flags, stdin, and contextual sources (git, files, commands).
@@ -129,7 +141,8 @@ func BuildPrompt(ctx context.Context, opts PromptOptions) (string, error) {
 	}
 
 	for _, c := range o.WithCmds {
-		out, err := o.runCmd(ctx, "sh", "-c", c)
+		shell, shellArgs := shellCommand(c)
+		out, err := o.runCmd(ctx, shell, shellArgs...)
 		if err != nil {
 			return "", fmt.Errorf("run %q: %w", c, err)
 		}

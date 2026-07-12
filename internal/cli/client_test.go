@@ -217,6 +217,7 @@ func TestClientHTTPMethods(t *testing.T) {
 }
 
 func TestClientSlugResolution(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // isolate the slug disk cache
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/workspaces" {
 			json.NewEncoder(w).Encode([]map[string]string{
@@ -244,6 +245,7 @@ func TestClientSlugResolution(t *testing.T) {
 }
 
 func TestClientSlugResolutionCaching(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // isolate the slug disk cache
 	callCount := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/workspaces" {
