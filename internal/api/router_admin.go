@@ -37,6 +37,15 @@ func (r *Router) registerAdminRoutes() {
 	r.authedMut("PUT", "/api/v1/admin/log-level", roleManage, obs.SetLogLevel)
 	r.authedAdmin("GET", "/api/v1/admin/health", obs.Health)
 
+	// Master-key re-encryption (E1). Instance-wide walk of every stored
+	// AES-256-GCM envelope, re-encrypted to the current key version — the
+	// missing half of ENCRYPTION_KEY rotation (decrypt-old always worked;
+	// this moves rows forward so the old key can be retired). Mutation →
+	// roleManage, same gate as the other instance-scoped admin operations
+	// (backups, prune-legacy-resources).
+	reencryptH := NewReencryptHandler(r.db, r.logger)
+	r.authedMut("POST", "/api/v1/admin/reencrypt", roleManage, reencryptH.Reencrypt)
+
 	// Keeper admin log
 	keeperLog := NewKeeperLogHandler(r.db, r.logger)
 	r.authedAdmin("GET", "/api/v1/admin/keeper/requests", keeperLog.List)
