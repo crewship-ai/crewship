@@ -25,14 +25,27 @@ type routineSaveMock struct {
 	gotSaveToken     string
 	gotSlug          string
 	gotAuthorCrew    string
+	gotTestRunCrew   string
 	internalSaveHits int
 }
 
 func (m *routineSaveMock) handler() http.Handler {
 	mux := http.NewServeMux()
+	// Crew listing — resolveCrewID maps slugs to CUIDs through this route.
+	mux.HandleFunc("GET /api/v1/crews", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]string{
+			{"id": "ccrewengineering00001", "slug": "engineering"},
+		})
+	})
 	// Public draft-validation gate — dry-run validates + mints the save_token.
 	mux.HandleFunc("POST /api/v1/workspaces/ws_test_1/pipelines/test_run", func(w http.ResponseWriter, r *http.Request) {
 		m.testRunCalled = true
+		var body struct {
+			AuthorCrewID string `json:"author_crew_id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		m.gotTestRunCrew = body.AuthorCrewID
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -98,7 +111,7 @@ func TestRoutineSave_UsesUserFacingEndpoint(t *testing.T) {
 	}
 	set("name", "save-test-probe")
 	set("definition", defPath)
-	set("author-crew", "crew_test_1")
+	set("author-crew", "ccrewtest000000000001")
 	t.Cleanup(func() {
 		set("name", "")
 		set("definition", "")
@@ -124,7 +137,52 @@ func TestRoutineSave_UsesUserFacingEndpoint(t *testing.T) {
 	if m.gotSlug != "save-test-probe" {
 		t.Errorf("slug: got %q", m.gotSlug)
 	}
-	if m.gotAuthorCrew != "crew_test_1" {
+	if m.gotAuthorCrew != "ccrewtest000000000001" {
 		t.Errorf("author_crew_id: got %q", m.gotAuthorCrew)
+	}
+}
+
+// TestRoutineSave_ResolvesAuthorCrewSlug pins the #997 fix: --author-crew
+// accepts a crew slug, resolved to its CUID before the test_run/save calls —
+// the save endpoints bind author_crew_id by ID only, so a raw slug used to
+// 403 with a misleading "crew does not belong to this workspace".
+func TestRoutineSave_ResolvesAuthorCrewSlug(t *testing.T) {
+	saveCLIState(t)
+
+	m := &routineSaveMock{t: t}
+	srv := httptest.NewServer(m.handler())
+	defer srv.Close()
+
+	cliCfg = &cli.CLIConfig{Token: "user-token", Workspace: "ws_test_1", Server: srv.URL}
+
+	defPath := filepath.Join(t.TempDir(), "probe.json")
+	def := `{"dsl_version":"1.0","name":"save-slug-probe","agentless":true,"steps":[{"id":"t","type":"transform","transform":{"input":"true","expression":"."}}]}`
+	if err := os.WriteFile(defPath, []byte(def), 0o600); err != nil {
+		t.Fatalf("write definition: %v", err)
+	}
+
+	set := func(flag, val string) {
+		if err := pipelineSaveCmd.Flags().Set(flag, val); err != nil {
+			t.Fatalf("set --%s: %v", flag, err)
+		}
+	}
+	set("name", "save-slug-probe")
+	set("definition", defPath)
+	set("author-crew", "engineering")
+	t.Cleanup(func() {
+		set("name", "")
+		set("definition", "")
+		set("author-crew", "")
+	})
+
+	if err := pipelineSaveCmd.RunE(pipelineSaveCmd, nil); err != nil {
+		t.Fatalf("routine save failed: %v", err)
+	}
+
+	if m.gotTestRunCrew != "ccrewengineering00001" {
+		t.Errorf("test_run author_crew_id: got %q, want the resolved CUID", m.gotTestRunCrew)
+	}
+	if m.gotAuthorCrew != "ccrewengineering00001" {
+		t.Errorf("save author_crew_id: got %q, want the resolved CUID", m.gotAuthorCrew)
 	}
 }

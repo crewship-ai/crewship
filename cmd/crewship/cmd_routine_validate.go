@@ -139,7 +139,7 @@ Server-side checks not run locally:
 		if ir := dsl.NormalizedIntegrationsRequired(); len(ir) > 0 {
 			fmt.Printf("  Integr.:   %s\n", strings.Join(ir, ", "))
 		}
-		fmt.Println("Save with: crewship routine save --definition <file> --author-crew <crew_id>")
+		fmt.Println("Save with: crewship routine save --definition <file> --author-crew <crew-slug-or-id>")
 		return nil
 	},
 }

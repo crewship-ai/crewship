@@ -163,7 +163,7 @@ var pipelineListCmd = &cobra.Command{
 		}
 		if len(rows) == 0 {
 			fmt.Println("No routines registered yet.")
-			fmt.Println("Save one via: crewship routine save --name … --definition file.json --author-crew <crew_id>")
+			fmt.Println("Save one via: crewship routine save --name … --definition file.json --author-crew <crew-slug-or-id>")
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -330,6 +330,14 @@ reuse contract).`,
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
 
+		// The save endpoints bind author_crew_id by ID only — a raw slug 403s
+		// with a misleading "crew does not belong to this workspace" (#997).
+		// Resolve like every other crew-taking flag.
+		authorCrewID, err := resolveCrewID(client, authorCrew)
+		if err != nil {
+			return fmt.Errorf("resolve --author-crew: %w", err)
+		}
+
 		// Save clears its test-gate via an HMAC save_token (the server no
 		// longer trusts a body "it passed" claim), so the CLI mirrors the UI:
 		// dry-run-validate the draft via /test_run first, then pass the returned
@@ -343,7 +351,7 @@ reuse contract).`,
 		fmt.Println("Validating routine (server-side dry-run)...")
 		testBody := map[string]any{
 			"definition":     json.RawMessage(definitionRaw),
-			"author_crew_id": authorCrew,
+			"author_crew_id": authorCrewID,
 			"sample_inputs":  sampleInputs,
 		}
 		testResp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/test_run", ws), testBody)
@@ -372,7 +380,7 @@ reuse contract).`,
 			"name":           name,
 			"description":    description,
 			"definition":     json.RawMessage(definitionRaw),
-			"author_crew_id": authorCrew,
+			"author_crew_id": authorCrewID,
 		}
 		if changeSummary != "" {
 			saveBody["change_summary"] = changeSummary
@@ -968,7 +976,7 @@ func init() {
 	pipelineSaveCmd.Flags().String("name", "", "human-readable name (REQUIRED; slug derived from this)")
 	pipelineSaveCmd.Flags().String("description", "", "one-line description shown in [AVAILABLE ROUTINES] block")
 	pipelineSaveCmd.Flags().String("definition", "", "path to a JSON DSL file (REQUIRED)")
-	pipelineSaveCmd.Flags().String("author-crew", "", "crew_id that owns this routine (REQUIRED)")
+	pipelineSaveCmd.Flags().String("author-crew", "", "crew slug or id that owns this routine (REQUIRED)")
 	pipelineSaveCmd.Flags().String("author-agent", "", "agent_id that authored this routine (optional but recommended)")
 	pipelineSaveCmd.Flags().String("sample-inputs", "", "JSON inputs the test_run uses to validate the DSL")
 	pipelineSaveCmd.Flags().String("change-summary", "", "one-line note stored on the version row (shown by 'routine versions' and the versions UI)")
