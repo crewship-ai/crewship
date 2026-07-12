@@ -146,6 +146,10 @@ var crewCreateCmd = &cobra.Command{
 		if networkMode != "" {
 			body["network_mode"] = networkMode
 		}
+		if flags.Changed("allow-private-endpoints") {
+			v, _ := flags.GetBool("allow-private-endpoints")
+			body["allow_private_endpoints"] = v
+		}
 		if v, _ := flags.GetString("allowed-domains"); v != "" {
 			domains := strings.Split(v, ",")
 			trimmed := make([]string, 0, len(domains))
@@ -241,6 +245,10 @@ var crewUpdateCmd = &cobra.Command{
 		if flags.Changed("network-mode") {
 			v, _ := flags.GetString("network-mode")
 			body["network_mode"] = v
+		}
+		if flags.Changed("allow-private-endpoints") {
+			v, _ := flags.GetBool("allow-private-endpoints")
+			body["allow_private_endpoints"] = v
 		}
 		if flags.Changed("allowed-domains") {
 			v, _ := flags.GetString("allowed-domains")
@@ -375,6 +383,7 @@ func init() {
 	crewCreateCmd.Flags().Int("ttl", 0, "Auto-stop after idle hours (0 = never stop)")
 	crewCreateCmd.Flags().String("network-mode", "", "Network policy mode: free or restricted")
 	crewCreateCmd.Flags().String("allowed-domains", "", "Comma-separated allowed domains for restricted mode")
+	crewCreateCmd.Flags().Bool("allow-private-endpoints", false, "Allow agents to reach a private/LAN model endpoint (RFC1918/loopback); link-local/metadata stay blocked")
 
 	crewUpdateCmd.Flags().String("name", "", "Crew name")
 	crewUpdateCmd.Flags().String("description", "", "Description")
@@ -385,6 +394,7 @@ func init() {
 	crewUpdateCmd.Flags().Int("ttl", -1, "Auto-stop after idle hours (0 = disable TTL)")
 	crewUpdateCmd.Flags().String("network-mode", "", "Network policy mode: free or restricted")
 	crewUpdateCmd.Flags().String("allowed-domains", "", "Comma-separated allowed domains for restricted mode")
+	crewUpdateCmd.Flags().Bool("allow-private-endpoints", false, "Allow agents to reach a private/LAN model endpoint (RFC1918/loopback); link-local/metadata stay blocked")
 
 	crewDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 

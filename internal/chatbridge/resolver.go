@@ -47,40 +47,41 @@ func NewIPCResolver(nextjsURL, internalToken string, logger *slog.Logger) *IPCRe
 }
 
 type chatResolveResponse struct {
-	AgentID            string                   `json:"agent_id"`
-	AgentSlug          string                   `json:"agent_slug"`
-	AgentRole          string                   `json:"agent_role"`
-	AgentStatus        string                   `json:"agent_status"`
-	CrewID             string                   `json:"crew_id"`
-	CrewSlug           string                   `json:"crew_slug"`
-	ContainerID        string                   `json:"container_id"`
-	CLIAdapter         string                   `json:"cli_adapter"`
-	LLMModel           string                   `json:"llm_model"`
-	SystemPrompt       string                   `json:"system_prompt"`
-	ToolProfile        string                   `json:"tool_profile"`
-	Credentials        []credentialResponse     `json:"credentials"`
-	TimeoutSecs        int                      `json:"timeout_seconds"`
-	WorkspaceID        string                   `json:"workspace_id"`
-	PreferredLanguage  string                   `json:"preferred_language,omitempty"`
-	MemoryEnabled      bool                     `json:"memory_enabled"`
-	CrewMembers        []crewMemberResponse     `json:"crew_members"`
-	AllCrews           []crewInfoResponse       `json:"all_crews,omitempty"`
-	ActiveMissions     []missionSummaryResponse `json:"active_missions,omitempty"`
-	NetworkMode        string                   `json:"network_mode"`
-	AllowedDomains     []string                 `json:"allowed_domains"`
-	MemoryMB           int                      `json:"memory_mb"`
-	CPUs               float64                  `json:"cpus"`
-	TTLHours           int                      `json:"ttl_hours"`
-	RuntimeImage       string                   `json:"runtime_image"`
-	CachedImage        string                   `json:"cached_image"`
-	CachedRequirements string                   `json:"cached_requirements"`
-	DevcontainerConfig string                   `json:"devcontainer_config"`
-	MiseConfig         string                   `json:"mise_config"`
-	ServicesJSON       string                   `json:"services_json"`
-	MCPServers         []mcpServerResponse      `json:"mcp_servers,omitempty"`
-	CrewMCPConfigJSON  string                   `json:"crew_mcp_config_json"`
-	AgentMCPConfigJSON string                   `json:"agent_mcp_config_json"`
-	InstalledSkills    []installedSkillEntry    `json:"installed_skills,omitempty"`
+	AgentID               string                   `json:"agent_id"`
+	AgentSlug             string                   `json:"agent_slug"`
+	AgentRole             string                   `json:"agent_role"`
+	AgentStatus           string                   `json:"agent_status"`
+	CrewID                string                   `json:"crew_id"`
+	CrewSlug              string                   `json:"crew_slug"`
+	ContainerID           string                   `json:"container_id"`
+	CLIAdapter            string                   `json:"cli_adapter"`
+	LLMModel              string                   `json:"llm_model"`
+	SystemPrompt          string                   `json:"system_prompt"`
+	ToolProfile           string                   `json:"tool_profile"`
+	Credentials           []credentialResponse     `json:"credentials"`
+	TimeoutSecs           int                      `json:"timeout_seconds"`
+	WorkspaceID           string                   `json:"workspace_id"`
+	PreferredLanguage     string                   `json:"preferred_language,omitempty"`
+	MemoryEnabled         bool                     `json:"memory_enabled"`
+	CrewMembers           []crewMemberResponse     `json:"crew_members"`
+	AllCrews              []crewInfoResponse       `json:"all_crews,omitempty"`
+	ActiveMissions        []missionSummaryResponse `json:"active_missions,omitempty"`
+	NetworkMode           string                   `json:"network_mode"`
+	AllowedDomains        []string                 `json:"allowed_domains"`
+	AllowPrivateEndpoints bool                     `json:"allow_private_endpoints"`
+	MemoryMB              int                      `json:"memory_mb"`
+	CPUs                  float64                  `json:"cpus"`
+	TTLHours              int                      `json:"ttl_hours"`
+	RuntimeImage          string                   `json:"runtime_image"`
+	CachedImage           string                   `json:"cached_image"`
+	CachedRequirements    string                   `json:"cached_requirements"`
+	DevcontainerConfig    string                   `json:"devcontainer_config"`
+	MiseConfig            string                   `json:"mise_config"`
+	ServicesJSON          string                   `json:"services_json"`
+	MCPServers            []mcpServerResponse      `json:"mcp_servers,omitempty"`
+	CrewMCPConfigJSON     string                   `json:"crew_mcp_config_json"`
+	AgentMCPConfigJSON    string                   `json:"agent_mcp_config_json"`
+	InstalledSkills       []installedSkillEntry    `json:"installed_skills,omitempty"`
 
 	// PR-E F6 — opener identity + role title for PERSONA / peer
 	// card injection. Resolver populates from chats.created_by and
@@ -539,48 +540,49 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 	}
 
 	return &ChatInfo{
-		AgentID:            data.AgentID,
-		AgentSlug:          data.AgentSlug,
-		AgentRole:          data.AgentRole,
-		AgentStatus:        data.AgentStatus,
-		CrewID:             data.CrewID,
-		CrewSlug:           data.CrewSlug,
-		ContainerID:        data.ContainerID,
-		CLIAdapter:         data.CLIAdapter,
-		LLMModel:           data.LLMModel,
-		SystemPrompt:       data.SystemPrompt,
-		ToolProfile:        data.ToolProfile,
-		Credentials:        creds,
-		TimeoutSecs:        data.TimeoutSecs,
-		WorkspaceID:        data.WorkspaceID,
-		PreferredLanguage:  data.PreferredLanguage,
-		MemoryEnabled:      data.MemoryEnabled,
-		CrewMembers:        crewMembers,
-		NetworkMode:        networkMode,
-		AllowedDomains:     allowedDomains,
-		MemoryMB:           data.MemoryMB,
-		CPUs:               data.CPUs,
-		TTLHours:           data.TTLHours,
-		RuntimeImage:       data.RuntimeImage,
-		CachedImage:        data.CachedImage,
-		DevcontainerConfig: data.DevcontainerConfig,
-		MiseConfig:         data.MiseConfig,
-		ServicesJSON:       data.ServicesJSON,
-		ServiceEnvLookup:   buildServiceEnvLookup(creds),
-		ContainerEnv:       containerEnv,
-		CachedRequirements: cachedReqs,
-		RootPostStart:      rootPostStart,
-		MCPServers:         mcpServers,
-		CrewMCPConfigJSON:  data.CrewMCPConfigJSON,
-		AgentMCPConfigJSON: data.AgentMCPConfigJSON,
-		InstalledSkills:    convertInstalledSkills(data.InstalledSkills),
-		LocalModelBaseURL:  data.LocalModelBaseURL,
-		LocalModelAPIKey:   data.LocalModelAPIKey,
-		LocalModelHeaders:  data.LocalModelHeaders,
-		OpenedByUserID:     data.OpenedByUserID,
-		RoleTitle:          data.RoleTitle,
-		Visibility:         data.Visibility,
-		ApprovalMode:       data.ApprovalMode,
+		AgentID:               data.AgentID,
+		AgentSlug:             data.AgentSlug,
+		AgentRole:             data.AgentRole,
+		AgentStatus:           data.AgentStatus,
+		CrewID:                data.CrewID,
+		CrewSlug:              data.CrewSlug,
+		ContainerID:           data.ContainerID,
+		CLIAdapter:            data.CLIAdapter,
+		LLMModel:              data.LLMModel,
+		SystemPrompt:          data.SystemPrompt,
+		ToolProfile:           data.ToolProfile,
+		Credentials:           creds,
+		TimeoutSecs:           data.TimeoutSecs,
+		WorkspaceID:           data.WorkspaceID,
+		PreferredLanguage:     data.PreferredLanguage,
+		MemoryEnabled:         data.MemoryEnabled,
+		CrewMembers:           crewMembers,
+		NetworkMode:           networkMode,
+		AllowedDomains:        allowedDomains,
+		AllowPrivateEndpoints: data.AllowPrivateEndpoints,
+		MemoryMB:              data.MemoryMB,
+		CPUs:                  data.CPUs,
+		TTLHours:              data.TTLHours,
+		RuntimeImage:          data.RuntimeImage,
+		CachedImage:           data.CachedImage,
+		DevcontainerConfig:    data.DevcontainerConfig,
+		MiseConfig:            data.MiseConfig,
+		ServicesJSON:          data.ServicesJSON,
+		ServiceEnvLookup:      buildServiceEnvLookup(creds),
+		ContainerEnv:          containerEnv,
+		CachedRequirements:    cachedReqs,
+		RootPostStart:         rootPostStart,
+		MCPServers:            mcpServers,
+		CrewMCPConfigJSON:     data.CrewMCPConfigJSON,
+		AgentMCPConfigJSON:    data.AgentMCPConfigJSON,
+		InstalledSkills:       convertInstalledSkills(data.InstalledSkills),
+		LocalModelBaseURL:     data.LocalModelBaseURL,
+		LocalModelAPIKey:      data.LocalModelAPIKey,
+		LocalModelHeaders:     data.LocalModelHeaders,
+		OpenedByUserID:        data.OpenedByUserID,
+		RoleTitle:             data.RoleTitle,
+		Visibility:            data.Visibility,
+		ApprovalMode:          data.ApprovalMode,
 	}, nil
 }
 

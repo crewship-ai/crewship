@@ -21,8 +21,11 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
 // CredentialType is a string alias used to document intent at call
@@ -244,6 +247,18 @@ func validateEndpointURL(value string) string {
 	}
 	if u.Host == "" {
 		return "endpoint URL must include a host (e.g. http://host:11434/v1)"
+	}
+	// SSRF create-time gate (#961): reject a literal IP that no legitimate
+	// endpoint could ever be — cloud metadata (169.254.169.254), link-local,
+	// multicast, reserved. These are hard-blocked even for crews that opt in
+	// to private-network egress, so refusing them at create time is a pure
+	// win (clear error now vs a silent run-time refusal later). A literal
+	// RFC1918/loopback IP is allowed HERE — the credential is workspace-scoped
+	// but the private-egress opt-in is per-crew, so the authoritative decision
+	// is made at run time; rejecting private literals at create would break
+	// the legitimate on-prem/LAN case (e.g. http://192.168.1.222:11434/v1).
+	if ip := net.ParseIP(u.Hostname()); ip != nil && httpsafe.IsHardBlockedIP(ip) {
+		return "endpoint URL points at a link-local/metadata/reserved address (" + ip.String() + "), which is never a valid model endpoint"
 	}
 	return ""
 }

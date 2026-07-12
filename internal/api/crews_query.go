@@ -20,7 +20,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
-			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains,
+			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains, c.allow_private_endpoints,
 			c.mcp_config_json, c.escalation_config,
 			c.runtime_image, c.devcontainer_config, c.mise_config, c.services_json, c.cached_image, c.config_hash,
 			c.max_ephemeral_agents,
@@ -48,7 +48,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 		var allowedDomainsJSON *string
 		if err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 			&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
-			&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON,
+			&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON, &c.AllowPrivateEndpoints,
 			&c.MCPConfigJSON, &c.EscalationConfig,
 			&c.RuntimeImage, &c.DevcontainerConfig, &c.MiseConfig, &c.ServicesJSON, &c.CachedImage, &c.ConfigHash,
 			&c.MaxEphemeralAgents,
@@ -89,7 +89,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var allowedDomainsJSON *string
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
-			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains,
+			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains, c.allow_private_endpoints,
 			c.mcp_config_json, c.escalation_config, c.issue_prefix,
 			c.runtime_image, c.devcontainer_config, c.mise_config, c.services_json, c.cached_image, c.config_hash,
 			c.max_ephemeral_agents,
@@ -100,7 +100,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL
 	`, crewID, workspaceID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
-		&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON,
+		&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON, &c.AllowPrivateEndpoints,
 		&c.MCPConfigJSON, &c.EscalationConfig, &c.IssuePrefix,
 		&c.RuntimeImage, &c.DevcontainerConfig, &c.MiseConfig, &c.ServicesJSON, &c.CachedImage, &c.ConfigHash,
 		&c.MaxEphemeralAgents,

@@ -42,25 +42,26 @@ type AgentRunRequest struct {
 	// re-sending context every turn. 0 means "use DefaultMaxTurns". Routine /
 	// scheduled runs set RoutineMaxTurns — lower, because an unattended job
 	// with no human watching is exactly where a stuck loop goes unnoticed.
-	MaxTurns           int
-	MemoryEnabled      bool
-	CrewMembers        []CrewMember      // Populated by bridge for LEAD agents
-	SkipSidecar        bool              // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
-	ApprovalMode       string            // "none" | "async" | "sync" — drives Harbor Master gate in RunAgent
-	SkipConvHistory    bool              // When true, skip injecting conversation history (used by assignment sub-agents)
-	NetworkMode        string            // "free" (default) or "restricted" — crew-level network policy
-	AllowedDomains     []string          // Extra allowed domains for restricted mode
-	LocalModelBaseURL  string            // OpenAI-compatible local model endpoint; resolved from an ENDPOINT_URL credential by the chat resolver (#955), with the CREWSHIP_LOCAL_MODEL_BASE_URL env as a deprecated fallback applied in RunAgent. Empty = local models disabled.
-	LocalModelAPIKey   string            // Optional bearer token for an authenticated local endpoint (#961); injected into OPENCODE_CONFIG_CONTENT options.apiKey, never the agent env.
-	LocalModelHeaders  map[string]string // Optional custom headers for the local endpoint (#961); injected into OPENCODE_CONFIG_CONTENT options.headers.
-	MemoryMB           int
-	CPUs               float64
-	TTLHours           int
-	MCPServers         []MCPServerConfig // Resolved MCP server configs for this agent
-	CrewMCPConfigJSON  string            // Raw crew .mcp.json (merged with agent's at runtime)
-	AgentMCPConfigJSON string            // Raw agent .mcp.json additions
-	PreferredLanguage  string            // Workspace language (e.g. "Czech", "English")
-	Skills             []SkillBundle     // Installed skills, written to per-CLI discovery paths in addition to the [SKILLS AVAILABLE] system-prompt block
+	MaxTurns              int
+	MemoryEnabled         bool
+	CrewMembers           []CrewMember      // Populated by bridge for LEAD agents
+	SkipSidecar           bool              // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
+	ApprovalMode          string            // "none" | "async" | "sync" — drives Harbor Master gate in RunAgent
+	SkipConvHistory       bool              // When true, skip injecting conversation history (used by assignment sub-agents)
+	NetworkMode           string            // "free" (default) or "restricted" — crew-level network policy
+	AllowedDomains        []string          // Extra allowed domains for restricted mode
+	AllowPrivateEndpoints bool              // #961: crew opted in to reach a private/LAN model endpoint (RFC1918/loopback). Link-local/metadata stay blocked regardless.
+	LocalModelBaseURL     string            // OpenAI-compatible local model endpoint; resolved from an ENDPOINT_URL credential by the chat resolver (#955), with the CREWSHIP_LOCAL_MODEL_BASE_URL env as a deprecated fallback applied in RunAgent. Empty = local models disabled.
+	LocalModelAPIKey      string            // Optional bearer token for an authenticated local endpoint (#961); injected into OPENCODE_CONFIG_CONTENT options.apiKey, never the agent env.
+	LocalModelHeaders     map[string]string // Optional custom headers for the local endpoint (#961); injected into OPENCODE_CONFIG_CONTENT options.headers.
+	MemoryMB              int
+	CPUs                  float64
+	TTLHours              int
+	MCPServers            []MCPServerConfig // Resolved MCP server configs for this agent
+	CrewMCPConfigJSON     string            // Raw crew .mcp.json (merged with agent's at runtime)
+	AgentMCPConfigJSON    string            // Raw agent .mcp.json additions
+	PreferredLanguage     string            // Workspace language (e.g. "Czech", "English")
+	Skills                []SkillBundle     // Installed skills, written to per-CLI discovery paths in addition to the [SKILLS AVAILABLE] system-prompt block
 
 	// PR-E F6 — PERSONA + per-user peer card injection. RoleTitle
 	// seeds the DefaultPersona fallback when both PERSONA layers
