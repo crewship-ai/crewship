@@ -56,6 +56,14 @@ Override any of: `CREWSHIP` (binary path), `SERVER`/`CREWSHIP_SERVER`,
 | `test-credentials.sh` | human **create + assign**; the API never returns the plaintext **value**; an agent **escalates** for a credential and a human grants it; agent **self-service** creation attributed `actor_type=agent` (probe — SKIPs if not wired). |
 | `test-determinism.sh` | a pure-transform recipe yields **byte-identical** `@json` output across N runs; prints a latency/cost **baseline**. |
 | `test-realworld-github.sh` | an agent uses the in-container **`gh`** CLI against a public repo (read-only); SKIPs if `gh` isn't authenticated. |
+| `test-keeper-ingress-fence.sh` | the **internal keeper HTTP surface** rejects every request with no token / a forged token / a spoofed `X-Forwarded-For` (the fence holds); flags whether the **network-origin gate** is defeated behind the reverse proxy (off-host caller → 403 not 404 ⇒ the static `X-Internal-Token` is the sole guard). *The one suite that uses raw `curl` — the internal channel has no CLI by design; you can't dogfood an attack against a tokenless endpoint.* |
+| `test-keeper-toctou.sh` | a credential decision reflects **injection-time** state, not approval-time: `rotate --grace-seconds 0` scrubs the stale value immediately, `unassign` removes the binding the keeper requires; **SKIPs** the container-only deferred escalate→approve→resume race (test T2) honestly. |
+| `test-keeper-audit-integrity.sh` | credential decisions leave a **durable trace**: lifecycle events land on the `credential audit` timeline, a granted escalation is resolvable off `PENDING`, `system keeper` exposes scrubber bookkeeping; **SKIPs** the load-only fail-silent audit-drop (test T6). |
+
+> **Keeper adversarial suite** (the three `test-keeper-*` above) is opt-in:
+> `WITH_KEEPER_SECURITY=1 ./run-all.sh`. Design + the full test catalog (T1–T13,
+> which findings each maps to) live in
+> `.claude/context/notes/keeper-adversarial-test-suite-2026-07-12.md`.
 
 ## Design notes
 
