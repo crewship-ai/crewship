@@ -45,6 +45,12 @@ const EXPECTED_MAP: Record<string, { wizardField: keyof WizardState | "n/a"; bod
   "ttl":              { wizardField: "ttlHours",        bodyKey: "container_ttl_hours" },
   "network-mode":     { wizardField: "networkMode",     bodyKey: "network_mode" },
   "allowed-domains":  { wizardField: "allowedDomains",  bodyKey: "allowed_domains" },
+  // Intentionally CLI-only (#961/#974): private-network model-endpoint egress
+  // is an ADMIN-tier security capability that also requires the instance-level
+  // CREWSHIP_ALLOW_PRIVATE_ENDPOINTS ceiling to take effect. It is deliberately
+  // kept out of the self-serve create wizard so it isn't a one-click toggle for
+  // a MANAGER — it's set by an operator/admin via the CLI or crew update.
+  "allow-private-endpoints": { wizardField: "n/a", bodyKey: null, note: "ADMIN-only private-egress opt-in; gated by instance ceiling — not a self-serve wizard toggle" },
 }
 
 // =============================================================================
