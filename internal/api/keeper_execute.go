@@ -63,6 +63,15 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// Cross-tenant binding: same guard as HandleRequest, and more critical
+	// here — an ALLOW on /execute injects the plaintext secret into
+	// body.container_id and runs a command there. A workspace-bound token
+	// must not be able to claim another workspace's workspace_id in the
+	// body. Master-token callers (empty binding) are unaffected.
+	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
+		return
+	}
+
 	if body.CredentialID == "" && body.CredentialName == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "credential_id or credential_name required",
