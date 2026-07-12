@@ -106,6 +106,25 @@ func (e *SkillReviewEvaluator) Evaluate(ctx context.Context, req SkillReviewRequ
 
 	transition := skills.EvaluateTransition(req.LifecycleSnap)
 
+	// CRE-138 defense-in-depth: an empty WorkspaceID means the paymaster
+	// middleware rejects the LLM call pre-flight ("paymaster: workspace_id
+	// required"), which Gatekeeper.Evaluate swallows into deny-by-default —
+	// turning a caller's missing billing workspace into an unverify +
+	// blocking inbox item for the skill. Short-circuit to ESCALATE before
+	// the LLM call instead (F4.1 is an audit; surface the plumbing problem
+	// to the operator). Mirrors the memory-health evaluator's early guard;
+	// the deterministic lifecycle proposal needs no LLM, so keep it.
+	if strings.TrimSpace(req.WorkspaceID) == "" {
+		e.logger.Warn("skill_evaluator: empty workspace_id → ESCALATE without LLM call",
+			"skill_id", req.SkillID)
+		return SkillReviewResult{
+			Decision:          keeper.DecisionEscalate,
+			Reason:            "Skill review has no billing workspace (no enabled assignment on a live agent?) — operator review",
+			RiskScore:         5,
+			ProposedLifecycle: transition,
+		}, nil
+	}
+
 	evalReq := EvalRequest{
 		Request: keeper.Request{
 			ID:                req.SkillID + "_review",
