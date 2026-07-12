@@ -19,6 +19,8 @@ package api
 // so users can actually pick it.
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/url"
 	"strings"
 )
@@ -167,16 +169,73 @@ func validateCredentialPayload(req *createCredentialRequest) string {
 	return ""
 }
 
-// validateEndpointURL enforces that an ENDPOINT_URL credential value is an
-// absolute http(s) URL with a host. Returns an end-user-readable 400 message
-// or "" when valid. Kept separate so the run-time resolver can reuse the exact
-// same gate before handing a stored URL to OpenCode's config.
-func validateEndpointURL(value string) string {
+// endpointValue is the structured on-disk shape of an ENDPOINT_URL
+// credential (#961 Feature A). A credential may store EITHER a bare URL
+// string (the #957 shape, still supported) OR this JSON object carrying an
+// optional auth token / custom headers for an authenticated Ollama-behind-
+// proxy or LiteLLM endpoint. Endpoint + key + headers = one credential
+// object, matching how OpenRouter/LiteLLM/Dify/OpenCode model a BYO endpoint.
+type endpointValue struct {
+	BaseURL string            `json:"baseURL"`
+	APIKey  string            `json:"apiKey,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// parseEndpointValue decodes a stored ENDPOINT_URL credential value into its
+// base URL and optional auth material. A value that begins with "{" is parsed
+// as the JSON object above (and must carry a non-empty baseURL); anything else
+// is treated as a bare base URL (the #957 back-compat shape) with no auth.
+// Callers that only need the display URL can ignore apiKey/headers — the read
+// path uses this to echo baseURL while never surfacing the secret.
+func parseEndpointValue(value string) (baseURL, apiKey string, headers map[string]string, err error) {
 	v := strings.TrimSpace(value)
 	if v == "" {
-		return "endpoint URL is required for ENDPOINT_URL credentials"
+		return "", "", nil, fmt.Errorf("endpoint value is empty")
 	}
-	u, err := url.Parse(v)
+	if strings.HasPrefix(v, "{") {
+		var ev endpointValue
+		if e := json.Unmarshal([]byte(v), &ev); e != nil {
+			return "", "", nil, fmt.Errorf("endpoint value is not valid JSON: %w", e)
+		}
+		if strings.TrimSpace(ev.BaseURL) == "" {
+			return "", "", nil, fmt.Errorf("endpoint JSON must include a non-empty baseURL")
+		}
+		return strings.TrimSpace(ev.BaseURL), ev.APIKey, ev.Headers, nil
+	}
+	return v, "", nil, nil
+}
+
+// buildEndpointValue serialises a base URL plus optional auth token/headers
+// into the stored credential value. With no auth it returns the bare URL (so
+// simple endpoints keep the #957 plaintext-URL shape and stay human-readable
+// in a raw DB row); with auth it returns the compact JSON object.
+func buildEndpointValue(baseURL, apiKey string, headers map[string]string) (string, error) {
+	baseURL = strings.TrimSpace(baseURL)
+	if apiKey == "" && len(headers) == 0 {
+		return baseURL, nil
+	}
+	raw, err := json.Marshal(endpointValue{BaseURL: baseURL, APIKey: apiKey, Headers: headers})
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+// validateEndpointURL enforces that an ENDPOINT_URL credential value carries an
+// absolute http(s) base URL with a host. It accepts either a bare URL or the
+// JSON object shape (#961), validating the baseURL inside. Returns an
+// end-user-readable 400 message or "" when valid. Kept separate so the run-time
+// resolver can reuse the exact same gate before handing a stored URL to
+// OpenCode's config.
+func validateEndpointURL(value string) string {
+	baseURL, _, _, err := parseEndpointValue(value)
+	if err != nil {
+		if strings.TrimSpace(value) == "" {
+			return "endpoint URL is required for ENDPOINT_URL credentials"
+		}
+		return "endpoint value must be a URL or a {\"baseURL\":…} object (e.g. http://host:11434/v1)"
+	}
+	u, err := url.Parse(baseURL)
 	if err != nil {
 		return "endpoint URL must be a valid URL (e.g. http://host:11434/v1)"
 	}

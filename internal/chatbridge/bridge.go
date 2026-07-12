@@ -81,7 +81,10 @@ type ChatInfo struct {
 	// LocalModelBaseURL is the OpenAI-compatible local-model endpoint the
 	// server resolved from the vault (ENDPOINT_URL credential, #955). Empty
 	// → orchestrator applies the deprecated env fallback.
-	LocalModelBaseURL  string
+	LocalModelBaseURL string
+	// LocalModelAPIKey / LocalModelHeaders carry optional endpoint auth (#961).
+	LocalModelAPIKey   string
+	LocalModelHeaders  map[string]string
 	SystemPrompt       string
 	ToolProfile        string
 	Credentials        []orchestrator.Credential

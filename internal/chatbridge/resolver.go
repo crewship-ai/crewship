@@ -103,6 +103,13 @@ type chatResolveResponse struct {
 	// default, #955). Empty → the orchestrator applies the deprecated
 	// CREWSHIP_LOCAL_MODEL_BASE_URL env fallback.
 	LocalModelBaseURL string `json:"local_model_base_url,omitempty"`
+
+	// LocalModelAPIKey / LocalModelHeaders carry optional auth for an
+	// authenticated local endpoint (#961). They ride this internal resolve
+	// channel and land in OpenCode's OPENCODE_CONFIG_CONTENT — never in the
+	// agent env and never on a user-facing credential read path.
+	LocalModelAPIKey  string            `json:"local_model_api_key,omitempty"`
+	LocalModelHeaders map[string]string `json:"local_model_headers,omitempty"`
 }
 
 // installedSkillEntry mirrors internal/api.installedSkillResponse.
@@ -568,6 +575,8 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		AgentMCPConfigJSON: data.AgentMCPConfigJSON,
 		InstalledSkills:    convertInstalledSkills(data.InstalledSkills),
 		LocalModelBaseURL:  data.LocalModelBaseURL,
+		LocalModelAPIKey:   data.LocalModelAPIKey,
+		LocalModelHeaders:  data.LocalModelHeaders,
 		OpenedByUserID:     data.OpenedByUserID,
 		RoleTitle:          data.RoleTitle,
 		Visibility:         data.Visibility,

@@ -44,13 +44,15 @@ type AgentRunRequest struct {
 	// with no human watching is exactly where a stuck loop goes unnoticed.
 	MaxTurns           int
 	MemoryEnabled      bool
-	CrewMembers        []CrewMember // Populated by bridge for LEAD agents
-	SkipSidecar        bool         // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
-	ApprovalMode       string       // "none" | "async" | "sync" — drives Harbor Master gate in RunAgent
-	SkipConvHistory    bool         // When true, skip injecting conversation history (used by assignment sub-agents)
-	NetworkMode        string       // "free" (default) or "restricted" — crew-level network policy
-	AllowedDomains     []string     // Extra allowed domains for restricted mode
-	LocalModelBaseURL  string       // OpenAI-compatible local model endpoint; resolved from an ENDPOINT_URL credential by the chat resolver (#955), with the CREWSHIP_LOCAL_MODEL_BASE_URL env as a deprecated fallback applied in RunAgent. Empty = local models disabled.
+	CrewMembers        []CrewMember      // Populated by bridge for LEAD agents
+	SkipSidecar        bool              // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
+	ApprovalMode       string            // "none" | "async" | "sync" — drives Harbor Master gate in RunAgent
+	SkipConvHistory    bool              // When true, skip injecting conversation history (used by assignment sub-agents)
+	NetworkMode        string            // "free" (default) or "restricted" — crew-level network policy
+	AllowedDomains     []string          // Extra allowed domains for restricted mode
+	LocalModelBaseURL  string            // OpenAI-compatible local model endpoint; resolved from an ENDPOINT_URL credential by the chat resolver (#955), with the CREWSHIP_LOCAL_MODEL_BASE_URL env as a deprecated fallback applied in RunAgent. Empty = local models disabled.
+	LocalModelAPIKey   string            // Optional bearer token for an authenticated local endpoint (#961); injected into OPENCODE_CONFIG_CONTENT options.apiKey, never the agent env.
+	LocalModelHeaders  map[string]string // Optional custom headers for the local endpoint (#961); injected into OPENCODE_CONFIG_CONTENT options.headers.
 	MemoryMB           int
 	CPUs               float64
 	TTLHours           int

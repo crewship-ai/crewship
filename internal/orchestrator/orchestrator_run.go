@@ -431,6 +431,10 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	effective, usedEnvFallback := effectiveLocalModelBaseURL(req.LocalModelBaseURL, localModelBaseURL)
 	req.LocalModelBaseURL = effective
 	if usedEnvFallback {
+		// The deprecated env fallback carries only a bare URL — no credential
+		// resolved, so any auth material would be stale. Drop it (#961).
+		req.LocalModelAPIKey = ""
+		req.LocalModelHeaders = nil
 		o.warnLocalModelEnvFallbackOnce()
 	}
 
