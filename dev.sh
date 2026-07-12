@@ -257,7 +257,22 @@ start_postgres() {
 ensure_web_build_fresh() {
   local marker="$PROJECT_DIR/.web-build-marker"
 
+  # The marker records the git HEAD the last frontend build was made from.
+  # mtime-only freshness ("find -newer marker") is unreliable right after
+  # `git fetch && git reset --hard`: files whose content didn't change keep
+  # their old mtimes, and a marker touched by a later restart can postdate
+  # a whole deploy — which is exactly how a stale UI shipped to dev2 on
+  # 2026-07-12 despite a frontend-heavy merge day. HEAD comparison makes
+  # deploys deterministic; the mtime scan below still catches uncommitted
+  # local edits between commits.
+  local head_now marker_head=""
+  head_now=$(cd "$PROJECT_DIR" && git rev-parse HEAD 2>/dev/null || echo unknown)
+
   if [[ -f "$marker" ]] && [[ -d "$PROJECT_DIR/web/out" ]] && [[ -s "$PROJECT_DIR/web/out/index.html" ]]; then
+    marker_head=$(head -n 1 "$marker" 2>/dev/null || true)
+    if [[ "$marker_head" != "$head_now" ]]; then
+      log "Frontend built from $marker_head, repo is at $head_now -- rebuilding web/out/..."
+    else
     local newer
     newer=$(cd "$PROJECT_DIR" && find \
       app components hooks lib types \
@@ -273,6 +288,7 @@ ensure_web_build_fresh() {
       return 0
     fi
     log "Frontend source changed ($newer) -- rebuilding web/out/..."
+    fi
   else
     log "web/out/ missing or stale -- running initial pnpm build..."
   fi
@@ -283,8 +299,8 @@ ensure_web_build_fresh() {
   fi
   rm -rf "$PROJECT_DIR/web/out"
   cp -r "$PROJECT_DIR/out" "$PROJECT_DIR/web/out"
-  touch "$marker"
-  ok "Frontend build refreshed -> web/out/"
+  printf '%s\n' "$head_now" > "$marker"
+  ok "Frontend build refreshed -> web/out/ (HEAD $head_now)"
 }
 
 start_go() {
