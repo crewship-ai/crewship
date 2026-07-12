@@ -20,6 +20,7 @@ func TestEndpointTiers(t *testing.T) {
 		{"169.254.0.1", true, true, false},
 		{"::ffff:169.254.169.254", true, true, false}, // IPv4-mapped bypass
 		{"fe80::1", true, true, false},
+		{"fd00:ec2::254", true, true, false}, // AWS EC2 IMDS IPv6 — ULA-shaped but must stay hard-blocked even with opt-in
 		// RFC1918 / loopback / ULA — blocked by default, opened by opt-in.
 		{"10.0.0.1", true, false, true},
 		{"172.16.5.5", true, false, true},

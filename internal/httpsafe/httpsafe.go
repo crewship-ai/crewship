@@ -70,6 +70,12 @@ var hardBlockedCIDRs = mustCIDRs(
 	"100::/64",
 	"fe80::/10",
 	"ff00::/8",
+	// AWS EC2 IMDS over IPv6. This ULA address would otherwise fall into the
+	// fc00::/7 soft tier below and become reachable once a crew opts into
+	// private egress — but it's cloud metadata, which must stay blocked
+	// regardless of the opt-in. Pin it into the hard tier (more specific than
+	// fc00::/7, and IsHardBlockedIP checks this set).
+	"fd00:ec2::254/128",
 )
 
 var privateReachableCIDRs = mustCIDRs(
