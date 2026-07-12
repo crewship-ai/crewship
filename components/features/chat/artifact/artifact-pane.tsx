@@ -40,7 +40,15 @@ interface ArtifactPaneProps {
 
 export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
   const { workspaceId } = useWorkspace()
-  const { open, tabs, activeId, setOpen, setActive, closeTab, pruneToAgent } = useArtifactStore()
+  // Narrow selectors — the pane subscribed to the whole artifact store and
+  // re-rendered on every unrelated store write.
+  const open = useArtifactStore((s) => s.open)
+  const tabs = useArtifactStore((s) => s.tabs)
+  const activeId = useArtifactStore((s) => s.activeId)
+  const setOpen = useArtifactStore((s) => s.setOpen)
+  const setActive = useArtifactStore((s) => s.setActive)
+  const closeTab = useArtifactStore((s) => s.closeTab)
+  const pruneToAgent = useArtifactStore((s) => s.pruneToAgent)
   const [content, setContent] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 

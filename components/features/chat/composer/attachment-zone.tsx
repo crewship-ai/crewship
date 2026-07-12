@@ -80,9 +80,14 @@ async function uploadOne(
 }
 
 export function AttachmentZone({ agentId, sessionId, children }: AttachmentZoneProps) {
-  const { attachments, addAttachments, removeAttachment } = useComposerStore()
+  // Subscribe only to THIS session's attachment list — the whole-store
+  // subscription re-rendered every mounted zone on any session's draft or
+  // attachment write.
+  const sessionAttachmentsRaw = useComposerStore((s) => s.attachments[sessionId])
+  const addAttachments = useComposerStore((s) => s.addAttachments)
+  const removeAttachment = useComposerStore((s) => s.removeAttachment)
   const { workspaceId } = useWorkspace()
-  const sessionAttachments = attachments[sessionId] ?? []
+  const sessionAttachments = sessionAttachmentsRaw ?? []
 
   const handleFiles = useCallback(
     async (files: File[]) => {
@@ -171,7 +176,8 @@ export function AttachmentZone({ agentId, sessionId, children }: AttachmentZoneP
 }
 
 export function AttachmentButton({ agentId, sessionId }: { agentId: string; sessionId: string }) {
-  const { addAttachments, removeAttachment } = useComposerStore()
+  const addAttachments = useComposerStore((s) => s.addAttachments)
+  const removeAttachment = useComposerStore((s) => s.removeAttachment)
   const { workspaceId } = useWorkspace()
   return (
     <AttachmentTrigger

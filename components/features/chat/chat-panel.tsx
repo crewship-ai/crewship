@@ -17,15 +17,8 @@ import {
   ConversationScrollButton,
   ConversationEmptyState,
 } from "@/components/ai-elements/conversation"
-import {
-  PromptInput,
-  PromptInputTextarea,
-  PromptInputFooter,
-  PromptInputSubmit,
-} from "@/components/ai-elements/prompt-input"
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
 import { useChat, type HistoryPart } from "@/hooks/use-chat"
-import { useMessageSubmit } from "./hooks/use-message-submit"
 import { useSession } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useDrawerStore } from "@/stores/drawer-store"
@@ -37,15 +30,15 @@ import { RightPanel } from "./right-panel"
 import { RightRail } from "./right-rail"
 import { RightDrawer } from "./right-drawer"
 import { SlashPalette } from "./composer/slash-palette"
-import { MentionAutocomplete, type CrewMember } from "./composer/mention-autocomplete"
-import { AttachmentZone, AttachmentButton } from "./composer/attachment-zone"
+import { type CrewMember } from "./composer/mention-autocomplete"
+import { ChatComposer } from "./composer/chat-composer"
+import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
 import { ArtifactPane } from "./artifact/artifact-pane"
 import { FollowUps } from "./suggestions/follow-ups"
 import { ConversationSearch } from "./search/conversation-search"
 import { ExportDialog } from "./export/export-dialog"
 import { ReconnectBanner } from "./messages/reconnect-banner"
 import type { FileEntry } from "./chat-tree-row"
-import { useComposerStore } from "@/stores/composer-store"
 import { getSuggestions } from "@/lib/agent-suggestions"
 import { apiFetch } from "@/lib/api-fetch"
 
@@ -99,7 +92,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
   const { workspaceId } = useWorkspace()
-  const [input, setInput] = useState(initialInput ?? "")
   const [sessionReady, setSessionReady] = useState(false)
 
   // Cutoff: turns whose timestamp is BEFORE this number skip the arrival
@@ -117,13 +109,13 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     sessionLoadedFor.current = sessionId
   }, [sessionId])
 
-  // Pre-populate input when a new session is started with a prefill value
-  useEffect(() => {
-    if (initialInput) setInput(initialInput)
-  }, [initialInput])
-
   const [files, setFiles] = useState<FileEntry[]>([])
-  const drawer = useDrawerStore()
+  // Narrow selectors — the panel only reads these three fields; a
+  // whole-store subscription re-rendered the entire chat (message list
+  // included) on every drawer width drag or unrelated store write.
+  const drawerOpen = useDrawerStore((s) => s.open)
+  const drawerActiveTab = useDrawerStore((s) => s.activeTab)
+  const drawerMode = useDrawerStore((s) => s.mode)
 
   // Per-(re)connect ticket fetch. apiFetch promotes the 401 path —
   // either via silent refresh or the global session-expired event —
@@ -281,10 +273,9 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
 
   const isGroupChat = Object.keys(participantNames).length > 1
 
-  // @mention autocomplete. The chat's agent is always offered (mentioning it is
-  // what makes it respond in a group chat); teammates are offered too as a
-  // courtesy. The textarea ref lets the popover anchor to the caret.
-  const mentionTextareaRef = useRef<HTMLTextAreaElement>(null)
+  // @mention autocomplete members. The chat's agent is always offered
+  // (mentioning it is what makes it respond in a group chat); teammates are
+  // offered too as a courtesy. The picker itself lives in ChatComposer.
   const mentionMembers = useMemo<CrewMember[]>(() => {
     const list: CrewMember[] = [{ id: agentId, slug: agentSlug, name: agentName ?? agentSlug, role_title: agentRole ?? undefined }]
     for (const [uid, name] of Object.entries(participantNames)) {
@@ -294,14 +285,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     }
     return list
   }, [agentId, agentSlug, agentName, agentRole, participantNames, currentUserId])
-  const handleMentionPick = useCallback((member: CrewMember, atIndex: number) => {
-    setInput((prev) => {
-      const after = prev.slice(atIndex)
-      const ws = after.search(/\s/)
-      const end = ws === -1 ? prev.length : atIndex + ws
-      return prev.slice(0, atIndex) + "@" + member.slug + " " + prev.slice(end)
-    })
-  }, [])
 
   const ensureSession = useCallback(async () => {
     if (sessionReady || !workspaceId || !sessionId) return
@@ -315,7 +298,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   }, [agentId, workspaceId, sessionId, sessionReady])
 
   // Fetch files only when the Files tab might be visible (drawer open + active)
-  const filesVisible = drawer.open && drawer.activeTab === "files"
+  const filesVisible = drawerOpen && drawerActiveTab === "files"
   useEffect(() => {
     if (!workspaceId || !filesVisible || !sessionId) return
     apiFetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}`)
@@ -323,8 +306,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       .then((data: FileEntry[] | null) => setFiles(data ?? []))
       .catch(() => {})
   }, [agentId, workspaceId, filesVisible, sessionId])
-
-  const composer = useComposerStore()
 
   // Bumped on every locally-sent message; arms the pin-to-top spacer so the
   // just-sent question anchors at the viewport top while the reply streams
@@ -339,36 +320,19 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     return null
   }, [turns])
 
-  // Guards against pasting a message whose encoded WS frame would exceed
-  // the server's inbound frame cap (64 KiB, internal/ws/hub.go) — sending
-  // one used to silently kill the connection (readPump treats an oversize
-  // frame as a read error and tears the socket down). Oversize messages
-  // are rejected locally with a toast; the draft is left intact so the
-  // user can trim and resend.
-  //
-  // Only fires when the message actually went out, so the pin-to-top
-  // nonce is bumped here too — a size-guard rejection must not re-arm
-  // the pin spacer.
+  // Fires from ChatComposer when a message actually went out (the size
+  // guard passed) — re-arms the pin-to-top spacer. Input/draft clearing
+  // lives inside the composer, next to the state it clears.
   const handleSent = useCallback(() => {
     setPinNonce((n) => n + 1)
-    setInput("")
-    composer.clearDraft(sessionId)
-    composer.clearAttachments(sessionId)
-  }, [composer, sessionId])
-
-  const handleSubmit = useMessageSubmit({
-    sessionId,
-    isStreaming,
-    ensureSession,
-    sendMessage,
-    onSend,
-    onSent: handleSent,
-  })
+  }, [])
 
   // Auto-send the initial prompt once, after the socket is connected.
   // The WS `send` silently drops while not OPEN, so we gate on
   // connectionStatus rather than firing on mount. Guarded by a ref so a
-  // re-render (or a transient reconnect) can't double-send.
+  // re-render (or a transient reconnect) can't double-send. When
+  // auto-sending, the composer is NOT prefilled (the prefill used to be
+  // cleared right after the send anyway — see composerInitialInput below).
   const autoSentRef = useRef(false)
   useEffect(() => {
     if (!autoSendInitial || autoSentRef.current) return
@@ -380,9 +344,10 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       await ensureSession()
       sendMessage(text)
       onSend?.(sessionId, text)
-      setInput("")
     })()
   }, [autoSendInitial, initialInput, connectionStatus, isStreaming, ensureSession, sendMessage, onSend, sessionId])
+
+  const composerInitialInput = autoSendInitial ? undefined : initialInput
 
   const handleSuggestionClick = useCallback(async (suggestion: string) => {
     if (isStreaming) return
@@ -413,11 +378,30 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     else if (id === "clear") loadHistory([])
   }, [regenerateWithPin, loadHistory])
 
-  const chatStatus = isStreaming ? "streaming" as const : "ready" as const
+  // Opt-in virtualized list (localStorage crewship.virtualChat=1) — mounts
+  // only the viewport instead of every turn. Read once per mount; flipping
+  // the flag requires a reload, which is fine for an experimental gate.
+  const [useVirtualChat] = useState(() => virtualChatEnabled())
 
   // One conversation surface, rendered by both the mobile-chat and desktop
   // branches — the two copies had already drifted once; don't re-fork them.
-  const conversationEl = (
+  const conversationEl = useVirtualChat ? (
+    <VirtualConversation
+      turns={turns}
+      sessionId={sessionId}
+      agentId={agentId}
+      agentName={agentName}
+      historyLoading={historyLoading}
+      isStreaming={isStreaming}
+      animateAfter={animateAfter}
+      onCopy={handleCopy}
+      onFileClick={noopFileClick}
+      onRegenerate={!isStreaming ? regenerateWithPin : undefined}
+      onEditUserMessage={!isStreaming ? editAndResendWithPin : undefined}
+      resolveAuthorName={resolveAuthorName}
+      footer={<StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />}
+    />
+  ) : (
     <Conversation>
       <ConversationContent className="mx-auto w-full max-w-3xl">
         {turns.length === 0 && !historyLoading && (
@@ -517,29 +501,26 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
             </Suggestions>
           </div>
         )}
-        <div className="p-3 shrink-0">
-          <PromptInput className="rounded-xl border" onSubmit={handleSubmit}>
-            <PromptInputTextarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={agentName ? `Message ${agentName}...` : "Send a message..."}
-              className="min-h-[44px]"
-            />
-            <PromptInputFooter className="justify-end p-2">
-              <PromptInputSubmit
-                disabled={!isStreaming && (!input.trim() || connectionStatus !== "connected")}
-                status={chatStatus}
-                onStop={stopGeneration}
-              />
-            </PromptInputFooter>
-          </PromptInput>
-        </div>
+        <ChatComposer
+          agentId={agentId}
+          sessionId={sessionId}
+          agentName={agentName}
+          variant="mobile"
+          isStreaming={isStreaming}
+          connectionStatus={connectionStatus}
+          stopGeneration={stopGeneration}
+          ensureSession={ensureSession}
+          sendMessage={sendMessage}
+          onSend={onSend}
+          onSent={handleSent}
+          initialInput={composerInitialInput}
+        />
       </div>
     )
   }
 
   // Desktop: chat + icon rail; drawer overlays (or pushes) when open
-  const pushOpen = drawer.open && drawer.mode === "push"
+  const pushOpen = drawerOpen && drawerMode === "push"
   return (
     <div className="relative flex h-full">
       <div className="flex flex-col overflow-hidden flex-1 min-w-0">
@@ -569,44 +550,30 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           show={!isStreaming && turns.length > 0 && turns[turns.length - 1].role === "assistant"}
         />
         </div>
-        <div className="mx-auto w-full max-w-3xl p-3 md:px-6 shrink-0">
-          <AttachmentZone agentId={agentId} sessionId={sessionId}>
-            <MentionAutocomplete
-              text={input}
-              textareaRef={mentionTextareaRef}
-              members={mentionMembers}
-              onPick={handleMentionPick}
-            />
-            <PromptInput className="rounded-xl border" onSubmit={handleSubmit}>
-              <PromptInputTextarea
-                ref={mentionTextareaRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder={agentName ? `Message ${agentName}...` : "Send a message..."}
-                className="min-h-[44px]"
-              />
-              <PromptInputFooter className="justify-between p-2 gap-2">
-                <div className="flex items-center gap-1">
-                  <AttachmentButton agentId={agentId} sessionId={sessionId} />
-                </div>
-                <PromptInputSubmit
-                  disabled={!isStreaming && (!input.trim() || connectionStatus !== "connected")}
-                  status={chatStatus}
-                  onStop={stopGeneration}
-                />
-              </PromptInputFooter>
-            </PromptInput>
-          </AttachmentZone>
-        </div>
+        <ChatComposer
+          agentId={agentId}
+          sessionId={sessionId}
+          agentName={agentName}
+          variant="desktop"
+          isStreaming={isStreaming}
+          connectionStatus={connectionStatus}
+          stopGeneration={stopGeneration}
+          ensureSession={ensureSession}
+          sendMessage={sendMessage}
+          onSend={onSend}
+          onSent={handleSent}
+          initialInput={composerInitialInput}
+          mentionMembers={mentionMembers}
+        />
       </div>
 
       <RightDrawer>
         <RightPanel
-          key={drawer.activeTab}
+          key={drawerActiveTab}
           agentId={agentId}
           workspaceId={workspaceId}
           files={files}
-          initialTab={drawer.activeTab}
+          initialTab={drawerActiveTab}
           hideTabs
           style={{ width: "100%", height: "100%" }}
         />
