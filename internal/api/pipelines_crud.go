@@ -446,12 +446,20 @@ func (h *PipelineHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slug := r.PathValue("slug")
+	// Both real clients (CLI `routine rollback --to N` and the versions UI)
+	// send {"target_version": N}; the handler historically decoded only
+	// {"version": N}, 400-ing every client rollback. Accept both, canonical
+	// name first.
 	var body struct {
-		Version int `json:"version"`
+		TargetVersion int `json:"target_version"`
+		Version       int `json:"version"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid request body")
 		return
+	}
+	if body.Version == 0 {
+		body.Version = body.TargetVersion
 	}
 	if body.Version < 1 {
 		replyError(w, http.StatusBadRequest, "version must be >= 1")
