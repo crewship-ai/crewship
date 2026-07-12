@@ -633,8 +633,10 @@ export default function OnboardingPage() {
                     <div>
                       <h2 className="text-2xl font-semibold tracking-tight">How will you work?</h2>
                       <p className="text-sm text-muted-foreground mt-1">
-                        Drive Crewship from your terminal or stay in the browser. Either way the agents need an
-                        API key below to call their model.
+                        Drive Crewship from your terminal or stay in the browser.{" "}
+                        {isLocalModel(model)
+                          ? "Your local model runs without an API key — just confirm the setup below."
+                          : "Either way the agents need an API key below to call their model."}
                       </p>
                     </div>
 
@@ -887,20 +889,22 @@ export default function OnboardingPage() {
                           on the server.
                         </p>
                       )}
-                      {ADAPTER_TOKEN_CMD[adapter] && (
+                      {!isLocalModel(model) && ADAPTER_TOKEN_CMD[adapter] && (
                         <div className="rounded-md border border-border bg-muted/40 p-2.5 font-mono text-[11px] leading-relaxed">
                           <span className="text-muted-foreground">Run this on your machine, paste the output above:</span>
                           <div className="text-emerald-500 mt-1 select-all">$ {ADAPTER_TOKEN_CMD[adapter]}</div>
                         </div>
                       )}
-                      <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        This is the{" "}
-                        <strong className="text-foreground/80">CLI token</strong>
-                        {" "}from <code className="font-mono text-foreground/80">{ADAPTER_TOKEN_CMD[adapter] ?? "<cli> setup-token"}</code>,{" "}
-                        <em>not</em> the raw account API key from the provider's console. The agents use the
-                        CLI token via the same OAuth flow your local CLI does — pasting an sk-ant-api… key
-                        here won&apos;t work.
-                      </p>
+                      {!isLocalModel(model) && (
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                          This is the{" "}
+                          <strong className="text-foreground/80">CLI token</strong>
+                          {" "}from <code className="font-mono text-foreground/80">{ADAPTER_TOKEN_CMD[adapter] ?? "<cli> setup-token"}</code>,{" "}
+                          <em>not</em> the raw account API key from the provider's console. The agents use the
+                          CLI token via the same OAuth flow your local CLI does — pasting an sk-ant-api… key
+                          here won&apos;t work.
+                        </p>
+                      )}
                     </div>
 
                     {/* Adapter install hint — only relevant in CLI mode */}
