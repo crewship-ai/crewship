@@ -131,8 +131,8 @@ The content endpoint refuses to follow symlinks (`EvalSymlinks` rejects payload_
 
   ```bash
   # Authoritative: the exact bytes the agent reads back next session.
-  crewship memory versions list  <agent-memory-path>   # newest-first, server API
-  crewship memory versions show  <version-id>           # raw content of a version
+  crewship memory versions list  <agent-memory-path>          # newest-first, server API
+  crewship memory versions show  <agent-memory-path> <sha>    # raw content of one version
 
   # Behavioural confirmation (drives the orchestrator's direct file read):
   crewship ask --agent <slug> "print <fact> from your memory, or NONE"

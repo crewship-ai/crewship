@@ -9,7 +9,7 @@ icon: "file-code"
 Crewship can be configured via a YAML file passed at startup. Environment variables override YAML values. The config is loaded and validated in `internal/config/config.go`.
 
 <Info>
-  The config file has eleven top-level sections: `server`, `ipc`, `container`, `storage`, `state`, `logging`, `auth`, `llm_proxy`, `keeper`, `license`, and `composio`. The [Complete Reference](#complete-reference) below shows every field with its default; [Section Details](#section-details) explains the load-bearing ones.
+  The config file has twelve top-level sections: `server`, `ipc`, `container`, `storage`, `state`, `logging`, `auth`, `llm_proxy`, `keeper`, `license`, `composio`, and `local_models`. The [Complete Reference](#complete-reference) below shows every field with its default; [Section Details](#section-details) explains the load-bearing ones.
 </Info>
 
 ## Loading Order
@@ -74,6 +74,9 @@ auth:
   nextjs_url: ""                # Auto-derived from port if unset
   internal_token: ""            # Auto-generated if empty
   allow_signup: false           # Allow new user registration
+  google_client_id: ""          # Google OAuth (both must be set to mount /auth/google/*)
+  google_client_secret: ""
+  bootstrap_window: 0s          # First-run /bootstrap window; 0 = open until first admin exists
 
 # LLM proxy (token management)
 llm_proxy:
@@ -98,6 +101,15 @@ composio:
   api_key: ""                   # Composio project API key ("ak_…")
   base_url: ""                  # Optional Composio API host override
   default_connector: false      # Give every agent a workspace-wide default connector
+
+# Local models (OpenAI-compatible server for agent CLIs)
+local_models:
+  base_url: ""                  # e.g. "http://host.docker.internal:11434/v1".
+                                # Handed to agent CLIs INSIDE crew containers, so it
+                                # must resolve from the container's perspective.
+                                # Distinct from keeper.ollama_url (daemon-internal).
+                                # Empty = local-model path disabled.
+                                # Env override: CREWSHIP_LOCAL_MODEL_BASE_URL
 ```
 
 ## Section Details

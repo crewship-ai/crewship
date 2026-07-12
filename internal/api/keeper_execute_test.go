@@ -558,6 +558,12 @@ func TestKeeperHandleExecute_ShellMetachars_Rejected(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("H1 VULNERABILITY: dangerous command %q was NOT rejected (got %d)", cmd, w.Code)
 		}
+		// The rejection message must describe the real blocklist
+		// (containsDangerousShellChars): ${} is NOT blocked, so listing it
+		// misleads operators triaging a rejected command.
+		if strings.Contains(w.Body.String(), "${}") {
+			t.Errorf("rejection message for %q lists ${}, which the sanitizer does not block: %s", cmd, w.Body.String())
+		}
 	}
 }
 

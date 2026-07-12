@@ -87,7 +87,7 @@ The end-to-end loop from "memory off" to "agent recalls last week's decision" is
       -d '{"query": "PostgreSQL migration strategy", "scope": "both", "limit": 5}'
     ```
 
-    `scope` is one of `agent`, `crew`, `both`. With `both`, BM25 (and dense scores, when an embedding model is configured) are RRF-merged across the two engines and each result carries its origin.
+    `scope` is one of `agent`, `crew`, `both`. With `both`, results from the two engines are merged and sorted by BM25 score, each carrying its origin. (RRF fusion of sparse + dense scores applies on the `hybrid=true` path, when an embedding model is configured — not to the default `both` merge.)
   </Step>
 
   <Step title="Let consolidation tend the index">
@@ -156,7 +156,9 @@ Budget is **dynamic**. If crew memory is empty, the agent reclaims the full budg
 </Tip>
 
 <Note>
-A workspace-scope memory tier (org-level strategy, cross-crew knowledge) is on the v0.2 roadmap.
+A workspace-scope memory tier (org-level strategy, cross-crew knowledge) is
+live: agents get a `[WORKSPACE MEMORY]` block (capped at 15% of the memory
+budget), and the CLI reads it via `--scope workspace` (or `all`).
 </Note>
 
 ## Enabling Memory
@@ -442,7 +444,7 @@ crewship memory search "PostgreSQL" -p /path -S crew -F json
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--path` | `-p` | Base path (meaning depends on scope) |
-| `--scope` | `-S` | `agent` or `crew` (workspace scope ships in v0.2) |
+| `--scope` | `-S` | `agent`, `crew`, `workspace`, or `all` |
 | `--limit` | `-l` | Max results (search only, default 10) |
 | `--format` | `-F` | `table` or `json` (search only) |
 
@@ -464,7 +466,7 @@ Agents in one crew cannot access another crew's shared memory. Container bind mo
 | Limit | Value | Description |
 |-------|-------|-------------|
 | Total memory size | 10 MB per agent | Maximum `.memory/` directory size |
-| Daily log size | 100 KB per file | Maximum single `daily/*.md` file |
+| Daily log size | 30 KB per file | Maximum single `daily/*.md` file (lowered from 100 KB so one day can't eat ~20% of a 200k context window) |
 | Crew memory reindex | Every 60 seconds | Automatic periodic reindex by Lead sidecar |
 
 ## Load-time injection scan

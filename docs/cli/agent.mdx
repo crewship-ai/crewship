@@ -61,7 +61,7 @@ Show detailed information about an agent.
 crewship agent get <slug-or-id>
 ```
 
-**Output fields:** Name, Slug, ID, Role, Role Title (only when set), Crew, Status, CLI Adapter, Tool Profile, Memory, Timeout, Created, Skills count, Credentials count. When a cron schedule is configured, additional rows appear: Schedule (`<cron> (enabled|disabled)`), Schedule Prompt, Next Run, and Last Run.
+**Output fields:** Name, Slug, ID, Role, Role Title (only when set), Crew, Status, CLI Adapter, Tool Profile, Memory, Timeout, Created, Skills count, Credentials count. When a cron schedule is configured, additional rows appear: Schedule (`<cron> (enabled|disabled)`), Schedule Prompt, Next Run, and Last Run. When `--webhook-require-timestamp` is set on the agent, a `Webhook Auth: timestamped signature required` row appears.
 
 ---
 
@@ -124,6 +124,7 @@ crewship agent update <slug-or-id> --role LEAD --memory
 | `--schedule-cron` | `string` | | Cron expression to run the agent on a schedule (e.g. `*/5 * * * *`); empty string clears it. |
 | `--schedule-prompt` | `string` | | Prompt the scheduled run sends to the agent. |
 | `--schedule-enabled` | `bool` | `false` | Enable/disable the agent's cron schedule. |
+| `--webhook-require-timestamp` | `bool` | `false` | Require inbound webhooks to use the timestamped signature scheme (rejects replayable body-only/plaintext deliveries). |
 | `--self-learning` | `bool` | `false` | Enable/disable per-agent self-learning. Goes through a separate audited endpoint (`PATCH /api/v1/agents/{id}/learning`), so it cannot be combined with any other field update in one command, and requires `--learning-reason`. |
 | `--learning-reason` | `string` | | Audit reason recorded with the `--self-learning` change (required when `--self-learning` is set). |
 | `--avatar-seed` | `string` | | Avatar seed. |

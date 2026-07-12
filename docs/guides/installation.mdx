@@ -19,8 +19,8 @@ Crewship ships as a **single binary** that embeds the Next.js frontend, SQLite d
   <Card title="Go 1.26+" icon="golang">
     Required for building from source (`go.mod` declares `go 1.26`). The binary is statically compiled with `go:embed`.
   </Card>
-  <Card title="Node.js 20+ & pnpm" icon="node-js">
-    Required only for development (frontend build). Not needed at runtime.
+  <Card title="Node.js 22+ & pnpm" icon="node-js">
+    Required only for development (frontend build; `package.json` pins `node >=22.13`). Not needed at runtime.
   </Card>
   <Card title="Docker or compatible runtime" icon="docker">
     Agent containers run on Docker, Podman, Colima, OrbStack, Rancher Desktop, or Apple Containers.
@@ -77,10 +77,14 @@ Crewship ships as a **single binary** that embeds the Next.js frontend, SQLite d
 
   <Step title="Open the web UI and complete onboarding">
     Open `http://localhost:8080` in a browser. With an empty database
-    you'll be redirected to `/onboarding`, where the wizard creates the
-    first admin user, the initial workspace, and your first crew. No
-    CLI bootstrap (`crewship init`, manual DB seeding, etc.) is part
-    of the supported install flow.
+    you'll be redirected to `/bootstrap`, which creates the **first admin
+    user** (`POST /api/v1/bootstrap`), then on to the `/onboarding` wizard
+    for the initial workspace, LLM credential, and your first crew.
+
+    Prefer the terminal? `crewship init --email you@example.com --name "You"`
+    hits the same bootstrap endpoint, and `crewship setup` mirrors the
+    onboarding wizard — see the [quickstart](/quickstart) for the CLI-first
+    path. (Manual DB seeding is *not* supported.)
   </Step>
 </Steps>
 

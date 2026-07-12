@@ -15,8 +15,12 @@ import (
 
 // Config controls memory engine behavior.
 type Config struct {
-	MaxSizeMB     int  // max total memory size in MB (default: 10)
-	DailyMaxKB    int  // max daily log size in KB (default: 100)
+	MaxSizeMB int // max total memory size in MB (default: 10)
+	// DailyMaxKB is informational only — the engine never enforces it. The
+	// effective daily-log cap is capDailyBytes in tools.go (30 KB, PR-A F1),
+	// mirrored by the legacy sidecar path's dailyCap (memory_write.go). Kept
+	// aligned at 30 so nobody reads a stale 100 out of this struct.
+	DailyMaxKB    int  // max daily log size in KB (default: 30)
 	SearchEnabled bool // enable FTS5 search (default: true)
 }
 
@@ -24,7 +28,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		MaxSizeMB:     10,
-		DailyMaxKB:    100,
+		DailyMaxKB:    30,
 		SearchEnabled: true,
 	}
 }
@@ -64,7 +68,7 @@ func New(basePath string, cfg Config) (*Engine, error) {
 		cfg.MaxSizeMB = 10
 	}
 	if cfg.DailyMaxKB == 0 {
-		cfg.DailyMaxKB = 100
+		cfg.DailyMaxKB = 30
 	}
 
 	dbPath := filepath.Join(basePath, "index.sqlite")
