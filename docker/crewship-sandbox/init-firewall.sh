@@ -108,38 +108,40 @@ ALLOWED_DOMAINS=(
 # #974-S6 (defense-in-depth): filter resolved IPs before seeding the L3
 # allowset. A domain that resolves to an internal IP at startup would
 # otherwise be silently permitted at L3 even though the sidecar's dial-time
-# SSRF guard blocks it — so a misconfigured/rebinding allowed_domain can't
-# open a hole to the host's private network. Hard ranges (link-local/metadata,
-# loopback, this-net, multicast, reserved) are ALWAYS skipped; RFC1918/CGNAT
-# are skipped unless private-endpoint egress is enabled at the instance level.
-# Default-safe: with the flag unset, only genuinely-public IPs are added, which
-# is exactly what the public ALLOWED_DOMAINS above should resolve to anyway.
-case "$(printf '%s' "${CREWSHIP_ALLOW_PRIVATE_ENDPOINTS:-}" | tr '[:upper:]' '[:lower:]')" in
-    1|true|yes|on|y|t) ALLOW_PRIVATE=1 ;;
-    *)                  ALLOW_PRIVATE=0 ;;
-esac
-
+# SSRF guard blocks it — so a misconfigured/rebinding ALLOWED_DOMAIN can't
+# open a hole to the host's private network.
+#
+# The L3 layer is UNCONDITIONALLY strict: it only ever resolves the hardcoded
+# public ALLOWED_DOMAINS above (Debian/GitHub/Docker/Anthropic/Sentry), which
+# must resolve to public IPs — a private/internal resolution there is always an
+# anomaly, never legitimate. It does NOT honor the per-crew / instance
+# private-endpoint opt-in: that opt-in permits a LAN model endpoint at the
+# SIDECAR DIAL layer (ssrfDialContext, gated by the effective allow-private
+# value), which is where a legitimate ENDPOINT_URL is dialed — not here.
+# (The container never receives CREWSHIP_ALLOW_PRIVATE_ENDPOINTS anyway: sudo
+# env_reset strips it, so any relax knob keyed on it would be dead code.)
+#
 # is_blocked_ip <ipv4> — prints a reason and returns 0 if the IP must NOT be
 # added to the allowset; returns 1 (add it) otherwise.
 is_blocked_ip() {
     local ip="$1" o1 o2 o3 o4
     IFS='.' read -r o1 o2 o3 o4 <<< "$ip"
-    # Hard tier — never overridable.
+    # Hard tier: link-local/metadata (169.254.169.254), loopback, this-net,
+    # multicast, reserved.
     if [ "$o1" -eq 0 ] || [ "$o1" -eq 127 ] \
        || { [ "$o1" -eq 169 ] && [ "$o2" -eq 254 ]; } \
        || [ "$o1" -ge 224 ]; then
         echo "hard-blocked (link-local/metadata/loopback/reserved)"
         return 0
     fi
-    # Private tier — RFC1918 + CGNAT (100.64.0.0/10), relaxable via instance opt-in.
+    # Private tier: RFC1918 + CGNAT (100.64.0.0/10) — always dropped at L3
+    # (public ALLOWED_DOMAINS never resolve here legitimately).
     if [ "$o1" -eq 10 ] \
        || { [ "$o1" -eq 172 ] && [ "$o2" -ge 16 ] && [ "$o2" -le 31 ]; } \
        || { [ "$o1" -eq 192 ] && [ "$o2" -eq 168 ]; } \
        || { [ "$o1" -eq 100 ] && [ "$o2" -ge 64 ] && [ "$o2" -le 127 ]; }; then
-        if [ "$ALLOW_PRIVATE" != "1" ]; then
-            echo "private (RFC1918/CGNAT) — set CREWSHIP_ALLOW_PRIVATE_ENDPOINTS to allow"
-            return 0
-        fi
+        echo "private (RFC1918/CGNAT) — not permitted at L3"
+        return 0
     fi
     return 1
 }
