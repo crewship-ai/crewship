@@ -66,3 +66,10 @@
 # sees the literal in the original commit. Not a real secret — its whole purpose
 # is to assert the value gets redacted from the escalation row.
 242fdbffc9b50d36cbcfd5dd84b1e3e45a491ddf:internal/api/escalation_credential_test.go:generic-api-key:151
+
+# Package-signing key provisioning (PR #942) — the PUBLIC GPG key fingerprint
+# of the Crewship Packages signing key in SIGNING.md. A fingerprint is meant
+# to be published (users verify packages against it); generic-api-key trips
+# on the 40-hex-char entropy. HEAD reformats it in spaced GPG groups so it no
+# longer matches; this entry covers the original commit in branch history.
+c3a9bd20707c23f94fe80d40c54a4d961636a574:packaging/SIGNING.md:generic-api-key:8
