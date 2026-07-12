@@ -152,3 +152,57 @@ func TestIterateChangeSummary_Format(t *testing.T) {
 		t.Errorf("summary should stay one-line short (<=160 chars), got %d", len(got))
 	}
 }
+
+// --- review-finding regression tests (PR #987 self-review) ---
+
+func TestExtractJSONObject_SkipsInvalidEarlierBrace(t *testing.T) {
+	in := `The score {see rubric} was low. Verdict: {"score": 55, "feedback": "ok"}`
+	got, err := parseGraderScore(in)
+	if err != nil {
+		t.Fatalf("parse should skip the invalid prose span: %v", err)
+	}
+	if got.Score != 55 {
+		t.Errorf("score: got %d, want 55", got.Score)
+	}
+}
+
+func TestValidateNoNewCapabilities(t *testing.T) {
+	oldDef := []byte(`{"steps":[{"id":"a","type":"agent_run"},{"id":"b","type":"http","egress_targets":["api.example.com"]}]}`)
+	// Same capabilities → ok.
+	if err := validateNoNewCapabilities(oldDef, oldDef); err != nil {
+		t.Errorf("identical capabilities should pass: %v", err)
+	}
+	// New step type → rejected.
+	if err := validateNoNewCapabilities(oldDef, []byte(`{"steps":[{"id":"a","type":"agent_run"},{"id":"c","type":"code"}]}`)); err == nil {
+		t.Error("new step type must be rejected")
+	}
+	// New egress host on an existing http step → rejected.
+	if err := validateNoNewCapabilities(oldDef, []byte(`{"steps":[{"id":"b","type":"http","egress_targets":["api.example.com","evil.com"]}]}`)); err == nil {
+		t.Error("added egress target must be rejected")
+	}
+	// Fewer capabilities → fine.
+	if err := validateNoNewCapabilities(oldDef, []byte(`{"steps":[{"id":"a","type":"agent_run"}]}`)); err != nil {
+		t.Errorf("shrinking capabilities should pass: %v", err)
+	}
+}
+
+func TestTruncateLine_RuneSafe(t *testing.T) {
+	got := truncateLine("žluťoučký kůň úpěl ďábelské ódy", 10)
+	for _, r := range got {
+		if r == '�' {
+			t.Fatalf("truncation produced invalid UTF-8: %q", got)
+		}
+	}
+}
+
+func TestBuildPrompts_RandomDelimiterAndCaps(t *testing.T) {
+	big := strings.Repeat("x", 100_000)
+	p := buildGradePrompt("rubric", "", big, "")
+	if len(p) > 40_000 {
+		t.Errorf("grade prompt must stay well under the 64KiB WS frame cap, got %d bytes", len(p))
+	}
+	p2 := buildGradePrompt("rubric", "", "out", "")
+	if strings.Contains(p2, "\n-----\n") {
+		t.Error("prompts must not use the static forgeable ----- delimiter")
+	}
+}
