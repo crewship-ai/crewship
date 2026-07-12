@@ -9,8 +9,6 @@ package api
 // → the previous secret stops validating immediately.
 
 import (
-	"database/sql"
-	"errors"
 	"net/http"
 	"time"
 )
@@ -48,11 +46,13 @@ func (h *AgentHandler) RotateWebhookSecret(w http.ResponseWriter, r *http.Reques
 		UPDATE agents SET webhook_secret = ?, updated_at = ?
 		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		secret, now, agentID, workspaceID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err != nil {
 		h.logger.Error("webhook secret rotate", "agent_id", agentID, "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
+	// Exec never yields sql.ErrNoRows — a missing/soft-deleted/cross-tenant
+	// agent shows up as a zero-row UPDATE instead.
 	if n, _ := res.RowsAffected(); n == 0 {
 		replyError(w, http.StatusNotFound, "Agent not found")
 		return

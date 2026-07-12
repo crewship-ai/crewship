@@ -31,7 +31,6 @@ One row per documented internal route, grouped by family. See [Route catalog](#r
 | `PATCH` | [/api/v1/internal/chats/\{chatId\}/message-count](#chats) | Increment message counter |
 | `PATCH` | [/api/v1/internal/chats/\{chatId\}/title](#chats) | Set chat title |
 | `GET` | [/api/v1/internal/agents/\{agentId\}/resolve](#agents-and-crews) | Resolve agent slug/ID to its full record |
-| `GET` | [/api/v1/internal/agents/\{agentId\}/webhook-secret](#agents-and-crews) | Fetch the agent's webhook HMAC secret |
 | `GET` | [/api/v1/internal/crews](#agents-and-crews) | List crews (sidecar discovery) |
 | `POST` | [/api/v1/internal/crews](#agents-and-crews) | Create a crew programmatically |
 | `POST` | [/api/v1/internal/agents](#agents-and-crews) | Create an agent programmatically |
@@ -87,11 +86,11 @@ The master token is generated at server startup if `CREWSHIP_INTERNAL_TOKEN` is 
 **Sidecars never receive the master token.** At sidecar start, the orchestrator derives a **workspace-bound token** — `wsv1.<workspace_id>.<hex(HMAC-SHA256(master, derivation_context || workspace_id))>` — and injects it via the sidecar's stdin `IPCConfig`. The `derivation_context` is a fixed, versioned domain-separation string (`"crewship internal-token workspace binding v1\x00"`); the MAC is computed over that context concatenated with the workspace ID, **not** over the workspace ID alone. Use `internaltoken.DeriveWorkspaceToken` (in `internal/auth/internaltoken`) as the canonical implementation — a custom sidecar that hashes only the workspace ID will mint tokens that fail validation. The `internalAuth` middleware validates the binding on every request: the MAC is re-derived from the embedded `workspace_id` and the in-memory master. The binding is enforced as a **mandatory request scope**:
 
 - a `?workspace_id` query parameter that disagrees with the token's bound workspace is rejected with `403` before the handler runs; and
-- when the caller omits `?workspace_id`, the middleware **injects** the bound workspace into the query — so every handler that filters by `?workspace_id` (`/agents/{id}/webhook-secret`, `/credentials`, `/agents/{id}/resolve`, `/chats/{id}/resolve`, `/crews`, …) is tenant-scoped automatically. There is no "legacy unscoped" path for a bound token.
+- when the caller omits `?workspace_id`, the middleware **injects** the bound workspace into the query — so every handler that filters by `?workspace_id` (`/credentials`, `/agents/{id}/resolve`, `/chats/{id}/resolve`, `/crews`, …) is tenant-scoped automatically. There is no "legacy unscoped" path for a bound token.
 
 Path-param mutations that don't read the query (chat message-count / title, run finalize, credential status) additionally constrain their lookup by the bound workspace; a foreign-tenant row returns `404`, never mutated. Handlers scoped by a `workspace_id` carried only in the JSON body (`/cost/record`, `/journal/emit`, `/pipelines/save`, and the issue / mission / assignment / query / escalation create handlers and the confidence report) enforce the binding in-handler via `assertInternalTokenWorkspace` (`403` on a foreign tenant), since the auth middleware cannot inspect bodies.
 
-Derivation is stateless, so tokens stay valid for the lifetime of one server boot and roll automatically with the master on restart. The unbound master token remains valid for host-side trusted callers (chat bridge, webhook secret resolver, LLM proxy monitor) that never enter a container — but only from a **loopback** origin: a master token arriving from a Docker-bridge / LAN IP is refused with `403` (capping the blast radius of a master copy leaked into a container). Set `CREWSHIP_INTERNAL_ALLOW_ANY=true` to relax both the loopback pin and the network gate when a reverse proxy rewrites `RemoteAddr`.
+Derivation is stateless, so tokens stay valid for the lifetime of one server boot and roll automatically with the master on restart. The unbound master token remains valid for host-side trusted callers (chat bridge, LLM proxy monitor) that never enter a container — but only from a **loopback** origin: a master token arriving from a Docker-bridge / LAN IP is refused with `403` (capping the blast radius of a master copy leaked into a container). Set `CREWSHIP_INTERNAL_ALLOW_ANY=true` to relax both the loopback pin and the network gate when a reverse proxy rewrites `RemoteAddr`.
 
 Workspace / crew / agent / mission scope is **not** taken from request bodies in a way that can cross tenants. The IPC layer reads it from the sidecar's `IPCConfig` (set by the orchestrator at exec time and pinned to the container) and projects it onto the request, and the token binding constrains every handler to its workspace. An agent that captured the sidecar's token cannot forge cross-tenant attribution: the token only authorizes the workspace it is cryptographically bound to.
 
@@ -145,7 +144,6 @@ The `POST` create/rotate routes are registered only when the public `CredentialH
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/api/v1/internal/agents/{agentId}/resolve` | Resolve agent slug/ID to its full record. |
-| `GET` | `/api/v1/internal/agents/{agentId}/webhook-secret` | Fetch the agent's webhook HMAC secret (used by the webhook handler to verify signatures). |
 | `GET` | `/api/v1/internal/crews` | List crews (sidecar discovery). |
 | `POST` | `/api/v1/internal/crews` | Create a crew programmatically. |
 | `POST` | `/api/v1/internal/agents` | Create an agent programmatically. |
