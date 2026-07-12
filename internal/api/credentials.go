@@ -42,7 +42,14 @@ func decryptEndpointURLForRead(credType, encValue string, logger *slog.Logger) *
 	if dec == "" || isPendingSentinel(dec) {
 		return nil
 	}
-	return &dec
+	// #961: the stored value may be a bare URL or a {baseURL,apiKey,headers}
+	// object. Echo ONLY the base URL — the auth token/headers must never
+	// leave the server through a read path.
+	baseURL, _, _, err := parseEndpointValue(dec)
+	if err != nil || baseURL == "" {
+		return nil
+	}
+	return &baseURL
 }
 
 // NewCredentialHandler creates a CredentialHandler with the given database and logger.

@@ -464,6 +464,8 @@ func init() {
 	credCreateCmd.Flags().String("provider", "", "Provider: ANTHROPIC|OPENAI|GOOGLE|GITHUB|GITLAB|VERCEL|AWS|OLLAMA|CUSTOM_CLI|NONE")
 	credCreateCmd.Flags().String("value", "", "Credential value — the URL for ENDPOINT_URL (visible in process list, prefer --value-stdin)")
 	credCreateCmd.Flags().Bool("value-stdin", false, "Read value from stdin (secure)")
+	credCreateCmd.Flags().String("auth-token", "", "ENDPOINT_URL only: bearer token sent to the endpoint (Authorization: Bearer …); stored encrypted, never displayed")
+	credCreateCmd.Flags().StringArray("header", nil, "ENDPOINT_URL only: extra request header KEY=VALUE (repeatable; use for Basic/custom-header endpoints)")
 	credCreateCmd.Flags().String("env-var-name", "", "Environment variable name")
 	credCreateCmd.Flags().Int("security-level", 0, "Keeper security level: 0 (none), 1 (low), 2 (medium), 3 (sensitive)")
 

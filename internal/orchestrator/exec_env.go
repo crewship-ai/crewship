@@ -358,7 +358,9 @@ func localModelConfigEnv(req AgentRunRequest) (string, bool) {
 		NPM     string `json:"npm"`
 		Name    string `json:"name"`
 		Options struct {
-			BaseURL string `json:"baseURL"`
+			BaseURL string            `json:"baseURL"`
+			APIKey  string            `json:"apiKey,omitempty"`
+			Headers map[string]string `json:"headers,omitempty"`
 		} `json:"options"`
 		Models map[string]struct {
 			Name string `json:"name"`
@@ -369,6 +371,14 @@ func localModelConfigEnv(req AgentRunRequest) (string, bool) {
 		Name: "Ollama (local)",
 	}
 	p.Options.BaseURL = req.LocalModelBaseURL
+	// #961: optional auth for an authenticated endpoint. apiKey → the
+	// @ai-sdk/openai-compatible driver auto-adds `Authorization: Bearer`;
+	// headers is the escape hatch for Basic/custom-header/non-bearer schemes.
+	// Both live only in this generated config JSON, never in the agent env.
+	p.Options.APIKey = req.LocalModelAPIKey
+	if len(req.LocalModelHeaders) > 0 {
+		p.Options.Headers = req.LocalModelHeaders
+	}
 	p.Models = map[string]struct {
 		Name string `json:"name"`
 	}{modelID: {Name: modelID}}

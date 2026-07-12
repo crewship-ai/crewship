@@ -51,8 +51,8 @@ func TestResolveLocalModelEndpoint_Precedence(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := resolveLocalModelEndpoint(context.Background(), db, logger, wsID, tc.assigned)
-			if got != tc.want {
-				t.Errorf("resolveLocalModelEndpoint = %q, want %q", got, tc.want)
+			if got.BaseURL != tc.want {
+				t.Errorf("resolveLocalModelEndpoint.BaseURL = %q, want %q", got.BaseURL, tc.want)
 			}
 		})
 	}
@@ -66,8 +66,8 @@ func TestResolveLocalModelEndpoint_NoneConfigured(t *testing.T) {
 	const wsID = "ws-empty"
 	mustExec(t, db, `INSERT INTO workspaces (id, name, slug) VALUES (?, 'E', 'e')`, wsID)
 
-	if got := resolveLocalModelEndpoint(context.Background(), db, logger, wsID, nil); got != "" {
-		t.Errorf("expected empty (env fallback), got %q", got)
+	if got := resolveLocalModelEndpoint(context.Background(), db, logger, wsID, nil); got.BaseURL != "" {
+		t.Errorf("expected empty (env fallback), got %q", got.BaseURL)
 	}
 }
 
@@ -90,8 +90,8 @@ func TestResolveLocalModelEndpoint_SkipsMalformedStored(t *testing.T) {
 		VALUES ('cr-bad', ?, 'bad', ?, 'ENDPOINT_URL', 'OLLAMA', 'ACTIVE', 'u1')`,
 		wsID, enc)
 
-	if got := resolveLocalModelEndpoint(context.Background(), db, logger, wsID, nil); got != "" {
-		t.Errorf("expected malformed stored URL skipped, got %q", got)
+	if got := resolveLocalModelEndpoint(context.Background(), db, logger, wsID, nil); got.BaseURL != "" {
+		t.Errorf("expected malformed stored URL skipped, got %q", got.BaseURL)
 	}
 }
 

@@ -66,6 +66,8 @@ func (info ChatInfo) ToAgentRunRequest(o AgentRunOverrides) orchestrator.AgentRu
 		CLIAdapter:         info.CLIAdapter,
 		LLMModel:           o.LLMModel,
 		LocalModelBaseURL:  info.LocalModelBaseURL,
+		LocalModelAPIKey:   info.LocalModelAPIKey,
+		LocalModelHeaders:  info.LocalModelHeaders,
 		SystemPrompt:       info.SystemPrompt,
 		UserMessage:        o.UserMessage,
 		ToolProfile:        info.ToolProfile,
