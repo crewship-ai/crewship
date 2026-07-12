@@ -47,26 +47,26 @@ func TestSeedCrews_CreatesAndLinksUser(t *testing.T) {
 		}
 	})
 
-	if len(ids) != len(seeddata.Crews) {
-		t.Fatalf("ids = %d, want %d", len(ids), len(seeddata.Crews))
+	if len(ids) != len(seeddata.ActiveCrews()) {
+		t.Fatalf("ids = %d, want %d", len(ids), len(seeddata.ActiveCrews()))
 	}
-	for _, c := range seeddata.Crews {
+	for _, c := range seeddata.ActiveCrews() {
 		if ids[c.Slug] != covCrewIDCli2 {
 			t.Errorf("crew %s id = %q", c.Slug, ids[c.Slug])
 		}
 	}
 	createCalls := stub.CallsFor("POST", "/api/v1/crews")
-	if len(createCalls) != len(seeddata.Crews) {
-		t.Errorf("crew POSTs = %d, want %d", len(createCalls), len(seeddata.Crews))
+	if len(createCalls) != len(seeddata.ActiveCrews()) {
+		t.Errorf("crew POSTs = %d, want %d", len(createCalls), len(seeddata.ActiveCrews()))
 	}
 	var body map[string]any
 	clitest.MustDecodeJSONBody(createCalls[0].Body, &body)
-	if body["slug"] != seeddata.Crews[0].Slug || body["name"] != seeddata.Crews[0].Name {
+	if body["slug"] != seeddata.ActiveCrews()[0].Slug || body["name"] != seeddata.ActiveCrews()[0].Name {
 		t.Errorf("first crew body = %v", body)
 	}
 	memberCalls := stub.CallsFor("POST", "/api/v1/crews/"+covCrewIDCli2+"/members")
-	if len(memberCalls) != len(seeddata.Crews) {
-		t.Errorf("member POSTs = %d, want %d", len(memberCalls), len(seeddata.Crews))
+	if len(memberCalls) != len(seeddata.ActiveCrews()) {
+		t.Errorf("member POSTs = %d, want %d", len(memberCalls), len(seeddata.ActiveCrews()))
 	}
 	var member map[string]string
 	clitest.MustDecodeJSONBody(memberCalls[0].Body, &member)
@@ -79,8 +79,8 @@ func TestSeedCrews_ConflictResolvesBySlugAndSkipsLinkWithoutUser(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
 	stub.OnPost("/api/v1/crews", clitest.ErrorResponse(409, "exists"))
-	existing := make([]map[string]string, 0, len(seeddata.Crews))
-	for i, c := range seeddata.Crews {
+	existing := make([]map[string]string, 0, len(seeddata.ActiveCrews()))
+	for i, c := range seeddata.ActiveCrews() {
 		existing = append(existing, map[string]string{"id": covCrewIDCli2[:19] + string(rune('1'+i)), "slug": c.Slug})
 	}
 	stub.OnGet("/api/v1/crews", clitest.JSONResponse(200, existing))
@@ -93,8 +93,8 @@ func TestSeedCrews_ConflictResolvesBySlugAndSkipsLinkWithoutUser(t *testing.T) {
 			t.Errorf("seedCrews: %v", err)
 		}
 	})
-	if len(ids) != len(seeddata.Crews) {
-		t.Fatalf("ids = %d, want %d", len(ids), len(seeddata.Crews))
+	if len(ids) != len(seeddata.ActiveCrews()) {
+		t.Fatalf("ids = %d, want %d", len(ids), len(seeddata.ActiveCrews()))
 	}
 	// userID empty → no member POSTs at all.
 	for _, call := range stub.Calls() {
@@ -111,7 +111,7 @@ func TestSeedCrews_ErrorAndCancellation(t *testing.T) {
 
 	_ = captureStdoutCovCli2(t, func() {
 		if _, err := seedCrews(context.Background(), newSeedClient(stub), ""); err == nil ||
-			!strings.Contains(err.Error(), "crew "+seeddata.Crews[0].Slug) {
+			!strings.Contains(err.Error(), "crew "+seeddata.ActiveCrews()[0].Slug) {
 			t.Errorf("got %v", err)
 		}
 	})
@@ -193,7 +193,7 @@ func TestSeedAgents_CreatesAllAgents(t *testing.T) {
 	stub.OnPost("/api/v1/agents", clitest.JSONResponse(201, map[string]string{"id": covAgentIDCli2}))
 
 	crewIDs := map[string]string{}
-	for _, c := range seeddata.Crews {
+	for _, c := range seeddata.ActiveCrews() {
 		crewIDs[c.Slug] = covCrewIDCli2
 	}
 
@@ -205,16 +205,16 @@ func TestSeedAgents_CreatesAllAgents(t *testing.T) {
 			t.Errorf("seedAgents: %v", err)
 		}
 	})
-	if len(ids) != len(seeddata.Agents) {
-		t.Fatalf("agent ids = %d, want %d", len(ids), len(seeddata.Agents))
+	if len(ids) != len(seeddata.ActiveAgents()) {
+		t.Fatalf("agent ids = %d, want %d", len(ids), len(seeddata.ActiveAgents()))
 	}
 	calls := stub.CallsFor("POST", "/api/v1/agents")
-	if len(calls) != len(seeddata.Agents) {
-		t.Fatalf("agent POSTs = %d, want %d", len(calls), len(seeddata.Agents))
+	if len(calls) != len(seeddata.ActiveAgents()) {
+		t.Fatalf("agent POSTs = %d, want %d", len(calls), len(seeddata.ActiveAgents()))
 	}
 	var body map[string]any
 	clitest.MustDecodeJSONBody(calls[0].Body, &body)
-	first := seeddata.Agents[0]
+	first := seeddata.ActiveAgents()[0]
 	if body["slug"] != first.Slug || body["crew_id"] != covCrewIDCli2 || body["agent_role"] != first.AgentRole {
 		t.Errorf("first agent body = %v", body)
 	}
@@ -243,12 +243,12 @@ func TestSeedAgents_SkipsUnknownCrewAndPropagatesErrors(t *testing.T) {
 	// Server error aborts with agent slug context.
 	stub.OnPost("/api/v1/agents", clitest.ErrorResponse(500, "boom"))
 	crewIDs := map[string]string{}
-	for _, c := range seeddata.Crews {
+	for _, c := range seeddata.ActiveCrews() {
 		crewIDs[c.Slug] = covCrewIDCli2
 	}
 	_ = captureStdoutCovCli2(t, func() {
 		if _, err := seedAgents(context.Background(), newSeedClient(stub), crewIDs); err == nil ||
-			!strings.Contains(err.Error(), "agent "+seeddata.Agents[0].Slug) {
+			!strings.Contains(err.Error(), "agent "+seeddata.ActiveAgents()[0].Slug) {
 			t.Errorf("got %v", err)
 		}
 	})
@@ -527,8 +527,8 @@ func TestSeedCrews_MemberLinkHTTPErrorTolerated(t *testing.T) {
 			t.Errorf("member failures must not abort: %v", err)
 		}
 	})
-	if len(ids) != len(seeddata.Crews) {
-		t.Errorf("ids = %d, want %d", len(ids), len(seeddata.Crews))
+	if len(ids) != len(seeddata.ActiveCrews()) {
+		t.Errorf("ids = %d, want %d", len(ids), len(seeddata.ActiveCrews()))
 	}
 	if !strings.Contains(out, "! Link user to crew") || !strings.Contains(out, "HTTP 500") {
 		t.Errorf("expected link failure lines:\n%s", out)
@@ -653,8 +653,8 @@ func TestSeedCrews_MemberLinkTransportErrorTolerated(t *testing.T) {
 			t.Errorf("member transport failures must not abort: %v", err)
 		}
 	})
-	if len(ids) != len(seeddata.Crews) {
-		t.Errorf("ids = %d, want %d", len(ids), len(seeddata.Crews))
+	if len(ids) != len(seeddata.ActiveCrews()) {
+		t.Errorf("ids = %d, want %d", len(ids), len(seeddata.ActiveCrews()))
 	}
 	if !strings.Contains(out, "! Link user to crew") || !strings.Contains(out, "Linked user to 0/") {
 		t.Errorf("expected transport failure lines:\n%s", out)
@@ -729,7 +729,7 @@ func TestSeedAgents_MidLoopCancellation(t *testing.T) {
 	defer srv.Close()
 
 	crewIDs := map[string]string{}
-	for _, c := range seeddata.Crews {
+	for _, c := range seeddata.ActiveCrews() {
 		crewIDs[c.Slug] = covCrewIDCli2
 	}
 	_ = captureStdoutCovCli2(t, func() {

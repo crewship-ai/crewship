@@ -2,6 +2,7 @@ package seeddata
 
 import (
 	"fmt"
+	"os"
 
 	"gopkg.in/yaml.v3"
 )
@@ -15,6 +16,15 @@ type CrewDef struct {
 	RuntimeImage       string `yaml:"runtime_image"`
 	DevcontainerConfig string `yaml:"devcontainer_config"`
 	MiseConfig         string `yaml:"mise_config,omitempty"`
+	// AllowPrivateEndpoints opts this crew into reaching a private/LAN
+	// local-model endpoint (e.g. host.docker.internal Ollama). Only takes
+	// effect when the operator also sets CREWSHIP_ALLOW_PRIVATE_ENDPOINTS=1.
+	AllowPrivateEndpoints bool `yaml:"allow_private_endpoints,omitempty"`
+	// RequiresEnv gates seeding of this crew: when non-empty, the crew is
+	// only created if the named env var == "1". Used for the opt-in
+	// local-Ollama demo crew (CREWSHIP_SEED_OLLAMA) so the default seed is
+	// unchanged.
+	RequiresEnv string `yaml:"requires_env,omitempty"`
 }
 
 // Crews — the 4 demo crews seeded into a fresh workspace.
@@ -54,4 +64,20 @@ func mustLoadCrews() []CrewDef {
 		panic("seeddata: builtin/crews.yaml decoded to zero crews — schema drift?")
 	}
 	return doc.Crews
+}
+
+// ActiveCrews returns the crews that should be seeded in the current
+// environment: every crew whose RequiresEnv is empty, plus gated demo crews
+// whose named env var == "1" (e.g. the local-Ollama demo via
+// CREWSHIP_SEED_OLLAMA). Keeps the default seed unchanged while letting an
+// operator opt into extra example crews.
+func ActiveCrews() []CrewDef {
+	out := make([]CrewDef, 0, len(Crews))
+	for _, c := range Crews {
+		if c.RequiresEnv != "" && os.Getenv(c.RequiresEnv) != "1" {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
 }

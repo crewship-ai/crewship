@@ -83,3 +83,20 @@ agents:
       timeout_seconds: 2400
       memory_enabled: true
       prompt_slug: riley
+    # Opt-in local-model demo agent (CREWSHIP_SEED_OLLAMA=1). Runs the OpenCode
+    # CLI against a LOCAL Ollama model — no cloud API key required. Needs the
+    # local-ai crew (bakes opencode-ai) + an ENDPOINT_URL credential pointing at
+    # host.docker.internal, plus CREWSHIP_ALLOW_PRIVATE_ENDPOINTS=1 on the server.
+    - name: Ollie
+      slug: ollie
+      crew_slug: local-ai
+      role_title: Local Model Assistant
+      agent_role: AGENT
+      cli_adapter: OPENCODE
+      llm_provider: OLLAMA
+      llm_model: ollama/qwen2.5-coder:7b
+      tool_profile: CODING
+      timeout_seconds: 1800
+      memory_enabled: true
+      prompt_slug: ollie
+      requires_env: CREWSHIP_SEED_OLLAMA
