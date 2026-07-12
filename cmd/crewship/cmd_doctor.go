@@ -174,6 +174,13 @@ counters or filter the per-check array.`,
 		results = append(results, runCheckCLIConfigServerScheme())
 		results = append(results, checkCLIConfigPerms(fixMode))
 
+		// Local-model endpoint reachability: if the workspace has an
+		// ENDPOINT_URL credential (Ollama / OpenAI-compatible), ask the server
+		// to probe it so a down/misconfigured endpoint surfaces here instead of
+		// as an opaque mid-run failure. Advisory (WARN at worst) and skipped
+		// cleanly when unauthenticated or no endpoint is configured.
+		runProbe(runCheckLocalModelEndpoint)
+
 		var failed, warned int
 		for _, r := range results {
 			switch r.status {
@@ -542,6 +549,77 @@ func checkNextAuthSecret() checkResult {
 
 // checkServerReachable does a TCP dial against the configured server's
 // host:port. We can't do a full HTTP probe because doctor must work
+// runCheckLocalModelEndpoint probes the workspace's configured local-model
+// endpoint (an ENDPOINT_URL credential — Ollama / OpenAI-compatible) by asking
+// the server to test it. This turns "my agent run failed opaquely" into an
+// up-front "endpoint X unreachable". It is advisory: INFO (skip) when the CLI
+// isn't authenticated, the server is unreachable, or no endpoint is configured;
+// PASS when reachable; WARN when configured-but-unreachable.
+func runCheckLocalModelEndpoint(ctx context.Context) checkResult {
+	const name = "local-model endpoint"
+	client := newAPIClient()
+
+	resp, err := client.Get("/api/v1/credentials")
+	if err != nil {
+		return checkResult{name: name, status: "INFO", detail: "skipped (could not reach the server to list credentials)"}
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return checkResult{name: name, status: "INFO", detail: "skipped (not authenticated — run `crewship login`)"}
+	}
+	var creds []struct {
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		Type   string `json:"type"`
+		Status string `json:"status"`
+	}
+	if err := cli.ReadJSON(resp, &creds); err != nil {
+		return checkResult{name: name, status: "INFO", detail: "skipped (could not parse credential list)"}
+	}
+
+	var endpointID, endpointName string
+	for _, c := range creds {
+		if c.Type == "ENDPOINT_URL" && (c.Status == "" || c.Status == "ACTIVE") {
+			endpointID, endpointName = c.ID, c.Name
+			break
+		}
+	}
+	if endpointID == "" {
+		return checkResult{name: name, status: "INFO", detail: "no local-model endpoint configured (skip)"}
+	}
+
+	tResp, err := client.Post("/api/v1/credentials/"+endpointID+"/test", nil)
+	if err != nil {
+		return checkResult{name: name, status: "INFO", detail: fmt.Sprintf("skipped (could not test %q)", endpointName)}
+	}
+	if err := cli.CheckError(tResp); err != nil {
+		return checkResult{name: name, status: "INFO", detail: fmt.Sprintf("skipped (test call failed for %q)", endpointName)}
+	}
+	var res struct {
+		Valid bool   `json:"valid"`
+		Error string `json:"error"`
+	}
+	if err := cli.ReadJSON(tResp, &res); err != nil {
+		return checkResult{name: name, status: "INFO", detail: "skipped (could not parse test result)"}
+	}
+	if res.Valid {
+		detail := endpointName + " reachable"
+		if res.Error != "" {
+			detail = endpointName + ": " + res.Error
+		}
+		return checkResult{name: name, status: "PASS", detail: detail}
+	}
+	msg := res.Error
+	if msg == "" {
+		msg = "unreachable"
+	}
+	return checkResult{
+		name:   name,
+		status: "WARN",
+		detail: fmt.Sprintf("%s: %s", endpointName, msg),
+		hint:   "start the endpoint (e.g. `ollama serve`) or fix the URL with `crewship credential update`",
+	}
+}
+
 // even when the user isn't logged in (unauthenticated /healthz endpoints
 // aren't universal). A successful TCP connect is enough to distinguish
 // "server is down / wrong port" from "auth issue".

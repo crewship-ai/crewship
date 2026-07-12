@@ -128,7 +128,15 @@ func (h *ModelsHandler) resolveModels(ctx context.Context, wsID, provider string
 		return curatedOrEmpty(provider), "curated"
 	}
 
-	lister, ok := h.buildLister(provider, apiKey, h.ollamaURL)
+	// For OLLAMA, list against the endpoint the workspace's agents actually
+	// use (its ENDPOINT_URL credential, #955), not just the server-global
+	// keeper daemon — so set-time model validation checks the real endpoint.
+	ollamaURL := h.ollamaURL
+	if provider == "OLLAMA" {
+		ollamaURL = h.effectiveOllamaURL(ctx, wsID)
+	}
+
+	lister, ok := h.buildLister(provider, apiKey, ollamaURL)
 	if !ok {
 		return curatedOrEmpty(provider), "curated"
 	}
@@ -140,6 +148,22 @@ func (h *ModelsHandler) resolveModels(ctx context.Context, wsID, provider string
 		return curatedOrEmpty(provider), "curated"
 	}
 	return live, "live"
+}
+
+// effectiveOllamaURL is the base URL to list OLLAMA models against for a
+// workspace: its ENDPOINT_URL credential (#955) when set, else the
+// server-global keeper daemon URL. The stored ENDPOINT_URL is
+// OpenAI-compatible (".../v1"); Ollama's tag list is the native "/api/tags",
+// so a trailing "/v1" is stripped before handing it to llm.NewOllama. A
+// non-Ollama OpenAI-compatible proxy that lacks /api/tags simply fails the
+// live list and falls back to curated (validation fail-open), unchanged.
+func (h *ModelsHandler) effectiveOllamaURL(ctx context.Context, wsID string) string {
+	ep := resolveLocalModelEndpoint(ctx, h.db, h.logger, wsID, nil)
+	if ep == "" {
+		return h.ollamaURL
+	}
+	base := strings.TrimRight(ep, "/")
+	return strings.TrimSuffix(base, "/v1")
 }
 
 // curatedOrEmpty returns the curated set for a provider, normalising a nil

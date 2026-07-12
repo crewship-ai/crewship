@@ -188,6 +188,7 @@ const OPENCODE_MODELS: ModelOption[] = [
   // upstream issues (anomalyco/opencode#1034, #4428) show tool-calling
   // reliability degrades sharply below this tier, so we don't offer a
   // free-form "any Ollama model" picker.
+  { value: "ollama/qwen2.5-coder:7b", label: "Ollama / Qwen2.5 Coder 7B (local, macOS-friendly)", category: "local" },
   { value: "ollama/qwen3-coder:30b", label: "Ollama / Qwen3 Coder 30B (local)", category: "local" },
   { value: "ollama/devstral:24b", label: "Ollama / Devstral Small 24B (local)", category: "local" },
 ]

@@ -220,6 +220,12 @@ func probeProvider(ctx context.Context, provider, ctype, value string) testResul
 		}
 
 	default:
+		// A local-model endpoint (ENDPOINT_URL, e.g. Ollama/OpenAI-compatible)
+		// is a real, testable target: the stored value IS the base URL, so
+		// actually probe it for a model list instead of claiming "valid".
+		if ctype == string(CredTypeEndpointURL) {
+			return probeLocalModelEndpoint(ctx, value)
+		}
 		return testResult{Valid: true, Error: "No validation available for this provider"}
 	}
 }

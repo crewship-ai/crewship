@@ -858,3 +858,41 @@ func nearly(a, b, eps float64) bool {
 	}
 	return d <= eps
 }
+
+// U3 (#974): a local-model ("ollama") run costs $0 but its tokens must still
+// land in the ledger so `paymaster by-agent` shows local usage. Metered $0 is a
+// valid, recorded row — not dropped.
+func TestRecord_LocalModelZeroCostRecordsTokens(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	rec, err := Record(ctx, db, &fakeEmitter{}, Call{
+		Scope:        Scope{WorkspaceID: "ws1", CrewID: "crew1", AgentID: "agent1"},
+		Provider:     "ollama",
+		Model:        "qwen2.5-coder:7b",
+		InputTokens:  120,
+		OutputTokens: 34,
+		CostUSD:      0,
+		BillingMode:  BillingMetered,
+		Tags:         map[string]any{"source": "local_model"},
+	})
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if rec.ID == "" {
+		t.Fatal("expected a ledger row for a $0 local-model call")
+	}
+
+	spend, err := SpendByAgent(ctx, db, "crew1", time.Time{}, time.Time{})
+	if err != nil {
+		t.Fatalf("SpendByAgent: %v", err)
+	}
+	var in, out int64
+	for _, s := range spend {
+		in += s.InTokens
+		out += s.OutTokens
+	}
+	if in != 120 || out != 34 {
+		t.Fatalf("SpendByAgent tokens = %d/%d, want 120/34 (local tokens must be observable at $0)", in, out)
+	}
+}
