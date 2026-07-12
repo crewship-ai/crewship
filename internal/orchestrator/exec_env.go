@@ -320,6 +320,21 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	return env
 }
 
+// effectiveLocalModelBaseURL applies the #955 precedence: a URL resolved from
+// an ENDPOINT_URL credential (already on the request) wins; the deprecated
+// server-global CREWSHIP_LOCAL_MODEL_BASE_URL env value is used only when the
+// credential path produced nothing. Returns the chosen URL and whether the
+// env fallback was taken (so the caller can emit the one-time deprecation).
+func effectiveLocalModelBaseURL(fromCredential, fromEnv string) (string, bool) {
+	if fromCredential != "" {
+		return fromCredential, false
+	}
+	if fromEnv != "" {
+		return fromEnv, true
+	}
+	return "", false
+}
+
 // localModelPrefix marks an LLMModel as targeting the operator's local
 // OpenAI-compatible endpoint. Mirrors isLocalModel in lib/cli-adapters.ts —
 // keep both in sync.

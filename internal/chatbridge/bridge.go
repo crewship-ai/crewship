@@ -72,12 +72,16 @@ type ChatInfo struct {
 	// (guided-autonomy hire waiting on operator approval). Empty when
 	// the resolver doesn't surface status (legacy paths default to
 	// permissive — only PENDING_REVIEW is treated as blocking).
-	AgentStatus        string
-	CrewID             string
-	CrewSlug           string
-	ContainerID        string
-	CLIAdapter         string
-	LLMModel           string
+	AgentStatus string
+	CrewID      string
+	CrewSlug    string
+	ContainerID string
+	CLIAdapter  string
+	LLMModel    string
+	// LocalModelBaseURL is the OpenAI-compatible local-model endpoint the
+	// server resolved from the vault (ENDPOINT_URL credential, #955). Empty
+	// → orchestrator applies the deprecated env fallback.
+	LocalModelBaseURL  string
 	SystemPrompt       string
 	ToolProfile        string
 	Credentials        []orchestrator.Credential

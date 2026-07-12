@@ -557,7 +557,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		mergedType = s
 	}
 	if _, ok := validCredentialTypes[mergedType]; !ok {
-		replyError(w, http.StatusBadRequest, "type must be one of: AI_CLI_TOKEN, API_KEY, CLI_TOKEN, SECRET, OAUTH2, USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET")
+		replyError(w, http.StatusBadRequest, "type must be one of: AI_CLI_TOKEN, API_KEY, CLI_TOKEN, SECRET, OAUTH2, USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET, ENDPOINT_URL")
 		return
 	}
 
