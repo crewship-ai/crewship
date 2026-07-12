@@ -280,7 +280,7 @@ Current Windows limitations:
 
 ## Verifying the install
 
-After any of the three paths:
+After any of these paths:
 
 ```bash
 crewship version           # SHA + build date
@@ -316,9 +316,10 @@ copy the binary to your target host. The binary has no runtime fetch
 behavior — no embedded analytics, no auto-update — so once it's on
 disk you're done.
 
-For air-gapped Docker hosts, `docker save crewship-ai/crewship:v0.1.0-beta.1`
+For air-gapped Docker hosts, `docker save ghcr.io/crewship-ai/crewship:v0.1.0-beta.1`
 into a tarball on a connected machine, transfer, then `docker load`
-on the target.
+on the target. (The image publishes only to GHCR — there is no Docker Hub
+mirror, so the `ghcr.io/` prefix is required.)
 
 ## Related
 

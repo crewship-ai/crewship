@@ -177,6 +177,7 @@ These are off by default and intended for operators debugging performance.
 | `KEEPER_ENABLED` | `false` | Enable Keeper AI gatekeeper (`true` or `1`) |
 | `KEEPER_OLLAMA_URL` | `http://localhost:11434` | Ollama API URL for Keeper LLM |
 | `KEEPER_MODEL` | _(none)_ | Model for Keeper evaluations (e.g. `claude-haiku-4-5`, or an Ollama model name). No default — an enabled Keeper with an empty model fails startup validation. |
+| `ANTHROPIC_API_KEY` | _(none)_ | **Required when `KEEPER_MODEL` (or an auxiliary-model slot) names a `claude-*` model** — the server builds an Anthropic provider for it and an empty key is a hard error / `503`. Not needed for Ollama models. |
 
 <Tip>
   Setting `KEEPER_OLLAMA_URL` auto-enables Keeper (unless `KEEPER_ENABLED` is explicitly `false`). This means you only need to set the URL to activate Keeper.
@@ -223,6 +224,9 @@ See [Paymaster](/guides/paymaster) for the full billing-mode model and [Migratio
 |----------|---------|-------------|
 | `CREWSHIP_CONSOLIDATE_HITL` | (unset — off) | Set to `1`/`true`/`yes`/`on` to route the [memory consolidator](/guides/consolidate) through a human-in-the-loop approval step instead of writing directly. Read on every tick so it can be flipped without a restart. Read by `internal/consolidate/runner.go`. |
 | `CREWSHIP_PIPELINE_RUNNER` | (unset — orchestrator runner) | Selects the pipeline execution backend. Set to `llm_direct` to run pipeline steps through the in-process LLM runner instead of spawning orchestrator containers (also the automatic fallback when no container provider is available). Read by `cmd/crewship/cmd_start.go`. |
+| `CREWSHIP_PIPELINE_RESUME` | (unset — on) | Set to `off` to disable resuming interrupted pipeline runs after a server restart. Read by `cmd/crewship/cmd_start.go` / `internal/pipeline/runs.go`. |
+| `CREWSHIP_MAX_CONCURRENT_RUNS` | `8` | Caps how many agent runs execute concurrently server-wide; excess runs queue. The primary throughput / memory-protection knob for busy instances. Non-positive or unparseable values are ignored. Read by `internal/orchestrator/orchestrator.go`. |
+| `GITHUB_TOKEN` | (unset) | Any GitHub PAT raises the API rate-limit budget for the release probes behind `crewship self-update` / update checks. Useful on shared or CI hosts that exhaust the anonymous limit. Read by `internal/update/`. |
 | `CREWSHIP_FORECAST_RATES` | (built-in rate table) | Overrides the provider price table used by `crewship cost forecast`. Format: `Name,inPerM,outPerM;Name,inPerM,outPerM;…` (USD per million tokens). Malformed entries fall back to the defaults with a one-time stderr warning. Read by `cmd/crewship/cmd_cost_forecast.go`. |
 | `CREWSHIP_QUERY_DEPTH` | `0` | Default crew-to-crew query recursion depth when a request does not specify one. Hard-capped at `2` (deeper queries are rejected to prevent loops). Read by `internal/sidecar/query.go`. |
 | `CREWSHIP_NOTIFY_LONG_RUN` | (built-in threshold) | Threshold in **seconds** above which the CLI emits a "long run" notification for an agent run. Read by `cmd/crewship/cmd_notify.go`. |
@@ -306,6 +310,10 @@ These configure the `crewship` CLI on a developer/operator machine (not the serv
 | `CREWSHIP_CONFIG` | `~/.crewship/cli-config.yaml` | Path to the CLI config file. Pin it to a per-instance path when running multiple clones on the same machine so their sessions don't clobber each other. |
 | `CREWSHIP_WORKSPACE` | (unset) | Default workspace ID/slug for commands that take one. |
 | `CREWSHIP_DEFAULT_AGENT` | (unset) | Default agent the CLI targets when a command omits an explicit agent. |
+| `CREWSHIP_TOKEN` | (unset) | Explicit CLI auth token — short-circuits the stored login entirely. The way to authenticate in CI or from an agent without a `crewship login` session. |
+| `CREWSHIP_PROFILE` | (unset) | Select a named server profile from `cli-config.yaml` (`servers:` map). Resolution: `--profile` flag → this var → `directory_profiles` match → `current`. Manage with `crewship server`. |
+| `CREWSHIP_HTTP_TIMEOUT` | `30` | CLI per-request timeout in **seconds**. Raise on slow links or long-running server calls. |
+| `CREWSHIP_ALLOW_SERVER_MISMATCH` | (unset) | Set to `1` to allow sending the stored auth token to a `--server` host different from the one it was issued for (normally refused as a token-leak guard). Same as the `--server-allow-mismatch` flag. |
 
 ## Installer
 

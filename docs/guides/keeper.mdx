@@ -147,15 +147,25 @@ Keeper follows a strict fail-closed philosophy:
 
 The `/keeper/execute` endpoint allows agents to run shell commands with credentials injected as environment variables. This is the most security-sensitive path:
 
+<Note>
+Execute only works with **`type: SECRET`** credentials. The Keeper secrets
+store loads exclusively `type='SECRET'` rows (`internal/keeper/secrets/store.go`)
+— an execute request naming an `API_KEY`, `CLI_TOKEN`, or any other type fails
+with "credential not available in secrets store" even after an ALLOW decision.
+Non-SECRET credentials reach agents through their normal delivery paths
+(env vars, `/secrets/` files) instead.
+</Note>
+
 <Steps>
   <Step title="Agent sends execute request">
     ```json
     {
-      "credential_name": "GH_TOKEN",
-      "intent": "Push code to the repository",
-      "command": "git push origin main"
+      "credential_name": "DB_PASSWORD",
+      "intent": "Run the nightly cleanup against the production database",
+      "command": "psql -c 'DELETE FROM sessions WHERE expired'"
     }
     ```
+    (`DB_PASSWORD` is a `type: SECRET` credential — see the Note above.)
   </Step>
 
   <Step title="Sidecar validates">

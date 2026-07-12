@@ -58,8 +58,8 @@ type MemoryWriteRejection struct {
 // AGENT.md / CREW.md get the 4000-char ceiling (the per-tier prompt
 // budget the orchestrator allocates each); pins.md gets a larger
 // 8000 because it accumulates curated entries forever; daily logs
-// are bounded per-day by the engine's DailyMaxKB (defaults to 100
-// KB) — the handler defers to that via a 100_000-byte cap.
+// are bounded per-day by dailyCap below (30 KB, matching the native
+// dispatcher's capDailyBytes in internal/memory/tools.go).
 //
 // 0 means "no per-call cap" — but the handler still wraps these
 // in WriteConfig.MaxBytes so a misconfigured tier is fail-safe.

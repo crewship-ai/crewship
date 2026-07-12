@@ -95,8 +95,10 @@ Detail: [Container isolation](/security/container-isolation).
 
 The agent never sees raw credentials. Instead:
 
-1. **Credentials live in the host's encrypted store** (`internal/sidecar/credstore`)
-   encrypted with `AES-256-GCM` using the operator's `ENCRYPTION_KEY`.
+1. **Credentials are encrypted at rest in the host database** with
+   `AES-256-GCM` using the operator's `ENCRYPTION_KEY` (`internal/encryption`);
+   the sidecar holds the decrypted working set in an **in-memory** store
+   (`internal/sidecar/credstore`) that never touches disk.
 2. **A per-agent sidecar** runs alongside the agent container, also as
    a non-root user (UID 1002).
 3. **The agent's outbound HTTP traffic is proxied through the sidecar.**
@@ -106,7 +108,7 @@ The agent never sees raw credentials. Instead:
    - Injects the `Authorization` header on the way out.
    - Forwards the response back.
 4. **The sidecar's credentials are loaded once at startup over stdin**
-   as a base64-encoded JSON payload. They are never written to the
+   as a JSON payload. They are never written to the
    agent container's environment.
 
 The agent therefore cannot:
