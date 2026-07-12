@@ -306,6 +306,7 @@ These configure the `crewship` CLI on a developer/operator machine (not the serv
 | `CREWSHIP_CONFIG` | `~/.crewship/cli-config.yaml` | Path to the CLI config file. Pin it to a per-instance path when running multiple clones on the same machine so their sessions don't clobber each other. |
 | `CREWSHIP_WORKSPACE` | (unset) | Default workspace ID/slug for commands that take one. |
 | `CREWSHIP_DEFAULT_AGENT` | (unset) | Default agent the CLI targets when a command omits an explicit agent. |
+| `CREWSHIP_NO_SLUG_CACHE` | (unset — cache on) | Set to `1` to disable the workspace slug→ID disk cache (`~/.crewship/cache/workspace_slugs.json`, 15-minute TTL). The cache saves one `/workspaces` preflight round-trip per invocation when `--workspace` is a slug; disable it if you delete and recreate workspaces under the same slug in rapid succession. Read by `internal/cli/slugcache.go`. |
 
 ## Installer
 

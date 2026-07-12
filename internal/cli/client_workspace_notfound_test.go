@@ -100,6 +100,7 @@ func TestWorkspaceSlugPreflightErrorFallsBack(t *testing.T) {
 // TestWorkspaceSlugResolvesToCUID confirms the happy path still resolves the
 // slug to the CUID via the preflight and injects it as workspace_id.
 func TestWorkspaceSlugResolvesToCUID(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // isolate the slug disk cache
 	const cuid = "cabcdefghijklmnopqrst"
 	var gotWorkspaceParam string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
