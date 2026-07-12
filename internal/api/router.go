@@ -45,6 +45,19 @@ func (b *keeperWSBroadcaster) BroadcastKeeperEvent(workspaceID string, event map
 	broadcastChannelEvent(b.hub, "keeper", workspaceID, "keeper_event", event)
 }
 
+// BroadcastInboxUpdated invalidates the workspace inbox queries in realtime
+// after a Keeper inbox write — the same `inbox.updated` event every other
+// inbox producer emits (payload is advisory; the client refetches on any).
+func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source string) {
+	broadcastWorkspaceEvent(b.hub, workspaceID, "inbox.updated", map[string]string{"source": source})
+}
+
+// NotifyUser pings a named user's channel so a targeted security contact
+// sees the Keeper finding without watching the workspace-wide feed.
+func (b *keeperWSBroadcaster) NotifyUser(userID string, event map[string]string) {
+	broadcastChannelEvent(b.hub, "user", userID, "notification.created", event)
+}
+
 type Router struct {
 	mux    *http.ServeMux
 	db     *sql.DB

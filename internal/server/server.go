@@ -774,7 +774,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			// installed) but skipping the wire when the evaluator was
 			// dropped during bootstrap keeps the boot logs honest.
 			if evals.behavior != nil {
-				orch.SetPostToolCallObserver(newPostToolCallObserver(logger, s.journalWriter))
+				orch.SetPostToolCallObserver(newPostToolCallObserver(logger, s.journalWriter, deps.DB))
 				logger.Info("keeper: orchestrator tool-call observer wired to behaviorhook")
 			}
 

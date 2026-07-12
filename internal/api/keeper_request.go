@@ -9,12 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/keeper/governance"
 )
 
 type keeperRequestBody struct {
@@ -294,19 +296,33 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// flip the agent's credential request semantics from "ESCALATE
 	// pending operator" to "transient transport error → retry" which is
 	// the wrong recovery for the same outcome.
+	// Workspace watchdog governance (#1001 M0): a configured security
+	// contact routes the snitch at a named admin instead of the MANAGER
+	// role fanout, and an opted-in workspace also gets high-risk DENYs.
+	gov, govConfigured, gerr := governance.Get(r.Context(), h.db, body.WorkspaceID)
+	if gerr != nil {
+		h.logger.Warn("keeper: governance lookup failed", "error", gerr, "workspace_id", body.WorkspaceID)
+	}
+	targetRole := "MANAGER"
+	if gov.SecurityContactUserID != "" {
+		targetRole = "" // targeted item; role fanout would double-deliver
+	}
+
+	inboxWritten := false
 	if gkResp.Decision == string(keeper.DecisionEscalate) {
 		inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
-			WorkspaceID: body.WorkspaceID,
-			Kind:        inbox.KindEscalation,
-			SourceID:    reqID,
-			TargetRole:  "MANAGER",
-			Title:       fmt.Sprintf("Keeper escalation: %s requested %s (risk %d)", agentName, credName, gkResp.RiskScore),
-			BodyMD:      gkResp.Reason,
-			SenderType:  "system",
-			SenderID:    "keeper",
-			SenderName:  "Keeper",
-			Priority:    "high",
-			Blocking:    true,
+			WorkspaceID:  body.WorkspaceID,
+			Kind:         inbox.KindEscalation,
+			SourceID:     reqID,
+			TargetUserID: gov.SecurityContactUserID,
+			TargetRole:   targetRole,
+			Title:        fmt.Sprintf("Keeper escalation: %s requested %s (risk %d)", agentName, credName, gkResp.RiskScore),
+			BodyMD:       gkResp.Reason,
+			SenderType:   "system",
+			SenderID:     "keeper",
+			SenderName:   "Keeper",
+			Priority:     "high",
+			Blocking:     true,
 			Payload: map[string]interface{}{
 				"request_id":      reqID,
 				"request_type":    "access",
@@ -320,6 +336,57 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				"risk_score":      gkResp.RiskScore,
 			},
 		})
+		inboxWritten = true
+	}
+
+	// High-risk DENY notify (#1001 M0): opt-in per workspace. A DENY is
+	// already enforced — the item is informational (non-blocking), it
+	// exists so the admin *hears about* an agent probing past its fence
+	// instead of discovering it in the log next week.
+	if govConfigured && gov.Enabled &&
+		gkResp.Decision == string(keeper.DecisionDeny) && gkResp.RiskScore >= gov.DenyNotifyMinRisk {
+		inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+			WorkspaceID:  body.WorkspaceID,
+			Kind:         inbox.KindEscalation,
+			SourceID:     reqID,
+			TargetUserID: gov.SecurityContactUserID,
+			TargetRole:   targetRole,
+			Title:        fmt.Sprintf("Keeper high-risk DENY: %s requested %s (risk %d)", agentName, credName, gkResp.RiskScore),
+			BodyMD:       gkResp.Reason,
+			SenderType:   "system",
+			SenderID:     "keeper",
+			SenderName:   "Keeper",
+			Priority:     "high",
+			Blocking:     false,
+			Payload: map[string]interface{}{
+				"request_id":      reqID,
+				"request_type":    "access",
+				"agent_id":        body.RequestingAgentID,
+				"agent_name":      agentName,
+				"credential_id":   body.CredentialID,
+				"credential_name": credName,
+				"security_level":  secLevel,
+				"intent":          body.Intent,
+				"reason":          gkResp.Reason,
+				"risk_score":      gkResp.RiskScore,
+			},
+		})
+		inboxWritten = true
+	}
+
+	// Realtime push (#1001 M0): Keeper was the only inbox producer that
+	// didn't broadcast inbox.updated — findings appeared only on manual
+	// refresh. Push the workspace invalidation and, when a security
+	// contact is configured, ping their user channel directly.
+	if inboxWritten && h.broadcaster != nil {
+		h.broadcaster.BroadcastInboxUpdated(body.WorkspaceID, "keeper")
+		if gov.SecurityContactUserID != "" {
+			h.broadcaster.NotifyUser(gov.SecurityContactUserID, map[string]string{
+				"kind":         "keeper_" + strings.ToLower(gkResp.Decision),
+				"workspace_id": body.WorkspaceID,
+				"title":        fmt.Sprintf("Keeper %s: %s requested %s (risk %d)", gkResp.Decision, agentName, credName, gkResp.RiskScore),
+			})
+		}
 	}
 
 	h.logger.Info("keeper: decision",
