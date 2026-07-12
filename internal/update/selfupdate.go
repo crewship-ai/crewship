@@ -114,9 +114,26 @@ func FormulaFromPath(execPath string, cliOnly bool) string {
 	return "crewship"
 }
 
+// releaseDownloadBase is the release asset host; a var so tests can point
+// the download path at a local httptest server.
+var releaseDownloadBase = "https://github.com/crewship-ai/crewship/releases/download"
+
 // downloadURL is the release asset URL for a given tag + filename.
 func downloadURL(tag, name string) string {
-	return fmt.Sprintf("https://github.com/crewship-ai/crewship/releases/download/%s/%s", tag, name)
+	return fmt.Sprintf("%s/%s/%s", releaseDownloadBase, tag, name)
+}
+
+// signatureVerifyOpts parameterizes the checksums.txt signature gate; the
+// zero value selects production pins (embedded Fulcio roots, release.yml
+// identity). Tests swap in their own PKI.
+var signatureVerifyOpts SignatureVerifyOptions
+
+// skipSignatureVerify is the operator escape hatch for the cosign gate —
+// e.g. a fork whose releases sign under a different workflow identity, or
+// an air-gapped mirror without signature assets. Ships with the loud
+// warning it deserves.
+func skipSignatureVerify() bool {
+	return os.Getenv("CREWSHIP_SKIP_SIGNATURE_VERIFY") == "1"
 }
 
 // VerifyChecksum confirms sha256(data) matches the entry for `name` in a
@@ -264,6 +281,25 @@ func PrepareInstallerUpdate(ctx context.Context, tag, exePath string, cliOnly bo
 	checksums, err := httpGet(ctx, downloadURL(tag, "checksums.txt"))
 	if err != nil {
 		return nil, fmt.Errorf("download checksums.txt: %w", err)
+	}
+	// Supply-chain gate: checksums.txt ships from the SAME origin as the
+	// archive, so its sha256 alone only proves integrity, not authenticity.
+	// The cosign keyless signature pins it to this repo's release workflow
+	// identity (see sigverify.go) before anything derived from it is trusted.
+	if skipSignatureVerify() {
+		fmt.Fprintln(os.Stderr, "WARNING: CREWSHIP_SKIP_SIGNATURE_VERIFY=1 — release signature NOT verified; you are trusting the download origin alone")
+	} else {
+		sig, err := httpGet(ctx, downloadURL(tag, "checksums.txt.sig"))
+		if err != nil {
+			return nil, fmt.Errorf("download checksums.txt.sig (set CREWSHIP_SKIP_SIGNATURE_VERIFY=1 only if you fully trust the origin): %w", err)
+		}
+		certPEM, err := httpGet(ctx, downloadURL(tag, "checksums.txt.pem"))
+		if err != nil {
+			return nil, fmt.Errorf("download checksums.txt.pem: %w", err)
+		}
+		if err := VerifyDetachedSignature(checksums, sig, certPEM, signatureVerifyOpts); err != nil {
+			return nil, fmt.Errorf("verify checksums.txt signature: %w", err)
+		}
 	}
 	if err := VerifyChecksum(archive, asset, string(checksums)); err != nil {
 		return nil, err

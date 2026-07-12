@@ -72,6 +72,11 @@ ehthumbs.db
 # Misc
 *.pem
 *.key
+# …but PUBLIC certificates (no keys) that the self-update signature gate
+# embeds and tests against are tracked deliberately:
+!internal/update/fulcio_v1.crt.pem
+!internal/update/fulcio_intermediate_v1.crt.pem
+!internal/update/testdata/real_checksums.txt.pem
 *.db-shm
 *.db-wal
 data/
