@@ -1,5 +1,6 @@
 "use client"
 
+import { resolveWsBase } from "@/lib/server-base"
 import {
   createContext,
   useCallback,
@@ -126,15 +127,12 @@ const VALID_REALTIME_TYPES: Set<string> = new Set([
 const RealtimeContext = createContext<RealtimeContextValue | null>(null)
 
 function getWsUrl(): string {
-  // During SSR window is undefined — return empty string so useWebSocket
-  // skips connecting. The client-side re-render will compute the real URL.
-  if (typeof window === "undefined") return ""
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
-  // Always use the same host:port as the page.  In dev mode the custom dev
-  // server (dev-server.mjs) proxies /ws to the Go backend, so there is no
-  // need to redirect to a different port.  In production the Go binary
-  // serves both the static frontend and the WebSocket on the same port.
-  return `${proto}//${window.location.host}/ws`
+  // During SSR resolveWsBase() returns "" so useWebSocket skips connecting;
+  // the client-side re-render computes the real URL. Same-origin default
+  // uses the page host:port (dev-server.mjs proxies /ws; in production the
+  // Go binary serves both), a desktop shell's server base overrides it.
+  const base = resolveWsBase()
+  return base === "" ? "" : `${base}/ws`
 }
 
 /**

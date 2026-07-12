@@ -24,6 +24,7 @@
  */
 
 import { bodyIsReplayable, inputIsReplayable } from "./fetch-with-retry"
+import { getAuthMode, getBearerToken, getServerOrigin, withServerBase } from "./server-base"
 
 const REFRESH_PATH = "/api/auth/token/refresh"
 const EVENT_SESSION_EXPIRED = "auth:session-expired"
@@ -53,6 +54,9 @@ export interface ApiFetchInit extends Omit<RequestInit, "credentials"> {
  *  Allowed inputs:
  *    - string starting with `/` (same-origin relative path)
  *    - URL whose origin matches window.location.origin
+ *    - URL whose origin matches the configured server base (desktop shell /
+ *      remote-server mode, lib/server-base.ts) — the ONE additional origin
+ *      the credentials may travel to, chosen by the operator, not by data.
  *    - Request object whose URL matches the above
  *
  *  Server-side renders (window === undefined) skip the origin check
@@ -81,17 +85,27 @@ function assertSameOrigin(input: RequestInfo | URL): string {
   } catch {
     return reject()
   }
-  if (parsed.origin !== window.location.origin) return reject()
+  if (parsed.origin !== window.location.origin && parsed.origin !== getServerOrigin()) {
+    return reject()
+  }
   return parsed.toString()
 }
 
 /** Centralised fetch with refresh-on-401-once + session-expired event. */
 export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): Promise<Response> {
   assertSameOrigin(input)
+  // Remote-server mode (desktop shell): prefix relative /api/* string paths
+  // with the configured base. Same-origin default leaves input untouched.
+  const target: RequestInfo | URL = typeof input === "string" ? withServerBase(input) : input
+  const bearer = getAuthMode() === "bearer"
   // credentials goes AFTER the spread so callers can't override —
   // {credentials: "include", ...init} would let init.credentials win
-  // and silently disable cookie auth.
-  const initWithCreds: RequestInit = { ...init, credentials: "include" }
+  // and silently disable cookie auth. In bearer mode (desktop shell)
+  // cookies are omitted — custom-scheme webview origins have no shared
+  // cookie jar — and the shell-provisioned token rides Authorization.
+  const initWithCreds: RequestInit = bearer
+    ? { ...init, credentials: "omit", headers: bearerHeaders(init?.headers) }
+    : { ...init, credentials: "include" }
   // Strip our internal-only flag before handing to fetch — `RequestInit`
   // would tolerate the extra field at runtime but it's cleaner not to
   // ship it across the wire.
@@ -99,7 +113,16 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
     delete (initWithCreds as ApiFetchInit).skipRefresh
   }
 
-  const res = await fetch(input, initWithCreds)
+  const res = await fetch(target, initWithCreds)
+  // Bearer tokens are long-lived CLI-class credentials: there is no cookie
+  // rotation to attempt, so a 401 is terminal for this request. Emit the
+  // session-expired signal so the shell can re-pair.
+  if (bearer) {
+    if (res.status === 401 && !init?.skipRefresh) {
+      emitSessionExpired((await peekReason(res)) ?? "session_expired")
+    }
+    return res
+  }
   if (res.status !== 401 || init?.skipRefresh) return res
 
   // Reading reason is best-effort. Server emits {"error": "<reason>"}
@@ -164,7 +187,18 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
 
   // Refresh wrote new cookies; the retry inherits them via the same
   // `credentials: include` and lands on a fresh access token.
-  return fetch(input, initWithCreds)
+  return fetch(target, initWithCreds)
+}
+
+/** bearerHeaders merges the shell token into caller headers without
+ *  clobbering an explicit Authorization. */
+function bearerHeaders(headers?: HeadersInit): Headers {
+  const h = new Headers(headers)
+  const token = getBearerToken()
+  if (token && !h.has("Authorization")) {
+    h.set("Authorization", `Bearer ${token}`)
+  }
+  return h
 }
 
 /** RefreshResult separates the three outcomes that need different
@@ -210,7 +244,10 @@ export async function tryRefresh(): Promise<RefreshResult> {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS)
     try {
-      const r = await fetch(REFRESH_PATH, {
+      // withServerBase: remote-server cookie mode refreshes against the
+      // configured server; same-origin default is byte-identical. (Bearer
+      // mode never reaches tryRefresh — apiFetch returns early.)
+      const r = await fetch(withServerBase(REFRESH_PATH), {
         method: "POST",
         credentials: "include",
         headers: { Accept: "application/json" },

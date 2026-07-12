@@ -1,5 +1,6 @@
 "use client"
 
+import { resolveWsBase } from "@/lib/server-base"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Terminal } from "@xterm/xterm"
 import { FitAddon } from "@xterm/addon-fit"
@@ -68,16 +69,20 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
         const { token } = await tokenRes.json()
         if (!token || cancelled) return
 
-        // Build WebSocket URL.
-        const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
-        let host = window.location.host
-        // Dev mode: Next.js on :3001/:3011, backend on :8080/:8081
-        const devPort = parseInt(window.location.port, 10)
-        if (devPort >= 3001 && devPort <= 3019) {
-          const backendPort = 8080 + (devPort - 3001)
-          host = window.location.hostname + ":" + backendPort
+        // Build WebSocket URL via the server-base seam; the dev-port
+        // remap below only applies to the same-origin default (the shell
+        // base already points at the backend directly).
+        let wsBase = resolveWsBase()
+        if (wsBase === `ws://${window.location.host}` || wsBase === `wss://${window.location.host}`) {
+          // Dev mode: Next.js on :3001/:3011, backend on :8080/:8081
+          const devPort = parseInt(window.location.port, 10)
+          if (devPort >= 3001 && devPort <= 3019) {
+            const backendPort = 8080 + (devPort - 3001)
+            const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
+            wsBase = `${proto}//${window.location.hostname}:${backendPort}`
+          }
         }
-        const wsUrl = `${proto}//${host}/ws/terminal`
+        const wsUrl = `${wsBase}/ws/terminal`
 
         // Create terminal.
         const terminal = new Terminal({

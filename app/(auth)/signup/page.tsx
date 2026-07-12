@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { serverFetch } from "@/lib/server-base"
 
 export default function SignupPage() {
   const [fullName, setFullName] = useState("")
@@ -30,8 +31,8 @@ export default function SignupPage() {
 
     setLoading(true)
 
-    // eslint-disable-next-line no-restricted-syntax -- pre-session signup endpoint: no session to refresh; a 4xx here is a validation error, not an expiry
-    const res = await fetch("/api/v1/auth/signup", {
+     
+    const res = await serverFetch("/api/v1/auth/signup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ full_name: fullName, email, password }),

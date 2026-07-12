@@ -35,6 +35,7 @@ import {
   useInvalidateDashboard,
   DASHBOARD_THROUGHPUT_PARAMS, DASHBOARD_COST_PARAMS,
 } from "@/hooks/use-dashboard-data"
+import { serverFetch } from "@/lib/server-base"
 import {
   crewColor, STATUS_PALETTE, formatCost, formatRelativeShort,
 } from "./dashboard-helpers"
@@ -54,8 +55,8 @@ export default function DashboardPage() {
 
   // ── Onboarding gate ────────────────────────────────────────────────
   useEffect(() => {
-    // eslint-disable-next-line no-restricted-syntax -- onboarding gate: redirects to /onboarding before the steady-state app loads; raw fetch by design
-    fetch("/api/v1/onboarding/status")
+     
+    serverFetch("/api/v1/onboarding/status")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data && !data.completed) {

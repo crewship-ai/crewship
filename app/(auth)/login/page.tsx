@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { serverFetch } from "@/lib/server-base"
 
 export default function LoginPage() {
   return (
@@ -71,8 +72,8 @@ function LoginForm() {
   useEffect(() => {
     let cancelled = false
 
-    // eslint-disable-next-line no-restricted-syntax -- pre-session login gate: runs before any session exists; must not enter apiFetch's 401-refresh/redirect cycle
-    void fetch("/api/v1/system/setup-status")
+     
+    void serverFetch("/api/v1/system/setup-status")
       .then(async (r) => (r.ok ? r.json() : { needs_bootstrap: false, allow_signup: true }))
       .then((data: { needs_bootstrap?: boolean; allow_signup?: boolean }) => {
         if (cancelled) return
@@ -91,8 +92,8 @@ function LoginForm() {
         if (!cancelled) setGateChecked(true)
       })
 
-    // eslint-disable-next-line no-restricted-syntax -- pre-session auth-provider probe; raw fetch by design (no session to refresh)
-    void fetch("/api/v1/auth/google/status")
+     
+    void serverFetch("/api/v1/auth/google/status")
       .then(async (r) => {
         if (!r.ok) throw new Error("google status check failed")
         const data: { enabled?: boolean } = await r.json()
