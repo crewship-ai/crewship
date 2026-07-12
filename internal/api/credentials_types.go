@@ -14,9 +14,9 @@ package api
 // inject into an agent container.
 //
 // Adding a new type: add it here, add its validation case in
-// validateCredentialPayload, then update the wizard's PROVIDER_TILES
-// map in components/features/credentials/add-credential-wizard/types.ts
-// so users can actually pick it.
+// validateCredentialPayload, then extend the type handling in
+// components/features/credentials/credential-form.tsx so users can
+// actually pick it.
 
 import (
 	"encoding/json"

@@ -33,8 +33,8 @@ Adding a new type:
 2. Add the mount branch to `buildCredFileScript` in
    `internal/orchestrator/exec_sidecar.go` (or document why the type is
    sidecar-proxy-only).
-3. Add the wizard tile + branching in
-   `components/features/credentials/add-credential-wizard/`.
+3. Extend the type handling in
+   `components/features/credentials/credential-form.tsx`.
 4. Update the table above.
 
 ## Schema (DB migration v93)
