@@ -115,6 +115,36 @@ func TestDeleteChat_AdminDeletesAnyChat(t *testing.T) {
 	}
 }
 
+func TestDeleteChat_WithAssignments409(t *testing.T) {
+	h, userID, wsID := covAUHandler(t)
+	seedChatForDelete(t, h, wsID, "agent-dc5", "chat-dc-5", userID)
+	// A lead delegated from this chat — assignments.chat_id is a NOT NULL
+	// FK with no cascade, and the rows are audit history.
+	if _, err := h.db.Exec(
+		`INSERT INTO agents (id, workspace_id, name, slug, status) VALUES ('agent-sub', ?, 'Sub', 'sub', 'IDLE')`, wsID); err != nil {
+		t.Fatalf("seed sub agent: %v", err)
+	}
+	if _, err := h.db.Exec(
+		`INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task)
+		 VALUES ('asg-1', ?, 'chat-dc-5', 'agent-dc5', 'agent-sub', 'do the thing')`, wsID); err != nil {
+		t.Fatalf("seed assignment: %v", err)
+	}
+
+	rr := deleteChatReq(t, h, userID, wsID, "OWNER", "agent-dc5", "chat-dc-5")
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("delete with assignments: status = %d, want 409 (body: %s)", rr.Code, rr.Body.String())
+	}
+	var n int
+	_ = h.db.QueryRow(`SELECT COUNT(*) FROM chats WHERE id = 'chat-dc-5'`).Scan(&n)
+	if n != 1 {
+		t.Error("chat with delegation history must survive")
+	}
+	_ = h.db.QueryRow(`SELECT COUNT(*) FROM assignments WHERE id = 'asg-1'`).Scan(&n)
+	if n != 1 {
+		t.Error("assignment audit row must survive")
+	}
+}
+
 func TestDeleteChat_WrongAgentOrWorkspace404(t *testing.T) {
 	h, userID, wsID := covAUHandler(t)
 	seedChatForDelete(t, h, wsID, "agent-dc4", "chat-dc-4", userID)

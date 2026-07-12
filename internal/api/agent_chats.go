@@ -312,6 +312,25 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Delegation records pin the chat: assignments.chat_id is a NOT NULL
+	// FK with no ON DELETE clause, so deleting a chat a lead ever
+	// delegated from would either 500 on the constraint or (with a
+	// cascade) silently destroy the delegation audit trail. Refuse with
+	// a clear 409 instead — such chats are operational history, not
+	// clutter.
+	var assignmentCount int
+	if err := h.db.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM assignments WHERE chat_id = ?`, chatID).Scan(&assignmentCount); err != nil {
+		h.logger.Error("delete chat: assignment check", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if assignmentCount > 0 {
+		replyError(w, http.StatusConflict,
+			"Chat has delegation records (assignments) and cannot be deleted — it is part of the audit trail")
+		return
+	}
+
 	// Chat + messages + read cursors go together — a partial delete would
 	// leave orphaned history rows no surface can reach. The per-user
 	// "agent replied" inbox items go too (source_id = chat_reply_<chat>_<user>,
