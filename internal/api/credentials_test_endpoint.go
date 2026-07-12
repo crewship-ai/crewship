@@ -33,7 +33,16 @@ type testResult struct {
 // probeProvider runs the provider-specific HTTP check and returns a
 // structured result. Transport errors fold into result.Error so the
 // HTTP layer can always emit 200.
-func probeProvider(ctx context.Context, provider, ctype, value string) testResult {
+// dialEndpoint gates the ONE probe that dials a caller-supplied host: an
+// ENDPOINT_URL's reachability check. It must be false on the unauthenticated-
+// body path (POST /credentials/test is RequireAuth-only, no workspace/role
+// floor) so an arbitrary user can't turn the server into a blind-SSRF /
+// internal-port-scan oracle against RFC1918/loopback. It is true only on the
+// role-gated stored-credential path (TestStored: canRole "update" + workspace
+// visibility), where the URL was already vetted at create/update time. Every
+// other provider dials a FIXED vendor host (api.anthropic.com, …), never a
+// user-chosen one, so they are unaffected by this flag.
+func probeProvider(ctx context.Context, provider, ctype, value string, dialEndpoint bool) testResult {
 	switch provider {
 	case "ANTHROPIC":
 		// OAuth setup tokens (sk-ant-oat*) cannot be validated via standard API.
@@ -221,9 +230,17 @@ func probeProvider(ctx context.Context, provider, ctype, value string) testResul
 
 	default:
 		// A local-model endpoint (ENDPOINT_URL, e.g. Ollama/OpenAI-compatible)
-		// is a real, testable target: the stored value IS the base URL, so
-		// actually probe it for a model list instead of claiming "valid".
+		// is a real, testable target: the stored value IS the base URL. Only
+		// DIAL it from the role-gated stored path (dialEndpoint); on the
+		// unauthenticated body path, syntax-validate only — dialing a
+		// user-supplied host there is an SSRF vector.
 		if ctype == string(CredTypeEndpointURL) {
+			if !dialEndpoint {
+				if msg := validateEndpointURL(value); msg != "" {
+					return testResult{Error: msg}
+				}
+				return testResult{Valid: true, Error: "endpoint URL is well-formed (reachability is checked by testing the saved credential)"}
+			}
 			return probeLocalModelEndpoint(ctx, value)
 		}
 		return testResult{Valid: true, Error: "No validation available for this provider"}
@@ -248,7 +265,9 @@ func (h *CredentialHandler) Test(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, probeProvider(ctx, body.Provider, body.Type, body.Value))
+	// dialEndpoint=false: this path is RequireAuth-only (no workspace/role
+	// floor), so it must NOT dial a caller-supplied ENDPOINT_URL host.
+	writeJSON(w, http.StatusOK, probeProvider(ctx, body.Provider, body.Type, body.Value, false))
 }
 
 // TestStored validates an existing credential by ID. Looks up + decrypts
@@ -304,7 +323,9 @@ func (h *CredentialHandler) TestStored(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	res := probeProvider(ctx, provider, ctype, value)
+	// dialEndpoint=true: role-gated (canRole "update") + workspace-visible, and
+	// the value was vetted at create/update, so reachability-dialing is safe.
+	res := probeProvider(ctx, provider, ctype, value, true)
 
 	// Audit goes outside the request path failure mode — log warn but
 	// don't fail the test if the audit insert hiccups.

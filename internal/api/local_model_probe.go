@@ -21,12 +21,18 @@ import (
 // probeLocalModelEndpoint dials a local-model base URL and reports whether it
 // answers with a model list, plus how many models it advertises.
 //
-// This is a SERVER-SIDE dial of a user-supplied URL, so it is SSRF-aware: the
-// dialer refuses link-local / cloud-metadata addresses (169.254.0.0/16 and the
-// IPv6 forms) at connect time, after DNS resolution, so a hostname that
-// resolves to the metadata endpoint can't pivot. RFC1918/loopback are allowed
-// on purpose — a LAN or on-host Ollama is exactly the endpoint an operator
-// wants to test, and creating the credential already requires MANAGER+.
+// This is a SERVER-SIDE dial, so it is SSRF-aware: the dialer refuses
+// link-local / cloud-metadata addresses (169.254.0.0/16 and the IPv6 forms) at
+// connect time, after DNS resolution, so a hostname that resolves to the
+// metadata endpoint can't pivot. RFC1918/loopback are allowed on purpose — a
+// LAN or on-host Ollama is exactly the endpoint an operator wants to test.
+//
+// Because that private-range allowance makes this a usable internal-scan
+// primitive, the caller MUST only reach it with an already-vetted, role-gated
+// URL: the credential Test-STORED path (canRole "update" + workspace
+// visibility, value from the DB). It must NOT be reached from the
+// unauthenticated Test-body path with a caller-supplied URL — probeProvider's
+// dialEndpoint gate enforces that.
 func probeLocalModelEndpoint(ctx context.Context, baseURL string) testResult {
 	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if base == "" {
@@ -56,10 +62,13 @@ func probeLocalModelEndpoint(ctx context.Context, baseURL string) testResult {
 	}
 
 	// Ollama-native fallback: GET {root}/api/tags -> {"models":[{"name":...}]}.
-	if root := strings.TrimSuffix(base, "/v1"); root != base {
-		if n, ok, _ := probeCount(ctx, client, root+"/api/tags", "models"); ok {
-			return testResult{Valid: true, Status: http.StatusOK, Error: modelCountNote(n)}
-		}
+	// A base may or may not carry the OpenAI-compatible "/v1" suffix; strip it
+	// when present, otherwise probe the bare base — so a plain
+	// "http://host:11434" (no /v1) still reaches /api/tags instead of being
+	// reported unreachable because only /models was tried.
+	root := strings.TrimSuffix(base, "/v1")
+	if n, ok, _ := probeCount(ctx, client, root+"/api/tags", "models"); ok {
+		return testResult{Valid: true, Status: http.StatusOK, Error: modelCountNote(n)}
 	}
 
 	return testResult{Error: "endpoint did not return a model list (tried /models and /api/tags) — check the URL and that the server is running"}

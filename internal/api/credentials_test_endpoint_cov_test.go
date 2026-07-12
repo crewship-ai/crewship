@@ -94,7 +94,7 @@ func TestProbeProvider_StatusMatrix(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			rt := &covCredsRoundTripper{status: tc.status}
 			swapDefaultTransport(t, rt)
-			res := probeProvider(context.Background(), tc.provider, "API_KEY", "secret-value")
+			res := probeProvider(context.Background(), tc.provider, "API_KEY", "secret-value", false)
 			if res.Valid != tc.wantValid {
 				t.Errorf("valid = %v, want %v (res=%+v)", res.Valid, tc.wantValid, res)
 			}
@@ -118,7 +118,7 @@ func TestProbeProvider_RequestShape(t *testing.T) {
 	t.Run("anthropic headers", func(t *testing.T) {
 		rt := &covCredsRoundTripper{status: 200}
 		swapDefaultTransport(t, rt)
-		probeProvider(context.Background(), "ANTHROPIC", "API_KEY", "sk-ant-real")
+		probeProvider(context.Background(), "ANTHROPIC", "API_KEY", "sk-ant-real", false)
 		if got := rt.lastReq.Header.Get("x-api-key"); got != "sk-ant-real" {
 			t.Errorf("x-api-key = %q", got)
 		}
@@ -132,7 +132,7 @@ func TestProbeProvider_RequestShape(t *testing.T) {
 	t.Run("github bearer + UA", func(t *testing.T) {
 		rt := &covCredsRoundTripper{status: 200}
 		swapDefaultTransport(t, rt)
-		probeProvider(context.Background(), "GITHUB", "API_KEY", "ghp_x")
+		probeProvider(context.Background(), "GITHUB", "API_KEY", "ghp_x", false)
 		if got := rt.lastReq.Header.Get("Authorization"); got != "Bearer ghp_x" {
 			t.Errorf("Authorization = %q", got)
 		}
@@ -143,7 +143,7 @@ func TestProbeProvider_RequestShape(t *testing.T) {
 	t.Run("gitlab private token", func(t *testing.T) {
 		rt := &covCredsRoundTripper{status: 200}
 		swapDefaultTransport(t, rt)
-		probeProvider(context.Background(), "GITLAB", "API_KEY", "glpat-x")
+		probeProvider(context.Background(), "GITLAB", "API_KEY", "glpat-x", false)
 		if got := rt.lastReq.Header.Get("PRIVATE-TOKEN"); got != "glpat-x" {
 			t.Errorf("PRIVATE-TOKEN = %q", got)
 		}
@@ -151,7 +151,7 @@ func TestProbeProvider_RequestShape(t *testing.T) {
 	t.Run("google key in query", func(t *testing.T) {
 		rt := &covCredsRoundTripper{status: 200}
 		swapDefaultTransport(t, rt)
-		probeProvider(context.Background(), "GOOGLE", "API_KEY", "AIza-x")
+		probeProvider(context.Background(), "GOOGLE", "API_KEY", "AIza-x", false)
 		if got := rt.lastReq.URL.Query().Get("key"); got != "AIza-x" {
 			t.Errorf("key query param = %q", got)
 		}
@@ -163,7 +163,7 @@ func TestProbeProvider_ConnectionErrors(t *testing.T) {
 	for _, p := range providers {
 		t.Run(p, func(t *testing.T) {
 			swapDefaultTransport(t, &covCredsRoundTripper{err: context.DeadlineExceeded})
-			res := probeProvider(context.Background(), p, "API_KEY", "v")
+			res := probeProvider(context.Background(), p, "API_KEY", "v", false)
 			if res.Valid {
 				t.Error("transport error must not report valid")
 			}
@@ -177,7 +177,7 @@ func TestProbeProvider_ConnectionErrors(t *testing.T) {
 func TestProbeProvider_AnthropicOAuthAndDefault(t *testing.T) {
 	// No transport swap on purpose: neither branch may touch the network.
 	t.Run("AI_CLI_TOKEN type accepted without probing", func(t *testing.T) {
-		res := probeProvider(context.Background(), "ANTHROPIC", "AI_CLI_TOKEN", "whatever")
+		res := probeProvider(context.Background(), "ANTHROPIC", "AI_CLI_TOKEN", "whatever", false)
 		if !res.Valid {
 			t.Error("AI_CLI_TOKEN should be accepted as valid")
 		}
@@ -186,13 +186,13 @@ func TestProbeProvider_AnthropicOAuthAndDefault(t *testing.T) {
 		}
 	})
 	t.Run("sk-ant-oat prefix accepted without probing", func(t *testing.T) {
-		res := probeProvider(context.Background(), "ANTHROPIC", "API_KEY", "sk-ant-oat01-xyz")
+		res := probeProvider(context.Background(), "ANTHROPIC", "API_KEY", "sk-ant-oat01-xyz", false)
 		if !res.Valid {
 			t.Error("setup token should be accepted as valid")
 		}
 	})
 	t.Run("unknown provider has no validation", func(t *testing.T) {
-		res := probeProvider(context.Background(), "SOME_RANDOM_TOOL", "API_KEY", "v")
+		res := probeProvider(context.Background(), "SOME_RANDOM_TOOL", "API_KEY", "v", false)
 		if !res.Valid {
 			t.Error("default branch should report valid")
 		}
