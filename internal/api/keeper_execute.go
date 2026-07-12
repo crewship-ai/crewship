@@ -63,19 +63,26 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	// Cross-tenant binding: same guard as HandleRequest, and more critical
-	// here — an ALLOW on /execute injects the plaintext secret into
-	// body.container_id and runs a command there. A workspace-bound token
-	// must not be able to claim another workspace's workspace_id in the
-	// body. Master-token callers (empty binding) are unaffected.
-	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
-		return
-	}
-
 	if body.CredentialID == "" && body.CredentialName == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "credential_id or credential_name required",
 		})
+		return
+	}
+
+	// Cross-tenant binding: same guard as HandleRequest, and more critical
+	// here — an ALLOW on /execute injects the plaintext secret into
+	// body.container_id and runs a command there. This route is internalAuth-only
+	// with a body-carried workspace_id, so requireInternal's query-scope injection
+	// does not constrain it. Reject before ANY credential lookup or container
+	// exec: a workspace-A token must not name workspace-B's agent/crew/credential
+	// to have B's secret injected into an attacker-chosen container.
+	// assertBoundCrewWorkspaceDB additionally proves the named crew belongs to
+	// that workspace. No-op for master-token callers (empty binding).
+	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
+		return
+	}
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.RequestingCrewID) {
 		return
 	}
 

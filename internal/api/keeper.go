@@ -166,6 +166,20 @@ func (h *KeeperHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cross-tenant scoping (PR-F24): keeper_requests has no workspace_id column,
+	// so scope the read via the requesting agent's workspace. A workspace-bound
+	// token must not read another tenant's request row (which exposes
+	// credential_id, intent, decision, risk). 404 (not 403) so it is not an
+	// existence oracle. No-op for master-token callers (empty binding).
+	if bound := InternalTokenWorkspaceFromContext(r.Context()); bound != "" {
+		var ws string
+		if err := h.db.QueryRowContext(r.Context(),
+			`SELECT workspace_id FROM agents WHERE id = ?`, row.RequestingAgentID).Scan(&ws); err != nil || ws != bound {
+			replyError(w, http.StatusNotFound, "request not found")
+			return
+		}
+	}
+
 	writeJSON(w, http.StatusOK, row)
 }
 
