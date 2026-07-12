@@ -568,13 +568,11 @@ func (p *Provider) toolsVolumeName(id, slug string) string {
 	return p.crewResourceName("tools", id, slug)
 }
 
-// secretsTmpfsSizeBytes caps the /secrets tmpfs. Credential files are a
-// handful of tokens/keys/certs per agent — 16 MiB is orders of magnitude
-// more than any legitimate crew needs while still bounding a runaway
-// writer (tmpfs pages count against container memory).
-const secretsTmpfsSizeBytes = 16 * 1024 * 1024
-
-// secretsTmpfsMount returns the tmpfs mount for /secrets.
+// secretsTmpfsSpec is the HostConfig.Tmpfs option string for /secrets.
+// The size=16m cap: credential files are a handful of tokens/keys/certs
+// per agent — 16 MiB is orders of magnitude more than any legitimate crew
+// needs while still bounding a runaway writer (tmpfs pages count against
+// container memory).
 //
 // Deliberately NOT a host bind: the orchestrator writes cleartext SSH keys,
 // passwords and tokens under /secrets/<agent-slug>/ at every run setup
@@ -588,28 +586,23 @@ const secretsTmpfsSizeBytes = 16 * 1024 * 1024
 // Ownership: tmpfs defaults to root:root, but the container runs as UID 1001
 // with CapDrop=ALL — root-without-CAP_DAC_OVERRIDE can't fix perms up later
 // and the per-run `mkdir -p /secrets/<slug>` execs as 1001. uid/gid mount
-// options hand the mount root to the agent UID at mount time. The uid/gid
-// TmpfsOptions require Docker Engine >= 26 (API 1.45); an older daemon
-// silently drops them, leaving the mount root-owned 0700 — the orchestrator
-// then ABORTS any run that carries file-mounted credentials with an error
-// naming this requirement (orchestrator_run.go, mkdir-preflight and
-// writeCredentialFiles failure paths) instead of starting the agent with
-// zero credentials or persisting secrets anywhere.
-func secretsTmpfsMount() mount.Mount {
-	return mount.Mount{
-		Type:   mount.TypeTmpfs,
-		Target: "/secrets",
-		TmpfsOptions: &mount.TmpfsOptions{
-			SizeBytes: secretsTmpfsSizeBytes,
-			Mode:      0o700,
-			Options:   [][]string{{"uid", "1001"}, {"gid", "1001"}},
-		},
-	}
-}
+// options hand the mount root to the agent UID at mount time.
+//
+// This MUST ride HostConfig.Tmpfs (the --tmpfs path), NOT the Mounts API:
+// the daemon rejects uid/gid inside mount.TmpfsOptions.Options with
+// `invalid mount config for type "tmpfs": invalid option: uid` (reproduced
+// live on Engine 29.3.0 — container create failed for every crew), while
+// the option-string path accepts and applies them. Should a daemon ever
+// drop the options and leave the mount root-owned, the orchestrator ABORTS
+// any run carrying file-mounted credentials (orchestrator_run.go
+// mkdir-preflight / writeCredentialFiles failure paths) instead of starting
+// the agent with zero credentials or persisting secrets anywhere.
+const secretsTmpfsSpec = "rw,noexec,nosuid,size=16m,mode=0700,uid=1001,gid=1001"
 
 // buildMounts returns the full list of mounts for a crew container, including
 // persistent bind mounts and named volumes for home/tools directories.
-// /secrets is an in-memory tmpfs (see secretsTmpfsMount) — never host-backed.
+// /secrets is an in-memory tmpfs (see secretsTmpfsSpec) mounted via
+// HostConfig.Tmpfs — never host-backed and never in this list.
 //
 // Sidecar + entrypoint bind mounts are mandatory: the legacy agent-runtime
 // image (which baked them in) was retired, so any user-provided base image
@@ -630,7 +623,6 @@ func (p *Provider) buildMounts(id, slug, workspacePath, outputPath, crewPath str
 		{Type: mount.TypeBind, Source: workspacePath, Target: "/workspace"},
 		{Type: mount.TypeBind, Source: outputPath, Target: "/output"},
 		{Type: mount.TypeBind, Source: crewPath, Target: "/crew"},
-		secretsTmpfsMount(),
 	}
 	if slug != "" {
 		mounts = append(mounts,
