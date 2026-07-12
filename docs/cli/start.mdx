@@ -28,9 +28,10 @@ crewship start [flags]
    `internal/database/migrate.go` order. Collision detection fails
    loudly if the local DB has a different name applied at a given
    version.
-5. **Telemetry init.** Reads consent from `app_settings`. v0.1 beta
-   default is enabled if no row exists; opt out with `crewship
-   telemetry off`. See [Telemetry](/guides/telemetry).
+5. **Telemetry init.** Reads consent from `app_settings`. With no
+   consent row, prerelease builds default to enabled (opt out with
+   `crewship telemetry off`); stable builds stay disabled until you
+   opt in. See [Telemetry](/guides/telemetry).
 6. **Update check.** Fires a goroutine that queries the GitHub Releases
    API (cached 24h in `~/.crewship/cache/`). Prints a banner to stderr
    if a newer release is available. Skip with

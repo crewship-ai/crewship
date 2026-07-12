@@ -16,11 +16,11 @@
   <a href="https://golang.org/doc/devel/release.html"><img src="https://img.shields.io/badge/go-1.26-00ADD8.svg?logo=go" alt="Go 1.26" /></a>
 </p>
 
-> **Status: v0.1 beta — open beta.** APIs and data models are still
-> moving; pin a tag (or commit SHA) if you ship to production. The
-> [Beta status & limitations](#beta-status--limitations) section below
-> spells out what's ready, what's WIP, and what's not yet wired up. See
-> also [CHANGELOG.md](CHANGELOG.md) and [RELEASING.md](RELEASING.md).
+> **Status: v1.0 release candidate.** APIs and data models are
+> stabilizing toward 1.0; pin a tag (or commit SHA) if you ship to
+> production. The [Beta status & limitations](#beta-status--limitations)
+> section below spells out what's ready, what's WIP, and what's not yet
+> wired up. See also [CHANGELOG.md](CHANGELOG.md) and [RELEASING.md](RELEASING.md).
 
 ---
 
@@ -44,7 +44,7 @@ and out of agent processes.
 
 ## What's in the box
 
-Labels: ✅ **stable** in v0.1 beta · 🟡 **early** (works but contract
+Labels: ✅ **stable** · 🟡 **early** (works but contract
 may shift) · 🚧 **WIP** (scaffolded, not yet usable end-to-end).
 
 - ✅ **Real Linux containers** — one per crew, isolated network,
@@ -52,7 +52,7 @@ may shift) · 🚧 **WIP** (scaffolded, not yet usable end-to-end).
   build, and run anything Linux supports.
 - ✅ **Claude Code adapter** — Anthropic's `claude` CLI, both
   Max-subscription and API-key auth paths. The production-tested
-  runtime for v0.1 beta.
+  runtime for this release.
 - 🚧 **Other CLI adapters** — Codex, Gemini, OpenCode, Cursor, Factory
   Droid have adapter scaffolds in `internal/orchestrator/adapter_*.go`,
   but only Claude Code is exercised across the full feature set. Other
@@ -94,7 +94,7 @@ may shift) · 🚧 **WIP** (scaffolded, not yet usable end-to-end).
 
 This is an **open beta**. The pieces marked ✅ above have been used by
 the maintainer in production-shaped workloads; the pieces marked 🟡 and
-🚧 are still being shaped. Specifically for v0.1 beta:
+🚧 are still being shaped. Specifically for this prerelease:
 
 - **Only the Claude Code (Anthropic) adapter is recommended for real
   work.** Codex / Gemini / OpenCode / Cursor / Factory Droid have
@@ -312,7 +312,7 @@ internal/backup/       Age-encrypted bundle export / restore
 internal/provider/     Pluggable container / storage / state backends
 internal/connectors/   MCP/OAuth integration manifests (🟡 early)
 internal/episodic/     Long-term episodic memory (🟡 early, full wiring in v0.2)
-internal/crashreport/  Opt-out Sentry crash reporting in v0.1 beta
+internal/crashreport/  Consent-gated Sentry crash reporting (opt-out in prereleases, opt-in from v1.0)
 internal/update/       GitHub-Releases version check + update banner
 
 ee/                    Enterprise add-ons (separate license, empty today)

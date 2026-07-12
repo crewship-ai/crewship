@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] — 2026-07-12
+
 ### Security
 
 - **X-Internal-Token is now bound to a workspace (PR-F24) — closes the
@@ -73,6 +75,78 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   with an error that points at the F4.4 negative-learning endpoint as
   the supported entry point. Tombstone test
   `TestDispatch_Write_LessonsTier_Rejected` pins the contract.
+
+- **Security hardening v1 wave.** Two-tier CLI tokens (standard +
+  HMAC-keyed admin) with fine-grained PAT-style scopes, per-crew role
+  overrides and per-agent ownership gates, structured 403s with a denial
+  audit log, one-shot setup token on `/api/v1/bootstrap`, internal API
+  refuses non-private client addresses, sidecar credential proxy strips
+  plaintext token fields, `NET_RAW` dropped from default crew container
+  capabilities, `/crew/init.sh` auto-exec now opt-in per crew, and
+  bootstrap/pair tokens widened to 256-bit (#462).
+
+- **May–June external-audit remediation waves.** Prod `docker.sock` is
+  brokered through a filtering proxy (#478); memory writes are scanned
+  *before* persist, including invisible-format (Cf) codepoint evasion
+  (#502, #477); a TOCTOU symlink window in `writeCredentialFiles` closed
+  (#464); path traversal, IDOR, cross-crew access, MCP SSRF,
+  prompt-injection and info-leak findings fixed across four passes
+  (#476–#508, #612, #619, #620, #651, #733, #752).
+
+- **RBAC chokepoint: route-table declared authz.** Previously
+  un-gated control-plane mutation endpoints now enforce role checks
+  (#792); every route's permission gate is declared in the route table
+  and pinned by an invariant test so new endpoints can't ship ungated
+  (#824, closes #809/#811); admin console + system endpoints get a
+  uniform ADMIN+ floor (#893); scoped CLI-token permissions are enforced
+  at the same route-table chokepoint (#888).
+
+- **Ingress trust fence.** Untrusted external content (webhook bodies,
+  poll payloads) is neutralized before it can enter an agent prompt
+  (#819, #808 M0), extended to the remaining mission/task and
+  crew-context ingress sites (#918); `tool_result` events from **all**
+  adapters now pass through one shared injection-scan chokepoint (#950).
+
+- **Per-agent sidecar identity.** Each agent in a crew receives its own
+  derived auth token, closing intra-crew identity spoofing against the
+  sidecar control plane (#826, closes #812), and escalations are
+  attributed to the bound agent rather than a caller-supplied `from`
+  field (#796). Per-agent memory identity fixes landed in the dev2
+  validation sweep (#779, CRE-137…146).
+
+- **Credential revocation is now effective at runtime.** The sidecar's
+  in-memory credstore reaps revoked credentials within ~60s (#795), and
+  revoking a credential also removes its file-based `/secrets` materials
+  from running containers (#903, closes #814).
+
+- **Webhook trigger hardening.** Every pipeline webhook dispatch
+  requires an HMAC signature (#501) with replay auto-dedupe (#506) and a
+  rate-limit floor (#507); empty-secret HMAC configs are rejected and
+  optional signed-timestamp replay defense added (#789), with per-agent
+  `require_timestamp` to close the body-only replay window (#822,
+  closes #815).
+
+- **New crews default to restricted egress**, and egress-policy denials
+  are loud instead of silent (#793); `http` pipeline steps enforce the
+  crew egress policy and resolve credentials from the vault rather than
+  inline secrets (#778).
+
+- **Memory file-path hardening.** Centralized pathsafe fencing on memory
+  paths plus capped search allocations close 13 CodeQL HIGH findings
+  (#926); memory-read and writer-lock opens use `O_NOFOLLOW`, closing a
+  symlink TOCTOU (#936, closes #934/#935).
+
+- **Log-injection neutralized centrally.** One CR/LF + control-character
+  neutralizer covers server and sidecar log sinks (#938); secret
+  redaction is wired through slog (#488) and raw token values in logs
+  replaced by fingerprints (#486).
+
+- **deb/rpm packages are GPG-signed** and the public key published for
+  apt/dnf verification (#942, closes #932).
+
+- **Go toolchain bumped 1.26.0 → 1.26.5** across the release cycle for
+  stdlib CVEs, including the crypto/tls GO-2026-5856 advisory
+  (#570, #907).
 
 ### Added
 
@@ -152,6 +226,124 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `SharedMemory` + `Constraints` slice written to the child's
   `BRIEF.md`; picked up by the orchestrator's prompt assembly.
 
+- **Declarative deployment manifests (SPEC-2).** `crewship apply` covers
+  14 manifest kinds end-to-end with validation (duplicate-slug detection
+  at validate time), plus auto-managed sidecar credentials (SPEC-4)
+  (#454, #456, #587).
+
+- **Routines platform wave.** Governance review gate
+  (proposed → approve, with OWNER/ADMIN `skip_governance_gate`),
+  describe-first authoring from chat, `save_routine`/`list_routines` as
+  native MCP tools, precondition gates and declared required
+  integrations, CEL expressions, deferred dispatch, hooks and input
+  streams (#743, #715, #739, #755). Follow-on: first-class token-zero
+  `script` steps (#849) with portable export/import bundles (#913),
+  per-step retry policy with backoff + CEL classifier (#882),
+  auto-parallelized independent steps with bounded DAG waves (#872),
+  single-step fixture runs (#854), `routine init` scaffold/clone (#860),
+  run-result retrieval (#844), run→files listing (#891), client-facing
+  shareable/redacted progress views (#877), offline `validate` parity
+  with server-side checks (#901), and non-blocking `notify` steps with
+  outbound email + signed-webhook channels and anti-spam caps
+  (#843, #859, #910).
+
+- **Managed integrations via Composio.** Catalog, OAuth connect flow,
+  per-agent binding, tool exposure and triggers (#696), a flag-gated
+  default connector for all agents (#699), portal-safe Add-app UX
+  (#703), and agents are made aware of their connected integrations
+  (#704).
+
+- **Chat overhaul.** Faithful history with reload, grouped
+  tool/reasoning UI, sub-agents and multi-user group chat (#702);
+  resumable streams so a reply is never lost to a refresh (#757); smooth
+  streaming reveal (#758); unread badges, activity ordering and
+  agent-replied notifications (#760); mid-turn steering of an in-flight
+  run, long-conversation compaction instead of truncation, cross-session
+  conversation search (BM25), and LLM model discovery with live model
+  switch (#630 wave).
+
+- **Fleet operations UI.** The Journal Runs tab is reworked into a fleet
+  ops overview (#750), a global Activity Bar + readable run-activity
+  timeline (#701), context-aware bottom dock across Issues, Routines &
+  Activity (#710), and a drillable agent-native run trace — tool-call
+  sub-spans, waterfall, persisted per-step input/output with lazy fetch
+  and syntax highlighting (#852, #853, #874), plus per-step
+  container-ready timing (#930).
+
+- **Inbox redesign.** Gmail-style triage with formatted detail,
+  noise/secret hardening and CLI parity (#708), collapsible group tree
+  with bulk select/resolve (#692), refined toolbar (#747), and
+  agent-proposed credentials with one-click human approval (#706).
+
+- **Ephemeral ("hired") agents surfaced in Crews & Agents** with full
+  lifecycle controls (#693); hired agents automatically receive an
+  Anthropic credential so they can actually run (#680).
+
+- **Slash commands + per-user capabilities.** Server-driven slash
+  palette with CLI/UI parity, gated by per-membership capability grants
+  (#595).
+
+- **Packaging: deb/rpm packages + systemd unit** for server installs
+  (#927, #858 phase 4), and **Windows support via a CLI-only
+  `crewship-cli` build** — zip archives, `O_NOFOLLOW` platform split,
+  gated self-update (#949, closes #945).
+
+- **`crewship self-update`** — one upgrade command per install channel
+  (brew/deb/rpm/tarball) (#915), including systemd server-mode upgrade
+  orchestration with health-checked restart (#929, #858 phase 5).
+
+- **Downgrade/version safety.** A version-skew guard refuses to boot a
+  binary over a newer DB schema (#912), and
+  `crewship db restore-snapshot` provides the matching downgrade
+  recovery path (#924); backups got a disaster-recovery rewrite —
+  `--replace` mode, schema-driven FK discovery, user reconciliation
+  (#594).
+
+- **Local-model support.** Ollama-style local endpoints for the OpenCode
+  adapter with BYOK egress (#951), and a first-class `ENDPOINT_URL`
+  credential type so local model endpoints live in the vault like any
+  other credential (#957, closes #955).
+
+- **Devcontainer-based provisioning.** BuildKit feature-image
+  provisioning (#675), proactive auto-provision so crews are runnable on
+  first dispatch (#731), deduped feature catalog preferring canonical
+  publishers (#732), and persisted BuildKit stderr tails so failed
+  builds are debuggable (#884).
+
+- **Agent-authored skills.** Agents can draft skills that route through
+  inbox review into a GENERATED catalog (#734).
+
+- **CLI: agent-ready contract.** Structured errors, stable exit codes,
+  `--wait`, env-var auth and API parity for driving Crewship from
+  agents (#782); native server profiles for multi-instance targeting
+  (#737); unified `crewship nuke` subcommands with full workspace
+  teardown (#748); confirmation prompts + `--yes` on six destructive
+  commands (#579); `--max-turns` on run/ask + agent schedule flags
+  (#753); `routine logs --show-outputs` for post-hoc step debugging
+  (#828); `me preferences` + privacy commands (#754).
+
+- **Cost controls.** Cache-stable prompt assembly, per-run turn caps
+  with a loop guard, and cheap-model routing for aux/sub-agent calls
+  (#751).
+
+- **Operator observability.** Opt-in pprof + Pyroscope push profiling
+  (#552), runtime log-level toggle and disk-health reporting (#784), and
+  every run surfaces the model it actually resolved to.
+
+- **Crew memory from mission outcomes (F4.5).** Mission results are
+  distilled into crew memory with provenance (#546); an evolving
+  per-operator user model personalizes agent behavior over time
+  (#630 wave).
+
+- **Settings & workspace management.** Real workspace switcher (list,
+  select, persist, create) (#597), editable profile with password change
+  and workspace member role management (#883), avatar upload (#900).
+
+- **Release engineering.** The release smoke pipeline runs again on a
+  real trigger plus a pre-merge package smoke (#941, closes #933), and
+  nightlies publish per-run immutable pre-releases instead of a rolling
+  tag (#895).
+
 ### Changed
 
 - **Frontend RBAC mirrors backend.** `AgentLearningToggle` derives
@@ -163,6 +355,39 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **`Promise.all` → `Promise.allSettled`** in `CrewPolicyControls.load`
   so a quota-fetch network error doesn't poison the required policy
   fetch.
+
+- **One request-builder for every dispatch path.** Chat, missions,
+  routines and peer delegation now build agent requests through a single
+  shared factory, which also activated the previously dead HITL approval
+  path and fixed mission/peer MCP + prompt divergence (#825, closes
+  #810); pipeline executor wiring was likewise unified behind one
+  factory (#773).
+
+- **Telemetry defaults to opt-in on stable releases** with an explicit
+  onboarding consent step (crash-reporting opt-out remains for
+  pre-release channels) (#645).
+
+- **First-run bootstrap UX.** The setup-token gate is replaced by an
+  n8n-style first-run flow (#593), and the bootstrap window now stays
+  open until the first admin exists, with the finite time window as an
+  opt-in (#785).
+
+- **UI chrome unified for 1.0** — consistent sub-bars, sidebars and
+  toolbars across pages (#749); agent access consolidated under a single
+  Skills & Tools surface (#698) with a curated built-in tool profile per
+  adapter (dead harness tools removed) (#705).
+
+- **Routine `test_run` is gone** — `dry_run` returns an honest execution
+  plan plus the declared capability manifest instead of pretending to
+  execute (#743 wave).
+
+- **First-party MCP tools are eager-loaded**, removing the per-run
+  ToolSearch discovery tax (#745).
+
+- **Dispatch/runtime performance.** Deferred-run dispatch is async,
+  removing the one-run-per-run-duration cliff (#857); warm crew hits
+  skip the host-wide Docker `ContainerList` (#876); crew containers
+  prewarm on claim, off the critical path (#902).
 
 ### Fixed
 
@@ -218,6 +443,78 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **CI build break from a leaked merge-conflict marker** in
   `internal/api/agent_config.go` (PR-D `agent.status` + PR-E
   `system_prompt_legacy` collision during parallel-agent push churn).
+
+- **Credential escalation no longer fakes success.** When a credential
+  proposal can't be staged, the agent gets an error instead of a
+  silent false-success (#787).
+
+- **Recurring issues actually fire.** The dispatcher was never wired
+  into server boot (#791); follow-up adds creator attribution, durable
+  fire idempotency and UTC consistency (#823), and issue creators are
+  recorded and displayed everywhere (#774).
+
+- **Schedulers are at-most-once.** Cron and deferred pipeline fires
+  dedupe via idempotency keys (#788), the agent scheduler gets the same
+  guarantee (#820), and scheduled fires honor `target_pipeline_version`
+  (#777).
+
+- **Container-start failures are classified** instead of collapsing into
+  one masked generic error, so operators see the real cause (bad image,
+  legacy volume, credential prep, …) (#790).
+
+- **Crash recovery for assignments and chats.** RUNNING assignments
+  orphaned by a crash are recovered at boot (#768), orchestration loops
+  re-attach to IN_PROGRESS missions (#641), webhook-triggered runs
+  dispatch asynchronously instead of blocking the receiver (#769), one
+  active run per chat is enforced regardless of sender (#765), and a
+  chat turn never ends in silence — zero-output and restart-interrupted
+  replies are surfaced (#770).
+
+- **Memory writes are durable and fail closed.** MCP memory-write
+  failures no longer report success; memory tools are only advertised
+  when the backing store is healthy; restart-agents matches the right
+  container (#786).
+
+- **dev2 validation sweep (CRE-137…146).** Memory identity, keeper
+  workspace scoping, webhook HMAC, cost attribution and CLI
+  parity/fidelity fixes from a full-instance validation pass (#779).
+
+- **Keeper F4.1 skill-review sweep bills a real workspace** instead of
+  attributing its LLM spend to a phantom one (#970, CRE-138).
+
+- **Full archives ship a Linux ELF sidecar on every platform.**
+  Darwin-built archives previously bundled a Mach-O sidecar that could
+  never run inside Linux crew containers (#968, closes #953); archives
+  now include `crewship-sidecar` + `entrypoint.sh` at all (#914), and
+  sidecar remediation hints are install-channel-aware with the Homebrew
+  libexec layout supported (#925).
+
+- **HTTPS login worked around a CSRF cookie-name mismatch** — the CSRF
+  cookie is re-sent under the server's real `__Host-` name (#875).
+
+- **Crew shared files reach `/crew/shared`.** Bundled `files:` never
+  arrived for agentless crews (#870); delivery is container-routed with
+  overwrite semantics and works for standalone SPEC-2 Crews (#928);
+  re-applying an unchanged file no-ops and succeeds on a stopped crew
+  (#940).
+
+- **OpenCode adapter production parity** — usage keys, model surfacing,
+  JSONL schema and EOF resilience (#948).
+
+- **Raw internal errors no longer leak to chat/comments**; hook warnings
+  surface on the run instead (#771); journal poison entries are dropped
+  rather than retried forever, and dev logs are capped (#783); chat WS
+  sends are guarded against the server's 64 KiB frame cap (#764).
+
+- **Scheduler resolves agent config via loopback** instead of the
+  public Next.js URL, fixing scheduled routines behind proxies (#709);
+  `crewship system keeper` injects the workspace so it stops 400ing
+  after the admin-floor change (#909).
+
+- **Pre-C1 legacy Docker resources are auto-migrated** on use and an
+  ops command detects + prunes orphaned pre-C1 crew resources, fixing
+  the "failed to start agent container" wall after old seeds
+  (#736, #738).
 
 ## [0.1.0-beta.4] — 2026-05-19
 
