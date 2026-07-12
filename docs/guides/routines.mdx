@@ -1011,6 +1011,26 @@ crewship routine rollback email-fetch --to 3
 
 History is preserved — you can roll forward to a future version by another rollback. There is no "delete version" — if a version was bad, the trail of "v3 → v4 (rollback to v2) → v5 (fix)" is the audit story you keep.
 
+## The improvement loop: `routine iterate`
+
+Version history is also the substrate for **self-improving routines**. `crewship routine iterate` closes the loop that ad-hoc "agent loop" setups hand-roll in a single chat session — run, score, rewrite, repeat — but with the runtime's guarantees attached:
+
+```bash
+crewship routine iterate summarize-text \
+  --rubric ./rubric.md --inputs '{"text": "..."}' \
+  --grader reviewer --optimizer lead --author-crew eng
+```
+
+Each round: the routine **runs** with your inputs → a **grader agent** scores the output 0–100 against your rubric → below `--target`, an **optimizer agent** proposes an improved definition → local validation → **you confirm** → the definition saves as a new immutable version. The `change_summary` on each version records the provenance (`iterate round 2: score 74/100 — misses the TL;DR`), so `routine versions` and the versions panel read as the improvement journal — and `rollback` undoes any round.
+
+What makes this different from looping in a chat window:
+
+- **Budgets are enforced, not advised** — every run and agent call lands in the Paymaster ledger under workspace budgets.
+- **The gates don't move** — each save passes the same server-side test-run gate and governance rules as a human author; a definition that gains risky steps (`http`, `code`, egress) parks as `proposed` for review and the loop stops.
+- **Nothing is lost** — full journal per run, one version row per accepted round, reversible by design.
+
+The rubric is the contract; write it like a brief to a colleague. Grader and optimizer are ordinary crew agents — a dedicated "reviewer" persona works well as the grader. Full flag reference in the [CLI docs](/cli/routine#crewship-routine-iterate-slug).
+
 ## Bundle export / import
 
 Routines are portable across workspaces:

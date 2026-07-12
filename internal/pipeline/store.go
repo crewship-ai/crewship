@@ -296,13 +296,17 @@ func (s *Store) saveVersionTx(ctx context.Context, tx *sql.Tx, pipelineID string
 		authorID = "unknown"
 	}
 
+	changeSummary := sql.NullString{}
+	if s := strings.TrimSpace(in.ChangeSummary); s != "" {
+		changeSummary = sql.NullString{String: s, Valid: true}
+	}
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO pipeline_versions (
     id, pipeline_id, version, definition_json, definition_hash,
     author_type, author_id, parent_version, change_summary, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		generateVersionID(), pipelineID, newVersion, in.DefinitionJSON, hash,
-		authorType, authorID, parentVal,
+		authorType, authorID, parentVal, changeSummary,
 		now.Format(time.RFC3339Nano),
 	)
 	if err != nil {

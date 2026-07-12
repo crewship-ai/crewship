@@ -774,6 +774,11 @@ type SaveInput struct {
 	// to 'active' (live). The save handlers set 'proposed' for risky
 	// agent/user-authored routines so they enter the maker-checker queue.
 	Status string
+	// ChangeSummary is an optional one-line provenance note stored on the
+	// pipeline_versions row (rendered by the versions UI and `routine
+	// versions`). `routine iterate` writes its round/score here
+	// ("iterate round 2: score 74→88"); empty persists as NULL.
+	ChangeSummary string
 }
 
 // ListFilters narrows a Store.List query. Zero value = "all

@@ -172,6 +172,51 @@ func TestStore_Save_HappyPath(t *testing.T) {
 	}
 }
 
+// TestStore_Save_PersistsChangeSummary verifies the version row carries the
+// caller-supplied ChangeSummary. Before `routine iterate` this column was
+// hardcoded NULL on the Save path — the versions UI rendered "No change
+// summary" for every row — so iterate-authored versions ("iterate round 2:
+// 74→88") had nowhere to surface their provenance.
+func TestStore_Save_PersistsChangeSummary(t *testing.T) {
+	db := openVersioningTestDB(t) // needs the pipeline_versions table
+	defer db.Close()
+	s := NewStore(db)
+
+	in := validSaveInput("email-fetch")
+	in.ChangeSummary = "iterate round 2: score 74→88"
+	saved, err := s.Save(context.Background(), in)
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	var got sql.NullString
+	if err := db.QueryRow(
+		`SELECT change_summary FROM pipeline_versions WHERE pipeline_id = ? ORDER BY version DESC LIMIT 1`,
+		saved.ID,
+	).Scan(&got); err != nil {
+		t.Fatalf("read version row: %v", err)
+	}
+	if !got.Valid || got.String != "iterate round 2: score 74→88" {
+		t.Errorf("change_summary: got %+v, want the supplied summary", got)
+	}
+
+	// And an empty ChangeSummary must stay NULL (no empty-string noise in the UI).
+	in2 := validSaveInput("email-fetch")
+	in2.DefinitionJSON = strings.Replace(in2.DefinitionJSON, "email-fetch", "email-fetch-2", 1)
+	if _, err := s.Save(context.Background(), in2); err != nil {
+		t.Fatalf("second save: %v", err)
+	}
+	if err := db.QueryRow(
+		`SELECT change_summary FROM pipeline_versions WHERE pipeline_id = ? ORDER BY version DESC LIMIT 1`,
+		saved.ID,
+	).Scan(&got); err != nil {
+		t.Fatalf("read second version row: %v", err)
+	}
+	if got.Valid {
+		t.Errorf("empty ChangeSummary should persist as NULL, got %q", got.String)
+	}
+}
+
 // TestStore_Save_PreservesDisabledOnResave is the disable-airbag invariant: a
 // routine an OWNER/ADMIN killed (status='disabled') must stay disabled across an
 // edit. A plain re-save (which carries status='active' via statusForRisk) used
