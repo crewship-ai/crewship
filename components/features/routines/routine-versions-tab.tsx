@@ -117,14 +117,22 @@ export function RoutineVersionsTab({ workspaceId, slug, onRolledBack }: Props) {
 
   // HEAD comes from the server (pipelines.head_version) — after a rollback
   // it sits on an OLDER row, so versions[0] (max version) is only a
-  // fallback for servers predating the is_head field (#996).
+  // fallback for servers predating the is_head field (#996). On a FULL
+  // page (server default LIMIT 100) a new server's head may live beyond
+  // the page — mark nothing rather than confidently marking the wrong row.
+  const VERSIONS_PAGE_CAP = 100
   const serverMarksHead = versions.some((v) => v.is_head)
   const headVersion = serverMarksHead
     ? versions.find((v) => v.is_head)?.version
-    : versions[0]?.version
+    : versions.length < VERSIONS_PAGE_CAP
+      ? versions[0]?.version
+      : undefined
 
   return (
-    <Card title="Version history" subtitle={`${versions.length} total · head v${headVersion}`}>
+    <Card
+      title="Version history"
+      subtitle={`${versions.length} total${headVersion != null ? ` · head v${headVersion}` : ""}`}
+    >
       <ol className="divide-y divide-border/40">
         {versions.map((v) => {
           const isHead = v.version === headVersion

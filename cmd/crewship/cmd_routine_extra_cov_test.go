@@ -108,6 +108,55 @@ func TestRoutineVersionsCmd(t *testing.T) {
 		}
 	})
 
+	t.Run("full page with no is_head suppresses the guess", func(t *testing.T) {
+		// A full page (server default LIMIT 100) with nothing marked is
+		// ambiguous: either an old server (marks nothing) or a new server
+		// whose head lives beyond the page. Printing no marker beats
+		// confidently marking the wrong row.
+		rows := make([]pipelineVersionRow, 100)
+		for i := range rows {
+			rows[i] = pipelineVersionRow{Version: 200 - i, DefinitionHash: "hhhh", AuthorType: "user", AuthorID: "u1", CreatedAt: "2026-06-01"}
+		}
+		stub := covStub(t)
+		stub.OnGet(versionsPath, clitest.JSONResponse(200, rows))
+		out := covCaptureStdoutCli3(t, func() {
+			if err := routineVersionsCmd.RunE(routineVersionsCmd, []string{"my-routine"}); err != nil {
+				t.Errorf("RunE: %v", err)
+			}
+		})
+		for _, line := range strings.Split(out, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) > 1 && strings.HasPrefix(fields[0], "v") && fields[1] == "*" {
+				t.Errorf("full unmarked page must render no head marker: %q", line)
+			}
+		}
+	})
+
+	t.Run("short page with no is_head falls back to max version", func(t *testing.T) {
+		// Old-server compatibility: fewer rows than the page cap and no
+		// is_head anywhere → the historical max-version heuristic applies.
+		stub := covStub(t)
+		stub.OnGet(versionsPath, clitest.JSONResponse(200, []pipelineVersionRow{
+			{Version: 2, DefinitionHash: "bbbb", AuthorType: "user", AuthorID: "u1", CreatedAt: "2026-06-01"},
+			{Version: 1, DefinitionHash: "aaaa", AuthorType: "user", AuthorID: "u1", CreatedAt: "2026-05-01"},
+		}))
+		out := covCaptureStdoutCli3(t, func() {
+			if err := routineVersionsCmd.RunE(routineVersionsCmd, []string{"my-routine"}); err != nil {
+				t.Errorf("RunE: %v", err)
+			}
+		})
+		marked := false
+		for _, line := range strings.Split(out, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) > 1 && fields[0] == "v2" && fields[1] == "*" {
+				marked = true
+			}
+		}
+		if !marked {
+			t.Errorf("old-server fallback must mark the max version: %q", out)
+		}
+	})
+
 	t.Run("empty history", func(t *testing.T) {
 		stub := covStub(t)
 		stub.OnGet(versionsPath, clitest.JSONResponse(200, []pipelineVersionRow{}))

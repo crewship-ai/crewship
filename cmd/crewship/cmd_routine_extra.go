@@ -67,7 +67,10 @@ var routineVersionsCmd = &cobra.Command{
 		// HEAD comes from the server's is_head (pipelines.head_version) —
 		// after a rollback it sits on an OLDER row, so guessing rows[0]
 		// (max version) shows a stale HEAD (#996). Servers predating the
-		// field mark nothing; fall back to the old max-version heuristic.
+		// field mark nothing; fall back to the old max-version heuristic —
+		// but ONLY when the page isn't full. On a full page (server default
+		// LIMIT 100), a new server's head may simply live beyond the page;
+		// printing no marker beats confidently marking the wrong row.
 		serverMarksHead := false
 		for _, v := range rows {
 			if v.IsHead {
@@ -75,9 +78,11 @@ var routineVersionsCmd = &cobra.Command{
 				break
 			}
 		}
+		const versionsPageCap = 100
+		guessHead := !serverMarksHead && len(rows) < versionsPageCap
 		for _, v := range rows {
 			isHead := ""
-			if v.IsHead || (!serverMarksHead && v.Version == rows[0].Version) {
+			if v.IsHead || (guessHead && v.Version == rows[0].Version) {
 				isHead = "*"
 			}
 			parent := "—"
