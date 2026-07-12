@@ -4,9 +4,11 @@ Crewship's `.deb` and `.rpm` packages are GPG-signed **when a signing key is
 configured** (issue #932). Signing is conditional: with no key the release still
 produces packages, just unsigned. This doc is the one-time setup.
 
-> **Status: blocked on secret.** The config + release wiring are in place, but
-> signing stays off until `GPG_SIGNING_KEY` exists as a repo/org secret. Only a
-> maintainer with secret access (Pavel) can add it.
+> **Status: ACTIVE.** `GPG_SIGNING_KEY` + `GPG_SIGNING_PASSPHRASE` are set as
+> repo secrets (2026-07-12). The signing key is
+> `EDE825B55FF87F7D442B82BAA5BA4669E217C05C` (Crewship Packages
+> <packages@crewship.ai>, RSA-4096, expires 2028-07-11 — rotate before then).
+> The public key is committed as [`packaging/crewship-packages.pub`](./crewship-packages.pub).
 
 ## What the maintainer sets up (once)
 
@@ -41,11 +43,12 @@ produces packages, just unsigned. This doc is the one-time setup.
    | `GPG_SIGNING_KEY` | the base64 blob from step 2 (**required** to enable signing) |
    | `GPG_SIGNING_PASSPHRASE` | the key passphrase, or leave unset for a `%no-protection` key |
 
-4. **Publish the public key** so users can verify. Export and commit it (and put
-   it on the docs site / a well-known URL):
+4. **Publish the public key** so users can verify. Export and commit it as
+   `packaging/crewship-packages.pub` (and put it on the docs site / a
+   well-known URL):
 
    ```bash
-   gpg --armor --export packages@crewship.ai > crewship-packages.pub
+   gpg --armor --export packages@crewship.ai > packaging/crewship-packages.pub
    ```
 
 ## How CI uses it
@@ -66,6 +69,9 @@ passphrase is read from `NFPM_PACKAGES_PASSPHRASE`.
 ## How users verify
 
 ```bash
+# get the public key (or from the docs site)
+curl -fsSLO https://raw.githubusercontent.com/crewship-ai/crewship/main/packaging/crewship-packages.pub
+
 # deb
 sudo apt-get install -y dpkg-sig
 dpkg-sig --verify crewship_<ver>_linux_amd64.deb
