@@ -110,16 +110,6 @@ func sweepGovernance(ctx context.Context, db *sql.DB, logger *slog.Logger, works
 	return gov
 }
 
-// sweepTargetRole mirrors the keeper_request.go targeting rule: a
-// configured security contact makes the item targeted, and keeping the
-// role fanout alongside would double-deliver.
-func sweepTargetRole(gov governance.Settings) string {
-	if gov.SecurityContactUserID != "" {
-		return ""
-	}
-	return "MANAGER"
-}
-
 // broadcastSweepInbox pushes the workspace inbox invalidation after a
 // successful sweep insert so findings repaint open inboxes immediately
 // instead of on the next poll (precedent: pipeline/runner_notify.go).
@@ -414,7 +404,7 @@ func (p *sqlSkillPersister) WriteInboxItem(ctx context.Context, skillID, reason 
 			Kind:         inbox.KindEscalation,
 			SourceID:     "skill_review_" + skillID + "_" + workspaceID,
 			TargetUserID: gov.SecurityContactUserID,
-			TargetRole:   sweepTargetRole(gov),
+			TargetRole:   "MANAGER",
 			Title:        "Skill review: " + skillID,
 			BodyMD:       friendly,
 			SenderType:   "system",
@@ -566,7 +556,7 @@ func (p *sqlMemoryHealthPersister) TriggerConsolidation(ctx context.Context, wor
 		Kind:         inbox.KindMemoryConsolidation,
 		SourceID:     "memory_health_" + crewID + "_" + time.Now().UTC().Format("20060102"),
 		TargetUserID: gov.SecurityContactUserID,
-		TargetRole:   sweepTargetRole(gov),
+		TargetRole:   "MANAGER",
 		Title:        "Memory consolidation suggested",
 		BodyMD:       reason,
 		SenderType:   "system",
@@ -617,7 +607,7 @@ func (p *sqlMemoryHealthPersister) WriteInboxItem(ctx context.Context, workspace
 		Kind:         inbox.KindMessage,
 		SourceID:     "memory_health_advisory_" + crewID + "_" + time.Now().UTC().Format("20060102"),
 		TargetUserID: gov.SecurityContactUserID,
-		TargetRole:   sweepTargetRole(gov),
+		TargetRole:   "MANAGER",
 		Title:        "Memory health advisory",
 		BodyMD:       friendly,
 		SenderType:   "system",

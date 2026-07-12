@@ -52,12 +52,6 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 	broadcastWorkspaceEvent(b.hub, workspaceID, "inbox.updated", map[string]string{"source": source})
 }
 
-// NotifyUser pings a named user's channel so a targeted security contact
-// sees the Keeper finding without watching the workspace-wide feed.
-func (b *keeperWSBroadcaster) NotifyUser(userID string, event map[string]string) {
-	broadcastChannelEvent(b.hub, "user", userID, "notification.created", event)
-}
-
 type Router struct {
 	mux    *http.ServeMux
 	db     *sql.DB

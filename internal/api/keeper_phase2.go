@@ -179,33 +179,17 @@ func (h *KeeperPhase2Handler) resolveGovernance(ctx context.Context, workspaceID
 	return gov
 }
 
-// govTargetRole returns the inbox TargetRole matching the governance
-// targeting rule keeper_request.go established: a configured security
-// contact makes the item targeted, and keeping the role fanout alongside
-// would double-deliver.
-func govTargetRole(gov governance.Settings) string {
-	if gov.SecurityContactUserID != "" {
-		return ""
-	}
-	return "MANAGER"
-}
-
-// notifyKeeperInbox pushes the realtime invalidation after an F4 inbox
-// write and, when a security contact is configured, pings their user
-// channel directly — same contract as the keeper_request.go credential
-// path (#1001 M0), so F4 findings stop depending on manual refresh.
-func (h *KeeperPhase2Handler) notifyKeeperInbox(workspaceID string, gov governance.Settings, kind, title string) {
+// notifyKeeperInbox pushes the realtime inbox invalidation after an F4
+// inbox write — the same contract as the keeper_request.go credential path
+// (#1001 M0), so F4 findings stop depending on manual refresh. A configured
+// security contact is highlighted purely via the item's TargetUserID (the
+// inbox visibility filter surfaces it to that contact and the MANAGER
+// fanout alike); a direct per-user push is a later milestone.
+func (h *KeeperPhase2Handler) notifyKeeperInbox(workspaceID string) {
 	if h.broadcaster == nil {
 		return
 	}
 	h.broadcaster.BroadcastInboxUpdated(workspaceID, "keeper")
-	if gov.SecurityContactUserID != "" {
-		h.broadcaster.NotifyUser(gov.SecurityContactUserID, map[string]string{
-			"kind":         kind,
-			"workspace_id": workspaceID,
-			"title":        title,
-		})
-	}
 }
 
 // inboxBlockingForPolicy maps the resolved Policy → the inbox.Item
@@ -389,7 +373,7 @@ func (h *KeeperPhase2Handler) HandleSkillReview(w http.ResponseWriter, r *http.R
 			Kind:         inbox.KindEscalation,
 			SourceID:     reqID,
 			TargetUserID: gov.SecurityContactUserID,
-			TargetRole:   govTargetRole(gov),
+			TargetRole:   "MANAGER",
 			Title:        title,
 			BodyMD:       res.Reason,
 			SenderType:   "system",
@@ -407,7 +391,7 @@ func (h *KeeperPhase2Handler) HandleSkillReview(w http.ResponseWriter, r *http.R
 				"unverify_after_decide": res.UnverifyAfterDecide,
 			},
 		})
-		h.notifyKeeperInbox(body.WorkspaceID, gov, "keeper_skill_review", title)
+		h.notifyKeeperInbox(body.WorkspaceID)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -493,7 +477,7 @@ func (h *KeeperPhase2Handler) HandleBehavior(w http.ResponseWriter, r *http.Requ
 			Kind:         inbox.KindEscalation,
 			SourceID:     reqID,
 			TargetUserID: gov.SecurityContactUserID,
-			TargetRole:   govTargetRole(gov),
+			TargetRole:   "MANAGER",
 			Title:        title,
 			BodyMD:       res.Reason,
 			SenderType:   "system",
@@ -511,7 +495,7 @@ func (h *KeeperPhase2Handler) HandleBehavior(w http.ResponseWriter, r *http.Requ
 				"should_block":    res.ShouldBlock,
 			},
 		})
-		h.notifyKeeperInbox(body.WorkspaceID, gov, "keeper_behavior", title)
+		h.notifyKeeperInbox(body.WorkspaceID)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -609,7 +593,7 @@ func (h *KeeperPhase2Handler) HandleMemoryHealth(w http.ResponseWriter, r *http.
 			Kind:         inbox.KindEscalation,
 			SourceID:     reqID,
 			TargetUserID: gov.SecurityContactUserID,
-			TargetRole:   govTargetRole(gov),
+			TargetRole:   "MANAGER",
 			Title:        title,
 			BodyMD:       res.Reason,
 			SenderType:   "system",
@@ -625,7 +609,7 @@ func (h *KeeperPhase2Handler) HandleMemoryHealth(w http.ResponseWriter, r *http.
 				"auto_consolidate":    res.AutoConsolidate,
 			},
 		})
-		h.notifyKeeperInbox(body.WorkspaceID, gov, "keeper_memory_health", title)
+		h.notifyKeeperInbox(body.WorkspaceID)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -761,7 +745,7 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 			Kind:         inbox.KindEscalation,
 			SourceID:     reqID,
 			TargetUserID: gov.SecurityContactUserID,
-			TargetRole:   govTargetRole(gov),
+			TargetRole:   "MANAGER",
 			Title:        title,
 			BodyMD:       fmt.Sprintf("**Proposed lesson** (auto-apply blocked by self_learning=OFF):\n\n%s\n\n_Reason: %s_", res.Proposal.Rule, res.Reason),
 			SenderType:   "system",
@@ -787,7 +771,7 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 			replyError(w, http.StatusInternalServerError, "failed to queue lesson proposal for approval")
 			return
 		}
-		h.notifyKeeperInbox(body.WorkspaceID, gov, "keeper_lesson_proposal", title)
+		h.notifyKeeperInbox(body.WorkspaceID)
 	}
 
 	// Surface BOTH ESCALATE and DENY to the operator inbox. DENY here
@@ -804,7 +788,7 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 			Kind:         inbox.KindEscalation,
 			SourceID:     reqID,
 			TargetUserID: gov.SecurityContactUserID,
-			TargetRole:   govTargetRole(gov),
+			TargetRole:   "MANAGER",
 			Title:        title,
 			BodyMD:       res.Reason,
 			SenderType:   "system",
@@ -821,7 +805,7 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 				"decision":     string(res.Decision),
 			},
 		})
-		h.notifyKeeperInbox(body.WorkspaceID, gov, "keeper_negative_learning", title)
+		h.notifyKeeperInbox(body.WorkspaceID)
 	}
 
 	resp := map[string]any{

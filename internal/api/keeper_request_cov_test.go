@@ -38,12 +38,10 @@ func (covKReqFailEmitter) Emit(_ context.Context, _ journal.Entry) (string, erro
 
 func (covKReqFailEmitter) Flush(_ context.Context) error { return nil }
 
-// covKReqBroadcaster records keeper events, inbox invalidations, and
-// per-user notifications.
+// covKReqBroadcaster records keeper events and inbox invalidations.
 type covKReqBroadcaster struct {
 	events       []map[string]any
 	inboxUpdated []string // sources
-	userNotified []string // user IDs
 }
 
 func (b *covKReqBroadcaster) BroadcastKeeperEvent(_ string, event map[string]any) {
@@ -52,10 +50,6 @@ func (b *covKReqBroadcaster) BroadcastKeeperEvent(_ string, event map[string]any
 
 func (b *covKReqBroadcaster) BroadcastInboxUpdated(_ string, source string) {
 	b.inboxUpdated = append(b.inboxUpdated, source)
-}
-
-func (b *covKReqBroadcaster) NotifyUser(userID string, _ map[string]string) {
-	b.userNotified = append(b.userNotified, userID)
 }
 
 func covKReqDecode(t *testing.T, raw []byte) keeper.RequestResult {

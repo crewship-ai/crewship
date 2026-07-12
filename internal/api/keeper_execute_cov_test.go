@@ -631,5 +631,3 @@ func (b *covKEBroadcaster) BroadcastKeeperEvent(_ string, _ map[string]any) {
 }
 
 func (b *covKEBroadcaster) BroadcastInboxUpdated(_ string, _ string) {}
-
-func (b *covKEBroadcaster) NotifyUser(_ string, _ map[string]string) {}

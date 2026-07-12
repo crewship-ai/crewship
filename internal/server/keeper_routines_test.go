@@ -240,7 +240,9 @@ func TestKeeperSweep_GovernanceTargetsSecurityContact(t *testing.T) {
 				sourceID, user, role, wantUser, wantRole)
 		}
 	}
-	assertTarget("skill_review_sk1_ws1", "u_sec", "")
+	// Superset: governed ws1 highlights the contact AND keeps MANAGER as a
+	// fallback; ungoverned ws2 stays on the legacy MANAGER-only fanout.
+	assertTarget("skill_review_sk1_ws1", "u_sec", "MANAGER")
 	assertTarget("skill_review_sk1_ws2", "", "MANAGER")
 }
 
@@ -283,8 +285,8 @@ func TestKeeperSweep_MemoryHealth_GovernanceTargets(t *testing.T) {
 			t.Fatal(err)
 		}
 		seen++
-		if user != "u_sec" || role != "" {
-			t.Errorf("row %s: target_user_id=%q target_role=%q, want u_sec/empty", sourceID, user, role)
+		if user != "u_sec" || role != "MANAGER" {
+			t.Errorf("row %s: target_user_id=%q target_role=%q, want u_sec/MANAGER", sourceID, user, role)
 		}
 	}
 	if err := rows.Err(); err != nil {

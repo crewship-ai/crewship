@@ -176,19 +176,21 @@ func TestKeeperGovernance_EscalateTargetsContactAndPushes(t *testing.T) {
 	}
 	res := covKReqDecode(t, rr.Body.Bytes())
 
-	var targetUser string
-	if err := db.QueryRow(`SELECT COALESCE(target_user_id, '') FROM inbox_items
-		WHERE workspace_id = ? AND source_id = ?`, wsID, res.RequestID).Scan(&targetUser); err != nil {
+	// Superset targeting: the contact is highlighted via target_user_id AND
+	// the MANAGER fanout is kept, so managers still see it as a fallback.
+	var targetUser, targetRole string
+	if err := db.QueryRow(`SELECT COALESCE(target_user_id, ''), COALESCE(target_role, '') FROM inbox_items
+		WHERE workspace_id = ? AND source_id = ?`, wsID, res.RequestID).Scan(&targetUser, &targetRole); err != nil {
 		t.Fatalf("inbox item: %v", err)
 	}
 	if targetUser != ownerID {
 		t.Errorf("target_user_id = %q, want security contact %q", targetUser, ownerID)
 	}
+	if targetRole != "MANAGER" {
+		t.Errorf("target_role = %q, want MANAGER kept as fallback", targetRole)
+	}
 	if len(bc.inboxUpdated) != 1 {
 		t.Fatalf("inbox.updated broadcasts = %d, want 1", len(bc.inboxUpdated))
-	}
-	if len(bc.userNotified) != 1 || bc.userNotified[0] != ownerID {
-		t.Fatalf("user notifications = %v, want [%s]", bc.userNotified, ownerID)
 	}
 }
 
@@ -223,9 +225,6 @@ func TestKeeperGovernance_EscalateWithoutRowStillPushes(t *testing.T) {
 	if len(bc.inboxUpdated) != 1 {
 		t.Fatalf("inbox.updated broadcasts = %d, want 1", len(bc.inboxUpdated))
 	}
-	if len(bc.userNotified) != 0 {
-		t.Fatalf("user notifications = %v, want none", bc.userNotified)
-	}
 }
 
 // High-risk DENY lands in the inbox only for workspaces that opted in.
@@ -253,19 +252,19 @@ func TestKeeperGovernance_HighRiskDenyNotifiesWhenEnabled(t *testing.T) {
 	res := covKReqDecode(t, rr.Body.Bytes())
 
 	var blocking int
-	var targetUser string
-	if err := db.QueryRow(`SELECT blocking, COALESCE(target_user_id, '') FROM inbox_items
-		WHERE workspace_id = ? AND source_id = ?`, wsID, res.RequestID).Scan(&blocking, &targetUser); err != nil {
+	var targetUser, targetRole string
+	if err := db.QueryRow(`SELECT blocking, COALESCE(target_user_id, ''), COALESCE(target_role, '') FROM inbox_items
+		WHERE workspace_id = ? AND source_id = ?`, wsID, res.RequestID).Scan(&blocking, &targetUser, &targetRole); err != nil {
 		t.Fatalf("DENY inbox item not written: %v", err)
 	}
 	if blocking != 0 {
 		t.Errorf("DENY notify must be non-blocking (informational), got blocking=%d", blocking)
 	}
-	if targetUser != ownerID {
-		t.Errorf("target_user_id = %q, want %q", targetUser, ownerID)
+	if targetUser != ownerID || targetRole != "MANAGER" {
+		t.Errorf("target = (%q, %q), want contact %q + MANAGER fallback", targetUser, targetRole, ownerID)
 	}
-	if len(bc.inboxUpdated) != 1 || len(bc.userNotified) != 1 {
-		t.Fatalf("broadcasts = inbox %d / user %d, want 1/1", len(bc.inboxUpdated), len(bc.userNotified))
+	if len(bc.inboxUpdated) != 1 {
+		t.Fatalf("inbox.updated broadcasts = %d, want 1", len(bc.inboxUpdated))
 	}
 }
 

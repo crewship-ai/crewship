@@ -55,9 +55,6 @@ type KeeperBroadcaster interface {
 	// other inbox producer (chatnotify, pipeline_governance, runner_notify)
 	// already emits.
 	BroadcastInboxUpdated(workspaceID string, source string)
-	// NotifyUser pings a named user's channel (notification.created) — used
-	// to target the workspace security contact directly.
-	NotifyUser(userID string, event map[string]string)
 }
 
 // KeeperHandler handles credential access requests forwarded by the sidecar.

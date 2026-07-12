@@ -371,14 +371,13 @@ func TestKeeperPhase2_GovernanceContact_TargetsAndNotifies(t *testing.T) {
 	if targetUser != "u_sec" {
 		t.Errorf("target_user_id = %q, want u_sec", targetUser)
 	}
-	if targetRole != "" {
-		t.Errorf("target_role = %q, want empty (targeted item must not also fan out)", targetRole)
+	// Superset targeting: the contact is highlighted AND the MANAGER fanout
+	// is kept as a fallback (inbox visibility filter ORs the two).
+	if targetRole != "MANAGER" {
+		t.Errorf("target_role = %q, want MANAGER kept as fallback", targetRole)
 	}
 	if len(bc.inboxUpdated) != 1 || bc.inboxUpdated[0] != "keeper" {
 		t.Errorf("inboxUpdated = %v, want [keeper]", bc.inboxUpdated)
-	}
-	if len(bc.userNotified) != 1 || bc.userNotified[0] != "u_sec" {
-		t.Errorf("userNotified = %v, want [u_sec]", bc.userNotified)
 	}
 }
 
@@ -434,9 +433,6 @@ func TestKeeperPhase2_NoGovernance_LegacyManagerFanout(t *testing.T) {
 	}
 	if len(bc.inboxUpdated) != 1 || bc.inboxUpdated[0] != "keeper" {
 		t.Errorf("inboxUpdated = %v, want [keeper]", bc.inboxUpdated)
-	}
-	if len(bc.userNotified) != 0 {
-		t.Errorf("userNotified = %v, want none without a contact", bc.userNotified)
 	}
 }
 

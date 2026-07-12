@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
@@ -297,15 +296,13 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// pending operator" to "transient transport error → retry" which is
 	// the wrong recovery for the same outcome.
 	// Workspace watchdog governance (#1001 M0): a configured security
-	// contact routes the snitch at a named admin instead of the MANAGER
-	// role fanout, and an opted-in workspace also gets high-risk DENYs.
+	// contact highlights the snitch for a named admin (TargetUserID) while
+	// KEEPING the MANAGER fanout, so the escalation stays visible to every
+	// manager as a fallback (the inbox visibility filter ORs the two). An
+	// opted-in workspace also gets high-risk DENYs.
 	gov, govConfigured, gerr := governance.Get(r.Context(), h.db, body.WorkspaceID)
 	if gerr != nil {
 		h.logger.Warn("keeper: governance lookup failed", "error", gerr, "workspace_id", body.WorkspaceID)
-	}
-	targetRole := "MANAGER"
-	if gov.SecurityContactUserID != "" {
-		targetRole = "" // targeted item; role fanout would double-deliver
 	}
 
 	inboxWritten := false
@@ -315,7 +312,7 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			Kind:         inbox.KindEscalation,
 			SourceID:     reqID,
 			TargetUserID: gov.SecurityContactUserID,
-			TargetRole:   targetRole,
+			TargetRole:   "MANAGER",
 			Title:        fmt.Sprintf("Keeper escalation: %s requested %s (risk %d)", agentName, credName, gkResp.RiskScore),
 			BodyMD:       gkResp.Reason,
 			SenderType:   "system",
@@ -350,7 +347,7 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			Kind:         inbox.KindEscalation,
 			SourceID:     reqID,
 			TargetUserID: gov.SecurityContactUserID,
-			TargetRole:   targetRole,
+			TargetRole:   "MANAGER",
 			Title:        fmt.Sprintf("Keeper high-risk DENY: %s requested %s (risk %d)", agentName, credName, gkResp.RiskScore),
 			BodyMD:       gkResp.Reason,
 			SenderType:   "system",
@@ -376,17 +373,10 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Realtime push (#1001 M0): Keeper was the only inbox producer that
 	// didn't broadcast inbox.updated — findings appeared only on manual
-	// refresh. Push the workspace invalidation and, when a security
-	// contact is configured, ping their user channel directly.
+	// refresh. Push the workspace invalidation so the bell badge updates
+	// live; a configured contact is surfaced via the item's TargetUserID.
 	if inboxWritten && h.broadcaster != nil {
 		h.broadcaster.BroadcastInboxUpdated(body.WorkspaceID, "keeper")
-		if gov.SecurityContactUserID != "" {
-			h.broadcaster.NotifyUser(gov.SecurityContactUserID, map[string]string{
-				"kind":         "keeper_" + strings.ToLower(gkResp.Decision),
-				"workspace_id": body.WorkspaceID,
-				"title":        fmt.Sprintf("Keeper %s: %s requested %s (risk %d)", gkResp.Decision, agentName, credName, gkResp.RiskScore),
-			})
-		}
 	}
 
 	h.logger.Info("keeper: decision",
