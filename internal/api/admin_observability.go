@@ -10,6 +10,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/diskusage"
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/secrets"
 )
 
 // AdminObservabilityHandler serves the operator-facing observability surface:
@@ -131,6 +132,12 @@ func (h *AdminObservabilityHandler) Health(w http.ResponseWriter, r *http.Reques
 	resp := map[string]any{
 		"uptime_seconds": int(time.Since(h.startedAt).Seconds()),
 		"log_level":      currentLogLevel(),
+		// E2 (master-key ops): where ENCRYPTION_KEY came from. "generated"
+		// means the auto-bootstrapped key sits in <dataDir>/secrets.env next
+		// to the database — a copied disk carries both ciphertext and key.
+		// "external" = operator-injected env; "unknown" = bootstrap didn't
+		// run in this process (embedded/test harnesses).
+		"encryption_key_source": secrets.EncryptionKeySource(),
 	}
 	// Real DB liveness probe. The admin overview's health dots were
 	// hardcoded green (#868); a bounded ping means a wedged/locked SQLite

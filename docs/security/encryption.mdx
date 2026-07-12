@@ -80,12 +80,7 @@ This is a **custom byte order** (`IV || AuthTag || Ciphertext`), not the standar
 
 ## Key Versioning
 
-Credentials are prefixed with a version identifier (e.g., `v1:`) to support key rotation:
-
-```go
-const currentKeyVersion = "v1"
-var versionPattern = regexp.MustCompile(`^v\d+$`)
-```
+Envelopes are prefixed with a version identifier (e.g., `v1:`) to support key rotation. The version NEW envelopes are minted with defaults to `v1` and is switched with the `CREWSHIP_ENCRYPTION_KEY_VERSION` environment variable during a rotation. Decryption always honours the per-envelope prefix, so any generation whose key is still in the environment remains readable.
 
 ### Key Resolution
 
@@ -95,7 +90,52 @@ var versionPattern = regexp.MustCompile(`^v\d+$`)
 | `v2` | `ENCRYPTION_KEY_V2` |
 | `vN` | `ENCRYPTION_KEY_VN` |
 
-If the version-specific env var is not set, it falls back to `ENCRYPTION_KEY`. This allows gradual key rotation without re-encrypting all existing credentials immediately.
+On **decrypt**, if the version-specific env var is not set, resolution falls back to `ENCRYPTION_KEY` (legacy compatibility). On **encrypt**, the resolution is strict: minting `vN` envelopes requires `ENCRYPTION_KEY_VN` to be present — a silent fallback would stamp envelopes with a version whose key they were not encrypted with. `crewship start` validates the active version's key at boot and refuses to start on a misconfigured rotation.
+
+### Key Source Visibility
+
+On first boot `crewship start` auto-generates `ENCRYPTION_KEY` and persists it to `<dataDir>/secrets.env` (mode 0600) — which on default installs is the **same volume as the SQLite database**. A copied disk or volume backup therefore carries both the ciphertext and the key. Crewship surfaces this:
+
+- A startup `WARN` log fires on every boot while the key is auto-generated/colocated.
+- `GET /api/v1/admin/health` (CLI: `crewship system health`) reports `encryption_key_source`: `"external"` (operator-injected env var), `"generated"` (auto-bootstrapped, colocated), or `"unknown"`.
+
+For stronger at-rest protection, supply `ENCRYPTION_KEY` from an external secret store (systemd `EnvironmentFile=`, Kubernetes secret, Vault) and remove the entry from `secrets.env`.
+
+## Rotating the Master Key
+
+`crewship admin reencrypt` re-encrypts every stored envelope to the current key version, so the old key can actually be retired instead of living in the environment forever.
+
+Runbook (rotating from `v1` to `v2`):
+
+```bash
+# 1. Generate the new key
+openssl rand -hex 32
+
+# 2. On the server, add the new key AND flip the active version,
+#    keeping the old key available for decryption:
+export ENCRYPTION_KEY=<old key>                # unchanged
+export ENCRYPTION_KEY_V2=<new key>
+export CREWSHIP_ENCRYPTION_KEY_VERSION=v2
+#    …then restart crewship. New writes now mint "v2:" envelopes.
+
+# 3. Re-encrypt everything that is still on the old key:
+crewship admin reencrypt
+# Re-encrypted: N   Skipped: M   Failed: 0
+
+# 4. Once the run reports failed: 0, no row references the old key.
+#    Retire it: keep ENCRYPTION_KEY_V2 + CREWSHIP_ENCRYPTION_KEY_VERSION=v2,
+#    and remove/replace the old ENCRYPTION_KEY value.
+```
+
+The operation is idempotent — envelopes already at the current version are skipped — so an interrupted run can simply be repeated. Undecryptable values (no configured key opens them) are counted under `failed` and left untouched; the CLI exits non-zero in that case so a scripted rotation never retires the old key on a false success.
+
+The walk covers every envelope-bearing column: `credentials.encrypted_value`, `credentials.encrypted_refresh_token`, `credentials.oauth_client_secret_enc`, `credentials.oauth_refresh_token_enc`, `credential_rotations.old_value`, `notification_channels.secret_enc`, `composio_settings.encrypted_api_key`, `oauth_states.code_verifier`, and `escalations.resolution` (credential-type escalations only).
+
+<Warning>
+  Backup bundles created **before** the rotation contain credential envelopes under the old key. Restoring one requires the old key to still be resolvable (keep it archived offline), or take a fresh backup after the re-encryption run.
+
+  The CLI-side backup keyring (`~/.crewship/backup-keyring.enc`) is a separate rotation domain: it is encrypted with the **CLI host's** own `ENCRYPTION_KEY`, not the server's, so the server-side run never touches it. If you rotate the CLI host's key, re-store the affected passphrases (`crewship backup create --use-keyring` re-writes the entry) or keep that host's old key resolvable.
+</Warning>
 
 ## Legacy Format Support
 
