@@ -15,7 +15,9 @@ step (`self-update` keeps a `.bak`), but once migrations have run, recovery
 
 ## Upgrade: `crewship self-update`
 
-One command, whatever platform you're on:
+One command on macOS and Linux (on **Windows**, `self-update` is disabled —
+download the newer zip and replace `crewship.exe` manually, see
+[Windows install](/guides/install#windows-cli-only)):
 
 ```bash
 crewship self-update            # upgrade to the latest release
@@ -193,6 +195,10 @@ crewship db restore-snapshot --list     # show snapshots (newest first, with v<f
 crewship db restore-snapshot            # restore the most recent, or
 crewship db restore-snapshot <file>.bak # restore a specific one
 ```
+
+The restore **prompts for confirmation** before touching the database; pass
+`--yes` to skip the prompt in scripts (without it, a run with closed stdin
+reads EOF and aborts with `aborted (pass --yes to skip confirmation)`).
 
 3. **Reinstall the older binary.** Homebrew: `brew install crewship-ai/tap/crewship@<version>` (or `brew uninstall` + install the pinned tag). Installer: `CREWSHIP_VERSION=vX.Y.Z curl -fsSL …/install.sh | bash`.
 4. **Start the older binary** — it boots against the restored schema.

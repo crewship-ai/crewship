@@ -517,7 +517,7 @@ Passing two raises a CLI error rather than silently picking one. A bundle encryp
 </Accordion>
 
 <Accordion title="Same-slug restore refuses by default">
-`crewship backup restore` will not overwrite an existing workspace or crew under the same slug. If the existing one is stale and you want to replace it, delete it first (a crew via `crewship crew delete`; a workspace must be removed out-of-band — there is no workspace-delete command, see the [workspaces API note](/api-reference/workspaces)); if you want both side-by-side, use `--as-workspace=<new-slug>` and then `crewship crew provision`.
+`crewship backup restore` will not overwrite an existing workspace or crew under the same slug. If the existing one is stale and you want to replace it, delete it first (a crew via `crewship crew delete`; a workspace via `crewship workspace delete <slug> --confirm <slug>` — OWNER only, refused if it is your only workspace, see the [workspace CLI](/cli/workspace#workspace-delete)); if you want both side-by-side, use `--as-workspace=<new-slug>` and then `crewship crew provision`.
 </Accordion>
 
 <Accordion title="Disk space during restore is not bounded by the heap streaming guarantee">

@@ -46,7 +46,7 @@ Show Keeper security system status.
 crewship system keeper
 ```
 
-**Output:** Status (enabled/disabled), Ollama URL, Model, Ollama status (online/offline), Secret credential count.
+**Output:** Status (enabled/disabled), Ollama URL, Model, Ollama status (online/offline), Secret credential count (the active workspace's `SECRET`-type credentials that are ACTIVE and not deleted — the set the Keeper `SecretStore` manages).
 
 <Note>
 Keeper status is **workspace-scoped** and requires the **ADMIN** or **OWNER**
@@ -147,6 +147,13 @@ crewship system aux-status
 crewship system aux-status --format json | jq '.slots[] | select(.source=="fallback")'
 crewship system aux-status --format yaml
 ```
+
+<Note>
+Requires the **ADMIN** or **OWNER** role — the resolved provider/model/timeout
+matrix is operator configuration, not for every workspace member to enumerate.
+A **MEMBER** gets a `403`, same as [`system keeper`](#crewship-system-keeper)
+above.
+</Note>
 
 **Source column values:**
 

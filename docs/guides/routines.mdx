@@ -925,7 +925,7 @@ crewship routine logs <run_id> --full   # full step-by-step journal timeline
 # or: GET /api/v1/workspaces/{wsId}/pipeline-runs/{runId}
 ```
 
-`routine result` answers "what did run X produce?" — it re-fetches the run and prints the final `output` (structured JSON is pretty-printed; `--format json` for scripting). `routine logs` now includes the output too; use `result` when the deliverable is all you want.
+`routine result` answers "what did run X produce?" — it re-fetches the run and prints the final `output` (structured JSON is pretty-printed; `--format json` for scripting), followed by a **Files changed during this run** section: the files on the run's crew written inside the run window (`report.pdf`, `summary.md`, …) with a `crew files get` fetch hint. For a document-producing routine the files *are* the deliverable. Read the list as a correlation ("what changed on the crew while this ran"), not proof of authorship — a concurrent session or overlapping run on the same crew shows up too; see the [CLI reference](/cli/routine#crewship-routine-result-run_id) for the full caveat. `routine logs` now includes the output too; use `result` when the deliverable is all you want.
 
 ### Client-facing views
 
@@ -1019,9 +1019,11 @@ Routines are portable across workspaces:
 # Export from workspace A
 crewship routine export email-fetch --include-history > email-fetch.json
 
-# Import into workspace B
-cat email-fetch.json | crewship routine import
+# Import into workspace B — --crew names the author crew that will own it
+cat email-fetch.json | crewship routine import --crew acct
 ```
+
+`--crew` is required on import: it names the author crew that owns the routine and resolves its agent slugs. Scripts inlined in the bundle materialize into that crew's shared dir (pass `--force` to overwrite a differing existing script, or `--no-scripts` to skip materialization).
 
 The bundle format is `crewship-pipeline-bundle/v1`: routine row + (optionally) the full version chain + change_summary annotations. Author identity is rewritten on import so the importing user becomes the new author. Slug is preserved; if it conflicts in the destination workspace the existing row updates (new version), or you change the bundle's slug before import.
 
@@ -1230,7 +1232,7 @@ crewship routine webhooks create --slug pr-review-structured \
 - run: crewship routine validate routines/*.json
 ```
 
-Exit code 1 on any invalid file.
+Exit code 1 on any invalid file. Beyond the schema, `validate` catches at author time what used to fail at `save` or on the first run: a `concurrency_key` that can render empty, unsatisfiable output gates (`min_length > max_length`, same token in `must_contain` and `must_not_contain`), and dead `egress_targets` entries (`*`, `*.*`, empty host — targets are literal/suffix matched, not globbed). Agent-slug typos fail here too if you supply the roster: `--agents triage,writer` (fully offline) or `--author-crew growth` (one `GET /api/v1/agents` call); the two flags are mutually exclusive. Details in the [CLI reference](/cli/routine#crewship-routine-validate-filejson).
 
 ### "Discover what an agent is about to do, without running it"
 

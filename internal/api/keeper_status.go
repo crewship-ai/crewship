@@ -34,6 +34,7 @@ type keeperStatusResponse struct {
 	AllowCount    int    `json:"allow_count"`
 	DenyCount     int    `json:"deny_count"`
 	EscalateCount int    `json:"escalate_count"`
+	SecretCount   int    `json:"secret_count"`
 }
 
 // Status returns the current Keeper configuration and health status.
@@ -83,6 +84,14 @@ func (h *KeeperStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 			`SELECT COUNT(*) FROM keeper_requests`+inWorkspace+` AND decision='DENY'`, workspaceID).Scan(&resp.DenyCount)
 		h.db.QueryRowContext(r.Context(),
 			`SELECT COUNT(*) FROM keeper_requests`+inWorkspace+` AND decision='ESCALATE'`, workspaceID).Scan(&resp.EscalateCount)
+		// Keeper-managed secrets in this workspace — same predicate the
+		// SecretStore loads with (keeper/secrets/store.go), workspace-scoped.
+		// The CLI has always printed this field; it was documented output
+		// that the server never returned (always rendered 0).
+		h.db.QueryRowContext(r.Context(),
+			`SELECT COUNT(*) FROM credentials
+			 WHERE workspace_id = ? AND type = 'SECRET' AND status = 'ACTIVE' AND deleted_at IS NULL`,
+			workspaceID).Scan(&resp.SecretCount)
 	}
 
 	writeJSON(w, http.StatusOK, resp)

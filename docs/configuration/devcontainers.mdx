@@ -93,14 +93,16 @@ Extend the main [environment reference](/configuration/environment). These gover
 **Sidecar binary**
 1. `{dir of crewship executable}/crewship-sidecar` — tar.gz / installer layout
 2. `{dir of crewship executable}/../libexec/crewship-sidecar` — Homebrew layout
-3. `/usr/local/bin/crewship-sidecar`
+3. `{dir of crewship executable}/../libexec/crewship/crewship-sidecar` — deb/rpm FHS layout (`/usr/libexec/crewship/`)
+4. `/usr/local/bin/crewship-sidecar`
 
 **Entrypoint script**
 1. `{dir of crewship executable}/entrypoint.sh` — tar.gz / installer layout
 2. `{dir of crewship executable}/../libexec/entrypoint.sh` — Homebrew layout
-3. `{cwd}/scripts/entrypoint.sh`
-4. `{cwd}/entrypoint.sh`
-5. `/usr/local/share/crewship/entrypoint.sh`
+3. `{dir of crewship executable}/../libexec/crewship/entrypoint.sh` — deb/rpm FHS layout (`/usr/libexec/crewship/`)
+4. `{cwd}/scripts/entrypoint.sh`
+5. `{cwd}/entrypoint.sh`
+6. `/usr/local/share/crewship/entrypoint.sh`
 
 The executable directory is resolved through symlinks first, so a Homebrew-symlinked `crewship` on your `PATH` resolves to its real Cellar directory (where the `libexec` sibling lives).
 
