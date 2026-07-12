@@ -315,6 +315,7 @@ These configure the `crewship` CLI on a developer/operator machine (not the serv
 | `CREWSHIP_PROFILE` | (unset) | Select a named server profile from `cli-config.yaml` (`servers:` map). Resolution: `--profile` flag → this var → `directory_profiles` match → `current`. Manage with `crewship server`. |
 | `CREWSHIP_HTTP_TIMEOUT` | `30` | CLI per-request timeout in **seconds**. Raise on slow links or long-running server calls. |
 | `CREWSHIP_ALLOW_SERVER_MISMATCH` | (unset) | Set to `1` to allow sending the stored auth token to a `--server` host different from the one it was issued for (normally refused as a token-leak guard). Same as the `--server-allow-mismatch` flag. |
+| `CREWSHIP_NO_SLUG_CACHE` | (unset — cache on) | Set to `1` to disable the workspace slug→ID disk cache (`~/.crewship/cache/workspace_slugs.json`, 15-minute TTL). The cache saves one `/workspaces` preflight round-trip per invocation when `--workspace` is a slug; disable it if you delete and recreate workspaces under the same slug in rapid succession. Read by `internal/cli/slugcache.go`. |
 
 ## Installer
 

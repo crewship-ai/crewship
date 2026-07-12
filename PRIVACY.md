@@ -1,8 +1,10 @@
 # Privacy Policy
 
-Crewship is self-hosted. The default install collects nothing and
-sends nothing. This page documents what that means in practice and
-what changes if you opt in to optional features.
+Crewship is self-hosted. Your workspaces, prompts, credentials, and
+agent output never leave your machine. The one optional outbound
+surface is anonymous crash reporting, whose default depends on the
+build flavour (on for prereleases, off for stable releases — details
+below). This page documents what that means in practice.
 
 **Controller:** Unify Technology s.r.o. (Czech Republic).
 **Contact:** privacy@unify.cz
@@ -23,9 +25,10 @@ equivalent on Linux/Windows:
   OpenAI, …) using the credentials you give it — over HTTPS,
   directly to those providers.
 
-**Crewship does not send any data to Unify Technology s.r.o. by
-default.** No telemetry, no crash reports, no usage metrics, no
-update pings beyond what is described below.
+**Crewship sends no usage data to Unify Technology s.r.o.** No usage
+analytics, no phone-home on agent runs, no metrics. The one exception
+is **crash reporting** (Sentry), which is consent-gated and
+build-flavour-dependent — see "Crash reporting" below.
 
 ## What we check from the public internet
 
@@ -42,23 +45,31 @@ update pings beyond what is described below.
 
 That's the entire outbound footprint of the default install.
 
+## Crash reporting
+
+Release binaries include anonymous crash reporting (Sentry). The
+default follows the build flavour:
+
+- **Prerelease builds** (`-beta.*`, `-rc.*`, dev): **enabled by
+  default**; disable any time with `crewship telemetry off`. The
+  onboarding wizard also surfaces the consent checkbox.
+- **Stable releases** (`v1.0.0` and later): **disabled** until you
+  explicitly opt in (`crewship telemetry on`).
+
+What a crash report contains (and what the defense-in-depth scrubbers
+strip — prompts, credentials, paths) is documented in the
+[Telemetry guide](docs/guides/telemetry.mdx). Consent state lives in
+your local database; the browser UI inherits the same consent via
+`GET /api/v1/system/telemetry` and fails closed.
+
 ## What we don't collect
 
-Crewship does not include the following surfaces in v0.1 beta:
-
-- ❌ No telemetry or usage analytics.
-- ❌ No crash reporting (no Sentry / Crashlytics / similar in the
-  default build).
+- ❌ No usage analytics or product metrics.
 - ❌ No third-party cookies in the embedded web UI.
 - ❌ No phone-home on container starts, agent runs, or LLM calls.
 - ❌ No fingerprinting, no advertising IDs, no platform analytics.
-
-When any of the above changes (e.g., when we ship optional crash
-reporting in a later version), the change will be:
-
-- Disabled by default for users with EU timezones / locales.
-- Documented here before it ships.
-- Surfaced in a first-run dialog with a clear "Send nothing" option.
+- ❌ No prompt, credential, or workspace content in crash reports
+  (scrubbed before send; see the Telemetry guide).
 
 ## What your data does
 
@@ -96,9 +107,9 @@ self-host an Ollama instance.
 
 ## GDPR / your rights
 
-Even though Crewship doesn't process your personal data by default,
-the following rights apply under GDPR for anything we eventually do
-collect (e.g., if you opt in to crash reporting):
+Crewship processes no personal data beyond what crash reporting
+sends when enabled. The following GDPR rights apply to anything we
+do collect:
 
 - Right of access (Art. 15)
 - Right to rectification (Art. 16)
@@ -116,4 +127,4 @@ local supervisory authority.
 
 This document is versioned in the repository. Material changes
 trigger a CHANGELOG entry and an in-app notice in the next release.
-Last reviewed: 2026-05-18.
+Last reviewed: 2026-07-12.

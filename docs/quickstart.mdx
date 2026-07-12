@@ -7,7 +7,7 @@ icon: "rocket"
 Crewship is a **self-hosted runtime for AI coding agents**. This page gets you from zero to a running agent in two passes: a 60-second smoke test that proves the runtime is alive on your hardware, then a 5-minute full setup that creates your first crew.
 
 <Warning>
-  **v0.1 beta — use the Claude Code adapter.** Crewship ships scaffolds
+  **Recommended adapter: Claude Code.** Crewship ships scaffolds
   for Codex, Gemini, OpenCode, Cursor, and Factory Droid, but only
   **Claude Code** has production-tested streaming, MCP support, and prompt
   scrubbers in this release. Pick Claude Code in the agent picker for
@@ -164,7 +164,7 @@ For pinned versions, custom install directories, and air-gapped install paths se
   </Step>
 
   <Step title="(Optional) Opt out of crash reporting">
-    Crewship v0.1 beta enables anonymous crash reporting by default. To opt out before any data leaves your machine:
+    Prerelease builds (beta/rc) enable anonymous crash reporting by default; stable releases (v1.0.0 and later) keep it **off** until you opt in. To opt out on a prerelease before any data leaves your machine:
 
     ```bash
     crewship telemetry off
