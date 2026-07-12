@@ -625,7 +625,11 @@ func wsOriginAllowlisted(origin string) bool {
 	origin = strings.TrimRight(strings.TrimSpace(origin), "/")
 	for _, item := range strings.Split(raw, ",") {
 		item = strings.TrimRight(strings.TrimSpace(item), "/")
-		if item != "" && item == origin {
+		// EqualFold, not ==, to stay in lockstep with the HTTP guard
+		// (origin_check.go originAllowed) — scheme/host are case-
+		// insensitive per RFC 3986, and a case-sensitive matcher here
+		// would silently reject an allowlist entry the HTTP side accepts.
+		if item != "" && strings.EqualFold(item, origin) {
 			return true
 		}
 	}

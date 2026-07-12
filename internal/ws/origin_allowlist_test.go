@@ -30,6 +30,15 @@ func TestHandleUpgrade_AllowlistedOrigin(t *testing.T) {
 		}
 	})
 
+	t.Run("matching is case-insensitive like the HTTP guard", func(t *testing.T) {
+		// origin_check.go originAllowed uses EqualFold; the WS matcher must
+		// not drift stricter and silently reject an entry HTTP accepts.
+		t.Setenv("CREWSHIP_ALLOWED_ORIGINS", "http://Tauri.Localhost")
+		if err := originDial(t, "http://tauri.localhost"); err != nil {
+			t.Errorf("case-folded allowlist entry rejected: %v", err)
+		}
+	})
+
 	t.Run("non-allowlisted origin still rejected in production", func(t *testing.T) {
 		t.Setenv("CREWSHIP_ALLOWED_ORIGINS", "http://tauri.localhost")
 		if err := originDial(t, "http://evil.example.com"); err == nil {
