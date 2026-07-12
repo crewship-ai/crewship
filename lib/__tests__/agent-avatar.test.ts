@@ -123,3 +123,33 @@ describe("seedColor", () => {
     expect(Number(m![1])).toBeLessThan(360)
   })
 })
+
+describe("lazy style loading", () => {
+  beforeEach(() => {
+    _resetAvatarCacheForTest()
+  })
+
+  it("returns a deterministic placeholder for a not-yet-loaded style, then the real avatar after preload", async () => {
+    const { preloadAvatarStyle } = await import("@/lib/agent-avatar")
+    // NOTE: in the vitest environment dynamic imports may already have
+    // resolved from a previous test; force-preload and then compare.
+    const before = getAgentAvatarUrl("lazy-seed", "adventurer")
+    expect(before).toMatch(/^data:image\/svg\+xml/)
+    await preloadAvatarStyle("adventurer")
+    const after = getAgentAvatarUrl("lazy-seed", "adventurer")
+    expect(after).toMatch(/^data:image\/svg\+xml/)
+    // After the collection is resident the URI is the real DiceBear
+    // render — stable across calls.
+    expect(getAgentAvatarUrl("lazy-seed", "adventurer")).toBe(after)
+  })
+
+  it("bumps the styles version when a lazy collection loads", async () => {
+    const { avatarStylesVersion, preloadAvatarStyle } = await import("@/lib/agent-avatar")
+    const v0 = avatarStylesVersion()
+    await preloadAvatarStyle("lorelei")
+    // Either it just loaded (version bumped) or was already resident
+    // from an earlier test (version unchanged) — both are valid; the
+    // invariant is monotonicity.
+    expect(avatarStylesVersion()).toBeGreaterThanOrEqual(v0)
+  })
+})

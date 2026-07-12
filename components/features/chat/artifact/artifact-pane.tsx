@@ -117,7 +117,10 @@ export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
         title={active?.title ?? "Artifact"}
         subtitle={active?.path}
       >
-        <ArtifactViewSwitch />
+        {/* Diff/Preview are not implemented yet — offer only the editor
+              view so the switcher (which hides itself below two views)
+              never exposes a "coming soon" dead end. */}
+          <ArtifactViewSwitch views={["editor"]} />
       </ArtifactHeader>
       {tabs.length > 0 && (
         <div className="flex items-center gap-1 overflow-x-auto border-b px-2 py-1 shrink-0 bg-muted/20">
@@ -175,18 +178,6 @@ export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
               No artifact open
             </div>
           )
-        }
-        diff={
-          <div className="flex items-center justify-center h-full p-8 text-sm text-muted-foreground text-center">
-            Diff view coming soon — will show before/after when an agent edits
-            a tracked file.
-          </div>
-        }
-        preview={
-          <div className="flex items-center justify-center h-full p-8 text-sm text-muted-foreground text-center">
-            Preview view coming soon — markdown render, image preview, sandbox
-            output.
-          </div>
         }
       />
     </Artifact>

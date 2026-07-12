@@ -15,7 +15,24 @@ import { Button } from "@/components/ui/button"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 import { cn } from "@/lib/utils"
-import { WorkflowGraph } from "@/components/features/orchestration/workflow-graph"
+import dynamic from "next/dynamic"
+
+// React Flow (~200 KB+) only loads when the user opens the graph tab —
+// keeps @xyflow/react out of the initial orchestration-route chunk.
+const WorkflowGraph = dynamic(
+  () =>
+    import("@/components/features/orchestration/workflow-graph").then(
+      (m) => m.WorkflowGraph
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        Loading graph…
+      </div>
+    ),
+  }
+)
 import { PipelineDetailSheet } from "@/components/features/orchestration/pipeline-detail-sheet"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { MissionTimeline } from "@/components/features/orchestration/mission-timeline"

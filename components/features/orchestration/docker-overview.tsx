@@ -35,11 +35,6 @@ export function DockerOverview({ crews }: DockerOverviewProps) {
           <TableHeader>
             <TableRow className="border-border hover:bg-transparent">
               <TableHead className="text-muted-foreground text-[11px] font-medium">Container</TableHead>
-              <TableHead className="text-muted-foreground text-[11px] font-medium">Image</TableHead>
-              <TableHead className="text-muted-foreground text-[11px] font-medium">Status</TableHead>
-              <TableHead className="text-muted-foreground text-[11px] font-medium">CPU</TableHead>
-              <TableHead className="text-muted-foreground text-[11px] font-medium">RAM</TableHead>
-              <TableHead className="text-muted-foreground text-[11px] font-medium">Network</TableHead>
               <TableHead className="text-muted-foreground text-[11px] font-medium text-right">Agents</TableHead>
             </TableRow>
           </TableHeader>
@@ -54,16 +49,6 @@ export function DockerOverview({ crews }: DockerOverviewProps) {
                     crewship-team-{crew.slug}
                   </div>
                 </TableCell>
-                <TableCell className="font-mono text-[11px] text-muted-foreground">node:18-slim</TableCell>
-                <TableCell>
-                  <span className="inline-flex items-center gap-1.5 text-[11px] text-emerald-400">
-                    <span className="size-1.5 rounded-full bg-emerald-500" />
-                    Running
-                  </span>
-                </TableCell>
-                <TableCell className="font-mono text-[11px] text-muted-foreground">--</TableCell>
-                <TableCell className="font-mono text-[11px] text-muted-foreground">--</TableCell>
-                <TableCell className="font-mono text-[11px] text-muted-foreground">--</TableCell>
                 <TableCell className="text-[11px] text-muted-foreground text-right">
                   {crew._count?.agents ?? 0}
                 </TableCell>
@@ -72,9 +57,15 @@ export function DockerOverview({ crews }: DockerOverviewProps) {
           </TableBody>
         </Table>
       </ScrollArea>
+      {/* The old table fabricated Image ("node:18-slim"), an always-green
+          Running status, and dashed CPU/RAM/Network cells — it read as live
+          infrastructure data while only the container name and agent count
+          were real. Until a real /containers stats endpoint exists, show
+          only the real columns and say so plainly. */}
       <div className="flex items-center gap-1.5 px-3 py-1.5 border-t border-border text-muted-foreground/50 text-[10px] shrink-0">
         <Info className="size-3" />
-        Live data coming soon
+        Live container metrics (image, status, CPU/RAM/network) are not
+        available yet
       </div>
     </div>
   )

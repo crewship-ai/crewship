@@ -15,10 +15,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
-import { mermaid } from "@streamdown/mermaid";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import {
   createContext,
@@ -30,6 +26,8 @@ import {
   useState,
 } from "react";
 import { Streamdown } from "streamdown";
+
+import { useStreamdownPlugins } from "./use-streamdown-plugins";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -347,20 +345,23 @@ export const MessageBranchPage = ({
 
 export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- mermaid peer dep version mismatch between @streamdown/mermaid and streamdown
-const streamdownPlugins = { cjk, code, math, mermaid } as any;
-
 export const MessageResponse = memo(
-  ({ className, ...props }: MessageResponseProps) => (
-    <Streamdown
-      className={cn(
-        "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-        className
-      )}
-      plugins={streamdownPlugins}
-      {...props}
-    />
-  ),
+  ({ className, ...props }: MessageResponseProps) => {
+    // Mermaid loads lazily, only for content that carries a mermaid fence.
+    const plugins = useStreamdownPlugins(
+      typeof props.children === "string" ? props.children : undefined
+    );
+    return (
+      <Streamdown
+        className={cn(
+          "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+          className
+        )}
+        plugins={plugins}
+        {...props}
+      />
+    );
+  },
   (prevProps, nextProps) => prevProps.children === nextProps.children
 );
 

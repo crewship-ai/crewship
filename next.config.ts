@@ -18,6 +18,13 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
+  experimental: {
+    // Rewrite barrel imports of these packages to direct per-module
+    // imports so tree-shaking sees through them. lucide-react alone is
+    // imported in hundreds of files; recharts sits in the dashboard
+    // landing route; date-fns shows up across list views.
+    optimizePackageImports: ["lucide-react", "recharts", "date-fns"],
+  },
   async rewrites() {
     if (!isDev) return []
     return [

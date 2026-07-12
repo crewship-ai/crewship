@@ -4,6 +4,10 @@ import { render, screen } from "@testing-library/react"
 // Avatar URL generation hits DiceBear — stub it so the test stays offline.
 vi.mock("@/lib/agent-avatar", () => ({
   getAgentAvatarUrl: () => "https://example.test/avatar.svg",
+  // useAvatarStylesVersion subscribes to lazy style loads; the mock is a
+  // static no-op store so the hook renders without the real module.
+  subscribeAvatarStyles: () => () => {},
+  avatarStylesVersion: () => 0,
 }))
 
 import { IssueCard } from "../issue-card"

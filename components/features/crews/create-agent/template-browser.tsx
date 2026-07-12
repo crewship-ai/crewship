@@ -9,6 +9,7 @@ import {
 } from "@/lib/entities"
 import type { AgentPersona, PersonaCategory } from "@/lib/entities"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 import { cn } from "@/lib/utils"
 import { getModelLabel } from "@/lib/cli-adapters"
 import type { PersonaSource } from "./types"
@@ -32,6 +33,8 @@ interface TemplateBrowserProps {
  *  browser) so the prompt + edit affordance is more discoverable on
  *  narrow viewports. */
 export function TemplateBrowser({ selected, onSelect }: TemplateBrowserProps) {
+  // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
+  useAvatarStylesVersion()
   const [source, setSource] = useState<PersonaSource>("builtin")
   const [search, setSearch] = useState("")
   const [category, setCategory] = useState<PersonaCategory | "all">("all")

@@ -25,6 +25,7 @@ import {
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 import { BUILTIN_PERSONAS, type AgentPersona } from "@/lib/entities"
 import { AvatarPickerDialog } from "@/components/features/crews/avatar-picker-dialog"
 import { TemplateBrowser } from "./template-browser"
@@ -86,6 +87,8 @@ export function CreateAgentDialog({
   crews,
   onCreated,
 }: CreateAgentDialogProps) {
+  // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
+  useAvatarStylesVersion()
   const router = useRouter()
   const [draft, setDraft] = useState(() => initialAgentDraft(defaultCrewSlug))
   const [submitting, setSubmitting] = useState(false)

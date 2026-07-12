@@ -6,6 +6,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
 import { AVATAR_STYLES, getAgentAvatarUrl, DEFAULT_AVATAR_STYLE } from "@/lib/agent-avatar"
+import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 import { cn } from "@/lib/utils"
 
 // Style options derived from the real DiceBear catalog in lib/agent-avatar.
@@ -13,10 +14,10 @@ import { cn } from "@/lib/utils"
 // — earlier hand-typed labels ("robots", "humans") fell through to the
 // default and silently kept the avatar Robots no matter what the user
 // picked.
-const STYLE_OPTIONS = (Object.entries(AVATAR_STYLES) as Array<[
-  string,
-  { label: string; style: unknown },
-]>).map(([value, meta]) => ({ value, label: meta.label }))
+const STYLE_OPTIONS = Object.entries(AVATAR_STYLES).map(([value, meta]) => ({
+  value,
+  label: meta.label,
+}))
 
 export interface AvatarPickerDialogProps {
   open: boolean
@@ -51,6 +52,8 @@ export function AvatarPickerDialog({
   crewStyle,
   onSave,
 }: AvatarPickerDialogProps) {
+  // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
+  useAvatarStylesVersion()
   const [draftSeed, setDraftSeed] = useState(seed ?? agentName)
   const [draftStyle, setDraftStyle] = useState<string | null>(style)
   const [quickSeeds, setQuickSeeds] = useState<string[]>([])

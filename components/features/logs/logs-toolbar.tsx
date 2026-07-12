@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 import { SEVERITY_COLOR } from "@/lib/journal-style"
 import type { JournalSeverity } from "@/lib/types/journal"
 import { TimeRangePicker, type TimeRange, type CustomRange } from "./time-range-picker"
@@ -141,6 +142,8 @@ export function LogsToolbar({
   traceId,
   onClearTraceId,
 }: LogsToolbarProps) {
+  // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
+  useAvatarStylesVersion()
   return (
     <div className="px-3 py-2 border-b border-border/50 bg-card/40 flex flex-wrap items-center gap-2 sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-card/70">
       {/* search */}

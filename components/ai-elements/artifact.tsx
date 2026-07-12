@@ -133,13 +133,30 @@ export const ArtifactHeader = ({
   );
 };
 
-export type ArtifactViewSwitchProps = ComponentProps<"div">;
+export type ArtifactViewSwitchProps = ComponentProps<"div"> & {
+  /**
+   * Which views to offer. Defaults to all three; hosts that haven't
+   * implemented diff/preview yet pass just ["editor"] so users never
+   * see a tab that dead-ends in a "coming soon" body. With fewer than
+   * two views the switcher renders nothing at all.
+   */
+  views?: ReadonlyArray<"editor" | "diff" | "preview">;
+};
 
 export const ArtifactViewSwitch = ({
   className,
+  views = ["editor", "diff", "preview"],
   ...props
 }: ArtifactViewSwitchProps) => {
   const { view, setView } = useArtifact();
+  const options = (
+    [
+      { id: "editor", icon: FileCode, label: "Editor" },
+      { id: "diff", icon: GitCompareArrows, label: "Diff" },
+      { id: "preview", icon: Eye, label: "Preview" },
+    ] as const
+  ).filter(({ id }) => views.includes(id));
+  if (options.length < 2) return null;
   return (
     <div
       className={cn(
@@ -148,13 +165,7 @@ export const ArtifactViewSwitch = ({
       )}
       {...props}
     >
-      {(
-        [
-          { id: "editor", icon: FileCode, label: "Editor" },
-          { id: "diff", icon: GitCompareArrows, label: "Diff" },
-          { id: "preview", icon: Eye, label: "Preview" },
-        ] as const
-      ).map(({ id, icon: Icon, label }) => (
+      {options.map(({ id, icon: Icon, label }) => (
         <button
           key={id}
           type="button"
