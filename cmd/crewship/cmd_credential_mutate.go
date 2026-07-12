@@ -296,15 +296,17 @@ Examples:
 				value = scanner.Text()
 			}
 		}
-		authToken, _ := flags.GetString("auth-token")
-		headerPairs, _ := flags.GetStringArray("header")
-		rotatingEndpointAuth := authToken != "" || len(headerPairs) > 0
+		authChanged := flags.Changed("auth-token")
+		headerChanged := flags.Changed("header")
+		rotatingEndpointAuth := authChanged || headerChanged
 
-		// For a plain rotate we require a new value up front. For an
-		// ENDPOINT_URL token rotation (--auth-token/--header) the base URL can
-		// be omitted — we fetch the current one so the operator can rotate JUST
-		// the token without re-typing the URL (and without silently dropping it,
-		// the bug this guards against).
+		// For a plain rotate we require a new value up front. For an ENDPOINT_URL
+		// field rotation (--auth-token/--header) the base URL can be omitted —
+		// the SERVER merges the changed field(s) over the stored value, keeping
+		// the rest. The CLI must NOT hand-build a full {baseURL,apiKey,headers}
+		// JSON here: it can't read the existing token/headers (secrets are never
+		// returned), so building the object client-side would silently drop the
+		// fields it can't see. Send only what changed and let the server merge.
 		if value == "" && !rotatingEndpointAuth {
 			return fmt.Errorf("--value or --value-stdin is required")
 		}
@@ -319,45 +321,53 @@ Examples:
 			return err
 		}
 
-		// #961/#974: rebuild the one-object ENDPOINT_URL value when rotating its
-		// auth token/headers. Without this, `rotate --value <token>` would
-		// overwrite the whole {baseURL,apiKey,headers} object with a bare token
-		// and the endpoint would silently vanish at run time. `--value` (if
-		// given) is the new base URL; otherwise we keep the current baseURL,
-		// fetched from the credential's read view (which echoes baseURL only).
+		body := map[string]interface{}{}
 		if rotatingEndpointAuth {
-			baseURL := value
-			if baseURL == "" {
-				metaResp, metaErr := client.Get("/api/v1/credentials/" + credID)
-				if metaErr != nil {
-					return fmt.Errorf("could not fetch current endpoint to preserve its base URL: %w", metaErr)
-				}
-				if err := cli.CheckError(metaResp); err != nil {
-					return err
-				}
-				var cred struct {
-					Type        string `json:"type"`
-					EndpointURL string `json:"endpoint_url"`
-				}
-				if err := cli.ReadJSON(metaResp, &cred); err != nil {
-					return err
-				}
-				if cred.Type != "ENDPOINT_URL" {
-					return fmt.Errorf("--auth-token/--header are only valid when rotating an ENDPOINT_URL credential (got %s)", cred.Type)
-				}
-				if cred.EndpointURL == "" {
-					return fmt.Errorf("could not determine the current base URL; pass --value with the endpoint URL")
-				}
-				baseURL = cred.EndpointURL
+			// Guard REGARDLESS of whether --value was passed: --auth-token/--header
+			// on a non-ENDPOINT_URL credential would otherwise be misapplied (a
+			// full-value rotate storing a JSON blob as, say, a GITHUB secret).
+			metaResp, metaErr := client.Get("/api/v1/credentials/" + credID)
+			if metaErr != nil {
+				return fmt.Errorf("could not fetch credential to validate its type: %w", metaErr)
 			}
-			v, err := buildEndpointCredentialValue(baseURL, authToken, headerPairs)
-			if err != nil {
+			if err := cli.CheckError(metaResp); err != nil {
 				return err
 			}
-			value = v
+			var cred struct {
+				Type string `json:"type"`
+			}
+			if err := cli.ReadJSON(metaResp, &cred); err != nil {
+				return err
+			}
+			if cred.Type != "ENDPOINT_URL" {
+				return fmt.Errorf("--auth-token/--header are only valid when rotating an ENDPOINT_URL credential (got %s)", cred.Type)
+			}
+			// Send only the changed field(s); the server merges over the stored
+			// value so unspecified fields (headers when rotating the token, or
+			// vice versa) are preserved.
+			if value != "" {
+				body["endpoint_base_url"] = value
+			}
+			if authChanged {
+				authToken, _ := flags.GetString("auth-token")
+				body["endpoint_auth_token"] = authToken
+			}
+			if headerChanged {
+				headerPairs, _ := flags.GetStringArray("header")
+				headers := map[string]string{}
+				for _, hp := range headerPairs {
+					k, v, ok := strings.Cut(hp, "=")
+					k = strings.TrimSpace(k)
+					if !ok || k == "" {
+						return fmt.Errorf("--header must be KEY=VALUE, got %q", hp)
+					}
+					headers[k] = strings.TrimSpace(v)
+				}
+				body["endpoint_headers"] = headers
+			}
+		} else {
+			body["value"] = value
 		}
-
-		body := map[string]interface{}{"value": value}
 		if flags.Changed("grace-seconds") {
 			gs, _ := flags.GetInt("grace-seconds")
 			if gs < 0 || gs > 604800 {

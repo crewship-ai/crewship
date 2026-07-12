@@ -54,6 +54,24 @@ const (
 type credentialRotateRequest struct {
 	Value        string `json:"value"`
 	GraceSeconds *int   `json:"grace_seconds"`
+
+	// Endpoint field-level rotation (#984). For an ENDPOINT_URL credential the
+	// stored value is a {baseURL,apiKey,headers} object; a caller rotating just
+	// the token cannot preserve headers CLI-side (secrets are never readable),
+	// so the server MERGES these fields over the decrypted existing value —
+	// unspecified (nil) fields are kept. Pointers distinguish "not provided"
+	// (keep) from "provided" (replace, even with an empty value to clear).
+	// Present on a non-ENDPOINT_URL credential → 400 (guards a --value+--auth
+	// footgun that would otherwise store a JSON blob as a bare secret).
+	EndpointBaseURL *string            `json:"endpoint_base_url,omitempty"`
+	EndpointToken   *string            `json:"endpoint_auth_token,omitempty"`
+	EndpointHeaders *map[string]string `json:"endpoint_headers,omitempty"`
+}
+
+// hasEndpointFields reports whether the rotate request carries any endpoint
+// field-merge input.
+func (req *credentialRotateRequest) hasEndpointFields() bool {
+	return req.EndpointBaseURL != nil || req.EndpointToken != nil || req.EndpointHeaders != nil
 }
 
 type rotationResponse struct {
@@ -93,7 +111,9 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
-	if strings.TrimSpace(req.Value) == "" {
+	// value is optional in endpoint field-merge mode (e.g. rotating only the
+	// token keeps the existing baseURL), required otherwise.
+	if strings.TrimSpace(req.Value) == "" && !req.hasEndpointFields() {
 		replyError(w, http.StatusBadRequest, "value required")
 		return
 	}
@@ -128,23 +148,30 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Type-aware validation on rotate. Historically Rotate stored the new
-	// value opaquely — fine for bare secrets, but an ENDPOINT_URL credential
-	// carries a structured {baseURL,apiKey,headers} value (#961), and a naive
-	// `rotate --value <new-token>` would overwrite the whole object with a bare
-	// string, silently dropping baseURL/headers. At run time the resolver then
-	// fails validateEndpointURL and the endpoint disappears with no error. Gate
-	// ENDPOINT_URL rotations through the same validator Create/Update use so a
-	// bare non-URL value is rejected here (the CLI's --auth-token path rebuilds
-	// the full object, preserving baseURL). See cmd_credential_mutate.go.
+	// Type-aware rotation. Historically Rotate stored the new value opaquely —
+	// fine for bare secrets, but an ENDPOINT_URL credential carries a structured
+	// {baseURL,apiKey,headers} value (#961). A naive full-value rotate would
+	// overwrite the whole object (dropping baseURL/headers), and the CLI cannot
+	// "preserve" the token/headers because secrets are never readable. So the
+	// server does a field-level MERGE over the decrypted existing value: replace
+	// only the fields the request carries, keep the rest. A full-value rotate
+	// (no endpoint_* fields) still validates the whole new value.
+	valueToStore := req.Value
 	if credType == CredTypeEndpointURL {
-		if msg := validateEndpointURL(req.Value); msg != "" {
+		merged, msg := mergeEndpointRotateValue(&req, oldEncrypted)
+		if msg != "" {
 			replyError(w, http.StatusBadRequest, msg)
 			return
 		}
+		valueToStore = merged
+	} else if req.hasEndpointFields() {
+		// Footgun guard: endpoint_* fields on a non-endpoint credential would
+		// otherwise be ignored while a caller believes they rotated auth.
+		replyError(w, http.StatusBadRequest, "endpoint_base_url/endpoint_auth_token/endpoint_headers are only valid for ENDPOINT_URL credentials")
+		return
 	}
 
-	newEncrypted, err := encryption.Encrypt(req.Value)
+	newEncrypted, err := encryption.Encrypt(valueToStore)
 	if err != nil {
 		h.logger.Error("encrypt rotated value", "error", err)
 		replyError(w, http.StatusInternalServerError, "Failed to encrypt credential")
@@ -216,6 +243,54 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		RotatedBy:    user.ID,
 		Status:       "ACTIVE",
 	})
+}
+
+// mergeEndpointRotateValue produces the new stored value for an ENDPOINT_URL
+// rotation. In full-value mode (no endpoint_* fields) the whole req.Value is
+// validated and returned as-is — a bare non-URL is rejected, preserving the S1
+// guard. In field-merge mode the existing value is decrypted and parsed, then
+// each provided field (baseURL / apiKey / headers) replaces its counterpart
+// while unspecified fields are kept, so "rotate just the token" preserves the
+// baseURL AND headers (and vice versa). Returns (value, "") on success or
+// ("", message) with an end-user 400 message.
+func mergeEndpointRotateValue(req *credentialRotateRequest, oldEncrypted string) (string, string) {
+	if !req.hasEndpointFields() {
+		if msg := validateEndpointURL(req.Value); msg != "" {
+			return "", msg
+		}
+		return req.Value, ""
+	}
+
+	base, key, headers, perr := "", "", map[string]string(nil), error(nil)
+	if dec, err := encryption.Decrypt(oldEncrypted); err == nil {
+		base, key, headers, perr = parseEndpointValue(dec)
+	} else {
+		perr = err
+	}
+	// A parse/decrypt failure means we have no existing baseURL to keep. That's
+	// only recoverable if the caller supplies a new baseURL in this rotate.
+	if perr != nil && req.EndpointBaseURL == nil {
+		return "", "cannot merge endpoint fields: the existing value is unreadable; include the base URL (--value) to rewrite it"
+	}
+
+	if req.EndpointBaseURL != nil {
+		base = strings.TrimSpace(*req.EndpointBaseURL)
+	}
+	if req.EndpointToken != nil {
+		key = *req.EndpointToken
+	}
+	if req.EndpointHeaders != nil {
+		headers = *req.EndpointHeaders
+	}
+
+	merged, err := buildEndpointValue(base, key, headers)
+	if err != nil {
+		return "", "could not build the merged endpoint value"
+	}
+	if msg := validateEndpointURL(merged); msg != "" {
+		return "", msg
+	}
+	return merged, ""
 }
 
 // ListRotations returns the rotation history for a credential —
