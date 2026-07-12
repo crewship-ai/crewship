@@ -108,7 +108,10 @@ The agent never sees raw credentials. Instead:
    - Injects the `Authorization` header on the way out.
    - Forwards the response back.
 4. **The sidecar's credentials are loaded once at startup over stdin**
-   as a JSON payload. They are never written to the
+   as a JSON payload. In transit the JSON is base64-wrapped inside the
+   container launch command (`echo '<b64>' | base64 -d | crewship-sidecar`)
+   so the shell never interprets credential bytes; the pipeline decodes it
+   before the sidecar reads stdin. They are never written to the
    agent container's environment.
 
 The agent therefore cannot:
