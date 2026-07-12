@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import {
   User, Building, Users,
   Box, Link2, Activity,
-  Shield, Cpu,
+  Shield, Cpu, Bell,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { LucideIcon } from "lucide-react"
@@ -47,6 +47,7 @@ const sections: NavSection[] = [
       { key: "crews", label: "Crews & Containers", icon: Box },
       { key: "aux-models", label: "Auxiliary Models", icon: Cpu, adminOnly: true },
       { key: "connections", label: "Connections", icon: Link2 },
+      { key: "notifications", label: "Notifications", icon: Bell },
       { key: "members", label: "Members", icon: Users },
       { key: "audit", label: "Audit Log", icon: Activity },
     ],

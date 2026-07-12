@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
+import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 
 // PipelineWebhook mirrors the wire shape returned by /pipeline-webhooks.
 // SigningSecret only surfaces on the create response (mirroring how
@@ -86,6 +87,30 @@ export function usePipelineWebhooks(workspaceId: string | null | undefined) {
     refresh()
     return () => abortRef.current?.abort()
   }, [refresh])
+
+  // Liveness: fire_count / last_fired_at / last_status previously refreshed
+  // only on mount or after a create/delete — an inbound webhook firing while
+  // the tab was open never showed. Refresh (debounced 1.5s) on
+  // pipeline.run.started; when the broadcast carries triggered_via, skip
+  // non-webhook starts (today's broadcast omits the field — see
+  // internal/pipeline/journal.go emitRunStarted — so we refresh on all
+  // starts; the tab is only mounted while the user is looking at it).
+  const liveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (liveTimerRef.current) clearTimeout(liveTimerRef.current)
+  }, [])
+  useRealtimeEventSafe(
+    "pipeline.run.started",
+    useCallback((event) => {
+      const via = event.payload.triggered_via
+      if (typeof via === "string" && via !== "webhook") return
+      if (liveTimerRef.current) return
+      liveTimerRef.current = setTimeout(() => {
+        liveTimerRef.current = null
+        refresh()
+      }, 1500)
+    }, [refresh]),
+  )
 
   const create = useCallback(
     async (body: WebhookSaveBody): Promise<PipelineWebhook | null> => {

@@ -22,6 +22,7 @@ import { CrewsContainersSection } from "./sections/crews-containers-section"
 import { ConnectionsSection } from "./sections/connections-section"
 import { CrewAuditSection } from "./sections/crew-audit-section"
 import { AuxStatusSection } from "./sections/aux-status-section"
+import { NotificationChannelsSection } from "./sections/notification-channels-section"
 
 interface Org {
   id: string
@@ -46,6 +47,7 @@ const sectionTitles: Record<string, { title: string; description?: string }> = {
   crews: { title: "Crews & Containers", description: "Manage crews, resources and network policies" },
   "aux-models": { title: "Auxiliary Models", description: "Cheap fast models that power keeper evaluators (PRD §6 F3)" },
   connections: { title: "Connections", description: "Cross-crew communication links" },
+  notifications: { title: "Notifications", description: "Outbound email / webhook delivery for run outcomes" },
   members: { title: "Members", description: "Team members and permissions" },
   audit: { title: "Audit Log", description: "Track workspace activity" },
 }
@@ -193,6 +195,9 @@ export function SettingsLayout() {
     }
     if (activeTab === "connections" && workspaceId) {
       return <ConnectionsSection workspaceId={workspaceId} />
+    }
+    if (activeTab === "notifications" && workspaceId) {
+      return <NotificationChannelsSection workspaceId={workspaceId} />
     }
     if (activeTab === "audit" && workspaceId) {
       return <CrewAuditSection workspaceId={workspaceId} />

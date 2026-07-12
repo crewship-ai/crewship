@@ -68,6 +68,23 @@ export function RealtimeToasts() {
     }, []),
   )
 
+  // Routine (pipeline) failures get the same workspace-wide surfacing as
+  // agent run.failed above — previously they were only visible inside the
+  // /routines and /activity views.
+  useRealtimeEvent(
+    "pipeline.run.failed",
+    useCallback((event) => {
+      if (asString(event.payload.status) === "CANCELLED") return
+      const routine = asString(event.payload.pipeline_slug) ?? "routine"
+      toast.error(`Routine failed: ${routine}`, {
+        description:
+          asString(event.payload.error_message) ??
+          "The routine run encountered an error.",
+        duration: 8000,
+      })
+    }, []),
+  )
+
   useRealtimeEvent(
     "mission.updated",
     useCallback((event) => {

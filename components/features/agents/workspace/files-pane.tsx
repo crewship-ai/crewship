@@ -177,6 +177,17 @@ export function FilesPageClient() {
     }, 500)
   }, [refreshTree]))
 
+  // Reconnect resync: this pane is a pure-WS consumer (no poll backstop) —
+  // file.event frames missed during a WS gap would leave the tree stale
+  // forever. The provider broadcasts a synthetic realtime.reconnected after
+  // every re-connect; reuse the same debounced refresh.
+  useRealtimeEvent("realtime.reconnected", useCallback(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      refreshTree()
+    }, 500)
+  }, [refreshTree]))
+
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)

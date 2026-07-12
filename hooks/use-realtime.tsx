@@ -74,6 +74,12 @@ export type RealtimeEventType =
   | "pipeline.step.validation_failed"
   | "pipeline.waitpoint.created"
   | "inbox.updated"
+  // Synthetic client-side event — NEVER sent by the server (and deliberately
+  // absent from VALID_REALTIME_TYPES so a wire message can't spoof it).
+  // Dispatched by the provider after the socket RE-connects, so pure-WS
+  // consumers (no poll backstop — e.g. the file browser) can refetch state
+  // whose change events they may have missed during the gap.
+  | "realtime.reconnected"
 
 /** A real-time event received from the WebSocket, with typed payload and timestamp. */
 export interface RealtimeEvent {
@@ -170,18 +176,10 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     return data.token
   }, [])
 
-  const handleMessage = useCallback(
-    (msg: WSMessage) => {
-      if (!VALID_REALTIME_TYPES.has(msg.type)) return
-
-      const event: RealtimeEvent = {
-        type: msg.type as RealtimeEventType,
-        payload: (typeof msg.payload === "object" && msg.payload !== null
-          ? msg.payload as Record<string, string>
-          : {}),
-        timestamp: new Date(),
-      }
-      const callbacks = listenersRef.current.get(msg.type)
+  const dispatchEvent = useCallback(
+    (type: RealtimeEventType, payload: Record<string, unknown>) => {
+      const event: RealtimeEvent = { type, payload, timestamp: new Date() }
+      const callbacks = listenersRef.current.get(type)
       if (callbacks) {
         for (const cb of callbacks) {
           try { cb(event) } catch { /* prevent subscriber errors from breaking others */ }
@@ -191,10 +189,39 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     [],
   )
 
+  const handleMessage = useCallback(
+    (msg: WSMessage) => {
+      if (!VALID_REALTIME_TYPES.has(msg.type)) return
+      dispatchEvent(
+        msg.type as RealtimeEventType,
+        (typeof msg.payload === "object" && msg.payload !== null
+          ? msg.payload as Record<string, string>
+          : {}),
+      )
+    },
+    [dispatchEvent],
+  )
+
+  // Reconnect resync: the chat socket resumes its own stream via onConnect,
+  // but this shared provider previously gave subscribers NO signal that a
+  // WS gap happened — hooks with a poll backstop self-healed while pure-WS
+  // consumers (file browser) stayed stale until their next event. On every
+  // reconnect after the first successful connect, broadcast a synthetic
+  // "realtime.reconnected" so those consumers refetch what they missed.
+  const hasConnectedOnceRef = useRef(false)
+  const handleConnect = useCallback(() => {
+    if (!hasConnectedOnceRef.current) {
+      hasConnectedOnceRef.current = true
+      return
+    }
+    dispatchEvent("realtime.reconnected", {})
+  }, [dispatchEvent])
+
   const { status, send } = useWebSocket({
     url: getWsUrl(),
     getToken,
     onMessage: handleMessage,
+    onConnect: handleConnect,
   })
 
   useEffect(() => { statusRef.current = status }, [status])
@@ -276,6 +303,28 @@ export function useRealtimeEvent(
   useEffect(() => { callbackRef.current = callback }, [callback])
 
   useEffect(() => {
+    return subscribe(eventType, (event) => callbackRef.current(event))
+  }, [eventType, subscribe])
+}
+
+/**
+ * Provider-tolerant variant of useRealtimeEvent: subscribes when a
+ * RealtimeProvider is mounted and silently no-ops when it isn't. For hooks
+ * that must stay usable (and unit-testable) outside the dashboard layout —
+ * data hooks like use-paymaster gain liveness when realtime is available
+ * without hard-requiring the provider.
+ */
+export function useRealtimeEventSafe(
+  eventType: RealtimeEventType,
+  callback: EventCallback,
+): void {
+  const ctx = useContext(RealtimeContext)
+  const callbackRef = useRef(callback)
+  useEffect(() => { callbackRef.current = callback }, [callback])
+
+  const subscribe = ctx?.subscribe
+  useEffect(() => {
+    if (!subscribe) return
     return subscribe(eventType, (event) => callbackRef.current(event))
   }, [eventType, subscribe])
 }
