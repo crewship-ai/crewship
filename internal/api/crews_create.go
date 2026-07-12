@@ -251,6 +251,15 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	allowPrivateEndpoints := 0
 	if req.AllowPrivateEndpoints {
+		// #974 S4: private-endpoint egress is an ADMIN-tier ("manage") capability
+		// — crews_update.go gates flipping this flag at manage. Create is only
+		// gated at "create" (MANAGER+), so without this per-field check a MANAGER
+		// could self-grant private egress (reach RFC1918/host services) by
+		// setting the flag at create time. Mirror the update-side gate.
+		if !canRole(role, "manage") {
+			replyError(w, http.StatusForbidden, "allow_private_endpoints requires ADMIN")
+			return
+		}
 		allowPrivateEndpoints = 1
 	}
 	_, err = h.db.ExecContext(r.Context(),

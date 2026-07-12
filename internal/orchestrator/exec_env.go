@@ -377,7 +377,11 @@ func localModelConfigEnv(req AgentRunRequest) (string, bool) {
 	// #961: optional auth for an authenticated endpoint. apiKey → the
 	// @ai-sdk/openai-compatible driver auto-adds `Authorization: Bearer`;
 	// headers is the escape hatch for Basic/custom-header/non-bearer schemes.
-	// Both live only in this generated config JSON, never in the agent env.
+	// NOTE (#974 S2): OPENCODE_CONFIG_CONTENT is itself an agent env var, so
+	// apiKey/headers DO land in the agent environment — the openai-compatible
+	// driver dials the endpoint directly, so the sidecar proxy can't isolate
+	// them. They are reported by AgentEnvCredentialExposures and redacted from
+	// logs by the scrubber's (case-insensitive) apiKey pattern.
 	p.Options.APIKey = req.LocalModelAPIKey
 	if len(req.LocalModelHeaders) > 0 {
 		p.Options.Headers = req.LocalModelHeaders
@@ -506,6 +510,19 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 				Reason:     "CLI tools read credentials from env vars, which cannot be proxied",
 			})
 		}
+	}
+
+	// Local-model endpoint auth (#961/#974 S2): the apiKey/headers are embedded
+	// in OPENCODE_CONFIG_CONTENT (an agent env var). The openai-compatible
+	// driver dials the endpoint directly, so the sidecar reverse-proxy cannot
+	// inject them — they are exposed to the agent process, like a CONNECT-
+	// tunneled API key. Not actionable via config (it is the endpoint's auth).
+	if req.LocalModelAPIKey != "" || len(req.LocalModelHeaders) > 0 {
+		out = append(out, CredentialEnvExposure{
+			EnvVarName: "OPENCODE_CONFIG_CONTENT",
+			Type:       "ENDPOINT_URL",
+			Reason:     "the local-model endpoint auth token/headers are embedded in the OpenCode config env var; the openai-compatible driver dials the endpoint directly, so the sidecar proxy cannot isolate them",
+		})
 	}
 
 	// SECRET credentials: isolated behind the Keeper request/execute flow when

@@ -275,3 +275,27 @@ func BenchmarkScrubNoSecrets(b *testing.B) {
 		s.Scrub(input)
 	}
 }
+
+// #974 S2: the local-model endpoint auth token lands in OPENCODE_CONFIG_CONTENT
+// as a camelCase "apiKey" and as an opaque (non-JWT) Bearer token. The scrubber
+// must redact both — the case-sensitive/JWT-only patterns missed them.
+func TestScrubEndpointAuthToken(t *testing.T) {
+	s := New()
+	cases := []struct {
+		name       string
+		input      string
+		mustNotSee string
+	}{
+		{"camelCase apiKey in JSON config", `{"provider":{"ollama":{"options":{"baseURL":"https://p/v1","apiKey":"ollama-secret-abc123"}}}}`, "ollama-secret-abc123"},
+		{"opaque bearer (non-JWT)", `Authorization: Bearer ollama-proxy-token-9f8e7d6c5b4a`, "ollama-proxy-token-9f8e7d6c5b4a"},
+		{"OPENCODE_CONFIG_CONTENT env line", `OPENCODE_CONFIG_CONTENT={"provider":{"ollama":{"options":{"apiKey":"sk-litellm-xyz789"}}}}`, "sk-litellm-xyz789"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := s.Scrub(tc.input)
+			if strings.Contains(got, tc.mustNotSee) {
+				t.Errorf("token leaked through scrubber: %q\n(got: %q)", tc.mustNotSee, got)
+			}
+		})
+	}
+}

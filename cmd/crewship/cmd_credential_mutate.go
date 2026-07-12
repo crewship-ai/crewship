@@ -300,6 +300,20 @@ Examples:
 			return fmt.Errorf("--value or --value-stdin is required")
 		}
 
+		// #974 S1: for an authenticated ENDPOINT_URL, fold the new base URL +
+		// token/headers into the one-object JSON the server stores, exactly as
+		// `credential create` does — otherwise rotating drops the token and the
+		// server (post-fix) rejects the bare value.
+		authToken, _ := flags.GetString("auth-token")
+		headerPairs, _ := flags.GetStringArray("header")
+		if authToken != "" || len(headerPairs) > 0 {
+			built, err := buildEndpointCredentialValue(value, authToken, headerPairs)
+			if err != nil {
+				return err
+			}
+			value = built
+		}
+
 		if err := confirmAction(cmd, fmt.Sprintf("Rotate credential %q? The old value will be scrubbed after the grace window.", args[0])); err != nil {
 			return err
 		}
