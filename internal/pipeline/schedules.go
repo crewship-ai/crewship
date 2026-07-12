@@ -18,6 +18,7 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // Schedule is one cron trigger for a saved pipeline. Bound to a
@@ -157,9 +158,9 @@ INSERT INTO pipeline_schedules (
 			id, in.WorkspaceID, in.Name, in.TargetPipelineID,
 			nullInt(in.TargetPipelineVersion),
 			in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(in.Enabled),
-			nextRun.UTC().Format(time.RFC3339Nano),
+			tsformat.Format(nextRun),
 			nullStr(in.WakePipelineID), string(wakeInputsJSON),
-			now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano),
+			tsformat.Format(now), tsformat.Format(now),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("insert schedule: %w", err)
@@ -177,9 +178,9 @@ SET name = ?, target_pipeline_id = ?, target_pipeline_version = ?,
 WHERE id = ? AND deleted_at IS NULL`,
 		in.Name, in.TargetPipelineID, nullInt(in.TargetPipelineVersion),
 		in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(in.Enabled),
-		nextRun.UTC().Format(time.RFC3339Nano),
+		tsformat.Format(nextRun),
 		nullStr(in.WakePipelineID), string(wakeInputsJSON),
-		now.Format(time.RFC3339Nano),
+		tsformat.Format(now),
 		in.ID,
 	)
 	if err != nil {
@@ -226,7 +227,7 @@ func (s *ScheduleStore) List(ctx context.Context, workspaceID string) ([]*Schedu
 // SoftDelete marks a schedule deleted; the scheduler skips
 // deleted_at IS NOT NULL rows.
 func (s *ScheduleStore) SoftDelete(ctx context.Context, id string) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := tsformat.Format(time.Now())
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE pipeline_schedules SET deleted_at = ?, updated_at = ?, enabled = 0 WHERE id = ? AND deleted_at IS NULL`,
 		now, now, id,
@@ -242,11 +243,19 @@ func (s *ScheduleStore) SoftDelete(ctx context.Context, id string) error {
 
 // listDueSchedules returns enabled schedules whose next_run_at has
 // passed. Called by the scheduler tick.
+//
+// next_run_at is compared as a string, so both sides use the
+// fixed-width tsformat (#990). Legacy rows written pre-fix with
+// RFC3339Nano (cron-derived whole seconds render with NO fraction)
+// compare greater than a fractional bound for their boundary second —
+// a one-poll-tick firing delay that self-heals as soon as the bound
+// crosses into the next second, and disappears once the row's next
+// UpdateAfterRun/Save rewrites it fixed-width.
 func (s *ScheduleStore) listDueSchedules(ctx context.Context) ([]*Schedule, error) {
 	rows, err := s.db.QueryContext(ctx, scheduleSelect+`
 WHERE enabled = 1 AND deleted_at IS NULL AND next_run_at <= ?
 ORDER BY next_run_at ASC LIMIT 100`,
-		time.Now().UTC().Format(time.RFC3339Nano))
+		tsformat.Format(time.Now()))
 	if err != nil {
 		return nil, err
 	}
@@ -265,12 +274,12 @@ ORDER BY next_run_at ASC LIMIT 100`,
 // recordRun persists the outcome of a fire — last_run_at, last_status,
 // last_run_id — and computes next_run_at from the cron expr.
 func (s *ScheduleStore) recordRun(ctx context.Context, scheduleID, runID, status string, nextRun time.Time) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := tsformat.Format(time.Now())
 	_, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_schedules
 SET last_run_at = ?, last_status = ?, last_run_id = ?, next_run_at = ?, updated_at = ?
 WHERE id = ?`,
-		now, status, nullStr(runID), nextRun.UTC().Format(time.RFC3339Nano), now, scheduleID,
+		now, status, nullStr(runID), tsformat.Format(nextRun), now, scheduleID,
 	)
 	return err
 }
@@ -281,7 +290,7 @@ WHERE id = ?`,
 // (no main run follows, so the wake record is what moves next_run_at
 // forward); on WOKE/ERROR the subsequent recordRun advances it.
 func (s *ScheduleStore) recordWakeCheck(ctx context.Context, scheduleID, status string, nextRun time.Time, advanceNext bool) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := tsformat.Format(time.Now())
 	fired := 0
 	if status == WakeStatusWoke || status == WakeStatusError {
 		fired = 1
@@ -293,7 +302,7 @@ SET wake_check_count = wake_check_count + 1,
     wake_fire_count = wake_fire_count + ?,
     last_wake_at = ?, last_wake_status = ?, next_run_at = ?, updated_at = ?
 WHERE id = ?`,
-			fired, now, status, nextRun.UTC().Format(time.RFC3339Nano), now, scheduleID,
+			fired, now, status, tsformat.Format(nextRun), now, scheduleID,
 		)
 		return err
 	}
