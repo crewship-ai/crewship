@@ -158,7 +158,7 @@ func resolveCredentialID(client *cli.Client, nameOrID string) (string, error) {
 			return c.ID, nil
 		}
 	}
-	return "", fmt.Errorf("credential %q not found", nameOrID)
+	return "", cli.NotFoundf("credential %q not found", nameOrID)
 }
 
 // testCredentialValue validates a credential value against the provider API.
@@ -460,9 +460,9 @@ var credDefaultEnvVarCmd = &cobra.Command{
 
 func init() {
 	credCreateCmd.Flags().String("name", "", "Credential name (required)")
-	credCreateCmd.Flags().String("type", "", "Type: SECRET|API_KEY|AI_CLI_TOKEN|CLI_TOKEN (required)")
-	credCreateCmd.Flags().String("provider", "", "Provider: ANTHROPIC|OPENAI|GOOGLE|GITHUB|GITLAB|VERCEL|AWS|CUSTOM_CLI|NONE")
-	credCreateCmd.Flags().String("value", "", "Credential value (visible in process list, prefer --value-stdin)")
+	credCreateCmd.Flags().String("type", "", "Type: SECRET|API_KEY|AI_CLI_TOKEN|CLI_TOKEN|ENDPOINT_URL (required)")
+	credCreateCmd.Flags().String("provider", "", "Provider: ANTHROPIC|OPENAI|GOOGLE|GITHUB|GITLAB|VERCEL|AWS|OLLAMA|CUSTOM_CLI|NONE")
+	credCreateCmd.Flags().String("value", "", "Credential value — the URL for ENDPOINT_URL (visible in process list, prefer --value-stdin)")
 	credCreateCmd.Flags().Bool("value-stdin", false, "Read value from stdin (secure)")
 	credCreateCmd.Flags().String("env-var-name", "", "Environment variable name")
 	credCreateCmd.Flags().Int("security-level", 0, "Keeper security level: 0 (none), 1 (low), 2 (medium), 3 (sensitive)")

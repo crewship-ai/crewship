@@ -65,8 +65,15 @@ build\:go: build\:sidecar
 # entrypoint.sh next to it. This lets users bring their own base image
 # (debian, ubuntu, alpine-glibc, etc.) while reusing the baked-in sidecar
 # via a host bind mount. See internal/provider/docker/docker.go buildMounts.
+#
+# ALWAYS GOOS=linux (#953): the sidecar is bind-mounted into the crew's
+# LINUX container and exec'd there, so it must be a Linux ELF for the
+# container's arch — NOT host-native. On macOS a native build produces a
+# Mach-O binary that fails in-container with exit 255 (misreported as a
+# glibc/musl mismatch). Mirrors dev.sh's arch mapping.
+SIDECAR_GOARCH := $(shell case "$$(uname -m)" in arm64|aarch64) echo arm64 ;; x86_64|amd64) echo amd64 ;; *) go env GOARCH ;; esac)
 build\:sidecar:
-	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o crewship-sidecar ./cmd/crewship-sidecar
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(SIDECAR_GOARCH) go build -trimpath -ldflags="-s -w" -o crewship-sidecar ./cmd/crewship-sidecar
 	cp scripts/entrypoint.sh ./entrypoint.sh
 	chmod +x ./entrypoint.sh
 

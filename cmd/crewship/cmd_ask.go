@@ -205,7 +205,7 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("get WS token: %w", err)
 			}
-			server := cli.ResolveServer(flagServer, cliCfg)
+			server := streamServerURL()
 			return runFanout(server, wsToken, agentsByID, prompt, quiet, md, saveFile, timeoutSecs, maxTurns)
 		}
 		if timeoutSecs > 0 {
@@ -231,7 +231,7 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("get WS token: %w", err)
 		}
-		server := cli.ResolveServer(flagServer, cliCfg)
+		server := streamServerURL()
 
 		if noStream {
 			return runNoStream(server, wsToken, agentID, chatResult.ID, prompt, quiet, md, saveFile, maxTurns)

@@ -580,7 +580,7 @@ func resolveSkillID(client *cli.Client, slugOrID string) (string, error) {
 			return s.ID, nil
 		}
 	}
-	return "", fmt.Errorf("skill not found: %s", slugOrID)
+	return "", cli.NotFoundf("skill not found: %s", slugOrID)
 }
 
 var skillCreateCmd = &cobra.Command{

@@ -67,11 +67,9 @@
 # is to assert the value gets redacted from the escalation row.
 242fdbffc9b50d36cbcfd5dd84b1e3e45a491ddf:internal/api/escalation_credential_test.go:generic-api-key:151
 
-# Package-signing setup doc (feat/package-signing-932, #932) — generic-api-key
-# trips on the PUBLIC GPG key fingerprint (EDE825B5…) sitting next to the
-# words "GPG_SIGNING_KEY" in the status note. The line names the repo secret,
-# it does not contain it; a GPG fingerprint is public by design (the public
-# key itself is committed as packaging/crewship-packages.pub). Because the
-# fetch-depth:0 checkout brings in all branches, this single commit turns
-# Gitleaks red on EVERY PR until allowlisted.
+# Package-signing key provisioning (PR #942) — the PUBLIC GPG key fingerprint
+# of the Crewship Packages signing key in SIGNING.md. A fingerprint is meant
+# to be published (users verify packages against it); generic-api-key trips
+# on the 40-hex-char entropy. HEAD reformats it in spaced GPG groups so it no
+# longer matches; this entry covers the original commit in branch history.
 c3a9bd20707c23f94fe80d40c54a4d961636a574:packaging/SIGNING.md:generic-api-key:8

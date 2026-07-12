@@ -58,6 +58,13 @@ The two formulae declare `conflicts:` against each other, so Homebrew refuses to
 Running a daemon-only subcommand from the CLI-only binary produces cobra's `unknown command "start"` error. If you need to bring up a daemon, install the full formula instead.
 </Note>
 
+<Note>
+The bundled `crewship-sidecar` is **always a Linux binary**, even in the macOS
+archive and Homebrew formula — it is bind-mounted into your Linux agent
+containers and executed there, never on the host. Don't be surprised when
+`file` reports it as an ELF executable on a Mac; that's by design (#953).
+</Note>
+
 The tap is auto-resolved from the prefixed name, so you do not need a separate `brew tap` step. Upgrades follow the normal flow:
 
 ```bash
@@ -174,10 +181,29 @@ try-restart`, so a **running** service picks up the new binary automatically
 installs `crewship self-update` deliberately refuses and points you back at
 `apt`/`dnf` — see [Upgrading & Downgrading](/guides/upgrades#install-channels--their-upgrade-path).
 
+### Verifying package signatures
+
+Release `.deb` / `.rpm` packages are GPG-signed with the **Crewship Packages**
+key (`packages@crewship.ai`, fingerprint
+`EDE8 25B5 5FF8 7F7D 442B  82BA A5BA 4669 E217 C05C`). The public key is committed at
+[`packaging/crewship-packages.pub`](https://raw.githubusercontent.com/crewship-ai/crewship/main/packaging/crewship-packages.pub):
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/crewship-ai/crewship/main/packaging/crewship-packages.pub
+
+# deb
+sudo apt-get install -y dpkg-sig
+dpkg-sig --verify crewship_<version>_linux_amd64.deb
+
+# rpm
+sudo rpm --import crewship-packages.pub
+rpm -K crewship_<version>_linux_amd64.rpm   # → "digests signatures OK"
+```
+
 <Note>
-Package signing (GPG for `apt`/`dnf` repositories) and macOS notarization are
-tracked follow-ups. Until then, verify package integrity against the release
-`checksums.txt`, and use the official APT/DNF repository once it's published.
+A hosted APT/DNF repository (signed `Release` / `repomd.xml`) and macOS
+notarization are tracked follow-ups. Package integrity can also be verified
+against the release `checksums.txt`.
 </Note>
 
 ## Docker Compose

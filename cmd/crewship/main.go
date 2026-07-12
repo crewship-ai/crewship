@@ -347,11 +347,15 @@ func confirmAction(cmd *cobra.Command, message string) error {
 	return nil
 }
 
-// requireWorkspace checks that a workspace is configured.
+// requireWorkspace checks that a workspace is configured. The failure is
+// typed ExitValidation — a precondition the caller fixes by passing
+// --workspace — mirroring requireAuth's typed ExitAuth.
 func requireWorkspace() error {
 	ws := cli.ResolveWorkspace(flagWorkspace, cliCfg)
 	if ws == "" {
-		return fmt.Errorf("no workspace set. Use --workspace flag or run 'crewship workspace use <slug>'")
+		return cli.WithExitCode(
+			fmt.Errorf("no workspace set. Use --workspace flag or run 'crewship workspace use <slug>'"),
+			cli.ExitValidation)
 	}
 	return nil
 }

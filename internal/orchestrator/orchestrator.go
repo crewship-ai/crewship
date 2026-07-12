@@ -50,7 +50,7 @@ type AgentRunRequest struct {
 	SkipConvHistory    bool         // When true, skip injecting conversation history (used by assignment sub-agents)
 	NetworkMode        string       // "free" (default) or "restricted" — crew-level network policy
 	AllowedDomains     []string     // Extra allowed domains for restricted mode
-	LocalModelBaseURL  string       // OpenAI-compatible local model endpoint (#944); populated by RunAgent from server config, empty = local models disabled
+	LocalModelBaseURL  string       // OpenAI-compatible local model endpoint; resolved from an ENDPOINT_URL credential by the chat resolver (#955), with the CREWSHIP_LOCAL_MODEL_BASE_URL env as a deprecated fallback applied in RunAgent. Empty = local models disabled.
 	MemoryMB           int
 	CPUs               float64
 	TTLHours           int
@@ -141,7 +141,7 @@ type Credential struct {
 	PlainValue string `json:"value"`
 	Priority   int    `json:"priority"`
 	// Type is one of: AI_CLI_TOKEN, API_KEY, CLI_TOKEN, SECRET, OAUTH2,
-	// USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET. See
+	// USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET, ENDPOINT_URL. See
 	// internal/api/credentials_types.go for the closed enum.
 	Type string `json:"type,omitempty"`
 	// Username is the cleartext identifier half of a USERPASS credential
@@ -207,13 +207,17 @@ type Orchestrator struct {
 	ipcBaseURL     string
 	ipcToken       string
 	// localModelBaseURL is the OpenAI-compatible local model endpoint
-	// (cfg.LocalModels.BaseURL) threaded into each AgentRunRequest; see
-	// SetLocalModelBaseURL.
+	// (cfg.LocalModels.BaseURL) used only as a deprecated fallback when no
+	// ENDPOINT_URL credential resolved a URL (#955); see SetLocalModelBaseURL.
 	localModelBaseURL string
-	statsRegister     StatsRegisterFunc
-	mu                sync.RWMutex
-	accepting         bool
-	crews             map[string]*crewState
+	// localModelEnvFallbackWarned fires the deprecation warning for the
+	// CREWSHIP_LOCAL_MODEL_BASE_URL env fallback at most once per process so
+	// it doesn't spam the log on every run.
+	localModelEnvFallbackWarned sync.Once
+	statsRegister               StatsRegisterFunc
+	mu                          sync.RWMutex
+	accepting                   bool
+	crews                       map[string]*crewState
 
 	// runSem bounds concurrent agent-run exec fan-outs. RunAgent acquires a
 	// token before its container.Exec fan-out (sidecar start, the mkdir/setup
@@ -1031,6 +1035,18 @@ func (o *Orchestrator) SetLocalModelBaseURL(baseURL string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.localModelBaseURL = baseURL
+}
+
+// warnLocalModelEnvFallbackOnce logs a one-time deprecation notice when a run
+// falls back to the server-global CREWSHIP_LOCAL_MODEL_BASE_URL because no
+// ENDPOINT_URL credential (#955) resolved an endpoint. Operators should move
+// the URL into a credential (`crewship credential create --type ENDPOINT_URL
+// --provider OLLAMA --value <url>`) so it's scoped per workspace/agent.
+func (o *Orchestrator) warnLocalModelEnvFallbackOnce() {
+	o.localModelEnvFallbackWarned.Do(func() {
+		o.logger.Warn("local-model endpoint sourced from deprecated CREWSHIP_LOCAL_MODEL_BASE_URL env; " +
+			"migrate to an ENDPOINT_URL credential (crewship credential create --type ENDPOINT_URL --provider OLLAMA --value <url>)")
+	})
 }
 
 // SetIPCConfig sets the crewshipd internal API base URL and token.

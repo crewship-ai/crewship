@@ -22,6 +22,29 @@ type CredentialHandler struct {
 	container provider.ContainerProvider
 }
 
+// decryptEndpointURLForRead returns the decrypted endpoint URL for an
+// ENDPOINT_URL credential so read endpoints can echo it (a base URL is a
+// destination, not a secret — same reasoning as the cleartext username).
+// Returns nil for every other type, for a PENDING sentinel body, or on a
+// decrypt error — the value must never leak for a secret type, and a read
+// path must not 500 on one bad row.
+func decryptEndpointURLForRead(credType, encValue string, logger *slog.Logger) *string {
+	if credType != CredTypeEndpointURL || encValue == "" {
+		return nil
+	}
+	dec, err := decryptCredential(encValue)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("decrypt ENDPOINT_URL for read", "error", err)
+		}
+		return nil
+	}
+	if dec == "" || isPendingSentinel(dec) {
+		return nil
+	}
+	return &dec
+}
+
 // NewCredentialHandler creates a CredentialHandler with the given database and logger.
 
 func NewCredentialHandler(db *sql.DB, logger *slog.Logger) *CredentialHandler {
@@ -48,7 +71,12 @@ type credentialResponse struct {
 	// nil for every other type. Safe to expose because usernames are
 	// not secrets — the password lives encrypted in encrypted_value
 	// and is never returned by any read endpoint.
-	Username       *string `json:"username"`
+	Username *string `json:"username"`
+	// EndpointURL is the decrypted value of an ENDPOINT_URL credential
+	// (#955) — an OpenAI-compatible base URL, not a secret, so it is
+	// echoed back on read the way Username is. nil for every other type;
+	// no read endpoint ever returns the value of a secret credential.
+	EndpointURL    *string `json:"endpoint_url,omitempty"`
 	TokenExpiresAt *string `json:"token_expires_at"`
 	LastCheckedAt  *string `json:"last_checked_at"`
 	LastError      *string `json:"last_error"`
@@ -108,6 +136,7 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 			c.last_used_at, c.last_used_ips, c.tags,
 			c.created_at, c.updated_at,
 			c.created_by_actor_type, c.created_by_actor_id, c.provisioned_for_service,
+			c.encrypted_value,
 			(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count
 		FROM credentials c
 		WHERE c.workspace_id = ? AND c.deleted_at IS NULL `+visFilter+`
@@ -128,12 +157,14 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c credentialResponse
 		var lastUsedIPsRaw, tagsRaw sql.NullString
+		var encValue string
 		if err := rows.Scan(&c.ID, &c.Name, &c.Description, &c.Type, &c.Provider,
 			&c.Status, &c.Scope, &c.CrewID, &c.AccountLabel, &c.AccountEmail, &c.Username,
 			&c.TokenExpiresAt, &c.LastCheckedAt, &c.LastError,
 			&c.LastUsedAt, &lastUsedIPsRaw, &tagsRaw,
 			&c.CreatedAt, &c.UpdatedAt,
 			&c.CreatedByActorType, &c.CreatedByActorID, &c.ProvisionedForService,
+			&encValue,
 			&c.AgentCount); err != nil {
 			h.logger.Error("scan credential", "error", err)
 			replyError(w, http.StatusInternalServerError, "Internal server error")
@@ -141,6 +172,7 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		c.LastUsedIPs = parseLastUsedIPs(lastUsedIPsRaw)
 		c.Tags = parseTags(tagsRaw)
+		c.EndpointURL = decryptEndpointURLForRead(c.Type, encValue, h.logger)
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
@@ -189,6 +221,7 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	var c credentialResponse
 	var lastUsedIPsRaw, tagsRaw sql.NullString
+	var encValue string
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.name, c.description, c.type, c.provider, c.status,
 			c.scope, c.crew_id, c.account_label, c.account_email, c.username,
@@ -196,6 +229,7 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 			c.last_used_at, c.last_used_ips, c.tags,
 			c.created_at, c.updated_at,
 			c.created_by_actor_type, c.created_by_actor_id, c.provisioned_for_service,
+			c.encrypted_value,
 			(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count
 		FROM credentials c
 		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL `+visFilter+`
@@ -205,9 +239,11 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&c.LastUsedAt, &lastUsedIPsRaw, &tagsRaw,
 		&c.CreatedAt, &c.UpdatedAt,
 		&c.CreatedByActorType, &c.CreatedByActorID, &c.ProvisionedForService,
+		&encValue,
 		&c.AgentCount)
 	c.LastUsedIPs = parseLastUsedIPs(lastUsedIPsRaw)
 	c.Tags = parseTags(tagsRaw)
+	c.EndpointURL = decryptEndpointURLForRead(c.Type, encValue, h.logger)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			replyError(w, http.StatusNotFound, "Credential not found")

@@ -106,7 +106,7 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("get WS token: %w", err)
 		}
-		server := cli.ResolveServer(flagServer, cliCfg)
+		server := streamServerURL()
 
 		agentSlug := runMeta.AgentSlug
 		if agentSlug == "" {

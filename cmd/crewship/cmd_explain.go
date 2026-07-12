@@ -110,7 +110,7 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("get WS token: %w", err)
 		}
-		server := cli.ResolveServer(flagServer, cliCfg)
+		server := streamServerURL()
 		quiet, _ := cmd.Flags().GetBool("quiet")
 		md := resolveMarkdownFromCmd(cmd)
 		saveFile, err := openSaveFile(cmd)

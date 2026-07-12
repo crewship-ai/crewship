@@ -422,9 +422,17 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	localModelBaseURL := o.localModelBaseURL
 	o.mu.RUnlock()
 
-	// #944: thread the operator's local-model endpoint into the request so
-	// the env builders and the network policy below see one consistent value.
-	req.LocalModelBaseURL = localModelBaseURL
+	// #955: the local-model endpoint is now resolved from the vault
+	// (ENDPOINT_URL credential, per-agent → workspace default) and arrives on
+	// req.LocalModelBaseURL via the chat resolver. The server-global
+	// CREWSHIP_LOCAL_MODEL_BASE_URL (#944) survives only as a deprecated
+	// fallback for operators who haven't migrated to a credential yet — used
+	// only when no credential resolved a URL.
+	effective, usedEnvFallback := effectiveLocalModelBaseURL(req.LocalModelBaseURL, localModelBaseURL)
+	req.LocalModelBaseURL = effective
+	if usedEnvFallback {
+		o.warnLocalModelEnvFallbackOnce()
+	}
 
 	if !sidecarEnabled && !req.SkipSidecar {
 		// Visible signal that the sidecar is OFF at runtime — pre-fix the

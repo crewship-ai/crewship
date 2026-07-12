@@ -18,7 +18,10 @@ package api
 // map in components/features/credentials/add-credential-wizard/types.ts
 // so users can actually pick it.
 
-import "strings"
+import (
+	"net/url"
+	"strings"
+)
 
 // CredentialType is a string alias used to document intent at call
 // sites — the DB column stays plain TEXT for migration simplicity.
@@ -34,6 +37,15 @@ const (
 	CredTypeSSHKey        CredentialType = "SSH_KEY"
 	CredTypeCertificate   CredentialType = "CERTIFICATE"
 	CredTypeGenericSecret CredentialType = "GENERIC_SECRET"
+	// CredTypeEndpointURL is a non-secret provider endpoint URL — the
+	// OpenAI-compatible base URL of a local model host (Ollama, LM Studio,
+	// llama.cpp) or a remote inference server (#955). It's stored and
+	// resolved through the same vault/CLI/scope machinery as an API key so
+	// the endpoint is configured uniformly (workspace default + per-agent
+	// override) instead of via a server-global env var. Unlike every other
+	// type its value is a destination, not a secret, so it is echoed back on
+	// GET/list (see credentials read path) rather than redacted.
+	CredTypeEndpointURL CredentialType = "ENDPOINT_URL"
 )
 
 // validCredentialTypes is the closed set the Create path accepts. The
@@ -49,6 +61,7 @@ var validCredentialTypes = map[CredentialType]struct{}{
 	CredTypeSSHKey:        {},
 	CredTypeCertificate:   {},
 	CredTypeGenericSecret: {},
+	CredTypeEndpointURL:   {},
 }
 
 // validateCredentialType checks only the closed type enum — extracted
@@ -57,7 +70,7 @@ var validCredentialTypes = map[CredentialType]struct{}{
 // per-type field validation.
 func validateCredentialType(t string) string {
 	if _, ok := validCredentialTypes[t]; !ok {
-		return "type must be one of: AI_CLI_TOKEN, API_KEY, CLI_TOKEN, SECRET, OAUTH2, USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET"
+		return "type must be one of: AI_CLI_TOKEN, API_KEY, CLI_TOKEN, SECRET, OAUTH2, USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET, ENDPOINT_URL"
 	}
 	return ""
 }
@@ -138,6 +151,40 @@ func validateCredentialPayload(req *createCredentialRequest) string {
 		// is opaque values (webhook secrets, signing keys, custom tokens).
 		// The generic "value required" gate in the Create handler is
 		// enough.
+
+	case CredTypeEndpointURL:
+		// The value is an OpenAI-compatible base URL (#955), not a secret.
+		// Gate it to a well-formed absolute http/https URL so a typo lands
+		// as a 400 at submit time rather than a container-start failure when
+		// OpenCode tries to dial it. We deliberately do NOT enforce a path
+		// like /v1 — different runtimes (Ollama vs vLLM vs LM Studio) expose
+		// the OpenAI shim at different roots, and OpenCode's provider config
+		// takes the base verbatim.
+		if msg := validateEndpointURL(req.Value); msg != "" {
+			return msg
+		}
+	}
+	return ""
+}
+
+// validateEndpointURL enforces that an ENDPOINT_URL credential value is an
+// absolute http(s) URL with a host. Returns an end-user-readable 400 message
+// or "" when valid. Kept separate so the run-time resolver can reuse the exact
+// same gate before handing a stored URL to OpenCode's config.
+func validateEndpointURL(value string) string {
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return "endpoint URL is required for ENDPOINT_URL credentials"
+	}
+	u, err := url.Parse(v)
+	if err != nil {
+		return "endpoint URL must be a valid URL (e.g. http://host:11434/v1)"
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "endpoint URL must use http or https (e.g. http://host:11434/v1)"
+	}
+	if u.Host == "" {
+		return "endpoint URL must include a host (e.g. http://host:11434/v1)"
 	}
 	return ""
 }

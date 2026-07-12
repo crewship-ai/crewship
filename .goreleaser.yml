@@ -40,8 +40,12 @@ builds:
     # Windows support needs a build-tagged file split (index_unix.go /
     # index_windows.go). Most Windows users run Crewship via Docker or
     # WSL during the beta period.
+    #
+    # Darwin lives in the separate crewship-darwin build below (#953): the
+    # darwin archive must bundle the LINUX sidecar (it is bind-mounted into
+    # Linux agent containers, never exec'd on the host), which needs its own
+    # archive definition — and archives can't vary files per-goos.
     goos:
-      - darwin
       - linux
     goarch:
       - amd64
@@ -56,6 +60,31 @@ builds:
       # an empty string and the crashreport package short-circuits Init() —
       # consent state is still recorded but no events are sent. Production
       # release builds must set this secret to enable crash visibility.
+      - -X github.com/crewship-ai/crewship/internal/crashreport.DSN={{ envOrDefault "SENTRY_DSN" "" }}
+
+  # Full daemon for macOS (#953). Separate build id so the darwin archive
+  # (default-darwin below) can bundle the LINUX sidecar + entrypoint.sh —
+  # agents always run in Linux containers (Docker Desktop / Colima /
+  # OrbStack VMs), so the bind-mount sources must be Linux artifacts even
+  # on a macOS host. A native darwin sidecar is a Mach-O binary that fails
+  # to exec in-container with exit 255, misdiagnosed as a glibc/musl issue.
+  - id: crewship-darwin
+    main: ./cmd/crewship
+    binary: crewship
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
       - -X github.com/crewship-ai/crewship/internal/crashreport.DSN={{ envOrDefault "SENTRY_DSN" "" }}
 
   # CLI-only build — same cmd/crewship entry point, built with the
@@ -99,7 +128,12 @@ builds:
   # /usr/local/bin/crewship-sidecar. Without it in the archive, a
   # tarball-installed `crewship start` refused to boot ("run 'make
   # build:sidecar'") — a Makefile the user doesn't have. Bundled ONLY in the
-  # full `default` archive; the CLI-only build never launches containers.
+  # full archives; the CLI-only build never launches containers.
+  #
+  # LINUX ONLY (#953): agent containers are always Linux, so the sidecar is
+  # always a Linux ELF — the darwin archive pulls the arch-matched linux
+  # build via its files: glob. A darwin build of this binary is useless by
+  # construction (it can never exec where it runs).
   - id: crewship-sidecar
     main: ./cmd/crewship-sidecar
     binary: crewship-sidecar
@@ -108,7 +142,6 @@ builds:
     flags:
       - -trimpath
     goos:
-      - darwin
       - linux
     goarch:
       - amd64
@@ -136,6 +169,29 @@ archives:
       - README*
       - CHANGELOG*
       - src: scripts/entrypoint.sh
+        dst: .
+        strip_parent: true
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+  # macOS full-daemon archive (#953). Bundles the LINUX sidecar binary from
+  # the crewship-sidecar build's dist output — resolveSidecarPaths finds it
+  # next to the crewship binary (or in Homebrew's libexec) and bind-mounts
+  # it into Linux agent containers; it is never executed on the macOS host.
+  # Arch-matched: Docker Desktop / Colima on Apple Silicon runs linux/arm64
+  # containers, Intel Macs run linux/amd64. Same name_template as `default`
+  # so install.sh and AssetNameForTag resolve it unchanged.
+  - id: default-darwin
+    builds:
+      - crewship-darwin
+    format: tar.gz
+    files:
+      - LICENSE*
+      - README*
+      - CHANGELOG*
+      - src: scripts/entrypoint.sh
+        dst: .
+        strip_parent: true
+      - src: dist/crewship-sidecar_linux_{{ .Arch }}*/crewship-sidecar
         dst: .
         strip_parent: true
     name_template: >-
@@ -206,8 +262,11 @@ brews:
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
     name: crewship
+    # Both full archives: default (linux, for Linuxbrew) + default-darwin
+    # (macOS — bundles the LINUX sidecar, #953).
     ids:
       - default
+      - default-darwin
     homepage: "https://crewship.ai"
     description: "Self-hosted runtime for AI coding agents — daemon + CLI + web UI in one binary"
     license: "Apache-2.0"
@@ -318,6 +377,17 @@ nfpms:
     # dep is advisory — an unsatisfiable one is skipped, never a hard failure.
     recommends:
       - docker-ce
+    # Embedded GPG signatures (#932), verified with `dpkg-sig --verify` / `rpm -K`.
+    # CONDITIONAL: signs only when GPG_KEY_PATH is set (release.yml materializes
+    # it from the GPG_SIGNING_KEY secret). Empty → nfpm skips signing, so
+    # snapshot builds and secret-less forks still produce (unsigned) packages.
+    # Passphrase (if the key has one) is read from NFPM_PACKAGES_PASSPHRASE.
+    deb:
+      signature:
+        key_file: '{{ if index .Env "GPG_KEY_PATH" }}{{ .Env.GPG_KEY_PATH }}{{ end }}'
+    rpm:
+      signature:
+        key_file: '{{ if index .Env "GPG_KEY_PATH" }}{{ .Env.GPG_KEY_PATH }}{{ end }}'
 
 release:
   github:

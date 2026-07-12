@@ -137,6 +137,16 @@ jobs:
               exit 1
             fi
           done
+          # #953: the sidecar is bind-mounted into LINUX agent containers and
+          # exec'd there, so EVERY full archive — including the darwin one —
+          # must carry a Linux ELF sidecar. A Mach-O sidecar passes the
+          # presence check above but fails at first agent start (exit 255,
+          # misdiagnosed as glibc/musl). Assert the ELF magic bytes.
+          MAGIC=$(od -An -tx1 -N4 crewship-sidecar | tr -d ' \n')
+          if [ "$MAGIC" != "7f454c46" ]; then
+            echo "::error::crewship-sidecar in this archive is not a Linux ELF (magic: ${MAGIC}) — it must be a GOOS=linux build even in the darwin archive (#953)"
+            exit 1
+          fi
           for pat in 'LICENSE*' 'README*' 'CHANGELOG*'; do
             # shellcheck disable=SC2086
             if ! ls $pat >/dev/null 2>&1; then
@@ -144,7 +154,7 @@ jobs:
               exit 1
             fi
           done
-          echo "packaging ok: crewship + crewship-sidecar + entrypoint.sh + LICENSE/README/CHANGELOG"
+          echo "packaging ok: crewship + crewship-sidecar (linux ELF) + entrypoint.sh + LICENSE/README/CHANGELOG"
 
       - name: Probe `crewship version`
         # Assert non-zero exit AND that the printed version contains the tag —
@@ -333,7 +343,45 @@ jobs:
           test -f /usr/libexec/crewship/entrypoint.sh
           test -f /usr/lib/systemd/system/crewship.service
           test -f /etc/crewship/crewship.env
+          # #953: the sidecar is bind-mounted into Linux agent containers —
+          # assert it is a Linux ELF, not a host-native artifact.
+          MAGIC=$(od -An -tx1 -N4 /usr/bin/crewship-sidecar | tr -d ' \n')
+          if [ "$MAGIC" != "7f454c46" ]; then
+            echo "::error::/usr/bin/crewship-sidecar is not a Linux ELF (magic: ${MAGIC}) (#953)"
+            exit 1
+          fi
           crewship version
+
+      - name: Verify package signature (if signed)
+        # GPG signing is conditional (#932): a release built without the
+        # GPG_SIGNING_KEY secret is unsigned, so an unsigned package is a soft
+        # SKIP here (keeps the smoke green until the key is provisioned). A
+        # package that IS signed but with a bad/invalid signature FAILS.
+        run: |
+          set -uo pipefail
+          PKG=$(ls /pkg/crewship_*_linux_amd64.${{ matrix.pkg }} | head -1)
+          if [ "${{ matrix.pkg }}" = "deb" ]; then
+            apt-get install -y --no-install-recommends dpkg-sig >/dev/null 2>&1 || true
+            OUT=$(dpkg-sig --verify "$PKG" 2>&1 || true)
+            echo "$OUT"
+            if echo "$OUT" | grep -q "GOODSIG"; then
+              echo "deb signature OK"
+            elif echo "$OUT" | grep -qiE "NOSIG|no signature|processing"; then
+              echo "::notice::deb is unsigned — skipping signature check (GPG_SIGNING_KEY not provisioned, #932)"
+            else
+              echo "::error::deb signature present but not GOODSIG"; exit 1
+            fi
+          else
+            OUT=$(rpm -K "$PKG" 2>&1 || true)
+            echo "$OUT"
+            if echo "$OUT" | grep -qi "signatures OK"; then
+              echo "rpm signature OK"
+            elif echo "$OUT" | grep -qi "NOT OK"; then
+              echo "::error::rpm signature check failed"; exit 1
+            else
+              echo "::notice::rpm is unsigned (digests only) — skipping signature check (GPG_SIGNING_KEY not provisioned, #932)"
+            fi
+          fi
 
       - name: Probe `crewship start --no-docker` health endpoint
         # Boots exactly as a package install would: crewship from /usr/bin,

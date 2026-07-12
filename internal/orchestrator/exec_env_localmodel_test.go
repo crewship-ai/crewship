@@ -134,3 +134,29 @@ func TestLocalModelExtraDomains(t *testing.T) {
 		t.Errorf("unparseable base URL: extra domains = %v, want none", got)
 	}
 }
+
+// #955 — credential-sourced endpoint wins; the deprecated env is only a
+// fallback. effectiveLocalModelBaseURL is the single precedence gate.
+func TestEffectiveLocalModelBaseURL(t *testing.T) {
+	tests := []struct {
+		name         string
+		fromCred     string
+		fromEnv      string
+		wantURL      string
+		wantFallback bool
+	}{
+		{"credential wins over env", "http://cred:11434/v1", "http://env:11434/v1", "http://cred:11434/v1", false},
+		{"credential wins when env empty", "http://cred:11434/v1", "", "http://cred:11434/v1", false},
+		{"env fallback when no credential", "", "http://env:11434/v1", "http://env:11434/v1", true},
+		{"none configured", "", "", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotURL, gotFallback := effectiveLocalModelBaseURL(tc.fromCred, tc.fromEnv)
+			if gotURL != tc.wantURL || gotFallback != tc.wantFallback {
+				t.Errorf("effectiveLocalModelBaseURL(%q,%q) = (%q,%v), want (%q,%v)",
+					tc.fromCred, tc.fromEnv, gotURL, gotFallback, tc.wantURL, tc.wantFallback)
+			}
+		})
+	}
+}
