@@ -29,6 +29,10 @@ type ModelsHandler struct {
 	// OpenAI / Ollama HTTP clients. ok=false means "this provider has no
 	// live-listing path" — the caller then uses the curated set.
 	buildLister func(provider, apiKey, ollamaURL string) (llm.ModelLister, bool)
+	// workspaceOllamaLister builds an SSRF-guarded lister for a workspace-
+	// configured OLLAMA ENDPOINT_URL (#988). Field so tests inject a fake
+	// without a real dial; the default is defaultWorkspaceOllamaLister.
+	workspaceOllamaLister func(baseURL string) (llm.ModelLister, bool)
 }
 
 // modelsListResponse is the GET /api/v1/models payload.
@@ -54,10 +58,11 @@ var supportedModelProviders = map[string]bool{
 // OLLAMA live discovery.
 func NewModelsHandler(db *sql.DB, logger *slog.Logger, ollamaURL string) *ModelsHandler {
 	return &ModelsHandler{
-		db:          db,
-		logger:      logger,
-		ollamaURL:   ollamaURL,
-		buildLister: defaultModelLister,
+		db:                    db,
+		logger:                logger,
+		ollamaURL:             ollamaURL,
+		buildLister:           defaultModelLister,
+		workspaceOllamaLister: defaultWorkspaceOllamaLister,
 	}
 }
 
@@ -126,6 +131,25 @@ func (h *ModelsHandler) resolveModels(ctx context.Context, wsID, provider string
 			h.logger.Warn("models: credential lookup failed", "provider", provider, "error", err)
 		}
 		return curatedOrEmpty(provider), "curated"
+	}
+
+	// #988: for OLLAMA, prefer the workspace's own ENDPOINT_URL so a typo'd
+	// ollama/* model is caught against the endpoint the agent will actually
+	// use — but SSRF-safely (the dial runs daemon-side; the guarded lister
+	// blocks a tenant endpoint resolving internal/metadata unless the instance
+	// cap is on). Fail-open: a blocked or unreachable workspace endpoint falls
+	// through to the server-global path / curated, never rejecting an edit.
+	if provider == "OLLAMA" && h.workspaceOllamaLister != nil {
+		if ep := resolveLocalModelEndpoint(ctx, h.db, h.logger, wsID, nil); ep.BaseURL != "" {
+			if wl, ok := h.workspaceOllamaLister(ep.BaseURL); ok {
+				if live, err := wl.ListModels(ctx); err == nil {
+					return live, "live"
+				} else {
+					h.logger.Warn("models: workspace OLLAMA endpoint discovery failed, falling back",
+						"error", err)
+				}
+			}
+		}
 	}
 
 	lister, ok := h.buildLister(provider, apiKey, h.ollamaURL)

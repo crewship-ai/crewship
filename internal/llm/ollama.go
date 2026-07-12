@@ -42,6 +42,21 @@ func NewOllama(baseURL, model string) *Ollama {
 	}
 }
 
+// NewOllamaWithClient builds an Ollama provider whose non-streaming requests
+// (Complete + ListModels) use the supplied http.Client. Used for a workspace
+// (tenant-configured) endpoint where the dial must be SSRF-guarded — the
+// caller passes a client with an SSRF-aware transport. The streaming client
+// keeps the standard proxy-aware transport (streaming isn't used for the
+// server-side discovery/validation path). A nil client falls back to the
+// default 300s-timeout client.
+func NewOllamaWithClient(baseURL, model string, client *http.Client) *Ollama {
+	o := NewOllama(baseURL, model)
+	if client != nil {
+		o.client = client
+	}
+	return o
+}
+
 // Name returns "ollama".
 func (o *Ollama) Name() string { return "ollama" }
 
