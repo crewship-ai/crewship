@@ -21,7 +21,9 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"io"
+	"log/slog"
 	"regexp"
 	"strings"
 
@@ -84,8 +86,24 @@ func buildCredRemoveScript(agentSlug, envVar, credType string) string {
 // UID 1001. Best-effort — see the package doc. No-op when the container
 // provider isn't wired (tests / --no-docker).
 func (h *CredentialHandler) reconcileRevokedCredential(ctx context.Context, credentialID, workspaceID string) {
-	if h.container == nil {
+	reconcileRevokedCredentialFiles(ctx, h.db, h.logger, h.container, credentialID, workspaceID)
+}
+
+// reconcileRevokedCredentialFiles is the handler-independent core shared by
+// the public DELETE handler (CredentialHandler) and the internal status
+// endpoint (InternalHandler — a sidecar-observed REVOKED must remove files
+// just like an operator delete). workspaceID may be empty (the internal
+// caller doesn't always send it); it is then resolved from the credential row.
+func reconcileRevokedCredentialFiles(ctx context.Context, db *sql.DB, logger *slog.Logger, ctr provider.ContainerProvider, credentialID, workspaceID string) {
+	if ctr == nil {
 		return
+	}
+	if workspaceID == "" {
+		if err := db.QueryRowContext(ctx,
+			`SELECT workspace_id FROM credentials WHERE id = ?`, credentialID).Scan(&workspaceID); err != nil {
+			logger.Warn("revoke reconcile: resolve workspace", "credential_id", credentialID, "error", err)
+			return
+		}
 	}
 
 	// Which agents hold this credential, and where. Whether it lives on disk
@@ -96,7 +114,7 @@ func (h *CredentialHandler) reconcileRevokedCredential(ctx context.Context, cred
 	// nothing and remove nothing. Non-file types (API_KEY/AI_CLI_TOKEN/OAUTH2)
 	// fall out below when credSecretPaths returns no paths. Only live agents
 	// in live crews have a running container to reach.
-	rows, err := h.db.QueryContext(ctx, `
+	rows, err := db.QueryContext(ctx, `
 		SELECT a.slug, cr.id, cr.slug, ac.env_var_name, c.type
 		FROM agent_credentials ac
 		JOIN agents a       ON a.id = ac.agent_id AND a.deleted_at IS NULL
@@ -105,7 +123,7 @@ func (h *CredentialHandler) reconcileRevokedCredential(ctx context.Context, cred
 		WHERE ac.credential_id = ? AND c.workspace_id = ?`,
 		credentialID, workspaceID)
 	if err != nil {
-		h.logger.Warn("revoke reconcile: query file mounts", "credential_id", credentialID, "error", err)
+		logger.Warn("revoke reconcile: query file mounts", "credential_id", credentialID, "error", err)
 		return
 	}
 	defer rows.Close()
@@ -115,19 +133,19 @@ func (h *CredentialHandler) reconcileRevokedCredential(ctx context.Context, cred
 	for rows.Next() {
 		var t target
 		if err := rows.Scan(&t.agentSlug, &t.crewID, &t.crewSlug, &t.envVar, &t.credType); err != nil {
-			h.logger.Warn("revoke reconcile: scan", "error", err)
+			logger.Warn("revoke reconcile: scan", "error", err)
 			return
 		}
 		targets = append(targets, t)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Warn("revoke reconcile: rows", "error", err)
+		logger.Warn("revoke reconcile: rows", "error", err)
 		return
 	}
 
 	for _, t := range targets {
 		if !credSlugRE.MatchString(t.agentSlug) || !credEnvVarRE.MatchString(t.envVar) {
-			h.logger.Warn("revoke reconcile: skipping unsafe identifiers",
+			logger.Warn("revoke reconcile: skipping unsafe identifiers",
 				"agent_slug", t.agentSlug, "env_var", t.envVar)
 			continue
 		}
@@ -135,8 +153,8 @@ func (h *CredentialHandler) reconcileRevokedCredential(ctx context.Context, cred
 		if script == "" {
 			continue // type has no on-disk form
 		}
-		container := h.container.CrewContainerName(t.crewID, t.crewSlug)
-		res, execErr := h.container.Exec(ctx, provider.ExecConfig{
+		container := ctr.CrewContainerName(t.crewID, t.crewSlug)
+		res, execErr := ctr.Exec(ctx, provider.ExecConfig{
 			ContainerID: container,
 			Cmd:         []string{"sh", "-c", script},
 			User:        "1001:1001",
@@ -144,7 +162,7 @@ func (h *CredentialHandler) reconcileRevokedCredential(ctx context.Context, cred
 		if execErr != nil {
 			// Overwhelmingly "container not running" — expected and benign
 			// (nothing to remove; won't re-materialize post-revoke).
-			h.logger.Debug("revoke reconcile: exec skipped (container likely stopped)",
+			logger.Debug("revoke reconcile: exec skipped (container likely stopped)",
 				"credential_id", credentialID, "crew_id", t.crewID, "error", execErr)
 			continue
 		}
@@ -153,8 +171,8 @@ func (h *CredentialHandler) reconcileRevokedCredential(ctx context.Context, cred
 			_ = res.Reader.Close()
 		}
 		if res != nil {
-			if running, code, ierr := h.container.ExecInspect(ctx, res.ExecID); ierr == nil && !running && code != 0 {
-				h.logger.Warn("revoke reconcile: rm exited non-zero",
+			if running, code, ierr := ctr.ExecInspect(ctx, res.ExecID); ierr == nil && !running && code != 0 {
+				logger.Warn("revoke reconcile: rm exited non-zero",
 					"credential_id", credentialID, "crew_id", t.crewID, "agent_slug", t.agentSlug, "exit_code", code)
 			}
 		}

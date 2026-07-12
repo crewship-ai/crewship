@@ -149,7 +149,7 @@ func TestBuildMounts_FullLayout(t *testing.T) {
 		ContainerPrefix:   "crewship",
 	}}
 
-	mounts, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew", "/secrets")
+	mounts, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew")
 	if err != nil {
 		t.Fatalf("buildMounts: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestBuildMounts_FullLayout(t *testing.T) {
 		"/workspace":                      {source: "/ws", mtype: mount.TypeBind, readOnly: false},
 		"/output":                         {source: "/out", mtype: mount.TypeBind, readOnly: false},
 		"/crew":                           {source: "/crew", mtype: mount.TypeBind, readOnly: false},
-		"/secrets":                        {source: "/secrets", mtype: mount.TypeBind, readOnly: false},
+		"/secrets":                        {source: "", mtype: mount.TypeTmpfs, readOnly: false},
 		"/home/agent":                     {source: "crewship-home-eng-ckcrew1", mtype: mount.TypeVolume, readOnly: false},
 		"/opt/crew-tools":                 {source: "crewship-tools-eng-ckcrew1", mtype: mount.TypeVolume, readOnly: false},
 		"/usr/local/bin/crewship-sidecar": {source: "/h/sidecar", mtype: mount.TypeBind, readOnly: true},
@@ -206,7 +206,7 @@ func TestBuildMounts_NoSlugSkipsHomeAndToolsVolumes(t *testing.T) {
 		EntrypointPath:    "/h/entrypoint.sh",
 	}}
 
-	mounts, err := p.buildMounts("ckcrew1", "", "/ws", "/out", "/crew", "/secrets")
+	mounts, err := p.buildMounts("ckcrew1", "", "/ws", "/out", "/crew")
 	if err != nil {
 		t.Fatalf("buildMounts: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestBuildMounts_PrefixAppliedToVolumes(t *testing.T) {
 		ContainerPrefix:   "crewship-7",
 	}}
 
-	mounts, err := p.buildMounts("ckcrew1", "rocket", "/ws", "/out", "/crew", "/secrets")
+	mounts, err := p.buildMounts("ckcrew1", "rocket", "/ws", "/out", "/crew")
 	if err != nil {
 		t.Fatalf("buildMounts: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestBuildMounts_SidecarAndEntrypointAreReadOnly(t *testing.T) {
 		EntrypointPath:    "/h/entrypoint.sh",
 	}}
 
-	mounts, err := p.buildMounts("ckcrew1", "rocket", "/ws", "/out", "/crew", "/secrets")
+	mounts, err := p.buildMounts("ckcrew1", "rocket", "/ws", "/out", "/crew")
 	if err != nil {
 		t.Fatalf("buildMounts: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestBuildMounts_MissingSidecarErrorMessage(t *testing.T) {
 	t.Parallel()
 
 	p := &Provider{cfg: Config{EntrypointPath: "/h/entrypoint.sh"}}
-	_, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew", "/secrets")
+	_, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew")
 	if err == nil {
 		t.Fatal("expected error when SidecarBinaryPath is empty")
 	}
@@ -301,7 +301,7 @@ func TestBuildMounts_MissingEntrypointErrorMessage(t *testing.T) {
 	t.Parallel()
 
 	p := &Provider{cfg: Config{SidecarBinaryPath: "/h/sidecar"}}
-	_, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew", "/secrets")
+	_, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew")
 	if err == nil {
 		t.Fatal("expected error when EntrypointPath is empty")
 	}

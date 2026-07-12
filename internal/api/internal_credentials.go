@@ -335,6 +335,23 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// A REVOKED transition must remove the credential's materialized
+	// /secrets file(s) from running crew containers, exactly like the public
+	// DELETE handler — otherwise a sidecar-detected revocation leaves the
+	// cleartext file readable until the next run. Async + bounded: the
+	// sidecar's status PATCH must not stall on a docker exec, and a wedged
+	// daemon must not hold the goroutine forever. Best-effort by design (the
+	// DB status is already REVOKED, so the file is never re-materialized).
+	if body.Status == "REVOKED" {
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
+		h.reconcileWG.Add(1)
+		go func() {
+			defer h.reconcileWG.Done()
+			defer cancel()
+			reconcileRevokedCredentialFiles(rctx, h.db, h.logger, h.container, credID, workspaceID)
+		}()
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"id": credID, "status": body.Status, "last_checked_at": now})
 }
 

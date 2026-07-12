@@ -32,7 +32,7 @@ func TestBuildMountsRejectsMachOSidecar(t *testing.T) {
 		SidecarBinaryPath: sidecar,
 		EntrypointPath:    "/host/entrypoint.sh",
 	}}
-	_, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew", "/secrets")
+	_, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew")
 	if err == nil {
 		t.Fatal("expected buildMounts to reject a Mach-O sidecar (#953)")
 	}
@@ -50,7 +50,7 @@ func TestBuildMountsAcceptsELFSidecar(t *testing.T) {
 		SidecarBinaryPath: sidecar,
 		EntrypointPath:    "/host/entrypoint.sh",
 	}}
-	if _, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew", "/secrets"); err != nil {
+	if _, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew"); err != nil {
 		t.Fatalf("buildMounts should accept an ELF sidecar: %v", err)
 	}
 }
@@ -63,7 +63,7 @@ func TestBuildMountsSkipsFormatCheckWhenSidecarUnreadable(t *testing.T) {
 		SidecarBinaryPath: "/nonexistent/crewship-sidecar",
 		EntrypointPath:    "/host/entrypoint.sh",
 	}}
-	if _, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew", "/secrets"); err != nil {
+	if _, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew"); err != nil {
 		t.Fatalf("buildMounts should not fail on an unreadable sidecar path: %v", err)
 	}
 }

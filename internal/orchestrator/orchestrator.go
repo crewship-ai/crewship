@@ -238,6 +238,13 @@ type Orchestrator struct {
 	runSem    chan struct{}
 	runSemCap int
 
+	// secretsHolds refcounts live runs per container+agent so post-run
+	// /secrets/<slug> cleanup only fires when the LAST overlapping run of
+	// that agent finishes (see secrets_cleanup.go). Lazily initialized
+	// under secretsHoldsMu so zero-value Orchestrators (tests) work.
+	secretsHoldsMu sync.Mutex
+	secretsHolds   map[string]int
+
 	// tmuxCache memoizes whether each container has tmux installed. Avoids a
 	// `command -v tmux` exec on every agent run (was ~50ms per call). Key is
 	// the container ID; value is true if tmux was found. Invalidated when the

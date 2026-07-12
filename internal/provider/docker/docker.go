@@ -563,15 +563,53 @@ func (p *Provider) toolsVolumeName(id, slug string) string {
 	return p.crewResourceName("tools", id, slug)
 }
 
+// secretsTmpfsSizeBytes caps the /secrets tmpfs. Credential files are a
+// handful of tokens/keys/certs per agent — 16 MiB is orders of magnitude
+// more than any legitimate crew needs while still bounding a runaway
+// writer (tmpfs pages count against container memory).
+const secretsTmpfsSizeBytes = 16 * 1024 * 1024
+
+// secretsTmpfsMount returns the tmpfs mount for /secrets.
+//
+// Deliberately NOT a host bind: the orchestrator writes cleartext SSH keys,
+// passwords and tokens under /secrets/<agent-slug>/ at every run setup
+// (internal/orchestrator/exec_sidecar.go writeCredentialFiles), and a bind
+// mount persisted those bytes on the host disk — surviving reboots and
+// leaking into anything that archives OutputBasePath. Nothing reads /secrets
+// across container recreation (files are unconditionally rewritten each run),
+// so an in-memory mount loses nothing and guarantees secrets die with the
+// container.
+//
+// Ownership: tmpfs defaults to root:root, but the container runs as UID 1001
+// with CapDrop=ALL — root-without-CAP_DAC_OVERRIDE can't fix perms up later
+// and the per-run `mkdir -p /secrets/<slug>` execs as 1001. uid/gid mount
+// options hand the mount root to the agent UID at mount time. The uid/gid
+// TmpfsOptions require Docker Engine >= 26 (API 1.45); an older daemon
+// silently drops them, leaving the mount root-owned 0700 — the credential
+// writer then fails loudly (writeCredentialFiles surfaces the non-zero exit)
+// instead of silently persisting secrets anywhere.
+func secretsTmpfsMount() mount.Mount {
+	return mount.Mount{
+		Type:   mount.TypeTmpfs,
+		Target: "/secrets",
+		TmpfsOptions: &mount.TmpfsOptions{
+			SizeBytes: secretsTmpfsSizeBytes,
+			Mode:      0o700,
+			Options:   [][]string{{"uid", "1001"}, {"gid", "1001"}},
+		},
+	}
+}
+
 // buildMounts returns the full list of mounts for a crew container, including
 // persistent bind mounts and named volumes for home/tools directories.
+// /secrets is an in-memory tmpfs (see secretsTmpfsMount) — never host-backed.
 //
 // Sidecar + entrypoint bind mounts are mandatory: the legacy agent-runtime
 // image (which baked them in) was retired, so any user-provided base image
 // needs them injected from the host. Returns an error if the config is
 // missing either path — the operator should run 'make build:sidecar' or
 // set CREWSHIP_SIDECAR_PATH / CREWSHIP_ENTRYPOINT_PATH.
-func (p *Provider) buildMounts(id, slug, workspacePath, outputPath, crewPath, secretsPath string) ([]mount.Mount, error) {
+func (p *Provider) buildMounts(id, slug, workspacePath, outputPath, crewPath string) ([]mount.Mount, error) {
 	if p.cfg.SidecarBinaryPath == "" {
 		return nil, fmt.Errorf("docker provider: SidecarBinaryPath is required (run 'make build:sidecar' or set CREWSHIP_SIDECAR_PATH)")
 	}
@@ -585,7 +623,7 @@ func (p *Provider) buildMounts(id, slug, workspacePath, outputPath, crewPath, se
 		{Type: mount.TypeBind, Source: workspacePath, Target: "/workspace"},
 		{Type: mount.TypeBind, Source: outputPath, Target: "/output"},
 		{Type: mount.TypeBind, Source: crewPath, Target: "/crew"},
-		{Type: mount.TypeBind, Source: secretsPath, Target: "/secrets"},
+		secretsTmpfsMount(),
 	}
 	if slug != "" {
 		mounts = append(mounts,

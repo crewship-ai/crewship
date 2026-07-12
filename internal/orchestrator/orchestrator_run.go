@@ -733,6 +733,25 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	}
 	env = append(env, "CREWSHIP_SECRETS_DIR="+secretsAgentDir)
 
+	// Post-run secret cleanup (secret lifecycle hardening): every run rewrites
+	// its credential files above, so nothing needs them to outlive the run —
+	// remove /secrets/<slug> on the way out. Refcounted so an overlapping run
+	// of the same agent is never yanked out from under; skipped when the CLI
+	// exec is still alive at return (detached tmux session keeps its secrets —
+	// the hold is intentionally kept so no later run removes them either).
+	agentExecStillRunning := false
+	if hasFileMountedCreds(req.Credentials) {
+		o.retainAgentSecrets(req.ContainerID, req.AgentSlug)
+		defer func() {
+			if agentExecStillRunning {
+				return
+			}
+			if o.releaseAgentSecrets(req.ContainerID, req.AgentSlug) {
+				o.cleanupAgentSecrets(req.ContainerID, req.AgentSlug)
+			}
+		}()
+	}
+
 	env = append(env, "CREWSHIP_OUTPUT_DIR="+outputDir)
 
 	// Write non-secret Claude config (skip onboarding). Credentials are
@@ -1177,6 +1196,10 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	})
 
 	if running {
+		// The CLI exec outlives this call (detached session) and may still
+		// read its credential files — keep the secrets hold so neither this
+		// deferred cleanup nor a later run's removes /secrets/<slug>.
+		agentExecStillRunning = true
 		o.updateRunStatus(ctx, runState.ID, "running")
 		return nil
 	}
