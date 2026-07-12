@@ -81,6 +81,20 @@ func (r *samplerTestEmitter) Emit(_ context.Context, e journal.Entry) (string, e
 }
 func (r *samplerTestEmitter) Flush(context.Context) error { return nil }
 
+// flakeSafeNow returns "now minus two seconds" for seeding rows that must
+// land INSIDE the sampler's scan window. Seeding with bare time.Now() put
+// the row in the SAME second as runOnce's scanEnd, where RFC3339Nano's
+// trailing-zero truncation breaks lexicographic ordering in SQL: a row
+// stamped "…02.5Z" compares GREATER than a bound "…02.500123456Z"
+// ('Z' > '0'), so the row fell outside the window ~1 run in 40 — the
+// macos/arm CI matrix surfaced it. Two seconds back guarantees the second
+// prefix differs, where string order equals chronological order regardless
+// of fractional-digit count. The underlying string-comparison fragility is
+// tracked separately (timestamp-format follow-up).
+func flakeSafeNow() time.Time {
+	return time.Now().UTC().Add(-2 * time.Second)
+}
+
 func seedRun(t *testing.T, db *sql.DB, id, pipelineID, slug string, endedAt time.Time) {
 	t.Helper()
 	if _, err := db.Exec(`INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, status, ended_at)
@@ -121,8 +135,8 @@ func TestOnlineSampler_FullRateEnqueuesEveryRun(t *testing.T) {
 	}
 	// Start watermark in the past so seeded rows fall inside the window.
 	s.watermark = time.Now().Add(-1 * time.Hour).UTC()
-	seedRun(t, db, "prn-1", "pl-1", "nightly", time.Now().UTC())
-	seedRun(t, db, "prn-2", "pl-1", "nightly", time.Now().UTC())
+	seedRun(t, db, "prn-1", "pl-1", "nightly", flakeSafeNow())
+	seedRun(t, db, "prn-2", "pl-1", "nightly", flakeSafeNow())
 
 	s.runOnce(context.Background())
 
@@ -163,7 +177,7 @@ func TestOnlineSampler_ZeroRateEnqueuesNothing(t *testing.T) {
 		t.Fatalf("ctor: %v", errCtor)
 	}
 	s.watermark = time.Now().Add(-1 * time.Hour).UTC()
-	seedRun(t, db, "prn-1", "pl-1", "nightly", time.Now().UTC())
+	seedRun(t, db, "prn-1", "pl-1", "nightly", flakeSafeNow())
 
 	s.runOnce(context.Background())
 
@@ -189,7 +203,7 @@ func TestOnlineSampler_NoEvalConfigSkips(t *testing.T) {
 		t.Fatalf("ctor: %v", errCtor)
 	}
 	s.watermark = time.Now().Add(-1 * time.Hour).UTC()
-	seedRun(t, db, "prn-1", "pl-1", "nightly", time.Now().UTC())
+	seedRun(t, db, "prn-1", "pl-1", "nightly", flakeSafeNow())
 
 	s.runOnce(context.Background())
 
@@ -222,7 +236,7 @@ func TestOnlineSampler_WatermarkAdvances(t *testing.T) {
 	s.watermark = time.Now().Add(-1 * time.Hour).UTC()
 
 	// First tick — one row, expect 1 enqueue.
-	seedRun(t, db, "prn-1", "pl-1", "nightly", time.Now().UTC())
+	seedRun(t, db, "prn-1", "pl-1", "nightly", flakeSafeNow())
 	s.runOnce(context.Background())
 
 	// Second tick — same row, watermark should have advanced past it.
@@ -257,7 +271,7 @@ func TestOnlineSampler_NoGraderSkips(t *testing.T) {
 		t.Fatalf("ctor: %v", err)
 	}
 	s.watermark = time.Now().Add(-1 * time.Hour).UTC()
-	seedRun(t, db, "prn-1", "pl-1", "nightly", time.Now().UTC())
+	seedRun(t, db, "prn-1", "pl-1", "nightly", flakeSafeNow())
 	s.runOnce(context.Background())
 
 	var count int
@@ -292,7 +306,7 @@ func TestOnlineSampler_DuplicateRunNoDoubleEnqueue(t *testing.T) {
 		t.Fatalf("ctor: %v", err)
 	}
 	s.watermark = time.Now().Add(-1 * time.Hour).UTC()
-	seedRun(t, db, "prn-dup", "pl-1", "nightly", time.Now().UTC())
+	seedRun(t, db, "prn-dup", "pl-1", "nightly", flakeSafeNow())
 
 	s.runOnce(context.Background())
 	// Roll the watermark back and re-run — simulates a crash-recovery
@@ -385,7 +399,7 @@ func TestOnlineSampler_TickPanicDoesntKillLoop(t *testing.T) {
 		t.Fatalf("ctor: %v", err)
 	}
 	s.watermark = time.Now().Add(-1 * time.Hour).UTC()
-	seedRun(t, db, "prn-boom", "pl-1", "nightly", time.Now().UTC())
+	seedRun(t, db, "prn-boom", "pl-1", "nightly", flakeSafeNow())
 
 	// If panic recovery is broken, this call propagates and the test
 	// goroutine dies — we'd never reach the assertion below. With

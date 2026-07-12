@@ -80,7 +80,7 @@ func TestOnlineSampler_StartTicksAndStops(t *testing.T) {
 		t.Fatalf("ctor: %v", err)
 	}
 	s.watermark = time.Now().Add(-1 * time.Hour).UTC()
-	seedRun(t, db, "prn-start", "pl-1", "nightly", time.Now().UTC())
+	seedRun(t, db, "prn-start", "pl-1", "nightly", flakeSafeNow())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -132,7 +132,7 @@ func TestOnlineSampler_TickBackoffSkips(t *testing.T) {
 		t.Fatalf("ctor: %v", err)
 	}
 	s.watermark = time.Now().Add(-1 * time.Hour).UTC()
-	seedRun(t, db, "prn-skip", "pl-1", "nightly", time.Now().UTC())
+	seedRun(t, db, "prn-skip", "pl-1", "nightly", flakeSafeNow())
 
 	s.backoffSkips = 2
 
@@ -209,7 +209,7 @@ func TestOnlineSampler_ResolverErrorRetriesNextTick(t *testing.T) {
 	}
 	start := time.Now().Add(-1 * time.Hour).UTC()
 	s.watermark = start
-	seedRun(t, db, "prn-retry", "pl-1", "nightly", time.Now().UTC())
+	seedRun(t, db, "prn-retry", "pl-1", "nightly", flakeSafeNow())
 
 	s.runOnce(context.Background())
 	if got := evalRunCount(t, db); got != 0 {
@@ -244,7 +244,7 @@ func TestOnlineSampler_EnqueueErrorRetriesNextTick(t *testing.T) {
 	}
 	start := time.Now().Add(-1 * time.Hour).UTC()
 	s.watermark = start
-	seedRun(t, db, "prn-insfail", "pl-1", "nightly", time.Now().UTC())
+	seedRun(t, db, "prn-insfail", "pl-1", "nightly", flakeSafeNow())
 
 	s.runOnce(context.Background())
 	if !s.watermark.Equal(start) {
@@ -289,7 +289,7 @@ func TestOnlineSampler_FractionalRate(t *testing.T) {
 			t.Fatalf("ctor: %v", err)
 		}
 		s.watermark = time.Now().Add(-1 * time.Hour).UTC()
-		seedRun(t, db, "prn-hi", "pl-1", "nightly", time.Now().UTC())
+		seedRun(t, db, "prn-hi", "pl-1", "nightly", flakeSafeNow())
 		s.runOnce(context.Background())
 		if got := evalRunCount(t, db); got != 1 {
 			t.Errorf("rate≈1.0 enqueued %d, want 1", got)
@@ -309,7 +309,7 @@ func TestOnlineSampler_FractionalRate(t *testing.T) {
 			t.Fatalf("ctor: %v", err)
 		}
 		s.watermark = time.Now().Add(-1 * time.Hour).UTC()
-		seedRun(t, db, "prn-lo", "pl-1", "nightly", time.Now().UTC())
+		seedRun(t, db, "prn-lo", "pl-1", "nightly", flakeSafeNow())
 		s.runOnce(context.Background())
 		if got := evalRunCount(t, db); got != 0 {
 			t.Errorf("rate≈0 enqueued %d, want 0", got)
