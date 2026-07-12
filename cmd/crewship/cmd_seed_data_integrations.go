@@ -259,7 +259,7 @@ func resolveCrewIntegration(client *cli.Client, crewID, name string) (string, er
 			return item.ID, nil
 		}
 	}
-	return "", fmt.Errorf("integration %q not found in crew %s", name, crewID)
+	return "", cli.NotFoundf("integration %q not found in crew %s", name, crewID)
 }
 
 // ════════════════════════════════════════════════════════════════════════════

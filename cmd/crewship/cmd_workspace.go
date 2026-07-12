@@ -107,7 +107,7 @@ var workspaceUseCmd = &cobra.Command{
 						}
 					}
 					if !found {
-						return fmt.Errorf("workspace %q not found or not accessible", args[0])
+						return cli.NotFoundf("workspace %q not found or not accessible", args[0])
 					}
 				}
 			}
