@@ -98,6 +98,20 @@ func InternalTokenWorkspaceFromContext(ctx context.Context) string {
 // any HTML upstream will break. The skip mirrors the one in the server-
 // level middleware — both layers must agree, which is why this CSP rule
 // appears twice across two packages.
+// VersionHeader stamps every response with X-Crewship-Server-Version so
+// clients can detect a version-skewed (usually stale) CLI without an extra
+// round-trip — a stale CLI against a newer server is the most common source
+// of confusing API errors. Empty version (unset ldflags) omits the header.
+func VersionHeader(version string, next http.Handler) http.Handler {
+	if version == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Crewship-Server-Version", version)
+		next.ServeHTTP(w, r)
+	})
+}
+
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()

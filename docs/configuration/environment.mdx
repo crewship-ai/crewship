@@ -241,7 +241,7 @@ These bypass safety or convenience behaviours. Never set them in production.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CREWSHIP_SKIP_MIGRATION_BACKUP` | (unset) | Set to `1` to skip the pre-migration `crewship.db` snapshot. **Never in production.** Read by `internal/database/backup_pre_migrate.go`. |
-| `CREWSHIP_SKIP_UPDATE_CHECK` | (unset) | Set to `1` to skip the daily "new version available" probe. Read by `internal/update/check.go`. |
+| `CREWSHIP_SKIP_UPDATE_CHECK` | (unset) | Set to `1` to skip the daily "new version available" probe **and** the once-per-process CLI↔server version-skew warning. Read by `internal/update/check.go` and `internal/cli/version_skew.go`. |
 | `CREWSHIP_SKIP_SIGNATURE_VERIFY` | (unset — gate on) | Set to `1` to skip the Sigstore/cosign signature verification of `checksums.txt` during `crewship self-update` (prints a loud warning). Only for air-gapped mirrors or forks whose releases sign under a different workflow identity. Read by `internal/update/selfupdate.go`. |
 | `CREWSHIP_SKIP_SIDECAR` | (unset) | Set to `1` to bypass fail-fast sidecar autodetect (tests / container-less runs only). Also documented under [Container](#container). Read by `internal/config/config.go`. |
 

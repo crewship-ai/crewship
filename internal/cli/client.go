@@ -227,6 +227,10 @@ func (c *Client) Do(method, path string, body interface{}) (*http.Response, erro
 		return nil, &ConnectionError{Err: err}
 	}
 
+	// One-per-process stale-CLI hint, fed by the version header the server
+	// stamps on every response (see version_skew.go).
+	maybeWarnVersionSkew(resp.Header.Get("X-Crewship-Server-Version"))
+
 	return resp, nil
 }
 
