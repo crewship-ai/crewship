@@ -68,10 +68,19 @@ detect_os() {
 }
 
 detect_arch() {
-  case "$(uname -m)" in
+  local m
+  m="$(uname -m)"
+  # Apple Silicon under Rosetta 2: an x86_64-translated shell (old iTerm
+  # profile, x86 Homebrew subshell) reports x86_64, which would install the
+  # amd64 binary to run under emulation forever. Prefer native arm64 when
+  # the kernel says this process is translated.
+  if [ "$(uname -s)" = "Darwin" ] && [ "$m" = "x86_64" ] &&      [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = "1" ]; then
+    m=arm64
+  fi
+  case "$m" in
     x86_64|amd64) echo amd64 ;;
     arm64|aarch64) echo arm64 ;;
-    *) err "unsupported arch: $(uname -m)" ;;
+    *) err "unsupported arch: $m" ;;
   esac
 }
 

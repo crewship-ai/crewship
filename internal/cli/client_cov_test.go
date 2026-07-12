@@ -249,8 +249,11 @@ func TestReadJSONBodyReadError(t *testing.T) {
 	resp := &http.Response{Body: errReadCloser{err: boom}}
 	var v map[string]any
 	err := ReadJSON(resp, &v)
-	if err == nil || !strings.Contains(err.Error(), "read response") {
-		t.Errorf("err = %v, want read response error", err)
+	// Post-streaming-rewrite the read error surfaces through the decoder,
+	// so the wrap prefix is "decode response"; the underlying cause must
+	// still be reachable via errors.Is.
+	if err == nil || !strings.Contains(err.Error(), "decode response") {
+		t.Errorf("err = %v, want decode response error", err)
 	}
 	if !errors.Is(err, boom) {
 		t.Errorf("err = %v, want wrapped %v", err, boom)
