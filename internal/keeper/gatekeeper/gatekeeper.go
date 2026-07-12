@@ -412,8 +412,8 @@ func (g *Gatekeeper) buildAccessPrompt(req EvalRequest) string {
 	}
 
 	sb.WriteString("========== CURRENT REQUEST TO EVALUATE ==========\n")
-	fmt.Fprintf(&sb, "Agent: %s (crew: %s)\n", req.AgentName, req.CrewName)
-	fmt.Fprintf(&sb, "Credential: %s (Security Level: L%d)\n", req.CredentialName, req.SecurityLevel)
+	fmt.Fprintf(&sb, "Agent: %q (crew: %q)\n", req.AgentName, req.CrewName)
+	fmt.Fprintf(&sb, "Credential: %q (Security Level: L%d)\n", req.CredentialName, req.SecurityLevel)
 	fmt.Fprintf(&sb, "Intent: %q\n", req.Request.Intent)
 
 	if req.Command != "" {
@@ -448,10 +448,10 @@ func (g *Gatekeeper) buildSkillReviewPrompt(req EvalRequest) string {
 		in = &SkillReviewInput{SkillName: "<unavailable>", SkillDescription: "<unavailable>"}
 	}
 	sb.WriteString("========== SKILL UNDER REVIEW ==========\n")
-	fmt.Fprintf(&sb, "Skill: %s (id: %s)\n", in.SkillName, in.SkillID)
+	fmt.Fprintf(&sb, "Skill: %q (id: %q)\n", in.SkillName, in.SkillID)
 	fmt.Fprintf(&sb, "Lifecycle state: %s\n", orPlaceholder(in.LifecycleState))
-	fmt.Fprintf(&sb, "Description: %s\n", orPlaceholder(in.SkillDescription))
-	fmt.Fprintf(&sb, "Assigned to agents: %s\n", joinOrNone(in.AssignedAgents))
+	fmt.Fprintf(&sb, "Description: %q\n", orPlaceholder(in.SkillDescription))
+	fmt.Fprintf(&sb, "Assigned to agents: %q\n", joinOrNone(in.AssignedAgents))
 	fmt.Fprintf(&sb, "Usage stats (last %d days): %d invocations, %d errors, last_used=%s\n",
 		in.Stats.LookbackDays, in.Stats.InvocationCount, in.Stats.ErrorCount, orPlaceholder(in.Stats.LastUsedAt))
 	if len(in.FailureSnippets) > 0 {
@@ -485,12 +485,12 @@ func (g *Gatekeeper) buildBehaviorPrompt(req EvalRequest) string {
 		in = &BehaviorInput{ToolName: "<unavailable>", BehaviorMode: "warn"}
 	}
 	sb.WriteString("========== TOOL CALL UNDER REVIEW ==========\n")
-	fmt.Fprintf(&sb, "Agent: %s (crew: %s)\n", req.AgentName, req.CrewName)
+	fmt.Fprintf(&sb, "Agent: %q (crew: %q)\n", req.AgentName, req.CrewName)
 	fmt.Fprintf(&sb, "Behavior mode: %s (warn=non-blocking inbox; block=interrupt next call)\n", in.BehaviorMode)
-	fmt.Fprintf(&sb, "Tool: %s\n", in.ToolName)
+	fmt.Fprintf(&sb, "Tool: %q\n", in.ToolName)
 	fmt.Fprintf(&sb, "Args (truncated): %q\n", truncateSnippet(in.ToolArgsSnippet, 500))
 	if len(in.RecentToolCalls) > 0 {
-		fmt.Fprintf(&sb, "Recent tool-call names (oldest→newest): %s\n", strings.Join(in.RecentToolCalls, ", "))
+		fmt.Fprintf(&sb, "Recent tool-call names (oldest→newest): %q\n", strings.Join(in.RecentToolCalls, ", "))
 	}
 	sb.WriteString("============================================\n\n")
 
@@ -522,7 +522,7 @@ func (g *Gatekeeper) buildMemoryHealthPrompt(req EvalRequest) string {
 		in = &MemoryHealthInput{}
 	}
 	sb.WriteString("========== MEMORY SNAPSHOT ==========\n")
-	fmt.Fprintf(&sb, "Agent: %s (crew: %s)\n", req.AgentName, req.CrewName)
+	fmt.Fprintf(&sb, "Agent: %q (crew: %q)\n", req.AgentName, req.CrewName)
 	fmt.Fprintf(&sb, "AGENT.md: %d bytes\n", in.AgentMDBytes)
 	fmt.Fprintf(&sb, "PERSONA.md: %d bytes\n", in.PersonaMDBytes)
 	fmt.Fprintf(&sb, "CREW.md: %d bytes\n", in.CrewMDBytes)
@@ -554,10 +554,10 @@ func (g *Gatekeeper) buildNegativeLearningPrompt(req EvalRequest) string {
 		in = &NegativeLearningInput{TriggerKind: "<unavailable>"}
 	}
 	sb.WriteString("========== FAILURE EVENT ==========\n")
-	fmt.Fprintf(&sb, "Agent: %s (crew: %s)\n", req.AgentName, req.CrewName)
-	fmt.Fprintf(&sb, "Trigger: %s\n", in.TriggerKind)
+	fmt.Fprintf(&sb, "Agent: %q (crew: %q)\n", req.AgentName, req.CrewName)
+	fmt.Fprintf(&sb, "Trigger: %q\n", in.TriggerKind)
 	if in.ToolName != "" {
-		fmt.Fprintf(&sb, "Tool: %s\n", in.ToolName)
+		fmt.Fprintf(&sb, "Tool: %q\n", in.ToolName)
 	}
 	fmt.Fprintf(&sb, "Failure snippet (truncated): %q\n", truncateSnippet(in.FailureSnippet, 1000))
 	if in.PriorLesson != "" {

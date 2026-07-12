@@ -31,7 +31,7 @@ func TestNegativeLearningEvaluator_DecisionMatrix(t *testing.T) {
 			llmResponse:  `{"decision":"ALLOW","reason":"check env vars before running deploy.sh","risk":3}`,
 			wantDec:      keeper.DecisionAllow,
 			wantWrite:    true,
-			wantInPrompt: []string{"FAILURE EVENT", "Trigger: run_failed"},
+			wantInPrompt: []string{"FAILURE EVENT", `Trigger: "run_failed"`},
 		},
 		{
 			name: "DENY — transient rate limit; drop as noise",
