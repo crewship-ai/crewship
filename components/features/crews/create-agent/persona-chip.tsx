@@ -2,6 +2,7 @@
 
 import { Sparkles } from "lucide-react"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 import { cn } from "@/lib/utils"
 import type { AgentPersona } from "@/lib/entities"
 
@@ -14,6 +15,8 @@ interface PersonaChipProps {
 /** Small pill with the persona's avatar + name + role title.
  *  Renders in the top "templates" row of the create-agent dialog. */
 export function PersonaChip({ persona, active, onClick }: PersonaChipProps) {
+  // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
+  useAvatarStylesVersion()
   return (
     <button
       type="button"

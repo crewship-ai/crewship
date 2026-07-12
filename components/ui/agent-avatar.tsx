@@ -1,6 +1,9 @@
+"use client"
+
 import type { ImgHTMLAttributes } from "react"
 
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 import { cn } from "@/lib/utils"
 
 /**
@@ -41,6 +44,9 @@ export function AgentAvatar({
   className,
   ...rest
 }: AgentAvatarProps) {
+  // Re-render when a lazy DiceBear collection finishes loading so the
+  // placeholder upgrades to the real avatar.
+  useAvatarStylesVersion()
   return (
     <img
       src={getAgentAvatarUrl(seed, style)}

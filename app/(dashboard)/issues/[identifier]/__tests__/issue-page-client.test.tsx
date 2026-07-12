@@ -41,6 +41,10 @@ vi.mock("@/components/features/issues/markdown-content", () => ({
 }))
 vi.mock("@/lib/agent-avatar", () => ({
   getAgentAvatarUrl: () => "",
+  // useAvatarStylesVersion subscribes to lazy style loads; the mock is a
+  // static no-op store so the hook renders without the real module.
+  subscribeAvatarStyles: () => () => {},
+  avatarStylesVersion: () => 0,
 }))
 // Tooltip needs a TooltipProvider ancestor the real app supplies higher up;
 // stub it to passthroughs so the header renders in isolation.

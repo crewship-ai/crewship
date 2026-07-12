@@ -26,7 +26,21 @@ import {
 import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { RunTimelineRail } from "./run-timeline-rail"
-import { TraceCanvas } from "./trace-canvas"
+import dynamic from "next/dynamic"
+
+// React Flow (~200 KB+) only loads when the trace canvas actually renders —
+// keeps @xyflow/react out of the initial activity-route chunk.
+const TraceCanvas = dynamic(
+  () => import("./trace-canvas").then((m) => m.TraceCanvas),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        Loading trace canvas…
+      </div>
+    ),
+  }
+)
 import { TraceSidePanel } from "./trace-side-panel"
 import { BottomPanel } from "@/components/features/crews/bottom-panel"
 import type { BottomPanelContext } from "@/components/features/crews/bottom-panel/types"

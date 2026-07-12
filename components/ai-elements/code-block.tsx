@@ -28,7 +28,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { createHighlighter } from "shiki";
 
 // Shiki uses bitflags for font styles: 1=italic, 2=bold, 4=underline
 // biome-ignore lint/suspicious/noBitwiseOperators: shiki bitflag check
@@ -144,10 +143,17 @@ const getHighlighter = (
     return cached;
   }
 
-  const highlighterPromise = createHighlighter({
-    langs: [language],
-    themes: ["github-light", "github-dark"],
-  });
+  // Dynamic import keeps the shiki engine (oniguruma WASM + grammar
+  // registry) out of the chat route's initial chunk — the component
+  // already renders raw tokens instantly and upgrades in place when
+  // highlighting arrives, so the lazy load is invisible beyond a brief
+  // uncolored flash on the very first code block.
+  const highlighterPromise = import("shiki").then(({ createHighlighter }) =>
+    createHighlighter({
+      langs: [language],
+      themes: ["github-light", "github-dark"],
+    })
+  );
 
   highlighterCache.set(language, highlighterPromise);
   return highlighterPromise;

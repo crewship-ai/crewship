@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { selection } from "@/lib/interaction"
 import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 
 // SkillInstalledAgent mirrors the backend skillInstalledAgent struct
 // — only populated on the Installed list (?installed=1) so the card
@@ -140,6 +141,8 @@ interface SkillCardProps {
 // updated relative, source badge, maturity badge (only when non-OFFICIAL).
 // Plus a flag chip when scan_status=FLAGGED.
 export function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
+  // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
+  useAvatarStylesVersion()
   const sourceCfg = SOURCE_BADGE[skill.source] ?? SOURCE_BADGE.CUSTOM
   const SourceIcon = sourceCfg.icon
   const DomainIcon = DOMAIN_ICONS[skill.category] ?? Blocks

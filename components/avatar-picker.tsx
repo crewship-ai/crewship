@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE, getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 
 interface AvatarPickerProps {
   seed: string
@@ -21,6 +22,8 @@ function randomSeed(): string {
 }
 
 export function AvatarPicker({ seed, style, onSeedChange, onStyleChange, lockedStyle, styleOnly }: AvatarPickerProps) {
+  // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
+  useAvatarStylesVersion()
   const [previewSeeds] = useState(() =>
     Array.from({ length: 8 }, () => randomSeed())
   )

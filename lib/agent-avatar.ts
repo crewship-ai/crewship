@@ -1,31 +1,112 @@
 import { createAvatar, type Style } from "@dicebear/core"
+// Only the DEFAULT style is imported eagerly. The other nine DiceBear
+// collections used to be static imports here, which pulled every
+// collection (~30–100 KB each, multi-hundred-KB total) into the shared
+// app-shell chunk even though any given avatar renders exactly one
+// style — and the vast majority of agents use the default. They now
+// load on demand via dynamic import (see STYLE_LOADERS below).
 import * as botttsNeutral from "@dicebear/bottts-neutral"
-import * as adventurer from "@dicebear/adventurer"
-import * as funEmoji from "@dicebear/fun-emoji"
-import * as pixelArt from "@dicebear/pixel-art"
-import * as micah from "@dicebear/micah"
-import * as notionists from "@dicebear/notionists"
-import * as thumbs from "@dicebear/thumbs"
-import * as lorelei from "@dicebear/lorelei"
-import * as bigSmile from "@dicebear/big-smile"
-import * as avataaars from "@dicebear/avataaars"
-
-/** Map of available DiceBear avatar styles, keyed by style slug. */
-export const AVATAR_STYLES: Record<string, { label: string; style: Style<object> }> = {
-  "bottts-neutral": { label: "Robots", style: botttsNeutral as unknown as Style<object> },
-  adventurer: { label: "Adventurer", style: adventurer as unknown as Style<object> },
-  "fun-emoji": { label: "Fun Emoji", style: funEmoji as unknown as Style<object> },
-  "pixel-art": { label: "Pixel Art", style: pixelArt as unknown as Style<object> },
-  micah: { label: "Micah", style: micah as unknown as Style<object> },
-  notionists: { label: "Notionists", style: notionists as unknown as Style<object> },
-  thumbs: { label: "Thumbs", style: thumbs as unknown as Style<object> },
-  lorelei: { label: "Lorelei", style: lorelei as unknown as Style<object> },
-  "big-smile": { label: "Big Smile", style: bigSmile as unknown as Style<object> },
-  avataaars: { label: "Avataaars", style: avataaars as unknown as Style<object> },
-}
 
 /** Default avatar style used when an agent has no explicit style set. */
 export const DEFAULT_AVATAR_STYLE = "bottts-neutral"
+
+/**
+ * Lazy loaders for every non-default DiceBear collection, keyed by style
+ * slug. Each fires a code-split dynamic import the first time the style
+ * is actually rendered (an agent configured with it scrolls into view,
+ * or the avatar picker opens).
+ */
+const STYLE_LOADERS: Record<string, () => Promise<{ default?: unknown } & object>> = {
+  adventurer: () => import("@dicebear/adventurer"),
+  "fun-emoji": () => import("@dicebear/fun-emoji"),
+  "pixel-art": () => import("@dicebear/pixel-art"),
+  micah: () => import("@dicebear/micah"),
+  notionists: () => import("@dicebear/notionists"),
+  thumbs: () => import("@dicebear/thumbs"),
+  lorelei: () => import("@dicebear/lorelei"),
+  "big-smile": () => import("@dicebear/big-smile"),
+  avataaars: () => import("@dicebear/avataaars"),
+}
+
+/**
+ * Map of available DiceBear avatar styles, keyed by style slug. Labels
+ * only — the style implementations live behind STYLE_LOADERS so pickers
+ * can enumerate keys/labels without forcing every collection to load.
+ */
+export const AVATAR_STYLES: Record<string, { label: string }> = {
+  "bottts-neutral": { label: "Robots" },
+  adventurer: { label: "Adventurer" },
+  "fun-emoji": { label: "Fun Emoji" },
+  "pixel-art": { label: "Pixel Art" },
+  micah: { label: "Micah" },
+  notionists: { label: "Notionists" },
+  thumbs: { label: "Thumbs" },
+  lorelei: { label: "Lorelei" },
+  "big-smile": { label: "Big Smile" },
+  avataaars: { label: "Avataaars" },
+}
+
+// Styles whose implementation is resident. The default is loaded from
+// the start; lazies join as their imports resolve.
+const _loadedStyles = new Map<string, Style<object>>([
+  [DEFAULT_AVATAR_STYLE, botttsNeutral as unknown as Style<object>],
+])
+const _pendingStyles = new Set<string>()
+
+// ─── change notification ──────────────────────────────────────────────
+//
+// getAgentAvatarUrl stays synchronous: while a style implementation is
+// in flight it returns a deterministic placeholder, and when the import
+// resolves the version below bumps so subscribed components re-render
+// and pick up the real avatar. Consumed via useAvatarStylesVersion
+// (useSyncExternalStore) in components that render non-default styles.
+
+let _stylesVersion = 0
+const _listeners = new Set<() => void>()
+
+/** Subscribe to style-load events. Returns an unsubscribe function. */
+export function subscribeAvatarStyles(listener: () => void): () => void {
+  _listeners.add(listener)
+  return () => _listeners.delete(listener)
+}
+
+/** Monotonic counter bumped whenever a lazy style finishes loading. */
+export function avatarStylesVersion(): number {
+  return _stylesVersion
+}
+
+function notifyStylesChanged(): void {
+  _stylesVersion++
+  for (const l of _listeners) l()
+}
+
+/**
+ * Kick off (or join) the dynamic import for a style. Resolves when the
+ * style is resident. Safe to call for already-loaded or unknown styles.
+ * Pickers can call this for all keys on open to warm the grid.
+ */
+export function preloadAvatarStyle(styleName: string): Promise<void> {
+  if (_loadedStyles.has(styleName)) return Promise.resolve()
+  const loader = STYLE_LOADERS[styleName]
+  if (!loader) return Promise.resolve()
+  _pendingStyles.add(styleName)
+  return loader()
+    .then((mod) => {
+      _loadedStyles.set(styleName, mod as unknown as Style<object>)
+      _pendingStyles.delete(styleName)
+      // Drop any placeholder URIs cached under this style so the next
+      // render regenerates the real avatar.
+      for (const key of _avatarCache.keys()) {
+        if (key.startsWith(styleName + ":")) _avatarCache.delete(key)
+      }
+      notifyStylesChanged()
+    })
+    .catch(() => {
+      // Import failed (offline chunk fetch, etc.) — leave the
+      // placeholder in place; a later call may retry.
+      _pendingStyles.delete(styleName)
+    })
+}
 
 /**
  * Hard cap on the in-memory avatar cache. Each entry is a DiceBear data
@@ -62,8 +143,30 @@ export function seedColor(seed: string): string {
 }
 
 /**
+ * Deterministic stand-in rendered while a lazy style implementation is
+ * still downloading: a soft seed-coloured disc. Same seed → same
+ * placeholder, so lists don't flicker between renders.
+ */
+function placeholderAvatarUri(seed: string): string {
+  const color = seedColor(seed)
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">` +
+    `<rect width="128" height="128" rx="24" fill="${color}" opacity="0.35"/>` +
+    `<circle cx="64" cy="64" r="28" fill="${color}" opacity="0.6"/>` +
+    `</svg>`
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
+}
+
+/**
  * Generate a DiceBear avatar data URI for an agent. Results are cached
  * in a bounded LRU keyed by (style, seed); see AVATAR_CACHE_MAX_ENTRIES.
+ *
+ * Synchronous by design: the default style renders immediately; a
+ * not-yet-loaded lazy style returns a deterministic placeholder, starts
+ * the dynamic import, and bumps avatarStylesVersion() when the real
+ * collection arrives (subscribe via useAvatarStylesVersion /
+ * subscribeAvatarStyles to re-render).
+ *
  * @param seed - Deterministic seed for avatar generation (typically the agent slug).
  * @param styleName - Avatar style key from AVATAR_STYLES; defaults to bottts-neutral.
  */
@@ -86,8 +189,19 @@ export function getAgentAvatarUrl(seed: string, styleName?: string | null): stri
     _avatarCache.set(key, cached)
     return cached
   }
-  const entry = AVATAR_STYLES[resolvedStyle]
-  const uri = createAvatar(entry.style, { seed, size: 128 }).toDataUri()
+
+  const style = _loadedStyles.get(resolvedStyle)
+  let uri: string
+  if (style) {
+    uri = createAvatar(style, { seed, size: 128 }).toDataUri()
+  } else {
+    // Style implementation not resident yet: kick off the lazy import
+    // and cache the placeholder under the same key — preloadAvatarStyle
+    // purges the style's entries when the real collection lands.
+    void preloadAvatarStyle(resolvedStyle)
+    uri = placeholderAvatarUri(seed)
+  }
+
   if (_avatarCache.size >= AVATAR_CACHE_MAX_ENTRIES) {
     // Evict the oldest entry — Map's iterator yields keys in
     // insertion order so the first .keys().next() is the LRU victim.
@@ -114,4 +228,3 @@ export function _resetAvatarCacheForTest(): void {
 export function _avatarCacheSizeForTest(): number {
   return _avatarCache.size
 }
-
