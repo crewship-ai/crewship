@@ -34,7 +34,12 @@ const ITEMS: RailItem[] = [
 ]
 
 export function RightRail({ className }: { className?: string }) {
-  const { open, activeTab, toggle, setActiveTab } = useDrawerStore()
+  // Narrow selectors — the rail re-rendered on width drags and mode flips
+  // it never reads.
+  const open = useDrawerStore((s) => s.open)
+  const activeTab = useDrawerStore((s) => s.activeTab)
+  const toggle = useDrawerStore((s) => s.toggle)
+  const setActiveTab = useDrawerStore((s) => s.setActiveTab)
 
   // Migrate persisted "context" → "files". Depend on activeTab so this
   // also fires after the persist middleware hydrates with the legacy

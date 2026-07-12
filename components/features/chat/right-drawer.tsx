@@ -14,7 +14,13 @@ interface RightDrawerProps {
 }
 
 export function RightDrawer({ children, className }: RightDrawerProps) {
-  const { open, mode, width, setOpen, setWidth, activeTab } = useDrawerStore()
+  // Narrow selectors — one per field actually read.
+  const open = useDrawerStore((s) => s.open)
+  const mode = useDrawerStore((s) => s.mode)
+  const width = useDrawerStore((s) => s.width)
+  const setOpen = useDrawerStore((s) => s.setOpen)
+  const setWidth = useDrawerStore((s) => s.setWidth)
+  const activeTab = useDrawerStore((s) => s.activeTab)
   const dragRef = useRef<{ startX: number; startW: number } | null>(null)
 
   useHotkeys(

@@ -1,7 +1,7 @@
 "use client"
 
 import { useAgentId } from "@/hooks/use-agent-id"
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Download, AlertCircle, ScrollText, Search, Pause, Play } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -22,6 +22,18 @@ import {
 type LogLevel = "ALL" | "INFO" | "WARN" | "ERROR"
 
 const LEVELS: LogLevel[] = ["ALL", "INFO", "WARN", "ERROR"]
+
+// Cap the in-memory buffer: the `agent.log` stream appended without bound,
+// so a chatty long-lived agent grew the array (and the per-render filter
+// over it) indefinitely. 2000 comfortably covers the initial fetch
+// (limit=1000) plus a long streaming session.
+export const MAX_LOG_ENTRIES = 2000
+
+/** Keeps the most recent MAX_LOG_ENTRIES entries; identity-stable when
+ *  already under the cap. Exported for tests. */
+export function capLogs(entries: LogEntry[]): LogEntry[] {
+  return entries.length > MAX_LOG_ENTRIES ? entries.slice(-MAX_LOG_ENTRIES) : entries
+}
 
 /** Agent logs viewer with dark terminal style, filtering, and auto-refresh. */
 export function LogsViewer() {
@@ -56,7 +68,7 @@ export function LogsViewer() {
           }
         }
         merged.sort((a, b) => a.ts.localeCompare(b.ts))
-        return merged
+        return capLogs(merged)
       })
       setError(null)
     } catch {
@@ -97,7 +109,7 @@ export function LogsViewer() {
           ? (payload.metadata as Record<string, unknown>)
           : undefined,
       }
-      setLogs((prev) => [...prev, entry])
+      setLogs((prev) => capLogs([...prev, entry]))
     }
   }, [autoRefresh, agentId]))
 
@@ -115,14 +127,17 @@ export function LogsViewer() {
     }
   }, [logs, autoScroll])
 
-  const filtered = logs.filter((l) => {
+  // Memoized: this used to re-filter the whole buffer on EVERY render —
+  // including renders triggered by unrelated state — which compounds badly
+  // with a streaming log feed.
+  const filtered = useMemo(() => logs.filter((l) => {
     if (filter !== "ALL" && l.level.toUpperCase() !== filter) return false
     if (searchQuery) {
       const q = searchQuery.toLowerCase()
       return (l.content ?? l.event).toLowerCase().includes(q) || l.event.toLowerCase().includes(q)
     }
     return true
-  })
+  }), [logs, filter, searchQuery])
 
   const handleDownload = useCallback(() => {
     const text = logs.map((l) => `[${formatLogTime(l.ts)}] ${l.level.toUpperCase()} ${l.event} ${l.content ?? ""}`).join("\n")
