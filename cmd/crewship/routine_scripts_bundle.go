@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
@@ -145,7 +146,7 @@ func inlineScripts(io crewFileIO, authorCrewID string, definition []byte) ([]scr
 			return nil, fmt.Errorf("download script %q from author crew: %w", p, err)
 		}
 		if !ok {
-			return nil, fmt.Errorf("script %q not found in author crew shared dir (%s) — deliver it via the crew manifest `files:` block and `crewship apply` before exporting", p, crewPath)
+			return nil, cli.NotFoundf("script %q not found in author crew shared dir (%s) — deliver it via the crew manifest `files:` block and `crewship apply` before exporting", p, crewPath)
 		}
 		entries = append(entries, scriptEntry{
 			Path:       p,

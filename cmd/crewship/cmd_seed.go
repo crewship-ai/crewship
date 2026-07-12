@@ -607,7 +607,7 @@ func resolveBySlug(client *cli.Client, listPath, slug string) (string, error) {
 			return item.ID, nil
 		}
 	}
-	return "", fmt.Errorf("resource with slug %q not found", slug)
+	return "", cli.NotFoundf("resource with slug %q not found", slug)
 }
 
 // resolveByName lists resources and finds one by name.
@@ -634,7 +634,7 @@ func resolveByName(client *cli.Client, listPath, name string) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("resource with name %q not found", name)
+	return "", cli.NotFoundf("resource with name %q not found", name)
 }
 
 func readBody(resp *http.Response) ([]byte, error) {

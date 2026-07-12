@@ -160,7 +160,7 @@ var routineWaitpointsShowCmd = &cobra.Command{
 				return nil
 			}
 		}
-		return fmt.Errorf("waitpoint %s not found (already decided, expired, or wrong token)", args[0])
+		return cli.NotFoundf("waitpoint %s not found (already decided, expired, or wrong token)", args[0])
 	},
 }
 

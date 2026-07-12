@@ -542,7 +542,7 @@ var pipelineRunCmd = &cobra.Command{
 		// path, which is exactly when the user wants help.
 		if resp.StatusCode == http.StatusNotFound {
 			if hint := suggestSimilarRoutineSlugs(client, ws, args[0]); hint != "" {
-				return fmt.Errorf("routine %q not found — %s", args[0], hint)
+				return cli.NotFoundf("routine %q not found — %s", args[0], hint)
 			}
 		}
 		if err := cli.CheckError(resp); err != nil {

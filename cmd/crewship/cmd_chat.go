@@ -534,7 +534,7 @@ func lookupChatAgentID(client *cli.Client, chatID string) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("chat %s not found in any agent's recent sessions", chatID)
+	return "", cli.NotFoundf("chat %s not found in any agent's recent sessions", chatID)
 }
 
 // postMultipart issues a multipart/form-data POST without going through

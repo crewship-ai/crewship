@@ -60,7 +60,7 @@ Examples:
 			}
 		}
 		if agentID == "" {
-			return fmt.Errorf("agent not found: %s", agentSlug)
+			return cli.NotFoundf("agent not found: %s", agentSlug)
 		}
 		if crewID == "" {
 			return fmt.Errorf("agent has no crew (logs require a crew)")
