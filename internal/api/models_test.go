@@ -276,3 +276,55 @@ var errLiveDown = errTest("live provider down")
 type errTest string
 
 func (e errTest) Error() string { return string(e) }
+
+// #974 U2: OLLAMA model discovery must resolve the workspace's ENDPOINT_URL
+// credential (the BYO endpoint), not the server-global KEEPER_OLLAMA_URL. The
+// injected lister captures the ollamaURL it was built with so we can assert it.
+func TestModelsList_OllamaUsesWorkspaceEndpoint(t *testing.T) {
+	var gotURL string
+	build := func(provider, apiKey, ollamaURL string) (llm.ModelLister, bool) {
+		if provider == "OLLAMA" {
+			gotURL = ollamaURL
+			return &fakeLister{models: []llm.ModelInfo{{ID: "ollama/qwen2.5-coder:7b"}}}, true
+		}
+		return nil, false
+	}
+	h, wsID, userID := newModelsHandler(t, build)
+
+	// Seed a workspace ENDPOINT_URL credential pointing at a specific host.
+	enc, err := encryption.Encrypt("http://ws-ollama.internal:11434/v1")
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	if _, err := h.db.Exec(`INSERT INTO credentials
+		(id, workspace_id, name, encrypted_value, type, provider, scope, status, created_by, created_at, updated_at)
+		VALUES ('cred-ep', ?, 'ep', ?, 'ENDPOINT_URL', 'OLLAMA', 'WORKSPACE', 'ACTIVE', ?, datetime('now'), datetime('now'))`,
+		wsID, enc, userID); err != nil {
+		t.Fatalf("seed endpoint cred: %v", err)
+	}
+
+	rr, _ := doModelsList(t, h, wsID, "?provider=OLLAMA")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	if gotURL != "http://ws-ollama.internal:11434/v1" {
+		t.Errorf("OLLAMA lister built with %q, want the workspace ENDPOINT_URL (not the server-global KEEPER_OLLAMA_URL)", gotURL)
+	}
+}
+
+// With no workspace ENDPOINT_URL, discovery falls back to the server-global URL.
+func TestModelsList_OllamaFallsBackToServerGlobal(t *testing.T) {
+	var gotURL string
+	build := func(provider, apiKey, ollamaURL string) (llm.ModelLister, bool) {
+		if provider == "OLLAMA" {
+			gotURL = ollamaURL
+			return &fakeLister{models: []llm.ModelInfo{{ID: "ollama/x"}}}, true
+		}
+		return nil, false
+	}
+	h, wsID, _ := newModelsHandler(t, build)
+	doModelsList(t, h, wsID, "?provider=OLLAMA")
+	if gotURL != "http://ollama.test:11434" {
+		t.Errorf("fallback lister built with %q, want the server-global URL", gotURL)
+	}
+}

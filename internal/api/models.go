@@ -128,7 +128,19 @@ func (h *ModelsHandler) resolveModels(ctx context.Context, wsID, provider string
 		return curatedOrEmpty(provider), "curated"
 	}
 
-	lister, ok := h.buildLister(provider, apiKey, h.ollamaURL)
+	// #974 U2: OLLAMA model discovery must validate against the workspace's
+	// configured BYO endpoint (the ENDPOINT_URL credential), not the daemon's
+	// server-global KEEPER_OLLAMA_URL — otherwise a typo'd ollama/* model is
+	// listed against the wrong host and only fails at run time. Fall back to
+	// the server-global URL when the workspace has no endpoint configured.
+	ollamaURL := h.ollamaURL
+	if provider == "OLLAMA" {
+		if ep := resolveLocalModelEndpoint(ctx, h.db, h.logger, wsID, nil); ep.BaseURL != "" {
+			ollamaURL = ep.BaseURL
+		}
+	}
+
+	lister, ok := h.buildLister(provider, apiKey, ollamaURL)
 	if !ok {
 		return curatedOrEmpty(provider), "curated"
 	}
