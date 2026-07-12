@@ -258,6 +258,42 @@ func (f *Formatter) Auto(v interface{}, tableHeaders []string, tableRows [][]str
 	}
 }
 
+// AutoHuman routes machine formats (json/yaml/ndjson) to the structured
+// renderers and everything else (table/quiet/empty) to the hand-crafted human
+// renderer. For commands whose human output is prose/sections rather than a
+// uniform table (system info/keeper/stats): the human bytes stay identical
+// while --format json/yaml/ndjson becomes actually machine-readable — those
+// commands used to leak ANSI-colored text onto stdout regardless of format.
+func (f *Formatter) AutoHuman(v interface{}, human func()) error {
+	switch f.Format {
+	case "json":
+		return f.JSON(v)
+	case "yaml":
+		return f.YAML(v)
+	case "ndjson":
+		return f.NDJSON(v)
+	default:
+		human()
+		return nil
+	}
+}
+
+// Machine renders v in the requested machine format, defaulting to JSON for
+// table/quiet/empty. For commands whose canonical output IS the raw API
+// payload (onboarding status/setup) and has always been JSON — the default
+// stays JSON for script compatibility, but --format yaml/ndjson is honored
+// instead of silently returning JSON.
+func (f *Formatter) Machine(v interface{}) error {
+	switch f.Format {
+	case "yaml":
+		return f.YAML(v)
+	case "ndjson":
+		return f.NDJSON(v)
+	default:
+		return f.JSON(v)
+	}
+}
+
 // AutoDetail routes to the correct format for single-entity detail views.
 func (f *Formatter) AutoDetail(v interface{}, pairs [][]string) error {
 	switch f.Format {

@@ -30,11 +30,17 @@ Show container runtime details and license information.
 
 ```bash
 crewship system info
+crewship system info --format json   # machine-readable: {"runtime": {...}, "license": {...}}
 ```
 
 **Runtime output:** Available, Runtime name, Version, Socket path.
 
 **License output:** Edition, Max crews, Max agents/crew, Max members, Licensee.
+
+With `--format json|yaml|ndjson` the command emits a structured payload
+(`runtime` + optional `license` key; `license` is omitted when the endpoint
+is unavailable). The same applies to `system keeper`, `system stats`, and
+`system onboarding status`.
 
 ---
 
