@@ -6,7 +6,7 @@ produces packages, just unsigned. This doc is the one-time setup.
 
 > **Status: ACTIVE.** `GPG_SIGNING_KEY` + `GPG_SIGNING_PASSPHRASE` are set as
 > repo secrets (2026-07-12). The signing key is
-> `EDE825B55FF87F7D442B82BAA5BA4669E217C05C` (Crewship Packages
+> `EDE8 25B5 5FF8 7F7D 442B  82BA A5BA 4669 E217 C05C` (Crewship Packages
 > <packages@crewship.ai>, RSA-4096, expires 2028-07-11 — rotate before then).
 > The public key is committed as [`packaging/crewship-packages.pub`](./crewship-packages.pub).
 
