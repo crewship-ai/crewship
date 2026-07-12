@@ -68,6 +68,12 @@ func TestPostCreateCommandInstallsAllFiveNewCLIs(t *testing.T) {
 		"app.factory.ai/cli", // Droid installer
 	}
 	for _, c := range Crews {
+		// Opt-in demo crews (e.g. local-ai) are intentionally minimal — they
+		// bake only the CLI they need, so exempt them from the "every crew
+		// installs all baseline CLIs/deps" contract.
+		if c.RequiresEnv != "" {
+			continue
+		}
 		postCreate := extractPostCreateCommand(t, c)
 		for _, want := range expected {
 			if !strings.Contains(postCreate, want) {
@@ -92,6 +98,12 @@ func TestPostCreateCommandInstallsContainerDeps(t *testing.T) {
 		"python3",   // tool-sandbox runtime
 	}
 	for _, c := range Crews {
+		// Opt-in demo crews (e.g. local-ai) are intentionally minimal — they
+		// bake only the CLI they need, so exempt them from the "every crew
+		// installs all baseline CLIs/deps" contract.
+		if c.RequiresEnv != "" {
+			continue
+		}
 		postCreate := extractPostCreateCommand(t, c)
 		for _, want := range expected {
 			if !strings.Contains(postCreate, want) {

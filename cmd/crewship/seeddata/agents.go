@@ -2,6 +2,7 @@ package seeddata
 
 import (
 	"fmt"
+	"os"
 
 	"gopkg.in/yaml.v3"
 )
@@ -21,6 +22,10 @@ type AgentDef struct {
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
 	MemoryEnabled  bool   `yaml:"memory_enabled"`
 	PromptSlug     string `yaml:"prompt_slug"` // matches prompts/{slug}.md
+	// RequiresEnv gates seeding of this agent: when non-empty, the agent is
+	// only created if the named env var == "1". Used for the opt-in
+	// local-Ollama demo agent (CREWSHIP_SEED_OLLAMA).
+	RequiresEnv string `yaml:"requires_env,omitempty"`
 }
 
 // Agents — the 12 demo agents seeded into a fresh workspace.
@@ -44,4 +49,18 @@ func mustLoadAgents() []AgentDef {
 		panic("seeddata: builtin/agents.yaml decoded to zero agents — schema drift?")
 	}
 	return doc.Agents
+}
+
+// ActiveAgents returns the agents that should be seeded in the current
+// environment — the same env-gate rule as ActiveCrews (RequiresEnv empty, or
+// its env var == "1").
+func ActiveAgents() []AgentDef {
+	out := make([]AgentDef, 0, len(Agents))
+	for _, a := range Agents {
+		if a.RequiresEnv != "" && os.Getenv(a.RequiresEnv) != "1" {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }

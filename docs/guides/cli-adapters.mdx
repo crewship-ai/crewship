@@ -115,6 +115,37 @@ OpenCode can route to a local, OpenAI-compatible model server instead of a cloud
 The server-global `CREWSHIP_LOCAL_MODEL_BASE_URL` env var still works as a **deprecated fallback** — used only when no `ENDPOINT_URL` credential is configured. Prefer the credential: it's per-workspace/per-agent and doesn't require a server restart to change.
 </Note>
 
+#### Try it on macOS with a seeded demo
+
+On a Mac (Docker Desktop + a local Ollama), one env var seeds a ready-to-run
+local-model crew — the `local-ai` crew with an `ollie` OpenCode agent on
+`ollama/qwen2.5-coder:7b` and a workspace `OLLAMA_ENDPOINT` credential pointing
+at `host.docker.internal:11434`:
+
+```bash
+ollama pull qwen2.5-coder:7b && ollama serve          # host model, any terminal
+
+# Seed the demo crew/agent/credential (default seed is unchanged without this):
+CREWSHIP_SEED_OLLAMA=1 crewship seed --nuke --yes
+
+# The endpoint is a PRIVATE address, blocked by the SSRF fence by default.
+# Opt in at the instance level, then start the server:
+CREWSHIP_ALLOW_PRIVATE_ENDPOINTS=1 crewship start
+
+crewship ask --agent ollie "In one sentence, what is 2 + 2?"
+```
+
+<Warning>
+`host.docker.internal` resolves to a **private** IP, which the SSRF fence blocks
+by default. The demo needs **both** `CREWSHIP_ALLOW_PRIVATE_ENDPOINTS=1` on the
+server (operator-controlled, tenant-inaccessible) **and** the crew's
+`allow_private_endpoints` flag (set on the seeded `local-ai` crew). Cloud
+metadata addresses (`169.254.169.254`) stay hard-blocked even with the opt-in.
+</Warning>
+
+The `scripts/test-harness/test-ollama-local.sh` scenario drives this end-to-end
+and self-skips when it isn't macOS or Ollama isn't reachable.
+
 #### Authenticated endpoints (production)
 
 A raw Ollama has no auth, so **never expose it directly** — front it with a reverse proxy (Caddy/nginx) or [LiteLLM](https://docs.litellm.ai/docs/proxy/virtual_keys) that terminates TLS and requires a bearer token. Attach that token to the same `ENDPOINT_URL` credential — endpoint + key stay one object:
