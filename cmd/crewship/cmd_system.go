@@ -52,39 +52,37 @@ var systemInfoCmd = &cobra.Command{
 			return err
 		}
 
-		var runtime struct {
-			Available bool   `json:"available"`
-			Runtime   string `json:"runtime"`
-			Version   string `json:"version"`
-			Socket    string `json:"socket"`
-		}
+		var runtime systemRuntimeInfo
 		if err := cli.ReadJSON(runtimeResp, &runtime); err != nil {
 			return err
 		}
 
-		fmt.Printf("%sContainer Runtime%s\n", cli.Bold, cli.Reset)
-		fmt.Printf("  Available:  %v\n", runtime.Available)
-		fmt.Printf("  Runtime:    %s\n", runtime.Runtime)
-		fmt.Printf("  Version:    %s\n", runtime.Version)
-		if runtime.Socket != "" {
-			fmt.Printf("  Socket:     %s\n", runtime.Socket)
-		}
-
-		// License info
+		// License info — optional: a non-200 (endpoint absent, older server)
+		// omits the section/key rather than failing the command.
+		var license *systemLicenseInfo
 		licenseResp, err := client.Get("/api/v1/system/license")
 		if err != nil {
 			return fmt.Errorf("license info: %w", err)
 		}
 		if licenseResp.StatusCode == 200 {
-			var license struct {
-				Edition     string `json:"edition"`
-				LicenseID   string `json:"license_id"`
-				LicenseeOrg string `json:"licensee_org"`
-				MaxAgents   int    `json:"max_agents_per_crew"`
-				MaxCrews    int    `json:"max_crews"`
-				MaxMembers  int    `json:"max_members"`
+			var lic systemLicenseInfo
+			if cli.ReadJSON(licenseResp, &lic) == nil {
+				license = &lic
 			}
-			if cli.ReadJSON(licenseResp, &license) == nil {
+		} else {
+			licenseResp.Body.Close()
+		}
+
+		payload := systemInfoPayload{Runtime: runtime, License: license}
+		return newFormatter().AutoHuman(payload, func() {
+			fmt.Printf("%sContainer Runtime%s\n", cli.Bold, cli.Reset)
+			fmt.Printf("  Available:  %v\n", runtime.Available)
+			fmt.Printf("  Runtime:    %s\n", runtime.Runtime)
+			fmt.Printf("  Version:    %s\n", runtime.Version)
+			if runtime.Socket != "" {
+				fmt.Printf("  Socket:     %s\n", runtime.Socket)
+			}
+			if license != nil {
 				fmt.Printf("\n%sLicense%s\n", cli.Bold, cli.Reset)
 				fmt.Printf("  Edition:          %s\n", license.Edition)
 				fmt.Printf("  Max crews:        %d\n", license.MaxCrews)
@@ -94,12 +92,33 @@ var systemInfoCmd = &cobra.Command{
 					fmt.Printf("  Licensee:         %s\n", license.LicenseeOrg)
 				}
 			}
-		} else {
-			licenseResp.Body.Close()
-		}
-
-		return nil
+		})
 	},
+}
+
+// systemRuntimeInfo / systemLicenseInfo / systemInfoPayload give `system info`
+// a stable machine shape for --format json/yaml/ndjson (the command used to
+// print ANSI human text regardless of format). License is a pointer so an
+// unavailable license endpoint omits the key instead of emitting zero values.
+type systemRuntimeInfo struct {
+	Available bool   `json:"available"`
+	Runtime   string `json:"runtime"`
+	Version   string `json:"version"`
+	Socket    string `json:"socket,omitempty"`
+}
+
+type systemLicenseInfo struct {
+	Edition     string `json:"edition"`
+	LicenseID   string `json:"license_id,omitempty"`
+	LicenseeOrg string `json:"licensee_org,omitempty"`
+	MaxAgents   int    `json:"max_agents_per_crew"`
+	MaxCrews    int    `json:"max_crews"`
+	MaxMembers  int    `json:"max_members"`
+}
+
+type systemInfoPayload struct {
+	Runtime systemRuntimeInfo  `json:"runtime"`
+	License *systemLicenseInfo `json:"license,omitempty"`
 }
 
 var systemKeeperCmd = &cobra.Command{
@@ -140,23 +159,23 @@ var systemKeeperCmd = &cobra.Command{
 			return err
 		}
 
-		status := cli.Red + "disabled" + cli.Reset
-		if keeper.Enabled {
-			status = cli.Green + "enabled" + cli.Reset
-		}
-		ollamaStatus := cli.Red + "offline" + cli.Reset
-		if keeper.OllamaOnline {
-			ollamaStatus = cli.Green + "online" + cli.Reset
-		}
+		return newFormatter().AutoHuman(keeper, func() {
+			status := cli.Red + "disabled" + cli.Reset
+			if keeper.Enabled {
+				status = cli.Green + "enabled" + cli.Reset
+			}
+			ollamaStatus := cli.Red + "offline" + cli.Reset
+			if keeper.OllamaOnline {
+				ollamaStatus = cli.Green + "online" + cli.Reset
+			}
 
-		fmt.Printf("%sKeeper Security%s\n", cli.Bold, cli.Reset)
-		fmt.Printf("  Status:       %s\n", status)
-		fmt.Printf("  Ollama URL:   %s\n", keeper.OllamaURL)
-		fmt.Printf("  Model:        %s\n", keeper.Model)
-		fmt.Printf("  Ollama:       %s\n", ollamaStatus)
-		fmt.Printf("  Secret creds: %d\n", keeper.SecretCount)
-
-		return nil
+			fmt.Printf("%sKeeper Security%s\n", cli.Bold, cli.Reset)
+			fmt.Printf("  Status:       %s\n", status)
+			fmt.Printf("  Ollama URL:   %s\n", keeper.OllamaURL)
+			fmt.Printf("  Model:        %s\n", keeper.Model)
+			fmt.Printf("  Ollama:       %s\n", ollamaStatus)
+			fmt.Printf("  Secret creds: %d\n", keeper.SecretCount)
+		})
 	},
 }
 
@@ -190,16 +209,13 @@ var systemStatsCmd = &cobra.Command{
 			return err
 		}
 
-		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(stats)
-		}
-		fmt.Printf("%sAdmin Stats%s\n", cli.Bold, cli.Reset)
-		fmt.Printf("  Workspaces: %d\n", stats.Workspaces)
-		fmt.Printf("  Users:      %d\n", stats.Users)
-		fmt.Printf("  Agents:     %d\n", stats.Agents)
-		fmt.Printf("  Running:    %d\n", stats.Running)
-		return nil
+		return newFormatter().AutoHuman(stats, func() {
+			fmt.Printf("%sAdmin Stats%s\n", cli.Bold, cli.Reset)
+			fmt.Printf("  Workspaces: %d\n", stats.Workspaces)
+			fmt.Printf("  Users:      %d\n", stats.Users)
+			fmt.Printf("  Agents:     %d\n", stats.Agents)
+			fmt.Printf("  Running:    %d\n", stats.Running)
+		})
 	},
 }
 
@@ -249,8 +265,9 @@ var systemOnboardingStatusCmd = &cobra.Command{
 			return err
 		}
 
-		f := newFormatter()
-		return f.JSON(result)
+		// The canonical output of onboarding status IS the raw API payload —
+		// default stays JSON, but --format yaml/ndjson is honored.
+		return newFormatter().Machine(result)
 	},
 }
 
@@ -343,7 +360,7 @@ Examples:
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
 		}
-		return newFormatter().JSON(result)
+		return newFormatter().Machine(result)
 	},
 }
 
