@@ -58,14 +58,14 @@ func resolveAgentID(client *cli.Client, slugOrID string) (string, error) {
 		}
 	}
 	if len(available) == 0 {
-		return "", fmt.Errorf("agent not found: %s (no agents in this workspace)", slugOrID)
+		return "", cli.NotFoundf("agent not found: %s (no agents in this workspace)", slugOrID)
 	}
 	suggestions := nearestSlugs(slugOrID, available, 3)
 	if len(suggestions) > 0 {
-		return "", fmt.Errorf("agent not found: %s. Did you mean: %s?",
+		return "", cli.NotFoundf("agent not found: %s. Did you mean: %s?",
 			slugOrID, strings.Join(suggestions, ", "))
 	}
-	return "", fmt.Errorf("agent not found: %s. Available: %s",
+	return "", cli.NotFoundf("agent not found: %s. Available: %s",
 		slugOrID, strings.Join(truncateList(available, 8), ", "))
 }
 
@@ -96,7 +96,7 @@ func resolveCrewID(client *cli.Client, slugOrID string) (string, error) {
 			return c.ID, nil
 		}
 	}
-	return "", fmt.Errorf("crew not found: %s", slugOrID)
+	return "", cli.NotFoundf("crew not found: %s", slugOrID)
 }
 
 // resolveIntegrationID maps a name or CUID to the integration's CUID.
@@ -120,5 +120,5 @@ func resolveIntegrationID(client *cli.Client, nameOrID string) (string, error) {
 			return item.ID, nil
 		}
 	}
-	return "", fmt.Errorf("integration %q not found", nameOrID)
+	return "", cli.NotFoundf("integration %q not found", nameOrID)
 }

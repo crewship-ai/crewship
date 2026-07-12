@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -43,7 +44,27 @@ type Client struct {
 	extraHeaders http.Header
 	// resolvedWorkspaceID caches the resolved CUID after first lookup
 	resolvedWorkspaceID string
+	// wsNotFound caches a definitive slug-resolution miss so repeated
+	// requests neither re-run the /workspaces preflight nor silently fall
+	// back to the raw slug (the pre-fix behavior that let a typo'd
+	// --workspace ride through and 404 confusingly downstream).
+	wsNotFound *WorkspaceNotFoundError
 }
+
+// WorkspaceNotFoundError means the /workspaces preflight succeeded but the
+// configured workspace slug wasn't in the list — a definitive miss (typo'd
+// --workspace / CREWSHIP_WORKSPACE), as opposed to a preflight failure where
+// the client falls back to passing the raw slug through.
+type WorkspaceNotFoundError struct {
+	Slug string
+}
+
+func (e *WorkspaceNotFoundError) Error() string {
+	return fmt.Sprintf("workspace not found: %s (check --workspace / CREWSHIP_WORKSPACE, or run 'crewship workspace list')", e.Slug)
+}
+
+// ExitCode types the miss as a not-found for the CLI exit-code contract.
+func (e *WorkspaceNotFoundError) ExitCode() int { return ExitNotFound }
 
 // DefaultTimeout is the per-request cap for ordinary CLI calls. Overridable via
 // CREWSHIP_HTTP_TIMEOUT (seconds) for environments where even routine listing is
@@ -143,8 +164,14 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 	// Inject workspace_id if set and not already in query. Resolve the slug
 	// using ctx (so any preflight lookup honours its cancellation) while still
 	// caching the result on c — using a WithContext clone here would discard
-	// that cache and re-resolve on every request.
-	if wsID := c.getWorkspaceID(ctx); wsID != "" {
+	// that cache and re-resolve on every request. A definitive slug miss
+	// (typo'd --workspace) fails the request here, typed ExitNotFound, before
+	// it can ride through as a bogus workspace_id param.
+	wsID, err := c.resolveWorkspaceID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if wsID != "" {
 		q := u.Query()
 		if q.Get("workspace_id") == "" {
 			q.Set("workspace_id", wsID)
@@ -247,28 +274,51 @@ func (c *Client) GetWorkspaceID() string {
 }
 
 // getWorkspaceID is GetWorkspaceID with an explicit context for the slug-
-// resolution preflight, so callers (e.g. NewRequest / StreamSSE) can bind it to
-// their own cancellation while the resolved CUID is still cached on c.
+// resolution preflight, so callers (e.g. StreamSSE) can bind it to their own
+// cancellation while the resolved CUID is still cached on c. It swallows a
+// definitive not-found and returns the raw slug — enforcement happens in
+// NewRequest (via resolveWorkspaceID), which every request funnels through.
 func (c *Client) getWorkspaceID(ctx context.Context) string {
+	id, err := c.resolveWorkspaceID(ctx)
+	if err != nil {
+		return c.WorkspaceID
+	}
+	return id
+}
+
+// resolveWorkspaceID resolves WorkspaceID to a CUID. The error is non-nil
+// ONLY on a definitive miss (*WorkspaceNotFoundError): the preflight listed
+// workspaces and the slug wasn't there. A failed preflight (transport error,
+// non-200 on the list endpoint) keeps the historical fallback of returning
+// the raw slug — the real request then surfaces the real failure.
+func (c *Client) resolveWorkspaceID(ctx context.Context) (string, error) {
 	if c.WorkspaceID == "" {
-		return ""
+		return "", nil
 	}
 	if c.resolvedWorkspaceID != "" {
-		return c.resolvedWorkspaceID
+		return c.resolvedWorkspaceID, nil
+	}
+	if c.wsNotFound != nil {
+		return "", c.wsNotFound
 	}
 	// If it already looks like a CUID (starts with 'c', length >= 20), use directly
 	if looksLikeCUID(c.WorkspaceID) {
 		c.resolvedWorkspaceID = c.WorkspaceID
-		return c.WorkspaceID
+		return c.WorkspaceID, nil
 	}
 	// Resolve slug to ID by calling workspaces list (without workspace_id param)
 	id, err := c.resolveWorkspaceSlug(ctx, c.WorkspaceID)
 	if err != nil {
-		// Fall back to using the slug directly
-		return c.WorkspaceID
+		var nf *WorkspaceNotFoundError
+		if errors.As(err, &nf) {
+			c.wsNotFound = nf
+			return "", nf
+		}
+		// Preflight itself failed — fall back to using the slug directly.
+		return c.WorkspaceID, nil
 	}
 	c.resolvedWorkspaceID = id
-	return id
+	return id, nil
 }
 
 func (c *Client) resolveWorkspaceSlug(ctx context.Context, slug string) (string, error) {
@@ -310,7 +360,7 @@ func (c *Client) resolveWorkspaceSlug(ctx context.Context, slug string) (string,
 			return ws.ID, nil
 		}
 	}
-	return "", fmt.Errorf("workspace not found: %s", slug)
+	return "", &WorkspaceNotFoundError{Slug: slug}
 }
 
 // Get sends an HTTP GET request to the given API path.

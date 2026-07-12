@@ -38,8 +38,8 @@ Every command exits with a classified code, so scripts and agents can branch on 
 |------|---------|
 | `0` | Success |
 | `1` | Unclassified error |
-| `2` | Validation failure (HTTP 400 / 422) |
-| `3` | Not found (HTTP 404) |
+| `2` | Validation failure (HTTP 400 / 422, or a missing precondition such as no workspace set) |
+| `3` | Not found (HTTP 404, or a client-side lookup miss — an agent/crew/workspace slug or resource name that doesn't resolve) |
 | `4` | Auth failure (HTTP 401 / 403, not logged in, token-host mismatch) |
 | `5` | Conflict (HTTP 409) |
 | `6` | Rate-limited (HTTP 429) |

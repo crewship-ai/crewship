@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -316,7 +317,7 @@ var evalBaselineShowCmd = &cobra.Command{
 		data, err := os.ReadFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return fmt.Errorf("baseline %q not found (saved baselines: crewship eval baseline list)", args[0])
+				return cli.NotFoundf("baseline %q not found (saved baselines: crewship eval baseline list)", args[0])
 			}
 			return fmt.Errorf("read baseline: %w", err)
 		}
@@ -359,7 +360,7 @@ var evalBaselineDeleteCmd = &cobra.Command{
 		}
 		if err := os.Remove(path); err != nil {
 			if os.IsNotExist(err) {
-				return fmt.Errorf("baseline %q not found", args[0])
+				return cli.NotFoundf("baseline %q not found", args[0])
 			}
 			return fmt.Errorf("delete baseline: %w", err)
 		}
@@ -426,7 +427,7 @@ func runEvalBaselineDiff(cmd *cobra.Command, args []string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("baseline %q not found (saved baselines: crewship eval baseline list)", args[0])
+			return cli.NotFoundf("baseline %q not found (saved baselines: crewship eval baseline list)", args[0])
 		}
 		return fmt.Errorf("read baseline: %w", err)
 	}

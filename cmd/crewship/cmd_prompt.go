@@ -325,7 +325,7 @@ func suggestSimilarPrompt(name string, baseErr error) error {
 		// Promptdir itself isn't readable — propagate the underlying error
 		// rather than dressing it up as "not found".
 		if os.IsNotExist(err) {
-			return fmt.Errorf("prompt %q not found (no prompts saved yet — try `crewship prompt save`)", name)
+			return cli.NotFoundf("prompt %q not found (no prompts saved yet — try `crewship prompt save`)", name)
 		}
 		return fmt.Errorf("read prompts dir: %w", err)
 	}
@@ -336,12 +336,12 @@ func suggestSimilarPrompt(name string, baseErr error) error {
 		}
 	}
 	if len(available) == 0 {
-		return fmt.Errorf("prompt %q not found (no prompts saved yet — try `crewship prompt save`)", name)
+		return cli.NotFoundf("prompt %q not found (no prompts saved yet — try `crewship prompt save`)", name)
 	}
 	if hits := nearestSlugs(name, available, 3); len(hits) > 0 {
-		return fmt.Errorf("prompt %q not found. Did you mean: %s?", name, strings.Join(hits, ", "))
+		return cli.NotFoundf("prompt %q not found. Did you mean: %s?", name, strings.Join(hits, ", "))
 	}
-	return fmt.Errorf("prompt %q not found. Available: %s",
+	return cli.NotFoundf("prompt %q not found. Available: %s",
 		name, strings.Join(truncateList(available, 8), ", "))
 }
 

@@ -158,7 +158,7 @@ func resolveCredentialID(client *cli.Client, nameOrID string) (string, error) {
 			return c.ID, nil
 		}
 	}
-	return "", fmt.Errorf("credential %q not found", nameOrID)
+	return "", cli.NotFoundf("credential %q not found", nameOrID)
 }
 
 // testCredentialValue validates a credential value against the provider API.

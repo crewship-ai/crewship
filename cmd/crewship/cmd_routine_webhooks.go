@@ -283,7 +283,7 @@ var routineWebhooksUrlCmd = &cobra.Command{
 				return nil
 			}
 		}
-		return fmt.Errorf("webhook %s not found", args[0])
+		return cli.NotFoundf("webhook %s not found", args[0])
 	},
 }
 

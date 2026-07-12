@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 )
 
@@ -103,6 +104,14 @@ func WithExitCode(err error, code int) error {
 		return nil
 	}
 	return &codedError{err: err, code: code}
+}
+
+// NotFoundf builds a client-side not-found error that exits with
+// ExitNotFound. The slug→ID resolvers short-circuit before any HTTP 404
+// exists, so without this the exit-code contract silently degrades to
+// ExitGeneric on the highest-traffic paths (agent/crew slug typos).
+func NotFoundf(format string, args ...interface{}) error {
+	return WithExitCode(fmt.Errorf(format, args...), ExitNotFound)
 }
 
 // ExitCodeFor returns the exit code for err: the innermost ExitCoder in

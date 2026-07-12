@@ -166,7 +166,7 @@ Examples:
 			return fmt.Errorf("get WS token: %w", err)
 		}
 
-		server := cli.ResolveServer(flagServer, cliCfg)
+		server := streamServerURL()
 
 		md := resolveMarkdownFromCmd(cmd)
 		saveFile, err := openSaveFile(cmd)
