@@ -30,6 +30,10 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	if r.keeperConfig != nil && r.keeperConfig.Enabled {
 		internal.SetKeeperEnabled(true)
 	}
+	// Revoke → remove file-based /secrets from running containers when the
+	// sidecar reports status REVOKED (#814 parity with the public DELETE
+	// handler). nil (no docker) makes the reconcile a no-op.
+	internal.SetContainer(r.keeperContainer)
 	// Default-connector behaviour flag (COMPOSIO_DEFAULT_CONNECTOR). Threaded
 	// from the same Composio config the ComposioHandler uses so the runtime
 	// resolver and the operator surface agree on whether it's armed.

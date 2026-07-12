@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/docker/api/types/mount"
 	dockernetwork "github.com/docker/docker/api/types/network"
 )
 
@@ -32,7 +33,7 @@ func TestBuildMountsIncludesSidecarBinds(t *testing.T) {
 		SidecarBinaryPath: "/host/path/crewship-sidecar",
 		EntrypointPath:    "/host/path/entrypoint.sh",
 	}}
-	mounts, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew", "/secrets")
+	mounts, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew")
 	if err != nil {
 		t.Fatalf("buildMounts: %v", err)
 	}
@@ -66,16 +67,72 @@ func TestBuildMountsIncludesSidecarBinds(t *testing.T) {
 	}
 }
 
+// A1 (secret lifecycle hardening): /secrets must be an in-memory tmpfs, never
+// a host bind mount — cleartext SSH keys / passwords written at agent-run
+// setup must not persist on the host disk nor land in backups. The tmpfs is
+// owned by the agent UID (1001) so the per-run `mkdir -p /secrets/<slug>`
+// (exec'd as 1001 under CapDrop=ALL) still works: tmpfs defaults to
+// root:root, and a root-owned 0700 mount would break every credential write.
+func TestBuildMountsSecretsIsTmpfs(t *testing.T) {
+	p := &Provider{cfg: Config{
+		SidecarBinaryPath: "/host/path/crewship-sidecar",
+		EntrypointPath:    "/host/path/entrypoint.sh",
+	}}
+	mounts, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew")
+	if err != nil {
+		t.Fatalf("buildMounts: %v", err)
+	}
+
+	var secrets *mount.Mount
+	for i := range mounts {
+		if mounts[i].Target == "/secrets" {
+			secrets = &mounts[i]
+			break
+		}
+	}
+	if secrets == nil {
+		t.Fatal("no mount targeting /secrets")
+	}
+	if secrets.Type != mount.TypeTmpfs {
+		t.Fatalf("/secrets mount type = %q, want tmpfs (host bind persists cleartext secrets)", secrets.Type)
+	}
+	if secrets.Source != "" {
+		t.Errorf("/secrets tmpfs must have no host source, got %q", secrets.Source)
+	}
+	opts := secrets.TmpfsOptions
+	if opts == nil {
+		t.Fatal("/secrets tmpfs has no TmpfsOptions (size/mode/uid limits required)")
+	}
+	if opts.SizeBytes != secretsTmpfsSizeBytes || opts.SizeBytes <= 0 {
+		t.Errorf("SizeBytes = %d, want %d", opts.SizeBytes, secretsTmpfsSizeBytes)
+	}
+	if opts.Mode != 0o700 {
+		t.Errorf("Mode = %o, want 0700", opts.Mode)
+	}
+	var haveUID, haveGID bool
+	for _, o := range opts.Options {
+		if len(o) == 2 && o[0] == "uid" && o[1] == "1001" {
+			haveUID = true
+		}
+		if len(o) == 2 && o[0] == "gid" && o[1] == "1001" {
+			haveGID = true
+		}
+	}
+	if !haveUID || !haveGID {
+		t.Errorf("tmpfs Options = %v, want uid=1001 and gid=1001 (agent must own the mount root)", opts.Options)
+	}
+}
+
 func TestBuildMountsErrorsWhenSidecarPathMissing(t *testing.T) {
 	p := &Provider{cfg: Config{EntrypointPath: "/host/entrypoint.sh"}}
-	if _, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew", "/secrets"); err == nil {
+	if _, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew"); err == nil {
 		t.Fatal("expected error when SidecarBinaryPath is empty")
 	}
 }
 
 func TestBuildMountsErrorsWhenEntrypointPathMissing(t *testing.T) {
 	p := &Provider{cfg: Config{SidecarBinaryPath: "/host/crewship-sidecar"}}
-	if _, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew", "/secrets"); err == nil {
+	if _, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew"); err == nil {
 		t.Fatal("expected error when EntrypointPath is empty")
 	}
 }
