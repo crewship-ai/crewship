@@ -24,7 +24,10 @@ const defaultKeyVersion = "v1"
 // generation via its per-envelope version prefix.
 const KeyVersionEnvVar = "CREWSHIP_ENCRYPTION_KEY_VERSION"
 
-var versionPattern = regexp.MustCompile(`^v\d+$`)
+// Bounded at v99: Decrypt recognizes a version prefix only up to 3 chars
+// before the ':' — an unbounded pattern here would let Encrypt mint
+// envelopes (e.g. "v2026:…") that Decrypt misreads as legacy base64.
+var versionPattern = regexp.MustCompile(`^v[1-9]\d?$`)
 
 // CurrentKeyVersion returns the version new envelopes are minted with:
 // "v1" unless CREWSHIP_ENCRYPTION_KEY_VERSION overrides it. A malformed
@@ -37,7 +40,7 @@ func CurrentKeyVersion() (string, error) {
 	}
 	v = strings.ToLower(v)
 	if !versionPattern.MatchString(v) {
-		return "", fmt.Errorf("%s=%q is not a valid key version (expected v2, v3, …)", KeyVersionEnvVar, v)
+		return "", fmt.Errorf("%s=%q is not a valid key version (expected v2, v3, … up to v99)", KeyVersionEnvVar, v)
 	}
 	return v, nil
 }

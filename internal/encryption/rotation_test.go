@@ -35,7 +35,10 @@ func TestCurrentKeyVersionOverride(t *testing.T) {
 }
 
 func TestCurrentKeyVersionInvalid(t *testing.T) {
-	for _, bad := range []string{"2", "V2x", "v", "banana", "v2:extra"} {
+	// v100+ and v0 must be rejected: Decrypt only recognizes a version
+	// prefix up to 3 chars ("v99:"), so minting "v100:" envelopes would
+	// make them unreadable (misparsed as legacy base64).
+	for _, bad := range []string{"2", "V2x", "v", "banana", "v2:extra", "v0", "v100", "v2026"} {
 		t.Setenv("CREWSHIP_ENCRYPTION_KEY_VERSION", bad)
 		if _, err := CurrentKeyVersion(); err == nil {
 			t.Fatalf("expected error for CREWSHIP_ENCRYPTION_KEY_VERSION=%q", bad)
