@@ -92,13 +92,13 @@ crewship system onboarding          # same as `onboarding status`
 
 | Command | Description |
 |---------|-------------|
-| `status` | Show whether onboarding is complete (default if no subcommand). Output is always JSON. |
+| `status` | Show whether onboarding is complete (default if no subcommand). Output defaults to JSON; `--format yaml/ndjson` honored. |
 | `setup` | Run the onboarding setup wizard (crew + agent + credential). |
 | `complete` | Mark onboarding as finished without running the wizard. |
 
 ### `crewship system onboarding status`
 
-Show whether onboarding is complete for the current user. Hits `GET /api/v1/onboarding/status`. Output is always JSON.
+Show whether onboarding is complete for the current user. Hits `GET /api/v1/onboarding/status`. Output defaults to JSON (the raw API payload); `--format yaml/ndjson` is honored.
 
 ```bash
 crewship system onboarding status
