@@ -38,6 +38,12 @@ half-written binary. The previous binary is kept at `<binary>.bak` for a
 manual rollback. `self-update` only acts when a newer release actually exists
 — otherwise it reports you're already current and exits.
 
+Every API response also carries an `X-Crewship-Server-Version` header, and the
+CLI compares it against its own version once per process: when a release CLI
+talks to a different release server, it prints a one-line stderr hint naming
+the remedy — the most common cause of confusing API errors is exactly this
+skew. Silence it with `CREWSHIP_SKIP_UPDATE_CHECK=1`.
+
 <Note>
 `self-update` verifies provenance end-to-end, no `cosign` binary needed: it
 checks the **Sigstore keyless signature** on `checksums.txt` — the certificate

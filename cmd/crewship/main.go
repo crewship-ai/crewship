@@ -39,6 +39,9 @@ var rootCmd = &cobra.Command{
 	Long:  "Crewship CLI allows you to manage agents, crews, missions, skills, and credentials from the terminal.",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		cli.InitColors(flagNoColor)
+		// Feed the ldflags-injected version to the client's version-skew
+		// detector (X-Crewship-Server-Version comparison, once per process).
+		cli.SetClientVersion(version)
 
 		// Inject the working directory so internal profile resolution can do
 		// directory_profiles matching without reaching into the filesystem
