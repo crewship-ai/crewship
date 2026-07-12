@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 
@@ -397,6 +398,29 @@ func localModelConfigEnv(req AgentRunRequest) (string, bool) {
 		return "", false
 	}
 	return "OPENCODE_CONFIG_CONTENT=" + string(raw), true
+}
+
+// allowPrivateEndpointsEnvVar is the instance-level ceiling for private-network
+// model endpoints (#974 S5). Default off: a per-crew allow_private_endpoints
+// opt-in only takes effect when the operator has also enabled it host-wide, so
+// a workspace admin cannot self-grant RFC1918/loopback egress on a shared or
+// cloud host. Mirrors CREWSHIP_HOOKS_ALLOW_PRIVATE (internal/hooks/http.go).
+const allowPrivateEndpointsEnvVar = "CREWSHIP_ALLOW_PRIVATE_ENDPOINTS"
+
+// instanceAllowsPrivateEndpoints reports whether the host operator has enabled
+// private-network model endpoints instance-wide. ANDed with the per-crew flag.
+func instanceAllowsPrivateEndpoints() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(allowPrivateEndpointsEnvVar))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
+// effectiveAllowPrivateEndpoints ANDs the per-crew opt-in with the instance-
+// level ceiling (#974 S5). Private-network egress requires BOTH.
+func effectiveAllowPrivateEndpoints(crewFlag bool) bool {
+	return crewFlag && instanceAllowsPrivateEndpoints()
 }
 
 // localModelExtraDomains returns the local endpoint's host when the
