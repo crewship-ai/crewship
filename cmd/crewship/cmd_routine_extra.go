@@ -24,6 +24,7 @@ import (
 
 type pipelineVersionRow struct {
 	Version        int    `json:"version"`
+	IsHead         bool   `json:"is_head"`
 	ParentVersion  *int   `json:"parent_version,omitempty"`
 	DefinitionHash string `json:"definition_hash"`
 	AuthorType     string `json:"author_type"`
@@ -63,10 +64,25 @@ var routineVersionsCmd = &cobra.Command{
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "VERSION\tHEAD\tPARENT\tHASH\tAUTHOR\tCREATED\tSUMMARY")
-		head := rows[0].Version
+		// HEAD comes from the server's is_head (pipelines.head_version) —
+		// after a rollback it sits on an OLDER row, so guessing rows[0]
+		// (max version) shows a stale HEAD (#996). Servers predating the
+		// field mark nothing; fall back to the old max-version heuristic —
+		// but ONLY when the page isn't full. On a full page (server default
+		// LIMIT 100), a new server's head may simply live beyond the page;
+		// printing no marker beats confidently marking the wrong row.
+		serverMarksHead := false
+		for _, v := range rows {
+			if v.IsHead {
+				serverMarksHead = true
+				break
+			}
+		}
+		const versionsPageCap = 100
+		guessHead := !serverMarksHead && len(rows) < versionsPageCap
 		for _, v := range rows {
 			isHead := ""
-			if v.Version == head {
+			if v.IsHead || (guessHead && v.Version == rows[0].Version) {
 				isHead = "*"
 			}
 			parent := "—"
@@ -201,9 +217,10 @@ var routineActiveCmd = &cobra.Command{
 var routineRollbackCmd = &cobra.Command{
 	Use:   "rollback <slug>",
 	Short: "Roll a routine back to a previous version",
-	Long: `Creates a new version on top of HEAD whose definition equals the target
-version's. The rollback is itself a versioned change — history is
-preserved, you can re-roll forward by another rollback.`,
+	Long: `Repoints the routine's HEAD at the target version and makes its
+definition live. No new version row is created (versions are deduped
+by content hash); history is preserved, so you can re-roll forward by
+another rollback. 'crewship routine versions' marks the new HEAD.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target, _ := cmd.Flags().GetInt("to")

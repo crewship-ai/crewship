@@ -1002,14 +1002,14 @@ The estimate is intentionally labelled "estimated" everywhere it surfaces — it
 
 ## Versioning + rollback
 
-Every save creates a new immutable row in `pipeline_versions` (v79 migration). The `pipelines.head_version` column points at the current. Rollback creates a NEW version on top of HEAD whose definition equals the target's:
+Every save creates a new immutable row in `pipeline_versions` (v79 migration). The `pipelines.head_version` column points at the current. Rollback repoints HEAD at the target version and makes its definition live — no new row is created (versions are deduped by content hash), and `routine versions` marks the new HEAD:
 
 ```bash
 crewship routine versions email-fetch
 crewship routine rollback email-fetch --to 3
 ```
 
-History is preserved — you can roll forward to a future version by another rollback. There is no "delete version" — if a version was bad, the trail of "v3 → v4 (rollback to v2) → v5 (fix)" is the audit story you keep.
+History is preserved — you can roll forward to a later version by another rollback. There is no "delete version" — if a version was bad, the trail stays: "v1 → v2 → v3, HEAD back on v2, then v4 (fix)" is the audit story you keep, and each run additionally records the content hash it executed.
 
 ## The improvement loop: `routine iterate`
 

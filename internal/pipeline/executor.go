@@ -1655,9 +1655,9 @@ func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipe
 		// boot resume scan can detect any edit since — including
 		// in-place edits that keep every step id, which the step-id
 		// existence gate alone cannot see. (pipeline_version is NOT
-		// used for this: the version store dedupes by content hash,
-		// so head_version can point at a stale row after an A→B→A
-		// edit cycle.) For a pinned run, in.pipeline already carries
+		// used for this: the content hash is the direct signal, and
+		// it stays valid against pre-#996 rows where a dedup'd save
+		// left head_version stale.) For a pinned run, in.pipeline already carries
 		// the pinned version's definition + hash (substituted in Run).
 		rec.DefinitionHash = in.pipeline.DefinitionHash
 	}
