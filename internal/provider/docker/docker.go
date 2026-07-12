@@ -551,6 +551,9 @@ func (p *Provider) buildMounts(id, slug, workspacePath, outputPath, crewPath, se
 	if p.cfg.EntrypointPath == "" {
 		return nil, fmt.Errorf("docker provider: EntrypointPath is required (run 'make build:sidecar' or set CREWSHIP_ENTRYPOINT_PATH)")
 	}
+	if err := verifySidecarIsLinuxELF(p.cfg.SidecarBinaryPath); err != nil {
+		return nil, err
+	}
 	mounts := []mount.Mount{
 		{Type: mount.TypeBind, Source: workspacePath, Target: "/workspace"},
 		{Type: mount.TypeBind, Source: outputPath, Target: "/output"},
@@ -578,6 +581,42 @@ func (p *Provider) buildMounts(id, slug, workspacePath, outputPath, crewPath, se
 		},
 	)
 	return mounts, nil
+}
+
+// verifySidecarIsLinuxELF guards against a host sidecar binary that cannot
+// exec inside a Linux agent container (#953). Agent containers are always
+// Linux, so the bind-mounted sidecar must be an ELF binary regardless of the
+// host OS — a darwin (Mach-O) sidecar fails in-container with exit 255, which
+// the BYOI sanity check then misdiagnoses as a glibc/musl mismatch. Detect the
+// mismatch host-side and say exactly what is wrong.
+//
+// Unreadable paths are deliberately NOT this guard's problem: existence
+// failures keep their existing error paths (Docker's own bind-mount error),
+// and turning a transient read error into "wrong format" would mislead.
+func verifySidecarIsLinuxELF(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil //nolint:nilerr // existence/permission problems surface via Docker's bind-mount error
+	}
+	defer f.Close()
+	var magic [4]byte
+	if _, err := io.ReadFull(f, magic[:]); err != nil {
+		return nil //nolint:nilerr // too short / unreadable — let the container-start path report it
+	}
+	if magic == [4]byte{0x7f, 'E', 'L', 'F'} {
+		return nil
+	}
+	detected := "an unrecognized binary format"
+	switch magic {
+	case [4]byte{0xcf, 0xfa, 0xed, 0xfe}, [4]byte{0xce, 0xfa, 0xed, 0xfe},
+		[4]byte{0xfe, 0xed, 0xfa, 0xcf}, [4]byte{0xfe, 0xed, 0xfa, 0xce},
+		[4]byte{0xca, 0xfe, 0xba, 0xbe}, [4]byte{0xbe, 0xba, 0xfe, 0xca}:
+		detected = "a macOS Mach-O binary"
+	}
+	return fmt.Errorf(
+		"docker provider: sidecar at %s is %s, but agent containers are Linux — the sidecar must be a Linux ELF build (#953); reinstall crewship (the release archive bundles the correct Linux sidecar) or point CREWSHIP_SIDECAR_PATH at a GOOS=linux build",
+		path, detected,
+	)
 }
 
 // daemonSharesHostFS reports whether the Docker daemon's storage lives on THIS
