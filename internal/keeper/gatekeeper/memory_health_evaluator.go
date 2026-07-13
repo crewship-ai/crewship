@@ -85,12 +85,30 @@ func (e *MemoryHealthEvaluator) Evaluate(ctx context.Context, req MemoryHealthRe
 		return MemoryHealthResult{}, fmt.Errorf("memory_health_evaluator: empty workspace_id")
 	}
 
+	// Clamp Reachability to its valid [0,100] domain before deriving the
+	// ratio, mirroring covRatio in consolidate/health.go. The
+	// /keeper/memory-health HTTP path deserializes Snapshot straight from the
+	// request body, so the value isn't guaranteed 0..100: an out-of-range
+	// >100 would otherwise produce a recallRatio >1 that reads as
+	// pathologically healthy and suppresses a warranted consolidation, and a
+	// negative value is nonsense input best treated as "unreachable" (0).
+	reach := req.Snapshot.Reachability
+	if reach < 0 {
+		reach = 0
+	} else if reach > 100 {
+		reach = 100
+	}
+
 	recallRatio := 0.0
-	if req.Snapshot.Coverage > 0 {
+	if reach > 0 {
 		// Use Reachability as a recall-vs-write proxy: high reachability
 		// + low freshness suggests "memory is being read but not
-		// updated"; both low = "stale memory nobody touches".
-		recallRatio = req.Snapshot.Reachability / 100.0
+		// updated"; both low = "stale memory nobody touches". Gate on the
+		// SAME field the value comes from (#1063): the guard previously
+		// tested Coverage, so a snapshot with Coverage==0 but Reachability>0
+		// forced recallRatio to 0.0 and fed the LLM a false "low recall
+		// (<0.05)" signal → spurious auto-consolidate pressure.
+		recallRatio = reach / 100.0
 	}
 
 	evalReq := EvalRequest{
