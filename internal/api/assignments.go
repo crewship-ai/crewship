@@ -254,6 +254,19 @@ func (h *AssignmentHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *AssignmentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	assignmentID := r.PathValue("assignmentId")
 
+	// Workspace scope (#1040). This internal route is reached from the sidecar
+	// with a workspace-bound token, but requireInternal only scopes handlers
+	// that read ?workspace_id — this one never did, so an agent could pass any
+	// assignment id and read its full row (task brief, result_summary,
+	// error_message) across workspaces: a cross-workspace IDOR. The sidecar now
+	// forwards its bound workspace_id; require it and scope the SELECT. Matches
+	// the InternalMissionHandler.Get pattern.
+	wsID := r.URL.Query().Get("workspace_id")
+	if wsID == "" {
+		replyError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+
 	type assignmentResult struct {
 		ID            string  `json:"id"`
 		WorkspaceID   string  `json:"workspace_id"`
@@ -273,8 +286,8 @@ func (h *AssignmentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status,
 		       started_at, finished_at, result_summary, error_message, created_at
-		FROM assignments WHERE id = ?
-	`, assignmentID).Scan(
+		FROM assignments WHERE id = ? AND workspace_id = ?
+	`, assignmentID, wsID).Scan(
 		&a.ID, &a.WorkspaceID, &a.ChatID, &a.AssignedByID, &a.AssignedToID,
 		&a.Task, &a.Status, &a.StartedAt, &a.FinishedAt,
 		&a.ResultSummary, &a.ErrorMessage, &a.CreatedAt,
