@@ -60,6 +60,55 @@ func TestWriteLesson_EntryCap_KeepsNewest(t *testing.T) {
 	}
 }
 
+// Eviction picks victims by CapturedAt but must NOT reorder survivors on disk
+// (the "retries order-stable on disk" guarantee). Insert with CapturedAt that
+// is NON-monotonic vs insertion order, then assert the survivors keep their
+// insertion order rather than a timestamp sort.
+func TestWriteLesson_EntryCap_PreservesOnDiskOrder(t *testing.T) {
+	orig := maxLessonEntries
+	maxLessonEntries = 3
+	defer func() { maxLessonEntries = orig }()
+
+	dir := t.TempDir()
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	// Insertion order A,B,C,D. CapturedAt: A oldest (evicted), then D,B,C newer
+	// but NOT in insertion order — survivors B,C,D must stay in insertion order.
+	entries := []struct {
+		id  string
+		min int
+	}{
+		{"A", 0},  // oldest → evicted (cap 3, 4 entries)
+		{"B", 30}, // survivor
+		{"C", 40}, // survivor
+		{"D", 20}, // survivor, but earliest-captured of the survivors
+	}
+	for _, e := range entries {
+		if err := WriteLesson(context.Background(), dir, LessonEntry{
+			ID: e.id, Kind: LessonKindNeutral, Source: LessonSourceManual,
+			Rule: "r", CapturedAt: base.Add(time.Duration(e.min) * time.Minute),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := ReadLessons(context.Background(), dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotIDs := make([]string, len(got))
+	for i, e := range got {
+		gotIDs[i] = e.ID
+	}
+	want := []string{"B", "C", "D"} // insertion order of survivors, NOT D,B,C by time
+	if len(gotIDs) != len(want) {
+		t.Fatalf("ids = %v, want %v", gotIDs, want)
+	}
+	for i := range want {
+		if gotIDs[i] != want[i] {
+			t.Fatalf("on-disk order = %v, want insertion order %v (eviction reordered survivors)", gotIDs, want)
+		}
+	}
+}
+
 // Idempotent re-writes of the SAME id must not count toward the cap or evict
 // unrelated entries — a corrected rule body overwrites in place.
 func TestWriteLesson_EntryCap_IdempotentReplaceDoesNotEvict(t *testing.T) {

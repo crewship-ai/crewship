@@ -225,14 +225,38 @@ func writeLessonToDir(ctx context.Context, lessonsDir string, entry LessonEntry)
 	}
 
 	// Bound the file (#1044). Distinct-per-event IDs mean the file grows
-	// unboundedly without a ceiling; keep the newest maxLessonEntries by
-	// CapturedAt so recall stays fresh and the flock'd read/write stays O(cap).
-	// Stable sort so entries with equal timestamps keep insertion order.
-	if len(out.Entries) > maxLessonEntries {
-		sort.SliceStable(out.Entries, func(i, j int) bool {
-			return out.Entries[i].CapturedAt.Before(out.Entries[j].CapturedAt)
+	// unboundedly without a ceiling; drop the oldest entries (by CapturedAt) on
+	// overflow so recall stays fresh and the flock'd read/write stays O(cap).
+	//
+	// Survivors keep their ON-DISK order — we pick which entries to evict by
+	// timestamp but do NOT reorder the file, so the "retries order-stable on
+	// disk" guarantee the idempotent-replace logic above relies on still holds.
+	//
+	// Tradeoffs of a single global cap (accepted; matches the #1044 remediation):
+	// eviction is kind-blind, so a burst of one kind can drop older entries of
+	// another, and an id re-written in place gets a fresh CapturedAt (above), so
+	// frequently-refreshed ids are treated as newest. 500 is generous enough
+	// that this only bites pathological churn.
+	if overflow := len(out.Entries) - maxLessonEntries; overflow > 0 {
+		order := make([]int, len(out.Entries))
+		for i := range order {
+			order[i] = i
+		}
+		// Oldest first; ties broken by original position (stable).
+		sort.SliceStable(order, func(a, b int) bool {
+			return out.Entries[order[a]].CapturedAt.Before(out.Entries[order[b]].CapturedAt)
 		})
-		out.Entries = out.Entries[len(out.Entries)-maxLessonEntries:]
+		evict := make(map[int]bool, overflow)
+		for _, idx := range order[:overflow] {
+			evict[idx] = true
+		}
+		kept := make([]LessonEntry, 0, maxLessonEntries)
+		for i, e := range out.Entries {
+			if !evict[i] {
+				kept = append(kept, e)
+			}
+		}
+		out.Entries = kept
 	}
 
 	return saveLessonsLocked(ctx, path, out)
