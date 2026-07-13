@@ -52,9 +52,11 @@ var startCmd = &cobra.Command{
 	Short: "Start the Crewship server",
 	Long:  "Start the Crewship server with optional configuration flags.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Brand banner on an interactive truecolor terminal (no-ops for
-		// pipes / NO_COLOR / CI, so structured stdout stays clean).
-		cli.PrintStartupBanner(os.Stderr, version)
+		// Compact one-line brand mark on an interactive terminal (no-ops
+		// for pipes / CI, so structured stdout stays clean). The full logo
+		// is reserved for the bare `crewship` invocation and first-run,
+		// so a busy restart loop isn't flooded with 16 lines each time.
+		cli.PrintStartLine(os.Stderr, version)
 
 		configPath, _ := cmd.Flags().GetString("config")
 		dbURL, _ := cmd.Flags().GetString("db")
@@ -1069,7 +1071,8 @@ func printFirstRunWelcome(db *sql.DB, logger *slog.Logger) {
 	if port == "" {
 		port = "8080"
 	}
-	fmt.Println()
+	// The full brand logo belongs to this once-per-install moment.
+	cli.PrintLogo(os.Stdout, version)
 	fmt.Printf("  %sWelcome to Crewship!%s  %s%s%s\n",
 		cli.Bold, cli.Reset, cli.Dim, version, cli.Reset)
 	fmt.Println()
