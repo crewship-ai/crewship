@@ -63,8 +63,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req queryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+	if !decodeCappedJSON(w, r, &req) {
 		return
 	}
 	if req.Target == "" || req.Question == "" {
@@ -206,8 +205,7 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req escalateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+	if !decodeCappedJSON(w, r, &req) {
 		return
 	}
 
@@ -386,8 +384,7 @@ func (s *Server) handleReportConfidence(w http.ResponseWriter, r *http.Request) 
 		Confidence float64 `json:"confidence"`
 		Reason     string  `json:"reason"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+	if !decodeCappedJSON(w, r, &req) {
 		return
 	}
 

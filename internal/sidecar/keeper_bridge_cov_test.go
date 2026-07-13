@@ -180,6 +180,18 @@ func TestCovKeeperExecuteValidation(t *testing.T) {
 			map[string]interface{}{"credential_id": "c1;DROP", "intent": "list repo files quickly", "command": "git status"},
 			"credential_id contains invalid characters",
 		},
+		{
+			// #1058: credential_name now gets the same NUL guard as intent.
+			"null byte in credential_name",
+			map[string]interface{}{"credential_name": "c\x00d", "intent": "list repo files quickly", "command": "git status"},
+			"credential_name contains invalid characters",
+		},
+		{
+			// #1058: env_var (forwarded as a container env-var name) is validated too.
+			"null byte in env_var",
+			map[string]interface{}{"credential_id": "c1", "env_var": "E\x00V", "intent": "list repo files quickly", "command": "git status"},
+			"env_var contains invalid characters",
+		},
 	}
 
 	for _, tt := range tests {

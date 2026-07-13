@@ -46,8 +46,7 @@ func (s *Server) handleExposePort(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req exposePortRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+	if !decodeCappedJSON(w, r, &req) {
 		return
 	}
 	req.Description = strings.TrimSpace(req.Description)

@@ -88,14 +88,19 @@ func (s *Server) handleKeeperRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req keeperRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+	if !decodeCappedJSON(w, r, &req) {
 		return
 	}
 
 	req.CredentialID = strings.TrimSpace(req.CredentialID)
 	req.CredentialName = strings.TrimSpace(req.CredentialName)
 	req.Intent = strings.TrimSpace(req.Intent)
+
+	// credential_name is as agent-controlled as intent/credential_id but
+	// previously got only TrimSpace — apply the same length + NUL guard (#1058).
+	if rejectInvalidField(w, req.CredentialName, "credential_name", maxCredentialNameLength) {
+		return
+	}
 
 	if req.CredentialID == "" && req.CredentialName == "" {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
@@ -220,8 +225,7 @@ func (s *Server) handleKeeperExecute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req keeperExecuteBody
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+	if !decodeCappedJSON(w, r, &req) {
 		return
 	}
 
@@ -229,6 +233,17 @@ func (s *Server) handleKeeperExecute(w http.ResponseWriter, r *http.Request) {
 	req.CredentialName = strings.TrimSpace(req.CredentialName)
 	req.Intent = strings.TrimSpace(req.Intent)
 	req.Command = strings.TrimSpace(req.Command)
+	req.EnvVar = strings.TrimSpace(req.EnvVar)
+
+	// credential_name and env_var are agent-controlled and previously
+	// unvalidated; env_var is forwarded as a container env-var name. Apply the
+	// intent/command length + NUL guard to both (#1058).
+	if rejectInvalidField(w, req.CredentialName, "credential_name", maxCredentialNameLength) {
+		return
+	}
+	if rejectInvalidField(w, req.EnvVar, "env_var", maxEnvVarLength) {
+		return
+	}
 
 	if (req.CredentialID == "" && req.CredentialName == "") || req.Intent == "" || req.Command == "" {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{

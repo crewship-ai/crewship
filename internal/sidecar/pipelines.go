@@ -59,8 +59,7 @@ func (s *Server) handlePipelinesSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body pipelinesSaveRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	if !decodeCappedJSON(w, r, &body) {
 		return
 	}
 	// #812: attribute authorship to the ACTING agent (per-agent token),
@@ -309,8 +308,7 @@ func (s *Server) handlePipelinesRun(w http.ResponseWriter, r *http.Request, slug
 	}
 	var body pipelinesRunRequest
 	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		if !decodeCappedJSON(w, r, &body) {
 			return
 		}
 	}
@@ -353,8 +351,7 @@ func (s *Server) handlePipelinesDryRun(w http.ResponseWriter, r *http.Request, s
 	}
 	var body pipelinesRunRequest
 	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		if !decodeCappedJSON(w, r, &body) {
 			return
 		}
 	}

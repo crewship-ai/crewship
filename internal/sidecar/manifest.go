@@ -102,8 +102,7 @@ func (s *Server) handleUpdateManifest(w http.ResponseWriter, r *http.Request) {
 		Credentials   []ManifestCredEntry `json:"credentials"`
 		SetupCommands []string            `json:"setup_commands"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+	if !decodeCappedJSON(w, r, &patch) {
 		return
 	}
 
