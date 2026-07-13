@@ -48,10 +48,6 @@ func (m *mockResolver) ResolveAgent(_ context.Context, _, _ string) (*ChatInfo, 
 	return m.info, m.err
 }
 
-func (m *mockResolver) GetWebhookSecret(_ context.Context, _, _ string) (string, error) {
-	return "", nil
-}
-
 func testBridge(t *testing.T, resolver ChatResolver) (*Bridge, string) {
 	t.Helper()
 	dir := t.TempDir()

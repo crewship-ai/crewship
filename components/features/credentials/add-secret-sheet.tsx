@@ -1,9 +1,10 @@
 "use client"
 
 // AddSecretSheet — the default Add flow. Single-page Sheet with the
-// unified CredentialForm. Replaces the 4-step wizard as the primary
-// "+" action; the legacy wizard is kept around for OAuth/setup-token
-// flows that still need provider-first selection.
+// unified CredentialForm. Replaced the old 4-step wizard as the "+"
+// action; the wizard has since been removed (nothing mounted it).
+// Reviving OAuth/setup-token flows from /credentials is tracked
+// separately.
 
 import * as React from "react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"

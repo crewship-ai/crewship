@@ -614,55 +614,6 @@ func TestInternalUpdateCredentialStatus(t *testing.T) {
 	})
 }
 
-func TestInternalGetWebhookSecret(t *testing.T) {
-	setTestEncryptionKey(t)
-	db := setupTestDB(t)
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('cr1', ?, 'C', 'c')`, wsID)
-	execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug, webhook_secret)
-		VALUES ('ag1', 'cr1', ?, 'A', 'a', 'mysecret')`, wsID)
-	execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug, webhook_secret)
-		VALUES ('ag2', 'cr1', ?, 'B', 'b', NULL)`, wsID)
-
-	h := NewInternalHandler(db, "tok", testLogger())
-
-	t.Run("found", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.SetPathValue("agentId", "ag1")
-		w := httptest.NewRecorder()
-		h.GetWebhookSecret(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("status = %d", w.Code)
-		}
-		var resp map[string]string
-		json.Unmarshal(w.Body.Bytes(), &resp)
-		if resp["webhook_secret"] != "mysecret" {
-			t.Errorf("got %q", resp["webhook_secret"])
-		}
-	})
-
-	t.Run("agent_not_found", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.SetPathValue("agentId", "missing")
-		w := httptest.NewRecorder()
-		h.GetWebhookSecret(w, req)
-		if w.Code != http.StatusNotFound {
-			t.Errorf("status = %d", w.Code)
-		}
-	})
-
-	t.Run("secret_not_configured", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.SetPathValue("agentId", "ag2")
-		w := httptest.NewRecorder()
-		h.GetWebhookSecret(w, req)
-		if w.Code != http.StatusNotFound {
-			t.Errorf("status = %d", w.Code)
-		}
-	})
-}
-
 // ============================================================================
 // internal_runs.go
 // ============================================================================

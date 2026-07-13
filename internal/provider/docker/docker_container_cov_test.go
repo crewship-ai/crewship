@@ -322,6 +322,11 @@ func covHealthyInspect(image string) string {
 			{"Destination": "/home/agent"},
 			{"Destination": "/opt/crew-tools"},
 		},
+		// A healthy modern container carries /secrets in HostConfig.Tmpfs
+		// (not Mounts); without it the drift path recreates.
+		"HostConfig": map[string]any{
+			"Tmpfs": map[string]string{"/secrets": secretsTmpfsSpec},
+		},
 	})
 	return string(b)
 }
@@ -460,6 +465,35 @@ func TestEnsureCrewRuntime_InspectExistingError(t *testing.T) {
 }
 
 // ---------- EnsureCrewRuntime: existing-container handling ----------
+
+// A container with all required Mounts but no /secrets entry in
+// HostConfig.Tmpfs predates the HostConfig-tmpfs mount shape (or carries a
+// legacy bind) — it must be recreated so secrets stop touching the host disk.
+func TestEnsureCrewRuntime_RecreatesWhenSecretsTmpfsEntryMissing(t *testing.T) {
+	t.Parallel()
+
+	inspect, _ := json.Marshal(map[string]any{
+		"Id":     "old-cid",
+		"State":  map[string]any{"Running": true},
+		"Config": map[string]any{"Image": covRuntimeRef},
+		"Mounts": []map[string]any{
+			{"Destination": "/crew"},
+			{"Destination": "/home/agent"},
+			{"Destination": "/opt/crew-tools"},
+		},
+		// HostConfig.Tmpfs deliberately absent.
+	})
+	f := &covRT{listBody: covExistingList("running"), inspectBody: string(inspect)}
+	p := f.provider(t, covRTConfig(t))
+
+	id, err := p.EnsureCrewRuntime(context.Background(), covTeam())
+	if err != nil {
+		t.Fatalf("EnsureCrewRuntime: %v", err)
+	}
+	if id != "cov-cid-0123456789ab" {
+		t.Errorf("id = %q, want freshly created container (recreate on missing /secrets tmpfs entry)", id)
+	}
+}
 
 func TestEnsureCrewRuntime_RecreatesWhenRequiredMountMissing(t *testing.T) {
 	t.Parallel()

@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -73,11 +72,10 @@ func maybeRecordSidecarUse(ctx context.Context, db *sql.DB, logger *slog.Logger,
 		return
 	}
 
-	if err := RecordCredentialEvent(ctx, db, logger, credID, AuditEventUse, "" /* agent unknown at this layer */, ip, map[string]any{"source": "sidecar_fetch"}); err != nil {
-		if logger != nil {
-			logger.Warn("sidecar use audit: record failed", "credential_id", credID, "error", err)
-		}
-	}
+	// USE debounce stays best-effort by design: an audit hiccup must
+	// never fail (or slow) the sidecar credential fetch. The drop
+	// counter + stable log event replace the old silent Warn.
+	recordCredentialEventBestEffort(ctx, db, logger, credID, AuditEventUse, "" /* agent unknown at this layer */, ip, map[string]any{"source": "sidecar_fetch"})
 }
 
 // ListCredentials returns active credentials for the sidecar.
@@ -335,53 +333,30 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// A REVOKED transition must remove the credential's materialized
+	// /secrets file(s) from running crew containers, exactly like the public
+	// DELETE handler — otherwise a sidecar-detected revocation leaves the
+	// cleartext file readable until the next run. Async + bounded: the
+	// sidecar's status PATCH must not stall on a docker exec, and a wedged
+	// daemon must not hold the goroutine forever. Best-effort by design (the
+	// DB status is already REVOKED, so the file is never re-materialized).
+	if body.Status == "REVOKED" {
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
+		h.reconcileWG.Add(1)
+		go func() {
+			defer h.reconcileWG.Done()
+			defer cancel()
+			reconcileRevokedCredentialFiles(rctx, h.db, h.logger, h.container, credID, workspaceID)
+		}()
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"id": credID, "status": body.Status, "last_checked_at": now})
 }
 
-// GetWebhookSecret returns the webhook secret for a given agent, used by the sidecar for signature validation.
-// GET /api/v1/internal/agents/{agentId}/webhook-secret
-func (h *InternalHandler) GetWebhookSecret(w http.ResponseWriter, r *http.Request) {
-	agentID := r.PathValue("agentId")
-
-	// Tenant scoping. The pre-fix query was `WHERE id = ?` with the agentID
-	// straight from the path and no scoping, so any internal caller — or the
-	// public webhook trigger flow, which lets the URL pick crew/agent — could
-	// fetch ANY agent's webhook secret across workspace boundaries and then
-	// forge a validly-signed webhook for that agent. We now constrain the
-	// lookup by whatever tenant scope the caller supplies.
-	//
-	// Both scopes are OPTIONAL query params (same backwards-compat shape as
-	// UpdateCredentialStatus above): the sidecar IPC resolver and the public
-	// webhook handler reach this via SecretLookup(crewID, agentID) and pass
-	// crew_id, while UI/admin callers pass workspace_id. A missing scope keeps
-	// the legacy id-only behavior so existing internal callers don't break;
-	// a present-but-mismatched scope yields the same 404 as a non-existent
-	// agent (404 not 403 — don't leak that the agent exists in another tenant).
-	query := "SELECT webhook_secret FROM agents WHERE id = ?"
-	args := []any{agentID}
-	if wsID := r.URL.Query().Get("workspace_id"); wsID != "" {
-		query += " AND workspace_id = ?"
-		args = append(args, wsID)
-	}
-	if crewID := r.URL.Query().Get("crew_id"); crewID != "" {
-		query += " AND crew_id = ?"
-		args = append(args, crewID)
-	}
-
-	var secret sql.NullString
-	err := h.db.QueryRowContext(r.Context(), query, args...).Scan(&secret)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			replyError(w, http.StatusNotFound, "Agent not found")
-			return
-		}
-		h.logger.Error("webhook secret lookup", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if !secret.Valid || secret.String == "" {
-		replyError(w, http.StatusNotFound, "Webhook secret not configured for agent")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"webhook_secret": secret.String})
-}
+// NOTE: the internal GET .../agents/{agentId}/webhook-secret endpoint was
+// REMOVED (#999). It returned the webhook signing secret in plaintext JSON
+// to any internal-token caller; its only consumer was the webhook trigger
+// handler's IPC resolver hop, and that handler now reads the secret from
+// its local DB (crew-scoped) without the secret ever leaving the process.
+// Obtaining a secret is rotation-only: POST /api/v1/agents/{agentId}/
+// webhook-secret/rotate returns the newly minted value exactly once.

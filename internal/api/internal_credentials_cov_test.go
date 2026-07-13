@@ -2,8 +2,8 @@ package api
 
 // Coverage tests for internal_credentials.go — maybeRecordSidecarUse
 // debounce/CAS branches, ListCredentials decrypt-failure tolerance,
-// requestIsLoopback host-only parsing, UpdateCredentialStatus error
-// branch, and GetWebhookSecret crew scoping.
+// requestIsLoopback host-only parsing, and UpdateCredentialStatus error
+// branch.
 
 import (
 	"context"
@@ -192,38 +192,6 @@ func TestCovICUpdateCredentialStatus_ExecError500(t *testing.T) {
 	}
 }
 
-// --- GetWebhookSecret ------------------------------------------------------------
-
-func TestCovICGetWebhookSecret_CrewScope(t *testing.T) {
-	h, db, _, wsID := covICRig(t)
-	if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew-wh', ?, 'WH', 'wh')`, wsID); err != nil {
-		t.Fatalf("seed crew: %v", err)
-	}
-	if _, err := db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, webhook_secret)
-		VALUES ('ag-wh', ?, 'crew-wh', 'A', 'a-wh', 'whsec_123')`, wsID); err != nil {
-		t.Fatalf("seed agent: %v", err)
-	}
-
-	t.Run("matching crew scope", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/x?crew_id=crew-wh", nil)
-		req.SetPathValue("agentId", "ag-wh")
-		rec := httptest.NewRecorder()
-		h.GetWebhookSecret(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
-		}
-		if !strings.Contains(rec.Body.String(), "whsec_123") {
-			t.Errorf("body = %q", rec.Body.String())
-		}
-	})
-
-	t.Run("mismatched crew scope 404", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/x?crew_id=other-crew", nil)
-		req.SetPathValue("agentId", "ag-wh")
-		rec := httptest.NewRecorder()
-		h.GetWebhookSecret(rec, req)
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("status = %d, want 404 (no tenant leak)", rec.Code)
-		}
-	})
-}
+// NOTE: the GetWebhookSecret crew-scope tests were deleted with the internal
+// GET .../agents/{agentId}/webhook-secret endpoint (#999) — the webhook
+// trigger path now reads the secret locally; see webhook_secret_sec_test.go.

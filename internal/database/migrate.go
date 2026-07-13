@@ -1602,6 +1602,16 @@ END;
 	{version: 133, name: "notification_channels", sql: migrationNotificationChannels},
 	{version: 134, name: "pending_run_invoking_user", sql: migrationPendingRunInvokingUser},
 	{version: 135, name: "crew_allow_private_endpoints", sql: migrationCrewAllowPrivateEndpoints},
+	// v136: repoint head_version at the version row matching the live
+	// definition_hash — heals rows that drifted via the pre-#996 dedup
+	// bug (A→B→A saves skipped the head repoint). See
+	// migrate_consts_v136_head_version_backfill.go.
+	{version: 136, name: "head_version_backfill", sql: migrationHeadVersionBackfill},
+
+	// v137: per-workspace Keeper watchdog governance (in-app toggle, named
+	// security contact, DENY-notify risk threshold). No row = inherit server
+	// config. See migrate_consts_v137_keeper_governance.go and issue #1001.
+	{version: 137, name: "keeper_governance_settings", sql: migrationKeeperGovernanceSettings},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

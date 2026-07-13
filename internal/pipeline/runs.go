@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // RunStatus is the closed set of pipeline_runs.status values. The DB
@@ -71,10 +73,10 @@ type RunRecord struct {
 	PipelineID   string
 	PipelineSlug string
 	// PipelineVersion mirrors pipelines.head_version at insert time.
-	// NULL = unknown/HEAD. Note it is NOT a reliable drift signal: the
-	// version store dedupes by content hash, so an edit cycle A→B→A
-	// leaves head_version pointing at B's row while the live
-	// definition is A. DefinitionHash below is the drift gate.
+	// NULL = unknown/HEAD. DefinitionHash below is the drift gate:
+	// it compares content directly, independent of version
+	// bookkeeping, and stays valid against pre-#996 rows where a
+	// dedup'd A→B→A save left head_version stale.
 	PipelineVersion *int
 	// DefinitionHash is sha256(definition_json) of the pipeline AS IT
 	// WAS when the run started (migration v114). Boot-time resume
@@ -649,8 +651,8 @@ func nullableIntPtr(p *int) any {
 	return *p
 }
 
-// nullableTime returns the RFC3339Nano string for a non-zero time, or
-// nil — so an unset/zero time binds as SQL NULL.
+// nullableTime returns the fixed-width timestamp string for a non-zero
+// time, or nil — so an unset/zero time binds as SQL NULL.
 func nullableTime(p *time.Time) any {
 	if p == nil || p.IsZero() {
 		return nil
@@ -658,10 +660,13 @@ func nullableTime(p *time.Time) any {
 	return formatRFC3339(*p)
 }
 
-// formatRFC3339 renders a time as the lex-sortable UTC RFC3339Nano string
-// the pipeline_runs timestamp columns store.
+// formatRFC3339 renders a time as the lex-sortable UTC timestamp string
+// the pipeline_runs timestamp columns store. Fixed-width (tsformat, #990):
+// RFC3339Nano truncates trailing-zero fractions, which breaks string
+// comparison inside a shared second — the quartermaster sampler compares
+// ended_at against its scan bounds lexicographically.
 func formatRFC3339(t time.Time) string {
-	return t.UTC().Format(time.RFC3339Nano)
+	return tsformat.Format(t)
 }
 
 // parseRFC3339Opt parses an optional RFC3339Nano string; empty → zero time.

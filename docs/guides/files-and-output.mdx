@@ -29,7 +29,7 @@ Crew Container (crewship-team-{slug})
 | `/workspace/` | Temporary files, scratch space for agent work | Internal to container |
 | `/output/{slug}/` | Agent output files | Visible in UI Files panel |
 | `/crew/shared/` | Files shared between all agents in the crew | All agents in the crew |
-| `/secrets/{slug}/` | Credential files (read-only) | Per-agent, injected at startup |
+| `/secrets/{slug}/` | Credential files (read-only, in-memory tmpfs — written at run start, removed at run end, never on the host disk) | Per-agent, injected per run |
 | `/crew/agents/{slug}/` | Agent home directory with memory and config | Per-agent |
 
 ## File Listing

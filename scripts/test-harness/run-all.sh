@@ -15,7 +15,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 QUICK=0
 [[ "${1:-}" == "--quick" ]] && QUICK=1
 
-tests=(test-memory.sh test-delegation.sh test-notifications.sh test-orchestration.sh test-credentials.sh)
+tests=(test-memory.sh test-delegation.sh test-notifications.sh test-orchestration.sh test-credentials.sh test-keeper.sh)
 (( QUICK == 0 )) && tests+=(test-determinism.sh)
 [[ "${WITH_GITHUB:-0}" == "1" ]] && tests+=(test-realworld-github.sh)
 # Keeper adversarial suite — opt-in (creates HARNESS_ credentials + probes the

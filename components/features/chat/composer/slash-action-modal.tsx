@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { apiFetch } from "@/lib/api-fetch"
+import { devWarn } from "@/lib/client-log"
 import type { SlashActionSchema, SlashFormField } from "@/hooks/use-slash-commands"
 
 /**
@@ -138,13 +139,13 @@ function Form({
         body: JSON.stringify(buildPayload(command.id, values)),
       })
       if (!res.ok) {
-        // Log raw body to console for operator debugging; surface
+        // Log raw body dev-only for operator debugging; surface
         // only a status-mapped sanitized message to the user.
         // Credential endpoint can return plaintext secret material
         // in validation errors, so the body MUST NOT reach the DOM.
         const body = await res.text().catch(() => "")
         if (body) {
-          console.warn(`[slash ${command.id}] server error:`, body)
+          devWarn(`[slash ${command.id}] server error:`, body)
         }
         toast.error(humanizeError(res.status, body))
         return
@@ -416,8 +417,8 @@ function buildPayload(id: string, values: Record<string, string>): unknown {
 // echoed — the credential endpoint can include plaintext secret
 // material in validation errors, and the routine / issue endpoints
 // can include SQL fragments / stack traces in their 500 paths. The
-// raw text goes to console.warn for operator debugging; the toast
-// gets the status-mapped human message only.
+// raw text goes to a dev-only devWarn for operator debugging; the
+// toast gets the status-mapped human message only.
 //
 // `body` is no longer consumed — kept in the signature for caller
 // compatibility but the modal now logs it before calling this fn.

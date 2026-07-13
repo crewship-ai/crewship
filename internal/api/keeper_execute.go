@@ -70,6 +70,22 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cross-tenant binding: same guard as HandleRequest, and more critical
+	// here — an ALLOW on /execute injects the plaintext secret into
+	// body.container_id and runs a command there. This route is internalAuth-only
+	// with a body-carried workspace_id, so requireInternal's query-scope injection
+	// does not constrain it. Reject before ANY credential lookup or container
+	// exec: a workspace-A token must not name workspace-B's agent/crew/credential
+	// to have B's secret injected into an attacker-chosen container.
+	// assertBoundCrewWorkspaceDB additionally proves the named crew belongs to
+	// that workspace. No-op for master-token callers (empty binding).
+	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
+		return
+	}
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.RequestingCrewID) {
+		return
+	}
+
 	// Resolve credential_name to credential_id if only name provided
 	if body.CredentialID == "" && body.CredentialName != "" {
 		err := h.db.QueryRowContext(r.Context(), `
@@ -223,6 +239,12 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:         time.Now().UTC(),
 	}
 
+	// #1021: FATAL. /execute is the highest-stakes keeper path — an ALLOW
+	// injects the plaintext secret into a container and runs a command with
+	// it. Proceeding with a swallowed audit INSERT would let that happen with
+	// NO record; an attacker inducing DB write pressure could suppress the
+	// trail while still getting the secret + exec. Fail closed before any
+	// evaluation or injection.
 	if _, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO keeper_requests
 		  (id, requesting_agent_id, requesting_crew_id, credential_id, task_id, intent,
@@ -230,8 +252,9 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?, ?, NULLIF(?,?), ?, 'execute', ?, 'PENDING', ?)`,
 		reqID, body.RequestingAgentID, body.RequestingCrewID, body.CredentialID,
 		body.TaskID, "", body.Intent, body.Command, req.CreatedAt.Format(time.RFC3339)); err != nil {
-		h.logger.Error("keeper execute: insert audit record", "error", err)
-		// Non-fatal — continue with evaluation
+		h.logger.Error("keeper execute: insert PENDING audit record failed; refusing to decide without an audit row", "error", err)
+		replyError(w, http.StatusInternalServerError, "audit persistence failed")
+		return
 	}
 
 	// Load agent's recent conversation history for Keeper context
@@ -379,6 +402,14 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	// Scrub the credential value from any output it may have leaked into.
 	// Add encoding variants (base64, URL) to catch exfiltration attempts like
 	// "echo $TOKEN | base64" that would otherwise bypass literal-only scrubbing.
+	//
+	// TODO(scrubber): this inline block predates (and was the template for)
+	// scrubber.AddSecretValues, which registers the identical literal +
+	// base64/url/hex/reversed patterns. Replace the block with
+	// `s.AddSecretValues(plainValue)` once the keeper_request/execute
+	// route-binding rework lands — swapping now would change the redaction
+	// marker ([REDACTED:keeper-secret] → [REDACTED:secret-value]) and churn
+	// a file a parallel branch owns.
 	s := scrubber.New()
 	if plainValue != "" {
 		if err := s.AddPattern("keeper-secret", regexp.QuoteMeta(plainValue)); err != nil {

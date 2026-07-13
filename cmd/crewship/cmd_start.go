@@ -25,6 +25,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/crashreport"
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/mailer"
@@ -98,6 +99,15 @@ var startCmd = &cobra.Command{
 			return fmt.Errorf("bootstrap secrets: %w", err)
 		}
 		bootCancel()
+
+		// Fail fast on a misconfigured master-key rotation: if
+		// CREWSHIP_ENCRYPTION_KEY_VERSION names a version whose key env
+		// var is missing or malformed, every credential write would 500
+		// at request time. One clear startup error beats a trail of
+		// mid-request failures.
+		if err := encryption.VerifyCurrentKey(); err != nil {
+			return fmt.Errorf("encryption key configuration invalid: %w", err)
+		}
 
 		cfg, err := config.Load(configPath)
 		if err != nil {

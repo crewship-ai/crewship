@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -17,20 +18,18 @@ import (
 //
 // The full trigger flow runs a background goroutine that needs the
 // orchestrator + container provider + log writer stack. We cover the
-// pre-goroutine surface (constructor wiring, secret lookup delegation,
-// the ResolveAgent error branch that bails before the goroutine spawns)
-// and the ServeHTTP delegation contract.
+// pre-goroutine surface (constructor wiring, the crew-scoped DB secret
+// lookup, the ResolveAgent error branch that bails before the goroutine
+// spawns) and the ServeHTTP delegation contract.
 // ---------------------------------------------------------------------------
 
-// fakeChatResolver records calls to GetWebhookSecret / ResolveAgent so
-// tests can assert the trigger handler routes through the resolver before
-// reaching the orchestrator. Other methods exist to satisfy the
-// chatbridge.ChatResolver interface; they return zero values.
+// fakeChatResolver records calls to ResolveAgent so tests can assert the
+// trigger handler routes through the resolver before reaching the
+// orchestrator. Other methods exist to satisfy the chatbridge.ChatResolver
+// interface; they return zero values. Webhook secrets are NOT resolved here:
+// lookupSecret reads the agents table directly (#999), so tests seed rows
+// via seedWebhookSecretAgent instead of stubbing a resolver method.
 type fakeChatResolver struct {
-	lookupCalledWithAgentID      string
-	lookupCalledWithCrewID       string
-	lookupReturnSecret           string
-	lookupReturnErr              error
 	resolveCalledWithAgentID     string
 	resolveCalledWithWorkspaceID string
 	resolveReturnInfo            *chatbridge.ChatInfo
@@ -48,11 +47,6 @@ func (f *fakeChatResolver) ResolveAgent(_ context.Context, agentID, workspaceID 
 	f.resolveCalledWithWorkspaceID = workspaceID
 	return f.resolveReturnInfo, f.resolveReturnErr
 }
-func (f *fakeChatResolver) GetWebhookSecret(_ context.Context, crewID, agentID string) (string, error) {
-	f.lookupCalledWithAgentID = agentID
-	f.lookupCalledWithCrewID = crewID
-	return f.lookupReturnSecret, f.lookupReturnErr
-}
 func (f *fakeChatResolver) CreateRun(_ context.Context, _, _, _, _, _ string, _ map[string]interface{}) error {
 	return nil
 }
@@ -67,6 +61,25 @@ func (f *fakeChatResolver) UpdateChatTitle(_ context.Context, _, _ string) error
 // Compile-time interface satisfaction — catches a chatbridge.ChatResolver
 // method-set drift before the test binary builds.
 var _ chatbridge.ChatResolver = (*fakeChatResolver)(nil)
+
+// seedWebhookSecretAgent seeds a crew + agent row carrying webhook_secret so
+// lookupSecret's crew-scoped DB read can be exercised against real rows
+// (#999 — the secret never leaves this process over IPC). secret == "" seeds
+// a NULL webhook_secret (the not-configured shape).
+func seedWebhookSecretAgent(t *testing.T, db *sql.DB, wsID, crewID, agentID, secret string) {
+	t.Helper()
+	seedCrewRow(t, db, crewID, wsID, "C-"+crewID, "c-"+crewID)
+	var sec any = secret
+	if secret == "" {
+		sec = nil
+	}
+	if _, err := db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role, status,
+		cli_adapter, tool_profile, timeout_seconds, memory_enabled, webhook_secret)
+		VALUES (?, ?, ?, ?, ?, 'AGENT', 'IDLE', 'CLAUDE_CODE', 'CODING', 1800, 0, ?)`,
+		agentID, wsID, crewID, "N-"+agentID, "s-"+agentID, sec); err != nil {
+		t.Fatalf("seed webhook agent %s: %v", agentID, err)
+	}
+}
 
 // ---- NewWebhookHandler ----
 
@@ -88,7 +101,7 @@ func TestNewWebhookHandler_WiresAllDependenciesAndBuildsInnerHandler(t *testing.
 		t.Error("logger not stored")
 	}
 	if h.resolver != resolver {
-		t.Error("resolver not stored — lookupSecret + trigger would dispatch to the wrong source")
+		t.Error("resolver not stored — trigger would dispatch to the wrong source")
 	}
 	if h.handler == nil {
 		t.Fatal("inner webhook.Handler not constructed; ServeHTTP would nil-deref")
@@ -97,36 +110,51 @@ func TestNewWebhookHandler_WiresAllDependenciesAndBuildsInnerHandler(t *testing.
 
 // ---- lookupSecret ----
 
-func TestLookupSecret_DelegatesToResolverWithAgentID(t *testing.T) {
-	// Source: lookupSecret discards the first arg (the URL path identifier)
-	// and forwards only the agentID to the resolver. Pin that contract so
-	// a refactor that accidentally passes the path arg can't sneak in.
-	resolver := &fakeChatResolver{lookupReturnSecret: "shhh"}
-	h := NewWebhookHandler(setupTestDB(t), newTestLogger(), resolver, nil, nil, nil, nil)
+func TestLookupSecret_ReadsCrewScopedRowFromDB(t *testing.T) {
+	// lookupSecret reads webhook_secret straight from the local agents table
+	// (#999 — the secret never travels over the internal IPC hop), and the
+	// (crew, agent) pair named in the webhook URL scopes the row: an agent id
+	// alone must not resolve another crew's secret.
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	seedWebhookSecretAgent(t, db, wsID, "crew-1", "agent-7", "shhh")
+	h := NewWebhookHandler(db, newTestLogger(), &fakeChatResolver{}, nil, nil, nil, nil)
 
-	got, err := h.lookupSecret(context.Background(), "ignored-path-id", "agent-7")
+	got, err := h.lookupSecret(context.Background(), "crew-1", "agent-7")
 	if err != nil {
 		t.Fatalf("lookupSecret: %v", err)
 	}
 	if got != "shhh" {
 		t.Errorf("secret = %q, want \"shhh\"", got)
 	}
-	if resolver.lookupCalledWithAgentID != "agent-7" {
-		t.Errorf("resolver called with %q, want \"agent-7\" (the second arg, not the first)", resolver.lookupCalledWithAgentID)
+
+	if secret, err := h.lookupSecret(context.Background(), "crew-wrong", "agent-7"); err == nil || secret != "" {
+		t.Errorf("wrong-crew lookup = (%q, %v), want empty secret + error (crew scoping must engage)", secret, err)
 	}
 }
 
-func TestLookupSecret_PropagatesResolverError(t *testing.T) {
-	// A resolver error must bubble — the webhook handler returns 401 from
-	// upstream when the secret can't be looked up; a swallowed error would
-	// silently accept unauthenticated webhooks.
-	want := errors.New("agent not found")
-	resolver := &fakeChatResolver{lookupReturnErr: want}
-	h := NewWebhookHandler(setupTestDB(t), newTestLogger(), resolver, nil, nil, nil, nil)
+func TestLookupSecret_ErrorsBubbleForMissingOrUnconfiguredAgent(t *testing.T) {
+	// A lookup error must bubble — the webhook handler maps it to 404
+	// upstream; a swallowed error would silently accept unauthenticated
+	// webhooks.
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	seedWebhookSecretAgent(t, db, wsID, "crew-1", "agent-nosecret", "") // NULL webhook_secret
+	h := NewWebhookHandler(db, newTestLogger(), &fakeChatResolver{}, nil, nil, nil, nil)
 
-	_, err := h.lookupSecret(context.Background(), "x", "agent-x")
-	if err != want {
-		t.Errorf("err = %v, want %v (errors should propagate unchanged)", err, want)
+	if _, err := h.lookupSecret(context.Background(), "crew-1", "agent-ghost"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("unknown agent err = %v, want \"not found\"", err)
+	}
+	if _, err := h.lookupSecret(context.Background(), "crew-1", "agent-nosecret"); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Errorf("NULL-secret agent err = %v, want \"not configured\"", err)
+	}
+
+	// nil db (test wiring) must refuse rather than pretend a secret matched.
+	hn := NewWebhookHandler(nil, newTestLogger(), &fakeChatResolver{}, nil, nil, nil, nil)
+	if _, err := hn.lookupSecret(context.Background(), "crew-1", "agent-7"); err == nil {
+		t.Error("nil-db lookup succeeded; want error")
 	}
 }
 

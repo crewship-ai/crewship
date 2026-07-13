@@ -38,13 +38,18 @@ func (covKReqFailEmitter) Emit(_ context.Context, _ journal.Entry) (string, erro
 
 func (covKReqFailEmitter) Flush(_ context.Context) error { return nil }
 
-// covKReqBroadcaster records keeper events.
+// covKReqBroadcaster records keeper events and inbox invalidations.
 type covKReqBroadcaster struct {
-	events []map[string]any
+	events       []map[string]any
+	inboxUpdated []string // sources
 }
 
 func (b *covKReqBroadcaster) BroadcastKeeperEvent(_ string, event map[string]any) {
 	b.events = append(b.events, event)
+}
+
+func (b *covKReqBroadcaster) BroadcastInboxUpdated(_ string, source string) {
+	b.inboxUpdated = append(b.inboxUpdated, source)
 }
 
 func covKReqDecode(t *testing.T, raw []byte) keeper.RequestResult {
@@ -197,7 +202,13 @@ func TestCovKReq_RiskScoreClampedToMinimum(t *testing.T) {
 // TestCovKReq_InsertAndUpdateFailures_NonFatal forces both keeper_requests
 // writes to fail via RAISE(ABORT) triggers; the decision flow must still
 // answer 200 with the gatekeeper verdict (writes are best-effort).
-func TestCovKReq_InsertAndUpdateFailures_NonFatal(t *testing.T) {
+// TestCovKReq_InsertFailure_FailsClosed pins the #1021 hardening (inverting the
+// former "…NonFatal" contract): a failed PENDING keeper_requests INSERT is now
+// FATAL. A keeper decision — including an ALLOW that leads to credential
+// injection — must never proceed with no audit row, or an attacker who can
+// induce DB write pressure could suppress the trail while still obtaining the
+// decision. The handler must 500 before evaluating, not 200 with the decision.
+func TestCovKReq_InsertFailure_FailsClosed(t *testing.T) {
 	db := setupTestDB(t)
 	wsID, crewID, agentID, credID := seedKeeperFixture(t, db)
 	execOrFatal(t, db, `CREATE TRIGGER covkreq_block_ins BEFORE INSERT ON keeper_requests
@@ -210,11 +221,9 @@ func TestCovKReq_InsertAndUpdateFailures_NonFatal(t *testing.T) {
 		RequestingAgentID: agentID, RequestingCrewID: crewID, WorkspaceID: wsID,
 		CredentialID: credID, Intent: "rotate the deploy key",
 	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d; body=%s", rr.Code, rr.Body.String())
-	}
-	if res := covKReqDecode(t, rr.Body.Bytes()); res.Decision != keeper.DecisionAllow {
-		t.Errorf("decision = %v, want ALLOW despite failed persistence", res.Decision)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (audit INSERT failure must be fatal — no decision without an audit row); body=%s",
+			rr.Code, rr.Body.String())
 	}
 }
 

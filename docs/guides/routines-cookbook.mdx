@@ -338,9 +338,10 @@ If the webhook upstream re-fires with the same `Idempotency-Key`, the second req
 ```bash
 # 1. Author the routine and save it. `routine save` always runs the
 #    test_run gate inline before persisting (no skip flag) — a failing
-#    test_run aborts the save. --author-crew takes the owning crew_id.
+#    test_run aborts the save. --author-crew takes the owning crew's
+#    slug or id.
 crewship routine save --name='my-summarizer' --definition=routine.json \
-  --author-crew=<crew_id>
+  --author-crew=<crew-slug-or-id>
 
 # 2. Bench at fast tier — 10 runs to characterise
 crewship routine bench my-summarizer --runs 10 --tier-override fast

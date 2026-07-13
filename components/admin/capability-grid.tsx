@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { apiFetch } from "@/lib/api-fetch"
+import { devWarn } from "@/lib/client-log"
 import { cn } from "@/lib/utils"
 import {
   ALL_CAPABILITIES,
@@ -191,11 +192,11 @@ function CapabilityRow({
       if (!res.ok) {
         // Sanitize the user-facing message — server bodies can carry
         // SQL fragments / stack traces that don't belong in a toast.
-        // We log the full text to console for operator debugging but
+        // We log the full text dev-only for operator debugging but
         // surface only the humanized message to the UI.
         const text = await res.text().catch(() => "")
         if (text) {
-          console.warn("[capability PATCH] server error:", text)
+          devWarn("[capability PATCH] server error:", text)
         }
         throw new Error(humanizePatchError(res.status))
       }
@@ -581,12 +582,12 @@ async function applyPresetAll(
     return
   }
   if (ok === 0) {
-    // Whole batch failed — log raw bodies to the console for
-    // operator debugging, surface a sanitized message + status
-    // codes to the toast. We never put server response text into
-    // the UI directly (see humanizePatchError rationale).
+    // Whole batch failed — log raw bodies dev-only for operator
+    // debugging, surface a sanitized message + status codes to the
+    // toast. We never put server response text into the UI directly
+    // (see humanizePatchError rationale).
     for (const f of failed) {
-      console.warn(`[bulk preset] member ${f.id} failed: HTTP ${f.status}`, f.body)
+      devWarn(`[bulk preset] member ${f.id} failed: HTTP ${f.status}`, f.body)
     }
     const firstStatus = failed[0].status
     toast.error(

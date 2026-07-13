@@ -140,38 +140,6 @@ func TestResolveAgentSendsWorkspaceScope(t *testing.T) {
 	}
 }
 
-// ---------- GetWebhookSecret crew scope ----------
-
-func TestGetWebhookSecretSendsCrewScope(t *testing.T) {
-	t.Parallel()
-	var gotCrew string
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotCrew = r.URL.Query().Get("crew_id")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"webhook_secret":"sek"}`))
-	}))
-	t.Cleanup(ts.Close)
-	r := NewIPCResolver(ts.URL, "tok", slog.Default())
-	got, err := r.GetWebhookSecret(context.Background(), "crew 1", "a1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "sek" {
-		t.Errorf("secret = %q", got)
-	}
-	if gotCrew != "crew 1" {
-		t.Errorf("crew_id query = %q, want %q", gotCrew, "crew 1")
-	}
-}
-
-func TestGetWebhookSecretNetworkError(t *testing.T) {
-	t.Parallel()
-	r := NewIPCResolver("http://127.0.0.1:1", "tok", slog.Default()) // closed port
-	if _, err := r.GetWebhookSecret(context.Background(), "", "a1"); err == nil {
-		t.Fatal("expected network error")
-	}
-}
-
 // ---------- request-creation (bad base URL) error branches ----------
 
 func TestRequestCreationErrorsOnBadBaseURL(t *testing.T) {
@@ -197,9 +165,6 @@ func TestRequestCreationErrorsOnBadBaseURL(t *testing.T) {
 		t.Error("UpdateChatTitle: expected request-creation error")
 	} else if !strings.Contains(err.Error(), "update chat title: create request") {
 		t.Errorf("UpdateChatTitle error = %v, want 'update chat title: create request' wrap", err)
-	}
-	if _, err := r.GetWebhookSecret(ctx, "", "a1"); err == nil {
-		t.Error("GetWebhookSecret: expected request-creation error")
 	}
 	if _, err := r.ResolveChat(ctx, "c1"); err == nil {
 		t.Error("ResolveChat: expected request-creation error")

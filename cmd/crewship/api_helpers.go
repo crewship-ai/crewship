@@ -101,6 +101,26 @@ func patchJSON(client *cli.Client, path string, body any, out any) error {
 	return cli.ReadJSON(resp, out)
 }
 
+// putJSON sends a PUT with body and decodes into out (if non-nil).
+// Mirrors postJSON/patchJSON — used by whole-row replace endpoints
+// (persona layers, keeper governance) whose handlers return the
+// stored state. Promoted here from cmd_persona.go when keeper became
+// the second caller.
+func putJSON(client *cli.Client, path string, body any, out any) error {
+	resp, err := client.Put(path, body)
+	if err != nil {
+		return err
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return err
+	}
+	if out == nil {
+		_ = resp.Body.Close()
+		return nil
+	}
+	return cli.ReadJSON(resp, out)
+}
+
 // deleteJSON sends a DELETE; ignores response body on success.
 func deleteJSON(client *cli.Client, path string) error {
 	resp, err := client.Delete(path)

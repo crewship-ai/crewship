@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -67,22 +68,42 @@ var validAuditEvents = map[CredentialAuditEvent]struct{}{
 	AuditEventRejected: {},
 }
 
-// RecordCredentialEvent appends one row to credential_audit and, when
-// event is USE, also refreshes the denormalised last_used_at +
-// last_used_ips on credentials.
+// credentialAuditDropped counts audit events that a best-effort call
+// site failed to persist (see recordCredentialEventBestEffort). The
+// mutation the event describes already succeeded, so the row is gone
+// for good — this counter is the "lost compliance event" signal the
+// TODO at the Create call site asked for, exposed on /metrics as
+// crewshipd_credential_audit_dropped_total.
+var credentialAuditDropped atomic.Int64
+
+// CredentialAuditDroppedTotal returns the number of credential audit
+// events dropped by best-effort writers since process start. Read by
+// the /metrics handler in internal/server.
+func CredentialAuditDroppedTotal() int64 {
+	return credentialAuditDropped.Load()
+}
+
+// auditExecer is the subset of *sql.DB / *sql.Tx the audit writers
+// need — lets RecordCredentialEventTx ride a caller-owned transaction
+// while RecordCredentialEvent keeps managing its own.
+type auditExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// RecordCredentialEventTx appends one row to credential_audit — and,
+// for USE events, refreshes the denormalised last_used_at +
+// last_used_ips snapshot — using the CALLER's transaction. Commit and
+// rollback stay with the caller: a mutation handler that already runs
+// in a tx includes its audit row atomically, so the timeline can never
+// silently miss an event the mutation succeeded for (audit fails →
+// whole mutation rolls back).
 //
-// Callers (today: rotation + test handlers; tomorrow: sidecar event
-// stream) provide the full context. ip is optional — empty string is
-// stored as NULL. metadata is optional — pass nil for events whose
-// type alone is sufficient.
-//
-// The whole operation runs in a single transaction so the row-level
-// snapshot can never drift from the timeline (e.g. last_used_at
-// pointing at an event that wasn't actually persisted).
-func RecordCredentialEvent(
+// ip is optional — empty string is stored as NULL. metadata is
+// optional — pass nil for events whose type alone is sufficient.
+func RecordCredentialEventTx(
 	ctx context.Context,
-	db *sql.DB,
-	logger *slog.Logger,
+	tx auditExecer,
 	credentialID string,
 	event CredentialAuditEvent,
 	agentID string,
@@ -115,16 +136,6 @@ func RecordCredentialEvent(
 		ipArg = sql.NullString{Valid: true, String: ip}
 	}
 
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin audit tx: %w", err)
-	}
-	defer func() {
-		if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) && logger != nil {
-			logger.Warn("audit tx rollback", "error", rbErr)
-		}
-	}()
-
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	if _, err := tx.ExecContext(ctx, `
@@ -144,7 +155,77 @@ func RecordCredentialEvent(
 		}
 	}
 
+	return nil
+}
+
+// RecordCredentialEvent appends one row to credential_audit and, when
+// event is USE, also refreshes the denormalised last_used_at +
+// last_used_ips on credentials.
+//
+// Callers provide the full context. ip is optional — empty string is
+// stored as NULL. metadata is optional — pass nil for events whose
+// type alone is sufficient.
+//
+// The whole operation runs in a single transaction so the row-level
+// snapshot can never drift from the timeline (e.g. last_used_at
+// pointing at an event that wasn't actually persisted). Mutation
+// handlers that already run in their own transaction should call
+// RecordCredentialEventTx inside it instead, so the audit row commits
+// or rolls back together with the mutation.
+func RecordCredentialEvent(
+	ctx context.Context,
+	db *sql.DB,
+	logger *slog.Logger,
+	credentialID string,
+	event CredentialAuditEvent,
+	agentID string,
+	ip string,
+	metadata map[string]any,
+) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin audit tx: %w", err)
+	}
+	defer func() {
+		if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) && logger != nil {
+			logger.Warn("audit tx rollback", "error", rbErr)
+		}
+	}()
+
+	if err := RecordCredentialEventTx(ctx, tx, credentialID, event, agentID, ip, metadata); err != nil {
+		return err
+	}
+
 	return tx.Commit()
+}
+
+// recordCredentialEventBestEffort persists an audit event for a
+// mutation that has ALREADY committed (no surrounding tx to ride). A
+// failure never propagates to the caller — the mutation is done and
+// must not be reported as failed — but it is counted in
+// credentialAuditDropped and logged under the stable event name
+// "credential_audit_write_failed" so operators can alarm on lost
+// compliance events instead of grepping for free-form Warn lines.
+func recordCredentialEventBestEffort(
+	ctx context.Context,
+	db *sql.DB,
+	logger *slog.Logger,
+	credentialID string,
+	event CredentialAuditEvent,
+	agentID string,
+	ip string,
+	metadata map[string]any,
+) {
+	if err := RecordCredentialEvent(ctx, db, logger, credentialID, event, agentID, ip, metadata); err != nil {
+		credentialAuditDropped.Add(1)
+		if logger != nil {
+			logger.Warn("credential_audit_write_failed",
+				"event", string(event),
+				"credential_id", credentialID,
+				"error", err,
+			)
+		}
+	}
 }
 
 // pushLastUsedIP updates credentials.last_used_at and pushes the IP
@@ -152,7 +233,7 @@ func RecordCredentialEvent(
 // lastUsedIPRingSize. A repeat IP is moved to the front (so the list
 // always reads "5 most recent unique IPs in order"). NULL/empty IPs
 // are skipped — last_used_at still updates so the Stale check works.
-func pushLastUsedIP(ctx context.Context, tx *sql.Tx, credentialID, ip, now string) error {
+func pushLastUsedIP(ctx context.Context, tx auditExecer, credentialID, ip, now string) error {
 	if ip == "" {
 		_, err := tx.ExecContext(ctx, `UPDATE credentials SET last_used_at = ? WHERE id = ?`, now, credentialID)
 		return err
@@ -299,7 +380,7 @@ func (h *CredentialHandler) AuditTimeline(w http.ResponseWriter, r *http.Request
 	var exists string
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT id FROM credentials
-		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		WHERE id = ? AND workspace_id = ?`, // audit is forensic — must survive soft-delete (REVOKE is written after deleted_at is set)
 		credentialID, workspaceID).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "Credential not found")

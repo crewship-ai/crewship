@@ -868,68 +868,6 @@ func TestCovIIUpdateCredentialStatus(t *testing.T) {
 	})
 }
 
-func TestCovIIGetWebhookSecret(t *testing.T) {
-	db := setupTestDB(t)
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-	seedCrewRow(t, db, "crewW", wsID, "Crew", "crew")
-	seedAgentRow(t, db, "agentW", wsID, "crewW", "Wes", "wes", "AGENT")
-	// agentW seeded without a webhook_secret → NULL.
-	if _, err := db.Exec(
-		`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role, status, cli_adapter, tool_profile, timeout_seconds, memory_enabled, webhook_secret)
-		 VALUES ('agentWS', ?, 'crewW', 'Wsec', 'wsec', 'AGENT', 'IDLE', 'CLAUDE_CODE', 'CODING', 1800, 0, 'whsec-123')`,
-		wsID); err != nil {
-		t.Fatalf("seed agent with secret: %v", err)
-	}
-	h := &InternalHandler{db: db, logger: newTestLogger(), journal: &emitRecorder{}}
-
-	t.Run("unknown agent → 404", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/x", nil)
-		req.SetPathValue("agentId", "ghost")
-		rec := httptest.NewRecorder()
-		h.GetWebhookSecret(rec, req)
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("code=%d want 404", rec.Code)
-		}
-	})
-
-	t.Run("agent without secret → 404", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/x", nil)
-		req.SetPathValue("agentId", "agentW")
-		rec := httptest.NewRecorder()
-		h.GetWebhookSecret(rec, req)
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("code=%d want 404", rec.Code)
-		}
-	})
-
-	t.Run("happy path → 200 with secret", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/x", nil)
-		req.SetPathValue("agentId", "agentWS")
-		rec := httptest.NewRecorder()
-		h.GetWebhookSecret(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("code=%d want 200; body=%s", rec.Code, rec.Body.String())
-		}
-		if !strings.Contains(rec.Body.String(), "whsec-123") {
-			t.Fatalf("body=%s missing secret", rec.Body.String())
-		}
-	})
-
-	t.Run("DB error → 500", func(t *testing.T) {
-		db2 := setupTestDB(t)
-		h2 := &InternalHandler{db: db2, logger: newTestLogger(), journal: &emitRecorder{}}
-		db2.Close()
-		req := httptest.NewRequest(http.MethodGet, "/x", nil)
-		req.SetPathValue("agentId", "a")
-		rec := httptest.NewRecorder()
-		h2.GetWebhookSecret(rec, req)
-		if rec.Code != http.StatusInternalServerError {
-			t.Fatalf("code=%d want 500", rec.Code)
-		}
-	})
-}
-
 // ---------------------------------------------------------------------------
 // missions_internal.go
 // ---------------------------------------------------------------------------

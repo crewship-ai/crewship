@@ -115,6 +115,54 @@ func TestRollback_HappyPath_SwapsHeadDefinitionAndHash(t *testing.T) {
 	}
 }
 
+// TestListVersions_IsHeadFollowsRollback pins the #996 display contract:
+// the versions list marks HEAD from pipelines.head_version, so after a
+// rollback the marked row is the ROLLED-BACK version — not the max
+// version. Before the fix the response carried no head info at all and
+// both the CLI and the versions UI guessed rows[0] (max), showing the
+// pre-rollback version as HEAD while the rolled-back definition ran.
+func TestListVersions_IsHeadFollowsRollback(t *testing.T) {
+	h, userID, wsID := newPipelineHandlerForCRUDTest(t)
+	seedPipelineWithVersions(t, h, wsID, "pln-ishead", "ishead-slug", 3)
+
+	req := httptest.NewRequest("POST", "/x", strings.NewReader(`{"target_version":1}`))
+	req.SetPathValue("slug", "ishead-slug")
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Rollback(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("rollback: code = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	lreq := httptest.NewRequest("GET", "/x", nil)
+	lreq.SetPathValue("slug", "ishead-slug")
+	lreq = withWorkspaceUser(lreq, userID, wsID, "OWNER")
+	lrr := httptest.NewRecorder()
+	h.ListVersions(lrr, lreq)
+	if lrr.Code != http.StatusOK {
+		t.Fatalf("list versions: code = %d body=%s", lrr.Code, lrr.Body.String())
+	}
+	var rows []struct {
+		Version int  `json:"version"`
+		IsHead  bool `json:"is_head"`
+	}
+	if err := json.Unmarshal(lrr.Body.Bytes(), &rows); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("rows = %d, want 3 (history preserved)", len(rows))
+	}
+	var marked []int
+	for _, r := range rows {
+		if r.IsHead {
+			marked = append(marked, r.Version)
+		}
+	}
+	if len(marked) != 1 || marked[0] != 1 {
+		t.Errorf("is_head rows = %v, want exactly [1] (the rolled-back head, not the max version)", marked)
+	}
+}
+
 // ---- ImportPipeline ----
 
 func TestImportPipeline_BadJSON_400(t *testing.T) {

@@ -8,11 +8,13 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 	"sync/atomic"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/policy"
+	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -99,6 +101,14 @@ type InternalHandler struct {
 	// behaviour — so tests that construct the handler without a resolver are
 	// unaffected. Wired at router build time.
 	policyResolver *policy.Resolver
+	// container reaches running crew containers so a status transition to
+	// REVOKED removes materialized /secrets files, same as the public DELETE
+	// handler (#814). nil (tests, --no-docker) → reconciliation no-ops.
+	container provider.ContainerProvider
+	// reconcileWG tracks the async revoke-reconcile goroutines spawned by
+	// UpdateCredentialStatus so tests (and a graceful shutdown, if it ever
+	// wants to) can wait for them instead of sleeping.
+	reconcileWG sync.WaitGroup
 }
 
 // postRunTriggerHook is the narrow interface UpdateRun calls. The
@@ -135,6 +145,11 @@ func (h *InternalHandler) SetJournal(j journal.Emitter) {
 func (h *InternalHandler) SetKeeperEnabled(enabled bool) {
 	h.keeperEnabled.Store(enabled)
 }
+
+// SetContainer wires the container provider used to remove a revoked
+// credential's file-based /secrets entries from running containers when the
+// sidecar reports status REVOKED (#814 parity with the DELETE handler).
+func (h *InternalHandler) SetContainer(cp provider.ContainerProvider) { h.container = cp }
 
 // SetPolicyResolver wires the per-crew autonomy policy resolver used to
 // derive approval_mode in the agent-config resolve response (#810). nil is

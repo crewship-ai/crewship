@@ -280,40 +280,18 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 		return fmt.Errorf("send message: %w", err)
 	}
 
-	// Collect all text, display only at the end. Track terminal state so that
-	// callers (e.g. `crewship seed --smoke-test` which execs this subprocess)
-	// see a non-zero exit + diagnostic on error, instead of a silent success.
-	var fullText strings.Builder
-	var streamErr string // populated by "error" events
-	gotDone := false
-	readErr := error(nil)
-	for {
-		msg, err := ws.ReadMessage()
-		if err != nil {
-			readErr = err
-			break
-		}
-		event, err := cli.ParseChatEvent(msg)
-		if err != nil || event == nil {
-			continue
-		}
-		switch event.Type {
-		case "text":
-			fullText.WriteString(event.Content)
-		case "error":
-			// Sanitise on capture rather than on emit so every later
-			// use (stderr print, returned error string) is uniformly
-			// safe and we don't have to remember at each call site.
-			streamErr = sanitizeTerminal(event.Content)
-		case "done":
-			gotDone = true
-		}
-		if event.Type == "done" || event.Type == "error" {
-			break
-		}
-	}
+	// Collect all text, display only at the end. Terminal state is tracked
+	// so that callers (e.g. `crewship seed --smoke-test` which execs this
+	// subprocess) see a non-zero exit + diagnostic on error, instead of a
+	// silent success. The collect loop is shared with routine iterate
+	// (collectAgentStream, #998); timeout 0 = block until the server closes
+	// the stream, the historical interactive behaviour.
+	res := collectAgentStream(ws, 0)
+	streamErr := res.StreamErr
+	gotDone := res.GotDone
+	readErr := res.ReadErr
 
-	text := fullText.String()
+	text := res.Text
 	if text != "" {
 		// Save un-styled, control-char-stripped text to file so the saved
 		// artefact is plain markdown — useful for piping into tools or

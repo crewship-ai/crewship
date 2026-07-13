@@ -128,9 +128,6 @@ func (r *orchCovResolver) ResolveAgent(_ context.Context, agentID, workspaceID s
 	info.WorkspaceID = workspaceID
 	return &info, nil
 }
-func (r *orchCovResolver) GetWebhookSecret(_ context.Context, _, _ string) (string, error) {
-	return "", nil
-}
 func (r *orchCovResolver) CreateRun(_ context.Context, _, _, _, _, _ string, _ map[string]interface{}) error {
 	return nil
 }

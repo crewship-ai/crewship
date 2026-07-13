@@ -172,6 +172,15 @@ func TestRotate_Forbidden_VIEWER(t *testing.T) {
 	wsID := seedTestWorkspace(t, db, userID)
 	seedCredentialEnc(t, db, wsID, userID, "cred-v", "K", "v")
 
+	// The layered gate consults the caller's MEMBERSHIP row when the
+	// context role fails canRole — make the row a genuine VIEWER (chat
+	// fallback, no credential.rotate) so this asserts a real deny, not
+	// an accident of the seeded OWNER row's admin capability fallback.
+	if _, err := db.Exec(`UPDATE workspace_members SET role='VIEWER' WHERE workspace_id=? AND user_id=?`, wsID, userID); err != nil {
+		t.Fatalf("demote member: %v", err)
+	}
+	InvalidateCapabilityCache(wsID, userID)
+
 	body := bytes.NewBufferString(`{"value":"new"}`)
 	req := httptest.NewRequest("POST", "/api/v1/credentials/cred-v/rotate", body)
 	req.SetPathValue("credentialId", "cred-v")

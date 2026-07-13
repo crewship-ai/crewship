@@ -19,9 +19,10 @@ import (
 // "current" one.
 //
 // Version is monotonic per pipeline_id (1, 2, 3, ...). Content-hash
-// dedup at save time means re-saving the exact same DSL is a no-op
-// — UNIQUE (pipeline_id, definition_hash) catches it. The author
-// fields capture provenance so the diff UI can render
+// dedup at save time means re-saving already-versioned DSL creates no
+// new row — UNIQUE (pipeline_id, definition_hash) catches it and
+// head_version REPOINTS at the existing row (#996). The author fields
+// capture provenance so the diff UI can render
 // "v3 by agent xyz on 2026-05-07" rows.
 type PipelineVersion struct {
 	ID             string
@@ -37,18 +38,18 @@ type PipelineVersion struct {
 }
 
 // SaveVersion persists a new immutable version for the given
-// pipeline. Called by Store.Save in a transaction so the head
-// pointer + new row land atomically.
-//
-// The Store.Save method retains the existing in-place behaviour
-// (pipelines.definition_json + .head_version updated) for
-// backwards-compatible read paths; SaveVersion just adds the
-// historical row alongside.
+// pipeline and bumps head_version. NOTE: this is the STANDALONE,
+// non-transactional variant with no production callers today —
+// Store.Save goes through saveVersionTx so the head pointer and the
+// new row land atomically with the definition_json write. SaveVersion
+// moves head_version WITHOUT touching pipelines.definition_json; a
+// future caller must keep the two in step itself.
 //
 // Returns the persisted version. If a version with the same
 // definition_hash already exists for this pipeline, returns the
-// existing row (idempotent) and does NOT bump head_version —
-// re-saving identical content is a no-op.
+// existing row (idempotent) and REPOINTS head_version at it (#996) —
+// no new row, but the head pointer follows the saved content so an
+// A→B→A cycle never leaves head_version on B while A is live.
 func (s *Store) SaveVersion(ctx context.Context, in SaveVersionInput) (*PipelineVersion, error) {
 	if in.PipelineID == "" {
 		return nil, errors.New("SaveVersion: pipeline_id required")
@@ -70,7 +71,14 @@ SELECT id, version FROM pipeline_versions
 WHERE pipeline_id = ? AND definition_hash = ?
 LIMIT 1`, in.PipelineID, hash).Scan(&existingVersionID, &existingVersionNum)
 	if err == nil {
-		// Already exists — return it without bumping head.
+		// Already exists — repoint head at the existing row (#996)
+		// and return it. No new version number is minted.
+		if _, err := s.db.ExecContext(ctx,
+			`UPDATE pipelines SET head_version = ?, updated_at = ? WHERE id = ?`,
+			existingVersionNum, time.Now().UTC().Format(time.RFC3339Nano), in.PipelineID,
+		); err != nil {
+			return nil, fmt.Errorf("SaveVersion: repoint head (dedup): %w", err)
+		}
 		return s.getVersionByID(ctx, existingVersionID)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -210,13 +218,15 @@ WHERE pipeline_id = ? AND version = ?`, pipelineID, version)
 // rolled-back DSL.
 //
 // Rollback does NOT delete intervening versions — they stay in the
-// history. The next save creates a NEW version (e.g. 5) on top of
-// the rolled-back head, so the timeline reads:
+// history. The next save of NEW content creates a new version whose
+// parent is MAX(version) (the numbering high-water mark, not the
+// rolled-back head); a save whose content matches an existing row
+// repoints head at that row instead of minting one (#996). Timeline:
 //
-//	v1 → v2 → v3 → v4 → ROLLBACK to v2 → v5 (parent=v2)
+//	v1 → v2 → v3 → v4 → ROLLBACK to v2 (head=2) → save fix → v5
 //
 // This preserves auditability: "we tried v3 + v4, neither worked,
-// kept rolling on top of v2".
+// rolled to v2, fixed forward as v5".
 func (s *Store) Rollback(ctx context.Context, pipelineID string, targetVersion int) (*Pipeline, error) {
 	target, err := s.GetVersion(ctx, pipelineID, targetVersion)
 	if err != nil {
@@ -236,6 +246,25 @@ WHERE id = ? AND deleted_at IS NULL`,
 		return nil, ErrNotFound
 	}
 	return s.GetByID(ctx, pipelineID)
+}
+
+// HeadVersion returns pipelines.head_version for the given pipeline —
+// the version row whose content is live in definition_json. Display
+// surfaces (versions API/CLI/UI) derive the HEAD marker from this,
+// never from MAX(version): after a rollback (or a dedup'd A→B→A save)
+// the head points at an OLDER row (#996).
+func (s *Store) HeadVersion(ctx context.Context, pipelineID string) (int, error) {
+	var head int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT head_version FROM pipelines WHERE id = ? AND deleted_at IS NULL`, pipelineID,
+	).Scan(&head)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("HeadVersion: %w", err)
+	}
+	return head, nil
 }
 
 // getVersionByID is the internal lookup by pipeline_versions.id —

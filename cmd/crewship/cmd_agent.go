@@ -131,6 +131,15 @@ var agentGetCmd = &cobra.Command{
 		// unscheduled agent's detail stays lean. When set, show whether it's
 		// firing (enabled/disabled), the prompt, and the resolved last/next
 		// run so the operator can confirm the cron is live end-to-end.
+		// Webhook secret presence (never the value — show-once, #999).
+		// Hidden entirely against servers predating the field.
+		if agent.WebhookSecretSet != nil {
+			wh := "not configured (rotate to mint one)"
+			if *agent.WebhookSecretSet {
+				wh = "configured (rotate-webhook-secret to replace)"
+			}
+			pairs = append(pairs, []string{"Webhook secret", wh})
+		}
 		if agent.ScheduleCron != nil && *agent.ScheduleCron != "" {
 			state := "disabled"
 			if agent.ScheduleEnabled {
@@ -208,6 +217,7 @@ func init() {
 	agentCmd.AddCommand(agentGetCmd)
 	agentCmd.AddCommand(agentCreateCmd)
 	agentCmd.AddCommand(agentUpdateCmd)
+	agentCmd.AddCommand(agentRotateWebhookSecretCmd)
 	agentCmd.AddCommand(agentDeleteCmd)
 	agentCmd.AddCommand(agentRunsCmd)
 	agentCmd.AddCommand(agentStopCmd)
@@ -260,7 +270,12 @@ type agentDetailResponse struct {
 	// WebhookRequireTimestamp is the read side of `agent update
 	// --webhook-require-timestamp` (#815).
 	WebhookRequireTimestamp bool `json:"webhook_require_timestamp"`
-	Count                   struct {
+	// WebhookSecretSet reports whether a webhook signing secret is
+	// configured (#999). The value itself is show-once — obtain one via
+	// `agent rotate-webhook-secret`. Pointer: nil on servers predating
+	// the field, so the CLI can stay silent instead of claiming "none".
+	WebhookSecretSet *bool `json:"webhook_secret_set"`
+	Count            struct {
 		Skills      int `json:"skills"`
 		Credentials int `json:"credentials"`
 	} `json:"_count"`

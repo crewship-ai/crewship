@@ -3,9 +3,6 @@ package api
 import (
 	"context"
 	"io"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"regexp"
 	"sync/atomic"
 	"testing"
@@ -17,8 +14,9 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// FIX A — webhook secret lookup must thread crew_id so the server-side crew
-// scoping (internal_credentials.go GetWebhookSecret) actually engages.
+// FIX A — webhook secret lookup must be scoped by the crew named in the
+// webhook URL. Post-#999 lookupSecret reads the agents table directly
+// (`AND crew_id = ?`); the secret never travels over IPC.
 //
 // FIX C — webhook run ids must be CUIDs (no UnixNano collision window) and a
 // repeated Idempotency-Key must not dispatch a second run.
@@ -26,50 +24,30 @@ import (
 // Prefix: TestSecResolve* (FIX A) / TestSecWebhook2* (FIX C).
 // ---------------------------------------------------------------------------
 
-// TestSecResolveWebhookSecretSendsCrewID stands up a stub server in front of a
-// real IPCResolver and asserts the GET carries ?crew_id=. Pre-fix the resolver
-// built the URL with no query, so the server's crew scoping was dead — this is
-// the RED guard.
-func TestSecResolveWebhookSecretSendsCrewID(t *testing.T) {
-	var gotQuery atomic.Value
-	gotQuery.Store("")
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotQuery.Store(r.URL.RawQuery)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"webhook_secret":"sek"}`))
-	}))
-	t.Cleanup(ts.Close)
-
-	r := chatbridge.NewIPCResolver(ts.URL, "tok", newTestLogger())
-	if _, err := r.GetWebhookSecret(context.Background(), "crew-77", "agent-9"); err != nil {
-		t.Fatalf("GetWebhookSecret: %v", err)
-	}
-
-	raw, _ := gotQuery.Load().(string)
-	vals, err := url.ParseQuery(raw)
-	if err != nil {
-		t.Fatalf("parse query %q: %v", raw, err)
-	}
-	if got := vals.Get("crew_id"); got != "crew-77" {
-		t.Errorf("crew_id query = %q, want %q (raw=%q) — server crew scoping never engages without it", got, "crew-77", raw)
-	}
-}
-
 // TestSecResolveLookupSecretThreadsCrewID pins the WebhookHandler.lookupSecret
-// contract: the crewID from the webhook URL must be forwarded to the resolver
-// (not discarded into the `_` param as pre-fix).
+// contract: the crewID from the webhook URL must scope the DB lookup (not be
+// discarded as pre-fix, when any crew's secret was fetchable by agent id
+// alone). Two agents in different crews with distinct secrets: each resolves
+// only under its own crew, and a cross-crew lookup fails.
 func TestSecResolveLookupSecretThreadsCrewID(t *testing.T) {
-	resolver := &fakeChatResolver{lookupReturnSecret: "shhh"}
-	h := NewWebhookHandler(setupTestDB(t), newTestLogger(), resolver, nil, nil, nil, nil)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	seedWebhookSecretAgent(t, db, wsID, "crew-abc", "agent-7", "shhh")
+	seedWebhookSecretAgent(t, db, wsID, "crew-other", "agent-8", "other-secret")
+	h := NewWebhookHandler(db, newTestLogger(), &fakeChatResolver{}, nil, nil, nil, nil)
 
-	if _, err := h.lookupSecret(context.Background(), "crew-abc", "agent-7"); err != nil {
+	got, err := h.lookupSecret(context.Background(), "crew-abc", "agent-7")
+	if err != nil {
 		t.Fatalf("lookupSecret: %v", err)
 	}
-	if resolver.lookupCalledWithCrewID != "crew-abc" {
-		t.Errorf("resolver crewID = %q, want \"crew-abc\" (must thread, not discard)", resolver.lookupCalledWithCrewID)
+	if got != "shhh" {
+		t.Errorf("secret = %q, want \"shhh\"", got)
 	}
-	if resolver.lookupCalledWithAgentID != "agent-7" {
-		t.Errorf("resolver agentID = %q, want \"agent-7\"", resolver.lookupCalledWithAgentID)
+	// agent-8 lives in crew-other: asking for it under crew-abc must fail —
+	// if this passes, the crewID was discarded and crew scoping never engaged.
+	if secret, err := h.lookupSecret(context.Background(), "crew-abc", "agent-8"); err == nil || secret != "" {
+		t.Errorf("cross-crew lookup = (%q, %v), want empty secret + error (crew scoping must engage)", secret, err)
 	}
 }
 
