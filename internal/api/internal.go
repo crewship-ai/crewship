@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -59,6 +60,112 @@ func ipInPrivateNet(ip net.IP) bool {
 		}
 	}
 	return false
+}
+
+// parseInternalTrustedProxies parses CREWSHIP_INTERNAL_TRUSTED_PROXIES — a
+// comma-separated list of CIDRs or bare IPs — into networks. Empty/unset
+// returns nil (#1020): the trusted set is EXPLICIT and never auto-populated
+// with private ranges, because auto-trusting 10.0.0.0/8 on a Proxmox/on-prem
+// LAN would let any host on that LAN spoof X-Forwarded-For and erase the origin
+// gate. (This is deliberately distinct from the rate limiter's
+// parseTrustedProxies, which defaults to trusting loopback — a lower-stakes
+// client-attribution concern.) A malformed entry is logged and skipped, never
+// silently widened.
+func parseInternalTrustedProxies(csv string, logger *slog.Logger) []*net.IPNet {
+	csv = strings.TrimSpace(csv)
+	if csv == "" {
+		return nil
+	}
+	var nets []*net.IPNet
+	for _, raw := range strings.Split(csv, ",") {
+		entry := strings.TrimSpace(raw)
+		if entry == "" {
+			continue
+		}
+		if !strings.Contains(entry, "/") {
+			// Bare IP → host route (/32 or /128).
+			if ip := net.ParseIP(entry); ip != nil {
+				if ip4 := ip.To4(); ip4 != nil {
+					entry += "/32"
+				} else {
+					entry += "/128"
+				}
+			}
+		}
+		_, n, err := net.ParseCIDR(entry)
+		if err != nil {
+			if logger != nil {
+				logger.Error("CREWSHIP_INTERNAL_TRUSTED_PROXIES: ignoring invalid entry",
+					"entry", raw, "error", err)
+			}
+			continue
+		}
+		// Reject an all-zeros CIDR (0.0.0.0/0, ::/0). "Trust every proxy" is
+		// almost always a misconfig, and it specifically enables a cross-family
+		// bypass: net.IPNet.Contains is family-blind, so a trusted 0.0.0.0/0
+		// would treat a spoofed X-Forwarded-For: ::1 from any IPv4 peer as a
+		// loopback client and pass the gate. Drop it loudly.
+		if ones, _ := n.Mask.Size(); ones == 0 {
+			if logger != nil {
+				logger.Error("CREWSHIP_INTERNAL_TRUSTED_PROXIES: refusing all-zeros CIDR (would trust every peer as a proxy)",
+					"entry", raw)
+			}
+			continue
+		}
+		nets = append(nets, n)
+	}
+	if logger != nil && len(nets) > 0 {
+		strs := make([]string, len(nets))
+		for i, n := range nets {
+			strs[i] = n.String()
+		}
+		// Log the actual ranges (not just a count) so a /8-vs-/32 typo is
+		// visible to operators auditing the trust set.
+		logger.Info("internal API: trusted reverse-proxy ranges configured", "cidrs", strings.Join(strs, ","))
+	}
+	return nets
+}
+
+// ipInNets reports whether ip falls in any of nets.
+func ipInNets(ip net.IP, nets []*net.IPNet) bool {
+	for _, n := range nets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// rightmostUntrustedXFF resolves the real client IP from X-Forwarded-For when
+// the direct peer is a trusted proxy (#1020). It flattens all XFF header values
+// (comma-split, in order) and walks RIGHT→LEFT — the rightmost hops are the
+// ones our own trusted proxies appended, so the first hop NOT in the trusted
+// set is the genuine client; anything left of it is attacker-controlled and
+// ignored. Fails CLOSED (ok=false) on an empty header, an all-trusted chain, or
+// an unparseable hop — the caller then denies rather than falling back to the
+// proxy's own loopback/private RemoteAddr (which would pass the gate).
+func rightmostUntrustedXFF(xffHeaders []string, trusted []*net.IPNet) (net.IP, bool) {
+	var hops []string
+	for _, h := range xffHeaders {
+		for _, p := range strings.Split(h, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				hops = append(hops, p)
+			}
+		}
+	}
+	for i := len(hops) - 1; i >= 0; i-- {
+		ip := net.ParseIP(hops[i])
+		if ip == nil {
+			// A trusted proxy wrote a non-IP token — treat the whole chain as
+			// untrustworthy and fail closed.
+			return nil, false
+		}
+		if ipInNets(ip, trusted) {
+			continue // another trusted proxy hop; keep walking left
+		}
+		return ip, true // rightmost untrusted hop = the real client
+	}
+	return nil, false
 }
 
 type mcpCredEntry struct {
@@ -193,6 +300,14 @@ func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 	// deployed behind a trusted reverse proxy on a public interface and
 	// the operator has accepted that X-Internal-Token is the sole guard.
 	allowAny := os.Getenv("CREWSHIP_INTERNAL_ALLOW_ANY") == "true"
+	// #1020: trusted-proxy X-Forwarded-For resolution. Empty/unset = today's
+	// behaviour (gate on the direct RemoteAddr only). The set is EXPLICIT and
+	// never auto-populated with private ranges — see parseTrustedProxies.
+	trustedProxies := parseInternalTrustedProxies(os.Getenv("CREWSHIP_INTERNAL_TRUSTED_PROXIES"), h.logger)
+	if len(trustedProxies) > 0 {
+		h.logger.Info("internal API: X-Forwarded-For origin resolution enabled for trusted reverse proxies",
+			"trusted_proxy_ranges", len(trustedProxies))
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Resolve the request origin once: the network gate, the
 		// master-token loopback pin (F-6), and the audit log all need it.
@@ -200,7 +315,56 @@ func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 		if splitErr != nil {
 			host = r.RemoteAddr
 		}
-		ip := net.ParseIP(host)
+		directIP := net.ParseIP(host)
+
+		// #1020: behind a reverse proxy the direct peer is the proxy itself
+		// (Caddy/nginx, often loopback), so gating on RemoteAddr alone lets
+		// any public client through the network gate — the only guard left is
+		// then the shared X-Internal-Token. When the DIRECT peer is a
+		// configured trusted proxy, resolve the real client from
+		// X-Forwarded-For (rightmost UNTRUSTED hop) and gate on that instead.
+		// XFF is consulted ONLY for a trusted-proxy peer — a client connecting
+		// directly (untrusted RemoteAddr) can't spoof it. If a trusted proxy
+		// forwards no usable client hop (missing/empty/garbage XFF) we fail
+		// CLOSED rather than fall back to the proxy's own loopback/private
+		// address, which would sail through the gate.
+		//
+		// A forwarding header is resolved only when actually PRESENT: a trusted
+		// proxy forwarding real traffic always sets X-Forwarded-For (chain,
+		// preferred) or at least X-Real-IP (nginx's single-IP default). Prefer
+		// XFF (chain-aware, rightmost-untrusted); fall back to X-Real-IP. If a
+		// header is present but carries no usable client (empty / all-trusted /
+		// garbage) we fail CLOSED. If NEITHER header is present, the request is
+		// a same-host self-call (crewshipd's WithInternalLoopbackURL sends
+		// neither) → gate on the direct IP (loopback → allowed). Only honored
+		// for a trusted-proxy peer — a direct client can't spoof either header.
+		ip := directIP
+		if len(trustedProxies) > 0 && directIP != nil && ipInNets(directIP, trustedProxies) {
+			if xff := r.Header.Values("X-Forwarded-For"); len(xff) > 0 {
+				realIP, ok := rightmostUntrustedXFF(xff, trustedProxies)
+				if !ok {
+					h.logger.Warn("internal API: trusted proxy forwarded no usable client IP in X-Forwarded-For — refused (fail-closed)",
+						"path", r.URL.Path, "remote_addr", r.RemoteAddr,
+						"user_agent", r.Header.Get("User-Agent"))
+					replyError(w, http.StatusNotFound, "Not Found")
+					return
+				}
+				ip = realIP
+			} else if xrip := strings.TrimSpace(r.Header.Get("X-Real-IP")); xrip != "" {
+				// A trusted proxy set X-Real-IP to the real client (nginx
+				// default). Single value from a trusted peer; fail closed on a
+				// non-IP so a garbage header can't fall through to the proxy IP.
+				realIP := net.ParseIP(xrip)
+				if realIP == nil {
+					h.logger.Warn("internal API: trusted proxy sent an unparseable X-Real-IP — refused (fail-closed)",
+						"path", r.URL.Path, "remote_addr", r.RemoteAddr)
+					replyError(w, http.StatusNotFound, "Not Found")
+					return
+				}
+				ip = realIP
+			}
+			// else: neither header → same-host self-call → gate on directIP.
+		}
 		isLoopback := ip != nil && ip.IsLoopback()
 
 		// Network gate first: refuse the request before constant-time

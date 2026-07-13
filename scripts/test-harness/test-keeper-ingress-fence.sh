@@ -202,12 +202,40 @@ if [[ "$probe" == "404" ]]; then
 elif [[ "$probe" == "403" ]]; then
   warn "network-origin gate is DEFEATED for this deployment: off-host caller → 403 (token reject), not 404."
   warn "  → The internal keeper surface is internet-reachable; only the static shared X-Internal-Token guards it."
-  warn "  → Anyone who reads that token from a container env can replay it off-host and (per keeper_execute.go"
-  warn "     trusting body requesting_agent_id/container_id) impersonate any agent + exec in any container."
+  warn "  → Fix (#1020): deny /api/v1/internal/* at the proxy, OR set CREWSHIP_INTERNAL_TRUSTED_PROXIES=<proxy-IP>"
+  warn "     on the server so the real client is resolved from X-Forwarded-For and this off-host caller gets 404."
   warn "  → Fence still holds (sections 2–7), so this is a hardening gap, not a live breach."
 else
   info "network-gate probe returned $probe (neither 404 nor 403) — inspect manually."
 fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "11. #1020 — a spoofed X-Forwarded-For from an untrusted peer changes nothing"
+# ─────────────────────────────────────────────────────────────────────────────
+# Config-independent invariant: this harness is an untrusted client (direct, or
+# behind the public proxy). A spoofed XFF claiming a loopback/private origin
+# must NOT alter the origin-gate outcome — XFF is honored only for a peer in
+# CREWSHIP_INTERNAL_TRUSTED_PROXIES, and even then only the rightmost UNtrusted
+# hop counts (the proxy appends our real IP to the right; our injected leftmost
+# value is ignored). So the response with a spoofed header must equal the one
+# without, and must never be 2xx.
+base_code="$(http_code POST /api/v1/internal/keeper/execute)"
+for hdr in "X-Forwarded-For: 127.0.0.1" "X-Forwarded-For: 10.0.0.1" "X-Forwarded-For: 127.0.0.1, ::1" "X-Real-IP: 127.0.0.1"; do
+  spoof_code="$(http_code POST /api/v1/internal/keeper/execute -H "$hdr")"
+  if [[ "$spoof_code" =~ ^2 ]]; then
+    _fail "spoofed origin ($hdr)" "internal route returned $spoof_code — origin gate bypassed via a spoofed X-Forwarded-For"
+  elif [[ "$spoof_code" == "$base_code" ]]; then
+    _pass "spoofed origin ($hdr) ignored — same outcome ($spoof_code) as no header"
+  else
+    _fail "spoofed origin ($hdr)" "changed outcome $base_code → $spoof_code (an untrusted peer's XFF must have NO effect)"
+  fi
+done
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "12. #1020 — legit trusted-proxy client resolution (needs server config + private origin)"
+# ─────────────────────────────────────────────────────────────────────────────
+skip "trusted-proxy XFF resolution end-to-end (T1b)" \
+  "set CREWSHIP_INTERNAL_TRUSTED_PROXIES=<this-proxy's-IP> on the server, then: (a) from an origin INSIDE a trusted/private range, a request the proxy tags with X-Forwarded-For=<that private IP> must resolve to the private client and pass the origin gate (reaching the token check); (b) a public rightmost hop must be 404'd. Can't be faked from a public harness host — the reverse proxy appends the REAL client IP as the rightmost XFF entry, so we can only ever present as a public client here. Unit-proven in internal_ingress_trusted_proxy_sec_test.go."
 
 printf '\n%s   warnings (findings, non-fatal): %d%s\n' "$_C_YEL" "$_WARN" "$_C_OFF"
 finish
