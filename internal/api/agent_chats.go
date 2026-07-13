@@ -300,6 +300,18 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 
 	if !createdBy.Valid || createdBy.String != user.ID {
 		role := RoleFromContext(r.Context())
+		// The route registers roleSelf → scopeSelf (#1074), so the
+		// route-level scope gate never runs here. That exemption is for the
+		// creator arm above — self-cleanup of a chat the token itself
+		// created consumes no resource capability. This arm deletes ANOTHER
+		// principal's chat via canEditAgent, which passes unconditionally
+		// for OWNER/ADMIN — so a leaked CLI token narrowed to an unrelated
+		// scope must NOT reach it. Re-impose the scope scopeForRoute used to
+		// demand for this pattern before the roleSelf change.
+		if !canScope(r.Context(), "agents:write") {
+			replyForbidden(w, h.logger, user.ID, role, "chat.delete", "chat:"+chatID)
+			return
+		}
 		ok, err := canEditAgent(r.Context(), h.db, user.ID, role, agentID)
 		if err != nil {
 			h.logger.Error("delete chat gate", "error", err)
