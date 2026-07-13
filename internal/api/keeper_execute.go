@@ -239,6 +239,12 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:         time.Now().UTC(),
 	}
 
+	// #1021: FATAL. /execute is the highest-stakes keeper path — an ALLOW
+	// injects the plaintext secret into a container and runs a command with
+	// it. Proceeding with a swallowed audit INSERT would let that happen with
+	// NO record; an attacker inducing DB write pressure could suppress the
+	// trail while still getting the secret + exec. Fail closed before any
+	// evaluation or injection.
 	if _, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO keeper_requests
 		  (id, requesting_agent_id, requesting_crew_id, credential_id, task_id, intent,
@@ -246,8 +252,9 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?, ?, NULLIF(?,?), ?, 'execute', ?, 'PENDING', ?)`,
 		reqID, body.RequestingAgentID, body.RequestingCrewID, body.CredentialID,
 		body.TaskID, "", body.Intent, body.Command, req.CreatedAt.Format(time.RFC3339)); err != nil {
-		h.logger.Error("keeper execute: insert audit record", "error", err)
-		// Non-fatal — continue with evaluation
+		h.logger.Error("keeper execute: insert PENDING audit record failed; refusing to decide without an audit row", "error", err)
+		replyError(w, http.StatusInternalServerError, "audit persistence failed")
+		return
 	}
 
 	// Load agent's recent conversation history for Keeper context
