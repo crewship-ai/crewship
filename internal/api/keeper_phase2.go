@@ -129,6 +129,14 @@ type KeeperPhase2Handler struct {
 	memHealthEval *gatekeeper.MemoryHealthEvaluator
 	negativeEval  *gatekeeper.NegativeLearningEvaluator
 	broadcaster   KeeperBroadcaster
+
+	// outputBase is the host-side OutputBasePath (cfg.Storage.BasePath) —
+	// the root the docker bind-mounts hang off. It is the ONLY trusted
+	// source for an agent's on-disk .memory dir: the F4.4 negative-learning
+	// write target is derived from it + (workspace_id, agent_id), never from
+	// the request body (see resolveAgentMemoryDir / #1037). Empty disables
+	// lesson writes (fail-safe: no write beats a body-chosen write target).
+	outputBase string
 }
 
 // WithBroadcaster attaches a broadcaster for real-time keeper event
@@ -136,6 +144,42 @@ type KeeperPhase2Handler struct {
 func (h *KeeperPhase2Handler) WithBroadcaster(b KeeperBroadcaster) *KeeperPhase2Handler {
 	h.broadcaster = b
 	return h
+}
+
+// WithMemoryBase sets the host OutputBasePath used to derive per-agent
+// .memory directories server-side. Wired from cfg.Storage.BasePath in
+// server.go, mirroring PersonaHandler. When unset the negative-learning
+// ALLOW path cannot resolve a write target and skips the lesson write
+// (fail-safe) rather than trusting an attacker-supplied path.
+func (h *KeeperPhase2Handler) WithMemoryBase(outputBase string) *KeeperPhase2Handler {
+	h.outputBase = outputBase
+	return h
+}
+
+// resolveAgentMemoryDir derives the host-side .memory directory for the
+// requesting agent from trusted server state only — the agents row
+// (crew_id, slug) scoped to workspaceID — and the configured outputBase.
+// This is the security boundary for #1037: the request body's
+// agent_memory_dir is an attacker-controlled write target and MUST NOT be
+// used. Returns "" (no error) when derivation isn't possible (no base, no
+// agent_id, agent not found / cross-workspace), which callers treat as
+// "skip the lesson write" rather than falling back to any body value.
+func (h *KeeperPhase2Handler) resolveAgentMemoryDir(ctx context.Context, workspaceID, agentID string) (string, error) {
+	if h.outputBase == "" || agentID == "" || workspaceID == "" {
+		return "", nil
+	}
+	var (
+		crewID sql.NullString
+		slug   string
+	)
+	err := h.db.QueryRowContext(ctx, `
+		SELECT crew_id, slug FROM agents
+		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		agentID, workspaceID).Scan(&crewID, &slug)
+	if err != nil {
+		return "", err
+	}
+	return hostAgentMemoryDir(h.outputBase, workspaceID, crewID.String, slug), nil
 }
 
 // NewKeeperPhase2Handler builds the handler. Any evaluator may be nil
@@ -644,6 +688,27 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 		return
 	}
 
+	// #1037: the lesson write target is derived from trusted server state
+	// (the agents row for body.AgentID, scoped to the token's workspace) —
+	// NOT body.AgentMemoryDir, which an internal caller could point at any
+	// other agent's / tenant's .memory dir to poison their lessons.md. The
+	// body field is retained for wire compat but never used as a path; a
+	// non-empty mismatch is logged as a likely poisoning attempt.
+	memoryDir, mderr := h.resolveAgentMemoryDir(r.Context(), body.WorkspaceID, body.AgentID)
+	if mderr != nil {
+		// Agent not found / cross-workspace / DB error → no trusted target.
+		// Fall through with an empty dir (lesson write is skipped below);
+		// the decision is still evaluated, recorded, and escalated.
+		h.logger.Warn("keeper_phase2: negative_learning could not resolve agent memory dir; lesson write will be skipped",
+			"workspace_id", body.WorkspaceID, "agent_id", body.AgentID, "error", mderr)
+		memoryDir = ""
+	}
+	if body.AgentMemoryDir != "" && body.AgentMemoryDir != memoryDir {
+		h.logger.Warn("keeper_phase2: ignoring request-supplied agent_memory_dir (using server-derived path)",
+			"workspace_id", body.WorkspaceID, "agent_id", body.AgentID,
+			"supplied", body.AgentMemoryDir, "derived", memoryDir)
+	}
+
 	pol := h.resolvePolicySafe(r.Context(), body.CrewID)
 
 	ctx := scopeKeeperRequest(r.Context(), body.WorkspaceID, body.CrewID, body.AgentID)
@@ -652,7 +717,7 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 		CrewID:         body.CrewID,
 		AgentName:      body.AgentName,
 		CrewName:       body.CrewName,
-		AgentMemoryDir: body.AgentMemoryDir,
+		AgentMemoryDir: memoryDir,
 		Trigger:        gatekeeper.NegativeTrigger(body.Trigger),
 		ToolName:       body.ToolName,
 		FailureSnippet: body.FailureSnippet,
@@ -691,7 +756,7 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 	// (legacy callers that haven't been updated), default to OFF —
 	// safer to require operator approval than silently auto-apply.
 	autoApplyLesson := false
-	if res.WriteLesson && body.AgentMemoryDir != "" {
+	if res.WriteLesson && memoryDir != "" {
 		if body.AgentID == "" {
 			h.logger.Warn("keeper_phase2: ALLOW lesson skipped (agent_id missing, can't resolve self_learning)",
 				"workspace_id", body.WorkspaceID)
@@ -707,7 +772,7 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 	}
 
 	if autoApplyLesson {
-		werr := consolidate.WriteLesson(r.Context(), body.AgentMemoryDir, consolidate.LessonEntry{
+		werr := consolidate.WriteLesson(r.Context(), memoryDir, consolidate.LessonEntry{
 			ID:          res.Proposal.ID,
 			Kind:        res.Proposal.Kind,
 			Source:      res.Proposal.Source,
@@ -716,9 +781,9 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 		})
 		if werr != nil {
 			h.logger.Warn("keeper_phase2: WriteLesson failed (decision still recorded)",
-				"agent_memory_dir", body.AgentMemoryDir, "error", werr)
+				"agent_memory_dir", memoryDir, "error", werr)
 		}
-	} else if res.WriteLesson && body.AgentMemoryDir != "" {
+	} else if res.WriteLesson && memoryDir != "" {
 		// ALLOW but self_learning OFF — queue blocking inbox so an
 		// operator can approve the proposed lesson before it lands on
 		// the agent's lessons.md. Payload carries the full lesson
@@ -745,7 +810,7 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 				"request_id":         reqID,
 				"request_type":       string(keeper.RequestTypeNegativeLearning),
 				"agent_id":           body.AgentID,
-				"agent_memory_dir":   body.AgentMemoryDir,
+				"agent_memory_dir":   memoryDir,
 				"lesson_id":          res.Proposal.ID,
 				"lesson_kind":        string(res.Proposal.Kind),
 				"lesson_rule":        res.Proposal.Rule,
