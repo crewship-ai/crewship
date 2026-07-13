@@ -62,8 +62,13 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// consistent — never that the body workspace is the caller's. Master-
 	// token callers (empty binding) are unaffected. Mirrors the guard every
 	// other internal endpoint runs (assignments_run.go, escalation_handler.go,
-	// internal_status.go, …).
+	// internal_status.go, …). assertBoundCrewWorkspaceDB additionally proves
+	// the named crew belongs to that workspace, so a body-consistent but
+	// foreign crew cannot slip through.
 	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
+		return
+	}
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.RequestingCrewID) {
 		return
 	}
 

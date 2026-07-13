@@ -380,7 +380,7 @@ func (h *CredentialHandler) AuditTimeline(w http.ResponseWriter, r *http.Request
 	var exists string
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT id FROM credentials
-		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		WHERE id = ? AND workspace_id = ?`, // audit is forensic — must survive soft-delete (REVOKE is written after deleted_at is set)
 		credentialID, workspaceID).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "Credential not found")

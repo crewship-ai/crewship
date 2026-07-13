@@ -208,10 +208,16 @@ func (e *BehaviorEvaluator) Evaluate(ctx context.Context, req BehaviorReviewRequ
 // closed set) — we widen WARN back here by scanning the raw response
 // before falling through to the normalised value.
 func classifyBehaviorDecision(normalised, reason, raw string) BehaviorDecision {
-	low := strings.ToUpper(raw)
-	switch {
-	case strings.Contains(low, `"WARN"`) || strings.Contains(low, `"WARN" `) || strings.Contains(low, `: "WARN"`):
-		return BehaviorWarn
+	// Recover WARN by parsing the response's `decision` field — NOT by scanning
+	// the raw body for the substring `"WARN"`. A substring scan downgrades a
+	// genuine DENY/ESCALATE whose reason or surrounding prose merely mentions
+	// the WARN option token, and WARN is always non-blocking (in block mode the
+	// tool sequence would not be interrupted). Mirrors isUnknownDecisionInRaw:
+	// trust the parsed decision, not stray text.
+	if resp, err := parseResponse(raw); err == nil {
+		if strings.EqualFold(strings.TrimSpace(resp.Decision), "WARN") {
+			return BehaviorWarn
+		}
 	}
 	switch normalised {
 	case string(keeper.DecisionAllow):

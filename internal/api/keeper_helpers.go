@@ -43,7 +43,13 @@ var envVarSanitizePattern = regexp.MustCompile(`[^A-Z0-9]+`)
 // double-quoted string, or a bare non-flag token — a regex that
 // only accepts unquoted values would let the quoted forms break the
 // sequence and allow `-c` to slip past.
-var interpreterPattern = regexp.MustCompile(`(?i)\b(bash|dash|zsh|ksh|sh|python[0-9.]*|python3|perl|ruby|node|deno|bun)\b(?:\s+--?[A-Za-z][A-Za-z0-9-]*(?:(?:=[^\s]+)|(?:\s+(?:'[^']*'|"[^"]*"|[^\s'"-][^\s]*)))?)*\s+(-[A-Za-z]*[cEe][A-Za-z]*|--eval)\b`)
+// The eval-flag trigger class covers -c/-E/-e (bash/python/perl/ruby),
+// -p/--print and -r/--require (node evaluate/require), and long forms --eval /
+// --print / --require. The interpreter alternation includes php/lua/tclsh/
+// Rscript/osascript/groovy, all of which can evaluate arbitrary code and were
+// previously absent. (This is still a denylist — an argv[0] allowlist would be
+// stronger; tracked separately.)
+var interpreterPattern = regexp.MustCompile(`(?i)\b(bash|dash|zsh|ksh|sh|python[0-9.]*|python3|perl|ruby|node|deno|bun|php|lua|tclsh|Rscript|osascript|groovy)\b(?:\s+--?[A-Za-z][A-Za-z0-9-]*(?:(?:=[^\s]+)|(?:\s+(?:'[^']*'|"[^"]*"|[^\s'"-][^\s]*)))?)*\s+(-[A-Za-z]*[cEerp][A-Za-z]*|--eval|--print|--require)\b`)
 
 // scriptToolPattern matches tools with built-in shell execution
 // capabilities.
@@ -99,32 +105,58 @@ func containsDangerousShellChars(cmd string) bool {
 		return true
 	}
 
-	// Simple approach: check outside single-quoted strings.
-	// Split by single quotes — odd-indexed segments are inside quotes.
-	parts := strings.Split(cmd, "'")
-	for i, part := range parts {
-		if i%2 == 1 {
-			// Inside single quotes — skip (shell does not interpret these)
-			continue
-		}
-		// Check for dangerous patterns outside quotes. The character set
-		// includes & (a single & backgrounds the left command and runs
-		// the right one — a separator the same way ; is; this also covers
-		// &&) alongside the classic ; | > and backtick.
-		if strings.ContainsAny(part, ";|>&`") {
-			return true
-		}
-		// <( is process substitution — it runs the inner command. Plain
-		// input redirection (`cmd < file`) is deliberately NOT blocked
-		// here: it adds no exfiltration capability over a bare `cat file`,
-		// which the gate already permits.
-		if strings.Contains(part, "<(") {
-			return true
-		}
-		// && and || need no explicit check: their & and | are already in
-		// the ContainsAny set above.
-		if strings.Contains(part, "$(") || strings.Contains(part, "${") {
-			return true
+	// Scan the command tracking real shell quote state. A single quote is only
+	// a quote-context toggle when it is NOT itself inside double quotes (or
+	// backslash-escaped) — the previous strings.Split(cmd, "'") assumed every
+	// ' toggles, so one literal ' inside "…" desynced the parser against the
+	// shell and the entire remainder (with its ; | & etc.) was skipped as
+	// "quoted". We only skip bytes genuinely inside single quotes; inside double
+	// quotes the shell still expands `…`, $(…) and ${…}, so those stay flagged.
+	const danger = ";|>&`"
+	rs := []rune(cmd)
+	var inSingle, inDouble, esc bool
+	for i := 0; i < len(rs); i++ {
+		c := rs[i]
+		switch {
+		case esc:
+			esc = false
+		case inSingle:
+			if c == '\'' {
+				inSingle = false
+			}
+		case inDouble:
+			switch {
+			case c == '\\':
+				esc = true
+			case c == '"':
+				inDouble = false
+			case c == '`':
+				return true
+			case c == '$' && i+1 < len(rs) && (rs[i+1] == '(' || rs[i+1] == '{'):
+				return true
+			}
+		default:
+			switch {
+			case c == '\'':
+				inSingle = true
+			case c == '"':
+				inDouble = true
+			case c == '\\':
+				esc = true
+			case strings.ContainsRune(danger, c):
+				// ; | > & backtick — separators/redirects/background/exec.
+				return true
+			case c == '$' && i+1 < len(rs) && (rs[i+1] == '(' || rs[i+1] == '{'):
+				return true
+			case c == '<' && i+1 < len(rs) && rs[i+1] == '(':
+				// <( process substitution — runs the inner command.
+				return true
+			case c == '<' && i+1 < len(rs) && rs[i+1] == '<':
+				// << here-doc / <<< here-string — feeds data to a transform
+				// tool without a pipe, defeating output scrubbing. Plain
+				// `cmd < file` (single <) stays permitted, as before.
+				return true
+			}
 		}
 	}
 	return false
