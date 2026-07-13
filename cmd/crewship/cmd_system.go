@@ -305,6 +305,15 @@ Examples:
 		}
 		crew, _ := cmd.Flags().GetString("crew")
 		agent, _ := cmd.Flags().GetString("agent")
+		// MarkFlagRequired (below, in init()) only checks Flag.Changed — it
+		// catches --crew omitted entirely, but `--crew ""` (e.g. an unset
+		// shell variable interpolated into a script) sets Changed=true with
+		// an empty value and sails through. Keep the explicit emptiness
+		// check so a script can't silently provision a crew/agent with a
+		// blank name against the server. (#966)
+		if crew == "" || agent == "" {
+			return fmt.Errorf("--crew and --agent are required")
+		}
 		body := map[string]string{
 			"crew_name":  crew,
 			"agent_name": agent,

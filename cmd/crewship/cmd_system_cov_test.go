@@ -227,6 +227,27 @@ func TestSystemOnboardingSetupRunE_MissingFlags(t *testing.T) {
 	}
 }
 
+// Regression (#966): cobra's required-flag validation only checks
+// Flag.Changed, not emptiness — `--crew ""` (e.g. an unset shell variable
+// interpolated into a script) sets Changed=true and sails straight past
+// MarkFlagRequired, then hits RunE with a blank name. This locks that RunE
+// still rejects an explicitly-empty --crew/--agent with a clear CLI-side
+// error and never reaches the server.
+func TestSystemOnboardingSetupRunE_EmptyStringFlag(t *testing.T) {
+	stub := covSetupCli5(t)
+	covSetFlagCli5(t, systemOnboardingSetupCmd, "crew", "")
+	covSetFlagCli5(t, systemOnboardingSetupCmd, "agent", "x")
+
+	var err error
+	covCaptureStdoutCli5(t, func() { err = systemOnboardingSetupCmd.RunE(systemOnboardingSetupCmd, nil) })
+	if err == nil || !strings.Contains(err.Error(), "--crew and --agent are required") {
+		t.Errorf("expected required-flags error; got %v", err)
+	}
+	if calls := stub.CallsFor("POST", "/api/v1/onboarding/setup"); len(calls) != 0 {
+		t.Errorf("empty --crew must not reach the server, got %d calls", len(calls))
+	}
+}
+
 func TestSystemOnboardingSetupRunE_DeprecatedCredentialFlag(t *testing.T) {
 	stub := covSetupCli5(t)
 	covSetFlagCli5(t, systemOnboardingSetupCmd, "crew", "backend")
