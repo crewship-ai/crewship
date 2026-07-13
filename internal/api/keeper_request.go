@@ -164,14 +164,20 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:         time.Now().UTC(),
 	}
 
-	// Persist PENDING request
+	// Persist PENDING request. #1021: this is FATAL — a keeper decision
+	// (including an ALLOW that injects a credential) must never proceed with
+	// no audit row. Swallowing the insert and continuing let an attacker who
+	// can induce DB write pressure suppress the audit trail while still
+	// obtaining the decision. Fail closed, matching the F4 recordKeeperRequest
+	// path which 500s on the same failure.
 	if _, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO keeper_requests (id, requesting_agent_id, requesting_crew_id, credential_id, task_id, intent, decision, created_at)
 		VALUES (?, ?, ?, ?, NULLIF(?,?), ?, 'PENDING', ?)`,
 		reqID, body.RequestingAgentID, body.RequestingCrewID, body.CredentialID,
 		body.TaskID, "", body.Intent, req.CreatedAt.Format(time.RFC3339)); err != nil {
-		h.logger.Error("keeper: insert request", "error", err)
-		// Non-fatal — continue with evaluation
+		h.logger.Error("keeper: insert PENDING request failed; refusing to decide without an audit row", "error", err)
+		replyError(w, http.StatusInternalServerError, "audit persistence failed")
+		return
 	}
 
 	// Emit keeper.request to the journal so a credential access ask

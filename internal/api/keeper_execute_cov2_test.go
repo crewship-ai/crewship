@@ -103,12 +103,17 @@ func TestCovKE2_RiskScoreClampedBothEnds(t *testing.T) {
 // TestCovKE2_AuditWriteFailures_NonFatal_DenyBroadcasts — both
 // keeper_requests writes are blocked; the deny decision still returns
 // 200 and reaches the broadcaster.
-func TestCovKE2_AuditWriteFailures_NonFatal_DenyBroadcasts(t *testing.T) {
+// TestCovKE2_AuditInsertFailure_FailsClosed pins the #1021 hardening (inverting
+// the former "…NonFatal_DenyBroadcasts" contract). /execute is the highest-
+// stakes keeper path — an ALLOW injects the plaintext secret into a container
+// and runs a command. A failed PENDING audit INSERT is now FATAL: the handler
+// 500s BEFORE evaluating, so no decision is reached, no secret injected, and
+// no broadcast emitted. Proceeding on a swallowed audit write would let that
+// happen with no record.
+func TestCovKE2_AuditInsertFailure_FailsClosed(t *testing.T) {
 	db := setupTestDB(t)
 	wsID, crewID, agentID, credID := seedKeeperFixture(t, db)
 	execOrFatal(t, db, `CREATE TRIGGER covke2_block_ins BEFORE INSERT ON keeper_requests
-		BEGIN SELECT RAISE(ABORT, 'covke2 forced'); END`)
-	execOrFatal(t, db, `CREATE TRIGGER covke2_block_upd BEFORE UPDATE ON keeper_requests
 		BEGIN SELECT RAISE(ABORT, 'covke2 forced'); END`)
 	gk := &mockEvaluator{resp: keeper.GatekeeperResponse{
 		Decision: string(keeper.DecisionDeny), Reason: "nope", RiskScore: 8,
@@ -116,11 +121,12 @@ func TestCovKE2_AuditWriteFailures_NonFatal_DenyBroadcasts(t *testing.T) {
 	bc := &covKReqBroadcaster{}
 	h := newKeeperHandlerWithGK(t, db, gk).WithBroadcaster(bc)
 	rr := doKeeperExecute(h, covKE2Body(wsID, crewID, agentID, credID))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (audit INSERT failure must abort execute before decide/inject); body=%s",
+			rr.Code, rr.Body.String())
 	}
-	if len(bc.events) != 1 || bc.events[0]["decision"] != string(keeper.DecisionDeny) {
-		t.Errorf("broadcast events = %v, want one DENY", bc.events)
+	if len(bc.events) != 0 {
+		t.Errorf("broadcast events = %v, want none (handler must abort before deciding)", bc.events)
 	}
 }
 

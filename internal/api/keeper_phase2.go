@@ -224,6 +224,25 @@ func (h *KeeperPhase2Handler) notifyKeeperInbox(workspaceID string) {
 	h.broadcaster.BroadcastInboxUpdated(workspaceID, "keeper")
 }
 
+// insertKeeperInbox surfaces an F4 ESCALATE/DENY decision to the operator
+// inbox and pushes the realtime invalidation. The inbox row is the ONLY
+// operator-visible surface for these decisions, so a failed insert must NOT
+// be swallowed (#1048): the keeper_requests audit row still lands, but no
+// human is alerted that a tool/skill/behaviour was escalated or denied —
+// governance that fails silently. On insert error it writes a 500 and
+// returns false so the caller returns; the platform retries rather than the
+// escalation vanishing behind a 200. Returns true (and notifies) on success.
+func (h *KeeperPhase2Handler) insertKeeperInbox(w http.ResponseWriter, ctx context.Context, reqID, workspaceID string, item inbox.Item) bool {
+	if err := inbox.Insert(ctx, h.db, h.logger, item); err != nil {
+		h.logger.Error("keeper_phase2: ESCALATE/DENY inbox insert failed; operator not alerted",
+			"request_id", reqID, "workspace_id", workspaceID, "error", err)
+		replyError(w, http.StatusInternalServerError, "failed to surface keeper decision to operator inbox")
+		return false
+	}
+	h.notifyKeeperInbox(workspaceID)
+	return true
+}
+
 // inboxBlockingForPolicy maps the resolved Policy → the inbox.Item
 // .Blocking flag PR-B established. Strict/guided crews want a hard
 // block; trusted/full crews want a non-blocking ping. Used by every
@@ -253,6 +272,26 @@ func (h *KeeperPhase2Handler) resolvePolicySafe(ctx context.Context, crewID stri
 		return policy.Policy{AutonomyLevel: policy.AutonomyGuided, BehaviorMode: policy.BehaviorWarn}
 	}
 	return p
+}
+
+// resolvePolicyStrict resolves the crew policy WITHOUT a downgrade-on-error
+// fallback. The behavior endpoint feeds the resolved policy into the decision
+// itself (BehaviorMode block vs warn is what makes a DENY actually blocking),
+// so the guided/warn fallback resolvePolicySafe uses would fail OPEN: a crew
+// configured behavior_mode=block that hits a transient resolve error would be
+// silently evaluated as warn and a tool call that should be ShouldBlock=true
+// downgraded to non-blocking (#1047). Callers on the enforcement path must
+// treat an error as "defer the check" (HTTP 503), never as "allow". The three
+// inbox-only handlers keep resolvePolicySafe, where the guided fallback is
+// conservative (Blocking=true) and a 503 would needlessly fail a decision.
+func (h *KeeperPhase2Handler) resolvePolicyStrict(ctx context.Context, crewID string) (policy.Policy, error) {
+	if h.policy == nil {
+		return policy.Policy{}, fmt.Errorf("policy resolver not configured")
+	}
+	if crewID == "" {
+		return policy.Policy{}, fmt.Errorf("crew_id required for policy resolution")
+	}
+	return h.policy.Resolve(ctx, crewID)
 }
 
 // recordKeeperRequest is the shared INSERT into keeper_requests for
@@ -400,7 +439,7 @@ func (h *KeeperPhase2Handler) HandleSkillReview(w http.ResponseWriter, r *http.R
 	if res.Decision == keeper.DecisionEscalate || res.Decision == keeper.DecisionDeny {
 		gov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
 		title := fmt.Sprintf("Skill review: %s (%s)", body.SkillName, res.Decision)
-		_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+		if !h.insertKeeperInbox(w, r.Context(), reqID, body.WorkspaceID, inbox.Item{
 			WorkspaceID:  body.WorkspaceID,
 			Kind:         inbox.KindEscalation,
 			SourceID:     reqID,
@@ -422,8 +461,9 @@ func (h *KeeperPhase2Handler) HandleSkillReview(w http.ResponseWriter, r *http.R
 				"verify_after_decide":   res.VerifyAfterDecide,
 				"unverify_after_decide": res.UnverifyAfterDecide,
 			},
-		})
-		h.notifyKeeperInbox(body.WorkspaceID)
+		}) {
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -469,7 +509,19 @@ func (h *KeeperPhase2Handler) HandleBehavior(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	pol := h.resolvePolicySafe(r.Context(), body.CrewID)
+	// #1047: the behavior decision is DRIVEN by the resolved policy
+	// (BehaviorMode block vs warn decides whether a DENY blocks). Unlike the
+	// inbox-only handlers, a silent guided/warn fallback here fails OPEN — a
+	// block-mode crew hitting a transient resolve error would be evaluated as
+	// warn and stop blocking. Fail closed: defer the check (503) rather than
+	// downgrade enforcement.
+	pol, perr := h.resolvePolicyStrict(r.Context(), body.CrewID)
+	if perr != nil {
+		h.logger.Warn("keeper_phase2: behavior policy resolve failed; deferring check (fail-closed)",
+			"crew_id", body.CrewID, "error", perr)
+		replyError(w, http.StatusServiceUnavailable, "policy unavailable; behavior check deferred")
+		return
+	}
 
 	ctx := scopeKeeperRequest(r.Context(), body.WorkspaceID, body.CrewID, body.AgentID)
 	res, err := h.behaviorEval.Evaluate(ctx, gatekeeper.BehaviorReviewRequest{
@@ -504,7 +556,7 @@ func (h *KeeperPhase2Handler) HandleBehavior(w http.ResponseWriter, r *http.Requ
 		policy.DecisionBlockInbox:
 		gov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
 		title := fmt.Sprintf("Behavior monitor: %s on %s (%s)", body.AgentName, body.ToolName, res.Decision)
-		_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+		if !h.insertKeeperInbox(w, r.Context(), reqID, body.WorkspaceID, inbox.Item{
 			WorkspaceID:  body.WorkspaceID,
 			Kind:         inbox.KindEscalation,
 			SourceID:     reqID,
@@ -526,8 +578,9 @@ func (h *KeeperPhase2Handler) HandleBehavior(w http.ResponseWriter, r *http.Requ
 				"policy_decision": string(res.PolicyDecision),
 				"should_block":    res.ShouldBlock,
 			},
-		})
-		h.notifyKeeperInbox(body.WorkspaceID)
+		}) {
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -620,7 +673,7 @@ func (h *KeeperPhase2Handler) HandleMemoryHealth(w http.ResponseWriter, r *http.
 	if res.Decision == keeper.DecisionEscalate {
 		gov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
 		title := fmt.Sprintf("Memory health: %s (overall %.0f)", body.CrewName, res.OverallScore)
-		_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+		if !h.insertKeeperInbox(w, r.Context(), reqID, body.WorkspaceID, inbox.Item{
 			WorkspaceID:  body.WorkspaceID,
 			Kind:         inbox.KindEscalation,
 			SourceID:     reqID,
@@ -640,8 +693,9 @@ func (h *KeeperPhase2Handler) HandleMemoryHealth(w http.ResponseWriter, r *http.
 				"contradiction_count": body.ContradictionCount,
 				"auto_consolidate":    res.AutoConsolidate,
 			},
-		})
-		h.notifyKeeperInbox(body.WorkspaceID)
+		}) {
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -836,7 +890,7 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 	// surface for the success path.)
 	if res.Decision == keeper.DecisionEscalate || res.Decision == keeper.DecisionDeny {
 		title := fmt.Sprintf("Negative learning %s: %s (%s)", res.Decision, body.AgentName, body.Trigger)
-		_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+		if !h.insertKeeperInbox(w, r.Context(), reqID, body.WorkspaceID, inbox.Item{
 			WorkspaceID:  body.WorkspaceID,
 			Kind:         inbox.KindEscalation,
 			SourceID:     reqID,
@@ -857,8 +911,9 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 				"tool_name":    body.ToolName,
 				"decision":     string(res.Decision),
 			},
-		})
-		h.notifyKeeperInbox(body.WorkspaceID)
+		}) {
+			return
+		}
 	}
 
 	resp := map[string]any{

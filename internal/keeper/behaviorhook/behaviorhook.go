@@ -124,9 +124,25 @@ func (h *Hook) MaybeEvaluate(ctx context.Context, ec hooks.EventContext) (*hooks
 	// Resolve policy (cached per crew for cacheTTL by the resolver).
 	p, err := h.policy.Resolve(ctx, ec.CrewID)
 	if err != nil {
-		h.logger.Warn("behaviorhook: policy resolve failed; skipping sample",
+		// #1047: fail CLOSED. The resolved policy decides whether this
+		// monitor blocks (block mode) — skipping the sample on a resolve
+		// error silently disables a block-mode crew's safety gate, the exact
+		// fail-open the HTTP behavior handler now rejects with 503. A
+		// resolve error here is rare (the resolver caches per crew for
+		// cacheTTL, so this only fires on a cold-cache DB hiccup) and the
+		// path is already sampled 1-in-N, so blocking the interrupted step
+		// with a clear governance message is the conservative choice, not an
+		// availability hazard. The agent retries once the resolver recovers.
+		h.logger.Error("behaviorhook: policy resolve failed; blocking sample (fail-closed)",
 			"crew_id", ec.CrewID, "error", err)
-		return nil, true
+		return &hooks.BlockedError{
+			HookID: "behavior_monitor",
+			Event:  hooks.EventPostToolCall,
+			Result: hooks.Result{
+				Outcome: hooks.OutcomeBlock,
+				Message: "F4.2 behavior monitor: policy temporarily unavailable; deferring this action (retry shortly)",
+			},
+		}, true
 	}
 
 	res, err := h.ev.Evaluate(ctx, gatekeeper.BehaviorReviewRequest{
