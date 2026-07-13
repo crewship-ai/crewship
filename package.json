@@ -22,7 +22,7 @@
     "db:studio": "dotenv -- prisma studio"
   },
   "dependencies": {
-    "@casl/ability": "^7.0.0",
+    "@casl/ability": "^7.0.1",
     "@codemirror/commands": "^6.10.4",
     "@codemirror/lang-css": "^6.3.1",
     "@codemirror/lang-html": "^6.4.11",
