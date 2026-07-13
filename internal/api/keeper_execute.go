@@ -9,6 +9,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/base32"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -433,44 +434,36 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Scrub the credential value from any output it may have leaked into.
-	// Add encoding variants (base64, URL) to catch exfiltration attempts like
-	// "echo $TOKEN | base64" that would otherwise bypass literal-only scrubbing.
+	// Add encoding variants to catch exfil attempts like "echo $TOKEN | base64"
+	// that would bypass literal-only scrubbing. DEFENSE-IN-DEPTH, not a boundary
+	// (#1022/#1064): a per-secret encoding set can never enumerate every
+	// transform (gzip, split/chunk, XOR, custom alphabet, or a tool like
+	// `curl --data-binary @/proc/self/environ` that never prints the secret at
+	// all). The real containment for single-tool self-exfil is the sandbox +
+	// egress policy — EPIC #1001 M2b (private bridge + egress enforcement). This
+	// only raises the cost of the common one-liners; do not rely on it.
 	//
-	// TODO(scrubber): this inline block predates (and was the template for)
-	// scrubber.AddSecretValues, which registers the identical literal +
-	// base64/url/hex/reversed patterns. Replace the block with
-	// `s.AddSecretValues(plainValue)` once the keeper_request/execute
-	// route-binding rework lands — swapping now would change the redaction
-	// marker ([REDACTED:keeper-secret] → [REDACTED:secret-value]) and churn
-	// a file a parallel branch owns.
+	// Kept inline (rather than scrubber.AddSecretValues, which registers the
+	// same set) only to preserve the [REDACTED:keeper-secret] marker that
+	// keeper_execute_test.go pins; the encoding list is kept in sync with it.
 	s := scrubber.New()
 	if plainValue != "" {
-		if err := s.AddPattern("keeper-secret", regexp.QuoteMeta(plainValue)); err != nil {
-			h.logger.Warn("keeper execute: could not add scrub pattern", "error", err)
+		enc := func(v string) {
+			if v != "" {
+				_ = s.AddPattern("keeper-secret", regexp.QuoteMeta(v))
+			}
 		}
-		// Base64 standard encoding
-		b64Std := base64.StdEncoding.EncodeToString([]byte(plainValue))
-		if b64Std != plainValue {
-			_ = s.AddPattern("keeper-secret", regexp.QuoteMeta(b64Std))
-		}
-		// Base64 URL-safe encoding (some tools use this)
-		b64URL := base64.URLEncoding.EncodeToString([]byte(plainValue))
-		if b64URL != b64Std && b64URL != plainValue {
-			_ = s.AddPattern("keeper-secret", regexp.QuoteMeta(b64URL))
-		}
-		// URL-encoded variant
-		urlEnc := url.QueryEscape(plainValue)
-		if urlEnc != plainValue {
-			_ = s.AddPattern("keeper-secret", regexp.QuoteMeta(urlEnc))
-		}
-		// Hex-encoded variant (catches `xxd -p`, `od -An -tx1` output)
+		enc(plainValue)
+		enc(base64.StdEncoding.EncodeToString([]byte(plainValue)))
+		enc(base64.URLEncoding.EncodeToString([]byte(plainValue)))
+		enc(base64.RawStdEncoding.EncodeToString([]byte(plainValue))) // unpadded base64 (JWT-style / raw emitters)
+		enc(base64.RawURLEncoding.EncodeToString([]byte(plainValue)))
+		enc(base32.StdEncoding.EncodeToString([]byte(plainValue))) // base32
+		enc(url.QueryEscape(plainValue))
 		hexEnc := hex.EncodeToString([]byte(plainValue))
-		_ = s.AddPattern("keeper-secret", regexp.QuoteMeta(hexEnc))
-		// Reversed string (catches `rev` exfiltration)
-		reversed := reverseString(plainValue)
-		if reversed != plainValue {
-			_ = s.AddPattern("keeper-secret", regexp.QuoteMeta(reversed))
-		}
+		enc(hexEnc)                    // lower-case hex (xxd -p)
+		enc(strings.ToUpper(hexEnc))   // upper-case hex (od -A n -t x1 | tr)
+		enc(reverseString(plainValue)) // rev
 	}
 	scrubbedOutput := s.Scrub(string(rawOutput))
 

@@ -1,6 +1,7 @@
 package scrubber
 
 import (
+	"encoding/base32"
 	"encoding/base64"
 	"encoding/hex"
 	"strings"
@@ -154,4 +155,31 @@ func reverse(s string) string {
 		r[i], r[j] = r[j], r[i]
 	}
 	return string(r)
+}
+
+// TestScrubber_ExtendedEncodings_Redacted pins the #1022/#1064 defense-in-depth
+// additions: a secret exfiltrated through base32, unpadded (raw) base64, or
+// upper-case hex — common one-liners the fixed set previously missed — is now
+// redacted alongside the original std-base64/url/hex/reversed set.
+func TestScrubber_ExtendedEncodings_Redacted(t *testing.T) {
+	secret := "sk-ant-EXTENDED-ENCODINGS-secret-value-1234567890"
+	s := New()
+	if n := s.AddSecretValues(secret); n == 0 {
+		t.Fatal("AddSecretValues registered nothing")
+	}
+	cases := map[string]string{
+		"base32":         base32.StdEncoding.EncodeToString([]byte(secret)),
+		"base64-raw-std": base64.RawStdEncoding.EncodeToString([]byte(secret)),
+		"base64-raw-url": base64.RawURLEncoding.EncodeToString([]byte(secret)),
+		"hex-upper":      strings.ToUpper(hex.EncodeToString([]byte(secret))),
+		// regression: the original set still redacts.
+		"base64-std": base64.StdEncoding.EncodeToString([]byte(secret)),
+		"hex-lower":  hex.EncodeToString([]byte(secret)),
+	}
+	for name, encoded := range cases {
+		out := s.Scrub("leak: " + encoded + " done")
+		if strings.Contains(out, encoded) {
+			t.Errorf("%s encoding leaked unredacted: %q", name, out)
+		}
+	}
 }
