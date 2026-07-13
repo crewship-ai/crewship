@@ -21,8 +21,7 @@ func (s *Server) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 		ProjectID   string `json:"project_id"`
 		AssigneeID  string `json:"assignee_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+	if !decodeCappedJSON(w, r, &req) {
 		return
 	}
 	if req.Title == "" {

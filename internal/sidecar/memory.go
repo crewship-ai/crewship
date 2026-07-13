@@ -54,10 +54,7 @@ func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 		Scope  string `json:"scope"`
 		Hybrid bool   `json:"hybrid"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
-			"error": "invalid JSON body",
-		})
+	if !decodeCappedJSON(w, r, &req) {
 		return
 	}
 
