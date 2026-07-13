@@ -360,7 +360,12 @@ func (d *Dispatcher) handleRead(ctx context.Context, raw json.RawMessage) (ToolR
 	if err := ctx.Err(); err != nil {
 		return ToolResult{IsError: true, Content: "memory.read: cancelled: " + err.Error()}, nil
 	}
-	data, err := os.ReadFile(path)
+	// readRegularNoFollow (not os.ReadFile): assertMemoryFile Lstat-rejects a
+	// pre-existing symlink, but an agent can race a regular→symlink swap in the
+	// TOCTOU window before this read (#1043). O_NOFOLLOW refuses the swapped
+	// link and the regular-file check refuses FIFOs/devices — the same
+	// primitive the indexer uses.
+	data, err := readRegularNoFollow(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return ToolResult{Content: ""}, nil
 	}
@@ -498,7 +503,10 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 	// #6) so the agent can consolidate the existing file in-turn. The
 	// store stays a pure bounded store — this read is only for the
 	// guidance payload, it never widens the cap.
-	old, err := os.ReadFile(path)
+	// readRegularNoFollow (not os.ReadFile): same TOCTOU no-follow guard as the
+	// read path (#1043) — append re-reads the on-disk body after taking the
+	// lock, and must refuse a raced symlink/FIFO swap rather than follow it.
+	old, err := readRegularNoFollow(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return ToolResult{IsError: true, Content: "memory.write: " + err.Error()}, nil
 	}

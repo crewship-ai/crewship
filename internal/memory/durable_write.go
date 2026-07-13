@@ -27,6 +27,21 @@ import (
 // On any failure the target is left untouched and the tempfile is
 // cleaned up, so the caller can safely surface an is_error result
 // without having half-persisted anything.
+// writeMemoryFileNoFollow writes content to path durably, refusing first if
+// the final path component is an existing symlink (#1039). The host-side card
+// writers (WritePeerCard, WriteUserModel) run with routine privilege and
+// previously used os.WriteFile, which follows a planted final-component
+// symlink and writes the card body THROUGH it to an arbitrary host path — a
+// confused-deputy write. writeFileDurable's rename already replaces a symlink
+// rather than writing through it; the explicit Lstat turns a planted link into
+// a loud refusal (and an attack signal) instead of a silent clobber.
+func writeMemoryFileNoFollow(path string, content []byte, perm os.FileMode) error {
+	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to write through symlinked path: %s", path)
+	}
+	return writeFileDurable(path, content, perm)
+}
+
 func writeFileDurable(path string, content []byte, perm os.FileMode) (err error) {
 	var randBuf [8]byte
 	if _, rerr := rand.Read(randBuf[:]); rerr != nil {

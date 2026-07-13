@@ -130,7 +130,7 @@ func WriteUserModel(p UserModelPaths, userID, workspaceID, content string) error
 		return fmt.Errorf("users: lock: %w", err)
 	}
 	defer func() { _ = lk.Unlock() }()
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := writeMemoryFileNoFollow(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("users: write: %w", err)
 	}
 	return nil
