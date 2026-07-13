@@ -77,6 +77,18 @@ type Proxy struct {
 	onLLMCall    LLMCallObserver
 	billingMode  string // "metered" | "flat_rate" | "" — set from env at startup
 	subPlan      string // human label for flat-rate (e.g. "Anthropic Max 20×")
+
+	// dnsCache, dnsResolve, and dialer back the shared resolve-then-pin SSRF
+	// dialer (#961, cache added #1081). ONE instance lives on the Proxy and is
+	// used by both the HTTP transport's DialContext (handleHTTP /
+	// handleReverseProxy) and handleConnect's tunnel dial — a PR #1139 review
+	// finding was that handleConnect used to build a fresh cache (and dialer)
+	// per CONNECT request, so the positive DNS cache never got a hit on the
+	// HTTPS-tunnel path. dnsResolve defaults to the real resolver and is only
+	// overridden by tests (same package, unexported field).
+	dnsCache   *dnsPositiveCache
+	dnsResolve resolveFunc
+	dialer     *net.Dialer
 }
 
 // ProxyConfig configures the sidecar proxy.
@@ -109,7 +121,7 @@ type ProxyConfig struct {
 
 // NewProxy creates a forward proxy with credential injection.
 func NewProxy(cfg ProxyConfig) *Proxy {
-	return &Proxy{
+	p := &Proxy{
 		credStore:    cfg.CredStore,
 		allowlist:    cfg.Allowlist,
 		scrubber:     cfg.Scrubber,
@@ -120,20 +132,32 @@ func NewProxy(cfg ProxyConfig) *Proxy {
 		onLLMCall:    cfg.OnLLMCall,
 		billingMode:  cfg.BillingMode,
 		subPlan:      cfg.SubscriptionPlan,
-		transport: &http.Transport{
-			// #961: resolve-then-pin SSRF guard. The allowlist matches a
-			// hostname string; this closes the DNS-rebinding gap by checking
-			// every resolved IP at dial time and connecting to that exact IP.
-			// FreeMode is the operator's explicit opt-out of egress limits, so
-			// the guard permits private targets there too (no free-mode regression);
-			// the fence's teeth are in restricted mode, where the local-model
-			// endpoint path lives.
-			DialContext:         ssrfDialContext(cfg.AllowPrivate || cfg.FreeMode),
-			MaxIdleConns:        100,
-			IdleConnTimeout:     90 * time.Second,
-			TLSHandshakeTimeout: 10 * time.Second,
-		},
+		dnsCache:     newDNSPositiveCache(ssrfDNSCacheTTL),
+		dnsResolve:   net.DefaultResolver.LookupIPAddr,
+		dialer:       &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second},
 	}
+	p.transport = &http.Transport{
+		// #961: resolve-then-pin SSRF guard. The allowlist matches a
+		// hostname string; this closes the DNS-rebinding gap by checking
+		// every resolved IP at dial time and connecting to that exact IP.
+		// FreeMode is the operator's explicit opt-out of egress limits, so
+		// the guard permits private targets there too (no free-mode regression);
+		// the fence's teeth are in restricted mode, where the local-model
+		// endpoint path lives. Shares p.dnsCache with handleConnect (#1139).
+		DialContext:         p.dialSSRF,
+		MaxIdleConns:        100,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
+	return p
+}
+
+// dialSSRF is the Proxy's shared resolve-then-pin SSRF dialer. Both the HTTP
+// transport (handleHTTP / handleReverseProxy, via http.Transport.DialContext)
+// and the CONNECT tunnel path (handleConnect) call this method so they share
+// ONE dnsPositiveCache instance instead of each building its own.
+func (p *Proxy) dialSSRF(ctx context.Context, network, addr string) (net.Conn, error) {
+	return ssrfDial(ctx, network, addr, p.allowPrivate || p.freeMode, p.dnsResolve, p.dnsCache, p.dialer)
 }
 
 // ssrfDialContext returns a DialContext that resolves the target host,
@@ -155,6 +179,14 @@ type resolveFunc func(ctx context.Context, host string) ([]net.IPAddr, error)
 // quickly; long enough to spare a chatty agent a lookup on every cold dial.
 const ssrfDNSCacheTTL = 30 * time.Second
 
+// dnsCacheMaxEntries hard-caps the positive DNS cache (#1139 review). In free
+// network mode the agent chooses the hostnames it asks the sidecar to dial
+// (e.g. a wildcard-DNS domain gives it one distinct hostname per request), so
+// without a cap the map would grow without bound and slowly OOM the
+// credential-holding sidecar process. 512 comfortably covers realistic
+// distinct-upstream-host counts for a single agent session.
+const dnsCacheMaxEntries = 512
+
 // dnsCacheEntry is a cached positive resolution with its expiry.
 type dnsCacheEntry struct {
 	ips    []net.IPAddr
@@ -167,6 +199,10 @@ type dnsCacheEntry struct {
 // endpoint blocklist and pins the connection to a validated IP, so the
 // resolve-then-pin anti-rebind property is unchanged: we still only ever dial
 // an IP we validated on this call. Failed lookups are not cached.
+//
+// The map is bounded by dnsCacheMaxEntries (#1139 review): unbounded growth
+// under agent-controlled hostnames is a slow memory-exhaustion path for a
+// process that also holds decrypted credentials in memory.
 type dnsPositiveCache struct {
 	mu  sync.Mutex
 	ttl time.Duration
@@ -194,38 +230,81 @@ func (c *dnsPositiveCache) resolve(ctx context.Context, host string, fn resolveF
 		return nil, err
 	}
 	c.mu.Lock()
-	c.m[host] = dnsCacheEntry{ips: ips, expiry: now.Add(c.ttl)}
+	c.insertLocked(host, dnsCacheEntry{ips: ips, expiry: now.Add(c.ttl)}, now)
 	c.mu.Unlock()
 	return ips, nil
 }
 
+// insertLocked stores entry under host, making room first if the cache is at
+// its cap and host isn't already a key (an overwrite of an existing key never
+// grows the map, so it never needs to evict). Must be called with c.mu held.
+func (c *dnsPositiveCache) insertLocked(host string, entry dnsCacheEntry, now time.Time) {
+	if _, exists := c.m[host]; !exists && len(c.m) >= dnsCacheMaxEntries {
+		c.evictToFitLocked(now)
+	}
+	c.m[host] = entry
+}
+
+// evictToFitLocked frees at least one slot: first by dropping every entry
+// that has already expired (a cheap, always-correct reclaim — an expired
+// entry is dead weight, never served by resolve's expiry check above), then,
+// if the cache is still at cap, by dropping arbitrary entries. Go randomizes
+// map iteration order per run, so that second pass doubles as the "oldest/
+// random" fallback the review asked for without needing a separate LRU
+// structure on this hot path. Must be called with c.mu held.
+func (c *dnsPositiveCache) evictToFitLocked(now time.Time) {
+	for h, e := range c.m {
+		if !now.Before(e.expiry) {
+			delete(c.m, h)
+		}
+	}
+	for h := range c.m {
+		if len(c.m) < dnsCacheMaxEntries {
+			break
+		}
+		delete(c.m, h)
+	}
+}
+
+// ssrfDial resolves host (via cache, falling back to resolve on a miss),
+// re-validates every resolved IP against the SSRF blocklist, and dials the
+// first validated IP. Shared by the Proxy's transport DialContext and
+// handleConnect (via Proxy.dialSSRF) so both paths reuse the same cache
+// instance, and by the standalone ssrfDialContext helpers used directly by
+// tests.
+func ssrfDial(ctx context.Context, network, addr string, allowPrivate bool, resolve resolveFunc, cache *dnsPositiveCache, dialer *net.Dialer) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("sidecar: invalid dial address %q: %w", addr, err)
+	}
+	ips, err := cache.resolve(ctx, host, resolve)
+	if err != nil {
+		return nil, fmt.Errorf("sidecar: DNS resolution failed for %s: %w", host, err)
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("sidecar: no addresses for %s", host)
+	}
+	// Re-validate on EVERY dial, including cache hits — the cache holds the
+	// resolution, not the verdict. This preserves the SSRF guarantee even
+	// if a record was cached moments before a policy/blocklist evaluation.
+	for _, ip := range ips {
+		if httpsafe.IsBlockedIPForEndpoint(ip.IP, allowPrivate) {
+			return nil, fmt.Errorf("sidecar: refusing to dial blocked address %s (host %s)", ip.IP, host)
+		}
+	}
+	return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+}
+
 // ssrfDialContextWithResolver is ssrfDialContext with an injectable resolver so
 // the DNS positive cache and blocklist re-validation can be unit-tested without
-// real network lookups.
+// real network lookups. Each call gets its own dialer + cache — callers that
+// want cache sharing across multiple dials/paths (the Proxy itself) use
+// Proxy.dialSSRF instead, which holds one long-lived cache.
 func ssrfDialContextWithResolver(allowPrivate bool, resolve resolveFunc) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 	cache := newDNSPositiveCache(ssrfDNSCacheTTL)
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(addr)
-		if err != nil {
-			return nil, fmt.Errorf("sidecar: invalid dial address %q: %w", addr, err)
-		}
-		ips, err := cache.resolve(ctx, host, resolve)
-		if err != nil {
-			return nil, fmt.Errorf("sidecar: DNS resolution failed for %s: %w", host, err)
-		}
-		if len(ips) == 0 {
-			return nil, fmt.Errorf("sidecar: no addresses for %s", host)
-		}
-		// Re-validate on EVERY dial, including cache hits — the cache holds the
-		// resolution, not the verdict. This preserves the SSRF guarantee even
-		// if a record was cached moments before a policy/blocklist evaluation.
-		for _, ip := range ips {
-			if httpsafe.IsBlockedIPForEndpoint(ip.IP, allowPrivate) {
-				return nil, fmt.Errorf("sidecar: refusing to dial blocked address %s (host %s)", ip.IP, host)
-			}
-		}
-		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+		return ssrfDial(ctx, network, addr, allowPrivate, resolve, cache, dialer)
 	}
 }
 
@@ -354,9 +433,12 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Establish TCP tunnel through the resolve-then-pin SSRF guard (#961):
 	// an allowlisted hostname whose DNS now points at 169.254.169.254 /
 	// RFC1918 / loopback is refused here even though the string matched.
+	// Uses p.dialSSRF (shared dnsPositiveCache) rather than building a fresh
+	// cache per CONNECT — the earlier per-request cache meant the positive
+	// DNS cache never got a hit on this path (#1139 review).
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	targetConn, err := ssrfDialContext(p.allowPrivate || p.freeMode)(ctx, "tcp", host)
+	targetConn, err := p.dialSSRF(ctx, "tcp", host)
 	if err != nil {
 		p.logger.Error("CONNECT dial failed", "host", host, "error", err)
 		http.Error(w, "failed to connect", http.StatusBadGateway)

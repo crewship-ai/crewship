@@ -124,12 +124,22 @@ func (cs *CredStore) Remove(id string) {
 	defer cs.mu.Unlock()
 
 	filtered := cs.creds[:0]
+	removed := false
 	for _, c := range cs.creds {
 		if c.ID != id {
 			filtered = append(filtered, c)
+		} else {
+			removed = true
 		}
 	}
 	cs.creds = filtered
+	if removed {
+		// Mirrors Reap: a shrunk tier can leave a stale round-robin counter
+		// pointing past the end (self-corrects via modulo, but resetting
+		// keeps distribution clean) — kept consistent with Reap's Clear()
+		// rather than silently diverging (#1139 review nit).
+		cs.rr.Clear()
+	}
 }
 
 // Reap removes every credential whose ID is NOT in keep, returning how many
