@@ -134,6 +134,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("PATCH", "/api/v1/crews/{crewId}/members/{memberId}", roleManage, crews.UpdateMemberRole)
 	r.authedMut("DELETE", "/api/v1/crews/{crewId}/members/{memberId}", roleManage, crews.RemoveMember)
 	r.authedMut("POST", "/api/v1/crews/{crewId}/apply-avatar-style", roleManage, crews.ApplyAvatarStyle)
+	r.mux.Handle("GET /api/v1/crews/{crewId}/container-status", authed(wsCtx(http.HandlerFunc(crews.ContainerStatus))))
 
 	// Crew Connections
 	conns := NewCrewConnectionHandler(r.db, r.logger)

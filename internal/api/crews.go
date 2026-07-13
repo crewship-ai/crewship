@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -153,6 +154,79 @@ func (h *CrewHandler) restartCrewContainer(ctx context.Context, crewID string) {
 	}
 	resp.Body.Close()
 	h.logger.Info("crew container stopped after network policy change", "crew_id", crewID, "status", resp.StatusCode)
+}
+
+// ContainerStatus proxies a crew's container status from crewshipd over the
+// IPC unix socket. It backs the dashboard's restart-progress feedback after a
+// network-policy change (which stops the container so it gets recreated with
+// the new policy on the next run) and the `crewship crew container-status` CLI
+// command.
+//
+// GET /api/v1/crews/{crewId}/container-status
+//
+// Failure modes are deliberately soft: the endpoint answers 200 with a coarse
+// status string ("not_configured" when there is no IPC socket, "unknown" when
+// crewshipd is unreachable) rather than a 5xx, because the caller is a polling
+// UI/CLI that treats those as transient "still settling" states, not errors.
+// Only crew-not-found (workspace scoping) and a missing id are hard failures.
+func (h *CrewHandler) ContainerStatus(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	crewID := r.PathValue("crewId")
+
+	if crewID == "" {
+		replyError(w, http.StatusBadRequest, "crewId is required")
+		return
+	}
+
+	// Scope to the caller's workspace — never leak another workspace's crew.
+	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
+	if err != nil {
+		h.logger.Error("container status: crew lookup", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if !found {
+		replyError(w, http.StatusNotFound, "Crew not found")
+		return
+	}
+
+	if h.socketPath == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"crew_id": crewID, "status": "not_configured"})
+		return
+	}
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", h.socketPath)
+			},
+		},
+	}
+	// Key the IPC call by the raw crew ID (matching restartCrewContainer); the
+	// crewshipd side resolves slug→container name before inspecting Docker.
+	reqURL := fmt.Sprintf("http://crewshipd/crews/%s/container/status", url.PathEscape(crewID))
+	ipcReq, err := http.NewRequestWithContext(r.Context(), "GET", reqURL, nil)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"crew_id": crewID, "status": "unknown"})
+		return
+	}
+	resp, err := client.Do(ipcReq)
+	if err != nil {
+		h.logger.Debug("container status via IPC (may not be running)", "crew_id", crewID, "error", err)
+		writeJSON(w, http.StatusOK, map[string]any{"crew_id": crewID, "status": "unknown"})
+		return
+	}
+	defer resp.Body.Close()
+
+	var ipcResp map[string]any
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&ipcResp); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"crew_id": crewID, "status": "unknown"})
+		return
+	}
+	// Always stamp the caller's crew ID — never trust the IPC-supplied value.
+	ipcResp["crew_id"] = crewID
+	writeJSON(w, http.StatusOK, ipcResp)
 }
 
 type crewCountResponse struct {

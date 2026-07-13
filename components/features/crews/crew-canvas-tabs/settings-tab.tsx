@@ -2,6 +2,8 @@
 
 import Link from "next/link"
 import { Trash2 } from "lucide-react"
+import { toast } from "sonner"
+import { apiFetch } from "@/lib/api-fetch"
 import { EditableField } from "@/components/shared/editable-field"
 import { CrewRuntimeConfig } from "@/components/features/crews/crew-runtime-config"
 import { CrewContainerConfig } from "@/components/features/crews/crew-container-config"
@@ -41,6 +43,48 @@ export function SettingsTab({
   applyAvatarStyle,
   onDelete,
 }: SettingsTabProps) {
+  // Saving a network policy stops the crew container so it's recreated with
+  // the new policy on the next agent run. Without feedback that restart was
+  // invisible — the save just returned and the container quietly cycled. This
+  // polls the container-status endpoint for a few seconds and surfaces the
+  // observed state, so the operator sees the policy actually take.
+  async function pollContainerRestart(crewId: string) {
+    const toastId = toast.loading("Applying network policy — restarting crew container…")
+    const url = `/api/v1/crews/${crewId}/container-status?workspace_id=${encodeURIComponent(workspaceId)}`
+    let lastStatus = ""
+    try {
+      // ~15s budget: 10 polls × 1.5s. The container is stopped then lazily
+      // recreated on next run, so we report the settled state rather than
+      // block on it reaching "running".
+      for (let i = 0; i < 10; i++) {
+        await new Promise((r) => setTimeout(r, 1500))
+        const res = await apiFetch(url)
+        if (!res.ok) continue
+        const body = (await res.json()) as { status?: string }
+        lastStatus = body.status ?? ""
+        // Once the container has cycled away from a live "running" state the
+        // restart has taken effect — stop early.
+        if (lastStatus === "stopped" || lastStatus === "creating" || lastStatus === "not_configured") {
+          break
+        }
+      }
+      toast.success("Network policy saved", {
+        id: toastId,
+        description:
+          lastStatus === "creating"
+            ? "Crew container is restarting with the new policy."
+            : "Crew container will start with the new policy on the next run.",
+      })
+    } catch {
+      // The policy patch already succeeded; a status-poll hiccup shouldn't read
+      // as a save failure. Resolve the toast without implying an error.
+      toast.success("Network policy saved", {
+        id: toastId,
+        description: "Crew container will pick up the new policy on the next run.",
+      })
+    }
+  }
+
   return (
     <div className="space-y-7">
       {/* Profile */}
@@ -140,6 +184,9 @@ export function SettingsTab({
             canEdit
             onSave={async (mode, domains) => {
               await patch({ network_mode: mode, allowed_domains: domains.length > 0 ? domains : null })
+              // Fire-and-forget: surface the container restart the policy
+              // change triggers. Not awaited so the editor closes immediately.
+              void pollContainerRestart(crew.id)
             }}
           />
         </Collapsible>

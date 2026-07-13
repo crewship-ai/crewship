@@ -27,6 +27,7 @@ All crew endpoints require authentication and workspace context (the `workspace_
 | GET | [`/api/v1/crews/{crewId}/policy`](#get-crew-policy) | Get the crew autonomy policy |
 | PUT | [`/api/v1/crews/{crewId}/policy`](#set-crew-policy) | Set the crew autonomy policy |
 | POST | [`/api/v1/crews/{crewId}/apply-avatar-style`](#apply-avatar-style) | Apply an avatar style across agents |
+| GET | [`/api/v1/crews/{crewId}/container-status`](#container-status) | Get the crew's runtime container status |
 | GET | [`/api/v1/crew-connections`](#list-connections) | List crew connections |
 | POST | [`/api/v1/crew-connections`](#create-connection) | Create a crew connection |
 | DELETE | [`/api/v1/crew-connections/{connectionId}`](#delete-connection) | Delete a crew connection |
@@ -555,6 +556,61 @@ When `reset_overrides` is `true`, the response is `{ "updated": N, "reset": true
 |---|---|
 | `400` | `avatar_style` missing and `reset_overrides` not set |
 | `404` | Crew not found |
+
+---
+
+## Container
+
+### Container Status
+
+```
+GET /api/v1/crews/{crewId}/container-status?workspace_id={workspaceId}
+```
+
+Returns the crew's runtime container state, proxied from `crewshipd` over the
+internal IPC socket. Useful for confirming a crew's container came back up after
+a [network-policy change](#update-crew) (which stops the container so it is
+recreated with the new policy on the next agent run).
+
+**Auth:** any workspace member
+
+**Response:** `200 OK`
+
+```json
+{ "crew_id": "ccrew0123456789abcdefghij", "status": "running", "uptime": "2026-07-13T00:00:00Z" }
+```
+
+**Response Fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `crew_id` | string | The crew's ID (always the caller's ID, echoed back) |
+| `status` | string | `running`, `creating`, `stopped`, `error`, `not_configured`, or `unknown` |
+| `uptime` | string? | RFC 3339 container start time (present when running) |
+
+Status values are deliberately coarse and the endpoint answers `200` even when
+the runtime is unavailable, so a polling UI/CLI can treat them as transient
+states rather than errors:
+
+| `status` | Meaning |
+|---|---|
+| `running` | Container is up |
+| `creating` | Container is (re)starting |
+| `stopped` | Container is not running |
+| `not_configured` | No container runtime / IPC socket is configured on the server |
+| `unknown` | `crewshipd` was unreachable or returned an unparseable response |
+| `error` | Container is in a dead/OOM-killed state |
+
+| Status | Condition |
+|---|---|
+| `400` | `crewId` missing |
+| `404` | Crew not found in this workspace |
+
+**CLI:**
+
+```
+crewship crew container-status <slug-or-id>
+```
 
 ---
 
