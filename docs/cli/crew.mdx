@@ -37,6 +37,7 @@ crewship crew <subcommand> [flags]
 | `provision status` | Check provisioning status |
 | `restart-agents` | Drop the runtime container so the next exec rebuilds from the cached image |
 | `rebuild` | Invalidate the cache and re-provision the container |
+| `apply-avatar-style` | Apply (or reset) an avatar style across every agent in the crew |
 | `cache list` | List cached devcontainer images (`crewship-cache:*`) |
 | `cache prune` | Remove old or unreferenced cached images |
 | `files list` | List entries under the crew's `/crew/shared/` Shared Ship volume |
@@ -393,6 +394,24 @@ Backed by `POST /api/v1/crews/{crewId}/restart-agents`. The handler returns `{"r
 <Note>
 `restarted: <n>` (n > 0) confirms the container was actually dropped; a fresh one is created cold on the next exec. `restarted: 0` means no running container was found for this crew — expected when the crew is idle, but if you *know* a container is up and still see `0`, you're on a build that predates the container-name-matching fix (the matcher looked for `crewship-team-<slug>` and missed the real `<prefix>-team-<slug>-<crewID>` name on any multi-instance or post-cross-tenant-fix deployment, so the drop silently no-op'd). Upgrade the server.
 </Note>
+
+---
+
+## `crewship crew apply-avatar-style`
+
+Set the `avatar_style` override for every agent in a crew in one call, or clear existing per-agent overrides so they fall back to the template default. Mirrors the crew toolbar's "Apply to all agents" avatar action.
+
+```bash
+crewship crew apply-avatar-style <slug-or-id> --style bottts-neutral
+crewship crew apply-avatar-style <slug-or-id> --reset
+```
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--style <name>` | (unset) | Avatar style: `bottts-neutral`\|`adventurer`\|`fun-emoji`\|`pixel-art`\|`micah`\|`notionists`\|`thumbs`\|`lorelei`\|`big-smile`\|`avataaars`. |
+| `--reset` | `false` | Clear `avatar_style` overrides for every agent in the crew. Mutually exclusive with `--style`. |
+
+Exactly one of `--style` or `--reset` is required. Backed by `POST /api/v1/crews/{crewId}/apply-avatar-style`. The response reports `updated` (agent row count affected) plus either `style` or `reset: true`.
 
 ---
 

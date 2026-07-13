@@ -184,6 +184,8 @@ Examples:
 		}
 
 		noStream, _ := cmd.Flags().GetBool("no-stream")
+		waitFlag, _ := cmd.Flags().GetBool("wait")
+		noStream = noStream || waitFlag
 		timeoutSecs, _ := cmd.Flags().GetInt("timeout")
 		maxTurns, _ := cmd.Flags().GetInt("max-turns")
 
@@ -308,6 +310,7 @@ func init() {
 	askCmd.Flags().StringP("prompt", "p", "", "Prompt text, @file, or @- for stdin")
 	askCmd.Flags().BoolP("quiet", "q", false, "Only output text, no meta info")
 	askCmd.Flags().Bool("no-stream", false, "Wait for completion, show only result")
+	askCmd.Flags().Bool("wait", false, "Wait for completion, show only result (alias for --no-stream, matches 'crewship pipeline run --wait')")
 	askCmd.Flags().Int("timeout", 0, "Timeout in seconds (0 = no timeout)")
 	askCmd.Flags().Int("max-turns", 0, "Cap the agent loop at N turns for this run (0 = adapter default, 50 interactive)")
 	askCmd.Flags().Bool("with-git-diff", false, "Append `git diff` as context")

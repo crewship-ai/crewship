@@ -336,6 +336,19 @@ Every Keeper decision is audited with:
 
 These are stored in the `GatekeeperResponse.Prompt` and `GatekeeperResponse.RawLLMResponse` fields (not serialized to the agent, only for observability).
 
+### Browsing the audit log from the CLI
+
+```bash
+crewship keeper requests
+crewship keeper requests --limit 20 --offset 20
+crewship keeper requests --format json | jq '.[] | select(.decision=="DENY")'
+```
+
+Backed by `GET /api/v1/admin/keeper/requests` (ADMIN/OWNER only), scoped to
+agents in the current workspace — same rows the in-app Keeper reviews panel
+shows. Each row carries the agent, credential, intent, decision, risk score,
+and timestamps.
+
 ## Decisions
 
 | Decision | Meaning | Agent Experience |
