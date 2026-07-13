@@ -3,8 +3,12 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -123,8 +127,7 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	user := UserFromContext(r.Context())
-
-	limit, offset := parseListPagination(r, 100, 500)
+	q := r.URL.Query()
 
 	// Crew-scoped visibility: roles below MANAGER (= MEMBER, VIEWER)
 	// see workspace-scoped credentials plus credentials assigned to
@@ -133,34 +136,133 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 	// happens at the SQL level so we never serialise rows the caller
 	// can't see.
 	visFilter, visArgs := credentialVisibilityFilter(role, user)
-	args := append([]any{workspaceID}, visArgs...)
-	args = append(args, limit, offset)
 
-	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT c.id, c.name, c.description, c.type, c.provider, c.status,
-			c.scope, c.crew_id, c.account_label, c.account_email, c.username,
-			c.token_expires_at, c.last_checked_at, c.last_error,
-			c.last_used_at, c.last_used_ips, c.tags,
-			c.created_at, c.updated_at,
-			c.created_by_actor_type, c.created_by_actor_id, c.provisioned_for_service,
-			c.encrypted_value,
-			(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count
-		FROM credentials c
-		WHERE c.workspace_id = ? AND c.deleted_at IS NULL `+visFilter+`
+	// Shared WHERE: workspace + visibility + optional server-side search/tag
+	// filters (#1033). Filters apply in BOTH the legacy and paginated modes.
+	where := "c.workspace_id = ? AND c.deleted_at IS NULL " + visFilter
+	whereArgs := append([]any{workspaceID}, visArgs...)
+	if search := strings.TrimSpace(q.Get("search")); search != "" {
+		where += ` AND (c.name LIKE ? ESCAPE '\' OR IFNULL(c.description,'') LIKE ? ESCAPE '\')`
+		like := "%" + escapeLikeWildcards(search) + "%"
+		whereArgs = append(whereArgs, like, like)
+	}
+	if tag := strings.TrimSpace(q.Get("tag")); tag != "" {
+		// tags is a JSON array TEXT column (migration v72), not a junction
+		// table — json_each expands it; json_each(NULL) yields no rows.
+		where += " AND EXISTS (SELECT 1 FROM json_each(c.tags) WHERE value = ?)"
+		whereArgs = append(whereArgs, tag)
+	}
+
+	// #1033: opt-in cursor pagination. When the caller passes paginate=true
+	// the response is the {credentials, next_cursor, limit} envelope; without
+	// it the endpoint keeps returning a bare array (offset-paginated) exactly
+	// as before, so every existing consumer is untouched.
+	if q.Get("paginate") == "true" {
+		h.listCredentialsPaginated(w, r, where, whereArgs, q)
+		return
+	}
+
+	limit, offset := parseListPagination(r, 100, 500)
+	args := append(append([]any{}, whereArgs...), limit, offset)
+	query := credentialSelectPrefix + where + `
 		-- c.id ASC is the pagination tiebreaker: (type, created_at) alone can
 		-- tie on bulk-imported credentials sharing a second, and ties that
 		-- straddle a page boundary would drop or duplicate rows.
 		ORDER BY c.type ASC, c.created_at DESC, c.id ASC
-		LIMIT ? OFFSET ?
-	`, args...)
+		LIMIT ? OFFSET ?`
+	result, err := h.scanCredentialRows(r.Context(), query, args)
 	if err != nil {
 		h.logger.Error("list credentials", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
+	h.enrichCredentials(r.Context(), result)
+	writeJSON(w, http.StatusOK, result)
+}
+
+// credentialListPage is the envelope returned by the opt-in paginated List
+// path (#1033). NextCursor is null on the last page.
+type credentialListPage struct {
+	Credentials []credentialResponse `json:"credentials"`
+	NextCursor  *string              `json:"next_cursor"`
+	Limit       int                  `json:"limit"`
+}
+
+// listCredentialsPaginated serves the paginate=true path: keyset cursor
+// pagination ordered by (created_at DESC, id DESC), returning the envelope.
+func (h *CredentialHandler) listCredentialsPaginated(w http.ResponseWriter, r *http.Request, where string, whereArgs []any, q url.Values) {
+	limit := 50
+	if v := strings.TrimSpace(q.Get("limit")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			replyError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		if n > 500 {
+			n = 500
+		}
+		limit = n
+	}
+
+	args := append([]any{}, whereArgs...)
+	if cur := strings.TrimSpace(q.Get("cursor")); cur != "" {
+		cAt, cID, err := decodeCredentialCursor(cur)
+		if err != nil {
+			replyError(w, http.StatusBadRequest, "invalid cursor: "+err.Error())
+			return
+		}
+		// Keyset: strictly "after" the cursor row in (created_at DESC, id DESC).
+		where += " AND (c.created_at < ? OR (c.created_at = ? AND c.id < ?))"
+		args = append(args, cAt, cAt, cID)
+	}
+	args = append(args, limit+1) // +1 look-ahead probe to detect a next page
+
+	query := credentialSelectPrefix + where + `
+		ORDER BY c.created_at DESC, c.id DESC
+		LIMIT ?`
+	result, err := h.scanCredentialRows(r.Context(), query, args)
+	if err != nil {
+		h.logger.Error("list credentials (paginated)", "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	var nextCursor *string
+	if len(result) > limit {
+		last := result[limit-1]
+		result = result[:limit]
+		c := encodeCredentialCursor(last.CreatedAt, last.ID)
+		nextCursor = &c
+	}
+	h.enrichCredentials(r.Context(), result)
+	writeJSON(w, http.StatusOK, credentialListPage{Credentials: result, NextCursor: nextCursor, Limit: limit})
+}
+
+// credentialSelectPrefix is the shared column list + FROM/WHERE opener for the
+// List paths. Callers append their own predicates + ORDER/LIMIT.
+const credentialSelectPrefix = `
+	SELECT c.id, c.name, c.description, c.type, c.provider, c.status,
+		c.scope, c.crew_id, c.account_label, c.account_email, c.username,
+		c.token_expires_at, c.last_checked_at, c.last_error,
+		c.last_used_at, c.last_used_ips, c.tags,
+		c.created_at, c.updated_at,
+		c.created_by_actor_type, c.created_by_actor_id, c.provisioned_for_service,
+		c.encrypted_value,
+		(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count
+	FROM credentials c
+	WHERE `
+
+// scanCredentialRows runs a List query and scans the rows into
+// credentialResponse values (crew/agent/mcp enrichment is applied separately
+// by enrichCredentials). Never returns a nil slice.
+func (h *CredentialHandler) scanCredentialRows(ctx context.Context, query string, args []any) ([]credentialResponse, error) {
+	rows, err := h.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 
-	var result []credentialResponse
+	result := []credentialResponse{}
 	for rows.Next() {
 		var c credentialResponse
 		var lastUsedIPsRaw, tagsRaw sql.NullString
@@ -173,33 +275,26 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 			&c.CreatedByActorType, &c.CreatedByActorID, &c.ProvisionedForService,
 			&encValue,
 			&c.AgentCount); err != nil {
-			h.logger.Error("scan credential", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
-			return
+			return nil, err
 		}
 		c.LastUsedIPs = parseLastUsedIPs(lastUsedIPsRaw)
 		c.Tags = parseTags(tagsRaw)
 		c.EndpointURL = decryptEndpointURLForRead(c.Type, encValue, h.logger)
 		result = append(result, c)
 	}
-	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (credentials)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
-		return
-	}
+	return result, rows.Err()
+}
 
-	if result == nil {
-		result = []credentialResponse{}
-	}
-
-	// Batch-load crew_ids from junction table
+// enrichCredentials batch-loads the crew_ids / agent names / mcp-used columns
+// for a page of credentials, in place.
+func (h *CredentialHandler) enrichCredentials(ctx context.Context, result []credentialResponse) {
 	credIDs := make([]string, len(result))
 	for i, c := range result {
 		credIDs[i] = c.ID
 	}
-	crewIDsMap := h.loadCrewIDsBatch(r.Context(), credIDs)
-	agentNamesMap := h.loadAgentNamesBatch(r.Context(), credIDs)
-	mcpUsedSet := h.loadMCPUsedBatch(r.Context(), credIDs)
+	crewIDsMap := h.loadCrewIDsBatch(ctx, credIDs)
+	agentNamesMap := h.loadAgentNamesBatch(ctx, credIDs)
+	mcpUsedSet := h.loadMCPUsedBatch(ctx, credIDs)
 	for i := range result {
 		if ids, ok := crewIDsMap[result[i].ID]; ok {
 			result[i].CrewIDs = ids
@@ -213,8 +308,33 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		result[i].MCPUsed = mcpUsedSet[result[i].ID]
 	}
+}
 
-	writeJSON(w, http.StatusOK, result)
+// credentialCursorPrefix versions the opaque list cursor so a future format
+// change is detectable rather than silently mis-parsed.
+const credentialCursorPrefix = "v1:"
+
+// encodeCredentialCursor packs a keyset position (created_at, id) into an
+// opaque base64url token. created_at is compared as a string — the stored
+// datetime('now') format is lexicographically ordered, matching the ORDER BY.
+func encodeCredentialCursor(createdAt, id string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(credentialCursorPrefix + createdAt + "|" + id))
+}
+
+func decodeCredentialCursor(s string) (string, string, error) {
+	dec, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return "", "", fmt.Errorf("not valid base64url")
+	}
+	str := string(dec)
+	if !strings.HasPrefix(str, credentialCursorPrefix) {
+		return "", "", fmt.Errorf("missing version prefix")
+	}
+	parts := strings.SplitN(strings.TrimPrefix(str, credentialCursorPrefix), "|", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("malformed cursor")
+	}
+	return parts[0], parts[1], nil
 }
 
 func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {

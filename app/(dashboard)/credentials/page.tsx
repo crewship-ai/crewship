@@ -42,6 +42,7 @@ import { RotationDialog } from "@/components/features/credentials/rotation-dialo
 import { EditCredentialDialog, type CredentialData } from "@/components/features/credentials/edit-credential-dialog"
 import { formatRelativeTime } from "@/lib/time"
 import { useAbilities } from "@/hooks/use-abilities"
+import { useWorkspace } from "@/hooks/use-workspace"
 import { getBrand, brandColor } from "@/lib/credential-providers/registry"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
@@ -111,7 +112,6 @@ const STATUS_DOT_COLOR: Record<DerivedStatus, string> = {
   Pending: "bg-amber-400",
 }
 
-interface Org { id: string; name: string }
 
 const TYPE_LABEL: Record<Credential["type"], string> = {
   AI_CLI_TOKEN: "ai cli",
@@ -129,8 +129,11 @@ type SortKey = "last_used" | "name" | "created"
 
 export default function CredentialsPage() {
   const { abilities } = useAbilities()
+  // #1033: read the selected workspace from the shared store (driven by the
+  // top-bar workspace switcher) instead of hardcoding the first workspace, so
+  // users in multiple workspaces can manage each one's credentials.
+  const { workspaceId, loading: wsLoading } = useWorkspace()
   const [credentials, setCredentials] = React.useState<Credential[]>([])
-  const [workspaceId, setWorkspaceId] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [loadError, setLoadError] = React.useState<string | null>(null)
   const [addOpen, setAddOpen] = React.useState(false)
@@ -156,25 +159,9 @@ export default function CredentialsPage() {
   const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false)
   const [bulkDeleting, setBulkDeleting] = React.useState(false)
 
-  // Both fetchers THROW on failure so loadData can surface a real
+  // fetchCredentials THROWS on failure so loadData can surface a real
   // error state — a failed fetch must never render as "no credentials
   // yet" (which invites re-creating secrets that already exist).
-  const fetchWorkspace = React.useCallback(async () => {
-    let res: Response
-    try {
-      res = await apiFetch("/api/v1/workspaces")
-    } catch {
-      throw new Error("Network error while loading the workspace.")
-    }
-    if (!res.ok) throw new Error(`Loading the workspace failed (HTTP ${res.status}).`)
-    const orgs: Org[] = await res.json() ?? []
-    if (orgs.length > 0) {
-      setWorkspaceId(orgs[0].id)
-      return orgs[0].id
-    }
-    return null
-  }, [])
-
   const fetchCredentials = React.useCallback(async (oid: string) => {
     let res: Response
     try {
@@ -197,23 +184,26 @@ export default function CredentialsPage() {
   }, [])
 
   const loadData = React.useCallback(async () => {
+    // Wait for the workspace store to resolve the selected workspace before
+    // deciding there's nothing to load.
+    if (wsLoading) return
     setLoading(true)
     setLoadError(null)
     try {
-      let oid = workspaceId
-      if (!oid) {
-        oid = await fetchWorkspace()
-      }
-      if (oid) {
-        await fetchCredentials(oid)
+      if (workspaceId) {
+        await fetchCredentials(workspaceId)
+      } else {
+        setCredentials([])
       }
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Something went wrong while loading credentials.")
     } finally {
       setLoading(false)
     }
-  }, [workspaceId, fetchWorkspace, fetchCredentials])
+  }, [wsLoading, workspaceId, fetchCredentials])
 
+  // Reload whenever the selected workspace changes (switcher) or the store
+  // finishes loading.
   React.useEffect(() => { loadData() }, [loadData])
 
   const handleRefresh = React.useCallback(() => {

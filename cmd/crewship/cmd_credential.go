@@ -2,9 +2,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,9 +23,47 @@ var credentialCmd = &cobra.Command{
 	Short:   "Manage credentials",
 }
 
+// credRow is a single credential row as rendered by `credential list`.
+type credRow struct {
+	ID                    string  `json:"id"`
+	Name                  string  `json:"name"`
+	Type                  string  `json:"type"`
+	Provider              string  `json:"provider"`
+	Status                string  `json:"status"`
+	AgentCount            int     `json:"_count_agent_credentials"`
+	CreatedByActorType    *string `json:"created_by_actor_type"`
+	ProvisionedForService *string `json:"provisioned_for_service"`
+}
+
+// decodeCredentialListPage tolerates BOTH the legacy bare-array response and
+// the paginated {credentials, next_cursor} envelope (#1033), so the command
+// works against any server version.
+func decodeCredentialListPage(raw []byte) ([]credRow, *string, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		var rows []credRow
+		if err := json.Unmarshal(raw, &rows); err != nil {
+			return nil, nil, err
+		}
+		return rows, nil, nil
+	}
+	var env struct {
+		Credentials []credRow `json:"credentials"`
+		NextCursor  *string   `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, nil, err
+	}
+	return env.Credentials, env.NextCursor, nil
+}
+
 var credListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List all credentials in the workspace",
+	Short: "List credentials in the workspace",
+	Long: `List credentials in the workspace.
+
+By default one page is returned; pass --all to follow the cursor and fetch
+every page. --search and --tag filter server-side.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -31,27 +72,61 @@ var credListCmd = &cobra.Command{
 			return err
 		}
 
+		flags := cmd.Flags()
+		search, _ := flags.GetString("search")
+		tag, _ := flags.GetString("tag")
+		limit, _ := flags.GetInt("limit")
+		cursor, _ := flags.GetString("cursor")
+		all, _ := flags.GetBool("all")
+
 		client := newAPIClient()
-		resp, err := client.Get("/api/v1/credentials")
-		if err != nil {
-			return err
-		}
-		if err := cli.CheckError(resp); err != nil {
-			return err
+		buildURL := func(cur string) string {
+			q := url.Values{}
+			// paginate=true opts into the cursor envelope; the server still
+			// returns a bare array to callers that don't ask, so this is safe.
+			q.Set("paginate", "true")
+			if limit > 0 {
+				q.Set("limit", strconv.Itoa(limit))
+			}
+			if search != "" {
+				q.Set("search", search)
+			}
+			if tag != "" {
+				q.Set("tag", tag)
+			}
+			if cur != "" {
+				q.Set("cursor", cur)
+			}
+			return "/api/v1/credentials?" + q.Encode()
 		}
 
-		var creds []struct {
-			ID                    string  `json:"id"`
-			Name                  string  `json:"name"`
-			Type                  string  `json:"type"`
-			Provider              string  `json:"provider"`
-			Status                string  `json:"status"`
-			AgentCount            int     `json:"_count_agent_credentials"`
-			CreatedByActorType    *string `json:"created_by_actor_type"`
-			ProvisionedForService *string `json:"provisioned_for_service"`
-		}
-		if err := cli.ReadJSON(resp, &creds); err != nil {
-			return err
+		var creds []credRow
+		var lastNext *string
+		cur := cursor
+		for {
+			resp, err := client.Get(buildURL(cur))
+			if err != nil {
+				return err
+			}
+			if err := cli.CheckError(resp); err != nil {
+				return err
+			}
+			var raw json.RawMessage
+			if err := cli.ReadJSON(resp, &raw); err != nil {
+				return err
+			}
+			page, next, err := decodeCredentialListPage(raw)
+			if err != nil {
+				return err
+			}
+			creds = append(creds, page...)
+			lastNext = next
+			// Stop after one page unless --all; also stop when there is no
+			// next page or the server returned a bare array (next == nil).
+			if !all || next == nil || *next == "" {
+				break
+			}
+			cur = *next
 		}
 
 		// SOURCE column surfaces who/what owns the row: a literal
@@ -75,7 +150,15 @@ var credListCmd = &cobra.Command{
 			}
 			rows = append(rows, []string{c.ID, c.Name, c.Type, c.Provider, c.Status, fmt.Sprintf("%d", c.AgentCount), source})
 		}
-		return f.Auto(creds, headers, rows)
+		if err := f.Auto(creds, headers, rows); err != nil {
+			return err
+		}
+		// Hint when more pages exist and the caller didn't ask for --all.
+		// To stderr so stdout stays a clean, parseable table.
+		if !all && lastNext != nil && *lastNext != "" {
+			fmt.Fprintf(os.Stderr, "More results available — re-run with --all, or --cursor %s for the next page.\n", *lastNext)
+		}
+		return nil
 	},
 }
 
@@ -459,6 +542,12 @@ var credDefaultEnvVarCmd = &cobra.Command{
 }
 
 func init() {
+	credListCmd.Flags().Int("limit", 0, "Page size (1-500; enables cursor pagination)")
+	credListCmd.Flags().String("cursor", "", "Opaque cursor from a previous page's output")
+	credListCmd.Flags().String("search", "", "Filter by a substring of the name or description (server-side)")
+	credListCmd.Flags().String("tag", "", "Filter to credentials carrying this exact tag (server-side)")
+	credListCmd.Flags().Bool("all", false, "Fetch every page by following the cursor")
+
 	credCreateCmd.Flags().String("name", "", "Credential name (required)")
 	credCreateCmd.Flags().String("type", "", "Type: SECRET|API_KEY|AI_CLI_TOKEN|CLI_TOKEN|ENDPOINT_URL (required)")
 	credCreateCmd.Flags().String("provider", "", "Provider: ANTHROPIC|OPENAI|GOOGLE|GITHUB|GITLAB|VERCEL|AWS|OLLAMA|CUSTOM_CLI|NONE")
