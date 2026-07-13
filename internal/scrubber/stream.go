@@ -1,10 +1,12 @@
 package scrubber
 
 import (
+	"encoding/base32"
 	"encoding/base64"
 	"encoding/hex"
 	"net/url"
 	"regexp"
+	"strings"
 	"sync"
 	"unicode/utf8"
 )
@@ -162,11 +164,20 @@ func (ss *StreamScrubber) AddSecretValues(values ...string) {
 const minSecretValueLen = 5
 
 // AddSecretValues registers exact-match redaction patterns for a set of known
-// secret values AND their common encodings — base64 (std + URL), URL-escape,
-// hex, and reversed — mirroring the encoding-aware scrub in
-// internal/api/keeper_execute.go. This catches exfiltration attempts like
-// `echo $TOKEN | base64` / `printf %s "$TOKEN" | xxd -p` / `… | rev` that the
+// secret values AND their common encodings — base64 (std + URL, padded and raw),
+// base32, URL-escape, hex (lower and upper), and reversed. This catches
+// exfiltration attempts like `echo $TOKEN | base64` / unpadded (JWT-style)
+// / `… | base32` / `printf %s "$TOKEN" | xxd -p` / `… | rev` that the
 // literal-only credential patterns would miss.
+//
+// Defense-in-depth, NOT a boundary (#1022/#1064): a per-secret pattern set can
+// never enumerate every transform a single tool can apply (gzip/deflate,
+// chunked/split output, XOR, a custom alphabet, or `curl --data-binary
+// @/proc/self/environ` that never prints the secret at all). The real
+// containment for single-tool self-exfil is the sandbox + egress policy (EPIC
+// #1001 M2b private bridge + egress enforcement); this scrubber only raises the
+// cost of the common one-liners. Do not treat "the scrubber will catch it" as a
+// safety property.
 //
 // It returns the byte length of the longest pattern registered, which callers
 // (e.g. StreamScrubber) use to size an overlap window. Values shorter than
@@ -196,8 +207,12 @@ func (s *Scrubber) AddSecretValues(values ...string) int {
 		add(v)
 		add(base64.StdEncoding.EncodeToString([]byte(v)))
 		add(base64.URLEncoding.EncodeToString([]byte(v)))
+		add(base64.RawStdEncoding.EncodeToString([]byte(v))) // unpadded base64 (JWT-style / raw emitters)
+		add(base64.RawURLEncoding.EncodeToString([]byte(v)))
+		add(base32.StdEncoding.EncodeToString([]byte(v))) // base32
 		add(url.QueryEscape(v))
-		add(hex.EncodeToString([]byte(v)))
+		add(hex.EncodeToString([]byte(v)))                  // lower-case hex (xxd -p)
+		add(strings.ToUpper(hex.EncodeToString([]byte(v)))) // upper-case hex (od -A n -t x1 | tr)
 		add(reverseString(v))
 	}
 	return maxLen
