@@ -17,6 +17,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/behaviorhook"
+	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
@@ -33,10 +35,11 @@ import (
 type postToolCallObserver struct {
 	logger *slog.Logger
 	journ  journal.Emitter
+	db     *sql.DB
 }
 
-func newPostToolCallObserver(logger *slog.Logger, j journal.Emitter) *postToolCallObserver {
-	return &postToolCallObserver{logger: logger, journ: j}
+func newPostToolCallObserver(logger *slog.Logger, j journal.Emitter, db *sql.DB) *postToolCallObserver {
+	return &postToolCallObserver{logger: logger, journ: j, db: db}
 }
 
 // Observe is called from the orchestrator's tool_call event tap. The
@@ -53,6 +56,16 @@ func newPostToolCallObserver(logger *slog.Logger, j journal.Emitter) *postToolCa
 func (o *postToolCallObserver) Observe(obs orchestrator.ToolCallObservation) {
 	hook := behaviorhook.Get()
 	if hook == nil {
+		return
+	}
+	// Workspace watchdog toggle (#1001 M0). The behavioral watchdog is
+	// opt-in per workspace (default OFF): an unconfigured workspace is not
+	// monitored until an OWNER/ADMIN enables it. One PK lookup per sampled
+	// observation; the observer already runs off the hot path.
+	gctx, gcancel := context.WithTimeout(context.Background(), 2*time.Second)
+	enabled := governance.Resolve(gctx, o.db, o.logger, obs.WorkspaceID).Enabled
+	gcancel()
+	if !enabled {
 		return
 	}
 	// Bound the call ourselves. behaviorhook.MaybeEvaluate uses the ctx

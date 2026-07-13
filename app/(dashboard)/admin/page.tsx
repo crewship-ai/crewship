@@ -301,6 +301,7 @@ export default function AdminPage() {
     if (tab === "security") {
       return (
         <KeeperTab
+          workspaceId={workspaceId}
           keeperLoading={keeperLoading}
           keeperStatus={keeperStatus}
           keeperLog={keeperLog}

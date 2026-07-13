@@ -207,10 +207,14 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("POST", "/api/v1/recipes/{slug}/install", roleManage, recipesH.Install)
 	// Credential audit timeline (CONNECTIONS.md §4.3 inline drawer)
 	r.mux.Handle("GET /api/v1/credentials/{credentialId}/audit", authed(wsCtx(http.HandlerFunc(creds.AuditTimeline))))
-	// Credential rotation w/ grace overlap (CONNECTIONS.md §7.1, MUST-add #1)
-	r.authedMut("POST", "/api/v1/credentials/{credentialId}/rotate", roleManage, creds.Rotate)
+	// Credential rotation w/ grace overlap (CONNECTIONS.md §7.1, MUST-add #1).
+	// roleInline: the handlers run the layered ADMIN+-or-credential.rotate
+	// gate (requireRoleOrCapabilityOrForbid) — a roleManage middleware gate
+	// here would 403 capability-granted MANAGERs/MEMBERs before the handler
+	// could honour the grant.
+	r.authedMut("POST", "/api/v1/credentials/{credentialId}/rotate", roleInline, creds.Rotate)
 	r.mux.Handle("GET /api/v1/credentials/{credentialId}/rotations", authed(wsCtx(http.HandlerFunc(creds.ListRotations))))
-	r.authedMut("DELETE", "/api/v1/credential-rotations/{rotationId}", roleManage, creds.CancelRotation)
+	r.authedMut("DELETE", "/api/v1/credential-rotations/{rotationId}", roleInline, creds.CancelRotation)
 	// Per-tool granularity (Cursor parity, CONNECTIONS.md §3.1)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/integrations/{integrationId}/tools", authed(wsCtx(http.HandlerFunc(integrations.ListCrewIntegrationTools))))
 	r.authedMut("PATCH", "/api/v1/crews/{crewId}/integrations/{integrationId}/tools/{toolName}", roleManage, integrations.UpdateCrewIntegrationTool)
@@ -274,6 +278,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Get))))
 	r.authedMut("PATCH", "/api/v1/agents/{agentId}", roleInline, agents.Update)
 	r.authedMut("DELETE", "/api/v1/agents/{agentId}", roleInline, agents.Delete)
+	// Webhook signing secret is show-once (#999): no read endpoint exists,
+	// rotate mints + returns the new value exactly once. Gate is inline
+	// (canEditAgent) — same as Update.
+	r.authedMut("POST", "/api/v1/agents/{agentId}/webhook-secret/rotate", roleInline, agents.RotateWebhookSecret)
 
 	// Agent skills
 	r.mux.Handle("GET /api/v1/agents/{agentId}/skills", authed(wsCtx(http.HandlerFunc(agents.ListSkills))))
@@ -291,6 +299,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// Mark-read: advances the caller's per-chat read cursor (unread badge
 	// source) and clears the paired "agent replied" inbox item.
 	r.authedMut("PUT", "/api/v1/agents/{agentId}/chats/{chatId}/read", roleSelf, agents.MarkChatRead)
+	// Delete: creator-or-agent-editor gate lives in the handler (#998 —
+	// lets one-shot programmatic chats clean up after themselves).
+	r.authedMut("DELETE", "/api/v1/agents/{agentId}/chats/{chatId}", roleInline, agents.DeleteChat)
 	r.mux.Handle("GET /api/v1/agents/{agentId}/runs", authed(wsCtx(http.HandlerFunc(agents.ListRuns))))
 
 	// PR-E F6 — PERSONA endpoints (agent + crew flavors). Persona

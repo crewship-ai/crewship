@@ -14,9 +14,9 @@ package api
 // inject into an agent container.
 //
 // Adding a new type: add it here, add its validation case in
-// validateCredentialPayload, then update the wizard's PROVIDER_TILES
-// map in components/features/credentials/add-credential-wizard/types.ts
-// so users can actually pick it.
+// validateCredentialPayload, then extend the type handling in
+// components/features/credentials/credential-form.tsx so users can
+// actually pick it.
 
 import (
 	"encoding/json"
@@ -110,6 +110,21 @@ func isPendingSentinel(decrypted string) bool {
 	return decrypted == pendingSentinelOAuth || decrypted == pendingSentinelManifest
 }
 
+// maxCredentialValueLen caps a single credential value (and refresh
+// token) at 64 KiB. Before this cap the only bound was the global 1 MB
+// request-body limit — a single pathological "credential" could bloat
+// the vault, the encrypted column, and every downstream injection path
+// (env vars, /secrets files, OPENCODE_CONFIG_CONTENT). 64 KiB is
+// comfortably above every real credential shape we store — RSA-4096
+// private keys (~3 KiB), full certificate chains (~10-20 KiB), fat
+// OAuth JWTs — while still bounding the row. ENDPOINT_URL keeps its
+// stricter 2048-byte cap (maxEndpointValueLen) on top.
+const maxCredentialValueLen = 64 * 1024
+
+// credentialValueTooLongMsg is the shared 400 message for the cap so
+// create/update/rotate report the limit identically.
+const credentialValueTooLongMsg = "value is too long (max 65536 bytes)"
+
 // validateCredentialPayload enforces per-type field requirements. It
 // runs after the generic "value required unless OAUTH2" gate in the
 // Create handler so this function can assume Value is populated for
@@ -121,6 +136,15 @@ func isPendingSentinel(decrypted string) bool {
 func validateCredentialPayload(req *createCredentialRequest) string {
 	if msg := validateCredentialType(req.Type); msg != "" {
 		return msg
+	}
+
+	// Generic size cap first — applies to every type. The per-type
+	// checks below may impose stricter limits (ENDPOINT_URL: 2048).
+	if len(req.Value) > maxCredentialValueLen {
+		return credentialValueTooLongMsg
+	}
+	if req.RefreshToken != nil && len(*req.RefreshToken) > maxCredentialValueLen {
+		return "refresh_token is too long (max 65536 bytes)"
 	}
 
 	switch req.Type {

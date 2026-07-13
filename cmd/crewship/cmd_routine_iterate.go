@@ -164,6 +164,59 @@ func runRoutineIterate(cmd *cobra.Command, args []string) error {
 	}
 
 	history := make([]iterateRound, 0, rounds)
+	// A mid-round failure (optimizer crash, save rejection, ...) must not
+	// swallow the rounds already paid for — print the partial summary on
+	// the error path too (#998), then surface the error.
+	roundsErr := runIterateRounds(client, ws, slug, iterateLoopParams{
+		rounds: rounds, target: target, inputs: inputs, inputsRaw: inputsRaw,
+		rubric: rubric, graderSlug: graderSlug, optimizerSlug: optimizerSlug,
+		graderID: graderID, optimizerID: optimizerID, authorCrewID: authorCrewID,
+		crewSlugs: crewSlugs, autoYes: autoYes,
+		runTimeout: runTimeout, agentTimeout: agentTimeout, maxTurns: maxTurns,
+	}, &history)
+	if roundsErr != nil {
+		if len(history) > 0 {
+			fmt.Fprintln(os.Stderr, "iterate aborted — partial results below:")
+			if perr := printIterateSummary(cmd, slug, target, history); perr != nil {
+				fmt.Fprintf(os.Stderr, "(print partial summary: %v)\n", perr)
+			}
+		}
+		return roundsErr
+	}
+	return printIterateSummary(cmd, slug, target, history)
+}
+
+// iterateLoopParams carries the resolved knobs into the round loop so the
+// error path in the caller can still reach the accumulated history.
+type iterateLoopParams struct {
+	rounds, target, maxTurns  int
+	inputs                    map[string]any
+	inputsRaw                 string
+	rubric                    string
+	graderSlug, optimizerSlug string
+	graderID, optimizerID     string
+	authorCrewID              string
+	crewSlugs                 map[string]struct{}
+	autoYes                   bool
+	runTimeout, agentTimeout  time.Duration
+}
+
+// runIterateRounds executes the run→grade→optimize→save loop, appending a
+// row per graded round to *history (also on early exits, so the caller can
+// report partial progress when a later step errors).
+func runIterateRounds(client *cli.Client, ws, slug string, p iterateLoopParams, history *[]iterateRound) error {
+	rounds, target := p.rounds, p.target
+	inputs, inputsRaw, rubric := p.inputs, p.inputsRaw, p.rubric
+	graderSlug, optimizerSlug := p.graderSlug, p.optimizerSlug
+	graderID, optimizerID := p.graderID, p.optimizerID
+	authorCrewID, crewSlugs, autoYes := p.authorCrewID, p.crewSlugs, p.autoYes
+	runTimeout, agentTimeout, maxTurns := p.runTimeout, p.agentTimeout, p.maxTurns
+
+	// The export bundle's name/description never change inside the loop —
+	// only the definition does, and after a successful save the local copy
+	// IS the server's head. Fetch once, then track the definition locally
+	// instead of re-exporting every round (#998).
+	var bundle *iterateBundle
 	for round := 1; round <= rounds; round++ {
 		fmt.Fprintf(os.Stderr, "── round %d/%d ──────────────────────────────\n", round, rounds)
 
@@ -195,34 +248,46 @@ func runRoutineIterate(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "  score %d/100 — %s\n", score.Score, truncateLine(score.Feedback, 120))
 
 		row := iterateRound{Round: round, RunID: run.RunID, RunStatus: run.Status, Score: score.Score, Feedback: score.Feedback, CostUSD: run.CostUSD}
+		// Once a round is graded its score is paid for — every exit after
+		// this point (optimize/validate/save failure included) must land
+		// the row in history so the partial summary shows THIS round too,
+		// not just the ones before it.
+		fail := func(err error) error {
+			*history = append(*history, row)
+			return err
+		}
 
 		// 3. Target reached → done. Only a COMPLETED run can satisfy the
 		// target — a FAILED run with a generous grader is not success.
 		if score.Score >= target && run.Status == "COMPLETED" {
-			history = append(history, row)
+			*history = append(*history, row)
 			fmt.Fprintf(os.Stderr, "✓ target %d reached\n", target)
 			break
 		}
 		if round == rounds {
-			history = append(history, row)
+			*history = append(*history, row)
 			break // out of rounds; report without another optimization
 		}
 
-		// 4. Fetch current definition + row metadata via export.
-		bundle, err := iterateFetchBundle(client, ws, slug)
-		if err != nil {
-			return fmt.Errorf("round %d export: %w", round, err)
+		// 4. Current definition + row metadata via export — first time only;
+		// later rounds track the definition locally (a successful save makes
+		// the local copy the server's head).
+		if bundle == nil {
+			bundle, err = iterateFetchBundle(client, ws, slug)
+			if err != nil {
+				return fail(fmt.Errorf("round %d export: %w", round, err))
+			}
 		}
 
 		// 5. Optimize.
 		fmt.Fprintf(os.Stderr, "🛠 optimizing with %s...\n", optimizerSlug)
 		optText, err := askAgentText(client, optimizerID, buildOptimizePrompt(bundle.Pipeline.Definition, rubric, score, run.Output, run.ErrorMessage), maxTurns, agentTimeout)
 		if err != nil {
-			return fmt.Errorf("round %d optimize: %w", round, err)
+			return fail(fmt.Errorf("round %d optimize: %w", round, err))
 		}
 		newDef, err := extractDefinitionJSON(optText)
 		if err != nil {
-			return fmt.Errorf("round %d: optimizer %s returned no valid definition JSON: %w", round, optimizerSlug, err)
+			return fail(fmt.Errorf("round %d: optimizer %s returned no valid definition JSON: %w", round, optimizerSlug, err))
 		}
 
 		// Structural injection guard: run output flows through grader
@@ -234,16 +299,16 @@ func runRoutineIterate(cmd *cobra.Command, args []string) error {
 		// but "safe-typed" additions (notify targets, new egress hosts on an
 		// existing http step) must fail closed here too.
 		if err := validateNoNewCapabilities(bundle.Pipeline.Definition, newDef); err != nil {
-			return fmt.Errorf("round %d: optimizer output rejected: %w", round, err)
+			return fail(fmt.Errorf("round %d: optimizer output rejected: %w", round, err))
 		}
 
 		// 6. Local validation before touching the server.
 		dsl, err := pipeline.Parse(newDef)
 		if err != nil {
-			return fmt.Errorf("round %d: optimizer produced an unparseable DSL: %w", round, err)
+			return fail(fmt.Errorf("round %d: optimizer produced an unparseable DSL: %w", round, err))
 		}
 		if err := pipeline.Validate(dsl, crewSlugs, nil); err != nil {
-			return fmt.Errorf("round %d: optimizer produced an invalid DSL: %w", round, err)
+			return fail(fmt.Errorf("round %d: optimizer produced an invalid DSL: %w", round, err))
 		}
 
 		// 7. Confirm.
@@ -251,7 +316,7 @@ func runRoutineIterate(cmd *cobra.Command, args []string) error {
 		if !autoYes {
 			fmt.Fprintf(os.Stderr, "proposed: %s (%d bytes)\n", summary, len(newDef))
 			if !confirmInteractive("Save as new version?") {
-				history = append(history, row)
+				*history = append(*history, row)
 				fmt.Fprintln(os.Stderr, "aborted by operator — no version saved")
 				break
 			}
@@ -260,18 +325,22 @@ func runRoutineIterate(cmd *cobra.Command, args []string) error {
 		// 8. Save (two-step test_run → save; server gates apply).
 		saved, err := iterateSaveDefinition(client, ws, slug, bundle.Pipeline.Name, bundle.Pipeline.Description, authorCrewID, summary, newDef)
 		if err != nil {
-			return fmt.Errorf("round %d save: %w", round, err)
+			return fail(fmt.Errorf("round %d save: %w", round, err))
 		}
 		row.SavedVersion = true
-		history = append(history, row)
+		*history = append(*history, row)
 		if saved.Status == "proposed" {
 			fmt.Fprintf(os.Stderr, "⚠ new version saved as PROPOSED (risky steps) — approve it before the next round can run it\n")
 			break
 		}
+		// The saved definition is now the server's head — keep the local
+		// bundle in lockstep so the next optimize round sees it without a
+		// re-export.
+		bundle.Pipeline.Definition = newDef
 		fmt.Fprintf(os.Stderr, "✓ saved new version (%s)\n", summary)
 	}
 
-	return printIterateSummary(cmd, slug, target, history)
+	return nil
 }
 
 // iterateRunResult is the subset of the synchronous run response iterate needs.
@@ -397,7 +466,8 @@ func iterateSaveDefinition(client *cli.Client, ws, slug, name, description, auth
 // askAgentText runs one prompt against an agent and returns the accumulated
 // final text. Same WS flow as `crewship ask --no-stream` (cmd_run.go
 // runNoStream), minus the printing/saving concerns — iterate consumes the
-// text programmatically.
+// text programmatically. The collect loop itself is shared
+// (collectAgentStream, #998) so event handling can't drift between the two.
 func askAgentText(client *cli.Client, agentID, prompt string, maxTurns int, timeout time.Duration) (string, error) {
 	chatResp, err := client.Post("/api/v1/agents/"+agentID+"/chats", ChatCreationBody())
 	if err != nil {
@@ -413,6 +483,11 @@ func askAgentText(client *cli.Client, agentID, prompt string, maxTurns int, time
 	if err := json.NewDecoder(chatResp.Body).Decode(&chat); err != nil {
 		return "", fmt.Errorf("decode chat: %w", err)
 	}
+	// One-shot chat: nothing re-opens it after this call, so leaving it
+	// behind pollutes the agent's session sidebar — a 10-round iterate
+	// used to strand 20 of them (#998). Best-effort: a failed delete
+	// never fails the round.
+	defer deleteIterateChat(client, agentID, chat.ID)
 
 	wsToken, err := cli.WSTokenFromServer(client)
 	if err != nil {
@@ -430,49 +505,30 @@ func askAgentText(client *cli.Client, agentID, prompt string, maxTurns int, time
 		return "", fmt.Errorf("send message: %w", err)
 	}
 
-	// Bound the whole conversation: a stalled agent container stops sending
-	// events without closing the socket, and an unattended --yes run must
-	// not hang forever on ReadMessage. Reads happen on a goroutine; the
-	// deadline fires on the select.
-	type wsRead struct {
-		msg *cli.WSMessage
-		err error
+	res := collectAgentStream(wsc, timeout)
+	switch {
+	case res.TimedOut:
+		return "", fmt.Errorf("agent did not finish within %s (stalled container?) — raise --agent-timeout or check the agent", timeout)
+	case res.ReadErr != nil:
+		return "", fmt.Errorf("agent stream closed early: %w", res.ReadErr)
+	case res.StreamErr != "":
+		return "", fmt.Errorf("agent error: %s", res.StreamErr)
 	}
-	reads := make(chan wsRead)
-	go func() {
-		for {
-			msg, err := wsc.ReadMessage()
-			reads <- wsRead{msg, err}
-			if err != nil {
-				return
-			}
-		}
-	}()
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
+	return res.Text, nil
+}
 
-	var fullText strings.Builder
-	for {
-		select {
-		case <-deadline.C:
-			return "", fmt.Errorf("agent did not finish within %s (stalled container?) — raise --agent-timeout or check the agent", timeout)
-		case r := <-reads:
-			if r.err != nil {
-				return "", fmt.Errorf("agent stream closed early: %w", r.err)
-			}
-			event, err := cli.ParseChatEvent(r.msg)
-			if err != nil || event == nil {
-				continue
-			}
-			switch event.Type {
-			case "text":
-				fullText.WriteString(event.Content)
-			case "error":
-				return "", fmt.Errorf("agent error: %s", sanitizeTerminal(event.Content))
-			case "done":
-				return fullText.String(), nil
-			}
-		}
+// deleteIterateChat removes a one-shot grader/optimizer chat. Best-effort:
+// iterate's outcome never depends on cleanup succeeding, so errors are
+// noted on stderr and swallowed.
+func deleteIterateChat(client *cli.Client, agentID, chatID string) {
+	resp, err := client.Delete(fmt.Sprintf("/api/v1/agents/%s/chats/%s", agentID, chatID))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  (cleanup: could not delete one-shot chat %s: %v)\n", chatID, err)
+		return
+	}
+	defer resp.Body.Close()
+	if err := cli.CheckError(resp); err != nil {
+		fmt.Fprintf(os.Stderr, "  (cleanup: could not delete one-shot chat %s: %v)\n", chatID, err)
 	}
 }
 

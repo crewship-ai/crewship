@@ -7,9 +7,9 @@
 //   * CredentialDetailSheet     (inline value rewrite, mode="edit")
 //
 // The wizardised "Connect service" flow (OAuth handshakes, setup-token,
-// PAT-with-test) lives separately and stays intact — that codepath
-// genuinely needs the provider as a first-class step. This form is the
-// flat "paste a secret" path Doppler/Vercel are built around.
+// PAT-with-test) was removed — it never got mounted. Reviving OAuth
+// from /credentials is tracked separately. This form is the flat
+// "paste a secret" path Doppler/Vercel are built around.
 
 import * as React from "react"
 import { Eye, EyeOff, ChevronDown, ChevronRight, X, Plus, Check, ChevronsUpDown, FlaskConical, CheckCircle2, XCircle } from "lucide-react"
@@ -27,6 +27,7 @@ import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command"
 import { detectProvider, detectType, detectFromValue } from "@/lib/credential-provider"
+import { isValidEnvVarName, suggestEnvVarName } from "@/lib/env-var-name"
 import { getBrand, brandColor } from "@/lib/credential-providers/registry"
 import { BrandPicker } from "./brand-picker"
 import { cn } from "@/lib/utils"
@@ -105,6 +106,19 @@ export function CredentialForm({
   // Track whether the user has manually edited provider so name-driven
   // auto-detect doesn't keep overriding their choice.
   const providerTouched = React.useRef(mode === "edit")
+  // Env-var-name validation. The name IS the env var agents read, so
+  // it must match ^[A-Z_][A-Z0-9_]*$. Errors only show after first
+  // blur (or submit) so we don't scream at half-typed lowercase input.
+  const [nameBlurred, setNameBlurred] = React.useState(false)
+  // The name the credential had when the form opened. An EXISTING
+  // invalid name is tolerated (warn, don't block) so legacy
+  // credentials stay editable — we only hard-block newly typed ones.
+  const initialName = React.useRef((initial?.name ?? "").trim())
+
+  const trimmedName = values.name.trim()
+  const nameIsLegacy = mode === "edit" && trimmedName === initialName.current
+  const nameInvalid = trimmedName !== "" && !isValidEnvVarName(trimmedName)
+  const nameSuggestion = nameInvalid ? suggestEnvVarName(trimmedName) : null
 
   React.useEffect(() => {
     if (values.scope === "CREW" && crews.length === 0 && !crewsLoading) {
@@ -190,6 +204,18 @@ export function CredentialForm({
       setError("Name is required")
       return
     }
+    if (nameInvalid && !nameIsLegacy) {
+      // Legacy names that were already invalid stay submittable (see
+      // nameIsLegacy above) — blocking them would make old credentials
+      // uneditable. Anything newly typed must be a valid env var name.
+      setNameBlurred(true)
+      setError(
+        nameSuggestion
+          ? `Name must be a valid env var name — try ${nameSuggestion}`
+          : "Name must be a valid env var name (uppercase letters, digits, underscores; can't start with a digit)",
+      )
+      return
+    }
     if (mode === "create" && !hideValue && !values.value.trim()) {
       setError("Value is required")
       return
@@ -240,7 +266,12 @@ export function CredentialForm({
             placeholder="e.g. STRIPE_API_KEY"
             value={values.name}
             onChange={(e) => handleNameChange(e.target.value)}
-            className="font-mono text-sm pr-9"
+            onBlur={() => setNameBlurred(true)}
+            className={cn(
+              "font-mono text-sm pr-9",
+              nameBlurred && nameInvalid && !nameIsLegacy && "border-red-500/50",
+            )}
+            aria-invalid={nameBlurred && nameInvalid && !nameIsLegacy}
             autoFocus={mode === "create"}
             required
           />
@@ -254,10 +285,34 @@ export function CredentialForm({
             </div>
           )}
         </div>
-        <p className="text-[11px] text-muted-foreground">
-          ENV variable name your agent will read. Brand is auto-detected from the name —
-          click the chip above to pick manually.
-        </p>
+        {nameBlurred && nameInvalid && !nameIsLegacy ? (
+          <div className="flex items-center gap-2 flex-wrap text-[11px] text-red-400">
+            <span>
+              Must be a valid env var name — uppercase letters, digits and underscores,
+              not starting with a digit.
+            </span>
+            {nameSuggestion && (
+              <button
+                type="button"
+                onClick={() => handleNameChange(nameSuggestion)}
+                className="font-mono rounded border border-red-400/40 px-1.5 py-0.5 hover:bg-red-500/10 transition-colors"
+              >
+                Use {nameSuggestion}
+              </button>
+            )}
+          </div>
+        ) : nameInvalid && nameIsLegacy ? (
+          <p className="text-[11px] text-amber-400">
+            This name isn&apos;t a valid env var name; agents may not see it as an
+            environment variable. You can keep it, or rename
+            {nameSuggestion ? <> to <button type="button" onClick={() => handleNameChange(nameSuggestion)} className="font-mono underline underline-offset-2 hover:text-amber-300">{nameSuggestion}</button></> : " it"}.
+          </p>
+        ) : (
+          <p className="text-[11px] text-muted-foreground">
+            ENV variable name your agent will read. Brand is auto-detected from the name —
+            click the chip above to pick manually.
+          </p>
+        )}
       </div>
 
       {/* Value */}

@@ -92,6 +92,12 @@ func newDriftFixture(t *testing.T, containerName, runningImage string) (*Provide
 					{"Destination": "/home/agent"},
 					{"Destination": "/opt/crew-tools"},
 				},
+				// /secrets rides HostConfig.Tmpfs, not Mounts — a healthy
+				// modern container carries this entry; without it the drift
+				// path recreates.
+				"HostConfig": map[string]any{
+					"Tmpfs": map[string]string{"/secrets": secretsTmpfsSpec},
+				},
 			})
 
 		// Stop the stale container.

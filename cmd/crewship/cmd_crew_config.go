@@ -265,7 +265,7 @@ func setCrewConfig(client *cli.Client, crewID, devcontainerPath, misePath, runti
 func readConfigFile(path string) (string, error) {
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("file not found: %s", path)
+			return "", cli.NotFoundf("file not found: %s", path)
 		}
 		return "", fmt.Errorf("stat %s: %w", path, err)
 	}

@@ -8,12 +8,14 @@ import {
 } from "@/components/ui/sheet"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
+import { KeeperGovernancePanel } from "@/components/features/admin/keeper-governance-panel"
 import { cn } from "@/lib/utils"
 import { redactSecrets, redactUrl } from "../utils"
 import type { KeeperStatus, KeeperLogEntry } from "../types"
 import type { KeeperLiveEvent, KeeperWsStatus } from "../hooks/use-admin-websocket"
 
 interface KeeperTabProps {
+  workspaceId: string | null
   keeperLoading: boolean
   keeperStatus: KeeperStatus | null
   keeperLog: KeeperLogEntry[]
@@ -36,6 +38,7 @@ function decisionStatusKey(decision: string | null | undefined): string {
 }
 
 export const KeeperTab = React.memo(function KeeperTab({
+  workspaceId,
   keeperLoading,
   keeperStatus,
   keeperLog,
@@ -62,6 +65,12 @@ export const KeeperTab = React.memo(function KeeperTab({
 
       {!keeperLoading && keeperStatus && (
         <>
+          {/* ── Watchdog governance (issue #1001 M0) ── */}
+          <KeeperGovernancePanel
+            workspaceId={workspaceId}
+            serverEnabled={keeperStatus.enabled}
+          />
+
           {/* ── System status card ── */}
           <SettingsCard
             title="System status"

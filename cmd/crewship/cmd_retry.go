@@ -181,7 +181,7 @@ func fetchRun(client *cli.Client, runID string) (runMetadata, error) {
 		}
 		return out, nil
 	}
-	return runMetadata{}, fmt.Errorf("run %s not found in last 100 runs", runID)
+	return runMetadata{}, cli.NotFoundf("run %s not found in last 100 runs", runID)
 }
 
 func init() {

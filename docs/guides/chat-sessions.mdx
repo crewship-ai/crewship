@@ -189,6 +189,7 @@ The chat surface is small — no dedicated `/api-reference/chats` page yet; the 
 | `POST` | `/api/v1/agents/{agentId}/chats` | Create a session. Body: `{session_id?, origin?}`. `origin` is one of `UI / CLI / WEBHOOK / CRON / AGENT` — anything else is stored as `NULL`. Returns `{"id": "<chatId>"}`. |
 | `GET` | `/api/v1/agents/{agentId}/chats` | List the agent's sessions, ordered by most recent activity. Each row carries `last_activity_at` (bumped on every message append) and `unread_count` — messages the **calling user** hasn't read, their own excluded. |
 | `PUT` | `/api/v1/agents/{agentId}/chats/{chatId}/read` | Mark the session read for the calling user: advances their per-chat read cursor (`unread_count` drops to 0) and clears the paired "agent replied" inbox notification. Returns `{chat_id, last_read_at}`. Cross-tenant or mis-nested ids return `404`. |
+| `DELETE` | `/api/v1/agents/{agentId}/chats/{chatId}` | Delete the session, its messages, read cursors, and its "agent replied" inbox items — irreversible. Allowed for the chat's creator or anyone with agent-edit rights. `routine iterate` uses this to remove its one-shot grader/optimizer sessions. Returns `204`; cross-tenant or mis-nested ids return `404`; a chat with delegation records (assignments) returns `409` — it is audit history and cannot be deleted. |
 
 ### Messages
 
@@ -315,6 +316,10 @@ crewship chat list atlas
 crewship chat c_abc123
 crewship chat read c_abc123            # agent auto-resolved from the chat
 crewship chat read c_abc123 --agent atlas   # skip the lookup scan
+
+# Remove an abandoned or one-shot session entirely (irreversible —
+# messages and read cursors go with it; creator or agent-editor only)
+crewship chat delete c_abc123 --yes
 ```
 
 ### "Your agent replied" notifications

@@ -32,9 +32,11 @@ import (
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"github.com/crewship-ai/crewship/internal/keeper/routines"
 	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/skills"
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // PRD §6 F4 default cadences. Daily at 03:00/03:30 UTC. Operators can
@@ -57,6 +59,7 @@ const (
 func registerKeeperPhase2Routines(
 	sched *scheduler.Scheduler,
 	db *sql.DB,
+	hub *ws.Hub,
 	skillEval *gatekeeper.SkillReviewEvaluator,
 	memHealthEval *gatekeeper.MemoryHealthEvaluator,
 	logger *slog.Logger,
@@ -68,7 +71,7 @@ func registerKeeperPhase2Routines(
 
 	if skillEval != nil {
 		fn := func(ctx context.Context) {
-			runSkillReviewSweep(ctx, db, skillEval, logger)
+			runSkillReviewSweep(ctx, db, hub, skillEval, logger)
 		}
 		if err := sched.RegisterPlatformRoutine(string(routines.RoutineKindSkillReview), cronSkillReview, fn); err != nil {
 			logger.Error("keeper: skill_review routine registration failed", "error", err)
@@ -81,7 +84,7 @@ func registerKeeperPhase2Routines(
 
 	if memHealthEval != nil {
 		fn := func(ctx context.Context) {
-			runMemoryHealthSweep(ctx, db, memHealthEval, logger)
+			runMemoryHealthSweep(ctx, db, hub, memHealthEval, logger)
 		}
 		if err := sched.RegisterPlatformRoutine(string(routines.RoutineKindMemoryHealthCheck), cronMemoryHealthCheck, fn); err != nil {
 			logger.Error("keeper: memory_health_check routine registration failed", "error", err)
@@ -95,6 +98,17 @@ func registerKeeperPhase2Routines(
 	return skillRegistered, memoryRegistered
 }
 
+// broadcastSweepInbox pushes the workspace inbox invalidation after a
+// successful sweep insert so findings repaint open inboxes immediately
+// instead of on the next poll (precedent: pipeline/runner_notify.go).
+// Nil hub (tests, headless boot) is a no-op.
+func broadcastSweepInbox(hub *ws.Hub, workspaceID string) {
+	if hub == nil {
+		return
+	}
+	hub.BroadcastWorkspace(workspaceID, "inbox.updated", map[string]string{"source": "keeper_sweep"})
+}
+
 // ---- F4.1 skill_review sweep ----
 
 // runSkillReviewSweep loads every skill (the catalog is workspace-global
@@ -105,6 +119,7 @@ func registerKeeperPhase2Routines(
 func runSkillReviewSweep(
 	ctx context.Context,
 	db *sql.DB,
+	hub *ws.Hub,
 	ev *gatekeeper.SkillReviewEvaluator,
 	logger *slog.Logger,
 ) {
@@ -117,7 +132,7 @@ func runSkillReviewSweep(
 		logger.Info("keeper.skill_review: no skills to audit")
 		return
 	}
-	pers := &sqlSkillPersister{db: db, logger: logger}
+	pers := &sqlSkillPersister{db: db, hub: hub, logger: logger}
 	sum, err := routines.RunSkillReview(ctx, ev, pers, inputs, logger)
 	if err != nil && ctx.Err() == nil {
 		logger.Error("keeper.skill_review: sweep aborted", "error", err)
@@ -267,6 +282,7 @@ func loadSkillSweepInputs(
 // OR IGNORE into inbox via the inbox.Insert helper (dedup on source_id).
 type sqlSkillPersister struct {
 	db     *sql.DB
+	hub    *ws.Hub // nil in tests — broadcasts are best-effort
 	logger *slog.Logger
 }
 
@@ -368,19 +384,23 @@ func (p *sqlSkillPersister) WriteInboxItem(ctx context.Context, skillID, reason 
 		// workspace suffix the second workspace's INSERT OR IGNORE
 		// would dedup against the first workspace's row — defeating
 		// the whole point of the fanout.
+		// Per-workspace resolution — each workspace in the fanout has
+		// its own security contact (or none).
+		gov := governance.Resolve(ctx, p.db, p.logger, workspaceID)
 		if err := inbox.Insert(ctx, p.db, p.logger, inbox.Item{
-			WorkspaceID: workspaceID,
-			Kind:        inbox.KindEscalation,
-			SourceID:    "skill_review_" + skillID + "_" + workspaceID,
-			TargetRole:  "MANAGER",
-			Title:       "Skill review: " + skillID,
-			BodyMD:      friendly,
-			SenderType:  "system",
-			SenderID:    "keeper_skill_review_routine",
-			SenderName:  "Skill Curator",
-			Priority:    "medium",
-			Blocking:    blocking,
-			Payload:     payload,
+			WorkspaceID:  workspaceID,
+			Kind:         inbox.KindEscalation,
+			SourceID:     "skill_review_" + skillID + "_" + workspaceID,
+			TargetUserID: gov.SecurityContactUserID,
+			TargetRole:   "MANAGER",
+			Title:        "Skill review: " + skillID,
+			BodyMD:       friendly,
+			SenderType:   "system",
+			SenderID:     "keeper_skill_review_routine",
+			SenderName:   "Skill Curator",
+			Priority:     "medium",
+			Blocking:     blocking,
+			Payload:      payload,
 		}); err != nil {
 			// Log per-workspace and keep going — one workspace's
 			// inbox being unavailable shouldn't drop notifications for
@@ -390,7 +410,9 @@ func (p *sqlSkillPersister) WriteInboxItem(ctx context.Context, skillID, reason 
 			if firstErr == nil {
 				firstErr = err
 			}
+			continue
 		}
+		broadcastSweepInbox(p.hub, workspaceID)
 	}
 	return firstErr
 }
@@ -404,6 +426,7 @@ func (p *sqlSkillPersister) WriteInboxItem(ctx context.Context, skillID, reason 
 func runMemoryHealthSweep(
 	ctx context.Context,
 	db *sql.DB,
+	hub *ws.Hub,
 	ev *gatekeeper.MemoryHealthEvaluator,
 	logger *slog.Logger,
 ) {
@@ -416,7 +439,7 @@ func runMemoryHealthSweep(
 		logger.Info("keeper.memory_health_check: no scopes to audit")
 		return
 	}
-	pers := &sqlMemoryHealthPersister{db: db, logger: logger}
+	pers := &sqlMemoryHealthPersister{db: db, hub: hub, logger: logger}
 	sum, err := routines.RunMemoryHealthCheck(ctx, ev, pers, scopes, logger)
 	if err != nil && ctx.Err() == nil {
 		logger.Error("keeper.memory_health_check: sweep aborted", "error", err)
@@ -499,6 +522,7 @@ func loadMemoryHealthScopes(
 // call consolidator.RunForCrew directly.
 type sqlMemoryHealthPersister struct {
 	db     *sql.DB
+	hub    *ws.Hub // nil in tests — broadcasts are best-effort
 	logger *slog.Logger
 }
 
@@ -514,18 +538,20 @@ func (p *sqlMemoryHealthPersister) TriggerConsolidation(ctx context.Context, wor
 	// write fails.
 	p.logger.Info("keeper.memory_health_check: auto-consolidation triggered",
 		"workspace_id", workspaceID, "crew_id", crewID, "reason", reason)
+	gov := governance.Resolve(ctx, p.db, p.logger, workspaceID)
 	if err := inbox.Insert(ctx, p.db, p.logger, inbox.Item{
-		WorkspaceID: workspaceID,
-		Kind:        inbox.KindMemoryConsolidation,
-		SourceID:    "memory_health_" + crewID + "_" + time.Now().UTC().Format("20060102"),
-		TargetRole:  "MANAGER",
-		Title:       "Memory consolidation suggested",
-		BodyMD:      reason,
-		SenderType:  "system",
-		SenderID:    "keeper_memory_health_routine",
-		SenderName:  "Memory Health",
-		Priority:    "medium",
-		Blocking:    false,
+		WorkspaceID:  workspaceID,
+		Kind:         inbox.KindMemoryConsolidation,
+		SourceID:     "memory_health_" + crewID + "_" + time.Now().UTC().Format("20060102"),
+		TargetUserID: gov.SecurityContactUserID,
+		TargetRole:   "MANAGER",
+		Title:        "Memory consolidation suggested",
+		BodyMD:       reason,
+		SenderType:   "system",
+		SenderID:     "keeper_memory_health_routine",
+		SenderName:   "Memory Health",
+		Priority:     "medium",
+		Blocking:     false,
 		Payload: map[string]interface{}{
 			"crew_id": crewID,
 			"reason":  reason,
@@ -534,6 +560,7 @@ func (p *sqlMemoryHealthPersister) TriggerConsolidation(ctx context.Context, wor
 	}); err != nil {
 		return fmt.Errorf("inbox insert (consolidation): %w", err)
 	}
+	broadcastSweepInbox(p.hub, workspaceID)
 	return nil
 }
 
@@ -562,18 +589,20 @@ func (p *sqlMemoryHealthPersister) WriteInboxItem(ctx context.Context, workspace
 			"workspace_id", workspaceID, "crew_id", crewID)
 		return nil
 	}
+	gov := governance.Resolve(ctx, p.db, p.logger, workspaceID)
 	if err := inbox.Insert(ctx, p.db, p.logger, inbox.Item{
-		WorkspaceID: workspaceID,
-		Kind:        inbox.KindMessage,
-		SourceID:    "memory_health_advisory_" + crewID + "_" + time.Now().UTC().Format("20060102"),
-		TargetRole:  "MANAGER",
-		Title:       "Memory health advisory",
-		BodyMD:      friendly,
-		SenderType:  "system",
-		SenderID:    "keeper_memory_health_routine",
-		SenderName:  "Memory Health",
-		Priority:    "medium",
-		Blocking:    false,
+		WorkspaceID:  workspaceID,
+		Kind:         inbox.KindMessage,
+		SourceID:     "memory_health_advisory_" + crewID + "_" + time.Now().UTC().Format("20060102"),
+		TargetUserID: gov.SecurityContactUserID,
+		TargetRole:   "MANAGER",
+		Title:        "Memory health advisory",
+		BodyMD:       friendly,
+		SenderType:   "system",
+		SenderID:     "keeper_memory_health_routine",
+		SenderName:   "Memory Health",
+		Priority:     "medium",
+		Blocking:     false,
 		Payload: map[string]interface{}{
 			"crew_id": crewID,
 			"reason":  friendly,
@@ -582,5 +611,6 @@ func (p *sqlMemoryHealthPersister) WriteInboxItem(ctx context.Context, workspace
 	}); err != nil {
 		return fmt.Errorf("inbox insert (memory_health advisory): %w", err)
 	}
+	broadcastSweepInbox(p.hub, workspaceID)
 	return nil
 }

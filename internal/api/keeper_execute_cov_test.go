@@ -629,3 +629,5 @@ type covKEBroadcaster struct {
 func (b *covKEBroadcaster) BroadcastKeeperEvent(_ string, _ map[string]any) {
 	b.called = true
 }
+
+func (b *covKEBroadcaster) BroadcastInboxUpdated(_ string, _ string) {}

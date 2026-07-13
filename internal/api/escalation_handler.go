@@ -135,6 +135,9 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 			case pendingCredInvalidType:
 				body.Context = prependEscalationNote(body.Context,
 					fmt.Sprintf("The proposed credential type %q is not recognized, so the value was NOT staged and has been discarded — a human must supply the credential.", proposal.Type))
+			case pendingCredValueTooLarge:
+				body.Context = prependEscalationNote(body.Context,
+					fmt.Sprintf("The proposed credential value (%d bytes) exceeds the %d-byte limit, so it was NOT staged and has been discarded — a human must supply the credential.", len(proposal.Value), maxCredentialValueLen))
 			case pendingCredNoApprover:
 				// Hard failure: nothing can approve the credential and the secret
 				// is gone. Fail LOUD instead of recording a PENDING escalation that
@@ -434,7 +437,7 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 			} else if rows, _ := res.RowsAffected(); rows == 0 {
 				h.logger.Warn("approve pending credential: no pending row to activate", "credential_id", credentialID.String)
 			} else {
-				_ = RecordCredentialEvent(r.Context(), h.db, h.logger, credentialID.String,
+				recordCredentialEventBestEffort(r.Context(), h.db, h.logger, credentialID.String,
 					AuditEventApproved, "", "", map[string]any{"approved_by": approverID})
 			}
 		case "reject":
@@ -447,7 +450,7 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 			} else if rows, _ := res.RowsAffected(); rows == 0 {
 				h.logger.Warn("reject pending credential: no pending row to delete", "credential_id", credentialID.String)
 			} else {
-				_ = RecordCredentialEvent(r.Context(), h.db, h.logger, credentialID.String,
+				recordCredentialEventBestEffort(r.Context(), h.db, h.logger, credentialID.String,
 					AuditEventRejected, "", "", map[string]any{"rejected_by": approverID})
 			}
 		}

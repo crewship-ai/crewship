@@ -30,6 +30,10 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	if r.keeperConfig != nil && r.keeperConfig.Enabled {
 		internal.SetKeeperEnabled(true)
 	}
+	// Revoke → remove file-based /secrets from running containers when the
+	// sidecar reports status REVOKED (#814 parity with the public DELETE
+	// handler). nil (no docker) makes the reconcile a no-op.
+	internal.SetContainer(r.keeperContainer)
 	// Default-connector behaviour flag (COMPOSIO_DEFAULT_CONNECTOR). Threaded
 	// from the same Composio config the ComposioHandler uses so the runtime
 	// resolver and the operator surface agree on whether it's armed.
@@ -63,7 +67,8 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	r.mux.Handle("POST /api/v1/internal/chats", internalAuth(http.HandlerFunc(internal.CreateChat)))
 	r.mux.Handle("GET /api/v1/internal/chats/{chatId}/resolve", internalAuth(http.HandlerFunc(internal.ResolveChat)))
 	r.mux.Handle("GET /api/v1/internal/agents/{agentId}/resolve", internalAuth(http.HandlerFunc(internal.ResolveAgent)))
-	r.mux.Handle("GET /api/v1/internal/agents/{agentId}/webhook-secret", internalAuth(http.HandlerFunc(internal.GetWebhookSecret)))
+	// GET .../agents/{agentId}/webhook-secret removed (#999) — the webhook
+	// handler reads the secret from its local DB; plaintext never over IPC.
 	r.mux.Handle("POST /api/v1/internal/runs", internalAuth(http.HandlerFunc(internal.CreateRun)))
 	r.mux.Handle("PATCH /api/v1/internal/runs/{runId}", internalAuth(http.HandlerFunc(internal.UpdateRun)))
 	r.mux.Handle("PATCH /api/v1/internal/chats/{chatId}/message-count", internalAuth(http.HandlerFunc(internal.IncrementMessageCount)))
@@ -188,7 +193,13 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 		r.db, r.internalToken, r.PolicyResolver(),
 		r.skillReviewEval, r.behaviorEval, r.memHealthEval, r.negativeEval,
 		r.logger,
-	)
+	).WithMemoryBase(r.outputBasePath) // #1037: derive lesson write target server-side, not from the request body
+	// Same broadcaster the credential-path KeeperHandler gets — the F4
+	// endpoints write to the same inbox and owe the same realtime push
+	// (#1001 M0).
+	if r.hub != nil {
+		kp2.WithBroadcaster(&keeperWSBroadcaster{hub: r.hub})
+	}
 	// F4 Keeper Phase 2 endpoints — wrapped in BOTH internalAuth (sidecar
 	// token gate) AND internalWsCtx (puts ?workspace_id= into request
 	// context). Handlers depend on the context value to run

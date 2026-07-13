@@ -474,6 +474,14 @@ func TestCovWFRRotate_Forbidden(t *testing.T) {
 	h := NewCredentialHandler(db, newTestLogger())
 	seedCredentialEnc(t, db, wsID, userID, "cr1", "tok", "old-value")
 
+	// Layered gate reads the membership row on role-miss; demote the
+	// row so the deny is genuine (OWNER's capability fallback would
+	// otherwise grant credential.rotate).
+	if _, err := db.Exec(`UPDATE workspace_members SET role='VIEWER' WHERE workspace_id=? AND user_id=?`, wsID, userID); err != nil {
+		t.Fatalf("demote member: %v", err)
+	}
+	InvalidateCapabilityCache(wsID, userID)
+
 	body := jsonBody(map[string]any{"value": "new-value"})
 	req := httptest.NewRequest("POST", "/api/v1/credentials/cr1/rotate", body)
 	req.SetPathValue("credentialId", "cr1")
@@ -646,6 +654,14 @@ func TestCovWFRCancelRotation_Forbidden(t *testing.T) {
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 	h := NewCredentialHandler(db, newTestLogger())
+
+	// Layered gate reads the membership row on role-miss; demote the
+	// row so the deny is genuine (OWNER's capability fallback would
+	// otherwise grant credential.rotate).
+	if _, err := db.Exec(`UPDATE workspace_members SET role='VIEWER' WHERE workspace_id=? AND user_id=?`, wsID, userID); err != nil {
+		t.Fatalf("demote member: %v", err)
+	}
+	InvalidateCapabilityCache(wsID, userID)
 
 	req := httptest.NewRequest("DELETE", "/api/v1/credential-rotations/x", nil)
 	req.SetPathValue("rotationId", "x")

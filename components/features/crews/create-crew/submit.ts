@@ -1,5 +1,6 @@
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
+import { devWarn } from "@/lib/client-log"
 import type { WizardState } from "./types"
 
 export interface SubmitResult {
@@ -149,11 +150,11 @@ async function applyOverrides(
   } catch (e) {
     // fetch() rejects on network errors / aborts. Capture the message but not
     // the original error object (no stack with potentially-sensitive context).
-    console.warn("crew override PATCH transport error:", e instanceof Error ? e.name : "unknown")
+    devWarn("crew override PATCH transport error:", e instanceof Error ? e.name : "unknown")
   }
 
-  // One log line, metadata only — no body, no headers.
-  console.warn("crew override PATCH non-OK", { crewId, status })
+  // One dev-only log line, metadata only — no body, no headers.
+  devWarn("crew override PATCH non-OK", { crewId, status })
   toast.warning("Crew created, but some customizations didn't apply", {
     description: "Open crew settings to retry icon, color, runtime or MCP overrides.",
   })

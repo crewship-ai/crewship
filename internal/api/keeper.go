@@ -49,6 +49,12 @@ const (
 
 type KeeperBroadcaster interface {
 	BroadcastKeeperEvent(workspaceID string, event map[string]any)
+	// BroadcastInboxUpdated pushes the workspace-wide inbox invalidation
+	// event after a Keeper inbox write, so escalations reach the bell badge
+	// in realtime instead of on manual refresh (#1001 M0). Same event every
+	// other inbox producer (chatnotify, pipeline_governance, runner_notify)
+	// already emits.
+	BroadcastInboxUpdated(workspaceID string, source string)
 }
 
 // KeeperHandler handles credential access requests forwarded by the sidecar.
@@ -158,6 +164,20 @@ func (h *KeeperHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("keeper: get request", "error", err)
 		replyError(w, http.StatusInternalServerError, "internal error")
 		return
+	}
+
+	// Cross-tenant scoping (PR-F24): keeper_requests has no workspace_id column,
+	// so scope the read via the requesting agent's workspace. A workspace-bound
+	// token must not read another tenant's request row (which exposes
+	// credential_id, intent, decision, risk). 404 (not 403) so it is not an
+	// existence oracle. No-op for master-token callers (empty binding).
+	if bound := InternalTokenWorkspaceFromContext(r.Context()); bound != "" {
+		var ws string
+		if err := h.db.QueryRowContext(r.Context(),
+			`SELECT workspace_id FROM agents WHERE id = ?`, row.RequestingAgentID).Scan(&ws); err != nil || ws != bound {
+			replyError(w, http.StatusNotFound, "request not found")
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusOK, row)

@@ -499,6 +499,73 @@ Examples:
 	},
 }
 
+// chatDeleteCmd removes a chat session and its conversation history —
+// CLI parity for DELETE /api/v1/agents/{agentId}/chats/{chatId} (#998).
+// The gate is server-side: the chat's creator, or anyone with agent-edit
+// rights, may delete. The agent is auto-resolved from the chat (same
+// lookup as `chat read`); pass --agent to skip the scan.
+var chatDeleteCmd = &cobra.Command{
+	Use:   "delete <chat-id>",
+	Short: "Delete a chat session and its message history (irreversible)",
+	Long: `Remove a chat session, its messages, and read cursors. Useful for
+cleaning up one-shot programmatic sessions (routine iterate creates and
+removes its own automatically) or abandoned conversations.
+
+This is irreversible — the transcript is gone. Requires --yes or an
+interactive confirmation.
+
+Examples:
+  crewship chat delete c_abc123 --yes
+  crewship chat delete c_abc123 --agent atlas`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		chatID := args[0]
+
+		if yes, _ := cmd.Flags().GetBool("yes"); !yes {
+			if !confirmInteractive(fmt.Sprintf("Delete chat %s and its full message history?", chatID)) {
+				return fmt.Errorf("aborted")
+			}
+		}
+
+		agentOverride, _ := cmd.Flags().GetString("agent")
+		var agentID string
+		if agentOverride != "" {
+			agentID, err = resolveAgentID(client, agentOverride)
+			if err != nil {
+				return err
+			}
+		} else {
+			agentID, err = lookupChatAgentID(client, chatID)
+			if err != nil {
+				return fmt.Errorf("resolve agent for chat %s: %w (pass --agent to override)", chatID, err)
+			}
+		}
+
+		resp, err := client.Delete("/api/v1/agents/" + url.PathEscape(agentID) +
+			"/chats/" + url.PathEscape(chatID))
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		f := newFormatter()
+		switch f.Format {
+		case "json":
+			return f.JSON(map[string]string{"chat_id": chatID, "status": "deleted"})
+		case "yaml":
+			return f.YAML(map[string]string{"chat_id": chatID, "status": "deleted"})
+		}
+		cli.PrintSuccess(fmt.Sprintf("Chat %s deleted.", chatID))
+		return nil
+	},
+}
+
 // lookupChatAgentID finds which agent owns a chat by walking the agents
 // list and querying each agent's chat list until the chat ID is found.
 // Worst case scales with #agents — fine for the typical workspace size
@@ -534,7 +601,7 @@ func lookupChatAgentID(client *cli.Client, chatID string) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("chat %s not found in any agent's recent sessions", chatID)
+	return "", cli.NotFoundf("chat %s not found in any agent's recent sessions", chatID)
 }
 
 // postMultipart issues a multipart/form-data POST without going through
@@ -658,6 +725,9 @@ func init() {
 
 	chatReadCmd.Flags().String("agent", "", "Override the auto-resolved agent slug or ID")
 
+	chatDeleteCmd.Flags().String("agent", "", "Override the auto-resolved agent slug or ID")
+	chatDeleteCmd.Flags().Bool("yes", false, "Skip the confirmation prompt")
+
 	chatSteerCmd.Flags().StringP("message", "m", "", "Steering message text (required)")
 
 	chatReactCmd.AddCommand(chatReactAddCmd)
@@ -674,5 +744,6 @@ func init() {
 	chatCmd.AddCommand(chatAttachCmd)
 	chatCmd.AddCommand(chatListCmd)
 	chatCmd.AddCommand(chatReadCmd)
+	chatCmd.AddCommand(chatDeleteCmd)
 	chatCmd.AddCommand(chatSteerCmd)
 }

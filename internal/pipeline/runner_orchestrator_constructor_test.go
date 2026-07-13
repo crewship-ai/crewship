@@ -39,9 +39,6 @@ func (minimalChatResolver) ResolveChat(_ context.Context, _ string) (*chatbridge
 func (minimalChatResolver) ResolveAgent(_ context.Context, _, _ string) (*chatbridge.ChatInfo, error) {
 	return nil, nil
 }
-func (minimalChatResolver) GetWebhookSecret(_ context.Context, _, _ string) (string, error) {
-	return "", nil
-}
 func (minimalChatResolver) CreateRun(_ context.Context, _, _, _, _, _ string, _ map[string]interface{}) error {
 	return nil
 }

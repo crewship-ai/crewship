@@ -164,11 +164,11 @@ func verifyCallerSignature(r *http.Request, workspaceID, callerID string) bool {
 // confuse an operator into thinking the user has no email.)
 //
 // Role injection is ADMIN (not MANAGER like the other internal
-// mirrors) because CredentialHandler.Rotate gates on canRole("manage")
-// — manage requires ADMIN+. The capability gate added in commit 6 is
-// the actual security boundary for slash-initiated credential
-// mutation; this role injection just clears the pre-capability
-// role check that predates the dual-path design.
+// mirrors) so the injected identity passes Rotate's layered gate
+// (role "manage" OR credential.rotate capability) via the role
+// branch. The capability gate is the actual security boundary for
+// slash-initiated credential mutation; this role injection just
+// clears the role check for callers the adapter already vetted.
 func (h *CredentialInternalAdapter) injectContext(r *http.Request, wsID, callerID string) *http.Request {
 	ctx := context.WithValue(r.Context(), ctxWorkspaceID, wsID)
 	ctx = context.WithValue(ctx, ctxRole, "ADMIN")

@@ -172,10 +172,33 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *WebhookHandler) lookupSecret(ctx context.Context, crewID, agentID string) (string, error) {
-	// Thread crewID so the server scopes the secret lookup to the (crew,
-	// agent) pair the webhook URL named — without it the server-side crew
-	// scoping never engages and any crew's secret is fetchable by id alone.
-	return h.resolver.GetWebhookSecret(ctx, crewID, agentID)
+	// Read locally from the agents table — this process owns the DB (same
+	// rationale as lookupRequireTimestamp, #815). The secret used to round-trip
+	// the internal IPC endpoint in plaintext JSON (#999); that endpoint is gone
+	// and the raw value now never leaves this process. Crew scoping mirrors the
+	// (crew, agent) pair the webhook URL named — without it any crew's secret
+	// would be fetchable by agent id alone.
+	if h.db == nil {
+		return "", errors.New("webhook secret lookup unavailable: no database")
+	}
+	query := `SELECT webhook_secret FROM agents WHERE id = ? AND deleted_at IS NULL`
+	args := []any{agentID}
+	if crewID != "" {
+		query += " AND crew_id = ?"
+		args = append(args, crewID)
+	}
+	var secret sql.NullString
+	err := h.db.QueryRowContext(ctx, query, args...).Scan(&secret)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("webhook secret lookup: agent %s not found", agentID)
+	}
+	if err != nil {
+		return "", fmt.Errorf("webhook secret lookup: %w", err)
+	}
+	if !secret.Valid || secret.String == "" {
+		return "", fmt.Errorf("webhook secret not configured for agent %s", agentID)
+	}
+	return secret.String, nil
 }
 
 // webhookIdempotencyKey resolves the dedup key for a webhook delivery.

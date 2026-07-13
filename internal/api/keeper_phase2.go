@@ -50,6 +50,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"github.com/crewship-ai/crewship/internal/lookout"
 	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/skills"
@@ -127,6 +128,58 @@ type KeeperPhase2Handler struct {
 	behaviorEval  *gatekeeper.BehaviorEvaluator
 	memHealthEval *gatekeeper.MemoryHealthEvaluator
 	negativeEval  *gatekeeper.NegativeLearningEvaluator
+	broadcaster   KeeperBroadcaster
+
+	// outputBase is the host-side OutputBasePath (cfg.Storage.BasePath) —
+	// the root the docker bind-mounts hang off. It is the ONLY trusted
+	// source for an agent's on-disk .memory dir: the F4.4 negative-learning
+	// write target is derived from it + (workspace_id, agent_id), never from
+	// the request body (see resolveAgentMemoryDir / #1037). Empty disables
+	// lesson writes (fail-safe: no write beats a body-chosen write target).
+	outputBase string
+}
+
+// WithBroadcaster attaches a broadcaster for real-time keeper event
+// notifications. Mirrors KeeperHandler.WithBroadcaster.
+func (h *KeeperPhase2Handler) WithBroadcaster(b KeeperBroadcaster) *KeeperPhase2Handler {
+	h.broadcaster = b
+	return h
+}
+
+// WithMemoryBase sets the host OutputBasePath used to derive per-agent
+// .memory directories server-side. Wired from cfg.Storage.BasePath in
+// server.go, mirroring PersonaHandler. When unset the negative-learning
+// ALLOW path cannot resolve a write target and skips the lesson write
+// (fail-safe) rather than trusting an attacker-supplied path.
+func (h *KeeperPhase2Handler) WithMemoryBase(outputBase string) *KeeperPhase2Handler {
+	h.outputBase = outputBase
+	return h
+}
+
+// resolveAgentMemoryDir derives the host-side .memory directory for the
+// requesting agent from trusted server state only — the agents row
+// (crew_id, slug) scoped to workspaceID — and the configured outputBase.
+// This is the security boundary for #1037: the request body's
+// agent_memory_dir is an attacker-controlled write target and MUST NOT be
+// used. Returns "" (no error) when derivation isn't possible (no base, no
+// agent_id, agent not found / cross-workspace), which callers treat as
+// "skip the lesson write" rather than falling back to any body value.
+func (h *KeeperPhase2Handler) resolveAgentMemoryDir(ctx context.Context, workspaceID, agentID string) (string, error) {
+	if h.outputBase == "" || agentID == "" || workspaceID == "" {
+		return "", nil
+	}
+	var (
+		crewID sql.NullString
+		slug   string
+	)
+	err := h.db.QueryRowContext(ctx, `
+		SELECT crew_id, slug FROM agents
+		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		agentID, workspaceID).Scan(&crewID, &slug)
+	if err != nil {
+		return "", err
+	}
+	return hostAgentMemoryDir(h.outputBase, workspaceID, crewID.String, slug), nil
 }
 
 // NewKeeperPhase2Handler builds the handler. Any evaluator may be nil
@@ -158,6 +211,38 @@ func NewKeeperPhase2Handler(
 	}
 }
 
+// notifyKeeperInbox pushes the realtime inbox invalidation after an F4
+// inbox write — the same contract as the keeper_request.go credential path
+// (#1001 M0), so F4 findings stop depending on manual refresh. A configured
+// security contact is highlighted purely via the item's TargetUserID (the
+// inbox visibility filter surfaces it to that contact and the MANAGER
+// fanout alike); a direct per-user push is a later milestone.
+func (h *KeeperPhase2Handler) notifyKeeperInbox(workspaceID string) {
+	if h.broadcaster == nil {
+		return
+	}
+	h.broadcaster.BroadcastInboxUpdated(workspaceID, "keeper")
+}
+
+// insertKeeperInbox surfaces an F4 ESCALATE/DENY decision to the operator
+// inbox and pushes the realtime invalidation. The inbox row is the ONLY
+// operator-visible surface for these decisions, so a failed insert must NOT
+// be swallowed (#1048): the keeper_requests audit row still lands, but no
+// human is alerted that a tool/skill/behaviour was escalated or denied —
+// governance that fails silently. On insert error it writes a 500 and
+// returns false so the caller returns; the platform retries rather than the
+// escalation vanishing behind a 200. Returns true (and notifies) on success.
+func (h *KeeperPhase2Handler) insertKeeperInbox(w http.ResponseWriter, ctx context.Context, reqID, workspaceID string, item inbox.Item) bool {
+	if err := inbox.Insert(ctx, h.db, h.logger, item); err != nil {
+		h.logger.Error("keeper_phase2: ESCALATE/DENY inbox insert failed; operator not alerted",
+			"request_id", reqID, "workspace_id", workspaceID, "error", err)
+		replyError(w, http.StatusInternalServerError, "failed to surface keeper decision to operator inbox")
+		return false
+	}
+	h.notifyKeeperInbox(workspaceID)
+	return true
+}
+
 // inboxBlockingForPolicy maps the resolved Policy → the inbox.Item
 // .Blocking flag PR-B established. Strict/guided crews want a hard
 // block; trusted/full crews want a non-blocking ping. Used by every
@@ -187,6 +272,26 @@ func (h *KeeperPhase2Handler) resolvePolicySafe(ctx context.Context, crewID stri
 		return policy.Policy{AutonomyLevel: policy.AutonomyGuided, BehaviorMode: policy.BehaviorWarn}
 	}
 	return p
+}
+
+// resolvePolicyStrict resolves the crew policy WITHOUT a downgrade-on-error
+// fallback. The behavior endpoint feeds the resolved policy into the decision
+// itself (BehaviorMode block vs warn is what makes a DENY actually blocking),
+// so the guided/warn fallback resolvePolicySafe uses would fail OPEN: a crew
+// configured behavior_mode=block that hits a transient resolve error would be
+// silently evaluated as warn and a tool call that should be ShouldBlock=true
+// downgraded to non-blocking (#1047). Callers on the enforcement path must
+// treat an error as "defer the check" (HTTP 503), never as "allow". The three
+// inbox-only handlers keep resolvePolicySafe, where the guided fallback is
+// conservative (Blocking=true) and a 503 would needlessly fail a decision.
+func (h *KeeperPhase2Handler) resolvePolicyStrict(ctx context.Context, crewID string) (policy.Policy, error) {
+	if h.policy == nil {
+		return policy.Policy{}, fmt.Errorf("policy resolver not configured")
+	}
+	if crewID == "" {
+		return policy.Policy{}, fmt.Errorf("crew_id required for policy resolution")
+	}
+	return h.policy.Resolve(ctx, crewID)
 }
 
 // recordKeeperRequest is the shared INSERT into keeper_requests for
@@ -332,18 +437,21 @@ func (h *KeeperPhase2Handler) HandleSkillReview(w http.ResponseWriter, r *http.R
 	}
 
 	if res.Decision == keeper.DecisionEscalate || res.Decision == keeper.DecisionDeny {
-		_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
-			WorkspaceID: body.WorkspaceID,
-			Kind:        inbox.KindEscalation,
-			SourceID:    reqID,
-			TargetRole:  "MANAGER",
-			Title:       fmt.Sprintf("Skill review: %s (%s)", body.SkillName, res.Decision),
-			BodyMD:      res.Reason,
-			SenderType:  "system",
-			SenderID:    "keeper_skill_review",
-			SenderName:  "Skill Curator",
-			Priority:    "medium",
-			Blocking:    res.Decision == keeper.DecisionDeny || inboxBlockingForPolicy(pol),
+		gov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
+		title := fmt.Sprintf("Skill review: %s (%s)", body.SkillName, res.Decision)
+		if !h.insertKeeperInbox(w, r.Context(), reqID, body.WorkspaceID, inbox.Item{
+			WorkspaceID:  body.WorkspaceID,
+			Kind:         inbox.KindEscalation,
+			SourceID:     reqID,
+			TargetUserID: gov.SecurityContactUserID,
+			TargetRole:   "MANAGER",
+			Title:        title,
+			BodyMD:       res.Reason,
+			SenderType:   "system",
+			SenderID:     "keeper_skill_review",
+			SenderName:   "Skill Curator",
+			Priority:     "medium",
+			Blocking:     res.Decision == keeper.DecisionDeny || inboxBlockingForPolicy(pol),
 			Payload: map[string]interface{}{
 				"request_id":            reqID,
 				"request_type":          string(keeper.RequestTypeSkillReview),
@@ -353,7 +461,9 @@ func (h *KeeperPhase2Handler) HandleSkillReview(w http.ResponseWriter, r *http.R
 				"verify_after_decide":   res.VerifyAfterDecide,
 				"unverify_after_decide": res.UnverifyAfterDecide,
 			},
-		})
+		}) {
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -399,7 +509,19 @@ func (h *KeeperPhase2Handler) HandleBehavior(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	pol := h.resolvePolicySafe(r.Context(), body.CrewID)
+	// #1047: the behavior decision is DRIVEN by the resolved policy
+	// (BehaviorMode block vs warn decides whether a DENY blocks). Unlike the
+	// inbox-only handlers, a silent guided/warn fallback here fails OPEN — a
+	// block-mode crew hitting a transient resolve error would be evaluated as
+	// warn and stop blocking. Fail closed: defer the check (503) rather than
+	// downgrade enforcement.
+	pol, perr := h.resolvePolicyStrict(r.Context(), body.CrewID)
+	if perr != nil {
+		h.logger.Warn("keeper_phase2: behavior policy resolve failed; deferring check (fail-closed)",
+			"crew_id", body.CrewID, "error", perr)
+		replyError(w, http.StatusServiceUnavailable, "policy unavailable; behavior check deferred")
+		return
+	}
 
 	ctx := scopeKeeperRequest(r.Context(), body.WorkspaceID, body.CrewID, body.AgentID)
 	res, err := h.behaviorEval.Evaluate(ctx, gatekeeper.BehaviorReviewRequest{
@@ -432,18 +554,21 @@ func (h *KeeperPhase2Handler) HandleBehavior(w http.ResponseWriter, r *http.Requ
 	switch res.PolicyDecision {
 	case policy.DecisionInboxApprove, policy.DecisionAutoLogInbox,
 		policy.DecisionBlockInbox:
-		_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
-			WorkspaceID: body.WorkspaceID,
-			Kind:        inbox.KindEscalation,
-			SourceID:    reqID,
-			TargetRole:  "MANAGER",
-			Title:       fmt.Sprintf("Behavior monitor: %s on %s (%s)", body.AgentName, body.ToolName, res.Decision),
-			BodyMD:      res.Reason,
-			SenderType:  "system",
-			SenderID:    "keeper_behavior",
-			SenderName:  "Behavior Monitor",
-			Priority:    behaviorPriorityForDecision(res.Decision),
-			Blocking:    res.PolicyDecision == policy.DecisionBlockInbox,
+		gov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
+		title := fmt.Sprintf("Behavior monitor: %s on %s (%s)", body.AgentName, body.ToolName, res.Decision)
+		if !h.insertKeeperInbox(w, r.Context(), reqID, body.WorkspaceID, inbox.Item{
+			WorkspaceID:  body.WorkspaceID,
+			Kind:         inbox.KindEscalation,
+			SourceID:     reqID,
+			TargetUserID: gov.SecurityContactUserID,
+			TargetRole:   "MANAGER",
+			Title:        title,
+			BodyMD:       res.Reason,
+			SenderType:   "system",
+			SenderID:     "keeper_behavior",
+			SenderName:   "Behavior Monitor",
+			Priority:     behaviorPriorityForDecision(res.Decision),
+			Blocking:     res.PolicyDecision == policy.DecisionBlockInbox,
 			Payload: map[string]interface{}{
 				"request_id":      reqID,
 				"request_type":    string(keeper.RequestTypeBehavior),
@@ -453,7 +578,9 @@ func (h *KeeperPhase2Handler) HandleBehavior(w http.ResponseWriter, r *http.Requ
 				"policy_decision": string(res.PolicyDecision),
 				"should_block":    res.ShouldBlock,
 			},
-		})
+		}) {
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -544,18 +671,21 @@ func (h *KeeperPhase2Handler) HandleMemoryHealth(w http.ResponseWriter, r *http.
 	}
 
 	if res.Decision == keeper.DecisionEscalate {
-		_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
-			WorkspaceID: body.WorkspaceID,
-			Kind:        inbox.KindEscalation,
-			SourceID:    reqID,
-			TargetRole:  "MANAGER",
-			Title:       fmt.Sprintf("Memory health: %s (overall %.0f)", body.CrewName, res.OverallScore),
-			BodyMD:      res.Reason,
-			SenderType:  "system",
-			SenderID:    "keeper_memory_health",
-			SenderName:  "Memory Health",
-			Priority:    "medium",
-			Blocking:    inboxBlockingForPolicy(pol),
+		gov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
+		title := fmt.Sprintf("Memory health: %s (overall %.0f)", body.CrewName, res.OverallScore)
+		if !h.insertKeeperInbox(w, r.Context(), reqID, body.WorkspaceID, inbox.Item{
+			WorkspaceID:  body.WorkspaceID,
+			Kind:         inbox.KindEscalation,
+			SourceID:     reqID,
+			TargetUserID: gov.SecurityContactUserID,
+			TargetRole:   "MANAGER",
+			Title:        title,
+			BodyMD:       res.Reason,
+			SenderType:   "system",
+			SenderID:     "keeper_memory_health",
+			SenderName:   "Memory Health",
+			Priority:     "medium",
+			Blocking:     inboxBlockingForPolicy(pol),
 			Payload: map[string]interface{}{
 				"request_id":          reqID,
 				"request_type":        string(keeper.RequestTypeMemoryHealth),
@@ -563,7 +693,9 @@ func (h *KeeperPhase2Handler) HandleMemoryHealth(w http.ResponseWriter, r *http.
 				"contradiction_count": body.ContradictionCount,
 				"auto_consolidate":    res.AutoConsolidate,
 			},
-		})
+		}) {
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -610,6 +742,27 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 		return
 	}
 
+	// #1037: the lesson write target is derived from trusted server state
+	// (the agents row for body.AgentID, scoped to the token's workspace) —
+	// NOT body.AgentMemoryDir, which an internal caller could point at any
+	// other agent's / tenant's .memory dir to poison their lessons.md. The
+	// body field is retained for wire compat but never used as a path; a
+	// non-empty mismatch is logged as a likely poisoning attempt.
+	memoryDir, mderr := h.resolveAgentMemoryDir(r.Context(), body.WorkspaceID, body.AgentID)
+	if mderr != nil {
+		// Agent not found / cross-workspace / DB error → no trusted target.
+		// Fall through with an empty dir (lesson write is skipped below);
+		// the decision is still evaluated, recorded, and escalated.
+		h.logger.Warn("keeper_phase2: negative_learning could not resolve agent memory dir; lesson write will be skipped",
+			"workspace_id", body.WorkspaceID, "agent_id", body.AgentID, "error", mderr)
+		memoryDir = ""
+	}
+	if body.AgentMemoryDir != "" && body.AgentMemoryDir != memoryDir {
+		h.logger.Warn("keeper_phase2: ignoring request-supplied agent_memory_dir (using server-derived path)",
+			"workspace_id", body.WorkspaceID, "agent_id", body.AgentID,
+			"supplied", body.AgentMemoryDir, "derived", memoryDir)
+	}
+
 	pol := h.resolvePolicySafe(r.Context(), body.CrewID)
 
 	ctx := scopeKeeperRequest(r.Context(), body.WorkspaceID, body.CrewID, body.AgentID)
@@ -618,7 +771,7 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 		CrewID:         body.CrewID,
 		AgentName:      body.AgentName,
 		CrewName:       body.CrewName,
-		AgentMemoryDir: body.AgentMemoryDir,
+		AgentMemoryDir: memoryDir,
 		Trigger:        gatekeeper.NegativeTrigger(body.Trigger),
 		ToolName:       body.ToolName,
 		FailureSnippet: body.FailureSnippet,
@@ -639,6 +792,10 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 		return
 	}
 
+	// Resolved once — both inbox writes below (gated lesson proposal,
+	// ESCALATE/DENY surface) share the same targeting decision.
+	gov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
+
 	// PR-G F4.1 UX — self_learning gate on the ALLOW path. The
 	// evaluator's WriteLesson=true says "this lesson is worth keeping",
 	// but whether it AUTO-applies vs queues operator approval depends
@@ -653,7 +810,7 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 	// (legacy callers that haven't been updated), default to OFF —
 	// safer to require operator approval than silently auto-apply.
 	autoApplyLesson := false
-	if res.WriteLesson && body.AgentMemoryDir != "" {
+	if res.WriteLesson && memoryDir != "" {
 		if body.AgentID == "" {
 			h.logger.Warn("keeper_phase2: ALLOW lesson skipped (agent_id missing, can't resolve self_learning)",
 				"workspace_id", body.WorkspaceID)
@@ -669,7 +826,7 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 	}
 
 	if autoApplyLesson {
-		werr := consolidate.WriteLesson(r.Context(), body.AgentMemoryDir, consolidate.LessonEntry{
+		werr := consolidate.WriteLesson(r.Context(), memoryDir, consolidate.LessonEntry{
 			ID:          res.Proposal.ID,
 			Kind:        res.Proposal.Kind,
 			Source:      res.Proposal.Source,
@@ -678,9 +835,9 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 		})
 		if werr != nil {
 			h.logger.Warn("keeper_phase2: WriteLesson failed (decision still recorded)",
-				"agent_memory_dir", body.AgentMemoryDir, "error", werr)
+				"agent_memory_dir", memoryDir, "error", werr)
 		}
-	} else if res.WriteLesson && body.AgentMemoryDir != "" {
+	} else if res.WriteLesson && memoryDir != "" {
 		// ALLOW but self_learning OFF — queue blocking inbox so an
 		// operator can approve the proposed lesson before it lands on
 		// the agent's lessons.md. Payload carries the full lesson
@@ -689,23 +846,25 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 		// would lose the proposal entirely (lessons.md isn't written
 		// AND no inbox item exists) while the handler returns 200,
 		// which is the worst failure mode.
+		title := fmt.Sprintf("Lesson proposal: %s (%s)", body.AgentName, body.Trigger)
 		if err := inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
-			WorkspaceID: body.WorkspaceID,
-			Kind:        inbox.KindEscalation,
-			SourceID:    reqID,
-			TargetRole:  "MANAGER",
-			Title:       fmt.Sprintf("Lesson proposal: %s (%s)", body.AgentName, body.Trigger),
-			BodyMD:      fmt.Sprintf("**Proposed lesson** (auto-apply blocked by self_learning=OFF):\n\n%s\n\n_Reason: %s_", res.Proposal.Rule, res.Reason),
-			SenderType:  "system",
-			SenderID:    "keeper_negative_learning",
-			SenderName:  "Negative Learning",
-			Priority:    "low",
-			Blocking:    true,
+			WorkspaceID:  body.WorkspaceID,
+			Kind:         inbox.KindEscalation,
+			SourceID:     reqID,
+			TargetUserID: gov.SecurityContactUserID,
+			TargetRole:   "MANAGER",
+			Title:        title,
+			BodyMD:       fmt.Sprintf("**Proposed lesson** (auto-apply blocked by self_learning=OFF):\n\n%s\n\n_Reason: %s_", res.Proposal.Rule, res.Reason),
+			SenderType:   "system",
+			SenderID:     "keeper_negative_learning",
+			SenderName:   "Negative Learning",
+			Priority:     "low",
+			Blocking:     true,
 			Payload: map[string]interface{}{
 				"request_id":         reqID,
 				"request_type":       string(keeper.RequestTypeNegativeLearning),
 				"agent_id":           body.AgentID,
-				"agent_memory_dir":   body.AgentMemoryDir,
+				"agent_memory_dir":   memoryDir,
 				"lesson_id":          res.Proposal.ID,
 				"lesson_kind":        string(res.Proposal.Kind),
 				"lesson_rule":        res.Proposal.Rule,
@@ -719,6 +878,7 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 			replyError(w, http.StatusInternalServerError, "failed to queue lesson proposal for approval")
 			return
 		}
+		h.notifyKeeperInbox(body.WorkspaceID)
 	}
 
 	// Surface BOTH ESCALATE and DENY to the operator inbox. DENY here
@@ -729,18 +889,20 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 	// (ALLOW writes a lessons.md row instead; that's the user-visible
 	// surface for the success path.)
 	if res.Decision == keeper.DecisionEscalate || res.Decision == keeper.DecisionDeny {
-		_ = inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
-			WorkspaceID: body.WorkspaceID,
-			Kind:        inbox.KindEscalation,
-			SourceID:    reqID,
-			TargetRole:  "MANAGER",
-			Title:       fmt.Sprintf("Negative learning %s: %s (%s)", res.Decision, body.AgentName, body.Trigger),
-			BodyMD:      res.Reason,
-			SenderType:  "system",
-			SenderID:    "keeper_negative_learning",
-			SenderName:  "Negative Learning",
-			Priority:    "high",
-			Blocking:    inboxBlockingForPolicy(pol),
+		title := fmt.Sprintf("Negative learning %s: %s (%s)", res.Decision, body.AgentName, body.Trigger)
+		if !h.insertKeeperInbox(w, r.Context(), reqID, body.WorkspaceID, inbox.Item{
+			WorkspaceID:  body.WorkspaceID,
+			Kind:         inbox.KindEscalation,
+			SourceID:     reqID,
+			TargetUserID: gov.SecurityContactUserID,
+			TargetRole:   "MANAGER",
+			Title:        title,
+			BodyMD:       res.Reason,
+			SenderType:   "system",
+			SenderID:     "keeper_negative_learning",
+			SenderName:   "Negative Learning",
+			Priority:     "high",
+			Blocking:     inboxBlockingForPolicy(pol),
 			Payload: map[string]interface{}{
 				"request_id":   reqID,
 				"request_type": string(keeper.RequestTypeNegativeLearning),
@@ -749,7 +911,9 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 				"tool_name":    body.ToolName,
 				"decision":     string(res.Decision),
 			},
-		})
+		}) {
+			return
+		}
 	}
 
 	resp := map[string]any{

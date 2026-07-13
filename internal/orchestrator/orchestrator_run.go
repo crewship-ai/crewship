@@ -659,6 +659,29 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	secretsAgentDir := path.Join("/secrets", req.AgentSlug)
 	secretsSharedDir := "/secrets/shared"
 
+	// Post-run secret cleanup (secret lifecycle hardening): every run rewrites
+	// its credential files below, so nothing needs them to outlive the run —
+	// remove /secrets/<slug> on the way out. Refcounted so an overlapping run
+	// of the same agent is never yanked out from under; skipped when the CLI
+	// exec is still alive at return (detached tmux session keeps its secrets —
+	// the hold is intentionally kept so no later run removes them either).
+	// The retain MUST precede the credential write below: taken any later, a
+	// finishing run of the same agent could hit count→0 and rm the files this
+	// run just wrote (TOCTOU window #1, see secrets_cleanup.go).
+	fileCreds := hasFileMountedCreds(req.Credentials)
+	agentExecStillRunning := false
+	if fileCreds {
+		o.retainAgentSecrets(req.ContainerID, req.AgentSlug)
+		defer func() {
+			if agentExecStillRunning {
+				return
+			}
+			if o.releaseAgentSecrets(req.ContainerID, req.AgentSlug) {
+				o.cleanupAgentSecrets(req.ContainerID, req.AgentSlug)
+			}
+		}()
+	}
+
 	// Create scratch, output, per-agent crew, and secrets directories
 	mkdirCfg := provider.ExecConfig{
 		ContainerID: req.ContainerID,
@@ -666,6 +689,18 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		User:        "1001:1001",
 	}
 	if mkErr := o.execPreflight(ctx, mkdirCfg); mkErr != nil {
+		// With file-mounted credentials in play this is fatal: the write
+		// below would fail too (or silently no-op), and the agent would run
+		// with ZERO file credentials — the classic cause is a Docker daemon
+		// older than Docker Engine 26, which drops the /secrets tmpfs uid/gid
+		// options and leaves the mount root-owned so UID 1001 can't mkdir.
+		if fileCreds {
+			o.logger.Error("failed to create agent dirs; run carries file-mounted credentials", "error", mkErr, "agent_id", req.AgentID)
+			o.updateRunStatus(ctx, runState.ID, "error")
+			return fmt.Errorf("create agent dirs (incl. /secrets/%s) for file-mounted credentials: %w — "+
+				"if this is a permission error on /secrets, the Docker daemon likely predates Docker Engine 26 "+
+				"(required for tmpfs uid/gid mount options); upgrade the daemon", req.AgentSlug, mkErr)
+		}
 		o.logger.Warn("failed to create agent dirs", "error", mkErr)
 	}
 
@@ -725,11 +760,30 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		}
 	}
 
-	// Create per-agent secrets directory and write credential files.
-	// Files are written as root (UID 0) with ownership 1001:1001 and mode 0400
-	// so the agent can read but not modify them.
-	if err := writeCredentialFiles(ctx, o.container, req.ContainerID, req.AgentSlug, req.Credentials, secretsAgentDir, secretsSharedDir, o.logger); err != nil {
-		o.logger.Warn("failed to write credential files", "error", err, "agent_id", req.AgentID)
+	// Write credential files into the per-agent secrets directory (written as
+	// UID 1001, mode 0400/0600 — see writeCredentialFiles). Held under the
+	// per-key secrets lock so a lagging cleanup rm from a previous run can
+	// never delete these files right after they land (TOCTOU window #2, see
+	// secrets_cleanup.go).
+	credWriteErr := func() error {
+		if fileCreds {
+			lk := o.agentSecretsLock(req.ContainerID, req.AgentSlug)
+			lk.Lock()
+			defer lk.Unlock()
+		}
+		return writeCredentialFiles(ctx, o.container, req.ContainerID, req.AgentSlug, req.Credentials, secretsAgentDir, secretsSharedDir, o.logger)
+	}()
+	if credWriteErr != nil {
+		// Same fail-loud posture as the mkdir preflight above: a run that
+		// carries file-mounted credentials must not start without them.
+		if fileCreds {
+			o.logger.Error("failed to write credential files; run carries file-mounted credentials", "error", credWriteErr, "agent_id", req.AgentID)
+			o.updateRunStatus(ctx, runState.ID, "error")
+			return fmt.Errorf("write credential files for %s: %w — "+
+				"if this is a permission error on /secrets, the Docker daemon likely predates Docker Engine 26 "+
+				"(required for tmpfs uid/gid mount options); upgrade the daemon", req.AgentSlug, credWriteErr)
+		}
+		o.logger.Warn("failed to write credential files", "error", credWriteErr, "agent_id", req.AgentID)
 	}
 	env = append(env, "CREWSHIP_SECRETS_DIR="+secretsAgentDir)
 
@@ -1177,6 +1231,10 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	})
 
 	if running {
+		// The CLI exec outlives this call (detached session) and may still
+		// read its credential files — keep the secrets hold so neither this
+		// deferred cleanup nor a later run's removes /secrets/<slug>.
+		agentExecStillRunning = true
 		o.updateRunStatus(ctx, runState.ID, "running")
 		return nil
 	}

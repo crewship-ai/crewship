@@ -6,6 +6,7 @@ import (
 	"time"
 
 	dockernetwork "github.com/docker/docker/api/types/network"
+	"strings"
 )
 
 func TestConfigDefaults(t *testing.T) {
@@ -32,7 +33,7 @@ func TestBuildMountsIncludesSidecarBinds(t *testing.T) {
 		SidecarBinaryPath: "/host/path/crewship-sidecar",
 		EntrypointPath:    "/host/path/entrypoint.sh",
 	}}
-	mounts, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew", "/secrets")
+	mounts, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew")
 	if err != nil {
 		t.Fatalf("buildMounts: %v", err)
 	}
@@ -66,16 +67,52 @@ func TestBuildMountsIncludesSidecarBinds(t *testing.T) {
 	}
 }
 
+// A1 (secret lifecycle hardening): /secrets must be an in-memory tmpfs, never
+// a host bind mount — cleartext SSH keys / passwords written at agent-run
+// setup must not persist on the host disk nor land in backups. The tmpfs is
+// owned by the agent UID (1001) so the per-run `mkdir -p /secrets/<slug>`
+// (exec'd as 1001 under CapDrop=ALL) still works.
+//
+// The mount MUST go through HostConfig.Tmpfs, NOT the Mounts API: the daemon
+// rejects uid/gid in mount.TmpfsOptions.Options ("invalid mount config for
+// type \"tmpfs\": invalid option: uid" — reproduced live on Engine 29.3.0),
+// while the --tmpfs option-string path accepts them.
+func TestBuildMountsSecretsIsTmpfs(t *testing.T) {
+	p := &Provider{cfg: Config{
+		SidecarBinaryPath: "/host/path/crewship-sidecar",
+		EntrypointPath:    "/host/path/entrypoint.sh",
+	}}
+	mounts, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew")
+	if err != nil {
+		t.Fatalf("buildMounts: %v", err)
+	}
+	for i := range mounts {
+		if mounts[i].Target == "/secrets" {
+			t.Fatalf("/secrets must not be in the Mounts list (type %q) — the daemon rejects uid/gid TmpfsOptions there; it belongs in HostConfig.Tmpfs", mounts[i].Type)
+		}
+	}
+
+	spec := secretsTmpfsSpec
+	for _, want := range []string{"uid=1001", "gid=1001", "mode=0700", "size=16m", "noexec", "nosuid", "rw"} {
+		if !strings.Contains(spec, want) {
+			t.Errorf("secretsTmpfsSpec = %q, missing %q", spec, want)
+		}
+	}
+	if strings.Contains(spec, "exec,") && !strings.Contains(spec, "noexec") {
+		t.Errorf("secretsTmpfsSpec must be noexec, got %q", spec)
+	}
+}
+
 func TestBuildMountsErrorsWhenSidecarPathMissing(t *testing.T) {
 	p := &Provider{cfg: Config{EntrypointPath: "/host/entrypoint.sh"}}
-	if _, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew", "/secrets"); err == nil {
+	if _, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew"); err == nil {
 		t.Fatal("expected error when SidecarBinaryPath is empty")
 	}
 }
 
 func TestBuildMountsErrorsWhenEntrypointPathMissing(t *testing.T) {
 	p := &Provider{cfg: Config{SidecarBinaryPath: "/host/crewship-sidecar"}}
-	if _, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew", "/secrets"); err == nil {
+	if _, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew"); err == nil {
 		t.Fatal("expected error when EntrypointPath is empty")
 	}
 }

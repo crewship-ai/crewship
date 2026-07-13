@@ -437,7 +437,7 @@ func openAdminDB() (*database.DB, error) {
 		// operator chases the wrong fix (`crewship init`) when the
 		// real problem is access rights.
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("database not found at %s — set DATABASE_URL or run `crewship init` first", dd.DatabasePath())
+			return nil, cli.NotFoundf("database not found at %s — set DATABASE_URL or run `crewship init` first", dd.DatabasePath())
 		}
 		return nil, fmt.Errorf("stat database path %s: %w", dd.DatabasePath(), err)
 	}

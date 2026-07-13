@@ -184,6 +184,119 @@ func TestVersions_Rollback(t *testing.T) {
 	}
 }
 
+// readHeadVersion reads pipelines.head_version straight from the DB —
+// the column the versions UI/CLI derive HEAD from (#996).
+func readHeadVersion(t *testing.T, db *sql.DB, pipelineID string) int {
+	t.Helper()
+	var head int
+	if err := db.QueryRow(`SELECT head_version FROM pipelines WHERE id = ?`, pipelineID).Scan(&head); err != nil {
+		t.Fatalf("read head_version: %v", err)
+	}
+	return head
+}
+
+// TestVersions_SaveDedupRepointsHead pins the #996 fix at the Save layer:
+// an A→B→A edit cycle re-saves content whose hash already has a version
+// row. The dedup must REPOINT head_version at that row — not skip the
+// head update — otherwise the live definition (A) and head_version (B's
+// row) diverge, and every head-derived surface lies.
+func TestVersions_SaveDedupRepointsHead(t *testing.T) {
+	db := openVersioningTestDB(t)
+	defer db.Close()
+	store := NewStore(db)
+	ctx := context.Background()
+
+	inA := validSaveInput("p1") // A → v1
+	saved, err := store.Save(ctx, inA)
+	if err != nil {
+		t.Fatalf("save A: %v", err)
+	}
+
+	inB := validSaveInput("p1") // B → v2
+	inB.DefinitionJSON = `{"name":"p1","steps":[],"v":"B"}`
+	if _, err := store.Save(ctx, inB); err != nil {
+		t.Fatalf("save B: %v", err)
+	}
+	if head := readHeadVersion(t, db, saved.ID); head != 2 {
+		t.Fatalf("head after B: got %d, want 2", head)
+	}
+
+	// Re-save A: identical hash to v1 — no new row, head repoints to 1.
+	rolled, err := store.Save(ctx, inA)
+	if err != nil {
+		t.Fatalf("re-save A: %v", err)
+	}
+	if rolled.DefinitionJSON != inA.DefinitionJSON {
+		t.Errorf("live definition: got %q, want A's", rolled.DefinitionJSON)
+	}
+	if head := readHeadVersion(t, db, saved.ID); head != 1 {
+		t.Errorf("head after A→B→A: got %d, want 1 (repointed at A's row)", head)
+	}
+	versions, _ := store.ListVersions(ctx, saved.ID, 0)
+	if len(versions) != 2 {
+		t.Errorf("dedup must not add a row: got %d versions, want 2", len(versions))
+	}
+}
+
+// TestVersions_SaveVersionDedupRepointsHead pins the same contract on the
+// standalone SaveVersion path: a duplicate-hash save returns the existing
+// row AND repoints head_version at it.
+func TestVersions_SaveVersionDedupRepointsHead(t *testing.T) {
+	db := openVersioningTestDB(t)
+	defer db.Close()
+	store := NewStore(db)
+	ctx := context.Background()
+	saved, _ := store.Save(ctx, validSaveInput("p1")) // v1
+
+	v1Json := `{"v":"manual_v1"}`
+	if _, err := store.SaveVersion(ctx, SaveVersionInput{
+		PipelineID: saved.ID, DefinitionJSON: v1Json, AuthorType: "agent", AuthorID: "a",
+	}); err != nil {
+		t.Fatalf("v2: %v", err)
+	}
+	if _, err := store.SaveVersion(ctx, SaveVersionInput{
+		PipelineID: saved.ID, DefinitionJSON: `{"v":"manual_v2"}`, AuthorType: "agent", AuthorID: "a",
+	}); err != nil {
+		t.Fatalf("v3: %v", err)
+	}
+	if head := readHeadVersion(t, db, saved.ID); head != 3 {
+		t.Fatalf("head after v3: got %d, want 3", head)
+	}
+
+	// Duplicate of v2's content — head must follow to the existing row.
+	dup, err := store.SaveVersion(ctx, SaveVersionInput{
+		PipelineID: saved.ID, DefinitionJSON: v1Json, AuthorType: "agent", AuthorID: "b",
+	})
+	if err != nil {
+		t.Fatalf("dup save: %v", err)
+	}
+	if dup.Version != 2 {
+		t.Fatalf("dup returned version %d, want 2", dup.Version)
+	}
+	if head := readHeadVersion(t, db, saved.ID); head != 2 {
+		t.Errorf("head after dup save: got %d, want 2 (repointed)", head)
+	}
+}
+
+// TestVersions_RollbackRepointsHead extends the rollback contract with an
+// explicit head_version assertion (the display surfaces derive HEAD from it).
+func TestVersions_RollbackRepointsHead(t *testing.T) {
+	db := openVersioningTestDB(t)
+	defer db.Close()
+	store := NewStore(db)
+	ctx := context.Background()
+	saved, _ := store.Save(ctx, validSaveInput("p1"))
+	_, _ = store.SaveVersion(ctx, SaveVersionInput{PipelineID: saved.ID, DefinitionJSON: `{"v":"2"}`, AuthorType: "agent", AuthorID: "a"})
+	_, _ = store.SaveVersion(ctx, SaveVersionInput{PipelineID: saved.ID, DefinitionJSON: `{"v":"3"}`, AuthorType: "agent", AuthorID: "a"})
+
+	if _, err := store.Rollback(ctx, saved.ID, 2); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	if head := readHeadVersion(t, db, saved.ID); head != 2 {
+		t.Errorf("head after rollback to 2: got %d, want 2", head)
+	}
+}
+
 func TestVersions_GetVersion_NotFound(t *testing.T) {
 	db := openVersioningTestDB(t)
 	defer db.Close()

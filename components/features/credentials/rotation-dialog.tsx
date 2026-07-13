@@ -46,7 +46,7 @@ export function RotationDialog({
     }
   }, [open])
 
-  // Auto-test debounced (mirrors AddCredentialWizard step 3 pattern).
+  // Auto-test debounced (same pattern as CredentialForm's paste auto-test).
   React.useEffect(() => {
     if (!value.trim()) return
     if (debounceRef.current) clearTimeout(debounceRef.current)

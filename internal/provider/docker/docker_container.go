@@ -558,12 +558,30 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				}
 				// Check required mounts: /crew, /home/agent (volume), /opt/crew-tools (volume).
 				requiredMounts := map[string]bool{"/crew": false, "/home/agent": false, "/opt/crew-tools": false}
+				needsRecreate := false
 				for _, m := range inspect.Mounts {
 					if _, ok := requiredMounts[m.Destination]; ok {
 						requiredMounts[m.Destination] = true
 					}
+					// Migration: containers created before the secret-lifecycle
+					// hardening carry /secrets as a persistent host bind. Recreate
+					// them so the tmpfs mount takes over and cleartext credentials
+					// stop touching the host disk.
+					if m.Destination == "/secrets" && m.Type != mount.TypeTmpfs {
+						needsRecreate = true
+						p.logger.Info("/secrets is not tmpfs (legacy bind mount), will recreate container",
+							"container", containerName, "mount_type", m.Type)
+					}
 				}
-				needsRecreate := false
+				// /secrets rides HostConfig.Tmpfs (not the Mounts API — see
+				// secretsTmpfsSpec), so it never appears in inspect.Mounts.
+				// A container lacking the Tmpfs entry predates the current
+				// mount shape (or was created by hand) — recreate it.
+				if !needsRecreate && (inspect.HostConfig == nil || inspect.HostConfig.Tmpfs["/secrets"] == "") {
+					needsRecreate = true
+					p.logger.Info("/secrets tmpfs entry missing from HostConfig, will recreate container",
+						"container", containerName)
+				}
 				for dest, found := range requiredMounts {
 					if !found {
 						needsRecreate = true
@@ -584,12 +602,14 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 					emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "reused running container", Tag: reusedImage})
 					return c.ID, nil
 				}
-				// Verify bind-mount directories still exist (macOS /tmp is wiped on reboot).
+				// Verify bind-mount directories still exist (macOS /tmp is wiped on
+				// reboot). /secrets is deliberately absent: it is a tmpfs with no
+				// host dir, so a host-side check would force a recreate on every
+				// restart.
 				bindMountDirs := []string{
 					filepath.Join(p.cfg.OutputBasePath, "workspaces", team.ID),
 					filepath.Join(p.cfg.OutputBasePath, team.ID),
 					filepath.Join(p.cfg.OutputBasePath, "crews", team.ID),
-					filepath.Join(p.cfg.OutputBasePath, "secrets", team.ID),
 				}
 				bindsMissing := false
 				for _, d := range bindMountDirs {
@@ -668,7 +688,17 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	outputPath := filepath.Join(p.cfg.OutputBasePath, team.ID)
 	workspacePath := filepath.Join(p.cfg.OutputBasePath, "workspaces", team.ID)
 	crewPath := filepath.Join(p.cfg.OutputBasePath, "crews", team.ID)
-	secretsPath := filepath.Join(p.cfg.OutputBasePath, "secrets", team.ID)
+
+	// /secrets is an in-memory tmpfs now (see secretsTmpfsSpec) — no host
+	// dir. Earlier versions bind-mounted OutputBasePath/secrets/<crew-id>,
+	// which persisted cleartext credentials on the host disk; scrub any
+	// leftover from that era so old secrets don't outlive the fix.
+	// Best-effort: a failed removal is only the pre-existing exposure.
+	legacySecretsPath := filepath.Join(p.cfg.OutputBasePath, "secrets", team.ID)
+	if err := os.RemoveAll(legacySecretsPath); err != nil {
+		p.logger.Warn("could not remove legacy host-side secrets dir; cleartext credentials may remain on disk",
+			"path", legacySecretsPath, "error", err)
+	}
 
 	allDirs := []string{
 		outputPath,
@@ -676,8 +706,6 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		crewPath,
 		filepath.Join(crewPath, "shared"),
 		filepath.Join(crewPath, "agents"),
-		secretsPath,
-		filepath.Join(secretsPath, "shared"),
 	}
 	for _, dir := range allDirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -818,7 +846,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// buildMounts below (it errors out otherwise).
 	containerCfg.Entrypoint = []string{"/usr/local/bin/entrypoint.sh"}
 	containerCfg.Cmd = nil
-	crewMounts, err := p.buildMounts(team.ID, team.Slug, workspacePath, outputPath, crewPath, secretsPath)
+	crewMounts, err := p.buildMounts(team.ID, team.Slug, workspacePath, outputPath, crewPath)
 	if err != nil {
 		return "", err
 	}
@@ -892,6 +920,10 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		Mounts: crewMounts,
 		Tmpfs: map[string]string{
 			"/tmp": "rw,size=500m",
+			// In-memory /secrets owned by the agent UID; must be here and
+			// not in Mounts — the daemon rejects uid/gid TmpfsOptions on a
+			// Mounts-API tmpfs (see secretsTmpfsSpec).
+			"/secrets": secretsTmpfsSpec,
 		},
 		NetworkMode: container.NetworkMode(p.cfg.Network),
 	}

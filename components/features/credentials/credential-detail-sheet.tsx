@@ -111,11 +111,19 @@ export function CredentialDetailSheet({
   const [valueSaved, setValueSaved] = React.useState(false)
   const [valueError, setValueError] = React.useState<string | null>(null)
 
-  // Test/Rotate are MANAGE+ operations. Hide the affordances for
-  // members who can't perform them rather than letting them click
-  // through to a 403; mirrors the BE gating in TestStored / Rotate.
+  // Hide affordances users can't perform rather than letting them
+  // click through to a 403. Mirrors the backend gating exactly:
+  //   * Test + value update (PATCH)  → MANAGER+  → CASL "update"
+  //   * Rotate w/ grace overlap      → OWNER/ADMIN (canRole "manage"
+  //     in credential_rotation.go)   → CASL "manage"
+  //   * Delete                       → OWNER/ADMIN (credentials.go)
+  //     → CASL "delete"
+  // MANAGER has update but neither manage nor delete, so they keep
+  // the value-update flow and lose the two buttons that always 403'd.
   const { abilities } = useAbilities()
-  const canManage = abilities.can("update", "Credential")
+  const canUpdate = abilities.can("update", "Credential")
+  const canRotate = abilities.can("manage", "Credential")
+  const canDelete = abilities.can("delete", "Credential")
 
   React.useEffect(() => {
     if (!open || !credential) {
@@ -140,13 +148,15 @@ export function CredentialDetailSheet({
         .catch(() => setAudit([]))
         .finally(() => setAuditLoading(false))
     }
-    if (tab === "settings") {
+    if (tab === "settings" && canRotate) {
+      // Rotation history is only rendered for users who can rotate —
+      // skip the fetch entirely for everyone else.
       apiFetch(`/api/v1/credentials/${credential.id}/rotations?workspace_id=${workspaceId}`)
         .then((r) => r.ok ? r.json() : [])
         .then((data: RotationRow[]) => setRotations(Array.isArray(data) ? data : []))
         .catch(() => setRotations([]))
     }
-  }, [tab, open, credential, workspaceId])
+  }, [tab, open, credential, workspaceId, canRotate])
 
   if (!credential) return null
 
@@ -204,7 +214,7 @@ export function CredentialDetailSheet({
                   {credential.account_label || credential.description || credential.provider}
                 </SheetDescription>
               </div>
-              {onEdit && (
+              {onEdit && canUpdate && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -296,7 +306,7 @@ export function CredentialDetailSheet({
                     requires update permission. Mirrors the BE gating
                     in TestStored — hiding the button avoids a click →
                     403 dead-end for read-only members. */}
-                {getBrand(credential.provider).cli && canManage && (
+                {getBrand(credential.provider).cli && canUpdate && (
                 <div className="pt-3 border-t border-white/10 flex gap-2">
                   <Button size="sm" variant="outline" onClick={handleTest} disabled={testing}>
                     {testing ? <Spinner className="h-3.5 w-3.5 mr-1.5" /> : <FlaskConical className="h-3.5 w-3.5 mr-1.5" />}
@@ -365,16 +375,21 @@ export function CredentialDetailSheet({
               </TabsContent>
 
               <TabsContent value="settings" className="m-0 space-y-4">
-                {!canManage && (
+                {!canUpdate && (
                   <p className="text-xs text-muted-foreground">
-                    You don&apos;t have permission to rotate or delete this credential.
+                    You don&apos;t have permission to modify this credential.
+                  </p>
+                )}
+                {canUpdate && !canRotate && (
+                  <p className="text-xs text-muted-foreground">
+                    Rotation with grace overlap and deletion require a workspace admin.
                   </p>
                 )}
                 {/* Inline value rewrite — quick manual rotation without
                     grace overlap. For users who just need to paste a
                     new key and move on (Vercel pattern). The real
                     rotation flow with overlap lives in onRotate. */}
-                {canManage && (
+                {canUpdate && (
                 <div className="space-y-1.5">
                   <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
                     Update value
@@ -446,15 +461,17 @@ export function CredentialDetailSheet({
                       {savingValue && <Spinner className="h-3 w-3 mr-1.5" />}
                       Save value
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => onRotate(credential)}
-                      className="text-[11px] text-muted-foreground hover:text-foreground"
-                    >
-                      <RefreshCw className="h-3 w-3 mr-1.5" />
-                      Rotate with grace overlap…
-                    </Button>
+                    {canRotate && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onRotate(credential)}
+                        className="text-[11px] text-muted-foreground hover:text-foreground"
+                      >
+                        <RefreshCw className="h-3 w-3 mr-1.5" />
+                        Rotate with grace overlap…
+                      </Button>
+                    )}
                     {valueSaved && (
                       <span className="text-[11px] text-emerald-400 inline-flex items-center gap-1">
                         <CheckCircle2 className="h-3 w-3" />
@@ -475,7 +492,7 @@ export function CredentialDetailSheet({
                 </div>
                 )}
 
-                {canManage && rotations.length > 0 && (
+                {canRotate && rotations.length > 0 && (
                   <div className="space-y-1.5">
                     <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
                       Rotation history
@@ -504,7 +521,7 @@ export function CredentialDetailSheet({
                   </div>
                 )}
 
-                {canManage && (
+                {canDelete && (
                 <div className="pt-3 border-t border-white/10">
                   <Button
                     size="sm"

@@ -179,6 +179,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		{"crewshipd_memory_sys_bytes", "Total bytes obtained from system", "gauge", mem.Sys},
 		{"crewshipd_gc_runs_total", "Total GC runs", "counter", mem.NumGC},
 		{"crewshipd_ws_connections", "Active WebSocket connections", "gauge", s.wsHub.ConnectionCount()},
+		{"crewshipd_credential_audit_dropped_total", "Credential audit events lost by best-effort writers (mutation succeeded, timeline row did not)", "counter", api.CredentialAuditDroppedTotal()},
 	}
 
 	for _, m := range metrics {

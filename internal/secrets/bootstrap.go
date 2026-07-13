@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // managedSecret describes one auto-bootstrap secret: where it lives
@@ -129,6 +130,49 @@ const (
 	secretsDirMode  = 0o700
 )
 
+// Key-source labels reported by Source / EncryptionKeySource. "external"
+// means the operator injected the value via env (systemd EnvironmentFile,
+// Kubernetes secret, Vault, …); "generated" means it was auto-bootstrapped
+// and lives in <dataDir>/secrets.env — on default installs that is the same
+// volume as the SQLite database, so a stolen disk carries both the
+// ciphertext and the key. "unknown" means LoadOrGenerate hasn't run in this
+// process (CLI-only invocations, unit tests).
+const (
+	SourceExternal  = "external"
+	SourceGenerated = "generated"
+	SourceUnknown   = "unknown"
+)
+
+var (
+	sourceMu sync.RWMutex
+	sources  = map[string]string{}
+)
+
+func recordSource(envVar, source string) {
+	sourceMu.Lock()
+	sources[envVar] = source
+	sourceMu.Unlock()
+}
+
+// Source reports where a managed secret's value came from in this process:
+// SourceExternal (env-injected), SourceGenerated (auto-bootstrapped, persisted
+// in <dataDir>/secrets.env), or SourceUnknown (bootstrap never ran).
+func Source(envVar string) string {
+	sourceMu.RLock()
+	defer sourceMu.RUnlock()
+	if s, ok := sources[envVar]; ok {
+		return s
+	}
+	return SourceUnknown
+}
+
+// EncryptionKeySource reports where ENCRYPTION_KEY came from — the signal the
+// admin health endpoint surfaces so operators can see at a glance whether the
+// master key is colocated with the database.
+func EncryptionKeySource() string {
+	return Source("ENCRYPTION_KEY")
+}
+
 // LoadOrGenerate populates the managed secrets for the running process,
 // generating any that are missing and persisting them so subsequent
 // boots stay deterministic.
@@ -183,6 +227,7 @@ func LoadOrGenerate(ctx context.Context, dataDir string, logger *slog.Logger) er
 			if err := m.Validate(v); err != nil {
 				return fmt.Errorf("secrets: env %s is invalid: %w", m.EnvVar, err)
 			}
+			recordSource(m.EnvVar, SourceExternal)
 			continue
 		}
 
@@ -199,6 +244,9 @@ func LoadOrGenerate(ctx context.Context, dataDir string, logger *slog.Logger) er
 			if err := os.Setenv(m.EnvVar, v); err != nil {
 				return fmt.Errorf("secrets: setenv %s: %w", m.EnvVar, err)
 			}
+			// Loaded from the persisted file: it was auto-generated on some
+			// earlier boot and still sits next to the database.
+			recordSource(m.EnvVar, SourceGenerated)
 			continue
 		}
 
@@ -217,6 +265,7 @@ func LoadOrGenerate(ctx context.Context, dataDir string, logger *slog.Logger) er
 			return fmt.Errorf("secrets: setenv %s: %w", m.EnvVar, err)
 		}
 		generated = true
+		recordSource(m.EnvVar, SourceGenerated)
 		logger.Info("first-run secret generated", "key", m.EnvVar, "bytes", m.Bytes)
 	}
 
@@ -225,6 +274,17 @@ func LoadOrGenerate(ctx context.Context, dataDir string, logger *slog.Logger) er
 			return fmt.Errorf("secrets: persist to %s: %w", path, err)
 		}
 		logger.Info("first-run secrets persisted", "path", path)
+	}
+
+	// E2 (master-key ops): an auto-generated ENCRYPTION_KEY lives in
+	// <dataDir>/secrets.env, on default installs the same volume as the
+	// SQLite database — a copied disk/backup of that volume carries both
+	// the ciphertext and the key. Warn on EVERY boot (not just first run)
+	// so long-lived installs keep seeing the nudge until the key moves to
+	// an external secret store.
+	if EncryptionKeySource() == SourceGenerated {
+		logger.Warn("encryption key is auto-generated and stored alongside the database — supply ENCRYPTION_KEY from an external secret store (systemd EnvironmentFile, Kubernetes secret, Vault) for stronger at-rest protection",
+			"path", path)
 	}
 	return nil
 }

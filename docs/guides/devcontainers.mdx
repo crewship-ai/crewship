@@ -371,7 +371,7 @@ When a message arrives for a crew, `chatbridge.Bridge` calls `container.EnsureCr
      - `CapDrop: ALL, CapAdd: NET_RAW, no-new-privileges, ReadonlyRootfs: true`.
      - Memory / CPU / `PidsLimit: 200`.
      - `ExtraHosts: ["host.docker.internal:host-gateway"]` — lets the sidecar reach `crewshipd` on Linux too.
-     - `Mounts`: `/workspace`, `/output`, `/crew`, `/secrets` (rw binds), `/home/agent` + `/opt/crew-tools` (named volumes), plus the two read-only bind mounts for the sidecar binary + entrypoint.
+     - `Mounts`: `/workspace`, `/output`, `/crew` (rw binds), `/secrets` (in-memory tmpfs — 16 MiB, mode `0700`, uid/gid 1001, never host-backed), `/home/agent` + `/opt/crew-tools` (named volumes), plus the two read-only bind mounts for the sidecar binary + entrypoint.
 4. `ContainerStart`.
 5. **Sanity-check** the sidecar bind mount for BYOI images:
 

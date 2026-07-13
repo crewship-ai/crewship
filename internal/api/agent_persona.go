@@ -119,13 +119,30 @@ func (h *PersonaHandler) resolveAgentPaths(r *http.Request, agentID string) (mem
 	return paths, crewID.String, slug, agentRole.String, roleTitle.String, nil
 }
 
+// hostAgentMemoryDir resolves the host-side .memory directory for an
+// agent, mirroring the docker bind-mount layout (see agentMemoryDir /
+// soloAgentMemoryDir below). It is the single source of truth for the
+// on-disk shape so security-sensitive callers that derive the path from
+// trusted state (e.g. keeper negative-learning, #1037) stay in lockstep
+// with the persona reader — a layout divergence between them would
+// reintroduce the very write-target confusion #1037 closes.
+//
+//	crewID != "" → {outputBase}/crews/{crewID}/agents/{slug}/.memory
+//	crewID == "" → {outputBase}/solo/{workspaceID}/agents/{slug}/.memory
+func hostAgentMemoryDir(outputBase, workspaceID, crewID, slug string) string {
+	if crewID != "" {
+		return filepath.Join(outputBase, "crews", crewID, "agents", slug, ".memory")
+	}
+	return filepath.Join(outputBase, "solo", workspaceID, "agents", slug, ".memory")
+}
+
 // soloAgentMemoryDir is the per-workspace fallback for agents that
 // don't belong to a crew. crew_id IS NULL would collapse to
 // .../crews//agents/{slug}/.memory and collide across workspaces;
 // using workspace_id keeps every solo agent's memory in its own
 // subtree.
 func (h *PersonaHandler) soloAgentMemoryDir(workspaceID, slug string) string {
-	return filepath.Join(h.outputBasePath, "solo", workspaceID, "agents", slug, ".memory")
+	return hostAgentMemoryDir(h.outputBasePath, workspaceID, "", slug)
 }
 
 // agentMemoryDir + crewSharedMemoryDir mirror the bind-mount layout
@@ -137,7 +154,7 @@ func (h *PersonaHandler) soloAgentMemoryDir(workspaceID, slug string) string {
 // So /crew/agents/{slug}/.memory/ on the container is
 // {OutputBase}/crews/{crewID}/agents/{slug}/.memory/ on the host.
 func (h *PersonaHandler) agentMemoryDir(crewID, slug string) string {
-	return filepath.Join(h.outputBasePath, "crews", crewID, "agents", slug, ".memory")
+	return hostAgentMemoryDir(h.outputBasePath, "", crewID, slug)
 }
 
 func (h *PersonaHandler) crewSharedMemoryDir(crewID string) string {
