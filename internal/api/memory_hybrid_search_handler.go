@@ -126,6 +126,35 @@ func (h *MemoryHybridSearchHandler) Search(w http.ResponseWriter, r *http.Reques
 	}
 	scope := episodic.ScopeForRole(body.Scope)
 
+	// crew_shared reads a crew's shared surface, so the caller MUST be a member
+	// of the named crew — and that crew must live in the caller's workspace.
+	// Without this, any workspace member could pass a SIBLING crew's id and read
+	// its shared episodic memory (HybridSearch trusted the body-supplied crew_id
+	// after only workspace-scoping), breaking the cross-crew isolation invariant
+	// (#1049). Empty crew_id under this scope is meaningless — reject it too.
+	if body.Scope == "crew_shared" {
+		if body.CrewID == "" {
+			replyError(w, http.StatusBadRequest, "crew_id required for scope=crew_shared")
+			return
+		}
+		if user == nil {
+			replyError(w, http.StatusForbidden, "not a member of the requested crew")
+			return
+		}
+		var one int
+		mErr := h.db.QueryRowContext(r.Context(),
+			`SELECT 1 FROM crew_members cm
+			   JOIN crews c ON c.id = cm.crew_id
+			  WHERE cm.crew_id = ? AND cm.user_id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL`,
+			body.CrewID, user.ID, wsID).Scan(&one)
+		if mErr != nil {
+			// sql.ErrNoRows → not a member (or crew not in this workspace); any
+			// other error is treated the same way — fail closed, never leak.
+			replyError(w, http.StatusForbidden, "not a member of the requested crew")
+			return
+		}
+	}
+
 	// Resolve workspace's FTS engine. nil is fine — handler downgrades
 	// to episodic-only.
 	var engine *memory.Engine
