@@ -240,4 +240,64 @@ describe("bulk delete partial failure (C6)", () => {
     })
     expect(screen.queryByText("1 selected")).not.toBeInTheDocument()
   })
+
+  // #1085 item 1: a 404 (another admin deleted it first) is success, not a
+  // failure — the row must not linger selected as a phantom.
+  it("treats a 404 DELETE as success, not a phantom failure", async () => {
+    const creds = [makeCredential({ id: "cred_a", name: "KEY_A" })]
+    h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("/api/v1/workspaces")) return ok([{ id: "ws1", name: "Test" }])
+      if (url.startsWith("/api/v1/credentials?")) return ok(creds)
+      if (init?.method === "DELETE") return fail(404) // already gone
+      return ok([])
+    })
+    render(<CredentialsPage />)
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select KEY_A" }))
+    const bulkBar = screen.getByText("1 selected").parentElement!
+    fireEvent.click(within(bulkBar).getByRole("button", { name: "Delete" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Delete 1" }))
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("1 credential deleted"))
+    })
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(screen.queryByText("1 selected")).not.toBeInTheDocument()
+  })
+})
+
+// #1085 item 2: a refresh failure after data is on screen must not replace the
+// loaded list with the full-page error card — it toasts and keeps the list.
+describe("transient refresh failure (C-refresh)", () => {
+  it("toasts and keeps the list instead of showing the error card", async () => {
+    const creds = [makeCredential({ id: "cred_a", name: "KEY_A" })]
+    // Key the failure on "a delete has happened" rather than a call counter —
+    // React double-invokes the load effect in tests, so a counter is fragile.
+    let deletedHappened = false
+    h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("/api/v1/workspaces")) return ok([{ id: "ws1", name: "Test" }])
+      if (url.startsWith("/api/v1/credentials?")) {
+        // Initial load(s) succeed; only the post-delete refresh fails.
+        return deletedHappened ? Promise.reject(new TypeError("fetch failed")) : ok(creds)
+      }
+      if (init?.method === "DELETE") {
+        deletedHappened = true
+        return ok({})
+      }
+      return ok([])
+    })
+    render(<CredentialsPage />)
+
+    // Delete the only credential — success path fires handleRefresh, which fails.
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select KEY_A" }))
+    const bulkBar = screen.getByText("1 selected").parentElement!
+    fireEvent.click(within(bulkBar).getByRole("button", { name: "Delete" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Delete 1" }))
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("Network error"))
+    })
+    // The full-page error card must NOT appear on a background refresh failure.
+    expect(screen.queryByText("Couldn't load credentials")).not.toBeInTheDocument()
+  })
 })
