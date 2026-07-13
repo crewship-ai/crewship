@@ -336,6 +336,18 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 	// "agent replied" inbox items go too (source_id = chat_reply_<chat>_<user>,
 	// see chatReplyInboxSourceID): leaving them would keep stale unread
 	// bells whose "Open chat" deep link now 404s.
+	//
+	// Deliberately NOT touched (#1074): peer_conversations.chat_id and
+	// escalations.chat_id are TEXT NOT NULL with no FK to chats — they record
+	// operational history (a delegated question, a credential escalation) that
+	// outlives the chat it originated in, so we leave them dangling rather than
+	// delete audit rows or (impossibly, they are NOT NULL) null the pointer.
+	// This is safe because every reader treats chat_id as an OPAQUE field: no
+	// query JOINs chats through it or dereferences it, so a pointer to a gone
+	// chat degrades gracefully (an "open source chat" deep link may 404, same
+	// as any deleted resource). Attachment blobs under
+	// <storage-root>/<crew>/<agent>/attachments/<chatId>/ are a separate
+	// residual tracked for follow-up (needs an IPC files-delete surface).
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		h.logger.Error("delete chat begin tx", "error", err)
