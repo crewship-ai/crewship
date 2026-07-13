@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -60,6 +61,17 @@ type lessonFile struct {
 // learned-YYYY-MM-DD.md / antipatterns-YYYY-MM.md fragments into one
 // long-lived, kind-discriminated log. PR-C is the first real consumer.
 const lessonsFilename = "lessons.md"
+
+// maxLessonEntries caps the number of entries retained per lessons file.
+// Lesson IDs are distinct per event (mission_outcome_<id>, neg_<sha>), so
+// genuinely different missions/failures would otherwise accumulate forever:
+// every WriteCrewLesson/ReadLessons does a full ReadFile+yaml.Unmarshal under
+// flock (O(file size) latency + an ever-growing serialized critical section),
+// and memory.read{tier:lessons} returns the whole file into the agent context
+// (#1044). On overflow the oldest entries (by CapturedAt) are dropped so the
+// newest maxLessonEntries survive. A package var (not const) so tests can
+// shrink it without writing hundreds of entries.
+var maxLessonEntries = 500
 
 // validLessonKinds is the closed set the writer accepts. Anything
 // outside this gets rejected at the boundary so a typo can't quietly
@@ -210,6 +222,41 @@ func writeLessonToDir(ctx context.Context, lessonsDir string, entry LessonEntry)
 	}
 	if !replaced {
 		out.Entries = append(out.Entries, entry)
+	}
+
+	// Bound the file (#1044). Distinct-per-event IDs mean the file grows
+	// unboundedly without a ceiling; drop the oldest entries (by CapturedAt) on
+	// overflow so recall stays fresh and the flock'd read/write stays O(cap).
+	//
+	// Survivors keep their ON-DISK order — we pick which entries to evict by
+	// timestamp but do NOT reorder the file, so the "retries order-stable on
+	// disk" guarantee the idempotent-replace logic above relies on still holds.
+	//
+	// Tradeoffs of a single global cap (accepted; matches the #1044 remediation):
+	// eviction is kind-blind, so a burst of one kind can drop older entries of
+	// another, and an id re-written in place gets a fresh CapturedAt (above), so
+	// frequently-refreshed ids are treated as newest. 500 is generous enough
+	// that this only bites pathological churn.
+	if overflow := len(out.Entries) - maxLessonEntries; overflow > 0 {
+		order := make([]int, len(out.Entries))
+		for i := range order {
+			order[i] = i
+		}
+		// Oldest first; ties broken by original position (stable).
+		sort.SliceStable(order, func(a, b int) bool {
+			return out.Entries[order[a]].CapturedAt.Before(out.Entries[order[b]].CapturedAt)
+		})
+		evict := make(map[int]bool, overflow)
+		for _, idx := range order[:overflow] {
+			evict[idx] = true
+		}
+		kept := make([]LessonEntry, 0, maxLessonEntries)
+		for i, e := range out.Entries {
+			if !evict[i] {
+				kept = append(kept, e)
+			}
+		}
+		out.Entries = kept
 	}
 
 	return saveLessonsLocked(ctx, path, out)
