@@ -15,6 +15,12 @@ import (
 // newQueryServer creates a Server configured for query/escalation testing.
 func newQueryServer(t *testing.T, ipc *IPCConfig, members []CrewMember) *Server {
 	t.Helper()
+	// Give the IPC a boot AgentID by default — production always has one, and
+	// actingAgentID now fails closed without it (#1059). Tests that specifically
+	// need an empty/absent identity pass a nil ipc.
+	if ipc != nil && ipc.AgentID == "" {
+		ipc.AgentID = "test-boot-agent"
+	}
 	return NewServer(ServerConfig{
 		Addr:        "127.0.0.1:0",
 		Logger:      slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
