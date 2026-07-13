@@ -51,6 +51,21 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cross-tenant binding: a workspace-bound sidecar token is scoped to
+	// one workspace, but this handler reads workspace_id from the JSON body
+	// (not the query the auth middleware scopes), so the body claim must be
+	// proven against the token's workspace. Without this a token captured in
+	// workspace A could name workspace B's agent/credential and, on ALLOW,
+	// have B's plaintext secret evaluated for injection. The downstream
+	// agent/crew/credential checks only prove the body is internally
+	// consistent — never that the body workspace is the caller's. Master-
+	// token callers (empty binding) are unaffected. Mirrors the guard every
+	// other internal endpoint runs (assignments_run.go, escalation_handler.go,
+	// internal_status.go, …).
+	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
+		return
+	}
+
 	// Resolve credential_name to credential_id if only name provided
 	if body.CredentialID == "" && body.CredentialName != "" {
 		err := h.db.QueryRowContext(r.Context(), `

@@ -275,7 +275,7 @@ type agentDetailResponse struct {
 	// `agent rotate-webhook-secret`. Pointer: nil on servers predating
 	// the field, so the CLI can stay silent instead of claiming "none".
 	WebhookSecretSet *bool `json:"webhook_secret_set"`
-	Count                   struct {
+	Count            struct {
 		Skills      int `json:"skills"`
 		Credentials int `json:"credentials"`
 	} `json:"_count"`
