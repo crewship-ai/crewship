@@ -424,6 +424,42 @@ func TestAgentMCPRunECov_ResolvedBothEmpty(t *testing.T) {
 	}
 }
 
+// The headline of this PR: --resolved must fold in the integration-table
+// cascade, not just the mcp_config_json blob. Blob config is empty here so the
+// assertion isolates the table servers returned by /integrations/resolved.
+func TestAgentMCPRunECov_ResolvedFoldsInIntegrationBindings(t *testing.T) {
+	s := covSetup(t)
+	covStubAgentForMCP(s, map[string]any{"crew_id": nil, "mcp_config_json": nil})
+	s.OnGet("/api/v1/agents/"+covAgentIDCli1+"/integrations/resolved",
+		clitest.JSONResponse(200, []map[string]any{
+			{"name": "filesystem", "scope": "crew", "transport": "stdio", "endpoint": nil, "credential_name": nil},
+			{"name": "github", "scope": "agent", "transport": "http", "endpoint": "https://api.github.com/mcp", "credential_name": "gh-token"},
+		}))
+	covSetFlag(t, agentMCPCmd, "resolved", "true")
+
+	out, err := covCaptureStdout(t, func() error {
+		return agentMCPCmd.RunE(agentMCPCmd, []string{"viktor"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "# Integration bindings") {
+		t.Errorf("resolved view must fold in table servers:\n%s", out)
+	}
+	// A stdio server with no credential renders "stdio" + "no credential".
+	if !strings.Contains(out, "filesystem [crew, stdio] stdio — no credential") {
+		t.Errorf("stdio binding not rendered as expected:\n%s", out)
+	}
+	// An http server renders its endpoint + credential name.
+	if !strings.Contains(out, "github [agent, http] https://api.github.com/mcp — credential: gh-token") {
+		t.Errorf("http binding not rendered as expected:\n%s", out)
+	}
+	// The empty-state line must NOT appear when bindings exist.
+	if strings.Contains(out, "no MCP servers") {
+		t.Errorf("empty-state message leaked despite bindings:\n%s", out)
+	}
+}
+
 func TestAgentMCPRunECov_ResolvedMalformedAgentConfig(t *testing.T) {
 	s := covSetup(t)
 	covStubAgentForMCP(s, map[string]any{"crew_id": nil, "mcp_config_json": "{broken"})
