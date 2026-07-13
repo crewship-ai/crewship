@@ -143,6 +143,51 @@ func TestHandleAssign_ForwardsToCrewshipd(t *testing.T) {
 	}
 }
 
+// #1040: handleResults forwards the sidecar's OWN trusted workspace_id (so the
+// internal handler can scope the row) and rejects an assignment id that could
+// smuggle a query string (which would otherwise override that workspace_id).
+func TestHandleResults_ForwardsBoundWorkspaceAndRejectsInjection(t *testing.T) {
+	var gotPath, gotQuery string
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		writeJSONResponse(w, http.StatusOK, map[string]string{"status": "COMPLETED"})
+	}))
+	defer mock.Close()
+	srv := newAssignmentServer(t, &IPCConfig{BaseURL: mock.URL, Token: "t", WorkspaceID: "ws-1"}, nil)
+
+	// Clean id → proxies with the trusted workspace_id.
+	req := httptest.NewRequest(http.MethodGet, "/results/clh3assign0001", nil)
+	w := httptest.NewRecorder()
+	srv.handleResults(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("clean id: got %d: %s", w.Code, w.Body.String())
+	}
+	if gotPath != "/api/v1/internal/assignments/clh3assign0001" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if !strings.Contains(gotQuery, "workspace_id=ws-1") {
+		t.Errorf("query = %q, want trusted workspace_id=ws-1", gotQuery)
+	}
+
+	// Injection id (%3F → '?') → 400 before proxy.
+	req2 := httptest.NewRequest(http.MethodGet, "/results/abc%3Fworkspace_id=ws-evil", nil)
+	w2 := httptest.NewRecorder()
+	srv.handleResults(w2, req2)
+	if w2.Code != http.StatusBadRequest {
+		t.Errorf("injection assignment id must 400, got %d", w2.Code)
+	}
+
+	// Dot-dot id → 400 (the path-traversal guard must survive the charset
+	// rewrite; ".." contains none of /?#&=% and PathEscape leaves '.' intact).
+	req3 := httptest.NewRequest(http.MethodGet, "/results/..", nil)
+	w3 := httptest.NewRecorder()
+	srv.handleResults(w3, req3)
+	if w3.Code != http.StatusBadRequest {
+		t.Errorf("dot-dot assignment id must 400, got %d", w3.Code)
+	}
+}
+
 func TestHandleResults_NoIPC(t *testing.T) {
 	srv := newAssignmentServer(t, nil, nil)
 

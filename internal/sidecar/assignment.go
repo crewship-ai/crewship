@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -75,10 +76,19 @@ func (s *Server) handleResults(w http.ResponseWriter, r *http.Request) {
 	}
 
 	assignmentID := strings.TrimPrefix(r.URL.Path, "/results/")
-	if assignmentID == "" || strings.Contains(assignmentID, "/") || strings.Contains(assignmentID, "..") {
+	// Reject any character that could smuggle a query string or extra path
+	// segment into the IPC URL (#1040) — otherwise the trusted ?workspace_id=
+	// appended below could be overridden via the same %3F path-injection trick,
+	// defeating the workspace scope. CUID assignment ids never contain these.
+	if assignmentID == "" || strings.ContainsAny(assignmentID, "/?#&=%") || strings.Contains(assignmentID, "..") {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "assignment_id required"})
 		return
 	}
 
-	s.proxyIPCJSON(w, r, http.MethodGet, "/api/v1/internal/assignments/"+assignmentID, "results", nil)
+	// Scope the internal read to this sidecar's trusted workspace (#1040): the
+	// internal AssignmentHandler.Get now requires workspace_id and filters on
+	// it, closing the cross-workspace IDOR on the assignment row.
+	q := url.Values{}
+	q.Set("workspace_id", s.ipc.WorkspaceID)
+	s.proxyIPCJSON(w, r, http.MethodGet, "/api/v1/internal/assignments/"+url.PathEscape(assignmentID)+"?"+q.Encode(), "results", nil)
 }

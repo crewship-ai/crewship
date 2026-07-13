@@ -30,7 +30,7 @@ func TestAssignmentGet_NotFound(t *testing.T) {
 
 	h := NewAssignmentHandler(db, nil, nil, "token", logger)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/internal/assignments/does-not-exist", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/internal/assignments/does-not-exist?workspace_id=ws-any", nil)
 	req.SetPathValue("assignmentId", "does-not-exist")
 	w := httptest.NewRecorder()
 
@@ -38,6 +38,54 @@ func TestAssignmentGet_NotFound(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+// #1040: workspace_id is now required — without it the handler cannot scope the
+// row and must 400 rather than run an unscoped SELECT (the IDOR primitive).
+func TestAssignmentGet_MissingWorkspace_400(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewAssignmentHandler(db, nil, nil, "token", logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/internal/assignments/assign1", nil)
+	req.SetPathValue("assignmentId", "assign1")
+	w := httptest.NewRecorder()
+	h.Get(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 without workspace_id, got %d", w.Code)
+	}
+}
+
+// #1040: an assignment id from another workspace must NOT be readable even with
+// a valid (different) workspace_id — the cross-workspace IDOR.
+func TestAssignmentGet_CrossWorkspace_404(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userA := seedTestUser(t, db)
+	wsA := seedTestWorkspace(t, db, userA)
+	ctx := context.Background()
+	db.ExecContext(ctx, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crewA', ?, 'C', 'c')`, wsA)
+	db.ExecContext(ctx, `INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('agA', 'crewA', ?, 'A', 'a')`, wsA)
+	db.ExecContext(ctx, `INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES ('chatA', 'agA', ?, 'CHAT', 'ACTIVE')`, wsA)
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, created_at)
+		 VALUES ('assignA', ?, 'chatA', 'agA', 'agA', 'secret brief', 'PENDING', datetime('now'))`, wsA); err != nil {
+		t.Fatalf("seed assignment: %v", err)
+	}
+
+	h := NewAssignmentHandler(db, nil, nil, "token", logger)
+	// Caller bound to a DIFFERENT workspace requests A's assignment id.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/internal/assignments/assignA?workspace_id=ws-other", nil)
+	req.SetPathValue("assignmentId", "assignA")
+	w := httptest.NewRecorder()
+	h.Get(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace assignment must 404, got %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "secret brief") {
+		t.Errorf("task brief leaked across workspaces: %s", w.Body.String())
 	}
 }
 
@@ -78,7 +126,7 @@ func TestAssignmentGet_Found(t *testing.T) {
 
 	h := NewAssignmentHandler(db, nil, nil, "token", logger)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/internal/assignments/assign1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/internal/assignments/assign1?workspace_id="+wsID, nil)
 	req.SetPathValue("assignmentId", "assign1")
 	w := httptest.NewRecorder()
 
