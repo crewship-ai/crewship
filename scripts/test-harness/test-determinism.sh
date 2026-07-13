@@ -6,23 +6,34 @@
 # canonical (@json) output is byte-identical every time. Also reports the perf
 # envelope (p50/max latency, cost/run) so we have a real-world baseline.
 #
-#   ./test-determinism.sh                 # csv-to-json, 5 runs
-#   RUNS=10 ROUTINE=normalize-dates ./test-determinism.sh
+#   ./test-determinism.sh                 # normalize-dates, 5 runs
+#   RUNS=10 ROUTINE=extract-contacts ./test-determinism.sh
 #
-# Pure-transform recipes that end in an @json transform are the right targets:
-#   csv-to-json · normalize-dates · extract-contacts · parse-log-line
+# Pure-transform recipes that end in an @json transform are the right targets.
+# These slugs ship in the standard seed:
+#   normalize-dates · extract-contacts · parse-log-line
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$HERE/lib.sh"
 
-ROUTINE="${ROUTINE:-csv-to-json}"
+ROUTINE="${ROUTINE:-normalize-dates}"
 RUNS="${RUNS:-5}"
 
 preflight
 
 if ! have jq; then
   skip "determinism test" "requires jq to read run outputs"
+  finish
+fi
+
+# Preflight the routine itself: if it doesn't exist in the target workspace,
+# every `routine run` 404s and the suite would otherwise report a phantom
+# "product regression" (5× non-zero exit). Fail loudly on the missing
+# prerequisite instead. See issue #1005.
+if ! cs routine show "$ROUTINE" >/dev/null 2>&1; then
+  _fail "routine '$ROUTINE' exists in the target workspace" \
+    "routine show returned non-zero (404?) — set ROUTINE=<seeded-slug>, e.g. normalize-dates / extract-contacts"
   finish
 fi
 
@@ -41,6 +52,15 @@ for i in $(seq 1 "$RUNS"); do
   dur="$(printf '%s' "$rec" | jq -r '.[0].duration_ms // 0')"
   outputs+=("$out"); costs+=("$cost"); durations+=("$dur")
 done
+
+# If no run produced output (e.g. every run failed / 404'd), fail the suite
+# cleanly rather than crashing on an unbound `outputs[@]` under `set -u`.
+# See issue #1005.
+if (( ${#outputs[@]} == 0 )); then
+  _fail "$ROUTINE produced output on at least one run" \
+    "0/${RUNS} runs succeeded — 'routine run $ROUTINE' exited non-zero every time"
+  finish
+fi
 
 # All outputs identical?
 identical=1
