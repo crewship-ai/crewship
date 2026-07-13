@@ -6,7 +6,33 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/episodic"
 )
+
+// #1049 [1]: the handler translated the scope STRING via episodic.ScopeForRole
+// (a ROLE mapper), so "crew_shared" collapsed to ScopeOwn and crew_shared
+// search silently returned own-scoped results. The dedicated translator must
+// map the scope string correctly.
+func TestEpisodicScopeForRequest(t *testing.T) {
+	cases := []struct {
+		in     string
+		want   episodic.Scope
+		wantOK bool
+	}{
+		{"", episodic.ScopeOwn, true},
+		{"own", episodic.ScopeOwn, true},
+		{"crew_shared", episodic.ScopeCrewShared, true}, // the bug: was ScopeOwn
+		{"bogus", "", false},
+		{"LEAD", "", false}, // not a scope value; must not be accepted as a role
+	}
+	for _, c := range cases {
+		got, ok := episodicScopeForRequest(c.in)
+		if ok != c.wantOK || (ok && got != c.want) {
+			t.Errorf("episodicScopeForRequest(%q) = (%q, %v), want (%q, %v)", c.in, got, ok, c.want, c.wantOK)
+		}
+	}
+}
 
 // #1049: the hybrid search handler forwarded a caller-supplied crew_id into
 // HybridSearch after only workspace-scoping. A workspace member could pass a

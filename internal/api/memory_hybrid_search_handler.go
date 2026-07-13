@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -79,6 +80,24 @@ func (h *MemoryHybridSearchHandler) SetWorkspaceProvider(p WorkspaceMemoryProvid
 	h.provider = p
 }
 
+// episodicScopeForRequest translates the request's scope STRING to the
+// episodic Scope enum, returning ok=false for an unknown value. This must NOT
+// go through episodic.ScopeForRole — that maps a ROLE ("LEAD" → crew_shared,
+// else own), so feeding it a scope string silently collapsed "crew_shared" to
+// ScopeOwn and crew_shared search never hit crew memory (#1049). "" and "own"
+// both mean the caller's own memory (episodic recall has no workspace-wide
+// scope); "crew_shared" is the crew_id-bound scope.
+func episodicScopeForRequest(s string) (episodic.Scope, bool) {
+	switch s {
+	case "", "own":
+		return episodic.ScopeOwn, true
+	case "crew_shared":
+		return episodic.ScopeCrewShared, true
+	default:
+		return "", false
+	}
+}
+
 // Search is the HTTP entry point. Returns 200 with a possibly-empty
 // hits array; 400 on malformed body or missing query; 401 on
 // missing workspace context. Other failures land 500 with logger
@@ -112,19 +131,18 @@ func (h *MemoryHybridSearchHandler) Search(w http.ResponseWriter, r *http.Reques
 	if body.Limit <= 0 {
 		body.Limit = 10
 	}
-	// Validate raw scope before translation. ScopeForRole would silently
-	// coerce unknown values to "" (= no scope filter), which leaks
-	// cross-agent results to a caller that just typo'd. Accept only the
-	// documented surface — empty (no filter, MEMBER+ implied),
-	// "own" (agent-only), "crew_shared" (crew_id-bound).
-	switch body.Scope {
-	case "", "own", "crew_shared":
-		// accepted
-	default:
+	// Translate the request scope STRING to the episodic Scope enum. This must
+	// NOT go through episodic.ScopeForRole — that maps a ROLE ("LEAD" → crew_
+	// shared, else own), so feeding it a scope string silently collapsed
+	// "crew_shared" to ScopeOwn and the crew_shared feature never actually
+	// searched crew memory (#1049). "" and "own" both mean the caller's own
+	// memory (episodic recall has no workspace-wide scope); "crew_shared" is the
+	// crew_id-bound scope. Any other value is rejected.
+	scope, ok := episodicScopeForRequest(body.Scope)
+	if !ok {
 		replyError(w, http.StatusBadRequest, "invalid scope (allowed: '', own, crew_shared)")
 		return
 	}
-	scope := episodic.ScopeForRole(body.Scope)
 
 	// crew_shared reads a crew's shared surface, so the caller MUST be a member
 	// of the named crew — and that crew must live in the caller's workspace.
@@ -147,10 +165,17 @@ func (h *MemoryHybridSearchHandler) Search(w http.ResponseWriter, r *http.Reques
 			   JOIN crews c ON c.id = cm.crew_id
 			  WHERE cm.crew_id = ? AND cm.user_id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL`,
 			body.CrewID, user.ID, wsID).Scan(&one)
-		if mErr != nil {
-			// sql.ErrNoRows → not a member (or crew not in this workspace); any
-			// other error is treated the same way — fail closed, never leak.
+		if errors.Is(mErr, sql.ErrNoRows) {
+			// Definitively not a member (or the crew isn't in this workspace).
 			replyError(w, http.StatusForbidden, "not a member of the requested crew")
+			return
+		}
+		if mErr != nil {
+			// A transient DB error (BUSY, cancelled ctx, pool exhaustion) is NOT
+			// an authorization denial — surface it as 500 so retry/backoff keyed
+			// on 5xx works and a real 403 stays distinguishable in monitoring.
+			h.logger.Error("crew membership check failed", "error", mErr, "workspace_id", wsID, "crew_id", body.CrewID)
+			replyError(w, http.StatusInternalServerError, "membership check failed")
 			return
 		}
 	}
