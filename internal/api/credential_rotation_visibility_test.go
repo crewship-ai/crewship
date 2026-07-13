@@ -56,6 +56,20 @@ func TestListRotations_VisibilityGate(t *testing.T) {
 		}
 	})
 
+	// Allow path: a VIEWER who IS a member of the credential's crew must see
+	// the history. Without this, a broken credential_crews/crew_members join
+	// (always-false) would still pass the deny + OWNER cases above.
+	t.Run("viewer with crew membership → 200", func(t *testing.T) {
+		if _, err := db.Exec(`INSERT INTO crew_members (crew_id, user_id) VALUES ('crew-vis', ?)`, viewerID); err != nil {
+			t.Fatalf("crew_members: %v", err)
+		}
+		rec := httptest.NewRecorder()
+		h.ListRotations(rec, newReq("VIEWER", viewerID))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("VIEWER (member) status = %d body=%s, want 200", rec.Code, rec.Body.String())
+		}
+	})
+
 	// OWNER (manage tier) retains full visibility.
 	t.Run("owner → 200", func(t *testing.T) {
 		rec := httptest.NewRecorder()
