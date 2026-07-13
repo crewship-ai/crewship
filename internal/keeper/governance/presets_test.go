@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestValidatePresets(t *testing.T) {
@@ -76,6 +77,20 @@ func TestCompileWatchSpecLengthCapped(t *testing.T) {
 	got := CompileWatchSpec(Settings{WatchSpec: huge})
 	if len(got) > maxCompiledWatchSpecLen+len(watchSpecTruncMarker) {
 		t.Fatalf("compiled block not capped: len=%d cap=%d", len(got), maxCompiledWatchSpecLen)
+	}
+}
+
+func TestCompileWatchSpecTruncationStaysValidUTF8(t *testing.T) {
+	// A multi-byte spec long enough to hit the cap must be truncated on a rune
+	// boundary — never emitting invalid UTF-8. "é" is 2 bytes, so a naive
+	// byte-offset cut would land mid-rune roughly half the time.
+	huge := strings.Repeat("é", maxCompiledWatchSpecLen)
+	got := CompileWatchSpec(Settings{WatchSpec: huge})
+	if len(got) > maxCompiledWatchSpecLen+len(watchSpecTruncMarker) {
+		t.Fatalf("compiled block not capped: len=%d", len(got))
+	}
+	if !utf8.ValidString(got) {
+		t.Fatal("truncation produced invalid UTF-8 (split a multi-byte rune)")
 	}
 }
 

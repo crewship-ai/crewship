@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // WatchPresets is the catalog of admin-selectable watch presets (issue #1001,
@@ -110,7 +111,16 @@ func CompileWatchSpec(s Settings) string {
 
 	out := strings.TrimRight(b.String(), "\n")
 	if len(out) > maxCompiledWatchSpecLen {
-		out = out[:maxCompiledWatchSpecLen] + watchSpecTruncMarker
+		// Back up to a rune boundary so truncating never splits a multi-byte
+		// character (the free-form spec may contain non-ASCII). This branch is
+		// unreachable given the 4 KB API cap on watch_spec + the ≈1 KB preset
+		// catalog, but it is a backstop — a backstop that emits invalid UTF-8
+		// when it fires is worse than none, and stays correct if the caps change.
+		cut := maxCompiledWatchSpecLen
+		for cut > 0 && !utf8.RuneStart(out[cut]) {
+			cut--
+		}
+		out = out[:cut] + watchSpecTruncMarker
 	}
 	return out
 }
