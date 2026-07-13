@@ -2,6 +2,7 @@ package sidecar
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
 // ProviderType identifies an LLM API provider.
@@ -35,14 +36,17 @@ type Credential struct {
 type CredStore struct {
 	mu    sync.RWMutex
 	creds []Credential
-	idx   map[ProviderType]int // round-robin index per provider
+	// rr holds the per-provider round-robin counter (ProviderType -> *uint64),
+	// bumped with atomic.AddUint64 so Select only needs a READ lock on the hot
+	// path — no write-lock serialization across concurrent outbound requests
+	// (#1081). A sync.Map lets the counter be created lazily for a provider
+	// without a map write under the read lock.
+	rr sync.Map
 }
 
 // NewCredStore creates an empty credential store.
 func NewCredStore() *CredStore {
-	return &CredStore{
-		idx: make(map[ProviderType]int),
-	}
+	return &CredStore{}
 }
 
 // Load replaces all credentials in the store.
@@ -51,7 +55,10 @@ func (cs *CredStore) Load(creds []Credential) {
 	defer cs.mu.Unlock()
 	cs.creds = make([]Credential, len(creds))
 	copy(cs.creds, creds)
-	cs.idx = make(map[ProviderType]int)
+	// Restart round-robin from the top on a reload (matches the previous
+	// idx-map reset). Safe under the write lock held here; no Select can be
+	// mid-flight because Select holds the read lock.
+	cs.rr.Clear()
 }
 
 // Select picks the next active credential for a provider.
@@ -59,8 +66,12 @@ func (cs *CredStore) Load(creds []Credential) {
 // Within the highest-priority tier, round-robin rotation is used.
 // Returns nil if no credential is available.
 func (cs *CredStore) Select(provider ProviderType) *Credential {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
+	// READ lock only: the top-tier scan reads cs.creds, and round-robin now
+	// advances an atomic per-provider counter (not a map index), so concurrent
+	// Selects don't serialize on a write lock (#1081). Load/Remove/Reap still
+	// take the write lock, so the creds slice can't change under us.
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
 
 	// Pass 1: find the best (lowest-numeric) Priority for this provider and
 	// count how many creds sit in that top tier. Done in a single scan instead
@@ -83,8 +94,11 @@ func (cs *CredStore) Select(provider ProviderType) *Credential {
 		return nil
 	}
 
-	target := cs.idx[provider] % topCount
-	cs.idx[provider] = target + 1
+	// Atomic round-robin within the top tier. LoadOrStore lazily creates the
+	// counter for a provider on first use; AddUint64-1 yields a 0-based ticket
+	// so the first Select maps to target 0 (unchanged from the old idx map).
+	ctr, _ := cs.rr.LoadOrStore(provider, new(uint64))
+	target := int((atomic.AddUint64(ctr.(*uint64), 1) - 1) % uint64(topCount))
 
 	// Pass 2: iterate again and return the Nth match in the top tier. Scanning
 	// in source-slice order is naturally stable (ascending original index) and
@@ -140,8 +154,10 @@ func (cs *CredStore) Reap(keep map[string]struct{}) int {
 	}
 	cs.creds = filtered
 	if removed > 0 {
-		// Round-robin indices may now point past the end of a shrunk tier.
-		cs.idx = make(map[ProviderType]int)
+		// Round-robin counters may now point past the end of a shrunk tier.
+		// (Select's modulo self-corrects, but resetting keeps distribution
+		// clean after a reap.) Safe under the write lock held here.
+		cs.rr.Clear()
 	}
 	return removed
 }

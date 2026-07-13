@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/httpsafe"
@@ -141,19 +142,84 @@ func NewProxy(cfg ProxyConfig) *Proxy {
 // then connects to the exact validated IP so a second resolution can't
 // rebind to an internal address between the check and the dial.
 func ssrfDialContext(allowPrivate bool) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return ssrfDialContextWithResolver(allowPrivate, net.DefaultResolver.LookupIPAddr)
+}
+
+// resolveFunc resolves a host to a set of IP addresses. It matches
+// net.Resolver.LookupIPAddr so the production path uses the default resolver
+// and tests can inject a counting/stub resolver.
+type resolveFunc func(ctx context.Context, host string) ([]net.IPAddr, error)
+
+// ssrfDNSCacheTTL bounds how long a successful resolution is reused on the dial
+// hot path. Short enough that a legitimately changed record is picked up
+// quickly; long enough to spare a chatty agent a lookup on every cold dial.
+const ssrfDNSCacheTTL = 30 * time.Second
+
+// dnsCacheEntry is a cached positive resolution with its expiry.
+type dnsCacheEntry struct {
+	ips    []net.IPAddr
+	expiry time.Time
+}
+
+// dnsPositiveCache caches successful host→IP resolutions for a short TTL on the
+// SSRF dial path (#1081). It caches ONLY the resolution — never the block
+// decision. Every dial re-validates the (possibly cached) IPs against the
+// endpoint blocklist and pins the connection to a validated IP, so the
+// resolve-then-pin anti-rebind property is unchanged: we still only ever dial
+// an IP we validated on this call. Failed lookups are not cached.
+type dnsPositiveCache struct {
+	mu  sync.Mutex
+	ttl time.Duration
+	m   map[string]dnsCacheEntry
+}
+
+func newDNSPositiveCache(ttl time.Duration) *dnsPositiveCache {
+	return &dnsPositiveCache{ttl: ttl, m: make(map[string]dnsCacheEntry)}
+}
+
+// resolve returns cached IPs for host when a fresh entry exists, else calls fn
+// and caches a successful result. Errors are propagated and never cached.
+func (c *dnsPositiveCache) resolve(ctx context.Context, host string, fn resolveFunc) ([]net.IPAddr, error) {
+	now := time.Now()
+	c.mu.Lock()
+	if e, ok := c.m[host]; ok && now.Before(e.expiry) {
+		ips := e.ips
+		c.mu.Unlock()
+		return ips, nil
+	}
+	c.mu.Unlock()
+
+	ips, err := fn(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.m[host] = dnsCacheEntry{ips: ips, expiry: now.Add(c.ttl)}
+	c.mu.Unlock()
+	return ips, nil
+}
+
+// ssrfDialContextWithResolver is ssrfDialContext with an injectable resolver so
+// the DNS positive cache and blocklist re-validation can be unit-tested without
+// real network lookups.
+func ssrfDialContextWithResolver(allowPrivate bool, resolve resolveFunc) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	cache := newDNSPositiveCache(ssrfDNSCacheTTL)
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			return nil, fmt.Errorf("sidecar: invalid dial address %q: %w", addr, err)
 		}
-		ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+		ips, err := cache.resolve(ctx, host, resolve)
 		if err != nil {
 			return nil, fmt.Errorf("sidecar: DNS resolution failed for %s: %w", host, err)
 		}
 		if len(ips) == 0 {
 			return nil, fmt.Errorf("sidecar: no addresses for %s", host)
 		}
+		// Re-validate on EVERY dial, including cache hits — the cache holds the
+		// resolution, not the verdict. This preserves the SSRF guarantee even
+		// if a record was cached moments before a policy/blocklist evaluation.
 		for _, ip := range ips {
 			if httpsafe.IsBlockedIPForEndpoint(ip.IP, allowPrivate) {
 				return nil, fmt.Errorf("sidecar: refusing to dial blocked address %s (host %s)", ip.IP, host)
