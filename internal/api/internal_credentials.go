@@ -140,6 +140,25 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		query += " AND provider = ?"
 		args = append(args, provider)
 	}
+	// #1031: when the caller identifies its crew, scope the metadata listing to
+	// credentials that crew can actually use — assigned to one of the crew's
+	// agents (agent_credentials) or directly crew-scoped (credential_crews) —
+	// so a compromised agent container can't enumerate every peer credential's
+	// existence/provider through its sidecar. crew_id is supplied server-side
+	// by the sidecar from its bound IPC config (the agent can't forge it); an
+	// empty crew_id keeps the workspace-wide behaviour the in-process
+	// TokenSyncer (include_values, loopback) and crew-less callers rely on.
+	if crewID := r.URL.Query().Get("crew_id"); crewID != "" {
+		query += ` AND (
+			EXISTS (SELECT 1 FROM agent_credentials ac
+			        JOIN agents a ON a.id = ac.agent_id
+			        WHERE ac.credential_id = credentials.id
+			          AND a.crew_id = ? AND a.deleted_at IS NULL)
+			OR EXISTS (SELECT 1 FROM credential_crews cc
+			           WHERE cc.credential_id = credentials.id AND cc.crew_id = ?)
+		)`
+		args = append(args, crewID, crewID)
+	}
 	query += " ORDER BY type ASC, created_at ASC"
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
