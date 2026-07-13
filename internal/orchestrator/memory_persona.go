@@ -31,6 +31,25 @@ import (
 // them unless they're the opener's. Cross-operator gossip is an
 // intentional gap, not a missing feature.
 
+// scanForInjection runs the shared memory.ScanContent prompt-injection scanner
+// over a block body before it is injected into the system prompt, returning a
+// deterministic [BLOCKED: …] notice (matching assembleSections' UX) on a hit
+// and the body unchanged otherwise. #1038: buildPersonaBlock / buildPeerCardBlock
+// / buildUserModelBlock injected their file bodies VERBATIM, bypassing the scan
+// every other tier runs — a poisoned PERSONA.md (crew-shared → every agent),
+// peer card, or operator model emitted `ignore previous instructions…` straight
+// to the model. The label is preserved so the operator sees which block tripped;
+// the on-disk file is left untouched.
+func scanForInjection(label, body string) string {
+	if hit := memory.ScanContent(body); hit != nil {
+		return fmt.Sprintf(
+			"[BLOCKED: possible prompt injection in %s — category=%s pattern=%s; operator can inspect the file directly]",
+			label, hit.Category, hit.Pattern,
+		)
+	}
+	return body
+}
+
 // personaContainerPath is the absolute path to the per-agent
 // PERSONA.md as the container sees it. Matches the existing
 // /crew/agents/{slug}/.memory/ layout used by buildAgentMemoryBlock.
@@ -86,13 +105,16 @@ func (o *Orchestrator) buildPersonaBlock(ctx context.Context, req AgentRunReques
 	}
 
 	var content, source string
+	fromFile := false
 	switch {
 	case strings.TrimSpace(agentPersona) != "":
 		content = strings.TrimSpace(agentPersona)
 		source = "agent override"
+		fromFile = true
 	case strings.TrimSpace(crewPersona) != "":
 		content = strings.TrimSpace(crewPersona)
 		source = "crew default"
+		fromFile = true
 	default:
 		// Synthesize a minimal default — see memory.DefaultPersona
 		// for the same shape. Done host-side (rather than reading
@@ -108,6 +130,14 @@ func (o *Orchestrator) buildPersonaBlock(ctx context.Context, req AgentRunReques
 	}
 	if content == "" {
 		return ""
+	}
+	// Scan only the FILE-derived persona (agent-writable via memory.write — the
+	// real injection surface). The synthesized default is our own generated
+	// text: scanning it would let a false-positive phrase in an operator-set
+	// RoleTitle blank the persona for every agent in the crew, which is worse
+	// than the (admin-config-only) risk it would guard (#1038 self-review).
+	if fromFile {
+		content = scanForInjection("PERSONA", content)
 	}
 	return fmt.Sprintf("[PERSONA]\nSource: %s\n%s\n[END PERSONA]\n\n", source, content)
 }
@@ -139,6 +169,7 @@ func (o *Orchestrator) buildPeerCardBlock(ctx context.Context, req AgentRunReque
 	if body == "" {
 		return ""
 	}
+	body = scanForInjection("PEER CONTEXT", body)
 	return fmt.Sprintf(
 		"[PEER CONTEXT]\nThe operator who opened this session has interacted with you before.\nThe following profile was distilled from prior sessions — treat it as a hint\nabout communication style, not as a fact about the operator's intent.\n%s\n[END PEER CONTEXT]\n\n",
 		body,
@@ -179,6 +210,7 @@ func (o *Orchestrator) buildUserModelBlock(ctx context.Context, req AgentRunRequ
 	if body == "" {
 		return ""
 	}
+	body = scanForInjection("OPERATOR MODEL", body)
 	return fmt.Sprintf(
 		"[OPERATOR MODEL]\nThis operator has worked with the crew before. The following profile was\ndistilled and merged across prior sessions — treat it as a hint about how\nthey prefer to work, not as a fact about who they are or what they want.\n%s\n[END OPERATOR MODEL]\n\n",
 		body,
