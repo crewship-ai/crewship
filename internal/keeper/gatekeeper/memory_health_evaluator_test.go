@@ -147,3 +147,35 @@ func TestMemoryHealthEvaluator_RejectsEmptyWorkspace(t *testing.T) {
 		t.Error("expected error on empty WorkspaceID")
 	}
 }
+
+// TestMemoryHealthEvaluator_RecallRatioClampsOutOfRange pins the clamp added
+// after the #1110 adversarial review: the /keeper/memory-health HTTP path
+// deserializes Snapshot straight from the request body, so Reachability isn't
+// guaranteed 0..100. An out-of-range value must not corrupt the recall signal.
+func TestMemoryHealthEvaluator_RecallRatioClampsOutOfRange(t *testing.T) {
+	cases := []struct {
+		name         string
+		reachability float64
+		wantRatio    string
+	}{
+		{"above-100-clamps-to-1", 500, "Recall/write ratio: 1.00"}, // was 5.00 → "pathologically healthy"
+		{"negative-treated-as-unreachable", -40, "Recall/write ratio: 0.00"},
+		{"exactly-100", 100, "Recall/write ratio: 1.00"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &mockProvider{content: `{"decision":"ALLOW","reason":"ok","risk":2}`}
+			gk := gatekeeper.New(p, "claude-haiku-4-5", newTestLogger())
+			ev := gatekeeper.NewMemoryHealthEvaluator(gk, newTestLogger())
+			if _, err := ev.Evaluate(context.Background(), gatekeeper.MemoryHealthRequest{
+				WorkspaceID: "ws1", CrewID: "cr1", AgentName: "Auditor", CrewName: "Ops",
+				Snapshot: consolidate.HealthSnapshot{Coverage: 0, Reachability: tc.reachability},
+			}); err != nil {
+				t.Fatalf("Evaluate: %v", err)
+			}
+			if !strings.Contains(p.capturedPrompt, tc.wantRatio) {
+				t.Errorf("reachability=%v: prompt should carry %q\n---\n%s\n---", tc.reachability, tc.wantRatio, p.capturedPrompt)
+			}
+		})
+	}
+}
