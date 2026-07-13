@@ -86,7 +86,7 @@ for the raw payload. See the [Integrations guide](/guides/integrations#managed-i
 | `integration remove <id-or-name>` | Delete a workspace integration. |
 | `integration enable <id-or-name>` | Enable. |
 | `integration disable <id-or-name>` | Disable. |
-| `integration test <id-or-name>` | Hit `POST /integrations/{id}/test` and print the result. |
+| `integration test <id-or-name>` | Hit `POST /integrations/{id}/test` and print the result. For `streamable-http`/`sse` it probes the endpoint; for `stdio` it statically validates the command config (the live launch happens at runtime inside the container). |
 | `integration crews-overview` | Cross-crew integrations table (which crews reference which servers). |
 
 ### Agent bindings
@@ -217,6 +217,15 @@ crewship integration add \
   --transport stdio \
   --command "npx @modelcontextprotocol/server-github"
 ```
+
+<Note>
+Pass the whole launch line to `--command` — the CLI splits it into the bare
+executable (`npx`) and its arguments (stored in `args_json`) for you. Storing
+the full line verbatim would make the runtime look for an executable literally
+named `npx @modelcontextprotocol/server-github`, which never exists, and the
+server would silently never start. `integration test` catches that same mistake
+statically for stdio servers before you wonder why no tools appeared.
+</Note>
 
 ### Bind an agent to it
 

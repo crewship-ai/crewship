@@ -498,14 +498,42 @@ var agentMCPCmd = &cobra.Command{
 				merged[k] = v
 			}
 
-			if len(merged) == 0 {
-				fmt.Printf("Agent %s: no MCP servers (crew + agent both empty).\n", args[0])
+			// Integration-table cascade (workspace/crew servers + agent
+			// bindings) is what the runtime actually injects alongside the
+			// blob. Surfacing only the blob made `--resolved` report "empty"
+			// for anyone using the modern `crewship integration` flow, which
+			// reads as "MCP is broken". Fold the table servers in so the
+			// output reflects what the agent really gets.
+			tableServers := fetchResolvedIntegrations(client, agentID)
+
+			if len(merged) == 0 && len(tableServers) == 0 {
+				fmt.Printf("Agent %s: no MCP servers (no blob config, no integration bindings).\n", args[0])
 				return nil
 			}
 
-			wrapper := map[string]interface{}{"mcpServers": merged}
-			pretty, _ := json.MarshalIndent(wrapper, "", "  ")
-			fmt.Println(string(pretty))
+			if len(merged) > 0 {
+				wrapper := map[string]interface{}{"mcpServers": merged}
+				pretty, _ := json.MarshalIndent(wrapper, "", "  ")
+				if len(tableServers) > 0 {
+					fmt.Println("# Blob config (crews/agents.mcp_config_json):")
+				}
+				fmt.Println(string(pretty))
+			}
+
+			if len(tableServers) > 0 {
+				fmt.Println("# Integration bindings (workspace/crew servers + agent bindings):")
+				for _, s := range tableServers {
+					cred := "no credential"
+					if s.CredentialName != "" {
+						cred = "credential: " + s.CredentialName
+					}
+					target := s.Endpoint
+					if target == "" {
+						target = "stdio"
+					}
+					fmt.Printf("  - %s [%s, %s] %s — %s\n", s.Name, s.Scope, s.Transport, target, cred)
+				}
+			}
 			return nil
 		}
 
@@ -538,6 +566,52 @@ var agentMCPCmd = &cobra.Command{
 		fmt.Println(string(pretty))
 		return nil
 	},
+}
+
+// resolvedIntegration is the agent-binding cascade entry returned by
+// GET /api/v1/agents/{id}/integrations/resolved — the table-based MCP
+// servers that the runtime injects alongside any blob config.
+type resolvedIntegration struct {
+	Name           string
+	Scope          string
+	Transport      string
+	Endpoint       string
+	CredentialName string
+}
+
+// fetchResolvedIntegrations returns the integration-table MCP servers bound
+// to an agent. Best-effort: returns nil on any error so the caller (the
+// `agent mcp --resolved` view) degrades to blob-only rather than failing.
+func fetchResolvedIntegrations(client *cli.Client, agentID string) []resolvedIntegration {
+	resp, err := client.Get("/api/v1/agents/" + agentID + "/integrations/resolved")
+	if err != nil {
+		return nil
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return nil
+	}
+	var raw []struct {
+		Name      string  `json:"name"`
+		Scope     string  `json:"scope"`
+		Transport string  `json:"transport"`
+		Endpoint  *string `json:"endpoint"`
+		CredName  *string `json:"credential_name"`
+	}
+	if err := cli.ReadJSON(resp, &raw); err != nil {
+		return nil
+	}
+	out := make([]resolvedIntegration, 0, len(raw))
+	for _, r := range raw {
+		e := resolvedIntegration{Name: r.Name, Scope: r.Scope, Transport: r.Transport}
+		if r.Endpoint != nil {
+			e.Endpoint = *r.Endpoint
+		}
+		if r.CredName != nil {
+			e.CredentialName = *r.CredName
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 func init() {

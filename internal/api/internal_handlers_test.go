@@ -1597,15 +1597,27 @@ func TestIsPrivateIP(t *testing.T) {
 
 func TestTestMCPConnection_Stdio(t *testing.T) {
 	t.Parallel()
-	res := testMCPConnection(context.Background(), "stdio", "", testLogger())
-	if res.Status != "skipped" {
-		t.Errorf("status = %q", res.Status)
+	// Well-formed stdio command → "ok" (static validation; live launch
+	// still happens at runtime).
+	res := testMCPConnection(context.Background(), "stdio", "", "npx", `["-y","@scope/pkg"]`, testLogger())
+	if res.Status != "ok" {
+		t.Errorf("well-formed stdio status = %q, want \"ok\"", res.Status)
+	}
+	// Empty command → error.
+	res = testMCPConnection(context.Background(), "stdio", "", "", "", testLogger())
+	if res.Status != "error" {
+		t.Errorf("empty-command stdio status = %q, want \"error\"", res.Status)
+	}
+	// Whole launch line in command field (the classic mistake) → error.
+	res = testMCPConnection(context.Background(), "stdio", "", "npx -y @scope/pkg", "", testLogger())
+	if res.Status != "error" {
+		t.Errorf("whitespace-command stdio status = %q, want \"error\"", res.Status)
 	}
 }
 
 func TestTestMCPConnection_UnknownTransport(t *testing.T) {
 	t.Parallel()
-	res := testMCPConnection(context.Background(), "carrier-pigeon", "", testLogger())
+	res := testMCPConnection(context.Background(), "carrier-pigeon", "", "", "", testLogger())
 	if res.Status != "error" {
 		t.Errorf("status = %q", res.Status)
 	}

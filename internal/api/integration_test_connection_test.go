@@ -29,20 +29,31 @@ func newIntegrationHandlerForTest(t *testing.T) *IntegrationHandler {
 // id/transport/endpoint. Returns the inserted id for convenience.
 func seedWorkspaceMCP(t *testing.T, h *IntegrationHandler, id, wsID, transport, endpoint string) {
 	t.Helper()
+	// stdio rows need a non-empty command to pass static validation; give
+	// them a well-formed default so transport-routing tests aren't tripped
+	// by the command check.
+	command := ""
+	if transport == "stdio" {
+		command = "npx"
+	}
 	if _, err := h.db.Exec(`INSERT INTO workspace_mcp_servers
-		(id, workspace_id, name, display_name, transport, endpoint, enabled)
-		VALUES (?, ?, ?, ?, ?, ?, 1)`,
-		id, wsID, id, id, transport, endpoint); err != nil {
+		(id, workspace_id, name, display_name, transport, endpoint, command, enabled)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+		id, wsID, id, id, transport, endpoint, command); err != nil {
 		t.Fatalf("seed workspace_mcp_servers %s: %v", id, err)
 	}
 }
 
 func seedCrewMCP(t *testing.T, h *IntegrationHandler, id, crewID, transport, endpoint string) {
 	t.Helper()
+	command := ""
+	if transport == "stdio" {
+		command = "npx"
+	}
 	if _, err := h.db.Exec(`INSERT INTO crew_mcp_servers
-		(id, crew_id, name, display_name, transport, endpoint, enabled)
-		VALUES (?, ?, ?, ?, ?, ?, 1)`,
-		id, crewID, id, id, transport, endpoint); err != nil {
+		(id, crew_id, name, display_name, transport, endpoint, command, enabled)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+		id, crewID, id, id, transport, endpoint, command); err != nil {
 		t.Fatalf("seed crew_mcp_servers %s: %v", id, err)
 	}
 }
@@ -109,14 +120,14 @@ func TestWorkspaceIntegrationConnection_SoftDeleted_NotFound(t *testing.T) {
 	}
 }
 
-func TestWorkspaceIntegrationConnection_StdioTransport_RoutesToSkipped(t *testing.T) {
-	// Stdio servers are tested at runtime inside the container — the
-	// handler returns the documented "skipped" status without
-	// attempting any network I/O. Pin the routing.
+func TestWorkspaceIntegrationConnection_StdioTransport_ValidatesCommand(t *testing.T) {
+	// Stdio servers can't be live-probed (launch is runtime-only), but a
+	// well-formed command passes static validation with "ok". Pin the
+	// routing + happy path.
 	h := newIntegrationHandlerForTest(t)
 	userID := seedTestUser(t, h.db)
 	wsID := seedTestWorkspace(t, h.db, userID)
-	seedWorkspaceMCP(t, h, "int-stdio", wsID, "stdio", "")
+	seedWorkspaceMCP(t, h, "int-stdio", wsID, "stdio", "") // seeds command="npx"
 
 	req := httptest.NewRequest("POST", "/api/v1/integrations/int-stdio/test", nil)
 	req.SetPathValue("integrationId", "int-stdio")
@@ -130,8 +141,35 @@ func TestWorkspaceIntegrationConnection_StdioTransport_RoutesToSkipped(t *testin
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
 	}
-	if got.Status != "skipped" {
-		t.Errorf("Status = %q, want \"skipped\"", got.Status)
+	if got.Status != "ok" {
+		t.Errorf("Status = %q, want \"ok\"", got.Status)
+	}
+}
+
+func TestWorkspaceIntegrationConnection_StdioWhitespaceCommand_Error(t *testing.T) {
+	// The classic config mistake: whole launch line in the command field.
+	// Static validation must flag it as an error so the operator fixes it
+	// before wondering why no tools appeared.
+	h := newIntegrationHandlerForTest(t)
+	userID := seedTestUser(t, h.db)
+	wsID := seedTestWorkspace(t, h.db, userID)
+	if _, err := h.db.Exec(`INSERT INTO workspace_mcp_servers
+		(id, workspace_id, name, display_name, transport, command, enabled)
+		VALUES ('int-bad-stdio', ?, 'bad', 'bad', 'stdio', 'npx -y @scope/pkg', 1)`, wsID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/api/v1/integrations/int-bad-stdio/test", nil)
+	req.SetPathValue("integrationId", "int-bad-stdio")
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.TestWorkspaceIntegrationConnection(rr, req)
+	var got testConnectionResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
+	if got.Status != "error" {
+		t.Errorf("Status = %q, want \"error\"", got.Status)
 	}
 }
 
@@ -226,12 +264,12 @@ func TestCrewIntegrationConnection_IntegrationMissing_404(t *testing.T) {
 	}
 }
 
-func TestCrewIntegrationConnection_StdioTransport_RoutesToSkipped(t *testing.T) {
+func TestCrewIntegrationConnection_StdioTransport_ValidatesCommand(t *testing.T) {
 	h := newIntegrationHandlerForTest(t)
 	userID := seedTestUser(t, h.db)
 	wsID := seedTestWorkspace(t, h.db, userID)
 	seedCrewRow(t, h.db, "crew-b", wsID, "B", "beta-int")
-	seedCrewMCP(t, h, "crew-int-stdio", "crew-b", "stdio", "")
+	seedCrewMCP(t, h, "crew-int-stdio", "crew-b", "stdio", "") // seeds command="npx"
 
 	req := httptest.NewRequest("POST", "/api/v1/crews/crew-b/integrations/crew-int-stdio/test", nil)
 	req.SetPathValue("crewId", "crew-b")
@@ -246,8 +284,8 @@ func TestCrewIntegrationConnection_StdioTransport_RoutesToSkipped(t *testing.T) 
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
 	}
-	if got.Status != "skipped" {
-		t.Errorf("Status = %q, want \"skipped\"", got.Status)
+	if got.Status != "ok" {
+		t.Errorf("Status = %q, want \"ok\"", got.Status)
 	}
 }
 

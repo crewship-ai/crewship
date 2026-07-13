@@ -176,8 +176,14 @@ func TestIntgAddRunECov_DefaultsDisplayAndTransport(t *testing.T) {
 	if body["transport"] != "streamable-http" {
 		t.Errorf("transport should default; got %v", body["transport"])
 	}
-	if body["command"] != "npx server-github" {
-		t.Errorf("command = %v", body["command"])
+	// The launch line is split: bare executable in command, the rest into
+	// args_json, so the runtime doesn't hunt for an executable named
+	// "npx server-github".
+	if body["command"] != "npx" {
+		t.Errorf("command should be split to bare executable; got %v", body["command"])
+	}
+	if body["args_json"] != `["server-github"]` {
+		t.Errorf("args_json = %v, want [\"server-github\"]", body["args_json"])
 	}
 }
 

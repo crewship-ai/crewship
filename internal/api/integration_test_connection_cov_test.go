@@ -15,7 +15,7 @@ import (
 // coverage task).
 
 func TestCovITC_TestMCPConnection_HTTPTransportEmptyEndpoint(t *testing.T) {
-	resp := testMCPConnection(context.Background(), "sse", "", newTestLogger())
+	resp := testMCPConnection(context.Background(), "sse", "", "", "", newTestLogger())
 	if resp.Status != "error" {
 		t.Fatalf("status = %q, want error", resp.Status)
 	}
