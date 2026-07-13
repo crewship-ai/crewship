@@ -914,6 +914,23 @@ func (p *Provider) ContainerIP(ctx context.Context, containerID, network string)
 	return net.IPAddress, nil
 }
 
+// ContainerUser returns the container's configured run-as user — the
+// Config.User set when the container was created (e.g. "1001:1001", the agent
+// user). Keeper uses this to run a credential-injected command as the same
+// user the agent process runs as instead of a hardcoded constant, and to fail
+// closed if it can't be determined (#1060). An empty string means the image
+// default / root, which keeper treats as undeterminable.
+func (p *Provider) ContainerUser(ctx context.Context, containerID string) (string, error) {
+	inspect, err := p.client.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", fmt.Errorf("inspect container %s for run-as user: %w", containerID, err)
+	}
+	if inspect.Config == nil {
+		return "", fmt.Errorf("container %s has no config", containerID)
+	}
+	return inspect.Config.User, nil
+}
+
 // CopyToContainer copies a tar archive into the container filesystem at dstPath.
 func (p *Provider) CopyToContainer(ctx context.Context, containerID string, dstPath string, content io.Reader) error {
 	return p.client.CopyToContainer(ctx, containerID, dstPath, content, container.CopyToContainerOptions{})

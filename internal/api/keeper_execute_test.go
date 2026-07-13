@@ -40,6 +40,14 @@ type mockContainerExec struct {
 	// lastExecContainerID records the ContainerID passed to the most recent
 	// Exec call so tests can assert the server-derived exec target (#1016).
 	lastExecContainerID string
+
+	// #1060: control + observe container-user resolution. userResult=="" and
+	// !userForceEmpty means ContainerUser returns the default agent user
+	// "1001:1001" so pre-existing ALLOW tests keep passing unchanged.
+	userResult     string
+	userErr        error
+	userForceEmpty bool
+	lastExecUser   string
 }
 
 func (m *mockContainerExec) EnsureCrewRuntime(_ context.Context, _ provider.CrewConfig) (string, error) {
@@ -50,8 +58,21 @@ func (m *mockContainerExec) RemoveCrewRuntime(_ context.Context, _ string) error
 func (m *mockContainerExec) ContainerStatus(_ context.Context, _ string) (*provider.ContainerStatus, error) {
 	return &provider.ContainerStatus{State: "running"}, nil
 }
+func (m *mockContainerExec) ContainerUser(_ context.Context, _ string) (string, error) {
+	if m.userErr != nil {
+		return "", m.userErr
+	}
+	if m.userForceEmpty {
+		return "", nil
+	}
+	if m.userResult != "" {
+		return m.userResult, nil
+	}
+	return "1001:1001", nil
+}
 func (m *mockContainerExec) Exec(_ context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
 	m.lastExecContainerID = cfg.ContainerID
+	m.lastExecUser = cfg.User
 	if m.execErr != nil {
 		return nil, m.execErr
 	}
