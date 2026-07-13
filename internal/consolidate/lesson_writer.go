@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -60,6 +61,17 @@ type lessonFile struct {
 // learned-YYYY-MM-DD.md / antipatterns-YYYY-MM.md fragments into one
 // long-lived, kind-discriminated log. PR-C is the first real consumer.
 const lessonsFilename = "lessons.md"
+
+// maxLessonEntries caps the number of entries retained per lessons file.
+// Lesson IDs are distinct per event (mission_outcome_<id>, neg_<sha>), so
+// genuinely different missions/failures would otherwise accumulate forever:
+// every WriteCrewLesson/ReadLessons does a full ReadFile+yaml.Unmarshal under
+// flock (O(file size) latency + an ever-growing serialized critical section),
+// and memory.read{tier:lessons} returns the whole file into the agent context
+// (#1044). On overflow the oldest entries (by CapturedAt) are dropped so the
+// newest maxLessonEntries survive. A package var (not const) so tests can
+// shrink it without writing hundreds of entries.
+var maxLessonEntries = 500
 
 // validLessonKinds is the closed set the writer accepts. Anything
 // outside this gets rejected at the boundary so a typo can't quietly
@@ -210,6 +222,17 @@ func writeLessonToDir(ctx context.Context, lessonsDir string, entry LessonEntry)
 	}
 	if !replaced {
 		out.Entries = append(out.Entries, entry)
+	}
+
+	// Bound the file (#1044). Distinct-per-event IDs mean the file grows
+	// unboundedly without a ceiling; keep the newest maxLessonEntries by
+	// CapturedAt so recall stays fresh and the flock'd read/write stays O(cap).
+	// Stable sort so entries with equal timestamps keep insertion order.
+	if len(out.Entries) > maxLessonEntries {
+		sort.SliceStable(out.Entries, func(i, j int) bool {
+			return out.Entries[i].CapturedAt.Before(out.Entries[j].CapturedAt)
+		})
+		out.Entries = out.Entries[len(out.Entries)-maxLessonEntries:]
 	}
 
 	return saveLessonsLocked(ctx, path, out)
