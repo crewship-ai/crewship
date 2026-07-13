@@ -191,6 +191,9 @@ export default function CredentialsPage() {
       tags: Array.isArray(c.tags) ? c.tags : [],
     }))
     setCredentials(normalised)
+    // #1085: any successful load clears a stale error — otherwise a full-page
+    // error card from an earlier failure survives a later good refresh.
+    setLoadError(null)
   }, [])
 
   const loadData = React.useCallback(async () => {
@@ -215,8 +218,12 @@ export default function CredentialsPage() {
 
   const handleRefresh = React.useCallback(() => {
     if (!workspaceId) return
+    // #1085: this refresh runs while data is already on screen (after a
+    // mutation). A transient failure should surface as a toast, not replace
+    // the loaded list with the full-page error card — the stale-but-visible
+    // list is more useful than an error screen, and the next refresh recovers.
     fetchCredentials(workspaceId).catch((err) => {
-      setLoadError(err instanceof Error ? err.message : "Something went wrong while loading credentials.")
+      toast.error(err instanceof Error ? err.message : "Couldn't refresh credentials.")
     })
   }, [workspaceId, fetchCredentials])
 
@@ -267,7 +274,13 @@ export default function CredentialsPage() {
       )
       const failedIds = ids.filter((_, i) => {
         const r = results[i]
-        return r.status === "rejected" || !r.value.ok
+        if (r.status === "rejected") return true
+        // #1085: a 404 means the credential is already gone (another admin
+        // deleted it first). Treat it as success, not a failure — otherwise it
+        // lingers in `selectedIds` as a phantom selection after the refresh
+        // removes its row, and the floating bar shows "1 selected" forever.
+        if (r.value.status === 404) return false
+        return !r.value.ok
       })
       const deleted = ids.length - failedIds.length
       if (failedIds.length === 0) {
