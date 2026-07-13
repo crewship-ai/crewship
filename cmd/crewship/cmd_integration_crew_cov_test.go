@@ -167,7 +167,8 @@ func TestIntgCrewCreateRunE_FullBody(t *testing.T) {
 		"display_name":            "GitHub",
 		"transport":               "stdio",
 		"endpoint":                "https://mcp.example.com",
-		"command":                 "npx server-github",
+		"command":                 "npx",               // launch line split: bin in command,
+		"args_json":               `["server-github"]`, // rest in args_json
 		"icon":                    "github",
 		"workspace_mcp_server_id": "ws-mcp-1",
 	}
@@ -234,7 +235,8 @@ func TestIntgCrewUpdateRunE_PatchesChangedFields(t *testing.T) {
 		"display_name": "New Name",
 		"transport":    "stdio",
 		"endpoint":     "https://new.example.com",
-		"command":      "npx new",
+		"command":      "npx",     // launch line split: bin in command,
+		"args_json":    `["new"]`, // rest in args_json
 		"icon":         "zap",
 		"enabled":      false,
 	}

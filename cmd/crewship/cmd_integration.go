@@ -1,11 +1,45 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 )
+
+// parseStdioCommand splits a stdio launch line into a bare executable and its
+// argument list. Users naturally type the whole line ("npx -y @scope/pkg"),
+// but the server stores the executable in `command` and its arguments in
+// `args_json` separately — storing the whole line makes the runtime search for
+// an executable literally named "npx -y @scope/pkg", which never exists, and
+// the server silently never starts. Splitting here keeps the CLI forgiving
+// while the stored shape stays correct. A bare command (no whitespace) returns
+// nil args.
+func parseStdioCommand(raw string) (bin string, args []string) {
+	fields := strings.Fields(raw)
+	if len(fields) == 0 {
+		return "", nil
+	}
+	if len(fields) == 1 {
+		return fields[0], nil
+	}
+	return fields[0], fields[1:]
+}
+
+// argsJSON marshals a stdio argument list to the JSON-array string the server
+// stores in `args_json`. Empty in, empty out (so the caller omits the field).
+func argsJSON(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(args)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
 
 var integrationCmd = &cobra.Command{
 	Use:     "integration",
@@ -138,7 +172,11 @@ var intgAddCmd = &cobra.Command{
 			body["endpoint"] = endpoint
 		}
 		if command != "" {
-			body["command"] = command
+			cmdBin, cmdArgs := parseStdioCommand(command)
+			body["command"] = cmdBin
+			if aj := argsJSON(cmdArgs); aj != "" {
+				body["args_json"] = aj
+			}
 		}
 		if icon != "" {
 			body["icon"] = icon

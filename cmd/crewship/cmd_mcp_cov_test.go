@@ -419,7 +419,7 @@ func TestAgentMCPRunECov_ResolvedBothEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	if !strings.Contains(out, "Agent viktor: no MCP servers (crew + agent both empty).") {
+	if !strings.Contains(out, "Agent viktor: no MCP servers (no blob config, no integration bindings).") {
 		t.Errorf("output = %q", out)
 	}
 }

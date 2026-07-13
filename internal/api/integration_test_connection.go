@@ -25,13 +25,13 @@ type testConnectionResponse struct {
 // given query, then performs an MCP connection test and writes the result.
 func (h *IntegrationHandler) loadAndTestConnection(w http.ResponseWriter, r *http.Request, query string, args ...any) {
 	var transport string
-	var endpoint sql.NullString
-	err := h.db.QueryRowContext(r.Context(), query, args...).Scan(&transport, &endpoint)
+	var endpoint, command, argsJSON sql.NullString
+	err := h.db.QueryRowContext(r.Context(), query, args...).Scan(&transport, &endpoint, &command, &argsJSON)
 	if err != nil {
 		replyError(w, http.StatusNotFound, "Integration not found")
 		return
 	}
-	result := testMCPConnection(r.Context(), transport, endpoint.String, h.logger)
+	result := testMCPConnection(r.Context(), transport, endpoint.String, command.String, argsJSON.String, h.logger)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -42,7 +42,7 @@ func (h *IntegrationHandler) TestWorkspaceIntegrationConnection(w http.ResponseW
 	integrationID := r.PathValue("integrationId")
 
 	h.loadAndTestConnection(w, r,
-		`SELECT transport, endpoint FROM workspace_mcp_servers
+		`SELECT transport, endpoint, command, args_json FROM workspace_mcp_servers
 		 WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		integrationID, workspaceID)
 }
@@ -64,19 +64,16 @@ func (h *IntegrationHandler) TestCrewIntegrationConnection(w http.ResponseWriter
 	}
 
 	h.loadAndTestConnection(w, r,
-		`SELECT transport, endpoint FROM crew_mcp_servers
+		`SELECT transport, endpoint, command, args_json FROM crew_mcp_servers
 		 WHERE id = ? AND crew_id = ? AND deleted_at IS NULL`,
 		integrationID, crewID)
 }
 
 // testMCPConnection performs the actual connectivity test based on transport type.
-func testMCPConnection(ctx context.Context, transport, endpoint string, logger interface{ Error(string, ...any) }) testConnectionResponse {
+func testMCPConnection(ctx context.Context, transport, endpoint, command, argsJSON string, logger interface{ Error(string, ...any) }) testConnectionResponse {
 	switch transport {
 	case "stdio":
-		return testConnectionResponse{
-			Status:  "skipped",
-			Message: "Stdio servers are tested at runtime inside the container",
-		}
+		return validateStdioServer(command, argsJSON)
 	case "streamable-http", "http", "sse":
 		return testStreamableHTTPConnection(ctx, endpoint)
 	default:
@@ -84,6 +81,43 @@ func testMCPConnection(ctx context.Context, transport, endpoint string, logger i
 			Status:  "error",
 			Message: fmt.Sprintf("Unknown transport type: %s", transport),
 		}
+	}
+}
+
+// validateStdioServer statically checks a stdio MCP server config. The launch
+// itself only happens at runtime inside the container, so we cannot do a live
+// probe here — but we can catch the most common config mistake: stuffing the
+// whole launch line ("npx -y @scope/pkg") into the command field, which makes
+// the runtime search for an executable literally named that and the server
+// silently never starts. Surfacing it at test time turns a confusing "no
+// tools appeared" into an actionable error.
+func validateStdioServer(command, argsJSON string) testConnectionResponse {
+	cmd := strings.TrimSpace(command)
+	if cmd == "" {
+		return testConnectionResponse{
+			Status:  "error",
+			Message: "stdio server has no command configured",
+		}
+	}
+	if strings.ContainsAny(cmd, " \t") {
+		return testConnectionResponse{
+			Status: "error",
+			Message: "command contains whitespace — it must be a bare executable with arguments in a separate list " +
+				`(e.g. command="npx", args=["-y","@scope/pkg"]). Re-add via "crewship integration add" which splits it automatically.`,
+		}
+	}
+	if argsJSON != "" {
+		var parsed []string
+		if err := json.Unmarshal([]byte(argsJSON), &parsed); err != nil {
+			return testConnectionResponse{
+				Status:  "error",
+				Message: "args_json is not a valid JSON array of strings",
+			}
+		}
+	}
+	return testConnectionResponse{
+		Status:  "ok",
+		Message: "stdio command is well-formed; the server is launched and fully verified at runtime inside the container",
 	}
 }
 

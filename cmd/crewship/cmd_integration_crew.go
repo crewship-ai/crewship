@@ -105,7 +105,11 @@ var intgCrewCreateCmd = &cobra.Command{
 			body["endpoint"] = endpoint
 		}
 		if command != "" {
-			body["command"] = command
+			cmdBin, cmdArgs := parseStdioCommand(command)
+			body["command"] = cmdBin
+			if aj := argsJSON(cmdArgs); aj != "" {
+				body["args_json"] = aj
+			}
 		}
 		if icon != "" {
 			body["icon"] = icon
@@ -166,7 +170,11 @@ var intgCrewUpdateCmd = &cobra.Command{
 		}
 		if flags.Changed("command") {
 			v, _ := flags.GetString("command")
-			body["command"] = v
+			cmdBin, cmdArgs := parseStdioCommand(v)
+			body["command"] = cmdBin
+			if aj := argsJSON(cmdArgs); aj != "" {
+				body["args_json"] = aj
+			}
 		}
 		if flags.Changed("icon") {
 			v, _ := flags.GetString("icon")
