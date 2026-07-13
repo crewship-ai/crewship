@@ -65,11 +65,11 @@ var rootCmd = &cobra.Command{
 		// this read-side overlay never corrupts what gets saved.
 		cliCfg = cfg.WithActiveProfile(flagProfile)
 	},
-	// Bare `crewship` with no subcommand: show the brand logo, then the
-	// usual help. Subcommands are unaffected (cobra only calls Run when no
+	// Bare `crewship` with no subcommand: show the compact brand line, then
+	// the usual help. Subcommands are unaffected (cobra only calls Run when no
 	// child command matches), and `crewship --help` still prints help alone.
 	Run: func(cmd *cobra.Command, args []string) {
-		cli.PrintLogo(os.Stderr, version)
+		cli.PrintStartLine(os.Stderr, version)
 		_ = cmd.Help()
 	},
 	SilenceUsage:  true,

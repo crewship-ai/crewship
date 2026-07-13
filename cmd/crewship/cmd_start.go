@@ -1071,8 +1071,7 @@ func printFirstRunWelcome(db *sql.DB, logger *slog.Logger) {
 	if port == "" {
 		port = "8080"
 	}
-	// The full brand logo belongs to this once-per-install moment.
-	cli.PrintLogo(os.Stdout, version)
+	cli.PrintStartLine(os.Stdout, version)
 	fmt.Printf("  %sWelcome to Crewship!%s  %s%s%s\n",
 		cli.Bold, cli.Reset, cli.Dim, version, cli.Reset)
 	fmt.Println()
