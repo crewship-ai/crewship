@@ -42,10 +42,12 @@ Examples:
 // keeperGovernance mirrors the GET/PUT /api/v1/admin/keeper/governance
 // response shape (internal/api/keeper_governance.go).
 type keeperGovernance struct {
-	Configured            bool   `json:"configured"`
-	Enabled               bool   `json:"enabled"`
-	SecurityContactUserID string `json:"security_contact_user_id"`
-	DenyNotifyMinRisk     int    `json:"deny_notify_min_risk"`
+	Configured            bool     `json:"configured"`
+	Enabled               bool     `json:"enabled"`
+	SecurityContactUserID string   `json:"security_contact_user_id"`
+	DenyNotifyMinRisk     int      `json:"deny_notify_min_risk"`
+	WatchSpec             string   `json:"watch_spec"`
+	WatchPresets          []string `json:"watch_presets"`
 }
 
 // keeperServerStatus mirrors GET /api/v1/system/keeper.
@@ -319,6 +321,7 @@ func init() {
 	keeperCmd.AddCommand(keeperDisableCmd)
 	keeperCmd.AddCommand(keeperContactCmd)
 	keeperCmd.AddCommand(keeperThresholdCmd)
+	keeperCmd.AddCommand(keeperWatchCmd)
 
 	rootCmd.AddCommand(keeperCmd)
 }

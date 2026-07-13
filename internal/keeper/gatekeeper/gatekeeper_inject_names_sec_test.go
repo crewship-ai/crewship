@@ -19,7 +19,7 @@ func TestSecGatekeeper_AccessPromptEscapesCredentialName(t *testing.T) {
 		SecurityLevel:  1,
 	}
 	req.Request.Intent = "legitimate-looking intent"
-	assertSnippetEscaped(t, g.buildAccessPrompt(req))
+	assertSnippetEscaped(t, g.buildAccessPrompt(req, ""))
 }
 
 func TestSecGatekeeper_AccessPromptEscapesAgentName(t *testing.T) {
@@ -31,7 +31,7 @@ func TestSecGatekeeper_AccessPromptEscapesAgentName(t *testing.T) {
 		SecurityLevel:  1,
 	}
 	req.Request.Intent = "legitimate-looking intent"
-	assertSnippetEscaped(t, g.buildAccessPrompt(req))
+	assertSnippetEscaped(t, g.buildAccessPrompt(req, ""))
 }
 
 func TestSecGatekeeper_BehaviorPromptEscapesToolName(t *testing.T) {
@@ -44,7 +44,7 @@ func TestSecGatekeeper_BehaviorPromptEscapesToolName(t *testing.T) {
 			BehaviorMode: "block",
 		},
 	}
-	assertSnippetEscaped(t, g.buildBehaviorPrompt(req))
+	assertSnippetEscaped(t, g.buildBehaviorPrompt(req, ""))
 }
 
 func TestSecGatekeeper_BehaviorPromptEscapesRecentToolCalls(t *testing.T) {
@@ -58,7 +58,7 @@ func TestSecGatekeeper_BehaviorPromptEscapesRecentToolCalls(t *testing.T) {
 			RecentToolCalls: []string{"ls", injectionPayload},
 		},
 	}
-	assertSnippetEscaped(t, g.buildBehaviorPrompt(req))
+	assertSnippetEscaped(t, g.buildBehaviorPrompt(req, ""))
 }
 
 func TestSecGatekeeper_SkillReviewPromptEscapesSkillName(t *testing.T) {

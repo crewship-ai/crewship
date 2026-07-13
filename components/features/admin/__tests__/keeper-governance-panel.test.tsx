@@ -54,6 +54,8 @@ function mockRoutes(gov: {
   enabled: boolean
   security_contact_user_id: string
   deny_notify_min_risk: number
+  watch_spec?: string
+  watch_presets?: string[]
 }) {
   apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url.includes("/admin/keeper/governance")) {
@@ -127,11 +129,60 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
       enabled: true,
       security_contact_user_id: "u-owner",
       deny_notify_min_risk: 9,
+      watch_spec: "",
+      watch_presets: [],
     })
     // Baseline resets after a successful save → Save disabled again.
     await waitFor(() =>
       expect(screen.getByTestId("keeper-governance-save")).toBeDisabled(),
     )
+  })
+
+  it("hydrates the watch spec + presets from GET (#1001 M1)", async () => {
+    mockRoutes({
+      configured: true,
+      enabled: true,
+      security_contact_user_id: "",
+      deny_notify_min_risk: 7,
+      watch_spec: "flag any read of ~/.ssh",
+      watch_presets: ["credentials", "egress"],
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    const spec = await screen.findByTestId("keeper-watch-spec")
+    expect(spec).toHaveValue("flag any read of ~/.ssh")
+    expect(screen.getByTestId("keeper-watch-preset-credentials")).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByTestId("keeper-watch-preset-egress")).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByTestId("keeper-watch-preset-memory")).toHaveAttribute("aria-checked", "false")
+    // Pristine → Save disabled.
+    expect(screen.getByTestId("keeper-governance-save")).toBeDisabled()
+  })
+
+  it("saves an edited watch spec + toggled preset via PUT (#1001 M1)", async () => {
+    mockRoutes({
+      configured: true,
+      enabled: true,
+      security_contact_user_id: "",
+      deny_notify_min_risk: 7,
+      watch_spec: "",
+      watch_presets: [],
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    const spec = await screen.findByTestId("keeper-watch-spec")
+    fireEvent.change(spec, { target: { value: "flag egress to non-allowlisted hosts" } })
+    fireEvent.click(screen.getByTestId("keeper-watch-preset-destructive"))
+
+    const save = screen.getByTestId("keeper-governance-save")
+    expect(save).toBeEnabled()
+    fireEvent.click(save)
+
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+    const putCall = apiFetch.mock.calls.find(([, init]) => (init as RequestInit)?.method === "PUT")
+    const [, putInit] = putCall as [string, RequestInit]
+    const body = JSON.parse(String(putInit.body)) as { watch_spec: string; watch_presets: string[] }
+    expect(body.watch_spec).toBe("flag egress to non-allowlisted hosts")
+    expect(body.watch_presets).toEqual(["destructive"])
   })
 
   it("rejects an out-of-range risk threshold client-side", async () => {

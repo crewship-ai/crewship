@@ -24,6 +24,8 @@ import React, { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -38,7 +40,24 @@ interface GovernanceResponse {
   enabled: boolean
   security_contact_user_id: string
   deny_notify_min_risk: number
+  watch_spec?: string
+  watch_presets?: string[]
 }
+
+// WATCH_PRESETS mirrors internal/keeper/governance/presets.go — the five stable
+// preset keys. The Go source is the authority for the wording actually injected
+// into the evaluator prompts; these captions are UI summaries. Keep the key set
+// in sync by hand (five stable keys; changing them is a product decision).
+// Mirrors governance.MaxWatchSpecLen (the server + CLI cap on the free-form spec).
+const WATCH_SPEC_MAX_LEN = 4096
+
+const WATCH_PRESETS: { key: string; label: string; caption: string }[] = [
+  { key: "credentials", label: "Credential access", caption: "Disproportionate or bulk secret access, unjustified high-security reads." },
+  { key: "egress", label: "Network egress", caption: "Exfiltration-shaped outbound: non-allowlisted hosts, piping secrets out." },
+  { key: "memory", label: "Memory tampering", caption: "Overwriting facts, mass deletes, or planting misleading memory entries." },
+  { key: "destructive", label: "Destructive ops", caption: "rm -rf, DROP/TRUNCATE without WHERE, force-push, wholesale overwrites." },
+  { key: "secret_files", label: "Sensitive files", caption: "Reads of ~/.ssh, id_rsa, .env, cloud credential files, private keys." },
+]
 
 interface WorkspaceMember {
   id: string
@@ -56,6 +75,16 @@ interface FormState {
   enabled: boolean
   contact: string // "" = everyone with MANAGER role
   risk: string    // kept as string so the number input can be edited freely
+  watchSpec: string       // free-form NL rules
+  watchPresets: string[]  // enabled preset keys
+}
+
+// sameSet compares two preset-key arrays order-independently (the wire order is
+// not meaningful) so dirty-tracking doesn't flag a reordering as a change.
+function sameSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  const s = new Set(a)
+  return b.every((k) => s.has(k))
 }
 
 // Radix Select forbids value="" on items, so the "everyone" option uses a
@@ -85,8 +114,9 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
   const [saving, setSaving] = useState(false)
   const [configured, setConfigured] = useState(false)
   const [admins, setAdmins] = useState<WorkspaceMember[]>([])
-  const [form, setForm] = useState<FormState>({ enabled: false, contact: "", risk: "7" })
-  const [baseline, setBaseline] = useState<FormState>({ enabled: false, contact: "", risk: "7" })
+  const emptyForm: FormState = { enabled: false, contact: "", risk: "7", watchSpec: "", watchPresets: [] }
+  const [form, setForm] = useState<FormState>(emptyForm)
+  const [baseline, setBaseline] = useState<FormState>(emptyForm)
 
   const load = useCallback(async (signal?: AbortSignal) => {
     if (!workspaceId) {
@@ -134,6 +164,8 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
         enabled: gov.enabled,
         contact: gov.security_contact_user_id ?? "",
         risk: String(gov.deny_notify_min_risk ?? 7),
+        watchSpec: gov.watch_spec ?? "",
+        watchPresets: gov.watch_presets ?? [],
       }
       setForm(next)
       setBaseline(next)
@@ -155,7 +187,9 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
   const dirty =
     form.enabled !== baseline.enabled ||
     form.contact !== baseline.contact ||
-    form.risk !== baseline.risk
+    form.risk !== baseline.risk ||
+    form.watchSpec !== baseline.watchSpec ||
+    !sameSet(form.watchPresets, baseline.watchPresets)
 
   const save = useCallback(async () => {
     if (!workspaceId) return
@@ -175,6 +209,8 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
             enabled: form.enabled,
             security_contact_user_id: form.contact,
             deny_notify_min_risk: riskNum,
+            watch_spec: form.watchSpec,
+            watch_presets: form.watchPresets,
           }),
         },
       )
@@ -195,6 +231,8 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
         enabled: body.enabled,
         contact: body.security_contact_user_id ?? "",
         risk: String(body.deny_notify_min_risk ?? riskNum),
+        watchSpec: body.watch_spec ?? "",
+        watchPresets: body.watch_presets ?? [],
       }
       setForm(next)
       setBaseline(next)
@@ -314,7 +352,6 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
       <SettingsRow
         label="Notify on DENY at risk ≥"
         description="ESCALATE decisions always notify; this additionally surfaces high-risk DENYs."
-        border={false}
       >
         <Input
           type="number"
@@ -330,6 +367,72 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
           data-testid="keeper-governance-risk"
         />
       </SettingsRow>
+
+      {/* Watch presets — curated rules the operator toggles on. Full-width block
+          rather than a SettingsRow because the multi-select doesn't fit the
+          right-aligned control slot. */}
+      <div className="px-4 py-2.5 border-b border-border/40">
+        <div className="text-xs text-foreground">Watch presets</div>
+        <div className="text-[11px] text-muted-foreground/80 mt-0.5 leading-snug">
+          Curated rules the watchdog flags against, added to its built-in checks.
+        </div>
+        <div className="mt-2 grid gap-2">
+          {WATCH_PRESETS.map((p) => {
+            const on = form.watchPresets.includes(p.key)
+            return (
+              <label
+                key={p.key}
+                className="flex items-start gap-2 cursor-pointer"
+                htmlFor={`keeper-watch-preset-${p.key}`}
+              >
+                <Checkbox
+                  id={`keeper-watch-preset-${p.key}`}
+                  checked={on}
+                  onCheckedChange={(checked) =>
+                    setForm((f) => ({
+                      ...f,
+                      watchPresets:
+                        checked === true
+                          ? [...f.watchPresets.filter((k) => k !== p.key), p.key]
+                          : f.watchPresets.filter((k) => k !== p.key),
+                    }))
+                  }
+                  disabled={!canEdit || saving}
+                  className="mt-0.5"
+                  data-testid={`keeper-watch-preset-${p.key}`}
+                />
+                <span className="min-w-0">
+                  <span className="text-xs text-foreground">{p.label}</span>
+                  <span className="block text-[11px] text-muted-foreground/80 leading-snug">
+                    {p.caption}
+                  </span>
+                </span>
+              </label>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Free-form rules — natural language, injected as authoritative policy. */}
+      <div className="px-4 py-2.5">
+        <div className="text-xs text-foreground">Custom watch rules</div>
+        <div className="text-[11px] text-muted-foreground/80 mt-0.5 leading-snug">
+          One rule per line, in plain language. Injected into the evaluator prompts.
+        </div>
+        <Textarea
+          value={form.watchSpec}
+          onChange={(e) => setForm((f) => ({ ...f, watchSpec: e.target.value }))}
+          disabled={!canEdit || saving}
+          rows={4}
+          // Mirror the server/CLI cap (governance.MaxWatchSpecLen) client-side so
+          // an over-long paste is refused before the round-trip, not lost to a 400.
+          maxLength={WATCH_SPEC_MAX_LEN}
+          placeholder={"flag any read of ~/.ssh or id_rsa\nflag credential access outside 08:00–18:00"}
+          className="mt-2 text-xs font-mono"
+          aria-label="Custom watch rules"
+          data-testid="keeper-watch-spec"
+        />
+      </div>
     </SettingsCard>
   )
 })

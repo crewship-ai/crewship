@@ -57,9 +57,11 @@ func (h *KeeperGovernanceHandler) Get(w http.ResponseWriter, r *http.Request) {
 // read clobbers the enabled flag and makes concurrent single-field edits
 // commute instead of overwriting each other.
 type keeperGovernancePutBody struct {
-	Enabled               *bool   `json:"enabled"`
-	SecurityContactUserID *string `json:"security_contact_user_id"`
-	DenyNotifyMinRisk     *int    `json:"deny_notify_min_risk"`
+	Enabled               *bool     `json:"enabled"`
+	SecurityContactUserID *string   `json:"security_contact_user_id"`
+	DenyNotifyMinRisk     *int      `json:"deny_notify_min_risk"`
+	WatchSpec             *string   `json:"watch_spec"`
+	WatchPresets          *[]string `json:"watch_presets"`
 }
 
 // Put handles PUT /api/v1/admin/keeper/governance (roleManage = OWNER/ADMIN).
@@ -96,11 +98,30 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 	if body.SecurityContactUserID != nil {
 		cur.SecurityContactUserID = *body.SecurityContactUserID
 	}
+	if body.WatchSpec != nil {
+		// Cap server-side so the DB row and the compiled prompt block stay
+		// bounded regardless of what the CLI/UI send.
+		if len(*body.WatchSpec) > governance.MaxWatchSpecLen {
+			replyError(w, http.StatusBadRequest, "watch_spec exceeds the maximum length")
+			return
+		}
+		cur.WatchSpec = *body.WatchSpec
+	}
+	if body.WatchPresets != nil {
+		if err := governance.ValidatePresets(*body.WatchPresets); err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		cur.WatchPresets = *body.WatchPresets
+	}
 
 	// The security contact must be an OWNER/ADMIN member of this workspace —
 	// snitching to someone who can't act on (or shouldn't see) escalations
-	// is a config foot-gun, so reject it at write time.
-	if cur.SecurityContactUserID != "" {
+	// is a config foot-gun, so reject it at write time. Validate ONLY when this
+	// request is setting/changing the contact (body.SecurityContactUserID != nil):
+	// an unrelated partial update (e.g. watch_spec/presets) must not be blocked
+	// because a previously-stored contact was demoted since it was last validated.
+	if body.SecurityContactUserID != nil && cur.SecurityContactUserID != "" {
 		var role string
 		err := h.db.QueryRowContext(r.Context(), `
 			SELECT role FROM workspace_members
@@ -146,6 +167,10 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 			"enabled":                  s.Enabled,
 			"security_contact_user_id": s.SecurityContactUserID,
 			"deny_notify_min_risk":     s.DenyNotifyMinRisk,
+			// Log the shape of the watch spec, not its text — the full rules
+			// can be large and needn't bloat every audit entry.
+			"watch_preset_count": len(s.WatchPresets),
+			"watch_spec_len":     len(s.WatchSpec),
 		},
 	}); jerr != nil {
 		h.logger.Warn("keeper governance: journal emit failed", "error", jerr)

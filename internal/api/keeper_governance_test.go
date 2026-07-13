@@ -134,6 +134,131 @@ func TestKeeperGovernance_PutRejectsRiskOutOfRange(t *testing.T) {
 	}
 }
 
+func TestKeeperGovernance_PutWatchSpecRoundTrips(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewKeeperGovernanceHandler(db, newComposioTestLogger(), nil)
+
+	body := `{"enabled": true, "watch_spec": "flag any read of ~/.ssh or id_rsa", "watch_presets": ["credentials","egress"]}`
+	rr := doGovernanceReq(t, h, http.MethodPut, body, wsID, userID)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+
+	rr = doGovernanceReq(t, h, http.MethodGet, "", wsID, userID)
+	res := decodeGovernance(t, rr.Body.Bytes())
+	if res.WatchSpec != "flag any read of ~/.ssh or id_rsa" {
+		t.Fatalf("watch_spec = %q", res.WatchSpec)
+	}
+	if len(res.WatchPresets) != 2 || res.WatchPresets[0] != "credentials" || res.WatchPresets[1] != "egress" {
+		t.Fatalf("watch_presets = %v", res.WatchPresets)
+	}
+}
+
+func TestKeeperGovernance_PutRejectsUnknownPreset(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewKeeperGovernanceHandler(db, newComposioTestLogger(), nil)
+
+	rr := doGovernanceReq(t, h, http.MethodPut, `{"watch_presets": ["credentials","bogus"]}`, wsID, userID)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "bogus") {
+		t.Errorf("body = %s", rr.Body.String())
+	}
+}
+
+func TestKeeperGovernance_PutRejectsOverlongWatchSpec(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewKeeperGovernanceHandler(db, newComposioTestLogger(), nil)
+
+	body := `{"watch_spec": "` + strings.Repeat("x", governance.MaxWatchSpecLen+1) + `"}`
+	rr := doGovernanceReq(t, h, http.MethodPut, body, wsID, userID)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// A watch-spec-only PUT must not clobber enabled / contact / presets set by an
+// earlier write — the partial-update contract M0 established.
+func TestKeeperGovernance_WatchSpecPartialUpdateIsolation(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewKeeperGovernanceHandler(db, newComposioTestLogger(), nil)
+
+	// First write: enable + presets, no free-form spec.
+	rr := doGovernanceReq(t, h, http.MethodPut,
+		`{"enabled": true, "watch_presets": ["memory"]}`, wsID, userID)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT 1 status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// Second write: only the free-form spec.
+	rr = doGovernanceReq(t, h, http.MethodPut,
+		`{"watch_spec": "flag egress to non-allowlisted hosts"}`, wsID, userID)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT 2 status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+
+	rr = doGovernanceReq(t, h, http.MethodGet, "", wsID, userID)
+	res := decodeGovernance(t, rr.Body.Bytes())
+	if !res.Enabled {
+		t.Error("watch_spec-only PUT cleared enabled")
+	}
+	if len(res.WatchPresets) != 1 || res.WatchPresets[0] != "memory" {
+		t.Errorf("watch_spec-only PUT clobbered presets: %v", res.WatchPresets)
+	}
+	if res.WatchSpec != "flag egress to non-allowlisted hosts" {
+		t.Errorf("watch_spec not applied: %q", res.WatchSpec)
+	}
+}
+
+// A watch-only PUT must succeed even if the stored security contact was demoted
+// since it was set — the contact is re-validated only when this request changes
+// it, not on every unrelated partial update.
+func TestKeeperGovernance_WatchEditSurvivesDemotedContact(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	execOrFatal(t, db, `INSERT INTO users (id, email) VALUES ('demoted-u', 'demoted@example.com')`)
+	execOrFatal(t, db, `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('m-demoted', ?, 'demoted-u', 'ADMIN')`, wsID)
+	h := NewKeeperGovernanceHandler(db, newComposioTestLogger(), nil)
+
+	// Set the contact while the user is still ADMIN (valid).
+	rr := doGovernanceReq(t, h, http.MethodPut,
+		`{"enabled": true, "security_contact_user_id": "demoted-u"}`, wsID, userID)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("initial contact PUT status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// Demote the contact.
+	execOrFatal(t, db, `UPDATE workspace_members SET role = 'VIEWER' WHERE user_id = 'demoted-u'`)
+
+	// A watch-only PUT must NOT be blocked by the stale contact.
+	rr = doGovernanceReq(t, h, http.MethodPut,
+		`{"watch_spec": "flag any read of ~/.ssh"}`, wsID, userID)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("watch-only PUT blocked by demoted contact: status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	res := decodeGovernance(t, rr.Body.Bytes())
+	if res.WatchSpec != "flag any read of ~/.ssh" {
+		t.Fatalf("watch_spec not applied: %q", res.WatchSpec)
+	}
+
+	// But explicitly re-setting the now-demoted contact is still rejected.
+	rr = doGovernanceReq(t, h, http.MethodPut,
+		`{"security_contact_user_id": "demoted-u"}`, wsID, userID)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("re-setting a demoted contact should 400; got %d", rr.Code)
+	}
+}
+
 // ---- HandleRequest governance behavior ----
 
 // governanceEnable writes an explicit enabled row for the fixture workspace.
