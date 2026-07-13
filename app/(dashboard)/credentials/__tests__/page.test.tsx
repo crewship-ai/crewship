@@ -8,6 +8,7 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import { toast } from "sonner"
 import { defineAbilitiesFor } from "@/lib/permissions/abilities"
 import type { OrgRole } from "@/lib/generated/prisma/client"
+import { _resetWorkspaceStoreForTests, useWorkspace } from "@/hooks/use-workspace"
 import CredentialsPage from "../page"
 
 // Hoisted holder so vi.mock factories can read per-test state.
@@ -109,11 +110,19 @@ function routeApi(credentials: unknown[]) {
 beforeEach(() => {
   h.role = "OWNER"
   h.apiFetch.mockReset()
+  // The workspace store is a module singleton with a localStorage-backed
+  // selection — reset both so each test starts from a clean slate (#1033).
+  _resetWorkspaceStoreForTests()
+  try { localStorage.clear() } catch { /* jsdom */ }
 })
 
 describe("load error state (C1)", () => {
   it("shows an error card with Retry instead of the empty state when the fetch fails", async () => {
-    h.apiFetch.mockRejectedValue(new TypeError("fetch failed"))
+    // Workspace resolves; the credentials fetch is what fails.
+    h.apiFetch.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/v1/workspaces")) return ok([{ id: "ws1", name: "Test" }])
+      throw new TypeError("fetch failed")
+    })
     render(<CredentialsPage />)
 
     expect(await screen.findByText("Couldn't load credentials")).toBeInTheDocument()
@@ -137,6 +146,112 @@ describe("load error state (C1)", () => {
     expect(await screen.findByText("Couldn't load credentials")).toBeInTheDocument()
     expect(screen.getByText(/HTTP 500/)).toBeInTheDocument()
     expect(screen.queryByText("No credentials yet")).not.toBeInTheDocument()
+  })
+})
+
+describe("multi-workspace (#1033)", () => {
+  it("loads credentials for the workspace the shared store resolves", async () => {
+    const requested: string[] = []
+    h.apiFetch.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/v1/workspaces")) {
+        return ok([{ id: "ws-alpha", name: "Alpha" }, { id: "ws-beta", name: "Beta" }])
+      }
+      if (url.startsWith("/api/v1/credentials?")) {
+        requested.push(new URL(url, "http://x").searchParams.get("workspace_id") ?? "")
+        return ok([makeCredential({ id: "c1", name: "ALPHA_KEY" })])
+      }
+      return ok([])
+    })
+    render(<CredentialsPage />)
+
+    // The page delegates workspace resolution to useWorkspace and fetches
+    // credentials for whichever workspace the store selected — no longer its
+    // own hardcoded orgs[0]. (Selection/persistence is use-workspace's own
+    // concern and suite.)
+    expect(await screen.findByText("ALPHA_KEY")).toBeInTheDocument()
+    expect(requested.length).toBeGreaterThan(0)
+    expect(requested.every((id) => id === "ws-alpha")).toBe(true)
+  })
+})
+
+// Harness that renders the real useWorkspace() store alongside the page so
+// tests can drive a workspace switch the same way the top-bar switcher does.
+function renderWithSwitcher() {
+  function Harness() {
+    const { setWorkspaceId } = useWorkspace()
+    return (
+      <>
+        <button onClick={() => setWorkspaceId("ws-b")}>switch to B</button>
+        <CredentialsPage />
+      </>
+    )
+  }
+  return render(<Harness />)
+}
+
+describe("stale response guard on workspace switch (#1156)", () => {
+  it("ignores a slow response from the previous workspace after switching", async () => {
+    let resolveA: (v: Response) => void = () => {}
+    const pendingA = new Promise<Response>((resolve) => { resolveA = resolve })
+    h.apiFetch.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/v1/workspaces")) {
+        return ok([{ id: "ws-a", name: "A" }, { id: "ws-b", name: "B" }])
+      }
+      if (url.includes("workspace_id=ws-a")) return pendingA
+      if (url.includes("workspace_id=ws-b")) {
+        return ok([makeCredential({ id: "cb", name: "BETA_KEY" })])
+      }
+      return ok([])
+    })
+
+    renderWithSwitcher()
+
+    // Wait until the (still-pending) ws-a fetch has actually been issued.
+    await waitFor(() => {
+      expect(h.apiFetch.mock.calls.some((c) => String(c[0]).includes("workspace_id=ws-a"))).toBe(true)
+    })
+
+    fireEvent.click(screen.getByText("switch to B"))
+
+    // ws-b's fetch resolves quickly and should win.
+    expect(await screen.findByText("BETA_KEY")).toBeInTheDocument()
+
+    // Now let the slow ws-a response resolve — it must NOT clobber the
+    // already-displayed ws-b rows, even though it resolves later.
+    resolveA(ok([makeCredential({ id: "ca", name: "ALPHA_KEY" })]))
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(screen.queryByText("ALPHA_KEY")).not.toBeInTheDocument()
+    expect(screen.getByText("BETA_KEY")).toBeInTheDocument()
+  })
+})
+
+describe("selection cleared on workspace switch (#1156)", () => {
+  it("clears bulk-select ids when the workspace changes", async () => {
+    h.apiFetch.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/v1/workspaces")) {
+        return ok([{ id: "ws-a", name: "A" }, { id: "ws-b", name: "B" }])
+      }
+      if (url.includes("workspace_id=ws-a")) {
+        return ok([makeCredential({ id: "ca", name: "ALPHA_KEY" })])
+      }
+      if (url.includes("workspace_id=ws-b")) {
+        return ok([makeCredential({ id: "cb", name: "BETA_KEY" })])
+      }
+      return ok([])
+    })
+
+    renderWithSwitcher()
+
+    expect(await screen.findByText("ALPHA_KEY")).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText("Select ALPHA_KEY"))
+    expect(await screen.findByText("1 selected")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText("switch to B"))
+
+    expect(await screen.findByText("BETA_KEY")).toBeInTheDocument()
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument()
   })
 })
 
