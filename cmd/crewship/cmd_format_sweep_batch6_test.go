@@ -1,8 +1,12 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
 )
@@ -65,6 +69,64 @@ func TestComposioToolkitsRunE_DefaultStaysHuman(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("human output missing %q; got:\n%s", want, out)
 		}
+	}
+}
+
+// TestComposioToolkitsRunE_YAMLAndNDJSON is the flip side of
+// DefaultStaysHuman: composioToolkitsCmd routes the single
+// composioToolkitsResponse struct through f.AutoHuman now, so --format
+// yaml/ndjson must carry the {enabled, total, toolkits} payload instead of
+// the rendered catalog table. Previously ndjson fell through the old
+// `f.Format == "json" || f.Format == "yaml"` gate straight to the human
+// view — this is the machine-format regression the sweep fixed.
+func TestComposioToolkitsRunE_YAMLAndNDJSON(t *testing.T) {
+	stub := covSetupCli5(t)
+	stub.OnGet("/api/v1/integrations/composio/toolkits", clitest.JSONResponse(200, map[string]any{
+		"enabled": true,
+		"total":   1,
+		"toolkits": []map[string]any{
+			{"slug": "gmail", "name": "Gmail", "meta": map[string]any{
+				"tools_count": 5, "categories": []map[string]any{{"name": "email"}},
+			}},
+		},
+	}))
+
+	flagFormat = "yaml"
+	var err error
+	out := covCaptureStdoutCli5(t, func() { err = composioToolkitsCmd.RunE(composioToolkitsCmd, nil) })
+	if err != nil {
+		t.Fatalf("yaml RunE: %v", err)
+	}
+	var yamlPayload map[string]any
+	if uerr := yaml.Unmarshal([]byte(out), &yamlPayload); uerr != nil {
+		t.Fatalf("yaml stdout does not parse: %v\ngot:\n%s", uerr, out)
+	}
+	if yamlPayload == nil {
+		t.Fatalf("yaml stdout parsed to nil; got:\n%s", out)
+	}
+	// yaml.v3 decodes a bare "1" as an int, not float64 — compare the
+	// formatted string rather than the exact numeric type.
+	if got := fmt.Sprintf("%v", yamlPayload["total"]); got != "1" {
+		t.Errorf("yaml payload total = %v (%T), want 1", yamlPayload["total"], yamlPayload["total"])
+	}
+
+	flagFormat = "ndjson"
+	out = covCaptureStdoutCli5(t, func() { err = composioToolkitsCmd.RunE(composioToolkitsCmd, nil) })
+	if err != nil {
+		t.Fatalf("ndjson RunE: %v", err)
+	}
+	// The toolkits response is a single struct (not a top-level slice), so
+	// NDJSON emits exactly one line for the whole object.
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("ndjson: want exactly 1 line for the toolkits object, got %d:\n%s", len(lines), out)
+	}
+	var ndjsonPayload map[string]any
+	if uerr := json.Unmarshal([]byte(lines[0]), &ndjsonPayload); uerr != nil {
+		t.Fatalf("ndjson line is not valid JSON: %v\nline:\n%s", uerr, lines[0])
+	}
+	if ndjsonPayload["total"] != 1.0 {
+		t.Errorf("ndjson payload total = %v, want 1", ndjsonPayload["total"])
 	}
 }
 
@@ -164,6 +226,54 @@ func TestComposioKeyShowRunE_DefaultStaysHuman(t *testing.T) {
 	}
 }
 
+// TestComposioKeyShowRunE_YAMLAndNDJSON is the flip side of
+// DefaultStaysHuman: composioKeyShowCmd routes the single
+// composioSettingsResponse struct through f.AutoHuman now, so --format
+// yaml/ndjson must carry the {configured, source, label} payload instead
+// of the prose status lines.
+func TestComposioKeyShowRunE_YAMLAndNDJSON(t *testing.T) {
+	stub := covSetupCli5(t)
+	stub.OnGet("/api/v1/integrations/composio/settings", clitest.JSONResponse(200, map[string]any{
+		"configured": true, "source": "workspace", "label": "prod",
+	}))
+
+	flagFormat = "yaml"
+	var err error
+	out := covCaptureStdoutCli5(t, func() { err = composioKeyShowCmd.RunE(composioKeyShowCmd, nil) })
+	if err != nil {
+		t.Fatalf("yaml RunE: %v", err)
+	}
+	var yamlPayload map[string]any
+	if uerr := yaml.Unmarshal([]byte(out), &yamlPayload); uerr != nil {
+		t.Fatalf("yaml stdout does not parse: %v\ngot:\n%s", uerr, out)
+	}
+	if yamlPayload == nil {
+		t.Fatalf("yaml stdout parsed to nil; got:\n%s", out)
+	}
+	if yamlPayload["source"] != "workspace" {
+		t.Errorf("yaml payload missing source=workspace: %+v", yamlPayload)
+	}
+
+	flagFormat = "ndjson"
+	out = covCaptureStdoutCli5(t, func() { err = composioKeyShowCmd.RunE(composioKeyShowCmd, nil) })
+	if err != nil {
+		t.Fatalf("ndjson RunE: %v", err)
+	}
+	// The settings response is a single struct (not a top-level slice), so
+	// NDJSON emits exactly one line for the whole object.
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("ndjson: want exactly 1 line for the settings object, got %d:\n%s", len(lines), out)
+	}
+	var ndjsonPayload map[string]any
+	if uerr := json.Unmarshal([]byte(lines[0]), &ndjsonPayload); uerr != nil {
+		t.Fatalf("ndjson line is not valid JSON: %v\nline:\n%s", uerr, lines[0])
+	}
+	if ndjsonPayload["source"] != "workspace" {
+		t.Errorf("ndjson payload missing source=workspace: %+v", ndjsonPayload)
+	}
+}
+
 func TestComposioBindingsRunE_DefaultStaysHuman(t *testing.T) {
 	stub := covSetupCli5(t)
 	// CUID-shaped id skips the /api/v1/agents slug-resolution round trip.
@@ -185,5 +295,67 @@ func TestComposioBindingsRunE_DefaultStaysHuman(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("human output missing %q; got:\n%s", want, out)
 		}
+	}
+}
+
+// TestComposioBindingsRunE_YAMLAndNDJSON is the flip side of
+// DefaultStaysHuman: composioBindingsCmd routes the single
+// composioListBindingsResponse struct through f.AutoHuman now, so --format
+// yaml/ndjson must carry the {agent_id, bindings} payload instead of the
+// rendered table.
+func TestComposioBindingsRunE_YAMLAndNDJSON(t *testing.T) {
+	stub := covSetupCli5(t)
+	const agentID = "c1111111111111111111111"
+	stub.OnGet("/api/v1/integrations/composio/agents/"+agentID+"/bind", clitest.JSONResponse(200, map[string]any{
+		"agent_id": agentID,
+		"bindings": []map[string]any{
+			{"toolkit": "gmail", "mode": "full", "user_id": "u1", "endpoint": "http://x"},
+		},
+	}))
+
+	flagFormat = "yaml"
+	var err error
+	out := covCaptureStdoutCli5(t, func() { err = composioBindingsCmd.RunE(composioBindingsCmd, []string{agentID}) })
+	if err != nil {
+		t.Fatalf("yaml RunE: %v", err)
+	}
+	var yamlPayload map[string]any
+	if uerr := yaml.Unmarshal([]byte(out), &yamlPayload); uerr != nil {
+		t.Fatalf("yaml stdout does not parse: %v\ngot:\n%s", uerr, out)
+	}
+	if yamlPayload == nil {
+		t.Fatalf("yaml stdout parsed to nil; got:\n%s", out)
+	}
+	bindings, ok := yamlPayload["bindings"].([]any)
+	if !ok || len(bindings) != 1 {
+		t.Fatalf("yaml payload missing 1 binding: %+v", yamlPayload)
+	}
+	binding, ok := bindings[0].(map[string]any)
+	if !ok || binding["toolkit"] != "gmail" {
+		t.Errorf("yaml binding mismatch: %+v", bindings[0])
+	}
+
+	flagFormat = "ndjson"
+	out = covCaptureStdoutCli5(t, func() { err = composioBindingsCmd.RunE(composioBindingsCmd, []string{agentID}) })
+	if err != nil {
+		t.Fatalf("ndjson RunE: %v", err)
+	}
+	// The bindings response is a single struct (not a top-level slice), so
+	// NDJSON emits exactly one line for the whole object.
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("ndjson: want exactly 1 line for the bindings object, got %d:\n%s", len(lines), out)
+	}
+	var ndjsonPayload map[string]any
+	if uerr := json.Unmarshal([]byte(lines[0]), &ndjsonPayload); uerr != nil {
+		t.Fatalf("ndjson line is not valid JSON: %v\nline:\n%s", uerr, lines[0])
+	}
+	ndBindings, ok := ndjsonPayload["bindings"].([]any)
+	if !ok || len(ndBindings) != 1 {
+		t.Fatalf("ndjson payload missing 1 binding: %+v", ndjsonPayload)
+	}
+	ndBinding, ok := ndBindings[0].(map[string]any)
+	if !ok || ndBinding["toolkit"] != "gmail" {
+		t.Errorf("ndjson binding mismatch: %+v", ndBindings[0])
 	}
 }
