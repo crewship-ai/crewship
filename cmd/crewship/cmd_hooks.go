@@ -85,32 +85,26 @@ var hooksListCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(body.Rows)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(body.Rows)
-		}
-
-		if len(body.Rows) == 0 {
-			fmt.Println("(no hooks registered)")
-			return nil
-		}
-		header := []string{"ID", "EVENT", "HANDLER", "TARGET", "ENABLED", "CREATED"}
-		rows := make([][]string, 0, len(body.Rows))
-		for _, r := range body.Rows {
-			enabled := "no"
-			if r.Enabled {
-				enabled = "yes"
+		return f.AutoHuman(body.Rows, func() {
+			if len(body.Rows) == 0 {
+				fmt.Println("(no hooks registered)")
+				return
 			}
-			target := r.Target
-			if len(target) > 40 {
-				target = target[:37] + "…"
+			header := []string{"ID", "EVENT", "HANDLER", "TARGET", "ENABLED", "CREATED"}
+			rows := make([][]string, 0, len(body.Rows))
+			for _, r := range body.Rows {
+				enabled := "no"
+				if r.Enabled {
+					enabled = "yes"
+				}
+				target := r.Target
+				if len(target) > 40 {
+					target = target[:37] + "…"
+				}
+				rows = append(rows, []string{r.ID, r.Event, r.HandlerKind, target, enabled, r.CreatedAt})
 			}
-			rows = append(rows, []string{r.ID, r.Event, r.HandlerKind, target, enabled, r.CreatedAt})
-		}
-		f.Table(header, rows)
-		return nil
+			f.Table(header, rows)
+		})
 	},
 }
 
