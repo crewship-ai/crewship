@@ -168,16 +168,16 @@ var crewStandupCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(result)
-		}
-		// Standup returns a text summary
-		if text, ok := result["standup"].(string); ok {
-			fmt.Println(text)
-		} else {
-			return f.JSON(result)
-		}
-		return nil
+		return f.AutoHuman(result, func() {
+			// Standup returns a text summary; fall back to a JSON dump
+			// when the expected text field is absent so the operator
+			// still gets something actionable.
+			if text, ok := result["standup"].(string); ok {
+				fmt.Println(text)
+			} else {
+				_ = f.JSON(result)
+			}
+		})
 	},
 }
 

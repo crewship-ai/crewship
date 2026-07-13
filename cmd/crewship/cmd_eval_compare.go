@@ -98,26 +98,21 @@ func runEvalCompare(cmd *cobra.Command, args []string) error {
 	}
 
 	f := newFormatter()
-	if f.Format == "json" {
-		return f.JSON(map[string]any{
-			"scenario":  slug,
-			"side_a":    a,
-			"side_b":    b,
-			"agreement": semanticAgreementVerdict(a, b),
-		})
-	}
-	if f.Format == "yaml" {
-		return f.YAML(map[string]any{
-			"scenario":  slug,
-			"side_a":    a,
-			"side_b":    b,
-			"agreement": semanticAgreementVerdict(a, b),
-		})
-	}
-	if f.Format == "markdown" {
-		return printCompareMarkdown(cmd, slug, a, b)
-	}
-	return printCompareTable(cmd, slug, a, b)
+	return f.AutoHuman(map[string]any{
+		"scenario":  slug,
+		"side_a":    a,
+		"side_b":    b,
+		"agreement": semanticAgreementVerdict(a, b),
+	}, func() {
+		// markdown is a human-facing format (PR-pasteable), not a
+		// machine one — it stays in the AutoHuman fallback alongside
+		// the default table. Both renderers only ever return nil.
+		if f.Format == "markdown" {
+			_ = printCompareMarkdown(cmd, slug, a, b)
+			return
+		}
+		_ = printCompareTable(cmd, slug, a, b)
+	})
 }
 
 // runOneSide fires one /run with the supplied tier and shapes the

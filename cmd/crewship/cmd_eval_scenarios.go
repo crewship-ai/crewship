@@ -280,42 +280,35 @@ func renderEvalReport(cmd *cobra.Command, outcomes []scenarioOutcome, scenarios,
 	matrix := aggregateMatrix(outcomes, scenarios, tiers)
 
 	f := newFormatter()
-	if f.Format == "json" {
-		return f.JSON(map[string]any{
-			"scenarios": scenarios,
-			"tiers":     tiers,
-			"matrix":    nestedMatrix(matrix, scenarios, tiers),
-			"outcomes":  outcomes,
-			"generated": time.Now().UTC().Format(time.RFC3339),
-		})
+	// One machine payload for every non-human format (json/yaml/ndjson).
+	// yaml previously omitted `generated`; folding into AutoHuman gives
+	// all three formats the same, more complete document.
+	report := map[string]any{
+		"scenarios": scenarios,
+		"tiers":     tiers,
+		"matrix":    nestedMatrix(matrix, scenarios, tiers),
+		"outcomes":  outcomes,
+		"generated": time.Now().UTC().Format(time.RFC3339),
 	}
-	if f.Format == "yaml" {
-		return f.YAML(map[string]any{
-			"scenarios": scenarios,
-			"tiers":     tiers,
-			"matrix":    nestedMatrix(matrix, scenarios, tiers),
-			"outcomes":  outcomes,
-		})
-	}
-
-	if f.Format == "markdown" {
-		printMarkdownReport(cmd, scenarios, tiers, matrix)
-		return nil
-	}
-
-	// Default table view.
-	header := append([]string{"SCENARIO"}, prettyTierNames(tiers)...)
-	rows := make([][]string, 0, len(scenarios))
-	for _, slug := range scenarios {
-		row := []string{slug}
-		for _, tier := range tiers {
-			cell := matrix[matrixKey(slug, tier)]
-			row = append(row, fmt.Sprintf("%d/%d  $%.4f", cell.Pass, cell.Total, cell.AvgCost))
+	return f.AutoHuman(report, func() {
+		if f.Format == "markdown" {
+			printMarkdownReport(cmd, scenarios, tiers, matrix)
+			return
 		}
-		rows = append(rows, row)
-	}
-	f.Table(header, rows)
-	return nil
+
+		// Default table view.
+		header := append([]string{"SCENARIO"}, prettyTierNames(tiers)...)
+		rows := make([][]string, 0, len(scenarios))
+		for _, slug := range scenarios {
+			row := []string{slug}
+			for _, tier := range tiers {
+				cell := matrix[matrixKey(slug, tier)]
+				row = append(row, fmt.Sprintf("%d/%d  $%.4f", cell.Pass, cell.Total, cell.AvgCost))
+			}
+			rows = append(rows, row)
+		}
+		f.Table(header, rows)
+	})
 }
 
 // aggregateMatrix turns the flat outcomes slice into a (slug,

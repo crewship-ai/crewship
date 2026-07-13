@@ -81,22 +81,16 @@ var consolidateRunCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(out)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(out)
-		}
-
-		switch {
-		case out.Triggered:
-			fmt.Printf("Consolidation triggered (worker_id=%s)\n", out.WorkerID)
-		case out.Accepted:
-			fmt.Printf("Accepted, but skipped: %s\n", out.Note)
-		default:
-			fmt.Println("Consolidation request submitted.")
-		}
-		return nil
+		return f.AutoHuman(out, func() {
+			switch {
+			case out.Triggered:
+				fmt.Printf("Consolidation triggered (worker_id=%s)\n", out.WorkerID)
+			case out.Accepted:
+				fmt.Printf("Accepted, but skipped: %s\n", out.Note)
+			default:
+				fmt.Println("Consolidation request submitted.")
+			}
+		})
 	},
 }
 

@@ -132,15 +132,13 @@ var agentLogsCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(result)
-		}
-		if logs, ok := result["logs"].(string); ok {
-			fmt.Print(logs)
-		} else {
-			fmt.Println("No logs available.")
-		}
-		return nil
+		return f.AutoHuman(result, func() {
+			if logs, ok := result["logs"].(string); ok {
+				fmt.Print(logs)
+			} else {
+				fmt.Println("No logs available.")
+			}
+		})
 	},
 }
 
@@ -176,7 +174,7 @@ var agentDebugCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		return f.JSON(result)
+		return f.Machine(result)
 	},
 }
 

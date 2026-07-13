@@ -624,7 +624,10 @@ func runCheckLocalModelEndpoint(ctx context.Context) checkResult {
 // aren't universal). A successful TCP connect is enough to distinguish
 // "server is down / wrong port" from "auth issue".
 func checkServerReachable(ctx context.Context) checkResult {
-	server := cli.ResolveServer(flagServer, cliCfg)
+	// EffectiveServer (flag > profile > env > cfg) — probe the host commands
+	// actually dial, not env>cfg, so the reachability check reflects the active
+	// profile. (#1003)
+	server := cli.EffectiveServer(flagServer, flagProfile, cliCfg)
 	u, err := url.Parse(server)
 	if err != nil {
 		return checkResult{
