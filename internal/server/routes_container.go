@@ -30,9 +30,22 @@ func (s *Server) handleContainerStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status, err := s.container.ContainerStatus(r.Context(), id)
+	// Resolve the crew slug → container name before inspecting. The provider
+	// keys on the container name (Docker inspect needs the name/hash, not the
+	// crew ID), so passing the raw id here silently reports "unknown" for a
+	// running crew. Mirrors handleContainerStop; falls back to the raw id for
+	// providers/tests that key on it directly.
+	containerName := id
+	if s.db != nil {
+		var slug string
+		if err := s.db.QueryRowContext(r.Context(), "SELECT slug FROM crews WHERE id = ?", id).Scan(&slug); err == nil && slug != "" {
+			containerName = s.container.CrewContainerName(id, slug)
+		}
+	}
+
+	status, err := s.container.ContainerStatus(r.Context(), containerName)
 	if err != nil {
-		s.logger.Error("container status failed", "crew_id", id, "error", err)
+		s.logger.Error("container status failed", "crew_id", id, "container", containerName, "error", err)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": id, "status": "unknown"})
 		return
 	}
