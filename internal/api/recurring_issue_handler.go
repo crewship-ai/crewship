@@ -353,7 +353,7 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		       ri.cron_expression, ri.enabled, ri.next_run, ri.last_run,
 		       ri.run_count, ri.created_at
 		FROM recurring_issues ri
-		LEFT JOIN crews c ON ri.crew_id = c.id
+		LEFT JOIN crews c ON ri.crew_id = c.id AND c.workspace_id = ri.workspace_id
 		WHERE ri.id = ?`, riID).Scan(
 		&ri.ID, &ri.CrewID, &ri.CrewName, &ri.Title, &ri.Description,
 		&ri.Priority, &ri.ProjectID, &ri.MilestoneID,

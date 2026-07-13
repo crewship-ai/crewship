@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -328,6 +329,47 @@ func TestCovMRTRecurringUpdate_ForeignCrew_400(t *testing.T) {
 	h.Update(uRR, uReq)
 	if uRR.Code != http.StatusBadRequest {
 		t.Fatalf("foreign-workspace crew reassignment must 400, got %d: %s", uRR.Code, uRR.Body.String())
+	}
+}
+
+// #1065 self-review [1]: the Update return-record query joined crews without a
+// workspace scope, so a recurring issue already carrying a foreign crew_id
+// (e.g. persisted before the write-path guard) would leak that crew's name in
+// the PATCH response even for a title-only edit.
+func TestCovMRTRecurringUpdate_ForeignCrewNameNotLeaked(t *testing.T) {
+	h, userID, wsID, crewID := covMRTRecurringHandler(t)
+	db := h.db
+
+	otherWS := generateCUID()
+	execOrFatal(t, db, `INSERT INTO workspaces (id, name, slug) VALUES (?, 'Other', ?)`, otherWS, "other-"+otherWS)
+	otherCrew := generateCUID()
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'SecretCrewName', 'secret')`, otherCrew, otherWS)
+
+	cReq := httptest.NewRequest("POST", "/", bytes.NewBufferString(
+		`{"crew_id":"`+crewID+`","title":"x","cron_expression":"0 9 * * *"}`))
+	cReq = withWorkspaceUser(cReq, userID, wsID, "OWNER")
+	cRR := httptest.NewRecorder()
+	h.Create(cRR, cReq)
+	if cRR.Code != http.StatusCreated {
+		t.Fatalf("create: %d body=%s", cRR.Code, cRR.Body.String())
+	}
+	var resp recurringIssueResponse
+	mustUnmarshal(t, cRR, &resp)
+
+	// Plant the foreign crew_id directly (simulating a pre-guard bad row).
+	execOrFatal(t, db, `UPDATE recurring_issues SET crew_id = ? WHERE id = ?`, otherCrew, resp.ID)
+
+	// Title-only PATCH (crew_id nil → write guard skipped).
+	uReq := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{"title":"renamed"}`))
+	uReq.SetPathValue("recurringId", resp.ID)
+	uReq = withWorkspaceUser(uReq, userID, wsID, "OWNER")
+	uRR := httptest.NewRecorder()
+	h.Update(uRR, uReq)
+	if uRR.Code != http.StatusOK {
+		t.Fatalf("update: %d body=%s", uRR.Code, uRR.Body.String())
+	}
+	if strings.Contains(uRR.Body.String(), "SecretCrewName") {
+		t.Errorf("foreign crew name leaked in Update response: %s", uRR.Body.String())
 	}
 }
 

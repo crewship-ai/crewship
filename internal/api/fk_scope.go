@@ -14,14 +14,16 @@ var errFKNotInWorkspace = errors.New("foreign key not found in workspace")
 // fkScopeTables is the closed set of tables assertFKInWorkspace will probe.
 // Restricting to a constant allowlist keeps the table-name interpolation below
 // provably free of any user-controlled identifier (the SQL text is built only
-// from these literals + parameterized id/workspace_id). Every entry has both a
-// workspace_id and a deleted_at column (soft-delete convention).
+// from these literals + parameterized id/workspace_id). ONLY tables that have
+// BOTH a workspace_id and a deleted_at column belong here, because the query is
+// hardcoded with `AND workspace_id = ? AND deleted_at IS NULL`. agents and
+// crews qualify; projects/labels are workspace-scoped but have no deleted_at,
+// and milestones are project-scoped (no workspace_id) — validating those needs
+// a different query shape, so they are deliberately NOT listed (a call for them
+// returns the unsupported-table error rather than a silent 500).
 var fkScopeTables = map[string]struct{}{
-	"agents":     {},
-	"crews":      {},
-	"labels":     {},
-	"projects":   {},
-	"milestones": {},
+	"agents": {},
+	"crews":  {},
 }
 
 // assertFKInWorkspace verifies that row `id` in `table` exists, is not
