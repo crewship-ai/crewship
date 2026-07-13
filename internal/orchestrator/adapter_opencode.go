@@ -42,9 +42,14 @@ func (opencodeAdapter) PromptViaStdin(req AgentRunRequest) bool { return false }
 func (opencodeAdapter) BuildCommand(req AgentRunRequest) []string {
 	cmd := []string{"opencode", "run", "--format", "json"}
 	if req.LLMModel != "" {
-		// LLMModel may already be in "provider/model" form; if not, opencode
-		// errors out with a clear message — better than us guessing the prefix.
-		cmd = append(cmd, "--model", req.LLMModel)
+		// OpenCode BYOKs across providers, so --model MUST be in
+		// "provider/model" form. A bare model (e.g. "claude-sonnet-4-6")
+		// is unroutable and opencode dies before its first LLM call with an
+		// opaque UnknownError (#1007, reproduced live on dev2). Qualify it
+		// with the agent's declared provider when the model doesn't already
+		// carry a provider segment. Unknown/empty provider → pass through
+		// unchanged (the parser now surfaces opencode's error either way).
+		cmd = append(cmd, "--model", qualifyOpenCodeModel(req.LLMProvider, req.LLMModel))
 	}
 	// Turn-1 parity: OpenCode reads AGENTS.md between invocations but the
 	// first user message in a fresh container has no system context. Prepend
@@ -63,6 +68,70 @@ func (opencodeAdapter) BuildCommand(req AgentRunRequest) []string {
 // UseStreamJSON returns true: --format json emits JSONL and
 // parseOpenCodeStreamJSON consumes one event envelope per line.
 func (opencodeAdapter) UseStreamJSON() bool { return true }
+
+// openCodeProviderIDs maps Crewship's llm_provider enum to the provider id
+// OpenCode expects as the first "provider/model" segment (models.dev / AI-SDK
+// naming). Only providers Crewship can assign to an OPENCODE agent are listed;
+// anything else falls through to "pass model unchanged" so we never fabricate a
+// provider we can't stand behind. OLLAMA is included for completeness but its
+// models already arrive as "ollama/…" via localModelPrefix, so the has-slash
+// guard in qualifyOpenCodeModel short-circuits before we consult this map.
+var openCodeProviderIDs = map[string]string{
+	"ANTHROPIC": "anthropic",
+	"OPENAI":    "openai",
+	"GOOGLE":    "google",
+	"OLLAMA":    "ollama",
+}
+
+// modelNameProviderID infers the OpenCode provider id from a bare model name's
+// well-known prefix. This is AUTHORITATIVE over the agent's configured provider
+// because the model can be overridden per call — a pipeline step tier override
+// or CREWSHIP_SUBAGENT_MODEL can name a bare model belonging to a DIFFERENT
+// provider than the agent's static llm_provider. Pairing the override model
+// with the static provider would mis-stamp it (e.g. "anthropic/gpt-4o-mini")
+// and misroute the run — the exact opaque failure #1007 set out to kill. The
+// provider must follow the model. Returns "" when the name reveals nothing.
+func modelNameProviderID(model string) string {
+	m := strings.ToLower(model)
+	switch {
+	case strings.HasPrefix(m, "claude-"),
+		strings.Contains(m, "sonnet"),
+		strings.Contains(m, "haiku"),
+		strings.Contains(m, "opus"):
+		return "anthropic"
+	case strings.HasPrefix(m, "gpt-"),
+		strings.HasPrefix(m, "chatgpt"),
+		strings.HasPrefix(m, "o1"),
+		strings.HasPrefix(m, "o3"),
+		strings.HasPrefix(m, "o4"):
+		return "openai"
+	case strings.HasPrefix(m, "gemini-"):
+		return "google"
+	case strings.HasPrefix(m, "grok-"):
+		return "xai"
+	}
+	return ""
+}
+
+// qualifyOpenCodeModel returns model in OpenCode's required "provider/model"
+// form. A model that already carries a "/" segment is returned untouched (it is
+// either already qualified or an "ollama/…" local model). For a bare model we
+// prefer the provider the MODEL NAME implies (correct for cross-provider
+// per-call overrides), and fall back to the agent's configured provider only
+// when the name reveals nothing. An empty/unknown provider yields the bare
+// model unchanged rather than a guess.
+func qualifyOpenCodeModel(provider, model string) string {
+	if model == "" || strings.Contains(model, "/") {
+		return model
+	}
+	if id := modelNameProviderID(model); id != "" {
+		return id + "/" + model
+	}
+	if id, ok := openCodeProviderIDs[strings.ToUpper(strings.TrimSpace(provider))]; ok {
+		return id + "/" + model
+	}
+	return model
+}
 
 func (opencodeAdapter) ParseStreamLine(line []byte, handler EventHandler) {
 	parseOpenCodeStreamJSON(line, handler)

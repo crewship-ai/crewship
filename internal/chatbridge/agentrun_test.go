@@ -18,6 +18,7 @@ func TestChatInfoToAgentRunRequest_CarriesAllFields(t *testing.T) {
 		CrewSlug:       "ops",
 		WorkspaceID:    "ws-1",
 		CLIAdapter:     "CLAUDE_CODE",
+		LLMProvider:    "ANTHROPIC",
 		SystemPrompt:   "you are eva",
 		ToolProfile:    "CODING",
 		TimeoutSecs:    111,
@@ -55,6 +56,12 @@ func TestChatInfoToAgentRunRequest_CarriesAllFields(t *testing.T) {
 	}
 	if req.LLMModel != "claude-x" {
 		t.Errorf("LLMModel = %q, want claude-x", req.LLMModel)
+	}
+	// #1090 review [3]: LLMProvider must be carried from ChatInfo — the
+	// OPENCODE adapter needs it to qualify a bare model, and dropping this
+	// mapping would silently regress the #1007 fix.
+	if req.LLMProvider != "ANTHROPIC" {
+		t.Errorf("LLMProvider = %q, want ANTHROPIC (dropped ChatInfo→req mapping regresses #1007)", req.LLMProvider)
 	}
 	if req.TimeoutSecs != 300 {
 		t.Errorf("TimeoutSecs = %d, want 300", req.TimeoutSecs)

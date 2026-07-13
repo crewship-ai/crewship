@@ -21,17 +21,23 @@ var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 // AgentRunRequest describes everything needed to execute an agent run inside
 // a container, including identity, credentials, prompts, and resource limits.
 type AgentRunRequest struct {
-	AgentID      string
-	AgentSlug    string
-	AgentRole    string // AGENT, LEAD
-	CrewID       string
-	CrewSlug     string
-	ChatID       string
-	MissionID    string // mission this run belongs to; threaded into every journal emit so Cartographer checkpoints can anchor on per-mission journal cursors.
-	WorkspaceID  string
-	ContainerID  string
-	CLIAdapter   string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, FACTORY_DROID
-	LLMModel     string // optional model override (e.g. claude-haiku-4-5-20251001)
+	AgentID     string
+	AgentSlug   string
+	AgentRole   string // AGENT, LEAD
+	CrewID      string
+	CrewSlug    string
+	ChatID      string
+	MissionID   string // mission this run belongs to; threaded into every journal emit so Cartographer checkpoints can anchor on per-mission journal cursors.
+	WorkspaceID string
+	ContainerID string
+	CLIAdapter  string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, FACTORY_DROID
+	LLMModel    string // optional model override (e.g. claude-haiku-4-5-20251001)
+	// LLMProvider is the agent's configured provider (ANTHROPIC, OPENAI,
+	// GOOGLE, OLLAMA, …). Used by the OPENCODE adapter to qualify a bare
+	// model name into OpenCode's required "provider/model" form (#1007);
+	// other adapters ignore it. Empty for dispatch paths that never set a
+	// provider — the adapter then passes the model through unchanged.
+	LLMProvider  string
 	SystemPrompt string
 	UserMessage  string
 	ToolProfile  string // MINIMAL, CODING, FULL

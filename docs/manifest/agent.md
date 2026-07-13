@@ -177,14 +177,27 @@ How each manifest field maps onto the create/update request body and binding cal
 | `spec.role_title` | `role_title` | |
 | `spec.agent_role` | `agent_role` | |
 | `spec.cli_adapter` | `cli_adapter` | |
-| `spec.llm.provider` | `llm_provider` | Omitted when `NONE`. |
-| `spec.llm.model` | `llm_model` | |
+| `spec.llm.provider` | `llm_provider` | Omitted when `NONE`. For `OPENCODE` agents the provider also qualifies a bare model — see below. |
+| `spec.llm.model` | `llm_model` | For `OPENCODE`, may be a bare model (`claude-sonnet-4-6`) or an explicit `provider/model` (`anthropic/claude-sonnet-4-6`). See below. |
 | `spec.tool_profile` | `tool_profile` | |
 | `spec.timeout_seconds` | `timeout_seconds` | Sent explicitly (default 1800) so the round-trip diff is stable. |
 | `spec.memory_enabled` | `memory_enabled` | Sent explicitly (default true). |
 | `spec.prompt` | `system_prompt` | |
 | `spec.skills[]` | `skill_id` | One `POST .../skills` per entry. |
 | `spec.env_refs[]` | `credential_id` + `env_var_name` | One `POST .../credentials` per entry. |
+
+### OpenCode model routing
+
+OpenCode is BYOK across providers, so its `--model` value must be in
+`provider/model` form. Crewship qualifies it for you: when an `OPENCODE`
+agent's `llm_model` has no `provider/` segment (e.g. `claude-sonnet-4-6`),
+the agent's `llm_provider` is prepended automatically — `ANTHROPIC` →
+`anthropic/claude-sonnet-4-6`, `OPENAI` → `openai/…`, `GOOGLE` → `google/…`.
+
+You can still pin the fully-qualified form yourself (`anthropic/claude-sonnet-4-6`),
+which is passed through untouched, as are local-model ids (`ollama/…`). If the
+provider is unset or unrecognized, the bare model is passed through unchanged
+and OpenCode surfaces its own routing error in the run journal.
 
 Endpoints used:
 

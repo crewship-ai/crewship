@@ -52,6 +52,7 @@ type chatResolveResponse struct {
 	ContainerID           string                   `json:"container_id"`
 	CLIAdapter            string                   `json:"cli_adapter"`
 	LLMModel              string                   `json:"llm_model"`
+	LLMProvider           string                   `json:"llm_provider"`
 	SystemPrompt          string                   `json:"system_prompt"`
 	ToolProfile           string                   `json:"tool_profile"`
 	Credentials           []credentialResponse     `json:"credentials"`
@@ -509,6 +510,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		ContainerID:           data.ContainerID,
 		CLIAdapter:            data.CLIAdapter,
 		LLMModel:              data.LLMModel,
+		LLMProvider:           data.LLMProvider,
 		SystemPrompt:          data.SystemPrompt,
 		ToolProfile:           data.ToolProfile,
 		Credentials:           creds,
