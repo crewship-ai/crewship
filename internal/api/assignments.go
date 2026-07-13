@@ -141,11 +141,16 @@ type targetAgentInfo struct {
 // loadAgentCredentials queries and decrypts all credentials for an agent.
 
 func (h *AssignmentHandler) loadAgentCredentials(ctx context.Context, agentID string) ([]orchestrator.Credential, error) {
+	// status='ACTIVE' is load-bearing (#1051), mirroring resolveAgentCredentials
+	// in agent_config.go: PENDING rows (manifest slots, OAuth mid-handshake,
+	// rotation in progress) carry sentinel encrypted bodies. Without this filter
+	// the delegation/hire loader would decrypt and inject "pending_manifest" /
+	// "pending_oauth" as a real env value at the sub-agent boundary.
 	rows, err := h.db.QueryContext(ctx, `
 		SELECT ac.credential_id, ac.env_var_name, ac.priority, c.encrypted_value, c.type
 		FROM agent_credentials ac
 		JOIN credentials c ON c.id = ac.credential_id
-		WHERE ac.agent_id = ? AND c.deleted_at IS NULL
+		WHERE ac.agent_id = ? AND c.deleted_at IS NULL AND c.status = 'ACTIVE'
 		ORDER BY ac.priority ASC
 	`, agentID)
 	if err != nil {
@@ -163,6 +168,11 @@ func (h *AssignmentHandler) loadAgentCredentials(ctx context.Context, agentID st
 		dec, err := encryption.Decrypt(encValue)
 		if err != nil {
 			h.logger.Error("decrypt credential", "id", c.ID, "error", err)
+			continue
+		}
+		// Defence in depth: a future code path that decrypts a row the SQL
+		// filter missed must not leak a sentinel placeholder to the agent.
+		if isPendingSentinel(dec) {
 			continue
 		}
 		c.PlainValue = dec
