@@ -92,24 +92,18 @@ Examples:
 		}
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(body.Entries)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(body.Entries)
-		}
+		return f.AutoHuman(body.Entries, func() {
+			if len(body.Entries) == 0 {
+				fmt.Printf("%sNo matches.%s\n", cli.Dim, cli.Reset)
+				return
+			}
 
-		if len(body.Entries) == 0 {
-			fmt.Printf("%sNo matches.%s\n", cli.Dim, cli.Reset)
-			return nil
-		}
-
-		fmt.Printf("%s%d match%s for %q%s\n\n",
-			cli.Bold, len(body.Entries), pluralize(len(body.Entries)), query, cli.Reset)
-		for _, e := range body.Entries {
-			printRecallEntry(e, query)
-		}
-		return nil
+			fmt.Printf("%s%d match%s for %q%s\n\n",
+				cli.Bold, len(body.Entries), pluralize(len(body.Entries)), query, cli.Reset)
+			for _, e := range body.Entries {
+				printRecallEntry(e, query)
+			}
+		})
 	},
 }
 

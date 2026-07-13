@@ -115,68 +115,62 @@ Examples:
 		}
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(filtered)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(filtered)
-		}
+		return f.AutoHuman(filtered, func() {
+			if len(filtered) == 0 {
+				fmt.Printf("%sNo runs.%s\n", cli.Dim, cli.Reset)
+				return
+			}
 
-		if len(filtered) == 0 {
-			fmt.Printf("%sNo runs.%s\n", cli.Dim, cli.Reset)
-			return nil
-		}
-
-		// Optional prompt preview pass — N parallel GETs to /chats/{id}/messages
-		// with bounded concurrency. Sequential was tolerable for ~20 runs but
-		// became visibly slow past 50; 4-way concurrency gives a 4× speedup
-		// without flooding the chat API. Failures are silent — a missing
-		// preview is better than a broken history listing.
-		previews := map[string]string{}
-		if withPrompts {
-			pairs := make([]runChatRef, 0, len(filtered))
-			for _, r := range filtered {
-				if r.ChatID == nil || *r.ChatID == "" {
-					continue
+			// Optional prompt preview pass — N parallel GETs to /chats/{id}/messages
+			// with bounded concurrency. Sequential was tolerable for ~20 runs but
+			// became visibly slow past 50; 4-way concurrency gives a 4× speedup
+			// without flooding the chat API. Failures are silent — a missing
+			// preview is better than a broken history listing.
+			previews := map[string]string{}
+			if withPrompts {
+				pairs := make([]runChatRef, 0, len(filtered))
+				for _, r := range filtered {
+					if r.ChatID == nil || *r.ChatID == "" {
+						continue
+					}
+					pairs = append(pairs, runChatRef{RunID: r.ID, ChatID: *r.ChatID})
 				}
-				pairs = append(pairs, runChatRef{RunID: r.ID, ChatID: *r.ChatID})
-			}
-			previews = fetchPromptsParallel(client, pairs, 4)
-		}
-
-		for _, r := range filtered {
-			ts := r.CreatedAt
-			if t, err := time.Parse(time.RFC3339, r.CreatedAt); err == nil {
-				ts = t.Format("2006-01-02 15:04")
-			}
-			slug := "?"
-			if r.AgentSlug != nil {
-				slug = *r.AgentSlug
-			} else if r.AgentName != nil {
-				slug = *r.AgentName
-			}
-			statusColor := cli.Gray
-			switch r.Status {
-			case "completed", "succeeded":
-				statusColor = cli.Green
-			case "failed", "error":
-				statusColor = cli.Red
-			case "running":
-				statusColor = cli.Yellow
+				previews = fetchPromptsParallel(client, pairs, 4)
 			}
 
-			fmt.Printf("%s%s%s  %s%-18s%s  %s%-10s%s  %-6s",
-				cli.Dim, ts, cli.Reset,
-				cli.Bold, truncateString(slug, 18), cli.Reset,
-				statusColor, r.Status, cli.Reset,
-				r.TriggerType)
+			for _, r := range filtered {
+				ts := r.CreatedAt
+				if t, err := time.Parse(time.RFC3339, r.CreatedAt); err == nil {
+					ts = t.Format("2006-01-02 15:04")
+				}
+				slug := "?"
+				if r.AgentSlug != nil {
+					slug = *r.AgentSlug
+				} else if r.AgentName != nil {
+					slug = *r.AgentName
+				}
+				statusColor := cli.Gray
+				switch r.Status {
+				case "completed", "succeeded":
+					statusColor = cli.Green
+				case "failed", "error":
+					statusColor = cli.Red
+				case "running":
+					statusColor = cli.Yellow
+				}
 
-			if preview, ok := previews[r.ID]; ok {
-				fmt.Printf("  %q", truncateString(firstLine(preview), 60))
+				fmt.Printf("%s%s%s  %s%-18s%s  %s%-10s%s  %-6s",
+					cli.Dim, ts, cli.Reset,
+					cli.Bold, truncateString(slug, 18), cli.Reset,
+					statusColor, r.Status, cli.Reset,
+					r.TriggerType)
+
+				if preview, ok := previews[r.ID]; ok {
+					fmt.Printf("  %q", truncateString(firstLine(preview), 60))
+				}
+				fmt.Println()
 			}
-			fmt.Println()
-		}
-		return nil
+		})
 	},
 }
 

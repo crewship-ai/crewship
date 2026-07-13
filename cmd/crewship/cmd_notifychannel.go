@@ -139,21 +139,16 @@ var notifyChannelAddCmd = &cobra.Command{
 			return err
 		}
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(created)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(created)
-		}
-		cli.PrintSuccess(fmt.Sprintf("Notification channel created: %s (%s)", created.ID, created.Type))
-		if len(created.Events) > 0 {
-			fmt.Printf("Notifies on: %s\n", strings.Join(created.Events, ", "))
-		}
-		if created.Secret != "" {
-			fmt.Printf("\nWebhook signing secret (shown once — store it now):\n  %s\n", created.Secret)
-			fmt.Println("\nVerify inbound requests: X-Crewship-Signature = \"sha256=\" + HMAC_SHA256(body, secret)")
-		}
-		return nil
+		return f.AutoHuman(created, func() {
+			cli.PrintSuccess(fmt.Sprintf("Notification channel created: %s (%s)", created.ID, created.Type))
+			if len(created.Events) > 0 {
+				fmt.Printf("Notifies on: %s\n", strings.Join(created.Events, ", "))
+			}
+			if created.Secret != "" {
+				fmt.Printf("\nWebhook signing secret (shown once — store it now):\n  %s\n", created.Secret)
+				fmt.Println("\nVerify inbound requests: X-Crewship-Signature = \"sha256=\" + HMAC_SHA256(body, secret)")
+			}
+		})
 	},
 }
 
