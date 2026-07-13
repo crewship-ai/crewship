@@ -53,7 +53,9 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// open intentionally does NOT requireAuth — we're just resolving a URL.
 		// The browser will prompt for login if the user isn't already.
-		base := cli.ResolveServer(flagServer, cliCfg)
+		// EffectiveServer (flag > profile > env > cfg) so the browser opens the
+		// same host commands target under an active --profile. (#1003)
+		base := cli.EffectiveServer(flagServer, flagProfile, cliCfg)
 		u, err := buildOpenURL(base, args)
 		if err != nil {
 			return err

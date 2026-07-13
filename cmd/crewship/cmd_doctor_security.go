@@ -31,8 +31,10 @@ import (
 //    specifically. A 0644 cli-config.yaml on a multi-tenant host
 //    leaks the token to any local user.
 
-// checkCLIConfigServerScheme reads the persisted CLI config and
-// classifies the configured server URL by scheme:
+// checkCLIConfigServerScheme classifies an already-resolved server URL by
+// scheme. The caller (runCheckCLIConfigServerScheme) resolves the effective
+// server — flag > profile > env > cfg — so the audit reflects the host the
+// CLI actually dials; this helper stays a pure, env-independent classifier:
 //
 //   - HTTPS                                → PASS
 //   - HTTP against localhost/127/[::1]     → PASS (loopback is fine)
@@ -46,15 +48,15 @@ import (
 // surfaces as a connection error at the first real request. Doctor's
 // job here is the categorical "are you yelling the token over
 // cleartext" check; cert validation is downstream.
-func checkCLIConfigServerScheme(cfg *cli.CLIConfig) checkResult {
-	if cfg == nil || strings.TrimSpace(cfg.Server) == "" {
+func checkCLIConfigServerScheme(server string) checkResult {
+	raw := strings.TrimSpace(server)
+	if raw == "" {
 		return checkResult{
 			name:   "cli server scheme",
 			status: "INFO",
 			detail: "no server configured (run 'crewship login --server …')",
 		}
 	}
-	raw := strings.TrimSpace(cfg.Server)
 	u, err := url.Parse(raw)
 	if err != nil {
 		return checkResult{
@@ -236,5 +238,10 @@ func runCheckCLIConfigServerScheme() checkResult {
 			detail: fmt.Sprintf("load cli config: %v", err),
 		}
 	}
-	return checkCLIConfigServerScheme(cfg)
+	// Resolve the server the CLI will ACTUALLY dial (flag > profile > env >
+	// cfg), not the raw top-level cfg.Server. Otherwise the audit reported
+	// "no server configured" whenever only a --profile / CREWSHIP_PROFILE was
+	// active (its server lives under Servers[name], not cfg.Server) even though
+	// every command worked. (#1003)
+	return checkCLIConfigServerScheme(cli.EffectiveServer(flagServer, flagProfile, cfg))
 }
