@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
+	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -198,7 +199,17 @@ func (h *WebhookHandler) lookupSecret(ctx context.Context, crewID, agentID strin
 	if !secret.Valid || secret.String == "" {
 		return "", fmt.Errorf("webhook secret not configured for agent %s", agentID)
 	}
-	return secret.String, nil
+	// #1072/#1029: the stored value is AES-256-GCM encrypted at rest when a key
+	// is configured. Decrypt an enveloped value; a bare value (legacy/key-less)
+	// passes through. A decrypt error is logged but the raw value is returned —
+	// a wrong secret simply fails the HMAC comparison, so this never grants
+	// access.
+	plain, decErr := encryption.DecryptIfEncrypted(secret.String)
+	if decErr != nil {
+		h.logger.Warn("webhook secret decrypt failed; using stored value as-is",
+			"agent_id", agentID, "error", decErr)
+	}
+	return plain, nil
 }
 
 // webhookIdempotencyKey resolves the dedup key for a webhook delivery.

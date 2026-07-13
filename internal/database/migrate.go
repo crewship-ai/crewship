@@ -1625,6 +1625,12 @@ END;
 	// fall back to the built-in anti-pattern list. See
 	// migrate_consts_v139_keeper_watch_spec.go and issue #1001 (M1).
 	{version: 139, name: "keeper_watch_spec", sql: migrationKeeperWatchSpec},
+
+	// v140: encrypt existing plaintext webhook secrets at rest
+	// (agents.webhook_secret, pipeline_webhooks.signing_secret) — fail-open,
+	// idempotent Go backfill. See migrate_consts_v140_encrypt_webhook_secrets.go
+	// and issues #1072 / #1029.
+	{version: 140, name: "encrypt_webhook_secrets", fn: migrationEncryptWebhookSecrets},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

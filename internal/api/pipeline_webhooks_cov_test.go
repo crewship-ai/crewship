@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
@@ -45,6 +46,7 @@ func TestCovPW_Create_UnresolvablePipeline_400(t *testing.T) {
 // still produce an HMAC-signed webhook (64-char hex secret revealed on
 // the create response only).
 func TestCovPW_Create_AutoMintsSigningSecret(t *testing.T) {
+	setTestEncryptionKeyParallelSafe(t) // deterministic: prove encryption at rest (#1029)
 	h, userID, wsID, pipeID := covPWFixture(t)
 	rr := covPWCreate(h, userID, wsID, map[string]any{"target_pipeline_id": pipeID})
 	if rr.Code != http.StatusCreated && rr.Code != http.StatusOK {
@@ -55,8 +57,18 @@ func TestCovPW_Create_AutoMintsSigningSecret(t *testing.T) {
 		Scan(&secret); err != nil {
 		t.Fatalf("read webhook: %v", err)
 	}
-	if len(secret) != 64 {
-		t.Errorf("signing_secret len = %d, want 64 hex chars (auto-minted)", len(secret))
+	// #1029: signing_secret must be ENCRYPTED at rest (envelope), not the raw
+	// 64-hex value — reverting the Save encryption would fail this.
+	if !encryption.IsEncrypted(secret) {
+		t.Errorf("signing_secret stored plaintext at rest: %q", secret)
+	}
+	// …and it must decrypt back to the auto-minted 64-hex secret.
+	dec, derr := encryption.DecryptIfEncrypted(secret)
+	if derr != nil {
+		t.Fatalf("decrypt signing_secret: %v", derr)
+	}
+	if len(dec) != 64 {
+		t.Errorf("decrypted signing_secret len = %d, want 64 hex chars (auto-minted)", len(dec))
 	}
 }
 

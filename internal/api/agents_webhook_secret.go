@@ -11,6 +11,8 @@ package api
 import (
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
 // RotateWebhookSecret mints a fresh webhook signing secret for an agent
@@ -41,11 +43,25 @@ func (h *AgentHandler) RotateWebhookSecret(w http.ResponseWriter, r *http.Reques
 	}
 
 	secret := generateWebhookSecret()
+	// #1072/#1029: store the secret AES-256-GCM encrypted at rest (like
+	// credentials), not plaintext. Fail-open: with no key configured we store
+	// plaintext and warn, preserving key-less deployments. The show-once
+	// response below still returns the PLAINTEXT `secret`.
+	storedSecret, encrypted, encErr := encryption.EncryptAtRest(secret)
+	if encErr != nil {
+		h.logger.Error("webhook secret encrypt", "agent_id", agentID, "error", encErr)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if !encrypted {
+		h.logger.Warn("webhook secret stored UNENCRYPTED at rest — set ENCRYPTION_KEY to encrypt (#1072)",
+			"agent_id", agentID, "workspace_id", workspaceID)
+	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	res, err := h.db.ExecContext(r.Context(), `
 		UPDATE agents SET webhook_secret = ?, updated_at = ?
 		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		secret, now, agentID, workspaceID)
+		storedSecret, now, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("webhook secret rotate", "agent_id", agentID, "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")

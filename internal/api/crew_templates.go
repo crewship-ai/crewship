@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
@@ -96,7 +97,14 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, logger *slog.Logger, j 
 	for _, a := range agents {
 		agentID := generateCUID()
 		agentIDs = append(agentIDs, agentID)
-		webhookSecret := generateWebhookSecret()
+		// #1072/#1029: store the webhook secret encrypted at rest (fail-open
+		// without a key). This creation path never reveals the secret — it's
+		// obtained via the show-once rotate endpoint — so a plain encrypt is fine.
+		storedSecret, _, encErr := encryption.EncryptAtRest(generateWebhookSecret())
+		if encErr != nil {
+			return nil, fmt.Errorf("encrypt webhook secret for %s: %w", a.Name, encErr)
+		}
+		webhookSecret := storedSecret
 		agentSlug := a.Slug + "-" + crewSlug
 
 		if _, err = tx.ExecContext(ctx, `

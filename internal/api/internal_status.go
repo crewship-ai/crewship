@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
 // nilIfEmpty returns nil for empty strings, otherwise a pointer to the string.
@@ -204,7 +205,15 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agentID := generateCUID()
-	webhookSecret := generateWebhookSecret()
+	// #1072/#1029: encrypt the webhook secret at rest (fail-open without a key).
+	// This path never returns the secret; it's revealed only via show-once rotate.
+	storedWebhookSecret, _, encErr := encryption.EncryptAtRest(generateWebhookSecret())
+	if encErr != nil {
+		h.logger.Error("internal create agent: encrypt webhook secret", "error", encErr)
+		replyError(w, http.StatusInternalServerError, "failed to create agent")
+		return
+	}
+	webhookSecret := storedWebhookSecret
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err := h.db.ExecContext(r.Context(), `

@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
 func seedRotateAgent(t *testing.T, h *AgentHandler, wsID, id, secret string) {
@@ -34,6 +36,7 @@ func rotateReq(t *testing.T, h *AgentHandler, userID, wsID, role, agentID string
 }
 
 func TestRotateWebhookSecret_MintsAndReturnsOnce(t *testing.T) {
+	setTestEncryptionKeyParallelSafe(t) // deterministic: encrypt at rest (#1072)
 	h, userID, wsID := covAUHandler(t)
 	seedRotateAgent(t, h, wsID, "agent-rot", "whsec_old")
 
@@ -51,13 +54,25 @@ func TestRotateWebhookSecret_MintsAndReturnsOnce(t *testing.T) {
 		t.Fatalf("rotate must mint a NEW secret; got %q", resp.WebhookSecret)
 	}
 
-	// The DB row now holds the returned secret — the old one is dead.
+	// The DB row now holds the returned secret — but ENCRYPTED at rest
+	// (#1072/#1029), not the plaintext the response shows once. It must be
+	// stored as an envelope and decrypt back to exactly the returned value.
 	var stored string
 	if err := h.db.QueryRow(`SELECT webhook_secret FROM agents WHERE id = 'agent-rot'`).Scan(&stored); err != nil {
 		t.Fatalf("readback: %v", err)
 	}
-	if stored != resp.WebhookSecret {
-		t.Errorf("stored secret %q != returned %q", stored, resp.WebhookSecret)
+	if !encryption.IsEncrypted(stored) {
+		t.Errorf("webhook_secret stored plaintext at rest: %q", stored)
+	}
+	if stored == resp.WebhookSecret {
+		t.Errorf("webhook_secret must NOT be stored as the returned plaintext")
+	}
+	dec, err := encryption.DecryptIfEncrypted(stored)
+	if err != nil {
+		t.Fatalf("decrypt stored secret: %v", err)
+	}
+	if dec != resp.WebhookSecret {
+		t.Errorf("stored secret decrypts to %q, want returned %q", dec, resp.WebhookSecret)
 	}
 }
 

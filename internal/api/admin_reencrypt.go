@@ -43,6 +43,12 @@ type reencryptTarget struct {
 	// envelopes (e.g. escalations.resolution is plaintext for non-CREDENTIAL
 	// types — updating those would corrupt operator text).
 	Where string
+	// FailOpen marks a column that is encrypted at rest only when a key is
+	// configured (webhook secrets, #1072). A bare (non-enveloped) value there
+	// is EXPECTED legacy/key-less state, not a rotation failure — so it counts
+	// as Skipped rather than Failed, keeping the "failed=0 ⇒ retire old key"
+	// signal honest.
+	FailOpen bool
 }
 
 // reencryptTargets is the exhaustive envelope-column inventory (verified
@@ -57,6 +63,14 @@ type reencryptTarget struct {
 //   - composio_settings.encrypted_api_key  — Composio API key
 //   - oauth_states.code_verifier           — PKCE verifier (ephemeral rows)
 //   - escalations.resolution               — ONLY WHERE type='CREDENTIAL'
+//   - agents.webhook_secret                — agent webhook signing secret (#1072/#1029)
+//   - pipeline_webhooks.signing_secret     — pipeline webhook HMAC key (#1029)
+//
+// The two webhook columns are FAIL-OPEN at rest (encrypted only when a key is
+// configured; #1072). A key-less deployment can't run reencrypt at all, and a
+// key-ful one has these enveloped by migration v140 — so any bare row a
+// rotation encounters is left untouched (reencryptColumn's undecryptable path),
+// never corrupted.
 //
 // Non-SQLite envelope storage (~/.crewship/backup-keyring.enc) is handled
 // separately; see the runbook in docs/guides/credentials.mdx.
@@ -70,6 +84,8 @@ var reencryptTargets = []reencryptTarget{
 	{Table: "composio_settings", Column: "encrypted_api_key"},
 	{Table: "oauth_states", Column: "code_verifier"},
 	{Table: "escalations", Column: "resolution", Where: "type = 'CREDENTIAL'"},
+	{Table: "agents", Column: "webhook_secret", FailOpen: true},
+	{Table: "pipeline_webhooks", Column: "signing_secret", FailOpen: true},
 }
 
 // reencryptBatchSize bounds how many row UPDATEs share one transaction:
@@ -212,6 +228,13 @@ func (h *ReencryptHandler) reencryptColumn(ctx context.Context, tgt reencryptTar
 			return res, fmt.Errorf("scan: %w", err)
 		}
 		if v, ok := encryption.ParseEnvelopeVersion(value); ok && v == version {
+			res.Skipped++
+			continue
+		}
+		// Fail-open columns (webhook secrets): a bare, non-enveloped value is
+		// the EXPECTED key-less/legacy state, not a rotation failure — count it
+		// as Skipped so it doesn't poison the "failed=0 ⇒ retire old key" gate.
+		if tgt.FailOpen && !encryption.IsEncrypted(value) {
 			res.Skipped++
 			continue
 		}
