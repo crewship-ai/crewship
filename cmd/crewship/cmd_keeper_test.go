@@ -58,6 +58,8 @@ func newKeeperMock(t *testing.T) *keeperMock {
 			"enabled":                  false,
 			"security_contact_user_id": "u-contact",
 			"deny_notify_min_risk":     4,
+			"watch_spec":               "",
+			"watch_presets":            []any{"credentials"},
 		},
 		members: []map[string]any{
 			{"id": "wm-1", "user_id": "u-admin", "role": "ADMIN",

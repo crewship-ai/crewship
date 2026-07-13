@@ -272,6 +272,59 @@ crewship keeper threshold 6
 Endpoints: `GET`/`PUT /api/v1/admin/keeper/governance` (read ADMIN+, write
 OWNER/ADMIN). Every governance change is journaled with the acting user.
 
+### Watch rules
+
+The watchdog ships with a built-in anti-pattern list (tight loops, scope creep,
+destructive sequences, credential probing). On top of that, OWNER/ADMINs can
+author a **watch spec** — the operator's own policy — which is injected into the
+behavior and credential-access evaluator prompts as an authoritative instruction.
+It has two parts: **presets** (curated, toggleable rules) and **free-form**
+natural-language rules you write yourself. Both are additive — an empty watch
+spec falls back to the built-in list.
+
+**Presets:**
+
+| Key | Flags |
+|-----|-------|
+| `credentials` | Disproportionate or bulk secret access; high-security reads without justification |
+| `egress` | Exfiltration-shaped network egress — non-allowlisted hosts, piping secrets out |
+| `memory` | Memory tampering — overwriting facts, mass deletes, misleading entries |
+| `destructive` | `rm -rf`, `DROP`/`TRUNCATE`/`DELETE` without `WHERE`, force-push, wholesale overwrites |
+| `secret_files` | Reads of `~/.ssh`, `id_rsa`, `.env`, cloud credential files, private keys |
+
+**Free-form rules** are plain language, e.g. *"flag any read of ~/.ssh or
+id_rsa; flag credential access outside 08:00–18:00"*.
+
+```bash
+# Show the current watch spec (presets + free-form rules)
+crewship keeper watch get
+
+# Set / clear the free-form rules (use - to read multi-line from stdin)
+crewship keeper watch set "flag any read of ~/.ssh or id_rsa"
+cat rules.txt | crewship keeper watch set -
+crewship keeper watch clear
+
+# Toggle presets on/off; list shows the catalog with a ✓ on enabled ones
+crewship keeper watch preset list
+crewship keeper watch preset add credentials
+crewship keeper watch preset remove egress
+```
+
+In the dashboard the same controls live in **Admin → Keeper → Watchdog
+governance**: a checklist of presets and a text area for the free-form rules.
+
+<Note>
+  The watch spec is admin-authored config, gated by OWNER/ADMIN and
+  journal-audited, so it is injected as an **authoritative** policy block, not
+  as untrusted data — that is what lets it instruct the evaluator. Because it is
+  authoritative, **write the rules yourself; do not paste rule text from an
+  untrusted source** — text that embeds its own instructions would be obeyed.
+  Authoring a watch spec does **not** enable the watchdog, and while the watchdog
+  is disabled the spec is inert (nothing is injected); run `crewship keeper enable`
+  (or the dashboard toggle) to activate it. The free-form spec is length-capped
+  server-side.
+</Note>
+
 ## Audit Trail
 
 Every Keeper decision is audited with:

@@ -188,12 +188,33 @@ type NegativeLearningInput struct {
 	PriorLesson    string // last lessons.md entry on the same kind, if any (dup-suppression)
 }
 
+// WatchSpecResolver returns the workspace's compiled watch-spec prompt block
+// (presets already expanded, free-form rules appended), or "" when the
+// workspace has no custom watch rules or resolution fails. It is read on the
+// hot evaluation path, so it must never error — an unresolvable spec yields ""
+// (the evaluator falls back to its built-in anti-pattern list). The block is
+// admin-authored config (issue #1001, M1); the gatekeeper injects it as an
+// authoritative instruction, not as untrusted data — see watchPolicyBlock.
+type WatchSpecResolver func(ctx context.Context, workspaceID string) string
+
 // Gatekeeper reviews credential requests using an LLM.
 // Falls back to a strict deny-all policy if the LLM is unavailable.
 type Gatekeeper struct {
-	provider llm.Provider
-	model    string // model name to use for requests
-	logger   *slog.Logger
+	provider  llm.Provider
+	model     string // model name to use for requests
+	logger    *slog.Logger
+	watchSpec WatchSpecResolver // nil-safe: a nil resolver injects no watch block
+}
+
+// Option configures a Gatekeeper at construction. Kept as functional options
+// so the two production wiring sites can supply a WatchSpecResolver without
+// churning the ~8 test call sites that construct a bare New(provider, model, logger).
+type Option func(*Gatekeeper)
+
+// WithWatchSpecResolver wires the per-workspace watch-spec resolver (M1). When
+// unset, Evaluate injects no watch policy block and behaves exactly as before.
+func WithWatchSpecResolver(r WatchSpecResolver) Option {
+	return func(g *Gatekeeper) { g.watchSpec = r }
 }
 
 // New creates a Gatekeeper that uses an LLM provider for decisions.
@@ -205,11 +226,15 @@ type Gatekeeper struct {
 // in PR-Z Z.2 because silent degradation hid mis-configuration. Startup
 // validation in internal/server/server.go now refuses to enable Keeper if
 // the model is unset.
-func New(provider llm.Provider, model string, logger *slog.Logger) *Gatekeeper {
+func New(provider llm.Provider, model string, logger *slog.Logger, opts ...Option) *Gatekeeper {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Gatekeeper{provider: provider, model: model, logger: logger}
+	g := &Gatekeeper{provider: provider, model: model, logger: logger}
+	for _, opt := range opts {
+		opt(g)
+	}
+	return g
 }
 
 // minIntentLength is the minimum number of non-whitespace characters required for
@@ -252,9 +277,22 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 	rt := effectiveRequestType(req)
 	intent := strings.TrimSpace(req.Request.Intent)
 	isAccessFlow := rt == "" || rt == keeper.RequestTypeAccess
+
+	// Resolve the workspace's admin-authored watch spec once, up front. It both
+	// feeds the buildPrompt choke point below AND gates the L1 fast path: when an
+	// operator has an active watch policy, even an L1 credential must reach the
+	// LLM so the policy is actually applied — otherwise the most common credential
+	// tier would silently bypass the operator's rules. "" when the watchdog is
+	// disabled/unconfigured or no resolver is wired (backward-compatible).
+	watch := ""
+	if g.watchSpec != nil {
+		watch = g.watchSpec(ctx, req.Request.WorkspaceID)
+	}
+
 	if isAccessFlow &&
 		req.Command == "" &&
 		req.SecurityLevel == keeper.SecurityLevelL1 &&
+		watch == "" &&
 		len(intent) >= minIntentLength &&
 		hasMinDistinctChars(intent, l1MinDistinctChars) &&
 		!looksLikeIntentInjection(intent) {
@@ -277,7 +315,7 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 		}, nil
 	}
 
-	prompt := g.buildPrompt(req)
+	prompt := g.buildPrompt(req, watch)
 	g.logger.Debug("keeper: LLM prompt", "prompt_len", len(prompt))
 
 	// Attach lookout scope so the paymaster middleware can attribute the
@@ -372,31 +410,60 @@ func truncateForAudit(s string) string {
 // Note: every template ends with the same strict JSON instruction
 // ({"decision":..., "reason":..., "risk":...}) so parseResponse can
 // stay format-agnostic.
-func (g *Gatekeeper) buildPrompt(req EvalRequest) string {
+// watch is the compiled workspace watch-spec block (or "") — threaded into the
+// access + behavior builders, which are the two paths live agent activity flows
+// through (M1). The F4 audit-sweep builders don't take it (out of M1 scope).
+func (g *Gatekeeper) buildPrompt(req EvalRequest, watch string) string {
 	switch effectiveRequestType(req) {
 	case keeper.RequestTypeSkillReview:
 		return g.buildSkillReviewPrompt(req)
 	case keeper.RequestTypeBehavior:
-		return g.buildBehaviorPrompt(req)
+		return g.buildBehaviorPrompt(req, watch)
 	case keeper.RequestTypeMemoryHealth:
 		return g.buildMemoryHealthPrompt(req)
 	case keeper.RequestTypeNegativeLearning:
 		return g.buildNegativeLearningPrompt(req)
 	default:
 		// "" + RequestTypeAccess + RequestTypeExecute share this body.
-		return g.buildAccessPrompt(req)
+		return g.buildAccessPrompt(req, watch)
 	}
+}
+
+// watchPolicyBlock renders the compiled watch spec as an authoritative,
+// clearly-labelled instruction block, or "" when spec is empty.
+//
+// SECURITY (M1): the watch spec is a different trust tier than the agent-
+// controlled text the rest of this file %q-escapes and random-delimiter-fences.
+// It is OWNER/ADMIN-authored config, gated by roleManage and journal-audited,
+// and it legitimately *instructs* the evaluator what to flag — so it is injected
+// as an authoritative block, NOT escaped as a data literal (that would defeat
+// its purpose). Callers place it directly after the task preamble, ABOVE the
+// untrusted conversation/tool-arg fences and ABOVE the final strict-JSON line,
+// so agent-injected text can neither spoof it nor push the response contract out
+// of the model's attention. The block is length-capped upstream (CompileWatchSpec).
+// A malicious admin authoring a policy that neuters the evaluator is out of the
+// M1 threat model — an OWNER/ADMIN can already disable the watchdog entirely.
+func watchPolicyBlock(spec string) string {
+	if spec == "" {
+		return ""
+	}
+	return "[WORKSPACE WATCH POLICY — operator-defined; flag any activity matching these rules]\n" +
+		spec + "\n\n"
 }
 
 // buildAccessPrompt renders the original Keeper credential-access /
 // execute prompt verbatim. Behavior identical to the pre-F4 single-
 // template buildPrompt — kept here so tests that assert prompt
 // substrings continue to pass byte-for-byte.
-func (g *Gatekeeper) buildAccessPrompt(req EvalRequest) string {
+func (g *Gatekeeper) buildAccessPrompt(req EvalRequest, watch string) string {
 	var sb strings.Builder
 	sb.WriteString("You are the Keeper — a security gatekeeper for AI agent credential access.\n")
 	sb.WriteString("Your ONLY job: evaluate the CURRENT request below and decide ALLOW, DENY, or ESCALATE.\n")
 	sb.WriteString("Do NOT repeat or copy previous decisions. Evaluate each request independently on its own merits.\n\n")
+
+	// Admin watch policy first — above the untrusted conversation fence so
+	// injected text in the history can't get ahead of the operator's rules.
+	sb.WriteString(watchPolicyBlock(watch))
 
 	if req.ConvHistory != "" {
 		delim, ok := randomDelimiter()
@@ -475,10 +542,14 @@ func (g *Gatekeeper) buildSkillReviewPrompt(req EvalRequest) string {
 // recent tool-call history) for anti-patterns. Decision semantics are
 // dual-mode (warn vs block) and depend on policy.BehaviorMode — the
 // mode is surfaced in the prompt so the LLM understands the stakes.
-func (g *Gatekeeper) buildBehaviorPrompt(req EvalRequest) string {
+func (g *Gatekeeper) buildBehaviorPrompt(req EvalRequest, watch string) string {
 	var sb strings.Builder
 	sb.WriteString("You are the Behavior Monitor — sampling an agent's tool calls for anti-patterns.\n")
 	sb.WriteString("Your ONLY job: decide ALLOW, WARN, DENY, or ESCALATE for the current tool call.\n\n")
+
+	// Admin watch policy first — above the untrusted tool-arg block below. These
+	// rules are additive to the built-in anti-pattern list further down.
+	sb.WriteString(watchPolicyBlock(watch))
 
 	in := req.Behavior
 	if in == nil {

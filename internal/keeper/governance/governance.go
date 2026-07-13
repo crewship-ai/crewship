@@ -14,6 +14,7 @@ package governance
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -36,6 +37,14 @@ type Settings struct {
 	// DenyNotifyMinRisk is the risk score (1–10) at or above which a DENY
 	// decision also lands in the inbox. ESCALATE always does.
 	DenyNotifyMinRisk int `json:"deny_notify_min_risk"`
+	// WatchSpec is the OWNER/ADMIN-authored free-form natural-language watch
+	// rules (issue #1001, M1). Empty = fall back to the evaluator's built-in
+	// anti-pattern list. Injected into the Keeper evaluator prompts via
+	// CompileWatchSpec.
+	WatchSpec string `json:"watch_spec"`
+	// WatchPresets is the set of enabled preset keys (see WatchPresets catalog).
+	// Stored as a JSON array in watch_presets; nil/empty = no presets.
+	WatchPresets []string `json:"watch_presets"`
 }
 
 // Get returns the explicit workspace row. found is false when the workspace
@@ -45,11 +54,12 @@ func Get(ctx context.Context, db *sql.DB, workspaceID string) (Settings, bool, e
 		s       Settings
 		enabled int
 		contact sql.NullString
+		presets string
 	)
 	err := db.QueryRowContext(ctx, `
-		SELECT enabled, security_contact_user_id, deny_notify_min_risk
+		SELECT enabled, security_contact_user_id, deny_notify_min_risk, watch_spec, watch_presets
 		FROM keeper_governance_settings WHERE workspace_id = ?`, workspaceID).
-		Scan(&enabled, &contact, &s.DenyNotifyMinRisk)
+		Scan(&enabled, &contact, &s.DenyNotifyMinRisk, &s.WatchSpec, &presets)
 	if err == sql.ErrNoRows {
 		return Settings{DenyNotifyMinRisk: DefaultDenyNotifyMinRisk}, false, nil
 	}
@@ -58,6 +68,11 @@ func Get(ctx context.Context, db *sql.DB, workspaceID string) (Settings, bool, e
 	}
 	s.Enabled = enabled != 0
 	s.SecurityContactUserID = contact.String
+	if presets != "" {
+		if err := json.Unmarshal([]byte(presets), &s.WatchPresets); err != nil {
+			return Settings{DenyNotifyMinRisk: DefaultDenyNotifyMinRisk}, false, fmt.Errorf("governance: get: decode watch_presets: %w", err)
+		}
+	}
 	return s, true, nil
 }
 
@@ -70,19 +85,31 @@ func Upsert(ctx context.Context, db *sql.DB, workspaceID string, s Settings, upd
 	if s.DenyNotifyMinRisk > 10 {
 		s.DenyNotifyMinRisk = 10
 	}
+	// Marshal presets to a JSON array; empty → "" for a stable default that
+	// round-trips back to a nil slice in Get.
+	presets := ""
+	if len(s.WatchPresets) > 0 {
+		b, err := json.Marshal(s.WatchPresets)
+		if err != nil {
+			return fmt.Errorf("governance: upsert: encode watch_presets: %w", err)
+		}
+		presets = string(b)
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO keeper_governance_settings
-			(workspace_id, enabled, security_contact_user_id, deny_notify_min_risk, updated_by, created_at, updated_at)
-		VALUES (?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?)
+			(workspace_id, enabled, security_contact_user_id, deny_notify_min_risk, watch_spec, watch_presets, updated_by, created_at, updated_at)
+		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, NULLIF(?, ''), ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
 			enabled = excluded.enabled,
 			security_contact_user_id = excluded.security_contact_user_id,
 			deny_notify_min_risk = excluded.deny_notify_min_risk,
+			watch_spec = excluded.watch_spec,
+			watch_presets = excluded.watch_presets,
 			updated_by = excluded.updated_by,
 			updated_at = excluded.updated_at`,
 		workspaceID, boolToInt(s.Enabled), s.SecurityContactUserID, s.DenyNotifyMinRisk,
-		updatedBy, now, now)
+		s.WatchSpec, presets, updatedBy, now, now)
 	if err != nil {
 		return fmt.Errorf("governance: upsert: %w", err)
 	}

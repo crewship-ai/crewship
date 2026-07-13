@@ -12,6 +12,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
@@ -20,9 +21,25 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/behaviorhook"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/policy"
 )
+
+// watchSpecResolver builds the gatekeeper.WatchSpecResolver every Gatekeeper is
+// wired with (M1, issue #1001). It compiles each workspace's admin-authored
+// watch spec (presets + free-form rules) into the prompt block the evaluators
+// inject. Read on the hot eval path; governance.Resolve never errors (fail-safe:
+// an unconfigured or unreadable workspace yields "" ⇒ no watch block, the
+// built-in anti-pattern list stays in force).
+func watchSpecResolver(db *sql.DB, logger *slog.Logger) gatekeeper.WatchSpecResolver {
+	return func(ctx context.Context, workspaceID string) string {
+		// ResolveWatchBlock gates on Settings.Enabled, so a merely-authored spec
+		// stays inert (no injection into the always-on access evaluator) until an
+		// OWNER/ADMIN enables the watchdog — the opt-in contract the CLI/docs promise.
+		return governance.ResolveWatchBlock(governance.Resolve(ctx, db, logger, workspaceID))
+	}
+}
 
 // phase2Evaluators bundles the four evaluators the API router needs. Any
 // field may be nil — the corresponding endpoint surfaces 503 in that case.
@@ -116,7 +133,8 @@ func buildAuxGatekeeper(
 		return nil
 	}
 	wrapped := llm.Middleware(base, j, db)
-	return gatekeeper.New(wrapped, model.Model, logger)
+	return gatekeeper.New(wrapped, model.Model, logger,
+		gatekeeper.WithWatchSpecResolver(watchSpecResolver(db, logger)))
 }
 
 // buildLLMProvider maps an AuxModel.Provider string to a concrete

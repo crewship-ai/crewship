@@ -49,7 +49,7 @@ func TestSecGatekeeper_BehaviorPromptEscapesToolArgs(t *testing.T) {
 		},
 	}
 
-	prompt := g.buildBehaviorPrompt(req)
+	prompt := g.buildBehaviorPrompt(req, "")
 	assertSnippetEscaped(t, prompt)
 }
 

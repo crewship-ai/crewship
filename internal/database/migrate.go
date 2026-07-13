@@ -1618,6 +1618,13 @@ END;
 	// credential_id with no index. See migrate_consts_v138_mcp_binding_credential_index.go
 	// and issue #1042.
 	{version: 138, name: "mcp_binding_credential_index", sql: migrationMCPBindingCredentialIndex},
+
+	// v139: admin-authored watch spec on the keeper governance row —
+	// free-form NL rules (watch_spec) + a JSON array of preset keys
+	// (watch_presets), injected into the Keeper evaluator prompts. Empty =
+	// fall back to the built-in anti-pattern list. See
+	// migrate_consts_v139_keeper_watch_spec.go and issue #1001 (M1).
+	{version: 139, name: "keeper_watch_spec", sql: migrationKeeperWatchSpec},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

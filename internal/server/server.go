@@ -633,7 +633,8 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			// feeds the cache-hit metric and per-agent usage visibility.
 			base := llm.NewOllama(cfg.Keeper.OllamaURL, cfg.Keeper.Model)
 			wrapped := llm.Middleware(base, s.journalWriter, deps.DB)
-			gk := gatekeeper.New(wrapped, cfg.Keeper.Model, logger)
+			gk := gatekeeper.New(wrapped, cfg.Keeper.Model, logger,
+				gatekeeper.WithWatchSpecResolver(watchSpecResolver(deps.DB, logger)))
 			opts = append(opts, goapi.WithKeeperGatekeeper(gk))
 			logger.Info("keeper gatekeeper enabled", "ollama_url", cfg.Keeper.OllamaURL, "model", cfg.Keeper.Model)
 		} else {

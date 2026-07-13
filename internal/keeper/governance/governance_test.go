@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/database"
@@ -66,7 +67,7 @@ func TestUpsertThenGetRoundTrips(t *testing.T) {
 	if !found {
 		t.Fatal("expected found=true after Upsert")
 	}
-	if s != in {
+	if !reflect.DeepEqual(s, in) {
 		t.Fatalf("round-trip mismatch: got %+v, want %+v", s, in)
 	}
 
@@ -79,8 +80,56 @@ func TestUpsertThenGetRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get after update: %v", err)
 	}
-	if s != in2 {
+	if !reflect.DeepEqual(s, in2) {
 		t.Fatalf("update mismatch: got %+v, want %+v", s, in2)
+	}
+}
+
+func TestUpsertRoundTripsWatchSpecAndPresets(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	in := Settings{
+		Enabled:           true,
+		DenyNotifyMinRisk: 7,
+		WatchSpec:         "flag any read of ~/.ssh or id_rsa",
+		WatchPresets:      []string{"credentials", "egress"},
+	}
+	if err := Upsert(ctx, db, "ws1", in, "u1"); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	s, found, err := Get(ctx, db, "ws1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if !reflect.DeepEqual(s, in) {
+		t.Fatalf("watch round-trip mismatch:\n got  %+v\n want %+v", s, in)
+	}
+
+	// Clearing the presets round-trips back to a nil slice (empty JSON default),
+	// not an empty non-nil slice, so DeepEqual against a zero-value Settings holds.
+	in2 := Settings{Enabled: true, DenyNotifyMinRisk: 7, WatchSpec: "", WatchPresets: nil}
+	if err := Upsert(ctx, db, "ws1", in2, "u1"); err != nil {
+		t.Fatalf("Upsert clear: %v", err)
+	}
+	s, _, err = Get(ctx, db, "ws1")
+	if err != nil {
+		t.Fatalf("Get after clear: %v", err)
+	}
+	if s.WatchSpec != "" || s.WatchPresets != nil {
+		t.Fatalf("clear did not reset watch fields: %+v", s)
+	}
+
+	// Resolve surfaces the watch fields for a configured workspace.
+	if err := Upsert(ctx, db, "ws1", in, "u1"); err != nil {
+		t.Fatalf("Upsert restore: %v", err)
+	}
+	r := Resolve(ctx, db, nil, "ws1")
+	if r.WatchSpec != in.WatchSpec || !reflect.DeepEqual(r.WatchPresets, in.WatchPresets) {
+		t.Fatalf("Resolve dropped watch fields: %+v", r)
 	}
 }
 

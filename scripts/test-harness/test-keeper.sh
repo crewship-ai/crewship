@@ -8,6 +8,8 @@
 #   - `keeper enable` / `disable` flip the workspace toggle (read-merge-write)
 #   - `keeper contact <email>` targets a named OWNER/ADMIN, rejects a non-member
 #   - `keeper threshold <N>` sets the DENY-notify risk, rejects out-of-range
+#   - `keeper watch set/get/clear` round-trip the free-form rules (#1001 M1)
+#   - `keeper watch preset add/remove/list` toggle presets; a bogus key is rejected
 #   - the settings round-trip: what we set is what `status` reads back
 #
 # This is a control-plane test (governance config), not a full escalation-flow
@@ -109,5 +111,59 @@ else
 fi
 # Clear the contact so we don't leave the shared instance targeting a person.
 cs keeper contact --clear >/dev/null 2>&1 || true
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "5. watch spec: free-form rules + presets round-trip (#1001 M1)"
+# ─────────────────────────────────────────────────────────────────────────────
+if ! cs keeper watch --help >/dev/null 2>&1; then
+  skip "keeper watch present" "installed crewship has no 'keeper watch' command — rebuild from the M1 branch"
+else
+  # Capture the original watch state so we leave the shared instance as found.
+  ORIG_SPEC=""; ORIG_HAS_CRED="false"
+  if have jq && [[ "$ORIG_JSON" != '{}' ]]; then
+    ORIG_SPEC="$(printf '%s' "$ORIG_JSON" | jq -r '.governance.watch_spec // ""')"
+    ORIG_HAS_CRED="$(printf '%s' "$ORIG_JSON" | jq -r '(.governance.watch_presets // []) | any(. == "credentials")')"
+  fi
+
+  # Free-form rules round-trip through `set` → `status`.
+  SENTINEL="flag any read of ~/.ssh (harness $$)"
+  if cs keeper watch set "$SENTINEL" >/dev/null 2>&1; then
+    _pass "keeper watch set exits 0"
+    if have jq; then
+      assert_eq "watch_spec round-trips" "$SENTINEL" \
+        "$(cs keeper status --format json 2>/dev/null | jq -r '.governance.watch_spec // empty')"
+    fi
+  else
+    _fail "keeper watch set exits 0" "watch set errored"
+  fi
+
+  # `clear` empties the free-form rules.
+  if cs keeper watch clear >/dev/null 2>&1 && have jq; then
+    assert_eq "watch_spec clears" "" \
+      "$(cs keeper status --format json 2>/dev/null | jq -r '.governance.watch_spec // ""')"
+  fi
+
+  # Preset add lands in the set; remove takes it out.
+  if cs keeper watch preset add credentials >/dev/null 2>&1 && have jq; then
+    assert_eq "preset add credentials sticks" "true" \
+      "$(cs keeper status --format json 2>/dev/null | jq -r '(.governance.watch_presets // []) | any(. == "credentials")')"
+    cs keeper watch preset remove credentials >/dev/null 2>&1 || true
+    assert_eq "preset remove credentials sticks" "false" \
+      "$(cs keeper status --format json 2>/dev/null | jq -r '(.governance.watch_presets // []) | any(. == "credentials")')"
+  else
+    skip "preset add/remove" "add errored or jq missing"
+  fi
+
+  # An unknown preset key is rejected client-side (non-zero exit, no change).
+  if cs keeper watch preset add definitely-not-a-preset >/dev/null 2>&1; then
+    _fail "bogus preset rejected" "expected non-zero exit for an unknown preset key"
+  else
+    _pass "bogus preset rejected"
+  fi
+
+  # Restore the original watch state (best-effort, matches the enable/contact restore).
+  if [[ -n "$ORIG_SPEC" ]]; then cs keeper watch set "$ORIG_SPEC" >/dev/null 2>&1 || true; fi
+  if [[ "$ORIG_HAS_CRED" == "true" ]]; then cs keeper watch preset add credentials >/dev/null 2>&1 || true; fi
+fi
 
 finish
