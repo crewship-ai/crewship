@@ -254,8 +254,14 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Build WHERE clause — workspace_id is optional (internal callers may not send it)
-	where := "id = ?"
+	// Build WHERE clause — workspace_id is optional (internal callers may not send it).
+	// deleted_at IS NULL (#1061): a status write (e.g. the OAuth refresh worker)
+	// must not mutate a soft-deleted credential — without this it would flip a
+	// dead row's status back to ACTIVE and bump updated_at, returning 200. Every
+	// other credential mutation filters deleted_at; the n==0→404 below then
+	// correctly rejects deleted credentials. Reused by the last_error / token
+	// updates in this handler.
+	where := "id = ? AND deleted_at IS NULL"
 	whereArgs := []any{credID}
 	if workspaceID != "" {
 		where += " AND workspace_id = ?"

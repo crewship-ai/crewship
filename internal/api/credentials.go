@@ -315,6 +315,17 @@ func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("clear credential from MCP bindings", "credential_id", credID, "error", err)
 	}
 
+	// Remove the agent_credentials assignments (#1050). Delete is a SOFT delete
+	// (deleted_at), so the `ON DELETE CASCADE` FK never fires — the assignment
+	// join rows would otherwise linger, keeping the credential listed as
+	// "assigned" and inflating the per-agent credential counts (agents_query.go)
+	// long after it's gone. agent_credentials has no independent value once the
+	// credential is deleted, so a hard delete is correct here.
+	if _, err := h.db.ExecContext(r.Context(),
+		"DELETE FROM agent_credentials WHERE credential_id = ?", credID); err != nil {
+		h.logger.Warn("remove credential assignments on delete", "credential_id", credID, "error", err)
+	}
+
 	// Stamp the timeline so the audit tab still answers "who deleted
 	// this and when" after the row is soft-deleted. credential_audit
 	// rows survive soft-delete (no FK cascade), so the historical
