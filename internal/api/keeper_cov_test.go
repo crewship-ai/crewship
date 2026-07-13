@@ -22,6 +22,17 @@ func (c covKPConvReader) Read(_ context.Context, _ string, _, _ int) ([]Conversa
 	return c.msgs, c.err
 }
 
+// ReadTail mirrors conversation.Store.ReadTail: return the newest maxMessages.
+func (c covKPConvReader) ReadTail(_ context.Context, _ string, maxMessages int) ([]ConversationMessage, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	if maxMessages > 0 && len(c.msgs) > maxMessages {
+		return c.msgs[len(c.msgs)-maxMessages:], nil
+	}
+	return c.msgs, nil
+}
+
 func TestCovKP_SetJournal(t *testing.T) {
 	db := setupTestDB(t)
 	h := newKeeperHandler(t, db)

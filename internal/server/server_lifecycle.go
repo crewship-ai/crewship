@@ -521,6 +521,23 @@ func (a *convStoreAdapter) Read(ctx context.Context, sessionID string, offset, l
 	return out, nil
 }
 
+// ReadTail adapts conversation.Store.ReadTail to the api.ConversationReader
+// interface (#1041 — keeper reads only the recent window, not the whole file).
+func (a *convStoreAdapter) ReadTail(ctx context.Context, sessionID string, maxMessages int) ([]goapi.ConversationMessage, error) {
+	msgs, err := a.store.ReadTail(ctx, sessionID, maxMessages)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]goapi.ConversationMessage, len(msgs))
+	for i, m := range msgs {
+		out[i] = goapi.ConversationMessage{
+			Role:    string(m.Role),
+			Content: m.Content,
+		}
+	}
+	return out, nil
+}
+
 // SearchConversations adapts conversation.Store.Search to the
 // api.ConversationSearcher interface so POST /api/v1/conversations/search
 // can run the agent-scoped BM25 query against the v111 FTS5 mirror.
