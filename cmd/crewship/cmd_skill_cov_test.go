@@ -11,6 +11,7 @@ package main
 import (
 	"encoding/json"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,6 +110,24 @@ func covCaptureStdout(t *testing.T, fn func() error) (string, error) {
 	return string(b), runErr
 }
 
+// assertNoMutatingCalls fails the test if the stub recorded any
+// non-idempotent HTTP call (anything but GET). Several RunE tests assert
+// that a local validation error (bad flags, missing required combination,
+// ...) short-circuits before any update side effect. Before #1075 that
+// meant literally zero calls whenever the command's positional arg was a
+// CUID-shaped id (resolveAgentID/resolveCrewID/... short-circuited without
+// touching the network at all); now the resolver spends exactly one GET
+// verifying that id first, so "zero calls" is no longer the right
+// assertion — "zero calls that could have changed anything" still is.
+func assertNoMutatingCalls(t *testing.T, stub *clitest.StubServer) {
+	t.Helper()
+	for _, c := range stub.Calls() {
+		if c.Method != http.MethodGet {
+			t.Errorf("no mutating HTTP call expected, got %s %s", c.Method, c.Path)
+		}
+	}
+}
+
 // covJSONBody unmarshals a recorded request body into a map.
 func covJSONBody(t *testing.T, body []byte) map[string]any {
 	t.Helper()
@@ -133,6 +152,9 @@ func TestBoolFlagCov(t *testing.T) {
 // ─── resolveSkillID ──────────────────────────────────────────────────────
 
 func TestResolveSkillIDCov_CUIDShortCircuit(t *testing.T) {
+	// #1075: resolveSkillID now verifies a CUID-shaped input with one GET
+	// (which the StubServer's default answers "exists" for, see clitest's
+	// CUID-verify carve-out) instead of trusting the shape with zero calls.
 	s := covSetup(t)
 	got, err := resolveSkillID(newAPIClient(), covSkillID)
 	if err != nil {
@@ -141,8 +163,8 @@ func TestResolveSkillIDCov_CUIDShortCircuit(t *testing.T) {
 	if got != covSkillID {
 		t.Errorf("got %q, want passthrough %q", got, covSkillID)
 	}
-	if calls := s.Calls(); len(calls) != 0 {
-		t.Errorf("CUID input must not hit the API; got %d calls", len(calls))
+	if calls := s.Calls(); len(calls) != 1 {
+		t.Errorf("expected exactly 1 verify call; got %d", len(calls))
 	}
 }
 
@@ -280,14 +302,28 @@ func TestSkillGetRunECov_HappyWithDescription(t *testing.T) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
 	}
-	if len(s.CallsFor("GET", "/api/v1/skills/"+covSkillID)) != 1 {
-		t.Error("expected exactly one detail GET")
+	// 2, not 1: resolveSkillID's #1075 CUID-verify GET and skillGetCmd's own
+	// detail fetch both hit this exact URL.
+	if len(s.CallsFor("GET", "/api/v1/skills/"+covSkillID)) != 2 {
+		t.Error("expected exactly two GETs to skill detail (verify + fetch)")
 	}
 }
 
 func TestSkillGetRunECov_NotFound(t *testing.T) {
+	// resolveSkillID's #1075 CUID-verify GET hits this same URL first —
+	// let it succeed (the id is real) so the 404 under test comes from
+	// skillGetCmd's own detail fetch, not from resolution treating a
+	// genuine detail-fetch failure as "this id doesn't exist, try a slug
+	// scan" instead.
 	s := covSetup(t)
-	s.OnGet("/api/v1/skills/"+covSkillID, clitest.ErrorResponse(404, "Skill not found"))
+	var calls int
+	s.OnGet("/api/v1/skills/"+covSkillID, func(_ *http.Request, _ []byte) (int, []byte, string) {
+		calls++
+		if calls == 1 {
+			return http.StatusOK, []byte(`{"id":"` + covSkillID + `"}`), "application/json"
+		}
+		return http.StatusNotFound, []byte(`{"error":"Skill not found"}`), "application/json"
+	})
 	err := skillGetCmd.RunE(skillGetCmd, []string{covSkillID})
 	if err == nil || !strings.Contains(err.Error(), "Skill not found") {
 		t.Errorf("want 404 surfaced; got %v", err)

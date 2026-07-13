@@ -240,7 +240,15 @@ var credGetCmd = &cobra.Command{
 
 func resolveCredentialID(client *cli.Client, nameOrID string) (string, error) {
 	if looksLikeCUID(nameOrID) {
-		return nameOrID, nil
+		ok, err := cuidExists(client, "/api/v1/credentials/"+nameOrID)
+		if err != nil {
+			return "", fmt.Errorf("resolve credential: %w", err)
+		}
+		if ok {
+			return nameOrID, nil
+		}
+		// Miss: nameOrID only looks like a CUID — fall through to the
+		// name scan below instead of forwarding a doomed id (#1075).
 	}
 
 	resp, err := client.Get("/api/v1/credentials")

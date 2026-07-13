@@ -111,15 +111,23 @@ func captureStderrCov(t *testing.T, fn func() error) (string, error) {
 // ─── resolveAgentID ─────────────────────────────────────────────────────
 
 func TestResolveAgentIDCov_CUIDShortCircuit(t *testing.T) {
-	// No server needed — CUID input must never hit the network.
-	c := cli.NewClient("http://127.0.0.1:0", "t", covWorkspaceIDCli10)
+	// #1075: a CUID-shaped input is no longer trusted blind — resolveAgentID
+	// spends exactly one GET verifying it exists before returning it, and
+	// does NOT also fall back to the slug list-scan on that fast path.
+	s := clitest.NewStubServer()
+	defer s.Close()
 	id := "cagent7890abcdefghijklm"
+	s.OnGet("/api/v1/agents/"+id, clitest.JSONResponse(200, map[string]string{"id": id}))
+	c := cli.NewClient(s.URL(), "t", covWorkspaceIDCli10)
 	got, err := resolveAgentID(c, id)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if got != id {
 		t.Errorf("got %q want %q", got, id)
+	}
+	if calls := s.Calls(); len(calls) != 1 {
+		t.Errorf("expected exactly 1 verify call, got %d: %+v", len(calls), calls)
 	}
 }
 

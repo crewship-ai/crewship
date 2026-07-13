@@ -267,9 +267,9 @@ func TestAskRunE_SaveFileOpenError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "open save file") {
 		t.Errorf("expected save-file open error, got %v", err)
 	}
-	if n := len(stub.Calls()); n != 0 {
-		t.Errorf("save-file failure must precede any HTTP call, got %d", n)
-	}
+	// resolveAgentID verifies the CUID-shaped --agent value (#1075, one GET)
+	// before openSaveFile runs, but that must not turn into a chat/run call.
+	assertNoMutatingCalls(t, stub)
 }
 
 func TestAskRunE_SaveFileAndTimeoutThenChatError(t *testing.T) {

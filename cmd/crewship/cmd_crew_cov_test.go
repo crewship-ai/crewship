@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -298,13 +299,25 @@ func TestCrewGetRunE_ErrorBranches(t *testing.T) {
 	if err := c.RunE(c, []string{"engineering"}); err == nil || !strings.Contains(err.Error(), "resolve crew") {
 		t.Errorf("want resolve error, got %v", err)
 	}
-	// CUID arg skips resolution → the detail GET fails.
+	// CUID arg: resolveCrewID's #1075 verify GET dies at transport level
+	// against the same dead server, before ever reaching the detail fetch.
 	if err := c.RunE(c, []string{covCrewIDCli4}); err == nil {
 		t.Error("want transport error on detail fetch")
 	}
 
+	// resolveCrewID's verify GET hits this same URL first — let it succeed
+	// (the id is real) so the 404 under test comes from crewGetCmd's own
+	// detail fetch, not from resolution mistaking a genuine detail-fetch
+	// failure for "this id doesn't exist, try a slug scan" instead.
 	stub := covSetupCli4(t)
-	stub.OnGet("/api/v1/crews/"+covCrewIDCli4, clitest.ErrorResponse(404, "crew gone"))
+	var calls int
+	stub.OnGet("/api/v1/crews/"+covCrewIDCli4, func(_ *http.Request, _ []byte) (int, []byte, string) {
+		calls++
+		if calls == 1 {
+			return http.StatusOK, []byte(`{"id":"` + covCrewIDCli4 + `"}`), "application/json"
+		}
+		return http.StatusNotFound, []byte(`{"error":"crew gone"}`), "application/json"
+	})
 	if err := c.RunE(c, []string{covCrewIDCli4}); err == nil || !strings.Contains(err.Error(), "crew gone") {
 		t.Errorf("want server error, got %v", err)
 	}
