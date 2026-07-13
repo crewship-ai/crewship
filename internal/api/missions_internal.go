@@ -81,6 +81,26 @@ func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// SECURITY (#1067): each task's assigned_agent_id is agent-supplied and was
+	// inserted verbatim. Validate every non-nil one belongs to this workspace —
+	// the same isolation guard as lead_agent_id. Cross-crew reachability
+	// (crew_connections) is still enforced at dispatch; this closes the
+	// cross-workspace stored-bad-state gap before any row is written.
+	for _, t := range req.Tasks {
+		if t.AssignedAgentID == nil || *t.AssignedAgentID == "" {
+			continue
+		}
+		if err := assertFKInWorkspace(r.Context(), h.db, "agents", *t.AssignedAgentID, req.WorkspaceID); err != nil {
+			if errors.Is(err, errFKNotInWorkspace) {
+				replyError(w, http.StatusBadRequest, "task assigned_agent_id does not belong to this workspace")
+				return
+			}
+			h.logger.Error("validate task assigned agent", "error", err)
+			replyError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+	}
+
 	id := generateCUID()
 	traceID := "mission-" + generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)

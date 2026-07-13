@@ -1015,6 +1015,36 @@ func TestInternalMissions_Create(t *testing.T) {
 		}
 	})
 
+	// #1067: a task assigned to an agent that is not in this workspace must be
+	// rejected before any row is written.
+	t.Run("task_foreign_agent_400", func(t *testing.T) {
+		body := `{"title":"M3","lead_agent_id":"lead","crew_id":"cr1","workspace_id":"` + wsID +
+			`","tasks":[{"title":"t1","task_order":0,"assigned_agent_id":"foreign-agent"}]}`
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		h.Create(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("foreign task agent must 400, got %d: %s", w.Code, w.Body.String())
+		}
+		// No mission row should have been written.
+		var n int
+		db.QueryRow(`SELECT COUNT(*) FROM missions WHERE title = 'M3'`).Scan(&n)
+		if n != 0 {
+			t.Errorf("mission row written despite invalid task agent (%d rows)", n)
+		}
+	})
+
+	t.Run("task_valid_agent_ok", func(t *testing.T) {
+		body := `{"title":"M4","lead_agent_id":"lead","crew_id":"cr1","workspace_id":"` + wsID +
+			`","tasks":[{"title":"t1","task_order":0,"assigned_agent_id":"lead"}]}`
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		h.Create(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("valid in-workspace task agent should 201, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
 	t.Run("invalid_json", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`bad`))
 		w := httptest.NewRecorder()
