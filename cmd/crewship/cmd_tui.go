@@ -25,7 +25,9 @@ Keys:
 		if err != nil {
 			return err
 		}
-		server := cli.ResolveServer(flagServer, cliCfg)
+		// EffectiveServer (flag > profile > env > cfg) so the TUI connects to the
+		// same host commands target under an active --profile. (#1003)
+		server := cli.EffectiveServer(flagServer, flagProfile, cliCfg)
 		return tui.Run(cmd.Context(), client, server)
 	},
 }

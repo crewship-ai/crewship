@@ -585,6 +585,18 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		// if it differs (e.g. after a policy change), we must restart the sidecar.
 		needStart := true
 		if health := checkSidecar(ctx, o.container, req.ContainerID); health != nil {
+			if health.Stale {
+				// #1008: the running sidecar is an OLD bind-mounted binary from
+				// before the last redeploy. It keeps serving stale memory/egress
+				// behaviour with no other signal — surface it loudly. Recreating
+				// the crew's containers (crewship crew restart-agents <crew>) or
+				// redeploying picks up the fresh sidecar.
+				o.logger.Error("stale sidecar detected: container is serving an OLD crewship-sidecar binary from before the last redeploy — memory recall and egress policy may be silently degraded; recreate the crew's containers (crewship crew restart-agents) to pick up the new sidecar",
+					"agent_id", req.AgentID,
+					"container_id", req.ContainerID[:min(12, len(req.ContainerID))],
+					"running_sidecar_hash", health.SidecarHash,
+				)
+			}
 			if health.NetworkMode == desiredMode && desiredMode != "restricted" {
 				// In "free" mode we can safely reuse. In "restricted" mode the
 				// domain allowlist may differ between agents (different MCP servers),

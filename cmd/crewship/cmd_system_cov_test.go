@@ -207,12 +207,44 @@ func TestSystemOnboardingBareDelegatesToStatus(t *testing.T) {
 
 func TestSystemOnboardingSetupRunE_MissingFlags(t *testing.T) {
 	covSetupCli5(t)
-	covSetFlagCli5(t, systemOnboardingSetupCmd, "crew", "")
-	covSetFlagCli5(t, systemOnboardingSetupCmd, "agent", "")
+	// Enforcement moved from a hand-rolled in-RunE check to MarkFlagRequired
+	// (#966): with --crew/--agent unset, cobra's required-flag validation must
+	// reject the command (a usage error), before RunE runs.
+	for _, name := range []string{"crew", "agent"} {
+		fl := systemOnboardingSetupCmd.Flags().Lookup(name)
+		if fl == nil {
+			t.Fatalf("flag --%s not registered", name)
+		}
+		origChanged := fl.Changed
+		_ = fl.Value.Set("")
+		fl.Changed = false
+		t.Cleanup(func() { fl.Changed = origChanged })
+	}
 
-	err := systemOnboardingSetupCmd.RunE(systemOnboardingSetupCmd, nil)
+	err := systemOnboardingSetupCmd.ValidateRequiredFlags()
+	if err == nil || !strings.Contains(err.Error(), "crew") || !strings.Contains(err.Error(), "agent") {
+		t.Errorf("expected required-flag error naming crew and agent; got %v", err)
+	}
+}
+
+// Regression (#966): cobra's required-flag validation only checks
+// Flag.Changed, not emptiness — `--crew ""` (e.g. an unset shell variable
+// interpolated into a script) sets Changed=true and sails straight past
+// MarkFlagRequired, then hits RunE with a blank name. This locks that RunE
+// still rejects an explicitly-empty --crew/--agent with a clear CLI-side
+// error and never reaches the server.
+func TestSystemOnboardingSetupRunE_EmptyStringFlag(t *testing.T) {
+	stub := covSetupCli5(t)
+	covSetFlagCli5(t, systemOnboardingSetupCmd, "crew", "")
+	covSetFlagCli5(t, systemOnboardingSetupCmd, "agent", "x")
+
+	var err error
+	covCaptureStdoutCli5(t, func() { err = systemOnboardingSetupCmd.RunE(systemOnboardingSetupCmd, nil) })
 	if err == nil || !strings.Contains(err.Error(), "--crew and --agent are required") {
 		t.Errorf("expected required-flags error; got %v", err)
+	}
+	if calls := stub.CallsFor("POST", "/api/v1/onboarding/setup"); len(calls) != 0 {
+		t.Errorf("empty --crew must not reach the server, got %d calls", len(calls))
 	}
 }
 

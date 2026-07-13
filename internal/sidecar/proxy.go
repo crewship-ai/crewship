@@ -76,6 +76,7 @@ type Proxy struct {
 	onLLMCall    LLMCallObserver
 	billingMode  string // "metered" | "flat_rate" | "" — set from env at startup
 	subPlan      string // human label for flat-rate (e.g. "Anthropic Max 20×")
+	buildHash    string // #1008: content hash of the running sidecar binary, advertised on /health
 }
 
 // ProxyConfig configures the sidecar proxy.
@@ -104,6 +105,10 @@ type ProxyConfig struct {
 	// values that the LLMCallObserver receives for ledger row tagging.
 	BillingMode      string
 	SubscriptionPlan string
+	// BuildHash is the content hash of the running sidecar binary, echoed on
+	// /health so the server can detect a container serving a STALE sidecar
+	// after a redeploy (#1008). Empty = unknown (server never false-alarms).
+	BuildHash string
 }
 
 // NewProxy creates a forward proxy with credential injection.
@@ -119,6 +124,7 @@ func NewProxy(cfg ProxyConfig) *Proxy {
 		onLLMCall:    cfg.OnLLMCall,
 		billingMode:  cfg.BillingMode,
 		subPlan:      cfg.SubscriptionPlan,
+		buildHash:    cfg.BuildHash,
 		transport: &http.Transport{
 			// #961: resolve-then-pin SSRF guard. The allowlist matches a
 			// hostname string; this closes the DNS-rebinding gap by checking
@@ -352,11 +358,12 @@ func (p *Proxy) handleLocal(w http.ResponseWriter, r *http.Request) {
 			networkMode = "restricted"
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"ok","anthropic_creds":%d,"openai_creds":%d,"google_creds":%d,"network_mode":"%s"}`,
+		fmt.Fprintf(w, `{"status":"ok","anthropic_creds":%d,"openai_creds":%d,"google_creds":%d,"network_mode":"%s","sidecar_hash":"%s"}`,
 			p.credStore.Count(ProviderAnthropic),
 			p.credStore.Count(ProviderOpenAI),
 			p.credStore.Count(ProviderGoogle),
 			networkMode,
+			p.buildHash,
 		)
 	case strings.HasPrefix(r.URL.Path, "/v1/"):
 		// Reverse-proxy to api.anthropic.com.

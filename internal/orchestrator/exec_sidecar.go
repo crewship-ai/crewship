@@ -390,6 +390,22 @@ func writeCredentialFiles(
 type sidecarHealth struct {
 	Status      string `json:"status"`
 	NetworkMode string `json:"network_mode"`
+	// SidecarHash is the content hash of the binary the running sidecar is
+	// executing (#1008). Empty on pre-#1008 sidecars.
+	SidecarHash string `json:"sidecar_hash"`
+	// Stale is set by checkSidecar when SidecarHash differs from the hash of
+	// the sidecar binary currently on disk — i.e. the container is serving an
+	// OLD bind-mounted sidecar after a redeploy. Not part of the wire format.
+	Stale bool `json:"-"`
+}
+
+// sidecarHashReporter is the optional capability a ContainerProvider implements
+// to report the content hash of the crewship-sidecar binary it bind-mounts
+// (the docker provider hashes cfg.SidecarBinaryPath). checkSidecar type-asserts
+// for it to detect a stale running sidecar (#1008); providers that can't report
+// return "" and detection fails open.
+type sidecarHashReporter interface {
+	ExpectedSidecarHash() string
 }
 
 // checkSidecar checks if a sidecar proxy is already listening on port 9119
@@ -415,6 +431,18 @@ func checkSidecar(ctx context.Context, ctr provider.ContainerProvider, container
 	}
 	if h.Status != "ok" {
 		return nil
+	}
+	// #1008: flag a container serving a STALE bind-mounted sidecar. A bind
+	// mount pins the inode the container started with, so after a redeploy the
+	// running sidecar keeps executing the OLD binary (memory/egress can degrade
+	// silently) while the host binary is already the NEW one. Compare the hash
+	// the sidecar reports against the hash of the binary now on disk. Fail open:
+	// only flag when BOTH hashes are known and differ, so a pre-#1008 sidecar
+	// (empty hash) or a provider that can't report never trips a false alarm.
+	if reporter, ok := ctr.(sidecarHashReporter); ok {
+		if expected := reporter.ExpectedSidecarHash(); expected != "" && h.SidecarHash != "" && expected != h.SidecarHash {
+			h.Stale = true
+		}
 	}
 	return &h
 }

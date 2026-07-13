@@ -684,13 +684,11 @@ Examples:
 		}
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(body)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(body)
-		}
-		return renderRunInsights(body)
+		return f.AutoHuman(body, func() {
+			// renderRunInsights only ever returns nil (it prints); the
+			// AutoHuman human closure can't propagate an error anyway.
+			_ = renderRunInsights(body)
+		})
 	},
 }
 

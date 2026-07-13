@@ -163,19 +163,14 @@ var paymasterTopCmd = &cobra.Command{
 			return err
 		}
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(body.Rows)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(body.Rows)
-		}
-		for i, row := range body.Rows {
-			scope := fmt.Sprintf("%s/%s", row.ScopeKind, row.ScopeID)
-			fmt.Printf("%2d. %s%-40s%s  %s$%8.4f%s  %d calls\n",
-				i+1, cli.Bold, truncateString(scope, 40), cli.Reset,
-				cli.Yellow, row.CostUSD, cli.Reset, row.CallCount)
-		}
-		return nil
+		return f.AutoHuman(body.Rows, func() {
+			for i, row := range body.Rows {
+				scope := fmt.Sprintf("%s/%s", row.ScopeKind, row.ScopeID)
+				fmt.Printf("%2d. %s%-40s%s  %s$%8.4f%s  %d calls\n",
+					i+1, cli.Bold, truncateString(scope, 40), cli.Reset,
+					cli.Yellow, row.CostUSD, cli.Reset, row.CallCount)
+			}
+		})
 	},
 }
 
@@ -187,30 +182,33 @@ var paymasterTopCmd = &cobra.Command{
 // empty output.
 func printSpendTable(scopeLabel string, rows any) error {
 	f := newFormatter()
-	if f.Format == "json" {
-		return f.JSON(rows)
-	}
-	if f.Format == "yaml" {
-		return f.YAML(rows)
-	}
-	fmt.Printf("%s%-30s  %10s  %6s  %12s%s\n",
-		cli.Bold, scopeLabel, "Cost (USD)", "Calls", "Tokens", cli.Reset)
-	fmt.Println(strings.Repeat("─", 64))
-	switch typed := rows.(type) {
-	case []crewSpendRow:
-		for _, r := range typed {
-			fmt.Printf("%-30s  %s$%8.4f%s  %6d  %12d\n",
-				truncateString(r.CrewID, 30), cli.Yellow, r.CostUSD, cli.Reset, r.CallCount, r.InTokens+r.OutTokens)
+	// humanErr carries the unsupported-type failure out of the human
+	// closure — AutoHuman's human func can't return, so latch it and
+	// surface it after. Machine formats (json/yaml/ndjson) render the raw
+	// slice and never touch this path.
+	var humanErr error
+	if err := f.AutoHuman(rows, func() {
+		fmt.Printf("%s%-30s  %10s  %6s  %12s%s\n",
+			cli.Bold, scopeLabel, "Cost (USD)", "Calls", "Tokens", cli.Reset)
+		fmt.Println(strings.Repeat("─", 64))
+		switch typed := rows.(type) {
+		case []crewSpendRow:
+			for _, r := range typed {
+				fmt.Printf("%-30s  %s$%8.4f%s  %6d  %12d\n",
+					truncateString(r.CrewID, 30), cli.Yellow, r.CostUSD, cli.Reset, r.CallCount, r.InTokens+r.OutTokens)
+			}
+		case []agentSpendRow:
+			for _, r := range typed {
+				fmt.Printf("%-30s  %s$%8.4f%s  %6d  %12d\n",
+					truncateString(r.AgentID, 30), cli.Yellow, r.CostUSD, cli.Reset, r.CallCount, r.InTokens+r.OutTokens)
+			}
+		default:
+			humanErr = fmt.Errorf("printSpendTable: unsupported rows type %T", rows)
 		}
-	case []agentSpendRow:
-		for _, r := range typed {
-			fmt.Printf("%-30s  %s$%8.4f%s  %6d  %12d\n",
-				truncateString(r.AgentID, 30), cli.Yellow, r.CostUSD, cli.Reset, r.CallCount, r.InTokens+r.OutTokens)
-		}
-	default:
-		return fmt.Errorf("printSpendTable: unsupported rows type %T", rows)
+	}); err != nil {
+		return err
 	}
-	return nil
+	return humanErr
 }
 
 // paymasterByMissionCmd hits the per-mission rollup. The server-side
@@ -262,19 +260,14 @@ Example:
 			return err
 		}
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(body)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(body)
-		}
-		fmt.Printf("%sMission %s%s\n", cli.Bold, body.MissionID, cli.Reset)
-		fmt.Printf("  Cost:         %s$%.4f%s\n", cli.Yellow, body.Row.CostUSD, cli.Reset)
-		fmt.Printf("  Calls:        %d\n", body.Row.CallCount)
-		fmt.Printf("  In tokens:    %d\n", body.Row.InTokens)
-		fmt.Printf("  Out tokens:   %d\n", body.Row.OutTokens)
-		fmt.Printf("  Total tokens: %d\n", body.Row.InTokens+body.Row.OutTokens)
-		return nil
+		return f.AutoHuman(body, func() {
+			fmt.Printf("%sMission %s%s\n", cli.Bold, body.MissionID, cli.Reset)
+			fmt.Printf("  Cost:         %s$%.4f%s\n", cli.Yellow, body.Row.CostUSD, cli.Reset)
+			fmt.Printf("  Calls:        %d\n", body.Row.CallCount)
+			fmt.Printf("  In tokens:    %d\n", body.Row.InTokens)
+			fmt.Printf("  Out tokens:   %d\n", body.Row.OutTokens)
+			fmt.Printf("  Total tokens: %d\n", body.Row.InTokens+body.Row.OutTokens)
+		})
 	},
 }
 
@@ -337,27 +330,22 @@ Examples:
 			return err
 		}
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(body.Rows)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(body.Rows)
-		}
-		fmt.Printf("%s%-20s  %-12s  %6s  %12s  %s%s\n",
-			cli.Bold, "Plan", "Provider", "Calls", "Tokens", "Last used", cli.Reset)
-		fmt.Println(strings.Repeat("─", 80))
-		for _, r := range body.Rows {
-			fmt.Printf("%-20s  %-12s  %6d  %12d  %s\n",
-				truncateString(r.Plan, 20),
-				truncateString(r.Provider, 12),
-				r.CallCount,
-				r.InTokens+r.OutTokens,
-				r.LastUsedAt)
-		}
-		if len(body.Rows) == 0 {
-			fmt.Printf("\n%s(no subscription credentials configured in this workspace)%s\n", cli.Dim, cli.Reset)
-		}
-		return nil
+		return f.AutoHuman(body.Rows, func() {
+			fmt.Printf("%s%-20s  %-12s  %6s  %12s  %s%s\n",
+				cli.Bold, "Plan", "Provider", "Calls", "Tokens", "Last used", cli.Reset)
+			fmt.Println(strings.Repeat("─", 80))
+			for _, r := range body.Rows {
+				fmt.Printf("%-20s  %-12s  %6d  %12d  %s\n",
+					truncateString(r.Plan, 20),
+					truncateString(r.Provider, 12),
+					r.CallCount,
+					r.InTokens+r.OutTokens,
+					r.LastUsedAt)
+			}
+			if len(body.Rows) == 0 {
+				fmt.Printf("\n%s(no subscription credentials configured in this workspace)%s\n", cli.Dim, cli.Reset)
+			}
+		})
 	},
 }
 

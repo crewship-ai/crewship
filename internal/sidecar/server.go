@@ -242,6 +242,7 @@ func NewServer(cfg ServerConfig) *Server {
 		OnLLMCall:        s.buildLLMCallObserver(),
 		BillingMode:      billingMode,
 		SubscriptionPlan: subscriptionPlan,
+		BuildHash:        selfExeHash(),
 	})
 	s.proxy = proxy
 
