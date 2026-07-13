@@ -26,7 +26,11 @@ import (
 // probes — the helper takes the URL as a parameter so unit tests drive
 // every branch against an httptest server.
 func runCheckEpisodicRecallMode(ctx context.Context) checkResult {
-	return checkEpisodicRecallMode(ctx, cli.ResolveServer(flagServer, cliCfg))
+	// EffectiveServer (flag > profile > env > cfg) so this probe hits the
+	// same host every other doctor check (and every authenticated command)
+	// actually dials — ResolveServer (env > cfg) would silently probe a
+	// different server whenever a --profile / CREWSHIP_PROFILE is active. (#1003)
+	return checkEpisodicRecallMode(ctx, cli.EffectiveServer(flagServer, flagProfile, cliCfg))
 }
 
 // checkEpisodicRecallMode GETs <serverURL>/healthz and inspects the
