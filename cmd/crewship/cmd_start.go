@@ -52,6 +52,10 @@ var startCmd = &cobra.Command{
 	Short: "Start the Crewship server",
 	Long:  "Start the Crewship server with optional configuration flags.",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Brand banner on an interactive truecolor terminal (no-ops for
+		// pipes / NO_COLOR / CI, so structured stdout stays clean).
+		cli.PrintStartupBanner(os.Stderr, version)
+
 		configPath, _ := cmd.Flags().GetString("config")
 		dbURL, _ := cmd.Flags().GetString("db")
 		noDocker, _ := cmd.Flags().GetBool("no-docker")
