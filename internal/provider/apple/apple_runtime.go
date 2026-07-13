@@ -131,7 +131,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	}
 
 	// Apple Containers use --user for the init process user
-	args = append(args, "--user", "1001:1001")
+	args = append(args, "--user", agentContainerUser)
 
 	// Image + entrypoint: keep container alive
 	args = append(args, p.cfg.RuntimeImage, "sleep", "infinity")
