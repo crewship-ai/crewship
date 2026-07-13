@@ -17,6 +17,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -73,12 +74,15 @@ func (s *Server) handleListCredentials(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
 		return
 	}
-	s.proxyToAPIFiltered(
-		w, r,
-		http.MethodGet,
-		"/api/v1/internal/credentials?workspace_id="+s.ipc.WorkspaceID,
-		stripCredentialValues,
-	)
+	// #1031: scope the metadata listing to this crew so the agent can't
+	// enumerate peer credentials in the workspace. CrewID comes from the
+	// sidecar's bound IPC config, not the agent — a crew-less caller
+	// (e.g. coordinator) omits it and keeps the workspace-wide view.
+	endpoint := "/api/v1/internal/credentials?workspace_id=" + url.QueryEscape(s.ipc.WorkspaceID)
+	if s.ipc.CrewID != "" {
+		endpoint += "&crew_id=" + url.QueryEscape(s.ipc.CrewID)
+	}
+	s.proxyToAPIFiltered(w, r, http.MethodGet, endpoint, stripCredentialValues)
 }
 
 // stripCredentialValues removes plaintext token fields from a credentials
