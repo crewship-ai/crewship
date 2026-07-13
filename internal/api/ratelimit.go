@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -125,14 +126,16 @@ func mustCIDR(s string) *net.IPNet {
 }
 
 // ipLimiter tracks a per-IP rate limiter and when it was last seen.
+// lastSeen is an atomic unix-nano stamp (#1056) so the hot path can refresh
+// it under a read lock instead of taking the map's write lock every request.
 type ipLimiter struct {
 	limiter  *rate.Limiter
-	lastSeen time.Time
+	lastSeen atomic.Int64
 }
 
 // RateLimiter provides per-IP HTTP rate limiting middleware.
 type RateLimiter struct {
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	visitors map[string]*ipLimiter
 	rps      rate.Limit // requests per second
 	burst    int
@@ -174,16 +177,31 @@ func (rl *RateLimiter) Close() {
 
 // getLimiter returns the rate limiter for the given IP, creating one if needed.
 func (rl *RateLimiter) getLimiter(ip string) *rate.Limiter {
+	now := time.Now().UnixNano()
+
+	// Fast path (#1056): an existing IP only needs its lastSeen bumped, which
+	// is now an atomic store — so we hold only a read lock, letting requests
+	// from different IPs proceed concurrently instead of serializing on the
+	// map's single write lock.
+	rl.mu.RLock()
+	v, exists := rl.visitors[ip]
+	rl.mu.RUnlock()
+	if exists {
+		v.lastSeen.Store(now)
+		return v.limiter
+	}
+
+	// Slow path: create the missing entry under the write lock, double-checking
+	// in case another goroutine created it between our RUnlock and Lock.
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
-
-	v, exists := rl.visitors[ip]
-	if !exists {
-		limiter := rate.NewLimiter(rl.rps, rl.burst)
-		rl.visitors[ip] = &ipLimiter{limiter: limiter, lastSeen: time.Now()}
-		return limiter
+	if v, exists := rl.visitors[ip]; exists {
+		v.lastSeen.Store(now)
+		return v.limiter
 	}
-	v.lastSeen = time.Now()
+	v = &ipLimiter{limiter: rate.NewLimiter(rl.rps, rl.burst)}
+	v.lastSeen.Store(now)
+	rl.visitors[ip] = v
 	return v.limiter
 }
 
@@ -209,9 +227,9 @@ func (rl *RateLimiter) cleanupLoop() {
 func (rl *RateLimiter) cleanup() {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
-	cutoff := time.Now().Add(-5 * time.Minute)
+	cutoff := time.Now().Add(-5 * time.Minute).UnixNano()
 	for ip, v := range rl.visitors {
-		if v.lastSeen.Before(cutoff) {
+		if v.lastSeen.Load() < cutoff {
 			delete(rl.visitors, ip)
 		}
 	}

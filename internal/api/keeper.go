@@ -25,6 +25,10 @@ type SecretGetter interface {
 
 type ConversationReader interface {
 	Read(ctx context.Context, sessionID string, offset, limit int) ([]ConversationMessage, error)
+	// ReadTail returns the newest maxMessages of a session, oldest-first,
+	// with O(maxMessages) memory — the keeper hot path only needs the tail
+	// (#1041). maxMessages <= 0 behaves like a full read.
+	ReadTail(ctx context.Context, sessionID string, maxMessages int) ([]ConversationMessage, error)
 }
 
 // ConversationMessage is a minimal view of a conversation message for Keeper context.
@@ -205,17 +209,16 @@ func (h *KeeperHandler) loadConversationHistory(ctx context.Context, agentID str
 		return ""
 	}
 
-	msgs, err := h.conversations.Read(ctx, chatID, 0, 0)
+	// #1041: read only the tail. Read(ctx, chatID, 0, 0) loaded the ENTIRE
+	// .jsonl (limit=0 = uncapped in the store) just to keep the last N — a
+	// conversation can grow to hundreds of thousands of turns, and both
+	// HandleRequest and HandleExecute pay this on every call. ReadTail streams
+	// with an O(maxMessages) ring buffer and returns the newest N oldest-first,
+	// exactly what the manual slice below produced.
+	msgs, err := h.conversations.ReadTail(ctx, chatID, keeperConvHistoryLimit)
 	if err != nil || len(msgs) == 0 {
 		return ""
 	}
-
-	// Take last N messages
-	start := 0
-	if len(msgs) > keeperConvHistoryLimit {
-		start = len(msgs) - keeperConvHistoryLimit
-	}
-	msgs = msgs[start:]
 
 	var sb strings.Builder
 	for _, m := range msgs {

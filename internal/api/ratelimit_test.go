@@ -361,8 +361,8 @@ func TestRateLimiter_Cleanup(t *testing.T) {
 	// Add a visitor
 	rl.getLimiter("10.0.0.1")
 	rl.mu.Lock()
-	// Backdate its lastSeen
-	rl.visitors["10.0.0.1"].lastSeen = rl.visitors["10.0.0.1"].lastSeen.Add(-10 * time.Minute)
+	// Backdate its lastSeen (atomic unix-nano stamp after #1056).
+	rl.visitors["10.0.0.1"].lastSeen.Store(time.Now().Add(-10 * time.Minute).UnixNano())
 	rl.mu.Unlock()
 
 	rl.cleanup()

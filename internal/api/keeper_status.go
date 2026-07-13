@@ -76,14 +76,17 @@ func (h *KeeperStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 	// Query request stats from DB, scoped to this workspace's agents.
 	if h.db != nil {
 		const inWorkspace = ` WHERE requesting_agent_id IN (SELECT id FROM agents WHERE workspace_id = ?)`
+		// #1055: one conditional-aggregate scan instead of four separate
+		// COUNT(*) passes over the append-only, unbounded keeper_requests
+		// (which has no workspace_id column and no (agent, decision) index, so
+		// each pass is a scan). COALESCE guards the empty-table SUM→NULL case.
 		h.db.QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM keeper_requests`+inWorkspace, workspaceID).Scan(&resp.TotalRequests)
-		h.db.QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM keeper_requests`+inWorkspace+` AND decision='ALLOW'`, workspaceID).Scan(&resp.AllowCount)
-		h.db.QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM keeper_requests`+inWorkspace+` AND decision='DENY'`, workspaceID).Scan(&resp.DenyCount)
-		h.db.QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM keeper_requests`+inWorkspace+` AND decision='ESCALATE'`, workspaceID).Scan(&resp.EscalateCount)
+			`SELECT COUNT(*),
+			        COALESCE(SUM(CASE WHEN decision='ALLOW' THEN 1 ELSE 0 END), 0),
+			        COALESCE(SUM(CASE WHEN decision='DENY' THEN 1 ELSE 0 END), 0),
+			        COALESCE(SUM(CASE WHEN decision='ESCALATE' THEN 1 ELSE 0 END), 0)
+			 FROM keeper_requests`+inWorkspace, workspaceID).
+			Scan(&resp.TotalRequests, &resp.AllowCount, &resp.DenyCount, &resp.EscalateCount)
 		// Keeper-managed secrets in this workspace — same predicate the
 		// SecretStore loads with (keeper/secrets/store.go), workspace-scoped.
 		// The CLI has always printed this field; it was documented output

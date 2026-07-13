@@ -18,118 +18,77 @@ type Scrubber struct {
 	patterns []pattern
 }
 
-// New creates a Scrubber with built-in patterns for common credential types.
-func New() *Scrubber {
-	s := &Scrubber{}
-
-	// Order matters: more specific patterns first, generic last.
-
+// builtinPatterns holds the built-in credential regexes, compiled ONCE at
+// package init (#1054). Order matters: more specific patterns first, generic
+// last. New() copies this slice into each Scrubber so per-instance AddPattern
+// can't mutate the shared set. Previously New() ran ~17 regexp.MustCompile on
+// every call, and the keeper /execute hot path builds a fresh Scrubber per
+// request.
+var builtinPatterns = []pattern{
 	// SSH/RSA/EC private keys (multiline)
-	s.patterns = append(s.patterns, pattern{
-		name: "ssh_private_key",
-		re:   regexp.MustCompile(`-----BEGIN OPENSSH PRIVATE KEY-----[\s\S]*?-----END OPENSSH PRIVATE KEY-----`),
-	})
-	s.patterns = append(s.patterns, pattern{
-		name: "private_key",
-		re:   regexp.MustCompile(`-----BEGIN (?:RSA |EC |DSA |ED25519 )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |ED25519 )?PRIVATE KEY-----`),
-	})
+	{name: "ssh_private_key", re: regexp.MustCompile(`-----BEGIN OPENSSH PRIVATE KEY-----[\s\S]*?-----END OPENSSH PRIVATE KEY-----`)},
+	{name: "private_key", re: regexp.MustCompile(`-----BEGIN (?:RSA |EC |DSA |ED25519 )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |ED25519 )?PRIVATE KEY-----`)},
 
 	// Anthropic API keys: sk-ant-* (also covers sk-ant-oat for OAuth tokens)
-	s.patterns = append(s.patterns, pattern{
-		name: "anthropic_key",
-		re:   regexp.MustCompile(`sk-ant-[a-zA-Z0-9_-]{10,}`),
-	})
+	{name: "anthropic_key", re: regexp.MustCompile(`sk-ant-[a-zA-Z0-9_-]{10,}`)},
 
 	// OpenAI API keys: sk-proj-*, sk-svcacct-*, sk-{48+ chars}
-	s.patterns = append(s.patterns, pattern{
-		name: "openai_key",
-		re:   regexp.MustCompile(`sk-(?:proj|svcacct)-[a-zA-Z0-9_-]{10,}|sk-[a-zA-Z0-9]{20,}`),
-	})
+	{name: "openai_key", re: regexp.MustCompile(`sk-(?:proj|svcacct)-[a-zA-Z0-9_-]{10,}|sk-[a-zA-Z0-9]{20,}`)},
 
 	// Google API keys: AIzaSy...
-	s.patterns = append(s.patterns, pattern{
-		name: "google_key",
-		re:   regexp.MustCompile(`AIzaSy[a-zA-Z0-9_-]{33}`),
-	})
+	{name: "google_key", re: regexp.MustCompile(`AIzaSy[a-zA-Z0-9_-]{33}`)},
 
 	// Cursor API keys: cur_* (added with the multi-CLI wave). Pre-fix
 	// scrubber missed these — Cursor key leaked in agent stdout would
 	// flow unscrubbed into chat UI + journal entries.
-	s.patterns = append(s.patterns, pattern{
-		name: "cursor_key",
-		re:   regexp.MustCompile(`cur_[a-zA-Z0-9_-]{20,}`),
-	})
+	{name: "cursor_key", re: regexp.MustCompile(`cur_[a-zA-Z0-9_-]{20,}`)},
 
 	// Factory Droid API keys: fact_* / factory_* (per Factory CLI docs).
-	s.patterns = append(s.patterns, pattern{
-		name: "factory_key",
-		re:   regexp.MustCompile(`fact(?:ory)?_[a-zA-Z0-9_-]{20,}`),
-	})
+	{name: "factory_key", re: regexp.MustCompile(`fact(?:ory)?_[a-zA-Z0-9_-]{20,}`)},
 
 	// OpenRouter (used by OpenCode multi-provider routing): sk-or-*
-	s.patterns = append(s.patterns, pattern{
-		name: "openrouter_key",
-		re:   regexp.MustCompile(`sk-or-[a-zA-Z0-9_-]{20,}`),
-	})
+	{name: "openrouter_key", re: regexp.MustCompile(`sk-or-[a-zA-Z0-9_-]{20,}`)},
 
 	// xAI / Grok keys: xai-*
-	s.patterns = append(s.patterns, pattern{
-		name: "xai_key",
-		re:   regexp.MustCompile(`xai-[a-zA-Z0-9]{20,}`),
-	})
+	{name: "xai_key", re: regexp.MustCompile(`xai-[a-zA-Z0-9]{20,}`)},
 
 	// Groq keys: gsk_*
-	s.patterns = append(s.patterns, pattern{
-		name: "groq_key",
-		re:   regexp.MustCompile(`gsk_[a-zA-Z0-9]{20,}`),
-	})
+	{name: "groq_key", re: regexp.MustCompile(`gsk_[a-zA-Z0-9]{20,}`)},
 
 	// GitHub tokens: ghp_, gho_, ghs_, ghr_, github_pat_
-	s.patterns = append(s.patterns, pattern{
-		name: "github_token",
-		re:   regexp.MustCompile(`(?:ghp_|gho_|ghs_|ghr_|github_pat_)[a-zA-Z0-9]{10,}`),
-	})
+	{name: "github_token", re: regexp.MustCompile(`(?:ghp_|gho_|ghs_|ghr_|github_pat_)[a-zA-Z0-9]{10,}`)},
 
 	// GitLab personal access tokens: glpat-*
-	s.patterns = append(s.patterns, pattern{
-		name: "gitlab_token",
-		re:   regexp.MustCompile(`glpat-[a-zA-Z0-9_-]{20,}`),
-	})
+	{name: "gitlab_token", re: regexp.MustCompile(`glpat-[a-zA-Z0-9_-]{20,}`)},
 
 	// Slack tokens: xoxb-, xoxp-, xoxa-, xoxr-
-	s.patterns = append(s.patterns, pattern{
-		name: "slack_token",
-		re:   regexp.MustCompile(`xox[bpar]-[a-zA-Z0-9-]+`),
-	})
+	{name: "slack_token", re: regexp.MustCompile(`xox[bpar]-[a-zA-Z0-9-]+`)},
 
 	// AWS access key IDs: AKIA*
-	s.patterns = append(s.patterns, pattern{
-		name: "aws_key",
-		re:   regexp.MustCompile(`AKIA[0-9A-Z]{16}`),
-	})
+	{name: "aws_key", re: regexp.MustCompile(`AKIA[0-9A-Z]{16}`)},
 
 	// Bearer tokens in Authorization headers. Matches JWT-shaped AND opaque
 	// tokens (an authenticated local-model endpoint / LiteLLM proxy issues
 	// opaque bearers, not JWTs — #974 S2). 12+ non-space chars after "Bearer".
-	s.patterns = append(s.patterns, pattern{
-		name: "bearer_token",
-		re:   regexp.MustCompile(`(?i)Bearer\s+\S{12,}`),
-	})
+	{name: "bearer_token", re: regexp.MustCompile(`(?i)Bearer\s+\S{12,}`)},
 
 	// Generic password/secret patterns in JSON or env var format.
 	// Case-insensitive so camelCase `"apiKey":` (emitted into
 	// OPENCODE_CONFIG_CONTENT by the local-model endpoint, #974 S2) is caught
 	// alongside snake_case and SCREAMING_CASE variants.
-	s.patterns = append(s.patterns, pattern{
-		name: "",
-		re:   regexp.MustCompile(`(?i)"(?:password|secret|token|api_key|apikey|secret_key)":\s*"[^"]+"`),
-	})
-	s.patterns = append(s.patterns, pattern{
-		name: "",
-		re:   regexp.MustCompile(`(?i)(?:PASSWORD|SECRET|SECRET_KEY|API_KEY|APIKEY)=[^\s]{6,}`),
-	})
+	{name: "", re: regexp.MustCompile(`(?i)"(?:password|secret|token|api_key|apikey|secret_key)":\s*"[^"]+"`)},
+	{name: "", re: regexp.MustCompile(`(?i)(?:PASSWORD|SECRET|SECRET_KEY|API_KEY|APIKEY)=[^\s]{6,}`)},
+}
 
-	return s
+// New creates a Scrubber with built-in patterns for common credential types.
+// The built-in regexes are compiled once at package init (see builtinPatterns);
+// New() only copies the slice, so it is cheap enough for the per-request keeper
+// /execute path. The copy has its own backing array so a later AddPattern on
+// this instance never mutates the shared built-in set.
+func New() *Scrubber {
+	return &Scrubber{
+		patterns: append([]pattern(nil), builtinPatterns...),
+	}
 }
 
 // AddPattern registers a custom credential pattern.
