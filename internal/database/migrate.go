@@ -1612,6 +1612,12 @@ END;
 	// security contact, DENY-notify risk threshold). No row = inherit server
 	// config. See migrate_consts_v137_keeper_governance.go and issue #1001.
 	{version: 137, name: "keeper_governance_settings", sql: migrationKeeperGovernanceSettings},
+
+	// v138: index agent_mcp_bindings(credential_id) — the credential list
+	// (loadMCPUsedBatch, every GET /credentials) and delete both scan by
+	// credential_id with no index. See migrate_consts_v138_mcp_binding_credential_index.go
+	// and issue #1042.
+	{version: 138, name: "mcp_binding_credential_index", sql: migrationMCPBindingCredentialIndex},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
