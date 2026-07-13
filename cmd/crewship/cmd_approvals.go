@@ -72,32 +72,26 @@ Examples:
 			return err
 		}
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(entry)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(entry)
-		}
-
-		// Text mode: print canonical fields up top, then dump any extra
-		// keys verbatim so an evolving server payload still renders
-		// something useful without code changes here.
-		canon := []string{"id", "status", "kind", "reason", "crew_id", "agent_id", "mission_id",
-			"requested_by", "decided_by", "decided_at", "comment", "created_at", "updated_at"}
-		printed := map[string]bool{}
-		for _, k := range canon {
-			if v, ok := entry[k]; ok && v != nil && fmt.Sprintf("%v", v) != "" {
+		return f.AutoHuman(entry, func() {
+			// Text mode: print canonical fields up top, then dump any extra
+			// keys verbatim so an evolving server payload still renders
+			// something useful without code changes here.
+			canon := []string{"id", "status", "kind", "reason", "crew_id", "agent_id", "mission_id",
+				"requested_by", "decided_by", "decided_at", "comment", "created_at", "updated_at"}
+			printed := map[string]bool{}
+			for _, k := range canon {
+				if v, ok := entry[k]; ok && v != nil && fmt.Sprintf("%v", v) != "" {
+					fmt.Printf("  %s%-14s%s %v\n", cli.Dim, k, cli.Reset, v)
+					printed[k] = true
+				}
+			}
+			for k, v := range entry {
+				if printed[k] || v == nil {
+					continue
+				}
 				fmt.Printf("  %s%-14s%s %v\n", cli.Dim, k, cli.Reset, v)
-				printed[k] = true
 			}
-		}
-		for k, v := range entry {
-			if printed[k] || v == nil {
-				continue
-			}
-			fmt.Printf("  %s%-14s%s %v\n", cli.Dim, k, cli.Reset, v)
-		}
-		return nil
+		})
 	},
 }
 
@@ -154,41 +148,35 @@ var approvalsListCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(body.Rows)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(body.Rows)
-		}
-
-		// Table output — color the STATUS column to make the queue
-		// scannable at a glance (same idiom as journal's severity chip).
-		for _, r := range body.Rows {
-			color := cli.Gray
-			switch r.Status {
-			case "pending":
-				color = cli.Yellow
-			case "approved":
-				color = cli.Green
-			case "denied":
-				color = cli.Red
-			case "timeout", "cancelled":
-				color = cli.Gray
+		return f.AutoHuman(body.Rows, func() {
+			// Table output — color the STATUS column to make the queue
+			// scannable at a glance (same idiom as journal's severity chip).
+			for _, r := range body.Rows {
+				color := cli.Gray
+				switch r.Status {
+				case "pending":
+					color = cli.Yellow
+				case "approved":
+					color = cli.Green
+				case "denied":
+					color = cli.Red
+				case "timeout", "cancelled":
+					color = cli.Gray
+				}
+				// The ID is what `approvals approve/deny <id>` consumes — print
+				// it in full (CUIDs are 25 chars; the old 24-char truncation
+				// clipped the last character and made every scraped ID unusable).
+				// Crew/agent IDs are link targets only and stay shortened.
+				fmt.Printf("%s%-25s%s  %s[%-9s]%s  %s%-16s%s  %-16s  %-16s  %s\n",
+					cli.Dim, r.ID, cli.Reset,
+					color, r.Status, cli.Reset,
+					cli.Bold, truncateString(r.Kind, 16), cli.Reset,
+					truncateString(r.CrewID, 16),
+					truncateString(r.AgentID, 16),
+					truncateString(r.Reason, 48),
+				)
 			}
-			// The ID is what `approvals approve/deny <id>` consumes — print
-			// it in full (CUIDs are 25 chars; the old 24-char truncation
-			// clipped the last character and made every scraped ID unusable).
-			// Crew/agent IDs are link targets only and stay shortened.
-			fmt.Printf("%s%-25s%s  %s[%-9s]%s  %s%-16s%s  %-16s  %-16s  %s\n",
-				cli.Dim, r.ID, cli.Reset,
-				color, r.Status, cli.Reset,
-				cli.Bold, truncateString(r.Kind, 16), cli.Reset,
-				truncateString(r.CrewID, 16),
-				truncateString(r.AgentID, 16),
-				truncateString(r.Reason, 48),
-			)
-		}
-		return nil
+		})
 	},
 }
 
