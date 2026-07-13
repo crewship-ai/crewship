@@ -32,6 +32,14 @@ const (
 	// ctxWorkspaceID on purpose: this value is derived from the token
 	// itself, never from caller-supplied query/body input.
 	ctxInternalTokenWS contextKey = "internal_token_workspace"
+	// ctxInternalTokenCrew carries the crew a crew-bound X-Internal-Token
+	// is cryptographically bound to (#1159). Set by requireInternal for
+	// crwv1 tokens (a per-crew sidecar's token); empty for workspace-bound
+	// and master-token callers. Like ctxInternalTokenWS it is derived from
+	// the token's HMAC — a ?crew_id query cannot forge it, so handlers that
+	// scope by crew (credential metadata listing) consult this instead of
+	// trusting the query parameter.
+	ctxInternalTokenCrew contextKey = "internal_token_crew"
 )
 
 // Reason codes returned in 401 bodies and WWW-Authenticate. The
@@ -82,6 +90,17 @@ func RoleFromContext(ctx context.Context) string {
 // — it cannot be forged by query parameters or request bodies.
 func InternalTokenWorkspaceFromContext(ctx context.Context) string {
 	s, _ := ctx.Value(ctxInternalTokenWS).(string)
+	return s
+}
+
+// InternalTokenCrewFromContext returns the crew the request's
+// X-Internal-Token is cryptographically bound to (#1159), or "" when the
+// caller authenticated with a workspace-bound or master token (no crew
+// binding) or the request didn't pass requireInternal. Handlers that scope
+// by crew (credential metadata listing) use this in preference to the
+// forgeable ?crew_id query parameter.
+func InternalTokenCrewFromContext(ctx context.Context) string {
+	s, _ := ctx.Value(ctxInternalTokenCrew).(string)
 	return s
 }
 

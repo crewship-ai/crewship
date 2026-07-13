@@ -9,6 +9,31 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Security
+
+- **Internal tokens are now bound to a crew, closing the
+  credential-metadata enumeration leak (#1159).** The `?crew_id` scope on
+  `GET /api/v1/internal/credentials` (#1031) was opt-in and fail-open: a
+  workspace-bound `X-Internal-Token` holder could omit `crew_id` (get the
+  whole workspace's credential metadata) or forge a sibling crew's id and
+  enumerate it. A per-crew sidecar now receives a **crew-bound** token —
+  `crwv1.<workspace_id>.<crew_id>.<hex(HMAC-SHA256(master, ctx ||
+  workspace_id || crew_id))>`, `internaltoken.DeriveCrewToken` — carrying
+  the workspace binding (PR-F24) plus a crew binding. `requireInternal`
+  rejects a `?crew_id` that disagrees with the token's crew (403) on every
+  internal route and exposes the bound crew via
+  `InternalTokenCrewFromContext`; the credential listing scopes to that
+  cryptographic crew in preference to the forgeable query parameter. The
+  loopback exemption for the crew-less in-process `TokenSyncer` is
+  connection-based (`r.RemoteAddr`), never header-based. Crew-less runs
+  fall back to the workspace-bound `wsv1` token unchanged.
+- **Privileged crews now emit a provision-time WARN (#1032).** A crew
+  provisioned with `--privileged` (e.g. DinD) collapses the UID 1001/1002
+  boundary that isolates the sidecar's IPC token and injected credentials
+  from the agent process. The full remediation is out of scope; the log
+  line surfaces the trust downgrade in ops the moment such a crew is
+  provisioned.
+
 ## [1.0.0-rc.1] — 2026-07-12
 
 ### Security
