@@ -217,16 +217,39 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	// #1053: grace_seconds=0 means "no overlap" — the caller explicitly wants
+	// no fallback window, so the old ciphertext must not be retained at rest.
+	// Store no old value and mark the rotation born-expired, mirroring the
+	// terminal shape ExpireGracedRotations writes (status='EXPIRED',
+	// old_value=''). Without this the old value would sit encrypted-at-rest
+	// until the hourly expiry sweep — a data-retention window (DB backup /
+	// key-compromise), even though it is never served as a fallback
+	// (fallback requires expires_at>now, which grace=0 already fails). For
+	// grace>0 the old value is retained for the fallback window as before.
+	oldValStore := oldEncrypted
+	rotStatus := "ACTIVE"
+	if graceSec == 0 {
+		oldValStore = ""
+		rotStatus = "EXPIRED"
+	}
+
 	rotationID := generateCUID()
 	if _, err := tx.ExecContext(r.Context(), `
 		INSERT INTO credential_rotations (id, credential_id, old_value, grace_seconds, rotated_at, expires_at, rotated_by, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE')`,
-		rotationID, credID, oldEncrypted, graceSec, nowStr, expiresAt, user.ID); err != nil {
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		rotationID, credID, oldValStore, graceSec, nowStr, expiresAt, user.ID, rotStatus); err != nil {
 		h.logger.Error("insert rotation row", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
+	// #1062: Rotate reactivates the credential (status='ACTIVE') even if it was
+	// REVOKED/EXPIRED (deleted_at NULL) by the OAuth worker or a health check.
+	// This is intentional and pinned by TestSecCred_Rotate_ReactivatesRevoked:
+	// rotation is the recovery path — supplying a fresh value through the
+	// privileged credential.rotate capability is exactly how an operator brings
+	// an upstream-revoked credential back. Soft-deleted credentials are already
+	// excluded (the load above filters deleted_at IS NULL → 404).
 	if _, err := tx.ExecContext(r.Context(), `
 		UPDATE credentials SET encrypted_value = ?, status = 'ACTIVE', last_error = NULL,
 		                       updated_at = ?
@@ -393,12 +416,12 @@ func (h *CredentialHandler) CancelRotation(w http.ResponseWriter, r *http.Reques
 	// Workspace isolation: walk credential_id back to the workspace
 	// before we touch anything. A 404 here also covers the case
 	// where rotationID belongs to another workspace.
-	var status string
+	var status, rotCredID string
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT cr.status FROM credential_rotations cr
+		SELECT cr.status, cr.credential_id FROM credential_rotations cr
 		JOIN credentials c ON c.id = cr.credential_id
 		WHERE cr.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL`,
-		rotationID, workspaceID).Scan(&status)
+		rotationID, workspaceID).Scan(&status, &rotCredID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "Rotation not found")
@@ -424,6 +447,16 @@ func (h *CredentialHandler) CancelRotation(w http.ResponseWriter, r *http.Reques
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
+
+	// #1052: ending the grace window early destroys the fallback secret
+	// (old_value scrubbed). Rotate records ROTATE and Delete records REVOKE,
+	// but cancel wrote nothing — the timeline silently omitted a
+	// security-relevant secret destruction. Record it (there is no dedicated
+	// CANCEL event type; REVOKE with a rotation_cancelled marker is the
+	// closest fit and keeps the forensic "when did the fallback go away"
+	// answerable). Best-effort: the cancel already succeeded.
+	recordCredentialEventBestEffort(r.Context(), h.db, h.logger, rotCredID, AuditEventRevoke, "", clientIP(r),
+		map[string]any{"rotation_id": rotationID, "rotation_cancelled": true, "old_value_scrubbed": true})
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "CANCELLED"})
 }
