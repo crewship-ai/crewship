@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
 )
 
@@ -59,6 +61,57 @@ func TestEvalRunsRunE_DefaultStaysHuman(t *testing.T) {
 	}
 }
 
+// TestEvalRunsRunE_YAMLAndNDJSON is the flip side of DefaultStaysHuman:
+// evalRunsCmd routes body.Rows (a slice) through f.AutoHuman now, so
+// --format yaml/ndjson must carry the run rows instead of the table.
+func TestEvalRunsRunE_YAMLAndNDJSON(t *testing.T) {
+	stub := covSetupCli5(t)
+	stub.OnGet("/api/v1/eval/runs", clitest.JSONResponse(200, map[string]any{
+		"rows": []map[string]any{
+			{"id": "er_1", "kind": "replay", "mission_id": "MIS-42", "baseline_mission_id": "", "status": "QUEUED", "created_at": "2026-07-13T00:00:00Z"},
+			{"id": "er_2", "kind": "compare", "mission_id": "MIS-43", "baseline_mission_id": "MIS-42", "status": "DONE", "created_at": "2026-07-13T00:01:00Z"},
+		},
+		"count": 2,
+	}))
+
+	flagFormat = "yaml"
+	var err error
+	out := covCaptureStdoutCli5(t, func() { err = evalRunsCmd.RunE(evalRunsCmd, nil) })
+	if err != nil {
+		t.Fatalf("yaml RunE: %v", err)
+	}
+	var yamlRows []map[string]any
+	if uerr := yaml.Unmarshal([]byte(out), &yamlRows); uerr != nil {
+		t.Fatalf("yaml stdout does not parse: %v\ngot:\n%s", uerr, out)
+	}
+	if len(yamlRows) != 2 {
+		t.Fatalf("yaml: want 2 rows, got %d; out:\n%s", len(yamlRows), out)
+	}
+	if yamlRows[0]["kind"] != "replay" || yamlRows[1]["kind"] != "compare" {
+		t.Errorf("yaml rows mismatch: %+v", yamlRows)
+	}
+
+	flagFormat = "ndjson"
+	out = covCaptureStdoutCli5(t, func() { err = evalRunsCmd.RunE(evalRunsCmd, nil) })
+	if err != nil {
+		t.Fatalf("ndjson RunE: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("ndjson: want one line per run row (2), got %d:\n%s", len(lines), out)
+	}
+	var first, second map[string]any
+	if uerr := json.Unmarshal([]byte(lines[0]), &first); uerr != nil {
+		t.Fatalf("ndjson line 0 is not valid JSON: %v\nline:\n%s", uerr, lines[0])
+	}
+	if uerr := json.Unmarshal([]byte(lines[1]), &second); uerr != nil {
+		t.Fatalf("ndjson line 1 is not valid JSON: %v\nline:\n%s", uerr, lines[1])
+	}
+	if first["kind"] != "replay" || second["kind"] != "compare" {
+		t.Errorf("ndjson rows mismatch: %+v / %+v", first, second)
+	}
+}
+
 // ── eval baseline list / show / diff (cmd_eval_baseline.go) ─────────────────
 
 func TestEvalBaselineListRunE_DefaultStaysHuman(t *testing.T) {
@@ -82,6 +135,67 @@ func TestEvalBaselineListRunE_DefaultStaysHuman(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("human output missing %q; got:\n%s", want, out)
 		}
+	}
+}
+
+// TestEvalBaselineListRunE_YAMLAndNDJSON is the flip side of
+// DefaultStaysHuman: evalBaselineListCmd routes its summary rows (a slice)
+// through f.AutoHuman now, so --format yaml/ndjson must carry the baseline
+// summaries instead of the table.
+func TestEvalBaselineListRunE_YAMLAndNDJSON(t *testing.T) {
+	covSetupCli5(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	mustWriteBaseline(t, home, baselineRecord{
+		Name:        "mainbase",
+		GeneratedAt: "2026-07-13T00:00:00Z",
+		Scenarios:   []string{"eval-x"},
+		Tiers:       []string{"fast"},
+		RunsPerCell: 5,
+	})
+	mustWriteBaseline(t, home, baselineRecord{
+		Name:        "secondbase",
+		GeneratedAt: "2026-07-12T00:00:00Z",
+		Scenarios:   []string{"eval-y"},
+		Tiers:       []string{"smart"},
+		RunsPerCell: 3,
+	})
+
+	flagFormat = "yaml"
+	var err error
+	out := covCaptureStdoutCli5(t, func() { err = evalBaselineListCmd.RunE(evalBaselineListCmd, nil) })
+	if err != nil {
+		t.Fatalf("yaml RunE: %v", err)
+	}
+	var yamlRows []map[string]any
+	if uerr := yaml.Unmarshal([]byte(out), &yamlRows); uerr != nil {
+		t.Fatalf("yaml stdout does not parse: %v\ngot:\n%s", uerr, out)
+	}
+	if len(yamlRows) != 2 {
+		t.Fatalf("yaml: want 2 baseline rows, got %d; out:\n%s", len(yamlRows), out)
+	}
+	if yamlRows[0]["name"] != "mainbase" || yamlRows[1]["name"] != "secondbase" {
+		t.Errorf("yaml rows mismatch: %+v", yamlRows)
+	}
+
+	flagFormat = "ndjson"
+	out = covCaptureStdoutCli5(t, func() { err = evalBaselineListCmd.RunE(evalBaselineListCmd, nil) })
+	if err != nil {
+		t.Fatalf("ndjson RunE: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("ndjson: want one line per baseline row (2), got %d:\n%s", len(lines), out)
+	}
+	var first, second map[string]any
+	if uerr := json.Unmarshal([]byte(lines[0]), &first); uerr != nil {
+		t.Fatalf("ndjson line 0 is not valid JSON: %v\nline:\n%s", uerr, lines[0])
+	}
+	if uerr := json.Unmarshal([]byte(lines[1]), &second); uerr != nil {
+		t.Fatalf("ndjson line 1 is not valid JSON: %v\nline:\n%s", uerr, lines[1])
+	}
+	if first["name"] != "mainbase" || second["name"] != "secondbase" {
+		t.Errorf("ndjson rows mismatch: %+v / %+v", first, second)
 	}
 }
 
@@ -170,6 +284,55 @@ func TestEvalCompareRunE_DefaultStaysHuman(t *testing.T) {
 	}
 }
 
+// TestEvalCompareRunE_YAMLAndNDJSON is the flip side of DefaultStaysHuman:
+// runEvalCompare routes its {scenario, side_a, side_b, agreement} payload
+// through f.AutoHuman now, so --format yaml/ndjson must carry it instead of
+// the table/markdown renderers.
+func TestEvalCompareRunE_YAMLAndNDJSON(t *testing.T) {
+	stub := covSetupCli5(t)
+	stub.OnPost("/api/v1/workspaces/"+covWSCli5+"/pipelines/eval-x/run",
+		clitest.JSONResponse(200, map[string]any{
+			"run_id": "run_a", "status": "COMPLETED", "output": "hello world",
+			"duration_ms": 10, "cost_usd": 0.02,
+		}))
+
+	flagFormat = "yaml"
+	var err error
+	out := covCaptureStdoutCli5(t, func() { err = runEvalCompare(evalCompareCmd, []string{"eval-x"}) })
+	if err != nil {
+		t.Fatalf("yaml RunE: %v", err)
+	}
+	var yamlPayload map[string]any
+	if uerr := yaml.Unmarshal([]byte(out), &yamlPayload); uerr != nil {
+		t.Fatalf("yaml stdout does not parse: %v\ngot:\n%s", uerr, out)
+	}
+	if yamlPayload == nil {
+		t.Fatalf("yaml stdout parsed to nil; got:\n%s", out)
+	}
+	if yamlPayload["scenario"] != "eval-x" {
+		t.Errorf("yaml payload missing scenario=eval-x: %+v", yamlPayload)
+	}
+
+	flagFormat = "ndjson"
+	out = covCaptureStdoutCli5(t, func() { err = runEvalCompare(evalCompareCmd, []string{"eval-x"}) })
+	if err != nil {
+		t.Fatalf("ndjson RunE: %v", err)
+	}
+	// The compare payload is a single map (not a top-level slice), so
+	// NDJSON emits exactly one line for the whole object.
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("ndjson: want exactly 1 line for the compare object, got %d:\n%s", len(lines), out)
+	}
+	var ndjsonPayload map[string]any
+	if uerr := json.Unmarshal([]byte(lines[0]), &ndjsonPayload); uerr != nil {
+		t.Fatalf("ndjson line is not valid JSON: %v\nline:\n%s", uerr, lines[0])
+	}
+	if ndjsonPayload["scenario"] != "eval-x" {
+		t.Errorf("ndjson payload missing scenario=eval-x: %+v", ndjsonPayload)
+	}
+}
+
 // ── eval scenarios report (cmd_eval_scenarios.go) ───────────────────────────
 
 func TestRenderEvalReport_DefaultStaysHuman(t *testing.T) {
@@ -190,5 +353,63 @@ func TestRenderEvalReport_DefaultStaysHuman(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("human output missing %q; got:\n%s", want, out)
 		}
+	}
+}
+
+// TestRenderEvalReportRunE_YAMLAndNDJSON is the flip side of
+// DefaultStaysHuman: renderEvalReport routes its {scenarios, tiers, matrix,
+// outcomes, generated} payload through f.AutoHuman now, so --format
+// yaml/ndjson must carry it. This also pins the intentional schema fix
+// flagged in review: --format yaml previously built its own map literal
+// WITHOUT a `generated` field (only json had it); folding into one
+// AutoHuman payload means yaml now includes `generated` too.
+func TestRenderEvalReportRunE_YAMLAndNDJSON(t *testing.T) {
+	covSetupCli5(t)
+	outcomes := []scenarioOutcome{
+		{Scenario: "eval-x", Tier: "", Attempt: 1, Status: "COMPLETED", DurationMs: 5, CostUSD: 0.01},
+	}
+
+	flagFormat = "yaml"
+	var err error
+	out := covCaptureStdoutCli5(t, func() {
+		err = renderEvalReport(evalScenariosCmd, outcomes, []string{"eval-x"}, []string{""})
+	})
+	if err != nil {
+		t.Fatalf("yaml renderEvalReport: %v", err)
+	}
+	var yamlPayload map[string]any
+	if uerr := yaml.Unmarshal([]byte(out), &yamlPayload); uerr != nil {
+		t.Fatalf("yaml stdout does not parse: %v\ngot:\n%s", uerr, out)
+	}
+	if yamlPayload == nil {
+		t.Fatalf("yaml stdout parsed to nil; got:\n%s", out)
+	}
+	if _, ok := yamlPayload["scenarios"]; !ok {
+		t.Errorf("yaml payload missing scenarios: %+v", yamlPayload)
+	}
+	// The schema-fix pin: `generated` used to be json-only.
+	if _, ok := yamlPayload["generated"]; !ok {
+		t.Errorf("yaml payload missing `generated` key (schema fix regressed); got: %+v", yamlPayload)
+	}
+
+	flagFormat = "ndjson"
+	out = covCaptureStdoutCli5(t, func() {
+		err = renderEvalReport(evalScenariosCmd, outcomes, []string{"eval-x"}, []string{""})
+	})
+	if err != nil {
+		t.Fatalf("ndjson renderEvalReport: %v", err)
+	}
+	// The report is a single map (not a top-level slice), so NDJSON emits
+	// exactly one line for the whole object.
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("ndjson: want exactly 1 line for the report object, got %d:\n%s", len(lines), out)
+	}
+	var ndjsonPayload map[string]any
+	if uerr := json.Unmarshal([]byte(lines[0]), &ndjsonPayload); uerr != nil {
+		t.Fatalf("ndjson line is not valid JSON: %v\nline:\n%s", uerr, lines[0])
+	}
+	if _, ok := ndjsonPayload["generated"]; !ok {
+		t.Errorf("ndjson payload missing `generated` key: %+v", ndjsonPayload)
 	}
 }
