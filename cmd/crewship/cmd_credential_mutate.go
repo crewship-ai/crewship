@@ -43,6 +43,25 @@ func buildEndpointCredentialValue(baseURL, authToken string, headerPairs []strin
 	return string(raw), nil
 }
 
+// resolveCrewIDs resolves --crews values (crew slug or ID, in any order) to
+// crew IDs — the form the API's credential_crews junction expects. Blank
+// entries are dropped so `--crews ""` clears the scoping (workspace-wide).
+func resolveCrewIDs(client *cli.Client, refs []string) ([]string, error) {
+	ids := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		id, err := resolveCrewID(client, ref)
+		if err != nil {
+			return nil, fmt.Errorf("resolve crew %q: %w", ref, err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 var credCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a credential",
@@ -118,6 +137,22 @@ var credCreateCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
+
+		// #1083: crew scoping parity. --crews accepts slugs or IDs; resolve
+		// each to an ID (what the API's credential_crews junction expects).
+		// The server derives scope=CREW from a non-empty crew_ids list, but
+		// an explicit --scope still passes through for the workspace-wide case.
+		if flags.Changed("crews") {
+			crewRefs, _ := flags.GetStringSlice("crews")
+			crewIDs, err := resolveCrewIDs(client, crewRefs)
+			if err != nil {
+				return err
+			}
+			body["crew_ids"] = crewIDs
+		}
+		if scope, _ := flags.GetString("scope"); scope != "" {
+			body["scope"] = scope
+		}
 
 		valid, errMsg := testCredentialValue(client, provider, credType, value)
 		if valid {
@@ -204,6 +239,20 @@ var credUpdateCmd = &cobra.Command{
 				return fmt.Errorf("--security-level must be between 0 and 3")
 			}
 			body["security_level"] = v
+		}
+		// #1083: crew scoping parity. Passing --crews (even empty, to clear)
+		// replaces the credential_crews set; the server re-derives scope.
+		if flags.Changed("crews") {
+			crewRefs, _ := flags.GetStringSlice("crews")
+			crewIDs, err := resolveCrewIDs(client, crewRefs)
+			if err != nil {
+				return err
+			}
+			body["crew_ids"] = crewIDs
+		}
+		if flags.Changed("scope") {
+			scope, _ := flags.GetString("scope")
+			body["scope"] = scope
 		}
 
 		if len(body) == 0 {

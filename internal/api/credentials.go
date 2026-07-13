@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/credprovider"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -352,25 +353,10 @@ func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *CredentialHandler) DefaultEnvVar(w http.ResponseWriter, r *http.Request) {
 	prov := r.URL.Query().Get("provider")
-	envVar := defaultEnvVarForCLIProvider(prov)
+	// #1083: the provider→env-var map is single-sourced in internal/credprovider
+	// so this handler and the CLI's --provider help can't drift.
+	envVar := credprovider.DefaultEnvVar(prov)
 	writeJSON(w, http.StatusOK, map[string]string{"env_var": envVar})
-}
-
-func defaultEnvVarForCLIProvider(provider string) string {
-	switch provider {
-	case "GITHUB":
-		return "GH_TOKEN"
-	case "GITLAB":
-		return "GITLAB_TOKEN"
-	case "VERCEL":
-		return "VERCEL_TOKEN"
-	case "AWS":
-		return "AWS_ACCESS_KEY_ID"
-	case "KUBERNETES":
-		return "KUBECONFIG"
-	default:
-		return ""
-	}
 }
 
 // isAnthropicOAuthToken detects if a value is an Anthropic OAuth/setup token

@@ -300,6 +300,16 @@ func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 	// deployed behind a trusted reverse proxy on a public interface and
 	// the operator has accepted that X-Internal-Token is the sole guard.
 	allowAny := os.Getenv("CREWSHIP_INTERNAL_ALLOW_ANY") == "true"
+	if allowAny {
+		// #1083: surface the kill-switch at startup. With the origin gate off,
+		// X-Internal-Token is the sole guard — and the include_values=true
+		// plaintext credential readback still trusts requestIsLoopback(
+		// r.RemoteAddr). Behind a reverse proxy that rewrites RemoteAddr to a
+		// loopback address, that assumption would no longer hold. Only enable
+		// ALLOW_ANY behind a trusted proxy that preserves the real client addr.
+		h.logger.Warn("CREWSHIP_INTERNAL_ALLOW_ANY=true: internal-API origin gate disabled; X-Internal-Token is the sole guard. " +
+			"Ensure the reverse proxy does not rewrite RemoteAddr to loopback — the include_values plaintext readback gates on it.")
+	}
 	// #1020: trusted-proxy X-Forwarded-For resolution. Empty/unset = today's
 	// behaviour (gate on the direct RemoteAddr only). The set is EXPLICIT and
 	// never auto-populated with private ranges — see parseTrustedProxies.

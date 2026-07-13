@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/credprovider"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -428,15 +429,18 @@ var credDefaultEnvVarCmd = &cobra.Command{
 		if err := requireAuth(); err != nil {
 			return err
 		}
+		// #1083: the route is now workspace-scoped (wsCtx) for uniformity
+		// with the rest of the credentials surface, so a workspace must be
+		// selected even though the response carries no tenant data.
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
 		provider, _ := cmd.Flags().GetString("provider")
 		if provider == "" {
 			return fmt.Errorf("--provider is required")
 		}
 
 		client := newAPIClient()
-		// Endpoint is workspace-agnostic — clear ws to match the
-		// existing pre-save `credential test` invocation.
-		client.WorkspaceID = ""
 		resp, err := client.Get("/api/v1/credentials/default-env-var?provider=" + url.QueryEscape(provider))
 		if err != nil {
 			return err
@@ -461,25 +465,29 @@ var credDefaultEnvVarCmd = &cobra.Command{
 func init() {
 	credCreateCmd.Flags().String("name", "", "Credential name (required)")
 	credCreateCmd.Flags().String("type", "", "Type: SECRET|API_KEY|AI_CLI_TOKEN|CLI_TOKEN|ENDPOINT_URL (required)")
-	credCreateCmd.Flags().String("provider", "", "Provider: ANTHROPIC|OPENAI|GOOGLE|GITHUB|GITLAB|VERCEL|AWS|OLLAMA|CUSTOM_CLI|NONE")
+	credCreateCmd.Flags().String("provider", "", "Provider: "+credprovider.ProvidersHelp())
 	credCreateCmd.Flags().String("value", "", "Credential value — the URL for ENDPOINT_URL (visible in process list, prefer --value-stdin)")
 	credCreateCmd.Flags().Bool("value-stdin", false, "Read value from stdin (secure)")
 	credCreateCmd.Flags().String("auth-token", "", "ENDPOINT_URL only: bearer token sent to the endpoint (Authorization: Bearer …); stored encrypted, never displayed")
 	credCreateCmd.Flags().StringArray("header", nil, "ENDPOINT_URL only: extra request header KEY=VALUE (repeatable; use for Basic/custom-header endpoints)")
 	credCreateCmd.Flags().String("env-var-name", "", "Environment variable name")
 	credCreateCmd.Flags().Int("security-level", 0, "Keeper security level: 0 (none), 1 (low), 2 (medium), 3 (sensitive)")
+	credCreateCmd.Flags().StringSlice("crews", nil, "Crew slugs or IDs to scope this credential to (repeatable/comma-separated); sets scope=CREW. Omit for a workspace-wide credential")
+	credCreateCmd.Flags().String("scope", "", "Visibility scope: WORKSPACE (default) or CREW. Usually inferred from --crews; set explicitly to override")
 
 	credUpdateCmd.Flags().String("name", "", "Credential name")
 	credUpdateCmd.Flags().String("value", "", "New value")
 	credUpdateCmd.Flags().Bool("value-stdin", false, "Read value from stdin")
 	credUpdateCmd.Flags().Int("security-level", 0, "Keeper security level: 0 (none), 1 (low), 2 (medium), 3 (sensitive)")
+	credUpdateCmd.Flags().StringSlice("crews", nil, "Replace the crew scoping with these crew slugs or IDs (repeatable/comma-separated); pass an empty value to clear crews and make it workspace-wide")
+	credUpdateCmd.Flags().String("scope", "", "Visibility scope: WORKSPACE or CREW. Usually inferred from --crews; set explicitly to override")
 
 	credAssignCmd.Flags().String("env-var-name", "", "Environment variable name override")
 	credAssignCmd.Flags().Int("priority", 0, "Priority (1-10)")
 
 	credDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
-	credTestCmd.Flags().String("provider", "", "Provider: ANTHROPIC|OPENAI|GOOGLE|GITHUB|GITLAB|VERCEL|AWS|CUSTOM_CLI (required)")
+	credTestCmd.Flags().String("provider", "", "Provider: "+credprovider.ProvidersHelp()+" (required)")
 	credTestCmd.Flags().String("type", "", "Type: API_KEY|AI_CLI_TOKEN|SECRET|CLI_TOKEN")
 	credTestCmd.Flags().String("value", "", "Credential value to test")
 	credTestCmd.Flags().Bool("value-stdin", false, "Read value from stdin")
