@@ -17,6 +17,9 @@ import (
 
 func newRoutineMCPTestServer(t *testing.T, ipc *IPCConfig) *Server {
 	t.Helper()
+	if ipc != nil && ipc.AgentID == "" {
+		ipc.AgentID = "test-boot-agent"
+	}
 	return NewServer(ServerConfig{
 		Addr:   "127.0.0.1:0",
 		IPC:    ipc,

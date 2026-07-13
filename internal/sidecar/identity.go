@@ -97,10 +97,16 @@ func (s *Server) actingAgentID(r *http.Request) (id string, ok bool) {
 		if s.tokensProvisioned() {
 			return "", false
 		}
-		if s.ipc != nil {
+		// Legacy (token-less) fallback: attribute to the boot agent — but only
+		// when there IS a boot identity. When s.ipc is nil or its AgentID is
+		// empty we CANNOT attribute the action, so fail closed with ("", false)
+		// rather than the old ("", true), which conflated "no identity" with
+		// "resolved" — a latent fail-open for any future caller that doesn't
+		// pre-check ipc (#1059).
+		if s.ipc != nil && s.ipc.AgentID != "" {
 			return s.ipc.AgentID, true
 		}
-		return "", true
+		return "", false
 	}
 	if !matched {
 		return "", false
