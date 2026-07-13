@@ -136,7 +136,7 @@ smuggled through the body.
 | `query` | string | -- | Required. The search text. `400` when empty. |
 | `limit` | integer | `10` | Max hits to return. Non-positive values fall back to the default; capped at `50` server-side. |
 | `scope` | string | `""` | One of `""` (no scope filter, MEMBER+ implied), `"own"` (caller's own memory only), or `"crew_shared"` (crew-shared memory). Any other value is `400`. |
-| `crew_id` | string | -- | Optional. Binds `crew_shared` results to a single crew. |
+| `crew_id` | string | -- | Binds `crew_shared` results to a single crew. **Required** when `scope` is `crew_shared` (`400` if omitted), and the caller must be a member of that crew in this workspace (`403` otherwise). Ignored for other scopes. |
 
 **Response:** `200 OK`
 
@@ -175,8 +175,9 @@ The unused half of each hit is **omitted**, not emitted as `null`
 
 | Status | Condition |
 |---|---|
-| `400` | Malformed JSON, empty `query`, or an invalid `scope`. |
+| `400` | Malformed JSON, empty `query`, an invalid `scope`, or `scope=crew_shared` without a `crew_id`. |
 | `401` | No workspace context in the session. |
+| `403` | `scope=crew_shared` for a crew the caller is not a member of (or that is not in this workspace). |
 | `500` | Underlying `memory.HybridSearch` failed. |
 
 ---
