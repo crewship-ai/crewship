@@ -3,9 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/shlex"
 	"github.com/spf13/cobra"
 )
 
@@ -18,7 +18,7 @@ import (
 // while the stored shape stays correct. A bare command (no whitespace) returns
 // nil args.
 func parseStdioCommand(raw string) (bin string, args []string) {
-	fields := strings.Fields(raw)
+	fields := shlex.Fields(raw)
 	if len(fields) == 0 {
 		return "", nil
 	}

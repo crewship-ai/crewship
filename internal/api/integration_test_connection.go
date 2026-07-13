@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/shlex"
 )
 
 // testConnectionResponse is the response body for the test connection endpoint.
@@ -99,11 +101,20 @@ func validateStdioServer(command, argsJSON string) testConnectionResponse {
 			Message: "stdio server has no command configured",
 		}
 	}
-	if strings.ContainsAny(cmd, " \t") {
-		return testConnectionResponse{
-			Status: "error",
-			Message: "command contains whitespace — it must be a bare executable with arguments in a separate list " +
-				`(e.g. command="npx", args=["-y","@scope/pkg"]). Re-add via "crewship integration add" which splits it automatically.`,
+	// Whitespace alone is no longer an error: a bare executable may legitimately
+	// live at a path containing spaces ("/opt/my app/bin/server"). We still catch
+	// the classic mistake — the whole launch line stuffed into command
+	// ("npx -y @scope/pkg") — by splitting quote-aware and flagging a trailing
+	// argument that looks like a flag, which a spaced path never carries.
+	if fields := shlex.Fields(cmd); len(fields) > 1 {
+		for _, arg := range fields[1:] {
+			if strings.HasPrefix(arg, "-") {
+				return testConnectionResponse{
+					Status: "error",
+					Message: "command looks like a full launch line (it carries an argument flag) — it must be a bare executable with arguments in a separate list " +
+						`(e.g. command="npx", args=["-y","@scope/pkg"]). Re-add via "crewship integration add" which splits it automatically.`,
+				}
+			}
 		}
 	}
 	if argsJSON != "" {
