@@ -62,13 +62,22 @@ type opencodeErrorObject struct {
 // form is rendered as "Name: message (ref X)" so the operator sees the error
 // class, the upstream message, and the correlation ref in one line.
 func decodeOpenCodeError(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
+	// Never return "" from the error path: an "error"-type envelope must always
+	// produce a non-empty message, or the operator sees a run marked failed
+	// with no cause — the blind-failure symptom #1007 set out to remove. A null
+	// / absent / empty payload (JSON null unmarshals into a string as "") maps
+	// to this generic notice.
+	const generic = "opencode reported an error (no detail provided)"
+	if s := strings.TrimSpace(string(raw)); s == "" || s == "null" {
+		return generic
 	}
 	// Legacy/simple string form.
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
-		return s
+		if strings.TrimSpace(s) != "" {
+			return s
+		}
+		return generic
 	}
 	// Current object form.
 	var obj opencodeErrorObject
@@ -85,7 +94,7 @@ func decodeOpenCodeError(raw json.RawMessage) string {
 		if obj.Data.Ref != "" {
 			s = strings.TrimSpace(s + " (ref " + obj.Data.Ref + ")")
 		}
-		if s != "" {
+		if strings.TrimSpace(s) != "" {
 			return s
 		}
 	}

@@ -42,10 +42,19 @@ func TestOpencodeBuildCommand_PrefixesBareModelWithProvider(t *testing.T) {
 		{"already prefixed", "ANTHROPIC", "anthropic/claude-sonnet-4-6", "anthropic/claude-sonnet-4-6"},
 		// ollama/local path already carries its provider segment.
 		{"ollama local", "OLLAMA", "ollama/qwen2.5-coder:7b", "ollama/qwen2.5-coder:7b"},
-		// No provider known → pass through unchanged (opencode will error, but
-		// now the parser surfaces it — see the diagnostic tests below).
-		{"no provider", "", "claude-sonnet-4-6", "claude-sonnet-4-6"},
-		// Unknown provider string → pass through unchanged rather than guess.
+		// Cross-provider per-call override (#1090 review): a bare model whose
+		// name reveals a DIFFERENT provider than the configured one must follow
+		// the MODEL, not the agent's static llm_provider. Otherwise a step tier
+		// override / CREWSHIP_SUBAGENT_MODEL mis-stamps and misroutes.
+		{"override openai on anthropic agent", "ANTHROPIC", "gpt-4o-mini", "openai/gpt-4o-mini"},
+		{"override anthropic on openai agent", "OPENAI", "claude-haiku-4-5", "anthropic/claude-haiku-4-5"},
+		{"override gemini on anthropic agent", "ANTHROPIC", "gemini-2.5-flash", "google/gemini-2.5-flash"},
+		// Name reveals nothing → fall back to configured provider.
+		{"unknown model name falls back to provider", "ANTHROPIC", "mystery-model", "anthropic/mystery-model"},
+		// No provider known + uninformative name → pass through unchanged
+		// (opencode will error, but the parser now surfaces it).
+		{"no provider", "", "mystery-model", "mystery-model"},
+		// Unknown provider string + uninformative name → pass through.
 		{"unknown provider", "MYSTERY", "some-model", "some-model"},
 	}
 	for _, tc := range cases {
@@ -115,6 +124,25 @@ func TestParseOpenCode_ErrorObject_UnknownErrorIncludesRef(t *testing.T) {
 	}
 	if !strings.Contains(got[0].Content, "err_fa9dcbd2") {
 		t.Errorf("content %q should surface the opencode error ref for correlation", got[0].Content)
+	}
+}
+
+func TestParseOpenCode_ErrorNullPayload_NonEmptyMessage(t *testing.T) {
+	// A null (or absent) error payload must still yield a non-empty error
+	// message — never an empty error event that hides the failure (#1090 review).
+	for _, line := range [][]byte{
+		[]byte(`{"type":"error","sessionID":"s","error":null}`),
+		[]byte(`{"type":"error","sessionID":"s"}`),
+		[]byte(`{"type":"error","sessionID":"s","error":""}`),
+	} {
+		var got []AgentEvent
+		parseOpenCodeStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+		if len(got) != 1 || got[0].Type != "error" {
+			t.Fatalf("want 1 error event for %s, got %+v", line, got)
+		}
+		if strings.TrimSpace(got[0].Content) == "" {
+			t.Errorf("error event Content must not be empty for %s", line)
+		}
 	}
 }
 

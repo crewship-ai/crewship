@@ -83,14 +83,49 @@ var openCodeProviderIDs = map[string]string{
 	"OLLAMA":    "ollama",
 }
 
+// modelNameProviderID infers the OpenCode provider id from a bare model name's
+// well-known prefix. This is AUTHORITATIVE over the agent's configured provider
+// because the model can be overridden per call — a pipeline step tier override
+// or CREWSHIP_SUBAGENT_MODEL can name a bare model belonging to a DIFFERENT
+// provider than the agent's static llm_provider. Pairing the override model
+// with the static provider would mis-stamp it (e.g. "anthropic/gpt-4o-mini")
+// and misroute the run — the exact opaque failure #1007 set out to kill. The
+// provider must follow the model. Returns "" when the name reveals nothing.
+func modelNameProviderID(model string) string {
+	m := strings.ToLower(model)
+	switch {
+	case strings.HasPrefix(m, "claude-"),
+		strings.Contains(m, "sonnet"),
+		strings.Contains(m, "haiku"),
+		strings.Contains(m, "opus"):
+		return "anthropic"
+	case strings.HasPrefix(m, "gpt-"),
+		strings.HasPrefix(m, "chatgpt"),
+		strings.HasPrefix(m, "o1"),
+		strings.HasPrefix(m, "o3"),
+		strings.HasPrefix(m, "o4"):
+		return "openai"
+	case strings.HasPrefix(m, "gemini-"):
+		return "google"
+	case strings.HasPrefix(m, "grok-"):
+		return "xai"
+	}
+	return ""
+}
+
 // qualifyOpenCodeModel returns model in OpenCode's required "provider/model"
 // form. A model that already carries a "/" segment is returned untouched (it is
-// either already qualified or an "ollama/…" local model). A bare model is
-// prefixed with the mapped provider id; an empty/unknown provider yields the
-// bare model unchanged rather than a guess.
+// either already qualified or an "ollama/…" local model). For a bare model we
+// prefer the provider the MODEL NAME implies (correct for cross-provider
+// per-call overrides), and fall back to the agent's configured provider only
+// when the name reveals nothing. An empty/unknown provider yields the bare
+// model unchanged rather than a guess.
 func qualifyOpenCodeModel(provider, model string) string {
 	if model == "" || strings.Contains(model, "/") {
 		return model
+	}
+	if id := modelNameProviderID(model); id != "" {
+		return id + "/" + model
 	}
 	if id, ok := openCodeProviderIDs[strings.ToUpper(strings.TrimSpace(provider))]; ok {
 		return id + "/" + model
