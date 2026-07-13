@@ -163,7 +163,7 @@ func WritePeerCard(p PeerPaths, userID, workspaceID, content string) error {
 		return fmt.Errorf("peers: lock: %w", err)
 	}
 	defer func() { _ = lk.Unlock() }()
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := writeMemoryFileNoFollow(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("peers: write: %w", err)
 	}
 	return nil
