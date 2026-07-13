@@ -21,6 +21,23 @@ routine — grounded in what this crew actually has, tested before it ships.
 
 ## Procedure
 
+> **Author from what you already know — do NOT probe or verify.** Everything you
+> need is already in your prompt: `[CONNECTED INTEGRATIONS]`, `[AVAILABLE ROUTINES]`,
+> and the DSL reference below. Writing a routine is a **paper exercise** — you
+> *describe* steps, you don't *perform* them now. So:
+> - **Do NOT** run a command to "check" / "list" integrations, routines, or
+>   endpoints — you already have them in your prompt.
+> - **Do NOT** fetch the source URL to "see what it returns." The routine's own
+>   `agent_run` step extracts the data at RUN time; put "extract the top 5 …" in
+>   that step's prompt and move on.
+> - **Do NOT** test a webhook, ping a host, or re-fetch the routine after saving
+>   to "verify." None of that is authoring.
+> - Creating the routine is **exactly ONE action**: call the `save_routine` tool
+>   with the finished DSL (see step 5 — do not curl the save endpoint). Call it a
+>   second time only if it returns a DSL error — then fix the JSON and retry.
+>   Target ~two messages total: a one-line plan, then the save + a plain summary.
+>   A third probing command means you're stalling — stop.
+
 1. **Clarify only the genuinely ambiguous essentials.** Ask at most 2–3 questions,
    then default the rest. The three that usually matter:
    - **Trigger cadence** — manual, on a schedule (when?), webhook, or event.
@@ -42,6 +59,11 @@ routine — grounded in what this crew actually has, tested before it ships.
    `resources.tools[]`). These can't be inferred from the step graph, so without
    the declaration the manifest is incomplete and the run-time resource
    precondition gate has nothing to check against.
+
+   **Raw URL or webhook given (e.g. a Discord/Slack webhook link)?** Don't hunt
+   for an integration and don't test it — just use a plain `http` step with that
+   URL and add its host to `egress_targets` (e.g. `["discord.com"]`). No
+   `credential_ref` is needed for a webhook whose secret is in the URL itself.
 
 3. **Prefer linear steps.** A short, top-to-bottom sequence is easier to read,
    test, and approve. Avoid branching (`if:`), DAG `needs:`, and loops unless the
