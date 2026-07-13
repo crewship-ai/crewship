@@ -45,14 +45,28 @@ func covStub(t *testing.T) *clitest.StubServer {
 // test end. pflag has no public "unset"; Changed is an exported field,
 // so reset it directly. Without this, a later test (possibly in another
 // file) that relies on flags.Changed() being false would misbehave.
+//
+// Slice-valued flags (StringSlice/StringArray/IntSlice) need special
+// handling: their Value.String() renders the empty default as the
+// literal text "[]", and pflag.stringSliceValue.Set (etc.) APPENDS
+// once its internal `changed` bookkeeping has ever been set — which,
+// unlike pflag.Flag.Changed, is never reset. So `Set(f.DefValue)` on a
+// slice flag doesn't restore it to empty; it appends a bogus "[]"
+// element every time this runs. Use the pflag.SliceValue.Replace
+// escape hatch instead, which overwrites the list directly.
 func covResetFlags(t *testing.T, cmd *cobra.Command) {
 	t.Helper()
 	t.Cleanup(func() {
 		cmd.Flags().VisitAll(func(f *pflag.Flag) {
-			if f.Changed {
-				_ = f.Value.Set(f.DefValue)
-				f.Changed = false
+			if !f.Changed {
+				return
 			}
+			if sv, ok := f.Value.(pflag.SliceValue); ok {
+				_ = sv.Replace(nil)
+			} else {
+				_ = f.Value.Set(f.DefValue)
+			}
+			f.Changed = false
 		})
 	})
 }

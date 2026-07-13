@@ -62,6 +62,26 @@ func resolveCrewIDs(client *cli.Client, refs []string) ([]string, error) {
 	return ids, nil
 }
 
+// normalizeCredentialScope validates a --scope flag value against the
+// server's WORKSPACE|CREW enum, case-insensitively, and normalizes it to
+// upper case. An empty input is passed through unchanged — an absent
+// --scope means "let the server infer it from --crews". Anything else is a
+// clear client-side error rather than a value that lands in the DB and
+// half-orphans the credential (#1083).
+func normalizeCredentialScope(scope string) (string, error) {
+	if scope == "" {
+		return "", nil
+	}
+	switch strings.ToUpper(scope) {
+	case "WORKSPACE":
+		return "WORKSPACE", nil
+	case "CREW":
+		return "CREW", nil
+	default:
+		return "", fmt.Errorf("--scope must be WORKSPACE or CREW, got %q", scope)
+	}
+}
+
 var credCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a credential",
@@ -142,16 +162,29 @@ var credCreateCmd = &cobra.Command{
 		// each to an ID (what the API's credential_crews junction expects).
 		// The server derives scope=CREW from a non-empty crew_ids list, but
 		// an explicit --scope still passes through for the workspace-wide case.
+		var crewIDs []string
 		if flags.Changed("crews") {
 			crewRefs, _ := flags.GetStringSlice("crews")
-			crewIDs, err := resolveCrewIDs(client, crewRefs)
+			var err error
+			crewIDs, err = resolveCrewIDs(client, crewRefs)
 			if err != nil {
 				return err
 			}
 			body["crew_ids"] = crewIDs
 		}
-		if scope, _ := flags.GetString("scope"); scope != "" {
+		rawScope, _ := flags.GetString("scope")
+		scope, err := normalizeCredentialScope(rawScope)
+		if err != nil {
+			return err
+		}
+		if scope != "" {
 			body["scope"] = scope
+		}
+		// The server auto-sets scope=CREW whenever crew_ids is non-empty,
+		// silently overriding an explicit --scope WORKSPACE. Warn rather
+		// than fail the request — the server's behaviour wins either way.
+		if scope == "WORKSPACE" && len(crewIDs) > 0 {
+			cli.PrintWarning("--scope WORKSPACE is ignored when --crews is set; the credential will be scope=CREW")
 		}
 
 		valid, errMsg := testCredentialValue(client, provider, credType, value)
@@ -242,17 +275,33 @@ var credUpdateCmd = &cobra.Command{
 		}
 		// #1083: crew scoping parity. Passing --crews (even empty, to clear)
 		// replaces the credential_crews set; the server re-derives scope.
-		if flags.Changed("crews") {
+		var crewIDs []string
+		crewsChanged := flags.Changed("crews")
+		if crewsChanged {
 			crewRefs, _ := flags.GetStringSlice("crews")
-			crewIDs, err := resolveCrewIDs(client, crewRefs)
+			var err error
+			crewIDs, err = resolveCrewIDs(client, crewRefs)
 			if err != nil {
 				return err
 			}
 			body["crew_ids"] = crewIDs
 		}
 		if flags.Changed("scope") {
-			scope, _ := flags.GetString("scope")
+			rawScope, _ := flags.GetString("scope")
+			if rawScope == "" {
+				return fmt.Errorf("--scope cannot be empty")
+			}
+			scope, err := normalizeCredentialScope(rawScope)
+			if err != nil {
+				return err
+			}
 			body["scope"] = scope
+			// The server auto-sets scope=CREW whenever crew_ids is non-empty,
+			// silently overriding an explicit --scope WORKSPACE. Warn rather
+			// than fail the request — the server's behaviour wins either way.
+			if scope == "WORKSPACE" && crewsChanged && len(crewIDs) > 0 {
+				cli.PrintWarning("--scope WORKSPACE is ignored when --crews is set; the credential will be scope=CREW")
+			}
 		}
 
 		if len(body) == 0 {

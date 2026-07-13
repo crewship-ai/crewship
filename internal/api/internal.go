@@ -216,6 +216,11 @@ type InternalHandler struct {
 	// UpdateCredentialStatus so tests (and a graceful shutdown, if it ever
 	// wants to) can wait for them instead of sleeping.
 	reconcileWG sync.WaitGroup
+	// allowAnyWarnOnce gates the CREWSHIP_INTERNAL_ALLOW_ANY startup warning
+	// in requireInternal so it logs once per handler, not once per wrapped
+	// route (~52 routes share this one *InternalHandler instance, see
+	// registerInternalRoutes's single `internalAuth := internal.requireInternal`).
+	allowAnyWarnOnce sync.Once
 }
 
 // postRunTriggerHook is the narrow interface UpdateRun calls. The
@@ -307,8 +312,15 @@ func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 		// r.RemoteAddr). Behind a reverse proxy that rewrites RemoteAddr to a
 		// loopback address, that assumption would no longer hold. Only enable
 		// ALLOW_ANY behind a trusted proxy that preserves the real client addr.
-		h.logger.Warn("CREWSHIP_INTERNAL_ALLOW_ANY=true: internal-API origin gate disabled; X-Internal-Token is the sole guard. " +
-			"Ensure the reverse proxy does not rewrite RemoteAddr to loopback — the include_values plaintext readback gates on it.")
+		//
+		// requireInternal wraps ~52 routes on this one *InternalHandler
+		// instance (registerInternalRoutes builds a single `internalAuth`
+		// and reuses it), so without allowAnyWarnOnce this logs 52 identical
+		// lines at startup.
+		h.allowAnyWarnOnce.Do(func() {
+			h.logger.Warn("CREWSHIP_INTERNAL_ALLOW_ANY=true: internal-API origin gate disabled; X-Internal-Token is the sole guard. " +
+				"Ensure the reverse proxy does not rewrite RemoteAddr to loopback — the include_values plaintext readback gates on it.")
+		})
 	}
 	// #1020: trusted-proxy X-Forwarded-For resolution. Empty/unset = today's
 	// behaviour (gate on the direct RemoteAddr only). The set is EXPLICIT and
