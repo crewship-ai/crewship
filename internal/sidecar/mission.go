@@ -10,6 +10,16 @@ import (
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
+// missionIDInjectionChars are the characters that, if present in a mission id
+// pulled from the URL path, could smuggle a query string or extra path segment
+// into the internal IPC URL (#1045). An agent sending
+// GET /mission/<id>%3Fworkspace_id=<ownWS>%26crew_id=%26 decodes to a `?…` that
+// the trusted missionScopeQuery would then be appended AFTER — its `?` is
+// swallowed as a bare `&`, so the injected empty crew_id wins and the mission
+// of a sibling crew (same workspace) leaks. CUID mission ids never contain
+// these; rejecting them (plus url.PathEscape belt-and-suspenders) closes it.
+const missionIDInjectionChars = "/?#&=%"
+
 // missionScopeQuery builds the ?workspace_id=&crew_id= query string the
 // internal mission Start/Get endpoints now require, sourced from the trusted
 // IPC identity (never the agent's request) so a compromised agent can't
@@ -151,12 +161,12 @@ func (s *Server) handleMissionStart(w http.ResponseWriter, r *http.Request) {
 
 	missionID := strings.TrimPrefix(r.URL.Path, "/mission/")
 	missionID = strings.TrimSuffix(missionID, "/start")
-	if missionID == "" || strings.Contains(missionID, "/") {
+	if missionID == "" || strings.ContainsAny(missionID, missionIDInjectionChars) {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "mission_id required"})
 		return
 	}
 
-	s.proxyIPCJSON(w, r, http.MethodPost, "/api/v1/internal/missions/"+missionID+"/start"+s.missionScopeQuery(), "mission start", nil)
+	s.proxyIPCJSON(w, r, http.MethodPost, "/api/v1/internal/missions/"+url.PathEscape(missionID)+"/start"+s.missionScopeQuery(), "mission start", nil)
 }
 
 // handleMissionStatus handles GET /mission/{missionId}
@@ -168,12 +178,12 @@ func (s *Server) handleMissionStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	missionID := strings.TrimPrefix(r.URL.Path, "/mission/")
-	if missionID == "" || strings.Contains(missionID, "/") {
+	if missionID == "" || strings.ContainsAny(missionID, missionIDInjectionChars) {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "mission_id required"})
 		return
 	}
 
-	s.proxyIPCJSON(w, r, http.MethodGet, "/api/v1/internal/missions/"+missionID+s.missionScopeQuery(), "mission status", nil)
+	s.proxyIPCJSON(w, r, http.MethodGet, "/api/v1/internal/missions/"+url.PathEscape(missionID)+s.missionScopeQuery(), "mission status", nil)
 }
 
 // handleMissionTemplates handles GET /mission/templates
