@@ -119,6 +119,24 @@ describe("serializeConfig", () => {
     })
   })
 
+  it("keeps a quoted arg with spaces intact instead of shredding it", () => {
+    const out = serializeConfig([
+      entry({
+        name: "files",
+        command: "npx",
+        args: `-y "@scope/pkg with space" --root "/opt/my app"`,
+      }),
+    ])
+    expect(JSON.parse(out)).toEqual({
+      mcpServers: {
+        files: {
+          command: "npx",
+          args: ["-y", "@scope/pkg with space", "--root", "/opt/my app"],
+        },
+      },
+    })
+  })
+
   it("omits args/env when empty and filters env rows with blank keys", () => {
     const out = serializeConfig([
       entry({

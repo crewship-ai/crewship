@@ -10,6 +10,87 @@ import type {
 let nextKey = 1
 
 // ---------------------------------------------------------------------------
+// Quote-aware arg tokenizer
+// ---------------------------------------------------------------------------
+
+/**
+ * Splits a user-typed args string into fields, honoring single and double
+ * quotes so a quoted argument with spaces (or a bare path at a spaced
+ * location) survives intact — unlike a naive `.split(/\s+/)`, which shreds
+ * both.
+ *
+ * Mirrors the backslash semantics of `internal/shlex` (Go): a backslash is a
+ * literal character except when it escapes something meaningful, so a
+ * Windows path like `C:\Program Files\nodejs\npx.exe` still parses correctly
+ * when quoted.
+ *   - Unquoted: `\` escapes only space, tab, `"`, `'`, or `\` itself;
+ *     otherwise literal.
+ *   - Inside double quotes: `\` escapes only `"` or `\`; otherwise literal.
+ *   - Inside single quotes: everything is literal, including `\`.
+ *
+ *   splitArgs(`-y "@scope/pkg with space"`) => ["-y", "@scope/pkg with space"]
+ *   splitArgs(`--root "/opt/my app"`)       => ["--root", "/opt/my app"]
+ */
+export function splitArgs(raw: string): string[] {
+  const fields: string[] = []
+  let cur = ""
+  let inField = false
+  let quote: "" | "'" | '"' = ""
+
+  const isEscapable = (c: string) => c === " " || c === "\t" || c === "'" || c === '"' || c === "\\"
+
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i]
+    const next = i + 1 < raw.length ? raw[i + 1] : undefined
+
+    if (c === "\\" && quote === "") {
+      if (next !== undefined && isEscapable(next)) {
+        cur += next
+        i++
+      } else {
+        cur += c
+      }
+      inField = true
+      continue
+    }
+    if (c === "\\" && quote === '"') {
+      if (next === '"' || next === "\\") {
+        cur += next
+        i++
+      } else {
+        cur += c
+      }
+      continue
+    }
+    if (quote !== "") {
+      if (c === quote) {
+        quote = ""
+      } else {
+        cur += c
+      }
+      continue
+    }
+    if (c === "'" || c === '"') {
+      quote = c
+      inField = true
+      continue
+    }
+    if (c === " " || c === "\t" || c === "\n" || c === "\r") {
+      if (inField) {
+        fields.push(cur)
+        cur = ""
+        inField = false
+      }
+      continue
+    }
+    cur += c
+    inField = true
+  }
+  if (inField) fields.push(cur)
+  return fields
+}
+
+// ---------------------------------------------------------------------------
 // Parse / Serialize
 // ---------------------------------------------------------------------------
 
@@ -63,10 +144,7 @@ export function serializeConfig(entries: ServerEntry[]): string {
       mcpServers[name] = server
     } else {
       const server: StdioServer = { command: entry.command }
-      const args = entry.args
-        .trim()
-        .split(/\s+/)
-        .filter(Boolean)
+      const args = splitArgs(entry.args.trim()).filter(Boolean)
       if (args.length > 0) server.args = args
       if (Object.keys(env).length > 0) server.env = env
       mcpServers[name] = server
