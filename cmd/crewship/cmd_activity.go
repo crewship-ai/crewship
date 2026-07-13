@@ -193,45 +193,38 @@ activity intentionally isn't wired.`,
 		}
 
 		f := newFormatter()
-		if f.Format == "json" || f.Format == "yaml" {
-			if f.Format == "json" {
-				return f.JSON(activities)
+		return f.AutoHuman(activities, func() {
+			for _, a := range activities {
+				ts := a.CreatedAt
+				if t, err := time.Parse(time.RFC3339Nano, a.CreatedAt); err == nil {
+					// Explicit UTC marker — a zone-less timestamp is ambiguous
+					// the moment the reader (or a scraper) sits in a different
+					// timezone than the server. UTC (not Local) keeps output
+					// deterministic across machines.
+					ts = t.UTC().Format("2006-01-02 15:04:05 UTC")
+				}
+
+				typeColor := ""
+				switch a.Type {
+				case "ASSIGNMENT", "assignment":
+					typeColor = cli.Blue
+				case "COMPLETED", "completed":
+					typeColor = cli.Green
+				case "ESCALATION", "escalation":
+					typeColor = cli.Red
+				case "QUERY", "query", "RESPONSE", "response":
+					typeColor = cli.Cyan
+				default:
+					typeColor = cli.Gray
+				}
+
+				fmt.Printf("%s%s%s  %s[%-12s]%s  %s%-10s%s  %s\n",
+					cli.Dim, ts, cli.Reset,
+					typeColor, a.Type, cli.Reset,
+					cli.Bold, a.CrewSlug, cli.Reset,
+					a.Summary)
 			}
-			return f.YAML(activities)
-		}
-
-		for _, a := range activities {
-			ts := a.CreatedAt
-			if t, err := time.Parse(time.RFC3339Nano, a.CreatedAt); err == nil {
-				// Explicit UTC marker — a zone-less timestamp is ambiguous
-				// the moment the reader (or a scraper) sits in a different
-				// timezone than the server. UTC (not Local) keeps output
-				// deterministic across machines.
-				ts = t.UTC().Format("2006-01-02 15:04:05 UTC")
-			}
-
-			typeColor := ""
-			switch a.Type {
-			case "ASSIGNMENT", "assignment":
-				typeColor = cli.Blue
-			case "COMPLETED", "completed":
-				typeColor = cli.Green
-			case "ESCALATION", "escalation":
-				typeColor = cli.Red
-			case "QUERY", "query", "RESPONSE", "response":
-				typeColor = cli.Cyan
-			default:
-				typeColor = cli.Gray
-			}
-
-			fmt.Printf("%s%s%s  %s[%-12s]%s  %s%-10s%s  %s\n",
-				cli.Dim, ts, cli.Reset,
-				typeColor, a.Type, cli.Reset,
-				cli.Bold, a.CrewSlug, cli.Reset,
-				a.Summary)
-		}
-
-		return nil
+		})
 	},
 }
 

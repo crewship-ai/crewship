@@ -145,18 +145,12 @@ Examples:
 		}
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(body.Entries)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(body.Entries)
-		}
-
-		// Text formatter: ts | severity-chip | scope | summary
-		for _, e := range body.Entries {
-			printJournalEntry(e)
-		}
-		return nil
+		return f.AutoHuman(body.Entries, func() {
+			// Text formatter: ts | severity-chip | scope | summary
+			for _, e := range body.Entries {
+				printJournalEntry(e)
+			}
+		})
 	},
 }
 
@@ -363,45 +357,39 @@ Tip: to narrow journal entries to a specific run/trace, use
 		}
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(body)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(body)
-		}
-
-		// Text mode renders three short tables. Caps the rendered rows
-		// at 50 per section so the output stays scannable; the JSON
-		// path returns the full snapshot.
-		fmt.Printf("%sCrews (%d)%s\n", cli.Bold, len(body.Crews), cli.Reset)
-		for i, c := range body.Crews {
-			if i >= 50 {
-				fmt.Printf("  %s… +%d more (use --format json for full list)%s\n", cli.Dim, len(body.Crews)-i, cli.Reset)
-				break
+		return f.AutoHuman(body, func() {
+			// Text mode renders three short tables. Caps the rendered rows
+			// at 50 per section so the output stays scannable; the JSON
+			// path returns the full snapshot.
+			fmt.Printf("%sCrews (%d)%s\n", cli.Bold, len(body.Crews), cli.Reset)
+			for i, c := range body.Crews {
+				if i >= 50 {
+					fmt.Printf("  %s… +%d more (use --format json for full list)%s\n", cli.Dim, len(body.Crews)-i, cli.Reset)
+					break
+				}
+				fmt.Printf("  %-24s  %-24s  %s\n", truncateString(c.ID, 24), truncateString(c.Slug, 24), c.Name)
 			}
-			fmt.Printf("  %-24s  %-24s  %s\n", truncateString(c.ID, 24), truncateString(c.Slug, 24), c.Name)
-		}
-		fmt.Printf("\n%sAgents (%d)%s\n", cli.Bold, len(body.Agents), cli.Reset)
-		for i, a := range body.Agents {
-			if i >= 50 {
-				fmt.Printf("  %s… +%d more%s\n", cli.Dim, len(body.Agents)-i, cli.Reset)
-				break
+			fmt.Printf("\n%sAgents (%d)%s\n", cli.Bold, len(body.Agents), cli.Reset)
+			for i, a := range body.Agents {
+				if i >= 50 {
+					fmt.Printf("  %s… +%d more%s\n", cli.Dim, len(body.Agents)-i, cli.Reset)
+					break
+				}
+				crew := "-"
+				if a.CrewID != nil {
+					crew = truncateString(*a.CrewID, 16)
+				}
+				fmt.Printf("  %-24s  %-24s  %-16s  %s\n", truncateString(a.ID, 24), truncateString(a.Slug, 24), crew, a.Name)
 			}
-			crew := "-"
-			if a.CrewID != nil {
-				crew = truncateString(*a.CrewID, 16)
+			fmt.Printf("\n%sMissions (%d)%s\n", cli.Bold, len(body.Missions), cli.Reset)
+			for i, m := range body.Missions {
+				if i >= 50 {
+					fmt.Printf("  %s… +%d more%s\n", cli.Dim, len(body.Missions)-i, cli.Reset)
+					break
+				}
+				fmt.Printf("  %-24s  %-10s  %s\n", truncateString(m.ID, 24), truncateString(m.Status, 10), m.Title)
 			}
-			fmt.Printf("  %-24s  %-24s  %-16s  %s\n", truncateString(a.ID, 24), truncateString(a.Slug, 24), crew, a.Name)
-		}
-		fmt.Printf("\n%sMissions (%d)%s\n", cli.Bold, len(body.Missions), cli.Reset)
-		for i, m := range body.Missions {
-			if i >= 50 {
-				fmt.Printf("  %s… +%d more%s\n", cli.Dim, len(body.Missions)-i, cli.Reset)
-				break
-			}
-			fmt.Printf("  %-24s  %-10s  %s\n", truncateString(m.ID, 24), truncateString(m.Status, 10), m.Title)
-		}
-		return nil
+		})
 	},
 }
 
@@ -562,25 +550,20 @@ Examples:
 			return err
 		}
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(entry)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(entry)
-		}
-		printJournalEntry(entry)
-		// Indent additional context (payload + refs) under the line so
-		// the per-line summary stays scannable in a terminal. Other
-		// formats already include them in the structured output.
-		if payload, ok := entry["payload"].(map[string]any); ok && len(payload) > 0 {
-			b, _ := json.MarshalIndent(payload, "  ", "  ")
-			fmt.Printf("  %spayload%s %s\n", cli.Dim, cli.Reset, string(b))
-		}
-		if refs, ok := entry["refs"].(map[string]any); ok && len(refs) > 0 {
-			b, _ := json.MarshalIndent(refs, "  ", "  ")
-			fmt.Printf("  %srefs%s    %s\n", cli.Dim, cli.Reset, string(b))
-		}
-		return nil
+		return f.AutoHuman(entry, func() {
+			printJournalEntry(entry)
+			// Indent additional context (payload + refs) under the line so
+			// the per-line summary stays scannable in a terminal. Other
+			// formats already include them in the structured output.
+			if payload, ok := entry["payload"].(map[string]any); ok && len(payload) > 0 {
+				b, _ := json.MarshalIndent(payload, "  ", "  ")
+				fmt.Printf("  %spayload%s %s\n", cli.Dim, cli.Reset, string(b))
+			}
+			if refs, ok := entry["refs"].(map[string]any); ok && len(refs) > 0 {
+				b, _ := json.MarshalIndent(refs, "  ", "  ")
+				fmt.Printf("  %srefs%s    %s\n", cli.Dim, cli.Reset, string(b))
+			}
+		})
 	},
 }
 
@@ -631,14 +614,9 @@ Examples:
 			return err
 		}
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(body)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(body)
-		}
-		fmt.Println(body.Total)
-		return nil
+		return f.AutoHuman(body, func() {
+			fmt.Println(body.Total)
+		})
 	},
 }
 
