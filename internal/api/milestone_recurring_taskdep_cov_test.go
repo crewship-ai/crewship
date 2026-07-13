@@ -298,6 +298,39 @@ func TestCovMRTRecurringUpdateBadJSON(t *testing.T) {
 
 // TestCovMRTRecurringUpdateNullableFields exercises the project_id / milestone_id
 // SetNull-vs-Set branches plus the cron recompute path, asserting persisted state.
+// #1065: reassigning a recurring issue's crew_id to a crew in another workspace
+// must be rejected (Create checked this; Update didn't).
+func TestCovMRTRecurringUpdate_ForeignCrew_400(t *testing.T) {
+	h, userID, wsID, crewID := covMRTRecurringHandler(t)
+	db := h.db
+
+	// A crew in a DIFFERENT workspace.
+	otherWS := generateCUID()
+	execOrFatal(t, db, `INSERT INTO workspaces (id, name, slug) VALUES (?, 'Other', ?)`, otherWS, "other-"+otherWS)
+	otherCrew := generateCUID()
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'Other', 'other')`, otherCrew, otherWS)
+
+	cReq := httptest.NewRequest("POST", "/", bytes.NewBufferString(
+		`{"crew_id":"`+crewID+`","title":"x","cron_expression":"0 9 * * *"}`))
+	cReq = withWorkspaceUser(cReq, userID, wsID, "OWNER")
+	cRR := httptest.NewRecorder()
+	h.Create(cRR, cReq)
+	if cRR.Code != http.StatusCreated {
+		t.Fatalf("create: %d body=%s", cRR.Code, cRR.Body.String())
+	}
+	var resp recurringIssueResponse
+	mustUnmarshal(t, cRR, &resp)
+
+	uReq := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{"crew_id":"`+otherCrew+`"}`))
+	uReq.SetPathValue("recurringId", resp.ID)
+	uReq = withWorkspaceUser(uReq, userID, wsID, "OWNER")
+	uRR := httptest.NewRecorder()
+	h.Update(uRR, uReq)
+	if uRR.Code != http.StatusBadRequest {
+		t.Fatalf("foreign-workspace crew reassignment must 400, got %d: %s", uRR.Code, uRR.Body.String())
+	}
+}
+
 func TestCovMRTRecurringUpdateNullableFields(t *testing.T) {
 	h, userID, wsID, crewID := covMRTRecurringHandler(t)
 	db := h.db

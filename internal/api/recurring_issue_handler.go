@@ -62,7 +62,7 @@ func (h *RecurringIssueHandler) List(w http.ResponseWriter, r *http.Request) {
 		       ri.cron_expression, ri.enabled, ri.next_run, ri.last_run,
 		       ri.run_count, ri.created_at
 		FROM recurring_issues ri
-		LEFT JOIN crews c ON ri.crew_id = c.id
+		LEFT JOIN crews c ON ri.crew_id = c.id AND c.workspace_id = ri.workspace_id
 		WHERE ri.workspace_id = ?`
 	args := []interface{}{wsID}
 
@@ -268,6 +268,19 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	ub := newUpdate()
 
 	if req.CrewID != nil {
+		// #1065: validate the reassigned crew belongs to this workspace before
+		// persisting it — Create checks this, Update did not, so a member could
+		// point a recurring issue at a sibling-workspace crew (leaked back as a
+		// foreign crew name via the List join).
+		if err := assertFKInWorkspace(r.Context(), h.db, "crews", *req.CrewID, wsID); err != nil {
+			if errors.Is(err, errFKNotInWorkspace) {
+				writeProblem(w, r, http.StatusBadRequest, "Crew not found in workspace")
+				return
+			}
+			h.logger.Error("validate recurring issue crew", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 		ub.Set("crew_id", *req.CrewID)
 	}
 	if req.Title != nil {
