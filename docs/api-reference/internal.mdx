@@ -94,6 +94,34 @@ Derivation is stateless, so tokens stay valid for the lifetime of one server boo
 
 Workspace / crew / agent / mission scope is **not** taken from request bodies in a way that can cross tenants. The IPC layer reads it from the sidecar's `IPCConfig` (set by the orchestrator at exec time and pinned to the container) and projects it onto the request, and the token binding constrains every handler to its workspace. An agent that captured the sidecar's token cannot forge cross-tenant attribution: the token only authorizes the workspace it is cryptographically bound to.
 
+## Network origin &amp; reverse proxies
+
+Before the token compare, a **network-origin gate** refuses `/api/v1/internal/*` from any peer that is not loopback or a private/RFC1918 range (Docker bridge, on-prem LAN), returning `404` so a public scanner can't even confirm the route exists. The intended boundary: only same-host processes and the sidecar (over the Docker bridge) reach this surface.
+
+<Warning>
+**A public reverse proxy erases the origin gate.** If Caddy/nginx terminates public traffic and proxies `/api/v1/internal/*` to crewshipd, the *direct peer* crewshipd sees is the proxy (typically `127.0.0.1`), so every off-host request sails through the network gate and the shared `X-Internal-Token` becomes the only guard (#1020). **The real fix is to not expose the internal surface at all** — do one of:
+
+- **Deny it at the proxy** (recommended). Caddy:
+  ```caddy
+  @internal path /api/v1/internal/*
+  respond @internal 404
+  ```
+  nginx:
+  ```nginx
+  location /api/v1/internal/ { return 404; }
+  ```
+- Bind crewshipd's internal listener to a **private interface / unix socket** and point only the sidecar at it, keeping the public vhost on a separate address.
+</Warning>
+
+If you *must* proxy the internal surface, restore a real origin boundary with the application-level backstop:
+
+- **`CREWSHIP_INTERNAL_TRUSTED_PROXIES`** — a comma-separated list of proxy CIDRs / IPs (e.g. `127.0.0.1,10.8.0.0/24`). When the direct peer is one of these, crewshipd resolves the true client from `X-Forwarded-For` (the **rightmost hop not in the trusted set** — the leftmost entries are attacker-controlled), or from `X-Real-IP` if no `X-Forwarded-For` is present (nginx's single-IP default), and applies the origin gate to *that*. A header that IS present but unusable (empty / all-trusted / a non-IP `X-Real-IP`) is **refused** (fail-closed). These headers are honored **only** for a trusted-proxy peer — a client connecting directly can't spoof them. The list is **explicit and never auto-populated with private ranges** (auto-trusting `10.0.0.0/8` on a LAN would let any host spoof the header); an all-zeros CIDR (`0.0.0.0/0`, `::/0`) is rejected outright, and the configured ranges are logged at startup so a typo is visible. Unset (default) = today's behaviour: gate on the direct peer only.
+
+  <Warning>
+  Your proxy **must** forward the client — set `X-Forwarded-For` (`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`) or `X-Real-IP`. If it forwards **neither**, crewshipd treats the request as a same-host self-call and gates on the proxy's own (loopback/private) IP — i.e. it **fails OPEN**, exactly the #1020 hole, so every off-host request would pass the origin gate. The self-call fallback exists so crewshipd's in-process loopback calls keep working; it is not a safety net for a misconfigured proxy.
+  </Warning>
+- **`CREWSHIP_INTERNAL_ALLOW_ANY=true`** — the blunt bypass. Disables the origin gate *and* the master-token loopback pin entirely, leaving `X-Internal-Token` as the sole guard. Use only when you fully trust the network path.
+
 <Accordion title="Resolved exception: the keeper/* family and tenant isolation (PR-F24 closed; PR-F25 pending)" id="tenant-isolation-on-internal-auth-handlers">
   The `/api/v1/internal/keeper/*` family (skill-review, behavior, memory-health, negative-learning) reads `body.workspace_id` AND `ctx.workspace_id` (the latter set by the `internalWsCtx` middleware from the `?workspace_id` query parameter). Historically this family carried a documented cross-tenant gap. Both halves are now closed:
 
