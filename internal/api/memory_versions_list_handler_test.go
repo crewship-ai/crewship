@@ -444,6 +444,80 @@ func TestMemVersionsCursor_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestMemoryVersionsList_Pagination_WholeSecondBoundary_NoDuplicatesOrGaps
+// proves the keyset cursor sorts and pages correctly across a
+// whole-second boundary (#1073a). Rows are seeded with LITERAL
+// written_at strings (bypassing seedVersionRow, which formats via
+// time.RFC3339Nano) to control the exact stored bytes:
+//
+//	rowNewest  2026-01-01T00:00:05.500000001Z   (1 tick after the boundary)
+//	rowCursor  2026-01-01T00:00:05.500000000Z   (the page-1/page-2 boundary row)
+//	rowOldest  2026-01-01T00:00:05.000000000Z   (a whole second, no sub-second remainder)
+//
+// All three are already fixed-width (tsformat.Layout), the shape every
+// writer produces post-#1073a and what the v141 backfill migration
+// normalizes existing rows to — so this exercises the List handler's
+// bound formatting specifically, independent of the writer/migration
+// pieces covered by their own tests.
+//
+// With limit=2, page 1 returns [rowNewest, rowCursor] and emits a
+// cursor pointing at rowCursor. Before the fix, the handler
+// re-encoded/re-formatted the cursor bound via time.RFC3339Nano, which
+// TRIMS trailing zero fractional digits — rowCursor's nanosecond value
+// (500000000) collapses to a single trailing "5", producing the
+// variable-width bound "...05.5Z" instead of the fixed-width
+// "...05.500000000Z" every stored row actually carries. Comparing that
+// truncated bound against fixed-width stored text breaks the '<'
+// ordering: "...05.500000001Z" (rowNewest, textually) < "...05.5Z"
+// because '0' (0x30) sorts below 'Z' (0x5A) at the first differing
+// byte — even though rowNewest is chronologically AFTER the cursor.
+// rowNewest therefore leaks onto page 2 as a duplicate. Formatting the
+// bound via tsformat (fixed-width, matching the stored rows) fixes the
+// comparison: page 2 must be exactly [rowOldest], with no next cursor.
+func TestMemoryVersionsList_Pagination_WholeSecondBoundary_NoDuplicatesOrGaps(t *testing.T) {
+	h, db, userID, wsID := memVerRig(t)
+
+	insertLiteral := func(id, writtenAt string) {
+		t.Helper()
+		if _, err := db.Exec(`
+			INSERT INTO memory_versions
+			(id, workspace_id, path, tier, sha256, bytes, payload_ref, written_at, written_by)
+			VALUES (?, ?, 'agent:a/AGENT.md', 'agent', ?, 10, '/dev/null', ?, 'test')`,
+			id, wsID, "sha-"+id, writtenAt,
+		); err != nil {
+			t.Fatalf("insert %s: %v", id, err)
+		}
+	}
+
+	insertLiteral("mv-newest", "2026-01-01T00:00:05.500000001Z")
+	insertLiteral("mv-cursor", "2026-01-01T00:00:05.500000000Z")
+	insertLiteral("mv-oldest", "2026-01-01T00:00:05.000000000Z")
+
+	_, p1 := memVerDo(t, h, userID, wsID, "OWNER", "limit=2")
+	if len(p1.Rows) != 2 {
+		t.Fatalf("page 1: got %d rows, want 2: %+v", len(p1.Rows), p1.Rows)
+	}
+	if p1.Rows[0].ID != "mv-newest" || p1.Rows[1].ID != "mv-cursor" {
+		t.Fatalf("page 1 order = [%s, %s], want [mv-newest, mv-cursor]",
+			p1.Rows[0].ID, p1.Rows[1].ID)
+	}
+	if p1.NextCursor == nil {
+		t.Fatalf("page 1: NextCursor is nil, want a cursor pointing at mv-cursor")
+	}
+
+	_, p2 := memVerDo(t, h, userID, wsID, "OWNER", "limit=2&cursor="+*p1.NextCursor)
+	if len(p2.Rows) != 1 {
+		t.Fatalf("page 2: got %d rows, want exactly 1 (mv-oldest); rows=%+v "+
+			"(a whole-second-boundary cursor bug duplicates mv-newest here)", len(p2.Rows), p2.Rows)
+	}
+	if p2.Rows[0].ID != "mv-oldest" {
+		t.Errorf("page 2 row 0 = %q, want mv-oldest", p2.Rows[0].ID)
+	}
+	if p2.NextCursor != nil {
+		t.Errorf("page 2: NextCursor = %v, want nil (last page)", p2.NextCursor)
+	}
+}
+
 // Compile-time guard: response shape pinned for the dashboard.
 // Any rename of a JSON-tagged field on memVersionRow /
 // memVersionsListResponse stops compiling here.
