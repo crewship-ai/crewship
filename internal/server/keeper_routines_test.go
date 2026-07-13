@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/keeper/governance"
 
 	_ "modernc.org/sqlite"
 )
@@ -185,6 +186,114 @@ func TestCR_MemoryHealthAdvisory_InfraSuppressed(t *testing.T) {
 	}
 	if body != real {
 		t.Errorf("real-finding body = %q, want %q", body, real)
+	}
+}
+
+// TestKeeperSweep_GovernanceTargetsSecurityContact pins the #1001 M0
+// snitch upgrade on the daily-sweep producers: a workspace with a
+// configured security contact gets its sweep inbox row targeted at that
+// user (role fanout cleared — it would double-deliver), while an
+// ungoverned workspace keeps the legacy MANAGER fanout. Both shapes are
+// asserted in one fanout so the per-workspace resolution is what's
+// actually exercised, not a handler-wide constant.
+func TestKeeperSweep_GovernanceTargetsSecurityContact(t *testing.T) {
+	db := krDB(t)
+	mustExec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(q, args...); err != nil {
+			t.Fatalf("exec %q: %v", q, err)
+		}
+	}
+	mustExec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1','WS1','ws1')`)
+	mustExec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws2','WS2','ws2')`)
+	mustExec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('cr1','ws1','C1','c1')`)
+	mustExec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('cr2','ws2','C2','c2')`)
+	mustExec(`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('a1','cr1','ws1','A1','a1')`)
+	mustExec(`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('a2','cr2','ws2','A2','a2')`)
+	mustExec(`INSERT INTO skills (id, name, slug, display_name) VALUES ('sk1','do','do','Do')`)
+	mustExec(`INSERT INTO agent_skills (agent_id, skill_id, enabled) VALUES ('a1','sk1',1)`)
+	mustExec(`INSERT INTO agent_skills (agent_id, skill_id, enabled) VALUES ('a2','sk1',1)`)
+	// keeper_governance_settings.security_contact_user_id FKs users(id).
+	mustExec(`INSERT INTO users (id, email) VALUES ('u_sec', 'sec@example.com')`)
+	if err := governance.Upsert(context.Background(), db, "ws1", governance.Settings{
+		Enabled: true, SecurityContactUserID: "u_sec", DenyNotifyMinRisk: 7,
+	}, ""); err != nil {
+		t.Fatalf("governance upsert: %v", err)
+	}
+
+	pers := &sqlSkillPersister{db: db, logger: krLogger()}
+	if err := pers.WriteInboxItem(context.Background(), "sk1", "needs review", false); err != nil {
+		t.Fatalf("WriteInboxItem: %v", err)
+	}
+
+	assertTarget := func(sourceID, wantUser, wantRole string) {
+		t.Helper()
+		var user, role string
+		if err := db.QueryRow(
+			`SELECT COALESCE(target_user_id,''), COALESCE(target_role,'') FROM inbox_items WHERE source_id = ?`,
+			sourceID,
+		).Scan(&user, &role); err != nil {
+			t.Fatalf("inbox row %s not found: %v", sourceID, err)
+		}
+		if user != wantUser || role != wantRole {
+			t.Errorf("row %s: target_user_id=%q target_role=%q, want %q/%q",
+				sourceID, user, role, wantUser, wantRole)
+		}
+	}
+	// Superset: governed ws1 highlights the contact AND keeps MANAGER as a
+	// fallback; ungoverned ws2 stays on the legacy MANAGER-only fanout.
+	assertTarget("skill_review_sk1_ws1", "u_sec", "MANAGER")
+	assertTarget("skill_review_sk1_ws2", "", "MANAGER")
+}
+
+// TestKeeperSweep_MemoryHealth_GovernanceTargets covers the same
+// targeting rule on both sqlMemoryHealthPersister write paths (advisory
+// + consolidation trigger).
+func TestKeeperSweep_MemoryHealth_GovernanceTargets(t *testing.T) {
+	db := krDB(t)
+	mustExec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(q, args...); err != nil {
+			t.Fatalf("exec %q: %v", q, err)
+		}
+	}
+	mustExec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1','WS1','ws1')`)
+	mustExec(`INSERT INTO users (id, email) VALUES ('u_sec', 'sec@example.com')`)
+	if err := governance.Upsert(context.Background(), db, "ws1", governance.Settings{
+		Enabled: true, SecurityContactUserID: "u_sec", DenyNotifyMinRisk: 7,
+	}, ""); err != nil {
+		t.Fatalf("governance upsert: %v", err)
+	}
+
+	pers := &sqlMemoryHealthPersister{db: db, logger: krLogger()}
+	if err := pers.WriteInboxItem(context.Background(), "ws1", "crewA", "4 contradictions found", false); err != nil {
+		t.Fatalf("WriteInboxItem: %v", err)
+	}
+	if err := pers.TriggerConsolidation(context.Background(), "ws1", "crewA", "memory bloated"); err != nil {
+		t.Fatalf("TriggerConsolidation: %v", err)
+	}
+
+	rows, err := db.Query(`SELECT source_id, COALESCE(target_user_id,''), COALESCE(target_role,'') FROM inbox_items`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	seen := 0
+	for rows.Next() {
+		var sourceID, user, role string
+		if err := rows.Scan(&sourceID, &user, &role); err != nil {
+			t.Fatal(err)
+		}
+		seen++
+		if user != "u_sec" || role != "MANAGER" {
+			t.Errorf("row %s: target_user_id=%q target_role=%q, want u_sec/MANAGER", sourceID, user, role)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if seen != 2 {
+		t.Errorf("inbox rows = %d, want 2 (advisory + consolidation trigger)", seen)
 	}
 }
 

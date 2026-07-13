@@ -38,13 +38,18 @@ func (covKReqFailEmitter) Emit(_ context.Context, _ journal.Entry) (string, erro
 
 func (covKReqFailEmitter) Flush(_ context.Context) error { return nil }
 
-// covKReqBroadcaster records keeper events.
+// covKReqBroadcaster records keeper events and inbox invalidations.
 type covKReqBroadcaster struct {
-	events []map[string]any
+	events       []map[string]any
+	inboxUpdated []string // sources
 }
 
 func (b *covKReqBroadcaster) BroadcastKeeperEvent(_ string, event map[string]any) {
 	b.events = append(b.events, event)
+}
+
+func (b *covKReqBroadcaster) BroadcastInboxUpdated(_ string, source string) {
+	b.inboxUpdated = append(b.inboxUpdated, source)
 }
 
 func covKReqDecode(t *testing.T, raw []byte) keeper.RequestResult {

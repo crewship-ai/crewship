@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/keeper/governance"
 )
 
 type keeperRequestBody struct {
@@ -294,19 +295,34 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// flip the agent's credential request semantics from "ESCALATE
 	// pending operator" to "transient transport error → retry" which is
 	// the wrong recovery for the same outcome.
+	// Workspace watchdog governance (#1001 M0): a configured security
+	// contact highlights the snitch for a named admin (TargetUserID) while
+	// KEEPING the MANAGER fanout, so the escalation stays visible to every
+	// manager as a fallback (the inbox visibility filter ORs the two). The
+	// high-risk DENY notify is opt-in and gated on the workspace watchdog
+	// being enabled — Resolve returns disabled for an unconfigured workspace
+	// (default OFF), matching the behavior hook so the two paths agree on
+	// what "enabled" means.
+	gov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
+
+	// inbox.Insert returns its SQL error; only broadcast on a real write so
+	// a failed projection doesn't flash a phantom bell update with nothing
+	// behind it.
+	inboxWritten := false
 	if gkResp.Decision == string(keeper.DecisionEscalate) {
-		inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
-			WorkspaceID: body.WorkspaceID,
-			Kind:        inbox.KindEscalation,
-			SourceID:    reqID,
-			TargetRole:  "MANAGER",
-			Title:       fmt.Sprintf("Keeper escalation: %s requested %s (risk %d)", agentName, credName, gkResp.RiskScore),
-			BodyMD:      gkResp.Reason,
-			SenderType:  "system",
-			SenderID:    "keeper",
-			SenderName:  "Keeper",
-			Priority:    "high",
-			Blocking:    true,
+		if err := inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+			WorkspaceID:  body.WorkspaceID,
+			Kind:         inbox.KindEscalation,
+			SourceID:     reqID,
+			TargetUserID: gov.SecurityContactUserID,
+			TargetRole:   "MANAGER",
+			Title:        fmt.Sprintf("Keeper escalation: %s requested %s (risk %d)", agentName, credName, gkResp.RiskScore),
+			BodyMD:       gkResp.Reason,
+			SenderType:   "system",
+			SenderID:     "keeper",
+			SenderName:   "Keeper",
+			Priority:     "high",
+			Blocking:     true,
 			Payload: map[string]interface{}{
 				"request_id":      reqID,
 				"request_type":    "access",
@@ -319,7 +335,53 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				"reason":          gkResp.Reason,
 				"risk_score":      gkResp.RiskScore,
 			},
-		})
+		}); err == nil {
+			inboxWritten = true
+		}
+	}
+
+	// High-risk DENY notify (#1001 M0): opt-in per workspace. A DENY is
+	// already enforced — the item is informational (non-blocking), it
+	// exists so the admin *hears about* an agent probing past its fence
+	// instead of discovering it in the log next week.
+	if gov.Enabled &&
+		gkResp.Decision == string(keeper.DecisionDeny) && gkResp.RiskScore >= gov.DenyNotifyMinRisk {
+		if err := inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+			WorkspaceID:  body.WorkspaceID,
+			Kind:         inbox.KindEscalation,
+			SourceID:     reqID,
+			TargetUserID: gov.SecurityContactUserID,
+			TargetRole:   "MANAGER",
+			Title:        fmt.Sprintf("Keeper high-risk DENY: %s requested %s (risk %d)", agentName, credName, gkResp.RiskScore),
+			BodyMD:       gkResp.Reason,
+			SenderType:   "system",
+			SenderID:     "keeper",
+			SenderName:   "Keeper",
+			Priority:     "high",
+			Blocking:     false,
+			Payload: map[string]interface{}{
+				"request_id":      reqID,
+				"request_type":    "access",
+				"agent_id":        body.RequestingAgentID,
+				"agent_name":      agentName,
+				"credential_id":   body.CredentialID,
+				"credential_name": credName,
+				"security_level":  secLevel,
+				"intent":          body.Intent,
+				"reason":          gkResp.Reason,
+				"risk_score":      gkResp.RiskScore,
+			},
+		}); err == nil {
+			inboxWritten = true
+		}
+	}
+
+	// Realtime push (#1001 M0): Keeper was the only inbox producer that
+	// didn't broadcast inbox.updated — findings appeared only on manual
+	// refresh. Push the workspace invalidation so the bell badge updates
+	// live; a configured contact is surfaced via the item's TargetUserID.
+	if inboxWritten && h.broadcaster != nil {
+		h.broadcaster.BroadcastInboxUpdated(body.WorkspaceID, "keeper")
 	}
 
 	h.logger.Info("keeper: decision",

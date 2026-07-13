@@ -50,6 +50,12 @@ func (r *Router) registerAdminRoutes() {
 	keeperLog := NewKeeperLogHandler(r.db, r.logger)
 	r.authedAdmin("GET", "/api/v1/admin/keeper/requests", keeperLog.List)
 
+	// Keeper watchdog governance (issue #1001 M0): workspace toggle, named
+	// security contact, DENY-notify threshold. Read ADMIN+, write OWNER/ADMIN.
+	keeperGov := NewKeeperGovernanceHandler(r.db, r.logger, r.Journal())
+	r.authedAdmin("GET", "/api/v1/admin/keeper/governance", keeperGov.Get)
+	r.authedMut("PUT", "/api/v1/admin/keeper/governance", roleManage, keeperGov.Put)
+
 	// PR-F F6: Admin GDPR cascade endpoints — Art. 15 access +
 	// Art. 17 erasure across the four cascadable tables
 	// (peer_cards, memory_versions, inbox_items; keeper_requests

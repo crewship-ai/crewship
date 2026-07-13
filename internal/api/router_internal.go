@@ -194,6 +194,12 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 		r.skillReviewEval, r.behaviorEval, r.memHealthEval, r.negativeEval,
 		r.logger,
 	)
+	// Same broadcaster the credential-path KeeperHandler gets — the F4
+	// endpoints write to the same inbox and owe the same realtime push
+	// (#1001 M0).
+	if r.hub != nil {
+		kp2.WithBroadcaster(&keeperWSBroadcaster{hub: r.hub})
+	}
 	// F4 Keeper Phase 2 endpoints — wrapped in BOTH internalAuth (sidecar
 	// token gate) AND internalWsCtx (puts ?workspace_id= into request
 	// context). Handlers depend on the context value to run

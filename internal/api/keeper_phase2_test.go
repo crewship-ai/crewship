@@ -323,6 +323,119 @@ func TestKeeperPhase2_NegativeLearning_AllowQueuesInbox_WhenSelfLearningOFF(t *t
 	}
 }
 
+// TestKeeperPhase2_GovernanceContact_TargetsAndNotifies pins the #1001 M0
+// snitch upgrade on the F4 surface: with a configured security contact the
+// inbox row targets that user (role fanout cleared — it would double-
+// deliver) and the broadcaster gets BOTH the workspace inbox invalidation
+// and the direct user ping. Mirrors the keeper_request.go contract.
+func TestKeeperPhase2_GovernanceContact_TargetsAndNotifies(t *testing.T) {
+	db, pr := kp2DB(t)
+	// keeper_governance_settings.security_contact_user_id FKs users(id).
+	if _, err := db.Exec(`INSERT INTO users (id, email) VALUES ('u_sec', 'sec@example.com')`); err != nil {
+		t.Fatal(err)
+	}
+	governanceEnable(t, db, "ws1", "u_sec", 7)
+
+	p := &kp2Provider{content: `{"decision":"DENY","reason":"stale skill","risk":8}`}
+	gk := gatekeeper.New(p, "claude-haiku-4-5", kp2Logger())
+	ev := gatekeeper.NewSkillReviewEvaluator(gk, kp2Logger())
+
+	bc := &covKReqBroadcaster{}
+	h := NewKeeperPhase2Handler(db, "tok", pr, ev, nil, nil, nil, kp2Logger()).WithBroadcaster(bc)
+
+	body := skillReviewBody{
+		WorkspaceID: "ws1", CrewID: "cr1",
+		SkillID: "sk_x", SkillName: "x", LifecycleState: "active", Assignments: 1,
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/internal/keeper/skill-review", mustJSON(t, body))
+	r = r.WithContext(context.WithValue(r.Context(), ctxWorkspaceID, body.WorkspaceID))
+	h.HandleSkillReview(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+
+	var targetUser, targetRole string
+	if err := db.QueryRow(
+		`SELECT COALESCE(target_user_id,''), COALESCE(target_role,'') FROM inbox_items WHERE source_id = ?`,
+		resp.RequestID,
+	).Scan(&targetUser, &targetRole); err != nil {
+		t.Fatalf("inbox row not found: %v", err)
+	}
+	if targetUser != "u_sec" {
+		t.Errorf("target_user_id = %q, want u_sec", targetUser)
+	}
+	// Superset targeting: the contact is highlighted AND the MANAGER fanout
+	// is kept as a fallback (inbox visibility filter ORs the two).
+	if targetRole != "MANAGER" {
+		t.Errorf("target_role = %q, want MANAGER kept as fallback", targetRole)
+	}
+	if len(bc.inboxUpdated) != 1 || bc.inboxUpdated[0] != "keeper" {
+		t.Errorf("inboxUpdated = %v, want [keeper]", bc.inboxUpdated)
+	}
+}
+
+// TestKeeperPhase2_NoGovernance_LegacyManagerFanout pins the fallback:
+// without a governance row the F4 inbox write keeps the legacy MANAGER
+// role fanout and the broadcaster still pushes the workspace inbox
+// invalidation — but no direct user ping (there's nobody to target).
+func TestKeeperPhase2_NoGovernance_LegacyManagerFanout(t *testing.T) {
+	db, _ := kp2DB(t)
+	if _, err := db.Exec(`UPDATE crews SET behavior_mode='block' WHERE id='cr1'`); err != nil {
+		t.Fatal(err)
+	}
+	pr := policy.NewResolver(db)
+
+	p := &kp2Provider{content: `{"decision":"DENY","reason":"destructive","risk":9}`}
+	gk := gatekeeper.New(p, "claude-haiku-4-5", kp2Logger())
+	ev := gatekeeper.NewBehaviorEvaluator(gk, kp2Logger())
+
+	bc := &covKReqBroadcaster{}
+	h := NewKeeperPhase2Handler(db, "tok", pr, nil, ev, nil, nil, kp2Logger()).WithBroadcaster(bc)
+
+	body := behaviorBody{
+		WorkspaceID: "ws1", CrewID: "cr1",
+		AgentID: "a1", AgentName: "Worker", CrewName: "Ops",
+		ToolName: "shell_exec", ToolArgsSnippet: `{"cmd":"rm -rf /"}`,
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/internal/keeper/behavior", mustJSON(t, body))
+	r = r.WithContext(context.WithValue(r.Context(), ctxWorkspaceID, body.WorkspaceID))
+	h.HandleBehavior(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+
+	var targetUser, targetRole string
+	if err := db.QueryRow(
+		`SELECT COALESCE(target_user_id,''), COALESCE(target_role,'') FROM inbox_items WHERE source_id = ?`,
+		resp.RequestID,
+	).Scan(&targetUser, &targetRole); err != nil {
+		t.Fatalf("inbox row not found: %v", err)
+	}
+	if targetUser != "" {
+		t.Errorf("target_user_id = %q, want empty without governance", targetUser)
+	}
+	if targetRole != "MANAGER" {
+		t.Errorf("target_role = %q, want MANAGER (legacy fanout)", targetRole)
+	}
+	if len(bc.inboxUpdated) != 1 || bc.inboxUpdated[0] != "keeper" {
+		t.Errorf("inboxUpdated = %v, want [keeper]", bc.inboxUpdated)
+	}
+}
+
 func mustJSON(t *testing.T, v any) *bytes.Buffer {
 	t.Helper()
 	b, err := json.Marshal(v)

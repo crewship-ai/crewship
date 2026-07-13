@@ -224,6 +224,54 @@ KEEPER_MODEL=claude-haiku-4-5
   Setting `KEEPER_OLLAMA_URL` auto-enables Keeper unless `KEEPER_ENABLED` is explicitly set to `false`. There is **no default model** — an enabled Keeper with an empty `keeper.model` (and no `KEEPER_MODEL`) fails validation at startup with `keeper.enabled=true but keeper.model is empty`. The earlier silent `phi3:mini` fallback was removed (PR-Z).
 </Note>
 
+## Watchdog Governance (per workspace)
+
+Beyond the credential gatekeeper, Keeper runs a **behavioral watchdog** — a
+behavior monitor that samples agent tool calls and flags anti-patterns
+(tight loops, scope creep, destructive sequences, credential probing).
+Workspace OWNERs/ADMINs control it in-app from **Admin → Keeper**, no server
+restart needed:
+
+| Setting | What it does | Default |
+|---------|-------------|---------|
+| **Watchdog enabled** | Master toggle for behavior monitoring + DENY notifications in this workspace | **Off (opt-in)** — enable per workspace |
+| **Security contact** | A named OWNER/ADMIN the escalation is highlighted for (via the inbox item's target) | Unset — findings go to all MANAGER+ members |
+| **Notify on DENY at risk ≥ N** | High-risk DENY decisions (1–10 scale) also land in the inbox as non-blocking items — ESCALATE always does | 7 |
+
+When a security contact is set the escalation targets that person **and** keeps
+the MANAGER fanout, so managers still see it as a fallback. Keeper findings push
+an `inbox.updated` event in realtime, so the bell badge updates without a
+manual refresh.
+
+<Note>
+  The behavioral watchdog is **opt-in and default OFF per workspace** — it only
+  runs once an OWNER/ADMIN enables it. The workspace toggle governs the
+  *behavioral* layer only: the credential-access gatekeeper enforcement stays
+  server-configured (`KEEPER_ENABLED`), so an in-app toggle can never weaken
+  credential isolation.
+</Note>
+
+### API + CLI
+
+```bash
+# Combined server + workspace governance status
+crewship keeper status
+
+# Toggle the watchdog for the current workspace (OWNER/ADMIN)
+crewship keeper enable
+crewship keeper disable
+
+# Route findings at a named admin (must be OWNER/ADMIN), or clear
+crewship keeper contact admin@example.com
+crewship keeper contact --clear
+
+# DENY notification threshold (1-10)
+crewship keeper threshold 6
+```
+
+Endpoints: `GET`/`PUT /api/v1/admin/keeper/governance` (read ADMIN+, write
+OWNER/ADMIN). Every governance change is journaled with the acting user.
+
 ## Audit Trail
 
 Every Keeper decision is audited with:

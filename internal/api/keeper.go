@@ -49,6 +49,12 @@ const (
 
 type KeeperBroadcaster interface {
 	BroadcastKeeperEvent(workspaceID string, event map[string]any)
+	// BroadcastInboxUpdated pushes the workspace-wide inbox invalidation
+	// event after a Keeper inbox write, so escalations reach the bell badge
+	// in realtime instead of on manual refresh (#1001 M0). Same event every
+	// other inbox producer (chatnotify, pipeline_governance, runner_notify)
+	// already emits.
+	BroadcastInboxUpdated(workspaceID string, source string)
 }
 
 // KeeperHandler handles credential access requests forwarded by the sidecar.
