@@ -159,18 +159,30 @@ export default function CredentialsPage() {
   const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false)
   const [bulkDeleting, setBulkDeleting] = React.useState(false)
 
+  // Cancel an in-flight fetch when the workspace changes so a slower
+  // response from the previous workspace can't resolve later and overwrite
+  // the newly-selected workspace's rows (matches the AbortController idiom
+  // used by app/(dashboard)/crews/page.tsx).
+  const abortRef = React.useRef<AbortController | null>(null)
+
   // fetchCredentials THROWS on failure so loadData can surface a real
   // error state — a failed fetch must never render as "no credentials
   // yet" (which invites re-creating secrets that already exist).
-  const fetchCredentials = React.useCallback(async (oid: string) => {
+  const fetchCredentials = React.useCallback(async (oid: string, signal?: AbortSignal) => {
     let res: Response
     try {
-      res = await apiFetch(`/api/v1/credentials?workspace_id=${oid}`)
-    } catch {
+      res = await apiFetch(`/api/v1/credentials?workspace_id=${oid}`, { signal })
+    } catch (err) {
+      if ((err as { name?: string })?.name === "AbortError") throw err
       throw new Error("Network error while loading credentials.")
     }
+    // Belt-and-suspenders: even if the abort didn't preempt the fetch (or
+    // the mock/transport ignores signals), never apply a response that's no
+    // longer wanted.
+    if (signal?.aborted) return
     if (!res.ok) throw new Error(`Loading credentials failed (HTTP ${res.status}).`)
     const data = await res.json()
+    if (signal?.aborted) return
     const normalised: Credential[] = (Array.isArray(data) ? data : []).map((c: Credential) => ({
       ...c,
       last_used_at: c.last_used_at ?? null,
@@ -187,24 +199,42 @@ export default function CredentialsPage() {
     // Wait for the workspace store to resolve the selected workspace before
     // deciding there's nothing to load.
     if (wsLoading) return
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
     setLoading(true)
     setLoadError(null)
     try {
       if (workspaceId) {
-        await fetchCredentials(workspaceId)
+        await fetchCredentials(workspaceId, controller.signal)
       } else {
         setCredentials([])
       }
     } catch (err) {
+      if (controller.signal.aborted || (err as { name?: string })?.name === "AbortError") return
       setLoadError(err instanceof Error ? err.message : "Something went wrong while loading credentials.")
     } finally {
-      setLoading(false)
+      // Only the currently-owned controller may flip loading back off —
+      // otherwise a superseded request's `finally` could clear the
+      // skeleton after the newer request already took over.
+      if (abortRef.current === controller) setLoading(false)
     }
   }, [wsLoading, workspaceId, fetchCredentials])
 
   // Reload whenever the selected workspace changes (switcher) or the store
   // finishes loading.
-  React.useEffect(() => { loadData() }, [loadData])
+  React.useEffect(() => {
+    loadData()
+    return () => { abortRef.current?.abort() }
+  }, [loadData])
+
+  // Bulk-select is per-workspace state: without this, switching workspaces
+  // leaves stale ids selected, floating the "N selected" bar over the new
+  // workspace's rows and letting bulk-delete fire DELETEs against the
+  // previous workspace's credential ids.
+  React.useEffect(() => {
+    setSelectedIds(new Set())
+  }, [workspaceId])
 
   const handleRefresh = React.useCallback(() => {
     if (!workspaceId) return

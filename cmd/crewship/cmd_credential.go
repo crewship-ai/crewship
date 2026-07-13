@@ -76,8 +76,13 @@ every page. --search and --tag filter server-side.`,
 		search, _ := flags.GetString("search")
 		tag, _ := flags.GetString("tag")
 		limit, _ := flags.GetInt("limit")
+		limitSet := flags.Changed("limit")
 		cursor, _ := flags.GetString("cursor")
 		all, _ := flags.GetBool("all")
+
+		if limitSet && limit <= 0 {
+			return fmt.Errorf("--limit must be a positive integer, got %d", limit)
+		}
 
 		client := newAPIClient()
 		buildURL := func(cur string) string {
@@ -85,8 +90,14 @@ every page. --search and --tag filter server-side.`,
 			// paginate=true opts into the cursor envelope; the server still
 			// returns a bare array to callers that don't ask, so this is safe.
 			q.Set("paginate", "true")
-			if limit > 0 {
+			// Always send an explicit limit. The paginated envelope defaults
+			// to 50 server-side, vs. the long-standing bare-array endpoint's
+			// 100 — without this, opting into pagination would silently
+			// halve the page size for every caller that didn't pass --limit.
+			if limitSet {
 				q.Set("limit", strconv.Itoa(limit))
+			} else {
+				q.Set("limit", "100")
 			}
 			if search != "" {
 				q.Set("search", search)
@@ -100,10 +111,18 @@ every page. --search and --tag filter server-side.`,
 			return "/api/v1/credentials?" + q.Encode()
 		}
 
+		// maxAllPages bounds --all's cursor-follow loop. Combined with the
+		// non-advancing-cursor check below, this guarantees the loop always
+		// terminates even against a buggy or malicious server.
+		const maxAllPages = 200
+
 		var creds []credRow
 		var lastNext *string
 		cur := cursor
-		for {
+		for pageNum := 0; ; pageNum++ {
+			if pageNum >= maxAllPages {
+				return fmt.Errorf("--all stopped after %d pages without reaching the end — this looks like a server bug; re-run without --all or with an explicit --cursor", maxAllPages)
+			}
 			resp, err := client.Get(buildURL(cur))
 			if err != nil {
 				return err
@@ -115,16 +134,19 @@ every page. --search and --tag filter server-side.`,
 			if err := cli.ReadJSON(resp, &raw); err != nil {
 				return err
 			}
-			page, next, err := decodeCredentialListPage(raw)
+			rows, next, err := decodeCredentialListPage(raw)
 			if err != nil {
 				return err
 			}
-			creds = append(creds, page...)
+			creds = append(creds, rows...)
 			lastNext = next
 			// Stop after one page unless --all; also stop when there is no
 			// next page or the server returned a bare array (next == nil).
 			if !all || next == nil || *next == "" {
 				break
+			}
+			if *next == cur {
+				return fmt.Errorf("--all aborted: the server returned the same cursor twice (%q) — no progress", *next)
 			}
 			cur = *next
 		}
