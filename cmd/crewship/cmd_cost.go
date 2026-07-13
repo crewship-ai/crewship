@@ -48,27 +48,17 @@ Examples:
 		subRows, _ := fetchSubscriptionUsage(client, rng) // best-effort; not every workspace has plans
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(map[string]any{
-				"range":         rng,
-				"top":           topRows,
-				"crews":         crewRows,
-				"subscriptions": subRows,
-			})
-		}
-		if f.Format == "yaml" {
-			return f.YAML(map[string]any{
-				"range":         rng,
-				"top":           topRows,
-				"crews":         crewRows,
-				"subscriptions": subRows,
-			})
-		}
-		printCostHeader(rng, crewRows)
-		printCostTopSpenders(topRows)
-		printCostByCrew(crewRows)
-		printCostSubscriptions(subRows)
-		return nil
+		return f.AutoHuman(map[string]any{
+			"range":         rng,
+			"top":           topRows,
+			"crews":         crewRows,
+			"subscriptions": subRows,
+		}, func() {
+			printCostHeader(rng, crewRows)
+			printCostTopSpenders(topRows)
+			printCostByCrew(crewRows)
+			printCostSubscriptions(subRows)
+		})
 	},
 }
 

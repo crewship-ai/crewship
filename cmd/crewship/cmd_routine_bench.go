@@ -341,52 +341,46 @@ func percentileInt64(sorted []int64, p int) int64 {
 
 func renderBenchReport(cmd *cobra.Command, s benchSummary) error {
 	f := newFormatter()
-	if f.Format == "json" {
-		return f.JSON(s)
-	}
-	if f.Format == "yaml" {
-		return f.YAML(s)
-	}
-
-	out := cmd.OutOrStdout()
-	tier := s.TierOverride
-	if tier == "" {
-		tier = "(authored)"
-	}
-	fmt.Fprintf(out, "\n────── %s × %d runs (tier=%s) ──────\n\n", s.Slug, s.Runs, tier)
-	fmt.Fprintf(out, "  Pass rate:  %d/%d  (%.0f%%)\n", s.Pass, s.Runs, s.PassRate*100)
-	fmt.Fprintf(out, "  Cost:       total $%.4f  /  mean $%.4f  /  p95 $%.4f  /  max $%.4f\n",
-		s.CostTotal, s.CostMean, s.CostP95, s.CostMax)
-	fmt.Fprintf(out, "  Duration:   p50 %dms  /  p95 %dms  /  max %dms\n",
-		s.DurP50Ms, s.DurP95Ms, s.DurMaxMs)
-
-	if len(s.FailReasons) > 0 {
-		fmt.Fprintln(out, "\n  Fail breakdown:")
-		// Stable order: highest count first, ties broken alphabetically.
-		type kv struct {
-			k string
-			v int
+	return f.AutoHuman(s, func() {
+		out := cmd.OutOrStdout()
+		tier := s.TierOverride
+		if tier == "" {
+			tier = "(authored)"
 		}
-		pairs := make([]kv, 0, len(s.FailReasons))
-		for k, v := range s.FailReasons {
-			pairs = append(pairs, kv{k, v})
-		}
-		sort.Slice(pairs, func(i, j int) bool {
-			if pairs[i].v != pairs[j].v {
-				return pairs[i].v > pairs[j].v
+		fmt.Fprintf(out, "\n────── %s × %d runs (tier=%s) ──────\n\n", s.Slug, s.Runs, tier)
+		fmt.Fprintf(out, "  Pass rate:  %d/%d  (%.0f%%)\n", s.Pass, s.Runs, s.PassRate*100)
+		fmt.Fprintf(out, "  Cost:       total $%.4f  /  mean $%.4f  /  p95 $%.4f  /  max $%.4f\n",
+			s.CostTotal, s.CostMean, s.CostP95, s.CostMax)
+		fmt.Fprintf(out, "  Duration:   p50 %dms  /  p95 %dms  /  max %dms\n",
+			s.DurP50Ms, s.DurP95Ms, s.DurMaxMs)
+
+		if len(s.FailReasons) > 0 {
+			fmt.Fprintln(out, "\n  Fail breakdown:")
+			// Stable order: highest count first, ties broken alphabetically.
+			type kv struct {
+				k string
+				v int
 			}
-			return pairs[i].k < pairs[j].k
-		})
-		for _, p := range pairs {
-			fmt.Fprintf(out, "    %-12s  %d\n", p.k, p.v)
+			pairs := make([]kv, 0, len(s.FailReasons))
+			for k, v := range s.FailReasons {
+				pairs = append(pairs, kv{k, v})
+			}
+			sort.Slice(pairs, func(i, j int) bool {
+				if pairs[i].v != pairs[j].v {
+					return pairs[i].v > pairs[j].v
+				}
+				return pairs[i].k < pairs[j].k
+			})
+			for _, p := range pairs {
+				fmt.Fprintf(out, "    %-12s  %d\n", p.k, p.v)
+			}
 		}
-	}
 
-	// Brief production-readiness verdict — a one-line "is this
-	// usable now?" so the operator doesn't need to interpret stats.
-	verdict := readinessVerdict(s)
-	fmt.Fprintf(out, "\n  Verdict:    %s\n", verdict)
-	return nil
+		// Brief production-readiness verdict — a one-line "is this
+		// usable now?" so the operator doesn't need to interpret stats.
+		verdict := readinessVerdict(s)
+		fmt.Fprintf(out, "\n  Verdict:    %s\n", verdict)
+	})
 }
 
 // readinessVerdict maps the bench summary to a short production-
