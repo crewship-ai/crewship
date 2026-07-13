@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,15 +39,28 @@ type containerUserResolver interface {
 }
 
 // isPrivilegedContainerUser reports whether a resolved container user string
-// denotes root. Keeper refuses to run a credential-injected command as root:
-// the containment model assumes the agent (and therefore this command) runs
-// unprivileged (#1060). Accepts the Docker "user" and "user:group" forms.
+// is unsafe to exec as. Keeper refuses to run a credential-injected command
+// as root — or as anything it can't strictly prove is a non-root numeric
+// uid[:gid] — because the containment model assumes the agent (and
+// therefore this command) runs unprivileged (#1060). The check is
+// deliberately strict and fails closed: only the Docker "uid" and "uid:gid"
+// forms are accepted, every part must parse as a positive integer, and a
+// zero uid *or* zero gid (root's primary group) is rejected. A named alias
+// like "root" or an image /etc/passwd entry aliasing uid 0 (e.g. "toor") is
+// rejected too, since it isn't one of the two accepted numeric forms.
 func isPrivilegedContainerUser(user string) bool {
 	u := strings.TrimSpace(user)
-	if i := strings.IndexByte(u, ':'); i >= 0 {
-		u = u[:i]
+	parts := strings.Split(u, ":")
+	if len(parts) < 1 || len(parts) > 2 {
+		return true
 	}
-	return u == "0" || strings.EqualFold(u, "root")
+	for _, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n <= 0 {
+			return true
+		}
+	}
+	return false
 }
 
 type keeperExecuteBody struct {

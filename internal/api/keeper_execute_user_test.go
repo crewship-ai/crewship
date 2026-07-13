@@ -43,8 +43,13 @@ func TestKeeperExecute_ResolvesContainerUser(t *testing.T) {
 	}
 }
 
-// TestKeeperExecute_UndeterminableUser_FailsClosed covers the three
-// undeterminable/privileged cases: the command must NOT run.
+// TestKeeperExecute_UndeterminableUser_FailsClosed covers the
+// undeterminable/privileged cases: the command must NOT run. The validation
+// is strict — only a numeric uid[:gid] with every part a positive integer is
+// accepted — so root's group (gid 0), a non-numeric alias for uid 0 (e.g. a
+// "toor" /etc/passwd entry), an unrelated non-numeric name, and malformed
+// user strings must all fail closed too, not just literal "root"/"0:0"
+// (#1060).
 func TestKeeperExecute_UndeterminableUser_FailsClosed(t *testing.T) {
 	cases := []struct {
 		name string
@@ -53,6 +58,12 @@ func TestKeeperExecute_UndeterminableUser_FailsClosed(t *testing.T) {
 		{"inspect error", &mockContainerExec{output: "ok", userErr: errors.New("inspect boom")}},
 		{"empty user", &mockContainerExec{output: "ok", userForceEmpty: true}},
 		{"root user", &mockContainerExec{output: "ok", userResult: "0:0"}},
+		{"root group", &mockContainerExec{output: "ok", userResult: "1001:0"}},
+		{"root uid non-root group", &mockContainerExec{output: "ok", userResult: "0:1001"}},
+		{"non-numeric root alias", &mockContainerExec{output: "ok", userResult: "toor"}},
+		{"non-numeric name", &mockContainerExec{output: "ok", userResult: "agent"}},
+		{"extra colon segment", &mockContainerExec{output: "ok", userResult: "1001:1001:extra"}},
+		{"non-numeric uid and gid", &mockContainerExec{output: "ok", userResult: "abc:def"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
