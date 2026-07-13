@@ -118,6 +118,27 @@ func TestMemoryHealthEvaluator_DecisionMatrix(t *testing.T) {
 	}
 }
 
+// #1063: the recall-ratio guard tested Coverage while the value came from
+// Reachability. A snapshot with Coverage==0 but Reachability>0 must surface the
+// Reachability-derived ratio, not a false 0.00 that reads as "low recall".
+func TestMemoryHealthEvaluator_RecallRatioGatesOnReachability(t *testing.T) {
+	p := &mockProvider{content: `{"decision":"ALLOW","reason":"ok","risk":2}`}
+	gk := gatekeeper.New(p, "claude-haiku-4-5", newTestLogger())
+	ev := gatekeeper.NewMemoryHealthEvaluator(gk, newTestLogger())
+
+	_, err := ev.Evaluate(context.Background(), gatekeeper.MemoryHealthRequest{
+		WorkspaceID: "ws1", CrewID: "cr1", AgentName: "Auditor", CrewName: "Ops",
+		// Coverage 0 (old guard would zero the ratio) but Reachability 80.
+		Snapshot: consolidate.HealthSnapshot{Coverage: 0, Reachability: 80},
+	})
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if !strings.Contains(p.capturedPrompt, "Recall/write ratio: 0.80") {
+		t.Errorf("prompt should carry the Reachability-derived recall ratio 0.80, not 0.00\n---\n%s\n---", p.capturedPrompt)
+	}
+}
+
 func TestMemoryHealthEvaluator_RejectsEmptyWorkspace(t *testing.T) {
 	gk := gatekeeper.New(&mockProvider{}, "claude-haiku-4-5", newTestLogger())
 	ev := gatekeeper.NewMemoryHealthEvaluator(gk, newTestLogger())

@@ -86,10 +86,14 @@ func (e *MemoryHealthEvaluator) Evaluate(ctx context.Context, req MemoryHealthRe
 	}
 
 	recallRatio := 0.0
-	if req.Snapshot.Coverage > 0 {
+	if req.Snapshot.Reachability > 0 {
 		// Use Reachability as a recall-vs-write proxy: high reachability
 		// + low freshness suggests "memory is being read but not
-		// updated"; both low = "stale memory nobody touches".
+		// updated"; both low = "stale memory nobody touches". Gate on the
+		// SAME field the value comes from (#1063): the guard previously
+		// tested Coverage, so a snapshot with Coverage==0 but Reachability>0
+		// forced recallRatio to 0.0 and fed the LLM a false "low recall
+		// (<0.05)" signal → spurious auto-consolidate pressure.
 		recallRatio = req.Snapshot.Reachability / 100.0
 	}
 
