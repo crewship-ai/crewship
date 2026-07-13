@@ -793,7 +793,21 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 		execCfg.AttachStdin = true
 	}
 	if execCfg.User == "" {
-		execCfg.User = "1001:1001"
+		// #1158: this used to default straight to a hardcoded "1001:1001",
+		// silently running as that constant even for a container whose actual
+		// agent user differs (a custom base image, a future uid bump,
+		// userns-remap) — contradicting the fail-closed philosophy keeper's
+		// /execute path adopted in #1060/PR #1135. Resolve the container's
+		// REAL configured user instead, and fail closed (no exec) if it can't
+		// be determined or is privileged, rather than defaulting.
+		resolvedUser, err := p.ContainerUser(ctx, cfg.ContainerID)
+		if err != nil {
+			return nil, fmt.Errorf("exec: resolve run-as user for container %s: %w", cfg.ContainerID, err)
+		}
+		if resolvedUser == "" || provider.IsPrivilegedExecUser(resolvedUser) {
+			return nil, fmt.Errorf("exec: container %s has no safe non-root user configured (resolved %q); refusing to exec without an explicit user", cfg.ContainerID, resolvedUser)
+		}
+		execCfg.User = resolvedUser
 	}
 
 	exec, err := p.client.ContainerExecCreate(ctx, cfg.ContainerID, execCfg)
@@ -853,7 +867,15 @@ func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.Interactive
 		User:         cfg.User,
 	}
 	if execCfg.User == "" {
-		execCfg.User = "1001:1001"
+		// #1158: same fail-closed resolution as Exec above — see its comment.
+		resolvedUser, err := p.ContainerUser(ctx, cfg.ContainerID)
+		if err != nil {
+			return nil, fmt.Errorf("exec interactive: resolve run-as user for container %s: %w", cfg.ContainerID, err)
+		}
+		if resolvedUser == "" || provider.IsPrivilegedExecUser(resolvedUser) {
+			return nil, fmt.Errorf("exec interactive: container %s has no safe non-root user configured (resolved %q); refusing to exec without an explicit user", cfg.ContainerID, resolvedUser)
+		}
+		execCfg.User = resolvedUser
 	}
 
 	exec, err := p.client.ContainerExecCreate(ctx, cfg.ContainerID, execCfg)

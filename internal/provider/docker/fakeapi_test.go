@@ -519,9 +519,13 @@ func TestExec_CreateError(t *testing.T) {
 	})
 	defer cleanup()
 
+	// Explicit User: targets exec-CREATE error propagation, not #1158's
+	// resolution path (which would itself error on this "missing container"
+	// fixture before ever reaching create — covered in exec_fail_closed_test.go).
 	_, err := p.Exec(context.Background(), provider.ExecConfig{
 		ContainerID: "missing",
 		Cmd:         []string{"echo"},
+		User:        "1001:1001",
 	})
 	if err == nil {
 		t.Fatal("expected error")
