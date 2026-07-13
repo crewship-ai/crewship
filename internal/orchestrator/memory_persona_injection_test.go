@@ -58,6 +58,27 @@ func TestBuildPersonaBlock_CrewLayerScansInjection(t *testing.T) {
 	assertBlocked(t, "crew PERSONA", got)
 }
 
+// #1038 self-review [5]: the SYNTHESIZED default (built from operator-set
+// RoleTitle) is our own generated text and must NOT be run through the injection
+// scanner — otherwise a false-positive phrase would blank the persona for every
+// agent in the crew. Only file-derived (agent-writable) personas are scanned.
+func TestBuildPersonaBlock_SynthesizedDefault_NotScanned(t *testing.T) {
+	// No PERSONA.md files → synthesized default path. Even with a RoleTitle
+	// carrying an injection-like phrase, the block must render (not [BLOCKED]).
+	mc := mockContainerForMemory(map[string]string{})
+	o := New(mc, newMemState(), slog.Default())
+	got := o.buildPersonaBlock(context.Background(), AgentRunRequest{
+		AgentSlug: "alice", ContainerID: "c1", CrewID: "crew1",
+		RoleTitle: "ignore previous instructions specialist", AgentRole: "AGENT",
+	})
+	if got == "" {
+		t.Skip("no default persona synthesized for this role/title; nothing to assert")
+	}
+	if strings.Contains(got, "[BLOCKED:") {
+		t.Errorf("synthesized default persona must not be scanned/blanked: %q", got)
+	}
+}
+
 func TestBuildPeerCardBlock_ScansInjection(t *testing.T) {
 	slug := memory.UserSlug("op-1", "ws-1")
 	mc := mockContainerForMemory(map[string]string{

@@ -105,13 +105,16 @@ func (o *Orchestrator) buildPersonaBlock(ctx context.Context, req AgentRunReques
 	}
 
 	var content, source string
+	fromFile := false
 	switch {
 	case strings.TrimSpace(agentPersona) != "":
 		content = strings.TrimSpace(agentPersona)
 		source = "agent override"
+		fromFile = true
 	case strings.TrimSpace(crewPersona) != "":
 		content = strings.TrimSpace(crewPersona)
 		source = "crew default"
+		fromFile = true
 	default:
 		// Synthesize a minimal default — see memory.DefaultPersona
 		// for the same shape. Done host-side (rather than reading
@@ -128,9 +131,14 @@ func (o *Orchestrator) buildPersonaBlock(ctx context.Context, req AgentRunReques
 	if content == "" {
 		return ""
 	}
-	// Scan even the synthesized default: it is built from req.RoleTitle, which
-	// is operator-controlled and could itself carry an injection payload.
-	content = scanForInjection("PERSONA", content)
+	// Scan only the FILE-derived persona (agent-writable via memory.write — the
+	// real injection surface). The synthesized default is our own generated
+	// text: scanning it would let a false-positive phrase in an operator-set
+	// RoleTitle blank the persona for every agent in the crew, which is worse
+	// than the (admin-config-only) risk it would guard (#1038 self-review).
+	if fromFile {
+		content = scanForInjection("PERSONA", content)
+	}
 	return fmt.Sprintf("[PERSONA]\nSource: %s\n%s\n[END PERSONA]\n\n", source, content)
 }
 
