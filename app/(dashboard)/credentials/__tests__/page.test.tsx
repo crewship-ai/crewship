@@ -381,6 +381,43 @@ describe("bulk delete partial failure (C6)", () => {
   })
 })
 
+// #1162: confirmDeleteCredential (single-item delete) still did
+// `if (res.ok) refresh` — a 404 (already deleted by another admin) was
+// silently swallowed: no toast, no refresh, stale row lingers. Apply the
+// same 404-as-already-gone semantics bulkDelete got in #1085.
+describe("single delete 404 (#1162)", () => {
+  it("treats a 404 DELETE as already-gone: toasts and refreshes instead of leaving a stale row", async () => {
+    const creds = [makeCredential({ id: "cred_a", name: "KEY_A" })]
+    let deletedHappened = false
+    h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("/api/v1/workspaces")) return ok([{ id: "ws1", name: "Test" }])
+      if (url.startsWith("/api/v1/credentials?")) return ok(deletedHappened ? [] : creds)
+      if (init?.method === "DELETE") {
+        deletedHappened = true
+        return fail(404) // already gone
+      }
+      return ok([])
+    })
+    render(<CredentialsPage />)
+
+    expect(await screen.findByText("KEY_A")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }))
+
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("already deleted"))
+    })
+    expect(toast.error).not.toHaveBeenCalled()
+    // The refresh this triggers must actually run — proving the 404 wasn't
+    // a silent no-op that leaves the now-nonexistent row on screen.
+    await waitFor(() => {
+      expect(screen.queryByText("KEY_A")).not.toBeInTheDocument()
+    })
+  })
+})
+
 // #1085 item 2: a refresh failure after data is on screen must not replace the
 // loaded list with the full-page error card — it toasts and keeps the list.
 describe("transient refresh failure (C-refresh)", () => {
