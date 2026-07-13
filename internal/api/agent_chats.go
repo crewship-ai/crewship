@@ -300,6 +300,18 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 
 	if !createdBy.Valid || createdBy.String != user.ID {
 		role := RoleFromContext(r.Context())
+		// The route registers roleSelf → scopeSelf (#1074), so the
+		// route-level scope gate never runs here. That exemption is for the
+		// creator arm above — self-cleanup of a chat the token itself
+		// created consumes no resource capability. This arm deletes ANOTHER
+		// principal's chat via canEditAgent, which passes unconditionally
+		// for OWNER/ADMIN — so a leaked CLI token narrowed to an unrelated
+		// scope must NOT reach it. Re-impose the scope scopeForRoute used to
+		// demand for this pattern before the roleSelf change.
+		if !canScope(r.Context(), "agents:write") {
+			replyForbidden(w, h.logger, user.ID, role, "chat.delete", "chat:"+chatID)
+			return
+		}
 		ok, err := canEditAgent(r.Context(), h.db, user.ID, role, agentID)
 		if err != nil {
 			h.logger.Error("delete chat gate", "error", err)
@@ -336,6 +348,18 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 	// "agent replied" inbox items go too (source_id = chat_reply_<chat>_<user>,
 	// see chatReplyInboxSourceID): leaving them would keep stale unread
 	// bells whose "Open chat" deep link now 404s.
+	//
+	// Deliberately NOT touched (#1074): peer_conversations.chat_id and
+	// escalations.chat_id are TEXT NOT NULL with no FK to chats — they record
+	// operational history (a delegated question, a credential escalation) that
+	// outlives the chat it originated in, so we leave them dangling rather than
+	// delete audit rows or (impossibly, they are NOT NULL) null the pointer.
+	// This is safe because every reader treats chat_id as an OPAQUE field: no
+	// query JOINs chats through it or dereferences it, so a pointer to a gone
+	// chat degrades gracefully (an "open source chat" deep link may 404, same
+	// as any deleted resource). Attachment blobs under
+	// <storage-root>/<crew>/<agent>/attachments/<chatId>/ are a separate
+	// residual tracked for follow-up (needs an IPC files-delete surface).
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		h.logger.Error("delete chat begin tx", "error", err)

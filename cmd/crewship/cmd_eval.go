@@ -144,24 +144,18 @@ var evalRunsCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(body.Rows)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(body.Rows)
-		}
-
-		if len(body.Rows) == 0 {
-			fmt.Println("(no eval runs recorded yet)")
-			return nil
-		}
-		header := []string{"ID", "KIND", "MISSION", "BASELINE", "STATUS", "CREATED"}
-		rows := make([][]string, 0, len(body.Rows))
-		for _, r := range body.Rows {
-			rows = append(rows, []string{r.ID, r.Kind, r.MissionID, r.BaselineID, r.Status, r.CreatedAt})
-		}
-		f.Table(header, rows)
-		return nil
+		return f.AutoHuman(body.Rows, func() {
+			if len(body.Rows) == 0 {
+				fmt.Println("(no eval runs recorded yet)")
+				return
+			}
+			header := []string{"ID", "KIND", "MISSION", "BASELINE", "STATUS", "CREATED"}
+			rows := make([][]string, 0, len(body.Rows))
+			for _, r := range body.Rows {
+				rows = append(rows, []string{r.ID, r.Kind, r.MissionID, r.BaselineID, r.Status, r.CreatedAt})
+			}
+			f.Table(header, rows)
+		})
 	},
 }
 

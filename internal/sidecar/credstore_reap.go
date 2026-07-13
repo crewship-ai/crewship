@@ -31,7 +31,15 @@ func (s *Server) reapRevokedCredentials(ctx context.Context) {
 	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
+	// #1031: scope to this crew, matching the agent-facing listing. The
+	// CredStore's boot creds are this crew's own, so the crew-scoped live set
+	// is a superset of what's in the store — a peer crew's credential is never
+	// in `keep`, and no valid own-crew credential is falsely reaped. A
+	// crew-less sidecar omits crew_id and keeps the workspace-wide view.
 	endpoint := s.ipc.BaseURL + "/api/v1/internal/credentials?workspace_id=" + url.QueryEscape(s.ipc.WorkspaceID)
+	if s.ipc.CrewID != "" {
+		endpoint += "&crew_id=" + url.QueryEscape(s.ipc.CrewID)
+	}
 	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		s.logger.Warn("credential reap: build request", "error", err)

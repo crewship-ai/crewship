@@ -140,6 +140,49 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		query += " AND provider = ?"
 		args = append(args, provider)
 	}
+	// #1031: when the caller identifies its crew, scope the metadata listing to
+	// credentials that crew can actually use — assigned to one of the crew's
+	// agents (agent_credentials), directly crew-scoped (credential_crews), or
+	// workspace-scoped — so a compromised agent container can't enumerate every
+	// peer credential's existence/provider through its sidecar. crew_id is
+	// supplied server-side by the sidecar from its bound IPC config (the agent
+	// can't forge it); an empty crew_id keeps the workspace-wide behaviour the
+	// in-process TokenSyncer (include_values, loopback) and crew-less callers
+	// rely on.
+	//
+	// scope = 'WORKSPACE' MUST be included in the OR: those credentials have
+	// no agent_credentials/credential_crews row by definition (that's what
+	// "workspace-wide" means — see credentialVisibilityFilter, the same idiom
+	// on the public API), so without it a scope=WORKSPACE credential with no
+	// assignment yet — e.g. one an agent just created via sidecar self-service
+	// (default scope=WORKSPACE, no crew_ids) — would be invisible in its own
+	// very next crew-scoped listing. A CREW-scoped credential belonging to a
+	// DIFFERENT crew is still excluded (the actual #1031 leak this scoping
+	// closes): it has neither an agent_credentials row pointing at THIS crew's
+	// agents, nor a credential_crews row naming THIS crew, nor scope=WORKSPACE.
+	if crewID := r.URL.Query().Get("crew_id"); crewID != "" {
+		query += ` AND (
+			credentials.scope = 'WORKSPACE'
+			OR EXISTS (SELECT 1 FROM agent_credentials ac
+			        JOIN agents a ON a.id = ac.agent_id
+			        WHERE ac.credential_id = credentials.id
+			          AND a.crew_id = ? AND a.deleted_at IS NULL)
+			OR EXISTS (SELECT 1 FROM credential_crews cc
+			           WHERE cc.credential_id = credentials.id AND cc.crew_id = ?)
+		)`
+		args = append(args, crewID, crewID)
+	} else if !requestIsLoopback(r) {
+		// Hardening (#1031): the crew scoping above is opt-in — a caller that
+		// omits crew_id gets the full workspace-wide listing, fail-open. A
+		// legitimate non-loopback caller always has a crew_id to send (the
+		// sidecar attaches its own bound crew), so a non-loopback call
+		// WITHOUT one is either an old/misconfigured sidecar or a bypass
+		// attempt. Full closure needs crew-bound internal tokens (not just
+		// crew_id, which any caller with a valid X-Internal-Token can forge);
+		// until then, at least make the bypass visible in ops.
+		h.logger.Warn("internal credentials: workspace-wide listing (no crew_id) from non-loopback caller",
+			"remote_addr", r.RemoteAddr, "workspace_id", workspaceID)
+	}
 	query += " ORDER BY type ASC, created_at ASC"
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)

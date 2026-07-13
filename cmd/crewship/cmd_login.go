@@ -280,8 +280,12 @@ user has no CLI token to validate).`,
 			return err
 		}
 
-		// Get user info from the validate endpoint (if CLI token) or infer from workspace
-		server := cli.ResolveServer(flagServer, cliCfg)
+		// Get user info from the validate endpoint (if CLI token) or infer from workspace.
+		// Use EffectiveServer (flag > profile > env > cfg) so the host whoami DISPLAYS
+		// matches the host every API command actually dials — newAPIClient resolves the
+		// same way. ResolveServer (env > cfg) would show a different server than we talk
+		// to whenever a --profile / CREWSHIP_PROFILE is active. (#1003)
+		server := cli.EffectiveServer(flagServer, flagProfile, cliCfg)
 		activeWS := cli.ResolveWorkspace(flagWorkspace, cliCfg)
 
 		// Try to get user info from CLI token validation

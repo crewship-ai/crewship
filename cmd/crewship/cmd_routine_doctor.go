@@ -157,10 +157,8 @@ func finishDoctorReport(cmd *cobra.Command, report doctorReport) error {
 	}
 
 	f := newFormatter()
-	if f.Format == "json" {
-		_ = f.JSON(report)
-	} else {
-		printDoctorTable(cmd, report)
+	if err := f.AutoHuman(report, func() { printDoctorTable(cmd, report) }); err != nil {
+		return err
 	}
 
 	if report.Failed > 0 {

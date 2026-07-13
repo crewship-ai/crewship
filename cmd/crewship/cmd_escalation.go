@@ -225,14 +225,7 @@ Examples:
 			return err
 		}
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(body)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(body)
-		}
-		fmt.Println(strconv.Itoa(body.Count))
-		return nil
+		return f.AutoHuman(body, func() { fmt.Println(strconv.Itoa(body.Count)) })
 	},
 }
 

@@ -195,6 +195,29 @@ func TestRequireInternal_NetworkGate(t *testing.T) {
 	})
 }
 
+// TestRequireInternal_AllowAnyWarnLogsOnce covers #1083: registerInternalRoutes
+// wraps ~52 routes with the SAME `internalAuth := internal.requireInternal`
+// method value on one *InternalHandler instance, so calling requireInternal
+// (as every route registration does) must not log the
+// CREWSHIP_INTERNAL_ALLOW_ANY startup warning once per route. Wrapping it
+// 5 times here stands in for that fan-out; only one line must appear.
+func TestRequireInternal_AllowAnyWarnLogsOnce(t *testing.T) {
+	// NOT t.Parallel — flips os.Setenv.
+	t.Setenv("CREWSHIP_INTERNAL_ALLOW_ANY", "true")
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewInternalHandler(nil, "tok", logger)
+
+	for range 5 {
+		_ = h.requireInternal(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	}
+
+	n := strings.Count(buf.String(), "CREWSHIP_INTERNAL_ALLOW_ANY=true")
+	if n != 1 {
+		t.Errorf("allow-any warning logged %d times across 5 requireInternal wraps, want exactly 1: %s", n, buf.String())
+	}
+}
+
 // Sanity-check: ensure the constant-time comparison itself is exercised.
 func TestRequireInternal_ConstantTime(t *testing.T) {
 	t.Parallel()

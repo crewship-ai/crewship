@@ -58,14 +58,7 @@ Examples:
 		}
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(res)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(res)
-		}
-		printModelList(res)
-		return nil
+		return f.AutoHuman(res, func() { printModelList(res) })
 	},
 }
 

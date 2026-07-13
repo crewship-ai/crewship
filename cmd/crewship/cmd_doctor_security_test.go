@@ -17,80 +17,75 @@ func TestCheckCLIConfigServerScheme(t *testing.T) {
 
 	cases := []struct {
 		name       string
-		cfg        *cli.CLIConfig
+		server     string
 		wantStatus string
 		mustHave   string // substring required in detail or hint
 	}{
 		{
-			name:       "nil config → INFO",
-			cfg:        nil,
+			name:       "empty server → INFO",
+			server:     "",
 			wantStatus: "INFO",
 			mustHave:   "no server configured",
 		},
 		{
-			name:       "empty server → INFO",
-			cfg:        &cli.CLIConfig{Server: ""},
-			wantStatus: "INFO",
-		},
-		{
 			name:       "whitespace-only server → INFO",
-			cfg:        &cli.CLIConfig{Server: "   "},
+			server:     "   ",
 			wantStatus: "INFO",
 		},
 		{
 			name:       "https public host → PASS",
-			cfg:        &cli.CLIConfig{Server: "https://crewship.example.com"},
+			server:     "https://crewship.example.com",
 			wantStatus: "PASS",
 			mustHave:   "https",
 		},
 		{
 			name:       "https with port → PASS",
-			cfg:        &cli.CLIConfig{Server: "https://crewship.example.com:8443"},
+			server:     "https://crewship.example.com:8443",
 			wantStatus: "PASS",
 			mustHave:   ":8443",
 		},
 		{
 			name:       "http localhost → PASS (loopback fine)",
-			cfg:        &cli.CLIConfig{Server: "http://localhost:8080"},
+			server:     "http://localhost:8080",
 			wantStatus: "PASS",
 			mustHave:   "loopback",
 		},
 		{
 			name:       "http 127.0.0.1 → PASS",
-			cfg:        &cli.CLIConfig{Server: "http://127.0.0.1:8080"},
+			server:     "http://127.0.0.1:8080",
 			wantStatus: "PASS",
 		},
 		{
 			name:       "http ::1 → PASS",
-			cfg:        &cli.CLIConfig{Server: "http://[::1]:8080"},
+			server:     "http://[::1]:8080",
 			wantStatus: "PASS",
 		},
 		{
 			name:       "http public host → WARN",
-			cfg:        &cli.CLIConfig{Server: "http://crewship.example.com"},
+			server:     "http://crewship.example.com",
 			wantStatus: "WARN",
 			mustHave:   "plaintext HTTP",
 		},
 		{
 			name:       "http LAN IP → WARN",
-			cfg:        &cli.CLIConfig{Server: "http://192.168.1.201:8080"},
+			server:     "http://192.168.1.201:8080",
 			wantStatus: "WARN",
 			mustHave:   "plaintext HTTP",
 		},
 		{
 			name:       "https case-insensitive → PASS",
-			cfg:        &cli.CLIConfig{Server: "HTTPS://crewship.example.com"},
+			server:     "HTTPS://crewship.example.com",
 			wantStatus: "PASS",
 		},
 		{
 			name:       "non-http scheme → FAIL",
-			cfg:        &cli.CLIConfig{Server: "ftp://files.example.com"},
+			server:     "ftp://files.example.com",
 			wantStatus: "FAIL",
 			mustHave:   "unsupported scheme",
 		},
 		{
 			name:       "malformed url → FAIL",
-			cfg:        &cli.CLIConfig{Server: "http://[invalid"},
+			server:     "http://[invalid",
 			wantStatus: "FAIL",
 			mustHave:   "malformed",
 		},
@@ -101,13 +96,13 @@ func TestCheckCLIConfigServerScheme(t *testing.T) {
 			// it must FAIL loudly with a "missing a host" message
 			// so the operator notices.
 			name:       "http://:8080 (empty host) → FAIL",
-			cfg:        &cli.CLIConfig{Server: "http://:8080"},
+			server:     "http://:8080",
 			wantStatus: "FAIL",
 			mustHave:   "missing a host",
 		},
 		{
 			name:       "https://:443 (empty host) → FAIL",
-			cfg:        &cli.CLIConfig{Server: "https://:443"},
+			server:     "https://:443",
 			wantStatus: "FAIL",
 			mustHave:   "missing a host",
 		},
@@ -116,7 +111,7 @@ func TestCheckCLIConfigServerScheme(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := checkCLIConfigServerScheme(tc.cfg)
+			got := checkCLIConfigServerScheme(tc.server)
 			if got.status != tc.wantStatus {
 				t.Errorf("status = %q, want %q (detail=%q hint=%q)",
 					got.status, tc.wantStatus, got.detail, got.hint)
@@ -132,6 +127,46 @@ func TestCheckCLIConfigServerScheme(t *testing.T) {
 				t.Errorf("name = %q, want \"cli server scheme\"", got.name)
 			}
 		})
+	}
+}
+
+// Regression (#1003): the doctor scheme audit read the raw top-level
+// cfg.Server and reported "no server configured" whenever only a --profile /
+// CREWSHIP_PROFILE was active (its server lives under Servers[name]) even
+// though every command worked. runCheckCLIConfigServerScheme now resolves the
+// effective server; this locks that a profile-only server is honored — and,
+// symmetrically, that a profile with NO server fails closed to INFO rather than
+// leaking through to env/cfg. Mirrors the shim's exact resolution.
+func TestCheckCLIConfigServerScheme_HonorsActiveProfile(t *testing.T) {
+	origServer, origProfile := flagServer, flagProfile
+	t.Cleanup(func() { flagServer, flagProfile = origServer, origProfile })
+	// Profile server must win over CREWSHIP_SERVER (profile > env), just like
+	// every authenticated command.
+	t.Setenv("CREWSHIP_SERVER", "http://192.168.1.201:8082")
+	flagServer = ""
+	flagProfile = "dev2"
+
+	cfg := &cli.CLIConfig{
+		// top-level Server intentionally empty — the old code reported INFO here
+		Servers: map[string]*cli.ServerProfile{
+			"dev2": {Server: "https://crewship-dev2.example.com", Token: "t"},
+		},
+	}
+
+	got := checkCLIConfigServerScheme(cli.EffectiveServer(flagServer, flagProfile, cfg))
+	if got.status != "PASS" {
+		t.Fatalf("active profile: status = %q, want PASS (detail=%q)", got.status, got.detail)
+	}
+	if !strings.Contains(got.detail, "crewship-dev2.example.com") {
+		t.Errorf("detail should name the profile host, got %q", got.detail)
+	}
+
+	// A named profile with no server fails closed → INFO, never falls back to
+	// the env server under the active profile.
+	cfg.Servers["dev2"] = &cli.ServerProfile{Server: ""}
+	got = checkCLIConfigServerScheme(cli.EffectiveServer(flagServer, flagProfile, cfg))
+	if got.status != "INFO" {
+		t.Errorf("server-less profile: status = %q, want INFO (detail=%q)", got.status, got.detail)
 	}
 }
 

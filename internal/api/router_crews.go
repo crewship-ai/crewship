@@ -301,8 +301,13 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// source) and clears the paired "agent replied" inbox item.
 	r.authedMut("PUT", "/api/v1/agents/{agentId}/chats/{chatId}/read", roleSelf, agents.MarkChatRead)
 	// Delete: creator-or-agent-editor gate lives in the handler (#998 —
-	// lets one-shot programmatic chats clean up after themselves).
-	r.authedMut("DELETE", "/api/v1/agents/{agentId}/chats/{chatId}", roleInline, agents.DeleteChat)
+	// lets one-shot programmatic chats clean up after themselves). roleSelf
+	// (not roleInline) so it is scope-exempt like create/read above (#1074):
+	// both defer authorization to the handler, but roleInline would resolve to
+	// agents:write and 403 a narrowly-scoped CLI token on its own cleanup
+	// deletes — the exact asymmetry that reintroduced orphan chats for scoped
+	// tokens. The handler's creator-or-editor gate is the real authorization.
+	r.authedMut("DELETE", "/api/v1/agents/{agentId}/chats/{chatId}", roleSelf, agents.DeleteChat)
 	r.mux.Handle("GET /api/v1/agents/{agentId}/runs", authed(wsCtx(http.HandlerFunc(agents.ListRuns))))
 
 	// PR-E F6 — PERSONA endpoints (agent + crew flavors). Persona
@@ -349,7 +354,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("POST", "/api/v1/credentials", roleInline, creds.Create)
 	r.authedSelfMut("POST", "/api/v1/credentials/test", creds.Test)
 	r.authedMut("POST", "/api/v1/credentials/{credentialId}/test", roleCreate, creds.TestStored)
-	r.mux.Handle("GET /api/v1/credentials/default-env-var", authed(http.HandlerFunc(creds.DefaultEnvVar)))
+	// #1083: wrap in wsCtx like every other credentials route. The response
+	// carries no tenant data, but requiring workspace membership keeps this
+	// route uniform with the rest of the credentials surface.
+	r.mux.Handle("GET /api/v1/credentials/default-env-var", authed(wsCtx(http.HandlerFunc(creds.DefaultEnvVar))))
 	r.mux.Handle("GET /api/v1/credentials/{credentialId}", authed(wsCtx(http.HandlerFunc(creds.Get))))
 	r.authedMut("PATCH", "/api/v1/credentials/{credentialId}", roleCreate, creds.Update)
 	r.authedMut("PUT", "/api/v1/credentials/{credentialId}", roleCreate, creds.Update)

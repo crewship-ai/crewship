@@ -305,6 +305,12 @@ Examples:
 		}
 		crew, _ := cmd.Flags().GetString("crew")
 		agent, _ := cmd.Flags().GetString("agent")
+		// MarkFlagRequired (below, in init()) only checks Flag.Changed — it
+		// catches --crew omitted entirely, but `--crew ""` (e.g. an unset
+		// shell variable interpolated into a script) sets Changed=true with
+		// an empty value and sails through. Keep the explicit emptiness
+		// check so a script can't silently provision a crew/agent with a
+		// blank name against the server. (#966)
 		if crew == "" || agent == "" {
 			return fmt.Errorf("--crew and --agent are required")
 		}
@@ -489,6 +495,11 @@ func dashIfEmpty(s string) string {
 func init() {
 	systemOnboardingSetupCmd.Flags().String("crew", "", "Crew name to create (required)")
 	systemOnboardingSetupCmd.Flags().String("agent", "", "First agent name in the crew (required)")
+	// Enforce via cobra's required-flag machinery (usage error), consistent
+	// with the other MarkFlagRequired sites, instead of a hand-rolled in-RunE
+	// check that returned a bare error. (#966)
+	_ = systemOnboardingSetupCmd.MarkFlagRequired("crew")
+	_ = systemOnboardingSetupCmd.MarkFlagRequired("agent")
 	systemOnboardingSetupCmd.Flags().String("cli-adapter", "", "CLI adapter (default CLAUDE_CODE)")
 	systemOnboardingSetupCmd.Flags().String("llm-provider", "", "LLM provider: ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, OLLAMA")
 	systemOnboardingSetupCmd.Flags().String("llm-model", "", "LLM model identifier")

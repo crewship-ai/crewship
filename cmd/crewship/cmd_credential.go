@@ -2,14 +2,18 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/credprovider"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -20,9 +24,47 @@ var credentialCmd = &cobra.Command{
 	Short:   "Manage credentials",
 }
 
+// credRow is a single credential row as rendered by `credential list`.
+type credRow struct {
+	ID                    string  `json:"id"`
+	Name                  string  `json:"name"`
+	Type                  string  `json:"type"`
+	Provider              string  `json:"provider"`
+	Status                string  `json:"status"`
+	AgentCount            int     `json:"_count_agent_credentials"`
+	CreatedByActorType    *string `json:"created_by_actor_type"`
+	ProvisionedForService *string `json:"provisioned_for_service"`
+}
+
+// decodeCredentialListPage tolerates BOTH the legacy bare-array response and
+// the paginated {credentials, next_cursor} envelope (#1033), so the command
+// works against any server version.
+func decodeCredentialListPage(raw []byte) ([]credRow, *string, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		var rows []credRow
+		if err := json.Unmarshal(raw, &rows); err != nil {
+			return nil, nil, err
+		}
+		return rows, nil, nil
+	}
+	var env struct {
+		Credentials []credRow `json:"credentials"`
+		NextCursor  *string   `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, nil, err
+	}
+	return env.Credentials, env.NextCursor, nil
+}
+
 var credListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List all credentials in the workspace",
+	Short: "List credentials in the workspace",
+	Long: `List credentials in the workspace.
+
+By default one page is returned; pass --all to follow the cursor and fetch
+every page. --search and --tag filter server-side.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -31,27 +73,83 @@ var credListCmd = &cobra.Command{
 			return err
 		}
 
-		client := newAPIClient()
-		resp, err := client.Get("/api/v1/credentials")
-		if err != nil {
-			return err
-		}
-		if err := cli.CheckError(resp); err != nil {
-			return err
+		flags := cmd.Flags()
+		search, _ := flags.GetString("search")
+		tag, _ := flags.GetString("tag")
+		limit, _ := flags.GetInt("limit")
+		limitSet := flags.Changed("limit")
+		cursor, _ := flags.GetString("cursor")
+		all, _ := flags.GetBool("all")
+
+		if limitSet && limit <= 0 {
+			return fmt.Errorf("--limit must be a positive integer, got %d", limit)
 		}
 
-		var creds []struct {
-			ID                    string  `json:"id"`
-			Name                  string  `json:"name"`
-			Type                  string  `json:"type"`
-			Provider              string  `json:"provider"`
-			Status                string  `json:"status"`
-			AgentCount            int     `json:"_count_agent_credentials"`
-			CreatedByActorType    *string `json:"created_by_actor_type"`
-			ProvisionedForService *string `json:"provisioned_for_service"`
+		client := newAPIClient()
+		buildURL := func(cur string) string {
+			q := url.Values{}
+			// paginate=true opts into the cursor envelope; the server still
+			// returns a bare array to callers that don't ask, so this is safe.
+			q.Set("paginate", "true")
+			// Always send an explicit limit. The paginated envelope defaults
+			// to 50 server-side, vs. the long-standing bare-array endpoint's
+			// 100 — without this, opting into pagination would silently
+			// halve the page size for every caller that didn't pass --limit.
+			if limitSet {
+				q.Set("limit", strconv.Itoa(limit))
+			} else {
+				q.Set("limit", "100")
+			}
+			if search != "" {
+				q.Set("search", search)
+			}
+			if tag != "" {
+				q.Set("tag", tag)
+			}
+			if cur != "" {
+				q.Set("cursor", cur)
+			}
+			return "/api/v1/credentials?" + q.Encode()
 		}
-		if err := cli.ReadJSON(resp, &creds); err != nil {
-			return err
+
+		// maxAllPages bounds --all's cursor-follow loop. Combined with the
+		// non-advancing-cursor check below, this guarantees the loop always
+		// terminates even against a buggy or malicious server.
+		const maxAllPages = 200
+
+		var creds []credRow
+		var lastNext *string
+		cur := cursor
+		for pageNum := 0; ; pageNum++ {
+			if pageNum >= maxAllPages {
+				return fmt.Errorf("--all stopped after %d pages without reaching the end — this looks like a server bug; re-run without --all or with an explicit --cursor", maxAllPages)
+			}
+			resp, err := client.Get(buildURL(cur))
+			if err != nil {
+				return err
+			}
+			if err := cli.CheckError(resp); err != nil {
+				return err
+			}
+			var raw json.RawMessage
+			if err := cli.ReadJSON(resp, &raw); err != nil {
+				return err
+			}
+			rows, next, err := decodeCredentialListPage(raw)
+			if err != nil {
+				return err
+			}
+			creds = append(creds, rows...)
+			lastNext = next
+			// Stop after one page unless --all; also stop when there is no
+			// next page or the server returned a bare array (next == nil).
+			if !all || next == nil || *next == "" {
+				break
+			}
+			if *next == cur {
+				return fmt.Errorf("--all aborted: the server returned the same cursor twice (%q) — no progress", *next)
+			}
+			cur = *next
 		}
 
 		// SOURCE column surfaces who/what owns the row: a literal
@@ -75,7 +173,15 @@ var credListCmd = &cobra.Command{
 			}
 			rows = append(rows, []string{c.ID, c.Name, c.Type, c.Provider, c.Status, fmt.Sprintf("%d", c.AgentCount), source})
 		}
-		return f.Auto(creds, headers, rows)
+		if err := f.Auto(creds, headers, rows); err != nil {
+			return err
+		}
+		// Hint when more pages exist and the caller didn't ask for --all.
+		// To stderr so stdout stays a clean, parseable table.
+		if !all && lastNext != nil && *lastNext != "" {
+			fmt.Fprintf(os.Stderr, "More results available — re-run with --all, or --cursor %s for the next page.\n", *lastNext)
+		}
+		return nil
 	},
 }
 
@@ -428,15 +534,18 @@ var credDefaultEnvVarCmd = &cobra.Command{
 		if err := requireAuth(); err != nil {
 			return err
 		}
+		// #1083: the route is now workspace-scoped (wsCtx) for uniformity
+		// with the rest of the credentials surface, so a workspace must be
+		// selected even though the response carries no tenant data.
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
 		provider, _ := cmd.Flags().GetString("provider")
 		if provider == "" {
 			return fmt.Errorf("--provider is required")
 		}
 
 		client := newAPIClient()
-		// Endpoint is workspace-agnostic — clear ws to match the
-		// existing pre-save `credential test` invocation.
-		client.WorkspaceID = ""
 		resp, err := client.Get("/api/v1/credentials/default-env-var?provider=" + url.QueryEscape(provider))
 		if err != nil {
 			return err
@@ -459,27 +568,37 @@ var credDefaultEnvVarCmd = &cobra.Command{
 }
 
 func init() {
+	credListCmd.Flags().Int("limit", 0, "Page size (1-500; enables cursor pagination)")
+	credListCmd.Flags().String("cursor", "", "Opaque cursor from a previous page's output")
+	credListCmd.Flags().String("search", "", "Filter by a substring of the name or description (server-side)")
+	credListCmd.Flags().String("tag", "", "Filter to credentials carrying this exact tag (server-side)")
+	credListCmd.Flags().Bool("all", false, "Fetch every page by following the cursor")
+
 	credCreateCmd.Flags().String("name", "", "Credential name (required)")
 	credCreateCmd.Flags().String("type", "", "Type: SECRET|API_KEY|AI_CLI_TOKEN|CLI_TOKEN|ENDPOINT_URL (required)")
-	credCreateCmd.Flags().String("provider", "", "Provider: ANTHROPIC|OPENAI|GOOGLE|GITHUB|GITLAB|VERCEL|AWS|OLLAMA|CUSTOM_CLI|NONE")
+	credCreateCmd.Flags().String("provider", "", "Provider: "+credprovider.ProvidersHelp())
 	credCreateCmd.Flags().String("value", "", "Credential value — the URL for ENDPOINT_URL (visible in process list, prefer --value-stdin)")
 	credCreateCmd.Flags().Bool("value-stdin", false, "Read value from stdin (secure)")
 	credCreateCmd.Flags().String("auth-token", "", "ENDPOINT_URL only: bearer token sent to the endpoint (Authorization: Bearer …); stored encrypted, never displayed")
 	credCreateCmd.Flags().StringArray("header", nil, "ENDPOINT_URL only: extra request header KEY=VALUE (repeatable; use for Basic/custom-header endpoints)")
 	credCreateCmd.Flags().String("env-var-name", "", "Environment variable name")
 	credCreateCmd.Flags().Int("security-level", 0, "Keeper security level: 0 (none), 1 (low), 2 (medium), 3 (sensitive)")
+	credCreateCmd.Flags().StringSlice("crews", nil, "Crew slugs or IDs to scope this credential to (repeatable/comma-separated); sets scope=CREW. Omit for a workspace-wide credential")
+	credCreateCmd.Flags().String("scope", "", "Visibility scope: WORKSPACE (default) or CREW. Usually inferred from --crews; set explicitly to override")
 
 	credUpdateCmd.Flags().String("name", "", "Credential name")
 	credUpdateCmd.Flags().String("value", "", "New value")
 	credUpdateCmd.Flags().Bool("value-stdin", false, "Read value from stdin")
 	credUpdateCmd.Flags().Int("security-level", 0, "Keeper security level: 0 (none), 1 (low), 2 (medium), 3 (sensitive)")
+	credUpdateCmd.Flags().StringSlice("crews", nil, "Replace the crew scoping with these crew slugs or IDs (repeatable/comma-separated); pass an empty value to clear crews and make it workspace-wide")
+	credUpdateCmd.Flags().String("scope", "", "Visibility scope: WORKSPACE or CREW. Usually inferred from --crews; set explicitly to override")
 
 	credAssignCmd.Flags().String("env-var-name", "", "Environment variable name override")
 	credAssignCmd.Flags().Int("priority", 0, "Priority (1-10)")
 
 	credDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
-	credTestCmd.Flags().String("provider", "", "Provider: ANTHROPIC|OPENAI|GOOGLE|GITHUB|GITLAB|VERCEL|AWS|CUSTOM_CLI (required)")
+	credTestCmd.Flags().String("provider", "", "Provider: "+credprovider.ProvidersHelp()+" (required)")
 	credTestCmd.Flags().String("type", "", "Type: API_KEY|AI_CLI_TOKEN|SECRET|CLI_TOKEN")
 	credTestCmd.Flags().String("value", "", "Credential value to test")
 	credTestCmd.Flags().Bool("value-stdin", false, "Read value from stdin")

@@ -343,40 +343,34 @@ var projectStatsCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(stats)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(stats)
-		}
-
-		pct := 0
-		if stats.TotalIssues > 0 {
-			pct = stats.CompletedIssues * 100 / stats.TotalIssues
-		}
-		fmt.Printf("Issues: %d total / %d completed (%d%%)\n", stats.TotalIssues, stats.CompletedIssues, pct)
-		if len(stats.ByStatus) > 0 {
-			fmt.Println("\nBy status:")
-			for s, c := range stats.ByStatus {
-				fmt.Printf("  %-15s %d\n", s, c)
+		return f.AutoHuman(stats, func() {
+			pct := 0
+			if stats.TotalIssues > 0 {
+				pct = stats.CompletedIssues * 100 / stats.TotalIssues
 			}
-		}
-		if len(stats.ByAssignee) > 0 {
-			fmt.Println("\nBy assignee:")
-			for _, a := range stats.ByAssignee {
-				fmt.Printf("  %-30s %d total / %d done\n", a.AgentName, a.Total, a.Completed)
+			fmt.Printf("Issues: %d total / %d completed (%d%%)\n", stats.TotalIssues, stats.CompletedIssues, pct)
+			if len(stats.ByStatus) > 0 {
+				fmt.Println("\nBy status:")
+				for s, c := range stats.ByStatus {
+					fmt.Printf("  %-15s %d\n", s, c)
+				}
 			}
-		}
-		if len(stats.ByLabel) > 0 {
-			fmt.Println("\nBy label:")
-			for _, l := range stats.ByLabel {
-				fmt.Printf("  %-30s %d\n", l.LabelName, l.Count)
+			if len(stats.ByAssignee) > 0 {
+				fmt.Println("\nBy assignee:")
+				for _, a := range stats.ByAssignee {
+					fmt.Printf("  %-30s %d total / %d done\n", a.AgentName, a.Total, a.Completed)
+				}
 			}
-		}
-		if len(stats.Crews) > 0 {
-			fmt.Printf("\nCrews: %v\n", stats.Crews)
-		}
-		return nil
+			if len(stats.ByLabel) > 0 {
+				fmt.Println("\nBy label:")
+				for _, l := range stats.ByLabel {
+					fmt.Printf("  %-30s %d\n", l.LabelName, l.Count)
+				}
+			}
+			if len(stats.Crews) > 0 {
+				fmt.Printf("\nCrews: %v\n", stats.Crews)
+			}
+		})
 	},
 }
 

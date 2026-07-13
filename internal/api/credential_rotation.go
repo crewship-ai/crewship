@@ -348,11 +348,20 @@ func mergeEndpointRotateValue(req *credentialRotateRequest, oldEncrypted string)
 func (h *CredentialHandler) ListRotations(w http.ResponseWriter, r *http.Request) {
 	credID := r.PathValue("credentialId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	user := UserFromContext(r.Context())
+
+	// #1066: apply the same role/visibility filter the credential Get
+	// handler uses. Rotation metadata (timestamps/status/rotated_by) is
+	// still sensitive, so a member who can't see the credential must not
+	// read its history — a non-visible credential 404s exactly like Get.
+	visFilter, visArgs := credentialVisibilityFilter(role, user)
+	args := append([]any{credID, workspaceID}, visArgs...)
 
 	var exists string
 	if err := h.db.QueryRowContext(r.Context(), `
-		SELECT id FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		credID, workspaceID).Scan(&exists); err != nil {
+		SELECT c.id FROM credentials c WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL `+visFilter,
+		args...).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "Credential not found")
 			return

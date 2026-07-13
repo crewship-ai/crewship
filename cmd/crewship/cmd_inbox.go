@@ -119,54 +119,48 @@ var inboxListCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(body.Rows)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(body.Rows)
-		}
 		// "quiet" suppresses table output entirely so a script can
 		// pipe the exit status without parsing rows. Match approvals'
 		// + journal's behavior so cross-command UX stays consistent.
 		if f.Format == "quiet" {
 			return nil
 		}
-
-		// Table output — color the STATE column so an unread waitpoint
-		// is impossible to miss when the user is scanning a 50-row feed.
-		// Same chip idiom as approvals.
-		for _, r := range body.Rows {
-			stateColor := cli.Gray
-			switch r.State {
-			case "unread":
-				stateColor = cli.Yellow
-			case "read":
-				stateColor = cli.Cyan
-			case "resolved":
-				stateColor = cli.Green
+		return f.AutoHuman(body.Rows, func() {
+			// Table output — color the STATE column so an unread waitpoint
+			// is impossible to miss when the user is scanning a 50-row feed.
+			// Same chip idiom as approvals.
+			for _, r := range body.Rows {
+				stateColor := cli.Gray
+				switch r.State {
+				case "unread":
+					stateColor = cli.Yellow
+				case "read":
+					stateColor = cli.Cyan
+				case "resolved":
+					stateColor = cli.Green
+				}
+				kindColor := cli.Dim
+				switch r.Kind {
+				case "waitpoint":
+					kindColor = cli.Yellow
+				case "escalation":
+					kindColor = cli.Red
+				case "failed_run":
+					kindColor = cli.Red
+				case "message":
+					kindColor = cli.Cyan
+				}
+				fmt.Printf("%s%-32s%s  %s[%-8s]%s  %s%-10s%s  %s%-9s%s  %-16s  %s\n",
+					cli.Dim, truncateString(r.ID, 32), cli.Reset,
+					stateColor, r.State, cli.Reset,
+					kindColor, r.Kind, cli.Reset,
+					cli.Bold, r.Priority, cli.Reset,
+					truncateString(r.SenderName, 16),
+					truncateString(r.Title, 60),
+				)
 			}
-			kindColor := cli.Dim
-			switch r.Kind {
-			case "waitpoint":
-				kindColor = cli.Yellow
-			case "escalation":
-				kindColor = cli.Red
-			case "failed_run":
-				kindColor = cli.Red
-			case "message":
-				kindColor = cli.Cyan
-			}
-			fmt.Printf("%s%-32s%s  %s[%-8s]%s  %s%-10s%s  %s%-9s%s  %-16s  %s\n",
-				cli.Dim, truncateString(r.ID, 32), cli.Reset,
-				stateColor, r.State, cli.Reset,
-				kindColor, r.Kind, cli.Reset,
-				cli.Bold, r.Priority, cli.Reset,
-				truncateString(r.SenderName, 16),
-				truncateString(r.Title, 60),
-			)
-		}
-		fmt.Printf("\n%s%d items · %d unread%s\n", cli.Dim, body.Count, body.UnreadCount, cli.Reset)
-		return nil
+			fmt.Printf("\n%s%d items · %d unread%s\n", cli.Dim, body.Count, body.UnreadCount, cli.Reset)
+		})
 	},
 }
 
@@ -271,40 +265,34 @@ Examples:
 		}
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(item)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(item)
-		}
 		if f.Format == "quiet" {
 			return nil
 		}
-
-		// Human detail view.
-		fmt.Printf("%s%s%s\n", cli.Bold, item.Title, cli.Reset)
-		fmt.Printf("%s%s · %s · %s%s\n", cli.Dim, item.Kind, item.State, item.Priority, cli.Reset)
-		from := item.SenderName
-		if from == "" {
-			from = item.SenderType
-		}
-		if from != "" {
-			fmt.Printf("%sfrom %s%s\n", cli.Dim, from, cli.Reset)
-		}
-		fmt.Printf("%sid %s%s\n", cli.Dim, item.ID, cli.Reset)
-		if item.ResolvedAction != "" {
-			fmt.Printf("%sresolved · %s%s\n", cli.Green, item.ResolvedAction, cli.Reset)
-		}
-		if item.BodyMD != "" {
-			fmt.Printf("\n%s\n", item.BodyMD)
-		}
-		if len(item.Payload) > 0 {
-			fmt.Printf("\n%sContext:%s\n", cli.Bold, cli.Reset)
-			for k, v := range item.Payload {
-				fmt.Printf("  %s%-18s%s %v\n", cli.Dim, k, cli.Reset, v)
+		return f.AutoHuman(item, func() {
+			// Human detail view.
+			fmt.Printf("%s%s%s\n", cli.Bold, item.Title, cli.Reset)
+			fmt.Printf("%s%s · %s · %s%s\n", cli.Dim, item.Kind, item.State, item.Priority, cli.Reset)
+			from := item.SenderName
+			if from == "" {
+				from = item.SenderType
 			}
-		}
-		return nil
+			if from != "" {
+				fmt.Printf("%sfrom %s%s\n", cli.Dim, from, cli.Reset)
+			}
+			fmt.Printf("%sid %s%s\n", cli.Dim, item.ID, cli.Reset)
+			if item.ResolvedAction != "" {
+				fmt.Printf("%sresolved · %s%s\n", cli.Green, item.ResolvedAction, cli.Reset)
+			}
+			if item.BodyMD != "" {
+				fmt.Printf("\n%s\n", item.BodyMD)
+			}
+			if len(item.Payload) > 0 {
+				fmt.Printf("\n%sContext:%s\n", cli.Bold, cli.Reset)
+				for k, v := range item.Payload {
+					fmt.Printf("  %s%-18s%s %v\n", cli.Dim, k, cli.Reset, v)
+				}
+			}
+		})
 	},
 }
 
@@ -412,14 +400,9 @@ Examples:
 			return err
 		}
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(body)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(body)
-		}
-		fmt.Println(body.UnreadCount)
-		return nil
+		return f.AutoHuman(body, func() {
+			fmt.Println(body.UnreadCount)
+		})
 	},
 }
 

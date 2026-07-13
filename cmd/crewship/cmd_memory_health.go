@@ -60,36 +60,30 @@ token (see 'crewship login').`,
 		}
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(body)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(body)
-		}
-
-		// Coloured overall: red <50, yellow 50–75, green ≥75. The band
-		// boundaries are arbitrary but match the Auto-Dream reference
-		// implementation so operators used to that tool map cleanly.
-		color := cli.Red
-		switch {
-		case body.Overall >= 75:
-			color = cli.Green
-		case body.Overall >= 50:
-			color = cli.Yellow
-		}
-		scope := "workspace-wide"
-		if body.CrewID != "" {
-			scope = "crew " + body.CrewID
-		}
-		fmt.Printf("Memory health (%s): %s%.0f/100%s\n\n", scope, color, body.Overall, cli.Reset)
-		for _, k := range []string{"freshness", "coverage", "coherence", "efficiency", "reachability"} {
-			v, ok := body.Metrics[k]
-			if !ok {
-				continue
+		return f.AutoHuman(body, func() {
+			// Coloured overall: red <50, yellow 50–75, green ≥75. The band
+			// boundaries are arbitrary but match the Auto-Dream reference
+			// implementation so operators used to that tool map cleanly.
+			color := cli.Red
+			switch {
+			case body.Overall >= 75:
+				color = cli.Green
+			case body.Overall >= 50:
+				color = cli.Yellow
 			}
-			fmt.Printf("  %-14s %6.1f\n", k, v)
-		}
-		return nil
+			scope := "workspace-wide"
+			if body.CrewID != "" {
+				scope = "crew " + body.CrewID
+			}
+			fmt.Printf("Memory health (%s): %s%.0f/100%s\n\n", scope, color, body.Overall, cli.Reset)
+			for _, k := range []string{"freshness", "coverage", "coherence", "efficiency", "reachability"} {
+				v, ok := body.Metrics[k]
+				if !ok {
+					continue
+				}
+				fmt.Printf("  %-14s %6.1f\n", k, v)
+			}
+		})
 	},
 }
 

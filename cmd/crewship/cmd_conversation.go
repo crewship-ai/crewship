@@ -91,35 +91,29 @@ Examples:
 		}
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(result)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(result)
-		}
-
-		if result.Count == 0 {
-			fmt.Printf("No conversation matches for %q.\n", query)
-			return nil
-		}
-
-		fmt.Printf("%s%d match(es) for %q%s\n\n", cli.Bold, result.Count, query, cli.Reset)
-		for _, h := range result.Hits {
-			snippet := h.Content
-			if snippet == "" {
-				snippet = h.ToolSummary
+		return f.AutoHuman(result, func() {
+			if result.Count == 0 {
+				fmt.Printf("No conversation matches for %q.\n", query)
+				return
 			}
-			snippet = strings.ReplaceAll(snippet, "\n", " ")
-			if len([]rune(snippet)) > 160 {
-				snippet = string([]rune(snippet)[:157]) + "..."
+
+			fmt.Printf("%s%d match(es) for %q%s\n\n", cli.Bold, result.Count, query, cli.Reset)
+			for _, h := range result.Hits {
+				snippet := h.Content
+				if snippet == "" {
+					snippet = h.ToolSummary
+				}
+				snippet = strings.ReplaceAll(snippet, "\n", " ")
+				if len([]rune(snippet)) > 160 {
+					snippet = string([]rune(snippet)[:157]) + "..."
+				}
+				fmt.Printf("%s%s%s  %s[%s]%s  session=%s\n  %s\n\n",
+					cli.Dim, h.Timestamp, cli.Reset,
+					cli.Cyan, h.Role, cli.Reset,
+					h.SessionID,
+					snippet)
 			}
-			fmt.Printf("%s%s%s  %s[%s]%s  session=%s\n  %s\n\n",
-				cli.Dim, h.Timestamp, cli.Reset,
-				cli.Cyan, h.Role, cli.Reset,
-				h.SessionID,
-				snippet)
-		}
-		return nil
+		})
 	},
 }
 

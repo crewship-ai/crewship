@@ -127,14 +127,9 @@ var checkpointCreateCmd = &cobra.Command{
 			return err
 		}
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(cp)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(cp)
-		}
-		cli.PrintSuccess(fmt.Sprintf("Checkpoint created: %s (label=%q cursor=%s)", cp.ID, cp.Label, cp.JournalCursor))
-		return nil
+		return f.AutoHuman(cp, func() {
+			cli.PrintSuccess(fmt.Sprintf("Checkpoint created: %s (label=%q cursor=%s)", cp.ID, cp.Label, cp.JournalCursor))
+		})
 	},
 }
 
@@ -170,23 +165,18 @@ anchored at this point.`,
 			return err
 		}
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(body)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(body)
-		}
-		fmt.Printf("%sCheckpoint:%s %s\n", cli.Bold, cli.Reset, body.Checkpoint.ID)
-		fmt.Printf("%sCursor:%s     %s\n", cli.Bold, cli.Reset, body.JournalCursor)
-		if len(body.WarnDivergence) > 0 {
-			fmt.Printf("%sDiverged entries (%d):%s\n", cli.Yellow, len(body.WarnDivergence), cli.Reset)
-			for _, w := range body.WarnDivergence {
-				fmt.Printf("  - %s\n", w)
+		return f.AutoHuman(body, func() {
+			fmt.Printf("%sCheckpoint:%s %s\n", cli.Bold, cli.Reset, body.Checkpoint.ID)
+			fmt.Printf("%sCursor:%s     %s\n", cli.Bold, cli.Reset, body.JournalCursor)
+			if len(body.WarnDivergence) > 0 {
+				fmt.Printf("%sDiverged entries (%d):%s\n", cli.Yellow, len(body.WarnDivergence), cli.Reset)
+				for _, w := range body.WarnDivergence {
+					fmt.Printf("  - %s\n", w)
+				}
+			} else {
+				fmt.Printf("%sNo divergence since checkpoint.%s\n", cli.Green, cli.Reset)
 			}
-		} else {
-			fmt.Printf("%sNo divergence since checkpoint.%s\n", cli.Green, cli.Reset)
-		}
-		return nil
+		})
 	},
 }
 
@@ -222,15 +212,10 @@ var checkpointForkCmd = &cobra.Command{
 			return err
 		}
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(out)
-		}
-		if f.Format == "yaml" {
-			return f.YAML(out)
-		}
-		cli.PrintSuccess(fmt.Sprintf("Forked mission %s from checkpoint %s (new checkpoint %s).",
-			out.NewMissionID, args[0], out.NewCheckpointID))
-		return nil
+		return f.AutoHuman(out, func() {
+			cli.PrintSuccess(fmt.Sprintf("Forked mission %s from checkpoint %s (new checkpoint %s).",
+				out.NewMissionID, args[0], out.NewCheckpointID))
+		})
 	},
 }
 

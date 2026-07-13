@@ -9,7 +9,7 @@ import {
   ArrowUpDown, RefreshCw,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { PageShell } from "@/components/layout/page-shell"
+import { SubBar, SubBarPrimary } from "@/components/layout/sub-bar"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -42,6 +42,7 @@ import { RotationDialog } from "@/components/features/credentials/rotation-dialo
 import { EditCredentialDialog, type CredentialData } from "@/components/features/credentials/edit-credential-dialog"
 import { formatRelativeTime } from "@/lib/time"
 import { useAbilities } from "@/hooks/use-abilities"
+import { useWorkspace } from "@/hooks/use-workspace"
 import { getBrand, brandColor } from "@/lib/credential-providers/registry"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
@@ -111,7 +112,6 @@ const STATUS_DOT_COLOR: Record<DerivedStatus, string> = {
   Pending: "bg-amber-400",
 }
 
-interface Org { id: string; name: string }
 
 const TYPE_LABEL: Record<Credential["type"], string> = {
   AI_CLI_TOKEN: "ai cli",
@@ -129,8 +129,11 @@ type SortKey = "last_used" | "name" | "created"
 
 export default function CredentialsPage() {
   const { abilities } = useAbilities()
+  // #1033: read the selected workspace from the shared store (driven by the
+  // top-bar workspace switcher) instead of hardcoding the first workspace, so
+  // users in multiple workspaces can manage each one's credentials.
+  const { workspaceId, loading: wsLoading } = useWorkspace()
   const [credentials, setCredentials] = React.useState<Credential[]>([])
-  const [workspaceId, setWorkspaceId] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [loadError, setLoadError] = React.useState<string | null>(null)
   const [addOpen, setAddOpen] = React.useState(false)
@@ -156,34 +159,30 @@ export default function CredentialsPage() {
   const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false)
   const [bulkDeleting, setBulkDeleting] = React.useState(false)
 
-  // Both fetchers THROW on failure so loadData can surface a real
+  // Cancel an in-flight fetch when the workspace changes so a slower
+  // response from the previous workspace can't resolve later and overwrite
+  // the newly-selected workspace's rows (matches the AbortController idiom
+  // used by app/(dashboard)/crews/page.tsx).
+  const abortRef = React.useRef<AbortController | null>(null)
+
+  // fetchCredentials THROWS on failure so loadData can surface a real
   // error state — a failed fetch must never render as "no credentials
   // yet" (which invites re-creating secrets that already exist).
-  const fetchWorkspace = React.useCallback(async () => {
+  const fetchCredentials = React.useCallback(async (oid: string, signal?: AbortSignal) => {
     let res: Response
     try {
-      res = await apiFetch("/api/v1/workspaces")
-    } catch {
-      throw new Error("Network error while loading the workspace.")
-    }
-    if (!res.ok) throw new Error(`Loading the workspace failed (HTTP ${res.status}).`)
-    const orgs: Org[] = await res.json() ?? []
-    if (orgs.length > 0) {
-      setWorkspaceId(orgs[0].id)
-      return orgs[0].id
-    }
-    return null
-  }, [])
-
-  const fetchCredentials = React.useCallback(async (oid: string) => {
-    let res: Response
-    try {
-      res = await apiFetch(`/api/v1/credentials?workspace_id=${oid}`)
-    } catch {
+      res = await apiFetch(`/api/v1/credentials?workspace_id=${oid}`, { signal })
+    } catch (err) {
+      if ((err as { name?: string })?.name === "AbortError") throw err
       throw new Error("Network error while loading credentials.")
     }
+    // Belt-and-suspenders: even if the abort didn't preempt the fetch (or
+    // the mock/transport ignores signals), never apply a response that's no
+    // longer wanted.
+    if (signal?.aborted) return
     if (!res.ok) throw new Error(`Loading credentials failed (HTTP ${res.status}).`)
     const data = await res.json()
+    if (signal?.aborted) return
     const normalised: Credential[] = (Array.isArray(data) ? data : []).map((c: Credential) => ({
       ...c,
       last_used_at: c.last_used_at ?? null,
@@ -191,32 +190,60 @@ export default function CredentialsPage() {
       tags: Array.isArray(c.tags) ? c.tags : [],
     }))
     setCredentials(normalised)
+    // #1085: any successful load clears a stale error — otherwise a full-page
+    // error card from an earlier failure survives a later good refresh.
+    setLoadError(null)
   }, [])
 
   const loadData = React.useCallback(async () => {
+    // Wait for the workspace store to resolve the selected workspace before
+    // deciding there's nothing to load.
+    if (wsLoading) return
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
     setLoading(true)
     setLoadError(null)
     try {
-      let oid = workspaceId
-      if (!oid) {
-        oid = await fetchWorkspace()
-      }
-      if (oid) {
-        await fetchCredentials(oid)
+      if (workspaceId) {
+        await fetchCredentials(workspaceId, controller.signal)
+      } else {
+        setCredentials([])
       }
     } catch (err) {
+      if (controller.signal.aborted || (err as { name?: string })?.name === "AbortError") return
       setLoadError(err instanceof Error ? err.message : "Something went wrong while loading credentials.")
     } finally {
-      setLoading(false)
+      // Only the currently-owned controller may flip loading back off —
+      // otherwise a superseded request's `finally` could clear the
+      // skeleton after the newer request already took over.
+      if (abortRef.current === controller) setLoading(false)
     }
-  }, [workspaceId, fetchWorkspace, fetchCredentials])
+  }, [wsLoading, workspaceId, fetchCredentials])
 
-  React.useEffect(() => { loadData() }, [loadData])
+  // Reload whenever the selected workspace changes (switcher) or the store
+  // finishes loading.
+  React.useEffect(() => {
+    loadData()
+    return () => { abortRef.current?.abort() }
+  }, [loadData])
+
+  // Bulk-select is per-workspace state: without this, switching workspaces
+  // leaves stale ids selected, floating the "N selected" bar over the new
+  // workspace's rows and letting bulk-delete fire DELETEs against the
+  // previous workspace's credential ids.
+  React.useEffect(() => {
+    setSelectedIds(new Set())
+  }, [workspaceId])
 
   const handleRefresh = React.useCallback(() => {
     if (!workspaceId) return
+    // #1085: this refresh runs while data is already on screen (after a
+    // mutation). A transient failure should surface as a toast, not replace
+    // the loaded list with the full-page error card — the stale-but-visible
+    // list is more useful than an error screen, and the next refresh recovers.
     fetchCredentials(workspaceId).catch((err) => {
-      setLoadError(err instanceof Error ? err.message : "Something went wrong while loading credentials.")
+      toast.error(err instanceof Error ? err.message : "Couldn't refresh credentials.")
     })
   }, [workspaceId, fetchCredentials])
 
@@ -267,7 +294,13 @@ export default function CredentialsPage() {
       )
       const failedIds = ids.filter((_, i) => {
         const r = results[i]
-        return r.status === "rejected" || !r.value.ok
+        if (r.status === "rejected") return true
+        // #1085: a 404 means the credential is already gone (another admin
+        // deleted it first). Treat it as success, not a failure — otherwise it
+        // lingers in `selectedIds` as a phantom selection after the refresh
+        // removes its row, and the floating bar shows "1 selected" forever.
+        if (r.value.status === 404) return false
+        return !r.value.ok
       })
       const deleted = ids.length - failedIds.length
       if (failedIds.length === 0) {
@@ -369,30 +402,45 @@ export default function CredentialsPage() {
   }, [filtered, sortKey])
 
   const headerActions = canManage ? (
-    <Button onClick={() => setAddOpen(true)} size="sm">
-      <Plus className="mr-1.5 h-3.5 w-3.5" />
+    <SubBarPrimary icon={Plus} onClick={() => setAddOpen(true)}>
       Add secret
-    </Button>
+    </SubBarPrimary>
   ) : null
+
+  // Canonical page chrome: the SubBar (identity + actions) directly under the
+  // global top bar, then a scrollable, padded content region — the same shape
+  // journal/admin/routines use. SubBar provides no padding of its own, so the
+  // content wrapper supplies it.
+  const subBar = (
+    <SubBar
+      icon={Key}
+      title="Credentials"
+      ariaLabel="Credentials"
+      description="Shared secrets, API keys, and CLI tokens for your agents"
+      actions={headerActions}
+    />
+  )
 
   if (loading) {
     return (
-      <PageShell title="Credentials" description="Shared secrets, API keys, and CLI tokens" actions={headerActions}>
-        <div className="space-y-3">
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
+      <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
+        {subBar}
+        <div className="flex-1 overflow-y-auto">
+          <div className="p-4 md:p-6 space-y-3">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
         </div>
-      </PageShell>
+      </div>
     )
   }
 
   return (
-    <PageShell
-      title="Credentials"
-      description="Shared secrets, API keys, and CLI tokens for your agents"
-      actions={headerActions}
-    >
+    <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
+      {subBar}
+      <div className="flex-1 overflow-y-auto">
+        <div className="p-4 md:p-6">
       {loadError ? (
         // Load failure — visually and semantically distinct from the
         // empty state: red accent, explicit error copy, and a Retry
@@ -646,7 +694,7 @@ export default function CredentialsPage() {
       </AlertDialog>
 
       {canDelete && selectedIds.size > 0 && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 rounded-full border border-white/15 bg-zinc-950/95 backdrop-blur shadow-2xl px-4 py-2 flex items-center gap-3 text-xs">
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 rounded-full border border-border bg-popover/95 backdrop-blur shadow-2xl px-4 py-2 flex items-center gap-3 text-xs">
           <span className="font-medium">{selectedIds.size} selected</span>
           <button type="button" onClick={() => setBulkDeleteOpen(true)} className="text-red-400 hover:text-red-300">
             Delete
@@ -667,7 +715,9 @@ export default function CredentialsPage() {
           knownTags={tagsInUse}
         />
       )}
-    </PageShell>
+        </div>
+      </div>
+    </div>
   )
 }
 

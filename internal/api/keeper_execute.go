@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +26,42 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
+
+// containerUserResolver is the narrow capability keeper needs from the
+// container provider: report the container's configured run-as user (the
+// Docker Config.User set at create time, e.g. "1001:1001"). It is an
+// optional interface — a provider that doesn't implement it makes keeper
+// fail closed rather than guess a uid. Kept separate from the broad
+// provider.ContainerProvider interface so its many mocks don't all have to
+// grow a method for this one call site (#1060).
+type containerUserResolver interface {
+	ContainerUser(ctx context.Context, containerID string) (string, error)
+}
+
+// isPrivilegedContainerUser reports whether a resolved container user string
+// is unsafe to exec as. Keeper refuses to run a credential-injected command
+// as root — or as anything it can't strictly prove is a non-root numeric
+// uid[:gid] — because the containment model assumes the agent (and
+// therefore this command) runs unprivileged (#1060). The check is
+// deliberately strict and fails closed: only the Docker "uid" and "uid:gid"
+// forms are accepted, every part must parse as a positive integer, and a
+// zero uid *or* zero gid (root's primary group) is rejected. A named alias
+// like "root" or an image /etc/passwd entry aliasing uid 0 (e.g. "toor") is
+// rejected too, since it isn't one of the two accepted numeric forms.
+func isPrivilegedContainerUser(user string) bool {
+	u := strings.TrimSpace(user)
+	parts := strings.Split(u, ":")
+	if len(parts) < 1 || len(parts) > 2 {
+		return true
+	}
+	for _, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n <= 0 {
+			return true
+		}
+	}
+	return false
+}
 
 type keeperExecuteBody struct {
 	RequestingAgentID string `json:"requesting_agent_id"`
@@ -410,11 +447,33 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	execCtx, cancel := context.WithTimeout(r.Context(), executeTimeout)
 	defer cancel()
 
+	// #1060: run the credential-injected command as the SAME user the agent
+	// process actually runs as, resolved from the live container — not a
+	// hardcoded "1001:1001". A drift between the create-time user (a custom
+	// base image, a future uid bump, userns-remap) and this constant would
+	// silently break the "run as the agent" containment and could run the
+	// command with a different privilege set. Resolve it, and fail closed if
+	// the user is undeterminable or privileged rather than defaulting.
+	resolver, ok := h.container.(containerUserResolver)
+	if !ok {
+		h.logger.Error("keeper execute: container provider cannot resolve run-as user; failing closed",
+			"container", execContainer)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "keeper execute not available"})
+		return
+	}
+	execUser, userErr := resolver.ContainerUser(execCtx, execContainer)
+	if userErr != nil || execUser == "" || isPrivilegedContainerUser(execUser) {
+		h.logger.Error("keeper execute: could not resolve an unprivileged container user; failing closed",
+			"container", execContainer, "resolved_user", execUser, "error", userErr)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "keeper execute not available"})
+		return
+	}
+
 	execResult, execErr := h.container.Exec(execCtx, provider.ExecConfig{
 		ContainerID: execContainer,
 		Cmd:         []string{"sh", "-c", body.Command},
 		Env:         []string{envVar + "=" + plainValue},
-		User:        "1001:1001",
+		User:        execUser,
 	})
 
 	var rawOutput []byte

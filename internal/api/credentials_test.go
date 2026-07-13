@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/credprovider"
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
@@ -574,10 +575,12 @@ func TestIsAnthropicOAuthToken(t *testing.T) {
 
 func TestDefaultEnvVarForCLIProvider(t *testing.T) {
 	t.Parallel()
-	if got := defaultEnvVarForCLIProvider("GITHUB"); got != "GH_TOKEN" {
+	// The mapping is single-sourced in internal/credprovider (#1083); this
+	// pins the two cases the handler most relies on.
+	if got := credprovider.DefaultEnvVar("GITHUB"); got != "GH_TOKEN" {
 		t.Errorf("got %q, want GH_TOKEN", got)
 	}
-	if got := defaultEnvVarForCLIProvider(""); got != "" {
+	if got := credprovider.DefaultEnvVar(""); got != "" {
 		t.Errorf("empty provider should return empty, got %q", got)
 	}
 }

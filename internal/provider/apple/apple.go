@@ -18,6 +18,20 @@ var _ provider.ContainerProvider = (*Provider)(nil)
 var _ provider.InteractiveExecProvider = (*Provider)(nil)
 var _ provider.VolumeManager = (*Provider)(nil)
 
+// agentContainerUser is the user Apple crew containers are created to run their
+// init process (and therefore the agent) as. Single-sourced here so the create
+// path (EnsureCrewRuntime) and ContainerUser (used by keeper to run injected
+// commands as the same user, #1060) can never drift apart.
+const agentContainerUser = "1001:1001"
+
+// ContainerUser returns the container's configured run-as user. Apple crew
+// containers are created with a fixed --user, so this reports that value; it
+// lets keeper run credential-injected commands as the agent user rather than a
+// separate hardcoded constant at the call site (#1060).
+func (p *Provider) ContainerUser(_ context.Context, _ string) (string, error) {
+	return agentContainerUser, nil
+}
+
 // Config holds Apple Container provider configuration.
 type Config struct {
 	RuntimeImage    string
