@@ -284,22 +284,20 @@ var evalBaselineListCmd = &cobra.Command{
 		sort.Slice(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
 
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(rows)
-		}
-		if len(rows) == 0 {
-			out := cmd.OutOrStdout()
-			fmt.Fprintln(out, "(no baselines stored yet)")
-			fmt.Fprintln(out, "Save one with: crewship eval baseline save <name> --tiers fast,smart --runs 5")
-			return nil
-		}
-		header := []string{"NAME", "GENERATED", "SCENARIOS", "TIERS", "RUNS/CELL"}
-		tbl := make([][]string, 0, len(rows))
-		for _, r := range rows {
-			tbl = append(tbl, []string{r.Name, r.GeneratedAt, fmt.Sprint(r.Scenarios), fmt.Sprint(r.Tiers), fmt.Sprint(r.RunsPerCell)})
-		}
-		f.Table(header, tbl)
-		return nil
+		return f.AutoHuman(rows, func() {
+			if len(rows) == 0 {
+				out := cmd.OutOrStdout()
+				fmt.Fprintln(out, "(no baselines stored yet)")
+				fmt.Fprintln(out, "Save one with: crewship eval baseline save <name> --tiers fast,smart --runs 5")
+				return
+			}
+			header := []string{"NAME", "GENERATED", "SCENARIOS", "TIERS", "RUNS/CELL"}
+			tbl := make([][]string, 0, len(rows))
+			for _, r := range rows {
+				tbl = append(tbl, []string{r.Name, r.GeneratedAt, fmt.Sprint(r.Scenarios), fmt.Sprint(r.Tiers), fmt.Sprint(r.RunsPerCell)})
+			}
+			f.Table(header, tbl)
+		})
 	},
 }
 
@@ -326,24 +324,22 @@ var evalBaselineShowCmd = &cobra.Command{
 			return fmt.Errorf("parse baseline: %w", err)
 		}
 		f := newFormatter()
-		if f.Format == "json" {
-			return f.JSON(rec)
-		}
-		out := cmd.OutOrStdout()
-		fmt.Fprintf(out, "Baseline:    %s\nGenerated:   %s\nWorkspace:   %s\nRuns/cell:   %d\n\n",
-			rec.Name, rec.GeneratedAt, rec.WorkspaceID, rec.RunsPerCell)
-		header := append([]string{"SCENARIO"}, prettyTierNames(rec.Tiers)...)
-		rows := make([][]string, 0, len(rec.Scenarios))
-		for _, slug := range rec.Scenarios {
-			row := []string{slug}
-			for _, t := range rec.Tiers {
-				c := rec.Cells[matrixKey(slug, t)]
-				row = append(row, fmt.Sprintf("%d/%d $%.4f", c.Pass, c.Total, c.AvgCost))
+		return f.AutoHuman(rec, func() {
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "Baseline:    %s\nGenerated:   %s\nWorkspace:   %s\nRuns/cell:   %d\n\n",
+				rec.Name, rec.GeneratedAt, rec.WorkspaceID, rec.RunsPerCell)
+			header := append([]string{"SCENARIO"}, prettyTierNames(rec.Tiers)...)
+			rows := make([][]string, 0, len(rec.Scenarios))
+			for _, slug := range rec.Scenarios {
+				row := []string{slug}
+				for _, t := range rec.Tiers {
+					c := rec.Cells[matrixKey(slug, t)]
+					row = append(row, fmt.Sprintf("%d/%d $%.4f", c.Pass, c.Total, c.AvgCost))
+				}
+				rows = append(rows, row)
 			}
-			rows = append(rows, row)
-		}
-		f.Table(header, rows)
-		return nil
+			f.Table(header, rows)
+		})
 	},
 }
 
@@ -462,22 +458,19 @@ func runEvalBaselineDiff(cmd *cobra.Command, args []string) error {
 	}
 
 	f := newFormatter()
-	if f.Format == "json" {
-		// Propagate serialisation failures (broken pipe, full
-		// disk on stdout redirect, etc) so CI doesn't see exit 0
-		// when the JSON output never actually reached the
-		// downstream consumer.
-		if err := f.JSON(map[string]any{
-			"baseline_name":    baseline.Name,
-			"baseline_at":      baseline.GeneratedAt,
-			"tolerance":        tolerance,
-			"regression_count": regressionCount,
-			"rows":             rows,
-		}); err != nil {
-			return fmt.Errorf("emit json diff: %w", err)
-		}
-	} else {
+	// Propagate serialisation failures (broken pipe, full disk on
+	// stdout redirect, etc) so CI doesn't see exit 0 when the machine
+	// output never actually reached the downstream consumer.
+	if err := f.AutoHuman(map[string]any{
+		"baseline_name":    baseline.Name,
+		"baseline_at":      baseline.GeneratedAt,
+		"tolerance":        tolerance,
+		"regression_count": regressionCount,
+		"rows":             rows,
+	}, func() {
 		printRegressionTable(cmd, baseline, rows, tolerance)
+	}); err != nil {
+		return fmt.Errorf("emit diff: %w", err)
 	}
 
 	if regressionCount > 0 {
