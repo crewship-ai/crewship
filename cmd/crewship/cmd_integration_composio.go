@@ -142,30 +142,27 @@ var composioInventoryCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		// Structured output: dump the whole response once.
-		if f.Format == "json" || f.Format == "yaml" {
-			return f.Auto(inv, nil, nil)
-		}
+		// Structured output (json/yaml/ndjson): dump the whole response once.
+		return f.AutoHuman(inv, func() {
+			if !inv.Enabled {
+				fmt.Println("Composio is not configured. Set a workspace key with `crewship integration composio key set` or from the dashboard (Integrations -> Composio); the COMPOSIO_API_KEY server env is also honoured.")
+				return
+			}
 
-		if !inv.Enabled {
-			fmt.Println("Composio is not configured. Set a workspace key with `crewship integration composio key set` or from the dashboard (Integrations -> Composio); the COMPOSIO_API_KEY server env is also honoured.")
-			return nil
-		}
+			fmt.Println("Connector catalog (auth configs):")
+			catRows := make([][]string, 0, len(inv.AuthConfigs))
+			for _, ac := range inv.AuthConfigs {
+				catRows = append(catRows, []string{ac.Toolkit.Slug, ac.Name, ac.Status})
+			}
+			f.Table([]string{"TOOLKIT", "NAME", "STATUS"}, catRows)
 
-		fmt.Println("Connector catalog (auth configs):")
-		catRows := make([][]string, 0, len(inv.AuthConfigs))
-		for _, ac := range inv.AuthConfigs {
-			catRows = append(catRows, []string{ac.Toolkit.Slug, ac.Name, ac.Status})
-		}
-		f.Table([]string{"TOOLKIT", "NAME", "STATUS"}, catRows)
-
-		fmt.Println("\nConnected users:")
-		userRows := make([][]string, 0, len(inv.Users))
-		for _, u := range inv.Users {
-			userRows = append(userRows, []string{u.UserID, strings.Join(distinctToolkits(u), ","), fmt.Sprintf("%d", len(u.ConnectedAccounts))})
-		}
-		f.Table([]string{"USER_ID", "APPS", "ACCOUNTS"}, userRows)
-		return nil
+			fmt.Println("\nConnected users:")
+			userRows := make([][]string, 0, len(inv.Users))
+			for _, u := range inv.Users {
+				userRows = append(userRows, []string{u.UserID, strings.Join(distinctToolkits(u), ","), fmt.Sprintf("%d", len(u.ConnectedAccounts))})
+			}
+			f.Table([]string{"USER_ID", "APPS", "ACCOUNTS"}, userRows)
+		})
 	},
 }
 
@@ -217,24 +214,22 @@ var composioToolkitsCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		if f.Format == "json" || f.Format == "yaml" {
-			return f.Auto(res, nil, nil)
-		}
-		if !res.Enabled {
-			fmt.Println("Composio is not configured. Set a workspace key with `crewship integration composio key set` or from the dashboard (Integrations -> Composio); the COMPOSIO_API_KEY server env is also honoured.")
-			return nil
-		}
-		rows := make([][]string, 0, len(res.Toolkits))
-		for _, t := range res.Toolkits {
-			cat := ""
-			if len(t.Meta.Categories) > 0 {
-				cat = t.Meta.Categories[0].Name
+		return f.AutoHuman(res, func() {
+			if !res.Enabled {
+				fmt.Println("Composio is not configured. Set a workspace key with `crewship integration composio key set` or from the dashboard (Integrations -> Composio); the COMPOSIO_API_KEY server env is also honoured.")
+				return
 			}
-			rows = append(rows, []string{t.Slug, t.Name, cat, fmt.Sprintf("%d", t.Meta.ToolsCount)})
-		}
-		f.Table([]string{"SLUG", "NAME", "CATEGORY", "TOOLS"}, rows)
-		fmt.Printf("\nShowing %d of %d apps. Narrow with --search / --category.\n", len(res.Toolkits), res.Total)
-		return nil
+			rows := make([][]string, 0, len(res.Toolkits))
+			for _, t := range res.Toolkits {
+				cat := ""
+				if len(t.Meta.Categories) > 0 {
+					cat = t.Meta.Categories[0].Name
+				}
+				rows = append(rows, []string{t.Slug, t.Name, cat, fmt.Sprintf("%d", t.Meta.ToolsCount)})
+			}
+			f.Table([]string{"SLUG", "NAME", "CATEGORY", "TOOLS"}, rows)
+			fmt.Printf("\nShowing %d of %d apps. Narrow with --search / --category.\n", len(res.Toolkits), res.Total)
+		})
 	},
 }
 
@@ -267,20 +262,18 @@ var composioToolsCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		if f.Format == "json" || f.Format == "yaml" {
-			return f.Auto(res, nil, nil)
-		}
-		if !res.Enabled {
-			fmt.Println("Composio is not configured. Set a workspace key with `crewship integration composio key set` or from the dashboard (Integrations -> Composio); the COMPOSIO_API_KEY server env is also honoured.")
-			return nil
-		}
-		rows := make([][]string, 0, len(res.Tools))
-		for _, t := range res.Tools {
-			rows = append(rows, []string{t.Slug, t.Name, t.Description})
-		}
-		f.Table([]string{"SLUG", "NAME", "DESCRIPTION"}, rows)
-		fmt.Printf("\nShowing %d of %d tools for %q. Narrow with --search.\n", len(res.Tools), res.Total, args[0])
-		return nil
+		return f.AutoHuman(res, func() {
+			if !res.Enabled {
+				fmt.Println("Composio is not configured. Set a workspace key with `crewship integration composio key set` or from the dashboard (Integrations -> Composio); the COMPOSIO_API_KEY server env is also honoured.")
+				return
+			}
+			rows := make([][]string, 0, len(res.Tools))
+			for _, t := range res.Tools {
+				rows = append(rows, []string{t.Slug, t.Name, t.Description})
+			}
+			f.Table([]string{"SLUG", "NAME", "DESCRIPTION"}, rows)
+			fmt.Printf("\nShowing %d of %d tools for %q. Narrow with --search.\n", len(res.Tools), res.Total, args[0])
+		})
 	},
 }
 
@@ -322,20 +315,18 @@ var composioTriggersTypesCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		if f.Format == "json" || f.Format == "yaml" {
-			return f.Auto(res, nil, nil)
-		}
-		if !res.Enabled {
-			fmt.Println("Composio is not configured. Set a workspace key with `crewship integration composio key set` or from the dashboard (Integrations -> Composio); the COMPOSIO_API_KEY server env is also honoured.")
-			return nil
-		}
-		rows := make([][]string, 0, len(res.Triggers))
-		for _, t := range res.Triggers {
-			rows = append(rows, []string{t.Slug, t.Toolkit.Slug, t.Type, t.Description})
-		}
-		f.Table([]string{"SLUG", "TOOLKIT", "TYPE", "DESCRIPTION"}, rows)
-		fmt.Printf("\nShowing %d of %d trigger types. Narrow with --toolkit / --search.\n", len(res.Triggers), res.Total)
-		return nil
+		return f.AutoHuman(res, func() {
+			if !res.Enabled {
+				fmt.Println("Composio is not configured. Set a workspace key with `crewship integration composio key set` or from the dashboard (Integrations -> Composio); the COMPOSIO_API_KEY server env is also honoured.")
+				return
+			}
+			rows := make([][]string, 0, len(res.Triggers))
+			for _, t := range res.Triggers {
+				rows = append(rows, []string{t.Slug, t.Toolkit.Slug, t.Type, t.Description})
+			}
+			f.Table([]string{"SLUG", "TOOLKIT", "TYPE", "DESCRIPTION"}, rows)
+			fmt.Printf("\nShowing %d of %d trigger types. Narrow with --toolkit / --search.\n", len(res.Triggers), res.Total)
+		})
 	},
 }
 
@@ -352,23 +343,21 @@ var composioTriggersActiveCmd = &cobra.Command{
 			return err
 		}
 		f := newFormatter()
-		if f.Format == "json" || f.Format == "yaml" {
-			return f.Auto(res, nil, nil)
-		}
-		if !res.Enabled {
-			fmt.Println("Composio is not configured. Set a workspace key with `crewship integration composio key set` or from the dashboard (Integrations -> Composio); the COMPOSIO_API_KEY server env is also honoured.")
-			return nil
-		}
-		rows := make([][]string, 0, len(res.Triggers))
-		for _, t := range res.Triggers {
-			state := "active"
-			if t.DisabledAt != "" {
-				state = "disabled"
+		return f.AutoHuman(res, func() {
+			if !res.Enabled {
+				fmt.Println("Composio is not configured. Set a workspace key with `crewship integration composio key set` or from the dashboard (Integrations -> Composio); the COMPOSIO_API_KEY server env is also honoured.")
+				return
 			}
-			rows = append(rows, []string{t.ID, t.TriggerName, t.UserID, state})
-		}
-		f.Table([]string{"ID", "TRIGGER", "USER_ID", "STATE"}, rows)
-		return nil
+			rows := make([][]string, 0, len(res.Triggers))
+			for _, t := range res.Triggers {
+				state := "active"
+				if t.DisabledAt != "" {
+					state = "disabled"
+				}
+				rows = append(rows, []string{t.ID, t.TriggerName, t.UserID, state})
+			}
+			f.Table([]string{"ID", "TRIGGER", "USER_ID", "STATE"}, rows)
+		})
 	},
 }
 
@@ -450,11 +439,9 @@ var composioDefaultShowCmd = &cobra.Command{
 			return err
 		}
 		f := newFormatter()
-		if f.Format == "json" || f.Format == "yaml" {
-			return f.Auto(d, nil, nil)
-		}
-		printComposioDefault(f, d)
-		return nil
+		return f.AutoHuman(d, func() {
+			printComposioDefault(f, d)
+		})
 	},
 }
 
@@ -513,21 +500,19 @@ var composioKeyShowCmd = &cobra.Command{
 			return err
 		}
 		f := newFormatter()
-		if f.Format == "json" || f.Format == "yaml" {
-			return f.Auto(s, nil, nil)
-		}
-		if !s.Configured {
-			fmt.Println("Composio: not configured. Set a workspace key with:")
-			fmt.Println("  crewship integration composio key set --key <ak_...>")
-			fmt.Println("(or from the dashboard: Integrations -> Composio). The server")
-			fmt.Println("COMPOSIO_API_KEY env var is also honoured as a fallback.")
-			return nil
-		}
-		fmt.Printf("Composio: configured (source: %s)\n", s.Source)
-		if s.Label != "" {
-			fmt.Printf("  Label:    %s\n", s.Label)
-		}
-		return nil
+		return f.AutoHuman(s, func() {
+			if !s.Configured {
+				fmt.Println("Composio: not configured. Set a workspace key with:")
+				fmt.Println("  crewship integration composio key set --key <ak_...>")
+				fmt.Println("(or from the dashboard: Integrations -> Composio). The server")
+				fmt.Println("COMPOSIO_API_KEY env var is also honoured as a fallback.")
+				return
+			}
+			fmt.Printf("Composio: configured (source: %s)\n", s.Source)
+			if s.Label != "" {
+				fmt.Printf("  Label:    %s\n", s.Label)
+			}
+		})
 	},
 }
 
@@ -757,19 +742,17 @@ var composioBindingsCmd = &cobra.Command{
 			return err
 		}
 		f := newFormatter()
-		if f.Format == "json" || f.Format == "yaml" {
-			return f.Auto(res, nil, nil)
-		}
-		if len(res.Bindings) == 0 {
-			fmt.Printf("Agent %s has no Composio bindings.\n", args[0])
-			return nil
-		}
-		rows := make([][]string, 0, len(res.Bindings))
-		for _, b := range res.Bindings {
-			rows = append(rows, []string{b.Toolkit, b.Mode, b.UserID, b.Endpoint})
-		}
-		f.Table([]string{"TOOLKIT", "MODE", "USER_ID", "ENDPOINT"}, rows)
-		return nil
+		return f.AutoHuman(res, func() {
+			if len(res.Bindings) == 0 {
+				fmt.Printf("Agent %s has no Composio bindings.\n", args[0])
+				return
+			}
+			rows := make([][]string, 0, len(res.Bindings))
+			for _, b := range res.Bindings {
+				rows = append(rows, []string{b.Toolkit, b.Mode, b.UserID, b.Endpoint})
+			}
+			f.Table([]string{"TOOLKIT", "MODE", "USER_ID", "ENDPOINT"}, rows)
+		})
 	},
 }
 
