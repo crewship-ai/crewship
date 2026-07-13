@@ -135,15 +135,17 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate agent exists, is not deleted, and belongs to claimed crew+workspace
-	var agentName, crewName, agentWorkspaceID string
+	// Validate agent exists, is not deleted, and belongs to claimed crew+workspace.
+	// crewSlug is fetched for #1016: the exec target container is derived from
+	// the agent's crew (id + slug), not the body-supplied container_id.
+	var agentName, crewName, crewSlug, agentWorkspaceID string
 	var agentCrewID sql.NullString
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT COALESCE(a.name,''), COALESCE(c.name,''), a.workspace_id, a.crew_id
+		SELECT COALESCE(a.name,''), COALESCE(c.name,''), COALESCE(c.slug,''), a.workspace_id, a.crew_id
 		FROM agents a
 		LEFT JOIN crews c ON c.id = a.crew_id
 		WHERE a.id = ? AND a.deleted_at IS NULL`, body.RequestingAgentID).Scan(
-		&agentName, &crewName, &agentWorkspaceID, &agentCrewID)
+		&agentName, &crewName, &crewSlug, &agentWorkspaceID, &agentCrewID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusUnauthorized, "requesting agent not found")
@@ -157,7 +159,16 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusForbidden, "workspace boundary violation")
 		return
 	}
-	if agentCrewID.Valid && agentCrewID.String != body.RequestingCrewID {
+	// Crew boundary (#1057): a crew-LESS agent (crew_id NULL) must not skip
+	// the check and claim an arbitrary crew — same escape hatch closed on the
+	// request path. Here it matters more: the claimed crew flows into the
+	// derived exec-target container below.
+	if agentCrewID.Valid {
+		if agentCrewID.String != body.RequestingCrewID {
+			replyError(w, http.StatusForbidden, "crew boundary violation")
+			return
+		}
+	} else if body.RequestingCrewID != "" {
 		replyError(w, http.StatusForbidden, "crew boundary violation")
 		return
 	}
@@ -373,11 +384,33 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// #1016: pin the exec target to the requesting agent's OWN crew container,
+	// derived server-side from its crew (CrewContainerName is the exact
+	// instance-prefixed name used to CREATE the container, so the provider Exec
+	// resolves it to the same container the agent's sidecar runs in). The
+	// body-supplied container_id (the sidecar's runtime id) is NOT trusted:
+	// within a single workspace an intra-tenant peer could otherwise name
+	// another agent's container and have this agent's plaintext secret injected
+	// and a command run there. #1015 closed the cross-tenant case; this closes
+	// the intra-workspace peer case.
+	if !agentCrewID.Valid {
+		// Unreachable in practice (requesting_crew_id is required and the crew
+		// boundary check above rejects a crew-less agent claiming a crew), but
+		// guard so we never fall back to a body-chosen container target.
+		replyError(w, http.StatusForbidden, "requesting agent has no crew container")
+		return
+	}
+	execContainer := h.container.CrewContainerName(agentCrewID.String, crewSlug)
+	if body.ContainerID != "" && body.ContainerID != execContainer {
+		h.logger.Warn("keeper execute: ignoring request-supplied container_id (using derived crew container)",
+			"agent_id", body.RequestingAgentID, "supplied", body.ContainerID, "derived", execContainer)
+	}
+
 	execCtx, cancel := context.WithTimeout(r.Context(), executeTimeout)
 	defer cancel()
 
 	execResult, execErr := h.container.Exec(execCtx, provider.ExecConfig{
-		ContainerID: body.ContainerID,
+		ContainerID: execContainer,
 		Cmd:         []string{"sh", "-c", body.Command},
 		Env:         []string{envVar + "=" + plainValue},
 		User:        "1001:1001",
@@ -387,7 +420,7 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	exitCode := -1
 
 	if execErr != nil {
-		h.logger.Error("keeper execute: exec failed", "error", execErr, "container_id", body.ContainerID)
+		h.logger.Error("keeper execute: exec failed", "error", execErr, "container_id", execContainer)
 		// Return generic error message — never expose Docker internals to the agent
 		rawOutput = []byte("command execution failed")
 	} else {

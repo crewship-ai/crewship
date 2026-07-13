@@ -113,8 +113,18 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusForbidden, "workspace boundary violation")
 		return
 	}
-	// Crew boundary: if the agent has a crew assignment, it must match the claimed crew
-	if agentCrewID.Valid && agentCrewID.String != body.RequestingCrewID {
+	// Crew boundary: the claimed requesting_crew_id must match the agent's
+	// actual crew. #1057: a crew-LESS agent (crew_id NULL) must NOT get an
+	// escape hatch — the old `agentCrewID.Valid && …` skipped the check
+	// entirely when NULL, letting a crew-less agent claim ANY crew and
+	// mis-attribute the ESCALATE inbox item (TargetRole MANAGER) and the
+	// journal rows. A crew-less agent may only pass an empty crew claim.
+	if agentCrewID.Valid {
+		if agentCrewID.String != body.RequestingCrewID {
+			replyError(w, http.StatusForbidden, "crew boundary violation")
+			return
+		}
+	} else if body.RequestingCrewID != "" {
 		replyError(w, http.StatusForbidden, "crew boundary violation")
 		return
 	}

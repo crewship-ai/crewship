@@ -36,6 +36,10 @@ type mockContainerExec struct {
 	exitCode int
 	execID   string
 	execErr  error
+
+	// lastExecContainerID records the ContainerID passed to the most recent
+	// Exec call so tests can assert the server-derived exec target (#1016).
+	lastExecContainerID string
 }
 
 func (m *mockContainerExec) EnsureCrewRuntime(_ context.Context, _ provider.CrewConfig) (string, error) {
@@ -46,7 +50,8 @@ func (m *mockContainerExec) RemoveCrewRuntime(_ context.Context, _ string) error
 func (m *mockContainerExec) ContainerStatus(_ context.Context, _ string) (*provider.ContainerStatus, error) {
 	return &provider.ContainerStatus{State: "running"}, nil
 }
-func (m *mockContainerExec) Exec(_ context.Context, _ provider.ExecConfig) (*provider.ExecResult, error) {
+func (m *mockContainerExec) Exec(_ context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	m.lastExecContainerID = cfg.ContainerID
 	if m.execErr != nil {
 		return nil, m.execErr
 	}
