@@ -29,7 +29,15 @@ type covContainer struct {
 	calls   []provider.ExecConfig
 	route   func(cfg provider.ExecConfig) (*provider.ExecResult, error)
 	inspect func(execID string) (bool, int, error)
+	// expectedHash, when non-empty, makes covContainer implement the
+	// sidecarHashReporter interface checkSidecar type-asserts for #1008
+	// stale-sidecar detection. Empty (the default) leaves it fail-open.
+	expectedHash string
 }
+
+// ExpectedSidecarHash lets covContainer stand in for a provider that knows the
+// on-disk sidecar build hash (#1008).
+func (c *covContainer) ExpectedSidecarHash() string { return c.expectedHash }
 
 func (c *covContainer) snapshotCalls() []provider.ExecConfig {
 	c.mu.Lock()
