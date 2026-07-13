@@ -9,7 +9,7 @@ import {
   ArrowUpDown, RefreshCw,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { PageShell } from "@/components/layout/page-shell"
+import { SubBar, SubBarPrimary } from "@/components/layout/sub-bar"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -369,30 +369,45 @@ export default function CredentialsPage() {
   }, [filtered, sortKey])
 
   const headerActions = canManage ? (
-    <Button onClick={() => setAddOpen(true)} size="sm">
-      <Plus className="mr-1.5 h-3.5 w-3.5" />
+    <SubBarPrimary icon={Plus} onClick={() => setAddOpen(true)}>
       Add secret
-    </Button>
+    </SubBarPrimary>
   ) : null
+
+  // Canonical page chrome: the SubBar (identity + actions) directly under the
+  // global top bar, then a scrollable, padded content region — the same shape
+  // journal/admin/routines use. SubBar provides no padding of its own, so the
+  // content wrapper supplies it.
+  const subBar = (
+    <SubBar
+      icon={Key}
+      title="Credentials"
+      ariaLabel="Credentials"
+      description="Shared secrets, API keys, and CLI tokens for your agents"
+      actions={headerActions}
+    />
+  )
 
   if (loading) {
     return (
-      <PageShell title="Credentials" description="Shared secrets, API keys, and CLI tokens" actions={headerActions}>
-        <div className="space-y-3">
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
+      <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
+        {subBar}
+        <div className="flex-1 overflow-y-auto">
+          <div className="p-4 md:p-6 space-y-3">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
         </div>
-      </PageShell>
+      </div>
     )
   }
 
   return (
-    <PageShell
-      title="Credentials"
-      description="Shared secrets, API keys, and CLI tokens for your agents"
-      actions={headerActions}
-    >
+    <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
+      {subBar}
+      <div className="flex-1 overflow-y-auto">
+        <div className="p-4 md:p-6">
       {loadError ? (
         // Load failure — visually and semantically distinct from the
         // empty state: red accent, explicit error copy, and a Retry
@@ -646,7 +661,7 @@ export default function CredentialsPage() {
       </AlertDialog>
 
       {canDelete && selectedIds.size > 0 && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 rounded-full border border-white/15 bg-zinc-950/95 backdrop-blur shadow-2xl px-4 py-2 flex items-center gap-3 text-xs">
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 rounded-full border border-border bg-popover/95 backdrop-blur shadow-2xl px-4 py-2 flex items-center gap-3 text-xs">
           <span className="font-medium">{selectedIds.size} selected</span>
           <button type="button" onClick={() => setBulkDeleteOpen(true)} className="text-red-400 hover:text-red-300">
             Delete
@@ -667,7 +682,9 @@ export default function CredentialsPage() {
           knownTags={tagsInUse}
         />
       )}
-    </PageShell>
+        </div>
+      </div>
+    </div>
   )
 }
 
