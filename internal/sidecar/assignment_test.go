@@ -177,6 +177,15 @@ func TestHandleResults_ForwardsBoundWorkspaceAndRejectsInjection(t *testing.T) {
 	if w2.Code != http.StatusBadRequest {
 		t.Errorf("injection assignment id must 400, got %d", w2.Code)
 	}
+
+	// Dot-dot id → 400 (the path-traversal guard must survive the charset
+	// rewrite; ".." contains none of /?#&=% and PathEscape leaves '.' intact).
+	req3 := httptest.NewRequest(http.MethodGet, "/results/..", nil)
+	w3 := httptest.NewRecorder()
+	srv.handleResults(w3, req3)
+	if w3.Code != http.StatusBadRequest {
+		t.Errorf("dot-dot assignment id must 400, got %d", w3.Code)
+	}
 }
 
 func TestHandleResults_NoIPC(t *testing.T) {

@@ -81,7 +81,7 @@ func (s *Server) handleResults(w http.ResponseWriter, r *http.Request) {
 	// segment into the IPC URL (#1040) — otherwise the trusted ?workspace_id=
 	// appended below could be overridden via the same %3F path-injection trick,
 	// defeating the workspace scope. CUID assignment ids never contain these.
-	if assignmentID == "" || strings.ContainsAny(assignmentID, "/?#&=%") {
+	if assignmentID == "" || strings.ContainsAny(assignmentID, "/?#&=%") || strings.Contains(assignmentID, "..") {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "assignment_id required"})
 		return
 	}

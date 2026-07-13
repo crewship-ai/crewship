@@ -266,6 +266,13 @@ func (h *AssignmentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "workspace_id is required")
 		return
 	}
+	// Defense-in-depth, matching InternalMissionHandler.Get/Create: a
+	// workspace-bound internal token may only read its own workspace, so the
+	// query-param workspace_id must agree with the token's binding. A master
+	// (host-side) token has an empty binding and passes unchanged.
+	if !assertInternalTokenWorkspace(w, r, wsID) {
+		return
+	}
 
 	type assignmentResult struct {
 		ID            string  `json:"id"`
