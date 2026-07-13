@@ -45,21 +45,36 @@ type Settings struct {
 	// WatchPresets is the set of enabled preset keys (see WatchPresets catalog).
 	// Stored as a JSON array in watch_presets; nil/empty = no presets.
 	WatchPresets []string `json:"watch_presets"`
+
+	// GovModelProvider selects the Keeper governance model's provider (M2a,
+	// #1001): "" = use the server/env default (backward-compatible), else
+	// "ollama" | "anthropic" | "openai_compat". Resolved via ResolveGovModel.
+	GovModelProvider string `json:"gov_model_provider"`
+	// GovModelID is the wire model identifier passed to the chosen provider.
+	GovModelID string `json:"gov_model_id"`
+	// GovModelCredentialID optionally points the provider at a vault credential
+	// (ENDPOINT_URL / API_KEY) for its endpoint/key. Empty = no credential. A
+	// revoked credential nulls this (ON DELETE SET NULL) and ResolveGovModel
+	// degrades to the default OLLAMA judge + a WARN (§4.4 revoke-safety).
+	GovModelCredentialID string `json:"gov_model_credential_id"`
 }
 
 // Get returns the explicit workspace row. found is false when the workspace
 // has never been configured in-app (the watchdog is then off — see Resolve).
 func Get(ctx context.Context, db *sql.DB, workspaceID string) (Settings, bool, error) {
 	var (
-		s       Settings
-		enabled int
-		contact sql.NullString
-		presets string
+		s         Settings
+		enabled   int
+		contact   sql.NullString
+		presets   string
+		govCredID sql.NullString
 	)
 	err := db.QueryRowContext(ctx, `
-		SELECT enabled, security_contact_user_id, deny_notify_min_risk, watch_spec, watch_presets
+		SELECT enabled, security_contact_user_id, deny_notify_min_risk, watch_spec, watch_presets,
+		       gov_model_provider, gov_model_id, gov_model_credential_id
 		FROM keeper_governance_settings WHERE workspace_id = ?`, workspaceID).
-		Scan(&enabled, &contact, &s.DenyNotifyMinRisk, &s.WatchSpec, &presets)
+		Scan(&enabled, &contact, &s.DenyNotifyMinRisk, &s.WatchSpec, &presets,
+			&s.GovModelProvider, &s.GovModelID, &govCredID)
 	if err == sql.ErrNoRows {
 		return Settings{DenyNotifyMinRisk: DefaultDenyNotifyMinRisk}, false, nil
 	}
@@ -68,6 +83,7 @@ func Get(ctx context.Context, db *sql.DB, workspaceID string) (Settings, bool, e
 	}
 	s.Enabled = enabled != 0
 	s.SecurityContactUserID = contact.String
+	s.GovModelCredentialID = govCredID.String
 	if presets != "" {
 		if err := json.Unmarshal([]byte(presets), &s.WatchPresets); err != nil {
 			return Settings{DenyNotifyMinRisk: DefaultDenyNotifyMinRisk}, false, fmt.Errorf("governance: get: decode watch_presets: %w", err)
@@ -98,18 +114,23 @@ func Upsert(ctx context.Context, db *sql.DB, workspaceID string, s Settings, upd
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO keeper_governance_settings
-			(workspace_id, enabled, security_contact_user_id, deny_notify_min_risk, watch_spec, watch_presets, updated_by, created_at, updated_at)
-		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, NULLIF(?, ''), ?, ?)
+			(workspace_id, enabled, security_contact_user_id, deny_notify_min_risk, watch_spec, watch_presets,
+			 gov_model_provider, gov_model_id, gov_model_credential_id, updated_by, created_at, updated_at)
+		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
 			enabled = excluded.enabled,
 			security_contact_user_id = excluded.security_contact_user_id,
 			deny_notify_min_risk = excluded.deny_notify_min_risk,
 			watch_spec = excluded.watch_spec,
 			watch_presets = excluded.watch_presets,
+			gov_model_provider = excluded.gov_model_provider,
+			gov_model_id = excluded.gov_model_id,
+			gov_model_credential_id = excluded.gov_model_credential_id,
 			updated_by = excluded.updated_by,
 			updated_at = excluded.updated_at`,
 		workspaceID, boolToInt(s.Enabled), s.SecurityContactUserID, s.DenyNotifyMinRisk,
-		s.WatchSpec, presets, updatedBy, now, now)
+		s.WatchSpec, presets, s.GovModelProvider, s.GovModelID, s.GovModelCredentialID,
+		updatedBy, now, now)
 	if err != nil {
 		return fmt.Errorf("governance: upsert: %w", err)
 	}

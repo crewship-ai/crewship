@@ -48,6 +48,11 @@ type keeperGovernance struct {
 	DenyNotifyMinRisk     int      `json:"deny_notify_min_risk"`
 	WatchSpec             string   `json:"watch_spec"`
 	WatchPresets          []string `json:"watch_presets"`
+
+	// Governance-model selection (M2a, #1001).
+	GovModelProvider     string `json:"gov_model_provider"`
+	GovModelID           string `json:"gov_model_id"`
+	GovModelCredentialID string `json:"gov_model_credential_id"`
 }
 
 // keeperServerStatus mirrors GET /api/v1/system/keeper.

@@ -1631,6 +1631,14 @@ END;
 	// idempotent Go backfill. See migrate_consts_v140_encrypt_webhook_secrets.go
 	// and issues #1072 / #1029.
 	{version: 140, name: "encrypt_webhook_secrets", fn: migrationEncryptWebhookSecrets},
+
+	// v142: per-workspace Keeper governance-model selection (provider + model +
+	// optional vault credential ref) on keeper_governance_settings. Empty
+	// provider = use the server/env default, so this is additive and preserves
+	// the opt-in contract. See migrate_consts_v142_keeper_gov_model.go and issue
+	// #1001 (M2a). (v141 is taken by the credential second-approver migration,
+	// PR #1084/#1173 — landing in parallel.)
+	{version: 142, name: "keeper_gov_model", sql: migrationKeeperGovModel},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

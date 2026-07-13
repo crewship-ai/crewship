@@ -325,6 +325,43 @@ governance**: a checklist of presets and a text area for the free-form rules.
   server-side.
 </Note>
 
+## Governance model (fully-local, no API key)
+
+The model that backs Keeper — the credential access gatekeeper **and** the
+auxiliary evaluators — is a **per-workspace, vault-backed setting**, chosen
+in-app rather than only via server env. This is what makes a **no-API-key
+Keeper** possible: point governance at a local Ollama classifier and the whole
+watchdog runs on your own hardware.
+
+| Field | What it does |
+|-------|-------------|
+| **Provider** | `ollama` (local, no key), `anthropic`, or `openai_compat` (any OpenAI-compatible endpoint). Empty = fall back to the server/env default (`keeper.model`). |
+| **Model** | The provider's model id, e.g. `qwen2.5:3b-instruct` (local) or `claude-haiku-4-5`. Keeper's evaluators are **classifiers, not coders** — prefer small instruct models. |
+| **Credential** | *(optional)* a vault `ENDPOINT_URL` or `API_KEY` credential the provider sources its endpoint/key from, so no secret lives in env or config. |
+
+```bash
+# Show the current workspace governance model
+crewship keeper model get
+
+# Run fully local on Ollama — no API key anywhere
+crewship keeper model set --provider ollama --model qwen2.5:3b-instruct
+
+# Point at an OpenAI-compatible endpoint via a vault credential
+crewship keeper model set --provider openai_compat --model gpt-4o-mini --credential cred_abc123
+
+# Fall back to the server/env default
+crewship keeper model clear
+```
+
+<Note>
+  **Revoke-safety.** If the credential backing the governance model is deleted or
+  revoked, Keeper does **not** break — it degrades to the default local Ollama
+  judge and surfaces a warning, rather than leaving the access path with no
+  evaluator (which, being fail-closed, would deny every credential request). A
+  working evaluator always exists. Choosing a model does not enable the watchdog;
+  run `crewship keeper enable`. OWNER/ADMIN only.
+</Note>
+
 ## Audit Trail
 
 Every Keeper decision is audited with:
