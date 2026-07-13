@@ -15,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
 // Webhook is the persisted record for an event-driven trigger.
@@ -83,6 +85,16 @@ func (s *WebhookStore) Save(ctx context.Context, in SaveWebhookInput) (*Webhook,
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
+	// #1029: encrypt the optional HMAC signing secret at rest (the v82 schema
+	// already documents this column as encrypted, but writes stored plaintext).
+	// Fail-open: with no key configured EncryptAtRest returns the value
+	// unchanged, preserving key-less deployments; the read/verify path decrypts
+	// only enveloped values.
+	storedSigning, _, err := encryption.EncryptAtRest(in.SigningSecret)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt signing_secret: %w", err)
+	}
+
 	if in.ID == "" {
 		id := generateWebhookID()
 		token, err := generateWebhookToken()
@@ -98,7 +110,7 @@ INSERT INTO pipeline_webhooks (
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, in.WorkspaceID, in.Name, in.TargetPipelineID,
 			nullInt(in.TargetPipelineVersion),
-			token, nullStr(in.SigningSecret), string(tmplJSON),
+			token, nullStr(storedSigning), string(tmplJSON),
 			boolToInt(in.Enabled), in.RateLimitPerMin,
 			now, now,
 		)
@@ -115,7 +127,7 @@ SET name = ?, target_pipeline_id = ?, target_pipeline_version = ?,
     updated_at = ?
 WHERE id = ? AND deleted_at IS NULL`,
 		in.Name, in.TargetPipelineID, nullInt(in.TargetPipelineVersion),
-		nullStr(in.SigningSecret), string(tmplJSON),
+		nullStr(storedSigning), string(tmplJSON),
 		boolToInt(in.Enabled), in.RateLimitPerMin, now, in.ID,
 	)
 	if err != nil {
@@ -324,6 +336,12 @@ func scanWebhook(rs rowScanner) (*Webhook, error) {
 	if err != nil {
 		return nil, err
 	}
+	// #1029: signing_secret is stored AES-256-GCM encrypted at rest; materialize
+	// the plaintext for in-memory use (HMAC verify + the show-once create
+	// response) so encryption is transparent to every consumer. A bare
+	// (legacy/key-less) value passes through unchanged; on a decrypt error the
+	// raw value is kept, which just makes HMAC verification fail safely.
+	w.SigningSecret, _ = encryption.DecryptIfEncrypted(w.SigningSecret)
 	w.Enabled = enabled != 0
 	if targetVersion.Valid {
 		v := int(targetVersion.Int64)

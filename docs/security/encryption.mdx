@@ -129,7 +129,11 @@ crewship admin reencrypt
 
 The operation is idempotent — envelopes already at the current version are skipped — so an interrupted run can simply be repeated. Undecryptable values (no configured key opens them) are counted under `failed` and left untouched; the CLI exits non-zero in that case so a scripted rotation never retires the old key on a false success.
 
-The walk covers every envelope-bearing column: `credentials.encrypted_value`, `credentials.encrypted_refresh_token`, `credentials.oauth_client_secret_enc`, `credentials.oauth_refresh_token_enc`, `credential_rotations.old_value`, `notification_channels.secret_enc`, `composio_settings.encrypted_api_key`, `oauth_states.code_verifier`, and `escalations.resolution` (credential-type escalations only).
+The walk covers every envelope-bearing column: `credentials.encrypted_value`, `credentials.encrypted_refresh_token`, `credentials.oauth_client_secret_enc`, `credentials.oauth_refresh_token_enc`, `credential_rotations.old_value`, `notification_channels.secret_enc`, `composio_settings.encrypted_api_key`, `oauth_states.code_verifier`, `escalations.resolution` (credential-type escalations only), and the two webhook-secret columns `agents.webhook_secret` and `pipeline_webhooks.signing_secret`.
+
+<Note>
+**Webhook secrets are fail-open at rest.** `agents.webhook_secret` and `pipeline_webhooks.signing_secret` are encrypted only when `ENCRYPTION_KEY` is configured; with no key they are stored plaintext (with a startup/rotate warning) so key-less webhook deployments keep working. During master-key rotation a bare (non-enveloped) webhook value is therefore reported as **skipped**, not failed — so the `failed=0 ⇒ retire the old key` criterion stays honest. Migration `v140` backfills existing plaintext webhook secrets to envelopes when a key is present.
+</Note>
 
 One known edge case: databases created in the brief pre-release window before encrypt-on-resolve landed (March 2026) may hold credential-type escalation resolutions stored as plaintext. Those rows always count under `failed` (they are left untouched — no corruption), so a `failed: 0` state is unreachable on such a database without clearing the affected historical `escalations.resolution` rows manually.
 

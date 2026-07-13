@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
+	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/webhook"
 )
 
@@ -131,6 +132,32 @@ func TestLookupSecret_ReadsCrewScopedRowFromDB(t *testing.T) {
 
 	if secret, err := h.lookupSecret(context.Background(), "crew-wrong", "agent-7"); err == nil || secret != "" {
 		t.Errorf("wrong-crew lookup = (%q, %v), want empty secret + error (crew scoping must engage)", secret, err)
+	}
+}
+
+// TestLookupSecret_DecryptsEncryptedSecretAtRest pins the #1072 read path: a
+// webhook_secret stored AES-256-GCM encrypted at rest must be DECRYPTED by
+// lookupSecret so HMAC verification uses the real secret. Reverting the
+// DecryptIfEncrypted call would return the envelope and fail this.
+func TestLookupSecret_DecryptsEncryptedSecretAtRest(t *testing.T) {
+	setTestEncryptionKeyParallelSafe(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	enc, err := encryption.Encrypt("whsec_real_value")
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	seedWebhookSecretAgent(t, db, wsID, "crew-1", "agent-enc", enc)
+	h := NewWebhookHandler(db, newTestLogger(), &fakeChatResolver{}, nil, nil, nil, nil)
+
+	got, err := h.lookupSecret(context.Background(), "crew-1", "agent-enc")
+	if err != nil {
+		t.Fatalf("lookupSecret: %v", err)
+	}
+	if got != "whsec_real_value" {
+		t.Errorf("lookupSecret returned %q, want the DECRYPTED plaintext (envelope not decrypted?)", got)
 	}
 }
 

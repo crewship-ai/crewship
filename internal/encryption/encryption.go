@@ -60,6 +60,59 @@ func ParseEnvelopeVersion(s string) (string, bool) {
 	return prefix, true
 }
 
+// IsEncrypted reports whether s carries an encryption envelope prefix
+// ("v1:…"). It's the read-side discriminator for columns that may hold a mix
+// of encrypted and legacy-plaintext values during/after an at-rest-encryption
+// rollout (e.g. webhook secrets, #1072/#1029): an enveloped value is decrypted,
+// a bare value is used as-is. generateWebhookSecret() emits 64 hex chars with
+// no ':' so it can never be mistaken for an envelope; a user-supplied value
+// that happens to start with "vN:" is disambiguated by attempting Decrypt and
+// falling back to plaintext on failure.
+func IsEncrypted(s string) bool {
+	_, ok := ParseEnvelopeVersion(s)
+	return ok
+}
+
+// KeyConfigured reports whether a usable AES-256 encryption key is present for
+// the current key version. Callers on fail-open paths (webhook secrets) gate
+// encryption on this: with a key they Encrypt at rest, without one they store
+// plaintext and warn, preserving key-less deployments.
+func KeyConfigured() bool {
+	return VerifyCurrentKey() == nil
+}
+
+// EncryptAtRest encrypts plaintext for storage when a usable key is configured;
+// otherwise it returns the plaintext unchanged with encrypted=false so the
+// caller can warn (fail-open — preserves key-less deployments per #1072). An
+// empty value is a no-op. A configured-but-failing Encrypt returns the error.
+func EncryptAtRest(plaintext string) (stored string, encrypted bool, err error) {
+	if plaintext == "" || !KeyConfigured() {
+		return plaintext, false, nil
+	}
+	ct, err := Encrypt(plaintext)
+	if err != nil {
+		return "", false, err
+	}
+	return ct, true, nil
+}
+
+// DecryptIfEncrypted returns the plaintext for a possibly-encrypted at-rest
+// value. A bare (non-enveloped) value is returned unchanged — legacy plaintext
+// or a key-less deployment. An enveloped value is decrypted; on a decrypt
+// error the raw value is returned as a best-effort fallback AND the error is
+// returned so the caller can warn (for an HMAC webhook secret a wrong value
+// simply fails verification, so this never grants access).
+func DecryptIfEncrypted(stored string) (string, error) {
+	if !IsEncrypted(stored) {
+		return stored, nil
+	}
+	pt, err := Decrypt(stored)
+	if err != nil {
+		return stored, err
+	}
+	return pt, nil
+}
+
 // keyEnvVarFor returns the env var holding the key for a version:
 // ENCRYPTION_KEY for v1, ENCRYPTION_KEY_V<N> for later generations.
 func keyEnvVarFor(version string) string {

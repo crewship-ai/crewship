@@ -288,3 +288,53 @@ func TestReencrypt_FailsClosedOnMisconfiguredKey(t *testing.T) {
 		t.Fatalf("rows must be untouched on aborted run, got %q", stored[:8])
 	}
 }
+
+// TestReencrypt_FailOpenWebhookColumns_BarePlaintextSkipped pins the #1072
+// adversarial follow-up: bare (non-enveloped) webhook secrets are the expected
+// key-less/legacy state, so master-key rotation must count them as Skipped, not
+// Failed — otherwise the "failed=0 ⇒ retire old key" gate is poisoned forever.
+func TestReencrypt_FailOpenWebhookColumns_BarePlaintextSkipped(t *testing.T) {
+	reencSetV1(t)
+	db := setupTestDB(t)
+	reencExec(t, db, `INSERT INTO workspaces (id, name, slug) VALUES ('ws1','W','w1')`)
+	reencExec(t, db, `INSERT INTO users (id, email) VALUES ('u1','u1@example.com')`)
+	// Bare plaintext webhook secrets — the fail-open key-less steady state.
+	reencExec(t, db, `INSERT INTO agents (id, workspace_id, name, slug, webhook_secret)
+		VALUES ('ag1','ws1','A','a','barehexsecret')`)
+	reencExec(t, db, `INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash)
+		VALUES ('p1','ws1','p','P','{}','h')`)
+	reencExec(t, db, `INSERT INTO pipeline_webhooks
+		(id, workspace_id, name, target_pipeline_id, token, signing_secret, inputs_template, enabled, rate_limit_per_min, created_at, updated_at)
+		VALUES ('wh1','ws1','n','p1','tok','baresig','{}',1,60,'t','t')`)
+
+	reencRotateToV2(t)
+	rec, out := callReencrypt(t, db, "OWNER")
+	if rec.Code != 200 {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	check := func(table, column string) {
+		for _, c := range out.Columns {
+			if c.Table == table && c.Column == column {
+				if c.Failed != 0 {
+					t.Errorf("%s.%s: Failed=%d, want 0 (bare fail-open value must be Skipped, not Failed)", table, column, c.Failed)
+				}
+				if c.Skipped < 1 {
+					t.Errorf("%s.%s: Skipped=%d, want >=1", table, column, c.Skipped)
+				}
+				return
+			}
+		}
+		t.Errorf("%s.%s missing from the reencrypt inventory", table, column)
+	}
+	check("agents", "webhook_secret")
+	check("pipeline_webhooks", "signing_secret")
+
+	// Bare values must be left untouched.
+	var ws, sg string
+	_ = db.QueryRow(`SELECT webhook_secret FROM agents WHERE id='ag1'`).Scan(&ws)
+	_ = db.QueryRow(`SELECT signing_secret FROM pipeline_webhooks WHERE id='wh1'`).Scan(&sg)
+	if ws != "barehexsecret" || sg != "baresig" {
+		t.Errorf("bare values were mutated: webhook_secret=%q signing_secret=%q", ws, sg)
+	}
+}
