@@ -47,6 +47,11 @@ crewship escalation resolve esc_abc --action redirect --redirect-to viktor
 
 Prints `Escalation <id> resolved.` on success.
 
+If the workspace has [segregation of duties](/guides/credentials#segregation-of-duties-second-approver)
+enabled (`crewship keeper second-approver enable`), resolving a `CREDENTIAL`
+escalation is refused with **403** when the caller is recorded as the owner of
+the agent that raised it — including a workspace OWNER, which is not exempt.
+
 ## `crewship escalation pending-count`
 
 Workspace-wide aggregate — backs dashboard tiles and alerting that just needs the total without per-crew fan-out. `GET /api/v1/escalations/pending-count` returns `{"count": N}`.

@@ -267,10 +267,23 @@ crewship keeper contact --clear
 
 # DENY notification threshold (1-10)
 crewship keeper threshold 6
+
+# Require a different human to resolve a CREDENTIAL escalation than the one
+# who owns the agent that raised it (segregation of duties, issue #1084)
+crewship keeper second-approver enable
+crewship keeper second-approver disable
 ```
 
 Endpoints: `GET`/`PUT /api/v1/admin/keeper/governance` (read ADMIN+, write
 OWNER/ADMIN). Every governance change is journaled with the acting user.
+
+<Note>
+  `second-approver` is a distinct concern from the behavioral watchdog above —
+  it gates who may *resolve* a `CREDENTIAL` escalation, not tool-call
+  monitoring — but it rides on this same governance row and endpoint. See
+  [Credentials → Segregation of duties](/guides/credentials#segregation-of-duties-second-approver)
+  for the full behavior, including the strict no-OWNER-bypass rule.
+</Note>
 
 ### Watch rules
 

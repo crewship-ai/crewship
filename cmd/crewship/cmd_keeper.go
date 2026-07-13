@@ -36,7 +36,8 @@ Examples:
   crewship keeper enable
   crewship keeper contact admin@example.com
   crewship keeper contact --clear
-  crewship keeper threshold 8`,
+  crewship keeper threshold 8
+  crewship keeper second-approver enable`,
 }
 
 // keeperGovernance mirrors the GET/PUT /api/v1/admin/keeper/governance
@@ -48,6 +49,12 @@ type keeperGovernance struct {
 	DenyNotifyMinRisk     int      `json:"deny_notify_min_risk"`
 	WatchSpec             string   `json:"watch_spec"`
 	WatchPresets          []string `json:"watch_presets"`
+	// RequireSecondApprover is the credential-escalation "four-eyes" toggle
+	// (issue #1084): when true, the user recorded as the initiating agent's
+	// owner cannot resolve a CREDENTIAL escalation that agent raised — OWNER
+	// is not exempt. Rides on this same governance row/endpoint but is a
+	// distinct concern from the behavioral watchdog above it.
+	RequireSecondApprover bool `json:"require_second_approver"`
 }
 
 // keeperServerStatus mirrors GET /api/v1/system/keeper.
@@ -103,11 +110,17 @@ func printKeeperGovernance(gov keeperGovernance) {
 		contact = "— (MANAGER fanout)"
 	}
 
+	secondApprover := cli.Red + "off" + cli.Reset
+	if gov.RequireSecondApprover {
+		secondApprover = cli.Green + "on" + cli.Reset
+	}
+
 	fmt.Printf("%sWatchdog Governance (workspace)%s\n", cli.Bold, cli.Reset)
 	fmt.Printf("  Configured:   %s\n", configured)
 	fmt.Printf("  Watchdog:     %s\n", enabled)
 	fmt.Printf("  Contact:      %s\n", contact)
 	fmt.Printf("  DENY-notify:  risk >= %d\n", gov.DenyNotifyMinRisk)
+	fmt.Printf("  2nd approver: %s\n", secondApprover)
 }
 
 var keeperStatusCmd = &cobra.Command{
@@ -313,8 +326,76 @@ Examples:
 	},
 }
 
+// keeperSecondApproverCmd groups the credential-escalation "four-eyes" toggle
+// (issue #1084). Distinct from the behavioral watchdog above it: this gate
+// governs who may RESOLVE a CREDENTIAL escalation, not tool-call monitoring.
+// It rides on the same governance row/endpoint (GET/PUT
+// /api/v1/admin/keeper/governance), so each subcommand is a one-field partial
+// update just like enable/disable/contact/threshold.
+var keeperSecondApproverCmd = &cobra.Command{
+	Use:   "second-approver",
+	Short: "Require a different human to approve credential escalations their own agent raised",
+	Long: `Toggle the credential-escalation segregation-of-duties rule for this
+workspace (requires OWNER or ADMIN).
+
+When enabled, resolving a CREDENTIAL escalation (crewship escalation resolve,
+or the inbox Approve/Reject button) is refused for the user recorded as the
+owner of the agent that raised it — approver must differ from initiator.
+This is a strict four-eyes rule: workspace OWNER is NOT exempt, even for an
+escalation raised by an agent they created.
+
+Default is off — existing single-approver workflows are unaffected until an
+OWNER/ADMIN opts in.
+
+Examples:
+  crewship keeper second-approver enable
+  crewship keeper second-approver disable`,
+}
+
+func setKeeperRequireSecondApprover(enabled bool) error {
+	client, err := requireAuthAndWorkspace()
+	if err != nil {
+		return err
+	}
+
+	out, err := putKeeperGovernanceFields(client, map[string]any{"require_second_approver": enabled})
+	if err != nil {
+		return err
+	}
+
+	return newFormatter().AutoHuman(out, func() {
+		verb := "disabled"
+		if out.RequireSecondApprover {
+			verb = "enabled"
+		}
+		cli.PrintSuccess(fmt.Sprintf("Second-approver rule %s for credential escalations in this workspace.", verb))
+		printKeeperGovernance(out)
+	})
+}
+
+var keeperSecondApproverEnableCmd = &cobra.Command{
+	Use:   "enable",
+	Short: "Require a second approver for credential escalations (requires OWNER or ADMIN)",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return setKeeperRequireSecondApprover(true)
+	},
+}
+
+var keeperSecondApproverDisableCmd = &cobra.Command{
+	Use:   "disable",
+	Short: "Allow a single approver for credential escalations again (requires OWNER or ADMIN)",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return setKeeperRequireSecondApprover(false)
+	},
+}
+
 func init() {
 	keeperContactCmd.Flags().Bool("clear", false, "Unset the security contact (fall back to MANAGER fanout)")
+
+	keeperSecondApproverCmd.AddCommand(keeperSecondApproverEnableCmd)
+	keeperSecondApproverCmd.AddCommand(keeperSecondApproverDisableCmd)
 
 	keeperCmd.AddCommand(keeperStatusCmd)
 	keeperCmd.AddCommand(keeperEnableCmd)
@@ -322,6 +403,7 @@ func init() {
 	keeperCmd.AddCommand(keeperContactCmd)
 	keeperCmd.AddCommand(keeperThresholdCmd)
 	keeperCmd.AddCommand(keeperWatchCmd)
+	keeperCmd.AddCommand(keeperSecondApproverCmd)
 
 	rootCmd.AddCommand(keeperCmd)
 }

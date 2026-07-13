@@ -1631,6 +1631,13 @@ END;
 	// idempotent Go backfill. See migrate_consts_v140_encrypt_webhook_secrets.go
 	// and issues #1072 / #1029.
 	{version: 140, name: "encrypt_webhook_secrets", fn: migrationEncryptWebhookSecrets},
+
+	// v141: per-workspace "four-eyes" toggle (require_second_approver) on the
+	// Keeper governance row — a MANAGER+ approver can no longer resolve a
+	// CREDENTIAL escalation raised by an agent they own (agents.created_by_user_id,
+	// v100) when enabled. OWNER is not exempt. Default off. See
+	// migrate_consts_v141_credential_second_approver.go and issue #1084.
+	{version: 141, name: "credential_second_approver", sql: migrationCredentialSecondApprover},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

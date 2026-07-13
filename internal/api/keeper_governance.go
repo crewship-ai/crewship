@@ -62,6 +62,7 @@ type keeperGovernancePutBody struct {
 	DenyNotifyMinRisk     *int      `json:"deny_notify_min_risk"`
 	WatchSpec             *string   `json:"watch_spec"`
 	WatchPresets          *[]string `json:"watch_presets"`
+	RequireSecondApprover *bool     `json:"require_second_approver"`
 }
 
 // Put handles PUT /api/v1/admin/keeper/governance (roleManage = OWNER/ADMIN).
@@ -113,6 +114,9 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cur.WatchPresets = *body.WatchPresets
+	}
+	if body.RequireSecondApprover != nil {
+		cur.RequireSecondApprover = *body.RequireSecondApprover
 	}
 
 	// The security contact must be an OWNER/ADMIN member of this workspace —
@@ -169,8 +173,9 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 			"deny_notify_min_risk":     s.DenyNotifyMinRisk,
 			// Log the shape of the watch spec, not its text — the full rules
 			// can be large and needn't bloat every audit entry.
-			"watch_preset_count": len(s.WatchPresets),
-			"watch_spec_len":     len(s.WatchSpec),
+			"watch_preset_count":      len(s.WatchPresets),
+			"watch_spec_len":          len(s.WatchSpec),
+			"require_second_approver": s.RequireSecondApprover,
 		},
 	}); jerr != nil {
 		h.logger.Warn("keeper governance: journal emit failed", "error", jerr)
