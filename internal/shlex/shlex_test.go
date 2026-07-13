@@ -23,6 +23,15 @@ func TestFields(t *testing.T) {
 		{"backslash escapes space", `a\ b`, []string{"a b"}},
 		{"backslash literal inside single quotes", `'a\b'`, []string{`a\b`}},
 		{"unterminated quote consumes rest", `cmd "unclosed`, []string{"cmd", "unclosed"}},
+		// Windows paths carry backslashes that are NOT escape sequences. An
+		// unquoted backslash only escapes when followed by space, tab, quote,
+		// or another backslash — otherwise it is a literal character, and the
+		// same narrowed rule applies inside double quotes (escapes only `"`
+		// and `\`). See issue #1140.
+		{"unquoted windows path survives", `C:\npx.exe`, []string{`C:\npx.exe`}},
+		{"quoted windows path with spaces survives", `"C:\Program Files\nodejs\npx.exe"`, []string{`C:\Program Files\nodejs\npx.exe`}},
+		{"escaped quote inside double quotes", `"say \"hi\""`, []string{`say "hi"`}},
+		{"trailing lone backslash is literal", `a\`, []string{`a\`}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

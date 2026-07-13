@@ -102,19 +102,18 @@ func validateStdioServer(command, argsJSON string) testConnectionResponse {
 		}
 	}
 	// Whitespace alone is no longer an error: a bare executable may legitimately
-	// live at a path containing spaces ("/opt/my app/bin/server"). We still catch
-	// the classic mistake — the whole launch line stuffed into command
-	// ("npx -y @scope/pkg") — by splitting quote-aware and flagging a trailing
-	// argument that looks like a flag, which a spaced path never carries.
+	// live at a path containing spaces, but only if it is quoted so it
+	// shlex-parses to a single token ("/opt/my app/bin/server" must be written
+	// as `"/opt/my app/bin/server"`). We still catch the classic mistake — the
+	// whole launch line stuffed into command — by splitting quote-aware and
+	// flagging ANY resulting extra token, not just ones that look like a flag:
+	// "uvx some-pkg" and "python script.py" are just as broken as
+	// "npx -y @scope/pkg" even though neither carries a dash.
 	if fields := shlex.Fields(cmd); len(fields) > 1 {
-		for _, arg := range fields[1:] {
-			if strings.HasPrefix(arg, "-") {
-				return testConnectionResponse{
-					Status: "error",
-					Message: "command looks like a full launch line (it carries an argument flag) — it must be a bare executable with arguments in a separate list " +
-						`(e.g. command="npx", args=["-y","@scope/pkg"]). Re-add via "crewship integration add" which splits it automatically.`,
-				}
-			}
+		return testConnectionResponse{
+			Status: "error",
+			Message: "command looks like a full launch line (it splits into more than one token) — it must be a bare executable with arguments in a separate list " +
+				`(e.g. command="npx", args=["-y","@scope/pkg"]). Re-add via "crewship integration add" which splits it automatically, or quote a path that legitimately contains spaces.`,
 		}
 	}
 	if argsJSON != "" {
