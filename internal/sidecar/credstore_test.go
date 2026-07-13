@@ -85,6 +85,31 @@ func TestCredStoreRemove(t *testing.T) {
 	}
 }
 
+// Remove must reset the round-robin counters exactly like Reap does (#1139
+// review nit — the two removal paths had drifted inconsistent). Three
+// same-priority creds, one Select to advance the counter by one tick, then
+// Remove an unrelated credential: without a reset the next Select lands on
+// the ticket the stale counter dictates (c2); with the reset it restarts
+// clean at ticket 0 (c1).
+func TestCredStoreRemove_ResetsRoundRobin(t *testing.T) {
+	cs := NewCredStore()
+	cs.Load([]Credential{
+		{ID: "c1", Provider: ProviderAnthropic, Token: "t1"},
+		{ID: "c2", Provider: ProviderAnthropic, Token: "t2"},
+		{ID: "c3", Provider: ProviderAnthropic, Token: "t3"},
+	})
+
+	if first := cs.Select(ProviderAnthropic); first == nil || first.ID != "c1" {
+		t.Fatalf("expected c1, got %v", first)
+	}
+
+	cs.Remove("c3") // shrinks the top tier from 3 to 2, unrelated to the ticket above
+
+	if next := cs.Select(ProviderAnthropic); next == nil || next.ID != "c1" {
+		t.Fatalf("expected c1 (round-robin reset by Remove, matching Reap), got %v", next)
+	}
+}
+
 func TestCredStoreLoadReplacesAll(t *testing.T) {
 	cs := NewCredStore()
 	cs.Load([]Credential{
