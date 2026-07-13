@@ -113,7 +113,9 @@ func TestCovAsg_Get_DBError(t *testing.T) {
 	h := NewAssignmentHandler(db, nil, nil, "tok", newTestLogger())
 	db.Close()
 
-	req := httptest.NewRequest("GET", "/api/v1/internal/assignments/a1", nil)
+	// workspace_id present so we reach the (closed-DB) query and exercise the
+	// 500 path rather than the #1040 missing-workspace 400 guard.
+	req := httptest.NewRequest("GET", "/api/v1/internal/assignments/a1?workspace_id=ws", nil)
 	req.SetPathValue("assignmentId", "a1")
 	rr := httptest.NewRecorder()
 	h.Get(rr, req)
