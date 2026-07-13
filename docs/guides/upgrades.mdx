@@ -130,6 +130,30 @@ service lifecycle, so `--systemd` refuses there and points you at `brew upgrade`
 or `apt`/`dnf` (the package's postinstall restarts a running service for you).
 </Note>
 
+### Server installs on macOS: manual cutover
+
+`self-update --systemd` is Linux-only — there is no launchd `ServiceManager`
+yet, so on a long-running **macOS** server install `self-update` swaps the
+binary but leaves the **old** process running until you restart it. Drive the
+same **prepare → stop → swap → start → health-check** sequence by hand:
+
+```bash
+crewship self-update --check                 # 1. confirm a newer release exists
+# 2. stop the running server: Ctrl-C, `kill <pid>`, or `launchctl bootout …`
+#    if you manage it with your own launchd agent
+crewship self-update                         # 3. checksum-verified in-place swap (keeps <binary>.bak)
+crewship start                               # 4. start on the new binary — migrations run here,
+                                             #    behind the automatic pre-migration snapshot
+curl -fsS http://127.0.0.1:8080/healthz      # 5. health-check (adjust host/port as needed)
+```
+
+If the new server **fails to start** or **never becomes healthy**, restore the
+previous binary from `<binary>.bak`, and — if migrations already ran in step 4 —
+restore the pre-migration snapshot with `crewship db restore-snapshot` (see
+"Rollback / downgrade" below). An orchestrated launchd flow that automates this
+stop/swap/start/rollback (the macOS analogue of `--systemd`) is not yet
+available.
+
 ## Install channels & their upgrade path
 
 Beyond Homebrew and the installer, Crewship ships native Linux packages and an
