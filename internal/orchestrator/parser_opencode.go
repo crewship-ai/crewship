@@ -24,7 +24,8 @@ import (
 //   - step_start    — model turn boundary begin;  data has `part`
 //   - step_finish   — model turn boundary end +   data has `part` (tokens, cost)
 //     usage / cost
-//   - error         — fatal error;                data has `error` string
+//   - error         — fatal error;                `error` is an object
+//     ({name, data:{message,ref}}); legacy string form also accepted
 //
 // IDs: messageID and partID live INSIDE part (part.id), not at envelope
 // level. The envelope only carries sessionID.
@@ -32,7 +33,64 @@ type opencodeEnvelope struct {
 	Type      string        `json:"type"`
 	SessionID string        `json:"sessionID,omitempty"`
 	Part      *opencodePart `json:"part,omitempty"`
-	Error     string        `json:"error,omitempty"`
+	// Error is deliberately json.RawMessage, not string: the real opencode
+	// error envelope carries `error` as a NESTED OBJECT
+	// ({name, data:{message,ref,...}}), and modelling it as a string made
+	// json.Unmarshal of the WHOLE line fail — so every error fell through to
+	// the plain-text branch, no "error" event fired, and streamOutput
+	// synthesized a non-error terminal result that hid the cause (#1007).
+	// decodeOpenCodeError handles both the object and legacy string forms.
+	Error json.RawMessage `json:"error,omitempty"`
+}
+
+// opencodeErrorObject is the object form of the `error` envelope field
+// observed from live opencode runs, e.g.
+//
+//	{"name":"APIError","data":{"message":"invalid x-api-key","statusCode":401}}
+//	{"name":"UnknownError","data":{"message":"Unexpected server error...","ref":"err_..."}}
+type opencodeErrorObject struct {
+	Name string `json:"name"`
+	Data struct {
+		Message string `json:"message"`
+		Ref     string `json:"ref"`
+	} `json:"data"`
+}
+
+// decodeOpenCodeError renders a human-readable message from the `error`
+// envelope field, accepting both the nested-object form (current opencode)
+// and the legacy bare-string form. Returns "" when raw is empty. The object
+// form is rendered as "Name: message (ref X)" so the operator sees the error
+// class, the upstream message, and the correlation ref in one line.
+func decodeOpenCodeError(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	// Legacy/simple string form.
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	// Current object form.
+	var obj opencodeErrorObject
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		msg := obj.Data.Message
+		switch {
+		case obj.Name != "" && msg != "":
+			s = obj.Name + ": " + msg
+		case msg != "":
+			s = msg
+		default:
+			s = obj.Name
+		}
+		if obj.Data.Ref != "" {
+			s = strings.TrimSpace(s + " (ref " + obj.Data.Ref + ")")
+		}
+		if s != "" {
+			return s
+		}
+	}
+	// Unknown shape — surface the raw JSON rather than dropping it.
+	return string(raw)
 }
 
 type opencodePart struct {
@@ -265,10 +323,12 @@ func parseOpenCodeStreamJSON(line []byte, handler EventHandler) {
 		return
 
 	case "error":
-		// Fatal error envelope (data.error is a string, not nested).
+		// Fatal error envelope. `error` is a nested object in current
+		// opencode ({name, data:{message,ref}}); decodeOpenCodeError also
+		// accepts the legacy string form (#1007).
 		handler(AgentEvent{
 			Type:      "error",
-			Content:   msg.Error,
+			Content:   decodeOpenCodeError(msg.Error),
 			Timestamp: time.Now(),
 		})
 

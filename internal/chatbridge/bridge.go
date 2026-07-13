@@ -75,6 +75,10 @@ type ChatInfo struct {
 	ContainerID string
 	CLIAdapter  string
 	LLMModel    string
+	// LLMProvider is the agent's configured provider (ANTHROPIC, OPENAI,
+	// GOOGLE, OLLAMA, …). Carried so the OPENCODE adapter can qualify a bare
+	// model into "provider/model" form (#1007); ignored by other adapters.
+	LLMProvider string
 	// LocalModelBaseURL is the OpenAI-compatible local-model endpoint the
 	// server resolved from the vault (ENDPOINT_URL credential, #955). Empty
 	// → orchestrator applies the deprecated env fallback.

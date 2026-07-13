@@ -30,6 +30,7 @@ type agentConfigData struct {
 	wsID          string
 	systemPrompt  sql.NullString
 	llmModel      sql.NullString
+	llmProvider   sql.NullString
 	timeoutSecs   int
 	memoryEnabled bool
 
@@ -299,6 +300,7 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		"container_id":            "",
 		"cli_adapter":             data.cliAdapter,
 		"llm_model":               llmModelStr,
+		"llm_provider":            data.llmProvider.String,
 		"system_prompt":           sysPrompt,
 		"tool_profile":            data.toolProfile,
 		"credentials":             creds,
@@ -376,7 +378,7 @@ func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agent
 	query := `
 		SELECT a.slug, a.name, a.status, a.role_title, a.agent_role, a.cli_adapter, a.system_prompt_legacy,
 			a.tool_profile, a.timeout_seconds, a.memory_enabled,
-			c2.id, c2.slug, c2.name, a.workspace_id, a.llm_model,
+			c2.id, c2.slug, c2.name, a.workspace_id, a.llm_model, a.llm_provider,
 			c2.network_mode, c2.allowed_domains, COALESCE(c2.allow_private_endpoints, 0),
 			c2.container_memory_mb, c2.container_cpus, c2.container_ttl_hours,
 			c2.runtime_image, c2.cached_image, c2.cached_requirements,
@@ -392,7 +394,7 @@ func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agent
 	}
 	err := h.db.QueryRowContext(r.Context(), query, args...).Scan(&d.agentSlug, &d.agentName, &d.agentStatus, &d.roleTitle, &d.agentRole, &d.cliAdapter, &d.systemPrompt,
 		&d.toolProfile, &d.timeoutSecs, &d.memoryEnabled,
-		&d.crewID, &d.crewSlug, &d.crewName, &d.wsID, &d.llmModel,
+		&d.crewID, &d.crewSlug, &d.crewName, &d.wsID, &d.llmModel, &d.llmProvider,
 		&d.crewNetworkMode, &d.crewAllowedDomains, &d.crewAllowPrivateEndpoints,
 		&d.crewMemoryMB, &d.crewCPUs, &d.crewTTLHours,
 		&d.crewRuntimeImage, &d.crewCachedImage, &d.crewCachedRequirements,
