@@ -355,9 +355,10 @@ func TestCredDefaultEnvVarCmd(t *testing.T) {
 		if len(calls) != 1 || !strings.Contains(calls[0].Query, "provider=GITHUB") {
 			t.Errorf("provider query missing: %+v", calls)
 		}
-		// Endpoint is workspace-agnostic — client clears the workspace.
-		if strings.Contains(calls[0].Query, "workspace_id") {
-			t.Errorf("workspace_id should NOT be sent: %q", calls[0].Query)
+		// #1083: the route is now workspace-scoped (wsCtx), so the CLI must
+		// send workspace_id like every other credentials command.
+		if !strings.Contains(calls[0].Query, "workspace_id") {
+			t.Errorf("workspace_id should be sent: %q", calls[0].Query)
 		}
 	})
 
