@@ -14,7 +14,7 @@ overrides:
   hono: '>=4.12.25'
   esbuild: '>=0.28.1'
   '@babel/core': '>=7.29.6'
-  postcss: '>=8.5.10'
+  postcss: ^8.5.18
   uuid: '>=11.1.1'
 
 importers:
