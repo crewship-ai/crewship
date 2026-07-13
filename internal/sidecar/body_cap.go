@@ -14,6 +14,14 @@ import (
 // #1058). 1 MiB is far above any legitimate control-plane payload.
 const sidecarMaxBodyBytes = 1 << 20
 
+// pipelineMaxBodyBytes is a larger cap for the pipeline run/dry-run/save
+// handlers. Unlike the control-plane routes (small typed fields), these carry
+// DATA-plane payloads — the agent-supplied Inputs map and, on save, the full
+// pipeline Definition / SampleInputs — which can legitimately exceed 1 MiB. The
+// cap still bounds the OOM surface but well above real payloads (matches the
+// 10 MiB agent-request cap in connections.go).
+const pipelineMaxBodyBytes = 10 << 20
+
 // Field-length ceilings for the agent-controlled keeper fields that previously
 // had no bound. credential_name is matched against a DB row; env_var becomes a
 // container environment-variable name. Length + NUL parity with the existing
@@ -29,7 +37,14 @@ const (
 // and returns false; on any other decode error it responds 400 ("invalid JSON
 // body", matching the prior message) and returns false.
 func decodeCappedJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, sidecarMaxBodyBytes)
+	return decodeCappedJSONLimit(w, r, dst, sidecarMaxBodyBytes)
+}
+
+// decodeCappedJSONLimit is decodeCappedJSON with a caller-chosen byte cap, for
+// the data-plane handlers (pipelines) whose bodies exceed the 1 MiB
+// control-plane default.
+func decodeCappedJSONLimit(w http.ResponseWriter, r *http.Request, dst any, maxBytes int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
 		var mbErr *http.MaxBytesError
 		if errors.As(err, &mbErr) {

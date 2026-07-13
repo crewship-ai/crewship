@@ -59,7 +59,7 @@ func (s *Server) handlePipelinesSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body pipelinesSaveRequest
-	if !decodeCappedJSON(w, r, &body) {
+	if !decodeCappedJSONLimit(w, r, &body, pipelineMaxBodyBytes) {
 		return
 	}
 	// #812: attribute authorship to the ACTING agent (per-agent token),
@@ -308,7 +308,7 @@ func (s *Server) handlePipelinesRun(w http.ResponseWriter, r *http.Request, slug
 	}
 	var body pipelinesRunRequest
 	if r.ContentLength > 0 {
-		if !decodeCappedJSON(w, r, &body) {
+		if !decodeCappedJSONLimit(w, r, &body, pipelineMaxBodyBytes) {
 			return
 		}
 	}
@@ -351,7 +351,7 @@ func (s *Server) handlePipelinesDryRun(w http.ResponseWriter, r *http.Request, s
 	}
 	var body pipelinesRunRequest
 	if r.ContentLength > 0 {
-		if !decodeCappedJSON(w, r, &body) {
+		if !decodeCappedJSONLimit(w, r, &body, pipelineMaxBodyBytes) {
 			return
 		}
 	}

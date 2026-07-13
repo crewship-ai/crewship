@@ -25,6 +25,27 @@ func TestDecodeCappedJSON_OversizedBody_413(t *testing.T) {
 	}
 }
 
+// #1116 self-review [4]: pipeline data-plane bodies can exceed the 1 MiB
+// control-plane default; decodeCappedJSONLimit accepts up to its larger cap.
+func TestDecodeCappedJSONLimit_AcceptsAboveDefault(t *testing.T) {
+	// ~2 MiB — over sidecarMaxBodyBytes (1 MiB) but under pipelineMaxBodyBytes.
+	payload := `{"x":"` + strings.Repeat("a", 2<<20) + `"}`
+	r := httptest.NewRequest("POST", "/x", bytes.NewReader([]byte(payload)))
+	w := httptest.NewRecorder()
+	var dst map[string]any
+	if !decodeCappedJSONLimit(w, r, &dst, pipelineMaxBodyBytes) {
+		t.Fatalf("2 MiB body should decode under the pipeline cap; status=%d", w.Code)
+	}
+
+	// The same body must be rejected by the default 1 MiB cap.
+	r2 := httptest.NewRequest("POST", "/x", bytes.NewReader([]byte(payload)))
+	w2 := httptest.NewRecorder()
+	var dst2 map[string]any
+	if decodeCappedJSON(w2, r2, &dst2) || w2.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("2 MiB body should 413 under the default cap; ok=%v status=%d", w2.Code == 200, w2.Code)
+	}
+}
+
 func TestDecodeCappedJSON_BadJSON_400(t *testing.T) {
 	r := httptest.NewRequest("POST", "/x", strings.NewReader("not json"))
 	w := httptest.NewRecorder()
