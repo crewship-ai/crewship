@@ -202,7 +202,7 @@ func TestKeeperPhase2_NotConfigured_Returns503(t *testing.T) {
 // the lesson immediately ONLY when the agent has self_learning=1.
 func TestKeeperPhase2_NegativeLearning_AllowWritesLesson_WhenSelfLearningON(t *testing.T) {
 	db, pr := kp2DB(t)
-	tmp := t.TempDir()
+	base := t.TempDir()
 
 	// kp2DB seeds agent a1 with self_learning_enabled=0 (default).
 	// Flip it ON for this test.
@@ -214,12 +214,16 @@ func TestKeeperPhase2_NegativeLearning_AllowWritesLesson_WhenSelfLearningON(t *t
 	gk := gatekeeper.New(p, "claude-haiku-4-5", kp2Logger())
 	ev := gatekeeper.NewNegativeLearningEvaluator(gk, kp2Logger())
 
-	h := NewKeeperPhase2Handler(db, "tok", pr, nil, nil, nil, ev, kp2Logger())
+	// #1037: the write target is derived from base + the a1 agents row
+	// (crew cr1, slug worker), NOT from the body. Point the body at a
+	// bogus dir to prove it's ignored.
+	h := NewKeeperPhase2Handler(db, "tok", pr, nil, nil, nil, ev, kp2Logger()).WithMemoryBase(base)
+	derivedDir := filepath.Join(base, "crews", "cr1", "agents", "worker", ".memory")
 
 	body := negativeLearningBody{
 		WorkspaceID: "ws1", CrewID: "cr1",
 		AgentID: "a1", AgentName: "Loser", CrewName: "Ops",
-		AgentMemoryDir: tmp,
+		AgentMemoryDir: filepath.Join(t.TempDir(), "attacker"),
 		Trigger:        "run_failed",
 		FailureSnippet: "deploy.sh: missing DATABASE_URL",
 	}
@@ -231,10 +235,14 @@ func TestKeeperPhase2_NegativeLearning_AllowWritesLesson_WhenSelfLearningON(t *t
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
 	}
 
-	// lessons.md should now exist under tmp.
-	data, err := os.ReadFile(filepath.Join(tmp, "lessons.md"))
+	// lessons.md should now exist under the server-derived dir, not the
+	// body-supplied attacker dir.
+	if _, err := os.Stat(filepath.Join(body.AgentMemoryDir, "lessons.md")); !os.IsNotExist(err) {
+		t.Fatalf("lessons.md leaked to body-supplied dir %q (err=%v)", body.AgentMemoryDir, err)
+	}
+	data, err := os.ReadFile(filepath.Join(derivedDir, "lessons.md"))
 	if err != nil {
-		t.Fatalf("lessons.md not written: %v", err)
+		t.Fatalf("lessons.md not written to derived dir %q: %v", derivedDir, err)
 	}
 	if !bytes.Contains(data, []byte("kind: negative")) {
 		t.Errorf("lessons.md missing 'kind: negative' line\n---\n%s\n---", string(data))
@@ -253,7 +261,6 @@ func TestKeeperPhase2_NegativeLearning_AllowWritesLesson_WhenSelfLearningON(t *t
 // effect, so this test exists to prevent that regression specifically.
 func TestKeeperPhase2_NegativeLearning_AllowQueuesInbox_WhenSelfLearningOFF(t *testing.T) {
 	db, pr := kp2DB(t)
-	tmp := t.TempDir()
 
 	// kp2DB seeds agent a1 with self_learning_enabled=0 — exactly the
 	// state we want to assert against. Confirm rather than assume so a
@@ -270,12 +277,13 @@ func TestKeeperPhase2_NegativeLearning_AllowQueuesInbox_WhenSelfLearningOFF(t *t
 	gk := gatekeeper.New(p, "claude-haiku-4-5", kp2Logger())
 	ev := gatekeeper.NewNegativeLearningEvaluator(gk, kp2Logger())
 
-	h := NewKeeperPhase2Handler(db, "tok", pr, nil, nil, nil, ev, kp2Logger())
+	base := t.TempDir()
+	h := NewKeeperPhase2Handler(db, "tok", pr, nil, nil, nil, ev, kp2Logger()).WithMemoryBase(base)
+	derivedDir := filepath.Join(base, "crews", "cr1", "agents", "worker", ".memory")
 
 	body := negativeLearningBody{
 		WorkspaceID: "ws1", CrewID: "cr1",
 		AgentID: "a1", AgentName: "Loser", CrewName: "Ops",
-		AgentMemoryDir: tmp,
 		Trigger:        "run_failed",
 		FailureSnippet: "deploy.sh: missing DATABASE_URL",
 	}
@@ -288,8 +296,8 @@ func TestKeeperPhase2_NegativeLearning_AllowQueuesInbox_WhenSelfLearningOFF(t *t
 	}
 
 	// lessons.md MUST NOT exist — the ALLOW was gated by self_learning=0.
-	if _, err := os.Stat(filepath.Join(tmp, "lessons.md")); err == nil {
-		raw, _ := os.ReadFile(filepath.Join(tmp, "lessons.md"))
+	if _, err := os.Stat(filepath.Join(derivedDir, "lessons.md")); err == nil {
+		raw, _ := os.ReadFile(filepath.Join(derivedDir, "lessons.md"))
 		t.Fatalf("lessons.md was written despite self_learning=0; content=%s", string(raw))
 	} else if !os.IsNotExist(err) {
 		t.Fatalf("unexpected stat error: %v", err)

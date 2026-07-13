@@ -193,7 +193,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 		r.db, r.internalToken, r.PolicyResolver(),
 		r.skillReviewEval, r.behaviorEval, r.memHealthEval, r.negativeEval,
 		r.logger,
-	)
+	).WithMemoryBase(r.outputBasePath) // #1037: derive lesson write target server-side, not from the request body
 	// Same broadcaster the credential-path KeeperHandler gets — the F4
 	// endpoints write to the same inbox and owe the same realtime push
 	// (#1001 M0).
