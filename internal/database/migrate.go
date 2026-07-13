@@ -1631,6 +1631,24 @@ END;
 	// idempotent Go backfill. See migrate_consts_v140_encrypt_webhook_secrets.go
 	// and issues #1072 / #1029.
 	{version: 140, name: "encrypt_webhook_secrets", fn: migrationEncryptWebhookSecrets},
+
+	// v141 is reserved for #1073a (memory_versions.written_at tsformat
+	// normalization, PR #1172) on its own branch. v142 is intentionally
+	// the next slot here so the two slices of #1073 don't collide.
+	//
+	// v142: broader audit of `DEFAULT (datetime('now'))` columns (#1073,
+	// slice b of 3). PR #1156's keyset-cursor pagination on
+	// credentials.created_at (and every other ORDER BY / range comparison
+	// over a `*_at` column) compares these values as TEXT — the
+	// space-separated legacy form SQLite's `datetime('now')` produces
+	// never compares correctly against the ISO T-form strings this
+	// codebase's Go writers emit. Migration v45 already backfilled every
+	// existing legacy-form value; this migration stops the DEFAULT itself
+	// from producing new ones, for every string-compared column identified
+	// in the #1073b audit (see the PR description for the per-column
+	// verdict table and migrate_v142_datetime_default_tform.go for the
+	// mechanism and the small list of columns intentionally left alone).
+	{version: 142, name: "datetime_now_default_tform", fn: migrationConvertDatetimeNowDefaults},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
