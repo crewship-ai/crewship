@@ -1640,6 +1640,13 @@ END;
 	// pagination PR #1156 added. See
 	// migrate_v141_memory_versions_tsformat.go and issue #1073.
 	{version: 141, name: "memory_versions_tsformat_backfill", fn: migrationNormalizeMemoryVersionsTsformat},
+	// v142: per-workspace Keeper governance-model selection (provider + model +
+	// optional vault credential ref) on keeper_governance_settings. Empty
+	// provider = use the server/env default, so this is additive and preserves
+	// the opt-in contract. See migrate_consts_v142_keeper_gov_model.go and issue
+	// #1001 (M2a). (v143 = credential second-approver #1173, v144 = datetime
+	// DEFAULT tsformat #1179 — landing in parallel.)
+	{version: 142, name: "keeper_gov_model", sql: migrationKeeperGovModel},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
