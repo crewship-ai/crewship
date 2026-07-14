@@ -133,6 +133,49 @@ func TestUpsertRoundTripsWatchSpecAndPresets(t *testing.T) {
 	}
 }
 
+func TestUpsertRoundTripsRequireSecondApprover(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	in := Settings{Enabled: true, DenyNotifyMinRisk: 7, RequireSecondApprover: true}
+	if err := Upsert(ctx, db, "ws1", in, "u1"); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	s, found, err := Get(ctx, db, "ws1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if !s.RequireSecondApprover {
+		t.Fatalf("RequireSecondApprover did not round-trip: %+v", s)
+	}
+
+	// Flip back off — partial-update callers (the API handler) always send
+	// the merged struct, so a plain re-Upsert must clear it.
+	in2 := Settings{Enabled: true, DenyNotifyMinRisk: 7, RequireSecondApprover: false}
+	if err := Upsert(ctx, db, "ws1", in2, "u1"); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	s, _, err = Get(ctx, db, "ws1")
+	if err != nil {
+		t.Fatalf("Get after clear: %v", err)
+	}
+	if s.RequireSecondApprover {
+		t.Fatalf("RequireSecondApprover did not clear: %+v", s)
+	}
+}
+
+// Default OFF: an unconfigured workspace must never resolve to
+// RequireSecondApprover=true — the four-eyes gate is opt-in.
+func TestResolveDefaultsSecondApproverOff(t *testing.T) {
+	db := openTestDB(t)
+	if s := Resolve(context.Background(), db, nil, "ws1"); s.RequireSecondApprover {
+		t.Fatal("unconfigured workspace must resolve RequireSecondApprover=false")
+	}
+}
+
 func TestUpsertClampsRisk(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

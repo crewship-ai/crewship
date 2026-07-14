@@ -5,6 +5,7 @@ package main
 // through GET /api/v1/missions first, so each test stubs that list.
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -89,6 +90,71 @@ func TestMissionStartRunE_APIError(t *testing.T) {
 	err := missionStartCmd.RunE(missionStartCmd, []string{covMissionIDCli6})
 	if err == nil || !strings.Contains(err.Error(), "not in PLANNING") {
 		t.Errorf("expected 409 surfaced, got %v", err)
+	}
+}
+
+// TestMissionStartRunE_WaitFlag_Completes covers issue #966 part 1:
+// `mission start --wait` polls GET .../missions/{id} (the same route
+// `mission get` uses) until the MissionEngine DAG loop finishes, instead
+// of returning the instant the POST /start ack lands.
+func TestMissionStartRunE_WaitFlag_Completes(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli6(t, stub)
+	covStubMissionList(stub)
+	stub.OnPost(covMissionPath("/start"), clitest.EmptyResponse(200))
+	stub.OnGet(covMissionPath(""), clitest.JSONResponse(200, map[string]any{
+		"id": covMissionIDCli6, "status": "COMPLETED",
+	}))
+
+	setFlagCov(t, missionStartCmd, "wait", "true")
+	missionStartCmd.SetContext(context.Background())
+
+	out, err := captureStdoutCov(t, func() error {
+		return missionStartCmd.RunE(missionStartCmd, []string{covMissionIDCli6})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "COMPLETED") {
+		t.Errorf("stdout should report the terminal status, got: %q", out)
+	}
+	if n := len(stub.CallsFor("GET", covMissionPath(""))); n < 1 {
+		t.Errorf("expected --wait to poll mission status, got %d GETs", n)
+	}
+}
+
+func TestMissionStartRunE_WaitFlag_FailedIsError(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli6(t, stub)
+	covStubMissionList(stub)
+	stub.OnPost(covMissionPath("/start"), clitest.EmptyResponse(200))
+	stub.OnGet(covMissionPath(""), clitest.JSONResponse(200, map[string]any{
+		"id": covMissionIDCli6, "status": "FAILED",
+	}))
+
+	setFlagCov(t, missionStartCmd, "wait", "true")
+	missionStartCmd.SetContext(context.Background())
+
+	err := missionStartCmd.RunE(missionStartCmd, []string{covMissionIDCli6})
+	if err == nil || !strings.Contains(err.Error(), "FAILED") {
+		t.Errorf("expected an error reporting FAILED status, got %v", err)
+	}
+}
+
+func TestMissionStartRunE_WithoutWait_DoesNotPoll(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli6(t, stub)
+	covStubMissionList(stub)
+	stub.OnPost(covMissionPath("/start"), clitest.EmptyResponse(200))
+
+	if err := missionStartCmd.RunE(missionStartCmd, []string{covMissionIDCli6}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if n := len(stub.CallsFor("GET", covMissionPath(""))); n != 0 {
+		t.Errorf("expected no status polling without --wait, got %d GETs", n)
 	}
 }
 

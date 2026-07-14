@@ -267,10 +267,23 @@ crewship keeper contact --clear
 
 # DENY notification threshold (1-10)
 crewship keeper threshold 6
+
+# Require a different human to resolve a CREDENTIAL escalation than the one
+# who owns the agent that raised it (segregation of duties, issue #1084)
+crewship keeper second-approver enable
+crewship keeper second-approver disable
 ```
 
 Endpoints: `GET`/`PUT /api/v1/admin/keeper/governance` (read ADMIN+, write
 OWNER/ADMIN). Every governance change is journaled with the acting user.
+
+<Note>
+  `second-approver` is a distinct concern from the behavioral watchdog above —
+  it gates who may *resolve* a `CREDENTIAL` escalation, not tool-call
+  monitoring — but it rides on this same governance row and endpoint. See
+  [Credentials → Segregation of duties](/guides/credentials#segregation-of-duties-second-approver)
+  for the full behavior, including the strict no-OWNER-bypass rule.
+</Note>
 
 ### Watch rules
 
@@ -378,6 +391,19 @@ Every Keeper decision is audited with:
 - Timestamp
 
 These are stored in the `GatekeeperResponse.Prompt` and `GatekeeperResponse.RawLLMResponse` fields (not serialized to the agent, only for observability).
+
+### Browsing the audit log from the CLI
+
+```bash
+crewship keeper requests
+crewship keeper requests --limit 20 --offset 20
+crewship keeper requests --format json | jq '.[] | select(.decision=="DENY")'
+```
+
+Backed by `GET /api/v1/admin/keeper/requests` (ADMIN/OWNER only), scoped to
+agents in the current workspace — same rows the in-app Keeper reviews panel
+shows. Each row carries the agent, credential, intent, decision, risk score,
+and timestamps.
 
 ## Decisions
 

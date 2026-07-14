@@ -58,11 +58,35 @@ type StubServer struct {
 
 // NewStubServer returns a ready-to-use StubServer. Register routes
 // with On / OnGet / OnPost / OnPatch / OnDelete / OnPut. Unmatched
-// requests fall through to the fallback handler (default 404).
+// requests fall through to the fallback handler (default 404), EXCEPT
+// for the CUID-verify GET carve-out documented on
+// [looksLikeVerifyGETPath], which defaults to "the id exists" instead.
 func NewStubServer() *StubServer {
 	s := &StubServer{
 		routes: make(map[routeKey]Handler),
 		fallback: func(r *http.Request, _ []byte) (int, []byte, string) {
+			// #1075: resolve*ID helpers in cmd/crewship (resolveAgentID,
+			// resolveCrewID, resolveSkillID, resolveCredentialID) verify a
+			// CUID-shaped candidate with GET /api/v1/<resource>/<id> before
+			// trusting it, instead of trusting the shape blind — a slug
+			// that happens to match the CUID shape (e.g.
+			// "customersuccessemea42") otherwise sailed through unverified
+			// and died downstream with a confusing not-found. Hundreds of
+			// existing fixtures pass a bare CUID-shaped id straight to a
+			// command and never expected ANY network call for it, let
+			// alone stubbed one. Rather than touching every one of those
+			// call sites, an unstubbed verify-shaped GET defaults to "the
+			// id exists" — the overwhelmingly common case in tests that
+			// don't care about resolution at all. A test that DOES want to
+			// exercise the miss path registers its own explicit stub for
+			// that exact path (e.g. via OnGet + ErrorResponse), which — like
+			// any explicit registration — always wins over this default.
+			if r.Method == http.MethodGet {
+				if id, ok := looksLikeVerifyGETPath(r.URL.Path); ok {
+					body := fmt.Sprintf(`{"id":%q}`, id)
+					return http.StatusOK, []byte(body), "application/json"
+				}
+			}
 			body := fmt.Sprintf(`{"error":"clitest: no stub registered for %s %s"}`, r.Method, r.URL.Path)
 			return http.StatusNotFound, []byte(body), "application/json"
 		},
@@ -157,6 +181,36 @@ func (s *StubServer) ResetCalls() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = nil
+}
+
+// looksLikeVerifyGETPath reports whether path is a single-resource GET for
+// a CUID-shaped id — "/api/v1/<resource>/<id>" with no further sub-path,
+// where <id> is 21+ lowercase-alphanumeric chars starting with "c"
+// (cuid2's shape). Deeper paths like ".../agents/{id}/debug" don't match:
+// only the bare "get this one resource by id" shape does.
+//
+// This intentionally duplicates cmd/crewship's looksLikeCUID rather than
+// importing it — cmd/crewship already imports this package for its tests,
+// so the reverse import would cycle. Keep the two in sync if the CUID
+// shape ever changes.
+func looksLikeVerifyGETPath(path string) (id string, ok bool) {
+	if strings.Count(path, "/") != 4 {
+		return "", false
+	}
+	idx := strings.LastIndex(path, "/")
+	if idx < 0 || idx == len(path)-1 {
+		return "", false
+	}
+	id = path[idx+1:]
+	if len(id) < 21 || id[0] != 'c' {
+		return "", false
+	}
+	for _, r := range id[1:] {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
+			return "", false
+		}
+	}
+	return id, true
 }
 
 // dispatch is the httptest.Server's HandlerFunc. It drains the body

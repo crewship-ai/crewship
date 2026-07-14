@@ -242,3 +242,89 @@ func TestDeriveAgentToken_DomainSeparated(t *testing.T) {
 		t.Error("per-agent MAC collides with workspace-binding MAC (missing domain separation)")
 	}
 }
+
+// --- #1159: crew-bound internal token -------------------------------------
+
+const crewTestMaster = "master-secret-0123456789abcdef"
+
+func TestDeriveCrewToken_RoundTrip(t *testing.T) {
+	t.Parallel()
+	const master = crewTestMaster
+	tok := DeriveCrewToken(master, "ws_a", "crew_1")
+	if !IsCrewToken(tok) {
+		t.Fatalf("IsCrewToken(%q) = false, want true", tok)
+	}
+	// A crew token must NOT be mistaken for a workspace token (distinct prefix).
+	if IsWorkspaceToken(tok) {
+		t.Errorf("crew token %q also matched IsWorkspaceToken — prefixes must not collide", tok)
+	}
+	ws, crew, ok := ValidateCrewToken(master, tok)
+	if !ok || ws != "ws_a" || crew != "crew_1" {
+		t.Fatalf("ValidateCrewToken = (%q,%q,%v), want (ws_a,crew_1,true)", ws, crew, ok)
+	}
+}
+
+func TestDeriveCrewToken_EmptyInputsFailClosed(t *testing.T) {
+	t.Parallel()
+	if DeriveCrewToken("", "ws", "c") != "" {
+		t.Error("empty master must not issue a crew token")
+	}
+	if DeriveCrewToken("m", "", "c") != "" {
+		t.Error("empty workspace must not issue a crew token")
+	}
+	if DeriveCrewToken("m", "ws", "") != "" {
+		t.Error("empty crew must not issue a crew token")
+	}
+}
+
+func TestValidateCrewToken_RejectsForgeries(t *testing.T) {
+	t.Parallel()
+	const master = crewTestMaster
+	valid := DeriveCrewToken(master, "ws_a", "crew_1")
+
+	cases := []struct {
+		name  string
+		token string
+	}{
+		// Rebind the crew segment to a sibling crew but keep the crew_1 MAC.
+		{"swapped_crew_segment", CrewPrefix + ".ws_a.crew_victim." + valid[len(CrewPrefix+".ws_a.crew_1."):]},
+		// Rebind the workspace segment (cross-tenant).
+		{"swapped_workspace_segment", CrewPrefix + ".ws_victim.crew_1." + valid[len(CrewPrefix+".ws_a.crew_1."):]},
+		{"tampered_mac", valid[:len(valid)-1] + "0"},
+		{"wrong_master", DeriveCrewToken("other-master", "ws_a", "crew_1")},
+		{"empty_crew_segment", CrewPrefix + ".ws_a..deadbeef"},
+		{"empty_ws_segment", CrewPrefix + "..crew_1.deadbeef"},
+		{"missing_segment", CrewPrefix + ".ws_a.deadbeef"},
+		{"workspace_token_not_a_crew_token", DeriveWorkspaceToken(master, "ws_a")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, ok := ValidateCrewToken(master, tc.token); ok {
+				t.Errorf("ValidateCrewToken accepted a forgery: %q", tc.token)
+			}
+		})
+	}
+}
+
+func TestValidateCrewToken_EmptyMasterFailsClosed(t *testing.T) {
+	t.Parallel()
+	tok := DeriveCrewToken(crewTestMaster, "ws_a", "crew_1")
+	if _, _, ok := ValidateCrewToken("", tok); ok {
+		t.Error("empty master must fail closed")
+	}
+}
+
+func TestDeriveCrewToken_DomainSeparated(t *testing.T) {
+	t.Parallel()
+	// The crew MAC must not collide with the workspace-binding or per-agent
+	// MAC even over the same key material — a crew token must never validate
+	// as a workspace token, and vice versa.
+	master := "shared-key"
+	crewTok := DeriveCrewToken(master, "ws_x", "ws_x")
+	if strings.HasSuffix(crewTok, mac(master, "ws_x")) {
+		t.Error("crew MAC collides with workspace-binding MAC (missing domain separation)")
+	}
+	if strings.HasSuffix(crewTok, agentMAC(master, "ws_x", "ws_x")) {
+		t.Error("crew MAC collides with per-agent MAC (missing domain separation)")
+	}
+}

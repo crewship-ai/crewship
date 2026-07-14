@@ -150,6 +150,25 @@ func TestEscalationResolveRunE_APIError(t *testing.T) {
 	}
 }
 
+// TestEscalationResolveRunE_SegregationOfDutiesError drives the #1084
+// four-eyes rejection through the actual `crewship escalation resolve` CLI
+// path (not a hand-rolled HTTP request): when the server 403s because the
+// caller is the recorded owner of the initiating agent, the CLI must
+// surface that error to the operator.
+func TestEscalationResolveRunE_SegregationOfDutiesError(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli8(t, stub.URL())
+	stub.OnPatch("/api/v1/escalations/esc-sod/resolve", clitest.ErrorResponse(403,
+		"a second approver is required: you cannot resolve a credential escalation raised by an agent you own"))
+	covSetFlagCli8(t, escalationResolveCmd, "action", "approve")
+
+	err := escalationResolveCmd.RunE(escalationResolveCmd, []string{"esc-sod"})
+	if err == nil || !strings.Contains(err.Error(), "second approver is required") {
+		t.Errorf("expected segregation-of-duties error surfaced via CLI; got %v", err)
+	}
+}
+
 func TestEscalationPendingCountRunE_Table(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()

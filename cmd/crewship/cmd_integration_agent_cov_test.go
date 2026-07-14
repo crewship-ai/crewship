@@ -14,11 +14,20 @@ const (
 )
 
 func TestIntgAgentUpdateBindingRunE_NoFieldsToUpdate(t *testing.T) {
-	covSetupCli10(t, "http://127.0.0.1:0")
+	// Was an intentionally-unroutable "http://127.0.0.1:0" to prove the
+	// no-fields guard needed no network at all. resolveAgentID now spends
+	// one GET verifying a CUID-shaped agent id before trusting it (#1075),
+	// so the guard needs a reachable server for that verification to
+	// resolve; the real invariant under test — no fields set means no
+	// mutating call — still holds via assertNoMutatingCalls.
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli10(t, stub.URL())
 	err := intgAgentUpdateBindingCmd.RunE(intgAgentUpdateBindingCmd, []string{covBindingAgentID, "bind-1"})
 	if err == nil || !strings.Contains(err.Error(), "no fields to update") {
 		t.Errorf("expected no-fields guard, got %v", err)
 	}
+	assertNoMutatingCalls(t, stub)
 }
 
 func TestIntgAgentUpdateBindingRunE_EnabledPatch(t *testing.T) {

@@ -218,6 +218,114 @@ func TestInternalWsCtx_EnforcesTokenBinding(t *testing.T) {
 	})
 }
 
+// --- #1159: crew-bound internal token ------------------------------------
+
+// TestRequireInternal_CrewBoundToken_InjectsWorkspaceAndSetsCrew is the
+// compatibility half: a crew-bound token authorizes its own workspace (with
+// or without the ?workspace_id query the sidecar attaches) exactly like a
+// workspace-bound token, AND exposes the bound crew to downstream handlers
+// via context — the cryptographic crew identity a ?crew_id query cannot
+// forge.
+func TestRequireInternal_CrewBoundToken_InjectsWorkspaceAndSetsCrew(t *testing.T) {
+	t.Parallel()
+	h := NewInternalHandler(nil, bindTestMaster, testLogger())
+	tok := internaltoken.DeriveCrewToken(bindTestMaster, "ws_a", "crew_1")
+
+	for _, tc := range []struct {
+		name  string
+		query string
+	}{
+		{"no_query", ""},
+		{"matching_workspace_query", "?workspace_id=ws_a"},
+		{"matching_crew_query", "?crew_id=crew_1"},
+		{"matching_both", "?workspace_id=ws_a&crew_id=crew_1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var sawWS, sawCrew, sawQueryWS string
+			downstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				sawWS = InternalTokenWorkspaceFromContext(r.Context())
+				sawCrew = InternalTokenCrewFromContext(r.Context())
+				sawQueryWS = r.URL.Query().Get("workspace_id")
+				w.WriteHeader(http.StatusOK)
+			})
+			rr := httptest.NewRecorder()
+			h.requireInternal(downstream).ServeHTTP(rr, bindTestRequest(tok, tc.query))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+			}
+			if sawWS != "ws_a" {
+				t.Errorf("bound workspace = %q, want ws_a", sawWS)
+			}
+			if sawCrew != "crew_1" {
+				t.Errorf("bound crew = %q, want crew_1", sawCrew)
+			}
+			if sawQueryWS != "ws_a" {
+				t.Errorf("injected workspace_id = %q, want ws_a", sawQueryWS)
+			}
+		})
+	}
+}
+
+// TestRequireInternal_CrewBoundToken_ForgedCrew403 is THE close: a token
+// bound to crew_1 presented with ?crew_id=crew_victim must be refused before
+// any handler runs — the enumerate-a-sibling-crew forgery #1159 exists to
+// stop. (Cross-workspace forgery is refused too.)
+func TestRequireInternal_CrewBoundToken_ForgedCrew403(t *testing.T) {
+	t.Parallel()
+	h := NewInternalHandler(nil, bindTestMaster, testLogger())
+	tok := internaltoken.DeriveCrewToken(bindTestMaster, "ws_a", "crew_1")
+
+	for _, tc := range []struct {
+		name  string
+		query string
+	}{
+		{"forged_crew", "?crew_id=crew_victim"},
+		{"forged_crew_with_matching_ws", "?workspace_id=ws_a&crew_id=crew_victim"},
+		{"forged_workspace", "?workspace_id=ws_victim"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reached := false
+			downstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				reached = true
+				w.WriteHeader(http.StatusOK)
+			})
+			rr := httptest.NewRecorder()
+			h.requireInternal(downstream).ServeHTTP(rr, bindTestRequest(tok, tc.query))
+			if rr.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403 for %q", rr.Code, tc.query)
+			}
+			if reached {
+				t.Errorf("downstream ran despite forged scope %q", tc.query)
+			}
+		})
+	}
+}
+
+// TestRequireInternal_CrewBoundToken_RejectsForgeries covers token integrity.
+func TestRequireInternal_CrewBoundToken_RejectsForgeries(t *testing.T) {
+	t.Parallel()
+	h := NewInternalHandler(nil, bindTestMaster, testLogger())
+	valid := internaltoken.DeriveCrewToken(bindTestMaster, "ws_a", "crew_1")
+
+	cases := []struct{ name, token string }{
+		{"tampered_mac", valid[:len(valid)-1] + "0"},
+		{"wrong_master", internaltoken.DeriveCrewToken("some-other-master", "ws_a", "crew_1")},
+		{"empty_crew_segment", "crwv1.ws_a..deadbeef"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			downstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Error("downstream ran for a forged crew token")
+			})
+			rr := httptest.NewRecorder()
+			h.requireInternal(downstream).ServeHTTP(rr, bindTestRequest(tc.token, ""))
+			if rr.Code != http.StatusForbidden {
+				t.Errorf("status = %d, want 403", rr.Code)
+			}
+		})
+	}
+}
+
 // TestAssertInternalTokenWorkspace covers the body-workspace guard:
 // requireInternal can only see query parameters, so handlers that
 // scope by a workspace_id carried in the JSON body (cost record,

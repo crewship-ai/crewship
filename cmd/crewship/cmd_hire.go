@@ -8,8 +8,13 @@ package main
 // without an intermediate conversion.
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -114,13 +119,63 @@ The agent ghosts automatically when its TTL elapses. Rehire it with
 		// 202 (guided/pending) is not an error — surface it to the
 		// user explicitly so they know to check the inbox.
 		if resp.StatusCode == http.StatusAccepted {
-			return printHireResponse(resp, "Hire submitted (awaiting inbox approval)")
+			hired, err := printHireResponse(resp, "Hire submitted (awaiting inbox approval)")
+			if err != nil {
+				return err
+			}
+			if waitForApproval, _ := flags.GetBool("wait"); waitForApproval && hired.PendingReview {
+				waitTimeout, _ := flags.GetDuration("wait-timeout")
+				waitInterval, _ := flags.GetDuration("wait-interval")
+				return waitForHireApproval(cmd, client, hired.ID, waitTimeout, waitInterval)
+			}
+			return nil
 		}
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		return printHireResponse(resp, "Agent hired")
+		_, err = printHireResponse(resp, "Agent hired")
+		return err
 	},
+}
+
+// waitForHireApproval polls a staged (PENDING_REVIEW) hire's agent status
+// via client.PollHireApproval — the same helper `crewship wait` and
+// `mission start --wait` build their polling on — until an operator
+// approves it (POST /agents/{id}/approve-hire flips status away from
+// PENDING_REVIEW) or it ghosts (TTL elapses before anyone approves it).
+func waitForHireApproval(cmd *cobra.Command, client *cli.Client, agentID string, timeout, interval time.Duration) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	start := time.Now()
+	var lastStatus string
+	status, err := client.PollHireApproval(ctx, agentID, interval, func(h *cli.HireStatus) {
+		if h.Status != lastStatus {
+			lastStatus = h.Status
+			fmt.Fprintf(os.Stderr, "%s[wait]%s %s status=%s elapsed=%s\n",
+				cli.Dim, cli.Reset, agentID, h.Status, time.Since(start).Truncate(time.Second))
+		}
+	})
+	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("timed out after %s waiting for hire %s to resolve",
+				time.Since(start).Truncate(time.Second), agentID)
+		}
+		return err
+	}
+
+	if strings.EqualFold(status.Status, "PENDING_REVIEW") && status.ExpiredAt != nil {
+		return fmt.Errorf("hire %s ghosted before being approved (TTL elapsed at %s)", agentID, *status.ExpiredAt)
+	}
+	cli.PrintSuccess(fmt.Sprintf("Hire %s resolved: status=%s", agentID, status.Status))
+	return nil
 }
 
 var rehireCmd = &cobra.Command{
@@ -171,18 +226,20 @@ expires_at without changing the live/ghost count toward the quota.`,
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		return printHireResponse(resp, "Agent rehired")
+		_, err = printHireResponse(resp, "Agent rehired")
+		return err
 	},
 }
 
 // printHireResponse decodes the API body into a hireResponseShape and
 // renders it via the configured formatter. JSON/yaml/ndjson modes get
 // the raw payload via AutoDetail's fallthrough; table mode gets a
-// human-friendly key/value list.
-func printHireResponse(resp *http.Response, headline string) error {
+// human-friendly key/value list. Returns the decoded body so callers
+// (e.g. --wait) can act on PendingReview/ID without a second decode.
+func printHireResponse(resp *http.Response, headline string) (hireResponseShape, error) {
 	var body hireResponseShape
 	if err := cli.ReadJSON(resp, &body); err != nil {
-		return err
+		return body, err
 	}
 	pairs := [][]string{
 		{"ID", body.ID},
@@ -205,9 +262,9 @@ func printHireResponse(resp *http.Response, headline string) error {
 	cli.PrintSuccess(headline + ": " + body.Name + " (" + body.ID + ")")
 	f := newFormatter()
 	if err := f.AutoDetail(body, pairs); err != nil {
-		return fmt.Errorf("format response: %w", err)
+		return body, fmt.Errorf("format response: %w", err)
 	}
-	return nil
+	return body, nil
 }
 
 // hireApproveCmd approves a guided-autonomy hire that is sitting in
@@ -259,6 +316,9 @@ func init() {
 	hireCmd.Flags().String("reason", "", "One-line justification (required, written to audit trail)")
 	hireCmd.Flags().String("parent-lead", "", "Lead agent ID that authored this hire (optional)")
 	hireCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	hireCmd.Flags().Bool("wait", false, "Block until a PENDING_REVIEW hire is approved or ghosts (no-op when the hire is already live)")
+	hireCmd.Flags().Duration("wait-timeout", 30*time.Minute, "Max time to wait with --wait (0 = forever)")
+	hireCmd.Flags().Duration("wait-interval", 2*time.Second, "Poll interval for --wait")
 
 	rehireCmd.Flags().Int("ttl", 0, "New TTL in minutes (default: 30, max: 1440)")
 	rehireCmd.Flags().String("reason", "", "One-line justification (required, appended to hire history)")

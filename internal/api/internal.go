@@ -412,6 +412,62 @@ func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 
 		token := r.Header.Get("X-Internal-Token")
 
+		// Crew-bound token path (#1159). A per-crew sidecar's token binds
+		// BOTH the workspace and the crew — crwv1.<ws>.<crew>.<mac> — so
+		// the middleware can pin the crew scope server-side instead of
+		// trusting a caller-supplied ?crew_id (which any workspace-bound
+		// holder could forge to enumerate every crew's credential
+		// metadata). Checked before the workspace branch; the "crwv1."
+		// prefix never collides with "wsv1.".
+		if internaltoken.IsCrewToken(token) {
+			wsID, crewID, ok := internaltoken.ValidateCrewToken(h.internalToken, token)
+			if !ok {
+				h.logger.Warn("internal API auth failed: invalid crew-bound token",
+					"path", r.URL.Path,
+					"remote_addr", r.RemoteAddr,
+					"user_agent", r.Header.Get("User-Agent"))
+				replyError(w, http.StatusForbidden, "Forbidden")
+				return
+			}
+			q := r.URL.Query()
+			// Workspace scope — identical mandatory-scope injection to the
+			// workspace-bound path below: a disagreeing ?workspace_id is a
+			// cross-tenant forgery (403); an omitted one is injected so every
+			// ?workspace_id-filtered handler runs tenant-scoped.
+			if reqWS := q.Get("workspace_id"); reqWS != "" {
+				if reqWS != wsID {
+					h.logger.Warn("internal API cross-workspace request refused (crew token)",
+						"path", r.URL.Path, "remote_addr", r.RemoteAddr,
+						"token_workspace", wsID, "requested_workspace", reqWS)
+					replyError(w, http.StatusForbidden, "Forbidden")
+					return
+				}
+			} else {
+				q.Set("workspace_id", wsID)
+			}
+			// Crew scope — a crew-bound token pins the crew. A caller-supplied
+			// ?crew_id that disagrees is the enumerate-a-sibling-crew forgery
+			// #1159 closes (403). We do NOT inject a crew_id when omitted:
+			// injecting would silently narrow the many OTHER internal endpoints
+			// that scope OPTIONALLY by crew_id (status, issues, missions), a
+			// behaviour change beyond this issue's scope. The credential
+			// listing — the endpoint that mattered — instead reads the
+			// crew from context (InternalTokenCrewFromContext), which is
+			// authoritative and unforgeable regardless of the query.
+			if reqCrew := q.Get("crew_id"); reqCrew != "" && reqCrew != crewID {
+				h.logger.Warn("internal API cross-crew request refused (crew token)",
+					"path", r.URL.Path, "remote_addr", r.RemoteAddr,
+					"token_crew", crewID, "requested_crew", reqCrew)
+				replyError(w, http.StatusForbidden, "Forbidden")
+				return
+			}
+			r.URL.RawQuery = q.Encode()
+			ctx := context.WithValue(r.Context(), ctxInternalTokenWS, wsID)
+			ctx = context.WithValue(ctx, ctxInternalTokenCrew, crewID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+
 		// Workspace-bound token path (PR-F24). Sidecars no longer hold
 		// the master token — at sidecar start the orchestrator hands
 		// each one HMAC(master, workspace_id) instead, so a token

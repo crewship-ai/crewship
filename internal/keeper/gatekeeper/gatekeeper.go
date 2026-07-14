@@ -354,39 +354,24 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 	}
 
 	raw := respLLM.Content
-	resp, err := parseResponse(raw)
-	if err != nil {
+
+	// Parse + normalise through the shared helper so the live decision and the
+	// M2a replay eval driver apply identical fail-closed rules (uppercase,
+	// unknown→DENY, risk clamped to [1,10]) and can never drift.
+	decision, risk, reason, perr := NormalizeRawResponse(raw)
+	if perr != nil {
 		g.logger.Error("keeper: parse LLM response failed, denying",
-			"error", err, "raw_len", len(raw))
-		return keeper.GatekeeperResponse{
-			Decision:       string(keeper.DecisionDeny),
-			Reason:         "Keeper LLM returned unparseable response — deny by default",
-			RiskScore:      10,
-			Prompt:         truncateForAudit(prompt),
-			RawLLMResponse: truncateForAudit(raw),
-		}, nil
+			"error", perr, "raw_len", len(raw))
+		reason = "Keeper LLM returned unparseable response — deny by default"
 	}
 
-	resp.Prompt = truncateForAudit(prompt)
-	resp.RawLLMResponse = truncateForAudit(raw)
-
-	// Normalise decision to uppercase; unknown values → DENY (safe default)
-	resp.Decision = strings.ToUpper(resp.Decision)
-	if resp.Decision != string(keeper.DecisionAllow) &&
-		resp.Decision != string(keeper.DecisionDeny) &&
-		resp.Decision != string(keeper.DecisionEscalate) {
-		resp.Decision = string(keeper.DecisionDeny)
-	}
-
-	// Clamp risk score to valid range [1, 10] so audit records are always valid
-	if resp.RiskScore < 1 {
-		resp.RiskScore = 1
-	}
-	if resp.RiskScore > 10 {
-		resp.RiskScore = 10
-	}
-
-	return resp, nil
+	return keeper.GatekeeperResponse{
+		Decision:       decision,
+		Reason:         reason,
+		RiskScore:      risk,
+		Prompt:         truncateForAudit(prompt),
+		RawLLMResponse: truncateForAudit(raw),
+	}, nil
 }
 
 const maxAuditText = 2000
@@ -691,6 +676,43 @@ func parseResponse(raw string) (keeper.GatekeeperResponse, error) {
 		return keeper.GatekeeperResponse{}, fmt.Errorf("unmarshal: %w", err)
 	}
 	return resp, nil
+}
+
+// NormalizeRawResponse applies the gatekeeper's fail-closed parse rules to a
+// raw governance-model response. It is the single source of truth shared by the
+// live Evaluate path and the M2a replay eval driver (internal/keeper/eval), so
+// the two can never drift.
+//
+// It returns the decision uppercased with unknown values forced to DENY, the
+// risk clamped to [1,10], and the model's stated reason. A non-nil err means
+// the raw response could not be parsed; the returned decision/risk are already
+// the safe DENY/10 fallback in that case, so a caller that ignores err still
+// gets a valid, safe result (callers that want to log or override the reason
+// inspect err).
+func NormalizeRawResponse(raw string) (decision string, risk int, reason string, err error) {
+	resp, perr := parseResponse(raw)
+	if perr != nil {
+		return string(keeper.DecisionDeny), 10, "", perr
+	}
+
+	// Normalise decision to uppercase; unknown values → DENY (safe default).
+	decision = strings.ToUpper(resp.Decision)
+	if decision != string(keeper.DecisionAllow) &&
+		decision != string(keeper.DecisionDeny) &&
+		decision != string(keeper.DecisionEscalate) {
+		decision = string(keeper.DecisionDeny)
+	}
+
+	// Clamp risk score to the valid range [1, 10].
+	risk = resp.RiskScore
+	if risk < 1 {
+		risk = 1
+	}
+	if risk > 10 {
+		risk = 10
+	}
+
+	return decision, risk, resp.Reason, nil
 }
 
 func randomDelimiter() (string, bool) {

@@ -769,6 +769,18 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		reqJSON = sql.NullString{String: string(reqBytes), Valid: true}
 	}
 
+	// #1032 (visibility mitigation): a privileged crew runs its container with
+	// --privileged, which collapses the UID 1001 (agent) / 1002 (sidecar)
+	// boundary that keeps a compromised agent from reading /proc/<sidecar>/mem
+	// — i.e. the sidecar's crew-bound IPC token and any injected credentials.
+	// The full fix (a non-privileged path for DinD etc.) is out of scope; the
+	// WARN at least surfaces the trust downgrade in ops the moment such a crew
+	// is provisioned, rather than leaving it silent.
+	if result.Requirements.Privileged {
+		h.logger.Warn("provisioned a PRIVILEGED crew — the UID 1001/1002 sidecar boundary is collapsed; a compromised agent can read the sidecar's IPC token and injected credentials (#1032)",
+			"crew_id", crewID, "workspace_id", workspaceID, "base_image", baseImage)
+	}
+
 	// Persist the cached image reference on the crew row. Use a fresh context
 	// (not the 30-min provisioning ctx, which may be near its deadline).
 	updateCtx, updateCancel := context.WithTimeout(context.Background(), 10*time.Second)

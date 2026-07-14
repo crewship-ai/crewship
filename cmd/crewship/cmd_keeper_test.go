@@ -25,13 +25,23 @@ func TestKeeperCmdStructure(t *testing.T) {
 	for _, sub := range keeperCmd.Commands() {
 		have[sub.Name()] = true
 	}
-	for _, want := range []string{"status", "enable", "disable", "contact", "threshold"} {
+	for _, want := range []string{"status", "enable", "disable", "contact", "threshold", "requests", "second-approver"} {
 		if !have[want] {
 			t.Errorf("keeper missing subcommand %q; have %v", want, have)
 		}
 	}
 	if keeperContactCmd.Flags().Lookup("clear") == nil {
 		t.Error("keeper contact missing --clear flag")
+	}
+
+	haveSA := map[string]bool{}
+	for _, sub := range keeperSecondApproverCmd.Commands() {
+		haveSA[sub.Name()] = true
+	}
+	for _, want := range []string{"enable", "disable"} {
+		if !haveSA[want] {
+			t.Errorf("keeper second-approver missing subcommand %q; have %v", want, haveSA)
+		}
 	}
 }
 
@@ -210,6 +220,28 @@ func TestKeeperDisableRunE_SendsEnabledOnly(t *testing.T) {
 	assertPartialPut(t, m, "enabled", false)
 }
 
+// TestKeeperSecondApproverEnableRunE_SendsFieldOnly drives the #1084
+// four-eyes toggle through the CLI RunE the same way the escalation
+// resolve acceptance path does — via the shared partial-update PUT, not a
+// hand-rolled HTTP request.
+func TestKeeperSecondApproverEnableRunE_SendsFieldOnly(t *testing.T) {
+	m := startKeeperMock(t)
+
+	if err := keeperSecondApproverEnableCmd.RunE(keeperSecondApproverEnableCmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	assertPartialPut(t, m, "require_second_approver", true)
+}
+
+func TestKeeperSecondApproverDisableRunE_SendsFieldOnly(t *testing.T) {
+	m := startKeeperMock(t)
+
+	if err := keeperSecondApproverDisableCmd.RunE(keeperSecondApproverDisableCmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	assertPartialPut(t, m, "require_second_approver", false)
+}
+
 func TestKeeperContactRunE_ResolvesEmailToUserID(t *testing.T) {
 	m := startKeeperMock(t)
 
@@ -293,5 +325,77 @@ func TestKeeperThresholdRunE_RejectsInvalidValues(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "between 1 and 10") {
 			t.Errorf("threshold %q: expected 'between 1 and 10' error; got %v", bad, err)
 		}
+	}
+}
+
+// ─── requests (issue #966 part 3 — GET /api/v1/admin/keeper/requests had no CLI surface) ───
+
+func TestKeeperRequestsRunE_NoAuth(t *testing.T) {
+	saveCLIState(t)
+	cliCfg = &cli.CLIConfig{}
+	err := keeperRequestsCmd.RunE(keeperRequestsCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "not logged in") {
+		t.Errorf("expected 'not logged in'; got %v", err)
+	}
+}
+
+func TestKeeperRequestsRunE_HappyPath(t *testing.T) {
+	saveCLIState(t)
+
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/admin/keeper/requests" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{
+				"id": "kr_1", "agent_id": "a1", "agent_name": "Viktor",
+				"crew_id": "c1", "credential_id": "cred1", "credential_name": "github-token",
+				"intent": "clone repo", "request_type": "command",
+				"decision": "ALLOW", "risk_score": 2,
+				"created_at": "2026-07-01T00:00:00Z",
+			},
+		})
+	}))
+	defer srv.Close()
+
+	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "cabcdefghijklmnopqrs", Server: srv.URL}
+	if err := keeperRequestsCmd.Flags().Set("limit", "20"); err != nil {
+		t.Fatalf("set --limit: %v", err)
+	}
+	t.Cleanup(func() { _ = keeperRequestsCmd.Flags().Set("limit", "50") })
+
+	out, err := captureStdoutCov(t, func() error {
+		return keeperRequestsCmd.RunE(keeperRequestsCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "github-token") || !strings.Contains(out, "ALLOW") {
+		t.Errorf("stdout should render the request row, got: %q", out)
+	}
+	if !strings.Contains(gotQuery, "limit=20") {
+		t.Errorf("expected limit=20 in query, got %q", gotQuery)
+	}
+}
+
+func TestKeeperRequestsRunE_Forbidden(t *testing.T) {
+	saveCLIState(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"Forbidden: ADMIN or OWNER only"}`))
+	}))
+	defer srv.Close()
+
+	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "cabcdefghijklmnopqrs", Server: srv.URL}
+
+	err := keeperRequestsCmd.RunE(keeperRequestsCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "ADMIN or OWNER") {
+		t.Errorf("expected forbidden surfaced; got %v", err)
 	}
 }

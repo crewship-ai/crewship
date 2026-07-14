@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ServerEntry } from "../types"
+import { splitArgs } from "./config-parser"
 
 let nextAdapterKey = 100_000
 
@@ -130,10 +131,7 @@ export function entryToPayload(entry: ServerEntry): CreatePayload {
     }
   } else {
     payload.command = entry.command
-    const argsList = entry.args
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean)
+    const argsList = splitArgs(entry.args.trim()).filter(Boolean)
     if (argsList.length > 0) {
       payload.args_json = JSON.stringify(argsList)
     }

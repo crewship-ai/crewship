@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"log/slog"
@@ -104,6 +105,74 @@ func TestListCredentials_CrewScope(t *testing.T) {
 		got := ids("workspace_id=" + wsID)
 		if !got["credWorkspace"] || !got["credCrewA"] || !got["credCrewB"] {
 			t.Errorf("workspace-wide should see all three, got %v", got)
+		}
+	})
+}
+
+// TestListCredentials_CrewBoundContextScopes covers #1159: when the request
+// carries a crew-bound internal token, the middleware puts the
+// cryptographically-bound crew in context, and ListCredentials scopes to THAT
+// crew — not the forgeable ?crew_id query. This closes the fail-open hole
+// where a workspace-bound-token holder could omit crew_id (workspace-wide) or
+// forge a sibling crew's id to enumerate every crew's credential metadata.
+func TestListCredentials_CrewBoundContextScopes(t *testing.T) {
+	h, db, userID, wsID := covICRig(t)
+
+	mustExec(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew-a', ?, 'A', 'crew-a')`, wsID)
+	mustExec(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew-b', ?, 'B', 'crew-b')`, wsID)
+	mustExec(t, db, `INSERT INTO agents (id, workspace_id, crew_id, name, slug) VALUES ('ag-b', ?, 'crew-b', 'AgB', 'ag-b')`, wsID)
+
+	covICSeedCredScoped(t, db, wsID, userID, "credWorkspace", "WORKSPACE")
+	covICSeedCredScoped(t, db, wsID, userID, "credCrewA", "CREW")
+	mustExec(t, db, `INSERT INTO credential_crews (credential_id, crew_id) VALUES ('credCrewA', 'crew-a')`)
+	covICSeedCredScoped(t, db, wsID, userID, "credCrewB", "CREW")
+	mustExec(t, db, `INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, created_at) VALUES ('ac-b', 'ag-b', 'credCrewB', 'B', 0, datetime('now'))`)
+
+	// ctxCrew is the crew a crew-bound token would resolve to. The query is
+	// what the (possibly malicious) caller supplies.
+	idsWithCtx := func(ctxCrew, query string) map[string]bool {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/internal/credentials?workspace_id="+wsID+query, nil)
+		req.RemoteAddr = "203.0.113.7:5555" // non-loopback: a real crew sidecar
+		if ctxCrew != "" {
+			req = req.WithContext(context.WithValue(req.Context(), ctxInternalTokenCrew, ctxCrew))
+		}
+		rec := httptest.NewRecorder()
+		h.ListCredentials(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		var out []struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		got := map[string]bool{}
+		for _, c := range out {
+			got[c.ID] = true
+		}
+		return got
+	}
+
+	t.Run("crew-bound context scopes even when query omits crew_id", func(t *testing.T) {
+		got := idsWithCtx("crew-a", "")
+		if !got["credWorkspace"] || !got["credCrewA"] {
+			t.Errorf("crew-a should see workspace + own crew creds, got %v", got)
+		}
+		if got["credCrewB"] {
+			t.Errorf("crew-a must NOT enumerate crew-b's credential via an omitted crew_id, got %v", got)
+		}
+	})
+
+	t.Run("crew-bound context overrides a forged query crew_id", func(t *testing.T) {
+		// Even if a forged ?crew_id=crew-b slipped past the middleware, the
+		// context crew is authoritative — the listing stays scoped to crew-a.
+		got := idsWithCtx("crew-a", "&crew_id=crew-b")
+		if got["credCrewB"] {
+			t.Errorf("forged query crew_id must not widen the listing; got %v", got)
+		}
+		if !got["credCrewA"] {
+			t.Errorf("crew-a should still see its own crew creds, got %v", got)
 		}
 	})
 }

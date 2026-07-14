@@ -130,16 +130,9 @@ var crewGetCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
-		crewID, err := resolveCrewID(client, args[0])
+		// #1177: one request on the CUID fast path (verify == fetch).
+		resp, _, err := getByRef(client, "/api/v1/crews/", args[0], resolveCrewID)
 		if err != nil {
-			return err
-		}
-
-		resp, err := client.Get("/api/v1/crews/" + crewID)
-		if err != nil {
-			return err
-		}
-		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
 
@@ -208,17 +201,12 @@ var crewStatusCmd = &cobra.Command{
 
 		client := newAPIClient()
 
-		crewID, err := resolveCrewID(client, args[0])
+		// #1177: fetch crew detail in ONE request on the CUID fast path
+		// (verify == fetch); getByRef also returns the resolved id, which
+		// drives the follow-up fetches below (reliable for both CUID and slug
+		// refs, independent of whether the detail body echoes an "id").
+		crewResp, crewID, err := getByRef(client, "/api/v1/crews/", args[0], resolveCrewID)
 		if err != nil {
-			return err
-		}
-
-		// Fetch crew detail
-		crewResp, err := client.Get("/api/v1/crews/" + crewID)
-		if err != nil {
-			return err
-		}
-		if err := cli.CheckError(crewResp); err != nil {
 			return err
 		}
 		var crew struct {

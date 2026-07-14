@@ -11,6 +11,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/keeper/governance"
 )
 
 // PendingEscalationCount returns the number of unresolved escalations workspace-wide.
@@ -299,6 +300,12 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	escalationID := r.PathValue("escalationId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
+	// The authenticated human resolving the escalation — recorded as the actor
+	// on the resolution journal entry (audit: who approved/rejected/redirected).
+	resolverUserID := ""
+	if u := UserFromContext(r.Context()); u != nil {
+		resolverUserID = u.ID
+	}
 	// Require at least MANAGER to resolve escalations (data-modifying operation)
 	if !canRole(role, "create") {
 		replyError(w, http.StatusForbidden, "Forbidden")
@@ -336,13 +343,13 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	}
 
 	var status, chatID, crewID, fromSlug, escalationType string
-	var credentialID sql.NullString
+	var credentialID, initiatorUserID sql.NullString
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT e.status, e.chat_id, e.crew_id, a.slug, e.type, e.credential_id
+		SELECT e.status, e.chat_id, e.crew_id, a.slug, e.type, e.credential_id, a.created_by_user_id
 		FROM escalations e
 		JOIN agents a ON a.id = e.from_agent_id
 		WHERE e.id = ? AND e.workspace_id = ?
-	`, escalationID, workspaceID).Scan(&status, &chatID, &crewID, &fromSlug, &escalationType, &credentialID)
+	`, escalationID, workspaceID).Scan(&status, &chatID, &crewID, &fromSlug, &escalationType, &credentialID, &initiatorUserID)
 
 	// Validate redirect_to agent exists in the same crew (after we know crew_id).
 	if err == nil && body.Action == "redirect" && body.RedirectTo != "" {
@@ -373,6 +380,64 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	if status != "PENDING" {
 		replyError(w, http.StatusConflict, "escalation already resolved")
 		return
+	}
+
+	// Segregation of duties (issue #1084): a workspace can opt in to a strict
+	// four-eyes rule for CREDENTIAL escalations — the human recorded as the
+	// initiating agent's owner (agents.created_by_user_id, v100) may not also
+	// be the one who resolves it. This is checked BEFORE any mutation and
+	// applies to every action (approve/reject/redirect), not just approve:
+	// the point is that the same person can't unilaterally close out a
+	// credential request their own agent raised. Deliberately independent of
+	// role — canRole above already gated MANAGER+, and this is a strict
+	// approver-must-differ-from-initiator rule with NO OWNER bypass. If the
+	// agent has no recorded owner (legacy pre-v99 rows), the rule cannot be
+	// enforced and resolution proceeds as before.
+	//
+	// KNOWN SCOPE LIMIT: "initiator" is proxied by agent *ownership*
+	// (created_by_user_id), not the human who actually drove the agent to raise
+	// the escalation. If user A owns the agent but user B drives it via chat to
+	// propose a credential, the rule blocks A, not B — so B could still
+	// self-approve. Tightening this to the actual requester needs the escalation
+	// to record the driving user at raise time (follow-up); until then this is a
+	// four-eyes control keyed on ownership, which covers the common case.
+	if escalationType == "CREDENTIAL" && initiatorUserID.Valid && initiatorUserID.String != "" {
+		gov := governance.Resolve(r.Context(), h.db, h.logger, workspaceID)
+		if gov.RequireSecondApprover {
+			approverID := ""
+			if user := UserFromContext(r.Context()); user != nil {
+				approverID = user.ID
+			}
+			if approverID != "" && approverID == initiatorUserID.String {
+				// Audit the blocked self-approval. A user attempting to resolve a
+				// credential escalation their own agent raised is exactly the
+				// security event a four-eyes control exists to catch, so it must
+				// leave a trail — the successful resolution is journaled downstream,
+				// but the denial otherwise left none.
+				_, _ = h.journal.Emit(r.Context(), journal.Entry{
+					WorkspaceID: workspaceID,
+					CrewID:      crewID,
+					Type:        journal.EntryKeeperDecision,
+					Severity:    journal.SeverityError,
+					ActorType:   journal.ActorUser,
+					ActorID:     approverID,
+					Summary: fmt.Sprintf(
+						"blocked self-approval: user tried to %s a credential escalation raised by agent %s they own",
+						body.Action, fromSlug),
+					Payload: map[string]any{
+						"rule":              "segregation_of_duties",
+						"action":            body.Action,
+						"escalation_type":   escalationType,
+						"from_slug":         fromSlug,
+						"initiator_user_id": initiatorUserID.String,
+					},
+					Refs: map[string]any{"escalation_id": escalationID, "chat_id": chatID},
+				})
+				replyError(w, http.StatusForbidden,
+					"a second approver is required: you cannot resolve a credential escalation raised by an agent you own")
+				return
+			}
+		}
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -488,6 +553,7 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		Type:        journal.EntryPeerEscalation,
 		Severity:    journal.SeverityNotice,
 		ActorType:   journal.ActorUser,
+		ActorID:     resolverUserID,
 		Summary:     fmt.Sprintf("escalation %s resolved (%s)", escalationID, body.Action),
 		Payload: map[string]any{
 			"resolution":      resolutionForJournal,
