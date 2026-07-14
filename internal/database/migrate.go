@@ -1652,9 +1652,24 @@ END;
 	// CREDENTIAL escalation raised by an agent they own (agents.created_by_user_id,
 	// v100) when enabled. OWNER is not exempt. Default off. See
 	// migrate_consts_v143_credential_second_approver.go and issue #1084.
-	// (v141 was renumbered to v143 to avoid a collision with #1172's v141;
-	// v142 belongs to #1176's keeper gov-model migration.)
 	{version: 143, name: "credential_second_approver", sql: migrationCredentialSecondApprover},
+	// v144: broader audit of `DEFAULT (datetime('now'))` AND
+	// `DEFAULT (datetime('now','subsec'))` columns (#1073, slice b of 3). PR
+	// #1156's keyset-cursor pagination on credentials.created_at (and every
+	// other ORDER BY / range comparison over a `*_at` column) compares these
+	// values as TEXT — both legacy forms SQLite emits are SPACE-separated and
+	// never compare correctly against the ISO T-form strings this codebase's
+	// Go writers emit ('now','subsec' just adds a fraction; it stays
+	// space-form, so the ~16 ordered subsec tables — pipelines, inbox_items,
+	// pending_runs, … — carry the same bug and MUST be converted too). This
+	// migration both stops the DEFAULT from producing new legacy-form values
+	// AND normalizes the historical ones the DEFAULT wrote after v45's
+	// one-shot backfill (v45 ran ~100 versions earlier, so legacy rows
+	// re-accumulated since), for every string-compared column identified in
+	// the #1073b audit (see the PR description for the per-column verdict
+	// table and migrate_v144_datetime_default_tform.go for the mechanism and
+	// the small list of columns intentionally left alone).
+	{version: 144, name: "datetime_now_default_tform", fn: migrationConvertDatetimeNowDefaults},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
