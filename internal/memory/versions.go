@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // Tier is the discriminator stored in memory_versions.tier. The five
@@ -135,7 +137,7 @@ func RecordVersion(ctx context.Context, db *sql.DB, rec VersionRecord) (*RecordR
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		versionID, rec.WorkspaceID, rec.Path, string(rec.Tier),
 		sha, len(rec.Content),
-		time.Now().UTC().Format(time.RFC3339Nano),
+		tsformat.Format(time.Now()),
 		writtenBy, parentSha, blobPath,
 	); err != nil {
 		// DB insert failed AFTER the blob landed — the blob is harmless
