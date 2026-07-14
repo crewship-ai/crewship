@@ -302,31 +302,25 @@ func TestSkillGetRunECov_HappyWithDescription(t *testing.T) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
 	}
-	// 2, not 1: resolveSkillID's #1075 CUID-verify GET and skillGetCmd's own
-	// detail fetch both hit this exact URL.
-	if len(s.CallsFor("GET", "/api/v1/skills/"+covSkillID)) != 2 {
-		t.Error("expected exactly two GETs to skill detail (verify + fetch)")
+	// #1177: exactly ONE GET now — for a real CUID the existence check IS the
+	// detail fetch (getByRef), no verify-then-refetch of the same URL.
+	if len(s.CallsFor("GET", "/api/v1/skills/"+covSkillID)) != 1 {
+		t.Errorf("expected exactly one GET to skill detail (verify == fetch), got %d",
+			len(s.CallsFor("GET", "/api/v1/skills/"+covSkillID)))
 	}
 }
 
 func TestSkillGetRunECov_NotFound(t *testing.T) {
-	// resolveSkillID's #1075 CUID-verify GET hits this same URL first —
-	// let it succeed (the id is real) so the 404 under test comes from
-	// skillGetCmd's own detail fetch, not from resolution treating a
-	// genuine detail-fetch failure as "this id doesn't exist, try a slug
-	// scan" instead.
+	// #1177 + #1075: `skill get <CUID>` collapses to a single detail GET. A
+	// 404 there means the id isn't real, so it falls back to the slug scan;
+	// with no matching skill in the list, the command surfaces a not-found
+	// error rather than trusting the doomed id.
 	s := covSetup(t)
-	var calls int
-	s.OnGet("/api/v1/skills/"+covSkillID, func(_ *http.Request, _ []byte) (int, []byte, string) {
-		calls++
-		if calls == 1 {
-			return http.StatusOK, []byte(`{"id":"` + covSkillID + `"}`), "application/json"
-		}
-		return http.StatusNotFound, []byte(`{"error":"Skill not found"}`), "application/json"
-	})
+	s.OnGet("/api/v1/skills/"+covSkillID, clitest.ErrorResponse(404, "Skill not found"))
+	s.OnGet("/api/v1/skills", clitest.JSONResponse(200, []map[string]any{}))
 	err := skillGetCmd.RunE(skillGetCmd, []string{covSkillID})
-	if err == nil || !strings.Contains(err.Error(), "Skill not found") {
-		t.Errorf("want 404 surfaced; got %v", err)
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "not found") {
+		t.Errorf("want not-found surfaced; got %v", err)
 	}
 }
 

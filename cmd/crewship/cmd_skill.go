@@ -126,16 +126,9 @@ var skillGetCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
-		skillID, err := resolveSkillID(client, args[0])
+		// #1177: one request on the CUID fast path (verify == fetch).
+		resp, _, err := getByRef(client, "/api/v1/skills/", args[0], resolveSkillID)
 		if err != nil {
-			return err
-		}
-
-		resp, err := client.Get("/api/v1/skills/" + skillID)
-		if err != nil {
-			return err
-		}
-		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
 

@@ -167,22 +167,14 @@ func TestAgentGetRunE_NoScheduleHidesRows(t *testing.T) {
 }
 
 func TestAgentGetRunE_ServerError(t *testing.T) {
-	// resolveAgentID's #1075 CUID-verify GET hits this same URL first —
-	// let it succeed (the id is real) so the 404 under test comes from
-	// agentGetCmd's own detail fetch, not from resolution treating a
-	// genuine detail-fetch failure as "this id doesn't exist, try a slug
-	// scan" instead.
+	// #1177: `agent get <CUID>` collapses to ONE detail GET (the existence
+	// check IS the fetch). A genuine server error on that single request must
+	// surface directly, not be swallowed or retried as a slug scan.
 	s := clitest.NewStubServer()
 	defer s.Close()
 	agentID := "cagent7890abcdefghijklm"
-	var calls int
-	s.OnGet("/api/v1/agents/"+agentID, func(_ *http.Request, _ []byte) (int, []byte, string) {
-		calls++
-		if calls == 1 {
-			return http.StatusOK, []byte(`{"id":"` + agentID + `"}`), "application/json"
-		}
-		return http.StatusNotFound, []byte(`{"error":"agent gone"}`), "application/json"
-	})
+	s.OnGet("/api/v1/agents/"+agentID,
+		clitest.ErrorResponse(http.StatusInternalServerError, "agent gone"))
 	covSetupCli10(t, s.URL())
 
 	err := agentGetCmd.RunE(agentGetCmd, []string{agentID})

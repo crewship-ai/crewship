@@ -198,15 +198,11 @@ var credGetCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
-		credID, err := resolveCredentialID(client, args[0])
+		// #1177: getByRef issues ONE request when args[0] is a real CUID (the
+		// existence check IS this fetch) instead of verifying then re-GETting
+		// the same URL.
+		resp, _, err := getByRef(client, "/api/v1/credentials/", args[0], resolveCredentialID)
 		if err != nil {
-			return err
-		}
-		resp, err := client.Get("/api/v1/credentials/" + credID)
-		if err != nil {
-			return err
-		}
-		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
 
