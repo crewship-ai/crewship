@@ -26,11 +26,21 @@ type CorpusRow struct {
 	RecordedRisk int
 }
 
-// corpusRequestTypes are the live-activity request types the harness scores —
-// the access/execute/behavior paths M1 targets. skill_review / memory_health /
-// negative_learning are lower value for governance-model selection (spec §3),
-// so they are excluded from the corpus.
-var corpusRequestTypes = []string{"access", "execute", "behavior"}
+// corpusRequestTypes are the live-activity request types the harness scores.
+// skill_review / memory_health / negative_learning are lower value for
+// governance-model selection (spec §3), so they are excluded from the corpus.
+//
+// `behavior` is deliberately EXCLUDED for now even though M1 targets it. The
+// replay path normalizes model output with gatekeeper.NormalizeRawResponse,
+// whose closed set is ALLOW/DENY/ESCALATE (WARN → DENY). But the LIVE behavior
+// path records decisions via classifyBehaviorDecision, which keeps WARN as a
+// first-class outcome. Scoring behavior rows here would (a) mis-score any
+// candidate that legitimately answers WARN as a DENY disagreement, and (b) the
+// decision filter below already silently drops behavior rows recorded as WARN —
+// both skew the governance-model selection for that one type. access/execute
+// both map cleanly onto NormalizeRawResponse, so they stay. Follow-up: route
+// behavior replay through classifyBehaviorDecision, then add it back.
+var corpusRequestTypes = []string{"access", "execute"}
 
 // LoadCorpus reads the recorded keeper_requests corpus for replay: rows with a
 // non-empty ollama_prompt and a *settled* decision (ALLOW/DENY/ESCALATE —

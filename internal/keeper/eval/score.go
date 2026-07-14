@@ -17,6 +17,12 @@ package eval
 // Decision is a normalized keeper decision (matches keeper.Decision values,
 // plus WARN for the behavior path). Replay drivers normalize model output to
 // these before scoring, mirroring the gatekeeper's uppercase + unknown→DENY rule.
+//
+// NOTE: WARN is defined for completeness but does not currently flow through the
+// scoring pipeline — the behavior request type is excluded from the corpus (see
+// corpusRequestTypes) because NormalizeRawResponse folds WARN→DENY while the live
+// behavior path keeps it first-class. WARN becomes reachable here once behavior
+// replay is routed through classifyBehaviorDecision.
 type Decision string
 
 const (

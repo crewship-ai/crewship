@@ -50,37 +50,46 @@ func nullInt(n int64) sql.NullInt64 { return sql.NullInt64{Int64: n, Valid: true
 func TestLoadCorpus_FiltersAndNormalizes(t *testing.T) {
 	db := newCorpusDB(t)
 
-	// Included: the three live-activity request types with a settled decision.
+	// Included: the live-activity request types (access/execute) with a settled
+	// decision. NULL risk on e1 clamps to 1.
 	insertRow(t, db, "a1", "access", "prompt-access", "allow", nullInt(2), "2026-01-01T00:00:03Z")
-	insertRow(t, db, "e1", "execute", "prompt-execute", "DENY", nullInt(9), "2026-01-01T00:00:02Z")
-	insertRow(t, db, "b1", "behavior", "prompt-behavior", "escalate", sql.NullInt64{}, "2026-01-01T00:00:01Z")
+	insertRow(t, db, "e1", "execute", "prompt-execute", "DENY", sql.NullInt64{}, "2026-01-01T00:00:02Z")
 
 	// Excluded, each for one reason:
-	insertRow(t, db, "sk", "skill_review", "prompt-skill", "allow", nullInt(1), "2026-01-01T00:00:09Z") // wrong type
-	insertRow(t, db, "mp", "access", "", "allow", nullInt(1), "2026-01-01T00:00:09Z")                   // empty prompt
-	insertRow(t, db, "pd", "access", "prompt-pending", "PENDING", nullInt(1), "2026-01-01T00:00:09Z")   // unsettled
+	insertRow(t, db, "b1", "behavior", "prompt-behavior", "escalate", nullInt(5), "2026-01-01T00:00:08Z") // behavior excluded (WARN-space drift)
+	insertRow(t, db, "bw", "behavior", "prompt-warn", "warn", nullInt(4), "2026-01-01T00:00:07Z")         // behavior WARN — would be silently dropped anyway
+	insertRow(t, db, "sk", "skill_review", "prompt-skill", "allow", nullInt(1), "2026-01-01T00:00:09Z")   // wrong type
+	insertRow(t, db, "mp", "access", "", "allow", nullInt(1), "2026-01-01T00:00:09Z")                     // empty prompt
+	insertRow(t, db, "pd", "access", "prompt-pending", "PENDING", nullInt(1), "2026-01-01T00:00:09Z")     // unsettled
 
 	got, err := LoadCorpus(context.Background(), db, 0)
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}
-	if len(got) != 3 {
-		t.Fatalf("got %d rows, want 3: %+v", len(got), got)
+	if len(got) != 2 {
+		t.Fatalf("got %d rows, want 2: %+v", len(got), got)
 	}
 
-	// Ordered newest-first by created_at: a1 (…03) > e1 (…02) > b1 (…01).
-	if got[0].ID != "a1" || got[1].ID != "e1" || got[2].ID != "b1" {
-		t.Fatalf("order = %s,%s,%s; want a1,e1,b1", got[0].ID, got[1].ID, got[2].ID)
+	// Ordered newest-first by created_at: a1 (…03) > e1 (…02).
+	if got[0].ID != "a1" || got[1].ID != "e1" {
+		t.Fatalf("order = %s,%s; want a1,e1", got[0].ID, got[1].ID)
+	}
+
+	// behavior (incl. WARN) must not leak into the corpus while it's excluded.
+	for _, r := range got {
+		if r.RequestType == "behavior" {
+			t.Errorf("behavior row %s must be excluded from the corpus, got %+v", r.ID, r)
+		}
 	}
 
 	// Decision normalized to uppercase.
-	if got[0].Recorded != Allow || got[1].Recorded != Deny || got[2].Recorded != Escalate {
-		t.Errorf("decisions = %v,%v,%v", got[0].Recorded, got[1].Recorded, got[2].Recorded)
+	if got[0].Recorded != Allow || got[1].Recorded != Deny {
+		t.Errorf("decisions = %v,%v", got[0].Recorded, got[1].Recorded)
 	}
 
-	// NULL risk on the behavior row clamps to 1; others pass through.
-	if got[0].RecordedRisk != 2 || got[1].RecordedRisk != 9 || got[2].RecordedRisk != 1 {
-		t.Errorf("risks = %d,%d,%d; want 2,9,1", got[0].RecordedRisk, got[1].RecordedRisk, got[2].RecordedRisk)
+	// risk passes through for a1; NULL risk on e1 clamps to 1.
+	if got[0].RecordedRisk != 2 || got[1].RecordedRisk != 1 {
+		t.Errorf("risks = %d,%d; want 2,1", got[0].RecordedRisk, got[1].RecordedRisk)
 	}
 }
 
