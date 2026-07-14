@@ -13,8 +13,10 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
 )
 
@@ -122,6 +124,58 @@ func TestResolveEscalation_SegregationOfDuties(t *testing.T) {
 				t.Errorf("escalation status = %q, want still PENDING — rejection must happen BEFORE any mutation", status)
 			}
 		})
+	}
+}
+
+// TestResolveEscalation_SegregationOfDuties_DeniedAttemptAudited — a blocked
+// self-approval must leave an audit trail. The successful resolve path is
+// journaled downstream, but issue #1084's four-eyes denial previously left
+// none — yet an operator trying to self-approve a credential their own agent
+// raised is exactly the security event you want recorded.
+func TestResolveEscalation_SegregationOfDuties_DeniedAttemptAudited(t *testing.T) {
+	ensureEncryptionKey(t)
+	db := setupTestDB(t)
+	ownerID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, ownerID)
+	crewID := seedCrewRow(t, db, "sod-crew4", wsID, "Crew", "sod-crew4")
+	agentID := seedOwnedAgent(t, db, "sod-agent4", wsID, crewID, ownerID)
+	seedSoDEscalation(t, db, "sod-esc4", wsID, crewID, agentID)
+
+	if err := governance.Upsert(context.Background(), db, wsID,
+		governance.Settings{RequireSecondApprover: true}, ownerID); err != nil {
+		t.Fatalf("enable require_second_approver: %v", err)
+	}
+
+	h := NewQueryHandler(db, nil, nil, "", newTestLogger())
+	jw := journal.NewWriter(db, newTestLogger(), journal.WriterOptions{FlushSize: 1})
+	t.Cleanup(func() { _ = jw.Close() })
+	h.SetJournal(jw)
+
+	// Owner (also the initiator) attempts to self-approve — must be blocked.
+	rr := covEscResolve(h, ownerID, wsID, "sod-esc4", map[string]string{
+		"resolution": "test resolution", "action": "approve",
+	})
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rr.Code, rr.Body.String())
+	}
+	_ = jw.Flush(context.Background())
+
+	// A keeper.decision audit row must exist, attributed to the blocked approver
+	// and naming the segregation_of_duties rule.
+	var actorID, payload string
+	err := db.QueryRowContext(context.Background(),
+		`SELECT actor_id, payload FROM journal_entries
+		 WHERE workspace_id = ? AND entry_type = ? AND severity = 'error'`,
+		wsID, string(journal.EntryKeeperDecision),
+	).Scan(&actorID, &payload)
+	if err != nil {
+		t.Fatalf("expected a keeper.decision audit entry for the blocked self-approval: %v", err)
+	}
+	if actorID != ownerID {
+		t.Errorf("audit actor_id = %q, want the blocked approver %q", actorID, ownerID)
+	}
+	if !strings.Contains(payload, "segregation_of_duties") {
+		t.Errorf("audit payload should name the rule, got %s", payload)
 	}
 }
 

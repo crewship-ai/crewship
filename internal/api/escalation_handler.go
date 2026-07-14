@@ -387,6 +387,14 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	// approver-must-differ-from-initiator rule with NO OWNER bypass. If the
 	// agent has no recorded owner (legacy pre-v99 rows), the rule cannot be
 	// enforced and resolution proceeds as before.
+	//
+	// KNOWN SCOPE LIMIT: "initiator" is proxied by agent *ownership*
+	// (created_by_user_id), not the human who actually drove the agent to raise
+	// the escalation. If user A owns the agent but user B drives it via chat to
+	// propose a credential, the rule blocks A, not B — so B could still
+	// self-approve. Tightening this to the actual requester needs the escalation
+	// to record the driving user at raise time (follow-up); until then this is a
+	// four-eyes control keyed on ownership, which covers the common case.
 	if escalationType == "CREDENTIAL" && initiatorUserID.Valid && initiatorUserID.String != "" {
 		gov := governance.Resolve(r.Context(), h.db, h.logger, workspaceID)
 		if gov.RequireSecondApprover {
@@ -395,6 +403,30 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 				approverID = user.ID
 			}
 			if approverID != "" && approverID == initiatorUserID.String {
+				// Audit the blocked self-approval. A user attempting to resolve a
+				// credential escalation their own agent raised is exactly the
+				// security event a four-eyes control exists to catch, so it must
+				// leave a trail — the successful resolution is journaled downstream,
+				// but the denial otherwise left none.
+				_, _ = h.journal.Emit(r.Context(), journal.Entry{
+					WorkspaceID: workspaceID,
+					CrewID:      crewID,
+					Type:        journal.EntryKeeperDecision,
+					Severity:    journal.SeverityError,
+					ActorType:   journal.ActorUser,
+					ActorID:     approverID,
+					Summary: fmt.Sprintf(
+						"blocked self-approval: user tried to %s a credential escalation raised by agent %s they own",
+						body.Action, fromSlug),
+					Payload: map[string]any{
+						"rule":              "segregation_of_duties",
+						"action":            body.Action,
+						"escalation_type":   escalationType,
+						"from_slug":         fromSlug,
+						"initiator_user_id": initiatorUserID.String,
+					},
+					Refs: map[string]any{"escalation_id": escalationID, "chat_id": chatID},
+				})
 				replyError(w, http.StatusForbidden,
 					"a second approver is required: you cannot resolve a credential escalation raised by an agent you own")
 				return
