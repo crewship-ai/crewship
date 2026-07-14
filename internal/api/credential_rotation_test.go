@@ -286,3 +286,40 @@ func TestRotate_NotFoundCrossWorkspace(t *testing.T) {
 
 // suppress unused import on builds that don't reach SQL fallback paths
 var _ = sql.ErrNoRows
+
+// TestRotate_RejectsPendingApproval — #1084 SoD: rotate must not activate an
+// agent-proposed credential still awaiting four-eyes approval (that would flip
+// status PENDING_APPROVAL -> ACTIVE, bypassing the second-approver gate).
+func TestRotate_RejectsPendingApproval(t *testing.T) {
+	t.Parallel()
+	setTestEncryptionKeyParallelSafe(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	credID := "cred-pending-1"
+	execOrFatal(t, db, `INSERT INTO credentials
+		(id, workspace_id, name, encrypted_value, type, status, created_by)
+		VALUES (?, ?, 'pending-cred', 'enc', 'API_KEY', 'PENDING_APPROVAL', ?)`,
+		credID, wsID, userID)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	h := NewCredentialHandler(db, logger)
+
+	body, _ := json.Marshal(map[string]any{"value": "new-value"})
+	req := rotationReq(t, "POST", "/api/v1/credentials/"+credID+"/rotate", string(body), userID, wsID)
+	req.SetPathValue("credentialId", credID)
+	rr := httptest.NewRecorder()
+	h.Rotate(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rr.Code, rr.Body.String())
+	}
+	// The credential must still be PENDING_APPROVAL — rotate must not have activated it.
+	var status string
+	if err := db.QueryRow(`SELECT status FROM credentials WHERE id = ?`, credID).Scan(&status); err != nil {
+		t.Fatalf("read status: %v", err)
+	}
+	if status != "PENDING_APPROVAL" {
+		t.Errorf("status = %q, want PENDING_APPROVAL (rotate must not activate)", status)
+	}
+}

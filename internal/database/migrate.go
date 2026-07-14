@@ -1644,9 +1644,17 @@ END;
 	// optional vault credential ref) on keeper_governance_settings. Empty
 	// provider = use the server/env default, so this is additive and preserves
 	// the opt-in contract. See migrate_consts_v142_keeper_gov_model.go and issue
-	// #1001 (M2a). (v143 = credential second-approver #1173, v144 = datetime
-	// DEFAULT tsformat #1179 — landing in parallel.)
+	// #1001 (M2a).
 	{version: 142, name: "keeper_gov_model", sql: migrationKeeperGovModel},
+
+	// v143: per-workspace "four-eyes" toggle (require_second_approver) on the
+	// Keeper governance row — a MANAGER+ approver can no longer resolve a
+	// CREDENTIAL escalation raised by an agent they own (agents.created_by_user_id,
+	// v100) when enabled. OWNER is not exempt. Default off. See
+	// migrate_consts_v143_credential_second_approver.go and issue #1084.
+	// (v141 was renumbered to v143 to avoid a collision with #1172's v141;
+	// v142 belongs to #1176's keeper gov-model migration.)
+	{version: 143, name: "credential_second_approver", sql: migrationCredentialSecondApprover},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

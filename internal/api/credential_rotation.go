@@ -156,11 +156,11 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	// scope check so cross-workspace rotation attempts 404. The
 	// existing soft-delete filter applies — rotating a deleted
 	// credential makes no sense.
-	var oldEncrypted, credType string
+	var oldEncrypted, credType, credStatus string
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT encrypted_value, type FROM credentials
+		SELECT encrypted_value, type, status FROM credentials
 		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		credID, workspaceID).Scan(&oldEncrypted, &credType)
+		credID, workspaceID).Scan(&oldEncrypted, &credType, &credStatus)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "Credential not found")
@@ -168,6 +168,16 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		}
 		h.logger.Error("read credential for rotate", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	// #1084 segregation-of-duties: rotate must NOT be a back door that activates
+	// an agent-proposed credential still awaiting four-eyes approval. The UPDATE
+	// below flips status to 'ACTIVE'; on a PENDING_APPROVAL row that would bypass
+	// the second-approver gate the escalation flow enforces. Route it back there.
+	if credStatus == "PENDING_APPROVAL" {
+		replyError(w, http.StatusConflict,
+			"credential is pending approval — approve or reject it via its escalation, not by rotating")
 		return
 	}
 

@@ -25,13 +25,23 @@ func TestKeeperCmdStructure(t *testing.T) {
 	for _, sub := range keeperCmd.Commands() {
 		have[sub.Name()] = true
 	}
-	for _, want := range []string{"status", "enable", "disable", "contact", "threshold", "requests"} {
+	for _, want := range []string{"status", "enable", "disable", "contact", "threshold", "requests", "second-approver"} {
 		if !have[want] {
 			t.Errorf("keeper missing subcommand %q; have %v", want, have)
 		}
 	}
 	if keeperContactCmd.Flags().Lookup("clear") == nil {
 		t.Error("keeper contact missing --clear flag")
+	}
+
+	haveSA := map[string]bool{}
+	for _, sub := range keeperSecondApproverCmd.Commands() {
+		haveSA[sub.Name()] = true
+	}
+	for _, want := range []string{"enable", "disable"} {
+		if !haveSA[want] {
+			t.Errorf("keeper second-approver missing subcommand %q; have %v", want, haveSA)
+		}
 	}
 }
 
@@ -208,6 +218,28 @@ func TestKeeperDisableRunE_SendsEnabledOnly(t *testing.T) {
 		t.Fatalf("RunE: %v", err)
 	}
 	assertPartialPut(t, m, "enabled", false)
+}
+
+// TestKeeperSecondApproverEnableRunE_SendsFieldOnly drives the #1084
+// four-eyes toggle through the CLI RunE the same way the escalation
+// resolve acceptance path does — via the shared partial-update PUT, not a
+// hand-rolled HTTP request.
+func TestKeeperSecondApproverEnableRunE_SendsFieldOnly(t *testing.T) {
+	m := startKeeperMock(t)
+
+	if err := keeperSecondApproverEnableCmd.RunE(keeperSecondApproverEnableCmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	assertPartialPut(t, m, "require_second_approver", true)
+}
+
+func TestKeeperSecondApproverDisableRunE_SendsFieldOnly(t *testing.T) {
+	m := startKeeperMock(t)
+
+	if err := keeperSecondApproverDisableCmd.RunE(keeperSecondApproverDisableCmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	assertPartialPut(t, m, "require_second_approver", false)
 }
 
 func TestKeeperContactRunE_ResolvesEmailToUserID(t *testing.T) {
