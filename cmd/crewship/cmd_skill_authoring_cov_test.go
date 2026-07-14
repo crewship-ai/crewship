@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -315,8 +316,11 @@ func TestSkillExportRunE_Stdout(t *testing.T) {
 		}
 	}
 	calls := stub.CallsFor("GET", "/api/v1/skills/"+covSkillIDCli5)
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 GET skill detail, got %d", len(calls))
+	// 2, not 1: resolveSkillID's #1075 CUID-verify GET and skillExportCmd's
+	// own detail fetch both hit this exact URL — a real, if minor, added
+	// round trip for "fetch by id right after resolving" commands.
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 GETs to skill detail (verify + fetch), got %d", len(calls))
 	}
 	if !strings.Contains(calls[0].Query, "workspace_id="+covWSCli5) {
 		t.Errorf("detail query missing workspace_id: %q", calls[0].Query)
@@ -474,9 +478,20 @@ func TestSkillExportRunE_ErrorBranches(t *testing.T) {
 		t.Errorf("expected skill-not-found; got %v", err)
 	}
 
-	// Detail endpoint 404s.
+	// Detail endpoint 404s. resolveSkillID's #1075 CUID-verify GET hits
+	// this same URL first — let it succeed (the id itself is real) so the
+	// 404 this subtest cares about comes from skillExportCmd's own,
+	// separate detail fetch, not from resolution mistaking a genuine
+	// detail-fetch failure for "this id doesn't exist, try a slug scan".
 	stub2 := covSetupCli5(t)
-	stub2.OnGet("/api/v1/skills/"+covSkillIDCli5, clitest.ErrorResponse(404, "skill gone"))
+	var detailCalls int
+	stub2.OnGet("/api/v1/skills/"+covSkillIDCli5, func(_ *http.Request, _ []byte) (int, []byte, string) {
+		detailCalls++
+		if detailCalls == 1 {
+			return http.StatusOK, []byte(`{"id":"` + covSkillIDCli5 + `"}`), "application/json"
+		}
+		return http.StatusNotFound, []byte(`{"error":"skill gone"}`), "application/json"
+	})
 	if err := skillExportCmd.RunE(skillExportCmd, []string{covSkillIDCli5}); err == nil || !strings.Contains(err.Error(), "skill gone") {
 		t.Errorf("expected 404; got %v", err)
 	}

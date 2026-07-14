@@ -82,16 +82,9 @@ var agentGetCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
-		agentID, err := resolveAgentID(client, args[0])
+		// #1177: one request on the CUID fast path (verify == fetch).
+		resp, _, err := getByRef(client, "/api/v1/agents/", args[0], resolveAgentID)
 		if err != nil {
-			return err
-		}
-
-		resp, err := client.Get("/api/v1/agents/" + agentID)
-		if err != nil {
-			return err
-		}
-		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
 

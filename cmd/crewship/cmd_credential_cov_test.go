@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
 )
 
@@ -207,10 +208,19 @@ func TestCredGetCmd(t *testing.T) {
 
 func TestCredGetCmd_NotFound(t *testing.T) {
 	stub := covStub(t)
+	// #1075: resolveCredentialID now verifies the CUID-shaped arg against its
+	// single-resource endpoint first. A real-but-missing id 404s there, so
+	// resolution falls back to the name scan (the list), which also finds
+	// nothing — yielding a client-side NotFound (ExitNotFound) instead of a
+	// doomed detail GET. Both the verify GET and the list scan must be stubbed.
 	stub.OnGet("/api/v1/credentials/"+covCredIDCli3, clitest.ErrorResponse(404, "credential not found"))
+	stub.OnGet("/api/v1/credentials", clitest.JSONResponse(200, []map[string]any{}))
 	err := credGetCmd.RunE(credGetCmd, []string{covCredIDCli3})
-	if err == nil || !strings.Contains(err.Error(), "credential not found") {
-		t.Fatalf("expected 404, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected not-found, got %v", err)
+	}
+	if code := cli.ExitCodeFor(err); code != cli.ExitNotFound {
+		t.Fatalf("expected ExitNotFound(%d), got %d (%v)", cli.ExitNotFound, code, err)
 	}
 }
 

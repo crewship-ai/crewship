@@ -100,6 +100,14 @@ func (m *activityMock) handler() http.Handler {
 		case r.URL.Path == "/api/v1/crews":
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(m.crews)
+		case strings.HasPrefix(r.URL.Path, "/api/v1/crews/"):
+			// #1075: resolveCrewID verifies a CUID-shaped --crew value with
+			// GET /api/v1/crews/{id} before trusting it. Answer "exists" so
+			// tests that only care about the fast path don't also need to
+			// stub this verification round trip.
+			w.Header().Set("Content-Type", "application/json")
+			id := strings.TrimPrefix(r.URL.Path, "/api/v1/crews/")
+			_ = json.NewEncoder(w).Encode(map[string]string{"id": id})
 		default:
 			m.t.Errorf("unexpected path %q", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
