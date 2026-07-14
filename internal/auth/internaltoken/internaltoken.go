@@ -158,6 +158,99 @@ func agentMAC(master, workspaceID, agentID string) string {
 	return hex.EncodeToString(m.Sum(nil))
 }
 
+// CrewPrefix marks a crew-bound internal token on the wire (#1159). Like
+// Prefix/AgentPrefix it is a public format marker, not a secret; the
+// middleware branches on it to pick the crew-binding validation path.
+const CrewPrefix = "crwv1"
+
+// crewDerivationContext domain-separates the crew-binding HMAC
+// (DeriveCrewToken) from the workspace-binding, caller-identity, and
+// per-agent HMACs so a token minted for one purpose can never validate for
+// another even though all run over the same master key. The trailing NUL
+// delimits the context from the (workspace_id, crew_id) tuple.
+const crewDerivationContext = "crewship internal-token crew binding v1\x00"
+
+// DeriveCrewToken returns the crew-bound internal token for (workspaceID,
+// crewID), derived from the master internal token (#1159). It extends the
+// workspace binding down to a single crew: a per-crew sidecar receives this
+// as its X-Internal-Token, so the API middleware can inject BOTH the
+// workspace and the crew scope server-side instead of trusting a
+// caller-supplied ?crew_id (which any workspace-bound-token holder could
+// forge to enumerate every crew's credential metadata — the #1031/#1159
+// leak).
+//
+// Format: crwv1.<workspace_id>.<crew_id>.<hex(HMAC-SHA256(master, ctx ||
+// workspace_id || NUL || crew_id))>. The workspace_id and crew_id segments
+// are informational (the MAC binds them); parsing recovers them.
+//
+// Returns "" when any input is empty — an empty master means internal auth is
+// unconfigured, and a token bound to an empty workspace or crew must never
+// exist (either could otherwise act as a wildcard). Callers must treat "" as
+// "do not issue" (fail closed).
+func DeriveCrewToken(master, workspaceID, crewID string) string {
+	if master == "" || workspaceID == "" || crewID == "" {
+		return ""
+	}
+	return CrewPrefix + "." + workspaceID + "." + crewID + "." + crewMAC(master, workspaceID, crewID)
+}
+
+// IsCrewToken reports whether token is shaped like a crew-bound token
+// (prefix match only — call ValidateCrewToken to verify it). The distinct
+// prefix ("crwv1." vs "wsv1.") means a crew token never collides with the
+// workspace-token branch in the middleware.
+func IsCrewToken(token string) bool {
+	return strings.HasPrefix(token, CrewPrefix+".")
+}
+
+// ValidateCrewToken verifies token against the master secret and returns the
+// (workspaceID, crewID) it is bound to. ok is false when the token is
+// malformed, either segment is empty, the MAC doesn't verify, or master is
+// empty (fail closed — never authorize anything without a configured
+// master). The MAC comparison is constant-time.
+//
+// Parsing mirrors ValidateWorkspaceToken's LastIndex approach so an ID
+// containing "." still round-trips: the hex MAC is taken after the LAST
+// dot, then the crew_id after the last dot of the remainder, leaving the
+// workspace_id as the head.
+func ValidateCrewToken(master, token string) (workspaceID, crewID string, ok bool) {
+	if master == "" {
+		return "", "", false
+	}
+	rest, found := strings.CutPrefix(token, CrewPrefix+".")
+	if !found {
+		return "", "", false
+	}
+	// rest = <workspace_id>.<crew_id>.<mac>
+	i := strings.LastIndexByte(rest, '.')
+	if i <= 0 {
+		return "", "", false
+	}
+	head, sig := rest[:i], rest[i+1:]
+	j := strings.LastIndexByte(head, '.')
+	if j <= 0 {
+		// No crew separator, or empty workspace segment.
+		return "", "", false
+	}
+	wsID, crID := head[:j], head[j+1:]
+	if wsID == "" || crID == "" || sig == "" {
+		return "", "", false
+	}
+	expected := crewMAC(master, wsID, crID)
+	if subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) != 1 {
+		return "", "", false
+	}
+	return wsID, crID, true
+}
+
+func crewMAC(master, workspaceID, crewID string) string {
+	m := hmac.New(sha256.New, []byte(master))
+	m.Write([]byte(crewDerivationContext))
+	m.Write([]byte(workspaceID))
+	m.Write([]byte{0})
+	m.Write([]byte(crewID))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
 // SignCaller returns a hex HMAC that binds an acting user id to a
 // workspace, keyed by the internal token the caller authenticates with
 // (the workspace-bound token a sidecar holds, or the master token for

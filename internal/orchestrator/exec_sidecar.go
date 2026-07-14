@@ -16,25 +16,34 @@ import (
 )
 
 // sidecarIPCToken returns the internal-API token to hand a sidecar at
-// startup. It is always workspace-bound (PR-F24): the raw master token
-// must never enter a container, because any agent that captured it
-// there (UID escalation, memory dump) could call /api/v1/internal/*
-// for every workspace. Derivation is HMAC(master, workspaceID), so the
-// API middleware can validate the binding statelessly against the same
-// in-memory master for the lifetime of one boot.
+// startup. Since #1159 it is CREW-bound when the run carries a crew —
+// HMAC(master, workspaceID‖crewID), format crwv1.<ws>.<crew>.<mac> — so
+// the API middleware can pin the crew scope server-side instead of
+// trusting a caller-supplied ?crew_id (the #1031/#1159 metadata-enumeration
+// leak). A run without a crew (crewID == "") falls back to the
+// workspace-bound token (PR-F24), keeping the crew-less workspace-wide
+// behaviour the in-process TokenSyncer and crew-less callers rely on.
+//
+// Either way the raw master token never enters a container: any agent that
+// captured a derived token there (UID escalation, memory dump) can only act
+// within the workspace — and now the crew — baked into it. Derivation is
+// stateless HMAC, validated against the same in-memory master for one boot.
 //
 // Fail closed: with an empty master or an empty workspace there is
 // nothing safe to issue — return "" so the sidecar's IPC calls get
 // loud 403s instead of a process-wide secret. An empty workspace here
 // would indicate a bug upstream (IPC configs are only built for crew
 // runs, which always carry a workspace).
-func sidecarIPCToken(master, workspaceID string, logger *slog.Logger) string {
+func sidecarIPCToken(master, workspaceID, crewID string, logger *slog.Logger) string {
 	if master == "" {
 		return ""
 	}
 	if workspaceID == "" {
 		logger.Error("sidecar IPC token: empty workspace_id — refusing to issue a token (master token never enters containers)")
 		return ""
+	}
+	if crewID != "" {
+		return internaltoken.DeriveCrewToken(master, workspaceID, crewID)
 	}
 	return internaltoken.DeriveWorkspaceToken(master, workspaceID)
 }
