@@ -38,6 +38,18 @@ func (m *routineSaveMock) handler() http.Handler {
 			{"id": "ccrewengineering00001", "slug": "engineering"},
 		})
 	})
+	// Single-crew verify — resolveCrewID's #1075 CUID check GETs this before
+	// trusting a CUID-shaped --author-crew. The known id is "real" (200) so
+	// resolution short-circuits and forwards it verbatim; anything else 404s
+	// and resolution falls back to the slug scan on the list route above.
+	mux.HandleFunc("GET /api/v1/crews/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("id") != "ccrewtest000000000001" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": "ccrewtest000000000001", "slug": "audit"})
+	})
 	// Public draft-validation gate — dry-run validates + mints the save_token.
 	mux.HandleFunc("POST /api/v1/workspaces/ws_test_1/pipelines/test_run", func(w http.ResponseWriter, r *http.Request) {
 		m.testRunCalled = true
