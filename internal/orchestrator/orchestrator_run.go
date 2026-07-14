@@ -588,14 +588,9 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			if health.Stale {
 				// #1008: the running sidecar is an OLD bind-mounted binary from
 				// before the last redeploy. It keeps serving stale memory/egress
-				// behaviour with no other signal — surface it loudly. Recreating
-				// the crew's containers (crewship crew restart-agents <crew>) or
-				// redeploying picks up the fresh sidecar.
-				o.logger.Error("stale sidecar detected: container is serving an OLD crewship-sidecar binary from before the last redeploy — memory recall and egress policy may be silently degraded; recreate the crew's containers (crewship crew restart-agents) to pick up the new sidecar",
-					"agent_id", req.AgentID,
-					"container_id", req.ContainerID[:min(12, len(req.ContainerID))],
-					"running_sidecar_hash", health.SidecarHash,
-				)
+				// behaviour with no other signal — surface it on a durable,
+				// operator-watchable channel (#1160), not just stdout.
+				o.emitStaleSidecarSignal(ctx, req, health.SidecarHash)
 			}
 			if health.NetworkMode == desiredMode && desiredMode != "restricted" {
 				// In "free" mode we can safely reuse. In "restricted" mode the
@@ -1313,4 +1308,47 @@ var mcpPackageDomains = map[string][]string{
 // arbitrary args from widening the restricted-mode allowlist.
 var knownPackageLaunchers = map[string]bool{
 	"npx": true, "pnpm": true, "yarn": true, "bunx": true,
+}
+
+// emitStaleSidecarSignal surfaces a detected stale bind-mounted sidecar
+// (#1008) on a durable, operator-watchable channel (#1160). The original
+// #1008 signal was a single logger.Error to stdout — exactly the channel
+// class nobody was watching when a stale sidecar silently degraded memory
+// recall and egress policy. A severity:error journal entry lands in the
+// activity feed where it is queryable, filterable, and alertable.
+//
+// Both the human-readable logger.Error (kept for local `dev.sh` tails) and
+// the journal entry fire here. Best-effort: a journal hiccup never blocks
+// the run — the sidecar still starts, it's the operator visibility that's
+// at stake, not correctness of this run.
+func (o *Orchestrator) emitStaleSidecarSignal(ctx context.Context, req AgentRunRequest, runningHash string) {
+	cIDShort := req.ContainerID
+	if len(cIDShort) > 12 {
+		cIDShort = cIDShort[:12]
+	}
+	const remediation = "crewship crew restart-agents"
+	o.logger.Error("stale sidecar detected: container is serving an OLD crewship-sidecar binary from before the last redeploy — memory recall and egress policy may be silently degraded; recreate the crew's containers ("+remediation+") to pick up the new sidecar",
+		"agent_id", req.AgentID,
+		"container_id", cIDShort,
+		"running_sidecar_hash", runningHash,
+	)
+	_, _ = o.getJournal().Emit(ctx, JournalEntry{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		Type:        "sidecar.stale",
+		Severity:    "error",
+		ActorType:   "system",
+		ActorID:     "orchestrator",
+		Summary: fmt.Sprintf(
+			"stale crewship-sidecar in %s's crew container — serving an OLD binary from before the last redeploy; memory recall and egress policy may be silently degraded. Run `%s` to recycle.",
+			req.AgentSlug, remediation),
+		Payload: map[string]any{
+			"container_id":         cIDShort,
+			"running_sidecar_hash": runningHash,
+			"agent_slug":           req.AgentSlug,
+			"remediation":          remediation,
+		},
+		Refs: map[string]any{"agent_id": req.AgentID, "container_id": req.ContainerID},
+	})
 }
