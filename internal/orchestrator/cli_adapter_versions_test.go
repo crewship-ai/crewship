@@ -150,7 +150,10 @@ func TestAdapterEnvVarMatchesProvider(t *testing.T) {
 		adapter     string
 		mustInclude string // env var the CLI definitely reads
 	}{
-		{"CODEX_CLI", "OPENAI_API_KEY"},
+		// CODEX_CLI is intentionally absent: since #1030 Codex is proxy-
+		// injected (OPENAI_BASE_URL → sidecar /openai), exactly like
+		// CLAUDE_CODE for Anthropic — it reads the dummy key and the sidecar
+		// swaps it, so apiKeyEnvVarsForAdapter("CODEX_CLI") is nil by design.
 		{"GEMINI_CLI", "GEMINI_API_KEY"}, // canonical AI Studio var
 		{"OPENCODE", "OPENAI_API_KEY"},   // BYOK includes OpenAI
 		{"CURSOR_CLI", "CURSOR_API_KEY"},

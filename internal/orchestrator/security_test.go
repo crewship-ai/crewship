@@ -123,7 +123,9 @@ func TestSidecarInjectsRealKeyOnlyForOwnAdapter(t *testing.T) {
 		wantValue string
 		denyKeys  []string // env var names that must NOT contain real values
 	}{
-		{"CODEX_CLI", "OPENAI_API_KEY", openaiKey, []string{"GOOGLE_API_KEY", "CURSOR_API_KEY"}},
+		// CODEX_CLI moved to the proxy-isolation family (#1030) — it no longer
+		// injects the real OPENAI_API_KEY to env; see
+		// TestSidecarProxyInjectedAdaptersDoNotLeakProviderKeys.
 		{"GEMINI_CLI", "GOOGLE_API_KEY", googleKey, []string{"OPENAI_API_KEY", "CURSOR_API_KEY"}},
 		{"CURSOR_CLI", "CURSOR_API_KEY", cursorKey, []string{"OPENAI_API_KEY", "GOOGLE_API_KEY"}},
 	}
@@ -181,6 +183,36 @@ func TestSidecarClaudeCodeAdapterDoesNotLeakOtherProviderKeys(t *testing.T) {
 		if strings.Contains(e, openaiKey) || strings.Contains(e, googleKey) || strings.Contains(e, cursorKey) {
 			t.Fatalf("Claude Code agent leaked non-anthropic key: %s", e)
 		}
+	}
+}
+
+// TestSidecarProxyInjectedAdaptersDoNotLeakProviderKeys asserts the
+// reverse-proxy isolation guarantee for every adapter whose provider key is
+// injected by the sidecar rather than the env: CLAUDE_CODE (Anthropic) and,
+// since #1030, CODEX_CLI (OpenAI). Even the adapter's OWN provider key must
+// not appear in env — it lives only in the sidecar CredStore and is swapped
+// for the dummy mid-flight.
+func TestSidecarProxyInjectedAdaptersDoNotLeakProviderKeys(t *testing.T) {
+	openaiKey := "sk-leak-openai-" + strings.Repeat("X", 24)
+	googleKey := "AIzaSy-leak-google-" + strings.Repeat("X", 16)
+	cursorKey := "cur_leak-" + strings.Repeat("X", 16)
+	creds := []Credential{
+		{ID: "c-oa", EnvVarName: "OPENAI_API_KEY", PlainValue: openaiKey},
+		{ID: "c-go", EnvVarName: "GOOGLE_API_KEY", PlainValue: googleKey},
+		{ID: "c-cu", EnvVarName: "CURSOR_API_KEY", PlainValue: cursorKey},
+	}
+	for _, adapter := range []string{"CLAUDE_CODE", "CODEX_CLI"} {
+		t.Run(adapter, func(t *testing.T) {
+			req := AgentRunRequest{
+				AgentID: "a1", CrewID: "c1", ChatID: "ch1",
+				CLIAdapter: adapter, Credentials: creds,
+			}
+			for _, e := range BuildEnvVarsSidecar(req, true) {
+				if strings.Contains(e, openaiKey) || strings.Contains(e, googleKey) || strings.Contains(e, cursorKey) {
+					t.Fatalf("%s agent leaked a real provider key into env: %s", adapter, e)
+				}
+			}
+		})
 	}
 }
 
