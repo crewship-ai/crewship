@@ -327,11 +327,17 @@ governance**: a checklist of presets and a text area for the free-form rules.
 
 ## Governance model (fully-local, no API key)
 
-The model that backs Keeper — the credential access gatekeeper **and** the
-auxiliary evaluators — is a **per-workspace, vault-backed setting**, chosen
-in-app rather than only via server env. This is what makes a **no-API-key
-Keeper** possible: point governance at a local Ollama classifier and the whole
-watchdog runs on your own hardware.
+The model that backs Keeper's **credential-access gatekeeper** is a
+**per-workspace, vault-backed setting**, chosen in-app rather than only via
+server env. This is what makes a **no-API-key Keeper** possible: point governance
+at a local Ollama classifier and the access gatekeeper runs on your own hardware.
+
+<Note>
+  Scope: this setting currently drives the **credential-access gatekeeper**. The
+  auxiliary evaluators (behavior watchdog, skill review, memory health, negative
+  learning) still resolve their model from server env/config — wiring them to the
+  same per-workspace setting is a follow-up.
+</Note>
 
 | Field | What it does |
 |-------|-------------|
