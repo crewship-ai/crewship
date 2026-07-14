@@ -1632,9 +1632,26 @@ END;
 	// and issues #1072 / #1029.
 	{version: 140, name: "encrypt_webhook_secrets", fn: migrationEncryptWebhookSecrets},
 
-	// v141 is #1073a (memory_versions.written_at tsformat normalization, PR
-	// #1172) and v142/v143 belong to other in-flight branches (keeper M2a
-	// #1176 grabbed v142) — so #1073b lands at v144 to avoid the collision.
+	// v141: normalize memory_versions.written_at to the fixed-width,
+	// lex-sortable tsformat.Layout — three incompatible call sites
+	// (RFC3339Nano writer, RFC3339Nano-truncated whole-second rows, and
+	// the space-form `datetime('now','subsec')` DEFAULT on the persona
+	// insert) corrupt ORDER BY written_at and the keyset-cursor
+	// pagination PR #1156 added. See
+	// migrate_v141_memory_versions_tsformat.go and issue #1073.
+	{version: 141, name: "memory_versions_tsformat_backfill", fn: migrationNormalizeMemoryVersionsTsformat},
+	// v142: per-workspace Keeper governance-model selection (provider + model +
+	// optional vault credential ref) on keeper_governance_settings. Empty
+	// provider = use the server/env default, so this is additive and preserves
+	// the opt-in contract. See migrate_consts_v142_keeper_gov_model.go and issue
+	// #1001 (M2a). (v143 = credential second-approver #1173, v144 = datetime
+	// DEFAULT tsformat #1179 — landing in parallel.)
+	{version: 142, name: "keeper_gov_model", sql: migrationKeeperGovModel},
+
+	// v143 is intentionally skipped here — it belongs to the credential
+	// second-approver branch (#1173), landing in parallel and out of scope
+	// for this migration slice. Migration versions only need to be strictly
+	// ascending, not contiguous.
 	//
 	// v144: broader audit of `DEFAULT (datetime('now'))` AND
 	// `DEFAULT (datetime('now','subsec'))` columns (#1073, slice b of 3). PR
