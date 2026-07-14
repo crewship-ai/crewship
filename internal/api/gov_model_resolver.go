@@ -174,13 +174,13 @@ func (r *GovModelResolver) buildProvider(m governance.ResolvedGovModel) (llm.Pro
 		if m.EndpointURL == "" {
 			return nil, fmt.Errorf("openai_compat gov model has no endpoint URL (needs an ENDPOINT_URL credential)")
 		}
-		// Key is optional (some self-hosted endpoints need none); when the
-		// endpoint credential didn't carry one, fall back to env.
-		key := m.APIKey
-		if key == "" {
-			key = os.Getenv("OPENAI_API_KEY")
-		}
-		return llm.NewOpenAIWithClient(key, m.EndpointURL, r.ssrf), nil
+		// SECURITY (key exfiltration): the endpoint here is tenant-admin
+		// controlled (a workspace-configured URL), so we must NEVER attach the
+		// server's OPENAI_API_KEY — that would leak the server key to an
+		// arbitrary destination the admin chose. Use ONLY the vault-sourced key
+		// (an API_KEY credential); send no key when none was configured (some
+		// self-hosted endpoints need none) rather than falling back to env.
+		return llm.NewOpenAIWithClient(m.APIKey, m.EndpointURL, r.ssrf), nil
 	default:
 		return nil, fmt.Errorf("unsupported gov model provider %q", m.Provider)
 	}

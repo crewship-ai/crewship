@@ -2,12 +2,52 @@ package api
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
+	"github.com/crewship-ai/crewship/internal/llm"
 )
+
+// TestGovModelResolver_OpenAICompat_NoServerKeyExfil is a security regression:
+// the openai_compat endpoint is tenant-admin-controlled, so the server's
+// OPENAI_API_KEY must NEVER be attached to it. With no vault key configured, the
+// built provider must send no server secret to the endpoint.
+func TestGovModelResolver_OpenAICompat_NoServerKeyExfil(t *testing.T) {
+	const serverSecret = "sk-server-secret-must-not-leak"
+	t.Setenv("OPENAI_API_KEY", serverSecret)
+	// Allow the loopback httptest endpoint past the SSRF fence for this test.
+	t.Setenv("CREWSHIP_ALLOW_PRIVATE_ENDPOINTS", "1")
+
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer srv.Close()
+
+	r := NewGovModelResolver(nil, nil, newTestLogger(), testOllamaURL, testOllamaModel)
+	p, err := r.buildProvider(governance.ResolvedGovModel{
+		Provider:    governance.ProviderOpenAICompat,
+		Model:       "gpt-x",
+		EndpointURL: srv.URL + "/v1/chat/completions",
+		APIKey:      "", // no vault key -> must NOT fall back to the server env key
+	})
+	if err != nil {
+		t.Fatalf("buildProvider: %v", err)
+	}
+	_, _ = p.Complete(context.Background(), llm.Request{
+		Model:    "gpt-x",
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}},
+	})
+	if strings.Contains(gotAuth, serverSecret) {
+		t.Errorf("openai_compat endpoint received the server key in %q — key exfiltration", gotAuth)
+	}
+}
 
 const (
 	testOllamaURL   = "http://127.0.0.1:11434"
