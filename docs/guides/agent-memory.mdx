@@ -520,6 +520,36 @@ the same turn** instead of just rejecting the call:
 on overflow. This keeps the store dumb (it does not consolidate for the agent)
 while giving the agent the material to self-curate without losing the turn.
 
+## Pinned facts (`tier=pins`)
+
+A `memory.write` with `tier=pins` appends to a dedicated `~/.memory/pins.md`
+file — the agent's list of facts that must be **always in context**, not just
+searchable. Use it for the handful of things a session must never miss: an
+on-call code, a hard constraint ("migrations are forward-only"), a "remember
+this" the operator flagged as load-bearing.
+
+The guarantee: `pins.md` is **force-injected at the top of the `[AGENT MEMORY]`
+block on every session start** — deterministically, before the agent takes its
+first turn, without the model having to `memory.read` it. Because it's the first
+section in the block, it also survives an aggressive budget-truncation pass
+ahead of `AGENT.md` and the daily logs. That's the difference from ordinary
+agent memory, which is retrieved by relevance and can be crowded out.
+
+<Note>
+Keep pins short. They spend from the same agent-tier budget as `AGENT.md`, and
+being always-on they cost tokens on **every** run. A few lines is right; a full
+notebook belongs in `AGENT.md`, which is retrieved on relevance.
+</Note>
+
+Two unrelated things share the word "pin" — don't confuse them:
+
+- **Agent pins** (`memory.write tier=pins` → `~/.memory/pins.md`) — described
+  above, injected inside `[AGENT MEMORY]`.
+- **Operator journal pins** — an operator marking a journal entry as a priority
+  pin; the [Consolidation worker](/guides/consolidate) snapshots those into a
+  separate crew file that renders as its own `[PINS]` block. That path is
+  crew-scoped and operator-driven, not the agent's memory tool.
+
 ## Best Practices
 
 <AccordionGroup>
