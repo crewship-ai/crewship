@@ -814,7 +814,11 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 	// The resolve branch above already validated a *resolved* user; this also
 	// catches a caller that passes a privileged user explicitly ("0", "root",
 	// "0:0", …), so the "or root" half of the guarantee holds on every path.
-	if provider.IsPrivilegedExecUser(execCfg.User) {
+	// The narrow exception is cfg.AllowPrivileged — an explicit, auditable
+	// opt-in the orchestrator's root-requiring preflight steps set (sidecar
+	// kill, dual-writer file pre-create); it is never a default and never
+	// reachable from agent/request input.
+	if !cfg.AllowPrivileged && provider.IsPrivilegedExecUser(execCfg.User) {
 		return nil, fmt.Errorf("exec: refusing to run as privileged user %q in container %s", execCfg.User, cfg.ContainerID)
 	}
 

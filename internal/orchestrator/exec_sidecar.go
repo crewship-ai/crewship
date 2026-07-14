@@ -98,6 +98,8 @@ func PreRunInstallPackages(
 		ContainerID: containerID,
 		Cmd:         []string{"sh", "-c", script},
 		User:        "0:0",
+		// Installing OS packages requires root; #1158 opt-in (see ExecConfig).
+		AllowPrivileged: true,
 	}
 
 	result, err := ctr.Exec(ctx, cfg)

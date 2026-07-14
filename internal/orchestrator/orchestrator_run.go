@@ -622,6 +622,11 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 					ContainerID: req.ContainerID,
 					Cmd:         []string{"sh", "-c", "pkill -f crewship-sidecar || true"},
 					User:        "0:0",
+					// Killing the stale sidecar to reset the network policy
+					// legitimately needs root; #1158 opt-in (see ExecConfig).
+					// Failing this closed would leave the stale egress policy in
+					// place — a worse security outcome than the root exec.
+					AllowPrivileged: true,
 				})
 			}
 		}
@@ -721,6 +726,9 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		ContainerID: req.ContainerID,
 		Cmd:         []string{"sh", "-c", `test -f /crew/manifest.json || echo '{"version":1,"packages":{"apt":[],"npm":[],"pip":[]},"credentials":[],"setup_commands":[]}' > /crew/manifest.json; chmod 0666 /crew/manifest.json`},
 		User:        "0:0",
+		// Pre-creating the dual-writer manifest (agent 1001 + sidecar 1002)
+		// needs root to chmod 0666; #1158 opt-in (see ExecConfig).
+		AllowPrivileged: true,
 	}
 	if mfErr := o.execPreflight(ctx, manifestCfg); mfErr != nil {
 		o.logger.Debug("manifest pre-create skipped", "error", mfErr)

@@ -248,6 +248,57 @@ func TestExec_ExplicitPrivilegedUser_FailsClosed(t *testing.T) {
 	}
 }
 
+// TestExec_ExplicitPrivilegedUser_AllowPrivilegedBypasses proves the audited
+// #1158 opt-in lets the orchestrator's root-requiring preflight steps (sidecar
+// kill, manifest pre-create, OS-package install) run as 0:0 — the fail-closed
+// guard is a default, not an absolute. On unpatched code (guard with no opt-in)
+// these callers would be broken, leaving e.g. a stale egress policy in place.
+func TestExec_ExplicitPrivilegedUser_AllowPrivilegedBypasses(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var execCreateReached bool
+	var seenUser string
+	p := newCovProviderTCP(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.HasSuffix(path, "/containers/cid/exec") && r.Method == http.MethodPost:
+			body, _ := decodeExecBody(r)
+			mu.Lock()
+			execCreateReached = true
+			seenUser = body.User
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Id":"e1"}`))
+		case strings.Contains(path, "/exec/e1/start"):
+			covHijackUpgrade(t, w, r, covStdcopyFrame(1, "ok"))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, path)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+
+	res, err := p.Exec(context.Background(), provider.ExecConfig{
+		ContainerID:     "cid",
+		Cmd:             []string{"id"},
+		User:            "0:0",
+		AllowPrivileged: true,
+	})
+	if err != nil {
+		t.Fatalf("Exec with AllowPrivileged should succeed, got: %v", err)
+	}
+	_, _ = res.Reader.Read(make([]byte, 0))
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !execCreateReached {
+		t.Fatal("AllowPrivileged exec must reach exec create (opt-in bypasses the guard)")
+	}
+	if seenUser != "0:0" {
+		t.Errorf("exec user = %q, want 0:0 passed through under AllowPrivileged", seenUser)
+	}
+}
+
 // decodeExecBody reads the ContainerExecCreate JSON body's "User" field.
 func decodeExecBody(r *http.Request) (struct {
 	User string `json:"User"`

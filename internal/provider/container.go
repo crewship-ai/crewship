@@ -152,6 +152,15 @@ type ExecConfig struct {
 	// the kernel's per-argv MAX_ARG_STRLEN limit (128 KiB on Linux) if passed
 	// as a positional command argument.
 	Stdin io.Reader
+
+	// AllowPrivileged opts this single Exec out of the #1158 fail-closed guard
+	// that otherwise refuses a root/privileged User. It exists ONLY for the
+	// handful of orchestrator preflight steps that legitimately require root
+	// inside the crew container (killing a stale sidecar to reset the network
+	// policy; pre-creating dual-writer files like /crew/manifest.json). Setting
+	// it is an explicit, auditable decision at the call site — never a default,
+	// and never reachable from agent- or request-supplied input.
+	AllowPrivileged bool
 }
 
 // IsPrivilegedExecUser reports whether a resolved or configured container
