@@ -8,13 +8,24 @@ import (
 	"strings"
 )
 
-// datetimeNowDefaultLiteral is the exact legacy DEFAULT expression this
-// migration replaces. Every occurrence in the schema was written with this
-// precise substring (no `'subsec'` modifier, no whitespace variation) — see
-// the #1073b audit's per-column verdict table in the PR description.
-// strings.Contains/ReplaceAll on this literal is therefore exact and
-// unambiguous.
+// datetimeNowDefaultLiteral is the second-precision legacy DEFAULT expression
+// this migration replaces: DEFAULT (datetime('now')) writes
+// "YYYY-MM-DD HH:MM:SS" (space-form, no fraction). Every occurrence in the
+// schema was written with this precise substring (no whitespace variation).
 const datetimeNowDefaultLiteral = "datetime('now')"
+
+// datetimeNowSubsecDefaultLiteral is the millisecond-fraction sibling:
+// DEFAULT (datetime('now','subsec')) writes "YYYY-MM-DD HH:MM:SS.SSS" — still
+// SPACE-form, so it sorts before any T-form value exactly like the plain form
+// (' ' 0x20 < 'T' 0x54). ~16 ordered tables (pipelines, inbox_items,
+// pending_runs, …) use it. The original #1073b pass matched only the plain
+// literal and silently skipped every one of these, because "datetime('now')"
+// is NOT a substring of "datetime('now','subsec')" (the char after 'now' is a
+// comma, not the closing paren) — so this migration must match and rewrite
+// both forms or the ordering bug it exists to close survives on those tables.
+// Every schema occurrence uses this exact spelling (no whitespace variation,
+// verified by repo-wide grep).
+const datetimeNowSubsecDefaultLiteral = "datetime('now','subsec')"
 
 // tformDefaultLiteral is the ISO T-form replacement: fixed-width
 // millisecond-fraction, always UTC/'Z'. This is the SAME expression already
@@ -54,10 +65,10 @@ var datetimeNowDefaultSkipTables = map[string]bool{
 	"instance_config":      true,
 }
 
-// migrationConvertDatetimeNowDefaults (v142) is the broader audit follow-up
+// migrationConvertDatetimeNowDefaults (v144) is the broader audit follow-up
 // to #1073 (slice b of 3; 1073a/PR #1172 covered memory_versions
-// specifically at v141). It converts every `DEFAULT (datetime('now'))`
-// column that is string-compared — appears in an ORDER BY / range /
+// specifically at v141). It converts every `DEFAULT (datetime('now'))` and
+// `DEFAULT (datetime('now','subsec'))` column that is string-compared — appears in an ORDER BY / range /
 // keyset-cursor comparison, or is a plausible pagination/sort key such as
 // created_at/updated_at — to the ISO T-form DEFAULT already used elsewhere
 // in this schema. The full per-column verdict (convert vs. intentionally
@@ -141,7 +152,9 @@ func migrationConvertDatetimeNowDefaults(ctx context.Context, tx *sql.Tx, logger
 		if err != nil {
 			return fmt.Errorf("read schema for %s: %w", table, err)
 		}
-		if createSQL == "" || !strings.Contains(createSQL, datetimeNowDefaultLiteral) {
+		if createSQL == "" ||
+			(!strings.Contains(createSQL, datetimeNowDefaultLiteral) &&
+				!strings.Contains(createSQL, datetimeNowSubsecDefaultLiteral)) {
 			continue
 		}
 
@@ -180,7 +193,7 @@ func migrationConvertDatetimeNowDefaults(ctx context.Context, tx *sql.Tx, logger
 // untouched and re-runs are no-ops. Column discovery reuses
 // timestampColumns (the *_at-suffix + allowlist filter v45 uses), so every
 // column a converted table's datetime('now') DEFAULT could have written is
-// covered. Scoped to a single table so v142 only normalizes the tables
+// covered. Scoped to a single table so v144 only normalizes the tables
 // whose DEFAULT it just converted, never the intentionally-skipped ones.
 func backfillLegacyTimestampRows(ctx context.Context, tx *sql.Tx, table string) (int64, error) {
 	cols, err := timestampColumns(ctx, tx, table)
@@ -191,10 +204,22 @@ func backfillLegacyTimestampRows(ctx context.Context, tx *sql.Tx, table string) 
 	for _, col := range cols {
 		// table and col are both validated by isSafeIdent inside
 		// timestampColumns before they reach this interpolation.
+		//
+		// Fraction-aware gate (#1179): match BOTH the second-precision legacy
+		// form ("YYYY-MM-DD HH:MM:SS", 19 chars, from datetime('now')) AND the
+		// subsecond form ("YYYY-MM-DD HH:MM:SS.SSS", from datetime('now',
+		// 'subsec')). A LIKE pattern of fixed underscores matches only its own
+		// length, so the plain 19-char pattern never catches a fractional row —
+		// leaving every subsec table's historical pool space-form and still
+		// mis-ordered. Both patterns require a literal SPACE at the date/time
+		// boundary, which T-form ('T' there) never has, so already-converted
+		// values match neither and re-runs stay no-ops. replace(' ','T')||'Z'
+		// transforms both correctly (one space, fraction preserved untouched).
 		query := fmt.Sprintf(
 			`UPDATE "%s" SET "%s" = replace("%s", ' ', 'T') || 'Z' `+
-				`WHERE "%s" LIKE '____-__-__ __:__:__'`,
-			table, col, col, col,
+				`WHERE "%s" LIKE '____-__-__ __:__:__' `+
+				`OR "%s" LIKE '____-__-__ __:__:__.%%'`,
+			table, col, col, col, col,
 		)
 		res, err := tx.ExecContext(ctx, query)
 		if err != nil {
@@ -257,9 +282,15 @@ func rewriteTableDefaultLiteral(ctx context.Context, tx *sql.Tx, table string) e
 	// below — or it leaks into whatever runs next on this connection.
 	defer func() { _, _ = tx.ExecContext(ctx, `PRAGMA writable_schema = OFF`) }()
 
+	// Rewrite BOTH legacy forms to the same fractional T-form in one pass.
+	// The two literals are disjoint (neither is a substring of the other, nor
+	// of the strftime replacement), so the nested replace is order-independent
+	// and cannot corrupt a table that mixes both forms across columns.
 	res, err := tx.ExecContext(ctx,
-		`UPDATE sqlite_master SET sql = replace(sql, ?, ?) WHERE type = 'table' AND name = ?`,
-		datetimeNowDefaultLiteral, tformDefaultLiteral, table,
+		`UPDATE sqlite_master SET sql = replace(replace(sql, ?, ?), ?, ?) WHERE type = 'table' AND name = ?`,
+		datetimeNowSubsecDefaultLiteral, tformDefaultLiteral,
+		datetimeNowDefaultLiteral, tformDefaultLiteral,
+		table,
 	)
 	if err != nil {
 		return fmt.Errorf("rewrite sqlite_master.sql for %s: %w", table, err)

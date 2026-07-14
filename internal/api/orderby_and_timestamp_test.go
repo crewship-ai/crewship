@@ -26,7 +26,7 @@ import (
 //          sorts it with BINARY collation, the space (0x20) in the legacy
 //          format sorts *before* the 'T' (0x54) in RFC3339 — so a row with a
 //          legacy timestamp interleaved ahead of a chronologically-earlier
-//          RFC3339 row. FIXED by migration v142 (#1073b): every
+//          RFC3339 row. FIXED by migration v144 (#1073b): every
 //          string-compared DEFAULT was converted to the ISO T-form and the
 //          historical legacy rows backfilled, so both write paths now sort
 //          consistently. The former TRIPWIRE is now TestTimestampOrdering_
@@ -185,17 +185,17 @@ func namesOf(ps []projectResponse) []string {
 // ── T3.7 / DB1 — mixed timestamp formats break ORDER BY (FIXED, #1073b) ─────
 //
 // legacyTSLayout is the space-form SQLite's `datetime('now')` DEFAULT used to
-// write. Migration v142 converted every string-compared DEFAULT to the ISO
+// write. Migration v144 converted every string-compared DEFAULT to the ISO
 // T-form (strftime('%Y-%m-%dT%H:%M:%fZ','now')) and backfilled the historical
 // legacy rows, so the DEFAULT must NOT produce this shape anymore. The
 // SecureTarget test below is the live regression guard; this constant is kept
 // only so the guard can assert the legacy shape is gone.
 const (
-	legacyTSLayout = "2006-01-02 15:04:05" // what the pre-v142 datetime('now') DEFAULT wrote
+	legacyTSLayout = "2006-01-02 15:04:05" // what the pre-v144 datetime('now') DEFAULT wrote
 )
 
 // TestTimestampOrdering_SecureTarget is the post-#1073b regression guard
-// (formerly the DB1 tripwire). After migration v142 normalised every
+// (formerly the DB1 tripwire). After migration v144 normalised every
 // string-compared timestamp to a single format, ORDER BY created_at must
 // return rows in true chronological order regardless of which path wrote each
 // row — the DEFAULT (now ISO T-form) or an explicit application RFC3339 write.
@@ -219,12 +219,12 @@ func TestTimestampOrdering_SecureTarget(t *testing.T) {
 	}
 	// Direct regression check: the DEFAULT must no longer write the space-form
 	// that broke ordering. `time.Parse(legacyTSLayout, ...)` succeeds ONLY on
-	// the old "YYYY-MM-DD HH:MM:SS" shape, so a success here means v142 was
+	// the old "YYYY-MM-DD HH:MM:SS" shape, so a success here means v144 was
 	// reverted.
 	if _, err := time.Parse(legacyTSLayout, legacyTS); err == nil {
-		t.Fatalf("DEFAULT regressed to legacy space-form %q — v142 conversion lost", legacyTS)
+		t.Fatalf("DEFAULT regressed to legacy space-form %q — v144 conversion lost", legacyTS)
 	}
-	// Post-v142 the DEFAULT is ISO T-form (with a millisecond fraction);
+	// Post-v144 the DEFAULT is ISO T-form (with a millisecond fraction);
 	// time.Parse(time.RFC3339, ...) accepts the trailing fraction.
 	legacyTime, err := time.Parse(time.RFC3339, legacyTS)
 	if err != nil {

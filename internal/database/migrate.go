@@ -1632,25 +1632,27 @@ END;
 	// and issues #1072 / #1029.
 	{version: 140, name: "encrypt_webhook_secrets", fn: migrationEncryptWebhookSecrets},
 
-	// v141 is reserved for #1073a (memory_versions.written_at tsformat
-	// normalization, PR #1172) on its own branch. v142 is intentionally
-	// the next slot here so the two slices of #1073 don't collide.
+	// v141 is #1073a (memory_versions.written_at tsformat normalization, PR
+	// #1172) and v142/v143 belong to other in-flight branches (keeper M2a
+	// #1176 grabbed v142) — so #1073b lands at v144 to avoid the collision.
 	//
-	// v142: broader audit of `DEFAULT (datetime('now'))` columns (#1073,
-	// slice b of 3). PR #1156's keyset-cursor pagination on
-	// credentials.created_at (and every other ORDER BY / range comparison
-	// over a `*_at` column) compares these values as TEXT — the
-	// space-separated legacy form SQLite's `datetime('now')` produces
-	// never compares correctly against the ISO T-form strings this
-	// codebase's Go writers emit. This migration both stops the DEFAULT
-	// from producing new legacy-form values AND normalizes the historical
-	// ones the DEFAULT wrote after v45's one-shot backfill (v45 ran ~100
-	// versions earlier, so legacy rows re-accumulated since), for every
-	// string-compared column identified in the #1073b audit (see the PR
-	// description for the per-column verdict table and
-	// migrate_v142_datetime_default_tform.go for the mechanism and the
-	// small list of columns intentionally left alone).
-	{version: 142, name: "datetime_now_default_tform", fn: migrationConvertDatetimeNowDefaults},
+	// v144: broader audit of `DEFAULT (datetime('now'))` AND
+	// `DEFAULT (datetime('now','subsec'))` columns (#1073, slice b of 3). PR
+	// #1156's keyset-cursor pagination on credentials.created_at (and every
+	// other ORDER BY / range comparison over a `*_at` column) compares these
+	// values as TEXT — both legacy forms SQLite emits are SPACE-separated and
+	// never compare correctly against the ISO T-form strings this codebase's
+	// Go writers emit ('now','subsec' just adds a fraction; it stays
+	// space-form, so the ~16 ordered subsec tables — pipelines, inbox_items,
+	// pending_runs, … — carry the same bug and MUST be converted too). This
+	// migration both stops the DEFAULT from producing new legacy-form values
+	// AND normalizes the historical ones the DEFAULT wrote after v45's
+	// one-shot backfill (v45 ran ~100 versions earlier, so legacy rows
+	// re-accumulated since), for every string-compared column identified in
+	// the #1073b audit (see the PR description for the per-column verdict
+	// table and migrate_v144_datetime_default_tform.go for the mechanism and
+	// the small list of columns intentionally left alone).
+	{version: 144, name: "datetime_now_default_tform", fn: migrationConvertDatetimeNowDefaults},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
