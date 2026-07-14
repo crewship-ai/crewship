@@ -47,6 +47,24 @@ crewship wait r_abc --format json                 # full RunDetail on completion
 crewship wait prun_xyz --routine --timeout 10m
 ```
 
+### Scope: agent + routine runs only
+
+`crewship wait` (and its `--timeout`/`--interval` polling contract) covers
+agent runs and routine (pipeline) runs. A handful of other long-running
+commands have grown their **own** `--wait` flag that polls a
+command-specific status endpoint instead of routing through `wait`:
+
+| Command | What `--wait` polls |
+|---|---|
+| [`crewship run` / `crewship ask`](/cli/run) | `--wait` is a spelling alias for `--no-stream` (block on the WebSocket stream itself — no separate poll). |
+| [`crewship pipeline run --wait`](/cli/routine) | `GET /api/v1/workspaces/{id}/pipeline-runs/{id}` |
+| [`crewship mission start --wait`](/cli/mission) | `GET /api/v1/crews/{crewId}/missions/{missionId}` |
+| [`crewship hire --wait`](/cli/hire) | `GET /api/v1/agents/{id}` (waits out a `guided`-crew `PENDING_REVIEW` approval) |
+
+`crew provision` / `crew rebuild` block by default (pass `--no-watch` to
+opt out) via their own devcontainer-build poll, so they don't need a
+`--wait` flag at all.
+
 ## See also
 
 - [`crewship watch`](/cli/watch) — live event tail (use to follow what's happening *during* the run).

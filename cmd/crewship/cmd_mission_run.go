@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -37,8 +41,53 @@ var missionStartCmd = &cobra.Command{
 		resp.Body.Close()
 
 		cli.PrintSuccess(fmt.Sprintf("Mission %s started — MissionEngine DAG loop is running.", args[0]))
+
+		if waitForRun, _ := cmd.Flags().GetBool("wait"); waitForRun {
+			waitTimeout, _ := cmd.Flags().GetDuration("wait-timeout")
+			return waitForMission(cmd, client, crewID, fullID, args[0], waitTimeout)
+		}
 		return nil
 	},
+}
+
+// waitForMission polls a mission's status (via client.PollMission, the
+// same helper `crewship wait` and `crewship pipeline run --wait` build
+// on) until it reaches COMPLETED or FAILED, ctx is cancelled, or timeout
+// elapses. Mirrors waitForPipelineRun's shape/output conventions
+// (cmd_pipeline.go) so --wait behaves consistently across commands.
+func waitForMission(cmd *cobra.Command, client *cli.Client, crewID, missionID, displayID string, timeout time.Duration) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	start := time.Now()
+	var lastStatus string
+	detail, err := client.PollMission(ctx, crewID, missionID, 2*time.Second, func(d *cli.MissionDetail) {
+		if d.Status != lastStatus {
+			lastStatus = d.Status
+			fmt.Fprintf(os.Stderr, "%s[wait]%s %s status=%s elapsed=%s\n",
+				cli.Dim, cli.Reset, displayID, d.Status, time.Since(start).Truncate(time.Second))
+		}
+	})
+	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("timed out after %s waiting for mission %s to finish",
+				time.Since(start).Truncate(time.Second), displayID)
+		}
+		return err
+	}
+
+	fmt.Printf("Mission %s: %s\n", displayID, detail.Status)
+	if strings.EqualFold(detail.Status, "FAILED") {
+		return fmt.Errorf("mission %s FAILED", displayID)
+	}
+	return nil
 }
 
 var missionResumeCmd = &cobra.Command{

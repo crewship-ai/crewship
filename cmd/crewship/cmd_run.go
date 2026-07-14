@@ -111,6 +111,8 @@ Examples:
 
 		interactive, _ := cmd.Flags().GetBool("interactive")
 		noStream, _ := cmd.Flags().GetBool("no-stream")
+		waitFlag, _ := cmd.Flags().GetBool("wait")
+		noStream = noStream || waitFlag
 		quiet, _ := cmd.Flags().GetBool("quiet")
 		existingChat, _ := cmd.Flags().GetString("chat")
 		timeoutSecs, _ := cmd.Flags().GetInt("timeout")
@@ -769,6 +771,7 @@ func init() {
 	runCmd.Flags().Bool("interactive", false, "Interactive chat mode")
 	runCmd.Flags().String("chat", "", "Continue existing chat (chat ID)")
 	runCmd.Flags().Bool("no-stream", false, "Wait for completion, show only result")
+	runCmd.Flags().Bool("wait", false, "Wait for completion, show only result (alias for --no-stream, matches 'crewship pipeline run --wait')")
 	runCmd.Flags().BoolP("quiet", "q", false, "Only output text, no meta info")
 	runCmd.Flags().Int("timeout", 0, "Timeout in seconds (0 = no timeout)")
 	runCmd.Flags().Int("max-turns", 0, "Cap the agent loop at N turns for this run (0 = adapter default, 50 interactive)")

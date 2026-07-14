@@ -5,12 +5,14 @@ package main
 // without standing up crewshipd.
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -205,5 +207,113 @@ func TestHireRunE_CUIDCrewGoesIntoCrewID(t *testing.T) {
 	}
 	if _, has := got["crew_slug"]; has {
 		t.Errorf("crew_slug present alongside crew_id: %v", got)
+	}
+}
+
+// TestHireRunE_WaitFlag_PollsUntilApproved covers issue #966 part 1: a
+// guided-autonomy hire returns 202 PENDING_REVIEW immediately; --wait
+// must block (polling GET /api/v1/agents/{id}, the same route `agent
+// get` uses) until an operator approves it (status flips to something
+// other than PENDING_REVIEW), instead of leaving the caller to guess.
+func TestHireRunE_WaitFlag_PollsUntilApproved(t *testing.T) {
+	saveCLIState(t)
+
+	var hits int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/agents/hire", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{
+			"id": "cabc123",
+			"slug": "docs-writer-eph-abc123",
+			"name": "Docs Writer",
+			"status": "PENDING_REVIEW",
+			"ephemeral": true,
+			"pending_review": true,
+			"inbox_item_id": "cinbox123",
+			"decision": "pending_review"
+		}`))
+	})
+	mux.HandleFunc("/api/v1/agents/cabc123", func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&hits, 1)
+		status := "PENDING_REVIEW"
+		if n >= 2 {
+			status = "IDLE"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "cabc123", "status": status})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "cabcdefghijklmnopqrs", Server: srv.URL}
+	hireCmd.SetContext(context.Background())
+
+	_ = hireCmd.Flags().Set("yes", "true")
+	_ = hireCmd.Flags().Set("crew", "docs")
+	_ = hireCmd.Flags().Set("template", "docs-writer")
+	_ = hireCmd.Flags().Set("reason", "ship section 7")
+	_ = hireCmd.Flags().Set("wait", "true")
+	_ = hireCmd.Flags().Set("wait-interval", "5ms")
+	t.Cleanup(func() {
+		_ = hireCmd.Flags().Set("yes", "false")
+		_ = hireCmd.Flags().Set("crew", "")
+		_ = hireCmd.Flags().Set("template", "")
+		_ = hireCmd.Flags().Set("reason", "")
+		_ = hireCmd.Flags().Set("wait", "false")
+		_ = hireCmd.Flags().Set("wait-interval", "2s")
+	})
+
+	if err := hireCmd.RunE(hireCmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if n := atomic.LoadInt32(&hits); n < 2 {
+		t.Errorf("expected --wait to poll agent status at least twice, got %d", n)
+	}
+}
+
+// TestHireRunE_WithoutWait_ReturnsImmediately pins the default (no
+// --wait) behaviour: a pending hire returns as soon as the 202 lands,
+// with zero polling of the agent status endpoint.
+func TestHireRunE_WithoutWait_ReturnsImmediately(t *testing.T) {
+	saveCLIState(t)
+
+	var hits int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/agents/hire", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{
+			"id": "cabc123", "slug": "docs-writer-eph-abc123", "name": "Docs Writer",
+			"status": "PENDING_REVIEW", "ephemeral": true, "pending_review": true,
+			"inbox_item_id": "cinbox123", "decision": "pending_review"
+		}`))
+	})
+	mux.HandleFunc("/api/v1/agents/cabc123", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "cabc123", "status": "PENDING_REVIEW"})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "cabcdefghijklmnopqrs", Server: srv.URL}
+
+	_ = hireCmd.Flags().Set("yes", "true")
+	_ = hireCmd.Flags().Set("crew", "docs")
+	_ = hireCmd.Flags().Set("template", "docs-writer")
+	_ = hireCmd.Flags().Set("reason", "ship section 7")
+	t.Cleanup(func() {
+		_ = hireCmd.Flags().Set("yes", "false")
+		_ = hireCmd.Flags().Set("crew", "")
+		_ = hireCmd.Flags().Set("template", "")
+		_ = hireCmd.Flags().Set("reason", "")
+	})
+
+	if err := hireCmd.RunE(hireCmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if n := atomic.LoadInt32(&hits); n != 0 {
+		t.Errorf("expected no agent-status polling without --wait, got %d", n)
 	}
 }
