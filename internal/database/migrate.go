@@ -1632,12 +1632,14 @@ END;
 	// and issues #1072 / #1029.
 	{version: 140, name: "encrypt_webhook_secrets", fn: migrationEncryptWebhookSecrets},
 
-	// v141: per-workspace "four-eyes" toggle (require_second_approver) on the
+	// v143: per-workspace "four-eyes" toggle (require_second_approver) on the
 	// Keeper governance row — a MANAGER+ approver can no longer resolve a
 	// CREDENTIAL escalation raised by an agent they own (agents.created_by_user_id,
 	// v100) when enabled. OWNER is not exempt. Default off. See
-	// migrate_consts_v141_credential_second_approver.go and issue #1084.
-	{version: 141, name: "credential_second_approver", sql: migrationCredentialSecondApprover},
+	// migrate_consts_v143_credential_second_approver.go and issue #1084.
+	// (v141 was renumbered to v143 to avoid a collision with #1172's v141;
+	// v142 belongs to #1176's keeper gov-model migration.)
+	{version: 143, name: "credential_second_approver", sql: migrationCredentialSecondApprover},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

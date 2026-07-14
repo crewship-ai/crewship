@@ -300,6 +300,12 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	escalationID := r.PathValue("escalationId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
+	// The authenticated human resolving the escalation — recorded as the actor
+	// on the resolution journal entry (audit: who approved/rejected/redirected).
+	resolverUserID := ""
+	if u := UserFromContext(r.Context()); u != nil {
+		resolverUserID = u.ID
+	}
 	// Require at least MANAGER to resolve escalations (data-modifying operation)
 	if !canRole(role, "create") {
 		replyError(w, http.StatusForbidden, "Forbidden")
@@ -547,6 +553,7 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		Type:        journal.EntryPeerEscalation,
 		Severity:    journal.SeverityNotice,
 		ActorType:   journal.ActorUser,
+		ActorID:     resolverUserID,
 		Summary:     fmt.Sprintf("escalation %s resolved (%s)", escalationID, body.Action),
 		Payload: map[string]any{
 			"resolution":      resolutionForJournal,

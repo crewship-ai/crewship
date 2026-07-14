@@ -55,6 +55,9 @@ type keeperGovernance struct {
 	// is not exempt. Rides on this same governance row/endpoint but is a
 	// distinct concern from the behavioral watchdog above it.
 	RequireSecondApprover bool `json:"require_second_approver"`
+	// Warning is a non-blocking advisory the server returns on a mutation —
+	// e.g. enabling second-approver with fewer than 2 eligible approvers.
+	Warning string `json:"warning,omitempty"`
 }
 
 // keeperServerStatus mirrors GET /api/v1/system/keeper.
@@ -369,6 +372,9 @@ func setKeeperRequireSecondApprover(enabled bool) error {
 			verb = "enabled"
 		}
 		cli.PrintSuccess(fmt.Sprintf("Second-approver rule %s for credential escalations in this workspace.", verb))
+		if out.Warning != "" {
+			fmt.Printf("%s⚠ %s%s\n", cli.Yellow, out.Warning, cli.Reset)
+		}
 		printKeeperGovernance(out)
 	})
 }

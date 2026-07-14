@@ -35,6 +35,10 @@ func NewKeeperGovernanceHandler(db *sql.DB, logger *slog.Logger, j journal.Emitt
 type keeperGovernanceResponse struct {
 	Configured bool `json:"configured"`
 	governance.Settings
+	// Warning is a non-blocking advisory returned by Put — e.g. enabling the
+	// second-approver rule on a workspace that lacks a second eligible approver.
+	// Empty on Get and on a clean Put.
+	Warning string `json:"warning,omitempty"`
 }
 
 // Get handles GET /api/v1/admin/keeper/governance (ADMIN+).
@@ -181,5 +185,26 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("keeper governance: journal emit failed", "error", jerr)
 	}
 
-	writeJSON(w, http.StatusOK, keeperGovernanceResponse{Configured: true, Settings: s})
+	// Warn (do NOT block) when enabling the four-eyes rule on a workspace that
+	// can't satisfy it: with fewer than two members who can resolve escalations
+	// (OWNER/ADMIN/MANAGER), a credential raised via the only eligible member's
+	// agent can never be approved by a different person — the rule would deadlock.
+	// The operator may be mid-setup (about to invite a second admin), so this is
+	// advisory, not a 4xx.
+	warning := ""
+	if body.RequireSecondApprover != nil && *body.RequireSecondApprover {
+		var eligible int
+		if err := h.db.QueryRowContext(r.Context(), `
+			SELECT COUNT(*) FROM workspace_members
+			WHERE workspace_id = ? AND role IN ('OWNER','ADMIN','MANAGER')`,
+			wsID).Scan(&eligible); err != nil {
+			h.logger.Warn("keeper governance: eligible-approver count failed", "error", err)
+		} else if eligible < 2 {
+			warning = "second-approver is enabled, but this workspace has fewer than 2 members who can approve escalations (OWNER/ADMIN/MANAGER). A credential raised via the only eligible member's agent cannot be resolved by anyone else — add another OWNER/ADMIN/MANAGER."
+			h.logger.Warn("keeper governance: second-approver enabled with <2 eligible approvers",
+				"workspace_id", wsID, "eligible", eligible)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, keeperGovernanceResponse{Configured: true, Settings: s, Warning: warning})
 }

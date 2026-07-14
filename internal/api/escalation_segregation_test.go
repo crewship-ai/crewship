@@ -238,3 +238,43 @@ func TestResolveEscalation_SegregationOfDuties_NoRecordedOwner(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (no recorded owner -> rule can't be enforced); body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+// TestResolveEscalation_SuccessJournalCarriesActorID — the resolution audit
+// entry must record WHO resolved it (#1084 review: add ActorID to the resolve
+// journal entry).
+func TestResolveEscalation_SuccessJournalCarriesActorID(t *testing.T) {
+	ensureEncryptionKey(t)
+	db := setupTestDB(t)
+	ownerID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, ownerID)
+	crewID := seedCrewRow(t, db, "sod-crew5", wsID, "Crew", "sod-crew5")
+	agentID := seedOwnedAgent(t, db, "sod-agent5", wsID, crewID, ownerID)
+	seedSoDEscalation(t, db, "sod-esc5", wsID, crewID, agentID)
+	// Toggle OFF → the owner can resolve (success path).
+
+	h := NewQueryHandler(db, nil, nil, "", newTestLogger())
+	jw := journal.NewWriter(db, newTestLogger(), journal.WriterOptions{FlushSize: 1})
+	t.Cleanup(func() { _ = jw.Close() })
+	h.SetJournal(jw)
+
+	rr := covEscResolve(h, ownerID, wsID, "sod-esc5", map[string]string{
+		"resolution": "approved", "action": "approve",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	_ = jw.Flush(context.Background())
+
+	var actorID string
+	err := db.QueryRowContext(context.Background(),
+		`SELECT actor_id FROM journal_entries
+		 WHERE workspace_id = ? AND entry_type = ? AND actor_type = 'user'
+		   AND json_extract(payload, '$.state') = 'resolved'`,
+		wsID, string(journal.EntryPeerEscalation)).Scan(&actorID)
+	if err != nil {
+		t.Fatalf("expected a resolved peer.escalation journal entry: %v", err)
+	}
+	if actorID != ownerID {
+		t.Errorf("resolve journal actor_id = %q, want the resolver %q", actorID, ownerID)
+	}
+}

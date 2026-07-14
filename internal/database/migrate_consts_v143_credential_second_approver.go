@@ -1,6 +1,6 @@
 package database
 
-// migrationCredentialSecondApprover (v141) adds a per-workspace "four-eyes"
+// migrationCredentialSecondApprover (v143) adds a per-workspace "four-eyes"
 // toggle for credential escalation approvals (issue #1084). It extends the
 // M0 Keeper governance row rather than adding a parallel settings table —
 // same rationale as v139 (migrate_consts_v139_keeper_watch_spec.go): the

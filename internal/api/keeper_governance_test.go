@@ -492,3 +492,46 @@ func TestKeeperGovernance_LowRiskDenySilent(t *testing.T) {
 		t.Fatalf("low-risk DENY wrote %d inbox items, want 0", n)
 	}
 }
+
+// TestKeeperGovernance_SecondApproverWarnsWhenTooFewApprovers — enabling the
+// four-eyes rule on a workspace with <2 eligible approvers (OWNER/ADMIN/MANAGER)
+// must WARN but still enable (#1084 review: warn, don't block — the operator may
+// be mid-setup).
+func TestKeeperGovernance_SecondApproverWarnsWhenTooFewApprovers(t *testing.T) {
+	t.Run("<2 eligible -> warning, still enabled", func(t *testing.T) {
+		db := setupTestDB(t)
+		userID := seedTestUser(t, db)
+		wsID := seedTestWorkspace(t, db, userID) // owner only
+		h := NewKeeperGovernanceHandler(db, newComposioTestLogger(), nil)
+
+		rr := doGovernanceReq(t, h, http.MethodPut, `{"require_second_approver": true}`, wsID, userID)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d; body=%s", rr.Code, rr.Body.String())
+		}
+		res := decodeGovernance(t, rr.Body.Bytes())
+		if res.Warning == "" {
+			t.Error("expected a warning when enabling with <2 eligible approvers")
+		}
+		if !res.RequireSecondApprover {
+			t.Error("rule must still be ENABLED (warn, not block)")
+		}
+	})
+
+	t.Run(">=2 eligible -> no warning", func(t *testing.T) {
+		db := setupTestDB(t)
+		userID := seedTestUser(t, db)
+		wsID := seedTestWorkspace(t, db, userID)
+		execOrFatal(t, db, `INSERT INTO users (id, email) VALUES ('mgr2', 'mgr2@example.com')`)
+		execOrFatal(t, db, `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('wm2', ?, 'mgr2', 'MANAGER')`, wsID)
+		h := NewKeeperGovernanceHandler(db, newComposioTestLogger(), nil)
+
+		rr := doGovernanceReq(t, h, http.MethodPut, `{"require_second_approver": true}`, wsID, userID)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d; body=%s", rr.Code, rr.Body.String())
+		}
+		res := decodeGovernance(t, rr.Body.Bytes())
+		if res.Warning != "" {
+			t.Errorf("unexpected warning with 2 eligible approvers: %q", res.Warning)
+		}
+	})
+}
