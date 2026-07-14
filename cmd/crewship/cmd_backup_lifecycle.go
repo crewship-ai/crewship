@@ -138,9 +138,12 @@ var backupCreateCmd = &cobra.Command{
 		// non-loopback host. Skipped when nothing secret is being sent
 		// (--no-encrypt / --recipient leave passphrase empty), so an
 		// unencrypted backup over a plain-HTTP dev box doesn't get a
-		// spurious credentials-in-the-clear warning.
+		// spurious credentials-in-the-clear warning. EffectiveServer (not
+		// ResolveServer) so this matches what the client.Post below (via
+		// newAPIClient) actually dials — flag > profile > env > config >
+		// default (#1146/#1163).
 		if passphrase != "" {
-			if err := preflightServerURL(cmd.ErrOrStderr(), cli.ResolveServer(flagServer, cliCfg)); err != nil {
+			if err := preflightServerURL(cmd.ErrOrStderr(), cli.EffectiveServer(flagServer, flagProfile, cliCfg)); err != nil {
 				return err
 			}
 		}
