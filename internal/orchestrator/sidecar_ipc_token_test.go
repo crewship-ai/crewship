@@ -17,10 +17,12 @@ func ipcTestLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 }
 
-func TestSidecarIPCToken_DerivesWorkspaceBoundToken(t *testing.T) {
+func TestSidecarIPCToken_CrewlessDerivesWorkspaceBoundToken(t *testing.T) {
 	t.Parallel()
 	const master = "master-secret"
-	tok := sidecarIPCToken(master, "ws_a", ipcTestLogger())
+	// No crew → workspace-bound fallback (PR-F24), the crew-less path the
+	// in-process TokenSyncer and crew-less callers rely on.
+	tok := sidecarIPCToken(master, "ws_a", "", ipcTestLogger())
 
 	if tok == master {
 		t.Fatal("sidecar received the raw master token — the workspace binding is not applied")
@@ -34,11 +36,37 @@ func TestSidecarIPCToken_DerivesWorkspaceBoundToken(t *testing.T) {
 	}
 }
 
-func TestSidecarIPCToken_DistinctPerWorkspace(t *testing.T) {
+// TestSidecarIPCToken_CrewBound covers #1159: a run with a crew gets a
+// crew-bound token so the internal API can pin the crew scope server-side.
+func TestSidecarIPCToken_CrewBound(t *testing.T) {
 	t.Parallel()
 	const master = "master-secret"
-	if sidecarIPCToken(master, "ws_a", ipcTestLogger()) == sidecarIPCToken(master, "ws_b", ipcTestLogger()) {
+	tok := sidecarIPCToken(master, "ws_a", "crew_1", ipcTestLogger())
+	if tok == master {
+		t.Fatal("sidecar received the raw master token — the crew binding is not applied")
+	}
+	if !internaltoken.IsCrewToken(tok) {
+		t.Fatalf("issued token %q is not crew-bound", tok)
+	}
+	ws, crew, ok := internaltoken.ValidateCrewToken(master, tok)
+	if !ok || ws != "ws_a" || crew != "crew_1" {
+		t.Fatalf("crew token validated to (%q,%q,%v), want (ws_a,crew_1,true)", ws, crew, ok)
+	}
+}
+
+func TestSidecarIPCToken_DistinctPerScope(t *testing.T) {
+	t.Parallel()
+	const master = "master-secret"
+	if sidecarIPCToken(master, "ws_a", "", ipcTestLogger()) == sidecarIPCToken(master, "ws_b", "", ipcTestLogger()) {
 		t.Fatal("tokens for different workspaces must differ")
+	}
+	// Two crews in the same workspace must get distinct tokens.
+	if sidecarIPCToken(master, "ws_a", "crew_1", ipcTestLogger()) == sidecarIPCToken(master, "ws_a", "crew_2", ipcTestLogger()) {
+		t.Fatal("tokens for different crews must differ")
+	}
+	// A crew-bound token must differ from the workspace-bound fallback.
+	if sidecarIPCToken(master, "ws_a", "crew_1", ipcTestLogger()) == sidecarIPCToken(master, "ws_a", "", ipcTestLogger()) {
+		t.Fatal("crew-bound and workspace-bound tokens for the same workspace must differ")
 	}
 }
 
@@ -49,11 +77,11 @@ func TestSidecarIPCToken_FailsClosed(t *testing.T) {
 	// to the master. A sidecar without a workspace-scoped token gets
 	// 403s from the internal API — loud and contained — instead of a
 	// process-wide secret inside the container.
-	if got := sidecarIPCToken(master, "", ipcTestLogger()); got != "" {
+	if got := sidecarIPCToken(master, "", "crew_1", ipcTestLogger()); got != "" {
 		t.Errorf("empty workspace: issued %q, want empty (never the master)", got)
 	}
 	// Empty master: nothing to derive from.
-	if got := sidecarIPCToken("", "ws_a", ipcTestLogger()); got != "" {
+	if got := sidecarIPCToken("", "ws_a", "crew_1", ipcTestLogger()); got != "" {
 		t.Errorf("empty master: issued %q, want empty", got)
 	}
 }

@@ -182,14 +182,14 @@ func TestAgentUpdateRunE_NoFields(t *testing.T) {
 		"avatar-seed", "avatar-style", "self-learning", "learning-reason",
 		"schedule-cron", "schedule-prompt", "schedule-enabled")
 
-	// CUID argument: resolveAgentID short-circuits, no HTTP call needed.
+	// CUID argument: resolveAgentID verifies it (#1075) but must not fire
+	// any mutating call — the "no fields to update" guard runs before any
+	// update side effect.
 	err := agentUpdateCmd.RunE(agentUpdateCmd, []string{covAgentIDCli6})
 	if err == nil || !strings.Contains(err.Error(), "no fields to update") {
 		t.Errorf("expected 'no fields to update', got %v", err)
 	}
-	if n := len(stub.Calls()); n != 0 {
-		t.Errorf("no HTTP call expected, got %d", n)
-	}
+	assertNoMutatingCalls(t, stub)
 }
 
 func TestAgentUpdateRunE_PatchesChangedFields(t *testing.T) {
@@ -328,9 +328,7 @@ func TestAgentUpdateRunE_SelfLearningRequiresReason(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "learning-reason is required") {
 		t.Errorf("expected learning-reason-required error, got %v", err)
 	}
-	if n := len(stub.Calls()); n != 0 {
-		t.Errorf("no HTTP call expected, got %d", n)
-	}
+	assertNoMutatingCalls(t, stub)
 }
 
 // TestAgentUpdateRunE_SelfLearningCannotCombine verifies the guard against
@@ -349,9 +347,7 @@ func TestAgentUpdateRunE_SelfLearningCannotCombine(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
 		t.Errorf("expected cannot-combine error, got %v", err)
 	}
-	if n := len(stub.Calls()); n != 0 {
-		t.Errorf("no HTTP call expected when the mix is rejected, got %d", n)
-	}
+	assertNoMutatingCalls(t, stub)
 }
 
 func TestAgentUpdateRunE_SystemPromptFromFile(t *testing.T) {

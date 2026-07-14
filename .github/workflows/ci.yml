@@ -277,9 +277,13 @@ jobs:
     env:
       GOLANGCI_VERSION: v2.1.6
     steps:
+      # fetch-depth: 0 (rather than the default shallow depth-1 clone) so
+      # the tsformat proximity-lint step below can resolve origin/main and
+      # diff against it — same reasoning as migration-lint.yml.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - uses: ./.github/actions/setup-go-embed
         with:
@@ -311,6 +315,21 @@ jobs:
 
       - name: Run golangci-lint
         run: ${{ steps.gopath.outputs.bin }}/golangci-lint run --timeout=5m ./...
+
+      # tsformat proximity lint (#990, #1073c): flags any RFC3339Nano
+      # token added within `window` lines of an ExecContext/QueryContext
+      # call — internal/tsformat's own doc comment says any such write
+      # belongs in tsformat.Format instead, since RFC3339Nano truncates
+      # trailing-zero fractional seconds and breaks lexicographic sort
+      # order in SQL comparisons/ORDER BY.
+      #
+      # Scoped to lines ADDED relative to origin/main (see
+      # scripts/lint-tsformat/main.go's doc comment) rather than a
+      # whole-tree scan, so this gate is about catching new regressions
+      # to the broken pattern, not retroactively blocking on the ~100+
+      # pre-existing hits that #1073a/#1073b are converting separately.
+      - name: tsformat proximity lint
+        run: go run ./scripts/lint-tsformat origin/main
 
   # ── Full binary build (push to main only — verifies embed works) ──
   #

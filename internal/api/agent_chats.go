@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -283,11 +285,16 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Scope check mirrors MarkChatRead: cross-tenant / mis-nested ids 404
-	// without leaking existence.
-	var createdBy sql.NullString
+	// without leaking existence. LEFT JOIN agents so we also learn the
+	// agent's slug + crew_id for the #1148 attachment-blob cleanup below —
+	// LEFT (not INNER) so a chat whose agent was since soft/hard-deleted
+	// still deletes cleanly (slug/crew_id come back NULL → cleanup no-ops).
+	var createdBy, agentSlug, agentCrewID sql.NullString
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT created_by FROM chats WHERE id = ? AND agent_id = ? AND workspace_id = ?`,
-		chatID, agentID, workspaceID).Scan(&createdBy)
+		`SELECT c.created_by, a.slug, a.crew_id
+		   FROM chats c LEFT JOIN agents a ON a.id = c.agent_id
+		  WHERE c.id = ? AND c.agent_id = ? AND c.workspace_id = ?`,
+		chatID, agentID, workspaceID).Scan(&createdBy, &agentSlug, &agentCrewID)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "Chat not found")
 		return
@@ -358,8 +365,8 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 	// query JOINs chats through it or dereferences it, so a pointer to a gone
 	// chat degrades gracefully (an "open source chat" deep link may 404, same
 	// as any deleted resource). Attachment blobs under
-	// <storage-root>/<crew>/<agent>/attachments/<chatId>/ are a separate
-	// residual tracked for follow-up (needs an IPC files-delete surface).
+	// <storage-root>/<crew>/<agent>/attachments/<chatId>/ are unlinked
+	// best-effort AFTER the tx commits (#1148) — see cleanupChatAttachments.
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		h.logger.Error("delete chat begin tx", "error", err)
@@ -388,6 +395,13 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
+
+	// #1148: the DB rows are gone; now unlink the chat's attachment blobs.
+	// Best-effort AFTER commit — a storage error is logged but must not
+	// fail the delete (the operator's chat is already gone, and the
+	// residual is a disk-space leak, not a correctness bug).
+	h.cleanupChatAttachments(agentCrewID, agentSlug, chatID)
+
 	h.broadcastAgentEvent("inbox.updated", workspaceID, map[string]string{
 		"source": "chat_deleted",
 		"chat":   chatID,
@@ -398,6 +412,48 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 		"chat_id":  chatID,
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// cleanupChatAttachments removes the on-disk attachment directory for a
+// deleted chat: <storagePath>/<crewID>/<slug>/attachments/<chatId>/,
+// the exact tree AgentChatAttachment writes to via the IPC files/save
+// path. Best-effort: every early-return / error is a silent no-op or a
+// WARN — callers have already committed the DB delete and a blob
+// residual must never turn a successful delete into a 500.
+//
+// The three id segments come from trusted sources (crew_id + slug are
+// DB columns; chatID is the already-scope-checked path value), but each
+// is still re-validated against safeIDPattern before it is joined onto
+// the host path. That keeps CodeQL's path-injection check satisfied and
+// adds defense-in-depth: a corrupted row or a future non-CUID id scheme
+// can never produce a "../" segment that escapes storagePath and unlinks
+// an unrelated tree.
+//
+// TODO(#1148): this unlinks via os.RemoveAll on the local storagePath,
+// which only cleans up the default localfs backend. provider.StorageProvider
+// already defines a Delete(ctx, path) site, so once a non-local backend
+// (e.g. an S3 StorageProvider) is wired, these blobs would leak — route the
+// cleanup through StorageProvider (walk the attachments prefix + Delete each
+// object, since the interface has no recursive RemoveAll) instead of the
+// filesystem directly. Tracked for the storage-backend generalization.
+func (h *AgentHandler) cleanupChatAttachments(crewID, slug sql.NullString, chatID string) {
+	if h.storagePath == "" || !crewID.Valid || !slug.Valid {
+		return // unwired storage, or an agent with no crew — no attachments possible
+	}
+	if !safeIDPattern.MatchString(crewID.String) ||
+		!safeIDPattern.MatchString(slug.String) ||
+		!safeIDPattern.MatchString(chatID) {
+		h.logger.Warn("skip chat attachment cleanup: unsafe id segment",
+			"crew_id", crewID.String, "slug", slug.String, "chat_id", chatID)
+		return
+	}
+	dir := filepath.Join(h.storagePath, crewID.String, slug.String, "attachments", chatID)
+	if err := os.RemoveAll(dir); err != nil {
+		// RemoveAll returns nil when the dir never existed, so this is a
+		// genuine unlink failure (perms, I/O) — worth a breadcrumb, not a
+		// failed request.
+		h.logger.Warn("chat attachment cleanup failed", "dir", dir, "error", err)
+	}
 }
 
 // ListRuns returns all execution runs for a given agent, ordered by most recent first.

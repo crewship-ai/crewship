@@ -616,6 +616,65 @@ func TestRunSetup_PreflightBlocksBadScheme(t *testing.T) {
 	}
 }
 
+// TestRunSetup_PreflightAndBrowserURL_HonorActiveProfile locks the #1163
+// fix: runSetup used cli.ResolveServer (env > cfg) for both the
+// transport-security preflight and the printed "open it in the browser"
+// URL, while the actual onboarding POST always dials through
+// newAPIClient's cli.EffectiveServer (flag > profile > env > cfg) — the
+// same divergence #1146 fixed for whoami/doctor/open/tui. Under an active
+// --profile with a stale CREWSHIP_SERVER left over from #544, the
+// unmigrated helpers would preflight-check (and print) the wrong host
+// even though the POST landed on the right one. Pointing CREWSHIP_SERVER
+// at an unsupported scheme makes the two helpers diverge unmistakably:
+// unmigrated code fails preflight outright; the fixed code resolves the
+// active profile's server and succeeds end to end.
+func TestRunSetup_PreflightAndBrowserURL_HonorActiveProfile(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+
+	origServer, origProfile, origCfg := flagServer, flagProfile, cliCfg
+	t.Cleanup(func() { flagServer, flagProfile, cliCfg = origServer, origProfile, origCfg })
+	saveSetupFlagsCov(t)
+
+	t.Setenv("CREWSHIP_SERVER", "ftp://bogus.invalid")
+	t.Setenv("CREWSHIP_WORKSPACE", "")
+	flagServer = ""
+	flagProfile = "dev2"
+	// Mirrors the WithActiveProfile overlay PersistentPreRun applies in
+	// production (main.go): top-level Server/Token/Workspace carry the
+	// active profile's values, and Servers still holds the named profile
+	// for cli.EffectiveServer's own ActiveProfile lookup.
+	cliCfg = &cli.CLIConfig{
+		Server: stub.URL(), Token: "fake-token", Workspace: covWorkspaceID,
+		Servers: map[string]*cli.ServerProfile{
+			"dev2": {Server: stub.URL(), Token: "fake-token", Workspace: covWorkspaceID},
+		},
+	}
+
+	stub.OnPost("/api/v1/onboarding/setup", clitest.JSONResponse(200, map[string]any{
+		"agent_id": "ag_1", "agent_count": 1,
+	}))
+
+	setupCrewFlag = "blank"
+	setupAdapterFlag = "CLAUDE_CODE"
+	setupAPIKeyFlag = "sk-ant-oat01-perfectly-fine-token"
+
+	out, err := captureStdoutCov(t, func() error {
+		return runSetup(setupCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("runSetup: %v (want it to resolve the active profile's server, not stale CREWSHIP_SERVER)", err)
+	}
+	wantURL := stub.URL() + "/crews/agents/ag_1/chat"
+	if !strings.Contains(out, wantURL) {
+		t.Errorf("browser URL must use the active profile's server; want substring %q, got:\n%s", wantURL, out)
+	}
+	calls := stub.CallsFor("POST", "/api/v1/onboarding/setup")
+	if len(calls) != 1 {
+		t.Fatalf("expected setup POST to reach the profile's stub server, got %d calls", len(calls))
+	}
+}
+
 func TestRunSetup_NetworkError(t *testing.T) {
 	setupDeadCLICov(t)
 	saveSetupFlagsCov(t)

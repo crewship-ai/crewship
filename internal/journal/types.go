@@ -238,6 +238,14 @@ const (
 	EntrySystemHookToggled            EntryType = "system.hook_toggled"
 	EntrySystemConsolidationTriggered EntryType = "system.consolidation_triggered"
 	EntrySystemConsolidationCompleted EntryType = "system.consolidation_completed"
+	// EntrySidecarStale (#1160): a crew container is serving an OLD
+	// bind-mounted crewship-sidecar from before the last redeploy (#1008
+	// detection), so memory recall and egress policy may be silently
+	// degraded. Emitted at severity:error by the orchestrator so the
+	// condition lands in the activity feed instead of only stdout — the
+	// channel class nobody watched when #1008 first happened. Remediation:
+	// `crewship crew restart-agents`.
+	EntrySidecarStale EntryType = "sidecar.stale"
 
 	// Credentials
 	// EntryCredentialAutoAssignFailed: a single autoAssignCredentials step failed

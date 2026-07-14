@@ -37,6 +37,13 @@ type AgentHandler struct {
 	// model set on update. Nil-safe: when unset (e.g. legacy test routers),
 	// llm_model passes through unchecked — the historical behaviour.
 	modelValidator ModelValidator
+	// storagePath is the host filesystem root that bind-mounts crew file
+	// storage (== cfg.Storage.BasePath). DeleteChat uses it to unlink a
+	// chat's attachment blobs under <root>/<crewID>/<slug>/attachments/
+	// <chatId>/ (#1148). Empty when unwired (legacy test routers): the
+	// blob cleanup silently no-ops, matching every other storagePath
+	// consumer in this package.
+	storagePath string
 }
 
 // ModelValidator resolves the valid model-ID set for a provider in a
@@ -91,6 +98,10 @@ func (h *AgentHandler) SetPolicyResolver(r *policy.Resolver) { h.policyResolver 
 // SetModelValidator wires the model-set validator used by Update to reject a
 // bogus llm_model. Nil-safe: when unset, llm_model passes through unchecked.
 func (h *AgentHandler) SetModelValidator(v ModelValidator) { h.modelValidator = v }
+
+// SetStoragePath wires the host storage root so DeleteChat can unlink a
+// chat's attachment blobs (#1148). Empty is allowed — cleanup no-ops.
+func (h *AgentHandler) SetStoragePath(path string) { h.storagePath = path }
 
 // CrewsStatus returns lightweight agent counts by status for the toolbar.
 //

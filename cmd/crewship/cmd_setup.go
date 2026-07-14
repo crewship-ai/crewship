@@ -257,9 +257,12 @@ func runSetup(cmd *cobra.Command, _ []string) error {
 	// Transport-security pre-flight before the per-adapter CLI token
 	// (credential_value) rides the wire — mirrors cmd_login.go. Blocks on
 	// a structurally broken --server, warns on plaintext HTTP to a
-	// non-loopback host. The resolved server matches what newAPIClient()
-	// is about to dial (flag > env > config > default).
-	if err := preflightServerURL(cmd.ErrOrStderr(), cli.ResolveServer(flagServer, cliCfg)); err != nil {
+	// non-loopback host. EffectiveServer (not ResolveServer) so this
+	// matches what newAPIClient() is about to dial (flag > profile > env >
+	// config > default) — see #1146/#1163: `setup` runs after
+	// `login --pair`, so an active --profile/CREWSHIP_PROFILE is the
+	// common case here, not the exception.
+	if err := preflightServerURL(cmd.ErrOrStderr(), cli.EffectiveServer(flagServer, flagProfile, cliCfg)); err != nil {
 		return err
 	}
 
@@ -301,11 +304,13 @@ func runSetup(cmd *cobra.Command, _ []string) error {
 	}
 	if result.AgentID != "" {
 		fmt.Printf("First agent ID: %s\n", result.AgentID)
-		// Use the resolved server URL (flag > env > config > default),
-		// the same one newAPIClient() used to talk to the backend
-		// just above. Reading cliCfg.Server directly would print a
-		// stale URL when the user passed --server.
-		server := cli.ResolveServer(flagServer, cliCfg)
+		// Use the resolved server URL (flag > profile > env > config >
+		// default) — the same one newAPIClient() used to talk to the
+		// backend just above (see #1146/#1163). Reading cliCfg.Server
+		// directly, or falling back to ResolveServer, would print a
+		// stale URL when the user passed --server or has an active
+		// profile with a leftover CREWSHIP_SERVER env var.
+		server := cli.EffectiveServer(flagServer, flagProfile, cliCfg)
 		fmt.Printf("Open it in the browser: %s/crews/agents/%s/chat\n", strings.TrimRight(server, "/"), result.AgentID)
 	}
 	return nil

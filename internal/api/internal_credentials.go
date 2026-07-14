@@ -160,7 +160,19 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 	// DIFFERENT crew is still excluded (the actual #1031 leak this scoping
 	// closes): it has neither an agent_credentials row pointing at THIS crew's
 	// agents, nor a credential_crews row naming THIS crew, nor scope=WORKSPACE.
-	if crewID := r.URL.Query().Get("crew_id"); crewID != "" {
+	// #1159: a crew-bound internal token pins the crew cryptographically —
+	// prefer it over the forgeable ?crew_id query. When present it is
+	// authoritative: a compromised agent can neither omit crew_id to get the
+	// workspace-wide view nor forge a sibling crew's id (requireInternal
+	// already 403s an explicit mismatch; this makes the context crew win even
+	// for an omitted query). A crew-less caller (workspace token / master /
+	// in-process TokenSyncer over loopback) has no bound crew and keeps the
+	// query-driven behaviour below.
+	crewID := r.URL.Query().Get("crew_id")
+	if boundCrew := InternalTokenCrewFromContext(r.Context()); boundCrew != "" {
+		crewID = boundCrew
+	}
+	if crewID != "" {
 		query += ` AND (
 			credentials.scope = 'WORKSPACE'
 			OR EXISTS (SELECT 1 FROM agent_credentials ac

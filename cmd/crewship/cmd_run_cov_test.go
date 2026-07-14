@@ -572,6 +572,35 @@ func TestRunCmdRunE_NoStreamFullPath(t *testing.T) {
 	}
 }
 
+// TestRunCmdRunE_WaitFlagAliasesNoStream pins --wait as a spelling alias
+// for --no-stream (issue #966 part 1): setting ONLY --wait must take the
+// exact same no-stream code path (one chat POST, one WS send, final text
+// collected — no streaming UI), without also setting --no-stream.
+func TestRunCmdRunE_WaitFlagAliasesNoStream(t *testing.T) {
+	cap := &wsCapture{}
+	newRunServerCov(t, cap, []cli.ChatEventPayload{
+		{Type: "text", Content: "done deal"},
+		{Type: "done"},
+	}, http.StatusOK, http.StatusOK)
+
+	setFlagCov(t, runCmd, "wait", "true")
+	setFlagCov(t, runCmd, "quiet", "true")
+	t.Cleanup(ResetAIFirstLatches)
+
+	out, err := captureStdoutCov(t, func() error {
+		return runCmd.RunE(runCmd, []string{"viktor", "ship it"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "done deal") {
+		t.Errorf("stdout: %q", out)
+	}
+	if got := cap.ChatCreates(); got != 1 {
+		t.Fatalf("expected one chat creation POST, got %d", got)
+	}
+}
+
 func TestRunCmdRunE_ChatReuseAndErrorPaths(t *testing.T) {
 	t.Run("existing chat skips creation", func(t *testing.T) {
 		cap := &wsCapture{}

@@ -55,6 +55,9 @@ crewship hire \
 | `--model` | optional | template default | Override the LLM model for this hire. Useful when the template defaults to Sonnet but the work needs Opus. |
 | `--parent-lead` | optional | — | Agent ID of the LEAD that initiated this hire (LEAD-driven sub-agent spawning). Links the rows for journal queries. |
 | `--yes` | optional | `false` | Skip interactive confirmation prompts. |
+| `--wait` | optional | `false` | Block until a `guided`-crew (`202` `PENDING_REVIEW`) hire is resolved — approved (`crewship hire approve`) or ghosted (TTL elapses before anyone approves it). No-op when the hire is already live (`201`). |
+| `--wait-timeout` | optional | `30m` | Max time to block with `--wait` (`0` = forever). |
+| `--wait-interval` | optional | `2s` | Poll interval for `--wait`. |
 
 ### Response
 
@@ -109,6 +112,22 @@ The CLI exits `0` on success (a `201` live hire or a `202` pending-review hire) 
 | Policy rejection (`strict` crew) | Server `403` — the response body names the `autonomy_level` that forbids `ephemeral_spawn`. |
 | Quota exceeded | Server `429` — the body names the live count and `crews.max_ephemeral_agents` max. |
 | Network / server error | The underlying HTTP/transport error (e.g. `5xx`). |
+
+### Waiting for a guided approval (`--wait`)
+
+```bash
+crewship hire --crew on-call --template incident-responder \
+  --reason "P1 incident #4582 needs sustained eyes-on" --wait
+```
+
+On a `guided`-autonomy crew the hire lands as `202` `PENDING_REVIEW` and
+needs an operator to run `crewship hire approve <agent>` before the agent
+can chat. `--wait` polls `GET /api/v1/agents/{id}` (the same route
+`crewship agent get` uses) every `--wait-interval` until the status flips
+away from `PENDING_REVIEW` (approved) or the hire ghosts — its TTL elapses
+before anyone approves it, which the CLI also treats as a resolved (failing)
+outcome so `--wait` doesn't hang forever on an abandoned approval. There is
+no explicit "denied" state today; a rejected hire is left to expire.
 
 ### `--ttl` clamping
 

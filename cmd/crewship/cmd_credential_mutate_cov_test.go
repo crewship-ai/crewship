@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -210,7 +211,20 @@ func TestCredUpdateCmd_ValueWithMetadataValidation(t *testing.T) {
 func TestCredUpdateCmd_MetadataFetchFailsStillUpdates(t *testing.T) {
 	stub := covStub(t)
 	covResetFlags(t, credUpdateCmd)
-	stub.OnGet("/api/v1/credentials/"+covCredIDCli3, clitest.ErrorResponse(500, "meta broke"))
+	// GET /api/v1/credentials/{id} now serves two logically distinct
+	// callers: resolveCredentialID's #1075 CUID-verify (must succeed, or
+	// the command never gets past resolution) and credUpdateCmd's OWN
+	// best-effort metadata fetch for --value validation (must fail, to
+	// exercise the warn-and-continue path this test is actually about).
+	// A stateful stub distinguishes the two calls to the same URL.
+	var metaCalls int
+	stub.OnGet("/api/v1/credentials/"+covCredIDCli3, func(_ *http.Request, _ []byte) (int, []byte, string) {
+		metaCalls++
+		if metaCalls == 1 {
+			return http.StatusOK, []byte(`{"id":"` + covCredIDCli3 + `"}`), "application/json"
+		}
+		return http.StatusInternalServerError, []byte(`{"error":"meta broke"}`), "application/json"
+	})
 	stub.OnPatch("/api/v1/credentials/"+covCredIDCli3, clitest.JSONResponse(200, map[string]string{"id": covCredIDCli3}))
 
 	covSetFlags(t, credUpdateCmd, map[string]string{"value": "v2"})

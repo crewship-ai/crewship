@@ -208,10 +208,17 @@ func TestSkillAssignRunECov2_ErrorBranches(t *testing.T) {
 			t.Errorf("want wrapped resolve error; got %v", err)
 		}
 	})
-	t.Run("fanout transport error", func(t *testing.T) {
-		covSetupDead(t)
-		// CUID skill + CUID agent: zero resolution calls, so the only
-		// network hit is the fan-out POST, which dies at transport level.
+	t.Run("fanout POST failure", func(t *testing.T) {
+		// #1075: resolveSkillID/resolveAgentID now verify a CUID-shaped
+		// input with one GET each, so a fully dead server (covSetupDead)
+		// would die there instead of reaching the fan-out POST this
+		// subtest means to exercise. Use a live stub that answers those
+		// verify GETs (clitest's default CUID-verify carve-out) and fail
+		// only the fan-out POST — runAssignFanout treats a transport error
+		// and a non-2xx response identically (both land in `failures`), so
+		// this still covers the same aggregation path.
+		s := covSetup(t)
+		s.OnPost("/api/v1/agents/"+covAgentIDCli1+"/skills", clitest.ErrorResponse(500, "boom"))
 		err := skillAssignCmd.RunE(skillAssignCmd, []string{covSkillID, covAgentIDCli1})
 		if err == nil || !strings.Contains(err.Error(), "assign failed for 1 of 1") {
 			t.Errorf("want fanout failure; got %v", err)

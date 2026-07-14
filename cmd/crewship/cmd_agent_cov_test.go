@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -166,10 +167,14 @@ func TestAgentGetRunE_NoScheduleHidesRows(t *testing.T) {
 }
 
 func TestAgentGetRunE_ServerError(t *testing.T) {
+	// #1177: `agent get <CUID>` collapses to ONE detail GET (the existence
+	// check IS the fetch). A genuine server error on that single request must
+	// surface directly, not be swallowed or retried as a slug scan.
 	s := clitest.NewStubServer()
 	defer s.Close()
 	agentID := "cagent7890abcdefghijklm"
-	s.OnGet("/api/v1/agents/"+agentID, clitest.ErrorResponse(404, "agent gone"))
+	s.OnGet("/api/v1/agents/"+agentID,
+		clitest.ErrorResponse(http.StatusInternalServerError, "agent gone"))
 	covSetupCli10(t, s.URL())
 
 	err := agentGetCmd.RunE(agentGetCmd, []string{agentID})

@@ -265,8 +265,18 @@ func (o *Orchestrator) buildAgentMemoryBlock(ctx context.Context, req AgentRunRe
 	// the curated brief surfaces on the sub-agent's first turn. Empty
 	// for unbriefed agents — no impact on the existing path.
 	briefMD, _ := o.readContainerFile(readCtx, req.ContainerID, path.Join(memoryDir, "BRIEF.md"))
+	// #1134: agent-tool pins. `memory.write tier=pins` fsyncs a durable
+	// file here (resolvePath in internal/memory/tools.go). Nothing else
+	// on the session-start path reads it — buildPinsBlock reads the
+	// operator-journal snapshot at a different path — so a `tier=pins`
+	// write only ever surfaced when the model *chose* to memory.read it.
+	// Inject it here as the FIRST section so assembleSections' truncation
+	// (which drops later sections first) keeps it: "pinned = always in
+	// context" now holds deterministically for agent-set pins too.
+	pinsMD, _ := o.readContainerFile(readCtx, req.ContainerID, path.Join(memoryDir, "pins.md"))
 
 	sections := []memorySection{
+		{"PINNED (memory.write tier=pins — always in context)", pinsMD},
 		{"BRIEF.md (parent-issued brief)", briefMD},
 		{"AGENT.md (long-term memory)", agentMD},
 		{fmt.Sprintf("Daily log: %s (yesterday)", yesterday), yesterdayLog},

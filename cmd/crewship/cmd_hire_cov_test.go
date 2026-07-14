@@ -159,7 +159,7 @@ func TestPrintHireResponseCov_BadJSON(t *testing.T) {
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader("not json at all")),
 	}
-	if err := printHireResponse(resp, "headline"); err == nil {
+	if _, err := printHireResponse(resp, "headline"); err == nil {
 		t.Error("want decode error for malformed body; got nil")
 	}
 }
