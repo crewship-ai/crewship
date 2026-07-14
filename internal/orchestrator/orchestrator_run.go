@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/tokenutil"
@@ -589,14 +590,9 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			if health.Stale {
 				// #1008: the running sidecar is an OLD bind-mounted binary from
 				// before the last redeploy. It keeps serving stale memory/egress
-				// behaviour with no other signal — surface it loudly. Recreating
-				// the crew's containers (crewship crew restart-agents <crew>) or
-				// redeploying picks up the fresh sidecar.
-				o.logger.Error("stale sidecar detected: container is serving an OLD crewship-sidecar binary from before the last redeploy — memory recall and egress policy may be silently degraded; recreate the crew's containers (crewship crew restart-agents) to pick up the new sidecar",
-					"agent_id", req.AgentID,
-					"container_id", req.ContainerID[:min(12, len(req.ContainerID))],
-					"running_sidecar_hash", health.SidecarHash,
-				)
+				// behaviour with no other signal — surface it on a durable,
+				// operator-watchable channel (#1160), not just stdout.
+				o.emitStaleSidecarSignal(ctx, req, health.SidecarHash)
 			}
 			if health.NetworkMode == desiredMode && desiredMode != "restricted" {
 				// In "free" mode we can safely reuse. In "restricted" mode the
@@ -1314,4 +1310,64 @@ var mcpPackageDomains = map[string][]string{
 // arbitrary args from widening the restricted-mode allowlist.
 var knownPackageLaunchers = map[string]bool{
 	"npx": true, "pnpm": true, "yarn": true, "bunx": true,
+}
+
+// emitStaleSidecarSignal surfaces a detected stale bind-mounted sidecar
+// (#1008) on a durable, operator-watchable channel (#1160). The original
+// #1008 signal was a single logger.Error to stdout — exactly the channel
+// class nobody was watching when a stale sidecar silently degraded memory
+// recall and egress policy. A severity:error journal entry lands in the
+// activity feed where it is queryable, filterable, and alertable.
+//
+// The human-readable logger.Error fires on EVERY detection (kept for local
+// `dev.sh` tails), but the journal entry is emitted at most ONCE per
+// (container_id, running_sidecar_hash): stale detection runs on every
+// RunAgent, and a stuck container stays stale until an operator recycles it,
+// so an un-deduped journal write would produce hundreds of identical
+// severity:error rows/day — the #1008 log-spam relocated into the DB rather
+// than fixed. Keying on the hash as well as the container means a redeploy
+// that swaps the sidecar binary (new hash, still stale relative to an
+// even-newer deploy) legitimately re-alerts once.
+//
+// Best-effort: a journal hiccup never blocks the run — the sidecar still
+// starts; it's operator visibility at stake, not this run's correctness.
+func (o *Orchestrator) emitStaleSidecarSignal(ctx context.Context, req AgentRunRequest, runningHash string) {
+	cIDShort := req.ContainerID
+	if len(cIDShort) > 12 {
+		cIDShort = cIDShort[:12]
+	}
+	const remediation = "crewship crew restart-agents"
+	o.logger.Error("stale sidecar detected: container is serving an OLD crewship-sidecar binary from before the last redeploy — memory recall and egress policy may be silently degraded; recreate the crew's containers ("+remediation+") to pick up the new sidecar",
+		"agent_id", req.AgentID,
+		"container_id", cIDShort,
+		"running_sidecar_hash", runningHash,
+	)
+
+	// Emit the journal row once per container+hash. LoadOrStore returns
+	// loaded=true when this key was already recorded, so a repeat detection
+	// short-circuits before the DB write.
+	dedupeKey := req.ContainerID + "\x00" + runningHash
+	if _, loaded := o.staleSidecarJournaled.LoadOrStore(dedupeKey, struct{}{}); loaded {
+		return
+	}
+
+	_, _ = o.getJournal().Emit(ctx, JournalEntry{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		Type:        string(journal.EntrySidecarStale),
+		Severity:    string(journal.SeverityError),
+		ActorType:   "system",
+		ActorID:     "orchestrator",
+		Summary: fmt.Sprintf(
+			"stale crewship-sidecar in %s's crew container — serving an OLD binary from before the last redeploy; memory recall and egress policy may be silently degraded. Run `%s` to recycle.",
+			req.AgentSlug, remediation),
+		Payload: map[string]any{
+			"container_id":         cIDShort,
+			"running_sidecar_hash": runningHash,
+			"agent_slug":           req.AgentSlug,
+			"remediation":          remediation,
+		},
+		Refs: map[string]any{"agent_id": req.AgentID, "container_id": req.ContainerID},
+	})
 }
