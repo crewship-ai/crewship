@@ -262,19 +262,30 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		)
 	}
 
-	// Multi-CLI BYO API key path. The sidecar reverse-proxy is wired only for
-	// api.anthropic.com today; Codex/Gemini/OpenCode/Cursor talk to their
-	// upstream over HTTPS CONNECT through the sidecar (no x-api-key
-	// injection). Override the dummy provider keys above with real values
-	// from req.Credentials — but only for env vars that THIS adapter's CLI
-	// actually reads. This preserves the sidecar isolation guarantee for
-	// cross-adapter scenarios (e.g. a Claude Code agent in a workspace that
-	// also has an OpenAI key configured — that key stays out of env).
+	// #1030: Codex routes its OpenAI traffic through the sidecar reverse-proxy
+	// by pointing OPENAI_BASE_URL at the /openai prefix on the sidecar port.
+	// The dummy OPENAI_API_KEY set above stays (Codex needs a syntactically
+	// valid key to send); the sidecar swaps it for the real value from the
+	// CredStore mid-flight, so the real key lives only in the sidecar heap.
+	// Scoped to Codex — OpenCode's multi-provider BYOK driver dials providers
+	// directly and must NOT be force-routed here.
+	if req.CLIAdapter == "CODEX_CLI" {
+		env = append(env, "OPENAI_BASE_URL=http://127.0.0.1:9119/openai/v1")
+	}
+
+	// Multi-CLI BYO API key path. The sidecar reverse-proxy now injects keys
+	// for api.anthropic.com (Claude Code) and api.openai.com (Codex, #1030);
+	// Gemini/OpenCode/Cursor still talk to their upstream over HTTPS CONNECT
+	// through the sidecar (no x-api-key injection). Override the dummy provider
+	// keys above with real values from req.Credentials — but only for env vars
+	// that THIS adapter's CLI actually reads. This preserves the sidecar
+	// isolation guarantee for cross-adapter scenarios (e.g. a Claude Code agent
+	// in a workspace that also has an OpenAI key configured — that key stays
+	// out of env).
 	//
-	// Future work: extend the sidecar reverse-proxy to api.openai.com,
-	// generativelanguage.googleapis.com and api.cursor.sh so this leak path
-	// can collapse back into the same x-api-key injection model the Anthropic
-	// path uses today. Tracked in plan: t-m-ukulem-bude-purring-cray.md.
+	// Future work: extend the same reverse-proxy injection to
+	// generativelanguage.googleapis.com (Gemini) and api.cursor.sh (Cursor) so
+	// the remaining leak paths collapse into the x-api-key model too.
 	allowed := apiKeyEnvVarsForAdapter(req.CLIAdapter)
 	if len(allowed) > 0 {
 		for _, cred := range req.Credentials {
@@ -519,7 +530,7 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 			out = append(out, CredentialEnvExposure{
 				EnvVarName: cred.EnvVarName,
 				Type:       "API_KEY",
-				Reason:     "adapter " + req.CLIAdapter + " reaches its upstream over an HTTPS CONNECT tunnel, so the real API key is written to env (the sidecar reverse-proxy only injects for api.anthropic.com)",
+				Reason:     "adapter " + req.CLIAdapter + " reaches its upstream over an HTTPS CONNECT tunnel, so the real API key is written to env (the sidecar reverse-proxy injects only for api.anthropic.com and api.openai.com)",
 			})
 		}
 	}
@@ -587,7 +598,15 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 func apiKeyEnvVarsForAdapter(adapter string) map[string]struct{} {
 	switch adapter {
 	case "CODEX_CLI":
-		return map[string]struct{}{"OPENAI_API_KEY": {}}
+		// #1030: Codex's OpenAI key is now isolated by the sidecar reverse-
+		// proxy (OPENAI_BASE_URL routes it through /openai → api.openai.com,
+		// where the real key is injected from the CredStore). So — exactly
+		// like CLAUDE_CODE for Anthropic — Codex no longer needs the real
+		// OPENAI_API_KEY written to its env; the dummy stays and the sidecar
+		// swaps it mid-flight. Returning nil keeps the real key out of
+		// /proc/<pid>/environ. (The CredStore still receives it via
+		// credTypeToProvider, independent of this set.)
+		return nil
 	case "GEMINI_CLI":
 		return map[string]struct{}{"GOOGLE_API_KEY": {}, "GEMINI_API_KEY": {}}
 	case "OPENCODE":
