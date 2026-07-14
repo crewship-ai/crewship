@@ -109,10 +109,21 @@ var datetimeNowDefaultSkipTables = map[string]bool{
 // final integrity gate, even though nothing here should be able to trip
 // it.
 //
-// This migration does NOT change any row's data — it only rewrites each
-// table's schema text. Existing legacy-form values were already normalized
-// by migration v45 (migrationBackfillLegacyTimestamps); this migration's
-// job is purely to stop the DEFAULT from producing new legacy-form rows.
+// Two concerns, both handled per converted table:
+//
+//  1. Schema text — rewrite the DEFAULT clause so NEW inserts stop
+//     producing legacy-form values (the writable_schema dance above).
+//  2. Existing data — normalize legacy-form rows the old DEFAULT already
+//     wrote. Migration v45's one-shot backfill ran long before this
+//     migration, so every insert relying on the DEFAULT between v45 and
+//     here re-accumulated legacy-form `created_at`/`updated_at` values;
+//     those still sort ahead of the T-form the fixed DEFAULT now produces
+//     (' ' 0x20 < 'T' 0x54), which is the exact #1073b symptom. Fixing
+//     only the DEFAULT would leave that historical pool broken forever, so
+//     each converted table also gets v45's idempotent legacy→T-form sweep
+//     (backfillLegacyTimestampRows) in the same pass. Scoped to converted
+//     tables only, so the intentionally-skipped tables' data is never
+//     touched.
 func migrationConvertDatetimeNowDefaults(ctx context.Context, tx *sql.Tx, logger *slog.Logger) error {
 	tables, err := listUserTables(ctx, tx)
 	if err != nil {
@@ -120,6 +131,7 @@ func migrationConvertDatetimeNowDefaults(ctx context.Context, tx *sql.Tx, logger
 	}
 
 	var converted []string
+	var totalBackfilled int64
 	for _, table := range tables {
 		if datetimeNowDefaultSkipTables[table] {
 			continue
@@ -136,8 +148,17 @@ func migrationConvertDatetimeNowDefaults(ctx context.Context, tx *sql.Tx, logger
 		if err := rewriteTableDefaultLiteral(ctx, tx, table); err != nil {
 			return fmt.Errorf("convert %s: %w", table, err)
 		}
+		// Normalize legacy-form rows this DEFAULT already wrote (see the
+		// "Existing data" note above) — must run AFTER the schema rewrite
+		// so a re-run finds nothing new to convert.
+		n, err := backfillLegacyTimestampRows(ctx, tx, table)
+		if err != nil {
+			return fmt.Errorf("backfill %s: %w", table, err)
+		}
+		totalBackfilled += n
 		converted = append(converted, table)
-		logger.Info("converted datetime('now') DEFAULT to T-form", "table", table)
+		logger.Info("converted datetime('now') DEFAULT to T-form",
+			"table", table, "rows_backfilled", n)
 	}
 
 	if err := checkForeignKeys(ctx, tx); err != nil {
@@ -146,8 +167,43 @@ func migrationConvertDatetimeNowDefaults(ctx context.Context, tx *sql.Tx, logger
 
 	logger.Info("datetime('now') DEFAULT audit complete",
 		"converted_tables", converted, "converted_count", len(converted),
+		"rows_backfilled", totalBackfilled,
 		"skipped_tables", skippedDatetimeNowDefaultTables())
 	return nil
+}
+
+// backfillLegacyTimestampRows rewrites every legacy space-form value
+// ("YYYY-MM-DD HH:MM:SS") in table's timestamp columns to ISO T-form
+// ("...T...Z"), using the SAME idempotent expression migration v45 applies
+// globally: replace(' ','T')||'Z', gated on the exact 19-char legacy
+// pattern so a value already in T-form (or any non-legacy text) is left
+// untouched and re-runs are no-ops. Column discovery reuses
+// timestampColumns (the *_at-suffix + allowlist filter v45 uses), so every
+// column a converted table's datetime('now') DEFAULT could have written is
+// covered. Scoped to a single table so v142 only normalizes the tables
+// whose DEFAULT it just converted, never the intentionally-skipped ones.
+func backfillLegacyTimestampRows(ctx context.Context, tx *sql.Tx, table string) (int64, error) {
+	cols, err := timestampColumns(ctx, tx, table)
+	if err != nil {
+		return 0, fmt.Errorf("describe %s: %w", table, err)
+	}
+	var total int64
+	for _, col := range cols {
+		// table and col are both validated by isSafeIdent inside
+		// timestampColumns before they reach this interpolation.
+		query := fmt.Sprintf(
+			`UPDATE "%s" SET "%s" = replace("%s", ' ', 'T') || 'Z' `+
+				`WHERE "%s" LIKE '____-__-__ __:__:__'`,
+			table, col, col, col,
+		)
+		res, err := tx.ExecContext(ctx, query)
+		if err != nil {
+			return total, fmt.Errorf("backfill %s.%s: %w", table, col, err)
+		}
+		n, _ := res.RowsAffected()
+		total += n
+	}
+	return total, nil
 }
 
 func skippedDatetimeNowDefaultTables() []string {

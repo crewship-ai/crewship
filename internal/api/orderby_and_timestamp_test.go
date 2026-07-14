@@ -20,15 +20,18 @@ import (
 //          ALREADY-SECURE behaviour, so these are plain regression guards
 //          (they FAIL the day someone interpolates `sort` directly).
 //
-//   T3.7 / DB1 — 24× legacy `datetime('now')` DEFAULTs (database/migrate.go)
-//          write `YYYY-MM-DD HH:MM:SS` while application code writes RFC3339
+//   T3.7 / DB1 — legacy `datetime('now')` DEFAULTs (database/migrate.go)
+//          wrote `YYYY-MM-DD HH:MM:SS` while application code writes RFC3339
 //          (`YYYY-MM-DDTHH:MM:SSZ`). Because created_at is TEXT and SQLite
 //          sorts it with BINARY collation, the space (0x20) in the legacy
 //          format sorts *before* the 'T' (0x54) in RFC3339 — so a row with a
-//          legacy timestamp interleaves ahead of a chronologically-earlier
-//          RFC3339 row. This is an UNFIXED finding, written as a TRIPWIRE:
-//          it asserts the current (wrong) ordering, logs "VULN DB1 confirmed",
-//          and ships a t.Skip'd *_SecureTarget documenting the post-fix invariant.
+//          legacy timestamp interleaved ahead of a chronologically-earlier
+//          RFC3339 row. FIXED by migration v142 (#1073b): every
+//          string-compared DEFAULT was converted to the ISO T-form and the
+//          historical legacy rows backfilled, so both write paths now sort
+//          consistently. The former TRIPWIRE is now TestTimestampOrdering_
+//          SecureTarget, a live regression guard asserting true chronological
+//          order across the DEFAULT and explicit-RFC3339 write paths.
 
 // ── T3.6 — ORDER BY whitelist (regression guard, already secure) ────────────
 
@@ -179,102 +182,26 @@ func namesOf(ps []projectResponse) []string {
 	return out
 }
 
-// ── T3.7 / DB1 — mixed timestamp formats break ORDER BY (tripwire) ──────────
-
+// ── T3.7 / DB1 — mixed timestamp formats break ORDER BY (FIXED, #1073b) ─────
+//
+// legacyTSLayout is the space-form SQLite's `datetime('now')` DEFAULT used to
+// write. Migration v142 converted every string-compared DEFAULT to the ISO
+// T-form (strftime('%Y-%m-%dT%H:%M:%fZ','now')) and backfilled the historical
+// legacy rows, so the DEFAULT must NOT produce this shape anymore. The
+// SecureTarget test below is the live regression guard; this constant is kept
+// only so the guard can assert the legacy shape is gone.
 const (
-	legacyTSLayout = "2006-01-02 15:04:05" // what datetime('now') DEFAULT writes
+	legacyTSLayout = "2006-01-02 15:04:05" // what the pre-v142 datetime('now') DEFAULT wrote
 )
 
-func TestTimestampOrdering_MixedFormats_VULN(t *testing.T) {
-	db := setupTestDB(t)
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-	ctx := context.Background()
-
-	// Row B: created_at supplied by the legacy `datetime('now')` DEFAULT.
-	// workspace_files.created_at is `TEXT NOT NULL DEFAULT (datetime('now'))`
-	// (database/migrate.go:563), so omitting the column triggers it.
-	idLegacy := generateCUID()
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO workspace_files (id, workspace_id, rel_path) VALUES (?, ?, ?)`,
-		idLegacy, wsID, "legacy.txt"); err != nil {
-		t.Fatalf("insert legacy-default row: %v", err)
-	}
-	var legacyTS string
-	if err := db.QueryRow(`SELECT created_at FROM workspace_files WHERE id = ?`, idLegacy).Scan(&legacyTS); err != nil {
-		t.Fatalf("read legacy created_at: %v", err)
-	}
-
-	legacyTime, err := time.Parse(legacyTSLayout, legacyTS)
-	if err != nil {
-		// If the DEFAULT ever starts writing RFC3339, the premise is gone.
-		t.Fatalf("DEFAULT no longer writes legacy `%s` format (got %q): %v — DB1 may be fixed, update this test",
-			legacyTSLayout, legacyTS, err)
-	}
-
-	// Row A: application-style RFC3339 timestamp, written ONE SECOND EARLIER
-	// than the legacy row. Truly chronological order is therefore [A, B].
-	rfcTime := legacyTime.Add(-1 * time.Second).UTC()
-	if rfcTime.Format("2006-01-02") != legacyTime.Format("2006-01-02") {
-		t.Skip("ran within 1s of UTC midnight; date rollover would mask the format effect — rerun")
-	}
-	rfcTS := rfcTime.Format(time.RFC3339) // e.g. 2026-06-29T11:59:59Z
-	idRFC := generateCUID()
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO workspace_files (id, workspace_id, rel_path, created_at) VALUES (?, ?, ?, ?)`,
-		idRFC, wsID, "app.txt", rfcTS); err != nil {
-		t.Fatalf("insert rfc3339 row: %v", err)
-	}
-
-	// Cursor pagination orders by created_at ASC.
-	rows, err := db.QueryContext(ctx,
-		`SELECT id, created_at FROM workspace_files WHERE workspace_id = ? ORDER BY created_at ASC`, wsID)
-	if err != nil {
-		t.Fatalf("query ordered: %v", err)
-	}
-	defer rows.Close()
-	type rec struct{ id, ts string }
-	var got []rec
-	for rows.Next() {
-		var r rec
-		if err := rows.Scan(&r.id, &r.ts); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		got = append(got, r)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows err: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("got %d rows, want 2", len(got))
-	}
-
-	// True chronological order is [idRFC (earlier), idLegacy (later)].
-	// The BUG: ASC ordering of mixed TEXT formats puts the legacy row first
-	// because space (0x20) < 'T' (0x54), so the chronologically-LATER row
-	// interleaves ahead of the earlier one.
-	if got[0].id == idRFC {
-		// Chronological order won — the format mismatch no longer flips it.
-		t.Fatalf("DB1 appears FIXED (good): ORDER BY created_at returned true chronological order "+
-			"[%s, %s] — replace this tripwire with the *_SecureTarget assertion", got[0].ts, got[1].ts)
-	}
-	if got[0].id != idLegacy {
-		t.Fatalf("unexpected first row %q (legacy=%s rfc=%s)", got[0].id, idLegacy, idRFC)
-	}
-	t.Logf("VULN DB1 confirmed: chronologically-later legacy row (%q) sorts BEFORE the earlier "+
-		"RFC3339 row (%q) under ORDER BY created_at ASC — cursor pagination interleaves out of order",
-		got[0].ts, got[1].ts)
-}
-
-// --- Secure target (activate after DB1 fix) ---------------------------------
-//
-// After timestamps are normalised to a single format (RFC3339 everywhere, or
-// every DEFAULT switched to strftime('%Y-%m-%dT%H:%M:%fZ','now')), ORDER BY
-// created_at must return rows in true chronological order regardless of which
-// path wrote each row.
+// TestTimestampOrdering_SecureTarget is the post-#1073b regression guard
+// (formerly the DB1 tripwire). After migration v142 normalised every
+// string-compared timestamp to a single format, ORDER BY created_at must
+// return rows in true chronological order regardless of which path wrote each
+// row — the DEFAULT (now ISO T-form) or an explicit application RFC3339 write.
+// A regression that reintroduced the space-form DEFAULT would flip the order
+// (' ' 0x20 < 'T' 0x54) and fail here.
 func TestTimestampOrdering_SecureTarget(t *testing.T) {
-	t.Skip("activate after DB1 fix: normalise all created_at writes to one (RFC3339) format")
-
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
@@ -290,7 +217,19 @@ func TestTimestampOrdering_SecureTarget(t *testing.T) {
 	if err := db.QueryRow(`SELECT created_at FROM workspace_files WHERE id = ?`, idLegacy).Scan(&legacyTS); err != nil {
 		t.Fatalf("read created_at: %v", err)
 	}
-	legacyTime, _ := time.Parse(time.RFC3339, legacyTS) // post-fix: DEFAULT is RFC3339
+	// Direct regression check: the DEFAULT must no longer write the space-form
+	// that broke ordering. `time.Parse(legacyTSLayout, ...)` succeeds ONLY on
+	// the old "YYYY-MM-DD HH:MM:SS" shape, so a success here means v142 was
+	// reverted.
+	if _, err := time.Parse(legacyTSLayout, legacyTS); err == nil {
+		t.Fatalf("DEFAULT regressed to legacy space-form %q — v142 conversion lost", legacyTS)
+	}
+	// Post-v142 the DEFAULT is ISO T-form (with a millisecond fraction);
+	// time.Parse(time.RFC3339, ...) accepts the trailing fraction.
+	legacyTime, err := time.Parse(time.RFC3339, legacyTS)
+	if err != nil {
+		t.Fatalf("DEFAULT wrote an unparseable timestamp %q: %v", legacyTS, err)
+	}
 	idRFC := generateCUID()
 	rfcTS := legacyTime.Add(-1 * time.Second).UTC().Format(time.RFC3339)
 	if _, err := db.ExecContext(ctx,

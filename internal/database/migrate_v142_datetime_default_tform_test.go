@@ -237,6 +237,90 @@ func TestMigrateV142_SkippedTablesStayLegacyForm(t *testing.T) {
 	}
 }
 
+// TestMigrateV142_BackfillsHistoricalLegacyRows is the reproducing test for
+// the incomplete-fix gap #1073b originally shipped with: converting only the
+// DEFAULT stops NEW legacy rows but leaves every legacy-form value the old
+// DEFAULT already wrote AFTER v45's one-shot backfill (v45 ran ~100 versions
+// earlier, so any insert relying on the DEFAULT since then re-accumulated
+// space-form rows). Those historical rows keep sorting ahead of the T-form
+// the fixed DEFAULT now produces, so the pagination bug persists on real
+// data even though a fresh insert looks correct.
+//
+// It drives the true upgrade path: land the schema at v141 (DEFAULT still
+// legacy), insert a row that relies on that legacy DEFAULT, then apply v142
+// and assert the historical value was normalized to T-form in place.
+func TestMigrateV142_BackfillsHistoricalLegacyRows(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open("file:" + filepath.Join(dir, "v142_backfill.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.Background()
+
+	// Schema at v141: workspace_files.created_at DEFAULT is still the legacy
+	// datetime('now') form.
+	if err := applyMigrationsUpTo(ctx, db.DB, 141, logger); err != nil {
+		t.Fatalf("migrate to v141: %v", err)
+	}
+
+	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws_bf', 'BF', 'ws-bf')`); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	// Insert relying on the legacy DEFAULT — this is the row that would have
+	// accumulated in production between v45 and v142.
+	if _, err := db.Exec(`INSERT INTO workspace_files (id, workspace_id, rel_path) VALUES ('wf_legacy', 'ws_bf', 'legacy.txt')`); err != nil {
+		t.Fatalf("insert legacy-default row: %v", err)
+	}
+
+	var beforeTS string
+	if err := db.QueryRow(`SELECT created_at FROM workspace_files WHERE id = 'wf_legacy'`).Scan(&beforeTS); err != nil {
+		t.Fatalf("read created_at at v141: %v", err)
+	}
+	if !legacySpaceFormPattern.MatchString(beforeTS) {
+		t.Fatalf("precondition: v141 DEFAULT should write legacy space-form, got %q — test premise invalid", beforeTS)
+	}
+
+	// Apply ONLY v142 (applyMigrationsUpTo re-runs from v1, so drive this
+	// migration in isolation against the populated v141 schema): it converts
+	// the DEFAULT AND backfills the historical row.
+	v142, err := findMigration(142)
+	if err != nil {
+		t.Fatalf("locate v142: %v", err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin v142 tx: %v", err)
+	}
+	if err := v142.fn(ctx, tx, logger); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("apply v142: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit v142: %v", err)
+	}
+
+	var afterTS string
+	if err := db.QueryRow(`SELECT created_at FROM workspace_files WHERE id = 'wf_legacy'`).Scan(&afterTS); err != nil {
+		t.Fatalf("read created_at after v142: %v", err)
+	}
+	if legacySpaceFormPattern.MatchString(afterTS) {
+		t.Errorf("v142 left the historical legacy row unconverted: %q still space-form", afterTS)
+	}
+	// v45's expression yields second-precision T-form (no fractional part);
+	// accept T-form with or without a fraction.
+	tform := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$`)
+	if !tform.MatchString(afterTS) {
+		t.Errorf("v142 backfilled to a non-T-form value: %q", afterTS)
+	}
+	// The normalized value must preserve the wall-clock instant: same
+	// date+time, only the separator/zone shape changed.
+	if want := beforeTS[:10] + "T" + beforeTS[11:] + "Z"; afterTS != want {
+		t.Errorf("backfill changed the instant: %q -> %q, want %q", beforeTS, afterTS, want)
+	}
+}
+
 // TestMigrateV142_MemoryVersionsUntouched guards the boundary with 1073a:
 // this migration must not modify memory_versions at all.
 func TestMigrateV142_MemoryVersionsUntouched(t *testing.T) {

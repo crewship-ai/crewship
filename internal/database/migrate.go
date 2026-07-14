@@ -1642,12 +1642,14 @@ END;
 	// over a `*_at` column) compares these values as TEXT — the
 	// space-separated legacy form SQLite's `datetime('now')` produces
 	// never compares correctly against the ISO T-form strings this
-	// codebase's Go writers emit. Migration v45 already backfilled every
-	// existing legacy-form value; this migration stops the DEFAULT itself
-	// from producing new ones, for every string-compared column identified
-	// in the #1073b audit (see the PR description for the per-column
-	// verdict table and migrate_v142_datetime_default_tform.go for the
-	// mechanism and the small list of columns intentionally left alone).
+	// codebase's Go writers emit. This migration both stops the DEFAULT
+	// from producing new legacy-form values AND normalizes the historical
+	// ones the DEFAULT wrote after v45's one-shot backfill (v45 ran ~100
+	// versions earlier, so legacy rows re-accumulated since), for every
+	// string-compared column identified in the #1073b audit (see the PR
+	// description for the per-column verdict table and
+	// migrate_v142_datetime_default_tform.go for the mechanism and the
+	// small list of columns intentionally left alone).
 	{version: 142, name: "datetime_now_default_tform", fn: migrationConvertDatetimeNowDefaults},
 }
 
