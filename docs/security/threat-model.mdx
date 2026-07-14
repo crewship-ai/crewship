@@ -539,6 +539,23 @@ bound workspace (403 otherwise; unknown crews get the same 403 so the
 check is not an existence oracle). Master-token loopback callers keep
 the connection-only model.
 
+The credential-metadata listing (`GET /internal/credentials`) added an
+opt-in `?crew_id` scope (#1031) but left it **fail-open**: a
+workspace-bound token authorizes the whole workspace, so any holder could
+omit `crew_id` (workspace-wide list) or forge a sibling crew's id and
+enumerate every crew's credential metadata. **#1159 closes this by binding
+the token to a crew.** A per-crew sidecar now receives a **crew-bound
+token** (`crwv1.<workspace_id>.<crew_id>.<mac>`,
+`internaltoken.DeriveCrewToken`) instead of a workspace-bound one; the
+crew is baked into the MAC. `requireInternal` refuses a `?crew_id` that
+disagrees with the token's crew (403) across every internal route, and
+the credential listing scopes to the **cryptographic** crew
+(`InternalTokenCrewFromContext`) in preference to the query — so a
+forged or omitted `crew_id` can no longer widen the view. The loopback
+exemption is **connection-based** (`r.RemoteAddr`), never header-based:
+the in-process `TokenSyncer` and crew-less callers legitimately carry no
+crew and keep the workspace-wide `include_values` path.
+
 **Residuals (intended, not bypasses):**
 
 - The binding derives its trust from the sidecar process boundary

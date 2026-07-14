@@ -126,16 +126,9 @@ var skillGetCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
-		skillID, err := resolveSkillID(client, args[0])
+		// #1177: one request on the CUID fast path (verify == fetch).
+		resp, _, err := getByRef(client, "/api/v1/skills/", args[0], resolveSkillID)
 		if err != nil {
-			return err
-		}
-
-		resp, err := client.Get("/api/v1/skills/" + skillID)
-		if err != nil {
-			return err
-		}
-		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
 
@@ -556,7 +549,15 @@ func runAssignFanout(client *cli.Client, skillID, skillLabel string, targets []a
 
 func resolveSkillID(client *cli.Client, slugOrID string) (string, error) {
 	if looksLikeCUID(slugOrID) {
-		return slugOrID, nil
+		ok, err := cuidExists(client, "/api/v1/skills/"+slugOrID)
+		if err != nil {
+			return "", fmt.Errorf("resolve skill: %w", err)
+		}
+		if ok {
+			return slugOrID, nil
+		}
+		// Miss: slugOrID only looks like a CUID — fall through to the
+		// slug scan below instead of forwarding a doomed id (#1075).
 	}
 
 	resp, err := client.Get("/api/v1/skills")

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -298,13 +299,17 @@ func TestCrewGetRunE_ErrorBranches(t *testing.T) {
 	if err := c.RunE(c, []string{"engineering"}); err == nil || !strings.Contains(err.Error(), "resolve crew") {
 		t.Errorf("want resolve error, got %v", err)
 	}
-	// CUID arg skips resolution → the detail GET fails.
+	// CUID arg: resolveCrewID's #1075 verify GET dies at transport level
+	// against the same dead server, before ever reaching the detail fetch.
 	if err := c.RunE(c, []string{covCrewIDCli4}); err == nil {
 		t.Error("want transport error on detail fetch")
 	}
 
+	// #1177: crew get collapses to ONE detail GET (the existence check IS the
+	// fetch). A genuine server error on that single request must surface.
 	stub := covSetupCli4(t)
-	stub.OnGet("/api/v1/crews/"+covCrewIDCli4, clitest.ErrorResponse(404, "crew gone"))
+	stub.OnGet("/api/v1/crews/"+covCrewIDCli4,
+		clitest.ErrorResponse(http.StatusInternalServerError, "crew gone"))
 	if err := c.RunE(c, []string{covCrewIDCli4}); err == nil || !strings.Contains(err.Error(), "crew gone") {
 		t.Errorf("want server error, got %v", err)
 	}

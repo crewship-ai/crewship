@@ -25,6 +25,7 @@ Auth: requires `crewship login` plus a workspace context. Both checks are skippe
 | `-p`, `--prompt <text>` | (unset) | Prompt text, `@path` to read a file, or `@-` to read from stdin. |
 | `-q`, `--quiet` | `false` | Only print the agent's text — no `[agent: …]` / `[done]` banners on stderr. |
 | `--no-stream` | `false` | Wait for `done`, print only the final text. |
+| `--wait` | `false` | Alias for `--no-stream` — same spelling as `crewship pipeline run --wait` / `crewship hire --wait` / `crewship mission start --wait`. |
 | `--timeout <secs>` | `0` | HTTP timeout in seconds; `0` = no timeout. |
 | `--max-turns <n>` | `0` | Cap the agent loop at N turns for this run (`0` = adapter default, 50 interactive). |
 | `--with-git-diff` | `false` | Append `git diff` as context. |

@@ -131,9 +131,16 @@ Start a PLANNING mission, kicking off the MissionEngine DAG loop.
 
 ```bash
 crewship mission start <id>
+crewship mission start <id> --wait
+crewship mission start <id> --wait --wait-timeout 1h
 ```
 
 The DAG engine evaluates task dependencies and dispatches ready tasks to agents.
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--wait` | `false` | Block and poll `GET /api/v1/crews/{crewId}/missions/{missionId}` (the same route `mission get` uses) every 2s until the mission reaches `COMPLETED` or `FAILED`, instead of returning as soon as the start request is acknowledged. Exits non-zero on `FAILED`. |
+| `--wait-timeout` | `30m` | Max time to block with `--wait` (`0` = forever). |
 
 ---
 

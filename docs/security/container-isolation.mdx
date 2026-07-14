@@ -166,7 +166,7 @@ For HTTPS requests, the sidecar:
 
 Credential injection only works for:
 - Plain HTTP proxy requests (agent sets `HTTP_PROXY`)
-- Reverse proxy mode (`ANTHROPIC_BASE_URL=http://127.0.0.1:9119`)
+- Reverse proxy mode — Claude Code via `ANTHROPIC_BASE_URL=http://127.0.0.1:9119` (→ `api.anthropic.com`) and, since #1030, Codex via `OPENAI_BASE_URL=http://127.0.0.1:9119/openai/v1` (→ `api.openai.com`; the `/openai` routing prefix is stripped before forwarding). For both, the real key stays in the sidecar CredStore and only a dummy placeholder reaches the agent env.
 
 ### Provider Detection
 

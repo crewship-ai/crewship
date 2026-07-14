@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -338,14 +339,96 @@ Examples:
 	},
 }
 
+// keeperRequestEntry mirrors one row of GET /api/v1/admin/keeper/requests
+// (internal/api/keeper_log.go:keeperLogEntry) — the Keeper decision audit
+// log, previously API-only (issue #966 part 3).
+type keeperRequestEntry struct {
+	ID           string  `json:"id"`
+	AgentID      string  `json:"agent_id"`
+	AgentName    string  `json:"agent_name"`
+	CrewID       string  `json:"crew_id"`
+	CredentialID string  `json:"credential_id"`
+	CredName     string  `json:"credential_name"`
+	Intent       string  `json:"intent"`
+	RequestType  string  `json:"request_type"`
+	Command      *string `json:"command,omitempty"`
+	Decision     *string `json:"decision"`
+	Reason       *string `json:"reason"`
+	RiskScore    *int    `json:"risk_score"`
+	ExitCode     *int    `json:"exit_code,omitempty"`
+	CreatedAt    string  `json:"created_at"`
+	DecidedAt    *string `json:"decided_at"`
+}
+
+var keeperRequestsCmd = &cobra.Command{
+	Use:   "requests",
+	Short: "List recent Keeper decision-audit requests (requires ADMIN or OWNER)",
+	Long: `List the most recent Keeper credential/behavior decisions from the
+audit log, scoped to agents in the current workspace. This is the CLI
+counterpart of the Keeper reviews panel — same rows, same ADMIN/OWNER gate.
+
+Backed by GET /api/v1/admin/keeper/requests?limit=&offset=.
+
+Examples:
+  crewship keeper requests
+  crewship keeper requests --limit 20
+  crewship keeper requests --format json | jq '.[] | select(.decision=="DENY")'`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+
+		limit, _ := cmd.Flags().GetInt("limit")
+		offset, _ := cmd.Flags().GetInt("offset")
+		q := url.Values{}
+		if limit > 0 {
+			q.Set("limit", fmt.Sprintf("%d", limit))
+		}
+		if offset > 0 {
+			q.Set("offset", fmt.Sprintf("%d", offset))
+		}
+		path := "/api/v1/admin/keeper/requests"
+		if enc := q.Encode(); enc != "" {
+			path += "?" + enc
+		}
+
+		var entries []keeperRequestEntry
+		if err := getJSON(client, path, &entries); err != nil {
+			return err
+		}
+
+		headers := []string{"ID", "AGENT", "CREDENTIAL", "TYPE", "DECISION", "RISK", "CREATED"}
+		var rows [][]string
+		for _, e := range entries {
+			decision := "-"
+			if e.Decision != nil {
+				decision = *e.Decision
+			}
+			risk := "-"
+			if e.RiskScore != nil {
+				risk = fmt.Sprintf("%d", *e.RiskScore)
+			}
+			rows = append(rows, []string{
+				truncateString(e.ID, 12), e.AgentName, e.CredName, e.RequestType, decision, risk, e.CreatedAt,
+			})
+		}
+		return newFormatter().Auto(entries, headers, rows)
+	},
+}
+
 func init() {
 	keeperContactCmd.Flags().Bool("clear", false, "Unset the security contact (fall back to MANAGER fanout)")
+	keeperRequestsCmd.Flags().Int("limit", 50, "Max rows to return (server caps at 200)")
+	keeperRequestsCmd.Flags().Int("offset", 0, "Row offset for pagination")
 
 	keeperCmd.AddCommand(keeperStatusCmd)
 	keeperCmd.AddCommand(keeperEnableCmd)
 	keeperCmd.AddCommand(keeperDisableCmd)
 	keeperCmd.AddCommand(keeperContactCmd)
 	keeperCmd.AddCommand(keeperThresholdCmd)
+	keeperCmd.AddCommand(keeperRequestsCmd)
 	keeperCmd.AddCommand(keeperWatchCmd)
 
 	rootCmd.AddCommand(keeperCmd)

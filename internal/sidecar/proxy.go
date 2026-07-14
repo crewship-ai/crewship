@@ -513,6 +513,14 @@ func (p *Proxy) handleLocal(w http.ResponseWriter, r *http.Request) {
 			networkMode,
 			p.buildHash,
 		)
+	case strings.HasPrefix(r.URL.Path, "/openai/"):
+		// #1030: reverse-proxy to api.openai.com. Codex points
+		// OPENAI_BASE_URL at http://127.0.0.1:9119/openai/v1, so its requests
+		// arrive here as /openai/v1/... . The /openai prefix disambiguates
+		// them from Anthropic's /v1/ (both providers share this port) and is
+		// stripped before forwarding. The dummy OPENAI_API_KEY in the agent
+		// env is swapped for the real key from the CredStore mid-flight.
+		p.handleOpenAIReverseProxy(w, r)
 	case strings.HasPrefix(r.URL.Path, "/v1/"):
 		// Reverse-proxy to api.anthropic.com.
 		// This handles the ANTHROPIC_BASE_URL=http://127.0.0.1:9119 mode where
@@ -530,12 +538,35 @@ func (p *Proxy) handleLocal(w http.ResponseWriter, r *http.Request) {
 // For OAuth token mode, CLAUDE_CODE_OAUTH_TOKEN is already set in the container env
 // so the request already carries Authorization: Bearer — no injection needed.
 func (p *Proxy) handleReverseProxy(w http.ResponseWriter, r *http.Request) {
-	// Inject API key from CredStore if present (overwrites any dummy key from agent env).
-	// If CredStore is empty the request is forwarded as-is (OAuth Bearer auth path).
-	cred := p.credStore.Select(ProviderAnthropic)
+	p.reverseProxyToProvider(w, r, ProviderAnthropic, "api.anthropic.com", "")
+}
+
+// handleOpenAIReverseProxy reverse-proxies a request to api.openai.com (#1030),
+// stripping the /openai routing prefix that keeps it distinct from the
+// Anthropic /v1/ path on the shared sidecar port. Codex reaches this via
+// OPENAI_BASE_URL=http://127.0.0.1:9119/openai/v1. The real OpenAI key is
+// injected from the CredStore (Bearer), so it never leaves the sidecar heap.
+func (p *Proxy) handleOpenAIReverseProxy(w http.ResponseWriter, r *http.Request) {
+	p.reverseProxyToProvider(w, r, ProviderOpenAI, "api.openai.com", "/openai")
+}
+
+// reverseProxyToProvider is the shared reverse-proxy body used by every
+// provider's ANTHROPIC_BASE_URL-style plain-HTTP endpoint. It injects the
+// provider's API key from the CredStore when one is present (overwriting any
+// dummy key the agent env carries); when the store is empty the request is
+// forwarded as-is (the OAuth Bearer path). stripPrefix, when non-empty, is
+// removed from the outbound path so a routing prefix (e.g. "/openai") added
+// to disambiguate providers on the shared port doesn't reach the upstream.
+//
+// It reuses p.transport (whose DialContext is p.dialSSRF), so the resolve-
+// then-pin SSRF guard and the #1139 shared DNS cache apply identically to
+// every provider — no provider gets a weaker egress path than Anthropic.
+func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, prov ProviderType, upstreamHost, stripPrefix string) {
+	cred := p.credStore.Select(prov)
 	if cred != nil {
-		injectCredential(r, ProviderAnthropic, cred.Token)
+		injectCredential(r, prov, cred.Token)
 		p.logger.Debug("api key injected for reverse proxy",
+			"provider", prov,
 			"credential_id", cred.ID,
 			"path", r.URL.Path,
 		)
@@ -548,8 +579,18 @@ func (p *Proxy) handleReverseProxy(w http.ResponseWriter, r *http.Request) {
 	outReq := r.Clone(r.Context())
 	outReq.RequestURI = ""
 	outReq.URL.Scheme = "https"
-	outReq.URL.Host = "api.anthropic.com"
-	outReq.Host = "api.anthropic.com"
+	outReq.URL.Host = upstreamHost
+	outReq.Host = upstreamHost
+	if stripPrefix != "" {
+		outReq.URL.Path = strings.TrimPrefix(outReq.URL.Path, stripPrefix)
+		if outReq.URL.Path == "" {
+			outReq.URL.Path = "/"
+		}
+		// RawPath is an optional escaped hint; clearing it makes URL.String()
+		// re-derive the request-target from the (now-stripped) Path so the
+		// prefix can't survive via a stale RawPath.
+		outReq.URL.RawPath = ""
+	}
 
 	for _, h := range hopByHopHeaders {
 		outReq.Header.Del(h)
@@ -557,17 +598,17 @@ func (p *Proxy) handleReverseProxy(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := p.transport.RoundTrip(outReq)
 	if err != nil {
-		p.logger.Error("reverse proxy upstream failed", "path", r.URL.Path, "error", err)
+		p.logger.Error("reverse proxy upstream failed", "provider", prov, "host", upstreamHost, "path", r.URL.Path, "error", err)
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		if p.onEgress != nil {
-			p.onEgress("api.anthropic.com", r.Method, string(ProviderAnthropic), 0, false)
+			p.onEgress(upstreamHost, r.Method, string(prov), 0, false)
 		}
 		return
 	}
 	defer resp.Body.Close()
 
 	if p.onEgress != nil {
-		p.onEgress("api.anthropic.com", r.Method, string(ProviderAnthropic), resp.StatusCode, false)
+		p.onEgress(upstreamHost, r.Method, string(prov), resp.StatusCode, false)
 	}
 
 	for k, vv := range resp.Header {
@@ -576,7 +617,7 @@ func (p *Proxy) handleReverseProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	p.copyAndObserveLLM(w, resp, string(ProviderAnthropic))
+	p.copyAndObserveLLM(w, resp, string(prov))
 }
 
 // copyAndObserveLLM streams the upstream response body to the client and,

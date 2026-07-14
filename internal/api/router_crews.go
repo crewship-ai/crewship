@@ -50,6 +50,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// instance the policies handler uses below — flipping policy via
 	// PUT invalidates it for everyone, including the hire path.
 	agents.SetPolicyResolver(r.PolicyResolver())
+	// #1148: storage root so DeleteChat can unlink a chat's attachment
+	// blobs. Same root every other storagePath consumer uses.
+	agents.SetStoragePath(r.storagePath)
 
 	if r.license != nil {
 		ws.SetLicense(r.license)

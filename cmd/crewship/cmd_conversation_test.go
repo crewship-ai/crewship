@@ -72,9 +72,10 @@ func buildConversationBinary(t *testing.T) string {
 func TestConversationSearchAcceptance(t *testing.T) {
 	bin := buildConversationBinary(t)
 
-	// A CUID-shaped agent id so resolveAgentID short-circuits without a
-	// second GET /api/v1/agents round-trip (keeps the mock focused on the
-	// search endpoint).
+	// A CUID-shaped agent id. Since #1075, resolveAgentID verifies it with a
+	// single GET /api/v1/agents/{id} before trusting it, then short-circuits
+	// (no list scan) — so the mock answers that verify with 200 and stays
+	// focused on the search endpoint.
 	const agentID = "cabcdefghijklmnopqrstuv"
 
 	var (
@@ -89,6 +90,12 @@ func TestConversationSearchAcceptance(t *testing.T) {
 		defer mu.Unlock()
 		gotPath = r.URL.Path
 		gotToken = r.Header.Get("Authorization")
+		// #1075: resolveAgentID verifies the CUID-shaped id here first.
+		if r.URL.Path == "/api/v1/agents/"+agentID {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"` + agentID + `"}`))
+			return
+		}
 		if r.URL.Path == "/api/v1/conversations/search" {
 			called = true
 			body, _ := io.ReadAll(r.Body)
@@ -152,6 +159,12 @@ func TestConversationSearchAcceptance_JSON(t *testing.T) {
 	const agentID = "cabcdefghijklmnopqrstuv"
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// #1075: resolveAgentID verifies the CUID-shaped id here first.
+		if r.URL.Path == "/api/v1/agents/"+agentID {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"` + agentID + `"}`))
+			return
+		}
 		if r.URL.Path == "/api/v1/conversations/search" {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"count":0,"query":"nope","hits":[]}`))

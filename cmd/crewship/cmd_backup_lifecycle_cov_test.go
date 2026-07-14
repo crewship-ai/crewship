@@ -501,6 +501,58 @@ func TestBackupCreateRunE_PreflightRejectsBrokenServer(t *testing.T) {
 	}
 }
 
+// TestBackupCreateRunE_PreflightHonorsActiveProfile locks the #1163 fix:
+// backupCreateCmd used cli.ResolveServer (env > cfg) for the
+// transport-security preflight right before the encryption passphrase hit
+// the wire, while the actual POST (via newAPIClient) always dials through
+// cli.EffectiveServer (flag > profile > env > cfg) — the same divergence
+// #1146 fixed for whoami/doctor/open/tui. Under an active --profile with a
+// stale CREWSHIP_SERVER left over from #544, the unmigrated preflight call
+// would validate the wrong host even though the POST landed on the right
+// one. Pointing CREWSHIP_SERVER at an unsupported scheme makes the two
+// helpers diverge unmistakably: unmigrated code fails preflight outright;
+// the fixed code resolves the active profile's server and succeeds.
+func TestBackupCreateRunE_PreflightHonorsActiveProfile(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+
+	origServer, origProfile, origWorkspace, origCfg := flagServer, flagProfile, flagWorkspace, cliCfg
+	t.Cleanup(func() {
+		flagServer, flagProfile, flagWorkspace, cliCfg = origServer, origProfile, origWorkspace, origCfg
+	})
+	covResetBackupCreateFlags(t)
+
+	t.Setenv("CREWSHIP_SERVER", "ftp://bogus.invalid")
+	t.Setenv("CREWSHIP_WORKSPACE", "")
+	flagServer = ""
+	flagWorkspace = ""
+	flagProfile = "dev2"
+	// Mirrors the WithActiveProfile overlay PersistentPreRun applies in
+	// production (main.go): top-level Server/Token/Workspace carry the
+	// active profile's values, and Servers still holds the named profile
+	// for cli.EffectiveServer's own ActiveProfile lookup.
+	cliCfg = &cli.CLIConfig{
+		Server: stub.URL(), Token: "fake-token", Workspace: covWSCli5,
+		Servers: map[string]*cli.ServerProfile{
+			"dev2": {Server: stub.URL(), Token: "fake-token", Workspace: covWSCli5},
+		},
+	}
+	covSetFlagCli5(t, backupCreateCmd, "passphrase-file", covPassphraseFile(t, "pw"))
+	stub.OnPost("/api/v1/admin/backups", clitest.JSONResponse(200, map[string]any{
+		"path": "/b.tar", "scope": "workspace", "encrypted": true, "format_version": 2,
+	}))
+
+	var err error
+	covCaptureAll(t, func() { err = backupCreateCmd.RunE(backupCreateCmd, nil) })
+	if err != nil {
+		t.Fatalf("RunE: %v (want it to resolve the active profile's server, not stale CREWSHIP_SERVER)", err)
+	}
+	calls := stub.CallsFor("POST", "/api/v1/admin/backups")
+	if len(calls) != 1 {
+		t.Fatalf("expected backup POST to reach the profile's stub server, got %d calls", len(calls))
+	}
+}
+
 func TestBackupCreateRunE_TransportError(t *testing.T) {
 	stub := covSetupCli5(t)
 	covResetBackupCreateFlags(t)

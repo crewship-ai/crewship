@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -244,6 +245,9 @@ func init() {
 	missionTaskUpdateCmd.Flags().String("assigned-agent", "", "Agent ID to assign")
 
 	missionCloneCmd.Flags().String("title", "", "Override title for cloned mission")
+
+	missionStartCmd.Flags().Bool("wait", false, "Block until the mission reaches a terminal status (COMPLETED/FAILED)")
+	missionStartCmd.Flags().Duration("wait-timeout", 30*time.Minute, "Max time to wait with --wait (0 = forever)")
 
 	missionCmd.AddCommand(missionListCmd)
 	missionCmd.AddCommand(missionGetCmd)

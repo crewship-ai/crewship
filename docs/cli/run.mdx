@@ -32,6 +32,7 @@ Each invocation creates a new chat by default (origin=`CLI`, so the web UI sideb
 | `--interactive` | `false` | Drop into a REPL after the first prompt. Ctrl-D exits, Ctrl-C cancels the current turn. |
 | `--chat <chat-id>` | (unset) | Continue an existing chat instead of creating one. |
 | `--no-stream` | `false` | Wait for completion and print the final text only. |
+| `--wait` | `false` | Alias for `--no-stream` — same spelling as `crewship pipeline run --wait` / `crewship hire --wait` / `crewship mission start --wait`, for scripts that want one consistent "block until done" flag across commands. |
 | `--max-turns <n>` | `0` | Cap the agent loop at N turns for this run (`0` = adapter default, `50` interactive). |
 | `-q`, `--quiet` | `false` | Suppress `[agent: …]` / `[thinking]` / `[done]` stderr chatter. |
 | `--timeout <secs>` | `0` | HTTP timeout (`0` = unbounded). |

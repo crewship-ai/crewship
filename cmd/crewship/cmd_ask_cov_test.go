@@ -9,6 +9,7 @@ package main
 // error paths are covered.
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -21,7 +22,7 @@ func TestAskCmdStructure(t *testing.T) {
 		t.Errorf("Use = %q", askCmd.Use)
 	}
 	for _, name := range []string{
-		"agent", "agents", "prompt", "quiet", "no-stream", "timeout",
+		"agent", "agents", "prompt", "quiet", "no-stream", "wait", "timeout",
 		"with-git-diff", "with-git-staged", "with-git-log", "with-git-status",
 		"with-file", "with-cmd", "paste", "dry-run", "estimate",
 		"markdown", "no-markdown", "save", "plan", "effort", "show-thinking",
@@ -267,9 +268,9 @@ func TestAskRunE_SaveFileOpenError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "open save file") {
 		t.Errorf("expected save-file open error, got %v", err)
 	}
-	if n := len(stub.Calls()); n != 0 {
-		t.Errorf("save-file failure must precede any HTTP call, got %d", n)
-	}
+	// resolveAgentID verifies the CUID-shaped --agent value (#1075, one GET)
+	// before openSaveFile runs, but that must not turn into a chat/run call.
+	assertNoMutatingCalls(t, stub)
 }
 
 func TestAskRunE_SaveFileAndTimeoutThenChatError(t *testing.T) {
@@ -343,6 +344,39 @@ func TestAskRunE_NoStreamWSDialFails(t *testing.T) {
 	}
 	if n := len(stub.CallsFor("GET", "/api/v1/ws-token")); n != 1 {
 		t.Errorf("expected 1 ws-token call, got %d", n)
+	}
+}
+
+// TestAskRunE_WaitFlagAliasesNoStream pins --wait as a spelling alias for
+// --no-stream on `ask` too (issue #966 part 1): setting ONLY --wait must
+// take the no-stream path (final text collected, no streaming UI) without
+// also setting --no-stream. Reuses the full WS+HTTP harness from
+// cmd_run_cov_test.go (newRunServerCov) since ask's single-agent path
+// shares the same chat-create -> ws-token -> runNoStream/runStream shape
+// as run.
+func TestAskRunE_WaitFlagAliasesNoStream(t *testing.T) {
+	cap := &wsCapture{}
+	newRunServerCov(t, cap, []cli.ChatEventPayload{
+		{Type: "text", Content: "done deal"},
+		{Type: "done"},
+	}, http.StatusOK, http.StatusOK)
+
+	covSetFlagCli6(t, askCmd, "agent", "viktor")
+	covSetFlagCli6(t, askCmd, "wait", "true")
+	covSetFlagCli6(t, askCmd, "quiet", "true")
+	t.Cleanup(ResetAIFirstLatches)
+
+	out, err := captureStdoutCov(t, func() error {
+		return askCmd.RunE(askCmd, []string{"hi"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "done deal") {
+		t.Errorf("stdout: %q", out)
+	}
+	if got := cap.ChatCreates(); got != 1 {
+		t.Fatalf("expected one chat creation POST, got %d", got)
 	}
 }
 

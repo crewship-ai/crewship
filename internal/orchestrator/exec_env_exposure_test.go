@@ -37,10 +37,10 @@ func TestAgentEnvCredentialExposures(t *testing.T) {
 			want:  nil,
 		},
 		{
-			name:    "codex byo openai key is exposed over CONNECT",
+			name:    "codex openai key is isolated by the reverse-proxy (#1030)",
 			adapter: "CODEX_CLI", keeper: true,
 			creds: []Credential{apiKey("OPENAI_API_KEY")},
-			want:  []exp{{"OPENAI_API_KEY", "API_KEY", false}},
+			want:  nil, // OPENAI_BASE_URL routes Codex through the sidecar; real key stays in the CredStore
 		},
 		{
 			name:    "cross-adapter key the CLI never reads stays isolated",
@@ -110,11 +110,10 @@ func TestAgentEnvCredentialExposures(t *testing.T) {
 			},
 		},
 		{
-			name:    "codex mixed bag: byo key + cli + secret all exposed",
+			name:    "codex mixed bag: openai key isolated (#1030), cli + secret exposed",
 			adapter: "CODEX_CLI", keeper: false,
 			creds: []Credential{apiKey("OPENAI_API_KEY"), cli, secret},
 			want: []exp{
-				{"OPENAI_API_KEY", "API_KEY", false},
 				{"GH_TOKEN", "CLI_TOKEN", false},
 				{"STRIPE_KEY", "SECRET", true},
 			},
