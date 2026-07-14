@@ -428,6 +428,14 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 // adds defense-in-depth: a corrupted row or a future non-CUID id scheme
 // can never produce a "../" segment that escapes storagePath and unlinks
 // an unrelated tree.
+//
+// TODO(#1148): this unlinks via os.RemoveAll on the local storagePath,
+// which only cleans up the default localfs backend. provider.StorageProvider
+// already defines a Delete(ctx, path) site, so once a non-local backend
+// (e.g. an S3 StorageProvider) is wired, these blobs would leak — route the
+// cleanup through StorageProvider (walk the attachments prefix + Delete each
+// object, since the interface has no recursive RemoveAll) instead of the
+// filesystem directly. Tracked for the storage-backend generalization.
 func (h *AgentHandler) cleanupChatAttachments(crewID, slug sql.NullString, chatID string) {
 	if h.storagePath == "" || !crewID.Valid || !slug.Valid {
 		return // unwired storage, or an agent with no crew — no attachments possible
