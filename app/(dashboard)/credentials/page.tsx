@@ -105,10 +105,11 @@ function deriveStatus(c: Credential): DerivedStatus {
 
 const STATUS_DOT_COLOR: Record<DerivedStatus, string> = {
   Available: "bg-muted-foreground/40",
-  Detected: "bg-blue-400",
-  Connected: "bg-emerald-500",
+  // #1162: migrated to the #749 semantic palette (bg-info/bg-success/bg-warn).
+  Detected: "bg-info",
+  Connected: "bg-success",
   Error: "bg-red-500",
-  Stale: "bg-amber-500",
+  Stale: "bg-warn",
   Pending: "bg-amber-400",
 }
 
@@ -267,11 +268,26 @@ export default function CredentialsPage() {
 
   async function confirmDeleteCredential() {
     if (!deleteCredential || !workspaceId) return
+    const name = deleteCredential.name
     try {
       const res = await apiFetch(`/api/v1/credentials/${deleteCredential.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
-      if (res.ok) handleRefresh()
-    } catch { /* silently fail */ }
-    finally { setDeleteCredential(null) }
+      if (res.ok) {
+        handleRefresh()
+      } else if (res.status === 404) {
+        // #1162: another admin already deleted this credential between the
+        // dialog opening and this DELETE landing. Mirrors bulkDelete's
+        // #1085 404-as-already-gone rule — treat it as success rather than
+        // silently leaving the now-stale row on screen with no feedback.
+        toast.success(`${name} was already deleted`)
+        handleRefresh()
+      } else {
+        toast.error(`Couldn't delete ${name}.`)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Couldn't delete ${name}.`)
+    } finally {
+      setDeleteCredential(null)
+    }
   }
 
   function toggleSelected(id: string) {
@@ -446,7 +462,7 @@ export default function CredentialsPage() {
         // empty state: red accent, explicit error copy, and a Retry
         // affordance. Never claims "no credentials yet".
         <Card className="p-12 text-center border-red-500/30 bg-red-500/[0.03]" role="alert">
-          <AlertTriangle className="mx-auto h-6 w-6 text-red-400" />
+          <AlertTriangle className="mx-auto h-6 w-6 text-error" />
           <h2 className="mt-3 text-sm font-medium text-foreground">Couldn&apos;t load credentials</h2>
           <p className="mt-1 text-xs text-muted-foreground">{loadError}</p>
           <Button size="sm" variant="outline" className="mt-4" onClick={loadData}>
@@ -513,7 +529,7 @@ export default function CredentialsPage() {
             <motion.div
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
-              className="rounded-md border border-amber-500/30 bg-amber-500/[0.05] px-3 py-2.5 text-xs flex items-center gap-2"
+              className="rounded-md border border-warn/30 bg-warn/[0.05] px-3 py-2.5 text-xs flex items-center gap-2"
             >
               <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
               <span className="text-foreground/90">
@@ -696,7 +712,7 @@ export default function CredentialsPage() {
       {canDelete && selectedIds.size > 0 && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 rounded-full border border-border bg-popover/95 backdrop-blur shadow-2xl px-4 py-2 flex items-center gap-3 text-xs">
           <span className="font-medium">{selectedIds.size} selected</span>
-          <button type="button" onClick={() => setBulkDeleteOpen(true)} className="text-red-400 hover:text-red-300">
+          <button type="button" onClick={() => setBulkDeleteOpen(true)} className="text-error hover:text-error/80">
             Delete
           </button>
           <button type="button" onClick={() => setSelectedIds(new Set())} className="text-muted-foreground hover:text-foreground">
@@ -785,7 +801,7 @@ function CredentialRow({ cred, selected, canUpdate, canDelete, onToggleSelect, o
           {brand.cli && (
             <Badge
               variant="outline"
-              className="text-[9px] px-1 font-mono shrink-0 border-blue-400/50 text-blue-300"
+              className="text-[9px] px-1 font-mono shrink-0 border-info/50 text-info"
               title="Crewship uses this credential to authenticate the agent's CLI inside the container"
             >
               CLI
