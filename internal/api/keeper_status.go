@@ -13,15 +13,25 @@ import (
 
 // KeeperStatusHandler provides the Keeper health and configuration status endpoint.
 type KeeperStatusHandler struct {
-	db     *sql.DB
-	cfg    *config.KeeperConfig
-	gk     gatekeeper.Evaluator
-	logger *slog.Logger
+	db       *sql.DB
+	cfg      *config.KeeperConfig
+	gk       gatekeeper.Evaluator
+	govModel GovModelStatusProvider
+	logger   *slog.Logger
 }
 
 // NewKeeperStatusHandler creates a KeeperStatusHandler with the given configuration and gatekeeper evaluator.
 func NewKeeperStatusHandler(db *sql.DB, cfg *config.KeeperConfig, gk gatekeeper.Evaluator, logger *slog.Logger) *KeeperStatusHandler {
 	return &KeeperStatusHandler{db: db, cfg: cfg, gk: gk, logger: logger}
+}
+
+// WithGovModelStatus wires the per-workspace governance-model status provider
+// (M2a, #1001) so the status card can surface a configured gov model and any
+// §4.4 degrade. nil-safe: unset leaves the gov-model fields empty. Returns the
+// handler for chaining at the router call site.
+func (h *KeeperStatusHandler) WithGovModelStatus(s GovModelStatusProvider) *KeeperStatusHandler {
+	h.govModel = s
+	return h
 }
 
 type keeperStatusResponse struct {
@@ -35,6 +45,16 @@ type keeperStatusResponse struct {
 	DenyCount     int    `json:"deny_count"`
 	EscalateCount int    `json:"escalate_count"`
 	SecretCount   int    `json:"secret_count"`
+
+	// Governance model (M2a, #1001). GovModelConfigured=false → the workspace
+	// uses the server default judge (the OllamaURL/Model above). When degraded,
+	// a revoked/broken gov-model credential fell back to the default judge —
+	// GovModelDegradeReason says why (§4.4 revoke-safety).
+	GovModelConfigured    bool   `json:"gov_model_configured"`
+	GovModelProvider      string `json:"gov_model_provider,omitempty"`
+	GovModelName          string `json:"gov_model,omitempty"`
+	GovModelDegraded      bool   `json:"gov_model_degraded"`
+	GovModelDegradeReason string `json:"gov_model_degrade_reason,omitempty"`
 }
 
 // Status returns the current Keeper configuration and health status.
@@ -71,6 +91,16 @@ func (h *KeeperStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 	// Probe Ollama health if configured
 	if resp.Enabled && resp.OllamaURL != "" {
 		resp.OllamaOnline = probeOllama(r.Context(), resp.OllamaURL)
+	}
+
+	// Per-workspace governance model (M2a, #1001) + any §4.4 degrade.
+	if h.govModel != nil {
+		gm := h.govModel.Status(r.Context(), workspaceID)
+		resp.GovModelConfigured = gm.Configured
+		resp.GovModelProvider = gm.Provider
+		resp.GovModelName = gm.Model
+		resp.GovModelDegraded = gm.Degraded
+		resp.GovModelDegradeReason = gm.Reason
 	}
 
 	// Query request stats from DB, scoped to this workspace's agents.

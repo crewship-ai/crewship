@@ -102,6 +102,14 @@ func WithKeeperGatekeeper(gk gatekeeper.Evaluator) RouterOption {
 	}
 }
 
+// WithGovModelStatus attaches the per-workspace governance-model status
+// provider (M2a, #1001) so the keeper status card can surface a §4.4 degrade.
+func WithGovModelStatus(s GovModelStatusProvider) RouterOption {
+	return func(r *Router) {
+		r.govModelStatus = s
+	}
+}
+
 // WithKeeperSecrets attaches a SecretGetter to the router for the keeper execute handler.
 // If not set, /keeper/execute will return 500 on ALLOW decisions (execute not configured).
 func WithKeeperSecrets(sg SecretGetter) RouterOption {

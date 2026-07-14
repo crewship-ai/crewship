@@ -43,6 +43,25 @@ func NewOpenAIWithBaseURL(apiKey, baseURL string) *OpenAI {
 	}
 }
 
+// NewOpenAIWithClient creates an OpenAI-compatible provider with a custom base
+// URL AND a caller-supplied http.Client. This is the SSRF seam for a
+// tenant-configured (openai_compat) governance-model endpoint (M2a, #1001): the
+// caller passes a client whose transport dials through the #988 httpsafe fence,
+// so a workspace can't point the endpoint at a link-local / private address to
+// pivot. A nil client falls back to the default 120s client (same as
+// NewOpenAIWithBaseURL) — callers wiring an untrusted endpoint MUST pass a
+// guarded client, never nil.
+func NewOpenAIWithClient(apiKey, baseURL string, client *http.Client) *OpenAI {
+	if client == nil {
+		client = &http.Client{Timeout: 120 * time.Second}
+	}
+	return &OpenAI{
+		apiKey:  apiKey,
+		baseURL: baseURL,
+		client:  client,
+	}
+}
+
 // Name returns "openai".
 func (o *OpenAI) Name() string { return "openai" }
 

@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -368,4 +369,59 @@ func TestOpenAIParseSSEStream_HandlerErrors(t *testing.T) {
 			t.Errorf("err = %v, want handler error", err)
 		}
 	})
+}
+
+// --- NewOpenAIWithClient (SSRF seam for openai_compat gov-model, #1001) ---
+
+// rtFunc adapts a func to http.RoundTripper so a test can assert the injected
+// client's transport is the one actually used for the upstream call.
+type rtFunc func(*http.Request) (*http.Response, error)
+
+func (f rtFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// TestNewOpenAIWithClient_UsesInjectedClient proves Complete dials through the
+// caller-supplied http.Client (the guarded transport a tenant endpoint needs),
+// not a default one.
+func TestNewOpenAIWithClient_UsesInjectedClient(t *testing.T) {
+	var sawRoundTrip bool
+	body := `{"choices":[{"message":{"content":"ok"}}]}`
+	client := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		sawRoundTrip = true
+		if got := r.Header.Get("Authorization"); got != "Bearer k" {
+			t.Errorf("Authorization = %q, want Bearer k", got)
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	o := NewOpenAIWithClient("k", "http://tenant.example/v1/chat/completions", client)
+	resp, err := o.Complete(context.Background(), Request{
+		Model:    "gpt-x",
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if !sawRoundTrip {
+		t.Fatal("injected client transport was not used")
+	}
+	if resp.Content != "ok" {
+		t.Errorf("content = %q, want ok", resp.Content)
+	}
+}
+
+// TestNewOpenAIWithClient_NilFallsBackToDefault documents that a nil client is
+// tolerated (falls back to the 120s default) — but production callers wiring an
+// untrusted endpoint must pass a guarded client.
+func TestNewOpenAIWithClient_NilFallsBackToDefault(t *testing.T) {
+	o := NewOpenAIWithClient("k", "http://x/v1/chat/completions", nil)
+	if o.client == nil {
+		t.Fatal("nil client must fall back to a non-nil default")
+	}
+	if o.client.Timeout != 120*time.Second {
+		t.Errorf("default client timeout = %v, want 120s", o.client.Timeout)
+	}
 }

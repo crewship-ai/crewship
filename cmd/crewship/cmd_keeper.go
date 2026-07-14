@@ -62,6 +62,15 @@ type keeperServerStatus struct {
 	Model        string `json:"model"`
 	OllamaOnline bool   `json:"ollama_online"`
 	SecretCount  int    `json:"secret_count"`
+
+	// Governance model (M2a, #1001). Configured=false → the server default
+	// judge (OllamaURL/Model) is in use. Degraded=true → a revoked/broken
+	// gov-model credential fell back to the default judge (§4.4).
+	GovModelConfigured    bool   `json:"gov_model_configured"`
+	GovModelProvider      string `json:"gov_model_provider"`
+	GovModelName          string `json:"gov_model"`
+	GovModelDegraded      bool   `json:"gov_model_degraded"`
+	GovModelDegradeReason string `json:"gov_model_degrade_reason"`
 }
 
 // keeperStatusPayload is the machine shape for `keeper status --format json`.
@@ -159,6 +168,17 @@ Examples:
 			fmt.Printf("  Model:        %s\n", server.Model)
 			fmt.Printf("  Ollama:       %s\n", ollamaStatus)
 			fmt.Printf("  Secret creds: %d\n", server.SecretCount)
+			if server.GovModelConfigured {
+				label := server.GovModelProvider
+				if server.GovModelName != "" {
+					label += " / " + server.GovModelName
+				}
+				fmt.Printf("  Gov model:    %s\n", label)
+				if server.GovModelDegraded {
+					fmt.Printf("  Gov model:    %sdegraded → default judge%s (%s)\n",
+						cli.Yellow, cli.Reset, server.GovModelDegradeReason)
+				}
+			}
 			fmt.Println()
 			printKeeperGovernance(gov)
 		})

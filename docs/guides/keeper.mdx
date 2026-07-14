@@ -359,11 +359,26 @@ crewship keeper model set --provider openai_compat --model gpt-4o-mini --credent
 crewship keeper model clear
 ```
 
+Once set, the governance model is resolved **at request time** for each
+credential-access decision: the access gatekeeper builds the configured provider
+(the `openai_compat` / remote-`ollama` endpoint is dialled through the SSRF fence,
+so a workspace can't point it at a private/link-local address) and uses it in
+place of the server default. `crewship keeper status` shows the resolved provider
+and model, and flags a degrade:
+
+```bash
+crewship keeper status          # -> "Gov model: openai_compat / gpt-4o-mini"
+                                #    or "Gov model: degraded → default judge (…)"
+```
+
 <Note>
   **Revoke-safety.** If the credential backing the governance model is deleted or
   revoked, Keeper does **not** break — it degrades to the default local Ollama
   judge and surfaces a warning, rather than leaving the access path with no
   evaluator (which, being fail-closed, would deny every credential request). A
+  revoke is a soft delete, so the degrade is enforced at resolve time (the lookup
+  treats a soft-deleted credential as unavailable); the fallback shows up as
+  `gov_model_degraded` in `keeper status` and a WARN in the audit journal. A
   working evaluator always exists. Choosing a model does not enable the watchdog;
   run `crewship keeper enable`. OWNER/ADMIN only.
 </Note>
