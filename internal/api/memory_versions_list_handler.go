@@ -62,6 +62,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 const (
@@ -234,19 +236,25 @@ func (h *MemoryVersionsListHandler) List(w http.ResponseWriter, r *http.Request)
 		args = append(args, escapeLikeWildcards(pathPrefix)+"%")
 	}
 	if !since.IsZero() {
+		// Bound formatted via tsformat (fixed 9-digit fraction) —
+		// stored written_at values are tsformat post-#1073a
+		// (writer + persona insert + backfill migration), and
+		// comparing a variable-width RFC3339Nano bound against
+		// fixed-width stored text is exactly the mixed-format
+		// corruption that fix removes.
 		where = append(where, "written_at >= ?")
-		args = append(args, since.UTC().Format(time.RFC3339Nano))
+		args = append(args, tsformat.Format(since))
 	}
 	if !until.IsZero() {
 		where = append(where, "written_at < ?")
-		args = append(args, until.UTC().Format(time.RFC3339Nano))
+		args = append(args, tsformat.Format(until))
 	}
 	if hasCursor {
 		// Keyset condition: rows STRICTLY after the cursor in
 		// (written_at DESC, id DESC) order — i.e. (written_at,
 		// id) lexicographically less than the cursor.
 		where = append(where, "(written_at < ? OR (written_at = ? AND id < ?))")
-		cursorStr := cursorAt.UTC().Format(time.RFC3339Nano)
+		cursorStr := tsformat.Format(cursorAt)
 		args = append(args, cursorStr, cursorStr, cursorID)
 	}
 
@@ -352,7 +360,7 @@ func collectAppliedFilters(tier, agentSlug, pathPrefix string, since, until time
 // "v1:" prefix so a future format change (e.g. adding a third
 // disambiguator) doesn't silently accept stale cursors.
 func encodeMemVersionsCursor(at time.Time, id string) string {
-	raw := memVersionsCursorPrefix + at.UTC().Format(time.RFC3339Nano) + "|" + id
+	raw := memVersionsCursorPrefix + tsformat.Format(at) + "|" + id
 	return base64.RawURLEncoding.EncodeToString([]byte(raw))
 }
 

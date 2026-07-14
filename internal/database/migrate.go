@@ -1631,6 +1631,15 @@ END;
 	// idempotent Go backfill. See migrate_consts_v140_encrypt_webhook_secrets.go
 	// and issues #1072 / #1029.
 	{version: 140, name: "encrypt_webhook_secrets", fn: migrationEncryptWebhookSecrets},
+
+	// v141: normalize memory_versions.written_at to the fixed-width,
+	// lex-sortable tsformat.Layout — three incompatible call sites
+	// (RFC3339Nano writer, RFC3339Nano-truncated whole-second rows, and
+	// the space-form `datetime('now','subsec')` DEFAULT on the persona
+	// insert) corrupt ORDER BY written_at and the keyset-cursor
+	// pagination PR #1156 added. See
+	// migrate_v141_memory_versions_tsformat.go and issue #1073.
+	{version: 141, name: "memory_versions_tsformat_backfill", fn: migrationNormalizeMemoryVersionsTsformat},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
