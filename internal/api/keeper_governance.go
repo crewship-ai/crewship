@@ -67,6 +67,13 @@ type keeperGovernancePutBody struct {
 	WatchSpec             *string   `json:"watch_spec"`
 	WatchPresets          *[]string `json:"watch_presets"`
 	RequireSecondApprover *bool     `json:"require_second_approver"`
+
+	// Governance-model selection (M2a, #1001). Empty provider = "use the
+	// server/env default". A credential ref must point at an ENDPOINT_URL /
+	// API_KEY credential in this workspace.
+	GovModelProvider     *string `json:"gov_model_provider"`
+	GovModelID           *string `json:"gov_model_id"`
+	GovModelCredentialID *string `json:"gov_model_credential_id"`
 }
 
 // Put handles PUT /api/v1/admin/keeper/governance (roleManage = OWNER/ADMIN).
@@ -121,6 +128,65 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.RequireSecondApprover != nil {
 		cur.RequireSecondApprover = *body.RequireSecondApprover
+	}
+	if body.GovModelProvider != nil {
+		// Empty is allowed and means "use the server/env default". A non-empty
+		// value must be one the resolver actually understands — validate against
+		// the same set governance.ResolveGovModel trusts so the two can't drift.
+		if *body.GovModelProvider != "" && !governance.KnownGovProvider(*body.GovModelProvider) {
+			replyError(w, http.StatusBadRequest, "gov_model_provider must be one of: ollama, anthropic, openai_compat")
+			return
+		}
+		cur.GovModelProvider = *body.GovModelProvider
+	}
+	if body.GovModelID != nil {
+		if len(*body.GovModelID) > governance.MaxGovModelIDLen {
+			replyError(w, http.StatusBadRequest, "gov_model_id exceeds the maximum length")
+			return
+		}
+		cur.GovModelID = *body.GovModelID
+	}
+	if body.GovModelCredentialID != nil {
+		cur.GovModelCredentialID = *body.GovModelCredentialID
+	}
+
+	// Coherence: a provider needs a model, and a credential without a provider
+	// is meaningless. Enforce on the MERGED row so a partial update that leaves
+	// the config half-set is rejected rather than silently producing a broken
+	// (and then degraded) evaluator.
+	if cur.GovModelProvider != "" && cur.GovModelID == "" {
+		replyError(w, http.StatusBadRequest, "gov_model_id is required when gov_model_provider is set")
+		return
+	}
+	if cur.GovModelCredentialID != "" && cur.GovModelProvider == "" {
+		replyError(w, http.StatusBadRequest, "gov_model_provider is required when gov_model_credential_id is set")
+		return
+	}
+
+	// The governance-model credential must be a usable ENDPOINT_URL / API_KEY
+	// credential in this workspace. Validate ONLY when this request sets it
+	// (body.GovModelCredentialID != nil and non-empty) — an unrelated partial
+	// update must not be blocked because a previously-stored credential was
+	// since revoked (the resolver's revoke-safety handles that at build time).
+	if body.GovModelCredentialID != nil && cur.GovModelCredentialID != "" {
+		var credType string
+		err := h.db.QueryRowContext(r.Context(), `
+			SELECT type FROM credentials
+			WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+			cur.GovModelCredentialID, wsID).Scan(&credType)
+		if errors.Is(err, sql.ErrNoRows) {
+			replyError(w, http.StatusBadRequest, "gov_model_credential_id is not a credential in this workspace")
+			return
+		}
+		if err != nil {
+			h.logger.Error("keeper governance: gov model credential lookup", "error", err)
+			replyError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if credType != governance.CredTypeEndpointURL && credType != governance.CredTypeAPIKey {
+			replyError(w, http.StatusBadRequest, "gov_model_credential_id must reference an ENDPOINT_URL or API_KEY credential")
+			return
+		}
 	}
 
 	// The security contact must be an OWNER/ADMIN member of this workspace —
@@ -180,6 +246,11 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 			"watch_preset_count":      len(s.WatchPresets),
 			"watch_spec_len":          len(s.WatchSpec),
 			"require_second_approver": s.RequireSecondApprover,
+			// Governance-model selection: log the provider/model + whether a
+			// vault credential backs it (never the credential value).
+			"gov_model_provider": s.GovModelProvider,
+			"gov_model_id":       s.GovModelID,
+			"gov_model_has_cred": s.GovModelCredentialID != "",
 		},
 	}); jerr != nil {
 		h.logger.Warn("keeper governance: journal emit failed", "error", jerr)

@@ -58,6 +58,11 @@ type keeperGovernance struct {
 	// Warning is a non-blocking advisory the server returns on a mutation —
 	// e.g. enabling second-approver with fewer than 2 eligible approvers.
 	Warning string `json:"warning,omitempty"`
+
+	// Governance-model selection (M2a, #1001).
+	GovModelProvider     string `json:"gov_model_provider"`
+	GovModelID           string `json:"gov_model_id"`
+	GovModelCredentialID string `json:"gov_model_credential_id"`
 }
 
 // keeperServerStatus mirrors GET /api/v1/system/keeper.

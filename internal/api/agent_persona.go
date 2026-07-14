@@ -18,6 +18,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/policy"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // PR-E F6 — PERSONA API surface.
@@ -575,11 +576,18 @@ func (h *PersonaHandler) recordVersion(r *http.Request, agentID, layer, path, co
 		writtenBy = user.ID
 	}
 	sha := hashPersona(content)
+	// written_at is set explicitly (tsformat, fixed 9-digit fraction)
+	// rather than relying on the column's DEFAULT (datetime('now',
+	// 'subsec')), which emits SQLite's space-separated form
+	// ("2026-01-01 00:00:05.123") — a THIRD written_at shape that,
+	// mixed with the RFC3339-family values every other writer
+	// produces, corrupts ORDER BY written_at and the keyset-cursor
+	// pagination in memory_versions_list_handler.go (#1073a).
 	_, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO memory_versions
-		(id, workspace_id, path, tier, sha256, bytes, written_by, payload_ref)
-		VALUES (lower(hex(randomblob(16))), ?, ?, 'persona', ?, ?, ?, ?)
-	`, wsID, path, sha, len(content), writtenBy, path)
+		(id, workspace_id, path, tier, sha256, bytes, written_at, written_by, payload_ref)
+		VALUES (lower(hex(randomblob(16))), ?, ?, 'persona', ?, ?, ?, ?, ?)
+	`, wsID, path, sha, len(content), tsformat.Format(time.Now()), writtenBy, path)
 	if err != nil {
 		h.logger.Warn("persona version row insert failed",
 			"agent_id", agentID, "layer", layer, "err", err)
@@ -746,11 +754,18 @@ func (h *PersonaHandler) recordCrewVersion(r *http.Request, crewID, path, conten
 		writtenBy = user.ID
 	}
 	sha := hashPersona(content)
+	// written_at is set explicitly (tsformat, fixed 9-digit fraction)
+	// rather than relying on the column's DEFAULT (datetime('now',
+	// 'subsec')), which emits SQLite's space-separated form
+	// ("2026-01-01 00:00:05.123") — a THIRD written_at shape that,
+	// mixed with the RFC3339-family values every other writer
+	// produces, corrupts ORDER BY written_at and the keyset-cursor
+	// pagination in memory_versions_list_handler.go (#1073a).
 	_, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO memory_versions
-		(id, workspace_id, path, tier, sha256, bytes, written_by, payload_ref)
-		VALUES (lower(hex(randomblob(16))), ?, ?, 'persona', ?, ?, ?, ?)
-	`, wsID, path, sha, len(content), writtenBy, path)
+		(id, workspace_id, path, tier, sha256, bytes, written_at, written_by, payload_ref)
+		VALUES (lower(hex(randomblob(16))), ?, ?, 'persona', ?, ?, ?, ?, ?)
+	`, wsID, path, sha, len(content), tsformat.Format(time.Now()), writtenBy, path)
 	if err != nil {
 		h.logger.Warn("crew persona version insert failed",
 			"crew_id", crewID, "err", err)
