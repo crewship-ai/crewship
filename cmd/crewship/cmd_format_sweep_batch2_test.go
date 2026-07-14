@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -254,9 +255,14 @@ func TestRecallRunE_DefaultStaysHuman(t *testing.T) {
 func TestHistoryRunE_DefaultStaysHuman(t *testing.T) {
 	stub := covSetupCli5(t)
 	slug := "eva"
+	// history's default --since is 24h and the window is filtered client-side
+	// against time.Now (cmd_history.go), so the seed must be relative to now,
+	// not a fixed literal — a hardcoded date silently ages out of the window
+	// and starts failing 24h after it's written. Anchor one hour ago.
+	createdAt := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339)
 	stub.OnGet("/api/v1/runs", clitest.JSONResponse(200, map[string]any{
 		"data": []map[string]any{
-			{"id": "run_1", "agent_slug": slug, "status": "completed", "trigger_type": "manual", "created_at": "2026-07-13T09:00:00Z"},
+			{"id": "run_1", "agent_slug": slug, "status": "completed", "trigger_type": "manual", "created_at": createdAt},
 		},
 	}))
 
