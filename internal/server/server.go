@@ -625,6 +625,15 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 
 		// Wire Composio managed-integration provider (API key from env/yaml)
 		opts = append(opts, goapi.WithComposioConfig(&cfg.Composio))
+
+		// M2a/M2b (#1001): ONE gov-model resolver shared by the access
+		// gatekeeper AND the Phase-2 aux evaluators, so a workspace's
+		// vault-backed governance model governs BOTH the credential-access
+		// judge and the behavior/F4 evaluators at request time (and its build
+		// cache is shared across both surfaces). Constructed unconditionally —
+		// the aux evaluators below build even when the access gatekeeper is
+		// disabled — with cfg.Keeper.* as the local default/degrade judge.
+		govResolver := goapi.NewGovModelResolver(deps.DB, s.journalWriter, logger, cfg.Keeper.OllamaURL, cfg.Keeper.Model)
 		if cfg.Keeper.Enabled {
 			// Wrap the Ollama provider with the full middleware stack so
 			// gatekeeper LLM calls are cost-tracked, guardrail-scanned,
@@ -635,8 +644,8 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			wrapped := llm.Middleware(base, s.journalWriter, deps.DB)
 			// M2a (#1001): the per-workspace vault-backed governance model
 			// overrides this default at request time when configured, degrading
-			// a revoked credential back to this same OLLAMA judge (§4.4).
-			govResolver := goapi.NewGovModelResolver(deps.DB, s.journalWriter, logger, cfg.Keeper.OllamaURL, cfg.Keeper.Model)
+			// a revoked credential back to this same OLLAMA judge (§4.4). The
+			// resolver is built above so the aux evaluators share it.
 			gk := gatekeeper.New(wrapped, cfg.Keeper.Model, logger,
 				gatekeeper.WithWatchSpecResolver(watchSpecResolver(deps.DB, logger)),
 				gatekeeper.WithGovModelResolver(govResolver.Resolve))
@@ -741,7 +750,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		// evaluator — the matching endpoint then returns 503 so partial
 		// rollouts have a deterministic shape (graceful degradation, not
 		// crash on boot). See internal/server/keeper_phase2.go.
-		evals := buildPhase2Evaluators(auxModels, s.journalWriter, deps.DB, logger)
+		evals := buildPhase2Evaluators(auxModels, govResolver.Resolve, cfg.Keeper.OllamaURL, cfg.Keeper.Model, s.journalWriter, deps.DB, logger)
 		opts = append(opts, goapi.WithKeeperPhase2Evaluators(
 			evals.skillReview,
 			evals.behavior,

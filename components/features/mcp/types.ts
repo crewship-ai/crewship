@@ -43,7 +43,7 @@ export interface ServerEntry {
 export interface Credential {
   id: string
   name: string
-  type: "AI_CLI_TOKEN" | "API_KEY" | "CLI_TOKEN" | "SECRET" | "OAUTH2"
+  type: "AI_CLI_TOKEN" | "API_KEY" | "CLI_TOKEN" | "SECRET" | "OAUTH2" | "ENDPOINT_URL"
   provider?: string
   status?: "ACTIVE" | "EXPIRED" | "RATE_LIMITED" | "REVOKED" | "ERROR" | "PENDING"
 }

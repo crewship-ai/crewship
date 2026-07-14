@@ -1,6 +1,25 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { KeeperGovernancePanel } from "../keeper-governance-panel"
+
+// Radix Select drives open/close through pointer-capture APIs happy-dom does
+// not implement; polyfill them so the provider/credential menus can open.
+beforeAll(() => {
+  Element.prototype.scrollIntoView = vi.fn()
+  // @ts-expect-error jsdom/happy-dom lacks these pointer-capture stubs
+  Element.prototype.hasPointerCapture = vi.fn(() => false)
+  // @ts-expect-error polyfill
+  Element.prototype.setPointerCapture = vi.fn()
+  // @ts-expect-error polyfill
+  Element.prototype.releasePointerCapture = vi.fn()
+})
+
+// openSelect drives a Radix SelectTrigger open the way a pointer would.
+function openSelect(trigger: HTMLElement) {
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerId: 1 })
+  fireEvent.pointerUp(trigger, { button: 0, pointerId: 1 })
+  fireEvent.click(trigger)
+}
 
 // Drive the component through its real fetch path with a stubbed apiFetch
 // (same pattern as aux-status-section.test.tsx) so we exercise the actual
@@ -49,6 +68,13 @@ const MEMBERS = [
   },
 ]
 
+const CREDENTIALS = [
+  { id: "cred-api", name: "Anthropic key", type: "API_KEY", status: "ACTIVE" },
+  { id: "cred-url", name: "Ollama host", type: "ENDPOINT_URL", status: "ACTIVE" },
+  // A SECRET must be filtered out of the gov-model credential picker.
+  { id: "cred-secret", name: "DB password", type: "SECRET", status: "ACTIVE" },
+]
+
 function mockRoutes(gov: {
   configured: boolean
   enabled: boolean
@@ -56,19 +82,19 @@ function mockRoutes(gov: {
   deny_notify_min_risk: number
   watch_spec?: string
   watch_presets?: string[]
+  gov_model_provider?: string
+  gov_model_id?: string
+  gov_model_credential_id?: string
 }) {
   apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url.includes("/admin/keeper/governance")) {
       if (init?.method === "PUT") {
-        const body = JSON.parse(String(init.body)) as {
-          enabled: boolean
-          security_contact_user_id: string
-          deny_notify_min_risk: number
-        }
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>
         return jsonResponse({ configured: true, ...body })
       }
       return jsonResponse(gov)
     }
+    if (url.includes("/credentials")) return jsonResponse(CREDENTIALS)
     if (url.includes("/members")) return jsonResponse(MEMBERS)
     throw new Error(`unexpected fetch: ${url}`)
   })
@@ -131,6 +157,9 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
       deny_notify_min_risk: 9,
       watch_spec: "",
       watch_presets: [],
+      gov_model_provider: "",
+      gov_model_id: "",
+      gov_model_credential_id: "",
     })
     // Baseline resets after a successful save → Save disabled again.
     await waitFor(() =>
@@ -218,6 +247,119 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     expect(sw).toBeDisabled()
     expect(screen.getByTestId("keeper-governance-risk")).toBeDisabled()
     expect(screen.queryByTestId("keeper-governance-save")).not.toBeInTheDocument()
+  })
+
+  it("renders the four governance-model provider options (#1001 gov-model)", async () => {
+    mockRoutes({
+      configured: true,
+      enabled: true,
+      security_contact_user_id: "",
+      deny_notify_min_risk: 7,
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    const trigger = await screen.findByTestId("keeper-gov-provider")
+    // Defaults to the server-default option, and no model input until a
+    // concrete provider is chosen.
+    expect(trigger).toHaveTextContent(/server default/i)
+    expect(screen.queryByTestId("keeper-gov-model-id")).not.toBeInTheDocument()
+
+    openSelect(trigger)
+    for (const label of [
+      /server default/i,
+      /ollama \(local\)/i,
+      /anthropic/i,
+      /openai-compatible/i,
+    ]) {
+      expect(await screen.findByRole("option", { name: label })).toBeInTheDocument()
+    }
+  })
+
+  it("blocks save when a provider is set but the model id is empty (#1001 gov-model)", async () => {
+    mockRoutes({
+      configured: true,
+      enabled: true,
+      security_contact_user_id: "",
+      deny_notify_min_risk: 7,
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    const trigger = await screen.findByTestId("keeper-gov-provider")
+    openSelect(trigger)
+    fireEvent.click(await screen.findByRole("option", { name: /anthropic/i }))
+
+    // Model input now shown, empty → required message + Save disabled.
+    const modelInput = await screen.findByTestId("keeper-gov-model-id")
+    expect(modelInput).toHaveValue("")
+    expect(screen.getByTestId("keeper-gov-model-required")).toBeInTheDocument()
+    expect(screen.getByTestId("keeper-governance-save")).toBeDisabled()
+
+    // A save attempt (via the guard) never reaches the PUT.
+    fireEvent.change(modelInput, { target: { value: "   " } })
+    expect(screen.getByTestId("keeper-governance-save")).toBeDisabled()
+    expect(
+      apiFetch.mock.calls.some(([, init]) => (init as RequestInit)?.method === "PUT"),
+    ).toBe(false)
+  })
+
+  it("saves the governance-model fields via PUT (#1001 gov-model)", async () => {
+    mockRoutes({
+      configured: true,
+      enabled: true,
+      security_contact_user_id: "",
+      deny_notify_min_risk: 7,
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    const trigger = await screen.findByTestId("keeper-gov-provider")
+    openSelect(trigger)
+    fireEvent.click(await screen.findByRole("option", { name: /anthropic/i }))
+
+    fireEvent.change(await screen.findByTestId("keeper-gov-model-id"), {
+      target: { value: "claude-haiku-4-5" },
+    })
+
+    // The credential picker is filtered to API_KEY / ENDPOINT_URL (no SECRET).
+    const credTrigger = screen.getByTestId("keeper-gov-credential")
+    openSelect(credTrigger)
+    expect(await screen.findByRole("option", { name: /anthropic key \(API_KEY\)/i })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: /ollama host \(ENDPOINT_URL\)/i })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /db password/i })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("option", { name: /anthropic key \(API_KEY\)/i }))
+
+    const save = screen.getByTestId("keeper-governance-save")
+    expect(save).toBeEnabled()
+    fireEvent.click(save)
+
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+    const putCall = apiFetch.mock.calls.find(([, init]) => (init as RequestInit)?.method === "PUT")
+    const [, putInit] = putCall as [string, RequestInit]
+    const body = JSON.parse(String(putInit.body)) as {
+      gov_model_provider: string
+      gov_model_id: string
+      gov_model_credential_id: string
+    }
+    expect(body.gov_model_provider).toBe("anthropic")
+    expect(body.gov_model_id).toBe("claude-haiku-4-5")
+    expect(body.gov_model_credential_id).toBe("cred-api")
+  })
+
+  it("hydrates the governance-model fields from GET (#1001 gov-model)", async () => {
+    mockRoutes({
+      configured: true,
+      enabled: true,
+      security_contact_user_id: "",
+      deny_notify_min_risk: 7,
+      gov_model_provider: "ollama",
+      gov_model_id: "qwen2.5:3b-instruct",
+      gov_model_credential_id: "cred-url",
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    expect(await screen.findByTestId("keeper-gov-model-id")).toHaveValue("qwen2.5:3b-instruct")
+    expect(screen.getByTestId("keeper-gov-provider")).toHaveTextContent(/ollama/i)
+    // Pristine hydration → Save disabled.
+    expect(screen.getByTestId("keeper-governance-save")).toBeDisabled()
   })
 
   it("surfaces a load failure with a retry affordance", async () => {

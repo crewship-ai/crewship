@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/select"
 import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
 import { useAbilities } from "@/hooks/use-abilities"
+import { useCredentials } from "@/components/features/mcp/hooks/use-credentials"
 import { apiFetch } from "@/lib/api-fetch"
 
 interface GovernanceResponse {
@@ -42,7 +43,31 @@ interface GovernanceResponse {
   deny_notify_min_risk: number
   watch_spec?: string
   watch_presets?: string[]
+  // Governance-model override (backed by keeper_governance.go). All optional:
+  // an empty provider means "use the server default model". When provider is
+  // non-empty the server requires gov_model_id; credential is always optional.
+  gov_model_provider?: string
+  gov_model_id?: string
+  gov_model_credential_id?: string
 }
+
+// GOV_MODEL_PROVIDERS mirrors the provider values accepted by
+// keeper_governance.go / the CLI: "" (server default), "ollama", "anthropic",
+// "openai_compat". Radix Select forbids value="" on items, so the "server
+// default" option uses a sentinel that maps back to the empty wire value.
+const GOV_PROVIDER_DEFAULT = "__server_default__"
+const GOV_CREDENTIAL_NONE = "__none__"
+
+const GOV_MODEL_PROVIDERS: { value: string; label: string; modelHint?: string }[] = [
+  { value: "", label: "Server default" },
+  { value: "ollama", label: "Ollama (local)", modelHint: "qwen2.5:3b-instruct" },
+  { value: "anthropic", label: "Anthropic", modelHint: "claude-haiku-4-5" },
+  { value: "openai_compat", label: "OpenAI-compatible", modelHint: "gpt-4o-mini" },
+]
+
+// Credential types usable as a governance-model credential: an API key
+// (anthropic / openai_compat) or an endpoint URL (a remote ollama / compat host).
+const GOV_CREDENTIAL_TYPES = new Set(["API_KEY", "ENDPOINT_URL"])
 
 // WATCH_PRESETS mirrors internal/keeper/governance/presets.go — the five stable
 // preset keys. The Go source is the authority for the wording actually injected
@@ -77,6 +102,9 @@ interface FormState {
   risk: string    // kept as string so the number input can be edited freely
   watchSpec: string       // free-form NL rules
   watchPresets: string[]  // enabled preset keys
+  govProvider: string     // "" | ollama | anthropic | openai_compat
+  govModelId: string      // required when govProvider != ""
+  govCredentialId: string // optional; "" = none
 }
 
 // sameSet compares two preset-key arrays order-independently (the wire order is
@@ -114,9 +142,20 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
   const [saving, setSaving] = useState(false)
   const [configured, setConfigured] = useState(false)
   const [admins, setAdmins] = useState<WorkspaceMember[]>([])
-  const emptyForm: FormState = { enabled: false, contact: "", risk: "7", watchSpec: "", watchPresets: [] }
+  const emptyForm: FormState = {
+    enabled: false, contact: "", risk: "7", watchSpec: "", watchPresets: [],
+    govProvider: "", govModelId: "", govCredentialId: "",
+  }
   const [form, setForm] = useState<FormState>(emptyForm)
   const [baseline, setBaseline] = useState<FormState>(emptyForm)
+
+  // Governance-model credential picker. Reuses the MCP credentials hook; we
+  // only surface API_KEY / ENDPOINT_URL creds (the two usable as a model cred).
+  const { credentials } = useCredentials(workspaceId ?? undefined)
+  const govCredentials = useMemo(
+    () => credentials.filter((c) => GOV_CREDENTIAL_TYPES.has(c.type)),
+    [credentials],
+  )
 
   const load = useCallback(async (signal?: AbortSignal) => {
     if (!workspaceId) {
@@ -166,6 +205,9 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
         risk: String(gov.deny_notify_min_risk ?? 7),
         watchSpec: gov.watch_spec ?? "",
         watchPresets: gov.watch_presets ?? [],
+        govProvider: gov.gov_model_provider ?? "",
+        govModelId: gov.gov_model_id ?? "",
+        govCredentialId: gov.gov_model_credential_id ?? "",
       }
       setForm(next)
       setBaseline(next)
@@ -189,13 +231,24 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
     form.contact !== baseline.contact ||
     form.risk !== baseline.risk ||
     form.watchSpec !== baseline.watchSpec ||
-    !sameSet(form.watchPresets, baseline.watchPresets)
+    !sameSet(form.watchPresets, baseline.watchPresets) ||
+    form.govProvider !== baseline.govProvider ||
+    form.govModelId !== baseline.govModelId ||
+    form.govCredentialId !== baseline.govCredentialId
+
+  // A non-empty provider REQUIRES a model id (the server 400s otherwise); block
+  // save and surface the requirement client-side.
+  const govModelMissing = form.govProvider !== "" && form.govModelId.trim() === ""
 
   const save = useCallback(async () => {
     if (!workspaceId) return
     const riskNum = Number(form.risk)
     if (!Number.isInteger(riskNum) || riskNum < 1 || riskNum > 10) {
       toast.error("Risk threshold must be a whole number between 1 and 10")
+      return
+    }
+    if (form.govProvider !== "" && form.govModelId.trim() === "") {
+      toast.error("A model id is required when a governance-model provider is set")
       return
     }
     setSaving(true)
@@ -211,6 +264,15 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
             deny_notify_min_risk: riskNum,
             watch_spec: form.watchSpec,
             watch_presets: form.watchPresets,
+            gov_model_provider: form.govProvider,
+            // Trim to "" when the provider is server-default so we never send a
+            // stale model id alongside an empty provider.
+            gov_model_id: form.govProvider === "" ? "" : form.govModelId.trim(),
+            // Same guard for the credential: the server rejects a credential
+            // with no provider (400), so drop a stale credential when the
+            // provider is reset to server-default.
+            gov_model_credential_id:
+              form.govProvider === "" ? "" : form.govCredentialId,
           }),
         },
       )
@@ -233,6 +295,9 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
         risk: String(body.deny_notify_min_risk ?? riskNum),
         watchSpec: body.watch_spec ?? "",
         watchPresets: body.watch_presets ?? [],
+        govProvider: body.gov_model_provider ?? "",
+        govModelId: body.gov_model_id ?? "",
+        govCredentialId: body.gov_model_credential_id ?? "",
       }
       setForm(next)
       setBaseline(next)
@@ -288,7 +353,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
             size="sm"
             className="h-7 px-2.5 text-xs"
             onClick={() => { void save() }}
-            disabled={saving || !dirty}
+            disabled={saving || !dirty || govModelMissing}
             data-testid="keeper-governance-save"
           >
             {saving ? "Saving…" : "Save"}
@@ -367,6 +432,111 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
           data-testid="keeper-governance-risk"
         />
       </SettingsRow>
+
+      {/* Governance model — which model the credential-access gatekeeper uses.
+          Empty provider = the server default; a non-empty provider requires a
+          model id (enforced client-side to match keeper_governance.go). */}
+      <SettingsRow
+        label="Governance model provider"
+        description="Model backing the credential-access gatekeeper. Leave on server default unless you need a workspace override."
+      >
+        <Select
+          value={form.govProvider === "" ? GOV_PROVIDER_DEFAULT : form.govProvider}
+          onValueChange={(v) =>
+            setForm((f) => ({ ...f, govProvider: v === GOV_PROVIDER_DEFAULT ? "" : v }))
+          }
+          disabled={!canEdit || saving}
+        >
+          <SelectTrigger
+            className="h-8 text-xs w-[220px]"
+            aria-label="Governance model provider"
+            data-testid="keeper-gov-provider"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {GOV_MODEL_PROVIDERS.map((p) => (
+              <SelectItem
+                key={p.value || GOV_PROVIDER_DEFAULT}
+                value={p.value === "" ? GOV_PROVIDER_DEFAULT : p.value}
+                className="text-xs"
+              >
+                {p.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </SettingsRow>
+
+      {form.govProvider !== "" && (
+        <>
+          <SettingsRow
+            label="Governance model id"
+            description="Required when a provider is set."
+          >
+            <span className="flex flex-col items-end gap-1">
+              <Input
+                type="text"
+                value={form.govModelId}
+                onChange={(e) => setForm((f) => ({ ...f, govModelId: e.target.value }))}
+                disabled={!canEdit || saving}
+                placeholder={
+                  GOV_MODEL_PROVIDERS.find((p) => p.value === form.govProvider)?.modelHint
+                }
+                className="h-8 w-[220px] text-xs"
+                aria-label="Governance model id"
+                aria-required="true"
+                aria-invalid={govModelMissing}
+                data-testid="keeper-gov-model-id"
+              />
+              {govModelMissing && (
+                <span className="text-[11px] text-destructive/90" data-testid="keeper-gov-model-required">
+                  A model id is required for this provider.
+                </span>
+              )}
+            </span>
+          </SettingsRow>
+
+          <SettingsRow
+            label="Governance model credential"
+            description="Optional. API key or endpoint URL the provider authenticates with."
+          >
+            <Select
+              value={form.govCredentialId === "" ? GOV_CREDENTIAL_NONE : form.govCredentialId}
+              onValueChange={(v) =>
+                setForm((f) => ({ ...f, govCredentialId: v === GOV_CREDENTIAL_NONE ? "" : v }))
+              }
+              disabled={!canEdit || saving}
+            >
+              <SelectTrigger
+                className="h-8 text-xs w-[220px]"
+                aria-label="Governance model credential"
+                data-testid="keeper-gov-credential"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={GOV_CREDENTIAL_NONE} className="text-xs">
+                  — none —
+                </SelectItem>
+                {govCredentials.map((c) => (
+                  <SelectItem key={c.id} value={c.id} className="text-xs">
+                    {c.name} ({c.type})
+                  </SelectItem>
+                ))}
+                {/* Keep a saved-but-now-unlisted credential selectable so the
+                    Select never renders blank and silently drops it on save. */}
+                {form.govCredentialId !== "" &&
+                  !govCredentials.some((c) => c.id === form.govCredentialId) && (
+                    <SelectItem value={form.govCredentialId} className="text-xs">
+                      {form.govCredentialId} (unavailable)
+                    </SelectItem>
+                  )}
+              </SelectContent>
+            </Select>
+          </SettingsRow>
+        </>
+      )}
 
       {/* Watch presets — curated rules the operator toggles on. Full-width block
           rather than a SettingsRow because the multi-select doesn't fit the
