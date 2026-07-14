@@ -426,3 +426,66 @@ func TestGatekeeper_LLMCallCarriesLookoutScope(t *testing.T) {
 		t.Errorf("scope AgentID = %q, want agent_789", p.capturedScope.AgentID)
 	}
 }
+
+// TestGatekeeper_GovModelResolver_OverridesDefault proves the M2a (#1001)
+// per-workspace governance-model resolver takes over the LLM call when it
+// returns a provider, and that a nil result cleanly falls back to the
+// construction-time default. This is what makes the vault-backed gov-model
+// setting LIVE on the access path.
+func TestGatekeeper_GovModelResolver_OverridesDefault(t *testing.T) {
+	// L2 so the request always reaches the LLM (no L1 auto-allow shortcut).
+	req := gatekeeper.EvalRequest{
+		Request: keeper.Request{
+			RequestingAgentID: "a1",
+			WorkspaceID:       "ws1",
+			Intent:            "need the db password to run a migration",
+		},
+		SecurityLevel:  keeper.SecurityLevelL2,
+		CredentialName: "db-pass",
+	}
+
+	t.Run("resolver returns a provider -> used instead of default", func(t *testing.T) {
+		defaultP := &mockProvider{content: `{"decision":"DENY","reason":"default model","risk":8}`}
+		govP := &mockProvider{content: `{"decision":"ALLOW","reason":"gov model","risk":2}`}
+		g := gatekeeper.New(defaultP, "default-model", newTestLogger(),
+			gatekeeper.WithGovModelResolver(func(_ context.Context, ws string) (llm.Provider, string) {
+				if ws == "ws1" {
+					return govP, "gov-model"
+				}
+				return nil, ""
+			}))
+
+		resp, err := g.Evaluate(context.Background(), req)
+		if err != nil {
+			t.Fatalf("Evaluate: %v", err)
+		}
+		if resp.Decision != string(keeper.DecisionAllow) {
+			t.Errorf("expected gov model (ALLOW), got %s (%s)", resp.Decision, resp.Reason)
+		}
+		if govP.capturedPrompt == "" {
+			t.Error("gov-model provider was not called")
+		}
+		if defaultP.capturedPrompt != "" {
+			t.Error("default provider must NOT be called when the gov model resolves")
+		}
+	})
+
+	t.Run("resolver returns nil -> default used", func(t *testing.T) {
+		defaultP := &mockProvider{content: `{"decision":"DENY","reason":"default model","risk":8}`}
+		g := gatekeeper.New(defaultP, "default-model", newTestLogger(),
+			gatekeeper.WithGovModelResolver(func(_ context.Context, _ string) (llm.Provider, string) {
+				return nil, ""
+			}))
+
+		resp, err := g.Evaluate(context.Background(), req)
+		if err != nil {
+			t.Fatalf("Evaluate: %v", err)
+		}
+		if resp.Decision != string(keeper.DecisionDeny) {
+			t.Errorf("expected default (DENY), got %s (%s)", resp.Decision, resp.Reason)
+		}
+		if defaultP.capturedPrompt == "" {
+			t.Error("default provider was not called when resolver returned nil")
+		}
+	})
+}

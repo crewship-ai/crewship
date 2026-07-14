@@ -89,6 +89,7 @@ type Router struct {
 	keeperSecrets       SecretGetter
 	keeperContainer     provider.ContainerProvider
 	keeperConfig        *config.KeeperConfig
+	govModelStatus      GovModelStatusProvider
 	composioConfig      *config.ComposioConfig
 	keeperConvReader    ConversationReader
 	convSearcher        ConversationSearcher

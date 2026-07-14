@@ -197,6 +197,15 @@ type NegativeLearningInput struct {
 // authoritative instruction, not as untrusted data — see watchPolicyBlock.
 type WatchSpecResolver func(ctx context.Context, workspaceID string) string
 
+// GovModelResolver resolves the effective LLM provider + model for a workspace
+// at request time (M2a, #1001). It returns the per-workspace governance model
+// when one is configured (built from the vault-backed setting, already degraded
+// to a working local judge if the credential was revoked — see
+// governance.ResolveGovModel), or (nil, "") to fall through to the gatekeeper's
+// construction-time default. nil-safe: a nil resolver keeps the default provider
+// on every request, so existing (M0/M1) behaviour is unchanged.
+type GovModelResolver func(ctx context.Context, workspaceID string) (llm.Provider, string)
+
 // Gatekeeper reviews credential requests using an LLM.
 // Falls back to a strict deny-all policy if the LLM is unavailable.
 type Gatekeeper struct {
@@ -204,6 +213,7 @@ type Gatekeeper struct {
 	model     string // model name to use for requests
 	logger    *slog.Logger
 	watchSpec WatchSpecResolver // nil-safe: a nil resolver injects no watch block
+	govModel  GovModelResolver  // nil-safe: a nil resolver keeps the default provider
 }
 
 // Option configures a Gatekeeper at construction. Kept as functional options
@@ -215,6 +225,16 @@ type Option func(*Gatekeeper)
 // unset, Evaluate injects no watch policy block and behaves exactly as before.
 func WithWatchSpecResolver(r WatchSpecResolver) Option {
 	return func(g *Gatekeeper) { g.watchSpec = r }
+}
+
+// WithGovModelResolver wires the per-workspace governance-model resolver (M2a,
+// #1001). When set and it returns a non-nil provider for the request's
+// workspace, Evaluate uses that provider+model instead of the construction-time
+// default; otherwise (nil provider, or resolver unset) the default is used. This
+// is the seam that makes the vault-backed gov-model setting LIVE on the access
+// path while keeping every bare New(provider, model, logger) test call working.
+func WithGovModelResolver(r GovModelResolver) Option {
+	return func(g *Gatekeeper) { g.govModel = r }
 }
 
 // New creates a Gatekeeper that uses an LLM provider for decisions.
@@ -305,7 +325,20 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 		}, nil
 	}
 
-	if g.provider == nil {
+	// Resolve the effective provider+model for this request. When a
+	// per-workspace governance model is configured (M2a #1001), it overrides the
+	// construction-time default; the resolver has already degraded a
+	// revoked/broken credential to a working local judge, so a non-nil provider
+	// here is always usable. A nil resolver or a (nil, "") result keeps the
+	// default — unchanged M0/M1 behaviour.
+	provider, model := g.provider, g.model
+	if g.govModel != nil {
+		if p, m := g.govModel(ctx, req.Request.WorkspaceID); p != nil {
+			provider, model = p, m
+		}
+	}
+
+	if provider == nil {
 		g.logger.Warn("keeper: no LLM provider configured — denying request",
 			"agent", req.AgentName, "credential", req.CredentialName)
 		return keeper.GatekeeperResponse{
@@ -336,8 +369,8 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 	callCtx, cancelCall := context.WithTimeout(ctx, llmCallTimeout)
 	defer cancelCall()
 
-	respLLM, err := g.provider.Complete(callCtx, llm.Request{
-		Model:       g.model,
+	respLLM, err := provider.Complete(callCtx, llm.Request{
+		Model:       model,
 		Messages:    []llm.Message{{Role: llm.RoleUser, Content: prompt}},
 		Temperature: ptr(0.1),
 		MaxTokens:   256,

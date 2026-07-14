@@ -633,9 +633,15 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			// feeds the cache-hit metric and per-agent usage visibility.
 			base := llm.NewOllama(cfg.Keeper.OllamaURL, cfg.Keeper.Model)
 			wrapped := llm.Middleware(base, s.journalWriter, deps.DB)
+			// M2a (#1001): the per-workspace vault-backed governance model
+			// overrides this default at request time when configured, degrading
+			// a revoked credential back to this same OLLAMA judge (§4.4).
+			govResolver := goapi.NewGovModelResolver(deps.DB, s.journalWriter, logger, cfg.Keeper.OllamaURL, cfg.Keeper.Model)
 			gk := gatekeeper.New(wrapped, cfg.Keeper.Model, logger,
-				gatekeeper.WithWatchSpecResolver(watchSpecResolver(deps.DB, logger)))
+				gatekeeper.WithWatchSpecResolver(watchSpecResolver(deps.DB, logger)),
+				gatekeeper.WithGovModelResolver(govResolver.Resolve))
 			opts = append(opts, goapi.WithKeeperGatekeeper(gk))
+			opts = append(opts, goapi.WithGovModelStatus(govResolver))
 			logger.Info("keeper gatekeeper enabled", "ollama_url", cfg.Keeper.OllamaURL, "model", cfg.Keeper.Model)
 		} else {
 			logger.Info("keeper gatekeeper disabled (set KEEPER_ENABLED=true or KEEPER_OLLAMA_URL to enable)")
