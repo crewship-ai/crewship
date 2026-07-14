@@ -3,6 +3,8 @@ package provider
 import (
 	"context"
 	"io"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
@@ -150,6 +152,42 @@ type ExecConfig struct {
 	// the kernel's per-argv MAX_ARG_STRLEN limit (128 KiB on Linux) if passed
 	// as a positional command argument.
 	Stdin io.Reader
+
+	// AllowPrivileged opts this single Exec out of the #1158 fail-closed guard
+	// that otherwise refuses a root/privileged User. It exists ONLY for the
+	// handful of orchestrator preflight steps that legitimately require root
+	// inside the crew container (killing a stale sidecar to reset the network
+	// policy; pre-creating dual-writer files like /crew/manifest.json). Setting
+	// it is an explicit, auditable decision at the call site — never a default,
+	// and never reachable from agent- or request-supplied input.
+	AllowPrivileged bool
+}
+
+// IsPrivilegedExecUser reports whether a resolved or configured container
+// exec user string is unsafe to run a command as. Shared by keeper's
+// /execute path (#1060, PR #1135) and the docker provider's generic Exec
+// fail-closed default (#1158) — both refuse to run a command as root, or as
+// anything that cannot be strictly proven to be a non-root numeric uid[:gid],
+// because their containment models assume the command runs unprivileged.
+// The check is deliberately strict and fails closed: only the Docker "uid"
+// and "uid:gid" forms are accepted, every part must parse as a positive
+// integer, and a zero uid *or* zero gid (root's primary group) is rejected.
+// A named alias like "root" or an image /etc/passwd entry aliasing uid 0
+// (e.g. "toor") is rejected too, since it isn't one of the two accepted
+// numeric forms.
+func IsPrivilegedExecUser(user string) bool {
+	u := strings.TrimSpace(user)
+	parts := strings.Split(u, ":")
+	if len(parts) < 1 || len(parts) > 2 {
+		return true
+	}
+	for _, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n <= 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // ExecResult holds the exec ID and output stream from a container exec command.

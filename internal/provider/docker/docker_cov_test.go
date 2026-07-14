@@ -774,6 +774,14 @@ func TestExec_Success_DemuxesStdoutAndStderr(t *testing.T) {
 	p := newCovProviderTCP(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		switch {
+		case strings.HasSuffix(path, "/containers/cid/json") && r.Method == http.MethodGet:
+			// #1158: User is empty below, so Exec resolves it from the
+			// container's configured user instead of a hardcoded default.
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"Id":     "cid",
+				"Config": map[string]any{"User": "1001:1001"},
+			})
 		case strings.HasSuffix(path, "/containers/cid/exec"):
 			mu.Lock()
 			body, _ := io.ReadAll(r.Body)
@@ -811,7 +819,7 @@ func TestExec_Success_DemuxesStdoutAndStderr(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	if execOpts.User != "1001:1001" {
-		t.Errorf("default exec user = %q, want 1001:1001", execOpts.User)
+		t.Errorf("resolved exec user = %q, want 1001:1001 (from container config)", execOpts.User)
 	}
 	if !execOpts.AttachStdout || !execOpts.AttachStderr {
 		t.Error("exec must attach stdout+stderr")
@@ -834,7 +842,10 @@ func TestExec_AttachError(t *testing.T) {
 		}
 	})
 
-	_, err := p.Exec(context.Background(), provider.ExecConfig{ContainerID: "cid", Cmd: []string{"ls"}})
+	// Explicit User: this test targets exec-ATTACH error propagation, not the
+	// #1158 user-resolution path (covered separately in
+	// exec_fail_closed_test.go), so it supplies a user to skip resolution.
+	_, err := p.Exec(context.Background(), provider.ExecConfig{ContainerID: "cid", Cmd: []string{"ls"}, User: "1001:1001"})
 	if err == nil || !strings.Contains(err.Error(), "exec attach") {
 		t.Fatalf("expected attach error, got %v", err)
 	}
@@ -872,9 +883,11 @@ func TestExecInteractive_Success(t *testing.T) {
 	res, err := p.ExecInteractive(context.Background(), provider.InteractiveExecConfig{
 		ContainerID: "cid",
 		Cmd:         []string{"bash"},
-		User:        "0:0",
-		Rows:        24,
-		Cols:        80,
+		// Non-privileged: this test exercises the interactive success path
+		// (resize/exec-id/tty), not the user; #1158 now rejects an explicit root.
+		User: "1001:1001",
+		Rows: 24,
+		Cols: 80,
 	})
 	if err != nil {
 		t.Fatalf("ExecInteractive: %v", err)
@@ -897,7 +910,7 @@ func TestExecInteractive_Success(t *testing.T) {
 	if !execOpts.Tty || !execOpts.AttachStdin {
 		t.Errorf("interactive exec must request Tty + stdin: %+v", execOpts)
 	}
-	if execOpts.User != "0:0" {
+	if execOpts.User != "1001:1001" {
 		t.Errorf("explicit user must pass through, got %q", execOpts.User)
 	}
 	if !strings.Contains(resizeQuery, "h=24") || !strings.Contains(resizeQuery, "w=80") {
@@ -912,8 +925,11 @@ func TestExecInteractive_CreateError(t *testing.T) {
 		http.Error(w, `{"message":"no such container"}`, http.StatusNotFound)
 	})
 
+	// Explicit User: targets exec-CREATE error propagation, not #1158's
+	// resolution path (which would itself error on this "missing container"
+	// fixture before ever reaching create — covered separately).
 	_, err := p.ExecInteractive(context.Background(), provider.InteractiveExecConfig{
-		ContainerID: "missing", Cmd: []string{"bash"},
+		ContainerID: "missing", Cmd: []string{"bash"}, User: "1001:1001",
 	})
 	if err == nil || !strings.Contains(err.Error(), "exec interactive create") {
 		t.Fatalf("expected create error, got %v", err)
@@ -931,8 +947,10 @@ func TestExecInteractive_AttachError(t *testing.T) {
 		http.Error(w, `{"message":"attach denied"}`, http.StatusInternalServerError)
 	})
 
+	// Explicit User: targets exec-ATTACH error propagation, not #1158's
+	// resolution path.
 	_, err := p.ExecInteractive(context.Background(), provider.InteractiveExecConfig{
-		ContainerID: "cid", Cmd: []string{"bash"},
+		ContainerID: "cid", Cmd: []string{"bash"}, User: "1001:1001",
 	})
 	if err == nil || !strings.Contains(err.Error(), "exec interactive attach") {
 		t.Fatalf("expected attach error, got %v", err)

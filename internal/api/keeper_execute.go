@@ -17,7 +17,6 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -36,31 +35,6 @@ import (
 // grow a method for this one call site (#1060).
 type containerUserResolver interface {
 	ContainerUser(ctx context.Context, containerID string) (string, error)
-}
-
-// isPrivilegedContainerUser reports whether a resolved container user string
-// is unsafe to exec as. Keeper refuses to run a credential-injected command
-// as root — or as anything it can't strictly prove is a non-root numeric
-// uid[:gid] — because the containment model assumes the agent (and
-// therefore this command) runs unprivileged (#1060). The check is
-// deliberately strict and fails closed: only the Docker "uid" and "uid:gid"
-// forms are accepted, every part must parse as a positive integer, and a
-// zero uid *or* zero gid (root's primary group) is rejected. A named alias
-// like "root" or an image /etc/passwd entry aliasing uid 0 (e.g. "toor") is
-// rejected too, since it isn't one of the two accepted numeric forms.
-func isPrivilegedContainerUser(user string) bool {
-	u := strings.TrimSpace(user)
-	parts := strings.Split(u, ":")
-	if len(parts) < 1 || len(parts) > 2 {
-		return true
-	}
-	for _, p := range parts {
-		n, err := strconv.Atoi(p)
-		if err != nil || n <= 0 {
-			return true
-		}
-	}
-	return false
 }
 
 type keeperExecuteBody struct {
@@ -462,7 +436,7 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	execUser, userErr := resolver.ContainerUser(execCtx, execContainer)
-	if userErr != nil || execUser == "" || isPrivilegedContainerUser(execUser) {
+	if userErr != nil || execUser == "" || provider.IsPrivilegedExecUser(execUser) {
 		h.logger.Error("keeper execute: could not resolve an unprivileged container user; failing closed",
 			"container", execContainer, "resolved_user", execUser, "error", userErr)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "keeper execute not available"})

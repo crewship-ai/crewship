@@ -793,7 +793,33 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 		execCfg.AttachStdin = true
 	}
 	if execCfg.User == "" {
-		execCfg.User = "1001:1001"
+		// #1158: this used to default straight to a hardcoded "1001:1001",
+		// silently running as that constant even for a container whose actual
+		// agent user differs (a custom base image, a future uid bump,
+		// userns-remap) — contradicting the fail-closed philosophy keeper's
+		// /execute path adopted in #1060/PR #1135. Resolve the container's
+		// REAL configured user instead, and fail closed (no exec) if it can't
+		// be determined or is privileged, rather than defaulting.
+		resolvedUser, err := p.ContainerUser(ctx, cfg.ContainerID)
+		if err != nil {
+			return nil, fmt.Errorf("exec: resolve run-as user for container %s: %w", cfg.ContainerID, err)
+		}
+		if resolvedUser == "" || provider.IsPrivilegedExecUser(resolvedUser) {
+			return nil, fmt.Errorf("exec: container %s has no safe non-root user configured (resolved %q); refusing to exec without an explicit user", cfg.ContainerID, resolvedUser)
+		}
+		execCfg.User = resolvedUser
+	}
+
+	// #1158: fail closed on empty OR root regardless of how the user arrives.
+	// The resolve branch above already validated a *resolved* user; this also
+	// catches a caller that passes a privileged user explicitly ("0", "root",
+	// "0:0", …), so the "or root" half of the guarantee holds on every path.
+	// The narrow exception is cfg.AllowPrivileged — an explicit, auditable
+	// opt-in the orchestrator's root-requiring preflight steps set (sidecar
+	// kill, dual-writer file pre-create); it is never a default and never
+	// reachable from agent/request input.
+	if !cfg.AllowPrivileged && provider.IsPrivilegedExecUser(execCfg.User) {
+		return nil, fmt.Errorf("exec: refusing to run as privileged user %q in container %s", execCfg.User, cfg.ContainerID)
 	}
 
 	exec, err := p.client.ContainerExecCreate(ctx, cfg.ContainerID, execCfg)
@@ -853,7 +879,21 @@ func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.Interactive
 		User:         cfg.User,
 	}
 	if execCfg.User == "" {
-		execCfg.User = "1001:1001"
+		// #1158: same fail-closed resolution as Exec above — see its comment.
+		resolvedUser, err := p.ContainerUser(ctx, cfg.ContainerID)
+		if err != nil {
+			return nil, fmt.Errorf("exec interactive: resolve run-as user for container %s: %w", cfg.ContainerID, err)
+		}
+		if resolvedUser == "" || provider.IsPrivilegedExecUser(resolvedUser) {
+			return nil, fmt.Errorf("exec interactive: container %s has no safe non-root user configured (resolved %q); refusing to exec without an explicit user", cfg.ContainerID, resolvedUser)
+		}
+		execCfg.User = resolvedUser
+	}
+
+	// #1158: fail closed on empty OR root regardless of how the user arrives —
+	// also catches an explicitly-supplied privileged user (see Exec's comment).
+	if provider.IsPrivilegedExecUser(execCfg.User) {
+		return nil, fmt.Errorf("exec interactive: refusing to run as privileged user %q in container %s", execCfg.User, cfg.ContainerID)
 	}
 
 	exec, err := p.client.ContainerExecCreate(ctx, cfg.ContainerID, execCfg)

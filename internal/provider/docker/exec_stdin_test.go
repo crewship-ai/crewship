@@ -91,6 +91,9 @@ func TestExec_Stdin_AttachesAndStreams(t *testing.T) {
 		ContainerID: "cid",
 		Cmd:         []string{"claude", "--print"},
 		Stdin:       strings.NewReader(prompt),
+		// Explicit User: this test targets stdin plumbing, not #1158's
+		// user-resolution path (covered in exec_fail_closed_test.go).
+		User: "1001:1001",
 	})
 	if err != nil {
 		t.Fatalf("Exec: %v", err)
@@ -140,6 +143,9 @@ func TestExec_NilStdin_DoesNotAttachStdin(t *testing.T) {
 		ContainerID: "cid",
 		Cmd:         []string{"echo", "hi"},
 		// Stdin intentionally nil.
+		// Explicit User: this test targets stdin plumbing, not #1158's
+		// user-resolution path (covered in exec_fail_closed_test.go).
+		User: "1001:1001",
 	})
 	if err != nil {
 		t.Fatalf("Exec: %v", err)
