@@ -810,6 +810,14 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 		execCfg.User = resolvedUser
 	}
 
+	// #1158: fail closed on empty OR root regardless of how the user arrives.
+	// The resolve branch above already validated a *resolved* user; this also
+	// catches a caller that passes a privileged user explicitly ("0", "root",
+	// "0:0", …), so the "or root" half of the guarantee holds on every path.
+	if provider.IsPrivilegedExecUser(execCfg.User) {
+		return nil, fmt.Errorf("exec: refusing to run as privileged user %q in container %s", execCfg.User, cfg.ContainerID)
+	}
+
 	exec, err := p.client.ContainerExecCreate(ctx, cfg.ContainerID, execCfg)
 	if err != nil {
 		return nil, fmt.Errorf("exec create: %w", err)
@@ -876,6 +884,12 @@ func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.Interactive
 			return nil, fmt.Errorf("exec interactive: container %s has no safe non-root user configured (resolved %q); refusing to exec without an explicit user", cfg.ContainerID, resolvedUser)
 		}
 		execCfg.User = resolvedUser
+	}
+
+	// #1158: fail closed on empty OR root regardless of how the user arrives —
+	// also catches an explicitly-supplied privileged user (see Exec's comment).
+	if provider.IsPrivilegedExecUser(execCfg.User) {
+		return nil, fmt.Errorf("exec interactive: refusing to run as privileged user %q in container %s", execCfg.User, cfg.ContainerID)
 	}
 
 	exec, err := p.client.ContainerExecCreate(ctx, cfg.ContainerID, execCfg)

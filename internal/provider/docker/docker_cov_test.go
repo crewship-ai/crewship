@@ -883,9 +883,11 @@ func TestExecInteractive_Success(t *testing.T) {
 	res, err := p.ExecInteractive(context.Background(), provider.InteractiveExecConfig{
 		ContainerID: "cid",
 		Cmd:         []string{"bash"},
-		User:        "0:0",
-		Rows:        24,
-		Cols:        80,
+		// Non-privileged: this test exercises the interactive success path
+		// (resize/exec-id/tty), not the user; #1158 now rejects an explicit root.
+		User: "1001:1001",
+		Rows: 24,
+		Cols: 80,
 	})
 	if err != nil {
 		t.Fatalf("ExecInteractive: %v", err)
@@ -908,7 +910,7 @@ func TestExecInteractive_Success(t *testing.T) {
 	if !execOpts.Tty || !execOpts.AttachStdin {
 		t.Errorf("interactive exec must request Tty + stdin: %+v", execOpts)
 	}
-	if execOpts.User != "0:0" {
+	if execOpts.User != "1001:1001" {
 		t.Errorf("explicit user must pass through, got %q", execOpts.User)
 	}
 	if !strings.Contains(resizeQuery, "h=24") || !strings.Contains(resizeQuery, "w=80") {

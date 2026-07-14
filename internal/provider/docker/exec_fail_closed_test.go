@@ -200,6 +200,54 @@ func TestExecInteractive_EmptyUser_FailsClosed_WhenPrivileged(t *testing.T) {
 	}
 }
 
+// TestExec_ExplicitPrivilegedUser_FailsClosed proves the "or root" half of the
+// #1158 guarantee holds even when the empty-user resolution branch is skipped: a
+// caller that supplies a privileged user EXPLICITLY is still refused before any
+// Docker call (no inspect, no exec create). On code that only guards the empty
+// path, an explicit "0:0"/"root" would sail straight through to exec create.
+func TestExec_ExplicitPrivilegedUser_FailsClosed(t *testing.T) {
+	cases := []struct{ name, user string }{
+		{"root uid:gid", "0:0"},
+		{"root uid only", "0"},
+		{"root alias", "root"},
+		{"root group", "1001:0"},
+		{"whitespace root", " 0 "},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var mu sync.Mutex
+			var dockerCallReached bool
+			p := newCovProviderTCP(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				dockerCallReached = true
+				mu.Unlock()
+				t.Errorf("unexpected Docker call %s %s — must fail closed before any request", r.Method, r.URL.Path)
+				w.WriteHeader(http.StatusInternalServerError)
+			})
+
+			if _, err := p.Exec(context.Background(), provider.ExecConfig{
+				ContainerID: "cid", Cmd: []string{"echo", "hi"}, User: tc.user,
+			}); err == nil {
+				t.Fatal("expected Exec to fail closed for an explicit privileged user, got nil")
+			}
+			if _, err := p.ExecInteractive(context.Background(), provider.InteractiveExecConfig{
+				ContainerID: "cid", Cmd: []string{"bash"}, User: tc.user,
+			}); err == nil {
+				t.Fatal("expected ExecInteractive to fail closed for an explicit privileged user, got nil")
+			}
+
+			mu.Lock()
+			defer mu.Unlock()
+			if dockerCallReached {
+				t.Error("a Docker request was made — an explicit privileged user must be rejected before any exec/inspect call")
+			}
+		})
+	}
+}
+
 // decodeExecBody reads the ContainerExecCreate JSON body's "User" field.
 func decodeExecBody(r *http.Request) (struct {
 	User string `json:"User"`
