@@ -122,11 +122,14 @@ func TestKnownGovProvider(t *testing.T) {
 	}
 }
 
-// TestGovModelFields_RoundTripAndRevoke exercises the v141 columns end-to-end on
-// a migrated DB: Upsert/Get round-trip, plus the ON DELETE SET NULL half of the
-// revoke-safety contract (§4.1) — deleting the credential nulls the ref rather
-// than dangling.
-func TestGovModelFields_RoundTripAndRevoke(t *testing.T) {
+// TestGovModelFields_RoundTripAndHardDelete exercises the v142 columns end-to-end
+// on a migrated DB: Upsert/Get round-trip, plus the ON DELETE SET NULL FK on a
+// HARD delete of the credential row (the same-name recreation purge path) — it
+// nulls the ref rather than leaving it dangling. NOTE: the normal revoke path is a
+// SOFT delete (credentials.deleted_at) which does NOT fire this FK; that path's
+// revoke-safety is enforced at resolve time and is covered by
+// TestResolveGovModel_RevokedCredentialDegrades.
+func TestGovModelFields_RoundTripAndHardDelete(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
@@ -155,16 +158,18 @@ func TestGovModelFields_RoundTripAndRevoke(t *testing.T) {
 		t.Fatalf("gov fields round-trip mismatch: %+v", got)
 	}
 
-	// Revoke the credential → ON DELETE SET NULL nulls the ref.
+	// HARD-delete the credential row (the purge path) → ON DELETE SET NULL nulls
+	// the ref. A real revoke is a soft delete and would NOT null it here (see the
+	// function doc); resolve-time degrade covers that path.
 	if _, err := db.Exec(`DELETE FROM credentials WHERE id = 'cred1'`); err != nil {
 		t.Fatalf("delete credential: %v", err)
 	}
 	got, _, err = Get(ctx, db, "ws1")
 	if err != nil {
-		t.Fatalf("Get after revoke: %v", err)
+		t.Fatalf("Get after hard delete: %v", err)
 	}
 	if got.GovModelCredentialID != "" {
-		t.Fatalf("revoked credential ref must be NULL, got %q", got.GovModelCredentialID)
+		t.Fatalf("hard-deleted credential ref must be NULL, got %q", got.GovModelCredentialID)
 	}
 	// Provider/model config survives — the resolver degrades at build time.
 	if got.GovModelProvider != ProviderOpenAICompat {

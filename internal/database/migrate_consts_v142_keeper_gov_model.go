@@ -11,10 +11,14 @@ package database
 //     additive and preserves the opt-in contract.
 //   - gov_model_id: the wire model identifier passed to the provider.
 //   - gov_model_credential_id: an optional vault credential (ENDPOINT_URL / API_KEY)
-//     the resolved provider sources its endpoint/key from. ON DELETE SET NULL is
-//     the DB half of the revoke-safety contract (§4.4): deleting the credential
-//     nulls the ref rather than leaving a dangling id, and the resolver then
-//     degrades to the default OLLAMA judge + a WARN — never a broken evaluator.
+//     the resolved provider sources its endpoint/key from. The FK's ON DELETE SET
+//     NULL only fires on a HARD delete of the credential row (the same-name
+//     recreation purge) — it cleans up a dangling id there. The normal revoke path
+//     is a SOFT delete (credentials.deleted_at), which does NOT trigger the FK; on
+//     that path revoke-safety is enforced at RESOLVE time — CredentialLookup treats
+//     a soft-deleted credential as unavailable and ResolveGovModel degrades to the
+//     default OLLAMA judge + a WARN, never a broken evaluator (§4.4). The FK is
+//     defense-in-depth for the purge case; the resolver is the real guarantee.
 //
 // SQLite runs all three ALTER TABLE … ADD COLUMN statements from one migration
 // string in a single ExecContext (see Migrate: tx.ExecContext(ctx, m.sql)).

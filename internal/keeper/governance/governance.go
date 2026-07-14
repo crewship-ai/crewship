@@ -53,9 +53,12 @@ type Settings struct {
 	// GovModelID is the wire model identifier passed to the chosen provider.
 	GovModelID string `json:"gov_model_id"`
 	// GovModelCredentialID optionally points the provider at a vault credential
-	// (ENDPOINT_URL / API_KEY) for its endpoint/key. Empty = no credential. A
-	// revoked credential nulls this (ON DELETE SET NULL) and ResolveGovModel
-	// degrades to the default OLLAMA judge + a WARN (§4.4 revoke-safety).
+	// (ENDPOINT_URL / API_KEY) for its endpoint/key. Empty = no credential.
+	// Revoke-safety (§4.4): a revoke is a soft delete (credentials.deleted_at),
+	// so the FK's ON DELETE SET NULL does NOT fire — the id stays set but
+	// CredentialLookup reports the credential unavailable at resolve time and
+	// ResolveGovModel degrades to the default OLLAMA judge + a WARN. (ON DELETE
+	// SET NULL only nulls this on a hard-delete purge of the credential row.)
 	GovModelCredentialID string `json:"gov_model_credential_id"`
 }
 
