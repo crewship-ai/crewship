@@ -54,9 +54,18 @@ type phase2Evaluators struct {
 // wraps it with the standard middleware stack (cost ledger + lookout +
 // telemetry), constructs a slot-specific Gatekeeper, and from that a
 // per-slot evaluator. Each slot is attempted independently: a slot whose
-// provider can't be built (e.g. anthropic provider with no
-// ANTHROPIC_API_KEY) is logged as warn and left nil. The bundle is
-// always returned — partial wiring is intentional, not an error.
+// provider can't be built and has no local default judge to fall back to is
+// logged as warn and left nil. The bundle is always returned — partial
+// wiring is intentional, not an error.
+//
+// govModel is the per-workspace governance-model resolver (M2a/M2b, #1001) —
+// the SAME resolver the access gatekeeper is wired with. Passing it here makes
+// the vault-backed gov-model setting govern the behavior + F4 evaluators at
+// request time, not just the credential-access judge. dfltOllamaURL/Model are
+// the server's local default judge (cfg.Keeper.*): when a slot's configured
+// provider can't be built at boot (e.g. anthropic default with no
+// ANTHROPIC_API_KEY), the evaluator falls back to that local judge instead of
+// being disabled — which is what lets governance run fully-local with no key.
 //
 // The slot → evaluator mapping per PRD §6 F3 / F4:
 //
@@ -66,52 +75,69 @@ type phase2Evaluators struct {
 //	SlotNegative     → NegativeLearningEvaluator (F4.4, failure → lessons.md)
 func buildPhase2Evaluators(
 	aux llm.AuxiliaryModels,
+	govModel gatekeeper.GovModelResolver,
+	dfltOllamaURL, dfltOllamaModel string,
 	j journal.Emitter,
 	db *sql.DB,
 	logger *slog.Logger,
 ) phase2Evaluators {
 	out := phase2Evaluators{}
 
-	if gk := buildAuxGatekeeper(aux, llm.SlotCurator, j, db, logger); gk != nil {
+	if gk := buildAuxGatekeeper(aux, llm.SlotCurator, govModel, dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
 		out.skillReview = gatekeeper.NewSkillReviewEvaluator(gk, logger)
 	} else {
-		logger.Warn("keeper: skill_review evaluator unavailable (curator aux slot not configured / API key missing)",
+		logger.Warn("keeper: skill_review evaluator unavailable (curator aux slot not configured and no local default judge)",
 			"impact", "POST /api/v1/keeper/skill-review will return 503")
 	}
 
-	if gk := buildAuxGatekeeper(aux, llm.SlotBehavior, j, db, logger); gk != nil {
+	if gk := buildAuxGatekeeper(aux, llm.SlotBehavior, govModel, dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
 		out.behavior = gatekeeper.NewBehaviorEvaluator(gk, logger)
 	} else {
-		logger.Warn("keeper: behavior evaluator unavailable (behavior aux slot not configured / API key missing)",
+		logger.Warn("keeper: behavior evaluator unavailable (behavior aux slot not configured and no local default judge)",
 			"impact", "POST /api/v1/keeper/behavior will return 503; F4.2 sampling hook will no-op")
 	}
 
-	if gk := buildAuxGatekeeper(aux, llm.SlotMemoryHealth, j, db, logger); gk != nil {
+	if gk := buildAuxGatekeeper(aux, llm.SlotMemoryHealth, govModel, dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
 		out.memoryHealth = gatekeeper.NewMemoryHealthEvaluator(gk, logger)
 	} else {
-		logger.Warn("keeper: memory_health evaluator unavailable (memory_health aux slot not configured / API key missing)",
+		logger.Warn("keeper: memory_health evaluator unavailable (memory_health aux slot not configured and no local default judge)",
 			"impact", "POST /api/v1/keeper/memory-health will return 503")
 	}
 
-	if gk := buildAuxGatekeeper(aux, llm.SlotNegative, j, db, logger); gk != nil {
+	if gk := buildAuxGatekeeper(aux, llm.SlotNegative, govModel, dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
 		out.negative = gatekeeper.NewNegativeLearningEvaluator(gk, logger)
 	} else {
-		logger.Warn("keeper: negative_learning evaluator unavailable (negative aux slot not configured / API key missing)",
+		logger.Warn("keeper: negative_learning evaluator unavailable (negative aux slot not configured and no local default judge)",
 			"impact", "POST /api/v1/keeper/negative-learning will return 503")
 	}
 
 	return out
 }
 
-// buildAuxGatekeeper resolves one aux slot and returns a Gatekeeper backed
-// by the right LLM provider with the standard middleware chain. Returns
-// nil (logged as warn) on any failure: unknown provider, missing API key,
-// model unset. The nil return is intentional — buildPhase2Evaluators uses
-// it as the "skip this slot" signal so a single mis-configured slot
-// doesn't take down the other three.
+// buildAuxGatekeeper resolves one aux slot and returns a Gatekeeper backed by
+// the right LLM provider with the standard middleware chain. It is wired with
+// two per-workspace seams identical to the access gatekeeper: the watch-spec
+// resolver (M1) and the gov-model resolver (M2a) — so a workspace's vault-backed
+// governance model overrides this slot's construction-time default at request
+// time.
+//
+// Construction-time provider selection (fully-local, M2, #1001):
+//   - Build the slot's configured provider (DefaultAuxiliaryModels puts every
+//     slot on anthropic; env overrides may repoint it).
+//   - If that can't be built at boot — the common case being an anthropic slot
+//     with no ANTHROPIC_API_KEY — fall back to the server's local default judge
+//     (dfltOllamaURL/Model, i.e. cfg.Keeper.*), mirroring the access gatekeeper
+//     which is likewise always constructed on the local Ollama base. This keeps
+//     the F4 evaluators alive with zero API key; a configured gov-model still
+//     overrides per request via the resolver.
+//   - Only when there is neither a buildable provider NOR a local default judge
+//     is nil returned (logged as warn) — the "skip this slot" signal so one
+//     mis-configured slot doesn't take down the other three.
 func buildAuxGatekeeper(
 	aux llm.AuxiliaryModels,
 	slot llm.Slot,
+	govModel gatekeeper.GovModelResolver,
+	dfltOllamaURL, dfltOllamaModel string,
 	j journal.Emitter,
 	db *sql.DB,
 	logger *slog.Logger,
@@ -127,14 +153,27 @@ func buildAuxGatekeeper(
 	}
 
 	base, perr := buildLLMProvider(model)
+	modelName := model.Model
 	if perr != nil {
-		logger.Warn("keeper: aux slot provider build failed",
-			"slot", slot, "provider", model.Provider, "error", perr)
-		return nil
+		// Configured provider can't be built at boot. Fall back to the local
+		// default judge so the evaluator runs fully-local (no API key) instead
+		// of going dark. A per-workspace gov-model setting still overrides this.
+		if dfltOllamaURL == "" || dfltOllamaModel == "" {
+			logger.Warn("keeper: aux slot provider build failed and no local default judge configured",
+				"slot", slot, "provider", model.Provider, "error", perr)
+			return nil
+		}
+		logger.Info("keeper: aux slot falling back to the local default judge",
+			"slot", slot, "configured_provider", model.Provider, "reason", perr.Error(),
+			"fallback_model", dfltOllamaModel)
+		base = llm.NewOllama(dfltOllamaURL, dfltOllamaModel)
+		modelName = dfltOllamaModel
 	}
+
 	wrapped := llm.Middleware(base, j, db)
-	return gatekeeper.New(wrapped, model.Model, logger,
-		gatekeeper.WithWatchSpecResolver(watchSpecResolver(db, logger)))
+	return gatekeeper.New(wrapped, modelName, logger,
+		gatekeeper.WithWatchSpecResolver(watchSpecResolver(db, logger)),
+		gatekeeper.WithGovModelResolver(govModel))
 }
 
 // buildLLMProvider maps an AuxModel.Provider string to a concrete

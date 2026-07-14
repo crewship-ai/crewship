@@ -340,16 +340,19 @@ governance**: a checklist of presets and a text area for the free-form rules.
 
 ## Governance model (fully-local, no API key)
 
-The model that backs Keeper's **credential-access gatekeeper** is a
-**per-workspace, vault-backed setting**, chosen in-app rather than only via
-server env. This is what makes a **no-API-key Keeper** possible: point governance
-at a local Ollama classifier and the access gatekeeper runs on your own hardware.
+The model that backs Keeper's governance is a **per-workspace, vault-backed
+setting**, chosen in-app rather than only via server env. This is what makes a
+**no-API-key Keeper** possible: point governance at a local Ollama classifier and
+Keeper runs entirely on your own hardware.
 
 <Note>
-  Scope: this setting currently drives the **credential-access gatekeeper**. The
+  Scope: this setting drives **both** the credential-access gatekeeper **and** the
   auxiliary evaluators (behavior watchdog, skill review, memory health, negative
-  learning) still resolve their model from server env/config — wiring them to the
-  same per-workspace setting is a follow-up.
+  learning) — all of them resolve the same per-workspace governance model at
+  request time. When a slot's configured provider can't be built at boot (e.g. the
+  default `anthropic` slot with no `ANTHROPIC_API_KEY`), that evaluator falls back
+  to the server's local Ollama judge instead of going dark — so the full watchdog
+  runs fully-local with no API key anywhere.
 </Note>
 
 | Field | What it does |
