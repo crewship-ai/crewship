@@ -268,6 +268,17 @@ type Orchestrator struct {
 	// per container logs at Warn, repeats at Debug.
 	tmuxWarned sync.Map
 
+	// staleSidecarJournaled de-duplicates the stale-sidecar journal entry
+	// (#1160) per (container_id, running_sidecar_hash). Stale-sidecar
+	// detection runs on EVERY RunAgent, so without this the severity:error
+	// entry emitted once per detection just moves the #1008 log-spam problem
+	// into the DB — hundreds of identical rows/day per stuck container. The
+	// hash is in the key so a redeploy that swaps the sidecar binary (new
+	// hash, still stale vs. an even-newer deploy) re-emits once; the
+	// per-run logger.Error is kept unconditionally for local stdout tails.
+	// Zero-value sync.Map is usable, so tests with a bare Orchestrator work.
+	staleSidecarJournaled sync.Map
+
 	// snapshotHashCache stores the most recent container.snapshot hash
 	// per container so the post-run probe can skip emitting a fresh
 	// journal entry when nothing actually changed. Stale entries (after

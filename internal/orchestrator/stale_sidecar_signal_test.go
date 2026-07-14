@@ -53,6 +53,52 @@ func TestEmitStaleSidecarSignal_EmitsErrorJournalEntry(t *testing.T) {
 	}
 }
 
+// Stale detection runs on EVERY RunAgent and a stuck container stays stale
+// until an operator recycles it, so the journal row must be emitted at most
+// once per (container_id, running_sidecar_hash) — otherwise the #1008
+// log-spam just moves into the DB. A changed hash (redeploy swapped the
+// binary) or a different container legitimately re-alerts once.
+func TestEmitStaleSidecarSignal_DedupesPerContainerAndHash(t *testing.T) {
+	o := New(nil, nil, slog.Default())
+	cj := &captureJournal{}
+	o.SetJournal(cj)
+	ctx := context.Background()
+
+	req := AgentRunRequest{
+		WorkspaceID: "ws1", CrewID: "crew1", AgentID: "a1",
+		AgentSlug: "researcher", ContainerID: "abcdef0123456789",
+	}
+
+	// Same container + same hash, five detections: exactly one journal row.
+	for i := 0; i < 5; i++ {
+		o.emitStaleSidecarSignal(ctx, req, "oldhash12345")
+	}
+	if len(cj.entries) != 1 {
+		t.Fatalf("same container+hash: expected 1 deduped entry, got %d", len(cj.entries))
+	}
+
+	// Same container, a NEW sidecar hash (a redeploy swapped the binary but
+	// it's still stale vs. an even-newer deploy) re-alerts once.
+	o.emitStaleSidecarSignal(ctx, req, "newhash67890")
+	if len(cj.entries) != 2 {
+		t.Fatalf("new hash on same container should re-alert once: got %d entries", len(cj.entries))
+	}
+
+	// A different container with the original hash is a distinct incident.
+	req2 := req
+	req2.ContainerID = "fedcba9876543210"
+	o.emitStaleSidecarSignal(ctx, req2, "oldhash12345")
+	if len(cj.entries) != 3 {
+		t.Fatalf("different container should emit its own entry: got %d entries", len(cj.entries))
+	}
+
+	// Re-detecting the very first (container, hash) still stays deduped.
+	o.emitStaleSidecarSignal(ctx, req, "oldhash12345")
+	if len(cj.entries) != 3 {
+		t.Fatalf("already-journaled container+hash must not re-emit: got %d entries", len(cj.entries))
+	}
+}
+
 // A short container id must not slice-panic when truncating to 12 chars.
 func TestEmitStaleSidecarSignal_ShortContainerID_NoPanic(t *testing.T) {
 	o := New(nil, nil, slog.Default())
