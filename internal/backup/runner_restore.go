@@ -319,6 +319,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			if err := RemapIDs(ctx, db, extracted.DBDump); err != nil {
 				return nil, err
 			}
+			ensureRestoringUserMembership(ctx, db, extracted.DBDump, opts.Actor.UserID, opts.Actor.Role)
 		}
 	}
 
@@ -599,6 +600,73 @@ func rewriteWorkspaceSlug(dump *DBDump, newSlug string) {
 	}
 	rows[0]["slug"] = newSlug
 	rows[0]["name"] = newSlug
+}
+
+// ensureRestoringUserMembership grants the admin who ran the restore
+// membership on the newly-forked workspace. --as-workspace / --as-crew
+// fork a BRAND NEW workspace (rewriteWorkspaceSlug + RemapIDs above)
+// that the restoring admin otherwise has no way to reach afterward:
+// crew-scope bundles (DumpCrew) never carry workspace_members rows at
+// all, and even workspace-scope bundles only carry the SOURCE
+// workspace's membership list, which may not include this admin.
+// Without this, `crewship workspace list` doesn't show the fork and
+// addressing it directly by ID/slug 403s (#1215).
+//
+// Uses opts.Actor.Role — RestoreBackup already required it to be
+// OWNER or ADMIN via RequireAdmin, matching what `workspace create`
+// grants its own caller.
+//
+// Only inserts when a `users` row for userID is actually reachable
+// (carried in the bundle itself, or already present on the target
+// instance — the normal case, since the restoring admin authenticated
+// against this instance to run the restore in the first place). Skips
+// silently otherwise rather than adding a row FK-checks would reject.
+func ensureRestoringUserMembership(ctx context.Context, db *sql.DB, dump *DBDump, userID, role string) {
+	if dump == nil || userID == "" {
+		return
+	}
+	wsID := firstWorkspaceID(dump)
+	if wsID == "" {
+		return
+	}
+	for _, r := range dump.Tables["workspace_members"] {
+		if r["workspace_id"] == wsID && r["user_id"] == userID {
+			return // already a member (e.g. carried over + reconciled by email)
+		}
+	}
+	if !userRowReachable(ctx, db, dump, userID) {
+		return
+	}
+	if role == "" {
+		role = "OWNER"
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	dump.Tables["workspace_members"] = append(dump.Tables["workspace_members"], map[string]any{
+		"id":           newRemapCUID(),
+		"workspace_id": wsID,
+		"user_id":      userID,
+		"role":         role,
+		"created_at":   now,
+		"updated_at":   now,
+	})
+}
+
+// userRowReachable reports whether userID will resolve against
+// `users` once the restore's INSERTs land — either because the
+// bundle carries that row itself, or because the target DB already
+// has it (the restoring admin is, by definition, an authenticated
+// user on this instance).
+func userRowReachable(ctx context.Context, db *sql.DB, dump *DBDump, userID string) bool {
+	for _, r := range dump.Tables["users"] {
+		if r["id"] == userID {
+			return true
+		}
+	}
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)`, userID).Scan(&exists); err != nil {
+		return false
+	}
+	return exists
 }
 
 // rewriteCrewSlug does the equivalent for crew-scope restores.

@@ -814,3 +814,70 @@ func TestE2E_AsCrew_RestoresIntoSameWorkspace_NoFKViolation(t *testing.T) {
 		t.Errorf("restored crew's chats.workspace_id did not resolve to the crew's own new workspace %q", newCrewWorkspaceID)
 	}
 }
+
+// TestE2E_AsCrew_RestoringUserGrantedMembership reproduces GitHub issue
+// #1215: --as-crew restore forks a dedicated new workspace (#1190) but
+// never adds the restoring admin as a member of it. DumpCrew never
+// carries workspace_members rows at all (crew-scope bundles don't
+// include that table), so the fork landed with zero memberships —
+// `crewship workspace list` couldn't see it and addressing it directly
+// 403'd with "Not a member of this workspace". The restoring user must
+// come out the other side as a member of the workspace their own
+// restore just created, holding the role asserted on the restore
+// Actor (the same role RequireAdmin already validated as OWNER/ADMIN).
+func TestE2E_AsCrew_RestoringUserGrantedMembership(t *testing.T) {
+	ctx := context.Background()
+
+	source := openMigratedDB(t)
+	seedWorkspace(t, source)
+
+	const passphrase = "as-crew-membership-e2e-123"
+	createResult, err := backup.CreateBackup(ctx, source, backup.CreateOptions{
+		Scope:      backup.ScopeCrew,
+		CrewID:     "c_alpha",
+		OutputDir:  t.TempDir(),
+		Actor:      backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+		Passphrase: passphrase,
+	})
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+
+	restoreResult, err := backup.RestoreBackup(ctx, source, backup.RestoreOptions{
+		Path:       createResult.Path,
+		Passphrase: passphrase,
+		AsCrew:     "alpha-member-clone",
+		Actor:      backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+	})
+	if err != nil {
+		t.Fatalf("RestoreBackup --as-crew: %v", err)
+	}
+
+	var newCrewWorkspaceID string
+	if err := source.QueryRowContext(ctx,
+		`SELECT workspace_id FROM crews WHERE slug = ? AND id != 'c_alpha'`, "alpha-member-clone",
+	).Scan(&newCrewWorkspaceID); err != nil {
+		t.Fatalf("query restored crew: %v", err)
+	}
+	if newCrewWorkspaceID == "" {
+		t.Fatalf("restored crew has no workspace_id")
+	}
+	if newCrewWorkspaceID != restoreResult.RestoredWorkspaceID {
+		t.Errorf("RestoreResult.RestoredWorkspaceID = %q, want %q", restoreResult.RestoredWorkspaceID, newCrewWorkspaceID)
+	}
+
+	var role string
+	err = source.QueryRowContext(ctx,
+		`SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?`,
+		newCrewWorkspaceID, "u_admin",
+	).Scan(&role)
+	if err == sql.ErrNoRows {
+		t.Fatalf("restoring user u_admin is NOT a member of the forked workspace %q — workspace list/get would 403", newCrewWorkspaceID)
+	}
+	if err != nil {
+		t.Fatalf("query workspace_members: %v", err)
+	}
+	if role != "ADMIN" {
+		t.Errorf("restoring user's role on forked workspace = %q, want %q (matches restore Actor.Role)", role, "ADMIN")
+	}
+}
