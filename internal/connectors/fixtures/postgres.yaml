@@ -51,3 +51,12 @@ mcp:
     - "-y"
     - "@modelcontextprotocol/server-postgres"
     - "${derived.dsn}"
+# The MCP server spawning does not prove the credential works — it
+# never touches the DSN until an agent first calls a tool. verify.sql
+# opens a real connection with the resolved DSN and round-trips a
+# trivial query, so a garbage host/user/password fails verify instead
+# of silently reporting ok=true (crewship-ai/crewship#1204).
+verify:
+  sql:
+    driver: postgres
+    dsn: "${derived.dsn}"

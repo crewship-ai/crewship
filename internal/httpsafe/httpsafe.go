@@ -219,34 +219,48 @@ func ValidateURL(raw string, allowSchemes ...string) (*url.URL, error) {
 	return u, nil
 }
 
+// SafeDialContext returns a DialContext-shaped dialer with the same
+// SSRF defences SafeTransport applies to HTTP traffic — resolve-then-
+// connect-to-the-resolved-IP so a DNS rebind can't pick a different
+// destination between the check and the dial, and refuse any address
+// in a blocked CIDR.
+//
+// Exported (rather than kept private inside SafeTransport) so non-HTTP
+// callers that still speak TCP — a raw database wire protocol, for
+// instance — get the exact same guarantee instead of hand-rolling a
+// second, easier-to-drift copy of this logic.
+func SafeDialContext(timeout time.Duration) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: timeout, KeepAlive: 30 * time.Second}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, fmt.Errorf("httpsafe: invalid address %q: %w", addr, err)
+		}
+		ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+		if err != nil {
+			return nil, fmt.Errorf("httpsafe: DNS resolution failed for %s: %w", host, err)
+		}
+		if len(ips) == 0 {
+			return nil, fmt.Errorf("httpsafe: no addresses for %s", host)
+		}
+		for _, ip := range ips {
+			if IsBlockedIP(ip.IP) {
+				return nil, fmt.Errorf("%w: %s", ErrBlocked, ip.IP)
+			}
+		}
+		// Connect directly to the first resolved IP so that a
+		// second resolver call (DNS rebind) can't pick a different
+		// destination between our check and the dial.
+		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+	}
+}
+
 // SafeTransport returns an http.Transport whose DialContext refuses to
 // connect to any address that resolves into a blocked CIDR. Pair with
 // ValidateURL for the full defence in depth — see package doc.
 func SafeTransport() *http.Transport {
-	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 	return &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			host, port, err := net.SplitHostPort(addr)
-			if err != nil {
-				return nil, fmt.Errorf("httpsafe: invalid address %q: %w", addr, err)
-			}
-			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-			if err != nil {
-				return nil, fmt.Errorf("httpsafe: DNS resolution failed for %s: %w", host, err)
-			}
-			if len(ips) == 0 {
-				return nil, fmt.Errorf("httpsafe: no addresses for %s", host)
-			}
-			for _, ip := range ips {
-				if IsBlockedIP(ip.IP) {
-					return nil, fmt.Errorf("%w: %s", ErrBlocked, ip.IP)
-				}
-			}
-			// Connect directly to the first resolved IP so that a
-			// second resolver call (DNS rebind) can't pick a different
-			// destination between our check and the dial.
-			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
-		},
+		DialContext:           SafeDialContext(10 * time.Second),
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 30 * time.Second,
 		IdleConnTimeout:       60 * time.Second,

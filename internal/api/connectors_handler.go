@@ -266,15 +266,35 @@ func (h *ConnectorHandler) Verify(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Manifests without a verify block accept the credentials at face
-	// value — install will still surface auth errors at first MCP call.
-	if m.Verify == nil || m.Verify.HTTP == nil {
+	// Dispatch on which verify strategy the manifest declares. Exactly
+	// one of HTTP/SQL/MCPMethod is set (Validate enforces this) or none
+	// is — manifests without a verify block accept the credentials at
+	// face value; install will still surface auth errors at first MCP
+	// call.
+	switch {
+	case m.Verify == nil:
 		writeJSON(w, http.StatusOK, VerifyResponse{OK: true})
-		return
+	case m.Verify.HTTP != nil:
+		ok, msg := h.probeVerifyHTTP(r.Context(), m, req.Fields)
+		writeJSON(w, http.StatusOK, VerifyResponse{OK: ok, Message: msg})
+	case m.Verify.SQL != nil:
+		ok, msg := h.probeVerifySQL(r.Context(), m, req.Fields)
+		writeJSON(w, http.StatusOK, VerifyResponse{OK: ok, Message: msg})
+	default:
+		// m.Verify.MCPMethod != "" — KNOWN GAP, tracked in
+		// crewship-ai/crewship#1204. Spinning up the connector's MCP
+		// server and confirming it answers a meta-handshake like
+		// tools/list is not proof the configured credential is
+		// valid — the server can legitimately respond before ever
+		// touching the secret. No manifest reaches this branch with
+		// real credentials today (linear/filesystem/everything are
+		// mcp_oauth/none and are short-circuited above), so this
+		// doesn't regress any live connector, but a future
+		// pat/conn_string manifest that sets mcp_method instead of
+		// http/sql would silently get the same false-positive this
+		// issue reported for Slack/Postgres. Prefer http or sql.
+		writeJSON(w, http.StatusOK, VerifyResponse{OK: true})
 	}
-
-	ok, msg := h.probeVerifyHTTP(r.Context(), m, req.Fields)
-	writeJSON(w, http.StatusOK, VerifyResponse{OK: ok, Message: msg})
 }
 
 // probeVerifyHTTP runs Verify.HTTP against the provider with the
@@ -340,7 +360,46 @@ func (h *ConnectorHandler) probeVerifyHTTP(ctx context.Context, m *connectors.Ma
 		}
 		return false, "provider returned " + http.StatusText(resp.StatusCode)
 	}
+
+	if v.ExpectJSONField == "" {
+		return true, ""
+	}
+	// Some providers (Slack's auth.test is the canonical example)
+	// return the expected HTTP status even when the credential is
+	// garbage — the real verdict lives in the JSON body. Fail closed:
+	// a non-JSON body, a missing field, or a present-but-falsy field
+	// are all treated as rejection, not as "status was fine so we'll
+	// assume it's OK."
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	if err != nil {
+		return false, "verify response body read failed: " + err.Error()
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return false, "verify response body was not valid JSON"
+	}
+	val, present := parsed[v.ExpectJSONField]
+	truthy, isBool := val.(bool)
+	if !present || !isBool || !truthy {
+		if reason := firstNonEmptyStringField(parsed, "error", "message"); reason != "" {
+			return false, "provider rejected credentials: " + reason
+		}
+		return false, "provider rejected credentials"
+	}
 	return true, ""
+}
+
+// firstNonEmptyStringField returns the first non-empty string value
+// found in m under any of keys, in order. Used to surface a
+// human-readable reason from a provider's JSON error body without
+// hardcoding one provider's exact shape.
+func firstNonEmptyStringField(m map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if s, ok := m[k].(string); ok && s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // Install handles POST /api/v1/connectors/{connectorId}/install.

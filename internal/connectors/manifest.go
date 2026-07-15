@@ -126,17 +126,41 @@ type MCPConfig struct {
 // VerifyHTTP is an optional post-connect check: hit this URL with the
 // resolved headers, expect ExpectStatus. Used to surface "your token
 // is invalid" before the agent runs.
+//
+// ExpectStatus alone is not always enough: some providers (Slack's
+// auth.test is the canonical example) return HTTP 200 even when the
+// credential is garbage — the real verdict lives in the JSON body.
+// ExpectJSONField, when set, names a top-level field in the response
+// body that must decode as JSON `true` for the probe to pass; a
+// present-but-falsy value fails the probe (with "error"/"message"
+// sibling fields surfaced as the failure reason when present), and a
+// missing field or non-JSON body also fails closed rather than
+// defaulting to "looks fine."
 type VerifyHTTP struct {
-	Method       string            `yaml:"method" json:"method"`
-	URL          string            `yaml:"url" json:"url"`
-	Headers      map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
-	ExpectStatus int               `yaml:"expect_status" json:"expect_status"`
+	Method          string            `yaml:"method" json:"method"`
+	URL             string            `yaml:"url" json:"url"`
+	Headers         map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+	ExpectStatus    int               `yaml:"expect_status" json:"expect_status"`
+	ExpectJSONField string            `yaml:"expect_json_field,omitempty" json:"expect_json_field,omitempty"`
 }
 
-// Verify is exactly one of HTTP or MCPMethod (mutually exclusive).
-// Manifests that omit Verify skip the post-connect check.
+// VerifySQL is an optional post-connect check for database-backed
+// (conn_string) connectors: open a real connection against DSN using
+// Driver's wire protocol and run a trivial round trip. A stdio MCP
+// server merely starting does not touch the configured credential at
+// all, so — unlike an HTTP-reachable API — there is no request/response
+// to probe; the only way to know the credential actually works is to
+// perform the same connection + auth handshake the MCP server would.
+type VerifySQL struct {
+	Driver string `yaml:"driver" json:"driver"` // e.g. "postgres" — selects the verify implementation
+	DSN    string `yaml:"dsn" json:"dsn"`       // placeholder-templated, e.g. "${derived.dsn}"
+}
+
+// Verify is exactly one of HTTP, SQL, or MCPMethod (mutually
+// exclusive). Manifests that omit Verify skip the post-connect check.
 type Verify struct {
 	HTTP      *VerifyHTTP `yaml:"http,omitempty" json:"http,omitempty"`
+	SQL       *VerifySQL  `yaml:"sql,omitempty" json:"sql,omitempty"`
 	MCPMethod string      `yaml:"mcp_method,omitempty" json:"mcp_method,omitempty"` // e.g. "tools/list"
 }
 
@@ -280,7 +304,7 @@ func ParseManifest(data []byte) (*Manifest, error) {
 //   - Brand.Color a valid 6-digit hex like #5E6AD2 (or empty)
 //   - Each Field.Key declared exactly once
 //   - Each Field.Type recognized; Type=select implies non-empty Choices
-//   - Verify (if present) declares exactly one of HTTP / MCPMethod
+//   - Verify (if present) declares exactly one of HTTP / SQL / MCPMethod
 //   - MCP transport matches the populated MCP fields:
 //   - stdio           → MCP.Command set, MCP.Endpoint empty
 //   - streamable-http → MCP.Endpoint set, MCP.Command empty
@@ -353,9 +377,21 @@ func (m *Manifest) Validate() error {
 		}
 	}
 
-	// --- Verify: exactly one of HTTP / MCPMethod ---
-	if m.Verify != nil && m.Verify.HTTP != nil && m.Verify.MCPMethod != "" {
-		return ErrManifestVerifyAmbiguous
+	// --- Verify: exactly one of HTTP / SQL / MCPMethod ---
+	if m.Verify != nil {
+		set := 0
+		if m.Verify.HTTP != nil {
+			set++
+		}
+		if m.Verify.SQL != nil {
+			set++
+		}
+		if m.Verify.MCPMethod != "" {
+			set++
+		}
+		if set > 1 {
+			return ErrManifestVerifyAmbiguous
+		}
 	}
 
 	// --- Auth-mode-specific shape requirements ---
