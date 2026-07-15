@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"net/http"
 	"time"
 )
@@ -137,6 +138,21 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("add agent credential", "error", err)
 		replyError(w, http.StatusConflict, "Credential already assigned to agent")
 		return
+	}
+
+	// #1198: a human may grant an agent's credential need by creating +
+	// assigning the credential directly instead of using `escalation
+	// resolve --action approve` on the specific escalation record. Close
+	// out any PENDING escalation this agent raised that clearly named this
+	// credential, so the queue doesn't accumulate stale, functionally-done
+	// rows. Best-effort — never fails the assignment itself.
+	var credName sql.NullString
+	if scanErr := h.db.QueryRowContext(r.Context(),
+		`SELECT name FROM credentials WHERE id = ? AND workspace_id = ?`,
+		req.CredentialID, workspaceID).Scan(&credName); scanErr != nil {
+		h.logger.Warn("auto-resolve escalations: lookup credential name", "error", scanErr, "credential_id", req.CredentialID)
+	} else if credName.Valid {
+		autoResolveEscalationsForCredential(r.Context(), h.db, h.logger, h.hub, h.journal, workspaceID, agentID, credName.String)
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
