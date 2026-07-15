@@ -89,15 +89,59 @@ func TestAuditRunE_AllFiltersAndRowRendering(t *testing.T) {
 		t.Errorf("action should be omitted; got %q", q)
 	}
 
-	// Table rendering: parsable timestamp reformatted, long entity ID
-	// truncated to 12 chars, nils dashed.
-	for _, want := range []string{"2026-06-01 10:20:30", "cred_abcdefg", "ops@example.com", "not-a-timestamp", "agent.run"} {
+	// Table rendering: parsable timestamp reformatted, short entity ID
+	// shown in full (not needlessly truncated), nils dashed.
+	for _, want := range []string{"2026-06-01 10:20:30", "cred_abcdefghijklmnop", "ops@example.com", "not-a-timestamp", "agent.run"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("table output missing %q; got %q", want, out)
 		}
 	}
-	if strings.Contains(out, "cred_abcdefghijklmnop") {
-		t.Errorf("entity ID should be truncated to 12 chars; got %q", out)
+}
+
+// TestAuditRunE_BackupPathEntityIDNotDestroyed is a regression test for
+// #1199: backup.* audit actions record the full backup file path as the
+// entity ID (see internal/api/backup.go WriteAuditLog calls). The old
+// `entityID[:12]` truncation turned e.g.
+// "/home/ubuntu/.crewship/backups/2026-07-15-full.tar.gz.age" into just
+// "/home/ubuntu" — discarding the only useful part (the filename) with no
+// truncation marker at all, so the value looked complete when it wasn't.
+func TestAuditRunE_BackupPathEntityIDNotDestroyed(t *testing.T) {
+	saveCLIState(t)
+	resetAuditFlags(t)
+
+	longPath := "/home/ubuntu/.crewship/backups/2026-07-15-1200-full.tar.gz.age"
+
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	stub.OnGet("/api/v1/audit", clitest.JSONResponse(http.StatusOK, map[string]any{
+		"data": []map[string]any{
+			{
+				"id":          "a1",
+				"action":      "backup.create",
+				"entity_type": "BACKUP",
+				"entity_id":   longPath,
+				"user_email":  "ops@example.com",
+				"created_at":  "2026-07-15T12:00:00Z",
+			},
+		},
+	}))
+	cliCfg = &cli.CLIConfig{Token: "tok", Workspace: "cabcdefghijklmnopqrs", Server: stub.URL()}
+
+	out, err := captureStdout(t, func() error {
+		return auditCmd.RunE(auditCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	if strings.Contains(out, "/home/ubuntu") && !strings.Contains(out, "full.tar.gz.age") {
+		t.Errorf("truncation destroyed the useful filename suffix; got %q", out)
+	}
+	if !strings.Contains(out, "full.tar.gz.age") {
+		t.Errorf("expected the backup filename to survive truncation; got %q", out)
+	}
+	if !strings.Contains(out, "…") {
+		t.Errorf("truncated value must carry a visible ellipsis marker; got %q", out)
 	}
 }
 

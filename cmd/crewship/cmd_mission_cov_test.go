@@ -52,7 +52,7 @@ func TestMissionListRunE_AllMissions(t *testing.T) {
 			t.Errorf("RunE: %v", err)
 		}
 	})
-	for _, want := range []string{"Ship the beta", "2/5", "viktor", "IN_PROGRESS", "..."} {
+	for _, want := range []string{"Ship the beta", "2/5", "viktor", "IN_PROGRESS", "...", covMissionIDCli8} {
 		if !strings.Contains(out, want) {
 			t.Errorf("list output missing %q:\n%s", want, out)
 		}

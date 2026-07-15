@@ -496,11 +496,18 @@ func formatTimestamp(iso string) string {
 	return t.Local().Format("2006-01-02 15:04 MST")
 }
 
+// shortID renders a schedule ID for the human table. #1199: schedule IDs
+// are "psched_" + cuid, ~28 chars — the old 16-char cutoff (truncating to
+// 14) sliced well into the ID on every real schedule, and `schedules now
+// <id>` requires the exact ID with no prefix-matching fallback, so the
+// truncated value from `list` was never directly usable. 40 chars covers
+// the realistic ID length with room to spare; only pathologically long
+// IDs get cut, and always with a visible "…" marker.
 func shortID(id string) string {
-	if len(id) <= 16 {
+	if len(id) <= 40 {
 		return id
 	}
-	return id[:14] + "…"
+	return id[:38] + "…"
 }
 
 func init() {

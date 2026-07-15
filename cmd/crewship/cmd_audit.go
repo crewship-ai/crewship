@@ -132,10 +132,7 @@ Examples:
 			}
 			entityID := "-"
 			if a.EntityID != nil {
-				entityID = *a.EntityID
-				if len(entityID) > 12 {
-					entityID = entityID[:12]
-				}
+				entityID = truncateEntityID(*a.EntityID, 32)
 			}
 			user := "-"
 			if a.UserEmail != nil {
@@ -145,6 +142,28 @@ Examples:
 		}
 		return f.Auto(result.Data, headers, rows)
 	},
+}
+
+// truncateEntityID renders an audit ENTITY_ID cell for the table view.
+// Most entity IDs are short cuids (~21 chars) and fit under max as-is. But
+// backup.* actions record the *full backup file path* as the entity ID
+// (see internal/api/backup.go WriteAuditLog calls) — an unbounded value
+// that can run well past a table-friendly width. A naive prefix cut like
+// the old `entityID[:12]` destroyed the only useful part of a path (the
+// filename) and left an unhelpful "/home/ubuntu" behind with no
+// truncation marker at all, indistinguishable from a complete value.
+//
+// When truncation is unavoidable, keep the tail — for a path that's the
+// filename; for an ID it's the disambiguating suffix — and always prefix
+// with "…" so the value is never mistaken for the whole thing. (#1199)
+func truncateEntityID(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	if max <= 1 {
+		return "…"
+	}
+	return "…" + s[len(s)-(max-1):]
 }
 
 func init() {
