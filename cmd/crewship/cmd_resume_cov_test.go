@@ -56,12 +56,32 @@ func TestResumeRunE_RunIDLookupError(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
 	covSetupCli8(t, stub.URL())
-	stub.OnGet("/api/v1/runs/run_missing", clitest.ErrorResponse(404, "run not found"))
+	// r_missing, not run_missing: resume's r_/run_ branch both call
+	// client.GetRun, but #1193's IsPipelineRunID only intercepts the
+	// run_ prefix (that's the shape `routine runs` mints) — r_ still
+	// reaches the real HTTP call, so this exercises the genuine
+	// not-found path rather than the pipeline-run-id-shape rejection.
+	stub.OnGet("/api/v1/runs/r_missing", clitest.ErrorResponse(404, "run not found"))
 	resumeCmd.SetContext(context.Background())
 
-	err := resumeCmd.RunE(resumeCmd, []string{"run_missing"})
+	err := resumeCmd.RunE(resumeCmd, []string{"r_missing"})
 	if err == nil || !strings.Contains(err.Error(), "run not found") {
 		t.Errorf("expected run-not-found; got %v", err)
+	}
+}
+
+func TestResumeRunE_PipelineRunIDRejectedWithHint(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli8(t, stub.URL())
+	resumeCmd.SetContext(context.Background())
+
+	// #1193: a run_-prefixed id is a pipeline run (routine runs), not a
+	// chat-turn run — resume should reject it before any HTTP call, with
+	// a hint pointing at the right command, not a bare "not found".
+	err := resumeCmd.RunE(resumeCmd, []string{"run_abc123"})
+	if err == nil || !strings.Contains(err.Error(), "routine logs") {
+		t.Errorf("expected pipeline-run-id hint mentioning `routine logs`; got %v", err)
 	}
 }
 
