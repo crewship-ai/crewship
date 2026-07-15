@@ -286,6 +286,56 @@ func TestAssertBoundCrewWorkspaceDB_EmptyIDSkippedAndDBError(t *testing.T) {
 	})
 }
 
+// TestAssertBoundCrewWorkspaceDB_CrewBoundToken_RejectsSiblingCrew is
+// issue #1186: the DB-membership check alone only proves a crew_id belongs
+// to the token's bound WORKSPACE, not that it matches the crew the token is
+// cryptographically bound to. A crwv1 token minted for one crew could still
+// attribute a cost row / journal entry / created agent to any sibling crew
+// in the same workspace. A workspace-bound (wsv1, no crew) or master-token
+// caller is unaffected — this only tightens the crew-bound path.
+func TestAssertBoundCrewWorkspaceDB_CrewBoundToken_RejectsSiblingCrew(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	ownCrew := seedCrewRow(t, db, "crew-own", wsID, "Own", "own")
+	siblingCrew := seedCrewRow(t, db, "crew-sibling", wsID, "Sibling", "sibling")
+
+	boundReq := func(crew string) *http.Request {
+		req := httptest.NewRequest("POST", "/x", nil)
+		ctx := context.WithValue(req.Context(), ctxInternalTokenWS, wsID)
+		ctx = context.WithValue(ctx, ctxInternalTokenCrew, crew)
+		return req.WithContext(ctx)
+	}
+
+	t.Run("crew_bound_token_own_crew_ok", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		if !assertBoundCrewWorkspaceDB(rr, boundReq(ownCrew), db, newTestLogger(), ownCrew) {
+			t.Fatalf("expected true for own crew; body=%s", rr.Body.String())
+		}
+	})
+
+	t.Run("crew_bound_token_sibling_crew_403", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		if assertBoundCrewWorkspaceDB(rr, boundReq(ownCrew), db, newTestLogger(), siblingCrew) {
+			t.Fatal("expected false: sibling crew must be refused for a crew-bound token")
+		}
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("status = %d, want 403", rr.Code)
+		}
+	})
+
+	t.Run("workspace_bound_token_any_workspace_crew_still_ok", func(t *testing.T) {
+		// No crew binding (wsv1 token) — unaffected, workspace-wide as before.
+		req := httptest.NewRequest("POST", "/x", nil)
+		req = req.WithContext(context.WithValue(req.Context(), ctxInternalTokenWS, wsID))
+		rr := httptest.NewRecorder()
+		if !assertBoundCrewWorkspaceDB(rr, req, db, newTestLogger(), siblingCrew) {
+			t.Fatalf("expected true for workspace-bound (no crew) caller; body=%s", rr.Body.String())
+		}
+	})
+}
+
 func TestAssertBoundChatWorkspaceDB_ForeignAndErrorPaths(t *testing.T) {
 	t.Parallel()
 	db := setupTestDB(t)

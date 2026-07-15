@@ -487,13 +487,25 @@ func assertInternalTokenWorkspace(w http.ResponseWriter, r *http.Request, bodyWS
 	return false
 }
 
-// assertBoundCrewWorkspaceDB rejects an internal-auth request when any
-// of the supplied crew IDs does not resolve (via the crews table) to the
+// assertBoundCrewWorkspaceDB rejects an internal-auth request when any of
+// the supplied crew IDs does not resolve (via the crews table) to the
 // workspace the caller's X-Internal-Token is bound to (PR-F24 foreign-ID
 // closure). assertInternalTokenWorkspace already proves the body's
 // workspace_id matches the binding; this closes the gap where a handler
 // then keeps going with additional body-carried crew references that
 // were never proven to live in that same workspace.
+//
+// #1186: when the caller's token is additionally crew-bound (crwv1 — a
+// per-crew sidecar's token), a workspace-membership check alone is not
+// enough. Without this, a crew-bound token could attribute a cost row /
+// journal entry / created agent to any SIBLING crew in the same
+// workspace, defeating the very isolation crwv1 tokens exist to enforce
+// (the residual gap #1159/#1178 left open). So a crew-bound caller must
+// match its OWN crew exactly — checked against the token's cryptographic
+// binding, not the DB, so it can't be satisfied by a crew that merely
+// happens to share the workspace. A workspace-bound (wsv1, no crew) or
+// master-token caller is unaffected: they fall through to the existing
+// workspace-membership check below, unchanged.
 //
 // No-op for master-token callers (no binding in context). Unknown crew
 // IDs are rejected with the same 403 so the check is not an existence
@@ -504,8 +516,22 @@ func assertBoundCrewWorkspaceDB(w http.ResponseWriter, r *http.Request, db *sql.
 	if bound == "" {
 		return true
 	}
+	boundCrew := InternalTokenCrewFromContext(r.Context())
 	for _, crewID := range crewIDs {
 		if crewID == "" {
+			continue
+		}
+		if boundCrew != "" {
+			if crewID != boundCrew {
+				if logger != nil {
+					logger.Warn("internal API cross-crew request refused (crew-bound token)",
+						"path", r.URL.Path, "remote_addr", r.RemoteAddr,
+						"token_crew", boundCrew, "requested_crew", crewID)
+				}
+				replyError(w, http.StatusForbidden,
+					"crew does not match the crew bound to the internal token")
+				return false
+			}
 			continue
 		}
 		var wsID string

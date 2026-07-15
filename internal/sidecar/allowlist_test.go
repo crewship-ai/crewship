@@ -57,6 +57,36 @@ func TestDomainAllowlistAdd(t *testing.T) {
 	}
 }
 
+// TestDomainAllowlistHash is #1160: the orchestrator compares this hash
+// against an independently-computed one (same domains, desired policy) to
+// decide whether a restricted-mode sidecar actually needs restarting,
+// instead of restarting unconditionally on every exec. The hash must be
+// insensitive to input order and case (both sides may build their domain
+// list differently) and must change when the domain SET changes.
+func TestDomainAllowlistHash(t *testing.T) {
+	a := NewDomainAllowlist([]string{"api.anthropic.com", "api.openai.com"})
+	b := NewDomainAllowlist([]string{"API.OPENAI.COM", "api.anthropic.com"}) // reordered + different case
+	if a.Hash() != b.Hash() {
+		t.Errorf("hash should be order/case-insensitive: a=%q b=%q", a.Hash(), b.Hash())
+	}
+
+	c := NewDomainAllowlist([]string{"api.anthropic.com", "evil.com"})
+	if a.Hash() == c.Hash() {
+		t.Errorf("hash should differ when the domain set differs: a=%q c=%q", a.Hash(), c.Hash())
+	}
+
+	d := NewDomainAllowlist([]string{"api.anthropic.com", "api.openai.com"})
+	d.Add("new.example.com")
+	if d.Hash() == a.Hash() {
+		t.Error("hash must reflect domains added after construction")
+	}
+
+	empty := NewDomainAllowlist(nil)
+	if empty.Hash() == "" {
+		t.Error("hash of an empty allowlist must still be a stable non-empty value")
+	}
+}
+
 func TestProviderForHost(t *testing.T) {
 	tests := []struct {
 		host     string

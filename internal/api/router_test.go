@@ -687,6 +687,50 @@ func TestWorkspaceUpdate_ClearPreferredLanguage(t *testing.T) {
 	}
 }
 
+// TestWorkspaceUpdate_AllowPrivilegedCredentials is issue #1032's opt-in
+// flag round-trip: default off, explicit true persists and reflects on the
+// response, explicit false flips it back.
+func TestWorkspaceUpdate_AllowPrivilegedCredentials(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	handler := NewWorkspaceHandler(db, logger)
+
+	patch := func(bodyJSON string) workspaceResponse {
+		req := httptest.NewRequest("PATCH", "/api/v1/workspaces/"+wsID, bytes.NewBufferString(bodyJSON))
+		req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
+		rr := httptest.NewRecorder()
+		handler.Update(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200, body: %s", rr.Code, rr.Body.String())
+		}
+		var ws workspaceResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &ws); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return ws
+	}
+
+	if ws := patch(`{"name":"Acme Corp"}`); ws.AllowPrivilegedCredentials {
+		t.Errorf("allow_privileged_credentials should default false, got true")
+	}
+
+	if ws := patch(`{"allow_privileged_credentials":true}`); !ws.AllowPrivilegedCredentials {
+		t.Errorf("allow_privileged_credentials = false after opting in, want true")
+	}
+	var flag int
+	db.QueryRow("SELECT allow_privileged_credentials FROM workspaces WHERE id = ?", wsID).Scan(&flag)
+	if flag != 1 {
+		t.Errorf("DB allow_privileged_credentials = %d, want 1", flag)
+	}
+
+	if ws := patch(`{"allow_privileged_credentials":false}`); ws.AllowPrivilegedCredentials {
+		t.Errorf("allow_privileged_credentials = true after opting out, want false")
+	}
+}
+
 func TestCRUDFlow(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))

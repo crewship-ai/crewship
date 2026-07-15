@@ -585,7 +585,7 @@ func TestRunAgent_RestrictedModeRestartsSidecarWithDomains(t *testing.T) {
 	var launchScript string
 	for _, call := range c.snapshotCalls() {
 		script := covScript(call)
-		if strings.Contains(script, "pkill -f crewship-sidecar") {
+		if strings.Contains(script, "pkill -f '^crewship-sidecar'") {
 			sawPkill = true
 		}
 		if strings.Contains(script, "crewship-sidecar --addr") {

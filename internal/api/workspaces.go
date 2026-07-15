@@ -96,6 +96,12 @@ type workspaceResponse struct {
 	CreatedAt         string  `json:"created_at"`
 	UpdatedAt         string  `json:"updated_at"`
 	CurrentUserRole   *string `json:"currentUserRole,omitempty"`
+	// AllowPrivilegedCredentials (#1032) — explicit opt-in to load
+	// credentials into a --privileged crew's sidecar CredStore despite the
+	// collapsed UID 1001/1002 isolation boundary. false (default): the
+	// agent-config resolver fails closed and omits credentials for a
+	// privileged crew.
+	AllowPrivilegedCredentials bool `json:"allow_privileged_credentials"`
 	// Nested `_count` is the canonical shape the frontend consumes
 	// (#866.1). The flat `_count_*` keys are retained one release for
 	// back-compat with any older client and should be removed after.
@@ -128,7 +134,7 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT w.id, w.name, w.slug, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
-			wm.role,
+			wm.role, w.allow_privileged_credentials,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
@@ -148,7 +154,7 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var ws workspaceResponse
 		if err := rows.Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
-			&ws.CreatedAt, &ws.UpdatedAt, &ws.CurrentUserRole,
+			&ws.CreatedAt, &ws.UpdatedAt, &ws.CurrentUserRole, &ws.AllowPrivilegedCredentials,
 			&ws.CrewCount, &ws.AgentCount, &ws.MemberCount); err != nil {
 			h.logger.Error("scan workspace", "error", err)
 			replyError(w, http.StatusInternalServerError, "Internal server error")
@@ -177,13 +183,15 @@ func (h *WorkspaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var ws workspaceResponse
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT w.id, w.name, w.slug, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
+			w.allow_privileged_credentials,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
 		FROM workspaces w
 		WHERE w.id = ? AND w.deleted_at IS NULL
 	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
-		&ws.CreatedAt, &ws.UpdatedAt, &ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
+		&ws.CreatedAt, &ws.UpdatedAt, &ws.AllowPrivilegedCredentials,
+		&ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			replyError(w, http.StatusNotFound, "Workspace not found")

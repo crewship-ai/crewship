@@ -196,6 +196,22 @@ func NewServer(cfg ServerConfig) *Server {
 
 	allowlist := NewDomainAllowlist(domains)
 
+	// #1160: policyDomainsHash covers ONLY the per-crew policy domains
+	// (cfg.NetworkPolicy.AllowedDomains — restricted mode; empty otherwise),
+	// never DefaultAllowedDomains. The orchestrator's restart-skip decision
+	// compares this against a hash it computes independently over the SAME
+	// per-crew domain list it asked for — it has no way to know about the
+	// ~19 hardcoded LLM domains merged into `domains` above, so reporting a
+	// hash of the FULL merged allowlist here would never match and would
+	// permanently defeat the optimization (every restricted-mode crew would
+	// restart its sidecar on every exec, silently reverting to the
+	// pre-#1160 behavior).
+	var policyDomains []string
+	if cfg.NetworkPolicy != nil && cfg.NetworkPolicy.Mode == "restricted" {
+		policyDomains = cfg.NetworkPolicy.AllowedDomains
+	}
+	policyDomainsHash := NewDomainAllowlist(policyDomains).Hash()
+
 	// s is created BEFORE the proxy so the observer closure can capture
 	// a stable reference to the server for journal emission. Proxy holds
 	// the closure as a function pointer, so rotating the credential store
@@ -232,17 +248,18 @@ func NewServer(cfg ServerConfig) *Server {
 	subscriptionPlan := os.Getenv("CREWSHIP_SUBSCRIPTION_PLAN")
 
 	proxy := NewProxy(ProxyConfig{
-		CredStore:        credStore,
-		Allowlist:        allowlist,
-		Scrubber:         scrubber.New(),
-		Logger:           cfg.Logger,
-		FreeMode:         freeMode,
-		AllowPrivate:     allowPrivateEndpoints,
-		OnEgress:         s.buildEgressObserver(),
-		OnLLMCall:        s.buildLLMCallObserver(),
-		BillingMode:      billingMode,
-		SubscriptionPlan: subscriptionPlan,
-		BuildHash:        selfExeHash(),
+		CredStore:         credStore,
+		Allowlist:         allowlist,
+		Scrubber:          scrubber.New(),
+		Logger:            cfg.Logger,
+		FreeMode:          freeMode,
+		AllowPrivate:      allowPrivateEndpoints,
+		OnEgress:          s.buildEgressObserver(),
+		OnLLMCall:         s.buildLLMCallObserver(),
+		BillingMode:       billingMode,
+		SubscriptionPlan:  subscriptionPlan,
+		BuildHash:         selfExeHash(),
+		PolicyDomainsHash: policyDomainsHash,
 	})
 	s.proxy = proxy
 

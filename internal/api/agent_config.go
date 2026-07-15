@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/composio"
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/policy"
 )
@@ -57,6 +58,13 @@ type agentConfigData struct {
 	crewServicesJSON          sql.NullString
 	crewMCPConfigJSON         sql.NullString
 	agentMCPConfigJSON        sql.NullString
+
+	// wsAllowPrivilegedCredentials is workspaces.allow_privileged_credentials
+	// (#1032) — the operator's explicit opt-in to load credentials into a
+	// --privileged crew's sidecar CredStore despite the collapsed UID
+	// 1001/1002 isolation boundary. 0 (default) means resolveAgentConfig
+	// fails closed and omits credentials for a privileged crew.
+	wsAllowPrivilegedCredentials int
 }
 
 // memberIntegrationEntry describes an MCP integration available to a crew member.
@@ -173,9 +181,30 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		return
 	}
 
-	// Auto-resolve credentials referenced in crew/agent MCP configs.
-	creds = autoResolveMCPCredentials(r.Context(), h.db, h.logger, data.wsID, creds,
-		data.crewMCPConfigJSON.String, data.agentMCPConfigJSON.String)
+	// #1032: a --privileged crew container drops no-new-privileges +
+	// CapDrop:ALL, collapsing the UID 1001 (agent) / 1002 (sidecar) boundary
+	// that normally keeps a compromised agent from reading the sidecar's
+	// process memory — and with it any credentials loaded into its
+	// CredStore. Fail closed (omit credentials entirely) unless the
+	// workspace has explicitly accepted that trade-off. blockPrivilegedCreds
+	// is re-applied after every downstream step that can repopulate creds
+	// (auto-resolve from MCP configs pulls straight from the workspace
+	// vault regardless of what "existing" already holds) so the gate can't
+	// be bypassed by an MCP server referencing the same env var.
+	blockPrivilegedCreds := data.crewIsPrivileged() && data.wsAllowPrivilegedCredentials == 0
+	if blockPrivilegedCreds {
+		h.logger.Warn("privileged crew: refusing to load credentials into sidecar CredStore (#1032, fail-closed) — set allow_privileged_credentials on the workspace to opt in",
+			"agent_id", agentID, "crew_id", data.crewID.String, "workspace_id", data.wsID)
+		creds = nil
+	}
+
+	// Auto-resolve credentials referenced in crew/agent MCP configs. Skipped
+	// entirely when blocked — creds is already nil and there's no point
+	// paying for the DB round-trip just to discard the result.
+	if !blockPrivilegedCreds {
+		creds = autoResolveMCPCredentials(r.Context(), h.db, h.logger, data.wsID, creds,
+			data.crewMCPConfigJSON.String, data.agentMCPConfigJSON.String)
+	}
 
 	sysPrompt, err := h.loadAgentSystemPrompt(r, data, creds, agentID)
 	if err != nil {
@@ -194,6 +223,21 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 	memoryMB, cpus, ttlHours := h.resolveContainerResources(data)
 
 	mcpServers := h.resolveAgentMCPServers(r, data, agentID)
+	// #1032: resolveAgentMCPServers has its OWN independent credential path
+	// (agent_mcp_bindings.credential_id, decrypted into CredToken) — entirely
+	// separate from the agent_credentials path blockPrivilegedCreds already
+	// covers. That token flows into the orchestrator's MCPServerConfig and
+	// from there into the sidecar's mcp_servers payload, i.e. the exact
+	// sidecar-memory exposure this gate exists to prevent. Strip it here too;
+	// keep the server DEFINITIONS (name/endpoint/transport) so the agent still
+	// sees what integrations exist, just without live credential material.
+	if blockPrivilegedCreds {
+		for i := range mcpServers {
+			mcpServers[i].CredToken = ""
+			mcpServers[i].CredType = ""
+			mcpServers[i].CredHeader = ""
+		}
+	}
 
 	// Auto-resolve credentials from table-based MCP servers' env_json.
 	if len(mcpServers) > 0 {
@@ -205,14 +249,17 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 				}
 			}
 		}
-		if len(envJsons) > 0 {
+		if len(envJsons) > 0 && !blockPrivilegedCreds {
 			creds = autoResolveMCPCredentials(r.Context(), h.db, h.logger, data.wsID, creds, envJsons...)
 		}
 	}
 
 	// For OAUTH2 credentials that were auto-resolved (client_id/secret),
 	// also include the access token so the orchestrator can write tokens.json.
-	creds = h.resolveOAuthAccessTokens(r, creds)
+	// Skipped when blocked, same reasoning as above.
+	if !blockPrivilegedCreds {
+		creds = h.resolveOAuthAccessTokens(r, creds)
+	}
 
 	// [KEEPER] section — credential access control instructions
 	roleStr := "AGENT"
@@ -383,9 +430,10 @@ func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agent
 			c2.container_memory_mb, c2.container_cpus, c2.container_ttl_hours,
 			c2.runtime_image, c2.cached_image, c2.cached_requirements,
 			c2.devcontainer_config, c2.mise_config, c2.services_json,
-			c2.mcp_config_json, a.mcp_config_json
+			c2.mcp_config_json, a.mcp_config_json, COALESCE(w.allow_privileged_credentials, 0)
 		FROM agents a
 		LEFT JOIN crews c2 ON c2.id = a.crew_id
+		LEFT JOIN workspaces w ON w.id = a.workspace_id
 		WHERE a.id = ?`
 	args := []any{agentID}
 	if wsID := r.URL.Query().Get("workspace_id"); wsID != "" {
@@ -399,8 +447,23 @@ func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agent
 		&d.crewMemoryMB, &d.crewCPUs, &d.crewTTLHours,
 		&d.crewRuntimeImage, &d.crewCachedImage, &d.crewCachedRequirements,
 		&d.crewDevcontainerConfig, &d.crewMiseConfig, &d.crewServicesJSON,
-		&d.crewMCPConfigJSON, &d.agentMCPConfigJSON)
+		&d.crewMCPConfigJSON, &d.agentMCPConfigJSON, &d.wsAllowPrivilegedCredentials)
 	return d, err
+}
+
+// crewIsPrivileged reports whether data's crew has a cached "privileged"
+// devcontainer requirement (#1032) — parsed defensively; a malformed or
+// absent cached_requirements blob is treated as non-privileged rather than
+// erroring the whole resolve.
+func (d *agentConfigData) crewIsPrivileged() bool {
+	if !d.crewCachedRequirements.Valid || d.crewCachedRequirements.String == "" {
+		return false
+	}
+	var reqs devcontainer.AggregatedRequirements
+	if err := json.Unmarshal([]byte(d.crewCachedRequirements.String), &reqs); err != nil {
+		return false
+	}
+	return reqs.Privileged
 }
 
 // loadAgentSystemPrompt builds the structured system prompt from ethos, language,
