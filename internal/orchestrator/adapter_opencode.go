@@ -83,7 +83,7 @@ var openCodeProviderIDs = map[string]string{
 	"OLLAMA":    "ollama",
 }
 
-// modelNameProviderID infers the OpenCode provider id from a bare model name's
+// ModelNameProviderID infers the LLM provider id from a bare model name's
 // well-known prefix. This is AUTHORITATIVE over the agent's configured provider
 // because the model can be overridden per call — a pipeline step tier override
 // or CREWSHIP_SUBAGENT_MODEL can name a bare model belonging to a DIFFERENT
@@ -91,7 +91,12 @@ var openCodeProviderIDs = map[string]string{
 // with the static provider would mis-stamp it (e.g. "anthropic/gpt-4o-mini")
 // and misroute the run — the exact opaque failure #1007 set out to kill. The
 // provider must follow the model. Returns "" when the name reveals nothing.
-func modelNameProviderID(model string) string {
+//
+// Exported (originally OpenCode-adapter-private) so callers outside this
+// package can derive a paymaster-compatible provider string ("anthropic",
+// "openai", "google", "xai") from a bare model slug without duplicating this
+// prefix table — see chatbridge/scheduler's #1205 cost-ledger fallback path.
+func ModelNameProviderID(model string) string {
 	m := strings.ToLower(model)
 	switch {
 	case strings.HasPrefix(m, "claude-"),
@@ -124,7 +129,7 @@ func qualifyOpenCodeModel(provider, model string) string {
 	if model == "" || strings.Contains(model, "/") {
 		return model
 	}
-	if id := modelNameProviderID(model); id != "" {
+	if id := ModelNameProviderID(model); id != "" {
 		return id + "/" + model
 	}
 	if id, ok := openCodeProviderIDs[strings.ToUpper(strings.TrimSpace(provider))]; ok {

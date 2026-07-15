@@ -282,6 +282,49 @@ func (r *IPCResolver) UpdateRun(ctx context.Context, runID, status string, exitC
 	return nil
 }
 
+// RecordCost forwards a completed run's CLI-reported token usage to the
+// paymaster cost ledger (#1205), reusing the exact same internal endpoint
+// (`POST /api/v1/internal/cost/record`) and wire format the in-container
+// sidecar already posts to after intercepting an LLM-provider HTTP response
+// (see internal/api/internal_cost.go's sidecarCostRecordRequest /
+// handleSidecarCostRecord). CostUSD is deliberately omitted from the body —
+// the handler derives it server-side via paymaster.Estimate from the token
+// counts and the shared rate card, keeping every ledger row priced from the
+// same source of truth regardless of which path wrote it.
+func (r *IPCResolver) RecordCost(ctx context.Context, usage RunCostUsage) error {
+	reqURL := fmt.Sprintf("%s/api/v1/internal/cost/record", r.baseURL)
+	payload := map[string]interface{}{
+		"workspace_id":  usage.WorkspaceID,
+		"crew_id":       usage.CrewID,
+		"agent_id":      usage.AgentID,
+		"provider":      usage.Provider,
+		"model":         usage.Model,
+		"input_tokens":  usage.InputTokens,
+		"output_tokens": usage.OutputTokens,
+		"billing_mode":  "metered",
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("record cost: marshal: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Internal-Token", r.internalToken)
+	resp, err := r.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("record cost: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
+		return fmt.Errorf("record cost: server returned %d: %s", resp.StatusCode, respBody)
+	}
+	return nil
+}
+
 // IncrementMessageCount increments the message count for a chat session.
 func (r *IPCResolver) IncrementMessageCount(ctx context.Context, chatID string, delta int) error {
 	reqURL := fmt.Sprintf("%s/api/v1/internal/chats/%s/message-count", r.baseURL, url.PathEscape(chatID))

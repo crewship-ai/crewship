@@ -138,6 +138,9 @@ func (r *orchCovResolver) IncrementMessageCount(_ context.Context, _ string, _ i
 	return nil
 }
 func (r *orchCovResolver) UpdateChatTitle(_ context.Context, _, _ string) error { return nil }
+func (r *orchCovResolver) RecordCost(_ context.Context, _ chatbridge.RunCostUsage) error {
+	return nil
+}
 
 // newOrchRunnerRig assembles a runner against a real orchestrator and
 // the seeded agents/crews DB from openAgentResolverTestDB.

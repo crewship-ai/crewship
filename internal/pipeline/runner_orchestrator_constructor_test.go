@@ -49,6 +49,9 @@ func (minimalChatResolver) IncrementMessageCount(_ context.Context, _ string, _ 
 	return nil
 }
 func (minimalChatResolver) UpdateChatTitle(_ context.Context, _, _ string) error { return nil }
+func (minimalChatResolver) RecordCost(_ context.Context, _ chatbridge.RunCostUsage) error {
+	return nil
+}
 
 // minimalContainer satisfies provider.ContainerProvider with no-ops.
 // Only the type-check matters for the constructor — none of the methods
