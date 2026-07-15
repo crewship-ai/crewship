@@ -24,14 +24,16 @@ section "1. Scheduler: create a cron schedule and confirm it's listed + enabled"
 # slug to begin with). It now self-provisions the schedule it needs, so the
 # assertion exercises the real scheduler instead of a demo-seed side effect.
 harness_sched_name="harness-orchestration-smoke"
+sched_create_out="$(mktemp -t cs-sched-create.XXXXXX)"
 cs routine schedules create --slug classify-ticket --name "$harness_sched_name" \
-  --cron "*/30 * * * *" >/tmp/cs-sched-create.out 2>&1
+  --cron "*/30 * * * *" >"$sched_create_out" 2>&1
 sched_out="$(cs routine schedules list 2>/dev/null)"
 if printf '%s' "$sched_out" | grep -qi "$harness_sched_name"; then
   _pass "self-provisioned schedule for 'classify-ticket' is listed"
 else
-  _fail "self-provisioned schedule for 'classify-ticket' is listed" "$(head -c 200 /tmp/cs-sched-create.out | tr '\n' ' ')"
+  _fail "self-provisioned schedule for 'classify-ticket' is listed" "$(head -c 200 "$sched_create_out" | tr '\n' ' ')"
 fi
+rm -f "$sched_create_out"
 if printf '%s' "$sched_out" | grep -qiE 'yes'; then
   _pass "at least one schedule is enabled"
 else
