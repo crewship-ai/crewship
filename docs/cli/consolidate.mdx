@@ -39,14 +39,14 @@ The command takes **no positional args** -- scope is passed via flags. A bare `c
 Sample outputs:
 
 ```
-Consolidation triggered (worker_id=csd_a1b2c3d4e5f6)
+Consolidation triggered (accepted=true, worker_id=csd_a1b2c3d4e5f6)
 ```
 
 ```
 Accepted, but skipped: no summarizer configured, skipping
 ```
 
-`Accepted` (202) with a note means the consolidator is wired but lacks a summarizer client -- set `OLLAMA_HOST` and install a chat model.
+`accepted=true` on a triggered run confirms the request was genuinely accepted (not just that a 202 came back). `Accepted, but skipped` (202) with a note means the consolidator is wired but lacks a summarizer client -- set `OLLAMA_HOST` and install a chat model.
 
 ## Requirements
 

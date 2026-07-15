@@ -198,9 +198,18 @@ func (h *ConsolidateHandler) Run(w http.ResponseWriter, r *http.Request) {
 		h.runOnce(ctx, workspaceID, body.CrewID, sinceDur, workerID)
 	}()
 
+	// accepted mirrors triggered on this path deliberately: both mean
+	// "the request was accepted and a run was kicked off". They used to
+	// diverge — this map only ever set "triggered", so "accepted"
+	// silently zero-valued to false on every successful call (#1206).
+	// note stays empty here; it's reserved for explaining a genuine
+	// non-accept (see the no-summarizer 202 branch above and the 409
+	// in-flight-guard branch below).
 	writeJSON(w, http.StatusAccepted, map[string]any{
+		"accepted":  true,
 		"triggered": true,
 		"worker_id": workerID,
+		"note":      "",
 	})
 }
 
