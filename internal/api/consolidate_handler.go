@@ -36,6 +36,14 @@ type ConsolidateHandler struct {
 
 	mu      sync.Mutex
 	running map[string]struct{} // workspace_id → in-flight
+
+	// testRunDone, when non-nil, receives a value after each background
+	// runOnce goroutine (kicked off by Run) finishes. Production leaves
+	// this nil; tests that exercise the real async Run path set it so
+	// they can wait for the goroutine before returning — otherwise a
+	// t.TempDir() MemoryRoot can still be mid-write when the test's own
+	// cleanup tries to remove it (flaky "directory not empty" on macOS).
+	testRunDone chan struct{}
 }
 
 func NewConsolidateHandler(db *sql.DB, logger *slog.Logger) *ConsolidateHandler {
@@ -184,14 +192,17 @@ func (h *ConsolidateHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// request's OTel span + auth values so the worker remains observable +
 	// audited; we don't want the request's *cancellation* to propagate
 	// (the caller has already received 202 and the worker should run to
-	// completion against its own ledger). Downstream handler tests pass
-	// a sync.WaitGroup via t.Cleanup when they need to observe the emit.
+	// completion against its own ledger). Tests that need to observe the
+	// goroutine's effects set h.testRunDone and receive from it.
 	parentCtx := context.WithoutCancel(r.Context())
 	go func() {
 		defer func() {
 			h.mu.Lock()
 			delete(h.running, workspaceID)
 			h.mu.Unlock()
+			if h.testRunDone != nil {
+				h.testRunDone <- struct{}{}
+			}
 		}()
 		ctx, cancel := context.WithTimeout(parentCtx, 10*time.Minute)
 		defer cancel()

@@ -103,6 +103,15 @@ func TestConsolidateRun_HappyPath_ReturnsWorkerID(t *testing.T) {
 	})
 	h.SetMemoryRoot(t.TempDir())
 
+	// Run kicks the actual work off in a background goroutine (see
+	// consolidate_handler.go) and returns 202 immediately. Wait for it
+	// to finish before this test returns — otherwise t.TempDir()'s own
+	// cleanup can race the goroutine's writes into that same directory,
+	// flaking as "TempDir RemoveAll cleanup: directory not empty".
+	done := make(chan struct{}, 1)
+	h.testRunDone = done
+	defer func() { <-done }()
+
 	body := bytes.NewBufferString(`{"since":"6h"}`)
 	req := httptest.NewRequest("POST", "/api/v1/consolidate/run", body)
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
