@@ -303,12 +303,12 @@ func TestRunSeedCov2_CancelMidPhases(t *testing.T) {
 		{"rbac users", "/api/v1/auth/signup", true, true,
 			"RBAC user seeding hit an error (continuing)"},
 		{"skills import", "/api/v1/workspaces/" + covSeedWSID + "/skills/import", false, true, ""},
-		{"routines", "/api/v1/workspaces/" + covSeedWSID + "/pipelines/save", false, true,
+		// Routine seeding no longer has its own inter-phase checkpoint
+		// (that used to be Phase 9b: demo schedules, now removed) — the
+		// abort surfaces at the next enabled checkpoint, the issues
+		// phase, so skipIss must stay false here.
+		{"routines", "/api/v1/workspaces/" + covSeedWSID + "/pipelines/save", false, false,
 			"Routine seeding hit an error (continuing)"},
-		// Schedules seed only one demo cron, so the in-phase loop never
-		// re-checks ctx after the cancel — the abort surfaces at the issues
-		// checkpoint, which therefore must stay enabled here.
-		{"schedules", "/api/v1/workspaces/" + covSeedWSID + "/pipeline-schedules", false, false, ""},
 		{"issues labels", "/api/v1/labels", false, false, ""},
 	}
 	for _, tc := range cases {
