@@ -169,10 +169,10 @@ WHERE id = ?`,
 			nullStr(in.Author.CrewID), nullStr(in.Author.AgentID), nullStr(in.Author.UserID),
 			nullStr(in.Author.ChatID), nullStr(in.Author.RunID),
 			string(in.Author.Via), nullStr(in.Author.ImportedURL),
-			in.LastTestRunAt.UTC().Format(time.RFC3339Nano),
+			in.LastTestRunAt.UTC().Format(time.RFC3339Nano), // tsformat:allow: last_test_run_at freshness is checked in Go via time.Since, never SQL-compared
 			nullStr(in.ExecutionTierJSON),
 			status,
-			now.Format(time.RFC3339Nano),
+			now.Format(time.RFC3339Nano), // tsformat:allow: updated_at is not currently ordered/compared in SQL anywhere
 			existingID,
 		)
 		if err != nil {
