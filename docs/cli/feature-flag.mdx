@@ -6,7 +6,7 @@ icon: "toggle-left"
 
 # crewship feature-flag
 
-Manage feature flags for the current workspace. The CLI surfaces the **override** layer (per-workspace on/off) plus a `list` view that includes the instance default. Flag **definitions** (creating, renaming, deleting a flag's identity) are an instance-admin operation and live in the web UI and direct API calls — see [the API reference below](#api).
+Manage feature flags for the current workspace. The CLI surfaces the **override** layer (per-workspace on/off) plus a `list` view that includes the instance default, and a `delete` for removing a flag **definition** outright. Creating or renaming a flag definition is still an instance-admin operation that lives in the web UI, direct API calls, or a [manifest `apply`](/manifest/feature_flag) — see [the API reference below](#api).
 
 ```bash
 crewship feature-flag <subcommand> [flags]
@@ -22,6 +22,7 @@ The command accepts the alias `crewship flag`.
 | `enable <key>` | Force the flag on for the current workspace (PUT override). |
 | `disable <key>` | Force the flag off for the current workspace (PUT override). |
 | `inherit <key>` | Drop the override and revert to the instance default. |
+| `delete <key>` | Delete the flag **definition** — cascades to every workspace's override. |
 
 ---
 
@@ -67,6 +68,17 @@ Removes the override. The next read of the flag reverts to the instance default 
 
 ---
 
+## `crewship feature-flag delete`
+
+```bash
+crewship feature-flag delete provisioner-v2
+crewship feature-flag delete provisioner-v2 --yes   # skip the confirmation prompt
+```
+
+Deletes the flag **definition** itself, not just this workspace's override — the delete cascades to every workspace's override row for the key, instance-wide. This is a stronger operation than `inherit`; prefer `inherit` if you only want to stop overriding for the current workspace. Requires `OWNER` / `ADMIN` (`canRole "manage"`) and prompts for confirmation unless `--yes` / `-y` is passed.
+
+---
+
 ## API
 
 The CLI is a thin wrapper over six endpoints:
@@ -74,18 +86,18 @@ The CLI is a thin wrapper over six endpoints:
 | Verb | Path | Wrapped by |
 |------|------|------------|
 | `GET` | `/api/v1/feature-flags` | `crewship feature-flag list` |
-| `POST` | `/api/v1/feature-flags` | — (web UI / direct API; flag definition CRUD) |
+| `POST` | `/api/v1/feature-flags` | — (web UI / direct API / manifest `apply`; flag definition create) |
 | `PATCH` | `/api/v1/feature-flags/{key}` | — (web UI / direct API) |
-| `DELETE` | `/api/v1/feature-flags/{key}` | — (web UI / direct API) |
+| `DELETE` | `/api/v1/feature-flags/{key}` | `crewship feature-flag delete` |
 | `PUT` | `/api/v1/feature-flags/{key}/override` | `enable` / `disable` |
 | `DELETE` | `/api/v1/feature-flags/{key}/override` | `inherit` |
 
-Flag definition CRUD (the three middle rows) intentionally has no CLI wrapper — creating a flag is an instance-admin event that should land via a code change, a migration, or the admin UI rather than an ad-hoc CLI call.
+Flag definition create/update (`POST` / `PATCH`) intentionally still has no CLI wrapper — creating or renaming a flag is an instance-admin event that should land via a code change, a migration, a manifest `apply`, or the admin UI rather than an ad-hoc CLI call. `delete` is the exception: it's the cleanup counterpart needed to safely exercise a flag's full lifecycle (e.g. a throwaway flag created via `apply`) without relying on `apply`'s broader manifest-diff delete semantics.
 
 ## Common errors
 
 - **`API error (404): Feature flag not found`** — the `<key>` you passed doesn't exist on this instance. Run `crewship feature-flag list` to see the catalog.
-- **`API error (403): Forbidden`** — override writes require `OWNER` / `ADMIN` (`canRole "manage"`). MEMBER and VIEWER roles can only `list`.
+- **`API error (403): Forbidden`** — override writes and `delete` require `OWNER` / `ADMIN` (`canRole "manage"`). MEMBER and VIEWER roles can only `list`.
 
 ## See also
 

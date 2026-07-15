@@ -126,6 +126,44 @@ var featureFlagInheritCmd = &cobra.Command{
 	},
 }
 
+var featureFlagDeleteCmd = &cobra.Command{
+	Use:   "delete <key>",
+	Short: "Delete a feature flag definition (DELETE /api/v1/feature-flags/{key})",
+	Long: `Delete removes the feature flag *definition* itself — not just this
+workspace's override. It cascades to every workspace's override rows for
+the flag, instance-wide. ADMIN-only server-side.
+
+Use "crewship feature-flag inherit <key>" instead if you only want to
+drop this workspace's override and fall back to the instance default.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		key := args[0]
+		if err := confirmAction(cmd, fmt.Sprintf("Delete feature flag %q? This removes the definition and every workspace's override.", key)); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		resp, err := client.Delete("/api/v1/feature-flags/" + url.PathEscape(key))
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		cli.PrintSuccess(fmt.Sprintf("Feature flag %q deleted.", key))
+		return nil
+	},
+}
+
 // setOverride PUTs a boolean override for the current workspace. Shared by
 // the `enable` and `disable` subcommands because they only differ in the
 // body's boolean value.
@@ -168,8 +206,11 @@ func boolBadge(b bool) string {
 }
 
 func init() {
+	featureFlagDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
+
 	featureFlagCmd.AddCommand(featureFlagListCmd)
 	featureFlagCmd.AddCommand(featureFlagEnableCmd)
 	featureFlagCmd.AddCommand(featureFlagDisableCmd)
 	featureFlagCmd.AddCommand(featureFlagInheritCmd)
+	featureFlagCmd.AddCommand(featureFlagDeleteCmd)
 }
