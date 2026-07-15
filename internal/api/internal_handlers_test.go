@@ -876,6 +876,61 @@ func TestInternalCreateAgent(t *testing.T) {
 	})
 }
 
+// TestInternalCreateAgent_CrewBoundToken_RejectsSiblingCrew is issue #1186:
+// requireInternal only pins the crew scope on routes that explicitly consult
+// InternalTokenCrewFromContext. CreateAgent never did, so a crew-bound
+// (crwv1) sidecar token — cryptographically scoped to its OWN crew — could
+// still hire an agent into any SIBLING crew in the same workspace by simply
+// naming it in the body. A workspace-bound (non-crew) or master-token caller
+// is unaffected: this only tightens the crew-bound path.
+func TestInternalCreateAgent_CrewBoundToken_RejectsSiblingCrew(t *testing.T) {
+	setTestEncryptionKey(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	ownCrew := seedCrewRow(t, db, "cr-own", wsID, "Own", "own")
+	siblingCrew := seedCrewRow(t, db, "cr-sibling", wsID, "Sibling", "sibling")
+
+	h := NewInternalHandler(db, "tok", testLogger())
+
+	boundCtx := func(crew string) context.Context {
+		ctx := context.WithValue(context.Background(), ctxInternalTokenWS, wsID)
+		return context.WithValue(ctx, ctxInternalTokenCrew, crew)
+	}
+
+	t.Run("crew_bound_token_own_crew_allowed", func(t *testing.T) {
+		body := strings.NewReader(`{"crew_id":"` + ownCrew + `","name":"Bot1","slug":"bot1"}`)
+		req := httptest.NewRequest(http.MethodPost, "/?workspace_id="+wsID, body).WithContext(boundCtx(ownCrew))
+		w := httptest.NewRecorder()
+		h.CreateAgent(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("crew_bound_token_sibling_crew_403", func(t *testing.T) {
+		body := strings.NewReader(`{"crew_id":"` + siblingCrew + `","name":"Bot2","slug":"bot2"}`)
+		req := httptest.NewRequest(http.MethodPost, "/?workspace_id="+wsID, body).WithContext(boundCtx(ownCrew))
+		w := httptest.NewRecorder()
+		h.CreateAgent(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403 (crew-bound token hiring into a sibling crew); body=%s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("master_token_any_crew_still_allowed", func(t *testing.T) {
+		// No binding in context (host-side/master-token caller) — unaffected,
+		// still workspace-wide by design.
+		body := strings.NewReader(`{"crew_id":"` + siblingCrew + `","name":"Bot3","slug":"bot3"}`)
+		req := httptest.NewRequest(http.MethodPost, "/?workspace_id="+wsID, body)
+		w := httptest.NewRecorder()
+		h.CreateAgent(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want 201 (unbound caller stays workspace-wide); body=%s", w.Code, w.Body.String())
+		}
+	})
+}
+
 func TestInternalListCrewConnections(t *testing.T) {
 	setTestEncryptionKey(t)
 	db := setupTestDB(t)
