@@ -284,6 +284,17 @@ const maxFailureRunIDSample = 100
 // pull only the most-recent maxFailureRunIDSample run IDs (a windowed query)
 // rather than accumulating every id in memory. Both steps resolve through
 // idx_pipeline_runs_failure_groups (migration v127).
+//
+// Runs are joined against pipelines and excluded once their pipeline is
+// soft-deleted (pipelines.deleted_at IS NOT NULL). `pipelines.Delete` (used
+// by `crewship nuke`) only soft-deletes — pipeline_runs rows are kept for
+// audit/replay — so on a long-lived workspace that gets nuked+reseeded
+// repeatedly, failed runs from a prior, now-deleted pipeline incarnation
+// would otherwise pile up in this workspace-wide aggregate forever and never
+// reflect the current cycle (crewship#1201). `ListRuns` (`routine runs`)
+// already gets this for free since it resolves the pipeline by slug first
+// (GetBySlug excludes soft-deleted rows) — this brings `routine errors` to
+// the same "current pipelines only" semantics.
 func (s *RunStore) FailureGroups(ctx context.Context, workspaceID string, limit int) ([]FailureGroup, error) {
 	const maxFailureGroups = 200
 	if limit <= 0 || limit > maxFailureGroups {
@@ -297,16 +308,18 @@ func (s *RunStore) FailureGroups(ctx context.Context, workspaceID string, limit 
 	// MAX(started_at) — i.e. the newest run in the group — which is exactly
 	// the representative sample we want for the view.
 	rows, err := s.db.QueryContext(ctx, `
-SELECT error_fingerprint,
+SELECT pr.error_fingerprint,
        COUNT(*) AS cnt,
-       COALESCE(pipeline_slug,''),
-       COALESCE(failed_at_step,''),
-       COALESCE(error_message,''),
-       MAX(started_at)
-FROM pipeline_runs
-WHERE workspace_id = ? AND status = 'failed' AND error_fingerprint IS NOT NULL
-GROUP BY error_fingerprint
-ORDER BY MAX(started_at) DESC
+       COALESCE(pr.pipeline_slug,''),
+       COALESCE(pr.failed_at_step,''),
+       COALESCE(pr.error_message,''),
+       MAX(pr.started_at)
+FROM pipeline_runs pr
+JOIN pipelines p ON p.id = pr.pipeline_id
+WHERE pr.workspace_id = ? AND pr.status = 'failed' AND pr.error_fingerprint IS NOT NULL
+  AND p.deleted_at IS NULL
+GROUP BY pr.error_fingerprint
+ORDER BY MAX(pr.started_at) DESC
 LIMIT ?`, workspaceID, limit)
 	if err != nil {
 		return nil, err
@@ -346,12 +359,16 @@ LIMIT ?`, workspaceID, limit)
 
 // sampleFailureRunIDs returns at most n most-recent failed run IDs for one
 // fingerprint in a workspace. Used by FailureGroups so the run-id sample is
-// bounded per group rather than accumulating every failed run's id.
+// bounded per group rather than accumulating every failed run's id. Joined
+// against pipelines with the same deleted_at IS NULL guard as FailureGroups
+// so a bulk-replay never targets runs from a pipeline that no longer exists.
 func (s *RunStore) sampleFailureRunIDs(ctx context.Context, workspaceID, fingerprint string, n int) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id FROM pipeline_runs
-WHERE workspace_id = ? AND status = 'failed' AND error_fingerprint = ?
-ORDER BY started_at DESC
+SELECT pr.id FROM pipeline_runs pr
+JOIN pipelines p ON p.id = pr.pipeline_id
+WHERE pr.workspace_id = ? AND pr.status = 'failed' AND pr.error_fingerprint = ?
+  AND p.deleted_at IS NULL
+ORDER BY pr.started_at DESC
 LIMIT ?`, workspaceID, fingerprint, n)
 	if err != nil {
 		return nil, err
