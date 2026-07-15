@@ -163,6 +163,14 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "name and crew_id are required")
 		return
 	}
+	// #1186: a crew-bound (crwv1) sidecar token could otherwise hire an
+	// agent into any sibling crew in the same workspace by naming it here
+	// — this route never consulted the token's crew binding at all. No-op
+	// for workspace-bound/master-token callers (unaffected, still
+	// workspace-wide by design).
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.CrewID) {
+		return
+	}
 	if body.Slug == "" {
 		body.Slug = slugify(body.Name)
 	} else {
