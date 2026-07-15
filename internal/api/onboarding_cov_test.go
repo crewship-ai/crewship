@@ -167,7 +167,7 @@ func TestCovOnbSetup_SingleAgentSuccess(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201, body=%s", w.Code, w.Body.String())
 	}
-	// preferred_language was persisted before the branch.
+	// preferred_language was persisted after the service-layer guard succeeded.
 	var lang string
 	if err := db.QueryRow("SELECT preferred_language FROM workspaces WHERE id = ?", wsID).Scan(&lang); err != nil {
 		t.Fatalf("read preferred_language: %v", err)
@@ -296,6 +296,61 @@ func TestCovOnbSetup_AlreadyCompletedConflict(t *testing.T) {
 	h.Setup(sw, second)
 	if sw.Code != http.StatusConflict {
 		t.Errorf("second setup status = %d, want 409 (already completed)", sw.Code)
+	}
+}
+
+// ---- #1203: a safely-refused (409) second Setup call must not silently
+//      overwrite preferred_language / telemetry_opt_in ----
+//
+// preferred_language and telemetry_opt_in used to be persisted
+// unconditionally at the top of Setup(), before the onboarding-completed
+// guard runs (service-layer guard for the blank path exercised here). So
+// even though the second call correctly 409s and does nothing else, it
+// still silently clobbered both settings with whatever the second
+// (attacker- or bug-triggered) request happened to carry. This asserts
+// the first call's values survive a rejected second call untouched.
+func TestCovOnbSetup_AlreadyCompletedDoesNotOverwritePrefs(t *testing.T) {
+	withTokenProbeSkipped(t)
+	setTestEncryptionKeyParallelSafe(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	svc := services.NewOnboardingService(db, testLogger(), generateCUID)
+	h := NewOnboardingHandler(db, svc, testLogger())
+
+	first := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(
+		`{"crew_name":"C","agent_name":"A","preferred_language":"Czech","telemetry_opt_in":true}`))
+	first = first.WithContext(withUser(first.Context(), &AuthUser{ID: userID}))
+	fw := httptest.NewRecorder()
+	h.Setup(fw, first)
+	if fw.Code != http.StatusCreated {
+		t.Fatalf("first setup status = %d, body=%s", fw.Code, fw.Body.String())
+	}
+
+	second := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(
+		`{"crew_name":"C2","agent_name":"A2","preferred_language":"French","telemetry_opt_in":false}`))
+	second = second.WithContext(withUser(second.Context(), &AuthUser{ID: userID}))
+	sw := httptest.NewRecorder()
+	h.Setup(sw, second)
+	if sw.Code != http.StatusConflict {
+		t.Fatalf("second setup status = %d, want 409 (already completed), body=%s", sw.Code, sw.Body.String())
+	}
+
+	var lang string
+	if err := db.QueryRow("SELECT preferred_language FROM workspaces WHERE id = ?", wsID).Scan(&lang); err != nil {
+		t.Fatalf("read preferred_language: %v", err)
+	}
+	if lang != "Czech" {
+		t.Errorf("preferred_language = %q after rejected second call, want unchanged %q", lang, "Czech")
+	}
+
+	var telemetryVal string
+	if err := db.QueryRow("SELECT value FROM app_settings WHERE key = 'telemetry_opt_in'").Scan(&telemetryVal); err != nil {
+		t.Fatalf("read telemetry_opt_in: %v", err)
+	}
+	if telemetryVal != "1" {
+		t.Errorf("telemetry_opt_in = %q after rejected second call, want unchanged \"1\"", telemetryVal)
 	}
 }
 
@@ -439,11 +494,11 @@ func TestCovOnbSetupTemplate_AlreadyCompletedConflict(t *testing.T) {
 	setTestEncryptionKeyParallelSafe(t)
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
-	seedTestWorkspace(t, db, userID)
+	wsID := seedTestWorkspace(t, db, userID)
 	h := NewOnboardingHandler(db, nil, testLogger())
 
 	// First submit claims onboarding (and deploys the template).
-	body := `{"crew_template_slug":"research-analysis"}`
+	body := `{"crew_template_slug":"research-analysis","preferred_language":"Czech","telemetry_opt_in":true}`
 	first := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	first = first.WithContext(withUser(first.Context(), &AuthUser{ID: userID}))
 	fw := httptest.NewRecorder()
@@ -452,12 +507,31 @@ func TestCovOnbSetupTemplate_AlreadyCompletedConflict(t *testing.T) {
 		t.Fatalf("first template setup status = %d, body=%s", fw.Code, fw.Body.String())
 	}
 
-	// Second submit hits the CAS guard (rows==0) → 409.
-	second := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	// Second submit hits the CAS guard (rows==0) → 409, and #1203: must
+	// not silently overwrite preferred_language / telemetry_opt_in with
+	// this rejected call's values.
+	secondBody := `{"crew_template_slug":"research-analysis","preferred_language":"French","telemetry_opt_in":false}`
+	second := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(secondBody))
 	second = second.WithContext(withUser(second.Context(), &AuthUser{ID: userID}))
 	sw := httptest.NewRecorder()
 	h.Setup(sw, second)
 	if sw.Code != http.StatusConflict {
 		t.Errorf("second template setup status = %d, want 409 (CAS guard)", sw.Code)
+	}
+
+	var lang string
+	if err := db.QueryRow("SELECT preferred_language FROM workspaces WHERE id = ?", wsID).Scan(&lang); err != nil {
+		t.Fatalf("read preferred_language: %v", err)
+	}
+	if lang != "Czech" {
+		t.Errorf("preferred_language = %q after rejected second template call, want unchanged %q", lang, "Czech")
+	}
+
+	var telemetryVal string
+	if err := db.QueryRow("SELECT value FROM app_settings WHERE key = 'telemetry_opt_in'").Scan(&telemetryVal); err != nil {
+		t.Fatalf("read telemetry_opt_in: %v", err)
+	}
+	if telemetryVal != "1" {
+		t.Errorf("telemetry_opt_in = %q after rejected second template call, want unchanged \"1\"", telemetryVal)
 	}
 }

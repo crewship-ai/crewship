@@ -262,29 +262,15 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Persist preferred_language for both forks (template + blank).
-	// Doing it before the branch means the orchestrator gets the
-	// setting regardless of which crew shape the user picked, and a
-	// failed write here doesn't take down the rest of the flow.
-	if lang := strings.TrimSpace(req.PreferredLanguage); lang != "" {
-		if _, err := h.db.ExecContext(r.Context(),
-			"UPDATE workspaces SET preferred_language = ?, updated_at = ? WHERE id = ?",
-			lang, time.Now().UTC().Format(time.RFC3339), workspaceID); err != nil {
-			h.logger.Warn("set preferred_language", "error", err)
-		}
-	}
-
-	// Persist the explicit telemetry consent answer (when the wizard sent
-	// one) before the branch, like preferred_language — it applies to both
-	// the template and blank forks and a failed write must not take down
-	// onboarding. The running server picks the new value up on its next
-	// crashreport.Init (i.e. next start), same as `crewship telemetry
-	// on|off`.
-	if req.TelemetryOptIn != nil {
-		if _, _, err := crashreport.SetOptIn(r.Context(), h.db, *req.TelemetryOptIn); err != nil {
-			h.logger.Warn("persist onboarding telemetry consent", "error", err)
-		}
-	}
+	// #1203: preferred_language and telemetry_opt_in used to be persisted
+	// here, unconditionally, before either fork's onboarding-completed
+	// guard runs. That meant a "safely refused" (409 already-completed)
+	// setup call still silently overwrote both settings on an
+	// already-onboarded workspace. Persistence now happens in
+	// persistOnboardingPrefs, called by each fork ONLY after its own
+	// guard confirms this is a genuinely new onboarding (see the
+	// service-layer guard for the blank path below, and the CAS guard in
+	// setupFromTemplate).
 
 	// CLI-token-only contract: reject raw API keys with a clear
 	// message that points users at `claude setup-token` etc. The
@@ -379,7 +365,39 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// #1203: only persist once the service's own guard has confirmed this
+	// call actually claimed onboarding (err == nil above rules out the
+	// ErrOnboardingAlreadyCompleted / already-refused case).
+	h.persistOnboardingPrefs(r.Context(), workspaceID, req)
+
 	writeJSON(w, http.StatusCreated, result)
+}
+
+// persistOnboardingPrefs writes preferred_language and telemetry_opt_in
+// from the wizard submission. Both settings are best-effort — a failed
+// write here must not take down (or roll back) an otherwise-successful
+// onboarding — but the CALLER is responsible for only invoking this after
+// its own onboarding-completed guard has confirmed the call actually
+// claimed a genuinely new onboarding (see #1203: these used to run
+// unconditionally before either fork's guard, so a safely-refused 409
+// second call still silently overwrote both settings).
+func (h *OnboardingHandler) persistOnboardingPrefs(ctx context.Context, workspaceID string, req onboardingSetupRequest) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	if lang := strings.TrimSpace(req.PreferredLanguage); lang != "" {
+		if _, err := h.db.ExecContext(ctx,
+			"UPDATE workspaces SET preferred_language = ?, updated_at = ? WHERE id = ?",
+			lang, now, workspaceID); err != nil {
+			h.logger.Warn("set preferred_language", "error", err)
+		}
+	}
+	// The running server picks the new telemetry value up on its next
+	// crashreport.Init (i.e. next start), same as `crewship telemetry
+	// on|off`.
+	if req.TelemetryOptIn != nil {
+		if _, _, err := crashreport.SetOptIn(ctx, h.db, *req.TelemetryOptIn); err != nil {
+			h.logger.Warn("persist onboarding telemetry consent", "error", err)
+		}
+	}
 }
 
 // setupFromTemplate handles the crew-template path of onboarding.
@@ -418,6 +436,11 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// #1203: only persist once the CAS guard above has actually claimed
+	// onboarding for this call (rows != 0) — not on every submission
+	// regardless of outcome.
+	h.persistOnboardingPrefs(r.Context(), workspaceID, req)
+
 	if strings.TrimSpace(req.WorkspaceName) != "" {
 		if _, err := h.db.ExecContext(r.Context(),
 			"UPDATE workspaces SET name = ?, updated_at = ? WHERE id = ?",
@@ -427,8 +450,8 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 			// failed rename doesn't abort the whole onboarding.
 		}
 	}
-	// (preferred_language is set in the parent Setup() before this
-	// fork — applies to both template + blank paths.)
+	// (preferred_language / telemetry_opt_in were persisted just above,
+	// right after the CAS guard succeeded.)
 
 	// Always store the API key when one was provided, regardless of
 	// pairing mode. The CLI token from /pair/redeem authenticates
