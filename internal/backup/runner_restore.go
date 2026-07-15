@@ -284,6 +284,32 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		}
 		if opts.AsCrew != "" && manifest.Scope == ScopeCrew && len(manifest.Contents.Crews) > 0 {
 			rewriteCrewSlug(extracted.DBDump, manifest.Contents.Crews[0].ID, opts.AsCrew)
+			// A crew-scope bundle carries its parent `workspaces` row
+			// purely to satisfy FK columns (crews.workspace_id,
+			// chats.workspace_id, agents.workspace_id, …) — DumpCrew
+			// pulls in exactly the one row matching the crew's
+			// workspace_id. --as-crew forks the CREW under a fresh
+			// slug, but until this rewrite the carried workspace row
+			// kept its ORIGINAL slug. RemapIDs (below) regenerates its
+			// id unconditionally, and workspaces.slug is globally
+			// UNIQUE: on a same-instance restore (the documented,
+			// common case — "crew-scope bundles restore independently
+			// of their parent workspace") the target already has a
+			// workspace row under that same slug, so the freshly
+			// regenerated row collided on INSERT OR IGNORE and was
+			// silently dropped, stranding every workspace_id FK the
+			// crew's rows point at (#1190).
+			//
+			// Forking the workspace's slug alongside the crew's — not
+			// just its id — fixes that AND sidesteps a second-order
+			// collision: agents has UNIQUE(workspace_id, slug), so a
+			// forked crew whose agents kept the ORIGINAL (shared)
+			// workspace_id would still collide against the source
+			// crew's agents of the same slug. Giving the fork its own
+			// dedicated workspace avoids every UNIQUE(workspace_id, …)
+			// collision at once, matching how --as-workspace already
+			// behaves for workspace-scope bundles.
+			rewriteWorkspaceSlug(extracted.DBDump, opts.AsCrew)
 		}
 		// When the admin picked a new slug via --as-* they want the
 		// restored data to live alongside the source. Regenerate every
