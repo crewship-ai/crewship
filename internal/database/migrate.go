@@ -1670,6 +1670,7 @@ END;
 	// table and migrate_v144_datetime_default_tform.go for the mechanism and
 	// the small list of columns intentionally left alone).
 	{version: 144, name: "datetime_now_default_tform", fn: migrationConvertDatetimeNowDefaults},
+	{version: 145, name: "workspace_allow_privileged_credentials", sql: migrationWorkspaceAllowPrivilegedCredentials},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

@@ -317,6 +317,37 @@ func TestWorkspaceUpdate_RunE(t *testing.T) {
 	}
 }
 
+// TestWorkspaceUpdate_AllowPrivilegedCredentialsFlag is issue #1032's CLI
+// parity: --allow-privileged-credentials must map to the JSON body only
+// when explicitly set (cobra Changed()), same as every other update flag.
+func TestWorkspaceUpdate_AllowPrivilegedCredentialsFlag(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	stub.OnPatch("/api/v1/workspaces/"+covWS, clitest.JSONResponse(200, map[string]string{"id": covWS}))
+	setStubCLI(t, stub.URL())
+
+	c := newFlagCmd(map[string]string{"name": "", "slug": "", "language": ""},
+		map[string]bool{"allow-privileged-credentials": false})
+	if err := c.Flags().Set("allow-privileged-credentials", "true"); err != nil {
+		t.Fatal(err)
+	}
+	captureStdoutCovCli2(t, func() {
+		if err := workspaceUpdateCmd.RunE(c, nil); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+
+	calls := stub.CallsFor("PATCH", "/api/v1/workspaces/"+covWS)
+	if len(calls) != 1 {
+		t.Fatalf("PATCH calls = %d, want 1", len(calls))
+	}
+	var body map[string]any
+	clitest.MustDecodeJSONBody(calls[0].Body, &body)
+	if body["allow_privileged_credentials"] != true {
+		t.Errorf("body = %v, want allow_privileged_credentials=true", body)
+	}
+}
+
 func TestWorkspaceMemberList_RunE(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()

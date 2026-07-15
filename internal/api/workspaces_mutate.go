@@ -114,6 +114,8 @@ type updateWorkspaceRequest struct {
 	Name              *string `json:"name"`
 	Slug              *string `json:"slug"`
 	PreferredLanguage *string `json:"preferred_language"`
+	// AllowPrivilegedCredentials (#1032) — see workspaceResponse doc comment.
+	AllowPrivilegedCredentials *bool `json:"allow_privileged_credentials"`
 }
 
 // Update modifies workspace settings such as name, slug, logo, and preferred language.
@@ -181,6 +183,21 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 			ub.Set("preferred_language", *req.PreferredLanguage)
 		}
 	}
+	if req.AllowPrivilegedCredentials != nil {
+		val := 0
+		if *req.AllowPrivilegedCredentials {
+			val = 1
+		}
+		ub.Set("allow_privileged_credentials", val)
+		if *req.AllowPrivilegedCredentials {
+			// #1032: an operator just accepted that a privileged crew's
+			// sidecar CredStore is reachable from any agent in that
+			// container (the UID 1001/1002 boundary is gone under
+			// --privileged) — worth a durable trail, not just a 200 OK.
+			h.logger.Warn("workspace opted in to loading credentials into privileged crews' sidecars (#1032)",
+				"workspace_id", workspaceID)
+		}
+	}
 	if !ub.Empty() {
 		query, args := ub.Build("workspaces", "id = ?", workspaceID)
 		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
@@ -193,13 +210,15 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var ws workspaceResponse
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT w.id, w.name, w.slug, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
+			w.allow_privileged_credentials,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
 		FROM workspaces w
 		WHERE w.id = ? AND w.deleted_at IS NULL
 	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
-		&ws.CreatedAt, &ws.UpdatedAt, &ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
+		&ws.CreatedAt, &ws.UpdatedAt, &ws.AllowPrivilegedCredentials,
+		&ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
 	if err != nil {
 		h.logger.Error("get workspace after update", "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")

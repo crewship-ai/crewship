@@ -201,12 +201,13 @@ var workspaceGetCmd = &cobra.Command{
 		}
 
 		var ws struct {
-			ID                string  `json:"id"`
-			Name              string  `json:"name"`
-			Slug              string  `json:"slug"`
-			CreatedAt         string  `json:"created_at"`
-			LogoURL           *string `json:"logo_url"`
-			PreferredLanguage *string `json:"preferred_language"`
+			ID                         string  `json:"id"`
+			Name                       string  `json:"name"`
+			Slug                       string  `json:"slug"`
+			CreatedAt                  string  `json:"created_at"`
+			LogoURL                    *string `json:"logo_url"`
+			PreferredLanguage          *string `json:"preferred_language"`
+			AllowPrivilegedCredentials bool    `json:"allow_privileged_credentials"`
 		}
 		if err := cli.ReadJSON(resp, &ws); err != nil {
 			return err
@@ -222,6 +223,7 @@ var workspaceGetCmd = &cobra.Command{
 			{"Name", ws.Name},
 			{"Slug", ws.Slug},
 			{"Language", lang},
+			{"Allow privileged credentials", fmt.Sprintf("%t", ws.AllowPrivilegedCredentials)},
 			{"ID", ws.ID},
 			{"Created", ws.CreatedAt},
 		}
@@ -254,6 +256,10 @@ var workspaceUpdateCmd = &cobra.Command{
 		if flags.Changed("language") {
 			v, _ := flags.GetString("language")
 			body["preferred_language"] = v
+		}
+		if flags.Changed("allow-privileged-credentials") {
+			v, _ := flags.GetBool("allow-privileged-credentials")
+			body["allow_privileged_credentials"] = v
 		}
 
 		if len(body) == 0 {
@@ -610,6 +616,8 @@ func init() {
 	workspaceUpdateCmd.Flags().String("name", "", "Workspace name")
 	workspaceUpdateCmd.Flags().String("slug", "", "Workspace slug")
 	workspaceUpdateCmd.Flags().String("language", "", "Preferred language (e.g. cs, en)")
+	workspaceUpdateCmd.Flags().Bool("allow-privileged-credentials", false,
+		"Load credentials into a --privileged crew's sidecar despite the collapsed UID 1001/1002 isolation boundary (#1032, default false — fails closed)")
 
 	workspaceMemberAddCmd.Flags().String("role", "MEMBER", "Role: MEMBER|ADMIN")
 	workspaceMemberRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
