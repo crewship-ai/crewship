@@ -773,3 +773,123 @@ func TestConnectors_Install_MalformedBody(t *testing.T) {
 		t.Errorf("status = %d, want 400", rr.Code)
 	}
 }
+
+// -------------------------------------------------------------------
+// #1207 — connector install/verify were entirely invisible to
+// `crewship audit`. These pin the audit_logs row each now writes.
+// -------------------------------------------------------------------
+
+func TestConnectors_Install_WritesAuditLog(t *testing.T) {
+	h := newSynthHandler(t)
+	db := h.db
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	body := bytes.NewBufferString(`{"name":"My Synth","fields":{"api_key":"sk-real-456"}}`)
+	req := httptest.NewRequest("POST", "/api/v1/connectors/synth-pat/install?workspace_id="+wsID, body)
+	req.SetPathValue("connectorId", "synth-pat")
+	ctx := withUser(req.Context(), &AuthUser{ID: userID})
+	ctx = withWorkspace(ctx, wsID, "MANAGER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	h.Install(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp InstallResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	var count int
+	var uID, wID string
+	if err := db.QueryRow(
+		`SELECT COUNT(*), user_id, workspace_id FROM audit_logs WHERE action = 'connector.install' AND entity_id = ?`,
+		resp.IntegrationID,
+	).Scan(&count, &uID, &wID); err != nil {
+		t.Fatalf("query audit_logs: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("audit_logs rows for connector.install = %d, want 1", count)
+	}
+	if uID != userID {
+		t.Errorf("audit user_id = %q, want %q", uID, userID)
+	}
+	if wID != wsID {
+		t.Errorf("audit workspace_id = %q, want %q", wID, wsID)
+	}
+}
+
+func TestConnectors_Verify_WritesAuditLog(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer fake.Close()
+
+	target, err := url.Parse(fake.URL)
+	if err != nil {
+		t.Fatalf("parse fake URL: %v", err)
+	}
+	restoreVerify := SetVerifyHTTPClientForTesting(&http.Client{
+		Timeout:   5 * time.Second,
+		Transport: &httpsafe.RewriteRoundTripper{Target: target},
+	})
+	defer restoreVerify()
+
+	yaml := `id: ad-hoc-audit
+name: Ad hoc audit
+auth_mode: pat
+brand: {logo: x, color: "#000000"}
+category: testing
+fields:
+  - {key: api_key, label: API Key, type: password, required: true}
+mcp:
+  transport: stdio
+  command: echo
+verify:
+  http:
+    method: GET
+    url: "https://verify.test/me"
+    headers:
+      Authorization: "Bearer ${field.api_key}"
+    expect_status: 200
+`
+	cat, errs := connectors.LoadAll(fstest.MapFS{
+		"fixtures/ad-hoc-audit.yaml": &fstest.MapFile{Data: []byte(yaml)},
+	})
+	if len(errs) != 0 {
+		t.Fatalf("load: %v", errs)
+	}
+
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewConnectorHandlerWithCatalog(db, logger, cat)
+
+	body := bytes.NewBufferString(`{"fields":{"api_key":"sk-test-123"}}`)
+	req := httptest.NewRequest("POST", "/api/v1/connectors/ad-hoc-audit/verify?workspace_id="+wsID, body)
+	req.SetPathValue("connectorId", "ad-hoc-audit")
+	ctx := withUser(req.Context(), &AuthUser{ID: userID})
+	ctx = withWorkspace(ctx, wsID, "MANAGER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	h.Verify(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var count int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM audit_logs WHERE action = 'connector.verify' AND entity_id = 'ad-hoc-audit' AND workspace_id = ?`,
+		wsID,
+	).Scan(&count); err != nil {
+		t.Fatalf("query audit_logs: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("audit_logs rows for connector.verify = %d, want 1", count)
+	}
+}

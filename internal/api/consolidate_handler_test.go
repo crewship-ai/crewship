@@ -18,6 +18,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/consolidate"
 )
@@ -232,5 +233,53 @@ func TestConsolidateRun_AlreadyRunning_RejectsWithClearError(t *testing.T) {
 	}
 	if resp.Error == "" {
 		t.Errorf("error message empty; a 409 must explain the rejection")
+	}
+}
+
+// TestConsolidateRun_EmitsAuditLogOnCompletion covers #1207: six manual
+// `consolidate run` calls in a 24h QA window produced zero audit_logs
+// rows. runOnce's terminal emitCompleted call must now also write a
+// "consolidate.run" audit_logs row, once per run (not per crew).
+func TestConsolidateRun_EmitsAuditLogOnCompletion(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	h := NewConsolidateHandler(db, newTestLogger())
+	h.SetConsolidator(&consolidate.Consolidator{
+		DB:         db,
+		Journal:    noopEmitter{},
+		Summarizer: &stubSummarizer{},
+	})
+	h.SetMemoryRoot(t.TempDir())
+
+	// Drive runOnce directly (synchronous) rather than through Run's
+	// background goroutine, so the audit row is guaranteed to exist by
+	// the time we assert on it.
+	workerID := "test-worker-1207"
+	h.runOnce(context.Background(), wsID, "", 6*time.Hour, workerID)
+
+	var count int
+	var gotWorkspace, metaJSON string
+	if err := db.QueryRow(
+		`SELECT COUNT(*), workspace_id, metadata FROM audit_logs WHERE action = 'consolidate.run' AND entity_id = ? GROUP BY workspace_id, metadata`,
+		workerID,
+	).Scan(&count, &gotWorkspace, &metaJSON); err != nil {
+		t.Fatalf("query audit_logs: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("audit_logs rows for consolidate.run = %d, want 1", count)
+	}
+	if gotWorkspace != wsID {
+		t.Errorf("audit workspace_id = %q, want %q", gotWorkspace, wsID)
+	}
+	var meta struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(metaJSON), &meta); err != nil {
+		t.Fatalf("decode metadata: %v", err)
+	}
+	if meta.Status != "ok" {
+		t.Errorf("metadata status = %q, want ok", meta.Status)
 	}
 }

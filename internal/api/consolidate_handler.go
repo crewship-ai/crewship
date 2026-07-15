@@ -385,4 +385,22 @@ func (h *ConsolidateHandler) emitCompleted(ctx context.Context, workspaceID, cre
 			"rules_appended": rulesAppended,
 		},
 	})
+
+	// #1207: consolidate runs were entirely invisible to `crewship
+	// audit` — six manual `consolidate run` calls in the 24h window
+	// produced zero audit_logs rows. Fires once per run, here at the
+	// single terminal point every runOnce exit path already funnels
+	// through (crew-not-found / crew-lookup-failed / enumerate-failed /
+	// enumerate-partial / ok), matching the once-per-lifecycle-event
+	// granularity of agent.hired / backup.create. journal is nil: the
+	// journal entry above already carries this event with a specific,
+	// typed EntrySystemConsolidationCompleted — passing h.journal here
+	// too would additionally dual-write a second, generic
+	// audit.entity_updated entry for the same completion.
+	WriteAuditLog(ctx, h.db, nil, "consolidate.run", "consolidation", workerID, "", workspaceID, map[string]interface{}{
+		"crew_id":        crewID,
+		"status":         status,
+		"crews_run":      crewsRun,
+		"rules_appended": rulesAppended,
+	})
 }
