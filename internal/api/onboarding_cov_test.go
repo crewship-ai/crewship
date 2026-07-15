@@ -300,7 +300,8 @@ func TestCovOnbSetup_AlreadyCompletedConflict(t *testing.T) {
 }
 
 // ---- #1203: a safely-refused (409) second Setup call must not silently
-//      overwrite preferred_language / telemetry_opt_in ----
+//
+//	overwrite preferred_language / telemetry_opt_in ----
 //
 // preferred_language and telemetry_opt_in used to be persisted
 // unconditionally at the top of Setup(), before the onboarding-completed
