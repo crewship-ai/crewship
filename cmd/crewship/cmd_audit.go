@@ -229,13 +229,14 @@ func findWorkspaceMemberUserIDByEmail(client *cli.Client, workspaceID, email str
 // filename; for an ID it's the disambiguating suffix — and always prefix
 // with "…" so the value is never mistaken for the whole thing. (#1199)
 func truncateEntityID(s string, max int) string {
-	if len(s) <= max {
+	r := []rune(s)
+	if len(r) <= max {
 		return s
 	}
 	if max <= 1 {
 		return "…"
 	}
-	return "…" + s[len(s)-(max-1):]
+	return "…" + string(r[len(r)-(max-1):])
 }
 
 func init() {

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
@@ -290,5 +291,38 @@ func TestAuditRunE_BadJSON(t *testing.T) {
 
 	if err := auditCmd.RunE(auditCmd, nil); err == nil {
 		t.Error("want decode error; got nil")
+	}
+}
+
+// TestTruncateEntityID_DoesNotSplitUTF8Rune is a CodeRabbit-flagged
+// regression: the original byte-slice truncation could cut a multi-byte
+// UTF-8 code point in half, corrupting output for a backup path containing
+// a Unicode filename.
+func TestTruncateEntityID_DoesNotSplitUTF8Rune(t *testing.T) {
+	// "日本語ファイル名バックアップ" is 14 runes, each 3 bytes in UTF-8 (42
+	// bytes total) — byte-slicing at any offset not a multiple of 3 would
+	// split a rune and produce invalid UTF-8 / mojibake.
+	s := "日本語ファイル名バックアップ"
+	got := truncateEntityID(s, 5)
+	if !strings.HasPrefix(got, "…") {
+		t.Fatalf("truncated value should start with an ellipsis marker; got %q", got)
+	}
+	if !utf8.ValidString(got) {
+		t.Errorf("truncateEntityID produced invalid UTF-8: %q", got)
+	}
+	wantSuffix := string([]rune(s)[len([]rune(s))-4:]) // max=5 keeps 4 runes after the marker
+	if !strings.HasSuffix(got, wantSuffix) {
+		t.Errorf("truncateEntityID(%q, 5) = %q, want suffix %q (rune-aligned)", s, got, wantSuffix)
+	}
+}
+
+func TestTruncateEntityID_ASCIIUnchanged(t *testing.T) {
+	if got := truncateEntityID("short", 32); got != "short" {
+		t.Errorf("value under max should pass through unchanged; got %q", got)
+	}
+	id := "cmrm3wehi01920379775a"
+	want := "…" + id[len(id)-11:]
+	if got := truncateEntityID(id, 12); got != want {
+		t.Errorf("truncateEntityID(%q, 12) = %q, want %q (tail-kept with ellipsis)", id, got, want)
 	}
 }

@@ -165,7 +165,13 @@ var backupInspectCmd = &cobra.Command{
 // better to show something than error out on a read-only inspect.
 func printBackupInspectHuman(raw json.RawMessage) error {
 	var m backup.Manifest
-	if err := json.Unmarshal(raw, &m); err != nil {
+	// A newer manifest (future FormatVersion, fields this binary doesn't
+	// know about yet) can still unmarshal cleanly into the known subset of
+	// fields — decode success alone doesn't mean the typed summary below
+	// is complete or trustworthy. Check IsCompatible before rendering it;
+	// an incompatible manifest falls back to the raw JSON dump, same as a
+	// genuine decode failure.
+	if err := json.Unmarshal(raw, &m); err != nil || !backup.IsCompatible(m.FormatVersion) {
 		pretty, _ := json.MarshalIndent(raw, "", "  ")
 		fmt.Println(string(pretty))
 		return nil

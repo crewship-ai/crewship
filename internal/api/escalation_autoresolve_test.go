@@ -139,3 +139,53 @@ func TestAgentCred_Add_DoesNotAutoResolveUnrelatedEscalation(t *testing.T) {
 		t.Errorf("escalation status = %q, want PENDING (reason doesn't mention credential name)", status)
 	}
 }
+
+// TestAgentCred_Add_DoesNotAutoResolveOnGenericShortName is a
+// CodeRabbit-flagged security finding: a short, generic credential name
+// (e.g. "api", "key") could whole-word-match a PENDING escalation for a
+// completely unrelated need the same agent happens to also be waiting on,
+// auto-approving the wrong thing. minAutoResolveNameLen guards against this
+// — a credential name below the threshold must never trigger auto-resolve,
+// even when the (coincidental) whole-word match is real.
+func TestAgentCred_Add_DoesNotAutoResolveOnGenericShortName(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	agentID, credID := "agent-1", "cred-1"
+	if _, err := db.Exec(`INSERT INTO agents (id, workspace_id, name, slug) VALUES (?, ?, 'A', 'a')`, agentID, wsID); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	shortName := "api" // 3 chars, well under minAutoResolveNameLen
+	seedCredentialEnc(t, db, wsID, userID, credID, shortName, "v")
+	h := newAgentHandlerForCred(t, db)
+
+	crewID, chatID := "crew-1", "chat-1"
+	now := time.Now().UTC().Format(time.RFC3339)
+	escID := "esc-generic-name"
+	if _, err := db.Exec(`INSERT INTO escalations(id,workspace_id,crew_id,chat_id,from_agent_id,reason,status,created_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)`,
+		escID, wsID, crewID, chatID, agentID,
+		"Need an api key for a totally different, unrelated integration", now); err != nil {
+		t.Fatalf("seed escalation: %v", err)
+	}
+
+	body := bytes.NewBufferString(`{"credential_id":"` + credID + `","env_var_name":"API"}`)
+	req := httptest.NewRequest("POST", "/api/v1/agents/"+agentID+"/credentials", body)
+	req.SetPathValue("agentId", agentID)
+	ctx := withWorkspace(req.Context(), wsID, "OWNER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+	h.AddCredential(rr, req)
+	if rr.Code != 201 {
+		t.Fatalf("AddCredential status = %d, body: %s", rr.Code, rr.Body.String())
+	}
+
+	var status string
+	if err := db.QueryRow(`SELECT status FROM escalations WHERE id = ?`, escID).Scan(&status); err != nil {
+		t.Fatalf("query escalation: %v", err)
+	}
+	if status != "PENDING" {
+		t.Errorf("escalation status = %q, want PENDING (credential name %q is too generic to safely auto-resolve)", status, shortName)
+	}
+}

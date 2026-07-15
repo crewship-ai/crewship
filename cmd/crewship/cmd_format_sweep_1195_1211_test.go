@@ -207,6 +207,38 @@ func TestBackupInspectRunE_FormatTableRendersHuman(t *testing.T) {
 	}
 }
 
+// TestBackupInspectRunE_IncompatibleFormatVersionFallsBackToRawJSON is a
+// CodeRabbit-flagged regression: a manifest from a newer/older-than-supported
+// FormatVersion still unmarshals cleanly (unknown fields are ignored, known
+// fields default their zero value) — decode success alone isn't proof the
+// typed human summary would be complete or trustworthy. -f table must fall
+// back to the raw JSON dump for an incompatible version, same as a genuine
+// decode failure, rather than rendering a summary with silently-missing data.
+func TestBackupInspectRunE_IncompatibleFormatVersionFallsBackToRawJSON(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli8(t, stub.URL())
+	origFormat := flagFormat
+	flagFormat = "table"
+	t.Cleanup(func() { flagFormat = origFormat })
+	stub.OnGet("/api/v1/admin/backups/inspect", clitest.JSONResponse(200, map[string]any{
+		"format_version": 99, // newer than backup.FormatVersion — must not render as a trustworthy summary
+		"scope":          "workspace",
+	}))
+
+	out := covCaptureStdoutCli8(t, func() {
+		if err := backupInspectCmd.RunE(backupInspectCmd, []string{"/tmp/b.tar.zst"}); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+	if !strings.Contains(out, `"format_version"`) {
+		t.Errorf("incompatible format_version=99 must fall back to raw JSON dump, not a typed summary; got:\n%s", out)
+	}
+	if strings.Contains(out, "Format version") {
+		t.Errorf("incompatible manifest must not render the human summary header; got:\n%s", out)
+	}
+}
+
 func TestBackupInspectRunE_FormatYAML(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
@@ -364,7 +396,9 @@ func TestIssueListRunE_YAMLFieldNamesMatchJSON(t *testing.T) {
 
 func TestInboxListRunE_YAMLFieldNamesMatchJSON(t *testing.T) {
 	stub := covSetupCli5(t)
+	origFormat := flagFormat
 	flagFormat = "yaml"
+	t.Cleanup(func() { flagFormat = origFormat })
 	stub.OnGet("/api/v1/inbox", clitest.JSONResponse(200, covInboxRows()))
 
 	var err error
