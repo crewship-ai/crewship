@@ -630,10 +630,25 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				// never actually stale. Bounded to ~2s; falls through to
 				// startSidecar regardless (best-effort, matches the existing
 				// `|| true` fail-open style below).
+				//
+				// The pattern is anchored with `^` — this whole command runs
+				// as `sh -c "<script>"`, and that wrapping shell's OWN
+				// /proc/<pid>/cmdline contains the literal substring
+				// "crewship-sidecar" (it's part of the script text passed to
+				// -c). An UNANCHORED `pkill -f crewship-sidecar` matches that
+				// substring anywhere in a process's command line — including
+				// its own parent shell — so it self-SIGTERMs before ever
+				// reaching the wait loop (verified live: exit code 143, i.e.
+				// killed by signal, with zero loop iterations run). The real
+				// sidecar is launched as the bare command `crewship-sidecar
+				// --addr 127.0.0.1:9119` (exec_sidecar.go's startSidecar), so
+				// its cmdline STARTS WITH the pattern; the wrapping shell's
+				// never does (it starts with "sh"). `^` excludes exactly the
+				// self-match case while still catching the real target.
 				_ = o.execPreflight(ctx, provider.ExecConfig{
 					ContainerID: req.ContainerID,
 					Cmd: []string{"sh", "-c",
-						"pkill -f crewship-sidecar 2>/dev/null; i=0; while [ $i -lt 20 ]; do pkill -0 -f crewship-sidecar 2>/dev/null || exit 0; sleep 0.1; i=$((i+1)); done; exit 0"},
+						`pkill -f '^crewship-sidecar' 2>/dev/null; i=0; while [ $i -lt 20 ]; do pkill -0 -f '^crewship-sidecar' 2>/dev/null || exit 0; sleep 0.1; i=$((i+1)); done; exit 0`},
 					User: "0:0",
 					// Killing the stale sidecar to reset the network policy
 					// legitimately needs root; #1158 opt-in (see ExecConfig).

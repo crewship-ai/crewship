@@ -78,6 +78,12 @@ type Proxy struct {
 	billingMode  string // "metered" | "flat_rate" | "" — set from env at startup
 	subPlan      string // human label for flat-rate (e.g. "Anthropic Max 20×")
 	buildHash    string // #1008: content hash of the running sidecar binary, advertised on /health
+	// policyDomainsHash (#1160) is a hash of ONLY the per-crew policy
+	// domains (restricted mode's cfg.NetworkPolicy.AllowedDomains), NEVER
+	// the DefaultAllowedDomains merged into `allowlist` — see the doc
+	// comment in server.go's NewServer for why the distinction matters.
+	// Advertised on /health as domains_hash.
+	policyDomainsHash string
 
 	// dnsCache, dnsResolve, and dialer back the shared resolve-then-pin SSRF
 	// dialer (#961, cache added #1081). ONE instance lives on the Proxy and is
@@ -122,25 +128,30 @@ type ProxyConfig struct {
 	// /health so the server can detect a container serving a STALE sidecar
 	// after a redeploy (#1008). Empty = unknown (server never false-alarms).
 	BuildHash string
+	// PolicyDomainsHash (#1160) is a hash of ONLY the per-crew policy
+	// domains — see the Proxy field doc comment. Empty is a valid value
+	// (free mode, or restricted with an empty allowlist).
+	PolicyDomainsHash string
 }
 
 // NewProxy creates a forward proxy with credential injection.
 func NewProxy(cfg ProxyConfig) *Proxy {
 	p := &Proxy{
-		credStore:    cfg.CredStore,
-		allowlist:    cfg.Allowlist,
-		scrubber:     cfg.Scrubber,
-		logger:       cfg.Logger,
-		freeMode:     cfg.FreeMode,
-		allowPrivate: cfg.AllowPrivate,
-		onEgress:     cfg.OnEgress,
-		onLLMCall:    cfg.OnLLMCall,
-		billingMode:  cfg.BillingMode,
-		subPlan:      cfg.SubscriptionPlan,
-		buildHash:    cfg.BuildHash,
-		dnsCache:     newDNSPositiveCache(ssrfDNSCacheTTL),
-		dnsResolve:   net.DefaultResolver.LookupIPAddr,
-		dialer:       &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second},
+		credStore:         cfg.CredStore,
+		allowlist:         cfg.Allowlist,
+		scrubber:          cfg.Scrubber,
+		logger:            cfg.Logger,
+		freeMode:          cfg.FreeMode,
+		allowPrivate:      cfg.AllowPrivate,
+		onEgress:          cfg.OnEgress,
+		onLLMCall:         cfg.OnLLMCall,
+		billingMode:       cfg.BillingMode,
+		subPlan:           cfg.SubscriptionPlan,
+		buildHash:         cfg.BuildHash,
+		policyDomainsHash: cfg.PolicyDomainsHash,
+		dnsCache:          newDNSPositiveCache(ssrfDNSCacheTTL),
+		dnsResolve:        net.DefaultResolver.LookupIPAddr,
+		dialer:            &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second},
 	}
 	p.transport = &http.Transport{
 		// #961: resolve-then-pin SSRF guard. The allowlist matches a
@@ -512,7 +523,7 @@ func (p *Proxy) handleLocal(w http.ResponseWriter, r *http.Request) {
 			p.credStore.Count(ProviderGoogle),
 			networkMode,
 			p.buildHash,
-			p.allowlist.Hash(),
+			p.policyDomainsHash,
 		)
 	case strings.HasPrefix(r.URL.Path, "/openai/"):
 		// #1030: reverse-proxy to api.openai.com. Codex points
