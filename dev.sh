@@ -68,6 +68,17 @@ guard_log_size() {
   disown 2>/dev/null || true
 }
 
+preserve_crash_log() {
+  # A truncating `> "$log"` redirect on every start/restart destroys the
+  # very evidence needed to diagnose why the previous run died — hit this
+  # 2026-07-15 when the reconciler auto-restarted a crashed slot and the
+  # crash reason was gone by the time anyone looked. Single bounded
+  # rotation (mv, not copy — instant regardless of size) keeps exactly
+  # one prior run's output around, no unbounded accumulation.
+  local f="$1"
+  [[ -s "$f" ]] && mv -f "$f" "${f}.prev"
+}
+
 is_running() {
   local pid_file="$1"
   if [[ -f "$pid_file" ]]; then
@@ -316,6 +327,7 @@ start_go() {
 
   log "Starting crewship on :$GO_PORT..."
   mkdir -p "$DATA_DIR" "$LOG_PATH" "$STATE_DIR"
+  preserve_crash_log "$GO_LOG"
 
   ensure_web_build_fresh || return 1
 
@@ -408,6 +420,7 @@ start_next() {
   fi
 
   log "Starting Next.js on :$NEXT_PORT..."
+  preserve_crash_log "$NEXT_LOG"
 
   (
     cd "$PROJECT_DIR"
@@ -747,7 +760,7 @@ cmd_nuke() {
   fi
 
   # 5. Remove log files
-  rm -f "$GO_LOG" "$NEXT_LOG"
+  rm -f "$GO_LOG" "$NEXT_LOG" "${GO_LOG}.prev" "${NEXT_LOG}.prev"
   rm -f "$GO_PID_FILE" "$NEXT_PID_FILE"
   ok "Logs and PID files cleaned"
 
