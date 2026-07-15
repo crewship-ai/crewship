@@ -271,15 +271,15 @@ func (h *ConnectorHandler) Verify(w http.ResponseWriter, r *http.Request) {
 	// is — manifests without a verify block accept the credentials at
 	// face value; install will still surface auth errors at first MCP
 	// call.
+	var ok bool
+	var msg string
 	switch {
 	case m.Verify == nil:
-		writeJSON(w, http.StatusOK, VerifyResponse{OK: true})
+		ok = true
 	case m.Verify.HTTP != nil:
-		ok, msg := h.probeVerifyHTTP(r.Context(), m, req.Fields)
-		writeJSON(w, http.StatusOK, VerifyResponse{OK: ok, Message: msg})
+		ok, msg = h.probeVerifyHTTP(r.Context(), m, req.Fields)
 	case m.Verify.SQL != nil:
-		ok, msg := h.probeVerifySQL(r.Context(), m, req.Fields)
-		writeJSON(w, http.StatusOK, VerifyResponse{OK: ok, Message: msg})
+		ok, msg = h.probeVerifySQL(r.Context(), m, req.Fields)
 	default:
 		// m.Verify.MCPMethod != "" — KNOWN GAP, tracked in
 		// crewship-ai/crewship#1204. Spinning up the connector's MCP
@@ -293,8 +293,24 @@ func (h *ConnectorHandler) Verify(w http.ResponseWriter, r *http.Request) {
 		// pat/conn_string manifest that sets mcp_method instead of
 		// http/sql would silently get the same false-positive this
 		// issue reported for Slack/Postgres. Prefer http or sql.
-		writeJSON(w, http.StatusOK, VerifyResponse{OK: true})
+		ok = true
 	}
+
+	// #1207: connector verify attempts were entirely invisible to
+	// `crewship audit` — wire in the same WriteAuditLog call every other
+	// audited mutation uses. journal is nil here (no h.journal wiring on
+	// this handler yet): the audit_logs row is what closes the gap, and
+	// skipping the journal dual-write avoids inventing a new, unreviewed
+	// Crow's Nest entry type for this call. user is guaranteed non-nil by
+	// the UserFromContext check at the top of this handler.
+	user := UserFromContext(r.Context())
+	WriteAuditLog(r.Context(), h.db, nil, "connector.verify", "connector", id, user.ID, WorkspaceIDFromContext(r.Context()), map[string]interface{}{
+		"connector_name": m.Name,
+		"auth_mode":      string(m.AuthMode),
+		"ok":             ok,
+	})
+
+	writeJSON(w, http.StatusOK, VerifyResponse{OK: ok, Message: msg})
 }
 
 // probeVerifyHTTP runs Verify.HTTP against the provider with the
@@ -566,6 +582,17 @@ func (h *ConnectorHandler) Install(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
+
+	// #1207: connector installs were entirely invisible to `crewship
+	// audit` — same call pattern as backup.create/connector.verify.
+	// journal stays nil (see Verify's comment above) so this only adds
+	// the compliance audit_logs row, not a new journal entry type.
+	WriteAuditLog(r.Context(), h.db, nil, "connector.install", "connector", integrationID, user.ID, workspaceID, map[string]interface{}{
+		"connector_id":   id,
+		"connector_name": m.Name,
+		"auth_mode":      string(m.AuthMode),
+		"display_name":   displayName,
+	})
 
 	resp := InstallResponse{IntegrationID: integrationID}
 	switch m.AuthMode {

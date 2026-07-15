@@ -312,6 +312,12 @@ type Orchestrator struct {
 	// the same append-only stream as everything else.
 	journal JournalEmitter
 
+	// auditLog is the compliance audit-log recorder. Nil-safe: SetAuditLog
+	// replaces it with a no-op. Used to record one agent.run.* row per
+	// terminal run outcome (completed/error/cancelled) so `crewship audit`
+	// surfaces agent-run activity (#1207) — previously invisible to it.
+	auditLog AuditEmitter
+
 	// hooks + approvalGate + episodicRecall are optional integration
 	// points. Each is nil-safe: callers always exercise them through the
 	// getter helpers which fall back to no-ops. SetHooksDispatcher /
@@ -835,6 +841,46 @@ type noopJournal struct{}
 
 func (noopJournal) Emit(_ context.Context, _ JournalEntry) (string, error) {
 	return "", nil
+}
+
+// AuditEmitter is a narrow interface the orchestrator uses to record
+// compliance audit-log rows without importing internal/api — same
+// import-cycle rationale as JournalEmitter above (internal/api imports
+// internal/orchestrator, so orchestrator can't import api back).
+type AuditEmitter interface {
+	RecordAudit(ctx context.Context, action, entityType, entityID, userID, workspaceID string, metadata map[string]any)
+}
+
+// SetAuditLog wires the audit-log recorder. nil is accepted and swapped
+// with a no-op so call sites never need to nil-check. Called by
+// server.New alongside SetJournal.
+func (o *Orchestrator) SetAuditLog(a AuditEmitter) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if a == nil {
+		o.auditLog = noopAudit{}
+		return
+	}
+	o.auditLog = a
+}
+
+// getAuditLog returns the configured recorder or a no-op. Safe under
+// concurrent reads because SetAuditLog holds mu.Lock and readers use
+// mu.RLock via this helper.
+func (o *Orchestrator) getAuditLog() AuditEmitter {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.auditLog == nil {
+		return noopAudit{}
+	}
+	return o.auditLog
+}
+
+// noopAudit is the fallback used in tests and pre-wiring code paths so
+// RecordAudit calls never panic and never need an `if a != nil` guard.
+type noopAudit struct{}
+
+func (noopAudit) RecordAudit(context.Context, string, string, string, string, string, map[string]any) {
 }
 
 // truncateStr clips a string to n runes with an ellipsis, used for

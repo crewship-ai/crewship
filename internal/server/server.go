@@ -438,6 +438,15 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		// orchestrator package stays independent of internal/journal.
 		orch.SetJournal(newOrchestratorJournalAdapter(s.journalWriter))
 
+		// Wire the audit-log recorder into the orchestrator so a run that
+		// reaches a terminal state (completed/error/cancelled) writes an
+		// agent.run.* row to audit_logs (#1207) — previously agent-run
+		// activity was entirely invisible to `crewship audit`. The adapter
+		// bridges the orchestrator's narrow AuditEmitter interface to
+		// api.WriteAuditLog so the orchestrator package stays independent
+		// of internal/api.
+		orch.SetAuditLog(newOrchestratorAuditAdapter(deps.DB))
+
 		// Wire the journal into the stats collector so Crow's Nest's
 		// resource sparklines and replay view get container.metrics rows
 		// every 30s (or sooner on >10pp CPU/RAM swings). Live WebSocket
