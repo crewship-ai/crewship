@@ -268,6 +268,14 @@ func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
 	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
 		return
 	}
+	// #1186: invoking_crew_id rides in the body independent of workspace_id —
+	// a crew-bound token could otherwise attribute a run (and any waitpoint
+	// approval card it raises, which shows this as the "From" crew) to a
+	// SIBLING crew in the same workspace. Same guard InternalSave already
+	// applies to author_crew_id below.
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.InvokingCrewID) {
+		return
+	}
 
 	p, err := h.store.GetBySlug(r.Context(), body.WorkspaceID, body.Slug)
 	if errors.Is(err, pipeline.ErrNotFound) {
