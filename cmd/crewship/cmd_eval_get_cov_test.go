@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -158,6 +159,115 @@ func TestEvalRunsRunE_JSONIncludesResultAndMetrics(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("eval runs json missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// TestEvalReplayRunE_FormatJSON guards #1221: `eval replay --format json`
+// used to always print the human "Replay queued: run_id=... status=..."
+// line via a bare fmt.Printf, ignoring --format entirely.
+func TestEvalReplayRunE_FormatJSON(t *testing.T) {
+	s := covStubCli9(t)
+	s.OnPost("/api/v1/eval/replay", clitest.JSONResponse(200, map[string]any{
+		"run_id": "er_replay_1", "status": "queued",
+	}))
+	flagFormat = "json"
+
+	out := covCaptureStdoutCli9(t, func() {
+		if err := evalReplayCmd.RunE(evalReplayCmd, []string{"MIS-42"}); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("--format json stdout is not valid JSON: %v\ngot:\n%s", err, out)
+	}
+	if payload["run_id"] != "er_replay_1" || payload["status"] != "queued" {
+		t.Errorf("payload = %v", payload)
+	}
+	if strings.Contains(out, "Replay queued:") {
+		t.Errorf("--format json must not fall back to the human confirmation line; got:\n%s", out)
+	}
+}
+
+// TestEvalReplayRunE_DefaultStaysHuman confirms the human queue-confirmation
+// text is unchanged when no --format is given.
+func TestEvalReplayRunE_DefaultStaysHuman(t *testing.T) {
+	s := covStubCli9(t)
+	s.OnPost("/api/v1/eval/replay", clitest.JSONResponse(200, map[string]any{
+		"run_id": "er_replay_2", "status": "queued",
+	}))
+
+	out := covCaptureStdoutCli9(t, func() {
+		if err := evalReplayCmd.RunE(evalReplayCmd, []string{"MIS-42"}); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+	if !strings.Contains(out, "Replay queued: run_id=er_replay_2 status=queued") {
+		t.Errorf("human output changed; got:\n%s", out)
+	}
+}
+
+// TestEvalReplayRunE_FormatYAMLFieldNamesMatchJSON guards against the
+// #1211-class bug: --format yaml must use the same snake_case field names
+// as --format json, not yaml.v3's lowercased-fieldname fallback.
+func TestEvalReplayRunE_FormatYAMLFieldNamesMatchJSON(t *testing.T) {
+	s := covStubCli9(t)
+	s.OnPost("/api/v1/eval/replay", clitest.JSONResponse(200, map[string]any{
+		"run_id": "er_replay_3", "status": "queued",
+	}))
+	flagFormat = "yaml"
+
+	out := covCaptureStdoutCli9(t, func() {
+		if err := evalReplayCmd.RunE(evalReplayCmd, []string{"MIS-42"}); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+	if !strings.Contains(out, "run_id: er_replay_3") {
+		t.Errorf("--format yaml must use snake_case run_id, not runid; got:\n%s", out)
+	}
+}
+
+// TestEvalRegressionRunE_FormatJSON guards #1221 for `eval regression`,
+// which had the same fmt.Printf-only bug as `eval replay`.
+func TestEvalRegressionRunE_FormatJSON(t *testing.T) {
+	s := covStubCli9(t)
+	s.OnPost("/api/v1/eval/regression", clitest.JSONResponse(200, map[string]any{
+		"run_id": "er_regr_1", "status": "queued",
+	}))
+	flagFormat = "json"
+
+	out := covCaptureStdoutCli9(t, func() {
+		if err := evalRegressionCmd.RunE(evalRegressionCmd, []string{"MIS-41", "MIS-42"}); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("--format json stdout is not valid JSON: %v\ngot:\n%s", err, out)
+	}
+	if payload["run_id"] != "er_regr_1" || payload["status"] != "queued" {
+		t.Errorf("payload = %v", payload)
+	}
+	if strings.Contains(out, "Regression queued:") {
+		t.Errorf("--format json must not fall back to the human confirmation line; got:\n%s", out)
+	}
+}
+
+// TestEvalRegressionRunE_DefaultStaysHuman confirms the human queue-
+// confirmation text is unchanged when no --format is given.
+func TestEvalRegressionRunE_DefaultStaysHuman(t *testing.T) {
+	s := covStubCli9(t)
+	s.OnPost("/api/v1/eval/regression", clitest.JSONResponse(200, map[string]any{
+		"run_id": "er_regr_2", "status": "queued",
+	}))
+
+	out := covCaptureStdoutCli9(t, func() {
+		if err := evalRegressionCmd.RunE(evalRegressionCmd, []string{"MIS-41", "MIS-42"}); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+	if !strings.Contains(out, "Regression queued: run_id=er_regr_2 status=queued") {
+		t.Errorf("human output changed; got:\n%s", out)
 	}
 }
 

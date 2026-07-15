@@ -55,14 +55,19 @@ var evalReplayCmd = &cobra.Command{
 		}
 
 		var out struct {
-			RunID  string `json:"run_id"`
-			Status string `json:"status"`
+			RunID  string `json:"run_id" yaml:"run_id"`
+			Status string `json:"status" yaml:"status"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
 		}
-		fmt.Printf("Replay queued: run_id=%s status=%s\n", out.RunID, out.Status)
-		return nil
+		// AutoHuman keeps the queue-confirmation line byte-identical for
+		// table/quiet/default and routes --format json/yaml/ndjson to the
+		// structured payload instead of silently printing the human line
+		// regardless of --format (#1221).
+		return newFormatter().AutoHuman(out, func() {
+			fmt.Printf("Replay queued: run_id=%s status=%s\n", out.RunID, out.Status)
+		})
 	},
 }
 
@@ -92,14 +97,19 @@ var evalRegressionCmd = &cobra.Command{
 		}
 
 		var out struct {
-			RunID  string `json:"run_id"`
-			Status string `json:"status"`
+			RunID  string `json:"run_id" yaml:"run_id"`
+			Status string `json:"status" yaml:"status"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
 		}
-		fmt.Printf("Regression queued: run_id=%s status=%s\n", out.RunID, out.Status)
-		return nil
+		// AutoHuman keeps the queue-confirmation line byte-identical for
+		// table/quiet/default and routes --format json/yaml/ndjson to the
+		// structured payload instead of silently printing the human line
+		// regardless of --format (#1221).
+		return newFormatter().AutoHuman(out, func() {
+			fmt.Printf("Regression queued: run_id=%s status=%s\n", out.RunID, out.Status)
+		})
 	},
 }
 
