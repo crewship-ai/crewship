@@ -228,19 +228,33 @@ var routineWebhooksCreateCmd = &cobra.Command{
 			baseURL = clientBaseURL(client)
 		}
 		publicURL := strings.TrimRight(baseURL, "/") + "/api/v1/webhooks/" + url.PathEscape(w.Token)
-		fmt.Println("Webhook created.")
-		fmt.Printf("  ID:        %s\n", w.ID)
-		fmt.Printf("  Name:      %s\n", w.Name)
-		fmt.Printf("  Routine:   %s\n", routineCell(w.TargetPipelineSlug, w.TargetPipelineVersion))
-		fmt.Printf("  Public URL: %s\n", publicURL)
-		fmt.Printf("  Rate limit: %d / minute\n", w.RateLimitPerMin)
-		if w.SigningSecret != "" {
-			fmt.Println()
-			fmt.Println("== HMAC signing secret (shown once, copy now) ==")
-			fmt.Println(w.SigningSecret)
-			fmt.Println("== Senders MUST include header: X-Crewship-Signature: sha256=<hex_hmac_of_body>")
-		}
-		return nil
+
+		// This used to always print the human block regardless of
+		// --format. Unlike `webhooks list` (which redacts tokens/secrets
+		// on machine output since it can be re-run any time), `create`
+		// is the ONE moment the signing secret exists in plaintext — a
+		// script capturing it via --format json needs the full,
+		// unredacted webhookRow, not a stripped-down view. AutoHuman
+		// keeps the human "shown once, copy now" block byte-identical
+		// for table/quiet/default (#1195).
+		result := struct {
+			webhookRow
+			PublicURL string `json:"public_url"`
+		}{webhookRow: w, PublicURL: publicURL}
+		return newFormatter().AutoHuman(result, func() {
+			fmt.Println("Webhook created.")
+			fmt.Printf("  ID:        %s\n", w.ID)
+			fmt.Printf("  Name:      %s\n", w.Name)
+			fmt.Printf("  Routine:   %s\n", routineCell(w.TargetPipelineSlug, w.TargetPipelineVersion))
+			fmt.Printf("  Public URL: %s\n", publicURL)
+			fmt.Printf("  Rate limit: %d / minute\n", w.RateLimitPerMin)
+			if w.SigningSecret != "" {
+				fmt.Println()
+				fmt.Println("== HMAC signing secret (shown once, copy now) ==")
+				fmt.Println(w.SigningSecret)
+				fmt.Println("== Senders MUST include header: X-Crewship-Signature: sha256=<hex_hmac_of_body>")
+			}
+		})
 	},
 }
 

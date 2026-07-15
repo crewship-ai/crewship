@@ -13,36 +13,41 @@ import (
 
 // ---------- types ----------
 
+// Field tags carry explicit yaml:"..." matching each json:"..." tag —
+// gopkg.in/yaml.v3 does NOT fall back to a json tag when no yaml tag is
+// present, it lowercases the raw Go field name instead (CrewID -> "crewid"
+// rather than "crew_id"). Without the yaml tag, --format yaml and --format
+// json return the same data under different key casing (#1211).
 type issueItem struct {
-	ID           string        `json:"id"`
-	CrewID       string        `json:"crew_id"`
-	CrewName     string        `json:"crew_name"`
-	CrewSlug     string        `json:"crew_slug"`
-	Number       *int          `json:"number"`
-	Identifier   *string       `json:"identifier"`
-	Title        string        `json:"title"`
-	Description  *string       `json:"description"`
-	Status       string        `json:"status"`
-	Priority     string        `json:"priority"`
-	AssigneeType *string       `json:"assignee_type"`
-	AssigneeID   *string       `json:"assignee_id"`
-	AssigneeName *string       `json:"assignee_name"`
-	DueDate      *string       `json:"due_date"`
-	MissionType  string        `json:"mission_type"`
-	CreatedBy    *issueCreator `json:"created_by"`
-	CreatedAt    string        `json:"created_at"`
-	UpdatedAt    string        `json:"updated_at"`
-	Labels       []issueLabel  `json:"labels"`
-	CommentCount int           `json:"comment_count"`
+	ID           string        `json:"id" yaml:"id"`
+	CrewID       string        `json:"crew_id" yaml:"crew_id"`
+	CrewName     string        `json:"crew_name" yaml:"crew_name"`
+	CrewSlug     string        `json:"crew_slug" yaml:"crew_slug"`
+	Number       *int          `json:"number" yaml:"number"`
+	Identifier   *string       `json:"identifier" yaml:"identifier"`
+	Title        string        `json:"title" yaml:"title"`
+	Description  *string       `json:"description" yaml:"description"`
+	Status       string        `json:"status" yaml:"status"`
+	Priority     string        `json:"priority" yaml:"priority"`
+	AssigneeType *string       `json:"assignee_type" yaml:"assignee_type"`
+	AssigneeID   *string       `json:"assignee_id" yaml:"assignee_id"`
+	AssigneeName *string       `json:"assignee_name" yaml:"assignee_name"`
+	DueDate      *string       `json:"due_date" yaml:"due_date"`
+	MissionType  string        `json:"mission_type" yaml:"mission_type"`
+	CreatedBy    *issueCreator `json:"created_by" yaml:"created_by"`
+	CreatedAt    string        `json:"created_at" yaml:"created_at"`
+	UpdatedAt    string        `json:"updated_at" yaml:"updated_at"`
+	Labels       []issueLabel  `json:"labels" yaml:"labels"`
+	CommentCount int           `json:"comment_count" yaml:"comment_count"`
 }
 
 // issueCreator mirrors the API's created_by object: who created the issue —
 // a human ("user") or an agent ("agent"). Nil on legacy issues that predate
 // creator attribution.
 type issueCreator struct {
-	Type string `json:"type"`
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	Type string `json:"type" yaml:"type"`
+	ID   string `json:"id" yaml:"id"`
+	Name string `json:"name" yaml:"name"`
 }
 
 // creatorLabel renders the creator for table output: the resolved name
@@ -63,9 +68,9 @@ func creatorLabel(c *issueCreator) string {
 }
 
 type issueLabel struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Color string `json:"color"`
+	ID    string `json:"id" yaml:"id"`
+	Name  string `json:"name" yaml:"name"`
+	Color string `json:"color" yaml:"color"`
 }
 
 type issueComment struct {

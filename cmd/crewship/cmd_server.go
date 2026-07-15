@@ -43,6 +43,18 @@ Typical setup:
   crewship --profile dev2 crew list # one-off against dev2`,
 }
 
+// serverProfileRow is the machine-format (--format json/yaml/ndjson) shape
+// for `server list`. The human table below prints the same data with color
+// markers and alignment that don't translate to structured output.
+type serverProfileRow struct {
+	Name      string `json:"name"`
+	Server    string `json:"server,omitempty"`
+	Workspace string `json:"workspace,omitempty"`
+	Active    bool   `json:"active"`
+	HasToken  bool   `json:"has_token"`
+	Defined   bool   `json:"defined"`
+}
+
 var serverListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List configured server profiles",
@@ -52,13 +64,15 @@ var serverListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		f := newFormatter()
 		if len(cfg.Servers) == 0 {
-			fmt.Println("No server profiles configured.")
-			fmt.Println("Add one with: crewship server add <name> --server <url>")
-			if cfg.Server != "" {
-				fmt.Printf("\nLegacy single-server target: %s\n", cfg.Server)
-			}
-			return nil
+			return f.AutoHuman([]serverProfileRow{}, func() {
+				fmt.Println("No server profiles configured.")
+				fmt.Println("Add one with: crewship server add <name> --server <url>")
+				if cfg.Server != "" {
+					fmt.Printf("\nLegacy single-server target: %s\n", cfg.Server)
+				}
+			})
 		}
 
 		active, source := cli.ActiveProfileNameWithSource(flagProfile, cfg)
@@ -68,47 +82,65 @@ var serverListCmd = &cobra.Command{
 		}
 		sort.Strings(names)
 
+		rows := make([]serverProfileRow, 0, len(names))
 		for _, n := range names {
 			p := cfg.Servers[n]
-			if p == nil {
-				// A hand-edited `servers: {name: null}` leaves a nil entry —
-				// show it rather than panicking on p.Token/p.Workspace.
-				fmt.Printf("  %s%-12s%s %-44s ws=%-26s %sundefined%s\n",
-					cli.Bold, n, cli.Reset, "(undefined)", "-", cli.Dim, cli.Reset)
-				continue
+			row := serverProfileRow{Name: n, Active: n == active}
+			if p != nil {
+				row.Defined = true
+				row.Server = p.Server
+				row.Workspace = p.Workspace
+				row.HasToken = p.Token != ""
 			}
-			marker := "  "
-			if n == active {
-				// #1210: a directory_profiles cwd match is visually
-				// indistinguishable from the persisted `server use` default
-				// otherwise — tag it "(dir)" so it doesn't look like the
-				// operator's own choice.
-				if source == cli.ProfileSourceDirectory {
-					marker = cli.Green + "*d" + cli.Reset
-				} else {
-					marker = cli.Green + "* " + cli.Reset
+			rows = append(rows, row)
+		}
+
+		// AutoHuman keeps this hand-crafted, colorized listing byte-
+		// identical for table/quiet/default and routes --format
+		// json/yaml/ndjson to the structured rows above instead of
+		// silently rendering the same list regardless of --format (#1195).
+		return f.AutoHuman(rows, func() {
+			for _, n := range names {
+				p := cfg.Servers[n]
+				if p == nil {
+					// A hand-edited `servers: {name: null}` leaves a nil entry —
+					// show it rather than panicking on p.Token/p.Workspace.
+					fmt.Printf("  %s%-12s%s %-44s ws=%-26s %sundefined%s\n",
+						cli.Bold, n, cli.Reset, "(undefined)", "-", cli.Dim, cli.Reset)
+					continue
 				}
+				marker := "  "
+				if n == active {
+					// #1210: a directory_profiles cwd match is visually
+					// indistinguishable from the persisted `server use` default
+					// otherwise — tag it "(dir)" so it doesn't look like the
+					// operator's own choice.
+					if source == cli.ProfileSourceDirectory {
+						marker = cli.Green + "*d" + cli.Reset
+					} else {
+						marker = cli.Green + "* " + cli.Reset
+					}
+				}
+				auth := cli.Dim + "no token" + cli.Reset
+				if p.Token != "" {
+					auth = "token set"
+				}
+				ws := p.Workspace
+				if ws == "" {
+					ws = "-"
+				}
+				fmt.Printf("%s%s%-12s%s %-44s ws=%-26s %s\n",
+					marker, cli.Bold, n, cli.Reset, p.Server, ws, auth)
 			}
-			auth := cli.Dim + "no token" + cli.Reset
-			if p.Token != "" {
-				auth = "token set"
+			if active != "" && cfg.Servers[active] == nil {
+				fmt.Printf("\n%s! active profile %q has no definition%s — run 'crewship server add %s --server <url>'\n",
+					cli.Yellow, active, cli.Reset, active)
 			}
-			ws := p.Workspace
-			if ws == "" {
-				ws = "-"
+			if hint := directoryOverrideHint(cfg, source); hint != "" {
+				fmt.Println()
+				fmt.Println(hint)
 			}
-			fmt.Printf("%s%s%-12s%s %-44s ws=%-26s %s\n",
-				marker, cli.Bold, n, cli.Reset, p.Server, ws, auth)
-		}
-		if active != "" && cfg.Servers[active] == nil {
-			fmt.Printf("\n%s! active profile %q has no definition%s — run 'crewship server add %s --server <url>'\n",
-				cli.Yellow, active, cli.Reset, active)
-		}
-		if hint := directoryOverrideHint(cfg, source); hint != "" {
-			fmt.Println()
-			fmt.Println(hint)
-		}
-		return nil
+		})
 	},
 }
 

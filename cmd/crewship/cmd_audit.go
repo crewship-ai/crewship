@@ -108,15 +108,21 @@ Examples:
 			return err
 		}
 
+		// Field tags carry explicit yaml:"..." matching each json:"..." tag —
+		// gopkg.in/yaml.v3 does NOT fall back to a json tag when no yaml
+		// tag is present, it lowercases the raw Go field name instead
+		// (EntityType -> "entitytype" rather than "entity_type"). Without
+		// the yaml tag, --format yaml and --format json return the same
+		// data under different key casing (#1211).
 		var result struct {
 			Data []struct {
-				ID         string  `json:"id"`
-				Action     string  `json:"action"`
-				EntityType string  `json:"entity_type"`
-				EntityID   *string `json:"entity_id"`
-				UserEmail  *string `json:"user_email"`
-				CreatedAt  string  `json:"created_at"`
-			} `json:"data"`
+				ID         string  `json:"id" yaml:"id"`
+				Action     string  `json:"action" yaml:"action"`
+				EntityType string  `json:"entity_type" yaml:"entity_type"`
+				EntityID   *string `json:"entity_id" yaml:"entity_id"`
+				UserEmail  *string `json:"user_email" yaml:"user_email"`
+				CreatedAt  string  `json:"created_at" yaml:"created_at"`
+			} `json:"data" yaml:"data"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
