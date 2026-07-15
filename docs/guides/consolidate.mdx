@@ -110,7 +110,7 @@ Response shapes:
 
 | Condition | Response |
 |---|---|
-| Run started | `{"triggered": true, "worker_id": "csd_..."}` |
+| Run started | `{"accepted": true, "triggered": true, "worker_id": "csd_..."}` |
 | No summarizer configured | `202 {"accepted": true, "note": "no summarizer configured, skipping"}` |
 | Consolidator not wired (dev/test build) | `503 {"error": "consolidator not configured"}` |
 | Same workspace already running | `409 {"error": "already running"}` |

@@ -113,6 +113,7 @@ func TestConsolidateRun_HappyPath_ReturnsWorkerID(t *testing.T) {
 	}
 	var resp struct {
 		Triggered bool   `json:"triggered"`
+		Accepted  bool   `json:"accepted"`
 		WorkerID  string `json:"worker_id"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
@@ -120,6 +121,15 @@ func TestConsolidateRun_HappyPath_ReturnsWorkerID(t *testing.T) {
 	}
 	if !resp.Triggered {
 		t.Errorf("triggered = false, want true")
+	}
+	// Regression for #1206: a successful trigger must also report
+	// accepted=true. The CLI's `consolidate run --format json` decodes
+	// this field independently of `triggered`, and the table renderer
+	// is being taught to surface it too — a response that omits
+	// "accepted" silently zero-values to false, making a genuinely
+	// successful run look rejected.
+	if !resp.Accepted {
+		t.Errorf("accepted = false, want true (issue #1206: success path must report accepted)")
 	}
 	if resp.WorkerID == "" {
 		t.Errorf("worker_id empty; handler must stamp one")
@@ -175,5 +185,52 @@ func TestConsolidateRun_NonAdmin_Forbidden(t *testing.T) {
 
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want %d (member can't trigger consolidation)", rr.Code, http.StatusForbidden)
+	}
+}
+
+// TestConsolidateRun_AlreadyRunning_RejectsWithClearError covers the one
+// genuine "not accepted" path the handler has: the per-workspace
+// in-flight guard. It must surface as an unambiguous 409 error — not a
+// 202 with accepted:false the way the #1206 bug made every *successful*
+// trigger look. The CLI's cli.CheckError() already turns any non-2xx
+// into a proper error before the accepted/note envelope is ever decoded,
+// so this stays a plain error body rather than adopting the 202
+// accepted/note shape.
+func TestConsolidateRun_AlreadyRunning_RejectsWithClearError(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	h := NewConsolidateHandler(db, newTestLogger())
+	h.SetConsolidator(&consolidate.Consolidator{
+		DB:         db,
+		Journal:    noopEmitter{},
+		Summarizer: &stubSummarizer{},
+	})
+	h.SetMemoryRoot(t.TempDir())
+
+	// Simulate an in-flight run for this workspace directly, rather than
+	// racing a goroutine against the handler.
+	h.mu.Lock()
+	h.running[wsID] = struct{}{}
+	h.mu.Unlock()
+
+	body := bytes.NewBufferString(`{}`)
+	req := httptest.NewRequest("POST", "/api/v1/consolidate/run", body)
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Run(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d (already running)", rr.Code, http.StatusConflict)
+	}
+	var resp struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Error == "" {
+		t.Errorf("error message empty; a 409 must explain the rejection")
 	}
 }
