@@ -418,6 +418,201 @@ verify:
 	}
 }
 
+// -------------------------------------------------------------------
+// verify.http expect_json_field — closes crewship-ai/crewship#1204
+// for Slack: auth.test returns HTTP 200 even for a garbage token, with
+// the real verdict in the JSON body's "ok" field. Before this fix,
+// slack.yaml shipped with no verify block at all (see the shipped
+// manifest's git history), so ConnectorHandler.Verify short-circuited
+// to ok=true for every submitted token, garbage or not.
+// -------------------------------------------------------------------
+
+const synthSlackLikeManifest = `id: synth-slacklike
+name: Synthetic Slack-like
+description: Test PAT connector whose provider returns 200 even for bad tokens
+category: testing
+brand: {logo: synth, color: "#4A154B"}
+auth_mode: pat
+fields:
+  - {key: bot_token, label: Bot Token, type: password, required: true, placeholder: xoxb-...}
+mcp:
+  transport: stdio
+  command: echo
+  args: ["${field.bot_token}"]
+verify:
+  http:
+    method: POST
+    url: "https://verify.test/auth.test"
+    headers:
+      Authorization: "Bearer ${field.bot_token}"
+    expect_status: 200
+    expect_json_field: ok
+`
+
+func newSlackLikeHandler(t *testing.T, fakeBody string) *ConnectorHandler {
+	t.Helper()
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(fakeBody))
+	}))
+	t.Cleanup(fake.Close)
+
+	target, err := url.Parse(fake.URL)
+	if err != nil {
+		t.Fatalf("parse fake URL: %v", err)
+	}
+	restore := SetVerifyHTTPClientForTesting(&http.Client{
+		Timeout:   5 * time.Second,
+		Transport: &httpsafe.RewriteRoundTripper{Target: target},
+	})
+	t.Cleanup(restore)
+
+	cat, errs := connectors.LoadAll(fstest.MapFS{
+		"fixtures/synth-slacklike.yaml": &fstest.MapFile{Data: []byte(synthSlackLikeManifest)},
+	})
+	if len(errs) != 0 {
+		t.Fatalf("load: %v", errs)
+	}
+	setTestEncryptionKeyParallelSafe(t)
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	return NewConnectorHandlerWithCatalog(db, logger, cat)
+}
+
+func TestConnectors_Verify_HTTPBodyField_GarbageTokenRejectedDespite200(t *testing.T) {
+	// The bug, reproduced exactly: HTTP 200 + {"ok": false, ...} must
+	// be ok=false, not the false-positive ok=true the un-fixed code
+	// reported.
+	h := newSlackLikeHandler(t, `{"ok": false, "error": "invalid_auth"}`)
+	userID := seedTestUser(t, h.db)
+	wsID := seedTestWorkspace(t, h.db, userID)
+
+	body := bytes.NewBufferString(`{"fields":{"bot_token":"totally-garbage-not-a-real-token"}}`)
+	req := httptest.NewRequest("POST", "/api/v1/connectors/synth-slacklike/verify?workspace_id="+wsID, body)
+	req.SetPathValue("connectorId", "synth-slacklike")
+	ctx := withUser(req.Context(), &AuthUser{ID: userID})
+	ctx = withWorkspace(ctx, wsID, "MANAGER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	h.Verify(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp VerifyResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rr.Body.String())
+	}
+	if resp.OK {
+		t.Error("expected ok=false for a garbage token even though the provider returned HTTP 200")
+	}
+	if resp.Message == "" || !strings.Contains(resp.Message, "invalid_auth") {
+		t.Errorf("expected message to surface the provider's error, got %q", resp.Message)
+	}
+}
+
+func TestConnectors_Verify_HTTPBodyField_ValidTokenAccepted(t *testing.T) {
+	h := newSlackLikeHandler(t, `{"ok": true, "user": "bot", "team": "acme"}`)
+	userID := seedTestUser(t, h.db)
+	wsID := seedTestWorkspace(t, h.db, userID)
+
+	body := bytes.NewBufferString(`{"fields":{"bot_token":"xoxb-real-looking-token"}}`)
+	req := httptest.NewRequest("POST", "/api/v1/connectors/synth-slacklike/verify?workspace_id="+wsID, body)
+	req.SetPathValue("connectorId", "synth-slacklike")
+	ctx := withUser(req.Context(), &AuthUser{ID: userID})
+	ctx = withWorkspace(ctx, wsID, "MANAGER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	h.Verify(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp VerifyResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rr.Body.String())
+	}
+	if !resp.OK {
+		t.Errorf("expected ok=true for a valid token, message: %s", resp.Message)
+	}
+}
+
+func TestConnectors_Verify_HTTPBodyField_MissingFieldFailsClosed(t *testing.T) {
+	// A response that doesn't even carry the expected field must not
+	// be treated as success — fail closed, not "no evidence of failure
+	// so assume it's fine."
+	h := newSlackLikeHandler(t, `{"user": "bot"}`)
+	userID := seedTestUser(t, h.db)
+	wsID := seedTestWorkspace(t, h.db, userID)
+
+	body := bytes.NewBufferString(`{"fields":{"bot_token":"xoxb-whatever"}}`)
+	req := httptest.NewRequest("POST", "/api/v1/connectors/synth-slacklike/verify?workspace_id="+wsID, body)
+	req.SetPathValue("connectorId", "synth-slacklike")
+	ctx := withUser(req.Context(), &AuthUser{ID: userID})
+	ctx = withWorkspace(ctx, wsID, "MANAGER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	h.Verify(rr, req)
+	var resp VerifyResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rr.Body.String())
+	}
+	if resp.OK {
+		t.Error("expected ok=false when the response body is missing the expected field")
+	}
+}
+
+// TestConnectors_Verify_RealSlackManifest_GarbageTokenRejected exercises
+// the *shipped* slack.yaml fixture end to end, guarding against the
+// manifest and the handler silently drifting apart.
+func TestConnectors_Verify_RealSlackManifest_GarbageTokenRejected(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok": false, "error": "invalid_auth"}`))
+	}))
+	defer fake.Close()
+	target, err := url.Parse(fake.URL)
+	if err != nil {
+		t.Fatalf("parse fake URL: %v", err)
+	}
+	restore := SetVerifyHTTPClientForTesting(&http.Client{
+		Timeout:   5 * time.Second,
+		Transport: &httpsafe.RewriteRoundTripper{Target: target},
+	})
+	defer restore()
+
+	cat, errs := connectors.LoadAll(connectors.FixturesFS)
+	if len(errs) != 0 {
+		t.Fatalf("load real catalog: %v", errs)
+	}
+	setTestEncryptionKeyParallelSafe(t)
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewConnectorHandlerWithCatalog(db, logger, cat)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	body := bytes.NewBufferString(`{"fields":{"bot_token":"totally-garbage-not-a-real-token"}}`)
+	req := httptest.NewRequest("POST", "/api/v1/connectors/slack/verify?workspace_id="+wsID, body)
+	req.SetPathValue("connectorId", "slack")
+	ctx := withUser(req.Context(), &AuthUser{ID: userID})
+	ctx = withWorkspace(ctx, wsID, "MANAGER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	h.Verify(rr, req)
+	var resp VerifyResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rr.Body.String())
+	}
+	if resp.OK {
+		t.Error("expected ok=false for the real slack.yaml manifest with a garbage token — this is the exact #1204 regression")
+	}
+}
+
 func TestConnectors_Verify_MissingRequiredField(t *testing.T) {
 	h := newSynthHandler(t)
 	db := h.db
