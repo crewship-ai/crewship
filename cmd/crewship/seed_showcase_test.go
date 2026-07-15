@@ -7,10 +7,9 @@ package main
 // DSL. Written against the showcase redesign:
 //
 //   - an agentless wake-gate probe (http + transform + code:expr) that
-//     demonstrates token-zero monitoring,
-//   - a wake-gated demo schedule wiring that probe to an agent routine
-//     that only runs when the probe fires,
-//   - a scheduled morning-briefing agent routine,
+//     demonstrates token-zero monitoring (unscheduled — the demo seed
+//     ships no cron schedules; wire one via the CLI/UI to see it fire),
+//   - a morning-briefing agent routine, likewise unscheduled by default,
 //   - a deterministic extraction recipe kept as the recipe-determinism
 //     example (canonical @json final step),
 //   - a multi-agent issue where a LEAD delegates subtasks to two crew
@@ -45,14 +44,6 @@ func parseSeedRoutine(t *testing.T, slug string) *pipeline.DSL {
 	}
 	t.Fatalf("seed routine %q not found — showcase regression", slug)
 	return nil
-}
-
-func seedRoutineSlugSet() map[string]bool {
-	set := make(map[string]bool, len(seeddata.Routines))
-	for _, r := range seeddata.Routines {
-		set[r.Slug] = true
-	}
-	return set
 }
 
 // The token-zero monitoring demo: an agentless probe that fetches a
@@ -93,54 +84,10 @@ func TestSeedShowcase_FeedWatchProbeIsAgentlessTokenZero(t *testing.T) {
 	}
 }
 
-// The wake gate must be wired into the demo schedules: one schedule
-// gates an agent routine behind the agentless probe so the crew only
-// wakes (and only spends tokens) when something changed.
-func TestSeedShowcase_WakeGatedScheduleWiring(t *testing.T) {
-	slugs := seedRoutineSlugSet()
-
-	var wakeGated []demoSchedule
-	for _, s := range demoSchedules {
-		if !slugs[s.TargetSlug] {
-			t.Errorf("schedule %q targets %q which is not a seeded routine", s.Name, s.TargetSlug)
-		}
-		if s.WakeSlug != "" {
-			wakeGated = append(wakeGated, s)
-		}
-	}
-	if len(wakeGated) == 0 {
-		t.Fatal("no wake-gated demo schedule — the token-zero wake-gate demo is missing")
-	}
-	for _, s := range wakeGated {
-		if !slugs[s.WakeSlug] {
-			t.Errorf("schedule %q wake gate %q is not a seeded routine", s.Name, s.WakeSlug)
-			continue
-		}
-		if s.WakeSlug == s.TargetSlug {
-			t.Errorf("schedule %q self-gates (%q) — the API rejects that", s.Name, s.WakeSlug)
-		}
-		// The API refuses non-agentless wake probes; catch it at unit time.
-		probe := parseSeedRoutine(t, s.WakeSlug)
-		if !probe.Agentless {
-			t.Errorf("schedule %q wake gate %q must be agentless", s.Name, s.WakeSlug)
-		}
-		// And the gated target should be worth waking for: an agent routine.
-		target := parseSeedRoutine(t, s.TargetSlug)
-		var hasAgentRun bool
-		for _, st := range target.Steps {
-			if st.Type == pipeline.StepAgentRun {
-				hasAgentRun = true
-			}
-		}
-		if !hasAgentRun {
-			t.Errorf("schedule %q gates %q which has no agent_run step — gate an agent routine so the demo shows saved tokens", s.Name, s.TargetSlug)
-		}
-	}
-}
-
-// The scheduled briefing: an agent routine that summarizes real crew
-// activity (not invented filler) and lands on the rail every morning.
-func TestSeedShowcase_MorningBriefingScheduled(t *testing.T) {
+// morning-briefing must still be a working agent routine even though the
+// demo seed no longer wires it to a cron schedule — it's runnable on
+// demand or scheduled by hand.
+func TestSeedShowcase_MorningBriefingIsAgentRoutine(t *testing.T) {
 	dsl := parseSeedRoutine(t, "morning-briefing")
 	var hasAgentRun bool
 	for _, st := range dsl.Steps {
@@ -150,15 +97,6 @@ func TestSeedShowcase_MorningBriefingScheduled(t *testing.T) {
 	}
 	if !hasAgentRun {
 		t.Fatal("morning-briefing must contain an agent_run step")
-	}
-	var scheduled bool
-	for _, s := range demoSchedules {
-		if s.TargetSlug == "morning-briefing" && s.Enabled {
-			scheduled = true
-		}
-	}
-	if !scheduled {
-		t.Error("morning-briefing must be wired to an enabled demo schedule")
 	}
 }
 
