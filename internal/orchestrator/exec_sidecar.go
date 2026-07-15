@@ -3,12 +3,15 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
@@ -404,6 +407,11 @@ type sidecarHealth struct {
 	// SidecarHash is the content hash of the binary the running sidecar is
 	// executing (#1008). Empty on pre-#1008 sidecars.
 	SidecarHash string `json:"sidecar_hash"`
+	// DomainsHash is a content hash of the running sidecar's CURRENT domain
+	// allowlist (#1160). Empty on pre-#1160 sidecars. Compared against the
+	// desired policy's hash so a restricted-mode crew only restarts its
+	// sidecar when the allowlist actually changed, instead of on every exec.
+	DomainsHash string `json:"domains_hash"`
 	// Stale is set by checkSidecar when SidecarHash differs from the hash of
 	// the sidecar binary currently on disk — i.e. the container is serving an
 	// OLD bind-mounted sidecar after a redeploy. Not part of the wire format.
@@ -456,6 +464,55 @@ func checkSidecar(ctx context.Context, ctr provider.ContainerProvider, container
 		}
 	}
 	return &h
+}
+
+// domainsHash mirrors internal/sidecar.DomainAllowlist.Hash() byte-for-byte
+// (lower-case + dedupe via a set, sort, sha256, hex[:12]) — reimplemented
+// here rather than shared because internal/sidecar imports this package
+// (mission.go), so the reverse import would cycle. Any change to one side
+// MUST be mirrored on the other or #1160's restart-skip silently stops
+// matching and every restricted-mode exec restarts the sidecar again.
+func domainsHash(domains []string) string {
+	set := make(map[string]struct{}, len(domains))
+	for _, d := range domains {
+		set[strings.ToLower(d)] = struct{}{}
+	}
+	sorted := make([]string, 0, len(set))
+	for d := range set {
+		sorted = append(sorted, d)
+	}
+	sort.Strings(sorted)
+	h := sha256.New()
+	for _, d := range sorted {
+		h.Write([]byte(d))
+		h.Write([]byte{'\n'})
+	}
+	return hex.EncodeToString(h.Sum(nil))[:12]
+}
+
+// sidecarNeedsRestart reports whether a shared crew container's already-
+// running sidecar must be killed and relaunched to match the desired
+// network policy (#1160). True on an actual network-mode change. In
+// restricted mode it's true only when the allowlist itself changed since
+// the sidecar started — NOT unconditionally on every exec, which used to
+// turn every other agent's exec in the same shared container into a
+// guaranteed restart of an otherwise-healthy sidecar (the repeated
+// non-deploy-triggered "stale" false positives traced live on dev3 are
+// that restart cycle racing itself). An unknown running hash (a
+// pre-#1160 sidecar that doesn't report domains_hash) can't prove the
+// allowlist is unchanged, so it fails toward the old, safe-but-noisier
+// behaviour rather than risk skipping a genuinely-needed restart.
+func sidecarNeedsRestart(health *sidecarHealth, desiredMode string, desiredDomains []string) bool {
+	if health.NetworkMode != desiredMode {
+		return true
+	}
+	if desiredMode != "restricted" {
+		return false
+	}
+	if health.DomainsHash == "" {
+		return true
+	}
+	return health.DomainsHash != domainsHash(desiredDomains)
 }
 
 // startSidecar launches the crewship-sidecar proxy inside the container.

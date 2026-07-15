@@ -1,7 +1,10 @@
 package sidecar
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -82,6 +85,29 @@ func (al *DomainAllowlist) Add(domain string) {
 	al.mu.Lock()
 	defer al.mu.Unlock()
 	al.domains[strings.ToLower(domain)] = true
+}
+
+// Hash returns a short, deterministic content hash of the current domain
+// set — sorted so member ORDER never affects it (domains are already
+// lower-cased on insert, so case doesn't either). Advertised on /health so
+// the orchestrator (#1160) can tell whether a restricted-mode crew's
+// allowlist actually changed since the sidecar started, instead of
+// restarting it unconditionally on every exec.
+func (al *DomainAllowlist) Hash() string {
+	al.mu.RLock()
+	domains := make([]string, 0, len(al.domains))
+	for d := range al.domains {
+		domains = append(domains, d)
+	}
+	al.mu.RUnlock()
+
+	sort.Strings(domains)
+	h := sha256.New()
+	for _, d := range domains {
+		h.Write([]byte(d))
+		h.Write([]byte{'\n'})
+	}
+	return hex.EncodeToString(h.Sum(nil))[:12]
 }
 
 // stripPort removes the port from a host string, handling IPv6 bracket notation.

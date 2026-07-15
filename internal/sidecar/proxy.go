@@ -506,12 +506,13 @@ func (p *Proxy) handleLocal(w http.ResponseWriter, r *http.Request) {
 			networkMode = "restricted"
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"ok","anthropic_creds":%d,"openai_creds":%d,"google_creds":%d,"network_mode":"%s","sidecar_hash":"%s"}`,
+		fmt.Fprintf(w, `{"status":"ok","anthropic_creds":%d,"openai_creds":%d,"google_creds":%d,"network_mode":"%s","sidecar_hash":"%s","domains_hash":"%s"}`,
 			p.credStore.Count(ProviderAnthropic),
 			p.credStore.Count(ProviderOpenAI),
 			p.credStore.Count(ProviderGoogle),
 			networkMode,
 			p.buildHash,
+			p.allowlist.Hash(),
 		)
 	case strings.HasPrefix(r.URL.Path, "/openai/"):
 		// #1030: reverse-proxy to api.openai.com. Codex points
