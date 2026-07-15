@@ -3,11 +3,19 @@ package quartermaster
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
+
+// ErrRunNotFound is returned by GetRun when no row matches the given id
+// within the caller's workspace. A run that truly doesn't exist and a
+// run that belongs to a different workspace both hit this path — the
+// caller (the API handler) 404s identically for both, so a cross-tenant
+// probe can't distinguish "wrong workspace" from "doesn't exist".
+var ErrRunNotFound = errors.New("quartermaster: run not found")
 
 // RunRecord is the shape the eval_runs handler returns for the list
 // endpoint. One row per replay/regression invocation; a thin index over
@@ -128,6 +136,58 @@ func ListRuns(ctx context.Context, db *sql.DB, workspaceID string, limit int) ([
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// GetRun fetches a single eval run by id, scoped to workspaceID so a
+// cross-tenant id can never be read even if the caller guesses it. This
+// is the single-record analog of ListRuns — same columns, same
+// COALESCE-for-nullable-text treatment, just filtered to one row.
+//
+// The result/signature/total_tokens/total_cost_usd/regressed columns
+// were already being written by UpdateRunStatus (see updateRun in the
+// API handler); this was previously reachable only via ListRuns, which
+// the CLI's `eval runs` truncated to a handful of fields. GetRun is what
+// closes issue #1191's "no way to see what replay/regression found".
+func GetRun(ctx context.Context, db *sql.DB, workspaceID, id string) (RunRecord, error) {
+	if workspaceID == "" {
+		return RunRecord{}, fmt.Errorf("quartermaster: workspace_id required")
+	}
+	if id == "" {
+		return RunRecord{}, fmt.Errorf("quartermaster: id required")
+	}
+	row := db.QueryRowContext(ctx, `SELECT id, workspace_id, kind,
+		COALESCE(mission_id,''), COALESCE(baseline_mission_id,''),
+		COALESCE(candidate_mission_id,''), status, COALESCE(result,''),
+		seed, COALESCE(signature,''), total_tokens, total_cost_usd,
+		regressed, COALESCE(created_by,''), created_at, completed_at
+		FROM eval_runs WHERE id = ? AND workspace_id = ?`, id, workspaceID)
+
+	var r RunRecord
+	var regressedInt int
+	var createdAt string
+	var completedAt sql.NullString
+	if err := row.Scan(
+		&r.ID, &r.WorkspaceID, &r.Kind,
+		&r.MissionID, &r.BaselineMissionID, &r.CandidateMissionID,
+		&r.Status, &r.Result,
+		&r.Seed, &r.Signature, &r.TotalTokens, &r.TotalCostUSD,
+		&regressedInt, &r.CreatedBy, &createdAt, &completedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return RunRecord{}, ErrRunNotFound
+		}
+		return RunRecord{}, fmt.Errorf("quartermaster: get run: %w", err)
+	}
+	r.Regressed = regressedInt != 0
+	if t, err := parseRunTS(createdAt); err == nil {
+		r.CreatedAt = t
+	}
+	if completedAt.Valid {
+		if t, err := parseRunTS(completedAt.String); err == nil {
+			r.CompletedAt = &t
+		}
+	}
+	return r, nil
 }
 
 // parseRunTS accepts the same timestamp forms SQLite writes + the

@@ -15,7 +15,7 @@ Two distinct evaluation surfaces share the `crewship eval` namespace:
 crewship eval <subcommand> [flags]
 ```
 
-Mission-level `replay` and `regression` enqueue work asynchronously and return a `run_id` (poll completion via `crewship eval runs`). The `runs` subcommand itself is a synchronous list query against existing eval runs. Routine-level subcommands all run synchronously and emit results inline.
+Mission-level `replay` and `regression` enqueue work asynchronously and return a `run_id` (poll completion via `crewship eval runs`). The `runs` subcommand itself is a synchronous list query against existing eval runs; `get` fetches one run's full record. Routine-level subcommands all run synchronously and emit results inline.
 
 ## Subcommands
 
@@ -24,6 +24,7 @@ Mission-level `replay` and `regression` enqueue work asynchronously and return a
 | Mission | `replay <mission-id>` | Replay a mission deterministically. |
 | Mission | `regression <baseline-id> <candidate-id>` | Regression-diff two missions. |
 | Mission | `runs` | List recent eval runs. |
+| Mission | `get <run-id>` (alias `show`) | Show one run's full result — verdict/diff summary, seed signature, token/cost totals. |
 | Routine | `scenarios` | Batch-run `eval-*` routines × tier list × N runs, output pass-rate matrix. |
 | Routine | `compare <slug>` | Head-to-head: run one scenario back-to-back on two tiers. |
 | Routine | `baseline save <name>` | Snapshot the current matrix as a regression baseline. |
@@ -98,19 +99,55 @@ er_b2c3d4e5f6071829        regression  MIS-42      MIS-41      completed    2026
 er_c3d4e5f607182930        replay      MIS-43                  failed       2026-04-17T10:30:00Z
 ```
 
-Status progresses `queued` -> `running` -> `completed` | `failed`. For regression runs, the `result` column (visible in JSON output) contains either `no_regression` or `regressed: <delta summary>` like `regressed: tool success -8% cost +22%`.
+Status progresses `queued` -> `running` -> `completed` | `failed`. For regression runs, the `result` field (now included in `--format json`/`yaml`/`ndjson`, not just the table) contains either `no_regression` or `regressed: <delta summary>` like `regressed: tool success -8% cost +22%`. The table view stays scannable (six columns); use `eval get <id>` for one run's full record.
 
-## Fetch a specific run result
+---
 
-The CLI does not yet expose a dedicated `get` subcommand. For a specific run, query the API:
+## `crewship eval get <run-id>`
+
+Fetch a single run by id and print what it found — the piece `eval runs`' table intentionally leaves out.
 
 ```bash
-# $CREWSHIP_SERVER is the instance URL; pass a CLI token as the bearer.
-curl -H "Authorization: Bearer crewship_cli_xxxxx" \
-  "$CREWSHIP_SERVER/api/v1/eval/runs?limit=200" | jq '.rows[] | select(.id == "er_...")'
+crewship eval get er_a1b2c3d4e5f60718
+crewship eval get er_a1b2c3d4e5f60718 --format json
 ```
 
-Or watch the [Crew Journal](/guides/crew-journal) for `eval.run_started`, `eval.metric`, `eval.regression_detected` entries correlated by the `run_id` in the payload.
+Aliased as `crewship eval show <run-id>`.
+
+Sample output (replay):
+
+```
+Run er_a1b2c3d4e5f60718: COMPLETED (replay)
+Mission: MIS-42
+Seed: 42
+Signature: 7c1b3a9f...
+Tokens: 184251  Cost: $0.8421
+Created: 2026-04-17T10:00:00Z  Completed: 2026-04-17T10:02:41Z
+
+Result:
+  ok
+```
+
+Sample output (regression):
+
+```
+Run er_b2c3d4e5f6071829: COMPLETED (regression)
+Baseline: MIS-41  Candidate: MIS-42
+Regressed: true
+Tokens: 201044  Cost: $0.9133
+Created: 2026-04-17T10:15:00Z
+
+Result:
+  regressed: tool success dropped 8.0% (> 5% threshold); cost rose 22.0% (> 15% threshold)
+```
+
+`--format json`/`yaml`/`ndjson` return the full `quartermaster.RunRecord` — the same shape `eval runs` rows now include (see [Eval API](/api-reference/eval)).
+
+<Note>
+  A run id that doesn't exist, or belongs to another workspace, 404s with
+  the same "eval run not found" message either way — existence isn't
+  leaked cross-tenant.
+</Note>
 
 ---
 

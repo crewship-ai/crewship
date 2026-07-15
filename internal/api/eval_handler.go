@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -312,6 +313,41 @@ func (h *EvalHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		"count": len(runs),
 		"limit": limit,
 	})
+}
+
+// GetRun serves GET /api/v1/eval/runs/{id}. Workspace-scoped: a
+// cross-tenant id 404s exactly like a genuinely missing one, so existence
+// can't be probed cross-tenant.
+//
+// This is the single-record fetch ListRuns never had (#1191): replay and
+// regression both persist their verdict in eval_runs.result (see
+// updateRun below) the moment the background goroutine finishes, but
+// until now the only way to read it back was to page through `eval
+// runs` and pattern-match the id — GetRun returns exactly one row,
+// including the fields (result, signature, total_tokens, total_cost_usd,
+// regressed) the CLI's `eval runs` table never rendered.
+func (h *EvalHandler) GetRun(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		replyError(w, http.StatusUnauthorized, "workspace required")
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		replyError(w, http.StatusBadRequest, "id required")
+		return
+	}
+	run, err := quartermaster.GetRun(r.Context(), h.db, workspaceID, id)
+	if err != nil {
+		if errors.Is(err, quartermaster.ErrRunNotFound) {
+			replyError(w, http.StatusNotFound, "eval run not found")
+			return
+		}
+		h.logger.Error("eval get run", "err", err, "id", id)
+		replyError(w, http.StatusInternalServerError, "get run failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, run)
 }
 
 // updateRun is a thin wrapper around quartermaster.UpdateRunStatus that
