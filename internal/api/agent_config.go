@@ -223,6 +223,21 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 	memoryMB, cpus, ttlHours := h.resolveContainerResources(data)
 
 	mcpServers := h.resolveAgentMCPServers(r, data, agentID)
+	// #1032: resolveAgentMCPServers has its OWN independent credential path
+	// (agent_mcp_bindings.credential_id, decrypted into CredToken) — entirely
+	// separate from the agent_credentials path blockPrivilegedCreds already
+	// covers. That token flows into the orchestrator's MCPServerConfig and
+	// from there into the sidecar's mcp_servers payload, i.e. the exact
+	// sidecar-memory exposure this gate exists to prevent. Strip it here too;
+	// keep the server DEFINITIONS (name/endpoint/transport) so the agent still
+	// sees what integrations exist, just without live credential material.
+	if blockPrivilegedCreds {
+		for i := range mcpServers {
+			mcpServers[i].CredToken = ""
+			mcpServers[i].CredType = ""
+			mcpServers[i].CredHeader = ""
+		}
+	}
 
 	// Auto-resolve credentials from table-based MCP servers' env_json.
 	if len(mcpServers) > 0 {

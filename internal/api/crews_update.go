@@ -263,10 +263,18 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			}
 			ub.Set("runtime_image", *req.RuntimeImage)
 		}
-		// Invalidate cached image when runtime image changes
+		// Invalidate the cached image so the dispatch gate reprovisions.
+		// cached_requirements is deliberately NOT invalidated here (#1032):
+		// resolveAgentConfig's fail-closed credential gate reads it as the
+		// only signal for "is this crew's actual RUNNING container
+		// privileged", and reprovisioning is async — nulling it out
+		// synchronously would open a window where the container is STILL
+		// privileged (unchanged until the rebuild completes) but the gate
+		// reads "unknown" and hands out credentials anyway. The stale value
+		// stays accurate until crew_provisioning_jobs.go's completion
+		// handler overwrites it with the freshly computed one.
 		ub.Set("cached_image", nil)
 		ub.Set("config_hash", nil)
-		ub.Set("cached_requirements", nil)
 	}
 	if req.DevcontainerConfig != nil {
 		if *req.DevcontainerConfig == "" {
@@ -274,10 +282,11 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		} else {
 			ub.Set("devcontainer_config", *req.DevcontainerConfig)
 		}
-		// Invalidate cached image when devcontainer config changes
+		// Invalidate the cached image when devcontainer config changes —
+		// cached_requirements is left alone; see the runtime_image branch
+		// above for why.
 		ub.Set("cached_image", nil)
 		ub.Set("config_hash", nil)
-		ub.Set("cached_requirements", nil)
 	}
 	if req.MiseConfig != nil {
 		if *req.MiseConfig == "" {
@@ -285,10 +294,11 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		} else {
 			ub.Set("mise_config", *req.MiseConfig)
 		}
-		// Invalidate cached image when mise config changes
+		// Invalidate the cached image when mise config changes —
+		// cached_requirements is left alone; see the runtime_image branch
+		// above for why.
 		ub.Set("cached_image", nil)
 		ub.Set("config_hash", nil)
-		ub.Set("cached_requirements", nil)
 	}
 	if req.ServicesJSON != nil {
 		if *req.ServicesJSON == "" {

@@ -3087,6 +3087,53 @@ func TestCrewUpdate_AllFields(t *testing.T) {
 	}
 }
 
+// TestCrewUpdate_MiseConfigEdit_KeepsCachedRequirements is #1032's staleness
+// gap: cached_requirements is the ONLY signal resolveAgentConfig's
+// fail-closed credential gate has for "is this crew's actual RUNNING
+// container privileged". Nulling it out synchronously on an ordinary
+// devcontainer_config/mise_config/runtime_image edit — while re-provisioning
+// (which recomputes it) happens asynchronously in the background — creates a
+// window where the container is STILL privileged but the gate thinks it
+// isn't, and starts handing out credentials to it. cached_image/config_hash
+// (the actual reprovisioning triggers) are the only columns that need
+// invalidating; cached_requirements must be left alone until the
+// provisioning job overwrites it with a freshly-computed value.
+func TestCrewUpdate_MiseConfigEdit_KeepsCachedRequirements(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewCrewHandler(db, newTestLogger())
+	seedCrewRow(t, db, "crew-priv-edit", wsID, "Privileged", "privileged-edit")
+	if _, err := db.Exec(`UPDATE crews SET cached_requirements = '{"privileged":true}' WHERE id = 'crew-priv-edit'`); err != nil {
+		t.Fatalf("seed privileged cached_requirements: %v", err)
+	}
+
+	body := map[string]interface{}{"mise_config": "[tools]\nnode = \"20\""}
+	req := httptest.NewRequest("PATCH", "/api/v1/crews/crew-priv-edit", jsonBody(body))
+	req.SetPathValue("crewId", "crew-priv-edit")
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Update(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("update = %d, body: %s", rr.Code, rr.Body.String())
+	}
+
+	var cachedReqs, cachedImage, configHash sql.NullString
+	if err := db.QueryRow(`SELECT cached_requirements, cached_image, config_hash FROM crews WHERE id = 'crew-priv-edit'`).
+		Scan(&cachedReqs, &cachedImage, &configHash); err != nil {
+		t.Fatalf("query crew: %v", err)
+	}
+	if !cachedReqs.Valid || cachedReqs.String != `{"privileged":true}` {
+		t.Errorf("cached_requirements = %v, want it preserved as {\"privileged\":true} until reprovisioning completes", cachedReqs)
+	}
+	if cachedImage.Valid {
+		t.Errorf("cached_image = %v, want NULL (this IS the reprovisioning trigger)", cachedImage)
+	}
+	if configHash.Valid {
+		t.Errorf("config_hash = %v, want NULL (this IS the reprovisioning trigger)", configHash)
+	}
+}
+
 // Exercise CreateAgentBinding crew-scope path + credential validation branches.
 func TestAgentBinding_CrewScopeAndCreds(t *testing.T) {
 	db := setupTestDB(t)
