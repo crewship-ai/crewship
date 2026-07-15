@@ -200,6 +200,50 @@ func TestCovNewServerRestrictedModeAddsPolicyDomains(t *testing.T) {
 	}
 }
 
+// TestCovNewServerHealthDomainsHash_ExcludesDefaultDomains is #1160: the
+// orchestrator's restart-skip optimization compares /health's domains_hash
+// against a hash it computes over ONLY the per-crew policy domains it asked
+// for (req.AllowedDomains + mcpStdioDomains + …) — it has no way to know
+// about DefaultAllowedDomains (the ~19-domain LLM allowlist merged into
+// EVERY sidecar's operational allowlist server-side). If /health reported a
+// hash of the full merged set instead of just the policy-supplied domains,
+// the two hashes would never match for any real restricted-mode crew,
+// permanently defeating the restart-skip.
+func TestCovNewServerHealthDomainsHash_ExcludesDefaultDomains(t *testing.T) {
+	srv := NewServer(ServerConfig{
+		Addr:   "127.0.0.1:0",
+		Logger: covLogger(),
+		NetworkPolicy: &NetworkPolicyConfig{
+			Mode:           "restricted",
+			AllowedDomains: []string{"custom.example.com"},
+		},
+	})
+
+	req := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
+	req.Host = "localhost:9119"
+	w := httptest.NewRecorder()
+	srv.proxy.ServeHTTP(w, req)
+
+	var resp struct {
+		DomainsHash string `json:"domains_hash"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal health response: %v; body=%s", err, w.Body.String())
+	}
+
+	want := NewDomainAllowlist([]string{"custom.example.com"}).Hash()
+	if resp.DomainsHash != want {
+		t.Errorf("domains_hash = %q, want %q (hash of ONLY the policy-supplied domains)", resp.DomainsHash, want)
+	}
+
+	// Sanity: the full OPERATIONAL allowlist (used for IsAllowed checks)
+	// really does include DefaultAllowedDomains, and its hash must differ
+	// from the policy-only one — otherwise this test would pass vacuously.
+	if full := srv.Allowlist().Hash(); full == want {
+		t.Fatal("test setup broken: full allowlist hash unexpectedly equals policy-only hash")
+	}
+}
+
 // TestCovNewServerMemoryInitFailureKeepsBasePaths verifies the documented
 // degradation contract: when the FTS engine cannot initialize (base path is
 // under a regular file), agentMemoryBase / crewMemoryBase are still set so

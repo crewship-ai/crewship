@@ -560,6 +560,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			desiredMode = "free"
 		}
 		var networkPolicy *SidecarNetworkPolicy
+		var desiredDomains []string
 		switch desiredMode {
 		case "free":
 			networkPolicy = &SidecarNetworkPolicy{Mode: "free"}
@@ -571,6 +572,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			// #944: allow the operator-configured local-model endpoint —
 			// empty unless this run actually uses an ollama/… model.
 			domains = append(domains, localModelExtraDomains(req)...)
+			desiredDomains = domains
 			networkPolicy = &SidecarNetworkPolicy{
 				Mode:                  "restricted",
 				AllowedDomains:        domains,
@@ -594,10 +596,14 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				// operator-watchable channel (#1160), not just stdout.
 				o.emitStaleSidecarSignal(ctx, req, health.SidecarHash)
 			}
-			if health.NetworkMode == desiredMode && desiredMode != "restricted" {
-				// In "free" mode we can safely reuse. In "restricted" mode the
-				// domain allowlist may differ between agents (different MCP servers),
-				// so we always restart to pick up the latest set.
+			if !sidecarNeedsRestart(health, desiredMode, desiredDomains) {
+				// #1160: restricted mode used to restart UNCONDITIONALLY here
+				// ("the domain allowlist may differ between agents, so we
+				// always restart to pick up the latest set") — with multiple
+				// agents sharing one crew container, that made every OTHER
+				// agent's exec a guaranteed kill+relaunch of an otherwise-
+				// healthy sidecar. sidecarNeedsRestart only says yes when the
+				// mode or the allowlist itself actually changed.
 				o.logger.Info("sidecar already running, reusing", "agent_id", req.AgentID, "container_id", req.ContainerID[:min(12, len(req.ContainerID))])
 				needStart = false
 				// The reused sidecar serves THIS agent's memory tier via the
@@ -612,13 +618,38 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 						memoryPrepPaths(memoryCfg, nil), o.logger)
 				}
 			} else {
-				o.logger.Warn("sidecar running with stale network policy, restarting",
+				o.logger.Warn("sidecar network policy changed, restarting",
 					"running_mode", health.NetworkMode, "desired_mode", desiredMode)
-				// Kill existing sidecar so we can start a new one
+				// Kill the existing sidecar and WAIT for it to actually exit
+				// before startSidecar launches a replacement (#1160): pkill
+				// only sends the signal and returns immediately, so without
+				// this wait a concurrent exec's checkSidecar could sample the
+				// container mid-restart — momentarily seeing the dying old
+				// process (or a not-yet-bound new one) and misreporting
+				// staleness or network-mode drift on a container that was
+				// never actually stale. Bounded to ~2s; falls through to
+				// startSidecar regardless (best-effort, matches the existing
+				// `|| true` fail-open style below).
+				//
+				// The pattern is anchored with `^` — this whole command runs
+				// as `sh -c "<script>"`, and that wrapping shell's OWN
+				// /proc/<pid>/cmdline contains the literal substring
+				// "crewship-sidecar" (it's part of the script text passed to
+				// -c). An UNANCHORED `pkill -f crewship-sidecar` matches that
+				// substring anywhere in a process's command line — including
+				// its own parent shell — so it self-SIGTERMs before ever
+				// reaching the wait loop (verified live: exit code 143, i.e.
+				// killed by signal, with zero loop iterations run). The real
+				// sidecar is launched as the bare command `crewship-sidecar
+				// --addr 127.0.0.1:9119` (exec_sidecar.go's startSidecar), so
+				// its cmdline STARTS WITH the pattern; the wrapping shell's
+				// never does (it starts with "sh"). `^` excludes exactly the
+				// self-match case while still catching the real target.
 				_ = o.execPreflight(ctx, provider.ExecConfig{
 					ContainerID: req.ContainerID,
-					Cmd:         []string{"sh", "-c", "pkill -f crewship-sidecar || true"},
-					User:        "0:0",
+					Cmd: []string{"sh", "-c",
+						`pkill -f '^crewship-sidecar' 2>/dev/null; i=0; while [ $i -lt 20 ]; do pkill -0 -f '^crewship-sidecar' 2>/dev/null || exit 0; sleep 0.1; i=$((i+1)); done; exit 0`},
+					User: "0:0",
 					// Killing the stale sidecar to reset the network policy
 					// legitimately needs root; #1158 opt-in (see ExecConfig).
 					// Failing this closed would leave the stale egress policy in
