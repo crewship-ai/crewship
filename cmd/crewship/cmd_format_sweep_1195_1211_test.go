@@ -417,3 +417,65 @@ func TestAuditRunE_YAMLFieldNamesMatchJSON(t *testing.T) {
 		t.Errorf("--format yaml regressed to squashed-lowercase entitytype; got:\n%s", out)
 	}
 }
+
+// TestServerListRunE_YAMLFieldNamesMatchJSON is a regression test flagged
+// by CodeRabbit on the #1195/#1211 PR: server list's serverProfileRow had
+// only json tags, so newly-reachable --format yaml (enabled by this same
+// PR's #1195 fix) would have hit the same squashed-lowercase bug #1211
+// fixed elsewhere (has_token -> hastoken) the moment it shipped.
+func TestServerListRunE_YAMLFieldNamesMatchJSON(t *testing.T) {
+	redirectConfigHome(t)
+	t.Setenv("CREWSHIP_PROFILE", "")
+	oldServer := flagServer
+	t.Cleanup(func() { flagServer = oldServer })
+	origFormat := flagFormat
+	flagFormat = "yaml"
+	t.Cleanup(func() { flagFormat = origFormat })
+
+	flagServer = "https://dev1.example"
+	if err := serverAddCmd.RunE(serverAddCmd, []string{"dev1"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	var err error
+	out := covCaptureStdoutCli8(t, func() { err = serverListCmd.RunE(serverListCmd, nil) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "has_token:") {
+		t.Errorf("--format yaml must use snake_case has_token (matching --format json), not hastoken; got:\n%s", out)
+	}
+	if strings.Contains(out, "hastoken:") {
+		t.Errorf("--format yaml regressed to squashed-lowercase hastoken; got:\n%s", out)
+	}
+}
+
+// TestBackupStatusRunE_YAMLFieldNamesMatchJSON is the same CodeRabbit-flagged
+// regression, for backup status's anonymous struct (acquired_by -> the
+// yaml.v3 default would squash it to acquiredby).
+func TestBackupStatusRunE_YAMLFieldNamesMatchJSON(t *testing.T) {
+	saveCLIState(t)
+	origFormat := flagFormat
+	flagFormat = "yaml"
+	t.Cleanup(func() { flagFormat = origFormat })
+
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	stub.OnGet("/api/v1/admin/backups/status", clitest.JSONResponse(200, map[string]any{
+		"held": true, "acquired_by": "u1", "acquired_at": "2026-06-01T10:20:30Z",
+	}))
+	cliCfg = &cli.CLIConfig{Token: "tok", Workspace: "cabcdefghijklmnopqrs", Server: stub.URL()}
+
+	out, err := captureStdout(t, func() error {
+		return backupStatusCmd.RunE(backupStatusCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "acquired_by:") {
+		t.Errorf("--format yaml must use snake_case acquired_by (matching --format json), not acquiredby; got:\n%s", out)
+	}
+	if strings.Contains(out, "acquiredby:") {
+		t.Errorf("--format yaml regressed to squashed-lowercase acquiredby; got:\n%s", out)
+	}
+}

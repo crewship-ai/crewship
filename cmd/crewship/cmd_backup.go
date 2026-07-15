@@ -57,14 +57,14 @@ var backupListCmd = &cobra.Command{
 		}
 		var out struct {
 			Data []struct {
-				Path          string `json:"path"`
-				FileName      string `json:"file_name"`
-				Size          int64  `json:"size_bytes"`
-				Scope         string `json:"scope"`
-				Encrypted     bool   `json:"encrypted"`
-				CreatedAt     string `json:"created_at,omitempty"`
-				FormatVersion int    `json:"format_version,omitempty"`
-			} `json:"data"`
+				Path          string `json:"path" yaml:"path"`
+				FileName      string `json:"file_name" yaml:"file_name"`
+				Size          int64  `json:"size_bytes" yaml:"size_bytes"`
+				Scope         string `json:"scope" yaml:"scope"`
+				Encrypted     bool   `json:"encrypted" yaml:"encrypted"`
+				CreatedAt     string `json:"created_at,omitempty" yaml:"created_at,omitempty"`
+				FormatVersion int    `json:"format_version,omitempty" yaml:"format_version,omitempty"`
+			} `json:"data" yaml:"data"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -223,11 +223,11 @@ you need to know who acquired the lock (or wait for its TTL).`,
 			return err
 		}
 		var out struct {
-			Held        bool   `json:"held"`
-			AcquiredBy  string `json:"acquired_by,omitempty"`
-			AcquiredAt  string `json:"acquired_at,omitempty"`
-			ExpiresAt   string `json:"expires_at,omitempty"`
-			WorkspaceID string `json:"workspace_id,omitempty"`
+			Held        bool   `json:"held" yaml:"held"`
+			AcquiredBy  string `json:"acquired_by,omitempty" yaml:"acquired_by,omitempty"`
+			AcquiredAt  string `json:"acquired_at,omitempty" yaml:"acquired_at,omitempty"`
+			ExpiresAt   string `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
+			WorkspaceID string `json:"workspace_id,omitempty" yaml:"workspace_id,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

@@ -47,12 +47,12 @@ Typical setup:
 // for `server list`. The human table below prints the same data with color
 // markers and alignment that don't translate to structured output.
 type serverProfileRow struct {
-	Name      string `json:"name"`
-	Server    string `json:"server,omitempty"`
-	Workspace string `json:"workspace,omitempty"`
-	Active    bool   `json:"active"`
-	HasToken  bool   `json:"has_token"`
-	Defined   bool   `json:"defined"`
+	Name      string `json:"name" yaml:"name"`
+	Server    string `json:"server,omitempty" yaml:"server,omitempty"`
+	Workspace string `json:"workspace,omitempty" yaml:"workspace,omitempty"`
+	Active    bool   `json:"active" yaml:"active"`
+	HasToken  bool   `json:"has_token" yaml:"has_token"`
+	Defined   bool   `json:"defined" yaml:"defined"`
 }
 
 var serverListCmd = &cobra.Command{

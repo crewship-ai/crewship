@@ -88,108 +88,108 @@ const (
 // and writers always include the current set. Removals require a bump
 // of FormatVersion.
 type Manifest struct {
-	FormatVersion           int    `json:"format_version"`
-	CrewshipVersionAtBackup string `json:"crewship_version_at_backup"`
-	SchemaMigrationVersions []int  `json:"schema_migration_versions"`
-	Scope                   Scope  `json:"scope"`
+	FormatVersion           int    `json:"format_version" yaml:"format_version"`
+	CrewshipVersionAtBackup string `json:"crewship_version_at_backup" yaml:"crewship_version_at_backup"`
+	SchemaMigrationVersions []int  `json:"schema_migration_versions" yaml:"schema_migration_versions"`
+	Scope                   Scope  `json:"scope" yaml:"scope"`
 	// ScopeLevel records which preset (quick/standard/full) the
 	// admin chose at create time so the UI can render a coherent
 	// badge without re-deriving from CrewSummary.*Included flags.
 	// Older bundles that pre-date the preset feature omit this
 	// field entirely; the catalog migration backfills 'standard'.
-	ScopeLevel        ScopeLevel `json:"scope_level,omitempty"`
-	CompatibleTargets []Target   `json:"compatible_targets"`
-	CreatedAt         time.Time  `json:"created_at"`
-	CreatedBy         Actor      `json:"created_by"`
-	SourceInstance    Instance   `json:"source_instance"`
-	Contents          Contents   `json:"contents"`
-	Encryption        Encryption `json:"encryption"`
-	Checksums         Checksums  `json:"checksums"`
+	ScopeLevel        ScopeLevel `json:"scope_level,omitempty" yaml:"scope_level,omitempty"`
+	CompatibleTargets []Target   `json:"compatible_targets" yaml:"compatible_targets"`
+	CreatedAt         time.Time  `json:"created_at" yaml:"created_at"`
+	CreatedBy         Actor      `json:"created_by" yaml:"created_by"`
+	SourceInstance    Instance   `json:"source_instance" yaml:"source_instance"`
+	Contents          Contents   `json:"contents" yaml:"contents"`
+	Encryption        Encryption `json:"encryption" yaml:"encryption"`
+	Checksums         Checksums  `json:"checksums" yaml:"checksums"`
 }
 
 // Actor describes the user who created or restored the bundle.
 type Actor struct {
-	UserID string `json:"user_id"`
-	Email  string `json:"email"`
-	Role   string `json:"role"`
+	UserID string `json:"user_id" yaml:"user_id"`
+	Email  string `json:"email" yaml:"email"`
+	Role   string `json:"role" yaml:"role"`
 }
 
 // Instance describes the Crewship installation that produced the bundle.
 type Instance struct {
-	Hostname      string `json:"hostname"`
-	Platform      string `json:"platform"`
-	DockerVersion string `json:"docker_version,omitempty"`
+	Hostname      string `json:"hostname" yaml:"hostname"`
+	Platform      string `json:"platform" yaml:"platform"`
+	DockerVersion string `json:"docker_version,omitempty" yaml:"docker_version,omitempty"`
 }
 
 // Contents enumerates what sections of the bundle are populated. This
 // is primarily informational; the authoritative listing lives inside
 // the payload tar.
 type Contents struct {
-	Workspace *WorkspaceSummary `json:"workspace,omitempty"`
-	Crews     []CrewSummary     `json:"crews,omitempty"`
+	Workspace *WorkspaceSummary `json:"workspace,omitempty" yaml:"workspace,omitempty"`
+	Crews     []CrewSummary     `json:"crews,omitempty" yaml:"crews,omitempty"`
 
 	// Instance-scope only (V1.5, CRE-129). Nil for MVP bundles.
-	CredstoreIncluded      bool `json:"credstore_included,omitempty"`
-	AuthKeysIncluded       bool `json:"auth_keys_included,omitempty"`
-	InstanceConfigIncluded bool `json:"instance_config_included,omitempty"`
+	CredstoreIncluded      bool `json:"credstore_included,omitempty" yaml:"credstore_included,omitempty"`
+	AuthKeysIncluded       bool `json:"auth_keys_included,omitempty" yaml:"auth_keys_included,omitempty"`
+	InstanceConfigIncluded bool `json:"instance_config_included,omitempty" yaml:"instance_config_included,omitempty"`
 }
 
 // WorkspaceSummary carries workspace-level identity fields.
 type WorkspaceSummary struct {
-	ID   string `json:"id"`
-	Slug string `json:"slug"`
-	Name string `json:"name"`
+	ID   string `json:"id" yaml:"id"`
+	Slug string `json:"slug" yaml:"slug"`
+	Name string `json:"name" yaml:"name"`
 }
 
 // CrewSummary carries per-crew provenance. Image digests are pinned so
 // that V2 restore can rebuild the exact devcontainer image even if
 // `crewship/agent-runtime:latest` has moved.
 type CrewSummary struct {
-	ID                         string       `json:"id"`
-	Slug                       string       `json:"slug"`
-	Name                       string       `json:"name"`
-	RuntimeImage               string       `json:"runtime_image,omitempty"`
-	BaseImageDigest            string       `json:"base_image_digest,omitempty"`
-	CachedImageDigest          string       `json:"cached_image_digest,omitempty"`
-	ConfigHash                 string       `json:"config_hash,omitempty"`
-	DevcontainerConfigIncluded bool         `json:"devcontainer_config_included"`
-	MiseConfigIncluded         bool         `json:"mise_config_included"`
-	Features                   []FeaturePin `json:"features,omitempty"`
-	WorkspaceIncluded          bool         `json:"workspace_included"`
-	VolumesIncluded            []string     `json:"volumes_included,omitempty"`
-	MemoryIncluded             bool         `json:"memory_included"`
+	ID                         string       `json:"id" yaml:"id"`
+	Slug                       string       `json:"slug" yaml:"slug"`
+	Name                       string       `json:"name" yaml:"name"`
+	RuntimeImage               string       `json:"runtime_image,omitempty" yaml:"runtime_image,omitempty"`
+	BaseImageDigest            string       `json:"base_image_digest,omitempty" yaml:"base_image_digest,omitempty"`
+	CachedImageDigest          string       `json:"cached_image_digest,omitempty" yaml:"cached_image_digest,omitempty"`
+	ConfigHash                 string       `json:"config_hash,omitempty" yaml:"config_hash,omitempty"`
+	DevcontainerConfigIncluded bool         `json:"devcontainer_config_included" yaml:"devcontainer_config_included"`
+	MiseConfigIncluded         bool         `json:"mise_config_included" yaml:"mise_config_included"`
+	Features                   []FeaturePin `json:"features,omitempty" yaml:"features,omitempty"`
+	WorkspaceIncluded          bool         `json:"workspace_included" yaml:"workspace_included"`
+	VolumesIncluded            []string     `json:"volumes_included,omitempty" yaml:"volumes_included,omitempty"`
+	MemoryIncluded             bool         `json:"memory_included" yaml:"memory_included"`
 	// SystemIncluded is set when the bundle carries the /var/lib
 	// section (any service data the agent populated at runtime —
 	// redis dump.rdb, postgresql data dir, etc.). Bundles produced
 	// before this section was added omit the field entirely; the
 	// restore preflight treats absent as "no system data to land".
-	SystemIncluded   bool  `json:"system_included,omitempty"`
-	AgentCount       int   `json:"agent_count"`
-	PayloadSizeBytes int64 `json:"payload_size_bytes,omitempty"`
+	SystemIncluded   bool  `json:"system_included,omitempty" yaml:"system_included,omitempty"`
+	AgentCount       int   `json:"agent_count" yaml:"agent_count"`
+	PayloadSizeBytes int64 `json:"payload_size_bytes,omitempty" yaml:"payload_size_bytes,omitempty"`
 }
 
 // FeaturePin pins a devcontainer feature OCI reference to a digest so
 // that rebuild on restore is reproducible.
 type FeaturePin struct {
-	Name   string `json:"name"`
-	Digest string `json:"digest"`
+	Name   string `json:"name" yaml:"name"`
+	Digest string `json:"digest" yaml:"digest"`
 }
 
 // Encryption records how the payload is sealed. When Enabled is false,
 // the payload sits in the outer tar as plaintext and must carry a
 // warning to the user.
 type Encryption struct {
-	Enabled       bool     `json:"enabled"`
-	Algorithm     string   `json:"algorithm,omitempty"`
-	KeyDerivation string   `json:"key_derivation,omitempty"`
-	Recipients    []string `json:"recipients,omitempty"`
+	Enabled       bool     `json:"enabled" yaml:"enabled"`
+	Algorithm     string   `json:"algorithm,omitempty" yaml:"algorithm,omitempty"`
+	KeyDerivation string   `json:"key_derivation,omitempty" yaml:"key_derivation,omitempty"`
+	Recipients    []string `json:"recipients,omitempty" yaml:"recipients,omitempty"`
 }
 
 // Checksums records integrity hashes. PayloadSHA256 covers the bytes of
 // the (possibly encrypted) payload blob inside the bundle; it does not
 // cover MANIFEST.json itself.
 type Checksums struct {
-	PayloadSHA256 string `json:"payload_sha256"`
+	PayloadSHA256 string `json:"payload_sha256" yaml:"payload_sha256"`
 }
 
 // Validate performs structural validation on the manifest. It does not
