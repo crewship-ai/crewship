@@ -187,9 +187,6 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		val := 0
 		if *req.AllowPrivilegedCredentials {
 			val = 1
-		}
-		ub.Set("allow_privileged_credentials", val)
-		if *req.AllowPrivilegedCredentials {
 			// #1032: an operator just accepted that a privileged crew's
 			// sidecar CredStore is reachable from any agent in that
 			// container (the UID 1001/1002 boundary is gone under
@@ -197,6 +194,7 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 			h.logger.Warn("workspace opted in to loading credentials into privileged crews' sidecars (#1032)",
 				"workspace_id", workspaceID)
 		}
+		ub.Set("allow_privileged_credentials", val)
 	}
 	if !ub.Empty() {
 		query, args := ub.Build("workspaces", "id = ?", workspaceID)
