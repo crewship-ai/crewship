@@ -84,7 +84,9 @@ func TestStore_Save_DefaultsViaAndDSLVersion(t *testing.T) {
 // the tombstone, so findIDBySlug locates it and Save routes down the
 // UPDATE path. This is what makes `seed --nuke` re-seeds work: nuke
 // soft-deletes every routine, and the next seed brings each one back
-// under the same slug + row id (history preserved).
+// under the same slug + row id — but NOT its old invocation stats or
+// journal history, which Save purges on resurrect (see
+// TestStore_Save_RevivingSoftDeletedSlug_PurgesStaleHistory).
 func TestStore_Save_ResurrectsSoftDeletedRow(t *testing.T) {
 	db := openStoreTestDB(t)
 	defer db.Close()

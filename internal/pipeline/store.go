@@ -101,8 +101,12 @@ func (s *Store) Save(ctx context.Context, in SaveInput) (*Pipeline, error) {
 
 	// Look up existing row by (workspace_id, slug). If present,
 	// update in place (preserving id, created_at, invocation_count
-	// — those should never reset on edit). If absent, insert new.
-	existingID, existingCreatedAt, err := s.findIDBySlug(ctx, in.WorkspaceID, in.Slug)
+	// — those should never reset on a plain edit). If absent, insert
+	// new. UNIQUE(workspace_id, slug) counts soft-deleted rows too, so
+	// this also matches a tombstoned row — see the wasDeleted handling
+	// below for why THAT case resets invocation stats and journal
+	// history instead of preserving them.
+	existingID, existingCreatedAt, wasDeleted, err := s.findIDBySlug(ctx, in.WorkspaceID, in.Slug)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		// fall through to insert
@@ -137,6 +141,19 @@ func (s *Store) Save(ctx context.Context, in SaveInput) (*Pipeline, error) {
 			status = "disabled"
 		}
 
+		// A resurrection (row was tombstoned) additionally resets the
+		// invocation counters and purges the old incarnation's journal
+		// history. UNIQUE(workspace_id, slug) forces this row to be
+		// reused rather than freshly inserted, but from the caller's
+		// perspective (e.g. `crewship seed --nuke` followed by reseed,
+		// or an agent recreating a routine under a deleted slug) this
+		// IS a new routine — it must not show up with someone else's
+		// stale "N invocations, last FAILED" history attached before it
+		// has ever actually run.
+		resurrectClause := ""
+		if wasDeleted {
+			resurrectClause = `, invocation_count = 0, last_invoked_at = NULL, last_invocation_status = NULL`
+		}
 		_, err = tx.ExecContext(ctx, `
 UPDATE pipelines SET
     name = ?, description = ?, dsl_version = ?, definition_json = ?, definition_hash = ?,
@@ -146,7 +163,7 @@ UPDATE pipelines SET
     execution_tier_json = ?,
     status = ?,
     updated_at = ?,
-    deleted_at = NULL
+    deleted_at = NULL`+resurrectClause+`
 WHERE id = ?`,
 			in.Name, nullStr(in.Description), in.DSLVersion, in.DefinitionJSON, hash,
 			nullStr(in.Author.CrewID), nullStr(in.Author.AgentID), nullStr(in.Author.UserID),
@@ -160,6 +177,15 @@ WHERE id = ?`,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("pipeline: update: %w", err)
+		}
+
+		if wasDeleted {
+			if _, err := tx.ExecContext(ctx,
+				`DELETE FROM journal_entries WHERE json_extract(payload, '$.pipeline_id') = ?`,
+				existingID,
+			); err != nil {
+				return nil, fmt.Errorf("pipeline: purge stale journal on resurrect: %w", err)
+			}
 		}
 
 		// Append a new version row (or no-op if hash matches).
@@ -500,23 +526,27 @@ func (s *Store) scanOne(ctx context.Context, q string, args ...any) (*Pipeline, 
 // tombstone routes Save down the UPDATE path instead, which clears
 // deleted_at (resurrect) and appends a fresh version — making save an
 // idempotent upsert-by-slug.
-func (s *Store) findIDBySlug(ctx context.Context, workspaceID, slug string) (string, time.Time, error) {
+// findIDBySlug also reports wasDeleted so Save can tell a plain edit
+// (row was live) from a resurrection (row was tombstoned) — the two
+// cases update the row very differently.
+func (s *Store) findIDBySlug(ctx context.Context, workspaceID, slug string) (id string, createdAt time.Time, wasDeleted bool, err error) {
 	var (
-		id        string
-		createdAt string
+		rawID        string
+		rawCreatedAt string
+		deletedAt    sql.NullString
 	)
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, created_at FROM pipelines WHERE workspace_id = ? AND slug = ?`,
+	err = s.db.QueryRowContext(ctx,
+		`SELECT id, created_at, deleted_at FROM pipelines WHERE workspace_id = ? AND slug = ?`,
 		workspaceID, slug,
-	).Scan(&id, &createdAt)
+	).Scan(&rawID, &rawCreatedAt, &deletedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", time.Time{}, ErrNotFound
+		return "", time.Time{}, false, ErrNotFound
 	}
 	if err != nil {
-		return "", time.Time{}, err
+		return "", time.Time{}, false, err
 	}
-	t, _ := time.Parse(time.RFC3339Nano, createdAt)
-	return id, t, nil
+	t, _ := time.Parse(time.RFC3339Nano, rawCreatedAt)
+	return rawID, t, deletedAt.Valid, nil
 }
 
 // pipelineColumns is the canonical SELECT list. Keeping it as a const
