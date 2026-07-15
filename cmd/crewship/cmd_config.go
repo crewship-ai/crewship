@@ -174,11 +174,13 @@ var configValidateCmd = &cobra.Command{
 			check("token validates against server", true, "")
 		}
 
-		// Default-agent existence (warning, not error — the picker handles missing).
+		// Default-agent existence (warning, not error — `ask` still runs with
+		// --agent or a default-agent fixed after this warning; there is no
+		// interactive picker fallback today, so the warning must say so).
 		if defaultAgent := cli.ResolveDefaultAgent("", cfg); defaultAgent != "" {
 			if _, err := resolveAgentID(client, defaultAgent); err != nil {
 				warn(fmt.Sprintf("default-agent %q", defaultAgent),
-					"agent not found in current workspace — picker will be used instead")
+					"agent not found in current workspace — `crewship ask` will fail until this is corrected, or override with --agent")
 			} else {
 				check(fmt.Sprintf("default-agent %q exists", defaultAgent), true, "")
 			}
