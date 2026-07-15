@@ -69,7 +69,12 @@ var missionListCmd = &cobra.Command{
 			if len(title) > 50 {
 				title = title[:47] + "..."
 			}
-			rows = append(rows, []string{m.ID[:12], title, m.Status, m.LeadSlug, tasks, m.CreatedAt})
+			// #1199: show the full ID rather than an un-marked prefix.
+			// Mission IDs are short cuids (~21 chars), not "absurdly
+			// long" — no readability reason to cut them, and doing so
+			// with no ellipsis made the value look complete when it
+			// wasn't.
+			rows = append(rows, []string{m.ID, title, m.Status, m.LeadSlug, tasks, m.CreatedAt})
 		}
 		return f.Auto(missions, headers, rows)
 	},

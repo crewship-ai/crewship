@@ -36,11 +36,22 @@ func TestShortIDCov(t *testing.T) {
 	if got := shortID("short-id"); got != "short-id" {
 		t.Errorf("short input must pass through, got %q", got)
 	}
-	if got := shortID("abcdefghijklmnop"); got != "abcdefghijklmnop" {
-		t.Errorf("16 chars must pass through, got %q", got)
+	if got := shortID(strings.Repeat("a", 40)); got != strings.Repeat("a", 40) {
+		t.Errorf("40 chars must pass through, got %q", got)
 	}
-	if got := shortID("abcdefghijklmnopq"); got != "abcdefghijklmn…" {
-		t.Errorf("long id: got %q", got)
+	// #1199: a real schedule ID ("psched_" + cuid, ~28 chars) must be
+	// shown in full — truncating it produced a value `schedules now
+	// <id>` can't resolve, since the /run endpoint takes the exact ID
+	// with no prefix-matching fallback.
+	realScheduleID := "psched_cmrm0ncabcd1234abcd5678"
+	if len(realScheduleID) >= 40 {
+		t.Fatalf("test fixture no longer representative, len=%d", len(realScheduleID))
+	}
+	if got := shortID(realScheduleID); got != realScheduleID {
+		t.Errorf("real schedule ID must not be truncated: got %q, want %q", got, realScheduleID)
+	}
+	if got := shortID(strings.Repeat("a", 41)); got != strings.Repeat("a", 38)+"…" {
+		t.Errorf("pathologically long id: got %q", got)
 	}
 }
 
@@ -155,8 +166,11 @@ func TestScheduleList_RunE(t *testing.T) {
 			t.Errorf("table missing %q:\n%s", want, out2)
 		}
 	}
-	if !strings.Contains(out2, "cschedule00000…") {
-		t.Errorf("long id not shortened:\n%s", out2)
+	// #1199: a realistic-length schedule ID must be shown in full, not cut
+	// down to an unusable prefix — `schedules now <id>` needs the exact
+	// value and has no prefix-matching fallback.
+	if !strings.Contains(out2, "cschedule00000000000x1y2") {
+		t.Errorf("id must be shown in full:\n%s", out2)
 	}
 
 	// Slug filter keeps only matching schedules.

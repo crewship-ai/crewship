@@ -203,6 +203,7 @@ For source-aware actions, use the matching subcommand instead:
 
   crewship approvals approve <id>           # waitpoints via approvals queue
   crewship escalation resolve <id> ...      # escalations via escalation lifecycle
+  crewship hire approve <agent-id>          # ephemeral-hire PENDING_REVIEW waitpoints
 
 Examples:
   crewship inbox resolve <id> --action approved
@@ -325,8 +326,10 @@ Archiving maps to resolve with action=archived. Restore an archived
 item with 'crewship inbox unread <id>'.
 
 Only non-decision items can be archived (messages, failed-run notices,
-advisories). Waitpoints and escalations are source-managed — resolve
-those through their decision flow instead.
+advisories). Waitpoints, escalations, and ephemeral-hire PENDING_REVIEW
+items are source-managed — resolve those through their decision flow
+instead: 'crewship approvals approve <id>', 'crewship escalation resolve
+<id>', or 'crewship hire approve <agent-id>'.
 
 Examples:
   crewship inbox archive <id>

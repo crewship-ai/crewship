@@ -253,3 +253,32 @@ func TestCheckpointCmds_ServerErrors(t *testing.T) {
 		t.Errorf("delete: expected error; got %v", err)
 	}
 }
+
+// TestCheckpointListRunE_CreatedByNotOverTruncated is a regression test
+// for #1199: CREATED_BY is a user/agent cuid, the same shape as the ID
+// column right next to it — it must get the same truncation budget (24
+// chars) rather than the old, much tighter 16-char cut.
+func TestCheckpointListRunE_CreatedByNotOverTruncated(t *testing.T) {
+	s := covStubCli9(t)
+	createdBy := "cmri6o7zm000116abcdefghijk" // 26-char cuid, same shape as c.ID
+	s.OnGet("/api/v1/missions/MIS-1/checkpoints", clitest.JSONResponse(200, map[string]any{
+		"checkpoints": []checkpointRow{
+			{ID: "chk_1", Label: "green build", JournalCursor: "cur_1", CreatedBy: createdBy, CreatedAt: "2026-06-01T00:00:00Z"},
+		},
+		"count":      1,
+		"mission_id": "MIS-1",
+	}))
+	covSetFlagCli9(t, checkpointListCmd, "mission", "MIS-1")
+
+	out := covCaptureStdoutCli9(t, func() {
+		if err := checkpointListCmd.RunE(checkpointListCmd, nil); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+	// 26 chars > the 24-char budget, so it must still be truncated — but
+	// with more of the value preserved than the old 16-char cut gave, and
+	// always with a visible ellipsis marker.
+	if !strings.Contains(out, createdBy[:23]+"…") {
+		t.Errorf("CREATED_BY not truncated to the 24-char budget with ellipsis:\n%s", out)
+	}
+}
