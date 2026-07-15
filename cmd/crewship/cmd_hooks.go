@@ -52,7 +52,11 @@ var hooksListCmd = &cobra.Command{
 		crew, _ := cmd.Flags().GetString("crew")
 		q := url.Values{}
 		if crew != "" {
-			q.Set("crew_id", crew)
+			crewID, err := resolveCrewID(client, crew)
+			if err != nil {
+				return err
+			}
+			q.Set("crew_id", crewID)
 		}
 		path := "/api/v1/hooks"
 		if enc := q.Encode(); enc != "" {
