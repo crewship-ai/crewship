@@ -198,11 +198,12 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		creds = nil
 	}
 
-	// Auto-resolve credentials referenced in crew/agent MCP configs.
-	creds = autoResolveMCPCredentials(r.Context(), h.db, h.logger, data.wsID, creds,
-		data.crewMCPConfigJSON.String, data.agentMCPConfigJSON.String)
-	if blockPrivilegedCreds {
-		creds = nil
+	// Auto-resolve credentials referenced in crew/agent MCP configs. Skipped
+	// entirely when blocked — creds is already nil and there's no point
+	// paying for the DB round-trip just to discard the result.
+	if !blockPrivilegedCreds {
+		creds = autoResolveMCPCredentials(r.Context(), h.db, h.logger, data.wsID, creds,
+			data.crewMCPConfigJSON.String, data.agentMCPConfigJSON.String)
 	}
 
 	sysPrompt, err := h.loadAgentSystemPrompt(r, data, creds, agentID)
@@ -233,19 +234,16 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 				}
 			}
 		}
-		if len(envJsons) > 0 {
+		if len(envJsons) > 0 && !blockPrivilegedCreds {
 			creds = autoResolveMCPCredentials(r.Context(), h.db, h.logger, data.wsID, creds, envJsons...)
-			if blockPrivilegedCreds {
-				creds = nil
-			}
 		}
 	}
 
 	// For OAUTH2 credentials that were auto-resolved (client_id/secret),
 	// also include the access token so the orchestrator can write tokens.json.
-	creds = h.resolveOAuthAccessTokens(r, creds)
-	if blockPrivilegedCreds {
-		creds = nil
+	// Skipped when blocked, same reasoning as above.
+	if !blockPrivilegedCreds {
+		creds = h.resolveOAuthAccessTokens(r, creds)
 	}
 
 	// [KEEPER] section — credential access control instructions
