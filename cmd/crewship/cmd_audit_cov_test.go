@@ -53,7 +53,7 @@ func TestAuditRunE_AllFiltersAndRowRendering(t *testing.T) {
 		"lines":       "5",
 		"entity-type": "CREDENTIAL",
 		"entity-id":   "cred_1",
-		"user":        "u_42",
+		"user":        "cuser0123456789012345",
 		"since":       "24h",
 		"until":       "2026-06-02T00:00:00Z",
 		"search":      "rotate",
@@ -78,7 +78,7 @@ func TestAuditRunE_AllFiltersAndRowRendering(t *testing.T) {
 	q := calls[0].Query
 	for _, want := range []string{
 		"limit=5", "page=2", "entity_type=CREDENTIAL", "entity_id=cred_1",
-		"user_id=u_42", "search=rotate", "date_from=", "date_to=2026-06-02",
+		"user_id=cuser0123456789012345", "search=rotate", "date_from=", "date_to=2026-06-02",
 	} {
 		if !strings.Contains(q, want) {
 			t.Errorf("query missing %q; got %q", want, q)
@@ -142,6 +142,98 @@ func TestAuditRunE_BackupPathEntityIDNotDestroyed(t *testing.T) {
 	}
 	if !strings.Contains(out, "…") {
 		t.Errorf("truncated value must carry a visible ellipsis marker; got %q", out)
+	}
+}
+
+// TestAuditRunE_UserFlagBadShapeErrors is a regression test for #1207:
+// --user's own help text says it wants a user ID, but a wrong-shaped value
+// (like an email pasted from `crewship whoami` output, or any other
+// non-ID garbage) used to be forwarded straight through to the server and
+// silently come back with zero rows — indistinguishable from "this user
+// has no audit history". It must now fail loudly instead.
+func TestAuditRunE_UserFlagBadShapeErrors(t *testing.T) {
+	saveCLIState(t)
+	resetAuditFlags(t)
+
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	// No route registered for /api/v1/audit or /members — if the CLI
+	// forwarded the bad value to the server at all, the test would fail
+	// on the transport error instead of the validation error we want.
+	cliCfg = &cli.CLIConfig{Token: "tok", Workspace: "cabcdefghijklmnopqrs", Server: stub.URL()}
+
+	if err := auditCmd.Flags().Set("user", "bob"); err != nil {
+		t.Fatal(err)
+	}
+	err := auditCmd.RunE(auditCmd, nil)
+	if err == nil {
+		t.Fatal("expected an error for a non-ID, non-email --user value; got nil")
+	}
+	if !strings.Contains(err.Error(), "--user") {
+		t.Errorf("error should name --user; got %v", err)
+	}
+	if len(stub.CallsFor("GET", "/api/v1/audit")) != 0 {
+		t.Error("bad --user value must not reach the server at all")
+	}
+}
+
+// TestAuditRunE_UserFlagResolvesEmail covers the other half of #1207: an
+// email-shaped --user value is resolved against the workspace member
+// roster (the same source `crewship workspace member list` reads) rather
+// than rejected outright, since email is the only user identifier
+// exposed anywhere else in the CLI (audit rows carry user_email, never
+// user_id, and `crewship whoami` doesn't show the ID either).
+func TestAuditRunE_UserFlagResolvesEmail(t *testing.T) {
+	saveCLIState(t)
+	resetAuditFlags(t)
+
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	stub.OnGet("/api/v1/workspaces/cabcdefghijklmnopqrs/members", clitest.JSONResponse(http.StatusOK, []map[string]any{
+		{"id": "mem_1", "user_id": "cuser0123456789012345", "email": "ops@example.com", "full_name": "Ops", "role": "ADMIN"},
+	}))
+	stub.OnGet("/api/v1/audit", clitest.JSONResponse(http.StatusOK, map[string]any{"data": []map[string]any{}}))
+	cliCfg = &cli.CLIConfig{Token: "tok", Workspace: "cabcdefghijklmnopqrs", Server: stub.URL()}
+
+	if err := auditCmd.Flags().Set("user", "OPS@Example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := auditCmd.RunE(auditCmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	calls := stub.CallsFor("GET", "/api/v1/audit")
+	if len(calls) != 1 {
+		t.Fatalf("want 1 audit GET, got %d", len(calls))
+	}
+	if !strings.Contains(calls[0].Query, "user_id=cuser0123456789012345") {
+		t.Errorf("email must resolve to the member's user_id; query=%q", calls[0].Query)
+	}
+}
+
+// TestAuditRunE_UserFlagEmailNotFoundErrors: an email that doesn't match
+// any workspace member must fail loudly too, not silently query an empty
+// user_id (or the raw email) and come back with zero rows.
+func TestAuditRunE_UserFlagEmailNotFoundErrors(t *testing.T) {
+	saveCLIState(t)
+	resetAuditFlags(t)
+
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	stub.OnGet("/api/v1/workspaces/cabcdefghijklmnopqrs/members", clitest.JSONResponse(http.StatusOK, []map[string]any{
+		{"id": "mem_1", "user_id": "cuser0123456789012345", "email": "ops@example.com"},
+	}))
+	cliCfg = &cli.CLIConfig{Token: "tok", Workspace: "cabcdefghijklmnopqrs", Server: stub.URL()}
+
+	if err := auditCmd.Flags().Set("user", "ghost@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	err := auditCmd.RunE(auditCmd, nil)
+	if err == nil {
+		t.Fatal("expected an error for an email with no matching workspace member; got nil")
+	}
+	if len(stub.CallsFor("GET", "/api/v1/audit")) != 0 {
+		t.Error("unresolved --user email must not reach the audit endpoint")
 	}
 }
 
