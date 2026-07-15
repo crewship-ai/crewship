@@ -17,7 +17,7 @@ preflight
 section "1. Scheduler: the seeded cron schedules are present + enabled"
 # ─────────────────────────────────────────────────────────────────────────────
 sched_out="$(cs routine schedules list 2>/dev/null)"
-for s in classify-ticket consistency-sweep daily-status-digest; do
+for s in classify-ticket consistency-sweep morning-briefing feed-change-report; do
   if printf '%s' "$sched_out" | grep -qi "$s"; then
     _pass "schedule for '$s' is listed"
   else
