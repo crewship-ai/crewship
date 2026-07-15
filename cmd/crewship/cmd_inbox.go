@@ -93,26 +93,32 @@ var inboxListCmd = &cobra.Command{
 			return err
 		}
 
+		// Field tags carry explicit yaml:"..." matching each json:"..." tag —
+		// gopkg.in/yaml.v3 does NOT fall back to a json tag when no yaml
+		// tag is present, it lowercases the raw Go field name instead
+		// (SourceID -> "sourceid" rather than "source_id"). Without the
+		// yaml tag, --format yaml and --format json return the same data
+		// under different key casing (#1211).
 		var body struct {
 			Rows []struct {
-				ID             string                 `json:"id"`
-				Kind           string                 `json:"kind"`
-				SourceID       string                 `json:"source_id"`
-				Title          string                 `json:"title"`
-				BodyMD         string                 `json:"body_md"`
-				SenderType     string                 `json:"sender_type"`
-				SenderName     string                 `json:"sender_name"`
-				AvatarSeed     string                 `json:"avatar_seed,omitempty"`
-				AvatarStyle    string                 `json:"avatar_style,omitempty"`
-				State          string                 `json:"state"`
-				Priority       string                 `json:"priority"`
-				Blocking       bool                   `json:"blocking"`
-				Payload        map[string]interface{} `json:"payload"`
-				CreatedAt      string                 `json:"created_at"`
-				ResolvedAction string                 `json:"resolved_action"`
-			} `json:"rows"`
-			Count       int `json:"count"`
-			UnreadCount int `json:"unread_count"`
+				ID             string                 `json:"id" yaml:"id"`
+				Kind           string                 `json:"kind" yaml:"kind"`
+				SourceID       string                 `json:"source_id" yaml:"source_id"`
+				Title          string                 `json:"title" yaml:"title"`
+				BodyMD         string                 `json:"body_md" yaml:"body_md"`
+				SenderType     string                 `json:"sender_type" yaml:"sender_type"`
+				SenderName     string                 `json:"sender_name" yaml:"sender_name"`
+				AvatarSeed     string                 `json:"avatar_seed,omitempty" yaml:"avatar_seed,omitempty"`
+				AvatarStyle    string                 `json:"avatar_style,omitempty" yaml:"avatar_style,omitempty"`
+				State          string                 `json:"state" yaml:"state"`
+				Priority       string                 `json:"priority" yaml:"priority"`
+				Blocking       bool                   `json:"blocking" yaml:"blocking"`
+				Payload        map[string]interface{} `json:"payload" yaml:"payload"`
+				CreatedAt      string                 `json:"created_at" yaml:"created_at"`
+				ResolvedAction string                 `json:"resolved_action" yaml:"resolved_action"`
+			} `json:"rows" yaml:"rows"`
+			Count       int `json:"count" yaml:"count"`
+			UnreadCount int `json:"unread_count" yaml:"unread_count"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -243,22 +249,24 @@ Examples:
 			return err
 		}
 
+		// See the matching comment on inboxListCmd's row struct above —
+		// explicit yaml tags are required here for the same reason (#1211).
 		var item struct {
-			ID             string                 `json:"id"`
-			Kind           string                 `json:"kind"`
-			SourceID       string                 `json:"source_id"`
-			Title          string                 `json:"title"`
-			BodyMD         string                 `json:"body_md"`
-			SenderType     string                 `json:"sender_type"`
-			SenderName     string                 `json:"sender_name"`
-			AvatarSeed     string                 `json:"avatar_seed,omitempty"`
-			AvatarStyle    string                 `json:"avatar_style,omitempty"`
-			State          string                 `json:"state"`
-			Priority       string                 `json:"priority"`
-			Blocking       bool                   `json:"blocking"`
-			ResolvedAction string                 `json:"resolved_action"`
-			CreatedAt      string                 `json:"created_at"`
-			Payload        map[string]interface{} `json:"payload"`
+			ID             string                 `json:"id" yaml:"id"`
+			Kind           string                 `json:"kind" yaml:"kind"`
+			SourceID       string                 `json:"source_id" yaml:"source_id"`
+			Title          string                 `json:"title" yaml:"title"`
+			BodyMD         string                 `json:"body_md" yaml:"body_md"`
+			SenderType     string                 `json:"sender_type" yaml:"sender_type"`
+			SenderName     string                 `json:"sender_name" yaml:"sender_name"`
+			AvatarSeed     string                 `json:"avatar_seed,omitempty" yaml:"avatar_seed,omitempty"`
+			AvatarStyle    string                 `json:"avatar_style,omitempty" yaml:"avatar_style,omitempty"`
+			State          string                 `json:"state" yaml:"state"`
+			Priority       string                 `json:"priority" yaml:"priority"`
+			Blocking       bool                   `json:"blocking" yaml:"blocking"`
+			ResolvedAction string                 `json:"resolved_action" yaml:"resolved_action"`
+			CreatedAt      string                 `json:"created_at" yaml:"created_at"`
+			Payload        map[string]interface{} `json:"payload" yaml:"payload"`
 		}
 		if err := cli.ReadJSON(resp, &item); err != nil {
 			return err
