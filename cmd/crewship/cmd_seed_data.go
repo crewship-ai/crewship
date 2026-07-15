@@ -48,6 +48,9 @@ func seedCrews(ctx context.Context, client *cli.Client, userID string) (map[stri
 		if c.MiseConfig != "" {
 			body["mise_config"] = c.MiseConfig
 		}
+		if len(c.AllowedDomains) > 0 {
+			body["allowed_domains"] = c.AllowedDomains
+		}
 		id, err := createOrResolve(client, "/api/v1/crews", body, "/api/v1/crews", c.Slug)
 		if err != nil {
 			return nil, fmt.Errorf("crew %s: %w", c.Slug, err)
