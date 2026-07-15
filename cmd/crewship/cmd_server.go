@@ -26,6 +26,13 @@ Select the active profile per command with --profile, per shell with the
 CREWSHIP_PROFILE env var, or persist a default with 'crewship server use
 <name>'. Authenticate a profile with 'crewship login --profile <name>'.
 
+Precedence: --profile flag > CREWSHIP_PROFILE env > a directory binding
+from 'crewship server add --dir' (cwd auto-select, e.g. per-clone dev-slot
+routing) > the 'server use'-persisted default. The directory binding
+outranks the persisted default, so a directory-mapped clone keeps using
+its bound profile even after 'server use' sets a different one — run
+'crewship server current' to see which layer actually won.
+
 Typical setup:
 
   crewship server add dev1 --server https://crewship-dev1.example
@@ -54,7 +61,7 @@ var serverListCmd = &cobra.Command{
 			return nil
 		}
 
-		active := cli.ActiveProfileName(flagProfile, cfg)
+		active, source := cli.ActiveProfileNameWithSource(flagProfile, cfg)
 		names := make([]string, 0, len(cfg.Servers))
 		for n := range cfg.Servers {
 			names = append(names, n)
@@ -72,7 +79,15 @@ var serverListCmd = &cobra.Command{
 			}
 			marker := "  "
 			if n == active {
-				marker = cli.Green + "* " + cli.Reset
+				// #1210: a directory_profiles cwd match is visually
+				// indistinguishable from the persisted `server use` default
+				// otherwise — tag it "(dir)" so it doesn't look like the
+				// operator's own choice.
+				if source == cli.ProfileSourceDirectory {
+					marker = cli.Green + "*d" + cli.Reset
+				} else {
+					marker = cli.Green + "* " + cli.Reset
+				}
 			}
 			auth := cli.Dim + "no token" + cli.Reset
 			if p.Token != "" {
@@ -88,6 +103,10 @@ var serverListCmd = &cobra.Command{
 		if active != "" && cfg.Servers[active] == nil {
 			fmt.Printf("\n%s! active profile %q has no definition%s — run 'crewship server add %s --server <url>'\n",
 				cli.Yellow, active, cli.Reset, active)
+		}
+		if hint := directoryOverrideHint(cfg, source); hint != "" {
+			fmt.Println()
+			fmt.Println(hint)
 		}
 		return nil
 	},
@@ -224,11 +243,15 @@ var serverCurrentCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		name, p := cfg.ActiveProfile(flagProfile)
+		name, source := cli.ActiveProfileNameWithSource(flagProfile, cfg)
 		if name == "" {
 			fmt.Printf("No profile active (legacy single-server mode).\nServer: %s\n",
 				valueOrDefault(cfg.Server, "http://localhost:8080"))
 			return nil
+		}
+		var p *cli.ServerProfile
+		if cfg.Servers != nil {
+			p = cfg.Servers[name]
 		}
 		if p == nil {
 			fmt.Printf("Active profile %q is selected but not defined (see 'crewship server list').\n", name)
@@ -240,8 +263,31 @@ var serverCurrentCmd = &cobra.Command{
 		}
 		fmt.Printf("Active profile: %s\nServer:         %s\nWorkspace:      %s\nToken:          %s\n",
 			name, p.Server, valueOrDefault(p.Workspace, "(none)"), auth)
+		if hint := directoryOverrideHint(cfg, source); hint != "" {
+			fmt.Println(hint)
+		}
 		return nil
 	},
+}
+
+// directoryOverrideHint explains, when a directory_profiles cwd match won
+// over the persisted `server use` default, exactly which directory
+// triggered it and what the persisted default would otherwise have been
+// (#1210 — this precedence layer previously had zero indication in the
+// CLI's own output, making `server use` look silently broken from inside
+// a directory-mapped clone). Returns "" when source isn't a directory
+// override, so callers can print it unconditionally.
+func directoryOverrideHint(cfg *cli.CLIConfig, source cli.ProfileSource) string {
+	if source != cli.ProfileSourceDirectory || cfg == nil {
+		return ""
+	}
+	_, dir := cli.MatchDirectoryProfileDir(cfg.DirectoryProfiles)
+	persisted := cfg.Current
+	if persisted == "" {
+		persisted = "(none)"
+	}
+	return fmt.Sprintf("%s! directory override for %s — persisted default (`server use`) is %q%s",
+		cli.Yellow, dir, persisted, cli.Reset)
 }
 
 func init() {

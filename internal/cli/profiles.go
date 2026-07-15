@@ -31,6 +31,31 @@ type ServerProfile struct {
 	Workspace string `yaml:"workspace,omitempty"`
 }
 
+// ProfileSource identifies which precedence layer resolved the active
+// profile name — see ActiveProfileNameWithSource. Introduced for #1210:
+// the directory_profiles cwd-match layer outranks the persisted `server
+// use` default but gave no indication anywhere in the CLI's output that
+// it had won, making `server use` look silently broken from inside a
+// directory-mapped clone. Surfacing the source lets `server current` /
+// `server list` explain themselves instead of just showing a name.
+type ProfileSource string
+
+const (
+	// ProfileSourceFlag means --profile supplied the name.
+	ProfileSourceFlag ProfileSource = "flag"
+	// ProfileSourceEnv means CREWSHIP_PROFILE supplied the name.
+	ProfileSourceEnv ProfileSource = "env"
+	// ProfileSourceDirectory means a directory_profiles cwd match supplied
+	// the name — the undocumented 4th precedence layer from #1210.
+	ProfileSourceDirectory ProfileSource = "directory"
+	// ProfileSourcePersisted means cfg.Current (the `server use`-persisted
+	// default) supplied the name.
+	ProfileSourcePersisted ProfileSource = "persisted"
+	// ProfileSourceNone means no profile is active (legacy single-server
+	// mode; top-level Server/Token/Workspace fields are used directly).
+	ProfileSourceNone ProfileSource = "none"
+)
+
 // ActiveProfileName resolves which server profile is active, in precedence
 // order:
 //
@@ -39,22 +64,38 @@ type ServerProfile struct {
 // It returns "" when no profile is selected (single-server / legacy mode), in
 // which case the top-level Server/Token/Workspace fields are used directly.
 // An empty CREWSHIP_PROFILE is treated as unset.
+//
+// This is a thin wrapper around ActiveProfileNameWithSource for callers that
+// only need the name.
 func ActiveProfileName(flagProfile string, cfg *CLIConfig) string {
+	name, _ := ActiveProfileNameWithSource(flagProfile, cfg)
+	return name
+}
+
+// ActiveProfileNameWithSource resolves the active profile name exactly like
+// ActiveProfileName, and additionally reports which precedence layer
+// produced it (see ProfileSource). Callers that only need the name should
+// keep using ActiveProfileName; this variant exists for `server current` /
+// `server list` to explain *why* a given profile is active (#1210).
+func ActiveProfileNameWithSource(flagProfile string, cfg *CLIConfig) (string, ProfileSource) {
 	if flagProfile != "" {
-		return flagProfile
+		return flagProfile, ProfileSourceFlag
 	}
 	if v := strings.TrimSpace(os.Getenv("CREWSHIP_PROFILE")); v != "" {
-		return v
+		return v, ProfileSourceEnv
 	}
 	if cfg == nil {
-		return ""
+		return "", ProfileSourceNone
 	}
 	if len(cfg.DirectoryProfiles) > 0 && workingDir != "" {
 		if name := matchDirectoryProfile(workingDir, cfg.DirectoryProfiles); name != "" {
-			return name
+			return name, ProfileSourceDirectory
 		}
 	}
-	return cfg.Current
+	if cfg.Current != "" {
+		return cfg.Current, ProfileSourcePersisted
+	}
+	return "", ProfileSourceNone
 }
 
 // matchDirectoryProfile returns the profile mapped to the longest configured
@@ -62,17 +103,39 @@ func ActiveProfileName(flagProfile string, cfg *CLIConfig) string {
 // is on path boundaries, so "/w/crewship_1" never matches a cwd under
 // "/w/crewship_10". Returns "" when nothing matches.
 func matchDirectoryProfile(cwd string, dirs map[string]string) string {
+	name, _ := matchDirectoryProfileDir(cwd, dirs)
+	return name
+}
+
+// MatchDirectoryProfileDir is the exported counterpart of
+// matchDirectoryProfileDir, matching against the working directory recorded
+// via SetWorkingDir. Callers (e.g. `server current`) use this to show which
+// configured directory triggered a ProfileSourceDirectory resolution.
+// Returns ("", "") when directory matching is disabled (no working
+// directory recorded) or nothing matches.
+func MatchDirectoryProfileDir(dirs map[string]string) (name string, dir string) {
+	if workingDir == "" {
+		return "", ""
+	}
+	return matchDirectoryProfileDir(workingDir, dirs)
+}
+
+// matchDirectoryProfileDir is matchDirectoryProfile plus the matched
+// directory key itself (cleaned), so callers can explain *which* configured
+// directory triggered the override rather than just the resulting profile
+// name. Returns ("", "") when nothing matches.
+func matchDirectoryProfileDir(cwd string, dirs map[string]string) (name string, dir string) {
 	cwd = filepath.Clean(cwd)
-	best, bestLen := "", -1
-	for dir, name := range dirs {
-		d := filepath.Clean(dir)
-		if cwd == d || strings.HasPrefix(cwd, d+string(os.PathSeparator)) {
-			if len(d) > bestLen {
-				best, bestLen = name, len(d)
+	bestLen := -1
+	for d, n := range dirs {
+		cd := filepath.Clean(d)
+		if cwd == cd || strings.HasPrefix(cwd, cd+string(os.PathSeparator)) {
+			if len(cd) > bestLen {
+				name, dir, bestLen = n, cd, len(cd)
 			}
 		}
 	}
-	return best
+	return name, dir
 }
 
 // ActiveProfile returns the active profile name and its definition. The
