@@ -882,8 +882,16 @@ func (h *ProvisioningHandler) ProvisionRebuild(w http.ResponseWriter, r *http.Re
 		return
 	}
 	// Clear cache so Provisioner won't short-circuit on the existing tag.
+	// cached_requirements is deliberately left alone (#1032): it's the only
+	// signal resolveAgentConfig's fail-closed credential gate has for "is
+	// this crew's actual RUNNING container privileged", and EnqueueForCrew
+	// below is async — nulling it here would open a window where the
+	// container is STILL privileged (unchanged until the rebuild completes)
+	// but the gate reads "unknown" and hands out credentials anyway. The
+	// stale value stays accurate until the provisioning job's completion
+	// handler overwrites it with the freshly computed one.
 	_, err := h.db.ExecContext(r.Context(),
-		`UPDATE crews SET cached_image = NULL, config_hash = NULL, cached_requirements = NULL, updated_at = datetime('now')
+		`UPDATE crews SET cached_image = NULL, config_hash = NULL, updated_at = datetime('now')
 		 WHERE id = ? AND workspace_id = ?`,
 		crewID, workspaceID,
 	)
