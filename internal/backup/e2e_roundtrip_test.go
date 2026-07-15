@@ -701,3 +701,116 @@ func equalStrings(a, b []string) bool {
 	}
 	return true
 }
+
+// TestE2E_AsCrew_RestoresIntoSameWorkspace_NoFKViolation reproduces
+// GitHub issue #1190: `crewship backup restore <bundle> --as-crew=X`
+// against a crew-scope bundle failed with a deferred FK violation
+// ("chats.rowid=… → workspaces") whenever the restore landed on the
+// SAME instance the bundle was taken from — which is the documented,
+// common case (docs/guides/backup.mdx: "Crew-scope bundles restore
+// independently of their parent workspace").
+//
+// Root cause: DumpCrew's bundle carries the crew's parent `workspaces`
+// row (needed to satisfy crews.workspace_id / chats.workspace_id /
+// agents.workspace_id FKs inside the bundle). RemapIDs unconditionally
+// regenerates every remappable table's PK, including `workspaces`, for
+// BOTH --as-workspace and --as-crew restores. But --as-crew only
+// rewrote the CREW's slug (rewriteCrewSlug) — the bundled workspace
+// row kept its ORIGINAL slug. Since workspaces.slug is UNIQUE and the
+// target (same instance) already has a workspace row with that slug
+// under the OLD id, the freshly-regenerated workspace row collided on
+// INSERT OR IGNORE and was silently dropped — while chats.workspace_id
+// (and every other workspace_id FK) had already been rewritten to
+// point at that now-nonexistent new id. The deferred FK check then
+// aborted the whole restore.
+//
+// A narrower fix (leaving `workspaces` un-remapped so the fork reuses
+// the target's existing workspace row) was tried and rejected: agents
+// has UNIQUE(workspace_id, slug), so a forked crew whose agents keep
+// the ORIGINAL (shared) workspace_id but the ORIGINAL (unrenamed)
+// slugs still collides against the source crew's own agents. The
+// actual fix forks the WORKSPACE alongside the crew (rewriteWorkspace
+// Slug reused for --as-crew, same as --as-workspace already does) so
+// every UNIQUE(workspace_id, …) constraint sidesteps collision at
+// once — the forked crew lives in its own dedicated workspace.
+func TestE2E_AsCrew_RestoresIntoSameWorkspace_NoFKViolation(t *testing.T) {
+	ctx := context.Background()
+
+	source := openMigratedDB(t)
+	workspaceID := seedWorkspace(t, source)
+
+	const passphrase = "as-crew-same-instance-e2e-123"
+	createResult, err := backup.CreateBackup(ctx, source, backup.CreateOptions{
+		Scope:      backup.ScopeCrew,
+		CrewID:     "c_alpha",
+		OutputDir:  t.TempDir(),
+		Actor:      backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+		Passphrase: passphrase,
+	})
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+
+	// Restore into the SAME db the bundle was created from — the
+	// canonical same-instance "clone this crew" scenario from the
+	// bug report. A fresh empty target would never exercise the
+	// workspace-slug collision because there'd be nothing to collide
+	// with.
+	restoreResult, err := backup.RestoreBackup(ctx, source, backup.RestoreOptions{
+		Path:       createResult.Path,
+		Passphrase: passphrase,
+		AsCrew:     "alpha-clone",
+		Actor:      backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+	})
+	if err != nil {
+		t.Fatalf("RestoreBackup --as-crew: %v", err)
+	}
+	if restoreResult.RowsInserted <= 0 {
+		t.Errorf("RestoreResult.RowsInserted = %d; want > 0", restoreResult.RowsInserted)
+	}
+
+	// The fork lands in its OWN new workspace — the original workspace
+	// must be untouched and a second one must now exist.
+	var wsCount int
+	if err := source.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspaces`).Scan(&wsCount); err != nil {
+		t.Fatalf("count workspaces: %v", err)
+	}
+	if wsCount != 2 {
+		t.Errorf("workspaces row count = %d, want 2 (original + crew fork's own workspace)", wsCount)
+	}
+
+	// The new crew (and its chats/agents) must be attached to a NEW
+	// workspace id — never the original, and never a dangling
+	// regenerated id that didn't land.
+	var newCrewID, newCrewWorkspaceID string
+	if err := source.QueryRowContext(ctx,
+		`SELECT id, workspace_id FROM crews WHERE slug = ? AND id != 'c_alpha'`, "alpha-clone",
+	).Scan(&newCrewID, &newCrewWorkspaceID); err != nil {
+		t.Fatalf("query restored crew: %v", err)
+	}
+	if newCrewWorkspaceID == "" || newCrewWorkspaceID == workspaceID {
+		t.Errorf("restored crew.workspace_id = %q, want a NEW workspace id distinct from original %q", newCrewWorkspaceID, workspaceID)
+	}
+	var newWorkspaceExists bool
+	if err := source.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM workspaces WHERE id = ?)`, newCrewWorkspaceID,
+	).Scan(&newWorkspaceExists); err != nil {
+		t.Fatalf("check new workspace landed: %v", err)
+	}
+	if !newWorkspaceExists {
+		t.Errorf("restored crew's new workspace_id %q does not correspond to a landed workspaces row", newCrewWorkspaceID)
+	}
+
+	var chatWorkspaceCount int
+	if err := source.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM chats c
+		 JOIN agents a ON a.id = c.agent_id
+		 WHERE a.crew_id = ? AND c.workspace_id = ?`,
+		newCrewID, newCrewWorkspaceID,
+	).Scan(&chatWorkspaceCount); err != nil {
+		t.Fatalf("query restored chats: %v", err)
+	}
+	if chatWorkspaceCount == 0 {
+		t.Errorf("restored crew's chats.workspace_id did not resolve to the crew's own new workspace %q", newCrewWorkspaceID)
+	}
+}
