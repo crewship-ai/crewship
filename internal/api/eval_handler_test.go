@@ -201,6 +201,121 @@ func TestEvalListRuns_WorkspaceScoped(t *testing.T) {
 	}
 }
 
+// TestEvalGetRun_HappyPath — GET /api/v1/eval/runs/{id} returns the full
+// record, including the result/verdict + metrics that `eval runs`
+// (list) already exposed in JSON but the CLI dropped (issue #1191).
+func TestEvalGetRun_HappyPath(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	crewID := seedCrewRow(t, db, "crew-eg1", wsID, "Crew", "crew-eg1")
+	missionID := seedMissionRow(t, db, "mis-eg1", wsID, crewID, "M1")
+
+	if _, err := db.Exec(`INSERT INTO eval_runs
+		(id, workspace_id, kind, mission_id, status, result, seed, signature,
+		 total_tokens, total_cost_usd, regressed, created_at, completed_at)
+		VALUES ('er-get1', ?, 'replay', ?, 'completed', 'ok', 7, 'sig-abc',
+		 1200, 0.15, 0, datetime('now'), datetime('now'))`, wsID, missionID); err != nil {
+		t.Fatalf("seed eval run: %v", err)
+	}
+
+	h := NewEvalHandler(db, newTestLogger())
+	req := httptest.NewRequest("GET", "/api/v1/eval/runs/er-get1", nil)
+	req.SetPathValue("id", "er-get1")
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.GetRun(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		ID           string  `json:"id"`
+		Status       string  `json:"status"`
+		Result       string  `json:"result"`
+		Signature    string  `json:"signature"`
+		TotalTokens  int64   `json:"total_tokens"`
+		TotalCostUSD float64 `json:"total_cost_usd"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.ID != "er-get1" || got.Status != "completed" {
+		t.Errorf("id/status = %q/%q", got.ID, got.Status)
+	}
+	if got.Result != "ok" {
+		t.Errorf("Result = %q, want %q", got.Result, "ok")
+	}
+	if got.Signature != "sig-abc" {
+		t.Errorf("Signature = %q, want %q", got.Signature, "sig-abc")
+	}
+	if got.TotalTokens != 1200 || got.TotalCostUSD != 0.15 {
+		t.Errorf("tokens/cost = %d/%v", got.TotalTokens, got.TotalCostUSD)
+	}
+}
+
+// TestEvalGetRun_NotFound — a genuinely missing id 404s.
+func TestEvalGetRun_NotFound(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	h := NewEvalHandler(db, newTestLogger())
+	req := httptest.NewRequest("GET", "/api/v1/eval/runs/does-not-exist", nil)
+	req.SetPathValue("id", "does-not-exist")
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.GetRun(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestEvalGetRun_CrossTenant_404 — a run that exists but belongs to a
+// different workspace 404s exactly like a missing id (existence isn't
+// leaked to a cross-tenant caller).
+func TestEvalGetRun_CrossTenant_404(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	otherWS := "other-ws"
+	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'Other', 'other')`, otherWS); err != nil {
+		t.Fatalf("seed other ws: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO eval_runs (id, workspace_id, kind, status, created_at)
+		VALUES ('er-foreign', ?, 'regression', 'completed', datetime('now'))`, otherWS); err != nil {
+		t.Fatalf("seed foreign run: %v", err)
+	}
+
+	h := NewEvalHandler(db, newTestLogger())
+	req := httptest.NewRequest("GET", "/api/v1/eval/runs/er-foreign", nil)
+	req.SetPathValue("id", "er-foreign")
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.GetRun(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("cross-tenant get status = %d, want 404", rr.Code)
+	}
+}
+
+// TestEvalGetRun_NoWorkspace_401 mirrors the auth guard other eval
+// handlers share.
+func TestEvalGetRun_NoWorkspace_401(t *testing.T) {
+	db := setupTestDB(t)
+	h := NewEvalHandler(db, newTestLogger())
+	req := httptest.NewRequest("GET", "/api/v1/eval/runs/er-1", nil)
+	req.SetPathValue("id", "er-1")
+	rr := httptest.NewRecorder()
+	h.GetRun(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rr.Code)
+	}
+}
+
 func TestEvalReplay_NonAdmin_Forbidden(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)

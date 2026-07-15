@@ -2,6 +2,7 @@ package quartermaster
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -433,6 +434,94 @@ func TestSummarize_JoinsReasons(t *testing.T) {
 	}
 	if !strings.Contains(got, ";") {
 		t.Errorf("expected semicolon separator, got %q", got)
+	}
+}
+
+// TestGetRun_HappyPath — GetRun returns the full row, including the
+// result/verdict column ListRuns already selects (issue #1191: the row
+// is persisted, it just had no single-record fetch path).
+func TestGetRun_HappyPath(t *testing.T) {
+	db := openDB(t)
+	defer db.Close()
+	if _, err := db.Exec(runsSchemaSQL); err != nil {
+		t.Fatal(err)
+	}
+	if err := InsertReplayRun(context.Background(), db,
+		RunRecord{ID: "r1", WorkspaceID: "ws_test", MissionID: "m1", Seed: 7, CreatedBy: "tester"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateRunStatus(context.Background(), db, "r1",
+		"completed", "ok", "sig123", 500, 0.02, false); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := GetRun(context.Background(), db, "ws_test", "r1")
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.ID != "r1" || got.MissionID != "m1" || got.Status != "completed" {
+		t.Errorf("got id=%s mission=%s status=%s", got.ID, got.MissionID, got.Status)
+	}
+	if got.Result != "ok" {
+		t.Errorf("Result = %q, want %q", got.Result, "ok")
+	}
+	if got.Signature != "sig123" {
+		t.Errorf("Signature = %q, want %q", got.Signature, "sig123")
+	}
+	if got.TotalTokens != 500 || got.TotalCostUSD != 0.02 {
+		t.Errorf("tokens/cost = %d/%v", got.TotalTokens, got.TotalCostUSD)
+	}
+	if got.CompletedAt == nil {
+		t.Error("CompletedAt should be populated for a completed run")
+	}
+}
+
+// TestGetRun_NotFound — a missing id returns the ErrRunNotFound sentinel
+// so the API layer can 404 without leaking whether the row exists.
+func TestGetRun_NotFound(t *testing.T) {
+	db := openDB(t)
+	defer db.Close()
+	if _, err := db.Exec(runsSchemaSQL); err != nil {
+		t.Fatal(err)
+	}
+	_, err := GetRun(context.Background(), db, "ws_test", "does-not-exist")
+	if !errors.Is(err, ErrRunNotFound) {
+		t.Errorf("GetRun err = %v, want ErrRunNotFound", err)
+	}
+}
+
+// TestGetRun_WorkspaceScoped — a run that exists but belongs to a
+// different workspace must 404 identically to a truly-missing id
+// (cross-tenant probes can't distinguish "wrong workspace" from
+// "doesn't exist").
+func TestGetRun_WorkspaceScoped(t *testing.T) {
+	db := openDB(t)
+	defer db.Close()
+	if _, err := db.Exec(runsSchemaSQL); err != nil {
+		t.Fatal(err)
+	}
+	if err := InsertReplayRun(context.Background(), db,
+		RunRecord{ID: "r1", WorkspaceID: "ws_owner", MissionID: "m1"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := GetRun(context.Background(), db, "ws_intruder", "r1")
+	if !errors.Is(err, ErrRunNotFound) {
+		t.Errorf("cross-tenant GetRun err = %v, want ErrRunNotFound", err)
+	}
+}
+
+// TestGetRun_RequiresWorkspaceAndID covers the validation guards.
+func TestGetRun_RequiresWorkspaceAndID(t *testing.T) {
+	db := openDB(t)
+	defer db.Close()
+	if _, err := db.Exec(runsSchemaSQL); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetRun(context.Background(), db, "", "r1"); err == nil {
+		t.Error("want error for empty workspace_id")
+	}
+	if _, err := GetRun(context.Background(), db, "ws_test", ""); err == nil {
+		t.Error("want error for empty id")
 	}
 }
 
