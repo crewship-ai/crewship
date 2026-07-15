@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -69,13 +70,32 @@ func setupFeedbackTestBed(t *testing.T) *feedbackTestBed {
 		t.Fatalf("seed other member: %v", err)
 	}
 
+	messageID := "msg-fb-1"
+	seedConvMessage(t, h.db, messageID, chatID, "agent-fb")
+
 	return &feedbackTestBed{
 		h:         h,
 		userID:    userID,
 		otherID:   otherID,
 		wsID:      wsID,
 		chatID:    chatID,
-		messageID: "msg-fb-1",
+		messageID: messageID,
+	}
+}
+
+// seedConvMessage inserts a row into the conversation_messages search
+// mirror (migration v111) — the table message_feedback.Create checks
+// (#1208) to confirm message_id refers to a real message before creating
+// a feedback row. Production rows land here via conversation.Store.Append;
+// tests insert directly since there's no conversation store wired up in
+// the API-handler test harness.
+func seedConvMessage(t *testing.T, db interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}, messageID, sessionID, agentID string) {
+	t.Helper()
+	if _, err := db.Exec(`INSERT INTO conversation_messages (id, session_id, agent_id, role, content)
+        VALUES (?, ?, ?, 'user', 'test message')`, messageID, sessionID, agentID); err != nil {
+		t.Fatalf("seed conversation_messages row %q: %v", messageID, err)
 	}
 }
 
@@ -137,6 +157,35 @@ func TestFeedback_Create_CrossWorkspaceChat_404(t *testing.T) {
 	bed.h.Create(rr, req)
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("cross-ws create = %d, want 404", rr.Code)
+	}
+}
+
+// TestFeedback_Create_UnknownMessage_404 pins issue #1208: message_id must
+// reference a real message before a feedback row is created. Before this
+// fix, `feedback create --message msg_doesnotexist --signal helpful`
+// silently succeeded (201) and left an orphan row nothing could trace back
+// to a real message.
+func TestFeedback_Create_UnknownMessage_404(t *testing.T) {
+	bed := setupFeedbackTestBed(t)
+	req := feedbackReq("POST", "/api/v1/feedback",
+		`{"message_id":"msg_doesnotexist12345","chat_id":"`+bed.chatID+`","signal":"helpful"}`,
+		bed.userID)
+	rr := httptest.NewRecorder()
+	bed.h.Create(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("create with unknown message_id = %d, want 404; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "message not found") {
+		t.Errorf("error body = %q, want to mention 'message not found'", rr.Body.String())
+	}
+	// No orphan row must have been created.
+	var count int
+	if err := bed.h.db.QueryRow(
+		`SELECT COUNT(*) FROM message_feedback WHERE message_id = 'msg_doesnotexist12345'`).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("orphan feedback row created for nonexistent message: count=%d", count)
 	}
 }
 

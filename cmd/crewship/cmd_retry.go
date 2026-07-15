@@ -144,6 +144,14 @@ type runMetadata struct {
 // CLI. If the run is not on the first page, the user can pass --limit via
 // `crewship history` first to find the ID — retry itself targets a known ID.
 func fetchRun(client *cli.Client, runID string) (runMetadata, error) {
+	// #1193: `crewship routine runs <slug>` surfaces run_-shaped pipeline
+	// run ids, but this list-and-scan only ever finds msg_-shaped
+	// chat-turn run ids (see cli.IsPipelineRunID). Catch the mismatch
+	// before burning a request on a list scan that can never match, and
+	// say so instead of a bare "not found".
+	if cli.IsPipelineRunID(runID) {
+		return runMetadata{}, cli.PipelineRunIDHint(runID)
+	}
 	q := url.Values{}
 	q.Set("limit", "100")
 	resp, err := client.Get("/api/v1/runs?" + q.Encode())

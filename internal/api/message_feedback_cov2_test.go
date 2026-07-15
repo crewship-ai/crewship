@@ -105,6 +105,7 @@ func TestFB2_Create_PersistedIDLookupFallback(t *testing.T) {
 		BEGIN DELETE FROM message_feedback WHERE id = NEW.id; END`); err != nil {
 		t.Fatalf("create trigger: %v", err)
 	}
+	seedConvMessage(t, bed.h.db, "m-fb2", bed.chatID, "agent-fb")
 	rr := covFB2Post(t, bed.h, bed.userID,
 		`{"message_id":"m-fb2","chat_id":"`+bed.chatID+`","signal":"helpful","reason":"good"}`)
 	if rr.Code != http.StatusCreated {
