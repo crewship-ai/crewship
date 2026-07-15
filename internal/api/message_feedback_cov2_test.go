@@ -1,9 +1,9 @@
 package api
 
 // Second coverage pass for message_feedback.go: ensureChatVisible's guard
-// and DB-error returns, Create's visibility-error 500, the no-chat
-// workspace-fallback 403/500, the post-insert id-lookup fallback, Delete's
-// exec failure, and List's query failure.
+// and DB-error returns, Create's message/chat resolution failures (404 vs
+// 500), the post-insert id-lookup fallback, Delete's exec failure, and
+// List's query failure.
 
 import (
 	"context"
@@ -57,6 +57,7 @@ func TestFB2_EnsureChatVisible_DBErrors(t *testing.T) {
 	})
 	t.Run("membership query error surfaces 500 via Create", func(t *testing.T) {
 		bed := setupFeedbackTestBed(t)
+		seedConvMessage(t, bed.h.db, "m1", bed.chatID, "agent-fb")
 		if _, err := bed.h.db.Exec(`ALTER TABLE workspace_members RENAME TO wm_hidden_fb2`); err != nil {
 			t.Fatalf("rename workspace_members: %v", err)
 		}
@@ -68,20 +69,31 @@ func TestFB2_EnsureChatVisible_DBErrors(t *testing.T) {
 	})
 }
 
-func TestFB2_Create_NoChatFallback(t *testing.T) {
-	t.Run("no membership 403", func(t *testing.T) {
+// TestFB2_Create_ChatResolutionFailures covers Create's behavior once
+// workspace/chat is derived from the message's own real session_id rather
+// than from a caller-supplied chat_id or a "most recent membership"
+// fallback (removed as part of a CodeRabbit-flagged cross-tenant existence
+// probe fix on this PR — see the long comment above the lookup in
+// message_feedback.go). A message_id that doesn't exist at all, and a
+// message whose real chat isn't visible to the caller, must both collapse
+// to the same generic 404 so neither case leaks information; only a
+// genuine DB error (schema drift, outage) surfaces as 500.
+func TestFB2_Create_ChatResolutionFailures(t *testing.T) {
+	t.Run("unknown message_id 404", func(t *testing.T) {
 		bed := setupFeedbackTestBed(t)
-		// A user with zero workspace memberships.
+		// A user with zero workspace memberships — irrelevant here, since
+		// the message lookup itself fails before membership is checked.
 		if _, err := bed.h.db.Exec(`INSERT INTO users (id, email, full_name) VALUES ('fb2-loner', 'l@fb.com', 'L')`); err != nil {
 			t.Fatalf("seed user: %v", err)
 		}
 		rr := covFB2Post(t, bed.h, "fb2-loner", `{"message_id":"m1","signal":"helpful"}`)
-		if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "no workspace membership") {
+		if rr.Code != http.StatusNotFound || !strings.Contains(rr.Body.String(), "message not found") {
 			t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 		}
 	})
 	t.Run("membership lookup error 500", func(t *testing.T) {
 		bed := setupFeedbackTestBed(t)
+		seedConvMessage(t, bed.h.db, "m1", bed.chatID, "agent-fb")
 		if _, err := bed.h.db.Exec(`ALTER TABLE workspace_members RENAME TO wm_hidden_fb2b`); err != nil {
 			t.Fatalf("rename workspace_members: %v", err)
 		}

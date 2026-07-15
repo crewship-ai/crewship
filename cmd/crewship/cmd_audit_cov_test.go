@@ -176,6 +176,9 @@ func TestAuditRunE_UserFlagBadShapeErrors(t *testing.T) {
 	if len(stub.CallsFor("GET", "/api/v1/audit")) != 0 {
 		t.Error("bad --user value must not reach the server at all")
 	}
+	if len(stub.CallsFor("GET", "/api/v1/workspaces/cabcdefghijklmnopqrs/members")) != 0 {
+		t.Error("bad --user value must not trigger an email-resolution lookup against /members either")
+	}
 }
 
 // TestAuditRunE_UserFlagResolvesEmail covers the other half of #1207: an

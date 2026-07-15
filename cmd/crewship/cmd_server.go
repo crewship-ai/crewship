@@ -287,6 +287,9 @@ var serverCurrentCmd = &cobra.Command{
 		}
 		if p == nil {
 			fmt.Printf("Active profile %q is selected but not defined (see 'crewship server list').\n", name)
+			if hint := directoryOverrideHint(cfg, source); hint != "" {
+				fmt.Println(hint)
+			}
 			return nil
 		}
 		auth := "(none)"

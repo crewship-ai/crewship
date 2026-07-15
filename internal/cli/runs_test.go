@@ -106,6 +106,7 @@ func TestGetRun_OKAndNotFound(t *testing.T) {
 // `routine logs`, not a bare "run not found" — and must not even hit the
 // server, since a run_ id can never be found via /api/v1/runs/{id}.
 func TestGetRun_PipelineRunIDRejectedWithHint(t *testing.T) {
+	t.Parallel()
 	called := false
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
