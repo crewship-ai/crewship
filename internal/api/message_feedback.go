@@ -216,15 +216,12 @@ func (h *MessageFeedbackHandler) Create(w http.ResponseWriter, r *http.Request) 
 	// preferred. When present, we derive the workspace from the chat
 	// row and verify the user is a member of that workspace.
 	//
-	// Message↔chat ownership is NOT validated here because messages
-	// live in JSONL files (chats.jsonl_path), not a SQL table — a
-	// per-POST file read would slow the path enough to discourage
-	// real-time feedback collection. The threat model is acceptable:
-	// workspaces are trust boundaries, so a workspace member filing
-	// feedback against any chat in their workspace is by design.
-	// Cross-tenant probes are blocked by ensureChatVisible. Forged
-	// fabricated message_ids are visible at eval-mining time (the
-	// grader joins back to the JSONL store and orphans are dropped).
+	// Message↔chat ownership (which chat a message belongs to) is still
+	// NOT cross-checked here — only that the message exists at all. The
+	// threat model is acceptable: workspaces are trust boundaries, so a
+	// workspace member filing feedback against any message in their
+	// workspace is by design. Cross-tenant probes are blocked by
+	// ensureChatVisible.
 	//
 	// When absent we fall back to the user's MOST RECENT workspace
 	// (ORDER BY created_at DESC). The previous version sorted ASC,
@@ -266,6 +263,40 @@ func (h *MessageFeedbackHandler) Create(w http.ResponseWriter, r *http.Request) 
 			replyError(w, http.StatusInternalServerError, "internal")
 			return
 		}
+	}
+
+	// #1208: message_id must reference a real message before we create a
+	// feedback row — otherwise `feedback create --message <anything>`
+	// silently succeeds and leaves an orphan row nothing can trace back.
+	// Messages themselves live in JSONL files (chats.jsonl_path), not a
+	// SQL table, and a per-POST file read would slow this path enough to
+	// discourage real-time feedback collection — so we don't read the
+	// JSONL directly. Instead we check the conversation_messages search
+	// mirror (migration v111): every Store.Append dual-writes a row here
+	// keyed by the same message id, so this is a single indexed lookup,
+	// not a file read. Checked here (after the chat/workspace resolution
+	// above) so an unauthorized or malformed request still gets its more
+	// specific 401/400/403/404 first, rather than a message-not-found
+	// that leaks nothing new but reorders the error priority.
+	//
+	// Known limitation: the mirror is "search-from-now-on" (no backfill of
+	// pre-v111 JSONL) and the dual-write is best-effort (a transient DB
+	// hiccup logs and continues rather than failing the chat turn) — so in
+	// theory a very old or unluckily-timed message_id could 404 here even
+	// though the JSONL row exists. That's an acceptable trade for closing
+	// the orphan-row hole: false 404s are rare and visible immediately to
+	// the caller, whereas the orphan-row bug was silent and permanent.
+	var msgExistsProbe int
+	existErr := h.db.QueryRowContext(r.Context(),
+		`SELECT 1 FROM conversation_messages WHERE id = ?`, body.MessageID).Scan(&msgExistsProbe)
+	if errors.Is(existErr, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "message not found")
+		return
+	}
+	if existErr != nil {
+		h.logger.Error("feedback message existence check", "err", existErr, "message_id", body.MessageID)
+		replyError(w, http.StatusInternalServerError, "internal")
+		return
 	}
 
 	var tracePtr *string

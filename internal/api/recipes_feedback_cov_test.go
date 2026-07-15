@@ -585,6 +585,7 @@ func TestCovRecFeedbackCreate_HappyWorkspaceFallback(t *testing.T) {
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 
+	seedConvMessage(t, db, "msg-1", "sess-1", "agent-1")
 	body := `{"message_id":"msg-1","signal":"helpful","reason":"nice"}`
 	rec := httptest.NewRecorder()
 	h.Create(rec, covRecFeedbackReq(t, body, userID))
@@ -617,6 +618,7 @@ func TestCovRecFeedbackCreate_Upsert(t *testing.T) {
 	userID := seedTestUser(t, db)
 	seedTestWorkspace(t, db, userID)
 
+	seedConvMessage(t, db, "msg-up", "sess-up", "agent-1")
 	first := `{"message_id":"msg-up","signal":"helpful","reason":"first"}`
 	rec := httptest.NewRecorder()
 	h.Create(rec, covRecFeedbackReq(t, first, userID))
@@ -656,6 +658,7 @@ func TestCovRecFeedbackCreate_DBError(t *testing.T) {
 	userID := seedTestUser(t, db)
 	seedTestWorkspace(t, db, userID)
 
+	seedConvMessage(t, db, "m1", "sess-1", "agent-1")
 	// Fault injection: drop the insert target table → 500.
 	if _, err := db.Exec(`DROP TABLE message_feedback`); err != nil {
 		t.Fatalf("drop message_feedback: %v", err)
