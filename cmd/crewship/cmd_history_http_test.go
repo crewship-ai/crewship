@@ -107,6 +107,35 @@ func TestFetchRun_NotFound(t *testing.T) {
 	}
 }
 
+// TestFetchRun_PipelineRunIDRejectedWithHint pins issue #1193:
+// `crewship routine runs <slug>` surfaces run_-shaped pipeline run ids,
+// but fetchRun (shared by inspect/explain/retry/export/copy-prompt) only
+// ever resolves msg_-shaped chat-turn run ids. Feeding a run_ id in must
+// produce a clear hint instead of the generic "not found in last 100
+// runs" — and must not even hit the server, since a run_ id can never
+// appear in the /api/v1/runs list.
+func TestFetchRun_PipelineRunIDRejectedWithHint(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer srv.Close()
+
+	_, err := fetchRun(cli.NewClient(srv.URL, "t", ""), "run_cmrm3xxzk0083de436e64")
+	if err == nil {
+		t.Fatal("expected error for a pipeline run_ id, got nil")
+	}
+	if called {
+		t.Error("fetchRun should reject a run_-shaped id before making any HTTP call")
+	}
+	for _, want := range []string{"pipeline run", "routine logs"} {
+		if !strings.Contains(strings.ToLower(err.Error()), want) {
+			t.Errorf("error %q should mention %q", err.Error(), want)
+		}
+	}
+}
+
 func TestFetchPromptsParallel_FillsAllInOrder(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Path: /api/v1/chats/{chatId}/messages
