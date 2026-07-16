@@ -573,6 +573,26 @@ func assertBoundCrewWorkspaceDB(w http.ResponseWriter, r *http.Request, db *sql.
 	return true
 }
 
+// effectiveCrewFilter returns the crew filter an internal read/list
+// endpoint should apply when it accepts an OPTIONAL ?crew_id (#1186
+// remainder: crew-connections, issues list, mission lookups). For a
+// crew-bound (crwv1) caller the token's cryptographic binding is
+// authoritative and CONSTRAINS the result: an omitted ?crew_id no longer
+// means workspace-wide — the bound crew is used instead, mirroring the
+// credential-metadata listing (#1159/#1178). An explicit ?crew_id that
+// disagrees with the binding was already 403'd by requireInternal before
+// the handler ran, so context and query can only agree here; preferring
+// the context value keeps the guarantee even if the middleware chain is
+// ever reordered (the round-8 lesson: never assume the other middleware
+// ran). Workspace-bound (wsv1) and master-token callers have no crew
+// binding and keep the query-driven optional-filter semantics unchanged.
+func effectiveCrewFilter(r *http.Request) string {
+	if boundCrew := InternalTokenCrewFromContext(r.Context()); boundCrew != "" {
+		return boundCrew
+	}
+	return r.URL.Query().Get("crew_id")
+}
+
 // assertBoundChatWorkspaceDB is the chat-table analogue of
 // assertBoundCrewWorkspaceDB: it rejects an internal-auth request whose
 // body-carried chat ID does not resolve to the token's bound workspace

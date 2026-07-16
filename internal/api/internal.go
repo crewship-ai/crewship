@@ -447,12 +447,12 @@ func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 			}
 			// Crew scope — a crew-bound token pins the crew. A caller-supplied
 			// ?crew_id that disagrees is the enumerate-a-sibling-crew forgery
-			// #1159 closes (403). We do NOT inject a crew_id when omitted:
-			// injecting would silently narrow the many OTHER internal endpoints
-			// that scope OPTIONALLY by crew_id (status, issues, missions), a
-			// behaviour change beyond this issue's scope. The credential
-			// listing — the endpoint that mattered — instead reads the
-			// crew from context (InternalTokenCrewFromContext), which is
+			// #1159 closes (403). We still do NOT inject a crew_id when
+			// omitted: the per-route decision belongs to the handlers, which
+			// read the binding from context instead — optional-?crew_id read
+			// endpoints (credentials, crew-connections, issues, missions)
+			// constrain via effectiveCrewFilter, and body-carried crew fields
+			// go through assertBoundCrewWorkspaceDB (#1186), both of which are
 			// authoritative and unforgeable regardless of the query.
 			if reqCrew := q.Get("crew_id"); reqCrew != "" && reqCrew != crewID {
 				h.logger.Warn("internal API cross-crew request refused (crew token)",

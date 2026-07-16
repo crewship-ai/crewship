@@ -63,6 +63,16 @@ func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) 
 	if !assertInternalTokenWorkspace(w, r, req.WorkspaceID) {
 		return
 	}
+	// #1186: crew_id is body-carried, so requireInternal's ?crew_id gate
+	// never sees it. A crew-bound (crwv1) token may only create missions in
+	// its OWN crew — the lead-agent check below proves the agent is in the
+	// NAMED crew, not that the named crew is the caller's, so a compromised
+	// crew sidecar could otherwise plant a mission in a sibling crew. A
+	// workspace-bound token's crew must resolve to the bound workspace
+	// (PR-F24 foreign-ID closure).
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &req.CrewID) {
+		return
+	}
 
 	// SECURITY (defense-in-depth): verify the lead agent actually belongs to
 	// the supplied crew+workspace. Without this, a compromised agent could
@@ -197,7 +207,10 @@ func (h *InternalMissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "workspace_id is required")
 		return
 	}
-	crewID := r.URL.Query().Get("crew_id")
+	// #1186: for a crew-bound (crwv1) token the binding constrains the
+	// lookup — omitting ?crew_id no longer widens it to the whole
+	// workspace, so a sibling crew's mission id resolves to 404.
+	crewID := effectiveCrewFilter(r)
 
 	selArgs := []any{missionID, wsID}
 	selQuery := `SELECT status FROM missions WHERE id = ? AND workspace_id = ?`
@@ -271,7 +284,9 @@ func (h *InternalMissionHandler) Get(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "workspace_id is required")
 		return
 	}
-	crewID := r.URL.Query().Get("crew_id")
+	// #1186: same crew-bound constraint as Start — the binding scopes the
+	// read, so an enumerated sibling-crew mission id is a 404, not a leak.
+	crewID := effectiveCrewFilter(r)
 
 	var m struct {
 		ID          string  `json:"id"`

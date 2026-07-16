@@ -27,6 +27,14 @@ func (h *QueryHandler) ReportConfidence(w http.ResponseWriter, r *http.Request) 
 		replyError(w, http.StatusBadRequest, "agent_id and crew_id required, confidence must be 0-1")
 		return
 	}
+	// #1186: crew_id is body-carried, so requireInternal's ?crew_id gate
+	// never sees it. A crew-bound (crwv1) token may only report confidence
+	// for its OWN crew's tasks (and escalate into its own crew); a
+	// workspace-bound token's crew must resolve to the bound workspace.
+	// The resolved-workspace re-check below stays as the layered defense.
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.CrewID) {
+		return
+	}
 
 	// Resolve task, workspace and chat from DB instead of trusting request body.
 	var taskID, missionID, resolvedWsID string

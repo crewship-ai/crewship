@@ -76,6 +76,15 @@ func (h *CrewMessagingHandler) SendMessage(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// #1186: a crew-bound (crwv1) token may only send AS its own crew —
+	// from_crew_id is the sender attribution, so a compromised crew-A
+	// sidecar must not impersonate sibling crew B (whose connections it
+	// would then message through). to_crew_id is the recipient and stays
+	// legitimately foreign; the workspace-membership check above covers it.
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &req.FromCrewID) {
+		return
+	}
+
 	// Verify the from_crew actually belongs to the claimed workspace.
 	actualWSID := h.resolveWorkspaceID(r.Context(), req.FromCrewID)
 	if actualWSID == "" || actualWSID != req.WorkspaceID {
