@@ -64,6 +64,25 @@ CREATE TABLE pipelines (
     deleted_at               TEXT,
     UNIQUE (workspace_id, slug)
 );
+
+CREATE TABLE journal_entries (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    crew_id TEXT,
+    agent_id TEXT,
+    mission_id TEXT,
+    ts TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    entry_type TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT 'info',
+    actor_type TEXT NOT NULL DEFAULT 'system',
+    actor_id TEXT,
+    summary TEXT NOT NULL,
+    payload TEXT NOT NULL DEFAULT '{}',
+    refs TEXT NOT NULL DEFAULT '{}',
+    trace_id TEXT,
+    span_id TEXT,
+    expires_at TEXT
+);
 `
 
 func openStoreTestDB(t *testing.T) *sql.DB {
@@ -429,6 +448,70 @@ func TestStore_SoftDelete_HidesFromQueries(t *testing.T) {
 		// because the schema is migrated to a partial unique index,
 		// flip this to expect success and document the change.
 		t.Logf("save after soft-delete returned: %v (UNIQUE blocks recreation; design choice)", err)
+	}
+}
+
+// TestStore_Save_RevivingSoftDeletedSlug_PurgesStaleHistory reproduces the
+// dev1 finding: UNIQUE(workspace_id, slug) forces Save() to revive a
+// soft-deleted row (same id) rather than insert a fresh one when a caller
+// (e.g. `crewship seed --nuke` followed by reseed) recreates a pipeline
+// under a previously-deleted slug. Reviving the row must not drag along the
+// old pipeline's invocation stats or journal history — otherwise a freshly
+// seeded/authored routine shows up with someone else's stale run history
+// and a misleading "10 invocations, last FAILED" badge before it has ever
+// actually run.
+func TestStore_Save_RevivingSoftDeletedSlug_PurgesStaleHistory(t *testing.T) {
+	db := openStoreTestDB(t)
+	defer db.Close()
+	s := NewStore(db)
+	ctx := context.Background()
+
+	first, err := s.Save(ctx, validSaveInput("feed-watch-probe"))
+	if err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	for i := 0; i < 10; i++ {
+		if err := s.RecordInvocation(ctx, first.ID, "FAILED"); err != nil {
+			t.Fatalf("record invocation %d: %v", i, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `
+INSERT INTO journal_entries (id, workspace_id, entry_type, actor_type, summary, payload)
+VALUES ('je_1', 'ws_test', 'pipeline.run.failed', 'system', 'Pipeline feed-watch-probe failed at step fetch',
+        '{"pipeline_id":"`+first.ID+`"}')`); err != nil {
+		t.Fatalf("seed journal entry: %v", err)
+	}
+
+	if err := s.SoftDelete(ctx, first.ID); err != nil {
+		t.Fatalf("soft delete: %v", err)
+	}
+
+	revived, err := s.Save(ctx, validSaveInput("feed-watch-probe"))
+	if err != nil {
+		t.Fatalf("revive save: %v", err)
+	}
+	if revived.ID != first.ID {
+		t.Fatalf("expected the UNIQUE(workspace_id, slug) row to be reused, got new id %q vs old %q", revived.ID, first.ID)
+	}
+	if revived.InvocationCount != 0 {
+		t.Errorf("invocation_count should reset on revive, got %d", revived.InvocationCount)
+	}
+	if revived.LastInvocationStatus != "" {
+		t.Errorf("last_invocation_status should reset on revive, got %q", revived.LastInvocationStatus)
+	}
+	if revived.LastInvokedAt != nil {
+		t.Errorf("last_invoked_at should reset on revive, got %v", revived.LastInvokedAt)
+	}
+
+	var stale int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM journal_entries WHERE json_extract(payload, '$.pipeline_id') = ?`,
+		first.ID,
+	).Scan(&stale); err != nil {
+		t.Fatalf("count journal entries: %v", err)
+	}
+	if stale != 0 {
+		t.Errorf("expected the old pipeline's journal history to be purged on revive, found %d stale entries", stale)
 	}
 }
 
