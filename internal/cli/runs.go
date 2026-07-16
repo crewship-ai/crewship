@@ -46,18 +46,6 @@ func (r *RunDetail) IsTerminal() bool {
 	return false
 }
 
-// IsPipelineRunID reports whether id has the shape minted by the pipeline
-// executor for ROUTINE runs (internal/pipeline.NewRunID: "run_" + CUID) —
-// as opposed to the "msg_" shape minted for agent chat-turn runs (the id
-// `crewship history` surfaces, and the id GetRun/fetchRun actually
-// resolve via /api/v1/runs). `crewship routine runs <slug>` surfaces
-// run_ ids in its RUN_ID column; feeding one into a chat-turn-run command
-// (diff/inspect/explain/resume) otherwise hits a bare "run not found" 404
-// with no hint about the ID-namespace mismatch (issue #1193).
-func IsPipelineRunID(id string) bool {
-	return strings.HasPrefix(id, "run_")
-}
-
 // PipelineRunIDHint is the shared, issue-#1193 error message for a
 // run_-shaped id fed into a command that only resolves msg_-shaped
 // chat-turn run ids. Both GetRun (backing diff/resume) and fetchRun
