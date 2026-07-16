@@ -865,7 +865,10 @@ carrying the schedule `id` plus the verb that was applied:
 
 ```bash
 $ crewship routine schedules now psched_abc --format json
-{"id":"psched_abc","fired":true}
+{
+  "id": "psched_abc",
+  "fired": true
+}
 ```
 
 The default (table) output stays human-readable and is unchanged.

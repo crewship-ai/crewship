@@ -125,12 +125,18 @@ func TestRoutineSchedulesCreateRunE_Format(t *testing.T) {
 			"cron_expr": "0 3 * * *",
 			"timezone":  "UTC",
 		}))
+	// routineSchedulesCreateCmd is package-level, so these values would
+	// otherwise persist into every later test in the package.
 	if ferr := routineSchedulesCreateCmd.Flags().Set("slug", "classify-ticket"); ferr != nil {
 		t.Fatalf("set --slug: %v", ferr)
 	}
 	if ferr := routineSchedulesCreateCmd.Flags().Set("cron", "0 3 * * *"); ferr != nil {
 		t.Fatalf("set --cron: %v", ferr)
 	}
+	t.Cleanup(func() {
+		_ = routineSchedulesCreateCmd.Flags().Set("slug", "")
+		_ = routineSchedulesCreateCmd.Flags().Set("cron", "")
+	})
 
 	flagFormat = "json"
 	t.Cleanup(func() { flagFormat = "" })
