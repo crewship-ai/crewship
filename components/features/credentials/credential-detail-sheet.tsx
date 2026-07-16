@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { formatDate, formatRelativeTime } from "@/lib/time"
 import { getBrand } from "@/lib/credential-providers/registry"
+import { Capability } from "@/lib/capabilities"
 import { useAbilities } from "@/hooks/use-abilities"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
@@ -114,15 +115,18 @@ export function CredentialDetailSheet({
   // Hide affordances users can't perform rather than letting them
   // click through to a 403. Mirrors the backend gating exactly:
   //   * Test + value update (PATCH)  → MANAGER+  → CASL "update"
-  //   * Rotate w/ grace overlap      → OWNER/ADMIN (canRole "manage"
-  //     in credential_rotation.go)   → CASL "manage"
+  //   * Rotate w/ grace overlap      → OWNER/ADMIN via role OR any
+  //     member holding the credential.rotate capability
+  //     (requireRoleOrCapabilityOrForbid in credential_rotation.go,
+  //     #1028) → CASL "manage" OR hasCapability
   //   * Delete                       → OWNER/ADMIN (credentials.go)
   //     → CASL "delete"
   // MANAGER has update but neither manage nor delete, so they keep
-  // the value-update flow and lose the two buttons that always 403'd.
-  const { abilities } = useAbilities()
+  // the value-update flow — and see Rotate only when explicitly
+  // granted credential.rotate (#1034).
+  const { abilities, hasCapability } = useAbilities()
   const canUpdate = abilities.can("update", "Credential")
-  const canRotate = abilities.can("manage", "Credential")
+  const canRotate = abilities.can("manage", "Credential") || hasCapability(Capability.CredentialRotate)
   const canDelete = abilities.can("delete", "Credential")
 
   React.useEffect(() => {
