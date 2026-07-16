@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -61,6 +63,63 @@ func looksLikeSubcommandTypo(arg string) bool {
 		return false
 	}
 	return subcommandSlugRe.MatchString(arg)
+}
+
+// maxTypoArgs bounds looksLikeSubcommandInvocation. Two tokens covers the
+// shape of essentially every real command (`crewship routine list`,
+// `crewship agent get`) and therefore of essentially every typo of one.
+// Three-plus bare tokens is where natural language starts to dominate
+// ("why is this slow"), and there is no shape-based way to tell that from
+// a hypothetical three-word command — so we stop guessing and treat it as
+// a prompt. That asymmetry is deliberate: a false "unknown command" on a
+// real question costs one retry with -p, while a false prompt costs a paid
+// agent run (#1218).
+const maxTypoArgs = 2
+
+// looksLikeSubcommandInvocation reports whether the bare positionals look
+// like an attempt to invoke a subcommand rather than a question for the
+// default agent.
+//
+// Cobra has already resolved every real command by the time root's RunE
+// runs, so slug-shaped tokens that reach us are, by construction, unknown
+// to Cobra. The count bound is what keeps a natural-language question out:
+// its individual words are slug-shaped too ("why", "is", "this", "slow"
+// all match subcommandSlugRe), so shape alone cannot separate the two —
+// only brevity can.
+func looksLikeSubcommandInvocation(args []string) bool {
+	if len(args) == 0 || len(args) > maxTypoArgs {
+		return false
+	}
+	for _, a := range args {
+		if !looksLikeSubcommandTypo(a) {
+			return false
+		}
+	}
+	return true
+}
+
+// unknownCommandError renders the "unknown command" error for a bare
+// slug-shaped invocation, with Cobra's own suggestions when it has any.
+//
+// We hand-roll this because rootCmd.Args is ArbitraryArgs (required so
+// `crewship "say hi"` parses at all), and ArbitraryArgs discards Cobra's
+// legacyArgs check — which is what would otherwise produce both this error
+// and the "Did you mean" list for free.
+func unknownCommandError(cmd *cobra.Command, args []string) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "unknown command %q for %q", args[0], cmd.CommandPath())
+	if suggestions := cmd.SuggestionsFor(args[0]); len(suggestions) > 0 {
+		b.WriteString("\n\nDid you mean this?\n")
+		for _, s := range suggestions {
+			fmt.Fprintf(&b, "\t%s\n", s)
+		}
+	} else {
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(&b, "\nRun %q to see available commands.\n", cmd.CommandPath()+" --help")
+	fmt.Fprintf(&b, "To send this to the default agent as a prompt instead, use %q.",
+		cmd.CommandPath()+" -p "+strconv.Quote(strings.Join(args, " ")))
+	return errors.New(b.String())
 }
 
 // runHeadlessAsk dispatches a top-level `-p "..."` invocation to the
@@ -138,18 +197,22 @@ func init() {
 		// the user typed `crewship "first"` followed by `crewship -p ""`.
 		prompt := flagRootPrompt
 
-		// Typo guard (gh#554): the headless-ask fallback used to fire
-		// for *any* unmatched positional, including bare subcommand
-		// typos like `crewship status` or `crewship lz`. Cobra resolves
-		// real subcommand names before RunE runs, so anything that
-		// reaches us here is unknown to Cobra. When the user did NOT
-		// opt into the ask path with -p AND the single positional looks
-		// like a subcommand slug, reject with an explicit
-		// "unknown command" instead of dispatching a real LLM run
-		// against the typo.
-		if prompt == "" && len(args) == 1 && looksLikeSubcommandTypo(args[0]) {
-			return fmt.Errorf("unknown command %q for %q; run %q to see available commands",
-				args[0], cmd.CommandPath(), cmd.CommandPath()+" --help")
+		// Typo guard (gh#554, widened for #1218): the headless-ask
+		// fallback used to fire for *any* unmatched positional,
+		// including bare subcommand typos like `crewship status` or
+		// `crewship lz`. Cobra resolves real subcommand names before
+		// RunE runs, so anything that reaches us here is unknown to
+		// Cobra. When the user did NOT opt into the ask path with -p
+		// AND the positionals look like a subcommand invocation,
+		// reject with an explicit "unknown command" instead of
+		// dispatching a real LLM run against the typo.
+		//
+		// #1218: this was `len(args) == 1`, which missed the dominant
+		// case — commands are `<noun> <verb>`, so typos are two tokens
+		// (`crewship schedule list`, `crewship routnie list`) and every
+		// one of them silently billed an agent run.
+		if prompt == "" && looksLikeSubcommandInvocation(args) {
+			return unknownCommandError(cmd, args)
 		}
 
 		if prompt == "" && len(args) > 0 {
@@ -172,5 +235,15 @@ func init() {
 	// Allow arbitrary positional args alongside `-p` so `crewship "say hi"`
 	// (no flag) and `crewship -p "say hi"` both work. Cobra rejects
 	// positional args by default unless ArbitraryArgs / MinimumNArgs is set.
+	//
+	// The cost of ArbitraryArgs is that it also discards Cobra's own
+	// unknown-command error and its "Did you mean" list; unknownCommandError
+	// rebuilds both (#1218).
 	rootCmd.Args = cobra.ArbitraryArgs
+	// Cobra only applies its default of 2 inside findSuggestions(), which
+	// sits on the Execute path we bypass — left at the zero value,
+	// SuggestionsFor would only ever match at distance 0 and every typo
+	// would lose its suggestion. Set it explicitly so the hint works
+	// regardless of how we reach it.
+	rootCmd.SuggestionsMinimumDistance = 2
 }

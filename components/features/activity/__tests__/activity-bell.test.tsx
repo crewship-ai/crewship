@@ -182,14 +182,21 @@ describe("<ActivityBell> dropdown", () => {
   })
 
   it("shows LIVE rows with current step, cost, review + trace links", async () => {
+    // #1223: started_at must be pinned explicitly. The run() default
+    // re-reads Date.now() per call, so r1 and r2 only tied when both
+    // calls landed in the same millisecond — when the clock ticked
+    // between them r2 came out newer and, since the LIVE list is sorted
+    // newest-first, rendered above r1. Fixed timestamps make the order
+    // a property of the fixture rather than of scheduling luck.
     h.runs = [
-      run({ id: "r1" }),
+      run({ id: "r1", started_at: "2026-07-15T10:00:01.000Z" }),
       run({
         id: "r2",
         pipeline_slug: "approval-gate",
         pipeline_name: "Approval gate demo",
         status: "waiting",
         current_step_id: "wait-for-human",
+        started_at: "2026-07-15T10:00:00.000Z",
       }),
     ]
     render(<ActivityBell />)
@@ -210,9 +217,17 @@ describe("<ActivityBell> dropdown", () => {
       "href",
       "/routines?slug=approval-gate",
     )
-    // Trace deep-link per row.
-    const traceLinks = screen.getAllByRole("link", { name: /open trace/i })
-    expect(traceLinks[0]).toHaveAttribute("href", "/activity?run=r1")
+    // Trace deep-link per row. Asserted as a set, not by index: the
+    // claim under test is "every live row deep-links to its own run",
+    // which says nothing about row order — indexing in coupled this to
+    // the sort and made the test fail on an ordering it never meant to
+    // pin (#1223).
+    const traceHrefs = screen
+      .getAllByRole("link", { name: /open trace/i })
+      .map((el) => el.getAttribute("href"))
+    expect(new Set(traceHrefs)).toEqual(
+      new Set(["/activity?run=r1", "/activity?run=r2"]),
+    )
   })
 
   it("caps LIVE at 6 rows and deep-links the footer to the active bucket", async () => {

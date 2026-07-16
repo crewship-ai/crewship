@@ -47,13 +47,13 @@ func TestShortIDCov(t *testing.T) {
 func TestSetScheduleEnabled_Guards(t *testing.T) {
 	saveCLIState(t)
 	cliCfg = &cli.CLIConfig{}
-	if err := setScheduleEnabled("sch1", true); err == nil || !strings.Contains(err.Error(), "not logged in") {
+	if err := setScheduleEnabled(routineSchedulesEnableCmd, "sch1", true); err == nil || !strings.Contains(err.Error(), "not logged in") {
 		t.Errorf("no auth: got %v", err)
 	}
 	cliCfg = &cli.CLIConfig{Token: "tok"}
 	flagWorkspace = ""
 	t.Setenv("CREWSHIP_WORKSPACE", "")
-	if err := setScheduleEnabled("sch1", true); err == nil || !strings.Contains(err.Error(), "workspace") {
+	if err := setScheduleEnabled(routineSchedulesEnableCmd, "sch1", true); err == nil || !strings.Contains(err.Error(), "workspace") {
 		t.Errorf("no workspace: got %v", err)
 	}
 }
@@ -89,7 +89,7 @@ func TestScheduleEnableDisable_PatchBody(t *testing.T) {
 
 	// API error surfaces.
 	stub.OnPatch(schedulesPath+"/sch1", clitest.ErrorResponse(404, "schedule not found"))
-	if err := setScheduleEnabled("sch1", true); err == nil || !strings.Contains(err.Error(), "schedule not found") {
+	if err := setScheduleEnabled(routineSchedulesEnableCmd, "sch1", true); err == nil || !strings.Contains(err.Error(), "schedule not found") {
 		t.Errorf("API error: got %v", err)
 	}
 }

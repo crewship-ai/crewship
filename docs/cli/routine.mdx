@@ -825,6 +825,17 @@ crewship routine schedules create \
 | `--wake-slug` | | Wake gate: agentless probe routine evaluated before each fire — the main routine runs only when the probe's output is truthy. |
 | `--wake-inputs` | | JSON object passed to the wake probe on each tick (requires `--wake-slug`). |
 
+`create` is the only command that mints a schedule ID, and every other
+schedule command takes that ID with no prefix-matching fallback — so to
+script the family, read it back with a machine format rather than parsing
+the human output:
+
+```bash
+id=$(crewship routine schedules create --slug summarize-text \
+       --cron "0 9 * * *" --format json | jq -r .id)
+crewship routine schedules now "$id" --format json
+```
+
 ### `schedules update <id>`
 
 Pass any subset of `--cron / --timezone / --name / --enabled / --inputs / --pin-version / --unpin / --wake-slug / --wake-inputs / --no-wake` to update. An existing version pin survives updates that don't mention it; `--pin-version N` re-pins, `--unpin` removes the pin so fires track head again. Likewise the wake gate is preserved unless touched: `--wake-slug` sets/replaces the probe, `--wake-inputs` replaces its inputs, and `--no-wake` removes the gate so the schedule fires on every tick again (`--no-wake` and `--wake-slug`/`--wake-inputs` are mutually exclusive).
@@ -844,6 +855,20 @@ crewship routine schedules delete sch_abc123 --yes
 ```
 
 `--yes` skips the confirmation prompt.
+
+### Machine-readable output
+
+Every `schedules` subcommand honours the global `-f/--format`
+(`table|json|yaml|ndjson`). `list` and `create` emit the full API row;
+`now`, `update`, `enable`, `disable`, and `delete` emit an acknowledgement
+carrying the schedule `id` plus the verb that was applied:
+
+```bash
+$ crewship routine schedules now psched_abc --format json
+{"id":"psched_abc","fired":true}
+```
+
+The default (table) output stays human-readable and is unchanged.
 
 ---
 

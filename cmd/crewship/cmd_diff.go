@@ -32,6 +32,18 @@ Examples:
   crewship diff r_abc r_def --full  # show full output instead of head only`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// #1193: reject routine-run ids up front. Both sides are checked
+		// because the two fetches race and run-a's error is reported
+		// first, so a bad run-b would stay invisible until run-a was
+		// fixed. Ahead of the auth check on purpose — the id is wrong
+		// whoever is asking, and a login prompt would bury the real
+		// problem. There is no routine-run equivalent of `diff`, so the
+		// hint points at the per-run report.
+		for _, id := range args {
+			if cli.IsPipelineRunID(id) {
+				return cli.PipelineRunIDError(id, "crewship routine report "+id)
+			}
+		}
 		client, err := requireAuthAndWorkspace()
 		if err != nil {
 			return err
