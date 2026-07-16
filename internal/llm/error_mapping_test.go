@@ -34,7 +34,7 @@ func TestCheckAnthropicStatus_ErrorMapping(t *testing.T) {
 			if tt.body != "" {
 				resp.Body = httpBody(tt.body)
 			}
-			err := checkAnthropicStatus(resp)
+			err := checkStatus(resp, "Anthropic")
 			if tt.wantNil {
 				if err != nil {
 					t.Errorf("want nil error for 200, got %v", err)
@@ -52,7 +52,7 @@ func TestCheckAnthropicStatus_ErrorMapping(t *testing.T) {
 }
 
 // TestCheckOpenAIStatus_ErrorMapping mirrors the Anthropic test for the
-// OpenAI side. Lives next to checkOpenAIStatus in openai.go.
+// OpenAI side of the shared checkStatus in httpretry.go.
 func TestCheckOpenAIStatus_ErrorMapping(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -72,7 +72,7 @@ func TestCheckOpenAIStatus_ErrorMapping(t *testing.T) {
 				StatusCode: tt.status,
 				Body:       httpBody(tt.body),
 			}
-			err := checkOpenAIStatus(resp)
+			err := checkStatus(resp, "OpenAI")
 			if tt.wantNil {
 				if err != nil {
 					t.Errorf("want nil error for 200, got %v", err)

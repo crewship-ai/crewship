@@ -7,9 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -57,7 +55,7 @@ func (a *Anthropic) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	}
 	defer resp.Body.Close()
 
-	if err := checkAnthropicStatus(resp); err != nil {
+	if err := checkStatus(resp, "Anthropic"); err != nil {
 		return nil, err
 	}
 
@@ -97,7 +95,7 @@ func (a *Anthropic) Complete(ctx context.Context, req Request) (*Response, error
 	}
 	defer resp.Body.Close()
 
-	if err := checkAnthropicStatus(resp); err != nil {
+	if err := checkStatus(resp, "Anthropic"); err != nil {
 		return nil, err
 	}
 
@@ -120,7 +118,7 @@ func (a *Anthropic) Stream(ctx context.Context, req Request, handler func(Stream
 	}
 	defer resp.Body.Close()
 
-	if err := checkAnthropicStatus(resp); err != nil {
+	if err := checkStatus(resp, "Anthropic"); err != nil {
 		return nil, err
 	}
 
@@ -300,81 +298,12 @@ func toAnthropicToolsCached(tools []ToolDef) []map[string]any {
 	return out
 }
 
-// retryableStatusCodes are HTTP status codes that should trigger a retry.
-var retryableStatusCodes = map[int]bool{
-	429: true, // Rate limited
-	500: true, // Internal server error
-	503: true, // Service unavailable
-	529: true, // Overloaded
-}
-
-func checkAnthropicStatus(resp *http.Response) error {
-	if resp.StatusCode == http.StatusOK {
-		return nil
-	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-	switch resp.StatusCode {
-	case http.StatusUnauthorized:
-		return fmt.Errorf("invalid Anthropic API key")
-	case http.StatusTooManyRequests:
-		return fmt.Errorf("Anthropic rate limit exceeded")
-	default:
-		return fmt.Errorf("Anthropic API returned %d: %s", resp.StatusCode, body)
-	}
-}
-
 // doWithRetry executes an HTTP request with exponential backoff retry on transient errors.
-// Max 3 attempts. Respects Retry-After header.
+// Max 3 attempts. Respects Retry-After header. See the shared doWithRetry in httpretry.go.
 func (a *Anthropic) doWithRetry(ctx context.Context, body []byte) (*http.Response, error) {
-	const maxRetries = 3
-	baseDelay := time.Second
-	var retryAfter time.Duration
-
-	var lastErr error
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		httpReq, err := a.newHTTPRequest(ctx, body)
-		if err != nil {
-			return nil, err
-		}
-
-		resp, err := a.client.Do(httpReq)
-		if err != nil {
-			lastErr = fmt.Errorf("anthropic http: %w", err)
-			if ctx.Err() != nil {
-				return nil, lastErr
-			}
-			// Network error — retry
-		} else if !retryableStatusCodes[resp.StatusCode] {
-			return resp, nil // Success or non-retryable error
-		} else {
-			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-			resp.Body.Close()
-			lastErr = fmt.Errorf("Anthropic API returned %d: %s", resp.StatusCode, respBody)
-
-			// Check Retry-After header
-			if ra := resp.Header.Get("Retry-After"); ra != "" {
-				if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
-					retryAfter = time.Duration(secs) * time.Second
-				}
-			}
-		}
-
-		if attempt < maxRetries-1 {
-			delay := baseDelay * (1 << attempt) // 1s, 2s, 4s
-			// Use Retry-After if it exceeds the calculated exponential delay
-			if retryAfter > delay {
-				delay = retryAfter
-			}
-			retryAfter = 0 // reset for next attempt
-			jitter := time.Duration(rand.Int63n(int64(delay / 4)))
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(delay + jitter):
-			}
-		}
-	}
-	return nil, fmt.Errorf("anthropic: max retries exceeded: %w", lastErr)
+	return doWithRetry(ctx, a.client, func(ctx context.Context) (*http.Request, error) {
+		return a.newHTTPRequest(ctx, body)
+	}, "anthropic", "Anthropic")
 }
 
 // parseSSEStream reads Anthropic's SSE stream and emits StreamEvents.
