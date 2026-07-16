@@ -133,24 +133,26 @@ func (cm *CredentialMonitor) validate(ctx context.Context, conn ProviderConnecti
 	switch conn.Provider {
 	case ProviderAnthropic:
 		return cm.validateAnthropic(ctx, conn)
+	case ProviderOpenAI:
+		return cm.validateOpenAI(ctx, conn)
+	case ProviderGoogle:
+		return cm.validateGoogle(ctx, conn)
 	default:
 		return conn.Status, ""
 	}
 }
 
-func (cm *CredentialMonitor) validateAnthropic(ctx context.Context, conn ProviderConnection) (ConnectionStatus, string) {
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.anthropic.com/v1/models", nil)
+// validateEndpoint issues a GET to a provider's model-listing endpoint and maps
+// the HTTP response to a ConnectionStatus. The setAuth callback installs the
+// provider-specific authentication (and any other) headers on the request. This
+// centralizes the request/timeout/status-mapping logic shared by every provider
+// validator; per-provider auth differences live entirely in setAuth.
+func (cm *CredentialMonitor) validateEndpoint(ctx context.Context, url string, setAuth func(*http.Request)) (ConnectionStatus, string) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return StatusError, fmt.Sprintf("create request: %v", err)
 	}
-	// OAuth tokens (sk-ant-oat*) use Bearer auth regardless of stored type;
-	// this handles the case where a user stores an OAuth token as API_KEY.
-	if conn.Type == TypeAICLIToken || strings.HasPrefix(conn.AccessToken, "sk-ant-oat") {
-		req.Header.Set("Authorization", "Bearer "+conn.AccessToken)
-	} else {
-		req.Header.Set("x-api-key", conn.AccessToken)
-	}
-	req.Header.Set("anthropic-version", "2023-06-01")
+	setAuth(req)
 
 	resp, err := cm.client.Do(req)
 	if err != nil {
@@ -171,6 +173,33 @@ func (cm *CredentialMonitor) validateAnthropic(ctx context.Context, conn Provide
 	default:
 		return StatusError, fmt.Sprintf("Unexpected status: %d", resp.StatusCode)
 	}
+}
+
+func (cm *CredentialMonitor) validateAnthropic(ctx context.Context, conn ProviderConnection) (ConnectionStatus, string) {
+	return cm.validateEndpoint(ctx, "https://api.anthropic.com/v1/models", func(req *http.Request) {
+		// OAuth tokens (sk-ant-oat*) use Bearer auth regardless of stored type;
+		// this handles the case where a user stores an OAuth token as API_KEY.
+		if conn.Type == TypeAICLIToken || strings.HasPrefix(conn.AccessToken, "sk-ant-oat") {
+			req.Header.Set("Authorization", "Bearer "+conn.AccessToken)
+		} else {
+			req.Header.Set("x-api-key", conn.AccessToken)
+		}
+		req.Header.Set("anthropic-version", "2023-06-01")
+	})
+}
+
+func (cm *CredentialMonitor) validateOpenAI(ctx context.Context, conn ProviderConnection) (ConnectionStatus, string) {
+	return cm.validateEndpoint(ctx, "https://api.openai.com/v1/models", func(req *http.Request) {
+		req.Header.Set("Authorization", "Bearer "+conn.AccessToken)
+	})
+}
+
+func (cm *CredentialMonitor) validateGoogle(ctx context.Context, conn ProviderConnection) (ConnectionStatus, string) {
+	// Gemini AI Studio (not Vertex): pass the key via the x-goog-api-key header
+	// rather than the ?key= query param to keep it out of the URL/logs.
+	return cm.validateEndpoint(ctx, "https://generativelanguage.googleapis.com/v1beta/models", func(req *http.Request) {
+		req.Header.Set("x-goog-api-key", conn.AccessToken)
+	})
 }
 
 func (cm *CredentialMonitor) persistStatus(ctx context.Context, connID string, status ConnectionStatus, errMsg string) {

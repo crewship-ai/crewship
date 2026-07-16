@@ -17,15 +17,31 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// rerouteAnthropic redirects api.anthropic.com requests to a test server.
-func rerouteAnthropic(srv *httptest.Server) http.RoundTripper {
+// rerouteHost redirects requests whose host contains `host` to a test server,
+// keeping the key-in-URL out of real DNS and guaranteeing no real network I/O.
+func rerouteHost(host string, srv *httptest.Server) http.RoundTripper {
 	return roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if strings.Contains(r.URL.Host, "api.anthropic.com") {
+		if strings.Contains(r.URL.Host, host) {
 			r.URL.Scheme = "http"
 			r.URL.Host = strings.TrimPrefix(srv.URL, "http://")
 		}
 		return http.DefaultTransport.RoundTrip(r)
 	})
+}
+
+// rerouteAnthropic redirects api.anthropic.com requests to a test server.
+func rerouteAnthropic(srv *httptest.Server) http.RoundTripper {
+	return rerouteHost("api.anthropic.com", srv)
+}
+
+// rerouteOpenAI redirects api.openai.com requests to a test server.
+func rerouteOpenAI(srv *httptest.Server) http.RoundTripper {
+	return rerouteHost("api.openai.com", srv)
+}
+
+// rerouteGoogle redirects generativelanguage.googleapis.com requests to a test server.
+func rerouteGoogle(srv *httptest.Server) http.RoundTripper {
+	return rerouteHost("generativelanguage.googleapis.com", srv)
 }
 
 // TestCredentialMonitor_ValidateAnthropic_AllStatusCodes covers the response
@@ -241,13 +257,157 @@ func TestCredentialMonitor_CheckOne_NoChangeNoPersist(t *testing.T) {
 	}
 }
 
-// TestCredentialMonitor_Validate_UnknownProvider returns the existing status.
+// TestCredentialMonitor_ValidateOpenAI_AllStatusCodes covers the response
+// matrix: 200=ACTIVE, 401=EXPIRED, 403=REVOKED, 429=RATE_LIMITED, other=ERROR.
+func TestCredentialMonitor_ValidateOpenAI_AllStatusCodes(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		code int
+		want ConnectionStatus
+	}{
+		{http.StatusOK, StatusActive},
+		{http.StatusUnauthorized, StatusExpired},
+		{http.StatusForbidden, StatusRevoked},
+		{http.StatusTooManyRequests, StatusRateLimited},
+		{http.StatusBadGateway, StatusError},
+	}
+	for _, tc := range cases {
+		t.Run(http.StatusText(tc.code), func(t *testing.T) {
+			var (
+				mu       sync.Mutex
+				seenAuth string
+				seenPath string
+			)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				seenAuth = r.Header.Get("Authorization")
+				seenPath = r.URL.Path
+				mu.Unlock()
+				w.WriteHeader(tc.code)
+			}))
+			defer srv.Close()
+
+			cm := NewCredentialMonitor(NewTokenPool(testLogger()),
+				"http://nextjs", "tok", time.Hour, testLogger())
+			cm.client = &http.Client{Transport: rerouteOpenAI(srv), Timeout: 5 * time.Second}
+
+			got, _ := cm.validateOpenAI(context.Background(), ProviderConnection{
+				ID: "c", Provider: ProviderOpenAI, AccessToken: "sk-openai", Status: StatusActive,
+			})
+			if got != tc.want {
+				t.Errorf("status %d → %q, want %q", tc.code, got, tc.want)
+			}
+			mu.Lock()
+			auth, path := seenAuth, seenPath
+			mu.Unlock()
+			if auth != "Bearer sk-openai" {
+				t.Errorf("expected Bearer auth, got %q", auth)
+			}
+			if path != "/v1/models" {
+				t.Errorf("expected /v1/models path, got %q", path)
+			}
+		})
+	}
+}
+
+// TestCredentialMonitor_ValidateGoogle_AllStatusCodes covers the response
+// matrix: 200=ACTIVE, 401=EXPIRED, 403=REVOKED, 429=RATE_LIMITED, other=ERROR.
+func TestCredentialMonitor_ValidateGoogle_AllStatusCodes(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		code int
+		want ConnectionStatus
+	}{
+		{http.StatusOK, StatusActive},
+		{http.StatusUnauthorized, StatusExpired},
+		{http.StatusForbidden, StatusRevoked},
+		{http.StatusTooManyRequests, StatusRateLimited},
+		{http.StatusBadGateway, StatusError},
+	}
+	for _, tc := range cases {
+		t.Run(http.StatusText(tc.code), func(t *testing.T) {
+			var (
+				mu        sync.Mutex
+				seenKey   string
+				seenQuery string
+			)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				seenKey = r.Header.Get("x-goog-api-key")
+				seenQuery = r.URL.RawQuery
+				mu.Unlock()
+				w.WriteHeader(tc.code)
+			}))
+			defer srv.Close()
+
+			cm := NewCredentialMonitor(NewTokenPool(testLogger()),
+				"http://nextjs", "tok", time.Hour, testLogger())
+			cm.client = &http.Client{Transport: rerouteGoogle(srv), Timeout: 5 * time.Second}
+
+			got, _ := cm.validateGoogle(context.Background(), ProviderConnection{
+				ID: "c", Provider: ProviderGoogle, AccessToken: "goog-key", Status: StatusActive,
+			})
+			if got != tc.want {
+				t.Errorf("status %d → %q, want %q", tc.code, got, tc.want)
+			}
+			mu.Lock()
+			key, query := seenKey, seenQuery
+			mu.Unlock()
+			if key != "goog-key" {
+				t.Errorf("expected x-goog-api-key header, got %q", key)
+			}
+			// Key must travel in the header, never the URL query string.
+			if strings.Contains(query, "key=") {
+				t.Errorf("expected no key in query, got %q", query)
+			}
+		})
+	}
+}
+
+// TestCredentialMonitor_Validate_DispatchesByProvider confirms validate()
+// routes OpenAI and Google (not just Anthropic) to a real validator rather than
+// returning the status unchanged.
+func TestCredentialMonitor_Validate_DispatchesByProvider(t *testing.T) {
+	t.Parallel()
+	for _, p := range []ProviderType{ProviderOpenAI, ProviderGoogle} {
+		t.Run(string(p), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusUnauthorized)
+			}))
+			defer srv.Close()
+
+			var transport http.RoundTripper
+			switch p {
+			case ProviderOpenAI:
+				transport = rerouteOpenAI(srv)
+			case ProviderGoogle:
+				transport = rerouteGoogle(srv)
+			}
+
+			cm := NewCredentialMonitor(NewTokenPool(testLogger()),
+				"http://nextjs", "tok", time.Hour, testLogger())
+			cm.client = &http.Client{Transport: transport, Timeout: 5 * time.Second}
+
+			// A 401 from the provider must flip a previously-ACTIVE cred to
+			// EXPIRED — proving the credential is actually health-checked.
+			got, _ := cm.validate(context.Background(), ProviderConnection{
+				Provider: p, AccessToken: "k", Status: StatusActive,
+			})
+			if got != StatusExpired {
+				t.Errorf("provider %s: expected EXPIRED on 401, got %s", p, got)
+			}
+		})
+	}
+}
+
+// TestCredentialMonitor_Validate_UnknownProvider returns the existing status
+// for a provider with no registered validator.
 func TestCredentialMonitor_Validate_UnknownProvider(t *testing.T) {
 	t.Parallel()
 	cm := NewCredentialMonitor(NewTokenPool(testLogger()),
 		"http://x", "t", time.Hour, testLogger())
 	got, msg := cm.validate(context.Background(), ProviderConnection{
-		Provider: ProviderGoogle, Status: StatusActive,
+		Provider: ProviderType("UNKNOWN"), Status: StatusActive,
 	})
 	if got != StatusActive || msg != "" {
 		t.Errorf("expected unchanged ACTIVE, got %s msg=%q", got, msg)
