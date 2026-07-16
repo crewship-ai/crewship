@@ -72,6 +72,9 @@ func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
 		Icon        string `json:"icon"`
 		Color       string `json:"color"`
 	}
+	// /api/v1/internal/* bypasses the global BodyCap, so bound the body here.
+	// Crew create carries only a handful of small fields — 1 MiB is generous.
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid JSON body")
 		return
@@ -154,6 +157,9 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		LLMModel     string `json:"llm_model"`
 		ToolProfile  string `json:"tool_profile"`
 	}
+	// /api/v1/internal/* bypasses the global BodyCap, so bound the body here.
+	// Agent create is small (a system prompt at most) — 1 MiB is generous.
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid JSON body")
 		return

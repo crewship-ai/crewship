@@ -55,6 +55,11 @@ type messageResponse struct {
 // SendMessage handles POST /api/v1/internal/crew-messages
 func (h *CrewMessagingHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	var req sendMessageRequest
+	// /api/v1/internal/* bypasses the global BodyCap, so bound the body here.
+	// Content may legitimately be up to 1 MiB (checked below); cap the whole
+	// body at 2 MiB so a valid near-1 MiB message plus metadata still decodes
+	// and hits the friendly "content too large" path rather than a raw cutoff.
+	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid request body")
 		return
