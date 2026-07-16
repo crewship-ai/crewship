@@ -311,14 +311,10 @@ func crewSharedContainerPath(crewID, storageKey string) (string, bool) {
 // atomic (temp file in the destination dir, then mv -f), and paths pass via env
 // so a crafted destination can't break out of the shell command.
 func (s *Server) writeCrewSharedFileViaContainer(ctx context.Context, crewID, containerPath string, content []byte) error {
-	var slug string
-	if s.db != nil {
-		_ = s.db.QueryRowContext(ctx, "SELECT slug FROM crews WHERE id = ?", crewID).Scan(&slug)
-	}
-	if slug == "" {
+	containerName, _, ok := s.resolveCrewContainer(ctx, crewID, false)
+	if !ok {
 		return errCrewNotFound
 	}
-	containerName := s.container.CrewContainerName(crewID, slug)
 
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()

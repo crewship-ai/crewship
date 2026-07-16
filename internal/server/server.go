@@ -934,16 +934,24 @@ func (s *Server) combinedHandler() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		if strings.HasPrefix(path, "/api/") ||
-			strings.HasPrefix(path, "/exposed/") ||
-			path == "/healthz" || path == "/readyz" ||
-			path == "/metrics" || path == "/ws" ||
-			path == "/ws/terminal" {
+		if isMuxRoutedPath(path) {
 			s.mux.ServeHTTP(w, r)
 			return
 		}
 		s.spaHandler.ServeHTTP(w, r)
 	})
+}
+
+// isMuxRoutedPath reports whether path is served by the mux (API, exposed-app
+// reverse proxy, health/metrics probes, WebSocket endpoints) rather than the
+// SPA static handler. Also consumed by securityHeadersMiddleware so the
+// routing split and the UI-vs-API CSP split can't drift apart.
+func isMuxRoutedPath(path string) bool {
+	return strings.HasPrefix(path, "/api/") ||
+		strings.HasPrefix(path, "/exposed/") ||
+		path == "/healthz" || path == "/readyz" ||
+		path == "/metrics" || path == "/ws" ||
+		path == "/ws/terminal"
 }
 
 // sensitiveStaticPathPrefixes lists URL path prefixes that should never be

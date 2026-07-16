@@ -198,10 +198,7 @@ func aeadForKey(key []byte) (cipher.AEAD, error) {
 }
 
 func getEncryptionKey(version string) ([]byte, error) {
-	envVar := "ENCRYPTION_KEY"
-	if version != "v1" {
-		envVar = "ENCRYPTION_KEY_" + strings.ToUpper(version)
-	}
+	envVar := keyEnvVarFor(version)
 
 	key := os.Getenv(envVar)
 	if key == "" {
