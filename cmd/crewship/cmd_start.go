@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +32,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/notify"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/preflight"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/provider/apple"
 	"github.com/crewship-ai/crewship/internal/provider/bbolt"
@@ -64,20 +66,23 @@ var startCmd = &cobra.Command{
 
 		detectCtx, detectCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer detectCancel()
-		if !noDocker && !checkAnyRuntime(detectCtx) {
-			// Print the help text to stderr, then return a short error.
+		if !noDocker {
+			// Print the guidance to stderr, then return a short error.
 			// Avoids ST1005 (error strings should not end with punctuation/newlines)
-			// while preserving the full user-facing guidance.
-			fmt.Fprintln(os.Stderr,
-				"Crewship requires a container runtime to run AI agents.\n"+
-					"Supported: Docker, Podman, Colima, OrbStack, Rancher Desktop, Apple Containers\n\n"+
-					"Install Docker Desktop:    https://docs.docker.com/get-docker/\n"+
-					"Install Podman:            https://podman.io/docs/installation\n"+
-					"Install Apple Containers:  brew install container (macOS 26+)\n\n"+
-					"To start without containers (dashboard only, no agents):\n"+
-					"  crewship start --no-docker\n\n"+
-					"Run 'crewship doctor' for full diagnostics")
-			return fmt.Errorf("no container runtime found")
+			// while preserving the full user-facing text. The guidance is
+			// OS-specific and distinguishes "installed but not running"
+			// (start it) from "not installed" (install one) — the two need
+			// opposite fixes and conflating them is a classic onboarding trap.
+			switch pf := preflight.Check(detectCtx); pf.Status {
+			case preflight.RuntimeRunning:
+				// good to go
+			case preflight.RuntimeInstalledNotRunning:
+				fmt.Fprintln(os.Stderr, preflight.Guidance(goruntime.GOOS, pf))
+				return fmt.Errorf("container runtime installed but not running")
+			default:
+				fmt.Fprintln(os.Stderr, preflight.Guidance(goruntime.GOOS, pf))
+				return fmt.Errorf("no container runtime found")
+			}
 		}
 
 		bootstrapLogger := logging.New("info", "json", os.Stdout)
@@ -894,16 +899,6 @@ var startCmd = &cobra.Command{
 		logger.Info("crewship stopped")
 		return nil
 	},
-}
-
-func checkAnyRuntime(ctx context.Context) bool {
-	if _, err := docker.Detect(ctx); err == nil {
-		return true
-	}
-	if _, err := apple.Detect(ctx); err == nil {
-		return true
-	}
-	return false
 }
 
 // cfgBoltPathFromEnv reports whether CREWSHIP_BOLT_PATH supplied the

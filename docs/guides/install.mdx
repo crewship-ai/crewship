@@ -342,7 +342,10 @@ crewship doctor            # runtime + data-dir + DB sanity check
 `crewship doctor` runs the following checks (each `PASS` / `WARN` /
 `FAIL` with a one-line detail):
 
-- Container runtime detected and socket responds
+- Container runtime detected and socket responds — when it fails, the
+  detail distinguishes *installed but not running* (with the exact
+  start command, e.g. `open -a Docker` or `sudo systemctl start docker`)
+  from *not installed* (with an OS-specific install pointer)
 - Data directory present (with `--fix` it gets created)
 - Data directory writable
 - Database migration version current

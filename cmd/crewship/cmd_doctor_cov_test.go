@@ -19,6 +19,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/crashreport"
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/preflight"
 )
 
 // tempDataDir points CREWSHIP_DATA_DIR at a fresh temp dir and returns
@@ -61,24 +62,48 @@ func TestCheckResultPrint_AllStatuses(t *testing.T) {
 }
 
 func TestCheckContainerRuntime_FailsFastWithoutRuntimes(t *testing.T) {
-	// Force both probes to fail deterministically: a dead DOCKER_HOST
-	// socket and a PATH without the apple `container` CLI.
+	// Force both live probes to fail deterministically: a dead DOCKER_HOST
+	// socket and a PATH without the apple `container` CLI. The
+	// installed-runtime scan reads real host state (/Applications, PATH),
+	// so stub it per branch below.
 	t.Setenv("DOCKER_HOST", "unix:///nonexistent/crewship-doctor-test.sock")
 	t.Setenv("PATH", "/nonexistent")
 
-	r := checkContainerRuntime(context.Background())
-	if r.name != "container runtime" {
-		t.Errorf("name = %q", r.name)
-	}
-	if r.status != "FAIL" {
-		t.Fatalf("status = %q, want FAIL (detail=%q)", r.status, r.detail)
-	}
-	if !strings.Contains(r.detail, "no Docker-compatible runtime") {
-		t.Errorf("detail = %q", r.detail)
-	}
-	if !strings.Contains(r.hint, "docker") {
-		t.Errorf("hint = %q", r.hint)
-	}
+	origInstalled := preflightInstalled
+	t.Cleanup(func() { preflightInstalled = origInstalled })
+
+	t.Run("nothing installed", func(t *testing.T) {
+		preflightInstalled = func() []preflight.InstalledRuntime { return nil }
+		r := checkContainerRuntime(context.Background())
+		if r.name != "container runtime" {
+			t.Errorf("name = %q", r.name)
+		}
+		if r.status != "FAIL" {
+			t.Fatalf("status = %q, want FAIL (detail=%q)", r.status, r.detail)
+		}
+		if !strings.Contains(r.detail, "no container runtime installed") {
+			t.Errorf("detail = %q", r.detail)
+		}
+		if !strings.Contains(r.hint, "docker") {
+			t.Errorf("hint = %q", r.hint)
+		}
+	})
+
+	t.Run("installed but not running", func(t *testing.T) {
+		preflightInstalled = func() []preflight.InstalledRuntime {
+			return []preflight.InstalledRuntime{{Name: "Docker Desktop", StartHint: "open -a Docker"}}
+		}
+		r := checkContainerRuntime(context.Background())
+		if r.status != "FAIL" {
+			t.Fatalf("status = %q, want FAIL (detail=%q)", r.status, r.detail)
+		}
+		if !strings.Contains(r.detail, "Docker Desktop installed but not running") {
+			t.Errorf("detail = %q", r.detail)
+		}
+		if !strings.Contains(r.hint, "open -a Docker") {
+			t.Errorf("hint = %q", r.hint)
+		}
+	})
 }
 
 func TestCheckDataDir_PassAndResolveError(t *testing.T) {
