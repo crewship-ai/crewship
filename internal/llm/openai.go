@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -327,9 +326,6 @@ func toFunctionTools(tools []ToolDef) []functionToolDef {
 }
 
 func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*Response, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
 	final := &Response{StopReason: StopEndTurn}
 	var textParts []string
 
@@ -340,16 +336,7 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 	}
 	toolMap := make(map[int]*partialToolCall)
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		data := line[6:]
-		if data == "[DONE]" {
-			break
-		}
-
+	fnErr, scanErr := forEachSSEData(r, 64*1024, 1024*1024, func(data string) (bool, error) {
 		var chunk struct {
 			Choices []struct {
 				Delta struct {
@@ -374,7 +361,7 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 			} `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			continue
+			return false, nil
 		}
 		if chunk.Usage != nil {
 			final.InputToks = chunk.Usage.PromptTokens
@@ -383,14 +370,14 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 		}
 
 		if len(chunk.Choices) == 0 {
-			continue
+			return false, nil
 		}
 		choice := chunk.Choices[0]
 
 		if choice.Delta.Content != "" {
 			textParts = append(textParts, choice.Delta.Content)
 			if err := handler(StreamEvent{Type: "text", Content: choice.Delta.Content}); err != nil {
-				return final, err
+				return false, err
 			}
 		}
 
@@ -417,6 +404,10 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 		case "stop":
 			final.StopReason = StopEndTurn
 		}
+		return false, nil
+	})
+	if fnErr != nil {
+		return final, fnErr
 	}
 
 	final.Content = strings.Join(textParts, "")
@@ -435,5 +426,5 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 	if err := handler(StreamEvent{Type: "done", Response: final}); err != nil {
 		return final, err
 	}
-	return final, scanner.Err()
+	return final, scanErr
 }

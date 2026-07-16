@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -308,25 +307,14 @@ func (a *Anthropic) doWithRetry(ctx context.Context, body []byte) (*http.Respons
 
 // parseSSEStream reads Anthropic's SSE stream and emits StreamEvents.
 func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*Response, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 4*1024), 1024*1024) // 4KB initial (SSE lines are small), 1MB max for tool results
-
 	final := &Response{StopReason: StopEndTurn}
 	var textParts []string
 	var toolCalls []ToolCall
 	var currentToolID, currentToolName string
 	var currentToolInput strings.Builder
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		data := line[6:]
-		if data == "[DONE]" {
-			break
-		}
-
+	// 4KB initial (SSE lines are small), 1MB max for tool results.
+	fnErr, scanErr := forEachSSEData(r, 4*1024, 1024*1024, func(data string) (bool, error) {
 		var event struct {
 			Type         string `json:"type"`
 			Index        int    `json:"index"`
@@ -352,7 +340,7 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 			} `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			continue
+			return false, nil
 		}
 
 		switch event.Type {
@@ -377,13 +365,13 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 
 		case "content_block_delta":
 			if event.Delta == nil {
-				continue
+				return false, nil
 			}
 			switch event.Delta.Type {
 			case "text_delta":
 				textParts = append(textParts, event.Delta.Text)
 				if err := handler(StreamEvent{Type: "text", Content: event.Delta.Text}); err != nil {
-					return final, err
+					return false, err
 				}
 			case "input_json_delta":
 				currentToolInput.WriteString(event.Delta.PartialJSON)
@@ -398,7 +386,7 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 				}
 				toolCalls = append(toolCalls, tc)
 				if err := handler(StreamEvent{Type: "tool_call", ToolCall: &tc}); err != nil {
-					return final, err
+					return false, err
 				}
 				currentToolID = ""
 				currentToolName = ""
@@ -422,6 +410,10 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 		case "message_stop":
 			// stream complete
 		}
+		return false, nil
+	})
+	if fnErr != nil {
+		return final, fnErr
 	}
 
 	final.Content = strings.Join(textParts, "")
@@ -430,5 +422,5 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 	if err := handler(StreamEvent{Type: "done", Response: final}); err != nil {
 		return final, err
 	}
-	return final, scanner.Err()
+	return final, scanErr
 }
