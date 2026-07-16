@@ -169,4 +169,13 @@ func TestConfigValidateRunE_WarnsOnMissingDefaultAgent(t *testing.T) {
 	if !strings.Contains(out, "1 warning(s)") {
 		t.Errorf("missing default-agent should warn, not error:\n%s", out)
 	}
+	// #1197: the warning must describe what actually happens — `ask` hard-fails
+	// with an invalid default-agent (exit 3, "agent not found: ...") — not the
+	// old, inaccurate claim that an interactive picker will kick in instead.
+	if !strings.Contains(out, "ask") || !strings.Contains(out, "fail") || !strings.Contains(out, "--agent") {
+		t.Errorf("warning should describe the real ask-will-fail consequence and the --agent override:\n%s", out)
+	}
+	if strings.Contains(out, "picker will be used instead") {
+		t.Errorf("warning still claims a picker fallback that `ask` does not actually have:\n%s", out)
+	}
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -69,13 +70,32 @@ func setupFeedbackTestBed(t *testing.T) *feedbackTestBed {
 		t.Fatalf("seed other member: %v", err)
 	}
 
+	messageID := "msg-fb-1"
+	seedConvMessage(t, h.db, messageID, chatID, "agent-fb")
+
 	return &feedbackTestBed{
 		h:         h,
 		userID:    userID,
 		otherID:   otherID,
 		wsID:      wsID,
 		chatID:    chatID,
-		messageID: "msg-fb-1",
+		messageID: messageID,
+	}
+}
+
+// seedConvMessage inserts a row into the conversation_messages search
+// mirror (migration v111) — the table message_feedback.Create checks
+// (#1208) to confirm message_id refers to a real message before creating
+// a feedback row. Production rows land here via conversation.Store.Append;
+// tests insert directly since there's no conversation store wired up in
+// the API-handler test harness.
+func seedConvMessage(t *testing.T, db interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}, messageID, sessionID, agentID string) {
+	t.Helper()
+	if _, err := db.Exec(`INSERT INTO conversation_messages (id, session_id, agent_id, role, content)
+        VALUES (?, ?, ?, 'user', 'test message')`, messageID, sessionID, agentID); err != nil {
+		t.Fatalf("seed conversation_messages row %q: %v", messageID, err)
 	}
 }
 
@@ -137,6 +157,35 @@ func TestFeedback_Create_CrossWorkspaceChat_404(t *testing.T) {
 	bed.h.Create(rr, req)
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("cross-ws create = %d, want 404", rr.Code)
+	}
+}
+
+// TestFeedback_Create_UnknownMessage_404 pins issue #1208: message_id must
+// reference a real message before a feedback row is created. Before this
+// fix, `feedback create --message msg_doesnotexist --signal helpful`
+// silently succeeded (201) and left an orphan row nothing could trace back
+// to a real message.
+func TestFeedback_Create_UnknownMessage_404(t *testing.T) {
+	bed := setupFeedbackTestBed(t)
+	req := feedbackReq("POST", "/api/v1/feedback",
+		`{"message_id":"msg_doesnotexist12345","chat_id":"`+bed.chatID+`","signal":"helpful"}`,
+		bed.userID)
+	rr := httptest.NewRecorder()
+	bed.h.Create(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("create with unknown message_id = %d, want 404; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "message not found") {
+		t.Errorf("error body = %q, want to mention 'message not found'", rr.Body.String())
+	}
+	// No orphan row must have been created.
+	var count int
+	if err := bed.h.db.QueryRow(
+		`SELECT COUNT(*) FROM message_feedback WHERE message_id = 'msg_doesnotexist12345'`).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("orphan feedback row created for nonexistent message: count=%d", count)
 	}
 }
 
@@ -442,22 +491,34 @@ func TestFeedback_Delete_NoAuth_401(t *testing.T) {
 // POSTs with chat_id (real workspace) must end up with the row
 // pointing at the real workspace. The previous SET clause skipped
 // workspace_id and left feedback orphaned in the wrong tenant.
-func TestFeedback_Create_UpsertReanchorsWorkspace(t *testing.T) {
+// TestFeedback_Create_WorkspaceAlwaysDerivedFromMessage replaces the old
+// TestFeedback_Create_UpsertReanchorsWorkspace, which exercised a
+// chat_id-absent "fall back to the caller's own most recent workspace
+// membership" path — that path was the cross-tenant existence-probe hole a
+// CodeRabbit security finding caught on this PR: workspace/chat is now
+// ALWAYS derived from the message's real session_id (conversation_messages),
+// never from what the caller happens to belong to or claims in chat_id.
+// Confirms that property holds whether chat_id is omitted or explicitly
+// (and correctly) supplied — both must resolve to the SAME real workspace —
+// and that the UPSERT's workspace_id/chat_id re-anchor still fires cleanly
+// across two POSTs of the same (message_id, user_id, signal).
+func TestFeedback_Create_WorkspaceAlwaysDerivedFromMessage(t *testing.T) {
 	bed := setupFeedbackTestBed(t)
 
-	// Add the user to a second workspace so the fallback path picks one
-	// that's NOT bed.wsID. ORDER BY created_at DESC means the more
-	// recently created membership wins — make this one the newer.
-	fbWS := "ws-fb-fallback"
-	if _, err := bed.h.db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'F', 'f')`, fbWS); err != nil {
-		t.Fatalf("seed fallback ws: %v", err)
+	// Add the user to a second workspace. If any code path still fell back
+	// to "most recent membership" this would be picked (created later) —
+	// its ABSENCE from the resulting rows below is the regression guard.
+	otherWS := "ws-other-membership"
+	if _, err := bed.h.db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'F', 'f')`, otherWS); err != nil {
+		t.Fatalf("seed other ws: %v", err)
 	}
 	if _, err := bed.h.db.Exec(`INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at)
-        VALUES ('m-fb-fallback', ?, ?, 'OWNER', datetime('now', '+1 day'))`, fbWS, bed.userID); err != nil {
-		t.Fatalf("seed fallback member: %v", err)
+        VALUES ('m-other', ?, ?, 'OWNER', datetime('now', '+1 day'))`, otherWS, bed.userID); err != nil {
+		t.Fatalf("seed other member: %v", err)
 	}
 
-	// First POST: no chat_id → workspace fallback to fbWS.
+	// First POST: chat_id omitted — must still resolve to the message's
+	// real workspace (bed.wsID), not otherWS and not a 403.
 	req := feedbackReq("POST", "/api/v1/feedback",
 		`{"message_id":"`+bed.messageID+`","signal":"helpful"}`, bed.userID)
 	rr := httptest.NewRecorder()
@@ -466,17 +527,22 @@ func TestFeedback_Create_UpsertReanchorsWorkspace(t *testing.T) {
 		t.Fatalf("first create = %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	var firstWS string
-	if err := bed.h.db.QueryRow(`SELECT workspace_id FROM message_feedback
+	var firstWS, firstChat string
+	if err := bed.h.db.QueryRow(`SELECT workspace_id, COALESCE(chat_id, '') FROM message_feedback
         WHERE message_id = ? AND user_id = ? AND signal = 'helpful'`,
-		bed.messageID, bed.userID).Scan(&firstWS); err != nil {
+		bed.messageID, bed.userID).Scan(&firstWS, &firstChat); err != nil {
 		t.Fatalf("first workspace lookup: %v", err)
 	}
-	if firstWS != fbWS {
-		t.Fatalf("first POST workspace = %q, want %q (fallback)", firstWS, fbWS)
+	if firstWS != bed.wsID {
+		t.Fatalf("first POST (no chat_id) workspace = %q, want %q (the message's real workspace, not otherWS=%q)", firstWS, bed.wsID, otherWS)
+	}
+	if firstChat != bed.chatID {
+		t.Fatalf("first POST (no chat_id) chat = %q, want %q (derived from the message, not left null)", firstChat, bed.chatID)
 	}
 
-	// Second POST: real chat_id → re-anchors to bed.wsID.
+	// Second POST: chat_id explicitly supplied (and correct) — must
+	// resolve to the identical workspace, and the UPSERT must re-anchor
+	// cleanly (no duplicate row, no stale value left over).
 	req = feedbackReq("POST", "/api/v1/feedback",
 		`{"message_id":"`+bed.messageID+`","chat_id":"`+bed.chatID+`","signal":"helpful"}`,
 		bed.userID)
@@ -493,6 +559,73 @@ func TestFeedback_Create_UpsertReanchorsWorkspace(t *testing.T) {
 		t.Fatalf("second workspace lookup: %v", err)
 	}
 	if secondWS != bed.wsID {
-		t.Errorf("after re-anchor, workspace = %q, want %q — UPSERT didn't update workspace_id", secondWS, bed.wsID)
+		t.Errorf("after re-POST, workspace = %q, want %q — UPSERT didn't re-anchor cleanly", secondWS, bed.wsID)
+	}
+}
+
+// TestFeedback_Create_CrossTenantChatWithForeignMessage_404 is the direct
+// regression test for the CodeRabbit-flagged security finding: a caller
+// with legitimate access to their OWN chat must not be able to learn
+// whether an unrelated message_id from a DIFFERENT workspace exists by
+// submitting their own chat_id alongside it. Before the fix, the existence
+// check ran unscoped against conversation_messages regardless of chat_id,
+// so this returned 201 (feedback attached to a cross-tenant message) for a
+// real foreign message_id, and 404 only for a truly nonexistent one —
+// letting an attacker enumerate arbitrary message ids across tenants purely
+// from the response code. After the fix, workspace/chat is derived from the
+// message's own real session_id, so a foreign message resolves to a chat
+// the caller can't see and 404s identically to a nonexistent one.
+func TestFeedback_Create_CrossTenantChatWithForeignMessage_404(t *testing.T) {
+	bed := setupFeedbackTestBed(t)
+
+	// A second, fully separate tenant: its own workspace, chat, and
+	// message — the caller (bed.userID) has no membership here at all.
+	foreignWS, foreignChat, foreignMsg := "ws-foreign", "chat-foreign", "msg-foreign"
+	if _, err := bed.h.db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'Foreign', 'foreign')`, foreignWS); err != nil {
+		t.Fatalf("seed foreign ws: %v", err)
+	}
+	foreignUser := "user-foreign-fb"
+	if _, err := bed.h.db.Exec(`INSERT INTO users (id, email, full_name) VALUES (?, 'foreign@fb.com', 'Foreign')`, foreignUser); err != nil {
+		t.Fatalf("seed foreign user: %v", err)
+	}
+	seedCrewRow(t, bed.h.db, "crew-foreign", foreignWS, "CF", "c-foreign")
+	seedAgentRow(t, bed.h.db, "agent-foreign", foreignWS, "crew-foreign", "AF", "a-foreign", "AGENT")
+	if _, err := bed.h.db.Exec(`INSERT INTO chats (id, agent_id, workspace_id, created_by, title)
+        VALUES (?, 'agent-foreign', ?, ?, 'foreign')`, foreignChat, foreignWS, foreignUser); err != nil {
+		t.Fatalf("seed foreign chat: %v", err)
+	}
+	seedConvMessage(t, bed.h.db, foreignMsg, foreignChat, "agent-foreign")
+
+	// Attacker submits THEIR OWN valid chat_id (passes any naive
+	// chat-visibility check) alongside the foreign message_id.
+	req := feedbackReq("POST", "/api/v1/feedback",
+		`{"message_id":"`+foreignMsg+`","chat_id":"`+bed.chatID+`","signal":"helpful"}`,
+		bed.userID)
+	rr := httptest.NewRecorder()
+	bed.h.Create(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("cross-tenant probe with own chat_id + foreign message_id = %d, want 404 (got body=%s)", rr.Code, rr.Body.String())
+	}
+
+	// Same response shape as a message_id that doesn't exist anywhere —
+	// the two cases must not be distinguishable from the response alone.
+	req2 := feedbackReq("POST", "/api/v1/feedback",
+		`{"message_id":"msg-does-not-exist-anywhere","chat_id":"`+bed.chatID+`","signal":"helpful"}`,
+		bed.userID)
+	rr2 := httptest.NewRecorder()
+	bed.h.Create(rr2, req2)
+	if rr2.Code != rr.Code || rr2.Body.String() != rr.Body.String() {
+		t.Errorf("cross-tenant-exists response (%d %q) differs from genuinely-missing response (%d %q) — existence is distinguishable, oracle not fully closed",
+			rr.Code, rr.Body.String(), rr2.Code, rr2.Body.String())
+	}
+
+	// No feedback row was created for the foreign message under any
+	// workspace — the attempted attach must not have partially succeeded.
+	var count int
+	if err := bed.h.db.QueryRow(`SELECT COUNT(*) FROM message_feedback WHERE message_id = ?`, foreignMsg).Scan(&count); err != nil {
+		t.Fatalf("count check: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("foreign message has %d feedback row(s), want 0 — the cross-tenant attach must have been fully rejected", count)
 	}
 }

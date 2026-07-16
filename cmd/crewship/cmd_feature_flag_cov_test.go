@@ -156,3 +156,63 @@ func TestFeatureFlagInheritRunE_ServerError(t *testing.T) {
 		t.Error("expected error from 500")
 	}
 }
+
+// #1196: `crewship feature-flag delete <key>` wraps
+// DELETE /api/v1/feature-flags/{key} — the flag *definition*, distinct
+// from `inherit` which only clears this workspace's override.
+
+func TestFeatureFlagDeleteRunE_DeletesDefinition(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnDelete("/api/v1/feature-flags/wake-gates", clitest.EmptyResponse(204))
+	covSetupCli10(t, s.URL())
+	covSetFlags(t, featureFlagDeleteCmd, map[string]string{"yes": "true"})
+
+	if err := featureFlagDeleteCmd.RunE(featureFlagDeleteCmd, []string{"wake-gates"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if got := len(s.CallsFor("DELETE", "/api/v1/feature-flags/wake-gates")); got != 1 {
+		t.Errorf("DELETE calls = %d, want 1", got)
+	}
+}
+
+func TestFeatureFlagDeleteRunE_RequiresConfirmationWithoutYes(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnDelete("/api/v1/feature-flags/wake-gates", clitest.EmptyResponse(204))
+	covSetupCli10(t, s.URL())
+	covSetFlags(t, featureFlagDeleteCmd, map[string]string{"yes": "false"})
+
+	// confirmAction falls back to reading stdin when not a TTY; with no
+	// input available it reads "" which is neither y/yes, so it aborts.
+	err := featureFlagDeleteCmd.RunE(featureFlagDeleteCmd, []string{"wake-gates"})
+	if err == nil {
+		t.Fatal("expected confirmation to be required")
+	}
+	if got := len(s.CallsFor("DELETE", "/api/v1/feature-flags/wake-gates")); got != 0 {
+		t.Errorf("DELETE should not have been called without confirmation, got %d calls", got)
+	}
+}
+
+func TestFeatureFlagDeleteRunE_NoAuth(t *testing.T) {
+	covSetupCli10(t, "http://127.0.0.1:0")
+	cliCfg = &cli.CLIConfig{}
+	covSetFlags(t, featureFlagDeleteCmd, map[string]string{"yes": "true"})
+	err := featureFlagDeleteCmd.RunE(featureFlagDeleteCmd, []string{"k"})
+	if err == nil || !strings.Contains(err.Error(), "not logged in") {
+		t.Errorf("expected not-logged-in, got %v", err)
+	}
+}
+
+func TestFeatureFlagDeleteRunE_ServerError(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnDelete("/api/v1/feature-flags/k", clitest.ErrorResponse(404, "Feature flag not found"))
+	covSetupCli10(t, s.URL())
+	covSetFlags(t, featureFlagDeleteCmd, map[string]string{"yes": "true"})
+
+	err := featureFlagDeleteCmd.RunE(featureFlagDeleteCmd, []string{"k"})
+	if err == nil || !strings.Contains(err.Error(), "Feature flag not found") {
+		t.Errorf("expected server error surfaced, got %v", err)
+	}
+}

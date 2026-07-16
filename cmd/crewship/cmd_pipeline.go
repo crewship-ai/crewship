@@ -840,31 +840,46 @@ var pipelineRunsCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
+		// Explicit yaml tags matching each json tag — gopkg.in/yaml.v3
+		// does NOT fall back to a json tag when no yaml tag is present,
+		// it lowercases the raw Go field name instead (EntryType ->
+		// "entrytype" rather than "entry_type"). Without the yaml tag,
+		// --format yaml and --format json would return the same data
+		// under different key casing (#1211) — this struct only gained
+		// --format yaml support in this same change (#1195), so this
+		// keeps the two in sync from the start.
 		var rows []struct {
-			ID        string `json:"id"`
-			Timestamp string `json:"ts"`
-			EntryType string `json:"entry_type"`
-			Severity  string `json:"severity"`
-			Summary   string `json:"summary"`
-			RunID     string `json:"run_id"`
+			ID        string `json:"id" yaml:"id"`
+			Timestamp string `json:"ts" yaml:"ts"`
+			EntryType string `json:"entry_type" yaml:"entry_type"`
+			Severity  string `json:"severity" yaml:"severity"`
+			Summary   string `json:"summary" yaml:"summary"`
+			RunID     string `json:"run_id" yaml:"run_id"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
-		if len(rows) == 0 {
-			fmt.Println("No runs yet for this routine.")
-			return nil
-		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "TS\tTYPE\tSEVERITY\tRUN_ID\tSUMMARY")
-		for _, r := range rows {
-			runID := r.RunID
-			if len(runID) > 16 {
-				runID = runID[:16] + "…"
+		// AutoHuman keeps the hand-crafted tabwriter view byte-identical
+		// for table/quiet/default while routing --format json/yaml/ndjson
+		// to the full (untruncated) rows — the RUN_ID column is clipped
+		// to 16 chars for the human table, but scripts need the full id
+		// to feed diff/inspect/explain (#1193).
+		return newFormatter().AutoHuman(rows, func() {
+			if len(rows) == 0 {
+				fmt.Println("No runs yet for this routine.")
+				return
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.Timestamp, r.EntryType, r.Severity, runID, r.Summary)
-		}
-		return w.Flush()
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "TS\tTYPE\tSEVERITY\tRUN_ID\tSUMMARY")
+			for _, r := range rows {
+				runID := r.RunID
+				if len(runID) > 16 {
+					runID = runID[:16] + "…"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.Timestamp, r.EntryType, r.Severity, runID, r.Summary)
+			}
+			w.Flush()
+		})
 	},
 }
 

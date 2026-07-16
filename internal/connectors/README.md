@@ -88,8 +88,22 @@ mcp:
 derived:
   dsn: "postgres://${field.user}:${field.password}@${field.host}:${field.port}/${field.database}"
 
-# Optional: pre-install probe. Either http (PAT-style auth check) or
-# mcp_method (call after spawn to confirm the server reachable).
+# Optional: pre-install probe. Exactly one of:
+#   http        — PAT-style auth check: hit a URL, expect a status
+#                 (+ optionally a truthy JSON body field, for providers
+#                 like Slack whose auth.test always returns HTTP 200 —
+#                 the real verdict lives in {"ok": true/false}).
+#   sql         — conn_string-style auth check: open a real connection
+#                 with the resolved DSN and round-trip a trivial query.
+#                 Needed for connectors (Postgres, …) with no HTTP API
+#                 to probe — an MCP server merely starting never
+#                 touches the credential.
+#   mcp_method  — NOT YET IMPLEMENTED as a real check (tracked in
+#                 crewship-ai/crewship#1204): the API currently treats
+#                 it exactly like "no verify block" (ok=true, unverified).
+#                 Do not rely on it to catch bad credentials until that
+#                 lands; prefer http or sql for any pat/conn_string
+#                 manifest.
 verify:
   http:
     method: GET
@@ -97,6 +111,11 @@ verify:
     headers:
       Authorization: "Bearer ${field.pat}"
     expect_status: 200
+    # expect_json_field: ok   # optional — see slack.yaml
+  # OR:
+  # sql:
+  #   driver: postgres
+  #   dsn: "${derived.dsn}"
   # OR:
   # mcp_method: tools/list
 

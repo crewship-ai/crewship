@@ -334,6 +334,94 @@ func TestActiveProfileNameDirectoryMatch(t *testing.T) {
 	}
 }
 
+// #1210: ActiveProfileNameWithSource must report WHICH precedence layer
+// resolved the active profile — flag, env, directory match, or the
+// persisted `server use` default — so callers like `server current` can
+// explain why a directory override silently beats a just-persisted
+// default instead of leaving that undocumented.
+func TestActiveProfileNameWithSource(t *testing.T) {
+	cfg := &CLIConfig{
+		Current:           "dev3-test",
+		DirectoryProfiles: map[string]string{"/work/crewship_3": "dev3"},
+		Servers: map[string]*ServerProfile{
+			"dev3":      {Server: "https://dev3"},
+			"dev3-test": {Server: "https://dev3-test"},
+		},
+	}
+
+	t.Run("flag wins", func(t *testing.T) {
+		t.Setenv("CREWSHIP_PROFILE", "")
+		SetWorkingDir("/work/crewship_3")
+		defer SetWorkingDir("")
+		name, src := ActiveProfileNameWithSource("dev3-test", cfg)
+		if name != "dev3-test" || src != ProfileSourceFlag {
+			t.Errorf("got (%q, %q), want (dev3-test, flag)", name, src)
+		}
+	})
+
+	t.Run("env wins over directory and persisted", func(t *testing.T) {
+		t.Setenv("CREWSHIP_PROFILE", "dev3-test")
+		SetWorkingDir("/work/crewship_3")
+		defer SetWorkingDir("")
+		name, src := ActiveProfileNameWithSource("", cfg)
+		if name != "dev3-test" || src != ProfileSourceEnv {
+			t.Errorf("got (%q, %q), want (dev3-test, env)", name, src)
+		}
+	})
+
+	t.Run("directory beats persisted current", func(t *testing.T) {
+		t.Setenv("CREWSHIP_PROFILE", "")
+		SetWorkingDir("/work/crewship_3/sub")
+		defer SetWorkingDir("")
+		name, src := ActiveProfileNameWithSource("", cfg)
+		if name != "dev3" || src != ProfileSourceDirectory {
+			t.Errorf("got (%q, %q), want (dev3, directory)", name, src)
+		}
+	})
+
+	t.Run("persisted current when no directory match", func(t *testing.T) {
+		t.Setenv("CREWSHIP_PROFILE", "")
+		SetWorkingDir("/elsewhere")
+		defer SetWorkingDir("")
+		name, src := ActiveProfileNameWithSource("", cfg)
+		if name != "dev3-test" || src != ProfileSourcePersisted {
+			t.Errorf("got (%q, %q), want (dev3-test, persisted)", name, src)
+		}
+	})
+
+	t.Run("none selected", func(t *testing.T) {
+		t.Setenv("CREWSHIP_PROFILE", "")
+		SetWorkingDir("")
+		name, src := ActiveProfileNameWithSource("", &CLIConfig{})
+		if name != "" || src != ProfileSourceNone {
+			t.Errorf("got (%q, %q), want (\"\", none)", name, src)
+		}
+	})
+
+	t.Run("nil cfg", func(t *testing.T) {
+		t.Setenv("CREWSHIP_PROFILE", "")
+		name, src := ActiveProfileNameWithSource("", nil)
+		if name != "" || src != ProfileSourceNone {
+			t.Errorf("got (%q, %q), want (\"\", none)", name, src)
+		}
+	})
+}
+
+// MatchedDirectoryProfileDir must expose which configured directory key
+// matched the cwd (not just the resulting profile name) so `server
+// current` can print the exact path that triggered the override.
+func TestMatchDirectoryProfileDir(t *testing.T) {
+	dirs := map[string]string{"/work/crewship_3": "dev3"}
+	name, dir := matchDirectoryProfileDir("/work/crewship_3/sub", dirs)
+	if name != "dev3" || dir != "/work/crewship_3" {
+		t.Errorf("got (%q, %q), want (dev3, /work/crewship_3)", name, dir)
+	}
+	name, dir = matchDirectoryProfileDir("/elsewhere", dirs)
+	if name != "" || dir != "" {
+		t.Errorf("no match: got (%q, %q), want (\"\", \"\")", name, dir)
+	}
+}
+
 func TestServersRoundTrip(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "c.yaml")
 	orig := &CLIConfig{

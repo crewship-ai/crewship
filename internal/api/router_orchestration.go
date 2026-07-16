@@ -417,6 +417,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedMut("POST", "/api/v1/eval/replay", roleManage, evH.Replay)
 	r.authedMut("POST", "/api/v1/eval/regression", roleManage, evH.Regression)
 	r.mux.Handle("GET /api/v1/eval/runs", authed(wsCtx(http.HandlerFunc(evH.ListRuns))))
+	r.mux.Handle("GET /api/v1/eval/runs/{id}", authed(wsCtx(http.HandlerFunc(evH.GetRun))))
 
 	// MCP tool call audit (require workspace context)
 	mcpAudit := NewMCPAuditHandler(r.db, r.logger)

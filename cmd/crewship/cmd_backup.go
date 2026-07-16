@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
@@ -56,37 +57,42 @@ var backupListCmd = &cobra.Command{
 		}
 		var out struct {
 			Data []struct {
-				Path          string `json:"path"`
-				FileName      string `json:"file_name"`
-				Size          int64  `json:"size_bytes"`
-				Scope         string `json:"scope"`
-				Encrypted     bool   `json:"encrypted"`
-				CreatedAt     string `json:"created_at,omitempty"`
-				FormatVersion int    `json:"format_version,omitempty"`
-			} `json:"data"`
+				Path          string `json:"path" yaml:"path"`
+				FileName      string `json:"file_name" yaml:"file_name"`
+				Size          int64  `json:"size_bytes" yaml:"size_bytes"`
+				Scope         string `json:"scope" yaml:"scope"`
+				Encrypted     bool   `json:"encrypted" yaml:"encrypted"`
+				CreatedAt     string `json:"created_at,omitempty" yaml:"created_at,omitempty"`
+				FormatVersion int    `json:"format_version,omitempty" yaml:"format_version,omitempty"`
+			} `json:"data" yaml:"data"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
 		}
-		if len(out.Data) == 0 {
-			fmt.Fprintln(os.Stderr, "No backups found.")
-			return nil
-		}
-		f := newFormatter()
-		headers := []string{"FILE", "SCOPE", "SIZE", "ENCRYPTED", "FORMAT", "CREATED_AT"}
-		rows := make([][]string, 0, len(out.Data))
-		for _, e := range out.Data {
-			rows = append(rows, []string{
-				e.FileName,
-				e.Scope,
-				formatBytes(e.Size),
-				yesNo(e.Encrypted),
-				fmt.Sprintf("v%d", e.FormatVersion),
-				e.CreatedAt,
-			})
-		}
-		f.Table(headers, rows)
-		return nil
+		// AutoHuman keeps the hand-crafted table byte-identical for
+		// table/quiet/default and routes --format json/yaml/ndjson to
+		// the full row data instead of silently rendering the table
+		// regardless of --format (#1195).
+		return newFormatter().AutoHuman(out.Data, func() {
+			if len(out.Data) == 0 {
+				fmt.Fprintln(os.Stderr, "No backups found.")
+				return
+			}
+			f := newFormatter()
+			headers := []string{"FILE", "SCOPE", "SIZE", "ENCRYPTED", "FORMAT", "CREATED_AT"}
+			rows := make([][]string, 0, len(out.Data))
+			for _, e := range out.Data {
+				rows = append(rows, []string{
+					e.FileName,
+					e.Scope,
+					formatBytes(e.Size),
+					yesNo(e.Encrypted),
+					fmt.Sprintf("v%d", e.FormatVersion),
+					e.CreatedAt,
+				})
+			}
+			f.Table(headers, rows)
+		})
 	},
 }
 
@@ -113,10 +119,91 @@ var backupInspectCmd = &cobra.Command{
 		if err := cli.ReadJSON(resp, &raw); err != nil {
 			return err
 		}
+		// Inverse of the usual bug: this used to always print raw JSON no
+		// matter what --format said. JSON stays the default (the manifest
+		// has always been surfaced this way and scripts may depend on
+		// it), but an explicit -f table (or -f quiet) now renders a
+		// human-readable summary instead of a JSON dump, and -f
+		// yaml/ndjson are honored too (#1195).
+		//
+		// cli.ResolveFormat collapses an unset --format to the literal
+		// string "table" (it's the fallback default for every OTHER
+		// command, where unset and explicit -f table mean the same
+		// thing). Here they must NOT mean the same thing, so this checks
+		// the raw --format value/config default BEFORE resolution to
+		// tell "nothing was requested" apart from "table was requested
+		// on purpose".
+		f := newFormatter()
+		requested := flagFormat != ""
+		if !requested && cliCfg != nil && cliCfg.Format != "" {
+			requested = true
+		}
+		switch {
+		case f.Format == "yaml", f.Format == "ndjson":
+			var v interface{}
+			if err := json.Unmarshal(raw, &v); err != nil {
+				return fmt.Errorf("decode manifest: %w", err)
+			}
+			if f.Format == "yaml" {
+				return f.YAML(v)
+			}
+			return f.NDJSON(v)
+		case requested && (f.Format == "table" || f.Format == "quiet"):
+			return printBackupInspectHuman(raw)
+		default: // nothing requested at all, or an explicit "json"
+			pretty, _ := json.MarshalIndent(raw, "", "  ")
+			fmt.Println(string(pretty))
+			return nil
+		}
+	},
+}
+
+// printBackupInspectHuman renders a backup manifest as a human-readable
+// key/value summary for `backup inspect -f table`. Falls back to the raw
+// JSON if the bundle's manifest doesn't decode into the shape this CLI
+// knows about (e.g. a newer format_version than this binary supports) —
+// better to show something than error out on a read-only inspect.
+func printBackupInspectHuman(raw json.RawMessage) error {
+	var m backup.Manifest
+	// A newer manifest (future FormatVersion, fields this binary doesn't
+	// know about yet) can still unmarshal cleanly into the known subset of
+	// fields — decode success alone doesn't mean the typed summary below
+	// is complete or trustworthy. Check IsCompatible before rendering it;
+	// an incompatible manifest falls back to the raw JSON dump, same as a
+	// genuine decode failure.
+	if err := json.Unmarshal(raw, &m); err != nil || !backup.IsCompatible(m.FormatVersion) {
 		pretty, _ := json.MarshalIndent(raw, "", "  ")
 		fmt.Println(string(pretty))
 		return nil
-	},
+	}
+	pairs := [][]string{
+		{"Format version", fmt.Sprintf("v%d", m.FormatVersion)},
+		{"Crewship version", m.CrewshipVersionAtBackup},
+		{"Scope", string(m.Scope)},
+	}
+	if m.ScopeLevel != "" {
+		pairs = append(pairs, []string{"Scope level", string(m.ScopeLevel)})
+	}
+	pairs = append(pairs,
+		[]string{"Created at", m.CreatedAt.Format("2006-01-02 15:04:05 MST")},
+		[]string{"Created by", fmt.Sprintf("%s (%s)", m.CreatedBy.Email, m.CreatedBy.Role)},
+		[]string{"Source host", fmt.Sprintf("%s (%s)", m.SourceInstance.Hostname, m.SourceInstance.Platform)},
+		[]string{"Encrypted", yesNo(m.Encryption.Enabled)},
+	)
+	if m.Encryption.Enabled && m.Encryption.Algorithm != "" {
+		pairs = append(pairs, []string{"Algorithm", m.Encryption.Algorithm})
+	}
+	if m.Checksums.PayloadSHA256 != "" {
+		pairs = append(pairs, []string{"Payload SHA256", truncateLong(m.Checksums.PayloadSHA256, 20)})
+	}
+	if m.Contents.Workspace != nil {
+		pairs = append(pairs, []string{"Workspace", fmt.Sprintf("%s (%s)", m.Contents.Workspace.Name, m.Contents.Workspace.Slug)})
+	}
+	if len(m.Contents.Crews) > 0 {
+		pairs = append(pairs, []string{"Crews", fmt.Sprintf("%d", len(m.Contents.Crews))})
+	}
+	newFormatter().Detail(pairs)
+	return nil
 }
 
 var backupStatusCmd = &cobra.Command{
@@ -142,25 +229,30 @@ you need to know who acquired the lock (or wait for its TTL).`,
 			return err
 		}
 		var out struct {
-			Held        bool   `json:"held"`
-			AcquiredBy  string `json:"acquired_by,omitempty"`
-			AcquiredAt  string `json:"acquired_at,omitempty"`
-			ExpiresAt   string `json:"expires_at,omitempty"`
-			WorkspaceID string `json:"workspace_id,omitempty"`
+			Held        bool   `json:"held" yaml:"held"`
+			AcquiredBy  string `json:"acquired_by,omitempty" yaml:"acquired_by,omitempty"`
+			AcquiredAt  string `json:"acquired_at,omitempty" yaml:"acquired_at,omitempty"`
+			ExpiresAt   string `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
+			WorkspaceID string `json:"workspace_id,omitempty" yaml:"workspace_id,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
 		}
-		if !out.Held {
-			fmt.Fprintln(os.Stderr, "No backup in progress on this workspace.")
-			return nil
-		}
-		f := newFormatter()
-		f.Table(
-			[]string{"WORKSPACE", "ACQUIRED_BY", "ACQUIRED_AT", "EXPIRES_AT"},
-			[][]string{{out.WorkspaceID, out.AcquiredBy, out.AcquiredAt, out.ExpiresAt}},
-		)
-		return nil
+		// AutoHuman keeps the hand-crafted table byte-identical for
+		// table/quiet/default and routes --format json/yaml/ndjson to
+		// the full status payload instead of silently rendering the
+		// table (or nothing) regardless of --format (#1195).
+		return newFormatter().AutoHuman(out, func() {
+			if !out.Held {
+				fmt.Fprintln(os.Stderr, "No backup in progress on this workspace.")
+				return
+			}
+			f := newFormatter()
+			f.Table(
+				[]string{"WORKSPACE", "ACQUIRED_BY", "ACQUIRED_AT", "EXPIRES_AT"},
+				[][]string{{out.WorkspaceID, out.AcquiredBy, out.AcquiredAt, out.ExpiresAt}},
+			)
+		})
 	},
 }
 

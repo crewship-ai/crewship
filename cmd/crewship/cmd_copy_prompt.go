@@ -36,7 +36,13 @@ Examples:
 
 To re-run with the recovered prompt, use:
   crewship retry r_abc                        # same agent + prompt, new chat
-  crewship retry r_abc --new-prompt "tweaked" # same agent, edited prompt`,
+  crewship retry r_abc --new-prompt "tweaked" # same agent, edited prompt
+
+NOTE: --format is intentionally ignored. The prompt is always written
+raw (no JSON/YAML envelope) so 'crewship copy-prompt r_abc | pbcopy' and
+'> prompt.txt' stay pipe-clean — that IS the output contract here, not a
+table-vs-json choice. Deliberate exception to the CLI's --format
+contract, same spirit as 'crewship wait' owning its own stderr framing.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {

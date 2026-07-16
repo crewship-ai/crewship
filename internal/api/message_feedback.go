@@ -211,62 +211,68 @@ func (h *MessageFeedbackHandler) Create(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// chat_id is optional in the payload — older clients (eval widgets,
-	// CLI feedback) may not have one — but providing it is strongly
-	// preferred. When present, we derive the workspace from the chat
-	// row and verify the user is a member of that workspace.
+	// #1208 + a CodeRabbit security finding on the same PR ("cross-tenant
+	// message existence probe"): message_id is always required (validated
+	// above), and every message row in the conversation_messages search
+	// mirror (migration v111) carries the session_id (chat) it actually
+	// belongs to. Deriving workspace/chat authorization from THAT —
+	// instead of trusting the caller-supplied chat_id, or falling back to
+	// "the user's own most recent workspace" when chat_id was absent — is
+	// what closes the hole: the previous version validated body.ChatID's
+	// visibility (if the caller bothered to send one) but never checked
+	// that message_id actually belonged to that chat. An attacker with
+	// legitimate access to ANY chat of their own could submit its id
+	// alongside an unrelated cross-tenant message_id and learn whether
+	// that message exists — and attach feedback to it — purely from the
+	// 200/404 response, because the old existence check ran unscoped
+	// against the whole table. Resolving session_id from the message
+	// FIRST and checking THAT chat's visibility eliminates the oracle:
+	// only messages in a chat the caller can already see resolve at all.
+	// A visible message but a chat the caller can't see, and a message
+	// that doesn't exist in the mirror at all, both collapse to the same
+	// "message not found" — deliberately not distinguishable from the
+	// outside.
 	//
-	// Message↔chat ownership is NOT validated here because messages
-	// live in JSONL files (chats.jsonl_path), not a SQL table — a
-	// per-POST file read would slow the path enough to discourage
-	// real-time feedback collection. The threat model is acceptable:
-	// workspaces are trust boundaries, so a workspace member filing
-	// feedback against any chat in their workspace is by design.
-	// Cross-tenant probes are blocked by ensureChatVisible. Forged
-	// fabricated message_ids are visible at eval-mining time (the
-	// grader joins back to the JSONL store and orphans are dropped).
+	// chat_id in the request body is still accepted (older clients may
+	// send it) but is no longer trusted for authorization — message_id,
+	// unconditionally required, is the only signal that matters now.
 	//
-	// When absent we fall back to the user's MOST RECENT workspace
-	// (ORDER BY created_at DESC). The previous version sorted ASC,
-	// picking the oldest membership — defensible for "primary" but a
-	// surprising default for a user whose primary membership has moved.
-	// DESC matches the implicit "current active org" mental model.
-	var workspaceID string
-	var chatPtr *string
-	if body.ChatID != "" {
-		ws, ok, err := h.ensureChatVisible(r, body.ChatID)
-		if err != nil {
-			// DB outage / schema drift — surface as 500 instead of a
-			// false 404 that would mask the real issue from the
-			// operator (and confuse the client into retrying against
-			// a non-existent chat).
-			h.logger.Error("feedback chat visibility check", "err", err, "chat_id", body.ChatID)
-			replyError(w, http.StatusInternalServerError, "internal")
-			return
-		}
-		if !ok {
-			replyError(w, http.StatusNotFound, "chat not found")
-			return
-		}
-		workspaceID = ws
-		chatPtr = &body.ChatID
-	} else {
-		err := h.db.QueryRowContext(r.Context(),
-			`SELECT workspace_id FROM workspace_members WHERE user_id = ? ORDER BY created_at DESC LIMIT 1`,
-			user.ID).Scan(&workspaceID)
-		switch {
-		case errors.Is(err, sql.ErrNoRows):
-			// User has no workspace memberships at all. 403 is honest
-			// here — the call shape is valid, the caller just isn't
-			// authorized to write anywhere.
-			replyError(w, http.StatusForbidden, "no workspace membership")
-			return
-		case err != nil:
-			h.logger.Error("feedback workspace lookup", "err", err)
-			replyError(w, http.StatusInternalServerError, "internal")
-			return
-		}
+	// Known limitation carried over from #1208: the mirror is
+	// "search-from-now-on" (no backfill of pre-v111 JSONL) and the
+	// dual-write is best-effort (a transient DB hiccup logs and continues
+	// rather than failing the chat turn) — so in theory a very old or
+	// unluckily-timed message_id could 404 here even though the JSONL row
+	// exists. Acceptable trade, same as before: false 404s are rare and
+	// visible immediately to the caller, whereas the orphan-row/oracle
+	// bugs were silent.
+	var sessionID string
+	lookupErr := h.db.QueryRowContext(r.Context(),
+		`SELECT session_id FROM conversation_messages WHERE id = ?`, body.MessageID).Scan(&sessionID)
+	if errors.Is(lookupErr, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "message not found")
+		return
 	}
+	if lookupErr != nil {
+		h.logger.Error("feedback message lookup", "err", lookupErr, "message_id", body.MessageID)
+		replyError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	workspaceID, visible, err := h.ensureChatVisible(r, sessionID)
+	if err != nil {
+		// DB outage / schema drift — surface as 500 instead of a false
+		// 404 that would mask the real issue from the operator.
+		h.logger.Error("feedback chat visibility check", "err", err, "chat_id", sessionID)
+		replyError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	if !visible {
+		// The message exists, but its real chat isn't visible to this
+		// caller (or is orphaned) — same response as a genuinely missing
+		// message, so the two cases aren't distinguishable from outside.
+		replyError(w, http.StatusNotFound, "message not found")
+		return
+	}
+	chatPtr := &sessionID
 
 	var tracePtr *string
 	if body.TraceID != "" {
@@ -278,15 +284,11 @@ func (h *MessageFeedbackHandler) Create(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// UNIQUE(message_id, user_id, signal) — UPSERT keeps the row id
-	// stable when a user updates their reason text and re-anchors the
-	// workspace + chat references to the latest POST. Re-anchoring
-	// matters when an earlier POST came in without chat_id (workspace
-	// fallback) and a later one carries the real chat: without the
-	// workspace_id overwrite the row stays parked in the fallback
-	// workspace and List queries scoped to the actual workspace miss
-	// it.
+	// stable when a user updates their reason text, and re-writes
+	// workspace_id/chat_id on every POST so the row always matches the
+	// message's current resolution above.
 	id := generateCUID()
-	_, err := h.db.ExecContext(r.Context(), `
+	_, err = h.db.ExecContext(r.Context(), `
 INSERT INTO message_feedback (id, workspace_id, chat_id, message_id, trace_id, signal, reason, user_id)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(message_id, user_id, signal) DO UPDATE SET

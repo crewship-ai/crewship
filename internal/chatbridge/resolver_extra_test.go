@@ -563,3 +563,88 @@ func TestCreateChatNetworkError(t *testing.T) {
 		t.Fatal("expected network error")
 	}
 }
+
+// ---------- RecordCost (#1205) ----------
+
+// TestRecordCostSendsExpectedRequest pins the wire contract: RecordCost must
+// hit the SAME internal endpoint the in-container sidecar already posts to
+// (POST /api/v1/internal/cost/record, see internal/api/internal_cost.go),
+// with the token/provider/model fields it captured from the CLI adapter's
+// own "result" event. CostUSD is deliberately absent from the payload — the
+// server derives it from the rate card so every ledger row is priced
+// consistently regardless of which write path produced it.
+func TestRecordCostSendsExpectedRequest(t *testing.T) {
+	t.Parallel()
+	rec := &recorder{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec.capture(r)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(ts.Close)
+
+	r := NewIPCResolver(ts.URL, "tok", slog.Default())
+	usage := RunCostUsage{
+		WorkspaceID:  "ws-1",
+		CrewID:       "crew-1",
+		AgentID:      "agent-1",
+		Provider:     "anthropic",
+		Model:        "claude-haiku-4-5",
+		InputTokens:  1000,
+		OutputTokens: 200,
+	}
+	if err := r.RecordCost(context.Background(), usage); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if rec.method != http.MethodPost {
+		t.Errorf("method = %s, want POST", rec.method)
+	}
+	if rec.path != "/api/v1/internal/cost/record" {
+		t.Errorf("path = %s, want /api/v1/internal/cost/record", rec.path)
+	}
+	if rec.headers.Get("X-Internal-Token") != "tok" {
+		t.Error("missing X-Internal-Token header")
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(rec.body, &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload["workspace_id"] != "ws-1" || payload["crew_id"] != "crew-1" || payload["agent_id"] != "agent-1" {
+		t.Errorf("scope fields wrong: %+v", payload)
+	}
+	if payload["provider"] != "anthropic" || payload["model"] != "claude-haiku-4-5" {
+		t.Errorf("provider/model wrong: %+v", payload)
+	}
+	if payload["input_tokens"].(float64) != 1000 || payload["output_tokens"].(float64) != 200 {
+		t.Errorf("token fields wrong: %+v", payload)
+	}
+	if payload["billing_mode"] != "metered" {
+		t.Errorf("billing_mode = %v, want metered", payload["billing_mode"])
+	}
+}
+
+func TestRecordCostServerError(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"provider and model required"}`))
+	}))
+	t.Cleanup(ts.Close)
+
+	r := NewIPCResolver(ts.URL, "tok", slog.Default())
+	err := r.RecordCost(context.Background(), RunCostUsage{WorkspaceID: "ws-1", Provider: "anthropic", Model: "claude-haiku-4-5"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "400") {
+		t.Errorf("expected status code in error, got %v", err)
+	}
+}
+
+func TestRecordCostNetworkError(t *testing.T) {
+	t.Parallel()
+	r := NewIPCResolver("http://127.0.0.1:1", "tok", slog.Default())
+	err := r.RecordCost(context.Background(), RunCostUsage{WorkspaceID: "ws-1", Provider: "anthropic", Model: "claude-haiku-4-5"})
+	if err == nil {
+		t.Fatal("expected network error")
+	}
+}

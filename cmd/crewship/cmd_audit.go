@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -30,7 +31,7 @@ Filters mirror the server-side /api/v1/audit query params:
   --action          Domain verb (agent.run, workspace.create, …)
   --entity-type     Entity kind (AGENT, BACKUP, CREDENTIAL, …)
   --entity-id       Narrow to a specific entity row
-  --user            User ID who performed the action
+  --user            User ID (or a member's email, resolved for you) who performed the action
   --since/--until   Date range (RFC3339 or 1h/24h/7d duration)
   --search          Free-text across action, entity_type, user email/name
   --page            Pagination (--lines per page)
@@ -76,7 +77,11 @@ Examples:
 			q.Set("entity_id", entityID)
 		}
 		if userID != "" {
-			q.Set("user_id", userID)
+			resolvedUserID, err := resolveAuditUserID(client, client.GetWorkspaceID(), userID)
+			if err != nil {
+				return err
+			}
+			q.Set("user_id", resolvedUserID)
 		}
 		// Accept the same flexible since/until syntax journal uses so the
 		// surface is uniform — RFC3339 passthrough plus 1h/24h/7d sugar.
@@ -108,15 +113,21 @@ Examples:
 			return err
 		}
 
+		// Field tags carry explicit yaml:"..." matching each json:"..." tag —
+		// gopkg.in/yaml.v3 does NOT fall back to a json tag when no yaml
+		// tag is present, it lowercases the raw Go field name instead
+		// (EntityType -> "entitytype" rather than "entity_type"). Without
+		// the yaml tag, --format yaml and --format json return the same
+		// data under different key casing (#1211).
 		var result struct {
 			Data []struct {
-				ID         string  `json:"id"`
-				Action     string  `json:"action"`
-				EntityType string  `json:"entity_type"`
-				EntityID   *string `json:"entity_id"`
-				UserEmail  *string `json:"user_email"`
-				CreatedAt  string  `json:"created_at"`
-			} `json:"data"`
+				ID         string  `json:"id" yaml:"id"`
+				Action     string  `json:"action" yaml:"action"`
+				EntityType string  `json:"entity_type" yaml:"entity_type"`
+				EntityID   *string `json:"entity_id" yaml:"entity_id"`
+				UserEmail  *string `json:"user_email" yaml:"user_email"`
+				CreatedAt  string  `json:"created_at" yaml:"created_at"`
+			} `json:"data" yaml:"data"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
@@ -132,10 +143,7 @@ Examples:
 			}
 			entityID := "-"
 			if a.EntityID != nil {
-				entityID = *a.EntityID
-				if len(entityID) > 12 {
-					entityID = entityID[:12]
-				}
+				entityID = truncateEntityID(*a.EntityID, 32)
 			}
 			user := "-"
 			if a.UserEmail != nil {
@@ -147,6 +155,90 @@ Examples:
 	},
 }
 
+// resolveAuditUserID validates/normalizes the --user flag value into a
+// real user ID before it's sent to the server. #1207: the flag's own help
+// text says it wants a user ID, but a wrong-shaped value (most commonly an
+// email — the only user identifier surfaced anywhere else in the CLI;
+// audit rows carry user_email, never user_id, and `crewship whoami`
+// doesn't show the ID either) used to be forwarded straight through and
+// silently come back with zero rows, indistinguishable from "this user
+// has no audit history".
+//
+// A CUID-shaped value passes through unchanged (the fast, common case
+// once a caller already has the ID — e.g. from a previous `--format
+// json` audit query). An email-shaped value is resolved against the
+// workspace member roster, the same list `crewship workspace member
+// list` reads, so the natural "I only know their email" case just
+// works. Anything else — or an email with no matching member — is a
+// clear, immediate error instead of a silent empty result.
+func resolveAuditUserID(client *cli.Client, workspaceID, raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if looksLikeCUID(raw) {
+		return raw, nil
+	}
+	if strings.Contains(raw, "@") {
+		id, err := findWorkspaceMemberUserIDByEmail(client, workspaceID, raw)
+		if err != nil {
+			return "", fmt.Errorf("--user %q: resolve email to user ID: %w", raw, err)
+		}
+		if id == "" {
+			return "", fmt.Errorf("--user %q: no workspace member with this email", raw)
+		}
+		return id, nil
+	}
+	return "", fmt.Errorf("--user must be a user ID (a cuid — see `crewship workspace member list`) or a member's email; got %q", raw)
+}
+
+// findWorkspaceMemberUserIDByEmail looks up a workspace member's user ID
+// by email against the regular (non-admin-gated) members endpoint, so
+// `crewship audit --user <email>` works for any member, not just
+// OWNER/ADMIN callers.
+func findWorkspaceMemberUserIDByEmail(client *cli.Client, workspaceID, email string) (string, error) {
+	resp, err := client.Get("/api/v1/workspaces/" + workspaceID + "/members")
+	if err != nil {
+		return "", err
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return "", err
+	}
+	var members []struct {
+		UserID string `json:"user_id"`
+		Email  string `json:"email"`
+	}
+	if err := cli.ReadJSON(resp, &members); err != nil {
+		return "", err
+	}
+	for _, m := range members {
+		if strings.EqualFold(m.Email, email) {
+			return m.UserID, nil
+		}
+	}
+	return "", nil
+}
+
+// truncateEntityID renders an audit ENTITY_ID cell for the table view.
+// Most entity IDs are short cuids (~21 chars) and fit under max as-is. But
+// backup.* actions record the *full backup file path* as the entity ID
+// (see internal/api/backup.go WriteAuditLog calls) — an unbounded value
+// that can run well past a table-friendly width. A naive prefix cut like
+// the old `entityID[:12]` destroyed the only useful part of a path (the
+// filename) and left an unhelpful "/home/ubuntu" behind with no
+// truncation marker at all, indistinguishable from a complete value.
+//
+// When truncation is unavoidable, keep the tail — for a path that's the
+// filename; for an ID it's the disambiguating suffix — and always prefix
+// with "…" so the value is never mistaken for the whole thing. (#1199)
+func truncateEntityID(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	if max <= 1 {
+		return "…"
+	}
+	return "…" + string(r[len(r)-(max-1):])
+}
+
 func init() {
 	// Filter flags map 1:1 to /api/v1/audit query params. Names match the
 	// admin UI's filter chips so a user clicking through the dashboard can
@@ -154,7 +246,7 @@ func init() {
 	auditCmd.Flags().String("action", "", "Filter by action (domain verb, e.g. agent.run, workspace.create)")
 	auditCmd.Flags().String("entity-type", "", "Filter by entity type (AGENT, BACKUP, CREDENTIAL, …)")
 	auditCmd.Flags().String("entity-id", "", "Filter by entity ID")
-	auditCmd.Flags().String("user", "", "Filter by user ID who performed the action")
+	auditCmd.Flags().String("user", "", "Filter by user ID (or a member's email) who performed the action")
 	auditCmd.Flags().String("since", "", "Start of date range (RFC3339 or duration: 1h, 24h, 7d)")
 	auditCmd.Flags().String("until", "", "End of date range (RFC3339 or duration)")
 	auditCmd.Flags().String("search", "", "Free-text search across action, entity_type, user email/name")

@@ -39,15 +39,26 @@ func newFailureDB(t *testing.T) *sql.DB {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	if _, err := db.Exec(`
+CREATE TABLE pipelines (
+    id         TEXT PRIMARY KEY,
+    deleted_at TEXT);
 CREATE TABLE pipeline_runs (
     id                TEXT PRIMARY KEY,
     workspace_id      TEXT NOT NULL,
+    pipeline_id       TEXT NOT NULL DEFAULT 'p_probe',
     pipeline_slug     TEXT,
     status            TEXT,
     started_at        TEXT DEFAULT '',
     error_fingerprint TEXT,
     failed_at_step    TEXT,
     error_message     TEXT);`); err != nil {
+		t.Fatal(err)
+	}
+	// FailureGroups joins pipeline_runs against pipelines and excludes rows
+	// whose pipeline was soft-deleted (crewship#1201) — seed the one live
+	// pipeline every test in this file implicitly runs its failures under,
+	// so the join doesn't drop them.
+	if _, err := db.Exec(`INSERT INTO pipelines (id, deleted_at) VALUES ('p_probe', NULL)`); err != nil {
 		t.Fatal(err)
 	}
 	return db
@@ -265,5 +276,52 @@ func TestFailureGroups_BoundedScan_Large(t *testing.T) {
 	}
 	if len(out[0].RunIDs) != maxFailureRunIDSample {
 		t.Errorf("run-id sample should be capped at %d, got %d", maxFailureRunIDSample, len(out[0].RunIDs))
+	}
+}
+
+// TestFailureGroups_ExcludesSoftDeletedPipeline is the regression guard for
+// crewship#1201: `crewship routine errors` reported a frozen, stale count
+// (524) right after a fresh `crewship seed --nuke --wait-provision` that
+// never moved even as new, confirmed failures landed. Root cause — nuke's
+// `DELETE /pipelines/{slug}` only SOFT-deletes the pipeline row (history is
+// kept on purpose for audit/replay), so pipeline_runs rows from a PRIOR
+// seed/nuke cycle's pipeline incarnation on a long-lived, reused workspace
+// stick around forever and were still being counted by FailureGroups, which
+// only scoped by workspace_id. This asserts the fix: once a pipeline is
+// soft-deleted, its failed runs drop out of the workspace's error-fingerprint
+// aggregate (and out of the bulk-replay run-id sample) — mirroring how
+// `routine runs <slug>` already excludes them via GetBySlug.
+func TestFailureGroups_ExcludesSoftDeletedPipeline(t *testing.T) {
+	db := newFailureDB(t)
+	defer db.Close()
+
+	// A second, now-deleted pipeline incarnation from a prior seed cycle,
+	// carrying its own stale failed runs under the SAME fingerprint the live
+	// pipeline is currently producing.
+	if _, err := db.Exec(`INSERT INTO pipelines (id, deleted_at) VALUES ('p_old', '2026-06-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, status, started_at, error_fingerprint, failed_at_step, error_message) VALUES
+  ('stale_1','w','p_old','feed-change-report','failed','2026-06-01T00:00:00','fp_shared','fetch','boom'),
+  ('stale_2','w','p_old','feed-change-report','failed','2026-06-01T00:00:01','fp_shared','fetch','boom'),
+  ('live_1','w','p_probe','feed-change-report','failed','2026-07-15T00:00:00','fp_shared','fetch','boom');`); err != nil {
+		t.Fatal(err)
+	}
+	s := NewRunStore(db)
+
+	out, err := s.FailureGroups(context.Background(), "w", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("want 1 fingerprint group, got %d", len(out))
+	}
+	g := out[0]
+	if g.Count != 1 {
+		t.Errorf("Count should exclude the 2 stale runs from the soft-deleted pipeline, want 1, got %d", g.Count)
+	}
+	if len(g.RunIDs) != 1 || g.RunIDs[0] != "live_1" {
+		t.Errorf("RunIDs should only sample the live pipeline's run, got %v", g.RunIDs)
 	}
 }

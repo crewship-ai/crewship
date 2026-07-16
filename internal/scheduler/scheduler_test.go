@@ -92,6 +92,10 @@ func (m *mockResolver) UpdateChatTitle(_ context.Context, _, _ string) error {
 	return nil
 }
 
+func (m *mockResolver) RecordCost(_ context.Context, _ chatbridge.RunCostUsage) error {
+	return nil
+}
+
 // mockContainer implements provider.ContainerProvider
 type mockContainer struct {
 	ensureErr error

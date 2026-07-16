@@ -147,3 +147,34 @@ func (o *Orchestrator) updateRunStatus(ctx context.Context, runID, status string
 		o.logger.Error("updateRunStatus: set failed", "run_id", runID, "error", err)
 	}
 }
+
+// runAuditActions maps a terminal RunState.Status value onto the
+// agent.run.* audit action name. "running" (the detached-exec
+// continuation case — see the "still running" branch in RunAgent) is
+// deliberately absent: it isn't a terminal outcome, so it produces no
+// audit row here.
+var runAuditActions = map[string]string{
+	"completed": "agent.run.completed",
+	"error":     "agent.run.failed",
+	"cancelled": "agent.run.cancelled",
+}
+
+// recordRunAudit emits a single agent.run.* audit-log row (#1207) when a
+// run reaches a terminal state. Called once per RunAgent invocation,
+// immediately alongside the matching updateRunStatus call at each of
+// RunAgent's terminal return points — never inside a loop — so the
+// granularity matches agent.hired (internal/api/agents_hire.go): one row
+// per completed lifecycle event, not one per internal step or LLM turn.
+func (o *Orchestrator) recordRunAudit(ctx context.Context, req AgentRunRequest, runID, status string) {
+	action, ok := runAuditActions[status]
+	if !ok {
+		return
+	}
+	o.getAuditLog().RecordAudit(ctx, action, "agent_run", runID, req.OpenedByUserID, req.WorkspaceID, map[string]any{
+		"agent_id":   req.AgentID,
+		"agent_slug": req.AgentSlug,
+		"crew_id":    req.CrewID,
+		"mission_id": req.MissionID,
+		"chat_id":    req.ChatID,
+	})
+}

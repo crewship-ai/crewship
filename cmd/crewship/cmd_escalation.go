@@ -122,11 +122,13 @@ var escalationListCmd = &cobra.Command{
 			if len(reason) > 50 {
 				reason = reason[:47] + "..."
 			}
-			idStr := e.ID
-			if len(idStr) > 12 {
-				idStr = idStr[:12]
-			}
-			rows = append(rows, []string{idStr, e.Type, e.FromSlug, reason, e.Status, e.CreatedAt})
+			// #1199: show the full ID. Escalation IDs are short cuids
+			// (~21 chars), not "absurdly long" — truncating them here
+			// used to produce a value that isn't resolvable by
+			// `escalation resolve` at all (false 404), since the
+			// resolve endpoint requires an exact ID and there's no
+			// prefix-matching fallback like `mission get` has.
+			rows = append(rows, []string{e.ID, e.Type, e.FromSlug, reason, e.Status, e.CreatedAt})
 		}
 		return f.Auto(escalations, headers, rows)
 	},

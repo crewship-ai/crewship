@@ -44,6 +44,10 @@ func (m *mockResolver) UpdateChatTitle(_ context.Context, _, _ string) error {
 	return nil
 }
 
+func (m *mockResolver) RecordCost(_ context.Context, _ RunCostUsage) error {
+	return nil
+}
+
 func (m *mockResolver) ResolveAgent(_ context.Context, _, _ string) (*ChatInfo, error) {
 	return m.info, m.err
 }

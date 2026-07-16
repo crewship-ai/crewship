@@ -581,6 +581,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		default:
 			o.logger.Error("unknown network mode, refusing to start sidecar", "mode", req.NetworkMode)
 			o.updateRunStatus(ctx, runState.ID, "error")
+			o.recordRunAudit(ctx, req, runState.ID, "error")
 			return fmt.Errorf("unknown network mode: %s", req.NetworkMode)
 		}
 		// Check if sidecar already running in this container (shared crew container).
@@ -662,6 +663,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, memoryCfg, ipcCfg, sidecarMembers, networkPolicy, req.MCPServers, o.logger); err != nil {
 				o.logger.Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)
 				o.updateRunStatus(ctx, runState.ID, "error")
+				o.recordRunAudit(ctx, req, runState.ID, "error")
 				return fmt.Errorf("start sidecar: %w", err)
 			}
 		}
@@ -742,6 +744,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		if fileCreds {
 			o.logger.Error("failed to create agent dirs; run carries file-mounted credentials", "error", mkErr, "agent_id", req.AgentID)
 			o.updateRunStatus(ctx, runState.ID, "error")
+			o.recordRunAudit(ctx, req, runState.ID, "error")
 			return fmt.Errorf("create agent dirs (incl. /secrets/%s) for file-mounted credentials: %w — "+
 				"if this is a permission error on /secrets, the Docker daemon likely predates Docker Engine 26 "+
 				"(required for tmpfs uid/gid mount options); upgrade the daemon", req.AgentSlug, mkErr)
@@ -827,6 +830,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		if fileCreds {
 			o.logger.Error("failed to write credential files; run carries file-mounted credentials", "error", credWriteErr, "agent_id", req.AgentID)
 			o.updateRunStatus(ctx, runState.ID, "error")
+			o.recordRunAudit(ctx, req, runState.ID, "error")
 			return fmt.Errorf("write credential files for %s: %w — "+
 				"if this is a permission error on /secrets, the Docker daemon likely predates Docker Engine 26 "+
 				"(required for tmpfs uid/gid mount options); upgrade the daemon", req.AgentSlug, credWriteErr)
@@ -855,6 +859,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			hasMCP := req.CrewMCPConfigJSON != "" || req.AgentMCPConfigJSON != "" || len(req.MCPServers) > 0
 			if hasMCP {
 				o.updateRunStatus(ctx, runState.ID, "error")
+				o.recordRunAudit(ctx, req, runState.ID, "error")
 				return fmt.Errorf("inject MCP config (%s): %w", req.CLIAdapter, err)
 			}
 			o.logger.Warn("failed to inject MCP config", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)
@@ -994,6 +999,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	if err != nil {
 		o.logger.Error("exec agent failed", "error", err, "agent_id", req.AgentID)
 		o.updateRunStatus(ctx, runState.ID, "error")
+		o.recordRunAudit(ctx, req, runState.ID, "error")
 		// Emit the terminal exec.command event for the failure path
 		// too so Crow's Nest doesn't show a hanging "running" block
 		// when Docker exec create/attach fails before the command runs.
@@ -1165,6 +1171,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	if guard.Tripped() {
 		cleanCtx := context.Background()
 		o.updateRunStatus(cleanCtx, runState.ID, "error")
+		o.recordRunAudit(cleanCtx, req, runState.ID, "error")
 		o.logger.Warn("run aborted by loop guard", "agent_id", req.AgentID, "exec_id", result.ExecID)
 		_, _ = j.Emit(cleanCtx, JournalEntry{
 			WorkspaceID: req.WorkspaceID,
@@ -1201,6 +1208,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	if ctx.Err() != nil {
 		cleanCtx := context.Background()
 		o.updateRunStatus(cleanCtx, runState.ID, "cancelled")
+		o.recordRunAudit(cleanCtx, req, runState.ID, "cancelled")
 		o.logger.Info("run cancelled", "agent_id", req.AgentID, "exec_id", result.ExecID)
 		// Close the Crow's Nest exec.command block and flip the Watch
 		// Roster off busy on cancellation too — otherwise stopped
@@ -1310,6 +1318,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		}
 	}
 	o.updateRunStatus(ctx, runState.ID, status)
+	o.recordRunAudit(ctx, req, runState.ID, status)
 
 	// Capture the container's actual installed-package state — apt + pip
 	// + npm + os-release. The journal is the source of truth for "what

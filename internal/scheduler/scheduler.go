@@ -487,8 +487,21 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 	orchestrator.MergeResultUsageMeta(completedMeta, acc.ResultMeta())
 	// Record the actually-resolved model (session-init ground truth) on the
 	// run so the run record can confirm which tier the subscription served.
+	resolvedModel := info.LLMModel
 	if m := acc.ResolvedModel(); m != "" {
 		completedMeta["model"] = m
+		resolvedModel = m
+	}
+
+	// Forward the CLI-reported token usage to the paymaster ledger (#1205).
+	// See chatbridge.resultUsageForLedger's doc for why this adapter-side
+	// write is needed in addition to the sidecar's own HTTP-level cost
+	// observation (which can't see OAuth-tunneled or streaming traffic).
+	// Best-effort: never blocks the scheduled run from completing.
+	if usage, ok := chatbridge.ResultUsageForLedger(info.WorkspaceID, info.CrewID, ag.ID, resolvedModel, acc.ResultMeta()); ok {
+		if err := s.resolver.RecordCost(ctx, usage); err != nil {
+			s.logger.Warn("failed to record run cost usage", "run_id", runID, "error", err)
+		}
 	}
 
 	if runErr != nil {

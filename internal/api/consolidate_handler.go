@@ -36,6 +36,14 @@ type ConsolidateHandler struct {
 
 	mu      sync.Mutex
 	running map[string]struct{} // workspace_id → in-flight
+
+	// testRunDone, when non-nil, receives a value after each background
+	// runOnce goroutine (kicked off by Run) finishes. Production leaves
+	// this nil; tests that exercise the real async Run path set it so
+	// they can wait for the goroutine before returning — otherwise a
+	// t.TempDir() MemoryRoot can still be mid-write when the test's own
+	// cleanup tries to remove it (flaky "directory not empty" on macOS).
+	testRunDone chan struct{}
 }
 
 func NewConsolidateHandler(db *sql.DB, logger *slog.Logger) *ConsolidateHandler {
@@ -184,23 +192,35 @@ func (h *ConsolidateHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// request's OTel span + auth values so the worker remains observable +
 	// audited; we don't want the request's *cancellation* to propagate
 	// (the caller has already received 202 and the worker should run to
-	// completion against its own ledger). Downstream handler tests pass
-	// a sync.WaitGroup via t.Cleanup when they need to observe the emit.
+	// completion against its own ledger). Tests that need to observe the
+	// goroutine's effects set h.testRunDone and receive from it.
 	parentCtx := context.WithoutCancel(r.Context())
 	go func() {
 		defer func() {
 			h.mu.Lock()
 			delete(h.running, workspaceID)
 			h.mu.Unlock()
+			if h.testRunDone != nil {
+				h.testRunDone <- struct{}{}
+			}
 		}()
 		ctx, cancel := context.WithTimeout(parentCtx, 10*time.Minute)
 		defer cancel()
 		h.runOnce(ctx, workspaceID, body.CrewID, sinceDur, workerID)
 	}()
 
+	// accepted mirrors triggered on this path deliberately: both mean
+	// "the request was accepted and a run was kicked off". They used to
+	// diverge — this map only ever set "triggered", so "accepted"
+	// silently zero-valued to false on every successful call (#1206).
+	// note stays empty here; it's reserved for explaining a genuine
+	// non-accept (see the no-summarizer 202 branch above and the 409
+	// in-flight-guard branch below).
 	writeJSON(w, http.StatusAccepted, map[string]any{
+		"accepted":  true,
 		"triggered": true,
 		"worker_id": workerID,
+		"note":      "",
 	})
 }
 
@@ -375,5 +395,23 @@ func (h *ConsolidateHandler) emitCompleted(ctx context.Context, workspaceID, cre
 			"crews_run":      crewsRun,
 			"rules_appended": rulesAppended,
 		},
+	})
+
+	// #1207: consolidate runs were entirely invisible to `crewship
+	// audit` — six manual `consolidate run` calls in the 24h window
+	// produced zero audit_logs rows. Fires once per run, here at the
+	// single terminal point every runOnce exit path already funnels
+	// through (crew-not-found / crew-lookup-failed / enumerate-failed /
+	// enumerate-partial / ok), matching the once-per-lifecycle-event
+	// granularity of agent.hired / backup.create. journal is nil: the
+	// journal entry above already carries this event with a specific,
+	// typed EntrySystemConsolidationCompleted — passing h.journal here
+	// too would additionally dual-write a second, generic
+	// audit.entity_updated entry for the same completion.
+	WriteAuditLog(ctx, h.db, nil, "consolidate.run", "consolidation", workerID, "", workspaceID, map[string]interface{}{
+		"crew_id":        crewID,
+		"status":         status,
+		"crews_run":      crewsRun,
+		"rules_appended": rulesAppended,
 	})
 }

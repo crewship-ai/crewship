@@ -82,11 +82,18 @@ var consolidateRunCmd = &cobra.Command{
 
 		f := newFormatter()
 		return f.AutoHuman(out, func() {
+			// Surface accepted/note in the table view too (#1206) — this
+			// used to only print "Consolidation triggered" regardless of
+			// what the API actually reported, hiding a wrong accepted
+			// signal from table users the same way the JSON output hid
+			// it from script consumers.
 			switch {
 			case out.Triggered:
-				fmt.Printf("Consolidation triggered (worker_id=%s)\n", out.WorkerID)
+				fmt.Printf("Consolidation triggered (accepted=%v, worker_id=%s)\n", out.Accepted, out.WorkerID)
 			case out.Accepted:
 				fmt.Printf("Accepted, but skipped: %s\n", out.Note)
+			case out.Note != "":
+				fmt.Printf("Not accepted: %s\n", out.Note)
 			default:
 				fmt.Println("Consolidation request submitted.")
 			}

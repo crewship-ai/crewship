@@ -89,6 +89,7 @@ func TestConsolidateRunRunE_TriggeredWithScope(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
 	stub.OnPost("/api/v1/consolidate/run", clitest.JSONResponse(http.StatusOK, map[string]any{
+		"accepted":  true,
 		"triggered": true,
 		"worker_id": "w-42",
 	}))
@@ -103,7 +104,10 @@ func TestConsolidateRunRunE_TriggeredWithScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	if !strings.Contains(out, "Consolidation triggered (worker_id=w-42)") {
+	// Regression for #1206: the table view must surface accepted=true,
+	// not just "triggered", so a wrong accepted signal can't hide here
+	// the way it hid in raw JSON output before the fix.
+	if !strings.Contains(out, "Consolidation triggered (accepted=true, worker_id=w-42)") {
 		t.Errorf("output: got %q", out)
 	}
 

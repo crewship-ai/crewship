@@ -98,9 +98,12 @@ func TestEscalationListRunE_TableOutput(t *testing.T) {
 			t.Errorf("RunE: %v", err)
 		}
 	})
-	// ID truncated to 12 chars, reason truncated with ellipsis.
-	if !strings.Contains(out, "esc-1-very-l") || strings.Contains(out, "esc-1-very-long-identifier") {
-		t.Errorf("id not truncated to 12 chars:\n%s", out)
+	// #1199: the ID column must show the full ID — a truncated ID (even
+	// one with an ellipsis marker) can't be pasted into `escalation
+	// resolve` and produces a false 404. Escalation IDs are short cuids,
+	// not "absurdly long", so there's no readability reason to cut them.
+	if !strings.Contains(out, "esc-1-very-long-identifier") {
+		t.Errorf("id must be shown in full (not truncated):\n%s", out)
 	}
 	if !strings.Contains(out, "...") {
 		t.Errorf("reason not truncated:\n%s", out)

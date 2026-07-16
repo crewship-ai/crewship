@@ -26,6 +26,13 @@ Select the active profile per command with --profile, per shell with the
 CREWSHIP_PROFILE env var, or persist a default with 'crewship server use
 <name>'. Authenticate a profile with 'crewship login --profile <name>'.
 
+Precedence: --profile flag > CREWSHIP_PROFILE env > a directory binding
+from 'crewship server add --dir' (cwd auto-select, e.g. per-clone dev-slot
+routing) > the 'server use'-persisted default. The directory binding
+outranks the persisted default, so a directory-mapped clone keeps using
+its bound profile even after 'server use' sets a different one — run
+'crewship server current' to see which layer actually won.
+
 Typical setup:
 
   crewship server add dev1 --server https://crewship-dev1.example
@@ -34,6 +41,18 @@ Typical setup:
   crewship login  --profile dev2
   crewship server use dev1          # default target for this machine
   crewship --profile dev2 crew list # one-off against dev2`,
+}
+
+// serverProfileRow is the machine-format (--format json/yaml/ndjson) shape
+// for `server list`. The human table below prints the same data with color
+// markers and alignment that don't translate to structured output.
+type serverProfileRow struct {
+	Name      string `json:"name" yaml:"name"`
+	Server    string `json:"server,omitempty" yaml:"server,omitempty"`
+	Workspace string `json:"workspace,omitempty" yaml:"workspace,omitempty"`
+	Active    bool   `json:"active" yaml:"active"`
+	HasToken  bool   `json:"has_token" yaml:"has_token"`
+	Defined   bool   `json:"defined" yaml:"defined"`
 }
 
 var serverListCmd = &cobra.Command{
@@ -45,51 +64,83 @@ var serverListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		f := newFormatter()
 		if len(cfg.Servers) == 0 {
-			fmt.Println("No server profiles configured.")
-			fmt.Println("Add one with: crewship server add <name> --server <url>")
-			if cfg.Server != "" {
-				fmt.Printf("\nLegacy single-server target: %s\n", cfg.Server)
-			}
-			return nil
+			return f.AutoHuman([]serverProfileRow{}, func() {
+				fmt.Println("No server profiles configured.")
+				fmt.Println("Add one with: crewship server add <name> --server <url>")
+				if cfg.Server != "" {
+					fmt.Printf("\nLegacy single-server target: %s\n", cfg.Server)
+				}
+			})
 		}
 
-		active := cli.ActiveProfileName(flagProfile, cfg)
+		active, source := cli.ActiveProfileNameWithSource(flagProfile, cfg)
 		names := make([]string, 0, len(cfg.Servers))
 		for n := range cfg.Servers {
 			names = append(names, n)
 		}
 		sort.Strings(names)
 
+		rows := make([]serverProfileRow, 0, len(names))
 		for _, n := range names {
 			p := cfg.Servers[n]
-			if p == nil {
-				// A hand-edited `servers: {name: null}` leaves a nil entry —
-				// show it rather than panicking on p.Token/p.Workspace.
-				fmt.Printf("  %s%-12s%s %-44s ws=%-26s %sundefined%s\n",
-					cli.Bold, n, cli.Reset, "(undefined)", "-", cli.Dim, cli.Reset)
-				continue
+			row := serverProfileRow{Name: n, Active: n == active}
+			if p != nil {
+				row.Defined = true
+				row.Server = p.Server
+				row.Workspace = p.Workspace
+				row.HasToken = p.Token != ""
 			}
-			marker := "  "
-			if n == active {
-				marker = cli.Green + "* " + cli.Reset
-			}
-			auth := cli.Dim + "no token" + cli.Reset
-			if p.Token != "" {
-				auth = "token set"
-			}
-			ws := p.Workspace
-			if ws == "" {
-				ws = "-"
-			}
-			fmt.Printf("%s%s%-12s%s %-44s ws=%-26s %s\n",
-				marker, cli.Bold, n, cli.Reset, p.Server, ws, auth)
+			rows = append(rows, row)
 		}
-		if active != "" && cfg.Servers[active] == nil {
-			fmt.Printf("\n%s! active profile %q has no definition%s — run 'crewship server add %s --server <url>'\n",
-				cli.Yellow, active, cli.Reset, active)
-		}
-		return nil
+
+		// AutoHuman keeps this hand-crafted, colorized listing byte-
+		// identical for table/quiet/default and routes --format
+		// json/yaml/ndjson to the structured rows above instead of
+		// silently rendering the same list regardless of --format (#1195).
+		return f.AutoHuman(rows, func() {
+			for _, n := range names {
+				p := cfg.Servers[n]
+				if p == nil {
+					// A hand-edited `servers: {name: null}` leaves a nil entry —
+					// show it rather than panicking on p.Token/p.Workspace.
+					fmt.Printf("  %s%-12s%s %-44s ws=%-26s %sundefined%s\n",
+						cli.Bold, n, cli.Reset, "(undefined)", "-", cli.Dim, cli.Reset)
+					continue
+				}
+				marker := "  "
+				if n == active {
+					// #1210: a directory_profiles cwd match is visually
+					// indistinguishable from the persisted `server use` default
+					// otherwise — tag it "(dir)" so it doesn't look like the
+					// operator's own choice.
+					if source == cli.ProfileSourceDirectory {
+						marker = cli.Green + "*d" + cli.Reset
+					} else {
+						marker = cli.Green + "* " + cli.Reset
+					}
+				}
+				auth := cli.Dim + "no token" + cli.Reset
+				if p.Token != "" {
+					auth = "token set"
+				}
+				ws := p.Workspace
+				if ws == "" {
+					ws = "-"
+				}
+				fmt.Printf("%s%s%-12s%s %-44s ws=%-26s %s\n",
+					marker, cli.Bold, n, cli.Reset, p.Server, ws, auth)
+			}
+			if active != "" && cfg.Servers[active] == nil {
+				fmt.Printf("\n%s! active profile %q has no definition%s — run 'crewship server add %s --server <url>'\n",
+					cli.Yellow, active, cli.Reset, active)
+			}
+			if hint := directoryOverrideHint(cfg, source); hint != "" {
+				fmt.Println()
+				fmt.Println(hint)
+			}
+		})
 	},
 }
 
@@ -224,14 +275,21 @@ var serverCurrentCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		name, p := cfg.ActiveProfile(flagProfile)
+		name, source := cli.ActiveProfileNameWithSource(flagProfile, cfg)
 		if name == "" {
 			fmt.Printf("No profile active (legacy single-server mode).\nServer: %s\n",
 				valueOrDefault(cfg.Server, "http://localhost:8080"))
 			return nil
 		}
+		var p *cli.ServerProfile
+		if cfg.Servers != nil {
+			p = cfg.Servers[name]
+		}
 		if p == nil {
 			fmt.Printf("Active profile %q is selected but not defined (see 'crewship server list').\n", name)
+			if hint := directoryOverrideHint(cfg, source); hint != "" {
+				fmt.Println(hint)
+			}
 			return nil
 		}
 		auth := "(none)"
@@ -240,8 +298,31 @@ var serverCurrentCmd = &cobra.Command{
 		}
 		fmt.Printf("Active profile: %s\nServer:         %s\nWorkspace:      %s\nToken:          %s\n",
 			name, p.Server, valueOrDefault(p.Workspace, "(none)"), auth)
+		if hint := directoryOverrideHint(cfg, source); hint != "" {
+			fmt.Println(hint)
+		}
 		return nil
 	},
+}
+
+// directoryOverrideHint explains, when a directory_profiles cwd match won
+// over the persisted `server use` default, exactly which directory
+// triggered it and what the persisted default would otherwise have been
+// (#1210 — this precedence layer previously had zero indication in the
+// CLI's own output, making `server use` look silently broken from inside
+// a directory-mapped clone). Returns "" when source isn't a directory
+// override, so callers can print it unconditionally.
+func directoryOverrideHint(cfg *cli.CLIConfig, source cli.ProfileSource) string {
+	if source != cli.ProfileSourceDirectory || cfg == nil {
+		return ""
+	}
+	_, dir := cli.MatchDirectoryProfileDir(cfg.DirectoryProfiles)
+	persisted := cfg.Current
+	if persisted == "" {
+		persisted = "(none)"
+	}
+	return fmt.Sprintf("%s! directory override for %s — persisted default (`server use`) is %q%s",
+		cli.Yellow, dir, persisted, cli.Reset)
 }
 
 func init() {

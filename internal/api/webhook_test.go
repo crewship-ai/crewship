@@ -59,6 +59,10 @@ func (f *fakeChatResolver) IncrementMessageCount(_ context.Context, _ string, _ 
 }
 func (f *fakeChatResolver) UpdateChatTitle(_ context.Context, _, _ string) error { return nil }
 
+func (f *fakeChatResolver) RecordCost(_ context.Context, _ chatbridge.RunCostUsage) error {
+	return nil
+}
+
 // Compile-time interface satisfaction — catches a chatbridge.ChatResolver
 // method-set drift before the test binary builds.
 var _ chatbridge.ChatResolver = (*fakeChatResolver)(nil)

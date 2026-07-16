@@ -56,6 +56,10 @@ type ChatResolver interface {
 	UpdateRun(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}) error
 	IncrementMessageCount(ctx context.Context, chatID string, delta int) error
 	UpdateChatTitle(ctx context.Context, chatID, title string) error
+	// RecordCost forwards a completed run's CLI-reported token usage to the
+	// paymaster cost ledger (#1205). Best-effort by contract: callers log
+	// and continue on error rather than fail the run over a billing write.
+	RecordCost(ctx context.Context, usage RunCostUsage) error
 }
 
 // ChatInfo holds the resolved configuration for a chat session, including
@@ -896,11 +900,23 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	orchestrator.MergeResultUsageMeta(completedMeta, acc.ResultMeta())
 	// Persist the model the run actually resolved to (session-init ground
 	// truth) so `crewship inspect`/the run JSON can confirm Opus-vs-Sonnet.
+	resolvedModel := info.LLMModel
 	if m := acc.ResolvedModel(); m != "" {
 		completedMeta["model"] = m
+		resolvedModel = m
 	}
 	if err := b.resolver.UpdateRun(ctx, runID, "COMPLETED", &exitCode, nil, completedMeta); err != nil {
 		b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
+	}
+
+	// Forward the CLI-reported token usage to the paymaster ledger (#1205).
+	// See cost.go's resultUsageForLedger doc for why this adapter-side write
+	// is needed in addition to (not instead of) the sidecar's own HTTP-level
+	// cost observation. Best-effort: never fails the chat turn.
+	if usage, ok := ResultUsageForLedger(info.WorkspaceID, info.CrewID, info.AgentID, resolvedModel, acc.ResultMeta()); ok {
+		if err := b.resolver.RecordCost(ctx, usage); err != nil {
+			b.logger.Warn("failed to record run cost usage", "run_id", runID, "error", err)
+		}
 	}
 
 	// Build compact tool summary for conversation context (cap at 10 entries

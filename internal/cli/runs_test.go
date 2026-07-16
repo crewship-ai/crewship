@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -95,6 +96,61 @@ func TestGetRun_OKAndNotFound(t *testing.T) {
 
 	if _, err := c.GetRun(context.Background(), "  "); err == nil {
 		t.Fatal("expected error for empty id, got nil")
+	}
+}
+
+// TestGetRun_PipelineRunIDRejectedWithHint pins issue #1193: `crewship
+// routine runs <slug>` surfaces run_-shaped pipeline run ids, but
+// diff/resume (via GetRun) only ever resolve msg_-shaped chat-turn run
+// ids. Feeding a run_ id in must produce a clear hint pointing at
+// `routine logs`, not a bare "run not found" — and must not even hit the
+// server, since a run_ id can never be found via /api/v1/runs/{id}.
+func TestGetRun_PipelineRunIDRejectedWithHint(t *testing.T) {
+	t.Parallel()
+	called := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNotFound)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok", "ws")
+	c.HTTPClient.Timeout = 2 * time.Second
+
+	_, err := c.GetRun(context.Background(), "run_cmrm3xxzk0083de436e64")
+	if err == nil {
+		t.Fatal("expected error for a pipeline run_ id, got nil")
+	}
+	if called {
+		t.Error("GetRun should reject a run_-shaped id before making any HTTP call")
+	}
+	for _, want := range []string{"pipeline run", "routine logs"} {
+		if !strings.Contains(strings.ToLower(err.Error()), want) {
+			t.Errorf("error %q should mention %q", err.Error(), want)
+		}
+	}
+}
+
+func TestIsPipelineRunID(t *testing.T) {
+	cases := []struct {
+		name string
+		id   string
+		want bool
+	}{
+		{"pipeline_run", "run_cmrm3xxzk0083de436e64", true},
+		{"chat_turn_run", "msg_cmrm3xxzk0083de436e64", false},
+		{"legacy_run", "r_abc123", false}, // legacy test fixture prefix, not the real pipeline shape
+		{"empty", "", false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsPipelineRunID(tc.id); got != tc.want {
+				t.Errorf("IsPipelineRunID(%q) = %v, want %v", tc.id, got, tc.want)
+			}
+		})
 	}
 }
 

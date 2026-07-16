@@ -55,14 +55,19 @@ var evalReplayCmd = &cobra.Command{
 		}
 
 		var out struct {
-			RunID  string `json:"run_id"`
-			Status string `json:"status"`
+			RunID  string `json:"run_id" yaml:"run_id"`
+			Status string `json:"status" yaml:"status"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
 		}
-		fmt.Printf("Replay queued: run_id=%s status=%s\n", out.RunID, out.Status)
-		return nil
+		// AutoHuman keeps the queue-confirmation line byte-identical for
+		// table/quiet/default and routes --format json/yaml/ndjson to the
+		// structured payload instead of silently printing the human line
+		// regardless of --format (#1221).
+		return newFormatter().AutoHuman(out, func() {
+			fmt.Printf("Replay queued: run_id=%s status=%s\n", out.RunID, out.Status)
+		})
 	},
 }
 
@@ -92,14 +97,19 @@ var evalRegressionCmd = &cobra.Command{
 		}
 
 		var out struct {
-			RunID  string `json:"run_id"`
-			Status string `json:"status"`
+			RunID  string `json:"run_id" yaml:"run_id"`
+			Status string `json:"status" yaml:"status"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
 		}
-		fmt.Printf("Regression queued: run_id=%s status=%s\n", out.RunID, out.Status)
-		return nil
+		// AutoHuman keeps the queue-confirmation line byte-identical for
+		// table/quiet/default and routes --format json/yaml/ndjson to the
+		// structured payload instead of silently printing the human line
+		// regardless of --format (#1221).
+		return newFormatter().AutoHuman(out, func() {
+			fmt.Printf("Regression queued: run_id=%s status=%s\n", out.RunID, out.Status)
+		})
 	},
 }
 
@@ -128,16 +138,17 @@ var evalRunsCmd = &cobra.Command{
 			return err
 		}
 
+		// Decode into the same full evalRunDetail shape `eval get` uses
+		// (cmd_eval_get.go) rather than a reduced local struct — the API
+		// already returns result/signature/total_tokens/total_cost_usd/
+		// regressed (quartermaster.RunRecord's full JSON), and dropping
+		// those fields here was exactly issue #1191's "no output,
+		// verdict, or diff content" complaint about `eval runs --format
+		// json`. The human table below still shows only the scannable
+		// columns; run `eval get <id>` for the full picture on one row.
 		var body struct {
-			Rows []struct {
-				ID         string `json:"id"`
-				Kind       string `json:"kind"`
-				MissionID  string `json:"mission_id"`
-				BaselineID string `json:"baseline_mission_id"`
-				Status     string `json:"status"`
-				CreatedAt  string `json:"created_at"`
-			} `json:"rows"`
-			Count int `json:"count"`
+			Rows  []evalRunDetail `json:"rows"`
+			Count int             `json:"count"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -152,9 +163,10 @@ var evalRunsCmd = &cobra.Command{
 			header := []string{"ID", "KIND", "MISSION", "BASELINE", "STATUS", "CREATED"}
 			rows := make([][]string, 0, len(body.Rows))
 			for _, r := range body.Rows {
-				rows = append(rows, []string{r.ID, r.Kind, r.MissionID, r.BaselineID, r.Status, r.CreatedAt})
+				rows = append(rows, []string{r.ID, r.Kind, r.MissionID, r.BaselineMissionID, r.Status, r.CreatedAt})
 			}
 			f.Table(header, rows)
+			fmt.Println("\nFor the full result/verdict of a specific run: crewship eval get <id>")
 		})
 	},
 }

@@ -67,10 +67,19 @@ func WriteAuditLog(ctx context.Context, db *sql.DB, j journal.Emitter, action, e
 			metaJSON = string(b)
 		}
 	}
+	// audit_logs.user_id is a nullable FK to users(id). An empty string is
+	// NOT NULL in SQLite, so it would fail the FK check (no users row has
+	// id = "") rather than storing cleanly the way a genuine NULL does.
+	// System-actor events (no human initiator — e.g. a background
+	// consolidate.run) legitimately have no user id, so pass a real NULL.
+	var userIDArg any
+	if userID != "" {
+		userIDArg = userID
+	}
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO audit_logs (id, workspace_id, user_id, action, entity_type, entity_id, metadata, created_at)
 		VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?)`,
-		workspaceID, userID, action, entityType, entityID, metaJSON, now)
+		workspaceID, userIDArg, action, entityType, entityID, metaJSON, now)
 	if err != nil {
 		slog.Warn("audit log write failed", "error", err, "action", action)
 	}

@@ -138,24 +138,27 @@ func TestCov2OnbSetup_PreferredLanguageWriteFailureIsSoft(t *testing.T) {
 // --- Setup: telemetry consent persist failure is soft ---
 
 func TestCov2OnbSetup_TelemetryPersistFailureIsSoft(t *testing.T) {
+	// #1203: preferred_language / telemetry_opt_in are now persisted only
+	// AFTER onboarding is genuinely claimed (service guard succeeds), not
+	// unconditionally up front — so this needs a fully valid setup that
+	// actually reaches persistOnboardingPrefs, to prove a SetOptIn failure
+	// there (missing app_settings table) is soft and doesn't turn an
+	// otherwise-successful onboarding into a 500.
 	withTokenProbeSkipped(t)
+	setTestEncryptionKeyParallelSafe(t)
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	seedTestWorkspace(t, db, userID)
 	if _, err := db.Exec(`DROP TABLE app_settings`); err != nil {
 		t.Fatalf("drop app_settings: %v", err)
 	}
-	h := NewOnboardingHandler(db, nil, testLogger())
-	// crew_name missing → flow stops with 400 AFTER the telemetry branch,
-	// proving the SetOptIn failure didn't abort the request.
-	body := `{"telemetry_opt_in":true}`
+	svc := services.NewOnboardingService(db, testLogger(), generateCUID)
+	h := NewOnboardingHandler(db, svc, testLogger())
+	body := `{"crew_name":"Crew","agent_name":"Eva","telemetry_opt_in":true}`
 	w := httptest.NewRecorder()
 	h.Setup(w, cov2OnbSetupReq(userID, body))
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (crew_name required), body=%s", w.Code, w.Body.String())
-	}
-	if !strings.Contains(w.Body.String(), "crew_name") {
-		t.Errorf("body = %s, want crew_name validation error", w.Body.String())
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (telemetry write is soft-fail), body=%s", w.Code, w.Body.String())
 	}
 }
 

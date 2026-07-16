@@ -44,6 +44,11 @@ func TestHooksListRunE_CrewFilterAndEmpty(t *testing.T) {
 	s := clitest.NewStubServer()
 	defer s.Close()
 	s.OnGet("/api/v1/hooks", clitest.JSONResponse(200, map[string]any{"rows": []map[string]any{}, "count": 0}))
+	// #1194: --crew now resolves slug→id via resolveCrewID before hitting
+	// /api/v1/hooks, the same way every other --crew flag in the CLI does.
+	s.OnGet("/api/v1/crews", clitest.JSONResponse(200, []map[string]any{
+		{"id": "crew-backend-cuid", "slug": "backend"},
+	}))
 	covSetupCli10(t, s.URL())
 	setFlagCovCli10(t, hooksListCmd, "crew", "backend")
 
@@ -57,7 +62,7 @@ func TestHooksListRunE_CrewFilterAndEmpty(t *testing.T) {
 		t.Errorf("empty list message missing: %q", out)
 	}
 	calls := s.CallsFor("GET", "/api/v1/hooks")
-	if len(calls) != 1 || !strings.Contains(calls[0].Query, "crew_id=backend") {
+	if len(calls) != 1 || !strings.Contains(calls[0].Query, "crew_id=crew-backend-cuid") {
 		t.Errorf("crew filter not propagated: %+v", calls)
 	}
 }

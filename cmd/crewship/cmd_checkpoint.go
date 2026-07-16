@@ -86,7 +86,13 @@ var checkpointListCmd = &cobra.Command{
 				truncateString(c.Label, 28),
 				truncateString(c.JournalCursor, 20),
 				c.CreatedAt,
-				truncateString(c.CreatedBy, 16),
+				// #1199: CREATED_BY is a user/agent cuid (~21 chars),
+				// same shape as c.ID above — give it the same 24-char
+				// budget so it isn't cut any more aggressively than the
+				// ID column is. truncateString always marks a cut with
+				// "…", so this stays consistent with option (b) even
+				// when a value does exceed the budget.
+				truncateString(c.CreatedBy, 24),
 			})
 		}
 		return f.Auto(body.Checkpoints, headers, rows)

@@ -25,8 +25,8 @@ install creates the integration at workspace scope (or crew scope with
 Examples:
   crewship connector list
   crewship connector get slack
-  crewship connector verify slack --field SLACK_TOKEN=xoxb-…
-  crewship connector install slack --field SLACK_TOKEN=xoxb-… --crew backend`,
+  crewship connector verify slack --field bot_token=xoxb-…
+  crewship connector install slack --field bot_token=xoxb-… --crew backend`,
 }
 
 var connectorListCmd = &cobra.Command{

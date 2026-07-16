@@ -113,6 +113,41 @@ func TestPostCreateCommandInstallsContainerDeps(t *testing.T) {
 	}
 }
 
+// TestSeedCrewsAllowDomainsTheirDemoContentNeeds guards against #1200: seeded
+// crews default to network_mode=restricted with an empty allowed_domains, but
+// the seed also ships demo content that needs real internet access — OPS
+// issues fetching Hacker News / wttr.in / a public JSON API, and the
+// engineering/ops "httpbin.org" routines. Without an explicit allowlist entry
+// per host, that demo content fails 100% of the time out of the box.
+func TestSeedCrewsAllowDomainsTheirDemoContentNeeds(t *testing.T) {
+	required := map[string][]string{
+		"engineering": {"httpbin.org"},                                                                    // fetch-and-extract routine
+		"ops":         {"httpbin.org", "news.ycombinator.com", "wttr.in", "jsonplaceholder.typicode.com"}, // feed-watch-probe/feed-change-report + OPS-3/4/5 issues
+	}
+	bySlug := map[string]CrewDef{}
+	for _, c := range Crews {
+		bySlug[c.Slug] = c
+	}
+	for slug, domains := range required {
+		c, ok := bySlug[slug]
+		if !ok {
+			t.Fatalf("crew %q not found in seed data", slug)
+		}
+		for _, want := range domains {
+			found := false
+			for _, got := range c.AllowedDomains {
+				if got == want {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("crew %s: allowed_domains %v missing %q needed by seeded demo content", slug, c.AllowedDomains, want)
+			}
+		}
+	}
+}
+
 // extractPostCreateCommand parses a crew's DevcontainerConfig JSON and
 // returns the postCreateCommand field as a string. Fails the test if
 // the JSON is malformed, the field is missing, the field is a non-

@@ -55,6 +55,7 @@ type capResolver struct {
 	runCreates []string // runIDs
 	runUpdates []runUpdateRec
 	increments []int
+	costCalls  []RunCostUsage
 }
 
 func (c *capResolver) CreateChat(context.Context, CreateChatRequest) error { return nil }
@@ -100,6 +101,13 @@ func (c *capResolver) UpdateChatTitle(_ context.Context, _, title string) error 
 	defer c.mu.Unlock()
 	c.titles = append(c.titles, title)
 	return c.titleErr
+}
+
+func (c *capResolver) RecordCost(_ context.Context, usage RunCostUsage) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.costCalls = append(c.costCalls, usage)
+	return nil
 }
 
 // ---------- scripted container provider ----------
@@ -293,6 +301,27 @@ func TestHandleChatMessageSuccessFullFlow(t *testing.T) {
 	}
 	if upd.metadata["duration_ms"] == nil {
 		t.Errorf("completed metadata missing duration_ms: %v", upd.metadata)
+	}
+
+	// #1205: the CLI-reported token usage must also be forwarded to the
+	// paymaster ledger via RecordCost, not just stashed in run metadata —
+	// that forwarding is the entire fix for `crewship cost` under-reporting
+	// real agent spend.
+	if len(resolver.costCalls) != 1 {
+		t.Fatalf("RecordCost calls = %d, want 1: %+v", len(resolver.costCalls), resolver.costCalls)
+	}
+	cost := resolver.costCalls[0]
+	if cost.WorkspaceID != "ws-1" || cost.CrewID != "crew-1" || cost.AgentID != "agent-1" {
+		t.Errorf("RecordCost scope = %+v, want ws-1/crew-1/agent-1", cost)
+	}
+	if cost.Provider != "anthropic" {
+		t.Errorf("RecordCost provider = %q, want anthropic", cost.Provider)
+	}
+	if cost.Model != "claude-test" {
+		t.Errorf("RecordCost model = %q, want claude-test (session-init resolved model)", cost.Model)
+	}
+	if cost.InputTokens != 10 || cost.OutputTokens != 5 {
+		t.Errorf("RecordCost tokens = (%d,%d), want (10,5)", cost.InputTokens, cost.OutputTokens)
 	}
 
 	// Conversation: user + assistant persisted, count incremented by 2.

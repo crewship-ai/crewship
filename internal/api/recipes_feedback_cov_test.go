@@ -557,12 +557,13 @@ func TestCovRecFeedbackCreate_ReasonTooLong(t *testing.T) {
 func TestCovRecFeedbackCreate_NoWorkspaceMembership(t *testing.T) {
 	db := setupTestDB(t)
 	h := NewMessageFeedbackHandler(db, newTestLogger())
-	// User exists but has no workspace membership → 403 on fallback path.
+	// message_id doesn't exist in the conversation_messages mirror at
+	// all → 404 before workspace/chat resolution is even attempted.
 	userID := seedTestUser(t, db)
 	rec := httptest.NewRecorder()
 	h.Create(rec, covRecFeedbackReq(t, `{"message_id":"m1","signal":"helpful"}`, userID))
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("Create no membership: got %d, want 403 (body=%s)", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("Create unknown message: got %d, want 404 (body=%s)", rec.Code, rec.Body.String())
 	}
 }
 
@@ -579,12 +580,19 @@ func TestCovRecFeedbackCreate_ChatNotFound(t *testing.T) {
 	}
 }
 
-func TestCovRecFeedbackCreate_HappyWorkspaceFallback(t *testing.T) {
+func TestCovRecFeedbackCreate_HappyDerivedFromMessage(t *testing.T) {
 	db := setupTestDB(t)
 	h := NewMessageFeedbackHandler(db, newTestLogger())
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
+	seedCrewRow(t, db, "crew-1", wsID, "C", "c-1")
+	seedAgentRow(t, db, "agent-1", wsID, "crew-1", "A", "a-1", "AGENT")
+	if _, err := db.Exec(`INSERT INTO chats (id, agent_id, workspace_id, created_by, title)
+        VALUES ('sess-1', 'agent-1', ?, ?, 'chat')`, wsID, userID); err != nil {
+		t.Fatalf("seed chat: %v", err)
+	}
 
+	seedConvMessage(t, db, "msg-1", "sess-1", "agent-1")
 	body := `{"message_id":"msg-1","signal":"helpful","reason":"nice"}`
 	rec := httptest.NewRecorder()
 	h.Create(rec, covRecFeedbackReq(t, body, userID))
@@ -615,8 +623,15 @@ func TestCovRecFeedbackCreate_Upsert(t *testing.T) {
 	db := setupTestDB(t)
 	h := NewMessageFeedbackHandler(db, newTestLogger())
 	userID := seedTestUser(t, db)
-	seedTestWorkspace(t, db, userID)
+	wsID := seedTestWorkspace(t, db, userID)
+	seedCrewRow(t, db, "crew-up", wsID, "C", "c-up")
+	seedAgentRow(t, db, "agent-1", wsID, "crew-up", "A", "a-1", "AGENT")
+	if _, err := db.Exec(`INSERT INTO chats (id, agent_id, workspace_id, created_by, title)
+        VALUES ('sess-up', 'agent-1', ?, ?, 'chat')`, wsID, userID); err != nil {
+		t.Fatalf("seed chat: %v", err)
+	}
 
+	seedConvMessage(t, db, "msg-up", "sess-up", "agent-1")
 	first := `{"message_id":"msg-up","signal":"helpful","reason":"first"}`
 	rec := httptest.NewRecorder()
 	h.Create(rec, covRecFeedbackReq(t, first, userID))
@@ -654,8 +669,15 @@ func TestCovRecFeedbackCreate_DBError(t *testing.T) {
 	db := setupTestDB(t)
 	h := NewMessageFeedbackHandler(db, newTestLogger())
 	userID := seedTestUser(t, db)
-	seedTestWorkspace(t, db, userID)
+	wsID := seedTestWorkspace(t, db, userID)
+	seedCrewRow(t, db, "crew-de", wsID, "C", "c-de")
+	seedAgentRow(t, db, "agent-1", wsID, "crew-de", "A", "a-1", "AGENT")
+	if _, err := db.Exec(`INSERT INTO chats (id, agent_id, workspace_id, created_by, title)
+        VALUES ('sess-1', 'agent-1', ?, ?, 'chat')`, wsID, userID); err != nil {
+		t.Fatalf("seed chat: %v", err)
+	}
 
+	seedConvMessage(t, db, "m1", "sess-1", "agent-1")
 	// Fault injection: drop the insert target table → 500.
 	if _, err := db.Exec(`DROP TABLE message_feedback`); err != nil {
 		t.Fatalf("drop message_feedback: %v", err)

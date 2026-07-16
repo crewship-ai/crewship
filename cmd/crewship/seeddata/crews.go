@@ -25,6 +25,12 @@ type CrewDef struct {
 	// local-Ollama demo crew (CREWSHIP_SEED_OLLAMA) so the default seed is
 	// unchanged.
 	RequiresEnv string `yaml:"requires_env,omitempty"`
+	// AllowedDomains lists hosts this crew's demo content (issues, routines)
+	// needs to reach over the network. Crews default to network_mode=restricted
+	// with an empty allowlist (see database.DefaultCrewNetworkMode); any host
+	// the seed's own demo content calls out to must be listed here or that
+	// content fails 100% of the time out of the box (#1200).
+	AllowedDomains []string `yaml:"allowed_domains,omitempty"`
 }
 
 // Crews — the 4 demo crews seeded into a fresh workspace.
