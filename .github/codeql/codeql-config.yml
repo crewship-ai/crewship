@@ -1,0 +1,27 @@
+# CodeQL analysis configuration (referenced by .github/workflows/codeql.yml).
+#
+# `queries` lives here (not as a workflow input) so the query suite and the
+# filters below are versioned in one place.
+name: crewship CodeQL config
+
+queries:
+  # security-extended pulls in taint paths the default suite misses
+  # (e.g. cleartext-logging, insecure-randomness).
+  - uses: security-extended
+
+query-filters:
+  # go/log-injection is excluded by policy (#954). Every logger in this
+  # codebase roots in internal/logging.New, whose ReplaceAttr hook
+  # (redactAttr -> neutralizeControl, internal/logging/logger.go) escapes
+  # CR/LF and all C0 control characters in both the message and every
+  # attribute before a line is emitted — the exact CWE-117 neutralization
+  # this query wants, applied once at the handler so no call site can forget
+  # it. CodeQL models the logger.Info/Warn/Error call as the sink and cannot
+  # see handler-level sanitization, so every new log statement touching
+  # request data re-opened a false positive: 440 alerts dismissed 2026-07-12,
+  # 32 more 2026-07-13, 47 more 2026-07-16 — zero true positives across three
+  # sweeps. The guarantee is pinned by TestLogInjection_* in internal/logging;
+  # if the sanitizer is ever removed those tests fail, and this exclusion
+  # must be revisited before they are deleted.
+  - exclude:
+      id: go/log-injection

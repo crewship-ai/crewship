@@ -137,6 +137,68 @@ func TestGovModelResolver_Resolve(t *testing.T) {
 	})
 }
 
+// TestGovModelResolver_CacheKeyRotation pins the #954 fix for CodeQL
+// go/weak-sensitive-data-hashing (alert 667): the build cache must not derive
+// its map key from the API key via a fast hash. The key lives on the cache
+// entry and is compared directly, so:
+//   - same config + same key    -> cache hit (same provider instance),
+//   - same config + rotated key -> rebuild that REPLACES the entry in place
+//     (exactly one entry per non-secret fingerprint, no stale-key leak).
+func TestGovModelResolver_CacheKeyRotation(t *testing.T) {
+	ensureEncryptionKey(t)
+	ctx := context.Background()
+
+	db := setupTestDB(t)
+	owner := seedTestUser(t, db)
+	ws := seedTestWorkspace(t, db, owner)
+	enc, _ := encryption.Encrypt("sk-ant-old")
+	execOrFatal(t, db, `INSERT INTO credentials (id, workspace_id, name, encrypted_value, type, created_by)
+		VALUES ('gk1', ?, 'gov-key', ?, 'API_KEY', ?)`, ws, enc, owner)
+	if err := governance.Upsert(ctx, db, ws, governance.Settings{
+		GovModelProvider:     governance.ProviderAnthropic,
+		GovModelID:           "claude-sonnet-4-5",
+		GovModelCredentialID: "gk1",
+	}, owner); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	r := NewGovModelResolver(db, nil, newTestLogger(), testOllamaURL, testOllamaModel)
+
+	p1, _ := r.Resolve(ctx, ws)
+	if p1 == nil {
+		t.Fatal("configured resolve returned nil provider")
+	}
+	p2, _ := r.Resolve(ctx, ws)
+	if p2 != p1 {
+		t.Error("same config + same key must hit the cache (same provider instance)")
+	}
+
+	// Rotate the vault key: same non-secret config, new secret.
+	encNew, _ := encryption.Encrypt("sk-ant-new")
+	execOrFatal(t, db, `UPDATE credentials SET encrypted_value = ? WHERE id = 'gk1'`, encNew)
+
+	p3, _ := r.Resolve(ctx, ws)
+	if p3 == nil {
+		t.Fatal("resolve after key rotation returned nil provider")
+	}
+	if p3 == p1 {
+		t.Error("rotated key must rebuild the provider, got the stale cached instance")
+	}
+
+	r.mu.Lock()
+	entries := len(r.cache)
+	var fp string
+	for k := range r.cache {
+		fp = k
+	}
+	r.mu.Unlock()
+	if entries != 1 {
+		t.Errorf("cache holds %d entries after rotation, want 1 (entry replaced in place, no stale-key leak)", entries)
+	}
+	if strings.Contains(fp, "sk-ant-old") || strings.Contains(fp, "sk-ant-new") {
+		t.Errorf("cache key %q contains secret material", fp)
+	}
+}
+
 // TestGovModelResolver_Status covers the read-only status seam the keeper status
 // card uses: unconfigured → zero value, revoked credential → Configured + Degraded.
 func TestGovModelResolver_Status(t *testing.T) {

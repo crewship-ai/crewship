@@ -135,11 +135,11 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-          # security-extended pulls in the security-and-quality query
-          # pack; default queries miss several taint paths that
-          # security-extended catches (e.g. cleartext-logging,
-          # insecure-randomness).
-          queries: security-extended
+          # Query suite (security-extended) and repo-specific query filters
+          # (go/log-injection excluded — sanitized centrally in
+          # internal/logging, see #954) live in the config file so they are
+          # versioned together.
+          config-file: ./.github/codeql/codeql-config.yml
 
       # For Go, we build the main binary so CodeQL sees the actual code
       # paths the release artifact will compile. web/out is empty in this
