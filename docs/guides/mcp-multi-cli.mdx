@@ -21,6 +21,22 @@ Every CLI adapter implements MCP (Model Context Protocol) differently. Crewship'
 
 ### Stdio servers (local subprocess)
 
+However the launch line reaches Crewship — the CLI's `integration add --command`, the
+web integration form's args field, or the MCP config editor — it is split into
+`command` + `args` by a quote-aware tokenizer, not a naive whitespace split:
+
+- **Single quotes** group and are fully literal inside (`'echo hi there'` → one token).
+- **Double quotes** group; inside them a backslash escapes only `"` and `\`, so
+  `"C:\Program Files\nodejs\npx.exe"` survives as one token with its backslashes.
+- An **unquoted backslash** escapes only a following space, tab, quote, or backslash;
+  otherwise it stays literal (`C:\npx.exe` needs no quoting).
+- An executable **path containing spaces must be quoted**, or validation rejects the
+  command as a crammed launch line.
+- `""` is kept as an intentional empty argument; an unterminated quote consumes the
+  rest of the input as one token (it is not an error).
+- There is **no shell**: no variable expansion, globbing, tilde/brace expansion, or
+  operators (`|`, `&&`, redirects). Env vars belong in the `env` field.
+
 **Claude / Cursor / Gemini / Droid** — separate `command` + `args`:
 ```json
 {"command": "npx", "args": ["-y", "@scope/pkg"], "env": {"FOO": "${VAR}"}}
@@ -90,7 +106,12 @@ Codex's project-scoped `.codex/config.toml` is only loaded for "trusted" project
 crewship agent mcp <agent-slug> --resolved
 ```
 
-Dumps the resolved MCP config that the adapter writes. Useful for spot-checking env-var translation, file paths, and per-CLI schema differences before exec.
+Dumps the resolved MCP config that the adapter writes, in two labeled sections: the
+blob config (`crews`/`agents.mcp_config_json`, agent keys winning over crew keys) and
+the integration-table bindings (workspace/crew servers plus per-agent bindings, each
+line showing origin, transport, endpoint or command, and the bound credential). Useful
+for spot-checking env-var translation, file paths, and per-CLI schema differences
+before exec.
 
 ## Adding an MCP server
 

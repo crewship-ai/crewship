@@ -60,7 +60,7 @@ account under. `<toolkit>` is a single positional arg.
 accepts a slug or id. `account revoke`/`refresh`/`remove` map to
 `POST .../accounts/{accountId}/revoke`, `POST .../accounts/{accountId}/refresh`,
 and `DELETE .../accounts/{accountId}` (all workspace manage); the `account-id` is
-the Composio account id shown by `integration composio inventory --output json`.
+the Composio account id shown by `integration composio inventory --format json`.
 
 `default show` maps to `GET /api/v1/integrations/composio/default` (read);
 `default enable`/`default set` map to the matching `PUT` (workspace manage).
@@ -73,8 +73,11 @@ time; a per-agent `bind` overrides the default for that agent. See the
 Maps to `GET /api/v1/integrations/composio/inventory`. Requires a Composio API key
 for the active workspace — set one per-workspace with `integration composio key set`
 (or from the Integrations UI), or fall back to a server-level `COMPOSIO_API_KEY`.
-Prints a "not configured" notice when neither is present. Add `--output json`
-for the raw payload. See the [Integrations guide](/guides/integrations#managed-integrations-composio).
+Prints a "not configured" notice when neither is present. Add `--format json`
+(or `yaml`/`ndjson`) for the raw payload — all read-only `composio` subcommands
+(`inventory`, `toolkits`, `tools`, `triggers types`, `triggers active`,
+`default show`, `key show`, `bindings`) honour the global `--format` flag.
+See the [Integrations guide](/guides/integrations#managed-integrations-composio).
 
 ### Workspace-scoped
 
@@ -225,6 +228,16 @@ the full line verbatim would make the runtime look for an executable literally
 named `npx @modelcontextprotocol/server-github`, which never exists, and the
 server would silently never start. `integration test` catches that same mistake
 statically for stdio servers before you wonder why no tools appeared.
+
+The split is quote-aware, not a naive whitespace split: quoted substrings stay
+one token, so an executable path that contains spaces must be quoted —
+`--command '"/opt/my app/bin/server" --port 3000'` yields the executable
+`/opt/my app/bin/server` plus one argument. Single quotes are fully literal
+inside; inside double quotes a backslash escapes only `"` and `\`, so Windows
+paths like `"C:\Program Files\nodejs\npx.exe"` survive intact. There is no
+shell involved — no variable expansion, globbing, or `|`/`&&` operators. See
+the [MCP guide](/guides/mcp-multi-cli#stdio-servers-local-subprocess) for the full
+tokenizer rules.
 </Note>
 
 ### Bind an agent to it

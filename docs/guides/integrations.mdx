@@ -244,6 +244,12 @@ MCP servers are configured per-crew or per-agent via the `.mcp.json` file:
 
 The sidecar merges crew-level and agent-level MCP configurations at runtime. The merged config is written to `/crew/agents/{slug}/.mcp.json` inside the container.
 
+When entering a stdio server through the web UI (integration form or config editor),
+the args string is tokenized quote-aware: `--flag "hello world"` becomes
+`["--flag", "hello world"]`, and an executable path with spaces stays one token when
+quoted. The exact rules are in the
+[MCP guide](/guides/mcp-multi-cli#stdio-servers-local-subprocess).
+
 ### MCP Gateway
 
 The `MCPGateway` (`internal/sidecar/mcp_gateway.go`) manages MCP server connections:

@@ -547,11 +547,17 @@ enumerate every crew's credential metadata. **#1159 closes this by binding
 the token to a crew.** A per-crew sidecar now receives a **crew-bound
 token** (`crwv1.<workspace_id>.<crew_id>.<mac>`,
 `internaltoken.DeriveCrewToken`) instead of a workspace-bound one; the
-crew is baked into the MAC. `requireInternal` refuses a `?crew_id` that
+crew is baked into the MAC. `requireInternal` refuses a `?crew_id` **query parameter** that
 disagrees with the token's crew (403) across every internal route, and
 the credential listing scopes to the **cryptographic** crew
 (`InternalTokenCrewFromContext`) in preference to the query — so a
-forged or omitted `crew_id` can no longer widen the view. The loopback
+forged or omitted `crew_id` can no longer widen the view. Routes that
+carry `crew_id` in the JSON **body** (cost record, journal emit, keeper
+request/execute, pipeline save/exec, assignment run, escalation, query,
+MCP tool-call recording, and `POST /internal/agents`) enforce the same
+exact-crew match in-handler via `assertBoundCrewWorkspaceDB` (#1186), so
+a crew-bound token cannot attribute writes to — or hire into — a
+sibling crew either. The loopback
 exemption is **connection-based** (`r.RemoteAddr`), never header-based:
 the in-process `TokenSyncer` and crew-less callers legitimately carry no
 crew and keep the workspace-wide `include_values` path.
@@ -586,6 +592,7 @@ crew and keep the workspace-wide `include_values` path.
 | Leaked master token replayed from a container | ✅ mitigated — master accepted only from a loopback origin (F-6); residual capped to the host trust boundary |
 | MCP tool-call audit writer (`POST /internal/mcp-tool-calls`) body workspace | ✅ closed — in-handler `assertInternalTokenWorkspace` (R-1) |
 | Cross-crew messaging / shared files (`/internal/crew-messages`, `/internal/crew-files`) connection-only auth | ✅ closed — caller-supplied crew IDs must resolve to the token's bound workspace (R-2) |
+| Crew-bound token, body-carried `crew_id` → sibling-crew attribution (cost / journal / keeper / pipelines / assignments / escalation / query / mcp-tool-calls / agent create) | ✅ closed — in-handler `assertBoundCrewWorkspaceDB` exact-crew match (#1186) |
 | F4 handler body-workspace drop | ⏳ PR-F25 (eliminate body workspace param — cleanup, no longer a security gap) |
 | Lessons memory tier agent-author write | ✅ closed — dispatcher rejects `tier="lessons"` |
 | Memory file injection scan (READ path) | ✅ — 11 regex rules + full Unicode Cf category (+ 3 Hangul fillers) |

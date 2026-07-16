@@ -142,6 +142,7 @@ Keeper follows a strict fail-closed philosophy:
 | Response unparseable | DENY with "unparseable response" |
 | Unknown decision value | Normalized to DENY |
 | Unknown network mode | Default to restricted |
+| Exec user empty, undeterminable, or root | Refuse to execute the command |
 
 ## The Execute Flow
 
@@ -181,7 +182,7 @@ Non-SECRET credentials reach agents through their normal delivery paths
   </Step>
 
   <Step title="If ALLOW, execute command">
-    The credential is injected as an environment variable, the command runs inside the container, and the output is **scrubbed** of credential values before being returned to the agent.
+    The credential is injected as an environment variable, the command runs inside the container as the container's resolved run-as user (never hardcoded; the exec is refused if that user is undeterminable or root), and the output is **scrubbed** of credential values before being returned to the agent.
   </Step>
 </Steps>
 

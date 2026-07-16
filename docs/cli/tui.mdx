@@ -10,7 +10,7 @@ icon: "monitor"
 
 ## `crewship tui`
 
-No flags. Resolves the server URL via the same `cli.ResolveServer` helper every other command uses (`--server`, env, then config).
+No flags. Resolves the server URL via the same effective-server chain every other command dials: `--server` flag → active profile's server (`--profile` / `CREWSHIP_PROFILE`) → `CREWSHIP_SERVER` env → `server:` in `~/.crewship/cli-config.yaml` → `http://localhost:8080`.
 
 ```bash
 crewship tui

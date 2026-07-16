@@ -132,6 +132,7 @@ Scopes use the shape `<resource>:<action>`. The recognised vocabulary is deliber
 - **Wildcards subsume:** `agents:*` satisfies any `agents` route; `*` satisfies everything.
 - **Least privilege is coarse today:** the broad workspace-management surface (projects, issues, pipelines, integrations, admin, feature flags, …) currently maps to `workspace:admin`. Finer scopes for that surface are planned.
 - **No `:read` scopes yet.** Reads are not scope-gated in this pass (GET routes register outside the mutation chokepoint), and there is no route-mapped `agents:run` — so those scopes aren't offered rather than shipped as no-ops. They return when a route requires them (read-scoping / invocation-scoping are tracked follow-ups). A scoped token can still read.
+- **Self-scoped mutations are scope-exempt.** A handful of mutations are gated by *ownership* instead of a scope — for example the one-shot programmatic chats an agent creates for itself: create, read, and delete are all authorized by the creator-or-agent-editor check, so a narrowly-scoped token (e.g. `agents:write`) can clean up its own chats without needing a broader scope.
 
 **Backward compatibility.** A token minted **without** `scopes` (the default, and every token issued before enforcement) carries the **full role** of the issuing user — unchanged behavior. Scopes only ever *narrow* a token; you can never mint one above your own role.
 

@@ -21,6 +21,11 @@ For a live tail of granular events, use [`crewship journal --follow`](/cli/journ
 | `--export <fmt>` | string | (unset) | Dump the current page: `ndjson` or `csv`. Wins over `--format`. |
 | `--out <path>` | string | (unset) | Write `--export` output to file (default: stdout). |
 
+`--export` and the global `--format` overlap but differ: `--format json|yaml|ndjson`
+renders the fetched page like any other list command, while `--export ndjson|csv` is a
+dedicated dump path that can write to a file via `--out` and takes precedence when both
+are set.
+
 ### Examples
 
 ```bash

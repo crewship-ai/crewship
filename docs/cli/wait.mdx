@@ -33,6 +33,13 @@ When neither `--quiet` nor a structured `--format` (`json`/`yaml`/`ndjson`) is s
 | `3` | `TIMEOUT` — server-reported, or `--timeout` reached |
 | `4` | Network/auth error before any status could be read, or the id matched neither run kind |
 
+<Note>
+`wait` is the one documented exception to the CLI's structured-error contract: because it
+owns these run-outcome exit codes, error diagnostics are printed to stderr as plain
+`[wait] error: ...` text even under a machine `--format` — there is no JSON/YAML error
+envelope. Branch on the exit code, not on parsing stderr.
+</Note>
+
 ### Examples
 
 ```bash

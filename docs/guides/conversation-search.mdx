@@ -49,6 +49,9 @@ crewship conversation search agent_123 "rate limit" --limit 50
 crewship conversation search backend-bot "auth" --format json | jq '.hits[].session_id'
 ```
 
+`--format yaml` and `--format ndjson` are honoured too, like every other read command —
+see [Output Formats](/cli/overview#output-formats).
+
 Arguments and flags:
 
 | Argument / flag | Meaning |

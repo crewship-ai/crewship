@@ -218,7 +218,7 @@ The sidecar forwards both endpoints over `/tmp/crewship.sock` to crewshipd, whic
 1. **L1 fast-path** — for `request` only (never `execute`), an L1 credential plus an intent ≥ 10 non-whitespace characters AND ≥ 3 distinct non-whitespace characters is auto-allowed without an LLM round-trip. Single-character, whitespace-only, or trivial-filler intents like `"aaaaaaaaaa"` are rejected.
 2. **LLM evaluation** — every other request is scored by `Gatekeeper.Evaluate`, which prompts a local Ollama model with the request, the agent's recent conversation, and the credential's `SecurityLevel`. The model returns a structured `{ decision, reason, risk }` JSON object.
 3. **Fail-closed default** — if no LLM provider is configured, the Gatekeeper returns `DENY`. The same applies if the LLM response cannot be parsed as JSON.
-4. **Execute branch only** — on `ALLOW`, crewshipd runs the command via `docker exec` inside the crew container with the credential injected as an environment variable. Stdout and stderr pass through the [scrubber](#output-processing) before being returned. The credential value never crosses back into UID 1001.
+4. **Execute branch only** — on `ALLOW`, crewshipd runs the command via `docker exec` inside the crew container with the credential injected as an environment variable. The exec runs as the container's resolved non-root run-as user and fails closed if that user is empty, undeterminable, or root. Stdout and stderr pass through the [scrubber](#output-processing) before being returned. The credential value never crosses back into UID 1001.
 
 ### Sequence diagram
 

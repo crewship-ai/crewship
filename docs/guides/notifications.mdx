@@ -89,6 +89,9 @@ crewship notifychannel rm nch_abc123 --yes
 
 Provide your own webhook secret with `--secret <value>` instead of letting Crewship generate one.
 
+`notifychannel add` and `list` honour the global `--format` flag (`json`/`yaml`/`ndjson`)
+for scripting — see [Output Formats](/cli/overview#output-formats).
+
 ## API
 
 All routes are workspace-scoped (the workspace comes from your auth context) and mutations require **MANAGER+**.
