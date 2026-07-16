@@ -400,58 +400,70 @@ const insertSQL = `INSERT INTO journal_entries
 	 actor_type, actor_id, summary, payload, refs, trace_id, span_id, expires_at)
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
-func (w *Writer) persistBatch(ctx context.Context, batch []Entry) error {
-	tx, err := w.db.BeginTx(ctx, nil)
+// withTx begins a transaction, runs fn, and commits. Any error — from
+// begin, fn, or commit — leaves the transaction rolled back via the
+// deferred Rollback (a no-op after a successful Commit). Local rather
+// than database.WithTx so the "journal:"-prefixed begin error that the
+// retry classifier and tests observe stays byte-identical.
+func withTx(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error) error {
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("journal: begin tx: %w", err)
 	}
-	stmt, err := tx.PrepareContext(ctx, insertSQL)
-	if err != nil {
-		_ = tx.Rollback()
-		return fmt.Errorf("journal: prepare: %w", err)
-	}
-	defer stmt.Close()
+	defer tx.Rollback() //nolint:errcheck
 
-	for _, e := range batch {
-		payload, err := e.payloadJSON()
-		if err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("journal: marshal payload: %w", err)
-		}
-		refs, err := e.refsJSON()
-		if err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("journal: marshal refs: %w", err)
-		}
-		var expires sql.NullString
-		if e.ExpiresAt != nil {
-			expires = sql.NullString{String: e.ExpiresAt.UTC().Format(time.RFC3339Nano), Valid: true}
-		}
-		_, err = stmt.ExecContext(ctx,
-			e.ID,
-			e.WorkspaceID,
-			nullable(e.CrewID),
-			nullable(e.AgentID),
-			nullable(e.MissionID),
-			e.TS.UTC().Format("2006-01-02T15:04:05.000Z"),
-			string(e.Type),
-			string(e.Severity),
-			priorityOrNormal(e.Priority),
-			string(e.ActorType),
-			nullable(e.ActorID),
-			e.Summary,
-			payload,
-			refs,
-			nullable(e.TraceID),
-			nullable(e.SpanID),
-			expires,
-		)
-		if err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("journal: insert %s: %w", e.Type, err)
-		}
+	if err := fn(tx); err != nil {
+		return err
 	}
 	return tx.Commit()
+}
+
+func (w *Writer) persistBatch(ctx context.Context, batch []Entry) error {
+	return withTx(ctx, w.db, func(tx *sql.Tx) error {
+		stmt, err := tx.PrepareContext(ctx, insertSQL)
+		if err != nil {
+			return fmt.Errorf("journal: prepare: %w", err)
+		}
+		defer stmt.Close()
+
+		for _, e := range batch {
+			payload, err := e.payloadJSON()
+			if err != nil {
+				return fmt.Errorf("journal: marshal payload: %w", err)
+			}
+			refs, err := e.refsJSON()
+			if err != nil {
+				return fmt.Errorf("journal: marshal refs: %w", err)
+			}
+			var expires sql.NullString
+			if e.ExpiresAt != nil {
+				expires = sql.NullString{String: e.ExpiresAt.UTC().Format(time.RFC3339Nano), Valid: true}
+			}
+			_, err = stmt.ExecContext(ctx,
+				e.ID,
+				e.WorkspaceID,
+				nullable(e.CrewID),
+				nullable(e.AgentID),
+				nullable(e.MissionID),
+				e.TS.UTC().Format("2006-01-02T15:04:05.000Z"),
+				string(e.Type),
+				string(e.Severity),
+				priorityOrNormal(e.Priority),
+				string(e.ActorType),
+				nullable(e.ActorID),
+				e.Summary,
+				payload,
+				refs,
+				nullable(e.TraceID),
+				nullable(e.SpanID),
+				expires,
+			)
+			if err != nil {
+				return fmt.Errorf("journal: insert %s: %w", e.Type, err)
+			}
+		}
+		return nil
+	})
 }
 
 // estimateBatchBytes is a rough size estimate used to cap the retry

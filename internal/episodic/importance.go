@@ -184,27 +184,24 @@ func DecayAndReinforce(ctx context.Context, db *sql.DB, now time.Time) (int, err
 		return 0, fmt.Errorf("episodic: decay iterate: %w", err)
 	}
 
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, fmt.Errorf("episodic: decay tx: %w", err)
-	}
-	stmt, err := tx.PrepareContext(ctx, `UPDATE journal_embeddings SET importance_score = ? WHERE entry_id = ?`)
-	if err != nil {
-		_ = tx.Rollback()
-		return 0, fmt.Errorf("episodic: decay prep: %w", err)
-	}
-	defer stmt.Close()
-
-	for _, r := range pending {
-		base := float64(BaseImportance(r.etype, r.sev, r.prio))
-		score := base * RecencyFactor(r.indexedAt, now) * (1 + ReferenceBoost(r.refs)/8)
-		if _, err := stmt.ExecContext(ctx, clamp01(score), r.id); err != nil {
-			_ = tx.Rollback()
-			return 0, fmt.Errorf("episodic: decay update %s: %w", r.id, err)
+	err = withTx(ctx, db, "episodic: decay tx", "episodic: decay commit", func(tx *sql.Tx) error {
+		stmt, err := tx.PrepareContext(ctx, `UPDATE journal_embeddings SET importance_score = ? WHERE entry_id = ?`)
+		if err != nil {
+			return fmt.Errorf("episodic: decay prep: %w", err)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("episodic: decay commit: %w", err)
+		defer stmt.Close()
+
+		for _, r := range pending {
+			base := float64(BaseImportance(r.etype, r.sev, r.prio))
+			score := base * RecencyFactor(r.indexedAt, now) * (1 + ReferenceBoost(r.refs)/8)
+			if _, err := stmt.ExecContext(ctx, clamp01(score), r.id); err != nil {
+				return fmt.Errorf("episodic: decay update %s: %w", r.id, err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
 	}
 	return len(pending), nil
 }
@@ -218,27 +215,23 @@ func MarkReferenced(ctx context.Context, db *sql.DB, entryIDs []string, now time
 	if len(entryIDs) == 0 {
 		return nil
 	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("episodic: mark tx: %w", err)
-	}
-	stmt, err := tx.PrepareContext(ctx, `UPDATE journal_embeddings
-		SET reference_count = reference_count + 1,
-		    last_referenced_at = ?
-		WHERE entry_id = ?`)
-	if err != nil {
-		_ = tx.Rollback()
-		return fmt.Errorf("episodic: mark prep: %w", err)
-	}
-	defer stmt.Close()
-	stamp := now.UTC().Format(time.RFC3339Nano)
-	for _, id := range entryIDs {
-		if _, err := stmt.ExecContext(ctx, stamp, id); err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("episodic: mark %s: %w", id, err)
+	return withTx(ctx, db, "episodic: mark tx", "", func(tx *sql.Tx) error {
+		stmt, err := tx.PrepareContext(ctx, `UPDATE journal_embeddings
+			SET reference_count = reference_count + 1,
+			    last_referenced_at = ?
+			WHERE entry_id = ?`)
+		if err != nil {
+			return fmt.Errorf("episodic: mark prep: %w", err)
 		}
-	}
-	return tx.Commit()
+		defer stmt.Close()
+		stamp := now.UTC().Format(time.RFC3339Nano)
+		for _, id := range entryIDs {
+			if _, err := stmt.ExecContext(ctx, stamp, id); err != nil {
+				return fmt.Errorf("episodic: mark %s: %w", id, err)
+			}
+		}
+		return nil
+	})
 }
 
 func clamp01(v float64) float64 {

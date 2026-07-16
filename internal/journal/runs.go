@@ -30,6 +30,25 @@ const (
 	RunStatusTimeout   RunStatus = "TIMEOUT"
 )
 
+// runStatusFromTerminal maps a run's terminal entry_type onto the
+// legacy RunStatus enum. NULL (no terminal yet) → RUNNING; an empty or
+// unknown terminal_type would only happen in a corrupt row (we always
+// emit terminal alongside DB UPDATE) so it also maps to RUNNING.
+func runStatusFromTerminal(terminalType string) RunStatus {
+	switch terminalType {
+	case string(EntryRunCompleted):
+		return RunStatusCompleted
+	case string(EntryRunFailed):
+		return RunStatusFailed
+	case string(EntryRunCancelled):
+		return RunStatusCancelled
+	case string(EntryRunTimeout):
+		return RunStatusTimeout
+	default:
+		return RunStatusRunning
+	}
+}
+
 // RunAggregated is one agent run reconstructed from its run.* journal
 // entries. Field set chosen to be a strict superset of what
 // /api/v1/runs returns today — no API contract change.
@@ -228,22 +247,7 @@ LIMIT ? OFFSET ?`
 				r.FinishedAt = &t
 			}
 		}
-		// Status mapping: terminal entry_type → legacy enum, NULL →
-		// RUNNING. Empty terminal_type would only happen in a corrupt
-		// row (we always emit terminal alongside DB UPDATE) so we map
-		// to RUNNING by default.
-		switch terminalType.String {
-		case string(EntryRunCompleted):
-			r.Status = RunStatusCompleted
-		case string(EntryRunFailed):
-			r.Status = RunStatusFailed
-		case string(EntryRunCancelled):
-			r.Status = RunStatusCancelled
-		case string(EntryRunTimeout):
-			r.Status = RunStatusTimeout
-		default:
-			r.Status = RunStatusRunning
-		}
+		r.Status = runStatusFromTerminal(terminalType.String)
 		// Pull trigger_type, chat_id, metadata out of the run.started
 		// payload — that's the authoritative source.
 		if startedPayload.Valid && startedPayload.String != "" && startedPayload.String != "{}" {
@@ -568,13 +572,14 @@ LIMIT ?`
 		res.Total++
 
 		// Outcome buckets. Terminal type decides; a NULL terminal is RUNNING.
-		isFailed := terminalType.String == string(EntryRunFailed) || terminalType.String == string(EntryRunTimeout)
-		switch terminalType.String {
-		case string(EntryRunCompleted):
+		status := runStatusFromTerminal(terminalType.String)
+		isFailed := status == RunStatusFailed || status == RunStatusTimeout
+		switch status {
+		case RunStatusCompleted:
 			res.Succeeded++
-		case string(EntryRunFailed), string(EntryRunTimeout):
+		case RunStatusFailed, RunStatusTimeout:
 			res.Failed++
-		case string(EntryRunCancelled):
+		case RunStatusCancelled:
 			// counted in Total, excluded from success/fail rate
 		default:
 			res.Running++

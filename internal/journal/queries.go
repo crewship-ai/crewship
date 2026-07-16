@@ -62,22 +62,11 @@ func fts5Phrase(s string) string {
 	return `"` + escaped + `"`
 }
 
-// List returns a page of entries matching q, newest first. Pagination is
-// keyset: the caller passes the last page's final (ts, id) back as Cursor
-// and gets rows strictly older. Offset-based paging is avoided so deep
-// pagination stays O(log n).
-func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
-	if q.WorkspaceID == "" {
-		return nil, "", fmt.Errorf("journal: List requires workspace_id")
-	}
-	if q.Limit <= 0 {
-		q.Limit = 100
-	}
-
-	var (
-		conds []string
-		args  []any
-	)
+// buildJournalFilters translates q's filter fields into WHERE conditions
+// and args, workspace scope first. Shared by List and Count so the two
+// can never drift — a filtered "N events" badge must show the same total
+// as the rows the user can actually paginate through.
+func buildJournalFilters(q Query) (conds []string, args []any) {
 	conds = append(conds, "workspace_id = ?")
 	args = append(args, q.WorkspaceID)
 
@@ -145,6 +134,43 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 		conds = append(conds, "ts <= ?")
 		args = append(args, formatUntilBound(q.Until))
 	}
+	return conds, args
+}
+
+// applyFTS appends the FTS5 free-text predicate when q.FTSQuery is set
+// and returns the FROM clause to use. We JOIN the shadow table on rowid
+// (external-content FTS5 — see migration 55) and add a MATCH predicate.
+// The phrase quoting in fts5Phrase neutralises special operators so an
+// end-user typing `db OR foo*` doesn't unexpectedly broaden the search.
+//
+// Column references in the callers' SELECTs must be table-qualified
+// because the FTS shadow table also has `summary` and `payload`
+// columns; everything the WHERE clause touches (workspace_id, crew_id,
+// ts, …) lives only on the base table so bare references stay
+// unambiguous.
+func applyFTS(q Query, conds []string, args []any) ([]string, []any, string) {
+	from := "FROM journal_entries"
+	if phrase := fts5Phrase(q.FTSQuery); phrase != "" {
+		from = "FROM journal_entries JOIN journal_entries_fts fts ON fts.rowid = journal_entries.rowid"
+		conds = append(conds, "journal_entries_fts MATCH ?")
+		args = append(args, phrase)
+	}
+	return conds, args, from
+}
+
+// List returns a page of entries matching q, newest first. Pagination is
+// keyset: the caller passes the last page's final (ts, id) back as Cursor
+// and gets rows strictly older. Offset-based paging is avoided so deep
+// pagination stays O(log n).
+func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
+	if q.WorkspaceID == "" {
+		return nil, "", fmt.Errorf("journal: List requires workspace_id")
+	}
+	if q.Limit <= 0 {
+		q.Limit = 100
+	}
+
+	conds, args := buildJournalFilters(q)
 	if q.Cursor != "" {
 		cTS, cID, err := decodeCursor(q.Cursor)
 		if err != nil {
@@ -155,22 +181,7 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 		conds = append(conds, "(ts < ? OR (ts = ? AND id < ?))")
 		args = append(args, cTS, cTS, cID)
 	}
-
-	// FTS5 free-text. We JOIN the shadow table on rowid (external-content
-	// FTS5 — see migration 55) and add a MATCH predicate. The phrase
-	// quoting in fts5Phrase neutralises special operators so an end-user
-	// typing `db OR foo*` doesn't unexpectedly broaden the search.
-	//
-	// `journal_entries` is qualified in SELECT because the FTS shadow
-	// table also has `summary` and `payload` columns; everything else
-	// the WHERE clause touches (workspace_id, crew_id, ts, …) lives
-	// only on the base table so bare references stay unambiguous.
-	from := "FROM journal_entries"
-	if phrase := fts5Phrase(q.FTSQuery); phrase != "" {
-		from = "FROM journal_entries JOIN journal_entries_fts fts ON fts.rowid = journal_entries.rowid"
-		conds = append(conds, "journal_entries_fts MATCH ?")
-		args = append(args, phrase)
-	}
+	conds, args, from := applyFTS(q, conds, args)
 
 	query := `SELECT journal_entries.id, journal_entries.workspace_id, journal_entries.crew_id,
 		journal_entries.agent_id, journal_entries.mission_id, journal_entries.ts, journal_entries.entry_type,
@@ -191,56 +202,9 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 
 	out := make([]Entry, 0, q.Limit)
 	for rows.Next() {
-		var (
-			e                                                  Entry
-			crewID, agentID, missionID, actorID                sql.NullString
-			traceID, spanID, expires                           sql.NullString
-			payloadStr, refsStr, tsStr, sev, prio, actor, kind string
-		)
-		if err := rows.Scan(
-			&e.ID,
-			&e.WorkspaceID,
-			&crewID,
-			&agentID,
-			&missionID,
-			&tsStr,
-			&kind,
-			&sev,
-			&prio,
-			&actor,
-			&actorID,
-			&e.Summary,
-			&payloadStr,
-			&refsStr,
-			&traceID,
-			&spanID,
-			&expires,
-		); err != nil {
+		e, err := scanEntry(rows)
+		if err != nil {
 			return nil, "", fmt.Errorf("journal: scan: %w", err)
-		}
-		e.CrewID = crewID.String
-		e.AgentID = agentID.String
-		e.MissionID = missionID.String
-		e.ActorID = actorID.String
-		e.TraceID = traceID.String
-		e.SpanID = spanID.String
-		e.Type = EntryType(kind)
-		e.Severity = Severity(sev)
-		e.Priority = Priority(prio)
-		e.ActorType = ActorType(actor)
-		if ts, err := parseJournalTS(tsStr); err == nil {
-			e.TS = ts
-		}
-		if expires.Valid {
-			if t, err := parseJournalTS(expires.String); err == nil {
-				e.ExpiresAt = &t
-			}
-		}
-		if payloadStr != "" && payloadStr != "{}" {
-			_ = json.Unmarshal([]byte(payloadStr), &e.Payload)
-		}
-		if refsStr != "" && refsStr != "{}" {
-			_ = json.Unmarshal([]byte(refsStr), &e.Refs)
 		}
 		out = append(out, e)
 	}
@@ -256,33 +220,25 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 	return out, nextCursor, nil
 }
 
-// Get fetches a single entry by ID scoped to a workspace. The workspace
-// scope is enforced here rather than at the handler so no cross-tenant
-// leaks are possible from an API bug upstream.
-func Get(ctx context.Context, db *sql.DB, workspaceID, id string) (*Entry, error) {
-	// Direct indexed lookup by (workspace_id, id). A prior version ran
-	// a List(Limit:1) first as a "fast path" but that list has no ID
-	// filter, so it returns the most recent row in the workspace, not
-	// the requested one — which means the fallback below always ran,
-	// the List call was pure waste, and CodeRabbit flagged it.
-	row := db.QueryRowContext(ctx, `SELECT id, workspace_id, crew_id, agent_id, mission_id, ts,
-		entry_type, severity, priority, actor_type, actor_id, summary, payload, refs, trace_id, span_id, expires_at
-		FROM journal_entries WHERE workspace_id = ? AND id = ?`, workspaceID, id)
+// scanEntry decodes the 17-column journal_entries projection shared by
+// List and Get into an Entry: NULL columns map to zero values, enum
+// strings are cast, payload/refs JSON is best-effort unmarshalled and
+// timestamps go through parseJournalTS. Both *sql.Row and *sql.Rows
+// satisfy the scanner parameter. Scan errors are returned unwrapped so
+// callers keep their own context (and Get can spot sql.ErrNoRows).
+func scanEntry(s interface{ Scan(...any) error }) (Entry, error) {
 	var (
 		e                                                  Entry
 		crewID, agentID, missionID, actorID                sql.NullString
 		traceID, spanID, expires                           sql.NullString
 		payloadStr, refsStr, tsStr, sev, prio, actor, kind string
 	)
-	if err := row.Scan(
+	if err := s.Scan(
 		&e.ID, &e.WorkspaceID, &crewID, &agentID, &missionID, &tsStr,
 		&kind, &sev, &prio, &actor, &actorID, &e.Summary, &payloadStr, &refsStr,
 		&traceID, &spanID, &expires,
 	); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("journal: get: %w", err)
+		return Entry{}, err
 	}
 	e.CrewID = crewID.String
 	e.AgentID = agentID.String
@@ -308,6 +264,28 @@ func Get(ctx context.Context, db *sql.DB, workspaceID, id string) (*Entry, error
 	if refsStr != "" && refsStr != "{}" {
 		_ = json.Unmarshal([]byte(refsStr), &e.Refs)
 	}
+	return e, nil
+}
+
+// Get fetches a single entry by ID scoped to a workspace. The workspace
+// scope is enforced here rather than at the handler so no cross-tenant
+// leaks are possible from an API bug upstream.
+func Get(ctx context.Context, db *sql.DB, workspaceID, id string) (*Entry, error) {
+	// Direct indexed lookup by (workspace_id, id). A prior version ran
+	// a List(Limit:1) first as a "fast path" but that list has no ID
+	// filter, so it returns the most recent row in the workspace, not
+	// the requested one — which means the fallback below always ran,
+	// the List call was pure waste, and CodeRabbit flagged it.
+	row := db.QueryRowContext(ctx, `SELECT id, workspace_id, crew_id, agent_id, mission_id, ts,
+		entry_type, severity, priority, actor_type, actor_id, summary, payload, refs, trace_id, span_id, expires_at
+		FROM journal_entries WHERE workspace_id = ? AND id = ?`, workspaceID, id)
+	e, err := scanEntry(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("journal: get: %w", err)
+	}
 	return &e, nil
 }
 
@@ -317,87 +295,11 @@ func Count(ctx context.Context, db *sql.DB, q Query) (int64, error) {
 	if q.WorkspaceID == "" {
 		return 0, fmt.Errorf("journal: Count requires workspace_id")
 	}
-	var (
-		conds = []string{"workspace_id = ?"}
-		args  = []any{q.WorkspaceID}
-	)
-	if len(q.CrewIDs) > 0 {
-		conds = append(conds, "crew_id IN ("+sqlInPlaceholders(len(q.CrewIDs))+")")
-		for _, id := range q.CrewIDs {
-			args = append(args, id)
-		}
-	} else if q.CrewID != "" {
-		conds = append(conds, "crew_id = ?")
-		args = append(args, q.CrewID)
-	}
-	if len(q.AgentIDs) > 0 {
-		conds = append(conds, "agent_id IN ("+sqlInPlaceholders(len(q.AgentIDs))+")")
-		for _, id := range q.AgentIDs {
-			args = append(args, id)
-		}
-	} else if q.AgentID != "" {
-		conds = append(conds, "agent_id = ?")
-		args = append(args, q.AgentID)
-	}
-	if q.MissionID != "" {
-		conds = append(conds, "mission_id = ?")
-		args = append(args, q.MissionID)
-	}
-	if q.TraceID != "" {
-		conds = append(conds, "trace_id = ?")
-		args = append(args, q.TraceID)
-	}
-	// Mirror List's Type / Severity / Until filters so Count matches
-	// the result set you'd actually paginate through. Previously Count
-	// ignored these, so filtered UI views would show a total that
-	// didn't line up with the rows the user could see.
-	if len(q.Types) > 0 {
-		conds = append(conds, "entry_type IN ("+sqlInPlaceholders(len(q.Types))+")")
-		for _, t := range q.Types {
-			args = append(args, string(t))
-		}
-	}
-	if len(q.ExcludeTypes) > 0 {
-		conds = append(conds, "entry_type NOT IN ("+sqlInPlaceholders(len(q.ExcludeTypes))+")")
-		for _, t := range q.ExcludeTypes {
-			args = append(args, string(t))
-		}
-	}
-	if len(q.Severities) > 0 {
-		conds = append(conds, "severity IN ("+sqlInPlaceholders(len(q.Severities))+")")
-		for _, s := range q.Severities {
-			args = append(args, string(s))
-		}
-	}
-	if len(q.ActorTypes) > 0 {
-		conds = append(conds, "actor_type IN ("+sqlInPlaceholders(len(q.ActorTypes))+")")
-		for _, a := range q.ActorTypes {
-			args = append(args, string(a))
-		}
-	}
-	if len(q.Priorities) > 0 {
-		conds = append(conds, "priority IN ("+sqlInPlaceholders(len(q.Priorities))+")")
-		for _, p := range q.Priorities {
-			args = append(args, string(p))
-		}
-	}
-	if !q.Since.IsZero() {
-		conds = append(conds, "ts >= ?")
-		args = append(args, formatSinceBound(q.Since))
-	}
-	if !q.Until.IsZero() {
-		conds = append(conds, "ts <= ?")
-		args = append(args, formatUntilBound(q.Until))
-	}
-	// Mirror List's FTS5 join so Count returns the same N as the
-	// paginated list — otherwise the badge contradicts what the user
-	// can scroll through.
-	from := "FROM journal_entries"
-	if phrase := fts5Phrase(q.FTSQuery); phrase != "" {
-		from = "FROM journal_entries JOIN journal_entries_fts fts ON fts.rowid = journal_entries.rowid"
-		conds = append(conds, "journal_entries_fts MATCH ?")
-		args = append(args, phrase)
-	}
+	// Same filter + FTS5 join builders as List, so Count returns the
+	// same N as the paginated list — otherwise the badge contradicts
+	// what the user can scroll through.
+	conds, args := buildJournalFilters(q)
+	conds, args, from := applyFTS(q, conds, args)
 	query := `SELECT COUNT(*) ` + from + ` WHERE ` + strings.Join(conds, " AND ")
 	var n int64
 	if err := db.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
