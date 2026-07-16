@@ -452,6 +452,7 @@ PR #225 extends the devcontainer expansion vocabulary the spec defines:
 </Warning>
 
 - To roll out a new sidecar or entrypoint across existing crews, rebuild the sidecar (`make build:sidecar`) and then remove each crew's container: `docker rm -f crewship-team-<slug>`. The container is recreated transparently on the next agent message, picking up the updated bind mount.
+- Containers still serving an old sidecar are flagged on the next agent run as a `sidecar.stale` severity-error journal entry. Servers built with `make build` / `make build:go` carry the expected sidecar hash baked in at build time, so a deploy that ships a new server but forgets to rebuild/recopy `crewship-sidecar` is also flagged (plus a `stale sidecar ARTIFACT detected` server log) — that variant needs the sidecar binary redeployed first; recreating containers alone remounts the same old file.
 - **`postStartCommand`** runs on *every* start, so it is the right hook for operations that must reflect host state at the moment of launch (e.g. refreshing a secret via `vault read`). Do not try to bake those into `postCreateCommand` — they'd freeze at provisioning time.
 - Cached images (`crewship-cache:{hash}`) live on the Docker host indefinitely. Run `crewship crew cache prune --older-than 30d` as part of your maintenance rotation; cached images referenced by live crews are protected automatically.
 

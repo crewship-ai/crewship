@@ -13,7 +13,20 @@ LICENSE_PUBKEY ?=
 # is consumed directly by `pnpm build` from process env — no wiring needed
 # here as long as it's exported when `make build` is invoked.
 SENTRY_DSN ?=
-LDFLAGS    = -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE) -X github.com/crewship-ai/crewship/internal/license.publicKey=$(LICENSE_PUBKEY) -X github.com/crewship-ai/crewship/internal/crashreport.DSN=$(SENTRY_DSN)"
+# SIDECAR_BUILD_HASH — content hash (sha256, first 12 hex chars — same shape
+# as internal/sidecar.selfExeHash) of the freshly built ./crewship-sidecar,
+# baked into the crewship binary so the server knows which sidecar it was
+# built alongside (#1160). Lets stale-sidecar detection catch ARTIFACT
+# staleness (deploy updated the server but forgot build:sidecar + copy —
+# runtime on-disk hashing compares old-vs-old and stays silent).
+# Recursively expanded (=, not :=) ON PURPOSE: the $(shell) runs when the
+# build recipe line expands — i.e. AFTER the build:sidecar prerequisite wrote
+# the file — not at makefile-read time. Missing file → empty → the server
+# falls back to on-disk hashing (fail-open), never a false alarm.
+# The pipeline shape is locked by TestSidecarHashShellContract
+# (internal/provider/docker/sidecar_binhash_test.go).
+SIDECAR_BUILD_HASH = $(shell (sha256sum crewship-sidecar 2>/dev/null || shasum -a 256 crewship-sidecar 2>/dev/null) | cut -c1-12)
+LDFLAGS    = -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE) -X github.com/crewship-ai/crewship/internal/license.publicKey=$(LICENSE_PUBKEY) -X github.com/crewship-ai/crewship/internal/crashreport.DSN=$(SENTRY_DSN) -X github.com/crewship-ai/crewship/internal/provider/docker.buildExpectedSidecarHash=$(SIDECAR_BUILD_HASH)"
 # -trimpath strips workspace paths (/Users/.../crewship_2/...) from the
 # binary, giving reproducible builds across machines and shaving a few KB
 # off the embedded debug info. Adds nothing measurable to compile time.
