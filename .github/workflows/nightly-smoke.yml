@@ -8,8 +8,11 @@ name: Nightly Smoke
 # v-prefixed semver), so it does not cover the nightly channel cleanly.
 # This workflow is the nightly-specific equivalent: it resolves the
 # pre-release the triggering Nightly run published, pulls its archive,
-# checks it boots, talks to its own health endpoint, and that the
-# cosign signature on checksums.txt verifies.
+# checks it boots, talks to its own health endpoint, that the cosign
+# signature on checksums.txt verifies, and that the deb/rpm packages
+# carry a good GPG signature from the committed Crewship Packages key
+# (#932 — the nightly channel is where package signing is exercised
+# continuously, not just at tag time).
 #
 # A red check here means the most recent main commit produced a binary
 # that beta testers shouldn't install. The signal to the maintainer is
@@ -42,6 +45,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # Checked out into a subdirectory so the repo tree can't satisfy the
+      # archive-content assertions below (the extract step asserts LICENSE/
+      # README/CHANGELOG exist in $PWD — a root checkout would make those
+      # pass even when the archive dropped them). Only needed for
+      # packaging/crewship-packages.pub, the committed public half of the
+      # deb/rpm signing key (#932).
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: repo
+
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
@@ -284,6 +297,86 @@ jobs:
             exit 1
           fi
           echo "health endpoint ok"
+
+      - name: Download nightly deb/rpm packages
+        # nightly.yml publishes the goreleaser nfpm packages alongside the
+        # archives (it once dropped them from the upload glob, leaving
+        # dangling .deb.sig/.rpm.pem assets — #932). Presence is enforced:
+        # a nightly without packages means the publish glob regressed.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p pkg
+          if ! gh release download "$NIGHTLY_TAG" \
+            --repo "$REPO" \
+            --dir pkg \
+            --pattern 'crewship_*_linux_amd64.deb' \
+            --pattern 'crewship_*_linux_amd64.rpm'; then
+            echo "::error::release $NIGHTLY_TAG is missing its linux_amd64 deb/rpm packages — nightly.yml's asset upload glob dropped them (#932)"
+            exit 1
+          fi
+          for ext in deb rpm; do
+            if ! ls pkg/crewship_*_linux_amd64.$ext >/dev/null 2>&1; then
+              echo "::error::release $NIGHTLY_TAG has no crewship_*_linux_amd64.$ext asset (#932)"
+              exit 1
+            fi
+          done
+          ls -la pkg
+
+      - name: Verify GPG signatures on deb/rpm packages
+        # End-to-end check of #932: the packages published for THIS commit
+        # must verify against the committed public key
+        # (packaging/crewship-packages.pub, fingerprint in
+        # packaging/SIGNING.md). Soft-skip when a package is unsigned — a
+        # secret-less fork legitimately produces unsigned nightlies (same
+        # fail-open contract as release.yml) — but a signature that exists
+        # and does NOT verify is always a hard failure.
+        run: |
+          set -euo pipefail
+          export GNUPGHOME=$(mktemp -d)
+          gpg --batch --import repo/packaging/crewship-packages.pub
+          DEB=$(ls pkg/crewship_*_linux_amd64.deb | head -1)
+          RPM=$(ls pkg/crewship_*_linux_amd64.rpm | head -1)
+
+          # deb — nfpm embeds a debsigs-style `_gpgorigin` ar member: a
+          # detached signature over the concatenation of the remaining
+          # members in ar order (debian-binary, control.tar.*, data.tar.*).
+          # Verified with plain gpg because dpkg-sig only understands its
+          # own _gpgbuilder manifest format, not debsigs signatures. The
+          # keyring above holds ONLY the Crewship Packages key, so a "Good
+          # signature" can't come from any other signer.
+          WORK=$(mktemp -d)
+          (cd "$WORK" && ar x "$OLDPWD/$DEB")
+          if [ ! -f "$WORK/_gpgorigin" ]; then
+            echo "::notice::deb is unsigned — skipping GPG check (GPG_SIGNING_KEY not provisioned on this repo, #932)"
+          else
+            cat "$WORK/debian-binary" "$WORK"/control.tar.* "$WORK"/data.tar.* \
+              | gpg --batch --verify "$WORK/_gpgorigin" -
+            echo "deb GPG signature ok"
+          fi
+
+          # rpm — the signature lives in the rpm header; `rpm -K` against a
+          # scratch rpmdb (so the runner's system keyring is never touched)
+          # with the public key imported. Output contract (mirrors
+          # smoke-test.yml): "signatures OK" = signed and valid,
+          # "NOT OK" = signed but bad, anything else = unsigned digests-only.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rpm >/dev/null
+          RPMDB=$(mktemp -d)
+          rpm --dbpath "$RPMDB" --initdb
+          rpm --dbpath "$RPMDB" --import repo/packaging/crewship-packages.pub
+          OUT=$(rpm --dbpath "$RPMDB" -K "$RPM" 2>&1 || true)
+          echo "$OUT"
+          if echo "$OUT" | grep -qi "NOT OK"; then
+            echo "::error::rpm signature check failed"
+            exit 1
+          elif echo "$OUT" | grep -qi "signatures OK"; then
+            echo "rpm GPG signature ok"
+          else
+            echo "::notice::rpm is unsigned (digests only) — skipping GPG check (GPG_SIGNING_KEY not provisioned on this repo, #932)"
+          fi
 
   docker:
     name: Nightly Docker smoke
