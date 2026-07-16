@@ -306,7 +306,12 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string) (string, in
 		// layout can't list its sibling's contents. On the current
 		// shared-UID setup (all agents run as 1001) this is a noop
 		// but mirrors the principle-of-least-privilege intent the
-		// pre-fix chown was trying to encode.
+		// pre-fix chown was trying to encode. The shared-UID posture
+		// is deliberate and documented: the enforced isolation
+		// boundary is the crew container, not the agent — agents that
+		// must not read each other's secrets belong in separate crews
+		// (docs/guides/credentials.mdx "The trust boundary is the
+		// crew, not the agent"; #1086).
 		fmt.Sprintf("chmod 0700 %s", secretsAgentDir),
 	)
 
