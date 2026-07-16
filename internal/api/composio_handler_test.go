@@ -1006,3 +1006,152 @@ func TestComposio_ListInventory_UpstreamError(t *testing.T) {
 		t.Fatalf("status = %d, want 502", rr.Code)
 	}
 }
+
+// ── Issue #1192 — upstream failures must be diagnosable, not an opaque 502 ───
+
+// fakeComposioFailingAPI answers every request with the given status and body,
+// mimicking a Composio-side rejection (bad key, rate limit, outage).
+func fakeComposioFailingAPI(t *testing.T, status int, body string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// problemDetail extracts the RFC 7807 "detail" member the CLI prints verbatim
+// as "API error (NNN): <detail>".
+func problemDetail(t *testing.T, rr *httptest.ResponseRecorder) string {
+	t.Helper()
+	var p struct {
+		Detail string `json:"detail"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &p); err != nil {
+		t.Fatalf("unmarshal problem body %q: %v", rr.Body.String(), err)
+	}
+	return p.Detail
+}
+
+// A Composio 401 (placeholder/revoked key) must tell the operator the key is
+// the problem — with the upstream status and message — instead of the bare
+// "Composio API error" that surfaced on dev3.
+func TestComposio_ListToolkits_BadKeyDiagnosable(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	srv := fakeComposioFailingAPI(t, http.StatusUnauthorized,
+		`{"error":{"message":"API key is invalid","error_code":10001}}`)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_placeholder", BaseURL: srv.URL,
+	})
+
+	req := withWorkspaceUser(httptest.NewRequest("GET", "/api/v1/integrations/composio/toolkits", nil), userID, wsID, "VIEWER")
+	rr := httptest.NewRecorder()
+	h.ListToolkits(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rr.Code)
+	}
+	detail := problemDetail(t, rr)
+	if detail == "Composio API error" {
+		t.Fatalf("detail is still the opaque legacy message")
+	}
+	for _, want := range []string{"401", "API key is invalid", "key set"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("detail %q missing %q", detail, want)
+		}
+	}
+}
+
+// A Composio 5xx must be labelled as an upstream outage (with the status),
+// distinguishing it from a key problem.
+func TestComposio_ListInventory_UpstreamOutageDiagnosable(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	srv := fakeComposioFailingAPI(t, http.StatusServiceUnavailable, `upstream unavailable`)
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_test", BaseURL: srv.URL,
+	})
+
+	req := withWorkspaceUser(httptest.NewRequest("GET", "/api/v1/integrations/composio/inventory", nil), userID, wsID, "VIEWER")
+	rr := httptest.NewRecorder()
+	h.ListInventory(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rr.Code)
+	}
+	detail := problemDetail(t, rr)
+	if !strings.Contains(detail, "503") {
+		t.Errorf("detail %q missing upstream status 503", detail)
+	}
+	if !strings.Contains(strings.ToLower(detail), "upstream") {
+		t.Errorf("detail %q does not name the failure as upstream", detail)
+	}
+}
+
+// A connection-level failure (Composio unreachable from the server) must be
+// reported as such — not as a generic API error, and not as a key problem.
+func TestComposio_ListInventory_UnreachableDiagnosable(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	base := dead.URL
+	dead.Close() // unreachable from here on
+
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_test", BaseURL: base,
+	})
+
+	req := withWorkspaceUser(httptest.NewRequest("GET", "/api/v1/integrations/composio/inventory", nil), userID, wsID, "VIEWER")
+	rr := httptest.NewRecorder()
+	h.ListInventory(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rr.Code)
+	}
+	detail := problemDetail(t, rr)
+	if !strings.Contains(strings.ToLower(detail), "unreachable") {
+		t.Errorf("detail %q does not say Composio is unreachable", detail)
+	}
+}
+
+// Key validation on PUT /settings must not misreport a network failure as
+// "Composio rejected this API key" — an unreachable upstream is a 502, and
+// only an actual 401/403 from Composio is a key rejection (400).
+func TestComposio_UpsertSettings_UnreachableIsNotKeyRejection(t *testing.T) {
+	armTestEncryptionKey(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	base := dead.URL
+	dead.Close()
+
+	h := NewComposioHandler(db, newComposioTestLogger(), &config.ComposioConfig{
+		Enabled: true, APIKey: "ak_env", BaseURL: base,
+	})
+	body := bytes.NewBufferString(`{"api_key":"ak_new"}`)
+	req := withWorkspaceUser(httptest.NewRequest("PUT", "/api/v1/integrations/composio/settings", body), userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.UpsertSettings(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 (unreachable, not key rejection)", rr.Code)
+	}
+	detail := problemDetail(t, rr)
+	if strings.Contains(detail, "rejected this API key") {
+		t.Errorf("detail %q misreports a network failure as a key rejection", detail)
+	}
+	if !strings.Contains(strings.ToLower(detail), "unreachable") {
+		t.Errorf("detail %q does not say Composio is unreachable", detail)
+	}
+}

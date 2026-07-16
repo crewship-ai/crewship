@@ -647,7 +647,12 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	rd := io.LimitReader(resp.Body, maxResponseBytes)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		snippet, _ := io.ReadAll(io.LimitReader(rd, 2048))
-		return fmt.Errorf("composio: %s %s: status %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(snippet)))
+		return &APIError{
+			StatusCode: resp.StatusCode,
+			Method:     method,
+			Path:       path,
+			Snippet:    strings.TrimSpace(string(snippet)),
+		}
 	}
 	if out == nil {
 		return nil
