@@ -269,6 +269,61 @@ func concurrentTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
+// TestDummyBcryptHash_LazyMemoizedCost12 pins the #967 startup fix:
+// the timing-equalizer hash must be produced by a memoized accessor
+// (sync.OnceValue), NOT an eager package-level generation — the eager
+// version cost every invocation of the full crewship binary ~290 ms
+// of bcrypt before main() ran, `crewship version` included. The cost
+// must stay 12 to match the real hashes in users.hashed_password, or
+// the unknown-email compare stops equalizing timing.
+func TestDummyBcryptHash_LazyMemoizedCost12(t *testing.T) {
+	h1 := dummyBcryptHash()
+	h2 := dummyBcryptHash()
+	if h1 != h2 {
+		t.Errorf("dummyBcryptHash must be memoized: got two different hashes\n%q\n%q", h1, h2)
+	}
+	cost, err := bcrypt.Cost([]byte(h1))
+	if err != nil {
+		t.Fatalf("dummyBcryptHash() is not a valid bcrypt hash: %v", err)
+	}
+	if cost != 12 {
+		t.Errorf("dummy hash cost = %d, want 12 (must match users.hashed_password cost)", cost)
+	}
+}
+
+// TestLockout_UnknownEmailBurnsEqualizerCompare pins the security
+// property the laziness refactor must not lose: the unknown-email
+// path still burns exactly one bcrypt comparison against the dummy
+// hash, so response timing can't be used to enumerate which emails
+// have accounts.
+func TestLockout_UnknownEmailBurnsEqualizerCompare(t *testing.T) {
+	db := setupTestDB(t)
+
+	orig := bcryptCompareHashAndPassword
+	t.Cleanup(func() { bcryptCompareHashAndPassword = orig })
+	var (
+		calls   int
+		gotHash string
+	)
+	bcryptCompareHashAndPassword = func(hash, password string) error {
+		calls++
+		gotHash = hash
+		return errors.New("mismatch")
+	}
+
+	_, _, err := checkAndLockoutOnFail(context.Background(), db,
+		"ghost-equalizer@example.com", "anything", time.Now())
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("unknown email: got %v want ErrInvalidCredentials", err)
+	}
+	if calls != 1 {
+		t.Errorf("unknown-email path should burn exactly 1 equalizer compare, got %d", calls)
+	}
+	if gotHash != dummyBcryptHash() {
+		t.Errorf("equalizer compare should use the dummy hash, got %q", gotHash)
+	}
+}
+
 func TestLockout_SuccessResetsCounter(t *testing.T) {
 	db := setupTestDB(t)
 	seedLockoutUser(t, db, "fatfinger@example.com", "correct")

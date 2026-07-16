@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -58,9 +59,18 @@ var ErrInvalidCredentials = errors.New("invalid credentials")
 //
 // The hash itself is the bcrypt of an arbitrary string the production
 // signin path will never produce; cost is 12 to match the real hashes
-// in users.hashed_password. Generated once at package init so the
-// timing of that one-shot generation doesn't bleed into request time.
-var dummyBcryptHash = mustGenerateDummyBcryptHash()
+// in users.hashed_password.
+//
+// Generated lazily on first use (memoized), NOT at package init: the
+// full crewship binary links this package into the same entry point
+// as the CLI, so an eager generation charged ~290 ms of bcrypt to
+// every invocation — `crewship version` included — before main() even
+// ran (issue #967 part 4; the cost was misattributed to cobra
+// command-tree registration, which measures at <1 ms). NewRouter
+// warms it in the background at server construction so the
+// timing-equalisation property holds from the server's first signin;
+// a CLI process that never builds a Router never pays it.
+var dummyBcryptHash = sync.OnceValue(mustGenerateDummyBcryptHash)
 
 func mustGenerateDummyBcryptHash() string {
 	h, err := bcrypt.GenerateFromPassword([]byte("crewship-timing-equalizer-not-a-real-credential"), 12)
@@ -102,7 +112,7 @@ func checkAndLockoutOnFail(ctx context.Context, db *sql.DB, email, password stri
 			// from "exists, wrong password". Without this, the
 			// generic "CredentialsSignin" error message is useless
 			// — the latency leaks the answer.
-			_ = bcryptCompareHashAndPassword(dummyBcryptHash, password)
+			_ = bcryptCompareHashAndPassword(dummyBcryptHash(), password)
 			return "", "", ErrInvalidCredentials
 		}
 		return "", "", fmt.Errorf("lockout: query user: %w", err)
