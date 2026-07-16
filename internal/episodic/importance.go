@@ -224,7 +224,7 @@ func MarkReferenced(ctx context.Context, db *sql.DB, entryIDs []string, now time
 			return fmt.Errorf("episodic: mark prep: %w", err)
 		}
 		defer stmt.Close()
-		stamp := now.UTC().Format(time.RFC3339Nano)
+		stamp := now.UTC().Format(time.RFC3339Nano) // tsformat:allow: pre-existing stored format; existing rows use RFC3339Nano and parseEpisodicTS reads it back
 		for _, id := range entryIDs {
 			if _, err := stmt.ExecContext(ctx, stamp, id); err != nil {
 				return fmt.Errorf("episodic: mark %s: %w", id, err)

@@ -437,7 +437,7 @@ func (w *Writer) persistBatch(ctx context.Context, batch []Entry) error {
 			}
 			var expires sql.NullString
 			if e.ExpiresAt != nil {
-				expires = sql.NullString{String: e.ExpiresAt.UTC().Format(time.RFC3339Nano), Valid: true}
+				expires = sql.NullString{String: e.ExpiresAt.UTC().Format(time.RFC3339Nano), Valid: true} // tsformat:allow: pre-existing stored format; retention sweep compares against rows already written as RFC3339Nano
 			}
 			_, err = stmt.ExecContext(ctx,
 				e.ID,
