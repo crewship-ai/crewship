@@ -175,6 +175,60 @@ func (h *MissionHandler) loadTasksForMission(r *http.Request, missionID string) 
 	return tasks, taskRows.Err()
 }
 
+// getBatchTasksForMissions loads tasks for multiple missions in a single query,
+// mirroring getBatchTaskStats. It preserves the exact row shape, LEFT JOIN agents
+// columns, and per-mission task_order ASC ordering that loadTasksForMission
+// returns, grouping rows by mission_id into a map keyed by mission ID.
+func (h *MissionHandler) getBatchTasksForMissions(r *http.Request, missionIDs []string) (map[string][]missionTaskResponse, error) {
+	if len(missionIDs) == 0 {
+		return map[string][]missionTaskResponse{}, nil
+	}
+
+	args := make([]interface{}, len(missionIDs))
+	for i, id := range missionIDs {
+		args[i] = id
+	}
+
+	taskRows, err := h.db.QueryContext(r.Context(), `
+		SELECT mt.id, mt.mission_id, mt.assigned_agent_id, mt.title, mt.description,
+		       mt.status, mt.task_order, mt.depends_on, mt.iteration, mt.max_iterations,
+		       mt.result_summary, mt.output_path, mt.error_message, mt.assignment_id,
+		       mt.token_count, mt.estimated_cost, mt.started_at, mt.completed_at,
+		       mt.duration_ms, mt.created_at, mt.updated_at,
+		       ag.name, ag.slug,
+		       mt.confidence, COALESCE(mt.needs_review, 0), mt.handoff_context,
+		       mt.evaluation_status, mt.evaluation_notes,
+		       COALESCE(mt.approval_required, 0), mt.approval_status, mt.approved_by, mt.approved_at
+		FROM mission_tasks mt
+		LEFT JOIN agents ag ON ag.id = mt.assigned_agent_id
+		WHERE mt.mission_id IN (`+sqlPlaceholders(len(missionIDs))+`)
+		ORDER BY mt.mission_id, mt.task_order ASC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer taskRows.Close()
+
+	result := make(map[string][]missionTaskResponse, len(missionIDs))
+	for taskRows.Next() {
+		var t missionTaskResponse
+		if err := taskRows.Scan(
+			&t.ID, &t.MissionID, &t.AssignedAgentID, &t.Title, &t.Description,
+			&t.Status, &t.TaskOrder, &t.DependsOn, &t.Iteration, &t.MaxIterations,
+			&t.ResultSummary, &t.OutputPath, &t.ErrorMessage, &t.AssignmentID,
+			&t.TokenCount, &t.EstimatedCost, &t.StartedAt, &t.CompletedAt,
+			&t.DurationMs, &t.CreatedAt, &t.UpdatedAt,
+			&t.AgentName, &t.AgentSlug,
+			&t.Confidence, &t.NeedsReview, &t.HandoffContext,
+			&t.EvaluationStatus, &t.EvaluationNotes,
+			&t.ApprovalRequired, &t.ApprovalStatus, &t.ApprovedBy, &t.ApprovedAt,
+		); err != nil {
+			return nil, err
+		}
+		result[t.MissionID] = append(result[t.MissionID], t)
+	}
+	return result, taskRows.Err()
+}
+
 func (h *MissionHandler) getTaskStats(r *http.Request, missionID string) (*taskStats, error) {
 	rows, err := h.db.QueryContext(r.Context(),
 		`SELECT status, COUNT(*) FROM mission_tasks WHERE mission_id = ? GROUP BY status`,

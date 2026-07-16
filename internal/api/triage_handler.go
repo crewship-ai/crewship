@@ -8,10 +8,31 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/ws"
 )
+
+// triageRegexCache memoizes compiled triage regexes keyed by pattern text.
+// Identical pattern text always compiles identically, so keying by the raw
+// pattern is safe and needs no invalidation. Values are *regexp.Regexp.
+var triageRegexCache sync.Map
+
+// compileTriageRegex returns a compiled regex for pattern, reusing a cached
+// compilation when present. On a cache miss it compiles and stores the result;
+// compile errors are returned to the caller and never cached.
+func compileTriageRegex(pattern string) (*regexp.Regexp, error) {
+	if v, ok := triageRegexCache.Load(pattern); ok {
+		return v.(*regexp.Regexp), nil
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := triageRegexCache.LoadOrStore(pattern, re)
+	return actual.(*regexp.Regexp), nil
+}
 
 // TriageHandler implements CRUD for triage rules and the process endpoint.
 type TriageHandler struct {
@@ -383,7 +404,7 @@ func (h *TriageHandler) Process(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if tr.MatchType == "regex" {
-			re, err := regexp.Compile(tr.Pattern)
+			re, err := compileTriageRegex(tr.Pattern)
 			if err != nil {
 				h.logger.Warn("triage: invalid regex pattern, skipping rule", "rule_id", tr.ID, "pattern", tr.Pattern)
 				continue
