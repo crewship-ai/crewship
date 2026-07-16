@@ -9,8 +9,8 @@ package orchestrator
 // churn producing repeated non-deploy-triggered "stale" false positives
 // with no redeploy or container recreation in between.
 //
-// domainsHash + sidecarNeedsRestart let the orchestrator skip the
-// restart when the allowlist genuinely hasn't changed. domainsHash cannot
+// DomainsHash + sidecarNeedsRestart let the orchestrator skip the
+// restart when the allowlist genuinely hasn't changed. DomainsHash cannot
 // share code with internal/sidecar.DomainAllowlist.Hash() (sidecar imports
 // orchestrator, so the reverse import would cycle) — it's reimplemented
 // here and MUST stay byte-for-byte in lockstep: lower-case + dedupe via a
@@ -20,8 +20,8 @@ import "testing"
 
 func TestDomainsHash_OrderAndCaseInsensitive(t *testing.T) {
 	t.Parallel()
-	a := domainsHash([]string{"api.anthropic.com", "api.openai.com"})
-	b := domainsHash([]string{"API.OPENAI.COM", "api.anthropic.com"})
+	a := DomainsHash([]string{"api.anthropic.com", "api.openai.com"})
+	b := DomainsHash([]string{"API.OPENAI.COM", "api.anthropic.com"})
 	if a != b {
 		t.Errorf("hash should be order/case-insensitive: a=%q b=%q", a, b)
 	}
@@ -29,8 +29,8 @@ func TestDomainsHash_OrderAndCaseInsensitive(t *testing.T) {
 
 func TestDomainsHash_ChangesWithSet(t *testing.T) {
 	t.Parallel()
-	a := domainsHash([]string{"api.anthropic.com", "api.openai.com"})
-	c := domainsHash([]string{"api.anthropic.com", "evil.com"})
+	a := DomainsHash([]string{"api.anthropic.com", "api.openai.com"})
+	c := DomainsHash([]string{"api.anthropic.com", "evil.com"})
 	if a == c {
 		t.Errorf("hash should differ when the domain set differs: a=%q c=%q", a, c)
 	}
@@ -38,8 +38,8 @@ func TestDomainsHash_ChangesWithSet(t *testing.T) {
 
 func TestDomainsHash_DuplicatesIgnored(t *testing.T) {
 	t.Parallel()
-	a := domainsHash([]string{"api.anthropic.com", "api.openai.com"})
-	dup := domainsHash([]string{"api.anthropic.com", "api.openai.com", "api.openai.com"})
+	a := DomainsHash([]string{"api.anthropic.com", "api.openai.com"})
+	dup := DomainsHash([]string{"api.anthropic.com", "api.openai.com", "api.openai.com"})
 	if a != dup {
 		t.Errorf("hash should ignore duplicate entries: a=%q dup=%q", a, dup)
 	}
@@ -48,7 +48,7 @@ func TestDomainsHash_DuplicatesIgnored(t *testing.T) {
 func TestSidecarNeedsRestart(t *testing.T) {
 	t.Parallel()
 	desiredDomains := []string{"api.anthropic.com", "api.openai.com"}
-	matchingHash := domainsHash(desiredDomains)
+	matchingHash := DomainsHash(desiredDomains)
 
 	cases := []struct {
 		name        string

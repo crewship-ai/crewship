@@ -219,7 +219,7 @@ func TestRunAgent_ConcurrentPolicyRestart_SingleKillSingleStart(t *testing.T) {
 	fake := newSidecarRaceContainer(2, 1500*time.Millisecond)
 	fake.mode["shared-c2"] = "free" // running sidecar predates the policy change
 	fake.startMode = "restricted"
-	fake.startHash = domainsHash(domains) // restarted sidecar reports the desired allowlist
+	fake.startHash = DomainsHash(domains) // restarted sidecar reports the desired allowlist
 
 	o := New(fake, newLockedMemState(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	o.SetSidecarEnabled(true)
