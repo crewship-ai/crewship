@@ -19,6 +19,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/crashreport"
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/preflight"
 	"github.com/crewship-ai/crewship/internal/provider/apple"
 	"github.com/crewship-ai/crewship/internal/provider/docker"
 	"github.com/crewship-ai/crewship/internal/secrets"
@@ -230,6 +231,11 @@ counters or filter the per-check array.`,
 	},
 }
 
+// preflightInstalled is the indirection that lets tests stub the
+// installed-runtime scan — it reads real host state (PATH, /Applications),
+// which a unit test can't control via env vars alone.
+var preflightInstalled = preflight.Installed
+
 // checkContainerRuntime probes both Docker-compatible runtimes and Apple
 // Containers. We accept either one — they're functionally equivalent for
 // Crewship's purposes, so finding any container runtime is a PASS.
@@ -248,11 +254,44 @@ func checkContainerRuntime(ctx context.Context) checkResult {
 			detail: fmt.Sprintf("apple %s (host_ip=%s)", a.Version, a.HostIP),
 		}
 	}
+	// No live runtime answered. Distinguish "installed but not running"
+	// (start it) from "not installed" (install one) — the fixes are
+	// opposites and a wrong hint sends the user reinstalling software
+	// they already have.
+	if installed := preflightInstalled(); len(installed) > 0 {
+		names := make([]string, 0, len(installed))
+		for _, rt := range installed {
+			names = append(names, rt.Name)
+		}
+		return checkResult{
+			name:   "container runtime",
+			status: "FAIL",
+			detail: fmt.Sprintf("%s installed but not running", strings.Join(names, ", ")),
+			hint:   fmt.Sprintf("start it: %s", installed[0].StartHint),
+		}
+	}
 	return checkResult{
 		name:   "container runtime",
 		status: "FAIL",
-		detail: "no Docker-compatible runtime or Apple Containers found",
-		hint:   "install one: https://docs.docker.com/get-docker/  OR  brew install container",
+		detail: "no container runtime installed (Docker, Podman, Colima, OrbStack, Rancher Desktop, Apple Containers)",
+		hint:   installHintForOS(runtime.GOOS),
+	}
+}
+
+// installHintForOS picks the one-line install pointer doctor prints when no
+// runtime is installed at all. The full multi-line guidance lives in
+// internal/preflight (printed by `crewship start`); doctor's hint column is
+// single-line, so this is the condensed OS-specific version.
+func installHintForOS(goos string) string {
+	switch goos {
+	case "darwin":
+		return "install one: https://docs.docker.com/desktop/setup/install/mac-install/  OR  brew install --cask orbstack  OR  brew install colima docker"
+	case "linux":
+		return "install Docker Engine: curl -fsSL https://get.docker.com | sh && sudo systemctl enable --now docker"
+	case "windows":
+		return "install Docker Desktop (WSL 2 backend): https://docs.docker.com/desktop/setup/install/windows-install/"
+	default:
+		return "install one: https://docs.docker.com/get-docker/"
 	}
 }
 

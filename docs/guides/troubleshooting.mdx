@@ -75,16 +75,27 @@ run migrations` or `failed to open database`. Common fixes:
 
 <Accordion title="Agent containers won't start">
 
+`crewship start` (and `crewship doctor`) distinguish two situations and
+print the matching fix for your OS:
+
 ```
-ERROR no Docker-compatible runtime found
+container runtime installed but not running
 ```
 
-`crewship doctor` will already have flagged this. Quick install paths
-on macOS:
+You already have a runtime — it just isn't running. The preflight names
+what it found and how to start it, e.g. `open -a Docker` (Docker
+Desktop), `colima start`, `container system start` (Apple Containers),
+or `sudo systemctl start docker` on Linux.
+
+```
+no container runtime found
+```
+
+Nothing is installed. Quick install paths on macOS:
 
 ```bash
 # Option 1 — Docker Desktop
-open -a "Docker"   # if installed but not running
+# https://docs.docker.com/desktop/setup/install/mac-install/
 
 # Option 2 — OrbStack (lightweight alternative)
 brew install --cask orbstack
@@ -95,8 +106,12 @@ brew install colima docker
 colima start
 ```
 
-On Linux, `systemctl start docker` or install `podman`. Crewship picks
-whatever socket it finds — no further config needed.
+On Linux, `curl -fsSL https://get.docker.com | sh`, then
+`sudo systemctl enable --now docker` and add yourself to the `docker`
+group (`sudo usermod -aG docker $USER`, log out and back in). Or
+install `podman`. On Windows, install Docker Desktop with the WSL 2
+backend. Crewship picks whatever socket it finds — no further config
+needed.
 
 </Accordion>
 

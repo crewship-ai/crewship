@@ -346,3 +346,29 @@ func TestDoctorCmdStructure(t *testing.T) {
 		t.Errorf("doctorCmd missing --fix flag")
 	}
 }
+
+// installHintForOS must give each supported OS its own actionable install
+// pointer — the generic get-docker URL is only acceptable as the fallback
+// for platforms we don't specifically know about.
+func TestInstallHintForOS(t *testing.T) {
+	tests := []struct {
+		goos string
+		want string
+	}{
+		{"darwin", "orbstack"},
+		{"darwin", "mac-install"},
+		{"linux", "get.docker.com"},
+		{"linux", "systemctl enable --now docker"},
+		{"windows", "windows-install"},
+		{"windows", "WSL 2"},
+		{"freebsd", "https://docs.docker.com/get-docker/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.goos+"_"+tt.want, func(t *testing.T) {
+			got := installHintForOS(tt.goos)
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("installHintForOS(%q) = %q, want it to contain %q", tt.goos, got, tt.want)
+			}
+		})
+	}
+}
