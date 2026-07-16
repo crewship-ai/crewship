@@ -197,15 +197,21 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	return nil
 }
 
+// namePrefix returns the configured container-name prefix
+// (Config.ContainerPrefix), falling back to the "crewship" default when
+// unset.
+func (p *Provider) namePrefix() string {
+	if p.cfg.ContainerPrefix != "" {
+		return p.cfg.ContainerPrefix
+	}
+	return "crewship"
+}
+
 // CrewContainerName returns the container name for a crew. It folds in the
 // globally-unique crew id (not the per-workspace slug alone) so two tenants
 // with an identically-named crew never collide on a shared host (audit C1).
 func (p *Provider) CrewContainerName(id, slug string) string {
-	prefix := p.cfg.ContainerPrefix
-	if prefix == "" {
-		prefix = "crewship"
-	}
-	parts := []string{prefix, "team"}
+	parts := []string{p.namePrefix(), "team"}
 	if slug != "" {
 		parts = append(parts, slug)
 	}

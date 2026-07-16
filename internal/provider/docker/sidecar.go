@@ -142,22 +142,14 @@ func volumeListOptions() volume.ListOptions {
 // sidecar. Kept short enough (crew slug ≤50, svc name ≤32) to stay
 // under docker's 64-char container-name limit even with a prefix.
 func (p *Provider) sidecarContainerName(crewSlug, serviceName string) string {
-	prefix := p.cfg.ContainerPrefix
-	if prefix == "" {
-		prefix = "crewship"
-	}
-	return prefix + "-svc-" + crewSlug + "-" + serviceName
+	return p.namePrefix() + "-svc-" + crewSlug + "-" + serviceName
 }
 
 // sidecarVolumeName returns the per-crew docker volume name for a
 // service's named volume. Two crews that declare `pg-data` get
 // distinct volumes — sidecars never share state across crews.
 func (p *Provider) sidecarVolumeName(crewSlug, volumeName string) string {
-	prefix := p.cfg.ContainerPrefix
-	if prefix == "" {
-		prefix = "crewship"
-	}
-	return prefix + "-svc-" + crewSlug + "-vol-" + volumeName
+	return p.namePrefix() + "-svc-" + crewSlug + "-vol-" + volumeName
 }
 
 // EnsureCrewServices ensures every declared sidecar is running for
@@ -544,11 +536,7 @@ func (p *Provider) RemoveCrewServices(ctx context.Context, crewSlug string) erro
 // doesn't refuse with "volume in use". Per-volume failures are
 // aggregated; the rest of the volumes are still attempted.
 func (p *Provider) RemoveCrewServiceVolumes(ctx context.Context, crewSlug string) error {
-	prefix := p.cfg.ContainerPrefix
-	if prefix == "" {
-		prefix = "crewship"
-	}
-	wantPrefix := prefix + "-svc-" + crewSlug + "-vol-"
+	wantPrefix := p.namePrefix() + "-svc-" + crewSlug + "-vol-"
 	// List by filter is preferable but docker's volume list filter
 	// API treats `label=managed-by=crewship` consistently; we list
 	// all and filter by name prefix in code to keep this simple.
