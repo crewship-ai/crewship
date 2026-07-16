@@ -125,6 +125,10 @@ When a crew starts, Crewship creates a shared container with this filesystem lay
   Files agents create in `/output/{slug}/` are immediately visible in the Files panel of the UI. Use the shared crew space at `/crew/shared/` for cross-agent collaboration.
 </Tip>
 
+<Note>
+  **Agents in a crew trust each other.** All agent processes in the container run as one Unix user (UID 1001), so the per-agent directories above are an organizational convention, not a security boundary — any agent can read a sibling's home, output, and `/secrets/{slug}/` files. The enforced isolation boundary is the crew container itself. Agents that must not see each other's credentials belong in separate crews; see [Credentials > The trust boundary is the crew](/guides/credentials#the-trust-boundary-is-the-crew-not-the-agent).
+</Note>
+
 ## System Prompt Assembly Order
 
 For the full 2-stage breakdown, see [Architecture > System Prompt Assembly](/architecture#system-prompt-assembly-order). When an agent starts, its system prompt is assembled in this order:
