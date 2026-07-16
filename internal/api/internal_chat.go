@@ -38,8 +38,7 @@ func (h *InternalHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?, ?, ?, 'CHAT', 'ACTIVE', ?, ?)`,
 		body.ChatID, body.AgentID, body.WorkspaceID, body.UserID, body.Title, now, now)
 	if err != nil {
-		h.logger.Error("create chat", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "create chat", err)
 		return
 	}
 
@@ -78,8 +77,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "Chat not found")
 			return
 		}
-		h.logger.Error("resolve chat lookup", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "resolve chat lookup", err)
 		return
 	}
 
@@ -119,8 +117,7 @@ func (h *InternalHandler) IncrementMessageCount(w http.ResponseWriter, r *http.R
 	}
 	res, err := h.db.ExecContext(r.Context(), mcQuery, mcArgs...)
 	if err != nil {
-		h.logger.Error("increment message count", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "increment message count", err)
 		return
 	}
 	// A non-existent chat ID still returned 200 OK — silent no-op masking
@@ -129,8 +126,7 @@ func (h *InternalHandler) IncrementMessageCount(w http.ResponseWriter, r *http.R
 	// reference instead of trusting a phantom success.
 	n, err := res.RowsAffected()
 	if err != nil {
-		h.logger.Error("increment message count rows affected", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "increment message count rows affected", err)
 		return
 	}
 	if n == 0 {
@@ -161,14 +157,12 @@ func (h *InternalHandler) UpdateChatTitle(w http.ResponseWriter, r *http.Request
 	}
 	res, err := h.db.ExecContext(r.Context(), titleQuery, titleArgs...)
 	if err != nil {
-		h.logger.Error("update chat title", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "update chat title", err)
 		return
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		h.logger.Error("update chat title rows affected", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "update chat title rows affected", err)
 		return
 	}
 	if n == 0 {

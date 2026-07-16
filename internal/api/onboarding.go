@@ -119,8 +119,7 @@ func (h *OnboardingHandler) Status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		h.logger.Error("query onboarding status", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "query onboarding status", err)
 		return
 	}
 
@@ -161,14 +160,12 @@ func (h *OnboardingHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		"UPDATE users SET onboarding_completed = 1, updated_at = ? WHERE id = ?",
 		time.Now().UTC().Format(time.RFC3339), user.ID)
 	if err != nil {
-		h.logger.Error("complete onboarding", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "complete onboarding", err)
 		return
 	}
 	rows, err := res.RowsAffected()
 	if err != nil {
-		h.logger.Error("complete onboarding rows affected", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "complete onboarding rows affected", err)
 		return
 	}
 	if rows == 0 {
@@ -257,8 +254,7 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		h.logger.Error("find workspace", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "find workspace", err)
 		return
 	}
 
@@ -418,8 +414,7 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 		"UPDATE users SET onboarding_completed = 1, updated_at = ? WHERE id = ? AND onboarding_completed = 0",
 		now, userID)
 	if err != nil {
-		h.logger.Error("onboarding template: lock", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "onboarding template: lock", err)
 		return
 	}
 	rows, err := guardRes.RowsAffected()
@@ -427,8 +422,7 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 		// Driver metadata failure — don't silently translate it into
 		// "already completed", which would block a retry the user
 		// could otherwise succeed at.
-		h.logger.Error("onboarding template: lock rows affected", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "onboarding template: lock rows affected", err)
 		return
 	}
 	if rows == 0 {
@@ -550,8 +544,7 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 			h.logger.Warn("onboarding template: crew slug conflict", "error", err, "workspace_id", workspaceID, "template_slug", req.CrewTemplateSlug)
 			replyError(w, http.StatusConflict, "Crew slug already exists")
 		default:
-			h.logger.Error("onboarding template: deploy", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "onboarding template: deploy", err)
 		}
 		return
 	}

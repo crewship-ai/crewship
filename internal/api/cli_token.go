@@ -301,8 +301,7 @@ func (h *CLITokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 					"issuing user has no workspace membership; cannot grant scoped token")
 				return
 			}
-			h.logger.Error("cli_token: lookup caller role", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "cli_token: lookup caller role", err)
 			return
 		}
 		if denied := scopesPermittedByRole(callerRole, normalisedScopes); denied != "" {
@@ -317,8 +316,7 @@ func (h *CLITokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if len(normalisedScopes) > 0 {
 		buf, err := json.Marshal(normalisedScopes)
 		if err != nil {
-			h.logger.Error("marshal scopes", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "marshal scopes", err)
 			return
 		}
 		scopesJSON = sql.NullString{String: string(buf), Valid: true}
@@ -332,8 +330,7 @@ func (h *CLITokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// than the rest of the codebase's secrets (session ids etc.).
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
-		h.logger.Error("generate token", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "generate token", err)
 		return
 	}
 
@@ -457,8 +454,7 @@ func (h *CLITokenHandler) List(w http.ResponseWriter, r *http.Request) {
 		`SELECT id, name, tier, expires_at, created_at, last_used_at, revoked_at
 		 FROM cli_tokens WHERE user_id = ? ORDER BY created_at DESC`, user.ID)
 	if err != nil {
-		h.logger.Error("list cli_tokens", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list cli_tokens", err)
 		return
 	}
 	defer rows.Close()
@@ -510,8 +506,7 @@ func (h *CLITokenHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		"UPDATE cli_tokens SET revoked_at = ? WHERE id = ? AND user_id = ?",
 		now, tokenID, user.ID)
 	if err != nil {
-		h.logger.Error("revoke cli_token", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "revoke cli_token", err)
 		return
 	}
 

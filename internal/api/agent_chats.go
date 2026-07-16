@@ -71,8 +71,7 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 		LIMIT 100
 	`, userID, userID, agentID, workspaceID)
 	if err != nil {
-		h.logger.Error("list agent chats", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list agent chats", err)
 		return
 	}
 	defer rows.Close()
@@ -100,15 +99,13 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 			&c.Mode, &c.Status, &c.MessageCount,
 			&c.StartedAt, &c.EndedAt, &c.CreatedAt, &c.Origin,
 			&c.LastActivityAt, &c.UnreadCount); err != nil {
-			h.logger.Error("scan chat", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan chat", err)
 			return
 		}
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (chats)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration (chats)", err)
 		return
 	}
 	if result == nil {
@@ -154,8 +151,7 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 	// Check agent exists
 	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
-		h.logger.Error("check agent exists", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "check agent exists", err)
 		return
 	}
 	if !found {
@@ -170,8 +166,7 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		 WHERE EXISTS (SELECT 1 FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL)`,
 		chatID, agentID, workspaceID, userID, origin, isoMillisNow(), agentID, workspaceID)
 	if err != nil {
-		h.logger.Error("create chat", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "create chat", err)
 		return
 	}
 
@@ -184,8 +179,7 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "Agent not found")
 			return
 		}
-		h.logger.Error("verify chat owner", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "verify chat owner", err)
 		return
 	}
 	if ownerAgentID != agentID {
@@ -223,8 +217,7 @@ func (h *AgentHandler) MarkChatRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		h.logger.Error("mark chat read lookup", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "mark chat read lookup", err)
 		return
 	}
 
@@ -234,8 +227,7 @@ func (h *AgentHandler) MarkChatRead(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?)
 		ON CONFLICT(user_id, chat_id) DO UPDATE SET last_read_at = excluded.last_read_at`,
 		user.ID, chatID, now); err != nil {
-		h.logger.Error("mark chat read upsert", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "mark chat read upsert", err)
 		return
 	}
 
@@ -300,8 +292,7 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		h.logger.Error("delete chat lookup", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "delete chat lookup", err)
 		return
 	}
 
@@ -321,8 +312,7 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 		}
 		ok, err := canEditAgent(r.Context(), h.db, user.ID, role, agentID)
 		if err != nil {
-			h.logger.Error("delete chat gate", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "delete chat gate", err)
 			return
 		}
 		if !ok {
@@ -340,8 +330,7 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 	var assignmentCount int
 	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT COUNT(*) FROM assignments WHERE chat_id = ?`, chatID).Scan(&assignmentCount); err != nil {
-		h.logger.Error("delete chat: assignment check", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "delete chat: assignment check", err)
 		return
 	}
 	if assignmentCount > 0 {
@@ -369,8 +358,7 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 	// best-effort AFTER the tx commits (#1148) — see cleanupChatAttachments.
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("delete chat begin tx", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "delete chat begin tx", err)
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -391,8 +379,7 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("delete chat commit", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "delete chat commit", err)
 		return
 	}
 
@@ -471,8 +458,7 @@ func (h *AgentHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		Limit:       100,
 	})
 	if err != nil {
-		h.logger.Error("list agent runs", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list agent runs", err)
 		return
 	}
 

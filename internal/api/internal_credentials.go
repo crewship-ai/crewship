@@ -199,8 +199,7 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("internal list credentials", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "internal list credentials", err)
 		return
 	}
 	defer rows.Close()
@@ -229,8 +228,7 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		var encRefresh, accountEmail sql.NullString
 		if err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Type, &c.Provider,
 			&encValue, &encRefresh, &c.TokenExpires, &c.AccountLabel, &accountEmail, &c.Status); err != nil {
-			h.logger.Error("scan internal credential", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan internal credential", err)
 			return
 		}
 		if includeValues {
@@ -257,8 +255,7 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (internal credentials)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration (internal credentials)", err)
 		return
 	}
 	if result == nil {
@@ -339,8 +336,7 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 	}
 	n, err := result.RowsAffected()
 	if err != nil {
-		h.logger.Error("update credential rows affected", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "update credential rows affected", err)
 		return
 	}
 	if n == 0 {
@@ -350,8 +346,7 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 
 	if body.LastError != nil {
 		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET last_error = ? WHERE "+where, append([]any{*body.LastError}, whereArgs...)...); err != nil {
-			h.logger.Error("update credential last_error", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "update credential last_error", err)
 			return
 		}
 	}
@@ -363,8 +358,7 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 			return
 		}
 		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET encrypted_value = ? WHERE "+where, append([]any{enc}, whereArgs...)...); err != nil {
-			h.logger.Error("update credential access token", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "update credential access token", err)
 			return
 		}
 	}
@@ -376,15 +370,13 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 			return
 		}
 		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET encrypted_refresh_token = ? WHERE "+where, append([]any{enc}, whereArgs...)...); err != nil {
-			h.logger.Error("update credential refresh token", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "update credential refresh token", err)
 			return
 		}
 	}
 	if body.TokenExpires != nil {
 		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET token_expires_at = ? WHERE "+where, append([]any{*body.TokenExpires}, whereArgs...)...); err != nil {
-			h.logger.Error("update credential token_expires_at", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "update credential token_expires_at", err)
 			return
 		}
 	}

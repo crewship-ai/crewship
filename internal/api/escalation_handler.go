@@ -80,8 +80,7 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 			replyError(w, http.StatusNotFound, "from agent not found")
 			return
 		}
-		h.logger.Error("lookup from agent for escalation", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "lookup from agent for escalation", err)
 		return
 	}
 
@@ -373,8 +372,7 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 			replyError(w, http.StatusNotFound, "escalation not found")
 			return
 		}
-		h.logger.Error("resolve escalation lookup", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "resolve escalation lookup", err)
 		return
 	}
 	if status != "PENDING" {
@@ -464,14 +462,12 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		WHERE id = ? AND workspace_id = ? AND status = 'PENDING'
 	`, storedResolution, body.Action, redirectToVal, now, escalationID, workspaceID)
 	if err != nil {
-		h.logger.Error("resolve escalation update", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "resolve escalation update", err)
 		return
 	}
 	n, err := result.RowsAffected()
 	if err != nil {
-		h.logger.Error("resolve escalation rows affected", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "resolve escalation rows affected", err)
 		return
 	}
 	if n == 0 {
@@ -643,8 +639,7 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 		LIMIT ? OFFSET ?
 	`, crewID, workspaceID, limit, offset)
 	if err != nil {
-		h.logger.Error("list escalations", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list escalations", err)
 		return
 	}
 	defer rows.Close()
@@ -658,8 +653,7 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 			&item.RedirectTo, &item.ResolvedBy, &item.ResolvedAt, &item.CreatedAt,
 			&item.CredentialID, &item.FromName, &item.FromSlug,
 		); err != nil {
-			h.logger.Error("scan escalation", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan escalation", err)
 			return
 		}
 		// Never expose plaintext credential values to the list response
@@ -670,8 +664,7 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration", err)
 		return
 	}
 

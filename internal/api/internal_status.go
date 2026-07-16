@@ -40,8 +40,7 @@ func (h *InternalHandler) ListCrews(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(),
 		`SELECT id, name, slug FROM crews WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY name`, wsID)
 	if err != nil {
-		h.logger.Error("list crews internal", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list crews internal", err)
 		return
 	}
 	defer rows.Close()
@@ -280,8 +279,7 @@ func (h *InternalHandler) ListCrewConnections(w http.ResponseWriter, r *http.Req
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("list crew connections internal", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list crew connections internal", err)
 		return
 	}
 	defer rows.Close()

@@ -93,8 +93,7 @@ func (h *CliPairHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 	code, err := generatePairingCode(8)
 	if err != nil {
-		h.logger.Error("cli pair: generate code", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "cli pair: generate code", err)
 		return
 	}
 
@@ -106,8 +105,7 @@ func (h *CliPairHandler) Start(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO cli_pairings (id, user_id, code, status, adapter_hint, created_at, expires_at)
 		VALUES (?, ?, ?, 'pending', ?, ?, ?)`,
 		id, user.ID, code, nullableHint(hint), now.Format(time.RFC3339), expires.Format(time.RFC3339)); err != nil {
-		h.logger.Error("cli pair: insert", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "cli pair: insert", err)
 		return
 	}
 
@@ -153,8 +151,7 @@ func (h *CliPairHandler) Poll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		h.logger.Error("cli pair: poll lookup", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "cli pair: poll lookup", err)
 		return
 	}
 
@@ -212,8 +209,7 @@ func (h *CliPairHandler) Redeem(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("cli pair redeem: begin tx", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "cli pair redeem: begin tx", err)
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
@@ -229,8 +225,7 @@ func (h *CliPairHandler) Redeem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		h.logger.Error("cli pair redeem: lookup", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "cli pair redeem: lookup", err)
 		return
 	}
 	if status != "pending" {
@@ -249,8 +244,7 @@ func (h *CliPairHandler) Redeem(w http.ResponseWriter, r *http.Request) {
 	// tokens, an inconsistency the dev1 8084 A/B run surfaced.
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
-		h.logger.Error("cli pair redeem: rand", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "cli pair redeem: rand", err)
 		return
 	}
 	cliToken := cliTokenPrefix + hex.EncodeToString(tokenBytes)
@@ -275,8 +269,7 @@ func (h *CliPairHandler) Redeem(w http.ResponseWriter, r *http.Request) {
 		WHERE code = ? AND status='pending'`,
 		now, nullableHint(hint), code)
 	if err != nil {
-		h.logger.Error("cli pair redeem: mark consumed", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "cli pair redeem: mark consumed", err)
 		return
 	}
 	affected, _ := updRes.RowsAffected()
@@ -289,21 +282,18 @@ func (h *CliPairHandler) Redeem(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO cli_tokens (id, user_id, name, token_hash, tier, created_at)
 		VALUES (?, ?, ?, ?, 'STANDARD', ?)`,
 		tokenID, userID, tokenName, tokenHashHex, now); err != nil {
-		h.logger.Error("cli pair redeem: insert cli_token", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "cli pair redeem: insert cli_token", err)
 		return
 	}
 
 	var email string
 	if err := tx.QueryRowContext(r.Context(), "SELECT email FROM users WHERE id = ?", userID).Scan(&email); err != nil {
-		h.logger.Error("cli pair redeem: lookup user", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "cli pair redeem: lookup user", err)
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("cli pair redeem: commit", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "cli pair redeem: commit", err)
 		return
 	}
 

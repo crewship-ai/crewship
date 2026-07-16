@@ -64,8 +64,7 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 			replyError(w, http.StatusForbidden, "agent does not belong to the requested crew/workspace")
 			return
 		}
-		h.logger.Error("port_expose: agent boundary check", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "port_expose: agent boundary check", err)
 		return
 	}
 
@@ -103,8 +102,7 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 		TTLSeconds:  int(ttl.Seconds()),
 	})
 	if err != nil {
-		h.logger.Error("port_expose: policy check", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "port_expose: policy check", err)
 		return
 	}
 	switch decision {
@@ -148,8 +146,7 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 
 	token, err := generateExposeToken()
 	if err != nil {
-		h.logger.Error("port_expose: token generation", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "port_expose: token generation", err)
 		return
 	}
 
@@ -178,8 +175,7 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 		expiresAt.Format(time.RFC3339), now.Format(time.RFC3339),
 	)
 	if err != nil {
-		h.logger.Error("port_expose: insert row", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "port_expose: insert row", err)
 		return
 	}
 

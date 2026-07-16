@@ -259,8 +259,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	for _, cid := range crewIDs {
 		crewFound, err := crewExists(r.Context(), h.db, cid, workspaceID)
 		if err != nil {
-			h.logger.Error("crew exists check", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "crew exists check", err)
 			return
 		}
 		if !crewFound {
@@ -365,8 +364,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("begin tx", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "begin tx", err)
 		return
 	}
 
@@ -396,8 +394,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusConflict, "Credential with this name already exists")
 			return
 		}
-		h.logger.Error("insert credential", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "insert credential", err)
 		return
 	}
 
@@ -408,8 +405,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 			encClientSecret, err = encryption.Encrypt(*req.OAuthClientSecret)
 			if err != nil {
 				tx.Rollback()
-				h.logger.Error("encrypt OAuth client secret", "error", err)
-				replyError(w, http.StatusInternalServerError, "Internal server error")
+				replyInternalError(w, h.logger, "encrypt OAuth client secret", err)
 				return
 			}
 		}
@@ -421,16 +417,14 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 			req.OAuthAuthURL, req.OAuthTokenURL, req.OAuthScopes,
 			credID); err != nil {
 			tx.Rollback()
-			h.logger.Error("store OAuth fields", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "store OAuth fields", err)
 			return
 		}
 	}
 
 	if err := h.setCrewIDs(r.Context(), tx, credID, crewIDs); err != nil {
 		tx.Rollback()
-		h.logger.Error("set credential crews", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "set credential crews", err)
 		return
 	}
 
@@ -448,8 +442,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit credential", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "commit credential", err)
 		return
 	}
 
@@ -521,8 +514,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "Credential not found")
 			return
 		}
-		h.logger.Error("load credential for update", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "load credential for update", err)
 		return
 	}
 
@@ -664,8 +656,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		for _, cid := range crewIDs {
 			ok, err := crewExists(r.Context(), h.db, cid, workspaceID)
 			if err != nil {
-				h.logger.Error("crew exists check", "error", err)
-				replyError(w, http.StatusInternalServerError, "Internal server error")
+				replyInternalError(w, h.logger, "crew exists check", err)
 				return
 			}
 			if !ok {
@@ -696,8 +687,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if crewIDStr != "" {
 			crewFound, err := crewExists(r.Context(), h.db, crewIDStr, workspaceID)
 			if err != nil {
-				h.logger.Error("crew exists check", "error", err)
-				replyError(w, http.StatusInternalServerError, "Internal server error")
+				replyInternalError(w, h.logger, "crew exists check", err)
 				return
 			}
 			if !crewFound {
@@ -810,8 +800,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("begin tx (update credential)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "begin tx (update credential)", err)
 		return
 	}
 
@@ -819,8 +808,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		query, args := ub.Build("credentials", "id = ? AND workspace_id = ?", credID, workspaceID)
 		if _, err := tx.ExecContext(r.Context(), query, args...); err != nil {
 			tx.Rollback()
-			h.logger.Error("update credential", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "update credential", err)
 			return
 		}
 	}
@@ -828,8 +816,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if updateCrewIDs {
 		if err := h.setCrewIDs(r.Context(), tx, credID, crewIDs); err != nil {
 			tx.Rollback()
-			h.logger.Error("update credential crews", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "update credential crews", err)
 			return
 		}
 	}
@@ -854,8 +841,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit credential update", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "commit credential update", err)
 		return
 	}
 

@@ -165,8 +165,7 @@ func isHTTPS(r *http.Request) bool {
 func (h *NextAuthHandler) CSRF(w http.ResponseWriter, r *http.Request) {
 	token, err := h.csrfToken()
 	if err != nil {
-		h.logger.Error("generate csrf token", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "generate csrf token", err)
 		return
 	}
 	cookieName := h.csrfCookieName(r)
@@ -232,8 +231,7 @@ func (h *NextAuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]interface{}{})
 			return
 		case err != nil:
-			h.logger.Error("session lookup in /auth/session", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "session lookup in /auth/session", err)
 			return
 		case !sess.Active(time.Now()):
 			h.clearAuthCookies(w, r)
@@ -344,8 +342,7 @@ func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Req
 	// "internal error" is the truthful response.
 	sess, accessTok, refreshTok, err := h.issueSession(r, userID, fullName, email)
 	if err != nil {
-		h.logger.Error("issue session", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "issue session", err)
 		return
 	}
 	setAuthCookies(w, r, accessTok, refreshTok)
@@ -533,20 +530,17 @@ func (h *NextAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	// still valid and the client can simply retry.
 	access, err := h.validator.IssueAccessToken(claims.ID, claims.Sid, fullName, email)
 	if err != nil {
-		h.logger.Error("issue access on refresh", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "issue access on refresh", err)
 		return
 	}
 	refresh, err := h.validator.IssueRefreshToken(claims.ID, claims.Sid)
 	if err != nil {
-		h.logger.Error("issue refresh on refresh", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "issue refresh on refresh", err)
 		return
 	}
 	newClaims, err := h.validator.ValidateRefresh(refresh)
 	if err != nil {
-		h.logger.Error("validate freshly-issued refresh", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "validate freshly-issued refresh", err)
 		return
 	}
 

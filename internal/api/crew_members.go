@@ -50,8 +50,7 @@ func (h *CrewHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "Crew not found")
 			return
 		}
-		h.logger.Error("get crew for list members", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get crew for list members", err)
 		return
 	}
 
@@ -64,8 +63,7 @@ func (h *CrewHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 		ORDER BY cm.created_at ASC
 	`, crewID)
 	if err != nil {
-		h.logger.Error("list crew members", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list crew members", err)
 		return
 	}
 	defer rows.Close()
@@ -77,8 +75,7 @@ func (h *CrewHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 		var roleOverride sql.NullString
 		if err := rows.Scan(&m.ID, &m.CrewID, &m.UserID, &roleOverride, &m.CreatedAt,
 			&u.ID, &u.Email, &u.FullName, &u.AvatarURL); err != nil {
-			h.logger.Error("scan crew member", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan crew member", err)
 			return
 		}
 		if roleOverride.Valid {
@@ -89,8 +86,7 @@ func (h *CrewHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 		result = append(result, m)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (crew members)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration (crew members)", err)
 		return
 	}
 
@@ -126,8 +122,7 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "Crew not found")
 			return
 		}
-		h.logger.Error("get crew for add member", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get crew for add member", err)
 		return
 	}
 
@@ -152,8 +147,7 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		h.logger.Error("check workspace membership", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "check workspace membership", err)
 		return
 	}
 
@@ -167,8 +161,7 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != sql.ErrNoRows {
-		h.logger.Error("check crew membership", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "check crew membership", err)
 		return
 	}
 
@@ -208,8 +201,7 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		"INSERT INTO crew_members (id, crew_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)",
 		memberID, crewID, req.UserID, roleParam, now)
 	if err != nil {
-		h.logger.Error("insert crew member", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "insert crew member", err)
 		return
 	}
 
@@ -225,8 +217,7 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	`, memberID).Scan(&m.ID, &m.CrewID, &m.UserID, &m.CreatedAt,
 		&u.ID, &u.Email, &u.FullName, &u.AvatarURL)
 	if err != nil {
-		h.logger.Error("get crew member after insert", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get crew member after insert", err)
 		return
 	}
 	m.User = &u
@@ -264,8 +255,7 @@ func (h *CrewHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "Crew not found")
 			return
 		}
-		h.logger.Error("get crew for remove member", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get crew for remove member", err)
 		return
 	}
 
@@ -279,8 +269,7 @@ func (h *CrewHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "Crew member not found")
 			return
 		}
-		h.logger.Error("get crew member for remove", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get crew member for remove", err)
 		return
 	}
 
@@ -288,8 +277,7 @@ func (h *CrewHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 		"DELETE FROM crew_members WHERE id = ? AND crew_id = ?",
 		memberID, crewID)
 	if err != nil {
-		h.logger.Error("delete crew member", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "delete crew member", err)
 		return
 	}
 
@@ -347,8 +335,7 @@ func (h *CrewHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "Crew member not found")
 			return
 		}
-		h.logger.Error("lookup crew member for role update", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "lookup crew member for role update", err)
 		return
 	}
 
@@ -385,8 +372,7 @@ func (h *CrewHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := h.db.ExecContext(r.Context(),
 		"UPDATE crew_members SET role = ? WHERE id = ?", roleParam, memberID); err != nil {
-		h.logger.Error("update crew member role", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "update crew member role", err)
 		return
 	}
 

@@ -65,8 +65,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// Verify crew exists and belongs to workspace
 	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
-		h.logger.Error("get crew for update", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get crew for update", err)
 		return
 	}
 	if !found {
@@ -103,8 +102,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != sql.ErrNoRows {
-			h.logger.Error("check crew slug", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "check crew slug", err)
 			return
 		}
 	}
@@ -357,8 +355,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			}
 			domainsJSON, err := json.Marshal(normalized)
 			if err != nil {
-				h.logger.Error("marshal allowed_domains", "error", err)
-				replyError(w, http.StatusInternalServerError, "Internal server error")
+				replyInternalError(w, h.logger, "marshal allowed_domains", err)
 				return
 			}
 			ub.Set("allowed_domains", string(domainsJSON))
@@ -368,8 +365,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	query, args := ub.Build("crews", "id = ?", crewID)
 	_, err = h.db.ExecContext(r.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("update crew", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "update crew", err)
 		return
 	}
 
@@ -395,8 +391,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		&c.MaxEphemeralAgents,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
-		h.logger.Error("get crew after update", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get crew after update", err)
 		return
 	}
 

@@ -131,8 +131,7 @@ func (h *RecipeHandler) Preview(w http.ResponseWriter, r *http.Request) {
 
 	resolvedSlug, available, err := resolveCrewSlug(r.Context(), h.db, workspaceID, rec.CrewSlug)
 	if err != nil {
-		h.logger.Error("resolve crew slug", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "resolve crew slug", err)
 		return
 	}
 
@@ -186,8 +185,7 @@ func (h *RecipeHandler) Install(w http.ResponseWriter, r *http.Request) {
 		SELECT id, name FROM credentials
 		WHERE workspace_id = ? AND deleted_at IS NULL`, workspaceID)
 	if err != nil {
-		h.logger.Error("preload credentials", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "preload credentials", err)
 		return
 	}
 	for rows.Next() {
@@ -218,8 +216,7 @@ func (h *RecipeHandler) Install(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("begin install tx", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "begin install tx", err)
 		return
 	}
 	defer func() {
@@ -277,8 +274,7 @@ func (h *RecipeHandler) Install(w http.ResponseWriter, r *http.Request) {
 			newID, workspaceID, c.EnvVarName, encOpt, c.Type, c.Provider, label,
 			user.ID, now, now)
 		if err != nil {
-			h.logger.Error("insert recipe credential", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "insert recipe credential", err)
 			return
 		}
 		// SELECT the canonical id — works whether we won the race
@@ -288,8 +284,7 @@ func (h *RecipeHandler) Install(w http.ResponseWriter, r *http.Request) {
 			SELECT id FROM credentials
 			WHERE workspace_id = ? AND name = ? AND deleted_at IS NULL`,
 			workspaceID, c.EnvVarName).Scan(&canonicalID); err != nil {
-			h.logger.Error("read canonical credential id", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "read canonical credential id", err)
 			return
 		}
 		credIDByEnvVar[c.EnvVarName] = canonicalID
@@ -370,8 +365,7 @@ func (h *RecipeHandler) Install(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit install tx", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "commit install tx", err)
 		return
 	}
 

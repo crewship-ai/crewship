@@ -38,8 +38,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
-		h.logger.Error("check agent exists", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "check agent exists", err)
 		return
 	}
 	if !found {
@@ -97,8 +96,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 			if err := h.db.QueryRowContext(r.Context(),
 				"SELECT crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 				agentID, workspaceID).Scan(&crewIDNull); err != nil {
-				h.logger.Error("query agent crew_id for promotion", "error", err)
-				replyError(w, http.StatusInternalServerError, "Internal server error")
+				replyInternalError(w, h.logger, "query agent crew_id for promotion", err)
 				return
 			}
 
@@ -111,8 +109,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 			if _, err := h.db.ExecContext(r.Context(),
 				"UPDATE agents SET agent_role = 'AGENT' WHERE crew_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL AND id != ?",
 				crewIDNull.String, agentID); err != nil {
-				h.logger.Error("demote existing lead", "error", err)
-				replyError(w, http.StatusInternalServerError, "Internal server error")
+				replyInternalError(w, h.logger, "demote existing lead", err)
 				return
 			}
 		}
@@ -203,8 +200,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 				if err := h.db.QueryRowContext(r.Context(),
 					"SELECT llm_provider FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 					agentID, workspaceID).Scan(&provNull); err != nil {
-					h.logger.Error("query agent llm_provider for model validation", "error", err)
-					replyError(w, http.StatusInternalServerError, "Internal server error")
+					replyInternalError(w, h.logger, "query agent llm_provider for model validation", err)
 					return
 				}
 				if provNull.Valid {
@@ -289,8 +285,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	query, args := ub.Build("agents", "id = ? AND workspace_id = ? AND deleted_at IS NULL", agentID, workspaceID)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-		h.logger.Error("update agent", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "update agent", err)
 		return
 	}
 

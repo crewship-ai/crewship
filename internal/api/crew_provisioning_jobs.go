@@ -180,8 +180,7 @@ func (h *ProvisioningHandler) ProvisionStatus(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if err != nil {
-		h.logger.Error("query crew provisioning status", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "query crew provisioning status", err)
 		return
 	}
 
@@ -896,8 +895,7 @@ func (h *ProvisioningHandler) ProvisionRebuild(w http.ResponseWriter, r *http.Re
 		crewID, workspaceID,
 	)
 	if err != nil {
-		h.logger.Error("clear cached image for rebuild", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "clear cached image for rebuild", err)
 		return
 	}
 	h.ProvisionTrigger(w, r)

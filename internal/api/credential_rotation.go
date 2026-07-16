@@ -166,8 +166,7 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "Credential not found")
 			return
 		}
-		h.logger.Error("read credential for rotate", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "read credential for rotate", err)
 		return
 	}
 
@@ -217,8 +216,7 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("begin rotate tx", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "begin rotate tx", err)
 		return
 	}
 	defer func() {
@@ -248,8 +246,7 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO credential_rotations (id, credential_id, old_value, grace_seconds, rotated_at, expires_at, rotated_by, status)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		rotationID, credID, oldValStore, graceSec, nowStr, expiresAt, user.ID, rotStatus); err != nil {
-		h.logger.Error("insert rotation row", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "insert rotation row", err)
 		return
 	}
 
@@ -265,8 +262,7 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		                       updated_at = ?
 		WHERE id = ?`,
 		newEncrypted, nowStr, credID); err != nil {
-		h.logger.Error("update credential value", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "update credential value", err)
 		return
 	}
 
@@ -281,8 +277,7 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit rotate tx", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "commit rotate tx", err)
 		return
 	}
 
@@ -376,8 +371,7 @@ func (h *CredentialHandler) ListRotations(w http.ResponseWriter, r *http.Request
 			replyError(w, http.StatusNotFound, "Credential not found")
 			return
 		}
-		h.logger.Error("rotations: check credential exists", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rotations: check credential exists", err)
 		return
 	}
 
@@ -388,8 +382,7 @@ func (h *CredentialHandler) ListRotations(w http.ResponseWriter, r *http.Request
 		WHERE credential_id = ?
 		ORDER BY rotated_at DESC`, credID)
 	if err != nil {
-		h.logger.Error("list rotations", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list rotations", err)
 		return
 	}
 	defer rows.Close()
@@ -446,8 +439,7 @@ func (h *CredentialHandler) CancelRotation(w http.ResponseWriter, r *http.Reques
 			replyError(w, http.StatusNotFound, "Rotation not found")
 			return
 		}
-		h.logger.Error("read rotation status", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "read rotation status", err)
 		return
 	}
 
@@ -462,8 +454,7 @@ func (h *CredentialHandler) CancelRotation(w http.ResponseWriter, r *http.Reques
 		UPDATE credential_rotations
 		SET status = 'CANCELLED', old_value = ''
 		WHERE id = ? AND status = 'ACTIVE'`, rotationID); err != nil {
-		h.logger.Error("cancel rotation", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "cancel rotation", err)
 		return
 	}
 

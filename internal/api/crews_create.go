@@ -55,8 +55,7 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 				replyError(w, http.StatusPaymentRequired, err.Error())
 				return
 			}
-			h.logger.Error("check crew limit", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "check crew limit", err)
 			return
 		}
 	}
@@ -89,8 +88,7 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != sql.ErrNoRows {
-		h.logger.Error("check crew slug", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "check crew slug", err)
 		return
 	}
 
@@ -151,8 +149,7 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		domainsJSON, err := json.Marshal(normalized)
 		if err != nil {
-			h.logger.Error("marshal allowed_domains", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "marshal allowed_domains", err)
 			return
 		}
 		s := string(domainsJSON)
@@ -267,8 +264,7 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		crewID, workspaceID, req.Name, req.Slug, req.Description, req.Color, req.Icon, memoryMB, cpus, ttlHours, networkMode, allowedDomainsDB, allowPrivateEndpoints, req.RuntimeImage, req.DevcontainerConfig, req.MiseConfig, req.ServicesJSON, now, now)
 	if err != nil {
-		h.logger.Error("insert crew", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "insert crew", err)
 		return
 	}
 

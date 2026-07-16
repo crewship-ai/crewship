@@ -218,8 +218,7 @@ func (h *AssignmentHandler) List(w http.ResponseWriter, r *http.Request) {
 		LIMIT ? OFFSET ?
 	`, crewID, crewID, workspaceID, limit, offset)
 	if err != nil {
-		h.logger.Error("list assignments", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list assignments", err)
 		return
 	}
 	defer rows.Close()
@@ -233,15 +232,13 @@ func (h *AssignmentHandler) List(w http.ResponseWriter, r *http.Request) {
 			&item.AssignedByName, &item.AssignedBySlug,
 			&item.AssignedToName, &item.AssignedToSlug,
 		); err != nil {
-			h.logger.Error("scan assignment", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan assignment", err)
 			return
 		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration", err)
 		return
 	}
 
@@ -304,8 +301,7 @@ func (h *AssignmentHandler) Get(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "assignment not found")
 			return
 		}
-		h.logger.Error("get assignment", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get assignment", err)
 		return
 	}
 

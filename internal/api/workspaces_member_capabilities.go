@@ -110,8 +110,7 @@ func (h *WorkspaceHandler) ListMembersCapabilities(w http.ResponseWriter, r *htt
 		var userID, memberRole string
 		var capsJSON sql.NullString
 		if err := rows.Scan(&userID, &memberRole, &capsJSON); err != nil {
-			h.logger.Error("scan member row", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan member row", err)
 			return
 		}
 		caps := resolveCapabilitiesFromRow(capsJSON, memberRole)
@@ -122,8 +121,7 @@ func (h *WorkspaceHandler) ListMembersCapabilities(w http.ResponseWriter, r *htt
 		})
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, out)

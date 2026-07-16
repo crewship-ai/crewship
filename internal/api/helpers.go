@@ -172,6 +172,17 @@ func buildPlaceholders(n int) string {
 	return string(buf)
 }
 
+// toAnySlice converts a []string to the []any shape database/sql variadic
+// query APIs require. Wraps the previously repeated make-and-copy loop at
+// batch-query call sites.
+func toAnySlice(ids []string) []any {
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	return args
+}
+
 // sqlPlaceholders returns a comma-separated string of n "?" placeholders
 // for use in SQL IN clauses (e.g. "?,?,?").
 func sqlPlaceholders(n int) string {
@@ -319,6 +330,24 @@ func internalError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, 
 		logger.Error(msg, "error", err)
 	}
 	writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+}
+
+// replyInternalError is the replyError-shaped sibling of internalError: the
+// canonical "log the error, return a 500" tail for handlers that reply with
+// the {"error": msg} JSON shape rather than an RFC 7807 problem. It
+// reproduces the dominant idiom exactly:
+//
+//	logger.Error(msg, "error", err)
+//	replyError(w, http.StatusInternalServerError, "Internal server error")
+//
+// The logger is guarded so a nil logger (e.g. a handler constructed without
+// one in a test) degrades to just writing the error response rather than
+// panicking. Callers still issue their own `return` after this call.
+func replyInternalError(w http.ResponseWriter, logger *slog.Logger, msg string, err error) {
+	if logger != nil {
+		logger.Error(msg, "error", err)
+	}
+	replyError(w, http.StatusInternalServerError, "Internal server error")
 }
 
 // readJSON decodes the request body (up to 1 MB) into v.

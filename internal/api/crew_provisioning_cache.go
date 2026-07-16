@@ -98,8 +98,7 @@ func (h *ProvisioningHandler) CacheList(w http.ResponseWriter, r *http.Request) 
 		       AND deleted_at IS NULL AND workspace_id = ?`,
 		workspaceID)
 	if err != nil {
-		h.logger.Error("query referenced cache images", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "query referenced cache images", err)
 		return
 	}
 	defer refRows.Close()
@@ -107,8 +106,7 @@ func (h *ProvisioningHandler) CacheList(w http.ResponseWriter, r *http.Request) 
 	for refRows.Next() {
 		var tag, slug string
 		if err := refRows.Scan(&tag, &slug); err != nil {
-			h.logger.Error("scan referenced cache image", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan referenced cache image", err)
 			return
 		}
 		refs[tag] = append(refs[tag], slug)
@@ -116,8 +114,7 @@ func (h *ProvisioningHandler) CacheList(w http.ResponseWriter, r *http.Request) 
 
 	imgs, err := h.listLocalImagesCached(r.Context())
 	if err != nil {
-		h.logger.Error("docker image list", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "docker image list", err)
 		return
 	}
 	out := make([]CacheImageInfo, 0, len(imgs))
@@ -215,8 +212,7 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 	if !force {
 		refs, err := h.referencedCacheImages(r.Context())
 		if err != nil {
-			h.logger.Error("query referenced cache images", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "query referenced cache images", err)
 			return
 		}
 		if crews, ok := refs[tag]; ok && len(crews) > 0 {

@@ -158,8 +158,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "target agent not found")
 			return
 		}
-		h.logger.Error("lookup target agent", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "lookup target agent", err)
 		return
 	}
 
@@ -171,8 +170,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?, ?, ?, ?, ?, 'RUNNING', ?)
 	`, convID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, target.ID, body.Question, now)
 	if err != nil {
-		h.logger.Error("create peer_conversation", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "create peer_conversation", err)
 		return
 	}
 
@@ -595,8 +593,7 @@ func (h *QueryHandler) ListPeerConversations(w http.ResponseWriter, r *http.Requ
 		LIMIT ? OFFSET ?
 	`, crewID, workspaceID, limit, offset)
 	if err != nil {
-		h.logger.Error("list peer conversations", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list peer conversations", err)
 		return
 	}
 	defer rows.Close()
@@ -610,16 +607,14 @@ func (h *QueryHandler) ListPeerConversations(w http.ResponseWriter, r *http.Requ
 			&escalatedInt, &item.CreatedAt, &item.FinishedAt,
 			&item.FromName, &item.FromSlug, &item.ToName, &item.ToSlug,
 		); err != nil {
-			h.logger.Error("scan peer conversation", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan peer conversation", err)
 			return
 		}
 		item.Escalated = escalatedInt != 0
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration", err)
 		return
 	}
 

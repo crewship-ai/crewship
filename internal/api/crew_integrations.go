@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
-	"strings"
 )
 
 // --- Response types ---
@@ -69,8 +68,7 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 		WHERE c.workspace_id = ? AND cs.deleted_at IS NULL
 		ORDER BY c.name, cs.name`, workspaceID)
 	if err != nil {
-		h.logger.Error("list all crew integrations", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list all crew integrations", err)
 		return
 	}
 	defer rows.Close()
@@ -90,8 +88,7 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 		results = append(results, s)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("iterate all crew integrations", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "iterate all crew integrations", err)
 		return
 	}
 	// Populate auth_status via a batch query. Use MAX on a priority CASE so
@@ -110,8 +107,7 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 		) AND ab.credential_id IS NOT NULL AND ab.credential_id != ''
 		GROUP BY ab.mcp_server_id`, workspaceID)
 	if err != nil {
-		h.logger.Error("query auth status batch", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "query auth status batch", err)
 		return
 	}
 	for authRows.Next() {
@@ -163,8 +159,7 @@ func (h *IntegrationHandler) ListCrewIntegrations(w http.ResponseWriter, r *http
 	// Verify crew belongs to workspace
 	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
-		h.logger.Error("crew exists check", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "crew exists check", err)
 		return
 	}
 	if !found {
@@ -191,8 +186,7 @@ func (h *IntegrationHandler) ListCrewIntegrations(w http.ResponseWriter, r *http
 		WHERE cs.crew_id = ? AND cs.deleted_at IS NULL
 		ORDER BY cs.created_at DESC`, crewID)
 	if err != nil {
-		h.logger.Error("list crew integrations", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list crew integrations", err)
 		return
 	}
 	defer rows.Close()
@@ -211,14 +205,12 @@ func (h *IntegrationHandler) ListCrewIntegrations(w http.ResponseWriter, r *http
 		results = append(results, s)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("iterate crew integrations", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "iterate crew integrations", err)
 		return
 	}
 	// Populate auth_status
 	if err := h.populateAuthStatus(r.Context(), results); err != nil {
-		h.logger.Error("populate auth status", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "populate auth status", err)
 		return
 	}
 	if results == nil {
@@ -239,13 +231,9 @@ func (h *IntegrationHandler) populateAuthStatus(ctx context.Context, results []c
 	for i, s := range results {
 		ids[i] = s.ID
 	}
-	placeholders := strings.Repeat("?,", len(ids))
-	placeholders = placeholders[:len(placeholders)-1]
+	placeholders := sqlPlaceholders(len(ids))
 
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		args[i] = id
-	}
+	args := toAnySlice(ids)
 
 	authStatusMap := make(map[string]string)
 	authRows, err := h.db.QueryContext(ctx, `

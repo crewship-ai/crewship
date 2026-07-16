@@ -36,8 +36,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 		LIMIT ? OFFSET ?
 	`, workspaceID, limit, offset)
 	if err != nil {
-		h.logger.Error("list crews", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list crews", err)
 		return
 	}
 	defer rows.Close()
@@ -53,16 +52,14 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 			&c.RuntimeImage, &c.DevcontainerConfig, &c.MiseConfig, &c.ServicesJSON, &c.CachedImage, &c.ConfigHash,
 			&c.MaxEphemeralAgents,
 			&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members); err != nil {
-			h.logger.Error("scan crew", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan crew", err)
 			return
 		}
 		c.AllowedDomains = parseAllowedDomains(allowedDomainsJSON)
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (crews)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration (crews)", err)
 		return
 	}
 
@@ -110,8 +107,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "Crew not found")
 			return
 		}
-		h.logger.Error("get crew", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get crew", err)
 		return
 	}
 
@@ -140,8 +136,7 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	// Verify crew exists and belongs to workspace
 	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
-		h.logger.Error("get crew for delete", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get crew for delete", err)
 		return
 	}
 	if !found {
@@ -172,8 +167,7 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		"UPDATE crews SET deleted_at = ? WHERE id = ?",
 		now, crewID)
 	if err != nil {
-		h.logger.Error("soft delete crew", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "soft delete crew", err)
 		return
 	}
 

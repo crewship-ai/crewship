@@ -29,8 +29,7 @@ func (h *CrewHandler) ApplyAvatarStyle(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "Crew not found")
 			return
 		}
-		h.logger.Error("apply avatar style: lookup crew", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "apply avatar style: lookup crew", err)
 		return
 	}
 
@@ -62,8 +61,7 @@ func (h *CrewHandler) ApplyAvatarStyle(w http.ResponseWriter, r *http.Request) {
 			body.AvatarStyle, now, crewID)
 	}
 	if err != nil {
-		h.logger.Error("apply avatar style to agents", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "apply avatar style to agents", err)
 		return
 	}
 

@@ -343,7 +343,7 @@ func (h *InboxHandler) enrichAgentAvatars(ctx context.Context, rows []inboxItemR
 	if len(ids) == 0 {
 		return
 	}
-	ph := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	ph := sqlPlaceholders(len(ids))
 	r, err := h.db.QueryContext(ctx,
 		`SELECT id, COALESCE(avatar_seed, ''), COALESCE(avatar_style, '') FROM agents WHERE id IN (`+ph+`)`,
 		ids...)

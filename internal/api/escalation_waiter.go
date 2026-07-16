@@ -79,8 +79,7 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 			replyError(w, http.StatusNotFound, "escalation not found")
 			return
 		}
-		h.logger.Error("wait escalation lookup", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "wait escalation lookup", err)
 		return
 	}
 

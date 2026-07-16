@@ -158,8 +158,7 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("list skills", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list skills", err)
 		return
 	}
 	defer rows.Close()
@@ -175,8 +174,7 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 			&s.Vendor, &s.Homepage, &s.SPDXLicense,
 			&s.Runtime, &s.Maturity, &s.ScanStatus, &s.DescriptionQuality,
 			&s.CreatedAt, &s.UpdatedAt); err != nil {
-			h.logger.Error("scan skill", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan skill", err)
 			return
 		}
 		s.Featured = featured == 1
@@ -187,8 +185,7 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 		result = append(result, s)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (skills)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration (skills)", err)
 		return
 	}
 
@@ -226,11 +223,8 @@ func (h *SkillHandler) populateInstalledOn(r *http.Request, rows []skillResponse
 		ids = append(ids, sr.ID)
 		idx[sr.ID] = i
 	}
-	placeholders := strings.Repeat("?,", len(ids)-1) + "?"
-	args := make([]interface{}, 0, len(ids))
-	for _, id := range ids {
-		args = append(args, id)
-	}
+	placeholders := sqlPlaceholders(len(ids))
+	args := toAnySlice(ids)
 	q := `
 		SELECT as2.skill_id, a.id, a.slug, a.name, a.avatar_seed, a.avatar_style,
 		       c.id, c.slug, c.name, c.color, c.icon, c.avatar_style
@@ -316,8 +310,7 @@ func (h *SkillHandler) Get(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		h.logger.Error("get skill", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get skill", err)
 		return
 	}
 	s.Featured = featured == 1

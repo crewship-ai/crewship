@@ -386,8 +386,7 @@ func (h *CredentialHandler) AuditTimeline(w http.ResponseWriter, r *http.Request
 			replyError(w, http.StatusNotFound, "Credential not found")
 			return
 		}
-		h.logger.Error("audit: check credential exists", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "audit: check credential exists", err)
 		return
 	}
 
@@ -406,8 +405,7 @@ func (h *CredentialHandler) AuditTimeline(w http.ResponseWriter, r *http.Request
 		ORDER BY occurred_at DESC, id DESC
 		LIMIT ?`, credentialID, limit)
 	if err != nil {
-		h.logger.Error("query credential audit", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "query credential audit", err)
 		return
 	}
 	defer rows.Close()
@@ -426,8 +424,7 @@ func (h *CredentialHandler) AuditTimeline(w http.ResponseWriter, r *http.Request
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (credential audit)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration (credential audit)", err)
 		return
 	}
 

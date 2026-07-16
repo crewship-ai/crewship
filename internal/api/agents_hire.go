@@ -169,8 +169,7 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		h.logger.Error("hire: load crew", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "hire: load crew", err)
 		return
 	}
 
@@ -190,8 +189,7 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
-			h.logger.Error("hire: load parent lead", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "hire: load parent lead", err)
 			return
 		}
 		if leadCrewID != crewID {
@@ -307,8 +305,7 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.db.BeginTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
-		h.logger.Error("hire: begin tx", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "hire: begin tx", err)
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -349,13 +346,11 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 		expiresAt, parentLeadID, hireReason,
 		createdAt, createdAt,
 	); err != nil {
-		h.logger.Error("hire: insert agent", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "hire: insert agent", err)
 		return
 	}
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("hire: commit tx", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "hire: commit tx", err)
 		return
 	}
 

@@ -147,8 +147,7 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("list audit logs", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list audit logs", err)
 		return
 	}
 	defer rows.Close()
@@ -159,15 +158,13 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&a.ID, &a.WorkspaceID, &a.UserID, &a.Action,
 			&a.EntityType, &a.EntityID, &a.Metadata, &a.IPAddress,
 			&a.UserAgent, &a.CreatedAt, &a.UserEmail, &a.UserName); err != nil {
-			h.logger.Error("scan audit log", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan audit log", err)
 			return
 		}
 		result = append(result, a)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (audit logs)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration (audit logs)", err)
 		return
 	}
 	if result == nil {
@@ -176,8 +173,7 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	var total int
 	if err := h.db.QueryRowContext(r.Context(), countQuery, countArgs...).Scan(&total); err != nil {
-		h.logger.Error("count audit logs", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "count audit logs", err)
 		return
 	}
 

@@ -81,8 +81,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 			Payload:     payload,
 			TraceID:     body.ID,
 		}); err != nil {
-			h.logger.Error("create run: emit run.started", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "create run: emit run.started", err)
 			return
 		}
 	}

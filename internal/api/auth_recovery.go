@@ -266,8 +266,7 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("reset password: begin tx", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "reset password: begin tx", err)
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
@@ -282,8 +281,7 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		h.logger.Error("reset password: token lookup", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "reset password: token lookup", err)
 		return
 	}
 
@@ -323,8 +321,7 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 	delRes, err := tx.ExecContext(r.Context(),
 		"DELETE FROM verification_tokens WHERE token = ?", tokenHash)
 	if err != nil {
-		h.logger.Error("reset password: delete token", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "reset password: delete token", err)
 		return
 	}
 	deleted, _ := delRes.RowsAffected()
@@ -347,8 +344,7 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
-		h.logger.Error("reset password: hash failed", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "reset password: hash failed", err)
 		return
 	}
 
@@ -360,14 +356,12 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 		UPDATE users
 		SET hashed_password = ?, failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL, updated_at = ?
 		WHERE id = ?`, string(hashed), now, userID); err != nil {
-		h.logger.Error("reset password: update user", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "reset password: update user", err)
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("reset password: commit", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "reset password: commit", err)
 		return
 	}
 

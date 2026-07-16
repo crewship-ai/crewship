@@ -181,8 +181,7 @@ func (h *CrewHandler) ContainerStatus(w http.ResponseWriter, r *http.Request) {
 	// Scope to the caller's workspace — never leak another workspace's crew.
 	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
-		h.logger.Error("container status: crew lookup", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "container status: crew lookup", err)
 		return
 	}
 	if !found {

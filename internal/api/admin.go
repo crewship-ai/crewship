@@ -89,8 +89,7 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		ORDER BY u.created_at DESC
 	`, workspaceID)
 	if err != nil {
-		h.logger.Error("list users", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list users", err)
 		return
 	}
 	defer rows.Close()
@@ -115,8 +114,7 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		var wsID, wsName, wsSlug, role sql.NullString
 		if err := rows.Scan(&u.ID, &u.Email, &u.FullName, &u.AvatarURL, &u.CreatedAt,
 			&wsID, &wsName, &wsSlug, &role); err != nil {
-			h.logger.Error("scan user", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan user", err)
 			return
 		}
 		if wsID.Valid {
@@ -132,8 +130,7 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		result = append(result, u)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (users)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration (users)", err)
 		return
 	}
 	if result == nil {
@@ -163,8 +160,7 @@ func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		ORDER BY w.created_at DESC
 	`, wsID)
 	if err != nil {
-		h.logger.Error("list workspaces (admin)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list workspaces (admin)", err)
 		return
 	}
 	defer rows.Close()
@@ -186,15 +182,13 @@ func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&ws.ID, &ws.Name, &ws.Slug,
 			&ws.CreatedAt, &ws.UpdatedAt,
 			&ws.MemberCount, &ws.AgentCount, &ws.CrewCount); err != nil {
-			h.logger.Error("scan workspace (admin)", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan workspace (admin)", err)
 			return
 		}
 		result = append(result, ws)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (workspaces)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration (workspaces)", err)
 		return
 	}
 	if result == nil {

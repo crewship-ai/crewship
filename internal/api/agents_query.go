@@ -73,8 +73,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		h.logger.Error("list agents", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list agents", err)
 		return
 	}
 	defer rows.Close()
@@ -95,8 +94,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			&createdByUserID,
 			&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
 			&ephemeral, &a.ExpiresAt, &a.ExpiredAt, &a.ParentLeadID, &a.HireReason); err != nil {
-			h.logger.Error("scan agent", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan agent", err)
 			return
 		}
 		a.MemoryEnabled = memEnabled == 1
@@ -111,8 +109,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		result = append(result, a)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (agents)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration (agents)", err)
 		return
 	}
 
@@ -231,8 +228,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "Agent not found")
 			return
 		}
-		h.logger.Error("get agent", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get agent", err)
 		return
 	}
 	a.MemoryEnabled = memEnabled == 1
@@ -287,8 +283,7 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		"UPDATE agents SET deleted_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		now, agentID, workspaceID)
 	if err != nil {
-		h.logger.Error("delete agent", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "delete agent", err)
 		return
 	}
 	affected, _ := res.RowsAffected()
@@ -345,8 +340,7 @@ func (h *AgentHandler) Load(w http.ResponseWriter, r *http.Request) {
 		ORDER BY 5 DESC, 6 DESC`,
 		cutoff, cutoff, wsID)
 	if err != nil {
-		h.logger.Error("agent load query", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "agent load query", err)
 		return
 	}
 	defer rows.Close()
@@ -357,15 +351,13 @@ func (h *AgentHandler) Load(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&e.AgentID, &e.AgentName, &e.AgentSlug, &e.AgentStatus,
 			&e.ActiveTasks, &e.PendingTasks, &e.CompletedToday,
 			&e.TokensUsedToday, &e.TokenBudget); err != nil {
-			h.logger.Error("scan agent load", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan agent load", err)
 			return
 		}
 		result = append(result, e)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (agent load)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration (agent load)", err)
 		return
 	}
 
