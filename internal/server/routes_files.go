@@ -116,8 +116,9 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 		files, err = s.storage.List(r.Context(), dir)
 	}
 	if err != nil {
-		s.logger.Error("file list failed", "crew_id", crewID, "agent_slug", agentSlug, "error", err)
-		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "files": []interface{}{}})
+		writeEmptyOK(w, s.logger, "file list failed", err,
+			map[string]interface{}{"crew_id": crewID, "files": []interface{}{}},
+			"crew_id", crewID, "agent_slug", agentSlug)
 		return
 	}
 

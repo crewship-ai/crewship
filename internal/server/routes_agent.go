@@ -228,8 +228,9 @@ func (s *Server) handleAgentLogs(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := s.logReader.ReadAgentLogs(crewID, agentID, offset, limit)
 	if err != nil {
-		s.logger.Error("read agent logs failed", "agent_id", agentID, "error", err)
-		writeJSON(w, http.StatusOK, map[string]interface{}{"agent_id": agentID, "logs": []interface{}{}})
+		writeEmptyOK(w, s.logger, "read agent logs failed", err,
+			map[string]interface{}{"agent_id": agentID, "logs": []interface{}{}},
+			"agent_id", agentID)
 		return
 	}
 	if entries == nil {
@@ -249,8 +250,9 @@ func (s *Server) handleChatMessages(w http.ResponseWriter, r *http.Request) {
 
 	messages, err := s.convStore.Read(r.Context(), id, 0, 0)
 	if err != nil {
-		s.logger.Error("read chat messages failed", "chat_id", id, "error", err)
-		writeJSON(w, http.StatusOK, map[string]interface{}{"chat_id": id, "messages": []interface{}{}})
+		writeEmptyOK(w, s.logger, "read chat messages failed", err,
+			map[string]interface{}{"chat_id": id, "messages": []interface{}{}},
+			"chat_id", id)
 		return
 	}
 

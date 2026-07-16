@@ -338,6 +338,17 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	}
 }
 
+// writeEmptyOK implements the graceful-degradation pattern shared by several
+// read-only handlers: log the failure (with any extra attrs, then the error),
+// then answer 200 with the handler's empty/partial fallback payload so the
+// dashboard keeps rendering instead of erroring. The payload is passed
+// through verbatim — each call site keeps its exact response shape (whether
+// or not it includes an "error" key).
+func writeEmptyOK(w http.ResponseWriter, logger *slog.Logger, msg string, err error, payload any, logAttrs ...any) {
+	logger.Error(msg, append(logAttrs, "error", err)...)
+	writeJSON(w, http.StatusOK, payload)
+}
+
 func (s *Server) handleCrewStats(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("id")
 	if s.container == nil {

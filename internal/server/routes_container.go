@@ -58,8 +58,9 @@ func (s *Server) handleContainerStatus(w http.ResponseWriter, r *http.Request) {
 
 	status, err := s.container.ContainerStatus(r.Context(), containerName)
 	if err != nil {
-		s.logger.Error("container status failed", "crew_id", id, "container", containerName, "error", err)
-		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": id, "status": "unknown"})
+		writeEmptyOK(w, s.logger, "container status failed", err,
+			map[string]interface{}{"crew_id": id, "status": "unknown"},
+			"crew_id", id, "container", containerName)
 		return
 	}
 
@@ -166,8 +167,9 @@ func (s *Server) handleContainerFileList(w http.ResponseWriter, r *http.Request)
 		User:        "1001:1001",
 	})
 	if err != nil {
-		s.logger.Error("container file list exec failed", "crew_id", crewID, "error", err)
-		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "files": []interface{}{}})
+		writeEmptyOK(w, s.logger, "container file list exec failed", err,
+			map[string]interface{}{"crew_id": crewID, "files": []interface{}{}},
+			"crew_id", crewID)
 		return
 	}
 	defer result.Reader.Close()
