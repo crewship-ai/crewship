@@ -49,10 +49,16 @@ func TestAgentEnvCredentialExposures(t *testing.T) {
 			want:  nil,
 		},
 		{
-			name:    "gemini key reported once by its own env var",
-			adapter: "GEMINI_CLI", keeper: true, // allowed = {GOOGLE_API_KEY, GEMINI_API_KEY}
+			name:    "gemini google key is isolated by the reverse-proxy (#1030)",
+			adapter: "GEMINI_CLI", keeper: true,
 			creds: []Credential{apiKey("GOOGLE_API_KEY")},
-			want:  []exp{{"GOOGLE_API_KEY", "API_KEY", false}},
+			want:  nil, // GOOGLE_GEMINI_BASE_URL routes Gemini through the sidecar; real key stays in the CredStore
+		},
+		{
+			name:    "cursor key stays exposed (no endpoint override in cursor-agent — #1030 residual)",
+			adapter: "CURSOR_CLI", keeper: true,
+			creds: []Credential{apiKey("CURSOR_API_KEY")},
+			want:  []exp{{"CURSOR_API_KEY", "API_KEY", false}},
 		},
 		{
 			name:    "oauth by type reported, not actionable",

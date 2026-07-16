@@ -525,6 +525,16 @@ func (p *Proxy) handleLocal(w http.ResponseWriter, r *http.Request) {
 			p.buildHash,
 			p.policyDomainsHash,
 		)
+	case strings.HasPrefix(r.URL.Path, "/gemini/"):
+		// #1030: reverse-proxy to generativelanguage.googleapis.com. The
+		// Gemini CLI points GOOGLE_GEMINI_BASE_URL at
+		// http://127.0.0.1:9119/gemini, so its requests arrive here as
+		// /gemini/v1beta/... . The /gemini prefix disambiguates them from
+		// Anthropic's /v1/ and OpenAI's /openai/ on the shared port and is
+		// stripped before forwarding. The dummy GOOGLE_API_KEY/GEMINI_API_KEY
+		// in the agent env is swapped for the real key from the CredStore
+		// mid-flight.
+		p.handleGeminiReverseProxy(w, r)
 	case strings.HasPrefix(r.URL.Path, "/openai/"):
 		// #1030: reverse-proxy to api.openai.com. Codex points
 		// OPENAI_BASE_URL at http://127.0.0.1:9119/openai/v1, so its requests
@@ -560,6 +570,19 @@ func (p *Proxy) handleReverseProxy(w http.ResponseWriter, r *http.Request) {
 // injected from the CredStore (Bearer), so it never leaves the sidecar heap.
 func (p *Proxy) handleOpenAIReverseProxy(w http.ResponseWriter, r *http.Request) {
 	p.reverseProxyToProvider(w, r, ProviderOpenAI, "api.openai.com", "/openai")
+}
+
+// handleGeminiReverseProxy reverse-proxies a request to
+// generativelanguage.googleapis.com (#1030), stripping the /gemini routing
+// prefix that keeps it distinct from the other providers on the shared
+// sidecar port. The Gemini CLI reaches this via
+// GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:9119/gemini (the @google/genai SDK
+// appends /v1beta/... to the base URL, the same path-suffixed shape gateway
+// deployments use). The real Google key is injected from the CredStore
+// (x-goog-api-key header + key query param), so it never leaves the sidecar
+// heap.
+func (p *Proxy) handleGeminiReverseProxy(w http.ResponseWriter, r *http.Request) {
+	p.reverseProxyToProvider(w, r, ProviderGoogle, "generativelanguage.googleapis.com", "/gemini")
 }
 
 // reverseProxyToProvider is the shared reverse-proxy body used by every
@@ -720,7 +743,13 @@ func injectCredential(r *http.Request, provider ProviderType, token string) {
 	case ProviderOpenAI:
 		r.Header.Set("Authorization", "Bearer "+token)
 	case ProviderGoogle:
-		// Google uses ?key= query param or Authorization header
+		// The Gemini API accepts the key either as the x-goog-api-key header
+		// (what the @google/genai SDK — and therefore the Gemini CLI — sends,
+		// so the dummy the agent carries MUST be overwritten here, #1030) or
+		// as the ?key= query param (kept for clients authenticating that
+		// way). Set both to the same real value so neither slot can retain a
+		// stale dummy.
+		r.Header.Set("x-goog-api-key", token)
 		q := r.URL.Query()
 		q.Set("key", token)
 		r.URL.RawQuery = q.Encode()

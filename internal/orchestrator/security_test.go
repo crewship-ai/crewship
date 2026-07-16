@@ -123,10 +123,11 @@ func TestSidecarInjectsRealKeyOnlyForOwnAdapter(t *testing.T) {
 		wantValue string
 		denyKeys  []string // env var names that must NOT contain real values
 	}{
-		// CODEX_CLI moved to the proxy-isolation family (#1030) — it no longer
-		// injects the real OPENAI_API_KEY to env; see
+		// CODEX_CLI and GEMINI_CLI moved to the proxy-isolation family (#1030)
+		// — they no longer inject the real provider key to env; see
 		// TestSidecarProxyInjectedAdaptersDoNotLeakProviderKeys.
-		{"GEMINI_CLI", "GOOGLE_API_KEY", googleKey, []string{"OPENAI_API_KEY", "CURSOR_API_KEY"}},
+		// CURSOR_CLI stays: cursor-agent has no endpoint override, so its key
+		// remains on the env path (documented #1030 residual).
 		{"CURSOR_CLI", "CURSOR_API_KEY", cursorKey, []string{"OPENAI_API_KEY", "GOOGLE_API_KEY"}},
 	}
 
@@ -189,9 +190,9 @@ func TestSidecarClaudeCodeAdapterDoesNotLeakOtherProviderKeys(t *testing.T) {
 // TestSidecarProxyInjectedAdaptersDoNotLeakProviderKeys asserts the
 // reverse-proxy isolation guarantee for every adapter whose provider key is
 // injected by the sidecar rather than the env: CLAUDE_CODE (Anthropic) and,
-// since #1030, CODEX_CLI (OpenAI). Even the adapter's OWN provider key must
-// not appear in env — it lives only in the sidecar CredStore and is swapped
-// for the dummy mid-flight.
+// since #1030, CODEX_CLI (OpenAI) and GEMINI_CLI (Google). Even the adapter's
+// OWN provider key must not appear in env — it lives only in the sidecar
+// CredStore and is swapped for the dummy mid-flight.
 func TestSidecarProxyInjectedAdaptersDoNotLeakProviderKeys(t *testing.T) {
 	openaiKey := "sk-leak-openai-" + strings.Repeat("X", 24)
 	googleKey := "AIzaSy-leak-google-" + strings.Repeat("X", 16)
@@ -201,7 +202,7 @@ func TestSidecarProxyInjectedAdaptersDoNotLeakProviderKeys(t *testing.T) {
 		{ID: "c-go", EnvVarName: "GOOGLE_API_KEY", PlainValue: googleKey},
 		{ID: "c-cu", EnvVarName: "CURSOR_API_KEY", PlainValue: cursorKey},
 	}
-	for _, adapter := range []string{"CLAUDE_CODE", "CODEX_CLI"} {
+	for _, adapter := range []string{"CLAUDE_CODE", "CODEX_CLI", "GEMINI_CLI"} {
 		t.Run(adapter, func(t *testing.T) {
 			req := AgentRunRequest{
 				AgentID: "a1", CrewID: "c1", ChatID: "ch1",
