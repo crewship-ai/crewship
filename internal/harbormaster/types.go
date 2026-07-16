@@ -25,6 +25,12 @@ const (
 	KindDestructiveOp     Kind = "destructive_op"
 	KindTargetEnvironment Kind = "target_environment"
 	KindCustom            Kind = "custom"
+	// KindEphemeralHire is a guided-autonomy ephemeral hire waiting for an
+	// operator decision (issue #1209). Unlike the other kinds it is NOT
+	// enqueued by Gate() — the Hire endpoint writes it directly so hire
+	// waitpoints show up in the standard approvals surface instead of
+	// being decidable only through `hire approve`.
+	KindEphemeralHire Kind = "ephemeral_hire"
 )
 
 // Status mirrors the CHECK constraint on approvals_queue.status. Callers

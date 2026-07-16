@@ -38,6 +38,7 @@ type hireResponseShape struct {
 	HireReason    *string `json:"hire_reason"`
 	PendingReview bool    `json:"pending_review"`
 	InboxItemID   string  `json:"inbox_item_id,omitempty"`
+	ApprovalID    string  `json:"approval_id,omitempty"`
 	Decision      string  `json:"decision"`
 }
 
@@ -49,7 +50,9 @@ var hireCmd = &cobra.Command{
 The crew's autonomy_level decides what happens next:
 
   strict   → rejected (operator must dial down policy)
-  guided   → blocking inbox approval (the hire is staged)
+  guided   → staged pending approval (blocking inbox waitpoint + a row
+             in the approvals queue; decide with 'crewship approvals
+             approve/deny <id>' or 'crewship hire approve <agent-id>')
   trusted  → auto-spawned, logged to inbox
   full     → auto-spawned, journal-only
 
@@ -256,6 +259,9 @@ func printHireResponse(resp *http.Response, headline string) (hireResponseShape,
 	if body.PendingReview {
 		pairs = append(pairs, []string{"Review", "PENDING APPROVAL (inbox " + body.InboxItemID + ")"})
 	}
+	if body.ApprovalID != "" {
+		pairs = append(pairs, []string{"Approval", body.ApprovalID + " (decide: crewship approvals approve/deny)"})
+	}
 	if body.Decision != "" {
 		pairs = append(pairs, []string{"Decision", body.Decision})
 	}
@@ -277,7 +283,12 @@ var hireApproveCmd = &cobra.Command{
 	Long: `Approve an ephemeral agent that a guided-autonomy hire left in
 PENDING_REVIEW, flipping it to IDLE so it can serve work. Mirrors the
 UI inbox approval. The agent id is printed by 'crewship hire' and shown
-in 'crewship agent list'.`,
+in 'crewship agent list'.
+
+Guided hires also appear in the standard approvals queue (issue #1209):
+'crewship approvals approve/deny <approval-id>' decides the same hire —
+approve flips the agent to IDLE exactly like this command; deny ghosts
+the staged agent. Both surfaces stay in sync whichever one you use.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {

@@ -6,6 +6,7 @@ export const APPROVAL_KINDS = [
   "cost_threshold",
   "target_environment",
   "tool_call",
+  "ephemeral_hire",
   "custom",
 ] as const
 export type ApprovalKind = (typeof APPROVAL_KINDS)[number]
