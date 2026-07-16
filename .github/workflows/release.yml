@@ -19,7 +19,10 @@ jobs:
   release:
     name: Build & Release
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 45 (was 30): headroom for Apple notarization when the MACOS_* secrets
+    # are set — the notarize pipe waits on up to four darwin binaries
+    # (2 builds x 2 arches), each typically 1-5 min at Apple's side.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -131,6 +134,16 @@ jobs:
           # nfpm reads the signing-key passphrase from NFPM_<ID>_PASSPHRASE
           # (nfpms id = "packages"). Empty when the key has no passphrase.
           NFPM_PACKAGES_PASSPHRASE: ${{ secrets.GPG_SIGNING_PASSPHRASE }}
+          # macOS code signing + notarization (see notarize: in
+          # .goreleaser.yml and packaging/SIGNING.md). CONDITIONAL: when
+          # MACOS_SIGN_P12 is unset the notarize pipe disables itself and
+          # darwin binaries ship unsigned — same fail-open pattern as the
+          # GPG key above.
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
 
   # Multi-arch Docker image published to GHCR alongside the binary release.
   # Runs in parallel with `release` because the two share no artifacts — the

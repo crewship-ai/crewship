@@ -285,6 +285,47 @@ signs:
     signature: "${artifact}.sig"
     certificate: "${artifact}.pem"
 
+# macOS code signing + notarization, via goreleaser's built-in quill
+# integration — pure Go, no Xcode toolchain, runs on the linux release
+# runner. Signed+notarized darwin binaries open without the Gatekeeper
+# "developer cannot be verified" prompt on direct downloads (Homebrew
+# strips quarantine anyway; this fixes the tarball path).
+#
+# CONDITIONAL like the deb/rpm GPG signing above: when the MACOS_SIGN_P12
+# secret is absent, `enabled` renders false and the release ships
+# unsigned darwin binaries exactly as before — snapshot/nightly runs and
+# secret-less forks keep working. See packaging/SIGNING.md for the
+# one-time Apple Developer setup and the secret table.
+#
+# NOTE: signing embeds a signature in the Mach-O, so when enabled the
+# darwin binaries are no longer byte-reproducible from source + toolchain
+# alone (the -trimpath note on the builds). The cosign chain is unaffected:
+# it signs the final (signed) artifacts in the same run.
+notarize:
+  macos:
+    - enabled: '{{ if index .Env "MACOS_SIGN_P12" }}true{{ else }}false{{ end }}'
+      # Both build ids that emit darwin binaries. goreleaser only feeds
+      # their darwin outputs to quill; crewship-cli's linux/windows
+      # binaries pass through untouched.
+      ids:
+        - crewship-darwin
+        - crewship-cli
+      sign:
+        certificate: '{{ envOrDefault "MACOS_SIGN_P12" "" }}'
+        password: '{{ envOrDefault "MACOS_SIGN_PASSWORD" "" }}'
+      notarize:
+        issuer_id: '{{ envOrDefault "MACOS_NOTARY_ISSUER_ID" "" }}'
+        key_id: '{{ envOrDefault "MACOS_NOTARY_KEY_ID" "" }}'
+        key: '{{ envOrDefault "MACOS_NOTARY_KEY" "" }}'
+        # Block the release until Apple accepts each submission — an
+        # unwaited submission that later fails would ship binaries that
+        # Gatekeeper rejects with no CI signal. Apple typically clears
+        # a small CLI binary in 1-5 minutes; 15m is headroom, and the
+        # release job's timeout-minutes is raised to absorb the four
+        # darwin binaries (2 builds x 2 arches) in the worst case.
+        wait: true
+        timeout: 15m
+
 changelog:
   sort: asc
   filters:
