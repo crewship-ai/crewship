@@ -435,10 +435,13 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 		oauth.SetHub(r.hub)
 	}
 	r.mux.Handle("GET /api/v1/oauth/providers", authed(http.HandlerFunc(oauth.ListProviders)))
-	r.authedMut("POST", "/api/v1/oauth/initiate", roleManage, oauth.Initiate)
+	// initiate/exchange/loopback run the layered role-OR-capability gate
+	// inside the handler (#1034): MANAGER+ or credential.create, aligned
+	// with POST /credentials since the flow lands the same OAUTH2 row.
+	r.authedMut("POST", "/api/v1/oauth/initiate", roleInline, oauth.Initiate)
 	r.mux.HandleFunc("GET /api/v1/oauth/callback", oauth.Callback) // No auth — uses state token
-	r.authedMut("POST", "/api/v1/oauth/exchange", roleManage, oauth.Exchange)
-	r.authedMut("POST", "/api/v1/oauth/loopback", roleManage, oauth.Loopback)
+	r.authedMut("POST", "/api/v1/oauth/exchange", roleInline, oauth.Exchange)
+	r.authedMut("POST", "/api/v1/oauth/loopback", roleInline, oauth.Loopback)
 	r.authedSelfMut("POST", "/api/v1/oauth/discover", oauth.Discover)
 	r.authedMut("POST", "/api/v1/oauth/auto-connect", roleManage, oauth.AutoConnect)
 

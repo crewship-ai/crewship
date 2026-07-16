@@ -10,6 +10,7 @@ import { CredentialDetailSheet } from "../credential-detail-sheet"
 
 const h = vi.hoisted(() => ({
   role: "OWNER" as string,
+  capabilities: [] as string[],
   apiFetch: vi.fn(),
 }))
 
@@ -19,10 +20,13 @@ vi.mock("@/lib/api-fetch", () => ({
 
 vi.mock("@/hooks/use-abilities", async () => {
   const { defineAbilitiesFor } = await import("@/lib/permissions/abilities")
+  const { hasCapability } = await import("@/lib/capabilities")
   return {
     useAbilities: () => ({
       abilities: defineAbilitiesFor(h.role as never),
       role: h.role,
+      capabilities: h.capabilities,
+      hasCapability: (cap: never) => hasCapability(h.capabilities, cap),
       loading: false,
     }),
   }
@@ -73,6 +77,7 @@ function openSettingsTab() {
 }
 
 beforeEach(() => {
+  h.capabilities = []
   h.apiFetch.mockReset()
   h.apiFetch.mockResolvedValue({ ok: true, status: 200, json: async () => [] })
 })
@@ -132,5 +137,20 @@ describe("Settings tab gating by role", () => {
     h.role = "MANAGER"
     renderSheet()
     expect(screen.getByRole("button", { name: /^edit$/i })).toBeInTheDocument()
+  })
+
+  // #1034 — the backend honors the credential.rotate capability for
+  // lower roles (requireRoleOrCapabilityOrForbid, #1028); the sheet
+  // must surface Rotate for a capability-holding MANAGER instead of
+  // gating on role alone.
+  it("MANAGER with credential.rotate capability sees the Rotate button", () => {
+    h.role = "MANAGER"
+    h.capabilities = ["chat", "credential.rotate"]
+    renderSheet()
+    openSettingsTab()
+
+    expect(screen.getByRole("button", { name: /rotate with grace overlap/i })).toBeInTheDocument()
+    // delete stays OWNER/ADMIN-only — the capability grants rotate, nothing more
+    expect(screen.queryByRole("button", { name: /delete credential/i })).not.toBeInTheDocument()
   })
 })

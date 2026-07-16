@@ -6,10 +6,10 @@ import { motion } from "motion/react"
 import { toast } from "sonner"
 import {
   Key, Plus, Pencil, Trash2, Clock, AlertTriangle,
-  ArrowUpDown, RefreshCw,
+  ArrowUpDown, RefreshCw, Link2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { SubBar, SubBarPrimary } from "@/components/layout/sub-bar"
+import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -37,10 +37,12 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { AddSecretSheet } from "@/components/features/credentials/add-secret-sheet"
+import { ConnectOAuthDialog } from "@/components/features/credentials/connect-oauth-dialog"
 import { CredentialDetailSheet } from "@/components/features/credentials/credential-detail-sheet"
 import { RotationDialog } from "@/components/features/credentials/rotation-dialog"
 import { EditCredentialDialog, type CredentialData } from "@/components/features/credentials/edit-credential-dialog"
 import { formatRelativeTime } from "@/lib/time"
+import { Capability } from "@/lib/capabilities"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { getBrand, brandColor } from "@/lib/credential-providers/registry"
@@ -129,7 +131,7 @@ const TYPE_LABEL: Record<Credential["type"], string> = {
 type SortKey = "last_used" | "name" | "created"
 
 export default function CredentialsPage() {
-  const { abilities } = useAbilities()
+  const { abilities, hasCapability } = useAbilities()
   // #1033: read the selected workspace from the shared store (driven by the
   // top-bar workspace switcher) instead of hardcoding the first workspace, so
   // users in multiple workspaces can manage each one's credentials.
@@ -138,9 +140,14 @@ export default function CredentialsPage() {
   const [loading, setLoading] = React.useState(true)
   const [loadError, setLoadError] = React.useState<string | null>(null)
   const [addOpen, setAddOpen] = React.useState(false)
+  const [oauthOpen, setOauthOpen] = React.useState(false)
   const [editOpen, setEditOpen] = React.useState(false)
   const [editCredential, setEditCredential] = React.useState<CredentialData | null>(null)
-  const canManage = abilities.can("create", "Credential")
+  // Layered like the backend (requireRoleOrCapabilityOrForbid): MANAGER+
+  // via role, or any member holding an explicit credential.create grant
+  // (#1034). Gates both the raw Add-secret sheet and the OAuth connect
+  // flow — the OAuth routes are aligned to the same tier server-side.
+  const canManage = abilities.can("create", "Credential") || hasCapability(Capability.CredentialCreate)
   // Row-action gating mirrors the backend: PATCH allows MANAGER
   // ("update"), DELETE is OWNER/ADMIN only ("manage" → CASL "delete").
   // Hiding what would 403 beats letting users click into dead-ends.
@@ -418,9 +425,14 @@ export default function CredentialsPage() {
   }, [filtered, sortKey])
 
   const headerActions = canManage ? (
-    <SubBarPrimary icon={Plus} onClick={() => setAddOpen(true)}>
-      Add secret
-    </SubBarPrimary>
+    <>
+      <SubBarSecondary icon={Link2} onClick={() => setOauthOpen(true)}>
+        Connect via OAuth
+      </SubBarSecondary>
+      <SubBarPrimary icon={Plus} onClick={() => setAddOpen(true)}>
+        Add secret
+      </SubBarPrimary>
+    </>
   ) : null
 
   // Canonical page chrome: the SubBar (identity + actions) directly under the
@@ -477,10 +489,16 @@ export default function CredentialsPage() {
           description="Add API keys, tokens, or secrets that your agents will use. All values are encrypted with AES-256-GCM."
         >
           {canManage && (
-            <Button className="mt-4" onClick={() => setAddOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add first secret
-            </Button>
+            <div className="mt-4 flex items-center justify-center gap-2">
+              <Button onClick={() => setAddOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add first secret
+              </Button>
+              <Button variant="outline" onClick={() => setOauthOpen(true)}>
+                <Link2 className="mr-2 h-4 w-4" />
+                Connect via OAuth
+              </Button>
+            </div>
           )}
         </EmptyState>
       ) : (
@@ -640,6 +658,15 @@ export default function CredentialsPage() {
           onOpenChange={setAddOpen}
           onSuccess={handleRefresh}
           knownTags={tagsInUse}
+        />
+      )}
+
+      {workspaceId && (
+        <ConnectOAuthDialog
+          workspaceId={workspaceId}
+          open={oauthOpen}
+          onOpenChange={setOauthOpen}
+          onSuccess={handleRefresh}
         />
       )}
 
