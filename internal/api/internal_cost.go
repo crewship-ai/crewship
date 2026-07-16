@@ -81,6 +81,11 @@ func (r *Router) handleSidecarCostRecord(w http.ResponseWriter, req *http.Reques
 	if !assertInternalTokenWorkspace(w, req, body.WorkspaceID) {
 		return
 	}
+	// #1222: a crew-bound token that omits crew_id must not be able to
+	// write an unattributed (NULL-crew) ledger row — attribute it to the
+	// crew the token is bound to. No-op for wsv1/master callers, whose
+	// cost rows stay legitimately workspace-wide.
+	body.CrewID = bindOmittedCrew(req.Context(), body.CrewID)
 	// PR-F24 foreign-ID closure: crew_id rides in the body independent of
 	// workspace_id — prove it belongs to the bound workspace so a ws-A
 	// token can't attribute a cost row to a ws-B crew.

@@ -87,6 +87,10 @@ func (r *Router) handleSidecarEmit(w http.ResponseWriter, req *http.Request) {
 	if !assertInternalTokenWorkspace(w, req, body.WorkspaceID) {
 		return
 	}
+	// #1222: a crew-bound token that omits crew_id must not be able to
+	// emit an unattributed (NULL-crew) journal entry — attribute it to the
+	// crew the token is bound to. No-op for wsv1/master callers.
+	body.CrewID = bindOmittedCrew(req.Context(), body.CrewID)
 	// PR-F24 foreign-ID closure: crew_id rides in the body independent of
 	// workspace_id — prove it belongs to the bound workspace so a ws-A
 	// token can't emit a journal entry attributed to a ws-B crew.

@@ -338,6 +338,12 @@ func (h *InternalHandler) RecordMCPToolCall(w http.ResponseWriter, r *http.Reque
 	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
 		return
 	}
+	// #1222: a crew-bound token that omits crew_id must not be able to
+	// write an unattributed MCP-tool-call audit row — attribute it to the
+	// crew the token is bound to. No-op for wsv1/master callers. Note this
+	// column stores "" rather than NULL when unset, so an omitted crew was
+	// an audit row that simply couldn't be traced back to a crew.
+	body.CrewID = bindOmittedCrew(r.Context(), body.CrewID)
 	// PR-F24 foreign-ID closure: crew_id is independent of the workspace_id
 	// checked above — prove it belongs to the bound workspace so a ws-A
 	// token can't write an audit row attributed to a ws-B crew.

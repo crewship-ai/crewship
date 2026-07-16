@@ -511,6 +511,36 @@ func assertInternalTokenWorkspace(w http.ResponseWriter, r *http.Request, bodyWS
 // IDs are rejected with the same 403 so the check is not an existence
 // oracle. Empty IDs are skipped (optional fields). Returns false after
 // writing the 403 — caller must return immediately.
+// bindOmittedCrew returns the crew a body-carried crew_id should be
+// attributed to, filling in the crew a crwv1 token is bound to when the
+// caller left the field empty.
+//
+// #1222: assertBoundCrewWorkspaceDB skips empty IDs by design ("optional
+// fields"), and requireInternal deliberately does NOT inject crew_id the
+// way it injects workspace_id — injecting it there would silently narrow
+// the many other internal endpoints that scope *optionally* by crew_id
+// (status, issues, missions). The result was that #1202's guarantee read
+// "own crew, or no crew": a crew-bound token couldn't name a sibling, but
+// could still omit the field and write a NULL-crew cost row / journal
+// entry / MCP-tool-call row / pipeline.
+//
+// So the injection lives per-handler, at the four body-carried sites where
+// the field is pure attribution and "no crew" is never a legitimate answer
+// for a crew-bound caller.
+//
+// Two invariants:
+//   - A non-empty value is returned untouched. Rewriting an explicit crew
+//     would turn assertBoundCrewWorkspaceDB's sibling-crew 403 into a
+//     silent success — the check must still see what the caller asked for.
+//   - A workspace-bound (wsv1) or master caller has no binding, so this is
+//     a no-op for them and those endpoints stay workspace-wide as before.
+func bindOmittedCrew(ctx context.Context, crewID string) string {
+	if strings.TrimSpace(crewID) != "" {
+		return crewID
+	}
+	return InternalTokenCrewFromContext(ctx)
+}
+
 func assertBoundCrewWorkspaceDB(w http.ResponseWriter, r *http.Request, db *sql.DB, logger *slog.Logger, crewIDs ...string) bool {
 	bound := InternalTokenWorkspaceFromContext(r.Context())
 	if bound == "" {

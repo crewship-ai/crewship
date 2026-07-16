@@ -769,6 +769,13 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
 		return
 	}
+	// #1222: a crew-bound token that omits author_crew_id must not be able
+	// to save an unattributed pipeline — attribute it to the crew the token
+	// is bound to. Beyond attribution this also restores the cross-crew
+	// agent_slug validation below: an empty author crew makes
+	// lookupAgentSlugs fail open to nil, silently downgrading Validate to
+	// schema-only. No-op for wsv1/master callers.
+	body.AuthorCrewID = bindOmittedCrew(r.Context(), body.AuthorCrewID)
 	// PR-F24 foreign-ID closure: author_crew_id is independent of the
 	// workspace_id checked above. A bound ws-A token must not attribute a
 	// pipeline to a ws-B crew (and the validator below would otherwise read

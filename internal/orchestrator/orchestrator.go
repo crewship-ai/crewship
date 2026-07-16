@@ -306,6 +306,22 @@ type Orchestrator struct {
 	snapshotInFlightMu sync.Mutex
 	snapshotInFlight   map[string]*sync.Mutex
 
+	// sidecarRestartMu protects sidecarRestartLocks itself. The per-
+	// container gates inside it serialize the checkSidecar → decide →
+	// pkill → startSidecar sequence for one shared crew container (#1220).
+	// Without it, two agents dispatching into the same container at the
+	// same instant both observe the same health, both decide to restart,
+	// and both pkill + startSidecar concurrently. Different containers
+	// never contend — this is deliberately not a global lock, since it sits
+	// on the hot RunAgent path.
+	//
+	// Buffered channels rather than sync.Mutex so acquisition can honour
+	// ctx: the waiter holds a runSem slot for the whole run, so a cancelled
+	// run must be able to abandon the wait. Never held across the agent CLI
+	// exec — only across the sidecar sequence itself.
+	sidecarRestartMu    sync.Mutex
+	sidecarRestartLocks map[string]chan struct{}
+
 	// journal is the Crew Journal emitter. Nil-safe: SetJournal replaces it
 	// with a no-op. Used by Crow's Nest emit points (exec.command,
 	// container.metrics) so live visibility into containers flows through
@@ -933,21 +949,22 @@ func New(
 ) *Orchestrator {
 	runSemCap := resolveRunSemCap()
 	return &Orchestrator{
-		container:          container,
-		state:              state,
-		scrubber:           scrubber.New(),
-		logger:             logger,
-		cooldown:           NewCooldownManager(),
-		accepting:          true,
-		crews:              make(map[string]*crewState),
-		tmuxCache:          make(map[string]bool),
-		snapshotHashCache:  make(map[string]string),
-		snapshotPending:    make(map[string]string),
-		snapshotInFlight:   make(map[string]*sync.Mutex),
-		postToolCallSem:    make(chan struct{}, postToolCallSemCap),
-		skillInvocationSem: make(chan struct{}, skillInvocationSemCap),
-		runSem:             make(chan struct{}, runSemCap),
-		runSemCap:          runSemCap,
+		container:           container,
+		state:               state,
+		scrubber:            scrubber.New(),
+		logger:              logger,
+		cooldown:            NewCooldownManager(),
+		accepting:           true,
+		crews:               make(map[string]*crewState),
+		tmuxCache:           make(map[string]bool),
+		snapshotHashCache:   make(map[string]string),
+		snapshotPending:     make(map[string]string),
+		snapshotInFlight:    make(map[string]*sync.Mutex),
+		sidecarRestartLocks: make(map[string]chan struct{}),
+		postToolCallSem:     make(chan struct{}, postToolCallSemCap),
+		skillInvocationSem:  make(chan struct{}, skillInvocationSemCap),
+		runSem:              make(chan struct{}, runSemCap),
+		runSemCap:           runSemCap,
 	}
 }
 

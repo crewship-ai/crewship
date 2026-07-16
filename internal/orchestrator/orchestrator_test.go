@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -55,7 +56,14 @@ func execBinaryInScript(script, bin string) bool {
 }
 
 // in-memory state mock
+//
+// Guarded by mu: the real StateProvider (bbolt) is safe for concurrent use
+// and RunAgent is legitimately called from many goroutines at once, so a
+// map-only fake was under-modelling the contract. It went unnoticed while
+// every test drove RunAgent serially; the #1220 concurrency test is the
+// first to call it in parallel, and `-race` catches it immediately.
 type memState struct {
+	mu   sync.RWMutex
 	data map[string]map[string][]byte
 }
 
@@ -63,12 +71,16 @@ func newMemState() *memState {
 	return &memState{data: make(map[string]map[string][]byte)}
 }
 func (m *memState) Get(_ context.Context, bucket, key string) ([]byte, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if b, ok := m.data[bucket]; ok {
 		return b[key], nil
 	}
 	return nil, nil
 }
 func (m *memState) Set(_ context.Context, bucket, key string, value []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.data[bucket] == nil {
 		m.data[bucket] = make(map[string][]byte)
 	}
@@ -76,15 +88,33 @@ func (m *memState) Set(_ context.Context, bucket, key string, value []byte) erro
 	return nil
 }
 func (m *memState) Delete(_ context.Context, bucket, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if b, ok := m.data[bucket]; ok {
 		delete(b, key)
 	}
 	return nil
 }
+
+// List returns a copy: handing back the live inner map would let a caller
+// range over it while another goroutine writes, re-introducing the race
+// just outside the lock.
 func (m *memState) List(_ context.Context, bucket string) (map[string][]byte, error) {
-	return m.data[bucket], nil
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	b, ok := m.data[bucket]
+	if !ok {
+		return nil, nil
+	}
+	out := make(map[string][]byte, len(b))
+	for k, v := range b {
+		out[k] = v
+	}
+	return out, nil
 }
 func (m *memState) ListByPrefix(_ context.Context, bucket, prefix string) (map[string][]byte, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	result := make(map[string][]byte)
 	for k, v := range m.data[bucket] {
 		if strings.HasPrefix(k, prefix) {
