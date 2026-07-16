@@ -263,7 +263,7 @@ func (p *Provider) inspectContainer(ctx context.Context, id string) (*containerJ
 func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) error {
 	_, err := runCLI(ctx, "stop", "--time", "10", containerID)
 	if err != nil {
-		return fmt.Errorf("stop crew runtime %s: %w", shortID(containerID), err)
+		return fmt.Errorf("stop crew runtime %s: %w", provider.ShortID(containerID), err)
 	}
 	return nil
 }
@@ -272,7 +272,7 @@ func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) erro
 func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) error {
 	_, err := runCLI(ctx, "delete", "--force", containerID)
 	if err != nil {
-		return fmt.Errorf("remove crew runtime %s: %w", shortID(containerID), err)
+		return fmt.Errorf("remove crew runtime %s: %w", provider.ShortID(containerID), err)
 	}
 	return nil
 }
@@ -314,13 +314,6 @@ func runCLI(ctx context.Context, args ...string) ([]byte, error) {
 		return stdout.Bytes(), fmt.Errorf("container %s: %w (stderr: %s)", strings.Join(args, " "), err, stderr.String())
 	}
 	return stdout.Bytes(), nil
-}
-
-func shortID(id string) string {
-	if len(id) > 12 {
-		return id[:12]
-	}
-	return id
 }
 
 // gcExecs periodically cleans up finished exec entries.

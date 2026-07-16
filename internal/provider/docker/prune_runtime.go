@@ -84,7 +84,7 @@ func (p *Provider) PruneCrewRuntimes(ctx context.Context, crews []provider.CrewR
 			if len(c.Names) > 0 {
 				name = strings.TrimPrefix(c.Names[0], "/")
 			} else {
-				name = shortID(c.ID)
+				name = provider.ShortID(c.ID)
 			}
 		}
 		if !match {

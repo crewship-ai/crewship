@@ -177,7 +177,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 
 	p.logger.Info("crew container started",
 		"crew_id", team.ID,
-		"container_id", shortID(containerID),
+		"container_id", provider.ShortID(containerID),
 	)
 
 	return containerID, nil

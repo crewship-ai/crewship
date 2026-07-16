@@ -101,7 +101,7 @@ func (p *Provider) migrateLegacyCrewResources(ctx context.Context, id, slug, ima
 		for _, name := range c.Names {
 			if name == "/"+legacyContainer {
 				p.logger.Info("removing legacy slug-scoped crew container (C1 migration)",
-					"container", legacyContainer, "container_id", shortID(c.ID))
+					"container", legacyContainer, "container_id", provider.ShortID(c.ID))
 				timeout := 10
 				_ = p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})
 				if rmErr := p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); rmErr != nil {
@@ -550,10 +550,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 						"running_image", inspect.Config.Image,
 						"desired_image", desiredImage,
 					)
-					timeout := 10
-					_ = p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})
-					_ = p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true})
-					p.evictWarm(team.ID)
+					p.forceTeardown(ctx, c.ID, team.ID)
 					break // fall through to create new container
 				}
 				// Check required mounts: /crew, /home/agent (volume), /opt/crew-tools (volume).
@@ -591,10 +588,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				}
 				if needsRecreate {
 					p.logger.Info("recreating container (missing required mounts)", "container", containerName)
-					timeout := 10
-					_ = p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})
-					_ = p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true})
-					p.evictWarm(team.ID)
+					p.forceTeardown(ctx, c.ID, team.ID)
 					break // fall through to create new container
 				}
 				if c.State == "running" {
@@ -620,10 +614,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				}
 				if bindsMissing {
 					p.logger.Info("bind-mount dirs missing, recreating container", "container", containerName)
-					timeout := 10
-					_ = p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})
-					_ = p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true})
-					p.evictWarm(team.ID)
+					p.forceTeardown(ctx, c.ID, team.ID)
 					break // fall through to create new container
 				}
 				if err := p.client.ContainerStart(ctx, c.ID, container.StartOptions{}); err != nil {
@@ -979,20 +970,14 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				return nil
 			}
 			// Poll exit code briefly.
-			for i := 0; i < 20; i++ {
-				inspect, ierr := p.client.ContainerExecInspect(checkCtx, ex.ID)
-				if ierr != nil {
-					return nil
-				}
-				if !inspect.Running {
-					if inspect.ExitCode != 0 {
-						p.logger.Error("sidecar binary incompatible with container libc — " +
-							"host-built sidecar expects glibc; Alpine/musl bases must use a glibc-compatible image")
-						return fmt.Errorf("sidecar sanity check failed (exit %d) — custom base image %q is likely musl-based or missing glibc symbols; use a glibc base (debian, ubuntu, mcr devcontainers)", inspect.ExitCode, team.Image)
-					}
-					return nil
-				}
-				time.Sleep(50 * time.Millisecond)
+			exitCode, stillRunning, ierr := p.waitExecExit(checkCtx, ex.ID, 20)
+			if ierr != nil || stillRunning {
+				return nil
+			}
+			if exitCode != 0 {
+				p.logger.Error("sidecar binary incompatible with container libc — " +
+					"host-built sidecar expects glibc; Alpine/musl bases must use a glibc-compatible image")
+				return fmt.Errorf("sidecar sanity check failed (exit %d) — custom base image %q is likely musl-based or missing glibc symbols; use a glibc base (debian, ubuntu, mcr devcontainers)", exitCode, team.Image)
 			}
 			return nil
 		}(); err != nil {
@@ -1034,6 +1019,35 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	return resp.ID, nil
 }
 
+// forceTeardown stops a crew container with a 10-second grace period,
+// force-removes it and drops the crew's warm-cache entry. Stop/remove errors
+// are deliberately ignored: every caller falls through to create a fresh
+// container regardless.
+func (p *Provider) forceTeardown(ctx context.Context, containerID, crewID string) {
+	timeout := 10
+	_ = p.client.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout})
+	_ = p.client.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
+	p.evictWarm(crewID)
+}
+
+// waitExecExit polls ContainerExecInspect for execID every 50ms until the
+// exec stops running or maxPolls polls have been made. It returns the exec's
+// exit code once it has stopped, stillRunning=true when the poll cap was hit
+// while the exec was still running, or the first inspect error encountered.
+func (p *Provider) waitExecExit(ctx context.Context, execID string, maxPolls int) (exitCode int, stillRunning bool, err error) {
+	for i := 0; i < maxPolls; i++ {
+		inspect, ierr := p.client.ContainerExecInspect(ctx, execID)
+		if ierr != nil {
+			return 0, false, ierr
+		}
+		if !inspect.Running {
+			return inspect.ExitCode, false, nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return 0, true, nil
+}
+
 // runPostStartCommands executes each post-start hook sequentially as the
 // agent user (UID 1001). Per-command timeout is 60 s. Non-fatal: a failing
 // hook is logged as a warning and we move on — agents can retry their own
@@ -1056,32 +1070,25 @@ func (p *Provider) runPostStartCommands(ctx context.Context, containerID string,
 		if err != nil {
 			cancel()
 			p.logger.Warn("postStartCommand exec create failed",
-				"container", shortID(containerID), "cmd", cmd, "error", err)
+				"container", provider.ShortID(containerID), "cmd", cmd, "error", err)
 			continue
 		}
 		if err := p.client.ContainerExecStart(runCtx, ex.ID, container.ExecStartOptions{}); err != nil {
 			cancel()
 			p.logger.Warn("postStartCommand exec start failed",
-				"container", shortID(containerID), "cmd", cmd, "error", err)
+				"container", provider.ShortID(containerID), "cmd", cmd, "error", err)
 			continue
 		}
 		// Poll exit code briefly; cap at ~60s total via runCtx timeout.
-		for i := 0; i < 1200; i++ { // 1200 * 50ms = 60s
-			inspect, ierr := p.client.ContainerExecInspect(runCtx, ex.ID)
-			if ierr != nil {
-				break
+		exitCode, stillRunning, ierr := p.waitExecExit(runCtx, ex.ID, 1200) // 1200 * 50ms = 60s
+		if ierr == nil && !stillRunning {
+			if exitCode != 0 {
+				p.logger.Warn("postStartCommand exited non-zero",
+					"container", provider.ShortID(containerID), "cmd", cmd, "exit_code", exitCode)
+			} else {
+				p.logger.Debug("postStartCommand completed",
+					"container", provider.ShortID(containerID), "cmd", cmd)
 			}
-			if !inspect.Running {
-				if inspect.ExitCode != 0 {
-					p.logger.Warn("postStartCommand exited non-zero",
-						"container", shortID(containerID), "cmd", cmd, "exit_code", inspect.ExitCode)
-				} else {
-					p.logger.Debug("postStartCommand completed",
-						"container", shortID(containerID), "cmd", cmd)
-				}
-				break
-			}
-			time.Sleep(50 * time.Millisecond)
 		}
 		cancel()
 	}
@@ -1120,19 +1127,11 @@ func buildChownInitCmd(allDirs []string, crewPath string) string {
 	return chownCmd
 }
 
-// shortID returns first 12 chars of a container ID, or the full string if shorter.
-func shortID(id string) string {
-	if len(id) > 12 {
-		return id[:12]
-	}
-	return id
-}
-
 // StopCrewRuntime gracefully stops a crew container with a 30-second timeout.
 func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) error {
 	timeout := 30
 	if err := p.client.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout}); err != nil {
-		return fmt.Errorf("stop crew runtime %s: %w", shortID(containerID), err)
+		return fmt.Errorf("stop crew runtime %s: %w", provider.ShortID(containerID), err)
 	}
 	return nil
 }
@@ -1140,7 +1139,7 @@ func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) erro
 // RemoveCrewRuntime forcefully removes a crew container.
 func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) error {
 	if err := p.client.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true}); err != nil {
-		return fmt.Errorf("remove crew runtime %s: %w", shortID(containerID), err)
+		return fmt.Errorf("remove crew runtime %s: %w", provider.ShortID(containerID), err)
 	}
 	return nil
 }

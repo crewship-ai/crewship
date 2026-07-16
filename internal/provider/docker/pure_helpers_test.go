@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/docker/docker/api/types/mount"
 )
 
@@ -337,8 +338,8 @@ func TestShortID(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := shortID(tt.input); got != tt.want {
-				t.Errorf("shortID(%q) = %q, want %q", tt.input, got, tt.want)
+			if got := provider.ShortID(tt.input); got != tt.want {
+				t.Errorf("ShortID(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}

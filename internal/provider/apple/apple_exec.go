@@ -51,6 +51,20 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 		return nil, fmt.Errorf("exec start: %w", err)
 	}
 
+	execID := p.registerExec(cmd, func() { pw.Close() })
+
+	return &provider.ExecResult{
+		ExecID: execID,
+		Reader: pr,
+	}, nil
+}
+
+// registerExec allocates an exec ID, registers the started command for
+// ExecInspect tracking, and spawns the goroutine that waits for it to finish,
+// records the exit code and closes the entry's done channel. cleanup runs as
+// the goroutine returns (after done is closed), closing the caller's pipe
+// writers so readers observe EOF.
+func (p *Provider) registerExec(cmd *exec.Cmd, cleanup func()) string {
 	execID := fmt.Sprintf("apple-exec-%d", p.execSeq.Add(1))
 
 	entry := &execEntry{
@@ -63,7 +77,7 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 	p.mu.Unlock()
 
 	go func() {
-		defer pw.Close()
+		defer cleanup()
 		err := cmd.Wait()
 		if err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
@@ -75,10 +89,7 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 		close(entry.done)
 	}()
 
-	return &provider.ExecResult{
-		ExecID: execID,
-		Reader: pr,
-	}, nil
+	return execID
 }
 
 // ExecInspect checks if an exec process is still running and returns its exit code.
@@ -136,29 +147,10 @@ func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.Interactive
 		return nil, fmt.Errorf("exec interactive start: %w", err)
 	}
 
-	execID := fmt.Sprintf("apple-exec-%d", p.execSeq.Add(1))
-
-	entry := &execEntry{
-		cmd:  cmd,
-		done: make(chan struct{}),
-	}
-	p.mu.Lock()
-	p.execs[execID] = entry
-	p.mu.Unlock()
-
-	go func() {
-		defer stdoutW.Close()
-		defer stdinR.Close()
-		err := cmd.Wait()
-		if err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				entry.exitCode = exitErr.ExitCode()
-			} else {
-				entry.exitCode = -1
-			}
-		}
-		close(entry.done)
-	}()
+	execID := p.registerExec(cmd, func() {
+		stdinR.Close()
+		stdoutW.Close()
+	})
 
 	conn := &pipeReadWriteCloser{
 		Reader: stdoutR,
