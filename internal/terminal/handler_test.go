@@ -127,7 +127,7 @@ func readJSONFrame(t *testing.T, c *websocket.Conn) map[string]string {
 
 func TestServeHTTP_NoValidatorReturns503(t *testing.T) {
 	t.Parallel()
-	h := New(&mockContainer{state: "running"}, nil, nil, silentLogger())
+	h := New(&mockContainer{state: "running"}, nil, nil, silentLogger(), nil)
 	req := httptest.NewRequest("GET", "/ws/terminal", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -138,7 +138,7 @@ func TestServeHTTP_NoValidatorReturns503(t *testing.T) {
 
 func TestServeHTTP_AuthMessageInvalid(t *testing.T) {
 	t.Parallel()
-	h := New(&mockContainer{state: "running"}, newTestValidator(t), nil, silentLogger())
+	h := New(&mockContainer{state: "running"}, newTestValidator(t), nil, silentLogger(), nil)
 	conn := dialTerminal(t, h)
 
 	// Send malformed first message.
@@ -156,7 +156,7 @@ func TestServeHTTP_AuthMessageInvalid(t *testing.T) {
 
 func TestServeHTTP_AuthTokenInvalid(t *testing.T) {
 	t.Parallel()
-	h := New(&mockContainer{state: "running"}, newTestValidator(t), nil, silentLogger())
+	h := New(&mockContainer{state: "running"}, newTestValidator(t), nil, silentLogger(), nil)
 	conn := dialTerminal(t, h)
 
 	auth, _ := json.Marshal(map[string]string{"type": "auth", "token": "not-a-real-token"})
@@ -172,7 +172,7 @@ func TestServeHTTP_AuthTokenInvalid(t *testing.T) {
 func TestServeHTTP_InitMissingFields(t *testing.T) {
 	t.Parallel()
 	v := newTestValidator(t)
-	h := New(&mockContainer{state: "running"}, v, nil, silentLogger())
+	h := New(&mockContainer{state: "running"}, v, nil, silentLogger(), nil)
 
 	tok, err := v.IssueWSTicket("u1", "test-session", "", "u1@example.com")
 	if err != nil {
@@ -218,7 +218,7 @@ func TestServeHTTP_InvalidAgentSlugRejected(t *testing.T) {
 	mustExec(t, db.DB, `INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at) VALUES ('wm1','w1','u1','OWNER',?)`, now)
 	mustExec(t, db.DB, `INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at) VALUES ('c1','w1','Crew','crew-a',?,?)`, now, now)
 
-	h := New(&interactiveMock{mockContainer: &mockContainer{state: "running"}}, v, db.DB, silentLogger())
+	h := New(&interactiveMock{mockContainer: &mockContainer{state: "running"}}, v, db.DB, silentLogger(), nil)
 
 	tok, err := v.IssueWSTicket("u1", "test-session", "", "")
 	if err != nil {
@@ -264,7 +264,7 @@ func TestServeHTTP_AccessDeniedForNonMember(t *testing.T) {
 	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES ('w1','WS','ws',?,?)`, now, now)
 	mustExec(t, db.DB, `INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at) VALUES ('c1','w1','Crew','crew-a',?,?)`, now, now)
 
-	h := New(&mockContainer{state: "running"}, v, db.DB, silentLogger())
+	h := New(&mockContainer{state: "running"}, v, db.DB, silentLogger(), nil)
 
 	tok, err := v.IssueWSTicket("uX", "test-session", "", "")
 	if err != nil {
@@ -293,7 +293,7 @@ func TestServeHTTP_AccessDeniedForNonMember(t *testing.T) {
 // the gate we care about.
 func TestCheckOrigin_RejectsOriginlessClientWithoutHeader(t *testing.T) {
 	t.Parallel()
-	h := New(&mockContainer{}, nil, nil, silentLogger())
+	h := New(&mockContainer{}, nil, nil, silentLogger(), nil)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := h.upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -329,7 +329,7 @@ func TestCheckOrigin_RejectsOriginlessClientWithoutHeader(t *testing.T) {
 // only exercises CheckOrigin.)
 func TestCheckOrigin_AcceptsOriginlessClientWithHeader(t *testing.T) {
 	t.Parallel()
-	h := New(&mockContainer{}, nil, nil, silentLogger())
+	h := New(&mockContainer{}, nil, nil, silentLogger(), nil)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := h.upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -355,7 +355,7 @@ func TestCheckOrigin_AcceptsOriginlessClientWithHeader(t *testing.T) {
 // works after Patch I: Origin equal to scheme://host → accepted.
 func TestCheckOrigin_BrowserSameOriginAllowed(t *testing.T) {
 	t.Parallel()
-	h := New(&mockContainer{}, nil, nil, silentLogger())
+	h := New(&mockContainer{}, nil, nil, silentLogger(), nil)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := h.upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -382,7 +382,7 @@ func TestCheckOrigin_BrowserSameOriginAllowed(t *testing.T) {
 // browser triggering /ws/terminal against the crewship origin.
 func TestCheckOrigin_BrowserCrossOriginRejected(t *testing.T) {
 	t.Parallel()
-	h := New(&mockContainer{}, nil, nil, silentLogger())
+	h := New(&mockContainer{}, nil, nil, silentLogger(), nil)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := h.upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -494,7 +494,7 @@ func TestValidSlugRegex(t *testing.T) {
 
 func TestWriteError_AndWriteInfo(t *testing.T) {
 	t.Parallel()
-	h := New(&mockContainer{}, nil, nil, silentLogger())
+	h := New(&mockContainer{}, nil, nil, silentLogger(), nil)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := h.upgrader.Upgrade(w, r, nil)
 		if err != nil {

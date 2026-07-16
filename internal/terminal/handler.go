@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/gorilla/websocket"
@@ -28,9 +30,21 @@ type Handler struct {
 	logger    *slog.Logger
 	validator *auth.JWTValidator
 	db        *sql.DB
-	upgrader  websocket.Upgrader
-	sessions  sync.Map // sessionID -> *Session
-	sessionID atomic.Int64
+	// sessionStore backs revocation enforcement for browser tickets
+	// (kind=ws tickets carrying a non-empty sid). It mirrors the chat
+	// hub's sessions.Store so a force-logged-out / password-changed /
+	// admin-revoked user cannot open a NEW container shell within the
+	// ticket TTL, and a live shell is torn down when the row is revoked
+	// mid-session. May be nil in dev / no-DB paths — the checks are then
+	// skipped (same tolerance the slug lookup uses for a nil db).
+	sessionStore sessions.Store
+	// revokePollInterval is the cadence of the mid-session revocation
+	// poll. Defaults to 30s (set in New, matching ws/client.go); tests
+	// override it to a few ms to exercise teardown without waiting.
+	revokePollInterval time.Duration
+	upgrader           websocket.Upgrader
+	sessions           sync.Map // sessionID -> *Session
+	sessionID          atomic.Int64
 }
 
 // Session represents an active terminal connection.
@@ -60,12 +74,24 @@ type resizeMessage struct {
 }
 
 // New creates a new terminal Handler.
-func New(container provider.ContainerProvider, validator *auth.JWTValidator, db *sql.DB, logger *slog.Logger) *Handler {
+//
+// sessionStore enforces session revocation for browser tickets (mirrors
+// the chat hub, ws.NewHub). Unlike the hub — which panics on a nil store
+// because production always has a DB-backed one — the terminal handler
+// tolerates a nil store and skips the revocation checks. This matches
+// the handler's existing dev-mode tolerance for a nil db (the crew-slug
+// lookup falls back to the client-supplied slug when h.db == nil) and
+// keeps the many handler-in-isolation tests that pass nil deps working.
+// In production the server always passes a real store built from the
+// same *sql.DB that backs the hub's store, so the checks are live.
+func New(container provider.ContainerProvider, validator *auth.JWTValidator, db *sql.DB, logger *slog.Logger, sessionStore sessions.Store) *Handler {
 	return &Handler{
-		container: container,
-		logger:    logger,
-		validator: validator,
-		db:        db,
+		container:          container,
+		logger:             logger,
+		validator:          validator,
+		db:                 db,
+		sessionStore:       sessionStore,
+		revokePollInterval: 30 * time.Second,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
@@ -144,6 +170,32 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := claims.ID
+
+	// Mirror the chat hub (ws/hub.go HandleUpgrade): browser tickets carry
+	// a sid that joins to user_sessions; refuse the connection if the row
+	// is gone or already revoked (force-logout, password change, admin
+	// revoke) even though the 15-min ws ticket is still cryptographically
+	// valid. This is a shell / code-exec surface, so a revoked user must
+	// not be able to open a NEW container shell within the ticket TTL.
+	// CLI-derived tickets have no sid — their CLI token is the auth
+	// artifact, with its own revocation table — so they skip this check.
+	// A nil sessionStore (dev / no-DB) also skips, per the New() contract.
+	// Fail CLOSED at connect time (reject on any lookup error): unlike the
+	// ongoing poll below, we can't establish a trustworthy session here.
+	if claims.Sid != "" && h.sessionStore != nil {
+		sess, sErr := h.sessionStore.Get(r.Context(), claims.Sid)
+		if sErr != nil {
+			if !errors.Is(sErr, sessions.ErrNotFound) {
+				h.logger.Error("terminal ws session lookup", "error", sErr, "sid", claims.Sid)
+			}
+			h.writeError(ws, "session_revoked")
+			return
+		}
+		if !sess.Active(time.Now()) {
+			h.writeError(ws, "session_revoked")
+			return
+		}
+	}
 
 	// Read init message (second text message from client).
 	_, msg, err := ws.ReadMessage()
@@ -343,6 +395,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.sessions.Store(sessionID, session)
 	defer h.sessions.Delete(sessionID)
 
+	// Ongoing revocation poll for browser sessions: mirror
+	// ws/client.go watchSessionRevocation. Every 30s re-check the session
+	// row and tear the live shell down (cancel the session ctx) if it has
+	// been revoked mid-session, so a force-logout kills an already-open
+	// shell rather than letting it run until the exec exits. Transient
+	// (non-ErrNotFound) lookup errors are TOLERATED — a DB blip must not
+	// kill an active shell. The goroutine exits on ctx.Done() (session /
+	// connection teardown) so it never leaks. CLI (empty sid) and nil-store
+	// paths don't start it.
+	if claims.Sid != "" && h.sessionStore != nil {
+		go h.watchSessionRevocation(ctx, cancel, claims.Sid)
+	}
+
 	h.logger.Info("terminal session started",
 		"session_id", sessionID,
 		"user_id", userID,
@@ -438,6 +503,59 @@ func (h *Handler) verifyAccess(ctx context.Context, userID, crewID string) error
 		return fmt.Errorf("user %s has insufficient role for terminal access", userID)
 	}
 	return nil
+}
+
+// watchSessionRevocation polls user_sessions every 30s for the given sid
+// and cancels the terminal session (tearing down the live shell) once the
+// row is definitively revoked — gone (ErrNotFound) or !Active. It mirrors
+// ws/client.go watchSessionRevocation, including the crucial transient-
+// error tolerance: a lookup error that is NOT ErrNotFound (DB timeout,
+// momentary unavailability) is logged and skipped so a backend hiccup
+// doesn't kill a working shell. The next tick retries; if the row really
+// is revoked, ErrNotFound on a later tick closes it cleanly.
+//
+// The goroutine exits when ctx is done (the session/connection ended) so
+// it does not leak. cancel() unblocks the main handler's <-ctx.Done(),
+// which force-closes the exec conn and the websocket.
+func (h *Handler) watchSessionRevocation(ctx context.Context, cancel context.CancelFunc, sid string) {
+	interval := h.revokePollInterval
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			lookupCtx, lookupCancel := context.WithTimeout(ctx, 5*time.Second)
+			sess, err := h.sessionStore.Get(lookupCtx, sid)
+			lookupCancel()
+
+			revoked := false
+			switch {
+			case errors.Is(err, sessions.ErrNotFound):
+				revoked = true
+			case err == nil && sess != nil && !sess.Active(time.Now()):
+				revoked = true
+			case err != nil:
+				// Transient — skip this tick, keep the shell alive.
+				h.logger.Debug("terminal session-revoke poll: transient error, retrying next tick",
+					"error", err, "sid", sid)
+				continue
+			}
+
+			if !revoked {
+				continue
+			}
+
+			h.logger.Info("terminal session revoked mid-session, tearing down shell", "sid", sid)
+			cancel()
+			return
+		}
+	}
 }
 
 // writeError sends a JSON error message to the WebSocket client.

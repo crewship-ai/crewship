@@ -244,7 +244,21 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		if deps != nil {
 			termDB = deps.DB
 		}
-		termHandler = terminal.New(ctr, jwtValidator, termDB, logger)
+		// Give the terminal handler a DB-backed sessions store so it
+		// enforces revocation on /ws/terminal exactly like the chat hub
+		// (newWSHub builds sessions.NewDBStore(deps.DB) for wsHub). We
+		// build a fresh store from the same *sql.DB rather than plumbing
+		// the hub's private instance out — a DBStore is a thin, stateless
+		// wrapper over the shared *sql.DB, so both read/write the same
+		// user_sessions rows. termDB is non-nil in production (newWSHub
+		// panics earlier if deps.DB is nil); when it is nil (isolated
+		// dev/test paths) we pass a nil store and the handler skips the
+		// checks, matching its existing nil-db slug fallback.
+		var termSessions sessions.Store
+		if termDB != nil {
+			termSessions = sessions.NewDBStore(termDB)
+		}
+		termHandler = terminal.New(ctr, jwtValidator, termDB, logger, termSessions)
 		logger.Info("terminal handler configured")
 	}
 

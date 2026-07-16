@@ -116,7 +116,7 @@ func TestServeHTTP_ShellSession_DataFlow(t *testing.T) {
 		conn:          pipe,
 		resized:       make(chan struct{}, 4),
 	}
-	h := New(mock, v, db.DB, silentLogger())
+	h := New(mock, v, db.DB, silentLogger(), nil)
 
 	tok, err := v.IssueWSTicket("u1", "test-session", "", "")
 	if err != nil {
@@ -217,7 +217,7 @@ func TestServeHTTP_ContainerStartFailure(t *testing.T) {
 	mustExec(t, db.DB, `INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at) VALUES ('c1','w1','C','crew-a',?,?)`, now, now)
 
 	mock := startFailMock{mockContainer: &mockContainer{state: "stopped"}}
-	h := New(mock, v, db.DB, silentLogger())
+	h := New(mock, v, db.DB, silentLogger(), nil)
 
 	tok, err := v.IssueWSTicket("u1", "test-session", "", "")
 	if err != nil {
@@ -269,7 +269,7 @@ func TestServeHTTP_DBLookupFailureFailsClosed(t *testing.T) {
 	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES ('w2','W2','w2',?,?)`, now, now)
 	mustExec(t, db.DB, `INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at) VALUES ('c-other','w2','Other','other',?,?)`, now, now)
 
-	h := New(&closableInteractiveMock{mockContainer: &mockContainer{state: "running"}, conn: newPipeConn()}, v, db.DB, silentLogger())
+	h := New(&closableInteractiveMock{mockContainer: &mockContainer{state: "running"}, conn: newPipeConn()}, v, db.DB, silentLogger(), nil)
 
 	tok, err := v.IssueWSTicket("u1", "test-session", "", "")
 	if err != nil {
