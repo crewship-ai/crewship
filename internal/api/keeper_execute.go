@@ -94,7 +94,7 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
 		return
 	}
-	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.RequestingCrewID) {
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.RequestingCrewID) {
 		return
 	}
 

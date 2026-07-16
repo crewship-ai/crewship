@@ -168,7 +168,7 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	// — this route never consulted the token's crew binding at all. No-op
 	// for workspace-bound/master-token callers (unaffected, still
 	// workspace-wide by design).
-	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.CrewID) {
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.CrewID) {
 		return
 	}
 	if body.Slug == "" {
@@ -340,8 +340,10 @@ func (h *InternalHandler) RecordMCPToolCall(w http.ResponseWriter, r *http.Reque
 	}
 	// PR-F24 foreign-ID closure: crew_id is independent of the workspace_id
 	// checked above — prove it belongs to the bound workspace so a ws-A
-	// token can't write an audit row attributed to a ws-B crew.
-	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.CrewID) {
+	// token can't write an audit row attributed to a ws-B crew. For a
+	// crew-bound (crwv1) token this also FILLS IN an omitted crew_id with
+	// the token's own crew (#1222), so the audit row is never crew-less.
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.CrewID) {
 		return
 	}
 	if body.MCPServerScope == "" {

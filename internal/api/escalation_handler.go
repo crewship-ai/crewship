@@ -63,7 +63,7 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	// workspace_id checked above — prove they belong to the bound workspace
 	// before inserting the escalation so a ws-A token can't raise one
 	// attributed to a ws-B crew/chat.
-	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.CrewID) {
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.CrewID) {
 		return
 	}
 	if !assertBoundChatWorkspaceDB(w, r, h.db, h.logger, body.ChatID) {

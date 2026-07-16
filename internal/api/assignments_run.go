@@ -63,7 +63,7 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// independent of workspace_id above. A bound ws-A token could pass the
 	// workspace check while pointing crew_id/chat_id at ws-B rows, so prove
 	// both belong to the bound workspace before dispatching the sub-agent.
-	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.CrewID) {
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.CrewID) {
 		return
 	}
 	if !assertBoundChatWorkspaceDB(w, r, h.db, h.logger, body.ChatID) {
