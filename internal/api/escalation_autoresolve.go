@@ -28,10 +28,25 @@ import (
 //  1. it was raised BY THE SAME AGENT the credential was just assigned to
 //     (same agent_id, implicitly the same crew — an agent belongs to one
 //     crew), and
-//  2. the credential's name appears as a whole word (case-insensitive) in
+//  2. it is a CREDENTIAL escalation — the only kind that a credential
+//     grant can possibly satisfy. TEXT/LINK rows (e.g. the confidence
+//     gate's auto-escalation in confidence_handler.go, hardcoded to
+//     'TEXT') are not credential requests and must never be flipped to
+//     action='approve' just because their free-form prose names a
+//     credential. Agents are instructed to raise credential asks as
+//     type='CREDENTIAL' (see the escalation contract in
+//     orchestrator/exec.go), so this costs the feature nothing, and
+//  3. it carries no structured proposal (credential_id IS NULL). A row
+//     WITH credential_id (v119) has a dedicated resolve path that
+//     activates that exact PENDING_APPROVAL credential; name-matching it
+//     here would mark the escalation approved while the proposed
+//     credential stayed stuck in PENDING_APPROVAL — approved on paper,
+//     never actually granted, and
+//  4. the credential's name appears as a whole word (case-insensitive) in
 //     the escalation's reason or context text, and
-//  3. the credential's name is specific enough to be a meaningful signal —
-//     see minAutoResolveNameLen below.
+//  5. the credential's name is specific enough to be a meaningful signal —
+//     see minAutoResolveNameLen below, and
+//  6. it is the ONLY such match — ambiguity leaves everything PENDING.
 //
 // Escalation reason/context is free-form text, but credential names are
 // specific, distinctive tokens (e.g. "HARNESS_PAGER_NFQ93I",
@@ -42,17 +57,23 @@ import (
 // unify the agent-proposed (structured `credential_id` + approve) and
 // human-supplied (create+assign) grant paths.
 //
-// CodeRabbit flagged (correctly) that a short, generic name — "API",
-// "TOKEN", "KEY" — could whole-word-match a PENDING escalation for a
-// completely different need the same agent happens to also be waiting on,
-// auto-approving the wrong thing. Full fix is structured correlation via
-// the escalation's own credential_id, but that field is only ever set when
-// the AGENT proposed a credential inline — never on the human
-// create+assign path this function exists to handle, so requiring it would
-// defeat the feature. minAutoResolveNameLen is the cheap mitigation:
-// real-world secret names are near-universally longer than 8 chars
-// (env-var/API-key naming conventions), so this closes the common
-// false-positive case without a redesign.
+// CodeRabbit flagged (correctly) that a free-form name match could close
+// an escalation for a completely different need the same agent happens to
+// also be waiting on, auto-approving the wrong thing.
+//
+// minAutoResolveNameLen alone does NOT answer that: it only rejects short,
+// generic names ("API", "TOKEN", "KEY"), while a perfectly ordinary name
+// like GITHUB_TOKEN (12 chars) clears the bar and still matches every
+// pending escalation that mentions it. The type/credential_id filters and
+// the ambiguity bail-out above are what actually bound the blast radius —
+// the length guard is now just a cheap first cut at obvious noise.
+//
+// Requiring credential_id for a positive match would defeat the feature
+// (it is NULL on exactly the human create+assign path this exists to
+// handle), which is why correlation is achieved by narrowing what is
+// ELIGIBLE rather than by demanding a structured key. The remaining
+// single-match case is a deliberate, bounded trade: worst case it closes
+// one stale row early, and a human can still see the resolution text.
 //
 // Best-effort: this runs after the credential assignment has already
 // committed, so a failure here is logged and swallowed rather than failing
@@ -79,6 +100,8 @@ func autoResolveEscalationsForCredential(ctx context.Context, db *sql.DB, logger
 		SELECT id, reason, COALESCE(context, ''), crew_id, chat_id
 		FROM escalations
 		WHERE from_agent_id = ? AND workspace_id = ? AND status = 'PENDING'
+		  AND type = 'CREDENTIAL'
+		  AND credential_id IS NULL
 	`, agentID, workspaceID)
 	if err != nil {
 		logger.Warn("auto-resolve escalations: query pending", "error", err, "agent_id", agentID)
@@ -103,6 +126,24 @@ func autoResolveEscalationsForCredential(ctx context.Context, db *sql.DB, logger
 	rows.Close()
 
 	if len(matches) == 0 {
+		return
+	}
+	// Ambiguity is not a tie to be broken — it's a signal to stay out.
+	// The name match cannot tell WHICH of two same-named asks the human
+	// actually granted ("GITHUB_TOKEN with repo:read for CI" vs
+	// "GITHUB_TOKEN needs admin:org so I can rotate org secrets"), and
+	// guessing wrong records action='approve'/resolved_by='system' on a
+	// request no human ever approved, then hides it from `escalation
+	// list`. Leave every candidate PENDING for a human to resolve
+	// explicitly — the stale-row cleanup this function exists for is
+	// worth far less than a spurious approval in the audit trail.
+	if len(matches) > 1 {
+		ids := make([]string, 0, len(matches))
+		for _, m := range matches {
+			ids = append(ids, m.id)
+		}
+		logger.Info("auto-resolve escalations: multiple pending escalations match the credential name, leaving all PENDING for a human",
+			"agent_id", agentID, "credential_name", credentialName, "escalation_ids", ids)
 		return
 	}
 
