@@ -167,6 +167,25 @@ jobs:
         with:
           syft-version: v1.38.0
 
+      # Materialize the deb/rpm signing key from the GPG_SIGNING_KEY secret,
+      # if configured (#932) — same conditional pattern as release.yml: when
+      # the secret is absent GPG_KEY_PATH stays unset, nfpm skips signing, and
+      # the nightly ships unsigned packages (secret-less forks keep working).
+      # Signing the nightly channel means the GPG path (key decode, nfpm
+      # template, passphrase env) is exercised on every push to main instead
+      # of failing for the first time inside a tagged release.
+      - name: Prepare package signing key (if configured)
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+        run: |
+          if [ -n "$GPG_SIGNING_KEY" ]; then
+            printf '%s' "$GPG_SIGNING_KEY" | base64 -d > "$RUNNER_TEMP/crewship-signing.asc"
+            echo "GPG_KEY_PATH=$RUNNER_TEMP/crewship-signing.asc" >> "$GITHUB_ENV"
+            echo "deb/rpm signing enabled"
+          else
+            echo "::notice::GPG_SIGNING_KEY not set — nightly deb/rpm packages will be UNSIGNED (see #932)"
+          fi
+
       - name: Build snapshot binaries
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
@@ -192,6 +211,10 @@ jobs:
           # artifacts (already "nightly-<sha>" via the ldflags path), not what
           # gets published — we upload via `gh release` ourselves.
           GORELEASER_CURRENT_TAG: v0.0.0-nightly
+          # nfpm reads the signing-key passphrase from NFPM_<ID>_PASSPHRASE
+          # (nfpms id = "packages"); empty when the key has no passphrase.
+          # See release.yml and packaging/SIGNING.md (#932).
+          NFPM_PACKAGES_PASSPHRASE: ${{ secrets.GPG_SIGNING_PASSPHRASE }}
           # goreleaser's `signs:` block uses the GitHub Actions OIDC token to
           # request a Fulcio short-lived cert (keyless cosign). The token is
           # injected automatically because the workflow has `id-token: write`.
@@ -235,7 +258,14 @@ jobs:
           set -euo pipefail
           TAG="nightly-$(date -u +%Y%m%d)-r${{ github.run_number }}"
           TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          ASSETS=$(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name 'checksums.txt' -o -name '*.sig' -o -name '*.pem' \) | tr '\n' ' ')
+          # *.deb / *.rpm: the GPG-signed packages (#932). goreleaser built
+          # and cosign-signed them all along, but the old glob dropped them
+          # from the upload — publishing dangling .deb.sig/.rpm.pem
+          # signatures for assets that didn't exist. Same story for the syft
+          # SBOMs (*.cdx.json / *.spdx.json), whose .sig/.pem uploaded
+          # without their subject. Keep this list in sync with what
+          # .goreleaser.yml produces per artifact family.
+          ASSETS=$(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.deb' -o -name '*.rpm' -o -name '*.cdx.json' -o -name '*.spdx.json' -o -name 'checksums.txt' -o -name '*.sig' -o -name '*.pem' \) | tr '\n' ' ')
           NOTES="Nightly pre-release built from main @ ${GITHUB_SHA:0:7} (${TS}).
 
           **Not for production.** Use a tagged release for stable workloads.

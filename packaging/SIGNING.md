@@ -72,19 +72,27 @@ passphrase is read from `NFPM_PACKAGES_PASSPHRASE`.
 # get the public key (or from the docs site)
 curl -fsSLO https://raw.githubusercontent.com/crewship-ai/crewship/main/packaging/crewship-packages.pub
 
-# deb
-sudo apt-get install -y dpkg-sig
-dpkg-sig --verify crewship_<ver>_linux_amd64.deb
+# deb — nfpm embeds a debsigs-style `_gpgorigin` ar member: a detached
+# signature over the other members in ar order. Note: dpkg-sig CANNOT verify
+# this (it only reads its own _gpgbuilder manifest format); use gpg directly
+# (or debsig-verify with a policy file):
+gpg --import crewship-packages.pub
+mkdir deb && (cd deb && ar x ../crewship_<ver>_linux_amd64.deb)
+cat deb/debian-binary deb/control.tar.* deb/data.tar.* | gpg --verify deb/_gpgorigin -
 
 # rpm
 sudo rpm --import crewship-packages.pub
 rpm -K crewship_<ver>_linux_amd64.rpm      # → "digests signatures OK"
 ```
 
-The post-release package smoke (`.github/workflows/smoke-test.yml`) runs `rpm -K`
-/ `dpkg-sig --verify` and treats an **unsigned** package as a soft skip (so it
-stays green until the key is provisioned) but **fails on a bad/invalid**
-signature once signing is on.
+Both the post-release package smoke (`.github/workflows/smoke-test.yml`) and
+the nightly smoke (`.github/workflows/nightly-smoke.yml`) verify the deb's
+`_gpgorigin` with gpg and run `rpm -K` against a scratch rpmdb with the
+committed public key imported. An **unsigned** package is a soft skip (so
+secret-less forks stay green) but a **bad/invalid** signature always fails.
+Nightly builds sign with the same key (`nightly.yml` materializes
+`GPG_SIGNING_KEY` exactly like `release.yml`), so the signing path is
+exercised on every push to main, not just at tag time.
 
 ---
 

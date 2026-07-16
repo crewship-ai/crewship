@@ -191,9 +191,12 @@ key (`packages@crewship.ai`, fingerprint
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/crewship-ai/crewship/main/packaging/crewship-packages.pub
 
-# deb
-sudo apt-get install -y dpkg-sig
-dpkg-sig --verify crewship_<version>_linux_amd64.deb
+# deb — the signature is a debsigs-style `_gpgorigin` ar member (dpkg-sig
+# cannot read this format); verify it with gpg over the other members:
+gpg --import crewship-packages.pub
+mkdir deb-verify && (cd deb-verify && ar x ../crewship_<version>_linux_amd64.deb)
+cat deb-verify/debian-binary deb-verify/control.tar.* deb-verify/data.tar.* \
+  | gpg --verify deb-verify/_gpgorigin -   # → "Good signature"
 
 # rpm
 sudo rpm --import crewship-packages.pub

@@ -458,7 +458,10 @@ nfpms:
     # dep is advisory — an unsatisfiable one is skipped, never a hard failure.
     recommends:
       - docker-ce
-    # Embedded GPG signatures (#932), verified with `dpkg-sig --verify` / `rpm -K`.
+    # Embedded GPG signatures (#932). deb gets a debsigs-style `_gpgorigin`
+    # ar member (verify with gpg or debsig-verify — NOT dpkg-sig, which only
+    # reads its own manifest format); rpm gets a header signature (`rpm -K`
+    # after importing packaging/crewship-packages.pub). See packaging/SIGNING.md.
     # CONDITIONAL: signs only when GPG_KEY_PATH is set (release.yml materializes
     # it from the GPG_SIGNING_KEY secret). Empty → nfpm skips signing, so
     # snapshot builds and secret-less forks still produce (unsigned) packages.

@@ -355,29 +355,64 @@ jobs:
       - name: Verify package signature (if signed)
         # GPG signing is conditional (#932): a release built without the
         # GPG_SIGNING_KEY secret is unsigned, so an unsigned package is a soft
-        # SKIP here (keeps the smoke green until the key is provisioned). A
-        # package that IS signed but with a bad/invalid signature FAILS.
+        # SKIP here (keeps the smoke green on secret-less forks). A package
+        # that IS signed but with a bad/invalid signature FAILS.
+        #
+        # deb verification uses plain gpg on the `_gpgorigin` ar member — a
+        # debsigs-style detached signature over the remaining members in ar
+        # order — because that is what nfpm produces. The dpkg-sig tool this
+        # step originally used only understands its own _gpgbuilder manifest
+        # format, so it classified every nfpm-signed deb as unsigned (and its
+        # unconditional "processing …" output line matched the old soft-skip
+        # grep, meaning the check could never fail at all).
+        #
+        # rpm verification must import the public key BEFORE `rpm -K`: a
+        # signed rpm without the key in the rpmdb reports "SIGNATURES NOT OK"
+        # (NOKEY), which would have hard-failed the first signed release.
         run: |
           set -uo pipefail
           PKG=$(ls /pkg/crewship_*_linux_amd64.${{ matrix.pkg }} | head -1)
+          # The committed public half of the signing key, pinned to the
+          # release's own tag so the smoke verifies against the key that was
+          # current when the release was cut (packaging/SIGNING.md).
+          if ! curl -fsSL \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${TAG}/packaging/crewship-packages.pub" \
+            -o /pkg/crewship-packages.pub; then
+            echo "::error::could not fetch packaging/crewship-packages.pub at tag ${TAG}"; exit 1
+          fi
           if [ "${{ matrix.pkg }}" = "deb" ]; then
-            apt-get install -y --no-install-recommends dpkg-sig >/dev/null 2>&1 || true
-            OUT=$(dpkg-sig --verify "$PKG" 2>&1 || true)
-            echo "$OUT"
-            if echo "$OUT" | grep -q "GOODSIG"; then
-              echo "deb signature OK"
-            elif echo "$OUT" | grep -qiE "NOSIG|no signature|processing"; then
+            # Guarded installs/extraction: this step runs without `set -e`,
+            # and a missing ar/gpg would otherwise make a SIGNED deb look
+            # unsigned (no _gpgorigin extracted) and silently soft-skip.
+            if ! apt-get install -y --no-install-recommends binutils gnupg >/dev/null; then
+              echo "::error::failed to install binutils/gnupg for deb verification"; exit 1
+            fi
+            export GNUPGHOME=$(mktemp -d)
+            if ! gpg --batch --import /pkg/crewship-packages.pub; then
+              echo "::error::failed to import packaging/crewship-packages.pub"; exit 1
+            fi
+            WORK=$(mktemp -d)
+            if ! (cd "$WORK" && ar x "$PKG"); then
+              echo "::error::failed to unpack $PKG with ar"; exit 1
+            fi
+            if [ ! -f "$WORK/_gpgorigin" ]; then
               echo "::notice::deb is unsigned — skipping signature check (GPG_SIGNING_KEY not provisioned, #932)"
+            elif cat "$WORK/debian-binary" "$WORK"/control.tar.* "$WORK"/data.tar.* \
+                | gpg --batch --verify "$WORK/_gpgorigin" -; then
+              echo "deb signature OK"
             else
-              echo "::error::deb signature present but not GOODSIG"; exit 1
+              echo "::error::deb signature did not verify against packaging/crewship-packages.pub"; exit 1
             fi
           else
-            OUT=$(rpm -K "$PKG" 2>&1 || true)
+            RPMDB=$(mktemp -d)
+            rpm --dbpath "$RPMDB" --initdb
+            rpm --dbpath "$RPMDB" --import /pkg/crewship-packages.pub
+            OUT=$(rpm --dbpath "$RPMDB" -K "$PKG" 2>&1 || true)
             echo "$OUT"
-            if echo "$OUT" | grep -qi "signatures OK"; then
-              echo "rpm signature OK"
-            elif echo "$OUT" | grep -qi "NOT OK"; then
+            if echo "$OUT" | grep -qi "NOT OK"; then
               echo "::error::rpm signature check failed"; exit 1
+            elif echo "$OUT" | grep -qi "signatures OK"; then
+              echo "rpm signature OK"
             else
               echo "::notice::rpm is unsigned (digests only) — skipping signature check (GPG_SIGNING_KEY not provisioned, #932)"
             fi
