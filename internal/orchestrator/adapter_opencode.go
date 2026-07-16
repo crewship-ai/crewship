@@ -18,7 +18,7 @@ import (
 // <message>`. Relevant flags:
 //   - --format        : default | json   (NOT --output-format — different name)
 //     json emits JSONL — one flat event envelope per line (step_start,
-//     text, tool_use, step_finish, error); parseOpenCodeStreamJSON consumes
+//     text, tool_use, step_finish, error); the opencode stream parser consumes
 //     it line-by-line like every other stream-JSON adapter
 //   - --model, -m     : "provider/model" — e.g. anthropic/claude-sonnet-4-6
 //   - --continue, -c  : resume last session
@@ -66,7 +66,7 @@ func (opencodeAdapter) BuildCommand(req AgentRunRequest) []string {
 }
 
 // UseStreamJSON returns true: --format json emits JSONL and
-// parseOpenCodeStreamJSON consumes one event envelope per line.
+// the opencode stream parser consumes one event envelope per line.
 func (opencodeAdapter) UseStreamJSON() bool { return true }
 
 // openCodeProviderIDs maps Crewship's llm_provider enum to the provider id
@@ -138,8 +138,22 @@ func qualifyOpenCodeModel(provider, model string) string {
 	return model
 }
 
+// ParseStreamLine satisfies the CLIAdapter interface for isolated lines. A
+// fresh parser has no cross-line memory, which is correct for a single line
+// (a first-seen accumulated snapshot emits verbatim) but would double-append
+// accumulated text if called repeatedly for one stream — streamOutput
+// therefore never uses this path for OPENCODE: it goes through
+// NewStreamLineParser below so dedup state spans the whole stream.
 func (opencodeAdapter) ParseStreamLine(line []byte, handler EventHandler) {
-	parseOpenCodeStreamJSON(line, handler)
+	newOpenCodeStreamParser().parseLine(line, handler)
+}
+
+// NewStreamLineParser implements streamLineParserFactory: one parser — and
+// thus one accumulated-text dedup namespace — per exec stream. State begins
+// and ends with the stream, so a run whose CLI exits before step_finish
+// (anomalyco/opencode#26855) cannot poison later runs' dedup (#1235).
+func (opencodeAdapter) NewStreamLineParser() func(line []byte, handler EventHandler) {
+	return newOpenCodeStreamParser().parseLine
 }
 
 // SetupSystemPrompt drops the canonical memory file set instead of just

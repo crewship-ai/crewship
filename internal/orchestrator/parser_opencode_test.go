@@ -10,7 +10,7 @@ import (
 func TestParseOpenCode_TextEvent(t *testing.T) {
 	line := []byte(`{"type":"text","sessionID":"ses-1","part":{"id":"p1","text":"hello"}}`)
 	var got []AgentEvent
-	parseOpenCodeStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+	newOpenCodeStreamParser().parseLine(line, func(e AgentEvent) { got = append(got, e) })
 
 	if len(got) != 1 || got[0].Type != "text" || got[0].Content != "hello" {
 		t.Fatalf("text event wrong: %+v (parser may still be looking for message.part.updated envelope)", got)
@@ -27,7 +27,7 @@ func TestParseOpenCode_TextEvent_RejectsOldEnvelope(t *testing.T) {
 	// real opencode never emits this discriminator.
 	line := []byte(`{"type":"message.part.updated","part":{"type":"text","text":"hello"}}`)
 	var got []AgentEvent
-	parseOpenCodeStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+	newOpenCodeStreamParser().parseLine(line, func(e AgentEvent) { got = append(got, e) })
 
 	// Old-shape goes to default branch — system event with subtype.
 	if len(got) != 1 || got[0].Type != "system" {
@@ -43,7 +43,7 @@ func TestParseOpenCode_TextEvent_RejectsOldEnvelope(t *testing.T) {
 func TestParseOpenCode_Reasoning(t *testing.T) {
 	line := []byte(`{"type":"reasoning","sessionID":"ses-1","part":{"id":"p1","text":"weighing options..."}}`)
 	var got []AgentEvent
-	parseOpenCodeStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+	newOpenCodeStreamParser().parseLine(line, func(e AgentEvent) { got = append(got, e) })
 
 	if len(got) != 1 || got[0].Type != "thinking" || got[0].Content != "weighing options..." {
 		t.Errorf("reasoning event wrong: %+v", got)
@@ -58,8 +58,9 @@ func TestParseOpenCode_ToolUseLifecycle(t *testing.T) {
 	completed := []byte(`{"type":"tool_use","sessionID":"s","part":{"id":"tu-1","tool":"bash","state":{"status":"completed","output":"file.txt"}}}`)
 
 	var got []AgentEvent
-	parseOpenCodeStreamJSON(running, func(e AgentEvent) { got = append(got, e) })
-	parseOpenCodeStreamJSON(completed, func(e AgentEvent) { got = append(got, e) })
+	p := newOpenCodeStreamParser()
+	p.parseLine(running, func(e AgentEvent) { got = append(got, e) })
+	p.parseLine(completed, func(e AgentEvent) { got = append(got, e) })
 
 	if len(got) != 2 {
 		t.Fatalf("want 2 events, got %d: %+v", len(got), got)
@@ -84,7 +85,7 @@ func TestParseOpenCode_ToolUseLifecycle(t *testing.T) {
 func TestParseOpenCode_StepFinish(t *testing.T) {
 	line := []byte(`{"type":"step_finish","sessionID":"s","part":{"tokens":{"input":80,"output":20},"cost":0.0042,"providerID":"anthropic","modelID":"claude-sonnet-4-6"}}`)
 	var got []AgentEvent
-	parseOpenCodeStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+	newOpenCodeStreamParser().parseLine(line, func(e AgentEvent) { got = append(got, e) })
 
 	if len(got) != 2 || got[0].Type != "system" || got[1].Type != "result" {
 		t.Fatalf("step_finish must emit system bootstrap + result: %+v", got)
@@ -112,7 +113,7 @@ func TestParseOpenCode_StepFinish(t *testing.T) {
 // TestParseOpenCode_StepStartSilent — boundary marker, must not flood journal.
 func TestParseOpenCode_StepStartSilent(t *testing.T) {
 	var got []AgentEvent
-	parseOpenCodeStreamJSON([]byte(`{"type":"step_start","part":{}}`), func(e AgentEvent) { got = append(got, e) })
+	newOpenCodeStreamParser().parseLine([]byte(`{"type":"step_start","part":{}}`), func(e AgentEvent) { got = append(got, e) })
 	if len(got) != 0 {
 		t.Errorf("step_start must be silent, got %+v", got)
 	}
@@ -123,7 +124,7 @@ func TestParseOpenCode_StepStartSilent(t *testing.T) {
 func TestParseOpenCode_Error(t *testing.T) {
 	line := []byte(`{"type":"error","sessionID":"s","error":"missing API key"}`)
 	var got []AgentEvent
-	parseOpenCodeStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+	newOpenCodeStreamParser().parseLine(line, func(e AgentEvent) { got = append(got, e) })
 
 	if len(got) != 1 || got[0].Type != "error" || got[0].Content != "missing API key" {
 		t.Errorf("error event wrong: %+v", got)
@@ -133,7 +134,7 @@ func TestParseOpenCode_Error(t *testing.T) {
 // TestParseOpenCode_NotJSON falls through to text.
 func TestParseOpenCode_NotJSON(t *testing.T) {
 	var got []AgentEvent
-	parseOpenCodeStreamJSON([]byte("not json"), func(e AgentEvent) { got = append(got, e) })
+	newOpenCodeStreamParser().parseLine([]byte("not json"), func(e AgentEvent) { got = append(got, e) })
 
 	if len(got) != 1 || got[0].Type != "text" {
 		t.Errorf("want text fallback, got %+v", got)
@@ -147,7 +148,7 @@ func TestParseOpenCode_NilHandler(t *testing.T) {
 			t.Fatalf("nil handler panicked: %v", r)
 		}
 	}()
-	parseOpenCodeStreamJSON([]byte(`{"type":"text","part":{"text":"x"}}`), nil)
+	newOpenCodeStreamParser().parseLine([]byte(`{"type":"text","part":{"text":"x"}}`), nil)
 }
 
 // TestParseOpenCode_UnknownType — forward-compat: unknown top-level type
@@ -155,7 +156,7 @@ func TestParseOpenCode_NilHandler(t *testing.T) {
 func TestParseOpenCode_UnknownType(t *testing.T) {
 	line := []byte(`{"type":"future_event_kind","sessionID":"s"}`)
 	var got []AgentEvent
-	parseOpenCodeStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+	newOpenCodeStreamParser().parseLine(line, func(e AgentEvent) { got = append(got, e) })
 
 	if len(got) != 1 || got[0].Type != "system" {
 		t.Errorf("unknown type should surface as system event: %+v", got)

@@ -31,7 +31,7 @@ const opencodeStepFinishLine = `{"type":"step_finish","sessionID":"ses_parity","
 // consumer never reads, so every OpenCode run recorded $0.
 func TestParseOpenCode_StepFinishUsageReadableByPaymaster(t *testing.T) {
 	var results []AgentEvent
-	parseOpenCodeStreamJSON([]byte(opencodeStepFinishLine), func(e AgentEvent) {
+	newOpenCodeStreamParser().parseLine([]byte(opencodeStepFinishLine), func(e AgentEvent) {
 		if e.Type == "result" {
 			results = append(results, e)
 		}
@@ -59,7 +59,7 @@ func TestParseOpenCode_StepFinishUsageReadableByPaymaster(t *testing.T) {
 // so the parser must surface it from there.
 func TestParseOpenCode_ModelSurfacedForCrowsNest(t *testing.T) {
 	handler, acc := NewBufferingHandler(BufferingHandlerOpts{CaptureResultMeta: true})
-	parseOpenCodeStreamJSON([]byte(opencodeStepFinishLine), handler)
+	newOpenCodeStreamParser().parseLine([]byte(opencodeStepFinishLine), handler)
 	if got := acc.ResolvedModel(); got != "anthropic/claude-sonnet-4-6" {
 		t.Fatalf("ResolvedModel = %q, want %q (no system event with model metadata was emitted)", got, "anthropic/claude-sonnet-4-6")
 	}
@@ -76,8 +76,9 @@ func TestParseOpenCode_AccumulatedTextEmitsOnlyNewSuffix(t *testing.T) {
 			sb.WriteString(e.Content)
 		}
 	}
-	parseOpenCodeStreamJSON([]byte(`{"type":"text","sessionID":"ses_sfx","part":{"id":"prt_1","text":"Hello"}}`), h)
-	parseOpenCodeStreamJSON([]byte(`{"type":"text","sessionID":"ses_sfx","part":{"id":"prt_1","text":"Hello world"}}`), h)
+	p := newOpenCodeStreamParser()
+	p.parseLine([]byte(`{"type":"text","sessionID":"ses_sfx","part":{"id":"prt_1","text":"Hello"}}`), h)
+	p.parseLine([]byte(`{"type":"text","sessionID":"ses_sfx","part":{"id":"prt_1","text":"Hello world"}}`), h)
 	if sb.String() != "Hello world" {
 		t.Fatalf("accumulated text double-appended: %q, want %q", sb.String(), "Hello world")
 	}
@@ -93,8 +94,9 @@ func TestParseOpenCode_DeltaStyleTextStillWorks(t *testing.T) {
 			sb.WriteString(e.Content)
 		}
 	}
-	parseOpenCodeStreamJSON([]byte(`{"type":"text","sessionID":"ses_dlt","part":{"id":"prt_1","text":"Hello"}}`), h)
-	parseOpenCodeStreamJSON([]byte(`{"type":"text","sessionID":"ses_dlt","part":{"id":"prt_1","text":" world"}}`), h)
+	p := newOpenCodeStreamParser()
+	p.parseLine([]byte(`{"type":"text","sessionID":"ses_dlt","part":{"id":"prt_1","text":"Hello"}}`), h)
+	p.parseLine([]byte(`{"type":"text","sessionID":"ses_dlt","part":{"id":"prt_1","text":" world"}}`), h)
 	if sb.String() != "Hello world" {
 		t.Fatalf("delta-style fallback broken: %q, want %q", sb.String(), "Hello world")
 	}
@@ -109,8 +111,9 @@ func TestParseOpenCode_DistinctPartsDoNotDedup(t *testing.T) {
 			sb.WriteString(e.Content)
 		}
 	}
-	parseOpenCodeStreamJSON([]byte(`{"type":"text","sessionID":"ses_dst","part":{"id":"prt_a","text":"same"}}`), h)
-	parseOpenCodeStreamJSON([]byte(`{"type":"text","sessionID":"ses_dst","part":{"id":"prt_b","text":"same"}}`), h)
+	p := newOpenCodeStreamParser()
+	p.parseLine([]byte(`{"type":"text","sessionID":"ses_dst","part":{"id":"prt_a","text":"same"}}`), h)
+	p.parseLine([]byte(`{"type":"text","sessionID":"ses_dst","part":{"id":"prt_b","text":"same"}}`), h)
 	if sb.String() != "samesame" {
 		t.Fatalf("distinct parts wrongly deduped: %q, want %q", sb.String(), "samesame")
 	}
@@ -125,8 +128,9 @@ func TestParseOpenCode_ReasoningAccumulatedDedup(t *testing.T) {
 			sb.WriteString(e.Content)
 		}
 	}
-	parseOpenCodeStreamJSON([]byte(`{"type":"reasoning","sessionID":"ses_rsn","part":{"id":"prt_r","text":"step 1"}}`), h)
-	parseOpenCodeStreamJSON([]byte(`{"type":"reasoning","sessionID":"ses_rsn","part":{"id":"prt_r","text":"step 1, step 2"}}`), h)
+	p := newOpenCodeStreamParser()
+	p.parseLine([]byte(`{"type":"reasoning","sessionID":"ses_rsn","part":{"id":"prt_r","text":"step 1"}}`), h)
+	p.parseLine([]byte(`{"type":"reasoning","sessionID":"ses_rsn","part":{"id":"prt_r","text":"step 1, step 2"}}`), h)
 	if sb.String() != "step 1, step 2" {
 		t.Fatalf("reasoning double-appended: %q, want %q", sb.String(), "step 1, step 2")
 	}
