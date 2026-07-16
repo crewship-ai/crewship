@@ -272,7 +272,7 @@ The crew journal is the audit trail and is persisted across container restarts: 
 
 - **Agent leaking a credential into chat or logs.** `/keeper/execute` runs the command in crewshipd, scrubs stdout/stderr, and only the redacted result reaches UID 1001.
 - **Unauthorised egress in restricted network mode.** The proxy refuses non-allowlisted hosts. Unknown network modes default to `restricted` (fail-closed) rather than `free`, so a misconfigured workspace cannot accidentally open up egress.
-- **Credential dump from the agent process.** Credentials are held in crewshipd's process memory; UID 1001 can talk to UID 1002 over loopback but cannot read the sidecar's process memory or files. Filesystem credentials at `/secrets/{slug}/` are mounted read-only.
+- **Credential dump from the agent process.** Credentials are held in crewshipd's process memory; UID 1001 can talk to UID 1002 over loopback but cannot read the sidecar's process memory or files. Filesystem credentials at `/secrets/{slug}/` live on the crew's writable tmpfs, owned by UID 1001 with restrictive modes (`0400` files, `0700` directories) — that keeps them from any non-1001 process, but not from sibling agents in the same crew, which share UID 1001 (see below).
 - **Prompt injection in tool output.** `internal/lookout` scans inputs and outputs; on a finding it either sanitises (default for secret-shaped output) or blocks (default for input). Every action is logged to the journal.
 - **Trivial fast-path bypasses.** L1 auto-allow is gated to `request` only — an attacker cannot smuggle a command through the L1 path because `execute` always pays the LLM round-trip. Empty or whitespace-only intents are rejected before they reach the LLM.
 
