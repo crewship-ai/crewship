@@ -676,8 +676,10 @@ prints `[wait] error:` diagnostics to stderr as plain text even under a machine
 
 ## Resolving resource references
 
-Anywhere a command takes an agent, crew, skill, or credential reference, you can pass a
-slug, a display name, or the record id interchangeably — including slugs that happen to
+Anywhere a command takes an agent, crew, skill, or credential reference, you can pass
+either the record id or the human identifier — the slug for agents, crews, and skills
+(display names don't resolve), and the name for credentials and integrations (which
+have no slug) — including slugs that happen to
 look like ids. CUID-shaped input is first verified with a single lookup; on a miss the
 CLI falls back to slug/name resolution, so a slug like `customersuccessemea42` resolves
 correctly instead of failing as an unknown id. A reference that resolves to nothing
