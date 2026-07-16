@@ -266,19 +266,26 @@ var routineSchedulesCreateCmd = &cobra.Command{
 			return err
 		}
 		var out scheduleRow
-		_ = json.NewDecoder(resp.Body).Decode(&out)
-		fmt.Printf("Schedule created: %s (%s @ %s)\n", out.Name, out.CronExpr, out.Timezone)
-		fmt.Printf("  ID:     %s\n", out.ID)
-		if out.TargetPipelineVersion != nil {
-			fmt.Printf("  Pinned: v%d (fires execute this version, not head)\n", *out.TargetPipelineVersion)
+		if derr := json.NewDecoder(resp.Body).Decode(&out); derr != nil {
+			return fmt.Errorf("decode created schedule: %w", derr)
 		}
-		if out.WakePipelineSlug != "" {
-			fmt.Printf("  Wake:   %s (routine fires only when the probe's output is truthy)\n", out.WakePipelineSlug)
-		}
-		if out.NextRunAt != nil {
-			fmt.Printf("  Next:   %s\n", formatTimestamp(*out.NextRunAt))
-		}
-		return nil
+		// #1219: `create` is the only place a schedule id comes into
+		// existence, so a script that can't parse this reply has no way
+		// to reach `schedules now <id>` at all. Pass the API row through
+		// verbatim for machine formats — full id included.
+		return resolvedFormatter(cmd).AutoHuman(out, func() {
+			fmt.Printf("Schedule created: %s (%s @ %s)\n", out.Name, out.CronExpr, out.Timezone)
+			fmt.Printf("  ID:     %s\n", out.ID)
+			if out.TargetPipelineVersion != nil {
+				fmt.Printf("  Pinned: v%d (fires execute this version, not head)\n", *out.TargetPipelineVersion)
+			}
+			if out.WakePipelineSlug != "" {
+				fmt.Printf("  Wake:   %s (routine fires only when the probe's output is truthy)\n", out.WakePipelineSlug)
+			}
+			if out.NextRunAt != nil {
+				fmt.Printf("  Next:   %s\n", formatTimestamp(*out.NextRunAt))
+			}
+		})
 	},
 }
 
@@ -368,23 +375,43 @@ var routineSchedulesUpdateCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		fmt.Printf("Schedule %s updated.\n", args[0])
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(
+			scheduleActionResult{ID: args[0], Updated: true},
+			func() { fmt.Printf("Schedule %s updated.\n", args[0]) },
+		)
 	},
+}
+
+// scheduleActionResult is the machine-readable acknowledgement shared by
+// the schedule mutations (now / update / enable / disable / delete).
+//
+// #1219: these all used to print prose only, so scripting the family meant
+// scraping "Schedule <id> fired (out-of-cycle)." — the exact gap the global
+// -f/--format flag exists to close. ID is always present so a caller can
+// correlate the reply with the request; the action fields are omitempty so
+// each command emits only its own verb rather than a union of false values.
+type scheduleActionResult struct {
+	ID      string `json:"id" yaml:"id"`
+	Fired   bool   `json:"fired,omitempty" yaml:"fired,omitempty"`
+	Updated bool   `json:"updated,omitempty" yaml:"updated,omitempty"`
+	Deleted bool   `json:"deleted,omitempty" yaml:"deleted,omitempty"`
+	// Enabled is a pointer: enable/disable must be able to report the
+	// meaningful value `false` without omitempty swallowing it.
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
 
 var routineSchedulesEnableCmd = &cobra.Command{
 	Use:   "enable <schedule_id>",
 	Short: "Enable a schedule (next tick will fire)",
 	Args:  cobra.ExactArgs(1),
-	RunE:  func(cmd *cobra.Command, args []string) error { return setScheduleEnabled(args[0], true) },
+	RunE:  func(cmd *cobra.Command, args []string) error { return setScheduleEnabled(cmd, args[0], true) },
 }
 
 var routineSchedulesDisableCmd = &cobra.Command{
 	Use:   "disable <schedule_id>",
 	Short: "Disable a schedule (skipped on tick until re-enabled)",
 	Args:  cobra.ExactArgs(1),
-	RunE:  func(cmd *cobra.Command, args []string) error { return setScheduleEnabled(args[0], false) },
+	RunE:  func(cmd *cobra.Command, args []string) error { return setScheduleEnabled(cmd, args[0], false) },
 }
 
 var routineSchedulesNowCmd = &cobra.Command{
@@ -419,8 +446,14 @@ var routineSchedulesNowCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		fmt.Printf("Schedule %s fired (out-of-cycle).\n", args[0])
-		return nil
+		// #1219: force-fire is the one schedule operation a test
+		// harness drives in a loop, so its acknowledgement has to be
+		// machine-readable — otherwise the only way to know it worked
+		// is to scrape prose.
+		return resolvedFormatter(cmd).AutoHuman(
+			scheduleActionResult{ID: args[0], Fired: true},
+			func() { fmt.Printf("Schedule %s fired (out-of-cycle).\n", args[0]) },
+		)
 	},
 }
 
@@ -455,12 +488,18 @@ var routineSchedulesDeleteCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		fmt.Printf("Schedule %s deleted.\n", args[0])
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(
+			scheduleActionResult{ID: args[0], Deleted: true},
+			func() { fmt.Printf("Schedule %s deleted.\n", args[0]) },
+		)
 	},
 }
 
-func setScheduleEnabled(scheduleID string, enabled bool) error {
+// setScheduleEnabled backs both `enable` and `disable`.
+//
+// It takes cmd purely so it can resolve the global -f/--format flag
+// (#1219); the HTTP call is identical either way.
+func setScheduleEnabled(cmd *cobra.Command, scheduleID string, enabled bool) error {
 	if err := requireAuth(); err != nil {
 		return err
 	}
@@ -484,8 +523,10 @@ func setScheduleEnabled(scheduleID string, enabled bool) error {
 	if !enabled {
 		state = "disabled"
 	}
-	fmt.Printf("Schedule %s %s.\n", scheduleID, state)
-	return nil
+	return resolvedFormatter(cmd).AutoHuman(
+		scheduleActionResult{ID: scheduleID, Enabled: &enabled},
+		func() { fmt.Printf("Schedule %s %s.\n", scheduleID, state) },
+	)
 }
 
 func formatTimestamp(iso string) string {

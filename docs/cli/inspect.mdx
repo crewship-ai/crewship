@@ -21,6 +21,22 @@ crewship inspect <run-id> [flags]
 
 Requires an authenticated session and a selected workspace (`requireAuthAndWorkspace`).
 
+<Note>
+  **`inspect` takes agent-run IDs, not routine-run IDs.** There are two
+  unrelated run namespaces:
+
+  - **Agent (chat-turn) runs** — `msg_…` (and legacy `r_…`), listed by
+    [`crewship history`](/cli/history). These are what `inspect`,
+    [`explain`](/cli/explain), and [`diff`](/cli/diff) read.
+  - **Routine (pipeline) runs** — `run_…` / `prn_…`, listed by
+    `crewship routine runs <slug>`. For these use
+    [`crewship routine logs <run-id>`](/cli/routine) (timeline) or
+    `crewship routine report <run-id>` (summary).
+
+  Passing a `run_…` ID here fails fast with a message naming the right
+  command (exit code `3`), rather than a bare `404`.
+</Note>
+
 ## Flags
 
 | Flag | Default | Purpose |

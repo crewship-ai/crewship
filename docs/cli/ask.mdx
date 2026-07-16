@@ -16,6 +16,34 @@ A new chat is created per invocation (origin tagged `CLI`, so the web UI sidebar
 
 Auth: requires `crewship login` plus a workspace context. Both checks are skipped in offline modes (`--dry-run`, `--estimate`).
 
+## The no-subcommand shortcut
+
+`ask` is also reachable straight from the root command, so a quick question
+doesn't need a subcommand at all:
+
+```bash
+crewship -p "why did the last deploy fail?"   # explicit, always works
+crewship "why did the last deploy fail?"      # bare prompt
+```
+
+<Warning>
+  **A bare one- or two-word invocation is treated as a mistyped subcommand,
+  not a prompt.** Commands are `<noun> <verb>` (`crewship routine list`), so
+  a typo is almost always one or two slug-shaped tokens — and dispatching
+  those to an agent silently starts a **paid run** instead of failing. A CLI
+  typo in a script must exit non-zero, not spend money, so:
+
+  ```bash
+  crewship schedule list   # → unknown command "schedule" (exit 1), no agent run
+  crewship routnie list    # → unknown command "routnie" — did you mean routine?
+  ```
+
+  Three or more bare words are still sent as a prompt (`crewship why is this
+  slow`), as is any single argument containing whitespace (`crewship "say
+  hi"`). To force a short prompt through, use `-p` — it always bypasses the
+  guard: `crewship -p "schedule list"`.
+</Warning>
+
 ## Flags
 
 | Flag | Default | Effect |

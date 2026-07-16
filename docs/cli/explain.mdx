@@ -35,6 +35,15 @@ crewship explain r_abc --types error,keeper.decision,peer.escalation
 crewship explain r_abc --save explain.md
 ```
 
+<Note>
+  **`explain` takes agent-run IDs (`msg_…`, legacy `r_…`) from
+  [`crewship history`](/cli/history)** — not the `run_…` / `prn_…` IDs that
+  `crewship routine runs <slug>` prints. For a routine run use
+  `crewship routine report <run-id>` (summary) or
+  `crewship routine logs <run-id>` (timeline). Passing a `run_…` ID here
+  fails fast naming the right command (exit code `3`), not a bare `404`.
+</Note>
+
 ### Output shape
 
 The default prompt instructs the agent to produce 3-6 bullets that highlight errors, escalations, keeper denials, budget warnings, or unexpected control flow. Normal runs collapse to one line. The exact template is `buildExplainPrompt()` in `cmd_explain.go`.

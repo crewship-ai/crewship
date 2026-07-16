@@ -40,6 +40,12 @@ Examples:
   crewship explain r_abc --types error,keeper.decision,peer.escalation`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// #1193: reject a routine-run id up front. Ahead of the auth
+		// check on purpose — the id is wrong whoever is asking, and a
+		// login prompt would bury the real problem.
+		if cli.IsPipelineRunID(args[0]) {
+			return cli.PipelineRunIDError(args[0], "crewship routine report "+args[0])
+		}
 		if err := requireAuth(); err != nil {
 			return err
 		}

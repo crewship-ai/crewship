@@ -29,6 +29,16 @@ crewship diff r_abc r_def --full
 crewship diff r_abc r_def --format json     # both RunDetails + a_text/b_text in one object
 ```
 
+<Note>
+  **`diff` compares agent runs** — `msg_…` (legacy `r_…`) IDs from
+  [`crewship history`](/cli/history). The `run_…` / `prn_…` IDs printed by
+  `crewship routine runs <slug>` are routine (pipeline) runs and live in a
+  different namespace; there is no routine-run equivalent of `diff`, so
+  inspect them individually with `crewship routine report <run-id>`.
+  Passing a `run_…` ID on either side fails fast (exit code `3`) instead of
+  returning a bare `404`.
+</Note>
+
 ### Output
 
 Side-by-side headers (agent, status, started, finished) with status colours (green/red/yellow), then a minimal line-by-line diff of the assistant output:
