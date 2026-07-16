@@ -97,6 +97,44 @@ func (h *ComposioHandler) resolveClient(r *http.Request) (*composio.Client, stri
 	return nil, ""
 }
 
+// composioGatewayError logs the raw client error (full upstream snippet —
+// server-log only) and writes a 502 whose detail classifies the upstream
+// failure so operators can act on it, instead of the opaque "Composio API
+// error" this used to emit (#1192). op names the Composio call that failed
+// ("list toolkits", …); extra log attrs may follow the error.
+func (h *ComposioHandler) composioGatewayError(w http.ResponseWriter, r *http.Request, op string, err error, logAttrs ...any) {
+	h.logger.Error("composio: "+op, append(logAttrs, "error", err)...)
+	writeProblem(w, r, http.StatusBadGateway, composioUpstreamDetail(op, err))
+}
+
+// composioUpstreamDetail renders a Composio client error as an actionable,
+// sanitized problem detail: invalid key vs rate limit vs Composio outage vs
+// rejected request vs unreachable host. The upstream body is never included
+// verbatim — only the bounded, control-char-stripped excerpt APIError.Detail
+// extracts (typically Composio's own error message).
+func composioUpstreamDetail(op string, err error) string {
+	var ae *composio.APIError
+	if errors.As(err, &ae) {
+		suffix := ""
+		if d := ae.Detail(); d != "" {
+			suffix = ": " + d
+		}
+		switch {
+		case ae.StatusCode == http.StatusUnauthorized || ae.StatusCode == http.StatusForbidden:
+			return fmt.Sprintf("Composio rejected the configured API key (%s failed with HTTP %d%s) — update it with `crewship integration composio key set` or fix the server's COMPOSIO_API_KEY",
+				op, ae.StatusCode, suffix)
+		case ae.StatusCode == http.StatusTooManyRequests:
+			return fmt.Sprintf("Composio rate-limited the request (%s failed with HTTP 429%s) — retry shortly", op, suffix)
+		case ae.StatusCode >= 500:
+			return fmt.Sprintf("Composio upstream error (%s failed with HTTP %d%s) — Composio may be degraded, retry shortly", op, ae.StatusCode, suffix)
+		default:
+			return fmt.Sprintf("Composio rejected the request (%s failed with HTTP %d%s)", op, ae.StatusCode, suffix)
+		}
+	}
+	return fmt.Sprintf("Composio API unreachable (%s failed: %s) — check the server's network path to Composio (COMPOSIO_BASE_URL)",
+		op, composio.TransportReason(err))
+}
+
 // ── Response types ───────────────────────────────────────────────────────────
 
 type composioInventoryResponse struct {
@@ -137,14 +175,12 @@ func (h *ComposioHandler) ListInventory(w http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 	authConfigs, err := client.ListAuthConfigs(ctx)
 	if err != nil {
-		h.logger.Error("composio: list auth configs", "error", err)
-		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		h.composioGatewayError(w, r, "list auth configs", err)
 		return
 	}
 	accounts, err := client.ListConnectedAccounts(ctx)
 	if err != nil {
-		h.logger.Error("composio: list connected accounts", "error", err)
-		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		h.composioGatewayError(w, r, "list connected accounts", err)
 		return
 	}
 
@@ -195,8 +231,7 @@ func (h *ComposioHandler) ListToolkits(w http.ResponseWriter, r *http.Request) {
 
 	page, err := client.ListToolkits(r.Context(), search, category, limit)
 	if err != nil {
-		h.logger.Error("composio: list toolkits", "error", err)
-		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		h.composioGatewayError(w, r, "list toolkits", err)
 		return
 	}
 	if page.Items == nil {
@@ -249,8 +284,7 @@ func (h *ComposioHandler) ListTools(w http.ResponseWriter, r *http.Request) {
 
 	page, err := client.ListTools(r.Context(), toolkit, search, limit)
 	if err != nil {
-		h.logger.Error("composio: list tools", "error", err)
-		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		h.composioGatewayError(w, r, "list tools", err, "toolkit", toolkit)
 		return
 	}
 	if page.Items == nil {
@@ -300,8 +334,7 @@ func (h *ComposioHandler) ListTriggerTypes(w http.ResponseWriter, r *http.Reques
 
 	page, err := client.ListTriggerTypes(r.Context(), toolkit, search, limit)
 	if err != nil {
-		h.logger.Error("composio: list trigger types", "error", err)
-		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		h.composioGatewayError(w, r, "list trigger types", err)
 		return
 	}
 	if page.Items == nil {
@@ -335,8 +368,7 @@ func (h *ComposioHandler) ListActiveTriggers(w http.ResponseWriter, r *http.Requ
 
 	triggers, err := client.ListActiveTriggers(r.Context())
 	if err != nil {
-		h.logger.Error("composio: list active triggers", "error", err)
-		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		h.composioGatewayError(w, r, "list active triggers", err)
 		return
 	}
 	if triggers == nil {
@@ -385,8 +417,7 @@ func (h *ComposioHandler) CreateTrigger(w http.ResponseWriter, r *http.Request) 
 
 	inst, err := client.CreateTriggerInstance(r.Context(), req.Slug, req.UserID, req.Config)
 	if err != nil {
-		h.logger.Error("composio: create trigger instance", "slug", req.Slug, "error", err)
-		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		h.composioGatewayError(w, r, "create trigger instance", err, "slug", req.Slug)
 		return
 	}
 	writeJSON(w, http.StatusOK, composioCreateTriggerResponse{Enabled: true, Trigger: inst})
@@ -433,23 +464,20 @@ func (h *ComposioHandler) Connect(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	authID, err := client.FindAuthConfig(ctx, req.Toolkit)
 	if err != nil {
-		h.logger.Error("composio: find auth config", "error", err)
-		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		h.composioGatewayError(w, r, "find auth config", err)
 		return
 	}
 	if authID == "" {
 		authID, err = client.CreateManagedAuthConfig(ctx, req.Toolkit, req.Toolkit+"-crewship")
 		if err != nil {
-			h.logger.Error("composio: create auth config", "toolkit", req.Toolkit, "error", err)
-			writeProblem(w, r, http.StatusBadGateway, "Composio API error (auth config)")
+			h.composioGatewayError(w, r, "create auth config", err, "toolkit", req.Toolkit)
 			return
 		}
 	}
 
 	link, err := client.CreateConnectLink(ctx, authID, req.UserID, "")
 	if err != nil {
-		h.logger.Error("composio: create connect link", "error", err)
-		writeProblem(w, r, http.StatusBadGateway, "Composio API error (connect link)")
+		h.composioGatewayError(w, r, "create connect link", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, composioConnectResponse{
@@ -799,8 +827,7 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 	// the implicit "all apps" case, to enumerate the connected apps.
 	authConfigs, err := client.ListAuthConfigs(ctx)
 	if err != nil {
-		h.logger.Error("composio: list auth configs", "error", err)
-		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		h.composioGatewayError(w, r, "list auth configs", err)
 		return
 	}
 	acBySlug := map[string]string{}
@@ -828,8 +855,7 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 		if authID == "" {
 			id, cerr := client.CreateManagedAuthConfig(ctx, app.Toolkit, app.Toolkit+"-crewship")
 			if cerr != nil {
-				h.logger.Error("composio: create auth config", "toolkit", app.Toolkit, "error", cerr)
-				writeProblem(w, r, http.StatusBadGateway, "Composio API error (auth config)")
+				h.composioGatewayError(w, r, "create auth config", cerr, "toolkit", app.Toolkit)
 				return
 			}
 			authID = id
@@ -843,8 +869,7 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 		case "read":
 			tools, terr := client.ListAllTools(ctx, app.Toolkit)
 			if terr != nil {
-				h.logger.Error("composio: list all tools", "toolkit", app.Toolkit, "error", terr)
-				writeProblem(w, r, http.StatusBadGateway, "Composio API error (tools)")
+				h.composioGatewayError(w, r, "list all tools", terr, "toolkit", app.Toolkit)
 				return
 			}
 			for _, t := range tools {
@@ -859,8 +884,7 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 		case "custom":
 			tools, terr := client.ListAllTools(ctx, app.Toolkit)
 			if terr != nil {
-				h.logger.Error("composio: list all tools", "toolkit", app.Toolkit, "error", terr)
-				writeProblem(w, r, http.StatusBadGateway, "Composio API error (tools)")
+				h.composioGatewayError(w, r, "list all tools", terr, "toolkit", app.Toolkit)
 				return
 			}
 			real := make(map[string]string, len(tools))
@@ -907,15 +931,14 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 		if composioServerID == "" {
 			id, _, cerr := client.CreateMCPServer(ctx, mcpName, []string{authID}, allowedTools)
 			if cerr != nil {
-				h.logger.Error("composio: create mcp server", "error", cerr)
-				writeProblem(w, r, http.StatusBadGateway, "Composio API error (mcp server)")
+				h.composioGatewayError(w, r, "create mcp server", cerr)
 				return
 			}
 			composioServerID = id
 		}
 		if composioServerID == "" {
 			h.logger.Error("composio: mcp server returned empty id")
-			writeProblem(w, r, http.StatusBadGateway, "Composio API error (mcp server)")
+			writeProblem(w, r, http.StatusBadGateway, "Composio returned an MCP server without an id — retry, and check the server log if it persists")
 			return
 		}
 
@@ -1261,8 +1284,7 @@ func (h *ComposioHandler) RevokeAccount(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := client.RevokeConnectedAccount(r.Context(), accountID); err != nil {
-		h.logger.Error("composio: revoke connected account", "account", accountID, "error", err)
-		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		h.composioGatewayError(w, r, "revoke connected account", err, "account", accountID)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -1287,8 +1309,7 @@ func (h *ComposioHandler) RefreshAccount(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := client.RefreshConnectedAccount(r.Context(), accountID); err != nil {
-		h.logger.Error("composio: refresh connected account", "account", accountID, "error", err)
-		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		h.composioGatewayError(w, r, "refresh connected account", err, "account", accountID)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -1313,8 +1334,7 @@ func (h *ComposioHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := client.DeleteConnectedAccount(r.Context(), accountID); err != nil {
-		h.logger.Error("composio: delete connected account", "account", accountID, "error", err)
-		writeProblem(w, r, http.StatusBadGateway, "Composio API error")
+		h.composioGatewayError(w, r, "delete connected account", err, "account", accountID)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -1391,7 +1411,15 @@ func (h *ComposioHandler) UpsertSettings(w http.ResponseWriter, r *http.Request)
 	probe := composio.NewClient(req.APIKey, h.envBaseURL)
 	if _, err := probe.ListToolkits(r.Context(), "", "", 1); err != nil {
 		h.logger.Warn("composio: api key validation failed", "error", err)
-		writeProblem(w, r, http.StatusBadRequest, "Composio rejected this API key (check the key and project)")
+		// Only an actual auth rejection from Composio means the KEY is bad
+		// (400). Anything else — Composio outage, network failure — must not
+		// masquerade as a key problem: surface it as a classified 502.
+		var ae *composio.APIError
+		if errors.As(err, &ae) && (ae.StatusCode == http.StatusUnauthorized || ae.StatusCode == http.StatusForbidden) {
+			writeProblem(w, r, http.StatusBadRequest, "Composio rejected this API key (check the key and project)")
+			return
+		}
+		writeProblem(w, r, http.StatusBadGateway, composioUpstreamDetail("validate api key", err))
 		return
 	}
 
@@ -1513,7 +1541,7 @@ func (h *ComposioHandler) ensureDefaultComposioServer(r *http.Request, wsID, req
 		accounts, lerr := client.ListConnectedAccounts(ctx)
 		if lerr != nil {
 			h.logger.Error("composio: list connected accounts", "error", lerr)
-			return "", "", &composioDefaultError{status: http.StatusBadGateway, msg: "Composio API error"}
+			return "", "", &composioDefaultError{status: http.StatusBadGateway, msg: composioUpstreamDetail("list connected accounts", lerr)}
 		}
 		users := groupByUser(accounts)
 		switch len(users) {
@@ -1530,7 +1558,7 @@ func (h *ComposioHandler) ensureDefaultComposioServer(r *http.Request, wsID, req
 	authConfigs, lerr := client.ListAuthConfigs(ctx)
 	if lerr != nil {
 		h.logger.Error("composio: list auth configs", "error", lerr)
-		return "", "", &composioDefaultError{status: http.StatusBadGateway, msg: "Composio API error"}
+		return "", "", &composioDefaultError{status: http.StatusBadGateway, msg: composioUpstreamDetail("list auth configs", lerr)}
 	}
 	authIDs := make([]string, 0, len(authConfigs))
 	seen := map[string]struct{}{}
@@ -1566,7 +1594,7 @@ func (h *ComposioHandler) ensureDefaultComposioServer(r *http.Request, wsID, req
 		id, _, cErr := client.CreateMCPServer(ctx, name, authIDs, nil)
 		if cErr != nil {
 			h.logger.Error("composio: create default mcp server", "error", cErr)
-			return "", "", &composioDefaultError{status: http.StatusBadGateway, msg: "Composio API error (mcp server)"}
+			return "", "", &composioDefaultError{status: http.StatusBadGateway, msg: composioUpstreamDetail("create default mcp server", cErr)}
 		}
 		serverID = id
 	} else if uErr := client.UpdateMCPServer(ctx, serverID, authIDs, nil); uErr != nil {
@@ -1576,7 +1604,7 @@ func (h *ComposioHandler) ensureDefaultComposioServer(r *http.Request, wsID, req
 	}
 	if serverID == "" {
 		h.logger.Error("composio: default mcp server returned empty id")
-		return "", "", &composioDefaultError{status: http.StatusBadGateway, msg: "Composio API error (mcp server)"}
+		return "", "", &composioDefaultError{status: http.StatusBadGateway, msg: "Composio returned an MCP server without an id — retry, and check the server log if it persists"}
 	}
 
 	// (4)+(5) Persist the managed key credential + the default columns in one

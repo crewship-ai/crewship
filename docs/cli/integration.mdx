@@ -76,6 +76,12 @@ for the active workspace — set one per-workspace with `integration composio ke
 Prints a "not configured" notice when neither is present. Add `--output json`
 for the raw payload. See the [Integrations guide](/guides/integrations#managed-integrations-composio).
 
+When a command that reaches Composio's live API fails, the `API error (502)`
+message classifies the failure — rejected API key (HTTP 401/403), rate limit
+(429), Composio outage (5xx), rejected request (other 4xx, with Composio's own
+message), or `Composio API unreachable` for network-level failures. See
+[Troubleshooting Composio errors](/guides/integrations#troubleshooting-composio-errors).
+
 ### Workspace-scoped
 
 | Command | Purpose |

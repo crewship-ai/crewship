@@ -150,6 +150,30 @@ so the user never has to tell it to "go look at the MCP server" first.
 Nothing to configure: the block appears automatically whenever the agent
 resolves at least one integration, and is omitted entirely when it has none.
 
+### Troubleshooting Composio errors
+
+Commands that reach Composio's live API (`toolkits`, `inventory`, `connect`,
+`bind`, trigger and account operations) surface any upstream failure as an
+`API error (502)` whose message classifies what went wrong:
+
+| Message starts with | Meaning | Fix |
+|---|---|---|
+| `Composio rejected the configured API key (… HTTP 401/403 …)` | The effective key (workspace or `COMPOSIO_API_KEY` env) is a placeholder, revoked, or from the wrong project | `crewship integration composio key set --key ak_…`, or fix the server env |
+| `Composio rate-limited the request (… HTTP 429 …)` | Project hit Composio's rate limit | Retry shortly |
+| `Composio upstream error (… HTTP 5xx …)` | Composio itself is degraded | Retry shortly; check Composio status |
+| `Composio rejected the request (… HTTP 4xx …)` | Bad request parameters (e.g. an invalid toolkit slug) | The included upstream message says what to change |
+| `Composio API unreachable (…)` | Network failure between the Crewship server and Composio (DNS, dial, TLS, timeout) | Check the server's outbound connectivity and `COMPOSIO_BASE_URL` |
+
+Each message includes Composio's own error text (sanitized and truncated);
+the full upstream response is written to the server log. Note that
+`crewship integration composio key show` only reports whether a key is
+*configured*, not whether Composio accepts it — a placeholder key shows as
+`configured` but fails live calls with the `rejected the configured API key`
+message above. Setting a key with `key set` validates it against Composio
+first: a key Composio rejects is refused with a 400, while a network failure
+during validation is reported as a 502 (`unreachable`) instead of blaming the
+key.
+
 ## OAuth 2.0 Integrations
 
 Crewship includes pre-configured OAuth providers for popular services. The implementation uses PKCE (Proof Key for Code Exchange) per RFC 7636 for secure authorization.
