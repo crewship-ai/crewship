@@ -272,8 +272,10 @@ func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
 	// a crew-bound token could otherwise attribute a run (and any waitpoint
 	// approval card it raises, which shows this as the "From" crew) to a
 	// SIBLING crew in the same workspace. Same guard InternalSave already
-	// applies to author_crew_id below.
-	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.InvokingCrewID) {
+	// applies to author_crew_id below. For a crew-bound (crwv1) token this
+	// also FILLS IN an omitted invoking_crew_id with the token's own crew
+	// (#1222), so the run is never left unattributed.
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.InvokingCrewID) {
 		return
 	}
 
@@ -557,7 +559,7 @@ func (h *PipelineHandler) InternalTestRun(w http.ResponseWriter, r *http.Request
 	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
 		return
 	}
-	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.AuthorCrewID) {
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.AuthorCrewID) {
 		return
 	}
 	dsl, err := pipeline.Parse(body.Definition)

@@ -266,8 +266,23 @@ func TestAssertBoundCrewWorkspaceDB_EmptyIDSkippedAndDBError(t *testing.T) {
 		req := httptest.NewRequest("POST", "/x", nil)
 		req = req.WithContext(context.WithValue(req.Context(), ctxInternalTokenWS, wsID))
 		rr := httptest.NewRecorder()
-		if !assertBoundCrewWorkspaceDB(rr, req, db, newTestLogger(), "", crewID, "") {
+		empty1, empty2 := "", ""
+		if !assertBoundCrewWorkspaceDB(rr, req, db, newTestLogger(), &empty1, &crewID, &empty2) {
 			t.Fatalf("expected true for (empty, own-crew, empty); body=%s", rr.Body.String())
+		}
+		// #1222: a workspace-bound (no crew) caller gets NO injection —
+		// the fields stay genuinely optional.
+		if empty1 != "" || empty2 != "" {
+			t.Errorf("empty ids mutated to (%q, %q); want untouched for a non-crew-bound caller", empty1, empty2)
+		}
+	})
+
+	t.Run("nil ids are skipped", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/x", nil)
+		req = req.WithContext(context.WithValue(req.Context(), ctxInternalTokenWS, wsID))
+		rr := httptest.NewRecorder()
+		if !assertBoundCrewWorkspaceDB(rr, req, db, newTestLogger(), nil, &crewID) {
+			t.Fatalf("expected true for (nil, own-crew); body=%s", rr.Body.String())
 		}
 	})
 
@@ -277,7 +292,7 @@ func TestAssertBoundCrewWorkspaceDB_EmptyIDSkippedAndDBError(t *testing.T) {
 		req := httptest.NewRequest("POST", "/x", nil)
 		req = req.WithContext(context.WithValue(req.Context(), ctxInternalTokenWS, wsID))
 		rr := httptest.NewRecorder()
-		if assertBoundCrewWorkspaceDB(rr, req, brokenDB, newTestLogger(), crewID) {
+		if assertBoundCrewWorkspaceDB(rr, req, brokenDB, newTestLogger(), &crewID) {
 			t.Fatal("expected false on DB failure")
 		}
 		if rr.Code != http.StatusForbidden {
@@ -310,14 +325,16 @@ func TestAssertBoundCrewWorkspaceDB_CrewBoundToken_RejectsSiblingCrew(t *testing
 
 	t.Run("crew_bound_token_own_crew_ok", func(t *testing.T) {
 		rr := httptest.NewRecorder()
-		if !assertBoundCrewWorkspaceDB(rr, boundReq(ownCrew), db, newTestLogger(), ownCrew) {
+		own := ownCrew
+		if !assertBoundCrewWorkspaceDB(rr, boundReq(ownCrew), db, newTestLogger(), &own) {
 			t.Fatalf("expected true for own crew; body=%s", rr.Body.String())
 		}
 	})
 
 	t.Run("crew_bound_token_sibling_crew_403", func(t *testing.T) {
 		rr := httptest.NewRecorder()
-		if assertBoundCrewWorkspaceDB(rr, boundReq(ownCrew), db, newTestLogger(), siblingCrew) {
+		sibling := siblingCrew
+		if assertBoundCrewWorkspaceDB(rr, boundReq(ownCrew), db, newTestLogger(), &sibling) {
 			t.Fatal("expected false: sibling crew must be refused for a crew-bound token")
 		}
 		if rr.Code != http.StatusForbidden {
@@ -330,8 +347,22 @@ func TestAssertBoundCrewWorkspaceDB_CrewBoundToken_RejectsSiblingCrew(t *testing
 		req := httptest.NewRequest("POST", "/x", nil)
 		req = req.WithContext(context.WithValue(req.Context(), ctxInternalTokenWS, wsID))
 		rr := httptest.NewRecorder()
-		if !assertBoundCrewWorkspaceDB(rr, req, db, newTestLogger(), siblingCrew) {
+		sibling := siblingCrew
+		if !assertBoundCrewWorkspaceDB(rr, req, db, newTestLogger(), &sibling) {
 			t.Fatalf("expected true for workspace-bound (no crew) caller; body=%s", rr.Body.String())
+		}
+	})
+
+	// #1222: a crew-bound token that OMITS the crew field must not slip
+	// through unattributed — the helper injects the token's own crew.
+	t.Run("crew_bound_token_omitted_crew_injected", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		omitted := ""
+		if !assertBoundCrewWorkspaceDB(rr, boundReq(ownCrew), db, newTestLogger(), &omitted) {
+			t.Fatalf("expected true for omitted crew on crew-bound token; body=%s", rr.Body.String())
+		}
+		if omitted != ownCrew {
+			t.Errorf("omitted crew injected as %q, want token's own crew %q", omitted, ownCrew)
 		}
 	})
 }

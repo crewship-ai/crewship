@@ -773,8 +773,10 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	// workspace_id checked above. A bound ws-A token must not attribute a
 	// pipeline to a ws-B crew (and the validator below would otherwise read
 	// that foreign crew's agent slugs), so prove it belongs to the bound
-	// workspace first.
-	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, body.AuthorCrewID) {
+	// workspace first. For a crew-bound (crwv1) token this also FILLS IN an
+	// omitted author_crew_id with the token's own crew (#1222), so the
+	// saved pipeline is never left author-less.
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.AuthorCrewID) {
 		return
 	}
 

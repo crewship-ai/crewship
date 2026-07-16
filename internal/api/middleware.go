@@ -507,26 +507,47 @@ func assertInternalTokenWorkspace(w http.ResponseWriter, r *http.Request, bodyWS
 // master-token caller is unaffected: they fall through to the existing
 // workspace-membership check below, unchanged.
 //
+// #1222: for a crew-bound caller the crew fields are also WRITTEN — an
+// omitted (empty) crew field is filled in with the token's bound crew,
+// mirroring how requireInternal injects the bound workspace_id into the
+// query. Without this, a crew-bound token could omit the field entirely
+// and land a cost row / journal entry / MCP-tool-call audit row / saved
+// pipeline with NO crew attribution ("own crew, or no crew" instead of
+// "own crew"). Callers therefore pass pointers into their decoded body,
+// and after a true return every supplied crew field of a crew-bound
+// caller is guaranteed to equal the token's crew — handlers can never
+// see an unattributed request. Workspace-bound (wsv1) and master-token
+// callers keep the old semantics: empty fields stay empty (genuinely
+// optional), nothing is injected.
+//
 // No-op for master-token callers (no binding in context). Unknown crew
 // IDs are rejected with the same 403 so the check is not an existence
-// oracle. Empty IDs are skipped (optional fields). Returns false after
-// writing the 403 — caller must return immediately.
-func assertBoundCrewWorkspaceDB(w http.ResponseWriter, r *http.Request, db *sql.DB, logger *slog.Logger, crewIDs ...string) bool {
+// oracle. Empty IDs are skipped for non-crew-bound callers (optional
+// fields). Returns false after writing the 403 — caller must return
+// immediately.
+func assertBoundCrewWorkspaceDB(w http.ResponseWriter, r *http.Request, db *sql.DB, logger *slog.Logger, crewIDs ...*string) bool {
 	bound := InternalTokenWorkspaceFromContext(r.Context())
 	if bound == "" {
 		return true
 	}
 	boundCrew := InternalTokenCrewFromContext(r.Context())
 	for _, crewID := range crewIDs {
-		if crewID == "" {
+		if crewID == nil {
 			continue
 		}
 		if boundCrew != "" {
-			if crewID != boundCrew {
+			if *crewID == "" {
+				// #1222: omitted crew field on a crew-bound token —
+				// inject the token's own crew so the write is attributed
+				// instead of landing crew-less.
+				*crewID = boundCrew
+				continue
+			}
+			if *crewID != boundCrew {
 				if logger != nil {
 					logger.Warn("internal API cross-crew request refused (crew-bound token)",
 						"path", r.URL.Path, "remote_addr", r.RemoteAddr,
-						"token_crew", boundCrew, "requested_crew", crewID)
+						"token_crew", boundCrew, "requested_crew", *crewID)
 				}
 				replyError(w, http.StatusForbidden,
 					"crew does not match the crew bound to the internal token")
@@ -534,12 +555,15 @@ func assertBoundCrewWorkspaceDB(w http.ResponseWriter, r *http.Request, db *sql.
 			}
 			continue
 		}
+		if *crewID == "" {
+			continue
+		}
 		var wsID string
 		err := db.QueryRowContext(r.Context(),
-			`SELECT workspace_id FROM crews WHERE id = ?`, crewID).Scan(&wsID)
+			`SELECT workspace_id FROM crews WHERE id = ?`, *crewID).Scan(&wsID)
 		if err != nil || wsID != bound {
 			if err != nil && !errors.Is(err, sql.ErrNoRows) && logger != nil {
-				logger.Error("resolve crew workspace for token binding", "crew_id", crewID, "error", err)
+				logger.Error("resolve crew workspace for token binding", "crew_id", *crewID, "error", err)
 			}
 			replyError(w, http.StatusForbidden,
 				"crew does not belong to the workspace bound to the internal token")

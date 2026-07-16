@@ -89,8 +89,10 @@ func (r *Router) handleSidecarEmit(w http.ResponseWriter, req *http.Request) {
 	}
 	// PR-F24 foreign-ID closure: crew_id rides in the body independent of
 	// workspace_id — prove it belongs to the bound workspace so a ws-A
-	// token can't emit a journal entry attributed to a ws-B crew.
-	if !assertBoundCrewWorkspaceDB(w, req, r.db, r.logger, body.CrewID) {
+	// token can't emit a journal entry attributed to a ws-B crew. For a
+	// crew-bound (crwv1) token this also FILLS IN an omitted crew_id with
+	// the token's own crew (#1222), so the entry is never left crew-less.
+	if !assertBoundCrewWorkspaceDB(w, req, r.db, r.logger, &body.CrewID) {
 		return
 	}
 	if strings.TrimSpace(body.Summary) == "" {
