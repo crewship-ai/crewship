@@ -122,7 +122,7 @@ func PreRunInstallPackages(
 	result.Reader.Close()
 
 	logger.Info("pre-run packages installed",
-		"container_id", containerID[:min(12, len(containerID))],
+		"container_id", shortID(containerID),
 		"packages", packages,
 	)
 	return nil
@@ -738,7 +738,7 @@ func startSidecar(
 	}
 
 	logger.Info("sidecar started",
-		"container_id", containerID[:min(12, len(containerID))],
+		"container_id", shortID(containerID),
 		"credentials", len(sc),
 		"output_bytes", len(output),
 	)

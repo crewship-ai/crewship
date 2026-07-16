@@ -79,7 +79,7 @@ func filterNpxServers(ctx context.Context, container provider.ContainerProvider,
 			// server; remove from map so it won't be filtered out.
 			logger.Warn("probe exec failed, keeping servers that require "+launcher,
 				"error", err,
-				"container_id", containerID[:min(12, len(containerID))])
+				"container_id", shortID(containerID))
 			delete(launchers, launcher)
 			continue
 		}
@@ -121,7 +121,7 @@ func filterNpxServers(ctx context.Context, container provider.ContainerProvider,
 	}
 	logger.Warn("launcher not found in container, skipping stdio MCP servers",
 		"skipped_servers", skipped,
-		"container_id", containerID[:min(12, len(containerID))])
+		"container_id", shortID(containerID))
 	return filtered
 }
 

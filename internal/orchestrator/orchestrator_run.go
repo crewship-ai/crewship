@@ -580,8 +580,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			}
 		default:
 			o.logger.Error("unknown network mode, refusing to start sidecar", "mode", req.NetworkMode)
-			o.updateRunStatus(ctx, runState.ID, "error")
-			o.recordRunAudit(ctx, req, runState.ID, "error")
+			o.failRun(ctx, req, runState.ID, "error")
 			return fmt.Errorf("unknown network mode: %s", req.NetworkMode)
 		}
 		// Check if sidecar already running in this container (shared crew container).
@@ -615,7 +614,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				// agent's exec a guaranteed kill+relaunch of an otherwise-
 				// healthy sidecar. sidecarNeedsRestart only says yes when the
 				// mode or the allowlist itself actually changed.
-				o.logger.Info("sidecar already running, reusing", "agent_id", req.AgentID, "container_id", req.ContainerID[:min(12, len(req.ContainerID))])
+				o.logger.Info("sidecar already running, reusing", "agent_id", req.AgentID, "container_id", shortID(req.ContainerID))
 				needStart = false
 				// The reused sidecar serves THIS agent's memory tier via the
 				// per-agent MCP path (CRE-137) — make sure the tier's dirs
@@ -672,8 +671,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		if needStart {
 			if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, memoryCfg, ipcCfg, sidecarMembers, networkPolicy, req.MCPServers, o.logger); err != nil {
 				o.logger.Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)
-				o.updateRunStatus(ctx, runState.ID, "error")
-				o.recordRunAudit(ctx, req, runState.ID, "error")
+				o.failRun(ctx, req, runState.ID, "error")
 				return fmt.Errorf("start sidecar: %w", err)
 			}
 		}
@@ -756,8 +754,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		// options and leaves the mount root-owned so UID 1001 can't mkdir.
 		if fileCreds {
 			o.logger.Error("failed to create agent dirs; run carries file-mounted credentials", "error", mkErr, "agent_id", req.AgentID)
-			o.updateRunStatus(ctx, runState.ID, "error")
-			o.recordRunAudit(ctx, req, runState.ID, "error")
+			o.failRun(ctx, req, runState.ID, "error")
 			return fmt.Errorf("create agent dirs (incl. /secrets/%s) for file-mounted credentials: %w — "+
 				"if this is a permission error on /secrets, the Docker daemon likely predates Docker Engine 26 "+
 				"(required for tmpfs uid/gid mount options); upgrade the daemon", req.AgentSlug, mkErr)
@@ -842,8 +839,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		// carries file-mounted credentials must not start without them.
 		if fileCreds {
 			o.logger.Error("failed to write credential files; run carries file-mounted credentials", "error", credWriteErr, "agent_id", req.AgentID)
-			o.updateRunStatus(ctx, runState.ID, "error")
-			o.recordRunAudit(ctx, req, runState.ID, "error")
+			o.failRun(ctx, req, runState.ID, "error")
 			return fmt.Errorf("write credential files for %s: %w — "+
 				"if this is a permission error on /secrets, the Docker daemon likely predates Docker Engine 26 "+
 				"(required for tmpfs uid/gid mount options); upgrade the daemon", req.AgentSlug, credWriteErr)
@@ -871,8 +867,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		if err := mcpAdapter.WriteMCPConfig(ctx, o.container, req.ContainerID, req, workDir, o.logger); err != nil {
 			hasMCP := req.CrewMCPConfigJSON != "" || req.AgentMCPConfigJSON != "" || len(req.MCPServers) > 0
 			if hasMCP {
-				o.updateRunStatus(ctx, runState.ID, "error")
-				o.recordRunAudit(ctx, req, runState.ID, "error")
+				o.failRun(ctx, req, runState.ID, "error")
 				return fmt.Errorf("inject MCP config (%s): %w", req.CLIAdapter, err)
 			}
 			o.logger.Warn("failed to inject MCP config", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)
@@ -960,10 +955,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cIDShort := req.ContainerID
-	if len(cIDShort) > 12 {
-		cIDShort = cIDShort[:12]
-	}
+	cIDShort := shortID(req.ContainerID)
 	o.logger.Info("exec agent", "agent_id", req.AgentID, "container_id", cIDShort, "cmd", cmd)
 
 	// Crow's Nest: emit the command start so the live terminal UI can
@@ -1011,8 +1003,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	result, err := o.container.Exec(execCtx, execCfg)
 	if err != nil {
 		o.logger.Error("exec agent failed", "error", err, "agent_id", req.AgentID)
-		o.updateRunStatus(ctx, runState.ID, "error")
-		o.recordRunAudit(ctx, req, runState.ID, "error")
+		o.failRun(ctx, req, runState.ID, "error")
 		// Emit the terminal exec.command event for the failure path
 		// too so Crow's Nest doesn't show a hanging "running" block
 		// when Docker exec create/attach fails before the command runs.
@@ -1183,35 +1174,12 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// crashes. Uses a fresh context because execCtx is now cancelled.
 	if guard.Tripped() {
 		cleanCtx := context.Background()
-		o.updateRunStatus(cleanCtx, runState.ID, "error")
-		o.recordRunAudit(cleanCtx, req, runState.ID, "error")
+		o.failRun(cleanCtx, req, runState.ID, "error")
 		o.logger.Warn("run aborted by loop guard", "agent_id", req.AgentID, "exec_id", result.ExecID)
-		_, _ = j.Emit(cleanCtx, JournalEntry{
-			WorkspaceID: req.WorkspaceID,
-			CrewID:      req.CrewID,
-			AgentID:     req.AgentID,
-			MissionID:   req.MissionID,
-			Type:        "exec.command",
-			Severity:    "warn",
-			ActorType:   "agent",
-			ActorID:     req.AgentID,
-			Summary:     fmt.Sprintf("%s: ABORTED — stuck loop (same tool call ×%d)", req.AgentSlug, loopGuardThreshold),
-			Payload: map[string]any{
-				"cmd":         cmd,
-				"phase":       "end",
-				"reason":      "loop_detected",
-				"duration_ms": time.Since(execStart).Milliseconds(),
-			},
-			Refs: map[string]any{"chat_id": req.ChatID, "exec_id": result.ExecID},
-		})
-		_ = o.getPresence().Track(cleanCtx, PresenceInput{
-			WorkspaceID: req.WorkspaceID,
-			CrewID:      req.CrewID,
-			AgentID:     req.AgentID,
-			MissionID:   req.MissionID,
-			Status:      "online",
-			Details:     map[string]any{"reason": "loop_detected"},
-		})
+		o.emitExecEnd(cleanCtx, req, result.ExecID, cmd, "warn",
+			fmt.Sprintf("%s: ABORTED — stuck loop (same tool call ×%d)", req.AgentSlug, loopGuardThreshold),
+			execStart, map[string]any{"reason": "loop_detected"})
+		o.markAgentOnline(cleanCtx, req, map[string]any{"reason": "loop_detected"})
 		return fmt.Errorf("run aborted: agent repeated the same tool call %d times (stuck loop)", loopGuardThreshold)
 	}
 
@@ -1220,40 +1188,17 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// sends SIGPIPE to the exec process, which should terminate it.
 	if ctx.Err() != nil {
 		cleanCtx := context.Background()
-		o.updateRunStatus(cleanCtx, runState.ID, "cancelled")
-		o.recordRunAudit(cleanCtx, req, runState.ID, "cancelled")
+		o.failRun(cleanCtx, req, runState.ID, "cancelled")
 		o.logger.Info("run cancelled", "agent_id", req.AgentID, "exec_id", result.ExecID)
 		// Close the Crow's Nest exec.command block and flip the Watch
 		// Roster off busy on cancellation too — otherwise stopped
 		// runs leave the live terminal hanging and presence stuck on
 		// "busy" until the 5-min idle sweeper corrects it. Uses
 		// cleanCtx so journal writes complete even after ctx expired.
-		_, _ = j.Emit(cleanCtx, JournalEntry{
-			WorkspaceID: req.WorkspaceID,
-			CrewID:      req.CrewID,
-			AgentID:     req.AgentID,
-			MissionID:   req.MissionID,
-			Type:        "exec.command",
-			Severity:    "warn",
-			ActorType:   "agent",
-			ActorID:     req.AgentID,
-			Summary:     fmt.Sprintf("%s: CANCELLED (%dms)", req.AgentSlug, time.Since(execStart).Milliseconds()),
-			Payload: map[string]any{
-				"cmd":         cmd,
-				"phase":       "end",
-				"cancelled":   true,
-				"duration_ms": time.Since(execStart).Milliseconds(),
-			},
-			Refs: map[string]any{"chat_id": req.ChatID, "exec_id": result.ExecID},
-		})
-		_ = o.getPresence().Track(cleanCtx, PresenceInput{
-			WorkspaceID: req.WorkspaceID,
-			CrewID:      req.CrewID,
-			AgentID:     req.AgentID,
-			MissionID:   req.MissionID,
-			Status:      "online",
-			Details:     map[string]any{"reason": "cancelled"},
-		})
+		o.emitExecEnd(cleanCtx, req, result.ExecID, cmd, "warn",
+			fmt.Sprintf("%s: CANCELLED (%dms)", req.AgentSlug, time.Since(execStart).Milliseconds()),
+			execStart, map[string]any{"cancelled": true})
+		o.markAgentOnline(cleanCtx, req, map[string]any{"reason": "cancelled"})
 		return fmt.Errorf("run cancelled: %w", ctx.Err())
 	}
 
@@ -1269,35 +1214,13 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	if exitCode != 0 {
 		endSeverity = "warn"
 	}
-	_, _ = j.Emit(ctx, JournalEntry{
-		WorkspaceID: req.WorkspaceID,
-		CrewID:      req.CrewID,
-		AgentID:     req.AgentID,
-		MissionID:   req.MissionID,
-		Type:        "exec.command",
-		Severity:    endSeverity,
-		ActorType:   "agent",
-		ActorID:     req.AgentID,
-		Summary:     fmt.Sprintf("%s: exit %d (%dms)", req.AgentSlug, exitCode, time.Since(execStart).Milliseconds()),
-		Payload: map[string]any{
-			"cmd":         cmd,
-			"phase":       "end",
-			"exit_code":   exitCode,
-			"duration_ms": time.Since(execStart).Milliseconds(),
-			"running":     running,
-		},
-		Refs: map[string]any{"chat_id": req.ChatID, "exec_id": result.ExecID},
-	})
+	o.emitExecEnd(ctx, req, result.ExecID, cmd, endSeverity,
+		fmt.Sprintf("%s: exit %d (%dms)", req.AgentSlug, exitCode, time.Since(execStart).Milliseconds()),
+		execStart, map[string]any{"exit_code": exitCode, "running": running})
 	// Flip agent back to online for the Watch Roster now that the run
 	// is done. If the agent stays in-session, the presence sweeper
 	// still tracks idleness separately.
-	_ = o.getPresence().Track(ctx, PresenceInput{
-		WorkspaceID: req.WorkspaceID,
-		CrewID:      req.CrewID,
-		AgentID:     req.AgentID,
-		MissionID:   req.MissionID,
-		Status:      "online",
-	})
+	o.markAgentOnline(ctx, req, nil)
 
 	if running {
 		// The CLI exec outlives this call (detached session) and may still
@@ -1330,8 +1253,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			execErr = fmt.Errorf("agent exited with code %d — check the journal for details", exitCode)
 		}
 	}
-	o.updateRunStatus(ctx, runState.ID, status)
-	o.recordRunAudit(ctx, req, runState.ID, status)
+	o.failRun(ctx, req, runState.ID, status)
 
 	// Capture the container's actual installed-package state — apt + pip
 	// + npm + os-release. The journal is the source of truth for "what
@@ -1343,6 +1265,56 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	o.recordContainerSnapshot(ctx, req, req.ContainerID)
 
 	return execErr
+}
+
+// shortID truncates a container ID to the familiar 12-char short form for
+// logs and journal payloads. IDs shorter than 12 chars pass through unchanged.
+func shortID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
+// emitExecEnd emits the terminal exec.command journal entry that closes a
+// Crow's Nest command block. The payload always carries cmd, phase:"end" and
+// duration_ms; extra holds the per-outcome fields (exit_code, reason, …).
+func (o *Orchestrator) emitExecEnd(ctx context.Context, req AgentRunRequest, execID string, cmd []string, severity, summary string, execStart time.Time, extra map[string]any) {
+	payload := map[string]any{
+		"cmd":         cmd,
+		"phase":       "end",
+		"duration_ms": time.Since(execStart).Milliseconds(),
+	}
+	for k, v := range extra {
+		payload[k] = v
+	}
+	_, _ = o.getJournal().Emit(ctx, JournalEntry{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		MissionID:   req.MissionID,
+		Type:        "exec.command",
+		Severity:    severity,
+		ActorType:   "agent",
+		ActorID:     req.AgentID,
+		Summary:     summary,
+		Payload:     payload,
+		Refs:        map[string]any{"chat_id": req.ChatID, "exec_id": execID},
+	})
+}
+
+// markAgentOnline flips the Watch Roster presence back to "online" at the end
+// of a run. details is optional (nil on the normal-exit path); terminal error
+// paths pass a reason so the roster shows why the run ended.
+func (o *Orchestrator) markAgentOnline(ctx context.Context, req AgentRunRequest, details map[string]any) {
+	_ = o.getPresence().Track(ctx, PresenceInput{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		MissionID:   req.MissionID,
+		Status:      "online",
+		Details:     details,
+	})
 }
 
 // Start runs the container TTL manager, periodically stopping idle containers
@@ -1393,10 +1365,7 @@ var knownPackageLaunchers = map[string]bool{
 // Best-effort: a journal hiccup never blocks the run — the sidecar still
 // starts; it's operator visibility at stake, not this run's correctness.
 func (o *Orchestrator) emitStaleSidecarSignal(ctx context.Context, req AgentRunRequest, runningHash string) {
-	cIDShort := req.ContainerID
-	if len(cIDShort) > 12 {
-		cIDShort = cIDShort[:12]
-	}
+	cIDShort := shortID(req.ContainerID)
 	const remediation = "crewship crew restart-agents"
 	o.logger.Error("stale sidecar detected: container is serving an OLD crewship-sidecar binary from before the last redeploy — memory recall and egress policy may be silently degraded; recreate the crew's containers ("+remediation+") to pick up the new sidecar",
 		"agent_id", req.AgentID,
