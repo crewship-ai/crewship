@@ -72,7 +72,12 @@ func New(basePath string, cfg Config) (*Engine, error) {
 	}
 
 	dbPath := filepath.Join(basePath, "index.sqlite")
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)")
+	// synchronous(NORMAL) + temp_store(MEMORY) mirror the main DB's rationale
+	// (database.go): NORMAL drops an fsync per write and only risks losing the
+	// last few transactions on an OS-level crash, never corruption. That is safe
+	// here because this per-agent index is fully rebuilt from the memory files at
+	// boot, so a lost tail is reconstructed on the next Reindex.
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=temp_store(MEMORY)")
 	if err != nil {
 		return nil, fmt.Errorf("open memory index: %w", err)
 	}

@@ -382,8 +382,8 @@ WHERE ` + strings.Join(outerConds, " AND ")
 // failed today.
 type RunStatsResult struct {
 	Running     int // run.started without a terminal entry yet
-	Today       int // any run.started with date(ts) = today (UTC)
-	FailedToday int // run.failed or run.timeout with date(ts) = today
+	Today       int // any run.started with ts >= start-of-today (UTC)
+	FailedToday int // run.failed or run.timeout with ts >= start-of-today (UTC)
 }
 
 // RunStats computes the three KPI counters in one query for a workspace.
@@ -411,22 +411,32 @@ WHERE je1.workspace_id = ?
   )`, workspaceID).Scan(&res.Running); err != nil {
 		return res, fmt.Errorf("journal: run stats running: %w", err)
 	}
+	// "Today" is a half-open range [start-of-today UTC, +inf) on the indexed
+	// ts column. The previous form wrapped ts in date() (`date(ts) =
+	// date('now')`), which is non-sargable and forced a full workspace scan.
+	// ts is stored at millisecond precision (boundLayout) and is
+	// lexicographically ordered, so comparing against a lower bound formatted
+	// with the same layout is both correct and index-friendly. formatSinceBound
+	// is the package's canonical lower-bound formatter.
+	now := time.Now().UTC()
+	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	todayBound := formatSinceBound(startOfToday)
 	// Today = run.started rows with ts >= start-of-today UTC
 	if err := db.QueryRowContext(ctx, `
 SELECT COUNT(DISTINCT trace_id)
 FROM journal_entries
 WHERE workspace_id = ?
   AND entry_type = 'run.started'
-  AND date(ts) = date('now')`, workspaceID).Scan(&res.Today); err != nil {
+  AND ts >= ?`, workspaceID, todayBound).Scan(&res.Today); err != nil {
 		return res, fmt.Errorf("journal: run stats today: %w", err)
 	}
-	// FailedToday = run.failed/timeout rows with date(ts)=today
+	// FailedToday = run.failed/timeout rows with ts >= start-of-today UTC
 	if err := db.QueryRowContext(ctx, `
 SELECT COUNT(DISTINCT trace_id)
 FROM journal_entries
 WHERE workspace_id = ?
   AND entry_type IN ('run.failed','run.timeout')
-  AND date(ts) = date('now')`, workspaceID).Scan(&res.FailedToday); err != nil {
+  AND ts >= ?`, workspaceID, todayBound).Scan(&res.FailedToday); err != nil {
 		return res, fmt.Errorf("journal: run stats failed today: %w", err)
 	}
 	return res, nil
@@ -443,22 +453,23 @@ const (
 	RunWindow30d RunInsightsWindow = "30d"
 )
 
-// sqlModifier maps a window to the SQLite datetime() modifier used to derive
+// duration maps a window to the Go duration subtracted from now to derive
 // the cutoff. Unknown values fall back to 24h so a bad query param can't widen
-// the scan to the whole table.
-func (w RunInsightsWindow) sqlModifier() string {
+// the scan to the whole table. Stored timestamps are UTC, so a day is exactly
+// 24h (no DST/calendar arithmetic needed).
+func (w RunInsightsWindow) duration() time.Duration {
 	switch w {
 	case RunWindow7d:
-		return "-7 days"
+		return 7 * 24 * time.Hour
 	case RunWindow30d:
-		return "-30 days"
+		return 30 * 24 * time.Hour
 	default:
-		return "-1 day"
+		return 24 * time.Hour
 	}
 }
 
 // normalize returns the canonical window string, defaulting unknown inputs to
-// 24h (matching sqlModifier).
+// 24h (matching duration).
 func (w RunInsightsWindow) normalize() string {
 	switch w {
 	case RunWindow7d:
@@ -537,15 +548,18 @@ func RunInsights(ctx context.Context, db *sql.DB, workspaceID string, window Run
 	// entries by ts >= cutoff is safe: a run's entries cluster around its start,
 	// so a run.started inside the window keeps its terminal entry too.
 	//
-	// datetime(ts) normalises the compare: ts is stored RFC3339
-	// ("2006-01-02T15:04:05.000Z") while datetime('now', ?) yields
-	// "YYYY-MM-DD HH:MM:SS". A raw string compare between the two formats would
-	// admit same-day rows before the cutoff time ('T' > ' '); wrapping both in
-	// datetime() puts them in one canonical form.
+	// The cutoff is computed in Go and formatted with the SAME layout the writer
+	// uses (boundLayout, via formatSinceBound), so `ts >= ?` is a plain
+	// lexicographic range on the indexed ts column — sargable. The previous form
+	// wrapped ts in datetime() to reconcile the stored format with
+	// datetime('now', ?)'s "YYYY-MM-DD HH:MM:SS" output, but that made the
+	// predicate non-sargable and forced a full scan. Formatting both sides
+	// identically removes the need for the function wrap entirely.
+	cutoff := formatSinceBound(time.Now().UTC().Add(-window.duration()))
 	cte, cteArgs := runAggregatesCTE(
 		[]string{"started_at", "finished_at", "terminal_type", "agent_id",
 			"started_payload", "terminal_payload"},
-		"workspace_id = ? AND trace_id IS NOT NULL AND entry_type LIKE 'run.%' AND datetime(ts) >= datetime('now', ?)")
+		"workspace_id = ? AND trace_id IS NOT NULL AND entry_type LIKE 'run.%' AND ts >= ?")
 	q := cte + `
 SELECT started_at, finished_at, terminal_type, agent_id, started_payload, terminal_payload
 FROM run_aggregates
@@ -554,11 +568,11 @@ ORDER BY started_at DESC
 LIMIT ?`
 
 	// Placeholder order: 3 terminal IN-lists in the CTE SELECT, then
-	// workspace_id, the window modifier, and the LIMIT (+1 to detect overflow).
+	// workspace_id, the window cutoff, and the LIMIT (+1 to detect overflow).
 	args := make([]any, 0, len(cteArgs)+3)
 	args = append(args, cteArgs...)
 	args = append(args, workspaceID)
-	args = append(args, window.sqlModifier())
+	args = append(args, cutoff)
 	args = append(args, maxInsightRows+1)
 
 	rows, err := db.QueryContext(ctx, q, args...)
