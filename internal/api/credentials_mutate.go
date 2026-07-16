@@ -7,6 +7,7 @@ package api
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -14,6 +15,23 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
+
+// encryptOrError encrypts a credential value for storage, handling the
+// failure tail that Create / Update / Rotate all shared: log the error
+// under logMsg and write the canonical "Failed to encrypt credential"
+// 500. The bool reports success — when false the response has already
+// been written and the caller should return immediately.
+func encryptOrError(w http.ResponseWriter, logger *slog.Logger, logMsg, value string) (string, bool) {
+	encrypted, err := encryption.Encrypt(value)
+	if err != nil {
+		if logger != nil {
+			logger.Error(logMsg, "error", err)
+		}
+		replyError(w, http.StatusInternalServerError, "Failed to encrypt credential")
+		return "", false
+	}
+	return encrypted, true
+}
 
 // provisionedForServiceRe enforces the canonical `<crew>/<service>`
 // shape: two non-empty DNS-label-safe segments separated by exactly
@@ -350,10 +368,8 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	credID := generateCUID()
 
-	encryptedValue, err := encryption.Encrypt(req.Value)
-	if err != nil {
-		h.logger.Error("encrypt credential", "error", err)
-		replyError(w, http.StatusInternalServerError, "Failed to encrypt credential")
+	encryptedValue, ok := encryptOrError(w, h.logger, "encrypt credential", req.Value)
+	if !ok {
 		return
 	}
 
@@ -489,6 +505,103 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 // Get returns a single credential by ID (without the secret value).
 // GET /api/v1/credentials/{credentialId}
 
+// validateCredentialUpdate is the Update handler's merged-payload
+// validation: overlay patch fields onto current row state, then enforce
+// the closed enum + per-type invariants the Create path checks (shared
+// via validateCredentialType / credentialValueShapeError). Without
+// this, a PATCH can drop a credential into an inconsistent state — set
+// type=USERPASS without a username, change type to SSH_KEY while the
+// stored value is a raw API key, paste a public key over an existing
+// SSH_KEY's value, etc. — that the resolver then trips over at
+// agent-run time. Create blocks all of these; Update used to silently
+// accept them.
+//
+// JSON-shape gating: type/username/value must be either absent or
+// a string (or null, where the column is nullable). A naked
+// `v.(string)` assertion with `ok` silently treats a non-string
+// like the field is missing, but the downstream `for jsonKey, col`
+// loop still calls `ub.Set(col, val)` with the raw `any`, writing
+// e.g. a numeric `{"type": 123}` straight into the TEXT column
+// as "123" — past the closed-enum check, past any sane downstream
+// resolver behaviour. Fail closed up-front instead.
+//
+// Returns "" when the merged payload is valid, otherwise the
+// end-user-readable message for the 400 response body.
+func validateCredentialUpdate(body map[string]interface{}, currentType string, currentUsername sql.NullString) string {
+	mergedType := currentType
+	if v, ok := body["type"]; ok {
+		s, isStr := v.(string)
+		if !isStr {
+			return "type must be a string"
+		}
+		mergedType = s
+	}
+	if msg := validateCredentialType(mergedType); msg != "" {
+		return msg
+	}
+
+	// Per-type field rules. Skip value-shape checks for SSH_KEY and
+	// CERTIFICATE when the patch doesn't touch `value` — we trust the
+	// stored encrypted blob was PEM-shaped when it was written by
+	// Create. Only the cases where the patch could newly violate the
+	// invariant need to fail closed here.
+	valueSent := false
+	valueStr := ""
+	if v, ok := body["value"]; ok {
+		s, isStr := v.(string)
+		if !isStr {
+			return "value must be a string"
+		}
+		if s != "" {
+			valueSent = true
+			valueStr = s
+		}
+	}
+	// Per-value size cap (mirrors validateCredentialPayload on Create).
+	if valueSent && len(valueStr) > maxCredentialValueLen {
+		return credentialValueTooLongMsg
+	}
+	typeChanged := mergedType != currentType
+
+	switch mergedType {
+	case CredTypeUserPass:
+		// USERPASS must always end up with a non-empty username.
+		// Effective username = patch username if sent, else current.
+		// null clears it (rejected below); non-string is a malformed
+		// request (rejected up-front, like type/value above).
+		effectiveUsername := currentUsername.String
+		if v, ok := body["username"]; ok {
+			switch s := v.(type) {
+			case string:
+				effectiveUsername = s
+			case nil:
+				effectiveUsername = ""
+			default:
+				return "username must be a string"
+			}
+		}
+		if strings.TrimSpace(effectiveUsername) == "" {
+			return "username is required for USERPASS credentials"
+		}
+
+	case CredTypeSSHKey, CredTypeCertificate:
+		// Changing TO SSH_KEY/CERTIFICATE requires a new value — we
+		// can't validate the existing encrypted blob's shape without
+		// decrypting it in the hot path, and the existing value almost
+		// certainly isn't PEM-shaped if the row was previously
+		// API_KEY/SECRET/etc.
+		if typeChanged && !valueSent {
+			return "changing type to " + mergedType + " requires a new value"
+		}
+		if valueSent {
+			if msg := credentialValueShapeError(mergedType, valueStr); msg != "" {
+				return msg
+			}
+		}
+	}
+	return ""
+}
+
 func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	credID := r.PathValue("credentialId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -524,109 +637,10 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Merged-payload validation: overlay patch fields onto current row
-	// state, then enforce the closed enum + per-type invariants the
-	// Create path checks. Without this, a PATCH can drop a credential
-	// into an inconsistent state — set type=USERPASS without a
-	// username, change type to SSH_KEY while the stored value is a
-	// raw API key, paste a public key over an existing SSH_KEY's
-	// value, etc. — that the resolver then trips over at agent-run
-	// time. Create blocks all of these; Update used to silently
-	// accept them.
-	//
-	// JSON-shape gating: type/username/value must be either absent or
-	// a string (or null, where the column is nullable). A naked
-	// `v.(string)` assertion with `ok` silently treats a non-string
-	// like the field is missing, but the downstream `for jsonKey, col`
-	// loop still calls `ub.Set(col, val)` with the raw `any`, writing
-	// e.g. a numeric `{"type": 123}` straight into the TEXT column
-	// as "123" — past the closed-enum check, past any sane downstream
-	// resolver behaviour. Fail closed up-front instead.
-	mergedType := currentType
-	if v, ok := body["type"]; ok {
-		s, isStr := v.(string)
-		if !isStr {
-			replyError(w, http.StatusBadRequest, "type must be a string")
-			return
-		}
-		mergedType = s
-	}
-	if _, ok := validCredentialTypes[mergedType]; !ok {
-		replyError(w, http.StatusBadRequest, "type must be one of: AI_CLI_TOKEN, API_KEY, CLI_TOKEN, SECRET, OAUTH2, USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET, ENDPOINT_URL")
+	// Merged-payload validation — see validateCredentialUpdate.
+	if msg := validateCredentialUpdate(body, currentType, currentUsername); msg != "" {
+		replyError(w, http.StatusBadRequest, msg)
 		return
-	}
-
-	// Per-type field rules. Skip value-shape checks for SSH_KEY and
-	// CERTIFICATE when the patch doesn't touch `value` — we trust the
-	// stored encrypted blob was PEM-shaped when it was written by
-	// Create. Only the cases where the patch could newly violate the
-	// invariant need to fail closed here.
-	valueSent := false
-	valueStr := ""
-	if v, ok := body["value"]; ok {
-		s, isStr := v.(string)
-		if !isStr {
-			replyError(w, http.StatusBadRequest, "value must be a string")
-			return
-		}
-		if s != "" {
-			valueSent = true
-			valueStr = s
-		}
-	}
-	// Per-value size cap (mirrors validateCredentialPayload on Create).
-	if valueSent && len(valueStr) > maxCredentialValueLen {
-		replyError(w, http.StatusBadRequest, credentialValueTooLongMsg)
-		return
-	}
-	typeChanged := mergedType != currentType
-
-	switch mergedType {
-	case CredTypeUserPass:
-		// USERPASS must always end up with a non-empty username.
-		// Effective username = patch username if sent, else current.
-		// null clears it (rejected below); non-string is a malformed
-		// request (rejected up-front, like type/value above).
-		effectiveUsername := currentUsername.String
-		if v, ok := body["username"]; ok {
-			switch s := v.(type) {
-			case string:
-				effectiveUsername = s
-			case nil:
-				effectiveUsername = ""
-			default:
-				replyError(w, http.StatusBadRequest, "username must be a string")
-				return
-			}
-		}
-		if strings.TrimSpace(effectiveUsername) == "" {
-			replyError(w, http.StatusBadRequest, "username is required for USERPASS credentials")
-			return
-		}
-
-	case CredTypeSSHKey:
-		// Changing TO SSH_KEY requires a new value — we can't validate
-		// the existing encrypted blob's shape without decrypting it
-		// in the hot path, and the existing value almost certainly
-		// isn't PEM-shaped if the row was previously API_KEY/SECRET/etc.
-		if typeChanged && !valueSent {
-			replyError(w, http.StatusBadRequest, "changing type to SSH_KEY requires a new value")
-			return
-		}
-		if valueSent && !looksLikePEM(valueStr, "PRIVATE KEY") {
-			replyError(w, http.StatusBadRequest, "ssh key must be a PEM-encoded private key (begins with -----BEGIN ... PRIVATE KEY-----)")
-			return
-		}
-
-	case CredTypeCertificate:
-		if typeChanged && !valueSent {
-			replyError(w, http.StatusBadRequest, "changing type to CERTIFICATE requires a new value")
-			return
-		}
-		if valueSent && !looksLikePEM(valueStr, "CERTIFICATE") {
-			replyError(w, http.StatusBadRequest, "certificate must be PEM-encoded (begins with -----BEGIN CERTIFICATE-----)")
-			return
-		}
 	}
 
 	// Note: "status" is intentionally excluded to prevent users from
@@ -707,10 +721,8 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// Handle value separately (needs encryption)
 	if val, ok := body["value"]; ok {
 		if s, ok := val.(string); ok && s != "" {
-			encrypted, err := encryption.Encrypt(s)
-			if err != nil {
-				h.logger.Error("encrypt credential value", "error", err)
-				replyError(w, http.StatusInternalServerError, "Failed to encrypt credential")
+			encrypted, encOK := encryptOrError(w, h.logger, "encrypt credential value", s)
+			if !encOK {
 				return
 			}
 			ub.Set("encrypted_value", encrypted)

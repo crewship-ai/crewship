@@ -117,86 +117,22 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.CrewID == "" && req.CrewSlug == "" {
-		replyError(w, http.StatusBadRequest, "crew_id or crew_slug is required")
-		return
-	}
-	if req.CrewID != "" && req.CrewSlug != "" {
-		replyError(w, http.StatusBadRequest, "crew_id and crew_slug are mutually exclusive")
-		return
-	}
-	if strings.TrimSpace(req.TemplateSlug) == "" {
-		replyError(w, http.StatusBadRequest, "template_slug is required")
-		return
-	}
-	if strings.TrimSpace(req.Reason) == "" {
-		replyError(w, http.StatusBadRequest, "reason is required (audit + history trail)")
+	if !validateHireRequest(w, req) {
 		return
 	}
 
-	// Clamp TTL into a sane window. We do NOT 400 on out-of-range
-	// values because the CLI default is 0 (let the server decide); a
-	// hard reject there would punish the happy path.
-	ttlMin := req.TTLMinutes
-	if ttlMin <= 0 {
-		ttlMin = defaultHireTTLMinutes
-	}
-	if ttlMin > maxHireTTLMinutes {
-		ttlMin = maxHireTTLMinutes
-	}
+	ttlMin := clampHireTTL(req.TTLMinutes)
 
-	// 1. Resolve crew → enforce workspace scope. Soft-delete check so
-	// a deleted crew can't be hired into via a stale slug from a
-	// long-running session.
-	var (
-		crewID      string
-		crewSlug    string
-		maxAgents   int
-		crewLookup  = req.CrewID
-		crewLookupB = "id"
-	)
-	if crewLookup == "" {
-		crewLookup = req.CrewSlug
-		crewLookupB = "slug"
-	}
-	query := fmt.Sprintf(
-		`SELECT id, slug, max_ephemeral_agents FROM crews
-		 WHERE %s = ? AND workspace_id = ? AND deleted_at IS NULL`, crewLookupB)
-	err := h.db.QueryRowContext(r.Context(), query, crewLookup, workspaceID).
-		Scan(&crewID, &crewSlug, &maxAgents)
-	if errors.Is(err, sql.ErrNoRows) {
-		replyError(w, http.StatusNotFound, "Crew not found in this workspace")
-		return
-	}
-	if err != nil {
-		replyInternalError(w, h.logger, "hire: load crew", err)
+	// 1. Resolve crew → enforce workspace scope.
+	crewID, crewSlug, maxAgents, ok := h.resolveHireCrew(w, r, req, workspaceID)
+	if !ok {
 		return
 	}
 
-	// 2. Resolve parent_lead_id (if provided) — same workspace check
-	// as the crew. A LEAD from a different workspace/crew CANNOT
-	// parent an ephemeral here; that would let cross-tenant data
-	// flow through the parent edge.
-	var parentLeadID *string
-	if strings.TrimSpace(req.ParentLeadID) != "" {
-		var leadID, leadCrewID string
-		err := h.db.QueryRowContext(r.Context(), `
-			SELECT id, COALESCE(crew_id, '') FROM agents
-			WHERE id = ? AND workspace_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL`,
-			req.ParentLeadID, workspaceID).Scan(&leadID, &leadCrewID)
-		if errors.Is(err, sql.ErrNoRows) {
-			replyError(w, http.StatusBadRequest, "parent_lead_id not found or not a LEAD in this workspace")
-			return
-		}
-		if err != nil {
-			replyInternalError(w, h.logger, "hire: load parent lead", err)
-			return
-		}
-		if leadCrewID != crewID {
-			replyError(w, http.StatusBadRequest, "parent_lead_id belongs to a different crew")
-			return
-		}
-		parentLeadID = &leadID
+	// 2. Resolve parent_lead_id (if provided).
+	parentLeadID, ok := h.resolveHireParentLead(w, r, req, crewID, workspaceID)
+	if !ok {
+		return
 	}
 
 	// 3. Resolve template → name + default LLM. We accept built-in
@@ -217,50 +153,16 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 		model = tmplDefaultModel
 	}
 
-	// 4. Policy gate. nil resolver path keeps tests compiling against
-	// the legacy NewAgentHandler — defaults to "guided" (inbox
-	// approve), which is the conservative behavior PR-D ships with
-	// until the router calls SetPolicyResolver.
-	decision := policy.DecisionInboxApprove
-	autonomyLevel := policy.AutonomyGuided
-	if h.policyResolver != nil {
-		pol, perr := h.policyResolver.Resolve(r.Context(), crewID)
-		if perr != nil {
-			h.logger.Error("hire: resolve policy", "crew_id", crewID, "error", perr)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
-			return
-		}
-		decision = pol.DecideAction(policy.ActionEphemeralSpawn)
-		autonomyLevel = pol.AutonomyLevel
-	}
-	if decision == policy.DecisionRejected {
-		// Structured 403 includes the autonomy level so the CLI can
-		// suggest the right `crewship policy set` invocation in its
-		// error message instead of just bouncing the user.
-		writeJSON(w, http.StatusForbidden, map[string]string{
-			"error":          "Ephemeral hire rejected by policy",
-			"reason":         "autonomy_level=" + string(autonomyLevel) + " forbids ephemeral_spawn",
-			"crew_id":        crewID,
-			"autonomy_level": string(autonomyLevel),
-		})
+	// 4. Policy gate.
+	decision, autonomyLevel, ok := h.resolveHirePolicy(w, r, crewID)
+	if !ok {
 		return
 	}
 
-	// 5. Per-crew quota + insert, wrapped in a single BEGIN IMMEDIATE
-	// transaction so a concurrent hire on the same crew cannot
-	// oversubscribe max_ephemeral_agents. Without the lock, the
-	// COUNT(*) + INSERT are separate operations: two simultaneous
-	// hires at the quota boundary each see (liveCount == max-1) and
-	// each commit a row, pushing the crew to (max+1).
-	//
-	// Counts only LIVE ephemerals (ghosts are preserved for audit
-	// and DO NOT consume a slot). Run after the policy gate so a
-	// strict-rejected request never touches the quota counter —
+	// 5. Per-crew quota + insert — see insertHireAgent for the
+	// BEGIN IMMEDIATE concurrency rationale. Run after the policy gate
+	// so a strict-rejected request never touches the quota counter —
 	// keeps the 429 surface honest about the budget.
-	//
-	// sql.LevelSerializable → BEGIN IMMEDIATE on modernc.org/sqlite
-	// (same idiom used by internal/backup/lock.go +
-	// internal/api/memory_config_handler.go).
 
 	// 6. Compute row identity + lifecycle stamps outside the tx so
 	// these are stable across a retry (if a future caller adds one).
@@ -303,54 +205,21 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 		llmModelArg = &model
 	}
 
-	tx, err := h.db.BeginTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelSerializable})
-	if err != nil {
-		replyInternalError(w, h.logger, "hire: begin tx", err)
-		return
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	var liveCount int
-	if err := tx.QueryRowContext(r.Context(), `
-		SELECT COUNT(*) FROM agents
-		WHERE crew_id = ? AND ephemeral = 1
-		  AND expired_at IS NULL AND deleted_at IS NULL`,
-		crewID).Scan(&liveCount); err != nil {
-		h.logger.Error("hire: count live ephemerals", "crew_id", crewID, "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if liveCount >= maxAgents {
-		writeJSON(w, http.StatusTooManyRequests, map[string]any{
-			"error":   "Ephemeral quota reached",
-			"reason":  fmt.Sprintf("crew has %d live ephemerals (max %d); rehire a ghost or raise crews.max_ephemeral_agents", liveCount, maxAgents),
-			"crew_id": crewID,
-			"live":    liveCount,
-			"max":     maxAgents,
-		})
-		return
-	}
-
-	if _, err = tx.ExecContext(r.Context(), `
-		INSERT INTO agents (
-			id, crew_id, workspace_id, name, slug, agent_role, status,
-			cli_adapter, llm_provider, llm_model, tool_profile, memory_enabled,
-			ephemeral, expires_at, parent_lead_id, hire_reason,
-			created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, 'AGENT', ?,
-		        'CLAUDE_CODE', ?, ?, 'CODING', 1,
-		        1, ?, ?, ?,
-		        ?, ?)`,
-		agentID, crewID, workspaceID, name, slug, initialStatus,
-		llmProviderArg, llmModelArg,
-		expiresAt, parentLeadID, hireReason,
-		createdAt, createdAt,
-	); err != nil {
-		replyInternalError(w, h.logger, "hire: insert agent", err)
-		return
-	}
-	if err := tx.Commit(); err != nil {
-		replyInternalError(w, h.logger, "hire: commit tx", err)
+	if !h.insertHireAgent(w, r, hireInsert{
+		agentID:       agentID,
+		crewID:        crewID,
+		workspaceID:   workspaceID,
+		name:          name,
+		slug:          slug,
+		initialStatus: initialStatus,
+		llmProvider:   llmProviderArg,
+		llmModel:      llmModelArg,
+		expiresAt:     expiresAt,
+		parentLeadID:  parentLeadID,
+		hireReason:    hireReason,
+		createdAt:     createdAt,
+		maxAgents:     maxAgents,
+	}) {
 		return
 	}
 
@@ -361,57 +230,10 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 7. Inbox + audit by decision.
-	inboxID := ""
-	pendingReview := false
-	httpStatus := http.StatusCreated
-	switch decision {
-	case policy.DecisionInboxApprove:
-		// Blocking inbox item — the agent row exists in
-		// PENDING_REVIEW; the approve-hire handler is the ONLY path
-		// to flip it to IDLE. The inbox waitpoint is what surfaces
-		// the approve button to the operator, so if the write fails
-		// the agent is bricked (status=PENDING_REVIEW with no
-		// inbox row to act on). Fail the request loudly so the
-		// caller can retry — the deferred Rollback above already
-		// undid the agent INSERT.
-		inboxID = generateCUID()
-		if err := h.writeInboxItem(r, inboxID, workspaceID, agentID, crewID, name,
-			"hire", hireInboxTitle(name, ttlMin), hireInboxBody(req.Reason, req.TemplateSlug, ttlMin, model),
-			userID, true); err != nil {
-			h.logger.Error("hire: required inbox waitpoint write failed",
-				"error", err, "agent_id", agentID, "inbox_id", inboxID)
-			// Roll back the agent row so the caller's retry doesn't
-			// trip the UNIQUE(workspace_id, slug) constraint and so
-			// quota stays consistent. The tx was already committed
-			// above, so issue a compensating DELETE here.
-			if _, derr := h.db.ExecContext(r.Context(),
-				`DELETE FROM agents WHERE id = ? AND workspace_id = ?`,
-				agentID, workspaceID); derr != nil {
-				h.logger.Error("hire: compensating delete after inbox failure",
-					"error", derr, "agent_id", agentID)
-			}
-			replyError(w, http.StatusInternalServerError, "Internal server error")
-			return
-		}
-		pendingReview = true
-		httpStatus = http.StatusAccepted
-	case policy.DecisionAutoLogInbox:
-		// Non-blocking inbox visibility entry. The agent is already
-		// live; we're just letting the operator audit after the fact.
-		// A failed inbox write here is a missed audit row, not a
-		// bricked agent — log and continue.
-		inboxID = generateCUID()
-		if err := h.writeInboxItem(r, inboxID, workspaceID, agentID, crewID, name,
-			"hire", hireInboxTitle(name, ttlMin), hireInboxBody(req.Reason, req.TemplateSlug, ttlMin, model),
-			userID, false); err != nil {
-			h.logger.Warn("hire: non-blocking inbox write failed",
-				"error", err, "agent_id", agentID)
-			inboxID = ""
-		}
-	case policy.DecisionAutoLogJournal, policy.DecisionAutoJournal:
-		// journal-only; the WriteAuditLog below covers it. No inbox
-		// noise per PRD §6 F5 (trusted/full crews don't want a hire
-		// per inbox row).
+	inboxID, pendingReview, httpStatus, ok := h.dispatchHireInbox(w, r, decision,
+		workspaceID, agentID, crewID, name, req, ttlMin, model, userID)
+	if !ok {
+		return
 	}
 
 	// Auto-assign an available Anthropic credential to the freshly-hired
@@ -467,6 +289,284 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 		InboxItemID:   inboxID,
 		Decision:      string(decision),
 	})
+}
+
+// validateHireRequest enforces the hire request-shape rules: exactly
+// one of crew_id/crew_slug, a template slug, and a non-empty reason
+// (audit + history trail). On violation it writes the 400 and returns
+// false; callers should return immediately.
+func validateHireRequest(w http.ResponseWriter, req hireRequest) bool {
+	if req.CrewID == "" && req.CrewSlug == "" {
+		replyError(w, http.StatusBadRequest, "crew_id or crew_slug is required")
+		return false
+	}
+	if req.CrewID != "" && req.CrewSlug != "" {
+		replyError(w, http.StatusBadRequest, "crew_id and crew_slug are mutually exclusive")
+		return false
+	}
+	if strings.TrimSpace(req.TemplateSlug) == "" {
+		replyError(w, http.StatusBadRequest, "template_slug is required")
+		return false
+	}
+	if strings.TrimSpace(req.Reason) == "" {
+		replyError(w, http.StatusBadRequest, "reason is required (audit + history trail)")
+		return false
+	}
+	return true
+}
+
+// clampHireTTL clamps a requested TTL into the sane
+// [defaultHireTTLMinutes, maxHireTTLMinutes] window. We do NOT 400 on
+// out-of-range values because the CLI default is 0 (let the server
+// decide); a hard reject there would punish the happy path. Shared by
+// Hire and Rehire so both lifecycles size TTLs identically.
+func clampHireTTL(ttlMinutes int) int {
+	ttlMin := ttlMinutes
+	if ttlMin <= 0 {
+		ttlMin = defaultHireTTLMinutes
+	}
+	if ttlMin > maxHireTTLMinutes {
+		ttlMin = maxHireTTLMinutes
+	}
+	return ttlMin
+}
+
+// resolveHireCrew resolves the target crew by id or slug and enforces
+// workspace scope. Soft-delete check so a deleted crew can't be hired
+// into via a stale slug from a long-running session. On failure the
+// 404/500 has been written and ok is false.
+func (h *AgentHandler) resolveHireCrew(w http.ResponseWriter, r *http.Request, req hireRequest, workspaceID string) (crewID, crewSlug string, maxAgents int, ok bool) {
+	crewLookup := req.CrewID
+	crewLookupB := "id"
+	if crewLookup == "" {
+		crewLookup = req.CrewSlug
+		crewLookupB = "slug"
+	}
+	query := fmt.Sprintf(
+		`SELECT id, slug, max_ephemeral_agents FROM crews
+		 WHERE %s = ? AND workspace_id = ? AND deleted_at IS NULL`, crewLookupB)
+	err := h.db.QueryRowContext(r.Context(), query, crewLookup, workspaceID).
+		Scan(&crewID, &crewSlug, &maxAgents)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "Crew not found in this workspace")
+		return "", "", 0, false
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "hire: load crew", err)
+		return "", "", 0, false
+	}
+	return crewID, crewSlug, maxAgents, true
+}
+
+// resolveHireParentLead validates req.ParentLeadID (when provided) —
+// same workspace check as the crew. A LEAD from a different
+// workspace/crew CANNOT parent an ephemeral here; that would let
+// cross-tenant data flow through the parent edge. Returns (nil, true)
+// when no parent was requested; on failure the 400/500 has been
+// written and ok is false.
+func (h *AgentHandler) resolveHireParentLead(w http.ResponseWriter, r *http.Request, req hireRequest, crewID, workspaceID string) (*string, bool) {
+	if strings.TrimSpace(req.ParentLeadID) == "" {
+		return nil, true
+	}
+	var leadID, leadCrewID string
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT id, COALESCE(crew_id, '') FROM agents
+		WHERE id = ? AND workspace_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL`,
+		req.ParentLeadID, workspaceID).Scan(&leadID, &leadCrewID)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusBadRequest, "parent_lead_id not found or not a LEAD in this workspace")
+		return nil, false
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "hire: load parent lead", err)
+		return nil, false
+	}
+	if leadCrewID != crewID {
+		replyError(w, http.StatusBadRequest, "parent_lead_id belongs to a different crew")
+		return nil, false
+	}
+	return &leadID, true
+}
+
+// resolveHirePolicy runs the per-crew autonomy gate for a hire. nil
+// resolver path keeps tests compiling against the legacy
+// NewAgentHandler — defaults to "guided" (inbox approve), which is the
+// conservative behavior PR-D ships with until the router calls
+// SetPolicyResolver. On rejection (or resolver error) the 403/500 has
+// been written and ok is false.
+func (h *AgentHandler) resolveHirePolicy(w http.ResponseWriter, r *http.Request, crewID string) (policy.Decision, policy.AutonomyLevel, bool) {
+	decision := policy.DecisionInboxApprove
+	autonomyLevel := policy.AutonomyGuided
+	if h.policyResolver != nil {
+		pol, perr := h.policyResolver.Resolve(r.Context(), crewID)
+		if perr != nil {
+			h.logger.Error("hire: resolve policy", "crew_id", crewID, "error", perr)
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return decision, autonomyLevel, false
+		}
+		decision = pol.DecideAction(policy.ActionEphemeralSpawn)
+		autonomyLevel = pol.AutonomyLevel
+	}
+	if decision == policy.DecisionRejected {
+		// Structured 403 includes the autonomy level so the CLI can
+		// suggest the right `crewship policy set` invocation in its
+		// error message instead of just bouncing the user.
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error":          "Ephemeral hire rejected by policy",
+			"reason":         "autonomy_level=" + string(autonomyLevel) + " forbids ephemeral_spawn",
+			"crew_id":        crewID,
+			"autonomy_level": string(autonomyLevel),
+		})
+		return decision, autonomyLevel, false
+	}
+	return decision, autonomyLevel, true
+}
+
+// hireInsert carries the precomputed row identity + lifecycle stamps
+// from Hire into insertHireAgent so the quota-guarded INSERT doesn't
+// need a dozen positional parameters.
+type hireInsert struct {
+	agentID       string
+	crewID        string
+	workspaceID   string
+	name          string
+	slug          string
+	initialStatus string
+	llmProvider   *string
+	llmModel      *string
+	expiresAt     string
+	parentLeadID  *string
+	hireReason    string
+	createdAt     string
+	maxAgents     int
+}
+
+// insertHireAgent runs the per-crew quota check + agent INSERT inside a
+// single BEGIN IMMEDIATE transaction (sql.LevelSerializable →
+// BEGIN IMMEDIATE on modernc.org/sqlite) so a concurrent hire on the
+// same crew cannot oversubscribe max_ephemeral_agents. Without the
+// lock, the COUNT(*) + INSERT are separate operations: two simultaneous
+// hires at the quota boundary each see (liveCount == max-1) and each
+// commit a row, pushing the crew to (max+1).
+//
+// Counts only LIVE ephemerals (ghosts are preserved for audit and DO
+// NOT consume a slot). On failure (429 quota / 500 DB error) the
+// response has been written and false is returned.
+func (h *AgentHandler) insertHireAgent(w http.ResponseWriter, r *http.Request, ins hireInsert) bool {
+	tx, err := h.db.BeginTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		replyInternalError(w, h.logger, "hire: begin tx", err)
+		return false
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var liveCount int
+	if err := tx.QueryRowContext(r.Context(), `
+		SELECT COUNT(*) FROM agents
+		WHERE crew_id = ? AND ephemeral = 1
+		  AND expired_at IS NULL AND deleted_at IS NULL`,
+		ins.crewID).Scan(&liveCount); err != nil {
+		h.logger.Error("hire: count live ephemerals", "crew_id", ins.crewID, "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return false
+	}
+	if liveCount >= ins.maxAgents {
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{
+			"error":   "Ephemeral quota reached",
+			"reason":  fmt.Sprintf("crew has %d live ephemerals (max %d); rehire a ghost or raise crews.max_ephemeral_agents", liveCount, ins.maxAgents),
+			"crew_id": ins.crewID,
+			"live":    liveCount,
+			"max":     ins.maxAgents,
+		})
+		return false
+	}
+
+	if _, err = tx.ExecContext(r.Context(), `
+		INSERT INTO agents (
+			id, crew_id, workspace_id, name, slug, agent_role, status,
+			cli_adapter, llm_provider, llm_model, tool_profile, memory_enabled,
+			ephemeral, expires_at, parent_lead_id, hire_reason,
+			created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, 'AGENT', ?,
+		        'CLAUDE_CODE', ?, ?, 'CODING', 1,
+		        1, ?, ?, ?,
+		        ?, ?)`,
+		ins.agentID, ins.crewID, ins.workspaceID, ins.name, ins.slug, ins.initialStatus,
+		ins.llmProvider, ins.llmModel,
+		ins.expiresAt, ins.parentLeadID, ins.hireReason,
+		ins.createdAt, ins.createdAt,
+	); err != nil {
+		replyInternalError(w, h.logger, "hire: insert agent", err)
+		return false
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "hire: commit tx", err)
+		return false
+	}
+	return true
+}
+
+// dispatchHireInbox writes the per-decision inbox item (blocking
+// waitpoint for guided, informational for trusted, none for full) after
+// the agent row has been committed. Returns the inbox id (empty when no
+// row was written), whether the hire is pending review, and the HTTP
+// status the response should carry. ok=false means the blocking-inbox
+// write failed: the agent row has been compensating-deleted and the 500
+// already written — the caller should return immediately.
+func (h *AgentHandler) dispatchHireInbox(w http.ResponseWriter, r *http.Request, decision policy.Decision,
+	workspaceID, agentID, crewID, name string, req hireRequest, ttlMin int, model, userID string) (string, bool, int, bool) {
+	inboxID := ""
+	pendingReview := false
+	httpStatus := http.StatusCreated
+	switch decision {
+	case policy.DecisionInboxApprove:
+		// Blocking inbox item — the agent row exists in
+		// PENDING_REVIEW; the approve-hire handler is the ONLY path
+		// to flip it to IDLE. The inbox waitpoint is what surfaces
+		// the approve button to the operator, so if the write fails
+		// the agent is bricked (status=PENDING_REVIEW with no
+		// inbox row to act on). Fail the request loudly so the
+		// caller can retry.
+		inboxID = generateCUID()
+		if err := h.writeInboxItem(r, inboxID, workspaceID, agentID, crewID, name,
+			"hire", hireInboxTitle(name, ttlMin), hireInboxBody(req.Reason, req.TemplateSlug, ttlMin, model),
+			userID, true); err != nil {
+			h.logger.Error("hire: required inbox waitpoint write failed",
+				"error", err, "agent_id", agentID, "inbox_id", inboxID)
+			// Roll back the agent row so the caller's retry doesn't
+			// trip the UNIQUE(workspace_id, slug) constraint and so
+			// quota stays consistent. The tx was already committed
+			// above, so issue a compensating DELETE here.
+			if _, derr := h.db.ExecContext(r.Context(),
+				`DELETE FROM agents WHERE id = ? AND workspace_id = ?`,
+				agentID, workspaceID); derr != nil {
+				h.logger.Error("hire: compensating delete after inbox failure",
+					"error", derr, "agent_id", agentID)
+			}
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return "", false, 0, false
+		}
+		pendingReview = true
+		httpStatus = http.StatusAccepted
+	case policy.DecisionAutoLogInbox:
+		// Non-blocking inbox visibility entry. The agent is already
+		// live; we're just letting the operator audit after the fact.
+		// A failed inbox write here is a missed audit row, not a
+		// bricked agent — log and continue.
+		inboxID = generateCUID()
+		if err := h.writeInboxItem(r, inboxID, workspaceID, agentID, crewID, name,
+			"hire", hireInboxTitle(name, ttlMin), hireInboxBody(req.Reason, req.TemplateSlug, ttlMin, model),
+			userID, false); err != nil {
+			h.logger.Warn("hire: non-blocking inbox write failed",
+				"error", err, "agent_id", agentID)
+			inboxID = ""
+		}
+	case policy.DecisionAutoLogJournal, policy.DecisionAutoJournal:
+		// journal-only; the WriteAuditLog below covers it. No inbox
+		// noise per PRD §6 F5 (trusted/full crews don't want a hire
+		// per inbox row).
+	}
+	return inboxID, pendingReview, httpStatus, true
 }
 
 // lookupCrewTemplate fetches a template by slug, honoring the built-in
@@ -609,13 +709,7 @@ func (h *AgentHandler) Rehire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ttlMin := req.TTLMinutes
-	if ttlMin <= 0 {
-		ttlMin = defaultHireTTLMinutes
-	}
-	if ttlMin > maxHireTTLMinutes {
-		ttlMin = maxHireTTLMinutes
-	}
+	ttlMin := clampHireTTL(req.TTLMinutes)
 
 	// 1. Load the existing row + scope check. Soft-deleted agents are
 	// 404'd; permanent (ephemeral=0) agents are 404'd too — rehire is

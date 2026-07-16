@@ -203,10 +203,8 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newEncrypted, err := encryption.Encrypt(valueToStore)
-	if err != nil {
-		h.logger.Error("encrypt rotated value", "error", err)
-		replyError(w, http.StatusInternalServerError, "Failed to encrypt credential")
+	newEncrypted, ok := encryptOrError(w, h.logger, "encrypt rotated value", valueToStore)
+	if !ok {
 		return
 	}
 

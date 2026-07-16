@@ -371,8 +371,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Return updated crew
 	var c crewResponse
-	var updatedDomainsJSON *string
-	err = h.db.QueryRowContext(r.Context(), `
+	err = scanCrewRow(h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains, c.allow_private_endpoints,
 			c.mcp_config_json, c.escalation_config,
@@ -383,19 +382,12 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
 		FROM crews c
 		WHERE c.id = ? AND c.deleted_at IS NULL
-	`, crewID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
-		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
-		&c.ContainerTTLHours, &c.NetworkMode, &updatedDomainsJSON, &c.AllowPrivateEndpoints,
-		&c.MCPConfigJSON, &c.EscalationConfig,
-		&c.RuntimeImage, &c.DevcontainerConfig, &c.MiseConfig, &c.CachedImage, &c.ConfigHash,
-		&c.MaxEphemeralAgents,
-		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
+	`, crewID), &c, false, false)
 	if err != nil {
 		replyInternalError(w, h.logger, "get crew after update", err)
 		return
 	}
 
-	c.AllowedDomains = parseAllowedDomains(updatedDomainsJSON)
 	writeJSON(w, http.StatusOK, c)
 
 	h.broadcastCrewEvent("crew.updated", workspaceID, map[string]string{

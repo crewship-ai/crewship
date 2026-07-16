@@ -44,18 +44,10 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 	var result []crewResponse
 	for rows.Next() {
 		var c crewResponse
-		var allowedDomainsJSON *string
-		if err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
-			&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
-			&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON, &c.AllowPrivateEndpoints,
-			&c.MCPConfigJSON, &c.EscalationConfig,
-			&c.RuntimeImage, &c.DevcontainerConfig, &c.MiseConfig, &c.ServicesJSON, &c.CachedImage, &c.ConfigHash,
-			&c.MaxEphemeralAgents,
-			&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members); err != nil {
+		if err := scanCrewRow(rows, &c, false, true); err != nil {
 			replyInternalError(w, h.logger, "scan crew", err)
 			return
 		}
-		c.AllowedDomains = parseAllowedDomains(allowedDomainsJSON)
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
@@ -83,8 +75,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var c crewResponse
-	var allowedDomainsJSON *string
-	err := h.db.QueryRowContext(r.Context(), `
+	err := scanCrewRow(h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains, c.allow_private_endpoints,
 			c.mcp_config_json, c.escalation_config, c.issue_prefix,
@@ -95,13 +86,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
 		FROM crews c
 		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL
-	`, crewID, workspaceID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
-		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
-		&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON, &c.AllowPrivateEndpoints,
-		&c.MCPConfigJSON, &c.EscalationConfig, &c.IssuePrefix,
-		&c.RuntimeImage, &c.DevcontainerConfig, &c.MiseConfig, &c.ServicesJSON, &c.CachedImage, &c.ConfigHash,
-		&c.MaxEphemeralAgents,
-		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
+	`, crewID, workspaceID), &c, true, true)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			replyError(w, http.StatusNotFound, "Crew not found")
@@ -111,7 +96,6 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c.AllowedDomains = parseAllowedDomains(allowedDomainsJSON)
 	writeJSON(w, http.StatusOK, c)
 }
 
