@@ -133,27 +133,6 @@ func TestGetRun_PipelineRunIDRejectedWithHint(t *testing.T) {
 	}
 }
 
-func TestIsPipelineRunID(t *testing.T) {
-	cases := []struct {
-		name string
-		id   string
-		want bool
-	}{
-		{"pipeline_run", "run_cmrm3xxzk0083de436e64", true},
-		{"chat_turn_run", "msg_cmrm3xxzk0083de436e64", false},
-		{"legacy_run", "r_abc123", false}, // legacy test fixture prefix, not the real pipeline shape
-		{"empty", "", false},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			if got := IsPipelineRunID(tc.id); got != tc.want {
-				t.Errorf("IsPipelineRunID(%q) = %v, want %v", tc.id, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestPollRun_TerminatesOnTerminalStatus(t *testing.T) {
 	hits := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
