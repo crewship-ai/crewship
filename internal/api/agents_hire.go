@@ -413,10 +413,11 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 		// of being a fourth disconnected HITL flow (issue #1209). The
 		// approval times out when the hire TTL elapses — the same moment
 		// the ephemeral expiry sweeper ghosts the un-approved agent — so
-		// the two lifecycles stay aligned. Best-effort: on a write
-		// failure the hire is still decidable via the inbox waitpoint +
-		// `hire approve`, so we log loudly and continue rather than
-		// compensating-delete a perfectly usable staged hire.
+		// the two lifecycles stay aligned. A write failure fails the
+		// hire (with the same compensating cleanup as the inbox path
+		// above): the approvals row is the decision point both decide
+		// endpoints serialize on, so continuing without it would
+		// recreate the split-brain surface #1209 removed.
 		requestedBy := userID
 		if requestedBy == "" && parentLeadID != nil {
 			requestedBy = *parentLeadID
@@ -449,11 +450,23 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 			TimeoutAt: &approvalTimeout,
 		})
 		if aerr != nil {
-			h.logger.Error("hire: enqueue approvals row failed — hire remains decidable via `hire approve` only",
-				"error", aerr, "agent_id", agentID)
-		} else {
-			approvalID = apID
+			h.logger.Error("hire: enqueue approvals row failed — compensating delete of staged hire",
+				"error", aerr, "agent_id", agentID, "inbox_id", inboxID)
+			if _, derr := h.db.ExecContext(r.Context(),
+				`DELETE FROM inbox_items WHERE id = ?`, inboxID); derr != nil {
+				h.logger.Error("hire: compensating inbox delete after enqueue failure",
+					"error", derr, "inbox_id", inboxID)
+			}
+			if _, derr := h.db.ExecContext(r.Context(),
+				`DELETE FROM agents WHERE id = ? AND workspace_id = ?`,
+				agentID, workspaceID); derr != nil {
+				h.logger.Error("hire: compensating delete after enqueue failure",
+					"error", derr, "agent_id", agentID)
+			}
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return
 		}
+		approvalID = apID
 	case policy.DecisionAutoLogInbox:
 		// Non-blocking inbox visibility entry. The agent is already
 		// live; we're just letting the operator audit after the fact.

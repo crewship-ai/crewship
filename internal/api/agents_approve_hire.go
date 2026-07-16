@@ -78,12 +78,13 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 		ephemeral int
 		crewID    sql.NullString
 		name      string
+		expiredAt sql.NullString
 	)
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT status, ephemeral, crew_id, name
+		SELECT status, ephemeral, crew_id, name, expired_at
 		FROM agents
 		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		agentID, workspaceID).Scan(&curStatus, &ephemeral, &crewID, &name)
+		agentID, workspaceID).Scan(&curStatus, &ephemeral, &crewID, &name, &expiredAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "Agent not found")
 		return
@@ -108,16 +109,84 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if expiredAt.Valid {
+		// Denied via the approvals surface or ghosted by the TTL
+		// sweeper — status stays PENDING_REVIEW in both terminal
+		// states, so the check above can't catch them. Approving here
+		// would resurrect a dead hire.
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error":  "Hire is no longer decidable",
+			"reason": "the staged agent was denied or expired at " + expiredAt.String,
+		})
+		return
+	}
 
-	// 2. Conditional UPDATE — if another operator just clicked
-	// Approve in parallel, the RowsAffected = 0 branch handles the
-	// race without a transaction. We're not touching any other
-	// columns so the second operator's no-op is harmless.
+	user := UserFromContext(r.Context())
+	userID := ""
+	if user != nil {
+		userID = user.ID
+	}
+
+	logger := h.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	// 2. Win the approvals-queue row BEFORE touching the agent (issue
+	// #1209 review). A guided hire also enqueued a kind=ephemeral_hire
+	// approvals_queue row; that row is the single decision point shared
+	// with POST /approvals/{id}/decide, which likewise flips the row
+	// first and applies agent side effects only after winning the CAS.
+	// Same lock order on both endpoints means a concurrent deny can no
+	// longer commit after we activate (denied queue + live agent):
+	// whoever flips the row owns the side effects, the loser gets an
+	// honest 409. Pre-#1209 hires (or a failed enqueue) have no row —
+	// for those the conditional agent UPDATE below stays the decision
+	// point, and no second surface exists to race it.
+	approvalRowID, lerr := findPendingHireApprovalRow(r.Context(), h.db, workspaceID, agentID)
+	switch {
+	case errors.Is(lerr, sql.ErrNoRows):
+		// Legacy hire — nothing to win on the approvals surface.
+	case lerr != nil:
+		h.logger.Error("approve-hire: lookup approvals row", "agent_id", agentID, "error", lerr)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	default:
+		derr := harbormaster.Decide(r.Context(), h.db, h.journal, workspaceID, approvalRowID,
+			harbormaster.StatusApproved, userID, "approved via hire approve")
+		if errors.Is(derr, harbormaster.ErrNotPending) {
+			// Someone decided through the approvals surface (or the
+			// row timed out) between our preflight and now. Their
+			// decision owns the agent transition; report it instead
+			// of activating on top of a concurrent deny.
+			reason := "approval " + approvalRowID + " was decided concurrently"
+			if row, gerr := harbormaster.Get(r.Context(), h.db, workspaceID, approvalRowID); gerr == nil && row != nil {
+				reason = "approval " + approvalRowID + " is already " + string(row.Status)
+			}
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error":  "Hire already decided via the approvals queue",
+				"reason": reason,
+			})
+			return
+		}
+		if derr != nil {
+			h.logger.Error("approve-hire: decide approvals row", "agent_id", agentID,
+				"approval_id", approvalRowID, "error", derr)
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+	}
+
+	// 3. Conditional UPDATE — the expired_at guard covers the TTL
+	// sweeper ghosting the agent between preflight and here; the
+	// status guard covers a concurrent legacy approve on a pre-#1209
+	// hire (no approvals row to serialize on).
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := h.db.ExecContext(r.Context(), `
 		UPDATE agents
 		SET status = 'IDLE', updated_at = ?
-		WHERE id = ? AND workspace_id = ? AND status = 'PENDING_REVIEW'`,
+		WHERE id = ? AND workspace_id = ? AND status = 'PENDING_REVIEW'
+		  AND expired_at IS NULL`,
 		now, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("approve-hire: update status", "agent_id", agentID, "error", err)
@@ -131,48 +200,36 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if n == 0 {
-		// Lost the race — another operator approved this row
-		// between our SELECT and UPDATE. Honest 409 instead of
-		// silent success so the caller's UI doesn't double-log.
+		// Lost the race — a concurrent legacy approve (pre-#1209 hire,
+		// no approvals row to serialize on) or the TTL sweeper got the
+		// row between our preflight and UPDATE. If we had won an
+		// approvals row above this leaves it approved with the agent
+		// still pending — log loudly; the sweeper ghosts the agent at
+		// TTL and the surfaces reconverge.
+		if approvalRowID != "" {
+			logger.Error("approve-hire: approvals row won but agent transition lost",
+				"agent_id", agentID, "approval_id", approvalRowID)
+		}
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error":  "Agent is not pending review",
-			"reason": "another operator approved this hire concurrently",
+			"reason": "the hire was decided or expired concurrently",
 		})
 		return
 	}
 
-	user := UserFromContext(r.Context())
-	userID := ""
-	if user != nil {
-		userID = user.ID
-	}
-
-	// 3. Resolve the inbox waitpoint addressed to this agent so the
+	// 4. Resolve the inbox waitpoint addressed to this agent so the
 	// blocking row drops from the operator's inbox without a separate
 	// PATCH. The writeInboxItem call in Hire uses source_id=agent_id
 	// for blocking hire waitpoints, so the resolver keys off that.
 	// Failures here are logged but non-fatal — the agent is already
 	// IDLE; a stale inbox row is fixable manually and shouldn't
 	// 500 the approve.
-	logger := h.logger
-	if logger == nil {
-		logger = slog.Default()
-	}
 	inbox.ResolveBySource(r.Context(), h.db, logger, "waitpoint", agentID, "approved", userID)
 
 	crewIDStr := ""
 	if crewID.Valid {
 		crewIDStr = crewID.String
 	}
-
-	// 3b. Keep the approvals surface consistent (issue #1209): a guided
-	// hire also enqueued a kind=ephemeral_hire approvals_queue row; flip
-	// it to approved so `approvals list` doesn't keep showing a pending
-	// decision for an agent that is already live. Best-effort — the agent
-	// is IDLE either way; ErrNotPending means an operator raced us through
-	// the approvals surface and the row is already terminal.
-	decideHireApprovalRow(r.Context(), h.db, h.journal, logger, workspaceID, agentID,
-		harbormaster.StatusApproved, userID, "approved via hire approve")
 
 	WriteAuditLog(r.Context(), h.db, h.journal, "agent.hire_approved", "AGENT", agentID, userID, workspaceID, map[string]interface{}{
 		"agent_id": agentID,
@@ -194,33 +251,20 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// decideHireApprovalRow flips the pending kind=ephemeral_hire
-// approvals_queue row for agentID to the given terminal status. Called
-// from ApproveHire so a hire decided through the legacy per-agent
-// endpoint doesn't leave a stale pending row on the approvals surface
-// (issue #1209). Best-effort by design: the agent-side transition is
-// the source of truth for the hire itself, so any failure here is
-// logged and swallowed.
-func decideHireApprovalRow(ctx context.Context, db *sql.DB, j journal.Emitter, logger *slog.Logger, workspaceID, agentID string, status harbormaster.Status, decidedBy, comment string) {
+// findPendingHireApprovalRow returns the id of the newest pending
+// kind=ephemeral_hire approvals_queue row for agentID, or sql.ErrNoRows
+// for pre-#1209 hires (and hires whose enqueue failed) that have no row
+// on the approvals surface. ApproveHire must win this row via
+// harbormaster.Decide BEFORE activating the agent — the row is the
+// atomic decision point shared with POST /approvals/{id}/decide.
+func findPendingHireApprovalRow(ctx context.Context, db *sql.DB, workspaceID, agentID string) (string, error) {
 	var approvalID string
 	err := db.QueryRowContext(ctx, `
 		SELECT id FROM approvals_queue
 		WHERE workspace_id = ? AND agent_id = ? AND kind = ? AND status = 'pending'
 		ORDER BY created_at DESC LIMIT 1`,
 		workspaceID, agentID, string(harbormaster.KindEphemeralHire)).Scan(&approvalID)
-	if errors.Is(err, sql.ErrNoRows) {
-		// Pre-#1209 hire, or the enqueue at hire time failed — nothing
-		// on the approvals surface to reconcile.
-		return
-	}
-	if err != nil {
-		logger.Warn("hire: lookup approvals row failed", "agent_id", agentID, "error", err)
-		return
-	}
-	if derr := harbormaster.Decide(ctx, db, j, workspaceID, approvalID, status, decidedBy, comment); derr != nil && !errors.Is(derr, harbormaster.ErrNotPending) {
-		logger.Warn("hire: decide approvals row failed",
-			"agent_id", agentID, "approval_id", approvalID, "error", derr)
-	}
+	return approvalID, err
 }
 
 // applyEphemeralHireDecision performs the agent-side transition for a
@@ -274,10 +318,14 @@ func applyEphemeralHireDecision(ctx context.Context, db *sql.DB, logger *slog.Lo
 	)
 	if approved {
 		action, eventType = "approved", "agent.hire_approved"
+		// expired_at guard: an approve landing after the TTL sweeper
+		// ghosted the agent must not resurrect it — the skip branch
+		// below logs it instead.
 		res, err = db.ExecContext(ctx, `
 			UPDATE agents
 			SET status = 'IDLE', updated_at = ?
-			WHERE id = ? AND workspace_id = ? AND status = 'PENDING_REVIEW'`,
+			WHERE id = ? AND workspace_id = ? AND status = 'PENDING_REVIEW'
+			  AND expired_at IS NULL`,
 			now, agentID, workspaceID)
 	} else {
 		action, eventType = "denied", "agent.hire_denied"

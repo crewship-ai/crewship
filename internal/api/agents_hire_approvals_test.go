@@ -11,8 +11,10 @@ package api
 //	                               inbox waitpoint resolves
 //	approvals decide (denied)    → agent ghosts (expired_at set), inbox
 //	                               waitpoint resolves with action=denied
-//	approve-hire endpoint        → syncs the pending approvals row to
-//	                               approved so the surfaces can't drift
+//	approve-hire endpoint        → wins the pending approvals row BEFORE
+//	                               activating (same lock order as decide),
+//	                               so the surfaces can't drift; a lost CAS
+//	                               or a ghosted agent is an honest 409
 
 import (
 	"context"
@@ -231,8 +233,10 @@ func TestApprovalsDecide_EphemeralHire_AgentAlreadyIdle_SkipsSideEffect(t *testi
 	approvalID := enqueueHireApproval(t, db, wsID, crewID, "a-raced", userID)
 	h := newHireApprovalsHandler(t, db)
 
-	// Simulate the legacy `hire approve` path winning the race: agent is
-	// already IDLE when the approvals-surface deny lands.
+	// Synthetic state: agent IDLE while the approvals row is still
+	// pending. Unreachable through either endpoint now that approve-hire
+	// wins the row before activating, but kept as defence in depth — a
+	// late deny must never ghost a live agent, whatever produced the state.
 	if _, err := db.Exec(`UPDATE agents SET status = 'IDLE' WHERE id = ?`, "a-raced"); err != nil {
 		t.Fatalf("flip agent: %v", err)
 	}
@@ -284,6 +288,93 @@ func TestApprovalsDecide_NonHireKind_DoesNotTouchAgents(t *testing.T) {
 	}
 	if status != "PENDING_REVIEW" {
 		t.Errorf("agents.status = %q, want PENDING_REVIEW (tool_call approvals must not flip hires)", status)
+	}
+}
+
+// The race #1209's review flagged: an approvals-surface deny commits
+// first, then the legacy approve lands. Pre-fix the legacy path
+// activated the agent anyway (denied queue + live IDLE agent); now it
+// loses the row CAS and returns an honest 409.
+func TestApproveHire_AfterApprovalsDeny_Returns409AndStaysGhosted(t *testing.T) {
+	db := setupTestDB(t)
+	userID, wsID, crewID := seedHireCrew(t, db, "guided", 5)
+	seedPendingReviewAgent(t, db, wsID, crewID, "a-deny-first")
+	approvalID := enqueueHireApproval(t, db, wsID, crewID, "a-deny-first", userID)
+
+	rr := postApprovalsDecide(t, newHireApprovalsHandler(t, db), userID, wsID, "OWNER", approvalID, "denied")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("deny status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+
+	rr = postApproveHire(t, newApproveHireHandler(t, db), userID, wsID, "MANAGER", "a-deny-first")
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("approve-hire after deny: status = %d, want 409; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var status string
+	var expiredAt sql.NullString
+	if err := db.QueryRow(`SELECT status, expired_at FROM agents WHERE id = ?`, "a-deny-first").
+		Scan(&status, &expiredAt); err != nil {
+		t.Fatalf("verify agent: %v", err)
+	}
+	if status == "IDLE" {
+		t.Errorf("legacy approve resurrected a denied hire (status = IDLE)")
+	}
+	if !expiredAt.Valid {
+		t.Errorf("expired_at cleared — denied hire must stay ghosted")
+	}
+}
+
+// A ghosted agent (TTL sweeper or deny leaves status=PENDING_REVIEW with
+// expired_at set) must not be resurrectable through the legacy endpoint.
+func TestApproveHire_ExpiredAgent_Returns409(t *testing.T) {
+	db := setupTestDB(t)
+	userID, wsID, crewID := seedHireCrew(t, db, "guided", 5)
+	seedPendingReviewAgent(t, db, wsID, crewID, "a-ghosted")
+	if _, err := db.Exec(`UPDATE agents SET expired_at = ? WHERE id = ?`,
+		time.Now().UTC().Format(time.RFC3339), "a-ghosted"); err != nil {
+		t.Fatalf("ghost agent: %v", err)
+	}
+
+	rr := postApproveHire(t, newApproveHireHandler(t, db), userID, wsID, "MANAGER", "a-ghosted")
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var status string
+	if err := db.QueryRow(`SELECT status FROM agents WHERE id = ?`, "a-ghosted").Scan(&status); err != nil {
+		t.Fatalf("verify agent: %v", err)
+	}
+	if status == "IDLE" {
+		t.Errorf("expired hire went IDLE through legacy approve")
+	}
+}
+
+// Approvals-surface approve landing after the sweeper ghosted the agent
+// must not resurrect it either — the side effect skips on the
+// expired_at guard.
+func TestApprovalsDecide_Approve_ExpiredAgent_DoesNotResurrect(t *testing.T) {
+	db := setupTestDB(t)
+	userID, wsID, crewID := seedHireCrew(t, db, "guided", 5)
+	seedPendingReviewAgent(t, db, wsID, crewID, "a-swept")
+	approvalID := enqueueHireApproval(t, db, wsID, crewID, "a-swept", userID)
+	if _, err := db.Exec(`UPDATE agents SET expired_at = ? WHERE id = ?`,
+		time.Now().UTC().Format(time.RFC3339), "a-swept"); err != nil {
+		t.Fatalf("ghost agent: %v", err)
+	}
+
+	rr := postApprovalsDecide(t, newHireApprovalsHandler(t, db), userID, wsID, "OWNER", approvalID, "approved")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (decision persists; side effect skips); body: %s",
+			rr.Code, rr.Body.String())
+	}
+
+	var status string
+	if err := db.QueryRow(`SELECT status FROM agents WHERE id = ?`, "a-swept").Scan(&status); err != nil {
+		t.Fatalf("verify agent: %v", err)
+	}
+	if status == "IDLE" {
+		t.Errorf("late approve resurrected a TTL-ghosted hire")
 	}
 }
 
