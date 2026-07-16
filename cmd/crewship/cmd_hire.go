@@ -260,7 +260,9 @@ func printHireResponse(resp *http.Response, headline string) (hireResponseShape,
 		pairs = append(pairs, []string{"Review", "PENDING APPROVAL (inbox " + body.InboxItemID + ")"})
 	}
 	if body.ApprovalID != "" {
-		pairs = append(pairs, []string{"Approval", body.ApprovalID + " (decide: crewship approvals approve/deny)"})
+		pairs = append(pairs, []string{"Approval", body.ApprovalID +
+			" (approve: crewship approvals approve " + body.ApprovalID +
+			"; deny: crewship approvals deny " + body.ApprovalID + ")"})
 	}
 	if body.Decision != "" {
 		pairs = append(pairs, []string{"Decision", body.Decision})
