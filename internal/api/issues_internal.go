@@ -67,7 +67,11 @@ func (h *InternalIssueHandler) List(w http.ResponseWriter, r *http.Request) {
 		WHERE m.workspace_id = ?`
 	args := []interface{}{wsID}
 
-	if crewID := r.URL.Query().Get("crew_id"); crewID != "" {
+	// #1186: for a crew-bound (crwv1) token the binding constrains the
+	// listing — an omitted ?crew_id returns the token's own crew's issues,
+	// not the workspace-wide backlog. Unbound callers keep the optional
+	// query filter.
+	if crewID := effectiveCrewFilter(r); crewID != "" {
 		query += " AND m.crew_id = ?"
 		args = append(args, crewID)
 	}
@@ -227,6 +231,15 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// requireInternal sees only the query string; this guards the
 	// body-carried workspace_id (403 on a foreign tenant).
 	if !assertInternalTokenWorkspace(w, r, req.WorkspaceID) {
+		return
+	}
+	// #1186: crew_id is body-carried, so requireInternal's ?crew_id gate
+	// never sees it. A crew-bound (crwv1) token may only create issues in
+	// its OWN crew (the author-agent check below runs only when an
+	// author_agent_id is supplied, so it alone cannot close this); a
+	// workspace-bound token's crew must resolve to the bound workspace
+	// (PR-F24 foreign-ID closure).
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &req.CrewID) {
 		return
 	}
 	if req.Priority == "" {

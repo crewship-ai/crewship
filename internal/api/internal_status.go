@@ -271,7 +271,11 @@ func (h *InternalHandler) ListCrewConnections(w http.ResponseWriter, r *http.Req
 		WHERE cc.workspace_id = ? AND cc.status = 'active'`
 	args := []interface{}{wsID}
 
-	if crewID := r.URL.Query().Get("crew_id"); crewID != "" {
+	// #1186: for a crew-bound (crwv1) token the binding constrains the
+	// listing — an omitted ?crew_id returns the token's own crew's
+	// connections, not the workspace-wide topology. Unbound callers keep
+	// the optional query filter.
+	if crewID := effectiveCrewFilter(r); crewID != "" {
 		query += " AND (cc.from_crew_id = ? OR cc.to_crew_id = ?)"
 		args = append(args, crewID, crewID)
 	}

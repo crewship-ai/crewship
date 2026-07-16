@@ -392,6 +392,14 @@ func (h *KeeperPhase2Handler) HandleSkillReview(w http.ResponseWriter, r *http.R
 	if !assertBodyWorkspaceMatchesCtx(w, r, body.WorkspaceID) {
 		return
 	}
+	// #1186: crew_id is body-carried, so requireInternal's ?crew_id gate
+	// never sees it. For a crew-bound (crwv1) caller this pins the crew
+	// that feeds policy resolution, cost attribution and the audit row to
+	// the token's own crew (an omitted field is filled in); a
+	// workspace-bound token's crew must resolve to the bound workspace.
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.CrewID) {
+		return
+	}
 
 	pol := h.resolvePolicySafe(r.Context(), body.CrewID)
 
@@ -506,6 +514,12 @@ func (h *KeeperPhase2Handler) HandleBehavior(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if !assertBodyWorkspaceMatchesCtx(w, r, body.WorkspaceID) {
+		return
+	}
+	// #1186: pin the body-carried crew to the token's binding — the crew
+	// drives resolvePolicyStrict, so a crew-bound caller must not be able
+	// to have its tool call judged under a sibling crew's (laxer) policy.
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.CrewID) {
 		return
 	}
 
@@ -638,6 +652,11 @@ func (h *KeeperPhase2Handler) HandleMemoryHealth(w http.ResponseWriter, r *http.
 	if !assertBodyWorkspaceMatchesCtx(w, r, body.WorkspaceID) {
 		return
 	}
+	// #1186: pin the body-carried crew to the token's binding (omitted →
+	// filled with the caller's own crew; sibling crew → 403).
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.CrewID) {
+		return
+	}
 
 	pol := h.resolvePolicySafe(r.Context(), body.CrewID)
 
@@ -739,6 +758,11 @@ func (h *KeeperPhase2Handler) HandleNegativeLearning(w http.ResponseWriter, r *h
 		return
 	}
 	if !assertBodyWorkspaceMatchesCtx(w, r, body.WorkspaceID) {
+		return
+	}
+	// #1186: pin the body-carried crew to the token's binding (omitted →
+	// filled with the caller's own crew; sibling crew → 403).
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.CrewID) {
 		return
 	}
 
