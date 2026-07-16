@@ -85,10 +85,19 @@ type JWTValidator struct {
 	nowFn func() time.Time
 }
 
+// MinSecretLen is the minimum accepted NEXTAUTH_SECRET length in
+// characters. All three encryption keys are HKDF-derived from this one
+// secret, so a short/weak value directly weakens every derived key. The
+// floor matches the 32-char minimum internal/secrets/bootstrap.go already
+// enforces (validateMinLen(32)) so an under-strength secret fails
+// consistently at both the bootstrap and the auth-validator surface.
+const MinSecretLen = 32
+
 // NewJWTValidator constructs a validator that can issue and verify all
-// three token kinds. Returns an error if NEXTAUTH_SECRET is empty —
-// without it the entire auth path becomes unsigned, which we'd rather
-// fail loudly at startup than silently accept.
+// three token kinds. Returns an error if NEXTAUTH_SECRET is empty or
+// shorter than MinSecretLen — without it the entire auth path becomes
+// unsigned, and a short secret weakens all three HKDF-derived keys, both
+// of which we'd rather fail loudly at startup than silently accept.
 //
 // The legacy second argument (cookie-name salt) is gone: kinds always
 // derive their own salts. Callers from before this change should pass
@@ -96,6 +105,9 @@ type JWTValidator struct {
 func NewJWTValidator(secret string) (*JWTValidator, error) {
 	if secret == "" {
 		return nil, errors.New("jwt secret is required")
+	}
+	if len(secret) < MinSecretLen {
+		return nil, fmt.Errorf("jwt secret (NEXTAUTH_SECRET) is too short: got %d characters, need at least %d — generate a strong value, e.g. `openssl rand -hex 32`, and set NEXTAUTH_SECRET before starting", len(secret), MinSecretLen)
 	}
 	a, err := deriveEncryptionKey(secret, saltAccess, 64)
 	if err != nil {
