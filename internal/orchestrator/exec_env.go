@@ -273,19 +273,40 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		env = append(env, "OPENAI_BASE_URL=http://127.0.0.1:9119/openai/v1")
 	}
 
+	// #1030: the Gemini CLI routes its Google traffic through the sidecar
+	// reverse-proxy by pointing GOOGLE_GEMINI_BASE_URL at the /gemini prefix
+	// on the sidecar port (the @google/genai SDK appends /v1beta/... to it —
+	// the same path-suffixed base-URL shape gateway deployments use). The
+	// dummy GOOGLE_API_KEY set above stays, and GEMINI_API_KEY (the CLI's
+	// canonical AI Studio var) gets the same dummy so auth-type selection
+	// still sees a syntactically-valid key; the sidecar swaps it for the real
+	// value from the CredStore mid-flight, so the real key lives only in the
+	// sidecar heap. Scoped to GEMINI_CLI — OpenCode's multi-provider BYOK
+	// driver dials providers directly and must NOT be force-routed here.
+	if req.CLIAdapter == "GEMINI_CLI" {
+		env = append(env,
+			"GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:9119/gemini",
+			"GEMINI_API_KEY=dummy-crewship-sidecar",
+		)
+	}
+
 	// Multi-CLI BYO API key path. The sidecar reverse-proxy now injects keys
-	// for api.anthropic.com (Claude Code) and api.openai.com (Codex, #1030);
-	// Gemini/OpenCode/Cursor still talk to their upstream over HTTPS CONNECT
-	// through the sidecar (no x-api-key injection). Override the dummy provider
-	// keys above with real values from req.Credentials — but only for env vars
-	// that THIS adapter's CLI actually reads. This preserves the sidecar
-	// isolation guarantee for cross-adapter scenarios (e.g. a Claude Code agent
-	// in a workspace that also has an OpenAI key configured — that key stays
-	// out of env).
+	// for api.anthropic.com (Claude Code), api.openai.com (Codex, #1030) and
+	// generativelanguage.googleapis.com (Gemini, #1030); OpenCode/Cursor/
+	// Factory still talk to their upstream over HTTPS CONNECT through the
+	// sidecar (no key injection). Override the dummy provider keys above with
+	// real values from req.Credentials — but only for env vars that THIS
+	// adapter's CLI actually reads. This preserves the sidecar isolation
+	// guarantee for cross-adapter scenarios (e.g. a Claude Code agent in a
+	// workspace that also has an OpenAI key configured — that key stays out
+	// of env).
 	//
-	// Future work: extend the same reverse-proxy injection to
-	// generativelanguage.googleapis.com (Gemini) and api.cursor.sh (Cursor) so
-	// the remaining leak paths collapse into the x-api-key model too.
+	// Residual (#1030): Cursor cannot join the reverse-proxy model — the
+	// cursor-agent configuration surface has no endpoint / base-URL override
+	// (cursor.com/docs/cli/reference/configuration), so there is no way to
+	// point it at the sidecar; its key stays on the env path until upstream
+	// ships an override. OpenCode is BYOK-by-design and Factory has no
+	// override either.
 	allowed := apiKeyEnvVarsForAdapter(req.CLIAdapter)
 	if len(allowed) > 0 {
 		for _, cred := range req.Credentials {
@@ -530,7 +551,7 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 			out = append(out, CredentialEnvExposure{
 				EnvVarName: cred.EnvVarName,
 				Type:       "API_KEY",
-				Reason:     "adapter " + req.CLIAdapter + " reaches its upstream over an HTTPS CONNECT tunnel, so the real API key is written to env (the sidecar reverse-proxy injects only for api.anthropic.com and api.openai.com)",
+				Reason:     "adapter " + req.CLIAdapter + " reaches its upstream over an HTTPS CONNECT tunnel, so the real API key is written to env (the sidecar reverse-proxy injects only for api.anthropic.com, api.openai.com and generativelanguage.googleapis.com)",
 			})
 		}
 	}
@@ -608,7 +629,16 @@ func apiKeyEnvVarsForAdapter(adapter string) map[string]struct{} {
 		// credTypeToProvider, independent of this set.)
 		return nil
 	case "GEMINI_CLI":
-		return map[string]struct{}{"GOOGLE_API_KEY": {}, "GEMINI_API_KEY": {}}
+		// #1030: Gemini's Google key is now isolated by the sidecar reverse-
+		// proxy (GOOGLE_GEMINI_BASE_URL routes it through /gemini →
+		// generativelanguage.googleapis.com, where the real key is injected
+		// from the CredStore). So — exactly like CLAUDE_CODE/CODEX_CLI —
+		// Gemini no longer needs the real GOOGLE_API_KEY/GEMINI_API_KEY
+		// written to its env; the dummies stay and the sidecar swaps them
+		// mid-flight. Returning nil keeps the real key out of
+		// /proc/<pid>/environ. (The CredStore still receives it via
+		// credTypeToProvider, independent of this set.)
+		return nil
 	case "OPENCODE":
 		// OpenCode is BYOK across 75+ providers via models.dev. Accept all
 		// the common provider env vars so users can route to whichever
@@ -634,6 +664,12 @@ func apiKeyEnvVarsForAdapter(adapter string) map[string]struct{} {
 			"MINIMAX_API_KEY":  {},
 		}
 	case "CURSOR_CLI":
+		// #1030 residual: cursor-agent has no endpoint / base-URL override in
+		// its configuration surface (cursor.com/docs/cli/reference/
+		// configuration documents only CURSOR_CONFIG_DIR, proxy vars and CA
+		// certs), so the sidecar reverse-proxy cannot be interposed — the CLI
+		// reaches api.cursor.sh/api2.cursor.sh over an HTTPS CONNECT tunnel
+		// and needs the real key in env. Revisit if Cursor ships an override.
 		return map[string]struct{}{"CURSOR_API_KEY": {}}
 	case "FACTORY_DROID":
 		return map[string]struct{}{"FACTORY_API_KEY": {}}
