@@ -35,7 +35,7 @@ The top-level command is the list view. `--follow` opens an SSE connection to `/
 | `--since` | `string` | | Time window (`1h`, `24h`, `7d`, or RFC3339). |
 | `--follow` | `bool` | `false` | Live tail via SSE — Ctrl-C to exit, reconnects on transient failure. |
 
-Global output flags apply: `--format text|json|yaml` (default text). Enum values for `--severity`, `--actor-type`, and `--priority` are validated client-side before the request goes out, so a typo fails fast with a list of allowed values.
+Global output flags apply: `--format text|json|yaml|ndjson` (default text). Enum values for `--severity`, `--actor-type`, and `--priority` are validated client-side before the request goes out, so a typo fails fast with a list of allowed values.
 
 ## Examples
 
@@ -78,7 +78,7 @@ For free-text "did we discuss this before?" lookups across the journal, prefer `
 
 ## `crewship journal get`
 
-Fetch a single entry by ID. Output respects `--format` (`text`, `json`, `yaml`); the text format prints the same single-line summary the list view uses, then indents the entry's `payload` and `refs` underneath so you can see the full structured detail at a glance.
+Fetch a single entry by ID. Output respects `--format` (`text`, `json`, `yaml`, `ndjson`); the text format prints the same single-line summary the list view uses, then indents the entry's `payload` and `refs` underneath so you can see the full structured detail at a glance.
 
 ```bash
 crewship journal get j_a1b2c3d4

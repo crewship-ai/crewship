@@ -657,7 +657,7 @@ This cascades: every agent binding and crew-level override of the integration is
 POST /api/v1/integrations/{integrationId}/test?workspace_id={workspaceId}
 ```
 
-Tests the MCP server connection. For `stdio` transport the server is not actually launched (that only happens inside a container at runtime) — instead the config is statically validated (command must be a bare executable with no embedded whitespace, `args_json` must be a valid JSON string array), returning `status: "ok"` when well-formed or `status: "error"` otherwise. For `streamable-http` (also `http`/`sse`) an MCP `initialize` handshake is attempted via an SSRF-safe HTTP client (private/loopback IPs blocked).
+Tests the MCP server connection. For `stdio` transport the server is not actually launched (that only happens inside a container at runtime) — instead the config is statically validated (the command must tokenize to a single executable — a full launch line that splits into more than one token is rejected, while a quoted path containing spaces is fine; `args_json` must be a valid JSON string array), returning `status: "ok"` when well-formed or `status: "error"` otherwise. Tokenizing is quote-aware, matching the CLI/UI split rules (see the [MCP guide](/guides/mcp-multi-cli#stdio-servers-local-subprocess)). For `streamable-http` (also `http`/`sse`) an MCP `initialize` handshake is attempted via an SSRF-safe HTTP client (private/loopback IPs blocked).
 
 **Response:** `200 OK`
 

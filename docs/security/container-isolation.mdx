@@ -34,7 +34,13 @@ Two fixed UIDs enforce a privilege boundary inside each container:
 | **1002** | Sidecar proxy | Credential store, IPC token, network control |
 
 <Warning>
-  The UID assignments (1001 for agent, 1002 for sidecar) are a security boundary. Do not change these values -- they are referenced throughout the codebase for privilege separation.
+  The UID assignments (1001 for agent, 1002 for sidecar) are a security boundary in the
+  standard runtime image. The exec paths no longer hardcode them, though: when crewshipd
+  runs a command in a container (Keeper `/execute`, provider `Exec`), it resolves the
+  container's actual configured run-as user via `ContainerInspect` and **fails closed** —
+  refusing to exec — if that user is empty, undeterminable, or privileged (root uid, root
+  gid, or a root alias). A custom base image with a different non-root uid (e.g.
+  `2000:2000`) works automatically; a root-configured container does not get exec'd into.
 </Warning>
 
 ### What Agents Cannot Do
@@ -71,7 +77,7 @@ Containers are created with these security measures (`internal/provider/docker/d
 - **Cap-drop ALL:** All Linux capabilities are dropped (`CapDrop: ["ALL"]`)
 - **No default cap-add:** By default no capabilities are re-added. `NET_RAW` was removed from the default set (it enables `AF_PACKET`/DNS-tunneling exfiltration). Devcontainer features may opt into an explicit allowlist (e.g. `NET_BIND_SERVICE`) via `team.CapAdd`.
 - **SecurityOpt no-new-privileges:** Blocks execution of setuid binaries inside the container
-- **Non-root execution:** Agent processes run as UID 1001
+- **Non-root execution:** Agent processes run as UID 1001; exec'd commands run as the container's resolved configured user and are refused outright if that user would be root or cannot be determined
 - **Read-only filesystem:** Root filesystem is read-only (`ReadonlyRootfs: true`), relaxed only for privileged crews (DinD)
 - **tmpfs /tmp (500M):** Writable temp directory (`rw,size=500m`), not persistent across restarts
 - **PID limit: 200:** Prevents fork bomb attacks (`PidsLimit: 200`)

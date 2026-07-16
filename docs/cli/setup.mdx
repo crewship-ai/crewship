@@ -112,7 +112,7 @@ First agent ID: a_abc123
 Open it in the browser: https://crewship.example.com/crews/agents/a_abc123/chat
 ```
 
-The server URL is whichever one this CLI invocation actually talked to (resolved from `--server`, then env, then `~/.crewship/cli-config.yaml`), so the printed link always matches the workspace you just provisioned.
+The server URL is whichever one this CLI invocation actually talked to (resolved from `--server`, then the active profile (`--profile` / `CREWSHIP_PROFILE`), then `CREWSHIP_SERVER` env, then `~/.crewship/cli-config.yaml`), so the printed link always matches the workspace you just provisioned. The pre-send transport-security check runs against that same effective server, even when a stale `CREWSHIP_SERVER` is exported alongside an active profile.
 
 ## See also
 

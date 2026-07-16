@@ -659,6 +659,32 @@ All list and detail commands support `--format` (`-f`):
 crewship agent list -f json | jq '.[].slug'
 ```
 
+The guarantee is uniform: commands that emit structured output honor all three machine
+formats (`json`, `yaml`, `ndjson`) equivalently on stdout, and under a machine format
+errors go to stderr as a structured envelope in that same format (see
+[Exit codes & machine-readable errors](#exit-codes-machine-readable-errors) above). A
+few commands have a different *default* than `table`:
+
+- `journal` and its subcommands default to `text`.
+- Structured-record commands with no canonical table — `agent debug` and
+  `system onboarding status` — default to `json` (with `yaml`/`ndjson` honoured), and
+  `metrics` defaults to `json` (with `yaml` honoured).
+
+The one documented exception is `crewship wait`: it owns its run-outcome exit codes and
+prints `[wait] error:` diagnostics to stderr as plain text even under a machine
+`--format` (no structured error envelope). See the [Wait page](/cli/wait).
+
+## Resolving resource references
+
+Anywhere a command takes an agent, crew, skill, or credential reference, you can pass
+either the record id or the human identifier — the slug for agents, crews, and skills
+(display names don't resolve), and the name for credentials and integrations (which
+have no slug) — including slugs that happen to
+look like ids. CUID-shaped input is first verified with a single lookup; on a miss the
+CLI falls back to slug/name resolution, so a slug like `customersuccessemea42` resolves
+correctly instead of failing as an unknown id. A reference that resolves to nothing
+exits with the not-found code (`3`) rather than a confusing server-side error.
+
 ---
 
 ## Other commands (run `--help` for details)

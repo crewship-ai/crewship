@@ -81,7 +81,7 @@ With neither flag, the command runs in GET mode: it pretty-prints the current co
 | --- | --- | --- |
 | `--set <json>` | (unset) | Replace the agent's MCP config. Pass `''` to clear. |
 | `--set-file <path>` | (unset) | Replace from a file. Mutually exclusive with `--set`. |
-| `--resolved` | `false` | Print the effective merged config (crew + agent; agent keys win). Cannot be combined with `--set` / `--set-file`. |
+| `--resolved` | `false` | Print the full effective MCP surface: the merged blob config (crew + agent; agent keys win) plus the integration-table bindings (workspace/crew servers + agent bindings). Cannot be combined with `--set` / `--set-file`. |
 
 ## JSON shape
 
@@ -174,7 +174,20 @@ crewship agent mcp daniel --resolved
 crewship agent mcp daniel --set-file daniel-mcp.json
 ```
 
-`--resolved` merges by `mcpServers.<name>` — agent keys win over crew keys with the same name, additive otherwise.
+`--resolved` prints up to two labeled sections. The first, `# Blob config
+(crews/agents.mcp_config_json):`, merges by `mcpServers.<name>` — agent keys win over
+crew keys with the same name, additive otherwise (when there are no integration
+bindings, the merged JSON prints without the section header). The second,
+`# Integration bindings (workspace/crew servers + agent bindings):`, folds in the
+integration-table cascade, one bulleted line per server, e.g.:
+
+```
+  - filesystem [crew, stdio] stdio — no credential
+  - github [agent, http] https://api.github.com/mcp — credential: gh-token
+```
+
+An agent with neither source prints
+`Agent <slug>: no MCP servers (no blob config, no integration bindings).`
 
 ## Common errors
 

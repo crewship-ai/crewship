@@ -112,7 +112,7 @@ crewship whoami
 # Role:      OWNER
 ```
 
-Hits `GET /api/v1/workspaces` plus `GET /api/v1/auth/cli-token/validate` to print the email, server URL, currently selected workspace (if any), and your role in it. Useful as a CI smoke check (`crewship whoami || exit 1`) before running a real mutation.
+Hits `GET /api/v1/workspaces` plus `GET /api/v1/auth/cli-token/validate` to print the email, server URL, currently selected workspace (if any), and your role in it. The `Server:` line shows the *effective* server the command actually dialed — it honours the active profile (`--profile` / `CREWSHIP_PROFILE`) with the usual precedence (`--server` → profile → `CREWSHIP_SERVER` env → config), so it is the authoritative answer to "which instance am I talking to?". Useful as a CI smoke check (`crewship whoami || exit 1`) before running a real mutation.
 
 | Flag | Type | Default | Effect |
 |---|---|---|---|

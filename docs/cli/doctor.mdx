@@ -35,6 +35,12 @@ non-zero exit as a hard gate.
 
 ## Check categories
 
+Server-dependent checks (*server reachable*, *episodic recall mode*, *cli server
+scheme*) resolve the same effective server other commands dial: `--server` flag →
+active profile (`--profile` / `CREWSHIP_PROFILE`) → `CREWSHIP_SERVER` env → config.
+An active profile that has no `server:` entry fails closed — the scheme check reports
+INFO instead of silently diagnosing a different host than your API calls use.
+
 ### Container runtime
 
 Detects which Docker-compatible runtime is available — Docker, Podman,

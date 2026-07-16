@@ -196,7 +196,7 @@ crewship agent logs viktor --tail 50
 
 ## `crewship agent debug`
 
-Show agent debug info including container state, environment variables, and crewshipd status. Output is always JSON.
+Show agent debug info including container state, environment variables, and crewshipd status. Output defaults to JSON (there is no table form); `--format yaml` and `--format ndjson` are honoured too.
 
 ```bash
 crewship agent debug <slug-or-id>
@@ -250,7 +250,7 @@ crewship agent mcp <agent-slug> --set-file agent-mcp.json
 |------|------|---------|-------------|
 | `--set` | `string` | | Set MCP config from JSON string. Pass empty string to clear. |
 | `--set-file` | `string` | | Set MCP config from file path. |
-| `--resolved` | `bool` | `false` | Show effective merged config (crew + agent). Agent overrides crew. |
+| `--resolved` | `bool` | `false` | Show the effective MCP surface: merged blob config (crew + agent, agent overrides crew) plus integration-table bindings (workspace/crew servers + agent bindings). |
 
 <Note>
 The JSON must contain a `"mcpServers"` object at the top level. `--set` and `--set-file` are mutually exclusive. `--resolved` cannot be combined with set operations.

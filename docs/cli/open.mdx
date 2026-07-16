@@ -62,4 +62,6 @@ crewship open issues CRE-128
 ## See also
 
 - [`crewship inbox`](/cli/inbox) — the same destination, but stays in the terminal.
-- [`crewship login`](/cli/login) — the `--server` flag this command honours.
+- [`crewship login`](/cli/login) — the `--server` flag this command honours. The browser
+  URL uses the effective server (`--server` → active profile → `CREWSHIP_SERVER` env →
+  config), so it opens the same instance other commands dial.

@@ -333,6 +333,22 @@ crewship start
 
 </Accordion>
 
+<Accordion title="A freshly recreated routine shows old FAILED invocation history">
+
+If a routine is created under a slug that previously existed and was deleted
+(`routine delete` is a soft-delete), older builds resurrected the tombstoned
+database row — and with it the previous routine's invocation count, last-run
+status, and journal entries. A brand-new routine could appear in the UI with
+"10 invocations, last FAILED" before it had ever run, typically right after
+`crewship seed --nuke` or when an agent re-authors a routine you deleted.
+
+Current builds purge the stale counters and journal entries when a deleted
+slug is reused, so the recreated routine starts clean. On older builds the
+inherited history is cosmetic — it corrects itself after the routine's next
+real run.
+
+</Accordion>
+
 </AccordionGroup>
 
 ## Where to go next
