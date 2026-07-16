@@ -10,6 +10,7 @@ const KIND_CLASS: Record<string, string> = {
   target_environment: "bg-orange-500/15 text-orange-300 border-orange-500/40",
   tool_call: "bg-blue-500/15 text-blue-300 border-blue-500/40",
   custom: "bg-slate-500/15 text-slate-300 border-slate-500/40",
+  agent_hire: "bg-emerald-500/15 text-emerald-300 border-emerald-500/40",
 }
 
 interface KindBadgeProps {

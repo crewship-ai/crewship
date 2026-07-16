@@ -1,6 +1,35 @@
 package harbormaster
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+// TestRequest_JSONWireFormat pins the snake_case wire contract of
+// GET /api/v1/approvals rows. Both first-party consumers (the CLI's
+// struct tags and the dashboard's zod approvalRowSchema) require these
+// exact keys; the struct used to marshal with Go-cased names, which
+// silently blanked crew_id/created_at/decided_by on both clients.
+func TestRequest_JSONWireFormat(t *testing.T) {
+	b, err := json.Marshal(Request{ID: "r1", CrewID: "c1", Kind: KindToolCall, TimeoutSecs: 60})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	got := string(b)
+	for _, key := range []string{`"id"`, `"workspace_id"`, `"crew_id"`, `"agent_id"`, `"mission_id"`,
+		`"requested_by"`, `"kind"`, `"reason"`, `"status"`, `"decided_by"`, `"decided_at"`,
+		`"comment"`, `"timeout_at"`, `"created_at"`} {
+		if !strings.Contains(got, key) {
+			t.Errorf("wire format missing %s: %s", key, got)
+		}
+	}
+	for _, gone := range []string{"TimeoutSecs", `"ID"`, `"CrewID"`, `"CreatedAt"`} {
+		if strings.Contains(got, gone) {
+			t.Errorf("wire format must not contain %s: %s", gone, got)
+		}
+	}
+}
 
 // TestMode_String pins the human-readable rendering used in logs and
 // journal entries. Adding a new Mode constant must consciously update

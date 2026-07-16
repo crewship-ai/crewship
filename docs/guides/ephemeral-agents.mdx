@@ -64,7 +64,9 @@ A `guided`-crew hire lands as `PENDING_REVIEW`. The inbox shows the hire request
 3. Writes a `agent.hire_approved` journal entry
 4. Broadcasts an `agent.hire_approved` WebSocket event so the UI repaints the agent card from the PENDING_REVIEW chip to a normal status badge
 
-The operator can also "fire" the pending agent by deleting it from the crew page — same path as deleting any agent. No separate "deny hire" endpoint exists today (tracked as PR-F follow-up); fire is the explicit reject path.
+Pending-review hires also surface in the [Harbormaster approvals queue](/guides/harbormaster#staged-hires-in-the-queue) as `kind: agent_hire` rows, so `crewship approvals list` / `approvals approve <agent-id>` (or `crewship hire approve`) work interchangeably — same state machine behind both.
+
+The operator can also "fire" the pending agent by deleting it from the crew page — same path as deleting any agent. No separate "deny hire" endpoint exists today (tracked as PR-F follow-up); fire is the explicit reject path, and an unapproved hire ghosts when its TTL expires.
 
 ### Credential setup
 

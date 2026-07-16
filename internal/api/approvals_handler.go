@@ -20,6 +20,10 @@ type ApprovalsHandler struct {
 	db      *sql.DB
 	logger  *slog.Logger
 	journal journal.Emitter
+	// hire delegates approve decisions on staged (PENDING_REVIEW)
+	// ephemeral hires to the agents handler's state machine (#1209).
+	// Wired via SetHireApprover; nil degrades to a CLI hint.
+	hire stagedHireApprover
 }
 
 func NewApprovalsHandler(db *sql.DB, logger *slog.Logger, j journal.Emitter) *ApprovalsHandler {
@@ -60,6 +64,19 @@ func (h *ApprovalsHandler) List(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "list failed")
 		return
 	}
+	// #1209: staged (PENDING_REVIEW) ephemeral hires are projected in
+	// as synthetic pending rows so the approvals surface is the one
+	// queue an operator has to watch. They only exist while pending —
+	// see approvals_hire.go for why other status filters skip them.
+	if status == "" || status == harbormaster.StatusPending {
+		hires, herr := h.listStagedHires(r.Context(), workspaceID, limit)
+		if herr != nil {
+			h.logger.Error("approvals list: staged hires", "err", herr)
+			replyError(w, http.StatusInternalServerError, "list failed")
+			return
+		}
+		rows = mergeApprovalRows(rows, hires, limit)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "status": status, "count": len(rows)})
 }
 
@@ -73,23 +90,28 @@ func (h *ApprovalsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	row, err := harbormaster.Get(r.Context(), h.db, workspaceID, id)
-	if err == harbormaster.ErrNotFound {
-		replyError(w, http.StatusNotFound, "not found")
-		return
-	}
-	if err != nil {
+	if err != nil && err != harbormaster.ErrNotFound {
 		h.logger.Error("approvals get", "err", err)
 		replyError(w, http.StatusInternalServerError, "get failed")
 		return
 	}
-	if row == nil {
-		// harbormaster.Get returns (nil, nil) for a missing row that
-		// didn't map to ErrNotFound (e.g., an ID that's malformed but
-		// the driver didn't complain). Surface as 404 so the UI
-		// renders the right empty state instead of a successful null
-		// response.
-		replyError(w, http.StatusNotFound, "not found")
-		return
+	if err == harbormaster.ErrNotFound || row == nil {
+		// Not a queue row (harbormaster.Get also returns (nil, nil)
+		// for a missing row that didn't map to ErrNotFound). #1209:
+		// before 404ing, check whether the id is a staged hire this
+		// surface projected into the listing — those must be
+		// fetchable by the same id the list handed out.
+		hireRow, herr := h.getStagedHire(r.Context(), workspaceID, id)
+		if herr != nil {
+			h.logger.Error("approvals get: staged hire", "err", herr)
+			replyError(w, http.StatusInternalServerError, "get failed")
+			return
+		}
+		if hireRow == nil {
+			replyError(w, http.StatusNotFound, "not found")
+			return
+		}
+		row = hireRow
 	}
 	writeJSON(w, http.StatusOK, row)
 }
@@ -136,7 +158,10 @@ func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 	case nil:
 		// ok
 	case harbormaster.ErrNotFound:
-		replyError(w, http.StatusNotFound, "not found")
+		// #1209: the id may be a staged (PENDING_REVIEW) hire projected
+		// into this surface rather than a queue row. Approvals on those
+		// delegate to the hire state machine; everything else stays 404.
+		h.decideStagedHire(w, r, workspaceID, id, status, user.ID)
 		return
 	case harbormaster.ErrNotPending:
 		replyError(w, http.StatusConflict, "already decided")

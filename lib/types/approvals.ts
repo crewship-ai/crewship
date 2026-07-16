@@ -7,6 +7,10 @@ export const APPROVAL_KINDS = [
   "target_environment",
   "tool_call",
   "custom",
+  // Synthetic read-model rows: staged (PENDING_REVIEW) ephemeral hires
+  // projected into the approvals queue (#1209). Never persisted to
+  // approvals_queue; the row id is the agent id.
+  "agent_hire",
 ] as const
 export type ApprovalKind = (typeof APPROVAL_KINDS)[number]
 

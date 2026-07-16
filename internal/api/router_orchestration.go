@@ -230,6 +230,14 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Harbor Master: HITL approvals inbox. Enqueue side runs inside
 	// the orchestrator's gate; this handler is list + decide for humans.
 	ah := NewApprovalsHandler(r.db, r.logger, r.Journal())
+	// #1209: staged (PENDING_REVIEW) ephemeral hires surface in this
+	// queue; approve decisions delegate to the agents handler's
+	// approve-hire state machine. registerCrewsRoutes runs earlier in
+	// registerRoutes, so agentHandler is set by now; the nil guard
+	// covers stripped-down test routers.
+	if r.agentHandler != nil {
+		ah.SetHireApprover(r.agentHandler)
+	}
 	r.mux.Handle("GET /api/v1/approvals", authed(wsCtx(http.HandlerFunc(ah.List))))
 	r.mux.Handle("GET /api/v1/approvals/{id}", authed(wsCtx(http.HandlerFunc(ah.Get))))
 	r.authedMut("POST", "/api/v1/approvals/{id}/decide", roleManage, ah.Decide)

@@ -17,6 +17,13 @@ var approvalsCmd = &cobra.Command{
 	Long: `Manage the approval queue — the set of agent-initiated actions that
 require a human decision (OWNER/ADMIN) before the agent can proceed.
 
+Staged ephemeral hires (guided autonomy) surface here too, as pending
+rows with kind=agent_hire whose id is the agent id. Approving one is
+identical to 'crewship hire approve <agent-id>'. They only appear
+while pending — an approved hire leaves the queue (audit lives in the
+journal), and deny is rejected because an unapproved hire ghosts when
+its TTL expires instead of being denied.
+
 Examples:
   crewship approvals list
   crewship approvals list --status approved --limit 100

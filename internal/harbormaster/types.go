@@ -25,6 +25,12 @@ const (
 	KindDestructiveOp     Kind = "destructive_op"
 	KindTargetEnvironment Kind = "target_environment"
 	KindCustom            Kind = "custom"
+	// KindAgentHire marks synthetic read-model rows only: staged
+	// (PENDING_REVIEW) ephemeral hires surfaced through the approvals
+	// listing (#1209). These rows are projected live from the agents
+	// table and are NEVER persisted to approvals_queue — the hire
+	// decision state machine stays in the approve-hire handler.
+	KindAgentHire Kind = "agent_hire"
 )
 
 // Status mirrors the CHECK constraint on approvals_queue.status. Callers
@@ -67,25 +73,31 @@ func (m Mode) String() string {
 // Request is the in-memory shape of an approvals_queue row. Callers fill
 // it in before calling Store.Enqueue; the store assigns ID/CreatedAt/
 // TimeoutAt and writes the row.
+//
+// The json tags are the wire contract for GET /api/v1/approvals — both
+// first-party consumers (the CLI's snake_case struct tags and the
+// dashboard's zod approvalRowSchema) expect snake_case keys. The struct
+// previously marshalled with Go-cased field names, which neither client
+// could fully decode (crew_id/created_at/decided_by arrived empty).
 type Request struct {
-	ID              string
-	WorkspaceID     string
-	CrewID          string
-	AgentID         string
-	MissionID       string
-	RequestedBy     string
-	Kind            Kind
-	Reason          string
-	Payload         map[string]any
-	Status          Status
-	DecidedBy       string
-	DecidedAt       *time.Time
-	DecisionComment string
-	TimeoutAt       *time.Time
-	CreatedAt       time.Time
+	ID              string         `json:"id"`
+	WorkspaceID     string         `json:"workspace_id"`
+	CrewID          string         `json:"crew_id"`
+	AgentID         string         `json:"agent_id"`
+	MissionID       string         `json:"mission_id"`
+	RequestedBy     string         `json:"requested_by"`
+	Kind            Kind           `json:"kind"`
+	Reason          string         `json:"reason"`
+	Payload         map[string]any `json:"payload,omitempty"`
+	Status          Status         `json:"status"`
+	DecidedBy       string         `json:"decided_by"`
+	DecidedAt       *time.Time     `json:"decided_at"`
+	DecisionComment string         `json:"comment"`
+	TimeoutAt       *time.Time     `json:"timeout_at"`
+	CreatedAt       time.Time      `json:"created_at"`
 	// TimeoutSecs is consulted by Enqueue when TimeoutAt is zero. Default
 	// 3600 (one hour). Stored only on the in-memory struct, not persisted.
-	TimeoutSecs int
+	TimeoutSecs int `json:"-"`
 }
 
 // Decision is what Gate returns to the caller. Pending=true means the

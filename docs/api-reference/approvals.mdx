@@ -44,22 +44,21 @@ GET /api/v1/approvals?status=pending&limit=50
 {
   "rows": [
     {
-      "ID": "req_01HXYZABCDEF",
-      "WorkspaceID": "ws_123",
-      "CrewID": "crw_backend",
-      "AgentID": "agt_viktor",
-      "MissionID": "MIS-42",
-      "RequestedBy": "agt_viktor",
-      "Kind": "destructive_op",
-      "Reason": "rm -rf /data/*",
-      "Payload": { "tool": "Bash", "args": { "command": "rm -rf /data/*" } },
-      "Status": "pending",
-      "DecidedBy": "",
-      "DecidedAt": null,
-      "DecisionComment": "",
-      "TimeoutAt": "2026-04-17T11:23:41Z",
-      "CreatedAt": "2026-04-17T10:23:41Z",
-      "TimeoutSecs": 0
+      "id": "req_01HXYZABCDEF",
+      "workspace_id": "ws_123",
+      "crew_id": "crw_backend",
+      "agent_id": "agt_viktor",
+      "mission_id": "MIS-42",
+      "requested_by": "agt_viktor",
+      "kind": "destructive_op",
+      "reason": "rm -rf /data/*",
+      "payload": { "tool": "Bash", "args": { "command": "rm -rf /data/*" } },
+      "status": "pending",
+      "decided_by": "",
+      "decided_at": null,
+      "comment": "",
+      "timeout_at": "2026-04-17T11:23:41Z",
+      "created_at": "2026-04-17T10:23:41Z"
     }
   ],
   "status": "pending",
@@ -67,16 +66,20 @@ GET /api/v1/approvals?status=pending&limit=50
 }
 ```
 
-The `rows[]` objects are serialized with their Go field names (PascalCase) — the `harbormaster.Request` struct carries no JSON tags. The `rows`, `status`, and `count` envelope keys are lowercase. `TimeoutSecs` is an in-memory-only field that is never read back from the row, so it always serializes as `0` here (the effective deadline is `TimeoutAt`). `DecidedAt` and `TimeoutAt` are pointers — they serialize as `null` when unset rather than being omitted.
+The `rows[]` objects serialize with snake_case keys, matching the envelope. (Before #1209 they carried Go field names — `ID`, `CrewID`, `CreatedAt` — which neither the CLI's struct tags nor the dashboard's schema could fully decode; treat the PascalCase shape as a historical bug, not a contract.) `decided_at` and `timeout_at` are nullable — they serialize as `null` when unset rather than being omitted.
 
 For `?status=all`, the `status` envelope key echoes back as an empty string (`""`), not `"all"` — the handler maps `all` to "no status filter" internally.
 
 | Field | Type | Description |
 |---|---|---|
-| `rows[].Kind` | string | `tool_call`, `cost_threshold`, `destructive_op`, `target_environment`, `custom`. |
-| `rows[].Status` | string | See Status values above. |
-| `rows[].Payload` | object | Tool call context (`tool`, `args`, plus any rule-specific fields). |
-| `rows[].TimeoutAt` | string? | RFC3339 deadline; the sweeper flips past-due rows to `timeout`. |
+| `rows[].kind` | string | `tool_call`, `cost_threshold`, `destructive_op`, `target_environment`, `custom`, or the synthetic `agent_hire` (see below). |
+| `rows[].status` | string | See Status values above. |
+| `rows[].payload` | object | Tool call context (`tool`, `args`, plus any rule-specific fields). |
+| `rows[].timeout_at` | string? | RFC3339 deadline; the sweeper flips past-due rows to `timeout`. |
+
+#### Staged hires (`kind: agent_hire`)
+
+Staged guided-autonomy hires — ephemeral agents parked in `PENDING_REVIEW` — are projected into the pending listing as synthetic rows (they are never persisted to `approvals_queue`). Their `id` is the **agent id**, `payload` carries `{"type": "hire", "agent_name": …, "expires_at": …, "decide_via": "crewship hire approve <agent-id>"}`, and `timeout_at` mirrors the hire TTL. They appear only while pending (`?status=pending` or `all`); once approved or ghosted they leave the projection — the decision history lives in the journal (`agent.hire_approved`). See [Staged hires in the queue](/guides/harbormaster#staged-hires-in-the-queue).
 
 ---
 
@@ -141,6 +144,8 @@ POST /api/v1/approvals/{id}/decide
 | 403 | Not OWNER/ADMIN. |
 | 404 | Request not found. |
 | 409 | Request already decided (status != `pending`). |
+
+Deciding a staged hire (`kind: agent_hire`, id = agent id) with `status: approved` delegates to the same state machine as `POST /api/v1/agents/{agentId}/approve-hire` — the agent flips to `IDLE` and its blocking inbox waitpoint resolves. `status: denied` on a hire returns 409: staged hires have no deny lifecycle — an unapproved hire ghosts when its TTL expires.
 
 ---
 

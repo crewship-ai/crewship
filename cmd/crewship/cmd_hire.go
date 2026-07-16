@@ -277,7 +277,13 @@ var hireApproveCmd = &cobra.Command{
 	Long: `Approve an ephemeral agent that a guided-autonomy hire left in
 PENDING_REVIEW, flipping it to IDLE so it can serve work. Mirrors the
 UI inbox approval. The agent id is printed by 'crewship hire' and shown
-in 'crewship agent list'.`,
+in 'crewship agent list'.
+
+Staged hires also appear in 'crewship approvals list' as pending rows
+with kind=agent_hire, and 'crewship approvals approve <agent-id>'
+performs the exact same approval — use whichever queue you already
+watch. Deny is not part of the hire lifecycle: an unapproved hire
+simply ghosts when its TTL expires.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {

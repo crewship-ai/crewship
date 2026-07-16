@@ -26,6 +26,7 @@ package api
 //      without a poll.
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"log/slog"
@@ -34,6 +35,134 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/inbox"
 )
+
+// errStagedHireNotFound is returned by approveStagedHire when the agent
+// id does not exist in the caller's workspace (or is soft-deleted).
+var errStagedHireNotFound = errors.New("staged hire: agent not found")
+
+// stagedHireConflict carries the exact 409 JSON body approveStagedHire
+// wants the caller to render — the state machine owns the conflict
+// vocabulary so ApproveHire and the approvals Decide delegation (#1209)
+// can't drift apart.
+type stagedHireConflict struct {
+	resp map[string]string
+}
+
+func (e *stagedHireConflict) Error() string { return e.resp["error"] }
+
+// approveStagedHire is the approve-hire state machine, shared by the
+// HTTP ApproveHire handler and the approvals Decide delegation (#1209).
+// It flips a PENDING_REVIEW ephemeral agent to IDLE, resolves the
+// blocking inbox waitpoint, writes the audit entry, and broadcasts the
+// WS event. RBAC is the caller's job — both call sites gate before
+// invoking this.
+//
+// Returns the agent's crew id and name on success. Error contract:
+//
+//	errStagedHireNotFound — agent missing in this workspace (→ 404)
+//	*stagedHireConflict   — not ephemeral / not pending / lost the
+//	                        concurrent-approve race (→ 409, body in resp)
+//	anything else         — DB failure (→ 500)
+func (h *AgentHandler) approveStagedHire(ctx context.Context, workspaceID, agentID, userID string) (string, string, error) {
+	// 1. Pre-flight: confirm the agent exists in this workspace and
+	// capture its current state for the 409 message. We do this read
+	// + write split (rather than a bare UPDATE … WHERE status=…) so
+	// the 404 vs 409 distinction is honest — a bare UPDATE with 0
+	// rows-affected can't tell those apart.
+	var (
+		curStatus string
+		ephemeral int
+		crewID    sql.NullString
+		name      string
+	)
+	err := h.db.QueryRowContext(ctx, `
+		SELECT status, ephemeral, crew_id, name
+		FROM agents
+		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		agentID, workspaceID).Scan(&curStatus, &ephemeral, &crewID, &name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", errStagedHireNotFound
+	}
+	if err != nil {
+		h.logger.Error("approve-hire: load agent", "agent_id", agentID, "error", err)
+		return "", "", err
+	}
+	if ephemeral != 1 {
+		return "", "", &stagedHireConflict{resp: map[string]string{
+			"error":  "approve-hire is only valid on ephemeral agents",
+			"reason": "permanent agents do not require hire approval",
+		}}
+	}
+	if curStatus != "PENDING_REVIEW" {
+		return "", "", &stagedHireConflict{resp: map[string]string{
+			"error":          "Agent is not pending review",
+			"reason":         "expected status=PENDING_REVIEW, got " + curStatus,
+			"current_status": curStatus,
+		}}
+	}
+
+	// 2. Conditional UPDATE — if another operator just clicked
+	// Approve in parallel, the RowsAffected = 0 branch handles the
+	// race without a transaction. We're not touching any other
+	// columns so the second operator's no-op is harmless.
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := h.db.ExecContext(ctx, `
+		UPDATE agents
+		SET status = 'IDLE', updated_at = ?
+		WHERE id = ? AND workspace_id = ? AND status = 'PENDING_REVIEW'`,
+		now, agentID, workspaceID)
+	if err != nil {
+		h.logger.Error("approve-hire: update status", "agent_id", agentID, "error", err)
+		return "", "", err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		h.logger.Error("approve-hire: rows affected", "agent_id", agentID, "error", err)
+		return "", "", err
+	}
+	if n == 0 {
+		// Lost the race — another operator approved this row
+		// between our SELECT and UPDATE. Honest 409 instead of
+		// silent success so the caller's UI doesn't double-log.
+		return "", "", &stagedHireConflict{resp: map[string]string{
+			"error":  "Agent is not pending review",
+			"reason": "another operator approved this hire concurrently",
+		}}
+	}
+
+	// 3. Resolve the inbox waitpoint addressed to this agent so the
+	// blocking row drops from the operator's inbox without a separate
+	// PATCH. The writeInboxItem call in Hire uses source_id=agent_id
+	// for blocking hire waitpoints, so the resolver keys off that.
+	// Failures here are logged but non-fatal — the agent is already
+	// IDLE; a stale inbox row is fixable manually and shouldn't
+	// fail the approve.
+	logger := h.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	inbox.ResolveBySource(ctx, h.db, logger, "waitpoint", agentID, "approved", userID)
+
+	crewIDStr := ""
+	if crewID.Valid {
+		crewIDStr = crewID.String
+	}
+
+	WriteAuditLog(ctx, h.db, h.journal, "agent.hire_approved", "AGENT", agentID, userID, workspaceID, map[string]interface{}{
+		"agent_id": agentID,
+		"crew_id":  crewIDStr,
+		"name":     name,
+	})
+
+	h.broadcastAgentEvent("agent.hire_approved", workspaceID, map[string]string{
+		"id":      agentID,
+		"crew_id": crewIDStr,
+		"name":    name,
+		"status":  "IDLE",
+	})
+
+	return crewIDStr, name, nil
+}
 
 // ApproveHire flips a PENDING_REVIEW ephemeral agent to IDLE,
 // resolves the blocking inbox waitpoint, and writes the audit entry.
@@ -64,119 +193,29 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Pre-flight: confirm the agent exists in this workspace and
-	// capture its current state for the 409 message. We do this read
-	// + write split (rather than a bare UPDATE … WHERE status=…) so
-	// the 404 vs 409 distinction is honest — a bare UPDATE with 0
-	// rows-affected can't tell those apart.
-	var (
-		curStatus string
-		ephemeral int
-		crewID    sql.NullString
-		name      string
-	)
-	err := h.db.QueryRowContext(r.Context(), `
-		SELECT status, ephemeral, crew_id, name
-		FROM agents
-		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		agentID, workspaceID).Scan(&curStatus, &ephemeral, &crewID, &name)
-	if errors.Is(err, sql.ErrNoRows) {
-		replyError(w, http.StatusNotFound, "Agent not found")
-		return
-	}
-	if err != nil {
-		h.logger.Error("approve-hire: load agent", "agent_id", agentID, "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if ephemeral != 1 {
-		writeJSON(w, http.StatusConflict, map[string]string{
-			"error":  "approve-hire is only valid on ephemeral agents",
-			"reason": "permanent agents do not require hire approval",
-		})
-		return
-	}
-	if curStatus != "PENDING_REVIEW" {
-		writeJSON(w, http.StatusConflict, map[string]string{
-			"error":          "Agent is not pending review",
-			"reason":         "expected status=PENDING_REVIEW, got " + curStatus,
-			"current_status": curStatus,
-		})
-		return
-	}
-
-	// 2. Conditional UPDATE — if another operator just clicked
-	// Approve in parallel, the RowsAffected = 0 branch handles the
-	// race without a transaction. We're not touching any other
-	// columns so the second operator's no-op is harmless.
-	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := h.db.ExecContext(r.Context(), `
-		UPDATE agents
-		SET status = 'IDLE', updated_at = ?
-		WHERE id = ? AND workspace_id = ? AND status = 'PENDING_REVIEW'`,
-		now, agentID, workspaceID)
-	if err != nil {
-		h.logger.Error("approve-hire: update status", "agent_id", agentID, "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		h.logger.Error("approve-hire: rows affected", "agent_id", agentID, "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if n == 0 {
-		// Lost the race — another operator approved this row
-		// between our SELECT and UPDATE. Honest 409 instead of
-		// silent success so the caller's UI doesn't double-log.
-		writeJSON(w, http.StatusConflict, map[string]string{
-			"error":  "Agent is not pending review",
-			"reason": "another operator approved this hire concurrently",
-		})
-		return
-	}
-
 	user := UserFromContext(r.Context())
 	userID := ""
 	if user != nil {
 		userID = user.ID
 	}
 
-	// 3. Resolve the inbox waitpoint addressed to this agent so the
-	// blocking row drops from the operator's inbox without a separate
-	// PATCH. The writeInboxItem call in Hire uses source_id=agent_id
-	// for blocking hire waitpoints, so the resolver keys off that.
-	// Failures here are logged but non-fatal — the agent is already
-	// IDLE; a stale inbox row is fixable manually and shouldn't
-	// 500 the approve.
-	logger := h.logger
-	if logger == nil {
-		logger = slog.Default()
+	crewID, _, err := h.approveStagedHire(r.Context(), workspaceID, agentID, userID)
+	var conflict *stagedHireConflict
+	switch {
+	case errors.Is(err, errStagedHireNotFound):
+		replyError(w, http.StatusNotFound, "Agent not found")
+		return
+	case errors.As(err, &conflict):
+		writeJSON(w, http.StatusConflict, conflict.resp)
+		return
+	case err != nil:
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
 	}
-	inbox.ResolveBySource(r.Context(), h.db, logger, "waitpoint", agentID, "approved", userID)
-
-	crewIDStr := ""
-	if crewID.Valid {
-		crewIDStr = crewID.String
-	}
-
-	WriteAuditLog(r.Context(), h.db, h.journal, "agent.hire_approved", "AGENT", agentID, userID, workspaceID, map[string]interface{}{
-		"agent_id": agentID,
-		"crew_id":  crewIDStr,
-		"name":     name,
-	})
-
-	h.broadcastAgentEvent("agent.hire_approved", workspaceID, map[string]string{
-		"id":      agentID,
-		"crew_id": crewIDStr,
-		"name":    name,
-		"status":  "IDLE",
-	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id":      agentID,
 		"status":  "IDLE",
-		"crew_id": crewIDStr,
+		"crew_id": crewID,
 	})
 }

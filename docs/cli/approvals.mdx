@@ -43,6 +43,15 @@ crewship approvals list --status all                        # full history
 | `--status` | `string` | `pending` | One of `pending`, `approved`, `denied`, `timeout`, `cancelled`, `all`. |
 | `--limit` | `int` | `50` | Max rows (server caps at 200). |
 
+<Note>
+  Staged ephemeral hires (guided autonomy) appear here too, as pending rows
+  with kind `agent_hire` whose id is the agent id. `approvals approve
+  <agent-id>` is identical to [`crewship hire approve`](/cli/hire); they only
+  show while pending, and `deny` is rejected — an unapproved hire ghosts when
+  its TTL expires. See [Staged hires in the
+  queue](/guides/harbormaster#staged-hires-in-the-queue).
+</Note>
+
 Sample output:
 
 ```

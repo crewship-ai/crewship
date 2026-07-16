@@ -103,6 +103,15 @@ Cross-tenant IDs return 404 with the "not found" shape. Deciding a non-pending r
 
 See [Approvals API](/api-reference/approvals) for full schemas.
 
+## Staged hires in the queue
+
+Guided-autonomy [ephemeral hires](/guides/ephemeral-agents) park the new agent in `PENDING_REVIEW` until an operator approves it. Those staged hires surface in this same queue as synthetic pending rows with `kind: agent_hire`, so watching `crewship approvals list` (or the dashboard queue) is enough — no separate hire queue to poll:
+
+- The row `id` is the **agent id**; `payload` carries `type: hire`, the agent name, the hire TTL (`expires_at`), and a `decide_via` hint.
+- `POST /api/v1/approvals/{agentId}/decide` with `status: approved` performs the exact same transition as `POST /api/v1/agents/{agentId}/approve-hire` / `crewship hire approve` — one state machine, two doors.
+- These rows are projected live from the `agents` table, **not** persisted to `approvals_queue`: they appear only under `?status=pending` (or `all`) while the hire is still staged, and leave the queue once approved or ghosted. The decision history lives in the journal (`agent.hire_approved`).
+- `status: denied` returns 409 — a staged hire has no deny lifecycle; an unapproved hire simply ghosts when its TTL expires.
+
 ## Timeout sweeper
 
 `harbormaster.StartTimeoutSweeper(ctx, db, j, 30*time.Second)` runs a background goroutine that flips rows past `timeout_at` from `pending` to `timeout` and emits `approval.timeout`. The server starts this once at boot.
