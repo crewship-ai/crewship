@@ -466,13 +466,20 @@ func checkSidecar(ctx context.Context, ctr provider.ContainerProvider, container
 	return &h
 }
 
-// domainsHash mirrors internal/sidecar.DomainAllowlist.Hash() byte-for-byte
+// DomainsHash mirrors internal/sidecar.DomainAllowlist.Hash() byte-for-byte
 // (lower-case + dedupe via a set, sort, sha256, hex[:12]) — reimplemented
 // here rather than shared because internal/sidecar imports this package
 // (mission.go), so the reverse import would cycle. Any change to one side
 // MUST be mirrored on the other or #1160's restart-skip silently stops
 // matching and every restricted-mode exec restarts the sidecar again.
-func domainsHash(domains []string) string {
+//
+// Exported (#1232) so internal/sidecar's parity test
+// (TestHealthDomainsHashParity_* in domains_hash_parity_test.go) can assert
+// the lockstep across the real wire format: the hash a freshly configured
+// sidecar reports on /health MUST equal this function over the exact
+// desiredDomains RunAgent computes, or every exec into a restricted-mode
+// crew silently degrades back to a guaranteed sidecar restart.
+func DomainsHash(domains []string) string {
 	set := make(map[string]struct{}, len(domains))
 	for _, d := range domains {
 		set[strings.ToLower(d)] = struct{}{}
@@ -512,7 +519,7 @@ func sidecarNeedsRestart(health *sidecarHealth, desiredMode string, desiredDomai
 	if health.DomainsHash == "" {
 		return true
 	}
-	return health.DomainsHash != domainsHash(desiredDomains)
+	return health.DomainsHash != DomainsHash(desiredDomains)
 }
 
 // startSidecar launches the crewship-sidecar proxy inside the container.
