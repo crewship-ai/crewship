@@ -951,15 +951,7 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 				lastRestored = dsl.Steps[i].ID
 			}
 		}
-		result.Status = "FAILED"
-		result.FailedAtStep = lastRestored
-		result.ErrorMessage = costCapExceededMessage(result.CostUSD, dsl.MaxCostUSD, lastRestored)
-		emit.emitRunFailed(ctx, lastRestored, result.ErrorMessage)
-		if in.Mode == ModeRun && in.pipeline != nil {
-			_ = e.store.RecordInvocation(ctx, in.pipeline.ID, "FAILED")
-		}
-		result.DurationMs = time.Since(startedAt).Milliseconds()
-		return result, nil
+		return e.failRun(ctx, in, emit, result, lastRestored, costCapExceededMessage(result.CostUSD, dsl.MaxCostUSD, lastRestored), true, startedAt), nil
 	}
 
 	// Agentless guarantee — runtime belt-and-braces behind the
@@ -974,15 +966,7 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 			if st.Type != StepAgentRun && st.Type != StepCallPipeline {
 				continue
 			}
-			result.Status = "FAILED"
-			result.FailedAtStep = st.ID
-			result.ErrorMessage = fmt.Sprintf("agentless routine contains %s step %q — token-zero guarantee violated; fix and re-save the definition", st.Type, st.ID)
-			emit.emitRunFailed(ctx, st.ID, result.ErrorMessage)
-			if in.Mode == ModeRun && in.pipeline != nil {
-				_ = e.store.RecordInvocation(ctx, in.pipeline.ID, "FAILED")
-			}
-			result.DurationMs = time.Since(startedAt).Milliseconds()
-			return result, nil
+			return e.failRun(ctx, in, emit, result, st.ID, fmt.Sprintf("agentless routine contains %s step %q — token-zero guarantee violated; fix and re-save the definition", st.Type, st.ID), true, startedAt), nil
 		}
 	}
 
@@ -996,17 +980,22 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 	//     independent siblings fan out (bounded). call_pipeline can't run
 	//     in a DAG, so a routine containing one falls back to linear.
 	//   off: force the linear loop even if `needs:` are declared.
+	// Run metadata is constant for the life of the run — parse it once
+	// here instead of re-unmarshalling in.MetadataJSON for every step
+	// (linear loop) or every step goroutine (DAG).
+	runMeta := parseRunMetadata(in.MetadataJSON)
+
 	if in.Mode != ModeDryRun {
 		switch parallelismMode(dsl) {
 		case ParallelismAuto:
 			if !hasCallPipeline(dsl) {
-				return e.runDAG(ctx, in, depth, deriveAutoNeeds(dsl), result, pipelineID, pipelineSlug, runID, emit, inputsForCtx, renderEnv, startedAt)
+				return e.runDAG(ctx, in, depth, deriveAutoNeeds(dsl), result, pipelineID, pipelineSlug, runID, emit, inputsForCtx, renderEnv, runMeta, startedAt)
 			}
 		case ParallelismOff:
 			// force sequential — fall through to the linear loop.
 		default: // explicit
 			if hasNeeds(dsl) {
-				return e.runDAG(ctx, in, depth, dsl, result, pipelineID, pipelineSlug, runID, emit, inputsForCtx, renderEnv, startedAt)
+				return e.runDAG(ctx, in, depth, dsl, result, pipelineID, pipelineSlug, runID, emit, inputsForCtx, renderEnv, runMeta, startedAt)
 			}
 		}
 	}
@@ -1018,16 +1007,13 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		// outer Run() promotes this to Status=CANCELLED when the
 		// cancel was user-initiated.
 		if err := ctx.Err(); err != nil {
-			result.Status = "FAILED"
+			failedAt := ""
 			if i > 0 {
-				result.FailedAtStep = dsl.Steps[i-1].ID
+				failedAt = dsl.Steps[i-1].ID
 			} else if len(dsl.Steps) > 0 {
-				result.FailedAtStep = dsl.Steps[0].ID
+				failedAt = dsl.Steps[0].ID
 			}
-			result.ErrorMessage = err.Error()
-			emit.emitRunFailed(ctx, result.FailedAtStep, err.Error())
-			result.DurationMs = time.Since(startedAt).Milliseconds()
-			return result, nil
+			return e.failRun(ctx, in, emit, result, failedAt, err.Error(), false, startedAt), nil
 		}
 
 		step := dsl.Steps[i]
@@ -1043,15 +1029,8 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 			}
 		}
 
-		stepStart := time.Now()
 		// Build the rendered prompt for both run + dry-run paths.
-		ctxRender := RenderContext{
-			Inputs:        inputsForCtx,
-			StepOutputs:   result.StepOutputs,
-			Env:           renderEnv,
-			Metadata:      parseRunMetadata(in.MetadataJSON),
-			EgressTargets: dsl.EgressTargets,
-		}
+		ctxRender := buildStepRenderContext(inputsForCtx, result.StepOutputs, renderEnv, runMeta, dsl.EgressTargets)
 		renderedPrompt := Render(step.Prompt, ctxRender)
 
 		// Conditional execution. We evaluate the rendered If string
@@ -1085,13 +1064,12 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		}
 		tier, fallback, err := e.resolver.Resolve(ctx, in.WorkspaceID, stepForResolve)
 		if err != nil {
-			result.Status = "FAILED"
-			result.FailedAtStep = step.ID
-			result.ErrorMessage = "tier resolver: " + err.Error()
 			emit.emitStepFailed(ctx, step, "tier_resolution", err.Error())
-			emit.emitRunFailed(ctx, step.ID, err.Error())
-			result.DurationMs = time.Since(startedAt).Milliseconds()
-			return result, nil
+			res := e.failRun(ctx, in, emit, result, step.ID, err.Error(), false, startedAt)
+			// Historical quirk, preserved: the stored message carries the
+			// "tier resolver:" prefix while the journal event does not.
+			res.ErrorMessage = "tier resolver: " + err.Error()
+			return res, nil
 		}
 
 		switch in.Mode {
@@ -1143,15 +1121,7 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 				// spend analytics (the cost-cap branch below always
 				// recorded it, so the two failure paths disagreed).
 				result.CostUSD += stepCost
-				result.Status = "FAILED"
-				result.FailedAtStep = step.ID
-				result.ErrorMessage = stepErr.Error()
-				emit.emitRunFailed(ctx, step.ID, stepErr.Error())
-				if in.Mode == ModeRun && in.pipeline != nil {
-					_ = e.store.RecordInvocation(ctx, in.pipeline.ID, "FAILED")
-				}
-				result.DurationMs = time.Since(startedAt).Milliseconds()
-				return result, nil
+				return e.failRun(ctx, in, emit, result, step.ID, stepErr.Error(), true, startedAt), nil
 			}
 			result.StepOutputs[step.ID] = output
 			result.CostUSD += stepCost
@@ -1167,18 +1137,9 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 			// be useful but DSL-level is the more common case
 			// (templates pin the budget regardless of caller).
 			if dsl.MaxCostUSD > 0 && result.CostUSD > dsl.MaxCostUSD {
-				result.Status = "FAILED"
-				result.FailedAtStep = step.ID
-				result.ErrorMessage = costCapExceededMessage(result.CostUSD, dsl.MaxCostUSD, step.ID)
-				emit.emitRunFailed(ctx, step.ID, result.ErrorMessage)
-				if in.Mode == ModeRun && in.pipeline != nil {
-					_ = e.store.RecordInvocation(ctx, in.pipeline.ID, "FAILED")
-				}
-				result.DurationMs = time.Since(startedAt).Milliseconds()
-				return result, nil
+				return e.failRun(ctx, in, emit, result, step.ID, costCapExceededMessage(result.CostUSD, dsl.MaxCostUSD, step.ID), true, startedAt), nil
 			}
 		}
-		_ = stepStart
 	}
 
 	result.DurationMs = time.Since(startedAt).Milliseconds()
@@ -1191,11 +1152,7 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 	case ModeDryRun:
 		result.Status = "DRY_RUN_OK"
 	case ModeRun:
-		result.Status = "COMPLETED"
-		emit.emitRunCompleted(ctx, result.DurationMs, result.CostUSD)
-		if in.Mode == ModeRun && in.pipeline != nil {
-			_ = e.store.RecordInvocation(ctx, in.pipeline.ID, "COMPLETED")
-		}
+		e.completeRun(ctx, in, emit, result)
 	default:
 		// Only ModeDryRun and ModeRun are supported. Any other (or empty)
 		// mode must never return an empty terminal Status — fail loudly so a
@@ -1205,6 +1162,35 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 	}
 
 	return result, nil
+}
+
+// failRun stamps the terminal FAILED state on result, emits the
+// run-failed journal event, and finalizes DurationMs. recordInvocation
+// controls the pipeline invocation-counter write — some failure paths
+// historically never recorded one (tier resolution, cancel pre-emption)
+// and that per-site behaviour is preserved. Returns result so callers
+// can `return e.failRun(...), nil` in one line.
+func (e *Executor) failRun(ctx context.Context, in RunInput, emit *pipelineEmitContext, result *RunResult, stepID, errMsg string, recordInvocation bool, startedAt time.Time) *RunResult {
+	result.Status = "FAILED"
+	result.FailedAtStep = stepID
+	result.ErrorMessage = errMsg
+	emit.emitRunFailed(ctx, stepID, errMsg)
+	if recordInvocation && in.Mode == ModeRun && in.pipeline != nil {
+		_ = e.store.RecordInvocation(ctx, in.pipeline.ID, "FAILED")
+	}
+	result.DurationMs = time.Since(startedAt).Milliseconds()
+	return result
+}
+
+// completeRun stamps the terminal COMPLETED state, emits the
+// run-completed journal event, and records the invocation. The caller
+// must finalize result.DurationMs first — the emit carries it.
+func (e *Executor) completeRun(ctx context.Context, in RunInput, emit *pipelineEmitContext, result *RunResult) {
+	result.Status = "COMPLETED"
+	emit.emitRunCompleted(ctx, result.DurationMs, result.CostUSD)
+	if in.Mode == ModeRun && in.pipeline != nil {
+		_ = e.store.RecordInvocation(ctx, in.pipeline.ID, "COMPLETED")
+	}
 }
 
 // runStep dispatches one non-dry-run step to either the AgentRunner
@@ -1307,18 +1293,29 @@ func (e *Executor) dispatchStep(
 // context (so it sees the same inputs/outputs the step does). Restricted
 // to code | http | transform, like routine hooks.
 func (e *Executor) runStepHook(ctx context.Context, hook *Step, in RunInput, runID string, parentRender RenderContext) (string, error) {
+	return e.dispatchHookStep(ctx, hook, in, parentRender, "step hook")
+}
+
+// dispatchHookStep is the shared hook-step dispatch used by both per-step
+// hooks (runStepHook) and routine lifecycle hooks (runRoutineHook). Only
+// code | http | transform are allowed — hooks must not recurse or spend
+// tokens. kind ("step hook" / "hook step") preserves each caller's
+// historical error wording.
+func (e *Executor) dispatchHookStep(ctx context.Context, hook *Step, in RunInput, render RenderContext, kind string) (string, error) {
 	switch hook.Type {
 	case StepHTTP:
-		out, _, _, err := e.runHTTPStep(ctx, *hook, parentRender, in)
+		out, _, _, err := e.runHTTPStep(ctx, *hook, render, in)
 		return out, err
 	case StepCode:
-		out, _, _, err := e.runCodeStep(ctx, *hook, parentRender, in)
+		out, _, _, err := e.runCodeStep(ctx, *hook, render, in)
 		return out, err
 	case StepTransform:
-		out, _, _, err := e.runTransformStep(*hook, parentRender)
+		out, _, _, err := e.runTransformStep(*hook, render)
 		return out, err
 	default:
-		return "", fmt.Errorf("step hook %q type %q not allowed (use code, http, or transform)", hook.ID, hook.Type)
+		// Validation rejects these at save time; this is the runtime
+		// belt-and-braces for a definition that smuggled one past.
+		return "", fmt.Errorf("%s %q type %q not allowed (use code, http, or transform)", kind, hook.ID, hook.Type)
 	}
 }
 

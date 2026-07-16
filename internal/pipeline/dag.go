@@ -201,6 +201,7 @@ func (e *Executor) runDAG(
 	emit *pipelineEmitContext,
 	inputsForCtx map[string]any,
 	renderEnv map[string]string,
+	runMeta map[string]any,
 	startedAt time.Time,
 ) (*RunResult, error) {
 	if err := validateDAG(dsl); err != nil {
@@ -320,7 +321,7 @@ func (e *Executor) runDAG(
 				if dagCtx.Err() != nil {
 					return
 				}
-				e.executeOneStep(dagCtx, step, stepIndex[step.ID], in, runID, pipelineID, emit, inputsForCtx, renderEnv, depth, &resMu, result, dsl, &firstErr, &suspended, dagCancel)
+				e.executeOneStep(dagCtx, step, stepIndex[step.ID], in, runID, pipelineID, emit, inputsForCtx, renderEnv, runMeta, depth, &resMu, result, dsl, &firstErr, &suspended, dagCancel)
 			}()
 		}
 		wg.Wait()
@@ -371,15 +372,7 @@ func (e *Executor) runDAG(
 
 		if f := firstErr.Load(); f != nil {
 			fail := f.(*dagStepFailure)
-			result.Status = "FAILED"
-			result.FailedAtStep = fail.stepID
-			result.ErrorMessage = fail.message
-			emit.emitRunFailed(ctx, fail.stepID, fail.message)
-			if in.Mode == ModeRun && in.pipeline != nil {
-				_ = e.store.RecordInvocation(ctx, in.pipeline.ID, "FAILED")
-			}
-			result.DurationMs = time.Since(startedAt).Milliseconds()
-			return result, nil
+			return e.failRun(ctx, in, emit, result, fail.stepID, fail.message, true, startedAt), nil
 		}
 	}
 
@@ -428,11 +421,7 @@ func (e *Executor) runDAG(
 	resMu.Unlock()
 
 	result.DurationMs = time.Since(startedAt).Milliseconds()
-	result.Status = "COMPLETED"
-	emit.emitRunCompleted(ctx, result.DurationMs, result.CostUSD)
-	if in.Mode == ModeRun && in.pipeline != nil {
-		_ = e.store.RecordInvocation(ctx, in.pipeline.ID, "COMPLETED")
-	}
+	e.completeRun(ctx, in, emit, result)
 	return result, nil
 }
 
@@ -460,6 +449,7 @@ func (e *Executor) executeOneStep(
 	emit *pipelineEmitContext,
 	inputsForCtx map[string]any,
 	renderEnv map[string]string,
+	runMeta map[string]any,
 	depth int,
 	resMu *sync.Mutex,
 	result *RunResult,
@@ -476,13 +466,7 @@ func (e *Executor) executeOneStep(
 		outputsSnap[k] = v
 	}
 	resMu.Unlock()
-	ctxRender := RenderContext{
-		Inputs:        inputsForCtx,
-		StepOutputs:   outputsSnap,
-		Env:           renderEnv,
-		Metadata:      parseRunMetadata(in.MetadataJSON),
-		EgressTargets: dsl.EgressTargets,
-	}
+	ctxRender := buildStepRenderContext(inputsForCtx, outputsSnap, renderEnv, runMeta, dsl.EgressTargets)
 	renderedPrompt := Render(step.Prompt, ctxRender)
 
 	// Conditional skip — same semantics as the linear path.

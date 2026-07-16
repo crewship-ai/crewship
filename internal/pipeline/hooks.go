@@ -20,6 +20,21 @@ func parseRunMetadata(s string) map[string]any {
 	return m
 }
 
+// buildStepRenderContext assembles the RenderContext a pipeline step
+// renders against. Shared by the linear loop and the DAG scheduler so
+// the two paths can't drift; metadata is parsed once per run
+// (parseRunMetadata) and threaded through rather than re-unmarshalled
+// per step.
+func buildStepRenderContext(inputs map[string]any, stepOutputs map[string]string, env map[string]string, metadata map[string]any, egressTargets []string) RenderContext {
+	return RenderContext{
+		Inputs:        inputs,
+		StepOutputs:   stepOutputs,
+		Env:           env,
+		Metadata:      metadata,
+		EgressTargets: egressTargets,
+	}
+}
+
 // runRoutineHook executes a single lifecycle hook step (Wave 4.1). Hooks
 // are deterministic side-channels: only code | http | transform are
 // allowed (no agent_run — hooks must not recurse or spend tokens). The
@@ -52,21 +67,7 @@ func (e *Executor) runRoutineHook(ctx context.Context, hook *Step, in RunInput, 
 		},
 		EgressTargets: egress,
 	}
-	switch hook.Type {
-	case StepHTTP:
-		out, _, _, err := e.runHTTPStep(ctx, *hook, render, in)
-		return out, err
-	case StepCode:
-		out, _, _, err := e.runCodeStep(ctx, *hook, render, in)
-		return out, err
-	case StepTransform:
-		out, _, _, err := e.runTransformStep(*hook, render)
-		return out, err
-	default:
-		// Validation rejects these at save time; this is the runtime
-		// belt-and-braces for a definition that smuggled one past.
-		return "", fmt.Errorf("hook step %q type %q not allowed (use code, http, or transform)", hook.ID, hook.Type)
-	}
+	return e.dispatchHookStep(ctx, hook, in, render, "hook step")
 }
 
 // runHooksAround wraps a main-execution function with the routine's
