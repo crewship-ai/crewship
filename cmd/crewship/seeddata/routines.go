@@ -50,14 +50,16 @@ func agentSlugRef(slug string) string { return slug }
 // in eval_scenarios.go are the matching regression harness.
 //
 // Alongside the deterministic recipes, three routines exist for the
-// live-workspace demo loop rather than determinism:
-//   - morning-briefing    — scheduled lead briefing (agent routine whose
+// live-workspace demo loop rather than determinism. None of them ship
+// with a cron schedule — the demo seed intentionally has zero scheduled
+// routines; wire one by hand (`crewship routine schedules create`) to
+// see the loop fire:
+//   - morning-briefing    — lead briefing (agent routine whose
 //     completion lands an inbox notification)
 //   - feed-watch-probe    — agentless token-zero wake gate (http +
-//     transform + code:expr), wired as the wake gate of the demo
-//     feed-watch schedule
-//   - feed-change-report  — the wake-gated target that only runs (and
-//     only spends tokens) when the probe fires
+//     transform + code:expr), suitable as a schedule's wake gate
+//   - feed-change-report  — the intended wake-gated target that only
+//     runs (and only spends tokens) when the probe fires
 //
 // Design conventions (kept identical across every recipe):
 //   - Each routine runs with empty inputs (sensible defaults set)
@@ -349,10 +351,10 @@ var Routines = []RoutineDef{
 	},
 
 	// ───────────────────────────────────────────────────────────────
-	// 6. morning-briefing — scheduled lead briefing (agent routine)
-	//    The demo scheduler targets this at 08:30; its completion lands
-	//    a notification, so a fresh workspace shows the "your crew
-	//    briefs you every morning" loop end-to-end.
+	// 6. morning-briefing — lead briefing (agent routine)
+	//    Unscheduled by default; its completion lands a notification,
+	//    so wiring it to a cron shows the "your crew briefs you every
+	//    morning" loop end-to-end.
 	// ───────────────────────────────────────────────────────────────
 	{
 		Slug:        "morning-briefing",
@@ -850,10 +852,10 @@ var Routines = []RoutineDef{
 
 	// ───────────────────────────────────────────────────────────────
 	// 15. feed-watch-probe — agentless wake gate (token-zero monitoring)
-	//     http fetch → transform reduce → code:expr compare. The demo
-	//     scheduler runs this every 15 minutes as the wake gate for
-	//     feed-change-report: with the stable seed defaults it emits
-	//     false, so the rail shows recurring zero-token SKIPPED wake
+	//     http fetch → transform reduce → code:expr compare. Unscheduled
+	//     by default; wire it as a schedule's wake gate for
+	//     feed-change-report and, with the stable seed defaults, it
+	//     emits false — the rail shows recurring zero-token SKIPPED wake
 	//     checks — the crew literally sleeps until the feed changes.
 	//     On camera: lower expected_items (or point url at a live feed)
 	//     and the next tick wakes the crew.
