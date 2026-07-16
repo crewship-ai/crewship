@@ -930,44 +930,13 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		defer e.persistRunTerminal(ctx, runID, in, pipelineID, result, startedAt)
 	}
 
-	// Resume-time cost-cap gate. The live gate runs AFTER each step
-	// completes — so a hard kill that lands after a step-boundary
-	// flush persisted an already-at-or-over-budget CostUSD but before
-	// that post-step gate ran leaves a row whose restored cost would
-	// otherwise buy one more step (or DAG wave) past max_cost_usd.
-	// Re-check the restored total here, before either scheduler can
-	// dispatch anything, and fail through the same path a live breach
-	// uses (same status, same wording) so resumed and live breaches
-	// are indistinguishable to operators. >= rather than the live
-	// gate's >: at exactly the cap the budget is fully consumed and
-	// there is nothing left to spend on another step.
-	if in.resume && dsl.MaxCostUSD > 0 && result.CostUSD >= dsl.MaxCostUSD {
-		// Attribute the breach to the last restored step in source
-		// order — the closest analogue to the live gate's "after
-		// step X" — falling back to the stamped in-flight step.
-		lastRestored := in.resumeCurrentStepID
-		for i := range dsl.Steps {
-			if _, ok := in.restoredOutputs[dsl.Steps[i].ID]; ok {
-				lastRestored = dsl.Steps[i].ID
-			}
-		}
-		return e.failRun(ctx, in, emit, result, lastRestored, costCapExceededMessage(result.CostUSD, dsl.MaxCostUSD, lastRestored), true, startedAt), nil
+	// Runtime gates — each returns the terminal FAILED result when it
+	// trips, before either scheduler can dispatch anything.
+	if failed := e.resumeCostCapGate(ctx, in, emit, result, startedAt); failed != nil {
+		return failed, nil
 	}
-
-	// Agentless guarantee — runtime belt-and-braces behind the
-	// save-time validator. A definition that reaches the executor with
-	// agentless=true AND an LLM-capable step (row written before the
-	// validator existed, or smuggled past it) fails here, before either
-	// scheduler can dispatch anything. One check covers linear, DAG,
-	// and dry-run paths alike.
-	if dsl.Agentless {
-		for i := range dsl.Steps {
-			st := &dsl.Steps[i]
-			if st.Type != StepAgentRun && st.Type != StepCallPipeline {
-				continue
-			}
-			return e.failRun(ctx, in, emit, result, st.ID, fmt.Sprintf("agentless routine contains %s step %q — token-zero guarantee violated; fix and re-save the definition", st.Type, st.ID), true, startedAt), nil
-		}
+	if failed := e.agentlessGate(ctx, in, emit, result, startedAt); failed != nil {
+		return failed, nil
 	}
 
 	// DAG dispatch — dry-run always takes the linear "what would execute"
@@ -1029,116 +998,8 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 			}
 		}
 
-		// Build the rendered prompt for both run + dry-run paths.
-		ctxRender := buildStepRenderContext(inputsForCtx, result.StepOutputs, renderEnv, runMeta, dsl.EgressTargets)
-		renderedPrompt := Render(step.Prompt, ctxRender)
-
-		// Conditional execution. We evaluate the rendered If string
-		// for truthiness BEFORE tier resolution / runner dispatch so
-		// a skipped step doesn't burn any tokens or DB lookups.
-		// Skipped steps still appear in the journal so observers see
-		// "this branch wasn't taken."
-		if step.If != "" {
-			if !evalIfCondition(Render(step.If, ctxRender)) {
-				emit.emitStepSkipped(ctx, step, step.If)
-				result.StepOutputs[step.ID] = "<skipped>"
-				e.persistStepOutputs(ctx, in, depth, runID, result.StepOutputs, result.CostUSD, startedAt)
-				continue
-			}
-		}
-
-		// Stamp the in-flight step BEFORE dispatch so a hard kill
-		// mid-step leaves current_step_id pointing at the step that
-		// was running — boot-time resume re-executes from here.
-		e.persistStepEntry(ctx, in, depth, runID, step.ID)
-
-		// Apply per-run tier override if the caller passed one.
-		// ModelOverride still wins inside Resolver — author's
-		// explicit pin beats a batch-level "run everything on fast".
-		// We mutate a local copy, never the DSL's Step in-place,
-		// so concurrent runs of the same DSL with different overrides
-		// don't race.
-		stepForResolve := step
-		if in.TierOverride != "" && step.Type == StepAgentRun && step.ModelOverride == "" {
-			stepForResolve.Complexity = in.TierOverride
-		}
-		tier, fallback, err := e.resolver.Resolve(ctx, in.WorkspaceID, stepForResolve)
-		if err != nil {
-			emit.emitStepFailed(ctx, step, "tier_resolution", err.Error())
-			res := e.failRun(ctx, in, emit, result, step.ID, err.Error(), false, startedAt)
-			// Historical quirk, preserved: the stored message carries the
-			// "tier resolver:" prefix while the journal event does not.
-			res.ErrorMessage = "tier resolver: " + err.Error()
-			return res, nil
-		}
-
-		switch in.Mode {
-		case ModeDryRun:
-			ds := DryRunStep{
-				StepID:      step.ID,
-				StepType:    string(step.Type),
-				WouldPass:   renderedPrompt,
-				TierAdapter: tier.Adapter,
-				TierModel:   tier.Model,
-			}
-			switch step.Type {
-			case StepAgentRun:
-				ds.WouldCallAgent = step.AgentSlug
-				ds.EstimatedCost = estimateStepCost(step, renderedPrompt)
-				result.CostUSD += ds.EstimatedCost
-			case StepCallPipeline:
-				ds.WouldCallSlug = step.PipelineSlug
-				// For dry-run we do not recurse into nested pipelines
-				// in MVP — that would require resolving them all and
-				// rendering N nested step plans. Phase 2 may unfold.
-			}
-			result.WouldExecute = append(result.WouldExecute, ds)
-			result.StepOutputs[step.ID] = "<dry-run>"
-			continue
-
-		case ModeRun:
-			emit.emitStepStarted(ctx, step, i, tier)
-
-			output, stepCost, stepDur, stepErr := e.runStepWithRetry(ctx, step, renderedPrompt, tier, fallback, in, runID, pipelineID, emit, ctxRender, depth, result.CostUSD)
-			// Suspend: the wait step parked on an approval. NOT a failure —
-			// return WAITING promptly so the caller (and slot) is released.
-			// MarkWaiting + step-output persistence already happened in
-			// runWaitStep; the deferred terminal write skips WAITING.
-			var susp *suspendError
-			if errors.As(stepErr, &susp) {
-				result.Status = "WAITING"
-				result.CurrentStep = susp.stepID
-				result.WaitpointToken = susp.token
-				result.DurationMs = time.Since(startedAt).Milliseconds()
-				return result, nil
-			}
-			if stepErr != nil {
-				// Fold the failed attempt's spend into the run total
-				// BEFORE bailing — runStepWithRetry reports the cost of
-				// every tier it burned alongside the error. Dropping it
-				// here made failed runs persist cost_usd=0, hiding
-				// exactly the expensive retried/escalated failures from
-				// spend analytics (the cost-cap branch below always
-				// recorded it, so the two failure paths disagreed).
-				result.CostUSD += stepCost
-				return e.failRun(ctx, in, emit, result, step.ID, stepErr.Error(), true, startedAt), nil
-			}
-			result.StepOutputs[step.ID] = output
-			result.CostUSD += stepCost
-			emit.emitStepCompleted(ctx, step, output, stepDur, stepCost)
-			// Flush the outputs map at the step boundary so a kill
-			// between steps loses at most the in-flight step.
-			e.persistStepOutputs(ctx, in, depth, runID, result.StepOutputs, result.CostUSD, startedAt)
-
-			// Cost-cap gate. Checked AFTER the step completes (we
-			// can't refund work already done) but BEFORE the next
-			// step kicks off so a runaway pipeline halts as soon as
-			// the budget is breached. Per-RunInput max would also
-			// be useful but DSL-level is the more common case
-			// (templates pin the budget regardless of caller).
-			if dsl.MaxCostUSD > 0 && result.CostUSD > dsl.MaxCostUSD {
-				return e.failRun(ctx, in, emit, result, step.ID, costCapExceededMessage(result.CostUSD, dsl.MaxCostUSD, step.ID), true, startedAt), nil
-			}
+		if terminal := e.runLinearStep(ctx, step, i, in, runID, pipelineID, emit, inputsForCtx, renderEnv, runMeta, depth, result, dsl, startedAt); terminal != nil {
+			return terminal, nil
 		}
 	}
 
@@ -1162,6 +1023,198 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 	}
 
 	return result, nil
+}
+
+// resumeCostCapGate is the resume-time cost-cap gate. The live gate
+// runs AFTER each step completes — so a hard kill that lands after a
+// step-boundary flush persisted an already-at-or-over-budget CostUSD
+// but before that post-step gate ran leaves a row whose restored cost
+// would otherwise buy one more step (or DAG wave) past max_cost_usd.
+// Re-check the restored total here, before either scheduler can
+// dispatch anything, and fail through the same path a live breach
+// uses (same status, same wording) so resumed and live breaches
+// are indistinguishable to operators. >= rather than the live
+// gate's >: at exactly the cap the budget is fully consumed and
+// there is nothing left to spend on another step.
+//
+// Returns the terminal FAILED result when the gate trips, nil otherwise.
+func (e *Executor) resumeCostCapGate(ctx context.Context, in RunInput, emit *pipelineEmitContext, result *RunResult, startedAt time.Time) *RunResult {
+	dsl := in.dsl
+	if !in.resume || dsl.MaxCostUSD <= 0 || result.CostUSD < dsl.MaxCostUSD {
+		return nil
+	}
+	// Attribute the breach to the last restored step in source
+	// order — the closest analogue to the live gate's "after
+	// step X" — falling back to the stamped in-flight step.
+	lastRestored := in.resumeCurrentStepID
+	for i := range dsl.Steps {
+		if _, ok := in.restoredOutputs[dsl.Steps[i].ID]; ok {
+			lastRestored = dsl.Steps[i].ID
+		}
+	}
+	return e.failRun(ctx, in, emit, result, lastRestored, costCapExceededMessage(result.CostUSD, dsl.MaxCostUSD, lastRestored), true, startedAt)
+}
+
+// agentlessGate enforces the agentless guarantee — runtime
+// belt-and-braces behind the save-time validator. A definition that
+// reaches the executor with agentless=true AND an LLM-capable step
+// (row written before the validator existed, or smuggled past it)
+// fails here, before either scheduler can dispatch anything. One
+// check covers linear, DAG, and dry-run paths alike.
+//
+// Returns the terminal FAILED result when the gate trips, nil otherwise.
+func (e *Executor) agentlessGate(ctx context.Context, in RunInput, emit *pipelineEmitContext, result *RunResult, startedAt time.Time) *RunResult {
+	dsl := in.dsl
+	if !dsl.Agentless {
+		return nil
+	}
+	for i := range dsl.Steps {
+		st := &dsl.Steps[i]
+		if st.Type != StepAgentRun && st.Type != StepCallPipeline {
+			continue
+		}
+		return e.failRun(ctx, in, emit, result, st.ID, fmt.Sprintf("agentless routine contains %s step %q — token-zero guarantee violated; fix and re-save the definition", st.Type, st.ID), true, startedAt)
+	}
+	return nil
+}
+
+// runLinearStep is the per-step execution body of the sequential loop
+// in runDSL: render → `if:` skip eval → tier resolve → dispatch →
+// post-step cost-cap gate. It mirrors executeOneStep in dag.go (the
+// DAG scheduler's per-step body) so the two stay diffable side by
+// side; they are deliberately NOT merged — the DAG body pays for
+// mutex/atomic/fail-fast plumbing the sequential path doesn't need.
+//
+// A non-nil return is the run's terminal result (suspend, failure, or
+// cost-cap breach) and the caller must return it as-is; nil means the
+// step finished (ran, skipped, or dry-ran) and the loop continues.
+func (e *Executor) runLinearStep(
+	ctx context.Context,
+	step Step,
+	stepIdx int,
+	in RunInput,
+	runID, pipelineID string,
+	emit *pipelineEmitContext,
+	inputsForCtx map[string]any,
+	renderEnv map[string]string,
+	runMeta map[string]any,
+	depth int,
+	result *RunResult,
+	dsl *DSL,
+	startedAt time.Time,
+) *RunResult {
+	// Build the rendered prompt for both run + dry-run paths.
+	ctxRender := buildStepRenderContext(inputsForCtx, result.StepOutputs, renderEnv, runMeta, dsl.EgressTargets)
+	renderedPrompt := Render(step.Prompt, ctxRender)
+
+	// Conditional execution. We evaluate the rendered If string
+	// for truthiness BEFORE tier resolution / runner dispatch so
+	// a skipped step doesn't burn any tokens or DB lookups.
+	// Skipped steps still appear in the journal so observers see
+	// "this branch wasn't taken."
+	if step.If != "" {
+		if !evalIfCondition(Render(step.If, ctxRender)) {
+			emit.emitStepSkipped(ctx, step, step.If)
+			result.StepOutputs[step.ID] = "<skipped>"
+			e.persistStepOutputs(ctx, in, depth, runID, result.StepOutputs, result.CostUSD, startedAt)
+			return nil
+		}
+	}
+
+	// Stamp the in-flight step BEFORE dispatch so a hard kill
+	// mid-step leaves current_step_id pointing at the step that
+	// was running — boot-time resume re-executes from here.
+	e.persistStepEntry(ctx, in, depth, runID, step.ID)
+
+	// Apply per-run tier override if the caller passed one.
+	// ModelOverride still wins inside Resolver — author's
+	// explicit pin beats a batch-level "run everything on fast".
+	// We mutate a local copy, never the DSL's Step in-place,
+	// so concurrent runs of the same DSL with different overrides
+	// don't race.
+	stepForResolve := step
+	if in.TierOverride != "" && step.Type == StepAgentRun && step.ModelOverride == "" {
+		stepForResolve.Complexity = in.TierOverride
+	}
+	tier, fallback, err := e.resolver.Resolve(ctx, in.WorkspaceID, stepForResolve)
+	if err != nil {
+		emit.emitStepFailed(ctx, step, "tier_resolution", err.Error())
+		res := e.failRun(ctx, in, emit, result, step.ID, err.Error(), false, startedAt)
+		// Historical quirk, preserved: the stored message carries the
+		// "tier resolver:" prefix while the journal event does not.
+		res.ErrorMessage = "tier resolver: " + err.Error()
+		return res
+	}
+
+	switch in.Mode {
+	case ModeDryRun:
+		ds := DryRunStep{
+			StepID:      step.ID,
+			StepType:    string(step.Type),
+			WouldPass:   renderedPrompt,
+			TierAdapter: tier.Adapter,
+			TierModel:   tier.Model,
+		}
+		switch step.Type {
+		case StepAgentRun:
+			ds.WouldCallAgent = step.AgentSlug
+			ds.EstimatedCost = estimateStepCost(step, renderedPrompt)
+			result.CostUSD += ds.EstimatedCost
+		case StepCallPipeline:
+			ds.WouldCallSlug = step.PipelineSlug
+			// For dry-run we do not recurse into nested pipelines
+			// in MVP — that would require resolving them all and
+			// rendering N nested step plans. Phase 2 may unfold.
+		}
+		result.WouldExecute = append(result.WouldExecute, ds)
+		result.StepOutputs[step.ID] = "<dry-run>"
+		return nil
+
+	case ModeRun:
+		emit.emitStepStarted(ctx, step, stepIdx, tier)
+
+		output, stepCost, stepDur, stepErr := e.runStepWithRetry(ctx, step, renderedPrompt, tier, fallback, in, runID, pipelineID, emit, ctxRender, depth, result.CostUSD)
+		// Suspend: the wait step parked on an approval. NOT a failure —
+		// return WAITING promptly so the caller (and slot) is released.
+		// MarkWaiting + step-output persistence already happened in
+		// runWaitStep; the deferred terminal write skips WAITING.
+		var susp *suspendError
+		if errors.As(stepErr, &susp) {
+			result.Status = "WAITING"
+			result.CurrentStep = susp.stepID
+			result.WaitpointToken = susp.token
+			result.DurationMs = time.Since(startedAt).Milliseconds()
+			return result
+		}
+		if stepErr != nil {
+			// Fold the failed attempt's spend into the run total
+			// BEFORE bailing — runStepWithRetry reports the cost of
+			// every tier it burned alongside the error. Dropping it
+			// here made failed runs persist cost_usd=0, hiding
+			// exactly the expensive retried/escalated failures from
+			// spend analytics (the cost-cap branch below always
+			// recorded it, so the two failure paths disagreed).
+			result.CostUSD += stepCost
+			return e.failRun(ctx, in, emit, result, step.ID, stepErr.Error(), true, startedAt)
+		}
+		result.StepOutputs[step.ID] = output
+		result.CostUSD += stepCost
+		emit.emitStepCompleted(ctx, step, output, stepDur, stepCost)
+		// Flush the outputs map at the step boundary so a kill
+		// between steps loses at most the in-flight step.
+		e.persistStepOutputs(ctx, in, depth, runID, result.StepOutputs, result.CostUSD, startedAt)
+
+		// Cost-cap gate. Checked AFTER the step completes (we
+		// can't refund work already done) but BEFORE the next
+		// step kicks off so a runaway pipeline halts as soon as
+		// the budget is breached. Per-RunInput max would also
+		// be useful but DSL-level is the more common case
+		// (templates pin the budget regardless of caller).
+		if dsl.MaxCostUSD > 0 && result.CostUSD > dsl.MaxCostUSD {
+			return e.failRun(ctx, in, emit, result, step.ID, costCapExceededMessage(result.CostUSD, dsl.MaxCostUSD, step.ID), true, startedAt)
+		}
+	}
+	return nil
 }
 
 // failRun stamps the terminal FAILED state on result, emits the
