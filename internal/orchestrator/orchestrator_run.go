@@ -587,6 +587,16 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		// Multiple agents in the same crew share one container — only the first starts the sidecar.
 		// Also verify the running sidecar's network mode matches the desired mode;
 		// if it differs (e.g. after a policy change), we must restart the sidecar.
+		//
+		// #1220: the whole check→decide→pkill→start sequence below runs under a
+		// per-container lock. Without it, two execs dispatching at nearly the
+		// same moment both sample the same health state, both decide to
+		// (re)start, and both pkill + startSidecar — one killing the other's
+		// freshly started sidecar, or double-starting it. The explicit unlock
+		// after the start block releases on the happy path BEFORE the heavy
+		// agent exec; the deferred call covers the error returns (idempotent).
+		unlockSidecar := o.lockSidecarLifecycle(req.ContainerID)
+		defer unlockSidecar()
 		needStart := true
 		if health := checkSidecar(ctx, o.container, req.ContainerID); health != nil {
 			if health.Stale {
@@ -665,6 +675,9 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				return fmt.Errorf("start sidecar: %w", err)
 			}
 		}
+		// Sidecar settled (reused or freshly started) — release the #1220
+		// lock now so it never spans the long-lived agent exec below.
+		unlockSidecar()
 		credCount := 0
 		for _, c := range req.Credentials {
 			if credTypeToProvider(c) != "" {

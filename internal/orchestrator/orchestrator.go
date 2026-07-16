@@ -279,6 +279,12 @@ type Orchestrator struct {
 	// Zero-value sync.Map is usable, so tests with a bare Orchestrator work.
 	staleSidecarJournaled sync.Map
 
+	// sidecarLifecycleLocks holds one *sync.Mutex per container ID,
+	// serializing the sidecar check→decide→pkill→start sequence across
+	// concurrent execs in the same shared crew container (#1220) — see
+	// lockSidecarLifecycle (sidecar_lifecycle_lock.go). Zero-value works.
+	sidecarLifecycleLocks sync.Map
+
 	// snapshotHashCache stores the most recent container.snapshot hash
 	// per container so the post-run probe can skip emitting a fresh
 	// journal entry when nothing actually changed. Stale entries (after
