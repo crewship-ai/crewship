@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// parseOpenCodeStreamJSON parses one stdout line from `opencode run --format
-// json`. Schema verified against the active upstream — github.com/sst/opencode
+// opencodeStreamParser.parseLine parses stdout lines from `opencode run
+// --format json`. Schema verified against the active upstream — github.com/sst/opencode
 // (pre-2026) NOW REDIRECTS 301 → github.com/anomalyco/opencode and the
 // pre-2026 opencode-ai/opencode npm package is archived. Either repo URL
 // resolves; the npm `latest` tag remains opencode-ai@1.14.x. Current emitter
@@ -120,12 +120,17 @@ type opencodePart struct {
 // carry the part's ACCUMULATED text so far (the TUI repaints the whole part),
 // not deltas — emitting each event verbatim double-appends every chunk.
 //
-// State is package-level because adapters are stateless singletons shared
-// across runs; keying by sessionID+partID keeps concurrent runs from
-// colliding (part ids are unique per session). Entries are dropped at each
-// step_finish for their session; the size cap is a backstop for streams that
-// never reach a step boundary — on overflow the whole map resets, which at
-// worst re-emits one full part once.
+// State is owned by an opencodeStreamParser, created per exec stream — it
+// used to be a package-level global (adapters are stateless singletons), but
+// a stream that ended without step_finish (the anomalyco/opencode#26855
+// early-exit case) left its entries behind for the life of the process,
+// silently swallowing re-emitted text on any later stream reusing the same
+// session/part ids — and making the package's tests non-idempotent under
+// `go test -count>1` (#1235). Keying by sessionID+partID keeps parts from
+// colliding within the stream (part ids are unique per session). Entries are
+// dropped at each step_finish for their session; the size cap is a backstop
+// for streams that never reach a step boundary — on overflow the whole map
+// resets, which at worst re-emits one full part once.
 type opencodeTextDedup struct {
 	mu   sync.Mutex
 	seen map[string]string
@@ -133,7 +138,17 @@ type opencodeTextDedup struct {
 
 const opencodeDedupCap = 4096
 
-var opencodeDedup = &opencodeTextDedup{seen: make(map[string]string)}
+// opencodeStreamParser owns all cross-line parse state for ONE exec stream
+// (one `opencode run` process). streamOutput obtains one per stream via
+// opencodeAdapter.NewStreamLineParser, so dedup state begins and ends with
+// the stream instead of leaking across runs through the adapter singleton.
+type opencodeStreamParser struct {
+	dedup opencodeTextDedup
+}
+
+func newOpenCodeStreamParser() *opencodeStreamParser {
+	return &opencodeStreamParser{dedup: opencodeTextDedup{seen: make(map[string]string)}}
+}
 
 // suffix returns the not-yet-emitted portion of text for the given part. If
 // text does not extend what was seen before (delta-style upstream, or a
@@ -192,7 +207,10 @@ func opencodeModelString(p *opencodePart) string {
 	}
 }
 
-func parseOpenCodeStreamJSON(line []byte, handler EventHandler) {
+// parseLine parses one stdout line from `opencode run --format json` (see
+// the schema notes at the top of this file). It must be called with lines of
+// a single stream only — accumulated-text dedup state lives on the receiver.
+func (p *opencodeStreamParser) parseLine(line []byte, handler EventHandler) {
 	if handler == nil {
 		return
 	}
@@ -208,7 +226,7 @@ func parseOpenCodeStreamJSON(line []byte, handler EventHandler) {
 		// Assistant text. Events carry the part's accumulated text so far —
 		// emit only the new suffix (see opencodeTextDedup).
 		if msg.Part != nil && msg.Part.Text != "" {
-			if chunk := opencodeDedup.suffix(msg.SessionID, msg.Part.ID, msg.Part.Text); chunk != "" {
+			if chunk := p.dedup.suffix(msg.SessionID, msg.Part.ID, msg.Part.Text); chunk != "" {
 				handler(AgentEvent{Type: "text", Content: chunk, Timestamp: time.Now()})
 			}
 		}
@@ -218,7 +236,7 @@ func parseOpenCodeStreamJSON(line []byte, handler EventHandler) {
 		// the collapsible reasoning pane. Same accumulated-text semantics as
 		// "text" parts.
 		if msg.Part != nil && msg.Part.Text != "" {
-			chunk := opencodeDedup.suffix(msg.SessionID, msg.Part.ID, msg.Part.Text)
+			chunk := p.dedup.suffix(msg.SessionID, msg.Part.ID, msg.Part.Text)
 			if chunk == "" {
 				return
 			}
@@ -325,7 +343,7 @@ func parseOpenCodeStreamJSON(line []byte, handler EventHandler) {
 			Timestamp: time.Now(),
 		})
 		// Step boundary: previous parts won't stream further updates.
-		opencodeDedup.clearSession(msg.SessionID)
+		p.dedup.clearSession(msg.SessionID)
 
 	case "step_start":
 		// Quiet — boundary marker only.

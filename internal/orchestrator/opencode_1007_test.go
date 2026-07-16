@@ -98,7 +98,7 @@ func TestParseOpenCode_ErrorObject_APIError(t *testing.T) {
 	// Exact shape captured from a live dev2 opencode run.
 	line := []byte(`{"type":"error","sessionID":"s","error":{"name":"APIError","data":{"message":"invalid x-api-key","statusCode":401}}}`)
 	var got []AgentEvent
-	parseOpenCodeStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+	newOpenCodeStreamParser().parseLine(line, func(e AgentEvent) { got = append(got, e) })
 
 	if len(got) != 1 {
 		t.Fatalf("want exactly 1 event (error), got %d: %+v — an object error must NOT fall through to the text branch", len(got), got)
@@ -114,7 +114,7 @@ func TestParseOpenCode_ErrorObject_APIError(t *testing.T) {
 func TestParseOpenCode_ErrorObject_UnknownErrorIncludesRef(t *testing.T) {
 	line := []byte(`{"type":"error","sessionID":"s","error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_fa9dcbd2"}}}`)
 	var got []AgentEvent
-	parseOpenCodeStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+	newOpenCodeStreamParser().parseLine(line, func(e AgentEvent) { got = append(got, e) })
 
 	if len(got) != 1 || got[0].Type != "error" {
 		t.Fatalf("want 1 error event, got %+v", got)
@@ -136,7 +136,7 @@ func TestParseOpenCode_ErrorNullPayload_NonEmptyMessage(t *testing.T) {
 		[]byte(`{"type":"error","sessionID":"s","error":""}`),
 	} {
 		var got []AgentEvent
-		parseOpenCodeStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+		newOpenCodeStreamParser().parseLine(line, func(e AgentEvent) { got = append(got, e) })
 		if len(got) != 1 || got[0].Type != "error" {
 			t.Fatalf("want 1 error event for %s, got %+v", line, got)
 		}
@@ -150,7 +150,7 @@ func TestParseOpenCode_ErrorString_BackwardCompatible(t *testing.T) {
 	// The legacy/simple string form must keep producing an error event.
 	line := []byte(`{"type":"error","sessionID":"s","error":"missing API key"}`)
 	var got []AgentEvent
-	parseOpenCodeStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+	newOpenCodeStreamParser().parseLine(line, func(e AgentEvent) { got = append(got, e) })
 
 	if len(got) != 1 || got[0].Type != "error" || got[0].Content != "missing API key" {
 		t.Fatalf("string-form error wrong: %+v", got)

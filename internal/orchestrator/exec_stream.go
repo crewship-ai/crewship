@@ -117,6 +117,16 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	adapter := getAdapter(req.CLIAdapter)
 	useStreamJSON := adapter.UseStreamJSON()
 
+	// Per-stream parser state: adapters whose line parsing carries cross-line
+	// state (OpenCode's accumulated-text dedup) hand out a parser scoped to
+	// this stream, so state cannot leak across runs — or across in-process
+	// test iterations under `go test -count>1` — through the stateless
+	// adapter singleton (#1235). Stateless adapters keep using ParseStreamLine.
+	parseLine := adapter.ParseStreamLine
+	if f, ok := adapter.(streamLineParserFactory); ok {
+		parseLine = f.NewStreamLineParser()
+	}
+
 	// Track whether the CLI delivered a terminal envelope. Some CLIs
 	// (observed: opencode, anomalyco/opencode#26855) can exit before
 	// emitting their final result event; without one, run finalization
@@ -126,8 +136,8 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	sawResult := false
 	sawError := false
 	// PR-F4 "scan path 2" (#947): every adapter's parser emits tool_result
-	// events through this wrapper — it is the single production seam
-	// (ParseStreamLine has no other caller) — so the MINJA tool-return scan
+	// events through this wrapper — it is the single production seam (the
+	// parseLine resolved above has no other caller) — so the MINJA tool-return scan
 	// runs here for the parsers that emit directly. Claude's parser routes
 	// its blocks through emitToolResultBlock (scan path 1, same scan
 	// function), so it is skipped to avoid double-scanning.
@@ -187,7 +197,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 		}
 
 		if useStreamJSON {
-			adapter.ParseStreamLine(line, streamHandler)
+			parseLine(line, streamHandler)
 		} else {
 			if handler != nil {
 				handler(AgentEvent{

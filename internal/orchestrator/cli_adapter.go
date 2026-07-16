@@ -95,6 +95,18 @@ type CLIAdapter interface {
 	) error
 }
 
+// streamLineParserFactory is an optional CLIAdapter capability. Adapters whose
+// line parsing carries cross-line state (OpenCode's accumulated-text dedup)
+// implement it; streamOutput calls NewStreamLineParser once per exec stream
+// and feeds every line of that stream to the returned function. This scopes
+// parser state to one stream — adapters stay stateless singletons (per the
+// CLIAdapter contract above) and state cannot leak across runs, or across
+// in-process test iterations under `go test -count>1` (#1235). Adapters with
+// stateless line parsing just implement ParseStreamLine and skip this.
+type streamLineParserFactory interface {
+	NewStreamLineParser() func(line []byte, handler EventHandler)
+}
+
 // maxArgStrLen is Linux's per-argv-element ceiling (MAX_ARG_STRLEN, 128 KiB):
 // execve rejects any single argument at or over this with E2BIG. argSafetyMargin
 // keeps the guard a touch below it to allow for the trailing NUL and multi-byte
