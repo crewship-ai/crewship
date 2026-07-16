@@ -11,15 +11,22 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // ApprovalsHandler serves the Harbor Master HITL inbox. The enqueue
 // path fires from inside gate.go when an agent hits a gated tool; this
-// handler is strictly reads + decide transitions for the human UI.
+// handler is strictly reads + decide transitions for the human UI —
+// plus the agent-side side effects for kind=ephemeral_hire rows, whose
+// source of truth is the agents table (issue #1209).
 type ApprovalsHandler struct {
 	db      *sql.DB
 	logger  *slog.Logger
 	journal journal.Emitter
+	// hub broadcasts agent lifecycle flips triggered by ephemeral-hire
+	// decisions. Nil-safe (broadcastWorkspaceEvent no-ops) so legacy
+	// test constructions without a hub keep working.
+	hub *ws.Hub
 }
 
 func NewApprovalsHandler(db *sql.DB, logger *slog.Logger, j journal.Emitter) *ApprovalsHandler {
@@ -28,6 +35,11 @@ func NewApprovalsHandler(db *sql.DB, logger *slog.Logger, j journal.Emitter) *Ap
 	}
 	return &ApprovalsHandler{db: db, logger: logger, journal: j}
 }
+
+// SetHub attaches the WS hub so ephemeral-hire decisions can broadcast
+// the agent status flip to live dashboards. Same optional-setter shape
+// as AgentHandler.SetLicense / SetScheduler.
+func (h *ApprovalsHandler) SetHub(hub *ws.Hub) { h.hub = hub }
 
 // List serves GET /api/v1/approvals. Filter by ?status=pending
 // (default) to drive the inbox, or ?status=all for history. Limit
@@ -146,6 +158,22 @@ func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "decide failed")
 		return
 	}
+
+	// Ephemeral-hire rows carry an agent-side transition (issue #1209):
+	// approved releases the PENDING_REVIEW gate, denied ghosts the staged
+	// agent. The Decide above is the atomic decision point — exactly one
+	// concurrent decider gets here — so the side effect can't double-fire.
+	// Failures inside are logged, never bubbled: the decision itself is
+	// already durable, and the legacy `hire approve` path remains a
+	// manual recovery hatch.
+	if row, gerr := harbormaster.Get(r.Context(), h.db, workspaceID, id); gerr == nil &&
+		row != nil && row.Kind == harbormaster.KindEphemeralHire && row.AgentID != "" {
+		applyEphemeralHireDecision(r.Context(), h.db, h.logger, h.journal, h.hub,
+			workspaceID, row.AgentID, status == harbormaster.StatusApproved, user.ID)
+	} else if gerr != nil {
+		h.logger.Warn("approvals decide: post-decide reload failed", "err", gerr, "approval_id", id)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": string(status), "decided_by": user.ID})
 }
 

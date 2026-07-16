@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/policy"
 )
 
@@ -66,7 +67,11 @@ type hireResponse struct {
 	HireReason    *string `json:"hire_reason"`
 	PendingReview bool    `json:"pending_review"`
 	InboxItemID   string  `json:"inbox_item_id,omitempty"`
-	Decision      string  `json:"decision"`
+	// ApprovalID is the approvals_queue row a guided hire is gated on
+	// (issue #1209) — decidable via `crewship approvals approve/deny`
+	// alongside the legacy `crewship hire approve` path.
+	ApprovalID string `json:"approval_id,omitempty"`
+	Decision   string `json:"decision"`
 }
 
 // defaultHireTTLMinutes is the floor used when the client passes 0 (or
@@ -367,6 +372,7 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 
 	// 7. Inbox + audit by decision.
 	inboxID := ""
+	approvalID := ""
 	pendingReview := false
 	httpStatus := http.StatusCreated
 	switch decision {
@@ -400,6 +406,67 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 		}
 		pendingReview = true
 		httpStatus = http.StatusAccepted
+
+		// Mirror the waitpoint into the Harbor Master approvals queue so
+		// the hire is visible AND decidable through the standard approval
+		// surfaces (`approvals list/approve/deny`, /approvals UI) instead
+		// of being a fourth disconnected HITL flow (issue #1209). The
+		// approval times out when the hire TTL elapses — the same moment
+		// the ephemeral expiry sweeper ghosts the un-approved agent — so
+		// the two lifecycles stay aligned. A write failure fails the
+		// hire (with the same compensating cleanup as the inbox path
+		// above): the approvals row is the decision point both decide
+		// endpoints serialize on, so continuing without it would
+		// recreate the split-brain surface #1209 removed.
+		requestedBy := userID
+		if requestedBy == "" && parentLeadID != nil {
+			requestedBy = *parentLeadID
+		}
+		if requestedBy == "" {
+			requestedBy = "system"
+		}
+		approvalTimeout := now.Add(time.Duration(ttlMin) * time.Minute)
+		apID, aerr := harbormaster.Enqueue(r.Context(), h.db, h.journal, harbormaster.Request{
+			WorkspaceID: workspaceID,
+			CrewID:      crewID,
+			AgentID:     agentID,
+			RequestedBy: requestedBy,
+			Kind:        harbormaster.KindEphemeralHire,
+			Reason:      fmt.Sprintf("hire ephemeral agent %s: %s", name, req.Reason),
+			Payload: map[string]any{
+				// tool/args match the Gate() payload convention so
+				// Decide's reward-history hook keys the outcome under
+				// a stable tool name instead of warn-logging every hire.
+				"tool": "agent.hire",
+				"args": map[string]any{
+					"template_slug": req.TemplateSlug,
+					"ttl_minutes":   ttlMin,
+					"model":         model,
+				},
+				"agent_id":      agentID,
+				"agent_name":    name,
+				"inbox_item_id": inboxID,
+			},
+			TimeoutAt: &approvalTimeout,
+		})
+		if aerr != nil {
+			h.logger.Error("hire: enqueue approvals row failed — compensating delete of staged hire",
+				"error", aerr, "agent_id", agentID, "inbox_id", inboxID)
+			if _, derr := h.db.ExecContext(r.Context(),
+				`DELETE FROM inbox_items WHERE id = ?`, inboxID); derr != nil {
+				h.logger.Error("hire: compensating inbox delete after enqueue failure",
+					"error", derr, "inbox_id", inboxID)
+			}
+			if _, derr := h.db.ExecContext(r.Context(),
+				`DELETE FROM agents WHERE id = ? AND workspace_id = ?`,
+				agentID, workspaceID); derr != nil {
+				h.logger.Error("hire: compensating delete after enqueue failure",
+					"error", derr, "agent_id", agentID)
+			}
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		approvalID = apID
 	case policy.DecisionAutoLogInbox:
 		// Non-blocking inbox visibility entry. The agent is already
 		// live; we're just letting the operator audit after the fact.
@@ -470,6 +537,7 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 		HireReason:    &reasonOut,
 		PendingReview: pendingReview,
 		InboxItemID:   inboxID,
+		ApprovalID:    approvalID,
 		Decision:      string(decision),
 	})
 }

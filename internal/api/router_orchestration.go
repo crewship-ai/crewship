@@ -230,6 +230,9 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Harbor Master: HITL approvals inbox. Enqueue side runs inside
 	// the orchestrator's gate; this handler is list + decide for humans.
 	ah := NewApprovalsHandler(r.db, r.logger, r.Journal())
+	// Hub is what lets an ephemeral-hire decision (issue #1209) push the
+	// agent status flip to open dashboards without a poll.
+	ah.SetHub(r.hub)
 	r.mux.Handle("GET /api/v1/approvals", authed(wsCtx(http.HandlerFunc(ah.List))))
 	r.mux.Handle("GET /api/v1/approvals/{id}", authed(wsCtx(http.HandlerFunc(ah.Get))))
 	r.authedMut("POST", "/api/v1/approvals/{id}/decide", roleManage, ah.Decide)
