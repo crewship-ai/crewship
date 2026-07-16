@@ -95,6 +95,65 @@ var terminalEntryTypes = []string{
 	string(EntryRunTimeout),
 }
 
+// runAggregateProjections is the canonical set of MAX(CASE WHEN ...) column
+// projections the run_aggregates CTE can expose, in canonical order. Entries
+// with terminal=true carry a %s slot for the terminal entry-type IN-list and
+// consume one set of terminal placeholders each.
+var runAggregateProjections = []struct {
+	name     string
+	terminal bool
+	expr     string
+}{
+	{"started_at", false, "MAX(CASE WHEN entry_type = 'run.started' THEN ts END) AS started_at"},
+	{"finished_at", true, "MAX(CASE WHEN entry_type IN %s THEN ts END) AS finished_at"},
+	{"terminal_type", true, "MAX(CASE WHEN entry_type IN %s THEN entry_type END) AS terminal_type"},
+	{"agent_id", false, "MAX(CASE WHEN entry_type = 'run.started' THEN agent_id END) AS agent_id"},
+	{"triggered_by", false, "MAX(CASE WHEN entry_type = 'run.started' THEN actor_id END) AS triggered_by"},
+	{"started_payload", false, "MAX(CASE WHEN entry_type = 'run.started' THEN payload END) AS started_payload"},
+	{"terminal_payload", true, "MAX(CASE WHEN entry_type IN %s THEN payload END) AS terminal_payload"},
+}
+
+// runAggregatesCTE assembles the shared "WITH run_aggregates AS (...)" query
+// prefix: one row per trace_id, columns picked via the MAX(CASE WHEN ...)
+// idiom which is portable SQL and uses the already-built index
+// (idx_journal_ws_trace). cols selects projections by name; output always
+// follows the canonical order in runAggregateProjections. innerWhere is the
+// raw WHERE text applied during grouping (filters on indexed columns, so
+// SQLite can prune before the GROUP BY).
+//
+// The returned args bind the terminal IN-list placeholders — one copy of
+// terminalEntryTypes per terminal projection selected, in projection order.
+// They MUST come before innerWhere's own args in the final arg list, because
+// the IN-lists appear in the SELECT clause ahead of the WHERE.
+func runAggregatesCTE(cols []string, innerWhere string) (string, []any) {
+	want := make(map[string]bool, len(cols))
+	for _, c := range cols {
+		want[c] = true
+	}
+	terminalIN := "(" + sqlInPlaceholders(len(terminalEntryTypes)) + ")"
+	lines := []string{"    SELECT trace_id"}
+	var args []any
+	for _, p := range runAggregateProjections {
+		if !want[p.name] {
+			continue
+		}
+		expr := p.expr
+		if p.terminal {
+			expr = fmt.Sprintf(expr, terminalIN)
+			for _, t := range terminalEntryTypes {
+				args = append(args, t)
+			}
+		}
+		lines = append(lines, "           "+expr)
+	}
+	cte := "\nWITH run_aggregates AS (\n" +
+		strings.Join(lines, ",\n") + "\n" +
+		"    FROM journal_entries\n" +
+		"    WHERE " + innerWhere + "\n" +
+		"    GROUP BY trace_id\n)"
+	return cte, args
+}
+
 // ListRuns groups journal_entries by trace_id over run.* event types and
 // returns one RunAggregated per trace. Total is the unfiltered-by-paging
 // row count so callers can render pagination state.
@@ -127,31 +186,10 @@ func ListRuns(ctx context.Context, db *sql.DB, q RunsQuery) ([]RunAggregated, in
 		innerArgs = append(innerArgs, q.AgentID)
 	}
 
-	// terminalIN expands to an IN-list of the terminal entry_types so
-	// the CTE picks them up uniformly.
-	terminalIN := "(" + sqlInPlaceholders(len(terminalEntryTypes)) + ")"
-	terminalArgs := make([]any, 0, len(terminalEntryTypes))
-	for _, t := range terminalEntryTypes {
-		terminalArgs = append(terminalArgs, t)
-	}
-
-	// CTE expansion: one row per trace_id, columns picked via
-	// MAX(CASE WHEN ...) idiom which is portable SQL and uses the
-	// already-built index.
-	cte := `
-WITH run_aggregates AS (
-    SELECT trace_id,
-           MAX(CASE WHEN entry_type = 'run.started' THEN ts END)        AS started_at,
-           MAX(CASE WHEN entry_type IN ` + terminalIN + ` THEN ts END)   AS finished_at,
-           MAX(CASE WHEN entry_type IN ` + terminalIN + ` THEN entry_type END) AS terminal_type,
-           MAX(CASE WHEN entry_type = 'run.started' THEN agent_id END)  AS agent_id,
-           MAX(CASE WHEN entry_type = 'run.started' THEN actor_id END)  AS triggered_by,
-           MAX(CASE WHEN entry_type = 'run.started' THEN payload END)   AS started_payload,
-           MAX(CASE WHEN entry_type IN ` + terminalIN + ` THEN payload END) AS terminal_payload
-    FROM journal_entries
-    WHERE ` + strings.Join(innerConds, " AND ") + `
-    GROUP BY trace_id
-)`
+	cte, cteArgs := runAggregatesCTE(
+		[]string{"started_at", "finished_at", "terminal_type", "agent_id",
+			"triggered_by", "started_payload", "terminal_payload"},
+		strings.Join(innerConds, " AND "))
 	// Outer WHERE — filters that operate on derived columns (status,
 	// json_extract on payload.trigger_type or .tags).
 	outerConds := []string{"started_at IS NOT NULL"}
@@ -194,14 +232,11 @@ ORDER BY started_at DESC
 LIMIT ? OFFSET ?`
 
 	// Compose final args. Placeholders appear in source order across the
-	// CTE — three terminal IN-lists in the SELECT come first (each has
-	// len(terminalEntryTypes) placeholders), then the WHERE clause
-	// (workspace_id and optional agent_id), then the outer WHERE
-	// filters and finally LIMIT/OFFSET.
-	args := make([]any, 0, 3*len(terminalArgs)+len(innerArgs)+len(outerArgs)+2)
-	args = append(args, terminalArgs...)
-	args = append(args, terminalArgs...)
-	args = append(args, terminalArgs...)
+	// CTE — the terminal IN-lists in the SELECT come first (bound by
+	// cteArgs), then the WHERE clause (workspace_id and optional
+	// agent_id), then the outer WHERE filters and finally LIMIT/OFFSET.
+	args := make([]any, 0, len(cteArgs)+len(innerArgs)+len(outerArgs)+2)
+	args = append(args, cteArgs...)
 	args = append(args, innerArgs...)
 	args = append(args, outerArgs...)
 	args = append(args, q.Limit, q.Offset)
@@ -223,73 +258,9 @@ LIMIT ? OFFSET ?`
 	}
 	out := make([]RunAggregated, 0, allocCap)
 	for rows.Next() {
-		var (
-			traceID, startedTS                             string
-			finishedTS, terminalType, agentID, triggeredBy sql.NullString
-			startedPayload, terminalPayload                sql.NullString
-		)
-		if err := rows.Scan(&traceID, &startedTS, &finishedTS, &terminalType,
-			&agentID, &triggeredBy, &startedPayload, &terminalPayload); err != nil {
-			return nil, 0, fmt.Errorf("journal: scan run: %w", err)
-		}
-		r := RunAggregated{
-			ID:          traceID,
-			WorkspaceID: q.WorkspaceID,
-			AgentID:     agentID.String,
-			TriggeredBy: triggeredBy.String,
-		}
-		if t, perr := parseJournalTS(startedTS); perr == nil {
-			r.StartedAt = t
-			r.CreatedAt = t
-		}
-		if finishedTS.Valid {
-			if t, perr := parseJournalTS(finishedTS.String); perr == nil {
-				r.FinishedAt = &t
-			}
-		}
-		r.Status = runStatusFromTerminal(terminalType.String)
-		// Pull trigger_type, chat_id, metadata out of the run.started
-		// payload — that's the authoritative source.
-		if startedPayload.Valid && startedPayload.String != "" && startedPayload.String != "{}" {
-			var p map[string]any
-			if err := json.Unmarshal([]byte(startedPayload.String), &p); err == nil {
-				if v, ok := p["trigger_type"].(string); ok {
-					r.TriggerType = v
-				}
-				if v, ok := p["chat_id"].(string); ok {
-					r.ChatID = v
-				}
-				if v, ok := p["metadata"].(map[string]any); ok {
-					r.Metadata = v
-					// run.started rarely carries the resolved model (it's
-					// known only after session-init), but honour it as a
-					// fallback so a future producer that stamps it here works.
-					if m, ok := v["model"].(string); ok && m != "" {
-						r.Model = m
-					}
-				}
-			}
-		}
-		// exit_code, error_message and the resolved model live on the
-		// terminal entry — the run driver knows the served model only after
-		// the stream completes, so the terminal metadata is authoritative.
-		if terminalPayload.Valid && terminalPayload.String != "" && terminalPayload.String != "{}" {
-			var p map[string]any
-			if err := json.Unmarshal([]byte(terminalPayload.String), &p); err == nil {
-				if v, ok := p["error_message"].(string); ok {
-					r.ErrorMessage = v
-				}
-				// JSON numbers come back as float64 from encoding/json.
-				if v, ok := p["exit_code"].(float64); ok {
-					ec := int(v)
-					r.ExitCode = &ec
-				}
-				if v, ok := p["metadata"].(map[string]any); ok {
-					if m, ok := v["model"].(string); ok && m != "" {
-						r.Model = m
-					}
-				}
-			}
+		r, err := scanRunAggregated(rows, q.WorkspaceID)
+		if err != nil {
+			return nil, 0, err
 		}
 		out = append(out, r)
 	}
@@ -298,37 +269,105 @@ LIMIT ? OFFSET ?`
 	}
 
 	// Total row count (unbounded by limit/offset) for pagination UI.
-	total, err := countRuns(ctx, db, q, innerConds, innerArgs, outerConds, outerArgs, terminalArgs)
+	total, err := countRuns(ctx, db, innerConds, innerArgs, outerConds, outerArgs)
 	if err != nil {
 		return nil, 0, err
 	}
 	return out, total, nil
 }
 
+// scanRunAggregated scans one run_aggregates row — column order (trace_id,
+// started_at, finished_at, terminal_type, agent_id, triggered_by,
+// started_payload, terminal_payload) — into a RunAggregated, decoding the
+// run.started / terminal JSON payloads into the derived fields.
+func scanRunAggregated(rows *sql.Rows, workspaceID string) (RunAggregated, error) {
+	var (
+		traceID, startedTS                             string
+		finishedTS, terminalType, agentID, triggeredBy sql.NullString
+		startedPayload, terminalPayload                sql.NullString
+	)
+	if err := rows.Scan(&traceID, &startedTS, &finishedTS, &terminalType,
+		&agentID, &triggeredBy, &startedPayload, &terminalPayload); err != nil {
+		return RunAggregated{}, fmt.Errorf("journal: scan run: %w", err)
+	}
+	r := RunAggregated{
+		ID:          traceID,
+		WorkspaceID: workspaceID,
+		AgentID:     agentID.String,
+		TriggeredBy: triggeredBy.String,
+	}
+	if t, perr := parseJournalTS(startedTS); perr == nil {
+		r.StartedAt = t
+		r.CreatedAt = t
+	}
+	if finishedTS.Valid {
+		if t, perr := parseJournalTS(finishedTS.String); perr == nil {
+			r.FinishedAt = &t
+		}
+	}
+	r.Status = runStatusFromTerminal(terminalType.String)
+	// Pull trigger_type, chat_id, metadata out of the run.started
+	// payload — that's the authoritative source.
+	if startedPayload.Valid && startedPayload.String != "" && startedPayload.String != "{}" {
+		var p map[string]any
+		if err := json.Unmarshal([]byte(startedPayload.String), &p); err == nil {
+			if v, ok := p["trigger_type"].(string); ok {
+				r.TriggerType = v
+			}
+			if v, ok := p["chat_id"].(string); ok {
+				r.ChatID = v
+			}
+			if v, ok := p["metadata"].(map[string]any); ok {
+				r.Metadata = v
+				// run.started rarely carries the resolved model (it's
+				// known only after session-init), but honour it as a
+				// fallback so a future producer that stamps it here works.
+				if m, ok := v["model"].(string); ok && m != "" {
+					r.Model = m
+				}
+			}
+		}
+	}
+	// exit_code, error_message and the resolved model live on the
+	// terminal entry — the run driver knows the served model only after
+	// the stream completes, so the terminal metadata is authoritative.
+	if terminalPayload.Valid && terminalPayload.String != "" && terminalPayload.String != "{}" {
+		var p map[string]any
+		if err := json.Unmarshal([]byte(terminalPayload.String), &p); err == nil {
+			if v, ok := p["error_message"].(string); ok {
+				r.ErrorMessage = v
+			}
+			// JSON numbers come back as float64 from encoding/json.
+			if v, ok := p["exit_code"].(float64); ok {
+				ec := int(v)
+				r.ExitCode = &ec
+			}
+			if v, ok := p["metadata"].(map[string]any); ok {
+				if m, ok := v["model"].(string); ok && m != "" {
+					r.Model = m
+				}
+			}
+		}
+	}
+	return r, nil
+}
+
 // countRuns mirrors the ListRuns CTE but selects COUNT(*). Kept as a
 // private helper so the filter logic stays in one place.
-func countRuns(ctx context.Context, db *sql.DB, _ RunsQuery,
+func countRuns(ctx context.Context, db *sql.DB,
 	innerConds []string, innerArgs []any,
-	outerConds []string, outerArgs []any,
-	terminalArgs []any) (int, error) {
-	terminalIN := "(" + sqlInPlaceholders(len(terminalEntryTypes)) + ")"
-	q := `
-WITH run_aggregates AS (
-    SELECT trace_id,
-           MAX(CASE WHEN entry_type = 'run.started' THEN ts END) AS started_at,
-           MAX(CASE WHEN entry_type IN ` + terminalIN + ` THEN entry_type END) AS terminal_type,
-           MAX(CASE WHEN entry_type = 'run.started' THEN payload END) AS started_payload
-    FROM journal_entries
-    WHERE ` + strings.Join(innerConds, " AND ") + `
-    GROUP BY trace_id
-)
+	outerConds []string, outerArgs []any) (int, error) {
+	cte, cteArgs := runAggregatesCTE(
+		[]string{"started_at", "terminal_type", "started_payload"},
+		strings.Join(innerConds, " AND "))
+	q := cte + `
 SELECT COUNT(*) FROM run_aggregates
 WHERE ` + strings.Join(outerConds, " AND ")
 
 	// Placeholder order: terminal IN-list in the CTE SELECT first, then
 	// the inner WHERE args, then the outer WHERE args.
-	args := make([]any, 0, len(terminalArgs)+len(innerArgs)+len(outerArgs))
-	args = append(args, terminalArgs...)
+	args := make([]any, 0, len(cteArgs)+len(innerArgs)+len(outerArgs))
+	args = append(args, cteArgs...)
 	args = append(args, innerArgs...)
 	args = append(args, outerArgs...)
 	var total int
@@ -494,12 +533,6 @@ func RunInsights(ctx context.Context, db *sql.DB, workspaceID string, window Run
 		ByAgent:   []AgentCount{},
 	}
 
-	terminalIN := "(" + sqlInPlaceholders(len(terminalEntryTypes)) + ")"
-	terminalArgs := make([]any, 0, len(terminalEntryTypes))
-	for _, t := range terminalEntryTypes {
-		terminalArgs = append(terminalArgs, t)
-	}
-
 	// One row per trace started within the window. Filtering all of a trace's
 	// entries by ts >= cutoff is safe: a run's entries cluster around its start,
 	// so a run.started inside the window keeps its terminal entry too.
@@ -509,22 +542,11 @@ func RunInsights(ctx context.Context, db *sql.DB, workspaceID string, window Run
 	// "YYYY-MM-DD HH:MM:SS". A raw string compare between the two formats would
 	// admit same-day rows before the cutoff time ('T' > ' '); wrapping both in
 	// datetime() puts them in one canonical form.
-	q := `
-WITH run_aggregates AS (
-    SELECT trace_id,
-           MAX(CASE WHEN entry_type = 'run.started' THEN ts END)              AS started_at,
-           MAX(CASE WHEN entry_type IN ` + terminalIN + ` THEN ts END)         AS finished_at,
-           MAX(CASE WHEN entry_type IN ` + terminalIN + ` THEN entry_type END) AS terminal_type,
-           MAX(CASE WHEN entry_type = 'run.started' THEN agent_id END)        AS agent_id,
-           MAX(CASE WHEN entry_type = 'run.started' THEN payload END)         AS started_payload,
-           MAX(CASE WHEN entry_type IN ` + terminalIN + ` THEN payload END)    AS terminal_payload
-    FROM journal_entries
-    WHERE workspace_id = ?
-      AND trace_id IS NOT NULL
-      AND entry_type LIKE 'run.%'
-      AND datetime(ts) >= datetime('now', ?)
-    GROUP BY trace_id
-)
+	cte, cteArgs := runAggregatesCTE(
+		[]string{"started_at", "finished_at", "terminal_type", "agent_id",
+			"started_payload", "terminal_payload"},
+		"workspace_id = ? AND trace_id IS NOT NULL AND entry_type LIKE 'run.%' AND datetime(ts) >= datetime('now', ?)")
+	q := cte + `
 SELECT started_at, finished_at, terminal_type, agent_id, started_payload, terminal_payload
 FROM run_aggregates
 WHERE started_at IS NOT NULL
@@ -533,10 +555,8 @@ LIMIT ?`
 
 	// Placeholder order: 3 terminal IN-lists in the CTE SELECT, then
 	// workspace_id, the window modifier, and the LIMIT (+1 to detect overflow).
-	args := make([]any, 0, 3*len(terminalArgs)+3)
-	args = append(args, terminalArgs...)
-	args = append(args, terminalArgs...)
-	args = append(args, terminalArgs...)
+	args := make([]any, 0, len(cteArgs)+3)
+	args = append(args, cteArgs...)
 	args = append(args, workspaceID)
 	args = append(args, window.sqlModifier())
 	args = append(args, maxInsightRows+1)
