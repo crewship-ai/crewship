@@ -382,6 +382,15 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	// larger trusted payloads — is left to its own per-handler caps.
 	capped := BodyCap(maxAPIBodyBytes)(r.mux)
 
+	// Warm the signin timing-equalizer hash (lockout.go) off the
+	// request path. Its generation moved out of package init (#967:
+	// eager cost-12 bcrypt added ~290 ms to every CLI invocation of
+	// the full binary); kicking it here restores the property that
+	// even the server's very first unknown-email signin burns a
+	// full-cost compare — while CLI processes, which never construct
+	// a Router, never pay for it at all.
+	go dummyBcryptHash()
+
 	// Pre-wrap mux with rate limiters (once, not per-request)
 	r.authRateLimitedMux = NewRateLimiter(10).Middleware(capped)     // 10 req/min per IP
 	r.apiRateLimitedMux = NewRateLimiter(120).Middleware(capped)     // 120 req/min per IP
