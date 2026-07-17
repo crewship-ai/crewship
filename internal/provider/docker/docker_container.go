@@ -87,10 +87,7 @@ func (p *Provider) migrateLegacyCrewResources(ctx context.Context, id, slug, ima
 	mu.Lock()
 	defer mu.Unlock()
 
-	prefix := p.cfg.ContainerPrefix
-	if prefix == "" {
-		prefix = "crewship"
-	}
+	prefix := p.namePrefix()
 	legacyContainer := prefix + "-team-" + slug
 
 	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
@@ -101,7 +98,7 @@ func (p *Provider) migrateLegacyCrewResources(ctx context.Context, id, slug, ima
 		for _, name := range c.Names {
 			if name == "/"+legacyContainer {
 				p.logger.Info("removing legacy slug-scoped crew container (C1 migration)",
-					"container", legacyContainer, "container_id", shortID(c.ID))
+					"container", legacyContainer, "container_id", provider.ShortID(c.ID))
 				timeout := 10
 				_ = p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})
 				if rmErr := p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); rmErr != nil {
@@ -159,10 +156,7 @@ func (p *Provider) migrateLegacyCrewResources(ctx context.Context, id, slug, ima
 // id-scoped resource; subtracting the protected set guarantees detection never
 // false-positives and prune never removes a live crew's container/volumes.
 func (p *Provider) legacyNameSets(crews []provider.CrewRef) map[string]bool {
-	prefix := p.cfg.ContainerPrefix
-	if prefix == "" {
-		prefix = "crewship"
-	}
+	prefix := p.namePrefix()
 	legacy := make(map[string]bool, len(crews)*3)
 	protected := make(map[string]bool, len(crews)*3)
 	for _, c := range crews {
@@ -513,140 +507,9 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		return "", err
 	}
 
-	p.logger.Debug("listing containers")
-	// Check if container already exists. This host-wide list is the cold-path
-	// cost the warm cache above short-circuits: only the FIRST same-crew call
-	// in a warmCrewTTL window reaches here; a DAG wave's remaining steps (and
-	// a prewarmed run's first step) hit the cache and skip it entirely.
-	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
-	if err != nil {
-		return "", fmt.Errorf("list containers: %w", err)
-	}
-	p.logger.Debug("containers listed", "count", len(containers))
-	for _, c := range containers {
-		for _, name := range c.Names {
-			if name == "/"+containerName {
-				// Check if container has /crew mount; if not, recreate it.
-				inspect, inspErr := p.client.ContainerInspect(ctx, c.ID)
-				if inspErr != nil {
-					return "", fmt.Errorf("inspect existing container %s: %w", containerName, inspErr)
-				}
-				// The reused container may still be running a previously
-				// provisioned cached image, while desiredImage falls back to the
-				// provider default when the caller left Image/CachedImage empty.
-				// Report the ACTUAL running image on the ready events below.
-				reusedImage := desiredImage
-				if inspect.Config != nil && inspect.Config.Image != "" {
-					reusedImage = inspect.Config.Image
-				}
-				// Image-drift check before the mount checks: if a
-				// re-provision produced a new image tag, the running
-				// container is stale by definition (its filesystem
-				// reflects the OLD provisioned image). Tear it down
-				// and fall through to create-new with the new tag.
-				if callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage {
-					p.logger.Info("recreating container (image drift)",
-						"container", containerName,
-						"running_image", inspect.Config.Image,
-						"desired_image", desiredImage,
-					)
-					timeout := 10
-					_ = p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})
-					_ = p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true})
-					p.evictWarm(team.ID)
-					break // fall through to create new container
-				}
-				// Check required mounts: /crew, /home/agent (volume), /opt/crew-tools (volume).
-				requiredMounts := map[string]bool{"/crew": false, "/home/agent": false, "/opt/crew-tools": false}
-				needsRecreate := false
-				for _, m := range inspect.Mounts {
-					if _, ok := requiredMounts[m.Destination]; ok {
-						requiredMounts[m.Destination] = true
-					}
-					// Migration: containers created before the secret-lifecycle
-					// hardening carry /secrets as a persistent host bind. Recreate
-					// them so the tmpfs mount takes over and cleartext credentials
-					// stop touching the host disk.
-					if m.Destination == "/secrets" && m.Type != mount.TypeTmpfs {
-						needsRecreate = true
-						p.logger.Info("/secrets is not tmpfs (legacy bind mount), will recreate container",
-							"container", containerName, "mount_type", m.Type)
-					}
-				}
-				// /secrets rides HostConfig.Tmpfs (not the Mounts API — see
-				// secretsTmpfsSpec), so it never appears in inspect.Mounts.
-				// A container lacking the Tmpfs entry predates the current
-				// mount shape (or was created by hand) — recreate it.
-				if !needsRecreate && (inspect.HostConfig == nil || inspect.HostConfig.Tmpfs["/secrets"] == "") {
-					needsRecreate = true
-					p.logger.Info("/secrets tmpfs entry missing from HostConfig, will recreate container",
-						"container", containerName)
-				}
-				for dest, found := range requiredMounts {
-					if !found {
-						needsRecreate = true
-						p.logger.Info("missing mount, will recreate container", "mount", dest, "container", containerName)
-						break
-					}
-				}
-				if needsRecreate {
-					p.logger.Info("recreating container (missing required mounts)", "container", containerName)
-					timeout := 10
-					_ = p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})
-					_ = p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true})
-					p.evictWarm(team.ID)
-					break // fall through to create new container
-				}
-				if c.State == "running" {
-					p.setWarm(team.ID, c.ID)
-					emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "reused running container", Tag: reusedImage})
-					return c.ID, nil
-				}
-				// Verify bind-mount directories still exist (macOS /tmp is wiped on
-				// reboot). /secrets is deliberately absent: it is a tmpfs with no
-				// host dir, so a host-side check would force a recreate on every
-				// restart.
-				bindMountDirs := []string{
-					filepath.Join(p.cfg.OutputBasePath, "workspaces", team.ID),
-					filepath.Join(p.cfg.OutputBasePath, team.ID),
-					filepath.Join(p.cfg.OutputBasePath, "crews", team.ID),
-				}
-				bindsMissing := false
-				for _, d := range bindMountDirs {
-					if _, statErr := os.Stat(d); os.IsNotExist(statErr) {
-						bindsMissing = true
-						break
-					}
-				}
-				if bindsMissing {
-					p.logger.Info("bind-mount dirs missing, recreating container", "container", containerName)
-					timeout := 10
-					_ = p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})
-					_ = p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true})
-					p.evictWarm(team.ID)
-					break // fall through to create new container
-				}
-				if err := p.client.ContainerStart(ctx, c.ID, container.StartOptions{}); err != nil {
-					return "", fmt.Errorf("start existing container: %w", err)
-				}
-				// Note: postStartCommand runs ONCE when the container is
-				// freshly created (see the create-path call below). On warm
-				// restart of a stopped container, the hooks already ran at
-				// create time and the changes were persisted to the container
-				// filesystem — re-running them would cause issues for
-				// non-idempotent commands (e.g. "mysql start" would hit port
-				// conflicts, "mkdir /foo" would fail on EEXIST).
-				//
-				// This is a deliberate deviation from the devcontainer spec's
-				// "run on every start" semantics, but matches what most
-				// template authors actually want. If a future use case needs
-				// ephemeral hooks that re-run on each restart, add a
-				// per-feature opt-in flag rather than flipping this default.
-				p.setWarm(team.ID, c.ID)
-				emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "restarted stopped container", Tag: reusedImage})
-				return c.ID, nil
-			}
-		}
+	cid, done, err := p.reconcileExistingContainer(ctx, team, containerName, desiredImage, callerSpecifiedImage, emitProv)
+	if done || err != nil {
+		return cid, err
 	}
 
 	runtime := p.cfg.DefaultRuntime
@@ -684,6 +547,248 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		return "", fmt.Errorf("ensure image: %w", err)
 	}
 
+	dirs, err := p.prepareCrewDirs(team)
+	if err != nil {
+		return "", err
+	}
+
+	// Ensure persistent named volumes for home directory and crew tools.
+	if team.Slug != "" {
+		if err := p.ensureVolume(ctx, p.homeVolumeName(team.ID, team.Slug)); err != nil {
+			return "", err
+		}
+		if err := p.ensureVolume(ctx, p.toolsVolumeName(team.ID, team.Slug)); err != nil {
+			return "", err
+		}
+	}
+
+	p.fixBindMountOwnership(ctx, runtimeImage, dirs)
+
+	containerCfg, hostConfig, err := p.buildCrewContainerConfig(ctx, team, containerName, runtimeImage, runtime, memoryMB, cpus, dirs)
+	if err != nil {
+		return "", err
+	}
+	resp, err := p.client.ContainerCreate(ctx,
+		containerCfg,
+		hostConfig,
+		&dockernetwork.NetworkingConfig{},
+		nil,
+		containerName,
+	)
+	if err != nil {
+		return "", fmt.Errorf("container create: %w", err)
+	}
+	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepContainerCreate, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage})
+
+	if err := p.client.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		return "", fmt.Errorf("container start: %w", err)
+	}
+
+	p.logger.Info("crew container started",
+		"crew_id", team.ID,
+		"container_id", resp.ID[:12],
+		"runtime", runtime,
+	)
+
+	// Sanity-check the bind-mounted sidecar on any BYOI crew (user-provided
+	// base image, with or without a cached derivative). Runs the binary with
+	// --version so an ABI mismatch (musl base vs. glibc sidecar) surfaces as
+	// a clear error instead of a cryptic runtime crash once the agent starts.
+	//
+	// Previously scoped to `team.CachedImage == ""` only, meaning a cached
+	// image originally built from a musl base would silently ship a broken
+	// sidecar. Now fires whenever team.Image is set.
+	if team.Image != "" {
+		if err := p.runByoiSidecarCheck(ctx, resp.ID, team.Image); err != nil {
+			return "", err
+		}
+	}
+
+	// Run postStartCommand hooks. The `/crew/init.sh` soft-promotion path
+	// is OPT-IN per crew (team.InitHookEnabled). When disabled (default),
+	// the auto-exec is skipped entirely — even a present and executable
+	// init.sh script is ignored. When enabled, it runs FIRST as UID 1001.
+	//
+	// Why opt-in: /crew/init.sh sits on a persistent bind mount on the
+	// host that survives container removal, sidecar reinstall, and
+	// docker rm -f. An agent with write access to /crew (which every
+	// agent has — it's the legitimate shared workspace) could stash a
+	// reverse-shell or exfil command there, and the next operator restart
+	// would auto-execute it as 1001. The default no-exec policy removes
+	// this persistence vector; operators who want the soft-promotion
+	// behaviour set init_hook_enabled=true on the crew manifest, which
+	// is a deliberate trust statement that everything in init.sh is
+	// code they wrote or audited.
+	var hooks []string
+	if team.InitHookEnabled {
+		hooks = append(hooks, "[ -x /crew/init.sh ] && /crew/init.sh; true")
+	} else {
+		// Log a one-line breadcrumb when a script exists but the hook is
+		// disabled — helps an operator who recently flipped the flag off
+		// understand why their script stopped running. The exec just
+		// stats the file; no execution.
+		hooks = append(hooks,
+			`if [ -e /crew/init.sh ]; then echo "crewship: /crew/init.sh present but init_hook_enabled=false on crew config — skipping execution" >&2; fi`)
+	}
+	hooks = append(hooks, team.PostStartCommands...)
+	p.runPostStartCommands(ctx, resp.ID, hooks)
+
+	p.setWarm(team.ID, resp.ID)
+	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage})
+	return resp.ID, nil
+}
+
+// reconcileExistingContainer checks whether a container named containerName
+// already exists and reconciles it: reuse it when healthy (running, right
+// image, required mounts and host bind dirs intact — restarting it if
+// stopped), or tear it down when stale so the caller falls through to create
+// a fresh one. done=true means EnsureCrewRuntime should return
+// (containerID, err) as-is; done=false means no reusable container remains
+// and the create path should proceed.
+func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider.CrewConfig, containerName, desiredImage string, callerSpecifiedImage bool, emitProv func(devcontainer.ProvisionEvent)) (containerID string, done bool, err error) {
+	p.logger.Debug("listing containers")
+	// Check if container already exists. This host-wide list is the cold-path
+	// cost the warm cache above short-circuits: only the FIRST same-crew call
+	// in a warmCrewTTL window reaches here; a DAG wave's remaining steps (and
+	// a prewarmed run's first step) hit the cache and skip it entirely.
+	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return "", false, fmt.Errorf("list containers: %w", err)
+	}
+	p.logger.Debug("containers listed", "count", len(containers))
+	for _, c := range containers {
+		for _, name := range c.Names {
+			if name == "/"+containerName {
+				// Check if container has /crew mount; if not, recreate it.
+				inspect, inspErr := p.client.ContainerInspect(ctx, c.ID)
+				if inspErr != nil {
+					return "", false, fmt.Errorf("inspect existing container %s: %w", containerName, inspErr)
+				}
+				// The reused container may still be running a previously
+				// provisioned cached image, while desiredImage falls back to the
+				// provider default when the caller left Image/CachedImage empty.
+				// Report the ACTUAL running image on the ready events below.
+				reusedImage := desiredImage
+				if inspect.Config != nil && inspect.Config.Image != "" {
+					reusedImage = inspect.Config.Image
+				}
+				// Image-drift check before the mount checks: if a
+				// re-provision produced a new image tag, the running
+				// container is stale by definition (its filesystem
+				// reflects the OLD provisioned image). Tear it down
+				// and fall through to create-new with the new tag.
+				if callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage {
+					p.logger.Info("recreating container (image drift)",
+						"container", containerName,
+						"running_image", inspect.Config.Image,
+						"desired_image", desiredImage,
+					)
+					p.forceTeardown(ctx, c.ID, team.ID)
+					break // fall through to create new container
+				}
+				// Check required mounts: /crew, /home/agent (volume), /opt/crew-tools (volume).
+				requiredMounts := map[string]bool{"/crew": false, "/home/agent": false, "/opt/crew-tools": false}
+				needsRecreate := false
+				for _, m := range inspect.Mounts {
+					if _, ok := requiredMounts[m.Destination]; ok {
+						requiredMounts[m.Destination] = true
+					}
+					// Migration: containers created before the secret-lifecycle
+					// hardening carry /secrets as a persistent host bind. Recreate
+					// them so the tmpfs mount takes over and cleartext credentials
+					// stop touching the host disk.
+					if m.Destination == "/secrets" && m.Type != mount.TypeTmpfs {
+						needsRecreate = true
+						p.logger.Info("/secrets is not tmpfs (legacy bind mount), will recreate container",
+							"container", containerName, "mount_type", m.Type)
+					}
+				}
+				// /secrets rides HostConfig.Tmpfs (not the Mounts API — see
+				// secretsTmpfsSpec), so it never appears in inspect.Mounts.
+				// A container lacking the Tmpfs entry predates the current
+				// mount shape (or was created by hand) — recreate it.
+				if !needsRecreate && (inspect.HostConfig == nil || inspect.HostConfig.Tmpfs["/secrets"] == "") {
+					needsRecreate = true
+					p.logger.Info("/secrets tmpfs entry missing from HostConfig, will recreate container",
+						"container", containerName)
+				}
+				for dest, found := range requiredMounts {
+					if !found {
+						needsRecreate = true
+						p.logger.Info("missing mount, will recreate container", "mount", dest, "container", containerName)
+						break
+					}
+				}
+				if needsRecreate {
+					p.logger.Info("recreating container (missing required mounts)", "container", containerName)
+					p.forceTeardown(ctx, c.ID, team.ID)
+					break // fall through to create new container
+				}
+				if c.State == "running" {
+					p.setWarm(team.ID, c.ID)
+					emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "reused running container", Tag: reusedImage})
+					return c.ID, true, nil
+				}
+				// Verify bind-mount directories still exist (macOS /tmp is wiped on
+				// reboot). /secrets is deliberately absent: it is a tmpfs with no
+				// host dir, so a host-side check would force a recreate on every
+				// restart.
+				bindMountDirs := []string{
+					filepath.Join(p.cfg.OutputBasePath, "workspaces", team.ID),
+					filepath.Join(p.cfg.OutputBasePath, team.ID),
+					filepath.Join(p.cfg.OutputBasePath, "crews", team.ID),
+				}
+				bindsMissing := false
+				for _, d := range bindMountDirs {
+					if _, statErr := os.Stat(d); os.IsNotExist(statErr) {
+						bindsMissing = true
+						break
+					}
+				}
+				if bindsMissing {
+					p.logger.Info("bind-mount dirs missing, recreating container", "container", containerName)
+					p.forceTeardown(ctx, c.ID, team.ID)
+					break // fall through to create new container
+				}
+				if err := p.client.ContainerStart(ctx, c.ID, container.StartOptions{}); err != nil {
+					return "", false, fmt.Errorf("start existing container: %w", err)
+				}
+				// Note: postStartCommand runs ONCE when the container is
+				// freshly created (see the create-path call in
+				// EnsureCrewRuntime). On warm restart of a stopped container,
+				// the hooks already ran at create time and the changes were
+				// persisted to the container filesystem — re-running them
+				// would cause issues for non-idempotent commands (e.g.
+				// "mysql start" would hit port conflicts, "mkdir /foo" would
+				// fail on EEXIST).
+				//
+				// This is a deliberate deviation from the devcontainer spec's
+				// "run on every start" semantics, but matches what most
+				// template authors actually want. If a future use case needs
+				// ephemeral hooks that re-run on each restart, add a
+				// per-feature opt-in flag rather than flipping this default.
+				p.setWarm(team.ID, c.ID)
+				emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "restarted stopped container", Tag: reusedImage})
+				return c.ID, true, nil
+			}
+		}
+	}
+	return "", false, nil
+}
+
+// crewDirs holds the host-side bind-mount paths prepared for a crew
+// container: the three mount roots plus the full list of directories
+// created (mount roots and crewPath subdirs), in creation order.
+type crewDirs struct {
+	output    string
+	workspace string
+	crew      string
+	all       []string
+}
+
+// prepareCrewDirs creates the host-side bind-mount directory tree for the
+// crew and scrubs the legacy host-side secrets dir.
+func (p *Provider) prepareCrewDirs(team provider.CrewConfig) (crewDirs, error) {
 	p.logger.Debug("image ok, creating dirs")
 	outputPath := filepath.Join(p.cfg.OutputBasePath, team.ID)
 	workspacePath := filepath.Join(p.cfg.OutputBasePath, "workspaces", team.ID)
@@ -709,29 +814,29 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	}
 	for _, dir := range allDirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return "", fmt.Errorf("create dir %s: %w", dir, err)
+			return crewDirs{}, fmt.Errorf("create dir %s: %w", dir, err)
 		}
 	}
+	return crewDirs{
+		output:    outputPath,
+		workspace: workspacePath,
+		crew:      crewPath,
+		all:       allDirs,
+	}, nil
+}
 
-	// Ensure persistent named volumes for home directory and crew tools.
-	if team.Slug != "" {
-		if err := p.ensureVolume(ctx, p.homeVolumeName(team.ID, team.Slug)); err != nil {
-			return "", err
-		}
-		if err := p.ensureVolume(ctx, p.toolsVolumeName(team.ID, team.Slug)); err != nil {
-			return "", err
-		}
-	}
-
-	// Fix ownership for container user (1001:1001). The host process may not
-	// run as root, so os.Chown can fail. In that case we use a short-lived
-	// Docker container (running as root) to chown the bind-mount paths.
-	// Windows has no host-side chown at all (os.Chown always errors), so
-	// skip straight to the in-container path — Docker Desktop's file
-	// sharing surfaces uid mapping inside the VM, where chown works.
+// fixBindMountOwnership fixes ownership of the bind-mount dirs for the
+// container user (1001:1001). The host process may not run as root, so
+// os.Chown can fail. In that case we use a short-lived Docker container
+// (running as root) to chown the bind-mount paths. Windows has no host-side
+// chown at all (os.Chown always errors), so skip straight to the
+// in-container path — Docker Desktop's file sharing surfaces uid mapping
+// inside the VM, where chown works. Best-effort: failures degrade to a 0777
+// chmod fallback rather than aborting the ensure.
+func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage string, dirs crewDirs) {
 	needsDockerChown := goruntime.GOOS == "windows"
 	if !needsDockerChown {
-		for _, dir := range allDirs {
+		for _, dir := range dirs.all {
 			if err := os.Chown(dir, 1001, 1001); err != nil {
 				needsDockerChown = true
 				break
@@ -739,9 +844,9 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 	}
 	if needsDockerChown {
-		chownCmd := buildChownInitCmd(allDirs, crewPath)
+		chownCmd := buildChownInitCmd(dirs.all, dirs.crew)
 		var mounts []mount.Mount
-		for _, dir := range allDirs {
+		for _, dir := range dirs.all {
 			mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: dir, Target: "/mnt" + dir})
 		}
 		initResp, initErr := p.client.ContainerCreate(ctx,
@@ -774,12 +879,18 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 			p.logger.Debug("init container fixed bind-mount ownership")
 		} else {
 			p.logger.Warn("init container chown failed, falling back to 0777", "error", initErr)
-			for _, dir := range allDirs {
+			for _, dir := range dirs.all {
 				os.Chmod(dir, 0777) //nolint:errcheck
 			}
 		}
 	}
+}
 
+// buildCrewContainerConfig assembles the container env (merging and
+// expanding devcontainer containerEnv, applying the agent login PATH) and
+// constructs the container.Config / container.HostConfig pair for the crew
+// container create call.
+func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.CrewConfig, containerName, runtimeImage, runtime string, memoryMB int, cpus float64, dirs crewDirs) (*container.Config, *container.HostConfig, error) {
 	pidsLimit := int64(200)
 	p.logger.Debug("calling ContainerCreate", "image", runtimeImage, "name", containerName)
 	env := []string{
@@ -815,7 +926,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 			}
 		}
 		if needsExpansion {
-			return "", fmt.Errorf("inspect image env for containerEnv expansion (%s): %w", runtimeImage, imgEnvErr)
+			return nil, nil, fmt.Errorf("inspect image env for containerEnv expansion (%s): %w", runtimeImage, imgEnvErr)
 		}
 		p.logger.Warn("could not inspect image for env expansion — passing containerEnv literally",
 			"image", runtimeImage, "error", imgEnvErr)
@@ -846,9 +957,9 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// buildMounts below (it errors out otherwise).
 	containerCfg.Entrypoint = []string{"/usr/local/bin/entrypoint.sh"}
 	containerCfg.Cmd = nil
-	crewMounts, err := p.buildMounts(team.ID, team.Slug, workspacePath, outputPath, crewPath)
+	crewMounts, err := p.buildMounts(team.ID, team.Slug, dirs.workspace, dirs.output, dirs.crew)
 	if err != nil {
-		return "", err
+		return nil, nil, err
 	}
 	// Apply feature-declared mounts (e.g. DinD needs /var/run/docker.sock).
 	// Feature metadata is user-controlled via devcontainer.json, so each
@@ -927,111 +1038,72 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		},
 		NetworkMode: container.NetworkMode(p.cfg.Network),
 	}
-	resp, err := p.client.ContainerCreate(ctx,
-		containerCfg,
-		hostConfig,
-		&dockernetwork.NetworkingConfig{},
-		nil,
-		containerName,
-	)
-	if err != nil {
-		return "", fmt.Errorf("container create: %w", err)
+	return containerCfg, hostConfig, nil
+}
+
+// runByoiSidecarCheck runs the bind-mounted sidecar binary with --version
+// inside the freshly started container so an ABI mismatch (musl base vs.
+// glibc sidecar) surfaces as a clear error. The WithTimeout's cancel is
+// released as soon as the check returns rather than leaking until
+// EnsureCrewRuntime itself returns (which may be much later — post-start
+// hooks, etc.). Exec setup/poll failures are tolerated (return nil); only a
+// non-zero exit from the binary itself fails the check.
+func (p *Provider) runByoiSidecarCheck(ctx context.Context, containerID, image string) error {
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	execCfg := container.ExecOptions{
+		Cmd:          []string{"/usr/local/bin/crewship-sidecar", "--version"},
+		User:         "0:0",
+		AttachStdout: true,
+		AttachStderr: true,
 	}
-	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepContainerCreate, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage})
-
-	if err := p.client.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		return "", fmt.Errorf("container start: %w", err)
+	ex, execErr := p.client.ContainerExecCreate(checkCtx, containerID, execCfg)
+	if execErr != nil {
+		return nil
 	}
+	if startErr := p.client.ContainerExecStart(checkCtx, ex.ID, container.ExecStartOptions{}); startErr != nil {
+		return nil
+	}
+	// Poll exit code briefly.
+	exitCode, stillRunning, ierr := p.waitExecExit(checkCtx, ex.ID, 20)
+	if ierr != nil || stillRunning {
+		return nil
+	}
+	if exitCode != 0 {
+		p.logger.Error("sidecar binary incompatible with container libc — " +
+			"host-built sidecar expects glibc; Alpine/musl bases must use a glibc-compatible image")
+		return fmt.Errorf("sidecar sanity check failed (exit %d) — custom base image %q is likely musl-based or missing glibc symbols; use a glibc base (debian, ubuntu, mcr devcontainers)", exitCode, image)
+	}
+	return nil
+}
 
-	p.logger.Info("crew container started",
-		"crew_id", team.ID,
-		"container_id", resp.ID[:12],
-		"runtime", runtime,
-	)
+// forceTeardown stops a crew container with a 10-second grace period,
+// force-removes it and drops the crew's warm-cache entry. Stop/remove errors
+// are deliberately ignored: every caller falls through to create a fresh
+// container regardless.
+func (p *Provider) forceTeardown(ctx context.Context, containerID, crewID string) {
+	timeout := 10
+	_ = p.client.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout})
+	_ = p.client.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
+	p.evictWarm(crewID)
+}
 
-	// Sanity-check the bind-mounted sidecar on any BYOI crew (user-provided
-	// base image, with or without a cached derivative). Runs the binary with
-	// --version so an ABI mismatch (musl base vs. glibc sidecar) surfaces as
-	// a clear error instead of a cryptic runtime crash once the agent starts.
-	//
-	// Previously scoped to `team.CachedImage == ""` only, meaning a cached
-	// image originally built from a musl base would silently ship a broken
-	// sidecar. Now fires whenever team.Image is set.
-	if team.Image != "" {
-		// Wrapped in an inline func so the WithTimeout's cancel is
-		// released as soon as the sanity check returns, rather than
-		// leaking until EnsureCrewRuntime itself returns (which may be
-		// much later — post-start hooks, etc.).
-		if err := func() error {
-			checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			defer cancel()
-			execCfg := container.ExecOptions{
-				Cmd:          []string{"/usr/local/bin/crewship-sidecar", "--version"},
-				User:         "0:0",
-				AttachStdout: true,
-				AttachStderr: true,
-			}
-			ex, execErr := p.client.ContainerExecCreate(checkCtx, resp.ID, execCfg)
-			if execErr != nil {
-				return nil
-			}
-			if startErr := p.client.ContainerExecStart(checkCtx, ex.ID, container.ExecStartOptions{}); startErr != nil {
-				return nil
-			}
-			// Poll exit code briefly.
-			for i := 0; i < 20; i++ {
-				inspect, ierr := p.client.ContainerExecInspect(checkCtx, ex.ID)
-				if ierr != nil {
-					return nil
-				}
-				if !inspect.Running {
-					if inspect.ExitCode != 0 {
-						p.logger.Error("sidecar binary incompatible with container libc — " +
-							"host-built sidecar expects glibc; Alpine/musl bases must use a glibc-compatible image")
-						return fmt.Errorf("sidecar sanity check failed (exit %d) — custom base image %q is likely musl-based or missing glibc symbols; use a glibc base (debian, ubuntu, mcr devcontainers)", inspect.ExitCode, team.Image)
-					}
-					return nil
-				}
-				time.Sleep(50 * time.Millisecond)
-			}
-			return nil
-		}(); err != nil {
-			return "", err
+// waitExecExit polls ContainerExecInspect for execID every 50ms until the
+// exec stops running or maxPolls polls have been made. It returns the exec's
+// exit code once it has stopped, stillRunning=true when the poll cap was hit
+// while the exec was still running, or the first inspect error encountered.
+func (p *Provider) waitExecExit(ctx context.Context, execID string, maxPolls int) (exitCode int, stillRunning bool, err error) {
+	for i := 0; i < maxPolls; i++ {
+		inspect, ierr := p.client.ContainerExecInspect(ctx, execID)
+		if ierr != nil {
+			return 0, false, ierr
 		}
+		if !inspect.Running {
+			return inspect.ExitCode, false, nil
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-
-	// Run postStartCommand hooks. The `/crew/init.sh` soft-promotion path
-	// is OPT-IN per crew (team.InitHookEnabled). When disabled (default),
-	// the auto-exec is skipped entirely — even a present and executable
-	// init.sh script is ignored. When enabled, it runs FIRST as UID 1001.
-	//
-	// Why opt-in: /crew/init.sh sits on a persistent bind mount on the
-	// host that survives container removal, sidecar reinstall, and
-	// docker rm -f. An agent with write access to /crew (which every
-	// agent has — it's the legitimate shared workspace) could stash a
-	// reverse-shell or exfil command there, and the next operator restart
-	// would auto-execute it as 1001. The default no-exec policy removes
-	// this persistence vector; operators who want the soft-promotion
-	// behaviour set init_hook_enabled=true on the crew manifest, which
-	// is a deliberate trust statement that everything in init.sh is
-	// code they wrote or audited.
-	var hooks []string
-	if team.InitHookEnabled {
-		hooks = append(hooks, "[ -x /crew/init.sh ] && /crew/init.sh; true")
-	} else {
-		// Log a one-line breadcrumb when a script exists but the hook is
-		// disabled — helps an operator who recently flipped the flag off
-		// understand why their script stopped running. The exec just
-		// stats the file; no execution.
-		hooks = append(hooks,
-			`if [ -e /crew/init.sh ]; then echo "crewship: /crew/init.sh present but init_hook_enabled=false on crew config — skipping execution" >&2; fi`)
-	}
-	hooks = append(hooks, team.PostStartCommands...)
-	p.runPostStartCommands(ctx, resp.ID, hooks)
-
-	p.setWarm(team.ID, resp.ID)
-	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage})
-	return resp.ID, nil
+	return 0, true, nil
 }
 
 // runPostStartCommands executes each post-start hook sequentially as the
@@ -1056,32 +1128,25 @@ func (p *Provider) runPostStartCommands(ctx context.Context, containerID string,
 		if err != nil {
 			cancel()
 			p.logger.Warn("postStartCommand exec create failed",
-				"container", shortID(containerID), "cmd", cmd, "error", err)
+				"container", provider.ShortID(containerID), "cmd", cmd, "error", err)
 			continue
 		}
 		if err := p.client.ContainerExecStart(runCtx, ex.ID, container.ExecStartOptions{}); err != nil {
 			cancel()
 			p.logger.Warn("postStartCommand exec start failed",
-				"container", shortID(containerID), "cmd", cmd, "error", err)
+				"container", provider.ShortID(containerID), "cmd", cmd, "error", err)
 			continue
 		}
 		// Poll exit code briefly; cap at ~60s total via runCtx timeout.
-		for i := 0; i < 1200; i++ { // 1200 * 50ms = 60s
-			inspect, ierr := p.client.ContainerExecInspect(runCtx, ex.ID)
-			if ierr != nil {
-				break
+		exitCode, stillRunning, ierr := p.waitExecExit(runCtx, ex.ID, 1200) // 1200 * 50ms = 60s
+		if ierr == nil && !stillRunning {
+			if exitCode != 0 {
+				p.logger.Warn("postStartCommand exited non-zero",
+					"container", provider.ShortID(containerID), "cmd", cmd, "exit_code", exitCode)
+			} else {
+				p.logger.Debug("postStartCommand completed",
+					"container", provider.ShortID(containerID), "cmd", cmd)
 			}
-			if !inspect.Running {
-				if inspect.ExitCode != 0 {
-					p.logger.Warn("postStartCommand exited non-zero",
-						"container", shortID(containerID), "cmd", cmd, "exit_code", inspect.ExitCode)
-				} else {
-					p.logger.Debug("postStartCommand completed",
-						"container", shortID(containerID), "cmd", cmd)
-				}
-				break
-			}
-			time.Sleep(50 * time.Millisecond)
 		}
 		cancel()
 	}
@@ -1120,19 +1185,11 @@ func buildChownInitCmd(allDirs []string, crewPath string) string {
 	return chownCmd
 }
 
-// shortID returns first 12 chars of a container ID, or the full string if shorter.
-func shortID(id string) string {
-	if len(id) > 12 {
-		return id[:12]
-	}
-	return id
-}
-
 // StopCrewRuntime gracefully stops a crew container with a 30-second timeout.
 func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) error {
 	timeout := 30
 	if err := p.client.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout}); err != nil {
-		return fmt.Errorf("stop crew runtime %s: %w", shortID(containerID), err)
+		return fmt.Errorf("stop crew runtime %s: %w", provider.ShortID(containerID), err)
 	}
 	return nil
 }
@@ -1140,7 +1197,7 @@ func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) erro
 // RemoveCrewRuntime forcefully removes a crew container.
 func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) error {
 	if err := p.client.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true}); err != nil {
-		return fmt.Errorf("remove crew runtime %s: %w", shortID(containerID), err)
+		return fmt.Errorf("remove crew runtime %s: %w", provider.ShortID(containerID), err)
 	}
 	return nil
 }

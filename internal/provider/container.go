@@ -334,3 +334,11 @@ type InteractiveExecProvider interface {
 	ExecInteractive(ctx context.Context, cfg InteractiveExecConfig) (*InteractiveExecResult, error)
 	ExecResize(ctx context.Context, execID string, rows, cols uint16) error
 }
+
+// ShortID returns first 12 chars of a container ID, or the full string if shorter.
+func ShortID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}

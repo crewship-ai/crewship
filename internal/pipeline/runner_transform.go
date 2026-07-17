@@ -3,6 +3,7 @@ package pipeline
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -110,13 +111,7 @@ func evalTransform(v any, expr string) (string, error) {
 			out = append(out, k)
 		}
 		// Sort for determinism — jq keys sorts alphabetically too.
-		for i := 0; i < len(out); i++ {
-			for j := i + 1; j < len(out); j++ {
-				if out[j] < out[i] {
-					out[i], out[j] = out[j], out[i]
-				}
-			}
-		}
+		sort.Strings(out)
 		b, _ := json.Marshal(out)
 		return string(b), nil
 	case "tostring":

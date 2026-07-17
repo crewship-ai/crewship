@@ -79,25 +79,9 @@ func bm25Lane(ctx context.Context, db *sql.DB, q Query, limit int) ([]Hit, error
 		return nil, nil
 	}
 
-	var (
-		conds = []string{"e.workspace_id = ?"}
-		args  = []any{q.WorkspaceID}
-	)
-	switch q.Scope {
-	case ScopeOwn:
-		if q.AgentID == "" {
-			return nil, fmt.Errorf("episodic: ScopeOwn requires agent_id")
-		}
-		conds = append(conds, "e.agent_id = ?")
-		args = append(args, q.AgentID)
-	case ScopeCrewShared:
-		if q.CrewID == "" {
-			return nil, fmt.Errorf("episodic: ScopeCrewShared requires crew_id")
-		}
-		conds = append(conds, "e.crew_id = ?")
-		args = append(args, q.CrewID)
-	default:
-		return nil, fmt.Errorf("episodic: unknown scope %q", q.Scope)
+	conds, args, err := applyScope(q, "e.", []string{"e.workspace_id = ?"}, []any{q.WorkspaceID})
+	if err != nil {
+		return nil, err
 	}
 
 	query := `SELECT e.id, e.entry_type, e.summary, e.agent_id, e.payload, e.ts,
@@ -132,9 +116,7 @@ func bm25Lane(ctx context.Context, db *sql.DB, q Query, limit int) ([]Hit, error
 		h.AgentID = agentID.String
 		h.EntryType = entryTypeStr
 		h.Payload = decodeJSONMap(payloadStr)
-		if ts, perr := time.Parse(time.RFC3339Nano, tsStr); perr == nil {
-			h.Age = time.Since(ts)
-		} else if ts, perr := time.Parse("2006-01-02T15:04:05.000Z", tsStr); perr == nil {
+		if ts, ok := parseEpisodicTS(tsStr); ok {
 			h.Age = time.Since(ts)
 		}
 		// bm25() returns negative scores (lower = better match). Normalise

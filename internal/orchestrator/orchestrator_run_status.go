@@ -148,6 +148,14 @@ func (o *Orchestrator) updateRunStatus(ctx context.Context, runID, status string
 	}
 }
 
+// failRun marks a run terminal: it persists the status via updateRunStatus
+// and emits the matching agent.run.* audit row via recordRunAudit. The two
+// calls always travel together at RunAgent's terminal return points.
+func (o *Orchestrator) failRun(ctx context.Context, req AgentRunRequest, runID, status string) {
+	o.updateRunStatus(ctx, runID, status)
+	o.recordRunAudit(ctx, req, runID, status)
+}
+
 // runAuditActions maps a terminal RunState.Status value onto the
 // agent.run.* audit action name. "running" (the detached-exec
 // continuation case — see the "still running" branch in RunAgent) is

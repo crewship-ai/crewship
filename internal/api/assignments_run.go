@@ -78,8 +78,7 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "chat not found")
 			return
 		}
-		h.logger.Error("lookup chat for assignment", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "lookup chat for assignment", err)
 		return
 	}
 
@@ -97,8 +96,7 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		h.logger.Error("lookup assigner crew for connection check", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "lookup assigner crew for connection check", err)
 		return
 	}
 	if assignerCrewID != body.CrewID {
@@ -134,8 +132,7 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "target agent not found")
 			return
 		}
-		h.logger.Error("lookup target agent", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "lookup target agent", err)
 		return
 	}
 
@@ -147,8 +144,7 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
 	`, assignmentID, body.WorkspaceID, body.ChatID, assignedByID, target.ID, body.Task, body.ChatID, now)
 	if err != nil {
-		h.logger.Error("create assignment", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "create assignment", err)
 		return
 	}
 

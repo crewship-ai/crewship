@@ -197,15 +197,21 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	return nil
 }
 
+// namePrefix returns the configured container-name prefix
+// (Config.ContainerPrefix), falling back to the "crewship" default when
+// unset.
+func (p *Provider) namePrefix() string {
+	if p.cfg.ContainerPrefix != "" {
+		return p.cfg.ContainerPrefix
+	}
+	return "crewship"
+}
+
 // CrewContainerName returns the container name for a crew. It folds in the
 // globally-unique crew id (not the per-workspace slug alone) so two tenants
 // with an identically-named crew never collide on a shared host (audit C1).
 func (p *Provider) CrewContainerName(id, slug string) string {
-	prefix := p.cfg.ContainerPrefix
-	if prefix == "" {
-		prefix = "crewship"
-	}
-	parts := []string{prefix, "team"}
+	parts := []string{p.namePrefix(), "team"}
 	if slug != "" {
 		parts = append(parts, slug)
 	}
@@ -263,7 +269,7 @@ func (p *Provider) inspectContainer(ctx context.Context, id string) (*containerJ
 func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) error {
 	_, err := runCLI(ctx, "stop", "--time", "10", containerID)
 	if err != nil {
-		return fmt.Errorf("stop crew runtime %s: %w", shortID(containerID), err)
+		return fmt.Errorf("stop crew runtime %s: %w", provider.ShortID(containerID), err)
 	}
 	return nil
 }
@@ -272,7 +278,7 @@ func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) erro
 func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) error {
 	_, err := runCLI(ctx, "delete", "--force", containerID)
 	if err != nil {
-		return fmt.Errorf("remove crew runtime %s: %w", shortID(containerID), err)
+		return fmt.Errorf("remove crew runtime %s: %w", provider.ShortID(containerID), err)
 	}
 	return nil
 }
@@ -314,13 +320,6 @@ func runCLI(ctx context.Context, args ...string) ([]byte, error) {
 		return stdout.Bytes(), fmt.Errorf("container %s: %w (stderr: %s)", strings.Join(args, " "), err, stderr.String())
 	}
 	return stdout.Bytes(), nil
-}
-
-func shortID(id string) string {
-	if len(id) > 12 {
-		return id[:12]
-	}
-	return id
 }
 
 // gcExecs periodically cleans up finished exec entries.

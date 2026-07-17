@@ -49,8 +49,7 @@ func (h *IntegrationHandler) ListCrewIntegrationTools(w http.ResponseWriter, r *
 		WHERE mcp_server_id = ? AND mcp_server_scope = 'crew'
 		ORDER BY tool_name ASC`, serverID)
 	if err != nil {
-		h.logger.Error("list mcp tool bindings", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list mcp tool bindings", err)
 		return
 	}
 	defer rows.Close()
@@ -60,16 +59,14 @@ func (h *IntegrationHandler) ListCrewIntegrationTools(w http.ResponseWriter, r *
 		var b toolBindingResponse
 		var enabled int
 		if err := rows.Scan(&b.ID, &b.ToolName, &b.Description, &enabled, &b.CreatedAt, &b.UpdatedAt); err != nil {
-			h.logger.Error("scan mcp tool binding", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan mcp tool binding", err)
 			return
 		}
 		b.Enabled = enabled != 0
 		out = append(out, b)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (mcp tool bindings)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration (mcp tool bindings)", err)
 		return
 	}
 
@@ -153,8 +150,7 @@ func (h *IntegrationHandler) UpdateCrewIntegrationTool(w http.ResponseWriter, r 
 			updated_at = excluded.updated_at`,
 		id, serverID, toolName, desc, enabledArg, now, now, enabledArg)
 	if err != nil {
-		h.logger.Error("upsert mcp tool binding", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "upsert mcp tool binding", err)
 		return
 	}
 
@@ -167,8 +163,7 @@ func (h *IntegrationHandler) UpdateCrewIntegrationTool(w http.ResponseWriter, r 
 		FROM mcp_tool_bindings
 		WHERE mcp_server_id = ? AND mcp_server_scope = 'crew' AND tool_name = ?`,
 		serverID, toolName).Scan(&out.ID, &out.ToolName, &out.Description, &enabledOut, &out.CreatedAt, &out.UpdatedAt); err != nil {
-		h.logger.Error("read back mcp tool binding", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "read back mcp tool binding", err)
 		return
 	}
 	out.Enabled = enabledOut != 0
@@ -227,8 +222,7 @@ func (h *IntegrationHandler) RefreshCrewIntegrationTools(w http.ResponseWriter, 
 	now := time.Now().UTC().Format(time.RFC3339)
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("begin tx (refresh tools)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "begin tx (refresh tools)", err)
 		return
 	}
 	defer func() {
@@ -262,8 +256,7 @@ func (h *IntegrationHandler) RefreshCrewIntegrationTools(w http.ResponseWriter, 
 				updated_at = excluded.updated_at`,
 			generateCUID(), serverID, name, desc, now, now)
 		if err != nil {
-			h.logger.Error("upsert refresh tool", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "upsert refresh tool", err)
 			return
 		}
 		if n, _ := res.RowsAffected(); n > 0 {
@@ -275,8 +268,7 @@ func (h *IntegrationHandler) RefreshCrewIntegrationTools(w http.ResponseWriter, 
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit refresh tools", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "commit refresh tools", err)
 		return
 	}
 
@@ -327,6 +319,5 @@ func (h *IntegrationHandler) respondCrewServerErr(w http.ResponseWriter, err err
 		replyError(w, http.StatusNotFound, "Crew integration not found")
 		return
 	}
-	h.logger.Error("assert crew server exists", "error", err)
-	replyError(w, http.StatusInternalServerError, "Internal server error")
+	replyInternalError(w, h.logger, "assert crew server exists", err)
 }

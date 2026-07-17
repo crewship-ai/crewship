@@ -116,8 +116,9 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 		files, err = s.storage.List(r.Context(), dir)
 	}
 	if err != nil {
-		s.logger.Error("file list failed", "crew_id", crewID, "agent_slug", agentSlug, "error", err)
-		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "files": []interface{}{}})
+		writeEmptyOK(w, s.logger, "file list failed", err,
+			map[string]interface{}{"crew_id": crewID, "files": []interface{}{}},
+			"crew_id", crewID, "agent_slug", agentSlug)
 		return
 	}
 
@@ -311,14 +312,10 @@ func crewSharedContainerPath(crewID, storageKey string) (string, bool) {
 // atomic (temp file in the destination dir, then mv -f), and paths pass via env
 // so a crafted destination can't break out of the shell command.
 func (s *Server) writeCrewSharedFileViaContainer(ctx context.Context, crewID, containerPath string, content []byte) error {
-	var slug string
-	if s.db != nil {
-		_ = s.db.QueryRowContext(ctx, "SELECT slug FROM crews WHERE id = ?", crewID).Scan(&slug)
-	}
-	if slug == "" {
+	containerName, _, ok := s.resolveCrewContainer(ctx, crewID, false)
+	if !ok {
 		return errCrewNotFound
 	}
-	containerName := s.container.CrewContainerName(crewID, slug)
 
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()

@@ -29,6 +29,32 @@ type Relation struct {
 	Score          float64
 }
 
+// withTx begins a transaction, runs fn, and commits. Any error — from
+// begin, fn, or commit — leaves the transaction rolled back via the
+// deferred Rollback (a no-op after a successful Commit). beginWrap and
+// commitWrap prefix the begin/commit errors so each caller keeps the
+// exact error text it returned before this helper existed; an empty
+// commitWrap returns the commit error unwrapped. Local rather than
+// database.WithTx for the same error-text reason.
+func withTx(ctx context.Context, db *sql.DB, beginWrap, commitWrap string, fn func(*sql.Tx) error) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("%s: %w", beginWrap, err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		if commitWrap != "" {
+			return fmt.Errorf("%s: %w", commitWrap, err)
+		}
+		return err
+	}
+	return nil
+}
+
 // LinkSimilarOnIndex is called by the indexer right after a new
 // embedding lands. It finds the top-3 most cosine-similar existing
 // entries above threshold (default 0.8), inserts symmetric
@@ -106,29 +132,24 @@ func LinkSimilarOnIndex(ctx context.Context, db *sql.DB, newEntryID, workspaceID
 	// Symmetric edges — "a similar to b" implies "b similar to a" for
 	// cosine. Two INSERT OR IGNOREs per pair so concurrent link runs
 	// don't collide on the primary key.
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("relations: tx: %w", err)
-	}
-	stmt, err := tx.PrepareContext(ctx,
-		`INSERT OR IGNORE INTO memory_relations (entry_id, related_entry_id, relation_kind, score)
-		 VALUES (?, ?, ?, ?)`)
-	if err != nil {
-		_ = tx.Rollback()
-		return fmt.Errorf("relations: prepare: %w", err)
-	}
-	defer stmt.Close()
-	for _, c := range cands {
-		if _, err := stmt.ExecContext(ctx, newEntryID, c.id, string(RelationSimilar), c.sim); err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("relations: insert forward: %w", err)
+	return withTx(ctx, db, "relations: tx", "", func(tx *sql.Tx) error {
+		stmt, err := tx.PrepareContext(ctx,
+			`INSERT OR IGNORE INTO memory_relations (entry_id, related_entry_id, relation_kind, score)
+			 VALUES (?, ?, ?, ?)`)
+		if err != nil {
+			return fmt.Errorf("relations: prepare: %w", err)
 		}
-		if _, err := stmt.ExecContext(ctx, c.id, newEntryID, string(RelationSimilar), c.sim); err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("relations: insert reverse: %w", err)
+		defer stmt.Close()
+		for _, c := range cands {
+			if _, err := stmt.ExecContext(ctx, newEntryID, c.id, string(RelationSimilar), c.sim); err != nil {
+				return fmt.Errorf("relations: insert forward: %w", err)
+			}
+			if _, err := stmt.ExecContext(ctx, c.id, newEntryID, string(RelationSimilar), c.sim); err != nil {
+				return fmt.Errorf("relations: insert reverse: %w", err)
+			}
 		}
-	}
-	return tx.Commit()
+		return nil
+	})
 }
 
 // LinkSupports records that a rule (consolidator output) is supported
@@ -140,25 +161,21 @@ func LinkSupports(ctx context.Context, db *sql.DB, ruleEntryID string, evidenceI
 	if len(evidenceIDs) == 0 {
 		return nil
 	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("relations supports: tx: %w", err)
-	}
-	stmt, err := tx.PrepareContext(ctx,
-		`INSERT OR IGNORE INTO memory_relations (entry_id, related_entry_id, relation_kind, score)
-		 VALUES (?, ?, ?, 1.0)`)
-	if err != nil {
-		_ = tx.Rollback()
-		return fmt.Errorf("relations supports: prepare: %w", err)
-	}
-	defer stmt.Close()
-	for _, eid := range evidenceIDs {
-		if _, err := stmt.ExecContext(ctx, ruleEntryID, eid, string(RelationSupports)); err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("relations supports: insert %s → %s: %w", ruleEntryID, eid, err)
+	return withTx(ctx, db, "relations supports: tx", "", func(tx *sql.Tx) error {
+		stmt, err := tx.PrepareContext(ctx,
+			`INSERT OR IGNORE INTO memory_relations (entry_id, related_entry_id, relation_kind, score)
+			 VALUES (?, ?, ?, 1.0)`)
+		if err != nil {
+			return fmt.Errorf("relations supports: prepare: %w", err)
 		}
-	}
-	return tx.Commit()
+		defer stmt.Close()
+		for _, eid := range evidenceIDs {
+			if _, err := stmt.ExecContext(ctx, ruleEntryID, eid, string(RelationSupports)); err != nil {
+				return fmt.Errorf("relations supports: insert %s → %s: %w", ruleEntryID, eid, err)
+			}
+		}
+		return nil
+	})
 }
 
 // RelationsFor returns all outbound edges from entry id. Used by the

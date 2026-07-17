@@ -328,7 +328,10 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 	// version pin: without this, ANY unrelated PATCH (cron tweak,
 	// rename, disable) would silently unpin a production schedule back
 	// onto head — the exact hazard pinning exists to prevent.
-	rawBody, err := io.ReadAll(r.Body)
+	// Bound the read: schedule PATCH bodies are small JSON documents;
+	// cap at 1 MiB to match the webhook dispatch handler's limit.
+	const maxBody = 1 << 20
+	rawBody, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
 	if err != nil {
 		replyError(w, http.StatusBadRequest, "could not read body")
 		return

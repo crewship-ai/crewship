@@ -1,16 +1,13 @@
 package llm
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -94,7 +91,7 @@ func (o *OpenAI) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	}
 	defer resp.Body.Close()
 
-	if err := checkOpenAIStatus(resp); err != nil {
+	if err := checkStatus(resp, "OpenAI"); err != nil {
 		return nil, err
 	}
 
@@ -129,7 +126,7 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (*Response, error) {
 	}
 	defer resp.Body.Close()
 
-	if err := checkOpenAIStatus(resp); err != nil {
+	if err := checkStatus(resp, "OpenAI"); err != nil {
 		return nil, err
 	}
 
@@ -152,7 +149,7 @@ func (o *OpenAI) Stream(ctx context.Context, req Request, handler func(StreamEve
 	}
 	defer resp.Body.Close()
 
-	if err := checkOpenAIStatus(resp); err != nil {
+	if err := checkStatus(resp, "OpenAI"); err != nil {
 		return nil, err
 	}
 
@@ -160,59 +157,15 @@ func (o *OpenAI) Stream(ctx context.Context, req Request, handler func(StreamEve
 }
 
 // doWithRetry executes an HTTP request with exponential backoff retry on transient errors.
-// Mirrors Anthropic.doWithRetry: max 3 attempts, 1s/2s/4s exponential backoff with jitter,
-// Retry-After honoured. Uses the same retryableStatusCodes (429/500/503/529) shared with
-// the Anthropic provider so policy stays consistent across LLM backends. Without this the
-// caller saw raw 429/503 from the upstream the moment OpenAI rate-limited a burst -- which
-// the orchestrator's own retry layer would then duplicate, amplifying spikes.
+// Shares the loop in httpretry.go with the Anthropic provider (max 3 attempts, 1s/2s/4s
+// exponential backoff with jitter, Retry-After honoured, retryableStatusCodes) so policy
+// stays consistent across LLM backends. Without this the caller saw raw 429/503 from the
+// upstream the moment OpenAI rate-limited a burst -- which the orchestrator's own retry
+// layer would then duplicate, amplifying spikes.
 func (o *OpenAI) doWithRetry(ctx context.Context, body []byte) (*http.Response, error) {
-	const maxRetries = 3
-	baseDelay := time.Second
-	var retryAfter time.Duration
-
-	var lastErr error
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		httpReq, err := o.newHTTPRequest(ctx, body)
-		if err != nil {
-			return nil, err
-		}
-
-		resp, err := o.client.Do(httpReq)
-		if err != nil {
-			lastErr = fmt.Errorf("openai http: %w", err)
-			if ctx.Err() != nil {
-				return nil, lastErr
-			}
-			// Network error -- retry
-		} else if !retryableStatusCodes[resp.StatusCode] {
-			return resp, nil // Success or non-retryable error
-		} else {
-			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-			resp.Body.Close()
-			lastErr = fmt.Errorf("OpenAI API returned %d: %s", resp.StatusCode, respBody)
-
-			if ra := resp.Header.Get("Retry-After"); ra != "" {
-				if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
-					retryAfter = time.Duration(secs) * time.Second
-				}
-			}
-		}
-
-		if attempt < maxRetries-1 {
-			delay := baseDelay * (1 << attempt) // 1s, 2s, 4s
-			if retryAfter > delay {
-				delay = retryAfter
-			}
-			retryAfter = 0
-			jitter := time.Duration(rand.Int63n(int64(delay / 4)))
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(delay + jitter):
-			}
-		}
-	}
-	return nil, fmt.Errorf("openai: max retries exceeded: %w", lastErr)
+	return doWithRetry(ctx, o.client, func(ctx context.Context) (*http.Request, error) {
+		return o.newHTTPRequest(ctx, body)
+	}, "openai", "OpenAI")
 }
 
 func (o *OpenAI) newHTTPRequest(ctx context.Context, body []byte) (*http.Request, error) {
@@ -245,7 +198,7 @@ func (o *OpenAI) buildRequestBody(req Request, stream bool) ([]byte, error) {
 		body["temperature"] = *req.Temperature
 	}
 	if len(req.Tools) > 0 {
-		body["tools"] = toOpenAITools(req.Tools)
+		body["tools"] = toFunctionTools(req.Tools)
 	}
 	if stream {
 		body["stream"] = true
@@ -271,7 +224,10 @@ type openaiToolCall struct {
 	} `json:"function"`
 }
 
-type openaiToolDef struct {
+// functionToolDef is the OpenAI-style {"type":"function","function":{...}}
+// tool wire format. Ollama adopted the same schema, so both providers share
+// this struct and the toFunctionTools converter.
+type functionToolDef struct {
 	Type     string `json:"type"`
 	Function struct {
 		Name        string `json:"name"`
@@ -358,10 +314,10 @@ func toOpenAIMessage(m Message) openaiMessage {
 	return openaiMessage{Role: m.Role, Content: m.Content}
 }
 
-func toOpenAITools(tools []ToolDef) []openaiToolDef {
-	out := make([]openaiToolDef, len(tools))
+func toFunctionTools(tools []ToolDef) []functionToolDef {
+	out := make([]functionToolDef, len(tools))
 	for i, t := range tools {
-		out[i] = openaiToolDef{Type: "function"}
+		out[i] = functionToolDef{Type: "function"}
 		out[i].Function.Name = t.Name
 		out[i].Function.Description = t.Description
 		out[i].Function.Parameters = t.InputSchema
@@ -369,25 +325,7 @@ func toOpenAITools(tools []ToolDef) []openaiToolDef {
 	return out
 }
 
-func checkOpenAIStatus(resp *http.Response) error {
-	if resp.StatusCode == http.StatusOK {
-		return nil
-	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-	switch resp.StatusCode {
-	case http.StatusUnauthorized:
-		return fmt.Errorf("invalid OpenAI API key")
-	case http.StatusTooManyRequests:
-		return fmt.Errorf("OpenAI rate limit exceeded")
-	default:
-		return fmt.Errorf("OpenAI API returned %d: %s", resp.StatusCode, body)
-	}
-}
-
 func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*Response, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
 	final := &Response{StopReason: StopEndTurn}
 	var textParts []string
 
@@ -398,16 +336,7 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 	}
 	toolMap := make(map[int]*partialToolCall)
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		data := line[6:]
-		if data == "[DONE]" {
-			break
-		}
-
+	fnErr, scanErr := forEachSSEData(r, 64*1024, 1024*1024, func(data string) (bool, error) {
 		var chunk struct {
 			Choices []struct {
 				Delta struct {
@@ -432,7 +361,7 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 			} `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			continue
+			return false, nil
 		}
 		if chunk.Usage != nil {
 			final.InputToks = chunk.Usage.PromptTokens
@@ -441,14 +370,14 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 		}
 
 		if len(chunk.Choices) == 0 {
-			continue
+			return false, nil
 		}
 		choice := chunk.Choices[0]
 
 		if choice.Delta.Content != "" {
 			textParts = append(textParts, choice.Delta.Content)
 			if err := handler(StreamEvent{Type: "text", Content: choice.Delta.Content}); err != nil {
-				return final, err
+				return false, err
 			}
 		}
 
@@ -475,6 +404,10 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 		case "stop":
 			final.StopReason = StopEndTurn
 		}
+		return false, nil
+	})
+	if fnErr != nil {
+		return final, fnErr
 	}
 
 	final.Content = strings.Join(textParts, "")
@@ -493,5 +426,5 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 	if err := handler(StreamEvent{Type: "done", Response: final}); err != nil {
 		return final, err
 	}
-	return final, scanner.Err()
+	return final, scanErr
 }

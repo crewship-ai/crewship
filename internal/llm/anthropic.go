@@ -1,15 +1,12 @@
 package llm
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -57,7 +54,7 @@ func (a *Anthropic) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	}
 	defer resp.Body.Close()
 
-	if err := checkAnthropicStatus(resp); err != nil {
+	if err := checkStatus(resp, "Anthropic"); err != nil {
 		return nil, err
 	}
 
@@ -97,7 +94,7 @@ func (a *Anthropic) Complete(ctx context.Context, req Request) (*Response, error
 	}
 	defer resp.Body.Close()
 
-	if err := checkAnthropicStatus(resp); err != nil {
+	if err := checkStatus(resp, "Anthropic"); err != nil {
 		return nil, err
 	}
 
@@ -120,7 +117,7 @@ func (a *Anthropic) Stream(ctx context.Context, req Request, handler func(Stream
 	}
 	defer resp.Body.Close()
 
-	if err := checkAnthropicStatus(resp); err != nil {
+	if err := checkStatus(resp, "Anthropic"); err != nil {
 		return nil, err
 	}
 
@@ -300,104 +297,24 @@ func toAnthropicToolsCached(tools []ToolDef) []map[string]any {
 	return out
 }
 
-// retryableStatusCodes are HTTP status codes that should trigger a retry.
-var retryableStatusCodes = map[int]bool{
-	429: true, // Rate limited
-	500: true, // Internal server error
-	503: true, // Service unavailable
-	529: true, // Overloaded
-}
-
-func checkAnthropicStatus(resp *http.Response) error {
-	if resp.StatusCode == http.StatusOK {
-		return nil
-	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-	switch resp.StatusCode {
-	case http.StatusUnauthorized:
-		return fmt.Errorf("invalid Anthropic API key")
-	case http.StatusTooManyRequests:
-		return fmt.Errorf("Anthropic rate limit exceeded")
-	default:
-		return fmt.Errorf("Anthropic API returned %d: %s", resp.StatusCode, body)
-	}
-}
-
 // doWithRetry executes an HTTP request with exponential backoff retry on transient errors.
-// Max 3 attempts. Respects Retry-After header.
+// Max 3 attempts. Respects Retry-After header. See the shared doWithRetry in httpretry.go.
 func (a *Anthropic) doWithRetry(ctx context.Context, body []byte) (*http.Response, error) {
-	const maxRetries = 3
-	baseDelay := time.Second
-	var retryAfter time.Duration
-
-	var lastErr error
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		httpReq, err := a.newHTTPRequest(ctx, body)
-		if err != nil {
-			return nil, err
-		}
-
-		resp, err := a.client.Do(httpReq)
-		if err != nil {
-			lastErr = fmt.Errorf("anthropic http: %w", err)
-			if ctx.Err() != nil {
-				return nil, lastErr
-			}
-			// Network error — retry
-		} else if !retryableStatusCodes[resp.StatusCode] {
-			return resp, nil // Success or non-retryable error
-		} else {
-			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-			resp.Body.Close()
-			lastErr = fmt.Errorf("Anthropic API returned %d: %s", resp.StatusCode, respBody)
-
-			// Check Retry-After header
-			if ra := resp.Header.Get("Retry-After"); ra != "" {
-				if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
-					retryAfter = time.Duration(secs) * time.Second
-				}
-			}
-		}
-
-		if attempt < maxRetries-1 {
-			delay := baseDelay * (1 << attempt) // 1s, 2s, 4s
-			// Use Retry-After if it exceeds the calculated exponential delay
-			if retryAfter > delay {
-				delay = retryAfter
-			}
-			retryAfter = 0 // reset for next attempt
-			jitter := time.Duration(rand.Int63n(int64(delay / 4)))
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(delay + jitter):
-			}
-		}
-	}
-	return nil, fmt.Errorf("anthropic: max retries exceeded: %w", lastErr)
+	return doWithRetry(ctx, a.client, func(ctx context.Context) (*http.Request, error) {
+		return a.newHTTPRequest(ctx, body)
+	}, "anthropic", "Anthropic")
 }
 
 // parseSSEStream reads Anthropic's SSE stream and emits StreamEvents.
 func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*Response, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 4*1024), 1024*1024) // 4KB initial (SSE lines are small), 1MB max for tool results
-
 	final := &Response{StopReason: StopEndTurn}
 	var textParts []string
 	var toolCalls []ToolCall
 	var currentToolID, currentToolName string
 	var currentToolInput strings.Builder
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		data := line[6:]
-		if data == "[DONE]" {
-			break
-		}
-
+	// 4KB initial (SSE lines are small), 1MB max for tool results.
+	fnErr, scanErr := forEachSSEData(r, 4*1024, 1024*1024, func(data string) (bool, error) {
 		var event struct {
 			Type         string `json:"type"`
 			Index        int    `json:"index"`
@@ -423,7 +340,7 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 			} `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			continue
+			return false, nil
 		}
 
 		switch event.Type {
@@ -448,13 +365,13 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 
 		case "content_block_delta":
 			if event.Delta == nil {
-				continue
+				return false, nil
 			}
 			switch event.Delta.Type {
 			case "text_delta":
 				textParts = append(textParts, event.Delta.Text)
 				if err := handler(StreamEvent{Type: "text", Content: event.Delta.Text}); err != nil {
-					return final, err
+					return false, err
 				}
 			case "input_json_delta":
 				currentToolInput.WriteString(event.Delta.PartialJSON)
@@ -469,7 +386,7 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 				}
 				toolCalls = append(toolCalls, tc)
 				if err := handler(StreamEvent{Type: "tool_call", ToolCall: &tc}); err != nil {
-					return final, err
+					return false, err
 				}
 				currentToolID = ""
 				currentToolName = ""
@@ -493,6 +410,10 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 		case "message_stop":
 			// stream complete
 		}
+		return false, nil
+	})
+	if fnErr != nil {
+		return final, fnErr
 	}
 
 	final.Content = strings.Join(textParts, "")
@@ -501,5 +422,5 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 	if err := handler(StreamEvent{Type: "done", Response: final}); err != nil {
 		return final, err
 	}
-	return final, scanner.Err()
+	return final, scanErr
 }

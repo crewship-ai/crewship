@@ -123,8 +123,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 				replyError(w, http.StatusPaymentRequired, err.Error())
 				return
 			}
-			h.logger.Error("check agent limit", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "check agent limit", err)
 			return
 		}
 	}
@@ -140,8 +139,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != sql.ErrNoRows {
-			h.logger.Error("check existing lead", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "check existing lead", err)
 			return
 		}
 	}
@@ -184,8 +182,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != sql.ErrNoRows {
-		h.logger.Error("check agent slug", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "check agent slug", err)
 		return
 	}
 
@@ -248,8 +245,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusConflict, msg)
 			return
 		}
-		h.logger.Error("insert agent", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "insert agent", err)
 		return
 	}
 

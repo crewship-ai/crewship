@@ -38,10 +38,7 @@ func (p *Provider) PruneCrewRuntimes(ctx context.Context, crews []provider.CrewR
 		return removed, nil
 	}
 
-	prefix := p.cfg.ContainerPrefix
-	if prefix == "" {
-		prefix = "crewship"
-	}
+	prefix := p.namePrefix()
 
 	// Build the exact-match target sets (agent container + its named volumes)
 	// and the sidecar match keys (label for containers, name-prefix for
@@ -84,7 +81,7 @@ func (p *Provider) PruneCrewRuntimes(ctx context.Context, crews []provider.CrewR
 			if len(c.Names) > 0 {
 				name = strings.TrimPrefix(c.Names[0], "/")
 			} else {
-				name = shortID(c.ID)
+				name = provider.ShortID(c.ID)
 			}
 		}
 		if !match {

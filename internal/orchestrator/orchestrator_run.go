@@ -270,431 +270,13 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		o.logger.Error("failed to persist run state", "error", err)
 	}
 
-	// volatile accumulates the per-turn-DYNAMIC context (conversation history,
-	// episodic recall, memory nudge, cost awareness). It is prepended to the
-	// USER message at the end of assembly rather than folded into the system
-	// prompt, so the system prompt stays byte-stable within a day and
-	// Anthropic prompt-cache reuse survives across turns (cache read = 0.1×
-	// input). Everything that changes message-to-message goes here; the stable
-	// preamble → persona → skills → memory-files prefix stays in SystemPrompt.
-	var volatile strings.Builder
-
-	// Inject conversation history for context continuity.
-	// Uses token-budget allocation: 60% conversation, 40% memory (of remaining budget).
-	baseTokens := tokenutil.EstimateTokens(req.SystemPrompt)
-	remaining := tokenutil.MaxSystemPromptTokens - baseTokens
-	if remaining < 2000 {
-		remaining = 2000 // minimum fallback
-	}
-	convTokenBudget := remaining * tokenutil.ConversationBudgetPct / 100
-	memTokenBudget := remaining * tokenutil.MemoryBudgetPct / 100
-
-	if o.convStore != nil && req.ChatID != "" && !req.SkipConvHistory {
-		history, compaction := o.buildConversationContextWithStats(ctx, req.ChatID, convTokenBudget)
-		o.emitCompactionEvent(ctx, req, compaction)
-		if history != "" {
-			volatile.WriteString(history)
-		}
+	if err := o.assembleSystemPrompt(ctx, &req); err != nil {
+		return err
 	}
 
-	// Validate slug BEFORE using it in path construction (memory context, output dirs)
-	if !validSlugRe.MatchString(req.AgentSlug) || req.AgentSlug != path.Base(req.AgentSlug) {
-		return fmt.Errorf("invalid agent slug: %q", req.AgentSlug)
-	}
-
-	// Assemble the final system prompt in a single strings.Builder pass.
-	// The previous `systemPrompt = systemPrompt + "\n\n" + section` chain was
-	// O(n²) — each step copied the full accumulated prompt, which is 5–15 kB
-	// in realistic workloads.
-	var promptBuf strings.Builder
-	promptBuf.Grow(len(req.SystemPrompt) + 8192) // headroom for up to 4 contexts
-	promptBuf.WriteString(req.SystemPrompt)
-
-	// Inject lead crew context into system prompt (before memory, after conversation history)
-	if req.AgentRole == "LEAD" && len(req.CrewMembers) > 0 {
-		if leadCtx := BuildLeadContext(req.CrewMembers); leadCtx != "" {
-			promptBuf.WriteString("\n\n")
-			promptBuf.WriteString(leadCtx)
-		}
-	}
-
-	// Inject peer communication context for non-LEAD agents in a crew
-	if req.AgentRole != "LEAD" && len(req.CrewMembers) > 0 {
-		if peerCtx := BuildPeerContext(req.CrewMembers, req.AgentSlug); peerCtx != "" {
-			promptBuf.WriteString("\n\n")
-			promptBuf.WriteString(peerCtx)
-		}
-	}
-
-	// Episodic recall: ask the memory layer for past high-value events
-	// similar to the current user prompt. Regular agents see only their
-	// own history; LEAD sees crew-shared entries too (the scope rule is
-	// inside the recaller). The injection is best-effort
-	// — a recall failure logs and continues so a flaky Ollama embed
-	// service never blocks a run. Budget is 2 KB of the 8 KB headroom
-	// reserved in promptBuf.Grow above.
-	if recaller := o.getEpisodicRecall(); recaller != nil && req.UserMessage != "" {
-		recallCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		rendered, err := recaller.Recall(recallCtx, EpisodicRecallInput{
-			WorkspaceID: req.WorkspaceID,
-			CrewID:      req.CrewID,
-			AgentID:     req.AgentID,
-			Role:        req.AgentRole,
-			Query:       req.UserMessage,
-			MaxChars:    2000,
-		})
-		cancel()
-		if err != nil {
-			// "Ollama unreachable" is the common dev-mode case (no embedder
-			// running). It's expected, not a bug, but with N parallel agent
-			// runs the per-recall DEBUG line floods the log on every chat
-			// turn. Log at INFO at most once per episodicUnreachableLogInterval
-			// so a single outage doesn't spam, but a *new* outage after
-			// recovery still surfaces.
-			if strings.Contains(err.Error(), "ollama unreachable") {
-				now := time.Now().UnixNano()
-				last := o.episodicUnreachableLastLogged.Load()
-				if last == 0 || time.Duration(now-last) >= episodicUnreachableLogInterval {
-					if o.episodicUnreachableLastLogged.CompareAndSwap(last, now) {
-						o.logger.Info("episodic recall backend unreachable; continuing without recall", "err", err)
-					}
-				}
-			} else {
-				o.logger.Debug("episodic recall failed; continuing without", "err", err, "agent", req.AgentSlug)
-			}
-		} else {
-			// Any successful recall (even an empty result for queries with
-			// no matches) means the backend is healthy again; reset the
-			// dedup so a *future* outage logs anew.
-			o.episodicUnreachableLastLogged.Store(0)
-			if rendered != "" {
-				// Query-dependent → changes every turn. Belongs in the
-				// volatile session context (user turn), not the cached prefix.
-				if volatile.Len() > 0 {
-					volatile.WriteString("\n\n")
-				}
-				volatile.WriteString(rendered)
-			}
-		}
-	}
-
-	// Inject agent memory context into system prompt (after conversation history)
-	if req.MemoryEnabled {
-		if memoryCtx := o.buildMemoryContext(ctx, req, tokenutil.CharsForTokens(memTokenBudget)); memoryCtx != "" {
-			promptBuf.WriteString("\n\n")
-			promptBuf.WriteString(memoryCtx)
-		}
-	}
-
-	// Inject workspace language preference so agents respond in the right language
-	if req.PreferredLanguage != "" {
-		promptBuf.WriteString("\n\n[LANGUAGE]\nAlways respond and write comments in ")
-		promptBuf.WriteString(req.PreferredLanguage)
-		promptBuf.WriteString(". All your output, summaries, and handoff descriptions must be in ")
-		promptBuf.WriteString(req.PreferredLanguage)
-		promptBuf.WriteString(".\n[END LANGUAGE]")
-	}
-
-	req.SystemPrompt = promptBuf.String()
-
-	// Agent-curated nudge + cost awareness — two small blocks that only fire
-	// when there's something to say (journal-entry backlog / recorded spend).
-	// Both change on essentially every run, so they join the volatile session
-	// context (user turn) rather than the cached system prefix.
-	if nudge := o.buildNudgeBlock(ctx, req); nudge != "" {
-		if volatile.Len() > 0 {
-			volatile.WriteString("\n")
-		}
-		volatile.WriteString(nudge)
-	}
-	if cost := o.buildCostAwarenessBlock(ctx, req); cost != "" {
-		if volatile.Len() > 0 {
-			volatile.WriteString("\n")
-		}
-		volatile.WriteString(cost)
-	}
-
-	// Prepend the volatile context to the USER message, framed so the model
-	// reads it as background rather than as the operator's instruction. Keeping
-	// it out of SystemPrompt is the whole point — see the volatile declaration.
-	req.UserMessage = prependSessionContext(volatile.String(), req.UserMessage)
-
-	o.logger.Info("system prompt assembled",
-		"agent", req.AgentSlug,
-		"est_tokens", tokenutil.EstimateTokens(req.SystemPrompt),
-		"session_context_bytes", volatile.Len(),
-	)
-
-	o.mu.RLock()
-	sidecarEnabled := o.sidecarEnabled && !req.SkipSidecar
-	keeperEnabled := o.keeperEnabled
-	ipcBaseURL := o.ipcBaseURL
-	ipcToken := o.ipcToken
-	localModelBaseURL := o.localModelBaseURL
-	o.mu.RUnlock()
-
-	// #955: the local-model endpoint is now resolved from the vault
-	// (ENDPOINT_URL credential, per-agent → workspace default) and arrives on
-	// req.LocalModelBaseURL via the chat resolver. The server-global
-	// CREWSHIP_LOCAL_MODEL_BASE_URL (#944) survives only as a deprecated
-	// fallback for operators who haven't migrated to a credential yet — used
-	// only when no credential resolved a URL.
-	effective, usedEnvFallback := effectiveLocalModelBaseURL(req.LocalModelBaseURL, localModelBaseURL)
-	req.LocalModelBaseURL = effective
-	if usedEnvFallback {
-		// The deprecated env fallback carries only a bare URL — no credential
-		// resolved, so any auth material would be stale. Drop it (#961).
-		req.LocalModelAPIKey = ""
-		req.LocalModelHeaders = nil
-		o.warnLocalModelEnvFallbackOnce()
-	}
-
-	if !sidecarEnabled && !req.SkipSidecar {
-		// Visible signal that the sidecar is OFF at runtime — pre-fix the
-		// orchestrator silently skipped startSidecar and the operator only
-		// noticed at first MCP tool call (ECONNREFUSED on 9119). With the
-		// config-side auto-enable in place this branch is reserved for
-		// CREWSHIP_SIDECAR_ENABLED=false; surface it so operators don't
-		// chase phantom "memory tools broken" reports.
-		o.logger.Warn("sidecar disabled — MCP memory tools and expose-port will be unreachable from agent",
-			"agent_id", req.AgentID, "container_id", req.ContainerID)
-	}
-
-	var env []string
-	if sidecarEnabled {
-		env = BuildEnvVarsSidecar(req, keeperEnabled)
-		// #812: hand THIS agent its own per-agent bearer token. The agent
-		// presents it (Authorization: Bearer $CREWSHIP_AGENT_TOKEN) on sidecar
-		// calls — escalate/query curls and the memory MCP config — so the
-		// shared per-crew sidecar can resolve the ACTING agent's identity from
-		// the token instead of a spoofable `from`/slug. Fail-closed empty when
-		// internal auth is unconfigured; the sidecar then falls back to the
-		// #796 membership-validated behaviour.
-		if agentTok := agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger); agentTok != "" {
-			env = append(env, "CREWSHIP_AGENT_TOKEN="+agentTok)
-		}
-		// Surface the credential-isolation gap: any plaintext credential that
-		// lands in the agent env (readable by the agent process). Actionable
-		// exposures (SECRET with Keeper off) warn so an operator can close them;
-		// structurally un-isolatable ones (OAuth / CLI tokens) stay at debug.
-		for _, exp := range AgentEnvCredentialExposures(req, keeperEnabled) {
-			if exp.Actionable {
-				o.logger.Warn("credential plaintext exposed in agent environment",
-					"agent_id", req.AgentID, "env_var", exp.EnvVarName, "type", exp.Type, "reason", exp.Reason)
-			} else {
-				o.logger.Debug("credential present in agent environment (not isolatable)",
-					"agent_id", req.AgentID, "env_var", exp.EnvVarName, "type", exp.Type, "reason", exp.Reason)
-			}
-		}
-		// Minimal env-builder signal at debug level. The previous Info
-		// log dumped every credential's EnvVarName + Type + value_len,
-		// which leaks auth metadata into production logs. Keep just a
-		// boolean for whether the Claude OAuth env was produced; the
-		// credential-injection root cause is being tracked separately.
-		hasOAuthEnv := false
-		for _, e := range env {
-			if strings.HasPrefix(e, "CLAUDE_CODE_OAUTH_TOKEN=") {
-				hasOAuthEnv = true
-				break
-			}
-		}
-		o.logger.Debug("env builder",
-			"agent_id", req.AgentID,
-			"has_oauth_env", hasOAuthEnv,
-			"env_count", len(env),
-		)
-		o.logger.Info("sidecar proxy starting", "agent_id", req.AgentID)
-		var memoryCfg *SidecarMemoryConfig
-		if req.MemoryEnabled {
-			memoryCfg = &SidecarMemoryConfig{
-				Enabled:   true,
-				BasePath:  path.Join("/crew", "agents", req.AgentSlug, ".memory"),
-				AgentSlug: req.AgentSlug,
-				AgentRole: strings.ToLower(req.AgentRole),
-			}
-			// Lead agents own the crew shared memory FTS5 index
-			if req.CrewID != "" {
-				memoryCfg.CrewMemoryPath = "/crew/shared/.memory"
-			}
-		}
-		// Build IPC config for agents in a crew so the sidecar can forward
-		// assignment requests (LEAD), peer queries, and escalations (all roles).
-		// The token handed to the sidecar is crew-bound (#1159; workspace-bound
-		// when the run has no crew), never the raw master internal token —
-		// see sidecarIPCToken.
-		var ipcCfg *SidecarIPCConfig
-		if ipcBaseURL != "" && (req.AgentRole == "LEAD" || len(req.CrewMembers) > 0) {
-			ipcCfg = &SidecarIPCConfig{
-				BaseURL:     ipcBaseURL,
-				Token:       sidecarIPCToken(ipcToken, req.WorkspaceID, req.CrewID, o.logger),
-				AgentID:     req.AgentID,
-				AgentSlug:   req.AgentSlug,
-				CrewID:      req.CrewID,
-				WorkspaceID: req.WorkspaceID,
-				ChatID:      req.ChatID,
-				ContainerID: req.ContainerID,
-				// #812: the boot agent's own per-agent token. req.CrewMembers
-				// excludes self, so the boot agent's identity would otherwise be
-				// missing from the sidecar's token→identity roster.
-				AgentToken: agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger),
-			}
-		}
-		// Convert crew members to sidecar format for target validation.
-		// #812: mint each member's per-agent token so the sidecar's roster can
-		// map an inbound bearer token to the ACTING crew member.
-		var sidecarMembers []SidecarCrewMember
-		for _, m := range req.CrewMembers {
-			sidecarMembers = append(sidecarMembers, SidecarCrewMember{
-				ID:        m.ID,
-				Slug:      m.Slug,
-				Name:      m.Name,
-				RoleTitle: m.RoleTitle,
-				ChatID:    m.ChatID,
-				AuthToken: agentAuthToken(ipcToken, req.WorkspaceID, m.ID, o.logger),
-			})
-		}
-		// Build network policy for sidecar.
-		// Normalize and validate: only "free" and "restricted" are accepted.
-		desiredMode := strings.TrimSpace(strings.ToLower(req.NetworkMode))
-		if desiredMode == "" {
-			desiredMode = "free"
-		}
-		var networkPolicy *SidecarNetworkPolicy
-		var desiredDomains []string
-		switch desiredMode {
-		case "free":
-			networkPolicy = &SidecarNetworkPolicy{Mode: "free"}
-		case "restricted":
-			// Auto-add API domains for stdio MCP servers so their HTTP
-			// calls can pass through the sidecar proxy.
-			domains := append([]string{}, req.AllowedDomains...)
-			domains = append(domains, mcpStdioDomains(req.MCPServers)...)
-			// #944: allow the operator-configured local-model endpoint —
-			// empty unless this run actually uses an ollama/… model.
-			domains = append(domains, localModelExtraDomains(req)...)
-			desiredDomains = domains
-			networkPolicy = &SidecarNetworkPolicy{
-				Mode:                  "restricted",
-				AllowedDomains:        domains,
-				AllowPrivateEndpoints: req.AllowPrivateEndpoints,
-			}
-		default:
-			o.logger.Error("unknown network mode, refusing to start sidecar", "mode", req.NetworkMode)
-			o.updateRunStatus(ctx, runState.ID, "error")
-			o.recordRunAudit(ctx, req, runState.ID, "error")
-			return fmt.Errorf("unknown network mode: %s", req.NetworkMode)
-		}
-		// Check if sidecar already running in this container (shared crew container).
-		// Multiple agents in the same crew share one container — only the first starts the sidecar.
-		// Also verify the running sidecar's network mode matches the desired mode;
-		// if it differs (e.g. after a policy change), we must restart the sidecar.
-		//
-		// #1220: the whole check→decide→pkill→start sequence below runs under a
-		// per-container lock. Without it, two execs dispatching at nearly the
-		// same moment both sample the same health state, both decide to
-		// (re)start, and both pkill + startSidecar — one killing the other's
-		// freshly started sidecar, or double-starting it. The explicit unlock
-		// after the start block releases on the happy path BEFORE the heavy
-		// agent exec; the deferred call covers the error returns (idempotent).
-		unlockSidecar := o.lockSidecarLifecycle(req.ContainerID)
-		defer unlockSidecar()
-		needStart := true
-		if health := checkSidecar(ctx, o.container, req.ContainerID); health != nil {
-			if health.Stale {
-				// #1008: the running sidecar is an OLD bind-mounted binary from
-				// before the last redeploy. It keeps serving stale memory/egress
-				// behaviour with no other signal — surface it on a durable,
-				// operator-watchable channel (#1160), not just stdout.
-				o.emitStaleSidecarSignal(ctx, req, health.SidecarHash)
-			}
-			if !sidecarNeedsRestart(health, desiredMode, desiredDomains) {
-				// #1160: restricted mode used to restart UNCONDITIONALLY here
-				// ("the domain allowlist may differ between agents, so we
-				// always restart to pick up the latest set") — with multiple
-				// agents sharing one crew container, that made every OTHER
-				// agent's exec a guaranteed kill+relaunch of an otherwise-
-				// healthy sidecar. sidecarNeedsRestart only says yes when the
-				// mode or the allowlist itself actually changed.
-				o.logger.Info("sidecar already running, reusing", "agent_id", req.AgentID, "container_id", req.ContainerID[:min(12, len(req.ContainerID))])
-				needStart = false
-				// The reused sidecar serves THIS agent's memory tier via the
-				// per-agent MCP path (CRE-137) — make sure the tier's dirs
-				// exist with the shared 1001:1002 perms even though
-				// startSidecar (which normally preps them) won't run. Also
-				// re-normalizes ownership of files written since the last
-				// prep, keeping the agent(1001)/sidecar(1002) dual-writer
-				// arrangement healthy.
-				if memoryCfg != nil && memoryCfg.Enabled && memoryCfg.BasePath != "" {
-					prepMemoryDirs(ctx, o.container, req.ContainerID,
-						memoryPrepPaths(memoryCfg, nil), o.logger)
-				}
-			} else {
-				o.logger.Warn("sidecar network policy changed, restarting",
-					"running_mode", health.NetworkMode, "desired_mode", desiredMode)
-				// Kill the existing sidecar and WAIT for it to actually exit
-				// before startSidecar launches a replacement (#1160): pkill
-				// only sends the signal and returns immediately, so without
-				// this wait a concurrent exec's checkSidecar could sample the
-				// container mid-restart — momentarily seeing the dying old
-				// process (or a not-yet-bound new one) and misreporting
-				// staleness or network-mode drift on a container that was
-				// never actually stale. Bounded to ~2s; falls through to
-				// startSidecar regardless (best-effort, matches the existing
-				// `|| true` fail-open style below).
-				//
-				// The pattern is anchored with `^` — this whole command runs
-				// as `sh -c "<script>"`, and that wrapping shell's OWN
-				// /proc/<pid>/cmdline contains the literal substring
-				// "crewship-sidecar" (it's part of the script text passed to
-				// -c). An UNANCHORED `pkill -f crewship-sidecar` matches that
-				// substring anywhere in a process's command line — including
-				// its own parent shell — so it self-SIGTERMs before ever
-				// reaching the wait loop (verified live: exit code 143, i.e.
-				// killed by signal, with zero loop iterations run). The real
-				// sidecar is launched as the bare command `crewship-sidecar
-				// --addr 127.0.0.1:9119` (exec_sidecar.go's startSidecar), so
-				// its cmdline STARTS WITH the pattern; the wrapping shell's
-				// never does (it starts with "sh"). `^` excludes exactly the
-				// self-match case while still catching the real target.
-				_ = o.execPreflight(ctx, provider.ExecConfig{
-					ContainerID: req.ContainerID,
-					Cmd: []string{"sh", "-c",
-						`pkill -f '^crewship-sidecar' 2>/dev/null; i=0; while [ $i -lt 20 ]; do pkill -0 -f '^crewship-sidecar' 2>/dev/null || exit 0; sleep 0.1; i=$((i+1)); done; exit 0`},
-					User: "0:0",
-					// Killing the stale sidecar to reset the network policy
-					// legitimately needs root; #1158 opt-in (see ExecConfig).
-					// Failing this closed would leave the stale egress policy in
-					// place — a worse security outcome than the root exec.
-					AllowPrivileged: true,
-				})
-			}
-		}
-		if needStart {
-			if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, memoryCfg, ipcCfg, sidecarMembers, networkPolicy, req.MCPServers, o.logger); err != nil {
-				o.logger.Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)
-				o.updateRunStatus(ctx, runState.ID, "error")
-				o.recordRunAudit(ctx, req, runState.ID, "error")
-				return fmt.Errorf("start sidecar: %w", err)
-			}
-		}
-		// Sidecar settled (reused or freshly started) — release the #1220
-		// lock now so it never spans the long-lived agent exec below.
-		unlockSidecar()
-		credCount := 0
-		for _, c := range req.Credentials {
-			if credTypeToProvider(c) != "" {
-				credCount++
-			}
-		}
-		o.logger.Info("sidecar ready", "agent_id", req.AgentID, "credentials", credCount)
-
-		// MCP servers configured via .mcp.json use ${ENV_VAR} references that
-		// Claude Code expands from the process environment. With sidecar enabled
-		// credentials normally skip env vars (they go via stdin instead), but
-		// MCP env references still need the actual values in the exec env.
-		env = injectMCPCredentialEnvVars(req, env)
-	} else {
-		env = BuildEnvVars(req, cred)
+	env, err := o.ensureSidecar(ctx, &req, cred, runState.ID)
+	if err != nil {
+		return err
 	}
 
 	// Log auth mode for debugging
@@ -708,16 +290,6 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	}
 
 	cmd := BuildCLICommand(req)
-
-	scratchDir := path.Join("/workspace", req.AgentSlug)
-	outputDir := path.Join("/output", req.AgentSlug)
-	workDir := outputDir // CWD = output dir so files are immediately visible to user
-
-	crewAgentDir := path.Join("/crew", "agents", req.AgentSlug)
-	crewSharedDir := "/crew/shared"
-
-	secretsAgentDir := path.Join("/secrets", req.AgentSlug)
-	secretsSharedDir := "/secrets/shared"
 
 	// Post-run secret cleanup (secret lifecycle hardening): every run rewrites
 	// its credential files below, so nothing needs them to outlive the run —
@@ -742,215 +314,14 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		}()
 	}
 
-	// Create scratch, output, per-agent crew, and secrets directories
-	mkdirCfg := provider.ExecConfig{
-		ContainerID: req.ContainerID,
-		Cmd:         []string{"mkdir", "-p", scratchDir, outputDir, crewAgentDir, crewSharedDir, secretsAgentDir, secretsSharedDir},
-		User:        "1001:1001",
-	}
-	if mkErr := o.execPreflight(ctx, mkdirCfg); mkErr != nil {
-		// With file-mounted credentials in play this is fatal: the write
-		// below would fail too (or silently no-op), and the agent would run
-		// with ZERO file credentials — the classic cause is a Docker daemon
-		// older than Docker Engine 26, which drops the /secrets tmpfs uid/gid
-		// options and leaves the mount root-owned so UID 1001 can't mkdir.
-		if fileCreds {
-			o.logger.Error("failed to create agent dirs; run carries file-mounted credentials", "error", mkErr, "agent_id", req.AgentID)
-			o.updateRunStatus(ctx, runState.ID, "error")
-			o.recordRunAudit(ctx, req, runState.ID, "error")
-			return fmt.Errorf("create agent dirs (incl. /secrets/%s) for file-mounted credentials: %w — "+
-				"if this is a permission error on /secrets, the Docker daemon likely predates Docker Engine 26 "+
-				"(required for tmpfs uid/gid mount options); upgrade the daemon", req.AgentSlug, mkErr)
-		}
-		o.logger.Warn("failed to create agent dirs", "error", mkErr)
+	env, workDir, err := o.preparePreflightDirs(ctx, req, env, fileCreds, runState.ID)
+	if err != nil {
+		return err
 	}
 
-	// Pre-create /crew/manifest.json writable by both agent (1001) and sidecar (1002).
-	manifestCfg := provider.ExecConfig{
-		ContainerID: req.ContainerID,
-		Cmd:         []string{"sh", "-c", `test -f /crew/manifest.json || echo '{"version":1,"packages":{"apt":[],"npm":[],"pip":[]},"credentials":[],"setup_commands":[]}' > /crew/manifest.json; chmod 0666 /crew/manifest.json`},
-		User:        "0:0",
-		// Pre-creating the dual-writer manifest (agent 1001 + sidecar 1002)
-		// needs root to chmod 0666; #1158 opt-in (see ExecConfig).
-		AllowPrivileged: true,
-	}
-	if mfErr := o.execPreflight(ctx, manifestCfg); mfErr != nil {
-		o.logger.Debug("manifest pre-create skipped", "error", mfErr)
-	}
-
-	// Create .memory/ directories for persistent agent memory (in crew HOME)
-	if req.MemoryEnabled {
-		memoryDir := path.Join(crewAgentDir, ".memory")
-		memoryDailyDir := path.Join(memoryDir, "daily")
-		memorySnapshotsDir := path.Join(memoryDir, ".snapshots")
-		mkMemCfg := provider.ExecConfig{
-			ContainerID: req.ContainerID,
-			Cmd:         []string{"mkdir", "-p", memoryDir, memoryDailyDir, memorySnapshotsDir},
-			User:        "1001:1001",
-		}
-		if memErr := o.execPreflight(ctx, mkMemCfg); memErr != nil {
-			o.logger.Warn("failed to create memory dirs", "error", memErr)
-		}
-
-		// Create crew shared memory dirs for lead agents (if in a crew)
-		if req.CrewID != "" {
-			crewMemDir := "/crew/shared/.memory"
-			crewMemDailyDir := path.Join(crewMemDir, "daily")
-			crewMemTopicsDir := path.Join(crewMemDir, "topics")
-			mkCrewMemCfg := provider.ExecConfig{
-				ContainerID: req.ContainerID,
-				Cmd:         []string{"mkdir", "-p", crewMemDir, crewMemDailyDir, crewMemTopicsDir},
-				User:        "1001:1001",
-			}
-			if crewMemErr := o.execPreflight(ctx, mkCrewMemCfg); crewMemErr != nil {
-				o.logger.Warn("failed to create crew memory dirs", "error", crewMemErr)
-			}
-		}
-
-		// One-time migration: copy memory from old location (/output/{slug}/.memory/)
-		// to new location (/crew/agents/{slug}/.memory/) if not already migrated
-		oldMemoryDir := path.Join(outputDir, ".memory")
-		migScript := fmt.Sprintf(
-			`if [ -d %[1]s ] && [ -z "$(ls -A %[2]s 2>/dev/null)" ]; then cp -a %[1]s/. %[2]s/ 2>/dev/null; fi; true`,
-			oldMemoryDir, memoryDir,
-		)
-		migCfg := provider.ExecConfig{
-			ContainerID: req.ContainerID,
-			Cmd:         []string{"sh", "-c", migScript},
-			User:        "1001:1001",
-		}
-		if migErr := o.execPreflight(ctx, migCfg); migErr != nil {
-			o.logger.Debug("memory migration skipped", "error", migErr)
-		}
-	}
-
-	// Write credential files into the per-agent secrets directory (written as
-	// UID 1001, mode 0400/0600 — see writeCredentialFiles). Held under the
-	// per-key secrets lock so a lagging cleanup rm from a previous run can
-	// never delete these files right after they land (TOCTOU window #2, see
-	// secrets_cleanup.go).
-	credWriteErr := func() error {
-		if fileCreds {
-			lk := o.agentSecretsLock(req.ContainerID, req.AgentSlug)
-			lk.Lock()
-			defer lk.Unlock()
-		}
-		return writeCredentialFiles(ctx, o.container, req.ContainerID, req.AgentSlug, req.Credentials, secretsAgentDir, secretsSharedDir, o.logger)
-	}()
-	if credWriteErr != nil {
-		// Same fail-loud posture as the mkdir preflight above: a run that
-		// carries file-mounted credentials must not start without them.
-		if fileCreds {
-			o.logger.Error("failed to write credential files; run carries file-mounted credentials", "error", credWriteErr, "agent_id", req.AgentID)
-			o.updateRunStatus(ctx, runState.ID, "error")
-			o.recordRunAudit(ctx, req, runState.ID, "error")
-			return fmt.Errorf("write credential files for %s: %w — "+
-				"if this is a permission error on /secrets, the Docker daemon likely predates Docker Engine 26 "+
-				"(required for tmpfs uid/gid mount options); upgrade the daemon", req.AgentSlug, credWriteErr)
-		}
-		o.logger.Warn("failed to write credential files", "error", credWriteErr, "agent_id", req.AgentID)
-	}
-	env = append(env, "CREWSHIP_SECRETS_DIR="+secretsAgentDir)
-
-	env = append(env, "CREWSHIP_OUTPUT_DIR="+outputDir)
-
-	// Write non-secret Claude config (skip onboarding). Credentials are
-	// also available as files in /secrets/{agent-slug}/ for CLI tools.
-	if err := setupClaudeConfig(ctx, o.container, req.ContainerID, req.AgentSlug, o.logger); err != nil {
-		o.logger.Warn("failed to inject claude config", "error", err, "agent_id", req.AgentID)
-	}
-
-	// Write MCP server configuration via the per-CLI adapter. Each adapter
-	// knows its own file path + format (Claude .mcp.json, Codex
-	// .codex/config.toml, Gemini .gemini/settings.json, OpenCode opencode.json
-	// under "mcp" key, Cursor .cursor/mcp.json, Droid .factory/mcp.json).
-	// Adapters that don't support MCP (currently none after the multi-CLI
-	// wave; unknownAdapter only) make this a no-op.
-	mcpAdapter := getAdapter(req.CLIAdapter)
-	if mcpAdapter.SupportsMCP() {
-		if err := mcpAdapter.WriteMCPConfig(ctx, o.container, req.ContainerID, req, workDir, o.logger); err != nil {
-			hasMCP := req.CrewMCPConfigJSON != "" || req.AgentMCPConfigJSON != "" || len(req.MCPServers) > 0
-			if hasMCP {
-				o.updateRunStatus(ctx, runState.ID, "error")
-				o.recordRunAudit(ctx, req, runState.ID, "error")
-				return fmt.Errorf("inject MCP config (%s): %w", req.CLIAdapter, err)
-			}
-			o.logger.Warn("failed to inject MCP config", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)
-		}
-	}
-
-	// Inject OAuth token files for MCP servers that need them.
-	// When Crewship holds access+refresh tokens from OAuth flow, write them
-	// to the location MCP servers expect (e.g. ~/.config/<server>/tokens.json).
-	if err := injectMCPOAuthTokens(ctx, o.container, req.ContainerID, req.AgentSlug, req.MCPServers, req.Credentials, o.logger); err != nil {
-		o.logger.Warn("failed to inject MCP OAuth tokens", "error", err, "agent_id", req.AgentID)
-	}
-
-	// Write CLI-specific system prompt files (e.g. AGENTS.md for OpenCode)
-	if err := setupSystemPromptFiles(ctx, o.container, req.ContainerID, req, workDir, o.logger); err != nil {
-		o.logger.Warn("failed to write system prompt files", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)
-	}
-
-	// Wrap agent CLI command with stdbuf to force line-buffered stdout.
-	// Apple's container runtime buffers exec output which causes choppy
-	// streaming in chat. stdbuf -oL flushes on every newline so JSON
-	// stream events arrive immediately.
-	//
-	// When tmux is available, wrap the command inside a named tmux session
-	// so users can attach via the web terminal to observe the running agent.
-	// The tmux session is named "agent-{slug}" and stdout still flows through
-	// the exec pipe for chat streaming.
-	// When the adapter delivers the prompt via stdin (claudeCodeAdapter does
-	// this for messages over ~96 KiB, to dodge Linux's 128 KiB MAX_ARG_STRLEN
-	// execve limit), bypass the tmux wrapper: a detached tmux session's stdin
-	// is NOT wired to the docker-exec stream, so a prompt sent on stdin would
-	// never reach the CLI. The trade-off — losing web-terminal attach for that
-	// one run — is acceptable for the rare oversized-prompt case; normal-size
-	// runs keep the tmux path unchanged.
-	var execCmd []string
-	var execStdin io.Reader
-	if getAdapter(req.CLIAdapter).PromptViaStdin(req) {
-		execCmd = append([]string{"stdbuf", "-oL"}, cmd...)
-		execStdin = strings.NewReader(req.UserMessage)
-		o.logger.Info("delivering oversized agent prompt via stdin (tmux bypassed)",
-			"agent_id", req.AgentID, "prompt_bytes", len(req.UserMessage))
-	} else {
-		// Shared E2BIG guard. Only the Claude adapter currently routes
-		// oversized prompts via stdin; the others fold system+user into a
-		// single positional argv element (e.g. gemini `-p <prompt>`), which
-		// execve rejects with E2BIG once any element exceeds Linux's 128 KiB
-		// MAX_ARG_STRLEN. Left unguarded that surfaced as the agent exiting 255
-		// at $0.00 with no actionable reason. Catch it BEFORE exec at the
-		// shared layer and fail with a legible error for EVERY arg-path
-		// adapter, rather than per-adapter. (Enabling stdin delivery for a
-		// given CLI is a follow-up gated on confirming that CLI reads its
-		// prompt from stdin in non-interactive mode.)
-		if oversizedArg, n := firstOversizedArg(cmd); oversizedArg {
-			return fmt.Errorf("agent prompt too large for %s: a single argument is %d bytes, over the %d-byte execve limit; "+
-				"this CLI delivers the prompt as a command-line argument and cannot accept input this large — "+
-				"reduce the input fed into the agent_run step, or use a Claude agent (which delivers large prompts via stdin)",
-				req.CLIAdapter, n, maxArgStrLen)
-		}
-		var tmuxErr error
-		execCmd, tmuxErr = o.setupTmuxExec(ctx, req.ContainerID, cmd, req.AgentSlug, env)
-		if tmuxErr != nil {
-			if _, seen := o.tmuxWarned.LoadOrStore(req.ContainerID, true); seen {
-				o.logger.Debug("tmux setup failed, falling back to direct exec", "error", tmuxErr)
-			} else {
-				o.logger.Warn("tmux setup failed, falling back to direct exec (further occurrences for this container log at debug)",
-					"error", tmuxErr, "container_id", req.ContainerID)
-			}
-			execCmd = append([]string{"stdbuf", "-oL"}, cmd...)
-		}
-	}
-
-	execCfg := provider.ExecConfig{
-		ContainerID: req.ContainerID,
-		Cmd:         execCmd,
-		Env:         env,
-		WorkingDir:  workDir,
-		User:        "1001:1001",
-		Stdin:       execStdin,
+	execCfg, err := o.buildExecCommand(ctx, req, cmd, env, workDir)
+	if err != nil {
+		return err
 	}
 
 	timeout := time.Duration(req.TimeoutSecs) * time.Second
@@ -960,10 +331,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cIDShort := req.ContainerID
-	if len(cIDShort) > 12 {
-		cIDShort = cIDShort[:12]
-	}
+	cIDShort := shortID(req.ContainerID)
 	o.logger.Info("exec agent", "agent_id", req.AgentID, "container_id", cIDShort, "cmd", cmd)
 
 	// Crow's Nest: emit the command start so the live terminal UI can
@@ -1011,8 +379,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	result, err := o.container.Exec(execCtx, execCfg)
 	if err != nil {
 		o.logger.Error("exec agent failed", "error", err, "agent_id", req.AgentID)
-		o.updateRunStatus(ctx, runState.ID, "error")
-		o.recordRunAudit(ctx, req, runState.ID, "error")
+		o.failRun(ctx, req, runState.ID, "error")
 		// Emit the terminal exec.command event for the failure path
 		// too so Crow's Nest doesn't show a hanging "running" block
 		// when Docker exec create/attach fails before the command runs.
@@ -1183,35 +550,12 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// crashes. Uses a fresh context because execCtx is now cancelled.
 	if guard.Tripped() {
 		cleanCtx := context.Background()
-		o.updateRunStatus(cleanCtx, runState.ID, "error")
-		o.recordRunAudit(cleanCtx, req, runState.ID, "error")
+		o.failRun(cleanCtx, req, runState.ID, "error")
 		o.logger.Warn("run aborted by loop guard", "agent_id", req.AgentID, "exec_id", result.ExecID)
-		_, _ = j.Emit(cleanCtx, JournalEntry{
-			WorkspaceID: req.WorkspaceID,
-			CrewID:      req.CrewID,
-			AgentID:     req.AgentID,
-			MissionID:   req.MissionID,
-			Type:        "exec.command",
-			Severity:    "warn",
-			ActorType:   "agent",
-			ActorID:     req.AgentID,
-			Summary:     fmt.Sprintf("%s: ABORTED — stuck loop (same tool call ×%d)", req.AgentSlug, loopGuardThreshold),
-			Payload: map[string]any{
-				"cmd":         cmd,
-				"phase":       "end",
-				"reason":      "loop_detected",
-				"duration_ms": time.Since(execStart).Milliseconds(),
-			},
-			Refs: map[string]any{"chat_id": req.ChatID, "exec_id": result.ExecID},
-		})
-		_ = o.getPresence().Track(cleanCtx, PresenceInput{
-			WorkspaceID: req.WorkspaceID,
-			CrewID:      req.CrewID,
-			AgentID:     req.AgentID,
-			MissionID:   req.MissionID,
-			Status:      "online",
-			Details:     map[string]any{"reason": "loop_detected"},
-		})
+		o.emitExecEnd(cleanCtx, req, result.ExecID, cmd, "warn",
+			fmt.Sprintf("%s: ABORTED — stuck loop (same tool call ×%d)", req.AgentSlug, loopGuardThreshold),
+			execStart, map[string]any{"reason": "loop_detected"})
+		o.markAgentOnline(cleanCtx, req, map[string]any{"reason": "loop_detected"})
 		return fmt.Errorf("run aborted: agent repeated the same tool call %d times (stuck loop)", loopGuardThreshold)
 	}
 
@@ -1220,40 +564,17 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// sends SIGPIPE to the exec process, which should terminate it.
 	if ctx.Err() != nil {
 		cleanCtx := context.Background()
-		o.updateRunStatus(cleanCtx, runState.ID, "cancelled")
-		o.recordRunAudit(cleanCtx, req, runState.ID, "cancelled")
+		o.failRun(cleanCtx, req, runState.ID, "cancelled")
 		o.logger.Info("run cancelled", "agent_id", req.AgentID, "exec_id", result.ExecID)
 		// Close the Crow's Nest exec.command block and flip the Watch
 		// Roster off busy on cancellation too — otherwise stopped
 		// runs leave the live terminal hanging and presence stuck on
 		// "busy" until the 5-min idle sweeper corrects it. Uses
 		// cleanCtx so journal writes complete even after ctx expired.
-		_, _ = j.Emit(cleanCtx, JournalEntry{
-			WorkspaceID: req.WorkspaceID,
-			CrewID:      req.CrewID,
-			AgentID:     req.AgentID,
-			MissionID:   req.MissionID,
-			Type:        "exec.command",
-			Severity:    "warn",
-			ActorType:   "agent",
-			ActorID:     req.AgentID,
-			Summary:     fmt.Sprintf("%s: CANCELLED (%dms)", req.AgentSlug, time.Since(execStart).Milliseconds()),
-			Payload: map[string]any{
-				"cmd":         cmd,
-				"phase":       "end",
-				"cancelled":   true,
-				"duration_ms": time.Since(execStart).Milliseconds(),
-			},
-			Refs: map[string]any{"chat_id": req.ChatID, "exec_id": result.ExecID},
-		})
-		_ = o.getPresence().Track(cleanCtx, PresenceInput{
-			WorkspaceID: req.WorkspaceID,
-			CrewID:      req.CrewID,
-			AgentID:     req.AgentID,
-			MissionID:   req.MissionID,
-			Status:      "online",
-			Details:     map[string]any{"reason": "cancelled"},
-		})
+		o.emitExecEnd(cleanCtx, req, result.ExecID, cmd, "warn",
+			fmt.Sprintf("%s: CANCELLED (%dms)", req.AgentSlug, time.Since(execStart).Milliseconds()),
+			execStart, map[string]any{"cancelled": true})
+		o.markAgentOnline(cleanCtx, req, map[string]any{"reason": "cancelled"})
 		return fmt.Errorf("run cancelled: %w", ctx.Err())
 	}
 
@@ -1269,35 +590,13 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	if exitCode != 0 {
 		endSeverity = "warn"
 	}
-	_, _ = j.Emit(ctx, JournalEntry{
-		WorkspaceID: req.WorkspaceID,
-		CrewID:      req.CrewID,
-		AgentID:     req.AgentID,
-		MissionID:   req.MissionID,
-		Type:        "exec.command",
-		Severity:    endSeverity,
-		ActorType:   "agent",
-		ActorID:     req.AgentID,
-		Summary:     fmt.Sprintf("%s: exit %d (%dms)", req.AgentSlug, exitCode, time.Since(execStart).Milliseconds()),
-		Payload: map[string]any{
-			"cmd":         cmd,
-			"phase":       "end",
-			"exit_code":   exitCode,
-			"duration_ms": time.Since(execStart).Milliseconds(),
-			"running":     running,
-		},
-		Refs: map[string]any{"chat_id": req.ChatID, "exec_id": result.ExecID},
-	})
+	o.emitExecEnd(ctx, req, result.ExecID, cmd, endSeverity,
+		fmt.Sprintf("%s: exit %d (%dms)", req.AgentSlug, exitCode, time.Since(execStart).Milliseconds()),
+		execStart, map[string]any{"exit_code": exitCode, "running": running})
 	// Flip agent back to online for the Watch Roster now that the run
 	// is done. If the agent stays in-session, the presence sweeper
 	// still tracks idleness separately.
-	_ = o.getPresence().Track(ctx, PresenceInput{
-		WorkspaceID: req.WorkspaceID,
-		CrewID:      req.CrewID,
-		AgentID:     req.AgentID,
-		MissionID:   req.MissionID,
-		Status:      "online",
-	})
+	o.markAgentOnline(ctx, req, nil)
 
 	if running {
 		// The CLI exec outlives this call (detached session) and may still
@@ -1330,8 +629,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			execErr = fmt.Errorf("agent exited with code %d — check the journal for details", exitCode)
 		}
 	}
-	o.updateRunStatus(ctx, runState.ID, status)
-	o.recordRunAudit(ctx, req, runState.ID, status)
+	o.failRun(ctx, req, runState.ID, status)
 
 	// Capture the container's actual installed-package state — apt + pip
 	// + npm + os-release. The journal is the source of truth for "what
@@ -1343,6 +641,739 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	o.recordContainerSnapshot(ctx, req, req.ContainerID)
 
 	return execErr
+}
+
+// assembleSystemPrompt builds the final system prompt and the volatile
+// per-turn session context for a run — conversation history, lead/peer crew
+// context, episodic recall, memory, language preference, and the nudge/cost
+// blocks. It mutates req.SystemPrompt (the stable, prompt-cacheable prefix)
+// and req.UserMessage (volatile context prepended). Pure extraction from
+// RunAgent; the only error is an invalid agent slug.
+func (o *Orchestrator) assembleSystemPrompt(ctx context.Context, req *AgentRunRequest) error {
+	// volatile accumulates the per-turn-DYNAMIC context (conversation history,
+	// episodic recall, memory nudge, cost awareness). It is prepended to the
+	// USER message at the end of assembly rather than folded into the system
+	// prompt, so the system prompt stays byte-stable within a day and
+	// Anthropic prompt-cache reuse survives across turns (cache read = 0.1×
+	// input). Everything that changes message-to-message goes here; the stable
+	// preamble → persona → skills → memory-files prefix stays in SystemPrompt.
+	var volatile strings.Builder
+
+	// Inject conversation history for context continuity.
+	// Uses token-budget allocation: 60% conversation, 40% memory (of remaining budget).
+	baseTokens := tokenutil.EstimateTokens(req.SystemPrompt)
+	remaining := tokenutil.MaxSystemPromptTokens - baseTokens
+	if remaining < 2000 {
+		remaining = 2000 // minimum fallback
+	}
+	convTokenBudget := remaining * tokenutil.ConversationBudgetPct / 100
+	memTokenBudget := remaining * tokenutil.MemoryBudgetPct / 100
+
+	if o.convStore != nil && req.ChatID != "" && !req.SkipConvHistory {
+		history, compaction := o.buildConversationContextWithStats(ctx, req.ChatID, convTokenBudget)
+		o.emitCompactionEvent(ctx, *req, compaction)
+		if history != "" {
+			volatile.WriteString(history)
+		}
+	}
+
+	// Validate slug BEFORE using it in path construction (memory context, output dirs)
+	if !validSlugRe.MatchString(req.AgentSlug) || req.AgentSlug != path.Base(req.AgentSlug) {
+		return fmt.Errorf("invalid agent slug: %q", req.AgentSlug)
+	}
+
+	// Assemble the final system prompt in a single strings.Builder pass.
+	// The previous `systemPrompt = systemPrompt + "\n\n" + section` chain was
+	// O(n²) — each step copied the full accumulated prompt, which is 5–15 kB
+	// in realistic workloads.
+	var promptBuf strings.Builder
+	promptBuf.Grow(len(req.SystemPrompt) + 8192) // headroom for up to 4 contexts
+	promptBuf.WriteString(req.SystemPrompt)
+
+	// Inject lead crew context into system prompt (before memory, after conversation history)
+	if req.AgentRole == "LEAD" && len(req.CrewMembers) > 0 {
+		if leadCtx := BuildLeadContext(req.CrewMembers); leadCtx != "" {
+			promptBuf.WriteString("\n\n")
+			promptBuf.WriteString(leadCtx)
+		}
+	}
+
+	// Inject peer communication context for non-LEAD agents in a crew
+	if req.AgentRole != "LEAD" && len(req.CrewMembers) > 0 {
+		if peerCtx := BuildPeerContext(req.CrewMembers, req.AgentSlug); peerCtx != "" {
+			promptBuf.WriteString("\n\n")
+			promptBuf.WriteString(peerCtx)
+		}
+	}
+
+	// Episodic recall: ask the memory layer for past high-value events
+	// similar to the current user prompt. Regular agents see only their
+	// own history; LEAD sees crew-shared entries too (the scope rule is
+	// inside the recaller). The injection is best-effort
+	// — a recall failure logs and continues so a flaky Ollama embed
+	// service never blocks a run. Budget is 2 KB of the 8 KB headroom
+	// reserved in promptBuf.Grow above.
+	if recaller := o.getEpisodicRecall(); recaller != nil && req.UserMessage != "" {
+		recallCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		rendered, err := recaller.Recall(recallCtx, EpisodicRecallInput{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.AgentID,
+			Role:        req.AgentRole,
+			Query:       req.UserMessage,
+			MaxChars:    2000,
+		})
+		cancel()
+		if err != nil {
+			// "Ollama unreachable" is the common dev-mode case (no embedder
+			// running). It's expected, not a bug, but with N parallel agent
+			// runs the per-recall DEBUG line floods the log on every chat
+			// turn. Log at INFO at most once per episodicUnreachableLogInterval
+			// so a single outage doesn't spam, but a *new* outage after
+			// recovery still surfaces.
+			if strings.Contains(err.Error(), "ollama unreachable") {
+				now := time.Now().UnixNano()
+				last := o.episodicUnreachableLastLogged.Load()
+				if last == 0 || time.Duration(now-last) >= episodicUnreachableLogInterval {
+					if o.episodicUnreachableLastLogged.CompareAndSwap(last, now) {
+						o.logger.Info("episodic recall backend unreachable; continuing without recall", "err", err)
+					}
+				}
+			} else {
+				o.logger.Debug("episodic recall failed; continuing without", "err", err, "agent", req.AgentSlug)
+			}
+		} else {
+			// Any successful recall (even an empty result for queries with
+			// no matches) means the backend is healthy again; reset the
+			// dedup so a *future* outage logs anew.
+			o.episodicUnreachableLastLogged.Store(0)
+			if rendered != "" {
+				// Query-dependent → changes every turn. Belongs in the
+				// volatile session context (user turn), not the cached prefix.
+				if volatile.Len() > 0 {
+					volatile.WriteString("\n\n")
+				}
+				volatile.WriteString(rendered)
+			}
+		}
+	}
+
+	// Inject agent memory context into system prompt (after conversation history)
+	if req.MemoryEnabled {
+		if memoryCtx := o.buildMemoryContext(ctx, *req, tokenutil.CharsForTokens(memTokenBudget)); memoryCtx != "" {
+			promptBuf.WriteString("\n\n")
+			promptBuf.WriteString(memoryCtx)
+		}
+	}
+
+	// Inject workspace language preference so agents respond in the right language
+	if req.PreferredLanguage != "" {
+		promptBuf.WriteString("\n\n[LANGUAGE]\nAlways respond and write comments in ")
+		promptBuf.WriteString(req.PreferredLanguage)
+		promptBuf.WriteString(". All your output, summaries, and handoff descriptions must be in ")
+		promptBuf.WriteString(req.PreferredLanguage)
+		promptBuf.WriteString(".\n[END LANGUAGE]")
+	}
+
+	req.SystemPrompt = promptBuf.String()
+
+	// Agent-curated nudge + cost awareness — two small blocks that only fire
+	// when there's something to say (journal-entry backlog / recorded spend).
+	// Both change on essentially every run, so they join the volatile session
+	// context (user turn) rather than the cached system prefix.
+	if nudge := o.buildNudgeBlock(ctx, *req); nudge != "" {
+		if volatile.Len() > 0 {
+			volatile.WriteString("\n")
+		}
+		volatile.WriteString(nudge)
+	}
+	if cost := o.buildCostAwarenessBlock(ctx, *req); cost != "" {
+		if volatile.Len() > 0 {
+			volatile.WriteString("\n")
+		}
+		volatile.WriteString(cost)
+	}
+
+	// Prepend the volatile context to the USER message, framed so the model
+	// reads it as background rather than as the operator's instruction. Keeping
+	// it out of SystemPrompt is the whole point — see the volatile declaration.
+	req.UserMessage = prependSessionContext(volatile.String(), req.UserMessage)
+
+	o.logger.Info("system prompt assembled",
+		"agent", req.AgentSlug,
+		"est_tokens", tokenutil.EstimateTokens(req.SystemPrompt),
+		"session_context_bytes", volatile.Len(),
+	)
+
+	return nil
+}
+
+// ensureSidecar resolves the local-model endpoint, brings the per-crew
+// sidecar up (start, healthy reuse, or policy-change restart under the #1220
+// lifecycle lock) and returns the agent exec environment — the sidecar env
+// with per-agent tokens when the sidecar is on, the plain credential env
+// otherwise. cred is the credential selected for the non-sidecar BuildEnvVars
+// fallback; runID is the run-state row failRun marks on fatal errors. It
+// mutates req's local-model fields. Pure extraction from RunAgent.
+func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, cred *Credential, runID string) ([]string, error) {
+	o.mu.RLock()
+	sidecarEnabled := o.sidecarEnabled && !req.SkipSidecar
+	keeperEnabled := o.keeperEnabled
+	ipcBaseURL := o.ipcBaseURL
+	ipcToken := o.ipcToken
+	localModelBaseURL := o.localModelBaseURL
+	o.mu.RUnlock()
+
+	// #955: the local-model endpoint is now resolved from the vault
+	// (ENDPOINT_URL credential, per-agent → workspace default) and arrives on
+	// req.LocalModelBaseURL via the chat resolver. The server-global
+	// CREWSHIP_LOCAL_MODEL_BASE_URL (#944) survives only as a deprecated
+	// fallback for operators who haven't migrated to a credential yet — used
+	// only when no credential resolved a URL.
+	effective, usedEnvFallback := effectiveLocalModelBaseURL(req.LocalModelBaseURL, localModelBaseURL)
+	req.LocalModelBaseURL = effective
+	if usedEnvFallback {
+		// The deprecated env fallback carries only a bare URL — no credential
+		// resolved, so any auth material would be stale. Drop it (#961).
+		req.LocalModelAPIKey = ""
+		req.LocalModelHeaders = nil
+		o.warnLocalModelEnvFallbackOnce()
+	}
+
+	if !sidecarEnabled && !req.SkipSidecar {
+		// Visible signal that the sidecar is OFF at runtime — pre-fix the
+		// orchestrator silently skipped startSidecar and the operator only
+		// noticed at first MCP tool call (ECONNREFUSED on 9119). With the
+		// config-side auto-enable in place this branch is reserved for
+		// CREWSHIP_SIDECAR_ENABLED=false; surface it so operators don't
+		// chase phantom "memory tools broken" reports.
+		o.logger.Warn("sidecar disabled — MCP memory tools and expose-port will be unreachable from agent",
+			"agent_id", req.AgentID, "container_id", req.ContainerID)
+	}
+
+	var env []string
+	if sidecarEnabled {
+		env = BuildEnvVarsSidecar(*req, keeperEnabled)
+		// #812: hand THIS agent its own per-agent bearer token. The agent
+		// presents it (Authorization: Bearer $CREWSHIP_AGENT_TOKEN) on sidecar
+		// calls — escalate/query curls and the memory MCP config — so the
+		// shared per-crew sidecar can resolve the ACTING agent's identity from
+		// the token instead of a spoofable `from`/slug. Fail-closed empty when
+		// internal auth is unconfigured; the sidecar then falls back to the
+		// #796 membership-validated behaviour.
+		if agentTok := agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger); agentTok != "" {
+			env = append(env, "CREWSHIP_AGENT_TOKEN="+agentTok)
+		}
+		// Surface the credential-isolation gap: any plaintext credential that
+		// lands in the agent env (readable by the agent process). Actionable
+		// exposures (SECRET with Keeper off) warn so an operator can close them;
+		// structurally un-isolatable ones (OAuth / CLI tokens) stay at debug.
+		for _, exp := range AgentEnvCredentialExposures(*req, keeperEnabled) {
+			if exp.Actionable {
+				o.logger.Warn("credential plaintext exposed in agent environment",
+					"agent_id", req.AgentID, "env_var", exp.EnvVarName, "type", exp.Type, "reason", exp.Reason)
+			} else {
+				o.logger.Debug("credential present in agent environment (not isolatable)",
+					"agent_id", req.AgentID, "env_var", exp.EnvVarName, "type", exp.Type, "reason", exp.Reason)
+			}
+		}
+		// Minimal env-builder signal at debug level. The previous Info
+		// log dumped every credential's EnvVarName + Type + value_len,
+		// which leaks auth metadata into production logs. Keep just a
+		// boolean for whether the Claude OAuth env was produced; the
+		// credential-injection root cause is being tracked separately.
+		hasOAuthEnv := false
+		for _, e := range env {
+			if strings.HasPrefix(e, "CLAUDE_CODE_OAUTH_TOKEN=") {
+				hasOAuthEnv = true
+				break
+			}
+		}
+		o.logger.Debug("env builder",
+			"agent_id", req.AgentID,
+			"has_oauth_env", hasOAuthEnv,
+			"env_count", len(env),
+		)
+		o.logger.Info("sidecar proxy starting", "agent_id", req.AgentID)
+		var memoryCfg *SidecarMemoryConfig
+		if req.MemoryEnabled {
+			memoryCfg = &SidecarMemoryConfig{
+				Enabled:   true,
+				BasePath:  path.Join("/crew", "agents", req.AgentSlug, ".memory"),
+				AgentSlug: req.AgentSlug,
+				AgentRole: strings.ToLower(req.AgentRole),
+			}
+			// Lead agents own the crew shared memory FTS5 index
+			if req.CrewID != "" {
+				memoryCfg.CrewMemoryPath = "/crew/shared/.memory"
+			}
+		}
+		// Build IPC config for agents in a crew so the sidecar can forward
+		// assignment requests (LEAD), peer queries, and escalations (all roles).
+		// The token handed to the sidecar is crew-bound (#1159; workspace-bound
+		// when the run has no crew), never the raw master internal token —
+		// see sidecarIPCToken.
+		var ipcCfg *SidecarIPCConfig
+		if ipcBaseURL != "" && (req.AgentRole == "LEAD" || len(req.CrewMembers) > 0) {
+			ipcCfg = &SidecarIPCConfig{
+				BaseURL:     ipcBaseURL,
+				Token:       sidecarIPCToken(ipcToken, req.WorkspaceID, req.CrewID, o.logger),
+				AgentID:     req.AgentID,
+				AgentSlug:   req.AgentSlug,
+				CrewID:      req.CrewID,
+				WorkspaceID: req.WorkspaceID,
+				ChatID:      req.ChatID,
+				ContainerID: req.ContainerID,
+				// #812: the boot agent's own per-agent token. req.CrewMembers
+				// excludes self, so the boot agent's identity would otherwise be
+				// missing from the sidecar's token→identity roster.
+				AgentToken: agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger),
+			}
+		}
+		// Convert crew members to sidecar format for target validation.
+		// #812: mint each member's per-agent token so the sidecar's roster can
+		// map an inbound bearer token to the ACTING crew member.
+		var sidecarMembers []SidecarCrewMember
+		for _, m := range req.CrewMembers {
+			sidecarMembers = append(sidecarMembers, SidecarCrewMember{
+				ID:        m.ID,
+				Slug:      m.Slug,
+				Name:      m.Name,
+				RoleTitle: m.RoleTitle,
+				ChatID:    m.ChatID,
+				AuthToken: agentAuthToken(ipcToken, req.WorkspaceID, m.ID, o.logger),
+			})
+		}
+		// Build network policy for sidecar.
+		// Normalize and validate: only "free" and "restricted" are accepted.
+		desiredMode := strings.TrimSpace(strings.ToLower(req.NetworkMode))
+		if desiredMode == "" {
+			desiredMode = "free"
+		}
+		var networkPolicy *SidecarNetworkPolicy
+		var desiredDomains []string
+		switch desiredMode {
+		case "free":
+			networkPolicy = &SidecarNetworkPolicy{Mode: "free"}
+		case "restricted":
+			// Auto-add API domains for stdio MCP servers so their HTTP
+			// calls can pass through the sidecar proxy.
+			domains := append([]string{}, req.AllowedDomains...)
+			domains = append(domains, mcpStdioDomains(req.MCPServers)...)
+			// #944: allow the operator-configured local-model endpoint —
+			// empty unless this run actually uses an ollama/… model.
+			domains = append(domains, localModelExtraDomains(*req)...)
+			desiredDomains = domains
+			networkPolicy = &SidecarNetworkPolicy{
+				Mode:                  "restricted",
+				AllowedDomains:        domains,
+				AllowPrivateEndpoints: req.AllowPrivateEndpoints,
+			}
+		default:
+			o.logger.Error("unknown network mode, refusing to start sidecar", "mode", req.NetworkMode)
+			o.failRun(ctx, *req, runID, "error")
+			return nil, fmt.Errorf("unknown network mode: %s", req.NetworkMode)
+		}
+		// Check if sidecar already running in this container (shared crew container).
+		// Multiple agents in the same crew share one container — only the first starts the sidecar.
+		// Also verify the running sidecar's network mode matches the desired mode;
+		// if it differs (e.g. after a policy change), we must restart the sidecar.
+		//
+		// #1220: the whole check→decide→pkill→start sequence below runs under a
+		// per-container lock. Without it, two execs dispatching at nearly the
+		// same moment both sample the same health state, both decide to
+		// (re)start, and both pkill + startSidecar — one killing the other's
+		// freshly started sidecar, or double-starting it. The explicit unlock
+		// after the start block releases on the happy path BEFORE the heavy
+		// agent exec; the deferred call covers the error returns (idempotent).
+		unlockSidecar := o.lockSidecarLifecycle(req.ContainerID)
+		defer unlockSidecar()
+		needStart := true
+		if health := checkSidecar(ctx, o.container, req.ContainerID); health != nil {
+			if health.Stale {
+				// #1008: the running sidecar is an OLD bind-mounted binary from
+				// before the last redeploy. It keeps serving stale memory/egress
+				// behaviour with no other signal — surface it on a durable,
+				// operator-watchable channel (#1160), not just stdout.
+				o.emitStaleSidecarSignal(ctx, *req, health.SidecarHash)
+			}
+			if !sidecarNeedsRestart(health, desiredMode, desiredDomains) {
+				// #1160: restricted mode used to restart UNCONDITIONALLY here
+				// ("the domain allowlist may differ between agents, so we
+				// always restart to pick up the latest set") — with multiple
+				// agents sharing one crew container, that made every OTHER
+				// agent's exec a guaranteed kill+relaunch of an otherwise-
+				// healthy sidecar. sidecarNeedsRestart only says yes when the
+				// mode or the allowlist itself actually changed.
+				o.logger.Info("sidecar already running, reusing", "agent_id", req.AgentID, "container_id", shortID(req.ContainerID))
+				needStart = false
+				// The reused sidecar serves THIS agent's memory tier via the
+				// per-agent MCP path (CRE-137) — make sure the tier's dirs
+				// exist with the shared 1001:1002 perms even though
+				// startSidecar (which normally preps them) won't run. Also
+				// re-normalizes ownership of files written since the last
+				// prep, keeping the agent(1001)/sidecar(1002) dual-writer
+				// arrangement healthy.
+				if memoryCfg != nil && memoryCfg.Enabled && memoryCfg.BasePath != "" {
+					prepMemoryDirs(ctx, o.container, req.ContainerID,
+						memoryPrepPaths(memoryCfg, nil), o.logger)
+				}
+			} else {
+				o.logger.Warn("sidecar network policy changed, restarting",
+					"running_mode", health.NetworkMode, "desired_mode", desiredMode)
+				// Kill the existing sidecar and WAIT for it to actually exit
+				// before startSidecar launches a replacement (#1160): pkill
+				// only sends the signal and returns immediately, so without
+				// this wait a concurrent exec's checkSidecar could sample the
+				// container mid-restart — momentarily seeing the dying old
+				// process (or a not-yet-bound new one) and misreporting
+				// staleness or network-mode drift on a container that was
+				// never actually stale. Bounded to ~2s; falls through to
+				// startSidecar regardless (best-effort, matches the existing
+				// `|| true` fail-open style below).
+				//
+				// The pattern is anchored with `^` — this whole command runs
+				// as `sh -c "<script>"`, and that wrapping shell's OWN
+				// /proc/<pid>/cmdline contains the literal substring
+				// "crewship-sidecar" (it's part of the script text passed to
+				// -c). An UNANCHORED `pkill -f crewship-sidecar` matches that
+				// substring anywhere in a process's command line — including
+				// its own parent shell — so it self-SIGTERMs before ever
+				// reaching the wait loop (verified live: exit code 143, i.e.
+				// killed by signal, with zero loop iterations run). The real
+				// sidecar is launched as the bare command `crewship-sidecar
+				// --addr 127.0.0.1:9119` (exec_sidecar.go's startSidecar), so
+				// its cmdline STARTS WITH the pattern; the wrapping shell's
+				// never does (it starts with "sh"). `^` excludes exactly the
+				// self-match case while still catching the real target.
+				_ = o.execPreflight(ctx, provider.ExecConfig{
+					ContainerID: req.ContainerID,
+					Cmd: []string{"sh", "-c",
+						`pkill -f '^crewship-sidecar' 2>/dev/null; i=0; while [ $i -lt 20 ]; do pkill -0 -f '^crewship-sidecar' 2>/dev/null || exit 0; sleep 0.1; i=$((i+1)); done; exit 0`},
+					User: "0:0",
+					// Killing the stale sidecar to reset the network policy
+					// legitimately needs root; #1158 opt-in (see ExecConfig).
+					// Failing this closed would leave the stale egress policy in
+					// place — a worse security outcome than the root exec.
+					AllowPrivileged: true,
+				})
+			}
+		}
+		if needStart {
+			if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, memoryCfg, ipcCfg, sidecarMembers, networkPolicy, req.MCPServers, o.logger); err != nil {
+				o.logger.Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)
+				o.failRun(ctx, *req, runID, "error")
+				return nil, fmt.Errorf("start sidecar: %w", err)
+			}
+		}
+		// Sidecar settled (reused or freshly started) — release the #1220
+		// lock now so it never spans the long-lived agent exec below.
+		unlockSidecar()
+		credCount := 0
+		for _, c := range req.Credentials {
+			if credTypeToProvider(c) != "" {
+				credCount++
+			}
+		}
+		o.logger.Info("sidecar ready", "agent_id", req.AgentID, "credentials", credCount)
+
+		// MCP servers configured via .mcp.json use ${ENV_VAR} references that
+		// Claude Code expands from the process environment. With sidecar enabled
+		// credentials normally skip env vars (they go via stdin instead), but
+		// MCP env references still need the actual values in the exec env.
+		env = injectMCPCredentialEnvVars(*req, env)
+	} else {
+		env = BuildEnvVars(*req, cred)
+	}
+
+	return env, nil
+}
+
+// preparePreflightDirs runs the pre-exec container setup: scratch/output/
+// crew/secrets directory creation, manifest pre-create, memory dirs and the
+// one-time memory migration, credential-file writes, Claude config, MCP
+// config, MCP OAuth tokens, and CLI system-prompt files. fileCreds is the
+// caller's hasFileMountedCreds result (the caller holds the matching secrets
+// retain); runID is the run-state row failRun marks on fatal errors. Returns
+// the augmented env and the exec working directory. Pure extraction from
+// RunAgent.
+func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunRequest, env []string, fileCreds bool, runID string) ([]string, string, error) {
+	scratchDir := path.Join("/workspace", req.AgentSlug)
+	outputDir := path.Join("/output", req.AgentSlug)
+	workDir := outputDir // CWD = output dir so files are immediately visible to user
+
+	crewAgentDir := path.Join("/crew", "agents", req.AgentSlug)
+	crewSharedDir := "/crew/shared"
+
+	secretsAgentDir := path.Join("/secrets", req.AgentSlug)
+	secretsSharedDir := "/secrets/shared"
+
+	// Create scratch, output, per-agent crew, and secrets directories
+	mkdirCfg := provider.ExecConfig{
+		ContainerID: req.ContainerID,
+		Cmd:         []string{"mkdir", "-p", scratchDir, outputDir, crewAgentDir, crewSharedDir, secretsAgentDir, secretsSharedDir},
+		User:        "1001:1001",
+	}
+	if mkErr := o.execPreflight(ctx, mkdirCfg); mkErr != nil {
+		// With file-mounted credentials in play this is fatal: the write
+		// below would fail too (or silently no-op), and the agent would run
+		// with ZERO file credentials — the classic cause is a Docker daemon
+		// older than Docker Engine 26, which drops the /secrets tmpfs uid/gid
+		// options and leaves the mount root-owned so UID 1001 can't mkdir.
+		if fileCreds {
+			o.logger.Error("failed to create agent dirs; run carries file-mounted credentials", "error", mkErr, "agent_id", req.AgentID)
+			o.failRun(ctx, req, runID, "error")
+			return nil, "", fmt.Errorf("create agent dirs (incl. /secrets/%s) for file-mounted credentials: %w — "+
+				"if this is a permission error on /secrets, the Docker daemon likely predates Docker Engine 26 "+
+				"(required for tmpfs uid/gid mount options); upgrade the daemon", req.AgentSlug, mkErr)
+		}
+		o.logger.Warn("failed to create agent dirs", "error", mkErr)
+	}
+
+	// Pre-create /crew/manifest.json writable by both agent (1001) and sidecar (1002).
+	manifestCfg := provider.ExecConfig{
+		ContainerID: req.ContainerID,
+		Cmd:         []string{"sh", "-c", `test -f /crew/manifest.json || echo '{"version":1,"packages":{"apt":[],"npm":[],"pip":[]},"credentials":[],"setup_commands":[]}' > /crew/manifest.json; chmod 0666 /crew/manifest.json`},
+		User:        "0:0",
+		// Pre-creating the dual-writer manifest (agent 1001 + sidecar 1002)
+		// needs root to chmod 0666; #1158 opt-in (see ExecConfig).
+		AllowPrivileged: true,
+	}
+	if mfErr := o.execPreflight(ctx, manifestCfg); mfErr != nil {
+		o.logger.Debug("manifest pre-create skipped", "error", mfErr)
+	}
+
+	// Create .memory/ directories for persistent agent memory (in crew HOME)
+	if req.MemoryEnabled {
+		memoryDir := path.Join(crewAgentDir, ".memory")
+		memoryDailyDir := path.Join(memoryDir, "daily")
+		memorySnapshotsDir := path.Join(memoryDir, ".snapshots")
+		mkMemCfg := provider.ExecConfig{
+			ContainerID: req.ContainerID,
+			Cmd:         []string{"mkdir", "-p", memoryDir, memoryDailyDir, memorySnapshotsDir},
+			User:        "1001:1001",
+		}
+		if memErr := o.execPreflight(ctx, mkMemCfg); memErr != nil {
+			o.logger.Warn("failed to create memory dirs", "error", memErr)
+		}
+
+		// Create crew shared memory dirs for lead agents (if in a crew)
+		if req.CrewID != "" {
+			crewMemDir := "/crew/shared/.memory"
+			crewMemDailyDir := path.Join(crewMemDir, "daily")
+			crewMemTopicsDir := path.Join(crewMemDir, "topics")
+			mkCrewMemCfg := provider.ExecConfig{
+				ContainerID: req.ContainerID,
+				Cmd:         []string{"mkdir", "-p", crewMemDir, crewMemDailyDir, crewMemTopicsDir},
+				User:        "1001:1001",
+			}
+			if crewMemErr := o.execPreflight(ctx, mkCrewMemCfg); crewMemErr != nil {
+				o.logger.Warn("failed to create crew memory dirs", "error", crewMemErr)
+			}
+		}
+
+		// One-time migration: copy memory from old location (/output/{slug}/.memory/)
+		// to new location (/crew/agents/{slug}/.memory/) if not already migrated
+		oldMemoryDir := path.Join(outputDir, ".memory")
+		migScript := fmt.Sprintf(
+			`if [ -d %[1]s ] && [ -z "$(ls -A %[2]s 2>/dev/null)" ]; then cp -a %[1]s/. %[2]s/ 2>/dev/null; fi; true`,
+			oldMemoryDir, memoryDir,
+		)
+		migCfg := provider.ExecConfig{
+			ContainerID: req.ContainerID,
+			Cmd:         []string{"sh", "-c", migScript},
+			User:        "1001:1001",
+		}
+		if migErr := o.execPreflight(ctx, migCfg); migErr != nil {
+			o.logger.Debug("memory migration skipped", "error", migErr)
+		}
+	}
+
+	// Write credential files into the per-agent secrets directory (written as
+	// UID 1001, mode 0400/0600 — see writeCredentialFiles). Held under the
+	// per-key secrets lock so a lagging cleanup rm from a previous run can
+	// never delete these files right after they land (TOCTOU window #2, see
+	// secrets_cleanup.go).
+	credWriteErr := func() error {
+		if fileCreds {
+			lk := o.agentSecretsLock(req.ContainerID, req.AgentSlug)
+			lk.Lock()
+			defer lk.Unlock()
+		}
+		return writeCredentialFiles(ctx, o.container, req.ContainerID, req.AgentSlug, req.Credentials, secretsAgentDir, secretsSharedDir, o.logger)
+	}()
+	if credWriteErr != nil {
+		// Same fail-loud posture as the mkdir preflight above: a run that
+		// carries file-mounted credentials must not start without them.
+		if fileCreds {
+			o.logger.Error("failed to write credential files; run carries file-mounted credentials", "error", credWriteErr, "agent_id", req.AgentID)
+			o.failRun(ctx, req, runID, "error")
+			return nil, "", fmt.Errorf("write credential files for %s: %w — "+
+				"if this is a permission error on /secrets, the Docker daemon likely predates Docker Engine 26 "+
+				"(required for tmpfs uid/gid mount options); upgrade the daemon", req.AgentSlug, credWriteErr)
+		}
+		o.logger.Warn("failed to write credential files", "error", credWriteErr, "agent_id", req.AgentID)
+	}
+	env = append(env, "CREWSHIP_SECRETS_DIR="+secretsAgentDir)
+
+	env = append(env, "CREWSHIP_OUTPUT_DIR="+outputDir)
+
+	// Write non-secret Claude config (skip onboarding). Credentials are
+	// also available as files in /secrets/{agent-slug}/ for CLI tools.
+	if err := setupClaudeConfig(ctx, o.container, req.ContainerID, req.AgentSlug, o.logger); err != nil {
+		o.logger.Warn("failed to inject claude config", "error", err, "agent_id", req.AgentID)
+	}
+
+	// Write MCP server configuration via the per-CLI adapter. Each adapter
+	// knows its own file path + format (Claude .mcp.json, Codex
+	// .codex/config.toml, Gemini .gemini/settings.json, OpenCode opencode.json
+	// under "mcp" key, Cursor .cursor/mcp.json, Droid .factory/mcp.json).
+	// Adapters that don't support MCP (currently none after the multi-CLI
+	// wave; unknownAdapter only) make this a no-op.
+	mcpAdapter := getAdapter(req.CLIAdapter)
+	if mcpAdapter.SupportsMCP() {
+		if err := mcpAdapter.WriteMCPConfig(ctx, o.container, req.ContainerID, req, workDir, o.logger); err != nil {
+			hasMCP := req.CrewMCPConfigJSON != "" || req.AgentMCPConfigJSON != "" || len(req.MCPServers) > 0
+			if hasMCP {
+				o.failRun(ctx, req, runID, "error")
+				return nil, "", fmt.Errorf("inject MCP config (%s): %w", req.CLIAdapter, err)
+			}
+			o.logger.Warn("failed to inject MCP config", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)
+		}
+	}
+
+	// Inject OAuth token files for MCP servers that need them.
+	// When Crewship holds access+refresh tokens from OAuth flow, write them
+	// to the location MCP servers expect (e.g. ~/.config/<server>/tokens.json).
+	if err := injectMCPOAuthTokens(ctx, o.container, req.ContainerID, req.AgentSlug, req.MCPServers, req.Credentials, o.logger); err != nil {
+		o.logger.Warn("failed to inject MCP OAuth tokens", "error", err, "agent_id", req.AgentID)
+	}
+
+	// Write CLI-specific system prompt files (e.g. AGENTS.md for OpenCode)
+	if err := setupSystemPromptFiles(ctx, o.container, req.ContainerID, req, workDir, o.logger); err != nil {
+		o.logger.Warn("failed to write system prompt files", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)
+	}
+
+	return env, workDir, nil
+}
+
+// buildExecCommand wraps the agent CLI command for execution — stdbuf
+// line-buffering, the tmux observation session when available, and stdin
+// delivery for oversized prompts — and assembles the provider.ExecConfig for
+// the run. Pure extraction from RunAgent; the only error is the shared E2BIG
+// guard for arg-path adapters.
+func (o *Orchestrator) buildExecCommand(ctx context.Context, req AgentRunRequest, cmd, env []string, workDir string) (provider.ExecConfig, error) {
+	// Wrap agent CLI command with stdbuf to force line-buffered stdout.
+	// Apple's container runtime buffers exec output which causes choppy
+	// streaming in chat. stdbuf -oL flushes on every newline so JSON
+	// stream events arrive immediately.
+	//
+	// When tmux is available, wrap the command inside a named tmux session
+	// so users can attach via the web terminal to observe the running agent.
+	// The tmux session is named "agent-{slug}" and stdout still flows through
+	// the exec pipe for chat streaming.
+	// When the adapter delivers the prompt via stdin (claudeCodeAdapter does
+	// this for messages over ~96 KiB, to dodge Linux's 128 KiB MAX_ARG_STRLEN
+	// execve limit), bypass the tmux wrapper: a detached tmux session's stdin
+	// is NOT wired to the docker-exec stream, so a prompt sent on stdin would
+	// never reach the CLI. The trade-off — losing web-terminal attach for that
+	// one run — is acceptable for the rare oversized-prompt case; normal-size
+	// runs keep the tmux path unchanged.
+	var execCmd []string
+	var execStdin io.Reader
+	if getAdapter(req.CLIAdapter).PromptViaStdin(req) {
+		execCmd = append([]string{"stdbuf", "-oL"}, cmd...)
+		execStdin = strings.NewReader(req.UserMessage)
+		o.logger.Info("delivering oversized agent prompt via stdin (tmux bypassed)",
+			"agent_id", req.AgentID, "prompt_bytes", len(req.UserMessage))
+	} else {
+		// Shared E2BIG guard. Only the Claude adapter currently routes
+		// oversized prompts via stdin; the others fold system+user into a
+		// single positional argv element (e.g. gemini `-p <prompt>`), which
+		// execve rejects with E2BIG once any element exceeds Linux's 128 KiB
+		// MAX_ARG_STRLEN. Left unguarded that surfaced as the agent exiting 255
+		// at $0.00 with no actionable reason. Catch it BEFORE exec at the
+		// shared layer and fail with a legible error for EVERY arg-path
+		// adapter, rather than per-adapter. (Enabling stdin delivery for a
+		// given CLI is a follow-up gated on confirming that CLI reads its
+		// prompt from stdin in non-interactive mode.)
+		if oversizedArg, n := firstOversizedArg(cmd); oversizedArg {
+			return provider.ExecConfig{}, fmt.Errorf("agent prompt too large for %s: a single argument is %d bytes, over the %d-byte execve limit; "+
+				"this CLI delivers the prompt as a command-line argument and cannot accept input this large — "+
+				"reduce the input fed into the agent_run step, or use a Claude agent (which delivers large prompts via stdin)",
+				req.CLIAdapter, n, maxArgStrLen)
+		}
+		var tmuxErr error
+		execCmd, tmuxErr = o.setupTmuxExec(ctx, req.ContainerID, cmd, req.AgentSlug, env)
+		if tmuxErr != nil {
+			if _, seen := o.tmuxWarned.LoadOrStore(req.ContainerID, true); seen {
+				o.logger.Debug("tmux setup failed, falling back to direct exec", "error", tmuxErr)
+			} else {
+				o.logger.Warn("tmux setup failed, falling back to direct exec (further occurrences for this container log at debug)",
+					"error", tmuxErr, "container_id", req.ContainerID)
+			}
+			execCmd = append([]string{"stdbuf", "-oL"}, cmd...)
+		}
+	}
+
+	return provider.ExecConfig{
+		ContainerID: req.ContainerID,
+		Cmd:         execCmd,
+		Env:         env,
+		WorkingDir:  workDir,
+		User:        "1001:1001",
+		Stdin:       execStdin,
+	}, nil
+}
+
+// shortID truncates a container ID to the familiar 12-char short form for
+// logs and journal payloads. IDs shorter than 12 chars pass through unchanged.
+func shortID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
+// emitExecEnd emits the terminal exec.command journal entry that closes a
+// Crow's Nest command block. The payload always carries cmd, phase:"end" and
+// duration_ms; extra holds the per-outcome fields (exit_code, reason, …).
+func (o *Orchestrator) emitExecEnd(ctx context.Context, req AgentRunRequest, execID string, cmd []string, severity, summary string, execStart time.Time, extra map[string]any) {
+	payload := map[string]any{
+		"cmd":         cmd,
+		"phase":       "end",
+		"duration_ms": time.Since(execStart).Milliseconds(),
+	}
+	for k, v := range extra {
+		payload[k] = v
+	}
+	_, _ = o.getJournal().Emit(ctx, JournalEntry{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		MissionID:   req.MissionID,
+		Type:        "exec.command",
+		Severity:    severity,
+		ActorType:   "agent",
+		ActorID:     req.AgentID,
+		Summary:     summary,
+		Payload:     payload,
+		Refs:        map[string]any{"chat_id": req.ChatID, "exec_id": execID},
+	})
+}
+
+// markAgentOnline flips the Watch Roster presence back to "online" at the end
+// of a run. details is optional (nil on the normal-exit path); terminal error
+// paths pass a reason so the roster shows why the run ended.
+func (o *Orchestrator) markAgentOnline(ctx context.Context, req AgentRunRequest, details map[string]any) {
+	_ = o.getPresence().Track(ctx, PresenceInput{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		MissionID:   req.MissionID,
+		Status:      "online",
+		Details:     details,
+	})
 }
 
 // Start runs the container TTL manager, periodically stopping idle containers
@@ -1393,10 +1424,7 @@ var knownPackageLaunchers = map[string]bool{
 // Best-effort: a journal hiccup never blocks the run — the sidecar still
 // starts; it's operator visibility at stake, not this run's correctness.
 func (o *Orchestrator) emitStaleSidecarSignal(ctx context.Context, req AgentRunRequest, runningHash string) {
-	cIDShort := req.ContainerID
-	if len(cIDShort) > 12 {
-		cIDShort = cIDShort[:12]
-	}
+	cIDShort := shortID(req.ContainerID)
 	const remediation = "crewship crew restart-agents"
 	o.logger.Error("stale sidecar detected: container is serving an OLD crewship-sidecar binary from before the last redeploy — memory recall and egress policy may be silently degraded; recreate the crew's containers ("+remediation+") to pick up the new sidecar",
 		"agent_id", req.AgentID,

@@ -204,6 +204,30 @@ func (c *Client) watchSessionRevocation() {
 	}
 }
 
+// sendError marshals the standard error frame ({"error": msg} payload on the
+// given channel) and queues it on this client's send buffer.
+func (c *Client) sendError(channel, msg string) {
+	resp, _ := json.Marshal(ServerMessage{
+		Type:    "error",
+		Channel: channel,
+		Payload: map[string]string{"error": msg},
+	})
+	c.safeSend(resp)
+}
+
+// unwrapDoubleEncoded handles a double-encoded payload (the frontend sends a
+// JSON.stringify'd string): when raw is a JSON string, the inner value is
+// returned as the payload; anything else passes through unchanged.
+func unwrapDoubleEncoded(raw json.RawMessage) json.RawMessage {
+	if len(raw) > 0 && raw[0] == '"' {
+		var unwrapped string
+		if err := json.Unmarshal(raw, &unwrapped); err == nil {
+			return json.RawMessage(unwrapped)
+		}
+	}
+	return raw
+}
+
 func (c *Client) subscribe(channel string) {
 	if channel == "" {
 		return
@@ -212,22 +236,12 @@ func (c *Client) subscribe(channel string) {
 	// Validate channel access: deny by default when no authorizer is configured.
 	if c.hub.channelAuth == nil {
 		c.hub.logger.Warn("channel subscription denied: no authorizer configured", "user_id", c.userID, "channel", channel)
-		resp, _ := json.Marshal(ServerMessage{
-			Type:    "error",
-			Channel: channel,
-			Payload: map[string]string{"error": "access denied"},
-		})
-		c.safeSend(resp)
+		c.sendError(channel, "access denied")
 		return
 	}
 	if !c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, channel) {
 		c.hub.logger.Warn("channel subscription denied", "user_id", c.userID, "channel", channel)
-		resp, _ := json.Marshal(ServerMessage{
-			Type:    "error",
-			Channel: channel,
-			Payload: map[string]string{"error": "access denied"},
-		})
-		c.safeSend(resp)
+		c.sendError(channel, "access denied")
 		return
 	}
 
@@ -315,13 +329,7 @@ func clampMaxTurns(n int) int {
 
 func (c *Client) handleCancelMessage(msg ClientMessage) {
 	var payload sendMessagePayload
-	raw := msg.Payload
-	if len(raw) > 0 && raw[0] == '"' {
-		var unwrapped string
-		if err := json.Unmarshal(raw, &unwrapped); err == nil {
-			raw = json.RawMessage(unwrapped)
-		}
-	}
+	raw := unwrapDoubleEncoded(msg.Payload)
 	if err := json.Unmarshal(raw, &payload); err != nil || payload.ChatID == "" {
 		return
 	}
@@ -350,13 +358,7 @@ type resumePayload struct {
 // history instead. Requires the same channel authorization as subscribe.
 func (c *Client) handleResume(msg ClientMessage) {
 	var payload resumePayload
-	raw := msg.Payload
-	if len(raw) > 0 && raw[0] == '"' {
-		var unwrapped string
-		if err := json.Unmarshal(raw, &unwrapped); err == nil {
-			raw = json.RawMessage(unwrapped)
-		}
-	}
+	raw := unwrapDoubleEncoded(msg.Payload)
 	if err := json.Unmarshal(raw, &payload); err != nil || payload.ChatID == "" {
 		return
 	}
@@ -391,43 +393,22 @@ func (c *Client) handleResume(msg ClientMessage) {
 func (c *Client) handleSendMessage(msg ClientMessage) {
 	c.hub.logger.Debug("handleSendMessage", "user_id", c.userID, "payload_len", len(msg.Payload))
 	if c.hub.chatHandler == nil {
-		resp, _ := json.Marshal(ServerMessage{
-			Type:    "error",
-			Channel: msg.Channel,
-			Payload: map[string]string{"error": "chat not available"},
-		})
-		c.safeSend(resp)
+		c.sendError(msg.Channel, "chat not available")
 		return
 	}
 
 	var payload sendMessagePayload
-	raw := msg.Payload
 	// Handle double-encoded payload (frontend sends JSON.stringify'd string)
-	if len(raw) > 0 && raw[0] == '"' {
-		var unwrapped string
-		if err := json.Unmarshal(raw, &unwrapped); err == nil {
-			raw = json.RawMessage(unwrapped)
-		}
-	}
+	raw := unwrapDoubleEncoded(msg.Payload)
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		c.hub.logger.Debug("invalid send_message payload", "error", err, "payload_len", len(msg.Payload))
-		resp, _ := json.Marshal(ServerMessage{
-			Type:    "error",
-			Channel: msg.Channel,
-			Payload: map[string]string{"error": "invalid payload"},
-		})
-		c.safeSend(resp)
+		c.sendError(msg.Channel, "invalid payload")
 		return
 	}
 
 	if payload.ChatID == "" || payload.Content == "" {
 		c.hub.logger.Debug("send_message missing fields", "chat_id_empty", payload.ChatID == "", "content_empty", payload.Content == "")
-		resp, _ := json.Marshal(ServerMessage{
-			Type:    "error",
-			Channel: msg.Channel,
-			Payload: map[string]string{"error": "session_id and content required"},
-		})
-		c.safeSend(resp)
+		c.sendError(msg.Channel, "session_id and content required")
 		return
 	}
 
@@ -436,12 +417,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		sessionCh := "session:" + payload.ChatID
 		if !c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, sessionCh) {
 			c.hub.logger.Warn("send_message denied: no access to session", "user_id", c.userID, "chat_id", payload.ChatID)
-			resp, _ := json.Marshal(ServerMessage{
-				Type:    "error",
-				Channel: msg.Channel,
-				Payload: map[string]string{"error": "access denied"},
-			})
-			c.safeSend(resp)
+			c.sendError(msg.Channel, "access denied")
 			return
 		}
 	}
@@ -462,12 +438,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		c.hub.cancelMu.Lock()
 		if _, exists := c.hub.cancelFns[cancelKey]; exists {
 			c.hub.cancelMu.Unlock()
-			errResp, _ := json.Marshal(ServerMessage{
-				Type:    "error",
-				Channel: channel,
-				Payload: map[string]string{"error": "a message is already being processed"},
-			})
-			c.safeSend(errResp)
+			c.sendError(channel, "a message is already being processed")
 			return
 		}
 		c.hub.cancelFns[cancelKey] = runCancel

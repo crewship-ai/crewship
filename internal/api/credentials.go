@@ -173,8 +173,7 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 		LIMIT ? OFFSET ?`
 	result, err := h.scanCredentialRows(r.Context(), query, args)
 	if err != nil {
-		h.logger.Error("list credentials", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list credentials", err)
 		return
 	}
 	h.enrichCredentials(r.Context(), result)
@@ -223,8 +222,7 @@ func (h *CredentialHandler) listCredentialsPaginated(w http.ResponseWriter, r *h
 		LIMIT ?`
 	result, err := h.scanCredentialRows(r.Context(), query, args)
 	if err != nil {
-		h.logger.Error("list credentials (paginated)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list credentials (paginated)", err)
 		return
 	}
 
@@ -377,8 +375,7 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "Credential not found")
 			return
 		}
-		h.logger.Error("get credential", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get credential", err)
 		return
 	}
 
@@ -419,8 +416,7 @@ func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		"UPDATE credentials SET deleted_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		now, credID, workspaceID)
 	if err != nil {
-		h.logger.Error("delete credential", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "delete credential", err)
 		return
 	}
 	affected, _ := res.RowsAffected()

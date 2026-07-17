@@ -85,8 +85,7 @@ func (h *UserProfileHandler) UpdateProfile(w http.ResponseWriter, r *http.Reques
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := h.db.ExecContext(r.Context(),
 		"UPDATE users SET full_name = ?, updated_at = ? WHERE id = ?", name, now, user.ID); err != nil {
-		h.logger.Error("update profile", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "update profile", err)
 		return
 	}
 
@@ -99,8 +98,7 @@ func (h *UserProfileHandler) writeProfile(w http.ResponseWriter, r *http.Request
 		"SELECT id, email, full_name, avatar_url FROM users WHERE id = ?", userID).
 		Scan(&resp.ID, &resp.Email, &resp.FullName, &resp.AvatarURL)
 	if err != nil {
-		h.logger.Error("load profile", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "load profile", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -151,8 +149,7 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err != nil {
-		h.logger.Error("load password hash", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "load password hash", err)
 		return
 	}
 	if !hashed.Valid || hashed.String == "" {
@@ -168,8 +165,7 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 
 	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), profileBcryptCost)
 	if err != nil {
-		h.logger.Error("hash new password", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "hash new password", err)
 		return
 	}
 
@@ -177,8 +173,7 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 	if _, err := h.db.ExecContext(r.Context(),
 		"UPDATE users SET hashed_password = ?, updated_at = ? WHERE id = ?",
 		string(newHash), now, user.ID); err != nil {
-		h.logger.Error("update password", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "update password", err)
 		return
 	}
 
@@ -187,8 +182,7 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 	// believes their old sessions are dead when they may still be live.
 	revoked, err := h.revokeOtherSessions(r, user.ID, user.SessionID)
 	if err != nil {
-		h.logger.Error("revoke sessions on password change", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "revoke sessions on password change", err)
 		return
 	}
 

@@ -158,8 +158,7 @@ func (h *QueryHandler) Standup(w http.ResponseWriter, r *http.Request) {
 	if wsID := WorkspaceIDFromContext(r.Context()); wsID != "" {
 		found, err := crewExists(r.Context(), h.db, crewID, wsID)
 		if err != nil {
-			h.logger.Error("standup workspace validation", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "standup workspace validation", err)
 			return
 		}
 		if !found {
@@ -181,8 +180,7 @@ func (h *QueryHandler) Standup(w http.ResponseWriter, r *http.Request) {
 	// Fetch data
 	convs, err := h.fetchStandupConversations(r.Context(), crewID, since)
 	if err != nil {
-		h.logger.Error("standup query conversations", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "standup query conversations", err)
 		return
 	}
 

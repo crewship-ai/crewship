@@ -56,8 +56,7 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != sql.ErrNoRows {
-		h.logger.Error("check workspace slug", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "check workspace slug", err)
 		return
 	}
 
@@ -67,8 +66,7 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("begin tx", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "begin tx", err)
 		return
 	}
 	defer tx.Rollback()
@@ -77,8 +75,7 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"INSERT INTO workspaces (id, name, slug, preferred_language, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
 		wsID, req.Name, req.Slug, req.PreferredLanguage, now, now)
 	if err != nil {
-		h.logger.Error("insert workspace", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "insert workspace", err)
 		return
 	}
 
@@ -86,14 +83,12 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at, updated_at) VALUES (?, ?, ?, 'OWNER', ?, ?)",
 		memberID, wsID, user.ID, now, now)
 	if err != nil {
-		h.logger.Error("insert workspace member", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "insert workspace member", err)
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit tx", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "commit tx", err)
 		return
 	}
 
@@ -163,8 +158,7 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != sql.ErrNoRows {
-			h.logger.Error("check workspace slug", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "check workspace slug", err)
 			return
 		}
 	}
@@ -199,8 +193,7 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if !ub.Empty() {
 		query, args := ub.Build("workspaces", "id = ?", workspaceID)
 		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-			h.logger.Error("update workspace", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "update workspace", err)
 			return
 		}
 	}
@@ -218,8 +211,7 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		&ws.CreatedAt, &ws.UpdatedAt, &ws.AllowPrivilegedCredentials,
 		&ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
 	if err != nil {
-		h.logger.Error("get workspace after update", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get workspace after update", err)
 		return
 	}
 	ws.fillNestedCount()

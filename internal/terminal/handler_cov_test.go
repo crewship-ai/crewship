@@ -216,7 +216,7 @@ func TestServeHTTP_FullShellSession(t *testing.T) {
 
 	serverSide, testSide := net.Pipe()
 	im := &covInteractive{covContainer: &covContainer{states: []string{"running"}}, conn: serverSide}
-	h := New(im, v, db, silentLogger())
+	h := New(im, v, db, silentLogger(), nil)
 
 	conn, done := dialTerminalDone(t, h)
 	authAndInit(t, conn, v, map[string]any{"crew_id": "c1", "crew_slug": "crew-a"})
@@ -298,7 +298,7 @@ func TestServeHTTP_AgentShellCreatesHomeDir(t *testing.T) {
 
 	serverSide, _ := net.Pipe()
 	im := &covInteractive{covContainer: &covContainer{states: []string{"running"}}, conn: serverSide}
-	h := New(im, v, db, silentLogger())
+	h := New(im, v, db, silentLogger(), nil)
 
 	conn, done := dialTerminalDone(t, h)
 	authAndInit(t, conn, v, map[string]any{
@@ -343,7 +343,7 @@ func TestServeHTTP_StartsStoppedContainer(t *testing.T) {
 
 	serverSide, _ := net.Pipe()
 	im := &covInteractive{covContainer: &covContainer{states: []string{"stopped"}}, conn: serverSide}
-	h := New(im, v, db, silentLogger())
+	h := New(im, v, db, silentLogger(), nil)
 
 	conn, done := dialTerminalDone(t, h)
 	authAndInit(t, conn, v, map[string]any{"crew_id": "c1", "crew_slug": "crew-a"})
@@ -381,7 +381,7 @@ func TestServeHTTP_ContainerStartFails(t *testing.T) {
 		states:    []string{"stopped"},
 		ensureErr: errors.New("no capacity"),
 	}}
-	h := New(im, v, db, silentLogger())
+	h := New(im, v, db, silentLogger(), nil)
 
 	conn, _ := dialTerminalDone(t, h)
 	authAndInit(t, conn, v, map[string]any{"crew_id": "c1", "crew_slug": "crew-a"})
@@ -405,7 +405,7 @@ func TestServeHTTP_ContainerStartFails(t *testing.T) {
 func TestServeHTTP_ProviderWithoutInteractiveExec(t *testing.T) {
 	v := newTestValidator(t)
 	db := seedTerminalDB(t)
-	h := New(&covContainer{states: []string{"running"}}, v, db, silentLogger())
+	h := New(&covContainer{states: []string{"running"}}, v, db, silentLogger(), nil)
 
 	conn, _ := dialTerminalDone(t, h)
 	authAndInit(t, conn, v, map[string]any{"crew_id": "c1", "crew_slug": "crew-a"})
@@ -423,7 +423,7 @@ func TestServeHTTP_ExecInteractiveFails(t *testing.T) {
 	h := New(&interactiveMock{
 		mockContainer: &mockContainer{state: "running"},
 		execErr:       errors.New("pty allocation failed"),
-	}, v, db, silentLogger())
+	}, v, db, silentLogger(), nil)
 
 	conn, _ := dialTerminalDone(t, h)
 	authAndInit(t, conn, v, map[string]any{"crew_id": "c1", "crew_slug": "crew-a"})
@@ -437,7 +437,7 @@ func TestServeHTTP_ExecInteractiveFails(t *testing.T) {
 // TestServeHTTP_InvalidInitJSON pins the malformed-init error frame.
 func TestServeHTTP_InvalidInitJSON(t *testing.T) {
 	v := newTestValidator(t)
-	h := New(&covContainer{}, v, nil, silentLogger())
+	h := New(&covContainer{}, v, nil, silentLogger(), nil)
 
 	conn, _ := dialTerminalDone(t, h)
 	tok, err := v.IssueWSTicket("u1", "sess", "", "")
@@ -462,7 +462,7 @@ func TestServeHTTP_InvalidInitJSON(t *testing.T) {
 // and init.
 func TestServeHTTP_ClientClosesBeforeInit(t *testing.T) {
 	v := newTestValidator(t)
-	h := New(&covContainer{}, v, nil, silentLogger())
+	h := New(&covContainer{}, v, nil, silentLogger(), nil)
 
 	conn, done := dialTerminalDone(t, h)
 	tok, err := v.IssueWSTicket("u1", "sess", "", "")
@@ -485,7 +485,7 @@ func TestServeHTTP_ClientClosesBeforeInit(t *testing.T) {
 // TestServeHTTP_ClientClosesBeforeAuth pins the auth-read failure branch.
 func TestServeHTTP_ClientClosesBeforeAuth(t *testing.T) {
 	v := newTestValidator(t)
-	h := New(&covContainer{}, v, nil, silentLogger())
+	h := New(&covContainer{}, v, nil, silentLogger(), nil)
 
 	conn, done := dialTerminalDone(t, h)
 	conn.Close()
@@ -506,7 +506,7 @@ func TestServeHTTP_AttachMode(t *testing.T) {
 	run := func(t *testing.T, im *covInteractive, init map[string]any) (map[string]string, *covInteractive, *websocket.Conn) {
 		t.Helper()
 		db := seedTerminalDB(t)
-		h := New(im, v, db, silentLogger())
+		h := New(im, v, db, silentLogger(), nil)
 		conn, _ := dialTerminalDone(t, h)
 		authAndInit(t, conn, v, init)
 		return readJSONFrame(t, conn), im, conn
@@ -561,7 +561,7 @@ func TestServeHTTP_AttachMode(t *testing.T) {
 			conn:         serverSide,
 		}
 		db := seedTerminalDB(t)
-		h := New(im, v, db, silentLogger())
+		h := New(im, v, db, silentLogger(), nil)
 		conn, done := dialTerminalDone(t, h)
 		authAndInit(t, conn, v, map[string]any{
 			"mode": "attach", "crew_id": "c1", "crew_slug": "crew-a", "agent_slug": "agent-1",
@@ -606,7 +606,7 @@ func TestServeHTTP_SlugSpoofRejected(t *testing.T) {
 
 	serverSide, _ := net.Pipe()
 	im := &covInteractive{covContainer: &covContainer{states: []string{"running"}}, conn: serverSide}
-	h := New(im, v, db, silentLogger())
+	h := New(im, v, db, silentLogger(), nil)
 
 	conn, done := dialTerminalDone(t, h)
 	// Spoofed slug "other-crew" — DB says crew c1 is "crew-a".

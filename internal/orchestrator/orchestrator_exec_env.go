@@ -155,25 +155,21 @@ func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cm
 	doneSignal := session + "-done"
 	envFile := fmt.Sprintf("/tmp/%s.env", session)
 
-	// Step 1: Write null-separated command args to file via base64.
+	// Compute the three file payloads up front. They are independent, so a
+	// single batched exec (below) writes all of them in one round-trip rather
+	// than three sequential ExecCreate+ExecStart+attach+drain cycles — this is
+	// the hottest path (every agent message). Mirrors the batched-write idiom
+	// in exec_sidecar.go's prepMemoryDirs.
+
+	// Args: null-separated command args.
 	var argsBuf []byte
 	for _, arg := range cmd {
 		argsBuf = append(argsBuf, []byte(arg)...)
 		argsBuf = append(argsBuf, 0)
 	}
 	argsEncoded := base64.StdEncoding.EncodeToString(argsBuf)
-	writeArgsResult, err := o.container.Exec(ctx, provider.ExecConfig{
-		ContainerID: containerID,
-		Cmd:         []string{"sh", "-c", fmt.Sprintf("printf '%%s' '%s' | base64 -d > '%s'", argsEncoded, argsFile)},
-		User:        "1001:1001",
-	})
-	if err != nil {
-		return nil, fmt.Errorf("write args file: %w", err)
-	}
-	io.Copy(io.Discard, writeArgsResult.Reader)
-	writeArgsResult.Reader.Close()
 
-	// Step 2: Write env vars as sourceable shell script.
+	// Env: sourceable shell script of `export KEY='VALUE'` lines.
 	var envScript strings.Builder
 	for _, e := range env {
 		if idx := strings.IndexByte(e, '='); idx > 0 {
@@ -196,32 +192,35 @@ func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cm
 		}
 	}
 	envEncoded := base64.StdEncoding.EncodeToString([]byte(envScript.String()))
-	envWriteResult, err := o.container.Exec(ctx, provider.ExecConfig{
-		ContainerID: containerID,
-		Cmd:         []string{"sh", "-c", fmt.Sprintf("printf '%%s' '%s' | base64 -d > '%s'", envEncoded, envFile)},
-		User:        "1001:1001",
-	})
-	if err != nil {
-		return nil, fmt.Errorf("write env file: %w", err)
-	}
-	io.Copy(io.Discard, envWriteResult.Reader)
-	envWriteResult.Reader.Close()
 
-	// Step 3: Write inner script (sources env, runs command via xargs).
+	// Inner script (sources env, runs command via xargs).
 	scriptContent := fmt.Sprintf("#!/bin/sh\n. '%s'\n"+
 		"EX=0\nxargs -0 stdbuf -oL < '%s' > '%s' 2>&1 || EX=$?\necho $EX > '%s'\nrm -f '%s'\ntmux wait-for -S '%s'\n",
 		envFile, argsFile, fifo, exitFile, fifo, doneSignal)
 	scriptEncoded := base64.StdEncoding.EncodeToString([]byte(scriptContent))
-	writeScriptResult, err := o.container.Exec(ctx, provider.ExecConfig{
+
+	// Single batched write: decode all three files and chmod the script in one
+	// exec. Base64 output is alphanumerics plus '+', '/' and '=' — never a
+	// single quote — so single-quoting each payload is safe. `&&` chains the
+	// steps so any decode failure aborts the rest, and the returned exec error
+	// surfaces the same kind of wrapped error any single write would have.
+	writeCmd := fmt.Sprintf(
+		"printf '%%s' '%s' | base64 -d > '%s' && "+
+			"printf '%%s' '%s' | base64 -d > '%s' && "+
+			"printf '%%s' '%s' | base64 -d > '%s' && chmod +x '%s'",
+		argsEncoded, argsFile,
+		envEncoded, envFile,
+		scriptEncoded, scriptFile, scriptFile)
+	writeResult, err := o.container.Exec(ctx, provider.ExecConfig{
 		ContainerID: containerID,
-		Cmd:         []string{"sh", "-c", fmt.Sprintf("printf '%%s' '%s' | base64 -d > '%s' && chmod +x '%s'", scriptEncoded, scriptFile, scriptFile)},
+		Cmd:         []string{"sh", "-c", writeCmd},
 		User:        "1001:1001",
 	})
 	if err != nil {
-		return nil, fmt.Errorf("write script file: %w", err)
+		return nil, fmt.Errorf("write tmux exec files: %w", err)
 	}
-	io.Copy(io.Discard, writeScriptResult.Reader)
-	writeScriptResult.Reader.Close()
+	io.Copy(io.Discard, writeResult.Reader)
+	writeResult.Reader.Close()
 
 	// Step 4: Return outer wrapper. Uses session-scoped kill (not kill-server)
 	// to avoid disrupting other agent sessions in the same crew container.

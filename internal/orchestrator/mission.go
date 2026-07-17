@@ -304,14 +304,10 @@ func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 				`UPDATE mission_tasks SET status = 'FAILED', error_message = 'mission timed out', updated_at = ?, completed_at = ?
 				 WHERE mission_id = ? AND status = 'AWAITING_APPROVAL'`,
 				now, now, ms.ID)
-			e.db.ExecContext(cleanCtx,
-				`UPDATE missions SET status = 'FAILED', updated_at = ?, completed_at = ? WHERE id = ? AND status = 'IN_PROGRESS'`,
-				now, now, ms.ID)
-			e.broadcastMissionStatus(ms, "FAILED")
-			e.pw.WriteEvent(ms.TraceID, ms.CrewSlug, ProgressEvent{
-				Type:      "mission_timeout",
-				MissionID: ms.ID,
-			})
+			// Best-effort cleanup on an already-timed-out mission: the
+			// UPDATE error was ignored here before the finalizeMission
+			// extraction too.
+			_ = e.finalizeMission(cleanCtx, ms, "FAILED", "mission_timeout")
 		}
 		e.mu.Lock()
 		delete(e.active, ms.ID)
@@ -467,6 +463,29 @@ func (e *MissionEngine) broadcastMissionStatus(ms *missionState, status string) 
 		map[string]string{"id": ms.ID, "title": ms.Title, "status": status})
 	e.hub.BroadcastWorkspace(ms.WorkspaceID, "mission.updated",
 		map[string]string{"id": ms.ID, "crew_id": ms.CrewID, "title": ms.Title, "status": status})
+}
+
+// finalizeMission moves a mission out of IN_PROGRESS into a terminal status,
+// stamping completed_at/updated_at, then broadcasts the transition and writes
+// the matching progress event. The `AND status = 'IN_PROGRESS'` guard keeps a
+// concurrent finalizer from double-transitioning. eventType is the
+// ProgressEvent type — "mission_"+newStatus on the completion paths,
+// "mission_timeout" on the mission-deadline path. On a DB error the broadcast
+// and progress event are skipped and the raw error is returned for the caller
+// to wrap.
+func (e *MissionEngine) finalizeMission(ctx context.Context, ms *missionState, newStatus, eventType string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := e.db.ExecContext(ctx,
+		`UPDATE missions SET status = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'IN_PROGRESS'`,
+		newStatus, now, now, ms.ID); err != nil {
+		return err
+	}
+	e.broadcastMissionStatus(ms, newStatus)
+	e.pw.WriteEvent(ms.TraceID, ms.CrewSlug, ProgressEvent{
+		Type:      eventType,
+		MissionID: ms.ID,
+	})
+	return nil
 }
 
 // countTasks returns the number of tasks in a mission.

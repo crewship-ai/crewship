@@ -374,17 +374,9 @@ func (e *MissionEngine) checkMissionCompletionWithTasks(ctx context.Context, ms 
 		}
 		e.logger.Info("lead planning complete, all assignments finished",
 			"mission_id", ms.ID, "total_assignments", total, "failed", failed, "status", newStatus)
-		now := time.Now().UTC().Format(time.RFC3339)
-		if _, err := e.db.ExecContext(ctx,
-			`UPDATE missions SET status = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'IN_PROGRESS'`,
-			newStatus, now, now, ms.ID); err != nil {
+		if err := e.finalizeMission(ctx, ms, newStatus, "mission_"+newStatus); err != nil {
 			return fmt.Errorf("update mission to %s: %w", newStatus, err)
 		}
-		e.broadcastMissionStatus(ms, newStatus)
-		e.pw.WriteEvent(ms.TraceID, ms.CrewSlug, ProgressEvent{
-			Type:      "mission_" + newStatus,
-			MissionID: ms.ID,
-		})
 		e.logger.Info("mission completed", "mission_id", ms.ID, "status", newStatus)
 		if newStatus == "REVIEW" {
 			e.fireIssueReviewInboxNotification(ctx, ms)
@@ -414,20 +406,12 @@ func (e *MissionEngine) checkMissionCompletionWithTasks(ctx context.Context, ms 
 		newStatus = "FAILED"
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	completedAt := sql.NullString{String: now, Valid: true}
-
-	if _, err := e.db.ExecContext(ctx,
-		`UPDATE missions SET status = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'IN_PROGRESS'`,
-		newStatus, completedAt, now, ms.ID); err != nil {
+	// completed_at was previously bound as sql.NullString{String: now,
+	// Valid: true}; the driver sends a valid NullString as its plain string,
+	// so finalizeMission's string binding is value-identical.
+	if err := e.finalizeMission(ctx, ms, newStatus, "mission_"+newStatus); err != nil {
 		return fmt.Errorf("update mission status: %w", err)
 	}
-
-	e.broadcastMissionStatus(ms, newStatus)
-	e.pw.WriteEvent(ms.TraceID, ms.CrewSlug, ProgressEvent{
-		Type:      "mission_" + newStatus,
-		MissionID: ms.ID,
-	})
 
 	e.logger.Info("mission completed", "mission_id", ms.ID, "status", newStatus)
 	if newStatus == "REVIEW" {

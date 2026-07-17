@@ -70,8 +70,7 @@ func (h *MCPAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("list mcp tool calls", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list mcp tool calls", err)
 		return
 	}
 	defer rows.Close()
@@ -82,15 +81,13 @@ func (h *MCPAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&e.ID, &e.WorkspaceID, &e.CrewID, &e.AgentID,
 			&e.MCPServerID, &e.MCPServerScope, &e.ToolName, &e.InputHash,
 			&e.Status, &e.DurationMS, &e.ErrorMessage, &e.CreatedAt); err != nil {
-			h.logger.Error("scan mcp tool call", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan mcp tool call", err)
 			return
 		}
 		results = append(results, e)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("iterate mcp tool calls", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "iterate mcp tool calls", err)
 		return
 	}
 	if results == nil {

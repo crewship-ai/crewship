@@ -151,8 +151,7 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 		ORDER BY w.created_at DESC
 	`, user.ID)
 	if err != nil {
-		h.logger.Error("list workspaces", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list workspaces", err)
 		return
 	}
 	defer rows.Close()
@@ -164,8 +163,7 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
 			&ws.CreatedAt, &ws.UpdatedAt, &ws.CurrentUserRole, &capsJSON, &ws.AllowPrivilegedCredentials,
 			&ws.CrewCount, &ws.AgentCount, &ws.MemberCount); err != nil {
-			h.logger.Error("scan workspace", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan workspace", err)
 			return
 		}
 		role := ""
@@ -177,8 +175,7 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 		result = append(result, ws)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (workspaces)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration (workspaces)", err)
 		return
 	}
 
@@ -210,8 +207,7 @@ func (h *WorkspaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "Workspace not found")
 			return
 		}
-		h.logger.Error("get workspace", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get workspace", err)
 		return
 	}
 	ws.CurrentUserRole = &role

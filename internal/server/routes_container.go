@@ -22,6 +22,27 @@ import (
 // Changes tabs opening at once could saturate Docker and starve agent work.
 var gitDiffSem = make(chan struct{}, 4)
 
+// resolveCrewContainer looks up the crew's slug in the DB and derives the
+// provider container name. The provider keys on the container name (Docker
+// inspect/exec need the name/hash, not the crew ID), so passing the raw id
+// silently misses a running crew. With fallbackToID the raw crew id is used
+// when no slug resolves (works for Docker container hashes / tests that key
+// on it directly) and ok is always true; without it, ok reports whether the
+// crew was found. slug is returned for callers that need it beyond naming
+// (e.g. sidecar teardown). Callers must have checked s.container != nil.
+func (s *Server) resolveCrewContainer(ctx context.Context, crewID string, fallbackToID bool) (containerName, slug string, ok bool) {
+	if s.db != nil {
+		_ = s.db.QueryRowContext(ctx, "SELECT slug FROM crews WHERE id = ?", crewID).Scan(&slug)
+	}
+	if slug == "" {
+		if fallbackToID {
+			return crewID, "", true
+		}
+		return "", "", false
+	}
+	return s.container.CrewContainerName(crewID, slug), slug, true
+}
+
 func (s *Server) handleContainerStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
@@ -30,23 +51,16 @@ func (s *Server) handleContainerStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve the crew slug → container name before inspecting. The provider
-	// keys on the container name (Docker inspect needs the name/hash, not the
-	// crew ID), so passing the raw id here silently reports "unknown" for a
-	// running crew. Mirrors handleContainerStop; falls back to the raw id for
-	// providers/tests that key on it directly.
-	containerName := id
-	if s.db != nil {
-		var slug string
-		if err := s.db.QueryRowContext(r.Context(), "SELECT slug FROM crews WHERE id = ?", id).Scan(&slug); err == nil && slug != "" {
-			containerName = s.container.CrewContainerName(id, slug)
-		}
-	}
+	// Resolve the crew slug → container name before inspecting; falls back to
+	// the raw id (mirrors handleContainerStop) so the provider can inspect a
+	// running crew instead of silently reporting "unknown".
+	containerName, _, _ := s.resolveCrewContainer(r.Context(), id, true)
 
 	status, err := s.container.ContainerStatus(r.Context(), containerName)
 	if err != nil {
-		s.logger.Error("container status failed", "crew_id", id, "container", containerName, "error", err)
-		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": id, "status": "unknown"})
+		writeEmptyOK(w, s.logger, "container status failed", err,
+			map[string]interface{}{"crew_id": id, "status": "unknown"},
+			"crew_id", id, "container", containerName)
 		return
 	}
 
@@ -95,15 +109,9 @@ func (s *Server) handleContainerStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve crew slug from DB so we can build the container name via provider.
-	var slug string
-	if s.db != nil {
-		_ = s.db.QueryRowContext(r.Context(), "SELECT slug FROM crews WHERE id = ?", id).Scan(&slug)
-	}
-	containerName := id // fallback: use raw id (works for Docker container hashes)
-	if slug != "" {
-		containerName = s.container.CrewContainerName(id, slug)
-	}
+	// Resolve crew slug from DB so we can build the container name via
+	// provider; falls back to the raw id (works for Docker container hashes).
+	containerName, slug, _ := s.resolveCrewContainer(r.Context(), id, true)
 
 	if err := s.container.StopCrewRuntime(r.Context(), containerName); err != nil {
 		s.logger.Error("container stop failed", "crew_id", id, "container", containerName, "error", err)
@@ -134,16 +142,12 @@ func (s *Server) handleContainerFileList(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var slug string
-	if s.db != nil {
-		_ = s.db.QueryRowContext(r.Context(), "SELECT slug FROM crews WHERE id = ?", crewID).Scan(&slug)
-	}
-	if slug == "" {
+	containerName, _, ok := s.resolveCrewContainer(r.Context(), crewID, false)
+	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
 		return
 	}
 
-	containerName := s.container.CrewContainerName(crewID, slug)
 	targetDir := "/home"
 	if subdir != "" {
 		cleaned := filepath.Clean(subdir)
@@ -163,8 +167,9 @@ func (s *Server) handleContainerFileList(w http.ResponseWriter, r *http.Request)
 		User:        "1001:1001",
 	})
 	if err != nil {
-		s.logger.Error("container file list exec failed", "crew_id", crewID, "error", err)
-		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "files": []interface{}{}})
+		writeEmptyOK(w, s.logger, "container file list exec failed", err,
+			map[string]interface{}{"crew_id": crewID, "files": []interface{}{}},
+			"crew_id", crewID)
 		return
 	}
 	defer result.Reader.Close()
@@ -217,16 +222,12 @@ func (s *Server) handleContainerGitLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var slug string
-	if s.db != nil {
-		_ = s.db.QueryRowContext(r.Context(), "SELECT slug FROM crews WHERE id = ?", crewID).Scan(&slug)
-	}
-	if slug == "" {
+	containerName, _, ok := s.resolveCrewContainer(r.Context(), crewID, false)
+	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
 		return
 	}
 
-	containerName := s.container.CrewContainerName(crewID, slug)
 	workDir := "/home"
 	if agentSlug != "" {
 		clean := filepath.Base(agentSlug)
@@ -321,16 +322,12 @@ func (s *Server) handleContainerGitDiff(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var slug string
-	if s.db != nil {
-		_ = s.db.QueryRowContext(r.Context(), "SELECT slug FROM crews WHERE id = ?", crewID).Scan(&slug)
-	}
-	if slug == "" {
+	containerName, _, ok := s.resolveCrewContainer(r.Context(), crewID, false)
+	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
 		return
 	}
 
-	containerName := s.container.CrewContainerName(crewID, slug)
 	workDir := "/home"
 	if agentSlug != "" {
 		clean := filepath.Base(agentSlug)

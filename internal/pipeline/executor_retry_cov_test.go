@@ -11,8 +11,8 @@ import (
 // ---------------------------------------------------------------------------
 // executor_retry.go — runStepWithRetry policy normalisation + backoff +
 // cancellation, shouldRetry / containsCaseFold / indexCaseFold,
-// runRunnerWithTransientRetry's ctx-cancel paths, sleepWithJitter,
-// injectValidationFeedback, isTransientRunnerError.
+// runRunnerWithTransientRetry's ctx-cancel paths, retrySleep +
+// applyJitter, injectValidationFeedback, isTransientRunnerError.
 // ---------------------------------------------------------------------------
 
 // retryHarness wires a closure-runner executor plus a step carrying
@@ -164,15 +164,38 @@ func TestRunRunnerWithTransientRetry_CtxCancelPaths(t *testing.T) {
 	}
 }
 
-func TestSleepWithJitter_CancelledContext(t *testing.T) {
+func TestRetrySleepWithHalfJitter_CancelledContext(t *testing.T) {
 	t.Parallel()
+	e := &Executor{}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if sleepWithJitter(ctx, 10*time.Millisecond) {
+	if e.retrySleep(ctx, e.applyJitter(10*time.Millisecond, jitterHalf)) {
 		t.Error("cancelled ctx must return false")
 	}
-	if !sleepWithJitter(context.Background(), 2*time.Millisecond) {
+	if !e.retrySleep(context.Background(), e.applyJitter(2*time.Millisecond, jitterHalf)) {
 		t.Error("live ctx must complete the sleep")
+	}
+}
+
+func TestApplyJitter_Distributions(t *testing.T) {
+	t.Parallel()
+	e := &Executor{}
+	const d = 100 * time.Millisecond
+	for i := 0; i < 200; i++ {
+		if got := e.applyJitter(d, jitterFull); got < 0 || got >= d {
+			t.Fatalf("jitterFull out of [0, d): %v", got)
+		}
+		if got := e.applyJitter(d, jitterHalf); got < d/2 || got > d {
+			t.Fatalf("jitterHalf out of [d/2, d]: %v", got)
+		}
+	}
+	if got := e.applyJitter(0, jitterFull); got != 0 {
+		t.Errorf("zero delay must map to zero, got %v", got)
+	}
+	// The injected jitterFn overrides both distributions.
+	e.jitterFn = func(time.Duration) time.Duration { return 7 }
+	if e.applyJitter(d, jitterFull) != 7 || e.applyJitter(d, jitterHalf) != 7 {
+		t.Error("jitterFn must override both modes")
 	}
 }
 

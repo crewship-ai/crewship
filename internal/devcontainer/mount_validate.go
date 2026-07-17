@@ -14,8 +14,13 @@ import "regexp"
 // tenant's image layers and volumes. Crewship has no operator "privileged crew"
 // concept, so these are rejected outright. If one is ever introduced, gate these
 // behind it explicitly rather than re-adding them to the default allowlist.
+// SECURITY: /tmp is deliberately NOT listed. docker_container.go turns any
+// non-volume allowed source into a mount.TypeBind, so {"source":"/tmp",
+// "target":"/tmp"} bind-mounts the DAEMON's host /tmp into the container —
+// cross-tenant/host exposure — while buying nothing, since the runtime
+// container already has its own /tmp tmpfs. A feature that genuinely wants
+// scratch space gets it from that tmpfs, not from a host bind.
 var allowedMountSources = map[string]bool{
-	"/tmp":      true, // tmpfs mounts
 	"/dev/fuse": true, // FUSE-based features
 }
 

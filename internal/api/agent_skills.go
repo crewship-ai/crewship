@@ -37,8 +37,7 @@ func (h *AgentHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
 
 	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
-		h.logger.Error("check agent exists", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "check agent exists", err)
 		return
 	}
 	if !found {
@@ -55,8 +54,7 @@ func (h *AgentHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
 		WHERE as2.agent_id = ?
 	`, agentID)
 	if err != nil {
-		h.logger.Error("list agent skills", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list agent skills", err)
 		return
 	}
 	defer rows.Close()
@@ -69,16 +67,14 @@ func (h *AgentHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
 			&s.Skill.ID, &s.Skill.Name, &s.Skill.Slug, &s.Skill.DisplayName,
 			&s.Skill.Description, &s.Skill.Category, &s.Skill.Source,
 			&s.Skill.Icon, &s.Skill.Version); err != nil {
-			h.logger.Error("scan agent skill", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan agent skill", err)
 			return
 		}
 		s.Enabled = enabled == 1
 		result = append(result, s)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (agent skills)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration (agent skills)", err)
 		return
 	}
 	if result == nil {
@@ -106,8 +102,7 @@ func (h *AgentHandler) AddSkill(w http.ResponseWriter, r *http.Request) {
 
 	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
-		h.logger.Error("check agent exists", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "check agent exists", err)
 		return
 	}
 	if !found {
@@ -200,8 +195,7 @@ func (h *AgentHandler) RemoveSkill(w http.ResponseWriter, r *http.Request) {
 
 	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
-		h.logger.Error("check agent exists", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "check agent exists", err)
 		return
 	}
 	if !found {
@@ -213,8 +207,7 @@ func (h *AgentHandler) RemoveSkill(w http.ResponseWriter, r *http.Request) {
 		"DELETE FROM agent_skills WHERE agent_id = ? AND skill_id = ?",
 		agentID, skillID)
 	if err != nil {
-		h.logger.Error("remove agent skill", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "remove agent skill", err)
 		return
 	}
 	n, _ := res.RowsAffected()

@@ -150,8 +150,7 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 			replyError(w, http.StatusNotFound, "Agent not found")
 			return
 		}
-		h.logger.Error("resolve agent config", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "resolve agent config", err)
 		return
 	}
 

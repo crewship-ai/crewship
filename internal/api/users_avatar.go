@@ -149,13 +149,11 @@ func (h *UserProfileHandler) UploadAvatar(w http.ResponseWriter, r *http.Request
 	// possible follow-up if it becomes a concern.
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o775); err != nil {
-		h.logger.Error("avatar mkdir", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "avatar mkdir", err)
 		return
 	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
-		h.logger.Error("avatar write", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "avatar write", err)
 		return
 	}
 
@@ -166,8 +164,7 @@ func (h *UserProfileHandler) UploadAvatar(w http.ResponseWriter, r *http.Request
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := h.db.ExecContext(r.Context(),
 		"UPDATE users SET avatar_url = ?, updated_at = ? WHERE id = ?", url, now, user.ID); err != nil {
-		h.logger.Error("avatar update url", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "avatar update url", err)
 		return
 	}
 
@@ -194,8 +191,7 @@ func (h *UserProfileHandler) DeleteAvatar(w http.ResponseWriter, r *http.Request
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := h.db.ExecContext(r.Context(),
 		"UPDATE users SET avatar_url = NULL, updated_at = ? WHERE id = ?", now, user.ID); err != nil {
-		h.logger.Error("avatar clear url", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "avatar clear url", err)
 		return
 	}
 
@@ -217,8 +213,7 @@ func (h *UserProfileHandler) ServeAvatar(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err != nil {
-		h.logger.Error("avatar read", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "avatar read", err)
 		return
 	}
 

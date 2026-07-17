@@ -145,17 +145,23 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 		if statsErr != nil {
 			h.logger.Error("batch get task stats", "error", statsErr)
 		}
+		var tasksMap map[string][]missionTaskResponse
+		if includeTasks {
+			var tasksErr error
+			tasksMap, tasksErr = h.getBatchTasksForMissions(r, ids)
+			if tasksErr != nil {
+				h.logger.Error("batch load tasks for missions", "error", tasksErr)
+			}
+		}
 		for i := range result {
 			if statsMap != nil {
 				result[i].TaskStats = statsMap[result[i].ID]
 			}
 			if includeTasks {
-				tasks, tasksErr := h.loadTasksForMission(r, result[i].ID)
-				if tasksErr != nil {
-					h.logger.Error("load tasks for mission", "mission_id", result[i].ID, "error", tasksErr)
-					result[i].Tasks = []missionTaskResponse{}
-				} else {
+				if tasks, ok := tasksMap[result[i].ID]; ok {
 					result[i].Tasks = tasks
+				} else {
+					result[i].Tasks = []missionTaskResponse{}
 				}
 			}
 		}

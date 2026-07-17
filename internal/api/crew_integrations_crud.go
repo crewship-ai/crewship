@@ -44,8 +44,7 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 	// Verify crew
 	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
-		h.logger.Error("crew exists check", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "crew exists check", err)
 		return
 	}
 	if !found {
@@ -237,8 +236,7 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 
 	query, args := u.Build("crew_mcp_servers", "id = ?", id)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-		h.logger.Error("update crew integration", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "update crew integration", err)
 		return
 	}
 
@@ -257,8 +255,7 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 		&s.ID, &s.CrewID, &s.WorkspaceMCPServerID, &s.Name, &s.DisplayName, &s.Transport,
 		&s.Endpoint, &s.Command, &s.ArgsJSON, &s.EnvJSON, &s.ConfigJSON,
 		&s.Icon, &enabled, &s.CreatedAt, &s.UpdatedAt, &s.AgentBindCount); err != nil {
-		h.logger.Error("fetch updated crew integration", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "fetch updated crew integration", err)
 		return
 	}
 	s.Enabled = enabled == 1
@@ -311,8 +308,7 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 	if _, err := tx.ExecContext(r.Context(),
 		"DELETE FROM agent_mcp_bindings WHERE mcp_server_id = ? AND mcp_server_scope = 'crew'", id); err != nil {
 		tx.Rollback()
-		h.logger.Error("delete agent bindings for crew server", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "delete agent bindings for crew server", err)
 		return
 	}
 

@@ -98,8 +98,7 @@ func (h *RunHandler) Get(w http.ResponseWriter, r *http.Request) {
 		Limit:       100,
 	})
 	if err != nil {
-		h.logger.Error("get run: list", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get run: list", err)
 		return
 	}
 	var found *journal.RunAggregated
@@ -211,8 +210,7 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	aggregated, total, err := journal.ListRuns(r.Context(), h.db, q)
 	if err != nil {
-		h.logger.Error("list runs", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list runs", err)
 		return
 	}
 
@@ -222,8 +220,7 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	stats, err := journal.RunStats(r.Context(), h.db, workspaceID)
 	if err != nil {
-		h.logger.Error("count run stats", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "count run stats", err)
 		return
 	}
 
@@ -319,8 +316,7 @@ func (h *RunHandler) Insights(w http.ResponseWriter, r *http.Request) {
 
 	agg, err := journal.RunInsights(r.Context(), h.db, workspaceID, window)
 	if err != nil {
-		h.logger.Error("run insights", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "run insights", err)
 		return
 	}
 

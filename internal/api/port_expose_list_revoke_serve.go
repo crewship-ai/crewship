@@ -63,8 +63,7 @@ func (h *PortExposeHandler) List(w http.ResponseWriter, r *http.Request) {
 			workspaceID, crewID, statusFilter)
 	}
 	if err != nil {
-		h.logger.Error("port_expose: list query", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "port_expose: list query", err)
 		return
 	}
 	defer rows.Close()
@@ -75,8 +74,7 @@ func (h *PortExposeHandler) List(w http.ResponseWriter, r *http.Request) {
 		var description, revokedAt, revokedReason sql.NullString
 		if err := rows.Scan(&it.ID, &it.AgentID, &it.AgentSlug, &it.ContainerPort,
 			&description, &it.Status, &it.ExpiresAt, &revokedAt, &revokedReason, &it.CreatedAt); err != nil {
-			h.logger.Error("port_expose: list scan", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "port_expose: list scan", err)
 			return
 		}
 		if description.Valid {
@@ -93,8 +91,7 @@ func (h *PortExposeHandler) List(w http.ResponseWriter, r *http.Request) {
 		out = append(out, it)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("port_expose: list rows err", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "port_expose: list rows err", err)
 		return
 	}
 
@@ -146,8 +143,7 @@ func (h *PortExposeHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		WHERE id = ? AND workspace_id = ? AND crew_id = ? AND status IN ('ACTIVE','PENDING')
 	`, now, reasonVal, exposeID, workspaceID, crewID)
 	if err != nil {
-		h.logger.Error("port_expose: revoke update", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "port_expose: revoke update", err)
 		return
 	}
 	n, _ := res.RowsAffected()

@@ -286,8 +286,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 					writeAuthError(w, http.StatusUnauthorized, reasonSessionRevoked)
 					return
 				}
-				m.logger.Error("session lookup failed", "error", err)
-				replyError(w, http.StatusInternalServerError, "Internal server error")
+				replyInternalError(w, m.logger, "session lookup failed", err)
 				return
 			}
 			if !sess.Active(timeNow()) {

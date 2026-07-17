@@ -58,8 +58,7 @@ func (h *IntegrationHandler) ListAgentBindings(w http.ResponseWriter, r *http.Re
 	// Verify agent
 	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
-		h.logger.Error("agent exists check", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "agent exists check", err)
 		return
 	}
 	if !found {
@@ -86,8 +85,7 @@ func (h *IntegrationHandler) ListAgentBindings(w http.ResponseWriter, r *http.Re
 		WHERE b.agent_id = ?
 		ORDER BY b.created_at DESC`, agentID)
 	if err != nil {
-		h.logger.Error("list agent bindings", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list agent bindings", err)
 		return
 	}
 	defer rows.Close()
@@ -106,8 +104,7 @@ func (h *IntegrationHandler) ListAgentBindings(w http.ResponseWriter, r *http.Re
 		results = append(results, b)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("iterate agent bindings", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "iterate agent bindings", err)
 		return
 	}
 	if results == nil {
@@ -129,8 +126,7 @@ func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.R
 	agentID := r.PathValue("agentId")
 	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
-		h.logger.Error("agent exists check", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "agent exists check", err)
 		return
 	}
 	if !found {
@@ -315,8 +311,7 @@ func (h *IntegrationHandler) UpdateAgentBinding(w http.ResponseWriter, r *http.R
 
 	query, args := ub.Build("agent_mcp_bindings", "id = ?", id)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-		h.logger.Error("update agent binding", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "update agent binding", err)
 		return
 	}
 

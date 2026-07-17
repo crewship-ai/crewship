@@ -97,8 +97,7 @@ func (h *IntegrationHandler) ListWorkspaceIntegrations(w http.ResponseWriter, r 
 		WHERE ws.workspace_id = ? AND ws.deleted_at IS NULL
 		ORDER BY ws.created_at DESC`, workspaceID)
 	if err != nil {
-		h.logger.Error("list workspace integrations", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list workspace integrations", err)
 		return
 	}
 	defer rows.Close()
@@ -118,8 +117,7 @@ func (h *IntegrationHandler) ListWorkspaceIntegrations(w http.ResponseWriter, r 
 		results = append(results, s)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("iterate workspace integrations", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "iterate workspace integrations", err)
 		return
 	}
 	if results == nil {
@@ -328,8 +326,7 @@ func (h *IntegrationHandler) UpdateWorkspaceIntegration(w http.ResponseWriter, r
 
 	query, args := u.Build("workspace_mcp_servers", "id = ? AND workspace_id = ?", id, workspaceID)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-		h.logger.Error("update workspace integration", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "update workspace integration", err)
 		return
 	}
 

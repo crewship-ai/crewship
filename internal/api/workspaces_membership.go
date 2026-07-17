@@ -48,8 +48,7 @@ func (h *WorkspaceHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 		ORDER BY wm.created_at ASC
 	`, workspaceID)
 	if err != nil {
-		h.logger.Error("list members", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list members", err)
 		return
 	}
 	defer rows.Close()
@@ -60,16 +59,14 @@ func (h *WorkspaceHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 		var u memberUser
 		if err := rows.Scan(&m.ID, &m.WorkspaceID, &m.UserID, &m.Role, &m.CreatedAt, &m.UpdatedAt,
 			&u.ID, &u.Email, &u.FullName, &u.AvatarURL); err != nil {
-			h.logger.Error("scan member", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan member", err)
 			return
 		}
 		m.User = &u
 		result = append(result, m)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (members)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration (members)", err)
 		return
 	}
 
@@ -103,8 +100,7 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 				replyError(w, http.StatusPaymentRequired, err.Error())
 				return
 			}
-			h.logger.Error("check member limit", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "check member limit", err)
 			return
 		}
 	}
@@ -144,8 +140,7 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != sql.ErrNoRows {
-		h.logger.Error("check existing member", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "check existing member", err)
 		return
 	}
 
@@ -156,8 +151,7 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		h.logger.Error("check user exists", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "check user exists", err)
 		return
 	}
 
@@ -168,8 +162,7 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		"INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
 		memberID, workspaceID, req.UserID, req.Role, now, now)
 	if err != nil {
-		h.logger.Error("insert member", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "insert member", err)
 		return
 	}
 
@@ -210,8 +203,7 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 			replyError(w, http.StatusNotFound, "Member not found")
 			return
 		}
-		h.logger.Error("get member", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get member", err)
 		return
 	}
 
@@ -224,8 +216,7 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 		"DELETE FROM workspace_members WHERE id = ? AND workspace_id = ?",
 		memberID, workspaceID)
 	if err != nil {
-		h.logger.Error("delete member", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "delete member", err)
 		return
 	}
 
@@ -267,8 +258,7 @@ func (h *WorkspaceHandler) ListInvitations(w http.ResponseWriter, r *http.Reques
 		ORDER BY wi.created_at DESC
 	`, workspaceID)
 	if err != nil {
-		h.logger.Error("list invitations", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list invitations", err)
 		return
 	}
 	defer rows.Close()
@@ -280,16 +270,14 @@ func (h *WorkspaceHandler) ListInvitations(w http.ResponseWriter, r *http.Reques
 		if err := rows.Scan(&inv.ID, &inv.WorkspaceID, &inv.Email, &inv.Role,
 			&inv.InvitedBy, &inv.Token, &inv.ExpiresAt, &inv.AcceptedAt, &inv.CreatedAt,
 			&inviter.ID, &inviter.Email, &inviter.FullName); err != nil {
-			h.logger.Error("scan invitation", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan invitation", err)
 			return
 		}
 		inv.Inviter = &inviter
 		result = append(result, inv)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (invitations)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration (invitations)", err)
 		return
 	}
 
@@ -332,8 +320,7 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 				replyError(w, http.StatusPaymentRequired, err.Error())
 				return
 			}
-			h.logger.Error("check member limit for invitation", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "check member limit for invitation", err)
 			return
 		}
 	}
@@ -374,8 +361,7 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err != sql.ErrNoRows {
-		h.logger.Error("check existing member by email", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "check existing member by email", err)
 		return
 	}
 
@@ -389,8 +375,7 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err != sql.ErrNoRows {
-		h.logger.Error("check existing invitation", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "check existing invitation", err)
 		return
 	}
 
@@ -399,8 +384,7 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 	invID := generateCUID()
 	token, err := generateToken()
 	if err != nil {
-		h.logger.Error("generate invitation token", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "generate invitation token", err)
 		return
 	}
 
@@ -410,8 +394,7 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 		invID, workspaceID, req.Email, req.Role, user.ID, token,
 		expiresAt.Format(time.RFC3339), now.Format(time.RFC3339))
 	if err != nil {
-		h.logger.Error("insert invitation", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "insert invitation", err)
 		return
 	}
 

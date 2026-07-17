@@ -60,6 +60,17 @@ func NewOllamaWithClient(baseURL, model string, client *http.Client) *Ollama {
 // Name returns "ollama".
 func (o *Ollama) Name() string { return "ollama" }
 
+// checkOllamaStatus maps a non-200 Ollama response to an error, reading at
+// most 512 bytes of the body for context. Ollama has no auth or rate-limit
+// distinction, so the shared checkStatus wording doesn't apply here.
+func checkOllamaStatus(resp *http.Response) error {
+	if resp.StatusCode == http.StatusOK {
+		return nil
+	}
+	errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	return fmt.Errorf("ollama returned %d: %s", resp.StatusCode, errBody)
+}
+
 // ListModels implements ModelLister against Ollama's GET /api/tags. There is
 // no curated fallback for Ollama (the model set is whatever the local daemon
 // has pulled), so a failure here is terminal for the caller — they get the
@@ -75,9 +86,8 @@ func (o *Ollama) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("ollama returned %d: %s", resp.StatusCode, errBody)
+	if err := checkOllamaStatus(resp); err != nil {
+		return nil, err
 	}
 
 	var raw struct {
@@ -117,9 +127,8 @@ func (o *Ollama) Complete(ctx context.Context, req Request) (*Response, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("ollama returned %d: %s", resp.StatusCode, errBody)
+	if err := checkOllamaStatus(resp); err != nil {
+		return nil, err
 	}
 
 	var raw ollamaChatResponse
@@ -147,9 +156,8 @@ func (o *Ollama) Stream(ctx context.Context, req Request, handler func(StreamEve
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("ollama returned %d: %s", resp.StatusCode, errBody)
+	if err := checkOllamaStatus(resp); err != nil {
+		return nil, err
 	}
 
 	return o.parseNDJSONStream(resp.Body, handler)
@@ -193,7 +201,7 @@ func (o *Ollama) buildRequestBody(req Request, stream bool) ([]byte, error) {
 	body["options"] = opts
 
 	if len(req.Tools) > 0 {
-		body["tools"] = toOllamaTools(req.Tools)
+		body["tools"] = toFunctionTools(req.Tools)
 	}
 
 	return json.Marshal(body)
@@ -214,15 +222,6 @@ type ollamaToolCall struct {
 	} `json:"function"`
 }
 
-type ollamaToolDef struct {
-	Type     string `json:"type"`
-	Function struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Parameters  any    `json:"parameters"`
-	} `json:"function"`
-}
-
 type ollamaChatResponse struct {
 	Message ollamaMessage `json:"message"`
 	Done    bool          `json:"done"`
@@ -239,17 +238,9 @@ func (r *ollamaChatResponse) toResponse() *Response {
 	}
 	if len(r.Message.ToolCalls) > 0 {
 		resp.StopReason = StopToolUse
-		for i, tc := range r.Message.ToolCalls {
-			argsJSON, err := json.Marshal(tc.Function.Arguments)
-			if err != nil {
-				argsJSON = []byte("{}")
-			}
-			resp.ToolCalls = append(resp.ToolCalls, ToolCall{
-				ID:    fmt.Sprintf("tc_%d", i),
-				Name:  tc.Function.Name,
-				Input: string(argsJSON),
-			})
-		}
+		// Complete has no error channel for a single bad tool call, so the
+		// per-call "{}" fallback inside toToolCalls is the whole story here.
+		resp.ToolCalls, _ = toToolCalls(r.Message.ToolCalls)
 	} else {
 		resp.StopReason = StopEndTurn
 	}
@@ -273,15 +264,29 @@ func toOllamaMessage(m Message) ollamaMessage {
 	return ollamaMessage{Role: m.Role, Content: m.Content}
 }
 
-func toOllamaTools(tools []ToolDef) []ollamaToolDef {
-	out := make([]ollamaToolDef, len(tools))
-	for i, t := range tools {
-		out[i] = ollamaToolDef{Type: "function"}
-		out[i].Function.Name = t.Name
-		out[i].Function.Description = t.Description
-		out[i].Function.Parameters = t.InputSchema
+// toToolCalls converts Ollama tool calls to the provider-neutral form,
+// synthesising sequential IDs (Ollama assigns none). A marshal failure
+// substitutes "{}" for that call's input and reports the first such error so
+// the streaming path can surface it; the non-streaming path keeps the
+// fallback and ignores the error.
+func toToolCalls(tcs []ollamaToolCall) ([]ToolCall, error) {
+	out := make([]ToolCall, len(tcs))
+	var firstErr error
+	for i, tc := range tcs {
+		argsJSON, err := json.Marshal(tc.Function.Arguments)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("marshal tool call args: %w", err)
+			}
+			argsJSON = []byte("{}")
+		}
+		out[i] = ToolCall{
+			ID:    fmt.Sprintf("tc_%d", i),
+			Name:  tc.Function.Name,
+			Input: string(argsJSON),
+		}
 	}
-	return out
+	return out, firstErr
 }
 
 // parseNDJSONStream reads Ollama's NDJSON stream and emits StreamEvents.
@@ -317,16 +322,11 @@ func (o *Ollama) parseNDJSONStream(r io.Reader, handler func(StreamEvent) error)
 
 			if len(chunk.Message.ToolCalls) > 0 {
 				final.StopReason = StopToolUse
-				for i, tc := range chunk.Message.ToolCalls {
-					argsJSON, err := json.Marshal(tc.Function.Arguments)
-					if err != nil {
-						return final, fmt.Errorf("marshal tool call args: %w", err)
-					}
-					toolCall := ToolCall{
-						ID:    fmt.Sprintf("tc_%d", i),
-						Name:  tc.Function.Name,
-						Input: string(argsJSON),
-					}
+				toolCalls, err := toToolCalls(chunk.Message.ToolCalls)
+				if err != nil {
+					return final, err
+				}
+				for _, toolCall := range toolCalls {
 					final.ToolCalls = append(final.ToolCalls, toolCall)
 					if err := handler(StreamEvent{Type: "tool_call", ToolCall: &toolCall}); err != nil {
 						return final, err

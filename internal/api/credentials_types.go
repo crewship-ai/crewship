@@ -159,20 +159,9 @@ func validateCredentialPayload(req *createCredentialRequest) string {
 			return "username is required for USERPASS credentials"
 		}
 
-	case CredTypeSSHKey:
-		// PEM gate keeps obviously-wrong pastes out of the vault —
-		// the most common mistake is pasting an OpenSSH public key
-		// (ssh-rsa AAAA...) into the private-key field. We don't
-		// fully parse the key here; ssh.ParsePrivateKey lives in
-		// the sidecar's mount path where a bad key surfaces as a
-		// container-start error the operator can correlate.
-		if !looksLikePEM(req.Value, "PRIVATE KEY") {
-			return "ssh key must be a PEM-encoded private key (begins with -----BEGIN ... PRIVATE KEY-----)"
-		}
-
-	case CredTypeCertificate:
-		if !looksLikePEM(req.Value, "CERTIFICATE") {
-			return "certificate must be PEM-encoded (begins with -----BEGIN CERTIFICATE-----)"
+	case CredTypeSSHKey, CredTypeCertificate:
+		if msg := credentialValueShapeError(req.Type, req.Value); msg != "" {
+			return msg
 		}
 
 	case CredTypeGenericSecret:
@@ -316,6 +305,32 @@ func validateEndpointURL(value string) string {
 	// hard-block gate (#988 review).
 	if ip := httpsafe.ParseIPStripZone(u.Hostname()); ip != nil && httpsafe.IsHardBlockedIP(ip) {
 		return "endpoint URL points at a link-local/metadata/reserved address (" + ip.String() + "), which is never a valid model endpoint"
+	}
+	return ""
+}
+
+// credentialValueShapeError enforces the per-type value-shape gate for
+// the two PEM-shaped credential types, returning the end-user-readable
+// 400 message ("" when the value passes or the type carries no shape
+// rule). Shared by the Create path (validateCredentialPayload) and the
+// Update path's merged-payload validation so the messages stay
+// byte-identical.
+//
+// PEM gate keeps obviously-wrong pastes out of the vault — the most
+// common mistake is pasting an OpenSSH public key (ssh-rsa AAAA...)
+// into the private-key field. We don't fully parse the key here;
+// ssh.ParsePrivateKey lives in the sidecar's mount path where a bad
+// key surfaces as a container-start error the operator can correlate.
+func credentialValueShapeError(credType CredentialType, value string) string {
+	switch credType {
+	case CredTypeSSHKey:
+		if !looksLikePEM(value, "PRIVATE KEY") {
+			return "ssh key must be a PEM-encoded private key (begins with -----BEGIN ... PRIVATE KEY-----)"
+		}
+	case CredTypeCertificate:
+		if !looksLikePEM(value, "CERTIFICATE") {
+			return "certificate must be PEM-encoded (begins with -----BEGIN CERTIFICATE-----)"
+		}
 	}
 	return ""
 }

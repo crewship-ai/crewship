@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 )
 
 // Agent-specific batch loaders. Extracted from agents.go so the
@@ -21,14 +20,9 @@ func batchCountByAgentID(ctx context.Context, db *sql.DB, tmpl string, ids []str
 	if len(ids) == 0 {
 		return map[string]int{}, nil
 	}
-	placeholders := strings.Repeat("?,", len(ids))
-	placeholders = placeholders[:len(placeholders)-1]
-	query := fmt.Sprintf(tmpl, placeholders)
+	query := fmt.Sprintf(tmpl, sqlPlaceholders(len(ids)))
 
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		args[i] = id
-	}
+	args := toAnySlice(ids)
 
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {

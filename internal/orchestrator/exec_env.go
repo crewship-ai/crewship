@@ -12,14 +12,12 @@ import (
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
-// BuildEnvVars constructs the environment variables for a container exec,
-// including agent identity, credentials (when sidecar is not used), and
-// provider-specific settings. Lives in exec_env.go since the multi-CLI
-// adapter refactor (the per-CLI command building moved to adapter_*.go);
-// this function is provider-neutral and stays here next to its sidecar
-// counterpart BuildEnvVarsSidecar.
-func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
-	env := []string{
+// baseAgentEnv returns the agent-identity env entries shared by every exec
+// (with and without sidecar): HOME plus the CREWSHIP_* identity variables.
+// Order matters — BuildEnvVars and BuildEnvVarsSidecar both start from this
+// exact sequence.
+func baseAgentEnv(req AgentRunRequest) []string {
+	return []string{
 		fmt.Sprintf("HOME=/crew/agents/%s", req.AgentSlug),
 		"CLAUDE_CODE_DISABLE_AUTOUPDATE=1",
 		"CREWSHIP_AGENT_ID=" + req.AgentID,
@@ -27,6 +25,16 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 		"CREWSHIP_CHAT_ID=" + req.ChatID,
 		"CREWSHIP_CREW_SHARED=/crew/shared",
 	}
+}
+
+// BuildEnvVars constructs the environment variables for a container exec,
+// including agent identity, credentials (when sidecar is not used), and
+// provider-specific settings. Lives in exec_env.go since the multi-CLI
+// adapter refactor (the per-CLI command building moved to adapter_*.go);
+// this function is provider-neutral and stays here next to its sidecar
+// counterpart BuildEnvVarsSidecar.
+func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
+	env := baseAgentEnv(req)
 
 	if activeCred != nil {
 		envVar := resolveEnvVar(activeCred)
@@ -215,13 +223,7 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		}
 	}
 
-	env := []string{
-		fmt.Sprintf("HOME=/crew/agents/%s", req.AgentSlug),
-		"CLAUDE_CODE_DISABLE_AUTOUPDATE=1",
-		"CREWSHIP_AGENT_ID=" + req.AgentID,
-		"CREWSHIP_CREW_ID=" + req.CrewID,
-		"CREWSHIP_CHAT_ID=" + req.ChatID,
-		"CREWSHIP_CREW_SHARED=/crew/shared",
+	env := append(baseAgentEnv(req),
 		// Proxy config -- all outbound HTTP goes through the sidecar
 		"HTTP_PROXY=http://127.0.0.1:9119",
 		"HTTPS_PROXY=http://127.0.0.1:9119",
@@ -232,7 +234,7 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		// would try to proxy requests to 127.0.0.1 through the proxy itself.
 		"NO_PROXY=127.0.0.1,localhost,::1",
 		"no_proxy=127.0.0.1,localhost,::1",
-	}
+	)
 
 	if hasOAuth {
 		// OAuth mode: Claude Code authenticates via HTTPS CONNECT tunnel.

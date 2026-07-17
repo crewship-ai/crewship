@@ -102,8 +102,7 @@ func (h *ProxyHandler) AgentDebug(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "Agent not found")
 			return
 		}
-		h.logger.Error("get agent for debug", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get agent for debug", err)
 		return
 	}
 
@@ -225,8 +224,7 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 
 	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
-		h.logger.Error("agent exists check", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "agent exists check", err)
 		return
 	}
 	if !found {
@@ -242,8 +240,7 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 		"UPDATE agents SET status = 'STOPPED', updated_at = ? WHERE id = ? AND workspace_id = ?",
 		now, agentID, workspaceID)
 	if err != nil {
-		h.logger.Error("update agent status to STOPPED", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "update agent status to STOPPED", err)
 		return
 	}
 	if affected, _ := res.RowsAffected(); affected == 0 {
@@ -275,8 +272,7 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]interface{}{"messages": []interface{}{}})
 			return
 		}
-		h.logger.Error("get chat workspace", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get chat workspace", err)
 		return
 	}
 

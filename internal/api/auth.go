@@ -315,15 +315,13 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != sql.ErrNoRows {
-		h.logger.Error("check existing email", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "check existing email", err)
 		return
 	}
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
-		h.logger.Error("hash password", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "hash password", err)
 		return
 	}
 
@@ -337,8 +335,7 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("begin tx", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "begin tx", err)
 		return
 	}
 	defer tx.Rollback()
@@ -347,8 +344,7 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		"INSERT INTO users (id, full_name, email, hashed_password, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
 		userID, req.FullName, req.Email, string(hashed), now, now)
 	if err != nil {
-		h.logger.Error("insert user", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "insert user", err)
 		return
 	}
 
@@ -357,8 +353,7 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		"INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
 		workspaceID, req.FullName+"'s Workspace", slug, now, now)
 	if err != nil {
-		h.logger.Error("insert workspace", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "insert workspace", err)
 		return
 	}
 
@@ -366,14 +361,12 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		"INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)",
 		memberID, workspaceID, userID, "OWNER", now)
 	if err != nil {
-		h.logger.Error("insert membership", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "insert membership", err)
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit tx", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "commit tx", err)
 		return
 	}
 
@@ -507,8 +500,7 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
-		h.logger.Error("bootstrap: hash password", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "bootstrap: hash password", err)
 		return
 	}
 
@@ -522,8 +514,7 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("bootstrap: begin tx", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "bootstrap: begin tx", err)
 		return
 	}
 	defer tx.Rollback()
@@ -551,14 +542,12 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		 WHERE NOT EXISTS (SELECT 1 FROM users)`,
 		userID, req.FullName, req.Email, string(hashed), now, now)
 	if err != nil {
-		h.logger.Error("bootstrap: insert user", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "bootstrap: insert user", err)
 		return
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		h.logger.Error("bootstrap: rows affected", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "bootstrap: rows affected", err)
 		return
 	}
 	if n == 0 {
@@ -575,8 +564,7 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		"INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
 		workspaceID, req.FullName+"'s Workspace", slug, now, now)
 	if err != nil {
-		h.logger.Error("bootstrap: insert workspace", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "bootstrap: insert workspace", err)
 		return
 	}
 
@@ -584,8 +572,7 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		"INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)",
 		memberID, workspaceID, userID, "OWNER", now)
 	if err != nil {
-		h.logger.Error("bootstrap: insert membership", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "bootstrap: insert membership", err)
 		return
 	}
 
@@ -598,8 +585,7 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	// the token surface is the right default.
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
-		h.logger.Error("bootstrap: generate token", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "bootstrap: generate token", err)
 		return
 	}
 	cliToken := cliTokenPrefix + hex.EncodeToString(tokenBytes)
@@ -617,14 +603,12 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		"INSERT INTO cli_tokens (id, user_id, name, token_hash, tier, created_at) VALUES (?, ?, ?, ?, 'STANDARD', ?)",
 		tokenID, userID, "bootstrap", tokenHashHex, now)
 	if err != nil {
-		h.logger.Error("bootstrap: insert cli_token", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "bootstrap: insert cli_token", err)
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("bootstrap: commit", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "bootstrap: commit", err)
 		return
 	}
 
@@ -699,8 +683,7 @@ func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 
 	jweToken, err := h.validator.IssueWSTicket(user.ID, user.SessionID, user.Name, user.Email)
 	if err != nil {
-		h.logger.Error("issue ws ticket", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "issue ws ticket", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"token": jweToken})

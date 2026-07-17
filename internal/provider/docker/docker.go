@@ -535,11 +535,7 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 // only ever contains DNS/Docker-safe characters. Empty segments are dropped so
 // callers that pass only an id (slug unset) still get a stable name.
 func (p *Provider) crewResourceName(kind, id, slug string) string {
-	prefix := p.cfg.ContainerPrefix
-	if prefix == "" {
-		prefix = "crewship"
-	}
-	parts := []string{prefix, kind}
+	parts := []string{p.namePrefix(), kind}
 	if slug != "" {
 		parts = append(parts, slug)
 	}
@@ -547,6 +543,16 @@ func (p *Provider) crewResourceName(kind, id, slug string) string {
 		parts = append(parts, id)
 	}
 	return strings.Join(parts, "-")
+}
+
+// namePrefix returns the configured container/volume name prefix
+// (Config.ContainerPrefix), falling back to the "crewship" default when
+// unset.
+func (p *Provider) namePrefix() string {
+	if p.cfg.ContainerPrefix != "" {
+		return p.cfg.ContainerPrefix
+	}
+	return "crewship"
 }
 
 // CrewContainerName returns the container name for a crew. It incorporates the

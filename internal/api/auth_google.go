@@ -68,8 +68,7 @@ func (h *GoogleAuthHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 	// shape could forge the OAuth callback. Fail-closed with 500.
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		h.logger.Error("oauth state random read", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "oauth state random read", err)
 		return
 	}
 	state := base64.URLEncoding.EncodeToString(b)
@@ -83,8 +82,7 @@ func (h *GoogleAuthHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 		`INSERT INTO oauth_states (state, credential_id, workspace_id, redirect_uri) VALUES (?, '', '', ?)`,
 		state, redirect)
 	if err != nil {
-		h.logger.Error("store oauth state", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "store oauth state", err)
 		return
 	}
 
@@ -167,8 +165,7 @@ func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	// Find or create user
 	userID, err := h.findOrCreateUser(r, userInfo, token)
 	if err != nil {
-		h.logger.Error("find or create user", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "find or create user", err)
 		return
 	}
 
@@ -182,8 +179,7 @@ func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 	sess, err := h.sessions.Create(r.Context(), userID, r.UserAgent(), clientIP(r), auth.RefreshTokenTTL)
 	if err != nil {
-		h.logger.Error("create session row", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "create session row", err)
 		return
 	}
 	// If either Issue* call fails after Create, revoke the row so we

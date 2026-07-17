@@ -54,8 +54,7 @@ func (h *SessionsHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.sessions.ListActiveForUser(r.Context(), user.ID)
 	if err != nil {
-		h.logger.Error("list sessions", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list sessions", err)
 		return
 	}
 
@@ -94,8 +93,7 @@ func (h *SessionsHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "session not found")
 			return
 		}
-		h.logger.Error("get session for revoke", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get session for revoke", err)
 		return
 	}
 	if sess.UserID != user.ID {
@@ -115,8 +113,7 @@ func (h *SessionsHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "session not found")
 			return
 		}
-		h.logger.Error("revoke session", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "revoke session", err)
 		return
 	}
 

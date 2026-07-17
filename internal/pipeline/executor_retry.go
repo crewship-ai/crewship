@@ -119,7 +119,7 @@ func (e *Executor) runStepWithRetry(
 		// tests; jitter:false in the policy keeps the exact schedule.
 		actualDelay := delay
 		if jitter {
-			actualDelay = e.applyJitter(delay)
+			actualDelay = e.applyJitter(delay, jitterFull)
 		}
 		emit.emitStepRetry(ctx, step, attempt, maxAttempts, err.Error(), actualDelay)
 		if !e.retrySleep(ctx, actualDelay) {
@@ -230,15 +230,36 @@ func (e *Executor) retrySleep(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-// applyJitter maps a base delay to the actual sleep. Default is full
-// jitter (uniform in [0, d)); injectable via e.jitterFn so tests can
-// force a deterministic value.
-func (e *Executor) applyJitter(d time.Duration) time.Duration {
+// jitterMode selects the jitter distribution applyJitter draws from.
+// The two retry loops deliberately use different distributions and
+// unifying them would change production backoff behaviour.
+type jitterMode int
+
+const (
+	// jitterFull: uniform in [0, d). Used by the per-step retry loop
+	// (runStepWithRetry) — maximum decorrelation between concurrent
+	// runs hitting the same upstream.
+	jitterFull jitterMode = iota
+	// jitterHalf: uniform in [d/2, d]. Used by the same-tier transient
+	// loop (runRunnerWithTransientRetry) — half-base + random keeps
+	// collisions between concurrent retries rare without making any
+	// one retry pathologically slow.
+	jitterHalf
+)
+
+// applyJitter maps a base delay to the actual sleep, drawing from the
+// given distribution. Injectable via e.jitterFn so tests can force a
+// deterministic value (the injected func overrides both modes).
+func (e *Executor) applyJitter(d time.Duration, mode jitterMode) time.Duration {
 	if e.jitterFn != nil {
 		return e.jitterFn(d)
 	}
 	if d <= 0 {
 		return 0
+	}
+	if mode == jitterHalf {
+		half := d / 2
+		return half + time.Duration(mathrand.Int64N(int64(d-half+1)))
 	}
 	return time.Duration(mathrand.Int64N(int64(d)))
 }
@@ -252,9 +273,10 @@ func (e *Executor) applyJitter(d time.Duration) time.Duration {
 // opt in via step.Retry, which runs ON TOP of this floor.
 const retryAttemptsPerTier = 2
 
-// transientRetryBackoff is the floor delay before the second attempt
-// in the same tier. We add full jitter on top so concurrent runs
-// hitting the same upstream don't stampede the recovery moment.
+// transientRetryBackoff is the base delay before the second attempt
+// in the same tier. Half-base jitter (jitterHalf) is applied on top so
+// concurrent runs hitting the same upstream don't stampede the
+// recovery moment.
 const transientRetryBackoff = 800 * time.Millisecond
 
 // runRunnerWithTransientRetry calls the agent runner and silently
@@ -303,7 +325,7 @@ func (e *Executor) runRunnerWithTransientRetry(
 			lastErr = err
 			if attempt < perTier && isTransientRunnerError(err) {
 				emit.emitStepRetry(ctx, step, attempt, perTier, err.Error(), transientRetryBackoff)
-				if !sleepWithJitter(ctx, transientRetryBackoff) {
+				if !e.retrySleep(ctx, e.applyJitter(transientRetryBackoff, jitterHalf)) {
 					return AgentStepResult{}, ctx.Err()
 				}
 				continue
@@ -314,7 +336,7 @@ func (e *Executor) runRunnerWithTransientRetry(
 		if attempt < perTier && strings.TrimSpace(res.Output) == "" {
 			lastErr = fmt.Errorf("agent runner returned empty output")
 			emit.emitStepRetry(ctx, step, attempt, perTier, "empty output", transientRetryBackoff)
-			if !sleepWithJitter(ctx, transientRetryBackoff) {
+			if !e.retrySleep(ctx, e.applyJitter(transientRetryBackoff, jitterHalf)) {
 				return AgentStepResult{}, ctx.Err()
 			}
 			continue
@@ -372,23 +394,6 @@ func isTransientRunnerError(err error) bool {
 		}
 	}
 	return false
-}
-
-// sleepWithJitter sleeps for a random duration in [delay/2, delay)
-// or returns false if the context is cancelled during the wait.
-// Half-base + random keeps collisions between concurrent retries
-// rare without making any one retry pathologically slow.
-func sleepWithJitter(ctx context.Context, delay time.Duration) bool {
-	half := delay / 2
-	jittered := half + time.Duration(mathrand.Int64N(int64(delay-half+1)))
-	t := time.NewTimer(jittered)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-t.C:
-		return true
-	}
 }
 
 // injectValidationFeedback prepends a short "previous attempt failed"

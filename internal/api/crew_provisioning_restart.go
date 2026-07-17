@@ -114,15 +114,13 @@ func (h *ProvisioningHandler) RestartCrewAgents(w http.ResponseWriter, r *http.R
 		return
 	}
 	if err != nil {
-		h.logger.Error("query crew for restart", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "query crew for restart", err)
 		return
 	}
 
 	containerID, err := h.findCrewContainer(r.Context(), crewID, slug)
 	if err != nil {
-		h.logger.Error("list containers for restart", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list containers for restart", err)
 		return
 	}
 	if containerID == "" {

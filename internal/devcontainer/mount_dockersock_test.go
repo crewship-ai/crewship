@@ -93,12 +93,31 @@ func TestMount_NonSlashStrictVolumeName(t *testing.T) {
 // TestMount_SafePaths_StillAllowed is a positive regression check that the
 // remaining intentionally-allowed host paths still pass.
 func TestMount_SafePaths_StillAllowed(t *testing.T) {
-	for _, src := range []string{"/tmp", "/dev/fuse"} {
+	for _, src := range []string{"/dev/fuse"} {
 		if !IsAllowedMountSource(src) {
 			t.Errorf("expected safe path %q to remain allowed", src)
 		}
 	}
 	if IsAllowedMountSource("") {
 		t.Error("empty source must be rejected")
+	}
+}
+
+// TestMount_HostTmp_Rejected asserts the host /tmp bind-mount source is no
+// longer accepted. docker_container.go turns a non-volume allowed source into
+// a mount.TypeBind, so a feature declaring {"source":"/tmp","target":"/tmp"}
+// used to bind the daemon's host /tmp into the container (cross-tenant/host
+// exposure). The container already has its own /tmp tmpfs, so the entry bought
+// nothing. This test would fail if /tmp were re-added to the allowlist.
+func TestMount_HostTmp_Rejected(t *testing.T) {
+	for _, src := range []string{"/tmp", "/tmp/foo", "/tmp/../etc"} {
+		if IsAllowedMountSource(src) {
+			t.Errorf("host /tmp source %q must be rejected (bind-mount of daemon /tmp; container has its own tmpfs)", src)
+		}
+	}
+	// The allowlist is exact-match, not a prefix match: a volume literally
+	// named "tmp" is a valid Docker named volume and stays allowed.
+	if !IsAllowedMountSource("tmp") {
+		t.Error(`named volume "tmp" must still be accepted (exact-match allowlist, not /tmp prefix)`)
 	}
 }

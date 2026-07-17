@@ -39,9 +39,9 @@ func TestShortID(t *testing.T) {
 		{"exactly12ch", "exactly12ch"},
 	}
 	for _, tt := range tests {
-		got := shortID(tt.input)
+		got := provider.ShortID(tt.input)
 		if got != tt.expected {
-			t.Errorf("shortID(%q) = %q, want %q", tt.input, got, tt.expected)
+			t.Errorf("ShortID(%q) = %q, want %q", tt.input, got, tt.expected)
 		}
 	}
 }

@@ -45,10 +45,10 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 		// scoping landed alongside in PR #551 after re-review.
 		path := r.URL.Path
 		isExposed := strings.HasPrefix(path, "/exposed/")
-		isUI := !isExposed &&
-			!strings.HasPrefix(path, "/api/") &&
-			path != "/healthz" && path != "/readyz" &&
-			path != "/metrics" && path != "/ws" && path != "/ws/terminal"
+		// UI = anything the SPA handler serves; the mux-routed surfaces
+		// (API, /exposed/, probes, WebSockets) share one predicate with
+		// combinedHandler so the two lists can't drift.
+		isUI := !isMuxRoutedPath(path)
 
 		if !isExposed {
 			// Audit 2026-05-23: ZAP flagged missing HSTS, COEP, CORP.

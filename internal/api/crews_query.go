@@ -36,8 +36,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 		LIMIT ? OFFSET ?
 	`, workspaceID, limit, offset)
 	if err != nil {
-		h.logger.Error("list crews", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list crews", err)
 		return
 	}
 	defer rows.Close()
@@ -45,24 +44,14 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 	var result []crewResponse
 	for rows.Next() {
 		var c crewResponse
-		var allowedDomainsJSON *string
-		if err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
-			&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
-			&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON, &c.AllowPrivateEndpoints,
-			&c.MCPConfigJSON, &c.EscalationConfig,
-			&c.RuntimeImage, &c.DevcontainerConfig, &c.MiseConfig, &c.ServicesJSON, &c.CachedImage, &c.ConfigHash,
-			&c.MaxEphemeralAgents,
-			&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members); err != nil {
-			h.logger.Error("scan crew", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+		if err := scanCrewRow(rows, &c, false, true); err != nil {
+			replyInternalError(w, h.logger, "scan crew", err)
 			return
 		}
-		c.AllowedDomains = parseAllowedDomains(allowedDomainsJSON)
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (crews)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration (crews)", err)
 		return
 	}
 
@@ -86,8 +75,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var c crewResponse
-	var allowedDomainsJSON *string
-	err := h.db.QueryRowContext(r.Context(), `
+	err := scanCrewRow(h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains, c.allow_private_endpoints,
 			c.mcp_config_json, c.escalation_config, c.issue_prefix,
@@ -98,24 +86,16 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
 		FROM crews c
 		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL
-	`, crewID, workspaceID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
-		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
-		&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON, &c.AllowPrivateEndpoints,
-		&c.MCPConfigJSON, &c.EscalationConfig, &c.IssuePrefix,
-		&c.RuntimeImage, &c.DevcontainerConfig, &c.MiseConfig, &c.ServicesJSON, &c.CachedImage, &c.ConfigHash,
-		&c.MaxEphemeralAgents,
-		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
+	`, crewID, workspaceID), &c, true, true)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			replyError(w, http.StatusNotFound, "Crew not found")
 			return
 		}
-		h.logger.Error("get crew", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get crew", err)
 		return
 	}
 
-	c.AllowedDomains = parseAllowedDomains(allowedDomainsJSON)
 	writeJSON(w, http.StatusOK, c)
 }
 
@@ -140,8 +120,7 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	// Verify crew exists and belongs to workspace
 	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
-		h.logger.Error("get crew for delete", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get crew for delete", err)
 		return
 	}
 	if !found {
@@ -172,8 +151,7 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		"UPDATE crews SET deleted_at = ? WHERE id = ?",
 		now, crewID)
 	if err != nil {
-		h.logger.Error("soft delete crew", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "soft delete crew", err)
 		return
 	}
 

@@ -27,8 +27,7 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 
 	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
-		h.logger.Error("check agent exists", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "check agent exists", err)
 		return
 	}
 	if !found {
@@ -51,8 +50,7 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 		ORDER BY ac.env_var_name, ac.priority DESC
 	`, agentID)
 	if err != nil {
-		h.logger.Error("list agent credentials", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "list agent credentials", err)
 		return
 	}
 	defer rows.Close()
@@ -63,15 +61,13 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&c.ID, &c.AgentID, &c.CredentialID, &c.CredName,
 			&c.CredType, &c.CredProvider, &c.CredStatus,
 			&c.EnvVarName, &c.Priority, &c.CreatedAt); err != nil {
-			h.logger.Error("scan agent credential", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "scan agent credential", err)
 			return
 		}
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (agent credentials)", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "rows iteration (agent credentials)", err)
 		return
 	}
 	if result == nil {
@@ -100,8 +96,7 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 
 	foundAgent, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
-		h.logger.Error("check agent exists", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "check agent exists", err)
 		return
 	}
 	if !foundAgent {
@@ -118,8 +113,7 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 	// Verify credential exists in this workspace (single query prevents enumeration)
 	foundCred, err := credentialExists(r.Context(), h.db, req.CredentialID, workspaceID)
 	if err != nil {
-		h.logger.Error("check credential exists", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "check credential exists", err)
 		return
 	}
 	if !foundCred {
@@ -176,8 +170,7 @@ func (h *AgentHandler) RemoveCredential(w http.ResponseWriter, r *http.Request) 
 		 AND agent_id IN (SELECT id FROM agents WHERE workspace_id = ? AND deleted_at IS NULL)`,
 		assignmentID, agentID, workspaceID)
 	if err != nil {
-		h.logger.Error("remove agent credential", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "remove agent credential", err)
 		return
 	}
 	affected, _ := res.RowsAffected()

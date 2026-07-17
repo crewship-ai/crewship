@@ -272,6 +272,30 @@ func TestNewValidatorEmptySecret(t *testing.T) {
 	}
 }
 
+func TestNewValidatorShortSecretRejected(t *testing.T) {
+	// A secret below MinSecretLen weakens all three HKDF-derived keys, so
+	// the constructor must fail loudly rather than accept it.
+	short := "0123456789abcdef0123456789abcde" // 31 chars, one under the floor
+	if len(short) != MinSecretLen-1 {
+		t.Fatalf("test setup: short secret is %d chars, want %d", len(short), MinSecretLen-1)
+	}
+	v, err := NewJWTValidator(short)
+	if err == nil {
+		t.Fatalf("expected error for %d-char secret (min %d), got validator %v", len(short), MinSecretLen, v)
+	}
+}
+
+func TestNewValidatorMinLengthSecretAccepted(t *testing.T) {
+	// Exactly MinSecretLen characters must be accepted.
+	secret := "0123456789abcdef0123456789abcdef" // 32 chars
+	if len(secret) != MinSecretLen {
+		t.Fatalf("test setup: secret is %d chars, want %d", len(secret), MinSecretLen)
+	}
+	if _, err := NewJWTValidator(secret); err != nil {
+		t.Errorf("expected %d-char secret to be accepted, got error: %v", len(secret), err)
+	}
+}
+
 func TestIssueRequiresUserAndSession(t *testing.T) {
 	v, err := NewJWTValidator(testSecret)
 	if err != nil {

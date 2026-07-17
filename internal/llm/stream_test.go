@@ -248,7 +248,7 @@ func TestNewOpenAI_DefaultBaseURL(t *testing.T) {
 }
 
 // TestAnthropicComplete_ErrorStatuses guards the status-code translation in
-// checkAnthropicStatus. Each retryable code must surface a "max retries
+// checkStatus. Each retryable code must surface a "max retries
 // exceeded" wrap with the inner status, and each non-retryable code must
 // translate to a stable, user-facing message.
 func TestAnthropicComplete_ErrorStatuses(t *testing.T) {
@@ -286,7 +286,7 @@ func TestAnthropicComplete_ErrorStatuses(t *testing.T) {
 
 func TestOpenAIComplete_ErrorStatuses(t *testing.T) {
 	t.Parallel()
-	// Non-retryable statuses surface via checkOpenAIStatus -- the friendly
+	// Non-retryable statuses surface via checkStatus -- the friendly
 	// translation. Retryable statuses (429/500/503/529) go through
 	// doWithRetry's three attempts and surface wrapped as "max retries
 	// exceeded: OpenAI API returned <code>: <body>". Both shapes need to

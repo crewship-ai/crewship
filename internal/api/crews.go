@@ -181,8 +181,7 @@ func (h *CrewHandler) ContainerStatus(w http.ResponseWriter, r *http.Request) {
 	// Scope to the caller's workspace — never leak another workspace's crew.
 	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
-		h.logger.Error("container status: crew lookup", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "container status: crew lookup", err)
 		return
 	}
 	if !found {
@@ -279,4 +278,35 @@ func parseAllowedDomains(raw *string) []string {
 		return []string{}
 	}
 	return domains
+}
+
+// scanCrewRow scans one crew row in the shared column order used by the
+// List / Get / Update SELECTs and applies the parseAllowedDomains
+// post-step on success. The three queries are NOT column-identical —
+// Get additionally selects issue_prefix (after escalation_config) and
+// Update omits services_json — so the two optional columns are toggled
+// by flags to keep the destination list aligned with each caller's
+// SELECT exactly. Works for both *sql.Row and *sql.Rows via the Scan
+// interface.
+func scanCrewRow(sc interface{ Scan(...any) error }, c *crewResponse, withIssuePrefix, withServicesJSON bool) error {
+	var allowedDomainsJSON *string
+	dest := make([]any, 0, 28)
+	dest = append(dest, &c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
+		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
+		&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON, &c.AllowPrivateEndpoints,
+		&c.MCPConfigJSON, &c.EscalationConfig)
+	if withIssuePrefix {
+		dest = append(dest, &c.IssuePrefix)
+	}
+	dest = append(dest, &c.RuntimeImage, &c.DevcontainerConfig, &c.MiseConfig)
+	if withServicesJSON {
+		dest = append(dest, &c.ServicesJSON)
+	}
+	dest = append(dest, &c.CachedImage, &c.ConfigHash, &c.MaxEphemeralAgents,
+		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
+	if err := sc.Scan(dest...); err != nil {
+		return err
+	}
+	c.AllowedDomains = parseAllowedDomains(allowedDomainsJSON)
+	return nil
 }

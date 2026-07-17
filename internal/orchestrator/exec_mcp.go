@@ -40,7 +40,7 @@ chmod 600 %s/.claude.json`, homeDir, homeDir, homeDir)
 	io.Copy(io.Discard, result.Reader)
 	result.Reader.Close()
 
-	logger.Debug("claude config injected (no credentials on disk)", "container_id", containerID[:min(12, len(containerID))])
+	logger.Debug("claude config injected (no credentials on disk)", "container_id", shortID(containerID))
 	return nil
 }
 
@@ -147,7 +147,7 @@ func setupMCPConfig(
 	io.Copy(io.Discard, result.Reader)
 	result.Reader.Close()
 
-	logger.Debug("MCP config injected", "container_id", containerID[:min(12, len(containerID))])
+	logger.Debug("MCP config injected", "container_id", shortID(containerID))
 	return nil
 }
 

@@ -1671,6 +1671,7 @@ END;
 	// the small list of columns intentionally left alone).
 	{version: 144, name: "datetime_now_default_tform", fn: migrationConvertDatetimeNowDefaults},
 	{version: 145, name: "workspace_allow_privileged_credentials", sql: migrationWorkspaceAllowPrivilegedCredentials},
+	{version: 146, name: "perf_indexes", sql: migrationPerfIndexes},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

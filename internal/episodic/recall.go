@@ -37,25 +37,9 @@ func Recall(ctx context.Context, db *sql.DB, emb Embedder, q Query) ([]Hit, erro
 		return nil, fmt.Errorf("episodic: embed query: %w", err)
 	}
 
-	var (
-		conds = []string{"em.workspace_id = ?", "em.dim > 0"}
-		args  = []any{q.WorkspaceID}
-	)
-	switch q.Scope {
-	case ScopeOwn:
-		if q.AgentID == "" {
-			return nil, fmt.Errorf("episodic: ScopeOwn requires agent_id")
-		}
-		conds = append(conds, "em.agent_id = ?")
-		args = append(args, q.AgentID)
-	case ScopeCrewShared:
-		if q.CrewID == "" {
-			return nil, fmt.Errorf("episodic: ScopeCrewShared requires crew_id")
-		}
-		conds = append(conds, "em.crew_id = ?")
-		args = append(args, q.CrewID)
-	default:
-		return nil, fmt.Errorf("episodic: unknown scope %q", q.Scope)
+	conds, args, err := applyScope(q, "em.", []string{"em.workspace_id = ?", "em.dim > 0"}, []any{q.WorkspaceID})
+	if err != nil {
+		return nil, err
 	}
 
 	// Cap the candidate set the cosine pass scans in Go. The package
@@ -117,9 +101,7 @@ func Recall(ctx context.Context, db *sql.DB, emb Embedder, q Query) ([]Hit, erro
 		}
 		c.AgentID = agentID.String
 		c.Payload = decodeJSONMap(payloadStr)
-		if ts, err := time.Parse(time.RFC3339Nano, tsStr); err == nil {
-			c.Age = time.Since(ts)
-		} else if ts, err := time.Parse("2006-01-02T15:04:05.000Z", tsStr); err == nil {
+		if ts, ok := parseEpisodicTS(tsStr); ok {
 			c.Age = time.Since(ts)
 		}
 		cands = append(cands, c)
@@ -254,6 +236,48 @@ func humanizeAge(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%dmo", int(d.Hours()/(24*30)))
 	}
+}
+
+// applyScope appends the scope-derived visibility conditions to
+// conds/args and validates the ID the scope requires. alias is the
+// table-alias prefix of the filtered columns ("em." when the scope
+// columns live on journal_embeddings, "e." for journal_entries).
+// Workspace isolation is NOT handled here — callers put workspace_id in
+// their seed conds unconditionally so a bad scope can never widen the
+// tenant boundary.
+func applyScope(q Query, alias string, conds []string, args []any) ([]string, []any, error) {
+	switch q.Scope {
+	case ScopeOwn:
+		if q.AgentID == "" {
+			return nil, nil, fmt.Errorf("episodic: ScopeOwn requires agent_id")
+		}
+		conds = append(conds, alias+"agent_id = ?")
+		args = append(args, q.AgentID)
+	case ScopeCrewShared:
+		if q.CrewID == "" {
+			return nil, nil, fmt.Errorf("episodic: ScopeCrewShared requires crew_id")
+		}
+		conds = append(conds, alias+"crew_id = ?")
+		args = append(args, q.CrewID)
+	default:
+		return nil, nil, fmt.Errorf("episodic: unknown scope %q", q.Scope)
+	}
+	return conds, args, nil
+}
+
+// parseEpisodicTS parses a journal_entries.ts value, trying the
+// nano-precision RFC3339 layout first and the fixed milli-precision
+// layout the journal writer stores second. Returns ok=false when
+// neither matches — callers treat an unparseable timestamp as
+// "age unknown" rather than erroring.
+func parseEpisodicTS(s string) (time.Time, bool) {
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, true
+	}
+	if t, err := time.Parse("2006-01-02T15:04:05.000Z", s); err == nil {
+		return t, true
+	}
+	return time.Time{}, false
 }
 
 // decodeJSONMap is a best-effort unmarshal — failures return nil rather

@@ -65,8 +65,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// Verify crew exists and belongs to workspace
 	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
-		h.logger.Error("get crew for update", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get crew for update", err)
 		return
 	}
 	if !found {
@@ -103,8 +102,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != sql.ErrNoRows {
-			h.logger.Error("check crew slug", "error", err)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
+			replyInternalError(w, h.logger, "check crew slug", err)
 			return
 		}
 	}
@@ -357,8 +355,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			}
 			domainsJSON, err := json.Marshal(normalized)
 			if err != nil {
-				h.logger.Error("marshal allowed_domains", "error", err)
-				replyError(w, http.StatusInternalServerError, "Internal server error")
+				replyInternalError(w, h.logger, "marshal allowed_domains", err)
 				return
 			}
 			ub.Set("allowed_domains", string(domainsJSON))
@@ -368,15 +365,13 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	query, args := ub.Build("crews", "id = ?", crewID)
 	_, err = h.db.ExecContext(r.Context(), query, args...)
 	if err != nil {
-		h.logger.Error("update crew", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "update crew", err)
 		return
 	}
 
 	// Return updated crew
 	var c crewResponse
-	var updatedDomainsJSON *string
-	err = h.db.QueryRowContext(r.Context(), `
+	err = scanCrewRow(h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains, c.allow_private_endpoints,
 			c.mcp_config_json, c.escalation_config,
@@ -387,20 +382,12 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
 		FROM crews c
 		WHERE c.id = ? AND c.deleted_at IS NULL
-	`, crewID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
-		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
-		&c.ContainerTTLHours, &c.NetworkMode, &updatedDomainsJSON, &c.AllowPrivateEndpoints,
-		&c.MCPConfigJSON, &c.EscalationConfig,
-		&c.RuntimeImage, &c.DevcontainerConfig, &c.MiseConfig, &c.CachedImage, &c.ConfigHash,
-		&c.MaxEphemeralAgents,
-		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
+	`, crewID), &c, false, false)
 	if err != nil {
-		h.logger.Error("get crew after update", "error", err)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "get crew after update", err)
 		return
 	}
 
-	c.AllowedDomains = parseAllowedDomains(updatedDomainsJSON)
 	writeJSON(w, http.StatusOK, c)
 
 	h.broadcastCrewEvent("crew.updated", workspaceID, map[string]string{
