@@ -54,6 +54,13 @@ paths = [
   # value. Verified in the launch audit; not a real credential.
   '''internal/services/onboarding_test\.go$''',
 
+  # Auth JWT test — fixed-length fake NEXTAUTH_SECRET vectors (hex
+  # strings of exactly 31/32 chars) used to exercise the MinSecretLen
+  # length check in NewJWTValidator. generic-api-key fires on the
+  # 32-char hex value; same contract as onboarding_test.go — not a real
+  # credential, only the length is under test.
+  '''internal/auth/jwt_test\.go$''',
+
   # Orchestrator security tests — fake stripe-access-token test vectors
   # used to verify credential file writing paths.
   '''internal/orchestrator/exec_security_test\.go$''',
