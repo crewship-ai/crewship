@@ -3,6 +3,7 @@ import { renderHook } from "@testing-library/react"
 
 const mockWorkspace = {
   role: null as string | null,
+  capabilities: null as string[] | null,
   loading: false,
 }
 
@@ -15,6 +16,7 @@ import { useAbilities } from "@/hooks/use-abilities"
 describe("useAbilities", () => {
   beforeEach(() => {
     mockWorkspace.role = null
+    mockWorkspace.capabilities = null
     mockWorkspace.loading = false
   })
 
@@ -71,5 +73,26 @@ describe("useAbilities", () => {
     // MANAGER cannot manage members or delete workspace
     expect(result.current.abilities.can("create", "Member")).toBe(false)
     expect(result.current.abilities.can("delete", "Workspace")).toBe(false)
+  })
+
+  // #1034 — per-membership capability grants layered onto the role
+  // abilities so UI can gate on role-OR-capability like the backend.
+  it("hasCapability reflects the membership's capability grants", () => {
+    mockWorkspace.role = "MANAGER"
+    mockWorkspace.capabilities = ["chat", "credential.rotate"]
+    const { result } = renderHook(() => useAbilities())
+    expect(result.current.hasCapability("credential.rotate")).toBe(true)
+    expect(result.current.hasCapability("credential.create")).toBe(false)
+    expect(result.current.capabilities).toEqual(["chat", "credential.rotate"])
+  })
+
+  it("hasCapability is false (except chat) when capabilities are unknown", () => {
+    mockWorkspace.role = "MEMBER"
+    mockWorkspace.capabilities = null // older backend / not loaded
+    const { result } = renderHook(() => useAbilities())
+    expect(result.current.hasCapability("credential.rotate")).toBe(false)
+    // chat is always implied — mirror of Go HasCapability
+    expect(result.current.hasCapability("chat")).toBe(true)
+    expect(result.current.capabilities).toBeNull()
   })
 })

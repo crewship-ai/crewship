@@ -9,6 +9,7 @@ const KIND_CLASS: Record<string, string> = {
   cost_threshold: "bg-amber-500/15 text-amber-300 border-amber-500/40",
   target_environment: "bg-orange-500/15 text-orange-300 border-orange-500/40",
   tool_call: "bg-blue-500/15 text-blue-300 border-blue-500/40",
+  ephemeral_hire: "bg-violet-500/15 text-violet-300 border-violet-500/40",
   custom: "bg-slate-500/15 text-slate-300 border-slate-500/40",
 }
 

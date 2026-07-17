@@ -202,6 +202,7 @@ endpoint (e.g. it won't approve a waitpoint through to the executor).
 For source-aware actions, use the matching subcommand instead:
 
   crewship approvals approve <id>           # waitpoints via approvals queue
+  crewship approvals deny <id>              # (both incl. ephemeral-hire reviews)
   crewship escalation resolve <id> ...      # escalations via escalation lifecycle
   crewship hire approve <agent-id>          # ephemeral-hire PENDING_REVIEW waitpoints
 
@@ -328,7 +329,8 @@ item with 'crewship inbox unread <id>'.
 Only non-decision items can be archived (messages, failed-run notices,
 advisories). Waitpoints, escalations, and ephemeral-hire PENDING_REVIEW
 items are source-managed — resolve those through their decision flow
-instead: 'crewship approvals approve <id>', 'crewship escalation resolve
+instead: 'crewship approvals approve <id>' or 'crewship approvals deny
+<id>' (hire reviews appear there too), 'crewship escalation resolve
 <id>', or 'crewship hire approve <agent-id>'.
 
 Examples:

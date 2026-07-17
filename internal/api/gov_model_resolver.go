@@ -2,9 +2,7 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
@@ -43,8 +41,19 @@ type GovModelResolver struct {
 	ssrf    *http.Client
 
 	mu     sync.Mutex
-	cache  map[string]llm.Provider // fingerprint -> wrapped provider (hot-path build cache)
-	warned map[string]string       // workspaceID -> last degrade reason (WARN dedup)
+	cache  map[string]govModelCacheEntry // fingerprint -> wrapped provider (hot-path build cache)
+	warned map[string]string             // workspaceID -> last degrade reason (WARN dedup)
+}
+
+// govModelCacheEntry pairs a built provider with the exact API key it was
+// built from. The key is compared directly on lookup instead of being hashed
+// into the cache key: secret material never flows through a fast hash (CodeQL
+// go/weak-sensitive-data-hashing, #954 alert 667), a rotated key can never
+// collide back onto a stale provider, and rotation replaces the entry in
+// place rather than leaking one cache slot per historical key.
+type govModelCacheEntry struct {
+	apiKey   string
+	provider llm.Provider
 }
 
 // NewGovModelResolver builds the resolver. ollamaURL/ollamaModel are the server
@@ -61,7 +70,7 @@ func NewGovModelResolver(db *sql.DB, j journal.Emitter, logger *slog.Logger, oll
 		lookup:  newGovModelCredentialLookup(db),
 		dflt:    governance.OllamaDefault{URL: ollamaURL, Model: ollamaModel},
 		ssrf:    govModelSSRFClient(),
-		cache:   map[string]llm.Provider{},
+		cache:   map[string]govModelCacheEntry{},
 		warned:  map[string]string{},
 	}
 }
@@ -82,9 +91,14 @@ func (r *GovModelResolver) Resolve(ctx context.Context, workspaceID string) (llm
 
 	fp := govModelFingerprint(resolved)
 	r.mu.Lock()
-	if p, ok := r.cache[fp]; ok {
+	// The API key is deliberately NOT part of the map key (see
+	// govModelCacheEntry); a hit additionally requires the cached entry to
+	// have been built from the same key, so a vault rotation rebuilds. Both
+	// operands are vault-sourced server-side values, so a plain comparison
+	// leaks nothing to a caller.
+	if e, ok := r.cache[fp]; ok && e.apiKey == resolved.APIKey {
 		r.mu.Unlock()
-		return p, resolved.Model
+		return e.provider, resolved.Model
 	}
 	r.mu.Unlock()
 
@@ -101,7 +115,7 @@ func (r *GovModelResolver) Resolve(ctx context.Context, workspaceID string) (llm
 	wrapped := llm.Middleware(raw, r.journal, r.db)
 
 	r.mu.Lock()
-	r.cache[fp] = wrapped
+	r.cache[fp] = govModelCacheEntry{apiKey: resolved.APIKey, provider: wrapped}
 	r.mu.Unlock()
 	return wrapped, resolved.Model
 }
@@ -211,16 +225,13 @@ func (r *GovModelResolver) emitDegrade(ctx context.Context, workspaceID, reason 
 	}
 }
 
-// govModelFingerprint keys the build cache on everything that changes the built
-// provider. The API key is hashed, never stored in the key in cleartext.
+// govModelFingerprint keys the build cache on every NON-secret field that
+// changes the built provider. The API key is intentionally absent — it is
+// matched against the cached govModelCacheEntry instead, so no secret (or
+// secret-derived digest) ever appears in the map key.
 func govModelFingerprint(m governance.ResolvedGovModel) string {
-	keyHash := ""
-	if m.APIKey != "" {
-		sum := sha256.Sum256([]byte(m.APIKey))
-		keyHash = hex.EncodeToString(sum[:6])
-	}
 	return strings.Join([]string{
-		m.Provider, m.Model, m.EndpointURL, keyHash, strconv.FormatBool(m.Degraded),
+		m.Provider, m.Model, m.EndpointURL, strconv.FormatBool(m.Degraded),
 	}, "|")
 }
 

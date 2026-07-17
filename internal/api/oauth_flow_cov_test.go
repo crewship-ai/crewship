@@ -33,6 +33,24 @@ func covOAuthRig(t *testing.T) (h *OAuthHandler, db *sql.DB, userID, wsID string
 	return
 }
 
+// covSeedChatOnlyMember seeds a genuinely capability-less MEMBER for the
+// forbidden cases. Since #1034 the flow handlers run the layered
+// role-OR-capability gate, which resolves capabilities from the caller's
+// workspace_members row — the rig's owner user would pass via the OWNER
+// fallback bundle no matter what role string the request context fakes.
+func covSeedChatOnlyMember(t *testing.T, db *sql.DB, wsID, userID string) {
+	t.Helper()
+	if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES (?, ?, 'M')`,
+		userID, userID+"@x"); err != nil {
+		t.Fatalf("seed member user: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO workspace_members (id, workspace_id, user_id, role, capabilities) VALUES (?, ?, ?, 'MEMBER', '["chat"]')`,
+		"m-"+userID, wsID, userID); err != nil {
+		t.Fatalf("seed membership: %v", err)
+	}
+	InvalidateCapabilityCache(wsID, userID)
+}
+
 // covSeedOAuthCred inserts an OAUTH2 credential with full OAuth config.
 // tokenURL "://bad" makes any exchange attempt fail fast and offline.
 func covSeedOAuthCred(t *testing.T, db *sql.DB, wsID, userID, credID, authURL, tokenURL string) {
@@ -74,7 +92,13 @@ func TestOAuthInitiate_Matrix(t *testing.T) {
 	}
 
 	t.Run("member forbidden", func(t *testing.T) {
-		if rr := run("MEMBER", `{"credential_id":"cred-init"}`); rr.Code != http.StatusForbidden {
+		covSeedChatOnlyMember(t, db, wsID, "cov-init-member")
+		req := httptest.NewRequest("POST", "/api/v1/oauth/initiate", strings.NewReader(`{"credential_id":"cred-init"}`))
+		req.Host = "crewship.local:8080"
+		req = withWorkspaceUser(req, "cov-init-member", wsID, "MEMBER")
+		rr := httptest.NewRecorder()
+		h.Initiate(rr, req)
+		if rr.Code != http.StatusForbidden {
 			t.Errorf("status = %d, want 403", rr.Code)
 		}
 	})
@@ -215,7 +239,12 @@ func TestOAuthExchange_Matrix(t *testing.T) {
 	}
 
 	t.Run("member forbidden", func(t *testing.T) {
-		if rr := run("MEMBER", `{"credential_id":"cred-ex","code":"c"}`); rr.Code != http.StatusForbidden {
+		covSeedChatOnlyMember(t, db, wsID, "cov-ex-member")
+		req := httptest.NewRequest("POST", "/api/v1/oauth/exchange", strings.NewReader(`{"credential_id":"cred-ex","code":"c"}`))
+		req = withWorkspaceUser(req, "cov-ex-member", wsID, "MEMBER")
+		rr := httptest.NewRecorder()
+		h.Exchange(rr, req)
+		if rr.Code != http.StatusForbidden {
 			t.Errorf("status = %d, want 403", rr.Code)
 		}
 	})
@@ -281,7 +310,12 @@ func TestOAuthLoopback_ValidationMatrix(t *testing.T) {
 	}
 
 	t.Run("member forbidden", func(t *testing.T) {
-		if rr := run("MEMBER", `{"credential_id":"x"}`); rr.Code != http.StatusForbidden {
+		covSeedChatOnlyMember(t, db, wsID, "cov-lb-member")
+		req := httptest.NewRequest("POST", "/api/v1/oauth/loopback", strings.NewReader(`{"credential_id":"x"}`))
+		req = withWorkspaceUser(req, "cov-lb-member", wsID, "MEMBER")
+		rr := httptest.NewRecorder()
+		h.Loopback(rr, req)
+		if rr.Code != http.StatusForbidden {
 			t.Errorf("status = %d, want 403", rr.Code)
 		}
 	})

@@ -22,8 +22,22 @@ import (
 func (h *OAuthHandler) Initiate(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
-	if !canRole(role, "manage") {
-		replyError(w, http.StatusForbidden, "Forbidden")
+	user := UserFromContext(r.Context())
+	callerUserID := ""
+	if user != nil {
+		callerUserID = user.ID
+	}
+
+	// Tier alignment (#1034): the OAuth connect flow lands the same OAUTH2
+	// credential row that POST /credentials creates, so it uses the same
+	// layered gate — MANAGER+ via role, or an explicit credential.create
+	// capability grant. Previously ADMIN+ only, which broke the /credentials
+	// entry point for a MANAGER: they could create the OAUTH2 row but the
+	// authorize step 403'd.
+	if !requireRoleOrCapabilityOrForbid(w, r, h.logger, h.db,
+		workspaceID, callerUserID, role,
+		CapabilityCredentialCreate, "oauth.initiate", "workspace:"+workspaceID,
+		"create") {
 		return
 	}
 
@@ -199,8 +213,18 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
-	if !canRole(role, "manage") {
-		replyError(w, http.StatusForbidden, "Forbidden")
+	user := UserFromContext(r.Context())
+	callerUserID := ""
+	if user != nil {
+		callerUserID = user.ID
+	}
+
+	// Same layered gate as Initiate (#1034) — manual code exchange is just
+	// the fallback leg of the same connect flow.
+	if !requireRoleOrCapabilityOrForbid(w, r, h.logger, h.db,
+		workspaceID, callerUserID, role,
+		CapabilityCredentialCreate, "oauth.exchange", "workspace:"+workspaceID,
+		"create") {
 		return
 	}
 
@@ -289,8 +313,18 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 func (h *OAuthHandler) Loopback(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
-	if !canRole(role, "manage") {
-		replyError(w, http.StatusForbidden, "Forbidden")
+	user := UserFromContext(r.Context())
+	callerUserID := ""
+	if user != nil {
+		callerUserID = user.ID
+	}
+
+	// Same layered gate as Initiate (#1034) — loopback is the localhost /
+	// private-IP leg of the same connect flow.
+	if !requireRoleOrCapabilityOrForbid(w, r, h.logger, h.db,
+		workspaceID, callerUserID, role,
+		CapabilityCredentialCreate, "oauth.loopback", "workspace:"+workspaceID,
+		"create") {
 		return
 	}
 

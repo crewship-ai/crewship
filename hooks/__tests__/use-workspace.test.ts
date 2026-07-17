@@ -57,6 +57,26 @@ describe("useWorkspace", () => {
     expect(result.current.workspaces).toEqual([WS_A, WS_B])
   })
 
+  // #1034 — the API's currentUserCapabilities ride along on the selected
+  // workspace; older backends without the field degrade to null.
+  it("exposes the selected workspace's capability grants", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => [
+        { ...WS_A, currentUserCapabilities: ["chat", "credential.rotate"] },
+        WS_B, // no field — older backend shape
+      ],
+    })
+
+    const { result } = renderHook(() => useWorkspace())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.capabilities).toEqual(["chat", "credential.rotate"])
+
+    act(() => result.current.setWorkspaceId("ws-b"))
+    expect(result.current.capabilities).toBeNull()
+  })
+
   it("handles empty workspaces array", async () => {
     mockFetch.mockResolvedValue({ ok: true, json: async () => [] })
     const { result } = renderHook(() => useWorkspace())

@@ -56,6 +56,15 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// #1186: crew_id is body-carried, so requireInternal's ?crew_id gate
+	// never sees it. A crew-bound (crwv1) token may only expose ports for
+	// its OWN crew — the agent-boundary check below proves the agent is in
+	// the NAMED crew, not that the named crew is the caller's; a
+	// workspace-bound token's crew must resolve to the bound workspace.
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.CrewID) {
+		return
+	}
+
 	// Anti-spoof: verify the agent actually belongs to the crew + workspace
 	// the sidecar claims. This mirrors the pattern KeeperHandler uses.
 	agentSlug, err := h.validateAgentBoundary(r.Context(), body.AgentID, body.CrewID, body.WorkspaceID)

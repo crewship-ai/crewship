@@ -14,6 +14,7 @@ import CredentialsPage from "../page"
 // Hoisted holder so vi.mock factories can read per-test state.
 const h = vi.hoisted(() => ({
   role: "OWNER" as string,
+  capabilities: [] as string[],
   apiFetch: vi.fn(),
 }))
 
@@ -36,10 +37,13 @@ vi.mock("next/link", () => ({
 
 vi.mock("@/hooks/use-abilities", async () => {
   const { defineAbilitiesFor } = await import("@/lib/permissions/abilities")
+  const { hasCapability } = await import("@/lib/capabilities")
   return {
     useAbilities: () => ({
       abilities: defineAbilitiesFor(h.role as never),
       role: h.role,
+      capabilities: h.capabilities,
+      hasCapability: (cap: never) => hasCapability(h.capabilities, cap),
       loading: false,
     }),
   }
@@ -58,6 +62,11 @@ vi.mock("@/components/features/credentials/rotation-dialog", () => ({
 }))
 vi.mock("@/components/features/credentials/edit-credential-dialog", () => ({
   EditCredentialDialog: () => <div data-testid="edit-dialog" />,
+}))
+vi.mock("@/components/features/credentials/connect-oauth-dialog", () => ({
+  ConnectOAuthDialog: ({ open }: { open: boolean }) => (
+    <div data-testid="connect-oauth-dialog" data-open={open ? "true" : "false"} />
+  ),
 }))
 
 function makeCredential(overrides: Record<string, unknown> = {}) {
@@ -109,6 +118,7 @@ function routeApi(credentials: unknown[]) {
 
 beforeEach(() => {
   h.role = "OWNER"
+  h.capabilities = []
   h.apiFetch.mockReset()
   // The workspace store is a module singleton with a localStorage-backed
   // selection — reset both so each test starts from a clean slate (#1033).
@@ -294,6 +304,44 @@ describe("RBAC-gated row actions (C2)", () => {
   it("CASL sanity: MANAGER lacks delete, OWNER has it", () => {
     expect(defineAbilitiesFor("MANAGER" as OrgRole).can("delete", "Credential")).toBe(false)
     expect(defineAbilitiesFor("OWNER" as OrgRole).can("delete", "Credential")).toBe(true)
+  })
+})
+
+describe("OAuth connect entry point (#1034)", () => {
+  it("shows Connect via OAuth next to Add secret and opens the dialog", async () => {
+    routeApi([makeCredential()])
+    render(<CredentialsPage />)
+
+    expect(await screen.findByText("STRIPE_API_KEY")).toBeInTheDocument()
+    const btn = screen.getByRole("button", { name: /connect via oauth/i })
+    expect(screen.getByTestId("connect-oauth-dialog")).toHaveAttribute("data-open", "false")
+    fireEvent.click(btn)
+    expect(screen.getByTestId("connect-oauth-dialog")).toHaveAttribute("data-open", "true")
+  })
+
+  it("MEMBER with an explicit credential.create grant sees the create actions", async () => {
+    // Backend honors credential.create for lower roles
+    // (requireRoleOrCapabilityOrForbid) — the UI must not hide what
+    // the API would accept.
+    h.role = "MEMBER"
+    h.capabilities = ["chat", "credential.create"]
+    routeApi([makeCredential()])
+    render(<CredentialsPage />)
+
+    expect(await screen.findByText("STRIPE_API_KEY")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /connect via oauth/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /add secret/i })).toBeInTheDocument()
+  })
+
+  it("MEMBER without the grant sees neither create action", async () => {
+    h.role = "MEMBER"
+    h.capabilities = ["chat"]
+    routeApi([makeCredential()])
+    render(<CredentialsPage />)
+
+    expect(await screen.findByText("STRIPE_API_KEY")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /connect via oauth/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /add secret/i })).not.toBeInTheDocument()
   })
 })
 

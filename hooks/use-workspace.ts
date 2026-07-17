@@ -8,6 +8,10 @@ export interface WorkspaceData {
   name: string
   slug: string
   currentUserRole: string | null
+  /** Resolved per-membership capability grants (#1034). Optional so
+   *  a client talking to an older backend degrades to role-only
+   *  gating instead of crashing. */
+  currentUserCapabilities?: string[] | null
 }
 
 interface UseWorkspaceReturn {
@@ -15,6 +19,9 @@ interface UseWorkspaceReturn {
   workspace: WorkspaceData | null
   workspaces: WorkspaceData[]
   role: string | null
+  /** The caller's capability grants in the selected workspace, or
+   *  null when unknown (older backend / not loaded yet). */
+  capabilities: string[] | null
   loading: boolean
   setWorkspaceId: (id: string) => void
   refresh: () => Promise<void>
@@ -136,6 +143,7 @@ export function useWorkspace(): UseWorkspaceReturn {
     workspace,
     workspaces: state.workspaces,
     role: workspace?.currentUserRole ?? null,
+    capabilities: workspace?.currentUserCapabilities ?? null,
     loading: state.loading,
     setWorkspaceId,
     refresh,
