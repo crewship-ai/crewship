@@ -195,14 +195,37 @@ func UpsertMessage(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item
 // user did so the audit trail matches the source table's lifecycle.
 // Idempotent — safe to call from multiple terminal paths.
 func ResolveBySource(ctx context.Context, db *sql.DB, logger *slog.Logger, kind, sourceID, action, userID string) {
-	if db == nil || kind == "" || sourceID == "" {
+	if db == nil {
 		return
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if err := ResolveBySourceTx(ctx, db, kind, sourceID, action, userID); err != nil {
+		logger.Warn("inbox resolve", "error", err, "kind", kind, "source_id", sourceID)
+	}
+}
+
+// DBTX is the subset of *sql.DB / *sql.Tx the write-through helpers
+// need — it lets ResolveBySourceTx ride a caller-owned transaction
+// while ResolveBySource keeps its own autocommit + log-and-swallow
+// contract. Same shape as auditExecer in internal/api/credential_audit.go.
+type DBTX interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// ResolveBySourceTx is ResolveBySource on the CALLER's transaction, and
+// it RETURNS the error instead of logging it. Handlers whose source-of-
+// truth mutation must not commit without the matching projection
+// (ephemeral-hire decisions, issue #1247) use this so a failed inbox
+// write rolls the whole decision back rather than stranding an
+// unresolved blocking waitpoint against a terminal approval.
+func ResolveBySourceTx(ctx context.Context, tx DBTX, kind, sourceID, action, userID string) error {
+	if tx == nil || kind == "" || sourceID == "" {
+		return nil
+	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := db.ExecContext(ctx, `
+	_, err := tx.ExecContext(ctx, `
 		UPDATE inbox_items
 		SET state = 'resolved',
 		    resolved_at = COALESCE(resolved_at, ?),
@@ -211,9 +234,7 @@ func ResolveBySource(ctx context.Context, db *sql.DB, logger *slog.Logger, kind,
 		    updated_at = ?
 		WHERE kind = ? AND source_id = ? AND state != 'resolved'`,
 		now, userID, action, now, kind, sourceID)
-	if err != nil {
-		logger.Warn("inbox resolve", "error", err, "kind", kind, "source_id", sourceID)
-	}
+	return err
 }
 
 // ResolveByPipeline resolves every still-open inbox item tied to a routine

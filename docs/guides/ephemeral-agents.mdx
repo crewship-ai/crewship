@@ -59,10 +59,21 @@ See [Autonomy + self-learning](/guides/autonomy-and-self-learning) for the auton
 
 A `guided`-crew hire lands as `PENDING_REVIEW`. The inbox shows the hire request with an **Approve hire** button. Clicking it calls `POST /api/v1/agents/{agentId}/approve-hire` which:
 
-1. Flips `agents.status` from `PENDING_REVIEW` to `IDLE` (atomic UPDATE with WHERE guard so a concurrent fire / soft-delete returns 404 instead of silently writing nothing)
-2. Resolves the inbox row via `inbox.ResolveBySource`
-3. Writes a `agent.hire_approved` journal entry
-4. Broadcasts an `agent.hire_approved` WebSocket event so the UI repaints the agent card from the PENDING_REVIEW chip to a normal status badge
+1. Wins the pending `kind=ephemeral_hire` row in the approvals queue — the single decision point shared with `POST /api/v1/approvals/{id}/decide`
+2. Flips `agents.status` from `PENDING_REVIEW` to `IDLE` (conditional UPDATE so a concurrent decision / TTL ghosting returns 409 instead of silently writing nothing)
+3. Resolves the blocking inbox waitpoint
+4. Commits — then writes the `agent.hire_approved` journal + audit entry
+5. Broadcasts an `agent.hire_approved` WebSocket event so the UI repaints the agent card from the PENDING_REVIEW chip to a normal status badge
+
+Steps 1–3 run in **one transaction**. If any of them fails the whole
+approval rolls back: the queue row stays `pending`, the agent stays
+`PENDING_REVIEW`, and the waitpoint stays in the inbox, so a retry (or a
+decision through the approvals queue) still works. Journal, audit and
+WebSocket events are emitted only after the commit, so a dashboard never
+sees a transition that was rolled back.
+
+Losing the race with a concurrent decision returns `409`; a failed inbox
+projection returns `500` with nothing applied.
 
 The operator can also "fire" the pending agent by deleting it from the crew page — same path as deleting any agent. No separate "deny hire" endpoint exists today (tracked as PR-F follow-up); fire is the explicit reject path.
 

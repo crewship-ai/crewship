@@ -241,9 +241,14 @@ func TestApprovalsDecide_EphemeralHire_AgentAlreadyIdle_SkipsSideEffect(t *testi
 		t.Fatalf("flip agent: %v", err)
 	}
 
+	// #1247 changed the contract here: the decision and its side effect
+	// are one transaction, so a side effect that cannot apply rolls the
+	// decision back and answers 409 instead of persisting a terminal
+	// approval nothing acted on. The load-bearing assertion is
+	// unchanged — the live agent must not be ghosted.
 	rr := postApprovalsDecide(t, h, userID, wsID, "OWNER", approvalID, "denied")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (decision persists; side effect skips); body: %s",
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (side effect can't apply → decision rolls back); body: %s",
 			rr.Code, rr.Body.String())
 	}
 
@@ -254,6 +259,15 @@ func TestApprovalsDecide_EphemeralHire_AgentAlreadyIdle_SkipsSideEffect(t *testi
 	}
 	if expiredAt.Valid {
 		t.Errorf("late deny ghosted an already-approved agent (expired_at = %q)", expiredAt.String)
+	}
+
+	// And the queue row stays decidable rather than going terminal.
+	var queueStatus string
+	if err := db.QueryRow(`SELECT status FROM approvals_queue WHERE id = ?`, approvalID).Scan(&queueStatus); err != nil {
+		t.Fatalf("verify approvals row: %v", err)
+	}
+	if queueStatus != "pending" {
+		t.Errorf("approvals_queue status = %q, want pending", queueStatus)
 	}
 }
 
@@ -363,9 +377,12 @@ func TestApprovalsDecide_Approve_ExpiredAgent_DoesNotResurrect(t *testing.T) {
 		t.Fatalf("ghost agent: %v", err)
 	}
 
+	// Post-#1247 the unappliable side effect rolls the decision back
+	// (409) instead of leaving an approved queue row against an agent
+	// that never moved.
 	rr := postApprovalsDecide(t, newHireApprovalsHandler(t, db), userID, wsID, "OWNER", approvalID, "approved")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (decision persists; side effect skips); body: %s",
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (ghosted agent → decision rolls back); body: %s",
 			rr.Code, rr.Body.String())
 	}
 

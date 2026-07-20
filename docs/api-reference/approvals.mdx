@@ -140,7 +140,21 @@ POST /api/v1/approvals/{id}/decide
 | 401 | Not authenticated. |
 | 403 | Not OWNER/ADMIN. |
 | 404 | Request not found. |
-| 409 | Request already decided (status != `pending`). |
+| 409 | Request already decided (status != `pending`), or the decision's side effect could not be applied (see below). |
+
+<Note>
+**The decision and its side effects are one transaction.** For
+`kind=ephemeral_hire` rows the decision also flips the staged agent
+(approve → `IDLE`, deny → ghosted) and resolves the blocking inbox
+waitpoint. All three writes commit together or not at all.
+
+If the staged agent can no longer take that transition — it was deleted,
+already activated through `POST /api/v1/agents/{agentId}/approve-hire`,
+or ghosted by the TTL sweeper — the whole decision is rolled back and
+you get `409 staged hire is no longer decidable`. The queue row stays
+`pending` and is still decidable (or will time out on its own); it is
+never left `approved`/`denied` against an agent that never moved.
+</Note>
 
 ---
 
