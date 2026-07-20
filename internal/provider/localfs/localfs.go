@@ -2,6 +2,7 @@ package localfs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,8 +20,20 @@ var _ provider.StorageProvider = (*Provider)(nil)
 // are resolved relative to basePath with symlink-aware path traversal protection.
 type Provider struct {
 	basePath string
+
+	// mu guards closed and every watchers.Add. A sync.WaitGroup panics with
+	// "reused before previous Wait has returned" if an Add lands while a Wait
+	// is in flight, so a Watch starting while WaitWatchers drains must be
+	// refused rather than counted.
+	mu       sync.Mutex
+	closed   bool
 	watchers sync.WaitGroup
 }
+
+// ErrWatchersClosed is returned by Watch once WaitWatchers has been called.
+// Waiting is terminal: the provider stays usable for plain file operations,
+// but it accepts no new watches.
+var ErrWatchersClosed = errors.New("localfs: provider watchers closed")
 
 // New creates a local filesystem Provider rooted at basePath, creating the
 // directory if it does not exist.
@@ -252,7 +265,14 @@ func (p *Provider) EnsureDir(_ context.Context, path string) error {
 // whatever descriptor the process has since opened for that number — in CI
 // that was the directory fd of an unrelated parallel test's os.RemoveAll,
 // which then failed with EBADF. See #1286.
+// Waiting is terminal for watches: afterwards Watch returns
+// ErrWatchersClosed, so a watch starting concurrently cannot be counted into
+// a WaitGroup that is already being waited on.
 func (p *Provider) WaitWatchers() {
+	p.mu.Lock()
+	p.closed = true
+	p.mu.Unlock()
+
 	p.watchers.Wait()
 }
 
@@ -275,7 +295,16 @@ func (p *Provider) Watch(ctx context.Context, dir string, events chan<- provider
 		return fmt.Errorf("watch %s: %w", dir, err)
 	}
 
+	// Register under the lock so the Add cannot race WaitWatchers' Wait.
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		watcher.Close()
+		return ErrWatchersClosed
+	}
 	p.watchers.Add(1)
+	p.mu.Unlock()
+
 	go func() {
 		// Done last: WaitWatchers must not release until the descriptors are
 		// actually gone, so watcher.Close has to run first.

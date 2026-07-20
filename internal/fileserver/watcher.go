@@ -2,6 +2,7 @@ package fileserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -31,8 +32,20 @@ type Watcher struct {
 	basePath string
 	logger   *slog.Logger
 	handler  EventHandler
-	watches  sync.WaitGroup
+
+	// mu guards closed and every watches.Add. A sync.WaitGroup panics with
+	// "reused before previous Wait has returned" if an Add lands while a Wait
+	// is in flight, and Watch is reachable from HTTP handlers that can fire
+	// during shutdown — so the two must be mutually exclusive, not merely
+	// unlikely to overlap.
+	mu      sync.Mutex
+	closed  bool
+	watches sync.WaitGroup
 }
+
+// ErrWatcherClosed is returned by Watch once Close has begun. Close is
+// terminal: a Watcher that has been closed does not accept new watches.
+var ErrWatcherClosed = errors.New("fileserver: watcher closed")
 
 // closeTimeout bounds Close so a handler wedged on a full channel cannot hang
 // shutdown forever; the descriptors leak until process exit in that case, which
@@ -62,7 +75,14 @@ func NewWatcher(basePath string, logger *slog.Logger, handler EventHandler) *Wat
 // since opened for that number — in CI that was the directory fd of an
 // unrelated parallel test's os.RemoveAll, which then failed with EBADF. See
 // #1286.
+//
+// Close is terminal and idempotent: after it, Watch returns ErrWatcherClosed,
+// and calling Close again just drains again.
 func (w *Watcher) Close() {
+	w.mu.Lock()
+	w.closed = true
+	w.mu.Unlock()
+
 	done := make(chan struct{})
 	go func() {
 		w.watches.Wait()
@@ -97,7 +117,16 @@ func (w *Watcher) Watch(ctx context.Context, crewID string) error {
 		return fmt.Errorf("watch output dir: %w", err)
 	}
 
+	// Register under the lock so the Add cannot race Close's Wait.
+	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		watcher.Close()
+		return ErrWatcherClosed
+	}
 	w.watches.Add(1)
+	w.mu.Unlock()
+
 	go func() {
 		// Done last: Close must not release until the descriptors are actually
 		// gone, so watcher.Close has to run first.

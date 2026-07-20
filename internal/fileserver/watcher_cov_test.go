@@ -2,6 +2,7 @@ package fileserver
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -240,14 +241,21 @@ func TestToFileEvent_Projection(t *testing.T) {
 	})
 }
 
-// TestWatcher_CloseIsSafe pins the Close contract — callable before and
-// after a Watch without panicking, and idempotent. Close is a wait, not a
+// TestWatcher_CloseIsSafe pins the Close contract — callable on a watcher
+// that never watched, idempotent, and terminal. Close is a wait, not a
 // signal: the caller cancels the Watch context, Close only drains.
 func TestWatcher_CloseIsSafe(t *testing.T) {
 	base := t.TempDir()
+
+	// Close with nothing to wait for is fine, and closes the watcher for good.
+	fresh := NewWatcher(base, discardLogger(), nil)
+	fresh.Close()
+	if err := fresh.Watch(context.Background(), "crew-z"); !errors.Is(err, ErrWatcherClosed) {
+		t.Fatalf("watch after close = %v, want ErrWatcherClosed", err)
+	}
+
 	events := make(chan FileEvent, 8)
 	w := NewWatcher(base, discardLogger(), func(_ string, fe FileEvent) { events <- fe })
-	w.Close() // before Watch — nothing to wait for
 
 	ctx, cancel := context.WithCancel(context.Background())
 	if err := w.Watch(ctx, "crew-z"); err != nil {
