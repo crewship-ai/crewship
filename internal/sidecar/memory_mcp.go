@@ -105,6 +105,22 @@ func (s *Server) handleMemoryMCPForAgent(w http.ResponseWriter, r *http.Request,
 	// that matches no crew member is a forgery and is refused before any path
 	// resolution. With no token we keep the CRE-137 URL-slug behaviour so
 	// legacy adapters (and solo containers) still work.
+	//
+	// #1254 item A: the token-less case was the hole. /query and /escalate
+	// already refuse a request that carries no Authorization header once the
+	// crew has per-agent tokens (a sibling dropping the header to fall through
+	// to the spoofable slug); this path did not, so a sibling could read or
+	// overwrite ANY crew member's memory tier just by naming it in the URL —
+	// the guarantee was enforced per-code-path instead of at a chokepoint.
+	// tokenlessDowngrade is now that chokepoint, shared with both siblings.
+	if s.tokenlessDowngrade(r) {
+		writeJSONResponse(w, http.StatusOK, memoryMCPResponse{
+			JSONRPC: "2.0",
+			ID:      mcpNullID,
+			Error:   &memoryMCPRPCError{Code: -32001, Message: "per-agent token required"},
+		})
+		return
+	}
 	effectiveSlug := agentSlug
 	if actorID, actorSlug, present, ok := s.actingIdentity(r); present {
 		if !ok {

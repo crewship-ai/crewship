@@ -77,6 +77,20 @@ func (s *Server) tokensProvisioned() bool {
 	return false
 }
 
+// tokenlessDowngrade reports whether r is a downgrade attempt: it presents NO
+// per-agent bearer token on a sidecar where per-agent tokens ARE provisioned.
+// This is the single chokepoint every identity-bearing agent route uses to
+// decide the refusal — /query, /escalate and the memory MCP path all call it
+// rather than re-deriving "no token && tokensProvisioned()" per path. Keeping
+// it in one place is what stops a route from being added (or, as in #1254
+// item A, from having existed all along) without the check.
+//
+// A request with a token — valid or forged — is NOT a downgrade; the caller
+// resolves it through actingIdentity, which refuses forgeries on its own.
+func (s *Server) tokenlessDowngrade(r *http.Request) bool {
+	return bearerToken(r) == "" && s.tokensProvisioned()
+}
+
 // actingAgentID resolves the acting agent's ID for provenance/attribution on
 // routes that record "which agent did this" (issue authorship, port-expose,
 // pipeline authoring, keeper requests, …). It layers over actingIdentity:
