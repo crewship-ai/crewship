@@ -44,6 +44,8 @@ export interface AgentDetail {
   system_prompt: string | null
   avatar_seed: string | null
   avatar_style: string | null
+  /** Stored avatar render (#1297); null means generate from the seed. */
+  avatar_url?: string | null
   timeout_seconds: number
   tool_profile: string
   memory_enabled: boolean

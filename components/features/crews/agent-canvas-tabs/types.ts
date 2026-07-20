@@ -24,6 +24,8 @@ export interface AgentRecord {
   schedule_next_run?: string | null
   avatar_seed: string | null
   avatar_style: string | null
+  /** Stored avatar render (#1297); null means generate from the seed. */
+  avatar_url?: string | null
   updated_at: string
   crew: { id?: string; name: string; slug: string; color: string | null; avatar_style: string | null } | null
   _count?: { skills: number; credentials: number; chats: number }

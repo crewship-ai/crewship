@@ -27,6 +27,11 @@ export interface InboxItem {
   // card shows instead of a generic glyph. Blank for system/crew/pipeline.
   avatar_seed?: string
   avatar_style?: string
+  /**
+   * The sender agent's stored avatar render (#1297), when it has one.
+   * Absent means generate from avatar_seed, as before.
+   */
+  avatar_url?: string
   state: "unread" | "read" | "resolved"
   priority: "urgent" | "high" | "medium" | "low"
   blocking: boolean

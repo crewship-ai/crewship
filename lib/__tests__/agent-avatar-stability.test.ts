@@ -10,12 +10,19 @@ import {
 /**
  * Golden-hash pin on the rendered avatar output.
  *
- * Agent avatars are not stored — they are re-derived from (seed, style) on
- * every render, so the DiceBear version in package.json *is* the source of
- * truth for what every existing agent looks like. That makes an avatar
- * library upgrade a user-visible product change disguised as a dependency
- * bump: nothing in the type system, the build, or the existing cache tests
- * notices when the same seed starts drawing a different face.
+ * Agent avatars are derived from (seed, style) at render time, so the
+ * DiceBear version in package.json decides what an agent looks like. That
+ * makes an avatar library upgrade a user-visible product change disguised as
+ * a dependency bump: nothing in the type system, the build, or the existing
+ * cache tests notices when the same seed starts drawing a different face.
+ *
+ * Agents CAN now keep a stored render (#1297), which pins their face against
+ * exactly this drift — but only once one has been stored for them. Freshly
+ * created agents, agents nobody with edit rights has viewed yet, and every
+ * agent on an instance that has not backfilled are still live-generated, and
+ * this generator is also what produces the bytes that get stored. So the
+ * tripwire still matters; its blast radius is just bounded to the
+ * not-yet-persisted population rather than every agent everywhere.
  *
  * This is not hypothetical. A @dicebear/core 9 -> 10 spike (2026-07-20)
  * re-rendered 10 styles x 5 seeds and found ZERO identical outputs — new
@@ -28,13 +35,15 @@ import {
  * already looking at".
  *
  * IF THIS TEST FAILS, the rendering changed. Do not just refresh the
- * hashes. Decide, explicitly:
- *   - is this an intended visual refresh that gets communicated, or
- *   - do already-created agents need to keep their current look (which
- *     means persisting the rendered avatar at creation time instead of
- *     re-deriving it, before the dependency moves)?
+ * hashes. Decide, explicitly, whether this is an intended visual refresh
+ * that gets communicated — and remember that agents with a stored render
+ * will NOT follow it, so an upgrade now splits the roster into old faces
+ * (persisted) and new ones (not), which is its own product decision.
  * Regenerate the hashes only once that decision is made, in the same
  * commit as the change that justifies it.
+ *
+ * A version bump also has to regenerate the Go-side fixtures that pin the
+ * generator/validator contract: `node scripts/gen-avatar-fixtures.mjs`.
  */
 const GOLDEN_AVATAR_HASHES: Record<string, string> = {
   "bottts-neutral__alice": "4bba430f9df07414",

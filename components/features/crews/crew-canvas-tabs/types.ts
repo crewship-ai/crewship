@@ -7,6 +7,8 @@ export interface AgentSummary {
   agent_role: string
   avatar_seed?: string | null
   avatar_style?: string | null
+  /** Stored avatar render (#1297); null means generate from the seed. */
+  avatar_url?: string | null
   llm_provider?: string | null
   llm_model?: string | null
   _count?: { skills: number; credentials: number }

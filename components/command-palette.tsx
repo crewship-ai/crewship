@@ -33,6 +33,8 @@ interface AgentResult {
   status: string
   avatar_seed: string | null
   avatar_style: string | null
+  /** Stored avatar render (#1297); null means generate from the seed. */
+  avatar_url?: string | null
   crew: { name: string; slug: string; color: string | null; avatar_style?: string | null } | null
 }
 
@@ -269,6 +271,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   <AgentAvatar
                     seed={agent.avatar_seed || agent.name}
                     style={agent.avatar_style || agent.crew?.avatar_style}
+                    agentId={agent.id}
+                    avatarUrl={agent.avatar_url}
                     className="h-5 w-5 rounded-full shrink-0"
                   />
                   <span className="flex-1 truncate">{agent.name}</span>

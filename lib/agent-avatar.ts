@@ -1,3 +1,5 @@
+"use client"
+
 import { createAvatar, type Style } from "@dicebear/core"
 // Only the DEFAULT style is imported eagerly. The other nine DiceBear
 // collections used to be static imports here, which pulled every
@@ -212,6 +214,36 @@ export function getAgentAvatarUrl(seed: string, styleName?: string | null): stri
   }
   _avatarCache.set(key, uri)
   return uri
+}
+
+/**
+ * Raw SVG markup for an agent avatar, or null when the style's collection
+ * isn't resident yet.
+ *
+ * Distinct from getAgentAvatarUrl in two ways that both matter to the
+ * persistence path (see lib/agent-avatar-persist.ts): it returns the markup
+ * rather than a data URI, and it returns **null** instead of a placeholder
+ * disc when the lazy import is still in flight. Persisting a placeholder
+ * would freeze the wrong picture forever, and because storing is write-once
+ * server-side, there'd be no second chance to get it right.
+ *
+ * Not cached: this is called once per agent per session at most, whereas
+ * getAgentAvatarUrl runs on every render.
+ *
+ * @param seed - Deterministic seed for avatar generation (typically the agent slug).
+ * @param styleName - Avatar style key from AVATAR_STYLES; defaults to bottts-neutral.
+ */
+export function getAgentAvatarSVG(seed: string, styleName?: string | null): string | null {
+  const resolvedStyle =
+    styleName && AVATAR_STYLES[styleName] ? styleName : DEFAULT_AVATAR_STYLE
+  const style = _loadedStyles.get(resolvedStyle)
+  if (!style) {
+    // Kick the import so a later attempt (next mount, next session) finds
+    // the collection resident and can persist the real thing.
+    void preloadAvatarStyle(resolvedStyle)
+    return null
+  }
+  return createAvatar(style, { seed, size: 128 }).toString()
 }
 
 /**

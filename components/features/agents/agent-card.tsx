@@ -48,6 +48,8 @@ interface AgentData {
   llm_model: string | null
   avatar_seed?: string | null
   avatar_style?: string | null
+  /** Stored avatar render (#1297); null means generate from the seed. */
+  avatar_url?: string | null
   crew: AgentCrew | null
   _count: AgentCount
   last_active_at?: string | null
@@ -142,6 +144,8 @@ export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }
               <AgentAvatar
                 seed={agent.avatar_seed || agent.name}
                 style={agent.avatar_style || agent.crew?.avatar_style}
+                agentId={agent.id}
+                avatarUrl={agent.avatar_url}
                 className="h-10 w-10 rounded-lg shrink-0"
               />
               <div className="flex-1 min-w-0">
