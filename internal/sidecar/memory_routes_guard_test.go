@@ -240,3 +240,34 @@ func TestMCPRequestID(t *testing.T) {
 		})
 	}
 }
+
+// TestMemoryMCP_ForgedTokenDirectCall_Is403 pins the status a forged token gets
+// from handleMemoryMCPForAgent called DIRECTLY, bypassing the router.
+//
+// Honest about what it proves: the handler's own refuseUnauthorizedMemory call
+// already answers 403 first, so this passed before the in-handler branch was
+// changed from 200 to 403 too. It is a pin, not a regression reproduction —
+// its job is to fail if a refactor moves or drops the chokepoint call and lets
+// the stale 200 branch become live again, which would put a refusal back in
+// the access log as a success.
+func TestMemoryMCP_ForgedTokenDirectCall_Is403(t *testing.T) {
+	s, _ := newLegacyMemoryRouteServer(t, true)
+
+	req := loopbackRequest(http.MethodPost, "/mcp/memory/beta",
+		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	req.Header.Set("Authorization", "Bearer tok-forged")
+	w := httptest.NewRecorder()
+
+	s.handleMemoryMCPForAgent(w, req, "beta")
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 for a forged token; body=%s", w.Code, w.Body.String())
+	}
+	var resp memoryMCPResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v (body=%s)", err, w.Body.String())
+	}
+	if resp.Error == nil || resp.Error.Code != -32001 {
+		t.Fatalf("error = %+v, want JSON-RPC -32001", resp.Error)
+	}
+}

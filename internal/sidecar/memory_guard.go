@@ -119,11 +119,21 @@ func (s *Server) refuseUnauthorizedMemory(w http.ResponseWriter, r *http.Request
 	// Note the comparison is written to fail CLOSED on an empty boot slug. The
 	// first cut had `s.memoryAgentSlug != "" && actorSlug != s.memoryAgentSlug`,
 	// which silently disabled this whole check when the slug was empty — a
-	// sibling then read the boot tier again. It is not reachable today (the
-	// orchestrator validates the slug before building the memory config), but
-	// the guard's answer to "I cannot tell who the boot agent is" must be to
-	// refuse, not to serve, and it should not depend on a caller-ordering
-	// invariant enforced in a different function.
+	// sibling then read the boot tier again.
+	//
+	// An empty slug should not be reachable: assembleSystemPrompt rejects
+	// req.AgentSlug unless it matches `^[a-zA-Z0-9][a-zA-Z0-9_-]*$` (empty
+	// fails) and aborts the run, and that check runs before ensureSidecar
+	// builds SidecarMemoryConfig from the same field — orchestrator_run.go,
+	// pinned by TestRunAgent_EmptySlugRejectedBeforeSidecarMemoryConfig.
+	// What keeps the empty case benign even if that ordering ever slips is that
+	// the SAME field feeds both halves — AgentSlug and BasePath
+	// (/crew/agents/<slug>/.memory) — so the slug the guard compares against
+	// and the tier the legacy handlers serve cannot name different agents. An
+	// empty slug therefore means the whole memory config is degenerate, not
+	// that the guard is looking at the wrong agent. Refusing is still the only
+	// defensible answer to "I cannot tell who the boot agent is", and it must
+	// not depend on a check enforced in a different package.
 	if present && ok && !isMemoryMCPPath(r.URL.Path) &&
 		(s.memoryAgentSlug == "" || actorSlug != s.memoryAgentSlug) &&
 		memoryRequestScope(r) != memoryScopeCrew {
