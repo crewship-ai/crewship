@@ -53,6 +53,26 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 	// badge; assistant/system rows always count. No cursor row means
 	// "never opened" — everything counts (migration v130 backfills a
 	// cursor for pre-existing chats so upgrades ship quiet).
+	//
+	// The unread count stays a correlated subquery on purpose — do not
+	// "optimise" it into a LEFT JOIN + GROUP BY (#1255 item 6 proposed
+	// exactly that; it was measured and rejected). Both shapes drive the
+	// same two indexes:
+	//
+	//	SEARCH m  USING INDEX idx_conversation_messages_session (session_id=? AND ts>?)
+	//	SEARCH rc USING INDEX sqlite_autoindex_chat_read_cursors_1 (user_id=? AND chat_id=?)
+	//
+	// so the join saves no I/O, but it additionally materialises one row
+	// per unread message and funnels them through a temp b-tree for the
+	// GROUP BY. Measured on SQLite (min of 8 runs, identical result sets):
+	//
+	//	 3,000 chats / 150,000 messages: subquery 35ms → join 45ms
+	//	30,000 chats / 420,000 messages: subquery 115ms → join 143ms
+	//
+	// Same linear slope in chat count, ~25% worse constant. The behaviour
+	// contract this projection must keep (four unread cases + the
+	// last_activity_at COALESCE fallback, which a GROUP BY is prone to
+	// collapse) is pinned by TestListChats_UnreadProjectionBehaviourLock.
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.agent_id, c.workspace_id, c.title, c.mode, c.status,
 			c.message_count, c.started_at, c.ended_at, c.created_at, c.origin,
