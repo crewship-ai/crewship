@@ -8,6 +8,11 @@ import {
   resolveStoredAvatarSrc,
 } from "@/lib/agent-avatar-persist"
 
+// Mirrors MAX_CONSECUTIVE_REFUSALS in the module under test. Kept local
+// rather than exported: the exact number is an implementation detail, but a
+// test asserting "stops after a run" has to know where the run ends.
+const MAX_CONSECUTIVE_REFUSALS_FOR_TEST = 5
+
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn() }))
 
 const h = vi.hoisted(() => ({ authMode: "cookie" as "cookie" | "bearer" }))
@@ -87,14 +92,52 @@ describe("queueAvatarBackfill", () => {
     expect(mockFetch).toHaveBeenCalledTimes(budget)
   })
 
-  // A viewer has no edit rights, so every attempt would 403. One is
-  // enough to learn that; the rest would be pure noise in the log.
-  it("stops trying for the whole session after a 403", async () => {
+  // A VIEWER can edit nothing, so every attempt 403s. Stop asking rather
+  // than firing one refused write per avatar on the page.
+  it("stops trying for the session after a run of refusals", async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 403 } as Response)
-    await queueAvatarBackfill("ag-1", "alice", "thumbs")
-    await queueAvatarBackfill("ag-2", "bob", "thumbs")
-    await queueAvatarBackfill("ag-3", "carol", "thumbs")
-    expect(mockFetch).toHaveBeenCalledTimes(1)
+    for (let i = 0; i < 12; i++) {
+      await queueAvatarBackfill(`ag-${i}`, `seed-${i}`, "thumbs")
+    }
+    expect(mockFetch).toHaveBeenCalledTimes(MAX_CONSECUTIVE_REFUSALS_FOR_TEST)
+  })
+
+  // Edit rights are per agent, not per workspace: a MANAGER may write to
+  // agents in crews they lead and be refused on everyone else's. Latching on
+  // the first 403 would disable backfill for the agents they CAN persist —
+  // the exact role the feature most needs to reach.
+  it("keeps going when refusals are interleaved with successes", async () => {
+    let call = 0
+    mockFetch.mockImplementation(() => {
+      call++
+      // Refused, refused, allowed, repeating — never a long enough run to trip.
+      return Promise.resolve(
+        call % 3 === 0 ? ({ ok: true, status: 200 } as Response) : ({ ok: false, status: 403 } as Response),
+      )
+    })
+    for (let i = 0; i < 9; i++) {
+      await queueAvatarBackfill(`ag-${i}`, `seed-${i}`, "thumbs")
+    }
+    expect(mockFetch).toHaveBeenCalledTimes(9)
+  })
+
+  // Refused and failed writes store nothing, so they must not consume the
+  // budget the successful ones need.
+  it("does not spend budget on refused or failed writes", async () => {
+    const budget = avatarBackfillBudget()
+    let call = 0
+    mockFetch.mockImplementation(() => {
+      call++
+      // One 403 (never a run), then all successes.
+      return Promise.resolve(
+        call === 1 ? ({ ok: false, status: 403 } as Response) : ({ ok: true, status: 200 } as Response),
+      )
+    })
+    for (let i = 0; i < budget + 5; i++) {
+      await queueAvatarBackfill(`ag-${i}`, `seed-${i}`, "thumbs")
+    }
+    // The refused one didn't count, so a full budget of stores still fits.
+    expect(mockFetch).toHaveBeenCalledTimes(budget + 1)
   })
 
   // 409 means someone else already stored it — benign, and specific to that

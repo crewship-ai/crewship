@@ -1,3 +1,5 @@
+"use client"
+
 import { createAvatar, type Style } from "@dicebear/core"
 // Only the DEFAULT style is imported eagerly. The other nine DiceBear
 // collections used to be static imports here, which pulled every

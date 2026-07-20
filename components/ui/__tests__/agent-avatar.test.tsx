@@ -6,7 +6,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 // can't be used, and hand the server a render for agents that lack one.
 
 const h = vi.hoisted(() => ({
-  storedSrc: null as string | null,
+  /** Set to make resolveStoredAvatarSrc decline (bearer mode, no stored render). */
+  declineStored: false,
 }))
 
 vi.mock("@/lib/agent-avatar", () => ({
@@ -14,8 +15,13 @@ vi.mock("@/lib/agent-avatar", () => ({
     `data:image/svg+xml;utf8,generated-${seed}-${style ?? "default"}`,
 }))
 
+// Argument-aware on purpose. A mock that ignores its argument and returns a
+// fixed string would pass even if the component resolved the wrong prop —
+// swapping `avatarUrl` for `seed` in the component left the whole suite green
+// under such a mock, so it proved nothing about prop wiring.
 vi.mock("@/lib/agent-avatar-persist", () => ({
-  resolveStoredAvatarSrc: () => h.storedSrc,
+  resolveStoredAvatarSrc: (url: string | null | undefined) =>
+    !url || h.declineStored ? null : `resolved:${url}`,
   queueAvatarBackfill: vi.fn().mockResolvedValue(undefined),
 }))
 
@@ -29,7 +35,7 @@ const mockBackfill = vi.mocked(queueAvatarBackfill)
 
 beforeEach(() => {
   mockBackfill.mockClear()
-  h.storedSrc = null
+  h.declineStored = false
 })
 
 describe("AgentAvatar", () => {
@@ -41,12 +47,41 @@ describe("AgentAvatar", () => {
     )
   })
 
-  it("prefers the stored render when one is available", () => {
-    h.storedSrc = "/api/v1/agents/ag-1/avatar?v=abc"
+  // Asserts the resolved value derives from the avatarUrl prop specifically,
+  // so the test fails if the component ever resolves a different prop.
+  it("prefers the stored render, resolved from the avatarUrl prop", () => {
     render(
-      <AgentAvatar agentId="ag-1" seed="alice" style="thumbs" avatarUrl="/x" alt="Alice" />,
+      <AgentAvatar
+        agentId="ag-1"
+        seed="alice"
+        style="thumbs"
+        avatarUrl="/api/v1/agents/ag-1/avatar?v=abc"
+        alt="Alice"
+      />,
     )
-    expect(screen.getByAltText("Alice")).toHaveAttribute("src", "/api/v1/agents/ag-1/avatar?v=abc")
+    expect(screen.getByAltText("Alice")).toHaveAttribute(
+      "src",
+      "resolved:/api/v1/agents/ag-1/avatar?v=abc",
+    )
+  })
+
+  // Bearer mode: the resolver declines, so the component must generate
+  // rather than render a URL an <img> cannot authenticate.
+  it("generates when the resolver declines the stored URL", () => {
+    h.declineStored = true
+    render(
+      <AgentAvatar
+        agentId="ag-1"
+        seed="alice"
+        style="thumbs"
+        avatarUrl="/api/v1/agents/ag-1/avatar?v=abc"
+        alt="Alice"
+      />,
+    )
+    expect(screen.getByAltText("Alice")).toHaveAttribute(
+      "src",
+      "data:image/svg+xml;utf8,generated-alice-thumbs",
+    )
   })
 
   // The stored URL is an authed same-origin request made by the browser's
@@ -55,9 +90,14 @@ describe("AgentAvatar", () => {
   // broken-image icon would be a visible regression over generating, which
   // always works — so failure has to fall back, not surface.
   it("falls back to generating when the stored render fails to load", async () => {
-    h.storedSrc = "/api/v1/agents/ag-1/avatar?v=abc"
     render(
-      <AgentAvatar agentId="ag-1" seed="alice" style="thumbs" avatarUrl="/x" alt="Alice" />,
+      <AgentAvatar
+        agentId="ag-1"
+        seed="alice"
+        style="thumbs"
+        avatarUrl="/api/v1/agents/ag-1/avatar?v=abc"
+        alt="Alice"
+      />,
     )
     const img = screen.getByAltText("Alice")
     fireEvent.error(img)
@@ -75,8 +115,14 @@ describe("AgentAvatar", () => {
   })
 
   it("does not re-offer a render for an agent that already has one", async () => {
-    h.storedSrc = "/api/v1/agents/ag-1/avatar?v=abc"
-    render(<AgentAvatar agentId="ag-1" seed="alice" style="thumbs" avatarUrl="/x" />)
+    render(
+      <AgentAvatar
+        agentId="ag-1"
+        seed="alice"
+        style="thumbs"
+        avatarUrl="/api/v1/agents/ag-1/avatar?v=abc"
+      />,
+    )
     await waitFor(() => expect(mockBackfill).not.toHaveBeenCalled())
   })
 
