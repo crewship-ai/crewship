@@ -41,9 +41,11 @@ run_with_fn() {
     echo "127"
     return
   fi
-  bash -c "set -euo pipefail
-$body
-$snippet" >/dev/null 2>&1
+  # Fed through stdin rather than `bash -c "...$body...$snippet"`: the
+  # function body comes out of dev.sh verbatim, quotes and all, and
+  # interpolating it into a double-quoted command string is one stray
+  # quote away from a syntax error that would look like a test failure.
+  printf '%s\n%s\n%s\n' 'set -euo pipefail' "$body" "$snippet" | bash >/dev/null 2>&1
   echo "$?"
 }
 
