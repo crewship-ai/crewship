@@ -28,6 +28,7 @@ crewship agent <subcommand> [flags]
 | `debug` | Show agent debug info (container state, env, crewshipd status) |
 | `skills` | List skills assigned to an agent |
 | `credentials` | List credentials assigned to an agent |
+| `avatar` | Inspect, set, or clear an agent's stored avatar |
 | `mcp` | Show or set MCP server configuration for an agent |
 | `files` | List files in the agent's working directory, or download a single file |
 | `file-write` | Write a file into the agent's working directory |
@@ -225,6 +226,68 @@ crewship agent credentials <slug-or-id>
 ```
 
 **Output columns:** ID, NAME, PROVIDER, TYPE, ENV VAR
+
+---
+
+## `crewship agent avatar`
+
+Inspect, set, or clear an agent's **stored** avatar.
+
+Normally an agent's face is drawn on the fly from its `avatar_seed` and
+`avatar_style`, which means it depends on the installed generator version —
+upgrading the avatar library repaints every agent. Once a render is stored,
+that exact image is served instead and the face stops moving.
+
+An agent with no stored render is in the normal, pre-persistence state, not
+a broken one.
+
+### `crewship agent avatar show`
+
+Write the stored avatar SVG to stdout, or to a file with `-o`. Errors if the
+agent has no stored render.
+
+```bash
+crewship agent avatar show my-agent
+crewship agent avatar show my-agent -o avatar.svg
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--out`, `-o` | `string` | _(stdout)_ | Write the SVG to this file instead of stdout. |
+
+### `crewship agent avatar set`
+
+Store an SVG as the agent's avatar.
+
+```bash
+crewship agent avatar set my-agent -f avatar.svg
+cat avatar.svg | crewship agent avatar set my-agent -f -
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--file`, `-f` | `string` | | SVG file to store, or `-` to read from stdin. **Required.** |
+
+The server validates the SVG against an allowlist of inert drawing elements;
+anything that could load or execute something (scripts, event handlers,
+external references) is refused. Maximum 64 KiB.
+
+Storing is **write-once** — an agent that already has a stored avatar fails
+with a conflict. Run `avatar clear` first to replace one.
+
+### `crewship agent avatar clear`
+
+Drop the stored render, returning the agent to generate-from-seed.
+
+```bash
+crewship agent avatar clear my-agent
+```
+
+<Note>
+  You rarely need `clear` by hand: changing an agent's `--avatar-seed` or
+  `--avatar-style`, or applying a crew-wide style with [`crewship crew
+  apply-avatar-style`](/cli/crew), drops the stale render automatically.
+</Note>
 
 ---
 

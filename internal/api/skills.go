@@ -80,11 +80,15 @@ type skillResponse struct {
 }
 
 type skillInstalledAgent struct {
-	AgentID         string  `json:"agent_id"`
-	AgentSlug       string  `json:"agent_slug"`
-	AgentName       string  `json:"agent_name"`
-	AvatarSeed      *string `json:"avatar_seed"`
-	AvatarStyle     *string `json:"avatar_style"`
+	AgentID     string  `json:"agent_id"`
+	AgentSlug   string  `json:"agent_slug"`
+	AgentName   string  `json:"agent_name"`
+	AvatarSeed  *string `json:"avatar_seed"`
+	AvatarStyle *string `json:"avatar_style"`
+	// AvatarURL is the agent's stored avatar render (#1297) when it has
+	// one, else null meaning "generate from the seed". Kept alongside the
+	// seed so a skill card shows the same face as the agent's own card.
+	AvatarURL       *string `json:"avatar_url"`
 	CrewID          *string `json:"crew_id"`
 	CrewSlug        *string `json:"crew_slug"`
 	CrewName        *string `json:"crew_name"`
@@ -227,6 +231,7 @@ func (h *SkillHandler) populateInstalledOn(r *http.Request, rows []skillResponse
 	args := toAnySlice(ids)
 	q := `
 		SELECT as2.skill_id, a.id, a.slug, a.name, a.avatar_seed, a.avatar_style,
+		       COALESCE(a.avatar_svg_hash, ''),
 		       c.id, c.slug, c.name, c.color, c.icon, c.avatar_style
 		FROM agent_skills as2
 		JOIN agents a ON a.id = as2.agent_id
@@ -241,13 +246,16 @@ func (h *SkillHandler) populateInstalledOn(r *http.Request, rows []skillResponse
 	for queryRows.Next() {
 		var skillID string
 		var ag skillInstalledAgent
+		var avatarSVGHash string
 		if err := queryRows.Scan(
 			&skillID, &ag.AgentID, &ag.AgentSlug, &ag.AgentName,
 			&ag.AvatarSeed, &ag.AvatarStyle,
+			&avatarSVGHash,
 			&ag.CrewID, &ag.CrewSlug, &ag.CrewName, &ag.CrewColor, &ag.CrewIcon, &ag.CrewAvatarStyle,
 		); err != nil {
 			return err
 		}
+		ag.AvatarURL = agentAvatarURL(ag.AgentID, avatarSVGHash)
 		i, ok := idx[skillID]
 		if !ok {
 			continue

@@ -1672,6 +1672,7 @@ END;
 	{version: 144, name: "datetime_now_default_tform", fn: migrationConvertDatetimeNowDefaults},
 	{version: 145, name: "workspace_allow_privileged_credentials", sql: migrationWorkspaceAllowPrivilegedCredentials},
 	{version: 146, name: "perf_indexes", sql: migrationPerfIndexes},
+	{version: 147, name: "agent_avatar_svg", sql: migrationAgentAvatarSVG},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

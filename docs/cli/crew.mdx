@@ -417,6 +417,8 @@ crewship crew apply-avatar-style <slug-or-id> --reset
 
 Exactly one of `--style` or `--reset` is required. Backed by `POST /api/v1/crews/{crewId}/apply-avatar-style`. The response reports `updated` (agent row count affected) plus either `style` or `reset: true`.
 
+This also drops any [stored avatar renders](/cli/agent#crewship-agent-avatar) for the crew's agents, since those depict the previous style. Affected agents go back to generating from their seed and are re-stored on next view.
+
 ---
 
 ## `crewship crew files`

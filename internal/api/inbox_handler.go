@@ -99,8 +99,14 @@ type inboxItemResponse struct {
 	// only when the sender is a real agent, so the inbox renders that agent's
 	// actual avatar instead of a generic glyph. Blank for system / crew /
 	// pipeline senders, which fall back to the kind glyph client-side.
-	AvatarSeed       string                 `json:"avatar_seed,omitempty"`
-	AvatarStyle      string                 `json:"avatar_style,omitempty"`
+	AvatarSeed  string `json:"avatar_seed,omitempty"`
+	AvatarStyle string `json:"avatar_style,omitempty"`
+	// AvatarURL points at the sender's stored avatar render (#1297) when it
+	// has one. Empty means generate from the seed. Carried here so the inbox
+	// shows the same face as the roster — without it, a generator upgrade
+	// would redraw senders in the inbox while agent cards kept the stored
+	// image.
+	AvatarURL        string                 `json:"avatar_url,omitempty"`
 	State            string                 `json:"state"`
 	Priority         string                 `json:"priority"`
 	Blocking         bool                   `json:"blocking"`
@@ -345,26 +351,30 @@ func (h *InboxHandler) enrichAgentAvatars(ctx context.Context, rows []inboxItemR
 	}
 	ph := sqlPlaceholders(len(ids))
 	r, err := h.db.QueryContext(ctx,
-		`SELECT id, COALESCE(avatar_seed, ''), COALESCE(avatar_style, '') FROM agents WHERE id IN (`+ph+`)`,
+		`SELECT id, COALESCE(avatar_seed, ''), COALESCE(avatar_style, ''), COALESCE(avatar_svg_hash, '')
+		 FROM agents WHERE id IN (`+ph+`)`,
 		ids...)
 	if err != nil {
 		h.logger.Warn("inbox avatar enrich", "error", err)
 		return
 	}
 	defer r.Close()
-	type avatar struct{ seed, style string }
+	type avatar struct{ seed, style, svgHash string }
 	byID := make(map[string]avatar, len(ids))
 	for r.Next() {
-		var id, seed, style string
-		if err := r.Scan(&id, &seed, &style); err != nil {
+		var id, seed, style, svgHash string
+		if err := r.Scan(&id, &seed, &style, &svgHash); err != nil {
 			continue
 		}
-		byID[id] = avatar{seed, style}
+		byID[id] = avatar{seed, style, svgHash}
 	}
 	for i := range rows {
 		if a, ok := byID[rows[i].SenderID]; ok {
 			rows[i].AvatarSeed = a.seed
 			rows[i].AvatarStyle = a.style
+			if u := agentAvatarURL(rows[i].SenderID, a.svgHash); u != nil {
+				rows[i].AvatarURL = *u
+			}
 		}
 	}
 }

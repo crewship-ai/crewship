@@ -265,9 +265,16 @@ type agentResponse struct {
 	// PR-E replaces it with the PERSONA.md memory tier (per-agent with
 	// crew-level default). New write paths should target PERSONA via the
 	// F1 memory.write tool. Reads remain valid until PR-E migration.
-	SystemPrompt    *string `json:"system_prompt"`
-	AvatarSeed      *string `json:"avatar_seed"`
-	AvatarStyle     *string `json:"avatar_style"`
+	SystemPrompt *string `json:"system_prompt"`
+	AvatarSeed   *string `json:"avatar_seed"`
+	AvatarStyle  *string `json:"avatar_style"`
+	// AvatarURL points at the stored render (#1297) when the agent has
+	// one, and is null otherwise — null means "generate from the seed",
+	// which is what every agent did before persistence existed. Carries a
+	// content hash as ?v= so it can be cached immutably. Never the SVG
+	// itself: inlining ~2.6 KB per agent would add ~500 KB to a
+	// 200-agent roster response.
+	AvatarURL       *string `json:"avatar_url"`
 	TimeoutSeconds  int     `json:"timeout_seconds"`
 	ToolProfile     string  `json:"tool_profile"`
 	MemoryEnabled   bool    `json:"memory_enabled"`

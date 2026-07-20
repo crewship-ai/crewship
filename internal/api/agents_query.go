@@ -26,7 +26,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	const listQuery = `
 		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
 			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
-			a.system_prompt_legacy, a.avatar_seed, a.avatar_style, a.timeout_seconds,
+			a.system_prompt_legacy, a.avatar_seed, a.avatar_style, a.avatar_svg_hash, a.timeout_seconds,
 			a.tool_profile, a.memory_enabled, a.cli_tools,
 			a.schedule_cron, a.schedule_prompt, a.schedule_enabled, a.schedule_last_run, a.schedule_next_run,
 			a.mcp_config_json,
@@ -84,9 +84,11 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		var memEnabled, schedEnabled, ephemeral int
 		var crewName, crewSlug, crewColor, crewAvatarStyle *string
 		var createdByUserID sql.NullString
+		var avatarSVGHash sql.NullString
 		if err := rows.Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
 			&a.Description, &a.RoleTitle, &a.AgentRole, &a.LeadMode, &a.Status, &a.CLIAdapter,
 			&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle,
+			&avatarSVGHash,
 			&a.TimeoutSeconds, &a.ToolProfile, &memEnabled, &a.CLITools,
 			&a.ScheduleCron, &a.SchedulePrompt, &schedEnabled, &a.ScheduleLastRun, &a.ScheduleNextRun,
 			&a.MCPConfigJSON,
@@ -99,6 +101,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		a.MemoryEnabled = memEnabled == 1
 		a.ScheduleEnabled = schedEnabled == 1
+		a.AvatarURL = agentAvatarURL(a.ID, avatarSVGHash.String)
 		if createdByUserID.Valid {
 			a.CreatedByUserID = createdByUserID.String
 		}
@@ -190,11 +193,12 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var memEnabled, schedEnabled, whRequireTS, whSecretSet int
 	var crewName, crewSlug, crewColor, crewAvatarStyle *string
 	var createdByUserID sql.NullString
+	var avatarSVGHash sql.NullString
 	var ephemeral int
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
 			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
-			a.system_prompt_legacy, a.avatar_seed, a.avatar_style, a.timeout_seconds,
+			a.system_prompt_legacy, a.avatar_seed, a.avatar_style, a.avatar_svg_hash, a.timeout_seconds,
 			a.tool_profile, a.memory_enabled, a.cli_tools,
 			a.schedule_cron, a.schedule_prompt, a.schedule_enabled, a.schedule_last_run, a.schedule_next_run,
 			a.webhook_require_timestamp,
@@ -213,6 +217,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	`, agentID, workspaceID).Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
 		&a.Description, &a.RoleTitle, &a.AgentRole, &a.LeadMode, &a.Status, &a.CLIAdapter,
 		&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle,
+		&avatarSVGHash,
 		&a.TimeoutSeconds, &a.ToolProfile, &memEnabled, &a.CLITools,
 		&a.ScheduleCron, &a.SchedulePrompt, &schedEnabled, &a.ScheduleLastRun, &a.ScheduleNextRun,
 		&whRequireTS,
@@ -234,6 +239,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	a.MemoryEnabled = memEnabled == 1
 	a.ScheduleEnabled = schedEnabled == 1
 	a.WebhookRequireTimestamp = whRequireTS == 1
+	a.AvatarURL = agentAvatarURL(a.ID, avatarSVGHash.String)
 	secretSet := whSecretSet == 1
 	a.WebhookSecretSet = &secretSet
 	if createdByUserID.Valid {

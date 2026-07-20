@@ -369,6 +369,26 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A crew's avatar_style is the default for every agent in it that hasn't
+	// set its own, so changing it changes those agents' faces — and a stored
+	// render (#1297) still depicts the OLD style. Drop the renders for the
+	// inheriting agents only; ones with their own avatar_style are unaffected
+	// by this field and must keep theirs.
+	//
+	// The dedicated apply-avatar-style endpoint clears renders for the whole
+	// crew because it rewrites every agent's own style. This path is the
+	// quieter one — the crew settings dropdown — and without this the change
+	// would appear to do nothing for any agent already backfilled.
+	if req.AvatarStyle != nil {
+		if _, err := h.db.ExecContext(r.Context(), `
+			UPDATE agents SET avatar_svg = NULL, avatar_svg_hash = NULL
+			WHERE crew_id = ? AND avatar_style IS NULL AND avatar_svg IS NOT NULL AND deleted_at IS NULL`,
+			crewID); err != nil {
+			replyInternalError(w, h.logger, "clear inherited agent avatars", err)
+			return
+		}
+	}
+
 	// Return updated crew
 	var c crewResponse
 	err = scanCrewRow(h.db.QueryRowContext(r.Context(), `
