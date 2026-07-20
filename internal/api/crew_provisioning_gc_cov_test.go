@@ -71,6 +71,7 @@ func (f *covGCFake) ImageRemove(_ context.Context, id string, _ image.RemoveOpti
 func covGCStaleContainer(id string) container.Summary {
 	return container.Summary{
 		ID:      id,
+		Names:   []string{"/" + devcontainer.TempContainerNamePrefix + id},
 		Created: time.Now().Add(-2 * tempContainerMaxAge).Unix(),
 		Labels: map[string]string{
 			devcontainer.TempContainerLabelKey: devcontainer.TempContainerLabelValue,

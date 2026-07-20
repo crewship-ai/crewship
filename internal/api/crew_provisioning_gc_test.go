@@ -49,6 +49,14 @@ func (f *fakeGCClient) ContainerList(_ context.Context, opts container.ListOptio
 	return out, nil
 }
 
+// tempNames builds the Names slice Docker reports for a provisioner scratch
+// container: leading slash, TempContainerNamePrefix, then a unique suffix.
+// Fixtures used to omit Names entirely, which modelled a container that has
+// never existed — every container the daemon returns has a name.
+func tempNames(suffix string) []string {
+	return []string{"/" + devcontainer.TempContainerNamePrefix + suffix}
+}
+
 // matchesAllLabels returns true when every "key=value" filter expression in
 // wants is present in labels. Mirrors the real Docker daemon's exact-match
 // label filter semantics for our test scope.
@@ -106,9 +114,9 @@ func TestSweepOrphanTempContainers_RemovesStaleKeepsFresh(t *testing.T) {
 	}
 	fake := &fakeGCClient{
 		containers: []container.Summary{
-			{ID: "old1", Created: now - int64((2 * time.Hour).Seconds()), Labels: tempLabel},
-			{ID: "fresh", Created: now - int64((5 * time.Minute).Seconds()), Labels: tempLabel},
-			{ID: "old2", Created: now - int64((3 * time.Hour).Seconds()), Labels: tempLabel},
+			{ID: "old1", Names: tempNames("old1"), Created: now - int64((2 * time.Hour).Seconds()), Labels: tempLabel},
+			{ID: "fresh", Names: tempNames("fresh"), Created: now - int64((5 * time.Minute).Seconds()), Labels: tempLabel},
+			{ID: "old2", Names: tempNames("old2"), Created: now - int64((3 * time.Hour).Seconds()), Labels: tempLabel},
 		},
 	}
 	h := newGCTestHandler(t, fake)
@@ -117,6 +125,89 @@ func TestSweepOrphanTempContainers_RemovesStaleKeepsFresh(t *testing.T) {
 
 	if got := strings.Join(fake.removedContainers, ","); got != "old1,old2" {
 		t.Errorf("removed containers = %q; want old1,old2", got)
+	}
+}
+
+// A live crew container must survive the sweeper even though it carries the
+// temp label, because it inherits that label from its own cached image and
+// cannot help doing so.
+//
+// The provisioner labels its scratch container crewship.temp=provision and
+// then `docker commit`s it into crewship-cache:<hash>. Docker copies the
+// source container's config — labels included — into the committed image,
+// and every container started from that image inherits them. Crew runtime
+// containers set no labels of their own (buildCrewContainerConfig passes
+// none), so crewship.temp=provision is the only label they carry, and the
+// sweeper's label filter matched them exactly.
+//
+// Observed on crewship-dev on 2026-07-20: a healthy crew container that had
+// been serving for an hour was force-removed the first time a sweep ran
+// after it crossed tempContainerMaxAge.
+//
+//	09:50:36 "orphan temp-container GC: removed stale temp containers"
+//	         "removed":1,"scanned":1,"duration":829782053
+//
+// A label cannot be an identity marker across a commit. The container name
+// can: names live on the container, never in the image.
+func TestSweepOrphanTempContainers_SparesLiveCrewContainers(t *testing.T) {
+	now := time.Now().Unix()
+	// Exactly what a crew container looks like to the daemon: the temp
+	// label inherited from its cache image, and nothing else.
+	inheritedLabel := map[string]string{
+		devcontainer.TempContainerLabelKey: devcontainer.TempContainerLabelValue,
+	}
+	fake := &fakeGCClient{
+		containers: []container.Summary{
+			{
+				ID:      "crew-instance",
+				Names:   []string{"/crewship-1-team-quality-cmrmd4i0a01b1b5a27a84"},
+				Created: now - int64((3 * time.Hour).Seconds()),
+				State:   "running",
+				Labels:  inheritedLabel,
+			},
+			{
+				ID:      "crew-legacy",
+				Names:   []string{"/crewship-team-engineering-cmrmg4gnu000b55b3967c"},
+				Created: now - int64((30 * 24 * time.Hour).Seconds()),
+				State:   "running",
+				Labels:  inheritedLabel,
+			},
+			{
+				// A genuinely leaked provisioner container: same label,
+				// but named by the provisioner rather than by the crew.
+				ID:      "leaked-temp",
+				Names:   []string{"/" + devcontainer.TempContainerNamePrefix + "a1b2c3d4"},
+				Created: now - int64((2 * time.Hour).Seconds()),
+				State:   "running",
+				Labels:  inheritedLabel,
+			},
+		},
+	}
+	h := newGCTestHandler(t, fake)
+
+	h.sweepOrphanTempContainers(context.Background())
+
+	if got := strings.Join(fake.removedContainers, ","); got != "leaked-temp" {
+		t.Errorf("removed containers = %q; want only leaked-temp — a crew container was killed by the orphan sweeper", got)
+	}
+}
+
+// The provisioner's own naming must stay distinguishable from every crew
+// container name, or the sweeper's name check silently stops protecting
+// them. Crew names come from crewResourceName: "<prefix>-team-<slug>-<id>".
+func TestTempContainerNamePrefix_CannotCollideWithCrewNames(t *testing.T) {
+	if devcontainer.TempContainerNamePrefix == "" {
+		t.Fatal("TempContainerNamePrefix must not be empty — it is the sweeper's only safe identity marker")
+	}
+	for _, crewName := range []string{
+		"crewship-team-quality-cmrmd4i0a01b1b5a27a84",
+		"crewship-1-team-quality-cmrmd4i0a01b1b5a27a84",
+		"crewship-12-team-data-pipeline-cmrmg4gnu000b55b3967c",
+	} {
+		if strings.HasPrefix(crewName, devcontainer.TempContainerNamePrefix) {
+			t.Errorf("crew container name %q starts with the temp prefix %q — the sweeper would delete live crews",
+				crewName, devcontainer.TempContainerNamePrefix)
+		}
 	}
 }
 
@@ -130,8 +221,8 @@ func TestSweepOrphanTempContainers_LabelFilterScopesDestruction(t *testing.T) {
 	}
 	fake := &fakeGCClient{
 		containers: []container.Summary{
-			// Old, has label → should be removed.
-			{ID: "ours-old", Created: now - int64((2 * time.Hour).Seconds()), Labels: tempLabel},
+			// Old, has label AND the provisioner's name → should be removed.
+			{ID: "ours-old", Names: tempNames("ours-old"), Created: now - int64((2 * time.Hour).Seconds()), Labels: tempLabel},
 			// Old, NO crewship label → must be ignored even though it's old.
 			{ID: "user-old", Created: now - int64((24 * time.Hour).Seconds()), Labels: map[string]string{"app": "their-thing"}},
 			// Old, different crewship label value → must be ignored.

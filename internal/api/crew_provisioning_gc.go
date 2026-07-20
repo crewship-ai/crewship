@@ -73,6 +73,18 @@ func (h *ProvisioningHandler) runStartupAndPeriodicGC(ctx context.Context) {
 // run cleans up via defer; this sweeper only catches the crash/SIGKILL path.
 // Filtered by the Provisioner's label so we never touch unrelated containers.
 
+// hasTempContainerName reports whether any of a container's names marks it
+// as a provisioner scratch container. Docker reports names with a leading
+// slash, and a container can carry several.
+func hasTempContainerName(names []string) bool {
+	for _, n := range names {
+		if strings.HasPrefix(strings.TrimPrefix(n, "/"), devcontainer.TempContainerNamePrefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *ProvisioningHandler) sweepOrphanTempContainers(ctx context.Context) {
 	if h.gcClient == nil {
 		return
@@ -96,6 +108,21 @@ func (h *ProvisioningHandler) sweepOrphanTempContainers(ctx context.Context) {
 			break
 		}
 		if c.Created >= cutoff {
+			continue
+		}
+		// Age and label are not enough to authorise deletion. The label
+		// travels into the committed cache image and back out into every
+		// crew container started from it, so matching on it alone means
+		// force-removing live crews an hour into their lives — which is
+		// exactly what happened on crewship-dev on 2026-07-20. Only the
+		// name proves this container came from createTempContainer;
+		// names are never copied into images.
+		//
+		// Scratch containers leaked by a SIGKILL *before* this check
+		// existed carry a Docker-assigned random name and are no longer
+		// swept. That is the intended trade: an abandoned `sleep infinity`
+		// costs a few MB, deleting somebody's running crew costs their work.
+		if !hasTempContainerName(c.Names) {
 			continue
 		}
 		if err := h.gcClient.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); err != nil {

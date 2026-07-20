@@ -6,6 +6,8 @@ package devcontainer
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"sort"
@@ -58,10 +60,11 @@ func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string)
 			Image: baseImage,
 			Cmd:   []string{"sleep", "infinity"},
 			User:  "0:0",
-			// Label is the canonical marker used by the orphan-temp sweeper.
-			// If crewshipd is SIGKILLed between ContainerCreate and the
-			// provision flow's cleanup defer, the next start-up sweep removes
-			// these by label (see internal/api/crew_provisioning.go).
+			// Narrows the sweeper's daemon-side list, but does NOT authorise
+			// deletion on its own — this container is about to be committed
+			// into a cache image, and the label rides along into every crew
+			// container started from it. The name below is the marker the
+			// sweeper acts on. See TempContainerLabelKey's doc comment.
 			Labels: map[string]string{TempContainerLabelKey: TempContainerLabelValue},
 		},
 		&container.HostConfig{
@@ -71,12 +74,29 @@ func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string)
 		},
 		nil, // networkingConfig
 		nil, // platform
-		"",  // no name (Docker assigns one)
+		tempContainerName(),
 	)
 	if err != nil {
 		return "", err
 	}
 	return resp.ID, nil
+}
+
+// tempContainerName returns a name only a provisioner scratch container can
+// have. Unlike the label, it cannot be inherited through `docker commit`,
+// which is what lets the orphan sweeper delete leaked scratch containers
+// without ever touching a live crew.
+//
+// Falls back to a nanosecond timestamp if the entropy source fails: a name
+// collision only fails this one provisioning run with a clear Docker error,
+// whereas dropping the prefix would produce a container the sweeper can
+// never clean up.
+func tempContainerName() string {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("%s%d", TempContainerNamePrefix, time.Now().UnixNano())
+	}
+	return TempContainerNamePrefix + hex.EncodeToString(buf)
 }
 
 // ensureImage makes sure the given image reference is present locally and, if
