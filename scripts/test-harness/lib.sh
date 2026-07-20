@@ -19,7 +19,31 @@
 set -uo pipefail
 
 # ── Configuration (override via env) ────────────────────────────────────────
-CREWSHIP="${CREWSHIP:-./crewship}"
+_HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Resolve the CLI binary. This used to default to the RELATIVE `./crewship`,
+# which only resolves when a suite is launched from the repo root — while the
+# README (correctly) says to run them from this directory. The miss surfaced as
+# an auth failure telling the operator to `crewship seed --nuke`, i.e. a path
+# bug that asked you to wipe the workspace (#1297). Anchor on the repo root
+# instead, then fall back to whatever `crewship` the operator has on PATH.
+_resolve_crewship() {
+  local root
+  root="$(git -C "$_HARNESS_DIR" rev-parse --show-toplevel 2>/dev/null)" || root=""
+  # No git, or not a checkout (tarball, vendored copy): the harness still lives
+  # two levels below the root, so derive it from our own location.
+  [[ -z "$root" ]] && root="$(cd "$_HARNESS_DIR/../.." && pwd)"
+
+  if [[ -x "$root/crewship" ]]; then
+    printf '%s\n' "$root/crewship"
+    return
+  fi
+  # Nothing built in the clone — an installed CLI is the next best thing. If
+  # there is none either, still name the repo-root path: preflight reports it
+  # and that is the path the operator is expected to build.
+  command -v crewship 2>/dev/null || printf '%s\n' "$root/crewship"
+}
+CREWSHIP="${CREWSHIP:-$(_resolve_crewship)}"
 # Resolve target server: explicit SERVER env wins, else CREWSHIP_SERVER (the
 # per-clone dev target, e.g. dev1), else the local default.
 SERVER="${SERVER:-${CREWSHIP_SERVER:-http://localhost:8081}}"
@@ -128,8 +152,19 @@ poll_until() {
 }
 
 # preflight — confirm the CLI is reachable and the workspace is seeded.
+#
+# The two failure modes are reported separately on purpose: "no binary" is a
+# build/path problem and must never send the operator to a destructive reseed.
 preflight() {
   section "Preflight: CLI ↔ $SERVER"
+  if ! "$CREWSHIP" version >/dev/null 2>&1; then
+    printf '%s  ✗ crewship binary not found at %s%s\n' "$_C_RED" "$CREWSHIP" "$_C_OFF"
+    printf '   Build it from the repo root:\n'
+    printf '     go build -o crewship ./cmd/crewship\n'
+    printf '   or install the CLI on PATH, or point the harness at one:\n'
+    printf '     CREWSHIP=/path/to/crewship %s\n' "$(basename "${BASH_SOURCE[1]:-run-all.sh}")"
+    exit 2
+  fi
   if ! cs whoami >/dev/null 2>&1; then
     printf '%s  ✗ cannot reach %s as an authenticated user.%s\n' "$_C_RED" "$SERVER" "$_C_OFF"
     printf '   Run from a clone shell with CREWSHIP_SERVER set and `crewship login` done,\n'

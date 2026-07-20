@@ -119,6 +119,8 @@ jobs:
         run: bash scripts/security-yml-test.sh
       - name: deploy-dev.sh push_branch
         run: bash scripts/deploy-dev-test.sh
+      - name: test-harness lib (binary resolution + preflight)
+        run: bash scripts/test-harness-lib-test.sh
 
   # ── Frontend: lint, typecheck, build ──
   frontend:
