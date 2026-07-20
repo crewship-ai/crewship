@@ -1058,14 +1058,28 @@ DELETE /api/v1/agents/{agentId}/avatar
 ```
 
 Returns `204`. The agent reverts to generate-from-seed — which also means
-the next generator upgrade will change its face again.
+the next generator upgrade will change its face again. Returns `404` for an
+agent that does not exist in this workspace, and `403` without edit rights.
+
+### When a stored render is dropped automatically
+
+A stored render depicts one specific `(avatar_seed, avatar_style)` pair, so
+it is discarded whenever something changes what the agent is supposed to
+look like:
+
+| Change | Effect |
+|---|---|
+| `PATCH /api/v1/agents/{agentId}` that **changes** `avatar_seed` or `avatar_style` | that agent's render is dropped |
+| `PATCH /api/v1/agents/{agentId}` that resubmits them **unchanged** | render kept |
+| Any unrelated field (rename, model swap) | render kept |
+| [`POST /api/v1/crews/{crewId}/apply-avatar-style`](/api-reference/crews) | every agent in the crew |
+| [`PATCH /api/v1/crews/{crewId}`](/api-reference/crews) changing `avatar_style` | only agents that **inherit** the crew style (`avatar_style` is null); agents with their own style keep theirs |
 
 <Note>
-  A stored render depicts one specific `(avatar_seed, avatar_style)` pair,
-  so it is dropped automatically whenever either changes: via `PATCH
-  /api/v1/agents/{agentId}`, or in bulk via [`POST
-  /api/v1/crews/{crewId}/apply-avatar-style`](/api-reference/crews). An
-  unrelated edit (a rename, a model change) leaves it intact.
+  The comparison is on values, not on which keys the request contains.
+  Clients that resubmit the whole agent on every save — the dashboard's
+  settings page does — would otherwise discard the stored render on every
+  unrelated edit.
 </Note>
 
 ---

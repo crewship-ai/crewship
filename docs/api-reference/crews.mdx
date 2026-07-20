@@ -537,6 +537,8 @@ Applies an `avatar_style` to all non-deleted agents in the crew, or clears per-a
 
 This also clears any [stored avatar renders](/api-reference/agents#agent-avatars) on those agents, because a stored render depicts the *previous* style — leaving it would make this call a no-op for every agent that has one. Affected agents revert to `avatar_url: null` and are re-stored on next view.
 
+`PATCH /api/v1/crews/{crewId}` with a new `avatar_style` does the same for the narrower set of agents that *inherit* the crew default (their own `avatar_style` is null). Agents with an explicit style of their own are unaffected by the crew default, so they keep their stored render.
+
 **Auth:** `OWNER` or `ADMIN` role
 
 **Request Body:**

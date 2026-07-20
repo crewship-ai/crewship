@@ -26,22 +26,31 @@ package api
 //      ten collections). That vocabulary contains no element or attribute
 //      capable of loading or executing anything: no <script>, no
 //      <foreignObject>, no <use>/<image>, no href of any kind, no event
-//      handlers. Anything outside it is refused, so the allowlist is a
-//      complete barrier rather than a blocklist that has to anticipate
-//      every vector.
+//      handlers. Anything outside it is refused.
+//
+//      The allowlist is only as good as the thing applying it. The first
+//      version scanned with regexes and was bypassable — '>' is legal
+//      inside an XML attribute value, so `width=">" onload="…"` hid the
+//      handler in a region the scanner never examined. It now walks a real
+//      encoding/xml token stream. See
+//      TestValidateAgentAvatarSVG_ScannerBypassesStayClosed; that is a
+//      standing argument against ever "simplifying" this back to pattern
+//      matching.
 //   2. ServeAvatar's `Content-Security-Policy: default-src 'none'; sandbox`
 //      plus nosniff, which neutralises active content even if something
-//      slipped past (1).
+//      slipped past (1). These are two controls precisely because (1) has
+//      been wrong once already — neither is treated as sufficient alone.
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -51,30 +60,33 @@ import (
 // generous headroom while keeping the row — and the buffered read — bounded.
 const maxAgentAvatarBytes = 64 << 10
 
-// agentAvatarAllowedTags is the element allowlist. It covers the vocabulary
-// the DiceBear collections emit plus the handful of neighbouring inert shape
-// and gradient elements, so a future minor version that starts using, say,
+// agentAvatarAllowedTags is the element allowlist, keyed by LOCAL name
+// (namespace prefix stripped, lowercased). It covers the vocabulary the
+// DiceBear collections emit plus the handful of neighbouring inert shape and
+// gradient elements, so a future minor version that starts using, say,
 // <polygon> does not spuriously fail validation. Every entry is a pure
 // drawing or metadata element — nothing here can fetch or execute.
 //
 // Deliberately absent: script, foreignObject, iframe, embed, object, a,
 // use, image, animate/set/handler. Those are the ones that turn a picture
-// into a program.
+// into a program. Matching on the local name means a foreign-namespace
+// dodge (<x:script>) is refused too.
 var agentAvatarAllowedTags = map[string]bool{
 	"svg": true, "g": true, "defs": true, "mask": true, "clippath": true,
 	"path": true, "rect": true, "circle": true, "ellipse": true,
 	"line": true, "polygon": true, "polyline": true,
 	"lineargradient": true, "radialgradient": true, "stop": true,
 	"title": true, "desc": true, "metadata": true,
-	// RDF/Dublin Core licensing block emitted by the collections.
-	"rdf:rdf": true, "rdf:description": true,
-	"dc:creator": true, "dc:rights": true, "dc:source": true, "dc:title": true,
-	"dcterms:license": true,
+	// RDF/Dublin Core licensing block emitted by the collections. Local
+	// names only: rdf:RDF -> "rdf", dc:creator -> "creator", and so on.
+	"rdf": true, "description": true,
+	"creator": true, "rights": true, "source": true, "license": true,
 }
 
-// agentAvatarAllowedAttrs is the attribute allowlist. Same principle: only
-// presentation, geometry and namespace declarations. No href/xlink:href, no
-// on* handlers — both are excluded simply by not appearing here.
+// agentAvatarAllowedAttrs is the attribute allowlist, also keyed by local
+// name. Same principle: only presentation, geometry and metadata. No
+// href/xlink:href, no on* handlers — both are excluded simply by not
+// appearing here, in any namespace.
 var agentAvatarAllowedAttrs = map[string]bool{
 	"id": true, "class": true, "style": true, "transform": true,
 	"width": true, "height": true, "viewbox": true, "version": true,
@@ -89,24 +101,21 @@ var agentAvatarAllowedAttrs = map[string]bool{
 	"stroke-dasharray": true, "stroke-dashoffset": true,
 	"gradientunits": true, "gradienttransform": true, "spreadmethod": true,
 	"stop-color": true, "stop-opacity": true,
-	"xmlns": true, "xmlns:dc": true, "xmlns:dcterms": true,
-	"xmlns:rdf": true, "xmlns:xsi": true, "xsi:type": true,
-	"rdf:about": true, "rdf:resource": true,
+	// Metadata-block attributes: xsi:type, rdf:about, rdf:resource.
+	"type": true, "about": true, "resource": true,
 }
-
-var (
-	// Matches an element tag and captures its name: `<rect ...>`, `</g>`.
-	agentAvatarTagRe = regexp.MustCompile(`<\s*/?\s*([A-Za-z_][\w:.\-]*)`)
-	// Matches an attribute name inside a tag body.
-	agentAvatarAttrRe = regexp.MustCompile(`([A-Za-z_][\w:.\-]*)\s*=`)
-	// url(...) references must stay internal — url(#gradient) is how fill
-	// and mask point at <defs>. Anything else is an outbound fetch.
-	agentAvatarURLRe = regexp.MustCompile(`(?i)url\(\s*['"]?\s*([^)'"\s]*)`)
-)
 
 // validateAgentAvatarSVG accepts only inert, self-contained SVG. See the
 // package comment above for why this is an allowlist rather than a
 // blocklist. Returns a caller-facing error describing the first violation.
+//
+// This walks a real XML token stream rather than scanning with regexes. An
+// earlier hand-rolled scanner split tags on the first '>' — but '>' is legal
+// inside an XML attribute value, so `<rect d="a>b" onload="alert(1)"/>`
+// parked the handler in a region the scanner never looked at, and it was
+// accepted. Regexes cannot decide XML; the parser can. Parsing also decodes
+// entity references before the value checks below see them, which closes the
+// matching `fill="&#x6a;avascript:..."` dodge.
 func validateAgentAvatarSVG(svg string) error {
 	trimmed := strings.TrimSpace(svg)
 	if trimmed == "" {
@@ -115,81 +124,118 @@ func validateAgentAvatarSVG(svg string) error {
 	if len(svg) > maxAgentAvatarBytes {
 		return fmt.Errorf("avatar svg exceeds %d bytes", maxAgentAvatarBytes)
 	}
-	if !strings.HasPrefix(trimmed, "<svg") {
-		return fmt.Errorf("avatar svg must start with an <svg> root element")
-	}
-	// Anchoring the tail closes the "valid avatar with a payload appended"
-	// shape, where a well-formed <svg>…</svg> is followed by other markup.
-	if !strings.HasSuffix(trimmed, "</svg>") {
-		return fmt.Errorf("avatar svg must end with </svg>")
-	}
-	// Comments, CDATA sections, DOCTYPEs and processing instructions can
-	// carry markup the tag scanner below would step over. None of them
-	// appear in generator output, so refuse them outright rather than
-	// trying to parse around them.
-	for _, bad := range []string{"<!--", "<![CDATA[", "<!DOCTYPE", "<?"} {
-		if strings.Contains(strings.ToUpper(trimmed), strings.ToUpper(bad)) {
-			return fmt.Errorf("avatar svg must not contain %q", bad)
-		}
-	}
 
-	for _, m := range agentAvatarTagRe.FindAllStringSubmatch(trimmed, -1) {
-		name := strings.ToLower(m[1])
-		if !agentAvatarAllowedTags[name] {
-			return fmt.Errorf("avatar svg contains disallowed element <%s>", name)
-		}
-	}
+	dec := xml.NewDecoder(strings.NewReader(trimmed))
+	// Leave dec.Entity nil: only the five predefined XML entities and numeric
+	// character references resolve. An undefined named entity is a parse
+	// error rather than something we have to reason about, and generator
+	// output never uses one.
+	dec.Strict = true
 
-	// Attribute names are only meaningful inside a tag body, so walk the
-	// `<...>` spans rather than the whole document (text content legitimately
-	// contains `=` — e.g. a licence URL in the metadata block).
-	for _, span := range splitAgentAvatarTagBodies(trimmed) {
-		for _, m := range agentAvatarAttrRe.FindAllStringSubmatch(span, -1) {
-			name := strings.ToLower(m[1])
-			if !agentAvatarAllowedAttrs[name] {
-				return fmt.Errorf("avatar svg contains disallowed attribute %q", name)
+	depth := 0
+	sawRoot := false
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("avatar svg is not well-formed XML: %w", err)
+		}
+
+		switch t := tok.(type) {
+		case xml.StartElement:
+			// Trailing junk after the root element closes — the "valid
+			// avatar with a payload appended" shape.
+			if sawRoot && depth == 0 {
+				return fmt.Errorf("avatar svg must contain a single <svg> root element")
 			}
+			if depth == 0 {
+				if strings.ToLower(t.Name.Local) != "svg" {
+					return fmt.Errorf("avatar svg root element must be <svg>, got <%s>", t.Name.Local)
+				}
+				sawRoot = true
+			}
+			name := strings.ToLower(t.Name.Local)
+			if !agentAvatarAllowedTags[name] {
+				return fmt.Errorf("avatar svg contains disallowed element <%s>", name)
+			}
+			for _, attr := range t.Attr {
+				if err := checkAgentAvatarAttr(attr); err != nil {
+					return err
+				}
+			}
+			depth++
+		case xml.EndElement:
+			depth--
+		case xml.ProcInst:
+			// A leading `<?xml version="1.0"?>` is inert boilerplate that
+			// every SVG editor writes, and `crewship agent avatar set` takes
+			// a file from the user — rejecting it would be a confusing
+			// papercut on a documented path. Every OTHER processing
+			// instruction is refused: `<?xml-stylesheet?>` in particular can
+			// pull in an external stylesheet.
+			if strings.ToLower(t.Target) != "xml" || sawRoot {
+				return fmt.Errorf("avatar svg must not contain processing instructions")
+			}
+		case xml.Directive:
+			// DOCTYPE and friends — entity-definition territory.
+			return fmt.Errorf("avatar svg must not contain XML directives")
+		case xml.Comment:
+			return fmt.Errorf("avatar svg must not contain comments")
+		case xml.CharData:
+			// Text is inert; it only becomes markup if something above let a
+			// dangerous element through, and nothing does.
+			_ = t
 		}
+	}
+	if !sawRoot {
+		return fmt.Errorf("avatar svg must contain an <svg> root element")
+	}
+	if depth != 0 {
+		return fmt.Errorf("avatar svg has unbalanced elements")
+	}
+	return nil
+}
+
+// checkAgentAvatarAttr validates one parsed attribute: its name against the
+// allowlist, and its (entity-decoded) value against the reference rules.
+func checkAgentAvatarAttr(attr xml.Attr) error {
+	// Namespace declarations. encoding/xml surfaces `xmlns="…"` as local
+	// name "xmlns", and `xmlns:dc="…"` as space "xmlns", local "dc". Both are
+	// inert bookkeeping and carry the http:// URIs that would otherwise trip
+	// the external-reference check below.
+	if attr.Name.Space == "xmlns" || strings.ToLower(attr.Name.Local) == "xmlns" {
+		return nil
 	}
 
-	for _, m := range agentAvatarURLRe.FindAllStringSubmatch(trimmed, -1) {
-		if !strings.HasPrefix(m[1], "#") {
-			return fmt.Errorf("avatar svg references an external url(%s)", m[1])
-		}
+	name := strings.ToLower(attr.Name.Local)
+	if !agentAvatarAllowedAttrs[name] {
+		return fmt.Errorf("avatar svg contains disallowed attribute %q", name)
 	}
-	// Belt and braces: these cannot survive the allowlists above, but a
-	// literal match is cheap and makes the intent unmissable to a reader.
-	lower := strings.ToLower(trimmed)
-	for _, scheme := range []string{"javascript:", "data:text/html", "vbscript:"} {
+
+	// url(...) must stay internal — url(#gradient) is how fill and mask point
+	// at <defs>. Anything else is an outbound fetch.
+	value := attr.Value
+	lower := strings.ToLower(value)
+	for idx := strings.Index(lower, "url("); idx >= 0; {
+		rest := strings.TrimLeft(value[idx+len("url("):], " \t\r\n'\"")
+		if !strings.HasPrefix(rest, "#") {
+			target, _, _ := strings.Cut(rest, ")")
+			return fmt.Errorf("avatar svg references an external url(%s)", strings.TrimSpace(target))
+		}
+		next := strings.Index(lower[idx+1:], "url(")
+		if next < 0 {
+			break
+		}
+		idx += 1 + next
+	}
+	for _, scheme := range []string{"javascript:", "vbscript:", "data:text/html"} {
 		if strings.Contains(lower, scheme) {
 			return fmt.Errorf("avatar svg contains a %q reference", scheme)
 		}
 	}
 	return nil
-}
-
-// splitAgentAvatarTagBodies returns the interior of each `<...>` span, i.e.
-// the regions where attributes may legally appear.
-func splitAgentAvatarTagBodies(s string) []string {
-	var out []string
-	for i := 0; i < len(s); {
-		open := strings.IndexByte(s[i:], '<')
-		if open < 0 {
-			break
-		}
-		open += i
-		close := strings.IndexByte(s[open:], '>')
-		if close < 0 {
-			// Unterminated tag — hand the remainder over so the attribute
-			// scan still sees it rather than silently skipping it.
-			out = append(out, s[open:])
-			break
-		}
-		close += open
-		out = append(out, s[open:close])
-		i = close + 1
-	}
-	return out
 }
 
 // agentAvatarHash is the content hash used as the ?v= cache buster. Short
@@ -352,6 +398,21 @@ func (h *AgentHandler) DeleteAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// canEditAgent short-circuits to true for OWNER/ADMIN without checking
+	// that the agent exists or is in this workspace, so without this an
+	// admin would get a cheerful 204 for a typo'd or cross-workspace id and
+	// believe they had cleared something. Matches Update/Delete, which both
+	// 404 through agentExists.
+	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
+	if err != nil {
+		replyInternalError(w, h.logger, "agent avatar existence check", err)
+		return
+	}
+	if !found {
+		replyError(w, http.StatusNotFound, "Agent not found")
+		return
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := h.db.ExecContext(r.Context(), `
 		UPDATE agents SET avatar_svg = NULL, avatar_svg_hash = NULL, updated_at = ?
@@ -361,4 +422,58 @@ func (h *AgentHandler) DeleteAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// agentAvatarInputsChanged reports whether a PATCH body actually repoints
+// avatar_seed or avatar_style away from what the row already holds.
+//
+// Deliberately value-based rather than presence-based: clients routinely
+// resubmit unchanged avatar fields alongside an unrelated edit, and treating
+// that as a change would throw away the stored render (#1297) on every save.
+// A body that omits both keys short-circuits without touching the database.
+func agentAvatarInputsChanged(
+	ctx context.Context, db *sql.DB, agentID, workspaceID string, body map[string]interface{},
+) (bool, error) {
+	seedVal, hasSeed := body["avatar_seed"]
+	styleVal, hasStyle := body["avatar_style"]
+	if !hasSeed && !hasStyle {
+		return false, nil
+	}
+
+	var curSeed, curStyle sql.NullString
+	err := db.QueryRowContext(ctx,
+		`SELECT avatar_seed, avatar_style FROM agents
+		 WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		agentID, workspaceID).Scan(&curSeed, &curStyle)
+	if err == sql.ErrNoRows {
+		// The caller's own existence check reports this; nothing to clear.
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	if hasSeed && jsonValueDiffersFromNullString(seedVal, curSeed) {
+		return true, nil
+	}
+	if hasStyle && jsonValueDiffersFromNullString(styleVal, curStyle) {
+		return true, nil
+	}
+	return false, nil
+}
+
+// jsonValueDiffersFromNullString compares a decoded JSON value against a
+// nullable text column. JSON null and a missing column value are the same
+// thing here; anything that isn't a string is treated as a change so an
+// unexpected type errs toward re-deriving the avatar rather than keeping a
+// render that may no longer match.
+func jsonValueDiffersFromNullString(v interface{}, cur sql.NullString) bool {
+	if v == nil {
+		return cur.Valid
+	}
+	s, ok := v.(string)
+	if !ok {
+		return true
+	}
+	return !cur.Valid || cur.String != s
 }

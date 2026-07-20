@@ -281,12 +281,22 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// The stored avatar (#1297) is a render of (avatar_seed, avatar_style).
 	// Repointing either one makes those bytes depict something the agent is
 	// no longer configured to look like, so drop them and let the client
-	// re-derive and back-fill. Scoped to exactly these two keys: an
-	// unrelated patch (a rename, a model swap) must not throw the render
-	// away, or every edit would cost a needless re-upload round-trip.
-	_, seedChanged := body["avatar_seed"]
-	_, styleChanged := body["avatar_style"]
-	if seedChanged || styleChanged {
+	// re-derive and back-fill.
+	//
+	// This compares VALUES, not key presence. The agent settings page sends
+	// avatar_seed and avatar_style on every save whether or not the user
+	// touched them (settings-page-client.tsx populates both from the loaded
+	// agent and resubmits them verbatim), so a presence check would discard
+	// the stored render every time somebody renamed an agent or changed its
+	// model — quietly defeating the whole feature, since the client would
+	// then re-render under whatever generator version happens to be
+	// installed.
+	changed, err := agentAvatarInputsChanged(r.Context(), h.db, agentID, workspaceID, body)
+	if err != nil {
+		replyInternalError(w, h.logger, "compare agent avatar inputs", err)
+		return
+	}
+	if changed {
 		ub.Set("avatar_svg", nil)
 		ub.Set("avatar_svg_hash", nil)
 	}
