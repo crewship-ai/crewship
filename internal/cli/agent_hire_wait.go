@@ -21,9 +21,9 @@ type HireStatus struct {
 
 // IsResolved reports whether a staged hire has reached a terminal
 // outcome: approved (status flipped away from PENDING_REVIEW by
-// POST /agents/{id}/approve-hire) or ghosted (its TTL elapsed before
-// anyone approved it — expired_at gets set even while still
-// PENDING_REVIEW). There is no explicit "denied" status today — a
+// POST /agents/{id}/approve-hire) or ghosted (its TTL elapsed, or its
+// approval window lapsed, before anyone approved it — expired_at gets
+// set in both cases even while still PENDING_REVIEW). There is no explicit "denied" status today — a
 // rejected hire is left to expire, which IsResolved also treats as
 // terminal so `--wait` doesn't hang forever.
 func (h *HireStatus) IsResolved() bool {

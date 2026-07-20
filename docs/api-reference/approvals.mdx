@@ -154,6 +154,11 @@ or ghosted by the TTL sweeper — the whole decision is rolled back and
 you get `409 staged hire is no longer decidable`. The queue row stays
 `pending` and is still decidable (or will time out on its own); it is
 never left `approved`/`denied` against an agent that never moved.
+
+A `kind=ephemeral_hire` row that times out ghosts the staged agent in the
+same sweep, so the lapsed hire is no longer approvable through either
+surface until `crewship rehire` reopens the cycle — see
+[Ephemeral agents](/guides/ephemeral-agents#recovering-a-denied-or-lapsed-hire).
 </Note>
 
 ---
