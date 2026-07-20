@@ -118,7 +118,7 @@ func (s *Server) handleMemoryMCPForAgent(w http.ResponseWriter, r *http.Request,
 	// second line for direct invocations of the handler (tests, any future
 	// in-process caller that bypasses the router); the router gate is the
 	// one that actually holds the surface.
-	if s.refuseTokenlessMemory(w, r) {
+	if s.refuseUnauthorizedMemory(w, r) {
 		return
 	}
 	effectiveSlug := agentSlug
@@ -128,6 +128,23 @@ func (s *Server) handleMemoryMCPForAgent(w http.ResponseWriter, r *http.Request,
 				JSONRPC: "2.0",
 				ID:      mcpNullID,
 				Error:   &memoryMCPRPCError{Code: -32001, Message: "unrecognized agent token"},
+			})
+			return
+		}
+		// A roster entry whose token matches but whose Slug is empty must NOT
+		// fall through to memoryAgentContextFor(""), which reads "" as "the
+		// sidecar's own agent" and hands back the BOOT agent's context — so a
+		// slugless member would be silently promoted to the boot agent and
+		// read its private tier. Unreachable today (agents.slug is NOT NULL and
+		// every create path validates it), but "" means two different things to
+		// the resolver and only one of them is safe.
+		if actorSlug == "" {
+			s.logger.Warn("memory mcp: refusing a token that resolves to an empty agent slug",
+				"acting_agent_id", actorID)
+			writeJSONResponse(w, http.StatusForbidden, memoryMCPResponse{
+				JSONRPC: "2.0",
+				ID:      mcpNullID,
+				Error:   &memoryMCPRPCError{Code: -32001, Message: "agent identity has no slug"},
 			})
 			return
 		}

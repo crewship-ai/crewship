@@ -30,7 +30,7 @@ import (
 type routeGuardKind int
 
 const (
-	// guardMemoryChokepoint — covered by refuseTokenlessMemory in
+	// guardMemoryChokepoint — covered by refuseUnauthorizedMemory in
 	// buildHandler, ahead of the route switch. Exercised end-to-end below:
 	// a token-less request on a tokens-provisioned crew must get 403.
 	guardMemoryChokepoint routeGuardKind = iota
@@ -255,7 +255,7 @@ var identityHelpers = []string{
 	"actingAgentID(r)",
 	"actingIdentity(r)",
 	"tokenlessDowngrade(r)",
-	"refuseTokenlessMemory(w, r)",
+	"refuseUnauthorizedMemory(w, r)",
 }
 
 // serverMethodCall matches a call to another method on the same Server, so the

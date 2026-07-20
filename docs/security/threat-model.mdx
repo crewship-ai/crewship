@@ -502,12 +502,46 @@ agent, so a sibling that simply omitted its `Authorization` header could still
 read and overwrite the boot agent's private `AGENT.md`.
 
 The whole memory surface is now gated **by path prefix in the sidecar's
-router** (`refuseTokenlessMemory`, `internal/sidecar/memory_guard.go`), before
-the route switch chooses a handler. Both `/memory/*` and `/mcp/memory*` are
-covered, a memory route added later inherits the check from its registration,
-and the refusal is a `403` on every one of them — the MCP transport used to
-answer `200` with a JSON-RPC error, which made downgrade attempts read as
-successes in access logs.
+router** (`refuseUnauthorizedMemory`, `internal/sidecar/memory_guard.go`),
+before the route switch chooses a handler. Both `/memory/*` and `/mcp/memory*`
+are covered, a memory route added later inherits the check from its
+registration, and the refusal is a `403` on every one of them — the MCP
+transport used to answer `200` with a JSON-RPC error, which made downgrade
+attempts read as successes in access logs.
+
+Moving the check to the prefix was necessary and was not sufficient. As first
+shipped the gate tested only whether the header was *absent*, on the stated
+reasoning that a request carrying a token "is resolved through `actingIdentity`,
+which refuses forgeries on its own" — true of `/mcp/memory/<slug>`, false of the
+five legacy routes, which call `actingIdentity` nowhere. Two ways through
+remained, both since closed and both now pinned by tests that drive the real
+router:
+
+- **A forged token.** `Authorization: Bearer anything` was not a token-less
+  downgrade, so the gate passed it, and no legacy handler resolved identity
+  behind it. Reading the boot agent's private `AGENT.md` cost one arbitrary
+  header — a cheaper bypass than the one being fixed. Forgery is now refused at
+  the chokepoint, not assumed of downstream callers.
+- **A sibling's own valid token.** The five legacy handlers resolve the agent
+  tier from the sidecar's boot agent, so *any* authenticated member read and
+  overwrote the boot agent's tier. Agent-scoped requests from a non-boot member
+  are now refused, pointing at `/mcp/memory/<slug>`, which resolves the acting
+  agent properly.
+
+  The refusal is scoped to the **agent** tier. `scope=crew` resolves to one
+  directory shared by the whole crew by construction, so there is no per-agent
+  crew tier to cross and refusing it would protect nothing while breaking
+  sibling access to shared memory. The first cut of this fix did exactly that —
+  a functional regression wearing a security fix's clothes, caught in review
+  before it shipped. `scope=both` reads the agent tier and is refused with it.
+
+The general lesson is the one this section already records, applied one level
+deeper: a guarantee stated at the level of "the memory surface" is only as true
+as the weakest handler behind it, and a comment asserting what *callers* do
+cannot enforce anything. Serving each agent its own tier on the legacy routes —
+rather than refusing non-boot agents — is the better end state and is tracked
+separately; `search`/`status`/`reindex` run through a single indexed engine
+bound to one tier, so it is a subsystem change, not a guard change.
 
 Coverage of the **rest** of the sidecar's routes is a different, weaker
 statement, deliberately kept honest here:

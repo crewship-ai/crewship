@@ -380,7 +380,7 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			// in per handler is what let that happen; a prefix gate in
 			// front of the switch covers every memory route that exists
 			// now and every one added later.
-			if isMemoryRoutePath(r.URL.Path) && s.refuseTokenlessMemory(w, r) {
+			if isMemoryRoutePath(r.URL.Path) && s.refuseUnauthorizedMemory(w, r) {
 				return
 			}
 			switch {
