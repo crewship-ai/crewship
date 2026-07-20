@@ -376,10 +376,25 @@ jobs:
           # only an explicit `=success` on every single job is green.
           # Blank lines (the block scalar's trailing newline) are dropped
           # first, otherwise they would themselves fail the `=success` test.
-          not_green=$(printf '%s\n' "$RESULTS" \
+          #
+          # Extracted verbatim and exercised by scripts/security-yml-test.sh —
+          # keep the gate:begin/gate:end markers in place or that test fails
+          # loudly rather than silently covering nothing.
+          # gate:begin
+          results_clean=$(printf '%s\n' "$RESULTS" \
             | sed 's/[[:space:]]*$//' \
+            | grep -v '^$' || true)
+          not_green=$(printf '%s\n' "$results_clean" \
             | grep -v '^$' \
             | grep -vE '=success$' || true)
+          # A RESULTS block with no job lines at all is a bug in this
+          # workflow, not a green run. Without this, zero reported jobs
+          # vacuously satisfies "every job reported success" and the tracking
+          # issue gets closed — the same fail-green shape as the bug above.
+          if [ -z "$results_clean" ]; then
+            not_green="(no job results were reported — the RESULTS block was empty)"
+          fi
+          # gate:end
           # --force makes label creation idempotent across runs.
           gh label create security-scan-alert --repo "$REPO" \
             --color B60205 \
@@ -388,6 +403,7 @@ jobs:
           # Only ever act on an issue THIS job filed: bot author + our exact
           # title or body marker. A human-filed issue that happens to carry
           # the security-scan-alert label must never be closed by the bot.
+          # lookup:begin
           existing=$(gh issue list --repo "$REPO" --label security-scan-alert \
             --state open --json number,title,body,author \
             --jq "[ .[]
@@ -395,6 +411,7 @@ jobs:
                     | select(.title == \$ENV.TITLE
                              or (.body // \"\" | contains(\$ENV.MARKER)))
                   ] | .[0].number // empty")
+          # lookup:end
 
           if [ -z "$not_green" ]; then
             # Green state: close any open alert issue so the label only ever

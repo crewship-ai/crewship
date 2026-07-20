@@ -98,6 +98,26 @@ jobs:
           fi
           echo "✓ No leaked merge-conflict markers found."
 
+  # ── Shell unit tests ──
+  # The shell we ship is as load-bearing as the Go, and harder to reason
+  # about: dev.sh wedges a dev slot when a helper trips `set -e`, and the
+  # alert-issue block in security.yml decides whether a failed security scan
+  # closes its own tracking issue. Both had test files that no workflow ran,
+  # so both regressed unnoticed. They run here.
+  shell:
+    needs: [merge-conflict-markers]
+    name: Shell
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: dev.sh helpers
+        run: bash scripts/dev-sh-test.sh
+      - name: security.yml alert-issue logic
+        run: bash scripts/security-yml-test.sh
+
   # ── Frontend: lint, typecheck, build ──
   frontend:
     needs: [merge-conflict-markers]
