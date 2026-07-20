@@ -114,13 +114,17 @@ sleep 60 &
 OWNER=$!
 
 GUARD_BODY="$(extract_fn guard_log_size)"
+# Body and paths go in as positional arguments, not interpolated into the
+# -c string: the body is dev.sh source verbatim, quotes and backticks
+# included, and one stray quote would turn a passing test into a syntax
+# error that reads like a failure. Same reasoning as run_with_fn above.
 (
-  bash -c "set -euo pipefail
-S=''
-warn() { echo \"[warn] \$*\"; }
-$GUARD_BODY
-guard_log_size '$TMP/guarded.log' $OWNER
-exit 0" >"$FIFO" 2>&1
+  bash -c 'set -euo pipefail
+S=""
+warn() { echo "[warn] $*"; }
+eval "$1"
+guard_log_size "$2" "$3"
+exit 0' _ "$GUARD_BODY" "$TMP/guarded.log" "$OWNER" >"$FIFO" 2>&1
 ) &
 WRITER=$!
 
