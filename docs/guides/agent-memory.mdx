@@ -80,17 +80,30 @@ The end-to-end loop from "memory off" to "agent recalls last week's decision" is
   </Step>
 
   <Step title="Search explicitly when you need to">
-    For mid-session lookups outside the initial prompt budget, the agent uses the `memory.search` MCP tool, which every adapter injects and which resolves the acting agent from its token.
-
-    The sidecar HTTP endpoint below is equivalent **for the boot agent** — the agent whose exec started the crew's shared sidecar. Any other member of the crew gets `403` on `scope=agent` and `scope=both` there (`scope=crew` is shared and always works); see the warning at the end of [Searching Memory](#3-searching-memory).
+    For mid-session lookups outside the initial prompt budget, the agent uses the `memory.search` MCP tool, which every adapter injects and which resolves the acting agent from its token. Normally the model just calls it; to drive the same transport by hand, POST a JSON-RPC `tools/call` to the sidecar's memory MCP endpoint:
 
     ```bash
-    curl -sX POST localhost:9119/memory/search \
+    curl -sX POST localhost:9119/mcp/memory \
       -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
-      -d '{"query": "PostgreSQL migration strategy", "scope": "both", "limit": 5}'
+      -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
+           "params":{"name":"memory.search",
+                     "arguments":{"q":"PostgreSQL migration strategy","limit":5}}}'
     ```
 
-    `scope` is one of `agent`, `crew`, `both`. With `both`, results from the two engines are merged and sorted by BM25 score, each carrying its origin. (RRF fusion of sparse + dense scores applies on the `hybrid=true` path, when an embedding model is configured — not to the default `both` merge.)
+    This works for **every** crew member: the transport resolves the acting agent from the token and searches that agent's own tier (plus the crew tier). Omit `tier` to search everything accessible.
+
+    <Warning>
+      The legacy `POST /memory/search` route is a **boot-agent-only** surface — the agent whose exec started the crew's shared sidecar. Any other member of the crew gets `403` on `scope=agent` and `scope=both` there (`scope=crew` is shared and always works); see the warning at the end of [Searching Memory](#3-searching-memory).
+
+      ```bash
+      # boot agent only
+      curl -sX POST localhost:9119/memory/search \
+        -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
+        -d '{"query": "PostgreSQL migration strategy", "scope": "both", "limit": 5}'
+      ```
+
+      There, `scope` is one of `agent`, `crew`, `both`. With `both`, results from the two engines are merged and sorted by BM25 score, each carrying its origin. (RRF fusion of sparse + dense scores applies on the `hybrid=true` path, when an embedding model is configured — not to the default `both` merge.)
+    </Warning>
   </Step>
 
   <Step title="Let consolidation tend the index">

@@ -265,11 +265,17 @@ var identityHelpers = []string{
 var serverMethodCall = regexp.MustCompile(`s\.([A-Za-z0-9_]+)\(`)
 
 func resolvesActingIdentity(name string, bodies map[string]string, depth int) bool {
+	return handlerCalls(name, bodies, depth, identityHelpers)
+}
+
+// handlerCalls reports whether the handler named name — or a Server method it
+// delegates to within depth hops — contains any of needles.
+func handlerCalls(name string, bodies map[string]string, depth int, needles []string) bool {
 	body, ok := bodies[name]
 	if !ok {
 		return false
 	}
-	for _, h := range identityHelpers {
+	for _, h := range needles {
 		if strings.Contains(body, h) {
 			return true
 		}
@@ -281,7 +287,7 @@ func resolvesActingIdentity(name string, bodies map[string]string, depth int) bo
 		if m[1] == name {
 			continue
 		}
-		if resolvesActingIdentity(m[1], bodies, depth-1) {
+		if handlerCalls(m[1], bodies, depth-1, needles) {
 			return true
 		}
 	}
@@ -384,5 +390,51 @@ func TestSidecarRoutes_MemoryChokepointRefusesTokenless(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("no guardMemoryChokepoint routes exercised — table or parser broken")
+	}
+}
+
+// memoryPerAgentResolvers are the calls that bind a memory request to the
+// ACTING agent's own tier, rather than to whichever agent the sidecar booted
+// for. memoryAgentContextFor(slug) is the only such resolver today.
+var memoryPerAgentResolvers = []string{"memoryAgentContextFor("}
+
+// TestMemoryMCPRoutes_ResolvePerAgentContext pins the assumption the
+// cross-agent exemption in refuseUnauthorizedMemory rests on.
+//
+// The guard refuses an authenticated non-boot member on the LEGACY /memory/*
+// routes but exempts the MCP transport, and it keys that exemption on the PATH
+// (`!isMemoryMCPPath`). That is sound only because every route under
+// /mcp/memory resolves the acting agent's own context — a sibling reaching it
+// is served its own tier, so there is nothing to refuse. A route added under
+// /mcp/memory/ later inherits the exemption whether or not it does that, and
+// would then serve the boot agent's tier to any crew member: exactly the CRE-153
+// hole, re-opened through a prefix nobody re-audited.
+//
+// So: every registered /mcp/memory* route must reach a per-agent resolver.
+// Adding one that does not fails here.
+func TestMemoryMCPRoutes_ResolvePerAgentContext(t *testing.T) {
+	routes := routeKeysFromSource(t)
+	bodies := packageHandlerBodies(t)
+
+	var checked int
+	for _, rt := range routes {
+		_, path, ok := strings.Cut(rt.key, " ")
+		if !ok || !isMemoryMCPPath(path) {
+			continue
+		}
+		checked++
+		if _, ok := bodies[rt.handler]; !ok {
+			t.Errorf("route %q: handler %q not found in package source", rt.key, rt.handler)
+			continue
+		}
+		if !handlerCalls(rt.handler, bodies, 2, memoryPerAgentResolvers) {
+			t.Errorf("route %q is exempt from the legacy cross-agent refusal because it is under "+
+				"/mcp/memory, but %s never resolves per-agent context (%v). Either resolve the "+
+				"acting agent's own tier in that handler, or stop exempting it in "+
+				"refuseUnauthorizedMemory.", rt.key, rt.handler, memoryPerAgentResolvers)
+		}
+	}
+	if checked < 2 {
+		t.Fatalf("recovered only %d /mcp/memory routes — the parser or the router changed shape", checked)
 	}
 }

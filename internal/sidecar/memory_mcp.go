@@ -124,7 +124,15 @@ func (s *Server) handleMemoryMCPForAgent(w http.ResponseWriter, r *http.Request,
 	effectiveSlug := agentSlug
 	if actorID, actorSlug, present, ok := s.actingIdentity(r); present {
 		if !ok {
-			writeJSONResponse(w, http.StatusOK, memoryMCPResponse{
+			// 403, not 200. refuseUnauthorizedMemory above already answers this
+			// exact condition (present && !ok) with 403, so this branch is dead
+			// for every caller today — router or in-process. It stays as the
+			// belt to that suspenders, and a fallback that disagrees with the
+			// primary about the STATUS is worse than no fallback: a refusal
+			// returning 200 is invisible in access logs, which is precisely the
+			// defect /security/threat-model claims is fixed. The JSON-RPC error
+			// envelope is preserved for protocol clients.
+			writeJSONResponse(w, http.StatusForbidden, memoryMCPResponse{
 				JSONRPC: "2.0",
 				ID:      mcpNullID,
 				Error:   &memoryMCPRPCError{Code: -32001, Message: "unrecognized agent token"},

@@ -507,7 +507,17 @@ before the route switch chooses a handler. Both `/memory/*` and `/mcp/memory*`
 are covered, a memory route added later inherits the check from its
 registration, and the refusal is a `403` on every one of them — the MCP
 transport used to answer `200` with a JSON-RPC error, which made downgrade
-attempts read as successes in access logs.
+attempts read as successes in access logs. The MCP handler's own redundant
+check (for in-process callers that bypass the router) answers `403` too, so no
+path can refuse a caller while logging a success.
+
+The gate exempts `/mcp/memory*` from the *cross-agent* refusal that the legacy
+routes carry, because that transport resolves each caller's own tier from its
+token rather than the boot agent's. That exemption is keyed on the path prefix,
+so it is test-enforced: every route registered under `/mcp/memory` must reach
+`memoryAgentContextFor`, and a future route under that prefix which does not
+resolve per-agent context fails the build
+(`TestMemoryMCPRoutes_ResolvePerAgentContext`).
 
 Moving the check to the prefix was necessary and was not sufficient. As first
 shipped the gate tested only whether the header was *absent*, on the stated

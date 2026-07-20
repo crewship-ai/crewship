@@ -774,3 +774,33 @@ func TestRunAgent_ResponseJournalCapAndToolTap(t *testing.T) {
 		t.Errorf("closing exec.command wrong: %v", last.Payload)
 	}
 }
+
+// TestRunAgent_EmptySlugRejectedBeforeSidecarMemoryConfig pins the ordering
+// that internal/sidecar/memory_guard.go's fail-closed empty-boot-slug comment
+// cites. The sidecar's legacy-route guard refuses when its boot slug is empty;
+// the reason that case cannot be reached in production is that
+// assembleSystemPrompt validates req.AgentSlug (empty fails validSlugRe) and
+// aborts the run BEFORE ensureSidecar builds SidecarMemoryConfig from the same
+// field. Moving or dropping that check would start a sidecar whose memory
+// config names no agent — so assert not just the error, but that no sidecar
+// exec was ever issued.
+func TestRunAgent_EmptySlugRejectedBeforeSidecarMemoryConfig(t *testing.T) {
+	t.Parallel()
+	c := covNewRunContainer(covRunOpts{stream: "{}\n"})
+	o := New(c, newMemState(), covQuietLogger())
+	o.SetSidecarEnabled(true)
+	req := covRunReq()
+	req.AgentSlug = ""
+	req.MemoryEnabled = true
+
+	err := o.RunAgent(context.Background(), req, nil)
+	if err == nil || !strings.Contains(err.Error(), "invalid agent slug") {
+		t.Fatalf("expected empty slug rejection, got %v", err)
+	}
+	for _, call := range c.snapshotCalls() {
+		if strings.Contains(covScript(call), "crewship-sidecar --addr") {
+			t.Fatal("sidecar started with an empty agent slug: the slug check no longer " +
+				"precedes SidecarMemoryConfig construction, so memory_guard.go's comment is stale")
+		}
+	}
+}
