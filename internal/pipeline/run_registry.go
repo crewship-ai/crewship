@@ -54,17 +54,35 @@ type runEntry struct {
 // deployment would need a shared registry to avoid double-firing on
 // concurrency-limited keys, but for single-binary that's not a concern.
 //
-// Thread-safety: a single mutex guards the map. Acquire / Release /
-// Cancel are O(map_size) + O(1) operations; the lock is held just
-// long enough to mutate, never across user code.
+// Thread-safety: a single mutex guards both maps. Acquire / Release /
+// Cancel are O(1); the lock is held just long enough to mutate, never
+// across user code.
 type RunRegistry struct {
 	mu   sync.Mutex
 	runs map[string]*runEntry
+	// keyCounts is the admission counter: live-run count per
+	// workspace+concurrency key, so Acquire's gate is O(1) instead of
+	// a scan of every live run. Mutated only under mu, always in the
+	// same critical section as runs, and deleted at zero so a long-
+	// lived process can't accumulate an entry per distinct key ever
+	// seen. Runs with an empty concurrency key are not tracked here —
+	// they don't compete for a slot.
+	keyCounts map[string]int
 }
 
 // NewRunRegistry builds an empty registry. One per process.
 func NewRunRegistry() *RunRegistry {
-	return &RunRegistry{runs: make(map[string]*runEntry)}
+	return &RunRegistry{
+		runs:      make(map[string]*runEntry),
+		keyCounts: make(map[string]int),
+	}
+}
+
+// concurrencyCountKey composes the keyCounts map key. NUL separates
+// the two halves so a workspace id ending in the separator can't
+// collide with a different (workspace, key) pair.
+func concurrencyCountKey(workspaceID, concurrencyKey string) string {
+	return workspaceID + "\x00" + concurrencyKey
 }
 
 // AcquireOpts configures one Acquire call. Bundled in a struct so the
@@ -100,25 +118,21 @@ func (r *RunRegistry) Acquire(parent context.Context, opts AcquireOpts) (context
 		return nil, func() {}, ErrDuplicateRunID
 	}
 
+	countKey := ""
 	if opts.ConcurrencyKey != "" {
 		max := opts.MaxConcurrent
 		if max <= 0 {
 			max = 1
 		}
-		count := 0
-		for _, entry := range r.runs {
-			if entry.info.WorkspaceID == opts.WorkspaceID && entry.info.ConcurrencyKey == opts.ConcurrencyKey {
-				count++
-			}
-		}
-		if count >= max {
+		countKey = concurrencyCountKey(opts.WorkspaceID, opts.ConcurrencyKey)
+		if r.keyCounts[countKey] >= max {
 			r.mu.Unlock()
 			return nil, func() {}, ErrConcurrencyLimitReached
 		}
 	}
 
 	ctx, cancel := context.WithCancel(parent)
-	r.runs[opts.RunID] = &runEntry{
+	entry := &runEntry{
 		info: RunInfo{
 			RunID:          opts.RunID,
 			WorkspaceID:    opts.WorkspaceID,
@@ -129,13 +143,29 @@ func (r *RunRegistry) Acquire(parent context.Context, opts AcquireOpts) (context
 		},
 		cancel: cancel,
 	}
+	r.runs[opts.RunID] = entry
+	if countKey != "" {
+		r.keyCounts[countKey]++
+	}
 	r.mu.Unlock()
 
+	// The identity check makes release both idempotent and safe
+	// against a stale closure: once this entry is gone, a second call
+	// (or a call after the same run id was re-acquired) must not evict
+	// someone else's run — that would decrement a counter it never
+	// incremented and leave the key permanently over- or under-booked.
 	release := func() {
 		r.mu.Lock()
-		if entry, ok := r.runs[opts.RunID]; ok {
-			entry.cancel() // idempotent
+		if cur, ok := r.runs[opts.RunID]; ok && cur == entry {
+			cur.cancel() // idempotent
 			delete(r.runs, opts.RunID)
+			if countKey != "" {
+				if n := r.keyCounts[countKey] - 1; n > 0 {
+					r.keyCounts[countKey] = n
+				} else {
+					delete(r.keyCounts, countKey)
+				}
+			}
 		}
 		r.mu.Unlock()
 	}
@@ -246,17 +276,19 @@ func (r *RunRegistry) Active(workspaceID string) []RunInfo {
 }
 
 // Count returns how many runs match the given workspace + concurrency
-// key. Used by tests and admin observability; the production
-// concurrency gate is inside Acquire (atomic with the insert).
+// key. An empty key means "every live run in the workspace", which the
+// admission counters don't track, so that case still walks the map.
+// Used by tests and admin observability; the production concurrency
+// gate is inside Acquire (atomic with the insert).
 func (r *RunRegistry) Count(workspaceID, concurrencyKey string) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if concurrencyKey != "" {
+		return r.keyCounts[concurrencyCountKey(workspaceID, concurrencyKey)]
+	}
 	n := 0
 	for _, entry := range r.runs {
 		if entry.info.WorkspaceID != workspaceID {
-			continue
-		}
-		if concurrencyKey != "" && entry.info.ConcurrencyKey != concurrencyKey {
 			continue
 		}
 		n++
