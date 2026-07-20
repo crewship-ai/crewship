@@ -352,3 +352,92 @@ func TestMemoryMCPRoute_SiblingStillAllowed(t *testing.T) {
 		t.Fatalf("sibling refused on its own per-agent MCP route: %s", w.Body.String())
 	}
 }
+
+// The guard has to read `scope` from the same place the handler will, and that
+// is a per-ROUTE fact, not a per-method one. The plausible rule — GET reads the
+// query, POST reads the body — is wrong: /memory/reindex is registered POST and
+// reads its scope from the QUERY.
+//
+// Getting that wrong is a bypass in one direction and an outage in the other,
+// and it shipped in the first cut of this guard:
+//
+//	POST /memory/reindex  body {"scope":"crew"}  -> guard saw crew, handler saw
+//	  no query and defaulted to agent, and a sibling reindexed the BOOT agent's
+//	  tier. 200.
+//	POST /memory/reindex?scope=crew              -> guard read an empty body,
+//	  defaulted to agent, and refused a crew member a crew-tier operation the
+//	  docs promise works. 403.
+//
+// This test pins each route's source. A handler that changes where it reads
+// scope from breaks it here rather than silently reopening the split.
+func TestMemoryRequestScope_MatchesHandlerSource(t *testing.T) {
+	for _, tc := range []struct {
+		route      string
+		method     string
+		viaQuery   bool // true: handler reads the query; false: reads the body
+		wantAllow  string
+		wantRefuse string
+	}{
+		{"/memory/read", "GET", true, "?scope=crew&file=CREW.md", "?file=CREW.md"},
+		{"/memory/status", "GET", true, "?scope=crew", ""},
+		{"/memory/reindex", "POST", true, "?scope=crew", ""},
+		{"/memory/write", "POST", false, `{"file":"CREW.md","scope":"crew","content":"x\n"}`, `{"file":"CREW.md","content":"x\n"}`},
+		{"/memory/search", "POST", false, `{"query":"x","scope":"crew"}`, `{"query":"x"}`},
+	} {
+		t.Run(tc.route, func(t *testing.T) {
+			s, base := newLegacyMemoryRouteServer(t, true)
+			withCrewTier(t, s)
+			h := s.buildHandler(nil)
+			seedBootTier(t, base)
+
+			// Crew scope, declared where THIS route actually reads it: allowed.
+			target, body := tc.route, ""
+			if tc.viaQuery {
+				target += tc.wantAllow
+			} else {
+				body = tc.wantAllow
+			}
+			r := loopbackRequest(tc.method, target, strings.NewReader(body))
+			r.Header.Set("Authorization", "Bearer tok-beta")
+			r.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code == 403 {
+				t.Errorf("crew scope declared where the handler reads it was refused: %s", w.Body.String())
+			}
+
+			// Crew scope declared in the OTHER channel — the one this handler
+			// ignores. The guard must not be fooled into allowing a request the
+			// handler will resolve to the agent tier.
+			other := tc.route
+			otherBody := ""
+			if tc.viaQuery {
+				otherBody = `{"scope":"crew","file":"CREW.md","query":"x","content":"x\n"}`
+				other += tc.wantRefuse
+			} else {
+				other += "?scope=crew"
+				otherBody = tc.wantRefuse
+			}
+			r2 := loopbackRequest(tc.method, other, strings.NewReader(otherBody))
+			r2.Header.Set("Authorization", "Bearer tok-beta")
+			r2.Header.Set("Content-Type", "application/json")
+			w2 := httptest.NewRecorder()
+			h.ServeHTTP(w2, r2)
+			if w2.Code != 403 {
+				t.Errorf("crew scope declared in the channel this handler IGNORES was allowed through (%d): %s",
+					w2.Code, w2.Body.String())
+			}
+		})
+	}
+}
+
+// A route added under /memory/ that this guard has not been taught about must
+// be refused for non-boot members, not waved through. Fail closed is the only
+// safe default here: the alternative is a new route being born cross-agent
+// readable, which is the exact history of this surface.
+func TestMemoryRequestScope_UnknownRouteFailsClosed(t *testing.T) {
+	r := httptest.NewRequest("POST", "/memory/some-future-route?scope=crew", strings.NewReader(`{"scope":"crew"}`))
+	if got := memoryRequestScope(r); got != "agent" {
+		t.Errorf("unknown /memory/ route resolved to %q, want \"agent\" (fail closed)", got)
+	}
+}

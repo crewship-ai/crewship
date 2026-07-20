@@ -161,19 +161,43 @@ func legacyCrossAgentMessage(path, actorSlug string) string {
 // memoryRequestScope reports which tier the request targets, applying the same
 // default every legacy handler applies ("" → "agent").
 //
-// The guard runs in front of the route switch, so it has to read the scope the
-// same way the handler will: from the query string for read/status/reindex, and
-// from the JSON body for write/search. The body is buffered and restored so the
-// handler still decodes it normally.
+// The guard runs in front of the route switch, so it must read the scope from
+// the SAME PLACE the handler will — and that is a per-route fact, not a
+// per-method one. The obvious rule (GET → query, POST → body) is wrong:
+// /memory/reindex is registered POST and reads its scope from the QUERY
+// (memory.go, handleMemoryReindex). Under the method rule the guard read an
+// empty body, resolved "agent", and refused a legitimate
+// `POST /memory/reindex?scope=crew` from a crew member — while
+// `POST /memory/reindex` with body {"scope":"crew"} made the guard see "crew"
+// and let it through to a handler that saw no query, defaulted to "agent", and
+// reindexed the BOOT agent's tier for a sibling. Guard and handler disagreeing
+// about the scope is a bypass in one direction and an outage in the other.
+//
+// So the mapping is explicit, and an unrecognised path under /memory/ resolves
+// to the agent tier: a route added later is refused for non-boot members until
+// someone teaches this function where its scope lives. That is the safe
+// direction to be wrong in, and TestMemoryRequestScope_MatchesHandlerSource
+// pins each route's source so a handler that changes it breaks the test rather
+// than the guard.
 //
 // Every uncertain case resolves to the agent tier — unparseable JSON, an
 // oversized body, an unknown scope value, "both" (which genuinely reads the
 // agent tier). Guessing "crew" would skip the check; guessing "agent" costs an
 // invalid request a 403 instead of a 400.
 func memoryRequestScope(r *http.Request) string {
-	if r.Method == http.MethodGet {
+	switch r.URL.Path {
+	case "/memory/read", "/memory/status", "/memory/reindex":
 		return normalizeMemoryScope(r.URL.Query().Get("scope"))
+	case "/memory/write", "/memory/search":
+		return memoryBodyScope(r)
+	default:
+		return "agent"
 	}
+}
+
+// memoryBodyScope reads the scope out of a JSON body, buffering and restoring
+// it so the handler still decodes the request normally.
+func memoryBodyScope(r *http.Request) string {
 	if r.Body == nil {
 		return "agent"
 	}
