@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	goruntime "runtime"
 	"strings"
 	"time"
@@ -733,13 +732,24 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				// reboot). /secrets is deliberately absent: it is a tmpfs with no
 				// host dir, so a host-side check would force a recreate on every
 				// restart.
-				bindMountDirs := []string{
-					filepath.Join(p.cfg.OutputBasePath, "workspaces", team.ID),
-					filepath.Join(p.cfg.OutputBasePath, team.ID),
-					filepath.Join(p.cfg.OutputBasePath, "crews", team.ID),
-				}
+				// Built through safepath.JoinUnder for the same reason as in
+				// prepareCrewDirs: the barrier belongs at the join, not several
+				// hundred lines up. A component that fails validation cannot name
+				// an existing bind mount either, so it takes the same path as a
+				// missing dir — recreate rather than reuse.
 				bindsMissing := false
-				for _, d := range bindMountDirs {
+				for _, components := range [][]string{
+					{"workspaces", team.ID},
+					{team.ID},
+					{"crews", team.ID},
+				} {
+					d, joinErr := safepath.JoinUnder(p.cfg.OutputBasePath, components...)
+					if joinErr != nil {
+						p.logger.Warn("unsafe crew bind-mount path, recreating container",
+							"container", containerName, "error", joinErr)
+						bindsMissing = true
+						break
+					}
 					if _, statErr := os.Stat(d); os.IsNotExist(statErr) {
 						bindsMissing = true
 						break
@@ -790,27 +800,59 @@ type crewDirs struct {
 // crew and scrubs the legacy host-side secrets dir.
 func (p *Provider) prepareCrewDirs(team provider.CrewConfig) (crewDirs, error) {
 	p.logger.Debug("image ok, creating dirs")
-	outputPath := filepath.Join(p.cfg.OutputBasePath, team.ID)
-	workspacePath := filepath.Join(p.cfg.OutputBasePath, "workspaces", team.ID)
-	crewPath := filepath.Join(p.cfg.OutputBasePath, "crews", team.ID)
+
+	// Build every host path through safepath.JoinUnder rather than
+	// filepath.Join. EnsureCrewRuntime already runs the same
+	// safepath.ValidateComponent over team.ID before it gets here, so this is
+	// not closing a live hole — it keeps the barrier next to the join, where a
+	// future caller of this helper cannot skip it, and it is what the
+	// filesystem sinks below (RemoveAll/MkdirAll/Chown/Chmod) are reached
+	// through.
+	join := func(components ...string) (string, error) {
+		return safepath.JoinUnder(p.cfg.OutputBasePath, components...)
+	}
+	outputPath, err := join(team.ID)
+	if err != nil {
+		return crewDirs{}, fmt.Errorf("crew output dir: %w", err)
+	}
+	workspacePath, err := join("workspaces", team.ID)
+	if err != nil {
+		return crewDirs{}, fmt.Errorf("crew workspace dir: %w", err)
+	}
+	crewPath, err := join("crews", team.ID)
+	if err != nil {
+		return crewDirs{}, fmt.Errorf("crew shared dir: %w", err)
+	}
 
 	// /secrets is an in-memory tmpfs now (see secretsTmpfsSpec) — no host
 	// dir. Earlier versions bind-mounted OutputBasePath/secrets/<crew-id>,
 	// which persisted cleartext credentials on the host disk; scrub any
 	// leftover from that era so old secrets don't outlive the fix.
 	// Best-effort: a failed removal is only the pre-existing exposure.
-	legacySecretsPath := filepath.Join(p.cfg.OutputBasePath, "secrets", team.ID)
+	legacySecretsPath, err := join("secrets", team.ID)
+	if err != nil {
+		return crewDirs{}, fmt.Errorf("legacy secrets dir: %w", err)
+	}
 	if err := os.RemoveAll(legacySecretsPath); err != nil {
 		p.logger.Warn("could not remove legacy host-side secrets dir; cleartext credentials may remain on disk",
 			"path", legacySecretsPath, "error", err)
+	}
+
+	sharedPath, err := join("crews", team.ID, "shared")
+	if err != nil {
+		return crewDirs{}, fmt.Errorf("crew shared subdir: %w", err)
+	}
+	agentsPath, err := join("crews", team.ID, "agents")
+	if err != nil {
+		return crewDirs{}, fmt.Errorf("crew agents subdir: %w", err)
 	}
 
 	allDirs := []string{
 		outputPath,
 		workspacePath,
 		crewPath,
-		filepath.Join(crewPath, "shared"),
-		filepath.Join(crewPath, "agents"),
+		sharedPath,
+		agentsPath,
 	}
 	for _, dir := range allDirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
