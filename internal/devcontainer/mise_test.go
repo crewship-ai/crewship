@@ -282,6 +282,99 @@ func TestInstallMiseTools(t *testing.T) {
 	}
 }
 
+// mise writes to three XDG roots besides its config: tool payloads to
+// $XDG_DATA_HOME/mise, tracked-config state to $XDG_STATE_HOME/mise and
+// downloads to $XDG_CACHE_HOME/mise. Only .config/mise used to be created and
+// chowned, so on a base image where /home/agent/.local is root-owned (a bare
+// debian runtime image plus common-utils, as the E2E provisioning test uses)
+// `mise install` running as 1001 died with
+//
+//	create_dir_all: ~/.local/state/mise/tracked-configs: Permission denied
+//
+// Pin that every dir mise needs is prepared and handed to the agent user
+// before the install runs, and that the XDG vars are set so mise cannot fall
+// back to a path we did not prepare.
+func TestInstallMiseTools_PreparesAgentOwnedXDGDirs(t *testing.T) {
+	type call struct {
+		cmd  string
+		user string
+		env  []string
+	}
+	var calls []call
+
+	mockExec := func(_ context.Context, _ string, cmd []string, user string, env []string) (string, int, error) {
+		calls = append(calls, call{cmd: strings.Join(cmd, " "), user: user, env: env})
+		return "ok", 0, nil
+	}
+
+	cfg := &MiseConfig{Tools: map[string]string{"node": "22"}}
+	if err := InstallMiseTools(context.Background(), "test-container", cfg, mockExec); err != nil {
+		t.Fatalf("InstallMiseTools: %v", err)
+	}
+
+	// Every dir mise writes to must be created before the install, and the
+	// creation must happen as root (the agent user cannot mkdir under a
+	// root-owned home).
+	wantDirs := []string{
+		"/home/agent/.config/mise",
+		"/home/agent/.local/share/mise",
+		"/home/agent/.local/state/mise",
+		"/home/agent/.cache/mise",
+	}
+	var mkdirIdx, chownIdx, installIdx = -1, -1, -1
+	for i, c := range calls {
+		switch {
+		case strings.Contains(c.cmd, "mkdir -p") && mkdirIdx < 0:
+			mkdirIdx = i
+		case strings.Contains(c.cmd, "chown") && chownIdx < 0:
+			chownIdx = i
+		case strings.Contains(c.cmd, "mise install") && installIdx < 0:
+			installIdx = i
+		}
+	}
+	if mkdirIdx < 0 || chownIdx < 0 || installIdx < 0 {
+		t.Fatalf("missing mkdir/chown/install call in %v", calls)
+	}
+	if mkdirIdx > installIdx || chownIdx > installIdx {
+		t.Errorf("dirs prepared after install (mkdir=%d chown=%d install=%d)", mkdirIdx, chownIdx, installIdx)
+	}
+	for _, dir := range wantDirs {
+		if !strings.Contains(calls[mkdirIdx].cmd, dir) {
+			t.Errorf("mkdir call does not create %s: %q", dir, calls[mkdirIdx].cmd)
+		}
+		if !strings.Contains(calls[chownIdx].cmd, dir) {
+			t.Errorf("chown call does not cover %s: %q", dir, calls[chownIdx].cmd)
+		}
+	}
+	if calls[mkdirIdx].user != "0:0" || calls[chownIdx].user != "0:0" {
+		t.Errorf("dir preparation must run as root, got mkdir=%q chown=%q",
+			calls[mkdirIdx].user, calls[chownIdx].user)
+	}
+	if !strings.Contains(calls[chownIdx].cmd, "1001:1001") {
+		t.Errorf("chown does not hand the dirs to the agent user: %q", calls[chownIdx].cmd)
+	}
+
+	// Both agent-side mise invocations must pin the XDG roots.
+	wantEnv := []string{
+		"HOME=/home/agent",
+		"XDG_CONFIG_HOME=/home/agent/.config",
+		"XDG_DATA_HOME=/home/agent/.local/share",
+		"XDG_STATE_HOME=/home/agent/.local/state",
+		"XDG_CACHE_HOME=/home/agent/.cache",
+	}
+	for _, c := range calls {
+		if c.user != "1001:1001" {
+			continue
+		}
+		joined := strings.Join(c.env, " ")
+		for _, want := range wantEnv {
+			if !strings.Contains(joined, want) {
+				t.Errorf("agent call %q missing env %s (got %v)", c.cmd, want, c.env)
+			}
+		}
+	}
+}
+
 func TestInstallMiseTools_Empty(t *testing.T) {
 	called := false
 	mockExec := func(_ context.Context, _ string, _ []string, _ string, _ []string) (string, int, error) {
