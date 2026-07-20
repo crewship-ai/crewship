@@ -110,8 +110,24 @@ step "Step 4: Verify 'crew config --show'"
 echo "OK: --show works"
 
 # 5. Trigger provisioning
+#
+# CrewHandler.maybeAutoProvision (internal/api/crews.go) kicks off a build in
+# the background as soon as step 3 persists a config that needs one, so by the
+# time we get here the job is usually already running and the explicit trigger
+# comes back 409 "provisioning already in progress". That 409 is the proactive
+# feature working, not a failure — accept it and let step 6 poll the job that
+# is already in flight. Any other non-zero exit is still a real failure.
 step "Step 5: Trigger provisioning"
-"$CREWSHIP" crew provision "$SLUG" --server "$SERVER" 2>&1 || fail "provision trigger failed"
+PROV_OUT=$("$CREWSHIP" crew provision "$SLUG" --server "$SERVER" 2>&1) && PROV_RC=0 || PROV_RC=$?
+echo "$PROV_OUT"
+if [ "$PROV_RC" -ne 0 ]; then
+    case "$PROV_OUT" in
+        *"already in progress"*)
+            echo "OK: auto-provision already running (proactive build, 409 expected)" ;;
+        *)
+            fail "provision trigger failed" ;;
+    esac
+fi
 
 # 6. Poll status with 10min timeout
 step "Step 6: Wait for provisioning to complete"

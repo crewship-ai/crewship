@@ -22,15 +22,12 @@ name: E2E Devcontainer
 # dashboard surfaces) is NOT wired into any CI workflow yet — it runs
 # manually on the dev VM via
 #     pnpm exec playwright test e2e/a11y.spec.ts
-# against a seeded instance. Wiring it here is blocked on real infra
-# work, not on the spec: jobs in this workflow build the Go binary with
-# a one-line web/out/index.html stub (see .github/actions/setup-go-embed),
-# so the embedded UI cannot serve any dashboard page. An a11y job needs:
-#   1. `pnpm build` before `go build` so the real Next export is embedded
-#      (also what the currently-red onboarding job needs to render /login);
-#   2. an onboarded + seeded workspace (`crewship seed`) plus
-#      E2E_EMAIL/E2E_PASSWORD for playwright.config.ts globalSetup.
-# Until that lands, the honest status is: a11y scans are dev-VM manual.
+# against a seeded instance. The embed half of the blocker is gone — the
+# onboarding job now exports the real UI over the stub before `go build`
+# (see "Build web UI into the embed dir"), so an a11y job can copy that
+# step. What it still needs is an onboarded + seeded workspace
+# (`crewship seed`) plus E2E_EMAIL/E2E_PASSWORD for playwright.config.ts
+# globalSetup. Until that lands, a11y scans stay dev-VM manual.
 
 on:
   workflow_dispatch: {}
@@ -71,6 +68,18 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: Build web UI into the embed dir
+        # setup-go-embed only writes a one-line web/out/index.html stub so
+        # `go:embed` compiles. That is enough for the API-only jobs, but this
+        # job drives the UI with a browser: against the stub, /login serves a
+        # bare doctype with no Next router, so the client-side redirect to
+        # /bootstrap never happens and the first spec times out. Export the
+        # real UI over the stub (same two steps as `make build`) before the
+        # binary is compiled.
+        run: |
+          pnpm build
+          rm -rf web/out && cp -r out web/out
 
       - name: Build CLI
         run: go build -o crewship ./cmd/crewship

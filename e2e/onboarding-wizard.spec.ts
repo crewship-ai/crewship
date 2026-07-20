@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test"
+import { test, expect, type Page } from "@playwright/test"
 
 /**
  * Onboarding wizard E2E — first-run journey from empty DB to a
@@ -27,6 +27,14 @@ const SETUP_STATUS_PATH = "/api/v1/system/setup-status"
 // probe is gated off in CI. Don't expose this as an env var — a real
 // token here would hit api.anthropic.com whenever the gate isn't set.
 const FAKE_API_KEY = "sk-ant-oat-e2e-fake-token"
+
+// Next.js keeps a permanently-mounted <div role="alert"
+// id="__next-route-announcer__"> in the DOM for client-side route
+// announcements, so a bare getByRole("alert") always resolves to two
+// elements and trips Playwright's strict mode — even when the form's own
+// alert renders exactly as expected. Scope every assertion to the real
+// alert by excluding the announcer.
+const formAlert = (page: Page) => page.locator('[role="alert"]:not(#__next-route-announcer__)')
 
 test.use({ storageState: { cookies: [], origins: [] } })
 test.describe.configure({ mode: "serial" })
@@ -74,7 +82,7 @@ test.describe("onboarding wizard — first-run flow", () => {
     await page.fill("#email", `pre-${email}`)
     await page.fill("#password", "long-enough-pw")
     await page.click("button[type=submit]")
-    await expect(page.getByRole("alert")).toContainText(/at least 2 characters/i)
+    await expect(formAlert(page)).toContainText(/at least 2 characters/i)
     expect(page.url()).toContain("/bootstrap")
   })
 
@@ -85,7 +93,7 @@ test.describe("onboarding wizard — first-run flow", () => {
     await page.fill("#email", `pre-${email}`)
     await page.fill("#password", "short")
     await page.click("button[type=submit]")
-    await expect(page.getByRole("alert")).toContainText(/at least 8 characters/i)
+    await expect(formAlert(page)).toContainText(/at least 8 characters/i)
     expect(page.url()).toContain("/bootstrap")
   })
 
@@ -178,15 +186,34 @@ test.describe("onboarding wizard — first-run flow", () => {
     }
   })
 
-  test("POST /api/v1/bootstrap returns 403 after first user exists", async ({ request }) => {
-    const res = await request.post("/api/v1/bootstrap", {
-      data: {
-        full_name: "Second Admin",
-        email: `second-${runId}@example.com`,
-        password: "another-pw-1234",
-      },
-      headers: { "Content-Type": "application/json" },
-    })
-    expect(res.status()).toBe(403)
+  test("POST /api/v1/bootstrap returns 410 after first user exists", async ({ request }) => {
+    // 410, not 403: AuthHandler.Bootstrap (internal/api/auth.go) answers a
+    // re-POST on an initialised instance with Gone + "please log in at
+    // /login instead", deliberately ahead of the window check so the
+    // message is actionable. The Go side pins the same code in
+    // internal/api/auth_test.go.
+    //
+    // Polled because /api/v1/bootstrap shares one 10-req/min per-IP bucket
+    // with /api/auth/* (routeWithRateLimiting, internal/api/router.go) and
+    // the wizard run above spends it on session calls — the first attempts
+    // here come back 429, so a single-shot assertion would observe the
+    // rate limiter instead of the contract. Worst case costs one window.
+    test.setTimeout(120_000)
+    await expect
+      .poll(
+        async () => {
+          const res = await request.post("/api/v1/bootstrap", {
+            data: {
+              full_name: "Second Admin",
+              email: `second-${runId}@example.com`,
+              password: "another-pw-1234",
+            },
+            headers: { "Content-Type": "application/json" },
+          })
+          return res.status()
+        },
+        { timeout: 90_000, intervals: [5_000] },
+      )
+      .toBe(410)
   })
 })
