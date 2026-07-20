@@ -402,7 +402,7 @@ same way whether or not that address has an account here:
 | `POST /api/auth/callback/credentials` (sign-in) | Unknown email and wrong password both return `CredentialsSignin`. The unknown-email path burns one bcrypt compare against a pre-generated dummy hash (`internal/api/lockout.go`) so the *latency* matches too. |
 | `POST /api/v1/auth/forgot` | Always `200` with one fixed body, including for malformed JSON, unknown addresses, missing mailer, and internal errors. Real vs fake is signalled only by what lands in the inbox. |
 | `POST /api/v1/auth/reset` | "Invalid or expired token" covers unknown / expired / already-consumed / racing tokens alike. |
-| `POST /api/v1/auth/signup` | Always `202` with one fixed body, no account id, no session cookie, and one bcrypt on both paths. The collision is reported to the address itself (mailer) or to the log with the address hashed. Previously `409 Email already registered`. |
+| `POST /api/v1/auth/signup` | Always `202` with one fixed body, no account id, no session cookie, and one bcrypt on both paths. The collision notice is mailed from a detached goroutine *after* the response is written, so the outbound send is not on the request path. Not constant-time (the created path still runs a write transaction) — the identical body plus the equal bcrypt cost is what is claimed. Previously `409 Email already registered`. |
 | `POST /api/v1/auth/pair/poll` | Unknown / foreign / expired codes are all reported as `expired`. |
 
 **Residual gap.** With `CREWSHIP_ALLOW_SIGNUP=true` and no

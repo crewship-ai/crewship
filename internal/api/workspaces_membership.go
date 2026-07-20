@@ -9,7 +9,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -79,14 +78,16 @@ func (h *WorkspaceHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 }
 
 type addMemberRequest struct {
+	// UserID only. Deliberately NOT an email: resolving an arbitrary
+	// address against the global users table would give every
+	// OWNER/ADMIN — one signup away on an open instance — the account
+	// existence oracle #1254 closed on the signup surface, and would let
+	// them pull another tenant's users into their workspace by address
+	// alone. Adding someone you only know the address of goes through
+	// POST /workspaces/{id}/invitations, which the invitee redeems at
+	// signup (see redeemPendingInvitations in auth.go).
 	UserID string `json:"user_id"`
-	// Email is an alternative handle for the same user, used when the
-	// caller only knows the address: POST /api/v1/auth/signup stopped
-	// returning the created account's id when it was de-enumerated
-	// (#1254 item 7), so "sign the user up, then put them in my
-	// workspace" has nothing else to key on. Ignored when UserID is set.
-	Email string `json:"email"`
-	Role  string `json:"role"`
+	Role   string `json:"role"`
 }
 
 // AddMember adds a user to the workspace with a specified role.
@@ -118,22 +119,8 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.UserID == "" && req.Email != "" {
-		// Resolve behind the manage-role gate. Case-insensitive because
-		// the address is typed by a human here, not read from a token.
-		err := h.db.QueryRowContext(r.Context(),
-			"SELECT id FROM users WHERE LOWER(email) = LOWER(?)", req.Email).Scan(&req.UserID)
-		if errors.Is(err, sql.ErrNoRows) {
-			replyError(w, http.StatusNotFound, "User not found")
-			return
-		}
-		if err != nil {
-			replyInternalError(w, h.logger, "resolve member email", err)
-			return
-		}
-	}
 	if req.UserID == "" {
-		replyError(w, http.StatusBadRequest, "user_id or email is required")
+		replyError(w, http.StatusBadRequest, "user_id is required")
 		return
 	}
 	if req.Role == "" {

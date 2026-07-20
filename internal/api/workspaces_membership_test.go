@@ -191,47 +191,36 @@ func TestWorkspaceMembership_AddMember_AdminAssigningAdmin_Returns403(t *testing
 	}
 }
 
-// Adding by email is the alternative to user_id: signup stopped
-// returning the new account's id when it was de-enumerated, so the
-// only handle a caller (the CLI seed, an invite UI) has for a freshly
-// created user is the address they typed. Resolution happens behind
-// the manage-role gate, so it is not an enumeration surface — an
-// admin can already list every member of their workspace.
-func TestWorkspaceMembership_AddMember_ByEmail_Resolves(t *testing.T) {
+// The workspace roster is NOT a global email→user_id lookup. Resolving
+// an arbitrary address against the users table would hand every
+// OWNER/ADMIN — one free signup away on an open instance — the exact
+// existence oracle #1254 closed on the unauthenticated signup surface,
+// and would let them pull another tenant's users into their workspace
+// by address alone. The endpoint takes user_id and nothing else.
+func TestWorkspaceMembership_AddMember_EmailIsNotAGlobalLookup(t *testing.T) {
 	h, userID, wsID := membershipRig(t)
 	seedOtherUser(t, h, "user-target", "target@example.com")
-	body := strings.NewReader(`{"email":"TARGET@example.com","role":"MEMBER"}`)
+	body := strings.NewReader(`{"email":"target@example.com","role":"MEMBER"}`)
 	req := withWorkspaceUser(
 		httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/members", body),
 		userID, wsID, "OWNER",
 	)
 	rr := httptest.NewRecorder()
 	h.AddMember(rr, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 — an email must not resolve to a user id here; body=%s",
+			rr.Code, rr.Body.String())
 	}
-	var got memberResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	// And nothing may have been written: a 400 that still created the
+	// row would be the same leak with a worse status code.
+	var members int
+	if err := h.db.QueryRow(
+		`SELECT COUNT(*) FROM workspace_members WHERE workspace_id = ? AND user_id = ?`,
+		wsID, "user-target").Scan(&members); err != nil {
+		t.Fatalf("count members: %v", err)
 	}
-	if got.UserID != "user-target" {
-		t.Errorf("user_id = %q, want user-target", got.UserID)
-	}
-}
-
-// An email with no account behind it is a 404, same as an unknown
-// user_id — the caller is already authorised to see the roster.
-func TestWorkspaceMembership_AddMember_UnknownEmail_Returns404(t *testing.T) {
-	h, userID, wsID := membershipRig(t)
-	body := strings.NewReader(`{"email":"nobody@example.com","role":"MEMBER"}`)
-	req := withWorkspaceUser(
-		httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/members", body),
-		userID, wsID, "OWNER",
-	)
-	rr := httptest.NewRecorder()
-	h.AddMember(rr, req)
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404; body=%s", rr.Code, rr.Body.String())
+	if members != 0 {
+		t.Errorf("membership rows = %d, want 0", members)
 	}
 }
 

@@ -1,13 +1,17 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"github.com/crewship-ai/crewship/internal/mailer"
 )
 
 // Signup must not tell an unauthenticated caller whether an address
@@ -132,5 +136,82 @@ func TestSignup_DisabledGateUnchangedByDeEnumeration(t *testing.T) {
 		if rr.Code != http.StatusForbidden {
 			t.Errorf("%s: status = %d, want 403", email, rr.Code)
 		}
+	}
+}
+
+// slowSignupMailer blocks in Send for a fixed delay. A signup that
+// dispatches the "you already have an account" notice inline shows
+// that delay in its response latency — which re-opens the enumeration
+// oracle in the time domain no matter how identical the bytes are.
+type slowSignupMailer struct {
+	delay time.Duration
+	mu    sync.Mutex
+	sent  []mailer.Message
+}
+
+func (m *slowSignupMailer) Send(_ context.Context, msg mailer.Message) error {
+	time.Sleep(m.delay)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sent = append(m.sent, msg)
+	return nil
+}
+
+func (m *slowSignupMailer) Configured() bool { return true }
+
+func (m *slowSignupMailer) count() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.sent)
+}
+
+// The collision notice is an outbound HTTPS POST to a third party. Held
+// on the request path it makes the taken-address response measurably
+// slower than the fresh-address one on every instance that has a mailer
+// configured — the loudest possible signal, and one the identical body
+// cannot mask. The send must be detached from the response.
+func TestSignup_ExistingEmail_MailerDoesNotDelayTheResponse(t *testing.T) {
+	db := setupTestDB(t)
+	h := NewAuthHandler(db, newTestLogger(), newTestJWTValidator(t), sessions.NewDBStore(db), true)
+	mail := &slowSignupMailer{delay: 1500 * time.Millisecond}
+	h.mail = mail
+
+	if _, err := db.Exec(`INSERT INTO users (id, email, full_name, hashed_password) VALUES ('u1', 'taken@example.com', 'Existing', 'x')`); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	// The equaliser hash is a sync.OnceValue: whoever calls it first
+	// pays an extra cost-12 generate. NewRouter warms it in a goroutine
+	// at server construction (see lockout.go) — this test builds the
+	// handler directly, so warm it here or the very first collision
+	// measures two bcrypts against the fresh path's one.
+	dummyBcryptHash()
+
+	start := time.Now()
+	signupForEnumTest(t, h, "unused@example.com")
+	fresh := time.Since(start)
+
+	start = time.Now()
+	rr := signupForEnumTest(t, h, "taken@example.com")
+	taken := time.Since(start)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", rr.Code)
+	}
+	// Half the mailer delay is a wide margin: the two paths differ only
+	// by bcrypt-generate vs bcrypt-compare plus a small transaction, so
+	// anything approaching 750ms of extra latency can only be the send.
+	if margin := mail.delay / 2; taken > fresh+margin {
+		t.Fatalf("taken-address signup took %v vs %v for a fresh address (margin %v) — the mailer is on the request path",
+			taken, fresh, margin)
+	}
+
+	// Detached, not dropped: the notice still has to reach the owner.
+	h.WaitForPendingMail()
+	if got := mail.count(); got != 1 {
+		t.Fatalf("sent %d notices, want 1", got)
+	}
+	if to := mail.sent[0].To; to != "taken@example.com" {
+		t.Errorf("notice went to %q", to)
 	}
 }

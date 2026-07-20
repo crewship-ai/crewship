@@ -51,12 +51,16 @@ var demoUsers = []demoUser{
 // non-fatal — a user the fixture can't place is reported and the loop
 // continues so the rest of the fixture lands.
 //
-// Signup answers 202 with a generic body for both a fresh address and
-// one that already has an account (it was de-enumerated in #1254), so
-// the seed can no longer read the new user's id out of the response —
-// and doesn't need to: the role-pinning POST below accepts the email
-// and resolves it server-side. That also makes re-seeding idempotent
-// without a 409 branch.
+// The flow is invite-then-signup, not signup-then-add-member. Signup
+// answers 202 with a generic body whether or not the address was free
+// (it was de-enumerated in #1254), so it can no longer hand back the
+// new account's id — and there is deliberately no endpoint that maps an
+// arbitrary email to one, because that would be the same enumeration
+// oracle behind an OWNER/ADMIN gate. What exists instead is the
+// invitation the server redeems inside the signup transaction: create
+// the invitation for the address with the fixture role first, then sign
+// the user up, and they land in this workspace already pinned. Both
+// steps are idempotent, so re-seeding is a no-op.
 func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -74,12 +78,35 @@ func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		// Step 1: signup. The signup handler doesn't check the caller's
+		// Step 1: invite the address into this workspace at the fixture
+		// role. 409 means either "already a member" or "an active
+		// invitation is already open" — both are fine on a re-seed, and
+		// both are workspace-scoped answers the caller could already get
+		// from GET /members, so no cross-tenant information leaks here.
+		iResp, err := client.Post(
+			fmt.Sprintf("/api/v1/workspaces/%s/invitations?workspace_id=%s", wsID, wsID),
+			map[string]string{"email": u.Email, "role": u.Role},
+		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  X %s: invite request failed: %v\n", u.Email, err)
+			continue
+		}
+		inviteStatus := iResp.StatusCode
+		if inviteStatus != http.StatusConflict {
+			if err := cli.CheckError(iResp); err != nil {
+				fmt.Fprintf(os.Stderr, "  X %s: invite as %s: %v\n", u.Email, u.Role, err)
+				continue
+			}
+		} else {
+			iResp.Body.Close()
+		}
+
+		// Step 2: signup. The signup handler doesn't check the caller's
 		// bearer (it gates on allowSignup, not auth), so we can reuse
 		// the same authenticated client. The 202 is deliberately
-		// uninformative — "created" and "already exists" look the same
-		// — so we don't branch on it; step 2 is what tells us whether
-		// the account is actually there.
+		// uninformative — "created" and "already exists" look the same —
+		// so we don't branch on it; step 3 is what tells us whether the
+		// account is actually in the workspace.
 		resp, err := client.Post("/api/v1/auth/signup", map[string]string{
 			"email":     u.Email,
 			"full_name": u.FullName,
@@ -96,38 +123,27 @@ func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 			continue
 		}
 
-		// Step 2: pin role via workspace_members, addressing the user by
-		// email. The bootstrap admin (already authed as client) is OWNER,
-		// so this call succeeds even when the target role is ADMIN.
-		mResp, err := client.Post(
-			fmt.Sprintf("/api/v1/workspaces/%s/members?workspace_id=%s", wsID, wsID),
-			map[string]interface{}{"email": u.Email, "role": u.Role},
-		)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  X %s: assign %s: %v\n", u.Email, u.Role, err)
+		// Step 3: verify against the roster. This is the only honest
+		// signal we have — signup won't say, and the invitation is only
+		// redeemed when the account was genuinely created.
+		_, gotRole, lerr := findWorkspaceMemberByEmail(client, wsID, u.Email)
+		if lerr != nil {
+			fmt.Fprintf(os.Stderr, "  X %s: roster lookup failed: %v\n", u.Email, lerr)
 			continue
 		}
-		if mResp.StatusCode == http.StatusConflict {
-			mResp.Body.Close()
-			// Already a member from an earlier run. Idempotent path:
-			// verify the role still matches the fixture (there is no
-			// role-update endpoint, so drift is a warning, not a fix).
-			_, existingRole, lerr := findWorkspaceMemberByEmail(client, wsID, u.Email)
-			if lerr != nil {
-				fmt.Fprintf(os.Stderr, "  X %s: lookup after 409 failed: %v\n", u.Email, lerr)
-				continue
-			}
-			if existingRole != "" && !strings.EqualFold(existingRole, u.Role) {
-				fmt.Fprintf(os.Stderr, "  ! %s: existing workspace role %q ≠ fixture %q (no role-update endpoint; manual fix needed)\n", u.Email, existingRole, u.Role)
-			} else {
-				fmt.Fprintf(os.Stderr, "  ↻ %s: already in workspace with role %s; skipping\n", u.Email, u.Role)
-			}
-			minted = append(minted, u)
+		switch {
+		case gotRole == "":
+			// The address exists but isn't in this workspace: it had an
+			// account before the seed ran, so signup was a no-op and the
+			// invitation is still pending for its owner to redeem.
+			fmt.Fprintf(os.Stderr, "  ↻ %s: account predates this seed; invitation left pending (re-run with --nuke for fresh state)\n", u.Email)
 			continue
-		}
-		if err := cli.CheckError(mResp); err != nil {
-			fmt.Fprintf(os.Stderr, "  X %s: assign %s: %v\n", u.Email, u.Role, err)
-			continue
+		case !strings.EqualFold(gotRole, u.Role):
+			// No role-update endpoint for workspace members, so drift
+			// from an earlier fixture is a warning, not a fix.
+			fmt.Fprintf(os.Stderr, "  ! %s: existing workspace role %q ≠ fixture %q (no role-update endpoint; manual fix needed)\n", u.Email, gotRole, u.Role)
+		case inviteStatus == http.StatusConflict:
+			fmt.Fprintf(os.Stderr, "  ↻ %s: already in workspace with role %s; skipping\n", u.Email, u.Role)
 		}
 		minted = append(minted, u)
 	}
@@ -157,8 +173,8 @@ func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 
 // findWorkspaceMemberByEmail resolves an email to (userID, currentRole)
 // for users already in the current workspace's member roster. Used to
-// read back the current role when the role-pinning POST returns 409
-// (the user was placed by an earlier seed run).
+// confirm that signup actually redeemed the invitation and to read back
+// the role that landed.
 //
 // Returns ("", "", nil) when the email isn't found in this workspace —
 // the user may exist in the global users table but not be a member here,

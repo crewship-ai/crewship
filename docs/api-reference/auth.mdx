@@ -130,9 +130,16 @@ address hashed.
 | `500` | Server-side failure (DB unreachable, bcrypt error). Not existence-dependent — a duplicate address never produces a `500`. |
 
 <Note>
-  Need the new user's id (to add them to a workspace, say)? Use `POST
-  /api/v1/workspaces/{workspaceId}/members` with `{"email": "..."}` —
-  it resolves the address behind the workspace-manage role gate.
+  Signup returns no account id, and there is deliberately no endpoint
+  that maps an arbitrary email to one — that would re-open this same
+  oracle behind an `OWNER`/`ADMIN` gate. To put someone in your
+  workspace when the address is all you have, create a [workspace
+  invitation](/api-reference/workspaces#create-invitation) first: signup
+  redeems every live invitation for the address inside the same
+  transaction that creates the account, so the new user lands in the
+  inviting workspace at the invited role. `POST
+  /api/v1/workspaces/{workspaceId}/members` still takes a `user_id` and
+  nothing else.
 </Note>
 
 <Note>
