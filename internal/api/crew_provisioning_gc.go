@@ -73,15 +73,40 @@ func (h *ProvisioningHandler) runStartupAndPeriodicGC(ctx context.Context) {
 // run cleans up via defer; this sweeper only catches the crash/SIGKILL path.
 // Filtered by the Provisioner's label so we never touch unrelated containers.
 
+// hasTempContainerName reports whether any of a container's names marks it
+// as a provisioner scratch container. Docker reports names with a leading
+// slash, and a container can carry several.
+func hasTempContainerName(names []string) bool {
+	for _, n := range names {
+		if strings.HasPrefix(strings.TrimPrefix(n, "/"), devcontainer.TempContainerNamePrefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *ProvisioningHandler) sweepOrphanTempContainers(ctx context.Context) {
 	if h.gcClient == nil {
 		return
 	}
 	start := time.Now()
 	labelFilter := devcontainer.TempContainerLabelKey + "=" + devcontainer.TempContainerLabelValue
+	// Filter by name as well as label, so orphanGCSweepCap is spent on
+	// plausible candidates. The label alone matches every crew container on
+	// the host (it rides in on the cache image), and on a shared daemon
+	// those vastly outnumber leaked scratch containers — Docker returns
+	// newest-first, so an old orphan lands past the cap and never gets
+	// cleaned up. The sweeper would be safe but blind.
+	//
+	// Docker's name filter is an unanchored substring match, which is why
+	// hasTempContainerName below remains the authoritative check: this
+	// narrows the list, it does not decide anything.
 	containers, err := h.gcClient.ContainerList(ctx, container.ListOptions{
-		All:     true,
-		Filters: filters.NewArgs(filters.Arg("label", labelFilter)),
+		All: true,
+		Filters: filters.NewArgs(
+			filters.Arg("label", labelFilter),
+			filters.Arg("name", devcontainer.TempContainerNamePrefix),
+		),
 	})
 	if err != nil {
 		h.logger.Warn("orphan temp-container GC: list failed", "error", err)
@@ -96,6 +121,21 @@ func (h *ProvisioningHandler) sweepOrphanTempContainers(ctx context.Context) {
 			break
 		}
 		if c.Created >= cutoff {
+			continue
+		}
+		// Age and label are not enough to authorise deletion. The label
+		// travels into the committed cache image and back out into every
+		// crew container started from it, so matching on it alone means
+		// force-removing live crews an hour into their lives — which is
+		// exactly what happened on crewship-dev on 2026-07-20. Only the
+		// name proves this container came from createTempContainer;
+		// names are never copied into images.
+		//
+		// Scratch containers leaked by a SIGKILL *before* this check
+		// existed carry a Docker-assigned random name and are no longer
+		// swept. That is the intended trade: an abandoned `sleep infinity`
+		// costs a few MB, deleting somebody's running crew costs their work.
+		if !hasTempContainerName(c.Names) {
 			continue
 		}
 		if err := h.gcClient.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); err != nil {

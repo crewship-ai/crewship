@@ -184,9 +184,29 @@ Two crews with identical configs share the same cache image (deduped on first pr
 `ProvisioningHandler` runs a sweeper every 30 minutes (and once at startup)
 to remove crash leaks:
 
-- **Temp containers** labelled `crewship.temp=provision` and older than 1 hour
-  are force-removed. Filter is label-scoped, so unrelated containers are
-  never touched.
+- **Temp containers** — those *named* `crewship-provision-*` **and** labelled
+  `crewship.temp=provision` — are force-removed once older than 1 hour. Both
+  conditions are required, and the name is the one that authorises deletion.
+
+  <Warning>
+  The label alone is not proof of provenance. Provisioning ends in a
+  `docker commit` of the scratch container, and Docker copies that
+  container's labels into the resulting `crewship-cache:*` image — so every
+  crew container started from it inherits `crewship.temp=provision`. Crew
+  containers set no labels of their own, making it the only label they carry.
+  A label-only sweeper therefore force-removes healthy crews an hour into
+  their lives; this happened on a dev host on 2026-07-20. Container names are
+  never copied into images, which is why the name is the marker that holds.
+
+  Consequence for `docker ps`: filtering by `label=crewship.temp=provision`
+  lists your running crews too. Filter by `name=crewship-provision-` to see
+  only genuine scratch containers.
+  </Warning>
+
+  Scratch containers leaked before this release carry a Docker-assigned
+  random name and are no longer swept automatically. Remove them by hand if
+  they bother you — `docker ps -a --filter label=crewship.temp=provision`,
+  then discount anything named like a crew.
 - **Cache images** (`crewship-cache:*`) with no referencing crew row across
   any workspace are flagged. A 5-minute age floor protects images that
   Provision() has just committed but not yet linked to a crew, eliminating

@@ -180,9 +180,27 @@ type Provisioner struct {
 // TempContainerLabelKey and TempContainerLabelValue identify temporary
 // containers created by Provisioner.createTempContainer. Exported so the
 // orphan-temp sweeper (internal/api/crew_provisioning.go) can filter on them.
+//
+// The label alone is NOT a safe identity marker, and must never again be
+// treated as one. createTempContainer's container is the input to
+// `docker commit`, and Docker copies the source container's config —
+// labels included — into the committed crewship-cache:<hash> image. Every
+// crew container started from that image therefore inherits
+// crewship.temp=provision, and since crew containers set no labels of
+// their own it is the only label they carry. The sweeper matched them and
+// force-removed a healthy crew container an hour into its life
+// (crewship-dev, 2026-07-20).
+//
+// TempContainerNamePrefix is the marker that actually holds: a container
+// name lives on the container and is never copied into an image, so no
+// amount of committing can make a crew container answer to it. The label
+// stays for `docker ps --filter label=` convenience and to narrow the
+// daemon-side list; the name is what authorises deletion.
 const (
 	TempContainerLabelKey   = "crewship.temp"
 	TempContainerLabelValue = "provision"
+
+	TempContainerNamePrefix = "crewship-provision-"
 )
 
 // ProvisionResult contains the output of a successful provisioning run.
