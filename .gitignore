@@ -105,8 +105,11 @@ internal-docs/
 .claude/context/*
 !.claude/context/prd/
 !.claude/context/prd/**
-!.claude/context/notes/
-!.claude/context/notes/**
+# .claude/context/notes/ is NOT tracked in this public repo. It holds
+# internal working notes (infra recon, live-instance findings) that must
+# stay private — they live in the private GitLab `infrastructure/crewship-notes`.
+# Do not re-add a `!` exception for it here.
+.claude/context/notes/
 
 # Local mockups / audit artifacts (kept untracked per user preference)
 audit-final/
