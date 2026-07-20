@@ -93,7 +93,7 @@ func (s *Server) tokensProvisioned() bool {
 // Coverage is enforced elsewhere, by construction rather than by convention:
 //
 //   - the memory surface is gated in buildHandler by path prefix
-//     (refuseTokenlessMemory, internal/sidecar/memory_guard.go) BEFORE the
+//     (refuseUnauthorizedMemory, internal/sidecar/memory_guard.go) BEFORE the
 //     route switch runs, so a new /memory or /mcp/memory route inherits the
 //     check from registration alone;
 //   - /query and /escalate still call this predicate inline — they are NOT
@@ -103,8 +103,18 @@ func (s *Server) tokensProvisioned() bool {
 //     enumerates the routes registered in buildHandler and fails when one is
 //     unclassified, so the next route cannot silently reintroduce the class.
 //
-// A request with a token — valid or forged — is NOT a downgrade; the caller
-// resolves it through actingIdentity, which refuses forgeries on its own.
+// A request with a token — valid or forged — is NOT a downgrade. This predicate
+// answers exactly one question: "did the caller omit the header on a crew that
+// issues tokens?" It says nothing about whether the token is real.
+//
+// That distinction was previously written here as "the caller resolves it
+// through actingIdentity, which refuses forgeries on its own" — an assertion
+// about callers that the five legacy /memory/* handlers did not honour, since
+// they call actingIdentity nowhere. A forged token was therefore not a
+// downgrade, not a forgery-refusal either, and simply passed. Forgery refusal
+// now happens at the memory chokepoint (refuseUnauthorizedMemory) rather than
+// being assumed of whoever calls this; do not restore a claim here about what
+// callers do, because a comment cannot enforce it.
 func (s *Server) tokenlessDowngrade(r *http.Request) bool {
 	return bearerToken(r) == "" && s.tokensProvisioned()
 }

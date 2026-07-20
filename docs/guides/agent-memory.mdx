@@ -316,7 +316,15 @@ cascades the index row away as well.
 
 ### 3. Searching Memory
 
-Agents search memory via the sidecar HTTP API with a `scope` parameter:
+Most agents should search through the **memory MCP tools**, which every adapter
+injects automatically — `memory.search` resolves the acting agent from its token
+and searches that agent's own tier.
+
+The sidecar HTTP API below takes a `scope` parameter and is the **boot agent's**
+surface: it serves the tier of the agent the sidecar was booted for. If your crew
+shares a sidecar and you are not that agent, these routes answer `403` and you
+want `/mcp/memory/<your-slug>` (or the MCP tools) instead — see the warning at
+the end of this section.
 
 ```bash
 # Search personal memory only
@@ -336,18 +344,39 @@ curl localhost:9119/memory/search \
 ```
 
 <Warning>
-**Every memory route requires the per-agent token.** The whole memory surface —
-`/memory/read`, `/memory/write`, `/memory/search`, `/memory/status`,
+**Every memory route requires a valid per-agent token.** The whole memory
+surface — `/memory/read`, `/memory/write`, `/memory/search`, `/memory/status`,
 `/memory/reindex`, and the MCP transports `/mcp/memory` and
 `/mcp/memory/<slug>` — is gated on the `Authorization: Bearer
 $CREWSHIP_AGENT_TOKEN` header whenever the crew has per-agent tokens
-provisioned (every crew started by a current orchestrator). A request without
-it is refused with `403 {"error":"per-agent token required"}`, because several
-agents share one sidecar and a token-less call cannot be attributed to a
-member. Crews that predate per-agent tokens keep working unauthenticated.
-The token is in each agent's environment, so `-H "Authorization: Bearer
+provisioned (every crew started by a current orchestrator). Several agents share
+one sidecar, so a call that cannot be attributed to a member is refused:
+
+- no header → `403 {"error":"per-agent token required"}`
+- a token matching no crew member → `403 {"error":"unrecognized agent token"}`
+
+Crews that predate per-agent tokens keep working unauthenticated. The token is
+in each agent's environment, so `-H "Authorization: Bearer
 $CREWSHIP_AGENT_TOKEN"` is all that is needed. See
 [Per-agent identity](/security/threat-model#per-agent-identity-on-the-shared-sidecar).
+</Warning>
+
+<Warning>
+**The legacy `/memory/*` routes serve the boot agent's tier only.** They resolve
+the memory directory from the sidecar's boot agent and do not switch tiers per
+caller. A crew member that is *not* the boot agent is therefore refused on those
+five routes, with a pointer to its own surface:
+
+```
+403 {"error":"this route serves only the boot agent's memory tier;
+              use /mcp/memory/<your-slug> for your own"}
+```
+
+Use `/mcp/memory/<slug>` (or the memory MCP tools, which every adapter injects
+automatically) — that transport resolves the acting agent from its token and
+serves that agent's own tier. Serving each agent its own tier on the legacy
+routes as well is planned; until then they are a boot-agent surface, not a
+per-agent one.
 </Warning>
 
 ## Dynamic Budget Allocation

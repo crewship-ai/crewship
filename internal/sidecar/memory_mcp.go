@@ -118,7 +118,7 @@ func (s *Server) handleMemoryMCPForAgent(w http.ResponseWriter, r *http.Request,
 	// second line for direct invocations of the handler (tests, any future
 	// in-process caller that bypasses the router); the router gate is the
 	// one that actually holds the surface.
-	if s.refuseTokenlessMemory(w, r) {
+	if s.refuseUnauthorizedMemory(w, r) {
 		return
 	}
 	effectiveSlug := agentSlug
