@@ -992,8 +992,14 @@ Both states are normal:
 
 | `avatar_url` | Meaning |
 |---|---|
-| a URL | The agent has a stored render; fetch it from that URL. |
+| a URL | The agent has a stored render; fetch it from that URL **as given**. |
 | `null` | No stored render — generate from `avatar_seed` + `avatar_style`, as before. |
+
+Use the string verbatim. It already carries both `?v=` and `workspace_id`,
+the latter because this route resolves its workspace the same way every
+other endpoint does, and an `<img>` tag cannot send the `X-Workspace-ID`
+header. Rebuilding the URL by hand and dropping that parameter yields a
+`400`.
 
 <Note>
   The server never draws an avatar (the generator is JavaScript-only). The
@@ -1006,10 +1012,12 @@ Both states are normal:
 ### Get stored avatar
 
 ```
-GET /api/v1/agents/{agentId}/avatar
+GET /api/v1/agents/{agentId}/avatar?v={hash}&workspace_id={workspaceId}
 ```
 
-Returns `image/svg+xml`. Readable by any workspace member. Returns `404`
+Returns `image/svg+xml`. Readable by any workspace member. `workspace_id`
+is required — it scopes the lookup to your workspace, so one workspace can
+never read another's avatars. Returns `404`
 when the agent has no stored render — which is not an error, it just means
 the client should generate from the seed.
 

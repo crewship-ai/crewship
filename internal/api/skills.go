@@ -255,7 +255,7 @@ func (h *SkillHandler) populateInstalledOn(r *http.Request, rows []skillResponse
 		); err != nil {
 			return err
 		}
-		ag.AvatarURL = agentAvatarURL(ag.AgentID, avatarSVGHash)
+		ag.AvatarURL = agentAvatarURL(ag.AgentID, avatarSVGHash, WorkspaceIDFromContext(r.Context()))
 		i, ok := idx[skillID]
 		if !ok {
 			continue

@@ -51,6 +51,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -249,11 +250,26 @@ func agentAvatarHash(svg string) string {
 // agentAvatarURL builds the serve URL for a stored avatar. Returns nil when
 // the agent has no stored render, which is the signal for the client to fall
 // back to generating from (avatar_seed, avatar_style).
-func agentAvatarURL(agentID, hash string) *string {
-	if hash == "" {
+//
+// workspace_id is part of the URL because the GET route is registered behind
+// wsCtx, which resolves the workspace from the query string, a {workspaceId}
+// path segment, or the X-Workspace-ID header. This path has no workspace
+// segment and an <img> tag cannot set a header, so without the query param
+// every stored avatar 400s at the middleware — the client then falls back to
+// generating one and the whole feature silently does nothing.
+//
+// Dropping wsCtx from the route would also make the URL fetchable and is the
+// wrong fix: ServeAvatar uses the workspace as its tenant scope, so the gate
+// is what keeps one workspace's avatars out of another's reach.
+func agentAvatarURL(agentID, hash, workspaceID string) *string {
+	// No workspace means no fetchable URL. Returning one anyway would hand
+	// the client a link that 400s; nil routes it to the seed fallback, which
+	// is the documented behaviour for "no stored render available".
+	if hash == "" || workspaceID == "" || agentID == "" {
 		return nil
 	}
-	u := fmt.Sprintf("/api/v1/agents/%s/avatar?v=%s", agentID, hash)
+	u := fmt.Sprintf("/api/v1/agents/%s/avatar?v=%s&workspace_id=%s",
+		url.PathEscape(agentID), url.QueryEscape(hash), url.QueryEscape(workspaceID))
 	return &u
 }
 
@@ -334,7 +350,7 @@ func (h *AgentHandler) PutAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"avatar_url": *agentAvatarURL(agentID, hash)})
+	writeJSON(w, http.StatusOK, map[string]any{"avatar_url": *agentAvatarURL(agentID, hash, workspaceID)})
 }
 
 // ServeAvatar streams an agent's stored avatar SVG.

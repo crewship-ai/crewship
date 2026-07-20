@@ -101,7 +101,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		a.MemoryEnabled = memEnabled == 1
 		a.ScheduleEnabled = schedEnabled == 1
-		a.AvatarURL = agentAvatarURL(a.ID, avatarSVGHash.String)
+		a.AvatarURL = agentAvatarURL(a.ID, avatarSVGHash.String, workspaceID)
 		if createdByUserID.Valid {
 			a.CreatedByUserID = createdByUserID.String
 		}
@@ -239,7 +239,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	a.MemoryEnabled = memEnabled == 1
 	a.ScheduleEnabled = schedEnabled == 1
 	a.WebhookRequireTimestamp = whRequireTS == 1
-	a.AvatarURL = agentAvatarURL(a.ID, avatarSVGHash.String)
+	a.AvatarURL = agentAvatarURL(a.ID, avatarSVGHash.String, workspaceID)
 	secretSet := whSecretSet == 1
 	a.WebhookSecretSet = &secretSet
 	if createdByUserID.Valid {

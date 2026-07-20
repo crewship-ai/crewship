@@ -438,7 +438,10 @@ func TestInboxList_CarriesStoredAvatarURL(t *testing.T) {
 	for _, row := range resp.Rows {
 		got[row.ID] = row.AvatarURL
 	}
-	if want := "/api/v1/agents/ag-stored/avatar?v=deadbeefdeadbeef"; got["esc-stored"] != want {
+	// The workspace must ride along: the inbox is one of the four places
+	// that builds this URL, and the route is gated by wsCtx, so a URL
+	// without it 400s in the browser (#1307).
+	if want := "/api/v1/agents/ag-stored/avatar?v=deadbeefdeadbeef&workspace_id=" + wsID; got["esc-stored"] != want {
 		t.Errorf("stored sender avatar_url = %q, want %q", got["esc-stored"], want)
 	}
 	if got["esc-plain"] != "" {
