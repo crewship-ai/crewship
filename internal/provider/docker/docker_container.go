@@ -430,6 +430,17 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// before any filepath.Join so a malformed ID can't reach the bind
 	// mount layer (which would let an attacker who controls the DB pin
 	// container output at /etc, /root, etc.).
+	//
+	// THIS IS THE SINGLE VALIDATION CHOKEPOINT for team.ID / team.Slug on
+	// the runtime-container path. Everything reached from here —
+	// reconcileExistingContainer, prepareCrewDirs, fixBindMountOwnership,
+	// and the volume/bind-mount construction they perform — deliberately
+	// does NOT re-validate; it relies on the two ValidateComponent calls
+	// immediately below having already fenced the values. Any new caller
+	// that reaches those helpers by another route must run the same
+	// validation first, and no early return may be inserted above this
+	// block. TestEnsureCrewRuntime_UnsafeIDsNeverReachDaemon pins the
+	// property that hostile ids fail before any docker API call.
 	if _, err := safepath.ValidateComponent(team.ID); err != nil {
 		return "", fmt.Errorf("crew id not safe for path: %w", err)
 	}

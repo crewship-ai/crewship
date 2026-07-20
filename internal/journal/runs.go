@@ -247,16 +247,16 @@ LIMIT ? OFFSET ?`
 	}
 	defer rows.Close()
 
-	// q.Limit is clamped to [1, 100] in the validation block above;
-	// re-apply at the make() call so the cap is locally visible to
-	// CodeQL's go/uncontrolled-allocation-size rule (min builtin is on
-	// CodeQL's recognised-sanitiser list; the local allocCap = q.Limit
-	// + if-clamp pattern was not).
-	allocCap := min(q.Limit, 100)
-	if allocCap < 0 {
-		allocCap = 0
-	}
-	out := make([]RunAggregated, 0, allocCap)
+	// Deliberately no capacity hint. The row count is bounded by the LIMIT
+	// bind (clamped to [1, 100] above), so append's growth costs at most a
+	// couple of reallocations — while a make(..., 0, limit) sink would
+	// pre-reserve memory from a caller-supplied number. Two earlier attempts
+	// to keep the hint and convince CodeQL's go/uncontrolled-allocation-size
+	// rule that the clamp sanitises it (a local `allocCap` + if-clamp, then
+	// the `min` builtin) both failed: the rule tracks the taint through the
+	// RunsQuery field, not through the clamp. Removing the sink removes the
+	// question. Do not reintroduce a capacity derived from q.Limit.
+	var out []RunAggregated
 	for rows.Next() {
 		r, err := scanRunAggregated(rows, q.WorkspaceID)
 		if err != nil {

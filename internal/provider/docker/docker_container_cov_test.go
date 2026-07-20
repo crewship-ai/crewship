@@ -1345,3 +1345,60 @@ func TestContainerStats_CacheLargerThanUsage_FallsBackToRawUsage(t *testing.T) {
 		t.Errorf("MemoryPct = %v, want 10", m.MemoryPct)
 	}
 }
+
+// TestEnsureCrewRuntime_UnsafeIDsNeverReachDaemon proves the path-safety
+// validation at the top of EnsureCrewRuntime is a real chokepoint and not
+// just a best-effort check: for every shape of hostile crew id/slug, the
+// call must fail BEFORE any docker API traffic happens. Zero
+// ContainerList, zero ContainerCreate, zero volume create — so none of the
+// downstream helpers that join these values into host paths
+// (reconcileExistingContainer, prepareCrewDirs, fixBindMountOwnership)
+// can ever observe an unvalidated component.
+//
+// This is the test that backs the CodeQL go/path-injection findings on
+// docker_container.go being false positives: the tainted value is fenced
+// at :433 and cannot flow further.
+func TestEnsureCrewRuntime_UnsafeIDsNeverReachDaemon(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		crew    provider.CrewConfig
+		wantErr string
+	}{
+		{"parent traversal id", provider.CrewConfig{ID: "../escape", Slug: "alpha"}, "crew id not safe for path"},
+		{"absolute id", provider.CrewConfig{ID: "/etc/passwd", Slug: "alpha"}, "crew id not safe for path"},
+		{"dot id", provider.CrewConfig{ID: "..", Slug: "alpha"}, "crew id not safe for path"},
+		{"empty id", provider.CrewConfig{ID: "", Slug: "alpha"}, "crew id not safe for path"},
+		{"nested id", provider.CrewConfig{ID: "a/../../b", Slug: "alpha"}, "crew id not safe for path"},
+		{"traversal slug", provider.CrewConfig{ID: "crew1", Slug: "../escape"}, "crew slug not safe for path"},
+		{"absolute slug", provider.CrewConfig{ID: "crew1", Slug: "/root"}, "crew slug not safe for path"},
+		{"separator slug", provider.CrewConfig{ID: "crew1", Slug: "a/b"}, "crew slug not safe for path"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			f := &covRT{}
+			p := f.provider(t, covRTConfig(t))
+
+			_, err := p.EnsureCrewRuntime(context.Background(), tt.crew)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
+			}
+
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if f.listCount != 0 {
+				t.Errorf("ContainerList called %d times; unsafe input reached the daemon", f.listCount)
+			}
+			if len(f.creates) != 0 || len(f.createNames) != 0 {
+				t.Errorf("ContainerCreate called %d times (names %v); unsafe input reached the daemon", len(f.creates), f.createNames)
+			}
+			if f.volumeCreates != 0 {
+				t.Errorf("VolumeCreate called %d times; unsafe input reached the daemon", f.volumeCreates)
+			}
+			if len(f.starts) != 0 || len(f.stops) != 0 || len(f.deletes) != 0 {
+				t.Errorf("container lifecycle calls made: starts=%v stops=%v deletes=%v", f.starts, f.stops, f.deletes)
+			}
+		})
+	}
+}
