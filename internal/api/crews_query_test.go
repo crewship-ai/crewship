@@ -11,12 +11,14 @@ import (
 
 // Behavior lock for CrewHandler.List (#1255 item 2).
 //
-// The counts in `_count` used to come from two correlated subqueries
-// evaluated once per returned row; they now come from two grouped
-// aggregates LEFT JOINed onto the page. That rewrite is purely a
-// performance change, so this fixture pins the observable contract —
-// row set, ordering, response key set and both counts — and must pass
-// identically before and after the query change.
+// The counts in `_count` come from two correlated subqueries evaluated
+// once per returned row. Item 2 of #1255 proposed replacing them with
+// grouped aggregates LEFT JOINed onto the page; that rewrite was
+// measured and rejected (see the comment on the query itself), so the
+// subqueries are still what ships. This fixture is the safety net for
+// anyone who retries the rewrite: it pins the observable contract — row
+// set, ordering, response key set and both counts — so a join version
+// has to reproduce it exactly.
 //
 // Fixture covers the shapes that break naive join rewrites: a crew with
 // no agents and no members (COALESCE must yield 0, not drop the row), a

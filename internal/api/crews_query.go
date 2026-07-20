@@ -31,6 +31,13 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 	//   500 crews / 20k agents / 10k members: subqueries 5.9ms, join 29.2ms
 	//   3000 crews / 24k agents / 12k members: subqueries 2.4ms, join 51.0ms
 	//
+	// #1255 cites ProjectHandler.List as the precedent to copy. It is not
+	// one: that query has no LIMIT/OFFSET. Without a page there is nothing
+	// to bound the point lookups, so amortising one grouped aggregate over
+	// the whole result is the better trade there and the worse trade here.
+	// Pagination is what inverts it — re-check for a LIMIT before treating
+	// any other handler as a precedent for this one.
+	//
 	// Do not "optimise" this into a join without re-running that
 	// measurement. TestCrewListCountsGoldenFixture locks the observable
 	// contract if you do.
