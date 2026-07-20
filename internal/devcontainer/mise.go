@@ -276,6 +276,38 @@ func InstallMise(ctx context.Context, containerID string, exec ExecFunc) error {
 	return nil
 }
 
+// miseAgentDirs are the directories mise itself owns under the agent home.
+// Created as root and chowned to the agent user before any agent-side mise
+// invocation — see the comment in InstallMiseTools.
+var miseAgentDirs = []string{
+	"/home/agent/.config/mise",
+	"/home/agent/.local/share/mise",
+	"/home/agent/.local/state/mise",
+	"/home/agent/.cache/mise",
+}
+
+// miseAgentDirParents are the XDG roots holding miseAgentDirs. They are shared
+// with other tooling, so they get a non-recursive chown: the agent needs to be
+// able to create siblings (mise writes lock files next to its dirs), not to own
+// whatever a feature installed alongside.
+var miseAgentDirParents = []string{
+	"/home/agent/.config",
+	"/home/agent/.local",
+	"/home/agent/.local/share",
+	"/home/agent/.local/state",
+	"/home/agent/.cache",
+}
+
+// miseAgentEnv pins every XDG root mise resolves, so it cannot fall back to a
+// path that was never prepared or chowned.
+var miseAgentEnv = []string{
+	"HOME=/home/agent",
+	"XDG_CONFIG_HOME=/home/agent/.config",
+	"XDG_DATA_HOME=/home/agent/.local/share",
+	"XDG_STATE_HOME=/home/agent/.local/state",
+	"XDG_CACHE_HOME=/home/agent/.cache",
+}
+
 // InstallMiseTools writes the mise config and runs `mise install`.
 // Runs as agent user (user "1001:1001") since mise installs to ~/.local/share/mise/.
 func InstallMiseTools(ctx context.Context, containerID string, cfg *MiseConfig, exec ExecFunc) error {
@@ -285,9 +317,26 @@ func InstallMiseTools(ctx context.Context, containerID string, cfg *MiseConfig, 
 
 	toml := cfg.ToTOML()
 
-	// Create config directory and write .mise.toml as root (then chown).
+	// Create every directory mise writes to, as root, before handing them to
+	// the agent user.
+	//
+	// The config is only one of four XDG roots mise touches: tool payloads go
+	// to $XDG_DATA_HOME/mise, tracked-config state to $XDG_STATE_HOME/mise and
+	// downloads to $XDG_CACHE_HOME/mise. Preparing .config/mise alone was
+	// enough on images that ship an agent-owned home, but on a base image
+	// where /home/agent (or an existing .local) belongs to root — a bare
+	// debian runtime image plus common-utils, which is exactly what the E2E
+	// provisioning test builds — `mise install` running as 1001 could not
+	// create its own state dir and died with
+	// "create_dir_all: ~/.local/state/mise/tracked-configs: Permission denied".
+	// The XDG parents are chowned non-recursively here (they are shared with
+	// other tooling — .local/share holds far more than mise — but the agent
+	// must be able to create siblings in them); the mise-owned subtrees get a
+	// full chown in the next step.
 	stdout, exitCode, err := exec(ctx, containerID, []string{
-		"sh", "-c", "mkdir -p /home/agent/.config/mise && cat > /home/agent/.config/mise/config.toml << 'MISE_EOF'\n" + toml + "MISE_EOF",
+		"sh", "-c", "mkdir -p " + strings.Join(miseAgentDirs, " ") +
+			" && chown 1001:1001 " + strings.Join(miseAgentDirParents, " ") +
+			" && cat > /home/agent/.config/mise/config.toml << 'MISE_EOF'\n" + toml + "MISE_EOF",
 	}, "0:0", nil)
 	if err != nil {
 		return fmt.Errorf("mise: write config: %v", err)
@@ -296,10 +345,9 @@ func InstallMiseTools(ctx context.Context, containerID string, cfg *MiseConfig, 
 		return fmt.Errorf("mise: write config exited %d: %s", exitCode, stdout)
 	}
 
-	// Set ownership to agent user.
-	stdout, exitCode, err = exec(ctx, containerID, []string{
-		"chown", "-R", "1001:1001", "/home/agent/.config/mise",
-	}, "0:0", nil)
+	// Hand the mise-owned subtrees to the agent user in full.
+	chown := append([]string{"chown", "-R", "1001:1001"}, miseAgentDirs...)
+	stdout, exitCode, err = exec(ctx, containerID, chown, "0:0", nil)
 	if err != nil {
 		return fmt.Errorf("mise: chown: %v", err)
 	}
@@ -310,7 +358,7 @@ func InstallMiseTools(ctx context.Context, containerID string, cfg *MiseConfig, 
 	// Install tools as agent user.
 	stdout, exitCode, err = exec(ctx, containerID, []string{
 		"mise", "install", "--yes",
-	}, "1001:1001", []string{"HOME=/home/agent", "XDG_CONFIG_HOME=/home/agent/.config"})
+	}, "1001:1001", miseAgentEnv)
 	if err != nil {
 		return fmt.Errorf("mise: install tools: %v", err)
 	}
@@ -321,7 +369,7 @@ func InstallMiseTools(ctx context.Context, containerID string, cfg *MiseConfig, 
 	// Reshim to ensure shims are up to date.
 	stdout, exitCode, err = exec(ctx, containerID, []string{
 		"mise", "reshim",
-	}, "1001:1001", []string{"HOME=/home/agent", "XDG_CONFIG_HOME=/home/agent/.config"})
+	}, "1001:1001", miseAgentEnv)
 	if err != nil {
 		return fmt.Errorf("mise: reshim: %v", err)
 	}

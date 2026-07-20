@@ -85,12 +85,16 @@ jobs:
         run: go build -o crewship ./cmd/crewship
 
       - name: Generate ephemeral test secrets
-        # Same rationale as the devcontainer job — per-run randomness
-        # so nothing trips Gitleaks and runs start from a clean slate.
+        # Same rationale — and same ::add-mask:: requirement — as the
+        # devcontainer job below.
         run: |
+          nextauth="$(openssl rand -hex 32)"
+          enckey="$(openssl rand -hex 32)"
+          echo "::add-mask::$nextauth"
+          echo "::add-mask::$enckey"
           {
-            echo "NEXTAUTH_SECRET=$(openssl rand -hex 32)"
-            echo "ENCRYPTION_KEY=$(openssl rand -hex 32)"
+            echo "NEXTAUTH_SECRET=$nextauth"
+            echo "ENCRYPTION_KEY=$enckey"
           } >> "$GITHUB_ENV"
 
       - name: Install Playwright browsers
@@ -188,10 +192,22 @@ jobs:
         #      cross-run state via accidentally-shared keys).
         # Both vars are scoped to the GitHub Actions $GITHUB_ENV file, so
         # subsequent steps inherit them automatically.
+        #
+        # ::add-mask:: before the write, or the values land in the log in
+        # cleartext: Actions prints the resolved `env:` block of every
+        # subsequent step, and $GITHUB_ENV values are not secrets, so
+        # nothing redacts them by default. Harmless in itself — they are
+        # throwaway per-run keys — but a workflow log that shows what a
+        # NEXTAUTH_SECRET looks like is a pattern nobody should copy into
+        # a job where the value is real.
         run: |
+          nextauth="$(openssl rand -hex 32)"
+          enckey="$(openssl rand -hex 32)"
+          echo "::add-mask::$nextauth"
+          echo "::add-mask::$enckey"
           {
-            echo "NEXTAUTH_SECRET=$(openssl rand -hex 32)"
-            echo "ENCRYPTION_KEY=$(openssl rand -hex 32)"
+            echo "NEXTAUTH_SECRET=$nextauth"
+            echo "ENCRYPTION_KEY=$enckey"
           } >> "$GITHUB_ENV"
 
       - name: Start dev server in background
