@@ -131,6 +131,23 @@ func (s *Server) handleMemoryMCPForAgent(w http.ResponseWriter, r *http.Request,
 			})
 			return
 		}
+		// A roster entry whose token matches but whose Slug is empty must NOT
+		// fall through to memoryAgentContextFor(""), which reads "" as "the
+		// sidecar's own agent" and hands back the BOOT agent's context — so a
+		// slugless member would be silently promoted to the boot agent and
+		// read its private tier. Unreachable today (agents.slug is NOT NULL and
+		// every create path validates it), but "" means two different things to
+		// the resolver and only one of them is safe.
+		if actorSlug == "" {
+			s.logger.Warn("memory mcp: refusing a token that resolves to an empty agent slug",
+				"acting_agent_id", actorID)
+			writeJSONResponse(w, http.StatusForbidden, memoryMCPResponse{
+				JSONRPC: "2.0",
+				ID:      mcpNullID,
+				Error:   &memoryMCPRPCError{Code: -32001, Message: "agent identity has no slug"},
+			})
+			return
+		}
 		if agentSlug != "" && agentSlug != actorSlug {
 			s.logger.Warn("memory mcp: url slug does not match authenticated agent, using token identity",
 				"url_slug", agentSlug, "acting_slug", actorSlug, "acting_agent_id", actorID)

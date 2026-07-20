@@ -522,10 +522,18 @@ router:
   behind it. Reading the boot agent's private `AGENT.md` cost one arbitrary
   header — a cheaper bypass than the one being fixed. Forgery is now refused at
   the chokepoint, not assumed of downstream callers.
-- **A sibling's own valid token.** The five legacy handlers resolve their tier
-  from the sidecar's boot agent, so *any* authenticated member read and
-  overwrote the boot agent's tier. They are now refused there, pointing at
-  `/mcp/memory/<slug>`, which resolves the acting agent properly.
+- **A sibling's own valid token.** The five legacy handlers resolve the agent
+  tier from the sidecar's boot agent, so *any* authenticated member read and
+  overwrote the boot agent's tier. Agent-scoped requests from a non-boot member
+  are now refused, pointing at `/mcp/memory/<slug>`, which resolves the acting
+  agent properly.
+
+  The refusal is scoped to the **agent** tier. `scope=crew` resolves to one
+  directory shared by the whole crew by construction, so there is no per-agent
+  crew tier to cross and refusing it would protect nothing while breaking
+  sibling access to shared memory. The first cut of this fix did exactly that —
+  a functional regression wearing a security fix's clothes, caught in review
+  before it shipped. `scope=both` reads the agent tier and is refused with it.
 
 The general lesson is the one this section already records, applied one level
 deeper: a guarantee stated at the level of "the memory surface" is only as true

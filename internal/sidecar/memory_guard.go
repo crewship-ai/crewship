@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -75,23 +76,26 @@ func isMemoryRoutePath(p string) bool {
 //     the chokepoint, not in each handler: that is the mistake this whole guard
 //     exists to stop repeating.
 //
-//  3. On the LEGACY routes only: an authenticated crew member that is not the
-//     boot agent. Those five handlers resolve their tier from
-//     s.agentMemoryBase — the boot agent's memory — with no identity
-//     resolution at all, so a sibling holding a perfectly valid token of its
-//     own still read and overwrote ALPHA's private AGENT.md. There is no
-//     correct outcome to preserve here: serving the request means cross-agent
-//     access, every time. It is refused with a pointer to /mcp/memory/<slug>,
-//     which does resolve per-agent identity properly.
+//  3. On the LEGACY routes, for AGENT-scoped requests only: an authenticated
+//     crew member that is not the boot agent. Those five handlers resolve the
+//     agent tier from s.agentMemoryBase — the boot agent's memory — with no
+//     identity resolution at all, so a sibling holding a perfectly valid token
+//     of its own still read and overwrote ALPHA's private AGENT.md.
 //
-//     Serving each agent its OWN tier on these routes is the better end state
-//     and is deliberately not attempted here: read/write are a base-path swap,
-//     but search/status/reindex run through a single indexed memory.Engine
-//     bound to one tier, so per-agent means per-agent engine instances —
-//     lifecycle, close, concurrency, per-tier index files. That is a subsystem,
-//     not a security patch, and smuggling it in here would put an unreviewed
-//     data-path change inside a fix that has to be obviously correct.
-//     Tracked separately.
+//     The scope qualifier is load-bearing and was missing from the first cut of
+//     this fix, which refused the whole legacy prefix. `scope=crew` resolves to
+//     crewMemoryBase — ONE directory shared by every member of the crew by
+//     construction (orchestrator sets CrewMemoryPath for every agent with a
+//     CrewID, not just leads). There is no per-agent crew tier to cross, so
+//     refusing it protected nothing and broke sibling access to shared memory:
+//     a functional regression wearing a security fix's clothes.
+//
+//     Serving each agent its OWN agent tier on these routes is the better end
+//     state and is deliberately not attempted here: read/write are a base-path
+//     swap, but search/status/reindex run through a single indexed
+//     memory.Engine bound to one tier, so per-agent means per-agent engine
+//     instances — lifecycle, close, concurrency, per-tier index files. That is
+//     a subsystem, not a security patch. Tracked in #1301.
 //
 // The MCP transport previously answered its own refusal with HTTP 200 and a
 // JSON-RPC error, which made every downgrade attempt indistinguishable from a
@@ -109,17 +113,92 @@ func (s *Server) refuseUnauthorizedMemory(w http.ResponseWriter, r *http.Request
 			"memory route: refusing request with a token matching no crew member", "")
 	}
 
-	// Legacy routes serve the boot tier and only the boot tier.
+	// Legacy routes serve the BOOT agent's agent tier. The crew tier they also
+	// serve is shared by construction and stays open to every member.
+	//
+	// Note the comparison is written to fail CLOSED on an empty boot slug. The
+	// first cut had `s.memoryAgentSlug != "" && actorSlug != s.memoryAgentSlug`,
+	// which silently disabled this whole check when the slug was empty — a
+	// sibling then read the boot tier again. It is not reachable today (the
+	// orchestrator validates the slug before building the memory config), but
+	// the guard's answer to "I cannot tell who the boot agent is" must be to
+	// refuse, not to serve, and it should not depend on a caller-ordering
+	// invariant enforced in a different function.
 	if present && ok && !isMemoryMCPPath(r.URL.Path) &&
-		s.memoryAgentSlug != "" && actorSlug != s.memoryAgentSlug {
-		return s.writeMemoryRefusal(w,
-			r,
-			"this route serves only the boot agent's memory tier; use /mcp/memory/"+actorSlug+" for your own",
-			"memory route: refusing cross-agent access on a legacy route",
+		(s.memoryAgentSlug == "" || actorSlug != s.memoryAgentSlug) &&
+		memoryRequestScope(r) != memoryScopeCrew {
+		return s.writeMemoryRefusal(w, r,
+			legacyCrossAgentMessage(r.URL.Path, actorSlug),
+			"memory route: refusing cross-agent access to the agent tier on a legacy route",
 			actorSlug)
 	}
 
 	return false
+}
+
+const memoryScopeCrew = "crew"
+
+// legacyCrossAgentMessage tells the refused caller where its own agent tier
+// actually is. Route-dependent on purpose: the memory MCP transport exposes
+// memory.read / memory.write / memory.search / memory.append_daily and NOTHING
+// else, so pointing a /memory/status or /memory/reindex caller at
+// /mcp/memory/<slug> would send it somewhere that cannot serve the request —
+// a refusal that lies about the alternative is how a guard gets deleted by the
+// next person to hit it.
+func legacyCrossAgentMessage(path, actorSlug string) string {
+	const shared = "; scope=crew is shared and remains available to every crew member"
+	switch path {
+	case "/memory/read", "/memory/write", "/memory/search":
+		return "this route serves the boot agent's memory tier; use /mcp/memory/" +
+			actorSlug + " for your own agent tier" + shared
+	default:
+		// /memory/status, /memory/reindex, and anything added under the prefix.
+		return "this route serves the boot agent's memory tier and has no " +
+			"per-agent equivalent yet (see issue #1301)" + shared
+	}
+}
+
+// memoryRequestScope reports which tier the request targets, applying the same
+// default every legacy handler applies ("" → "agent").
+//
+// The guard runs in front of the route switch, so it has to read the scope the
+// same way the handler will: from the query string for read/status/reindex, and
+// from the JSON body for write/search. The body is buffered and restored so the
+// handler still decodes it normally.
+//
+// Every uncertain case resolves to the agent tier — unparseable JSON, an
+// oversized body, an unknown scope value, "both" (which genuinely reads the
+// agent tier). Guessing "crew" would skip the check; guessing "agent" costs an
+// invalid request a 403 instead of a 400.
+func memoryRequestScope(r *http.Request) string {
+	if r.Method == http.MethodGet {
+		return normalizeMemoryScope(r.URL.Query().Get("scope"))
+	}
+	if r.Body == nil {
+		return "agent"
+	}
+	// +1 so an oversized body is detected rather than silently truncated into
+	// a parse that yields the wrong scope.
+	raw, err := io.ReadAll(io.LimitReader(r.Body, sidecarMaxBodyBytes+1))
+	_ = r.Body.Close()
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	if err != nil || int64(len(raw)) > sidecarMaxBodyBytes {
+		return "agent"
+	}
+	var probe struct {
+		Scope string `json:"scope"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return "agent"
+	}
+	return normalizeMemoryScope(probe.Scope)
+}
+
+func normalizeMemoryScope(scope string) string {
+	if scope == memoryScopeCrew {
+		return memoryScopeCrew
+	}
+	return "agent"
 }
 
 // writeMemoryRefusal logs the refusal and writes it in the shape the route

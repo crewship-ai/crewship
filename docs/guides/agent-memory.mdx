@@ -80,7 +80,9 @@ The end-to-end loop from "memory off" to "agent recalls last week's decision" is
   </Step>
 
   <Step title="Search explicitly when you need to">
-    For mid-session lookups outside the initial prompt budget, the agent calls its sidecar's search endpoint:
+    For mid-session lookups outside the initial prompt budget, the agent uses the `memory.search` MCP tool, which every adapter injects and which resolves the acting agent from its token.
+
+    The sidecar HTTP endpoint below is equivalent **for the boot agent** — the agent whose exec started the crew's shared sidecar. Any other member of the crew gets `403` on `scope=agent` and `scope=both` there (`scope=crew` is shared and always works); see the warning at the end of [Searching Memory](#3-searching-memory).
 
     ```bash
     curl -sX POST localhost:9119/memory/search \
@@ -632,10 +634,10 @@ Two unrelated things share the word "pin" — don't confuse them:
 **Memory files are not encrypted at rest.** `AGENT.md`, `CREW.md`, daily logs, and the `index.sqlite` files live as plain on-disk bytes inside the container. Never write secrets, tokens, or PII into memory — credentials belong in [Keeper](/guides/keeper), not in `~/.memory/`.
 </Warning>
 
-- **Crew reindex lags up to 60 seconds.** The lead sidecar reindexes the crew tier on a 60-second tick. Writes to `CREW.md` or `topics/*.md` are searchable on the next tick, not immediately — if you need instant visibility, hit `POST /memory/reindex?scope=crew` from the lead's sidecar.
+- **Crew reindex lags up to 60 seconds.** The lead sidecar reindexes the crew tier on a 60-second tick. Writes to `CREW.md` or `topics/*.md` are searchable on the next tick, not immediately — if you need instant visibility, hit `POST /memory/reindex?scope=crew`. The crew tier is shared, so this works from any member of the crew — unlike `scope=agent` on that route, which serves the boot agent's tier only.
 - **Agent-tier reindex after `/memory/write` is asynchronous.** A successful `POST /memory/write` returns `201` the moment the bytes are durable on disk; the FTS5 reindex (and the `memory.updated` journal entry) then run on a single-worker background queue rather than blocking the response. The lag is sub-second in practice. The queue is strict FIFO, so consecutive writes to the same file reindex in write order — turn N always lands before turn N+1, never a stale earlier write winning a race. Writes are still searchable essentially immediately; if you need a hard barrier (e.g. write-then-search in a tight loop), the queue is drained on sidecar shutdown so nothing is lost, but for instant in-session visibility you can hit `POST /memory/reindex?scope=agent`.
 - **Single-agent crews have no crew tier.** The `crew` scope returns 503 for an agent that isn't a member of a crew (or whose crew has only itself). The budget for the agent tier is 100% in that case; no crew context to retrieve.
-- **Agents cannot read other agents' personal memory — even within the same crew.** Container bind mounts enforce this at the filesystem level, not by API check. If a workflow needs cross-agent state, the right surface is `CREW.md` or `topics/`, written by the lead.
+- **An agent's personal memory is not reachable by its crewmates through the sidecar API.** Note what this is *not*: within a crew there is no filesystem-level isolation to rely on. A crew shares **one container and one mount**, so every agent tier is on the same disk, reachable by any process in that container. The boundary is enforced by the sidecar — a per-agent bearer token, checked at the memory chokepoint before the route switch, with the acting agent resolved from the token rather than from a caller-supplied slug. An agent with shell access in the container can still read its crewmates' files directly; the guarantee covers the API surface, not the filesystem. If a workflow needs cross-agent state, the right surface is `CREW.md` or `topics/`, written by the lead.
 - **Budget is measured in characters, not tokens.** The default 15,000-character budget is ~3,500–4,500 tokens depending on language and content. Don't reason about budget as if it were tokens — the orchestrator slices on character boundaries.
 - **The 10 MB per-agent memory cap is a hard limit.** Once a directory exceeds it, new writes fail rather than evicting old ones — consolidation isn't automatic eviction. Curated facts only, not raw logs.
 - **Don't delete `AGENT.md` entries casually.** Memory is append-mostly. Remove only entries that are explicitly outdated — pruning live knowledge is what makes an agent feel "dumber than yesterday".
