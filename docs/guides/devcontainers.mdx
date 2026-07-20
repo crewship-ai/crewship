@@ -479,6 +479,27 @@ PR #225 extends the devcontainer expansion vocabulary the spec defines:
     - Declare `ghcr.io/devcontainers/features/common-utils:2` as the *first* feature — it installs prerequisites.
   </Accordion>
 
+  <Accordion title="base/runtime image freshness unknown; keeping the local copy without pulling">
+    Before pulling, Crewship asks the registry for the current manifest digest (a `HEAD`) and compares it against the local image's `RepoDigests`. If that lookup fails, the pull is skipped and the local copy is used as-is — the right call when you're offline, but it means a *permanently* failing lookup pins you to a stale image indefinitely. That case now logs at `WARN`:
+
+    ```
+    WARN runtime image freshness unknown; keeping the local copy without pulling — it may be stale.
+         Check registry reachability and your Docker credential helper (~/.docker/config.json credsStore)
+         ref=debian:bookworm-slim
+    ```
+
+    Two usual causes:
+
+    - **No route to the registry** (air-gapped host, egress firewall). Pre-pull images on the host and ignore the warning.
+    - **A broken or wedged Docker credential helper.** `~/.docker/config.json` names a `credsStore`, and Docker execs `docker-credential-<store>` for every registry. If that binary is missing, hangs, or prompts for an unlocked keychain, the digest lookup times out (5s). Verify with:
+
+      ```bash
+      echo "ghcr.io" | docker-credential-$(jq -r .credsStore ~/.docker/config.json) get
+      ```
+
+      Digest lookups for registries that need no credentials — loopback/`localhost` registries — skip the helper entirely, and a helper that errors falls back to anonymous access rather than giving up, so public images keep resolving.
+  </Accordion>
+
   <Accordion title="cache image never refreshes">
     `configHash` is deterministic over `(baseImage, devcontainer_config, mise_config)`. Upstream feature releases that re-use the same tag don't change the hash. Force a rebuild:
 

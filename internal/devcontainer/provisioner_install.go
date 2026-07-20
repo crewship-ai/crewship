@@ -101,8 +101,12 @@ func (p *Provisioner) ensureImage(ctx context.Context, ref string) error {
 		return nil
 	}
 	if localPresent && remoteDigest == "" {
-		// Offline or auth-gated registry; trust local presence.
-		p.logger.Debug("image present locally; skipping pull (remote digest unavailable)", "ref", ref)
+		// Offline or auth-gated registry; trust local presence. This is a
+		// fail-open: a permanently broken digest lookup (wedged credential
+		// helper, blocked egress) silently pins the crew to a stale base image
+		// with no other signal, so this is a Warn rather than a Debug.
+		p.logger.Warn("base image freshness unknown; keeping the local copy without pulling — it may be stale. Check registry reachability and your Docker credential helper (~/.docker/config.json credsStore)",
+			"ref", ref)
 		return nil
 	}
 
