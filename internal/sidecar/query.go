@@ -115,7 +115,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		tokenAuthed = true
 	}
 	if !tokenAuthed {
-		if s.tokensProvisioned() {
+		if s.tokenlessDowngrade(r) {
 			// Per-agent tokens are in force for this crew; a token-less request
 			// is a downgrade/impersonation attempt (a sibling omitting the
 			// Authorization header to fall through to the spoofable membership
@@ -250,7 +250,7 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 	// rejects a slug outside the crew while keeping correct per-agent
 	// attribution.
 	if !tokenAuthed {
-		if s.tokensProvisioned() {
+		if s.tokenlessDowngrade(r) {
 			// Per-agent tokens are in force for this crew; a token-less request
 			// is a downgrade/impersonation attempt (a sibling omitting the
 			// Authorization header to fall through to the spoofable membership

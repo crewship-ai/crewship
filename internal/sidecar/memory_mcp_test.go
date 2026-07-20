@@ -417,3 +417,102 @@ func TestMemoryMCP_UnknownTokenRejected(t *testing.T) {
 		t.Fatalf("forged token must not write anything (stat err=%v)", err)
 	}
 }
+
+// TestMemoryMCP_TokenlessSiblingReadRefused — #1254 item A: the memory MCP
+// path must mirror the refusal its siblings (/query, /escalate) already
+// implement. On a crew where per-agent tokens ARE provisioned, a request
+// that presents NO Authorization header is a downgrade attempt: the caller
+// is a sibling in the shared container dropping the header to fall through
+// to the spoofable URL slug. It must be refused before any path resolution,
+// so a sibling can neither READ nor WRITE beta's memory tier by naming it
+// in the URL.
+func TestMemoryMCP_TokenlessSiblingReadRefused(t *testing.T) {
+	s, agentsRoot := newTokenMemoryMCPTestServer(t)
+
+	// Seed beta's private memory so a successful read would leak content.
+	betaFile := filepath.Join(agentsRoot, "beta", ".memory", "AGENT.md")
+	if err := os.WriteFile(betaFile, []byte("beta private secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{
+			name: "read",
+			body: `{"jsonrpc":"2.0","id":21,"method":"tools/call",
+				"params":{"name":"memory.read","arguments":{"tier":"AGENT"}}}`,
+		},
+		{
+			name: "write",
+			body: `{"jsonrpc":"2.0","id":22,"method":"tools/call",
+				"params":{"name":"memory.write",
+				         "arguments":{"tier":"AGENT","content":"clobbered\n","mode":"replace"}}}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/mcp/memory/beta", strings.NewReader(tc.body))
+			req.Host = "127.0.0.1:9119"
+			// Deliberately NO Authorization header.
+			w := httptest.NewRecorder()
+
+			s.handleMemoryMCPForAgent(w, req, "beta")
+
+			var resp struct {
+				Error *struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+				Result json.RawMessage `json:"result"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode: %v (body=%s)", err, w.Body.String())
+			}
+			if resp.Error == nil {
+				t.Fatalf("token-less sibling %s must yield a JSON-RPC error, got %s", tc.name, w.Body.String())
+			}
+			if !strings.Contains(resp.Error.Message, "per-agent token required") {
+				t.Errorf("error message = %q, want it to mention 'per-agent token required'", resp.Error.Message)
+			}
+			if strings.Contains(w.Body.String(), "beta private secret") {
+				t.Errorf("token-less sibling read leaked beta's memory: %s", w.Body.String())
+			}
+		})
+	}
+
+	got, err := os.ReadFile(betaFile)
+	if err != nil {
+		t.Fatalf("read beta AGENT.md: %v", err)
+	}
+	if string(got) != "beta private secret\n" {
+		t.Fatalf("token-less sibling write clobbered beta's memory: %q", got)
+	}
+}
+
+// TestMemoryMCP_TokenlessAllowedWhenNoTokensProvisioned — the refusal must
+// stay scoped to crews that HAVE tokens. A legacy (un-upgraded) deployment
+// with no tokens anywhere keeps the CRE-137 URL-slug behaviour.
+func TestMemoryMCP_TokenlessAllowedWhenNoTokensProvisioned(t *testing.T) {
+	s, agentsRoot := newMultiAgentMemoryMCPTestServer(t)
+
+	body := `{"jsonrpc":"2.0","id":23,"method":"tools/call",
+		"params":{"name":"memory.write",
+		         "arguments":{"tier":"AGENT","content":"legacy write\n","mode":"replace"}}}`
+	req := httptest.NewRequest("POST", "/mcp/memory/beta", strings.NewReader(body))
+	req.Host = "127.0.0.1:9119"
+	w := httptest.NewRecorder()
+
+	s.handleMemoryMCPForAgent(w, req, "beta")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
+	}
+	got, err := os.ReadFile(filepath.Join(agentsRoot, "beta", ".memory", "AGENT.md"))
+	if err != nil {
+		t.Fatalf("legacy token-less write must still work: %v (body=%s)", err, w.Body.String())
+	}
+	if string(got) != "legacy write\n" {
+		t.Fatalf("beta AGENT.md = %q", got)
+	}
+}
