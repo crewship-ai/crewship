@@ -178,6 +178,112 @@ func TestMarkChatRead_WrongScope404(t *testing.T) {
 	}
 }
 
+// Behaviour lock for the ListChats unread/last-activity projection
+// (#1255 item 6). This is NOT a regression test for a defect — it pins the
+// exact contract of the per-row unread computation so the query can be
+// rewritten from a correlated subquery to a grouped LEFT JOIN without
+// silently changing results.
+//
+// Four cases in one list call, so the aggregation is exercised across a
+// mixed result set rather than one row at a time:
+//
+//	a) chat with zero messages          → unread 0
+//	b) chat whose messages are all read → unread 0
+//	c) chat with some unread            → unread 1
+//	d) chat with everything unread      → unread 2 (own user message excluded)
+//
+// It also asserts last_activity_at *by value* on every row, including the
+// zero-message chat that falls back through COALESCE to a legacy
+// space-separated started_at. A GROUP BY that collapsed or mis-picked that
+// expression would show up here, as would any change to the DESC ordering.
+func TestListChats_UnreadProjectionBehaviourLock(t *testing.T) {
+	sdb := setupTestDB(t)
+	db := sdb
+	wsID, userID := unreadTSeed(t, db)
+
+	// (a) zero messages, no last_activity_at → COALESCE falls back to the
+	// legacy space-separated started_at, normalised by strftime.
+	unreadTChat(t, db, "lock-a-empty", wsID, userID)
+	execOrFatal(t, db, `UPDATE chats SET last_activity_at = NULL,
+		started_at = '2026-05-01 00:00:00' WHERE id = 'lock-a-empty'`)
+
+	// (b) two messages, cursor past both.
+	unreadTChat(t, db, "lock-b-read", wsID, userID)
+	execOrFatal(t, db, `UPDATE chats SET last_activity_at = '2026-06-01T10:00:05.000Z' WHERE id = 'lock-b-read'`)
+	unreadTMsg(t, db, "lock-b-m1", "lock-b-read", "assistant", "2026-06-01T10:00:00.000Z", nil)
+	unreadTMsg(t, db, "lock-b-m2", "lock-b-read", "assistant", "2026-06-01T10:00:05.000Z", nil)
+	execOrFatal(t, db, `INSERT INTO chat_read_cursors (user_id, chat_id, last_read_at)
+		VALUES (?, 'lock-b-read', '2026-06-01T23:59:59.999Z')`, userID)
+
+	// (c) three messages, cursor between the second and the third.
+	unreadTChat(t, db, "lock-c-partial", wsID, userID)
+	execOrFatal(t, db, `UPDATE chats SET last_activity_at = '2026-07-01T10:00:10.000Z' WHERE id = 'lock-c-partial'`)
+	unreadTMsg(t, db, "lock-c-m1", "lock-c-partial", "assistant", "2026-07-01T10:00:00.000Z", nil)
+	unreadTMsg(t, db, "lock-c-m2", "lock-c-partial", "assistant", "2026-07-01T10:00:05.000Z", nil)
+	unreadTMsg(t, db, "lock-c-m3", "lock-c-partial", "assistant", "2026-07-01T10:00:10.000Z", nil)
+	execOrFatal(t, db, `INSERT INTO chat_read_cursors (user_id, chat_id, last_read_at)
+		VALUES (?, 'lock-c-partial', '2026-07-01T10:00:06.000Z')`, userID)
+
+	// (d) no cursor at all → everything counts, except the caller's own
+	// user-role message (author guard).
+	unreadTChat(t, db, "lock-d-unread", wsID, userID)
+	execOrFatal(t, db, `UPDATE chats SET last_activity_at = '2026-08-01T10:00:00.000Z' WHERE id = 'lock-d-unread'`)
+	unreadTMsg(t, db, "lock-d-m1", "lock-d-unread", "user", "2026-08-01T09:59:00.000Z", userID)
+	unreadTMsg(t, db, "lock-d-m2", "lock-d-unread", "assistant", "2026-08-01T09:59:30.000Z", nil)
+	unreadTMsg(t, db, "lock-d-m3", "lock-d-unread", "assistant", "2026-08-01T10:00:00.000Z", nil)
+
+	h := NewAgentHandler(sdb, newTestLogger())
+	rows := unreadTList(t, h, wsID, userID)
+
+	want := []chatUnreadRow{
+		{ID: "lock-d-unread", LastActivityAt: "2026-08-01T10:00:00.000Z", UnreadCount: 2},
+		{ID: "lock-c-partial", LastActivityAt: "2026-07-01T10:00:10.000Z", UnreadCount: 1},
+		{ID: "lock-b-read", LastActivityAt: "2026-06-01T10:00:05.000Z", UnreadCount: 0},
+		{ID: "lock-a-empty", LastActivityAt: "2026-05-01T00:00:00.000Z", UnreadCount: 0},
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("rows = %d, want %d (%+v)", len(rows), len(want), rows)
+	}
+	for i, w := range want {
+		if rows[i].ID != w.ID {
+			t.Fatalf("row %d id = %q, want %q (ordering by last_activity_at DESC broke): %+v",
+				i, rows[i].ID, w.ID, rows)
+		}
+		if rows[i].UnreadCount != w.UnreadCount {
+			t.Errorf("%s: unread_count = %d, want %d", w.ID, rows[i].UnreadCount, w.UnreadCount)
+		}
+		if rows[i].LastActivityAt != w.LastActivityAt {
+			t.Errorf("%s: last_activity_at = %q, want %q", w.ID, rows[i].LastActivityAt, w.LastActivityAt)
+		}
+	}
+}
+
+// A second user's cursor must not affect the caller's counts, and the
+// caller's own cursor must not leak across chats — the grouped join adds a
+// second joined table, so pin the per-(user, chat) scoping explicitly.
+func TestListChats_UnreadIsPerUser(t *testing.T) {
+	sdb := setupTestDB(t)
+	db := sdb
+	wsID, userID := unreadTSeed(t, db)
+	otherID := "unread-other-user"
+	execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES (?, 'other@example.com', 'Other User')`, otherID)
+
+	unreadTChat(t, db, "peruser-c1", wsID, userID)
+	unreadTMsg(t, db, "peruser-m1", "peruser-c1", "assistant", "2026-07-01T10:00:00.000Z", nil)
+	unreadTMsg(t, db, "peruser-m2", "peruser-c1", "assistant", "2026-07-01T10:00:05.000Z", nil)
+	// The other user has read everything; the caller has read nothing.
+	execOrFatal(t, db, `INSERT INTO chat_read_cursors (user_id, chat_id, last_read_at)
+		VALUES (?, 'peruser-c1', '2026-07-02T00:00:00.000Z')`, otherID)
+
+	h := NewAgentHandler(sdb, newTestLogger())
+	if got := unreadTList(t, h, wsID, userID)[0].UnreadCount; got != 2 {
+		t.Errorf("caller unread = %d, want 2 (other user's cursor must not apply)", got)
+	}
+	if got := unreadTList(t, h, wsID, otherID)[0].UnreadCount; got != 0 {
+		t.Errorf("other-user unread = %d, want 0", got)
+	}
+}
+
 // Marking read also clears the "agent replied" inbox notification for
 // this (user, chat) pair — the deep-linked item must not stay unread
 // after the user has actually seen the reply.
