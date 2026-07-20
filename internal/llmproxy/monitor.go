@@ -115,12 +115,17 @@ func (cm *CredentialMonitor) checkAll(ctx context.Context) {
 		// protection. The flip is gone instead.
 		//
 		// Recovery for a genuinely-healthy OAuth token that was marked
-		// EXPIRED comes from the paths that actually know something: the
-		// user re-linking the token, or the sidecar's status PATCH after a
-		// successful call. Not from a timer with no evidence.
+		// EXPIRED is a RE-LINK, and today that is the only path. The
+		// PATCH /api/v1/internal/credentials/{id} status endpoint has
+		// exactly one caller — persistStatus below — so nothing outside
+		// this monitor can move a credential back to ACTIVE. Rows left
+		// EXPIRED by an earlier incorrect validation therefore stay
+		// EXPIRED instead of silently self-healing, which is why the log
+		// below is Info and names the remedy rather than being a Debug
+		// line nobody reads.
 		if conn.Type == TypeAICLIToken || strings.HasPrefix(conn.AccessToken, "sk-ant-oat") {
 			if conn.Status == StatusExpired {
-				cm.logger.Debug("oauth token left expired (not API-validatable; re-link to restore)",
+				cm.logger.Info("oauth credential is expired and cannot be re-validated automatically; re-link it to restore access",
 					"connection_id", conn.ID, "provider", conn.Provider)
 			}
 			continue
