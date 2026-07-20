@@ -79,11 +79,29 @@ func (s *Server) tokensProvisioned() bool {
 
 // tokenlessDowngrade reports whether r is a downgrade attempt: it presents NO
 // per-agent bearer token on a sidecar where per-agent tokens ARE provisioned.
-// This is the single chokepoint every identity-bearing agent route uses to
-// decide the refusal — /query, /escalate and the memory MCP path all call it
-// rather than re-deriving "no token && tokensProvisioned()" per path. Keeping
-// it in one place is what stops a route from being added (or, as in #1254
-// item A, from having existed all along) without the check.
+//
+// What this function guarantees is narrow, and the previous version of this
+// comment overstated it. It guarantees only that every route which CALLS it
+// applies the SAME predicate — one definition of "downgrade", not five
+// slightly different re-derivations of "no token && tokensProvisioned()". It
+// does NOT guarantee that a route calls it at all. #1274 claimed otherwise and
+// was wrong in the same commit: it added the call to the memory MCP handler
+// while the five legacy /memory/{read,write,search,status,reindex} routes
+// registered ten lines away in buildHandler never called it and stayed exposed
+// (CRE-153).
+//
+// Coverage is enforced elsewhere, by construction rather than by convention:
+//
+//   - the memory surface is gated in buildHandler by path prefix
+//     (refuseTokenlessMemory, internal/sidecar/memory_guard.go) BEFORE the
+//     route switch runs, so a new /memory or /mcp/memory route inherits the
+//     check from registration alone;
+//   - /query and /escalate still call this predicate inline — they are NOT
+//     behind a prefix gate, and adding a sibling route next to them will not
+//     pick the check up automatically;
+//   - TestSidecarRoutes_IdentityCoverage (memory_routes_coverage_test.go)
+//     enumerates the routes registered in buildHandler and fails when one is
+//     unclassified, so the next route cannot silently reintroduce the class.
 //
 // A request with a token — valid or forged — is NOT a downgrade; the caller
 // resolves it through actingIdentity, which refuses forgeries on its own.

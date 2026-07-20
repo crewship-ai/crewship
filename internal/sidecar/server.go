@@ -369,6 +369,20 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 		// sidecar listens on that loopback port inside its own
 		// container's network namespace.
 		if (isLocalhost(r.Host) || isLocalhost(r.URL.Host)) && remoteIsLoopback(r) {
+			// #1254 item A / CRE-153: the memory surface is guarded HERE,
+			// before the route switch picks a handler, not inside the
+			// handlers. #1274 put the token check in
+			// handleMemoryMCPForAgent only and the five legacy routes ten
+			// lines below — /memory/{read,write,search,status,reindex},
+			// which do no identity resolution at all and resolve the tier
+			// from the BOOT agent's s.agentMemoryBase — kept serving a
+			// sibling that simply omitted its Authorization header. Opting
+			// in per handler is what let that happen; a prefix gate in
+			// front of the switch covers every memory route that exists
+			// now and every one added later.
+			if isMemoryRoutePath(r.URL.Path) && s.refuseTokenlessMemory(w, r) {
+				return
+			}
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == "/memory/search":
 				s.handleMemorySearch(w, r)

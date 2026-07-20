@@ -84,6 +84,7 @@ The end-to-end loop from "memory off" to "agent recalls last week's decision" is
 
     ```bash
     curl -sX POST localhost:9119/memory/search \
+      -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
       -d '{"query": "PostgreSQL migration strategy", "scope": "both", "limit": 5}'
     ```
 
@@ -320,16 +321,34 @@ Agents search memory via the sidecar HTTP API with a `scope` parameter:
 ```bash
 # Search personal memory only
 curl localhost:9119/memory/search \
+  -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
   -d '{"query": "PostgreSQL", "scope": "agent"}'
 
 # Search crew shared memory
 curl localhost:9119/memory/search \
+  -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
   -d '{"query": "deployment", "scope": "crew"}'
 
 # Search both (merged by relevance)
 curl localhost:9119/memory/search \
+  -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
   -d '{"query": "database", "scope": "both"}'
 ```
+
+<Warning>
+**Every memory route requires the per-agent token.** The whole memory surface —
+`/memory/read`, `/memory/write`, `/memory/search`, `/memory/status`,
+`/memory/reindex`, and the MCP transports `/mcp/memory` and
+`/mcp/memory/<slug>` — is gated on the `Authorization: Bearer
+$CREWSHIP_AGENT_TOKEN` header whenever the crew has per-agent tokens
+provisioned (every crew started by a current orchestrator). A request without
+it is refused with `403 {"error":"per-agent token required"}`, because several
+agents share one sidecar and a token-less call cannot be attributed to a
+member. Crews that predate per-agent tokens keep working unauthenticated.
+The token is in each agent's environment, so `-H "Authorization: Bearer
+$CREWSHIP_AGENT_TOKEN"` is all that is needed. See
+[Per-agent identity](/security/threat-model#per-agent-identity-on-the-shared-sidecar).
+</Warning>
 
 ## Dynamic Budget Allocation
 
