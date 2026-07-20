@@ -456,10 +456,10 @@ CREWSHIP_DEPLOY_HOST=crewship-dev CREWSHIP_DEPLOY_PATH=/opt/crewship_2 \
 # harness (build CLI from main — the installed one may be older):
 go build -o /tmp/crewship-main ./cmd/crewship
 cd scripts/test-harness && CREWSHIP=/tmp/crewship-main \
-  SERVER=http://192.168.1.201:8082 ./test-keeper.sh
+  SERVER=http://192.168.1.10:8082 ./test-keeper.sh
 ```
-- The dev2 login token is issued for host `192.168.1.201`, so drive the harness
-  with `--server http://192.168.1.201:8082` (NOT the `crewship-dev2.unifylab.cz`
+- The dev2 login token is issued for host `192.168.1.10`, so drive the harness
+  with `--server http://192.168.1.10:8082` (NOT the `crewship-dev2.example`
   name — it trips the token host-mismatch guard).
 - A slot reconciler reverts the dev slot to its pinned branch every ~10 min —
   run the harness promptly after deploy.

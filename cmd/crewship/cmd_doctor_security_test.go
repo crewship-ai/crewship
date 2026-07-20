@@ -68,7 +68,7 @@ func TestCheckCLIConfigServerScheme(t *testing.T) {
 		},
 		{
 			name:       "http LAN IP → WARN",
-			server:     "http://192.168.1.201:8080",
+			server:     "http://192.168.1.10:8080",
 			wantStatus: "WARN",
 			mustHave:   "plaintext HTTP",
 		},
@@ -142,7 +142,7 @@ func TestCheckCLIConfigServerScheme_HonorsActiveProfile(t *testing.T) {
 	t.Cleanup(func() { flagServer, flagProfile = origServer, origProfile })
 	// Profile server must win over CREWSHIP_SERVER (profile > env), just like
 	// every authenticated command.
-	t.Setenv("CREWSHIP_SERVER", "http://192.168.1.201:8082")
+	t.Setenv("CREWSHIP_SERVER", "http://192.168.1.10:8082")
 	flagServer = ""
 	flagProfile = "dev2"
 

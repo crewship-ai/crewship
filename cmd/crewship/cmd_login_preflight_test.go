@@ -94,7 +94,7 @@ func TestPreflightServerURL(t *testing.T) {
 		},
 		{
 			name:       "http LAN IP → warning",
-			server:     "http://192.168.1.201:8080",
+			server:     "http://192.168.1.10:8080",
 			wantStderr: "plaintext HTTP",
 		},
 		{

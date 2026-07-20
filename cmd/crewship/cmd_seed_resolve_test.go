@@ -20,7 +20,7 @@ func TestSeedTargetServerHonoursProfileOverEnv(t *testing.T) {
 	t.Cleanup(func() { flagProfile, flagServer, cliCfg = origProfile, origServer, origCfg })
 
 	// Shell exports a different instance (multi-clone convention).
-	t.Setenv("CREWSHIP_SERVER", "https://crewship-dev3.unifylab.cz")
+	t.Setenv("CREWSHIP_SERVER", "https://crewship-dev3.example")
 	t.Setenv("CREWSHIP_PROFILE", "")
 
 	flagServer = ""
@@ -30,13 +30,13 @@ func TestSeedTargetServerHonoursProfileOverEnv(t *testing.T) {
 	cliCfg = (&cli.CLIConfig{
 		Current: "dev1",
 		Servers: map[string]*cli.ServerProfile{
-			"dev3": {Server: "https://crewship-dev3.unifylab.cz", Token: "t3"},
-			"prod": {Server: "https://crewship-prod.unifylab.cz"}, // fresh: no token
+			"dev3": {Server: "https://crewship-dev3.example", Token: "t3"},
+			"prod": {Server: "https://crewship-prod.example"}, // fresh: no token
 		},
 	}).WithActiveProfile(flagProfile)
 
 	got := seedTargetServer()
-	want := "https://crewship-prod.unifylab.cz"
+	want := "https://crewship-prod.example"
 	if got != want {
 		t.Errorf("seedTargetServer() = %q, want %q — CREWSHIP_SERVER must not override an explicit --profile", got, want)
 	}
