@@ -1,0 +1,191 @@
+package api
+
+// Regression tests for the two defects #1272 shipped alongside its
+// (correct) transactional fix for #1247.
+//
+// Defect 1 — permanent bricking. #1272 replaced the `status='pending'`
+// filter in the approve-hire approvals lookup with "newest row at ANY
+// status, 409 if it isn't pending". A hire cycle's approvals row goes
+// terminal on deny (`denied`) or on harbormaster.SweepTimeouts
+// (`timeout`) while the agent row stays PENDING_REVIEW. The documented
+// recovery — `crewship rehire` — resets the agent lifecycle
+// (expires_at / expired_at) but does NOT enqueue a fresh approvals row,
+// so the terminal row from the PREVIOUS cycle 409'd every subsequent
+// approve forever. No API or CLI path led back to IDLE.
+//
+// Defect 2 — harbormaster.DecideTx swallowed its post-CAS reload error
+// and returned (nil, nil). POST /approvals/{id}/decide gates the
+// agent-side transition on `row != nil`, so a reload failure committed
+// the queue CAS, skipped the agent transition, the waitpoint resolve,
+// the journal, the audit row and the WS broadcast — and answered 200.
+// That is precisely the drift #1247 exists to eliminate.
+
+import (
+	"context"
+	"database/sql"
+	"net/http"
+	"testing"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/harbormaster"
+)
+
+// rehireOK drives POST /agents/{id}/rehire and fails the test unless it
+// returns 200 — every test below uses rehire as the documented recovery
+// step, so a non-200 there means the test never reached its assertion.
+func rehireOK(t *testing.T, h *AgentHandler, userID, wsID, agentID, reason string) {
+	t.Helper()
+	rr := postRehire(t, h, userID, wsID, "MANAGER", agentID, map[string]any{
+		"reason":      reason,
+		"ttl_minutes": 60,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("rehire status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestApproveHire_AfterDenyThenRehire_ReachesIdle is defect 1's primary
+// repro: deny the guided hire, rehire the agent, approve. The approve
+// must succeed — the `denied` row describes the PREVIOUS hire cycle and
+// must not veto a decision on the current one.
+func TestApproveHire_AfterDenyThenRehire_ReachesIdle(t *testing.T) {
+	db := setupTestDB(t)
+	userID, wsID, crewID := seedHireCrew(t, db, "guided", 5)
+	agentH := newApproveHireHandler(t, db)
+	seedPendingReviewAgent(t, db, wsID, crewID, "a-deny-rehire")
+	approvalID := enqueueHireApproval(t, db, wsID, crewID, "a-deny-rehire", userID)
+
+	rr := postApprovalsDecide(t, newHireApprovalsHandler(t, db), userID, wsID, "OWNER", approvalID, "denied")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("deny status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	if got := approvalStatus(t, db, approvalID); got != "denied" {
+		t.Fatalf("approvals_queue status = %q, want denied", got)
+	}
+
+	// The documented recovery path. It un-ghosts the agent (expired_at
+	// back to NULL) and pushes expires_at forward; it does not touch
+	// agents.status and does not enqueue a new approvals row.
+	rehireOK(t, agentH, userID, wsID, "a-deny-rehire", "second thoughts, we do need them")
+
+	status, expired := agentStatusExpiry(t, db, "a-deny-rehire")
+	if status != "PENDING_REVIEW" || expired.Valid {
+		t.Fatalf("post-rehire agent = %q expired=%v, want PENDING_REVIEW / NULL", status, expired)
+	}
+
+	rr = postApproveHire(t, agentH, userID, wsID, "MANAGER", "a-deny-rehire")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("approve-hire after rehire: status = %d, want 200 — a terminal row from the "+
+			"previous hire cycle must not brick the agent; body: %s", rr.Code, rr.Body.String())
+	}
+	status, expired = agentStatusExpiry(t, db, "a-deny-rehire")
+	if status != "IDLE" {
+		t.Errorf("agents.status = %q, want IDLE", status)
+	}
+	if expired.Valid {
+		t.Errorf("agents.expired_at = %q, want NULL", expired.String)
+	}
+}
+
+// TestApproveHire_AfterApprovalTimeoutThenRehire_ReachesIdle is the
+// second bricking trigger, and the one that needs no operator error at
+// all: harbormaster.SweepTimeouts flips the queue row to `timeout` on
+// its own timer. The agent row is untouched by that sweep, so the hire
+// is still perfectly decidable — and after a rehire it must approve.
+func TestApproveHire_AfterApprovalTimeoutThenRehire_ReachesIdle(t *testing.T) {
+	db := setupTestDB(t)
+	userID, wsID, crewID := seedHireCrew(t, db, "guided", 5)
+	agentH := newApproveHireHandler(t, db)
+	seedPendingReviewAgent(t, db, wsID, crewID, "a-timeout-rehire")
+
+	past := time.Now().UTC().Add(-time.Minute)
+	approvalID, err := harbormaster.Enqueue(context.Background(), db, nil, harbormaster.Request{
+		WorkspaceID: wsID,
+		CrewID:      crewID,
+		AgentID:     "a-timeout-rehire",
+		RequestedBy: userID,
+		Kind:        harbormaster.KindEphemeralHire,
+		Reason:      "hire ephemeral agent a-timeout-rehire: test",
+		Payload:     map[string]any{"tool": "agent.hire", "agent_id": "a-timeout-rehire"},
+		TimeoutAt:   &past,
+	})
+	if err != nil {
+		t.Fatalf("enqueue hire approval: %v", err)
+	}
+
+	n, err := harbormaster.SweepTimeouts(context.Background(), db, nil)
+	if err != nil {
+		t.Fatalf("sweep timeouts: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("swept %d rows, want 1", n)
+	}
+	if got := approvalStatus(t, db, approvalID); got != "timeout" {
+		t.Fatalf("approvals_queue status = %q, want timeout", got)
+	}
+
+	// The approvals-queue sweep does not touch the agent — it is still
+	// a live, undecided hire.
+	status, expired := agentStatusExpiry(t, db, "a-timeout-rehire")
+	if status != "PENDING_REVIEW" || expired.Valid {
+		t.Fatalf("post-sweep agent = %q expired=%v, want PENDING_REVIEW / NULL", status, expired)
+	}
+
+	rehireOK(t, agentH, userID, wsID, "a-timeout-rehire", "approval window lapsed, extend it")
+
+	rr := postApproveHire(t, agentH, userID, wsID, "MANAGER", "a-timeout-rehire")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("approve-hire after timeout+rehire: status = %d, want 200; body: %s",
+			rr.Code, rr.Body.String())
+	}
+	if status, _ = agentStatusExpiry(t, db, "a-timeout-rehire"); status != "IDLE" {
+		t.Errorf("agents.status = %q, want IDLE", status)
+	}
+}
+
+// TestApprovalsDecide_ReloadFailure_RollsBackAndReturns500 is defect 2
+// end to end.
+//
+// Injection: drop a column the post-CAS reload SELECT reads but the CAS
+// UPDATE does not write, so the decision applies and the reload fails —
+// same "the DB stops cooperating mid-request" shape as
+// breakInboxTable, aimed one statement later. `reason` is NOT NULL with
+// no index and no FK, so SQLite lets it go and only the reload breaks.
+//
+// Pre-fix: DecideTx returned (nil, nil), the handler skipped the
+// ephemeral-hire side effect on its `row != nil` gate, committed, and
+// answered 200 with a terminal approval against a PENDING_REVIEW agent.
+func TestApprovalsDecide_ReloadFailure_RollsBackAndReturns500(t *testing.T) {
+	db := setupTestDB(t)
+	userID, wsID, crewID := seedHireCrew(t, db, "guided", 5)
+	seedPendingReviewAgent(t, db, wsID, crewID, "a-reload-fail")
+	approvalID := enqueueHireApproval(t, db, wsID, crewID, "a-reload-fail", userID)
+
+	if _, err := db.Exec(`ALTER TABLE approvals_queue DROP COLUMN reason`); err != nil {
+		t.Fatalf("break reload column: %v", err)
+	}
+
+	rr := postApprovalsDecide(t, newHireApprovalsHandler(t, db), userID, wsID, "OWNER", approvalID, "approved")
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 — a reload failure must fail the transaction, not "+
+			"commit a decision whose side effects were skipped; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var queueStatus string
+	if err := db.QueryRow(`SELECT status FROM approvals_queue WHERE id = ?`, approvalID).Scan(&queueStatus); err != nil {
+		t.Fatalf("read approval status: %v", err)
+	}
+	if queueStatus != "pending" {
+		t.Errorf("approvals_queue status = %q, want pending (the CAS must roll back)", queueStatus)
+	}
+
+	var status string
+	var expired sql.NullString
+	if err := db.QueryRow(`SELECT status, expired_at FROM agents WHERE id = ?`, "a-reload-fail").
+		Scan(&status, &expired); err != nil {
+		t.Fatalf("read agent state: %v", err)
+	}
+	if status != "PENDING_REVIEW" || expired.Valid {
+		t.Errorf("agent = %q expired=%v, want PENDING_REVIEW / NULL", status, expired)
+	}
+}

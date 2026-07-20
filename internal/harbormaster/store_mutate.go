@@ -99,6 +99,11 @@ func Enqueue(ctx context.Context, db *sql.DB, j journal.Emitter, req Request) (s
 //
 // ErrNotPending is also returned when the row exists but is already
 // approved/denied/timed out; the caller should treat that as a no-op.
+//
+// This is the autocommit wrapper, so there is no transaction to roll
+// back: a reload failure surfaces as an error even though the CAS
+// itself committed. Loud is right — the caller must not assume the
+// post-decision tail ran.
 
 func Decide(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, id string, status Status, decidedBy, comment string) error {
 	row, err := DecideTx(ctx, db, workspaceID, id, status, decidedBy, comment)
@@ -129,9 +134,10 @@ type DBTX interface {
 // enclosing transaction is durable. Broadcasting or journaling an
 // uncommitted decision is its own bug.
 //
-// Returns the reloaded row on success (nil only if the reload itself
-// failed, which is non-fatal — the decision is already applied in the
-// caller's tx).
+// Returns the reloaded row on success. A non-nil error means the
+// decision must NOT be committed — including a reload failure, which
+// leaves the caller unable to apply the side effects the decision
+// implies. On success the row is always non-nil.
 func DecideTx(ctx context.Context, tx DBTX, workspaceID, id string, status Status, decidedBy, comment string) (*Request, error) {
 	if status != StatusApproved && status != StatusDenied {
 		return nil, ErrBadStatus
@@ -183,10 +189,26 @@ func DecideTx(ctx context.Context, tx DBTX, workspaceID, id string, status Statu
 
 	// Reload so the journal entry carries the canonical scope. Scoped
 	// to the caller's workspace, matching the UPDATE above.
+	//
+	// A failed reload MUST fail the whole call. Callers gate real work
+	// on the returned row — POST /approvals/{id}/decide applies the
+	// ephemeral-hire agent transition, the waitpoint resolve, the audit
+	// row and the WS broadcast only `if row != nil`. Returning
+	// (nil, nil) here therefore committed the queue CAS and skipped
+	// every side effect while answering 200: a terminal approval
+	// describing a transition that never happened, which is exactly the
+	// drift #1247 exists to eliminate. Returning the error instead lets
+	// the caller roll its transaction back, so the row stays pending
+	// and decidable.
 	row, err := getTx(ctx, tx, workspaceID, id)
 	if err != nil {
-		// Decision succeeded; failing the reload shouldn't error out.
-		return nil, nil
+		return nil, fmt.Errorf("harbormaster: reload decided approval %s: %w", id, err)
+	}
+	if row == nil {
+		// Unreachable in practice — the UPDATE above just matched this
+		// row inside the caller's transaction. Fail closed rather than
+		// hand back a nil row the caller would read as "nothing to do".
+		return nil, fmt.Errorf("harbormaster: reload decided approval %s: row vanished mid-transaction", id)
 	}
 	return row, nil
 }
@@ -194,8 +216,9 @@ func DecideTx(ctx context.Context, tx DBTX, workspaceID, id string, status Statu
 // AfterDecide performs the post-commit tail of a decision: the journal
 // entry and the reward-history row that feeds AdjustMode. Both are
 // best-effort and must run only once the decision is durable — a
-// journal entry for a rolled-back decision is a lie. row may be nil
-// (reload failed), in which case there is nothing to emit.
+// journal entry for a rolled-back decision is a lie. A nil row means
+// the caller has nothing durable to describe (DecideTx never returns
+// one alongside a nil error), so there is nothing to emit.
 func AfterDecide(ctx context.Context, db *sql.DB, j journal.Emitter, row *Request, status Status, decidedBy, comment string) {
 	if row == nil {
 		return

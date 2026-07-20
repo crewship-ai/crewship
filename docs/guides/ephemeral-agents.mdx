@@ -59,7 +59,7 @@ See [Autonomy + self-learning](/guides/autonomy-and-self-learning) for the auton
 
 A `guided`-crew hire lands as `PENDING_REVIEW`. The inbox shows the hire request with an **Approve hire** button. Clicking it calls `POST /api/v1/agents/{agentId}/approve-hire` which:
 
-1. Wins the pending `kind=ephemeral_hire` row in the approvals queue — the single decision point shared with `POST /api/v1/approvals/{id}/decide`
+1. Wins the pending `kind=ephemeral_hire` row in the approvals queue — the single decision point shared with `POST /api/v1/approvals/{id}/decide`. If that row is already terminal (`denied` / `timeout`) it belongs to an **earlier** hire cycle, so it is left as the historical record and the agent row below becomes the decision point
 2. Flips `agents.status` from `PENDING_REVIEW` to `IDLE` (conditional UPDATE so a concurrent decision / TTL ghosting returns 409 instead of silently writing nothing)
 3. Resolves the blocking inbox waitpoint
 4. Commits — then writes the `agent.hire_approved` journal + audit entry
@@ -74,6 +74,27 @@ sees a transition that was rolled back.
 
 Losing the race with a concurrent decision returns `409`; a failed inbox
 projection returns `500` with nothing applied.
+
+#### Recovering a denied or lapsed hire
+
+A denied hire ghosts the staged agent (`expired_at` set, status stays
+`PENDING_REVIEW`). An approval that nobody answers before its timeout leaves
+the queue row `timeout` with the agent untouched. Both are recoverable with
+the normal ghost path:
+
+```bash
+crewship rehire <agent-slug-or-id> --ttl 60 --reason "second look: still needed"
+crewship hire approve <agent-slug-or-id>
+```
+
+`rehire` clears `expired_at` and pushes `expires_at` forward — that, not the
+approvals-queue row, is what marks the hire decidable again. The old `denied`
+/ `timeout` row stays terminal because it is an accurate record of the
+previous cycle; the new approval is recorded as an `agent.hire_approved`
+audit entry alongside the `agent.rehired` one. A hire that has genuinely
+been decided in the **current** cycle still returns `409` — a deny writes
+`agents.expired_at` in the same transaction as its queue decision, and the
+approve's conditional `UPDATE … WHERE expired_at IS NULL` is what rejects it.
 
 The operator can also "fire" the pending agent by deleting it from the crew page — same path as deleting any agent. No separate "deny hire" endpoint exists today (tracked as PR-F follow-up); fire is the explicit reject path.
 
