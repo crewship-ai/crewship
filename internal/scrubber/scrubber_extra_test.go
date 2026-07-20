@@ -3,7 +3,6 @@ package scrubber
 import (
 	"strings"
 	"testing"
-	"time"
 	"unicode/utf8"
 )
 
@@ -16,7 +15,7 @@ import (
 //   - GitHub fine-grained PATs (github_pat_…)
 //   - Multi-rule collisions and the deterministic hit ordering
 //   - UTF-8 multi-byte text around a secret (offset bookkeeping)
-//   - Very long clean input completes in linear time
+//   - Very long clean input passes through unmodified
 //   - Block-mode rejection surfaces the FIRST hit's rule name
 //
 // All assertions exercise the public Scrubber API only.
@@ -255,34 +254,58 @@ func TestScrubber_UTF8WrappedSecret_OffsetsAreByteAccurate(t *testing.T) {
 	}
 }
 
-// TestScrubber_VeryLongCleanInput_CompletesUnderOneSecond is a coarse
-// sanity check that the regex engine doesn't go quadratic on ~1 MB of
-// plain text containing no secrets. The SecurityReDoSResistance test
-// covers an adversarial pattern; this one covers the boring-payload
-// path that dominates real journal writes (megabytes of agent stdout).
-func TestScrubber_VeryLongCleanInput_CompletesUnderOneSecond(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping linear-time sanity check in -short mode")
-	}
-	s := New()
-	// ~1 MB of clean prose. Use varied characters to avoid pathological
-	// runs of identical bytes that might short-circuit the regex engine.
+// oneMBCleanProse builds ~1 MB of secret-free prose. Varied characters
+// avoid pathological runs of identical bytes that could let the regex
+// engine short-circuit and flatter the measurement.
+func oneMBCleanProse() string {
 	chunk := "the quick brown fox jumps over the lazy dog 1234567890 "
 	var b strings.Builder
 	b.Grow(1 << 20)
 	for b.Len() < (1 << 20) {
 		b.WriteString(chunk)
 	}
-	in := b.String()
+	return b.String()
+}
 
-	start := time.Now()
+// TestScrubber_VeryLongCleanInput_Unmodified pins the correctness half
+// of the large-payload path that dominates real journal writes
+// (megabytes of agent stdout): ~1 MB of clean prose must come back out
+// of Scrub byte-identical, with nothing spuriously redacted.
+//
+// This test deliberately carries NO timing assertion. Its predecessor
+// asserted a 1-second wall-clock budget on work that measures in the
+// tens of milliseconds — a threshold that says nothing about
+// correctness and everything about how loaded the CI box happened to
+// be. Throughput belongs in a benchmark, not in a pass/fail test; see
+// BenchmarkScrub1MBClean below, which reports MB/s so a real regression
+// is measured rather than guessed at.
+func TestScrubber_VeryLongCleanInput_Unmodified(t *testing.T) {
+	s := New()
+	in := oneMBCleanProse()
 	got := s.Scrub(in)
-	elapsed := time.Since(start)
-	if elapsed > time.Second {
-		t.Errorf("Scrub of ~1 MB clean input took %v (want <1s) — possible quadratic regex behaviour", elapsed)
-	}
 	if got != in {
 		t.Errorf("clean input mutated by Scrub (len got=%d, want=%d)", len(got), len(in))
+	}
+}
+
+// BenchmarkScrub1MBClean measures Scrub throughput on the clean-payload
+// path. b.SetBytes makes `go test -bench` report MB/s, so a genuine
+// slowdown (a newly added pattern that backtracks, a switch away from
+// RE2) shows up as a number to compare against a baseline instead of a
+// binary threshold that only trips on an already-catastrophic
+// regression.
+//
+//	go test ./internal/scrubber/ -run '^$' -bench BenchmarkScrub1MBClean -benchmem
+func BenchmarkScrub1MBClean(b *testing.B) {
+	s := New()
+	in := oneMBCleanProse()
+	b.SetBytes(int64(len(in)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if out := s.Scrub(in); len(out) != len(in) {
+			b.Fatalf("unexpected mutation: len=%d want %d", len(out), len(in))
+		}
 	}
 }
 

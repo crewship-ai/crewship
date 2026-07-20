@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { RoutinesExplorer } from "../routines-explorer"
 import { RoutinesListView } from "../routines-list-view"
@@ -15,6 +15,24 @@ import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 const h = vi.hoisted(() => ({
   runs: [] as unknown[],
 }))
+
+// Frozen "now". The elapsed sub-lines are derived from
+// Date.now() - started_at inside the component, so the fixture and the
+// render have to agree on the clock. Building started_at from a live
+// Date.now() left ~50ms of headroom before "12.0s" tipped over to
+// "12.1s" (issue #1253) — under load or coverage instrumentation that
+// headroom is gone. Freeze the clock instead: shouldAdvanceTime:false
+// pins Date.now() for the whole test, and every fixture timestamp is
+// derived from NOW rather than from the wall clock.
+const NOW = new Date("2026-07-02T09:00:00.000Z").getTime()
+
+// sleepRealMs burns real wall-clock time synchronously. Atomics.wait is
+// not faked by vi.useFakeTimers, so this is genuine skew between the
+// fixture construction and the render — exactly the drift that made the
+// elapsed assertions flaky. With the clock frozen it must be invisible.
+function sleepRealMs(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
 
 vi.mock("@/hooks/use-active-routine-runs", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/hooks/use-active-routine-runs")>()
@@ -46,10 +64,10 @@ function pipeline(overrides: Partial<Pipeline>): Pipeline {
     workspace_visible: true,
     invocation_count: 12,
     authored_via: "user_api",
-    created_at: "2026-07-01T10:00:00Z",
-    updated_at: "2026-07-01T10:00:00Z",
+    created_at: new Date(NOW - 86_400_000).toISOString(),
+    updated_at: new Date(NOW - 86_400_000).toISOString(),
     last_invocation_status: "completed",
-    last_invoked_at: "2026-07-02T09:00:00Z",
+    last_invoked_at: new Date(NOW - 3_600_000).toISOString(),
     ...overrides,
   } as Pipeline
 }
@@ -62,7 +80,7 @@ function activeRun(overrides: Partial<PipelineRun>): PipelineRun {
     pipeline_name: "Classify support ticket",
     status: "running",
     mode: "run",
-    started_at: new Date(Date.now() - 12_000).toISOString(),
+    started_at: new Date(NOW - 12_000).toISOString(),
     ended_at: "",
     current_step_id: "ask-casey",
     step_outputs: null,
@@ -94,6 +112,19 @@ const EXPLORER_PROPS = {
   onChange: vi.fn(),
 }
 
+beforeEach(() => {
+  // shouldAdvanceTime:false — the clock does not tick on its own, so the
+  // component's Date.now() at render is byte-identical to the NOW the
+  // fixtures were built from. The 1s useTick interval also stays parked,
+  // which keeps these renders single-pass.
+  vi.useFakeTimers({ shouldAdvanceTime: false })
+  vi.setSystemTime(NOW)
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe("<RoutinesExplorer> live rows", () => {
   beforeEach(() => {
     h.runs = []
@@ -107,6 +138,9 @@ describe("<RoutinesExplorer> live rows", () => {
 
   it("renders the current step + elapsed sub-line for a running routine", () => {
     h.runs = [activeRun({})]
+    // Real time passes between fixture and render. Against a live clock
+    // this alone flips "12.0s" to "12.1s"; the frozen clock absorbs it.
+    sleepRealMs(60)
     render(<RoutinesExplorer routines={[pipeline({})]} {...EXPLORER_PROPS} />)
     const sub = screen.getByText(/ask-casey/)
     expect(sub).toBeInTheDocument()
@@ -150,6 +184,7 @@ describe("<RoutinesListView> live status cell", () => {
 
   it("swaps in a Running pill with step · elapsed · cost while a run is live", () => {
     h.runs = [activeRun({})]
+    sleepRealMs(60)
     render(<RoutinesListView routines={[pipeline({})]} {...LIST_PROPS} />)
     expect(screen.getByText("Running")).toBeInTheDocument()
     const sub = screen.getByText(/ask-casey/)
