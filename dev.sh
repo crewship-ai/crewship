@@ -75,8 +75,20 @@ preserve_crash_log() {
   # crash reason was gone by the time anyone looked. Single bounded
   # rotation (mv, not copy — instant regardless of size) keeps exactly
   # one prior run's output around, no unbounded accumulation.
+  #
+  # Must be an `if`, not `[[ ... ]] && mv`: as the function's last
+  # statement that list returns 1 whenever the log is absent or empty,
+  # the function returns 1, and dev.sh's `set -e` aborts start_go at the
+  # call site — before the log is ever recreated, so the slot can never
+  # start again. Self-inflicted and permanent: the first rotation is what
+  # removes the file that the next start then trips over. This wedged the
+  # dev1 slot from 2026-07-16 until 2026-07-20, and with it the slot
+  # reconciler, which `set -e`s out of its own loop when a slot's dev.sh
+  # exits non-zero — so dev2/dev3 silently stopped tracking main too.
   local f="$1"
-  [[ -s "$f" ]] && mv -f "$f" "${f}.prev"
+  if [[ -s "$f" ]]; then
+    mv -f "$f" "${f}.prev"
+  fi
 }
 
 is_running() {
