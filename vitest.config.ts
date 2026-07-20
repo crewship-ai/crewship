@@ -52,13 +52,20 @@ export default defineConfig({
       // any of these is not met. They sit just under the current numbers
       // so the gate starts green and ratchets upward as coverage lands.
       //
-      // Measured on this include set (2026-07-20):
-      //   statements 68.61  branches 61.40  functions 70.40  lines 69.83
+      // Measured on this include set (2026-07-20). Local and CI do NOT agree:
+      //   local  statements 68.61  branches 61.40  functions 70.40  lines 69.83
+      //   CI     statements 67.46  branches 61.40  functions 70.20  lines 68.48
+      // Branches and functions match; statements and lines run ~1.2pp lower on
+      // the CI runner. The gate is set from the CI numbers with roughly a point
+      // of headroom, because CI is the thing that actually blocks a merge —
+      // thresholds derived from a local run fail on the first PR that uses them
+      // (which is exactly what happened here). Raise these only after checking
+      // a CI run, never a local one.
       thresholds: {
-        lines: 69,
-        functions: 70,
-        branches: 61,
-        statements: 68,
+        lines: 67,
+        functions: 69,
+        branches: 60,
+        statements: 66,
       },
     },
   },
