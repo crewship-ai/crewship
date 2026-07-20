@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -143,6 +144,59 @@ func poolStatus(t *testing.T, pool *TokenPool, id string) ConnectionStatus {
 	return ""
 }
 
+// The production entry point is checkAll, and ONLY checkAll: Run() ticks it,
+// nothing else calls checkOne or any of the monitor's other internals. This
+// test therefore drives checkAll and nothing but checkAll, against a provider
+// that rejects every request, and asserts the credential the provider refuses
+// is not advertised as healthy.
+//
+// #1277 shipped a guard for exactly this and the guard never ran: checkAll
+// `continue`s past checkOne for every sk-ant-oat connection, and checkOne was
+// the only thing recording an outcome, so the guard's input was permanently
+// "nothing has validated this" — which it treated as resurrectable. Five ticks
+// later the credential was ACTIVE in the pool and ACTIVE in the database,
+// having never once been shown to the provider.
+func TestCredentialMonitor_CheckAllDoesNotResurrectRejectedOAuth(t *testing.T) {
+	var probes atomic.Int64
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		probes.Add(1)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer provider.Close()
+
+	pool := NewTokenPool(testLogger())
+	pool.Update([]ProviderConnection{{
+		ID:          "oat-prod",
+		WorkspaceID: "org1",
+		Provider:    ProviderAnthropic,
+		// The class the guard is meant to cover: an OAuth CLI token, stored
+		// as API_KEY, that something already marked EXPIRED.
+		Type:        TypeAPIKey,
+		AccessToken: "sk-ant-oat-revoked",
+		Status:      StatusExpired,
+	}})
+
+	cm, persisted, mu := newTestMonitor(t, pool, provider.URL)
+
+	for i := 0; i < 5; i++ {
+		cm.checkAll(context.Background())
+	}
+
+	if got := poolStatus(t, pool, "oat-prod"); got != StatusExpired {
+		t.Errorf("EXPIRED OAuth credential resurrected by the monitor loop: want EXPIRED, got %s (provider contacted %d times)",
+			got, probes.Load())
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, upd := range *persisted {
+		if upd.Status == StatusActive {
+			t.Errorf("monitor loop persisted ACTIVE for a credential it never validated: %+v", *persisted)
+			break
+		}
+	}
+}
+
 // #1254 item B: a credential that a provider actually rejected (real 401) must
 // stay EXPIRED. Before the fix, checkAll flipped every EXPIRED sk-ant-oat
 // credential back to ACTIVE on every tick — and persisted ACTIVE to the DB —
@@ -189,30 +243,11 @@ func TestCredentialMonitor_OAuthNotResurrectedAfterRealAuthFailure(t *testing.T)
 	}
 }
 
-// A rejection observed on the live request path (not the poller) is equally
-// terminal: NoteAuthFailure is the hook for it.
-func TestCredentialMonitor_OAuthNotResurrectedAfterNotedAuthFailure(t *testing.T) {
-	pool := NewTokenPool(testLogger())
-	pool.Update([]ProviderConnection{{
-		ID:          "oat-noted",
-		WorkspaceID: "org1",
-		Provider:    ProviderAnthropic,
-		Type:        TypeAPIKey,
-		AccessToken: "sk-ant-oat-revoked",
-		Status:      StatusExpired,
-	}})
-
-	cm, _, _ := newTestMonitor(t, pool, "http://127.0.0.1:1")
-	cm.NoteAuthFailure("oat-noted")
-
-	cm.checkAll(context.Background())
-	if got := poolStatus(t, pool, "oat-noted"); got != StatusExpired {
-		t.Errorf("credential rejected on the request path was resurrected: got %s", got)
-	}
-}
-
 // An OAuth token whose own recorded expiry has already elapsed is genuinely
-// expired — no validation needed to know that.
+// expired. (With the resurrection branch removed this holds for the same
+// reason every other OAuth case does — the monitor changes nothing about a
+// credential it cannot validate — but the case is worth keeping pinned
+// because it is the one an operator is most likely to eyeball.)
 func TestCredentialMonitor_OAuthNotResurrectedWhenTokenExpiryElapsed(t *testing.T) {
 	past := time.Now().Add(-2 * time.Hour)
 	pool := NewTokenPool(testLogger())
@@ -234,9 +269,12 @@ func TestCredentialMonitor_OAuthNotResurrectedWhenTokenExpiryElapsed(t *testing.
 	}
 }
 
-// The other half of the distinction: a credential nothing has validated must
-// still recover. This is the pre-existing repair path and it must not regress.
-func TestCredentialMonitor_OAuthStillRecoversWhenNeverValidated(t *testing.T) {
+// The monitor no longer "repairs" an EXPIRED OAuth credential it has never
+// validated. It cannot validate one at all (no /v1/models equivalent for
+// sk-ant-oat), so a flip to ACTIVE here is an assertion of health with zero
+// evidence behind it — and it was PATCHed to the database, which is how a
+// revoked token got re-advertised as usable. Recovery is the re-link path.
+func TestCredentialMonitor_OAuthNotResurrectedWhenNeverValidated(t *testing.T) {
 	future := time.Now().Add(2 * time.Hour)
 	pool := NewTokenPool(testLogger())
 	pool.Update([]ProviderConnection{
@@ -263,15 +301,16 @@ func TestCredentialMonitor_OAuthStillRecoversWhenNeverValidated(t *testing.T) {
 	cm.checkAll(context.Background())
 
 	for _, id := range []string{"oat-unvalidated", "oat-unvalidated-future"} {
-		if got := poolStatus(t, pool, id); got != StatusActive {
-			t.Errorf("%s: unvalidated OAuth credential should still recover, got %s", id, got)
+		if got := poolStatus(t, pool, id); got != StatusExpired {
+			t.Errorf("%s: monitor flipped an OAuth credential it never validated, got %s", id, got)
 		}
 	}
 }
 
 // A transient failure (unreachable host / 5xx) is not a verdict on the
-// credential and must never harden into a permanent kill.
-func TestCredentialMonitor_TransientFailureDoesNotBlockRecovery(t *testing.T) {
+// credential: it maps to ERROR, never to EXPIRED/REVOKED, so a flaky network
+// can never be mistaken for a revoked token by anything reading the status.
+func TestCredentialMonitor_TransientFailureMapsToError(t *testing.T) {
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
@@ -294,37 +333,37 @@ func TestCredentialMonitor_TransientFailureDoesNotBlockRecovery(t *testing.T) {
 	if got := poolStatus(t, pool, "oat-flaky"); got != StatusError {
 		t.Fatalf("after 502, want ERROR, got %s", got)
 	}
-	if cm.lastOutcome("oat-flaky") != outcomeTransient {
-		t.Fatalf("502 must record a transient outcome, got %v", cm.lastOutcome("oat-flaky"))
-	}
 
-	// Something else (e.g. the OAuth refresh worker) marks it EXPIRED; since
-	// nothing ever rejected it, the monitor may still repair it.
-	pool.MarkStatus("oat-flaky", StatusExpired)
+	// A second tick against the same flaky provider must not escalate it.
 	cm.checkAll(context.Background())
-	if got := poolStatus(t, pool, "oat-flaky"); got != StatusActive {
-		t.Errorf("transient failure turned into a permanent kill: got %s", got)
+	if got := poolStatus(t, pool, "oat-flaky"); got != StatusError {
+		t.Errorf("transient failure escalated on the next tick: got %s", got)
 	}
 }
 
-// An unsupported provider is never probed, so its echoed-back status must not
-// be recorded as a validation verdict.
-func TestCredentialMonitor_UnsupportedProviderRecordsNoOutcome(t *testing.T) {
+// An unsupported provider is never probed, so nothing about it may change and
+// nothing may be written to the database on its behalf.
+func TestCredentialMonitor_UnsupportedProviderChangesNothing(t *testing.T) {
 	pool := NewTokenPool(testLogger())
 	conn := ProviderConnection{
 		ID:          "other",
 		WorkspaceID: "org1",
 		Provider:    ProviderType("SOMETHING_ELSE"),
 		Type:        TypeAPIKey,
-		AccessToken: "sk-ant-oat-x",
+		AccessToken: "not-an-oat-key",
 		Status:      StatusExpired,
 	}
 	pool.Update([]ProviderConnection{conn})
 
-	cm, _, _ := newTestMonitor(t, pool, "http://127.0.0.1:1")
-	cm.checkOne(context.Background(), conn)
+	cm, persisted, mu := newTestMonitor(t, pool, "http://127.0.0.1:1")
+	cm.checkAll(context.Background())
 
-	if got := cm.lastOutcome("other"); got != outcomeUnknown {
-		t.Errorf("unprobed provider must leave the outcome unknown, got %v", got)
+	if got := poolStatus(t, pool, "other"); got != StatusExpired {
+		t.Errorf("unprobed provider must keep its status, got %s", got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(*persisted) != 0 {
+		t.Errorf("unprobed provider must not persist anything, got %+v", *persisted)
 	}
 }

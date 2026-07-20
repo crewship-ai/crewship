@@ -146,11 +146,16 @@ func TestCredentialMonitor_CheckAll_SkipsRevokedAndOAuth(t *testing.T) {
 	}
 }
 
-// TestCredentialMonitor_CheckAll_ResetsExpiredOAuth: an OAuth token marked
-// EXPIRED by an earlier (incorrect) check must be auto-restored to ACTIVE.
-func TestCredentialMonitor_CheckAll_ResetsExpiredOAuth(t *testing.T) {
+// TestCredentialMonitor_CheckAll_LeavesExpiredOAuthAlone: the monitor cannot
+// validate an sk-ant-oat token, so it must not have an opinion about one —
+// neither in the pool nor in the database. This test used to assert the
+// opposite ("must be auto-restored to ACTIVE"); that reset is what allowed a
+// revoked OAuth token to be re-advertised as healthy on every tick.
+func TestCredentialMonitor_CheckAll_LeavesExpiredOAuthAlone(t *testing.T) {
 	t.Parallel()
+	var patches int32
 	persistOk := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&patches, 1)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer persistOk.Close()
@@ -165,8 +170,11 @@ func TestCredentialMonitor_CheckAll_ResetsExpiredOAuth(t *testing.T) {
 	cm.checkAll(context.Background())
 
 	all := pool.AllConnections()
-	if len(all) != 1 || all[0].Status != StatusActive {
-		t.Errorf("expected reset to ACTIVE, got %+v", all)
+	if len(all) != 1 || all[0].Status != StatusExpired {
+		t.Errorf("expected EXPIRED to be left alone, got %+v", all)
+	}
+	if got := atomic.LoadInt32(&patches); got != 0 {
+		t.Errorf("monitor persisted a status for an unvalidatable credential: %d PATCHes", got)
 	}
 }
 
