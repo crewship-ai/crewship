@@ -29,26 +29,23 @@ func TestEncryptAtRest_WithKey_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestEncryptAtRest_NoKey_FailsOpen(t *testing.T) {
+// #1254 item C: the no-key path used to fail OPEN (plaintext, no error). It
+// now fails CLOSED unless the operator opts in explicitly — see
+// fail_closed_test.go for the full contract.
+func TestEncryptAtRest_NoKey_FailsClosed(t *testing.T) {
 	t.Setenv("ENCRYPTION_KEY", "")
 	t.Setenv("CREWSHIP_ENCRYPTION_KEY_VERSION", "")
+	t.Setenv(AllowPlaintextSecretsEnvVar, "")
 
 	if KeyConfigured() {
 		t.Fatal("KeyConfigured() should be false with no key set")
 	}
-	stored, encrypted, err := EncryptAtRest("whsec_plain")
-	if err != nil {
-		t.Fatalf("EncryptAtRest fail-open should not error: %v", err)
-	}
-	if encrypted {
-		t.Error("expected encrypted=false with no key")
-	}
-	if stored != "whsec_plain" {
-		t.Errorf("no-key store = %q, want the plaintext unchanged", stored)
+	if _, _, err := EncryptAtRest("whsec_plain"); err == nil {
+		t.Fatal("expected EncryptAtRest to fail closed with no key configured")
 	}
 	// An empty value is always a no-op.
-	if s, enc, _ := EncryptAtRest(""); s != "" || enc {
-		t.Errorf("empty value: got (%q, %v), want (\"\", false)", s, enc)
+	if s, enc, err := EncryptAtRest(""); s != "" || enc || err != nil {
+		t.Errorf("empty value: got (%q, %v, %v), want (\"\", false, nil)", s, enc, err)
 	}
 }
 

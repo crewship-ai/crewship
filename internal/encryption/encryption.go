@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"regexp"
 	"strings"
@@ -73,6 +74,27 @@ func IsEncrypted(s string) bool {
 	return ok
 }
 
+// AllowPlaintextSecretsEnvVar is the explicit, documented opt-out that
+// restores the pre-#1254 fail-OPEN behaviour: with no encryption key
+// configured, secrets are written to the database in plaintext. It exists for
+// deployments that genuinely have no key yet and cannot take a hard failure
+// during the transition. Every write taken under this flag logs a Warn — a
+// silent opt-out is the original bug with extra steps.
+const AllowPlaintextSecretsEnvVar = "CREWSHIP_ALLOW_PLAINTEXT_SECRETS"
+
+// PlaintextSecretsAllowed reports whether the operator explicitly opted into
+// storing secrets in plaintext when no key is configured. Only an explicit,
+// recognised affirmative counts; anything else (unset, empty, garbage) leaves
+// the secure fail-closed default in place.
+func PlaintextSecretsAllowed() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(AllowPlaintextSecretsEnvVar))) {
+	case "true", "1", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 // KeyConfigured reports whether a usable AES-256 encryption key is present for
 // the current key version. Callers on fail-open paths (webhook secrets) gate
 // encryption on this: with a key they Encrypt at rest, without one they store
@@ -81,12 +103,35 @@ func KeyConfigured() bool {
 	return VerifyCurrentKey() == nil
 }
 
-// EncryptAtRest encrypts plaintext for storage when a usable key is configured;
-// otherwise it returns the plaintext unchanged with encrypted=false so the
-// caller can warn (fail-open — preserves key-less deployments per #1072). An
-// empty value is a no-op. A configured-but-failing Encrypt returns the error.
+// EncryptAtRest encrypts plaintext for storage. An empty value is a no-op.
+//
+// #1254 item C — this path fails CLOSED. With no usable key configured it
+// returns an error and never hands the plaintext back to the caller, so a
+// missing key can no longer silently downgrade a secret column to plaintext.
+// The pre-#1254 fail-open behaviour is still available, but only when the
+// operator asks for it explicitly via CREWSHIP_ALLOW_PLAINTEXT_SECRETS=true —
+// and every write taken under that flag logs a Warn naming the flag and the
+// fix. A configured-but-failing Encrypt returns the error as before.
 func EncryptAtRest(plaintext string) (stored string, encrypted bool, err error) {
-	if plaintext == "" || !KeyConfigured() {
+	if plaintext == "" {
+		return "", false, nil
+	}
+	if !KeyConfigured() {
+		if !PlaintextSecretsAllowed() {
+			return "", false, fmt.Errorf(
+				"refusing to store a secret in plaintext: no usable encryption key is configured (%w). "+
+					"Generate one with `openssl rand -hex 32` and set ENCRYPTION_KEY, or set %s=true to accept plaintext storage",
+				keyResolutionError(), AllowPlaintextSecretsEnvVar)
+		}
+		// Loud on every write, deliberately not deduplicated: an operator
+		// scraping logs must be able to count exactly how many secrets went
+		// to disk unprotected. The secret itself is never logged.
+		slog.Warn("storing secret UNENCRYPTED at rest — no encryption key configured and "+
+			AllowPlaintextSecretsEnvVar+"=true is set; set ENCRYPTION_KEY (openssl rand -hex 32) and re-run "+
+			"`crewship admin reencrypt` to protect existing rows",
+			"opt_out_env", AllowPlaintextSecretsEnvVar,
+			"key_env", "ENCRYPTION_KEY",
+			"reason", keyResolutionError().Error())
 		return plaintext, false, nil
 	}
 	ct, err := Encrypt(plaintext)
@@ -94,6 +139,16 @@ func EncryptAtRest(plaintext string) (stored string, encrypted bool, err error) 
 		return "", false, err
 	}
 	return ct, true, nil
+}
+
+// keyResolutionError returns the concrete reason the active key version is
+// unusable, so the fail-closed error tells the operator *which* env var is
+// missing or malformed instead of a generic "no key".
+func keyResolutionError() error {
+	if err := VerifyCurrentKey(); err != nil {
+		return err
+	}
+	return errors.New("encryption key unavailable")
 }
 
 // DecryptIfEncrypted returns the plaintext for a possibly-encrypted at-rest

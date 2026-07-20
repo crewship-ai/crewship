@@ -87,9 +87,11 @@ func (s *WebhookStore) Save(ctx context.Context, in SaveWebhookInput) (*Webhook,
 
 	// #1029: encrypt the optional HMAC signing secret at rest (the v82 schema
 	// already documents this column as encrypted, but writes stored plaintext).
-	// Fail-open: with no key configured EncryptAtRest returns the value
-	// unchanged, preserving key-less deployments; the read/verify path decrypts
-	// only enveloped values.
+	// #1254 item C: fail-CLOSED. With no usable key EncryptAtRest returns an
+	// error and the save is rejected rather than silently storing the secret
+	// in plaintext (opt back in with CREWSHIP_ALLOW_PLAINTEXT_SECRETS=true).
+	// The read/verify path still decrypts only enveloped values, so rows
+	// written in plaintext by older builds keep working.
 	storedSigning, _, err := encryption.EncryptAtRest(in.SigningSecret)
 	if err != nil {
 		return nil, fmt.Errorf("encrypt signing_secret: %w", err)

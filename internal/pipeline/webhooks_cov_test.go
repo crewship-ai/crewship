@@ -30,6 +30,9 @@ func TestWebhookStore_Save_Validation(t *testing.T) {
 }
 
 func TestWebhookStore_Save_CreateMintsTokenAndDefaults(t *testing.T) {
+	// #1254 item C: signing-secret storage fails closed without a key, so a
+	// test that saves one must configure the key like production does.
+	t.Setenv("ENCRYPTION_KEY", testEncryptionKey)
 	db := openWebhookTestDB(t)
 	defer db.Close()
 	store := NewWebhookStore(db)
