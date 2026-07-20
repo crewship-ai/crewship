@@ -390,9 +390,12 @@ func TestCredentialMonitor_Validate_DispatchesByProvider(t *testing.T) {
 
 			// A 401 from the provider must flip a previously-ACTIVE cred to
 			// EXPIRED — proving the credential is actually health-checked.
-			got, _ := cm.validate(context.Background(), ProviderConnection{
+			got, _, validated := cm.validate(context.Background(), ProviderConnection{
 				Provider: p, AccessToken: "k", Status: StatusActive,
 			})
+			if !validated {
+				t.Errorf("provider %s: expected a real probe", p)
+			}
 			if got != StatusExpired {
 				t.Errorf("provider %s: expected EXPIRED on 401, got %s", p, got)
 			}
@@ -406,9 +409,12 @@ func TestCredentialMonitor_Validate_UnknownProvider(t *testing.T) {
 	t.Parallel()
 	cm := NewCredentialMonitor(NewTokenPool(testLogger()),
 		"http://x", "t", time.Hour, testLogger())
-	got, msg := cm.validate(context.Background(), ProviderConnection{
+	got, msg, validated := cm.validate(context.Background(), ProviderConnection{
 		Provider: ProviderType("UNKNOWN"), Status: StatusActive,
 	})
+	if validated {
+		t.Error("unknown provider must not report a probe")
+	}
 	if got != StatusActive || msg != "" {
 		t.Errorf("expected unchanged ACTIVE, got %s msg=%q", got, msg)
 	}
