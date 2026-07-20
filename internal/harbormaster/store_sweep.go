@@ -123,6 +123,20 @@ func SweepTimeouts(ctx context.Context, db *sql.DB, j journal.Emitter) (int, err
 // exactly, so a hire that was approved or ghosted between the SELECT
 // and here is left alone.
 //
+// It carries one guard the deny path does not need: the agent's OWN
+// deadline (`expires_at <= now`). Hire writes agents.expires_at and the
+// queue row's timeout_at from the same instant + TTL, but `crewship
+// rehire` pushes only expires_at forward — it reopens a hire cycle
+// without enqueuing a new approvals row. Ghosting off the queue row's
+// stale deadline would silently undo the operator's extension on the
+// next tick (<=30s) and 409 the approve that follows. The agent
+// deadline is the per-cycle truth, so it decides; the queue row still
+// goes terminal (its window really did lapse) and approve-hire skips a
+// terminal row anyway. Same guard shape the ephemeral TTL sweeper uses
+// (internal/ephemeral/expiry.go). A NULL expires_at cannot come out of
+// the hire path; if one ever does, not ghosting is the safe direction —
+// the hire stays decidable by an operator.
+//
 // The blocking inbox waitpoint is NOT resolved. It stays in the
 // operator's inbox as the actionable "this hire lapsed, rehire or drop
 // it" item, and the approve/deny that eventually follows a rehire
@@ -156,8 +170,9 @@ func flipTimedOutRow(ctx context.Context, db *sql.DB, approvalID, agentID string
 		if _, err := tx.ExecContext(ctx, `UPDATE agents
 			SET expired_at = ?, updated_at = ?
 			WHERE id = ? AND ephemeral = 1 AND status = 'PENDING_REVIEW'
-			  AND expired_at IS NULL AND deleted_at IS NULL`,
-			nowAgents, nowAgents, agentID); err != nil {
+			  AND expired_at IS NULL AND deleted_at IS NULL
+			  AND expires_at IS NOT NULL AND expires_at <= ?`,
+			nowAgents, nowAgents, agentID, nowAgents); err != nil {
 			return false, fmt.Errorf("harbormaster: sweep ghost agent %s: %w", agentID, err)
 		}
 	}

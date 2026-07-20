@@ -94,6 +94,7 @@ func TestApproveHire_AfterDenyThenRehire_ReachesIdle(t *testing.T) {
 func timeOutHireApproval(t *testing.T, db *sql.DB, userID, wsID, crewID, agentID string) string {
 	t.Helper()
 	past := time.Now().UTC().Add(-time.Minute)
+	lapseAgentTTL(t, db, agentID, past)
 	approvalID, err := harbormaster.Enqueue(context.Background(), db, nil, harbormaster.Request{
 		WorkspaceID: wsID,
 		CrewID:      crewID,
@@ -119,6 +120,19 @@ func timeOutHireApproval(t *testing.T, db *sql.DB, userID, wsID, crewID, agentID
 		t.Fatalf("approvals_queue status = %q, want timeout", got)
 	}
 	return approvalID
+}
+
+// lapseAgentTTL rewinds agents.expires_at to match a lapsed approval
+// window. Hire writes both deadlines from the same instant + TTL, so
+// they only ever disagree once `crewship rehire` pushes the agent's
+// forward — the seed helper's far-future default would be a state the
+// hire path cannot produce.
+func lapseAgentTTL(t *testing.T, db *sql.DB, agentID string, at time.Time) {
+	t.Helper()
+	if _, err := db.Exec(`UPDATE agents SET expires_at = ? WHERE id = ?`,
+		at.Format(time.RFC3339), agentID); err != nil {
+		t.Fatalf("lapse agent ttl: %v", err)
+	}
 }
 
 // TestApproveHire_AfterApprovalTimeout_Returns409AndStaysGhosted is the
@@ -191,6 +205,64 @@ func TestApproveHire_AfterApprovalTimeoutThenRehire_ReachesIdle(t *testing.T) {
 			rr.Code, rr.Body.String())
 	}
 	if status, _ = agentStatusExpiry(t, db, "a-timeout-rehire"); status != "IDLE" {
+		t.Errorf("agents.status = %q, want IDLE", status)
+	}
+}
+
+// TestSweep_AfterRehireBeforeTimeout_LeavesHireApprovable is the review
+// finding on #1316: a rehire extends agents.expires_at but leaves the
+// approvals_queue row's timeout_at where it was (rehire reopens a hire
+// cycle without enqueuing a new approval). If the sweeper ghosted off
+// that stale queue deadline, the next tick — within 30s — would undo
+// the operator's extension and the approve that follows would 409, with
+// nothing in the API surface explaining why.
+//
+// The order here is what makes it a regression and not a rediscovery of
+// the timeout contract: the rehire lands BEFORE the sweep runs.
+func TestSweep_AfterRehireBeforeTimeout_LeavesHireApprovable(t *testing.T) {
+	db := setupTestDB(t)
+	userID, wsID, crewID := seedHireCrew(t, db, "guided", 5)
+	agentH := newApproveHireHandler(t, db)
+	seedPendingReviewAgent(t, db, wsID, crewID, "a-rehire-then-sweep")
+
+	past := time.Now().UTC().Add(-time.Minute)
+	lapseAgentTTL(t, db, "a-rehire-then-sweep", past)
+	approvalID, err := harbormaster.Enqueue(context.Background(), db, nil, harbormaster.Request{
+		WorkspaceID: wsID,
+		CrewID:      crewID,
+		AgentID:     "a-rehire-then-sweep",
+		RequestedBy: userID,
+		Kind:        harbormaster.KindEphemeralHire,
+		Reason:      "hire ephemeral agent a-rehire-then-sweep: test",
+		Payload:     map[string]any{"tool": "agent.hire", "agent_id": "a-rehire-then-sweep"},
+		TimeoutAt:   &past,
+	})
+	if err != nil {
+		t.Fatalf("enqueue hire approval: %v", err)
+	}
+
+	// Operator notices the window is about to lapse and extends it.
+	rehireOK(t, agentH, userID, wsID, "a-rehire-then-sweep", "still deciding, give me another hour")
+
+	if _, err := harbormaster.SweepTimeouts(context.Background(), db, nil); err != nil {
+		t.Fatalf("sweep timeouts: %v", err)
+	}
+	if got := approvalStatus(t, db, approvalID); got != "timeout" {
+		t.Fatalf("approvals_queue status = %q, want timeout — the queue row's own window did lapse", got)
+	}
+
+	status, expired := agentStatusExpiry(t, db, "a-rehire-then-sweep")
+	if status != "PENDING_REVIEW" || expired.Valid {
+		t.Fatalf("post-sweep agent = %q expired=%v, want PENDING_REVIEW / NULL — the sweep ghosted "+
+			"a hire whose TTL the operator had just extended", status, expired)
+	}
+
+	rr := postApproveHire(t, agentH, userID, wsID, "MANAGER", "a-rehire-then-sweep")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("approve-hire after rehire-then-sweep: status = %d, want 200; body: %s",
+			rr.Code, rr.Body.String())
+	}
+	if status, _ = agentStatusExpiry(t, db, "a-rehire-then-sweep"); status != "IDLE" {
 		t.Errorf("agents.status = %q, want IDLE", status)
 	}
 }

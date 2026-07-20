@@ -102,6 +102,12 @@ same transaction as the queue row they settle, and the approve's conditional
 The blocking waitpoint stays in the inbox after a timeout — the hire still
 needs an operator call, it just needs a `rehire` first.
 
+`rehire` also works **before** the window lapses: it pushes `expires_at`
+forward, and the sweeper ghosts a staged hire only when the agent's own
+deadline has passed. The queue row still flips to `timeout` on its original
+deadline (an accurate record of that cycle), but the extended hire stays
+approvable — `hire approve` returns `200` with no second `rehire` needed.
+
 The operator can also "fire" the pending agent by deleting it from the crew page — same path as deleting any agent. No separate "deny hire" endpoint exists today (tracked as PR-F follow-up); fire is the explicit reject path.
 
 ### Credential setup

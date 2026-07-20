@@ -48,6 +48,7 @@ CREATE TABLE agents (
     id TEXT PRIMARY KEY,
     status TEXT NOT NULL,
     ephemeral INTEGER NOT NULL DEFAULT 0,
+    expires_at TEXT,
     expired_at TEXT,
     deleted_at TEXT,
     updated_at TEXT
