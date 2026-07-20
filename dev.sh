@@ -51,6 +51,18 @@ err()  { echo -e "${RED}[crewship${S}]${NC} $*" >&2; }
 # to the held-open inode. The warning is deliberately LOUD: a log that keeps
 # hitting the cap is a crash-loop symptom we want surfaced, not silently
 # rotated into oblivion (that just hides the underlying bug).
+#
+# The watcher's stdio is redirected into the log it guards rather than
+# inherited. Inherited, it holds the write end of whatever pipe dev.sh was
+# invoked through for as long as the service runs — so `ssh host ./dev.sh
+# start` never returns, because ssh waits for an EOF that a 30-second sleep
+# loop will not deliver until the server dies. That is what made
+# scripts/deploy-dev.sh sit for 37 minutes after printing "Deploy complete"
+# on 2026-07-20, and what left a pair of long-lived writers on the slot
+# reconciler's own log after every restart. Writing the warning into the
+# fresh log, immediately after the truncation, keeps it loud exactly where
+# someone diagnosing the crash-loop is already looking — and makes the new
+# log self-documenting about why it starts mid-story.
 guard_log_size() {
   local f="$1" owner="$2"
   local cap=$((50 * 1024 * 1024)) # 50 MB
@@ -59,12 +71,12 @@ guard_log_size() {
       local sz
       sz=$(wc -c < "$f" 2>/dev/null || echo 0)
       if (( sz > cap )); then
-        warn "log $f passed $((cap / 1024 / 1024))MB — truncating. Likely a crash-loop; check for repeated ERRORs in $f"
         : > "$f"
+        warn "log $f passed $((cap / 1024 / 1024))MB — truncated. Likely a crash-loop; check for repeated ERRORs below" >> "$f"
       fi
       sleep 30
     done
-  ) &
+  ) </dev/null >/dev/null 2>&1 &
   disown 2>/dev/null || true
 }
 

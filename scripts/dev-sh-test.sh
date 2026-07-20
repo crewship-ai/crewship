@@ -96,6 +96,48 @@ else
   fail "non-empty log file: original still present, expected mv"
 fi
 
+# guard_log_size backgrounds a watcher that outlives the call and runs for
+# as long as the service does. If that watcher inherits the caller's
+# stdout, it holds the write end of whatever pipe dev.sh was invoked
+# through — so `ssh host ./dev.sh start` never returns, because ssh waits
+# for EOF that a 30-second-sleep loop will not deliver until the server
+# dies. That is exactly why scripts/deploy-dev.sh appeared to hang for
+# 37 minutes after printing "Deploy complete", and why the reconciler's
+# own log accumulated a pair of long-lived writers on every slot restart.
+echo "dev.sh: guard_log_size does not hold the caller's stdout"
+
+FIFO="$TMP/fifo"
+mkfifo "$FIFO"
+
+# A long-lived owner so the watch loop stays alive, mimicking a running server.
+sleep 60 &
+OWNER=$!
+
+GUARD_BODY="$(extract_fn guard_log_size)"
+(
+  bash -c "set -euo pipefail
+S=''
+warn() { echo \"[warn] \$*\"; }
+$GUARD_BODY
+guard_log_size '$TMP/guarded.log' $OWNER
+exit 0" >"$FIFO" 2>&1
+) &
+WRITER=$!
+
+# cat returns only when EVERY writer has closed the pipe. If the watcher
+# inherited stdout, the fd stays open and this blocks until the timeout —
+# which is the deploy hang, reproduced.
+if timeout 6 cat "$FIFO" >/dev/null 2>&1; then
+  pass "pipe closes when dev.sh returns (ssh would exit)"
+else
+  fail "pipe still held after dev.sh returned — ssh/deploy-dev.sh would hang"
+fi
+
+kill "$OWNER" 2>/dev/null || true
+kill "$WRITER" 2>/dev/null || true
+wait "$OWNER" 2>/dev/null || true
+wait "$WRITER" 2>/dev/null || true
+
 # Guard the whole class of bug, not just the one instance of it.
 echo "dev.sh: no function ends in a bare && list"
 offenders="$(awk '
