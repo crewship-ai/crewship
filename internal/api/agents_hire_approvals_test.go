@@ -226,7 +226,11 @@ func TestApprovalsDecide_DenyEphemeralHire_GhostsAgent(t *testing.T) {
 	}
 }
 
-func TestApprovalsDecide_EphemeralHire_AgentAlreadyIdle_SkipsSideEffect(t *testing.T) {
+// Renamed from …_SkipsSideEffect: #1247 replaced "persist the decision,
+// skip the side effect" with "an unappliable side effect rolls the
+// decision back", and the assertions were updated to match while the
+// name kept describing the old contract.
+func TestApprovalsDecide_EphemeralHire_AgentAlreadyIdle_RollsBackDecision(t *testing.T) {
 	db := setupTestDB(t)
 	userID, wsID, crewID := seedHireCrew(t, db, "guided", 5)
 	seedPendingReviewAgent(t, db, wsID, crewID, "a-raced")

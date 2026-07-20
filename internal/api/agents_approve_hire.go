@@ -159,24 +159,43 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 	// Same lock order on both endpoints means the loser gets an honest
 	// 409. Pre-#1209 hires (or a failed enqueue) have no row at all —
 	// for those the conditional agent UPDATE below stays the decision
-	// point, and no second surface exists to race it. A row that
-	// exists but is already terminal is a concurrent decision, NOT a
-	// legacy hire: activating on top of it is exactly the double-win
-	// #1247 reproduced.
+	// point, and no second surface exists to race it.
+	//
+	// A row that is ALREADY terminal is not a decision on the hire in
+	// front of us. approvals_queue rows are per-enqueue, not per-agent:
+	// `crewship rehire` opens a fresh hire cycle (expired_at cleared,
+	// expires_at pushed forward) without enqueuing a new row, so the
+	// newest row for this agent can be the `denied` / `timeout` verdict
+	// of a PREVIOUS cycle. #1272 409'd on it unconditionally, which
+	// bricked every rehired agent permanently — approve-hire 409'd,
+	// /approvals/{id}/decide 409'd with ErrNotPending, and the
+	// chatbridge refused to start a PENDING_REVIEW agent, with no path
+	// back to IDLE.
+	//
+	// Skipping the CAS on a terminal row does NOT reopen the #1247
+	// double-win, because the queue row was never what closed it — the
+	// transaction was. A deny writes agents.expired_at inside the same
+	// tx as its CAS (applyEphemeralHireDecisionTx), so a deny that
+	// committed first is visible to the conditional agent UPDATE below
+	// via its `expired_at IS NULL` guard and we lose there with a 409.
+	// The agent row, not the queue row, is the per-hire-cycle
+	// decidability guard: it is the only one rehire resets.
 	approvalRowID, rowStatus, lerr := findHireApprovalRow(r.Context(), tx, workspaceID, agentID)
 	switch {
 	case errors.Is(lerr, sql.ErrNoRows):
 		// Legacy hire — nothing to win on the approvals surface.
+		approvalRowID = ""
 	case lerr != nil:
 		h.logger.Error("approve-hire: lookup approvals row", "agent_id", agentID, "error", lerr)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	case rowStatus != string(harbormaster.StatusPending):
-		writeJSON(w, http.StatusConflict, map[string]string{
-			"error":  "Hire already decided via the approvals queue",
-			"reason": "approval " + approvalRowID + " is already " + rowStatus,
-		})
-		return
+		// Stale verdict from an earlier cycle. Leave it terminal (it is
+		// an accurate record of that cycle) and let the agent UPDATE
+		// decide this one.
+		logger.Info("approve-hire: newest approvals row is already terminal — deciding on the agent row",
+			"agent_id", agentID, "approval_id", approvalRowID, "approval_status", rowStatus)
+		approvalRowID = ""
 	}
 
 	var decidedRow *harbormaster.Request
@@ -289,13 +308,13 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 // harbormaster.DecideTx BEFORE activating the agent — the row is the
 // atomic decision point shared with POST /approvals/{id}/decide.
 //
-// The status matters: the earlier version filtered on status='pending'
-// and mapped "row exists but is already denied" onto the same
-// sql.ErrNoRows the legacy-hire case uses. A concurrent deny that
-// committed first therefore looked like a hire with no approvals row,
-// and ApproveHire happily activated the agent on top of it — two
-// winners for one decision (#1247). Returning the status lets the
-// caller tell "no such row" from "already decided".
+// The status comes back rather than being filtered into the WHERE
+// clause so the caller can tell "no row at all" from "a row that is
+// already terminal" and log the difference. It must NOT be used to
+// reject the request: the newest row can belong to a previous hire
+// cycle that `crewship rehire` reopened, and rejecting on it bricks the
+// agent for good. Only agents.expired_at / agents.status track the
+// current cycle, and only they gate the transition.
 func findHireApprovalRow(ctx context.Context, q harbormaster.DBTX, workspaceID, agentID string) (string, string, error) {
 	var approvalID, status string
 	err := q.QueryRowContext(ctx, `
