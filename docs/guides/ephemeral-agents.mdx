@@ -78,9 +78,11 @@ projection returns `500` with nothing applied.
 #### Recovering a denied or lapsed hire
 
 A denied hire ghosts the staged agent (`expired_at` set, status stays
-`PENDING_REVIEW`). An approval that nobody answers before its timeout leaves
-the queue row `timeout` with the agent untouched. Both are recoverable with
-the normal ghost path:
+`PENDING_REVIEW`). An approval that nobody answers before its timeout ghosts
+it the same way: the sweeper flips the queue row to `timeout` **and** writes
+`agents.expired_at` in the same transaction, so a lapsed approval window bars
+`hire approve` (`409`) instead of leaving the hire quietly approvable days
+later. Both are recoverable with the normal ghost path:
 
 ```bash
 crewship rehire <agent-slug-or-id> --ttl 60 --reason "second look: still needed"
@@ -92,9 +94,19 @@ approvals-queue row, is what marks the hire decidable again. The old `denied`
 / `timeout` row stays terminal because it is an accurate record of the
 previous cycle; the new approval is recorded as an `agent.hire_approved`
 audit entry alongside the `agent.rehired` one. A hire that has genuinely
-been decided in the **current** cycle still returns `409` — a deny writes
-`agents.expired_at` in the same transaction as its queue decision, and the
-approve's conditional `UPDATE … WHERE expired_at IS NULL` is what rejects it.
+been decided in the **current** cycle — denied, or timed out of its approval
+window — still returns `409`: both verdicts write `agents.expired_at` in the
+same transaction as the queue row they settle, and the approve's conditional
+`UPDATE … WHERE expired_at IS NULL` is what rejects it.
+
+The blocking waitpoint stays in the inbox after a timeout — the hire still
+needs an operator call, it just needs a `rehire` first.
+
+`rehire` also works **before** the window lapses: it pushes `expires_at`
+forward, and the sweeper ghosts a staged hire only when the agent's own
+deadline has passed. The queue row still flips to `timeout` on its original
+deadline (an accurate record of that cycle), but the extended hire stays
+approvable — `hire approve` returns `200` with no second `rehire` needed.
 
 The operator can also "fire" the pending agent by deleting it from the crew page — same path as deleting any agent. No separate "deny hire" endpoint exists today (tracked as PR-F follow-up); fire is the explicit reject path.
 

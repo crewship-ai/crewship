@@ -357,6 +357,9 @@ func Cancel(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, id,
 }
 
 // SweepTimeouts moves any pending row whose timeout_at is in the past to
-// 'timeout' and emits one EntryApprovalTimeout per row. Designed to be
+// 'timeout' and emits one EntryApprovalTimeout per row. For
+// kind=ephemeral_hire rows it also ghosts the staged agent in the same
+// transaction, so a lapsed approval window bars approve-hire until
+// `crewship rehire` (#1304) — see flipTimedOutRow. Designed to be
 // called from a 30s ticker; safe to invoke concurrently because the
 // UPDATE is conditional on status='pending'.

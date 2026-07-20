@@ -110,10 +110,11 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if expiredAt.Valid {
-		// Denied via the approvals surface or ghosted by the TTL
-		// sweeper — status stays PENDING_REVIEW in both terminal
-		// states, so the check above can't catch them. Approving here
-		// would resurrect a dead hire.
+		// Denied via the approvals surface, ghosted by the TTL
+		// sweeper, or timed out of its approval window — status stays
+		// PENDING_REVIEW in all three terminal states, so the check
+		// above can't catch them. Approving here would resurrect a
+		// dead hire; `crewship rehire` is the way back.
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error":  "Hire is no longer decidable",
 			"reason": "the staged agent was denied or expired at " + expiredAt.String,
@@ -174,12 +175,14 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 	//
 	// Skipping the CAS on a terminal row does NOT reopen the #1247
 	// double-win, because the queue row was never what closed it — the
-	// transaction was. A deny writes agents.expired_at inside the same
-	// tx as its CAS (applyEphemeralHireDecisionTx), so a deny that
-	// committed first is visible to the conditional agent UPDATE below
-	// via its `expired_at IS NULL` guard and we lose there with a 409.
-	// The agent row, not the queue row, is the per-hire-cycle
-	// decidability guard: it is the only one rehire resets.
+	// transaction was. Every terminal verdict writes agents.expired_at
+	// in the same transaction as its own CAS — a deny in
+	// applyEphemeralHireDecisionTx, a lapsed window in
+	// harbormaster.SweepTimeouts (#1304) — so a verdict that committed
+	// first is visible to the conditional agent UPDATE below via its
+	// `expired_at IS NULL` guard and we lose there with a 409. The
+	// agent row, not the queue row, is the per-hire-cycle decidability
+	// guard: it is the only one rehire resets.
 	approvalRowID, rowStatus, lerr := findHireApprovalRow(r.Context(), tx, workspaceID, agentID)
 	switch {
 	case errors.Is(lerr, sql.ErrNoRows):
@@ -315,6 +318,15 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 // cycle that `crewship rehire` reopened, and rejecting on it bricks the
 // agent for good. Only agents.expired_at / agents.status track the
 // current cycle, and only they gate the transition.
+//
+// Taking only the newest row rests on there being at most one PENDING
+// hire row per agent: api.Hire on the guided path is the sole enqueuer
+// of KindEphemeralHire, it runs once per staged agent, and rehire
+// reopens a cycle without enqueuing. That invariant matters more than
+// it used to — since a terminal newest row is skipped rather than
+// rejected, an older row hiding beneath it would stay pending forever
+// after an approve. Any second enqueue path must decide (or cancel)
+// every pending hire row for the agent, not just the newest.
 func findHireApprovalRow(ctx context.Context, q harbormaster.DBTX, workspaceID, agentID string) (string, string, error) {
 	var approvalID, status string
 	err := q.QueryRowContext(ctx, `

@@ -40,6 +40,19 @@ CREATE TABLE approvals_queue (
 CREATE INDEX idx_approvals_status ON approvals_queue(status, timeout_at);
 CREATE INDEX idx_approvals_ws ON approvals_queue(workspace_id, created_at DESC);
 CREATE INDEX idx_approvals_agent ON approvals_queue(agent_id, status);
+
+-- Only the columns SweepTimeouts touches when it ghosts a staged
+-- ephemeral hire (#1304). The real table lives in the migrations; this
+-- is the same "mirror just enough" shape as approvals_queue above.
+CREATE TABLE agents (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    ephemeral INTEGER NOT NULL DEFAULT 0,
+    expires_at TEXT,
+    expired_at TEXT,
+    deleted_at TEXT,
+    updated_at TEXT
+);
 `
 
 func openTestDB(t *testing.T) *sql.DB {
