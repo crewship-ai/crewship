@@ -13,18 +13,29 @@ and credential **self-service vs. escalation**.
 
 ## Prereqs
 
-1. A dev server is up and **seeded** with the release-demo template:
+1. A `crewship` binary the harness can find. It looks, in order, at `$CREWSHIP`,
+   then `<repo-root>/crewship`, then whatever `crewship` is on `PATH` — so from
+   anywhere in the clone, either of these is enough:
+   ```bash
+   go build -o crewship ./cmd/crewship   # from the repo root
+   # ...or just have the installed CLI on PATH
+   ```
+   `seed` below is client-side from that binary, so build before you seed.
+2. A dev server is up and **seeded** with the release-demo template. Run this
+   from the repo root (or with the installed CLI on `PATH`):
    ```bash
    SEED_ANTHROPIC_API_KEY=sk-ant-... \
    SEED_GITHUB_TOKEN=ghp_...           # optional, enables the GitHub scenario
-   crewship seed --nuke --with-memory --with-users --wait-provision
+   ./crewship seed --nuke --with-memory --with-users --wait-provision
    ```
-2. Your shell targets that server. Prefer the env var (scopes to one shell):
+   > `--nuke` **wipes the target workspace**. Pass `--server` explicitly, or be
+   > sure `CREWSHIP_SERVER` points where you think it does.
+3. Your shell targets that server. Prefer the env var (scopes to one shell):
    ```bash
    export CREWSHIP_SERVER=<your devN url>
    crewship whoami        # confirm it talks to the right instance
    ```
-3. `jq` installed (recommended — JSON assertions fall back to grep without it).
+4. `jq` installed (recommended — JSON assertions fall back to grep without it).
 
 ## Run
 
@@ -42,8 +53,8 @@ RUNS=10 ROUTINE=normalize-dates ./test-determinism.sh
 ROUTINE=classify-ticket ./test-notifications.sh
 ```
 
-Override any of: `CREWSHIP` (binary path), `SERVER`/`CREWSHIP_SERVER`,
-`ASK_TIMEOUT`, `POLL_TIMEOUT`, `POLL_INTERVAL`.
+Override any of: `CREWSHIP` (binary path — absolute, or relative to your cwd),
+`SERVER`/`CREWSHIP_SERVER`, `ASK_TIMEOUT`, `POLL_TIMEOUT`, `POLL_INTERVAL`.
 
 ## What each suite asserts
 
