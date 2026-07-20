@@ -354,7 +354,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          # Job results, one per line, for the failure filter below.
+          # Marker written into every bot-filed body; the close path
+          # refuses to touch an issue that does not carry it.
+          MARKER: "<!-- crewship:scheduled-security-scan-alert -->"
+          TITLE: "Scheduled security scan failed on main"
+          # Job results, one per line, for the green gate below.
           RESULTS: |
             gitleaks=${{ needs.gitleaks.result }}
             govulncheck=${{ needs.govulncheck.result }}
@@ -363,22 +367,42 @@ jobs:
             osv-scan=${{ needs.osv-scan.result }}
         run: |
           set -euo pipefail
-          failed=$(echo "$RESULTS" | grep -E '=(failure|cancelled)$' || true)
+          # Fail SAFE, not fail green. This job runs with `if: always()`, so
+          # it also runs when the scan pipeline itself is broken and every
+          # needs-job is `skipped`. Enumerating the BAD statuses (the
+          # `=(failure|cancelled)` filter this replaces) meant any status
+          # not on that list — skipped, timed_out, or whatever GitHub adds
+          # next — read as green and CLOSED the tracking issue. Invert it:
+          # only an explicit `=success` on every single job is green.
+          # Blank lines (the block scalar's trailing newline) are dropped
+          # first, otherwise they would themselves fail the `=success` test.
+          not_green=$(printf '%s\n' "$RESULTS" \
+            | sed 's/[[:space:]]*$//' \
+            | grep -v '^$' \
+            | grep -vE '=success$' || true)
           # --force makes label creation idempotent across runs.
           gh label create security-scan-alert --repo "$REPO" \
             --color B60205 \
             --description "Automated: scheduled security scan failed on main" \
             --force
+          # Only ever act on an issue THIS job filed: bot author + our exact
+          # title or body marker. A human-filed issue that happens to carry
+          # the security-scan-alert label must never be closed by the bot.
           existing=$(gh issue list --repo "$REPO" --label security-scan-alert \
-            --state open --json number --jq '.[0].number // empty')
+            --state open --json number,title,body,author \
+            --jq "[ .[]
+                    | select(.author.is_bot)
+                    | select(.title == \$ENV.TITLE
+                             or (.body // \"\" | contains(\$ENV.MARKER)))
+                  ] | .[0].number // empty")
 
-          if [ -z "$failed" ]; then
+          if [ -z "$not_green" ]; then
             # Green state: close any open alert issue so the label only ever
             # flags a real, current failure (same contract as the
             # code-scanning-report job below).
             if [ -n "$existing" ]; then
               gh issue comment "$existing" --repo "$REPO" \
-                --body "✅ Scheduled security scan on \`main\` is green again as of $RUN_URL. Closing."
+                --body "✅ Every scheduled security scan on \`main\` reported \`success\` as of $RUN_URL. Closing."
               gh issue close "$existing" --repo "$REPO" --reason completed
               echo "Closed alert issue #$existing (all scans green)."
             else
@@ -387,11 +411,14 @@ jobs:
             exit 0
           fi
 
-          echo "Failed scans:"; echo "$failed"
-          body="Scheduled security scan on \`main\` failed.
+          echo "Scans that did not report success:"; echo "$not_green"
+          body="$MARKER
+          Scheduled security scan on \`main\` did not complete successfully.
+
+          Jobs below did not report \`success\` — a \`skipped\` or \`cancelled\` job means the scan never ran, which is **not** a green result:
 
           \`\`\`
-          $failed
+          $not_green
           \`\`\`
 
           Run: $RUN_URL
@@ -402,7 +429,7 @@ jobs:
             echo "Updated existing alert issue #$existing"
           else
             gh issue create --repo "$REPO" \
-              --title "Scheduled security scan failed on main" \
+              --title "$TITLE" \
               --label security-scan-alert \
               --body "$body"
           fi
@@ -435,6 +462,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          MARKER: "<!-- crewship:code-scanning-alert -->"
+          TITLE: "Code scanning: open alerts on main (tracking)"
         run: |
           set -euo pipefail
 
@@ -468,8 +497,15 @@ jobs:
             --description "Automated: open CodeQL / code-scanning alerts on main" \
             --force
 
+          # Same containment as scheduled-report: only an issue this job
+          # filed (bot author + our title/marker) is ever closed.
           existing=$(gh issue list --repo "$REPO" --label "$label" \
-            --state open --json number --jq '.[0].number // empty')
+            --state open --json number,title,body,author \
+            --jq "[ .[]
+                    | select(.author.is_bot)
+                    | select(.title == \$ENV.TITLE
+                             or (.body // \"\" | contains(\$ENV.MARKER)))
+                  ] | .[0].number // empty")
 
           if [ "$count" -eq 0 ]; then
             # Clean state: close any open tracking issue so the label only
@@ -504,7 +540,8 @@ jobs:
           # Plain double-quoted assignment (same pattern as scheduled-report
           # above) — avoids heredoc indentation pitfalls inside the YAML
           # block scalar.
-          body="**${count}** open code-scanning (CodeQL) alert(s) on \`main\`.
+          body="$MARKER
+          **${count}** open code-scanning (CodeQL) alert(s) on \`main\`.
 
           | count | severity | rule |
           |------:|----------|------|
@@ -520,7 +557,7 @@ jobs:
             echo "Updated tracking issue #$existing (${count} open)."
           else
             gh issue create --repo "$REPO" \
-              --title "Code scanning: open alerts on main (tracking)" \
+              --title "$TITLE" \
               --label "$label" \
               --body "$body"
             echo "Filed new tracking issue (${count} open)."
