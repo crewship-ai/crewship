@@ -162,6 +162,10 @@ func runAggregatesCTE(cols []string, innerWhere string) (string, []any) {
 // trace_id IS NOT NULL — Phase D migration v60. Without it SQLite would
 // fall back to a full table scan; with it the workspace prefix is a
 // covering range scan.
+// maxRunsPage caps a single ListRuns page. Doubles as the pre-allocation size
+// for the result slice — see the make() call below.
+const maxRunsPage = 100
+
 func ListRuns(ctx context.Context, db *sql.DB, q RunsQuery) ([]RunAggregated, int, error) {
 	if q.WorkspaceID == "" {
 		return nil, 0, fmt.Errorf("journal: ListRuns requires workspace_id")
@@ -169,8 +173,8 @@ func ListRuns(ctx context.Context, db *sql.DB, q RunsQuery) ([]RunAggregated, in
 	if q.Limit <= 0 {
 		q.Limit = 50
 	}
-	if q.Limit > 100 {
-		q.Limit = 100
+	if q.Limit > maxRunsPage {
+		q.Limit = maxRunsPage
 	}
 
 	// Inner WHERE (applied during grouping) — filters that touch indexed
@@ -247,16 +251,17 @@ LIMIT ? OFFSET ?`
 	}
 	defer rows.Close()
 
-	// q.Limit is clamped to [1, 100] in the validation block above;
-	// re-apply at the make() call so the cap is locally visible to
-	// CodeQL's go/uncontrolled-allocation-size rule (min builtin is on
-	// CodeQL's recognised-sanitiser list; the local allocCap = q.Limit
-	// + if-clamp pattern was not).
-	allocCap := min(q.Limit, 100)
-	if allocCap < 0 {
-		allocCap = 0
-	}
-	out := make([]RunAggregated, 0, allocCap)
+	// Pre-size to the page cap itself rather than to q.Limit. The limit is
+	// already clamped to [1, maxRunsPage] in the validation block above, so a
+	// row can never exceed this capacity and the only cost is at most
+	// maxRunsPage-1 unused slots on a small page.
+	//
+	// Passing the clamped variable instead kept go/uncontrolled-allocation-size
+	// (alert 722) open through two attempted mitigations — an explicit
+	// if-clamp, then the min() builtin — because CodeQL credits neither as a
+	// barrier and still sees a request-derived value reaching make(). A
+	// constant ends that: there is no tainted value left to flag.
+	out := make([]RunAggregated, 0, maxRunsPage)
 	for rows.Next() {
 		r, err := scanRunAggregated(rows, q.WorkspaceID)
 		if err != nil {
