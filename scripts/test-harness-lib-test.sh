@@ -122,6 +122,20 @@ expect_contains "auth failure -> points at login/seed" "$out" "seed --nuke"
 expect_not_contains "auth failure -> does NOT claim the binary is missing" "$out" "not found"
 
 echo
+echo "== README prereqs =="
+
+# The prereqs say an installed CLI on PATH is enough, so the commands they hand
+# the operator must work for that operator too. A hardcoded `./crewship` in the
+# seed block is exactly the breakage this file's fix removed from lib.sh.
+README="$SCRIPT_DIR/test-harness/README.md"
+readme_cmds="$(grep -nE '^[[:space:]]*\./crewship ' "$README" || true)"
+expect_eq "README hands out no bare ./crewship command line" "" "$readme_cmds"
+expect_contains "README seeds with the PATH form" \
+  "$(grep -E '^[[:space:]]*crewship seed ' "$README" || true)" "crewship seed --nuke"
+expect_contains "README still names the locally-built ./crewship form" \
+  "$(cat "$README")" "./crewship"
+
+echo
 if [ "$FAILURES" -eq 0 ]; then
   echo "all test-harness lib checks passed"
 else

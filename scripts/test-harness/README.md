@@ -20,13 +20,15 @@ and credential **self-service vs. escalation**.
    go build -o crewship ./cmd/crewship   # from the repo root
    # ...or just have the installed CLI on PATH
    ```
-   `seed` below is client-side from that binary, so build before you seed.
+   `seed` below is client-side from that binary, so make sure the one you
+   resolve is current — rebuild it, or `crewship self-update` the installed one.
 2. A dev server is up and **seeded** with the release-demo template. Run this
-   from the repo root (or with the installed CLI on `PATH`):
+   with the installed CLI on `PATH` (or from the repo root, see below):
    ```bash
    SEED_ANTHROPIC_API_KEY=sk-ant-... \
    SEED_GITHUB_TOKEN=ghp_...           # optional, enables the GitHub scenario
-   ./crewship seed --nuke --with-memory --with-users --wait-provision
+   crewship seed --nuke --with-memory --with-users --wait-provision
+   # ...or ./crewship seed ... if you built the binary into the repo root above
    ```
    > `--nuke` **wipes the target workspace**. Pass `--server` explicitly, or be
    > sure `CREWSHIP_SERVER` points where you think it does.
