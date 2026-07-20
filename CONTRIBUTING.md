@@ -32,6 +32,11 @@ go test ./... -count=1 && go vet ./...      # Go: must pass
 pnpm lint && pnpm build                      # Frontend: must pass for UI changes
 ```
 
+The `cmd/crewship` suite scrubs every `CREWSHIP_*` variable from its own
+environment before running, so a shell that exports `CREWSHIP_PROFILE` or
+`CREWSHIP_SERVER` for a dev instance can no longer redirect the tests at
+your live server. Tests that need one of those vars set it themselves.
+
 For UI changes, also exercise the affected feature in a browser before
 declaring it done. Type checking and tests verify code correctness, not
 feature correctness.
