@@ -51,6 +51,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -249,11 +250,18 @@ func agentAvatarHash(svg string) string {
 // agentAvatarURL builds the serve URL for a stored avatar. Returns nil when
 // the agent has no stored render, which is the signal for the client to fall
 // back to generating from (avatar_seed, avatar_style).
-func agentAvatarURL(agentID, hash string) *string {
+//
+// workspace_id is part of the URL, not an afterthought (#1307): the serve
+// route sits behind RequireWorkspace, which reads the workspace from the
+// query, a {workspaceId} path segment, or X-Workspace-ID. This path has no
+// workspace segment and the URL's only consumer is an <img src>, which cannot
+// set a header — so a URL without the query param 400s on every load.
+func agentAvatarURL(agentID, workspaceID, hash string) *string {
 	if hash == "" {
 		return nil
 	}
-	u := fmt.Sprintf("/api/v1/agents/%s/avatar?v=%s", agentID, hash)
+	u := fmt.Sprintf("/api/v1/agents/%s/avatar?v=%s&workspace_id=%s",
+		url.PathEscape(agentID), url.QueryEscape(hash), url.QueryEscape(workspaceID))
 	return &u
 }
 
@@ -334,7 +342,7 @@ func (h *AgentHandler) PutAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"avatar_url": *agentAvatarURL(agentID, hash)})
+	writeJSON(w, http.StatusOK, map[string]any{"avatar_url": *agentAvatarURL(agentID, workspaceID, hash)})
 }
 
 // ServeAvatar streams an agent's stored avatar SVG.

@@ -338,6 +338,7 @@ func (h *InboxHandler) Get(w http.ResponseWriter, r *http.Request) {
 // client-side. Best-effort: a lookup error logs and leaves avatars blank
 // rather than failing the list.
 func (h *InboxHandler) enrichAgentAvatars(ctx context.Context, rows []inboxItemResponse) {
+	workspaceID := WorkspaceIDFromContext(ctx)
 	ids := make([]interface{}, 0)
 	seen := make(map[string]bool)
 	for i := range rows {
@@ -372,7 +373,7 @@ func (h *InboxHandler) enrichAgentAvatars(ctx context.Context, rows []inboxItemR
 		if a, ok := byID[rows[i].SenderID]; ok {
 			rows[i].AvatarSeed = a.seed
 			rows[i].AvatarStyle = a.style
-			if u := agentAvatarURL(rows[i].SenderID, a.svgHash); u != nil {
+			if u := agentAvatarURL(rows[i].SenderID, workspaceID, a.svgHash); u != nil {
 				rows[i].AvatarURL = *u
 			}
 		}

@@ -992,8 +992,20 @@ Both states are normal:
 
 | `avatar_url` | Meaning |
 |---|---|
-| a URL | The agent has a stored render; fetch it from that URL. |
+| a URL | The agent has a stored render; fetch it from that URL as-is. |
 | `null` | No stored render — generate from `avatar_seed` + `avatar_style`, as before. |
+
+The URL is relative and fully qualified for the workspace, so it can be
+dropped straight into an `<img src>`:
+
+```
+/api/v1/agents/{agentId}/avatar?v={hash}&workspace_id={workspaceId}
+```
+
+`workspace_id` is part of the URL because the serve route is
+workspace-scoped and an `<img>` cannot send the `X-Workspace-ID` header the
+other read endpoints accept. Do not strip it — a request without it is
+rejected with `400 workspace_id is required`.
 
 <Note>
   The server never draws an avatar (the generator is JavaScript-only). The
@@ -1009,9 +1021,11 @@ Both states are normal:
 GET /api/v1/agents/{agentId}/avatar
 ```
 
-Returns `image/svg+xml`. Readable by any workspace member. Returns `404`
-when the agent has no stored render — which is not an error, it just means
-the client should generate from the seed.
+Returns `image/svg+xml`. Readable by any workspace member. Requires
+`?workspace_id=` (or an `X-Workspace-ID` header) like every other
+workspace-scoped route — the URL in `avatar_url` already carries it.
+Returns `404` when the agent has no stored render — which is not an error,
+it just means the client should generate from the seed.
 
 The `?v=` parameter carries a content hash and is ignored by the server; it
 exists so the response can be cached immutably and still refresh when the
@@ -1045,7 +1059,7 @@ swap a teammate's agent portrait.
 
 | Status | Meaning |
 |---|---|
-| `200` | Stored. Returns `{ "avatar_url": "…" }`. |
+| `200` | Stored. Returns `{ "avatar_url": "…" }` — ready to use as an `<img src>`. |
 | `400` | The SVG failed validation or exceeded the size cap. |
 | `403` | Caller lacks edit rights on this agent. |
 | `404` | No such agent in this workspace. |

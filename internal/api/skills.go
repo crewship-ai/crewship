@@ -221,6 +221,7 @@ func (h *SkillHandler) populateInstalledOn(r *http.Request, rows []skillResponse
 	if len(rows) == 0 {
 		return nil
 	}
+	workspaceID := WorkspaceIDFromContext(r.Context())
 	ids := make([]string, 0, len(rows))
 	idx := make(map[string]int, len(rows))
 	for i, sr := range rows {
@@ -255,7 +256,7 @@ func (h *SkillHandler) populateInstalledOn(r *http.Request, rows []skillResponse
 		); err != nil {
 			return err
 		}
-		ag.AvatarURL = agentAvatarURL(ag.AgentID, avatarSVGHash)
+		ag.AvatarURL = agentAvatarURL(ag.AgentID, workspaceID, avatarSVGHash)
 		i, ok := idx[skillID]
 		if !ok {
 			continue
