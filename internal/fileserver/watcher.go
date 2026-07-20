@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -30,7 +31,13 @@ type Watcher struct {
 	basePath string
 	logger   *slog.Logger
 	handler  EventHandler
+	watches  sync.WaitGroup
 }
+
+// closeTimeout bounds Close so a handler wedged on a full channel cannot hang
+// shutdown forever; the descriptors leak until process exit in that case, which
+// is strictly better than never returning.
+const closeTimeout = 5 * time.Second
 
 // NewWatcher creates a Watcher that monitors directories under basePath.
 func NewWatcher(basePath string, logger *slog.Logger, handler EventHandler) *Watcher {
@@ -41,10 +48,32 @@ func NewWatcher(basePath string, logger *slog.Logger, handler EventHandler) *Wat
 	}
 }
 
-// Close is a no-op — individual fsnotify watchers are closed when the context
-// passed to Watch() is cancelled. This method exists so callers can express
-// explicit cleanup intent without needing to know the internal lifecycle.
-func (w *Watcher) Close() {}
+// Close blocks until every goroutine started by Watch has observed its context
+// cancellation and released the underlying fsnotify watcher. Cancel the Watch
+// contexts first, or Close waits out closeTimeout for nothing.
+//
+// Waiting is the point: callers tear the watched directories down right after
+// shutdown, and on the kqueue backends (macOS, *BSD) fsnotify holds one
+// descriptor per watched file and closes them all inside Watcher.Close. If a
+// flood of NOTE_DELETE arrives while that is running, fsnotify v1.10.1 can
+// close the same descriptor twice (its readEvents→remove path drops the
+// watches lock between the map lookup and the unix.Close that Close is doing
+// concurrently). The second close lands on whatever descriptor the process has
+// since opened for that number — in CI that was the directory fd of an
+// unrelated parallel test's os.RemoveAll, which then failed with EBADF. See
+// #1286.
+func (w *Watcher) Close() {
+	done := make(chan struct{})
+	go func() {
+		w.watches.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(closeTimeout):
+		w.logger.Warn("file watcher shutdown timed out", "timeout", closeTimeout)
+	}
+}
 
 // Watch starts watching the output directory for a crew, invoking the handler
 // on file changes. The watcher runs until ctx is cancelled.
@@ -68,7 +97,11 @@ func (w *Watcher) Watch(ctx context.Context, crewID string) error {
 		return fmt.Errorf("watch output dir: %w", err)
 	}
 
+	w.watches.Add(1)
 	go func() {
+		// Done last: Close must not release until the descriptors are actually
+		// gone, so watcher.Close has to run first.
+		defer w.watches.Done()
 		defer watcher.Close()
 		for {
 			select {

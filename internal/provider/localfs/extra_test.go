@@ -145,7 +145,9 @@ func TestWatch_EmitsCreateEvent(t *testing.T) {
 	t.Parallel()
 	p := tempProvider(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+	// Wait for the watcher to release its descriptors before t.TempDir's
+	// RemoveAll runs — see WaitWatchers and #1286.
+	t.Cleanup(func() { cancel(); p.WaitWatchers() })
 
 	if err := p.EnsureDir(ctx, "watchme"); err != nil {
 		t.Fatal(err)
@@ -194,7 +196,9 @@ func TestWatch_RemoveAndRename(t *testing.T) {
 	t.Parallel()
 	p := tempProvider(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+	// Wait for the watcher to release its descriptors before t.TempDir's
+	// RemoveAll runs — see WaitWatchers and #1286.
+	t.Cleanup(func() { cancel(); p.WaitWatchers() })
 
 	if err := p.EnsureDir(ctx, "rm"); err != nil {
 		t.Fatal(err)
@@ -230,7 +234,9 @@ func TestWatch_NestedSubdir_AutoRegisters(t *testing.T) {
 	t.Parallel()
 	p := tempProvider(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+	// Wait for the watcher to release its descriptors before t.TempDir's
+	// RemoveAll runs — see WaitWatchers and #1286.
+	t.Cleanup(func() { cancel(); p.WaitWatchers() })
 
 	if err := p.EnsureDir(ctx, "auto"); err != nil {
 		t.Fatal(err)

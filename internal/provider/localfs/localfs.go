@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/fsnotify/fsnotify"
@@ -18,6 +19,7 @@ var _ provider.StorageProvider = (*Provider)(nil)
 // are resolved relative to basePath with symlink-aware path traversal protection.
 type Provider struct {
 	basePath string
+	watchers sync.WaitGroup
 }
 
 // New creates a local filesystem Provider rooted at basePath, creating the
@@ -237,8 +239,26 @@ func (p *Provider) EnsureDir(_ context.Context, path string) error {
 	return os.MkdirAll(full, 0775)
 }
 
+// WaitWatchers blocks until every goroutine started by Watch has observed its
+// context cancellation and released the underlying fsnotify watcher.
+//
+// Callers that delete a watched tree must cancel, then WaitWatchers, then
+// delete — never delete while the watcher is still closing. On the kqueue
+// backends (macOS, *BSD) fsnotify holds one descriptor per watched file and
+// closes them all inside Watcher.Close; if a flood of NOTE_DELETE arrives at
+// the same time, fsnotify v1.10.1 can close the same descriptor twice (its
+// readEvents→remove path drops the watches lock between the map lookup and
+// the unix.Close that Close is doing concurrently). The second close lands on
+// whatever descriptor the process has since opened for that number — in CI
+// that was the directory fd of an unrelated parallel test's os.RemoveAll,
+// which then failed with EBADF. See #1286.
+func (p *Provider) WaitWatchers() {
+	p.watchers.Wait()
+}
+
 // Watch starts watching the directory tree for filesystem changes, sending
-// events to the provided channel until ctx is cancelled.
+// events to the provided channel until ctx is cancelled. Shutdown is
+// asynchronous; use WaitWatchers to block until it has completed.
 func (p *Provider) Watch(ctx context.Context, dir string, events chan<- provider.FileEvent) error {
 	full, err := p.resolve(dir)
 	if err != nil {
@@ -255,7 +275,11 @@ func (p *Provider) Watch(ctx context.Context, dir string, events chan<- provider
 		return fmt.Errorf("watch %s: %w", dir, err)
 	}
 
+	p.watchers.Add(1)
 	go func() {
+		// Done last: WaitWatchers must not release until the descriptors are
+		// actually gone, so watcher.Close has to run first.
+		defer p.watchers.Done()
 		defer watcher.Close()
 		for {
 			select {
