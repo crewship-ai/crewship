@@ -98,6 +98,13 @@ func List(ctx context.Context, db *sql.DB, workspaceID string, statusFilter Stat
 // fail closed on empty input. Never thread a user-controlled value
 // into the workspaceID argument without a pre-check.
 func Get(ctx context.Context, db *sql.DB, workspaceID, id string) (*Request, error) {
+	return getTx(ctx, db, workspaceID, id)
+}
+
+// getTx is Get over the DBTX subset so DecideTx can read its own
+// uncommitted write from inside the caller's transaction. Same
+// workspace-scoping contract as Get.
+func getTx(ctx context.Context, db DBTX, workspaceID, id string) (*Request, error) {
 	if id == "" {
 		return nil, ErrNotFound
 	}

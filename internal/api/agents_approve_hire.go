@@ -132,18 +132,38 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 		logger = slog.Default()
 	}
 
-	// 2. Win the approvals-queue row BEFORE touching the agent (issue
-	// #1209 review). A guided hire also enqueued a kind=ephemeral_hire
-	// approvals_queue row; that row is the single decision point shared
-	// with POST /approvals/{id}/decide, which likewise flips the row
-	// first and applies agent side effects only after winning the CAS.
-	// Same lock order on both endpoints means a concurrent deny can no
-	// longer commit after we activate (denied queue + live agent):
-	// whoever flips the row owns the side effects, the loser gets an
-	// honest 409. Pre-#1209 hires (or a failed enqueue) have no row —
+	// 2–4. ONE transaction: win the approvals-queue CAS, flip the
+	// agent, resolve the inbox waitpoint (issue #1247). Before this,
+	// the three steps were separate autocommit statements, so a
+	// failure after the first left a terminal approval against a
+	// still-PENDING_REVIEW agent plus an unresolved blocking
+	// waitpoint — the "approvals row won but agent transition lost"
+	// branch this replaces was reachable without any crash.
+	//
+	// database.Open sets `_txlock=immediate`, so BeginTx issues BEGIN
+	// IMMEDIATE: the write lock is taken up front rather than
+	// upgraded mid-transaction, which is what makes a concurrent
+	// decider block on busy_timeout (30s) instead of failing with
+	// SQLITE_BUSY on a lock upgrade.
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.logger.Error("approve-hire: begin tx", "agent_id", agentID, "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	// Rollback is a no-op after a successful Commit.
+	defer func() { _ = tx.Rollback() }()
+
+	// The approvals-queue row is the single decision point shared with
+	// POST /approvals/{id}/decide, which flips the same row first.
+	// Same lock order on both endpoints means the loser gets an honest
+	// 409. Pre-#1209 hires (or a failed enqueue) have no row at all —
 	// for those the conditional agent UPDATE below stays the decision
-	// point, and no second surface exists to race it.
-	approvalRowID, lerr := findPendingHireApprovalRow(r.Context(), h.db, workspaceID, agentID)
+	// point, and no second surface exists to race it. A row that
+	// exists but is already terminal is a concurrent decision, NOT a
+	// legacy hire: activating on top of it is exactly the double-win
+	// #1247 reproduced.
+	approvalRowID, rowStatus, lerr := findHireApprovalRow(r.Context(), tx, workspaceID, agentID)
 	switch {
 	case errors.Is(lerr, sql.ErrNoRows):
 		// Legacy hire — nothing to win on the approvals surface.
@@ -151,21 +171,23 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("approve-hire: lookup approvals row", "agent_id", agentID, "error", lerr)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
-	default:
-		derr := harbormaster.Decide(r.Context(), h.db, h.journal, workspaceID, approvalRowID,
+	case rowStatus != string(harbormaster.StatusPending):
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error":  "Hire already decided via the approvals queue",
+			"reason": "approval " + approvalRowID + " is already " + rowStatus,
+		})
+		return
+	}
+
+	var decidedRow *harbormaster.Request
+	if approvalRowID != "" {
+		var derr error
+		decidedRow, derr = harbormaster.DecideTx(r.Context(), tx, workspaceID, approvalRowID,
 			harbormaster.StatusApproved, userID, "approved via hire approve")
-		if errors.Is(derr, harbormaster.ErrNotPending) {
-			// Someone decided through the approvals surface (or the
-			// row timed out) between our preflight and now. Their
-			// decision owns the agent transition; report it instead
-			// of activating on top of a concurrent deny.
-			reason := "approval " + approvalRowID + " was decided concurrently"
-			if row, gerr := harbormaster.Get(r.Context(), h.db, workspaceID, approvalRowID); gerr == nil && row != nil {
-				reason = "approval " + approvalRowID + " is already " + string(row.Status)
-			}
+		if errors.Is(derr, harbormaster.ErrNotPending) || errors.Is(derr, harbormaster.ErrNotFound) {
 			writeJSON(w, http.StatusConflict, map[string]string{
 				"error":  "Hire already decided via the approvals queue",
-				"reason": reason,
+				"reason": "approval " + approvalRowID + " was decided concurrently",
 			})
 			return
 		}
@@ -177,12 +199,11 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 3. Conditional UPDATE — the expired_at guard covers the TTL
-	// sweeper ghosting the agent between preflight and here; the
-	// status guard covers a concurrent legacy approve on a pre-#1209
-	// hire (no approvals row to serialize on).
+	// Conditional UPDATE — the expired_at guard covers the TTL sweeper
+	// ghosting the agent between preflight and here; the status guard
+	// covers a concurrent legacy approve on a pre-#1209 hire.
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := h.db.ExecContext(r.Context(), `
+	res, err := tx.ExecContext(r.Context(), `
 		UPDATE agents
 		SET status = 'IDLE', updated_at = ?
 		WHERE id = ? AND workspace_id = ? AND status = 'PENDING_REVIEW'
@@ -200,16 +221,10 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if n == 0 {
-		// Lost the race — a concurrent legacy approve (pre-#1209 hire,
-		// no approvals row to serialize on) or the TTL sweeper got the
-		// row between our preflight and UPDATE. If we had won an
-		// approvals row above this leaves it approved with the agent
-		// still pending — log loudly; the sweeper ghosts the agent at
-		// TTL and the surfaces reconverge.
-		if approvalRowID != "" {
-			logger.Error("approve-hire: approvals row won but agent transition lost",
-				"agent_id", agentID, "approval_id", approvalRowID)
-		}
+		// Lost the race, or the TTL sweeper ghosted the row. The
+		// deferred rollback undoes the approvals-queue CAS too, so the
+		// row stays pending and decidable instead of going terminal
+		// against an agent that never moved.
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error":  "Agent is not pending review",
 			"reason": "the hire was decided or expired concurrently",
@@ -217,14 +232,30 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. Resolve the inbox waitpoint addressed to this agent so the
+	// Resolve the inbox waitpoint addressed to this agent so the
 	// blocking row drops from the operator's inbox without a separate
 	// PATCH. The writeInboxItem call in Hire uses source_id=agent_id
 	// for blocking hire waitpoints, so the resolver keys off that.
-	// Failures here are logged but non-fatal — the agent is already
-	// IDLE; a stale inbox row is fixable manually and shouldn't
-	// 500 the approve.
-	inbox.ResolveBySource(r.Context(), h.db, logger, "waitpoint", agentID, "approved", userID)
+	// This is part of the decision now: a failed projection rolls the
+	// whole approval back rather than leaving a blocking waitpoint
+	// nobody can clear.
+	if err := inbox.ResolveBySourceTx(r.Context(), tx, "waitpoint", agentID, "approved", userID); err != nil {
+		logger.Error("approve-hire: resolve inbox waitpoint", "agent_id", agentID, "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("approve-hire: commit", "agent_id", agentID, "error", err)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	// 5. Post-commit tail. Journal, audit and broadcast only describe
+	// state that is now durable — emitting them inside the tx would
+	// announce a transition a rollback could still erase.
+	harbormaster.AfterDecide(r.Context(), h.db, h.journal, decidedRow,
+		harbormaster.StatusApproved, userID, "approved via hire approve")
 
 	crewIDStr := ""
 	if crewID.Valid {
@@ -251,20 +282,28 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// findPendingHireApprovalRow returns the id of the newest pending
+// findHireApprovalRow returns the id AND status of the newest
 // kind=ephemeral_hire approvals_queue row for agentID, or sql.ErrNoRows
 // for pre-#1209 hires (and hires whose enqueue failed) that have no row
 // on the approvals surface. ApproveHire must win this row via
-// harbormaster.Decide BEFORE activating the agent — the row is the
+// harbormaster.DecideTx BEFORE activating the agent — the row is the
 // atomic decision point shared with POST /approvals/{id}/decide.
-func findPendingHireApprovalRow(ctx context.Context, db *sql.DB, workspaceID, agentID string) (string, error) {
-	var approvalID string
-	err := db.QueryRowContext(ctx, `
-		SELECT id FROM approvals_queue
-		WHERE workspace_id = ? AND agent_id = ? AND kind = ? AND status = 'pending'
+//
+// The status matters: the earlier version filtered on status='pending'
+// and mapped "row exists but is already denied" onto the same
+// sql.ErrNoRows the legacy-hire case uses. A concurrent deny that
+// committed first therefore looked like a hire with no approvals row,
+// and ApproveHire happily activated the agent on top of it — two
+// winners for one decision (#1247). Returning the status lets the
+// caller tell "no such row" from "already decided".
+func findHireApprovalRow(ctx context.Context, q harbormaster.DBTX, workspaceID, agentID string) (string, string, error) {
+	var approvalID, status string
+	err := q.QueryRowContext(ctx, `
+		SELECT id, status FROM approvals_queue
+		WHERE workspace_id = ? AND agent_id = ? AND kind = ?
 		ORDER BY created_at DESC LIMIT 1`,
-		workspaceID, agentID, string(harbormaster.KindEphemeralHire)).Scan(&approvalID)
-	return approvalID, err
+		workspaceID, agentID, string(harbormaster.KindEphemeralHire)).Scan(&approvalID, &status)
+	return approvalID, status, err
 }
 
 // applyEphemeralHireDecision performs the agent-side transition for a
@@ -282,32 +321,32 @@ func findPendingHireApprovalRow(ctx context.Context, db *sql.DB, workspaceID, ag
 //	           resurrected later via `crewship rehire`.
 //
 // Both UPDATEs are conditional on status='PENDING_REVIEW' so a decision
-// racing the legacy `hire approve` path degrades to a logged no-op
-// instead of clobbering an already-live agent. The approvals_queue row
-// was already flipped by the caller — that row is the atomic decision
-// point; this function only applies its side effects.
-func applyEphemeralHireDecision(ctx context.Context, db *sql.DB, logger *slog.Logger, j journal.Emitter, hub *ws.Hub, workspaceID, agentID string, approved bool, decidedBy string) {
-	if logger == nil {
-		logger = slog.Default()
-	}
-
+// racing the legacy `hire approve` path cannot clobber an already-live
+// agent. Unlike the pre-#1247 version, a skipped side effect is no
+// longer a logged no-op on top of an already-committed decision: the
+// function runs inside the CALLER's transaction alongside the
+// approvals_queue CAS and returns errHireNotDecidable, so the caller
+// rolls the decision back and the queue row stays pending. A terminal
+// approval must never describe a transition that did not happen.
+//
+// The returned effect carries everything the post-commit tail (audit
+// log + WS broadcast) needs; nothing is emitted from inside the tx.
+func applyEphemeralHireDecisionTx(ctx context.Context, tx harbormaster.DBTX, workspaceID, agentID string, approved bool, decidedBy string) (*hireDecisionEffect, error) {
 	var (
 		curStatus string
 		crewID    sql.NullString
 		name      string
 	)
-	err := db.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 		SELECT status, crew_id, name
 		FROM agents
 		WHERE id = ? AND workspace_id = ? AND ephemeral = 1 AND deleted_at IS NULL`,
 		agentID, workspaceID).Scan(&curStatus, &crewID, &name)
 	if errors.Is(err, sql.ErrNoRows) {
-		logger.Warn("hire decision: agent not found", "agent_id", agentID)
-		return
+		return nil, errHireNotDecidable
 	}
 	if err != nil {
-		logger.Error("hire decision: load agent", "agent_id", agentID, "error", err)
-		return
+		return nil, err
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -319,9 +358,8 @@ func applyEphemeralHireDecision(ctx context.Context, db *sql.DB, logger *slog.Lo
 	if approved {
 		action, eventType = "approved", "agent.hire_approved"
 		// expired_at guard: an approve landing after the TTL sweeper
-		// ghosted the agent must not resurrect it — the skip branch
-		// below logs it instead.
-		res, err = db.ExecContext(ctx, `
+		// ghosted the agent must not resurrect it.
+		res, err = tx.ExecContext(ctx, `
 			UPDATE agents
 			SET status = 'IDLE', updated_at = ?
 			WHERE id = ? AND workspace_id = ? AND status = 'PENDING_REVIEW'
@@ -329,7 +367,7 @@ func applyEphemeralHireDecision(ctx context.Context, db *sql.DB, logger *slog.Lo
 			now, agentID, workspaceID)
 	} else {
 		action, eventType = "denied", "agent.hire_denied"
-		res, err = db.ExecContext(ctx, `
+		res, err = tx.ExecContext(ctx, `
 			UPDATE agents
 			SET expired_at = ?, updated_at = ?
 			WHERE id = ? AND workspace_id = ? AND status = 'PENDING_REVIEW'
@@ -337,39 +375,75 @@ func applyEphemeralHireDecision(ctx context.Context, db *sql.DB, logger *slog.Lo
 			now, now, agentID, workspaceID)
 	}
 	if err != nil {
-		logger.Error("hire decision: update agent", "agent_id", agentID, "action", action, "error", err)
-		return
+		return nil, err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		// Already decided through the legacy path (or already ghosted).
-		// The approvals row this call rides on is terminal either way;
-		// log for the audit trail and leave the agent alone.
-		logger.Warn("hire decision: agent no longer pending review — side effect skipped",
-			"agent_id", agentID, "action", action, "current_status", curStatus)
-		return
+	n, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		// Already decided through the legacy path, or already ghosted
+		// by the TTL sweeper. Fail the whole decision so the queue row
+		// stays pending rather than going terminal on a no-op.
+		return nil, errHireNotDecidable
 	}
 
-	inbox.ResolveBySource(ctx, db, logger, "waitpoint", agentID, action, decidedBy)
+	if err := inbox.ResolveBySourceTx(ctx, tx, "waitpoint", agentID, action, decidedBy); err != nil {
+		return nil, err
+	}
 
-	crewIDStr := crewID.String
-	WriteAuditLog(ctx, db, j, eventType, "AGENT", agentID, decidedBy, workspaceID, map[string]interface{}{
-		"agent_id": agentID,
-		"crew_id":  crewIDStr,
-		"name":     name,
+	return &hireDecisionEffect{
+		agentID:   agentID,
+		crewID:    crewID.String,
+		name:      name,
+		action:    action,
+		eventType: eventType,
+		decidedAt: now,
+		approved:  approved,
+	}, nil
+}
+
+// errHireNotDecidable means the staged agent could not take the
+// transition the decision implies (gone, already live, or ghosted by
+// the TTL sweeper). The caller must roll back and answer 409 —
+// committing the queue row would leave a terminal approval with no
+// matching agent state, the exact drift #1247 is about.
+var errHireNotDecidable = errors.New("staged hire is no longer decidable")
+
+// hireDecisionEffect is the post-commit description of an applied
+// ephemeral-hire decision: what to write to the audit log and what to
+// broadcast, once the transaction is durable.
+type hireDecisionEffect struct {
+	agentID   string
+	crewID    string
+	name      string
+	action    string
+	eventType string
+	decidedAt string
+	approved  bool
+}
+
+// emit writes the audit row and broadcasts the agent lifecycle flip.
+// Call ONLY after the enclosing transaction commits.
+func (e *hireDecisionEffect) emit(ctx context.Context, db *sql.DB, j journal.Emitter, hub *ws.Hub, workspaceID, decidedBy string) {
+	WriteAuditLog(ctx, db, j, e.eventType, "AGENT", e.agentID, decidedBy, workspaceID, map[string]interface{}{
+		"agent_id": e.agentID,
+		"crew_id":  e.crewID,
+		"name":     e.name,
 		"via":      "approvals_queue",
 	})
 
 	payload := map[string]string{
-		"id":      agentID,
-		"crew_id": crewIDStr,
-		"name":    name,
+		"id":      e.agentID,
+		"crew_id": e.crewID,
+		"name":    e.name,
 	}
-	if approved {
+	if e.approved {
 		payload["status"] = "IDLE"
 	} else {
 		// Denied hires ghost in place — status stays PENDING_REVIEW,
 		// expired_at marks the row terminal (same shape agent.expired uses).
-		payload["expired_at"] = now
+		payload["expired_at"] = e.decidedAt
 	}
-	broadcastWorkspaceEvent(hub, workspaceID, eventType, payload)
+	broadcastWorkspaceEvent(hub, workspaceID, e.eventType, payload)
 }

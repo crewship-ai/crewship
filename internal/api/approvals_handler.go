@@ -143,14 +143,27 @@ func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "status must be approved or denied")
 		return
 	}
-	err := harbormaster.Decide(r.Context(), h.db, h.journal, workspaceID, id, status, user.ID, body.Comment)
-	switch err {
-	case nil:
+	// One transaction for the decision AND its agent-side side effects
+	// (issue #1247). database.Open sets `_txlock=immediate`, so this is
+	// a BEGIN IMMEDIATE: the writer lock is held from here, and a
+	// concurrent decider waits out busy_timeout instead of racing.
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.logger.Error("approvals decide: begin tx", "err", err, "approval_id", id)
+		replyError(w, http.StatusInternalServerError, "decide failed")
+		return
+	}
+	// No-op after a successful Commit.
+	defer func() { _ = tx.Rollback() }()
+
+	row, err := harbormaster.DecideTx(r.Context(), tx, workspaceID, id, status, user.ID, body.Comment)
+	switch {
+	case err == nil:
 		// ok
-	case harbormaster.ErrNotFound:
+	case errors.Is(err, harbormaster.ErrNotFound):
 		replyError(w, http.StatusNotFound, "not found")
 		return
-	case harbormaster.ErrNotPending:
+	case errors.Is(err, harbormaster.ErrNotPending):
 		replyError(w, http.StatusConflict, "already decided")
 		return
 	default:
@@ -161,17 +174,38 @@ func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 
 	// Ephemeral-hire rows carry an agent-side transition (issue #1209):
 	// approved releases the PENDING_REVIEW gate, denied ghosts the staged
-	// agent. The Decide above is the atomic decision point — exactly one
-	// concurrent decider gets here — so the side effect can't double-fire.
-	// Failures inside are logged, never bubbled: the decision itself is
-	// already durable, and the legacy `hire approve` path remains a
-	// manual recovery hatch.
-	if row, gerr := harbormaster.Get(r.Context(), h.db, workspaceID, id); gerr == nil &&
-		row != nil && row.Kind == harbormaster.KindEphemeralHire && row.AgentID != "" {
-		applyEphemeralHireDecision(r.Context(), h.db, h.logger, h.journal, h.hub,
+	// agent. It rides this transaction, so the decision and the agent
+	// state commit together or not at all — a side effect that can't
+	// apply now rolls the decision back and answers 409 instead of
+	// leaving a terminal approval nothing acted on (#1247).
+	var effect *hireDecisionEffect
+	if row != nil && row.Kind == harbormaster.KindEphemeralHire && row.AgentID != "" {
+		effect, err = applyEphemeralHireDecisionTx(r.Context(), tx,
 			workspaceID, row.AgentID, status == harbormaster.StatusApproved, user.ID)
-	} else if gerr != nil {
-		h.logger.Warn("approvals decide: post-decide reload failed", "err", gerr, "approval_id", id)
+		if errors.Is(err, errHireNotDecidable) {
+			h.logger.Warn("approvals decide: staged hire no longer decidable — decision rolled back",
+				"approval_id", id, "agent_id", row.AgentID)
+			replyError(w, http.StatusConflict, "staged hire is no longer decidable")
+			return
+		}
+		if err != nil {
+			h.logger.Error("approvals decide: apply hire side effect", "err", err, "approval_id", id)
+			replyError(w, http.StatusInternalServerError, "decide failed")
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("approvals decide: commit", "err", err, "approval_id", id)
+		replyError(w, http.StatusInternalServerError, "decide failed")
+		return
+	}
+
+	// Post-commit tail: journal, reward history, audit and broadcast
+	// describe durable state only.
+	harbormaster.AfterDecide(r.Context(), h.db, h.journal, row, status, user.ID, body.Comment)
+	if effect != nil {
+		effect.emit(r.Context(), h.db, h.journal, h.hub, workspaceID, user.ID)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": string(status), "decided_by": user.ID})

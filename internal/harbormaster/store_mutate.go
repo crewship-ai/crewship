@@ -101,25 +101,57 @@ func Enqueue(ctx context.Context, db *sql.DB, j journal.Emitter, req Request) (s
 // approved/denied/timed out; the caller should treat that as a no-op.
 
 func Decide(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, id string, status Status, decidedBy, comment string) error {
+	row, err := DecideTx(ctx, db, workspaceID, id, status, decidedBy, comment)
+	if err != nil {
+		return err
+	}
+	AfterDecide(ctx, db, j, row, status, decidedBy, comment)
+	return nil
+}
+
+// DBTX is the subset of *sql.DB / *sql.Tx the decision writers need —
+// it lets DecideTx ride a caller-owned transaction while Decide keeps
+// managing its own autocommit statement. Same shape (and rationale) as
+// auditExecer in internal/api/credential_audit.go: the caller owns
+// commit/rollback, so a handler that must apply side effects
+// atomically with the decision can enlist the CAS in its transaction
+// instead of leaving a committed decision behind when a later step
+// fails (issue #1247).
+type DBTX interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// DecideTx performs ONLY the compare-and-swap half of a decision: the
+// conditional UPDATE plus the reload that tells the caller what it just
+// won. It writes no journal entry and no reward row — those are
+// post-commit concerns the caller hands to AfterDecide once the
+// enclosing transaction is durable. Broadcasting or journaling an
+// uncommitted decision is its own bug.
+//
+// Returns the reloaded row on success (nil only if the reload itself
+// failed, which is non-fatal — the decision is already applied in the
+// caller's tx).
+func DecideTx(ctx context.Context, tx DBTX, workspaceID, id string, status Status, decidedBy, comment string) (*Request, error) {
 	if status != StatusApproved && status != StatusDenied {
-		return ErrBadStatus
+		return nil, ErrBadStatus
 	}
 	if id == "" {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
 	// Fail closed on empty workspaceID: an empty value would make the
 	// scoped UPDATE a no-op and then the Get fallback below would have
 	// to branch on `workspaceID == ""` to avoid an unscoped lookup —
 	// easier to refuse the call here so there's exactly one safe path.
 	if workspaceID == "" {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
 
 	now := time.Now().UTC()
 	const updateSQL = `UPDATE approvals_queue
 		SET status = ?, decided_by = ?, decided_at = ?, decision_comment = ?
 		WHERE id = ? AND workspace_id = ? AND status = 'pending'`
-	res, err := db.ExecContext(ctx, updateSQL,
+	res, err := tx.ExecContext(ctx, updateSQL,
 		string(status),
 		nullable(decidedBy),
 		now.Format(timeFmt),
@@ -128,33 +160,45 @@ func Decide(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, id 
 		workspaceID,
 	)
 	if err != nil {
-		return fmt.Errorf("harbormaster: update decision: %w", err)
+		return nil, fmt.Errorf("harbormaster: update decision: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("harbormaster: rows affected: %w", err)
+		return nil, fmt.Errorf("harbormaster: rows affected: %w", err)
 	}
 	if n == 0 {
 		// Distinguish missing vs. not-pending so the caller can render
 		// the right error to the operator. The Get below is scoped to
 		// the caller's workspace, so a cross-tenant ID looks identical
 		// to a nonexistent one (ErrNotFound) — no existence leak.
-		row, err := Get(ctx, db, workspaceID, id)
+		row, err := getTx(ctx, tx, workspaceID, id)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if row == nil {
-			return ErrNotFound
+			return nil, ErrNotFound
 		}
-		return ErrNotPending
+		return nil, ErrNotPending
 	}
 
 	// Reload so the journal entry carries the canonical scope. Scoped
 	// to the caller's workspace, matching the UPDATE above.
-	row, err := Get(ctx, db, workspaceID, id)
-	if err != nil || row == nil {
-		// Decision succeeded; failing the audit emit shouldn't error out.
-		return nil
+	row, err := getTx(ctx, tx, workspaceID, id)
+	if err != nil {
+		// Decision succeeded; failing the reload shouldn't error out.
+		return nil, nil
+	}
+	return row, nil
+}
+
+// AfterDecide performs the post-commit tail of a decision: the journal
+// entry and the reward-history row that feeds AdjustMode. Both are
+// best-effort and must run only once the decision is durable — a
+// journal entry for a rolled-back decision is a lie. row may be nil
+// (reload failed), in which case there is nothing to emit.
+func AfterDecide(ctx context.Context, db *sql.DB, j journal.Emitter, row *Request, status Status, decidedBy, comment string) {
+	if row == nil {
+		return
 	}
 
 	if j != nil {
@@ -207,7 +251,6 @@ func Decide(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, id 
 		slog.Default().Warn("harbormaster: reward history skipped — missing tool",
 			"approval_id", row.ID, "workspace_id", row.WorkspaceID)
 	}
-	return nil
 }
 
 // extractToolArgs pulls the tool name + args back out of the stored
