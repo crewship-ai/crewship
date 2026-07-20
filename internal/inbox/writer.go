@@ -224,7 +224,10 @@ func ResolveBySourceTx(ctx context.Context, tx DBTX, kind, sourceID, action, use
 	if tx == nil || kind == "" || sourceID == "" {
 		return nil
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	// Encoding must stay byte-identical to ResolveBySource below, which this
+	// function was extracted from — otherwise resolved_at carries two formats
+	// depending on which variant wrote the row.
+	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: matches the autocommit ResolveBySource this was extracted from; resolved_at is read back for display, never compared in SQL
 	_, err := tx.ExecContext(ctx, `
 		UPDATE inbox_items
 		SET state = 'resolved',
