@@ -117,6 +117,8 @@ jobs:
         run: bash scripts/dev-sh-test.sh
       - name: security.yml alert-issue logic
         run: bash scripts/security-yml-test.sh
+      - name: deploy-dev.sh push_branch
+        run: bash scripts/deploy-dev-test.sh
 
   # ── Frontend: lint, typecheck, build ──
   frontend:
