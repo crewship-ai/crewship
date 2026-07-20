@@ -204,9 +204,21 @@ rpm -K crewship_<version>_linux_amd64.rpm   # → "digests signatures OK"
 ```
 
 <Note>
-A hosted APT/DNF repository (signed `Release` / `repomd.xml`) and macOS
-notarization are tracked follow-ups. Package integrity can also be verified
-against the release `checksums.txt`.
+A hosted APT/DNF repository (signed `Release` / `repomd.xml`) is a tracked
+follow-up. Package integrity can also be verified against the release
+`checksums.txt`.
+
+**macOS notarization is pipeline-ready but currently INACTIVE.** The release
+pipeline signs and notarizes the macOS artifacts only when the
+`MACOS_SIGN_P12` signing certificate is configured, and it is not provisioned
+today — so published macOS builds are unsigned and Gatekeeper will still warn
+("cannot be opened because the developer cannot be verified") on first launch.
+Until the certificate is in place, verify the macOS download against
+`checksums.txt` and clear the quarantine attribute yourself:
+
+```bash
+xattr -d com.apple.quarantine ./crewship
+```
 </Note>
 
 ## Docker Compose

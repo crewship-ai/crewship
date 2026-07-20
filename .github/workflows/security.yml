@@ -349,7 +349,7 @@ jobs:
       contents: read
       issues: write
     steps:
-      - name: File or update the alert issue on failure
+      - name: File, update, or close the alert issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -364,16 +364,30 @@ jobs:
         run: |
           set -euo pipefail
           failed=$(echo "$RESULTS" | grep -E '=(failure|cancelled)$' || true)
-          if [ -z "$failed" ]; then
-            echo "All scheduled scans green — nothing to report."
-            exit 0
-          fi
-          echo "Failed scans:"; echo "$failed"
           # --force makes label creation idempotent across runs.
           gh label create security-scan-alert --repo "$REPO" \
             --color B60205 \
             --description "Automated: scheduled security scan failed on main" \
             --force
+          existing=$(gh issue list --repo "$REPO" --label security-scan-alert \
+            --state open --json number --jq '.[0].number // empty')
+
+          if [ -z "$failed" ]; then
+            # Green state: close any open alert issue so the label only ever
+            # flags a real, current failure (same contract as the
+            # code-scanning-report job below).
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" --repo "$REPO" \
+                --body "✅ Scheduled security scan on \`main\` is green again as of $RUN_URL. Closing."
+              gh issue close "$existing" --repo "$REPO" --reason completed
+              echo "Closed alert issue #$existing (all scans green)."
+            else
+              echo "All scheduled scans green and no alert issue — nothing to do."
+            fi
+            exit 0
+          fi
+
+          echo "Failed scans:"; echo "$failed"
           body="Scheduled security scan on \`main\` failed.
 
           \`\`\`
@@ -382,9 +396,7 @@ jobs:
 
           Run: $RUN_URL
 
-          Typical cause: a new advisory landed in the govulncheck/OSV DB (updated ~daily) — check the run log for the GO-YYYY-NNNN id, then bump the dependency/toolchain or add a dated, justified allowlist entry (see the govulncheck job header + THIRD-PARTY-NOTICES.md). Close this issue when the scheduled run is green again."
-          existing=$(gh issue list --repo "$REPO" --label security-scan-alert \
-            --state open --json number --jq '.[0].number // empty')
+          Typical cause: a new advisory landed in the govulncheck/OSV DB (updated ~daily) — check the run log for the GO-YYYY-NNNN id, then bump the dependency/toolchain or add a dated, justified allowlist entry (see the govulncheck job header + THIRD-PARTY-NOTICES.md). This issue auto-closes when the daily scheduled run is green again."
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --repo "$REPO" --body "$body"
             echo "Updated existing alert issue #$existing"

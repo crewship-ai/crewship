@@ -329,10 +329,12 @@ jobs:
         # End-to-end check of #932: the packages published for THIS commit
         # must verify against the committed public key
         # (packaging/crewship-packages.pub, fingerprint in
-        # packaging/SIGNING.md). Soft-skip when a package is unsigned — a
-        # secret-less fork legitimately produces unsigned nightlies (same
-        # fail-open contract as release.yml) — but a signature that exists
-        # and does NOT verify is always a hard failure.
+        # packaging/SIGNING.md). GPG_SIGNING_KEY is provisioned on this repo
+        # (nightly.yml has logged "deb/rpm signing enabled" since
+        # 2026-07-12), so signing is MANDATORY: an unsigned package fails,
+        # and so does a signature that does not verify. The former soft-skip
+        # branches predated the secret and would now hide a nightly that
+        # silently stopped signing.
         run: |
           set -euo pipefail
           export GNUPGHOME=$(mktemp -d)
@@ -350,7 +352,8 @@ jobs:
           WORK=$(mktemp -d)
           (cd "$WORK" && ar x "$OLDPWD/$DEB")
           if [ ! -f "$WORK/_gpgorigin" ]; then
-            echo "::notice::deb is unsigned — skipping GPG check (GPG_SIGNING_KEY not provisioned on this repo, #932)"
+            echo "::error::deb is UNSIGNED (no _gpgorigin member) — nightly packages must be GPG-signed (#932)"
+            exit 1
           else
             cat "$WORK/debian-binary" "$WORK"/control.tar.* "$WORK"/data.tar.* \
               | gpg --batch --verify "$WORK/_gpgorigin" -
@@ -375,7 +378,8 @@ jobs:
           elif echo "$OUT" | grep -qi "signatures OK"; then
             echo "rpm GPG signature ok"
           else
-            echo "::notice::rpm is unsigned (digests only) — skipping GPG check (GPG_SIGNING_KEY not provisioned on this repo, #932)"
+            echo "::error::rpm is UNSIGNED (digests only) — nightly packages must be GPG-signed (#932)"
+            exit 1
           fi
 
   docker:

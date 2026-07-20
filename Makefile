@@ -1,9 +1,13 @@
-.PHONY: up down restart status dev dev\:go dev\:next build build\:go build\:sidecar test lint security sbom notices e2e e2e\:ui validate
+.PHONY: up down restart status dev dev\:go dev\:next build build\:go build\:sidecar test cover lint security sbom notices e2e e2e\:ui validate
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE    ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LICENSE_PUBKEY ?=
+# Coverage knobs for `make cover` (see the Test & Lint section).
+COVER_PKGS   ?= ./...
+# coverage/ is already gitignored, so the profile never lands in a commit.
+COVERPROFILE ?= coverage/go-cover.out
 # SENTRY_DSN is the Go-side crash-report endpoint, baked in at link time
 # via -X internal/crashreport.DSN. Empty default keeps local `make build`
 # fully telemetry-silent; CI/release paths export the real value from the
@@ -111,6 +115,18 @@ build\:sidecar:
 test:
 	pnpm test
 	go test ./...
+
+# Repo-wide Go coverage profile + total, in one reproducible command.
+# -timeout 40m: the full run measures ~4m but `go test` applies its
+# per-package timeout to the whole binary set here; the 25m default is what
+# ad-hoc coverage runs kept tripping over. COVER_PKGS/COVERPROFILE are
+# overridable for a narrower measurement, e.g.
+#   make cover COVER_PKGS=./internal/api/...
+cover:
+	@mkdir -p $(dir $(COVERPROFILE))
+	go test $(COVER_PKGS) -coverprofile=$(COVERPROFILE) -covermode=atomic -timeout 40m
+	@echo "→ Total coverage:"
+	@go tool cover -func=$(COVERPROFILE) | tail -1
 
 lint:
 	pnpm lint

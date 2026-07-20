@@ -352,11 +352,12 @@ jobs:
           fi
           crewship version
 
-      - name: Verify package signature (if signed)
-        # GPG signing is conditional (#932): a release built without the
-        # GPG_SIGNING_KEY secret is unsigned, so an unsigned package is a soft
-        # SKIP here (keeps the smoke green on secret-less forks). A package
-        # that IS signed but with a bad/invalid signature FAILS.
+      - name: Verify package signature
+        # GPG_SIGNING_KEY is provisioned on this repo (deb/rpm signing has
+        # been active since 2026-07-12), so signing is MANDATORY here (#932):
+        # an unsigned package fails just as a bad signature does. The old
+        # soft-skip branches predated the secret and would have hidden a
+        # release that silently stopped signing.
         #
         # deb verification uses plain gpg on the `_gpgorigin` ar member — a
         # debsigs-style detached signature over the remaining members in ar
@@ -396,7 +397,7 @@ jobs:
               echo "::error::failed to unpack $PKG with ar"; exit 1
             fi
             if [ ! -f "$WORK/_gpgorigin" ]; then
-              echo "::notice::deb is unsigned — skipping signature check (GPG_SIGNING_KEY not provisioned, #932)"
+              echo "::error::deb is UNSIGNED (no _gpgorigin member) — release packages must be GPG-signed (#932)"; exit 1
             elif cat "$WORK/debian-binary" "$WORK"/control.tar.* "$WORK"/data.tar.* \
                 | gpg --batch --verify "$WORK/_gpgorigin" -; then
               echo "deb signature OK"
@@ -414,7 +415,7 @@ jobs:
             elif echo "$OUT" | grep -qi "signatures OK"; then
               echo "rpm signature OK"
             else
-              echo "::notice::rpm is unsigned (digests only) — skipping signature check (GPG_SIGNING_KEY not provisioned, #932)"
+              echo "::error::rpm is UNSIGNED (digests only) — release packages must be GPG-signed (#932)"; exit 1
             fi
           fi
 
