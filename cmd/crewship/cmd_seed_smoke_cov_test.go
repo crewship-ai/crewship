@@ -39,6 +39,9 @@ func TestMain(m *testing.M) {
 	default:
 		os.Exit(0)
 	}
+	// The developer's shell may export CREWSHIP_* for their own dev instance;
+	// those beat the config a test just wrote (#1305). See testenv_test.go.
+	scrubAmbientCrewshipEnv()
 	os.Exit(m.Run())
 }
 
