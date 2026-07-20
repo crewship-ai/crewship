@@ -159,6 +159,13 @@ type Executor struct {
 	// Nil = the guard is skipped (target trusted as-is).
 	memberCheck func(ctx context.Context, workspaceID, userID string) (bool, error)
 
+	// crewAudience resolves a `crew:<slug>` notify target to the crew's
+	// human audience (its crew_members user ids) inside ONE workspace, so
+	// a notify step can fan a notice out to every member. Production wiring
+	// installs NewCrewAudienceResolver(db). Nil = crew: targets degrade to
+	// a workspace notice (never a run failure).
+	crewAudience func(ctx context.Context, workspaceID, crewSlug string) ([]string, error)
+
 	// noticeCounter reports how many routine-update notices a run has
 	// already delivered to a given recipient, so a notify step can enforce
 	// a per-recipient soft cap (anti-spam) and drop further notices once a

@@ -450,7 +450,7 @@
       "properties": {
         "to": {
           "type": "string",
-          "description": "Recipient selector: 'workspace' (default), 'trigger' (the user who ran it; workspace fallback if unattended), 'user:<id>', 'role:OWNER', or 'role:MANAGER'. Template-substitutable."
+          "description": "Recipient selector: 'workspace' (default), 'trigger' (the user who ran it; workspace fallback if unattended), 'user:<id>', 'role:OWNER', 'role:MANAGER', or 'crew:<slug>' (fans out to every human member of that crew in this workspace; an unknown slug or an empty crew degrades to a workspace notice). Template-substitutable."
         },
         "title": { "type": "string", "description": "Inbox card title (rendered, secret-redacted, truncated)." },
         "body": { "type": "string", "description": "Markdown body (rendered, secret-redacted). Usually {{ steps.X.output }}." },

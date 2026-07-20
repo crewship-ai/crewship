@@ -184,11 +184,12 @@ func TestRunNotifyStep_SoftCap_FailsOpen(t *testing.T) {
 }
 
 // TestRunNotifyStep_TemplatedCrewDegradesVisibly pins the run-time behaviour
-// of a templated `to` that renders to an unsupported crew:<slug> (the only
-// way crew: reaches run time — literal crew: is rejected at save). It must
-// NOT fail the run (non-blocking contract) but ALSO must not look like a
-// clean targeted send: the notice degrades to a workspace notice AND the
-// step output is marked `notified:degraded` so it's distinguishable.
+// of a templated `to` that renders to a crew:<slug> whose audience cannot be
+// resolved (no resolver wired here). It must NOT fail the run (non-blocking
+// contract) but ALSO must not look like a clean targeted send: the notice
+// degrades to a workspace notice AND the step output is marked
+// `notified:degraded` so it's distinguishable. (The happy path — a resolvable
+// crew fanning out to its members — lives in runner_notify_crew_test.go.)
 func TestRunNotifyStep_TemplatedCrewDegradesVisibly(t *testing.T) {
 	fake := &fakeInboxNotifier{}
 	exec := notifyExecutor(fake)
@@ -234,11 +235,13 @@ func TestRunNotifyStep_TargetResolution(t *testing.T) {
 		{"role:owner", "u1", "", "OWNER"}, // case-insensitive
 		// Bad / unsupported targets DEGRADE to a workspace notice at run
 		// time — a notify step must never fail the run. The literal forms
-		// are rejected at author time (see TestResolveNotifyTarget +
+		// are rejected at author time (see TestResolveNotifyTargets +
 		// TestValidate_NotifyStep); this covers the run-time safety net.
 		{"role:VIEWER", "u1", "", ""},
 		{"user:", "u1", "", ""},
-		{"crew:sales", "u1", "", ""}, // deferred to Phase 1
+		// crew: is supported (#842) but no audience resolver is wired here,
+		// so it degrades to a workspace notice rather than failing.
+		{"crew:sales", "u1", "", ""},
 		{"garbage", "u1", "", ""},
 	}
 	for _, tc := range cases {
@@ -264,10 +267,10 @@ func TestRunNotifyStep_TargetResolution(t *testing.T) {
 	}
 }
 
-// TestResolveNotifyTarget pins the PURE resolver's error contract — the
+// TestResolveNotifyTargets pins the PURE resolver's error contract — the
 // one author-time Validate relies on. (runNotifyStep degrades on these at
 // run time; Validate rejects the literal forms up front.)
-func TestResolveNotifyTarget(t *testing.T) {
+func TestResolveNotifyTargets(t *testing.T) {
 	ok := []struct{ to, wantUser, wantRole string }{
 		{"", "", ""}, {"workspace", "", ""},
 		{"trigger", "u_trig", ""},
@@ -275,14 +278,14 @@ func TestResolveNotifyTarget(t *testing.T) {
 		{"role:MANAGER", "", "MANAGER"}, {"role:owner", "", "OWNER"},
 	}
 	for _, tc := range ok {
-		u, r, err := resolveNotifyTarget(tc.to, "u_trig")
-		if err != nil || u != tc.wantUser || r != tc.wantRole {
-			t.Errorf("resolveNotifyTarget(%q) = (%q,%q,%v), want (%q,%q,nil)", tc.to, u, r, err, tc.wantUser, tc.wantRole)
+		recips, slug, err := resolveNotifyTargets(tc.to, "u_trig")
+		if err != nil || slug != "" || len(recips) != 1 || recips[0].UserID != tc.wantUser || recips[0].Role != tc.wantRole {
+			t.Errorf("resolveNotifyTargets(%q) = (%+v,%q,%v), want one recipient (%q,%q) and no crew", tc.to, recips, slug, err, tc.wantUser, tc.wantRole)
 		}
 	}
-	for _, bad := range []string{"role:VIEWER", "user:", "crew:sales", "garbage"} {
-		if _, _, err := resolveNotifyTarget(bad, "u_trig"); err == nil {
-			t.Errorf("resolveNotifyTarget(%q) should error", bad)
+	for _, bad := range []string{"role:VIEWER", "user:", "crew:", "garbage"} {
+		if _, _, err := resolveNotifyTargets(bad, "u_trig"); err == nil {
+			t.Errorf("resolveNotifyTargets(%q) should error", bad)
 		}
 	}
 }
