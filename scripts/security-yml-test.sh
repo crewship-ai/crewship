@@ -20,8 +20,19 @@
 # Both blocks are EXTRACTED VERBATIM from security.yml between marker comments
 # and eval'd, rather than being re-typed here. A copy would drift from the
 # workflow and then happily pass while production stayed broken — which is the
-# exact failure mode these tests are meant to prevent. If the markers go
-# missing the extraction returns empty and the run fails loudly.
+# exact failure mode these tests are meant to prevent.
+#
+# Marker LOSS fails loudly. Marker BYPASS is the harder case and the one that
+# actually threatens this file: leave the markers in place, green and tested,
+# and re-assign `not_green` one line after `# gate:end`. So extraction is scoped
+# to the scheduled-report job (a block moved out of it is not found at all), and
+# every assignment to the tested variables inside that job must live inside the
+# markers — otherwise the value under test is not the value production uses.
+#
+# Known limit, stated rather than discovered later: this verifies the LOGIC the
+# job would run, not that the job runs. Disabling it (`if: false`, removing the
+# schedule trigger, deleting the step) leaves every check here green. Guarding
+# that belongs in branch protection or a workflow-level lint, not here.
 #
 # Usage: bash scripts/security-yml-test.sh
 set -uo pipefail
@@ -33,29 +44,79 @@ FAILURES=0
 pass() { printf '  ok   %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; FAILURES=$((FAILURES + 1)); }
 
-# Print the lines between `# <name>:begin` and `# <name>:end`, dedented out of
-# the YAML block scalar. Returns empty if the markers are absent.
+# Print the body of the `scheduled-report` job — everything from its key to the
+# next job at the same indent. Extraction is scoped to this FIRST, so a marked
+# block that has been moved out of the job (into another job, or into a dead
+# comment island) is not found at all rather than being tested where it can no
+# longer run.
+scheduled_report_job() {
+  awk '
+    /^  scheduled-report:[[:space:]]*$/ { inside = 1; print; next }
+    inside && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { inside = 0 }
+    inside { print }
+  ' "$WORKFLOW"
+}
+
+JOB_SRC="$(scheduled_report_job)"
+
+# Print the lines between `# <name>:begin` and `# <name>:end` within the job
+# body, dedented out of the YAML block scalar. Empty if the markers are absent.
 extract_block() {
-  awk -v name="$1" '
+  printf '%s\n' "$JOB_SRC" | awk -v name="$1" '
     $0 ~ "^[[:space:]]*# " name ":begin[[:space:]]*$" { inside = 1; next }
     $0 ~ "^[[:space:]]*# " name ":end[[:space:]]*$"   { inside = 0 }
     inside { sub(/^ {10}/, ""); print }
-  ' "$WORKFLOW"
+  '
 }
+
+# Count assignments to a shell variable in a block of text.
+count_assign() { printf '%s\n' "$2" | grep -cE "^[[:space:]]*$1=" || true; }
+
+if [ -z "$JOB_SRC" ]; then
+  echo "FATAL: could not find the 'scheduled-report' job in $WORKFLOW" >&2
+  echo "       (renamed? then this test is covering nothing — fix the name here)" >&2
+  exit 1
+fi
 
 GATE_SRC="$(extract_block gate)"
 LOOKUP_SRC="$(extract_block lookup)"
 
 if [ -z "$GATE_SRC" ]; then
-  echo "FATAL: could not extract the 'gate' block from $WORKFLOW" >&2
-  echo "       (the # gate:begin / # gate:end markers are gone)" >&2
+  echo "FATAL: could not extract the 'gate' block from the scheduled-report job" >&2
+  echo "       (markers gone, or the block was moved out of the job)" >&2
   exit 1
 fi
 if [ -z "$LOOKUP_SRC" ]; then
-  echo "FATAL: could not extract the 'lookup' block from $WORKFLOW" >&2
-  echo "       (the # lookup:begin / # lookup:end markers are gone)" >&2
+  echo "FATAL: could not extract the 'lookup' block from the scheduled-report job" >&2
+  echo "       (markers gone, or the block was moved out of the job)" >&2
   exit 1
 fi
+
+# Marker LOSS is the easy failure and was the only one this file used to guard
+# against. Marker BYPASS is the one that matters: leave the markers untouched,
+# tested and green, then re-assign the variable one line AFTER `# gate:end`.
+# Production fails green; the suite reports 17/17 ok. Nobody has to remove a
+# marker to defeat a test that only checks its own window.
+#
+# So: every assignment to these variables inside the job must live inside the
+# marked span. A second one outside it means the workflow's real value is not
+# the value under test, and that is fatal, not a warning.
+for pair in "not_green:GATE" "results_clean:GATE" "existing:LOOKUP"; do
+  var="${pair%%:*}"
+  case "${pair##*:}" in
+    GATE) marked="$GATE_SRC" ;;
+    *)    marked="$LOOKUP_SRC" ;;
+  esac
+  in_job="$(count_assign "$var" "$JOB_SRC")"
+  in_marked="$(count_assign "$var" "$marked")"
+  if [ "$in_job" -ne "$in_marked" ]; then
+    echo "FATAL: '$var' is assigned $in_job time(s) in the scheduled-report job" >&2
+    echo "       but only $in_marked time(s) inside the tested markers." >&2
+    echo "       An assignment outside the markers is not covered by this test," >&2
+    echo "       and silently decides what production actually does." >&2
+    exit 1
+  fi
+done
 
 # ---------------------------------------------------------------------------
 # The green gate
@@ -86,8 +147,7 @@ echo "green gate (GREEN closes the tracking issue):"
 expect_gate "every job success -> GREEN" GREEN \
 'gitleaks=success
 govulncheck=success
-trivy=success
-semgrep=success
+grype=success
 license-check=success
 osv-scan=success
 '
@@ -96,8 +156,7 @@ osv-scan=success
 expect_gate "every job skipped (the #1275 bug) -> NOT_GREEN" NOT_GREEN \
 'gitleaks=skipped
 govulncheck=skipped
-trivy=skipped
-semgrep=skipped
+grype=skipped
 license-check=skipped
 osv-scan=skipped
 '
@@ -105,8 +164,7 @@ osv-scan=skipped
 expect_gate "one job skipped among successes -> NOT_GREEN" NOT_GREEN \
 'gitleaks=success
 govulncheck=skipped
-trivy=success
-semgrep=success
+grype=success
 license-check=success
 osv-scan=success
 '
@@ -114,8 +172,7 @@ osv-scan=success
 expect_gate "one job failed -> NOT_GREEN" NOT_GREEN \
 'gitleaks=success
 govulncheck=failure
-trivy=success
-semgrep=success
+grype=success
 license-check=success
 osv-scan=success
 '
@@ -123,8 +180,7 @@ osv-scan=success
 expect_gate "one job cancelled -> NOT_GREEN" NOT_GREEN \
 'gitleaks=success
 govulncheck=cancelled
-trivy=success
-semgrep=success
+grype=success
 license-check=success
 osv-scan=success
 '
@@ -135,8 +191,7 @@ osv-scan=success
 expect_gate "unknown future status -> NOT_GREEN" NOT_GREEN \
 'gitleaks=success
 govulncheck=timed_out
-trivy=success
-semgrep=success
+grype=success
 license-check=success
 osv-scan=success
 '
@@ -145,8 +200,7 @@ osv-scan=success
 expect_gate "empty result for one job -> NOT_GREEN" NOT_GREEN \
 'gitleaks=success
 govulncheck=
-trivy=success
-semgrep=success
+grype=success
 license-check=success
 osv-scan=success
 '
@@ -155,15 +209,17 @@ osv-scan=success
 expect_gate "no job results at all -> NOT_GREEN" NOT_GREEN ''
 
 # Trailing whitespace is stripped before the comparison, so a genuinely green
-# scan still closes its issue rather than nagging forever.
+# scan still closes its issue rather than nagging forever. GitHub renders the
+# RESULTS block scalar from `${{ needs.*.result }}` expressions, and trailing
+# spaces in that YAML are invisible in review — without the `sed` this case is
+# a permanent false alarm on a green scan.
+#
+# Written with $'...' and explicit escapes ON PURPOSE: a fixture that carried
+# literal trailing spaces would be byte-identical to the all-success case the
+# moment any editor or pre-commit hook trimmed it, and would then silently
+# duplicate that test while claiming to cover the `sed`.
 expect_gate "trailing whitespace on success lines -> GREEN" GREEN \
-'gitleaks=success
-govulncheck=success
-trivy=success
-semgrep=success
-license-check=success
-osv-scan=success
-'
+$'gitleaks=success   \ngovulncheck=success\t\ngrype=success \nlicense-check=success\nosv-scan=success  \n'
 
 # ---------------------------------------------------------------------------
 # The issue lookup
@@ -195,9 +251,21 @@ run_lookup() {
   '
 }
 
+# Asserts BOTH the selected issue and that the lookup exited cleanly.
+#
+# The exit status is not decoration. "no issue selected" and "jq died" both
+# produce empty output, so an output-only assertion reports `ok` for a lookup
+# that crashed. In the workflow that crash happens under `set -euo pipefail`:
+# the step aborts, and no issue is filed at all — the failure the test claims to
+# rule out. Dropping the `// ""` null-body guard is exactly that mutation, and
+# it used to pass here.
 expect_lookup() {
-  local label="$1" want="$2" fixture="$3" got
-  got="$(run_lookup "$fixture")"
+  local label="$1" want="$2" fixture="$3" got rc
+  got="$(run_lookup "$fixture")" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fail "$label (lookup exited $rc — in the workflow this aborts the step under set -e, filing nothing)"
+    return
+  fi
   if [ "$got" = "$want" ]; then
     pass "$label"
   else
