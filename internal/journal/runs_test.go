@@ -2,6 +2,7 @@ package journal
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -234,4 +235,81 @@ func runFirstID(runs []RunAggregated) string {
 		return ""
 	}
 	return runs[0].ID
+}
+
+// TestListRuns_LimitClampAllocation pins the two properties that make an
+// attacker-supplied RunsQuery.Limit harmless:
+//
+//  1. the effective page size is clamped to 100 no matter how large the
+//     caller asks for (functional clamp — already true), and
+//  2. the returned slice's capacity is bounded by the maxRunsPage constant
+//     and never by the requested limit. Property (2) is what the
+//     go/uncontrolled-allocation-size alert was about: a
+//     `make([]RunAggregated, 0, limit)` sink pre-allocates from a value the
+//     caller influences. Pre-sizing to the constant instead removes the
+//     tainted value entirely.
+func TestListRuns_LimitClampAllocation(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 1})
+
+	now := time.Now().UTC()
+	// 120 runs in ws_big (> the 100 cap), 3 runs in ws_small.
+	for i := 0; i < 120; i++ {
+		emitRun(t, w, "ws_big", "agent_a", fmt.Sprintf("big_%03d", i), "COMPLETED", "USER",
+			now.Add(-time.Duration(i+1)*time.Minute))
+	}
+	for i := 0; i < 3; i++ {
+		emitRun(t, w, "ws_small", "agent_a", fmt.Sprintf("small_%d", i), "COMPLETED", "USER",
+			now.Add(-time.Duration(i+1)*time.Minute))
+	}
+	if err := w.Flush(context.Background()); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	w.Close()
+
+	// A limit far beyond anything a page could hold. Must neither panic nor
+	// try to reserve 2^40 elements.
+	huge := 1 << 40
+
+	runs, total, err := ListRuns(context.Background(), db, RunsQuery{WorkspaceID: "ws_big", Limit: huge})
+	if err != nil {
+		t.Fatalf("list ws_big: %v", err)
+	}
+	if total != 120 {
+		t.Errorf("total: got %d want 120", total)
+	}
+	if len(runs) != 100 {
+		t.Errorf("effective limit not clamped to 100: got %d rows", len(runs))
+	}
+
+	// Small workspace, same hostile limit: capacity must track the result
+	// size, not the requested limit.
+	small, _, err := ListRuns(context.Background(), db, RunsQuery{WorkspaceID: "ws_small", Limit: huge})
+	if err != nil {
+		t.Fatalf("list ws_small: %v", err)
+	}
+	if len(small) != 3 {
+		t.Fatalf("ws_small rows: got %d want 3", len(small))
+	}
+	// Capacity is deliberately NOT asserted to track the row count. The
+	// result slice is pre-sized to the maxRunsPage constant, which is
+	// bounded and caller-independent — that is what takes the tainted value
+	// out of the make() and satisfies go/uncontrolled-allocation-size. What
+	// must hold is that capacity can never be influenced by q.Limit.
+	if cap(small) > maxRunsPage {
+		t.Errorf("result capacity exceeds the page cap — allocation is not bounded by a constant: cap=%d", cap(small))
+	}
+
+	// Negative / zero limits fall back to the 50 default rather than
+	// producing a negative make() argument.
+	for _, lim := range []int{0, -1, -(1 << 40)} {
+		got, _, err := ListRuns(context.Background(), db, RunsQuery{WorkspaceID: "ws_big", Limit: lim})
+		if err != nil {
+			t.Fatalf("list limit=%d: %v", lim, err)
+		}
+		if len(got) != 50 {
+			t.Errorf("limit=%d: got %d rows want default 50", lim, len(got))
+		}
+	}
 }
