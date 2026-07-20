@@ -104,9 +104,19 @@ DCC=$(sqlite3 "$DB" "SELECT devcontainer_config FROM crews WHERE id = '$CREW_ID'
 echo "OK: config applied"
 
 # 4. Show config
+#
+# Captured rather than piped straight into `grep -q`: the pipe swallowed both
+# stdout and stderr, so a failure here printed nothing but "did not display
+# runtime_image" and left no way to tell an empty response from an API error
+# from a changed output format. Echo what we got, then assert on it.
 step "Step 4: Verify 'crew config --show'"
-"$CREWSHIP" crew config "$SLUG" --show --server "$SERVER" 2>&1 | grep -q "debian:bookworm-slim" || \
-    fail "--show did not display runtime_image"
+SHOW_OUT=$("$CREWSHIP" crew config "$SLUG" --show --server "$SERVER" 2>&1) && SHOW_RC=0 || SHOW_RC=$?
+echo "$SHOW_OUT"
+[ "$SHOW_RC" -eq 0 ] || fail "crew config --show exited $SHOW_RC"
+case "$SHOW_OUT" in
+    *debian:bookworm-slim*) ;;
+    *) fail "--show did not display runtime_image" ;;
+esac
 echo "OK: --show works"
 
 # 5. Trigger provisioning
