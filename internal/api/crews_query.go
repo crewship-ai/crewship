@@ -18,6 +18,22 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	limit, offset := parseListPagination(r, 100, 500)
 
+	// The two per-row COUNT subqueries below look like the classic N+1 to
+	// rewrite as a grouped LEFT JOIN, but measurement says otherwise
+	// (#1255 item 2). Each subquery is a point lookup on an existing index
+	// (idx_agent_crew, idx_crew_member_crew), so the total work is bounded
+	// by the page size — at most 2×LIMIT probes, independent of how many
+	// agents or members the workspace holds. Any grouped-aggregate rewrite
+	// has to touch every agent/crew_member row in the workspace before the
+	// LIMIT applies, so it is the version that degrades with workspace
+	// size. Benchmarked on a seeded SQLite fixture, 500-row page:
+	//
+	//   500 crews / 20k agents / 10k members: subqueries 5.9ms, join 29.2ms
+	//   3000 crews / 24k agents / 12k members: subqueries 2.4ms, join 51.0ms
+	//
+	// Do not "optimise" this into a join without re-running that
+	// measurement. TestCrewListCountsGoldenFixture locks the observable
+	// contract if you do.
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains, c.allow_private_endpoints,
