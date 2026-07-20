@@ -258,11 +258,12 @@ func TestCovAuthSignup_DBErrorOnExistingCheck(t *testing.T) {
 	}
 }
 
-// TestCovAuthSignup_SecureCookieAndBody verifies the full happy path
-// returns 201 with the created id/email body AND, under HTTPS, the
-// __Secure- prefixed cookies — touching the setSessionCookies success
-// branch end-to-end.
-func TestCovAuthSignup_SecureCookieAndBody(t *testing.T) {
+// TestCovAuthSignup_HappyPathIsGenericAndCookieless pins the
+// de-enumerated happy path end-to-end: 202 with the generic body and
+// — even over HTTPS, where the __Secure- cookie prefix would apply —
+// no session cookie, because a cookie that only shows up for new
+// addresses is the same oracle the 409 was.
+func TestCovAuthSignup_HappyPathIsGenericAndCookieless(t *testing.T) {
 	t.Parallel()
 	h, _, _ := covAuthHandler(t, true)
 
@@ -271,20 +272,16 @@ func TestCovAuthSignup_SecureCookieAndBody(t *testing.T) {
 	req.Header.Set("X-Forwarded-Proto", "https")
 	rr := httptest.NewRecorder()
 	h.Signup(rr, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201, body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202, body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "carol@example.com") {
-		t.Errorf("response body should echo the created email, got %s", rr.Body.String())
+	if strings.Contains(rr.Body.String(), "carol@example.com") {
+		t.Errorf("response echoes the submitted email, got %s", rr.Body.String())
 	}
-	var gotSecure bool
 	for _, c := range rr.Result().Cookies() {
-		if c.Name == "__Secure-authjs.session-token" && c.Value != "" {
-			gotSecure = true
+		if strings.Contains(c.Name, "session-token") && c.Value != "" {
+			t.Errorf("signup handed out %q; it must not authenticate the caller", c.Name)
 		}
-	}
-	if !gotSecure {
-		t.Error("expected __Secure-authjs.session-token under HTTPS")
 	}
 }
 

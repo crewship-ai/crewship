@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -35,11 +36,9 @@ func TestSeedRBACUsers_Canceled(t *testing.T) {
 func TestSeedRBACUsers_HappyPath(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
-	stub.OnPost(signupPath, func(_ *http.Request, body []byte) (int, []byte, string) {
-		var req map[string]string
-		clitest.MustDecodeJSONBody(body, &req)
-		return 201, []byte(`{"id":"u-` + req["email"] + `","email":"` + req["email"] + `"}`), "application/json"
-	})
+	// Signup answers the de-enumerated 202 with no account id — the
+	// seed must not need one.
+	stub.OnPost(signupPath, clitest.JSONResponse(202, map[string]any{"ok": true}))
 	stub.OnPost(membersPath, clitest.JSONResponse(201, map[string]string{"id": "m1"}))
 
 	out := captureStdoutCovCli2(t, func() {
@@ -56,10 +55,11 @@ func TestSeedRBACUsers_HappyPath(t *testing.T) {
 	if len(members) != len(demoUsers) {
 		t.Fatalf("member POSTs = %d, want %d", len(members), len(demoUsers))
 	}
-	// Role pinning carries the user id from signup plus the fixture role.
+	// Role pinning addresses the user by email (the only handle the
+	// seed has now) plus the fixture role.
 	var first map[string]any
 	clitest.MustDecodeJSONBody(members[0].Body, &first)
-	if first["user_id"] != "u-"+demoUsers[0].Email || first["role"] != demoUsers[0].Role {
+	if first["email"] != demoUsers[0].Email || first["role"] != demoUsers[0].Role {
 		t.Errorf("member body = %v", first)
 	}
 	// Credential table printed for every minted user.
@@ -70,20 +70,21 @@ func TestSeedRBACUsers_HappyPath(t *testing.T) {
 	}
 }
 
-func TestSeedRBACUsers_SignupConflictReusesExistingMember(t *testing.T) {
+// Re-seeding an instance that already has the fixture: signup answers
+// the same generic 202 as the first run, and the member POST is what
+// reports "already there". A role that drifted from the fixture is a
+// warning — there is no role-update endpoint to fix it with.
+func TestSeedRBACUsers_MemberConflictRoleDrift(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
-	stub.OnPost(signupPath, clitest.ErrorResponse(409, "already exists"))
-	// Admin roster: first fixture user exists with the matching role,
-	// second with a drifted role, the rest are invisible (cross-workspace).
-	role0 := demoUsers[0].Role
+	stub.OnPost(signupPath, clitest.JSONResponse(202, map[string]any{"ok": true}))
+	stub.OnPost(membersPath, clitest.ErrorResponse(409, "member exists"))
 	drifted := "VIEWER"
-	if demoUsers[1].Role == drifted {
+	if demoUsers[0].Role == drifted {
 		drifted = "MEMBER"
 	}
 	stub.OnGet(adminUsers, clitest.JSONResponse(200, []map[string]any{
-		{"id": "u1", "email": strings.ToUpper(demoUsers[0].Email), "role": role0}, // EqualFold match
-		{"id": "u2", "email": demoUsers[1].Email, "role": drifted},
+		{"id": "u1", "email": demoUsers[0].Email, "role": drifted},
 	}))
 
 	out := captureStdoutCovCli2(t, func() {
@@ -92,19 +93,13 @@ func TestSeedRBACUsers_SignupConflictReusesExistingMember(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(out, "already in workspace with role "+role0) {
-		t.Errorf("expected idempotent-skip line:\n%s", out)
-	}
 	if !strings.Contains(out, "≠ fixture") {
 		t.Errorf("expected role-drift warning:\n%s", out)
 	}
-	if !strings.Contains(out, "lookup endpoint can't see them") {
-		t.Errorf("expected invisible-user skip line:\n%s", out)
-	}
-	// No member POST goes out on the 409 recovery path here (matching
-	// role skips, drifted role warns, invisible user skips).
-	if got := len(stub.CallsFor("POST", membersPath)); got != 0 {
-		t.Errorf("member POSTs = %d, want 0", got)
+	// The users the roster doesn't know about still count as placed —
+	// the 409 says they are members, the roster just can't name them.
+	if !strings.Contains(out, "RBAC fixture credentials") {
+		t.Errorf("expected credential table:\n%s", out)
 	}
 }
 
@@ -129,15 +124,20 @@ func TestSeedRBACUsers_FailuresAreNonFatal(t *testing.T) {
 func TestSeedRBACUsers_MemberConflictIsIdempotent(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
-	stub.OnPost(signupPath, clitest.JSONResponse(201, map[string]string{"id": "u1", "email": "x"}))
+	stub.OnPost(signupPath, clitest.JSONResponse(202, map[string]any{"ok": true}))
 	stub.OnPost(membersPath, clitest.ErrorResponse(409, "member exists"))
+	roster := make([]map[string]any, 0, len(demoUsers))
+	for i, u := range demoUsers {
+		roster = append(roster, map[string]any{"id": fmt.Sprintf("u%d", i), "email": u.Email, "role": u.Role})
+	}
+	stub.OnGet(adminUsers, clitest.JSONResponse(200, roster))
 
 	out := captureStdoutCovCli2(t, func() {
 		if err := seedRBACUsers(context.Background(), newSeedClient(stub)); err != nil {
 			t.Errorf("seedRBACUsers: %v", err)
 		}
 	})
-	if !strings.Contains(out, "already in workspace; assumed role pinned earlier") {
+	if !strings.Contains(out, "already in workspace with role "+demoUsers[0].Role) {
 		t.Errorf("expected member-conflict line:\n%s", out)
 	}
 	// All users still land in the credential table.
@@ -149,7 +149,7 @@ func TestSeedRBACUsers_MemberConflictIsIdempotent(t *testing.T) {
 func TestSeedRBACUsers_MemberAssignErrorSkipsUser(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
-	stub.OnPost(signupPath, clitest.JSONResponse(201, map[string]string{"id": "u1", "email": "x"}))
+	stub.OnPost(signupPath, clitest.JSONResponse(202, map[string]any{"ok": true}))
 	stub.OnPost(membersPath, clitest.ErrorResponse(403, "not allowed"))
 
 	out := captureStdoutCovCli2(t, func() {
@@ -231,7 +231,8 @@ func TestSeedRBACUsers_TransportErrorsAreNonFatal(t *testing.T) {
 func TestSeedRBACUsers_LookupAfter409Fails(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
-	stub.OnPost(signupPath, clitest.ErrorResponse(409, "exists"))
+	stub.OnPost(signupPath, clitest.JSONResponse(202, map[string]any{"ok": true}))
+	stub.OnPost(membersPath, clitest.ErrorResponse(409, "member exists"))
 	stub.OnGet(adminUsers, clitest.ErrorResponse(500, "roster broken"))
 
 	out := captureStdoutCovCli2(t, func() {
@@ -241,21 +242,6 @@ func TestSeedRBACUsers_LookupAfter409Fails(t *testing.T) {
 	})
 	if !strings.Contains(out, "lookup after 409 failed") {
 		t.Errorf("expected lookup failure lines:\n%s", out)
-	}
-}
-
-func TestSeedRBACUsers_SignupParseError(t *testing.T) {
-	stub := clitest.NewStubServer()
-	defer stub.Close()
-	stub.OnPost(signupPath, clitest.TextResponse(201, "not json"))
-
-	out := captureStdoutCovCli2(t, func() {
-		if err := seedRBACUsers(context.Background(), newSeedClient(stub)); err != nil {
-			t.Errorf("parse failures must not abort: %v", err)
-		}
-	})
-	if !strings.Contains(out, "signup parse") {
-		t.Errorf("expected parse failure lines:\n%s", out)
 	}
 }
 

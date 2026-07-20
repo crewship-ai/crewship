@@ -53,6 +53,11 @@ function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const registered = searchParams.get("registered") === "true"
+  // Signup can't confirm that an account was created — the endpoint
+  // answers the same way for an address that already has one, so it
+  // doesn't leak who is registered. The banner has to stay as vague as
+  // the API response is.
+  const signupSubmitted = searchParams.get("signup") === "submitted"
   const expired = searchParams.get("reason") === "expired"
   const redirectTarget = safeRedirectPath(searchParams.get("redirect"))
   const { signIn } = useAuth()
@@ -153,6 +158,16 @@ function LoginForm() {
                 aria-live="polite"
               >
                 Account created! Please sign in.
+              </div>
+            )}
+            {signupSubmitted && !registered && (
+              <div
+                className="rounded-md border border-emerald-200/40 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-400"
+                role="status"
+                aria-live="polite"
+              >
+                Thanks! If that email address wasn&apos;t already registered,
+                your account is ready — sign in below.
               </div>
             )}
             {expired && !error && (

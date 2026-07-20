@@ -25,7 +25,7 @@ Errors follow [RFC 7807 Problem Details](https://datatracker.ietf.org/doc/html/r
 | `PATCH` | [`/api/v1/workspaces/{workspaceId}`](#update-workspace) | Partial update of workspace fields |
 | `DELETE` | [`/api/v1/workspaces/{workspaceId}`](#delete-workspace) | Soft-delete the workspace + cascade (`OWNER` only) |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/members`](#list-members) | All members of the workspace |
-| `POST` | [`/api/v1/workspaces/{workspaceId}/members`](#add-member) | Add an existing user by user ID |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/members`](#add-member) | Add an existing user by user ID or email |
 | `DELETE` | [`/api/v1/workspaces/{workspaceId}/members/{memberId}`](#remove-member) | Remove a member (not the `OWNER`) |
 | `PATCH` | [`/api/v1/workspaces/{workspaceId}/members/{memberId}`](#change-member-role) | Change a member's role (`MANAGER+`, ladder-guarded) |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities`](#get-member-capabilities) | Resolved capability set for one member |
@@ -270,7 +270,11 @@ Returns all members of the workspace ordered by `created_at` ASC, joined to `use
 POST /api/v1/workspaces/{workspaceId}/members
 ```
 
-Adds an existing user to the workspace by user ID.
+Adds an existing user to the workspace by user ID -- or by email, when
+that is the only handle the caller has (`POST /api/v1/auth/signup` no
+longer returns the account's id; see [Auth](/api-reference/auth)). The
+email is resolved server-side, case-insensitively, behind the same
+manage-role gate.
 
 <Tip>
 Use this when the user already has a Crewship account; for unknown email addresses, use [Create invitation](#create-invitation) instead.
@@ -282,7 +286,8 @@ Use this when the user already has a Crewship account; for unknown email address
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `user_id` | string | yes | -- | Target user's CUID |
+| `user_id` | string | yes* | -- | Target user's CUID. *Optional when `email` is given. |
+| `email` | string | yes* | -- | Target user's email address, as an alternative to `user_id`. Ignored when `user_id` is set. |
 | `role` | string | no | `MEMBER` | One of `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER` (`OWNER` cannot be assigned via API). Assigning `ADMIN` requires the caller to be `OWNER`. |
 
 ```json
@@ -296,10 +301,10 @@ Use this when the user already has a Crewship account; for unknown email address
 
 | Status | Condition |
 |---|---|
-| `400` | Missing `user_id`, invalid `role` |
+| `400` | Neither `user_id` nor `email` given, invalid `role` |
 | `402` | License member limit reached |
 | `403` | Caller not `OWNER`/`ADMIN`, or tried to assign `ADMIN` without being `OWNER` |
-| `404` | `user_id` does not match any user |
+| `404` | `user_id` / `email` does not match any user |
 | `409` | User is already a member |
 
 <Accordion title="License limit (402 Payment Required)">

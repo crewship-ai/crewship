@@ -15,8 +15,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/crewship-ai/crewship/internal/auth/sessions"
 )
 
 // cov2AuthAbortTrigger installs a trigger that aborts the given
@@ -83,74 +81,27 @@ func TestCov2AuthSignup_TxInsertFailures(t *testing.T) {
 	}
 }
 
-// --- Signup: session-create failure → orphan cleanup runs ---
+// --- Signup: losing the insert race for an existing address ---
 
-// With a nil sessions store the commit succeeds but setSessionCookies
-// fails, so Signup must delete the just-created user + workspace and
-// answer 500.
-func TestCov2AuthSignup_SessionFailureCleansUpOrphan(t *testing.T) {
+// A concurrent signup for the same address can land between the
+// existence probe and the INSERT. users.email is UNIQUE, so the INSERT
+// fails — and that failure only ever happens for an address that
+// exists, so it must answer with the same generic 202 as everything
+// else rather than a distinguishing 500.
+func TestCov2AuthSignup_UniqueRaceAnswersGeneric(t *testing.T) {
 	t.Parallel()
-	db := setupTestDB(t)
-	h := NewAuthHandler(db, newTestLogger(), newTestJWTValidator(t), nil /* no sessions store */, true)
-	rec := httptest.NewRecorder()
-	h.Signup(rec, cov2SignupReq(cov2ValidSignupBody))
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500 (session store missing), body=%s", rec.Code, rec.Body.String())
-	}
-	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE email = 'cov2@example.com'`).Scan(&n); err != nil {
-		t.Fatalf("count users: %v", err)
-	}
-	if n != 0 {
-		t.Errorf("orphan user rows = %d, want 0 (cleanupOrphanedSignup must delete)", n)
-	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM workspaces`).Scan(&n); err != nil {
-		t.Fatalf("count workspaces: %v", err)
-	}
-	if n != 0 {
-		t.Errorf("orphan workspace rows = %d, want 0", n)
-	}
-}
-
-// Same path, but with DELETE triggers installed so both best-effort
-// deletes inside cleanupOrphanedSignup fail — the handler still
-// answers 500 and does not panic.
-func TestCov2AuthSignup_CleanupDeleteFailuresAreLoggedNotFatal(t *testing.T) {
-	t.Parallel()
-	db := setupTestDB(t)
-	h := NewAuthHandler(db, newTestLogger(), newTestJWTValidator(t), nil, true)
-	cov2AuthAbortTrigger(t, db, "cov2_cl_users", "DELETE", "users")
-	cov2AuthAbortTrigger(t, db, "cov2_cl_ws", "DELETE", "workspaces")
-	rec := httptest.NewRecorder()
-	h.Signup(rec, cov2SignupReq(cov2ValidSignupBody))
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500, body=%s", rec.Code, rec.Body.String())
-	}
-	// Cleanup was blocked by the triggers, so the orphan user remains —
-	// proving the error branches ran rather than the deletes silently
-	// succeeding.
-	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE email = 'cov2@example.com'`).Scan(&n); err != nil {
-		t.Fatalf("count users: %v", err)
-	}
-	if n != 1 {
-		t.Errorf("user rows = %d, want 1 (delete was trigger-blocked)", n)
-	}
-}
-
-// --- setSessionCookies: sessions.Create DB failure (via Signup) ---
-
-func TestCov2AuthSignup_SessionsTableGone500(t *testing.T) {
-	t.Parallel()
-	db := setupTestDB(t)
-	h := NewAuthHandler(db, newTestLogger(), newTestJWTValidator(t), sessions.NewDBStore(db), true)
-	if _, err := db.Exec(`DROP TABLE user_sessions`); err != nil {
-		t.Fatalf("drop user_sessions: %v", err)
+	h, db, _ := covAuthHandler(t, true)
+	// Stand in for the racing winner: the row appears after our probe
+	// would have run. A BEFORE INSERT trigger that raises the driver's
+	// UNIQUE message reproduces the loser's exact error.
+	if _, err := db.Exec(`CREATE TRIGGER cov2_su_race BEFORE INSERT ON users
+		BEGIN SELECT RAISE(ABORT, 'UNIQUE constraint failed: users.email'); END`); err != nil {
+		t.Fatalf("create trigger: %v", err)
 	}
 	rec := httptest.NewRecorder()
 	h.Signup(rec, cov2SignupReq(cov2ValidSignupBody))
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500 (sessions.Create failed), body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (race loser must not 500), body=%s", rec.Code, rec.Body.String())
 	}
 }
 

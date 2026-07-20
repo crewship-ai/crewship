@@ -191,6 +191,50 @@ func TestWorkspaceMembership_AddMember_AdminAssigningAdmin_Returns403(t *testing
 	}
 }
 
+// Adding by email is the alternative to user_id: signup stopped
+// returning the new account's id when it was de-enumerated, so the
+// only handle a caller (the CLI seed, an invite UI) has for a freshly
+// created user is the address they typed. Resolution happens behind
+// the manage-role gate, so it is not an enumeration surface — an
+// admin can already list every member of their workspace.
+func TestWorkspaceMembership_AddMember_ByEmail_Resolves(t *testing.T) {
+	h, userID, wsID := membershipRig(t)
+	seedOtherUser(t, h, "user-target", "target@example.com")
+	body := strings.NewReader(`{"email":"TARGET@example.com","role":"MEMBER"}`)
+	req := withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/members", body),
+		userID, wsID, "OWNER",
+	)
+	rr := httptest.NewRecorder()
+	h.AddMember(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+	var got memberResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.UserID != "user-target" {
+		t.Errorf("user_id = %q, want user-target", got.UserID)
+	}
+}
+
+// An email with no account behind it is a 404, same as an unknown
+// user_id — the caller is already authorised to see the roster.
+func TestWorkspaceMembership_AddMember_UnknownEmail_Returns404(t *testing.T) {
+	h, userID, wsID := membershipRig(t)
+	body := strings.NewReader(`{"email":"nobody@example.com","role":"MEMBER"}`)
+	req := withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/members", body),
+		userID, wsID, "OWNER",
+	)
+	rr := httptest.NewRecorder()
+	h.AddMember(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 // Missing user_id is a 400. The endpoint cannot do anything useful
 // without it and we want a deterministic error so the UI can surface a
 // clean validation message instead of guessing from a 500.

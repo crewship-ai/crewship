@@ -48,8 +48,15 @@ var demoUsers = []demoUser{
 //
 // Requires CREWSHIP_ALLOW_SIGNUP=true on the server (signup endpoint
 // gates on this; bootstrap is the only path otherwise). Errors are
-// non-fatal — a single signup that 409s (user already exists) is
-// reported and the loop continues so the rest of the fixture lands.
+// non-fatal — a user the fixture can't place is reported and the loop
+// continues so the rest of the fixture lands.
+//
+// Signup answers 202 with a generic body for both a fresh address and
+// one that already has an account (it was de-enumerated in #1254), so
+// the seed can no longer read the new user's id out of the response —
+// and doesn't need to: the role-pinning POST below accepts the email
+// and resolves it server-side. That also makes re-seeding idempotent
+// without a 409 branch.
 func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -61,11 +68,7 @@ func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 	fmt.Fprintln(os.Stderr, "Seeding RBAC fixture (4 users × 4 roles)...")
 	fmt.Fprintln(os.Stderr, "  (requires CREWSHIP_ALLOW_SIGNUP=true on server)")
 
-	type row struct {
-		demoUser
-		UserID string
-	}
-	var minted []row
+	var minted []demoUser
 
 	for _, u := range demoUsers {
 		if err := ctx.Err(); err != nil {
@@ -73,10 +76,10 @@ func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 		}
 		// Step 1: signup. The signup handler doesn't check the caller's
 		// bearer (it gates on allowSignup, not auth), so we can reuse
-		// the same authenticated client. The signed-up user's session
-		// cookies are returned in the response but ignored — they
-		// would expire in 15 min anyway and the seed has no use for
-		// them.
+		// the same authenticated client. The 202 is deliberately
+		// uninformative — "created" and "already exists" look the same
+		// — so we don't branch on it; step 2 is what tells us whether
+		// the account is actually there.
 		resp, err := client.Post("/api/v1/auth/signup", map[string]string{
 			"email":     u.Email,
 			"full_name": u.FullName,
@@ -86,59 +89,19 @@ func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 			fmt.Fprintf(os.Stderr, "  X %s: signup request failed: %v\n", u.Email, err)
 			continue
 		}
-		var userID string
-		if resp.StatusCode == http.StatusConflict {
-			resp.Body.Close()
-			// Signup 409 = user already in users table. Falling through
-			// to role pinning keeps --with-users idempotent: the
-			// workspace_members row may still be missing from a prior
-			// half-failed seed, so we look up the user ID and re-try the
-			// member POST. If the member row also exists with the right
-			// role, AddMember returns 409 below and we treat it as a
-			// no-op; if the role drifted from the fixture we surface a
-			// warning (no PUT endpoint for member role exists today).
-			existingID, existingRole, lerr := findWorkspaceMemberByEmail(client, wsID, u.Email)
-			if lerr != nil {
-				fmt.Fprintf(os.Stderr, "  X %s: lookup after 409 failed: %v\n", u.Email, lerr)
-				continue
-			}
-			if existingID == "" {
-				fmt.Fprintf(os.Stderr, "  ↻ %s: in users table but not in this workspace and lookup endpoint can't see them; skip (re-run with --nuke for fresh state)\n", u.Email)
-				continue
-			}
-			userID = existingID
-			if existingRole != "" && !strings.EqualFold(existingRole, u.Role) {
-				fmt.Fprintf(os.Stderr, "  ! %s: existing workspace role %q ≠ fixture %q (no role-update endpoint; manual fix needed)\n", u.Email, existingRole, u.Role)
-				minted = append(minted, row{demoUser: u, UserID: userID})
-				continue
-			}
-			if strings.EqualFold(existingRole, u.Role) {
-				fmt.Fprintf(os.Stderr, "  ↻ %s: already in workspace with role %s; skipping\n", u.Email, u.Role)
-				minted = append(minted, row{demoUser: u, UserID: userID})
-				continue
-			}
-		} else if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-			body, _ := readBody(resp)
-			fmt.Fprintf(os.Stderr, "  X %s: signup HTTP %d: %s\n", u.Email, resp.StatusCode, strings.TrimSpace(string(body)))
+		signupStatus := resp.StatusCode
+		resp.Body.Close()
+		if signupStatus != http.StatusAccepted && signupStatus != http.StatusCreated && signupStatus != http.StatusOK {
+			fmt.Fprintf(os.Stderr, "  X %s: signup HTTP %d (is CREWSHIP_ALLOW_SIGNUP=true?)\n", u.Email, signupStatus)
 			continue
-		} else {
-			var signup struct {
-				ID    string `json:"id"`
-				Email string `json:"email"`
-			}
-			if err := cli.ReadJSON(resp, &signup); err != nil {
-				fmt.Fprintf(os.Stderr, "  X %s: signup parse: %v\n", u.Email, err)
-				continue
-			}
-			userID = signup.ID
 		}
 
-		// Step 2: pin role via workspace_members. The bootstrap admin
-		// (already authed as client) is OWNER, so this call succeeds
-		// even when the target role is ADMIN or higher.
+		// Step 2: pin role via workspace_members, addressing the user by
+		// email. The bootstrap admin (already authed as client) is OWNER,
+		// so this call succeeds even when the target role is ADMIN.
 		mResp, err := client.Post(
 			fmt.Sprintf("/api/v1/workspaces/%s/members?workspace_id=%s", wsID, wsID),
-			map[string]interface{}{"user_id": userID, "role": u.Role},
+			map[string]interface{}{"email": u.Email, "role": u.Role},
 		)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  X %s: assign %s: %v\n", u.Email, u.Role, err)
@@ -146,15 +109,27 @@ func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 		}
 		if mResp.StatusCode == http.StatusConflict {
 			mResp.Body.Close()
-			fmt.Fprintf(os.Stderr, "  ↻ %s: already in workspace; assumed role pinned earlier\n", u.Email)
-			minted = append(minted, row{demoUser: u, UserID: userID})
+			// Already a member from an earlier run. Idempotent path:
+			// verify the role still matches the fixture (there is no
+			// role-update endpoint, so drift is a warning, not a fix).
+			_, existingRole, lerr := findWorkspaceMemberByEmail(client, wsID, u.Email)
+			if lerr != nil {
+				fmt.Fprintf(os.Stderr, "  X %s: lookup after 409 failed: %v\n", u.Email, lerr)
+				continue
+			}
+			if existingRole != "" && !strings.EqualFold(existingRole, u.Role) {
+				fmt.Fprintf(os.Stderr, "  ! %s: existing workspace role %q ≠ fixture %q (no role-update endpoint; manual fix needed)\n", u.Email, existingRole, u.Role)
+			} else {
+				fmt.Fprintf(os.Stderr, "  ↻ %s: already in workspace with role %s; skipping\n", u.Email, u.Role)
+			}
+			minted = append(minted, u)
 			continue
 		}
 		if err := cli.CheckError(mResp); err != nil {
 			fmt.Fprintf(os.Stderr, "  X %s: assign %s: %v\n", u.Email, u.Role, err)
 			continue
 		}
-		minted = append(minted, row{demoUser: u, UserID: userID})
+		minted = append(minted, u)
 	}
 
 	if len(minted) == 0 {
@@ -182,8 +157,8 @@ func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 
 // findWorkspaceMemberByEmail resolves an email to (userID, currentRole)
 // for users already in the current workspace's member roster. Used to
-// recover the user ID when signup returns 409 so the role-pinning step
-// can still verify the workspace_members row.
+// read back the current role when the role-pinning POST returns 409
+// (the user was placed by an earlier seed run).
 //
 // Returns ("", "", nil) when the email isn't found in this workspace —
 // the user may exist in the global users table but not be a member here,

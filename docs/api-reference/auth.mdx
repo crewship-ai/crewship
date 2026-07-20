@@ -75,11 +75,20 @@ NextAuth error redirect target. Echoes the `?error=` query value back as JSON (d
 ### `POST /api/v1/auth/signup`
 
 Create a new user, their starter workspace, and the OWNER workspace
-membership in a single transaction, then set the session cookie so
-the client is signed in immediately. Off by default — enable with
+membership in a single transaction. Off by default — enable with
 `CREWSHIP_ALLOW_SIGNUP=true` at startup. On a closed instance
 (default), the endpoint returns `403` with the env-var name in the
 error message.
+
+<Warning>
+  **Contract change (2026-07):** this endpoint no longer answers `409
+  Email already registered`, no longer returns the new account's `id`,
+  and no longer sets a session cookie. All three told an
+  unauthenticated caller whether an address has an account here, which
+  made signup an email-enumeration oracle. A brand-new address and one
+  that already exists now get byte-identical responses. Clients must
+  send the user to `/login` afterwards instead of assuming a session.
+</Warning>
 
 **Request body:**
 
@@ -97,24 +106,34 @@ error message.
 | `email` | Must match the server's basic email regex. |
 | `password` | Min 8 characters. |
 
-**Response:** `201 Created`. The body is just the new user's `id` and
-`email` — the workspace and OWNER membership are created server-side
-but are not echoed back. A `Set-Cookie: __Secure-authjs.session-token=...`
-header is set, so the caller is signed in — no follow-up login call needed.
+**Response:** `202 Accepted`, with the same body whether the account was
+created or the address already had one:
 
 ```json
 {
-  "id": "u_01HVY...",
-  "email": "alice@example.com"
+  "ok": true,
+  "message": "If that email address isn't already registered, the account has been created. Sign in at /login to continue."
 }
 ```
+
+No session cookie is set — sign in at `POST /api/auth/callback/credentials`
+(or the `/login` page) once the account exists. When the address was
+already taken, nothing is written and the owner gets an "someone tried
+to sign up with your email" notice, if a mailer is configured
+(`RESEND_API_KEY`); otherwise the attempt is only logged, with the
+address hashed.
 
 | Status | Condition |
 |--------|-----------|
 | `400` | Field fails one of the validation rules above. |
 | `403` | Signup is disabled (`CREWSHIP_ALLOW_SIGNUP` is unset/false). |
-| `409` | Email already registered on this instance. |
-| `500` | DB transaction or session-cookie issue failed; account rolled back so no orphan rows land. |
+| `500` | Server-side failure (DB unreachable, bcrypt error). Not existence-dependent — a duplicate address never produces a `500`. |
+
+<Note>
+  Need the new user's id (to add them to a workspace, say)? Use `POST
+  /api/v1/workspaces/{workspaceId}/members` with `{"email": "..."}` —
+  it resolves the address behind the workspace-manage role gate.
+</Note>
 
 <Note>
   Signup is distinct from [`POST /api/v1/bootstrap`](/api-reference/overview) — bootstrap is the one-shot empty-instance flow that always creates the first OWNER regardless of `CREWSHIP_ALLOW_SIGNUP`. Signup is the steady-state "add another user to this open instance" surface. Most production deployments leave signup off and onboard via [device pairing](#device-pairing) or direct admin invites.
