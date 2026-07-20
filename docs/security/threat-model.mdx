@@ -489,6 +489,43 @@ presented bearer token against that roster to resolve the **acting** agent:
   never enters a container, the token cannot be forged from inside the agent
   process.
 
+#### Where the memory refusal is enforced (CRE-153)
+
+The token-less refusal above is only true of a route that actually performs
+it, and stating the guarantee at the level of "identity-bearing routes" was
+how it came to be false. The first attempt applied the check inside the memory
+**MCP** handler alone; the five **legacy** HTTP memory routes registered
+alongside it — `GET /memory/read`, `POST /memory/write`, `POST
+/memory/search`, `GET /memory/status`, `POST /memory/reindex` — did no
+identity resolution at all and resolved the tier from the sidecar's boot
+agent, so a sibling that simply omitted its `Authorization` header could still
+read and overwrite the boot agent's private `AGENT.md`.
+
+The whole memory surface is now gated **by path prefix in the sidecar's
+router** (`refuseTokenlessMemory`, `internal/sidecar/memory_guard.go`), before
+the route switch chooses a handler. Both `/memory/*` and `/mcp/memory*` are
+covered, a memory route added later inherits the check from its registration,
+and the refusal is a `403` on every one of them — the MCP transport used to
+answer `200` with a JSON-RPC error, which made downgrade attempts read as
+successes in access logs.
+
+Coverage of the **rest** of the sidecar's routes is a different, weaker
+statement, deliberately kept honest here:
+
+- `/query`, `/escalate` and the agent-attribution routes (`/issue/create`,
+  `/expose-port`, `/keeper/*`, `/pipelines/save`, `/pipelines/<slug>/run`,
+  `/mcp/routines`, `/connections/<crew>/message`, `/report-confidence`)
+  resolve the acting agent **inside the handler** and fail closed there. They
+  are not behind a prefix gate; a route added next to them does not inherit
+  the check.
+- Crew-scoped routes (mission start, pipeline dry-run, cross-crew message and
+  file reads) carry **no per-agent** decision at all: any member of the crew
+  may drive them, and authorization is applied by crewshipd on the far side of
+  the IPC hop. That is an accepted boundary, not an oversight.
+- `TestSidecarRoutes_IdentityCoverage` enumerates the routes registered in the
+  sidecar router directly from source and fails when one is not classified, so
+  the next route cannot silently join the first category by accident.
+
 The raw LLM-proxy cost ledger still attributes usage to the boot agent:
 provider API calls carry the provider key, not a per-agent token, so the
 proxy has no per-request identity to bind — an accepted limitation of the
@@ -595,6 +632,7 @@ crew and keep the workspace-wide `include_values` path.
 | Crew-bound token, body-carried `crew_id` → sibling-crew attribution (cost / journal / keeper / pipelines / assignments / escalation / query / mcp-tool-calls / agent create) | ✅ closed — in-handler `assertBoundCrewWorkspaceDB` exact-crew match (#1186) |
 | F4 handler body-workspace drop | ⏳ PR-F25 (eliminate body workspace param — cleanup, no longer a security gap) |
 | Lessons memory tier agent-author write | ✅ closed — dispatcher rejects `tier="lessons"` |
+| Token-less sibling reads/writes a peer's memory tier (CRE-153) | ✅ closed — router-level prefix gate over `/memory/*` + `/mcp/memory*` (`refuseTokenlessMemory`), 403 on every route + route-enumeration test |
 | Memory file injection scan (READ path) | ✅ — 11 regex rules + full Unicode Cf category (+ 3 Hangul fillers) |
 | Memory scanner v2 (base64 / homoglyph / URL exfil) | ✅ shipped — PR-F4 |
 | Memory scanner — tool-result path | ✅ partial — Claude `tool_result` wired; per-adapter sweep is PR-F4 follow-up |

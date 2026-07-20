@@ -110,15 +110,15 @@ func (s *Server) handleMemoryMCPForAgent(w http.ResponseWriter, r *http.Request,
 	// already refuse a request that carries no Authorization header once the
 	// crew has per-agent tokens (a sibling dropping the header to fall through
 	// to the spoofable slug); this path did not, so a sibling could read or
-	// overwrite ANY crew member's memory tier just by naming it in the URL —
-	// the guarantee was enforced per-code-path instead of at a chokepoint.
-	// tokenlessDowngrade is now that chokepoint, shared with both siblings.
-	if s.tokenlessDowngrade(r) {
-		writeJSONResponse(w, http.StatusOK, memoryMCPResponse{
-			JSONRPC: "2.0",
-			ID:      mcpNullID,
-			Error:   &memoryMCPRPCError{Code: -32001, Message: "per-agent token required"},
-		})
+	// overwrite ANY crew member's memory tier just by naming it in the URL.
+	//
+	// CRE-153: the refusal now lives in buildHandler, in front of the whole
+	// /memory + /mcp/memory prefix — #1274 put it here only, and the five
+	// legacy /memory/* routes stayed wide open. This call is the redundant
+	// second line for direct invocations of the handler (tests, any future
+	// in-process caller that bypasses the router); the router gate is the
+	// one that actually holds the surface.
+	if s.refuseTokenlessMemory(w, r) {
 		return
 	}
 	effectiveSlug := agentSlug
