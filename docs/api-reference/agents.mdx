@@ -243,6 +243,7 @@ GET /api/v1/agents?workspace_id={workspaceId}
 | `system_prompt` | string? | System prompt for the agent |
 | `avatar_seed` | string? | Seed for avatar generation |
 | `avatar_style` | string? | Avatar style (e.g., `"bottts"`, `"pixel-art"`) |
+| `avatar_url` | string? | Serve URL for the agent's **stored** avatar, or `null` when it has none and is still generated from the seed. See [Agent avatars](#agent-avatars). |
 | `timeout_seconds` | integer | Maximum execution time |
 | `tool_profile` | string | Tool access profile |
 | `memory_enabled` | boolean | Whether agent memory is enabled |
@@ -971,6 +972,100 @@ DELETE /api/v1/agents/{agentId}/peers/{userId}
 
 <Note>
   The GDPR cascade endpoint [`DELETE /api/v1/admin/users/{userId}/data`](/api-reference/admin#delete-api-v1-admin-users-userid-data) deletes peer cards across **all** agents in the workspace for a single user — that's the right path for a full SAR. This per-agent endpoint is for the narrower "clean up just this agent's notes about this user" case.
+</Note>
+
+---
+
+## Agent avatars
+
+An agent's avatar is drawn from its `avatar_seed` and `avatar_style` by a
+generator that runs **in the browser**. That makes the rendered face a
+function of the installed generator version: upgrading the avatar library
+redraws every existing agent, and the roster your team recognises changes
+overnight.
+
+To stop that, an agent can carry a **stored render**. Once stored, that
+exact image is served instead of being redrawn, so the agent's face
+survives generator upgrades.
+
+Both states are normal:
+
+| `avatar_url` | Meaning |
+|---|---|
+| a URL | The agent has a stored render; fetch it from that URL. |
+| `null` | No stored render — generate from `avatar_seed` + `avatar_style`, as before. |
+
+<Note>
+  The server never draws an avatar (the generator is JavaScript-only). The
+  client renders the image and stores it — at creation, or the first time
+  someone with edit rights views an agent that has none. Agents created
+  through the CLI or crew templates therefore start with `avatar_url: null`
+  and get filled in later.
+</Note>
+
+### Get stored avatar
+
+```
+GET /api/v1/agents/{agentId}/avatar
+```
+
+Returns `image/svg+xml`. Readable by any workspace member. Returns `404`
+when the agent has no stored render — which is not an error, it just means
+the client should generate from the seed.
+
+The `?v=` parameter carries a content hash and is ignored by the server; it
+exists so the response can be cached immutably and still refresh when the
+image actually changes.
+
+Responses are served with `Content-Security-Policy: default-src 'none';
+sandbox` and `X-Content-Type-Options: nosniff`, so the SVG cannot load
+subresources or execute script even if opened directly.
+
+### Store an avatar
+
+```
+PUT /api/v1/agents/{agentId}/avatar
+```
+
+```json
+{ "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\">…</svg>" }
+```
+
+Requires the same per-agent edit rights as `PATCH /api/v1/agents/{agentId}`.
+
+The SVG is validated against an allowlist of inert drawing, gradient and
+metadata elements. Anything capable of loading or executing something —
+`<script>`, `<foreignObject>`, `<use>`, `<image>`, any `href`, any `on*`
+handler, any external `url(…)` — is rejected with `400`. Maximum 64 KiB.
+
+**Storing is write-once.** An agent that already has a stored avatar
+returns `409`; clear it first to replace it. Without that rule, an endpoint
+that fires automatically on page view would double as a way to silently
+swap a teammate's agent portrait.
+
+| Status | Meaning |
+|---|---|
+| `200` | Stored. Returns `{ "avatar_url": "…" }`. |
+| `400` | The SVG failed validation or exceeded the size cap. |
+| `403` | Caller lacks edit rights on this agent. |
+| `404` | No such agent in this workspace. |
+| `409` | The agent already has a stored avatar. |
+
+### Clear a stored avatar
+
+```
+DELETE /api/v1/agents/{agentId}/avatar
+```
+
+Returns `204`. The agent reverts to generate-from-seed — which also means
+the next generator upgrade will change its face again.
+
+<Note>
+  A stored render depicts one specific `(avatar_seed, avatar_style)` pair,
+  so it is dropped automatically whenever either changes: via `PATCH
+  /api/v1/agents/{agentId}`, or in bulk via [`POST
+  /api/v1/crews/{crewId}/apply-avatar-style`](/api-reference/crews). An
+  unrelated edit (a rename, a model change) leaves it intact.
 </Note>
 
 ---

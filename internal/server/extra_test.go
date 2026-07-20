@@ -722,3 +722,33 @@ func touch(p string) error {
 	}
 	return f.Close()
 }
+
+// The persisted-agent-avatar endpoint (#1297) serves image/svg+xml from our
+// own origin, which is only safe because it stamps its own
+// `default-src 'none'; sandbox` policy — that is what stops a direct
+// navigation to the URL from executing script inside the SVG.
+//
+// That control depends entirely on ordering: this middleware sets CSP
+// *before* calling the handler, so the handler's Set wins. Move the
+// middleware's Set after next.ServeHTTP and every stored avatar silently
+// loses its sandbox while every existing test stays green. Pin it here.
+func TestSecurityHeadersMiddleware_HandlerMayHardenCSP(t *testing.T) {
+	t.Parallel()
+	const sandboxed = "default-src 'none'; sandbox"
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Security-Policy", sandboxed)
+		w.WriteHeader(http.StatusOK)
+	})
+	wrapped := securityHeadersMiddleware(inner)
+	rec := httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, httptest.NewRequest("GET", "/api/v1/agents/ag-1/avatar", nil))
+
+	if got := rec.Header().Get("Content-Security-Policy"); got != sandboxed {
+		t.Errorf("Content-Security-Policy = %q, want the handler's %q — "+
+			"the middleware must not clobber a handler-set policy", got, sandboxed)
+	}
+	if got := rec.Header().Values("Content-Security-Policy"); len(got) != 1 {
+		t.Errorf("got %d CSP headers (%q), want exactly 1 — "+
+			"two policies intersect and the result is not what either intended", len(got), got)
+	}
+}

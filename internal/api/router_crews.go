@@ -287,6 +287,14 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// (canEditAgent) — same as Update.
 	r.authedMut("POST", "/api/v1/agents/{agentId}/webhook-secret/rotate", roleInline, agents.RotateWebhookSecret)
 
+	// Persisted avatar (#1297). GET is readable by any workspace member —
+	// rosters render each other — while PUT/DELETE take the same inline
+	// per-agent edit gate as Update. PUT is write-once by design; see
+	// agents_avatar.go.
+	r.mux.Handle("GET /api/v1/agents/{agentId}/avatar", authed(wsCtx(http.HandlerFunc(agents.ServeAvatar))))
+	r.authedMut("PUT", "/api/v1/agents/{agentId}/avatar", roleInline, agents.PutAvatar)
+	r.authedMut("DELETE", "/api/v1/agents/{agentId}/avatar", roleInline, agents.DeleteAvatar)
+
 	// Agent skills
 	r.mux.Handle("GET /api/v1/agents/{agentId}/skills", authed(wsCtx(http.HandlerFunc(agents.ListSkills))))
 	r.authedMut("POST", "/api/v1/agents/{agentId}/skills", roleCreate, agents.AddSkill)

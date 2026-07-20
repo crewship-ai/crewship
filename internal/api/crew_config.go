@@ -51,13 +51,18 @@ func (h *CrewHandler) ApplyAvatarStyle(w http.ResponseWriter, r *http.Request) {
 
 	var res sql.Result
 	var err error
+	// Clearing avatar_svg/_hash alongside the style is not optional: those
+	// columns hold a render of the *old* style (#1297), so leaving them
+	// would make this endpoint a no-op for every agent that has been
+	// backfilled — the crew's style would change in the DB while the
+	// roster kept serving the previous faces.
 	if body.ResetOverrides {
 		res, err = h.db.ExecContext(r.Context(),
-			"UPDATE agents SET avatar_style = NULL, updated_at = ? WHERE crew_id = ? AND deleted_at IS NULL",
+			"UPDATE agents SET avatar_style = NULL, avatar_svg = NULL, avatar_svg_hash = NULL, updated_at = ? WHERE crew_id = ? AND deleted_at IS NULL",
 			now, crewID)
 	} else {
 		res, err = h.db.ExecContext(r.Context(),
-			"UPDATE agents SET avatar_style = ?, updated_at = ? WHERE crew_id = ? AND deleted_at IS NULL",
+			"UPDATE agents SET avatar_style = ?, avatar_svg = NULL, avatar_svg_hash = NULL, updated_at = ? WHERE crew_id = ? AND deleted_at IS NULL",
 			body.AvatarStyle, now, crewID)
 	}
 	if err != nil {
