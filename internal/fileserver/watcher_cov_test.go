@@ -2,6 +2,7 @@ package fileserver
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -240,26 +241,36 @@ func TestToFileEvent_Projection(t *testing.T) {
 	})
 }
 
-// TestWatcher_CloseIsSafe pins the documented no-op Close contract —
-// callable before, during, and after a Watch without panicking or
-// killing the active watch.
+// TestWatcher_CloseIsSafe pins the Close contract — callable on a watcher
+// that never watched, idempotent, and terminal. Close is a wait, not a
+// signal: the caller cancels the Watch context, Close only drains.
 func TestWatcher_CloseIsSafe(t *testing.T) {
 	base := t.TempDir()
+
+	// Close with nothing to wait for is fine, and closes the watcher for good.
+	fresh := NewWatcher(base, discardLogger(), nil)
+	fresh.Close()
+	if err := fresh.Watch(context.Background(), "crew-z"); !errors.Is(err, ErrWatcherClosed) {
+		t.Fatalf("watch after close = %v, want ErrWatcherClosed", err)
+	}
+
 	events := make(chan FileEvent, 8)
 	w := NewWatcher(base, discardLogger(), func(_ string, fe FileEvent) { events <- fe })
-	w.Close() // before Watch
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	if err := w.Watch(ctx, "crew-z"); err != nil {
 		t.Fatalf("watch: %v", err)
 	}
-	w.Close() // during Watch — must not stop the loop
 
+	// The loop is live until the context is cancelled, Close notwithstanding.
 	if err := os.WriteFile(filepath.Join(base, "crew-z", "alive.txt"), []byte("y"), 0o640); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	waitForEvent(t, events, "file_created", "alive.txt")
+
+	cancel()
+	w.Close()
+	w.Close() // idempotent once drained
 }
 
 // TestWatch_UnwatchableSubdirErrors pins the addAllDirs failure path in

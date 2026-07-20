@@ -2,11 +2,13 @@ package fileserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -30,7 +32,25 @@ type Watcher struct {
 	basePath string
 	logger   *slog.Logger
 	handler  EventHandler
+
+	// mu guards closed and every watches.Add. A sync.WaitGroup panics with
+	// "reused before previous Wait has returned" if an Add lands while a Wait
+	// is in flight, and Watch is reachable from HTTP handlers that can fire
+	// during shutdown — so the two must be mutually exclusive, not merely
+	// unlikely to overlap.
+	mu      sync.Mutex
+	closed  bool
+	watches sync.WaitGroup
 }
+
+// ErrWatcherClosed is returned by Watch once Close has begun. Close is
+// terminal: a Watcher that has been closed does not accept new watches.
+var ErrWatcherClosed = errors.New("fileserver: watcher closed")
+
+// closeTimeout bounds Close so a handler wedged on a full channel cannot hang
+// shutdown forever; the descriptors leak until process exit in that case, which
+// is strictly better than never returning.
+const closeTimeout = 5 * time.Second
 
 // NewWatcher creates a Watcher that monitors directories under basePath.
 func NewWatcher(basePath string, logger *slog.Logger, handler EventHandler) *Watcher {
@@ -41,10 +61,39 @@ func NewWatcher(basePath string, logger *slog.Logger, handler EventHandler) *Wat
 	}
 }
 
-// Close is a no-op — individual fsnotify watchers are closed when the context
-// passed to Watch() is cancelled. This method exists so callers can express
-// explicit cleanup intent without needing to know the internal lifecycle.
-func (w *Watcher) Close() {}
+// Close blocks until every goroutine started by Watch has observed its context
+// cancellation and released the underlying fsnotify watcher. Cancel the Watch
+// contexts first, or Close waits out closeTimeout for nothing.
+//
+// Waiting is the point: callers tear the watched directories down right after
+// shutdown, and on the kqueue backends (macOS, *BSD) fsnotify holds one
+// descriptor per watched file and closes them all inside Watcher.Close. If a
+// flood of NOTE_DELETE arrives while that is running, fsnotify v1.10.1 can
+// close the same descriptor twice (its readEvents→remove path drops the
+// watches lock between the map lookup and the unix.Close that Close is doing
+// concurrently). The second close lands on whatever descriptor the process has
+// since opened for that number — in CI that was the directory fd of an
+// unrelated parallel test's os.RemoveAll, which then failed with EBADF. See
+// #1286.
+//
+// Close is terminal and idempotent: after it, Watch returns ErrWatcherClosed,
+// and calling Close again just drains again.
+func (w *Watcher) Close() {
+	w.mu.Lock()
+	w.closed = true
+	w.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		w.watches.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(closeTimeout):
+		w.logger.Warn("file watcher shutdown timed out", "timeout", closeTimeout)
+	}
+}
 
 // Watch starts watching the output directory for a crew, invoking the handler
 // on file changes. The watcher runs until ctx is cancelled.
@@ -68,7 +117,20 @@ func (w *Watcher) Watch(ctx context.Context, crewID string) error {
 		return fmt.Errorf("watch output dir: %w", err)
 	}
 
+	// Register under the lock so the Add cannot race Close's Wait.
+	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		watcher.Close()
+		return ErrWatcherClosed
+	}
+	w.watches.Add(1)
+	w.mu.Unlock()
+
 	go func() {
+		// Done last: Close must not release until the descriptors are actually
+		// gone, so watcher.Close has to run first.
+		defer w.watches.Done()
 		defer watcher.Close()
 		for {
 			select {

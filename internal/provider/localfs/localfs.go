@@ -2,11 +2,13 @@ package localfs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/fsnotify/fsnotify"
@@ -18,7 +20,20 @@ var _ provider.StorageProvider = (*Provider)(nil)
 // are resolved relative to basePath with symlink-aware path traversal protection.
 type Provider struct {
 	basePath string
+
+	// mu guards closed and every watchers.Add. A sync.WaitGroup panics with
+	// "reused before previous Wait has returned" if an Add lands while a Wait
+	// is in flight, so a Watch starting while WaitWatchers drains must be
+	// refused rather than counted.
+	mu       sync.Mutex
+	closed   bool
+	watchers sync.WaitGroup
 }
+
+// ErrWatchersClosed is returned by Watch once WaitWatchers has been called.
+// Waiting is terminal: the provider stays usable for plain file operations,
+// but it accepts no new watches.
+var ErrWatchersClosed = errors.New("localfs: provider watchers closed")
 
 // New creates a local filesystem Provider rooted at basePath, creating the
 // directory if it does not exist.
@@ -237,8 +252,33 @@ func (p *Provider) EnsureDir(_ context.Context, path string) error {
 	return os.MkdirAll(full, 0775)
 }
 
+// WaitWatchers blocks until every goroutine started by Watch has observed its
+// context cancellation and released the underlying fsnotify watcher.
+//
+// Callers that delete a watched tree must cancel, then WaitWatchers, then
+// delete — never delete while the watcher is still closing. On the kqueue
+// backends (macOS, *BSD) fsnotify holds one descriptor per watched file and
+// closes them all inside Watcher.Close; if a flood of NOTE_DELETE arrives at
+// the same time, fsnotify v1.10.1 can close the same descriptor twice (its
+// readEvents→remove path drops the watches lock between the map lookup and
+// the unix.Close that Close is doing concurrently). The second close lands on
+// whatever descriptor the process has since opened for that number — in CI
+// that was the directory fd of an unrelated parallel test's os.RemoveAll,
+// which then failed with EBADF. See #1286.
+// Waiting is terminal for watches: afterwards Watch returns
+// ErrWatchersClosed, so a watch starting concurrently cannot be counted into
+// a WaitGroup that is already being waited on.
+func (p *Provider) WaitWatchers() {
+	p.mu.Lock()
+	p.closed = true
+	p.mu.Unlock()
+
+	p.watchers.Wait()
+}
+
 // Watch starts watching the directory tree for filesystem changes, sending
-// events to the provided channel until ctx is cancelled.
+// events to the provided channel until ctx is cancelled. Shutdown is
+// asynchronous; use WaitWatchers to block until it has completed.
 func (p *Provider) Watch(ctx context.Context, dir string, events chan<- provider.FileEvent) error {
 	full, err := p.resolve(dir)
 	if err != nil {
@@ -255,7 +295,20 @@ func (p *Provider) Watch(ctx context.Context, dir string, events chan<- provider
 		return fmt.Errorf("watch %s: %w", dir, err)
 	}
 
+	// Register under the lock so the Add cannot race WaitWatchers' Wait.
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		watcher.Close()
+		return ErrWatchersClosed
+	}
+	p.watchers.Add(1)
+	p.mu.Unlock()
+
 	go func() {
+		// Done last: WaitWatchers must not release until the descriptors are
+		// actually gone, so watcher.Close has to run first.
+		defer p.watchers.Done()
 		defer watcher.Close()
 		for {
 			select {

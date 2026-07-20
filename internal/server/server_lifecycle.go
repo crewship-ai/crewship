@@ -438,8 +438,12 @@ func (s *Server) Shutdown() error {
 	if s.pyroscopeShutdown != nil {
 		s.pyroscopeShutdown()
 	}
-	// fileWatcher goroutines are closed via context cancellation (runCancel above);
-	// explicit Close() is a no-op but signals intent.
+	// fileWatcher goroutines exit on context cancellation (runCancel above),
+	// and Close() blocks until they have — so it has to come after runCancel
+	// or it just burns its 5s timeout. Draining matters because the crew
+	// output tree may be deleted right after shutdown, and fsnotify must be
+	// done releasing its descriptors first (#1286). Close is terminal: no new
+	// watches are accepted afterwards.
 	if s.fileWatcher != nil {
 		s.fileWatcher.Close()
 	}
