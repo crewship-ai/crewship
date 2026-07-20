@@ -91,9 +91,22 @@ func (h *ProvisioningHandler) sweepOrphanTempContainers(ctx context.Context) {
 	}
 	start := time.Now()
 	labelFilter := devcontainer.TempContainerLabelKey + "=" + devcontainer.TempContainerLabelValue
+	// Filter by name as well as label, so orphanGCSweepCap is spent on
+	// plausible candidates. The label alone matches every crew container on
+	// the host (it rides in on the cache image), and on a shared daemon
+	// those vastly outnumber leaked scratch containers — Docker returns
+	// newest-first, so an old orphan lands past the cap and never gets
+	// cleaned up. The sweeper would be safe but blind.
+	//
+	// Docker's name filter is an unanchored substring match, which is why
+	// hasTempContainerName below remains the authoritative check: this
+	// narrows the list, it does not decide anything.
 	containers, err := h.gcClient.ContainerList(ctx, container.ListOptions{
-		All:     true,
-		Filters: filters.NewArgs(filters.Arg("label", labelFilter)),
+		All: true,
+		Filters: filters.NewArgs(
+			filters.Arg("label", labelFilter),
+			filters.Arg("name", devcontainer.TempContainerNamePrefix),
+		),
 	})
 	if err != nil {
 		h.logger.Warn("orphan temp-container GC: list failed", "error", err)

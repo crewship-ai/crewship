@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -40,13 +41,35 @@ func (f *fakeGCClient) ContainerList(_ context.Context, opts container.ListOptio
 	if len(wantLabels) == 0 {
 		return f.containers, nil
 	}
+	// The name filter is emulated too, or a sweeper that drops it still
+	// looks correct here while scanning the whole host in production.
+	// Docker's name filter is an unanchored substring match — modelled as
+	// such deliberately, because that looseness is exactly why the sweeper
+	// keeps hasTempContainerName as its authoritative check.
+	wantNames := opts.Filters.Get("name")
+
 	out := make([]container.Summary, 0, len(f.containers))
 	for _, c := range f.containers {
-		if matchesAllLabels(c.Labels, wantLabels) {
-			out = append(out, c)
+		if !matchesAllLabels(c.Labels, wantLabels) {
+			continue
 		}
+		if len(wantNames) > 0 && !matchesAnyName(c.Names, wantNames) {
+			continue
+		}
+		out = append(out, c)
 	}
 	return out, nil
+}
+
+func matchesAnyName(names []string, wants []string) bool {
+	for _, want := range wants {
+		for _, n := range names {
+			if strings.Contains(strings.TrimPrefix(n, "/"), want) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // tempNames builds the Names slice Docker reports for a provisioner scratch
@@ -189,6 +212,49 @@ func TestSweepOrphanTempContainers_SparesLiveCrewContainers(t *testing.T) {
 
 	if got := strings.Join(fake.removedContainers, ","); got != "leaked-temp" {
 		t.Errorf("removed containers = %q; want only leaked-temp — a crew container was killed by the orphan sweeper", got)
+	}
+}
+
+// Sparing crew containers must not cost the sweeper its ability to reach
+// the orphans it exists to remove.
+//
+// The list is capped at orphanGCSweepCap. With a label-only daemon-side
+// filter, every crew container on the host is a candidate — and on a shared
+// daemon they vastly outnumber leaked scratch containers, so a real orphan
+// can sit beyond the cap and never be cleaned up. Docker returns
+// newest-first, which puts an old leak last: precisely where the cap bites.
+// Narrowing server-side by name spends the cap on real candidates.
+func TestSweepOrphanTempContainers_CapNotConsumedByCrewContainers(t *testing.T) {
+	now := time.Now().Unix()
+	label := map[string]string{
+		devcontainer.TempContainerLabelKey: devcontainer.TempContainerLabelValue,
+	}
+
+	containers := make([]container.Summary, 0, orphanGCSweepCap+51)
+	for i := 0; i < orphanGCSweepCap+50; i++ {
+		containers = append(containers, container.Summary{
+			ID:      "crew" + strconv.Itoa(i),
+			Names:   []string{"/crewship-1-team-crew" + strconv.Itoa(i) + "-cmrmd4i0a01b1b5a27a84"},
+			Created: now - int64((2 * time.Hour).Seconds()),
+			State:   "running",
+			Labels:  label,
+		})
+	}
+	// Oldest, so newest-first ordering leaves it last — past the cap.
+	containers = append(containers, container.Summary{
+		ID:      "real-orphan",
+		Names:   []string{"/" + devcontainer.TempContainerNamePrefix + "deadbeef"},
+		Created: now - int64((5 * time.Hour).Seconds()),
+		Labels:  label,
+	})
+
+	fake := &fakeGCClient{containers: containers}
+	h := newGCTestHandler(t, fake)
+
+	h.sweepOrphanTempContainers(context.Background())
+
+	if got := strings.Join(fake.removedContainers, ","); got != "real-orphan" {
+		t.Errorf("removed = %q; want real-orphan — the cap was spent on crew containers the sweeper can never delete anyway", got)
 	}
 }
 
