@@ -101,6 +101,53 @@ On first boot `crewship start` auto-generates `ENCRYPTION_KEY` and persists it t
 
 For stronger at-rest protection, supply `ENCRYPTION_KEY` from an external secret store (systemd `EnvironmentFile=`, Kubernetes secret, Vault) and remove the entry from `secrets.env`.
 
+## No key configured (fail-closed)
+
+Secret writes **fail closed**. If no usable encryption key resolves for the active key version, Crewship refuses to store the secret rather than silently writing it to the database in plaintext.
+
+This closes a compatibility shim that shipped with the webhook-secret work (#1072/#1029) and was never given a sunset: before this change, a deployment with no `ENCRYPTION_KEY` stored webhook signing secrets as plaintext and the only trace was a log line nobody was reading.
+
+### What an operator sees
+
+The write fails and the API returns `500`. The server log carries the reason, naming the env var that is missing or malformed:
+
+```
+refusing to store a secret in plaintext: no usable encryption key is configured
+(ENCRYPTION_KEY is not set (required to mint v1 envelopes)). Generate one with
+`openssl rand -hex 32` and set ENCRYPTION_KEY, or set
+CREWSHIP_ALLOW_PLAINTEXT_SECRETS=true to accept plaintext storage
+```
+
+### How to fix it
+
+Generate a key and put it in the environment, then restart:
+
+```bash
+openssl rand -hex 32     # 32 bytes → 64 hex chars
+export ENCRYPTION_KEY=<the value>
+```
+
+On a normal install you should never hit this: `crewship start` bootstraps `ENCRYPTION_KEY` on first boot (persisting it to `<dataDir>/secrets.env`) and then calls `VerifyCurrentKey()` — it **refuses to start** if the active key version's env var is missing or malformed. So a key-less deployment is told at boot, not at first secret write. The fail-closed encrypt path is the backstop for embedded/alternate entry points that skip that bootstrap, and for a mid-rotation `CREWSHIP_ENCRYPTION_KEY_VERSION` pointing at a key that has not been supplied yet.
+
+<Warning>
+**Escape hatch: `CREWSHIP_ALLOW_PLAINTEXT_SECRETS`.** Setting it to `true` (also accepted: `1`, `yes`, `on` — anything else means false) restores the old behaviour: with no key, secrets are written to the database **in plaintext**.
+
+Every such write emits a `WARN`, deliberately not deduplicated, so the count of unprotected secrets is auditable:
+
+```
+level=WARN msg="storing secret UNENCRYPTED at rest — no encryption key configured
+and CREWSHIP_ALLOW_PLAINTEXT_SECRETS=true is set; set ENCRYPTION_KEY
+(openssl rand -hex 32) and re-run `crewship admin reencrypt` to protect existing rows"
+opt_out_env=CREWSHIP_ALLOW_PLAINTEXT_SECRETS key_env=ENCRYPTION_KEY
+```
+
+The secret value itself is never logged. Treat this flag as a short-lived transition aid, not a configuration: anything written while it is on stays plaintext in the database until you configure a key and run `crewship admin reencrypt`.
+</Warning>
+
+### Reading already-stored plaintext
+
+Fail-closed applies to **writes only**. Values already stored in plaintext by an older build (or under the opt-out) continue to be read back unchanged, with or without a key present and regardless of the flag — the read path discriminates on the `vN:` envelope prefix. Turning fail-closed on therefore cannot brick an existing install's stored secrets.
+
 ## Rotating the Master Key
 
 `crewship admin reencrypt` re-encrypts every stored envelope to the current key version, so the old key can actually be retired instead of living in the environment forever.
@@ -132,7 +179,7 @@ The operation is idempotent — envelopes already at the current version are ski
 The walk covers every envelope-bearing column: `credentials.encrypted_value`, `credentials.encrypted_refresh_token`, `credentials.oauth_client_secret_enc`, `credentials.oauth_refresh_token_enc`, `credential_rotations.old_value`, `notification_channels.secret_enc`, `composio_settings.encrypted_api_key`, `oauth_states.code_verifier`, `escalations.resolution` (credential-type escalations only), and the two webhook-secret columns `agents.webhook_secret` and `pipeline_webhooks.signing_secret`.
 
 <Note>
-**Webhook secrets are fail-open at rest.** `agents.webhook_secret` and `pipeline_webhooks.signing_secret` are encrypted only when `ENCRYPTION_KEY` is configured; with no key they are stored plaintext (with a startup/rotate warning) so key-less webhook deployments keep working. During master-key rotation a bare (non-enveloped) webhook value is therefore reported as **skipped**, not failed — so the `failed=0 ⇒ retire the old key` criterion stays honest. Migration `v140` backfills existing plaintext webhook secrets to envelopes when a key is present.
+**Webhook secrets are encrypted at rest, fail-closed.** `agents.webhook_secret` and `pipeline_webhooks.signing_secret` are encrypted whenever a usable key resolves; with no key the write is **rejected** rather than downgraded to plaintext (see [No key configured](#no-key-configured-fail-closed) below). Rows written in plaintext by older builds keep working — they are read back as-is. During master-key rotation such a bare (non-enveloped) webhook value is reported as **skipped**, not failed, so the `failed=0 ⇒ retire the old key` criterion stays honest. Migration `v140` backfills existing plaintext webhook secrets to envelopes when a key is present.
 </Note>
 
 One known edge case: databases created in the brief pre-release window before encrypt-on-resolve landed (March 2026) may hold credential-type escalation resolutions stored as plaintext. Those rows always count under `failed` (they are left untouched — no corruption), so a `failed: 0` state is unreachable on such a database without clearing the affected historical `escalations.resolution` rows manually.
