@@ -2,8 +2,9 @@
 # Deploy current branch to a remote dev server over SSH.
 #
 # Usage: ./scripts/deploy-dev.sh [branch]
-#   - No args: deploys current local branch
-#   - With arg: deploys specified branch
+#   - No args: deploys current local branch (refuses a detached HEAD — the
+#     server deploys origin/<branch>, and "HEAD" is not one)
+#   - With arg: deploys specified branch (must exist locally)
 #   - Publishes the branch to origin (skipped when origin already has every
 #     local commit), then pulls on server, rebuilds, restarts
 #
@@ -34,14 +35,29 @@ GO_PATH_EXPORT='export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin'
 # deploying `main` from a clone that hadn't pulled in a while.
 push_branch() {
   local branch="$1"
+  # Detached HEAD makes `git rev-parse --abbrev-ref HEAD` yield the literal
+  # "HEAD". Left alone it deploys the WRONG code silently: origin/HEAD is a
+  # real symref to origin/main in any clone, so the ancestry check below says
+  # "already published", the push is skipped, and the server resets to
+  # origin/HEAD — main, not the sha the operator checked out. Same for a name
+  # with no local branch: there is nothing to push and nothing to deploy.
+  if [ "$branch" = HEAD ] || ! git rev-parse --verify --quiet "refs/heads/$branch^{commit}" >/dev/null; then
+    echo "error: refusing to deploy detached HEAD / unknown branch '$branch'; nothing was deployed." >&2
+    echo "       Check out a named branch (or pass one) before retrying." >&2
+    return 1
+  fi
   # Push moves refs/heads/$branch, so ancestry has to be measured from that
   # ref too; HEAD only coincides with it when $branch is checked out.
   local local_ref="refs/heads/$branch"
-  git rev-parse --verify --quiet "$local_ref^{commit}" >/dev/null || local_ref="HEAD"
 
   # Fetch first: the ancestry check must compare against origin's real tip,
   # not a remote-tracking ref that is itself stale.
-  if ! git fetch origin "$branch" >/dev/null 2>&1; then
+  local fetched=0
+  if git fetch origin "$branch" >/dev/null 2>&1; then
+    fetched=1
+  fi
+
+  if [ "$fetched" -eq 0 ]; then
     # Nothing on origin to compare against (brand-new branch), or the fetch
     # failed for its own reasons — either way, let the push decide.
     echo ">>> Pushing to origin (no origin/$branch yet)..."
@@ -54,8 +70,17 @@ push_branch() {
   fi
 
   if ! git push origin "$branch" 2>&1; then
-    echo "error: local '$branch' has diverged from origin; nothing was deployed." >&2
-    echo "       Pull or force-push before retrying." >&2
+    # Only divergence when we actually compared against origin's real tip and
+    # it said "not an ancestor". A failed fetch means the remote is missing or
+    # unreachable, and telling the operator to "pull or force-push" is the same
+    # misdiagnosis this function exists to stop making — let git's own error
+    # above stand.
+    if [ "$fetched" -eq 1 ]; then
+      echo "error: local '$branch' has diverged from origin; nothing was deployed." >&2
+      echo "       Pull or force-push before retrying." >&2
+    else
+      echo "error: push of '$branch' to origin failed (see git's message above); nothing was deployed." >&2
+    fi
     return 1
   fi
 }

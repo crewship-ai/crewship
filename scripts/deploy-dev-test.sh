@@ -169,6 +169,100 @@ else
   fail "diverged: operator message missing from output: $OUT"
 fi
 
+# ── Detached HEAD: must refuse, not quietly deploy origin's default branch. ─
+# `git rev-parse --abbrev-ref HEAD` yields the literal "HEAD" when detached.
+# refs/heads/HEAD does not exist, `git fetch origin HEAD` succeeds, and
+# origin/HEAD is a real symref to origin/main in any cloned checkout — so an
+# unguarded ancestry check reports "already contains every local commit" and
+# the server then resets to origin/HEAD, i.e. main, NOT the operator's sha.
+repo="$(new_repo detached)"
+# Mirror what `git clone` leaves behind; new_repo builds the pair by hand.
+git -C "$repo" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+git -C "$repo" checkout -q --detach HEAD
+
+run_push_branch "$repo" HEAD
+if [[ "$STATUS" != "0" ]]; then
+  pass "detached HEAD: returns non-zero (deploy stops)"
+else
+  fail "detached HEAD: returned 0 — the server would deploy origin's default branch: $OUT"
+fi
+if [[ "$OUT" == *"nothing was deployed"* ]]; then
+  pass "detached HEAD: says the deploy did not happen"
+else
+  fail "detached HEAD: operator message missing from output: $OUT"
+fi
+
+# ── Stale remote-tracking ref: the pre-check fetch must refresh it. ─────────
+# Local main is BEHIND origin's real tip but AHEAD of the stale
+# refs/remotes/origin/main this clone still holds. Without the fetch the
+# ancestry check reads the stale ref, concludes "not an ancestor", and pushes
+# a behind tip — a non-fast-forward that kills the deploy.
+repo="$(new_repo stalefetch)"
+base="$(git -C "$repo" rev-parse HEAD)"
+commit_in "$repo" local-and-remote
+git -C "$repo" push -q origin main
+other="$TMP/stalefetch-other"
+git clone -q "$TMP/stalefetch-origin.git" "$other"
+commit_in "$other" remote-only
+git -C "$other" push -q origin main
+# Rewind only the remote-tracking ref: that is exactly what a clone that has
+# not fetched since its own push looks like.
+git -C "$repo" update-ref refs/remotes/origin/main "$base"
+
+run_push_branch "$repo" main
+if [[ "$STATUS" == "0" && "$OUT" == *"Skipping push"* ]]; then
+  pass "stale origin ref: fetched first, then skipped"
+else
+  fail "stale origin ref: exited $STATUS, output: $OUT"
+fi
+
+# ── Deploying a branch that is NOT checked out: ancestry must read that ─────
+# branch's ref, not HEAD. refs/heads/feat/x is behind origin/feat/x (skip),
+# while HEAD sits on a main that has diverged from it (push → non-ff → abort).
+repo="$(new_repo otherbranch)"
+git -C "$repo" checkout -q -b feat/x
+commit_in "$repo" branch-work
+git -C "$repo" push -q origin feat/x
+other="$TMP/otherbranch-other"
+git clone -q "$TMP/otherbranch-origin.git" "$other"
+git -C "$other" checkout -q feat/x
+commit_in "$other" branch-work-remote
+git -C "$other" push -q origin feat/x
+git -C "$repo" checkout -q main
+commit_in "$repo" unrelated-main-work
+
+run_push_branch "$repo" feat/x
+if [[ "$STATUS" == "0" && "$OUT" == *"Skipping push"* ]]; then
+  pass "other branch checked out: ancestry measured from refs/heads/feat/x"
+else
+  fail "other branch checked out: exited $STATUS, output: $OUT"
+fi
+
+# ── Push failure that is NOT divergence must not be blamed on divergence. ───
+# A missing/unreachable origin is the same misdiagnosis class as the bug this
+# script was written for; the operator needs the real git error, not a bogus
+# "pull or force-push" instruction.
+repo="$TMP/noremote"
+git init -q -b main "$repo"
+commit_in "$repo" base
+
+run_push_branch "$repo" main
+if [[ "$STATUS" != "0" ]]; then
+  pass "no origin remote: returns non-zero"
+else
+  fail "no origin remote: returned 0: $OUT"
+fi
+if [[ "$OUT" != *"diverged"* ]]; then
+  pass "no origin remote: does not claim divergence"
+else
+  fail "no origin remote: blamed divergence for an unreachable remote: $OUT"
+fi
+if [[ "$OUT" == *"nothing was deployed"* ]]; then
+  pass "no origin remote: says the deploy did not happen"
+else
+  fail "no origin remote: operator message missing from output: $OUT"
+fi
+
 echo ""
 if [[ "$FAILURES" -eq 0 ]]; then
   echo "All deploy-dev.sh tests passed."
