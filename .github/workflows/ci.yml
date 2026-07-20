@@ -162,8 +162,20 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
 
+      # Coverage, not a bare test run: vitest exits non-zero when the
+      # thresholds in vitest.config.ts are not met, which is what makes
+      # that gate real rather than decorative.
       - name: Test
-        run: pnpm test
+        run: pnpm test:coverage
+
+      - name: Upload coverage (lcov)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: frontend-coverage-lcov
+          path: coverage/lcov.info
+          if-no-files-found: warn
+          retention-days: 14
 
   # ── Go: vet, build, test ──
   go:

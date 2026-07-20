@@ -32,6 +32,22 @@ vi.mock("recharts", () => ({
   Tooltip: () => null,
 }))
 
+// LogsPanel mounts useUserPreference, which GETs /api/v1/me/preferences on
+// first paint. Unmocked, that is a real socket connect to localhost:3000 —
+// it aborts the whole run with ECONNREFUSED anywhere no dev server is up
+// (CI, `pnpm test:coverage`). Stub the transport, not the hook, so the
+// hook's own logic still runs under test.
+vi.mock("@/lib/api-fetch", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api-fetch")>()
+  return {
+    ...actual,
+    apiFetch: vi.fn(async () => new Response("{}", {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })),
+  }
+})
+
 import { LogsPanel } from "@/components/features/logs/logs-panel"
 
 function entry(overrides: Partial<JournalEntry> = {}): JournalEntry {
@@ -188,6 +204,14 @@ describe("LogsPanel", () => {
     // ensure at least one is present.
     rerender(<LogsPanel entries={entries} live={false} onLiveChange={onLiveChange} />)
     expect(document.querySelectorAll('[title="Resume live tail"]').length).toBeGreaterThan(0)
+  })
+
+  it("never issues a real network request when mounted", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+    render(<LogsPanel entries={[entry({ id: "a", summary: "x" })]} />)
+    // Let mount effects and their promise chains run.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(fetchSpy.mock.calls.map((c) => String(c[0]))).toEqual([])
   })
 
   it("collapses the stats rail when the chevron is clicked", () => {
