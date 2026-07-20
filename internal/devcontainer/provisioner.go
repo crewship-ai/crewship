@@ -464,6 +464,15 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		}
 	}
 
+	// 4b. Hand /home/agent to the agent user before anything runs as 1001.
+	// Feature scripts run as root and leave root-owned paths behind (and some
+	// base images ship the home root-owned to begin with) — see
+	// EnsureAgentHomeOwnership. Must sit after feature install and before mise
+	// and the lifecycle hooks below.
+	if err := EnsureAgentHomeOwnership(ctx, containerID, p.installer.execInContainerAsUser); err != nil {
+		return fail("agent_home", err)
+	}
+
 	// 5. Handle mise configuration.
 	if miseConfig != "" {
 		emit(miseStepLabel)
