@@ -116,6 +116,8 @@ export function AgentAccessTab({
                     data-testid="agent-avatar"
                     seed={a.avatar_seed || a.slug || a.name}
                     style={a.avatar_style || a.crew?.avatar_style}
+                    agentId={a.id}
+                    avatarUrl={a.avatar_url}
                     className="mt-0.5 h-8 w-8 shrink-0 rounded-lg"
                   />
                   <div className="min-w-0">

@@ -52,6 +52,8 @@ interface AgentRecord {
   role_title: string | null
   avatar_seed: string | null
   avatar_style: string | null
+  /** Stored avatar render (#1297); null means generate from the seed. */
+  avatar_url?: string | null
   crew?: { name: string; slug: string; avatar_style: string | null } | null
 }
 
@@ -397,6 +399,8 @@ export function ChatPageClient() {
         <AgentAvatar
           seed={agent.avatar_seed || agent.name}
           style={agent.avatar_style || agent.crew?.avatar_style}
+          agentId={agent.id}
+          avatarUrl={agent.avatar_url}
           className="w-7 h-7 rounded-full"
         />
         <div className="flex-1 min-w-0">

@@ -56,6 +56,8 @@ export type AgentLite = {
   slug: string
   avatar_seed?: string | null
   avatar_style?: string | null
+  /** Stored avatar render (#1297); null means generate from the seed. */
+  avatar_url?: string | null
   crew?: { name: string; avatar_style?: string | null } | null
 }
 

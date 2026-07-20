@@ -323,6 +323,8 @@ export function AgentCanvas({
           <AgentAvatar
             seed={agent.avatar_seed || agent.name}
             style={agent.avatar_style || agent.crew?.avatar_style}
+            agentId={agent.id}
+            avatarUrl={agent.avatar_url}
             className={cn(
               "w-20 h-20 rounded-2xl transition-transform group-hover:scale-[1.03]",
               isRunning && "ring-2 ring-emerald-500/40",

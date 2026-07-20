@@ -78,6 +78,8 @@ export function AgentHeader({ agentId }: AgentHeaderProps) {
       <AgentAvatar
         seed={agent.avatar_seed || agent.name}
         style={agent.avatar_style || agent.crew?.avatar_style}
+        agentId={agent.id}
+        avatarUrl={agent.avatar_url}
         alt={agent.name}
         className="h-8 w-8 md:h-10 md:w-10 rounded-xl shrink-0"
       />

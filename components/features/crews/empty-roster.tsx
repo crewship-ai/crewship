@@ -18,6 +18,8 @@ interface AgentData {
   crew_id: string | null
   avatar_seed?: string | null
   avatar_style?: string | null
+  /** Stored avatar render (#1297); null means generate from the seed. */
+  avatar_url?: string | null
   last_active_at?: string | null
   crew?: { name: string; slug: string; avatar_style?: string | null } | null
   // PR-D F5 ephemeral lifecycle (server returns these; absent on permanent agents).
@@ -136,6 +138,8 @@ export function EmptyRoster({ agents, crews, onAgentSelect }: EmptyRosterProps) 
                         <AgentAvatar
                           seed={a.avatar_seed || a.name}
                           style={a.avatar_style || a.crew?.avatar_style}
+                          agentId={a.id}
+                          avatarUrl={a.avatar_url}
                           className="h-6 w-6 rounded-full shrink-0"
                         />
                         <span className="truncate">{a.name}</span>

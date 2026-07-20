@@ -270,6 +270,8 @@ function SenderAvatar({ item, className }: { item: InboxItem; className?: string
       <AgentAvatar
         seed={item.avatar_seed || item.sender_name || "agent"}
         style={item.avatar_style}
+        agentId={item.sender_id}
+        avatarUrl={item.avatar_url}
         className={cn("shrink-0 rounded-md object-cover", className ?? "h-6 w-6")}
         aria-hidden
       />

@@ -1,6 +1,5 @@
 "use client"
 
-import Image from "next/image"
 import {
   Blocks, Code, Search, Hammer, Server, MessageCircle, Settings,
   Palette, ShieldCheck, BadgeCheck, Lock, Dot, Download, Clock,
@@ -10,8 +9,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { selection } from "@/lib/interaction"
 import { cn } from "@/lib/utils"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
-import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 
 // SkillInstalledAgent mirrors the backend skillInstalledAgent struct
 // — only populated on the Installed list (?installed=1) so the card
@@ -22,6 +20,8 @@ export interface SkillInstalledAgent {
   agent_name: string
   avatar_seed: string | null
   avatar_style: string | null
+  /** Stored avatar render (#1297); null means generate from the seed. */
+  avatar_url?: string | null
   crew_id: string | null
   crew_slug: string | null
   crew_name: string | null
@@ -141,8 +141,6 @@ interface SkillCardProps {
 // updated relative, source badge, maturity badge (only when non-OFFICIAL).
 // Plus a flag chip when scan_status=FLAGGED.
 export function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
-  // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
-  useAvatarStylesVersion()
   const sourceCfg = SOURCE_BADGE[skill.source] ?? SOURCE_BADGE.CUSTOM
   const SourceIcon = sourceCfg.icon
   const DomainIcon = DOMAIN_ICONS[skill.category] ?? Blocks
@@ -259,14 +257,16 @@ function InstalledAgents({ agents }: { agents: SkillInstalledAgent[] }) {
       </span>
       <div className="flex -space-x-1.5 shrink-0">
         {visible.map((a) => (
-          <Image
+          <AgentAvatar
             key={a.agent_id}
-            src={getAgentAvatarUrl(a.avatar_seed ?? a.agent_slug, a.avatar_style)}
+            seed={a.avatar_seed ?? a.agent_slug}
+            style={a.avatar_style}
+            agentId={a.agent_id}
+            avatarUrl={a.avatar_url}
             alt={a.agent_name}
             title={`${a.agent_name}${a.crew_name ? ` · ${a.crew_name}` : ""}`}
             width={20}
             height={20}
-            unoptimized
             className="h-5 w-5 rounded-full ring-1 ring-black/40 bg-white/[0.04]"
           />
         ))}
