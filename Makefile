@@ -1,4 +1,4 @@
-.PHONY: up down restart status dev dev\:go dev\:next build build\:go build\:sidecar test cover lint security sbom notices e2e e2e\:ui validate smoke-cli
+.PHONY: up down restart status dev dev\:go dev\:next build build\:go build\:sidecar test cover lint security mutation sbom notices e2e e2e\:ui validate smoke-cli
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
@@ -197,6 +197,22 @@ security:
 		gitleaks detect --no-banner --redact; \
 	else \
 		echo "⚠ gitleaks not installed — brew install gitleaks"; \
+	fi
+
+# Mutation testing (github.com/go-gremlins/gremlins), scoped to the four
+# packages in .gremlins.yaml — NOT repo-wide, see that file for why.
+# gremlins copies the whole Go module root per worker with no ignore
+# support; if your checkout has a large .claude/ (worktrees, caches) or
+# other big untracked dirs under the module root, point TMPDIR at a
+# volume with room, or run this from a clean `git worktree add` checkout.
+mutation:
+	@if command -v gremlins >/dev/null 2>&1; then \
+		for pkg in ./internal/untrusted ./internal/scrubber ./internal/manifest/kinds ./internal/sidecar; do \
+			echo "→ gremlins unleash $$pkg"; \
+			gremlins unleash "$$pkg" --config .gremlins.yaml || exit 1; \
+		done; \
+	else \
+		echo "⚠ gremlins not installed — go install github.com/go-gremlins/gremlins/cmd/gremlins@latest"; \
 	fi
 
 sbom:

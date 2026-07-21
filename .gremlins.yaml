@@ -1,0 +1,48 @@
+# Mutation testing config for github.com/go-gremlins/gremlins.
+#
+# Scope: deliberately NOT repo-wide. This module is 97+ packages and
+# internal/api alone takes ~96.6s per `go test` run — mutating it would mean
+# thousands of test invocations. Scoped instead to the four security/parsing
+# chokepoints where a test that "passes but proves nothing" is the highest-
+# value catch: the injection fence, the credential scrubber, the manifest
+# ingestion structs, and the egress sidecar. Run via `make mutation` (loops
+# these four paths — gremlins only accepts one path per invocation) or
+# directly: `gremlins unleash ./internal/untrusted --config .gremlins.yaml`.
+#
+# NEVER point this at internal/api or run repo-wide; that's explicitly out
+# of scope (see the quality/testability plan).
+#
+# Real baselines measured 2026-07-21 (on a clean `git worktree` checkout of
+# origin/main — the live working tree's .claude/ cache defeats gremlins'
+# per-worker full-module copy; see the Makefile comment):
+#
+#   package                    workers  killed  lived  not-covered  timed-out  efficacy  mutant-cov
+#   internal/untrusted               1       7      0           14          0   100.00%      33.33%
+#   internal/scrubber                2      33     14           27          0    70.21%      63.51%
+#   internal/sidecar                 3     677    132          202          9    83.68%      80.02%
+#   internal/manifest/kinds          3    1157     87           76        210    93.01%      94.24%
+#
+# Notes on reading these:
+# - untrusted's low mutant-coverage is fence.go's sanitizeSource loop
+#   reporting NOT COVERED despite being exercised — gremlins' branch-level
+#   view of a rune-range switch, not an actual test gap. Don't chase that
+#   number without checking LIVED first.
+# - scrubber's 14 LIVED mutants cluster in stream.go's overlap-buffer
+#   arithmetic (lines 52-224) — genuine under-tested boundary cases in the
+#   streaming-secret-redaction dedup logic, worth a follow-up look.
+# - manifest/kinds' 210 TIMED OUT (of 1454 runnable) is this run's biggest
+#   piece of noise, not a real signal either way — some mutants may need a
+#   higher --timeout-coefficient than the 15 used here, or this sandbox's
+#   CPU contention inflated it. Re-run before trusting that number precisely.
+#
+# Thresholds below are set BELOW every package's worst real measurement
+# (untrusted's 33.33% mutant-coverage, scrubber's 70.21% efficacy) — start
+# lenient, ratchet up per-package as a follow-up once the noise above is
+# sorted out. A single shared config applies to all four `gremlins unleash`
+# invocations; gremlins has no per-path threshold override within one file.
+unleash:
+  workers: 2
+  timeout-coefficient: 15
+  threshold:
+    efficacy: 50
+    mutant-coverage: 20
