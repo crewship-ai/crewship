@@ -22,6 +22,12 @@
 // hand-written per-endpoint schemas if this ever needs to be a contract
 // consumers code-generate clients from.
 //
+// It also deliberately EXCLUDES every /api/v1/internal/* route (see
+// addRoute) — that surface is sidecar-only, X-Internal-Token authenticated,
+// and never called by an external client. GET /openapi.json itself carries
+// no auth, so documenting internal routes there would publish a route map of
+// the one part of the API deliberately kept non-public.
+//
 // Run via `go generate ./internal/api/` or directly:
 //
 //	go run ./cmd/gen-openapi
@@ -108,11 +114,20 @@ func run() error {
 	return nil
 }
 
-// addRoute excludes the generic /exposed/{token} reverse-proxy mount — it has
-// no fixed method/response shape (it forwards to an arbitrary user app), so
-// it isn't a real documented API operation.
+// addRoute excludes:
+//   - the generic /exposed/{token} reverse-proxy mount — it has no fixed
+//     method/response shape (it forwards to an arbitrary user app), so it
+//     isn't a real documented API operation.
+//   - everything under /api/v1/internal/ — the sidecar-only, X-Internal-Token
+//     authenticated surface (see docs/api-reference/internal.mdx). This spec
+//     is served publicly and unauthenticated at GET /openapi.json; publishing
+//     a machine-readable, always-current route map of the internal surface
+//     there would hand an unauthenticated caller a ready-made target list for
+//     the one part of the API that's deliberately not public, undoing the
+//     effect of #1308's internal-detail scrub for no benefit to a real API
+//     consumer (who has no use for endpoints they can't call anyway).
 func addRoute(seen map[route]bool, routes *[]route, method, path string) {
-	if strings.HasPrefix(path, "/exposed/") {
+	if strings.HasPrefix(path, "/exposed/") || strings.HasPrefix(path, "/api/v1/internal/") {
 		return
 	}
 	rt := route{method: method, path: path}

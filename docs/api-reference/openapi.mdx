@@ -6,13 +6,15 @@ icon: "file-code"
 
 ## `GET /openapi.json`
 
-Returns a generated [OpenAPI 3.0](https://spec.openapis.org/oas/v3.0.3) document describing every registered route — no authentication required, since it carries no data, only shape.
+Returns a generated [OpenAPI 3.0](https://spec.openapis.org/oas/v3.0.3) document describing every registered **public** route — no authentication required, since it carries no data, only shape.
 
 ```
 GET /openapi.json
 ```
 
 This is a **route catalog**, not a hand-authored contract: paths, HTTP methods, and path parameters (`{id}`-style) are exact, generated straight from the route registrations in `internal/api/router_*.go` by `cmd/gen-openapi`. Request and response bodies are a generic `object` placeholder rather than per-endpoint schemas — enough for API discovery and black-box fuzzing tools (e.g. schemathesis) to enumerate every operation, not enough to code-generate a typed client from. For the real request/response shapes, use the per-resource pages in this section.
+
+`/api/v1/internal/*` routes are deliberately excluded — that surface is sidecar-only, `X-Internal-Token` authenticated (see [Internal IPC](/api-reference/internal)), and this endpoint itself carries no auth. Publishing a route map of the one part of the API kept non-public would be counterproductive.
 
 <Note>
   Before this endpoint existed, `GET /openapi.json` returned `200 text/html` — the embedded Next.js SPA answers every unmatched path with its index page. A status-code check alone can't tell that apart from a real spec; check the `Content-Type` is `application/json`.

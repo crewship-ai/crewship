@@ -269,6 +269,18 @@ func TestOpenAPISpec_IsRealJSON(t *testing.T) {
 	if ops, ok := doc.Paths["/api/v1/agents/{agentId}"]; !ok || len(ops) == 0 {
 		t.Errorf("expected /api/v1/agents/{agentId} in the generated spec, got paths: %v", mapKeys(doc.Paths))
 	}
+
+	// The generated spec is public and unauthenticated (GET /openapi.json,
+	// no auth check) — it must never document the sidecar-only,
+	// X-Internal-Token-authenticated /api/v1/internal/* surface. That would
+	// hand an unauthenticated caller a ready-made route map of the one part
+	// of the API deliberately kept non-public (docs/api-reference/internal.mdx),
+	// undoing #1308's internal-detail scrub for no benefit to a real caller.
+	for p := range doc.Paths {
+		if strings.Contains(p, "/internal/") {
+			t.Errorf("generated OpenAPI spec must not include internal routes, found: %s", p)
+		}
+	}
 }
 
 func mapKeys(m map[string]map[string]any) []string {
