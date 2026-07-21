@@ -49,6 +49,48 @@ func newTestProxy(creds []Credential, domains []string) *Proxy {
 	})
 }
 
+// TestNewProxy_ConfigTransportOverride verifies ProxyConfig.Transport is
+// honored from OUTSIDE the package (via NewProxy), not just via the direct
+// `proxy.transport = …` field assignment every other test in this file uses.
+// This is the seam a future replay/cassette-backed RoundTripper (quality/
+// testability plan item A4) needs: something outside internal/sidecar (the
+// sidecar's main(), gated on a replay-mode flag) constructing a Proxy that
+// never touches the real network.
+func TestNewProxy_ConfigTransportOverride(t *testing.T) {
+	var sawRequest bool
+	fake := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		sawRequest = true
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"type":"message"}`)),
+			Request:    r,
+		}, nil
+	})
+
+	cs := NewCredStore()
+	proxy := NewProxy(ProxyConfig{
+		CredStore: cs,
+		Allowlist: NewDomainAllowlist(DefaultAllowedDomains),
+		Scrubber:  scrubber.New(),
+		Logger:    slog.Default(),
+		Transport: fake,
+	})
+
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{}`))
+	req.Host = "127.0.0.1:9119"
+	req.Header.Set("Authorization", "Bearer sk-ant-oat01-my-oauth-token")
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	if !sawRequest {
+		t.Fatal("expected the configured Transport override to receive the forwarded request")
+	}
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestProxyBlocksNonAllowedDomain(t *testing.T) {
 	proxy := newTestProxy(nil, []string{"api.anthropic.com"})
 
