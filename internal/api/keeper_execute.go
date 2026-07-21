@@ -8,6 +8,7 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base32"
 	"encoding/base64"
@@ -18,6 +19,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/keeper"
@@ -25,6 +27,76 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
+
+// keeperExecuteClaimTTL bounds how long a dedup claim covers an in-flight
+// /keeper/execute call: long enough to span gatekeeper evaluation (an LLM
+// round-trip) plus the full container exec (executeTimeout), so a slow
+// legitimate call can't have its claim expire out from under it while a
+// concurrent duplicate is still waiting.
+const keeperExecuteClaimTTL = executeTimeout + 10*time.Second
+
+// keeperExecuteDebounceTTL is how long a claim is held AFTER the winning
+// call finishes (success or failure), so a client retry-on-timeout that
+// lands just after the original completes is still deduped instead of
+// re-running the command a moment later.
+const keeperExecuteDebounceTTL = 5 * time.Second
+
+// keeperExecuteDedup is the single chokepoint (#1329) that gives POST
+// /keeper/execute an idempotency key. HandleExecute calls claim() exactly
+// once, before the PENDING audit insert and before any gatekeeper
+// evaluation or container exec — every code path through the handler goes
+// through this one call, so no branch (ALLOW, DENY, ESCALATE, or an error
+// return) can bypass it. This is process-local (crewship is a single Go
+// binary with no horizontal scaling of the API server within a workspace),
+// so an in-memory map is sufficient — see internal/database for the
+// process-wide-single-instance assumption this relies on.
+type keeperExecuteDedup struct {
+	mu       sync.Mutex
+	inFlight map[string]time.Time // dedup key -> claim expiry
+}
+
+func newKeeperExecuteDedup() *keeperExecuteDedup {
+	return &keeperExecuteDedup{inFlight: make(map[string]time.Time)}
+}
+
+// claim atomically reserves key until keeperExecuteClaimTTL from now.
+// Returns false if another call already holds (or recently held, within
+// its debounce window) the same key — the caller must not proceed.
+func (d *keeperExecuteDedup) claim(key string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	now := time.Now()
+	if exp, ok := d.inFlight[key]; ok && now.Before(exp) {
+		return false
+	}
+	// Opportunistic cleanup of fully-expired entries so the map doesn't
+	// grow unbounded over the process lifetime.
+	for k, exp := range d.inFlight {
+		if now.After(exp) {
+			delete(d.inFlight, k)
+		}
+	}
+	d.inFlight[key] = now.Add(keeperExecuteClaimTTL)
+	return true
+}
+
+// release shortens an active claim to the post-completion debounce window,
+// called via defer once the winning call's outcome (ALLOW/DENY/ESCALATE or
+// an error return) is decided.
+func (d *keeperExecuteDedup) release(key string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.inFlight[key] = time.Now().Add(keeperExecuteDebounceTTL)
+}
+
+// keeperExecuteDedupKey identifies "the same logical execute request" for
+// dedup purposes: same workspace, same requesting agent, same resolved
+// credential, same command. Hashed (not stored raw) so the in-memory key
+// never holds a copy of the command string for longer than necessary.
+func keeperExecuteDedupKey(workspaceID, agentID, credentialID, command string) string {
+	sum := sha256.Sum256([]byte(workspaceID + "\x00" + agentID + "\x00" + credentialID + "\x00" + command))
+	return hex.EncodeToString(sum[:])
+}
 
 // containerUserResolver is the narrow capability keeper needs from the
 // container provider: report the container's configured run-as user (the
@@ -246,6 +318,32 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+
+	// #1329: dedup chokepoint. Must run after credential resolution (so
+	// body.CredentialID is the canonical resolved id, not a name) and
+	// before ANY audit insert, gatekeeper evaluation, or container exec —
+	// this is the one point every call passes through exactly once.
+	dedupKey := keeperExecuteDedupKey(body.WorkspaceID, body.RequestingAgentID, body.CredentialID, body.Command)
+	if !h.execDedup.claim(dedupKey) {
+		h.logger.Warn("keeper execute: duplicate request suppressed",
+			"agent", agentName, "credential", credName)
+		dupNow := time.Now().UTC()
+		if _, err := h.db.ExecContext(r.Context(), `
+			INSERT INTO keeper_requests
+			  (id, requesting_agent_id, requesting_crew_id, credential_id, task_id, intent,
+			   request_type, command, decision, created_at, decided_at)
+			VALUES (?, ?, ?, ?, NULLIF(?,?), ?, 'execute', ?, 'DUPLICATE_SUPPRESSED', ?, ?)`,
+			generateCUID(), body.RequestingAgentID, body.RequestingCrewID, body.CredentialID,
+			body.TaskID, "", body.Intent, body.Command,
+			dupNow.Format(time.RFC3339), dupNow.Format(time.RFC3339)); err != nil {
+			h.logger.Error("keeper execute: insert duplicate-suppressed audit record failed", "error", err)
+		}
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "an identical keeper execute request is already in flight; retry after it completes",
+		})
+		return
+	}
+	defer h.execDedup.release(dedupKey)
 
 	// Insert PENDING audit record
 	reqID := generateCUID()
