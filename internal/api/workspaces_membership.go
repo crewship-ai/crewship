@@ -78,6 +78,14 @@ func (h *WorkspaceHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 }
 
 type addMemberRequest struct {
+	// UserID only. Deliberately NOT an email: resolving an arbitrary
+	// address against the global users table would give every
+	// OWNER/ADMIN — one signup away on an open instance — the account
+	// existence oracle #1254 closed on the signup surface, and would let
+	// them pull another tenant's users into their workspace by address
+	// alone. Adding someone you only know the address of goes through
+	// POST /workspaces/{id}/invitations, which the invitee redeems at
+	// signup (see redeemPendingInvitations in auth.go).
 	UserID string `json:"user_id"`
 	Role   string `json:"role"`
 }

@@ -3,7 +3,6 @@
 import { useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
-import { useAuth } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -18,7 +17,6 @@ export default function SignupPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
-  const { refresh } = useAuth()
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -42,9 +40,7 @@ export default function SignupPage() {
 
     if (!res.ok) {
       const data = await res.json()
-      if (res.status === 409) {
-        setError("An account with this email already exists")
-      } else if (data.error?.fieldErrors) {
+      if (data.error?.fieldErrors) {
         const messages = Object.values(data.error.fieldErrors).flat()
         setError(messages.join(". ") || "Invalid input")
       } else {
@@ -53,8 +49,12 @@ export default function SignupPage() {
       return
     }
 
-    await refresh()
-    router.push("/")
+    // The API answers 202 with the same generic body whether or not the
+    // address already had an account, and hands out no session — telling
+    // this form "already registered" (the old 409) or logging it straight
+    // in would give away who has an account here. So: no auto-login, and
+    // a banner on /login that promises no more than the API did.
+    router.push("/login?signup=submitted")
   }
 
   return (

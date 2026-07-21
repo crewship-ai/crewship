@@ -191,6 +191,39 @@ func TestWorkspaceMembership_AddMember_AdminAssigningAdmin_Returns403(t *testing
 	}
 }
 
+// The workspace roster is NOT a global email→user_id lookup. Resolving
+// an arbitrary address against the users table would hand every
+// OWNER/ADMIN — one free signup away on an open instance — the exact
+// existence oracle #1254 closed on the unauthenticated signup surface,
+// and would let them pull another tenant's users into their workspace
+// by address alone. The endpoint takes user_id and nothing else.
+func TestWorkspaceMembership_AddMember_EmailIsNotAGlobalLookup(t *testing.T) {
+	h, userID, wsID := membershipRig(t)
+	seedOtherUser(t, h, "user-target", "target@example.com")
+	body := strings.NewReader(`{"email":"target@example.com","role":"MEMBER"}`)
+	req := withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/members", body),
+		userID, wsID, "OWNER",
+	)
+	rr := httptest.NewRecorder()
+	h.AddMember(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 — an email must not resolve to a user id here; body=%s",
+			rr.Code, rr.Body.String())
+	}
+	// And nothing may have been written: a 400 that still created the
+	// row would be the same leak with a worse status code.
+	var members int
+	if err := h.db.QueryRow(
+		`SELECT COUNT(*) FROM workspace_members WHERE workspace_id = ? AND user_id = ?`,
+		wsID, "user-target").Scan(&members); err != nil {
+		t.Fatalf("count members: %v", err)
+	}
+	if members != 0 {
+		t.Errorf("membership rows = %d, want 0", members)
+	}
+}
+
 // Missing user_id is a 400. The endpoint cannot do anything useful
 // without it and we want a deterministic error so the UI can surface a
 // clean validation message instead of guessing from a 500.

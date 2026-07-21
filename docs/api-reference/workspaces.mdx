@@ -273,7 +273,7 @@ POST /api/v1/workspaces/{workspaceId}/members
 Adds an existing user to the workspace by user ID.
 
 <Tip>
-Use this when the user already has a Crewship account; for unknown email addresses, use [Create invitation](#create-invitation) instead.
+This takes a `user_id` and only a `user_id`. When all you have is an email address -- whether or not it already has an account -- use [Create invitation](#create-invitation): resolving an address to a user id here would hand every `OWNER`/`ADMIN` the account-existence oracle that signup no longer answers.
 </Tip>
 
 **Auth:** `OWNER` or `ADMIN` (`canRole "manage"`).
@@ -567,6 +567,16 @@ POST /api/v1/workspaces/{workspaceId}/invitations
 | `role` | string | no | `MEMBER` | One of `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER` |
 
 **Response:** `201 Created` -- invitation object with the freshly minted hex `token` (this is the only time the token is returned).
+
+Invitations are redeemed at **signup**: when the invited address creates
+an account via [`POST /api/v1/auth/signup`](/api-reference/auth#signup),
+every live invitation for that address is consumed inside the same
+transaction and the new user lands in each inviting workspace at the
+invited role, on top of their own default workspace. An invitation for
+an address that *already* has an account is left pending -- signup is a
+no-op there, and redeeming it would place someone who never consented.
+This is also why `POST .../members` takes a `user_id` and not an email:
+resolving an arbitrary address would be an account-existence oracle.
 
 | Status | Condition |
 |---|---|

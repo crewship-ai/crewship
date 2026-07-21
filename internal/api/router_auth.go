@@ -29,7 +29,12 @@ func (r *Router) registerAuthRoutes() {
 	// setup token (Patch C) against the same instance the mux dispatches
 	// to. /api/v1/bootstrap is the deploy-race vector — the token gate on
 	// that handler is the single point of defence.
+	// One mailer for both auth surfaces: signup needs it for the
+	// "you already have an account" notice that replaced the 409,
+	// recovery for the reset link.
+	mail := mailer.NewFromEnv()
 	authH := NewAuthHandler(r.db, r.logger, r.authMw.validator, r.sessionsStore, r.allowSignup)
+	authH.mail = mail
 	r.authHandler = authH
 	r.mux.HandleFunc("POST /api/v1/bootstrap", authH.Bootstrap)
 	r.mux.HandleFunc("POST /api/v1/auth/signup", authH.Signup)
@@ -40,7 +45,7 @@ func (r *Router) registerAuthRoutes() {
 	// to mailer.Disabled which returns ErrDisabled on Send. /forgot
 	// returns 200 either way (no enumeration); /reset is the
 	// token-redemption endpoint.
-	recoveryH := NewRecoveryHandler(r.db, r.logger, mailer.NewFromEnv(), r.sessionsStore)
+	recoveryH := NewRecoveryHandler(r.db, r.logger, mail, r.sessionsStore)
 	r.mux.HandleFunc("POST /api/v1/auth/forgot", recoveryH.Forgot)
 	r.mux.HandleFunc("POST /api/v1/auth/reset", recoveryH.Reset)
 

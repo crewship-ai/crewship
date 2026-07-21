@@ -18,6 +18,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"github.com/crewship-ai/crewship/internal/mailer"
 )
 
 // AuthHandler provides user authentication endpoints including signup, login, and WebSocket token exchange.
@@ -27,6 +28,19 @@ type AuthHandler struct {
 	validator   *auth.JWTValidator
 	sessions    sessions.Store
 	allowSignup bool
+
+	// mail carries the out-of-band half of the de-enumerated signup:
+	// the "you already have an account" notice. Optional — nil (tests)
+	// and mailer.Disabled{} (no transport configured) both degrade to
+	// a log line, never to a different HTTP response. Wired by
+	// NewRouter alongside the recovery handler's mailer.
+	mail mailer.Mailer
+
+	// mailWG tracks the detached collision notices. The send is
+	// deliberately NOT on the request path (see notifyExistingAccount),
+	// which leaves nothing for a test — or a future graceful shutdown —
+	// to join on; this is that join point.
+	mailWG sync.WaitGroup
 
 	// bootstrap window state gates POST /api/v1/bootstrap on an empty
 	// database. Armed by ArmDeployRaceWindow at server start.
@@ -281,8 +295,42 @@ var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-
 // recompile the regex on every call.
 var emailSlugCleanRE = regexp.MustCompile(`[^a-z0-9-]`)
 
-// Signup registers a new user, creates their default workspace, and sets a session cookie.
+// Signup registers a new user and creates their default workspace.
 // POST /api/v1/auth/signup — disabled when CREWSHIP_ALLOW_SIGNUP is false.
+//
+// The response is deliberately the same 202 + body for a brand-new
+// address and for one that already has an account: the pre-2026-07
+// 409 "Email already registered" turned this endpoint into an email
+// enumeration oracle for anyone who could reach it. Login (dummy-
+// bcrypt timing equalizer) and /auth/forgot (always 200) were already
+// de-enumerated; signup was the last one left.
+//
+// Consequences of that contract, all intentional:
+//
+//   - No session cookie. Signup used to log the new user straight in,
+//     but Set-Cookie is part of the response — emitting it only on the
+//     created path leaks existence exactly as loudly as the 409 did.
+//     The dashboard now routes to /login?signup=submitted instead.
+//   - No account id in the body, for the same reason. Placing a user
+//     you only know the address of goes through a workspace invitation,
+//     which this handler redeems — see redeemPendingInvitations.
+//   - The collision is handled out-of-band the way recovery does it:
+//     an "account already exists" notice to the address itself when a
+//     mailer is configured, an info log with a hashed address when not.
+//     It is dispatched AFTER the response is written, detached: the
+//     send happens on the collision branch only, so awaiting it would
+//     answer in latency exactly what the body refuses to.
+//   - Both paths burn one bcrypt at cost 12, so the dominant cost is
+//     the same on each. This is NOT a constant-time guarantee — the
+//     created path still runs a write transaction. What is equalised
+//     is the body, status, cookies, and the two big request-path costs.
+//
+// Residual, documented in docs/security/threat-model.mdx: with open
+// signup and no email-verification step, an attacker who signs up with
+// victim@example.com can still infer the answer by trying to log in
+// with the password they just chose. Closing that needs verification-
+// before-activation, which is tracked separately; this change removes
+// the single-request oracle.
 func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	if !h.allowSignup {
 		replyError(w, http.StatusForbidden, "Registration is disabled. Set CREWSHIP_ALLOW_SIGNUP=true to enable.")
@@ -311,7 +359,18 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	var existingID string
 	err := h.db.QueryRowContext(r.Context(), "SELECT id FROM users WHERE email = ?", req.Email).Scan(&existingID)
 	if err == nil {
-		replyError(w, http.StatusConflict, "Email already registered")
+		// Address is taken. Spend one bcrypt so this path costs what
+		// the create path costs (GenerateFromPassword at the same cost
+		// 12 below), then answer exactly as if we had created the
+		// account. The owner hears about the attempt by email.
+		_ = bcryptCompareHashAndPassword(dummyBcryptHash(), req.Password)
+		// Answer FIRST. The notice is an outbound HTTPS call to a third
+		// party and it happens on this branch only — awaited here it
+		// would make the taken-address response measurably slower than
+		// the created one on every instance with a mailer configured,
+		// which is the same oracle in the time domain.
+		writeSignupResponse(w)
+		h.notifyExistingAccount(r.Context(), req.Email)
 		return
 	}
 	if err != sql.ErrNoRows {
@@ -344,6 +403,16 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		"INSERT INTO users (id, full_name, email, hashed_password, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
 		userID, req.FullName, req.Email, string(hashed), now, now)
 	if err != nil {
+		// users.email is UNIQUE, so a concurrent signup for the same
+		// address can land between our probe above and this INSERT.
+		// That failure is existence-dependent — surfacing it as a 500
+		// would put the oracle back, this time in the status code.
+		if isDuplicateEmailErr(err) {
+			h.logger.Info("signup: lost the insert race for an existing address",
+				"email_hash", emailHashShort(req.Email))
+			writeSignupResponse(w)
+			return
+		}
 		replyInternalError(w, h.logger, "insert user", err)
 		return
 	}
@@ -365,51 +434,170 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	joined, err := redeemPendingInvitations(r.Context(), tx, userID, req.Email, now)
+	if err != nil {
+		replyInternalError(w, h.logger, "redeem invitations", err)
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "commit tx", err)
 		return
 	}
 
-	// Cookie-set must succeed for the response to honestly mean "you
-	// are signed up and signed in". If it fails (validator down,
-	// sessions store unreachable), tell the client and roll the
-	// account back so we don't leave an orphan that can never log in
-	// because of a cleanup we forgot.
-	//
-	// We use a fresh background context with a short timeout instead
-	// of r.Context() because the user has already been committed.
-	// If the client disconnects between tx.Commit and sessions.Create,
-	// r.Context() goes Canceled — and we'd then delete a perfectly
-	// valid user. Background-derived context decouples the post-commit
-	// auth setup from the transport: the user gets created either way;
-	// the cookie just doesn't reach them and they re-login normally.
-	authCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := h.setSessionCookies(authCtx, w, r, userID, req.FullName, req.Email); err != nil {
-		h.logger.Error("set session cookies after signup — rolling back", "error", err)
-		h.cleanupOrphanedSignup(userID, workspaceID)
-		replyError(w, http.StatusInternalServerError, "Failed to establish session — please try again")
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, map[string]string{"id": userID, "email": req.Email})
+	h.logger.Info("signup: account created", "user_id", userID, "workspace", slug, "invitations_redeemed", joined)
+	writeSignupResponse(w)
 }
 
-// cleanupOrphanedSignup removes the user + workspace + membership rows
-// created by a Signup that committed but couldn't establish a session.
-// Best-effort — we already logged the original failure, so any error
-// here just means a manual sweep later. FK CASCADE on user delete
-// handles workspace_members; we still nuke the workspace explicitly
-// because it has no inbound FK from users.
-func (h *AuthHandler) cleanupOrphanedSignup(userID, workspaceID string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if _, err := h.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
-		h.logger.Error("cleanup orphan user", "error", err, "user_id", userID)
+// redeemPendingInvitations places a freshly created account into every
+// workspace that had invited its address, and marks those invitations
+// accepted. Runs inside the signup transaction so a user either lands
+// everywhere they were invited or nowhere.
+//
+// This is the redemption half of POST /workspaces/{id}/invitations,
+// which could always name an address with no account behind it but had
+// nothing to consume the row. Signup is the right moment: the address
+// only gets placed because whoever holds it turned up and chose a
+// password. That consent is what keeps "add a member by email" honest —
+// an OWNER can invite any address, but cannot pull an existing account
+// into their workspace, and gets no signal about whether the address
+// has one (the invitation POST answers the same either way).
+//
+// Only the created path calls this. The collision branch must stay a
+// no-op — see TestSignup_ExistingAccount_DoesNotRedeemInvitations.
+//
+// Returns how many invitations were redeemed, for the log line.
+func redeemPendingInvitations(ctx context.Context, tx *sql.Tx, userID, email, now string) (int, error) {
+	// LOWER() on both sides because the inviter typed the address by
+	// hand. expires_at is stored RFC3339 ("...T...Z") while datetime()
+	// yields "... ..." — comparing them as TEXT makes every stored value
+	// sort after every clock value ('T' > ' '), i.e. nothing ever
+	// expires. datetime() on both sides normalises them first.
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, workspace_id, role FROM workspace_invitations
+		WHERE LOWER(email) = LOWER(?) AND accepted_at IS NULL
+		  AND datetime(expires_at) > datetime('now')`, email)
+	if err != nil {
+		return 0, err
 	}
-	if _, err := h.db.ExecContext(ctx, `DELETE FROM workspaces WHERE id = ?`, workspaceID); err != nil {
-		h.logger.Error("cleanup orphan workspace", "error", err, "workspace_id", workspaceID)
+	type invite struct{ id, workspaceID, role string }
+	var pending []invite
+	for rows.Next() {
+		var inv invite
+		if err := rows.Scan(&inv.id, &inv.workspaceID, &inv.role); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		pending = append(pending, inv)
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+
+	for _, inv := range pending {
+		// OR IGNORE guards the UNIQUE(workspace_id, user_id): two live
+		// invitations for the same workspace are legal rows, and the
+		// second one must not fail the whole signup.
+		if _, err := tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO workspace_members (id, workspace_id, user_id, role, created_at)
+			VALUES (?, ?, ?, ?, ?)`, generateCUID(), inv.workspaceID, userID, inv.role, now); err != nil {
+			return 0, err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE workspace_invitations SET accepted_at = ? WHERE id = ?`, now, inv.id); err != nil {
+			return 0, err
+		}
+	}
+	return len(pending), nil
+}
+
+// writeSignupResponse writes the no-enumeration signup response. Single
+// helper — like the recovery handler's writeForgotResponse — so every
+// path answers with byte-identical bytes and nobody can reintroduce a
+// distinguishing branch by accident.
+func writeSignupResponse(w http.ResponseWriter) {
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"ok":      true,
+		"message": "If that email address isn't already registered, the account has been created. Sign in at /login to continue.",
+	})
+}
+
+// isDuplicateEmailErr reports whether err is the UNIQUE violation on
+// users.email. Matched on the driver's message because modernc/sqlite
+// surfaces constraint failures as an opaque error type whose code we'd
+// have to import the driver to inspect — and the api package
+// deliberately stays driver-agnostic.
+func isDuplicateEmailErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique") && strings.Contains(msg, "users.email")
+}
+
+// notifyExistingAccount is the out-of-band half of the de-enumerated
+// signup: the HTTP response can't say "you already have an account",
+// so we tell the address itself. Mirrors /auth/forgot — when no mailer
+// is configured (the common self-hosted case) we only log, with the
+// address hashed so the log isn't its own enumeration surface.
+//
+// The send runs in a detached goroutine and the caller must already
+// have written the response. Both halves of that matter: the send only
+// happens on the collision branch, so any time it spends is a direct
+// read on "does this address exist" for anyone with a stopwatch. The
+// context is derived with WithoutCancel because r.Context() is dead the
+// moment the handler returns; the explicit timeout is what bounds it.
+//
+// Errors are swallowed on purpose: the response has already gone out,
+// and a send failure must not change it.
+func (h *AuthHandler) notifyExistingAccount(ctx context.Context, email string) {
+	if h.mail == nil || !h.mail.Configured() {
+		h.logger.Info("signup: attempt on an address that already has an account (no mailer configured, owner not notified)",
+			"email_hash", emailHashShort(email))
+		return
+	}
+	sendCtx := context.WithoutCancel(ctx)
+	h.mailWG.Add(1)
+	go func() {
+		defer h.mailWG.Done()
+		sendCtx, cancel := context.WithTimeout(sendCtx, 30*time.Second)
+		defer cancel()
+		if err := h.mail.Send(sendCtx, mailer.Message{
+			To:      email,
+			Subject: "Someone tried to sign up with your Crewship email",
+			HTML:    existingAccountEmailHTML(),
+			Text:    existingAccountEmailText(),
+		}); err != nil {
+			h.logger.Error("signup: notify existing account failed", "error", err, "email_hash", emailHashShort(email))
+		}
+	}()
+}
+
+// WaitForPendingMail blocks until every detached collision notice has
+// finished. Only tests and shutdown need it; request handlers must
+// never call it (that would put the mailer back on the request path).
+func (h *AuthHandler) WaitForPendingMail() { h.mailWG.Wait() }
+
+func existingAccountEmailHTML() string {
+	return `<!doctype html>
+<html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:32px;color:#18181b;">
+<h2 style="margin:0 0 16px 0;font-size:20px;">You already have a Crewship account</h2>
+<p>Someone (hopefully you) just tried to create a Crewship account with this email address. One already exists, so nothing was changed.</p>
+<p>If that was you, sign in with your existing password — or use the "Forgot password" link if you don't remember it.</p>
+<p style="color:#71717a;font-size:13px;">If it wasn't you, no action is needed: your password was not changed and no new account was created.</p>
+</body></html>`
+}
+
+func existingAccountEmailText() string {
+	return `Someone (hopefully you) just tried to create a Crewship account with this email address.
+
+One already exists, so nothing was changed.
+
+If that was you, sign in with your existing password — or use the "Forgot password" link if you don't remember it.
+
+If it wasn't you, no action is needed: your password was not changed and no new account was created.`
 }
 
 // Bootstrap creates the first admin user on an empty database.

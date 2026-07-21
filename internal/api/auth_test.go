@@ -95,8 +95,8 @@ func TestAuthSignup_Success(t *testing.T) {
 	req := httptest.NewRequest("POST", "/api/v1/auth/signup", body)
 	rr := httptest.NewRecorder()
 	h.Signup(rr, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201, body: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202, body: %s", rr.Code, rr.Body.String())
 	}
 
 	// Verify user was created with workspace + membership
@@ -115,39 +115,14 @@ func TestAuthSignup_Success(t *testing.T) {
 		t.Errorf("workspaces = %d, want 1", count)
 	}
 
-	// Verify session cookie set
-	gotCookie := false
+	// No session cookie: signup stopped authenticating the caller when
+	// the endpoint was de-enumerated — a Set-Cookie that only appears
+	// for genuinely new addresses answers the question the generic
+	// body refuses to. The user signs in at /login afterwards.
 	for _, c := range rr.Result().Cookies() {
-		if c.Name == "authjs.session-token" || c.Name == "__Secure-authjs.session-token" {
-			gotCookie = true
-			if c.Value == "" {
-				t.Error("session cookie value empty")
-			}
+		if strings.Contains(c.Name, "session-token") && c.Value != "" {
+			t.Errorf("signup set session cookie %q; it must not authenticate the caller", c.Name)
 		}
-	}
-	if !gotCookie {
-		t.Error("expected session cookie to be set")
-	}
-}
-
-func TestAuthSignup_DuplicateEmail(t *testing.T) {
-	t.Parallel()
-	db := setupTestDB(t)
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v := newTestJWTValidator(t)
-	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), true)
-
-	// Insert existing user
-	if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES ('u1', 'taken@example.com', 'Existing')`); err != nil {
-		t.Fatalf("seed user: %v", err)
-	}
-
-	body := bytes.NewBufferString(`{"full_name":"New","email":"taken@example.com","password":"longenough"}`)
-	req := httptest.NewRequest("POST", "/api/v1/auth/signup", body)
-	rr := httptest.NewRecorder()
-	h.Signup(rr, req)
-	if rr.Code != http.StatusConflict {
-		t.Errorf("status = %d, want 409", rr.Code)
 	}
 }
 
@@ -499,20 +474,24 @@ func TestAuthWsToken_CLIToken(t *testing.T) {
 	}
 }
 
-// ---- setSessionCookie (via Signup) ----
+// ---- setSessionCookie (via Bootstrap) ----
 
-func TestAuthSignup_SecureCookieOnHTTPS(t *testing.T) {
+// Bootstrap is the only handler that still hands out session cookies —
+// signup stopped doing so when it was de-enumerated — so the Secure
+// cookie contract is pinned here.
+func TestAuthBootstrap_SecureCookieOnHTTPS(t *testing.T) {
 	t.Parallel()
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	v := newTestJWTValidator(t)
-	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), true)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
+	armBootstrapForTest(t, h)
 
 	body := bytes.NewBufferString(`{"full_name":"Bob","email":"bob@example.com","password":"longenough"}`)
-	req := httptest.NewRequest("POST", "/api/v1/auth/signup", body)
+	req := httptest.NewRequest("POST", "/api/v1/bootstrap", body)
 	req.Header.Set("X-Forwarded-Proto", "https")
 	rr := httptest.NewRecorder()
-	h.Signup(rr, req)
+	h.Bootstrap(rr, req)
 
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body: %s", rr.Code, rr.Body.String())
