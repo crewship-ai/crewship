@@ -79,6 +79,9 @@ type KeeperHandler struct {
 	// dedicated keeper UI even when journal isn't wired (tests, early
 	// bring-up). Set via SetJournal at router setup.
 	journal journal.Emitter
+	// execDedup is the single chokepoint (#1329) that gives POST
+	// /keeper/execute an idempotency key — see keeperExecuteDedup.
+	execDedup *keeperExecuteDedup
 }
 
 // NewKeeperHandler creates a KeeperHandler with the given gatekeeper evaluator and internal token.
@@ -90,6 +93,7 @@ func NewKeeperHandler(db *sql.DB, internalToken string, gk gatekeeper.Evaluator,
 		internalToken: internalToken,
 		gatekeeper:    gk,
 		journal:       noopEmitter{},
+		execDedup:     newKeeperExecuteDedup(),
 	}
 }
 
