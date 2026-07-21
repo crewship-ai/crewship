@@ -41,8 +41,8 @@ describe("getServerBase", () => {
   })
 
   it("falls back to localStorage", () => {
-    stubStoredBase("http://192.168.1.201:8082")
-    expect(getServerBase()).toBe("http://192.168.1.201:8082")
+    stubStoredBase("http://192.168.1.10:8082")
+    expect(getServerBase()).toBe("http://192.168.1.10:8082")
   })
 
   it("injected global wins over localStorage", () => {
@@ -162,7 +162,7 @@ describe("resolveWsBase", () => {
   })
 
   it("maps a configured http base to ws and keeps the port", () => {
-    window.__CREWSHIP_SERVER_BASE__ = "http://192.168.1.201:8082"
-    expect(resolveWsBase()).toBe("ws://192.168.1.201:8082")
+    window.__CREWSHIP_SERVER_BASE__ = "http://192.168.1.10:8082"
+    expect(resolveWsBase()).toBe("ws://192.168.1.10:8082")
   })
 })
