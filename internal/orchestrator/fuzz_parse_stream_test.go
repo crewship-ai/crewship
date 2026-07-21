@@ -1,11 +1,13 @@
 package orchestrator
 
 import (
-	"os"
-	"path/filepath"
+	"embed"
 	"strings"
 	"testing"
 )
+
+//go:embed testdata/cli-fixtures
+var cliFixturesFS embed.FS
 
 // seedFuzzFromFixture seeds f with every non-empty line recorded from a real
 // CLI run (internal/orchestrator/testdata/cli-fixtures/*.ndjson), plus a
@@ -17,7 +19,7 @@ import (
 // surface, not the fixtures themselves.
 func seedFuzzFromFixture(f *testing.F, fixture string) {
 	f.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", "cli-fixtures", fixture))
+	data, err := cliFixturesFS.ReadFile("testdata/cli-fixtures/" + fixture)
 	if err != nil {
 		f.Fatalf("read fixture %s: %v", fixture, err)
 	}
@@ -45,47 +47,41 @@ func seedFuzzFromFixture(f *testing.F, fixture string) {
 func FuzzParseStreamLine_Claude(f *testing.F) {
 	seedFuzzFromFixture(f, "claude.ndjson")
 	f.Fuzz(func(t *testing.T, line []byte) {
-		var got []AgentEvent
-		parseClaudeCodeStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+		parseClaudeCodeStreamJSON(line, func(AgentEvent) {})
 	})
 }
 
 func FuzzParseStreamLine_Codex(f *testing.F) {
 	seedFuzzFromFixture(f, "codex.ndjson")
 	f.Fuzz(func(t *testing.T, line []byte) {
-		var got []AgentEvent
-		parseCodexStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+		parseCodexStreamJSON(line, func(AgentEvent) {})
 	})
 }
 
 func FuzzParseStreamLine_Cursor(f *testing.F) {
 	seedFuzzFromFixture(f, "cursor.ndjson")
 	f.Fuzz(func(t *testing.T, line []byte) {
-		var got []AgentEvent
-		parseCursorStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+		parseCursorStreamJSON(line, func(AgentEvent) {})
 	})
 }
 
 func FuzzParseStreamLine_Droid(f *testing.F) {
 	seedFuzzFromFixture(f, "droid.ndjson")
 	f.Fuzz(func(t *testing.T, line []byte) {
-		var got []AgentEvent
-		parseDroidStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+		parseDroidStreamJSON(line, func(AgentEvent) {})
 	})
 }
 
 func FuzzParseStreamLine_Gemini(f *testing.F) {
 	seedFuzzFromFixture(f, "gemini.ndjson")
 	f.Fuzz(func(t *testing.T, line []byte) {
-		var got []AgentEvent
-		parseGeminiStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+		parseGeminiStreamJSON(line, func(AgentEvent) {})
 	})
 }
 
 func FuzzParseStreamLine_OpenCode(f *testing.F) {
 	seedFuzzFromFixture(f, "opencode.ndjson")
 	f.Fuzz(func(t *testing.T, line []byte) {
-		var got []AgentEvent
-		newOpenCodeStreamParser().parseLine(line, func(e AgentEvent) { got = append(got, e) })
+		newOpenCodeStreamParser().parseLine(line, func(AgentEvent) {})
 	})
 }
