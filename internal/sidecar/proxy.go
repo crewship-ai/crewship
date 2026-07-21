@@ -132,6 +132,16 @@ type ProxyConfig struct {
 	// domains — see the Proxy field doc comment. Empty is a valid value
 	// (free mode, or restricted with an empty allowlist).
 	PolicyDomainsHash string
+	// Transport overrides the outbound RoundTripper the proxy hands every
+	// forwarded request to (handleHTTP, handleReverseProxy). nil (the
+	// default) builds the real resolve-then-pin SSRF-guarded *http.Transport
+	// exactly as before — this field changes nothing for production sidecars.
+	// It exists so a replay/cassette-backed RoundTripper (quality/testability
+	// plan A4) can be wired in from OUTSIDE this package (e.g. the sidecar's
+	// main(), gated on an explicit replay-mode flag) without reaching into an
+	// unexported field. In-package tests already do that directly (see
+	// proxy_test.go's `proxy.transport = …` assignments) and are unaffected.
+	Transport http.RoundTripper
 }
 
 // NewProxy creates a forward proxy with credential injection.
@@ -153,18 +163,22 @@ func NewProxy(cfg ProxyConfig) *Proxy {
 		dnsResolve:        net.DefaultResolver.LookupIPAddr,
 		dialer:            &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second},
 	}
-	p.transport = &http.Transport{
-		// #961: resolve-then-pin SSRF guard. The allowlist matches a
-		// hostname string; this closes the DNS-rebinding gap by checking
-		// every resolved IP at dial time and connecting to that exact IP.
-		// FreeMode is the operator's explicit opt-out of egress limits, so
-		// the guard permits private targets there too (no free-mode regression);
-		// the fence's teeth are in restricted mode, where the local-model
-		// endpoint path lives. Shares p.dnsCache with handleConnect (#1139).
-		DialContext:         p.dialSSRF,
-		MaxIdleConns:        100,
-		IdleConnTimeout:     90 * time.Second,
-		TLSHandshakeTimeout: 10 * time.Second,
+	if cfg.Transport != nil {
+		p.transport = cfg.Transport
+	} else {
+		p.transport = &http.Transport{
+			// #961: resolve-then-pin SSRF guard. The allowlist matches a
+			// hostname string; this closes the DNS-rebinding gap by checking
+			// every resolved IP at dial time and connecting to that exact IP.
+			// FreeMode is the operator's explicit opt-out of egress limits, so
+			// the guard permits private targets there too (no free-mode regression);
+			// the fence's teeth are in restricted mode, where the local-model
+			// endpoint path lives. Shares p.dnsCache with handleConnect (#1139).
+			DialContext:         p.dialSSRF,
+			MaxIdleConns:        100,
+			IdleConnTimeout:     90 * time.Second,
+			TLSHandshakeTimeout: 10 * time.Second,
+		}
 	}
 	return p
 }
