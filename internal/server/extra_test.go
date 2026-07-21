@@ -86,6 +86,7 @@ func TestRegisterRoutes_AllPathsMounted(t *testing.T) {
 		{"GET", "/metrics", http.StatusOK},
 		{"GET", "/ws", http.StatusUnauthorized},                // missing token
 		{"GET", "/ws/terminal", http.StatusServiceUnavailable}, // no terminal handler
+		{"GET", "/openapi.json", http.StatusOK},
 	}
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
@@ -223,6 +224,71 @@ func TestCombinedHandler_RoutesAPIPathsToMux(t *testing.T) {
 	if rec2.Body.String() != "SPA" {
 		t.Errorf("expected SPA, got %q", rec2.Body.String())
 	}
+
+	// /openapi.json must NOT hit SPA either — pre-fix, the SPA catch-all
+	// answered every unmatched path (including this one) with its index.html:
+	// a 200 that looked like a working endpoint but carried no real schema.
+	rec3 := httptest.NewRecorder()
+	combined.ServeHTTP(rec3, httptest.NewRequest("GET", "/openapi.json", nil))
+	if strings.Contains(rec3.Body.String(), "SPA") {
+		t.Errorf("/openapi.json routed to SPA: %s", rec3.Body.String())
+	}
+}
+
+// TestOpenAPISpec_IsRealJSON pins the actual regression this route closes:
+// GET /openapi.json must return a real application/json OpenAPI document
+// with paths, not a 200-status-with-no-schema SPA fallback page.
+func TestOpenAPISpec_IsRealJSON(t *testing.T) {
+	t.Parallel()
+	s := newTestServer()
+
+	req := httptest.NewRequest("GET", "/openapi.json", nil)
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("expected application/json content-type, got %q", ct)
+	}
+
+	var doc struct {
+		OpenAPI string                    `json:"openapi"`
+		Paths   map[string]map[string]any `json:"paths"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if doc.OpenAPI == "" {
+		t.Error("missing openapi version field")
+	}
+	if len(doc.Paths) == 0 {
+		t.Error("expected at least one path in the generated spec")
+	}
+	if ops, ok := doc.Paths["/api/v1/agents/{agentId}"]; !ok || len(ops) == 0 {
+		t.Errorf("expected /api/v1/agents/{agentId} in the generated spec, got paths: %v", mapKeys(doc.Paths))
+	}
+
+	// The generated spec is public and unauthenticated (GET /openapi.json,
+	// no auth check) — it must never document the sidecar-only,
+	// X-Internal-Token-authenticated /api/v1/internal/* surface. That would
+	// hand an unauthenticated caller a ready-made route map of the one part
+	// of the API deliberately kept non-public (docs/api-reference/internal.mdx),
+	// undoing #1308's internal-detail scrub for no benefit to a real caller.
+	for p := range doc.Paths {
+		if strings.Contains(p, "/internal/") {
+			t.Errorf("generated OpenAPI spec must not include internal routes, found: %s", p)
+		}
+	}
+}
+
+func mapKeys(m map[string]map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // TestSanitizeMetadata_AllowedKeys verifies the allowlist is applied.
