@@ -24,6 +24,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /metrics", s.handleMetrics)
 	s.mux.HandleFunc("GET /ws", s.handleWebSocket)
 	s.mux.HandleFunc("GET /ws/terminal", s.handleTerminalWebSocket)
+	s.mux.HandleFunc("GET /openapi.json", api.ServeOpenAPISpec)
 }
 
 func (s *Server) registerIPCRoutes() {

@@ -405,6 +405,7 @@
             "icon": "globe",
             "pages": [
               "api-reference/overview",
+              "api-reference/openapi",
               "api-reference/auth",
               "api-reference/workspaces",
               "api-reference/crews",

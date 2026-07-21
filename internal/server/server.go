@@ -979,8 +979,8 @@ func newLLMProxy(cfg *config.Config, logger *slog.Logger, wsHub *ws.Hub) (*llmpr
 	return tokenPool, tokenSyncer, credMonitor
 }
 
-// combinedHandler routes /api/, /exposed/, /healthz, /readyz, /metrics, /ws
-// to the mux, and everything else to the SPA static file handler.
+// combinedHandler routes /api/, /exposed/, /healthz, /readyz, /metrics, /ws,
+// /openapi.json to the mux, and everything else to the SPA static file handler.
 // /exposed/{token}/... must bypass the SPA handler so the port-expose reverse
 // proxy sees the request instead of serving the Next.js fallback.
 
@@ -1015,7 +1015,7 @@ func isMuxRoutedPath(path string) bool {
 		strings.HasPrefix(path, "/exposed/") ||
 		path == "/healthz" || path == "/readyz" ||
 		path == "/metrics" || path == "/ws" ||
-		path == "/ws/terminal"
+		path == "/ws/terminal" || path == "/openapi.json"
 }
 
 // sensitiveStaticPathPrefixes lists URL path prefixes that should never be
