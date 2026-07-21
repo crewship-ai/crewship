@@ -167,16 +167,16 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "8. Deferred escalate→approve→resume race (needs a live container, T2)"
+section "8. Deferred escalate→approve→resume race (T2 — blocked on a missing feature, not a missing test)"
 # ─────────────────────────────────────────────────────────────────────────────
 skip "deferred-approval TOCTOU end-to-end (test T2)" \
-  "drive the sidecar keeper bridge from inside a crew container: open an ESCALATE, rotate --grace-seconds 0 / unassign while PENDING, approve, then assert the resumed injection uses the NEW state. The synchronous path re-validates at keeper_execute.go:323 — this proves the deferred twin does too."
+  "2026-07-21 audit: there is NO deferred approve→resume execution path to test. HandleRequest (keeper_request.go) and HandleExecute (keeper_execute.go) are the only two decision endpoints; an ESCALATE from either is a terminal, human-visibility-only outcome — it inserts a keeper_requests row + an inbox item and returns, but nothing in internal/api or the sidecar bridge (internal/sidecar/keeper_bridge.go) ever re-reads that row, flips its decision, or resumes a credential injection/exec after a human acts on it (confirmed: only keeper_execute.go and keeper_request.go run 'UPDATE keeper_requests' anywhere in the codebase, both at initial-decision time only; inbox PatchState treats a keeper ESCALATE as a source-less item an operator can only dismiss, never approve-and-resume). Fix is a product feature (build the resume pipeline), not a test — do not attempt to fake this test green. Re-scope #1023 accordingly before picking this back up."
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "9. Double-execute of one approved requestId (needs internal token, T10)"
+section "9. Double-execute of one approved requestId (T10 — proven via a deterministic Go test, not this bash race)"
 # ─────────────────────────────────────────────────────────────────────────────
-skip "double-execute idempotency (test T10)" \
-  "fire two simultaneous POST /api/v1/internal/keeper/execute for one approved requestId; assert the command runs once (no double side effect / duplicate audit row). Requires the internal token — run as a sidecar-side probe."
+skip "double-execute idempotency (test T10) — see internal/api/keeper_execute_concurrent_test.go" \
+  "2026-07-21: ported to TestKeeperHandleExecute_ConcurrentIdenticalRequests_T10, a deterministic Go-level test (httptest + a counting container fake) instead of a live two-container race needing the internal token from inside a sidecar. FINDING: HandleExecute has no idempotency key — 2 concurrent identical /keeper/execute calls reproducibly ran the container command twice and left 2 audit rows, every one of 5 repeated runs. This is a real gap (no dedup on retry/race), not a test artifact; the Go test currently logs it rather than hard-asserting, so it doesn't block every future PR on an un-designed idempotency fix. Left skipped here (not this script's job to re-prove a Go-level result against live infra) — see the Go test for the reproducible finding."
 
 info "Cleanup: crewship credential delete $CRED --yes"
 if cs credential delete "$CRED" --yes >/dev/null 2>&1; then info "deleted $CRED"; else info "left $CRED for inspection"; fi
