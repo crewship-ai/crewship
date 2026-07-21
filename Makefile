@@ -1,4 +1,4 @@
-.PHONY: up down restart status dev dev\:go dev\:next build build\:go build\:sidecar test cover lint security sbom notices e2e e2e\:ui validate
+.PHONY: up down restart status dev dev\:go dev\:next build build\:go build\:sidecar test cover lint security sbom notices e2e e2e\:ui validate smoke-cli
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
@@ -127,6 +127,52 @@ cover:
 	go test $(COVER_PKGS) -coverprofile=$(COVERPROFILE) -covermode=atomic -timeout 40m
 	@echo "→ Total coverage:"
 	@go tool cover -func=$(COVERPROFILE) | tail -1
+
+# Regenerates internal/orchestrator/testdata/cli-fixtures/*.ndjson from the
+# REAL upstream CLI binaries — internal/orchestrator/e2e_multi_cli_test.go has
+# cited this target since it was written, but it never existed until now
+# (2026-07-21 quality-testability audit). NOT part of `test`/CI: it needs all
+# six CLIs installed, spends real API quota per adapter, and each upstream
+# tool changes independently — run it manually or from a nightly dev2 job,
+# never per-PR. Missing CLIs are skipped with a warning, not a failure, so a
+# partial local install can still refresh the fixtures it has.
+#
+# opencode.ndjson is currently authored from the documented schema (#943), not
+# captured — this target replaces it with a real capture the first time
+# opencode is installed where it runs.
+smoke-cli:
+	@mkdir -p internal/orchestrator/testdata/cli-fixtures
+	@if command -v claude >/dev/null 2>&1; then \
+		echo "→ capturing claude.ndjson"; \
+		claude --print --output-format stream-json "say hello" \
+			> internal/orchestrator/testdata/cli-fixtures/claude.ndjson; \
+	else echo "⚠ claude not installed — skipping claude.ndjson"; fi
+	@if command -v codex >/dev/null 2>&1; then \
+		echo "→ capturing codex.ndjson"; \
+		codex exec --json --sandbox read-only -- "say hello" \
+			> internal/orchestrator/testdata/cli-fixtures/codex.ndjson; \
+	else echo "⚠ codex not installed — skipping codex.ndjson"; fi
+	@if command -v gemini >/dev/null 2>&1; then \
+		echo "→ capturing gemini.ndjson"; \
+		gemini -p "say hello" --output-format stream-json \
+			> internal/orchestrator/testdata/cli-fixtures/gemini.ndjson; \
+	else echo "⚠ gemini not installed — skipping gemini.ndjson"; fi
+	@if command -v opencode >/dev/null 2>&1; then \
+		echo "→ capturing opencode.ndjson"; \
+		opencode run --format json -- "say hello" \
+			> internal/orchestrator/testdata/cli-fixtures/opencode.ndjson; \
+	else echo "⚠ opencode not installed — skipping opencode.ndjson (stays hand-authored from #943 docs)"; fi
+	@if command -v cursor-agent >/dev/null 2>&1; then \
+		echo "→ capturing cursor.ndjson"; \
+		cursor-agent -p --output-format stream-json --force -- "say hello" \
+			> internal/orchestrator/testdata/cli-fixtures/cursor.ndjson; \
+	else echo "⚠ cursor-agent not installed — skipping cursor.ndjson"; fi
+	@if command -v droid >/dev/null 2>&1; then \
+		echo "→ capturing droid.ndjson"; \
+		droid exec --auto low -o stream-json -- "say hello" \
+			> internal/orchestrator/testdata/cli-fixtures/droid.ndjson; \
+	else echo "⚠ droid not installed — skipping droid.ndjson"; fi
+	@echo "→ done. Review the diffs, then commit + bump pinnedNpmVersion in internal/orchestrator/cli_adapter_versions_test.go if any schema changed."
 
 lint:
 	pnpm lint
