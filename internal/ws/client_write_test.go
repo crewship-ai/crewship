@@ -14,7 +14,10 @@ import (
 
 // dialClientConn spins up a real hub upgrade endpoint and returns a
 // dialed *websocket.Conn so writeFrame can be exercised against an
-// actual network connection (not a mock).
+// actual network connection (not a mock). It never sends the post-upgrade
+// auth message — the tests here exercise writeFrame directly against a raw
+// conn wrapped in a standalone *Client, bypassing hub registration
+// entirely, so server-side auth completing is irrelevant.
 func dialClientConn(t *testing.T) *websocket.Conn {
 	t.Helper()
 	v, err := auth.NewJWTValidator("test-secret-of-sufficient-length")
@@ -26,13 +29,8 @@ func dialClientConn(t *testing.T) *websocket.Conn {
 	srv := httptest.NewServer(http.HandlerFunc(hub.HandleUpgrade))
 	t.Cleanup(srv.Close)
 
-	tok, err := v.IssueWSTicket("user-1", "", "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
 	u, _ := url.Parse(srv.URL)
-	wsURL := fmt.Sprintf("ws://%s/?token=%s", u.Host, url.QueryEscape(tok))
-	conn, err := websocket.Dial(wsURL, "", srv.URL)
+	conn, err := websocket.Dial(fmt.Sprintf("ws://%s/", u.Host), "", srv.URL)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}

@@ -7,21 +7,21 @@ icon: "signal"
 Crewship pushes real-time updates — log streaming, chat token streams, and entity-change events — over a single token-authenticated WebSocket. Clients subscribe to typed channels (`workspace:{id}`, `session:{chatId}`, …); the server validates each subscription against database membership and fans state changes out to the subscribers. Most dashboard state arrives on the `workspace` channel, while a few high-fanout streams (chat, mission detail, files) use narrower channels.
 
 <Note>
-  Connecting requires a short-lived JWT from `GET /api/v1/ws-token` (itself session- or CLI-authenticated). The token is validated only during the handshake; the connection stays authenticated afterward.
+  Connecting requires a short-lived JWT from `GET /api/v1/ws-token` (itself session- or CLI-authenticated). The token is sent as the first message after the connection opens, not a URL query parameter -- a `?token=` would leak into proxy/access logs, browser history, and Referer headers. It is validated only at that point; the connection stays authenticated afterward.
 </Note>
 
 ## Connection
 
 ```
-ws://<host>:8080/ws?token=<jwt>
+ws://<host>:8080/ws
 ```
 
 ### Authentication Flow
 
 1. Obtain a short-lived JWT token: `GET /api/v1/ws-token` (requires session or CLI auth)
-2. Connect to the WebSocket endpoint with the token as a query parameter
-3. The token is validated during the handshake using the same JWT validator as the REST API
-4. After connection, the token is no longer needed -- the connection remains authenticated
+2. Open the WebSocket connection (no token in the URL)
+3. Send `{"type":"auth","token":"<jwt>"}` as the first message; the server validates it using the same JWT validator as the REST API and closes the connection if it's missing, invalid, or the underlying session was revoked
+4. After that, the token is no longer needed -- the connection remains authenticated
 
 The WebSocket server uses `golang.org/x/net/websocket` (not gorilla/websocket). Authentication is token-based. Inbound frames are capped at 64 KiB.
 
@@ -399,11 +399,12 @@ const response = await fetch('/api/v1/ws-token', {
 });
 const { token } = await response.json();
 
-// 2. Connect
-const ws = new WebSocket(`ws://localhost:8080/ws?token=${token}`);
+// 2. Connect (no token in the URL)
+const ws = new WebSocket('ws://localhost:8080/ws');
 
 ws.onopen = () => {
-  // 3. Subscribe to workspace events
+  // 3. Authenticate as the first message, then subscribe
+  ws.send(JSON.stringify({ type: 'auth', token }));
   ws.send(JSON.stringify({
     type: 'subscribe',
     channel: `workspace:${workspaceId}`

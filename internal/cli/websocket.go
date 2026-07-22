@@ -8,8 +8,6 @@ import (
 	"sync"
 
 	"golang.org/x/net/websocket"
-
-	"github.com/crewship-ai/crewship/internal/cli/redact"
 )
 
 // WSClient is a WebSocket client for streaming chat events from the server.
@@ -33,7 +31,13 @@ type ChatEventPayload struct {
 	Metadata any    `json:"metadata,omitempty"`
 }
 
-// NewWSClient connects to the server's WebSocket endpoint with JWT authentication.
+// NewWSClient connects to the server's WebSocket endpoint, then
+// authenticates by sending {"type":"auth","token":...} as the first
+// message on the connection — mirroring internal/ws/hub.go
+// authenticateUpgradedConn. The token no longer rides the dial URL (a
+// `?token=<jwt>` query string used to leak the WS ticket into proxy/access
+// logs and any dial-error string); the URL and Origin below carry no
+// secret, so a dial failure can be returned as-is.
 func NewWSClient(serverURL, token string) (*WSClient, error) {
 	u, err := url.Parse(serverURL)
 	if err != nil {
@@ -45,7 +49,7 @@ func NewWSClient(serverURL, token string) (*WSClient, error) {
 		scheme = "wss"
 	}
 
-	wsURL := fmt.Sprintf("%s://%s/ws?token=%s", scheme, u.Host, url.QueryEscape(token))
+	wsURL := fmt.Sprintf("%s://%s/ws", scheme, u.Host)
 	origin := serverURL
 
 	conn, err := websocket.Dial(wsURL, "", origin)
@@ -53,45 +57,38 @@ func NewWSClient(serverURL, token string) (*WSClient, error) {
 		return nil, wrapDialError(err)
 	}
 
-	return &WSClient{conn: conn}, nil
+	c := &WSClient{conn: conn}
+	authFrame, err := json.Marshal(struct {
+		Type  string `json:"type"`
+		Token string `json:"token"`
+	}{Type: "auth", Token: token})
+	if err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("marshal ws auth frame: %w", err)
+	}
+	if _, err := conn.Write(authFrame); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("websocket auth: %w", err)
+	}
+	// Deliberately not reading back a synchronous ack/error here: on success
+	// the server sends nothing (it just proceeds to register the
+	// connection), so a synchronous read would have to guess a timeout for
+	// the happy path. On rejection the server writes one error/
+	// session_revoked frame before closing — the caller's first ReadMessage
+	// picks that up naturally as the very next frame, so a rejected auth
+	// surfaces on the first real read rather than being silently lost.
+	return c, nil
 }
 
-// wrapDialError wraps a websocket.Dial error with context, scrubbing any
-// embedded credentials before the error can reach stderr or CI logs.
-//
-// golang.org/x/net/websocket embeds the full dial URL — including the
-// `?token=<jwt>` query string we authenticate with — in its error
-// messages. Returning that error verbatim leaks the (short-lived but
-// still session-bearing) WS token to the terminal and any log scraper.
-// We run the whole error text through redact.URL, which masks the
-// `token` query param (and any other known secret-bearing param) while
-// leaving the rest of the dial diagnostic intact.
+// wrapDialError wraps a websocket.Dial error with context. The dial URL no
+// longer carries a token (see NewWSClient), so — unlike the pre-fix
+// version of this helper — there is nothing left to redact out of the
+// error string.
 func wrapDialError(err error) error {
 	if err == nil {
 		return nil
 	}
-	return fmt.Errorf("websocket connect: %s", redactErrToken(err.Error()))
-}
-
-// redactErrToken strips secret-bearing query params from any URL-shaped
-// token embedded in an arbitrary error string. x/net's dial errors are
-// free-form ("websocket.Dial ws://host/ws?token=…: dial tcp …"), so we
-// can't url.Parse the whole thing — we redact the longest space-delimited
-// field that parses as a URL with a redactable query param.
-func redactErrToken(s string) string {
-	fields := strings.Fields(s)
-	for _, f := range fields {
-		// Trim a trailing ':' that x/net appends after the URL.
-		trimmed := strings.TrimRight(f, ":")
-		if trimmed == "" {
-			continue
-		}
-		masked := redact.URL(trimmed)
-		if masked != trimmed {
-			s = strings.Replace(s, trimmed, masked, 1)
-		}
-	}
-	return s
+	return fmt.Errorf("websocket connect: %w", err)
 }
 
 // Subscribe sends a channel subscription request to the server.
