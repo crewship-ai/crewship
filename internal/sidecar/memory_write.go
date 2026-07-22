@@ -275,7 +275,14 @@ const memoryReindexTimeout = 30 * time.Second
 func (s *Server) resolveMemoryEngineWithPath(scope string, r *http.Request) (*memory.Engine, string, bool) {
 	switch scope {
 	case "agent", "":
-		engine, basePath, err := s.peerMemoryEngineFor(s.legacyMemoryEffectiveSlug(r))
+		slug, err := s.legacyMemoryEffectiveSlug(r)
+		var (
+			engine   *memory.Engine
+			basePath string
+		)
+		if err == nil {
+			engine, basePath, err = s.peerMemoryEngineFor(r.Context(), slug)
+		}
 		if err != nil {
 			s.logger.Error("memory: peer engine unavailable", "error", err)
 			return nil, "", true

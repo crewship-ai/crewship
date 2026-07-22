@@ -26,7 +26,11 @@ type scopedResult struct {
 func (s *Server) resolveMemoryEngine(scope string, r *http.Request) (*memory.Engine, bool) {
 	switch scope {
 	case "agent", "":
-		engine, _, err := s.peerMemoryEngineFor(s.legacyMemoryEffectiveSlug(r))
+		slug, err := s.legacyMemoryEffectiveSlug(r)
+		var engine *memory.Engine
+		if err == nil {
+			engine, _, err = s.peerMemoryEngineFor(r.Context(), slug)
+		}
 		if err != nil {
 			s.logger.Error("memory: peer engine unavailable", "error", err)
 			return nil, true
