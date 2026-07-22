@@ -128,7 +128,10 @@ func TestCanSubscribeMatrix(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := auth.CanSubscribe(ctx, tc.userID, tc.channel)
+			got, err := auth.CanSubscribe(ctx, tc.userID, tc.channel)
+			if err != nil {
+				t.Fatalf("CanSubscribe(%q, %q): unexpected error: %v", tc.userID, tc.channel, err)
+			}
 			if got != tc.want {
 				t.Errorf("CanSubscribe(%q, %q) = %v, want %v", tc.userID, tc.channel, got, tc.want)
 			}
@@ -136,7 +139,10 @@ func TestCanSubscribeMatrix(t *testing.T) {
 	}
 }
 
-// Closed DB must produce false (defensive — we never grant access on error).
+// A DB failure must produce (false, non-nil error): denied on the grant
+// path (we never grant access on error), but flagged as NON-definitive so
+// the hub's re-authorization sweep keeps existing subscriptions instead
+// of mass-revoking every client on a transient DB hiccup.
 func TestCanSubscribeFailsClosedOnDBError(t *testing.T) {
 	t.Parallel()
 	db := seededDB(t)
@@ -144,7 +150,11 @@ func TestCanSubscribeFailsClosedOnDBError(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	if auth.CanSubscribe(context.Background(), "u-good", "workspace:ws-1") {
+	ok, err := auth.CanSubscribe(context.Background(), "u-good", "workspace:ws-1")
+	if ok {
 		t.Error("expected deny on closed DB")
+	}
+	if err == nil {
+		t.Error("expected a non-nil error on closed DB — a bare deny would let the sweep treat an infrastructure failure as a definitive revocation")
 	}
 }

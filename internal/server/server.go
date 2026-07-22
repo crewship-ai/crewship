@@ -543,6 +543,13 @@ func (s *Server) mountAPIRouter(
 		opts = append(opts, goapi.WithPortExposeNetwork(cfg.Container.Network))
 	}
 	opts = append(opts, goapi.WithHub(wsHub))
+	// The terminal handler joins the hub as a session-revocation
+	// notifier: a Revoke/RevokeAllForUser through the API immediately
+	// tears down any open container shell for that session/user, instead
+	// of waiting for the terminal's 30s backstop poll (#1255 item 3).
+	if s.terminalHandler != nil {
+		opts = append(opts, goapi.WithSessionRevocationNotifiers(s.terminalHandler))
+	}
 	opts = append(opts, goapi.WithOrchestrator(orch))
 	opts = append(opts, goapi.WithLogWriter(logW))
 	if missionEngine != nil {

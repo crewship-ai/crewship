@@ -88,6 +88,17 @@ func WithHub(hub *ws.Hub) RouterOption {
 	}
 }
 
+// WithSessionRevocationNotifiers registers additional transports (beyond
+// the hub attached via WithHub, which is always included) that must be
+// told immediately when a session is revoked — e.g. the terminal handler,
+// so a force-logout tears down an open container shell without waiting
+// for its 30s poll. Nil entries are ignored.
+func WithSessionRevocationNotifiers(notifiers ...SessionRevocationNotifier) RouterOption {
+	return func(r *Router) {
+		r.revokeNotifiers = append(r.revokeNotifiers, notifiers...)
+	}
+}
+
 // WithOrchestrator attaches the container orchestrator used to run agent assignments.
 func WithOrchestrator(orch *orchestrator.Orchestrator) RouterOption {
 	return func(r *Router) {

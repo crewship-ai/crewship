@@ -177,36 +177,6 @@ func TestWriteFrame_FailsOnClosedConn(t *testing.T) {
 	}
 }
 
-// watchSessionRevocation must return immediately when the connection has no
-// auth session (CLI-token tickets) or missing dependencies.
-func TestWatchSessionRevocation_EarlyReturns(t *testing.T) {
-	t.Parallel()
-	hub := newRunningHub(t)
-
-	cases := []struct {
-		name string
-		c    *Client
-	}{
-		{"no auth session id", &Client{authSessionID: "", hub: hub}},
-		{"nil hub", &Client{authSessionID: "sess-1", hub: nil}},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			done := make(chan struct{})
-			go func() {
-				tc.c.watchSessionRevocation()
-				close(done)
-			}()
-			select {
-			case <-done:
-			case <-time.After(time.Second):
-				t.Fatal("watchSessionRevocation should return immediately")
-			}
-		})
-	}
-}
-
 // safeSend on a closed channel panics internally; the recover converts that
 // into a false return instead of crashing the caller.
 func TestSafeSend_RecoversFromClosedChannel(t *testing.T) {

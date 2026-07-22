@@ -27,13 +27,16 @@ func TestNewDBChannelAuthorizer_PanicsOnNilDB(t *testing.T) {
 // DBChannelAuthorizer (bypassing the constructor), the method must fail
 // closed rather than panic.
 func TestDBChannelAuthorizer_CanSubscribeFailClosed(t *testing.T) {
+	// These are all STRUCTURAL denials — they must come back as a
+	// definitive (false, nil), not an error, or the hub's re-auth sweep
+	// would treat them as transient and never act on them.
 	var a *DBChannelAuthorizer // nil receiver
-	if a.CanSubscribe(context.Background(), "u1", "workspace:ws1") {
+	if mustVerdict(t, a, "u1", "workspace:ws1") {
 		t.Error("nil receiver should deny")
 	}
 
 	zero := &DBChannelAuthorizer{} // zero value, no db
-	if zero.CanSubscribe(context.Background(), "u1", "workspace:ws1") {
+	if mustVerdict(t, zero, "u1", "workspace:ws1") {
 		t.Error("zero-value authorizer should deny")
 	}
 
@@ -42,15 +45,27 @@ func TestDBChannelAuthorizer_CanSubscribeFailClosed(t *testing.T) {
 	defer db.Close()
 	auth := NewDBChannelAuthorizer(db)
 
-	if auth.CanSubscribe(context.Background(), "", "workspace:ws1") {
+	if mustVerdict(t, auth, "", "workspace:ws1") {
 		t.Error("empty userID should deny")
 	}
-	if auth.CanSubscribe(context.Background(), "u1", "no-colon") {
+	if mustVerdict(t, auth, "u1", "no-colon") {
 		t.Error("channel without type:id should deny")
 	}
-	if auth.CanSubscribe(context.Background(), "u1", "workspace:") {
+	if mustVerdict(t, auth, "u1", "workspace:") {
 		t.Error("channel with empty id should deny")
 	}
+}
+
+// mustVerdict calls CanSubscribe and fails the test if the result is not
+// definitive (err != nil). Used where the test's subject is the verdict,
+// not the error path.
+func mustVerdict(t *testing.T, a *DBChannelAuthorizer, userID, channel string) bool {
+	t.Helper()
+	ok, err := a.CanSubscribe(context.Background(), userID, channel)
+	if err != nil {
+		t.Fatalf("CanSubscribe(%q, %q): unexpected error: %v", userID, channel, err)
+	}
+	return ok
 }
 
 // TestDBChannelAuthorizer_UserChannel covers the user:{userId} channel
@@ -63,10 +78,10 @@ func TestDBChannelAuthorizer_UserChannel(t *testing.T) {
 	defer db.Close()
 	auth := NewDBChannelAuthorizer(db)
 
-	if !auth.CanSubscribe(context.Background(), "u1", "user:u1") {
+	if !mustVerdict(t, auth, "u1", "user:u1") {
 		t.Error("user should be allowed to subscribe to their own channel")
 	}
-	if auth.CanSubscribe(context.Background(), "u1", "user:u2") {
+	if mustVerdict(t, auth, "u1", "user:u2") {
 		t.Error("user must not subscribe to another user's channel")
 	}
 }

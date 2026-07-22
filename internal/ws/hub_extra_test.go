@@ -38,12 +38,27 @@ func defaultTestValidator(t *testing.T) *auth.JWTValidator {
 // allowAllAuthorizer permits every CanSubscribe call.
 type allowAllAuthorizer struct{}
 
-func (allowAllAuthorizer) CanSubscribe(_ context.Context, _, _ string) bool { return true }
+func (allowAllAuthorizer) CanSubscribe(_ context.Context, _, _ string) (bool, error) {
+	return true, nil
+}
 
-// denyAllAuthorizer rejects every CanSubscribe call.
+// denyAllAuthorizer rejects every CanSubscribe call (definitive deny).
 type denyAllAuthorizer struct{}
 
-func (denyAllAuthorizer) CanSubscribe(_ context.Context, _, _ string) bool { return false }
+func (denyAllAuthorizer) CanSubscribe(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
+}
+
+// erroringAuthorizer simulates infrastructure failure in the authorizer
+// (DB timeout etc.): every check errors, no verdict is definitive.
+type erroringAuthorizer struct {
+	calls atomic.Int32
+}
+
+func (a *erroringAuthorizer) CanSubscribe(_ context.Context, _, _ string) (bool, error) {
+	a.calls.Add(1)
+	return false, errors.New("authorizer db timeout")
+}
 
 // allowChannelsAuthorizer permits a fixed set of channels.
 type allowChannelsAuthorizer struct {
@@ -51,9 +66,9 @@ type allowChannelsAuthorizer struct {
 	calls   atomic.Int32
 }
 
-func (a *allowChannelsAuthorizer) CanSubscribe(_ context.Context, _, channel string) bool {
+func (a *allowChannelsAuthorizer) CanSubscribe(_ context.Context, _, channel string) (bool, error) {
 	a.calls.Add(1)
-	return a.allowed[channel]
+	return a.allowed[channel], nil
 }
 
 // stubChatHandler captures invocations and emits a configurable event sequence.

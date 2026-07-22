@@ -48,12 +48,20 @@ type Handler struct {
 }
 
 // Session represents an active terminal connection.
+//
+// userID and authSid identify who this shell belongs to and which
+// user_sessions row authorized it (authSid empty for CLI-token-derived
+// tickets). NotifySessionRevoked / NotifyUserRevoked match on them to
+// tear a shell down the moment its backing session is revoked, without
+// waiting for the 30s watchSessionRevocation poll.
 type Session struct {
-	id     string
-	execID string
-	conn   io.ReadWriteCloser // Docker hijacked / Apple pipe connection
-	ws     *websocket.Conn
-	cancel context.CancelFunc
+	id      string
+	execID  string
+	userID  string
+	authSid string
+	conn    io.ReadWriteCloser // Docker hijacked / Apple pipe connection
+	ws      *websocket.Conn
+	cancel  context.CancelFunc
 }
 
 // InitMessage is sent by the client as the first text message after connecting.
@@ -386,11 +394,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	session := &Session{
-		id:     sessionID,
-		execID: execResult.ExecID,
-		conn:   execResult.Conn,
-		ws:     ws,
-		cancel: cancel,
+		id:      sessionID,
+		execID:  execResult.ExecID,
+		userID:  userID,
+		authSid: claims.Sid,
+		conn:    execResult.Conn,
+		ws:      ws,
+		cancel:  cancel,
 	}
 	h.sessions.Store(sessionID, session)
 	defer h.sessions.Delete(sessionID)
@@ -503,6 +513,51 @@ func (h *Handler) verifyAccess(ctx context.Context, userID, crewID string) error
 		return fmt.Errorf("user %s has insufficient role for terminal access", userID)
 	}
 	return nil
+}
+
+// NotifySessionRevoked immediately tears down every live shell that was
+// authorized by the given user_sessions ID. It implements the API
+// layer's SessionRevocationNotifier: the notifying session store calls
+// it the moment a Revoke commits, so a force-logout kills an open shell
+// in milliseconds. The watchSessionRevocation poll below stays as the
+// backstop for revocations that bypass that chokepoint. Nil-safe and
+// callable from any goroutine (h.sessions is a sync.Map; cancel is
+// idempotent).
+func (h *Handler) NotifySessionRevoked(sid string) {
+	if h == nil || sid == "" {
+		return
+	}
+	h.sessions.Range(func(_, v any) bool {
+		s, ok := v.(*Session)
+		if !ok || s.authSid != sid {
+			return true
+		}
+		h.logger.Info("terminal session revoked, tearing down shell",
+			"session_id", s.id, "sid", sid)
+		s.cancel()
+		return true
+	})
+}
+
+// NotifyUserRevoked tears down every live shell belonging to userID that
+// was authorized by a browser session (non-empty authSid) — the
+// RevokeAllForUser companion (password change, forced re-auth). CLI
+// shells (empty authSid) are left alone: their auth artifact is the CLI
+// token, which RevokeAllForUser does not touch.
+func (h *Handler) NotifyUserRevoked(userID string) {
+	if h == nil || userID == "" {
+		return
+	}
+	h.sessions.Range(func(_, v any) bool {
+		s, ok := v.(*Session)
+		if !ok || s.userID != userID || s.authSid == "" {
+			return true
+		}
+		h.logger.Info("terminal user sessions revoked, tearing down shell",
+			"session_id", s.id, "user_id", userID)
+		s.cancel()
+		return true
+	})
 }
 
 // watchSessionRevocation polls user_sessions every 30s for the given sid
