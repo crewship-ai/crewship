@@ -190,6 +190,16 @@ paths = [
   # and the internal/encryption/* test vectors. No production credential.
   '''cmd/crewship/cmd_backup_lifecycle_cov_test\.go$''',
 
+  # Sidecar memory-write live-verify script (#1301). Section [8] spins up a
+  # SECOND local sidecar with per-agent tokens to exercise the legacy
+  # /memory/* routes' per-agent isolation. "tok-alpha"/"tok-beta" are
+  # hardcoded fixture bearer tokens for that throwaway localhost sidecar
+  # (127.0.0.1, torn down at script exit) — the curl-auth-header rule fires
+  # on the `-H 'Authorization: Bearer tok-alpha'` shape. No production
+  # credential; verified inline, same class as the script's pre-existing
+  # fake `sk-ant-api03-…` scrubber-test payload in section [2].
+  '''scripts/verify-sidecar-memory-write\.sh$''',
+
   # Package-signing setup doc (issue #932/#942). Prose that explains how a
   # maintainer configures GPG signing — it references `GPG_SIGNING_KEY` (a
   # GitHub-secret NAME, never a value) and a `gpg --full-generate-key <<'KEY'`
