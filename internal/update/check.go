@@ -17,6 +17,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,6 +47,103 @@ const (
 	// notifications; 5s is generous for an HTTPS GET to api.github.com.
 	requestTimeout = 5 * time.Second
 )
+
+// latestNightlyListURL lists enough recent releases to reliably contain the
+// newest nightly-<date>-r<n> pre-release even when a stable cut lands in
+// between: nightlies are pruned after 7 days (nightly.yml) but can land many
+// times a day, so 30 is comfortably more than a single day's worth. A var
+// (not const) so tests can point it at a local httptest server.
+var latestNightlyListURL = "https://api.github.com/repos/crewship-ai/crewship/releases?per_page=30"
+
+// nightlyVersionPattern matches the nightly release/version format cut by
+// nightly.yml: nightly-<UTC-date>-r<workflow-run-number>, e.g.
+// "nightly-20260714-r552". The date is fixed-width (YYYYMMDD) and the run
+// number strictly increases per push to main, so lexical date comparison
+// followed by numeric run comparison sorts builds correctly.
+var nightlyVersionPattern = regexp.MustCompile(`^nightly-(\d{8})-r(\d+)$`)
+
+// nightlyVersion is a parsed nightly-<date>-r<n> version, orderable by date
+// then run number.
+type nightlyVersion struct {
+	date string
+	run  int
+}
+
+// parseNightlyVersion parses the nightly-<date>-r<n> format. Anything else
+// (a semver tag, "dev", a hand-built version string) reports ok=false — the
+// caller falls back to semver handling or the incomparable-version path.
+func parseNightlyVersion(v string) (nightlyVersion, bool) {
+	m := nightlyVersionPattern.FindStringSubmatch(strings.TrimSpace(v))
+	if m == nil {
+		return nightlyVersion{}, false
+	}
+	run, err := strconv.Atoi(m[2])
+	if err != nil {
+		return nightlyVersion{}, false
+	}
+	return nightlyVersion{date: m[1], run: run}, true
+}
+
+// compareNightlyVersion orders two nightly versions by date then run number,
+// returning -1/0/1 like strings.Compare.
+func compareNightlyVersion(a, b nightlyVersion) int {
+	if a.date != b.date {
+		if a.date < b.date {
+			return -1
+		}
+		return 1
+	}
+	switch {
+	case a.run < b.run:
+		return -1
+	case a.run > b.run:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// IncomparableVersionError reports an installed version string that is
+// neither a recognized semver release nor a nightly-<date>-r<n> build — most
+// likely a local build (`go run`, a hand-rolled `make build`) that embedded
+// no version at all. It is never a "the check is broken" condition: callers
+// should tell the operator plainly rather than surface a raw parse error
+// (#1291 — the previous "invalid current version" message was mistaken for
+// nightly builds specifically, since those ARE comparable and simply weren't
+// recognized).
+type IncomparableVersionError struct {
+	Version string
+}
+
+func (e *IncomparableVersionError) Error() string {
+	return fmt.Sprintf(
+		"installed version %q cannot be compared against a release — it looks like a local build, not a crewship release or nightly build",
+		e.Version,
+	)
+}
+
+// checkNightly compares a nightly current version against the most recently
+// published nightly-* release. Unlike the stable/pre-release path this never
+// consults the on-disk cache: nightlies are cut many times a day and pruned
+// after 7 days, so a 24h-stale "latest nightly" could already be gone.
+func checkNightly(ctx context.Context, currentVersion string, current nightlyVersion) (*Result, error) {
+	tag, notes, htmlURL, err := fetchLatestNightly(ctx, latestNightlyListURL)
+	if err != nil {
+		return nil, err
+	}
+	latest, ok := parseNightlyVersion(tag)
+	if !ok {
+		return nil, fmt.Errorf("latest nightly tag %q does not match the nightly-<date>-r<n> format", tag)
+	}
+	return &Result{
+		Current:   currentVersion,
+		Latest:    tag,
+		Newer:     compareNightlyVersion(latest, current) > 0,
+		URL:       htmlURL,
+		Notes:     notes,
+		CheckedAt: time.Now().UTC(),
+	}, nil
+}
 
 // Result captures everything the caller needs to render an update banner.
 // Newer is the only field a UI consumer needs to gate the banner on; the
@@ -85,12 +184,16 @@ func Check(ctx context.Context, currentVersion string) (*Result, error) {
 		return nil, nil
 	}
 
+	if nv, ok := parseNightlyVersion(currentVersion); ok {
+		return checkNightly(ctx, currentVersion, nv)
+	}
+
 	// normalizeVersion adds the leading "v" that golang.org/x/mod/semver
 	// requires. Tags ship as v0.1.0 already, but package.json carries 0.1.0
 	// and we want the same code path to work for both.
 	current := normalizeVersion(currentVersion)
 	if !semver.IsValid(current) {
-		return nil, fmt.Errorf("invalid current version %q", currentVersion)
+		return nil, &IncomparableVersionError{Version: currentVersion}
 	}
 
 	if cached := readCache(); cached != nil && time.Since(cached.CheckedAt) < CacheTTL {
@@ -137,9 +240,12 @@ func CheckExplicit(ctx context.Context, currentVersion string) (*Result, error) 
 	if currentVersion == "" || currentVersion == "dev" {
 		return nil, nil
 	}
+	if nv, ok := parseNightlyVersion(currentVersion); ok {
+		return checkNightly(ctx, currentVersion, nv)
+	}
 	current := normalizeVersion(currentVersion)
 	if !semver.IsValid(current) {
-		return nil, fmt.Errorf("invalid current version %q", currentVersion)
+		return nil, &IncomparableVersionError{Version: currentVersion}
 	}
 	url := LatestReleaseURL
 	if semver.Prerelease(current) != "" {
@@ -236,6 +342,62 @@ func fetchLatest(ctx context.Context, url string) (tag, notes, htmlURL string, e
 		return "", "", "", errors.New("release has empty tag_name")
 	}
 	return single.TagName, truncateNotes(single.Body), single.HTMLURL, nil
+}
+
+// fetchLatestNightly hits a GitHub releases-list endpoint and returns the
+// most recent nightly-<date>-r<n> entry. The list is newest-first, but a
+// stable release can land between nightly cuts, so this scans past non-
+// nightly (and draft) entries rather than trusting index 0.
+func fetchLatestNightly(ctx context.Context, url string) (tag, notes, htmlURL string, err error) {
+	reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", "", "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "crewship-update-check")
+	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", "", "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", "", "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusNotFound {
+			return "", "", "", errors.New("no published release")
+		}
+		return "", "", "", fmt.Errorf("github API status %d", resp.StatusCode)
+	}
+
+	type release struct {
+		TagName string `json:"tag_name"`
+		HTMLURL string `json:"html_url"`
+		Body    string `json:"body"`
+		Draft   bool   `json:"draft"`
+	}
+	var list []release
+	if err := json.Unmarshal(body, &list); err != nil {
+		return "", "", "", fmt.Errorf("parse release list JSON: %w", err)
+	}
+	for _, r := range list {
+		if r.Draft {
+			continue
+		}
+		if _, ok := parseNightlyVersion(r.TagName); ok {
+			return r.TagName, truncateNotes(r.Body), r.HTMLURL, nil
+		}
+	}
+	return "", "", "", errors.New("no nightly-<date>-r<n> release found")
 }
 
 // truncateNotes keeps release notes short for the CLI banner. Full notes

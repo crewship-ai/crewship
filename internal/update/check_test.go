@@ -3,6 +3,7 @@ package update
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,15 @@ import (
 	"testing"
 	"time"
 )
+
+// setLatestNightlyListURL points the nightly-channel lookup at a test server
+// and returns a restore func, so Check/CheckExplicit's nightly path can be
+// exercised end-to-end without hitting the real GitHub API.
+func setLatestNightlyListURL(url string) func() {
+	prev := latestNightlyListURL
+	latestNightlyListURL = url
+	return func() { latestNightlyListURL = prev }
+}
 
 // withTempHome redirects HOME so cacheFile() writes into a per-test directory
 // instead of polluting the real ~/.crewship.
@@ -63,6 +73,170 @@ func TestCheck_InvalidVersion(t *testing.T) {
 	_, err := Check(context.Background(), "not-a-version")
 	if err == nil {
 		t.Error("expected error for invalid version")
+	}
+	var incomparable *IncomparableVersionError
+	if !errors.As(err, &incomparable) {
+		t.Errorf("expected *IncomparableVersionError, got %T: %v", err, err)
+	}
+}
+
+func TestParseNightlyVersion(t *testing.T) {
+	cases := []struct {
+		in   string
+		date string
+		run  int
+		ok   bool
+	}{
+		{"nightly-20260714-r552", "20260714", 552, true},
+		{"nightly-20260101-r1", "20260101", 1, true},
+		{"  nightly-20260714-r552  ", "20260714", 552, true},
+		{"v0.1.0", "", 0, false},
+		{"nightly-2026071-r552", "", 0, false},  // short date
+		{"nightly-20260714-552", "", 0, false},  // missing 'r'
+		{"nightly-20260714-rabc", "", 0, false}, // non-numeric run
+		{"not-a-version", "", 0, false},
+	}
+	for _, c := range cases {
+		nv, ok := parseNightlyVersion(c.in)
+		if ok != c.ok {
+			t.Errorf("parseNightlyVersion(%q) ok = %v, want %v", c.in, ok, c.ok)
+			continue
+		}
+		if ok && (nv.date != c.date || nv.run != c.run) {
+			t.Errorf("parseNightlyVersion(%q) = %+v, want date=%s run=%d", c.in, nv, c.date, c.run)
+		}
+	}
+}
+
+func TestCompareNightlyVersion(t *testing.T) {
+	older := nightlyVersion{date: "20260714", run: 552}
+	newerSameDay := nightlyVersion{date: "20260714", run: 553}
+	newerNextDay := nightlyVersion{date: "20260715", run: 1}
+
+	if compareNightlyVersion(older, older) != 0 {
+		t.Error("expected equal versions to compare 0")
+	}
+	if compareNightlyVersion(newerSameDay, older) <= 0 {
+		t.Error("expected same-day higher run to compare greater")
+	}
+	if compareNightlyVersion(older, newerSameDay) >= 0 {
+		t.Error("expected same-day lower run to compare less")
+	}
+	if compareNightlyVersion(newerNextDay, newerSameDay) <= 0 {
+		t.Error("expected next-day build to compare greater regardless of run number")
+	}
+}
+
+// TestFetchLatestNightly_PicksFirstNightlyTag covers the case where the
+// releases list interleaves a stable cut ahead of the nightlies (the list is
+// newest-first) — the first tag matching nightly-<date>-r<n> must win, not
+// simply the first entry.
+func TestFetchLatestNightly_PicksFirstNightlyTag(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[
+			{"tag_name": "v0.3.0", "html_url": "https://x/stable", "body": "stable release", "draft": false},
+			{"tag_name": "nightly-20260722-r010", "html_url": "https://x/n10", "body": "nightly 10", "draft": false},
+			{"tag_name": "nightly-20260721-r638", "html_url": "https://x/n638", "body": "nightly 638", "draft": false}
+		]`))
+	}))
+	defer srv.Close()
+
+	tag, notes, url, err := fetchLatestNightly(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("fetchLatestNightly: %v", err)
+	}
+	if tag != "nightly-20260722-r010" {
+		t.Errorf("tag = %q, want nightly-20260722-r010", tag)
+	}
+	if !strings.Contains(notes, "nightly 10") {
+		t.Errorf("notes = %q", notes)
+	}
+	if url != "https://x/n10" {
+		t.Errorf("url = %q", url)
+	}
+}
+
+func TestFetchLatestNightly_NoneFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"tag_name": "v0.3.0", "html_url": "https://x", "body": "stable", "draft": false}]`))
+	}))
+	defer srv.Close()
+
+	_, _, _, err := fetchLatestNightly(context.Background(), srv.URL)
+	if err == nil {
+		t.Error("expected error when no nightly release is present")
+	}
+}
+
+func TestCheck_NightlyChannel_Newer(t *testing.T) {
+	withTempHome(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"tag_name": "nightly-20260722-r010", "html_url": "https://x/n10", "body": "n10", "draft": false}]`))
+	}))
+	defer srv.Close()
+	restore := setLatestNightlyListURL(srv.URL)
+	defer restore()
+
+	r, err := Check(context.Background(), "nightly-20260721-r638")
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if r == nil {
+		t.Fatal("expected a result for a nightly current version")
+	}
+	if !r.Newer {
+		t.Errorf("expected Newer=true, got result %+v", r)
+	}
+	if r.Latest != "nightly-20260722-r010" {
+		t.Errorf("Latest = %q, want nightly-20260722-r010", r.Latest)
+	}
+}
+
+func TestCheck_NightlyChannel_UpToDate(t *testing.T) {
+	withTempHome(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"tag_name": "nightly-20260721-r638", "html_url": "https://x", "body": "current", "draft": false}]`))
+	}))
+	defer srv.Close()
+	restore := setLatestNightlyListURL(srv.URL)
+	defer restore()
+
+	r, err := Check(context.Background(), "nightly-20260721-r638")
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if r == nil || r.Newer {
+		t.Errorf("expected Newer=false for the same nightly build, got %+v", r)
+	}
+}
+
+func TestCheckExplicit_NightlyChannel(t *testing.T) {
+	withTempHome(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"tag_name": "nightly-20260722-r010", "html_url": "https://x/n10", "body": "n10", "draft": false}]`))
+	}))
+	defer srv.Close()
+	restore := setLatestNightlyListURL(srv.URL)
+	defer restore()
+
+	r, err := CheckExplicit(context.Background(), "nightly-20260721-r638")
+	if err != nil {
+		t.Fatalf("CheckExplicit: %v", err)
+	}
+	if r == nil || !r.Newer {
+		t.Errorf("expected a newer nightly result, got %+v", r)
+	}
+}
+
+func TestCheckExplicit_IncomparableVersion(t *testing.T) {
+	withTempHome(t)
+	_, err := CheckExplicit(context.Background(), "commit: none")
+	var incomparable *IncomparableVersionError
+	if !errors.As(err, &incomparable) {
+		t.Errorf("expected *IncomparableVersionError, got %T: %v", err, err)
+	}
+	if !strings.Contains(incomparable.Error(), "local build") {
+		t.Errorf("expected a friendly local-build message, got %q", incomparable.Error())
 	}
 }
 

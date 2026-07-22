@@ -62,6 +62,20 @@ means trusting the download origin alone.
 e.g. `go run ./cmd/crewship`) refuses — there's nothing to compare against.
 </Note>
 
+### Nightly builds
+
+If you're tracking `main` and running a `nightly-<date>-r<n>` build (a dev
+slot, or anyone who installed a pre-release binary directly), `self-update`
+and `self-update --check` recognize the nightly channel and compare against
+the most recently published `nightly-*` pre-release — by date, then by build
+number — rather than against the stable release line. The upgrade itself
+works the same way as a stable install: download, checksum-verify, swap.
+
+An installed version that's neither a release tag nor a recognized nightly
+build (a hand-rolled `make build` with no embedded version, for example) has
+nothing to compare against; `self-update` says so plainly rather than failing
+with a parse error.
+
 ### Migrations run on the next start
 
 `self-update` swaps the binary only. Schema migrations apply on the **next
