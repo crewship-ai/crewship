@@ -208,5 +208,108 @@ fi
 rm -f "${R7_JSON}" "${R7_HDR}"
 
 echo
+echo "[8] Per-agent isolation on the legacy routes (#1301)"
+echo "    Everything above ran with NO Authorization header at all, which only"
+echo "    proves the token-less (no-tokens-provisioned) path — a second sidecar"
+echo "    instance with per-agent tokens configured is required to exercise the"
+echo "    #1301 fix: each sibling now gets its OWN agent tier through the legacy"
+echo "    routes instead of always the boot agent's."
+MEM_DIR2=$(mktemp -d /tmp/sidecar-mem2.XXXX)
+ALPHA_DIR="${MEM_DIR2}/agents/alpha/.memory"
+BETA_DIR="${MEM_DIR2}/agents/beta/.memory"
+mkdir -p "${ALPHA_DIR}"
+LOG_FILE2=$(mktemp /tmp/sidecar-test2.XXXX.log)
+R8_JSON=$(mktemp /tmp/sidecar-r8.XXXX.json)
+R9_JSON=$(mktemp /tmp/sidecar-r9.XXXX.json)
+PORT2=9202
+
+read -r -d '' CONFIG2 <<JSON || true
+{
+  "credentials": [],
+  "memory": {
+    "enabled": true,
+    "base_path": "${ALPHA_DIR}",
+    "agent_slug": "alpha",
+    "agent_role": "agent"
+  },
+  "ipc": {
+    "agent_id": "agent-alpha",
+    "agent_slug": "alpha",
+    "agent_token": "tok-alpha"
+  },
+  "crew_members": [
+    {"id": "agent-alpha", "slug": "alpha", "auth_token": "tok-alpha"},
+    {"id": "agent-beta", "slug": "beta", "auth_token": "tok-beta"}
+  ]
+}
+JSON
+
+echo "${CONFIG2}" | /tmp/crewship-2-sidecar -addr 127.0.0.1:${PORT2} \
+  >"${LOG_FILE2}" 2>&1 &
+SIDECAR2_PID=$!
+
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  if curl -s -m 1 -H 'Authorization: Bearer tok-alpha' "http://127.0.0.1:${PORT2}/memory/status" >/dev/null 2>&1; then
+    echo "[ready] second sidecar (per-agent tokens) up on ${PORT2}"
+    break
+  fi
+  sleep 0.5
+done
+if ! kill -0 ${SIDECAR2_PID} 2>/dev/null; then
+  echo "[FAIL] second sidecar died during startup"
+  tail -20 "${LOG_FILE2}"
+  fail=$((fail+1))
+else
+  # alpha (boot agent) writes its own tier.
+  curl -s -o /dev/null -X POST -H 'Content-Type: application/json' \
+    -H 'Authorization: Bearer tok-alpha' \
+    -d '{"file":"AGENT.md","content":"alpha private secret\n"}' \
+    "http://127.0.0.1:${PORT2}/memory/write" >/dev/null
+
+  # beta (sibling, own valid token) writes AGENT.md too.
+  STATUS=$(curl -s -o "${R8_JSON}" -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+    -H 'Authorization: Bearer tok-beta' \
+    -d '{"file":"AGENT.md","content":"beta own note\n"}' \
+    "http://127.0.0.1:${PORT2}/memory/write")
+  check "sibling write to legacy route returns 201 (not refused)" "${STATUS}" "201"
+
+  if [[ -f "${ALPHA_DIR}/AGENT.md" ]] && grep -q 'alpha private secret' "${ALPHA_DIR}/AGENT.md"; then
+    green "  PASS  alpha's AGENT.md unchanged by beta's write"
+    pass=$((pass+1))
+  else
+    red   "  FAIL  alpha's AGENT.md missing or clobbered: $(cat "${ALPHA_DIR}/AGENT.md" 2>/dev/null || echo '<missing>')"
+    fail=$((fail+1))
+  fi
+  if [[ -f "${BETA_DIR}/AGENT.md" ]] && grep -q 'beta own note' "${BETA_DIR}/AGENT.md"; then
+    green "  PASS  beta's write landed in beta's OWN tier (${BETA_DIR})"
+    pass=$((pass+1))
+  else
+    red   "  FAIL  beta's own AGENT.md missing at ${BETA_DIR}/AGENT.md"
+    fail=$((fail+1))
+  fi
+
+  # beta reads back its own tier — must never see alpha's content.
+  STATUS=$(curl -s -o "${R9_JSON}" -w '%{http_code}' \
+    -H 'Authorization: Bearer tok-beta' \
+    "http://127.0.0.1:${PORT2}/memory/read?file=AGENT.md")
+  check "sibling read of its own tier returns 200" "${STATUS}" "200"
+  if grep -q 'alpha private secret' "${R9_JSON}"; then
+    red   "  FAIL  beta's read leaked alpha's private tier"
+    fail=$((fail+1))
+  else
+    green "  PASS  beta's read did not leak alpha's tier"
+    pass=$((pass+1))
+  fi
+
+  # Token-less request on this tokens-provisioned crew must still be refused.
+  STATUS=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT2}/memory/read?file=AGENT.md")
+  check "token-less request on a tokens-provisioned crew is refused" "${STATUS}" "403"
+fi
+
+kill -TERM ${SIDECAR2_PID} 2>/dev/null || true
+wait ${SIDECAR2_PID} 2>/dev/null || true
+rm -rf "${MEM_DIR2}" "${R8_JSON}" "${R9_JSON}"
+
+echo
 printf '\033[1mSummary: %d passed, %d failed\033[0m\n' "${pass}" "${fail}"
 [[ "${fail}" -eq 0 ]] && exit 0 || exit 1

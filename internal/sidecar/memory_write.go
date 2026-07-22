@@ -124,7 +124,7 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 		req.Scope = "agent"
 	}
 
-	engine, basePath, valid := s.resolveMemoryEngineWithPath(req.Scope)
+	engine, basePath, valid := s.resolveMemoryEngineWithPath(req.Scope, r)
 	if !valid {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid scope: use agent or crew"})
 		return
@@ -269,11 +269,18 @@ const memoryReindexTimeout = 30 * time.Second
 
 // resolveMemoryEngineWithPath returns the engine + its base path for
 // the given scope so handlers can validate paths and call WriteFile.
-// Same valid-scope semantics as resolveMemoryEngine.
-func (s *Server) resolveMemoryEngineWithPath(scope string) (*memory.Engine, string, bool) {
+// scope="agent" resolves to the ACTING agent's own tier — see
+// resolveMemoryEngine and peerMemoryEngineFor (#1301). Same valid-scope
+// semantics as resolveMemoryEngine.
+func (s *Server) resolveMemoryEngineWithPath(scope string, r *http.Request) (*memory.Engine, string, bool) {
 	switch scope {
 	case "agent", "":
-		return s.memoryEngine, s.agentMemoryBase, true
+		engine, basePath, err := s.peerMemoryEngineFor(s.legacyMemoryEffectiveSlug(r))
+		if err != nil {
+			s.logger.Error("memory: peer engine unavailable", "error", err)
+			return nil, "", true
+		}
+		return engine, basePath, true
 	case "crew":
 		return s.crewMemoryEngine, s.crewMemoryBase, true
 	default:

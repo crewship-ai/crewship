@@ -21,13 +21,25 @@ import (
 // whose LEGACY HTTP memory surface (/memory/{read,write,search,status,reindex})
 // is fully wired: engine + executor + scrubber, base path = alpha's tier.
 //
-// That base path is the whole point of the regression these tests cover: the
-// legacy routes resolve the tier from s.agentMemoryBase — the BOOT agent's
-// memory — with no identity resolution at all. A sibling (beta) that omits its
-// Authorization header therefore reads and writes ALPHA's private tier.
+// base is nested as <root>/agents/alpha/.memory — the real-world layout
+// memoryAgentContextFor/peerCrewMember assume (BasePath's grandparent is the
+// agents root, so a sibling's own tier is <agents-root>/<slug>/.memory). A flat
+// t.TempDir() would make peer resolution derive a path outside this test's
+// tempdir entirely (Dir(Dir(base)) landing in the OS temp root), so nesting it
+// keeps every test hermetic.
+//
+// That base path is also the whole point of the regression these tests cover:
+// the legacy routes used to resolve every scope=agent request from
+// s.agentMemoryBase — the BOOT agent's memory — with no identity resolution at
+// all. #1301 replaced that with each sibling getting its own tier; see
+// memory_routes_crossagent_test.go.
 func newLegacyMemoryRouteServer(t *testing.T, withTokens bool) (*Server, string) {
 	t.Helper()
-	base := t.TempDir()
+	root := t.TempDir()
+	base := filepath.Join(root, "agents", "alpha", ".memory")
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		t.Fatalf("mkdir base: %v", err)
+	}
 	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
 	eng, err := memory.New(base, memory.DefaultConfig())
 	if err != nil {

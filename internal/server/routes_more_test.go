@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -267,7 +268,6 @@ func TestNew_WithJWTSecret_MountsAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
 
 	logger := logging.New("error", "json", nil)
 	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
@@ -281,12 +281,65 @@ func TestNew_WithJWTSecret_MountsAPI(t *testing.T) {
 
 	s := New(cfg, logger, &Deps{DB: db.DB})
 	t.Cleanup(func() {
-		if s.fileWatcher != nil {
-			s.fileWatcher.Close()
+		// Shutdown drains every background goroutine New() started
+		// (journal writer, file watcher, catalog/mise refresh tickers, …)
+		// before the DB and temp dir are torn down below.
+		if err := s.Shutdown(); err != nil {
+			t.Errorf("server shutdown: %v", err)
+		}
+		if err := db.Close(); err != nil {
+			t.Errorf("db close: %v", err)
 		}
 	})
 	if s.apiRouter == nil {
 		t.Error("expected apiRouter mounted with JWT secret")
+	}
+}
+
+// TestNew_Shutdown_TempDirRemovableAfterward pins the teardown contract
+// behind #1286: server.New starts background goroutines against deps.DB —
+// notably a journal.Writer with a flush ticker — that MUST be fully stopped
+// by Shutdown before the caller's directory is removed. Before this test's
+// sibling (TestNew_WithJWTSecret_MountsAPI) called Shutdown, that ticker
+// could still be mid-persist when t.TempDir()'s RemoveAll walked the same
+// directory, intermittently failing with "directory not empty" and blaming
+// a bystander test. This does not reproduce that sub-millisecond race
+// directly (it isn't reliably forceable in a fast unit test — see PR #1319's
+// own admission for the sibling fsnotify race), but it does pin the
+// contract: once Shutdown returns, nothing New() started may still be
+// touching the directory, so removing it ourselves — exactly what
+// t.TempDir()'s cleanup does — must always succeed cleanly.
+func TestNew_Shutdown_TempDirRemovableAfterward(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	db, err := database.Open("file:" + filepath.Join(dir, "api.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	logger := logging.New("error", "json", nil)
+	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default()
+	cfg.Auth.JWTSecret = "supersecretkeythatisatleast32chars!!"
+	cfg.Auth.InternalToken = "internal-tok"
+	cfg.Storage.BasePath = dir
+
+	s := New(cfg, logger, &Deps{DB: db.DB})
+	if err := s.Shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("db close: %v", err)
+	}
+
+	// The exact operation t.TempDir()'s built-in cleanup performs. A
+	// leftover goroutine still writing into dir would race this and
+	// intermittently fail with ENOTEMPTY/EBADF.
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove temp dir after Shutdown: %v", err)
 	}
 }
 
