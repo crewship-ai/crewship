@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -393,6 +394,33 @@ func TestScheduleReadyTasks_MarksFailedOnScheduleError(t *testing.T) {
 	}
 	if got := covTaskStatus(t, db, "t-bad"); got != "FAILED" {
 		t.Errorf("unschedulable task = %q, want FAILED", got)
+	}
+}
+
+// #1255 item 4: each 3s mission tick called loadTasks twice inside
+// scheduleReadyTasks alone (once inside ResolveReadyTasks, once again for
+// the mission-brief snapshot) on top of a third call in runMissionLoop for
+// the post-schedule completion/deadlock check. scheduleReadyTasks must
+// share ONE loadTasks snapshot between ready-resolution and the brief
+// context instead of loading the same mission_tasks rows twice.
+func TestScheduleReadyTasks_LoadsTasksExactlyOnce(t *testing.T) {
+	t.Parallel()
+	db := covMissionDB(t)
+	covSeed(t, db)
+	ms := covMission(t, db, "m1", "IN_PROGRESS")
+	now := time.Now().UTC().Format(time.RFC3339)
+	mustExec(t, db, `INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, created_at, updated_at)
+		VALUES ('t-bad', 'm1', 'agent-deleted', 'Doomed', 'PENDING', 1, '[]', ?, ?)`, now, now)
+
+	e := newLifecycleEngine(t, db)
+	var loadTasksCalls atomic.Int64
+	e.loadTasksHook = func() { loadTasksCalls.Add(1) }
+
+	if err := e.scheduleReadyTasks(context.Background(), ms); err != nil {
+		t.Fatalf("scheduleReadyTasks: %v", err)
+	}
+	if got := loadTasksCalls.Load(); got != 1 {
+		t.Errorf("loadTasks called %d times in one scheduleReadyTasks pass, want exactly 1", got)
 	}
 }
 
