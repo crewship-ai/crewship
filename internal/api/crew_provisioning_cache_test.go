@@ -27,7 +27,7 @@ import (
 // ---------------------------------------------------------------------------
 
 // newCacheTestHandler builds a ProvisioningHandler suitable for testing the
-// cache endpoints. docker is set to a non-nil sentinel client (NewClientWithOpts
+// cache endpoints. docker is set to a non-nil sentinel client (client.New
 // does not dial) so the != nil guard passes; all real Docker calls are routed
 // through the fake gcClient.
 func newCacheTestHandler(t *testing.T, fake orphanGCClient) *ProvisioningHandler {

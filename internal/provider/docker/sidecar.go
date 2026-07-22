@@ -46,7 +46,6 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	dockernetwork "github.com/moby/moby/api/types/network"
-	"github.com/moby/moby/api/types/strslice"
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -343,7 +342,7 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewSlug string, svc *prov
 		Healthcheck: hc,
 	}
 	if len(svc.Command) > 0 {
-		cfg.Cmd = strslice.StrSlice(svc.Command)
+		cfg.Cmd = svc.Command
 	}
 
 	// Audit H7 baseline hardening. Sidecars used to inherit Docker's

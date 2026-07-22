@@ -204,9 +204,9 @@ func newMobyOps(t *testing.T, d *fakeDaemon) *MobyDockerOps {
 	t.Helper()
 	srv := httptest.NewServer(d)
 	t.Cleanup(srv.Close)
-	cli, err := client.NewClientWithOpts(
+	cli, err := client.New(
 		client.WithHost("tcp://"+srv.Listener.Addr().String()),
-		client.WithVersion("1.47"),
+		client.WithAPIVersion("1.47"),
 	)
 	if err != nil {
 		t.Fatalf("new docker client: %v", err)

@@ -288,7 +288,7 @@ func covRTConfig(t *testing.T) Config {
 func (f *covRT) provider(t *testing.T, cfg Config) *Provider {
 	t.Helper()
 	srv := httptest.NewServer(f.handler())
-	cli, err := client.NewClientWithOpts(client.WithHost(srv.URL), client.WithVersion("1.43"))
+	cli, err := client.New(client.WithHost(srv.URL), client.WithAPIVersion("1.43"))
 	if err != nil {
 		srv.Close()
 		t.Fatalf("docker client: %v", err)

@@ -26,7 +26,7 @@ func covCPRFakeDocker(t *testing.T, handler http.HandlerFunc) (*client.Client, *
 	srv := httptest.NewServer(handler)
 	cli, err := client.New(
 		client.WithHost(srv.URL),
-		client.WithVersion("1.43"),
+		client.WithAPIVersion("1.43"),
 	)
 	if err != nil {
 		srv.Close()

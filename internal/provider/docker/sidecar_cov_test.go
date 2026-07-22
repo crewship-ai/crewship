@@ -32,9 +32,9 @@ func newCovProvider(t *testing.T, cfg Config, handler http.HandlerFunc) *Provide
 	t.Helper()
 
 	srv := httptest.NewServer(handler)
-	cli, err := client.NewClientWithOpts(
+	cli, err := client.New(
 		client.WithHost(srv.URL),
-		client.WithVersion("1.43"),
+		client.WithAPIVersion("1.43"),
 	)
 	if err != nil {
 		srv.Close()
@@ -67,9 +67,9 @@ func newCovProviderTCP(t *testing.T, cfg Config, handler http.HandlerFunc) *Prov
 	t.Helper()
 
 	srv := httptest.NewServer(handler)
-	cli, err := client.NewClientWithOpts(
+	cli, err := client.New(
 		client.WithHost("tcp://"+strings.TrimPrefix(srv.URL, "http://")),
-		client.WithVersion("1.43"),
+		client.WithAPIVersion("1.43"),
 	)
 	if err != nil {
 		srv.Close()
