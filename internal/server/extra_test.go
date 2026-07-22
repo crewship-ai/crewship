@@ -84,7 +84,6 @@ func TestRegisterRoutes_AllPathsMounted(t *testing.T) {
 		{"GET", "/healthz", http.StatusOK},
 		{"GET", "/readyz", http.StatusOK},
 		{"GET", "/metrics", http.StatusOK},
-		{"GET", "/ws", http.StatusUnauthorized},                // missing token
 		{"GET", "/ws/terminal", http.StatusServiceUnavailable}, // no terminal handler
 		{"GET", "/openapi.json", http.StatusOK},
 	}
@@ -104,6 +103,24 @@ func TestRegisterRoutes_AllPathsMounted(t *testing.T) {
 			}
 		})
 	}
+
+	// /ws upgrades unconditionally and authenticates on the first frame,
+	// so it hijacks the connection — a ResponseRecorder (no http.Hijacker)
+	// panics. Prove the route is mounted over a real listener instead: a
+	// plain GET fails the websocket handshake with 400, while an unmounted
+	// path would 404.
+	t.Run("GET /ws", func(t *testing.T) {
+		srv := httptest.NewServer(s.mux)
+		defer srv.Close()
+		resp, err := http.Get(srv.URL + "/ws")
+		if err != nil {
+			t.Fatalf("GET /ws: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+		}
+	})
 }
 
 func TestRegisterIPCRoutes_AllPathsMounted(t *testing.T) {
