@@ -146,6 +146,18 @@ func (c *Client) sendError(channel, msg string) {
 	c.safeSend(resp)
 }
 
+// trySendError is sendError with a non-blocking enqueue (trySend). Hub
+// sweep/notify goroutines use it so one client's full send buffer can't
+// stall the shared loop; the frame is best-effort there.
+func (c *Client) trySendError(channel, msg string) {
+	resp, _ := json.Marshal(ServerMessage{
+		Type:    "error",
+		Channel: channel,
+		Payload: map[string]string{"error": msg},
+	})
+	c.trySend(resp)
+}
+
 // unwrapDoubleEncoded handles a double-encoded payload (the frontend sends a
 // JSON.stringify'd string): when raw is a JSON string, the inner value is
 // returned as the payload; anything else passes through unchanged.
@@ -170,8 +182,11 @@ func (c *Client) subscribe(channel string) {
 		c.sendError(channel, "access denied")
 		return
 	}
-	if !c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, channel) {
-		c.hub.logger.Warn("channel subscription denied", "user_id", c.userID, "channel", channel)
+	// Grant path: an authorizer ERROR is treated exactly like a deny —
+	// fail closed. Only the periodic sweep (which takes access away)
+	// distinguishes the two.
+	if ok, err := c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, channel); err != nil || !ok {
+		c.hub.logger.Warn("channel subscription denied", "user_id", c.userID, "channel", channel, "error", err)
 		c.sendError(channel, "access denied")
 		return
 	}
@@ -218,6 +233,26 @@ func (c *Client) safeSend(data []byte) (sent bool) {
 	case c.send <- data:
 		return true
 	case <-c.ctx.Done():
+		return false
+	}
+}
+
+// trySend is the non-blocking variant of safeSend: enqueue if the buffer
+// has room, otherwise drop the frame immediately. Used by hub-side
+// goroutines (connection sweep, revocation notify) that must never park
+// behind one client's saturated buffer. Same panic guard — the hub
+// closes c.send on unregister, and these callers race with that by
+// design.
+func (c *Client) trySend(data []byte) (sent bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			sent = false
+		}
+	}()
+	select {
+	case c.send <- data:
+		return true
+	default:
 		return false
 	}
 }
@@ -297,8 +332,13 @@ func (c *Client) handleResume(msg ClientMessage) {
 	channel := "session:" + payload.ChatID
 	// Deny by default: same authorization gate as subscribe so a client can't
 	// replay another workspace's/session's stream by guessing a chat id.
-	if c.hub.channelAuth == nil || !c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, channel) {
+	// Authorizer errors fail closed, like every grant path.
+	if c.hub.channelAuth == nil {
 		c.hub.logger.Warn("resume denied", "user_id", c.userID, "channel", channel)
+		return
+	}
+	if ok, err := c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, channel); err != nil || !ok {
+		c.hub.logger.Warn("resume denied", "user_id", c.userID, "channel", channel, "error", err)
 		return
 	}
 
@@ -346,8 +386,9 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 	// Validate session access: user must be authorized for this chat's channel
 	if c.hub.channelAuth != nil {
 		sessionCh := "session:" + payload.ChatID
-		if !c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, sessionCh) {
-			c.hub.logger.Warn("send_message denied: no access to session", "user_id", c.userID, "chat_id", payload.ChatID)
+		// Grant path — authorizer errors fail closed.
+		if ok, err := c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, sessionCh); err != nil || !ok {
+			c.hub.logger.Warn("send_message denied: no access to session", "user_id", c.userID, "chat_id", payload.ChatID, "error", err)
 			c.sendError(msg.Channel, "access denied")
 			return
 		}

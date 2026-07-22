@@ -71,8 +71,12 @@ type Router struct {
 	// ADMIN+ floor (#865). Mutations already carry roleManage via authedMut;
 	// this is the read half. The floor invariant walks it (and source-scans
 	// router_admin.go) so an admin read that forgets its gate fails the build.
-	adminRoutes     []adminRoute
-	sessionsStore   sessions.Store
+	adminRoutes   []adminRoute
+	sessionsStore sessions.Store
+	// revokeNotifiers are extra transports (beyond r.hub) that get an
+	// immediate in-process signal on session revocation — see
+	// WithSessionRevocationNotifiers and newNotifyingSessionStore.
+	revokeNotifiers []SessionRevocationNotifier
 	socketPath      string
 	internalToken   string
 	internalBaseURL string
@@ -372,6 +376,21 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	for _, opt := range opts {
 		opt(r)
 	}
+
+	// Now that options have attached the hub and any extra revocation
+	// notifiers, wrap the sessions store so every successful Revoke /
+	// RevokeAllForUser — from ANY handler, present or future — pushes an
+	// immediate disconnect to live WS/terminal connections (#1255 item 3)
+	// instead of waiting for their 30s backstop sweeps. The wrap happens
+	// BEFORE registerRoutes so every handler constructed there holds the
+	// decorated store. authMw keeps the raw store — it only reads
+	// (Get/TouchLastUsed) and never revokes.
+	notifiers := make([]SessionRevocationNotifier, 0, len(r.revokeNotifiers)+1)
+	if r.hub != nil {
+		notifiers = append(notifiers, r.hub)
+	}
+	notifiers = append(notifiers, r.revokeNotifiers...)
+	r.sessionsStore = newNotifyingSessionStore(r.sessionsStore, notifiers...)
 
 	r.registerRoutes()
 

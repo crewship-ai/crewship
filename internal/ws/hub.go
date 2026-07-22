@@ -93,6 +93,13 @@ type Hub struct {
 	// each crossing of dropLogThreshold.
 	droppedFrames  atomic.Uint64
 	loggedDropMark atomic.Uint64
+
+	// connSweepInFlight guards the shared connection sweep against
+	// overlapping runs: the sweep executes on its own goroutine (so it
+	// can never stall Run's select loop behind a slow DB), and if a
+	// sweep is still running when the next tick fires, that tick is
+	// skipped rather than stacking a second concurrent sweep.
+	connSweepInFlight atomic.Bool
 }
 
 // dropLogThreshold is how many dropped frames must accumulate between WARN
@@ -106,6 +113,13 @@ const dropLogThreshold = 16
 // membership stops granting access over WS" the old per-connection poll
 // carried.
 const connSweepInterval = 30 * time.Second
+
+// sweepQueryTimeout bounds every individual DB round-trip the sweep makes
+// (sessions.Get, CanSubscribe). The sweep goroutine otherwise inherits the
+// server-lifetime context, so without a per-query deadline one wedged
+// query would pin the sweep (and, via the overlap guard, suppress all
+// future ticks) for as long as the DB driver cares to block.
+const sweepQueryTimeout = 5 * time.Second
 
 // consecutiveDropsBeforeDisconnect is the per-client cutoff: once that
 // many broadcasts in a row have failed to enqueue, dispatch treats the
@@ -283,7 +297,10 @@ func (h *Hub) Run(ctx context.Context) {
 
 	// Shared connection sweep: revocation (#1255 item 3) + channel
 	// re-authorization (#1254 item 5). One ticker, two independent checks —
-	// see sweepRevokedSessions / sweepChannelAuthorization.
+	// see sweepRevokedSessions / sweepChannelAuthorization. The tick only
+	// STARTS the sweep (maybeStartConnSweep runs it on its own goroutine)
+	// so DB latency in the checks can never stall register/unregister/
+	// broadcast processing in this loop.
 	connSweepTicker := time.NewTicker(connSweepInterval)
 	defer connSweepTicker.Stop()
 
@@ -295,8 +312,7 @@ func (h *Hub) Run(ctx context.Context) {
 		case <-sweepTicker.C:
 			h.streams.sweep(time.Now())
 		case <-connSweepTicker.C:
-			h.sweepRevokedSessions(ctx)
-			h.sweepChannelAuthorization(ctx)
+			h.maybeStartConnSweep(ctx)
 		case client := <-h.register:
 			h.mu.Lock()
 			h.clients[client] = true
@@ -461,6 +477,86 @@ func (c *Client) forceDisconnect() {
 	}
 }
 
+// maybeStartConnSweep launches one shared connection sweep on its own
+// goroutine, unless the previous sweep is still running — then the tick
+// is dropped (the next one retries). Reports whether a sweep was started,
+// which tests use to exercise the overlap guard directly.
+//
+// The sweep MUST NOT run inline in Run's select loop: register/unregister
+// are unbuffered channels, so any DB latency inside the sweep would
+// freeze connection setup/teardown and broadcast dispatch for its
+// duration — and a wedged DB query would freeze the hub outright.
+func (h *Hub) maybeStartConnSweep(ctx context.Context) bool {
+	if !h.connSweepInFlight.CompareAndSwap(false, true) {
+		return false
+	}
+	go func() {
+		defer h.connSweepInFlight.Store(false)
+		h.sweepRevokedSessions(ctx)
+		h.sweepChannelAuthorization(ctx)
+	}()
+	return true
+}
+
+// NotifySessionRevoked immediately force-disconnects every live client
+// authenticated under the given user_sessions ID. This is the push half
+// of revocation enforcement (#1255 item 3): the API layer calls it (via
+// the notifying session store) the moment a Revoke lands, so logout /
+// admin revoke / refresh-reuse detection close the socket in
+// milliseconds with zero DB queries. The 30s sweep remains as the
+// backstop for anything that mutates user_sessions without going
+// through that chokepoint.
+//
+// Nil-safe (headless callers may hold a nil hub) and safe to call from
+// any goroutine: the client snapshot is taken under RLock and the
+// teardown path (closeRevokedClients → trySend/forceDisconnect) never
+// blocks.
+func (h *Hub) NotifySessionRevoked(sessionID string) {
+	if h == nil || sessionID == "" {
+		return
+	}
+	var matched []*Client
+	h.mu.RLock()
+	for c := range h.clients {
+		if c.authSessionID == sessionID {
+			matched = append(matched, c)
+		}
+	}
+	h.mu.RUnlock()
+	if len(matched) == 0 {
+		return
+	}
+	h.logger.Info("ws closing connections for revoked session",
+		"sid", sessionID, "connections", len(matched))
+	h.closeRevokedClients(matched)
+}
+
+// NotifyUserRevoked immediately force-disconnects every live
+// browser-session client belonging to userID — the push companion to
+// sessions.Store.RevokeAllForUser (password change, forced Google
+// re-auth). Clients with an empty authSessionID are left alone: those
+// are CLI-token-derived connections whose auth artifact has its own
+// revocation table, and RevokeAllForUser does not touch it.
+func (h *Hub) NotifyUserRevoked(userID string) {
+	if h == nil || userID == "" {
+		return
+	}
+	var matched []*Client
+	h.mu.RLock()
+	for c := range h.clients {
+		if c.userID == userID && c.authSessionID != "" {
+			matched = append(matched, c)
+		}
+	}
+	h.mu.RUnlock()
+	if len(matched) == 0 {
+		return
+	}
+	h.logger.Info("ws closing connections for revoked user sessions",
+		"user_id", userID, "connections", len(matched))
+	h.closeRevokedClients(matched)
+}
+
 // sweepRevokedSessions checks every DISTINCT authenticated session ID
 // currently connected — once per tick, not once per connection — and
 // force-disconnects every client registered under a session that comes
@@ -491,7 +587,7 @@ func (h *Hub) sweepRevokedSessions(ctx context.Context) {
 	h.mu.RUnlock()
 
 	for sid, clients := range bySession {
-		qCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		qCtx, cancel := context.WithTimeout(ctx, sweepQueryTimeout)
 		sess, err := h.sessions.Get(qCtx, sid)
 		cancel()
 
@@ -521,13 +617,20 @@ func (h *Hub) sweepRevokedSessions(ctx context.Context) {
 // brief delay so writePump has a chance to flush the frame first — mirrors
 // the old per-connection watcher's behaviour, just fanned out to every
 // client sharing the session instead of one.
+//
+// The frame goes out via trySend (non-blocking), not safeSend: this runs
+// on the sweep/notify goroutine, and a client with a full send buffer
+// would park a blocking send until its buffer drains — stalling the
+// courtesy frame for every OTHER revoked client behind it. Losing the
+// frame on a saturated connection is fine; the force-disconnect that
+// follows is the enforcement.
 func (h *Hub) closeRevokedClients(clients []*Client) {
 	revokedFrame, _ := json.Marshal(ServerMessage{
 		Type:    "session_revoked",
 		Payload: map[string]string{"reason": "session_revoked"},
 	})
 	for _, c := range clients {
-		c.safeSend(revokedFrame)
+		c.trySend(revokedFrame)
 	}
 	go func(clients []*Client) {
 		time.Sleep(50 * time.Millisecond)
@@ -547,6 +650,15 @@ func (h *Hub) closeRevokedClients(clients []*Client) {
 // doesn't cover it — kept receiving that workspace's broadcasts for the
 // rest of the connection's lifetime. This closes that gap on the same
 // cadence as the revocation sweep rather than adding a second ticker.
+//
+// Deny vs. error: only a DEFINITIVE deny (false, nil) revokes the
+// subscription. A CanSubscribe error (DB hiccup, per-query timeout) skips
+// the channel and retries next tick — the production authorizer fails
+// closed on any error, so treating "check failed" as "access removed"
+// would strip EVERY subscription from EVERY client on one transient DB
+// blip, and the frontend does not re-subscribe without a reconnect.
+// Subscribe-time checks still fail closed on error; only this
+// take-access-away path needs the distinction.
 func (h *Hub) sweepChannelAuthorization(ctx context.Context) {
 	if h.channelAuth == nil {
 		return
@@ -567,11 +679,22 @@ func (h *Hub) sweepChannelAuthorization(ctx context.Context) {
 		c.mu.Unlock()
 
 		for _, ch := range chans {
-			if h.channelAuth.CanSubscribe(ctx, c.userID, ch) {
+			qCtx, cancel := context.WithTimeout(ctx, sweepQueryTimeout)
+			ok, err := h.channelAuth.CanSubscribe(qCtx, c.userID, ch)
+			cancel()
+			if err != nil {
+				// Transient — keep the subscription, retry next tick. If
+				// access really was removed, a later tick returns a clean
+				// (false, nil) and revokes it then.
+				h.logger.Debug("ws channel re-check: transient error, retrying next tick",
+					"error", err, "user_id", c.userID, "channel", ch)
+				continue
+			}
+			if ok {
 				continue
 			}
 			c.unsubscribe(ch)
-			c.sendError(ch, "access revoked")
+			c.trySendError(ch, "access revoked")
 			h.logger.Info("ws subscription revoked by periodic re-check",
 				"user_id", c.userID, "channel", ch)
 		}
@@ -733,8 +856,15 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 
 // ChannelAuthorizer checks whether a user is allowed to subscribe to a given channel.
 // Must be set via Hub.SetChannelAuthorizer before accepting connections.
+//
+// CanSubscribe returns (allowed, err). A definitive verdict has err ==
+// nil; a non-nil err means the check itself failed (infrastructure
+// trouble) and allowed is meaningless. Grant paths (subscribe/resume/
+// send) treat error as deny — fail closed. The periodic re-authorization
+// sweep treats error as "keep the existing subscription and retry" —
+// see sweepChannelAuthorization for why the asymmetry matters.
 type ChannelAuthorizer interface {
-	CanSubscribe(ctx context.Context, userID, channel string) bool
+	CanSubscribe(ctx context.Context, userID, channel string) (bool, error)
 }
 
 // SetChannelAuthorizer sets the authorizer used to check channel subscription permissions.
