@@ -16,12 +16,22 @@ type scopedResult struct {
 	Source string `json:"source"` // "agent" or "crew"
 }
 
-// resolveMemoryEngine returns the engine for the given scope.
+// resolveMemoryEngine returns the engine for the given scope. scope="agent"
+// resolves to the ACTING agent's own tier (legacyMemoryEffectiveSlug +
+// peerMemoryEngineFor, #1301) rather than always the boot agent's — a
+// construction failure there (mkdir/sqlite open) reports as engine=nil,
+// valid=true so the caller's existing nil check answers 503, same as an
+// unconfigured boot tier always has.
 // Returns engine, true if valid scope; nil, false if scope is invalid.
-func (s *Server) resolveMemoryEngine(scope string) (*memory.Engine, bool) {
+func (s *Server) resolveMemoryEngine(scope string, r *http.Request) (*memory.Engine, bool) {
 	switch scope {
 	case "agent", "":
-		return s.memoryEngine, true
+		engine, _, err := s.peerMemoryEngineFor(s.legacyMemoryEffectiveSlug(r))
+		if err != nil {
+			s.logger.Error("memory: peer engine unavailable", "error", err)
+			return nil, true
+		}
+		return engine, true
 	case "crew":
 		return s.crewMemoryEngine, true
 	default:
@@ -99,7 +109,8 @@ func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 
 	switch req.Scope {
 	case "agent":
-		s.searchSingleScope(w, r, s.memoryEngine, "agent", req.Query, req.Limit)
+		engine, _ := s.resolveMemoryEngine("agent", r)
+		s.searchSingleScope(w, r, engine, "agent", req.Query, req.Limit)
 	case "crew":
 		s.searchSingleScope(w, r, s.crewMemoryEngine, "crew", req.Query, req.Limit)
 	case "both":
@@ -202,8 +213,12 @@ func (s *Server) searchSingleScope(w http.ResponseWriter, r *http.Request, engin
 func itoa(n int) string { return strconv.Itoa(n) }
 
 func (s *Server) searchBothScopes(w http.ResponseWriter, r *http.Request, query string, limit int) {
+	// scope=both's agent half resolves to the ACTING agent's own tier
+	// (#1301) — same as scope=agent, not always the boot agent's.
+	agentEngine, _ := s.resolveMemoryEngine("agent", r)
+
 	// At least one engine must be available
-	if s.memoryEngine == nil && s.crewMemoryEngine == nil {
+	if agentEngine == nil && s.crewMemoryEngine == nil {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "no memory engines available",
 		})
@@ -214,8 +229,8 @@ func (s *Server) searchBothScopes(w http.ResponseWriter, r *http.Request, query 
 	var searchErrors int
 
 	// Query agent memory
-	if s.memoryEngine != nil {
-		results, err := s.memoryEngine.Search(r.Context(), query, limit)
+	if agentEngine != nil {
+		results, err := agentEngine.Search(r.Context(), query, limit)
 		if err != nil {
 			s.logger.Warn("agent memory search failed in scope=both", "error", err)
 			searchErrors++
@@ -239,7 +254,7 @@ func (s *Server) searchBothScopes(w http.ResponseWriter, r *http.Request, query 
 
 	// If all attempted scopes failed, return error instead of empty 200
 	engineCount := 0
-	if s.memoryEngine != nil {
+	if agentEngine != nil {
 		engineCount++
 	}
 	if s.crewMemoryEngine != nil {
@@ -292,7 +307,7 @@ func (s *Server) handleMemoryStatus(w http.ResponseWriter, r *http.Request) {
 		scope = "agent"
 	}
 
-	engine, valid := s.resolveMemoryEngine(scope)
+	engine, valid := s.resolveMemoryEngine(scope, r)
 	if !valid {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
 			"error": "invalid scope: use agent or crew",
@@ -325,7 +340,7 @@ func (s *Server) handleMemoryReindex(w http.ResponseWriter, r *http.Request) {
 		scope = "agent"
 	}
 
-	engine, valid := s.resolveMemoryEngine(scope)
+	engine, valid := s.resolveMemoryEngine(scope, r)
 	if !valid {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
 			"error": "invalid scope: use agent or crew",

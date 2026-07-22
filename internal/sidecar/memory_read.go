@@ -50,7 +50,7 @@ func (s *Server) handleMemoryRead(w http.ResponseWriter, r *http.Request) {
 		scope = "agent"
 	}
 
-	_, basePath, valid := s.resolveMemoryEngineWithPath(scope)
+	_, basePath, valid := s.resolveMemoryEngineWithPath(scope, r)
 	if !valid {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid scope: use agent or crew"})
 		return
