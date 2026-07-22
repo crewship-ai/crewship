@@ -1280,7 +1280,15 @@ func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*pr
 
 // ContainerStats returns CPU and memory usage metrics for a running container.
 func (p *Provider) ContainerStats(ctx context.Context, containerID string) (*provider.ContainerMetrics, error) {
-	resp, err := p.client.ContainerStats(ctx, containerID, client.ContainerStatsOptions{Stream: false})
+	// IncludePreviousSample keeps the daemon's two-sample (1s apart)
+	// collection so PreCPUStats is populated and CPUPercent stays a 1s
+	// delta. Without it, moby v2's Stream:false defaults to one-shot mode:
+	// PreCPUStats comes back zeroed and the >=0 wraparound guard below
+	// would silently turn CPUPercent into a cumulative since-start average.
+	resp, err := p.client.ContainerStats(ctx, containerID, client.ContainerStatsOptions{
+		Stream:                false,
+		IncludePreviousSample: true,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("container stats: %w", err)
 	}

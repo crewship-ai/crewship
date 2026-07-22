@@ -457,6 +457,9 @@ func TestEnsureSidecar_CreateBody(t *testing.T) {
 	t.Parallel()
 
 	svc := covRedisSvc()
+	// A UDP port must survive as-is: the old TrimSuffix+"/tcp" normalization
+	// mangled "53/udp" into the malformed key "53/udp/tcp".
+	svc.Ports = append(svc.Ports, "53/udp")
 	svc.Healthcheck = &provider.CrewServiceHealthcheck{
 		Test:        []string{"CMD", "redis-cli", "ping"},
 		Interval:    2 * time.Second,
@@ -549,6 +552,12 @@ func TestEnsureSidecar_CreateBody(t *testing.T) {
 	}
 	if _, ok := cfg.ExposedPorts[network.MustParsePort("5432/tcp")]; !ok {
 		t.Errorf("exposed ports missing 5432/tcp: %v", cfg.ExposedPorts)
+	}
+	if _, ok := cfg.ExposedPorts[network.MustParsePort("53/udp")]; !ok {
+		t.Errorf("exposed ports missing 53/udp: %v", cfg.ExposedPorts)
+	}
+	if len(cfg.ExposedPorts) != 3 {
+		t.Errorf("exposed ports = %v, want exactly 6379/tcp, 5432/tcp, 53/udp", cfg.ExposedPorts)
 	}
 	wantLabels := map[string]string{
 		"managed-by":         "crewship",

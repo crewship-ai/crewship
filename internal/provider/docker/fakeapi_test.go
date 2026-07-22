@@ -262,6 +262,13 @@ func TestContainerStats_FakeAPI(t *testing.T) {
 		if r.URL.Query().Get("stream") != "false" {
 			t.Errorf("stream query = %q, want false", r.URL.Query().Get("stream"))
 		}
+		// Previous-sample mode must be requested: moby v2's Stream:false
+		// otherwise adds one-shot=true, which zeroes PreCPUStats and would
+		// silently degrade CPUPercent from a 1s delta to a cumulative
+		// since-start average.
+		if r.URL.Query().Get("one-shot") == "true" {
+			t.Errorf("one-shot=true sent; want previous-sample mode (IncludePreviousSample)")
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(statsPayload)
 	})

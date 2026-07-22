@@ -310,7 +310,11 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewSlug string, svc *prov
 	// leak DB ports across crews and tenants.
 	exposed := dockernetwork.PortSet{}
 	for _, p := range svc.Ports {
-		port, err := dockernetwork.ParsePort(strings.TrimSuffix(p, "/tcp") + "/tcp")
+		// ParsePort handles "5432", "5432/tcp" and "5432/udp" directly
+		// (bare ports default to tcp). No suffix munging: appending
+		// "/tcp" to an already-qualified "53/udp" would produce the
+		// malformed key "53/udp/tcp".
+		port, err := dockernetwork.ParsePort(p)
 		if err == nil {
 			exposed[port] = struct{}{}
 		}
