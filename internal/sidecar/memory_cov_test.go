@@ -302,16 +302,18 @@ func TestCovResolveMemoryEngineScopes(t *testing.T) {
 	defer srv.memoryEngine.Close()
 	defer srv.crewMemoryEngine.Close()
 
-	if eng, ok := srv.resolveMemoryEngine(""); !ok || eng != srv.memoryEngine {
+	noAuth := httptest.NewRequest("GET", "http://localhost:9119/memory/status", nil)
+
+	if eng, ok := srv.resolveMemoryEngine("", noAuth); !ok || eng != srv.memoryEngine {
 		t.Error("empty scope should resolve to agent engine")
 	}
-	if eng, ok := srv.resolveMemoryEngine("agent"); !ok || eng != srv.memoryEngine {
+	if eng, ok := srv.resolveMemoryEngine("agent", noAuth); !ok || eng != srv.memoryEngine {
 		t.Error("agent scope should resolve to agent engine")
 	}
-	if eng, ok := srv.resolveMemoryEngine("crew"); !ok || eng != srv.crewMemoryEngine {
+	if eng, ok := srv.resolveMemoryEngine("crew", noAuth); !ok || eng != srv.crewMemoryEngine {
 		t.Error("crew scope should resolve to crew engine")
 	}
-	if _, ok := srv.resolveMemoryEngine("nope"); ok {
+	if _, ok := srv.resolveMemoryEngine("nope", noAuth); ok {
 		t.Error("unknown scope must be invalid")
 	}
 }

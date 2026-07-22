@@ -25,6 +25,6 @@ func BenchmarkCanSubscribe_Parse(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = a.CanSubscribe(ctx, "user-123", "providers:all")
+		_, _ = a.CanSubscribe(ctx, "user-123", "providers:all")
 	}
 }

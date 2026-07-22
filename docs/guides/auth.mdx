@@ -136,6 +136,50 @@ Scopes use the shape `<resource>:<action>`. The recognised vocabulary is deliber
 
 **Backward compatibility.** A token minted **without** `scopes` (the default, and every token issued before enforcement) carries the **full role** of the issuing user — unchanged behavior. Scopes only ever *narrow* a token; you can never mint one above your own role.
 
+### 7. Non-interactive CLI login (systemd / CI / harnesses)
+
+`crewship login`'s default email+password flow prompts for the password on a
+real TTY (`term.ReadPassword`), which fails outright over a pipe:
+
+```bash
+$ printf 'demo@crewship.ai\npassword123\n' | crewship login
+Email: Password: read password: inappropriate ioctl for device
+```
+
+That blocks any unattended process — a systemd timer re-authenticating after a
+dev-slot reseed, a CI job, a headless test harness — from obtaining a fresh
+CLI token on its own. Two non-interactive password sources exist for exactly
+this case, in addition to `--email` to skip the email prompt too:
+
+```bash
+# Read the password from stdin (docker-login style) — preferred:
+crewship login --server https://crewship.example.com \
+  --email demo@crewship.ai --password-stdin <<< "$CREWSHIP_LOGIN_PASSWORD"
+
+# Or via an env var — no stdin involved at all:
+CREWSHIP_PASSWORD="$CREWSHIP_LOGIN_PASSWORD" \
+  crewship login --server https://crewship.example.com --email demo@crewship.ai
+```
+
+Prefer `--password-stdin` when both work (preferred for CI / scripts — avoids
+argv leak): an environment variable is readable from `/proc/<pid>/environ` by
+anything running as the same user and is inherited by every child process, so
+on shared machines `CREWSHIP_PASSWORD` exposes the password more broadly than
+a stdin pipe does. Reserve the env var for runners that can only inject
+secrets through the environment.
+
+`--password-stdin` and `CREWSHIP_PASSWORD` are mutually exclusive — passing
+both is refused rather than silently picking one, since it usually means the
+caller meant one of them and mistyped. Both paths go through the same
+CSRF+credentials exchange and CLI-token mint as interactive login, so the
+persisted token behaves identically (profile-aware, revocable from Settings →
+CLI tokens).
+
+For a token-only automation (no interactive login ever happened, or the
+password shouldn't be redistributed at all), mint a scoped CLI token once from
+a session-authed browser (§6) and use `crewship login --token <token>`
+instead — that path already avoided the TTY entirely.
+
 ### The admin authorization floor
 
 The admin console and everything behind it sit on one uniform floor: **ADMIN+ (ADMIN or OWNER)**. This is enforced at the route table, not per-handler, so the read surface and the destructive mutations can't drift apart.

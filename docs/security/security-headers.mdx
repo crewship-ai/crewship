@@ -58,6 +58,7 @@ The SPA `img-src` allows one extra host, `https://logos.composio.dev`, which ser
 |---|---|---|
 | `/api/auth/*`, `/api/v1/auth/*`, `/api/v1/bootstrap` | **10 req/min** per IP | Auth endpoints — strict because these gate the entire system. |
 | `/api/v1/credentials/test`, stored-credential test paths | **60 req/min** per IP | Credential-test endpoints hit external provider APIs; a tighter bucket keeps them from being used as a free key-validation oracle for stolen secrets. |
+| `/api/*` (all other), with a **valid CLI token** | **no rate limit** | Authenticated CLI/admin bulk operations (`crewship seed`, template import, bulk-create) exempt from the per-IP bucket — see below. |
 | `/api/*` (all other) | **120 req/min** per IP | Public API endpoints. |
 | `/api/v1/internal/*` | **no rate limit** | Sidecar IPC. Authenticated via `X-Internal-Token`, not IP. |
 | Static UI / other paths | **no rate limit** | Served from the embedded Next.js export. |
@@ -71,9 +72,29 @@ Dispatch happens in `Router.routeWithRateLimiting`:
 if strings.HasPrefix(path, "/api/v1/internal/") { r.mux.ServeHTTP(w, req); return }
 if strings.HasPrefix(path, "/api/auth/") || … { r.authRateLimitedMux.ServeHTTP(…); return }
 if path == "/api/v1/credentials/test" || … { r.credTestRateLimitedMux.ServeHTTP(…); return }
-if strings.HasPrefix(path, "/api/")          { r.apiRateLimitedMux.ServeHTTP(…);  return }
+if strings.HasPrefix(path, "/api/") {
+  if token := extractToken(req); token != "" && IsCLIToken(token) {
+    // negative cache of failed lookups keeps spoofed CLI-prefix bearers
+    // from forcing an unthrottled DB lookup per request
+    if !r.cliExemptNeg.has(key, now) {
+      if IsValidCLIToken(req.Context(), r.db, token) {
+        r.cappedMux.ServeHTTP(w, req); return // authenticated CLI — exempt (#1333)
+      }
+      r.cliExemptNeg.put(key, now)
+    }
+  }
+  r.apiRateLimitedMux.ServeHTTP(w, req); return
+}
 r.mux.ServeHTTP(w, req)
 ```
+
+### Authenticated-CLI exemption (#1333)
+
+A `crewship seed` or template-import run fires far more requests than the 120/min general bucket in seconds — 429ing mid-run used to leave a half-seeded tenant. Requests bearing a **genuinely valid** CLI token (`crewship_cli_…` or `crewship_admin_…`, hash-matched against `cli_tokens`, non-revoked, non-expired — checked via `IsValidCLIToken`, not just the token's prefix shape) skip the per-IP bucket entirely and go straight to the body-capped mux. This check is side-effect-free: it never writes the ADMIN per-use audit row or touches `last_used_at` — the real `RequireAuth` validation (with its audit trail) still runs exactly once, downstream in the handler.
+
+The exemption applies **only** to the general `/api/*` bucket. The auth endpoints (`/api/auth/*`) and the credential-test anti-oracle bucket (`/api/v1/credentials/test`) are unaffected — a valid CLI token does not bypass either, since both exist specifically to throttle actions that stay dangerous even when authenticated (login/signup credential stuffing, key-validation oracling). A CLI-token-*shaped* bearer that doesn't hash-match a live row (forged, revoked, expired) gets no exemption and falls through to the normal per-IP bucket like any other request.
+
+Because the validity check runs *before* the limiter, failed lookups are remembered in a small bounded negative cache (SHA-256 of the bearer, 30 s TTL, 1024-entry cap) so a flood of spoofed CLI-prefix bearers cannot force an unthrottled database lookup on every request. Only failures are cached — a valid token is re-checked on every request, so revoking or expiring it removes the exemption immediately.
 
 ### Burst, cleanup, 429 response
 
@@ -147,6 +168,7 @@ GET /api/auth/google/callback?state=<token>&code=<code>
 | `400 OAuth state expired` after leaving the sign-in tab open | State row older than 15 minutes. Retry from the start. |
 | `400 Invalid or expired state` on back-button replay | State row already consumed — single-use. |
 | Legitimate internal caller rate-limited | Request hit the `/api/*` bucket because it was not sent under `/api/v1/internal/*`. Fix the route prefix; internal callers go through `X-Internal-Token` auth. |
+| `crewship seed` / template import 429s mid-run | Should not happen with a valid CLI token — the authenticated-CLI exemption (#1333) covers this. If it still 429s, confirm the CLI is actually sending `Authorization: Bearer crewship_cli_…`/`crewship_admin_…` and that the token isn't revoked/expired. `CREWSHIP_RATELIMIT_DISABLED` is no longer needed for seeding. |
 
 ## See also
 

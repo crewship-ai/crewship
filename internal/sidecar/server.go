@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/memory"
@@ -118,6 +119,16 @@ type Server struct {
 	proxy            *Proxy
 	memoryEngine     *memory.Engine
 	crewMemoryEngine *memory.Engine // crew shared memory — only initialized for lead agents
+	// peerMemoryEngines caches per-sibling FTS5 engines for the legacy
+	// /memory/{search,status,reindex} routes (#1301): each sibling now gets
+	// its OWN agent-tier engine instead of always resolving to memoryEngine
+	// (the boot agent's). Keyed by slug, built lazily on first access, and
+	// bounded by crew roster size — no eviction needed, every entry is
+	// closed at shutdown alongside memoryEngine/crewMemoryEngine. Guarded by
+	// peerMemoryEnginesMu since multiple siblings' requests can race the
+	// same sidecar concurrently.
+	peerMemoryEngines   map[string]*memory.Engine
+	peerMemoryEnginesMu sync.Mutex
 	// agentMemoryBase / crewMemoryBase are the resolved base paths
 	// the write handler joins relative paths under. Mirrors what's
 	// in cfg.Memory.{BasePath,CrewMemoryPath}, stashed on the Server
@@ -232,7 +243,8 @@ func NewServer(cfg ServerConfig) *Server {
 		// Single-worker, strict-FIFO, no-drop executor for post-write
 		// reindex + journal emit. Started here so it's live before the
 		// HTTP server begins accepting writes.
-		memoryExec: newMemoryExecutor(cfg.Logger),
+		memoryExec:        newMemoryExecutor(cfg.Logger),
+		peerMemoryEngines: make(map[string]*memory.Engine),
 	}
 
 	// Billing-mode + plan come from the orchestrator-set env vars in
@@ -740,6 +752,7 @@ func (s *Server) Start(ctx context.Context) error {
 		if s.crewMemoryEngine != nil {
 			s.crewMemoryEngine.Close()
 		}
+		s.closePeerMemoryEngines()
 		if err := s.httpServer.Shutdown(shutCtx); err != nil {
 			s.httpServer.Close()
 			return fmt.Errorf("sidecar shutdown: %w", err)
@@ -763,6 +776,7 @@ func (s *Server) Start(ctx context.Context) error {
 		if s.crewMemoryEngine != nil {
 			s.crewMemoryEngine.Close()
 		}
+		s.closePeerMemoryEngines()
 		return err
 	}
 }

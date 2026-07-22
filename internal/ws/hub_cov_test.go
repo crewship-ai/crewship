@@ -2,9 +2,9 @@ package ws
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,7 +13,6 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"golang.org/x/net/websocket"
-	"strings"
 )
 
 // stubSessions lets each test script the Get result; writes are no-ops.
@@ -103,7 +102,12 @@ func TestForceDisconnect_ClosesLiveConn(t *testing.T) {
 
 // --- HandleUpgrade: session-bound (sid) tickets ---
 
-func dialWithSid(t *testing.T, store sessions.Store, sid string) (*websocket.Conn, *http.Response, error) {
+// dialWithSid dials and completes the post-upgrade auth handshake for a
+// sid-carrying ticket. The upgrade itself always succeeds now (auth moved
+// post-upgrade — see hub.go authenticateUpgradedConn); session-revocation
+// rejection surfaces as a frame + close on the live connection instead of
+// an HTTP status, so callers read that frame themselves.
+func dialWithSid(t *testing.T, store sessions.Store, sid string) *websocket.Conn {
 	t.Helper()
 	v := defaultTestValidator(t)
 	hub := newRunningHub(t, withValidator(v), withSessions(store))
@@ -116,20 +120,32 @@ func dialWithSid(t *testing.T, store sessions.Store, sid string) (*websocket.Con
 		t.Fatal(err)
 	}
 
-	// Plain GET first to read status code/body (websocket.Dial hides them).
-	resp, err := http.Get(srv.URL + "/?token=" + url.QueryEscape(tok))
-	if err != nil {
+	u, _ := url.Parse(srv.URL)
+	conn, dialErr := websocket.Dial(fmt.Sprintf("ws://%s/", u.Host), "", srv.URL)
+	if dialErr != nil {
+		t.Fatalf("dial (upgrade must succeed pre-auth): %v", dialErr)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	wsAuth(t, conn, tok)
+	return conn
+}
+
+// recvAuthFrame reads the single frame HandleUpgrade sends on an auth
+// rejection (session_revoked or a generic error) before closing.
+func recvAuthFrame(t *testing.T, conn *websocket.Conn) ServerMessage {
+	t.Helper()
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { resp.Body.Close() })
-
-	u, _ := url.Parse(srv.URL)
-	wsURL := fmt.Sprintf("ws://%s/?token=%s", u.Host, url.QueryEscape(tok))
-	conn, dialErr := websocket.Dial(wsURL, "", srv.URL)
-	if conn != nil {
-		t.Cleanup(func() { _ = conn.Close() })
+	var raw []byte
+	if err := websocket.Message.Receive(conn, &raw); err != nil {
+		t.Fatalf("expected an auth-rejection frame before close, got read error: %v", err)
 	}
-	return conn, resp, dialErr
+	var msg ServerMessage
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		t.Fatalf("unmarshal %q: %v", raw, err)
+	}
+	return msg
 }
 
 func TestHandleUpgrade_SessionMissingIsRevoked(t *testing.T) {
@@ -137,16 +153,9 @@ func TestHandleUpgrade_SessionMissingIsRevoked(t *testing.T) {
 	store := &stubSessions{get: func(context.Context, string) (*sessions.Session, error) {
 		return nil, sessions.ErrNotFound
 	}}
-	_, resp, dialErr := dialWithSid(t, store, "sess-gone")
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", resp.StatusCode)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	if got := string(body); !strings.Contains(got, "session_revoked") {
-		t.Errorf("body = %q, want session_revoked", got)
-	}
-	if dialErr == nil {
-		t.Error("websocket dial must fail for a revoked session")
+	conn := dialWithSid(t, store, "sess-gone")
+	if msg := recvAuthFrame(t, conn); msg.Type != "session_revoked" {
+		t.Errorf("type = %q, want session_revoked", msg.Type)
 	}
 }
 
@@ -155,12 +164,9 @@ func TestHandleUpgrade_SessionLookupErrorIs500(t *testing.T) {
 	store := &stubSessions{get: func(context.Context, string) (*sessions.Session, error) {
 		return nil, errors.New("db timeout")
 	}}
-	_, resp, dialErr := dialWithSid(t, store, "sess-1")
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500", resp.StatusCode)
-	}
-	if dialErr == nil {
-		t.Error("websocket dial must fail on session lookup error")
+	conn := dialWithSid(t, store, "sess-1")
+	if msg := recvAuthFrame(t, conn); msg.Type != "error" {
+		t.Errorf("type = %q, want error", msg.Type)
 	}
 }
 
@@ -175,12 +181,9 @@ func TestHandleUpgrade_InactiveSessionIsRevoked(t *testing.T) {
 			RevokedAt: &revokedAt,
 		}, nil
 	}}
-	_, resp, dialErr := dialWithSid(t, store, "sess-1")
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", resp.StatusCode)
-	}
-	if dialErr == nil {
-		t.Error("websocket dial must fail for an inactive session")
+	conn := dialWithSid(t, store, "sess-1")
+	if msg := recvAuthFrame(t, conn); msg.Type != "session_revoked" {
+		t.Errorf("type = %q, want session_revoked", msg.Type)
 	}
 }
 
@@ -193,10 +196,7 @@ func TestHandleUpgrade_ActiveSessionConnects(t *testing.T) {
 			ExpiresAt: time.Now().Add(time.Hour),
 		}, nil
 	}}
-	conn, _, dialErr := dialWithSid(t, store, "sess-1")
-	if dialErr != nil {
-		t.Fatalf("dial: %v", dialErr)
-	}
+	conn := dialWithSid(t, store, "sess-1")
 	// The connection is live end-to-end: ping → pong.
 	wsSend(t, conn, ClientMessage{Type: "ping"})
 	if msg := wsRecv(t, conn); msg.Type != "pong" {
@@ -206,21 +206,18 @@ func TestHandleUpgrade_ActiveSessionConnects(t *testing.T) {
 
 // --- HandleUpgrade: Origin validation ---
 
+// originDial exercises only the Handshake's Origin/CSRF gate, which still
+// runs pre-upgrade (unchanged by the auth-moved-post-upgrade fix) — no
+// token or auth message needed to observe an origin rejection.
 func originDial(t *testing.T, origin string) error {
 	t.Helper()
-	v := defaultTestValidator(t)
-	hub := newRunningHub(t, withValidator(v))
+	hub := newRunningHub(t)
 	hub.SetChannelAuthorizer(allowAllAuthorizer{})
 	srv := httptest.NewServer(http.HandlerFunc(hub.HandleUpgrade))
 	t.Cleanup(srv.Close)
 
-	tok, err := v.IssueWSTicket("user-1", "", "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
 	u, _ := url.Parse(srv.URL)
-	wsURL := fmt.Sprintf("ws://%s/?token=%s", u.Host, url.QueryEscape(tok))
-	conn, err := websocket.Dial(wsURL, "", origin)
+	conn, err := websocket.Dial(fmt.Sprintf("ws://%s/", u.Host), "", origin)
 	if conn != nil {
 		t.Cleanup(func() { _ = conn.Close() })
 	}

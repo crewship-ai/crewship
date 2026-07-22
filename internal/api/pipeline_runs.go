@@ -512,10 +512,18 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 	// leak from another tenant. `p.deleted_at IS NULL` matches every
 	// other pipelines query (v78) so a soft-deleted pipeline doesn't
 	// resurface its name in run lists.
+	//
+	// step_outputs_json is deliberately NOT selected here (#1255 item 1).
+	// It can carry many KB of agent transcript/tool-result JSON per row —
+	// data only the expanded run-detail view renders — and this feed is
+	// polled by the dashboard every few seconds. GetRun (the single-run
+	// endpoint) still returns it in full; the frontend (RunStepTree,
+	// runs-view.tsx) fetches that lazily on row expansion via useTrace
+	// instead of reading it off the list response.
 	query := `
 		SELECT r.id, r.pipeline_id, r.pipeline_slug, p.name,
 		       r.status, r.mode, r.started_at, r.ended_at,
-		       r.current_step_id, r.step_outputs_json,
+		       r.current_step_id,
 		       r.cost_usd, r.duration_ms,
 		       r.triggered_via, r.triggered_by_id,
 		       r.invoking_crew_id, r.invoking_agent_id, r.invoking_user_id,
@@ -545,7 +553,7 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 	for rows.Next() {
 		var (
 			id, pipelineID, pipelineSlug, status, mode, startedAt string
-			pipelineName, currentStepID, stepOutputsJSON          sql.NullString
+			pipelineName, currentStepID                           sql.NullString
 			endedAt                                               sql.NullString
 			costUSD                                               float64
 			durationMs                                            int64
@@ -557,7 +565,7 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 		if err := rows.Scan(
 			&id, &pipelineID, &pipelineSlug, &pipelineName,
 			&status, &mode, &startedAt, &endedAt,
-			&currentStepID, &stepOutputsJSON,
+			&currentStepID,
 			&costUSD, &durationMs,
 			&triggeredVia, &triggeredByID,
 			&invokingCrewID, &invokingAgentID, &invokingUserID,
@@ -566,10 +574,6 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 		); err != nil {
 			h.logger.Warn("scan pipeline run", "error", err)
 			continue
-		}
-		var stepOutputs map[string]interface{}
-		if stepOutputsJSON.Valid && stepOutputsJSON.String != "" {
-			_ = json.Unmarshal([]byte(stepOutputsJSON.String), &stepOutputs)
 		}
 		out = append(out, map[string]interface{}{
 			"id":                id,
@@ -581,7 +585,6 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 			"started_at":        startedAt,
 			"ended_at":          endedAt.String,
 			"current_step_id":   currentStepID.String,
-			"step_outputs":      stepOutputs,
 			"cost_usd":          costUSD,
 			"duration_ms":       durationMs,
 			"triggered_via":     triggeredVia.String,

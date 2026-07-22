@@ -47,6 +47,16 @@ func startTestWSServer(t *testing.T) (serverURL string, recv chan WSMessage, sen
 				}
 				var m WSMessage
 				if err := json.Unmarshal(raw, &m); err == nil {
+					// NewWSClient now sends {"type":"auth","token":...} as
+					// its first frame post-dial (token moved out of the
+					// dial URL — see internal/ws/hub.go
+					// authenticateUpgradedConn). This mock server has no
+					// real auth layer, so swallow it here rather than
+					// forwarding it to recv, matching how a real server
+					// consumes it before app-level dispatch.
+					if m.Type == "auth" {
+						continue
+					}
 					recv <- m
 				}
 			}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -76,6 +77,15 @@ func newSigGateFixture(t *testing.T, sign bool) *sigGateFixture {
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The release-assets API endpoint (asset discovery).
+		if strings.HasPrefix(r.URL.Path, "/tags/") {
+			names := make([]map[string]string, 0, len(f.assets))
+			for name := range f.assets {
+				names = append(names, map[string]string{"name": name})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"assets": names})
+			return
+		}
 		name := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
 		data, ok := f.assets[name]
 		if !ok {
@@ -89,6 +99,9 @@ func newSigGateFixture(t *testing.T, sign bool) *sigGateFixture {
 	origBase := releaseDownloadBase
 	releaseDownloadBase = srv.URL
 	t.Cleanup(func() { releaseDownloadBase = origBase })
+	origAPI := releaseAPIBase
+	releaseAPIBase = srv.URL
+	t.Cleanup(func() { releaseAPIBase = origAPI })
 
 	return f
 }

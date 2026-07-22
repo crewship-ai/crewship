@@ -87,7 +87,10 @@ describe("useWebSocket — coverage extensions", () => {
     expect(url.protocol).toMatch(/^wss?:$/)
     expect(url.host).toBe(window.location.host)
     expect(url.pathname).toBe("/ws")
-    expect(url.searchParams.get("token")).toBe("t")
+    // Token travels in the post-open auth frame now, never the URL.
+    expect(url.searchParams.has("token")).toBe(false)
+    act(() => { mockInstances[0].simulateOpen() })
+    expect(mockInstances[0].sent[0]).toBe(JSON.stringify({ type: "auth", token: "t" }))
   })
 
   it("socket error event flips status to 'error'", async () => {

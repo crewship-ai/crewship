@@ -27,13 +27,25 @@ func newUpgradedConn(t *testing.T) (*Hub, *websocket.Conn) {
 		t.Fatal(err)
 	}
 	u, _ := url.Parse(srv.URL)
-	wsURL := fmt.Sprintf("ws://%s/?token=%s", u.Host, url.QueryEscape(tok))
+	wsURL := fmt.Sprintf("ws://%s/", u.Host)
 	conn, err := websocket.Dial(wsURL, "", srv.URL)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
+	wsAuth(t, conn, tok)
 	return hub, conn
+}
+
+// wsAuth sends the post-upgrade auth message HandleUpgrade now expects as
+// the first frame on every /ws connection (token moved out of the URL
+// query string — see hub.go authenticateUpgradedConn).
+func wsAuth(t *testing.T, conn *websocket.Conn, token string) {
+	t.Helper()
+	raw, _ := json.Marshal(map[string]string{"type": "auth", "token": token})
+	if _, err := conn.Write(raw); err != nil {
+		t.Fatalf("ws auth write: %v", err)
+	}
 }
 
 func wsSend(t *testing.T, conn *websocket.Conn, msg ClientMessage) {
@@ -162,36 +174,6 @@ func TestWriteFrame_FailsOnClosedConn(t *testing.T) {
 	c := &Client{conn: conn, writeWait: time.Second}
 	if c.writeFrame([]byte("x")) {
 		t.Fatal("writeFrame must fail on a closed connection")
-	}
-}
-
-// watchSessionRevocation must return immediately when the connection has no
-// auth session (CLI-token tickets) or missing dependencies.
-func TestWatchSessionRevocation_EarlyReturns(t *testing.T) {
-	t.Parallel()
-	hub := newRunningHub(t)
-
-	cases := []struct {
-		name string
-		c    *Client
-	}{
-		{"no auth session id", &Client{authSessionID: "", hub: hub}},
-		{"nil hub", &Client{authSessionID: "sess-1", hub: nil}},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			done := make(chan struct{})
-			go func() {
-				tc.c.watchSessionRevocation()
-				close(done)
-			}()
-			select {
-			case <-done:
-			case <-time.After(time.Second):
-				t.Fatal("watchSessionRevocation should return immediately")
-			}
-		})
 	}
 }
 

@@ -8,16 +8,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"golang.org/x/net/websocket"
 )
 
 // Client represents a single authenticated WebSocket connection with its
 // channel subscriptions and outbound message buffer. authSessionID is
 // the user_sessions row that authorized this connection (empty for
-// CLI-token-derived tickets); the per-connection revoke watcher uses
-// it to detect server-side logout and force-close with the
-// session_revoked frame.
+// CLI-token-derived tickets); the hub's shared revocation sweep
+// (Hub.sweepRevokedSessions) groups clients by this field to detect
+// server-side logout and force-close with the session_revoked frame.
 //
 // consecutiveDrops + disconnectFired implement the slow-consumer
 // disconnect logic in Hub.dispatch. The hub-level recordDrop accounts
@@ -132,77 +131,9 @@ func (c *Client) writeFrame(msg []byte) bool {
 	return true
 }
 
-// watchSessionRevocation polls user_sessions every 30s and force-closes
-// the connection when the row goes revoked or expires. The frontend's
-// use-websocket hook treats a "session_revoked" frame as terminal —
-// stops retrying and emits the auth:session-expired event so the page
-// hard-redirects to /login.
-//
-// Periodic-poll (rather than push) keeps the implementation independent
-// of where the revocation came from (signOut on the same node, admin
-// force-logout from a different process, password change, etc). The 30s
-// cadence is the documented worst-case "how long until a revoked token
-// stops working over WS"; tighten only if you find that's too lax.
-//
-// Critically — and this is what CodeRabbit caught — only an explicit
-// "this session is revoked or expired" signal terminates the watcher.
-// A transient sessions.Get failure (DB timeout under load, momentary
-// network blip to a remote-DB deployment) MUST NOT close the WS:
-// kicking users to /login on every backend hiccup defeats the whole
-// "robust auth" goal. Log + skip + retry on the next tick.
-func (c *Client) watchSessionRevocation() {
-	if c.authSessionID == "" || c.hub == nil || c.hub.sessions == nil {
-		return
-	}
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-c.ctx.Done():
-			return
-		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
-			sess, err := c.hub.sessions.Get(ctx, c.authSessionID)
-			cancel()
-
-			// Definitively revoked: row is gone or revoked_at != NULL
-			// or expires_at in the past. Close.
-			revoked := false
-			switch {
-			case errors.Is(err, sessions.ErrNotFound):
-				revoked = true
-			case err == nil && sess != nil && !sess.Active(time.Now()):
-				revoked = true
-			case err != nil:
-				// Transient — DB timeout, momentary unavailability.
-				// Skip this tick; the next one will try again. The
-				// connection stays up; the user keeps working. If
-				// the row really IS revoked the very next tick will
-				// see ErrNotFound and close cleanly.
-				c.hub.logger.Debug("ws session-revoke poll: transient error, retrying next tick",
-					"error", err, "sid", c.authSessionID)
-				continue
-			}
-
-			if !revoked {
-				continue
-			}
-
-			// Send the terminal frame, then close. safeSend dropping
-			// is fine — readPump's defer will tear the connection
-			// down on the next read failure.
-			revokedFrame, _ := json.Marshal(ServerMessage{
-				Type:    "session_revoked",
-				Payload: map[string]string{"reason": "session_revoked"},
-			})
-			c.safeSend(revokedFrame)
-			time.Sleep(50 * time.Millisecond) // give writePump a chance to flush
-			c.conn.Close()
-			return
-		}
-	}
-}
+// Session revocation is enforced by the hub's shared sweep
+// (Hub.sweepRevokedSessions in hub.go), not a per-connection watcher —
+// see that function's doc comment for why (#1255 item 3).
 
 // sendError marshals the standard error frame ({"error": msg} payload on the
 // given channel) and queues it on this client's send buffer.
@@ -213,6 +144,18 @@ func (c *Client) sendError(channel, msg string) {
 		Payload: map[string]string{"error": msg},
 	})
 	c.safeSend(resp)
+}
+
+// trySendError is sendError with a non-blocking enqueue (trySend). Hub
+// sweep/notify goroutines use it so one client's full send buffer can't
+// stall the shared loop; the frame is best-effort there.
+func (c *Client) trySendError(channel, msg string) {
+	resp, _ := json.Marshal(ServerMessage{
+		Type:    "error",
+		Channel: channel,
+		Payload: map[string]string{"error": msg},
+	})
+	c.trySend(resp)
 }
 
 // unwrapDoubleEncoded handles a double-encoded payload (the frontend sends a
@@ -239,8 +182,11 @@ func (c *Client) subscribe(channel string) {
 		c.sendError(channel, "access denied")
 		return
 	}
-	if !c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, channel) {
-		c.hub.logger.Warn("channel subscription denied", "user_id", c.userID, "channel", channel)
+	// Grant path: an authorizer ERROR is treated exactly like a deny —
+	// fail closed. Only the periodic sweep (which takes access away)
+	// distinguishes the two.
+	if ok, err := c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, channel); err != nil || !ok {
+		c.hub.logger.Warn("channel subscription denied", "user_id", c.userID, "channel", channel, "error", err)
 		c.sendError(channel, "access denied")
 		return
 	}
@@ -287,6 +233,26 @@ func (c *Client) safeSend(data []byte) (sent bool) {
 	case c.send <- data:
 		return true
 	case <-c.ctx.Done():
+		return false
+	}
+}
+
+// trySend is the non-blocking variant of safeSend: enqueue if the buffer
+// has room, otherwise drop the frame immediately. Used by hub-side
+// goroutines (connection sweep, revocation notify) that must never park
+// behind one client's saturated buffer. Same panic guard — the hub
+// closes c.send on unregister, and these callers race with that by
+// design.
+func (c *Client) trySend(data []byte) (sent bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			sent = false
+		}
+	}()
+	select {
+	case c.send <- data:
+		return true
+	default:
 		return false
 	}
 }
@@ -366,8 +332,13 @@ func (c *Client) handleResume(msg ClientMessage) {
 	channel := "session:" + payload.ChatID
 	// Deny by default: same authorization gate as subscribe so a client can't
 	// replay another workspace's/session's stream by guessing a chat id.
-	if c.hub.channelAuth == nil || !c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, channel) {
+	// Authorizer errors fail closed, like every grant path.
+	if c.hub.channelAuth == nil {
 		c.hub.logger.Warn("resume denied", "user_id", c.userID, "channel", channel)
+		return
+	}
+	if ok, err := c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, channel); err != nil || !ok {
+		c.hub.logger.Warn("resume denied", "user_id", c.userID, "channel", channel, "error", err)
 		return
 	}
 
@@ -415,8 +386,9 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 	// Validate session access: user must be authorized for this chat's channel
 	if c.hub.channelAuth != nil {
 		sessionCh := "session:" + payload.ChatID
-		if !c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, sessionCh) {
-			c.hub.logger.Warn("send_message denied: no access to session", "user_id", c.userID, "chat_id", payload.ChatID)
+		// Grant path — authorizer errors fail closed.
+		if ok, err := c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, sessionCh); err != nil || !ok {
+			c.hub.logger.Warn("send_message denied: no access to session", "user_id", c.userID, "chat_id", payload.ChatID, "error", err)
 			c.sendError(msg.Channel, "access denied")
 			return
 		}

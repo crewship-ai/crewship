@@ -92,18 +92,17 @@ The end-to-end loop from "memory off" to "agent recalls last week's decision" is
 
     This works for **every** crew member: the transport resolves the acting agent from the token and searches that agent's own tier (plus the crew tier). Omit `tier` to search everything accessible.
 
-    <Warning>
-      The legacy `POST /memory/search` route is a **boot-agent-only** surface — the agent whose exec started the crew's shared sidecar. Any other member of the crew gets `403` on `scope=agent` and `scope=both` there (`scope=crew` is shared and always works); see the warning at the end of [Searching Memory](#3-searching-memory).
+    <Tip>
+      The legacy `POST /memory/search` route works the same way for every crew member — it resolves the acting agent from its own token and searches that agent's tier, not always the sidecar's boot agent (see the note at the end of [Searching Memory](#3-searching-memory)).
 
       ```bash
-      # boot agent only
       curl -sX POST localhost:9119/memory/search \
         -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
         -d '{"query": "PostgreSQL migration strategy", "scope": "both", "limit": 5}'
       ```
 
-      There, `scope` is one of `agent`, `crew`, `both`. With `both`, results from the two engines are merged and sorted by BM25 score, each carrying its origin. (RRF fusion of sparse + dense scores applies on the `hybrid=true` path, when an embedding model is configured — not to the default `both` merge.)
-    </Warning>
+      `scope` is one of `agent`, `crew`, `both`. With `both`, results from the two engines are merged and sorted by BM25 score, each carrying its origin. (RRF fusion of sparse + dense scores applies on the `hybrid=true` path, when an embedding model is configured — not to the default `both` merge.)
+    </Tip>
   </Step>
 
   <Step title="Let consolidation tend the index">
@@ -335,11 +334,12 @@ Most agents should search through the **memory MCP tools**, which every adapter
 injects automatically — `memory.search` resolves the acting agent from its token
 and searches that agent's own tier.
 
-The sidecar HTTP API below takes a `scope` parameter and is the **boot agent's**
-surface: it serves the tier of the agent the sidecar was booted for. If your crew
-shares a sidecar and you are not that agent, these routes answer `403` and you
-want `/mcp/memory/<your-slug>` (or the MCP tools) instead — see the warning at
-the end of this section.
+The sidecar HTTP API below takes a `scope` parameter and resolves `scope=agent`
+to the **acting** agent's own tier — the caller identified by its
+`Authorization: Bearer $CREWSHIP_AGENT_TOKEN` header, not always the agent the
+sidecar was originally booted for. Several crew members can share one sidecar;
+each gets its own tier here exactly as it would through `/mcp/memory/<slug>` —
+see the note at the end of this section.
 
 ```bash
 # Search personal memory only
@@ -370,29 +370,24 @@ one sidecar, so a call that cannot be attributed to a member is refused:
 - no header → `403 {"error":"per-agent token required"}`
 - a token matching no crew member → `403 {"error":"unrecognized agent token"}`
 
-Crews that predate per-agent tokens keep working unauthenticated. The token is
-in each agent's environment, so `-H "Authorization: Bearer
+Crews that predate per-agent tokens keep working unauthenticated (the token-less
+fallback resolves to the sidecar's boot agent, matching pre-token behavior). The
+token is in each agent's environment, so `-H "Authorization: Bearer
 $CREWSHIP_AGENT_TOKEN"` is all that is needed. See
 [Per-agent identity](/security/threat-model#per-agent-identity-on-the-shared-sidecar).
 </Warning>
 
-<Warning>
-**The legacy `/memory/*` routes serve the boot agent's tier only.** They resolve
-the memory directory from the sidecar's boot agent and do not switch tiers per
-caller. A crew member that is *not* the boot agent is therefore refused on those
-five routes, with a pointer to its own surface:
-
-```
-403 {"error":"this route serves only the boot agent's memory tier;
-              use /mcp/memory/<your-slug> for your own"}
-```
-
-Use `/mcp/memory/<slug>` (or the memory MCP tools, which every adapter injects
-automatically) — that transport resolves the acting agent from its token and
-serves that agent's own tier. Serving each agent its own tier on the legacy
-routes as well is planned; until then they are a boot-agent surface, not a
-per-agent one.
-</Warning>
+<Note>
+**The legacy `/memory/*` routes serve each caller's own agent tier.** `scope=agent`
+(the default) resolves from the caller's own bearer token — the same identity
+`/mcp/memory/<slug>` resolves — so any crew member reaches its own `AGENT.md`,
+`pins.md`, and daily logs through these routes, not just the sidecar's boot
+agent. `scope=crew` is unaffected by identity: it is one directory shared by the
+whole crew by construction. `/mcp/memory/<slug>` (or the memory MCP tools, which
+every adapter injects automatically) remains the recommended surface for new
+integrations — it has a narrower, closed tool vocabulary — but the legacy HTTP
+routes are no longer a boot-agent-only surface.
+</Note>
 
 ## Dynamic Budget Allocation
 
@@ -647,7 +642,7 @@ Two unrelated things share the word "pin" — don't confuse them:
 **Memory files are not encrypted at rest.** `AGENT.md`, `CREW.md`, daily logs, and the `index.sqlite` files live as plain on-disk bytes inside the container. Never write secrets, tokens, or PII into memory — credentials belong in [Keeper](/guides/keeper), not in `~/.memory/`.
 </Warning>
 
-- **Crew reindex lags up to 60 seconds.** The lead sidecar reindexes the crew tier on a 60-second tick. Writes to `CREW.md` or `topics/*.md` are searchable on the next tick, not immediately — if you need instant visibility, hit `POST /memory/reindex?scope=crew`. The crew tier is shared, so this works from any member of the crew — unlike `scope=agent` on that route, which serves the boot agent's tier only.
+- **Crew reindex lags up to 60 seconds.** The lead sidecar reindexes the crew tier on a 60-second tick. Writes to `CREW.md` or `topics/*.md` are searchable on the next tick, not immediately — if you need instant visibility, hit `POST /memory/reindex?scope=crew`. The crew tier is shared, so this works from any member of the crew, same as `scope=agent` on that route now resolving to the caller's own tier.
 - **Agent-tier reindex after `/memory/write` is asynchronous.** A successful `POST /memory/write` returns `201` the moment the bytes are durable on disk; the FTS5 reindex (and the `memory.updated` journal entry) then run on a single-worker background queue rather than blocking the response. The lag is sub-second in practice. The queue is strict FIFO, so consecutive writes to the same file reindex in write order — turn N always lands before turn N+1, never a stale earlier write winning a race. Writes are still searchable essentially immediately; if you need a hard barrier (e.g. write-then-search in a tight loop), the queue is drained on sidecar shutdown so nothing is lost, but for instant in-session visibility you can hit `POST /memory/reindex?scope=agent`.
 - **Single-agent crews have no crew tier.** The `crew` scope returns 503 for an agent that isn't a member of a crew (or whose crew has only itself). The budget for the agent tier is 100% in that case; no crew context to retrieve.
 - **An agent's personal memory is not reachable by its crewmates through the sidecar API.** Note what this is *not*: within a crew there is no filesystem-level isolation to rely on. A crew shares **one container and one mount**, so every agent tier is on the same disk, reachable by any process in that container. The boundary is enforced by the sidecar — a per-agent bearer token, checked at the memory chokepoint before the route switch, with the acting agent resolved from the token rather than from a caller-supplied slug. An agent with shell access in the container can still read its crewmates' files directly; the guarantee covers the API surface, not the filesystem. If a workflow needs cross-agent state, the right surface is `CREW.md` or `topics/`, written by the lead.

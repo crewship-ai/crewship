@@ -167,7 +167,8 @@ preflight() {
   fi
   if ! cs whoami >/dev/null 2>&1; then
     printf '%s  ✗ cannot reach %s as an authenticated user.%s\n' "$_C_RED" "$SERVER" "$_C_OFF"
-    printf '   Run from a clone shell with CREWSHIP_SERVER set and `crewship login` done,\n'
+    printf '   Run from a clone shell with CREWSHIP_SERVER set and a non-interactive login done:\n'
+    printf '     crewship login --email <email> --password-stdin <<< "$PASSWORD"\n'
     printf '   and make sure the workspace is seeded:\n'
     printf '     crewship seed --nuke --with-memory --with-users --wait-provision\n'
     exit 2

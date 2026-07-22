@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
@@ -71,8 +73,12 @@ type Router struct {
 	// ADMIN+ floor (#865). Mutations already carry roleManage via authedMut;
 	// this is the read half. The floor invariant walks it (and source-scans
 	// router_admin.go) so an admin read that forgets its gate fails the build.
-	adminRoutes     []adminRoute
-	sessionsStore   sessions.Store
+	adminRoutes   []adminRoute
+	sessionsStore sessions.Store
+	// revokeNotifiers are extra transports (beyond r.hub) that get an
+	// immediate in-process signal on session revocation — see
+	// WithSessionRevocationNotifiers and newNotifyingSessionStore.
+	revokeNotifiers []SessionRevocationNotifier
 	socketPath      string
 	internalToken   string
 	internalBaseURL string
@@ -124,6 +130,8 @@ type Router struct {
 	authRateLimitedMux     http.Handler        // mux wrapped with auth rate limiter
 	apiRateLimitedMux      http.Handler        // mux wrapped with general API rate limiter
 	credTestRateLimitedMux http.Handler        // mux wrapped with /credentials/test limiter (defence against credential-validation oracle abuse)
+	cappedMux              http.Handler        // body-capped mux, NOT rate-limited — the #1333 authenticated-CLI exemption routes here directly
+	cliExemptNeg           *cliExemptNegCache  // bounded negative cache of failed exemption lookups — stops spoofed CLI-prefix bearers from forcing an unthrottled DB lookup per request
 	journal                journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
 	consolidator           *consolidate.Consolidator
 	consolidateMemoryRoot  string
@@ -373,6 +381,21 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 		opt(r)
 	}
 
+	// Now that options have attached the hub and any extra revocation
+	// notifiers, wrap the sessions store so every successful Revoke /
+	// RevokeAllForUser — from ANY handler, present or future — pushes an
+	// immediate disconnect to live WS/terminal connections (#1255 item 3)
+	// instead of waiting for their 30s backstop sweeps. The wrap happens
+	// BEFORE registerRoutes so every handler constructed there holds the
+	// decorated store. authMw keeps the raw store — it only reads
+	// (Get/TouchLastUsed) and never revokes.
+	notifiers := make([]SessionRevocationNotifier, 0, len(r.revokeNotifiers)+1)
+	if r.hub != nil {
+		notifiers = append(notifiers, r.hub)
+	}
+	notifiers = append(notifiers, r.revokeNotifiers...)
+	r.sessionsStore = newNotifyingSessionStore(r.sessionsStore, notifiers...)
+
 	r.registerRoutes()
 
 	// Bound the request body on the public API surface (P3). The cap
@@ -381,6 +404,7 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	// routes straight to r.mux in routeWithRateLimiting and may carry
 	// larger trusted payloads — is left to its own per-handler caps.
 	capped := BodyCap(maxAPIBodyBytes)(r.mux)
+	r.cappedMux = capped
 
 	// Warm the signin timing-equalizer hash (lockout.go) off the
 	// request path. Its generation moved out of package init (#967:
@@ -392,6 +416,7 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	go dummyBcryptHash()
 
 	// Pre-wrap mux with rate limiters (once, not per-request)
+	r.cliExemptNeg = newCLIExemptNegCache()
 	r.authRateLimitedMux = NewRateLimiter(10).Middleware(capped)     // 10 req/min per IP
 	r.apiRateLimitedMux = NewRateLimiter(120).Middleware(capped)     // 120 req/min per IP
 	r.credTestRateLimitedMux = NewRateLimiter(60).Middleware(capped) // 60 req/min per IP — tighter on /credentials/test to limit its use as a credential-validation oracle (a tenant should never need 60 manual test clicks per minute)
@@ -478,8 +503,44 @@ func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	// General API rate limiting
+	// General API rate limiting — except authenticated CLI callers, which
+	// are exempt from the per-IP bucket entirely (#1333). A bulk operation
+	// (crewship seed, template import) fires far more requests than the
+	// 120/min budget in seconds, 429ing mid-run and leaving a half-seeded
+	// tenant. The limiter must still cover everyone else: a request must
+	// present a token that is REAL — cryptographically hash-matched,
+	// non-revoked, non-expired (IsValidCLIToken, not just "shaped like" a
+	// CLI token) — before it skips the bucket, so an unauthenticated
+	// caller can't spoof the `crewship_cli_`/`crewship_admin_` prefix to
+	// dodge throttling. The exempted request still goes through the real
+	// RequireAuth validation (with its audit trail) downstream in r.mux —
+	// IsValidCLIToken here is a side-effect-free pre-check.
+	//
+	// The validity check runs BEFORE the limiter on purpose: exempt CLI
+	// traffic must not drain the per-IP bucket it shares with a browser
+	// behind the same NAT. To keep that ordering from becoming a DoS
+	// amplifier (spoofed prefix → unthrottled DB lookup per request),
+	// failed lookups land in r.cliExemptNeg — see ratelimit_cli_negcache.go
+	// — and a cached failure skips the DB and falls into the normal bucket.
+	// Note this branch is dead for auth paths: the stricter auth bucket
+	// above matched first, so a valid CLI token cannot exempt login/
+	// bootstrap traffic (covered by TestRouteWithRateLimiting_AuthPath_
+	// ValidCLIToken_StillAuthRateLimited).
 	if strings.HasPrefix(path, "/api/") {
+		if token := extractToken(req); token != "" && IsCLIToken(token) {
+			key := sha256.Sum256([]byte(token))
+			now := time.Now()
+			if !r.cliExemptNeg.has(key, now) {
+				if cliExemptDBLookupHook != nil {
+					cliExemptDBLookupHook()
+				}
+				if IsValidCLIToken(req.Context(), r.db, token) {
+					r.cappedMux.ServeHTTP(w, req)
+					return
+				}
+				r.cliExemptNeg.put(key, now)
+			}
+		}
 		r.apiRateLimitedMux.ServeHTTP(w, req)
 		return
 	}

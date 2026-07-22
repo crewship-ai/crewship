@@ -19,7 +19,14 @@ export interface PipelineRun {
   started_at: string
   ended_at: string
   current_step_id: string
-  step_outputs: Record<string, unknown> | null
+  // step_outputs can carry many KB of agent transcript/tool-result JSON
+  // per row. GetRun (the single-run detail endpoint) always returns it;
+  // the list endpoint (usePipelineRuns) never does — the list feed is
+  // polled every few seconds and this data is only needed by the
+  // expanded/detail view. Components reading it (RunStepTree via
+  // useTrace) fetch the detail on demand rather than relying on this
+  // field being populated on a list row.
+  step_outputs?: Record<string, unknown> | null
   // sub_spans — agent-internal tool calls per step, keyed by step id.
   // Each value is the raw wire array (bash/write/read/edit/mcp_tool/
   // http/tool/think spans, ordered by seq); mapSubSpans normalizes it.

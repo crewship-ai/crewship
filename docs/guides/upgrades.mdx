@@ -47,10 +47,11 @@ skew. Silence it with `CREWSHIP_SKIP_UPDATE_CHECK=1`.
 <Note>
 `self-update` verifies provenance end-to-end, no `cosign` binary needed: it
 checks the **Sigstore keyless signature** on `checksums.txt` — the certificate
-must chain to the embedded production Fulcio CA, carry this repo's
-`release.yml` workflow identity, and be issued via GitHub Actions OIDC —
-before trusting any checksum in it. Only then is the archive's SHA-256
-compared. A release with missing or invalid signature assets is refused.
+must chain to the embedded production Fulcio CA, carry this repo's signing
+workflow identity (`release.yml` for stable releases, `nightly.yml` for
+nightly builds — see [Nightly builds](#nightly-builds)), and be issued via
+GitHub Actions OIDC — before trusting any checksum in it. Only then is the
+archive's SHA-256 compared. A release with missing or invalid signature assets is refused.
 Operators mirroring releases without signatures (air-gapped setups, forks
 signing under a different identity) can bypass the gate with
 `CREWSHIP_SKIP_SIGNATURE_VERIFY=1` — this prints a loud warning, because it
@@ -68,8 +69,30 @@ If you're tracking `main` and running a `nightly-<date>-r<n>` build (a dev
 slot, or anyone who installed a pre-release binary directly), `self-update`
 and `self-update --check` recognize the nightly channel and compare against
 the most recently published `nightly-*` pre-release — by date, then by build
-number — rather than against the stable release line. The upgrade itself
-works the same way as a stable install: download, checksum-verify, swap.
+number — rather than against the stable release line.
+
+The upgrade itself follows the same verified pipeline as a stable install
+(download, signature + checksum verification, atomic swap), with two
+nightly-specific differences under the hood:
+
+- **Asset discovery.** Nightly archives are goreleaser *snapshot* builds, so
+  their filenames carry a `0.0.0-snapshot-<commit>` version instead of the
+  release tag. `self-update` reads the release's published asset list and
+  picks the archive for your OS/arch and build variant from it — it never
+  guesses the filename from the tag. Stable releases use the same discovery,
+  falling back to the deterministic tag-derived name if the listing is
+  unavailable.
+- **Signature identity.** Nightly `checksums.txt` files are signed by the
+  `nightly.yml` workflow, not `release.yml`, so the Sigstore identity pin is
+  per-channel: a nightly upgrade verifies against the `nightly.yml` workflow
+  identity, and a stable upgrade still accepts only `release.yml` — neither
+  channel accepts the other's signatures.
+
+Passive update checks (the CLI boot banner and the dashboard's version badge
+via `/api/v1/system/version`) cache the nightly answer on disk for 1 hour
+(24 hours on the stable channel), so a frequently polled server stays within
+GitHub's unauthenticated API quota. An explicit `crewship self-update` or
+`--check` always asks GitHub directly.
 
 An installed version that's neither a release tag nor a recognized nightly
 build (a hand-rolled `make build` with no embedded version, for example) has

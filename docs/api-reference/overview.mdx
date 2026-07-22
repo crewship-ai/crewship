@@ -63,8 +63,10 @@ Short-lived JWT tokens for establishing WebSocket connections.
 # Get a WS token (requires session or CLI auth)
 GET /api/v1/ws-token
 
-# Connect
-ws://localhost:8080/ws?token=<jwt>
+# Connect, then send the token as the first message (not a URL query
+# param — that would leak into proxy/access logs and Referer headers)
+ws://localhost:8080/ws
+> {"type":"auth","token":"<jwt>"}
 ```
 
 ### 4. Internal Token (IPC)

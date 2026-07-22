@@ -105,7 +105,9 @@ func (h *SystemHandler) Runtime(w http.ResponseWriter, r *http.Request) {
 }
 
 // Version reports the running binary's version plus the latest available
-// release (cached 24h by internal/update). The web UI uses this to render a
+// release (cached on disk by internal/update — 24h on the stable channel, 1h
+// on nightly, so per-request polling never exhausts GitHub's unauthenticated
+// API quota). The web UI uses this to render a
 // "Crewship vX.Y.Z available" banner; the CLI does its own check at boot.
 //
 // Failures from the update package surface as `latest: null` so the client

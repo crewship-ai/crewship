@@ -880,6 +880,8 @@ GET /api/v1/workspaces/{workspaceId}/pipeline-runs
 
 Workspace-scoped run feed for the `/activity` page. Returns recent runs across **every** pipeline with enrichment (`pipeline_name`, `issue_identifier` when `triggered_via=issue`). Sorted by `started_at` DESC.
 
+`step_outputs` is deliberately **not** included in this feed — it can carry many KB of agent transcript/tool-result JSON per row, and this endpoint is polled every few seconds by the dashboard. Fetch [Get pipeline run](#get-pipeline-run) for a specific run id to get its step outputs.
+
 **Query parameters:**
 
 | Parameter | Type | Default | Description |
@@ -903,7 +905,6 @@ Workspace-scoped run feed for the `/activity` page. Returns recent runs across *
       "started_at": "2026-05-19T08:00:00.123456Z",
       "ended_at": "",
       "current_step_id": "review",
-      "step_outputs": { "draft": "..." },
       "cost_usd": 0.012,
       "duration_ms": 4321,
       "triggered_via": "schedule",

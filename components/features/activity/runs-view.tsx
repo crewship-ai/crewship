@@ -22,9 +22,9 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePipelineRuns, type PipelineRun } from "@/hooks/use-pipeline-runs"
+import { useTrace } from "@/hooks/use-trace"
 import { statusIcon, statusTint } from "@/lib/activity/run-status"
 import { relTime, formatDurationDecimal } from "@/lib/time"
-import { apiFetch } from "@/lib/api-fetch"
 
 // RunsView — the /activity "what's happening right now" surface.
 // Each row is one pipeline_run. Collapsed shows source pill + routine
@@ -308,50 +308,19 @@ function StatusPill({ status }: { status: string }) {
   )
 }
 
-// PipelineDSL is the trimmed shape we pull from the pipeline detail
-// endpoint. Only `steps` is needed for the tree — id + type drive the
-// rendering, agent_slug + wait copy are surfaced when present.
-interface PipelineDSLStep {
-  id: string
-  type: string
-  agent_slug?: string
-  wait?: { kind?: string; approval_prompt?: string }
-}
-
-interface PipelineDSL {
-  steps?: PipelineDSLStep[]
-}
-
-interface PipelineDetail {
-  id: string
-  slug: string
-  name: string
-  definition?: PipelineDSL
-}
-
-// RunStepTree fetches the pipeline DEFINITION lazily so we can render
-// every step (done / current / future) instead of just the ones with
-// outputs. The previous version iterated over step_outputs only and
-// the user couldn't see step 4 of 4 ("publish") sitting there waiting.
-// Cache via component state — one fetch per expansion of this run.
+// RunStepTree fetches the run DETAIL (step_outputs) + the pipeline
+// DEFINITION lazily, via the same useTrace hook the trace canvas uses, so
+// we can render every step (done / current / future) instead of just the
+// ones with outputs. step_outputs is intentionally absent from the list
+// endpoint (ListWorkspaceRuns) — it can carry many KB of agent transcript
+// per row, data only the expanded view renders — so this component is the
+// one place that needs it, fetched from GetRun on expansion (#1255 item 1).
+// One fetch per expansion, kept fresh by useTrace's own 3s poll/realtime
+// refresh while the run is still active.
 function RunStepTree({ workspaceId, run }: { workspaceId: string; run: PipelineRun }) {
-  const [definition, setDefinition] = useState<PipelineDSL | null>(null)
-  useEffect(() => {
-    if (!run.pipeline_slug) return
-    let cancelled = false
-    apiFetch(
-      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(run.pipeline_slug)}`,
-    )
-      .then(async (res) => (res.ok ? ((await res.json()) as PipelineDetail) : null))
-      .then((data) => {
-        if (cancelled || !data?.definition) return
-        setDefinition(data.definition)
-      })
-      .catch(() => { /* swallow — fall back to outputs-only view */ })
-    return () => { cancelled = true }
-  }, [workspaceId, run.pipeline_slug])
+  const trace = useTrace(workspaceId, run.id)
 
-  const stepOutputs = run.step_outputs ?? {}
+  const stepOutputs = trace.run?.step_outputs ?? {}
   const completedSet = new Set(Object.keys(stepOutputs))
 
   // Step status:
@@ -369,7 +338,7 @@ function RunStepTree({ workspaceId, run }: { workspaceId: string; run: PipelineR
   //      the user the whole "here's where we are out of N total" view.
   //   2) DSL not loaded yet (or pipeline gone) → outputs-only fallback
   //      so the user still sees what the run produced.
-  const dslSteps = definition?.steps ?? []
+  const dslSteps = trace.dsl?.steps ?? []
   const hasDSL = dslSteps.length > 0
 
   return (
