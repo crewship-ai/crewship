@@ -14,21 +14,15 @@ import (
 // pipeline_webhooks.signing_secret, which stored plaintext despite the schema
 // comment claiming otherwise — unlike every credential value.
 //
-// Idempotent, and deliberately non-fatal without a key:
-//   - No usable ENCRYPTION_KEY → skip + WARN. A migration must never break
-//     boot, and the read paths decrypt only "vN:"-enveloped values, so mixed
-//     state is safe. Since #1254 item 1 the WRITE paths fail closed, so the
-//     skip is the one remaining place plaintext survives — the WARN says so
-//     explicitly and points at the catch-up path, because v140 itself never
-//     re-runs once recorded: set ENCRYPTION_KEY, then `crewship admin
-//     reencrypt` performs the backfill this skip deferred.
+// Fail-open + idempotent, matching the write/read paths:
+//   - No usable ENCRYPTION_KEY → skip + WARN. Key-less deployments keep
+//     working; the write paths also store plaintext and the read paths decrypt
+//     only "vN:"-enveloped values, so mixed state is safe.
 //   - A row already carrying an encryption envelope is skipped, so a re-run
 //     (or a partial prior run) never double-encrypts.
 func migrationEncryptWebhookSecrets(ctx context.Context, tx *sql.Tx, logger *slog.Logger) error {
 	if !encryption.KeyConfigured() {
-		logger.Warn("v140: webhook-secret encryption backfill deferred — no usable ENCRYPTION_KEY is configured, " +
-			"so existing webhook/signing secrets remain plaintext at rest. This migration will not run again: " +
-			"set ENCRYPTION_KEY (openssl rand -hex 32) and run `crewship admin reencrypt` to encrypt the existing rows (#1254)")
+		logger.Warn("v140: no usable ENCRYPTION_KEY — leaving webhook secrets plaintext at rest (#1072 fail-open); set ENCRYPTION_KEY to encrypt")
 		return nil
 	}
 

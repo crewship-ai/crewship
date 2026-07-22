@@ -150,7 +150,7 @@ Fail-closed applies to **writes only**. Values already stored in plaintext by an
 
 ### The migration backfill waits for a key
 
-Upgrading to the release that introduced webhook-secret encryption runs a one-time migration (v140) that encrypts any webhook/signing secrets previously stored in plaintext. If no usable `ENCRYPTION_KEY` is configured when that migration runs, it **skips instead of failing** — a migration must never break boot — and logs a `WARN` stating that the backfill is deferred. The migration does not run again later, so after configuring a key, run:
+Upgrading to the release that introduced webhook-secret encryption runs a one-time migration (v140) that encrypts any webhook/signing secrets previously stored in plaintext. If no usable `ENCRYPTION_KEY` is configured when that migration runs, it **skips instead of failing** — a migration must never break boot — and logs a `WARN` that the secrets are left plaintext at rest. The backfill is effectively deferred: the migration does not run again later, so after configuring a key, run:
 
 ```bash
 crewship admin reencrypt

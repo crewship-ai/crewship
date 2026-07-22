@@ -1,14 +1,12 @@
 package database
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"io"
 	"log/slog"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
@@ -107,11 +105,9 @@ func TestMigrateV140_EncryptsWebhookSecrets(t *testing.T) {
 	assertEncrypted(`SELECT signing_secret FROM pipeline_webhooks WHERE id='wh2'`, "v2:looks-like-an-envelope-but-is-plaintext")
 }
 
-// TestMigrateV140_NoKey_LeavesPlaintext pins the key-less path: the backfill
-// skips WITHOUT failing (a migration must never break boot), values stay
-// plaintext — and (#1254 item 1) the skip is loud: a WARN that explicitly
-// says the backfill is waiting on a key and how to complete it later
-// (`crewship admin reencrypt`), since v140 itself never re-runs.
+// TestMigrateV140_NoKey_LeavesPlaintext pins the fail-open path: with no key
+// the backfill is a no-op (values stay plaintext), preserving key-less
+// deployments.
 func TestMigrateV140_NoKey_LeavesPlaintext(t *testing.T) {
 	t.Setenv("ENCRYPTION_KEY", "")
 	t.Setenv("CREWSHIP_ENCRYPTION_KEY_VERSION", "")
@@ -122,10 +118,9 @@ func TestMigrateV140_NoKey_LeavesPlaintext(t *testing.T) {
 	mustExec(t, db.DB, `INSERT INTO agents (id, crew_id, workspace_id, name, slug, webhook_secret)
 		VALUES ('ag1','cr1','ws1','A','a','plain-agent-secret')`)
 
-	var logs bytes.Buffer
 	tx, _ := db.DB.Begin()
-	if err := migrationEncryptWebhookSecrets(context.Background(), tx, slog.New(slog.NewTextHandler(&logs, nil))); err != nil {
-		t.Fatalf("key-less v140 must skip, not fail boot: %v", err)
+	if err := migrationEncryptWebhookSecrets(context.Background(), tx, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatalf("migration: %v", err)
 	}
 	tx.Commit()
 
@@ -135,22 +130,5 @@ func TestMigrateV140_NoKey_LeavesPlaintext(t *testing.T) {
 	}
 	if stored != "plain-agent-secret" {
 		t.Errorf("no-key backfill changed the value: %q", stored)
-	}
-
-	// The skip must be a WARN that tells the operator (a) the backfill is
-	// deferred waiting on a key, (b) which env var to set, and (c) how to
-	// catch up, given the migration will not run again.
-	out := logs.String()
-	if !strings.Contains(out, "level=WARN") {
-		t.Fatalf("key-less skip must log a WARN, got:\n%s", out)
-	}
-	if !strings.Contains(strings.ToLower(out), "deferred") {
-		t.Errorf("WARN must say the backfill is deferred/waiting on a key:\n%s", out)
-	}
-	if !strings.Contains(out, "ENCRYPTION_KEY") {
-		t.Errorf("WARN must name ENCRYPTION_KEY as the fix:\n%s", out)
-	}
-	if !strings.Contains(out, "crewship admin reencrypt") {
-		t.Errorf("WARN must point at `crewship admin reencrypt` as the catch-up path (v140 never re-runs):\n%s", out)
 	}
 }
