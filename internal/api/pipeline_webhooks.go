@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
@@ -195,6 +196,13 @@ func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) 
 	saved, err := h.webhooks.Save(r.Context(), in)
 	if err != nil {
 		h.logger.Warn("create pipeline webhook", "error", err)
+		// #1254 item 1: the HMAC signing secret fails CLOSED when no
+		// encryption key is configured. Surface the misconfiguration with
+		// the fix instead of a generic failure.
+		if errors.Is(err, encryption.ErrPlaintextRefused) {
+			replyError(w, http.StatusInternalServerError, encryptionNotConfiguredMsg)
+			return
+		}
 		replyError(w, http.StatusInternalServerError, "failed to create webhook")
 		return
 	}

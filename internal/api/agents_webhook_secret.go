@@ -9,11 +9,19 @@ package api
 // → the previous secret stops validating immediately.
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
+
+// encryptionNotConfiguredMsg is the actionable error surfaced when a secret
+// write fails closed (#1254 item 1): it names both the fix and the explicit
+// opt-out, mirroring the server-log message from encryption.EncryptAtRest.
+const encryptionNotConfiguredMsg = "Cannot store the secret: no encryption key is configured on the server. " +
+	"Set ENCRYPTION_KEY (openssl rand -hex 32), or set " +
+	encryption.AllowPlaintextSecretsEnvVar + "=true to explicitly accept plaintext storage"
 
 // RotateWebhookSecret mints a fresh webhook signing secret for an agent
 // and returns it exactly once.
@@ -44,12 +52,21 @@ func (h *AgentHandler) RotateWebhookSecret(w http.ResponseWriter, r *http.Reques
 
 	secret := generateWebhookSecret()
 	// #1072/#1029: store the secret AES-256-GCM encrypted at rest (like
-	// credentials), not plaintext. Fail-open: with no key configured we store
-	// plaintext and warn, preserving key-less deployments. The show-once
-	// response below still returns the PLAINTEXT `secret`.
+	// credentials), not plaintext. #1254 item 1: fail-CLOSED — with no usable
+	// key EncryptAtRest refuses (rotate is rejected, the stored secret stays
+	// untouched) unless the operator explicitly set
+	// CREWSHIP_ALLOW_PLAINTEXT_SECRETS=true. The show-once response below
+	// still returns the PLAINTEXT `secret`.
 	storedSecret, encrypted, encErr := encryption.EncryptAtRest(secret)
 	if encErr != nil {
 		h.logger.Error("webhook secret encrypt", "agent_id", agentID, "error", encErr)
+		if errors.Is(encErr, encryption.ErrPlaintextRefused) {
+			// Misconfiguration, not an internal fault: the caller passed the
+			// admin-level edit gate above, so telling them the fix is safe and
+			// far more actionable than a blind 500.
+			replyError(w, http.StatusInternalServerError, encryptionNotConfiguredMsg)
+			return
+		}
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}

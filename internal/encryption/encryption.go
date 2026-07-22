@@ -95,6 +95,12 @@ func PlaintextSecretsAllowed() bool {
 	}
 }
 
+// ErrPlaintextRefused is wrapped into every fail-closed refusal from
+// EncryptAtRest, so callers (typically HTTP handlers) can errors.Is-detect
+// the "no key configured" misconfiguration and surface an actionable message
+// to the operator instead of a generic internal error.
+var ErrPlaintextRefused = errors.New("refusing to store a secret in plaintext")
+
 // KeyConfigured reports whether a usable AES-256 encryption key is present for
 // the current key version. Callers on fail-open paths (webhook secrets) gate
 // encryption on this: with a key they Encrypt at rest, without one they store
@@ -119,9 +125,9 @@ func EncryptAtRest(plaintext string) (stored string, encrypted bool, err error) 
 	if !KeyConfigured() {
 		if !PlaintextSecretsAllowed() {
 			return "", false, fmt.Errorf(
-				"refusing to store a secret in plaintext: no usable encryption key is configured (%w). "+
+				"%w: no usable encryption key is configured (%w). "+
 					"Generate one with `openssl rand -hex 32` and set ENCRYPTION_KEY, or set %s=true to accept plaintext storage",
-				keyResolutionError(), AllowPlaintextSecretsEnvVar)
+				ErrPlaintextRefused, keyResolutionError(), AllowPlaintextSecretsEnvVar)
 		}
 		// Loud on every write, deliberately not deduplicated: an operator
 		// scraping logs must be able to count exactly how many secrets went
