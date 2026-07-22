@@ -381,11 +381,11 @@ func TestLegacyMemoryRoutes_SiblingSearchStatusReindexOwnTier(t *testing.T) {
 	})
 
 	t.Run("engine is cached across requests, not reconstructed each time", func(t *testing.T) {
-		eng1, dir1, err := s.peerMemoryEngineFor("beta")
+		eng1, dir1, err := s.peerMemoryEngineFor(context.Background(), "beta")
 		if err != nil {
 			t.Fatal(err)
 		}
-		eng2, dir2, err := s.peerMemoryEngineFor("beta")
+		eng2, dir2, err := s.peerMemoryEngineFor(context.Background(), "beta")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -414,7 +414,7 @@ func TestPeerMemoryEngineFor_ConcurrentFirstAccessConverges(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(i int) {
 			defer wg.Done()
-			eng, _, err := s.peerMemoryEngineFor("beta")
+			eng, _, err := s.peerMemoryEngineFor(context.Background(), "beta")
 			if err != nil {
 				t.Errorf("peerMemoryEngineFor: %v", err)
 				return
@@ -441,7 +441,7 @@ func TestClosePeerMemoryEngines(t *testing.T) {
 	// Nil/empty cache: must not panic.
 	s.closePeerMemoryEngines()
 
-	eng, dir, err := s.peerMemoryEngineFor("beta")
+	eng, dir, err := s.peerMemoryEngineFor(context.Background(), "beta")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -63,6 +63,12 @@ type MissionEngine struct {
 	// Circuit breaker: tracks consecutive failures per agent
 	cbMu     sync.Mutex
 	failures map[string]int // agentID -> consecutive failure count
+
+	// loadTasksHook, when set, is called on every loadTasks execution. Nil
+	// in production; tests use it to lock down the query count per tick
+	// (e.g. scheduleReadyTasks must issue loadTasks exactly once — #1255
+	// item 4) so a future edit can't silently reintroduce a redundant load.
+	loadTasksHook func()
 }
 
 // ErrInvalidTaskStatus is returned when a task is not in the expected status for an operation.
@@ -425,6 +431,9 @@ func (e *MissionEngine) getMissionStatus(ctx context.Context, missionID string) 
 }
 
 func (e *MissionEngine) loadTasks(ctx context.Context, missionID string) ([]TaskInfo, error) {
+	if e.loadTasksHook != nil {
+		e.loadTasksHook()
+	}
 	rows, err := e.db.QueryContext(ctx, `
 		SELECT mt.id, mt.mission_id, mt.assigned_agent_id, a.slug, mt.title, mt.description,
 		       mt.status, mt.task_order, mt.depends_on, COALESCE(mt.iteration, 1),

@@ -118,6 +118,56 @@ jobs:
             echo "::notice::GPG_SIGNING_KEY not set — deb/rpm packages will be UNSIGNED (see #932)"
           fi
 
+      # -- Supply-chain CVE gate (completes CRE-122) --
+      # goreleaser already generates the SBOM (syft) and signs keyless (cosign),
+      # but nothing scanned the dependency tree — a Critical CVE could ship
+      # signed. The gate is two-layered, and both layers fail the job BEFORE
+      # goreleaser publishes anything:
+      #
+      #   1. Source scan (go.mod + pnpm-lock.yaml): catches npm-side Criticals
+      #      in the embedded UI — JS deps never appear in the Go binary, so an
+      #      artifact-only scan would miss them entirely.
+      #   2. Built-artifact scan (below): a real snapshot build of the main
+      #      binary, so the gate covers what actually ships — not just the
+      #      checkout, which can diverge from the linked result.
+      #
+      # severity-cutoff=critical keeps the gate tight (High/Medium are reported,
+      # not blocking) so a routine transitive High doesn't wedge every release;
+      # tighten as the dependency tree is triaged. SHA-pinned like syft/cosign.
+      - name: Grype CVE scan — source (go.mod + pnpm lockfile)
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        with:
+          path: "."
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
+
+      # Single-target snapshot build of the full binary, purely as scan input.
+      # Dependencies are identical across all builds and every GOOS/GOARCH
+      # (one shared go.mod, no per-target deps), so ONE linux/amd64 binary is
+      # a sufficient dependency-CVE gate for the whole matrix — building all
+      # targets twice would roughly double release time for no extra signal.
+      # goreleaser OSS has no publish-only mode, hence build-scan-release
+      # rather than release-scan-publish. Reuses the setup-go cache above and
+      # warms the Go build cache for the full release build below.
+      - name: Build snapshot binary for artifact scan
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+        with:
+          version: "v2.6.1"
+          args: build --clean --snapshot --single-target --id crewship
+
+      # Grype reads the Go module list embedded in the compiled binary
+      # (debug/buildinfo), so scanning dist/ gates the built artifact itself.
+      # `release --clean` below wipes dist/ first, so the snapshot binary can
+      # never leak into the published release.
+      - name: Grype CVE scan — built artifact (gate on Critical)
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        with:
+          path: "dist"
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
+
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
           # Pin to a specific v2 minor — `~> v2` allows v3 once released,

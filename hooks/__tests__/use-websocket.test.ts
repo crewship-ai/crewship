@@ -93,8 +93,15 @@ describe("useWebSocket", () => {
     )
     await act(async () => { await vi.runAllTimersAsync() })
     expect(mockInstances).toHaveLength(1)
-    expect(mockInstances[0].url).toContain("token=test-token")
+    // The token is never in the URL — it leaks into proxy/access logs,
+    // browser history, and Referer headers there. It's sent post-open
+    // instead, as the first frame on the socket (mirrors /ws/terminal and
+    // the server's authenticateUpgradedConn).
+    expect(mockInstances[0].url).not.toContain("token=")
     expect(result.current.status).toBe("connecting")
+
+    act(() => { mockInstances[0].simulateOpen() })
+    expect(mockInstances[0].sent[0]).toBe(JSON.stringify({ type: "auth", token: "test-token" }))
   })
 
   it("sets connected status on open", async () => {
@@ -172,7 +179,7 @@ describe("useWebSocket", () => {
     )
     await act(async () => { await vi.runAllTimersAsync() })
     expect(mockInstances).toHaveLength(1)
-    expect(mockInstances[0].url).toContain("token=t1")
+    expect(mockInstances[0].url).not.toContain("token=")
 
     act(() => { mockInstances[0].close(1006, "abnormal") })
 
@@ -181,7 +188,7 @@ describe("useWebSocket", () => {
     await act(async () => { await vi.runAllTimersAsync() })
     expect(getToken).toHaveBeenCalledTimes(2)
     expect(mockInstances).toHaveLength(2)
-    expect(mockInstances[1].url).toContain("token=t2")
+    expect(mockInstances[1].url).not.toContain("token=")
   })
 
   it("reconnect attempts capped — surfaces transport error, NOT session-expired", async () => {
@@ -253,6 +260,9 @@ describe("useWebSocket", () => {
       mockInstances[0].simulateOpen()
       result.current.send({ type: "ping" })
     })
-    expect(mockInstances[0].sent).toHaveLength(1)
+    // simulateOpen sends the auth frame first, then the manual ping.
+    expect(mockInstances[0].sent).toHaveLength(2)
+    expect(mockInstances[0].sent[0]).toBe(JSON.stringify({ type: "auth", token: "t" }))
+    expect(mockInstances[0].sent[1]).toBe(JSON.stringify({ type: "ping" }))
   })
 })

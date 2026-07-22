@@ -129,6 +129,13 @@ func TestLogsRunE_FollowStreamsEvents(t *testing.T) {
 	})
 	var gotSubscribe string
 	mux.Handle("/ws", websocket.Handler(func(conn *websocket.Conn) {
+		// NewWSClient now sends {"type":"auth","token":...} as the first
+		// frame post-dial (token moved out of the dial URL — see
+		// internal/ws/hub.go authenticateUpgradedConn / internal/cli/
+		// websocket.go NewWSClient); discard it before reading subscribe.
+		var authRaw []byte
+		_ = websocket.Message.Receive(conn, &authRaw)
+
 		var raw []byte
 		if err := websocket.Message.Receive(conn, &raw); err == nil {
 			gotSubscribe = string(raw)

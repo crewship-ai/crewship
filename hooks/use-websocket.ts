@@ -222,17 +222,19 @@ export function useWebSocket({
       reconnectTimerRef.current = undefined
     }
 
-    // Note: token is passed as query parameter because browser WebSocket API
-    // does not support custom headers. The token is a short-lived JWE and the
-    // connection uses WSS in production, mitigating URL-based leakage risks.
+    // Auth happens post-open, not via a `?token=` query param: the browser
+    // WebSocket API can't send custom headers, and a URL-embedded token
+    // leaks into proxy/access logs, browser history, and Referer headers.
+    // Mirrors hooks/use-terminal.ts and the server side (internal/ws/hub.go
+    // authenticateUpgradedConn).
     const wsUrlObj = new URL(effectiveUrl, window.location.origin)
-    wsUrlObj.searchParams.set("token", token)
     const ws = new WebSocket(wsUrlObj.toString())
     wsRef.current = ws
 
     updateStatus("connecting")
 
     ws.onopen = () => {
+      ws.send(JSON.stringify({ type: "auth", token }))
       reconnectAttemptsRef.current = 0
       updateStatus("connected")
       // Re-establish subscriptions / resume in-flight streams on every

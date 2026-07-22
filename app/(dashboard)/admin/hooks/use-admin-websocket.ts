@@ -54,13 +54,20 @@ export function useAdminWebSocket({ enabled, workspaceId }: UseAdminWebSocketOpt
           : window.location.port === "3001"
             ? window.location.hostname + ":8080"
             : window.location.host
-        const wsUrl = `${proto}//${host}/ws?token=${encodeURIComponent(token)}`
+        // Auth happens post-open, not via a `?token=` query param: the
+        // browser WebSocket API can't send custom headers, and a
+        // URL-embedded token leaks into proxy/access logs, browser history,
+        // and Referer headers. Mirrors hooks/use-websocket.ts and the server
+        // side (internal/ws/hub.go authenticateUpgradedConn) — the auth
+        // frame must be the first message, before any subscribe.
+        const wsUrl = `${proto}//${host}/ws`
         ws = new WebSocket(wsUrl)
         keeperWsRef.current = ws
 
         ws.onopen = () => {
           if (cancelled) { ws?.close(); return }
           setKeeperWsStatus("connected")
+          ws?.send(JSON.stringify({ type: "auth", token }))
           ws?.send(JSON.stringify({ type: "subscribe", channel: `keeper:${workspaceId}` }))
         }
         ws.onmessage = (event) => {
