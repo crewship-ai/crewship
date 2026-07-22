@@ -180,9 +180,9 @@ func TestMarkChatRead_WrongScope404(t *testing.T) {
 
 // Behaviour lock for the ListChats unread/last-activity projection
 // (#1255 item 6). This is NOT a regression test for a defect — it pins the
-// exact contract of the per-row unread computation so the query can be
-// rewritten from a correlated subquery to a grouped LEFT JOIN without
-// silently changing results.
+// exact contract of the per-row unread computation so the query shape can
+// be rewritten (correlated subquery → page query + batched aggregate, as
+// shipped; or any future shape) without silently changing results.
 //
 // Four cases in one list call, so the aggregation is exercised across a
 // mixed result set rather than one row at a time:
@@ -281,6 +281,136 @@ func TestListChats_UnreadIsPerUser(t *testing.T) {
 	}
 	if got := unreadTList(t, h, wsID, otherID)[0].UnreadCount; got != 0 {
 		t.Errorf("other-user unread = %d, want 0", got)
+	}
+}
+
+// unreadCorrelatedReferenceSQL is a frozen copy of the ListChats
+// projection as it stood before #1255 item 6 (single statement, per-row
+// correlated unread subquery). It is the behaviour oracle for
+// TestListChats_UnreadMatchesCorrelatedReference: the production handler
+// may change its query shape (it now pages first and batches the unread
+// aggregate), but its output must stay equal to this reference on any
+// fixture. Do not "modernise" this constant — its value is that it does
+// NOT follow the production code.
+const unreadCorrelatedReferenceSQL = `
+	SELECT c.id,
+		COALESCE(c.last_activity_at,
+			strftime('%Y-%m-%dT%H:%M:%fZ', c.started_at),
+			c.started_at) AS last_activity_at,
+		(SELECT COUNT(*) FROM conversation_messages m
+		 WHERE m.session_id = c.id
+		   AND NOT (m.role = 'user' AND (m.author_user_id IS NULL OR m.author_user_id = ?))
+		   AND m.ts > COALESCE((SELECT rc.last_read_at FROM chat_read_cursors rc
+		                        WHERE rc.chat_id = c.id AND rc.user_id = ?), '')
+		) AS unread_count
+	FROM chats c
+	WHERE c.agent_id = ? AND c.workspace_id = ?
+	ORDER BY last_activity_at DESC
+	LIMIT 100`
+
+// Equivalence pin for the #1255 item 6 rewrite (page query + batched
+// unread aggregate): on a fixture that exercises every arm of the unread
+// predicate, the production HTTP handler must return exactly what the
+// pre-rewrite correlated query returns — same rows, same order, same
+// unread counts, for more than one requesting user.
+//
+// The fixture goes beyond the behaviour-lock test above by covering the
+// author-guard arms individually:
+//
+//   - own user-role message            → never counts for the author
+//   - other user's user-role message   → counts for everyone else
+//   - authorless user-role (legacy /
+//     scheduler-injected)              → counts for nobody
+//   - assistant and system messages    → count for every non-reader
+//
+// crossed with cursor states (no cursor / cursor mid-history / cursor
+// past everything) and an empty chat.
+func TestListChats_UnreadMatchesCorrelatedReference(t *testing.T) {
+	sdb := setupTestDB(t)
+	db := sdb
+	wsID, userID := unreadTSeed(t, db)
+	otherID := "unread-ref-other"
+	execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES (?, 'ref-other@example.com', 'Ref Other')`, otherID)
+
+	// Chat 1: empty, no cursors.
+	unreadTChat(t, db, "ref-empty", wsID, userID)
+	execOrFatal(t, db, `UPDATE chats SET last_activity_at = '2026-07-01T10:00:00.000Z' WHERE id = 'ref-empty'`)
+
+	// Chat 2: every author-guard arm, no cursor for either user.
+	unreadTChat(t, db, "ref-mixed", wsID, userID)
+	execOrFatal(t, db, `UPDATE chats SET last_activity_at = '2026-07-02T10:00:04.000Z' WHERE id = 'ref-mixed'`)
+	unreadTMsg(t, db, "ref-x1", "ref-mixed", "user", "2026-07-02T10:00:00.000Z", userID)  // caller's own
+	unreadTMsg(t, db, "ref-x2", "ref-mixed", "user", "2026-07-02T10:00:01.000Z", otherID) // other user's
+	unreadTMsg(t, db, "ref-x3", "ref-mixed", "user", "2026-07-02T10:00:02.000Z", nil)     // authorless legacy
+	unreadTMsg(t, db, "ref-x4", "ref-mixed", "assistant", "2026-07-02T10:00:03.000Z", nil)
+	unreadTMsg(t, db, "ref-x5", "ref-mixed", "system", "2026-07-02T10:00:04.000Z", nil)
+	// userID sees x2+x4+x5 = 3; otherID sees x1+x4+x5 = 3; x3 counts for nobody.
+
+	// Chat 3: caller's cursor mid-history, other user cursor-less.
+	unreadTChat(t, db, "ref-cursor-mid", wsID, userID)
+	execOrFatal(t, db, `UPDATE chats SET last_activity_at = '2026-07-03T10:00:03.000Z' WHERE id = 'ref-cursor-mid'`)
+	unreadTMsg(t, db, "ref-c1", "ref-cursor-mid", "assistant", "2026-07-03T10:00:00.000Z", nil)
+	unreadTMsg(t, db, "ref-c2", "ref-cursor-mid", "user", "2026-07-03T10:00:02.000Z", otherID)
+	unreadTMsg(t, db, "ref-c3", "ref-cursor-mid", "assistant", "2026-07-03T10:00:03.000Z", nil)
+	execOrFatal(t, db, `INSERT INTO chat_read_cursors (user_id, chat_id, last_read_at)
+		VALUES (?, 'ref-cursor-mid', '2026-07-03T10:00:01.000Z')`, userID)
+	// userID: c2+c3 = 2 (cursor hides c1); otherID: c1+c3 = 2 (own c2 excluded).
+
+	// Chat 4: caller has read everything; other user has read nothing.
+	unreadTChat(t, db, "ref-all-read", wsID, userID)
+	execOrFatal(t, db, `UPDATE chats SET last_activity_at = '2026-07-04T10:00:01.000Z' WHERE id = 'ref-all-read'`)
+	unreadTMsg(t, db, "ref-r1", "ref-all-read", "assistant", "2026-07-04T10:00:00.000Z", nil)
+	unreadTMsg(t, db, "ref-r2", "ref-all-read", "system", "2026-07-04T10:00:01.000Z", nil)
+	execOrFatal(t, db, `INSERT INTO chat_read_cursors (user_id, chat_id, last_read_at)
+		VALUES (?, 'ref-all-read', '2026-07-04T23:59:59.999Z')`, userID)
+	// userID: 0; otherID: 2.
+
+	h := NewAgentHandler(sdb, newTestLogger())
+	for _, uid := range []string{userID, otherID} {
+		wantRows, err := sdb.Query(unreadCorrelatedReferenceSQL, uid, uid, "unread-ag", wsID)
+		if err != nil {
+			t.Fatalf("reference query (%s): %v", uid, err)
+		}
+		var want []chatUnreadRow
+		for wantRows.Next() {
+			var r chatUnreadRow
+			if err := wantRows.Scan(&r.ID, &r.LastActivityAt, &r.UnreadCount); err != nil {
+				wantRows.Close()
+				t.Fatalf("scan reference row (%s): %v", uid, err)
+			}
+			want = append(want, r)
+		}
+		if err := wantRows.Err(); err != nil {
+			t.Fatalf("reference rows (%s): %v", uid, err)
+		}
+		wantRows.Close()
+		if len(want) != 4 {
+			t.Fatalf("reference returned %d rows, want 4 — fixture broke: %+v", len(want), want)
+		}
+
+		got := unreadTList(t, h, wsID, uid)
+		if len(got) != len(want) {
+			t.Fatalf("user %s: handler rows = %d, want %d (%+v)", uid, len(got), len(want), got)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("user %s row %d: handler %+v != correlated reference %+v", uid, i, got[i], want[i])
+			}
+		}
+	}
+
+	// Fixture sanity against hand-computed values, so the reference SQL
+	// cannot silently agree with the handler on wrong numbers.
+	handWant := map[string]map[string]int{
+		userID:  {"ref-empty": 0, "ref-mixed": 3, "ref-cursor-mid": 2, "ref-all-read": 0},
+		otherID: {"ref-empty": 0, "ref-mixed": 3, "ref-cursor-mid": 2, "ref-all-read": 2},
+	}
+	for uid, byChat := range handWant {
+		for _, row := range unreadTList(t, h, wsID, uid) {
+			if want, ok := byChat[row.ID]; ok && row.UnreadCount != want {
+				t.Errorf("user %s chat %s: unread = %d, hand-computed want %d", uid, row.ID, row.UnreadCount, want)
+			}
+		}
 	}
 }
 
