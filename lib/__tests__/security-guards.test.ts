@@ -9,12 +9,9 @@ import { apiFetch, tryRefresh, _resetRefreshInflightForTesting } from "../api-fe
  * internal/provider/docker/tenant_collision_test.go):
  *
  *   - For behaviour that is ALREADY secure (T3.3 same-origin guard,
- *     T3.4 no-token-in-web-storage) we write normal passing regression
- *     guards so a future refactor that re-opens the hole fails CI.
- *   - For the one UNFIXED finding (FE1/B1 — ws-token in URL query) we
- *     assert the CURRENT behaviour so the suite stays GREEN, log
- *     "VULN FE1 confirmed", and add a t.Skip'd *_SecureTarget test that
- *     documents the post-fix assertion (server-side TTL verification).
+ *     T3.4 no-token-in-web-storage, and — since #1254 bullet 2 — FE1/B1
+ *     no-token-in-ws-url) we write normal passing regression guards so a
+ *     future refactor that re-opens the hole fails CI.
  *
  * Network is fully mocked — these are unit tests, no live backend.
  */
@@ -199,49 +196,26 @@ describe("T3.4 no JWT-shaped value in web storage (secure)", () => {
 })
 
 // ---------------------------------------------------------------------------
-// FE1 / B1 — ws-token carried in the URL query string (UNFIXED, LOW)
+// FE1 / B1 — ws-token carried in the URL query string (FIXED — #1254 bullet 2)
 //
-// hooks/use-websocket.ts:200 sets the short-lived WS auth token as a `?token=`
-// query param because the browser WebSocket API cannot send custom headers.
-// URL query strings can leak via proxy/access logs and Referer. The audit
-// rates this LOW *provided* the JWE TTL is ≤60s and single-use — that part is
-// enforced server-side (Go) and is asserted in the backend suite (T3.1), not
-// reachable from this unit. Here we TRIPWIRE the CURRENT client behaviour.
-//
-// We replicate the exact URL construction the hook performs (it is otherwise
-// entangled with React/WebSocket lifecycle that isn't worth standing up for a
-// one-line documentation guard).
+// hooks/use-websocket.ts used to set the short-lived WS auth token as a
+// `?token=` query param because the browser WebSocket API cannot send custom
+// headers. URL query strings can leak via proxy/access logs and Referer.
+// Fixed by moving auth post-open: the hook now connects to a bare URL and
+// sends `{"type":"auth",token}` as the first frame once the socket opens
+// (mirrors hooks/use-terminal.ts and the server's
+// internal/ws/hub.go authenticateUpgradedConn). Full behavioural coverage —
+// including that the auth frame is actually sent — lives in
+// hooks/__tests__/use-websocket.test.ts; this guard is the one-line
+// documentation tripwire for the URL-construction half of the fix.
 // ---------------------------------------------------------------------------
-describe("FE1/B1 ws-token in URL query (VULN — documented)", () => {
-  it("VULN FE1: the WS token is placed in the URL query string, not a header", () => {
-    const token = "eyJhbGciOiJkaXI.eyJleHAiOjk5fQ.ZmFrZS1qd2Utd3MtdG9rZW4" // gitleaks:allow — fabricated fake WS token, test fixture
-    // Mirror hooks/use-websocket.ts: new URL(...) + searchParams.set("token", ...)
-    const wsUrlObj = new URL("/api/v1/ws", window.location.origin)
-    wsUrlObj.searchParams.set("token", token)
-    const finalUrl = wsUrlObj.toString()
-
-    // CURRENT (insecure-in-logs) behaviour: token is observable in the URL.
-    expect(wsUrlObj.searchParams.get("token")).toBe(token)
-    expect(finalUrl).toContain(`token=${encodeURIComponent(token)}`)
-
-    // eslint-disable-next-line no-console
-    console.log(
-      "VULN FE1 confirmed: ws-token is passed as a URL query param (use-websocket.ts:200); " +
-        "leakable via proxy/access logs + Referer. Mitigation relies on server-side ≤60s single-use TTL.",
-    )
-    // TODO(FE1): once a header/subprotocol-based token handoff (or a body-POST
-    // ws-token exchange) ships, flip this to assert the token is NOT in the URL
-    // and enable FE1_SecureTarget below.
-  })
-
-  it.skip("FE1_SecureTarget: WS auth token must NOT appear in the connection URL", () => {
-    // Activate after FE1 fix. Post-fix expectation:
-    //   - the token is delivered out-of-band (Sec-WebSocket-Protocol header or
-    //     a short-lived cookie), and
-    //   - the constructed WS URL contains no `token=` query param.
-    // Server-side TTL/single-use (T3.1) remains the defense-in-depth backstop
-    // and is verified in the Go backend suite, not here.
+describe("FE1/B1 ws-token NOT in URL query (fixed)", () => {
+  it("FE1_SecureTarget: WS auth token must NOT appear in the connection URL", () => {
+    // Mirror hooks/use-websocket.ts's current URL construction: new URL(...),
+    // no searchParams.set("token", ...) — the token travels only in the
+    // post-open auth frame, never the URL.
     const wsUrlObj = new URL("/api/v1/ws", window.location.origin)
     expect(wsUrlObj.searchParams.has("token")).toBe(false)
+    expect(wsUrlObj.toString()).not.toContain("token=")
   })
 })

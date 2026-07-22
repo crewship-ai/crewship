@@ -84,7 +84,9 @@ describe("useWebSocket send() result", () => {
     act(() => { ok = result.current.send({ type: "ping" }) })
 
     expect(ok).toBe(true)
-    expect(mockInstances[0].sent).toHaveLength(1)
+    // simulateOpen sends the post-open auth frame first, then the ping.
+    expect(mockInstances[0].sent).toHaveLength(2)
+    expect(mockInstances[0].sent[1]).toBe(JSON.stringify({ type: "ping" }))
   })
 
   it("returns false again after the socket drops back to non-OPEN", async () => {
