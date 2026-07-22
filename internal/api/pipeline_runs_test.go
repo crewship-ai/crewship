@@ -381,6 +381,63 @@ func TestPipelineRuns_List_StatusActive_BundlesInProgressStatuses(t *testing.T) 
 	}
 }
 
+// TestPipelineRuns_List_OmitsStepOutputs_DetailStillHasIt is the #1255
+// item 1 regression guard: step_outputs can carry many KB of agent
+// transcript/tool-result JSON per row, and the list feed is polled every
+// few seconds. It must not be in the list response at all — not even a
+// null/empty placeholder key — while GetRun (the single-run detail the
+// frontend fetches lazily on row expansion) still returns it in full.
+func TestPipelineRuns_List_OmitsStepOutputs_DetailStillHasIt(t *testing.T) {
+	h, db, userID, wsID := runsHandlerRig(t)
+	seedRunsPipeline(t, db, wsID, "pln_a", "demo")
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := db.Exec(`
+		INSERT INTO pipeline_runs (
+		    id, workspace_id, pipeline_id, pipeline_slug,
+		    status, mode, started_at,
+		    step_outputs_json, cost_usd, duration_ms,
+		    triggered_via, inputs_json, created_at, updated_at
+		) VALUES (?, ?, ?, ?, 'completed', 'run', ?, ?, 0, 0, 'manual', '{}', ?, ?)`,
+		"prn_heavy", wsID, "pln_a", "demo", now,
+		`{"step1":"a very large chunk of agent transcript that must never ride the list feed"}`,
+		now, now); err != nil {
+		t.Fatalf("seed run with step_outputs: %v", err)
+	}
+
+	listReq := withWorkspaceUser(
+		httptest.NewRequest("GET", "/api/v1/workspaces/"+wsID+"/pipeline-runs", nil),
+		userID, wsID, "OWNER",
+	)
+	listRR := httptest.NewRecorder()
+	h.ListWorkspaceRuns(listRR, listReq)
+	if listRR.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200", listRR.Code)
+	}
+	if strings.Contains(listRR.Body.String(), "step_outputs") {
+		t.Errorf("list response must not mention step_outputs at all, got: %s", listRR.Body.String())
+	}
+
+	getReq := withWorkspaceUser(
+		httptest.NewRequest("GET", "/api/v1/workspaces/"+wsID+"/pipeline-runs/prn_heavy", nil),
+		userID, wsID, "OWNER",
+	)
+	getReq.SetPathValue("runId", "prn_heavy")
+	getRR := httptest.NewRecorder()
+	h.GetRun(getRR, getReq)
+	if getRR.Code != http.StatusOK {
+		t.Fatalf("get status = %d, want 200", getRR.Code)
+	}
+	var detail struct {
+		StepOutputs map[string]any `json:"step_outputs"`
+	}
+	if err := json.Unmarshal(getRR.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode detail: %v", err)
+	}
+	if detail.StepOutputs["step1"] == nil {
+		t.Errorf("GetRun must still return step_outputs in full, got %v", detail.StepOutputs)
+	}
+}
+
 // ── ListActiveRuns ──────────────────────────────────────────────────────
 
 // TestPipelineRuns_ListActiveRuns_NoRegistry_Returns200WithEmptyArray
