@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -400,15 +401,25 @@ func (s *Server) peerCrewMember(slug string) (*CrewMember, string, error) {
 // legacyMemoryEffectiveSlug resolves which agent tier the five legacy
 // /memory/* routes should serve for scope=agent (#1301: previously always
 // the boot agent's). By the time a legacy handler runs, refuseUnauthorizedMemory
-// has already refused both a token-less downgrade and a forged token, so
-// only two cases reach here: a valid per-agent token (serve THAT agent's own
-// tier) or no token at all on a crew with no tokens provisioned (legacy /
-// un-upgraded deployment — keep serving the boot agent's tier, "").
-func (s *Server) legacyMemoryEffectiveSlug(r *http.Request) string {
-	if _, actorSlug, present, ok := s.actingIdentity(r); present && ok {
-		return actorSlug
+// has already refused a token-less downgrade, a forged token, AND a token
+// resolving to an empty slug, so only two cases reach here: a valid per-agent
+// token (serve THAT agent's own tier) or no token at all on a crew with no
+// tokens provisioned (legacy / un-upgraded deployment — keep serving the boot
+// agent's tier, "").
+//
+// The error return is the belt to that chokepoint: a token that maps to a
+// roster entry with an EMPTY slug must not fall through to
+// peerMemoryEngineFor(""), which reads "" as the boot agent — the same silent
+// promotion handleMemoryMCPForAgent refuses inline on the MCP transport. Any
+// in-process caller that bypasses the router fails closed here instead.
+func (s *Server) legacyMemoryEffectiveSlug(r *http.Request) (string, error) {
+	if actorID, actorSlug, present, ok := s.actingIdentity(r); present && ok {
+		if actorSlug == "" {
+			return "", fmt.Errorf("memory: agent identity %s has no slug", actorID)
+		}
+		return actorSlug, nil
 	}
-	return ""
+	return "", nil
 }
 
 // peerMemoryEngineFor returns the FTS5 engine + base path for slug's OWN
@@ -421,7 +432,18 @@ func (s *Server) legacyMemoryEffectiveSlug(r *http.Request) string {
 // that isn't a known crew member before an entry is ever created), so no
 // eviction policy is needed — every entry lives for the sidecar's process
 // lifetime and is closed once at shutdown (closePeerMemoryEngines).
-func (s *Server) peerMemoryEngineFor(slug string) (engine *memory.Engine, basePath string, err error) {
+//
+// Construction happens OUTSIDE peerMemoryEnginesMu (double-checked): the
+// first access pays MkdirAll + a SQLite open + a full reindex of that tier,
+// and holding the global mutex across all of it serialized every legacy
+// memory operation of every agent behind one slow cold start (#1341
+// follow-up). Two racing first accesses may both build an engine for the
+// same slug; the loser is closed and the winner's cached instance is
+// returned, so callers always share one engine per slug. ctx bounds only
+// the initial reindex — a cancelled request still caches the engine (the
+// index catches up on the next reindex), matching the previous behaviour
+// where a failed initial reindex was logged and the engine kept.
+func (s *Server) peerMemoryEngineFor(ctx context.Context, slug string) (engine *memory.Engine, basePath string, err error) {
 	if slug == "" || slug == s.memoryAgentSlug {
 		return s.memoryEngine, s.agentMemoryBase, nil
 	}
@@ -431,10 +453,12 @@ func (s *Server) peerMemoryEngineFor(slug string) (engine *memory.Engine, basePa
 	}
 
 	s.peerMemoryEnginesMu.Lock()
-	defer s.peerMemoryEnginesMu.Unlock()
 	if eng, ok := s.peerMemoryEngines[slug]; ok {
+		s.peerMemoryEnginesMu.Unlock()
 		return eng, dir, nil
 	}
+	s.peerMemoryEnginesMu.Unlock()
+
 	// Mirrors NewServer's own boot-time engine init (server.go): the
 	// directory may not exist yet on a freshly provisioned crew, and
 	// SQLite errors SQLITE_CANTOPEN rather than creating parents.
@@ -445,13 +469,27 @@ func (s *Server) peerMemoryEngineFor(slug string) (engine *memory.Engine, basePa
 	if err != nil {
 		return nil, "", fmt.Errorf("memory: init peer engine for %q: %w", slug, err)
 	}
-	if err := eng.Reindex(); err != nil {
+	if err := eng.ReindexContext(ctx); err != nil {
 		s.logger.Warn("peer memory initial reindex failed", "error", err, "slug", slug)
+	}
+
+	s.peerMemoryEnginesMu.Lock()
+	if existing, ok := s.peerMemoryEngines[slug]; ok {
+		// Lost the construction race — another request cached its engine
+		// while we were building ours. Serve the winner; close the loser
+		// outside the lock so a slow SQLite close can't stall the cache.
+		s.peerMemoryEnginesMu.Unlock()
+		if cerr := eng.Close(); cerr != nil {
+			s.logger.Warn("peer memory engine close after lost construction race failed",
+				"error", cerr, "slug", slug)
+		}
+		return existing, dir, nil
 	}
 	if s.peerMemoryEngines == nil {
 		s.peerMemoryEngines = make(map[string]*memory.Engine)
 	}
 	s.peerMemoryEngines[slug] = eng
+	s.peerMemoryEnginesMu.Unlock()
 	return eng, dir, nil
 }
 

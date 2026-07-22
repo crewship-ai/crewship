@@ -97,10 +97,25 @@ func (s *Server) refuseUnauthorizedMemory(w http.ResponseWriter, r *http.Request
 			"memory route: refusing token-less request on a crew with per-agent tokens")
 	}
 
-	_, _, present, ok := s.actingIdentity(r)
+	_, actorSlug, present, ok := s.actingIdentity(r)
 	if present && !ok {
 		return s.writeMemoryRefusal(w, r, "unrecognized agent token",
 			"memory route: refusing request with a token matching no crew member")
+	}
+
+	// A token matching a roster entry whose Slug is EMPTY (#1341 follow-up).
+	// "" means two different things to the tier resolvers and only one of them
+	// is safe: memoryAgentContextFor("") and peerMemoryEngineFor("") both read
+	// it as "the sidecar's own boot agent", so a slugless member would be
+	// silently promoted to the boot agent's private tier. The MCP handler
+	// refuses this inline (handleMemoryMCPForAgent), but the five legacy
+	// /memory/* routes resolved it through legacyMemoryEffectiveSlug straight
+	// into that promotion. Refuse at the chokepoint so both transports agree.
+	// Unreachable today (agents.slug is NOT NULL and every create path
+	// validates it) — this is the fence for the day that stops being true.
+	if present && ok && actorSlug == "" {
+		return s.writeMemoryRefusal(w, r, "agent identity has no slug",
+			"memory route: refusing a token that resolves to an empty agent slug")
 	}
 
 	return false
