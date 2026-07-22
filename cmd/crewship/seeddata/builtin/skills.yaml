@@ -109,10 +109,10 @@ skills:
         ## Instructions
         1. Write scripts to /tmp/ with descriptive names (not script.sh, test.py)
         2. Add a shebang line: #!/usr/bin/env python3 or #!/bin/bash
-        3. Make scripts executable with chmod +x before running
+        3. Always run scripts through the interpreter: bash /tmp/name.sh or python3 /tmp/name.py — /tmp is a noexec tmpfs, so chmod +x and ./name.sh fail with Permission denied
         4. For Python: use only stdlib modules (no pip install needed)
         5. For Bash: use set -euo pipefail at the top for error safety
-        6. Capture output to both stdout and a file with: ./script.sh | tee /tmp/output.txt
+        6. Capture output to both stdout and a file with: bash /tmp/name.sh | tee /tmp/output.txt
         7. Include comments explaining what each section does
 
         ## Output Format
