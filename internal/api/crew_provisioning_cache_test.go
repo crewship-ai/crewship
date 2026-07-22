@@ -9,8 +9,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/docker/docker/api/types/image"
-	dockerclient "github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/image"
+	dockerclient "github.com/moby/moby/client"
 )
 
 // ---------------------------------------------------------------------------
@@ -32,7 +32,7 @@ import (
 // through the fake gcClient.
 func newCacheTestHandler(t *testing.T, fake orphanGCClient) *ProvisioningHandler {
 	t.Helper()
-	dc, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv)
+	dc, err := dockerclient.New(dockerclient.FromEnv)
 	if err != nil {
 		t.Fatalf("init docker client sentinel: %v", err)
 	}
@@ -383,6 +383,6 @@ func TestReferencedCacheImages_AcrossWorkspacesIgnoresDeleted(t *testing.T) {
 // failingRemoveGCClient simulates ImageRemove returning an error.
 type failingRemoveGCClient struct{ fakeGCClient }
 
-func (f *failingRemoveGCClient) ImageRemove(_ context.Context, _ string, _ image.RemoveOptions) ([]image.DeleteResponse, error) {
-	return nil, errors.New("daemon refused")
+func (f *failingRemoveGCClient) ImageRemove(_ context.Context, _ string, _ dockerclient.ImageRemoveOptions) (dockerclient.ImageRemoveResult, error) {
+	return dockerclient.ImageRemoveResult{}, errors.New("daemon refused")
 }

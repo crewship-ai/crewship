@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/moby/moby/client"
 )
 
 // TestResilienceNetworkRecreate verifies that EnsureCrewRuntime auto-recreates
@@ -72,7 +73,7 @@ func TestResilienceNetworkRecreate(t *testing.T) {
 	_ = p.RemoveCrewRuntime(ctx, containerID)
 
 	// Step 2: Delete the network behind the server's back (via Docker API, not CLI)
-	if err := p.client.NetworkRemove(ctx, networkName); err != nil {
+	if _, err := p.client.NetworkRemove(ctx, networkName, client.NetworkRemoveOptions{}); err != nil {
 		t.Fatalf("NetworkRemove: %v", err)
 	}
 	t.Log("Network deleted")
@@ -103,5 +104,5 @@ func TestResilienceNetworkRecreate(t *testing.T) {
 	}
 
 	// Final cleanup
-	_ = p.client.NetworkRemove(ctx, networkName)
+	_, _ = p.client.NetworkRemove(ctx, networkName, client.NetworkRemoveOptions{})
 }

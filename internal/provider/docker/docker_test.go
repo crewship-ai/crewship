@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
-	dockernetwork "github.com/docker/docker/api/types/network"
 	"strings"
+
+	"github.com/moby/moby/client"
 )
 
 func TestConfigDefaults(t *testing.T) {
@@ -186,19 +187,19 @@ func TestEnsureNetworkNotInternal(t *testing.T) {
 	testNet := "crewship-test-net-notinternal"
 
 	// Cleanup before and after
-	_ = p.client.NetworkRemove(ctx, testNet)
-	defer func() { _ = p.client.NetworkRemove(ctx, testNet) }()
+	_, _ = p.client.NetworkRemove(ctx, testNet, client.NetworkRemoveOptions{})
+	defer func() { _, _ = p.client.NetworkRemove(ctx, testNet, client.NetworkRemoveOptions{}) }()
 
 	if err := p.ensureNetwork(ctx, testNet); err != nil {
 		t.Fatalf("ensureNetwork: %v", err)
 	}
 
-	networks, err := p.client.NetworkList(ctx, dockernetwork.ListOptions{})
+	networkResult, err := p.client.NetworkList(ctx, client.NetworkListOptions{})
 	if err != nil {
 		t.Fatalf("NetworkList: %v", err)
 	}
 
-	for _, n := range networks {
+	for _, n := range networkResult.Items {
 		if n.Name == testNet {
 			if n.Internal {
 				t.Errorf("network %q was created with Internal=true, want Internal=false: containers need internet access for Claude Code to reach api.anthropic.com", testNet)

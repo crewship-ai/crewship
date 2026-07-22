@@ -24,7 +24,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/provider"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 )
 
 // driftCallLog records the verbs+IDs the fake daemon sees, in order.

@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/docker/docker/api/types/container"
+	"github.com/moby/moby/client"
 )
 
 // findCrewContainer returns the live Docker container ID for the given crew,
@@ -32,11 +32,11 @@ func (h *ProvisioningHandler) findCrewContainer(ctx context.Context, crewID, slu
 		return "", nil
 	}
 	suffix := "-team-" + slug + "-" + crewID
-	containers, err := h.docker.ContainerList(ctx, container.ListOptions{All: true})
+	listResult, err := h.docker.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return "", err
 	}
-	for _, c := range containers {
+	for _, c := range listResult.Items {
 		for _, n := range c.Names {
 			if strings.HasSuffix(strings.TrimPrefix(n, "/"), suffix) {
 				return c.ID, nil
@@ -57,11 +57,11 @@ func (h *ProvisioningHandler) agentsPendingRestartCount(ctx context.Context, cre
 	if err != nil || containerID == "" {
 		return 0
 	}
-	inspect, err := h.docker.ContainerInspect(ctx, containerID)
+	inspectResult, err := h.docker.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
 	if err != nil {
 		return 0
 	}
-	if inspect.Config != nil && inspect.Config.Image == cachedImage {
+	if inspectResult.Container.Config != nil && inspectResult.Container.Config.Image == cachedImage {
 		return 0
 	}
 	// Stale container — count active agents in this crew. We deliberately
@@ -131,7 +131,7 @@ func (h *ProvisioningHandler) RestartCrewAgents(w http.ResponseWriter, r *http.R
 
 	// Force-remove drops the container. The next agent exec will trigger
 	// EnsureCrewRuntime which re-creates from the current cached_image.
-	if err := h.docker.ContainerRemove(r.Context(), containerID, container.RemoveOptions{Force: true}); err != nil {
+	if _, err := h.docker.ContainerRemove(r.Context(), containerID, client.ContainerRemoveOptions{Force: true}); err != nil {
 		h.logger.Error("remove crew container", "container_id", containerID, "error", err)
 		replyError(w, http.StatusInternalServerError, "Failed to remove crew container")
 		return

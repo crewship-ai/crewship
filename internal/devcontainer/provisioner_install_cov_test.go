@@ -11,9 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
+	"github.com/moby/moby/client"
 )
 
 // --- scripted exec docker client ---------------------------------------------
@@ -32,18 +30,18 @@ type covExecResult struct {
 // exec options; the default is success with empty output.
 type covExecClient struct {
 	mu      sync.Mutex
-	execs   []container.ExecOptions
+	execs   []client.ExecCreateOptions
 	copies  []string
 	copyErr error
-	respond func(call int, cfg container.ExecOptions) covExecResult
+	respond func(call int, cfg client.ExecCreateOptions) covExecResult
 	results map[string]covExecResult
 }
 
-func newCovExecClient(respond func(call int, cfg container.ExecOptions) covExecResult) *covExecClient {
+func newCovExecClient(respond func(call int, cfg client.ExecCreateOptions) covExecResult) *covExecClient {
 	return &covExecClient{respond: respond, results: map[string]covExecResult{}}
 }
 
-func (c *covExecClient) ContainerExecCreate(_ context.Context, _ string, cfg container.ExecOptions) (container.ExecCreateResponse, error) {
+func (c *covExecClient) ExecCreate(_ context.Context, _ string, cfg client.ExecCreateOptions) (client.ExecCreateResult, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	n := len(c.execs)
@@ -53,42 +51,44 @@ func (c *covExecClient) ContainerExecCreate(_ context.Context, _ string, cfg con
 		res = c.respond(n, cfg)
 	}
 	if res.createErr != nil {
-		return container.ExecCreateResponse{}, res.createErr
+		return client.ExecCreateResult{}, res.createErr
 	}
 	id := fmt.Sprintf("cov-exec-%d", n)
 	c.results[id] = res
-	return container.ExecCreateResponse{ID: id}, nil
+	return client.ExecCreateResult{ID: id}, nil
 }
 
-func (c *covExecClient) ContainerExecAttach(_ context.Context, execID string, _ container.ExecStartOptions) (types.HijackedResponse, error) {
+func (c *covExecClient) ExecAttach(_ context.Context, execID string, _ client.ExecAttachOptions) (client.ExecAttachResult, error) {
 	c.mu.Lock()
 	res := c.results[execID]
 	c.mu.Unlock()
 	if res.attachErr != nil {
-		return types.HijackedResponse{}, res.attachErr
+		return client.ExecAttachResult{}, res.attachErr
 	}
-	return types.NewHijackedResponse(newMockConn(res.output), "application/vnd.docker.raw-stream"), nil
+	return client.ExecAttachResult{
+		HijackedResponse: client.NewHijackedResponse(newMockConn(res.output), "application/vnd.docker.raw-stream"),
+	}, nil
 }
 
-func (c *covExecClient) ContainerExecInspect(_ context.Context, execID string) (container.ExecInspect, error) {
+func (c *covExecClient) ExecInspect(_ context.Context, execID string, _ client.ExecInspectOptions) (client.ExecInspectResult, error) {
 	c.mu.Lock()
 	res := c.results[execID]
 	c.mu.Unlock()
 	if res.inspectErr != nil {
-		return container.ExecInspect{}, res.inspectErr
+		return client.ExecInspectResult{}, res.inspectErr
 	}
-	return container.ExecInspect{ExitCode: res.exitCode}, nil
+	return client.ExecInspectResult{ExitCode: res.exitCode}, nil
 }
 
-func (c *covExecClient) CopyToContainer(_ context.Context, _ string, dstPath string, content io.Reader, _ container.CopyToContainerOptions) error {
+func (c *covExecClient) CopyToContainer(_ context.Context, _ string, options client.CopyToContainerOptions) (client.CopyToContainerResult, error) {
 	if c.copyErr != nil {
-		return c.copyErr
+		return client.CopyToContainerResult{}, c.copyErr
 	}
-	_, _ = io.Copy(io.Discard, content)
+	_, _ = io.Copy(io.Discard, options.Content)
 	c.mu.Lock()
-	c.copies = append(c.copies, dstPath)
+	c.copies = append(c.copies, options.DestinationPath)
 	c.mu.Unlock()
-	return nil
+	return client.CopyToContainerResult{}, nil
 }
 
 // execCmd flattens the n-th recorded exec command for assertions.
@@ -111,12 +111,12 @@ type covCommitClient struct {
 	pullCalls int
 }
 
-func (c *covCommitClient) ImagePull(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {
+func (c *covCommitClient) ImagePull(_ context.Context, _ string, _ client.ImagePullOptions) (client.ImagePullResponse, error) {
 	c.pullCalls++
 	if c.pullErr != nil {
 		return nil, c.pullErr
 	}
-	return io.NopCloser(strings.NewReader("pull-log")), nil
+	return nopImagePullResponse{io.NopCloser(strings.NewReader("pull-log"))}, nil
 }
 
 // --- harness -----------------------------------------------------------------
@@ -410,7 +410,7 @@ func TestInstallFeatures_InstallErrorPropagates(t *testing.T) {
 	ref := "ghcr.io/t/features/broken:1"
 	covSeedFeature(t, cacheDir, ref, `{"id":"broken","version":"1"}`)
 
-	exec := newCovExecClient(func(_ int, cfg container.ExecOptions) covExecResult {
+	exec := newCovExecClient(func(_ int, cfg client.ExecCreateOptions) covExecResult {
 		if strings.Contains(strings.Join(cfg.Cmd, " "), "install.sh") {
 			return covExecResult{output: "compile error", exitCode: 1}
 		}
@@ -429,7 +429,7 @@ func TestInstallFeatures_InstallErrorPropagates(t *testing.T) {
 func TestRunFeatureLifecycleCommands_RunsAsAgentUser(t *testing.T) {
 	t.Parallel()
 
-	exec := newCovExecClient(func(int, container.ExecOptions) covExecResult {
+	exec := newCovExecClient(func(int, client.ExecCreateOptions) covExecResult {
 		return covExecResult{output: "hook done"}
 	})
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
@@ -463,7 +463,7 @@ func TestRunFeatureLifecycleCommands_Failures(t *testing.T) {
 	feature := []*ResolvedFeature{{Metadata: FeatureMetadata{ID: "f", PostCreateCommand: "boom"}}}
 
 	// Non-zero exit.
-	exec := newCovExecClient(func(int, container.ExecOptions) covExecResult {
+	exec := newCovExecClient(func(int, client.ExecCreateOptions) covExecResult {
 		return covExecResult{output: "stack trace", exitCode: 3}
 	})
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
@@ -476,7 +476,7 @@ func TestRunFeatureLifecycleCommands_Failures(t *testing.T) {
 	}
 
 	// Transport error.
-	exec = newCovExecClient(func(int, container.ExecOptions) covExecResult {
+	exec = newCovExecClient(func(int, client.ExecCreateOptions) covExecResult {
 		return covExecResult{createErr: errors.New("daemon gone")}
 	})
 	p = newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
@@ -547,7 +547,7 @@ func TestInstallMiseMethod_FullPipeline(t *testing.T) {
 func TestInstallMiseMethod_BinaryInstallFailure(t *testing.T) {
 	t.Parallel()
 
-	exec := newCovExecClient(func(call int, _ container.ExecOptions) covExecResult {
+	exec := newCovExecClient(func(call int, _ client.ExecCreateOptions) covExecResult {
 		if call == 0 {
 			return covExecResult{output: "curl: 404", exitCode: 22}
 		}
@@ -563,7 +563,7 @@ func TestInstallMiseMethod_BinaryInstallFailure(t *testing.T) {
 func TestInstallMiseMethod_ToolsInstallFailure(t *testing.T) {
 	t.Parallel()
 
-	exec := newCovExecClient(func(call int, _ container.ExecOptions) covExecResult {
+	exec := newCovExecClient(func(call int, _ client.ExecCreateOptions) covExecResult {
 		if call == 3 { // first InstallMiseTools call: write config
 			return covExecResult{output: "disk full", exitCode: 1}
 		}
@@ -583,7 +583,7 @@ func TestRunPostCreateCommands_Failures(t *testing.T) {
 
 	cfg := &Config{Image: "x", PostCreateCommand: []string{"make setup"}}
 
-	exec := newCovExecClient(func(int, container.ExecOptions) covExecResult {
+	exec := newCovExecClient(func(int, client.ExecCreateOptions) covExecResult {
 		return covExecResult{output: "make: error", exitCode: 2}
 	})
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
@@ -592,7 +592,7 @@ func TestRunPostCreateCommands_Failures(t *testing.T) {
 		t.Errorf("expected exit-code error, got %v", err)
 	}
 
-	exec = newCovExecClient(func(int, container.ExecOptions) covExecResult {
+	exec = newCovExecClient(func(int, client.ExecCreateOptions) covExecResult {
 		return covExecResult{createErr: errors.New("daemon gone")}
 	})
 	p = newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
@@ -605,7 +605,7 @@ func TestRunPostCreateCommands_Failures(t *testing.T) {
 func TestRunPostCreateCommands_RunsAllInOrderWithOutput(t *testing.T) {
 	t.Parallel()
 
-	exec := newCovExecClient(func(int, container.ExecOptions) covExecResult {
+	exec := newCovExecClient(func(int, client.ExecCreateOptions) covExecResult {
 		return covExecResult{output: "done"}
 	})
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
@@ -661,7 +661,7 @@ func TestWriteAggregatedContainerEnv_Failures(t *testing.T) {
 
 	env := map[string]string{"A": "1"}
 
-	exec := newCovExecClient(func(int, container.ExecOptions) covExecResult {
+	exec := newCovExecClient(func(int, client.ExecCreateOptions) covExecResult {
 		return covExecResult{exitCode: 1}
 	})
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
@@ -670,7 +670,7 @@ func TestWriteAggregatedContainerEnv_Failures(t *testing.T) {
 		t.Errorf("expected exit-code error, got %v", err)
 	}
 
-	exec = newCovExecClient(func(int, container.ExecOptions) covExecResult {
+	exec = newCovExecClient(func(int, client.ExecCreateOptions) covExecResult {
 		return covExecResult{createErr: errors.New("daemon gone")}
 	})
 	p = newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
@@ -701,7 +701,7 @@ func TestCleanupCaches(t *testing.T) {
 func TestCleanupCaches_Failures(t *testing.T) {
 	t.Parallel()
 
-	exec := newCovExecClient(func(int, container.ExecOptions) covExecResult {
+	exec := newCovExecClient(func(int, client.ExecCreateOptions) covExecResult {
 		return covExecResult{exitCode: 9}
 	})
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
@@ -710,7 +710,7 @@ func TestCleanupCaches_Failures(t *testing.T) {
 		t.Errorf("expected exit-code error, got %v", err)
 	}
 
-	exec = newCovExecClient(func(int, container.ExecOptions) covExecResult {
+	exec = newCovExecClient(func(int, client.ExecCreateOptions) covExecResult {
 		return covExecResult{createErr: errors.New("daemon gone")}
 	})
 	p = newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())

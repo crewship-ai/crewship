@@ -11,7 +11,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/ws"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 )
 
 type ProvisioningHandler struct {

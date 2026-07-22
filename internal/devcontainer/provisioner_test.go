@@ -5,14 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"strings"
 	"testing"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	dockernetwork "github.com/docker/docker/api/types/network"
-	dockerclient "github.com/docker/docker/client"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/api/types/jsonstream"
+	"github.com/moby/moby/client"
 )
 
 // mockCommitClient implements CommitClient for testing.
@@ -46,46 +46,46 @@ type mockCreateCall struct {
 	name    string
 }
 
-func (m *mockCommitClient) ContainerCreate(_ context.Context, config *container.Config, hostConfig *container.HostConfig, _ *dockernetwork.NetworkingConfig, _ *ocispec.Platform, name string) (container.CreateResponse, error) {
+func (m *mockCommitClient) ContainerCreate(_ context.Context, options client.ContainerCreateOptions) (client.ContainerCreateResult, error) {
 	m.createdContainers = append(m.createdContainers, mockCreateCall{
-		config:  config,
-		hostCfg: hostConfig,
-		name:    name,
+		config:  options.Config,
+		hostCfg: options.HostConfig,
+		name:    options.Name,
 	})
 	if m.createErr != nil {
-		return container.CreateResponse{}, m.createErr
+		return client.ContainerCreateResult{}, m.createErr
 	}
-	return container.CreateResponse{ID: "temp-container-id"}, nil
+	return client.ContainerCreateResult{ID: "temp-container-id"}, nil
 }
 
-func (m *mockCommitClient) ContainerStart(_ context.Context, containerID string, _ container.StartOptions) error {
+func (m *mockCommitClient) ContainerStart(_ context.Context, containerID string, _ client.ContainerStartOptions) (client.ContainerStartResult, error) {
 	m.startedIDs = append(m.startedIDs, containerID)
-	return m.startErr
+	return client.ContainerStartResult{}, m.startErr
 }
 
-func (m *mockCommitClient) ContainerStop(_ context.Context, containerID string, _ container.StopOptions) error {
+func (m *mockCommitClient) ContainerStop(_ context.Context, containerID string, _ client.ContainerStopOptions) (client.ContainerStopResult, error) {
 	m.stoppedIDs = append(m.stoppedIDs, containerID)
-	return nil
+	return client.ContainerStopResult{}, nil
 }
 
-func (m *mockCommitClient) ContainerRemove(_ context.Context, containerID string, _ container.RemoveOptions) error {
+func (m *mockCommitClient) ContainerRemove(_ context.Context, containerID string, _ client.ContainerRemoveOptions) (client.ContainerRemoveResult, error) {
 	m.removedIDs = append(m.removedIDs, containerID)
-	return nil
+	return client.ContainerRemoveResult{}, nil
 }
 
-func (m *mockCommitClient) ContainerCommit(_ context.Context, containerID string, options container.CommitOptions) (container.CommitResponse, error) {
+func (m *mockCommitClient) ContainerCommit(_ context.Context, containerID string, options client.ContainerCommitOptions) (client.ContainerCommitResult, error) {
 	m.committedIDs = append(m.committedIDs, containerID)
 	m.commitRefs = append(m.commitRefs, options.Reference)
 	if m.commitErr != nil {
-		return container.CommitResponse{}, m.commitErr
+		return client.ContainerCommitResult{}, m.commitErr
 	}
-	return container.CommitResponse{ID: "sha256:committed"}, nil
+	return client.ContainerCommitResult{ID: "sha256:committed"}, nil
 }
 
-func (m *mockCommitClient) ImageList(_ context.Context, _ image.ListOptions) ([]image.Summary, error) {
+func (m *mockCommitClient) ImageList(_ context.Context, _ client.ImageListOptions) (client.ImageListResult, error) {
 	m.imageListCalls++
 	if m.listErr != nil {
-		return nil, m.listErr
+		return client.ImageListResult{}, m.listErr
 	}
 	var summaries []image.Summary
 	for _, tag := range m.existingImages {
@@ -93,21 +93,34 @@ func (m *mockCommitClient) ImageList(_ context.Context, _ image.ListOptions) ([]
 			RepoTags: []string{tag},
 		})
 	}
-	return summaries, nil
+	return client.ImageListResult{Items: summaries}, nil
 }
 
-func (m *mockCommitClient) ImagePull(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader("")), nil
+func (m *mockCommitClient) ImagePull(_ context.Context, _ string, _ client.ImagePullOptions) (client.ImagePullResponse, error) {
+	return nopImagePullResponse{io.NopCloser(strings.NewReader(""))}, nil
 }
 
-func (m *mockCommitClient) ImageInspect(_ context.Context, ref string, _ ...dockerclient.ImageInspectOption) (image.InspectResponse, error) {
+func (m *mockCommitClient) ImageInspect(_ context.Context, ref string, _ ...client.ImageInspectOption) (client.ImageInspectResult, error) {
 	for _, tag := range m.existingImages {
 		if tag == ref {
-			return image.InspectResponse{RepoDigests: m.inspectDigests[ref]}, nil
+			return client.ImageInspectResult{InspectResponse: image.InspectResponse{RepoDigests: m.inspectDigests[ref]}}, nil
 		}
 	}
-	return image.InspectResponse{}, errors.New("no such image")
+	return client.ImageInspectResult{}, errors.New("no such image")
 }
+
+// nopImagePullResponse satisfies client.ImagePullResponse (io.ReadCloser plus
+// the JSONMessages/Wait convenience methods) for tests that don't exercise
+// the pull-progress stream.
+type nopImagePullResponse struct {
+	io.ReadCloser
+}
+
+func (nopImagePullResponse) JSONMessages(context.Context) iter.Seq2[jsonstream.Message, error] {
+	return func(func(jsonstream.Message, error) bool) {}
+}
+
+func (nopImagePullResponse) Wait(context.Context) error { return nil }
 
 func TestIsCached_Hit(t *testing.T) {
 	cfg := &Config{Image: "ubuntu:22.04"}

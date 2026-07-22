@@ -15,13 +15,9 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/mount"
-	dockernetwork "github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/api/types/volume"
-	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -243,12 +239,12 @@ const socketPingTimeout = 1500 * time.Millisecond
 func Detect(ctx context.Context) (*DetectResult, error) {
 	// If DOCKER_HOST is set, use that directly.
 	if host := os.Getenv("DOCKER_HOST"); host != "" {
-		cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+		cli, err := client.New(client.FromEnv)
 		if err != nil {
 			return nil, fmt.Errorf("docker client (DOCKER_HOST=%s): %w", host, err)
 		}
 		defer cli.Close()
-		info, err := cli.Ping(ctx)
+		info, err := cli.Ping(ctx, client.PingOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("docker ping (DOCKER_HOST=%s): %w", host, err)
 		}
@@ -256,7 +252,7 @@ func Detect(ctx context.Context) (*DetectResult, error) {
 		if strings.Contains(info.APIVersion, "libpod") {
 			rt = "podman"
 		}
-		sv, _ := cli.ServerVersion(ctx)
+		sv, _ := cli.ServerVersion(ctx, client.ServerVersionOptions{})
 		ver := sv.Version
 		// Podman masquerades as Docker -- check server components
 		for _, comp := range sv.Components {
@@ -275,24 +271,21 @@ func Detect(ctx context.Context) (*DetectResult, error) {
 		if _, err := os.Stat(c.path); err != nil {
 			continue
 		}
-		cli, err := client.NewClientWithOpts(
-			client.WithHost(c.host),
-			client.WithAPIVersionNegotiation(),
-		)
+		cli, err := client.New(client.WithHost(c.host))
 		if err != nil {
 			continue
 		}
 
 		// Per-socket timeout: bail quickly if daemon is unresponsive.
 		pingCtx, cancel := context.WithTimeout(ctx, socketPingTimeout)
-		_, pingErr := cli.Ping(pingCtx)
+		_, pingErr := cli.Ping(pingCtx, client.PingOptions{})
 		cancel()
 		if pingErr != nil {
 			cli.Close()
 			continue
 		}
 
-		sv, _ := cli.ServerVersion(ctx)
+		sv, _ := cli.ServerVersion(ctx, client.ServerVersionOptions{})
 		ver := sv.Version
 		rt := c.runtime
 		// Podman masquerades as Docker -- check server components
@@ -329,14 +322,13 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 	} else {
 		opts = append(opts, client.WithHost(detected.Host))
 	}
-	opts = append(opts, client.WithAPIVersionNegotiation())
 
-	cli, err := client.NewClientWithOpts(opts...)
+	cli, err := client.New(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("docker client: %w", err)
 	}
 
-	if _, err := cli.Ping(ctx); err != nil {
+	if _, err := cli.Ping(ctx, client.PingOptions{}); err != nil {
 		cli.Close()
 		return nil, fmt.Errorf("docker ping: %w", err)
 	}
@@ -389,16 +381,16 @@ func (p *Provider) DockerClient() *client.Client {
 
 // ensureNetwork creates the Docker bridge network if it doesn't already exist.
 func (p *Provider) ensureNetwork(ctx context.Context, name string) error {
-	networks, err := p.client.NetworkList(ctx, dockernetwork.ListOptions{})
+	networks, err := p.client.NetworkList(ctx, client.NetworkListOptions{})
 	if err != nil {
 		return fmt.Errorf("list networks: %w", err)
 	}
-	for _, n := range networks {
+	for _, n := range networks.Items {
 		if n.Name == name {
 			return nil
 		}
 	}
-	_, err = p.client.NetworkCreate(ctx, name, dockernetwork.CreateOptions{
+	_, err = p.client.NetworkCreate(ctx, name, client.NetworkCreateOptions{
 		Driver: "bridge",
 	})
 	if err != nil {
@@ -503,7 +495,7 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 		action = "local runtime image stale, re-pulling"
 	}
 	p.logger.Info(action, "image", ref, "remote_digest", remoteDigest)
-	reader, err := p.client.ImagePull(ctx, ref, image.PullOptions{})
+	reader, err := p.client.ImagePull(ctx, ref, client.ImagePullOptions{})
 	if err != nil {
 		if localPresent {
 			p.logger.Warn("runtime image pull failed; proceeding with local (possibly stale) copy",
@@ -702,11 +694,11 @@ func verifySidecarIsLinuxELF(path string) error {
 // This is more reliable than a GOOS check (Docker Desktop on Linux is VM-backed
 // too).
 func daemonSharesHostFS(ctx context.Context, cli *client.Client) bool {
-	info, err := cli.Info(ctx)
-	if err != nil || info.DockerRootDir == "" {
+	info, err := cli.Info(ctx, client.InfoOptions{})
+	if err != nil || info.Info.DockerRootDir == "" {
 		return false
 	}
-	if _, statErr := os.Stat(info.DockerRootDir); statErr == nil || !os.IsNotExist(statErr) {
+	if _, statErr := os.Stat(info.Info.DockerRootDir); statErr == nil || !os.IsNotExist(statErr) {
 		return true
 	}
 	return false
@@ -722,7 +714,8 @@ func daemonSharesHostFS(ctx context.Context, cli *client.Client) bool {
 // that state by inspecting the Mountpoint, force-remove, then recreate.
 // (Issue #536.)
 func (p *Provider) ensureVolume(ctx context.Context, name string) error {
-	if existing, err := p.client.VolumeInspect(ctx, name); err == nil {
+	if inspectResult, err := p.client.VolumeInspect(ctx, name, client.VolumeInspectOptions{}); err == nil {
+		existing := inspectResult.Volume
 		// Docker tracks the volume. Confirm the backing directory
 		// actually exists before trusting the metadata — on a healthy
 		// host Mountpoint is e.g. /var/lib/docker/volumes/<name>/_data
@@ -755,12 +748,12 @@ func (p *Provider) ensureVolume(ctx context.Context, name string) error {
 			}
 			p.logger.Warn("docker volume mountpoint missing on disk; recreating",
 				"volume", name, "mountpoint", existing.Mountpoint)
-			if rmErr := p.client.VolumeRemove(ctx, name, true); rmErr != nil {
+			if _, rmErr := p.client.VolumeRemove(ctx, name, client.VolumeRemoveOptions{Force: true}); rmErr != nil {
 				return fmt.Errorf("volume remove (mountpoint vanished) %s: %w", name, rmErr)
 			}
 		}
 	}
-	_, err := p.client.VolumeCreate(ctx, volume.CreateOptions{
+	_, err := p.client.VolumeCreate(ctx, client.VolumeCreateOptions{
 		Name: name,
 		Labels: map[string]string{
 			"managed-by": "crewship",
@@ -777,7 +770,7 @@ func (p *Provider) ensureVolume(ctx context.Context, name string) error {
 // can only ever target its own volumes.
 func (p *Provider) RemoveCrewVolumes(ctx context.Context, id, slug string) error {
 	for _, name := range []string{p.homeVolumeName(id, slug), p.toolsVolumeName(id, slug)} {
-		if err := p.client.VolumeRemove(ctx, name, true); err != nil {
+		if _, err := p.client.VolumeRemove(ctx, name, client.VolumeRemoveOptions{Force: true}); err != nil {
 			p.logger.Warn("volume remove failed", "volume", name, "error", err)
 		}
 	}
@@ -787,7 +780,7 @@ func (p *Provider) RemoveCrewVolumes(ctx context.Context, id, slug string) error
 // Exec runs a command inside a container via Docker exec. Returns a reader
 // for the combined stdout/stderr stream.
 func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
-	execCfg := container.ExecOptions{
+	execCfg := client.ExecCreateOptions{
 		Cmd:          cfg.Cmd,
 		Env:          cfg.Env,
 		WorkingDir:   cfg.WorkingDir,
@@ -832,12 +825,12 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 		return nil, fmt.Errorf("exec: refusing to run as privileged user %q in container %s", execCfg.User, cfg.ContainerID)
 	}
 
-	exec, err := p.client.ContainerExecCreate(ctx, cfg.ContainerID, execCfg)
+	exec, err := p.client.ExecCreate(ctx, cfg.ContainerID, execCfg)
 	if err != nil {
 		return nil, fmt.Errorf("exec create: %w", err)
 	}
 
-	resp, err := p.client.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
+	resp, err := p.client.ExecAttach(ctx, exec.ID, client.ExecAttachOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("exec attach: %w", err)
 	}
@@ -868,7 +861,7 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 
 // ExecInspect checks if an exec process is still running and returns its exit code.
 func (p *Provider) ExecInspect(ctx context.Context, execID string) (bool, int, error) {
-	resp, err := p.client.ContainerExecInspect(ctx, execID)
+	resp, err := p.client.ExecInspect(ctx, execID, client.ExecInspectOptions{})
 	if err != nil {
 		return false, 0, fmt.Errorf("exec inspect: %w", err)
 	}
@@ -878,14 +871,14 @@ func (p *Provider) ExecInspect(ctx context.Context, execID string) (bool, int, e
 // ExecInteractive creates an interactive TTY exec session with bidirectional I/O.
 // Unlike Exec(), this supports stdin and returns a raw connection for terminal use.
 func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.InteractiveExecConfig) (*provider.InteractiveExecResult, error) {
-	execCfg := container.ExecOptions{
+	execCfg := client.ExecCreateOptions{
 		Cmd:          cfg.Cmd,
 		Env:          cfg.Env,
 		WorkingDir:   cfg.WorkingDir,
 		AttachStdin:  true,
 		AttachStdout: true,
 		AttachStderr: true,
-		Tty:          true,
+		TTY:          true,
 		User:         cfg.User,
 	}
 	if execCfg.User == "" {
@@ -906,19 +899,19 @@ func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.Interactive
 		return nil, fmt.Errorf("exec interactive: refusing to run as privileged user %q in container %s", execCfg.User, cfg.ContainerID)
 	}
 
-	exec, err := p.client.ContainerExecCreate(ctx, cfg.ContainerID, execCfg)
+	exec, err := p.client.ExecCreate(ctx, cfg.ContainerID, execCfg)
 	if err != nil {
 		return nil, fmt.Errorf("exec interactive create: %w", err)
 	}
 
-	resp, err := p.client.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{Tty: true})
+	resp, err := p.client.ExecAttach(ctx, exec.ID, client.ExecAttachOptions{TTY: true})
 	if err != nil {
 		return nil, fmt.Errorf("exec interactive attach: %w", err)
 	}
 
 	// Set initial terminal size.
 	if cfg.Rows > 0 && cfg.Cols > 0 {
-		_ = p.client.ContainerExecResize(ctx, exec.ID, container.ResizeOptions{
+		_, _ = p.client.ExecResize(ctx, exec.ID, client.ExecResizeOptions{
 			Height: uint(cfg.Rows),
 			Width:  uint(cfg.Cols),
 		})
@@ -932,10 +925,11 @@ func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.Interactive
 
 // ExecResize changes the terminal dimensions of a running interactive exec session.
 func (p *Provider) ExecResize(ctx context.Context, execID string, rows, cols uint16) error {
-	return p.client.ContainerExecResize(ctx, execID, container.ResizeOptions{
+	_, err := p.client.ExecResize(ctx, execID, client.ExecResizeOptions{
 		Height: uint(rows),
 		Width:  uint(cols),
 	})
+	return err
 }
 
 // HostAddress returns the hostname that containers should use to reach the host.
@@ -950,18 +944,19 @@ func (p *Provider) HostAddress() string {
 // network, which doubles as an anti-spoof check: an agent can't ask us to
 // expose a container sitting on some unrelated bridge.
 func (p *Provider) ContainerIP(ctx context.Context, containerID, network string) (string, error) {
-	inspect, err := p.client.ContainerInspect(ctx, containerID)
+	inspectResult, err := p.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
 	if err != nil {
 		return "", fmt.Errorf("inspect container %s on network %q: %w", containerID, network, err)
 	}
+	inspect := inspectResult.Container
 	if inspect.NetworkSettings == nil {
 		return "", fmt.Errorf("container %s has no network settings", containerID)
 	}
 	net, ok := inspect.NetworkSettings.Networks[network]
-	if !ok || net == nil || net.IPAddress == "" {
+	if !ok || net == nil || !net.IPAddress.IsValid() {
 		return "", fmt.Errorf("container %s not attached to network %q", containerID, network)
 	}
-	return net.IPAddress, nil
+	return net.IPAddress.String(), nil
 }
 
 // ContainerUser returns the container's configured run-as user — the
@@ -971,19 +966,23 @@ func (p *Provider) ContainerIP(ctx context.Context, containerID, network string)
 // closed if it can't be determined (#1060). An empty string means the image
 // default / root, which keeper treats as undeterminable.
 func (p *Provider) ContainerUser(ctx context.Context, containerID string) (string, error) {
-	inspect, err := p.client.ContainerInspect(ctx, containerID)
+	inspectResult, err := p.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
 	if err != nil {
 		return "", fmt.Errorf("inspect container %s for run-as user: %w", containerID, err)
 	}
-	if inspect.Config == nil {
+	if inspectResult.Container.Config == nil {
 		return "", fmt.Errorf("container %s has no config", containerID)
 	}
-	return inspect.Config.User, nil
+	return inspectResult.Container.Config.User, nil
 }
 
 // CopyToContainer copies a tar archive into the container filesystem at dstPath.
 func (p *Provider) CopyToContainer(ctx context.Context, containerID string, dstPath string, content io.Reader) error {
-	return p.client.CopyToContainer(ctx, containerID, dstPath, content, container.CopyToContainerOptions{})
+	_, err := p.client.CopyToContainer(ctx, containerID, client.CopyToContainerOptions{
+		DestinationPath: dstPath,
+		Content:         content,
+	})
+	return err
 }
 
 // Close releases the Docker API client connection.

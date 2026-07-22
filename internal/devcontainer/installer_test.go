@@ -15,15 +15,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
+	"github.com/moby/moby/client"
 )
 
 // mockDockerClient implements DockerClient for testing.
 type mockDockerClient struct {
 	// Recorded calls.
 	copiedTars      []copiedTar
-	execCreated     []container.ExecOptions
+	execCreated     []client.ExecCreateOptions
 	execAttachCalls int
 
 	// Configurable responses.
@@ -45,45 +44,47 @@ type copiedTar struct {
 	data        []byte
 }
 
-func (m *mockDockerClient) ContainerExecCreate(_ context.Context, _ string, config container.ExecOptions) (container.ExecCreateResponse, error) {
+func (m *mockDockerClient) ExecCreate(_ context.Context, _ string, config client.ExecCreateOptions) (client.ExecCreateResult, error) {
 	m.execCreated = append(m.execCreated, config)
 	// Error only on the install.sh call (index 1) unless execCreateErrAny.
 	if m.execCreateErr != nil && (m.execCreateErrAny || len(m.execCreated) == 2) {
-		return container.ExecCreateResponse{}, m.execCreateErr
+		return client.ExecCreateResult{}, m.execCreateErr
 	}
-	return container.ExecCreateResponse{ID: "exec-123"}, nil
+	return client.ExecCreateResult{ID: "exec-123"}, nil
 }
 
-func (m *mockDockerClient) ContainerExecAttach(_ context.Context, _ string, _ container.ExecStartOptions) (types.HijackedResponse, error) {
+func (m *mockDockerClient) ExecAttach(_ context.Context, _ string, _ client.ExecAttachOptions) (client.ExecAttachResult, error) {
 	m.execAttachCalls++
 	if m.execAttachErr != nil {
-		return types.HijackedResponse{}, m.execAttachErr
+		return client.ExecAttachResult{}, m.execAttachErr
 	}
-	return types.NewHijackedResponse(newMockConn(m.execOutput), "application/vnd.docker.raw-stream"), nil
+	return client.ExecAttachResult{
+		HijackedResponse: client.NewHijackedResponse(newMockConn(m.execOutput), "application/vnd.docker.raw-stream"),
+	}, nil
 }
 
-func (m *mockDockerClient) ContainerExecInspect(_ context.Context, _ string) (container.ExecInspect, error) {
+func (m *mockDockerClient) ExecInspect(_ context.Context, _ string, _ client.ExecInspectOptions) (client.ExecInspectResult, error) {
 	if m.execInspectErr != nil {
-		return container.ExecInspect{}, m.execInspectErr
+		return client.ExecInspectResult{}, m.execInspectErr
 	}
 	// Mkdir (1st exec) always returns 0; non-zero exitCode applies to install.sh.
 	if len(m.execCreated) == 1 {
-		return container.ExecInspect{ExitCode: 0}, nil
+		return client.ExecInspectResult{ExitCode: 0}, nil
 	}
-	return container.ExecInspect{ExitCode: m.exitCode}, nil
+	return client.ExecInspectResult{ExitCode: m.exitCode}, nil
 }
 
-func (m *mockDockerClient) CopyToContainer(_ context.Context, containerID, dstPath string, content io.Reader, _ container.CopyToContainerOptions) error {
+func (m *mockDockerClient) CopyToContainer(_ context.Context, containerID string, options client.CopyToContainerOptions) (client.CopyToContainerResult, error) {
 	if m.copyErr != nil {
-		return m.copyErr
+		return client.CopyToContainerResult{}, m.copyErr
 	}
-	data, _ := io.ReadAll(content)
+	data, _ := io.ReadAll(options.Content)
 	m.copiedTars = append(m.copiedTars, copiedTar{
 		containerID: containerID,
-		dstPath:     dstPath,
+		dstPath:     options.DestinationPath,
 		data:        data,
 	})
-	return nil
+	return client.CopyToContainerResult{}, nil
 }
 
 // mockConn implements net.Conn with a buffered reader for testing.

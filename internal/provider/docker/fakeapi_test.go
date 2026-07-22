@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 )
 
 // newFakeDockerProvider returns a Provider wired to an httptest server that
@@ -256,9 +256,11 @@ func TestContainerStats_FakeAPI(t *testing.T) {
 		if !strings.Contains(r.URL.Path, "/containers/cid/stats") {
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
-		// SDK passes stream=0 for one-shot.
-		if r.URL.Query().Get("stream") != "0" {
-			t.Errorf("stream query = %q, want 0", r.URL.Query().Get("stream"))
+		// moby/moby/client encodes the Stream bool query param as "false"/"true"
+		// (was "0"/"1" under docker/docker v28) — a wire-encoding convention
+		// change in the new SDK, not a functional one; the daemon accepts both.
+		if r.URL.Query().Get("stream") != "false" {
+			t.Errorf("stream query = %q, want false", r.URL.Query().Get("stream"))
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(statsPayload)

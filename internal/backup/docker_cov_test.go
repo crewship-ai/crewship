@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,8 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/client"
 )
 
 // fakeDaemon is a minimal Docker Engine API stand-in. Each endpoint's
@@ -83,6 +84,15 @@ func newFakeDaemon() *fakeDaemon {
 }
 
 var versionPrefixRe = regexp.MustCompile(`^/v[0-9.]+`)
+
+// stdcopyFrame builds one stdcopy-framed message ([StreamType,0,0,0,BE-len]
+// + payload) — replicates the removed stdcopy.NewStdWriter for test fixtures.
+func stdcopyFrame(t stdcopy.StdType, payload []byte) []byte {
+	header := make([]byte, 8)
+	header[0] = byte(t)
+	binary.BigEndian.PutUint32(header[4:], uint32(len(payload)))
+	return append(header, payload...)
+}
 
 func writeDaemonErr(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
@@ -173,9 +183,8 @@ func (d *fakeDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			d.execStdin = got
 			d.mu.Unlock()
 		}
-		sw := stdcopy.NewStdWriter(conn, stdcopy.Stdout)
 		if len(d.execStdout) > 0 {
-			_, _ = sw.Write(d.execStdout)
+			_, _ = conn.Write(stdcopyFrame(stdcopy.Stdout, d.execStdout))
 		}
 	case strings.HasPrefix(path, "/exec/") && strings.HasSuffix(path, "/json"):
 		if d.execInspectStatus >= 400 {

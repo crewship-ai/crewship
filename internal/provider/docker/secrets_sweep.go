@@ -42,8 +42,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/mount"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/client"
 )
 
 // legacySecretsHelperTimeout bounds how long the sweep waits for the UID-1001
@@ -183,27 +184,32 @@ func (p *Provider) removeLegacySecretsDirViaHelper(ctx context.Context, dirPath 
 		},
 	}
 
-	created, err := p.client.ContainerCreate(ctx, helperCfg, helperHost, nil, nil, "")
+	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config:     helperCfg,
+		HostConfig: helperHost,
+	})
 	if err != nil {
 		return fmt.Errorf("create removal helper: %w", err)
 	}
-	defer func() { _ = p.client.ContainerRemove(ctx, created.ID, container.RemoveOptions{Force: true}) }()
+	defer func() {
+		_, _ = p.client.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{Force: true})
+	}()
 
-	if err := p.client.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
+	if _, err := p.client.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
 		return fmt.Errorf("start removal helper: %w", err)
 	}
 
 	waitCtx, cancel := context.WithTimeout(ctx, legacySecretsHelperTimeout)
 	defer cancel()
-	statusCh, errCh := p.client.ContainerWait(waitCtx, created.ID, container.WaitConditionNotRunning)
+	wait := p.client.ContainerWait(waitCtx, created.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
 	select {
-	case _, ok := <-statusCh:
+	case _, ok := <-wait.Result:
 		if !ok {
 			return fmt.Errorf("wait for removal helper: wait channel closed before a status was delivered")
 		}
 		// Exit code intentionally not checked — see doc comment above.
 		return nil
-	case werr := <-errCh:
+	case werr := <-wait.Error:
 		return fmt.Errorf("wait for removal helper: %w", werr)
 	case <-waitCtx.Done():
 		return fmt.Errorf("wait for removal helper: %w", waitCtx.Err())
@@ -220,14 +226,14 @@ func (p *Provider) sweepLegacySecretsDirs(ctx context.Context) {
 	if _, err := os.Stat(base); err != nil {
 		return // nothing to scrub (the common steady state)
 	}
-	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
+	listResult, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		// Without the mount inventory we cannot tell live dirs from dead
 		// ones — deleting blindly could break running legacy agents, so skip.
 		p.logger.Warn("legacy secrets sweep skipped: cannot list containers", "error", err)
 		return
 	}
-	protected := protectedLegacySecretsDirs(containers, base)
+	protected := protectedLegacySecretsDirs(listResult.Items, base)
 	removed, skipped, failed := sweepLegacySecretsBase(base, protected, p.logger, os.RemoveAll,
 		func(dir string) error { return p.removeLegacySecretsDirViaHelper(ctx, dir) })
 	if removed+skipped+failed > 0 {

@@ -8,8 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 )
 
 // TestProvisioner_Progress_RealDocker verifies that WithProgress fires a
@@ -33,11 +32,11 @@ func TestProvisioner_Progress_RealDocker(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
-	docker, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	docker, err := client.New(client.FromEnv)
 	if err != nil {
 		t.Skipf("docker client unavailable: %v", err)
 	}
-	if _, err := docker.Ping(ctx); err != nil {
+	if _, err := docker.Ping(ctx, client.PingOptions{}); err != nil {
 		t.Skipf("docker daemon not reachable: %v", err)
 	}
 	defer func() { _ = docker.Close() }()
@@ -81,7 +80,7 @@ func TestProvisioner_Progress_RealDocker(t *testing.T) {
 	// Best-effort cleanup: drop the cache image so we don't leak across runs.
 	defer func() {
 		if result != nil && result.CachedImage != "" {
-			_, _ = docker.ImageRemove(context.Background(), result.CachedImage, image.RemoveOptions{Force: true, PruneChildren: true})
+			_, _ = docker.ImageRemove(context.Background(), result.CachedImage, client.ImageRemoveOptions{Force: true, PruneChildren: true})
 		}
 	}()
 

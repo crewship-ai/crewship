@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/dockerutil"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 )
 
 // newEnsureImageProvider returns a Provider whose fake daemon records the

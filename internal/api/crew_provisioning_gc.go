@@ -12,17 +12,15 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
+	"github.com/moby/moby/client"
 )
 
 // without standing up a real Docker daemon. Satisfied by *docker.Client.
 type orphanGCClient interface {
-	ContainerList(ctx context.Context, options container.ListOptions) ([]container.Summary, error)
-	ContainerRemove(ctx context.Context, containerID string, options container.RemoveOptions) error
-	ImageList(ctx context.Context, options image.ListOptions) ([]image.Summary, error)
-	ImageRemove(ctx context.Context, imageID string, options image.RemoveOptions) ([]image.DeleteResponse, error)
+	ContainerList(ctx context.Context, options client.ContainerListOptions) (client.ContainerListResult, error)
+	ContainerRemove(ctx context.Context, containerID string, options client.ContainerRemoveOptions) (client.ContainerRemoveResult, error)
+	ImageList(ctx context.Context, options client.ImageListOptions) (client.ImageListResult, error)
+	ImageRemove(ctx context.Context, imageID string, options client.ImageRemoveOptions) (client.ImageRemoveResult, error)
 }
 
 // ProvisioningHandler provides endpoints for the devcontainer feature catalog
@@ -101,17 +99,17 @@ func (h *ProvisioningHandler) sweepOrphanTempContainers(ctx context.Context) {
 	// Docker's name filter is an unanchored substring match, which is why
 	// hasTempContainerName below remains the authoritative check: this
 	// narrows the list, it does not decide anything.
-	containers, err := h.gcClient.ContainerList(ctx, container.ListOptions{
+	listResult, err := h.gcClient.ContainerList(ctx, client.ContainerListOptions{
 		All: true,
-		Filters: filters.NewArgs(
-			filters.Arg("label", labelFilter),
-			filters.Arg("name", devcontainer.TempContainerNamePrefix),
-		),
+		Filters: make(client.Filters).
+			Add("label", labelFilter).
+			Add("name", devcontainer.TempContainerNamePrefix),
 	})
 	if err != nil {
 		h.logger.Warn("orphan temp-container GC: list failed", "error", err)
 		return
 	}
+	containers := listResult.Items
 	cutoff := time.Now().Add(-tempContainerMaxAge).Unix()
 	removed := 0
 	for i, c := range containers {
@@ -138,7 +136,7 @@ func (h *ProvisioningHandler) sweepOrphanTempContainers(ctx context.Context) {
 		if !hasTempContainerName(c.Names) {
 			continue
 		}
-		if err := h.gcClient.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); err != nil {
+		if _, err := h.gcClient.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true}); err != nil {
 			h.logger.Warn("orphan temp-container GC: remove failed", "container", c.ID, "error", err)
 			continue
 		}
@@ -242,7 +240,7 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 	}
 	removed := 0
 	for _, tag := range orphans {
-		if _, err := h.gcClient.ImageRemove(ctx, tag, image.RemoveOptions{Force: false, PruneChildren: true}); err != nil {
+		if _, err := h.gcClient.ImageRemove(ctx, tag, client.ImageRemoveOptions{Force: false, PruneChildren: true}); err != nil {
 			h.logger.Warn("orphan cache-image GC: remove failed", "tag", tag, "error", err)
 			continue
 		}

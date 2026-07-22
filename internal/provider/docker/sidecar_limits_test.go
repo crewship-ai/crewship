@@ -22,7 +22,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/docker/docker/api/types/container"
+	"github.com/moby/moby/api/types/container"
 )
 
 // captureSidecarHostConfig runs ensureSidecar for covRedisSvc() against a fake

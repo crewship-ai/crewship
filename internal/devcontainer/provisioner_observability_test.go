@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/docker/docker/api/types/container"
+	"github.com/moby/moby/client"
 )
 
 // stepStatus is a compact (step,status) projection of a ProvisionEvent used to
@@ -198,7 +198,7 @@ func TestProvision_Sink_FeatureInstallFailure(t *testing.T) {
 	ref := "ghcr.io/t/features/broken:1"
 	covSeedFeature(t, cacheDir, ref, `{"id":"broken","version":"1"}`)
 
-	exec := newCovExecClient(func(_ int, cfg container.ExecOptions) covExecResult {
+	exec := newCovExecClient(func(_ int, cfg client.ExecCreateOptions) covExecResult {
 		if strings.Contains(strings.Join(cfg.Cmd, " "), "install.sh") {
 			return covExecResult{output: "compile error", exitCode: 1}
 		}
@@ -274,7 +274,7 @@ func TestProvision_CapturesLoginPath(t *testing.T) {
 	covSeedFeature(t, cacheDir, ref, `{"id":"common-utils","version":"2"}`)
 
 	want := "/home/agent/.local/bin:/usr/local/py-utils/bin:/usr/local/bin:/usr/bin:/bin"
-	exec := newCovExecClient(func(_ int, cfg container.ExecOptions) covExecResult {
+	exec := newCovExecClient(func(_ int, cfg client.ExecCreateOptions) covExecResult {
 		if strings.Contains(strings.Join(cfg.Cmd, " "), `printf %s "$PATH"`) {
 			return covExecResult{output: want}
 		}
@@ -304,7 +304,7 @@ func TestProvision_LoginPathCaptureFailureIsNonFatal(t *testing.T) {
 	ref := "ghcr.io/devcontainers/features/common-utils:2"
 	covSeedFeature(t, cacheDir, ref, `{"id":"common-utils","version":"2"}`)
 
-	exec := newCovExecClient(func(_ int, cfg container.ExecOptions) covExecResult {
+	exec := newCovExecClient(func(_ int, cfg client.ExecCreateOptions) covExecResult {
 		if strings.Contains(strings.Join(cfg.Cmd, " "), `printf %s "$PATH"`) {
 			return covExecResult{output: "", exitCode: 1}
 		}

@@ -12,7 +12,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/docker/docker/api/types/image"
+	"github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/client"
 )
 
 type imageListCacheEntry struct {
@@ -168,10 +169,11 @@ func (p *Provisioner) listImages(ctx context.Context) ([]image.Summary, error) {
 	if p.imageListCache.images != nil && time.Since(p.imageListCache.fetchedAt) < imageListTTL {
 		return p.imageListCache.images, nil
 	}
-	imgs, err := p.docker.ImageList(ctx, image.ListOptions{})
+	listResult, err := p.docker.ImageList(ctx, client.ImageListOptions{})
 	if err != nil {
 		return nil, err
 	}
+	imgs := listResult.Items
 	p.imageListCache = imageListCacheEntry{images: imgs, fetchedAt: time.Now()}
 	return imgs, nil
 }

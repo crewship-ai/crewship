@@ -3,34 +3,28 @@ package devcontainer
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	dockerclient "github.com/docker/docker/client"
-
 	"github.com/crewship-ai/crewship/internal/dockerutil"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	dockernetwork "github.com/docker/docker/api/types/network"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/moby/moby/client"
 )
 
 // CommitClient is the subset of the Docker API needed for image provisioning.
 // A real *client.Client satisfies this interface.
 
 type CommitClient interface {
-	ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *dockernetwork.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
-	ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error
-	ContainerStop(ctx context.Context, containerID string, options container.StopOptions) error
-	ContainerRemove(ctx context.Context, containerID string, options container.RemoveOptions) error
-	ContainerCommit(ctx context.Context, containerID string, options container.CommitOptions) (container.CommitResponse, error)
-	ImageList(ctx context.Context, options image.ListOptions) ([]image.Summary, error)
-	ImagePull(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error)
-	ImageInspect(ctx context.Context, imageID string, inspectOpts ...dockerclient.ImageInspectOption) (image.InspectResponse, error)
+	ContainerCreate(ctx context.Context, options client.ContainerCreateOptions) (client.ContainerCreateResult, error)
+	ContainerStart(ctx context.Context, containerID string, options client.ContainerStartOptions) (client.ContainerStartResult, error)
+	ContainerStop(ctx context.Context, containerID string, options client.ContainerStopOptions) (client.ContainerStopResult, error)
+	ContainerRemove(ctx context.Context, containerID string, options client.ContainerRemoveOptions) (client.ContainerRemoveResult, error)
+	ContainerCommit(ctx context.Context, containerID string, options client.ContainerCommitOptions) (client.ContainerCommitResult, error)
+	ImageList(ctx context.Context, options client.ImageListOptions) (client.ImageListResult, error)
+	ImagePull(ctx context.Context, refStr string, options client.ImagePullOptions) (client.ImagePullResponse, error)
+	ImageInspect(ctx context.Context, imageID string, inspectOpts ...client.ImageInspectOption) (client.ImageInspectResult, error)
 }
 
 // ProgressCallback receives provisioning progress updates. Called synchronously
@@ -462,12 +456,12 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// Ensure cleanup on any exit path.
 	defer func() {
 		cleanupCtx := context.Background()
-		_ = p.docker.ContainerStop(cleanupCtx, containerID, container.StopOptions{})
-		_ = p.docker.ContainerRemove(cleanupCtx, containerID, container.RemoveOptions{Force: true})
+		_, _ = p.docker.ContainerStop(cleanupCtx, containerID, client.ContainerStopOptions{})
+		_, _ = p.docker.ContainerRemove(cleanupCtx, containerID, client.ContainerRemoveOptions{Force: true})
 	}()
 
 	// 3. Start the container.
-	if err := p.docker.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
+	if _, err := p.docker.ContainerStart(ctx, containerID, client.ContainerStartOptions{}); err != nil {
 		return fail("container_start", fmt.Errorf("starting temp container: %w", err))
 	}
 
@@ -541,7 +535,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 
 	// 9. Commit the container as a cached image.
 	emit(commitStepLabel)
-	_, commitErr := p.docker.ContainerCommit(ctx, containerID, container.CommitOptions{
+	_, commitErr := p.docker.ContainerCommit(ctx, containerID, client.ContainerCommitOptions{
 		Reference: tag,
 	})
 	if commitErr != nil {

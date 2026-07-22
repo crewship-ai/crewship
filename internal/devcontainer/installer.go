@@ -13,9 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/client"
 )
 
 var featureIDRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,49}$`)
@@ -23,10 +22,10 @@ var featureIDRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,49}$`)
 // DockerClient is the subset of the Docker API needed for feature installation.
 // A real *client.Client satisfies this interface.
 type DockerClient interface {
-	ContainerExecCreate(ctx context.Context, container string, config container.ExecOptions) (container.ExecCreateResponse, error)
-	ContainerExecAttach(ctx context.Context, execID string, config container.ExecStartOptions) (types.HijackedResponse, error)
-	ContainerExecInspect(ctx context.Context, execID string) (container.ExecInspect, error)
-	CopyToContainer(ctx context.Context, containerID, dstPath string, content io.Reader, options container.CopyToContainerOptions) error
+	ExecCreate(ctx context.Context, containerID string, options client.ExecCreateOptions) (client.ExecCreateResult, error)
+	ExecAttach(ctx context.Context, execID string, options client.ExecAttachOptions) (client.ExecAttachResult, error)
+	ExecInspect(ctx context.Context, execID string, options client.ExecInspectOptions) (client.ExecInspectResult, error)
+	CopyToContainer(ctx context.Context, containerID string, options client.CopyToContainerOptions) (client.CopyToContainerResult, error)
 }
 
 // Installer installs devcontainer features into a running container via
@@ -87,7 +86,10 @@ func (inst *Installer) InstallFeature(ctx context.Context, containerID string, f
 	}
 
 	// 3. Copy into container at destBase.
-	if err := inst.docker.CopyToContainer(installCtx, containerID, destBase, tarBuf, container.CopyToContainerOptions{}); err != nil {
+	if _, err := inst.docker.CopyToContainer(installCtx, containerID, client.CopyToContainerOptions{
+		DestinationPath: destBase,
+		Content:         tarBuf,
+	}); err != nil {
 		return fmt.Errorf("copying feature %s to container: %w", featureID, err)
 	}
 
@@ -146,7 +148,7 @@ func (inst *Installer) execInContainerAsUser(ctx context.Context, containerID st
 // when empty, no WorkingDir override is applied and the container's default
 // WORKDIR is used.
 func (inst *Installer) execInContainerFull(ctx context.Context, containerID string, cmd []string, user, workDir string, env []string) (string, int, error) {
-	execCfg := container.ExecOptions{
+	execCfg := client.ExecCreateOptions{
 		Cmd:          cmd,
 		Env:          env,
 		User:         user,
@@ -155,12 +157,12 @@ func (inst *Installer) execInContainerFull(ctx context.Context, containerID stri
 		AttachStderr: true,
 	}
 
-	exec, err := inst.docker.ContainerExecCreate(ctx, containerID, execCfg)
+	exec, err := inst.docker.ExecCreate(ctx, containerID, execCfg)
 	if err != nil {
 		return "", -1, fmt.Errorf("exec create: %w", err)
 	}
 
-	resp, err := inst.docker.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
+	resp, err := inst.docker.ExecAttach(ctx, exec.ID, client.ExecAttachOptions{})
 	if err != nil {
 		return "", -1, fmt.Errorf("exec attach: %w", err)
 	}
@@ -182,7 +184,7 @@ func (inst *Installer) execInContainerFull(ctx context.Context, containerID stri
 	}
 	buf := bytes.NewBuffer(demuxDockerStream(raw.Bytes()))
 
-	inspect, err := inst.docker.ContainerExecInspect(ctx, exec.ID)
+	inspect, err := inst.docker.ExecInspect(ctx, exec.ID, client.ExecInspectOptions{})
 	if err != nil {
 		return buf.String(), -1, fmt.Errorf("exec inspect: %w", err)
 	}
