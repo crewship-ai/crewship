@@ -9,9 +9,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/client"
 )
 
 // DockerOps abstracts the Docker operations the backup / restore flow
@@ -76,7 +75,7 @@ type MobyDockerOps struct {
 
 // Pause implements DockerOps.
 func (m *MobyDockerOps) Pause(ctx context.Context, containerID string) error {
-	if err := m.Client.ContainerPause(ctx, containerID); err != nil {
+	if _, err := m.Client.ContainerPause(ctx, containerID, client.ContainerPauseOptions{}); err != nil {
 		// Docker returns "is already paused" with varying wording; we
 		// treat that as success so a retried backup does not double-fail.
 		if strings.Contains(err.Error(), "already paused") {
@@ -89,7 +88,7 @@ func (m *MobyDockerOps) Pause(ctx context.Context, containerID string) error {
 
 // Unpause implements DockerOps.
 func (m *MobyDockerOps) Unpause(ctx context.Context, containerID string) error {
-	if err := m.Client.ContainerUnpause(ctx, containerID); err != nil {
+	if _, err := m.Client.ContainerUnpause(ctx, containerID, client.ContainerUnpauseOptions{}); err != nil {
 		if strings.Contains(err.Error(), "is not paused") {
 			return nil
 		}
@@ -100,18 +99,18 @@ func (m *MobyDockerOps) Unpause(ctx context.Context, containerID string) error {
 
 // CopyFrom implements DockerOps.
 func (m *MobyDockerOps) CopyFrom(ctx context.Context, containerID, srcPath string) (io.ReadCloser, error) {
-	r, _, err := m.Client.CopyFromContainer(ctx, containerID, srcPath)
+	result, err := m.Client.CopyFromContainer(ctx, containerID, client.CopyFromContainerOptions{SourcePath: srcPath})
 	if err != nil {
 		return nil, fmt.Errorf("backup: docker cp from %s:%s: %w", containerID, srcPath, err)
 	}
-	return r, nil
+	return result.Content, nil
 }
 
 // ContainerExists implements DockerOps by probing the daemon. Any
 // error containing "No such container" resolves to (false, nil);
 // other errors (daemon unreachable, permission denied) bubble up.
 func (m *MobyDockerOps) ContainerExists(ctx context.Context, containerID string) (bool, error) {
-	_, err := m.Client.ContainerInspect(ctx, containerID)
+	_, err := m.Client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
 	if err == nil {
 		return true, nil
 	}
@@ -124,7 +123,9 @@ func (m *MobyDockerOps) ContainerExists(ctx context.Context, containerID string)
 
 // CopyTo implements DockerOps.
 func (m *MobyDockerOps) CopyTo(ctx context.Context, containerID, dstPath string, content io.Reader) error {
-	if err := m.Client.CopyToContainer(ctx, containerID, dstPath, content, container.CopyToContainerOptions{
+	if _, err := m.Client.CopyToContainer(ctx, containerID, client.CopyToContainerOptions{
+		DestinationPath:           dstPath,
+		Content:                   content,
 		AllowOverwriteDirWithFile: false,
 		CopyUIDGID:                true,
 	}); err != nil {
@@ -185,7 +186,7 @@ func (m *MobyDockerOps) copyToWithUser(ctx context.Context, containerID, dstPath
 	// filesystem driver's uid remapping. Tar fails open with
 	// "Permission denied" when root tries to overwrite an
 	// agent-owned file under those conditions.
-	exec, err := m.Client.ContainerExecCreate(ctx, containerID, container.ExecOptions{
+	exec, err := m.Client.ExecCreate(ctx, containerID, client.ExecCreateOptions{
 		Cmd: []string{
 			"tar", "-x",
 			"--overwrite",
@@ -200,7 +201,7 @@ func (m *MobyDockerOps) copyToWithUser(ctx context.Context, containerID, dstPath
 	if err != nil {
 		return fmt.Errorf("backup: exec-tar create %s:%s: %w", containerID, dstPath, err)
 	}
-	resp, err := m.Client.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
+	resp, err := m.Client.ExecAttach(ctx, exec.ID, client.ExecAttachOptions{})
 	if err != nil {
 		return fmt.Errorf("backup: exec-tar attach %s:%s: %w", containerID, dstPath, err)
 	}
@@ -250,7 +251,7 @@ func (m *MobyDockerOps) copyToWithUser(ctx context.Context, containerID, dstPath
 		return fmt.Errorf("backup: exec-tar drain %s:%s: %w", containerID, dstPath, drained.err)
 	}
 
-	insp, err := m.Client.ContainerExecInspect(ctx, exec.ID)
+	insp, err := m.Client.ExecInspect(ctx, exec.ID, client.ExecInspectOptions{})
 	if err != nil {
 		return fmt.Errorf("backup: exec-tar inspect %s:%s: %w", containerID, dstPath, err)
 	}
@@ -265,7 +266,7 @@ func (m *MobyDockerOps) copyToWithUser(ctx context.Context, containerID, dstPath
 // semantics of exec_test patterns elsewhere in the codebase (see
 // internal/devcontainer/installer.go:execInContainerFull).
 func (m *MobyDockerOps) Exec(ctx context.Context, containerID string, cmd []string) (int, []byte, error) {
-	exec, err := m.Client.ContainerExecCreate(ctx, containerID, container.ExecOptions{
+	exec, err := m.Client.ExecCreate(ctx, containerID, client.ExecCreateOptions{
 		Cmd:          cmd,
 		User:         "0:0",
 		AttachStdout: true,
@@ -274,7 +275,7 @@ func (m *MobyDockerOps) Exec(ctx context.Context, containerID string, cmd []stri
 	if err != nil {
 		return -1, nil, fmt.Errorf("backup: exec create %s: %w", containerID, err)
 	}
-	resp, err := m.Client.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
+	resp, err := m.Client.ExecAttach(ctx, exec.ID, client.ExecAttachOptions{})
 	if err != nil {
 		return -1, nil, fmt.Errorf("backup: exec attach %s: %w", containerID, err)
 	}
@@ -293,7 +294,7 @@ func (m *MobyDockerOps) Exec(ctx context.Context, containerID string, cmd []stri
 	var buf bytes.Buffer
 	buf.Write(stdout.Bytes())
 	buf.Write(stderr.Bytes())
-	inspect, err := m.Client.ContainerExecInspect(ctx, exec.ID)
+	inspect, err := m.Client.ExecInspect(ctx, exec.ID, client.ExecInspectOptions{})
 	if err != nil {
 		return -1, buf.Bytes(), fmt.Errorf("backup: exec inspect %s: %w", containerID, err)
 	}

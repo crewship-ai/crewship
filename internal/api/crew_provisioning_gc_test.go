@@ -12,8 +12,9 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/client"
 )
 
 // fakeGCClient is a minimal orphanGCClient implementation for unit-testing the
@@ -30,23 +31,37 @@ type fakeGCClient struct {
 	imageListCalls int32
 }
 
-func (f *fakeGCClient) ContainerList(_ context.Context, opts container.ListOptions) ([]container.Summary, error) {
+// filterValues extracts the value set for a filter term from client.Filters
+// (map[string]map[string]bool) as a slice, mirroring the old filters.Args.Get.
+func filterValues(f client.Filters, term string) []string {
+	set := f[term]
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for v := range set {
+		out = append(out, v)
+	}
+	return out
+}
+
+func (f *fakeGCClient) ContainerList(_ context.Context, opts client.ContainerListOptions) (client.ContainerListResult, error) {
 	if f.containerListErr != nil {
-		return nil, f.containerListErr
+		return client.ContainerListResult{}, f.containerListErr
 	}
 	// Enforce the label filter so a regression in the sweeper's filter
 	// argument is caught by the test (e.g. if it stopped scoping to
 	// crewship.temp=provision and started touching unrelated containers).
-	wantLabels := opts.Filters.Get("label")
+	wantLabels := filterValues(opts.Filters, "label")
 	if len(wantLabels) == 0 {
-		return f.containers, nil
+		return client.ContainerListResult{Items: f.containers}, nil
 	}
 	// The name filter is emulated too, or a sweeper that drops it still
 	// looks correct here while scanning the whole host in production.
 	// Docker's name filter is an unanchored substring match — modelled as
 	// such deliberately, because that looseness is exactly why the sweeper
 	// keeps hasTempContainerName as its authoritative check.
-	wantNames := opts.Filters.Get("name")
+	wantNames := filterValues(opts.Filters, "name")
 
 	out := make([]container.Summary, 0, len(f.containers))
 	for _, c := range f.containers {
@@ -58,7 +73,7 @@ func (f *fakeGCClient) ContainerList(_ context.Context, opts container.ListOptio
 		}
 		out = append(out, c)
 	}
-	return out, nil
+	return client.ContainerListResult{Items: out}, nil
 }
 
 func matchesAnyName(names []string, wants []string) bool {
@@ -101,22 +116,22 @@ func matchesAllLabels(labels map[string]string, wants []string) bool {
 	return true
 }
 
-func (f *fakeGCClient) ContainerRemove(_ context.Context, id string, _ container.RemoveOptions) error {
+func (f *fakeGCClient) ContainerRemove(_ context.Context, id string, _ client.ContainerRemoveOptions) (client.ContainerRemoveResult, error) {
 	f.removedContainers = append(f.removedContainers, id)
-	return nil
+	return client.ContainerRemoveResult{}, nil
 }
 
-func (f *fakeGCClient) ImageList(_ context.Context, _ image.ListOptions) ([]image.Summary, error) {
+func (f *fakeGCClient) ImageList(_ context.Context, _ client.ImageListOptions) (client.ImageListResult, error) {
 	atomic.AddInt32(&f.imageListCalls, 1)
 	if f.imageListErr != nil {
-		return nil, f.imageListErr
+		return client.ImageListResult{}, f.imageListErr
 	}
-	return f.images, nil
+	return client.ImageListResult{Items: f.images}, nil
 }
 
-func (f *fakeGCClient) ImageRemove(_ context.Context, id string, _ image.RemoveOptions) ([]image.DeleteResponse, error) {
+func (f *fakeGCClient) ImageRemove(_ context.Context, id string, _ client.ImageRemoveOptions) (client.ImageRemoveResult, error) {
 	f.removedImages = append(f.removedImages, id)
-	return nil, nil
+	return client.ImageRemoveResult{}, nil
 }
 
 func newGCTestHandler(t *testing.T, fake *fakeGCClient) *ProvisioningHandler {

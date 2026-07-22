@@ -10,7 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types/image"
+	"github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/client"
 )
 
 type cachedImageList struct {
@@ -157,10 +158,11 @@ func (h *ProvisioningHandler) listLocalImagesCached(ctx context.Context) ([]imag
 	if h.imgListCache.images != nil && time.Since(h.imgListCache.fetchedAt) < imageListCacheTTL {
 		return h.imgListCache.images, nil
 	}
-	imgs, err := h.gcClient.ImageList(ctx, image.ListOptions{})
+	listResult, err := h.gcClient.ImageList(ctx, client.ImageListOptions{})
 	if err != nil {
 		return nil, err
 	}
+	imgs := listResult.Items
 	h.imgListCache = cachedImageList{images: imgs, fetchedAt: time.Now()}
 	return imgs, nil
 }
@@ -227,7 +229,7 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 	// Use the narrow gcClient interface — same underlying *client.Client, but
 	// keeps the destructive surface aligned with the orphan sweeper for both
 	// readability and test parity.
-	_, err := h.gcClient.ImageRemove(r.Context(), tag, image.RemoveOptions{Force: force, PruneChildren: true})
+	_, err := h.gcClient.ImageRemove(r.Context(), tag, client.ImageRemoveOptions{Force: force, PruneChildren: true})
 	if err != nil {
 		h.logger.Error("docker image remove", "tag", tag, "error", err)
 		replyError(w, http.StatusInternalServerError, "Failed to remove cached image")

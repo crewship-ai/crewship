@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
-	"github.com/docker/docker/api/types/container"
+	"github.com/moby/moby/api/types/container"
 )
 
 // covDaemonHandler fakes the minimal daemon surface Detect/New touch:
@@ -770,7 +770,7 @@ func TestExec_Success_DemuxesStdoutAndStderr(t *testing.T) {
 	t.Parallel()
 
 	var mu sync.Mutex
-	var execOpts container.ExecOptions
+	var execOpts container.ExecCreateRequest
 	p := newCovProviderTCP(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		switch {
@@ -855,7 +855,7 @@ func TestExecInteractive_Success(t *testing.T) {
 	t.Parallel()
 
 	var mu sync.Mutex
-	var execOpts container.ExecOptions
+	var execOpts container.ExecCreateRequest
 	var resizeQuery string
 	p := newCovProviderTCP(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path

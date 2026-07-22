@@ -23,11 +23,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	dockernetwork "github.com/docker/docker/api/types/network"
-	dockerclient "github.com/docker/docker/client"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"iter"
+
+	"github.com/moby/moby/api/types/jsonstream"
+	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 )
@@ -38,35 +37,44 @@ type covCommitClient struct {
 	createErr error
 }
 
-func (c *covCommitClient) ContainerCreate(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *dockernetwork.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
+// covImagePullResponse is a minimal client.ImagePullResponse — an empty
+// read stream with no-op progress/wait, standing in for a real pull.
+type covImagePullResponse struct{ io.ReadCloser }
+
+func (covImagePullResponse) JSONMessages(context.Context) iter.Seq2[jsonstream.Message, error] {
+	return func(func(jsonstream.Message, error) bool) {}
+}
+func (covImagePullResponse) Wait(context.Context) error { return nil }
+
+func (c *covCommitClient) ContainerCreate(_ context.Context, _ client.ContainerCreateOptions) (client.ContainerCreateResult, error) {
 	if c.createErr != nil {
-		return container.CreateResponse{}, c.createErr
+		return client.ContainerCreateResult{}, c.createErr
 	}
-	return container.CreateResponse{ID: "tmp-1"}, nil
+	return client.ContainerCreateResult{ID: "tmp-1"}, nil
 }
-func (c *covCommitClient) ContainerStart(_ context.Context, _ string, _ container.StartOptions) error {
-	return nil
+func (c *covCommitClient) ContainerStart(_ context.Context, _ string, _ client.ContainerStartOptions) (client.ContainerStartResult, error) {
+	return client.ContainerStartResult{}, nil
 }
-func (c *covCommitClient) ContainerStop(_ context.Context, _ string, _ container.StopOptions) error {
-	return nil
+func (c *covCommitClient) ContainerStop(_ context.Context, _ string, _ client.ContainerStopOptions) (client.ContainerStopResult, error) {
+	return client.ContainerStopResult{}, nil
 }
-func (c *covCommitClient) ContainerRemove(_ context.Context, _ string, _ container.RemoveOptions) error {
-	return nil
+func (c *covCommitClient) ContainerRemove(_ context.Context, _ string, _ client.ContainerRemoveOptions) (client.ContainerRemoveResult, error) {
+	return client.ContainerRemoveResult{}, nil
 }
-func (c *covCommitClient) ContainerCommit(_ context.Context, _ string, _ container.CommitOptions) (container.CommitResponse, error) {
-	return container.CommitResponse{ID: "sha256:x"}, nil
+func (c *covCommitClient) ContainerCommit(_ context.Context, _ string, _ client.ContainerCommitOptions) (client.ContainerCommitResult, error) {
+	return client.ContainerCommitResult{ID: "sha256:x"}, nil
 }
-func (c *covCommitClient) ImageList(_ context.Context, _ image.ListOptions) ([]image.Summary, error) {
+func (c *covCommitClient) ImageList(_ context.Context, _ client.ImageListOptions) (client.ImageListResult, error) {
 	if c.listErr != nil {
-		return nil, c.listErr
+		return client.ImageListResult{}, c.listErr
 	}
-	return nil, nil // no cached images
+	return client.ImageListResult{}, nil // no cached images
 }
-func (c *covCommitClient) ImagePull(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader("")), nil
+func (c *covCommitClient) ImagePull(_ context.Context, _ string, _ client.ImagePullOptions) (client.ImagePullResponse, error) {
+	return covImagePullResponse{io.NopCloser(strings.NewReader(""))}, nil
 }
-func (c *covCommitClient) ImageInspect(_ context.Context, _ string, _ ...dockerclient.ImageInspectOption) (image.InspectResponse, error) {
-	return image.InspectResponse{}, errors.New("no such image")
+func (c *covCommitClient) ImageInspect(_ context.Context, _ string, _ ...client.ImageInspectOption) (client.ImageInspectResult, error) {
+	return client.ImageInspectResult{}, errors.New("no such image")
 }
 
 // covProvRig builds a ProvisioningHandler whose provisioner runs against

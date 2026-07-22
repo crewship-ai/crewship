@@ -2,17 +2,25 @@ package devcontainer
 
 import (
 	"bytes"
+	"encoding/binary"
 	"testing"
 
-	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/moby/moby/api/pkg/stdcopy"
 )
 
 // framed wraps s in a single stdcopy stdout frame, exactly as a non-TTY Docker
-// exec attach would emit it.
+// exec attach would emit it. stdcopy.NewStdWriter was removed from the new
+// github.com/moby/moby/api/pkg/stdcopy package (only StdCopy — the reader
+// side — remains), so the frame header is built by hand here: it's a fixed,
+// documented wire format ([stream type, 0, 0, 0, big-endian uint32 size]) that
+// stdcopy.StdCopy on the other end still parses identically.
 func framed(s string) []byte {
 	var buf bytes.Buffer
-	w := stdcopy.NewStdWriter(&buf, stdcopy.Stdout)
-	_, _ = w.Write([]byte(s))
+	header := make([]byte, 8)
+	header[0] = byte(stdcopy.Stdout)
+	binary.BigEndian.PutUint32(header[4:], uint32(len(s)))
+	buf.Write(header)
+	buf.WriteString(s)
 	return buf.Bytes()
 }
 

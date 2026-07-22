@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 )
 
 // covCPRFakeDocker returns a *client.Client pointed at an httptest fake
@@ -24,9 +24,9 @@ import (
 func covCPRFakeDocker(t *testing.T, handler http.HandlerFunc) (*client.Client, *httptest.Server) {
 	t.Helper()
 	srv := httptest.NewServer(handler)
-	cli, err := client.NewClientWithOpts(
+	cli, err := client.New(
 		client.WithHost(srv.URL),
-		client.WithVersion("1.43"),
+		client.WithAPIVersion("1.43"),
 	)
 	if err != nil {
 		srv.Close()

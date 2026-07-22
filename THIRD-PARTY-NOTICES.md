@@ -97,7 +97,6 @@ image processor before `pnpm build` — no source-code surgery in
 | `github.com/crewship-ai/crewship` | Apache-2.0 | https://github.com/crewship-ai/crewship/blob/HEAD/LICENSE |
 | `github.com/distribution/reference` | Apache-2.0 | https://github.com/distribution/reference/blob/v0.6.0/LICENSE |
 | `github.com/dlclark/regexp2` | MIT | https://github.com/dlclark/regexp2/blob/v1.11.5/LICENSE |
-| `github.com/docker/docker` | Apache-2.0 | https://github.com/docker/docker/blob/v28.5.2/LICENSE |
 | `github.com/docker/go-connections` | Apache-2.0 | https://github.com/docker/go-connections/blob/v0.6.0/LICENSE |
 | `github.com/docker/go-units` | Apache-2.0 | https://github.com/docker/go-units/blob/v0.5.0/LICENSE |
 | `github.com/dustin/go-humanize` | MIT | https://github.com/dustin/go-humanize/blob/v1.0.1/LICENSE |
@@ -116,6 +115,8 @@ image processor before `pnpm build` — no source-code surgery in
 | `github.com/microcosm-cc/bluemonday` | BSD-3-Clause | https://github.com/microcosm-cc/bluemonday/blob/v1.0.27/LICENSE.md |
 | `github.com/mitchellh/hashstructure/v2` | MIT | https://github.com/mitchellh/hashstructure/blob/v2.0.2/LICENSE |
 | `github.com/moby/docker-image-spec/specs-go/v1` | Apache-2.0 | https://github.com/moby/docker-image-spec/blob/v1.3.1/LICENSE |
+| `github.com/moby/moby/api` | Apache-2.0 | https://github.com/moby/moby/blob/api/v1.55.0/LICENSE |
+| `github.com/moby/moby/client` | Apache-2.0 | https://github.com/moby/moby/blob/client/v0.5.0/LICENSE |
 | `github.com/muesli/ansi` | MIT | https://github.com/muesli/ansi/blob/276c6243b2f6/LICENSE |
 | `github.com/muesli/cancelreader` | MIT | https://github.com/muesli/cancelreader/blob/v0.2.2/LICENSE |
 | `github.com/muesli/reflow` | MIT | https://github.com/muesli/reflow/blob/v0.3.0/LICENSE |
@@ -165,9 +166,4 @@ monitored for upstream resolution.
 
 | CVE | Module | Status | Notes |
 |-----|--------|--------|-------|
-| GO-2026-4887 | github.com/docker/docker | No upstream fix | AuthZ plugin bypass on oversized request bodies. Not reachable via Crewship's usage pattern (we do not use AuthZ plugins). Monitor https://pkg.go.dev/vuln/GO-2026-4887 |
-| GO-2026-4883 | github.com/docker/docker | No upstream fix | Off-by-one in plugin privilege validation. Not reachable via Crewship's usage pattern. Monitor https://pkg.go.dev/vuln/GO-2026-4883 |
-| GO-2026-5746 | github.com/docker/docker (v28.5.2) | No upstream fix (Fixed in: N/A) | Reachable via the container provider (Crewship runs Docker for crew runtimes). Accepted pending an upstream fix; repo-wide, not tied to any change. Monitor https://pkg.go.dev/vuln/GO-2026-5746 |
-| GO-2026-5668 | github.com/docker/docker (v28.5.2) | No upstream fix (Fixed in: N/A) | Same June-2026 docker advisory wave; reachable via the container provider. Accepted pending an upstream fix. Monitor https://pkg.go.dev/vuln/GO-2026-5668 |
-| GO-2026-5617 | github.com/docker/docker (v28.5.2) | No upstream fix (Fixed in: N/A) | Same June-2026 docker advisory wave; reachable via the container provider. Accepted pending an upstream fix. Monitor https://pkg.go.dev/vuln/GO-2026-5617 |
 | GO-2026-5932 | golang.org/x/crypto/openpgp | No upstream fix (Fixed in: N/A) | The openpgp package is unmaintained and unsafe by design; upstream will never ship a fix (advisory is "use a maintained alternative"). **Not reachable in Crewship**: we never import `golang.org/x/crypto/openpgp` (it is a transitive-graph presence only — `go mod why golang.org/x/crypto` reports "main module does not need package"), and govulncheck lists it under "modules you require, but your code doesn't appear to call". Bumping x/crypto does not help — every published version, including the latest, still ships openpgp with the same advisory. Accepted as known, non-reachable risk. Monitor https://pkg.go.dev/vuln/GO-2026-5932 |

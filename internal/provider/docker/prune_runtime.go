@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/provider"
-	"github.com/docker/docker/api/types/container"
+	"github.com/moby/moby/client"
 )
 
 // PruneCrewRuntimes removes the LIVE id-scoped runtime resources of each crew:
@@ -62,11 +62,11 @@ func (p *Provider) PruneCrewRuntimes(ctx context.Context, crews []provider.CrewR
 		return removed, nil
 	}
 
-	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
+	listResult, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return removed, fmt.Errorf("list containers (crew runtime prune): %w", err)
 	}
-	for _, c := range containers {
+	for _, c := range listResult.Items {
 		name, match := "", false
 		for _, n := range c.Names {
 			trimmed := strings.TrimPrefix(n, "/")
@@ -87,21 +87,18 @@ func (p *Provider) PruneCrewRuntimes(ctx context.Context, crews []provider.CrewR
 		if !match {
 			continue
 		}
-		if rmErr := p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); rmErr != nil {
+		if _, rmErr := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true}); rmErr != nil {
 			p.logger.Warn("crew runtime container remove failed", "container", name, "error", rmErr)
 		} else {
 			removed = append(removed, name)
 		}
 	}
 
-	list, err := p.client.VolumeList(ctx, volumeListOptions())
+	volList, err := p.client.VolumeList(ctx, volumeListOptions())
 	if err != nil {
 		return removed, fmt.Errorf("list volumes (crew runtime prune): %w", err)
 	}
-	for _, vol := range list.Volumes {
-		if vol == nil {
-			continue
-		}
+	for _, vol := range volList.Items {
 		match := targetVolumes[vol.Name]
 		if !match {
 			for _, pfx := range sidecarVolPrefixes {
@@ -114,7 +111,7 @@ func (p *Provider) PruneCrewRuntimes(ctx context.Context, crews []provider.CrewR
 		if !match {
 			continue
 		}
-		if rmErr := p.client.VolumeRemove(ctx, vol.Name, true); rmErr != nil {
+		if _, rmErr := p.client.VolumeRemove(ctx, vol.Name, client.VolumeRemoveOptions{Force: true}); rmErr != nil {
 			p.logger.Warn("crew runtime volume remove failed", "volume", vol.Name, "error", rmErr)
 		} else {
 			removed = append(removed, vol.Name)

@@ -19,8 +19,9 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/provider"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 )
 
 // newCovProvider wires a Provider to an httptest fake docker daemon with
@@ -31,9 +32,9 @@ func newCovProvider(t *testing.T, cfg Config, handler http.HandlerFunc) *Provide
 	t.Helper()
 
 	srv := httptest.NewServer(handler)
-	cli, err := client.NewClientWithOpts(
+	cli, err := client.New(
 		client.WithHost(srv.URL),
-		client.WithVersion("1.43"),
+		client.WithAPIVersion("1.43"),
 	)
 	if err != nil {
 		srv.Close()
@@ -66,9 +67,9 @@ func newCovProviderTCP(t *testing.T, cfg Config, handler http.HandlerFunc) *Prov
 	t.Helper()
 
 	srv := httptest.NewServer(handler)
-	cli, err := client.NewClientWithOpts(
+	cli, err := client.New(
 		client.WithHost("tcp://"+strings.TrimPrefix(srv.URL, "http://")),
-		client.WithVersion("1.43"),
+		client.WithAPIVersion("1.43"),
 	)
 	if err != nil {
 		srv.Close()
@@ -118,8 +119,8 @@ func TestReadToDiscard_DrainsAll(t *testing.T) {
 func TestVolumeListOptions_NoFilters(t *testing.T) {
 	t.Parallel()
 	opts := volumeListOptions()
-	if opts.Filters.Len() != 0 {
-		t.Errorf("expected no filters, got %d", opts.Filters.Len())
+	if len(opts.Filters) != 0 {
+		t.Errorf("expected no filters, got %d", len(opts.Filters))
 	}
 }
 
@@ -456,6 +457,9 @@ func TestEnsureSidecar_CreateBody(t *testing.T) {
 	t.Parallel()
 
 	svc := covRedisSvc()
+	// A UDP port must survive as-is: the old TrimSuffix+"/tcp" normalization
+	// mangled "53/udp" into the malformed key "53/udp/tcp".
+	svc.Ports = append(svc.Ports, "53/udp")
 	svc.Healthcheck = &provider.CrewServiceHealthcheck{
 		Test:        []string{"CMD", "redis-cli", "ping"},
 		Interval:    2 * time.Second,
@@ -543,11 +547,17 @@ func TestEnsureSidecar_CreateBody(t *testing.T) {
 	if strings.Join(cfg.Cmd, " ") != "redis-server --appendonly yes" {
 		t.Errorf("cmd = %v", cfg.Cmd)
 	}
-	if _, ok := cfg.ExposedPorts["6379/tcp"]; !ok {
+	if _, ok := cfg.ExposedPorts[network.MustParsePort("6379/tcp")]; !ok {
 		t.Errorf("exposed ports missing 6379/tcp: %v", cfg.ExposedPorts)
 	}
-	if _, ok := cfg.ExposedPorts["5432/tcp"]; !ok {
+	if _, ok := cfg.ExposedPorts[network.MustParsePort("5432/tcp")]; !ok {
 		t.Errorf("exposed ports missing 5432/tcp: %v", cfg.ExposedPorts)
+	}
+	if _, ok := cfg.ExposedPorts[network.MustParsePort("53/udp")]; !ok {
+		t.Errorf("exposed ports missing 53/udp: %v", cfg.ExposedPorts)
+	}
+	if len(cfg.ExposedPorts) != 3 {
+		t.Errorf("exposed ports = %v, want exactly 6379/tcp, 5432/tcp, 53/udp", cfg.ExposedPorts)
 	}
 	wantLabels := map[string]string{
 		"managed-by":         "crewship",

@@ -30,8 +30,8 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/provider"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 )
 
 // dockerCreateCapture records every POST /containers/create request body
@@ -174,9 +174,9 @@ func newEnsureRuntimeFixture(t *testing.T, cfg Config) (*Provider, *dockerCreate
 
 	srv := httptest.NewServer(http.HandlerFunc(handler))
 
-	cli, err := client.NewClientWithOpts(
+	cli, err := client.New(
 		client.WithHost(srv.URL),
-		client.WithVersion("1.43"),
+		client.WithAPIVersion("1.43"),
 	)
 	if err != nil {
 		srv.Close()

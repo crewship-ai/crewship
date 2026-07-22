@@ -11,9 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 )
 
 // TestRestartCrewAgents_RealDocker exercises the full restart path against a
@@ -33,18 +32,18 @@ func TestRestartCrewAgents_RealDocker(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	docker, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	docker, err := client.New(client.FromEnv)
 	if err != nil {
 		t.Skipf("docker client unavailable: %v", err)
 	}
-	if _, err := docker.Ping(ctx); err != nil {
+	if _, err := docker.Ping(ctx, client.PingOptions{}); err != nil {
 		t.Skipf("docker daemon not reachable: %v", err)
 	}
 	defer func() { _ = docker.Close() }()
 
 	// Pull alpine if missing — it's tiny and we need a base image to run.
 	if _, err := docker.ImageInspect(ctx, "alpine:3"); err != nil {
-		rc, pullErr := docker.ImagePull(ctx, "alpine:3", image.PullOptions{})
+		rc, pullErr := docker.ImagePull(ctx, "alpine:3", client.ImagePullOptions{})
 		if pullErr != nil {
 			t.Skipf("cannot pull alpine: %v", pullErr)
 		}
@@ -84,10 +83,13 @@ func TestRestartCrewAgents_RealDocker(t *testing.T) {
 
 	// Mirror the provider's real naming: <prefix>-team-<slug>-<crewID>.
 	containerName := "crewship-team-" + slug + "-" + crewID
-	createResp, err := docker.ContainerCreate(ctx, &container.Config{
-		Image: "alpine:3",
-		Cmd:   []string{"sleep", "60"},
-	}, nil, nil, nil, containerName)
+	createResp, err := docker.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
+			Image: "alpine:3",
+			Cmd:   []string{"sleep", "60"},
+		},
+		Name: containerName,
+	})
 	if err != nil {
 		t.Fatalf("create test container: %v", err)
 	}
@@ -95,9 +97,9 @@ func TestRestartCrewAgents_RealDocker(t *testing.T) {
 	t.Cleanup(func() {
 		// Best-effort cleanup if the test fails before RestartCrewAgents
 		// removed the container.
-		_ = docker.ContainerRemove(context.Background(), createdID, container.RemoveOptions{Force: true})
+		_, _ = docker.ContainerRemove(context.Background(), createdID, client.ContainerRemoveOptions{Force: true})
 	})
-	if err := docker.ContainerStart(ctx, createdID, container.StartOptions{}); err != nil {
+	if _, err := docker.ContainerStart(ctx, createdID, client.ContainerStartOptions{}); err != nil {
 		t.Fatalf("start test container: %v", err)
 	}
 
@@ -123,7 +125,7 @@ func TestRestartCrewAgents_RealDocker(t *testing.T) {
 	}
 
 	// The container must actually be gone — that's the whole point.
-	if _, err := docker.ContainerInspect(ctx, createdID); err == nil {
+	if _, err := docker.ContainerInspect(ctx, createdID, client.ContainerInspectOptions{}); err == nil {
 		t.Errorf("container %s still exists after restart", createdID[:12])
 	}
 }
@@ -140,11 +142,11 @@ func TestRestartCrewAgents_NoContainer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	docker, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	docker, err := client.New(client.FromEnv)
 	if err != nil {
 		t.Skipf("docker client unavailable: %v", err)
 	}
-	if _, err := docker.Ping(ctx); err != nil {
+	if _, err := docker.Ping(ctx, client.PingOptions{}); err != nil {
 		t.Skipf("docker daemon not reachable: %v", err)
 	}
 	defer func() { _ = docker.Close() }()

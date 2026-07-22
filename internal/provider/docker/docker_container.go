@@ -17,10 +17,10 @@ import (
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/safepath"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/mount"
-	dockernetwork "github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/api/types/volume"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
+	dockernetwork "github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 )
 
 // FindCrewContainer is a non-mutating lookup for an existing crew
@@ -29,11 +29,11 @@ import (
 // restart with the stats collector.
 func (p *Provider) FindCrewContainer(ctx context.Context, id, slug string) (string, bool, error) {
 	containerName := p.CrewContainerName(id, slug)
-	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
+	containers, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return "", false, fmt.Errorf("list containers: %w", err)
 	}
-	for _, c := range containers {
+	for _, c := range containers.Items {
 		for _, name := range c.Names {
 			if name == "/"+containerName {
 				return c.ID, c.State == "running", nil
@@ -89,18 +89,18 @@ func (p *Provider) migrateLegacyCrewResources(ctx context.Context, id, slug, ima
 	prefix := p.namePrefix()
 	legacyContainer := prefix + "-team-" + slug
 
-	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
+	containers, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return fmt.Errorf("list containers (legacy C1 migration): %w", err)
 	}
-	for _, c := range containers {
+	for _, c := range containers.Items {
 		for _, name := range c.Names {
 			if name == "/"+legacyContainer {
 				p.logger.Info("removing legacy slug-scoped crew container (C1 migration)",
 					"container", legacyContainer, "container_id", provider.ShortID(c.ID))
 				timeout := 10
-				_ = p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})
-				if rmErr := p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); rmErr != nil {
+				_, _ = p.client.ContainerStop(ctx, c.ID, client.ContainerStopOptions{Timeout: &timeout})
+				if _, rmErr := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true}); rmErr != nil {
 					return fmt.Errorf("remove legacy slug-scoped container %q (C1 migration): %w", legacyContainer, rmErr)
 				}
 			}
@@ -120,11 +120,9 @@ func (p *Provider) migrateLegacyCrewResources(ctx context.Context, id, slug, ima
 			"legacy data was NOT removed and provisioning is paused so no empty id-scoped "+
 			"volumes strand it — retry once the daemon can enumerate volumes again", err)
 	}
-	existing := make(map[string]bool, len(list.Volumes))
-	for _, vol := range list.Volumes {
-		if vol != nil {
-			existing[vol.Name] = true
-		}
+	existing := make(map[string]bool, len(list.Items))
+	for _, vol := range list.Items {
+		existing[vol.Name] = true
 	}
 
 	for _, role := range []string{"home", "tools"} {
@@ -190,11 +188,11 @@ func (p *Provider) HasLegacyCrewResources(ctx context.Context, crews []provider.
 		return false, nil
 	}
 
-	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
+	containers, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return false, fmt.Errorf("list containers (legacy C1 detect): %w", err)
 	}
-	for _, c := range containers {
+	for _, c := range containers.Items {
 		for _, name := range c.Names {
 			if legacy[strings.TrimPrefix(name, "/")] {
 				return true, nil
@@ -206,8 +204,8 @@ func (p *Provider) HasLegacyCrewResources(ctx context.Context, crews []provider.
 	if err != nil {
 		return false, fmt.Errorf("list volumes (legacy C1 detect): %w", err)
 	}
-	for _, vol := range list.Volumes {
-		if vol != nil && legacy[vol.Name] {
+	for _, vol := range list.Items {
+		if legacy[vol.Name] {
 			return true, nil
 		}
 	}
@@ -230,15 +228,15 @@ func (p *Provider) PruneLegacyCrewResources(ctx context.Context, crews []provide
 		return removed, nil
 	}
 
-	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
+	containers, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return removed, fmt.Errorf("list containers (legacy C1 prune): %w", err)
 	}
-	for _, c := range containers {
+	for _, c := range containers.Items {
 		for _, name := range c.Names {
 			n := strings.TrimPrefix(name, "/")
 			if legacy[n] {
-				if rmErr := p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); rmErr != nil {
+				if _, rmErr := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true}); rmErr != nil {
 					p.logger.Warn("legacy C1 container remove failed", "container", n, "error", rmErr)
 				} else {
 					removed = append(removed, n)
@@ -251,9 +249,9 @@ func (p *Provider) PruneLegacyCrewResources(ctx context.Context, crews []provide
 	if err != nil {
 		return removed, fmt.Errorf("list volumes (legacy C1 prune): %w", err)
 	}
-	for _, vol := range list.Volumes {
-		if vol != nil && legacy[vol.Name] {
-			if rmErr := p.client.VolumeRemove(ctx, vol.Name, true); rmErr != nil {
+	for _, vol := range list.Items {
+		if legacy[vol.Name] {
+			if _, rmErr := p.client.VolumeRemove(ctx, vol.Name, client.VolumeRemoveOptions{Force: true}); rmErr != nil {
 				p.logger.Warn("legacy C1 volume remove failed", "volume", vol.Name, "error", rmErr)
 			} else {
 				removed = append(removed, vol.Name)
@@ -289,7 +287,7 @@ func (p *Provider) migrateLegacyVolume(ctx context.Context, legacy, target, imag
 	// orphan check), treats the partial copy as authoritative, and skips migration,
 	// silently stranding the legacy data behind a corrupt half-copy.
 	copySucceeded := false
-	if _, err := p.client.VolumeCreate(ctx, volume.CreateOptions{
+	if _, err := p.client.VolumeCreate(ctx, client.VolumeCreateOptions{
 		Name:   target,
 		Labels: map[string]string{"managed-by": "crewship"},
 	}); err != nil {
@@ -305,7 +303,7 @@ func (p *Provider) migrateLegacyVolume(ctx context.Context, legacy, target, imag
 		// volume the orphan check will later flag, and the legacy data is intact.
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := p.client.VolumeRemove(cleanupCtx, target, true); err != nil {
+		if _, err := p.client.VolumeRemove(cleanupCtx, target, client.VolumeRemoveOptions{Force: true}); err != nil {
 			p.logger.Warn("C1 migration failed and could not remove the incomplete target volume — operator should prune it before the next provision",
 				"legacy_volume", legacy, "target_volume", target, "error", err)
 		}
@@ -335,14 +333,17 @@ func (p *Provider) migrateLegacyVolume(ctx context.Context, legacy, target, imag
 			{Type: mount.TypeVolume, Source: target, Target: "/to"},
 		},
 	}
-	created, err := p.client.ContainerCreate(ctx, helperCfg, helperHost, nil, nil, "")
+	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config:     helperCfg,
+		HostConfig: helperHost,
+	})
 	if err != nil {
 		return failSafe("create copy helper", err)
 	}
 	// Always clean up the helper, success or failure.
-	defer func() { _ = p.client.ContainerRemove(ctx, created.ID, container.RemoveOptions{Force: true}) }()
+	defer func() { _, _ = p.client.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{Force: true}) }()
 
-	if err := p.client.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
+	if _, err := p.client.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
 		return failSafe("start copy helper", err)
 	}
 
@@ -352,21 +353,22 @@ func (p *Provider) migrateLegacyVolume(ctx context.Context, legacy, target, imag
 	// /containers/{id}/wait, which is also straightforward to fake in tests.
 	waitCtx, waitCancel := context.WithTimeout(ctx, 60*time.Second)
 	defer waitCancel()
-	statusCh, errCh := p.client.ContainerWait(waitCtx, created.ID, container.WaitConditionNotRunning)
+	wait := p.client.ContainerWait(waitCtx, created.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
 	select {
-	case status, ok := <-statusCh:
-		// ContainerWait closes statusCh (zero-value status, ok == false) on a
-		// wait failure while delivering the real cause on errCh. select can pick
-		// this ready-but-closed case first, so a closed channel must be treated
-		// as failure — otherwise a wait error masquerades as StatusCode 0 and we
-		// would go on to remove the legacy volume after a copy that never ran.
+	case status, ok := <-wait.Result:
+		// ContainerWait closes the Result channel (zero-value status, ok ==
+		// false) on a wait failure while delivering the real cause on the
+		// Error channel. select can pick this ready-but-closed case first, so
+		// a closed channel must be treated as failure — otherwise a wait
+		// error masquerades as StatusCode 0 and we would go on to remove the
+		// legacy volume after a copy that never ran.
 		if !ok {
 			return failSafe("wait for copy helper", fmt.Errorf("wait channel closed before a status was delivered"))
 		}
 		if status.StatusCode != 0 {
 			return failSafe("copy helper exit", fmt.Errorf("helper exited with status %d", status.StatusCode))
 		}
-	case werr := <-errCh:
+	case werr := <-wait.Error:
 		return failSafe("wait for copy helper", werr)
 	case <-waitCtx.Done():
 		return failSafe("wait for copy helper", waitCtx.Err())
@@ -375,7 +377,7 @@ func (p *Provider) migrateLegacyVolume(ctx context.Context, legacy, target, imag
 	// suppress the rollback defer before we prune the legacy source.
 	copySucceeded = true
 
-	if err := p.client.VolumeRemove(ctx, legacy, true); err != nil {
+	if _, err := p.client.VolumeRemove(ctx, legacy, client.VolumeRemoveOptions{Force: true}); err != nil {
 		// The data was copied successfully; failing to prune the legacy volume
 		// is non-fatal (it becomes a benign orphan). Warn and continue.
 		p.logger.Warn("C1 migration copied volume data but failed to prune legacy volume — operator may prune it manually",
@@ -567,19 +569,18 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	if err != nil {
 		return "", err
 	}
-	resp, err := p.client.ContainerCreate(ctx,
-		containerCfg,
-		hostConfig,
-		&dockernetwork.NetworkingConfig{},
-		nil,
-		containerName,
-	)
+	resp, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config:           containerCfg,
+		HostConfig:       hostConfig,
+		NetworkingConfig: &dockernetwork.NetworkingConfig{},
+		Name:             containerName,
+	})
 	if err != nil {
 		return "", fmt.Errorf("container create: %w", err)
 	}
 	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepContainerCreate, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage})
 
-	if err := p.client.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+	if _, err := p.client.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
 		return "", fmt.Errorf("container start: %w", err)
 	}
 
@@ -650,19 +651,20 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 	// cost the warm cache above short-circuits: only the FIRST same-crew call
 	// in a warmCrewTTL window reaches here; a DAG wave's remaining steps (and
 	// a prewarmed run's first step) hit the cache and skip it entirely.
-	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
+	containers, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return "", false, fmt.Errorf("list containers: %w", err)
 	}
-	p.logger.Debug("containers listed", "count", len(containers))
-	for _, c := range containers {
+	p.logger.Debug("containers listed", "count", len(containers.Items))
+	for _, c := range containers.Items {
 		for _, name := range c.Names {
 			if name == "/"+containerName {
 				// Check if container has /crew mount; if not, recreate it.
-				inspect, inspErr := p.client.ContainerInspect(ctx, c.ID)
+				inspectResult, inspErr := p.client.ContainerInspect(ctx, c.ID, client.ContainerInspectOptions{})
 				if inspErr != nil {
 					return "", false, fmt.Errorf("inspect existing container %s: %w", containerName, inspErr)
 				}
+				inspect := inspectResult.Container
 				// The reused container may still be running a previously
 				// provisioned cached image, while desiredImage falls back to the
 				// provider default when the caller left Image/CachedImage empty.
@@ -760,7 +762,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					p.forceTeardown(ctx, c.ID, team.ID)
 					break // fall through to create new container
 				}
-				if err := p.client.ContainerStart(ctx, c.ID, container.StartOptions{}); err != nil {
+				if _, err := p.client.ContainerStart(ctx, c.ID, client.ContainerStartOptions{}); err != nil {
 					return "", false, fmt.Errorf("start existing container: %w", err)
 				}
 				// Note: postStartCommand runs ONCE when the container is
@@ -891,25 +893,25 @@ func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage strin
 		for _, dir := range dirs.all {
 			mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: dir, Target: "/mnt" + dir})
 		}
-		initResp, initErr := p.client.ContainerCreate(ctx,
-			&container.Config{
+		initResp, initErr := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+			Config: &container.Config{
 				Image:      runtimeImage,
 				User:       "0:0",
 				Entrypoint: []string{"sh", "-c", chownCmd},
 			},
-			&container.HostConfig{Mounts: mounts},
-			nil, nil, "")
+			HostConfig: &container.HostConfig{Mounts: mounts},
+		})
 		if initErr == nil {
-			_ = p.client.ContainerStart(ctx, initResp.ID, container.StartOptions{})
+			_, _ = p.client.ContainerStart(ctx, initResp.ID, client.ContainerStartOptions{})
 			// ContainerWait returns two channels; drain one of them (or
 			// cancel) so we do not leak a goroutine inside the docker client
 			// when the wait completes. A short timeout keeps us from hanging
 			// indefinitely on a wedged daemon.
 			waitCtx, waitCancel := context.WithTimeout(ctx, 30*time.Second)
-			statusCh, waitErrCh := p.client.ContainerWait(waitCtx, initResp.ID, container.WaitConditionNotRunning)
+			wait := p.client.ContainerWait(waitCtx, initResp.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
 			select {
-			case <-statusCh:
-			case werr := <-waitErrCh:
+			case <-wait.Result:
+			case werr := <-wait.Error:
 				if werr != nil {
 					p.logger.Debug("init container wait returned error", "error", werr)
 				}
@@ -917,7 +919,7 @@ func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage strin
 				p.logger.Debug("init container wait timed out", "error", waitCtx.Err())
 			}
 			waitCancel()
-			_ = p.client.ContainerRemove(ctx, initResp.ID, container.RemoveOptions{})
+			_, _ = p.client.ContainerRemove(ctx, initResp.ID, client.ContainerRemoveOptions{})
 			p.logger.Debug("init container fixed bind-mount ownership")
 		} else {
 			p.logger.Warn("init container chown failed, falling back to 0777", "error", initErr)
@@ -1100,17 +1102,17 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 func (p *Provider) runByoiSidecarCheck(ctx context.Context, containerID, image string) error {
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	execCfg := container.ExecOptions{
+	execCfg := client.ExecCreateOptions{
 		Cmd:          []string{"/usr/local/bin/crewship-sidecar", "--version"},
 		User:         "0:0",
 		AttachStdout: true,
 		AttachStderr: true,
 	}
-	ex, execErr := p.client.ContainerExecCreate(checkCtx, containerID, execCfg)
+	ex, execErr := p.client.ExecCreate(checkCtx, containerID, execCfg)
 	if execErr != nil {
 		return nil
 	}
-	if startErr := p.client.ContainerExecStart(checkCtx, ex.ID, container.ExecStartOptions{}); startErr != nil {
+	if _, startErr := p.client.ExecStart(checkCtx, ex.ID, client.ExecStartOptions{}); startErr != nil {
 		return nil
 	}
 	// Poll exit code briefly.
@@ -1132,8 +1134,8 @@ func (p *Provider) runByoiSidecarCheck(ctx context.Context, containerID, image s
 // container regardless.
 func (p *Provider) forceTeardown(ctx context.Context, containerID, crewID string) {
 	timeout := 10
-	_ = p.client.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout})
-	_ = p.client.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
+	_, _ = p.client.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout})
+	_, _ = p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true})
 	p.evictWarm(crewID)
 }
 
@@ -1143,7 +1145,7 @@ func (p *Provider) forceTeardown(ctx context.Context, containerID, crewID string
 // while the exec was still running, or the first inspect error encountered.
 func (p *Provider) waitExecExit(ctx context.Context, execID string, maxPolls int) (exitCode int, stillRunning bool, err error) {
 	for i := 0; i < maxPolls; i++ {
-		inspect, ierr := p.client.ContainerExecInspect(ctx, execID)
+		inspect, ierr := p.client.ExecInspect(ctx, execID, client.ExecInspectOptions{})
 		if ierr != nil {
 			return 0, false, ierr
 		}
@@ -1166,21 +1168,21 @@ func (p *Provider) runPostStartCommands(ctx context.Context, containerID string,
 	for _, cmd := range cmds {
 		runCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		// strict mode — fail loud on first error, matches install.sh behavior.
-		execCfg := container.ExecOptions{
+		execCfg := client.ExecCreateOptions{
 			Cmd:          []string{"bash", "-lc", "set -e\n" + cmd},
 			User:         "1001:1001",
 			Env:          []string{"HOME=/home/agent", "USER=agent"},
 			AttachStdout: true,
 			AttachStderr: true,
 		}
-		ex, err := p.client.ContainerExecCreate(runCtx, containerID, execCfg)
+		ex, err := p.client.ExecCreate(runCtx, containerID, execCfg)
 		if err != nil {
 			cancel()
 			p.logger.Warn("postStartCommand exec create failed",
 				"container", provider.ShortID(containerID), "cmd", cmd, "error", err)
 			continue
 		}
-		if err := p.client.ContainerExecStart(runCtx, ex.ID, container.ExecStartOptions{}); err != nil {
+		if _, err := p.client.ExecStart(runCtx, ex.ID, client.ExecStartOptions{}); err != nil {
 			cancel()
 			p.logger.Warn("postStartCommand exec start failed",
 				"container", provider.ShortID(containerID), "cmd", cmd, "error", err)
@@ -1237,7 +1239,7 @@ func buildChownInitCmd(allDirs []string, crewPath string) string {
 // StopCrewRuntime gracefully stops a crew container with a 30-second timeout.
 func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) error {
 	timeout := 30
-	if err := p.client.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout}); err != nil {
+	if _, err := p.client.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
 		return fmt.Errorf("stop crew runtime %s: %w", provider.ShortID(containerID), err)
 	}
 	return nil
@@ -1245,7 +1247,7 @@ func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) erro
 
 // RemoveCrewRuntime forcefully removes a crew container.
 func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) error {
-	if err := p.client.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true}); err != nil {
+	if _, err := p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true}); err != nil {
 		return fmt.Errorf("remove crew runtime %s: %w", provider.ShortID(containerID), err)
 	}
 	return nil
@@ -1253,10 +1255,11 @@ func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) er
 
 // ContainerStatus inspects a container and returns its current state (running/stopped/error).
 func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*provider.ContainerStatus, error) {
-	inspect, err := p.client.ContainerInspect(ctx, containerID)
+	inspectResult, err := p.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("container inspect: %w", err)
 	}
+	inspect := inspectResult.Container
 
 	state := "stopped"
 	switch {
@@ -1277,7 +1280,15 @@ func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*pr
 
 // ContainerStats returns CPU and memory usage metrics for a running container.
 func (p *Provider) ContainerStats(ctx context.Context, containerID string) (*provider.ContainerMetrics, error) {
-	resp, err := p.client.ContainerStats(ctx, containerID, false)
+	// IncludePreviousSample keeps the daemon's two-sample (1s apart)
+	// collection so PreCPUStats is populated and CPUPercent stays a 1s
+	// delta. Without it, moby v2's Stream:false defaults to one-shot mode:
+	// PreCPUStats comes back zeroed and the >=0 wraparound guard below
+	// would silently turn CPUPercent into a cumulative since-start average.
+	resp, err := p.client.ContainerStats(ctx, containerID, client.ContainerStatsOptions{
+		Stream:                false,
+		IncludePreviousSample: true,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("container stats: %w", err)
 	}

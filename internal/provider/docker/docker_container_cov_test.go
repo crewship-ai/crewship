@@ -28,8 +28,8 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/provider"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 )
 
 const covRuntimeRef = "127.0.0.1:1/cov/runtime:latest"
@@ -65,7 +65,7 @@ type covRT struct {
 	starts          []string
 	stops           []string
 	deletes         []string
-	execCreates     []container.ExecOptions
+	execCreates     []container.ExecCreateRequest
 	imgInspects     int
 	execInspectN    map[string]int
 	execCreateCount int
@@ -132,7 +132,7 @@ func (f *covRT) handler() http.HandlerFunc {
 			_, _ = w.Write([]byte(`{"Running":false,"ExitCode":0}`))
 
 		case strings.HasSuffix(path, "/exec") && r.Method == http.MethodPost:
-			var opts container.ExecOptions
+			var opts container.ExecCreateRequest
 			b, _ := io.ReadAll(r.Body)
 			_ = json.Unmarshal(b, &opts)
 			f.execCreates = append(f.execCreates, opts)
@@ -288,7 +288,7 @@ func covRTConfig(t *testing.T) Config {
 func (f *covRT) provider(t *testing.T, cfg Config) *Provider {
 	t.Helper()
 	srv := httptest.NewServer(f.handler())
-	cli, err := client.NewClientWithOpts(client.WithHost(srv.URL), client.WithVersion("1.43"))
+	cli, err := client.New(client.WithHost(srv.URL), client.WithAPIVersion("1.43"))
 	if err != nil {
 		srv.Close()
 		t.Fatalf("docker client: %v", err)

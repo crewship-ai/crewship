@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 )
 
 // newFakeDockerProvider returns a Provider wired to an httptest server that
@@ -24,11 +24,11 @@ func newFakeDockerProvider(t *testing.T, handler http.HandlerFunc) (*Provider, f
 
 	srv := httptest.NewServer(handler)
 
-	cli, err := client.NewClientWithOpts(
+	cli, err := client.New(
 		client.WithHost(srv.URL),
 		// Pin a recent stable API version to avoid auto-negotiation calls
 		// against the fake server.
-		client.WithVersion("1.43"),
+		client.WithAPIVersion("1.43"),
 	)
 	if err != nil {
 		srv.Close()
@@ -256,9 +256,18 @@ func TestContainerStats_FakeAPI(t *testing.T) {
 		if !strings.Contains(r.URL.Path, "/containers/cid/stats") {
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
-		// SDK passes stream=0 for one-shot.
-		if r.URL.Query().Get("stream") != "0" {
-			t.Errorf("stream query = %q, want 0", r.URL.Query().Get("stream"))
+		// moby/moby/client encodes the Stream bool query param as "false"/"true"
+		// (was "0"/"1" under docker/docker v28) — a wire-encoding convention
+		// change in the new SDK, not a functional one; the daemon accepts both.
+		if r.URL.Query().Get("stream") != "false" {
+			t.Errorf("stream query = %q, want false", r.URL.Query().Get("stream"))
+		}
+		// Previous-sample mode must be requested: moby v2's Stream:false
+		// otherwise adds one-shot=true, which zeroes PreCPUStats and would
+		// silently degrade CPUPercent from a 1s delta to a cumulative
+		// since-start average.
+		if r.URL.Query().Get("one-shot") == "true" {
+			t.Errorf("one-shot=true sent; want previous-sample mode (IncludePreviousSample)")
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(statsPayload)

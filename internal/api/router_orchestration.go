@@ -22,6 +22,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/moby/moby/client"
 )
 
 // orchestrationHandlers bundles the handlers constructed in
@@ -581,18 +582,19 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	if r.dockerClient != nil {
 		dc := r.dockerClient
 		peInspector = DockerInspectorFunc(func(ctx context.Context, id, network string) (string, error) {
-			inspect, err := dc.ContainerInspect(ctx, id)
+			inspectResult, err := dc.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
 			if err != nil {
 				return "", err
 			}
+			inspect := inspectResult.Container
 			if inspect.NetworkSettings == nil {
 				return "", errPortExposeNoNetwork
 			}
 			ns, ok := inspect.NetworkSettings.Networks[network]
-			if !ok || ns == nil || ns.IPAddress == "" {
+			if !ok || ns == nil || !ns.IPAddress.IsValid() {
 				return "", errPortExposeNoNetwork
 			}
-			return ns.IPAddress, nil
+			return ns.IPAddress.String(), nil
 		})
 	}
 	portExposeH := NewPortExposeHandler(r.db, r.portExposeRegistry, peInspector, AllowAllPolicy{}, r.hub, peCfg, r.logger)

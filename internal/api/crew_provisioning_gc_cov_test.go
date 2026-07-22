@@ -9,8 +9,9 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/client"
 )
 
 // crew_provisioning_gc_cov_test.go covers the remaining sweeper
@@ -34,38 +35,38 @@ type covGCFake struct {
 	removedImages     []string
 }
 
-func (f *covGCFake) ContainerList(_ context.Context, _ container.ListOptions) ([]container.Summary, error) {
+func (f *covGCFake) ContainerList(_ context.Context, _ client.ContainerListOptions) (client.ContainerListResult, error) {
 	if f.containerListErr != nil {
-		return nil, f.containerListErr
+		return client.ContainerListResult{}, f.containerListErr
 	}
-	return f.containers, nil
+	return client.ContainerListResult{Items: f.containers}, nil
 }
 
-func (f *covGCFake) ContainerRemove(_ context.Context, id string, _ container.RemoveOptions) error {
+func (f *covGCFake) ContainerRemove(_ context.Context, id string, _ client.ContainerRemoveOptions) (client.ContainerRemoveResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.containerRemoveErr != nil {
-		return f.containerRemoveErr
+		return client.ContainerRemoveResult{}, f.containerRemoveErr
 	}
 	f.removedContainers = append(f.removedContainers, id)
-	return nil
+	return client.ContainerRemoveResult{}, nil
 }
 
-func (f *covGCFake) ImageList(_ context.Context, _ image.ListOptions) ([]image.Summary, error) {
+func (f *covGCFake) ImageList(_ context.Context, _ client.ImageListOptions) (client.ImageListResult, error) {
 	if f.imageListErr != nil {
-		return nil, f.imageListErr
+		return client.ImageListResult{}, f.imageListErr
 	}
-	return f.images, nil
+	return client.ImageListResult{Items: f.images}, nil
 }
 
-func (f *covGCFake) ImageRemove(_ context.Context, id string, _ image.RemoveOptions) ([]image.DeleteResponse, error) {
+func (f *covGCFake) ImageRemove(_ context.Context, id string, _ client.ImageRemoveOptions) (client.ImageRemoveResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.imageRemoveErr != nil {
-		return nil, f.imageRemoveErr
+		return client.ImageRemoveResult{}, f.imageRemoveErr
 	}
 	f.removedImages = append(f.removedImages, id)
-	return nil, nil
+	return client.ImageRemoveResult{}, nil
 }
 
 func covGCStaleContainer(id string) container.Summary {

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
-	"github.com/docker/docker/api/types/mount"
+	"github.com/moby/moby/api/types/mount"
 )
 
 // These tests exercise PURE helpers in the docker provider package — they

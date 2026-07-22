@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/dockerutil"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 )
 
 // newEnsureImageProvider returns a Provider whose fake daemon records the
@@ -59,9 +59,9 @@ func newEnsureImageProvider(t *testing.T, imagePresent bool) (p *Provider, pulls
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(handler))
-	cli, err := client.NewClientWithOpts(
+	cli, err := client.New(
 		client.WithHost(srv.URL),
-		client.WithVersion("1.43"),
+		client.WithAPIVersion("1.43"),
 	)
 	if err != nil {
 		srv.Close()

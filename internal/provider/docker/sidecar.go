@@ -43,13 +43,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/mount"
-	dockernetwork "github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/api/types/strslice"
-	"github.com/docker/docker/api/types/volume"
-	"github.com/docker/go-connections/nat"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
+	dockernetwork "github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
@@ -134,8 +131,8 @@ func readToDiscard(r io.Reader) (int64, error) {
 // volumeListOptions returns the no-filter ListOptions used by the
 // sidecar volume cleanup path. Centralised here so a future
 // label-based filter change touches one site.
-func volumeListOptions() volume.ListOptions {
-	return volume.ListOptions{}
+func volumeListOptions() client.VolumeListOptions {
+	return client.VolumeListOptions{}
 }
 
 // sidecarContainerName returns the docker container name for one
@@ -227,11 +224,11 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewSlug string, svc *prov
 	name := p.sidecarContainerName(crewSlug, svc.Name)
 	desiredHash := computeSidecarSpecHash(svc)
 
-	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
+	listResult, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return "", fmt.Errorf("list containers: %w", err)
 	}
-	for _, c := range containers {
+	for _, c := range listResult.Items {
 		var matched bool
 		for _, n := range c.Names {
 			if n == "/"+name {
@@ -258,7 +255,7 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewSlug string, svc *prov
 		if drift != "" {
 			p.logger.Info("sidecar drift; recreating", "service", svc.Name, "reason", drift)
 			timeout := 5
-			if err := p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout}); err != nil {
+			if _, err := p.client.ContainerStop(ctx, c.ID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
 				// Stop can fail when the container is already
 				// gone (race with another reconcile). Inspect
 				// + skip-if-not-found would be cleaner, but
@@ -268,13 +265,13 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewSlug string, svc *prov
 				p.logger.Debug("sidecar stop returned error (may be already stopped)",
 					"service", svc.Name, "error", err)
 			}
-			if err := p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true, RemoveVolumes: false}); err != nil {
+			if _, err := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: false}); err != nil {
 				return "", fmt.Errorf("remove sidecar %q for recreate: %w", svc.Name, err)
 			}
 			break // fall through to create
 		}
 		if c.State != "running" {
-			if err := p.client.ContainerStart(ctx, c.ID, container.StartOptions{}); err != nil {
+			if _, err := p.client.ContainerStart(ctx, c.ID, client.ContainerStartOptions{}); err != nil {
 				return "", fmt.Errorf("start existing sidecar: %w", err)
 			}
 		}
@@ -311,9 +308,13 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewSlug string, svc *prov
 	// Ports: container-internal only — never publish to the host.
 	// Sidecars are crew-private; exposing them on the host would
 	// leak DB ports across crews and tenants.
-	exposed := nat.PortSet{}
+	exposed := dockernetwork.PortSet{}
 	for _, p := range svc.Ports {
-		port, err := nat.NewPort("tcp", strings.TrimSuffix(p, "/tcp"))
+		// ParsePort handles "5432", "5432/tcp" and "5432/udp" directly
+		// (bare ports default to tcp). No suffix munging: appending
+		// "/tcp" to an already-qualified "53/udp" would produce the
+		// malformed key "53/udp/tcp".
+		port, err := dockernetwork.ParsePort(p)
 		if err == nil {
 			exposed[port] = struct{}{}
 		}
@@ -345,7 +346,7 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewSlug string, svc *prov
 		Healthcheck: hc,
 	}
 	if len(svc.Command) > 0 {
-		cfg.Cmd = strslice.StrSlice(svc.Command)
+		cfg.Cmd = svc.Command
 	}
 
 	// Audit H7 baseline hardening. Sidecars used to inherit Docker's
@@ -398,11 +399,16 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewSlug string, svc *prov
 		}
 	}
 
-	created, err := p.client.ContainerCreate(ctx, cfg, hostCfg, networkCfg, nil, name)
+	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config:           cfg,
+		HostConfig:       hostCfg,
+		NetworkingConfig: networkCfg,
+		Name:             name,
+	})
 	if err != nil {
 		return "", fmt.Errorf("create sidecar: %w", err)
 	}
-	if err := p.client.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
+	if _, err := p.client.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
 		return "", fmt.Errorf("start sidecar: %w", err)
 	}
 	p.logger.Info("sidecar started", "crew", crewSlug, "service", svc.Name, "container", created.ID, "image", svc.Image)
@@ -418,7 +424,7 @@ func (p *Provider) pullSidecarImage(ctx context.Context, ref string) error {
 	_, inspectErr := p.client.ImageInspect(ctx, ref)
 	localPresent := inspectErr == nil
 
-	reader, err := p.client.ImagePull(ctx, ref, image.PullOptions{})
+	reader, err := p.client.ImagePull(ctx, ref, client.ImagePullOptions{})
 	if err != nil {
 		if localPresent {
 			p.logger.Warn("sidecar image pull failed; using local copy", "image", ref, "error", err)
@@ -445,24 +451,24 @@ func (p *Provider) waitSidecarHealthy(ctx context.Context, containerID string) e
 		case <-ctx.Done():
 			return fmt.Errorf("timeout waiting for healthy")
 		case <-tick.C:
-			inspect, err := p.client.ContainerInspect(ctx, containerID)
+			inspect, err := p.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
 			if err != nil {
 				continue // transient — keep polling
 			}
-			if inspect.State == nil {
+			if inspect.Container.State == nil {
 				continue
 			}
-			if inspect.State.Health == nil {
+			if inspect.Container.State.Health == nil {
 				// Container is running but has no healthcheck
 				// configured at the docker level (e.g. spec said
 				// otherwise but docker didn't apply it). Treat
 				// "running" as ready and move on.
-				if inspect.State.Running {
+				if inspect.Container.State.Running {
 					return nil
 				}
 				continue
 			}
-			switch inspect.State.Health.Status {
+			switch inspect.Container.State.Health.Status {
 			case "healthy":
 				return nil
 			case "unhealthy":
@@ -482,20 +488,20 @@ func (p *Provider) waitSidecarHealthy(ctx context.Context, containerID string) e
 // crew's sidecars running, which is the worst outcome (the agent
 // is gone but its dependents linger).
 func (p *Provider) StopCrewServices(ctx context.Context, crewSlug string) error {
-	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
+	listResult, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return fmt.Errorf("list containers: %w", err)
 	}
 	timeout := 10
 	var failures []error
-	for _, c := range containers {
+	for _, c := range listResult.Items {
 		if c.Labels["crewship.crew"] != crewSlug || c.Labels["crewship.kind"] != "sidecar" {
 			continue
 		}
 		if c.State != "running" {
 			continue
 		}
-		if err := p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout}); err != nil {
+		if _, err := p.client.ContainerStop(ctx, c.ID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
 			p.logger.Warn("stop sidecar failed", "container", c.ID, "error", err)
 			failures = append(failures, fmt.Errorf("stop %s: %w", c.ID, err))
 		}
@@ -511,16 +517,16 @@ func (p *Provider) StopCrewServices(ctx context.Context, crewSlug string) error 
 // you want a full teardown. Like StopCrewServices, attempts every
 // container and aggregates failures.
 func (p *Provider) RemoveCrewServices(ctx context.Context, crewSlug string) error {
-	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
+	listResult, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return fmt.Errorf("list containers: %w", err)
 	}
 	var failures []error
-	for _, c := range containers {
+	for _, c := range listResult.Items {
 		if c.Labels["crewship.crew"] != crewSlug || c.Labels["crewship.kind"] != "sidecar" {
 			continue
 		}
-		if err := p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true, RemoveVolumes: false}); err != nil {
+		if _, err := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: false}); err != nil {
 			p.logger.Warn("remove sidecar failed", "container", c.ID, "error", err)
 			failures = append(failures, fmt.Errorf("remove %s: %w", c.ID, err))
 		}
@@ -540,16 +546,16 @@ func (p *Provider) RemoveCrewServiceVolumes(ctx context.Context, crewSlug string
 	// List by filter is preferable but docker's volume list filter
 	// API treats `label=managed-by=crewship` consistently; we list
 	// all and filter by name prefix in code to keep this simple.
-	list, err := p.client.VolumeList(ctx, volumeListOptions())
+	volList, err := p.client.VolumeList(ctx, volumeListOptions())
 	if err != nil {
 		return fmt.Errorf("list volumes: %w", err)
 	}
 	var failures []error
-	for _, vol := range list.Volumes {
-		if vol == nil || !strings.HasPrefix(vol.Name, wantPrefix) {
+	for _, vol := range volList.Items {
+		if !strings.HasPrefix(vol.Name, wantPrefix) {
 			continue
 		}
-		if err := p.client.VolumeRemove(ctx, vol.Name, true); err != nil {
+		if _, err := p.client.VolumeRemove(ctx, vol.Name, client.VolumeRemoveOptions{Force: true}); err != nil {
 			p.logger.Warn("remove sidecar volume failed", "volume", vol.Name, "error", err)
 			failures = append(failures, fmt.Errorf("remove %s: %w", vol.Name, err))
 		}

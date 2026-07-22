@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/dockerutil"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 )
 
 func (p *Provisioner) aggregateFeatureRequirements(features []*ResolvedFeature, rootEnv map[string]string) AggregatedRequirements {
@@ -55,8 +55,8 @@ func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string)
 	if err := p.ensureImage(ctx, baseImage); err != nil {
 		return "", fmt.Errorf("pull base image %q: %w", baseImage, err)
 	}
-	resp, err := p.docker.ContainerCreate(ctx,
-		&container.Config{
+	resp, err := p.docker.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
 			Image: baseImage,
 			Cmd:   []string{"sleep", "infinity"},
 			User:  "0:0",
@@ -67,15 +67,13 @@ func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string)
 			// sweeper acts on. See TempContainerLabelKey's doc comment.
 			Labels: map[string]string{TempContainerLabelKey: TempContainerLabelValue},
 		},
-		&container.HostConfig{
+		HostConfig: &container.HostConfig{
 			// Parity with runtime — some feature install scripts dial the host
 			// (local registry mirrors, air-gapped package servers).
 			ExtraHosts: []string{"host.docker.internal:host-gateway"},
 		},
-		nil, // networkingConfig
-		nil, // platform
-		tempContainerName(),
-	)
+		Name: tempContainerName(),
+	})
 	if err != nil {
 		return "", err
 	}
@@ -115,9 +113,9 @@ func tempContainerName() string {
 func (p *Provisioner) ensureImage(ctx context.Context, ref string) error {
 	remoteDigest := p.digestResolver.Remote(ctx, ref)
 
-	inspect, inspectErr := p.docker.ImageInspect(ctx, ref)
+	inspectResult, inspectErr := p.docker.ImageInspect(ctx, ref)
 	localPresent := inspectErr == nil
-	if localPresent && remoteDigest != "" && dockerutil.RepoDigestsContain(inspect.RepoDigests, remoteDigest) {
+	if localPresent && remoteDigest != "" && dockerutil.RepoDigestsContain(inspectResult.RepoDigests, remoteDigest) {
 		return nil
 	}
 	if localPresent && remoteDigest == "" {
@@ -135,7 +133,7 @@ func (p *Provisioner) ensureImage(ctx context.Context, ref string) error {
 		action = "local image stale, re-pulling"
 	}
 	p.logger.Info(action, "ref", ref, "remote_digest", remoteDigest)
-	rc, err := p.docker.ImagePull(ctx, ref, image.PullOptions{})
+	rc, err := p.docker.ImagePull(ctx, ref, client.ImagePullOptions{})
 	if err != nil {
 		// If pull fails but image exists locally, proceed with stale copy and
 		// warn. Otherwise surface the error.

@@ -79,8 +79,7 @@ monitored for upstream resolution.
 
 | CVE | Module | Status | Notes |
 |-----|--------|--------|-------|
-| GO-2026-4887 | github.com/docker/docker | No upstream fix | AuthZ plugin bypass on oversized request bodies. Not reachable via Crewship's usage pattern (we do not use AuthZ plugins). Monitor https://pkg.go.dev/vuln/GO-2026-4887 |
-| GO-2026-4883 | github.com/docker/docker | No upstream fix | Off-by-one in plugin privilege validation. Not reachable via Crewship's usage pattern. Monitor https://pkg.go.dev/vuln/GO-2026-4883 |
+| GO-2026-5932 | golang.org/x/crypto/openpgp | No upstream fix (Fixed in: N/A) | The openpgp package is unmaintained and unsafe by design; upstream will never ship a fix (advisory is "use a maintained alternative"). **Not reachable in Crewship**: we never import `golang.org/x/crypto/openpgp` (it is a transitive-graph presence only — `go mod why golang.org/x/crypto` reports "main module does not need package"), and govulncheck lists it under "modules you require, but your code doesn't appear to call". Bumping x/crypto does not help — every published version, including the latest, still ships openpgp with the same advisory. Accepted as known, non-reachable risk. Monitor https://pkg.go.dev/vuln/GO-2026-5932 |
 MANUAL
 } > "$TMP"
 
