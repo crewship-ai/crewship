@@ -100,7 +100,20 @@ type Hub struct {
 	// sweep is still running when the next tick fires, that tick is
 	// skipped rather than stacking a second concurrent sweep.
 	connSweepInFlight atomic.Bool
+
+	// authReadTimeout bounds how long HandleUpgrade waits for the
+	// post-upgrade auth message before closing an unauthenticated
+	// connection. Defaults to wsAuthReadTimeout; tests shrink it directly
+	// (unexported field, same package) to exercise the timeout path
+	// without a real 10s wait.
+	authReadTimeout time.Duration
 }
+
+// wsAuthReadTimeout is how long a freshly upgraded /ws connection has to
+// send its {"type":"auth","token":...} message before the server closes
+// it. Matches /ws/terminal's post-upgrade auth deadline
+// (internal/terminal/handler.go).
+const wsAuthReadTimeout = 10 * time.Second
 
 // dropLogThreshold is how many dropped frames must accumulate between WARN
 // log lines. Picked large enough that healthy traffic never logs and small
@@ -252,17 +265,18 @@ func NewHub(logger *slog.Logger, chatHandler ChatHandler, jwtValidator *auth.JWT
 		panic("ws.NewHub: sessionsStore required")
 	}
 	return &Hub{
-		logger:       logger,
-		chatHandler:  chatHandler,
-		jwtValidator: jwtValidator,
-		sessions:     sessionsStore,
-		clients:      make(map[*Client]bool),
-		channels:     make(map[string]map[*Client]bool),
-		register:     make(chan *Client),
-		unregister:   make(chan *Client),
-		broadcast:    make(chan ChannelMessage, 256),
-		cancelFns:    make(map[string]context.CancelFunc),
-		streams:      newSessionStreams(),
+		logger:          logger,
+		chatHandler:     chatHandler,
+		jwtValidator:    jwtValidator,
+		sessions:        sessionsStore,
+		clients:         make(map[*Client]bool),
+		channels:        make(map[string]map[*Client]bool),
+		register:        make(chan *Client),
+		unregister:      make(chan *Client),
+		broadcast:       make(chan ChannelMessage, 256),
+		cancelFns:       make(map[string]context.CancelFunc),
+		streams:         newSessionStreams(),
+		authReadTimeout: wsAuthReadTimeout,
 	}
 }
 
@@ -727,49 +741,14 @@ func (h *Hub) DroppedFrames() uint64 {
 	return h.droppedFrames.Load()
 }
 
-// HandleUpgrade authenticates the JWT token from the query parameter and
-// upgrades the HTTP connection to a WebSocket.
+// HandleUpgrade upgrades the HTTP connection to a WebSocket, then
+// authenticates via the first post-upgrade message rather than a URL query
+// parameter — a `?token=` carries a PII-bearing 15-min JWE into proxy/access
+// logs, browser history, and Referer headers. Mirrors /ws/terminal
+// (internal/terminal/handler.go ServeHTTP), which moved to this pattern
+// first. The Origin/CSRF handshake check below is unrelated to auth and
+// still runs pre-upgrade, same as before.
 func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
-	token := r.URL.Query().Get("token")
-	if token == "" {
-		http.Error(w, "missing token", http.StatusUnauthorized)
-		return
-	}
-
-	// jwtValidator and sessions are guaranteed non-nil by NewHub. No
-	// need to defend; the nil-check noise here was the original sin
-	// that made revoke-on-WS optional.
-
-	claims, err := h.jwtValidator.ValidateWS(token)
-	if err != nil {
-		h.logger.Warn("ws auth failed", "error", err)
-		http.Error(w, "invalid token", http.StatusUnauthorized)
-		return
-	}
-	userID := claims.ID
-	authSessionID := claims.Sid
-
-	// Browser tickets carry a sid that joins to user_sessions; refuse
-	// the upgrade if the row is gone or already revoked. CLI-derived
-	// tickets have no sid (their CLI token is the auth artifact, with
-	// its own revocation table) — those skip this check.
-	if authSessionID != "" {
-		sess, sErr := h.sessions.Get(r.Context(), authSessionID)
-		if sErr != nil {
-			if errors.Is(sErr, sessions.ErrNotFound) {
-				http.Error(w, "session_revoked", http.StatusUnauthorized)
-				return
-			}
-			h.logger.Error("ws session lookup", "error", sErr)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		if !sess.Active(time.Now()) {
-			http.Error(w, "session_revoked", http.StatusUnauthorized)
-			return
-		}
-	}
-
 	wsServer := websocket.Server{
 		Handshake: func(config *websocket.Config, req *http.Request) error {
 			// Validate that Origin header, when present, matches the
@@ -829,6 +808,13 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 			// limit; readPump treats that as a normal read error and
 			// closes the connection.
 			conn.MaxPayloadBytes = wsMaxInboundFrameBytes
+
+			userID, authSessionID, authOK := h.authenticateUpgradedConn(r, conn)
+			if !authOK {
+				conn.Close()
+				return
+			}
+
 			ctx, cancel := context.WithCancel(context.Background())
 			client := &Client{
 				conn:          conn,
@@ -852,6 +838,96 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	wsServer.ServeHTTP(w, r)
+}
+
+// authenticateUpgradedConn reads the first message off a freshly upgraded
+// connection, expects {"type":"auth","token":"..."}, and validates it the
+// same way the old pre-upgrade path did: JWT signature/expiry, then (for
+// browser tickets carrying a sid) that the joined user_sessions row is
+// still active. CLI-derived tickets have no sid — their CLI token is the
+// auth artifact, with its own revocation table — so they skip that check.
+//
+// Returns ok=false on any failure, having already sent a client-visible
+// frame (session_revoked or a generic error) and left the connection ready
+// for the caller to Close. Never registers a client on failure.
+func (h *Hub) authenticateUpgradedConn(r *http.Request, conn *websocket.Conn) (userID, authSessionID string, ok bool) {
+	timeout := h.authReadTimeout
+	if timeout <= 0 {
+		timeout = wsAuthReadTimeout
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		h.logger.Warn("ws set auth read deadline", "error", err)
+		return "", "", false
+	}
+
+	var raw []byte
+	if err := websocket.Message.Receive(conn, &raw); err != nil {
+		h.logger.Debug("ws auth read failed (no auth message within deadline)", "error", err)
+		return "", "", false
+	}
+
+	var authMsg struct {
+		Type  string `json:"type"`
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(raw, &authMsg); err != nil || authMsg.Type != "auth" || authMsg.Token == "" {
+		h.sendWSAuthFrame(conn, "error", "invalid auth message")
+		return "", "", false
+	}
+
+	// jwtValidator and sessions are guaranteed non-nil by NewHub. No
+	// need to defend; the nil-check noise here was the original sin
+	// that made revoke-on-WS optional.
+	claims, err := h.jwtValidator.ValidateWS(authMsg.Token)
+	if err != nil {
+		h.logger.Warn("ws auth failed", "error", err)
+		h.sendWSAuthFrame(conn, "error", "invalid token")
+		return "", "", false
+	}
+	userID = claims.ID
+	authSessionID = claims.Sid
+
+	// Browser tickets carry a sid that joins to user_sessions; refuse the
+	// connection if the row is gone or already revoked. CLI-derived
+	// tickets skip this check (see doc comment above).
+	if authSessionID != "" {
+		sess, sErr := h.sessions.Get(r.Context(), authSessionID)
+		if sErr != nil {
+			if errors.Is(sErr, sessions.ErrNotFound) {
+				h.sendWSAuthFrame(conn, "session_revoked", "session_revoked")
+				return "", "", false
+			}
+			h.logger.Error("ws session lookup", "error", sErr)
+			h.sendWSAuthFrame(conn, "error", "internal error")
+			return "", "", false
+		}
+		if !sess.Active(time.Now()) {
+			h.sendWSAuthFrame(conn, "session_revoked", "session_revoked")
+			return "", "", false
+		}
+	}
+
+	if err := conn.SetReadDeadline(time.Time{}); err != nil {
+		h.logger.Warn("ws clear auth read deadline", "error", err)
+		return "", "", false
+	}
+	return userID, authSessionID, true
+}
+
+// sendWSAuthFrame best-effort writes a ServerMessage frame to a connection
+// that hasn't been registered as a Client yet (so writePump/c.send aren't
+// available). typ "session_revoked" mirrors watchSessionRevocation's
+// mid-session frame (client.go) so the frontend's existing
+// type==="session_revoked" handling covers both connect-time and
+// mid-session revocation identically. conn.Write (not
+// websocket.Message.Send with a []byte, which forces a binary frame) keeps
+// this a text frame, matching every other JSON frame this hub sends.
+func (h *Hub) sendWSAuthFrame(conn *websocket.Conn, typ, message string) {
+	data, err := json.Marshal(ServerMessage{Type: typ, Payload: map[string]string{"message": message}})
+	if err != nil {
+		return
+	}
+	_, _ = conn.Write(data)
 }
 
 // ChannelAuthorizer checks whether a user is allowed to subscribe to a given channel.

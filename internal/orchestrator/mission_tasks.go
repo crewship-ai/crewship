@@ -21,7 +21,15 @@ func (e *MissionEngine) ResolveReadyTasks(ctx context.Context, missionID string)
 	if err != nil {
 		return nil, err
 	}
+	return e.resolveReadyFromTasks(ctx, missionID, tasks)
+}
 
+// resolveReadyFromTasks is ResolveReadyTasks' self-heal + ready-filter logic,
+// operating on an already-loaded task snapshot instead of querying its own.
+// scheduleReadyTasks calls this directly with the snapshot it already loaded
+// for the mission-brief context, so a tick issues one mission_tasks query
+// here instead of two (#1255 item 4).
+func (e *MissionEngine) resolveReadyFromTasks(ctx context.Context, missionID string, tasks []TaskInfo) ([]TaskInfo, error) {
 	completed := make(map[string]bool)
 	for _, t := range tasks {
 		if t.Status == "COMPLETED" {
@@ -334,15 +342,17 @@ func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState,
 // scheduleReadyTasks finds PENDING tasks with completed dependencies and creates assignments.
 
 func (e *MissionEngine) scheduleReadyTasks(ctx context.Context, ms *missionState) error {
-	ready, err := e.ResolveReadyTasks(ctx, ms.ID)
+	// Single snapshot shared between ready-resolution and the mission-brief
+	// context below — resolveReadyFromTasks self-heals/auto-assigns in place
+	// on this slice, so allTasks already reflects those mutations without a
+	// second query (#1255 item 4).
+	allTasks, err := e.loadTasks(ctx, ms.ID)
 	if err != nil {
 		return fmt.Errorf("resolve ready tasks: %w", err)
 	}
-
-	// Load all tasks once for mission brief context
-	allTasks, briefErr := e.loadTasks(ctx, ms.ID)
-	if briefErr != nil {
-		e.logger.Warn("load tasks for brief failed, continuing without context", "error", briefErr)
+	ready, err := e.resolveReadyFromTasks(ctx, ms.ID, allTasks)
+	if err != nil {
+		return fmt.Errorf("resolve ready tasks: %w", err)
 	}
 
 	for _, task := range ready {

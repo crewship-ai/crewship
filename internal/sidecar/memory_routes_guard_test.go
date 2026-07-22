@@ -149,6 +149,96 @@ func TestLegacyMemoryRoutes_TokenlessRefused(t *testing.T) {
 	}
 }
 
+// TestLegacyMemoryRoutes_EmptySlugTokenRefused — parity with the MCP transport
+// (#1341 follow-up). handleMemoryMCPForAgent refuses a token that resolves to a
+// roster entry with an EMPTY slug, because "" reads as "the boot agent" to the
+// tier resolvers and a slugless member would be silently promoted to the boot
+// agent's private tier. The five legacy routes resolved the same identity
+// through legacyMemoryEffectiveSlug → peerMemoryEngineFor("") — exactly that
+// promotion. The chokepoint must refuse it with 403 on every legacy route.
+func TestLegacyMemoryRoutes_EmptySlugTokenRefused(t *testing.T) {
+	s, base := newLegacyMemoryRouteServer(t, true)
+	s.crewMembers = append(s.crewMembers, CrewMember{ID: "agent-3", Slug: "", AuthToken: "tok-slugless"})
+	h := s.buildHandler(nil)
+
+	const secret = "alpha private secret\n"
+	agentFile := filepath.Join(base, "AGENT.md")
+	if err := os.WriteFile(agentFile, []byte(secret), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		target string
+		body   string
+	}{
+		{"read", http.MethodGet, "/memory/read?file=AGENT.md", ""},
+		{"write", http.MethodPost, "/memory/write", `{"file":"AGENT.md","content":"clobbered\n"}`},
+		{"search", http.MethodPost, "/memory/search", `{"query":"secret"}`},
+		{"status", http.MethodGet, "/memory/status", ""},
+		{"reindex", http.MethodPost, "/memory/reindex", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var body io.Reader
+			if tc.body != "" {
+				body = strings.NewReader(tc.body)
+			}
+			req := loopbackRequest(tc.method, tc.target, body)
+			req.Header.Set("Authorization", "Bearer tok-slugless")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+
+			if w.Code != http.StatusForbidden {
+				t.Errorf("status = %d, want 403; body=%s", w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), "agent identity has no slug") {
+				t.Errorf("body = %s, want it to mention 'agent identity has no slug'", w.Body.String())
+			}
+			if strings.Contains(w.Body.String(), "alpha private secret") {
+				t.Errorf("slugless token leaked the boot agent's memory: %s", w.Body.String())
+			}
+		})
+	}
+
+	got, err := os.ReadFile(agentFile)
+	if err != nil {
+		t.Fatalf("read AGENT.md: %v", err)
+	}
+	if string(got) != secret {
+		t.Fatalf("slugless-token write clobbered the boot agent's memory: %q", got)
+	}
+}
+
+// TestResolveMemoryEngine_EmptySlugTokenFailsClosed is the belt to that
+// chokepoint: an in-process caller that reaches resolveMemoryEngine directly
+// (bypassing the router) must not be handed the BOOT agent's engine for a
+// slugless identity — legacyMemoryEffectiveSlug errors and the resolver
+// reports the engine as unavailable instead.
+func TestResolveMemoryEngine_EmptySlugTokenFailsClosed(t *testing.T) {
+	s, _ := newLegacyMemoryRouteServer(t, true)
+	s.crewMembers = append(s.crewMembers, CrewMember{ID: "agent-3", Slug: "", AuthToken: "tok-slugless"})
+
+	r := loopbackRequest(http.MethodGet, "/memory/status", nil)
+	r.Header.Set("Authorization", "Bearer tok-slugless")
+
+	engine, valid := s.resolveMemoryEngine("agent", r)
+	if !valid {
+		t.Fatal("scope=agent must stay a valid scope")
+	}
+	if engine != nil {
+		t.Fatal("slugless identity resolved to an engine — boot-tier promotion is back")
+	}
+
+	engineWP, basePath, validWP := s.resolveMemoryEngineWithPath("agent", r)
+	if !validWP {
+		t.Fatal("scope=agent must stay a valid scope")
+	}
+	if engineWP != nil || basePath != "" {
+		t.Fatalf("slugless identity resolved to engine=%v basePath=%q — boot-tier promotion is back", engineWP, basePath)
+	}
+}
+
 // TestLegacyMemoryRoutes_TokenedRequestStillWorks — the guard must only refuse
 // the token-less case. A request carrying a recognized per-agent token keeps
 // working exactly as before.

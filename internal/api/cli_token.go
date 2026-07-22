@@ -554,20 +554,22 @@ type ValidateCLITokenResult struct {
 	Scopes stringSet // nil = unrestricted token (pre-v100 or no scopes set)
 }
 
-// ValidateCLITokenFull is the post-Patch-M2 entrypoint that also
-// returns the token's scope set. ValidateCLIToken keeps the legacy
-// three-string signature for callers that don't care about scopes;
-// it now delegates to this one.
-func ValidateCLITokenFull(ctx context.Context, db *sql.DB, token string, audit ValidateAuditContext) (ValidateCLITokenResult, error) {
+// lookupCLIToken resolves a CLI token to its row via hash + tier match +
+// revocation + expiry checks. Read-only — no audit insert, no last_used_at
+// touch. Both ValidateCLITokenFull (real auth, which layers those side
+// effects on top) and IsValidCLIToken (a side-effect-free validity check for
+// the rate limiter's exemption decision, #1333) call this so the
+// security-sensitive hash/tier/expiry logic lives in exactly one place.
+func lookupCLIToken(ctx context.Context, db *sql.DB, token string) (tokenID, userID, email, name, tier string, scopes stringSet, err error) {
 	var (
 		tokenHash    string
 		expectedTier string
 	)
 	switch {
 	case strings.HasPrefix(token, cliTokenAdminPrefix):
-		key, err := adminHMACKey()
-		if err != nil {
-			return ValidateCLITokenResult{}, fmt.Errorf("invalid CLI token")
+		key, keyErr := adminHMACKey()
+		if keyErr != nil {
+			return "", "", "", "", "", nil, fmt.Errorf("invalid CLI token")
 		}
 		tokenHash = hashAdmin(token, key)
 		expectedTier = "ADMIN"
@@ -575,26 +577,24 @@ func ValidateCLITokenFull(ctx context.Context, db *sql.DB, token string, audit V
 		tokenHash = hashStandard(token)
 		expectedTier = "STANDARD"
 	default:
-		return ValidateCLITokenResult{}, fmt.Errorf("invalid CLI token")
+		return "", "", "", "", "", nil, fmt.Errorf("invalid CLI token")
 	}
 
 	var (
-		userID, email, name, dbTier string
-		expiresAt, revokedAt        sql.NullString
-		scopesRaw                   sql.NullString
-		tokenID                     string
+		expiresAt, revokedAt sql.NullString
+		scopesRaw            sql.NullString
 	)
-	err := db.QueryRowContext(ctx, `
+	dbErr := db.QueryRowContext(ctx, `
 		SELECT ct.id, ct.user_id, u.email, u.full_name, ct.tier, ct.expires_at, ct.revoked_at, ct.scopes
 		FROM cli_tokens ct
 		JOIN users u ON u.id = ct.user_id
 		WHERE ct.token_hash = ?
-	`, tokenHash).Scan(&tokenID, &userID, &email, &name, &dbTier, &expiresAt, &revokedAt, &scopesRaw)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return ValidateCLITokenResult{}, fmt.Errorf("invalid CLI token")
+	`, tokenHash).Scan(&tokenID, &userID, &email, &name, &tier, &expiresAt, &revokedAt, &scopesRaw)
+	if dbErr != nil {
+		if dbErr == sql.ErrNoRows {
+			return "", "", "", "", "", nil, fmt.Errorf("invalid CLI token")
 		}
-		return ValidateCLITokenResult{}, fmt.Errorf("validate CLI token: %w", err)
+		return "", "", "", "", "", nil, fmt.Errorf("validate CLI token: %w", dbErr)
 	}
 
 	// Belt-and-braces: refuse if the row's stored tier disagrees with
@@ -602,23 +602,48 @@ func ValidateCLITokenFull(ctx context.Context, db *sql.DB, token string, audit V
 	// (different hash functions, no shared keyspace) but the check is
 	// free and defends against a future bug that lets a STANDARD token
 	// row's hash match an ADMIN computation or vice versa.
-	if dbTier != expectedTier {
-		return ValidateCLITokenResult{}, fmt.Errorf("invalid CLI token")
+	if tier != expectedTier {
+		return "", "", "", "", "", nil, fmt.Errorf("invalid CLI token")
 	}
 
 	if revokedAt.Valid {
-		return ValidateCLITokenResult{}, fmt.Errorf("invalid CLI token")
+		return "", "", "", "", "", nil, fmt.Errorf("invalid CLI token")
 	}
 	if expiresAt.Valid {
 		t, perr := time.Parse(time.RFC3339, expiresAt.String)
 		if perr == nil && time.Now().UTC().After(t) {
-			return ValidateCLITokenResult{}, fmt.Errorf("invalid CLI token")
+			return "", "", "", "", "", nil, fmt.Errorf("invalid CLI token")
 		}
 	}
 
-	var scopes stringSet
 	if scopesRaw.Valid {
 		scopes = parseScopes(scopesRaw.String)
+	}
+
+	return tokenID, userID, email, name, tier, scopes, nil
+}
+
+// IsValidCLIToken reports whether token is a currently-valid (correctly
+// hashed, non-revoked, non-expired) CLI token of either tier, WITHOUT the
+// side effects ValidateCLITokenFull carries — no ADMIN audit insert, no
+// last_used_at touch. The rate limiter (#1333) uses this to decide whether a
+// request qualifies for the authenticated-CLI exemption from the per-IP
+// bucket; the request still goes through the real ValidateCLITokenFull
+// (with its audit trail) exactly once, downstream in RequireAuth. Calling
+// this does NOT double-count a CLI token's per-use audit trail.
+func IsValidCLIToken(ctx context.Context, db *sql.DB, token string) bool {
+	_, _, _, _, _, _, err := lookupCLIToken(ctx, db, token)
+	return err == nil
+}
+
+// ValidateCLITokenFull is the post-Patch-M2 entrypoint that also
+// returns the token's scope set. ValidateCLIToken keeps the legacy
+// three-string signature for callers that don't care about scopes;
+// it now delegates to this one.
+func ValidateCLITokenFull(ctx context.Context, db *sql.DB, token string, audit ValidateAuditContext) (ValidateCLITokenResult, error) {
+	tokenID, userID, email, name, dbTier, scopes, err := lookupCLIToken(ctx, db, token)
+	if err != nil {
+		return ValidateCLITokenResult{}, err
 	}
 
 	nowStr := time.Now().UTC().Format(time.RFC3339)

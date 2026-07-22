@@ -871,19 +871,63 @@ func TestSetChatHandlerReplaces(t *testing.T) {
 
 // ---------- HandleUpgrade auth paths ----------
 
-func TestHandleUpgradeMissingToken(t *testing.T) {
+// Auth now happens post-upgrade (see authenticateUpgradedConn), so a
+// connection that never sends {"type":"auth",...} isn't rejected at the
+// HTTP layer — the upgrade succeeds and the server instead closes the
+// connection once authReadTimeout elapses with no valid auth message.
+func TestHandleUpgrade_NoAuthMessage_ClosesAfterDeadline(t *testing.T) {
 	t.Parallel()
 	hub := newRunningHub(t)
+	hub.authReadTimeout = 50 * time.Millisecond
 	srv := httptest.NewServer(http.HandlerFunc(hub.HandleUpgrade))
 	t.Cleanup(srv.Close)
 
-	resp, err := http.Get(srv.URL)
+	u, _ := url.Parse(srv.URL)
+	conn, err := websocket.Dial(fmt.Sprintf("ws://%s/", u.Host), "", srv.URL)
+	if err != nil {
+		t.Fatalf("dial (upgrade must succeed pre-auth): %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var raw []byte
+	if err := websocket.Message.Receive(conn, &raw); err == nil {
+		t.Fatalf("expected the connection to close without a live auth message, got frame %q", raw)
+	}
+}
+
+// The `?token=` query string is no longer read at all — a client that
+// only supplies it there (the old, now-vulnerable path) and never sends
+// a post-upgrade auth message is rejected exactly like one with no token
+// anywhere.
+func TestHandleUpgrade_URLTokenAloneIsRejected(t *testing.T) {
+	t.Parallel()
+	v := defaultTestValidator(t)
+	hub := newRunningHub(t, withValidator(v))
+	hub.authReadTimeout = 50 * time.Millisecond
+	srv := httptest.NewServer(http.HandlerFunc(hub.HandleUpgrade))
+	t.Cleanup(srv.Close)
+
+	tok, err := v.IssueWSTicket("user-1", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", resp.StatusCode)
+	u, _ := url.Parse(srv.URL)
+	wsURL := fmt.Sprintf("ws://%s/?token=%s", u.Host, url.QueryEscape(tok))
+	conn, err := websocket.Dial(wsURL, "", srv.URL)
+	if err != nil {
+		t.Fatalf("dial (upgrade must succeed pre-auth): %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var raw []byte
+	if err := websocket.Message.Receive(conn, &raw); err == nil {
+		t.Fatalf("expected a URL-only token (no post-upgrade auth message) to be rejected, got frame %q", raw)
 	}
 }
 
@@ -925,13 +969,27 @@ func TestHandleUpgradeInvalidToken(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(hub.HandleUpgrade))
 	t.Cleanup(srv.Close)
 
-	resp, err := http.Get(srv.URL + "/?token=garbage")
+	u, _ := url.Parse(srv.URL)
+	conn, err := websocket.Dial(fmt.Sprintf("ws://%s/", u.Host), "", srv.URL)
 	if err != nil {
+		t.Fatalf("dial (upgrade must succeed pre-auth): %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	wsAuth(t, conn, "garbage")
+
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", resp.StatusCode)
+	var raw []byte
+	if err := websocket.Message.Receive(conn, &raw); err != nil {
+		t.Fatalf("expected an error frame before close, got read error: %v", err)
+	}
+	var msg ServerMessage
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		t.Fatalf("unmarshal %q: %v", raw, err)
+	}
+	if msg.Type != "error" {
+		t.Errorf("type = %q, want error", msg.Type)
 	}
 }
 
@@ -957,13 +1015,14 @@ func TestHandleUpgradeAndBroadcastEndToEnd(t *testing.T) {
 
 	// Build ws:// URL from httptest server URL.
 	u, _ := url.Parse(srv.URL)
-	wsURL := fmt.Sprintf("ws://%s/?token=%s", u.Host, url.QueryEscape(tok))
+	wsURL := fmt.Sprintf("ws://%s/", u.Host)
 
 	conn, err := websocket.Dial(wsURL, "", srv.URL)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
+	wsAuth(t, conn, tok)
 
 	// Subscribe.
 	sub, _ := json.Marshal(ClientMessage{Type: "subscribe", Channel: "session:s1"})
@@ -1015,7 +1074,7 @@ func TestPingProducesPongReply(t *testing.T) {
 		t.Fatalf("issue ws ticket: %v", err)
 	}
 	u, _ := url.Parse(srv.URL)
-	wsURL := fmt.Sprintf("ws://%s/?token=%s", u.Host, url.QueryEscape(tok))
+	wsURL := fmt.Sprintf("ws://%s/", u.Host)
 
 	var conn *websocket.Conn
 	conn, err = websocket.Dial(wsURL, "", srv.URL)
@@ -1023,6 +1082,7 @@ func TestPingProducesPongReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
+	wsAuth(t, conn, tok)
 
 	ping, _ := json.Marshal(ClientMessage{Type: "ping"})
 	if _, err := conn.Write(ping); err != nil {
