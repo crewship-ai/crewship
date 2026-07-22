@@ -124,6 +124,7 @@ type Router struct {
 	authRateLimitedMux     http.Handler        // mux wrapped with auth rate limiter
 	apiRateLimitedMux      http.Handler        // mux wrapped with general API rate limiter
 	credTestRateLimitedMux http.Handler        // mux wrapped with /credentials/test limiter (defence against credential-validation oracle abuse)
+	cappedMux              http.Handler        // body-capped mux, NOT rate-limited — the #1333 authenticated-CLI exemption routes here directly
 	journal                journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
 	consolidator           *consolidate.Consolidator
 	consolidateMemoryRoot  string
@@ -381,6 +382,7 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	// routes straight to r.mux in routeWithRateLimiting and may carry
 	// larger trusted payloads — is left to its own per-handler caps.
 	capped := BodyCap(maxAPIBodyBytes)(r.mux)
+	r.cappedMux = capped
 
 	// Warm the signin timing-equalizer hash (lockout.go) off the
 	// request path. Its generation moved out of package init (#967:
@@ -478,8 +480,23 @@ func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	// General API rate limiting
+	// General API rate limiting — except authenticated CLI callers, which
+	// are exempt from the per-IP bucket entirely (#1333). A bulk operation
+	// (crewship seed, template import) fires far more requests than the
+	// 120/min budget in seconds, 429ing mid-run and leaving a half-seeded
+	// tenant. The limiter must still cover everyone else: a request must
+	// present a token that is REAL — cryptographically hash-matched,
+	// non-revoked, non-expired (IsValidCLIToken, not just "shaped like" a
+	// CLI token) — before it skips the bucket, so an unauthenticated
+	// caller can't spoof the `crewship_cli_`/`crewship_admin_` prefix to
+	// dodge throttling. The exempted request still goes through the real
+	// RequireAuth validation (with its audit trail) downstream in r.mux —
+	// IsValidCLIToken here is a side-effect-free pre-check.
 	if strings.HasPrefix(path, "/api/") {
+		if token := extractToken(req); token != "" && IsCLIToken(token) && IsValidCLIToken(req.Context(), r.db, token) {
+			r.cappedMux.ServeHTTP(w, req)
+			return
+		}
 		r.apiRateLimitedMux.ServeHTTP(w, req)
 		return
 	}

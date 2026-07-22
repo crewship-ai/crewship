@@ -136,3 +136,76 @@ func TestCovCT3_Validate_AdminToken_HappyPath(t *testing.T) {
 		t.Errorf("audit uses = %d err=%v, want exactly 1", uses, err)
 	}
 }
+
+// TestCovCT3_IsValidCLIToken_MatchesFullValidation — IsValidCLIToken (the
+// rate limiter's #1333 exemption check) must agree with ValidateCLITokenFull
+// on valid/invalid/revoked/expired tokens.
+func TestCovCT3_IsValidCLIToken_MatchesFullValidation(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+
+	valid := cliTokenStandardPrefix + "isvalid0011223344"
+	execOrFatal(t, db, `INSERT INTO cli_tokens (id, user_id, name, token_hash, tier, created_at)
+		VALUES ('covct3-iv1', ?, 'n', ?, 'STANDARD', datetime('now'))`,
+		userID, hashStandard(valid))
+
+	revoked := cliTokenStandardPrefix + "isrevoked0011223344"
+	now := time.Now().UTC().Format(time.RFC3339)
+	execOrFatal(t, db, `INSERT INTO cli_tokens (id, user_id, name, token_hash, tier, revoked_at, created_at)
+		VALUES ('covct3-iv2', ?, 'n', ?, 'STANDARD', ?, datetime('now'))`,
+		userID, hashStandard(revoked), now)
+
+	expired := cliTokenStandardPrefix + "isexpired0011223344"
+	past := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+	execOrFatal(t, db, `INSERT INTO cli_tokens (id, user_id, name, token_hash, tier, expires_at, created_at)
+		VALUES ('covct3-iv3', ?, 'n', ?, 'STANDARD', ?, datetime('now'))`,
+		userID, hashStandard(expired), past)
+
+	cases := []struct {
+		name  string
+		token string
+		want  bool
+	}{
+		{"valid", valid, true},
+		{"revoked", revoked, false},
+		{"expired", expired, false},
+		{"unknown", cliTokenStandardPrefix + "totally-unseen", false},
+		{"not-cli-shaped", "some-random-bearer-value", false},
+	}
+	for _, c := range cases {
+		if got := IsValidCLIToken(context.Background(), db, c.token); got != c.want {
+			t.Errorf("IsValidCLIToken(%s) = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestCovCT3_IsValidCLIToken_NoAuditSideEffects — the rate limiter calls
+// IsValidCLIToken on every request that looks like a CLI token; it must
+// never write to cli_token_uses (ADMIN audit) or bump last_used_at. Those
+// side effects belong exclusively to the real ValidateCLITokenFull call
+// RequireAuth makes downstream — double-writing would corrupt the ADMIN
+// per-use audit trail an incident responder relies on.
+func TestCovCT3_IsValidCLIToken_NoAuditSideEffects(t *testing.T) {
+	keyHex := strings.Repeat("11", 32)
+	t.Setenv(adminTokenHMACKeyEnv, keyHex)
+	key, _ := hex.DecodeString(keyHex)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	token := cliTokenAdminPrefix + "noauditsideeffect"
+	execOrFatal(t, db, `INSERT INTO cli_tokens (id, user_id, name, token_hash, tier, created_at)
+		VALUES ('covct3-nse', ?, 'admin', ?, 'ADMIN', datetime('now'))`,
+		userID, hashAdmin(token, key))
+
+	for i := 0; i < 5; i++ {
+		if !IsValidCLIToken(context.Background(), db, token) {
+			t.Fatalf("call %d: IsValidCLIToken = false, want true", i)
+		}
+	}
+	var uses int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM cli_token_uses WHERE token_id = 'covct3-nse'`).Scan(&uses); err != nil {
+		t.Fatalf("count uses: %v", err)
+	}
+	if uses != 0 {
+		t.Errorf("cli_token_uses rows = %d after 5 IsValidCLIToken calls, want 0 (no audit side effects)", uses)
+	}
+}
