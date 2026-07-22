@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -47,49 +49,41 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 	// last_activity_at falls back to started_at (normalised through
 	// strftime so legacy space-separated rows compare with ISO rows).
 	//
-	// unread_count counts messages the user hasn't seen and didn't
-	// write: the author guard treats authorless user-role rows
-	// (legacy, scheduler-injected) as "mine" so they never inflate the
-	// badge; assistant/system rows always count. No cursor row means
-	// "never opened" — everything counts (migration v130 backfills a
-	// cursor for pre-existing chats so upgrades ship quiet).
-	//
-	// The unread count stays a correlated subquery on purpose — do not
-	// "optimise" it into a LEFT JOIN + GROUP BY (#1255 item 6 proposed
-	// exactly that; it was measured and rejected). Both shapes drive the
-	// same two indexes:
+	// Two statements on purpose (#1255 item 6): first the page of chats,
+	// then ONE batched unread aggregate over exactly the page's ids.
+	// The ORDER BY is a COALESCE expression, so it cannot ride
+	// idx_chats_agent_activity — EXPLAIN shows USE TEMP B-TREE FOR ORDER
+	// BY, which materialises the full projection for every chat of the
+	// agent BEFORE the LIMIT prunes to 100. With unread_count inline
+	// (the pre-#1255 correlated-subquery shape), that meant the two
+	// unread index probes
 	//
 	//	SEARCH m  USING INDEX idx_conversation_messages_session (session_id=? AND ts>?)
 	//	SEARCH rc USING INDEX sqlite_autoindex_chat_read_cursors_1 (user_id=? AND chat_id=?)
 	//
-	// so the join saves no I/O, but it additionally materialises one row
-	// per unread message and funnels them through a temp b-tree for the
-	// GROUP BY. Measured on SQLite (min of 8 runs, identical result sets):
+	// ran once per EXISTING chat, not per RETURNED chat. Splitting moves
+	// the unread work after the LIMIT: O(page ≤ 100) evaluations instead
+	// of O(total chats), while the page query's per-row cost drops to a
+	// plain projection + sort.
 	//
-	//	 3,000 chats / 150,000 messages: subquery 35ms → join 45ms
-	//	30,000 chats / 420,000 messages: subquery 115ms → join 143ms
-	//
-	// Same linear slope in chat count, ~25% worse constant. The behaviour
-	// contract this projection must keep (four unread cases + the
-	// last_activity_at COALESCE fallback, which a GROUP BY is prone to
-	// collapse) is pinned by TestListChats_UnreadProjectionBehaviourLock.
+	// Do NOT re-merge this into a single LEFT JOIN + GROUP BY statement:
+	// that shape was built, measured, and rejected in #1262 (~25% slower
+	// — same index probes per chat, still pre-LIMIT, plus an extra temp
+	// b-tree materialising one row per unread message). The batched
+	// second query below keeps the per-chat plan of the correlated
+	// subquery (same two SEARCHes, driven from the chats pk for each id
+	// in the page) but is bounded by the page.
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.agent_id, c.workspace_id, c.title, c.mode, c.status,
 			c.message_count, c.started_at, c.ended_at, c.created_at, c.origin,
 			COALESCE(c.last_activity_at,
 				strftime('%Y-%m-%dT%H:%M:%fZ', c.started_at),
-				c.started_at) AS last_activity_at,
-			(SELECT COUNT(*) FROM conversation_messages m
-			 WHERE m.session_id = c.id
-			   AND NOT (m.role = 'user' AND (m.author_user_id IS NULL OR m.author_user_id = ?))
-			   AND m.ts > COALESCE((SELECT rc.last_read_at FROM chat_read_cursors rc
-			                        WHERE rc.chat_id = c.id AND rc.user_id = ?), '')
-			) AS unread_count
+				c.started_at) AS last_activity_at
 		FROM chats c
 		WHERE c.agent_id = ? AND c.workspace_id = ?
 		ORDER BY last_activity_at DESC
 		LIMIT 100
-	`, userID, userID, agentID, workspaceID)
+	`, agentID, workspaceID)
 	if err != nil {
 		replyInternalError(w, h.logger, "list agent chats", err)
 		return
@@ -118,7 +112,7 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&c.ID, &c.AgentID, &c.WorkspaceID, &c.Title,
 			&c.Mode, &c.Status, &c.MessageCount,
 			&c.StartedAt, &c.EndedAt, &c.CreatedAt, &c.Origin,
-			&c.LastActivityAt, &c.UnreadCount); err != nil {
+			&c.LastActivityAt); err != nil {
 			replyInternalError(w, h.logger, "scan chat", err)
 			return
 		}
@@ -128,10 +122,93 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "rows iteration (chats)", err)
 		return
 	}
+
+	if len(result) > 0 {
+		ids := make([]string, len(result))
+		for i := range result {
+			ids[i] = result[i].ID
+		}
+		unread, err := h.chatUnreadCounts(r.Context(), ids, userID)
+		if err != nil {
+			replyInternalError(w, h.logger, "batch unread counts", err)
+			return
+		}
+		for i := range result {
+			result[i].UnreadCount = unread[result[i].ID]
+		}
+	}
+
 	if result == nil {
 		result = []chatResponse{}
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// chatUnreadCounts returns the requesting user's unread_count for each
+// chat on the page, keyed by chat id (missing key == 0). One statement
+// for the whole page — the #1255 item 6 batched aggregate.
+//
+// unread_count counts messages the user hasn't seen and didn't write:
+// the author guard treats authorless user-role rows (legacy,
+// scheduler-injected) as "mine" so they never inflate the badge;
+// assistant/system rows always count. No cursor row means "never
+// opened" — everything counts (migration v130 backfills a cursor for
+// pre-existing chats so upgrades ship quiet). The predicate and the
+// cursor COALESCE must stay byte-identical to the pre-split correlated
+// shape — TestListChats_UnreadMatchesCorrelatedReference diffs this
+// handler against a frozen copy of that query, and
+// TestListChats_UnreadProjectionBehaviourLock pins the absolute values.
+//
+// The aggregate is driven from chats (pk lookups over the IN list)
+// rather than from conversation_messages so the plan per chat is the
+// same pair of index probes the correlated subquery used — cursor point
+// lookup once per chat, then an index range scan of the chat's messages
+// with ts as a seek bound:
+//
+//	SEARCH c USING COVERING INDEX sqlite_autoindex_chats_1 (id=?)
+//	SEARCH m USING INDEX idx_conversation_messages_session (session_id=? AND ts>?) LEFT-JOIN
+//	CORRELATED SCALAR SUBQUERY 1
+//	  SEARCH rc USING INDEX sqlite_autoindex_chat_read_cursors_1 (user_id=? AND chat_id=?)
+//
+// (no temp b-tree at all — the GROUP BY rides the pk-ordered IN scan).
+//
+// Anchoring on conversation_messages instead would demote ts to a
+// post-join filter (the cursor join can't feed a seek bound once m is
+// the outer table), degrading each chat to a full-history scan.
+func (h *AgentHandler) chatUnreadCounts(ctx context.Context, chatIDs []string, userID string) (map[string]int, error) {
+	args := make([]any, 0, len(chatIDs)+2)
+	args = append(args, userID, userID)
+	placeholders := make([]string, len(chatIDs))
+	for i, id := range chatIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+
+	rows, err := h.db.QueryContext(ctx, `
+		SELECT c.id, COUNT(m.id)
+		FROM chats c
+		LEFT JOIN conversation_messages m ON m.session_id = c.id
+			AND NOT (m.role = 'user' AND (m.author_user_id IS NULL OR m.author_user_id = ?))
+			AND m.ts > COALESCE((SELECT rc.last_read_at FROM chat_read_cursors rc
+			                     WHERE rc.chat_id = c.id AND rc.user_id = ?), '')
+		WHERE c.id IN (`+strings.Join(placeholders, ",")+`)
+		GROUP BY c.id
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	unread := make(map[string]int, len(chatIDs))
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		unread[id] = n
+	}
+	return unread, rows.Err()
 }
 
 // CreateChat starts a new chat session with the specified agent.
