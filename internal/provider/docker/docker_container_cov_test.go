@@ -980,10 +980,21 @@ func TestEnsureCrewRuntime_DefaultHardening(t *testing.T) {
 		t.Errorf("ExtraHosts = %v", hc.ExtraHosts)
 	}
 	// /tmp must be noexec,nosuid like /secrets (defense-in-depth against
-	// staging/executing dropped binaries) — see secretsTmpfsSpec.
-	for _, want := range []string{"noexec", "nosuid", "rw"} {
-		if !strings.Contains(hc.Tmpfs["/tmp"], want) {
+	// executing/setuid-escalating dropped binaries) — see secretsTmpfsSpec.
+	// Token-aware (not substring) so this can't pass with "exec"/"suid" also
+	// present, or with size=500m silently dropped.
+	tmpOpts := map[string]bool{}
+	for _, opt := range strings.Split(hc.Tmpfs["/tmp"], ",") {
+		tmpOpts[opt] = true
+	}
+	for _, want := range []string{"rw", "noexec", "nosuid", "size=500m"} {
+		if !tmpOpts[want] {
 			t.Errorf("Tmpfs[/tmp] = %q, missing %q", hc.Tmpfs["/tmp"], want)
+		}
+	}
+	for _, forbidden := range []string{"exec", "suid"} {
+		if tmpOpts[forbidden] {
+			t.Errorf("Tmpfs[/tmp] = %q, contains insecure option %q", hc.Tmpfs["/tmp"], forbidden)
 		}
 	}
 	if req.Config.Entrypoint[0] != "/usr/local/bin/entrypoint.sh" {

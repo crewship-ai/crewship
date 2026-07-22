@@ -79,7 +79,7 @@ Containers are created with these security measures (`internal/provider/docker/d
 - **SecurityOpt no-new-privileges:** Blocks execution of setuid binaries inside the container
 - **Non-root execution:** Agent processes run as UID 1001; exec'd commands run as the container's resolved configured user and are refused outright if that user would be root or cannot be determined
 - **Read-only filesystem:** Root filesystem is read-only (`ReadonlyRootfs: true`), relaxed only for privileged crews (DinD)
-- **tmpfs /tmp (500M):** Writable temp directory (`rw,noexec,nosuid,size=500m`), not persistent across restarts. `noexec`/`nosuid` block staging and executing dropped binaries; scripts still run via an explicit interpreter (`sh`, `bash`, …), which reads the file rather than exec'ing it.
+- **tmpfs /tmp (500M):** Writable temp directory (`rw,noexec,nosuid,size=500m`), not persistent across restarts. `rw` still permits staging a file here, but `noexec` blocks executing it directly and `nosuid` strips any setuid/setgid bit; scripts still run via an explicit interpreter (`sh`, `bash`, …), which reads the file rather than exec'ing it.
 - **PID limit: 200:** Prevents fork bomb attacks (`PidsLimit: 200`)
 - **Memory limits:** Configurable per-crew (`default_memory_mb`, default 8192 MB / 8 GiB)
 - **CPU limits:** Configurable per-crew (`default_cpus`, default 2.0)
