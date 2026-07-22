@@ -20,11 +20,13 @@ import (
 )
 
 var (
-	loginTokenFlag   string
-	loginGoogleFlag  bool
-	loginPairFlag    bool
-	loginCodeFlag    string
-	loginAdapterHint string
+	loginTokenFlag         string
+	loginGoogleFlag        bool
+	loginPairFlag          bool
+	loginCodeFlag          string
+	loginAdapterHint       string
+	loginEmailFlag         string
+	loginPasswordStdinFlag bool
 )
 
 var loginCmd = &cobra.Command{
@@ -44,7 +46,12 @@ paste the CLI token printed at the end):
 
 Device-code pairing (paste the code shown in the browser onboarding
 or Settings → Pair CLI):
-  crewship login --pair --code=XXXX-XXXX`,
+  crewship login --pair --code=XXXX-XXXX
+
+Non-interactive email+password (systemd timers, CI, test harnesses —
+anywhere a TTY isn't available for the password prompt):
+  crewship login --email demo@crewship.ai --password-stdin <<< "$PASSWORD"
+  CREWSHIP_PASSWORD=... crewship login --email demo@crewship.ai`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Validate the profile target first: a typo'd --profile/CREWSHIP_PROFILE
 		// should get a clear "unknown profile" message before server resolution
@@ -389,6 +396,8 @@ func init() {
 	loginCmd.Flags().BoolVar(&loginPairFlag, "pair", false, "Redeem a device-code shown in the browser (use with --code)")
 	loginCmd.Flags().StringVar(&loginCodeFlag, "code", "", "Pairing code from the browser (with --pair)")
 	loginCmd.Flags().StringVar(&loginAdapterHint, "adapter", "", "Optional adapter hint (telemetry): CLAUDE_CODE | GEMINI_CLI | CODEX_CLI | OPENCODE | CURSOR_CLI | FACTORY_DROID")
+	loginCmd.Flags().StringVar(&loginEmailFlag, "email", "", "Email for non-interactive login (skips the Email prompt)")
+	loginCmd.Flags().BoolVar(&loginPasswordStdinFlag, "password-stdin", false, "Read the password from stdin instead of prompting (non-interactive; see also CREWSHIP_PASSWORD)")
 
 	whoamiCmd.Flags().Bool("json", false, "Deprecated alias for --format json")
 }
@@ -561,18 +570,18 @@ func loginWithGoogle(serverURL string) error {
 func loginInteractive(serverURL string) error {
 	reader := bufio.NewReader(os.Stdin)
 
-	fmt.Printf("Crewship server: %s\n\n", serverURL)
-	fmt.Print("Email: ")
-	email, _ := reader.ReadString('\n')
-	email = strings.TrimSpace(email)
-
-	fmt.Print("Password: ")
-	passwordBytes, err := term.ReadPassword(int(syscall.Stdin))
-	if err != nil {
-		return fmt.Errorf("read password: %w", err)
+	email := strings.TrimSpace(loginEmailFlag)
+	if email == "" {
+		fmt.Printf("Crewship server: %s\n\n", serverURL)
+		fmt.Print("Email: ")
+		line, _ := reader.ReadString('\n')
+		email = strings.TrimSpace(line)
 	}
-	password := string(passwordBytes)
-	fmt.Println()
+
+	password, err := resolveLoginPassword(reader)
+	if err != nil {
+		return err
+	}
 
 	if email == "" || password == "" {
 		return fmt.Errorf("email and password are required")
@@ -616,6 +625,46 @@ func loginInteractive(serverURL string) error {
 
 	cli.PrintSuccess(savedTokenMessage("Login successful!", profile))
 	return nil
+}
+
+// resolveLoginPassword picks the password source for `crewship login`, in
+// priority order: CREWSHIP_PASSWORD env var, --password-stdin, then the
+// interactive TTY prompt. The two non-interactive sources exist so a
+// systemd timer / CI job / test harness can obtain a fresh CLI token after a
+// dev-slot reseed without a human running an interactive login first
+// (#1331) — term.ReadPassword requires a real TTY and fails outright over a
+// pipe ("read password: inappropriate ioctl for device"), which is exactly
+// the gap non-interactive callers hit.
+//
+// The two are mutually exclusive rather than one silently overriding the
+// other: a caller that set both meant one of them and typoed, and picking a
+// winner would authenticate with a password the caller didn't intend to use.
+func resolveLoginPassword(reader *bufio.Reader) (string, error) {
+	envPassword := os.Getenv("CREWSHIP_PASSWORD")
+	switch {
+	case envPassword != "" && loginPasswordStdinFlag:
+		return "", fmt.Errorf("--password-stdin and CREWSHIP_PASSWORD are mutually exclusive — pick one non-interactive password source")
+	case envPassword != "":
+		return envPassword, nil
+	case loginPasswordStdinFlag:
+		line, err := reader.ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return "", fmt.Errorf("read password from stdin: %w", err)
+		}
+		pw := strings.TrimSpace(line)
+		if pw == "" {
+			return "", fmt.Errorf("--password-stdin: no password on stdin")
+		}
+		return pw, nil
+	default:
+		fmt.Print("Password: ")
+		passwordBytes, err := term.ReadPassword(int(syscall.Stdin))
+		if err != nil {
+			return "", fmt.Errorf("read password: %w", err)
+		}
+		fmt.Println()
+		return string(passwordBytes), nil
+	}
 }
 
 // errInvalidCredentials is returned only when the server genuinely rejected the
