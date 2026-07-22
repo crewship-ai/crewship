@@ -43,6 +43,16 @@ const (
 	// GitHub API calls (60/hour limit).
 	CacheTTL = 24 * time.Hour
 
+	// nightlyCacheTTL is the cache reuse window for the nightly channel.
+	// Nightly builds can land many times a day, so the 24h stable TTL would
+	// advertise a stale target for most of a day; one hour keeps the banner
+	// reasonably fresh while capping the GitHub API footprint at ~1
+	// unauthenticated request/hour. Before the nightly path used the cache
+	// at all, a nightly server polled by the dashboard burned the whole
+	// 60 req/h unauthenticated quota and silently degraded to latest:null
+	// (#1291).
+	nightlyCacheTTL = time.Hour
+
 	// requestTimeout caps the network call. Slow boots are worse than missed
 	// notifications; 5s is generous for an HTTPS GET to api.github.com.
 	requestTimeout = 5 * time.Second
@@ -122,10 +132,13 @@ func (e *IncomparableVersionError) Error() string {
 	)
 }
 
-// checkNightly compares a nightly current version against the most recently
-// published nightly-* release. Unlike the stable/pre-release path this never
-// consults the on-disk cache: nightlies are cut many times a day and pruned
-// after 7 days, so a 24h-stale "latest nightly" could already be gone.
+// checkNightly fetches the most recently published nightly-* release and
+// compares it against a nightly current version. It is the network half of
+// the nightly channel: Check layers the shared on-disk cache on top of it
+// (nightlyCacheTTL — short enough that the advertised target is fresh, long
+// enough that a dashboard-polled server stays within GitHub's
+// unauthenticated API quota), while CheckExplicit calls it directly so an
+// explicit `crewship self-update` always sees a fresh answer.
 func checkNightly(ctx context.Context, currentVersion string, current nightlyVersion) (*Result, error) {
 	tag, notes, htmlURL, err := fetchLatestNightly(ctx, latestNightlyListURL)
 	if err != nil {
@@ -184,25 +197,38 @@ func Check(ctx context.Context, currentVersion string) (*Result, error) {
 		return nil, nil
 	}
 
-	if nv, ok := parseNightlyVersion(currentVersion); ok {
-		return checkNightly(ctx, currentVersion, nv)
-	}
+	nightly, isNightly := parseNightlyVersion(currentVersion)
 
 	// normalizeVersion adds the leading "v" that golang.org/x/mod/semver
 	// requires. Tags ship as v0.1.0 already, but package.json carries 0.1.0
 	// and we want the same code path to work for both.
 	current := normalizeVersion(currentVersion)
-	if !semver.IsValid(current) {
+	if !isNightly && !semver.IsValid(current) {
 		return nil, &IncomparableVersionError{Version: currentVersion}
 	}
 
-	if cached := readCache(); cached != nil && time.Since(cached.CheckedAt) < CacheTTL {
-		// Refresh the comparison against the *current* binary's version —
-		// the cached "latest" is still accurate but the "newer" flag must be
-		// recomputed because the operator may have just upgraded.
-		cached.Current = currentVersion
-		cached.Newer = semver.Compare(normalizeVersion(cached.Latest), current) > 0
-		return cached, nil
+	// Both channels share the on-disk cache; the nightly channel reuses it
+	// on a shorter TTL (nightlies land many times a day). adaptCachedResult
+	// refuses a cross-channel entry, so a nightly binary never compares
+	// itself against a cached stable tag (or vice versa) — it falls through
+	// to a fresh fetch instead.
+	ttl := CacheTTL
+	if isNightly {
+		ttl = nightlyCacheTTL
+	}
+	if cached := readCache(); cached != nil && time.Since(cached.CheckedAt) < ttl {
+		if adapted := adaptCachedResult(cached, currentVersion); adapted != nil {
+			return adapted, nil
+		}
+	}
+
+	if isNightly {
+		result, err := checkNightly(ctx, currentVersion, nightly)
+		if err != nil {
+			return nil, err
+		}
+		writeCache(result)
+		return result, nil
 	}
 
 	// Pick the appropriate endpoint based on whether the local build is a
@@ -421,6 +447,34 @@ func normalizeVersion(v string) string {
 		return "v" + v
 	}
 	return v
+}
+
+// adaptCachedResult recomputes a cached check against the CURRENT binary's
+// version, returning nil when the entry is unusable for this caller. Two
+// rules:
+//   - Newer is always recomputed — the cached flag goes stale the moment the
+//     operator upgrades (the cached "latest" may now BE the current version).
+//   - the cached Latest must belong to the caller's release channel: nightly
+//     and stable share one cache file, and a cross-channel comparison is
+//     meaningless (semver.Compare treats a nightly tag as less than any valid
+//     version, which would silently suppress real updates).
+func adaptCachedResult(cached *Result, currentVersion string) *Result {
+	if nv, ok := parseNightlyVersion(currentVersion); ok {
+		latest, ok := parseNightlyVersion(cached.Latest)
+		if !ok {
+			return nil // cached latest is not a nightly build
+		}
+		cached.Current = currentVersion
+		cached.Newer = compareNightlyVersion(latest, nv) > 0
+		return cached
+	}
+	latest := normalizeVersion(cached.Latest)
+	if !semver.IsValid(latest) {
+		return nil // cached latest is not a release tag (e.g. a nightly)
+	}
+	cached.Current = currentVersion
+	cached.Newer = semver.Compare(latest, normalizeVersion(currentVersion)) > 0
+	return cached
 }
 
 // readCache returns the cached Result if present and well-formed, nil

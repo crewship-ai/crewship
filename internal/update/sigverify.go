@@ -61,11 +61,29 @@ var fulcioOIDCIssuerV2OID = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 1, 8}
 // releaseIdentityPattern pins the certificate SAN to this repo's release
 // workflow — the identity `cosign verify-blob --certificate-identity-regexp`
 // uses in the documented verification flow (release notes header). Stable
-// releases are signed exclusively by release.yml; nightly prereleases
-// (nightly.yml) are never self-update targets because their tags aren't
-// semver (check.go refuses them).
+// releases are signed exclusively by release.yml; nightly prereleases are
+// signed by nightly.yml and carry their own pin below — identityPatternForTag
+// selects per channel, so neither channel ever accepts the other's identity.
 var releaseIdentityPattern = regexp.MustCompile(
 	`^https://github\.com/crewship-ai/crewship/\.github/workflows/release\.yml@`)
+
+// nightlyIdentityPattern pins the nightly channel: nightly.yml (not
+// release.yml) signs the checksums.txt of nightly-<date>-r<n> prereleases,
+// so a nightly self-update target verifies against that workflow identity.
+var nightlyIdentityPattern = regexp.MustCompile(
+	`^https://github\.com/crewship-ai/crewship/\.github/workflows/nightly\.yml@`)
+
+// identityPatternForTag returns the workflow identity allowed to have signed
+// the release `tag`: nightly-<date>-r<n> tags → nightly.yml, everything else
+// (semver release tags) → release.yml. Deliberately a per-channel pin rather
+// than one combined pattern: a stable upgrade must never accept a
+// nightly-signed checksums file, and vice versa.
+func identityPatternForTag(tag string) *regexp.Regexp {
+	if _, ok := parseNightlyVersion(tag); ok {
+		return nightlyIdentityPattern
+	}
+	return releaseIdentityPattern
+}
 
 // githubActionsOIDCIssuer is the only issuer that may have authenticated
 // the release workflow's identity.
@@ -80,7 +98,9 @@ type SignatureVerifyOptions struct {
 	// Intermediates supplement chain building. Nil with nil Roots → the
 	// embedded Fulcio intermediate; nil with non-nil Roots → empty.
 	Intermediates *x509.CertPool
-	// IdentityPattern pins the certificate's SAN URI. Nil → release.yml.
+	// IdentityPattern pins the certificate's SAN URI. Nil → release.yml
+	// (self-update swaps in the per-channel pin for nightly tags before
+	// verifying; see identityPatternForTag).
 	IdentityPattern *regexp.Regexp
 	// OIDCIssuer pins the Fulcio issuer extension. "" → GitHub Actions.
 	OIDCIssuer string
