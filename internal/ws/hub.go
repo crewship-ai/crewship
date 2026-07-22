@@ -100,6 +100,13 @@ type Hub struct {
 // enough that a real stuck client is noticed within a few seconds.
 const dropLogThreshold = 16
 
+// connSweepInterval is the cadence of the hub's shared per-connection sweep
+// (sweepRevokedSessions + sweepChannelAuthorization) — matches the
+// documented worst-case "how long until a revoked token / removed
+// membership stops granting access over WS" the old per-connection poll
+// carried.
+const connSweepInterval = 30 * time.Second
+
 // consecutiveDropsBeforeDisconnect is the per-client cutoff: once that
 // many broadcasts in a row have failed to enqueue, dispatch treats the
 // connection as stuck and tears it down asynchronously. The client's
@@ -274,6 +281,12 @@ func (h *Hub) Run(ctx context.Context) {
 	sweepTicker := time.NewTicker(sessionStreamSweepInterval)
 	defer sweepTicker.Stop()
 
+	// Shared connection sweep: revocation (#1255 item 3) + channel
+	// re-authorization (#1254 item 5). One ticker, two independent checks —
+	// see sweepRevokedSessions / sweepChannelAuthorization.
+	connSweepTicker := time.NewTicker(connSweepInterval)
+	defer connSweepTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -281,6 +294,9 @@ func (h *Hub) Run(ctx context.Context) {
 			return
 		case <-sweepTicker.C:
 			h.streams.sweep(time.Now())
+		case <-connSweepTicker.C:
+			h.sweepRevokedSessions(ctx)
+			h.sweepChannelAuthorization(ctx)
 		case client := <-h.register:
 			h.mu.Lock()
 			h.clients[client] = true
@@ -445,6 +461,123 @@ func (c *Client) forceDisconnect() {
 	}
 }
 
+// sweepRevokedSessions checks every DISTINCT authenticated session ID
+// currently connected — once per tick, not once per connection — and
+// force-disconnects every client registered under a session that comes
+// back revoked or expired.
+//
+// This replaces the old per-connection watchSessionRevocation goroutine
+// (#1255 item 3): a user with N tabs open under the same session drove N
+// independent 30s polls of the identical user_sessions row (documented
+// live at ~3k conns ≈ 100 q/s). Grouping by session ID means the query
+// count now scales with distinct sessions, not connections — a user with
+// 5 tabs open costs exactly the same one query per tick as a user with 1.
+//
+// Same transient-vs-definitive distinction as the watcher it replaces: a
+// sessions.Get failure (DB timeout, momentary unavailability) MUST NOT
+// disconnect anyone — only an explicit "not found" or "inactive" result
+// does.
+func (h *Hub) sweepRevokedSessions(ctx context.Context) {
+	if h.sessions == nil {
+		return
+	}
+	h.mu.RLock()
+	bySession := make(map[string][]*Client)
+	for c := range h.clients {
+		if c.authSessionID != "" {
+			bySession[c.authSessionID] = append(bySession[c.authSessionID], c)
+		}
+	}
+	h.mu.RUnlock()
+
+	for sid, clients := range bySession {
+		qCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		sess, err := h.sessions.Get(qCtx, sid)
+		cancel()
+
+		revoked := false
+		switch {
+		case errors.Is(err, sessions.ErrNotFound):
+			revoked = true
+		case err == nil && sess != nil && !sess.Active(time.Now()):
+			revoked = true
+		case err != nil:
+			// Transient — DB timeout, momentary unavailability. Skip this
+			// tick; the next one retries. If the session really IS revoked
+			// the next tick sees ErrNotFound and closes cleanly.
+			h.logger.Debug("ws session-revoke sweep: transient error, retrying next tick",
+				"error", err, "sid", sid)
+			continue
+		}
+		if !revoked {
+			continue
+		}
+		h.closeRevokedClients(clients)
+	}
+}
+
+// closeRevokedClients sends the terminal session_revoked frame to every
+// client under a just-revoked session, then force-disconnects each after a
+// brief delay so writePump has a chance to flush the frame first — mirrors
+// the old per-connection watcher's behaviour, just fanned out to every
+// client sharing the session instead of one.
+func (h *Hub) closeRevokedClients(clients []*Client) {
+	revokedFrame, _ := json.Marshal(ServerMessage{
+		Type:    "session_revoked",
+		Payload: map[string]string{"reason": "session_revoked"},
+	})
+	for _, c := range clients {
+		c.safeSend(revokedFrame)
+	}
+	go func(clients []*Client) {
+		time.Sleep(50 * time.Millisecond)
+		for _, c := range clients {
+			c.forceDisconnect()
+		}
+	}(clients)
+}
+
+// sweepChannelAuthorization re-verifies CanSubscribe for every client's
+// currently-subscribed channels once per tick, unsubscribing (and notifying
+// the client with an error frame) for any channel that no longer passes.
+//
+// Without this, CanSubscribe is enforced only at subscribe/resume/send time
+// (#1254 item 5): a user removed from a workspace — membership change is a
+// distinct event from session revocation, so the revocation sweep above
+// doesn't cover it — kept receiving that workspace's broadcasts for the
+// rest of the connection's lifetime. This closes that gap on the same
+// cadence as the revocation sweep rather than adding a second ticker.
+func (h *Hub) sweepChannelAuthorization(ctx context.Context) {
+	if h.channelAuth == nil {
+		return
+	}
+	h.mu.RLock()
+	clients := make([]*Client, 0, len(h.clients))
+	for c := range h.clients {
+		clients = append(clients, c)
+	}
+	h.mu.RUnlock()
+
+	for _, c := range clients {
+		c.mu.Lock()
+		chans := make([]string, 0, len(c.channels))
+		for ch := range c.channels {
+			chans = append(chans, ch)
+		}
+		c.mu.Unlock()
+
+		for _, ch := range chans {
+			if h.channelAuth.CanSubscribe(ctx, c.userID, ch) {
+				continue
+			}
+			c.unsubscribe(ch)
+			c.sendError(ch, "access revoked")
+			h.logger.Info("ws subscription revoked by periodic re-check",
+				"user_id", c.userID, "channel", ch)
+		}
+	}
+}
+
 // recordDrop increments the dropped-frame counter and emits a WARN log
 // roughly every dropLogThreshold drops, so a slow or stuck consumer can be
 // noticed without spamming for every single non-blocking send miss.
@@ -588,10 +721,10 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 
 			h.register <- client
 
+			// Session revocation is enforced by the hub's shared sweep
+			// (sweepRevokedSessions), not a per-connection goroutine — see
+			// its doc comment.
 			go client.writePump()
-			if authSessionID != "" {
-				go client.watchSessionRevocation()
-			}
 			client.readPump()
 		},
 	}
