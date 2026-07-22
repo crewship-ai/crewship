@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
@@ -125,6 +127,7 @@ type Router struct {
 	apiRateLimitedMux      http.Handler        // mux wrapped with general API rate limiter
 	credTestRateLimitedMux http.Handler        // mux wrapped with /credentials/test limiter (defence against credential-validation oracle abuse)
 	cappedMux              http.Handler        // body-capped mux, NOT rate-limited — the #1333 authenticated-CLI exemption routes here directly
+	cliExemptNeg           *cliExemptNegCache  // bounded negative cache of failed exemption lookups — stops spoofed CLI-prefix bearers from forcing an unthrottled DB lookup per request
 	journal                journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
 	consolidator           *consolidate.Consolidator
 	consolidateMemoryRoot  string
@@ -394,6 +397,7 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	go dummyBcryptHash()
 
 	// Pre-wrap mux with rate limiters (once, not per-request)
+	r.cliExemptNeg = newCLIExemptNegCache()
 	r.authRateLimitedMux = NewRateLimiter(10).Middleware(capped)     // 10 req/min per IP
 	r.apiRateLimitedMux = NewRateLimiter(120).Middleware(capped)     // 120 req/min per IP
 	r.credTestRateLimitedMux = NewRateLimiter(60).Middleware(capped) // 60 req/min per IP — tighter on /credentials/test to limit its use as a credential-validation oracle (a tenant should never need 60 manual test clicks per minute)
@@ -492,10 +496,31 @@ func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request)
 	// dodge throttling. The exempted request still goes through the real
 	// RequireAuth validation (with its audit trail) downstream in r.mux —
 	// IsValidCLIToken here is a side-effect-free pre-check.
+	//
+	// The validity check runs BEFORE the limiter on purpose: exempt CLI
+	// traffic must not drain the per-IP bucket it shares with a browser
+	// behind the same NAT. To keep that ordering from becoming a DoS
+	// amplifier (spoofed prefix → unthrottled DB lookup per request),
+	// failed lookups land in r.cliExemptNeg — see ratelimit_cli_negcache.go
+	// — and a cached failure skips the DB and falls into the normal bucket.
+	// Note this branch is dead for auth paths: the stricter auth bucket
+	// above matched first, so a valid CLI token cannot exempt login/
+	// bootstrap traffic (covered by TestRouteWithRateLimiting_AuthPath_
+	// ValidCLIToken_StillAuthRateLimited).
 	if strings.HasPrefix(path, "/api/") {
-		if token := extractToken(req); token != "" && IsCLIToken(token) && IsValidCLIToken(req.Context(), r.db, token) {
-			r.cappedMux.ServeHTTP(w, req)
-			return
+		if token := extractToken(req); token != "" && IsCLIToken(token) {
+			key := sha256.Sum256([]byte(token))
+			now := time.Now()
+			if !r.cliExemptNeg.has(key, now) {
+				if cliExemptDBLookupHook != nil {
+					cliExemptDBLookupHook()
+				}
+				if IsValidCLIToken(req.Context(), r.db, token) {
+					r.cappedMux.ServeHTTP(w, req)
+					return
+				}
+				r.cliExemptNeg.put(key, now)
+			}
 		}
 		r.apiRateLimitedMux.ServeHTTP(w, req)
 		return
