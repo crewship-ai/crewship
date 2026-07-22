@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -79,6 +80,15 @@ func runSelfUpdate(ctx context.Context, checkOnly bool) error {
 	// boot banner, not a self-update the user typed on purpose).
 	res, err := update.CheckExplicit(ctx, version)
 	if err != nil {
+		// An unrecognized version string (neither a release tag nor a
+		// nightly-<date>-r<n> build) means there's nothing to compare
+		// against — most likely a local build. Say so plainly instead of
+		// surfacing a parse error (#1291).
+		var incomparable *update.IncomparableVersionError
+		if errors.As(err, &incomparable) {
+			fmt.Println(incomparable.Error())
+			return nil
+		}
 		return fmt.Errorf("checking for updates: %w", err)
 	}
 	if res == nil {
