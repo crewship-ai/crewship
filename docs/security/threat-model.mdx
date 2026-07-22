@@ -532,12 +532,12 @@ attempts read as successes in access logs. The MCP handler's own redundant
 check (for in-process callers that bypass the router) answers `403` too, so no
 path can refuse a caller while logging a success.
 
-The gate exempts `/mcp/memory*` from the *cross-agent* refusal that the legacy
-routes carry, because that transport resolves each caller's own tier from its
-token rather than the boot agent's. That exemption is keyed on the path prefix,
-so it is test-enforced: every route registered under `/mcp/memory` must reach
-`memoryAgentContextFor`, and a future route under that prefix which does not
-resolve per-agent context fails the build
+`/mcp/memory*` and the legacy routes both resolve each caller's own tier from
+its token now (#1301, below) rather than one of them defaulting to the boot
+agent's — but the identity resolution is still two independent code paths
+(`memoryAgentContextFor` for the MCP transport, `legacyMemoryEffectiveSlug` +
+`peerMemoryEngineFor` for the five legacy routes), so a future route added
+under `/mcp/memory` that skips `memoryAgentContextFor` still fails the build
 (`TestMemoryMCPRoutes_ResolvePerAgentContext`).
 
 Moving the check to the prefix was necessary and was not sufficient. As first
@@ -553,26 +553,35 @@ router:
   behind it. Reading the boot agent's private `AGENT.md` cost one arbitrary
   header — a cheaper bypass than the one being fixed. Forgery is now refused at
   the chokepoint, not assumed of downstream callers.
-- **A sibling's own valid token.** The five legacy handlers resolve the agent
+- **A sibling's own valid token.** The five legacy handlers resolved the agent
   tier from the sidecar's boot agent, so *any* authenticated member read and
-  overwrote the boot agent's tier. Agent-scoped requests from a non-boot member
-  are now refused, pointing at `/mcp/memory/<slug>`, which resolves the acting
-  agent properly.
+  overwrote the boot agent's tier. This was first closed by refusing every
+  agent-scoped request from a non-boot member outright (403, pointing at
+  `/mcp/memory/<slug>`) — a stopgap, since a sibling's own memory was simply
+  unreachable over this surface rather than actually served. #1301 replaced
+  the refusal with the real fix: `legacyMemoryEffectiveSlug` resolves the
+  ACTING agent from its token (the same identity `/mcp/memory/<slug>` already
+  resolved), and `read`/`write` swap to that agent's own base path while
+  `search`/`status`/`reindex` — which run through a real FTS5-indexed
+  `memory.Engine`, not a plain file read — get their own per-agent `Engine`
+  instance from a lazily-built, slug-keyed cache (`peerMemoryEngineFor`,
+  `internal/sidecar/memory_mcp.go`) instead of always the boot agent's. The
+  cache is bounded by crew roster size (an unknown slug is refused before an
+  entry is ever created) and every entry is closed at sidecar shutdown
+  alongside `memoryEngine`/`crewMemoryEngine`.
 
-  The refusal is scoped to the **agent** tier. `scope=crew` resolves to one
-  directory shared by the whole crew by construction, so there is no per-agent
-  crew tier to cross and refusing it would protect nothing while breaking
-  sibling access to shared memory. The first cut of this fix did exactly that —
-  a functional regression wearing a security fix's clothes, caught in review
-  before it shipped. `scope=both` reads the agent tier and is refused with it.
+  `scope=crew` was never part of this — it resolves to one directory shared by
+  the whole crew by construction, so there is no per-agent crew tier to cross.
+  The first cut of the stopgap refusal mistakenly refused it too, breaking
+  sibling access to shared memory — a functional regression wearing a security
+  fix's clothes, caught in review before it shipped.
 
 The general lesson is the one this section already records, applied one level
 deeper: a guarantee stated at the level of "the memory surface" is only as true
 as the weakest handler behind it, and a comment asserting what *callers* do
-cannot enforce anything. Serving each agent its own tier on the legacy routes —
-rather than refusing non-boot agents — is the better end state and is tracked
-separately; `search`/`status`/`reindex` run through a single indexed engine
-bound to one tier, so it is a subsystem change, not a guard change.
+cannot enforce anything. A refusal that only proves "not the wrong tier" is a
+stopgap, not the fix — the fix is serving the RIGHT tier, and that took a
+second change (#1301) after the chokepoint (#1295, #1303) closed the leak.
 
 Coverage of the **rest** of the sidecar's routes is a different, weaker
 statement, deliberately kept honest here:
