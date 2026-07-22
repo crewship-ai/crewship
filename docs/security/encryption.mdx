@@ -109,7 +109,7 @@ This closes a compatibility shim that shipped with the webhook-secret work (#107
 
 ### What an operator sees
 
-The write fails and the API returns `500`. The server log carries the reason, naming the env var that is missing or malformed:
+The write fails and the API returns `500`. For the webhook-secret endpoints (agent webhook-secret rotate, pipeline-webhook create) the response body itself is actionable — it names `ENCRYPTION_KEY` and the opt-out flag — and the server log carries the full reason, naming the env var that is missing or malformed:
 
 ```
 refusing to store a secret in plaintext: no usable encryption key is configured
@@ -147,6 +147,16 @@ The secret value itself is never logged. Treat this flag as a short-lived transi
 ### Reading already-stored plaintext
 
 Fail-closed applies to **writes only**. Values already stored in plaintext by an older build (or under the opt-out) continue to be read back unchanged, with or without a key present and regardless of the flag — the read path discriminates on the `vN:` envelope prefix. Turning fail-closed on therefore cannot brick an existing install's stored secrets.
+
+### The migration backfill waits for a key
+
+Upgrading to the release that introduced webhook-secret encryption runs a one-time migration (v140) that encrypts any webhook/signing secrets previously stored in plaintext. If no usable `ENCRYPTION_KEY` is configured when that migration runs, it **skips instead of failing** — a migration must never break boot — and logs a `WARN` that the secrets are left plaintext at rest. The backfill is effectively deferred: the migration does not run again later, so after configuring a key, run:
+
+```bash
+crewship admin reencrypt
+```
+
+to perform the backfill the skip deferred. Newly written secrets are protected by the fail-closed write path either way.
 
 ## Rotating the Master Key
 

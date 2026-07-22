@@ -2,6 +2,7 @@ package encryption
 
 import (
 	"bytes"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -52,6 +53,13 @@ func TestEncryptAtRest_NoKey_NoOptOut_FailsClosed(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ENCRYPTION_KEY") {
 		t.Errorf("error must name the key env var so the operator knows the fix, got: %v", err)
+	}
+	// #1254 item 1: callers (HTTP handlers) must be able to distinguish the
+	// misconfiguration refusal from a genuine encrypt failure without string
+	// matching, so they can surface an actionable message instead of a blind
+	// 500. The refusal therefore wraps a stable sentinel.
+	if !errors.Is(err, ErrPlaintextRefused) {
+		t.Errorf("fail-closed refusal must wrap ErrPlaintextRefused (errors.Is), got: %v", err)
 	}
 
 	// An empty value stays a no-op — there is no secret to protect.
