@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/net/websocket"
+
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/logging"
@@ -203,15 +205,53 @@ func TestMetrics_RemoteWithoutTokenIs404(t *testing.T) {
 	}
 }
 
-func TestWebSocketMissingToken(t *testing.T) {
-	s := newTestServer()
-	req := httptest.NewRequest("GET", "/ws", nil)
-	w := httptest.NewRecorder()
+// TestWebSocketUnauthenticated replaces the old TestWebSocketMissingToken:
+// /ws no longer 401s pre-upgrade. Since #1254 pt.2 the hub upgrades
+// unconditionally and authenticates via the first post-upgrade frame
+// (ws.Hub.authenticateUpgradedConn) — a `?token=` query param would leak
+// the ticket into proxy/access logs, browser history, and Referer headers.
+// This test drives the production route (routes.go GET /ws → s.wsHub),
+// not the hub directly: a client whose first frame is not a valid auth
+// message gets an error frame back and the connection is closed without
+// ever being registered.
+func TestWebSocketUnauthenticated(t *testing.T) {
+	s := newTestServerForT(t)
+	srv := httptest.NewServer(s.mux)
+	t.Cleanup(srv.Close)
 
-	s.mux.ServeHTTP(w, req)
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+	conn, err := websocket.Dial(wsURL, "", srv.URL)
+	if err != nil {
+		t.Fatalf("dial (upgrade must succeed pre-auth): %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
 
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401, got %d", w.Code)
+	// First frame is not an auth message — the server must reject the
+	// connection instead of treating it as authenticated.
+	if _, err := conn.Write([]byte(`{"type":"subscribe","channel":"chat:general"}`)); err != nil {
+		t.Fatalf("write first frame: %v", err)
+	}
+
+	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var raw []byte
+	if err := websocket.Message.Receive(conn, &raw); err != nil {
+		t.Fatalf("expected an auth-error frame before close, got read error: %v", err)
+	}
+	var frame struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &frame); err != nil {
+		t.Fatalf("non-JSON frame %q: %v", raw, err)
+	}
+	if frame.Type != "error" {
+		t.Fatalf("expected type=error frame, got %q", raw)
+	}
+	// After the rejection the server closes the socket — no client is
+	// registered, so no further frames may arrive.
+	if err := websocket.Message.Receive(conn, &raw); err == nil {
+		t.Fatalf("expected the connection to be closed after rejected auth, got frame %q", raw)
 	}
 }
 
