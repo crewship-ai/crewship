@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -129,6 +130,100 @@ var releaseDownloadBase = "https://github.com/crewship-ai/crewship/releases/down
 // downloadURL is the release asset URL for a given tag + filename.
 func downloadURL(tag, name string) string {
 	return fmt.Sprintf("%s/%s/%s", releaseDownloadBase, tag, name)
+}
+
+// releaseAPIBase is the GitHub API root for this repo's releases — asset
+// discovery (resolveAssetName) lists a release's real asset names here. A
+// var so tests can point it at a local httptest server.
+var releaseAPIBase = "https://api.github.com/repos/crewship-ai/crewship/releases"
+
+// fetchReleaseAssets returns the asset names published on the release `tag`.
+func fetchReleaseAssets(ctx context.Context, tag string) ([]string, error) {
+	body, err := httpGet(ctx, releaseAPIBase+"/tags/"+tag)
+	if err != nil {
+		return nil, err
+	}
+	var rel struct {
+		Assets []struct {
+			Name string `json:"name"`
+		} `json:"assets"`
+	}
+	if err := json.Unmarshal(body, &rel); err != nil {
+		return nil, fmt.Errorf("parse release JSON: %w", err)
+	}
+	names := make([]string, 0, len(rel.Assets))
+	for _, a := range rel.Assets {
+		names = append(names, a.Name)
+	}
+	return names, nil
+}
+
+// selectAsset picks the platform's release archive out of the asset names a
+// release actually published.
+//
+// Stable releases name archives after their tag
+// (crewship_<version>_<os>_<arch>.tar.gz), so the tag-derived name matches
+// exactly. Nightly releases can't work that way: nightly.yml runs goreleaser
+// in snapshot mode (GORELEASER_CURRENT_TAG is a placeholder, see #886), so
+// nightly archives carry the 0.0.0-snapshot-<commit> version template —
+// unpredictable from the nightly-<date>-r<n> tag, which made a tag-computed
+// name a guaranteed 404 (#1291). Discovery therefore prefers the exact
+// tag-derived name, then falls back to the unique asset with the right
+// family prefix (crewship_ vs crewship-cli_ — never swap variants) and
+// _<goos>_<goarch>.<ext> suffix (which signature/SBOM/package companions
+// like .sig, .spdx.json, .deb can never match). Zero or multiple candidates
+// is a hard, descriptive error — never a guess that 404s at download time.
+func selectAsset(assetNames []string, tag string, cliOnly bool, goos, goarch string) (string, error) {
+	exact := assetNameFor(tag, cliOnly, goos, goarch)
+	prefix := "crewship_"
+	if cliOnly {
+		prefix = "crewship-cli_"
+	}
+	ext := ".tar.gz"
+	if goos == "windows" {
+		ext = ".zip"
+	}
+	suffix := fmt.Sprintf("_%s_%s%s", goos, goarch, ext)
+
+	var candidates []string
+	for _, name := range assetNames {
+		if name == exact {
+			return name, nil
+		}
+		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, suffix) {
+			candidates = append(candidates, name)
+		}
+	}
+	switch len(candidates) {
+	case 1:
+		return candidates[0], nil
+	case 0:
+		return "", fmt.Errorf(
+			"release %s has no %s archive for %s/%s: expected %q or a %s…%s asset (release lists %d assets)",
+			tag, strings.TrimSuffix(prefix, "_"), goos, goarch, exact, prefix, suffix, len(assetNames))
+	default:
+		return "", fmt.Errorf(
+			"release %s has %d archives matching %s…%s (%s) — cannot pick one safely",
+			tag, len(candidates), prefix, suffix, strings.Join(candidates, ", "))
+	}
+}
+
+// resolveAssetName discovers the archive asset name for `tag` from the
+// release's published assets. If the listing itself fails (GitHub API rate
+// limit, an air-gapped mirror serving only the download host), a stable tag
+// still derives its deterministic name as a fallback — a nightly tag cannot
+// (the snapshot version in its asset names is unknowable without the
+// listing), so there the listing error surfaces instead of a guessed name
+// that would 404.
+func resolveAssetName(ctx context.Context, tag string, cliOnly bool) (string, error) {
+	names, err := fetchReleaseAssets(ctx, tag)
+	if err != nil {
+		if _, nightly := parseNightlyVersion(tag); nightly {
+			return "", fmt.Errorf("list release assets for %s: %w", tag, err)
+		}
+		return AssetNameForTag(tag, cliOnly), nil
+	}
+	return selectAsset(names, tag, cliOnly, runtime.GOOS, runtime.GOARCH)
 }
 
 // signatureVerifyOpts parameterizes the checksums.txt signature gate; the
@@ -278,7 +373,13 @@ type PreparedUpdate struct {
 // failure here leaves the install untouched. binDir (= dir of exePath) must be
 // writable at Commit time (installer channel).
 func PrepareInstallerUpdate(ctx context.Context, tag, exePath string, cliOnly bool, fromVersion string) (*PreparedUpdate, error) {
-	asset := AssetNameForTag(tag, cliOnly)
+	// The asset name is discovered from the release's published assets, not
+	// computed from the tag — nightly archives carry a snapshot version the
+	// tag doesn't encode (see selectAsset).
+	asset, err := resolveAssetName(ctx, tag, cliOnly)
+	if err != nil {
+		return nil, err
+	}
 	archive, err := httpGet(ctx, downloadURL(tag, asset))
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", asset, err)
@@ -302,7 +403,14 @@ func PrepareInstallerUpdate(ctx context.Context, tag, exePath string, cliOnly bo
 		if err != nil {
 			return nil, fmt.Errorf("download checksums.txt.pem: %w", err)
 		}
-		if err := VerifyDetachedSignature(checksums, sig, certPEM, signatureVerifyOpts); err != nil {
+		// Per-channel identity pin: stable tags are signed by release.yml,
+		// nightly tags by nightly.yml — pick the matching pin for this tag
+		// unless the options (tests, forks) already carry an explicit one.
+		opts := signatureVerifyOpts
+		if opts.IdentityPattern == nil {
+			opts.IdentityPattern = identityPatternForTag(tag)
+		}
+		if err := VerifyDetachedSignature(checksums, sig, certPEM, opts); err != nil {
 			return nil, fmt.Errorf("verify checksums.txt signature: %w", err)
 		}
 	}
