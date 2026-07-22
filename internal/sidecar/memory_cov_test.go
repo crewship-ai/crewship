@@ -68,7 +68,10 @@ func TestCovMemorySearchHybridForwardsScopeVocabulary(t *testing.T) {
 			}))
 			defer mock.Close()
 
-			srv := setupCovMemoryServer(t, &IPCConfig{BaseURL: mock.URL, Token: "t", CrewID: "crew-42"})
+			// AgentSlug mirrors production: the orchestrator always mints the
+			// IPC config with the boot agent's slug, and the hybrid forward
+			// fails closed without a resolvable acting identity (#1348).
+			srv := setupCovMemoryServer(t, &IPCConfig{BaseURL: mock.URL, Token: "t", CrewID: "crew-42", AgentSlug: "alpha"})
 			defer srv.memoryEngine.Close()
 			defer srv.crewMemoryEngine.Close()
 
@@ -79,7 +82,7 @@ func TestCovMemorySearchHybridForwardsScopeVocabulary(t *testing.T) {
 			if w.Code != http.StatusOK {
 				t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 			}
-			if gotPath != "/api/v1/memory/search/hybrid" {
+			if gotPath != "/api/v1/internal/memory/search/hybrid" {
 				t.Errorf("path = %q", gotPath)
 			}
 			if gotBody["scope"] != tt.hostScope {

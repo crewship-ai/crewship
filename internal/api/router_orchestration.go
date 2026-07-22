@@ -410,6 +410,10 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	hsH.SetEmbedder(r.hybridSearchEmbedder)
 	hsH.SetWorkspaceProvider(r.hybridSearchProvider)
 	hsH.SetJournal(r.Journal())
+	// Stash for registerInternalRoutes (runs after this): the sidecar's
+	// hybrid forward hits an internal-token route (#1348) that must share
+	// this instance (same embedder/provider/journal wiring).
+	r.hybridSearchHandler = hsH
 	r.authedMut("POST", "/api/v1/memory/search/hybrid", roleSelf, hsH.Search)
 
 	// Quartermaster eval: mission replay + regression + list. Both
