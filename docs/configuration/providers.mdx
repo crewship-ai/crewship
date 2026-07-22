@@ -129,12 +129,26 @@ The `CrewConfig` struct is passed to `EnsureCrewRuntime` when creating or ensuri
 
 **Config key:** `container.provider: "apple"`
 
-The Apple provider (`internal/provider/apple/apple.go`) uses Apple Containers on macOS Tahoe+. Since there is no Go SDK, all operations shell out to the `container` CLI.
+The Apple provider (`internal/provider/apple/apple.go`) uses Apple Containers on macOS 26 (Tahoe) or later. Since there is no Go SDK, all operations shell out to the `container` CLI.
 
 ```go
 // Apple Containers run each container as a lightweight VM on macOS (Tahoe+).
 // Since there is no Go SDK, all operations shell out to the `container` CLI.
 ```
+
+<Note>
+  The macOS 26 (Tahoe) floor is a practical requirement of Apple's
+  `container` tooling — Crewship performs no OS or version check. Startup
+  detection only verifies that the `container` binary is on `PATH`, that
+  `container system version` succeeds, and that `container system status`
+  exits 0 (`internal/provider/apple/detect.go`). If any of those fail, the
+  provider is skipped with a warning and the server runs without a container
+  backend.
+</Note>
+
+<Card title="Running Crewship on macOS without Docker Desktop" icon="apple" href="/guides/macos-without-docker">
+  The full guide to this provider: how to enable it, and the complete list of what degrades versus Docker. Read it before switching a workflow you depend on.
+</Card>
 
 #### Apple Container Features
 
@@ -165,18 +179,50 @@ type containerJSON struct {
 
 #### Apple Containers Limitations
 
+The Apple provider is **not** feature-equivalent to Docker. Summary of the differences; the full list, including the security deltas, is in [macOS Without Docker Desktop](/guides/macos-without-docker#what-you-give-up).
+
 | Feature | Docker | Apple Containers |
 |---------|--------|-----------------|
 | `ContainerStats` | Full CPU/memory/network metrics | Not supported (returns error) |
-| `ExecResize` | Resizes running exec TTY | No-op (CLI does not support resize) |
-| CPU allocation | Fractional (e.g., 1.5 CPUs) | Integer only (rounded) |
+| `CopyToContainer` | Supported | Not supported (returns error) |
+| `ExecResize` | Resizes running exec TTY | Silent no-op — TTY panes do not reflow |
+| Devcontainer `services:` sidecars | Supported (`SidecarProvider`) | Not implemented — `services:` ignored at runtime |
+| Reattach to crew containers after restart | Supported (`CrewContainerLookup`) | Not implemented — no boot-time rehydration |
+| Admin prune / legacy-resource endpoints | Registered | Not registered (no pruner interfaces) |
+| Custom / provisioned images (`Image`, `CachedImage`) | Applied | Ignored — always uses `container.runtime_image` |
+| `ContainerEnv`, `PostStartCommands`, init hook, `LoginPath` | Applied | Ignored |
+| `Privileged`, `Init`, `CapAdd`, `SecurityOpt`, `ExtraMounts` | Applied | Ignored — no DinD-style setups |
+| `NetworkMode: restricted` / `AllowedDomains` | Enforced by the sidecar | **Not enforced** — no sidecar, so egress is unrestricted |
+| Sidecar bind mount + credential injection | Yes | No |
+| Privileged-exec fail-closed guard (#1158) | Applied | **Not applied** — `User` passes straight through |
+| `TTLHours` idle auto-stop | Honoured | Ignored |
+| Provisioning progress events (`ProvisionSink`) | Streamed to the UI | None |
+| CPU allocation | Fractional (e.g., 1.5 CPUs) | Integer only (`1.5` → `1`, minimum 1) |
+| Port publishing | Supported | None — host reachability via the host's LAN IP |
+| Volumes | Named volumes | Host bind mounts (`/workspace`, `/output`, `/crew`; tmpfs `/tmp`, `/home/agent`) |
+| Volume cleanup | Removes crew volumes | Removes only `homes/<crew-id>`; workspace/output/crew dirs are left on disk |
+| Root filesystem / user | Per image | Always `--read-only`, fixed user `1001:1001` |
 | Stop timeout | 30 seconds | 10 seconds |
+| `ContainerStatus` uptime | Reported | Not reported |
+
+<Warning>
+  Two of the rows above are security-relevant: Apple crew containers get **no
+  restricted-network enforcement** and **no fail-closed privileged-exec
+  guard**. Treat them as trusted-local-dev only.
+</Warning>
 
 ### Auto Provider
 
 **Config key:** `container.provider: "auto"`
 
-Auto-detection tries Docker first, then falls back to Apple Containers. Useful for development environments where the runtime may vary.
+Auto-detection tries **Apple Containers first** and falls back to Docker if the Apple provider fails to initialize (`initProviders` in `cmd/crewship/cmd_start.go`). On a Mac with both available, `auto` selects Apple Containers — set `provider: "docker"` explicitly if that is not what you want. If neither initializes, the server starts with no container provider and logs a warning.
+
+<Note>
+  The default is `docker`, so Apple Containers is never used unless you opt
+  in via `container.provider` (or `CREWSHIP_CONTAINER_PROVIDER`). Note also
+  that `crewship start --no-docker` disables **every** container provider,
+  Apple included.
+</Note>
 
 ### Kubernetes Provider — v0.2 roadmap
 
@@ -245,7 +291,7 @@ Invalid provider values cause a startup error with a descriptive message.
   <Tab title="Development">
     ```yaml
     container:
-      provider: "docker"    # or "auto" for macOS
+      provider: "docker"    # or "apple" on macOS without Docker Desktop
       default_runtime: "runc"
     storage:
       provider: "localfs"

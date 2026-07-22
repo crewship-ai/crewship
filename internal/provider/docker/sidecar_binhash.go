@@ -114,8 +114,25 @@ func (p *Provider) ExpectedSidecarHash() string {
 
 // onDiskSidecarHash hashes the sidecar binary at cfg.SidecarBinaryPath
 // (memoized by mtime+size). "" when the path is unset or unreadable.
-func (p *Provider) onDiskSidecarHash() string {
-	path := p.cfg.SidecarBinaryPath
+func (p *Provider) onDiskSidecarHash() string { return SidecarFileHash(p.cfg.SidecarBinaryPath) }
+
+// ExpectedSidecarHashFromBuild exposes the build-time injected hash (see
+// buildExpectedSidecarHash) to callers that have no Provider — notably
+// `crewship doctor`, which compares the sidecar binary it finds on disk
+// against the one this binary was built alongside without needing a live
+// docker daemon. Returns "" when no hash was injected or the injected value
+// is malformed, i.e. the same fail-open contract the provider path uses.
+func ExpectedSidecarHashFromBuild() string { return normalizedBuildSidecarHash() }
+
+// SidecarFileHash returns the short content hash of the sidecar binary at
+// path, in the same format the sidecar advertises on /health and the Makefile
+// injects at link time (sha256, first 12 hex chars). "" when path is empty or
+// unreadable — callers must treat that as "unknown", never as a mismatch.
+//
+// Exported so doctor hashes the binary through the same code path the
+// provider does; a second implementation would be one refactor away from
+// disagreeing and alarming on every healthy deploy.
+func SidecarFileHash(path string) string {
 	if path == "" {
 		return ""
 	}

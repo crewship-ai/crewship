@@ -326,9 +326,18 @@ func TestCheckServerReachable(t *testing.T) {
 	}
 	addr := ln.Addr().String()
 	_ = ln.Close()
+	// Loopback: WARN, not FAIL — doctor runs before `crewship start`, so a
+	// local daemon that is not up yet must not trip the exit-1 gate.
 	cliCfg = &cli.CLIConfig{Server: "http://" + addr}
+	if r := checkServerReachable(ctx); r.status != "WARN" || !strings.Contains(r.detail, "dial") {
+		t.Errorf("closed loopback port: got %+v", r)
+	}
+
+	// A remote target is the opposite: nobody configures one by accident, so
+	// an unreachable host stays a hard FAIL. .invalid never resolves (RFC 2606).
+	cliCfg = &cli.CLIConfig{Server: "http://doctor-test.invalid:8080"}
 	if r := checkServerReachable(ctx); r.status != "FAIL" || !strings.Contains(r.detail, "dial") {
-		t.Errorf("closed port: got %+v", r)
+		t.Errorf("unreachable remote: got %+v", r)
 	}
 }
 
@@ -487,8 +496,17 @@ func TestDoctorRunE_JSONBattery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := doctorCmd.RunE(doctorCmd, nil); err != nil {
-		t.Fatalf("RunE: %v", err)
+	// The rigged environment makes `container runtime` FAIL, so RunE must
+	// return the exit-1 gate error — AND still have written the complete
+	// payload first (the assertions below parse it). That ordering is the
+	// contract CI gates depend on: `crewship doctor --json | jq` must not
+	// receive a truncated document on the runs it most needs to inspect.
+	err := doctorCmd.RunE(doctorCmd, nil)
+	if err == nil {
+		t.Fatal("RunE returned nil with a FAILing check — the documented exit-1 gate is not enforced")
+	}
+	if code := cli.ExitCodeFor(err); code != cli.ExitGeneric {
+		t.Errorf("ExitCodeFor = %d, want %d", code, cli.ExitGeneric)
 	}
 
 	var payload struct {
@@ -557,8 +575,13 @@ func TestDoctorRunE_HumanOutputFooter(t *testing.T) {
 	_ = doctorCmd.Flags().Set("json", "false")
 
 	out := captureStdoutCovCli2(t, func() {
-		if err := doctorCmd.RunE(doctorCmd, nil); err != nil {
-			t.Errorf("RunE: %v", err)
+		// Same exit-1 gate as the JSON path: the rigged env FAILs the
+		// container-runtime check, and the human table is still printed in
+		// full before the error surfaces.
+		if err := doctorCmd.RunE(doctorCmd, nil); err == nil {
+			t.Errorf("RunE returned nil with a FAILing check — the documented exit-1 gate is not enforced")
+		} else if code := cli.ExitCodeFor(err); code != cli.ExitGeneric {
+			t.Errorf("ExitCodeFor = %d, want %d", code, cli.ExitGeneric)
 		}
 	})
 	if !strings.Contains(out, "Crewship doctor") {
@@ -627,7 +650,8 @@ func TestCheckServerReachable_DefaultPortAppended(t *testing.T) {
 	if !strings.Contains(r.detail, "127.0.0.1:443") {
 		t.Errorf("expected :443 default in detail, got %+v", r)
 	}
-	if r.status != "PASS" && r.status != "FAIL" {
+	// See the :80 sibling below: an unreachable loopback is WARN, not FAIL.
+	if r.status != "PASS" && r.status != "WARN" {
 		t.Errorf("unexpected status %+v", r)
 	}
 }
@@ -642,7 +666,10 @@ func TestCheckServerReachable_HTTPDefaultPort(t *testing.T) {
 	if !strings.Contains(r.detail, "127.0.0.1:80") {
 		t.Errorf("expected :80 default in detail, got %+v", r)
 	}
-	if r.status != "PASS" && r.status != "FAIL" {
+	// WARN is the expected outcome when nothing is listening on loopback:
+	// doctor runs before `crewship start`, so a local daemon that is not up
+	// yet must not trip the exit-1 gate (see unreachableServerVerdict).
+	if r.status != "PASS" && r.status != "WARN" {
 		t.Errorf("unexpected status %+v", r)
 	}
 }

@@ -9,14 +9,17 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/crashreport"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/preflight"
@@ -94,7 +97,15 @@ With --json, emits a structured object instead of the colored table:
 
 The status enum is PASS / WARN / FAIL / INFO, identical to the human
 table. CI gates can branch on the top-level "failed" / "warned"
-counters or filter the per-check array.`,
+counters or filter the per-check array.
+
+Exit code: 0 when every check is PASS / WARN / INFO, 1 when any check
+FAILs — in both output modes. In --json mode the full payload is still
+written to stdout before the non-zero exit, so a gate can read the
+counters AND branch on $?.
+
+The port-binding check probes the address 'crewship start' would bind:
+CREWSHIP_HOST (default 0.0.0.0) on CREWSHIP_PORT (default 8080).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fixMode, _ := cmd.Flags().GetBool("fix")
 		// Doctor's machine output is a bespoke JSON document (checks +
@@ -141,12 +152,27 @@ counters or filter the per-check array.`,
 			results = append(results, fn(ctx))
 		}
 		runProbe(checkContainerRuntime)
+		// Apple Containers is a first-class provider on macOS, but the
+		// runtime row above only ever names the ONE provider `start` would
+		// pick. Report Apple's availability separately there so an operator
+		// running Docker still learns the alternative exists (and that
+		// CREWSHIP_CONTAINER_PROVIDER=apple would work). Never FAIL/WARN —
+		// not having it installed is not a health problem.
+		if runtime.GOOS == "darwin" {
+			runProbe(checkAppleContainers)
+		}
+		runProbe(runCheckPortBinding)
 		results = append(results, checkDataDir(fixMode))
 		results = append(results, checkDataDirWritable())
 		runProbe(checkDBMigrationVersion)
 		results = append(results, checkSidecarBinary())
 		results = append(results, checkNextAuthSecret())
 		runProbe(checkServerReachable)
+		// CLI ↔ server build parity. A CLI several releases behind the
+		// daemon it drives is the single most common source of "the API
+		// returned something weird" reports, and nothing else in the CLI
+		// surfaces the comparison.
+		runProbe(runCheckServerVersionMatch)
 		// Episodic recall mode (W2): reads the `episodic` field off the
 		// server's /healthz. WARN when recall runs sparse-only (no
 		// embedder configured), INFO when the server is down or older
@@ -182,53 +208,105 @@ counters or filter the per-check array.`,
 		// cleanly when unauthenticated or no endpoint is configured.
 		runProbe(runCheckLocalModelEndpoint)
 
-		var failed, warned int
-		for _, r := range results {
-			switch r.status {
-			case "FAIL":
-				failed++
-			case "WARN":
-				warned++
-			}
-		}
-
-		if jsonOut {
-			// JSON mode: emit a single object on stdout, no human
-			// header/footer/per-check lines. The structure matches
-			// the contract documented in the command's Long.
-			return emitDoctorJSON(cmd.OutOrStdout(), results, failed, warned)
-		}
-
-		for _, r := range results {
-			r.print()
-		}
-		fmt.Println()
-		switch {
-		case failed > 0:
-			fmt.Printf("  %s%d failed, %d warned%s — fix the FAILs and re-run.\n",
-				cli.Red, failed, warned, cli.Reset)
-			fmt.Println()
-			fmt.Printf("  %sNeed help?%s  https://docs.crewship.ai/troubleshooting\n", cli.Dim, cli.Reset)
-		case warned > 0:
-			fmt.Printf("  %s%d warned%s — review and re-run.\n", cli.Yellow, warned, cli.Reset)
-			fmt.Println()
-			fmt.Printf("  %sNext steps:%s\n", cli.Bold, cli.Reset)
-			fmt.Printf("    1. crewship start\n")
-			fmt.Printf("    2. open http://localhost:8080\n")
-			fmt.Printf("    3. follow the onboarding wizard (workspace → crew → agent → credentials)\n")
-		default:
-			fmt.Printf("  %sAll checks passed.%s\n", cli.Green, cli.Reset)
-			fmt.Println()
-			fmt.Printf("  %sNext steps:%s\n", cli.Bold, cli.Reset)
-			fmt.Printf("    1. crewship start\n")
-			fmt.Printf("    2. open http://localhost:8080\n")
-			fmt.Printf("    3. follow the onboarding wizard (workspace → crew → agent → credentials)\n")
-			fmt.Println()
-			fmt.Printf("  %sCLI walkthrough:%s  https://docs.crewship.ai/guides/onboarding\n", cli.Dim, cli.Reset)
-		}
-		fmt.Println()
-		return nil
+		return finishDoctor(cmd.OutOrStdout(), results, jsonOut)
 	},
+}
+
+// countDoctorStatuses tallies the two counters the exit contract and the
+// JSON payload are built on. INFO deliberately counts as neither: it exists
+// precisely for findings that must not colour the summary line or the exit
+// code (skipped probes, "not applicable on this OS", …).
+func countDoctorStatuses(results []checkResult) (failed, warned int) {
+	for _, r := range results {
+		switch r.status {
+		case "FAIL":
+			failed++
+		case "WARN":
+			warned++
+		}
+	}
+	return failed, warned
+}
+
+// doctorExitErr turns the FAIL count into the documented exit-code contract
+// (docs/cli/doctor.mdx: 0 when everything is PASS/WARN/INFO, 1 when anything
+// FAILs — "treat the non-zero exit as a hard gate").
+//
+// It returns a plain coded error rather than calling os.Exit so the decision
+// stays testable and the normal cobra unwinding still runs. rootCmd sets
+// SilenceUsage + SilenceErrors (main.go), so this error produces neither a
+// usage dump nor cobra's "Error:" prefix — main.exitWithError prints the one
+// summary line and exits with cli.ExitCodeFor. The message is deliberately
+// short: the table (or the JSON payload) printed above is the real output,
+// and this line only exists so a human who piped stdout elsewhere still sees
+// why the command exited non-zero.
+func doctorExitErr(failed int) error {
+	if failed == 0 {
+		return nil
+	}
+	return cli.WithExitCode(
+		fmt.Errorf("%d check(s) FAILED — see the doctor output above", failed),
+		cli.ExitGeneric,
+	)
+}
+
+// finishDoctor renders the collected results in the requested format and
+// returns the exit-contract error. Split out of RunE so both output paths
+// are unit-testable without standing up the full check battery (which
+// touches Docker, the data dir, the network, and the DB).
+//
+// Ordering matters in JSON mode: the payload is written in FULL before the
+// gate error is returned, so `crewship doctor --json | jq` still receives a
+// complete document on exactly the runs a CI gate most needs to inspect.
+func finishDoctor(out io.Writer, results []checkResult, jsonOut bool) error {
+	failed, warned := countDoctorStatuses(results)
+
+	if jsonOut {
+		// JSON mode: emit a single object on stdout, no human
+		// header/footer/per-check lines. The structure matches
+		// the contract documented in the command's Long.
+		if err := emitDoctorJSON(out, results, failed, warned); err != nil {
+			return err
+		}
+		return doctorExitErr(failed)
+	}
+
+	printDoctorChecks(results, failed, warned)
+	return doctorExitErr(failed)
+}
+
+// printDoctorChecks writes the human table plus the summary/next-steps
+// footer. Kept on fmt.Printf (os.Stdout) rather than cmd.OutOrStdout so the
+// colour helpers and the per-row printer keep their single output target.
+func printDoctorChecks(results []checkResult, failed, warned int) {
+	for _, r := range results {
+		r.print()
+	}
+	fmt.Println()
+	switch {
+	case failed > 0:
+		fmt.Printf("  %s%d failed, %d warned%s — fix the FAILs and re-run.\n",
+			cli.Red, failed, warned, cli.Reset)
+		fmt.Println()
+		fmt.Printf("  %sNeed help?%s  https://docs.crewship.ai/troubleshooting\n", cli.Dim, cli.Reset)
+	case warned > 0:
+		fmt.Printf("  %s%d warned%s — review and re-run.\n", cli.Yellow, warned, cli.Reset)
+		fmt.Println()
+		fmt.Printf("  %sNext steps:%s\n", cli.Bold, cli.Reset)
+		fmt.Printf("    1. crewship start\n")
+		fmt.Printf("    2. open http://localhost:8080\n")
+		fmt.Printf("    3. follow the onboarding wizard (workspace → crew → agent → credentials)\n")
+	default:
+		fmt.Printf("  %sAll checks passed.%s\n", cli.Green, cli.Reset)
+		fmt.Println()
+		fmt.Printf("  %sNext steps:%s\n", cli.Bold, cli.Reset)
+		fmt.Printf("    1. crewship start\n")
+		fmt.Printf("    2. open http://localhost:8080\n")
+		fmt.Printf("    3. follow the onboarding wizard (workspace → crew → agent → credentials)\n")
+		fmt.Println()
+		fmt.Printf("  %sCLI walkthrough:%s  https://docs.crewship.ai/guides/onboarding\n", cli.Dim, cli.Reset)
+	}
+	fmt.Println()
 }
 
 // preflightInstalled is the indirection that lets tests stub the
@@ -236,46 +314,154 @@ counters or filter the per-check array.`,
 // which a unit test can't control via env vars alone.
 var preflightInstalled = preflight.Installed
 
-// checkContainerRuntime probes both Docker-compatible runtimes and Apple
-// Containers. We accept either one — they're functionally equivalent for
-// Crewship's purposes, so finding any container runtime is a PASS.
+// containerProviderSetting resolves the container provider `crewship start`
+// would use: CREWSHIP_CONTAINER_PROVIDER when set, else the built-in default
+// from internal/config.Default() ("docker").
+//
+// Caveat worth knowing when reading doctor's output: `crewship start
+// --config <file>` can also set container.provider from YAML, and doctor has
+// no --config flag to point at that file. Env + default is what doctor can
+// honestly resolve, and it covers every deployment that doesn't hand-write a
+// config file. The detail string always names the provider it assumed so the
+// discrepancy is visible rather than silent.
+func containerProviderSetting() string {
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("CREWSHIP_CONTAINER_PROVIDER"))); v != "" {
+		return v
+	}
+	return config.Default().Container.Provider
+}
+
+// checkContainerRuntime reports the runtime `crewship start` would ACTUALLY
+// use, honouring the configured provider. Doctor used to hand-roll a
+// docker-then-apple probe and PASS on whichever answered — which disagreed
+// with initProviders (cmd_start.go), where "auto" tries APPLE first and an
+// explicit "docker"/"apple" never falls back at all. Reporting a provider
+// start would never pick is worse than reporting nothing: it sends operators
+// debugging the wrong runtime.
 func checkContainerRuntime(ctx context.Context) checkResult {
+	var dockerDesc, appleDesc string
 	if d, err := docker.Detect(ctx); err == nil {
-		return checkResult{
-			name:   "container runtime",
-			status: "PASS",
-			detail: fmt.Sprintf("%s %s (%s)", d.Runtime, d.Version, d.Socket),
-		}
+		dockerDesc = fmt.Sprintf("%s %s (%s)", d.Runtime, d.Version, d.Socket)
 	}
 	if a, err := apple.Detect(ctx); err == nil {
-		return checkResult{
-			name:   "container runtime",
-			status: "PASS",
-			detail: fmt.Sprintf("apple %s (host_ip=%s)", a.Version, a.HostIP),
-		}
+		appleDesc = fmt.Sprintf("apple %s (host_ip=%s)", a.Version, a.HostIP)
 	}
-	// No live runtime answered. Distinguish "installed but not running"
-	// (start it) from "not installed" (install one) — the fixes are
-	// opposites and a wrong hint sends the user reinstalling software
-	// they already have.
+	// Distinguish "installed but not running" (start it) from "not
+	// installed" (install one) — the fixes are opposites and a wrong hint
+	// sends the user reinstalling software they already have.
+	var installedNames []string
+	var startHint string
 	if installed := preflightInstalled(); len(installed) > 0 {
-		names := make([]string, 0, len(installed))
 		for _, rt := range installed {
-			names = append(names, rt.Name)
+			installedNames = append(installedNames, rt.Name)
 		}
+		startHint = installed[0].StartHint
+	}
+	return containerRuntimeVerdict(containerProviderSetting(), dockerDesc, appleDesc, installedNames, startHint)
+}
+
+// containerRuntimeVerdict is the pure decision table behind
+// checkContainerRuntime. dockerDesc / appleDesc are the rendered detail for
+// each runtime, empty when that runtime did not answer; installed /
+// startHint come from the preflight scan. Keeping it parameterised is what
+// makes the start-parity contract testable without a container daemon.
+func containerRuntimeVerdict(provider, dockerDesc, appleDesc string, installed []string, startHint string) checkResult {
+	const name = "container runtime"
+	pass := func(desc string) checkResult {
+		detail := fmt.Sprintf("%s  [provider=%s]", desc, provider)
+		r := checkResult{name: name, status: "PASS", detail: detail}
+		// Docker won under an explicit/auto selection while Apple is also
+		// up: mention the road not taken once, quietly, rather than leaving
+		// `doctor` silent about a provider the host fully supports.
+		if provider != "apple" && dockerDesc != "" && appleDesc != "" && desc == dockerDesc {
+			r.hint = "Apple Containers is also available here — set CREWSHIP_CONTAINER_PROVIDER=apple (or container.provider) to use it"
+		}
+		return r
+	}
+	fail := func(detail, hint string) checkResult {
 		return checkResult{
-			name:   "container runtime",
+			name:   name,
 			status: "FAIL",
-			detail: fmt.Sprintf("%s installed but not running", strings.Join(names, ", ")),
-			hint:   fmt.Sprintf("start it: %s", installed[0].StartHint),
+			detail: fmt.Sprintf("%s  [provider=%s]", detail, provider),
+			hint:   hint,
 		}
 	}
-	return checkResult{
-		name:   "container runtime",
-		status: "FAIL",
-		detail: "no container runtime installed (Docker, Podman, Colima, OrbStack, Rancher Desktop, Apple Containers)",
-		hint:   installHintForOS(runtime.GOOS),
+	// Shared "nothing answered" tail: both the explicit-provider and the
+	// auto paths end here, and the remediation only depends on whether a
+	// runtime is installed at all.
+	notRunning := func() checkResult {
+		if len(installed) > 0 {
+			return fail(fmt.Sprintf("%s installed but not running", strings.Join(installed, ", ")),
+				fmt.Sprintf("start it: %s", startHint))
+		}
+		return fail("no container runtime installed (Docker, Podman, Colima, OrbStack, Rancher Desktop, Apple Containers)",
+			installHintForOS(runtime.GOOS))
 	}
+
+	switch provider {
+	case "docker":
+		if dockerDesc != "" {
+			return pass(dockerDesc)
+		}
+		if appleDesc != "" {
+			// Apple is up but the provider is pinned to docker: `start`
+			// would run WITHOUT containers, so this is a real FAIL even
+			// though a runtime exists on the host.
+			return fail("docker not available (Apple Containers is up, but container.provider is pinned to docker)",
+				"start Docker, or set CREWSHIP_CONTAINER_PROVIDER=apple to use the runtime you already have")
+		}
+		return notRunning()
+	case "apple":
+		if appleDesc != "" {
+			return pass(appleDesc)
+		}
+		if dockerDesc != "" {
+			return fail("Apple Containers not available (Docker is up, but container.provider is pinned to apple)",
+				"start Apple Containers ('container system start'), or set CREWSHIP_CONTAINER_PROVIDER=docker")
+		}
+		return notRunning()
+	case "auto":
+		// Mirror initProviders: Apple first (native, lighter on macOS),
+		// Docker second.
+		if appleDesc != "" {
+			return pass(appleDesc)
+		}
+		if dockerDesc != "" {
+			return pass(dockerDesc)
+		}
+		return notRunning()
+	default:
+		// config.Validate rejects anything outside docker|apple|auto, so
+		// this is a config error the server would refuse to boot on.
+		return fail(fmt.Sprintf("unknown container provider %q", provider),
+			"set container.provider (or CREWSHIP_CONTAINER_PROVIDER) to docker, apple, or auto")
+	}
+}
+
+// checkAppleContainers reports Apple Containers availability as its own row
+// on macOS. Purely informational (PASS/INFO, never WARN/FAIL): the container
+// runtime row above owns the health verdict, this one only answers "is the
+// native macOS provider an option on this host?" — a question doctor could
+// not answer at all whenever Docker replied first.
+func checkAppleContainers(ctx context.Context) checkResult {
+	desc := ""
+	if a, err := apple.Detect(ctx); err == nil {
+		desc = fmt.Sprintf("apple %s (host_ip=%s)", a.Version, a.HostIP)
+	}
+	return appleContainersVerdict(desc)
+}
+
+func appleContainersVerdict(desc string) checkResult {
+	const name = "apple containers"
+	if desc == "" {
+		return checkResult{
+			name:   name,
+			status: "INFO",
+			detail: "not available (optional native macOS provider)",
+			hint:   "install from https://github.com/apple/container and run 'container system start' to use CREWSHIP_CONTAINER_PROVIDER=apple",
+		}
+	}
+	return checkResult{name: name, status: "PASS", detail: desc}
 }
 
 // installHintForOS picks the one-line install pointer doctor prints when no
@@ -292,6 +478,191 @@ func installHintForOS(goos string) string {
 		return "install Docker Desktop (WSL 2 backend): https://docs.docker.com/desktop/setup/install/windows-install/"
 	default:
 		return "install one: https://docs.docker.com/get-docker/"
+	}
+}
+
+// ─── port binding ─────────────────────────────────────────────────────
+//
+// docs/cli/doctor.mdx has documented this check (and shown it in the sample
+// output) since the page was written, but it never existed in code. It does
+// now: bind the address `crewship start` would bind, release it immediately,
+// and report whether the port is available.
+
+// doctorBindTarget resolves the host:port `crewship start` binds, using the
+// same inputs internal/config does: CREWSHIP_HOST / CREWSHIP_PORT over the
+// defaults from config.Default() (0.0.0.0:8080). An unparseable or
+// out-of-range CREWSHIP_PORT falls back to the default exactly like
+// applyEnvOverrides + Validate would (the server refuses to boot on a port
+// outside 1-65535, so probing it would be diagnosing the wrong problem —
+// the config error surfaces at `start`).
+func doctorBindTarget() (string, int) {
+	def := config.Default().Server
+	host, port := def.Host, def.Port
+	if v := strings.TrimSpace(os.Getenv("CREWSHIP_HOST")); v != "" {
+		host = v
+	}
+	if v := strings.TrimSpace(os.Getenv("CREWSHIP_PORT")); v != "" {
+		if p, err := strconv.Atoi(v); err == nil && p >= 1 && p <= 65535 {
+			port = p
+		}
+	}
+	return host, port
+}
+
+// runCheckPortBinding wires the production state into checkPortBinding: the
+// effective server URL (to decide whether the port is even ours to bind) and
+// a probe that identifies a live crewshipd on the port we're testing.
+func runCheckPortBinding(ctx context.Context) checkResult {
+	host, port := doctorBindTarget()
+	return checkPortBinding(
+		cli.EffectiveServer(flagServer, flagProfile, cliCfg),
+		host, port,
+		func(p int) bool { return crewshipdOnPort(ctx, p) },
+	)
+}
+
+// checkPortBinding attempts to bind host:port and releases it immediately.
+//
+//   - remote server configured → INFO. The port lives on the other host; a
+//     local bind test would be answering a question nobody asked (and would
+//     FAIL on any machine that happens to run something on 8080).
+//   - bind succeeds → PASS.
+//   - bind fails, but the squatter answers as crewshipd → PASS. `crewship
+//     doctor` on a machine where `crewship start` is ALREADY running is the
+//     single most common invocation; reporting the daemon's own listener as
+//     a failure would make the check a permanent false alarm.
+//   - bind fails to anything else → FAIL with the documented lsof
+//     remediation.
+func checkPortBinding(serverURL, host string, port int, ownsPort func(int) bool) checkResult {
+	const name = "port binding"
+
+	// Only meaningful for a local target. A remote/LAN server means the
+	// listener is on that host, not this one.
+	if u, err := url.Parse(strings.TrimSpace(serverURL)); err == nil {
+		if h := u.Hostname(); h != "" && !isLoopbackHost(h) {
+			return checkResult{
+				name:   name,
+				status: "INFO",
+				detail: fmt.Sprintf("skipped — server %s is remote, the port is bound there", h),
+			}
+		}
+	}
+
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	ln, err := net.Listen("tcp", addr)
+	if err == nil {
+		_ = ln.Close()
+		return checkResult{
+			name:   name,
+			status: "PASS",
+			detail: fmt.Sprintf("%s is bindable", addr),
+		}
+	}
+	if ownsPort != nil && ownsPort(port) {
+		return checkResult{
+			name:   name,
+			status: "PASS",
+			detail: fmt.Sprintf("%s in use by the running crewshipd (expected)", addr),
+		}
+	}
+	return checkResult{
+		name:   name,
+		status: "FAIL",
+		detail: fmt.Sprintf("%s is in use by another process: %v", addr, err),
+		hint:   fmt.Sprintf("find the squatter with 'lsof -i :%d' (Linux: 'ss -ltnp sport = :%d'), or pick another port with CREWSHIP_PORT", port, port),
+	}
+}
+
+// crewshipdOnPort reports whether the process holding the port is our own
+// daemon, by asking http://127.0.0.1:<port>/healthz for the service name.
+// Anything else — no answer, wrong shape, a different service — is false, so
+// an unrelated squatter still trips the FAIL branch.
+func crewshipdOnPort(ctx context.Context, port int) bool {
+	url := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	var body struct {
+		Service string `json:"service"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
+		return false
+	}
+	return body.Service == "crewshipd"
+}
+
+// ─── CLI ↔ server version parity ──────────────────────────────────────
+
+// runCheckServerVersionMatch wires the production client into the testable
+// helper. GET /api/v1/system/version is the endpoint that reports the
+// daemon's own build (internal/api/system.go); /healthz deliberately does
+// not carry it.
+func runCheckServerVersionMatch(ctx context.Context) checkResult {
+	return checkServerVersionMatch(ctx, newAPIClient(), version)
+}
+
+// checkServerVersionMatch compares this binary's version against the running
+// server's. Every "couldn't ask" condition (down, unauthenticated, older
+// server without the endpoint, unparseable body) is INFO, never FAIL: the
+// "server reachable" row already owns a dead daemon and doctor must not
+// double-report one root cause as two failures.
+func checkServerVersionMatch(ctx context.Context, client *cli.Client, cliVersion string) checkResult {
+	const name = "cli/server version"
+
+	if cliVersion == "" || cliVersion == "dev" {
+		return checkResult{name: name, status: "INFO", detail: "skipped (development build)"}
+	}
+	resp, err := client.WithContext(ctx).Get("/api/v1/system/version")
+	if err != nil {
+		return checkResult{name: name, status: "INFO", detail: "skipped (server not reachable — see 'server reachable' check)"}
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return checkResult{name: name, status: "INFO", detail: "skipped (not authenticated — run `crewship login`)"}
+	}
+	var body struct {
+		Current string `json:"current"`
+	}
+	if err := cli.ReadJSON(resp, &body); err != nil {
+		return checkResult{name: name, status: "INFO", detail: "skipped (could not parse the server version response)"}
+	}
+	return serverVersionVerdict(cliVersion, body.Current)
+}
+
+// serverVersionVerdict is the pure comparison. The `v` prefix is normalised
+// away on both sides: the CLI is built with a `v`-prefixed git tag while the
+// server may report either spelling depending on how it was built, and a
+// prefix-only difference is not a version skew.
+func serverVersionVerdict(cliVersion, serverVersion string) checkResult {
+	const name = "cli/server version"
+	if cliVersion == "" || cliVersion == "dev" {
+		return checkResult{name: name, status: "INFO", detail: "skipped (development build)"}
+	}
+	if strings.TrimSpace(serverVersion) == "" {
+		return checkResult{name: name, status: "INFO", detail: "skipped (server did not report a version)"}
+	}
+	norm := func(v string) string { return strings.TrimPrefix(strings.TrimSpace(v), "v") }
+	if norm(cliVersion) == norm(serverVersion) {
+		return checkResult{
+			name:   name,
+			status: "PASS",
+			detail: fmt.Sprintf("both on %s", strings.TrimSpace(serverVersion)),
+		}
+	}
+	return checkResult{
+		name:   name,
+		status: "WARN",
+		detail: fmt.Sprintf("CLI %s, server %s — mismatched builds", cliVersion, strings.TrimSpace(serverVersion)),
+		hint:   "run `crewship self-update` (a stale CLI against a newer server is the most common source of confusing API errors)",
 	}
 }
 
@@ -475,11 +846,13 @@ func checkSidecarBinary() checkResult {
 	}
 	for _, p := range candidates {
 		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-			return checkResult{
-				name:   "sidecar binary",
-				status: "PASS",
-				detail: p,
-			}
+			// Presence alone is a weak signal: the classic bad deploy
+			// updates the server binary but not the sidecar next to it, and
+			// the stale file passes a stat check forever (#1160). Compare
+			// the file against the hash baked into THIS binary at link time
+			// and surface the divergence here, where an operator is already
+			// looking, instead of at the first failed agent start.
+			return sidecarHashVerdict(p, docker.SidecarFileHash(p), docker.ExpectedSidecarHashFromBuild())
 		}
 	}
 	return checkResult{
@@ -487,6 +860,40 @@ func checkSidecarBinary() checkResult {
 		status: "WARN",
 		detail: "not found on disk (may be embedded in crewshipd)",
 		hint:   "searched: " + strings.Join(candidates, ", "),
+	}
+}
+
+// sidecarHashVerdict compares the on-disk sidecar against the build-time
+// expected hash. Fail-open by design, matching the provider-side contract in
+// internal/provider/docker:
+//
+//   - expected == ""  → no hash was injected (dev `go build`, `go test`,
+//     container image builds). Presence-only PASS, exactly as before.
+//   - onDisk  == ""   → unreadable file. "Unknown", never a mismatch — a
+//     permissions hiccup must not raise a fleet-wide false alarm.
+//   - equal           → PASS with the hash, so the operator can eyeball it
+//     against the server logs.
+//   - different       → WARN. Not FAIL: agents still start, they just run a
+//     sidecar the server wasn't built against. The remediation is a rebuild
+//     and recopy, NOT a restart (restarting remounts the same stale file).
+func sidecarHashVerdict(path, onDisk, expected string) checkResult {
+	const name = "sidecar binary"
+	if expected == "" || onDisk == "" {
+		return checkResult{name: name, status: "PASS", detail: path}
+	}
+	if onDisk == expected {
+		return checkResult{
+			name:   name,
+			status: "PASS",
+			detail: fmt.Sprintf("%s (hash %s, matches this build)", path, onDisk),
+		}
+	}
+	return checkResult{
+		name:   name,
+		status: "WARN",
+		detail: fmt.Sprintf("%s is stale: hash %s, this binary was built against %s", path, onDisk, expected),
+		hint: "rebuild and recopy the sidecar ('make build:sidecar'), then " +
+			"'crewship crew restart-agents <crew>' — restarting alone would remount the same stale file",
 	}
 }
 
@@ -662,17 +1069,57 @@ func runCheckLocalModelEndpoint(ctx context.Context) checkResult {
 // even when the user isn't logged in (unauthenticated /healthz endpoints
 // aren't universal). A successful TCP connect is enough to distinguish
 // "server is down / wrong port" from "auth issue".
+// unreachableServerVerdict grades a failed dial by whether the target is local.
+//
+// doctor is a PRE-flight tool: `crewship doctor` before `crewship start` is the
+// primary way it gets run, and a local daemon that hasn't been started yet is
+// the expected state there, not a fault. Grading that FAIL would make the
+// documented exit-1 gate fire on a healthy machine every time — which trains
+// operators to ignore the exit code and defeats the point of having a gate.
+//
+// A remote target is the opposite: nobody configures a remote server by
+// accident, so if it does not answer, something is genuinely wrong and the
+// gate should fire.
+func unreachableServerVerdict(host, via string, dialErr error) checkResult {
+	name := "server reachable"
+	dialHost, _, splitErr := net.SplitHostPort(host)
+	if splitErr != nil {
+		dialHost = host
+	}
+	if isLoopbackHost(dialHost) {
+		return checkResult{
+			name:   name,
+			status: "WARN",
+			detail: fmt.Sprintf("dial %s (from %s): %v", host, via, dialErr),
+			hint:   "expected if you have not run `crewship start` yet — start it, then re-run doctor",
+		}
+	}
+	return checkResult{
+		name:   name,
+		status: "FAIL",
+		detail: fmt.Sprintf("dial %s (from %s): %v", host, via, dialErr),
+		hint:   "check that crewshipd is running on that host and the port is open",
+	}
+}
+
 func checkServerReachable(ctx context.Context) checkResult {
 	// EffectiveServer (flag > profile > env > cfg) — probe the host commands
 	// actually dial, not env>cfg, so the reachability check reflects the active
 	// profile. (#1003)
-	server := cli.EffectiveServer(flagServer, flagProfile, cliCfg)
+	//
+	// The WithSource variant additionally reports WHICH layer won. "TCP
+	// localhost:8080 ok" was true but useless when the operator's real
+	// question is "why is it talking to THAT host?" — a forgotten
+	// CREWSHIP_SERVER in one shell and a `server:` line in cli-config.yaml
+	// produce byte-identical output otherwise.
+	server, source := cli.EffectiveServerWithSource(flagServer, flagProfile, cliCfg)
+	via := serverSourceLabel(source, cli.ActiveProfileName(flagProfile, cliCfg))
 	u, err := url.Parse(server)
 	if err != nil {
 		return checkResult{
 			name:   "server reachable",
 			status: "FAIL",
-			detail: fmt.Sprintf("invalid server URL %q: %v", server, err),
+			detail: fmt.Sprintf("invalid server URL %q (from %s): %v", server, via, err),
 		}
 	}
 	host := u.Host
@@ -680,7 +1127,7 @@ func checkServerReachable(ctx context.Context) checkResult {
 		return checkResult{
 			name:   "server reachable",
 			status: "FAIL",
-			detail: fmt.Sprintf("could not parse host from %q", server),
+			detail: fmt.Sprintf("could not parse host from %q (from %s)", server, via),
 		}
 	}
 	// Default ports for http/https when the URL omits them — net.Dial
@@ -696,18 +1143,36 @@ func checkServerReachable(ctx context.Context) checkResult {
 	dialer := &net.Dialer{Timeout: 3 * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp", host)
 	if err != nil {
-		return checkResult{
-			name:   "server reachable",
-			status: "FAIL",
-			detail: fmt.Sprintf("dial %s: %v", host, err),
-			hint:   "check that crewshipd is running and the port is open",
-		}
+		return unreachableServerVerdict(host, via, err)
 	}
 	_ = conn.Close()
 	return checkResult{
 		name:   "server reachable",
 		status: "PASS",
-		detail: "TCP " + host + " ok",
+		detail: fmt.Sprintf("TCP %s ok (from %s)", host, via),
+	}
+}
+
+// serverSourceLabel renders a cli.ServerSource as the phrase doctor prints
+// in the detail column. The profile case names the profile: "profile" alone
+// is not actionable on a config holding dev1/dev2/dev3.
+func serverSourceLabel(source cli.ServerSource, profileName string) string {
+	switch source {
+	case cli.ServerSourceFlag:
+		return "--server flag"
+	case cli.ServerSourceProfile:
+		if profileName != "" {
+			return fmt.Sprintf("profile %q", profileName)
+		}
+		return "active profile"
+	case cli.ServerSourceEnv:
+		return "CREWSHIP_SERVER env"
+	case cli.ServerSourceConfig:
+		return "config file (server:)"
+	case cli.ServerSourceDefault:
+		return "built-in default"
+	default:
+		return string(source)
 	}
 }
 

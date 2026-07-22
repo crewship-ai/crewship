@@ -36,6 +36,7 @@
                 "pages": [
                   "guides/install",
                   "guides/installation",
+                  "guides/macos-without-docker",
                   "guides/onboarding",
                   "guides/auth",
                   "guides/admin-cli"

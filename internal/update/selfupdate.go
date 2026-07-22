@@ -34,6 +34,22 @@ const (
 	// isn't Homebrew — a system package manager (apt/rpm), a container image,
 	// or a read-only mount owns it. self-update refuses and points elsewhere.
 	ChannelPackaged
+	// ChannelNPM: installed from npm — `npm i -g crewship` (whose bin shim
+	// execs the real binary out of an @crewship/cli-<os>-<arch> optional
+	// dependency) or a transient `npx crewship` cache. npm owns that file
+	// tree; an in-place swap would be silently undone by the next
+	// install/dedupe, so self-update refuses and points at npm.
+	ChannelNPM
+	// ChannelGoInstall: built by `go install …/cmd/crewship@…` into GOBIN or
+	// GOPATH/bin. That directory IS writable, so without this case the binary
+	// classified as ChannelInstaller and self-update would overwrite a
+	// locally-built binary with a downloaded release tarball — a different
+	// build (possibly a different variant) than the user asked for.
+	ChannelGoInstall
+
+	// New channels MUST be appended here: ChannelInstaller is iota 0 and
+	// doubles as the `default:` arm of every switch over Channel, so inserting
+	// a constant earlier would silently re-map the existing values.
 )
 
 func (c Channel) String() string {
@@ -42,6 +58,10 @@ func (c Channel) String() string {
 		return "homebrew"
 	case ChannelPackaged:
 		return "packaged"
+	case ChannelNPM:
+		return "npm"
+	case ChannelGoInstall:
+		return "go-install"
 	default:
 		return "installer"
 	}
@@ -56,6 +76,18 @@ func DetectChannel(execPath string, writable bool) Channel {
 	if isHomebrewPath(execPath) {
 		return ChannelHomebrew
 	}
+	// npm and go-install are decided by path shape BEFORE the writability
+	// fallback, because writability doesn't distinguish them: a global npm
+	// prefix (/usr/local/lib/node_modules) is usually root-owned and would be
+	// swallowed by ChannelPackaged — telling an npm user to run apt-get —
+	// while GOBIN is always writable and would be swallowed by
+	// ChannelInstaller, which is the case that actually clobbers a binary.
+	if isNPMPath(execPath) {
+		return ChannelNPM
+	}
+	if isGoInstallPath(execPath) {
+		return ChannelGoInstall
+	}
 	if !writable {
 		return ChannelPackaged
 	}
@@ -69,6 +101,146 @@ func DetectChannel(execPath string, writable bool) Channel {
 // to the Cellar, and only the resolved target carries the marker.
 func isHomebrewPath(p string) bool {
 	return strings.Contains(filepath.ToSlash(p), "/Cellar/")
+}
+
+// isNPMPath reports whether the path lives inside an npm-managed tree. The
+// marker is a whole `node_modules` (or npx cache `_npx`) PATH SEGMENT, never a
+// substring: a user directory called "my_node_modules_backup" is not an npm
+// install, and misclassifying it would refuse a self-update that should work.
+//
+// One segment test covers every npm layout because the bin shim execs the real
+// binary out of the per-platform package — global
+// (<prefix>/lib/node_modules/@crewship/cli-<os>-<arch>/bin/crewship), local
+// project (./node_modules/…), and npx (~/.npm/_npx/<hash>/node_modules/…) all
+// carry it.
+func isNPMPath(p string) bool {
+	for _, seg := range strings.Split(filepath.ToSlash(p), "/") {
+		if seg == "node_modules" || seg == "_npx" {
+			return true
+		}
+	}
+	return false
+}
+
+// isNPXPath reports whether the binary is running out of npx's throwaway
+// cache, where "upgrading" is meaningless — npx resolves the latest version on
+// every invocation.
+func isNPXPath(p string) bool {
+	for _, seg := range strings.Split(filepath.ToSlash(p), "/") {
+		if seg == "_npx" {
+			return true
+		}
+	}
+	return false
+}
+
+// isGoInstallPath reports whether the binary's directory is one `go install`
+// writes to. It mirrors the toolchain's own rule without ever running
+// `go env` — that would cost a fork on every self-update run and fail outright
+// on a machine with the CLI but no Go toolchain:
+//
+//   - GOBIN set → that is the ONLY install target;
+//   - else every entry of the GOPATH list + "/bin";
+//   - else the default GOPATH, ~/go, + "/bin".
+//
+// Each value is read with goEnvValue, so a GOBIN/GOPATH persisted by
+// `go env -w` counts too.
+func isGoInstallPath(execPath string) bool {
+	dir := filepath.Dir(execPath)
+	// Read the `go env -w` file at most once per call, not once per lookup.
+	fileVars := goEnvFileVars()
+	if gobin := goEnvValue("GOBIN", fileVars); gobin != "" {
+		return sameDir(dir, gobin)
+	}
+	gopath := goEnvValue("GOPATH", fileVars)
+	if gopath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return false
+		}
+		gopath = filepath.Join(home, "go")
+	}
+	for _, entry := range filepath.SplitList(gopath) {
+		if entry == "" {
+			continue
+		}
+		if sameDir(dir, filepath.Join(entry, "bin")) {
+			return true
+		}
+	}
+	return false
+}
+
+// goEnvValue resolves a go environment variable the way the toolchain does:
+// the OS environment wins, and the `go env -w` file is consulted only when the
+// variable is unset or empty. fileVars may be nil (no file / unreadable).
+func goEnvValue(key string, fileVars map[string]string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return strings.TrimSpace(fileVars[key])
+}
+
+// goEnvFileVars parses the file `go env -w` writes to — the officially
+// recommended way to set GOBIN persistently, and invisible to os.Getenv, so
+// without it the go-install guard would miss the users most likely to have
+// one. Returns nil for a missing, unreadable or disabled file: that is the
+// common case (most machines have never run `go env -w`) and must never be an
+// error or a log line on the self-update path.
+func goEnvFileVars() map[string]string {
+	path := goEnvFilePath()
+	if path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	// Format is plain KEY=VALUE lines. Anything else (blank lines, comments,
+	// a truncated write) is skipped rather than rejected — this file belongs
+	// to the Go toolchain, and it is not our place to fail on its contents.
+	out := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimRight(line, "\r")
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
+// goEnvFilePath is where the Go toolchain keeps its `go env -w` values:
+// $GOENV when set (the toolchain's own override, with the literal "off"
+// meaning "read no file at all"), otherwise os.UserConfigDir()/go/env.
+func goEnvFilePath() string {
+	if v := strings.TrimSpace(os.Getenv("GOENV")); v != "" {
+		if v == "off" {
+			return ""
+		}
+		return v
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "go", "env")
+}
+
+// sameDir compares two directory paths lexically (both are already absolute
+// here — execPath is symlink-resolved by the caller and the env values are
+// absolute by definition). Windows paths are compared case-insensitively.
+func sameDir(a, b string) bool {
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 // AssetNameForTag returns the release archive filename for this platform,
@@ -178,6 +350,48 @@ func PackagedChannelGuidance(execPath string) string {
 			"  • rpm/dnf:   dnf upgrade crewship\n"+
 			"  • docker:    docker pull ghcr.io/crewship-ai/crewship:latest\n"+
 			"Or reinstall into a directory you own with the official installer:\n"+
+			"  curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash",
+		execPath,
+	)
+}
+
+// NPMChannelGuidance is the actionable refusal shown to an npm install. The
+// binary lives inside node_modules, which npm rewrites wholesale on the next
+// install/dedupe — an in-place swap would be silently reverted (and would
+// leave the meta-package's version metadata lying about what's installed).
+// An npx run gets the honest answer instead: there is nothing to upgrade.
+func NPMChannelGuidance(execPath string) string {
+	if isNPXPath(execPath) {
+		return fmt.Sprintf(
+			"%s is running from npx's cache, so there is nothing to update — "+
+				"npx resolves the latest published version on every invocation.\n"+
+				"For a persistent install:\n"+
+				"  npm i -g crewship",
+			execPath,
+		)
+	}
+	return fmt.Sprintf(
+		"%s was installed by npm, so 'crewship self-update' won't overwrite it "+
+			"(npm owns node_modules and would revert the swap). Upgrade with npm:\n"+
+			"  npm i -g crewship@latest\n"+
+			"If it's a project-local dependency, upgrade it there instead:\n"+
+			"  npm i crewship@latest\n"+
+			"Or reinstall into a directory you own with the official installer:\n"+
+			"  curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash",
+		execPath,
+	)
+}
+
+// GoInstallChannelGuidance is the actionable refusal shown to a binary built
+// by `go install`. Its directory (GOBIN / GOPATH/bin) is writable, so before
+// this channel existed self-update happily replaced a source-built binary with
+// a downloaded release archive — a silent, unasked-for change of provenance.
+func GoInstallChannelGuidance(execPath string) string {
+	return fmt.Sprintf(
+		"%s was built by 'go install', so 'crewship self-update' won't replace it "+
+			"with a downloaded release archive. Rebuild it from source instead:\n"+
+			"  go install github.com/crewship-ai/crewship/cmd/crewship@latest\n"+
+			"Or switch to a released binary with the official installer:\n"+
 			"  curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash",
 		execPath,
 	)

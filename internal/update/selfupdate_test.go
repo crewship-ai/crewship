@@ -4,12 +4,21 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestDetectChannel(t *testing.T) {
+	// Pin the go-install inputs so the non-go cases can't accidentally match
+	// this machine's real GOBIN / GOPATH / ~/go/bin — including a GOBIN this
+	// developer may have persisted with `go env -w` (GOENV=off, the
+	// toolchain's own opt-out, keeps that file out of the test).
+	t.Setenv("GOENV", "off")
+	t.Setenv("GOBIN", "")
+	t.Setenv("GOPATH", "/nonexistent-gopath")
+
 	cases := []struct {
 		name     string
 		execPath string
@@ -24,6 +33,21 @@ func TestDetectChannel(t *testing.T) {
 		// Not writable and not brew = a system package manager owns it (apt/rpm)
 		// or it's a read-only mount — we must not clobber it.
 		{"packaged non-writable /usr/bin", "/usr/bin/crewship", false, ChannelPackaged},
+
+		// npm: the bin shim execs the real binary out of the per-platform
+		// package, so the resolved path always carries a node_modules segment.
+		// A GLOBAL npm prefix is typically root-owned (writable=false), which is
+		// exactly why the npm test must run before the packaged fallback —
+		// otherwise these would be misreported as apt/rpm installs.
+		{"npm global (root-owned prefix)", "/usr/local/lib/node_modules/@crewship/cli-linux-x64/bin/crewship", false, ChannelNPM},
+		{"npm global (user prefix, writable)", "/home/u/.npm-global/lib/node_modules/@crewship/cli-darwin-arm64/bin/crewship", true, ChannelNPM},
+		{"npm local project install", "/home/u/proj/node_modules/@crewship/cli-linux-arm64/bin/crewship", true, ChannelNPM},
+		{"npx cache", "/home/u/.npm/_npx/a1b2c3/node_modules/@crewship/cli-darwin-arm64/bin/crewship", true, ChannelNPM},
+		// Segment matching, not substring: a user directory that merely spells
+		// node_modules inside a longer name is NOT an npm install, and must
+		// keep its ordinary installer classification.
+		{"lookalike dir is not npm", "/home/u/my_node_modules_backup/bin/crewship", true, ChannelInstaller},
+		{"lookalike dir is not npm (suffix)", "/home/u/bin/node_modules_old/crewship", true, ChannelInstaller},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -31,6 +55,248 @@ func TestDetectChannel(t *testing.T) {
 				t.Errorf("DetectChannel(%q, %v) = %v, want %v", tc.execPath, tc.writable, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestDetectChannel_GoInstall pins the latent-bug fix: a `go install`-ed
+// binary lands in a WRITABLE GOBIN / GOPATH/bin / ~/go/bin, so before this it
+// classified as ChannelInstaller and self-update would have overwritten a
+// locally-built binary with a downloaded release tarball. Each case drives the
+// three sources go itself honours, from the env DetectChannel reads.
+func TestDetectChannel_GoInstall(t *testing.T) {
+	home := t.TempDir()
+
+	cases := []struct {
+		name     string
+		gobin    string
+		gopath   string
+		execPath string
+		want     Channel
+	}{
+		{
+			name:     "GOBIN wins",
+			gobin:    "/opt/gobin",
+			gopath:   "/nonexistent-gopath",
+			execPath: "/opt/gobin/crewship",
+			want:     ChannelGoInstall,
+		},
+		{
+			// GOBIN set means `go install` writes ONLY there, so GOPATH/bin is
+			// not a go-install location in this configuration.
+			name:     "GOPATH/bin ignored while GOBIN is set",
+			gobin:    "/opt/gobin",
+			gopath:   "/home/u/go",
+			execPath: "/home/u/go/bin/crewship",
+			want:     ChannelInstaller,
+		},
+		{
+			name:     "GOPATH/bin when GOBIN unset",
+			gopath:   "/home/u/go",
+			execPath: "/home/u/go/bin/crewship",
+			want:     ChannelGoInstall,
+		},
+		{
+			// GOPATH is a LIST; every entry's bin is a go-install target.
+			name:     "second GOPATH entry",
+			gopath:   "/home/u/go" + string(os.PathListSeparator) + "/srv/go",
+			execPath: "/srv/go/bin/crewship",
+			want:     ChannelGoInstall,
+		},
+		{
+			name:     "default ~/go/bin when GOPATH unset",
+			execPath: filepath.Join(home, "go", "bin", "crewship"),
+			want:     ChannelGoInstall,
+		},
+		{
+			// Only the bin dir itself counts — a nested dir under GOPATH/bin is
+			// not something `go install` produces.
+			name:     "nested under GOPATH/bin is not go install",
+			gopath:   "/home/u/go",
+			execPath: "/home/u/go/bin/vendored/crewship",
+			want:     ChannelInstaller,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GOENV", "off") // ignore this developer's `go env -w` file
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home) // windows equivalent of HOME
+			t.Setenv("GOBIN", tc.gobin)
+			t.Setenv("GOPATH", tc.gopath)
+			// writable=true throughout: that is precisely the state that used
+			// to mask the bug (a writable dir looked like an installer install).
+			if got := DetectChannel(tc.execPath, true); got != tc.want {
+				t.Errorf("DetectChannel(%q, true) = %v, want %v", tc.execPath, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDetectChannel_GoEnvFile covers the OTHER way GOBIN/GOPATH get set:
+// `go env -w`, which persists them to os.UserConfigDir()/go/env and never
+// touches the process environment. It is the officially recommended way to set
+// GOBIN persistently, so without reading that file the go-install guard would
+// miss exactly the users most likely to have one — and self-update would
+// clobber their source-built binary.
+//
+// Precedence mirrors the toolchain: the OS environment variable wins; the file
+// is consulted only when the variable is unset or empty.
+func TestDetectChannel_GoEnvFile(t *testing.T) {
+	cases := []struct {
+		name string
+		// envFile is the go env file's content; "" means write no file at all.
+		envFile  string
+		writeEnv bool
+		gobin    string // OS environment, "" = unset
+		gopath   string
+		execPath string
+		want     Channel
+	}{
+		{
+			name:     "GOBIN from the go env file",
+			envFile:  "GOBIN=/opt/gobin\nGOTOOLCHAIN=local\n",
+			writeEnv: true,
+			execPath: "/opt/gobin/crewship",
+			want:     ChannelGoInstall,
+		},
+		{
+			name:     "GOPATH from the go env file",
+			envFile:  "GOPATH=/srv/go\n",
+			writeEnv: true,
+			execPath: "/srv/go/bin/crewship",
+			want:     ChannelGoInstall,
+		},
+		{
+			// The OS env wins, so the file's GOBIN is NOT a go-install dir here.
+			name:     "OS env GOBIN overrides a conflicting file GOBIN",
+			envFile:  "GOBIN=/from-file/bin\n",
+			writeEnv: true,
+			gobin:    "/from-env/bin",
+			execPath: "/from-file/bin/crewship",
+			want:     ChannelInstaller,
+		},
+		{
+			name:     "OS env GOBIN overrides a conflicting file GOBIN (positive)",
+			envFile:  "GOBIN=/from-file/bin\n",
+			writeEnv: true,
+			gobin:    "/from-env/bin",
+			execPath: "/from-env/bin/crewship",
+			want:     ChannelGoInstall,
+		},
+		{
+			name:     "OS env GOPATH overrides a conflicting file GOPATH",
+			envFile:  "GOPATH=/from-file/go\n",
+			writeEnv: true,
+			gopath:   "/from-env/go",
+			execPath: "/from-file/go/bin/crewship",
+			want:     ChannelInstaller,
+		},
+		{
+			// A malformed file must be tolerated silently, never error — it is
+			// not ours to validate, and a self-update must not die over it.
+			name:     "garbage file is ignored",
+			envFile:  "not a key value line\n\n=novalue\nGOBIN\n#comment=x\n",
+			writeEnv: true,
+			execPath: "/opt/gobin/crewship",
+			want:     ChannelInstaller,
+		},
+		{
+			// The common case: no file has ever been written.
+			name:     "missing file is not an error",
+			writeEnv: false,
+			execPath: "/opt/gobin/crewship",
+			want:     ChannelInstaller,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// GOENV points the toolchain (and us) at an alternate env file —
+			// which is how these cases stay hermetic without a package-level
+			// override hook in the production path.
+			goenv := filepath.Join(t.TempDir(), "env")
+			if tc.writeEnv {
+				if err := os.WriteFile(goenv, []byte(tc.envFile), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("GOENV", goenv)
+			t.Setenv("GOBIN", tc.gobin)
+			t.Setenv("GOPATH", tc.gopath)
+			// Keep the ~/go/bin default out of reach of every case.
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+
+			if got := DetectChannel(tc.execPath, true); got != tc.want {
+				t.Errorf("DetectChannel(%q, true) = %v, want %v", tc.execPath, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestGoEnvFileOff pins the toolchain's own opt-out: GOENV=off means "read no
+// env file", and we must honour it rather than treating "off" as a path.
+func TestGoEnvFileOff(t *testing.T) {
+	t.Setenv("GOENV", "off")
+	t.Setenv("GOBIN", "")
+	t.Setenv("GOPATH", "/nonexistent-gopath")
+	if got := DetectChannel("/opt/gobin/crewship", true); got != ChannelInstaller {
+		t.Errorf("GOENV=off must disable the env file, got %v", got)
+	}
+}
+
+// TestChannelString pins the human-readable names (they appear in errors and
+// in the --systemd refusal), and in particular that appending the new
+// constants did not shift ChannelInstaller off iota 0 / the default arm.
+func TestChannelString(t *testing.T) {
+	if ChannelInstaller != 0 {
+		t.Fatalf("ChannelInstaller must stay iota 0 (it doubles as the default arm), got %d", ChannelInstaller)
+	}
+	cases := map[Channel]string{
+		ChannelInstaller: "installer",
+		ChannelHomebrew:  "homebrew",
+		ChannelPackaged:  "packaged",
+		ChannelNPM:       "npm",
+		ChannelGoInstall: "go-install",
+	}
+	for c, want := range cases {
+		if got := c.String(); got != want {
+			t.Errorf("Channel(%d).String() = %q, want %q", c, got, want)
+		}
+	}
+}
+
+// TestNPMChannelGuidance pins that the npm refusal is actionable and, for an
+// npx run, says the truth: there is nothing to update because npx already
+// fetches the latest on every invocation.
+func TestNPMChannelGuidance(t *testing.T) {
+	global := NPMChannelGuidance("/usr/local/lib/node_modules/@crewship/cli-linux-x64/bin/crewship")
+	if !strings.Contains(global, "npm i -g crewship@latest") {
+		t.Errorf("global npm guidance must name the upgrade command: %q", global)
+	}
+	if !strings.Contains(global, "/usr/local/lib/node_modules/@crewship/cli-linux-x64/bin/crewship") {
+		t.Errorf("guidance should name the binary path: %q", global)
+	}
+
+	npx := NPMChannelGuidance("/home/u/.npm/_npx/a1b2c3/node_modules/@crewship/cli-darwin-arm64/bin/crewship")
+	if !strings.Contains(strings.ToLower(npx), "npx") {
+		t.Errorf("npx guidance must mention npx: %q", npx)
+	}
+	if !strings.Contains(strings.ToLower(npx), "nothing to update") {
+		t.Errorf("npx guidance must say there is nothing to update: %q", npx)
+	}
+}
+
+// TestGoInstallChannelGuidance pins the exact module path a user must re-run;
+// a wrong path here sends people to a package that doesn't exist.
+func TestGoInstallChannelGuidance(t *testing.T) {
+	msg := GoInstallChannelGuidance("/home/u/go/bin/crewship")
+	if !strings.Contains(msg, "go install github.com/crewship-ai/crewship/cmd/crewship@latest") {
+		t.Errorf("guidance must name the real module path: %q", msg)
+	}
+	if !strings.Contains(msg, "/home/u/go/bin/crewship") {
+		t.Errorf("guidance should name the binary path: %q", msg)
 	}
 }
 

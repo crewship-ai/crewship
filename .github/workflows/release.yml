@@ -145,6 +145,184 @@ jobs:
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
 
+  # npm distribution — `npx crewship@latest` / `npm i -g crewship`.
+  #
+  # Consumes the artifacts the `release` job already built, signed and
+  # checksummed: it downloads the four full-daemon archives from the GitHub
+  # release, verifies each against `checksums.txt`, and repacks the binaries
+  # into npm packages. It deliberately does NOT run a second Go build — an npm
+  # user must get byte-identical bytes to the tarball user, or the cosign
+  # signature chain covers nothing that npm ships.
+  #
+  # Layout (the esbuild/turbo/biome pattern): a bare `crewship` meta-package
+  # whose bin shim resolves, at run time, one of four per-platform packages
+  # (`@crewship/cli-{darwin,linux}-{arm64,x64}`) declared as
+  # optionalDependencies with matching `os`/`cpu`. No postinstall download
+  # script, so it works offline-cached and with `--ignore-scripts`.
+  #
+  # SAFETY: NPM_TOKEN is not provisioned in this repo today. GitHub Actions
+  # forbids `secrets.*` in a job-level `if:`, so this job always starts and a
+  # first step converts the secret's presence into a step output every later
+  # step gates on — the same fail-open convention as MACOS_SIGN_P12 in
+  # .goreleaser.yml and GPG_KEY_PATH in the release job above. Without the
+  # secret the job is a logged no-op and the release still succeeds.
+  npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: [release]
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Gate on NPM_TOKEN
+        id: gate
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "npm publishing enabled"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::NPM_TOKEN not set — skipping npm publish. Provision the secret (and the @crewship npm org) to enable \`npx crewship\`."
+          fi
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: "https://registry.npmjs.org"
+
+      # The npm version tracks the release tag exactly, minus the `v` that npm
+      # semver forbids. There is no second source of truth here.
+      - name: Resolve version and dist-tag
+        id: meta
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          # Same rule as the docker job's `latest`: a pre-release tag must not
+          # move the tag `npx crewship@latest` resolves to.
+          if echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "dist_tag=latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "dist_tag=next" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download + verify release archives
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          DL="$RUNNER_TEMP/dl"
+          mkdir -p "$DL"
+
+          # Full-daemon archives only. `crewship_*` does not match the
+          # CLI-only `crewship-cli_*` assets.
+          gh release download "$TAG" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --dir "$DL" \
+            --pattern "crewship_${VERSION}_darwin_*.tar.gz" \
+            --pattern "crewship_${VERSION}_linux_*.tar.gz" \
+            --pattern "checksums.txt"
+
+          # Verify against the release's own checksums.txt. Build a filtered
+          # list rather than `-c --ignore-missing`, so an archive that has NO
+          # checksum line fails loudly instead of being silently skipped.
+          cd "$DL"
+          : > wanted.txt
+          for f in \
+            "crewship_${VERSION}_darwin_arm64.tar.gz" \
+            "crewship_${VERSION}_darwin_amd64.tar.gz" \
+            "crewship_${VERSION}_linux_arm64.tar.gz" \
+            "crewship_${VERSION}_linux_amd64.tar.gz"; do
+            test -f "$f" || { echo "::error::release asset $f is missing"; exit 1; }
+            grep -E "[[:space:]]\*?${f}\$" checksums.txt >> wanted.txt \
+              || { echo "::error::no checksum entry for $f"; exit 1; }
+          done
+          sha256sum -c wanted.txt
+          echo "all four full-daemon archives verified against checksums.txt"
+
+      # Unpack into the <os>-<arch> layout build-packages.mjs expects. Each
+      # archive root holds crewship, crewship-sidecar (always a LINUX ELF) and
+      # entrypoint.sh — the exact trio `crewship start` autodetects next to its
+      # own executable.
+      - name: Extract archives
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          DL="$RUNNER_TEMP/dl"
+          ART="$RUNNER_TEMP/art"
+          extract() {
+            local goarch="$1" npmarch="$2" goos="$3"
+            local dir="$ART/${goos}-${npmarch}"
+            mkdir -p "$dir"
+            tar -xzf "$DL/crewship_${VERSION}_${goos}_${goarch}.tar.gz" -C "$dir"
+          }
+          extract arm64 arm64 darwin
+          extract amd64 x64   darwin
+          extract arm64 arm64 linux
+          extract amd64 x64   linux
+          for d in "$ART"/*/; do
+            echo "== $d"; ls -l "$d"
+          done
+
+      - name: Assemble packages
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          node npm/scripts/build-packages.mjs \
+            --version "$VERSION" \
+            --artifacts "$RUNNER_TEMP/art" \
+            --out "$RUNNER_TEMP/npmout"
+
+      # Platform packages FIRST: the meta package pins them as exact-version
+      # optionalDependencies, so publishing it first would leave a window where
+      # `npm i crewship` resolves nothing installable.
+      #
+      # Each publish is skipped when that exact version already exists on the
+      # registry, so re-running a release tag is idempotent rather than a hard
+      # E403.
+      - name: Publish
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          DIST_TAG: ${{ steps.meta.outputs.dist_tag }}
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/npmout"
+          publish() {
+            local dir="$1"
+            local name
+            name=$(node -p "require('$dir/package.json').name")
+            if npm view "${name}@${VERSION}" version >/dev/null 2>&1; then
+              echo "::notice::${name}@${VERSION} already published — skipping"
+              return 0
+            fi
+            ( cd "$dir" && npm publish --access public --tag "$DIST_TAG" )
+          }
+          for dir in "$OUT"/cli-*; do
+            publish "$dir"
+          done
+          publish "$OUT/crewship"
+          echo "published crewship@${VERSION} (dist-tag: ${DIST_TAG})"
+
   # Multi-arch Docker image published to GHCR alongside the binary release.
   # Runs in parallel with `release` because the two share no artifacts — the
   # Dockerfile builds frontend + backend itself rather than consuming

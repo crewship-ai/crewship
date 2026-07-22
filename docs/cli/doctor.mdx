@@ -33,6 +33,27 @@ into a healthcheck without false alarms on transient external state
 requirement for starting Crewship is missing or broken; treat the
 non-zero exit as a hard gate.
 
+The gate applies to **both** output modes. With `--json` the complete
+payload is written to stdout *before* the non-zero exit, so a CI job can
+read the counters and branch on `$?` from the same invocation:
+
+```bash
+crewship doctor --format json > doctor.json   # exit 1 if anything FAILed
+jq '.failed, [.checks[] | select(.status=="FAIL") | .name]' doctor.json
+```
+
+Machine formats also emit the usual structured error envelope on
+**stderr** (`{"error": {"message": "N check(s) FAILED …", "exit_code": 1}}`),
+matching every other command — stdout stays reserved for the payload.
+
+<Note>
+Running `crewship doctor` before the daemon is up FAILs the *server
+reachable* check, and therefore exits 1. That is intended (the check
+describes a real condition), but it means a CI probe on a fresh runner
+should assert on the `--json` payload with an allowlist rather than on
+the bare exit code — see the two smoke workflows for the pattern.
+</Note>
+
 ## Check categories
 
 Server-dependent checks (*server reachable*, *episodic recall mode*, *cli server
@@ -43,21 +64,108 @@ INFO instead of silently diagnosing a different host than your API calls use.
 
 ### Container runtime
 
-Detects which Docker-compatible runtime is available — Docker, Podman,
-Colima, OrbStack, Apple Containers, or Rancher Desktop. Auto-probes
-each candidate socket; the first reachable one wins.
+Reports the runtime `crewship start` would **actually** use, honouring
+the configured provider (`container.provider`, overridable with
+`CREWSHIP_CONTAINER_PROVIDER`; default `docker`). The detail column
+always ends with `[provider=…]` so you can see which selection was
+applied:
 
-- **PASS** — runtime detected; agents can run.
-- **FAIL** — no runtime found. Install one; see [Install — container
-  runtime requirement](/guides/install).
+| `container.provider` | Selection |
+|----------------------|-----------|
+| `docker` (default) | Docker-compatible runtime only — Docker, Podman, Colima, OrbStack, Rancher Desktop. Apple Containers being up does **not** satisfy it. |
+| `apple` | Apple Containers only. |
+| `auto` | Apple Containers **first**, Docker as fallback — the same order `initProviders` uses at startup. |
+
+- **PASS** — the selected provider answered; agents can run.
+- **FAIL — `… installed but not running`** — start the runtime with the
+  hint shown.
+- **FAIL — `no container runtime installed`** — install one; see
+  [Install — container runtime requirement](/guides/install).
+- **FAIL — `pinned to docker/apple`** — a runtime is up but it is not
+  the one the provider setting selects. Either start the selected one or
+  repoint `CREWSHIP_CONTAINER_PROVIDER`.
+
+<Note>
+`crewship start --config <file>` can also set `container.provider` from
+YAML. Doctor has no `--config` flag, so it resolves the env var + default
+only — which is why the assumed provider is always printed.
+</Note>
+
+### Apple Containers (macOS only)
+
+An informational row (**PASS**/**INFO**, never WARN/FAIL) reporting
+whether the native macOS provider is available — including when Docker
+answered first. Previously doctor probed Apple only as a Docker fallback
+and stayed silent about it on every machine where Docker was running.
 
 ### Port binding
 
-Confirms the HTTP port (default `8080` or `CREWSHIP_PORT`) is free.
+Binds the address `crewship start` would bind — `CREWSHIP_HOST` (default
+`0.0.0.0`) on `CREWSHIP_PORT` (default `8080`) — and releases it
+immediately.
 
-- **PASS** — port is bindable.
-- **FAIL** — port in use. `lsof -i :8080` to find the squatter,
-  or change `CREWSHIP_PORT`.
+- **PASS — `0.0.0.0:8080 is bindable`** — the port is free.
+- **PASS — `… in use by the running crewshipd (expected)`** — the port is
+  taken, but `/healthz` on it answers as crewshipd. Running doctor while
+  the daemon is up is the most common invocation; that is not a failure.
+- **FAIL — `… is in use by another process`** — something else holds the
+  port. `lsof -i :8080` (Linux: `ss -ltnp sport = :8080`) finds the
+  squatter, or set `CREWSHIP_PORT`.
+- **INFO — `server … is remote`** — the configured server is not
+  loopback, so the listener lives on that host and a local bind test
+  would answer a question nobody asked.
+
+### Server reachable
+
+TCP-dials the effective server and reports **which configuration layer
+chose it** — `--server flag`, `profile "dev2"`, `CREWSHIP_SERVER env`,
+`config file (server:)` or `built-in default`. A forgotten
+`CREWSHIP_SERVER` in one shell and a `server:` line in
+`cli-config.yaml` otherwise produce byte-identical output, which is
+exactly the confusion this check exists to remove.
+
+```
+[PASS]  server reachable   TCP dev2.internal:8080 ok (from profile "dev2")
+```
+
+- **PASS** — the dial succeeded.
+- **WARN — a *local* server did not answer.** Expected when you have not
+  run `crewship start` yet, which is the normal state when doctor is used
+  as a pre-flight check. It deliberately does **not** trip the exit-1 gate,
+  so `crewship doctor && crewship start` works on a healthy machine.
+- **FAIL — a *remote* server did not answer**, or the URL is unparseable.
+  Nobody configures a remote server by accident, so an unreachable one is
+  a real fault.
+
+### CLI / server version
+
+Compares this binary's version against the running daemon's
+(`GET /api/v1/system/version`).
+
+- **PASS** — both builds match (a leading `v` on either side is ignored).
+- **WARN** — mismatch. Run [`crewship self-update`](/cli/self-update); a
+  stale CLI against a newer server is the most common source of
+  confusing API errors.
+- **INFO** — skipped: development build, server unreachable, or not
+  logged in. Doctor never double-reports a dead daemon — the *server
+  reachable* row owns that failure.
+
+### Sidecar binary
+
+Locates `crewship-sidecar` (in `~/.crewship/bin/` or next to the CLI)
+and, when this binary was built with the sidecar hash injected at link
+time, compares the file's content hash against it.
+
+- **PASS — `<path>`** — found; no build-time hash available to compare
+  against (plain `go build`, container image builds).
+- **PASS — `<path> (hash abc123def456, matches this build)`** — the
+  on-disk sidecar is the one this binary was built alongside.
+- **WARN — `… is stale: hash X, this binary was built against Y`** — the
+  deploy updated the server but not the sidecar. Rebuild and recopy
+  (`make build:sidecar`), then `crewship crew restart-agents` —
+  restarting alone remounts the same stale file.
+- **WARN — `not found on disk`** — may be embedded in crewshipd; the
+  searched paths are listed in the hint.
 
 ### Database file permissions
 
@@ -102,7 +210,7 @@ with a vector embedder or degraded to keyword/FTS only.
   works on keywords, but vector similarity is off. Set
   `KEEPER_OLLAMA_URL` to an Ollama host serving `nomic-embed-text`.
 - **INFO — server not reachable / older server** — the daemon is down
-  (the *server reachable* check already FAILs for that) or predates
+  (the *server reachable* check already reports that) or predates
   the `episodic` health field.
 
 ### Legacy crew resources
@@ -169,22 +277,42 @@ PR #441 added a version + OS/arch header banner and a "Next steps" footer that p
 ```
 $ crewship doctor
 
-crewship v0.1.0-beta.4 · darwin/arm64
+  Crewship doctor — environment check
+  binary:  v0.1.0-beta.4   os: darwin/arm64
 
-  [PASS]  container runtime              docker (Docker Desktop 4.35.1) at /var/run/docker.sock
-  [PASS]  port binding                   :8080 is bindable
-  [PASS]  database permissions           ~/.crewship (0700) + crewship.db (0600)
-  [PASS]  NEXTAUTH_SECRET                auto-managed in /Users/you/.crewship/secrets.env (64 chars)
-  [PASS]  telemetry status               ENABLED, endpoint o4511387688108032.ingest.de.sentry.io (vendor default)
-  [PASS]  DSN reachability               connected to o4511387688108032.ingest.de.sentry.io:443 (94ms)
-  [WARN]  update available               v0.1.0 stable is out; you're on v0.1.0-beta.1
-                                         → brew upgrade crewship
+  [PASS]  container runtime                 docker 27.3.1 (/var/run/docker.sock)  [provider=docker]
+  [INFO]  apple containers                  not available (optional native macOS provider)
+  [PASS]  port binding                      0.0.0.0:8080 in use by the running crewshipd (expected)
+  [PASS]  data directory                    /Users/you/.crewship
+  [PASS]  data dir writable                 touch test ok
+  [PASS]  db migration version              v85 (latest)
+  [PASS]  sidecar binary                    /Users/you/.crewship/bin/crewship-sidecar (hash 3f9a12c40b7e, matches this build)
+  [PASS]  NEXTAUTH_SECRET                   auto-managed in /Users/you/.crewship/secrets.env (64 chars)
+  [PASS]  server reachable                  TCP localhost:8080 ok (from config file (server:))
+  [PASS]  cli/server version                both on v0.1.0-beta.4
+  [PASS]  episodic recall mode              vector + sparse recall (embedder configured, indexer running)
+  [PASS]  legacy crew resources             no orphaned pre-C1 crew volumes/containers
+  [PASS]  telemetry status                  enabled, endpoint o4511387688108032.ingest.de.sentry.io
+  [PASS]  sentry DSN wiring                 DSN resolved (o4511387688108032.ingest.de.sentry.io)
+  [PASS]  telemetry endpoint                TCP o4511387688108032.ingest.de.sentry.io:443 ok
+  [PASS]  data dir perms                    dir 0700, db file 0600 (/Users/you/.crewship)
+  [WARN]  update check                      v0.1.0 available, you're on v0.1.0-beta.4
+           brew upgrade crewship  OR  docker pull ghcr.io/crewship-ai/crewship:latest
+  [PASS]  cli server scheme                 localhost:8080 (http on loopback — fine)
+  [PASS]  cli config perms                  /Users/you/.crewship/cli-config.yaml mode 0600
+  [PASS]  local-model endpoint              ollama-local reachable
 
-Next steps:
-  crewship start                 (boot the daemon)
-  open http://localhost:8080     (then complete the browser onboarding wizard)
-  https://docs.crewship.ai/guides/troubleshooting  (shown on FAIL only)
+  1 warned — review and re-run.
+
+  Next steps:
+    1. crewship start
+    2. open http://localhost:8080
+    3. follow the onboarding wizard (workspace → crew → agent → credentials)
 ```
+
+The *apple containers* row only appears on macOS. On a FAIL run the
+footer is replaced with `N failed, M warned — fix the FAILs and re-run.`
+plus the troubleshooting link, and the command exits 1.
 
 ## Output formats
 
@@ -215,10 +343,13 @@ for first-run onboarding, not running surgery on a populated install.
 - **After upgrading the binary** — pre-migration snapshot has run by
   this point; doctor confirms the new binary is happy with the
   existing DB.
-- **In CI smoke tests** — the `.github/workflows/smoke-test.yml`
-  workflow runs `crewship doctor` against the freshly-released
-  binary on each release tag to catch broken binaries before they
-  reach users.
+- **In CI smoke tests** — the `.github/workflows/smoke-test.yml` and
+  `nightly-smoke.yml` workflows run `crewship doctor` against the
+  freshly-built binary to catch broken binaries before they reach users.
+  Both parse `--format json` and require that every FAIL is in a small
+  allowlist (`container runtime`, on the Docker-less macOS runner), so a
+  genuine regression in any other check still fails the job. Copy that
+  shape rather than `|| true`-ing the exit code.
 
 ## Related
 

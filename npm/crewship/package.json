@@ -1,0 +1,44 @@
+{
+  "name": "crewship",
+  "version": "0.0.0-dev",
+  "description": "Self-hosted runtime for AI coding agents — daemon + CLI + web UI in one binary",
+  "keywords": [
+    "crewship",
+    "ai",
+    "agents",
+    "cli",
+    "self-hosted",
+    "orchestration"
+  ],
+  "homepage": "https://crewship.ai",
+  "bugs": "https://github.com/crewship-ai/crewship/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/crewship-ai/crewship.git",
+    "directory": "npm/crewship"
+  },
+  "license": "Apache-2.0",
+  "author": "Crewship <support@crewship.ai>",
+  "type": "commonjs",
+  "bin": {
+    "crewship": "bin/crewship.js"
+  },
+  "files": [
+    "bin/crewship.js",
+    "lib/platform.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@crewship/cli-darwin-arm64": "0.0.0-dev",
+    "@crewship/cli-darwin-x64": "0.0.0-dev",
+    "@crewship/cli-linux-arm64": "0.0.0-dev",
+    "@crewship/cli-linux-x64": "0.0.0-dev"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

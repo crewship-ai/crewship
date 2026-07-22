@@ -279,6 +279,52 @@ func TestEffectiveServer(t *testing.T) {
 	}
 }
 
+// EffectiveServer delegates to EffectiveServerWithSource, so the two can never
+// disagree today. This pins that: `crewship doctor` prints the source alongside
+// the URL, and a source attributed to a layer that did not actually supply the
+// URL would send an operator chasing the wrong config file.
+func TestEffectiveServerAgreesWithSourceVariant(t *testing.T) {
+	profile := &CLIConfig{
+		Current: "dev1",
+		Servers: map[string]*ServerProfile{"dev1": {Server: "https://profile-host"}},
+	}
+	serverless := &CLIConfig{
+		Current: "dev1",
+		Servers: map[string]*ServerProfile{"dev1": {Token: "t"}},
+	}
+
+	cases := []struct {
+		name       string
+		flagServer string
+		env        string
+		cfg        *CLIConfig
+		wantSource ServerSource
+	}{
+		{"flag wins", "https://flag", "https://env", profile, ServerSourceFlag},
+		{"profile beats env", "", "https://env", profile, ServerSourceProfile},
+		{"serverless profile fails closed", "", "https://env", serverless, ServerSourceProfile},
+		{"env in legacy mode", "", "https://env", &CLIConfig{Server: "https://cfg"}, ServerSourceEnv},
+		{"config in legacy mode", "", "", &CLIConfig{Server: "https://cfg"}, ServerSourceConfig},
+		{"built-in default", "", "", &CLIConfig{}, ServerSourceDefault},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CREWSHIP_PROFILE", "")
+			t.Setenv("CREWSHIP_SERVER", tc.env)
+
+			want := EffectiveServer(tc.flagServer, "", tc.cfg)
+			got, source := EffectiveServerWithSource(tc.flagServer, "", tc.cfg)
+			if got != want {
+				t.Errorf("URL disagreement: EffectiveServer=%q EffectiveServerWithSource=%q", want, got)
+			}
+			if source != tc.wantSource {
+				t.Errorf("source = %q, want %q (url %q)", source, tc.wantSource, got)
+			}
+		})
+	}
+}
+
 func TestEffectiveServerFailsClosedForServerlessProfile(t *testing.T) {
 	t.Setenv("CREWSHIP_PROFILE", "")
 	t.Setenv("CREWSHIP_SERVER", "https://stale-env")

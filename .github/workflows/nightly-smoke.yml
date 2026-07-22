@@ -236,11 +236,42 @@ jobs:
           fi
 
       - name: Probe `crewship doctor --no-color`
-        # Same contract as the release smoke: exit 0 unless a FAIL check
-        # fires. WARN is acceptable on a fresh CI runner with no Docker.
+        # Same contract as the release smoke: doctor exits 1 when any check
+        # FAILs, and a bare runner has no Docker, so that one expected FAIL
+        # would sink the job. Assert on the --json payload with the same
+        # allowlist instead — every other FAIL is a real regression — plus
+        # the exit-code contract itself. (A local server that isn't up is
+        # only a WARN: doctor is meant to be run before `crewship start`.)
         run: |
-          set -euo pipefail
-          ./crewship doctor --no-color
+          set -uo pipefail
+          ./crewship doctor --no-color || true
+
+          ./crewship doctor --format json > doctor.json
+          CODE=$?
+          set -e
+          if ! jq -e '.checks | length > 0' doctor.json >/dev/null; then
+            echo "::error::crewship doctor --format json produced no checks"
+            cat doctor.json
+            exit 1
+          fi
+          FAILED=$(jq '.failed' doctor.json)
+          if [ "$FAILED" -gt 0 ] && [ "$CODE" -ne 1 ]; then
+            echo "::error::doctor reported ${FAILED} FAIL(s) but exited ${CODE} — the documented exit-1 gate regressed"
+            exit 1
+          fi
+          if [ "$FAILED" -eq 0 ] && [ "$CODE" -ne 0 ]; then
+            echo "::error::doctor reported no FAILs but exited ${CODE}"
+            exit 1
+          fi
+          UNEXPECTED=$(jq -r '
+            ["container runtime"] as $allowed
+            | [.checks[] | select(.status == "FAIL") | select(.name as $n | $allowed | index($n) | not)]
+            | map("\(.name): \(.detail)") | join("; ")' doctor.json)
+          if [ -n "$UNEXPECTED" ]; then
+            echo "::error::unexpected doctor FAIL(s) on a fresh runner — ${UNEXPECTED}"
+            exit 1
+          fi
+          echo "doctor ok: ${FAILED} allowlisted FAIL(s), exit ${CODE}"
 
       - name: Probe `crewship --help`
         run: |

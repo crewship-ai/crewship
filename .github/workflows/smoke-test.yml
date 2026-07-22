@@ -171,15 +171,58 @@ jobs:
           fi
 
       - name: Probe `crewship doctor --no-color`
-        # doctor exits 0 unless a FAIL check fires. WARN is acceptable for a
-        # fresh runner (no Docker, no data dir yet), so we deliberately don't
-        # parse the output — exit code is the contract.
+        # doctor exits 1 whenever any check FAILs — the hard gate documented
+        # in docs/cli/doctor.mdx, actually enforced since the RunE stopped
+        # returning nil unconditionally.
+        #
+        # A bare release runner legitimately trips one of those FAILs, so the
+        # exit code alone can no longer be the assertion:
+        #
+        #   * container runtime — macos-14 has no Docker installed at all.
+        #
+        # (An unreachable LOCAL server is only a WARN — doctor runs before
+        # `crewship start`, so a daemon that isn't up yet is expected, not a
+        # fault. Nothing to allowlist for it.)
+        #
+        # So we assert on the --json payload instead: every FAIL must be in
+        # the allowlist below. A regression in ANY other check still turns
+        # the job red, which the old "exit code is the contract" version
+        # could never do (the exit code was always 0).
+        #
+        # The exit-code contract itself is asserted too — payload counters
+        # and $? must agree, so a future regression that silently drops the
+        # gate again is caught here rather than by a user.
         run: |
-          set -euo pipefail
-          ./crewship doctor --no-color || {
-            echo "::error::crewship doctor exited non-zero"
+          set -uo pipefail
+          # Human output first: it is what a maintainer reads in the log.
+          ./crewship doctor --no-color || true
+
+          ./crewship doctor --format json > doctor.json
+          CODE=$?
+          set -e
+          if ! jq -e '.checks | length > 0' doctor.json >/dev/null; then
+            echo "::error::crewship doctor --format json produced no checks"
+            cat doctor.json
             exit 1
-          }
+          fi
+          FAILED=$(jq '.failed' doctor.json)
+          if [ "$FAILED" -gt 0 ] && [ "$CODE" -ne 1 ]; then
+            echo "::error::doctor reported ${FAILED} FAIL(s) but exited ${CODE} — the documented exit-1 gate regressed"
+            exit 1
+          fi
+          if [ "$FAILED" -eq 0 ] && [ "$CODE" -ne 0 ]; then
+            echo "::error::doctor reported no FAILs but exited ${CODE}"
+            exit 1
+          fi
+          UNEXPECTED=$(jq -r '
+            ["container runtime"] as $allowed
+            | [.checks[] | select(.status == "FAIL") | select(.name as $n | $allowed | index($n) | not)]
+            | map("\(.name): \(.detail)") | join("; ")' doctor.json)
+          if [ -n "$UNEXPECTED" ]; then
+            echo "::error::unexpected doctor FAIL(s) on a fresh runner — ${UNEXPECTED}"
+            exit 1
+          fi
+          echo "doctor ok: ${FAILED} allowlisted FAIL(s), exit ${CODE}"
 
       - name: Probe `crewship --help`
         run: |

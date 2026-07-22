@@ -1,6 +1,6 @@
 ---
 title: "Install"
-description: "Supported ways to install Crewship: Homebrew tap, signed curl | bash installer, Debian/RPM packages, or Docker."
+description: "Supported ways to install Crewship: Homebrew tap, signed curl | bash installer, Debian/RPM packages, npm/npx, or Docker."
 icon: "download"
 ---
 
@@ -10,7 +10,7 @@ Crewship ships as a single, statically-linked Go binary with the
 Next.js frontend embedded via `go:embed`. There is no Node runtime at
 production deploy time, and the only hard dependency is a container
 runtime if you intend to run agents (Docker, Podman, Colima, OrbStack,
-Apple Containers, or Rancher Desktop).
+[Apple Containers](/guides/macos-without-docker), or Rancher Desktop).
 
 Pick the install path that matches how you run software locally — the
 options below are first-class and tested on every release.
@@ -24,6 +24,9 @@ options below are first-class and tested on every release.
   </Card>
   <Card title="Debian / RPM packages" icon="box" href="#debian--rpm-packages">
     `apt`/`dnf`-managed install with a bundled systemd service.
+  </Card>
+  <Card title="npm / npx" icon="npm" href="#npm--npx">
+    `npx crewship@latest` — no Node runtime needed after install.
   </Card>
   <Card title="Docker" icon="docker" href="#docker-compose">
     Official multi-arch image, or Compose from source.
@@ -166,6 +169,14 @@ sudo systemctl enable --now crewship
 sudo -u crewship CREWSHIP_DATA_DIR=/var/lib/crewship crewship start --no-docker
 ```
 
+<Note>
+  `--no-docker` disables **every** container provider, not just Docker — it
+  means "run the dashboard with no container backend at all", so no agents
+  can run. It is not a way to select a non-Docker runtime. To run crews on
+  macOS without Docker Desktop, see
+  [macOS without Docker Desktop](/guides/macos-without-docker).
+</Note>
+
 | Path | Purpose |
 |---|---|
 | `/usr/bin/crewship`, `/usr/bin/crewship-sidecar` | the binaries (on `PATH`) |
@@ -220,6 +231,113 @@ Until the certificate is in place, verify the macOS download against
 xattr -d com.apple.quarantine ./crewship
 ```
 </Note>
+
+## npm / npx
+
+If Node is already on the box — a JS monorepo, a CI image, a devcontainer —
+npm is the shortest path to a Crewship binary. It installs the **same signed
+Go binary** the release pipeline publishes; Node is used only to fetch and
+launch it, never at run time.
+
+```bash
+# One-shot, nothing installed permanently
+npx crewship@latest version
+
+# Or install it globally
+npm install -g crewship
+crewship version
+
+# Or pin it per-project (agents, CI, Makefiles)
+npm install --save-dev crewship
+npx crewship ask "summarise today's crew activity"
+```
+
+Pin a version the same way you would any npm package — the npm version tracks
+the release tag exactly, minus the `v`:
+
+```bash
+npx crewship@1.0.0 version
+npm install -g crewship@1.0.0
+```
+
+Pre-release tags publish under the `next` dist-tag, so `@latest` never
+resolves to a beta.
+
+### This is the full binary — `crewship start` works
+
+Unlike Homebrew, npm ships only **one** flavour, and it is the full one: the
+daemon, the embedded dashboard and the CLI. There is no `crewship-cli` npm
+package, so nothing you read above about the CLI-only build applies here —
+`start`, `doctor`, `admin`, `telemetry` and `memory log/show/restore` are all
+present.
+
+The runtime companions ride along in the same directory as the binary, which
+is exactly where the daemon autodetects them:
+
+```
+node_modules/@crewship/cli-<os>-<arch>/bin/
+  crewship            # daemon + CLI + dashboard for your OS/arch
+  crewship-sidecar    # ALWAYS a Linux ELF (see the Homebrew note above)
+  entrypoint.sh
+```
+
+The trade-off is weight: each platform package is ~75 MB unpacked, so a cold
+`npx crewship@latest` downloads ~60 MB before it prints anything. If you only
+need a thin client for a remote `crewshipd`, the ~27 MB `crewship-cli`
+Homebrew formula or release tarball is the leaner choice.
+
+### Supported platforms
+
+| OS | arch | package npm resolves |
+|---|---|---|
+| macOS | arm64 (Apple Silicon) | `@crewship/cli-darwin-arm64` |
+| macOS | x64 (Intel) | `@crewship/cli-darwin-x64` |
+| Linux | arm64 | `@crewship/cli-linux-arm64` |
+| Linux | x64 | `@crewship/cli-linux-x64` |
+
+The binaries are statically linked (`CGO_ENABLED=0`), so glibc and musl
+(Alpine) hosts both work with no separate variant.
+
+**Windows is not on npm.** Native Windows builds ship on every release as
+`.zip` archives — see [Windows](#windows) below — but their packaging is still
+beta, the same reason `install.sh` and the post-release smoke matrix exclude
+them. Running `npx crewship` on Windows prints that pointer rather than npm's
+opaque `EBADPLATFORM`.
+
+### How it resolves — and what to do when it doesn't
+
+The published `crewship` package carries no binary. It declares one
+`optionalDependency` per platform, each with matching `os`/`cpu` fields, so
+npm unpacks exactly one; a tiny `bin` shim then `require.resolve`s it and
+execs it, forwarding argv, stdio, signals and the exit code. This is the
+`esbuild` / `turbo` / `biome` pattern.
+
+There is deliberately **no postinstall download script**, so installs work
+behind a proxy, from a warm offline cache, and with `npm ci --ignore-scripts`.
+
+If the command errors with *"the platform package … is not installed"*, npm
+skipped the optional dependency. Usual causes: `--omit=optional`, or a
+lockfile generated on a different OS/CPU
+([npm/cli#4828](https://github.com/npm/cli/issues/4828)). Fix:
+
+```bash
+npm install @crewship/cli-$(node -p "process.platform + '-' + process.arch")
+# or
+rm -rf node_modules package-lock.json && npm install
+```
+
+<Note>
+**npm publishing is pipeline-ready but currently INACTIVE.** The release
+workflow builds and publishes these packages only when the `NPM_TOKEN` secret
+is configured, and it is not provisioned today — so the `crewship` package is
+not yet on the public registry. Until it is, use Homebrew, `curl | bash`, the
+deb/rpm packages, or Docker. (Same fail-open pattern as macOS notarization
+above: a missing secret makes the job a logged no-op, never a failed release.)
+</Note>
+
+The npm job never rebuilds from source: it downloads the release archives,
+verifies them against the release `checksums.txt`, and repacks the binaries.
+The bytes you get from npm are the bytes covered by the cosign signature.
 
 ## Docker Compose
 

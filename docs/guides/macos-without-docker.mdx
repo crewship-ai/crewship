@@ -1,0 +1,263 @@
+---
+title: "macOS Without Docker Desktop"
+description: "Run crew containers on Apple Containers instead of Docker Desktop — how to enable it, and exactly which Crewship features degrade or disappear when you do."
+icon: "apple"
+---
+
+# macOS Without Docker Desktop
+
+Crewship runs one Linux container per crew. On macOS that normally means Docker Desktop (or Colima, OrbStack, Rancher Desktop — anything exposing a Docker socket). If you would rather not run any of those, Crewship has a second container backend: the **Apple Container provider**, which drives Apple's native `container` CLI.
+
+This page is the honest version of that trade. Apple Containers is a good fit for **solo, local development**. It is **not** feature-equivalent to the Docker provider, and several things you may depend on — devcontainer service sidecars, custom crew images, restricted networking, credential injection into crew containers — are simply not there. Read the [What you give up](#what-you-give-up) section before switching a workflow you care about.
+
+## What the Apple provider is
+
+Apple Containers runs each container as a lightweight VM on macOS. There is no Go SDK for it, so Crewship's provider (`internal/provider/apple/`) shells out to the `container` CLI for every operation: create, start, stop, exec, inspect, delete.
+
+<CardGroup cols={2}>
+  <Card title="No Docker Desktop" icon="ban">
+    No daemon to install, no VM to size, no license question. Apple's `container` tooling ships from Apple.
+  </Card>
+  <Card title="VM-per-container isolation" icon="shield">
+    Each container is its own lightweight VM rather than a namespace on a shared kernel.
+  </Card>
+  <Card title="Same crew model" icon="users">
+    Crews, agents, workspaces, `/workspace`, `/output` and `/crew` all behave the same from the agent's point of view.
+  </Card>
+  <Card title="Local dev scope" icon="laptop">
+    Best treated as a laptop backend. For servers and anything shared, use Docker.
+  </Card>
+</CardGroup>
+
+## Requirements
+
+<Note>
+  **macOS 26 (Tahoe) or later.** This is a practical requirement of Apple's
+  `container` tooling — in particular the `container network` commands
+  Crewship uses — not something Crewship enforces. There is no OS or
+  macOS-version check anywhere in the provider code; if the CLI works, the
+  provider starts.
+</Note>
+
+What Crewship actually checks at startup (`internal/provider/apple/detect.go`):
+
+| Check | How | If it fails |
+|-------|-----|-------------|
+| `container` binary on `PATH` | `exec.LookPath("container")` | Provider unavailable |
+| CLI responds | `container system version --format json` (falls back to the non-JSON form) | Provider unavailable |
+| System service running | `container system status` must exit 0 | Provider unavailable |
+
+If any check fails, Crewship logs a warning and **starts anyway with no container provider**. Provider init is non-fatal: the server comes up, the UI works, and agent runs that need a container fail later. If crews will not start, check the server log for `apple container provider unavailable` first.
+
+```bash
+# Verify the prerequisites yourself before touching config
+container system status
+container system version
+```
+
+Start the service if it is not running:
+
+```bash
+container system start
+```
+
+## Enabling it
+
+The container provider is selected by `container.provider`. **The default is `docker`** — Apple Containers is never used unless you opt in.
+
+<Tabs>
+  <Tab title="Env var">
+    ```bash
+    export CREWSHIP_CONTAINER_PROVIDER=apple
+    crewship start
+    ```
+    Scopes to one shell. Best for trying it out.
+  </Tab>
+  <Tab title="Config file">
+    ```yaml
+    container:
+      provider: "apple"          # "docker" (default) | "apple" | "auto"
+      runtime_image: "debian:bookworm-slim"
+      network: "crewship-agents"
+      default_memory_mb: 2048
+      default_cpus: 2            # integers only on Apple — see below
+    ```
+  </Tab>
+  <Tab title="Auto">
+    ```yaml
+    container:
+      provider: "auto"
+    ```
+    `auto` tries **Apple Containers first**, and falls back to Docker only if
+    the Apple provider fails to initialize. On a Mac with both installed,
+    `auto` gives you Apple Containers.
+  </Tab>
+</Tabs>
+
+Valid values are `docker`, `apple`, and `auto`; anything else fails config validation at startup.
+
+<Warning>
+  `crewship start --no-docker` suppresses **every** container provider,
+  including Apple. The flag name is historical — it means "run with no
+  container backend at all", not "run with something other than Docker".
+  Do not use it to select Apple Containers.
+</Warning>
+
+Confirm which backend was picked from the server log:
+
+```
+INFO  apple container runtime detected  version=0.10.0 host_ip=192.168.1.24
+```
+
+or, under `provider: "auto"`:
+
+```
+INFO  auto-detected Apple Containers as container provider
+```
+
+## What you give up
+
+Everything in this section is a real difference in the shipped code, not a caveat about maturity.
+
+### Features that error
+
+| Operation | Behaviour on Apple |
+|-----------|--------------------|
+| `ContainerStats` | Always returns `container stats not supported on Apple Containers`. Live CPU/memory/network metrics for crews are unavailable. |
+| `CopyToContainer` | Always returns an error. Any flow that pushes a file into a running crew container fails. |
+| `ExecResize` | Silent no-op. Interactive TTY panes **do not reflow** when you resize the window — the remote side keeps the dimensions it started with. |
+
+### Capabilities that are skipped entirely
+
+The Docker provider implements several optional interfaces that the Apple provider does not. Callers type-assert, so the feature is silently skipped rather than failing loudly.
+
+| Missing interface | Consequence |
+|-------------------|-------------|
+| `SidecarProvider` | **No per-crew service sidecars.** A devcontainer `services:` block (Redis, Postgres, …) is ignored at runtime. |
+| `CrewContainerLookup` | **No reattach on restart.** After `crewshipd` restarts, existing crew containers are not re-registered; tracking resumes only on the next dispatch for that crew. |
+| `LegacyResourcePruner` / `LegacyResourceDetector` / `CrewRuntimePruner` | The admin prune / legacy-resource endpoints are not registered. `crewship doctor` cannot surface or clean legacy crew resources, and `seed --nuke` cannot tear down crew runtimes. |
+
+### CrewConfig fields that are silently ignored
+
+`EnsureCrewRuntime` on Apple builds a fixed `container create` argv. Fields outside that argv are accepted and then dropped:
+
+| Field | What is lost |
+|-------|--------------|
+| `Image`, `CachedImage` | **Custom and provisioned devcontainer images are ignored.** Every crew runs the globally configured `container.runtime_image`. The whole devcontainer image-caching pipeline has no effect. |
+| `ContainerEnv` | Devcontainer `containerEnv` is dropped. Only `CREWSHIP_CREW_ID` is set in the container. |
+| `Privileged`, `Init`, `CapAdd`, `SecurityOpt`, `ExtraMounts` | Not applied — Docker-in-Docker-style setups cannot work. |
+| `PostStartCommands` | Never executed. |
+| `InitHookEnabled` | `/crew/init.sh` never runs. |
+| `LoginPath` | Ignored. |
+| `NetworkMode`, `AllowedDomains` | **No restricted-network enforcement.** See the warning below. |
+| `TTLHours` | No idle auto-stop. |
+| `ProvisionSink` | No provisioning progress events, so the UI's container-preparation stream stays empty while a crew starts. |
+
+### No sidecar, and no credential injection into crew containers
+
+The Docker provider bind-mounts the `crewship-sidecar` binary and an entrypoint script into each crew container. The Apple provider does neither — its config carries no sidecar or entrypoint path at all. Sidecar-based credential injection therefore **does not reach Apple crew containers**.
+
+<Warning>
+  **Two security-relevant deltas. Read these before running anything you
+  do not fully trust.**
+
+  1. **No fail-closed privileged-exec guard.** The Docker provider refuses
+     to exec as a privileged user unless explicitly allowed
+     (`provider.IsPrivilegedExecUser`, #1158). The Apple provider applies no
+     such check — it passes the requested user straight through to
+     `container exec --user`.
+  2. **No restricted-network enforcement.** `NetworkMode: "restricted"` and
+     `AllowedDomains` are enforced by the sidecar. There is no sidecar on
+     Apple, so a crew marked "restricted" gets **unrestricted** egress.
+
+  Treat Apple crew containers as trusted-local-dev only.
+</Warning>
+
+### Resource, storage and networking differences
+
+| Area | Docker | Apple Containers |
+|------|--------|------------------|
+| CPU limit | Fractional (`1.5`) | **Integer only** — `1.5` becomes `1`, and anything below 1 is clamped to 1 |
+| Memory limit | Honoured | Honoured (default 512 MB when unset) |
+| Port publishing | Supported | **None.** Host reachability relies on the provider reporting the host's LAN IP to containers |
+| Volumes | Named volumes | **Host bind mounts** — fixed `/workspace`, `/output`, `/crew`, plus tmpfs `/tmp` and `/home/agent` |
+| Root filesystem | Writable by default | Always `--read-only` |
+| Container user | Resolved per image | Fixed `1001:1001` |
+| Stop grace period | 30 s | 10 s |
+| `ContainerStatus` | Includes uptime | No uptime reported |
+| Network creation | Fails loudly | Best-effort at startup (a `container network list` failure is logged and tolerated); a crew launch that needs the network still fails if it cannot be ensured |
+
+<Warning>
+  **Volume cleanup is incomplete.** `RemoveCrewVolumes` deletes only
+  `<storage.base_path>/homes/<crew-id>`. The workspace, output and crew
+  directories the provider created — `workspaces/<crew-id>`, `<crew-id>`,
+  `crews/<crew-id>` — are **left on disk**. Removing a crew reclaims almost
+  nothing; clean those paths by hand if disk usage matters.
+</Warning>
+
+<Note>
+  Because the mounts are host directories under `storage.base_path`, a
+  reboot that wipes their location (macOS clears `/tmp`) leaves the
+  container pointing at directories that no longer exist. Crewship detects
+  this on the next launch and recreates the container — but the contents
+  are gone. Do not put `storage.base_path` under `/tmp`.
+</Note>
+
+## Should you switch?
+
+<CardGroup cols={2}>
+  <Card title="Reasonable fit" icon="circle-check">
+    Solo local development, one or two crews, a stock runtime image, agents
+    that mostly read and write files in `/workspace`, and no need for live
+    resource metrics or per-crew services.
+  </Card>
+  <Card title="Stay on Docker" icon="circle-xmark">
+    Anything shared or server-side; devcontainer `services:`; custom or
+    provisioned crew images; restricted egress; credential injection;
+    Docker-in-Docker; admin prune / `seed --nuke`; live crew stats;
+    provisioning progress in the UI.
+  </Card>
+</CardGroup>
+
+If you want to keep Docker off your Mac but still need the full feature set, the other option is a Docker-compatible runtime that is not Docker Desktop — Colima, OrbStack, Rancher Desktop, or Podman all speak the Docker socket and use the **Docker** provider with everything intact. See [Providers](/configuration/providers) for the socket detection order.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Crews never start and the log says the provider is unavailable">
+    Provider init failure is non-fatal, so the server starts without a
+    container backend. Run `container system status` — if the service is not
+    running, `container system start`. Then restart `crewshipd`.
+  </Accordion>
+  <Accordion title="My devcontainer features / custom image had no effect">
+    Expected. The Apple provider always uses `container.runtime_image` and
+    ignores `Image`, `CachedImage`, `ContainerEnv`, `PostStartCommands` and
+    the init hook. Switch to the Docker provider if you need the
+    devcontainer pipeline — see [Devcontainers & Runtime Images](/guides/devcontainers).
+  </Accordion>
+  <Accordion title="`auto` picked Apple Containers and I wanted Docker">
+    `auto` tries Apple first. Set `container.provider: "docker"` (or
+    `CREWSHIP_CONTAINER_PROVIDER=docker`) explicitly.
+  </Accordion>
+  <Accordion title="Disk usage keeps growing after deleting crews">
+    Only `homes/<crew-id>` is removed. Delete `workspaces/<crew-id>`,
+    `<crew-id>` and `crews/<crew-id>` under `storage.base_path` manually.
+  </Accordion>
+</AccordionGroup>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Providers" icon="server" href="/configuration/providers">
+    Full container/storage/state provider reference, including Docker socket detection.
+  </Card>
+  <Card title="Devcontainers & Runtime Images" icon="container" href="/guides/devcontainers">
+    The image pipeline the Apple provider does not participate in.
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/guides/troubleshooting">
+    General startup and container diagnostics.
+  </Card>
+  <Card title="YAML configuration" icon="file-code" href="/configuration/yaml-config">
+    Every `container.*` key and its env-var override.
+  </Card>
+</CardGroup>

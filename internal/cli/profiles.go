@@ -285,18 +285,70 @@ func (cfg *CLIConfig) ClearTokenTarget(flagProfile string) {
 // profiles replace). Precedence: --server flag > active profile's server >
 // CREWSHIP_SERVER env > top-level server > default. In legacy mode (no profile
 // active) it is identical to ResolveServer.
+//
+// It delegates to EffectiveServerWithSource so the precedence chain exists in
+// exactly one place: `crewship doctor` reports which layer won, and an
+// attribution that could drift from the URL actually dialed would be worse
+// than no attribution at all.
 func EffectiveServer(flagServer, flagProfile string, cfg *CLIConfig) string {
+	server, _ := EffectiveServerWithSource(flagServer, flagProfile, cfg)
+	return server
+}
+
+// ServerSource identifies which configuration layer supplied the effective
+// server URL. It is the server-URL counterpart of ProfileSource: knowing
+// *that* the CLI dials http://localhost:8080 is far less useful than knowing
+// *why* — a stale CREWSHIP_SERVER in one shell and a `server:` line in
+// cli-config.yaml look identical in every command's output, which is exactly
+// the confusion `crewship doctor` exists to remove.
+type ServerSource string
+
+const (
+	// ServerSourceFlag means the per-command --server flag supplied the URL.
+	ServerSourceFlag ServerSource = "flag"
+	// ServerSourceProfile means the active profile supplied it (or was
+	// selected but carries no server, in which case the URL is empty — the
+	// documented fail-closed behaviour of EffectiveServer).
+	ServerSourceProfile ServerSource = "profile"
+	// ServerSourceEnv means the CREWSHIP_SERVER environment variable did.
+	ServerSourceEnv ServerSource = "env"
+	// ServerSourceConfig means the top-level `server:` field in
+	// cli-config.yaml did.
+	ServerSourceConfig ServerSource = "config"
+	// ServerSourceDefault means nothing was configured and the built-in
+	// http://localhost:8080 fallback applies.
+	ServerSourceDefault ServerSource = "default"
+)
+
+// EffectiveServerWithSource resolves the server URL exactly like
+// EffectiveServer and additionally reports which precedence layer produced
+// it. Callers that only need the URL should keep using EffectiveServer; this
+// variant exists so `crewship doctor` can attribute the host it probed
+// instead of leaving the operator to guess between flag, profile, env and
+// config file.
+//
+// The two functions are kept in lockstep by construction: every branch below
+// mirrors one branch of EffectiveServer (and ResolveServer's env > config >
+// default tail), and cmd/crewship's doctor test asserts they agree on the URL
+// for every layer.
+func EffectiveServerWithSource(flagServer, flagProfile string, cfg *CLIConfig) (string, ServerSource) {
 	if flagServer != "" {
-		return flagServer
+		return flagServer, ServerSourceFlag
 	}
-	// A profile is explicitly selected: use its server, and fail closed (empty)
-	// if it has none — never silently dial CREWSHIP_SERVER / the default under a
-	// named profile.
 	if name, p := cfg.ActiveProfile(flagProfile); name != "" {
 		if p != nil && p.Server != "" {
-			return p.Server
+			return p.Server, ServerSourceProfile
 		}
-		return ""
+		// Selected but serverless: fail closed, and still attribute it to the
+		// profile — "no server" under a named profile is a profile problem,
+		// not a missing env var.
+		return "", ServerSourceProfile
 	}
-	return ResolveServer("", cfg)
+	if v := os.Getenv("CREWSHIP_SERVER"); v != "" {
+		return v, ServerSourceEnv
+	}
+	if cfg != nil && cfg.Server != "" {
+		return cfg.Server, ServerSourceConfig
+	}
+	return ResolveServer("", cfg), ServerSourceDefault
 }

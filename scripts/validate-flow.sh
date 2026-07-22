@@ -94,6 +94,58 @@ assert_fails() {
   return 0
 }
 
+# assert_doctor_clean runs `crewship doctor` against $SERVER and fails on any
+# FAIL row that isn't allowlisted.
+#
+# Why not just `assert_ok "$CLI" doctor`: doctor now exits 1 whenever any
+# check FAILs (the hard gate documented in docs/cli/doctor.mdx — before that
+# it returned 0 unconditionally and this assertion could never fire). Some of
+# those FAILs are legitimate *here*: this script frequently drives a remote
+# dev instance from a laptop, where the LOCAL container runtime says nothing
+# about the server's health. Allowlist those, assert on everything else, and
+# print the offending rows so a failure is diagnosable from the log alone.
+#
+# Override the allowlist with DOCTOR_ALLOWED_FAILS="a|b" (extended regex,
+# matched against the check name).
+DOCTOR_ALLOWED_FAILS="${DOCTOR_ALLOWED_FAILS:-container runtime}"
+
+assert_doctor_clean() {
+  TOTAL=$((TOTAL + 1))
+  local json unexpected
+  # `|| true`: a non-zero exit is expected whenever a FAIL row exists; the
+  # payload on stdout is the signal, and it is emitted in full before the
+  # gate fires.
+  json=$("$CLI" doctor -s "$SERVER" --format json 2>/dev/null) || true
+  if [ -z "$json" ]; then
+    FAIL=$((FAIL + 1))
+    echo "  ✗ crewship doctor produced no JSON payload"
+    return 0
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    # No jq on this host: fall back to the coarse exit-code assertion rather
+    # than silently skipping the check.
+    if "$CLI" doctor -s "$SERVER" >/dev/null 2>&1; then
+      PASS=$((PASS + 1)); echo "  ✓ crewship doctor passes (exit code only — jq not installed)"
+    else
+      FAIL=$((FAIL + 1)); echo "  ✗ crewship doctor reported failures (install jq for details)"
+    fi
+    return 0
+  fi
+  unexpected=$(printf '%s' "$json" | jq -r --arg allowed "$DOCTOR_ALLOWED_FAILS" '
+    [.checks[]
+     | select(.status == "FAIL")
+     | select(.name | test("^(" + $allowed + ")$") | not)]
+    | map("\(.name): \(.detail)") | join("; ")')
+  if [ -z "$unexpected" ]; then
+    PASS=$((PASS + 1))
+    echo "  ✓ crewship doctor has no unexpected FAILs"
+  else
+    FAIL=$((FAIL + 1))
+    echo "  ✗ crewship doctor reported FAIL(s): $unexpected"
+  fi
+  return 0
+}
+
 # Idempotent create — succeeds or 409
 try_create() {
   local output
@@ -127,8 +179,7 @@ assert_ok "Server /healthz returns 200" \
 assert_ok "Server /readyz returns 200" \
   curl -sf "$SERVER/readyz"
 
-assert_ok "crewship doctor passes" \
-  "$CLI" doctor -s "$SERVER"
+assert_doctor_clean
 
 echo ""
 

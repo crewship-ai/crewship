@@ -29,11 +29,15 @@ var selfUpdateCmd = &cobra.Command{
 
 How it upgrades depends on how crewship was installed:
 
-  • Homebrew        → runs 'brew upgrade crewship'
+  • Homebrew          → runs 'brew upgrade crewship'
   • installer/tarball → downloads the matching release asset, verifies its
                         checksum, and atomically swaps the binary in place
                         (plus the bundled sidecar + entrypoint.sh when present)
-  • package manager  → refuses and prints the command to run instead
+  • package manager   → refuses and prints the command to run instead
+  • npm / npx         → refuses; upgrade with 'npm i -g crewship@latest'
+                        (npx already fetches the latest on every run)
+  • go install        → refuses; rebuild with
+                        'go install github.com/crewship-ai/crewship/cmd/crewship@latest'
 
 Use --check to see whether a newer release exists without changing anything.
 
@@ -116,72 +120,126 @@ func runSelfUpdate(ctx context.Context, checkOnly bool) error {
 
 	channel := update.DetectChannel(exePath, dirWritable(binDir))
 
-	// --systemd orchestrates a self-installed systemd binary. Homebrew
-	// and package-manager installs manage their own service lifecycle, so
-	// refuse there and point at the right tool rather than fighting it.
-	if selfUpdateSystemd && channel != update.ChannelInstaller {
-		switch channel {
-		case update.ChannelHomebrew:
-			return fmt.Errorf("--systemd is for a self-managed systemd install; this is a Homebrew install — " +
-				"run 'brew upgrade' and restart the service via brew services / your unit")
-		default:
-			return fmt.Errorf("--systemd is for a self-managed systemd install; this binary is package-managed — " +
-				"upgrade via apt/dnf (the package restarts the service for you)")
-		}
+	if err := systemdChannelGuard(selfUpdateSystemd, channel); err != nil {
+		return err
 	}
+	return dispatchSelfUpdate(ctx, channel, exePath, res.Latest, selfUpdateSystemd)
+}
 
+// systemdChannelGuard rejects --systemd on every channel except a
+// self-managed installer install. Homebrew, package managers, npm and
+// `go install` each own their own upgrade (and, where relevant, service)
+// lifecycle, so each gets the command that actually applies — telling an npm
+// or go-install user to "upgrade via apt/dnf" would be plain wrong.
+func systemdChannelGuard(systemd bool, channel update.Channel) error {
+	if !systemd || channel == update.ChannelInstaller {
+		return nil
+	}
+	const prefix = "--systemd is for a self-managed systemd install; "
+	switch channel {
+	case update.ChannelHomebrew:
+		return fmt.Errorf(prefix + "this is a Homebrew install — " +
+			"run 'brew upgrade' and restart the service via brew services / your unit")
+	case update.ChannelNPM:
+		return fmt.Errorf(prefix + "this binary came from npm — " +
+			"upgrade with 'npm i -g crewship@latest' and restart the service yourself")
+	case update.ChannelGoInstall:
+		return fmt.Errorf(prefix + "this binary was built by 'go install' — " +
+			"rebuild it with 'go install github.com/crewship-ai/crewship/cmd/crewship@latest' " +
+			"and restart the service yourself")
+	default:
+		return fmt.Errorf(prefix + "this binary is package-managed — " +
+			"upgrade via apt/dnf (the package restarts the service for you)")
+	}
+}
+
+// dispatchSelfUpdate routes an upgrade by install channel. Only the installer
+// channel — a binary in a directory we own, that nothing else manages — is
+// swapped in place; every other channel refuses and returns the guidance for
+// the tool that DOES own the file, because an in-place swap there is at best
+// reverted on the next package operation and at worst destroys a build the
+// user made themselves.
+func dispatchSelfUpdate(ctx context.Context, channel update.Channel, exePath, latestTag string, systemd bool) error {
 	switch channel {
 	case update.ChannelHomebrew:
 		// Read the formula from the Cellar path so a crewship-cli install
 		// upgrades crewship-cli, not the wrong crewship formula.
 		formula := update.FormulaFromPath(exePath, cliOnlyVariant)
 		fmt.Printf("\nInstalled via Homebrew — upgrading with 'brew upgrade %s'…\n", formula)
-		brew := exec.CommandContext(ctx, "brew", "upgrade", formula)
-		brew.Stdout, brew.Stderr, brew.Stdin = os.Stdout, os.Stderr, os.Stdin
-		if err := brew.Run(); err != nil {
-			return fmt.Errorf("brew upgrade %s failed: %w", formula, err)
-		}
-		return nil
+		return brewUpgrade(ctx, formula)
 
 	case update.ChannelPackaged:
 		return fmt.Errorf("%s", update.PackagedChannelGuidance(exePath))
 
+	case update.ChannelNPM:
+		return fmt.Errorf("%s", update.NPMChannelGuidance(exePath))
+
+	case update.ChannelGoInstall:
+		return fmt.Errorf("%s", update.GoInstallChannelGuidance(exePath))
+
 	default: // ChannelInstaller
-		if selfUpdateSystemd {
-			return runServerSelfUpdate(ctx, res.Latest, exePath)
+		if systemd {
+			return serverSelfUpdate(ctx, latestTag, exePath)
 		}
-		fmt.Printf("\nDownloading %s and swapping %s…\n", res.Latest, exePath)
-		result, err := update.ApplyInstallerUpdate(ctx, res.Latest, exePath, cliOnlyVariant, version)
-		if err != nil {
-			return fmt.Errorf("self-update failed (binary unchanged): %w", err)
-		}
-		// Sanity-check the freshly swapped binary actually runs; on failure
-		// roll back every swapped file (binary + companions) so a bad swap
-		// never leaves crewship broken or in a mixed state. Bound the probe
-		// so a hung bad build fails fast into the rollback rather than
-		// stalling self-update indefinitely.
-		sanityCtx, sanityCancel := context.WithTimeout(ctx, 30*time.Second)
-		out, verr := exec.CommandContext(sanityCtx, exePath, "version").CombinedOutput()
-		sanityCancel()
-		if verr != nil {
-			restoreErr := update.RestoreBackups(result.Replaced)
-			if restoreErr != nil {
-				return fmt.Errorf(
-					"updated binary failed its version sanity check: %w\n%s\n"+
-						"AND rollback failed: %v — restore manually from %s, or reinstall:\n"+
-						"  curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash",
-					verr, out, restoreErr, result.BackupPath)
-			}
+		return installerSelfUpdate(ctx, latestTag, exePath)
+	}
+}
+
+// The three arms that touch the network, the disk or the service manager are
+// vars so the channel-dispatch tests can assert which one ran without
+// downloading a release, overwriting the running binary, or stopping a unit.
+var (
+	brewUpgrade         = runBrewUpgrade
+	installerSelfUpdate = runInstallerSelfUpdate
+	serverSelfUpdate    = runServerSelfUpdate
+)
+
+// runBrewUpgrade shells out to `brew upgrade <formula>`, passing our stdio
+// through so the user sees brew's own progress.
+func runBrewUpgrade(ctx context.Context, formula string) error {
+	brew := exec.CommandContext(ctx, "brew", "upgrade", formula)
+	brew.Stdout, brew.Stderr, brew.Stdin = os.Stdout, os.Stderr, os.Stdin
+	if err := brew.Run(); err != nil {
+		return fmt.Errorf("brew upgrade %s failed: %w", formula, err)
+	}
+	return nil
+}
+
+// runInstallerSelfUpdate downloads + verifies the release and swaps the binary
+// (plus its companions) in place, then sanity-checks the result and rolls back
+// if the new binary can't even print its version.
+func runInstallerSelfUpdate(ctx context.Context, latestTag, exePath string) error {
+	fmt.Printf("\nDownloading %s and swapping %s…\n", latestTag, exePath)
+	result, err := update.ApplyInstallerUpdate(ctx, latestTag, exePath, cliOnlyVariant, version)
+	if err != nil {
+		return fmt.Errorf("self-update failed (binary unchanged): %w", err)
+	}
+	// Sanity-check the freshly swapped binary actually runs; on failure
+	// roll back every swapped file (binary + companions) so a bad swap
+	// never leaves crewship broken or in a mixed state. Bound the probe
+	// so a hung bad build fails fast into the rollback rather than
+	// stalling self-update indefinitely.
+	sanityCtx, sanityCancel := context.WithTimeout(ctx, 30*time.Second)
+	out, verr := exec.CommandContext(sanityCtx, exePath, "version").CombinedOutput()
+	sanityCancel()
+	if verr != nil {
+		restoreErr := update.RestoreBackups(result.Replaced)
+		if restoreErr != nil {
 			return fmt.Errorf(
 				"updated binary failed its version sanity check: %w\n%s\n"+
-					"rolled back to the previous version (%s) — no change applied",
-				verr, out, result.FromVersion)
+					"AND rollback failed: %v — restore manually from %s, or reinstall:\n"+
+					"  curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash",
+				verr, out, restoreErr, result.BackupPath)
 		}
-		fmt.Printf("Updated crewship %s → %s (replaced: %v)\n", result.FromVersion, result.ToVersion, result.Replaced)
-		fmt.Printf("Previous binary kept at %s for rollback.\n", result.BackupPath)
-		fmt.Println("Migrations (if any) run on the next 'crewship start'; a pre-migration snapshot is taken automatically.")
-		return nil
+		return fmt.Errorf(
+			"updated binary failed its version sanity check: %w\n%s\n"+
+				"rolled back to the previous version (%s) — no change applied",
+			verr, out, result.FromVersion)
 	}
+	fmt.Printf("Updated crewship %s → %s (replaced: %v)\n", result.FromVersion, result.ToVersion, result.Replaced)
+	fmt.Printf("Previous binary kept at %s for rollback.\n", result.BackupPath)
+	fmt.Println("Migrations (if any) run on the next 'crewship start'; a pre-migration snapshot is taken automatically.")
+	return nil
 }
 
 // runServerSelfUpdate orchestrates a systemd-managed in-place upgrade: stop →
