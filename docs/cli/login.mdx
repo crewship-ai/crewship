@@ -20,7 +20,7 @@ Four mutually exclusive modes — pick one. Interactive is the default when no m
 | `--code <code>` | string | (unset) | Pairing code from the browser. Required when `--pair` is set. |
 | `--adapter <name>` | string | (unset) | Optional telemetry hint, one of `CLAUDE_CODE`, `GEMINI_CLI`, `CODEX_CLI`, `OPENCODE`, `CURSOR_CLI`, `FACTORY_DROID`. Server never routes on this — it's adapter-blind. |
 | `--email <email>` | string | (unset) | Skips the interactive `Email:` prompt for the default email+password flow. Combine with `--password-stdin` or `CREWSHIP_PASSWORD` for a fully non-interactive login. |
-| `--password-stdin` | bool | `false` | Reads the password as a line from stdin instead of prompting on the TTY. Mutually exclusive with `CREWSHIP_PASSWORD`. |
+| `--password-stdin` | bool | `false` | Reads the password as a line from stdin instead of prompting on the TTY (preferred for CI / scripts — avoids argv leak). Mutually exclusive with `CREWSHIP_PASSWORD`. |
 
 ### Interactive
 
@@ -86,7 +86,7 @@ Email: Password: read password: inappropriate ioctl for device
 job, or a headless test harness:
 
 ```bash
-# stdin (docker-login style):
+# stdin (docker-login style) — preferred:
 crewship login --server https://crewship.example.com \
   --email demo@crewship.ai --password-stdin <<< "$PASSWORD"
 
@@ -94,6 +94,13 @@ crewship login --server https://crewship.example.com \
 CREWSHIP_PASSWORD="$PASSWORD" \
   crewship login --server https://crewship.example.com --email demo@crewship.ai
 ```
+
+Prefer `--password-stdin` when both work (preferred for CI / scripts — avoids
+argv leak): an environment variable is readable from `/proc/<pid>/environ` by
+anything running as the same user and is inherited by every child process, so
+on shared machines `CREWSHIP_PASSWORD` exposes the password more broadly than
+a stdin pipe does. Reserve the env var for runners that can only inject
+secrets through the environment.
 
 Both go through the same CSRF+credentials exchange and CLI-token mint as
 interactive login, so the persisted token behaves identically. Passing both
