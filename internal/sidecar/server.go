@@ -602,6 +602,15 @@ func writeJSONResponse(w http.ResponseWriter, status int, v interface{}) {
 // used in error messages (e.g. "issue create" → "issue create request failed").
 // If body is nil, no request body is sent.
 func (s *Server) proxyIPCJSON(w http.ResponseWriter, r *http.Request, method, path, label string, body []byte) {
+	s.proxyIPCJSONHeaders(w, r, method, path, label, body, nil)
+}
+
+// proxyIPCJSONHeaders is proxyIPCJSON plus caller-supplied extra headers on
+// the forwarded request (e.g. the hybrid search forward's
+// X-Acting-Agent-Slug, #1348). Extra headers are applied BEFORE the
+// internal token is set, so an extras map can never override
+// X-Internal-Token.
+func (s *Server) proxyIPCJSONHeaders(w http.ResponseWriter, r *http.Request, method, path, label string, body []byte, extra http.Header) {
 	if s.ipc == nil {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
 		return
@@ -621,6 +630,11 @@ func (s *Server) proxyIPCJSON(w http.ResponseWriter, r *http.Request, method, pa
 	}
 	if body != nil {
 		httpReq.Header.Set("Content-Type", "application/json")
+	}
+	for k, vs := range extra {
+		for _, v := range vs {
+			httpReq.Header.Add(k, v)
+		}
 	}
 	httpReq.Header.Set("X-Internal-Token", s.ipc.Token)
 

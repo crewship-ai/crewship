@@ -119,6 +119,7 @@ type Router struct {
 	credentialHandler      *CredentialHandler
 	skillGenHandler        *SkillGenerateHandler
 	skillPropHandler       *SkillProposedHandler
+	hybridSearchHandler    *MemoryHybridSearchHandler
 	storagePath            string // base path for crew file storage
 	catalogFetcher         *devcontainer.CatalogFetcher
 	runtimeFetcher         *devcontainer.RuntimeFetcher

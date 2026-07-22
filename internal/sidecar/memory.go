@@ -126,12 +126,37 @@ func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// actingAgentSlugHeader carries the ACTING agent's slug across the IPC
+// boundary on the hybrid search forward (#1348). The value is derived
+// exclusively from the token-resolved identity (hybridActingSlug) — never
+// from the URL or the request payload — and the host resolves it strictly
+// INSIDE the workspace/crew its internal token is bound to, so the header
+// can only narrow the internal token's authority, never widen it.
+const actingAgentSlugHeader = "X-Acting-Agent-Slug"
+
 // forwardHybridSearch translates the sidecar's scope vocabulary
 // ("agent" / "crew" / "both") to the host hybrid endpoint's scope
-// vocabulary ("own" / "crew_shared" / "") and proxies via
-// X-Internal-Token. Same 15 s timeout the rest of proxyIPCJSON
-// callers use; same auth.
+// vocabulary ("own" / "crew_shared" / "") and proxies to the host's
+// INTERNAL hybrid route via X-Internal-Token, forwarding the acting
+// agent's identity in X-Acting-Agent-Slug. Same 15 s timeout the rest
+// of the proxyIPCJSON callers use; same auth.
+//
+// #1348: the previous forward carried only the IPC token, so host-side
+// scope="own" resolved to the internal-token identity for every sibling
+// in the crew container instead of the caller. The acting slug now rides
+// along; a request whose acting identity cannot be resolved is refused
+// here and never forwarded (the memory chokepoint in buildHandler
+// already refuses token-less downgrades and forged tokens before this
+// handler runs — the checks inside hybridActingSlug are the redundant
+// second line for in-process callers that bypass the router).
 func (s *Server) forwardHybridSearch(w http.ResponseWriter, r *http.Request, query string, limit int, scope string) {
+	actingSlug, ok := s.hybridActingSlug(r)
+	if !ok {
+		writeJSONResponse(w, http.StatusForbidden, map[string]string{
+			"error": "memory hybrid search: acting agent identity could not be resolved",
+		})
+		return
+	}
 	hostScope := ""
 	switch scope {
 	case "agent":
@@ -140,8 +165,8 @@ func (s *Server) forwardHybridSearch(w http.ResponseWriter, r *http.Request, que
 		hostScope = "crew_shared"
 	case "both":
 		// "both" has no direct host equivalent — pass empty so the
-		// host's ScopeForRole picks ScopeOwn (the default) and the
-		// caller's agent-id-from-token does the filtering.
+		// host defaults to own-scope and the forwarded acting
+		// identity does the filtering.
 		hostScope = ""
 	}
 	body, _ := json.Marshal(map[string]any{
@@ -150,7 +175,40 @@ func (s *Server) forwardHybridSearch(w http.ResponseWriter, r *http.Request, que
 		"scope":   hostScope,
 		"crew_id": s.ipcCrewID(),
 	})
-	s.proxyIPCJSON(w, r, "POST", "/api/v1/memory/search/hybrid", "memory hybrid search", body)
+	extra := http.Header{}
+	extra.Set(actingAgentSlugHeader, actingSlug)
+	s.proxyIPCJSONHeaders(w, r, "POST", "/api/v1/internal/memory/search/hybrid", "memory hybrid search", body, extra)
+}
+
+// hybridActingSlug resolves the acting agent slug the hybrid forward
+// attaches, EXCLUSIVELY from unforgeable material:
+//
+//   - a valid per-agent bearer token → that agent's roster slug (a
+//     shared-container sibling gets ITS OWN identity, never the boot
+//     agent's);
+//   - a forged token, a token resolving to an empty slug, or a missing
+//     token on a crew WITH tokens provisioned → ("", false), fail closed
+//     (the chokepoint answers these with 403 before this runs; this is
+//     the belt for in-process callers);
+//   - no token on a genuinely token-less (legacy, un-upgraded) crew →
+//     the boot agent's slug from the orchestrator-provisioned IPC
+//     config, the only possible acting identity on such a deployment.
+//     If even that is absent there is no identity to forward — refuse
+//     rather than let the host guess.
+func (s *Server) hybridActingSlug(r *http.Request) (string, bool) {
+	if _, slug, present, ok := s.actingIdentity(r); present {
+		if !ok || slug == "" {
+			return "", false
+		}
+		return slug, true
+	}
+	if s.tokensProvisioned() {
+		return "", false
+	}
+	if s.ipc != nil && s.ipc.AgentSlug != "" {
+		return s.ipc.AgentSlug, true
+	}
+	return "", false
 }
 
 // ipcCrewID returns the crew id from the IPC config so the hybrid

@@ -110,6 +110,16 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 		r.mux.Handle("POST /api/v1/internal/credentials", internalAuth(http.HandlerFunc(credAdapter.Create)))
 		r.mux.Handle("POST /api/v1/internal/credentials/{credentialId}/rotate", internalAuth(http.HandlerFunc(credAdapter.Rotate)))
 	}
+	// Hybrid memory search — sidecar→main forward (#1348). The sidecar
+	// forwards the ACTING agent's slug in X-Acting-Agent-Slug; the handler
+	// resolves it strictly inside the workspace/crew the internal token is
+	// bound to, so own-scope recall narrows to the caller instead of
+	// collapsing every shared-container sibling onto the token identity.
+	// nil-safe: test routers that skip orchestration routes have no
+	// shared handler instance to mount.
+	if r.hybridSearchHandler != nil {
+		r.mux.Handle("POST /api/v1/internal/memory/search/hybrid", internalAuth(http.HandlerFunc(r.hybridSearchHandler.SearchInternal)))
+	}
 	r.mux.Handle("GET /api/v1/internal/crew-connections", internalAuth(http.HandlerFunc(internal.ListCrewConnections)))
 	r.mux.Handle("POST /api/v1/internal/mcp-tool-calls", internalAuth(http.HandlerFunc(internal.RecordMCPToolCall)))
 	// Sidecar-emitted Crow's Nest journal events (network.egress, file.written).

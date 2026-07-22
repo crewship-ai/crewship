@@ -576,6 +576,40 @@ router:
   sibling access to shared memory — a functional regression wearing a security
   fix's clothes, caught in review before it shipped.
 
+#### The hybrid branch — acting identity across the IPC boundary (#1348)
+
+One branch of `/memory/search` leaves the sidecar entirely: `hybrid=true`
+forwards to the host so recall can combine the workspace FTS corpus with
+episodic (journal) memory. The forward authenticates with the crew's
+`X-Internal-Token` — which identifies the **sidecar**, one shared identity per
+crew container, not the agent that asked. As shipped, the per-agent identity
+the chokepoint had just validated was dropped at that hop, so host-side
+`scope=own` could not resolve to the caller — the same boot-identity
+conflation #1301 removed from the FTS path, reappearing one hop later.
+
+The acting identity now crosses the boundary explicitly, and only as a
+**narrowing**:
+
+- the sidecar attaches `X-Acting-Agent-Slug`, derived exclusively from the
+  token-resolved acting identity (or, on a token-less legacy crew, the boot
+  slug from the orchestrator-minted IPC config — never from the URL or the
+  request payload), and refuses to forward at all when no identity resolves;
+- the host serves the forward on a dedicated internal route
+  (`POST /api/v1/internal/memory/search/hybrid`) that re-proves the slug
+  against the internal token's cryptographic workspace/crew binding: an
+  unknown slug, a sibling-crew slug, a foreign-workspace slug, a missing
+  header, or an unbound (master) token are all refused with `403`, never
+  fallen back to a wider identity. `scope=own` then filters episodic recall
+  by the **resolved** agent, and `crew_shared` is pinned to the token's bound
+  crew plus the acting agent's membership in it.
+
+A compromised container can therefore still name any sibling **inside its own
+crew** — exactly the authority the shared container already has by
+construction — but nothing beyond the crew/workspace its token is bound to.
+Cross-agent isolation of `own`-scope hybrid recall is pinned by tests on both
+sides of the hop (`internal/sidecar/memory_hybrid_identity_test.go`,
+`internal/api/memory_hybrid_search_internal_test.go`).
+
 The general lesson is the one this section already records, applied one level
 deeper: a guarantee stated at the level of "the memory surface" is only as true
 as the weakest handler behind it, and a comment asserting what *callers* do

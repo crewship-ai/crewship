@@ -99,6 +99,9 @@ func TestHandleMemorySearch_Hybrid_ForwardsToHost(t *testing.T) {
 			BaseURL: hostStub.URL,
 			Token:   "test-token",
 			CrewID:  "crew_x",
+			// Production always mints the boot slug; the hybrid forward
+			// fails closed without a resolvable acting identity (#1348).
+			AgentSlug: "alpha",
 		},
 	}
 
@@ -115,8 +118,8 @@ func TestHandleMemorySearch_Hybrid_ForwardsToHost(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
 	}
-	if receivedPath != "/api/v1/memory/search/hybrid" {
-		t.Errorf("host received path = %q, want /api/v1/memory/search/hybrid", receivedPath)
+	if receivedPath != "/api/v1/internal/memory/search/hybrid" {
+		t.Errorf("host received path = %q, want /api/v1/internal/memory/search/hybrid", receivedPath)
 	}
 	// scope translation: sidecar "crew" -> host "crew_shared"
 	if receivedBody["scope"] != "crew_shared" {
@@ -160,7 +163,9 @@ func TestForwardHybridSearch_ScopeMapping(t *testing.T) {
 			defer hostStub.Close()
 			s := &Server{
 				logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-				ipc:    &IPCConfig{BaseURL: hostStub.URL, Token: "t"},
+				// AgentSlug: the hybrid forward fails closed without a
+				// resolvable acting identity (#1348).
+				ipc: &IPCConfig{BaseURL: hostStub.URL, Token: "t", AgentSlug: "alpha"},
 			}
 			body, _ := json.Marshal(map[string]any{"query": "q", "hybrid": true, "scope": c.sidecarScope})
 			req := httptest.NewRequest("POST", "/memory/search", bytes.NewReader(body))
