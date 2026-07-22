@@ -979,6 +979,13 @@ func TestEnsureCrewRuntime_DefaultHardening(t *testing.T) {
 	if len(hc.ExtraHosts) != 1 || hc.ExtraHosts[0] != "host.docker.internal:host-gateway" {
 		t.Errorf("ExtraHosts = %v", hc.ExtraHosts)
 	}
+	// /tmp must be noexec,nosuid like /secrets (defense-in-depth against
+	// staging/executing dropped binaries) — see secretsTmpfsSpec.
+	for _, want := range []string{"noexec", "nosuid", "rw"} {
+		if !strings.Contains(hc.Tmpfs["/tmp"], want) {
+			t.Errorf("Tmpfs[/tmp] = %q, missing %q", hc.Tmpfs["/tmp"], want)
+		}
+	}
 	if req.Config.Entrypoint[0] != "/usr/local/bin/entrypoint.sh" {
 		t.Errorf("Entrypoint = %v", req.Config.Entrypoint)
 	}

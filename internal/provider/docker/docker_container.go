@@ -1072,7 +1072,13 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 		},
 		Mounts: crewMounts,
 		Tmpfs: map[string]string{
-			"/tmp": "rw,size=500m",
+			// noexec,nosuid mirrors /secrets (secretsTmpfsSpec) — cheap
+			// defense-in-depth against staging/executing dropped binaries.
+			// Every script step and tmux exec wrapper invokes files under
+			// /tmp via an explicit interpreter (`sh <path>`, `bash <path>`,
+			// …), never execve()s them directly, so noexec does not break
+			// those paths.
+			"/tmp": "rw,noexec,nosuid,size=500m",
 			// In-memory /secrets owned by the agent UID; must be here and
 			// not in Mounts — the daemon rejects uid/gid TmpfsOptions on a
 			// Mounts-API tmpfs (see secretsTmpfsSpec).
