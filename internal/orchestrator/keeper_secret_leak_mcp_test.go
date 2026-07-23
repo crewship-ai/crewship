@@ -1,11 +1,13 @@
 package orchestrator
 
 import (
+	"bytes"
+	"log/slog"
 	"strings"
 	"testing"
 )
 
-// ── SECURITY FINDING (pre-existing, surfaced by this review) ─────────────────
+// ── SECURITY FINDING (#1362) — now CLOSED ────────────────────────────────────
 //
 // The "gate SECRET credential files on Keeper state" fix, and its docs
 // (docs/guides/credentials.mdx), assert an absolute delivery contract:
@@ -14,73 +16,76 @@ import (
 //	 all, and it is not injected as an environment variable."
 //
 // The FILE path (buildCredFileScript) and the primary env path
-// (BuildEnvVarsSidecar) both honour that. But there is a THIRD delivery path
-// that does NOT: injectMCPCredentialEnvVars (exec_env.go), called from the
-// sidecar-enabled branch of ensureSidecar (orchestrator_run.go ~L1093). It
-// injects a credential's PlainValue into the agent env whenever the
-// credential's EnvVarName is referenced by an MCP config (${VAR}) — matching
-// on NAME ONLY, ignoring both the credential Type and keeperEnabled (the
-// function has no keeper parameter at all).
+// (BuildEnvVarsSidecar) both honour that. A THIRD delivery path used to NOT:
+// injectMCPCredentialEnvVars (exec_env.go), called from the sidecar-enabled
+// branch of ensureSidecar (orchestrator_run.go ~L1093). It injected a
+// credential's PlainValue into the agent env whenever the credential's
+// EnvVarName was referenced by an MCP config (${VAR}) — matching on NAME ONLY,
+// ignoring both the credential Type and keeperEnabled.
 //
-// Consequence: a SECRET-typed credential whose EnvVarName is referenced in an
-// agent/crew MCP server config is injected as cleartext into the agent's
-// environment EVEN WITH KEEPER ON — readable via `env` / /proc/self/environ —
-// directly contradicting the Keeper system prompt ("You do NOT have these
-// credentials in your environment") and bypassing the /keeper/request audit
-// gate the whole feature exists to enforce.
+// Consequence (pre-fix): a SECRET-typed credential whose EnvVarName was
+// referenced in an agent/crew MCP server config was injected as cleartext into
+// the agent's environment EVEN WITH KEEPER ON — bypassing the /keeper/request
+// audit gate the whole feature exists to enforce.
 //
-// This test PROVES the leak against current code (it passes = the hole is
-// real). It is deliberately written to fail loudly if someone later closes the
-// hole, at which point flip it to the companion expectation in
-// TestInjectMCPCredentialEnvVars_SecretShouldBeGated_DESIRED below.
-//
-// NOT fixed here: gating SECRET in injectMCPCredentialEnvVars would 401 any MCP
-// server that legitimately needs that secret (the MCP process can't call
-// /keeper/request), so the correct remedy is a design decision (route MCP
-// secrets through the sidecar/Keeper, or forbid SECRET-typed creds as MCP
-// refs, or narrow the docs' absolute claim). Severity: HIGH for the stated
-// Keeper contract, conditional on a SECRET being MCP-referenced.
-func TestInjectMCPCredentialEnvVars_SecretLeaksUnderKeeper_CONFIRMED_HOLE(t *testing.T) {
+// #1362 closes the hole: injectMCPCredentialEnvVars now takes keeperEnabled and
+// withholds SECRET-typed credentials from the MCP env when Keeper is on. This
+// test asserts the leak is CLOSED under Keeper, and that with Keeper OFF the
+// SECRET is still injected (unchanged legacy behaviour — the MCP server needs
+// the value and there is no Keeper to route it through).
+func TestInjectMCPCredentialEnvVars_SecretWithheldUnderKeeper(t *testing.T) {
 	t.Parallel()
 	// An HTTP MCP server whose Authorization header references a SECRET-typed
 	// credential by name — a perfectly ordinary config.
 	crewJSON := `{"mcpServers":{"internal":{"type":"http","url":"https://api.internal.example/sse","headers":{"Authorization":"Bearer ${PROD_DB_PASSWORD}"}}}}`
-	req := AgentRunRequest{
-		CrewMCPConfigJSON: crewJSON,
-		Credentials: []Credential{
-			{ID: "s1", Type: "SECRET", EnvVarName: "PROD_DB_PASSWORD", PlainValue: "hunter2-cleartext"},
-		},
+	newReq := func() AgentRunRequest {
+		return AgentRunRequest{
+			CrewMCPConfigJSON: crewJSON,
+			Credentials: []Credential{
+				{ID: "s1", Type: "SECRET", EnvVarName: "PROD_DB_PASSWORD", PlainValue: "hunter2-cleartext"},
+			},
+		}
 	}
 
-	// injectMCPCredentialEnvVars has no keeperEnabled parameter — there is no
-	// way for the caller to ask it to withhold. It runs identically whether
-	// Keeper is on or off.
-	got := injectMCPCredentialEnvVars(req, nil)
-
-	leaked := false
+	// Keeper ON: the SECRET must NOT be injected into the MCP env, and a warning
+	// naming the credential must be emitted (without the value).
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	got := injectMCPCredentialEnvVars(newReq(), nil, true, logger)
 	for _, e := range got {
+		if strings.HasPrefix(e, "PROD_DB_PASSWORD=") {
+			t.Fatalf("Keeper ON: SECRET must not be injected via MCP ref, got %q (env=%v)", e, got)
+		}
+	}
+	logOut := buf.String()
+	if !strings.Contains(logOut, "PROD_DB_PASSWORD") {
+		t.Fatalf("Keeper ON: expected a warning naming the withheld SECRET, log=%q", logOut)
+	}
+	if strings.Contains(logOut, "hunter2-cleartext") {
+		t.Fatalf("Keeper ON: warning must never contain the secret value, log=%q", logOut)
+	}
+
+	// Keeper OFF: legacy behaviour is unchanged — the SECRET IS injected so the
+	// MCP server can authenticate.
+	gotOff := injectMCPCredentialEnvVars(newReq(), nil, false, logger)
+	leaked := false
+	for _, e := range gotOff {
 		if e == "PROD_DB_PASSWORD=hunter2-cleartext" {
 			leaked = true
 		}
 	}
 	if !leaked {
-		t.Fatalf("expected the SECRET plaintext to be present in env (documenting the known leak); "+
-			"if this now FAILS, the hole may be fixed — update this test and un-skip the DESIRED companion. env=%v", got)
+		t.Fatalf("Keeper OFF: SECRET must still be injected (legacy, unchanged); env=%v", gotOff)
 	}
-	t.Logf("CONFIRMED: SECRET PROD_DB_PASSWORD injected into agent env via MCP ref, bypassing Keeper. env=%v", got)
 }
 
-// TestInjectMCPCredentialEnvVars_SecretShouldBeGated_DESIRED encodes the
-// behaviour the Keeper contract actually promises: with Keeper ON, a
-// SECRET-typed credential must NOT be injected into the agent env even when an
-// MCP config references it. It is skipped because the current code cannot
-// satisfy it (injectMCPCredentialEnvVars takes no keeper flag). Un-skip and
-// wire a keeper parameter through when the design decision above is made.
+// TestInjectMCPCredentialEnvVars_SecretShouldBeGated_DESIRED is the primary
+// assertion of the Keeper contract: with Keeper ON, a SECRET-typed credential
+// must NOT be injected into the agent env even when an MCP config references it.
+// Formerly skipped (the code could not satisfy it); #1362 implements the gate,
+// so it now runs.
 func TestInjectMCPCredentialEnvVars_SecretShouldBeGated_DESIRED(t *testing.T) {
-	t.Skip("DESIRED behaviour, not yet implemented: injectMCPCredentialEnvVars has no keeper gate; " +
-		"see TestInjectMCPCredentialEnvVars_SecretLeaksUnderKeeper_CONFIRMED_HOLE. Requires a design decision.")
-
-	// Sketch of the assertion once a keeper-aware variant exists:
+	t.Parallel()
 	crewJSON := `{"mcpServers":{"internal":{"type":"http","url":"https://api.internal.example/sse","headers":{"Authorization":"Bearer ${PROD_DB_PASSWORD}"}}}}`
 	req := AgentRunRequest{
 		CrewMCPConfigJSON: crewJSON,
@@ -88,7 +93,7 @@ func TestInjectMCPCredentialEnvVars_SecretShouldBeGated_DESIRED(t *testing.T) {
 			{ID: "s1", Type: "SECRET", EnvVarName: "PROD_DB_PASSWORD", PlainValue: "hunter2-cleartext"},
 		},
 	}
-	got := injectMCPCredentialEnvVars(req, nil) // would need: (req, nil, keeperEnabled=true)
+	got := injectMCPCredentialEnvVars(req, nil, true, nil) // Keeper ON, nil logger tolerated
 	for _, e := range got {
 		if strings.HasPrefix(e, "PROD_DB_PASSWORD=") {
 			t.Fatalf("Keeper ON: SECRET must not be injected via MCP ref, got %q", e)
@@ -96,11 +101,11 @@ func TestInjectMCPCredentialEnvVars_SecretShouldBeGated_DESIRED(t *testing.T) {
 	}
 }
 
-// TestInjectMCPCredentialEnvVars_NonSecretUnaffected documents that the
-// finding is scoped to SECRET-vs-Keeper semantics: CLI_TOKEN and other
-// env-legitimate types are SUPPOSED to be injected via MCP refs and that is
-// correct behaviour (they carry no withhold claim). This guards against an
-// over-broad future fix that would break MCP auth for the ungated types.
+// TestInjectMCPCredentialEnvVars_NonSecretUnaffected documents that the gate is
+// scoped to SECRET-vs-Keeper semantics: CLI_TOKEN and other env-legitimate
+// types are SUPPOSED to be injected via MCP refs and that stays correct even
+// with Keeper ON (they carry no withhold claim). This guards against an
+// over-broad fix that would break MCP auth for the ungated types.
 func TestInjectMCPCredentialEnvVars_NonSecretUnaffected(t *testing.T) {
 	t.Parallel()
 	crewJSON := `{"mcpServers":{"gh":{"type":"http","url":"https://mcp.gh.example/sse","headers":{"Authorization":"Bearer ${GH_TOKEN}"}}}}`
@@ -110,7 +115,8 @@ func TestInjectMCPCredentialEnvVars_NonSecretUnaffected(t *testing.T) {
 			{ID: "c1", Type: "CLI_TOKEN", EnvVarName: "GH_TOKEN", PlainValue: "ghp_real"},
 		},
 	}
-	got := injectMCPCredentialEnvVars(req, nil)
+	// Keeper ON — a non-SECRET type must STILL be injected.
+	got := injectMCPCredentialEnvVars(req, nil, true, nil)
 	found := false
 	for _, e := range got {
 		if e == "GH_TOKEN=ghp_real" {
@@ -118,6 +124,6 @@ func TestInjectMCPCredentialEnvVars_NonSecretUnaffected(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("CLI_TOKEN referenced by MCP must be injected (correct behaviour); env=%v", got)
+		t.Fatalf("CLI_TOKEN referenced by MCP must be injected even under Keeper (correct behaviour); env=%v", got)
 	}
 }

@@ -1090,7 +1090,10 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		// Claude Code expands from the process environment. With sidecar enabled
 		// credentials normally skip env vars (they go via stdin instead), but
 		// MCP env references still need the actual values in the exec env.
-		env = injectMCPCredentialEnvVars(*req, env)
+		// #1362: reuse the keeperEnabled read taken under o.mu.RLock at the top
+		// of ensureSidecar (L830). injectMCPCredentialEnvVars is the third
+		// credential-delivery path and must withhold SECRETs under Keeper too.
+		env = injectMCPCredentialEnvVars(*req, env, keeperEnabled, o.logger)
 	} else {
 		env = BuildEnvVars(*req, cred)
 	}
