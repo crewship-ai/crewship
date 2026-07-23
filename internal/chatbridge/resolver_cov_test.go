@@ -287,6 +287,52 @@ func TestResolveChatFeatureEnvWithoutDevcontainerEnv(t *testing.T) {
 	}
 }
 
+// #1380: the operator-declared top-level privilege controls in
+// devcontainer_config (privileged / init / capAdd / mounts) must reach the
+// runtime requirements even when there are NO feature-derived
+// cached_requirements. This is the proof that the Security-tab toggles are
+// honoured by the runtime rather than parsed-and-discarded — the merged
+// requirements are what bridge.go maps onto the container HostConfig.
+func TestResolveChatHonoursTopLevelPrivilege(t *testing.T) {
+	t.Parallel()
+	resp := chatResolveResponse{
+		AgentID:    "a1",
+		CLIAdapter: "CLAUDE_CODE",
+		// No cached_requirements — privilege comes purely from the operator's
+		// top-level devcontainer_config keys. capAdd includes a disallowed cap
+		// and mounts include the docker socket; both must be filtered out.
+		DevcontainerConfig: `{"image":"debian:bookworm-slim","privileged":true,"init":true,` +
+			`"capAdd":["NET_BIND_SERVICE","SYS_ADMIN"],` +
+			`"mounts":[{"source":"/dev/fuse","target":"/dev/fuse"},` +
+			`{"source":"/var/run/docker.sock","target":"/var/run/docker.sock"}]}`,
+	}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(ts.Close)
+	r := NewIPCResolver(ts.URL, "tok", slog.Default())
+	info, err := r.ResolveChat(context.Background(), "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.CachedRequirements == nil {
+		t.Fatal("CachedRequirements nil — top-level privilege was dropped")
+	}
+	if !info.CachedRequirements.Privileged {
+		t.Error("privileged not honoured from devcontainer_config")
+	}
+	if !info.CachedRequirements.Init {
+		t.Error("init not honoured from devcontainer_config")
+	}
+	if len(info.CachedRequirements.CapAdd) != 1 || info.CachedRequirements.CapAdd[0] != "NET_BIND_SERVICE" {
+		t.Errorf("CapAdd = %v, want only NET_BIND_SERVICE (SYS_ADMIN filtered)", info.CachedRequirements.CapAdd)
+	}
+	if len(info.CachedRequirements.Mounts) != 1 || info.CachedRequirements.Mounts[0].Source != "/dev/fuse" {
+		t.Errorf("Mounts = %v, want only /dev/fuse (docker.sock filtered)", info.CachedRequirements.Mounts)
+	}
+}
+
 // ---------- resolve(): PreferredLanguage wiring ----------
 
 // TestResolveChatWiresPreferredLanguage guards the chat language fix: the

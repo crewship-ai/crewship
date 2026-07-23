@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label"
 import { RuntimeConfig, type RuntimeConfigValue } from "@/components/features/crews/runtime-config"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
+import { useAbilities } from "@/hooks/use-abilities"
 
 interface CrewRuntimeConfigProps {
   crewId: string
@@ -42,6 +43,13 @@ export function CrewRuntimeConfig({
   const [saving, setSaving] = useState(false)
   const [provisioning, setProvisioning] = useState(false)
   const [rebuilding, setRebuilding] = useState(false)
+
+  // Privileged mode is the highest-blast-radius escape hatch — only admins can
+  // flip it in the UI. The backend is the authority and additionally enforces
+  // the workspace allow_privileged_credentials flag on save; this is the FE
+  // guardrail so a non-admin never sees it as editable.
+  const { role } = useAbilities()
+  const canEditPrivileged = role === "OWNER" || role === "ADMIN"
 
   // Resync from props when they change (e.g. after save)
   useEffect(() => {
@@ -174,7 +182,7 @@ export function CrewRuntimeConfig({
       {/* Runtime config editor */}
       {canEdit ? (
         <>
-          <RuntimeConfig value={value} onChange={setValue} />
+          <RuntimeConfig value={value} onChange={setValue} canEditPrivileged={canEditPrivileged} />
           {hasChanges && (
             <div className="border-t mt-4 pt-4">
               <Button size="sm" onClick={handleSave} disabled={saving}>

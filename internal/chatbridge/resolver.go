@@ -543,6 +543,27 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		}
 	}
 
+	// #1380: fold the operator-declared top-level privilege controls
+	// (privileged / init / capAdd / mounts) from devcontainer_config into the
+	// effective runtime requirements. These are validated + gated at save time
+	// (crews create/update), then HONOURED here — this is what makes the
+	// Security-tab toggles actually reach the container's HostConfig instead of
+	// being parsed-and-discarded. caps/mounts are re-filtered through the
+	// allowlists inside ParseConfigSecurity (defense in depth against a
+	// tampered stored blob); privileged/init are OR-ed onto the feature set.
+	if data.DevcontainerConfig != "" {
+		sec := devcontainer.ParseConfigSecurity(data.DevcontainerConfig)
+		if sec.Privileged || sec.Init || len(sec.CapAdd) > 0 || len(sec.Mounts) > 0 {
+			if cachedReqs == nil {
+				cachedReqs = &devcontainer.AggregatedRequirements{}
+			}
+			cachedReqs.Privileged = cachedReqs.Privileged || sec.Privileged
+			cachedReqs.Init = cachedReqs.Init || sec.Init
+			cachedReqs.CapAdd = append(cachedReqs.CapAdd, sec.CapAdd...)
+			cachedReqs.Mounts = append(cachedReqs.Mounts, sec.Mounts...)
+		}
+	}
+
 	return &ChatInfo{
 		AgentID:               data.AgentID,
 		AgentSlug:             data.AgentSlug,

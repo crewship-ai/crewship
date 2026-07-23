@@ -113,6 +113,75 @@ Containers are created with these security measures (`internal/provider/docker/d
 - **ExtraHosts:** `host.docker.internal:host-gateway` enables container-to-host communication
 - **Named volumes:** `crewship-home-{slug}-{crewID}` and `crewship-tools-{slug}-{crewID}` for persistent home and tools directories (namespaced by crew ID to prevent cross-tenant collisions)
 
+## Runtime Escape Hatches
+
+A crew's container can opt out of individual isolation layers through its
+`devcontainer_config`. These are the settings with the **largest blast radius**,
+so the crew settings UI (**Container image & features → Security** tab) exposes
+them as labeled controls with inline warnings instead of a raw JSON blob. Each
+control serializes to the exact top-level `devcontainer_config` key the runtime
+reads, and a raw-JSON "advanced" editor remains available for anything the
+structured UI does not model (preserved verbatim on save).
+
+The UI controls are **affordances, not the security boundary** — every one is
+re-validated **server-side** on save (create *and* update, `crews_create.go` /
+`crews_update.go` via `devcontainer.Config.ValidateSecurity`), and the runtime
+applies the *validated* values. A caller that bypasses the UI (raw API, a stale
+client, a hand-edited config) hits the same gate.
+
+| Control | JSON key | What it costs you |
+|---------|----------|-------------------|
+| **Privileged mode** | `privileged` | Nulls `no-new-privileges`, drops the read-only rootfs, grants ~all Linux capabilities and host device access. An agent can escape to the host. **Refused on save with `403` unless the workspace has `allow_privileged_credentials` set** (the same flag that governs handing credentials to a privileged crew, #1032). Prefer adding a single capability instead. |
+| **Added capabilities** | `capAdd` | Re-adds specific Linux capabilities on top of `--cap-drop=ALL`. Only **`NET_BIND_SERVICE`** may be granted directly — it is the *same* allowlist the devcontainer-feature path enforces. Any broader capability (`SYS_ADMIN`, `NET_RAW`, `DAC_OVERRIDE`, …) is **rejected on save with `400`**; if a crew genuinely needs more, that is what privileged mode (workspace-gated) is for, so the escalation stays visible. Names normalize across `CAP_`/case forms. |
+| **Extra mounts** | `mounts` | Bind/volume mounts into the container. The allowlist mirrors `internal/devcontainer/mount_validate.go`: only `/dev/fuse` and valid named volumes are permitted. The Docker socket (`/var/run/docker.sock`), `/var/lib/docker`, `/tmp` and arbitrary host paths are **rejected on save with `400`** — each is a container-escape primitive. The runtime re-filters through the same allowlist (defense in depth). |
+| **Init process (PID 1)** | `init` | Runs a tiny init as PID 1 to reap zombie processes (docker `--init`). Low risk. |
+| **Container environment** | `containerEnv` | Extra env vars injected at start. `CREWSHIP_*` keys are reserved and ignored. |
+| **Start hook (init script)** | `postStartCommand` | Shell commands run on **every** container start as the agent user (UID 1001). Note the crew's `/crew` directory is an agent-writable host bind that **survives container removal** — a script auto-executed from there is a persistence surface, so treat everything it runs as code you wrote or audited. |
+
+### How enforcement is wired
+
+The `privileged` / `capAdd` / `mounts` / `init` keys are **top-level**
+`devcontainer.json` fields — distinct from the capabilities a devcontainer
+*feature* declares (those come from arbitrary OCI registries and are
+force-stripped, `internal/devcontainer/features.go`). Because they are a
+first-party operator declaration, the runtime **honors** them, but only after
+the save gate has validated them:
+
+1. **Save (`ValidateSecurity`)** — `privileged` requires `allow_privileged_credentials` (`403`); `capAdd` is bounded to `NET_BIND_SERVICE` (`400`); every `mounts[].source` must pass `IsAllowedMountSource` (`400`). The keys are persisted in the canonical config (they used to be silently dropped on the auto-inject re-marshal).
+2. **Runtime read (`ParseConfigSecurity`)** — at container start the resolver folds the validated top-level keys into the effective requirements the provider maps onto the Docker `HostConfig` (`internal/chatbridge/resolver.go` → `internal/provider/docker/docker_container.go`), re-filtering caps/mounts as defense in depth. The `#1032` credential-fail-closed gate reads the same source, so a UI-privileged crew is correctly treated as privileged when deciding whether to load vault credentials.
+
+This means toggling **Privileged** in the UI actually makes (or, without the
+workspace flag, *refuses* to make) the container privileged — the change reaches
+`HostConfig.Privileged`, not just the stored JSON.
+
+<Warning>
+  A crew running **privileged** has essentially no container isolation left. The
+  Security tab surfaces an **"Isolation reduced"** badge on any such crew so the
+  posture is visible wherever the crew is configured. Reserve privileged mode for
+  crews you fully trust (e.g. Docker-in-Docker) and grant a single capability
+  where that is enough.
+</Warning>
+
+### CLI parity
+
+The same controls are drivable from the CLI, and go through the identical
+server-side validation:
+
+```bash
+# Toggle privileged (needs the workspace allow_privileged_credentials flag, else 403)
+crewship crew config my-crew --privileged
+
+# Grant a capability (only NET_BIND_SERVICE is accepted; anything else → 400)
+crewship crew config my-crew --cap-add NET_BIND_SERVICE
+
+# Run a docker --init reaper as PID 1
+crewship crew config my-crew --init
+```
+
+These flags merge onto the crew's stored `devcontainer_config` (image and
+features are preserved) and PATCH it back. Uploading a full config file with
+`--devcontainer ./devcontainer.json` is validated the same way.
+
 ## Network Policy
 
 Each crew can have a network access policy:

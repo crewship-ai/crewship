@@ -4,8 +4,10 @@ package api
 // Owns createCrewRequest type. Extracted from crews.go.
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -15,6 +17,38 @@ import (
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/license"
 )
+
+// workspaceAllowsPrivileged reports whether the workspace has opted into
+// privileged container credentials (allow_privileged_credentials). This is the
+// same flag #1032 uses to gate loading credentials into a privileged crew's
+// sidecar; #1380 reuses it as the gate for accepting privileged:true in a
+// crew's devcontainer_config. A missing workspace row is treated as "not
+// allowed" (fail closed).
+func (h *CrewHandler) workspaceAllowsPrivileged(ctx context.Context, workspaceID string) (bool, error) {
+	var v int
+	err := h.db.QueryRowContext(ctx,
+		`SELECT COALESCE(allow_privileged_credentials, 0) FROM workspaces WHERE id = ?`,
+		workspaceID).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return v == 1, nil
+}
+
+// replyDevcontainerSecurityError maps a Config.ValidateSecurity failure to the
+// right HTTP status: privileged-without-flag is an authorization failure (403);
+// a disallowed capability or mount is a bad request (400).
+func replyDevcontainerSecurityError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, devcontainer.ErrPrivilegedNotAllowed):
+		replyError(w, http.StatusForbidden, err.Error())
+	default:
+		replyError(w, http.StatusBadRequest, "invalid devcontainer_config: "+err.Error())
+	}
+}
 
 type createCrewRequest struct {
 	Name                  string   `json:"name"`
@@ -172,6 +206,19 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		cfg, err := devcontainer.ParseBytes([]byte(*req.DevcontainerConfig))
 		if err != nil {
 			replyError(w, http.StatusBadRequest, "invalid devcontainer_config: "+err.Error())
+			return
+		}
+		// #1380: enforce the structured container-privilege controls
+		// server-side. The Security-tab UI writes top-level privileged /
+		// capAdd / mounts keys; without this gate they'd be stored (or, on
+		// the auto-inject path, parsed-and-discarded) with zero validation.
+		allowPriv, err := h.workspaceAllowsPrivileged(r.Context(), workspaceID)
+		if err != nil {
+			replyInternalError(w, h.logger, "check workspace privileged flag", err)
+			return
+		}
+		if verr := cfg.ValidateSecurity(allowPriv); verr != nil {
+			replyDevcontainerSecurityError(w, verr)
 			return
 		}
 		// Auto-inject common-utils when the operator didn't declare a
