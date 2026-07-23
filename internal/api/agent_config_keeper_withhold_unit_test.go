@@ -2,12 +2,13 @@ package api
 
 import "testing"
 
-// Adversarial unit test for #1364 R2. The resolve-response integration tests
-// pass even if withholdKeeperSecretValues were a no-op, because buildKeeperBlock
-// ALSO blanks SECRET values as a side effect. This test exercises the function
-// in isolation so the explicit chokepoint is proven to work on its own — the
-// whole point of the defense-in-depth: if a refactor removes buildKeeperBlock's
-// side effect, this function must still hold the line.
+// Adversarial unit test for #1364 R2. withholdKeeperSecretValues is now the
+// SOLE place that blanks SECRET plaintext — buildKeeperBlock is read-only (it
+// only lists the Keeper-gated credential names for the prompt, it no longer
+// mutates values). This test exercises the withholding function in isolation so
+// the explicit chokepoint is proven to work on its own: nothing else in the
+// resolve path will paper over a regression here, so if this function ever
+// stops blanking, that gap surfaces directly instead of being masked.
 func TestWithholdKeeperSecretValues_BlanksOnlySecret(t *testing.T) {
 	creds := []mcpCredEntry{
 		{ID: "1", EnvVar: "PROD_KEY", Value: "secret-plaintext", Type: "SECRET"},

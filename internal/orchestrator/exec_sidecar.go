@@ -145,9 +145,18 @@ type credFileSpec struct {
 // the shell script that mounts them into the agent container and the
 // list of .env entries the agent reads at startup.
 //
+// Which types are file-delivered is NOT decided by the switch below — it is
+// read from the credpolicy table (Delivery=file), the single source of truth
+// shared with secrets_cleanup.go. The switch only picks the on-disk LAYOUT for
+// each file type; a Delivery=file type it doesn't recognise falls through to
+// the default flat-file layout. Non-file types are skipped before the switch.
+//
 // Per-type behaviour:
 //
-//	API_KEY, AI_CLI_TOKEN, OAUTH2  → skipped (sidecar proxy handles them)
+//	API_KEY (proxy), AI_CLI_TOKEN / OAUTH2 / ENDPOINT_URL (env), unknown (none)
+//	                               → skipped (not Delivery=file in credpolicy);
+//	                                 the sidecar proxy / env-var block handle
+//	                                 the delivered ones, so they never touch disk
 //	CLI_TOKEN, GENERIC_SECRET      → one file at secretsAgentDir/<envvar>,
 //	                                 mode 0400. .env maps envvar to path.
 //	SECRET                         → same flat-file layout as CLI_TOKEN,
@@ -204,18 +213,21 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabl
 			continue
 		}
 
-		switch c.Type {
-		case "SECRET", "CLI_TOKEN", "GENERIC_SECRET":
-			// Opaque secret material delivered as a single 0400 file (+ an env
-			// var pointing at the path). SECRET is the Keeper-gated one, already
-			// skipped above when Keeper is on; CLI tools (gh, glab, …) and
-			// generic secrets are read from disk regardless of Keeper state.
-			path := secretsAgentDir + "/" + c.EnvVarName
-			specs = append(specs, credFileSpec{
-				EnvVar: c.EnvVarName, Value: c.PlainValue, Path: path, Mode: "0400",
-			})
-			envLines = append(envLines, c.EnvVarName+"="+path)
+		// #1364: the DELIVERY CHANNEL is table-driven too. Only file-mounted
+		// types (credpolicy Delivery=file) are written under /secrets; env /
+		// proxy / none types are injected elsewhere (env-var block, sidecar
+		// proxy) or not delivered at all, so they're skipped here. Consulting
+		// the table — rather than a hard-coded type list in the switch below —
+		// keeps this delivery decision in lockstep with secrets_cleanup.go,
+		// which counts mounted files via credpolicy.For(...).FileMounted(). A
+		// future Delivery=file type added to the table is now written (via the
+		// default flat-file layout) and counted, instead of being counted by
+		// cleanup yet never written here.
+		if !credpolicy.For(c.Type).FileMounted() {
+			continue
+		}
 
+		switch c.Type {
 		case "USERPASS":
 			// Username is cleartext on the Credential struct; password
 			// rides on PlainValue (encrypted at rest, decrypted by the
@@ -260,10 +272,19 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabl
 			envLines = append(envLines, c.EnvVarName+"_PATH="+path)
 
 		default:
-			// API_KEY, AI_CLI_TOKEN, OAUTH2, and any unknown type are
-			// intentionally skipped: the sidecar proxy injects them at
-			// outbound-request time so they never touch disk.
-			continue
+			// SECRET, CLI_TOKEN, GENERIC_SECRET — and any future Delivery=file
+			// type without a bespoke layout — deliver as a single 0400 file (+
+			// an env var pointing at the path). SECRET is the Keeper-gated one,
+			// already skipped above when Keeper is on; CLI tools (gh, glab, …)
+			// and generic secrets are read from disk regardless of Keeper state.
+			// Non-file types never reach here: the FileMounted() guard above
+			// skipped them (API_KEY → proxy, AI_CLI_TOKEN/OAUTH2/ENDPOINT_URL →
+			// env var, unknown → not delivered).
+			path := secretsAgentDir + "/" + c.EnvVarName
+			specs = append(specs, credFileSpec{
+				EnvVar: c.EnvVarName, Value: c.PlainValue, Path: path, Mode: "0400",
+			})
+			envLines = append(envLines, c.EnvVarName+"="+path)
 		}
 	}
 
