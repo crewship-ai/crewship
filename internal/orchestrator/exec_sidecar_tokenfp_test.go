@@ -21,7 +21,7 @@ func TestSidecarTokenFP_ParsedFromHealth(t *testing.T) {
 	}{
 		{
 			name:   "reports fingerprint",
-			body:   `{"status":"ok","network_mode":"free","token_fp":"abc123def456"}`,
+			body:   `{"status":"ok","network_mode":"free","token_fp":"abc123def456"}`, //gitleaks:allow — fake fixture
 			wantFP: "abc123def456",
 		},
 		{

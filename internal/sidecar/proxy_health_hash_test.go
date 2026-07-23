@@ -48,7 +48,7 @@ func TestHealthSidecarHashEmptyWhenUnset(t *testing.T) {
 // restart (its token is now permanently rejected).
 func TestHealthReportsTokenFP(t *testing.T) {
 	proxy := newTestProxy(nil, []string{"localhost"})
-	proxy.tokenFP = "abc123def456"
+	proxy.tokenFP = "abc123def456" //gitleaks:allow — fake fixture; a token fingerprint is a one-way hash (public on /health), not a secret
 
 	req := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
 	req.Host = "localhost:9119"
@@ -58,7 +58,7 @@ func TestHealthReportsTokenFP(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("health status = %d, want 200", w.Code)
 	}
-	if body := w.Body.String(); !strings.Contains(body, `"token_fp":"abc123def456"`) {
+	if body := w.Body.String(); !strings.Contains(body, `"token_fp":"abc123def456"`) { //gitleaks:allow — fake fixture
 		t.Errorf("health body missing token_fp: %q", body)
 	}
 }
