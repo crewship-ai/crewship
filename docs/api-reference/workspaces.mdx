@@ -1299,6 +1299,10 @@ Accepts either `target_pipeline_slug` (UI-friendly) or `target_pipeline_id` (CLI
 | `timezone` | string | no | IANA name (e.g. `"Europe/Prague"`); default UTC |
 | `inputs` | object | no | Static inputs passed on every fire |
 | `enabled` | boolean | no | Default `true` |
+| `wake_pipeline_slug` | string | no | Wake gate: an [agentless](/guides/routines#agentless-routines) probe run before each fire; the main routine fires only when the probe's final output is truthy. |
+| `wake_pipeline_id` | string | no | Wake gate probe by id (alternative to the slug). |
+| `wake_inputs` | object | no | Static inputs passed to the wake probe on each tick. |
+| `wake_fail_closed` | boolean | no | Default `false` (fail **open**): a probe error / timeout / non-`COMPLETED` run still fires the main routine and records `last_wake_status: ERROR`. Set `true` (fail **closed**) to **hold** the run on any such non-affirmative probe outcome (recorded `HELD`, no main run) — for gates that must *suppress* an unattended run, not just save tokens. Ignored without a wake gate. |
 
 **Response:** `201 Created` -- schedule object.
 
@@ -1314,7 +1318,7 @@ Accepts either `target_pipeline_slug` (UI-friendly) or `target_pipeline_id` (CLI
 PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}
 ```
 
-**Whole-row replace semantics** -- the caller sends the post-edit state, missing fields fall back to the existing row. This includes `target_pipeline_version`: an absent field keeps the existing version pin, an explicit `"target_pipeline_version": null` clears it (fires track head again).
+**Whole-row replace semantics** -- the caller sends the post-edit state, missing fields fall back to the existing row. This includes `target_pipeline_version`: an absent field keeps the existing version pin, an explicit `"target_pipeline_version": null` clears it (fires track head again). Likewise `wake_fail_closed`: absent keeps the existing policy, an explicit boolean sets it; clearing the wake gate resets the policy to fail-open.
 
 **Auth:** `OWNER` or `ADMIN` (`canRole "manage"`).
 

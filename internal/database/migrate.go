@@ -1688,6 +1688,12 @@ END;
 	// state — not workspace-scoped, never in a backup bundle. See
 	// migrate_consts_v150_scheduler_leader.go and internal/leader.
 	{version: 150, name: "scheduler_leader", sql: migrationSchedulerLeader},
+	// v151: opt-in fail-closed policy on the schedule wake gate — a
+	// non-affirmative probe (error / nil / non-COMPLETED) HOLDS the run
+	// instead of failing open. Default 0 preserves fail-open for existing
+	// schedules. See migrate_consts_v151_schedule_wake_fail_closed.go and
+	// issue #1372.
+	{version: 151, name: "schedule_wake_fail_closed", sql: migrationScheduleWakeFailClosed},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

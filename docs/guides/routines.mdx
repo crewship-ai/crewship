@@ -918,7 +918,21 @@ Point the probe's `url`/`expected_items` inputs at your own endpoint to make it 
 Semantics worth knowing:
 
 - The probe must be `agentless: true`, live in the same workspace, and can't be the schedule's own routine — all validated when the schedule is saved.
-- **Probe errors fail open**: a broken or deleted probe wakes the main routine instead of going silently blind, and records `last_wake_status: ERROR` so you can see the probe needs fixing.
+- **Probe errors fail open by default**: a broken or deleted probe wakes the main routine instead of going silently blind, and records `last_wake_status: ERROR` so you can see the probe needs fixing. This is the right default for a *monitoring* gate — you would rather over-fire than miss a signal.
+- **Fail closed for unattended gates**: when the gate is meant to *suppress* an autonomous run — not just save tokens — a broken probe that fires the run anyway is a security hole (a tampered or unreachable probe cannot be allowed to green-light the run). Pass `--fail-closed` so any non-affirmative probe outcome (error, timeout, or a non-`COMPLETED` run) **holds** the run instead of firing it. The tick records `last_wake_status: HELD`, does not increment `wake_fire_count`, and advances `next_run_at` like a skipped tick. The default stays fail-open, so existing schedules are unchanged.
+
+  ```bash
+  # A probe error now HOLDS the run instead of firing it:
+  crewship routine schedules create --slug nightly-cleanup \
+      --cron "0 3 * * *" \
+      --wake-slug maintenance-window-open --fail-closed
+
+  # Flip an existing gate's policy either way:
+  crewship routine schedules update <schedule_id> --fail-closed
+  crewship routine schedules update <schedule_id> --fail-closed=false
+  ```
+
+  Note an empty or ambiguous output on a `COMPLETED` probe run is already treated as falsy → `SKIPPED` (the main run never fires) regardless of policy — `--fail-closed` only changes the *failure* branch.
 - A skipped tick advances `next_run_at` but leaves `last_run_*` untouched — run telemetry stays strictly about main runs. Wake telemetry lives in `wake_check_count` / `wake_fire_count` / `last_wake_at` / `last_wake_status`, and `routine schedules list` shows it as `<probe> woke/checked` in the WAKE column.
 - Probe executions are regular runs with `triggered_via: wake_check`, so they're auditable in run history and filterable out of dashboards.
 
