@@ -18,6 +18,7 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/leader"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -61,7 +62,14 @@ type Schedule struct {
 	WakeCheckCount int
 	WakeFireCount  int
 	LastWakeAt     *time.Time
-	LastWakeStatus string // WOKE | SKIPPED | ERROR
+	LastWakeStatus string // WOKE | SKIPPED | ERROR | HELD
+	// WakeFailClosed flips the probe-failure default (#1372). When false
+	// (default), a probe that errors / returns nil / finishes
+	// non-COMPLETED fails OPEN — the main routine fires anyway and the
+	// tick records ERROR. When true, that same non-affirmative outcome
+	// HOLDS the run (records HELD): a broken or tampered probe can no
+	// longer be the thing that triggers an unattended autonomous run.
+	WakeFailClosed bool
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -72,7 +80,8 @@ type Schedule struct {
 const (
 	WakeStatusWoke    = "WOKE"    // probe truthy (or absent) — main routine fired
 	WakeStatusSkipped = "SKIPPED" // probe falsey — tick skipped, no main run
-	WakeStatusError   = "ERROR"   // probe failed — failed OPEN, main routine fired
+	WakeStatusError   = "ERROR"   // probe failed, fail-OPEN gate — main routine fired anyway
+	WakeStatusHeld    = "HELD"    // probe failed, fail-CLOSED gate — run held, no main run (#1372)
 )
 
 // SaveScheduleInput is the payload for ScheduleStore.Save.
@@ -93,6 +102,9 @@ type SaveScheduleInput struct {
 	// store persists what it's given.
 	WakePipelineID string
 	WakeInputs     map[string]any
+	// WakeFailClosed opts the gate into fail-closed probe-failure
+	// handling (#1372). Ignored when WakePipelineID is empty (no gate).
+	WakeFailClosed bool
 }
 
 // ScheduleStore is the persistence + listing API for
@@ -152,14 +164,14 @@ func (s *ScheduleStore) Save(ctx context.Context, in SaveScheduleInput) (*Schedu
 INSERT INTO pipeline_schedules (
     id, workspace_id, name, target_pipeline_id, target_pipeline_version,
     cron_expr, timezone, inputs_json, enabled, next_run_at,
-    wake_pipeline_id, wake_inputs_json,
+    wake_pipeline_id, wake_inputs_json, wake_fail_closed,
     created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, in.WorkspaceID, in.Name, in.TargetPipelineID,
 			nullInt(in.TargetPipelineVersion),
 			in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(in.Enabled),
 			tsformat.Format(nextRun),
-			nullStr(in.WakePipelineID), string(wakeInputsJSON),
+			nullStr(in.WakePipelineID), string(wakeInputsJSON), boolToInt(in.WakeFailClosed),
 			tsformat.Format(now), tsformat.Format(now),
 		)
 		if err != nil {
@@ -174,12 +186,12 @@ UPDATE pipeline_schedules
 SET name = ?, target_pipeline_id = ?, target_pipeline_version = ?,
     cron_expr = ?, timezone = ?, inputs_json = ?, enabled = ?,
     next_run_at = ?, wake_pipeline_id = ?, wake_inputs_json = ?,
-    updated_at = ?
+    wake_fail_closed = ?, updated_at = ?
 WHERE id = ? AND deleted_at IS NULL`,
 		in.Name, in.TargetPipelineID, nullInt(in.TargetPipelineVersion),
 		in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(in.Enabled),
 		tsformat.Format(nextRun),
-		nullStr(in.WakePipelineID), string(wakeInputsJSON),
+		nullStr(in.WakePipelineID), string(wakeInputsJSON), boolToInt(in.WakeFailClosed),
 		tsformat.Format(now),
 		in.ID,
 	)
@@ -286,9 +298,12 @@ WHERE id = ?`,
 
 // recordWakeCheck persists the outcome of one wake-gate evaluation.
 // Counters + last_wake_* are wake-only telemetry — last_run_* stays
-// strictly about main runs. advanceNext is true on a SKIPPED tick
-// (no main run follows, so the wake record is what moves next_run_at
-// forward); on WOKE/ERROR the subsequent recordRun advances it.
+// strictly about main runs. advanceNext is true when no main run
+// follows (SKIPPED, or a fail-closed HELD tick), so the wake record is
+// what moves next_run_at forward; on WOKE/ERROR the subsequent recordRun
+// advances it. wake_fire_count counts ticks that fired the main run, so
+// HELD (held, no main run) does NOT increment it — only WOKE and the
+// fail-OPEN ERROR do.
 func (s *ScheduleStore) recordWakeCheck(ctx context.Context, scheduleID, status string, nextRun time.Time, advanceNext bool) error {
 	now := tsformat.Format(time.Now())
 	fired := 0
@@ -318,20 +333,32 @@ WHERE id = ?`,
 }
 
 // PipelineScheduler ticks every 30s, fires due schedules through
-// the supplied Executor, and updates next_run_at. Single-instance
-// — running multiple replicas would double-fire schedules; we'll
-// add leader election alongside crew-level state in a follow-up.
+// the supplied Executor, and updates next_run_at.
+//
+// Multi-replica safe: when a leader Gate is attached (SetLeaderGate),
+// the tick fires only on the replica holding the scheduler lease, so
+// two replicas can't double-fire. A nil gate means "always leader" —
+// the unchanged single-instance behaviour (#1376).
 type PipelineScheduler struct {
 	store     *ScheduleStore
 	pipelines *Store // pipeline lookup for the run
 	executor  *Executor
 	logger    *slog.Logger
 
+	// leaderGate, when non-nil, gates each tick on holding the scheduler
+	// lease. Nil = single-instance (always fire).
+	leaderGate leader.Gate
+
 	stopCh    chan struct{}
 	stopped   chan struct{}
 	startOnce sync.Once
 	stopOnce  sync.Once
 }
+
+// SetLeaderGate attaches a leader-election gate so this scheduler only fires
+// while its replica holds the scheduler lease. Call before Start. Passing nil
+// (the default) keeps single-instance behaviour.
+func (s *PipelineScheduler) SetLeaderGate(g leader.Gate) { s.leaderGate = g }
 
 // NewPipelineScheduler wires a scheduler ready to start. Caller
 // invokes Start to spawn the tick goroutine.
@@ -384,6 +411,12 @@ func (s *PipelineScheduler) run(ctx context.Context) {
 }
 
 func (s *PipelineScheduler) tick(ctx context.Context) {
+	// Leader gate: on a multi-replica deploy only the lease holder fires, so
+	// two replicas don't both dispatch the same due schedule. Nil gate (the
+	// single-instance default) always passes.
+	if s.leaderGate != nil && !s.leaderGate.IsLeader() {
+		return
+	}
 	due, err := s.store.listDueSchedules(ctx)
 	if err != nil {
 		s.logger.Warn("pipeline scheduler: list due", "error", err)
@@ -591,21 +624,46 @@ func (s *PipelineScheduler) alertFailedScheduledRun(ctx context.Context, sched *
 	}
 }
 
-// runWakeCheck executes the schedule's probe routine and maps its
-// outcome to (proceed, wakeStatus):
+// evalWakeProbe maps a wake-probe invocation's outcome to
+// (proceed, wakeStatus). This is the single security-critical wake-gate
+// decision (#1372): the ONLY affirmative outcome is a COMPLETED run whose
+// final output is truthy. Every other shape — an executor error, a nil
+// result, a timeout (surfaced as an error), or any non-COMPLETED status —
+// is "non-affirmative" and its handling is governed by failClosed:
 //
-//   - probe COMPLETED + truthy final output → (true, WOKE)
-//   - probe COMPLETED + falsey final output → (false, SKIPPED)
-//   - probe failed / didn't load            → (true, ERROR)
+//   - COMPLETED + truthy output → (true,  WOKE)     — probe said wake
+//   - COMPLETED + falsey output → (false, SKIPPED)  — probe said skip
+//   - non-affirmative, fail-OPEN  (default) → (true,  ERROR) — fire anyway
+//   - non-affirmative, fail-CLOSED          → (false, HELD)  — hold the run
 //
-// Errors fail OPEN: a monitoring schedule whose probe broke must wake
-// the main routine rather than go silently blind — occasional token
-// spend on a flapping probe is the cheaper failure mode. The ERROR
-// wake status keeps the breakage visible to operators.
+// Fail-OPEN stays the default so a plain monitoring schedule whose probe
+// flaps does not go silently blind; the ERROR status keeps the breakage
+// visible. Fail-CLOSED is the safe default for an UNATTENDED gate: a
+// broken or tampered probe must not be the thing that green-lights an
+// autonomous run, so any outcome that cannot AFFIRM "wake" holds instead.
 //
 // Truthiness reuses evalIfCondition, the same falsey rule step `if:`
 // conditions use (empty/false/0/null/nil/no/off → skip), so probe
-// authors learn one rule for both features.
+// authors learn one rule for both features. Note an empty/ambiguous
+// output on a COMPLETED run is already non-affirmative → SKIPPED, so it
+// never fires the main run regardless of policy.
+func evalWakeProbe(res *RunResult, runErr error, failClosed bool) (bool, string) {
+	if runErr != nil || res == nil || res.Status != "COMPLETED" {
+		if failClosed {
+			return false, WakeStatusHeld
+		}
+		return true, WakeStatusError
+	}
+	if evalIfCondition(res.Output) {
+		return true, WakeStatusWoke
+	}
+	return false, WakeStatusSkipped
+}
+
+// runWakeCheck executes the schedule's probe routine and delegates the
+// outcome mapping to evalWakeProbe (which owns the fail-open/fail-closed
+// policy). A non-affirmative probe is logged so a broken gate stays
+// visible whether it failed open (fired anyway) or closed (held).
 func (s *PipelineScheduler) runWakeCheck(ctx context.Context, sched *Schedule) (bool, string) {
 	var wakeInputs map[string]any
 	if sched.WakeInputsJSON != "" {
@@ -628,21 +686,23 @@ func (s *PipelineScheduler) runWakeCheck(ctx context.Context, sched *Schedule) (
 		TriggeredByID:  sched.ID,
 		IdempotencyKey: ScheduledFireIdempotencyKey("sched-wake", sched.ID, wakeBucket),
 	})
-	if err != nil || res == nil || res.Status != "COMPLETED" {
+	proceed, status := evalWakeProbe(res, err, sched.WakeFailClosed)
+	if status == WakeStatusError || status == WakeStatusHeld {
 		errMsg := ""
 		if err != nil {
 			errMsg = err.Error()
 		} else if res != nil {
 			errMsg = res.ErrorMessage
 		}
-		s.logger.Warn("pipeline scheduler: wake check failed — failing open",
-			"schedule", sched.ID, "wake_pipeline", sched.WakePipelineID, "error", errMsg)
-		return true, WakeStatusError
+		disposition := "failing open — firing main run"
+		if status == WakeStatusHeld {
+			disposition = "failing closed — holding run"
+		}
+		s.logger.Warn("pipeline scheduler: wake check failed — "+disposition,
+			"schedule", sched.ID, "wake_pipeline", sched.WakePipelineID,
+			"fail_closed", sched.WakeFailClosed, "error", errMsg)
 	}
-	if evalIfCondition(res.Output) {
-		return true, WakeStatusWoke
-	}
-	return false, WakeStatusSkipped
+	return proceed, status
 }
 
 const scheduleSelect = `
@@ -653,6 +713,7 @@ SELECT id, workspace_id, name, target_pipeline_id, target_pipeline_version,
        COALESCE(wake_pipeline_id, ''), COALESCE(wake_inputs_json, '{}'),
        wake_check_count, wake_fire_count,
        last_wake_at, COALESCE(last_wake_status, ''),
+       COALESCE(wake_fail_closed, 0),
        created_at, updated_at, deleted_at
 FROM pipeline_schedules`
 
@@ -665,6 +726,7 @@ func scanSchedule(rs rowScanner) (*Schedule, error) {
 		lastWakeAt    sql.NullString
 		deletedAt     sql.NullString
 		enabled       int
+		wakeFailClsd  int
 		createdAt     string
 		updatedAt     string
 	)
@@ -676,12 +738,14 @@ func scanSchedule(rs rowScanner) (*Schedule, error) {
 		&s.WakePipelineID, &s.WakeInputsJSON,
 		&s.WakeCheckCount, &s.WakeFireCount,
 		&lastWakeAt, &s.LastWakeStatus,
+		&wakeFailClsd,
 		&createdAt, &updatedAt, &deletedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 	s.Enabled = enabled != 0
+	s.WakeFailClosed = wakeFailClsd != 0
 	if targetVersion.Valid {
 		v := int(targetVersion.Int64)
 		s.TargetPipelineVersion = &v

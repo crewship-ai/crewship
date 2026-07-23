@@ -342,6 +342,45 @@ func (h *ProxyHandler) CrewFileSave(w http.ResponseWriter, r *http.Request) {
 	h.proxyJSON(w, resp)
 }
 
+// CrewFileDelete removes a file from a crew's shared directory via the sidecar.
+func (h *ProxyHandler) CrewFileDelete(w http.ResponseWriter, r *http.Request) {
+	crewID := r.PathValue("crewId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	// Same RBAC as the upload route (CrewFileSave): mutating a crew's shared
+	// files requires the "create" tier.
+	if !canRole(role, "create") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		replyError(w, http.StatusBadRequest, "path parameter required")
+		return
+	}
+	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
+	if err != nil {
+		replyInternalError(w, h.logger, "crew exists check", err)
+		return
+	}
+	if !found {
+		replyError(w, http.StatusNotFound, "Crew not found")
+		return
+	}
+	cleanPath, ok := normalizeRequestPath(filePath)
+	if !ok {
+		replyError(w, http.StatusBadRequest, "Invalid file path")
+		return
+	}
+	ipcPath := fmt.Sprintf("/crews/%s/files/delete?path=%s", url.PathEscape(crewID), url.QueryEscape(cleanPath))
+	resp, err := h.ipcDelete(r.Context(), ipcPath)
+	if err != nil {
+		replyError(w, http.StatusBadGateway, "Failed to delete file")
+		return
+	}
+	h.proxyJSON(w, resp)
+}
+
 // AgentLogs returns collected log entries for a running agent.
 
 func (h *ProxyHandler) AgentContainerFiles(w http.ResponseWriter, r *http.Request) {

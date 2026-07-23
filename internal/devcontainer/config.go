@@ -17,6 +17,14 @@ var (
 	ErrInvalidImage      = errors.New("devcontainer: invalid image reference")
 	ErrInvalidFeatureRef = errors.New("devcontainer: invalid feature reference")
 	ErrUnsupportedField  = errors.New("devcontainer: unsupported field")
+
+	// Security-control validation errors (#1380). The save path (crews
+	// create/update) maps ErrPrivilegedNotAllowed to 403 and the cap/mount
+	// errors to 400 so a client learns *why* a privileged/cap/mount config
+	// was refused rather than seeing it silently accepted-and-discarded.
+	ErrPrivilegedNotAllowed = errors.New("devcontainer: privileged mode requires the workspace allow_privileged_credentials flag")
+	ErrCapabilityNotAllowed = errors.New("devcontainer: capability not allowed")
+	ErrMountNotAllowed      = errors.New("devcontainer: mount source not allowed")
 )
 
 // Config represents the subset of devcontainer.json that Crewship supports.
@@ -39,6 +47,22 @@ type Config struct {
 	PostStartCommand  any                       `json:"postStartCommand,omitempty"`
 	ContainerEnv      map[string]string         `json:"containerEnv,omitempty"`
 	RemoteUser        string                    `json:"remoteUser,omitempty"`
+
+	// Top-level container-privilege controls (#1380). These are the
+	// operator-declared runtime escape hatches the Security-tab UI writes.
+	// Unlike feature-declared requirements (which come from arbitrary OCI
+	// registries and are force-stripped in features.go), these are an
+	// explicit first-party operator opt-in — so the runtime HONORS them,
+	// but only after the save path has validated them: privileged requires
+	// the workspace allow_privileged_credentials flag, capAdd is bounded to
+	// the same allowlist as the feature path, and mount sources must pass
+	// IsAllowedMountSource. They are runtime-only (HostConfig, not image
+	// content), so they persist in canonicalMap but are excluded from the
+	// provisioning ConfigHash (see hashRelevantMap).
+	Privileged bool           `json:"privileged,omitempty"`
+	Init       bool           `json:"init,omitempty"`
+	CapAdd     []string       `json:"capAdd,omitempty"`
+	Mounts     []FeatureMount `json:"mounts,omitempty"`
 }
 
 // Parse reads a devcontainer.json from r and returns a validated Config.
@@ -59,6 +83,10 @@ func ParseBytes(data []byte) (*Config, error) {
 		PostStartCommand  json.RawMessage           `json:"postStartCommand"`
 		ContainerEnv      map[string]string         `json:"containerEnv"`
 		RemoteUser        string                    `json:"remoteUser"`
+		Privileged        bool                      `json:"privileged"`
+		Init              bool                      `json:"init"`
+		CapAdd            []string                  `json:"capAdd"`
+		Mounts            []FeatureMount            `json:"mounts"`
 	}
 
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -70,6 +98,10 @@ func ParseBytes(data []byte) (*Config, error) {
 		Features:     raw.Features,
 		ContainerEnv: raw.ContainerEnv,
 		RemoteUser:   raw.RemoteUser,
+		Privileged:   raw.Privileged,
+		Init:         raw.Init,
+		CapAdd:       raw.CapAdd,
+		Mounts:       raw.Mounts,
 	}
 
 	// Parse polymorphic lifecycle commands.
@@ -312,9 +344,17 @@ func (c *Config) Hash() string {
 // ConfigHash so that "I tweaked postStartCommand" does not invalidate the
 // cached image — the image content is identical, only start-time behaviour
 // differs.
+//
+// privileged/init/capAdd/mounts are runtime HostConfig knobs, not image
+// content, so they are excluded too — flipping privileged must not force a
+// full rebuild (the runtime honours them straight from devcontainer_config).
 func (c *Config) hashRelevantMap() map[string]any {
 	m := c.canonicalMap()
 	delete(m, "postStartCommand")
+	delete(m, "privileged")
+	delete(m, "init")
+	delete(m, "capAdd")
+	delete(m, "mounts")
 	return m
 }
 
@@ -351,7 +391,125 @@ func (c *Config) canonicalMap() map[string]any {
 		m["postStartCommand"] = c.NormalizedPostStartCommands()
 	}
 
+	// Container-privilege controls (#1380). Persisted so an EnsureAgentUser
+	// re-marshal (or a config export) doesn't silently drop an operator's
+	// privileged/capAdd/mounts declaration — the pre-#1380 bug where the UI
+	// wrote keys the backend parsed-and-discarded. Runtime-only, hence
+	// excluded from hashRelevantMap.
+	if c.Privileged {
+		m["privileged"] = true
+	}
+	if c.Init {
+		m["init"] = true
+	}
+	if len(c.CapAdd) > 0 {
+		m["capAdd"] = c.CapAdd
+	}
+	if len(c.Mounts) > 0 {
+		m["mounts"] = c.Mounts
+	}
+
 	return m
+}
+
+// NormalizeCapability upper-cases a capability name and strips a leading
+// "CAP_" so "cap_net_bind_service", "NET_BIND_SERVICE" and "CAP_NET_BIND_SERVICE"
+// all resolve to the canonical Docker cap name ("NET_BIND_SERVICE").
+func NormalizeCapability(raw string) string {
+	up := strings.ToUpper(strings.TrimSpace(raw))
+	return strings.TrimPrefix(up, "CAP_")
+}
+
+// IsAllowedCapAdd reports whether cap (in any CAP_/case form) is within the
+// capability allowlist a first-party operator may grant without going fully
+// privileged. It is deliberately the SAME allowlist the feature-metadata path
+// enforces (allowedFeatureCapAdd — NET_BIND_SERVICE today): anything broader is
+// an escalation that must go through the privileged flag (workspace-gated),
+// not a per-cap grant.
+func IsAllowedCapAdd(cap string) bool {
+	_, ok := allowedFeatureCapAdd[NormalizeCapability(cap)]
+	return ok
+}
+
+// ValidateSecurity checks the operator-declared top-level privilege controls
+// against Crewship policy. allowPrivileged is the workspace's
+// allow_privileged_credentials opt-in. Returns a typed sentinel error the API
+// layer maps to a status code (privileged → 403, cap/mount → 400). Called at
+// SAVE time so a disallowed config is refused server-side rather than stored
+// and silently discarded.
+func (c *Config) ValidateSecurity(allowPrivileged bool) error {
+	if c == nil {
+		return nil
+	}
+	if c.Privileged && !allowPrivileged {
+		return ErrPrivilegedNotAllowed
+	}
+	for _, cap := range c.CapAdd {
+		if !IsAllowedCapAdd(cap) {
+			return fmt.Errorf("%w: %q (only NET_BIND_SERVICE may be granted directly; use privileged mode for broader access)", ErrCapabilityNotAllowed, cap)
+		}
+	}
+	for _, m := range c.Mounts {
+		if !IsAllowedMountSource(m.Source) {
+			return fmt.Errorf("%w: %q", ErrMountNotAllowed, m.Source)
+		}
+	}
+	return nil
+}
+
+// SecurityRequirements returns the operator-declared top-level privilege
+// controls as an AggregatedRequirements fragment, with caps/mounts filtered
+// through the runtime allowlists (defense in depth: even a tampered stored
+// config can't smuggle an unlisted cap/mount into the HostConfig). Privileged
+// and Init pass through as declared — the save path is responsible for gating
+// privileged on the workspace flag. The runtime merges this fragment into the
+// feature-derived cached_requirements so the Security-tab toggles actually
+// reach the container.
+func (c *Config) SecurityRequirements() AggregatedRequirements {
+	if c == nil {
+		return AggregatedRequirements{}
+	}
+	req := AggregatedRequirements{
+		Privileged: c.Privileged,
+		Init:       c.Init,
+	}
+	for _, cap := range c.CapAdd {
+		if IsAllowedCapAdd(cap) {
+			req.CapAdd = append(req.CapAdd, NormalizeCapability(cap))
+		}
+	}
+	for _, m := range c.Mounts {
+		if IsAllowedMountSource(m.Source) {
+			req.Mounts = append(req.Mounts, m)
+		}
+	}
+	return req
+}
+
+// ParseConfigSecurity decodes ONLY the top-level privilege controls
+// (privileged/init/capAdd/mounts) from a stored devcontainer_config JSON string
+// and returns them as a filtered AggregatedRequirements fragment. A malformed
+// or empty blob yields the zero value (no extra privilege). Used by the runtime
+// (resolver + credential gate) to honour the Security-tab controls, which live
+// at the devcontainer.json top level rather than in the feature-aggregated
+// cached_requirements. It intentionally does NOT run full Config.Validate — a
+// previously-stored config is trusted to be well-formed, and we never want the
+// privilege read to fail open on an unrelated validation nit.
+func ParseConfigSecurity(devcontainerJSON string) AggregatedRequirements {
+	if strings.TrimSpace(devcontainerJSON) == "" {
+		return AggregatedRequirements{}
+	}
+	var raw struct {
+		Privileged bool           `json:"privileged"`
+		Init       bool           `json:"init"`
+		CapAdd     []string       `json:"capAdd"`
+		Mounts     []FeatureMount `json:"mounts"`
+	}
+	if err := json.Unmarshal([]byte(devcontainerJSON), &raw); err != nil {
+		return AggregatedRequirements{}
+	}
+	c := &Config{Privileged: raw.Privileged, Init: raw.Init, CapAdd: raw.CapAdd, Mounts: raw.Mounts}
+	return c.SecurityRequirements()
 }
 
 // MarshalJSON implements json.Marshaler for deterministic DB storage.

@@ -17,6 +17,11 @@ type agentCredentialResponse struct {
 	EnvVarName   string `json:"env_var_name"`
 	Priority     int    `json:"priority"`
 	CreatedAt    string `json:"created_at"`
+	// ExpiresAt is the grant's lease expiry (RFC3339 UTC), empty for a
+	// standing grant. Expired reports whether that lease has already lapsed —
+	// an expired grant is refused at credential-injection time (fail-closed).
+	ExpiresAt string `json:"expires_at,omitempty"`
+	Expired   bool   `json:"expired"`
 }
 
 // ListCredentials returns all credentials assigned to the specified agent.
@@ -43,7 +48,8 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT ac.id, ac.agent_id, ac.credential_id,
 			COALESCE(c.name, ''), COALESCE(c.type, ''), COALESCE(c.provider, ''), COALESCE(c.status, ''),
-			COALESCE(ac.env_var_name, ''), ac.priority, COALESCE(ac.created_at, '')
+			COALESCE(ac.env_var_name, ''), ac.priority, COALESCE(ac.created_at, ''),
+			COALESCE(ac.expires_at, '')
 		FROM agent_credentials ac
 		JOIN credentials c ON c.id = ac.credential_id
 		WHERE ac.agent_id = ?
@@ -60,9 +66,16 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 		var c agentCredentialResponse
 		if err := rows.Scan(&c.ID, &c.AgentID, &c.CredentialID, &c.CredName,
 			&c.CredType, &c.CredProvider, &c.CredStatus,
-			&c.EnvVarName, &c.Priority, &c.CreatedAt); err != nil {
+			&c.EnvVarName, &c.Priority, &c.CreatedAt, &c.ExpiresAt); err != nil {
 			replyInternalError(w, h.logger, "scan agent credential", err)
 			return
+		}
+		// A lease with expires_at at or before now has lapsed; injection paths
+		// refuse it, so surface it as expired to the CLI/UI.
+		if c.ExpiresAt != "" {
+			if exp, perr := time.Parse(time.RFC3339, c.ExpiresAt); perr == nil && !time.Now().Before(exp) {
+				c.Expired = true
+			}
 		}
 		result = append(result, c)
 	}
@@ -80,7 +93,17 @@ type addAgentCredentialRequest struct {
 	CredentialID string `json:"credential_id"`
 	EnvVarName   string `json:"env_var_name"`
 	Priority     int    `json:"priority"`
+	// TTLSeconds, when > 0, makes this a short-lived lease: the grant is set
+	// to expire TTLSeconds from now and is refused at injection time once it
+	// lapses (#1373). 0 (the default) creates a standing grant.
+	TTLSeconds int64 `json:"ttl_seconds"`
 }
+
+// maxCredentialLeaseSeconds caps a lease at 30 days. A lease is a
+// session/short-lived construct; a multi-month "lease" is a standing grant in
+// disguise and defeats the ephemerality guarantee. Callers wanting longer just
+// omit the TTL (standing grant).
+const maxCredentialLeaseSeconds = 30 * 24 * 60 * 60
 
 // AddCredential assigns an existing credential to an agent with a specified environment variable name.
 // POST /api/v1/agents/{agentId}/credentials
@@ -109,6 +132,14 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "credential_id and env_var_name are required")
 		return
 	}
+	if req.TTLSeconds < 0 {
+		replyError(w, http.StatusBadRequest, "ttl_seconds must not be negative")
+		return
+	}
+	if req.TTLSeconds > maxCredentialLeaseSeconds {
+		replyError(w, http.StatusBadRequest, "ttl_seconds exceeds the maximum lease of 30 days")
+		return
+	}
 
 	// Verify credential exists in this workspace (single query prevents enumeration)
 	foundCred, err := credentialExists(r.Context(), h.db, req.CredentialID, workspaceID)
@@ -121,13 +152,24 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
 	id := generateCUID()
 
+	// NULL expires_at = standing grant; a positive TTL makes it a short-lived
+	// lease refused at injection time once it lapses (#1373).
+	var expiresAt sql.NullString
+	if req.TTLSeconds > 0 {
+		expiresAt = sql.NullString{
+			String: now.Add(time.Duration(req.TTLSeconds) * time.Second).Format(time.RFC3339),
+			Valid:  true,
+		}
+	}
+
 	_, err = h.db.ExecContext(r.Context(),
-		`INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		id, agentID, req.CredentialID, req.EnvVarName, req.Priority, now)
+		`INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, created_at, expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id, agentID, req.CredentialID, req.EnvVarName, req.Priority, nowStr, expiresAt)
 	if err != nil {
 		h.logger.Error("add agent credential", "error", err)
 		replyError(w, http.StatusConflict, "Credential already assigned to agent")

@@ -824,6 +824,7 @@ crewship routine schedules create \
 | `--pin-version` | | Pin every fire to this immutable routine version instead of head (see the [Scheduling guide](/guides/scheduling)). If the pinned version is later deleted, fires **fail with an inbox alert** — they never silently fall back to head. |
 | `--wake-slug` | | Wake gate: agentless probe routine evaluated before each fire — the main routine runs only when the probe's output is truthy. |
 | `--wake-inputs` | | JSON object passed to the wake probe on each tick (requires `--wake-slug`). |
+| `--fail-closed` | | Wake gate: **hold** the run when the probe errors, times out, or finishes non-`COMPLETED`, instead of failing open (requires `--wake-slug`). Default off — a broken probe fires the main run and records `last_wake_status: ERROR`. With this on, that outcome records `HELD` and no main run fires. Use it when the gate must *suppress* an autonomous run, not just save tokens. |
 
 `create` is the only command that mints a schedule ID, and every other
 schedule command takes that ID with no prefix-matching fallback — so to
@@ -838,7 +839,7 @@ crewship routine schedules now "$id" --format json
 
 ### `schedules update <id>`
 
-Pass any subset of `--cron / --timezone / --name / --enabled / --inputs / --pin-version / --unpin / --wake-slug / --wake-inputs / --no-wake` to update. An existing version pin survives updates that don't mention it; `--pin-version N` re-pins, `--unpin` removes the pin so fires track head again. Likewise the wake gate is preserved unless touched: `--wake-slug` sets/replaces the probe, `--wake-inputs` replaces its inputs, and `--no-wake` removes the gate so the schedule fires on every tick again (`--no-wake` and `--wake-slug`/`--wake-inputs` are mutually exclusive).
+Pass any subset of `--cron / --timezone / --name / --enabled / --inputs / --pin-version / --unpin / --wake-slug / --wake-inputs / --no-wake / --fail-closed` to update. An existing version pin survives updates that don't mention it; `--pin-version N` re-pins, `--unpin` removes the pin so fires track head again. Likewise the wake gate is preserved unless touched: `--wake-slug` sets/replaces the probe, `--wake-inputs` replaces its inputs, and `--no-wake` removes the gate so the schedule fires on every tick again (`--no-wake` and `--wake-slug`/`--wake-inputs`/`--fail-closed` are mutually exclusive). The fail-closed policy is preserved unless mentioned: `--fail-closed` holds the run on a probe failure, `--fail-closed=false` restores fail-open.
 
 ### `schedules enable <id>` / `schedules disable <id>`
 

@@ -472,14 +472,24 @@ func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agent
 // absent cached_requirements blob is treated as non-privileged rather than
 // erroring the whole resolve.
 func (d *agentConfigData) crewIsPrivileged() bool {
-	if !d.crewCachedRequirements.Valid || d.crewCachedRequirements.String == "" {
-		return false
+	// Feature-aggregated requirements (cached_requirements) — the historical
+	// source of privilege for DinD-style features.
+	if d.crewCachedRequirements.Valid && d.crewCachedRequirements.String != "" {
+		var reqs devcontainer.AggregatedRequirements
+		if err := json.Unmarshal([]byte(d.crewCachedRequirements.String), &reqs); err == nil && reqs.Privileged {
+			return true
+		}
 	}
-	var reqs devcontainer.AggregatedRequirements
-	if err := json.Unmarshal([]byte(d.crewCachedRequirements.String), &reqs); err != nil {
-		return false
+	// #1380: the operator-declared top-level privileged flag in
+	// devcontainer_config is also honoured by the runtime, so the #1032
+	// credential-fail-closed gate must see it too — otherwise a UI-privileged
+	// crew would run privileged while still being handed vault credentials.
+	if d.crewDevcontainerConfig.Valid && d.crewDevcontainerConfig.String != "" {
+		if devcontainer.ParseConfigSecurity(d.crewDevcontainerConfig.String).Privileged {
+			return true
+		}
 	}
-	return reqs.Privileged
+	return false
 }
 
 // loadAgentSystemPrompt builds the structured system prompt from ethos, language,

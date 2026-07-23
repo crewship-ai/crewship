@@ -53,6 +53,31 @@ Because agents run as UID 1001 and the sidecar runs as UID 1002:
 - Agents cannot tamper with outbound request headers (the sidecar handles this)
 - Agents cannot set their own container ID in Keeper execute requests
 
+### Privileged crews and credentials (fail-closed)
+
+A **privileged** crew (Docker-in-Docker) runs without the UID 1001/1002
+boundary above — under `--privileged` the split that keeps the sidecar's
+CredStore unreadable is gone, so *any* process in the container can reach it.
+Because of that, Crewship **fails closed** (#1032): credentials are **not**
+loaded into a privileged crew's sidecar unless the workspace explicitly opts
+in via `allow_privileged_credentials` (default **off**).
+
+The toggle is workspace-scoped and admin-gated (OWNER/ADMIN):
+
+- **UI:** **Settings → Crews & Containers → Privileged credentials → "Load
+  credentials into privileged crews."**
+- **API:** `PATCH /api/v1/workspaces/{id}` with
+  `{"allow_privileged_credentials": true}` (read it back on
+  `GET /api/v1/workspaces/{id}`).
+- **CLI:** `crewship workspace update --allow-privileged-credentials`.
+
+<Warning>
+  Turning this on means you accept that a privileged crew's agents can read
+  every credential injected into that crew. Leave it **off** unless you run a
+  DinD workload that genuinely needs vaulted credentials and you trust the code
+  executing inside it.
+</Warning>
+
 ## Container Runtime Security
 
 Crewship supports multiple container runtimes with different security profiles:
@@ -80,12 +105,82 @@ Containers are created with these security measures (`internal/provider/docker/d
 - **Non-root execution:** Agent processes run as UID 1001; exec'd commands run as the container's resolved configured user and are refused outright if that user would be root or cannot be determined
 - **Read-only filesystem:** Root filesystem is read-only (`ReadonlyRootfs: true`), relaxed only for privileged crews (DinD)
 - **tmpfs /tmp (500M):** Writable temp directory (`rw,noexec,nosuid,size=500m`), not persistent across restarts. `rw` still permits staging a file here, but `noexec` blocks executing it directly and `nosuid` strips any setuid/setgid bit; scripts still run via an explicit interpreter (`sh`, `bash`, …), which reads the file rather than exec'ing it.
+- **noexec on agent-writable persistent volumes:** `/workspace`, `/output` and `/crew` are agent-writable and **host-persistent** — `/crew` in particular is a host directory that survives container removal and is **shared across every agent in the crew**. They are mounted `noexec,nosuid`, so a compromised agent can still write data there but cannot `execve()` a payload staged on them. This closes the "durable, cross-agent code-execution foothold" vector (a payload dropped once under `/crew/shared` outliving container rebuilds). Docker's bind-mount API has no `noexec` flag, so these ride a **bind-backed local volume** (`type=none,device=<host path>,o=bind,noexec,nosuid`) — the mount still binds the exact host directory (data persists, still crew-shared), just with execution denied. The **exceptions** are deliberate: `/opt/crew-tools` stays executable because agent tool binaries run from there, and the sidecar/entrypoint binaries are mounted read-only. Scripts under these volumes still run via an explicit interpreter (`sh <path>`), which reads the file rather than exec'ing it, so the runtime is unaffected. Existing containers created before this policy are recreated on next provision so `noexec` takes effect. (Follow-up: the `/home/agent` named volume is Docker-managed storage with no host device path, so making it `noexec` requires relocating its storage and is tracked separately.)
 - **PID limit: 200:** Prevents fork bomb attacks (`PidsLimit: 200`)
 - **Memory limits:** Configurable per-crew (`default_memory_mb`, default 8192 MB / 8 GiB)
 - **CPU limits:** Configurable per-crew (`default_cpus`, default 2.0)
 - **Network isolation:** Containers connect to a dedicated Docker bridge network
 - **ExtraHosts:** `host.docker.internal:host-gateway` enables container-to-host communication
 - **Named volumes:** `crewship-home-{slug}-{crewID}` and `crewship-tools-{slug}-{crewID}` for persistent home and tools directories (namespaced by crew ID to prevent cross-tenant collisions)
+
+## Runtime Escape Hatches
+
+A crew's container can opt out of individual isolation layers through its
+`devcontainer_config`. These are the settings with the **largest blast radius**,
+so the crew settings UI (**Container image & features → Security** tab) exposes
+them as labeled controls with inline warnings instead of a raw JSON blob. Each
+control serializes to the exact top-level `devcontainer_config` key the runtime
+reads, and a raw-JSON "advanced" editor remains available for anything the
+structured UI does not model (preserved verbatim on save).
+
+The UI controls are **affordances, not the security boundary** — every one is
+re-validated **server-side** on save (create *and* update, `crews_create.go` /
+`crews_update.go` via `devcontainer.Config.ValidateSecurity`), and the runtime
+applies the *validated* values. A caller that bypasses the UI (raw API, a stale
+client, a hand-edited config) hits the same gate.
+
+| Control | JSON key | What it costs you |
+|---------|----------|-------------------|
+| **Privileged mode** | `privileged` | Nulls `no-new-privileges`, drops the read-only rootfs, grants ~all Linux capabilities and host device access. An agent can escape to the host. **Refused on save with `403` unless the workspace has `allow_privileged_credentials` set** (the same flag that governs handing credentials to a privileged crew, #1032). Prefer adding a single capability instead. |
+| **Added capabilities** | `capAdd` | Re-adds specific Linux capabilities on top of `--cap-drop=ALL`. Only **`NET_BIND_SERVICE`** may be granted directly — it is the *same* allowlist the devcontainer-feature path enforces. Any broader capability (`SYS_ADMIN`, `NET_RAW`, `DAC_OVERRIDE`, …) is **rejected on save with `400`**; if a crew genuinely needs more, that is what privileged mode (workspace-gated) is for, so the escalation stays visible. Names normalize across `CAP_`/case forms. |
+| **Extra mounts** | `mounts` | Bind/volume mounts into the container. The allowlist mirrors `internal/devcontainer/mount_validate.go`: only `/dev/fuse` and valid named volumes are permitted. The Docker socket (`/var/run/docker.sock`), `/var/lib/docker`, `/tmp` and arbitrary host paths are **rejected on save with `400`** — each is a container-escape primitive. The runtime re-filters through the same allowlist (defense in depth). |
+| **Init process (PID 1)** | `init` | Runs a tiny init as PID 1 to reap zombie processes (docker `--init`). Low risk. |
+| **Container environment** | `containerEnv` | Extra env vars injected at start. `CREWSHIP_*` keys are reserved and ignored. |
+| **Start hook (init script)** | `postStartCommand` | Shell commands run on **every** container start as the agent user (UID 1001). Note the crew's `/crew` directory is an agent-writable host bind that **survives container removal** — a script auto-executed from there is a persistence surface, so treat everything it runs as code you wrote or audited. |
+
+### How enforcement is wired
+
+The `privileged` / `capAdd` / `mounts` / `init` keys are **top-level**
+`devcontainer.json` fields — distinct from the capabilities a devcontainer
+*feature* declares (those come from arbitrary OCI registries and are
+force-stripped, `internal/devcontainer/features.go`). Because they are a
+first-party operator declaration, the runtime **honors** them, but only after
+the save gate has validated them:
+
+1. **Save (`ValidateSecurity`)** — `privileged` requires `allow_privileged_credentials` (`403`); `capAdd` is bounded to `NET_BIND_SERVICE` (`400`); every `mounts[].source` must pass `IsAllowedMountSource` (`400`). The keys are persisted in the canonical config (they used to be silently dropped on the auto-inject re-marshal).
+2. **Runtime read (`ParseConfigSecurity`)** — at container start the resolver folds the validated top-level keys into the effective requirements the provider maps onto the Docker `HostConfig` (`internal/chatbridge/resolver.go` → `internal/provider/docker/docker_container.go`), re-filtering caps/mounts as defense in depth. The `#1032` credential-fail-closed gate reads the same source, so a UI-privileged crew is correctly treated as privileged when deciding whether to load vault credentials.
+
+This means toggling **Privileged** in the UI actually makes (or, without the
+workspace flag, *refuses* to make) the container privileged — the change reaches
+`HostConfig.Privileged`, not just the stored JSON.
+
+<Warning>
+  A crew running **privileged** has essentially no container isolation left. The
+  Security tab surfaces an **"Isolation reduced"** badge on any such crew so the
+  posture is visible wherever the crew is configured. Reserve privileged mode for
+  crews you fully trust (e.g. Docker-in-Docker) and grant a single capability
+  where that is enough.
+</Warning>
+
+### CLI parity
+
+The same controls are drivable from the CLI, and go through the identical
+server-side validation:
+
+```bash
+# Toggle privileged (needs the workspace allow_privileged_credentials flag, else 403)
+crewship crew config my-crew --privileged
+
+# Grant a capability (only NET_BIND_SERVICE is accepted; anything else → 400)
+crewship crew config my-crew --cap-add NET_BIND_SERVICE
+
+# Run a docker --init reaper as PID 1
+crewship crew config my-crew --init
+```
+
+These flags merge onto the crew's stored `devcontainer_config` (image and
+features are preserved) and PATCH it back. Uploading a full config file with
+`--devcontainer ./devcontainer.json` is validated the same way.
 
 ## Network Policy
 
@@ -103,20 +198,51 @@ Each crew can have a network access policy:
   <Tab title="Restricted Mode">
     Only connections to allowlisted domains are permitted. Unknown domains are blocked with HTTP 403.
 
-    Default allowed domains (`internal/egressallow/allowlist.go`, re-exported by `internal/sidecar`):
+    Default allowed domains (`internal/egressallow/allowlist.go` — `DefaultAllowedDomains`, re-exported by `internal/sidecar`):
 
     - **Anthropic** — `api.anthropic.com`, `console.anthropic.com` (OAuth refresh callback)
     - **OpenAI / Codex** — `api.openai.com`, `auth.openai.com` (ChatGPT-subscription login), `chatgpt.com` (subscription routing)
     - **Google / Gemini** — `generativelanguage.googleapis.com`, `oauth2.googleapis.com` (OAuth), `accounts.google.com` (OAuth UI redirect)
     - **Cursor** — `api.cursor.sh`, `api2.cursor.sh` (primary model gateway, since 2026-Q1)
     - **Factory Droid** — `api.factory.ai` (legacy), `app.factory.ai` (CLI installer + API base)
+    - **OpenCode BYOK providers** (#944) — `openrouter.ai`, `api.x.ai` (xAI Grok), `api.groq.com`, `api.deepseek.com`, `api.moonshot.ai` (Kimi), `api.z.ai` (GLM), `api.minimax.io`
+
+    These defaults are always allowed in restricted mode — you never list them yourself.
 
     Additional domains can be added per-crew:
     ```json
     {
       "mode": "restricted",
-      "allowed_domains": ["github.com", "registry.npmjs.org"]
+      "allowed_domains": ["github.com", "*.github.com", "registry.npmjs.org"]
     }
+    ```
+
+    #### Wildcard subdomains
+
+    An entry of the form `*.example.com` matches **any subdomain** — `raw.github.com`,
+    `codeload.github.com`, `a.b.github.com` — with one or more labels. It does **not**
+    match the apex `github.com` itself (list that separately if you need it) and never
+    matches a look-alike suffix such as `notgithub.com` or `github.com.evil.com`. This
+    is the fix for the classic trap where adding `github.com` alone leaves
+    `raw.githubusercontent.com` blocked — use `*.githubusercontent.com`.
+
+    #### Package-registry preset
+
+    The create-crew wizard, the crew **Network** settings tab, and the CLI expose a
+    one-click **“Allow package registries”** action. It appends the curated set a
+    restricted crew needs to run the common package managers, so you don't enumerate
+    every mirror by hand:
+
+    - **npm** — `registry.npmjs.org`
+    - **pip** — `pypi.org`, `files.pythonhosted.org`
+    - **cargo** — `crates.io`, `static.crates.io`, `index.crates.io`
+    - **Go modules** — `proxy.golang.org`, `sum.golang.org`
+    - **apt** — `deb.debian.org`, `security.debian.org`, `archive.ubuntu.com`, `security.ubuntu.com`, `ports.ubuntu.com`
+    - **Docker Hub** — `registry-1.docker.io`, `auth.docker.io`, `index.docker.io`, `production.cloudflare.docker.com`
+
+    From the CLI:
+    ```bash
+    crewship crew update my-crew --network-mode restricted --allow-package-registries
     ```
   </Tab>
 </Tabs>
@@ -150,7 +276,8 @@ The `DomainAllowlist` (`internal/egressallow/allowlist.go`, a dependency-free le
 - Domains are stored lowercase for case-insensitive matching
 - Port numbers are stripped before comparison
 - IPv6 bracket notation is handled correctly
-- Domains can be added at runtime via `allowlist.Add(domain)`
+- `*.example.com` entries are stored as a subdomain-suffix matcher (matches any subdomain, not the apex); everything else is an exact host match
+- Domains can be added at runtime via `allowlist.Add(domain)` (exact or wildcard)
 
 ## Proxy Security
 

@@ -1,9 +1,9 @@
 package main
 
-// crew files: list / get / save subcommands wrapping the Shared Ship
-// (`/crew/shared/`) surface. Server-side routes live in
-// internal/api/proxy_files.go (CrewFiles / CrewFileDownload / CrewFileSave)
-// and are mounted under /api/v1/crews/{crewId}/files…
+// crew files: list / get / save / delete subcommands wrapping the Shared
+// Ship (`/crew/shared/`) surface. Server-side routes live in
+// internal/api/proxy_files.go (CrewFiles / CrewFileDownload / CrewFileSave /
+// CrewFileDelete) and are mounted under /api/v1/crews/{crewId}/files…
 //
 // Pattern mirrors cmd_agent_files.go so the table / json / yaml output and
 // the atomic-download helper feel identical regardless of scope.
@@ -24,7 +24,7 @@ import (
 var crewFilesCmd = &cobra.Command{
 	Use:     "files",
 	Aliases: []string{"file"},
-	Short:   "Inspect or write files in a crew's shared directory",
+	Short:   "Inspect, write, or delete files in a crew's shared directory",
 }
 
 var crewFilesListCmd = &cobra.Command{
@@ -213,6 +213,46 @@ Examples:
 	},
 }
 
+var crewFilesDeleteCmd = &cobra.Command{
+	Use:     "delete <crew-slug-or-id> <path>",
+	Aliases: []string{"rm"},
+	Short:   "Delete a file from the crew's shared directory",
+	Long: `Remove a file from the crew shared volume (the inter-agent
+"Shared Ship" namespace). Path-traversal is rejected server-side, identical
+to save. Pass -y/--yes to skip the confirmation prompt.
+
+Examples:
+  crewship crew files delete demo-crew shared/probe.sh
+  crewship crew files delete demo-crew shared/tmp.log --yes`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		crewID, err := resolveCrewID(client, args[0])
+		if err != nil {
+			return err
+		}
+		if err := confirmAction(cmd, fmt.Sprintf("Delete %q from crew %q?", args[1], args[0])); err != nil {
+			return err
+		}
+
+		resp, err := client.Delete("/api/v1/crews/" + url.PathEscape(crewID) +
+			"/files/delete?path=" + url.QueryEscape(args[1]))
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		cli.PrintSuccess(fmt.Sprintf("Deleted %s from crew %q.", args[1], args[0]))
+		return nil
+	},
+}
+
 // putBytes streams raw bytes via PUT, reusing the configured client's auth
 // token and workspace context. The standard cli.Client.Do path JSON-encodes
 // the body, which is wrong for binary file uploads — so we issue the
@@ -259,8 +299,11 @@ func init() {
 	crewFilesSaveCmd.Flags().String("content", "", "Inline content string (alternative to stdin / --file)")
 	crewFilesSaveCmd.Flags().String("file", "", "Local file path to upload (alternative to stdin / --content)")
 
+	crewFilesDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
+
 	crewFilesCmd.AddCommand(crewFilesListCmd)
 	crewFilesCmd.AddCommand(crewFilesGetCmd)
 	crewFilesCmd.AddCommand(crewFilesSaveCmd)
+	crewFilesCmd.AddCommand(crewFilesDeleteCmd)
 	crewCmd.AddCommand(crewFilesCmd)
 }

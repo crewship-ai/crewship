@@ -173,16 +173,32 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		crewID = boundCrew
 	}
 	if crewID != "" {
+		// #1373: an agent_credentials grant may carry a short-lived LEASE
+		// (ac.expires_at). Boot-delivery flows through THIS listing: the
+		// orchestrator's boot payload and the crew sidecar's credential reaper
+		// both consume it, so an expired lease must drop out here or a leased
+		// provider key (API_KEY / AI_CLI_TOKEN, e.g. the Anthropic key) would
+		// be handed to the container at boot and never evicted for the
+		// container's whole life — defeating the TTL. Mirror the exact gate the
+		// L3/L4 injection point (/keeper/execute) already enforces:
+		// (expires_at IS NULL OR expires_at > now). NULL = standing grant,
+		// unchanged. leaseNow is the fixed-width RFC3339 UTC comparison value —
+		// every lease timestamp is written in that same form (see AddCredential
+		// / keeper_execute), so the TEXT comparison orders correctly.
+		// credential_crews grants have no lease column and are unaffected; only
+		// the per-agent grant is lease-gated.
+		leaseNow := time.Now().UTC().Format(time.RFC3339)
 		query += ` AND (
 			credentials.scope = 'WORKSPACE'
 			OR EXISTS (SELECT 1 FROM agent_credentials ac
 			        JOIN agents a ON a.id = ac.agent_id
 			        WHERE ac.credential_id = credentials.id
-			          AND a.crew_id = ? AND a.deleted_at IS NULL)
+			          AND a.crew_id = ? AND a.deleted_at IS NULL
+			          AND (ac.expires_at IS NULL OR ac.expires_at > ?))
 			OR EXISTS (SELECT 1 FROM credential_crews cc
 			           WHERE cc.credential_id = credentials.id AND cc.crew_id = ?)
 		)`
-		args = append(args, crewID, crewID)
+		args = append(args, crewID, leaseNow, crewID)
 	} else if !requestIsLoopback(r) {
 		// Hardening (#1031): the crew scoping above is opt-in — a caller that
 		// omits crew_id gets the full workspace-wide listing, fail-open. A

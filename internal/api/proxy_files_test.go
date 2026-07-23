@@ -190,6 +190,122 @@ func TestCrewFileSave_HappyPath_ForwardsBodyAndPathToIPC(t *testing.T) {
 	}
 }
 
+// ---- CrewFileDelete ----
+
+func TestCrewFileDelete_VIEWER_Forbidden(t *testing.T) {
+	h, userID, wsID, crewID := newProxyHandlerWithCrewWorkspace(t, "/tmp/no-such-socket")
+	req := httptest.NewRequest("DELETE", "/x?path=shared/foo.txt", nil)
+	req.SetPathValue("crewId", crewID)
+	req = withWorkspaceUser(req, userID, wsID, "VIEWER")
+	rr := httptest.NewRecorder()
+	h.CrewFileDelete(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("VIEWER status = %d, want 403", rr.Code)
+	}
+}
+
+func TestCrewFileDelete_MissingPathParam_400(t *testing.T) {
+	h, userID, wsID, crewID := newProxyHandlerWithCrewWorkspace(t, "/tmp/no-such-socket")
+	req := httptest.NewRequest("DELETE", "/x", nil) // no ?path=
+	req.SetPathValue("crewId", crewID)
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.CrewFileDelete(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 (missing path)", rr.Code)
+	}
+}
+
+func TestCrewFileDelete_UnknownCrew_404(t *testing.T) {
+	h, userID, wsID, _ := newProxyHandlerWithCrewWorkspace(t, "/tmp/no-such-socket")
+	req := httptest.NewRequest("DELETE", "/x?path=shared/foo.txt", nil)
+	req.SetPathValue("crewId", "missing-crew")
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.CrewFileDelete(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rr.Code)
+	}
+}
+
+func TestCrewFileDelete_CrossWorkspaceCrew_404(t *testing.T) {
+	h, userID, wsA, _ := newProxyHandlerWithCrewWorkspace(t, "/tmp/no-such-socket")
+	wsB := "ws-pfd-foreign"
+	if _, err := h.db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'F', 'f-pfd')`, wsB); err != nil {
+		t.Fatalf("seed wsB: %v", err)
+	}
+	seedCrewRow(t, h.db, "crew-foreign-pfd", wsB, "F", "f-pfd")
+
+	req := httptest.NewRequest("DELETE", "/x?path=shared/foo.txt", nil)
+	req.SetPathValue("crewId", "crew-foreign-pfd")
+	req = withWorkspaceUser(req, userID, wsA, "OWNER")
+	rr := httptest.NewRecorder()
+	h.CrewFileDelete(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("cross-workspace status = %d, want 404", rr.Code)
+	}
+}
+
+func TestCrewFileDelete_PathTraversal_400(t *testing.T) {
+	// Same normalizeRequestPath gate as save — path-traversal rejection
+	// identical across the write surface (#1391).
+	h, userID, wsID, crewID := newProxyHandlerWithCrewWorkspace(t, "/tmp/no-such-socket")
+	for _, p := range []string{"../escape.txt", "subdir/../../etc/passwd", "/absolute/path"} {
+		t.Run(p, func(t *testing.T) {
+			req := httptest.NewRequest("DELETE", "/x?path="+p, nil)
+			req.SetPathValue("crewId", crewID)
+			req = withWorkspaceUser(req, userID, wsID, "OWNER")
+			rr := httptest.NewRecorder()
+			h.CrewFileDelete(rr, req)
+			if rr.Code != http.StatusBadRequest {
+				t.Errorf("path=%q: status = %d, want 400", p, rr.Code)
+			}
+		})
+	}
+}
+
+func TestCrewFileDelete_IPCUnreachable_502(t *testing.T) {
+	h, userID, wsID, crewID := newProxyHandlerWithCrewWorkspace(t, "/tmp/no-such-socket-pfd")
+	req := httptest.NewRequest("DELETE", "/x?path=shared/foo.txt", nil)
+	req.SetPathValue("crewId", crewID)
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.CrewFileDelete(rr, req)
+	if rr.Code != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", rr.Code)
+	}
+}
+
+func TestCrewFileDelete_HappyPath_ForwardsPathToIPC(t *testing.T) {
+	var gotPath, gotMethod string
+	sock := newUnixIPCServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		if r.URL.RawQuery != "" {
+			gotPath += "?" + r.URL.RawQuery
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"deleted"}`))
+	}))
+	h, userID, wsID, crewID := newProxyHandlerWithCrewWorkspace(t, sock)
+
+	req := httptest.NewRequest("DELETE", "/x?path=shared/foo.txt", nil)
+	req.SetPathValue("crewId", crewID)
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.CrewFileDelete(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if gotMethod != "DELETE" {
+		t.Errorf("IPC method = %q, want DELETE", gotMethod)
+	}
+	wantPath := "/crews/" + crewID + "/files/delete?path=shared%2Ffoo.txt"
+	if gotPath != wantPath {
+		t.Errorf("IPC path = %q, want %q", gotPath, wantPath)
+	}
+}
+
 // ---- AgentContainerFiles ----
 
 func TestAgentContainerFiles_UnknownAgent_404(t *testing.T) {

@@ -381,7 +381,8 @@ func TestHandlePipelinesSave_HappyPath_InjectsAuthorIdentityFromIPC(t *testing.T
 				t.Errorf("test_run author_crew_id = %v, want crew-real (sidecar must overwrite)", got["author_crew_id"])
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
+			// #1371: test_run mints the save_token the save step must forward.
+			_, _ = w.Write([]byte(`{"status":"COMPLETED","save_token":"mock-save-token-xyz"}`))
 		case strings.HasSuffix(r.URL.Path, "/internal/pipelines/save"):
 			_ = json.NewDecoder(r.Body).Decode(&saveBody)
 			w.Header().Set("Content-Type", "application/json")
@@ -430,8 +431,13 @@ func TestHandlePipelinesSave_HappyPath_InjectsAuthorIdentityFromIPC(t *testing.T
 	if saveBody["workspace_id"] != "ws-real" {
 		t.Errorf("workspace_id = %v, want ws-real", saveBody["workspace_id"])
 	}
-	if saveBody["last_test_run_passed"] != true {
-		t.Errorf("last_test_run_passed = %v, want true", saveBody["last_test_run_passed"])
+	// #1371: the save step forwards the test_run's save_token (proof-of-test)
+	// rather than a forgeable last_test_run_passed flag.
+	if saveBody["save_token"] != "mock-save-token-xyz" {
+		t.Errorf("save_token = %v, want mock-save-token-xyz (test_run proof must be forwarded)", saveBody["save_token"])
+	}
+	if _, forged := saveBody["last_test_run_passed"]; forged {
+		t.Errorf("save body must not carry the forgeable last_test_run_passed flag anymore")
 	}
 }
 

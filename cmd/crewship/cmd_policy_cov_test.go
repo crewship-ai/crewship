@@ -19,6 +19,13 @@ func resetPolicySetFlags(t *testing.T) {
 		}
 		_ = policySetCmd.Flags().Set("behavior", "warn")
 		_ = policySetCmd.Flags().Set("yes", "false")
+		// max-ephemeral is Changed-sensitive: reset both its value and the
+		// Changed bit so a test that sets it can't make the next test issue a
+		// stray crews PATCH. Set() would re-mark Changed, so poke the flag.
+		if f := policySetCmd.Flags().Lookup("max-ephemeral"); f != nil {
+			_ = f.Value.Set("-1")
+			f.Changed = false
+		}
 	})
 }
 

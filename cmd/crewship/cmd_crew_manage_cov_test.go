@@ -185,6 +185,7 @@ func declareCrewCreateFlags(c *cobra.Command) {
 	c.Flags().Int("ttl", 0, "")
 	c.Flags().String("network-mode", "", "")
 	c.Flags().String("allowed-domains", "", "")
+	c.Flags().Bool("allow-package-registries", false, "")
 }
 
 func TestCrewCreateRunE_NoAuth(t *testing.T) {
@@ -284,6 +285,116 @@ func TestCrewCreateRunE_HappyPath_BodyAndSlugDerivation(t *testing.T) {
 	}
 }
 
+// ─── mergeDomains (registry-preset union) ────────────────────────────
+
+func TestMergeDomains(t *testing.T) {
+	cases := []struct {
+		name        string
+		base, extra []string
+		want        []string
+	}{
+		{"empty base gets extra", nil, []string{"a.com", "b.com"}, []string{"a.com", "b.com"}},
+		{"dedup case-insensitive across sets", []string{"A.com"}, []string{"a.com", "b.com"}, []string{"a.com", "b.com"}},
+		{"preserves base order, appends new", []string{"z.com", "y.com"}, []string{"y.com", "x.com"}, []string{"z.com", "y.com", "x.com"}},
+		{"trims and drops blanks", []string{" a.com ", ""}, nil, []string{"a.com"}},
+		{"nil extra normalizes base", []string{"A.COM", "a.com"}, nil, []string{"a.com"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := mergeDomains(c.base, c.extra)
+			if len(got) != len(c.want) {
+				t.Fatalf("mergeDomains = %v, want %v", got, c.want)
+			}
+			for i := range c.want {
+				if got[i] != c.want[i] {
+					t.Fatalf("mergeDomains[%d] = %q, want %q (full %v)", i, got[i], c.want[i], got)
+				}
+			}
+		})
+	}
+}
+
+// #1377 — `crew create --allow-package-registries` folds the curated
+// registry preset into whatever --allowed-domains the operator passed.
+func TestCrewCreateRunE_PackageRegistries(t *testing.T) {
+	stub := covSetupCli4(t)
+	stub.OnPost("/api/v1/crews", clitest.JSONResponse(201, map[string]string{
+		"id": covCrewIDCli4, "slug": "eng",
+	}))
+
+	c := covFreshCmd(crewCreateCmd, declareCrewCreateFlags)
+	covSetFlagsCli4(t, c, map[string]string{
+		"name":                     "Eng",
+		"network-mode":             "restricted",
+		"allowed-domains":          "github.com",
+		"allow-package-registries": "true",
+	})
+
+	if _, err := covCaptureStdoutCli4(t, func() error { return c.RunE(c, nil) }); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	calls := stub.CallsFor("POST", "/api/v1/crews")
+	if len(calls) != 1 {
+		t.Fatalf("POST calls = %d, want 1", len(calls))
+	}
+	var body struct {
+		AllowedDomains []string `json:"allowed_domains"`
+	}
+	if err := json.Unmarshal(calls[0].Body, &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(body.AllowedDomains) == 0 || body.AllowedDomains[0] != "github.com" {
+		t.Fatalf("expected github.com first, got %v", body.AllowedDomains)
+	}
+	if !containsStr(body.AllowedDomains, "registry.npmjs.org") || !containsStr(body.AllowedDomains, "pypi.org") {
+		t.Errorf("registry preset not folded into allowed_domains: %v", body.AllowedDomains)
+	}
+}
+
+// #1377 — a preset-only `crew update --allow-package-registries` must UNION
+// the registries onto the crew's existing domains, not clobber them.
+func TestCrewUpdateRunE_PackageRegistriesMergesExisting(t *testing.T) {
+	stub := covSetupCli4(t)
+	stub.OnGet("/api/v1/crews/"+covCrewIDCli4, clitest.JSONResponse(200, map[string]any{
+		"id": covCrewIDCli4, "allowed_domains": []string{"internal.example.com"},
+	}))
+	stub.OnPatch("/api/v1/crews/"+covCrewIDCli4, clitest.JSONResponse(200, map[string]string{"id": covCrewIDCli4}))
+
+	c := covFreshCmd(crewUpdateCmd, declareCrewUpdateFlags)
+	covSetFlagsCli4(t, c, map[string]string{"allow-package-registries": "true"})
+
+	if _, err := covCaptureStdoutCli4(t, func() error { return c.RunE(c, []string{covCrewIDCli4}) }); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	patches := stub.CallsFor("PATCH", "/api/v1/crews/"+covCrewIDCli4)
+	if len(patches) != 1 {
+		t.Fatalf("PATCH calls = %d, want 1", len(patches))
+	}
+	var body struct {
+		AllowedDomains []string `json:"allowed_domains"`
+	}
+	if err := json.Unmarshal(patches[0].Body, &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !containsStr(body.AllowedDomains, "internal.example.com") {
+		t.Errorf("existing domain was clobbered: %v", body.AllowedDomains)
+	}
+	if !containsStr(body.AllowedDomains, "registry.npmjs.org") {
+		t.Errorf("registry preset not merged: %v", body.AllowedDomains)
+	}
+}
+
+func containsStr(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestCrewCreateRunE_ServerError(t *testing.T) {
 	stub := covSetupCli4(t)
 	stub.OnPost("/api/v1/crews", clitest.ErrorResponse(400, "slug must be 2-50 characters"))
@@ -307,6 +418,7 @@ func declareCrewUpdateFlags(c *cobra.Command) {
 	c.Flags().Int("ttl", -1, "")
 	c.Flags().String("network-mode", "", "")
 	c.Flags().String("allowed-domains", "", "")
+	c.Flags().Bool("allow-package-registries", false, "")
 }
 
 func TestCrewUpdateRunE_NoFields(t *testing.T) {

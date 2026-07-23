@@ -194,6 +194,70 @@ func TestPipelineSchedules_List_ResolvesWakeSlug(t *testing.T) {
 	}
 }
 
+// TestPipelineSchedules_WakeFailClosed_RoundTrip covers the #1372 flag:
+// create with wake_fail_closed=true persists and echoes it, a PATCH that
+// omits the field keeps it, an explicit false clears it, and clearing the
+// gate resets the policy to fail-open.
+func TestPipelineSchedules_WakeFailClosed_RoundTrip(t *testing.T) {
+	h, db, userID, wsID := scheduleHandlerRig(t)
+	seedPipelineRow(t, db, wsID, "pln_main", "ping-hosts")
+	seedPipelineRowDef(t, db, wsID, "pln_probe", "cost-probe", agentlessProbeDef)
+
+	// Create with fail-closed on.
+	body := `{
+		"cron_expr": "*/10 * * * *",
+		"target_pipeline_slug": "ping-hosts",
+		"wake_pipeline_slug": "cost-probe",
+		"wake_fail_closed": true
+	}`
+	req := withWorkspaceUser(httptest.NewRequest("POST",
+		"/api/v1/workspaces/"+wsID+"/pipeline-schedules", strings.NewReader(body)),
+		userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.CreateSchedule(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create: status = %d (body: %s)", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if resp["wake_fail_closed"] != true {
+		t.Fatalf("create should echo wake_fail_closed=true, got %v", resp["wake_fail_closed"])
+	}
+	id, _ := resp["id"].(string)
+
+	// PATCH an unrelated field — policy must survive.
+	patch := func(t *testing.T, jsonBody string) map[string]any {
+		t.Helper()
+		req := withWorkspaceUser(httptest.NewRequest("PATCH",
+			"/api/v1/workspaces/"+wsID+"/pipeline-schedules/"+id, strings.NewReader(jsonBody)),
+			userID, wsID, "OWNER")
+		req.SetPathValue("scheduleId", id)
+		rr := httptest.NewRecorder()
+		h.UpdateSchedule(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("patch %s: status = %d (body: %s)", jsonBody, rr.Code, rr.Body.String())
+		}
+		var out map[string]any
+		_ = json.Unmarshal(rr.Body.Bytes(), &out)
+		return out
+	}
+
+	if out := patch(t, `{"cron_expr": "*/30 * * * *"}`); out["wake_fail_closed"] != true {
+		t.Errorf("policy must survive an unrelated PATCH, got %v", out["wake_fail_closed"])
+	}
+	// Explicit false clears it (omitempty means the field drops from JSON).
+	if out := patch(t, `{"wake_fail_closed": false}`); out["wake_fail_closed"] == true {
+		t.Errorf("explicit false must clear the policy, got %v", out["wake_fail_closed"])
+	}
+	// Re-arm, then clear the whole gate — policy resets with it.
+	if out := patch(t, `{"wake_fail_closed": true}`); out["wake_fail_closed"] != true {
+		t.Fatalf("re-arm failed, got %v", out["wake_fail_closed"])
+	}
+	if out := patch(t, `{"wake_pipeline_slug": ""}`); out["wake_fail_closed"] == true {
+		t.Errorf("clearing the gate must reset fail-closed, got %v", out["wake_fail_closed"])
+	}
+}
+
 func TestPipelineSchedules_Update_WithoutWakeFields_KeepsGate(t *testing.T) {
 	h, db, userID, wsID := scheduleHandlerRig(t)
 	seedPipelineRow(t, db, wsID, "pln_main", "ping-hosts")

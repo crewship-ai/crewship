@@ -601,6 +601,74 @@ func (p *Provider) toolsVolumeName(id, slug string) string {
 // the agent with zero credentials or persisting secrets anywhere.
 const secretsTmpfsSpec = "rw,noexec,nosuid,size=16m,mode=0700,uid=1001,gid=1001"
 
+// agentWritableNoexecTargets are the container paths whose mounts must be
+// noexec (see noexecBindMount / #1400). Used both to build the mounts and to
+// detect legacy exec-capable binds on reused containers.
+var agentWritableNoexecTargets = map[string]bool{
+	"/workspace": true,
+	"/output":    true,
+	"/crew":      true,
+}
+
+// legacyWritableBindNeedsNoexec reports whether an existing container mount is
+// an agent-writable data path still carried as a plain (exec-allowed) host
+// bind — i.e. created before #1400. Such containers must be recreated so the
+// bind-backed noexec volume takes over. The current shape mounts these as
+// TypeVolume (bind-backed), so only a TypeBind on one of these destinations
+// is legacy.
+func legacyWritableBindNeedsNoexec(destination string, mountType mount.Type) bool {
+	return agentWritableNoexecTargets[destination] && mountType == mount.TypeBind
+}
+
+// noexecBindMountOpts is the local-driver "o=" option string applied to the
+// agent-writable, host-persistent crew data mounts (/workspace, /output,
+// /crew). "bind" is what makes the local driver bind-mount the host `device`
+// path (rather than a managed volume dir); noexec blocks execve()-ing any
+// payload an agent stages on these volumes and nosuid strips setuid/setgid
+// bits.
+//
+// Why not a plain TypeBind mount: #1400 — /crew is a host directory that
+// SURVIVES container removal and is SHARED across every agent in the crew, so
+// writable+executable there is a durable, cross-agent code-execution foothold
+// (proven live: a marker + probe script staged under /crew/shared reappeared
+// on host disk and re-executed after container rebuild). Docker's Mounts-API
+// BindOptions has no noexec field, and the local volume driver only honours
+// mount options ("o=") when paired with type=none + device=<path> (see
+// moby/volume/local mandatoryOpts). A bind-backed local volume is therefore
+// the only supported way to get noexec onto a persistent host path here — the
+// mount still binds the exact host dir (data persists, still crew-shared),
+// just with exec denied.
+//
+// NOT applied to /opt/crew-tools (agent binaries execute from there — noexec
+// would break the runtime), nor to the read-only sidecar/entrypoint binds.
+const noexecBindMountOpts = "bind,noexec,nosuid"
+
+// noexecBindMount builds a bind-backed local volume mount that binds hostPath
+// at target with noexec,nosuid (see noexecBindMountOpts). Source is left empty
+// so Docker provisions an anonymous volume record pointing at the host path;
+// removing that record never touches the host data (it's the bind device, not
+// managed storage), and forceTeardown removes it (RemoveVolumes) on recreate
+// so the records don't accumulate. NoCopy is set because there is nothing to
+// copy up — the mount fully replaces the target with the host directory, just
+// like the plain bind mount it replaces.
+func noexecBindMount(hostPath, target string) mount.Mount {
+	return mount.Mount{
+		Type:   mount.TypeVolume,
+		Target: target,
+		VolumeOptions: &mount.VolumeOptions{
+			NoCopy: true,
+			DriverConfig: &mount.Driver{
+				Name: "local",
+				Options: map[string]string{
+					"type":   "none",
+					"device": hostPath,
+					"o":      noexecBindMountOpts,
+				},
+			},
+		},
+	}
+}
+
 // buildMounts returns the full list of mounts for a crew container, including
 // persistent bind mounts and named volumes for home/tools directories.
 // /secrets is an in-memory tmpfs (see secretsTmpfsSpec) mounted via
@@ -622,9 +690,9 @@ func (p *Provider) buildMounts(id, slug, workspacePath, outputPath, crewPath str
 		return nil, err
 	}
 	mounts := []mount.Mount{
-		{Type: mount.TypeBind, Source: workspacePath, Target: "/workspace"},
-		{Type: mount.TypeBind, Source: outputPath, Target: "/output"},
-		{Type: mount.TypeBind, Source: crewPath, Target: "/crew"},
+		noexecBindMount(workspacePath, "/workspace"),
+		noexecBindMount(outputPath, "/output"),
+		noexecBindMount(crewPath, "/crew"),
 	}
 	if slug != "" {
 		mounts = append(mounts,

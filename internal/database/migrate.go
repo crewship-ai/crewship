@@ -1678,7 +1678,22 @@ END;
 	// stop getting unrestricted egress. See
 	// migrate_consts_v148_backfill_network_mode_restricted.go (#1366).
 	{version: 148, name: "backfill_network_mode_restricted", fn: migrateBackfillNetworkModeRestricted},
-
+	// v149: optional short-lived lease (expires_at) on the agent_credentials
+	// grant — an expired lease is refused at injection time (fail-closed). See
+	// migrate_consts_v149_credential_lease.go and issue #1373.
+	{version: 149, name: "credential_lease_expiry", sql: migrationCredentialLeaseExpiry},
+	// v150: single-row lease table backing scheduler leader election (#1376),
+	// so the agent/pipeline cron loops and the recurring-issue dispatcher fire
+	// on exactly one replica in a multi-replica deploy. Instance-local runtime
+	// state — not workspace-scoped, never in a backup bundle. See
+	// migrate_consts_v150_scheduler_leader.go and internal/leader.
+	{version: 150, name: "scheduler_leader", sql: migrationSchedulerLeader},
+	// v151: opt-in fail-closed policy on the schedule wake gate — a
+	// non-affirmative probe (error / nil / non-COMPLETED) HOLDS the run
+	// instead of failing open. Default 0 preserves fail-open for existing
+	// schedules. See migrate_consts_v151_schedule_wake_fail_closed.go and
+	// issue #1372.
+	{version: 151, name: "schedule_wake_fail_closed", sql: migrationScheduleWakeFailClosed},
 	// v152 makes the audit journal tamper-evident: per-workspace hash-chain
 	// (seq + prev_hash + entry_hash) on journal_entries, backfilled into a
 	// valid chain for existing rows, plus a UNIQUE(workspace_id, seq) guard.

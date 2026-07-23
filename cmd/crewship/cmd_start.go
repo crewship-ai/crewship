@@ -27,6 +27,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/crashreport"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/leader"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/mailer"
@@ -338,6 +339,28 @@ var startCmd = &cobra.Command{
 			srv.SetChannelAuthorizer(ws.NewDBChannelAuthorizer(deps.DB))
 		}
 
+		// Scheduler leader election (#1376). One lease row (scheduler_leader)
+		// gates all three scheduling loops — the agent cron scheduler, the
+		// pipeline cron scheduler, and the recurring-issue dispatcher — so a
+		// multi-replica deploy fires each due occurrence on exactly one replica
+		// instead of every replica double-firing. A lone replica wins the lease
+		// immediately (Start does a synchronous acquire), so single-instance
+		// behaviour is unchanged. Opt-out via CREWSHIP_SCHEDULER_LEADER_ELECTION=0
+		// (leaves every loop always-fire, exactly as before). The stable replica
+		// identity comes from CREWSHIP_REPLICA_ID when set, else a random id.
+		var schedulerLease leader.Gate
+		if deps.DB != nil && schedulerLeaderElectionEnabled() {
+			lease := leader.New(deps.DB,
+				leader.WithHolderID(strings.TrimSpace(os.Getenv("CREWSHIP_REPLICA_ID"))),
+				leader.WithLogger(logger),
+			)
+			lease.Start(ctx)
+			defer lease.Stop()
+			schedulerLease = lease
+			logger.Info("scheduler leader election enabled",
+				"holder", lease.HolderID(), "leader", lease.IsLeader())
+		}
+
 		// Start agent scheduler (cron-based scheduled runs)
 		if deps.DB != nil && deps.Container != nil {
 			sched := scheduler.New(
@@ -349,6 +372,9 @@ var startCmd = &cobra.Command{
 				},
 				logger,
 			)
+			if schedulerLease != nil {
+				sched.SetLeaderGate(schedulerLease)
+			}
 			if err := sched.Start(ctx); err != nil {
 				logger.Error("scheduler failed to start", "error", err)
 			} else {
@@ -773,6 +799,9 @@ var startCmd = &cobra.Command{
 					Signals:      signalRegistry,
 				})
 				scheduler := pipeline.NewPipelineScheduler(schedStore, schedPipelineStore, schedExec, logger)
+				if schedulerLease != nil {
+					scheduler.SetLeaderGate(schedulerLease)
+				}
 				scheduler.Start(ctx)
 				defer scheduler.Stop()
 				logger.Info("pipeline scheduler wired (cron triggers; 30s tick)")
@@ -791,6 +820,9 @@ var startCmd = &cobra.Command{
 				// it, recurring issues had CRUD + a next_run column but no
 				// runtime consumer — they looked scheduled and never fired.
 				recurringIssues := api.NewRecurringIssueDispatcher(deps.DB, srv.WSHub(), logger)
+				if schedulerLease != nil {
+					recurringIssues.SetLeaderGate(schedulerLease)
+				}
 				recurringIssues.Start(ctx)
 				defer recurringIssues.Stop()
 				logger.Info("recurring-issue dispatcher wired (cron triggers; 30s tick)")
@@ -933,6 +965,19 @@ func cfgBoltPathFromEnv() bool {
 // config.envBool.
 func pipelineResumeEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("CREWSHIP_PIPELINE_RESUME"))) {
+	case "0", "false", "off", "no", "n", "f":
+		return false
+	}
+	return true
+}
+
+// schedulerLeaderElectionEnabled reports whether the scheduler leader-election
+// lease should be wired (#1376). Default ON — it is safe for a single replica
+// (which wins the lease immediately). Set CREWSHIP_SCHEDULER_LEADER_ELECTION to
+// a falsey value to disable it and leave every scheduling loop always-fire, the
+// pre-#1376 behaviour.
+func schedulerLeaderElectionEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("CREWSHIP_SCHEDULER_LEADER_ELECTION"))) {
 	case "0", "false", "off", "no", "n", "f":
 		return false
 	}

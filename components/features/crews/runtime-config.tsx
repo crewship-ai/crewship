@@ -33,9 +33,11 @@ import {
   buildDevcontainerJSON,
   buildMiseJSON,
   parseDevcontainerConfig,
+  parseDevcontainerFull,
   parseMiseConfig,
 } from "./runtime-config-data"
 import type { CategoryFilter, FeatureMap } from "./runtime-config-data"
+import { RuntimeSecurityConfig, type SecurityConfigValue } from "./runtime-security-config"
 
 export interface RuntimeConfigValue {
   runtimeImage: string
@@ -46,6 +48,9 @@ export interface RuntimeConfigValue {
 interface RuntimeConfigProps {
   value: RuntimeConfigValue
   onChange: (value: RuntimeConfigValue) => void
+  /** Gates the privileged toggle in the Security tab (admin + workspace
+   *  allow_privileged_credentials). Everything else stays editable. */
+  canEditPrivileged?: boolean
 }
 
 interface CatalogFeature {
@@ -83,9 +88,10 @@ function extractRuntimes(json: unknown): RuntimeEntry[] {
 }
 
 
-export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
+export function RuntimeConfig({ value, onChange, canEditPrivileged = false }: RuntimeConfigProps) {
   // Parse initial state from value
   const initialDC = useMemo(() => parseDevcontainerConfig(value.devcontainerConfig), [value.devcontainerConfig])
+  const initialFull = useMemo(() => parseDevcontainerFull(value.devcontainerConfig), [value.devcontainerConfig])
   const initialMise = useMemo(() => parseMiseConfig(value.miseConfig), [value.miseConfig])
 
   // Feature catalog
@@ -127,11 +133,24 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
   // Selected runtime tools (tool name -> version)
   const [miseTools, setMiseTools] = useState<Record<string, string>>(initialMise)
 
+  // Container-privilege escape hatches (#1380). Held as one struct plus the
+  // passthrough bucket of top-level keys the structured UI doesn't model, so
+  // rebuilding the devcontainer_config never drops an operator's advanced JSON.
+  const [security, setSecurity] = useState<SecurityConfigValue>({
+    privileged: initialFull.privileged,
+    init: initialFull.init,
+    capAdd: initialFull.capAdd,
+    mounts: initialFull.mounts,
+    containerEnv: initialFull.containerEnv,
+    postStartCommand: initialFull.postStartCommand,
+  })
+  const [passthrough, setPassthrough] = useState<Record<string, unknown>>(initialFull.passthrough)
+
   const syncingRef = useRef(false)
 
   useEffect(() => {
     syncingRef.current = true
-    const dc = parseDevcontainerConfig(value.devcontainerConfig)
+    const dc = parseDevcontainerFull(value.devcontainerConfig)
     const mc = parseMiseConfig(value.miseConfig)
     setSelectedFeatures(dc.features)
     setBaseImage(dc.image)
@@ -139,6 +158,15 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
     setIsCustomImage(isCustom)
     if (isCustom) setCustomImage(dc.image)
     setMiseTools(mc)
+    setSecurity({
+      privileged: dc.privileged,
+      init: dc.init,
+      capAdd: dc.capAdd,
+      mounts: dc.mounts,
+      containerEnv: dc.containerEnv,
+      postStartCommand: dc.postStartCommand,
+    })
+    setPassthrough(dc.passthrough)
     requestAnimationFrame(() => { syncingRef.current = false })
   }, [value.devcontainerConfig, value.miseConfig])
 
@@ -153,10 +181,20 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
   // Compute effective image
   const effectiveImage = isCustomImage ? customImage || "debian:bookworm-slim" : baseImage
 
-  // Build JSON preview
+  // Build JSON preview — includes the structured privilege fields and any
+  // unmodeled passthrough keys so the visual builder is lossless.
   const devcontainerJSON = useMemo(
-    () => buildDevcontainerJSON(effectiveImage, selectedFeatures),
-    [effectiveImage, selectedFeatures]
+    () =>
+      buildDevcontainerJSON(effectiveImage, selectedFeatures, {
+        privileged: security.privileged,
+        init: security.init,
+        capAdd: security.capAdd,
+        mounts: security.mounts,
+        containerEnv: security.containerEnv,
+        postStartCommand: security.postStartCommand,
+        passthrough,
+      }),
+    [effectiveImage, selectedFeatures, security, passthrough]
   )
   const miseJSON = useMemo(() => buildMiseJSON(miseTools), [miseTools])
 
@@ -272,15 +310,27 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
 
   function applyRawEdits() {
     try {
+      let img = effectiveImage
       if (rawDevcontainer.trim()) {
-        const parsed = JSON.parse(rawDevcontainer)
-        const img = parsed.image || "debian:bookworm-slim"
-        const feats = parsed.features || {}
-        setBaseImage(img)
-        setSelectedFeatures(feats)
-        if (!BASE_IMAGES.some((b) => b.value === img)) {
+        // Validate + fully parse so the structured tabs (incl. Security) and
+        // the passthrough bucket resync from the operator's hand-edited JSON.
+        const full = parseDevcontainerFull(rawDevcontainer)
+        JSON.parse(rawDevcontainer) // surface a syntax error before applying
+        img = full.image
+        setBaseImage(full.image)
+        setSelectedFeatures(full.features)
+        setSecurity({
+          privileged: full.privileged,
+          init: full.init,
+          capAdd: full.capAdd,
+          mounts: full.mounts,
+          containerEnv: full.containerEnv,
+          postStartCommand: full.postStartCommand,
+        })
+        setPassthrough(full.passthrough)
+        if (!BASE_IMAGES.some((b) => b.value === full.image)) {
           setIsCustomImage(true)
-          setCustomImage(img)
+          setCustomImage(full.image)
         } else {
           setIsCustomImage(false)
         }
@@ -294,9 +344,18 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
       }
 
       propagate(
-        rawDevcontainer.trim() || buildDevcontainerJSON(effectiveImage, selectedFeatures),
+        rawDevcontainer.trim() ||
+          buildDevcontainerJSON(effectiveImage, selectedFeatures, {
+            privileged: security.privileged,
+            init: security.init,
+            capAdd: security.capAdd,
+            mounts: security.mounts,
+            containerEnv: security.containerEnv,
+            postStartCommand: security.postStartCommand,
+            passthrough,
+          }),
         rawMise.trim() || "",
-        effectiveImage
+        img
       )
       setEditRaw(false)
     } catch {
@@ -373,6 +432,12 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
           </TabsTrigger>
           <TabsTrigger value="runtimes">
             Language Runtimes{selectedRuntimeCount > 0 ? ` (${selectedRuntimeCount})` : ""}
+          </TabsTrigger>
+          <TabsTrigger value="security" className="gap-1.5">
+            Security
+            {security.privileged && (
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-destructive" aria-hidden />
+            )}
           </TabsTrigger>
           <TabsTrigger value="preview">Preview</TabsTrigger>
         </TabsList>
@@ -769,6 +834,15 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
               No runtimes found{runtimeSearchQuery ? ` for "${runtimeSearchQuery}"` : ""}.
             </p>
           )}
+        </TabsContent>
+
+        {/* ---- Security tab ---- */}
+        <TabsContent value="security" className="pt-3">
+          <RuntimeSecurityConfig
+            value={security}
+            onChange={setSecurity}
+            canEditPrivileged={canEditPrivileged}
+          />
         </TabsContent>
 
         {/* ---- Preview tab ---- */}

@@ -4,6 +4,7 @@ import { useMemo } from "react"
 import dynamic from "next/dynamic"
 import { Box, Plug } from "lucide-react"
 import type { WizardState } from "./types"
+import { useAbilities } from "@/hooks/use-abilities"
 
 // Code-split the heavy children: RuntimeConfig (806 lines + 1308-row catalog
 // fetch) and MCPConfigEditor (template registry + credential picker). Without
@@ -53,6 +54,8 @@ export function StepContainer({ state, setState, workspaceId }: Props) {
 // =============================================================================
 
 function ImageFeaturesSection({ state, setState }: { state: WizardState; setState: (p: Partial<WizardState>) => void }) {
+  const { role } = useAbilities()
+  const canEditPrivileged = role === "OWNER" || role === "ADMIN"
   const summary = useMemo(() => {
     const baseImage = parseBaseImage(state.devcontainerConfig) || state.runtimeImage || "debian:bookworm-slim"
     const featureCount = countFeatures(state.devcontainerConfig)
@@ -102,6 +105,7 @@ function ImageFeaturesSection({ state, setState }: { state: WizardState; setStat
             devcontainerConfig: v.devcontainerConfig,
             miseConfig: v.miseConfig,
           })}
+          canEditPrivileged={canEditPrivileged}
         />
       </div>
     </section>

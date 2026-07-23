@@ -13,6 +13,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/leader"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -54,8 +55,25 @@ type Scheduler struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	// leaderGate, when non-nil, gates every fire (scheduled agents and
+	// platform routines) on holding the scheduler lease, so a multi-replica
+	// deploy triggers each occurrence once. Nil = single-instance (always
+	// fire), the unchanged default (#1376).
+	leaderGate leader.Gate
+
 	mu       sync.Mutex
 	entryMap map[string]cron.EntryID // agentID → cron entry
+}
+
+// SetLeaderGate attaches a leader-election gate so this scheduler only fires
+// while its replica holds the scheduler lease. Call before Start. Nil (the
+// default) keeps single-instance behaviour.
+func (s *Scheduler) SetLeaderGate(g leader.Gate) { s.leaderGate = g }
+
+// isLeader reports whether this replica may fire. A nil gate (single instance)
+// always may.
+func (s *Scheduler) isLeader() bool {
+	return s.leaderGate == nil || s.leaderGate.IsLeader()
 }
 
 // New creates a Scheduler that loads cron schedules from the database
@@ -178,6 +196,12 @@ func (s *Scheduler) RegisterPlatformRoutine(name, cronExpr string, fn func(ctx c
 		// stream serially to keep the LLM token budget bounded —
 		// parallelism would burn cost without a clear win for a daily
 		// audit-not-gate workload).
+		//
+		// Leader gate: platform sweeps (Keeper Phase 2) run once per cluster,
+		// not once per replica. Nil gate (single instance) always passes.
+		if !s.isLeader() {
+			return
+		}
 		jobCtx, cancel := context.WithTimeout(s.ctx, 30*time.Minute)
 		defer cancel()
 		s.logger.Info("platform routine fired", "name", name, "cron", cronExpr)
@@ -312,6 +336,14 @@ func (s *Scheduler) occurrenceBucket(ctx context.Context, agentID string) string
 }
 
 func (s *Scheduler) triggerAgent(ag scheduledAgent) {
+	// Leader gate: on a multi-replica deploy only the lease holder fires, so
+	// the same cron occurrence isn't run on every replica. The idempotency
+	// reservation below is the second line of defence; this skips the wasted
+	// work (and the container spin-up) up front. Nil gate always passes.
+	if !s.isLeader() {
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(s.ctx, 45*time.Minute)
 	defer cancel()
 

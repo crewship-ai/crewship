@@ -325,9 +325,11 @@ var agentCredentialsCmd = &cobra.Command{
 			ID             string `json:"id"`
 			CredentialID   string `json:"credential_id"`
 			CredentialName string `json:"credential_name"`
-			Provider       string `json:"provider"`
-			Type           string `json:"type"`
+			Provider       string `json:"credential_provider"`
+			Type           string `json:"credential_type"`
 			EnvVarName     string `json:"env_var_name"`
+			ExpiresAt      string `json:"expires_at"`
+			Expired        bool   `json:"expired"`
 		}
 		if err := cli.ReadJSON(resp, &creds); err != nil {
 			return err
@@ -339,10 +341,18 @@ var agentCredentialsCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		headers := []string{"ID", "NAME", "PROVIDER", "TYPE", "ENV VAR"}
+		headers := []string{"ID", "NAME", "PROVIDER", "TYPE", "ENV VAR", "LEASE"}
 		var rows [][]string
 		for _, c := range creds {
-			rows = append(rows, []string{c.ID[:min(12, len(c.ID))], c.CredentialName, c.Provider, c.Type, c.EnvVarName})
+			lease := "standing"
+			if c.ExpiresAt != "" {
+				if c.Expired {
+					lease = "EXPIRED " + c.ExpiresAt
+				} else {
+					lease = "expires " + c.ExpiresAt
+				}
+			}
+			rows = append(rows, []string{c.ID[:min(12, len(c.ID))], c.CredentialName, c.Provider, c.Type, c.EnvVarName, lease})
 		}
 		return f.Auto(creds, headers, rows)
 	},

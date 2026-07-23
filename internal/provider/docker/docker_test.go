@@ -7,6 +7,7 @@ import (
 
 	"strings"
 
+	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 )
 
@@ -101,6 +102,74 @@ func TestBuildMountsSecretsIsTmpfs(t *testing.T) {
 	}
 	if strings.Contains(spec, "exec,") && !strings.Contains(spec, "noexec") {
 		t.Errorf("secretsTmpfsSpec must be noexec, got %q", spec)
+	}
+}
+
+// #1400: the agent-writable, host-persistent, crew-shared bind mounts
+// (/workspace, /output, /crew) must be mounted noexec. /crew in particular
+// is a host directory that survives container removal and is shared across
+// every agent in the crew, so a writable+executable mount is a durable,
+// cross-agent code-execution foothold (proven live: a payload staged under
+// /crew/shared reappeared on host disk and re-executed after container
+// rebuild). Docker's Mounts-API BindOptions has no noexec field, and the
+// local volume driver only honours mount options ("o=") when paired with
+// type=none + device=<path> (moby/volume/local mandatoryOpts). So these ride
+// a bind-backed local volume carrying o=bind,noexec,nosuid rather than a
+// plain TypeBind mount. /opt/crew-tools stays executable (agent tools run
+// from there) and the sidecar/entrypoint binds are read-only.
+func TestBuildMountsAgentWritableBindsAreNoexec(t *testing.T) {
+	p := &Provider{cfg: Config{
+		SidecarBinaryPath: "/host/path/crewship-sidecar",
+		EntrypointPath:    "/host/path/entrypoint.sh",
+	}}
+	mounts, err := p.buildMounts("ckcrew1", "eng", "/ws", "/out", "/crew")
+	if err != nil {
+		t.Fatalf("buildMounts: %v", err)
+	}
+
+	wantDevice := map[string]string{"/workspace": "/ws", "/output": "/out", "/crew": "/crew"}
+	seen := map[string]bool{}
+	for _, m := range mounts {
+		want, ok := wantDevice[m.Target]
+		if !ok {
+			continue
+		}
+		seen[m.Target] = true
+		if m.Type != mount.TypeVolume {
+			t.Errorf("%s: mount type = %q, want %q (bind-backed noexec volume)", m.Target, m.Type, mount.TypeVolume)
+			continue
+		}
+		if m.VolumeOptions == nil || m.VolumeOptions.DriverConfig == nil {
+			t.Errorf("%s: missing VolumeOptions.DriverConfig", m.Target)
+			continue
+		}
+		opts := m.VolumeOptions.DriverConfig.Options
+		if opts["device"] != want {
+			t.Errorf("%s: device opt = %q, want %q", m.Target, opts["device"], want)
+		}
+		if opts["type"] != "none" {
+			t.Errorf("%s: type opt = %q, want \"none\"", m.Target, opts["type"])
+		}
+		for _, flag := range []string{"bind", "noexec", "nosuid"} {
+			if !strings.Contains(opts["o"], flag) {
+				t.Errorf("%s: o opt = %q, missing %q", m.Target, opts["o"], flag)
+			}
+		}
+	}
+	for target := range wantDevice {
+		if !seen[target] {
+			t.Errorf("expected agent-writable mount for %s", target)
+		}
+	}
+
+	// /opt/crew-tools must stay executable — agent binaries run from there,
+	// so noexec there would break the runtime.
+	for _, m := range mounts {
+		if m.Target == "/opt/crew-tools" && m.VolumeOptions != nil && m.VolumeOptions.DriverConfig != nil {
+			if strings.Contains(m.VolumeOptions.DriverConfig.Options["o"], "noexec") {
+				t.Error("/opt/crew-tools must NOT be noexec (agent tools execute from there)")
+			}
+		}
 	}
 }
 
