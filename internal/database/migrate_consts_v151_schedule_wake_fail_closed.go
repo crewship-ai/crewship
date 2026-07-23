@@ -1,6 +1,6 @@
 package database
 
-// migrationScheduleWakeFailClosed (v149) adds an opt-in fail-closed
+// migrationScheduleWakeFailClosed (v151) adds an opt-in fail-closed
 // policy flag to the schedule wake gate (issue #1372).
 //
 // Background: the wake gate (v115) fails OPEN — a probe that errors,

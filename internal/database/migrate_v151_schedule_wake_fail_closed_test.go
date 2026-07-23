@@ -2,12 +2,12 @@ package database
 
 import "testing"
 
-// TestMigrate_V149_WakeFailClosedColumn asserts v149 added the opt-in
+// TestMigrate_V151_WakeFailClosedColumn asserts v151 added the opt-in
 // fail-closed policy column to pipeline_schedules as NOT NULL DEFAULT 0,
 // so existing schedules keep the fail-open default and the schedule
 // store's SELECT can scan it on every tick without a NULL surprise
 // (#1372).
-func TestMigrate_V149_WakeFailClosedColumn(t *testing.T) {
+func TestMigrate_V151_WakeFailClosedColumn(t *testing.T) {
 	t.Parallel()
 	db := migrateChainSetup(t)
 
@@ -47,7 +47,7 @@ func TestMigrate_V149_WakeFailClosedColumn(t *testing.T) {
 	}
 
 	if !found {
-		t.Fatal("column wake_fail_closed missing from pipeline_schedules after v149")
+		t.Fatal("column wake_fail_closed missing from pipeline_schedules after v151")
 	}
 	if notNull != 1 || dflt != "0" {
 		t.Errorf("wake_fail_closed: got notNull=%d dflt=%q, want notNull=1 dflt=\"0\"", notNull, dflt)
