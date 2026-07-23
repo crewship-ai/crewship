@@ -118,6 +118,7 @@ func newScheduleFlagsCmd() *cobra.Command {
 	c.Flags().String("wake-slug", "", "")
 	c.Flags().String("wake-inputs", "", "")
 	c.Flags().Bool("no-wake", false, "")
+	c.Flags().Bool("fail-closed", false, "")
 	c.Flags().Bool("json", false, "")
 	c.Flags().Bool("yes", false, "")
 	return c
@@ -224,6 +225,7 @@ func TestScheduleCreate_Validation(t *testing.T) {
 		{"wake-inputs without wake-slug", map[string]string{"slug": "x", "cron": "* * * * *", "wake-inputs": `{"a":1}`}, "--wake-inputs requires --wake-slug"},
 		{"bad inputs json", map[string]string{"slug": "x", "cron": "* * * * *", "inputs": "{nope"}, "--inputs must be valid JSON"},
 		{"bad wake-inputs json", map[string]string{"slug": "x", "cron": "* * * * *", "wake-slug": "probe", "wake-inputs": "{nope"}, "--wake-inputs must be valid JSON"},
+		{"fail-closed without wake-slug", map[string]string{"slug": "x", "cron": "* * * * *", "fail-closed": "true"}, "--fail-closed requires --wake-slug"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -324,6 +326,13 @@ func TestScheduleUpdate_ValidationAndBody(t *testing.T) {
 	if err := routineSchedulesUpdateCmd.RunE(c3, []string{"sch1"}); err == nil ||
 		!strings.Contains(err.Error(), "--no-wake and --wake-inputs are mutually exclusive") {
 		t.Errorf("no-wake+wake-inputs: got %v", err)
+	}
+	c3b := newScheduleFlagsCmd()
+	_ = c3b.Flags().Set("no-wake", "true")
+	_ = c3b.Flags().Set("fail-closed", "true")
+	if err := routineSchedulesUpdateCmd.RunE(c3b, []string{"sch1"}); err == nil ||
+		!strings.Contains(err.Error(), "--no-wake and --fail-closed are mutually exclusive") {
+		t.Errorf("no-wake+fail-closed: got %v", err)
 	}
 
 	// Invalid JSON payloads.

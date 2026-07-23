@@ -38,6 +38,7 @@ type scheduleRow struct {
 	WakePipelineID        string                 `json:"wake_pipeline_id,omitempty"`
 	WakePipelineSlug      string                 `json:"wake_pipeline_slug,omitempty"`
 	WakeInputs            map[string]interface{} `json:"wake_inputs,omitempty"`
+	WakeFailClosed        bool                   `json:"wake_fail_closed,omitempty"`
 	WakeCheckCount        int                    `json:"wake_check_count,omitempty"`
 	WakeFireCount         int                    `json:"wake_fire_count,omitempty"`
 	LastWakeAt            *string                `json:"last_wake_at,omitempty"`
@@ -198,11 +199,15 @@ var routineSchedulesCreateCmd = &cobra.Command{
 		enabled, _ := cmd.Flags().GetBool("enabled")
 		wakeSlug, _ := cmd.Flags().GetString("wake-slug")
 		wakeInputsJSON, _ := cmd.Flags().GetString("wake-inputs")
+		failClosed, _ := cmd.Flags().GetBool("fail-closed")
 		if slug == "" || cronExpr == "" {
 			return fmt.Errorf("--slug and --cron are required")
 		}
 		if wakeInputsJSON != "" && wakeSlug == "" {
 			return fmt.Errorf("--wake-inputs requires --wake-slug")
+		}
+		if failClosed && wakeSlug == "" {
+			return fmt.Errorf("--fail-closed requires --wake-slug (it governs the wake gate's probe-failure handling)")
 		}
 		if name == "" {
 			name = fmt.Sprintf("%s schedule", slug)
@@ -245,6 +250,9 @@ var routineSchedulesCreateCmd = &cobra.Command{
 				}
 				body["wake_inputs"] = wakeInputs
 			}
+			if failClosed {
+				body["wake_fail_closed"] = true
+			}
 		}
 		if err := requireAuth(); err != nil {
 			return err
@@ -281,6 +289,9 @@ var routineSchedulesCreateCmd = &cobra.Command{
 			}
 			if out.WakePipelineSlug != "" {
 				fmt.Printf("  Wake:   %s (routine fires only when the probe's output is truthy)\n", out.WakePipelineSlug)
+				if out.WakeFailClosed {
+					fmt.Printf("  Policy: fail-closed (a probe error/timeout HOLDS the run instead of firing)\n")
+				}
 			}
 			if out.NextRunAt != nil {
 				fmt.Printf("  Next:   %s\n", formatTimestamp(*out.NextRunAt))
@@ -353,8 +364,15 @@ var routineSchedulesUpdateCmd = &cobra.Command{
 			}
 			body["wake_inputs"] = wakeInputs
 		}
+		if cmd.Flags().Changed("fail-closed") {
+			if noWake {
+				return fmt.Errorf("--no-wake and --fail-closed are mutually exclusive")
+			}
+			fc, _ := cmd.Flags().GetBool("fail-closed")
+			body["wake_fail_closed"] = fc
+		}
 		if len(body) == 0 {
-			return fmt.Errorf("at least one of --cron / --timezone / --name / --enabled / --inputs / --pin-version / --unpin / --wake-slug / --wake-inputs / --no-wake required")
+			return fmt.Errorf("at least one of --cron / --timezone / --name / --enabled / --inputs / --pin-version / --unpin / --wake-slug / --wake-inputs / --no-wake / --fail-closed required")
 		}
 		if err := requireAuth(); err != nil {
 			return err
@@ -563,6 +581,7 @@ func init() {
 	routineSchedulesCreateCmd.Flags().Bool("enabled", true, "create the schedule already enabled (default true)")
 	routineSchedulesCreateCmd.Flags().String("wake-slug", "", "wake gate: agentless probe routine evaluated before each fire — the main routine runs only when the probe's output is truthy")
 	routineSchedulesCreateCmd.Flags().String("wake-inputs", "", "JSON object passed to the wake probe on each tick (requires --wake-slug)")
+	routineSchedulesCreateCmd.Flags().Bool("fail-closed", false, "wake gate: HOLD the run when the probe errors/times out/returns non-COMPLETED instead of failing open (requires --wake-slug; default off — a broken probe fires the main run and records ERROR)")
 	routineSchedulesCreateCmd.Flags().Int("pin-version", 0, "pin the schedule to a specific routine version — every fire executes that immutable version instead of head (see 'crewship routine versions <slug>'); if the version is later deleted the fire FAILS with an inbox alert rather than silently running head")
 
 	routineSchedulesUpdateCmd.Flags().String("name", "", "new schedule name")
@@ -573,6 +592,7 @@ func init() {
 	routineSchedulesUpdateCmd.Flags().String("wake-slug", "", "set/replace the wake gate's agentless probe routine")
 	routineSchedulesUpdateCmd.Flags().String("wake-inputs", "", "replace the wake probe's inputs JSON object")
 	routineSchedulesUpdateCmd.Flags().Bool("no-wake", false, "remove the wake gate (schedule fires on every tick again)")
+	routineSchedulesUpdateCmd.Flags().Bool("fail-closed", false, "set the wake gate's probe-failure policy: --fail-closed HOLDS the run on a probe error/timeout; --fail-closed=false restores fail-open (fire anyway, record ERROR). Absent = keep existing")
 	routineSchedulesUpdateCmd.Flags().Int("pin-version", 0, "pin (or re-pin) the schedule to a specific routine version; fires execute that immutable version instead of head")
 	routineSchedulesUpdateCmd.Flags().Bool("unpin", false, "remove the version pin (fires track head again); updates that mention neither --pin-version nor --unpin keep the existing pin")
 

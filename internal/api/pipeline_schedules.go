@@ -38,6 +38,7 @@ type scheduleResponse struct {
 	WakePipelineID   string         `json:"wake_pipeline_id,omitempty"`
 	WakePipelineSlug string         `json:"wake_pipeline_slug,omitempty"`
 	WakeInputs       map[string]any `json:"wake_inputs,omitempty"`
+	WakeFailClosed   bool           `json:"wake_fail_closed,omitempty"`
 	WakeCheckCount   int            `json:"wake_check_count,omitempty"`
 	WakeFireCount    int            `json:"wake_fire_count,omitempty"`
 	LastWakeAt       *time.Time     `json:"last_wake_at,omitempty"`
@@ -78,6 +79,7 @@ func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlu
 		WakePipelineID:        s.WakePipelineID,
 		WakePipelineSlug:      wakeSlug,
 		WakeInputs:            wakeInputs,
+		WakeFailClosed:        s.WakeFailClosed,
 		WakeCheckCount:        s.WakeCheckCount,
 		WakeFireCount:         s.WakeFireCount,
 		LastWakeAt:            s.LastWakeAt,
@@ -103,6 +105,11 @@ type scheduleRequestBody struct {
 	WakePipelineSlug *string        `json:"wake_pipeline_slug,omitempty"`
 	WakePipelineID   *string        `json:"wake_pipeline_id,omitempty"`
 	WakeInputs       map[string]any `json:"wake_inputs,omitempty"`
+	// WakeFailClosed opts the gate into fail-closed probe-failure
+	// handling (#1372). Pointer so PATCH can tell "absent — keep the
+	// existing policy" from an explicit false. Only meaningful when a
+	// wake gate is set; ignored on an ungated schedule.
+	WakeFailClosed *bool `json:"wake_fail_closed,omitempty"`
 }
 
 // resolveWakePipeline validates a wake-gate reference at save time —
@@ -214,6 +221,7 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		Enabled:               enabled,
 		WakePipelineID:        wakeID,
 		WakeInputs:            body.WakeInputs,
+		WakeFailClosed:        body.WakeFailClosed != nil && *body.WakeFailClosed,
 	}
 	saved, err := h.schedules.Save(r.Context(), in)
 	if err != nil {
@@ -411,6 +419,16 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 	if wakeInputs == nil && wakeID != "" {
 		_ = json.Unmarshal([]byte(existing.WakeInputsJSON), &wakeInputs)
 	}
+	// Fail-closed policy merge: absent field keeps the existing value,
+	// an explicit bool sets it. Clearing the gate (wakeID == "") also
+	// resets the policy — a policy without a gate is meaningless.
+	wakeFailClosed := existing.WakeFailClosed
+	if body.WakeFailClosed != nil {
+		wakeFailClosed = *body.WakeFailClosed
+	}
+	if wakeID == "" {
+		wakeFailClosed = false
+	}
 
 	in := pipeline.SaveScheduleInput{
 		ID:                    scheduleID,
@@ -424,6 +442,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		Enabled:               enabled,
 		WakePipelineID:        wakeID,
 		WakeInputs:            wakeInputs,
+		WakeFailClosed:        wakeFailClosed,
 	}
 	saved, err := h.schedules.Save(r.Context(), in)
 	if err != nil {
