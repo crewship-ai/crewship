@@ -346,16 +346,24 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Find the issue
-	var missionID, currentStatus string
+	var missionID, currentStatus, crewID string
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT id, status FROM missions WHERE identifier = ? AND workspace_id = ?`,
-		ident, req.WorkspaceID).Scan(&missionID, &currentStatus)
+		`SELECT id, status, crew_id FROM missions WHERE identifier = ? AND workspace_id = ?`,
+		ident, req.WorkspaceID).Scan(&missionID, &currentStatus, &crewID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
 			return
 		}
 		internalError(w, r, h.logger, "find issue for update", err)
+		return
+	}
+	// #1365: a crew-bound (crwv1) token may only mutate its OWN crew's issues.
+	// The workspace check above is necessary but not sufficient — a sibling
+	// crew shares the tenant, and issue CREATE already enforces this boundary.
+	// Fold the issue's own crew_id through the same helper the create path uses
+	// so crwv1 tokens are held to their crew and wsv1 tokens keep workspace reach.
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &crewID) {
 		return
 	}
 
@@ -474,16 +482,21 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	var missionID string
+	var missionID, crewID string
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT id FROM missions WHERE identifier = ? AND workspace_id = ?`,
-		ident, req.WorkspaceID).Scan(&missionID)
+		`SELECT id, crew_id FROM missions WHERE identifier = ? AND workspace_id = ?`,
+		ident, req.WorkspaceID).Scan(&missionID, &crewID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
 			return
 		}
 		internalError(w, r, h.logger, "find issue for comment", err)
+		return
+	}
+	// #1365: a crew-bound (crwv1) token may only comment on its OWN crew's
+	// issues — mirror the guard on UpdateStatus and the issue CREATE path.
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &crewID) {
 		return
 	}
 
