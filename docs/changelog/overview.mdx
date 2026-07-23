@@ -5,6 +5,14 @@ icon: "rss"
 mode: "center"
 ---
 
+<Update label="July 23, 2026" tags={["fixes"]}>
+
+## Updates
+
+- **Grandfathered crews tightened to restricted egress.** Existing crews still on the legacy `network_mode=free` default are backfilled to `restricted` on upgrade, so they stop getting unrestricted outbound access. The column default itself is also flipped to `restricted`, so any crew created without an explicit network mode — a raw insert, a seed, a future migration — is now restricted by construction rather than defaulting open. A restricted crew still reaches all built-in LLM/CLI provider domains plus any it explicitly allowlists; if a crew genuinely needs open egress, re-open it to `free` (or add the domains it needs) from its network policy. See [Container isolation](/security/container-isolation).
+
+</Update>
+
 <Update label="May 29, 2026" tags={["features", "updates", "fixes"]}>
 
 ## Slash commands and per-user capabilities

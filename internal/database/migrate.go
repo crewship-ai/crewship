@@ -1673,6 +1673,11 @@ END;
 	{version: 145, name: "workspace_allow_privileged_credentials", sql: migrationWorkspaceAllowPrivilegedCredentials},
 	{version: 146, name: "perf_indexes", sql: migrationPerfIndexes},
 	{version: 147, name: "agent_avatar_svg", sql: migrationAgentAvatarSVG},
+	// v148 tightens grandfathered crews: backfills every legacy
+	// network_mode='free' row to 'restricted' so pre-v18 / seed-drift crews
+	// stop getting unrestricted egress. See
+	// migrate_consts_v148_backfill_network_mode_restricted.go (#1366).
+	{version: 148, name: "backfill_network_mode_restricted", fn: migrateBackfillNetworkModeRestricted},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
