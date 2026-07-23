@@ -328,3 +328,49 @@ func TestDeriveCrewToken_DomainSeparated(t *testing.T) {
 		t.Error("crew MAC collides with per-agent MAC (missing domain separation)")
 	}
 }
+
+func TestFingerprint_DeterministicAndDistinct(t *testing.T) {
+	t.Parallel()
+
+	// Empty token -> empty fingerprint (nothing for the server to compare).
+	if fp := Fingerprint(""); fp != "" {
+		t.Fatalf("Fingerprint(\"\") = %q, want empty", fp)
+	}
+
+	master := "master-secret"
+	tokA := DeriveCrewToken(master, "ws_1", "crew_a")
+	tokB := DeriveCrewToken(master, "ws_1", "crew_b")
+
+	fpA1 := Fingerprint(tokA)
+	fpA2 := Fingerprint(tokA)
+	if fpA1 == "" {
+		t.Fatal("expected non-empty fingerprint for a real token")
+	}
+	// Deterministic: the same token always fingerprints identically, so a
+	// sidecar and the server independently derive the same value.
+	if fpA1 != fpA2 {
+		t.Fatalf("Fingerprint not deterministic: %q != %q", fpA1, fpA2)
+	}
+	// 12 hex chars, matching the other /health digests.
+	if len(fpA1) != 12 {
+		t.Fatalf("Fingerprint length = %d, want 12 (%q)", len(fpA1), fpA1)
+	}
+	// Distinct tokens fingerprint differently (this is what lets the server
+	// notice a container holding a stale token).
+	if fpA1 == Fingerprint(tokB) {
+		t.Fatalf("distinct tokens shared a fingerprint: %q", fpA1)
+	}
+
+	// A token minted under a ROTATED master fingerprints differently — the
+	// #1385 orphan-detection signal.
+	tokRotated := DeriveCrewToken("different-master", "ws_1", "crew_a")
+	if Fingerprint(tokRotated) == fpA1 {
+		t.Fatal("token from a rotated master shares the old fingerprint — orphan detection would miss it")
+	}
+
+	// The fingerprint is not a substring of the token (one-way; nothing
+	// leaked to an agent reading /health).
+	if strings.Contains(tokA, fpA1) {
+		t.Fatalf("fingerprint %q appears inside the token %q", fpA1, tokA)
+	}
+}

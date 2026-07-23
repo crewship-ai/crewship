@@ -289,3 +289,33 @@ func VerifyCaller(token, workspaceID, callerUserID, signature string) bool {
 	}
 	return subtle.ConstantTimeCompare([]byte(signature), []byte(expected)) == 1
 }
+
+// fingerprintContext domain-separates the token-fingerprint HMAC from every
+// other derivation over the same secret. The fingerprint is a short, one-way
+// tag a sidecar can safely advertise on its /health endpoint so the server
+// can tell whether the container still holds the CURRENTLY-valid crew-bound
+// token (#1385) — without the sidecar ever echoing the token itself. The
+// trailing NUL keeps the label a fixed-length prefix.
+const fingerprintContext = "crewship internal-token fingerprint v1\x00"
+
+// Fingerprint returns a short, non-reversible tag for an internal token
+// (#1385). It is HMAC-SHA256(token, context) truncated to 12 hex chars — the
+// same shape as the sidecar's other /health digests (build hash, domains
+// hash). Two processes derive the SAME fingerprint for the same token, so the
+// server can compare a sidecar-reported fingerprint against the fingerprint of
+// the token it WOULD mint today: a mismatch means the container is holding a
+// token from a rotated master (an "orphan" after a restart that changed the
+// master). Returns "" for an empty token so an unconfigured sidecar reports
+// nothing to compare (the server then never false-classifies it as orphaned).
+//
+// The token keys the HMAC, so the fingerprint is one-way: an agent that reads
+// /health cannot recover the token from it, and matching a 48-bit tag grants
+// no advantage against the 256-bit crew MAC it would still have to forge.
+func Fingerprint(token string) string {
+	if token == "" {
+		return ""
+	}
+	m := hmac.New(sha256.New, []byte(token))
+	m.Write([]byte(fingerprintContext))
+	return hex.EncodeToString(m.Sum(nil))[:12]
+}

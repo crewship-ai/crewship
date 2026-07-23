@@ -455,6 +455,13 @@ type sidecarHealth struct {
 	// the sidecar binary currently on disk — i.e. the container is serving an
 	// OLD bind-mounted sidecar after a redeploy. Not part of the wire format.
 	Stale bool `json:"-"`
+	// TokenFP (#1385) is the sidecar's fingerprint of the crew-bound internal
+	// token it booted with (internaltoken.Fingerprint). Empty on a pre-#1385
+	// sidecar or a crew-less one. The reap-orphan-containers path compares it
+	// against the fingerprint of the token the server would mint today: a
+	// non-empty mismatch means this container was orphaned by a master rotation
+	// and now holds a permanently-rejected token.
+	TokenFP string `json:"token_fp"`
 }
 
 // sidecarHashReporter is the optional capability a ContainerProvider implements
@@ -503,6 +510,38 @@ func checkSidecar(ctx context.Context, ctr provider.ContainerProvider, container
 		}
 	}
 	return &h
+}
+
+// SidecarTokenFP probes a running container's sidecar /health and returns the
+// crew-bound internal-token fingerprint it advertises (#1385). Returns "" when
+// the sidecar isn't reachable/healthy, is crew-less, or predates the token_fp
+// field — every one of which the caller treats as "unknown", NEVER as
+// orphaned. Thin exported wrapper over checkSidecar so the admin
+// reap-orphan-containers handler (internal/api) can classify a container
+// without reimplementing the /health exec probe.
+func SidecarTokenFP(ctx context.Context, ctr provider.ContainerProvider, containerID string) string {
+	h := checkSidecar(ctx, ctr, containerID)
+	if h == nil {
+		return ""
+	}
+	return h.TokenFP
+}
+
+// SidecarTokenOrphaned reports whether a container's sidecar holds a STALE
+// crew-bound token: the fingerprint it advertises on /health (reportedFP)
+// disagrees with the fingerprint of the token the server would mint for that
+// crew today (expectedFP). It is the #1385 orphan test.
+//
+// Fails SAFE: an empty reportedFP (unreachable / pre-#1385 / crew-less
+// sidecar) or an empty expectedFP (internal auth unconfigured) is NEVER
+// classified as orphaned, so a reap only ever removes a container we can
+// positively prove is holding a rotated-master token — a healthy container is
+// never touched on ambiguity.
+func SidecarTokenOrphaned(reportedFP, expectedFP string) bool {
+	if reportedFP == "" || expectedFP == "" {
+		return false
+	}
+	return reportedFP != expectedFP
 }
 
 // DomainsHash mirrors internal/sidecar.DomainAllowlist.Hash() byte-for-byte
