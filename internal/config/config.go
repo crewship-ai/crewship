@@ -1,7 +1,9 @@
 package config
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -311,15 +313,36 @@ func Load(path string) (*Config, error) {
 		cfg.Auth.NextjsURL = fmt.Sprintf("http://localhost:%d", cfg.Server.Port)
 	}
 
-	// Auto-generate a cryptographically random internal token if none was
-	// configured. This eliminates the hardcoded "crewshipd" default that
-	// anyone knowing the source code could use to access decrypted credentials.
+	// Derive the internal-token master when none was explicitly configured
+	// (no `internal_token:` in the file, no CREWSHIP_INTERNAL_TOKEN env). An
+	// explicit value always wins — this block only fills the gap.
+	//
+	// #1385: the master must be STABLE across server restarts. It keys the
+	// crew-bound tokens (crwv1.<ws>.<crew>.<hmac>) minted into surviving agent
+	// containers; if the master changes on restart, every live container's
+	// token is rejected forever ("invalid crew-bound token") with no
+	// self-healing. A per-boot random (the old behavior) guaranteed that
+	// breakage on every restart. Deriving it deterministically from the
+	// PERSISTED ENCRYPTION_KEY (bootstrapped once to <dataDir>/secrets.env, or
+	// operator-supplied) makes a restart a no-op for live containers, with no
+	// new on-disk secret and no change to the operator override precedence.
+	//
+	// Security note: an attacker with ENCRYPTION_KEY can already decrypt every
+	// credential straight from the DB, so an HMAC-derived internal master
+	// grants no additional reach; the derivation is one-way and the master
+	// never leaves the server. When there is no encryption key (plaintext dev
+	// mode) there is nothing stable to anchor to, so we fall back to a per-boot
+	// random — that mode has no persisted secrets and ephemeral containers.
 	if cfg.Auth.InternalToken == "" {
-		token, err := generateRandomToken(32)
-		if err != nil {
-			return nil, fmt.Errorf("generate internal token: %w", err)
+		if seed := os.Getenv("ENCRYPTION_KEY"); seed != "" {
+			cfg.Auth.InternalToken = deriveInternalTokenMaster(seed)
+		} else {
+			token, err := generateRandomToken(32)
+			if err != nil {
+				return nil, fmt.Errorf("generate internal token: %w", err)
+			}
+			cfg.Auth.InternalToken = token
 		}
-		cfg.Auth.InternalToken = token
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -695,4 +718,22 @@ func generateRandomToken(bytes int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// internalTokenDerivationLabel domain-separates the internal-token master
+// from any other subkey derived off ENCRYPTION_KEY. The trailing NUL keeps
+// the label a fixed-length prefix so it can never collide with a
+// future-appended context.
+const internalTokenDerivationLabel = "crewship internal-token master derivation v1\x00"
+
+// deriveInternalTokenMaster produces a STABLE internal-token master from the
+// persisted ENCRYPTION_KEY (#1385). HMAC-SHA256 gives a one-way 256-bit
+// subkey — the same seed always yields the same master across restarts, so
+// crew-bound tokens held by surviving containers keep validating, while the
+// seed itself is never recoverable from the master. Callers use this only
+// when no explicit internal_token / CREWSHIP_INTERNAL_TOKEN is configured.
+func deriveInternalTokenMaster(seed string) string {
+	m := hmac.New(sha256.New, []byte(seed))
+	m.Write([]byte(internalTokenDerivationLabel))
+	return hex.EncodeToString(m.Sum(nil))
 }
