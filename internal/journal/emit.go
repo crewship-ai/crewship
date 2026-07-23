@@ -49,6 +49,15 @@ type Writer struct {
 	flushDur time.Duration
 	closed   chan struct{}
 	closeMu  sync.Mutex
+
+	// writeMu serializes persistBatch across the batch worker and any
+	// synchronous fallback (saturated queue, shutdown drain). The
+	// hash-chain reads each workspace's current head then extends it; two
+	// concurrent transactions could otherwise read the same head and mint
+	// duplicate seq values, which the UNIQUE(workspace_id, seq) index would
+	// reject — dropping an audit entry. One writer at a time keeps the
+	// chain append well-defined without relying on SQLite lock timing.
+	writeMu sync.Mutex
 }
 
 // DB exposes the underlying *sql.DB for callers that need to run a
@@ -397,8 +406,15 @@ func isPermanentDBError(err error) bool {
 
 const insertSQL = `INSERT INTO journal_entries
 	(id, workspace_id, crew_id, agent_id, mission_id, ts, entry_type, severity, priority,
-	 actor_type, actor_id, summary, payload, refs, trace_id, span_id, expires_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	 actor_type, actor_id, summary, payload, refs, trace_id, span_id, expires_at,
+	 seq, prev_hash, entry_hash)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+// chainHeadSQL fetches the current tip (highest seq, its entry_hash) of a
+// workspace's chain so a new entry can extend it. A workspace with no rows
+// yet returns no rows → genesis.
+const chainHeadSQL = `SELECT seq, entry_hash FROM journal_entries
+	WHERE workspace_id = ? ORDER BY seq DESC LIMIT 1`
 
 // withTx begins a transaction, runs fn, and commits. Any error — from
 // begin, fn, or commit — leaves the transaction rolled back via the
@@ -418,13 +434,31 @@ func withTx(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error) error {
 	return tx.Commit()
 }
 
+// chainHead tracks the tip of one workspace's hash-chain as a batch is
+// applied, so consecutive entries in the same batch extend each other in
+// memory without re-querying the DB per row.
+type chainHead struct {
+	seq      int64
+	prevHash string
+}
+
 func (w *Writer) persistBatch(ctx context.Context, batch []Entry) error {
+	// Serialize all writers (worker + synchronous fallback): the chain
+	// read-then-extend below must not interleave, or two txns mint the same
+	// seq and the UNIQUE(workspace_id, seq) index rejects one write.
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
+
 	return withTx(ctx, w.db, func(tx *sql.Tx) error {
 		stmt, err := tx.PrepareContext(ctx, insertSQL)
 		if err != nil {
 			return fmt.Errorf("journal: prepare: %w", err)
 		}
 		defer stmt.Close()
+
+		// Per-workspace chain heads, lazily loaded from the DB the first
+		// time a workspace appears in this batch.
+		heads := make(map[string]*chainHead, 4)
 
 		for _, e := range batch {
 			payload, err := e.payloadJSON()
@@ -435,17 +469,53 @@ func (w *Writer) persistBatch(ctx context.Context, batch []Entry) error {
 			if err != nil {
 				return fmt.Errorf("journal: marshal refs: %w", err)
 			}
+			tsStr := e.TS.UTC().Format("2006-01-02T15:04:05.000Z")
 			var expires sql.NullString
+			expiresStr := ""
 			if e.ExpiresAt != nil {
-				expires = sql.NullString{String: e.ExpiresAt.UTC().Format(time.RFC3339Nano), Valid: true} // tsformat:allow: pre-existing stored format; retention sweep compares against rows already written as RFC3339Nano
+				expiresStr = e.ExpiresAt.UTC().Format(time.RFC3339Nano) // tsformat:allow: pre-existing stored format; retention sweep compares against rows already written as RFC3339Nano
+				expires = sql.NullString{String: expiresStr, Valid: true}
 			}
+
+			head, ok := heads[e.WorkspaceID]
+			if !ok {
+				head, err = loadChainHead(ctx, tx, e.WorkspaceID)
+				if err != nil {
+					return err
+				}
+				heads[e.WorkspaceID] = head
+			}
+
+			seq := head.seq + 1
+			prevHash := head.prevHash
+			entryHash := ChainHash(prevHash, ChainFields{
+				Seq:       seq,
+				ID:        e.ID,
+				Workspace: e.WorkspaceID,
+				CrewID:    e.CrewID,
+				AgentID:   e.AgentID,
+				MissionID: e.MissionID,
+				TS:        tsStr,
+				EntryType: string(e.Type),
+				Severity:  string(e.Severity),
+				Priority:  priorityOrNormal(e.Priority),
+				ActorType: string(e.ActorType),
+				ActorID:   e.ActorID,
+				Summary:   e.Summary,
+				Payload:   payload,
+				Refs:      refs,
+				TraceID:   e.TraceID,
+				SpanID:    e.SpanID,
+				ExpiresAt: expiresStr,
+			})
+
 			_, err = stmt.ExecContext(ctx,
 				e.ID,
 				e.WorkspaceID,
 				nullable(e.CrewID),
 				nullable(e.AgentID),
 				nullable(e.MissionID),
-				e.TS.UTC().Format("2006-01-02T15:04:05.000Z"),
+				tsStr,
 				string(e.Type),
 				string(e.Severity),
 				priorityOrNormal(e.Priority),
@@ -457,13 +527,42 @@ func (w *Writer) persistBatch(ctx context.Context, batch []Entry) error {
 				nullable(e.TraceID),
 				nullable(e.SpanID),
 				expires,
+				seq,
+				prevHash,
+				entryHash,
 			)
 			if err != nil {
 				return fmt.Errorf("journal: insert %s: %w", e.Type, err)
 			}
+
+			head.seq = seq
+			head.prevHash = entryHash
 		}
 		return nil
 	})
+}
+
+// loadChainHead reads the current tip of a workspace's chain inside the
+// write transaction. No rows yet → genesis (seq 0, GenesisPrevHash), so the
+// first entry lands at seq 1 chaining onto the genesis prev_hash.
+func loadChainHead(ctx context.Context, tx *sql.Tx, workspaceID string) (*chainHead, error) {
+	head := &chainHead{seq: 0, prevHash: GenesisPrevHash}
+	var seq sql.NullInt64
+	var hash sql.NullString
+	err := tx.QueryRowContext(ctx, chainHeadSQL, workspaceID).Scan(&seq, &hash)
+	switch {
+	case err == sql.ErrNoRows:
+		return head, nil
+	case err != nil:
+		return nil, fmt.Errorf("journal: read chain head: %w", err)
+	}
+	if seq.Valid {
+		head.seq = seq.Int64
+	}
+	if hash.Valid {
+		head.prevHash = hash.String
+	}
+	return head, nil
 }
 
 // estimateBatchBytes is a rough size estimate used to cap the retry

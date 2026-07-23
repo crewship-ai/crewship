@@ -13,6 +13,7 @@ crewship journal [flags]
 crewship journal get <entry-id>
 crewship journal count [flags]
 crewship journal priority <entry-id> --mark <marker> [--reason <text>]
+crewship journal verify
 ```
 
 The top-level command is the list view. `--follow` opens an SSE connection to `/api/v1/journal/stream` and prints entries as they arrive (Ctrl-C to exit). The CLI auto-reconnects on transient failure with bounded exponential backoff (1 s → 30 s) and threads `Last-Event-ID` so a brief disconnect resumes without dropping or duplicating entries. For pretty in-browser viewing, the web UI `/journal` page is also available.
@@ -117,6 +118,36 @@ crewship journal priority j_abc --mark normal
 ```
 
 The `--mark` value is validated client-side before the request goes out. Each invocation also writes a `memory.priority_changed` audit entry to the journal carrying the previous and new priority plus the supplied reason — so the curation history is itself queryable.
+
+## `crewship journal verify`
+
+Verify the workspace's audit **hash-chain** is intact — the tamper-evidence
+check for the append-only journal. Every entry commits to its own content plus
+the hash of the preceding entry, so any after-the-fact edit, in-place reorder,
+or deletion of a middle row breaks the chain and is reported here. Requires
+OWNER or ADMIN.
+
+```bash
+crewship journal verify
+crewship journal verify --format json
+```
+
+Backed by `GET /api/v1/admin/journal/verify` (workspace-scoped, no arguments).
+On a healthy journal it prints `Journal chain OK — N entries verified, no
+tampering detected.` and exits `0`. On a broken chain it prints the first bad
+`seq`/entry and the reason, and **exits non-zero** — so you can gate a cron job
+or CI check on it:
+
+```bash
+if ! crewship journal verify; then
+  echo "AUDIT TRAIL TAMPERED — investigate immediately" >&2
+fi
+```
+
+`--format json` emits the raw result (`ok`, `count`, `broken_seq`,
+`broken_id`, `reason`) for machine consumers. See the
+[Audit Log](/security/audit#tamper-evidence-the-journal-hash-chain) page for
+the guarantee and what it does (and does not) cover.
 
 ## `crewship journal lookup`
 

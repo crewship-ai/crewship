@@ -176,6 +176,84 @@ WriteAuditLog(r.Context(), h.db, h.journal, "create", "AGENT", agentID, userID, 
 
 The function generates a random hex ID, writes the row in the same request context, and — when `j` is non-nil — dual-emits a typed `audit.entity_*` entry into the unified Crew Journal. If the write fails, a warning is logged but the original operation is not rolled back -- the audit log is best-effort to avoid blocking user operations.
 
+## Tamper-Evidence: the Journal Hash-Chain
+
+Crewship deliberately chooses **accountability ex-post** over real-time
+control, which makes the journal the load-bearing safety mechanism. To keep
+that record trustworthy, every `journal_entries` row is linked into a
+per-workspace **hash-chain**:
+
+- **`seq`** — a per-workspace monotonic sequence number (1-based). It gives a
+  deterministic order independent of the random `id` primary key and the
+  wall-clock `ts` (which can collide), and a deleted middle row shows up as a
+  gap. A `UNIQUE(workspace_id, seq)` index enforces that no two rows share a
+  slot.
+- **`prev_hash`** — the `entry_hash` of the immediately preceding entry in the
+  same workspace. The first entry (genesis) uses the empty string.
+- **`entry_hash`** — `SHA-256` over the entry's committed content **plus**
+  `prev_hash`.
+
+### What the chain detects
+
+Because each entry commits to the one before it, any of the following breaks
+the chain and is caught by verification:
+
+- **Mutation** — editing any committed field of a written row (the recomputed
+  `entry_hash` no longer matches the stored one).
+- **Reorder** — swapping entries in place (the `prev_hash` linkage no longer
+  matches).
+- **Mid-chain deletion** — removing a row leaves a `seq` gap.
+
+<Note>
+  The chain alone cannot detect **tail truncation** — deleting the newest N
+  entries leaves a shorter but internally-consistent chain. Anchoring the tip
+  with **signed compaction checkpoints** closes that gap and is the tracked
+  follow-up (issue #1369).
+</Note>
+
+### Determinism
+
+Hashing never depends on Go map iteration order. `payload` and `refs` are
+hashed as their stored JSON strings (encoding/json emits map keys sorted), and
+every field is **length-framed** (an 8-byte length prefix) before hashing, so
+no value can be confused with a delimiter or spill into its neighbour. The same
+`ChainHash` function is used by the write path, the verifier, and the migration
+backfill, so they can never drift.
+
+### Verifying integrity
+
+Run verification for the current workspace with the CLI (ADMIN or OWNER):
+
+```bash
+crewship journal verify
+```
+
+It walks the chain and prints `Journal chain OK — N entries verified` or, on a
+break, the first bad `seq`/entry and the reason. The command **exits non-zero**
+when the chain is broken, so it can gate a cron job or CI check. The `--format
+json` variant emits the raw result for machine consumers.
+
+The same check is available over HTTP:
+
+```
+GET /api/v1/admin/journal/verify        # ADMIN or OWNER
+```
+
+```json
+{ "workspace_id": "ws-uuid", "ok": true, "count": 128 }
+```
+
+On a broken chain the response stays `200` with `"ok": false` plus
+`broken_seq`, `broken_id`, and a human-readable `reason`.
+
+<Info>
+  Upgrading an existing instance runs a migration that **backfills** every
+  historical row into a valid chain (ordered by `workspace_id, ts, id`), so
+  verification passes immediately after upgrade. On shared dev slots a
+  nuke+reseed is still the cleanest path, since any out-of-band edits made
+  before the upgrade are frozen into the chain as genuine.
+</Info>
+
 ## What's Next
 
 <CardGroup cols={2}>

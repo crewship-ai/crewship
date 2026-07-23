@@ -28,6 +28,7 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | `GET` | [/api/v1/admin/memory/config](#get-api-v1-admin-memory-config) | Read per-workspace memory configuration |
 | `PATCH` | [/api/v1/admin/memory/config](#patch-api-v1-admin-memory-config) | Partial-merge update of memory configuration |
 | `GET` | [/api/v1/admin/keeper/requests](#get-api-v1-admin-keeper-requests) | Keeper access-request audit log |
+| `GET` | [/api/v1/admin/journal/verify](#get-api-v1-admin-journal-verify) | Verify the audit journal hash-chain (tamper-evidence) |
 | `POST` | [/api/v1/internal/keeper/skill-review](#post-api-v1-internal-keeper-skill-review) | F4.1 — periodic skill audit |
 | `POST` | [/api/v1/internal/keeper/behavior](#post-api-v1-internal-keeper-behavior) | F4.2 — post-tool-call behavior monitor |
 | `POST` | [/api/v1/internal/keeper/memory-health](#post-api-v1-internal-keeper-memory-health) | F4.3 — periodic memory consolidation review |
@@ -258,6 +259,38 @@ Lists workspace details with member, agent, and crew counts.
 <Note>
   This endpoint is scoped to the current workspace only. It does not list other workspaces in the system.
 </Note>
+
+## GET /api/v1/admin/journal/verify
+
+Walks the current workspace's journal **hash-chain** and reports whether it is
+intact — the tamper-evidence check for the append-only journal (`internal/api/admin_journal_integrity.go`). Detects content mutation, in-place reorder, and mid-chain deletion; see [Audit Log → Tamper-Evidence](/security/audit#tamper-evidence-the-journal-hash-chain) for the guarantee.
+
+**Required role:** ADMIN or OWNER (`canRole(role, "manage")`)
+
+The endpoint takes no parameters; the workspace comes from request context (`X-Workspace-ID`). It stays `200 OK` even when the chain is broken — inspect `ok`.
+
+### Response
+
+```json
+{
+  "workspace_id": "ws-uuid",
+  "ok": false,
+  "count": 42,
+  "broken_seq": 43,
+  "broken_id": "j_9f3c…",
+  "reason": "content hash mismatch at seq 43: entry was modified after write"
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ok` | boolean | `true` when the whole chain verifies |
+| `count` | integer | Entries walked before returning |
+| `broken_seq` | integer | `seq` of the first bad entry (omitted when `ok`) |
+| `broken_id` | string | `id` of the first bad entry (omitted when `ok`) |
+| `reason` | string | Human-readable cause of the break (omitted when `ok`) |
+
+CLI parity: `crewship journal verify` (exits non-zero on a broken chain).
 
 ## Audit log
 

@@ -191,7 +191,10 @@ func TestWriter_PersistBatch_RollbackOnPartialFailure(t *testing.T) {
 			summary TEXT NOT NULL,
 			payload TEXT NOT NULL DEFAULT '{}',
 			refs TEXT NOT NULL DEFAULT '{}',
-			trace_id TEXT, span_id TEXT, expires_at TEXT
+			trace_id TEXT, span_id TEXT, expires_at TEXT,
+			seq INTEGER NOT NULL DEFAULT 0,
+			prev_hash TEXT NOT NULL DEFAULT '',
+			entry_hash TEXT NOT NULL DEFAULT ''
 		);
 	`); err != nil {
 		t.Fatalf("schema: %v", err)

@@ -1678,6 +1678,13 @@ END;
 	// stop getting unrestricted egress. See
 	// migrate_consts_v148_backfill_network_mode_restricted.go (#1366).
 	{version: 148, name: "backfill_network_mode_restricted", fn: migrateBackfillNetworkModeRestricted},
+
+	// v149 makes the audit journal tamper-evident: per-workspace hash-chain
+	// (seq + prev_hash + entry_hash) on journal_entries, backfilled into a
+	// valid chain for existing rows, plus a UNIQUE(workspace_id, seq) guard.
+	// journal.VerifyChain then detects mutation / reorder / mid-chain
+	// deletion. See migrate_consts_v149_journal_hash_chain.go (#1369).
+	{version: 149, name: "journal_hash_chain", fn: migrationJournalHashChain},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
