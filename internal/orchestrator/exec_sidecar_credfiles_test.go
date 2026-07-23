@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/credpolicy"
 )
 
 // pemFixture builds a fake PEM block at runtime so the literal
@@ -245,6 +247,59 @@ func TestBuildCredFileScript_PerType(t *testing.T) {
 						t.Errorf(".env missing line %q\ndecoded .env:\n%s", line, env)
 					}
 				}
+			}
+		})
+	}
+}
+
+// TestBuildCredFileScript_DeliveryChannelIsTableDriven pins the #1364 nit: the
+// file-vs-skip decision in buildCredFileScript is governed by the credpolicy
+// table (Delivery=file), NOT by a hard-coded `switch c.Type` allow-list. For
+// every credential type the table classifies as file-mounted the builder must
+// emit a file; for every non-file type (proxy / env / none) it must skip. This
+// keeps the delivery channel in lockstep with secrets_cleanup.go, which counts
+// mounted files via the same credpolicy.For(...).FileMounted() call — so a
+// Delivery=file row can no longer be counted by cleanup yet never written here.
+//
+// (Not red on today's main: the old hard-coded switch happened to match the
+// table exactly, so no existing type diverges. The value is forward-looking —
+// add a Delivery=file row for a new type and this asserts the builder writes it
+// without anyone having to remember to edit the switch.)
+func TestBuildCredFileScript_DeliveryChannelIsTableDriven(t *testing.T) {
+	t.Parallel()
+
+	// One representative credential per known type, with the type-specific
+	// fields (Username for USERPASS, PEM bodies) populated so the builder can
+	// produce a valid spec for the file-mounted ones.
+	fixtures := map[string]Credential{
+		"SECRET":         {EnvVarName: "WEBHOOK_SECRET", PlainValue: "shhh"},
+		"GENERIC_SECRET": {EnvVarName: "STRIPE_HOOK", PlainValue: "whsec_xxx"},
+		"CLI_TOKEN":      {EnvVarName: "GH_TOKEN", PlainValue: "ghp_xxx"},
+		"USERPASS":       {EnvVarName: "GMAIL", PlainValue: "pa55", Username: "u@x"},
+		"SSH_KEY":        {EnvVarName: "GITHUB_SSH", PlainValue: pemFixture("OPENSSH PRIVATE KEY", "ABC")},
+		"CERTIFICATE":    {EnvVarName: "MTLS_CLIENT", PlainValue: pemFixture("CERTIFICATE", "ABC")},
+		"API_KEY":        {EnvVarName: "ANTHROPIC_API_KEY", PlainValue: "sk-ant"},
+		"AI_CLI_TOKEN":   {EnvVarName: "CLAUDE_TOKEN", PlainValue: "sk-ant-oat"},
+		"OAUTH2":         {EnvVarName: "LINEAR_OAUTH", PlainValue: "oat_xxx"},
+		"ENDPOINT_URL":   {EnvVarName: "BASE_URL", PlainValue: "https://api.example.com"},
+	}
+
+	for ty, base := range fixtures {
+		ty, base := ty, base
+		t.Run(ty, func(t *testing.T) {
+			t.Parallel()
+			base.Type = ty
+			// Keeper OFF so the delivery-channel decision (not the Keeper gate)
+			// is what's under test.
+			script, count, err := buildCredFileScript([]Credential{base}, "/secrets/agent-a", false)
+			if err != nil {
+				t.Fatalf("buildCredFileScript(%s): %v", ty, err)
+			}
+			wantFile := credpolicy.For(ty).FileMounted()
+			gotFile := script != "" && count > 0
+			if gotFile != wantFile {
+				t.Errorf("%s: file-delivered=%v, want %v (credpolicy Delivery=%q)\nscript=%q",
+					ty, gotFile, wantFile, credpolicy.For(ty).Delivery, script)
 			}
 		})
 	}

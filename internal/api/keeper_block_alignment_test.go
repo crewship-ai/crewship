@@ -52,9 +52,10 @@ func TestBuildKeeperBlock_WithholdSetMatchesFileGate(t *testing.T) {
 }
 
 // TestBuildKeeperBlock_RedactsListedValues confirms the block never embeds a
-// SECRET's cleartext value while advertising it — the entry it lists is wiped
-// (Value = "") as a side effect, so a later mcpCredEntry consumer can't reuse
-// the plaintext of a credential the agent is being told it does not have.
+// SECRET's cleartext value while advertising it, and that the resolver
+// chokepoint (withholdKeeperSecretValues) wipes the entry so a later
+// mcpCredEntry consumer can't reuse the plaintext of a credential the agent is
+// being told it does not have. buildKeeperBlock itself is read-only now (#1364).
 func TestBuildKeeperBlock_RedactsListedValues(t *testing.T) {
 	h := covCfgHandler(nil)
 	creds := []mcpCredEntry{
@@ -64,7 +65,8 @@ func TestBuildKeeperBlock_RedactsListedValues(t *testing.T) {
 	if strings.Contains(block, "hunter2") {
 		t.Errorf("keeper block must not contain the SECRET plaintext; got:\n%s", block)
 	}
+	withholdKeeperSecretValues(creds)
 	if creds[0].Value != "" {
-		t.Errorf("SECRET entry value must be wiped after listing, got %q", creds[0].Value)
+		t.Errorf("SECRET entry value must be wiped by withholdKeeperSecretValues, got %q", creds[0].Value)
 	}
 }

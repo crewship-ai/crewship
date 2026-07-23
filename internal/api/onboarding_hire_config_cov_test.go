@@ -1068,7 +1068,8 @@ func TestCovOHCBuildKeeperBlock(t *testing.T) {
 	if got := h.buildKeeperBlock("bot", []mcpCredEntry{{EnvVar: "X", Type: "API_KEY"}}); got != "" {
 		t.Errorf("non-secret creds should yield empty keeper block, got %q", got)
 	}
-	// One SECRET cred → block lists it AND the value is scrubbed in-place.
+	// One SECRET cred → block lists it (read-only); the value is scrubbed by the
+	// explicit withholdKeeperSecretValues chokepoint, not by buildKeeperBlock (#1364).
 	creds := []mcpCredEntry{{EnvVar: "DB_PW", Type: "SECRET", Value: "supersecret"}}
 	block := h.buildKeeperBlock("bot", creds)
 	if !strings.Contains(block, "DB_PW") {
@@ -1077,8 +1078,9 @@ func TestCovOHCBuildKeeperBlock(t *testing.T) {
 	if !strings.Contains(block, "agent_slug\":\"bot\"") {
 		t.Errorf("keeper block missing agent_slug: %q", block)
 	}
+	withholdKeeperSecretValues(creds)
 	if creds[0].Value != "" {
-		t.Errorf("SECRET cred value not scrubbed, still = %q", creds[0].Value)
+		t.Errorf("SECRET cred value not scrubbed by withholdKeeperSecretValues, still = %q", creds[0].Value)
 	}
 }
 
