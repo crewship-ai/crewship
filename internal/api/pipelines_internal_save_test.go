@@ -61,10 +61,16 @@ func TestPipelineInternalSave_HappyPath(t *testing.T) {
 	seedAgentRow(t, db, "a-pipe", wsID, crewID, "Lead", "agent_lead", "LEAD")
 
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
-	freshTestRun := time.Now().UTC().Format(time.RFC3339)
+	// #1371: the agent-authored gate clears only against an HMAC save_token
+	// (minted by the internal test_run), never a forgeable body flag. Mint one
+	// over the exact definition bytes + authoring crew this save carries.
+	h.SetSaveTokenSecret([]byte("internal-save-happy-secret"))
+	def := `{"name":"my-pipe","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`
+	token := signSaveToken([]byte("internal-save-happy-secret"), wsID,
+		definitionHashHex([]byte(def)), internalSaveTokenSubject(crewID), time.Now())
 	body := `{"workspace_id":"` + wsID + `","slug":"my-pipe","name":"My Pipe","author_crew_id":"` + crewID + `",` +
-		`"last_test_run_passed":true,"last_test_run_at":"` + freshTestRun + `",` +
-		`"definition":{"name":"my-pipe","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}}`
+		`"save_token":"` + token + `",` +
+		`"definition":` + def + `}`
 	req := httptest.NewRequest("POST", "/api/v1/internal/pipelines/save", bytes.NewBufferString(body))
 	rr := httptest.NewRecorder()
 	h.InternalSave(rr, req)

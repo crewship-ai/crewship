@@ -33,6 +33,9 @@ func foreignIDsHandlers(t *testing.T) (*InternalHandler, scopeIDs, *AssignmentHa
 	ah := NewAssignmentHandler(h.db, nil, nil, scopeMaster, testLogger())
 	qh := NewQueryHandler(h.db, nil, nil, scopeMaster, testLogger())
 	ph := NewPipelineHandler(h.db, testLogger(), nil, nil)
+	// #1371: InternalSave clears its store test-gate only against an HMAC
+	// save_token, so the same-workspace OK case must present a valid one.
+	ph.SetSaveTokenSecret([]byte(testSaveTokenSecret1371))
 	return h, ids, ah, qh, ph
 }
 
@@ -136,7 +139,6 @@ func TestSecBinding_ForeignBodyIDs403(t *testing.T) {
 // token — must keep working for every handler gaining the foreign-ID
 // check.
 func TestSecBinding_SameWorkspaceBodyIDsOK(t *testing.T) {
-	freshRun := time.Now().UTC().Format(time.RFC3339)
 	cases := []struct {
 		name     string
 		body     func(ids scopeIDs) map[string]any
@@ -189,16 +191,25 @@ func TestSecBinding_SameWorkspaceBodyIDsOK(t *testing.T) {
 		{
 			name: "pipeline internal save own author crew",
 			body: func(ids scopeIDs) map[string]any {
+				def := map[string]any{
+					"name": "legit-pipe",
+					"steps": []map[string]any{
+						{"id": "a", "type": "agent_run", "agent_slug": "aagent", "prompt": "hi"},
+					},
+				}
+				// #1371: mint a save_token over the exact definition bytes the
+				// body will carry (json.Marshal is deterministic for maps, so
+				// the standalone hash matches the RawMessage the handler decodes)
+				// + the author crew. A master token leaves author_crew_id as
+				// supplied, so the subject binds to ids.crewA.
+				defBytes, _ := json.Marshal(def)
+				token := signSaveToken([]byte(testSaveTokenSecret1371), ids.wsA,
+					definitionHashHex(defBytes), internalSaveTokenSubject(ids.crewA), time.Now())
 				return map[string]any{
 					"workspace_id": ids.wsA, "slug": "legit-pipe", "name": "Legit",
-					"author_crew_id":       ids.crewA,
-					"last_test_run_passed": true, "last_test_run_at": freshRun,
-					"definition": map[string]any{
-						"name": "legit-pipe",
-						"steps": []map[string]any{
-							{"id": "a", "type": "agent_run", "agent_slug": "aagent", "prompt": "hi"},
-						},
-					},
+					"author_crew_id": ids.crewA,
+					"save_token":     token,
+					"definition":     def,
 				}
 			},
 			handler: func(_ *AssignmentHandler, _ *QueryHandler, ph *PipelineHandler) http.HandlerFunc {

@@ -43,6 +43,16 @@ const (
 	saveTokenSep = "."
 )
 
+// internalSaveTokenSubject is the subject a save_token is bound to on the
+// agent-authored (InternalSave) path, where there is no user identity — it
+// binds the token to the AUTHORING CREW instead. The "crew:" prefix keeps
+// this subject namespace disjoint from the user path's raw user IDs so a
+// token minted for the interactive surface can never verify on the
+// autonomous one (or vice versa). See #1371: autonomous >= interactive.
+func internalSaveTokenSubject(crewID string) string {
+	return "crew:" + crewID
+}
+
 // signSaveToken returns "<unix_ts>.<hex_hmac>". Inputs are
 // concatenated with pipe — the pipe is also non-base64/hex so a
 // crafted definition_hash can't collide with the boundary.

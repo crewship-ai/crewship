@@ -26,7 +26,12 @@ func newPipelineHandlerForCRUDTest(t *testing.T) (*PipelineHandler, string, stri
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	return NewPipelineHandler(db, logger, nil, nil), userID, wsID
+	h := NewPipelineHandler(db, logger, nil, nil)
+	// #1371: agent-authored saves clear the store test-gate only against an
+	// HMAC save_token, so tests that drive InternalSave need the signing
+	// secret wired (mirrors cmd_start.go SetSaveTokenSecret).
+	h.SetSaveTokenSecret([]byte(testSaveTokenSecret1371))
+	return h, userID, wsID
 }
 
 // seedPipelineWithVersions inserts a pipelines row plus N pipeline_versions
