@@ -7,10 +7,13 @@ import {
   Copy,
   CheckCircle2,
   XCircle,
+  KeyRound,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { useAgentFetch } from "@/hooks/use-agent-fetch"
+import { useAbilities } from "@/hooks/use-abilities"
 import { apiFetch } from "@/lib/api-fetch"
 
 interface AgentScheduleInfo {
@@ -34,6 +37,19 @@ export interface TriggersTabProps {
 
 export function TriggersTab({ agentId, workspaceId }: TriggersTabProps) {
   const [copied, setCopied] = useState(false)
+  // Webhook signing-secret rotation (#999 / #1378). The secret is show-once:
+  // no read endpoint returns it, so a fresh POST is the only way to obtain one.
+  // We hold the plaintext in local state ONLY until the user dismisses it.
+  const [rotating, setRotating] = useState(false)
+  const [newSecret, setNewSecret] = useState<string | null>(null)
+  const [secretSet, setSecretSet] = useState<boolean | null>(null)
+  const [secretCopied, setSecretCopied] = useState(false)
+
+  // Rotation is the same per-agent edit gate as the settings PATCH
+  // (canEditAgent server-side: OWNER/ADMIN always, MANAGER conditionally).
+  // MEMBER/VIEWER can't update agents, so hide the control for them.
+  const { abilities } = useAbilities()
+  const canRotate = abilities.can("update", "Agent")
 
   const { data: agent, loading } = useAgentFetch<AgentScheduleInfo>(
     async (signal) => {
@@ -52,6 +68,46 @@ export function TriggersTab({ agentId, workspaceId }: TriggersTabProps) {
   const webhookUrl = agent.crew_id && agent.slug
     ? `/api/v1/webhooks/${agent.crew_id}/${agentId}/trigger`
     : null
+
+  // Local state wins once we've rotated in this session; otherwise fall back to
+  // the presence flag from GET.
+  const hasSecret = secretSet ?? agent.webhook_secret_set ?? false
+
+  async function handleRotate() {
+    if (rotating) return
+    setRotating(true)
+    setNewSecret(null)
+    try {
+      const r = await apiFetch(
+        `/api/v1/agents/${agentId}/webhook-secret/rotate?workspace_id=${workspaceId}`,
+        { method: "POST" },
+      )
+      if (!r.ok) {
+        let msg = `HTTP ${r.status}`
+        try {
+          const e = (await r.json()) as { error?: string; detail?: string }
+          msg = e.error ?? e.detail ?? msg
+        } catch {
+          /* keep the status fallback */
+        }
+        toast.error(`Failed to rotate secret: ${msg}`)
+        return
+      }
+      const body = (await r.json()) as { webhook_secret?: string }
+      if (body.webhook_secret) {
+        // Show-once: the previous secret stops validating immediately, so make
+        // it clear the operator must copy it into the external system now.
+        setNewSecret(body.webhook_secret)
+        setSecretSet(true)
+        setSecretCopied(false)
+        toast.success("New webhook secret generated — copy it now, it won't be shown again")
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to rotate secret")
+    } finally {
+      setRotating(false)
+    }
+  }
 
   return (
     <div className="p-3 space-y-4 text-sm">
@@ -122,10 +178,75 @@ export function TriggersTab({ agentId, workspaceId }: TriggersTabProps) {
             </div>
             <p className="text-micro text-muted-foreground">
               POST with JSON body.{" "}
-              {agent.webhook_secret_set
-                ? "Signature header required — rotate the secret via `crewship agent rotate-webhook-secret`."
-                : "No secret configured."}
+              {hasSecret
+                ? "Signature header required (X-Signature: hex HMAC-SHA256 of the raw body)."
+                : "No signing secret configured — deliveries are unsigned."}
             </p>
+
+            {/* Signing secret rotation (#1378). Show-once: the plaintext is
+                displayed exactly once, right after minting. */}
+            {canRotate && (
+              <div className="pt-1 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2.5 text-xs gap-1.5"
+                    disabled={rotating}
+                    onClick={() => { void handleRotate() }}
+                    data-testid="webhook-rotate-secret"
+                  >
+                    {rotating ? <Spinner className="h-3 w-3" /> : <KeyRound className="h-3 w-3" />}
+                    {rotating ? "Rotating…" : hasSecret ? "Rotate secret" : "Generate secret"}
+                  </Button>
+                  {hasSecret && !newSecret && (
+                    <span className="flex items-center gap-1 text-micro text-emerald-500">
+                      <CheckCircle2 className="h-3 w-3" /> Secret set
+                    </span>
+                  )}
+                </div>
+
+                {newSecret && (
+                  <div
+                    className="rounded-md border border-amber-500/40 bg-amber-500/5 px-2.5 py-2 space-y-1.5"
+                    data-testid="webhook-secret-reveal"
+                  >
+                    <p className="text-micro text-amber-600 dark:text-amber-400">
+                      Copy this now — it is shown once and the previous secret already stopped validating.
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <code className="text-micro bg-accent px-1.5 py-0.5 rounded font-mono truncate flex-1">
+                        {newSecret}
+                      </code>
+                      <button
+                        type="button"
+                        aria-label={secretCopied ? "Secret copied" : "Copy webhook secret"}
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(newSecret)
+                            setSecretCopied(true)
+                            setTimeout(() => setSecretCopied(false), 2000)
+                          } catch {
+                            toast.error("Failed to copy secret")
+                          }
+                        }}
+                        className="p-1 rounded hover:bg-accent text-muted-foreground"
+                      >
+                        {secretCopied ? <CheckCircle2 className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setNewSecret(null)}
+                      className="text-micro text-muted-foreground hover:text-foreground underline"
+                    >
+                      I&apos;ve stored it — dismiss
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <p className="text-label text-muted-foreground">Assign agent to a crew to enable webhooks.</p>

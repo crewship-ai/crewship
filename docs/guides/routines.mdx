@@ -811,7 +811,11 @@ Per-step `complexity` annotation drives the resolver. With `on_fail: "escalate_t
 
 ## Save validation gate
 
-Save endpoints (sidecar `/pipelines/save`, user `/api/v1/workspaces/{ws}/pipelines/save`, internal `/api/v1/internal/pipelines/save`) require the routine to clear a validation gate before it persists. The gate is a **dry-run validation** of the draft, not a real execution — there is no "test run" mode (you cannot run an agent dry). The sidecar agent-authoring flow forwards the draft to `/api/v1/internal/pipelines/test_run`, which parses, schema-validates, and dry-runs it (rendering every template, invoking no agent); on success it sets `last_test_run_passed` and forwards to save.
+Save endpoints (sidecar `/pipelines/save`, user `/api/v1/workspaces/{ws}/pipelines/save`, internal `/api/v1/internal/pipelines/save`) require the routine to clear a validation gate before it persists. The gate is a **dry-run validation** of the draft, not a real execution — there is no "test run" mode (you cannot run an agent dry). The sidecar agent-authoring flow forwards the draft to `/api/v1/internal/pipelines/test_run`, which parses, schema-validates, and dry-runs it (rendering every template, invoking no agent); on success **it mints an HMAC `save_token`** bound to (workspace, definition hash, authoring crew) and forwards that token to save. `InternalSave` verifies the token — it does **not** trust a body-supplied "it passed" claim.
+
+<Warning>
+**Autonomous ≥ interactive: the gate never weakens for agents.** The agent-authored path (`InternalSave`) is held to the *same* proof-of-test bar as the interactive user path. Both clear the store gate only against a server-verified `save_token` minted by a real dry-run — the old `last_test_run_at` / `last_test_run_passed` body fields are **forgeable and no longer trusted** on either path ([#1371](https://github.com/crewship-ai/crewship/issues/1371)). An agent cannot author *and activate* a routine that never passed a dry-run by simply claiming it did. This is a security invariant: every gate that guards an interactive save must guard the unattended one at least as tightly.
+</Warning>
 
 This is the **self-improvement loop**: an authoring agent that writes brittle DSL gets a structured failure report it can read and revise from. Without the gate, MVP would ship pipelines that pass schema but fail at runtime. Real execution happens on the first live `run`, and risky routines are human-reviewed (governance) before they go live.
 

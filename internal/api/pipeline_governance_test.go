@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 // --- helpers --------------------------------------------------------------
@@ -24,11 +23,15 @@ func httpRoutineDef() string {
 		`{"id":"h","type":"http","http":{"method":"GET","url":"https://api.example.com/x"}}]}`
 }
 
+// internalSaveBody builds an InternalSave request that clears the #1371
+// store test-gate by attaching a valid save_token (minted with the same
+// canonical test secret newPipelineHandlerForCRUDTest wires). `def` is
+// embedded verbatim so its bytes match the hash the token is signed over.
 func internalSaveBody(t *testing.T, wsID, slug, crewID, def string) string {
 	t.Helper()
-	fresh := time.Now().UTC().Format(time.RFC3339)
+	token := signInternalSaveTokenForTest([]byte(testSaveTokenSecret1371), wsID, crewID, def)
 	return `{"workspace_id":"` + wsID + `","slug":"` + slug + `","name":"` + slug + `","author_crew_id":"` + crewID + `",` +
-		`"last_test_run_passed":true,"last_test_run_at":"` + fresh + `","definition":` + def + `}`
+		`"save_token":"` + token + `","definition":` + def + `}`
 }
 
 func doInternalSave(t *testing.T, h *PipelineHandler, body string) *httptest.ResponseRecorder {

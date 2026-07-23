@@ -7,9 +7,32 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/pflag"
+
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
 )
+
+// covSetCapAdd sets the cap-add StringSlice flag cleanly (pflag StringSlice Set
+// APPENDS after the first call, so covSetFlagCli5 is unusable for it) and marks
+// it Changed so the #1380 security dispatch fires. Restores empty on cleanup.
+func covSetCapAdd(t *testing.T, vals ...string) {
+	t.Helper()
+	f := crewConfigCmd.Flags().Lookup("cap-add")
+	if f == nil {
+		t.Fatal("flag --cap-add not registered")
+	}
+	sv, ok := f.Value.(pflag.SliceValue)
+	if !ok {
+		t.Fatal("cap-add is not a SliceValue")
+	}
+	_ = sv.Replace(vals)
+	f.Changed = true
+	t.Cleanup(func() {
+		_ = sv.Replace(nil)
+		f.Changed = false
+	})
+}
 
 // ─── pure helpers ────────────────────────────────────────────────────────
 
@@ -72,6 +95,25 @@ func covResetCrewConfigFlags(t *testing.T) {
 	covSetFlagCli5(t, crewConfigCmd, "devcontainer", "")
 	covSetFlagCli5(t, crewConfigCmd, "mise", "")
 	covSetFlagCli5(t, crewConfigCmd, "runtime-image", "")
+	covSetFlagCli5(t, crewConfigCmd, "privileged", "false")
+	covSetFlagCli5(t, crewConfigCmd, "init", "false")
+	// cap-add is a StringSlice (Set appends); reset it via SliceValue.Replace.
+	if f := crewConfigCmd.Flags().Lookup("cap-add"); f != nil {
+		if sv, ok := f.Value.(pflag.SliceValue); ok {
+			_ = sv.Replace(nil)
+		}
+	}
+	// pflag marks a flag Changed on every Set (including the resets above and
+	// any prior test's Set), and the crewConfigCmd is package-global — so the
+	// #1380 security dispatch, which keys off Changed(), would leak across
+	// tests. Clear the Changed bit for every flag we touch to keep tests
+	// hermetic regardless of run order.
+	for _, name := range []string{"show", "export", "clear", "devcontainer", "mise",
+		"runtime-image", "privileged", "init", "cap-add"} {
+		if f := crewConfigCmd.Flags().Lookup(name); f != nil {
+			f.Changed = false
+		}
+	}
 }
 
 func TestCrewConfigRunE_NoMode(t *testing.T) {
@@ -232,6 +274,63 @@ func TestCrewConfigRunE_SetAllThree(t *testing.T) {
 	}
 	if body["runtime_image"] != "ubuntu:24.04" {
 		t.Errorf("runtime_image = %q", body["runtime_image"])
+	}
+}
+
+// #1380: --privileged / --cap-add merge onto the stored devcontainer_config
+// (preserving image/features) and PATCH it back, where the server validates.
+func TestCrewConfigRunE_SetSecurityMergesConfig(t *testing.T) {
+	stub := covSetupCli5(t)
+	covResetCrewConfigFlags(t)
+	stub.OnGet("/api/v1/crews/"+covCrewIDCli5, clitest.JSONResponse(200, map[string]any{
+		"id":                  covCrewIDCli5,
+		"name":                "Backend",
+		"slug":                "backend",
+		"devcontainer_config": `{"image":"debian:bookworm-slim","features":{"x":{}}}`,
+	}))
+	stub.OnPatch("/api/v1/crews/"+covCrewIDCli5, clitest.JSONResponse(200, map[string]any{"ok": true}))
+	covSetFlagCli5(t, crewConfigCmd, "privileged", "true")
+	covSetCapAdd(t, "cap_net_bind_service")
+
+	var err error
+	covCaptureAll(t, func() { err = crewConfigCmd.RunE(crewConfigCmd, []string{covCrewIDCli5}) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	var body map[string]string
+	clitest.MustDecodeJSONBody(stub.CallsFor("PATCH", "/api/v1/crews/"+covCrewIDCli5)[0].Body, &body)
+	var sent map[string]any
+	if jsonErr := json.Unmarshal([]byte(body["devcontainer_config"]), &sent); jsonErr != nil {
+		t.Fatalf("patched config not JSON: %v", jsonErr)
+	}
+	if sent["image"] != "debian:bookworm-slim" {
+		t.Errorf("image clobbered: %v", sent["image"])
+	}
+	if _, ok := sent["features"]; !ok {
+		t.Errorf("features dropped on merge: %v", sent)
+	}
+	if sent["privileged"] != true {
+		t.Errorf("privileged not set: %v", sent["privileged"])
+	}
+	caps, _ := sent["capAdd"].([]any)
+	if len(caps) != 1 || caps[0] != "NET_BIND_SERVICE" {
+		t.Errorf("capAdd = %v, want [NET_BIND_SERVICE] normalized", sent["capAdd"])
+	}
+}
+
+// A crew with no stored devcontainer_config can't take privilege knobs alone —
+// there'd be no base image, so the server would reject an image-less config.
+func TestCrewConfigRunE_SetSecurityNoBaseConfig(t *testing.T) {
+	stub := covSetupCli5(t)
+	covResetCrewConfigFlags(t)
+	stub.OnGet("/api/v1/crews/"+covCrewIDCli5, clitest.JSONResponse(200, map[string]any{
+		"id": covCrewIDCli5, "name": "Backend", "slug": "backend",
+	}))
+	covSetFlagCli5(t, crewConfigCmd, "privileged", "true")
+
+	err := crewConfigCmd.RunE(crewConfigCmd, []string{covCrewIDCli5})
+	if err == nil || !strings.Contains(err.Error(), "no devcontainer_config") {
+		t.Errorf("expected no-base-config error; got %v", err)
 	}
 }
 

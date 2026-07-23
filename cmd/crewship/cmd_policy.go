@@ -155,7 +155,12 @@ Examples:
   crewship policy set --crew engineering --level trusted
   crewship policy set --crew prod-ops --level full --behavior warn \
     --reason "Friday production freeze — operator on call" --yes
-  crewship policy set --crew sandbox --level strict --behavior block`,
+  crewship policy set --crew sandbox --level strict --behavior block
+  crewship policy set --crew engineering --max-ephemeral 20
+  crewship policy set --crew engineering --level trusted --max-ephemeral 20
+
+At least one of --level / --max-ephemeral is required; --max-ephemeral
+(0-100) sets the per-crew hire quota independently of the autonomy policy.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -167,45 +172,60 @@ Examples:
 		level, _ := cmd.Flags().GetString("level")
 		behavior, _ := cmd.Flags().GetString("behavior")
 		reason, _ := cmd.Flags().GetString("reason")
+		// --max-ephemeral is API↔CLI parity (#1378) for the hire quota
+		// (crews.max_ephemeral_agents / PATCH /api/v1/crews/{id}), which had
+		// UI + API but no CLI flag. It's independent of the autonomy policy, so
+		// it can be set on its own or alongside --level.
+		maxEphemeral, _ := cmd.Flags().GetInt("max-ephemeral")
+		maxEphemeralSet := cmd.Flags().Changed("max-ephemeral")
 
 		if crewSlug == "" {
 			return errors.New("--crew is required")
 		}
-		if level == "" {
-			return errors.New("--level is required (strict|guided|trusted|full)")
+		// At least one thing to change: a policy level or the ephemeral quota.
+		if level == "" && !maxEphemeralSet {
+			return errors.New("--level is required (strict|guided|trusted|full), or pass --max-ephemeral")
 		}
-		// Normalise to lowercase so "STRICT", "Trusted", etc. pass —
-		// the API check is case-sensitive but operator memory isn't.
-		level = strings.ToLower(strings.TrimSpace(level))
-		if _, ok := validAutonomyLevels[level]; !ok {
-			return fmt.Errorf("invalid --level %q (want strict|guided|trusted|full)", level)
+		if maxEphemeralSet && (maxEphemeral < 0 || maxEphemeral > 100) {
+			return fmt.Errorf("invalid --max-ephemeral %d (want 0-100)", maxEphemeral)
 		}
 
-		if behavior == "" {
-			behavior = "warn"
-		}
-		behavior = strings.ToLower(strings.TrimSpace(behavior))
-		if _, ok := validBehaviorModes[behavior]; !ok {
-			return fmt.Errorf("invalid --behavior %q (want warn|block)", behavior)
-		}
+		// Policy-level validation only applies when a level was actually given
+		// (a --max-ephemeral-only invocation leaves the autonomy policy alone).
+		if level != "" {
+			// Normalise to lowercase so "STRICT", "Trusted", etc. pass —
+			// the API check is case-sensitive but operator memory isn't.
+			level = strings.ToLower(strings.TrimSpace(level))
+			if _, ok := validAutonomyLevels[level]; !ok {
+				return fmt.Errorf("invalid --level %q (want strict|guided|trusted|full)", level)
+			}
 
-		// Local enforcement of the PRD §6 F2 "reason required for full"
-		// rule — also enforced server-side, but failing fast here means
-		// the operator sees a clean error before the network round-trip.
-		if level == "full" && strings.TrimSpace(reason) == "" {
-			return errors.New("--reason is required when --level=full")
-		}
+			if behavior == "" {
+				behavior = "warn"
+			}
+			behavior = strings.ToLower(strings.TrimSpace(behavior))
+			if _, ok := validBehaviorModes[behavior]; !ok {
+				return fmt.Errorf("invalid --behavior %q (want warn|block)", behavior)
+			}
 
-		// Loose transitions get an interactive confirmation. We can't
-		// tell whether the previous level was already loose without a
-		// GET round-trip — keeping the prompt unconditional for any
-		// move TO trusted/full is the simpler, safer policy and matches
-		// the "loud on irreversible-ish actions" idiom the rest of the
-		// CLI uses for delete-like commands.
-		if _, loose := looseLevels[level]; loose {
-			msg := fmt.Sprintf("Set autonomy_level=%s for crew %q? Memory writes and skill assignments will auto-execute.", level, crewSlug)
-			if err := confirmAction(cmd, msg); err != nil {
-				return err
+			// Local enforcement of the PRD §6 F2 "reason required for full"
+			// rule — also enforced server-side, but failing fast here means
+			// the operator sees a clean error before the network round-trip.
+			if level == "full" && strings.TrimSpace(reason) == "" {
+				return errors.New("--reason is required when --level=full")
+			}
+
+			// Loose transitions get an interactive confirmation. We can't
+			// tell whether the previous level was already loose without a
+			// GET round-trip — keeping the prompt unconditional for any
+			// move TO trusted/full is the simpler, safer policy and matches
+			// the "loud on irreversible-ish actions" idiom the rest of the
+			// CLI uses for delete-like commands.
+			if _, loose := looseLevels[level]; loose {
+				msg := fmt.Sprintf("Set autonomy_level=%s for crew %q? Memory writes and skill assignments will auto-execute.", level, crewSlug)
+				if err := confirmAction(cmd, msg); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -215,27 +235,44 @@ Examples:
 			return err
 		}
 
-		body := map[string]string{
-			"autonomy_level": level,
-			"behavior_mode":  behavior,
-		}
-		if reason != "" {
-			body["reason"] = strings.TrimSpace(reason)
+		if level != "" {
+			body := map[string]string{
+				"autonomy_level": level,
+				"behavior_mode":  behavior,
+			}
+			if reason != "" {
+				body["reason"] = strings.TrimSpace(reason)
+			}
+
+			resp, err := client.Put("/api/v1/crews/"+url.PathEscape(crewID)+"/policy", body)
+			if err != nil {
+				return err
+			}
+			if err := cli.CheckError(resp); err != nil {
+				return err
+			}
+
+			var p policyWire
+			if err := cli.ReadJSON(resp, &p); err != nil {
+				return err
+			}
+			cli.PrintSuccess(fmt.Sprintf("Policy updated for crew %s: %s / %s", p.CrewID, p.AutonomyLevel, p.BehaviorMode))
 		}
 
-		resp, err := client.Put("/api/v1/crews/"+url.PathEscape(crewID)+"/policy", body)
-		if err != nil {
-			return err
+		// The ephemeral quota lives on the crew record, not the policy route,
+		// so it's a separate PATCH /api/v1/crews/{id} (crews_update.go).
+		if maxEphemeralSet {
+			resp, err := client.Patch("/api/v1/crews/"+url.PathEscape(crewID),
+				map[string]int{"max_ephemeral_agents": maxEphemeral})
+			if err != nil {
+				return err
+			}
+			if err := cli.CheckError(resp); err != nil {
+				return err
+			}
+			resp.Body.Close()
+			cli.PrintSuccess(fmt.Sprintf("Max ephemeral agents set to %d for crew %s", maxEphemeral, crewID))
 		}
-		if err := cli.CheckError(resp); err != nil {
-			return err
-		}
-
-		var p policyWire
-		if err := cli.ReadJSON(resp, &p); err != nil {
-			return err
-		}
-		cli.PrintSuccess(fmt.Sprintf("Policy updated for crew %s: %s / %s", p.CrewID, p.AutonomyLevel, p.BehaviorMode))
 		return nil
 	},
 }
@@ -370,6 +407,7 @@ func init() {
 	policySetCmd.Flags().String("level", "", "Autonomy level: strict|guided|trusted|full (required)")
 	policySetCmd.Flags().String("behavior", "warn", "Behavior mode: warn|block")
 	policySetCmd.Flags().String("reason", "", "Operator-supplied reason (required when --level=full)")
+	policySetCmd.Flags().Int("max-ephemeral", -1, "Per-crew hire quota: max live ephemeral agents (0-100). Can be set with or without --level")
 	policySetCmd.Flags().Bool("yes", false, "Skip the loose-transition confirmation prompt")
 
 	policyCmd.AddCommand(policyGetCmd)

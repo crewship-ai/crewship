@@ -2,9 +2,12 @@ package sidecar
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 )
 
 // Reap drops exactly the credentials whose IDs aren't in the keep set, and a
@@ -57,6 +60,62 @@ func TestSidecar_ReapRevokedCredentials_DropsMissing(t *testing.T) {
 	}
 	if s.credStore.Select(ProviderAnthropic) == nil {
 		t.Error("live credential a was wrongly reaped")
+	}
+}
+
+// #1373: a leased credential delivered at boot (while its lease was valid) is
+// evicted by this same reaper ONCE its lease lapses — because crewshipd's
+// crew-scoped listing is lease-gated (an expired agent_credentials.expires_at
+// drops the row exactly like a revocation). The backend here models that
+// source of truth: it returns a credential while its lease is in the future and
+// omits it once the lease has passed. The reaper must keep it before expiry and
+// drop it after — no client-side expiry logic in the sidecar, the server's
+// list is authoritative.
+func TestSidecar_ReapRevokedCredentials_EvictsExpiredLease(t *testing.T) {
+	var mu sync.Mutex
+	leaseExpiry := time.Now().Add(1 * time.Hour) // valid to start
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		leased := time.Now().Before(leaseExpiry) // lease-gated: (expires_at > now)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		// "standing" is a NULL-lease grant (always listed); "leased" appears
+		// only while its lease is unexpired.
+		if leased {
+			fmt.Fprint(w, `[{"id":"standing","provider":"anthropic","status":"ACTIVE"},`+
+				`{"id":"leased","provider":"openai","status":"ACTIVE"}]`)
+			return
+		}
+		fmt.Fprint(w, `[{"id":"standing","provider":"anthropic","status":"ACTIVE"}]`)
+	}))
+	defer backend.Close()
+
+	s := newJournalTestServer(backend.URL)
+	s.credStore = NewCredStore()
+	s.credStore.Load([]Credential{
+		{ID: "standing", Provider: ProviderAnthropic, Token: "t1"},
+		{ID: "leased", Provider: ProviderOpenAI, Token: "t2"},
+	})
+
+	// Before expiry: the leased key is still listed, so the reaper keeps it.
+	s.reapRevokedCredentials(context.Background())
+	if s.credStore.Select(ProviderOpenAI) == nil {
+		t.Fatal("valid (unexpired) lease was reaped early")
+	}
+
+	// The lease lapses.
+	mu.Lock()
+	leaseExpiry = time.Now().Add(-1 * time.Minute)
+	mu.Unlock()
+
+	// After expiry: crewshipd omits the leased key → the reaper evicts it.
+	s.reapRevokedCredentials(context.Background())
+	if s.credStore.Select(ProviderOpenAI) != nil {
+		t.Error("expired-lease credential is still served after reap — TTL not enforced end-to-end")
+	}
+	if s.credStore.Select(ProviderAnthropic) == nil {
+		t.Error("standing (NULL-lease) credential was wrongly evicted")
 	}
 }
 

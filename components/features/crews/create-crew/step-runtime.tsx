@@ -1,8 +1,9 @@
 "use client"
 
 import { useId, useState } from "react"
-import { Cpu, MemoryStick, Clock, Network as NetIcon, Globe, Lock, X, Plus } from "lucide-react"
+import { Cpu, MemoryStick, Clock, Network as NetIcon, Globe, Lock, X, Plus, Package } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { PACKAGE_REGISTRY_DOMAINS, mergeDomains } from "../registry-presets"
 import {
   CPU_PRESETS, CPU_MIN, CPU_MAX,
   MEMORY_PRESETS, MEMORY_MIN_MB, MEMORY_MAX_MB,
@@ -228,7 +229,17 @@ function NetworkCell({ state, setState }: Props) {
               Allowed domains
               <span className="ml-2 text-[10px] text-muted-foreground normal-case tracking-normal">supports wildcards (<code className="font-mono">*.github.com</code>)</span>
             </span>
-            <span className="text-[10px] text-muted-foreground">{state.allowedDomains.length} listed</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setState({ allowedDomains: mergeDomains(state.allowedDomains, PACKAGE_REGISTRY_DOMAINS) })}
+                className="inline-flex items-center gap-1 rounded border border-white/15 bg-card/60 px-1.5 py-0.5 text-[10px] text-foreground/80 hover:border-white/30 hover:text-foreground normal-case tracking-normal"
+              >
+                <Package className="h-3 w-3" aria-hidden="true" />
+                Allow package registries
+              </button>
+              <span className="text-[10px] text-muted-foreground">{state.allowedDomains.length} listed</span>
+            </div>
           </div>
           <DomainChips
             value={state.allowedDomains}

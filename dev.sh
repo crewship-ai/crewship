@@ -392,9 +392,37 @@ start_go() {
   cp "$PROJECT_DIR/scripts/entrypoint.sh" "${bin_dir}/entrypoint.sh"
   chmod +x "${bin_dir}/entrypoint.sh"
 
+  # A dev slot must ALWAYS run the sidecar it just built, co-located with the
+  # freshly-built server binary. Otherwise a hardcoded CREWSHIP_SIDECAR_PATH in
+  # .env.local (e.g. a hand-pinned /opt/crewship_N/... path left over from an
+  # earlier deploy) wins via the `. ./.env.local` sourcing below and silently
+  # bind-mounts a STALE sidecar into every crew container — that is #1390, which
+  # shipped dev slots a sidecar missing the CRE-153 memory-auth chokepoint
+  # (unauthenticated cross-agent memory read/write) and the #1387 token_fp
+  # binding. The server binary is rebuilt on every start; the sidecar now tracks
+  # it. Freshness wins on a slot: we force the just-built paths AFTER sourcing
+  # .env.local (see the subshell), so a stale pin cannot take effect. Warn
+  # loudly here — on the deploy console, not buried in the go log — when we are
+  # overriding an explicit pin, so a deliberate override is never lost silently.
+  local fresh_sidecar="${bin_dir}/crewship-sidecar"
+  local fresh_entrypoint="${bin_dir}/entrypoint.sh"
+  local pinned_sidecar
+  pinned_sidecar=$(grep -E '^CREWSHIP_SIDECAR_PATH=' "$PROJECT_DIR/.env.local" 2>/dev/null \
+    | head -1 | cut -d'=' -f2- | tr -d '"' || true)
+  if [[ -n "$pinned_sidecar" && "$pinned_sidecar" != "$fresh_sidecar" ]]; then
+    warn "ignoring CREWSHIP_SIDECAR_PATH=$pinned_sidecar from .env.local — a dev slot always runs the sidecar it just built ($fresh_sidecar). Remove the pin from .env.local to silence this. (#1390)"
+  fi
+
   (
     cd "$PROJECT_DIR"
     set -a && . ./.env.local && set +a
+    # Force the freshly-built, co-located sidecar + entrypoint (#1390). Exported
+    # AFTER sourcing .env.local so a stale hardcoded pin there cannot win — the
+    # server's applyEnvOverrides honours CREWSHIP_SIDECAR_PATH, so last export
+    # wins. With no pin this is identical to the config autodetect result (same
+    # path), so the no-.env.local case is unchanged.
+    export CREWSHIP_SIDECAR_PATH="$fresh_sidecar"
+    export CREWSHIP_ENTRYPOINT_PATH="$fresh_entrypoint"
     export CREWSHIP_LOG_LEVEL=debug
     # Auto-detect container runtime; fall back to --no-docker if none found
     # Supports Docker, Podman, and Apple Containers (macOS 26+)

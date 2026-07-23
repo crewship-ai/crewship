@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils"
 import { resolveCrewColor } from "@/lib/colors"
 import { apiFetch } from "@/lib/api-fetch"
+import { PrivilegedCredentialsCard } from "./privileged-credentials-card"
 
 
 const MEMORY_OPTIONS = [
@@ -288,6 +289,9 @@ export function CrewsContainersSection({
   if (crews.length === 0) {
     return (
       <div className="space-y-5">
+        {/* The privileged-credentials override is workspace-scoped, so it
+            still applies (and must stay visible) when no crews exist yet. */}
+        <PrivilegedCredentialsCard workspaceId={workspaceId} />
         <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center mb-3">
@@ -305,6 +309,9 @@ export function CrewsContainersSection({
 
   return (
     <div className="space-y-5">
+      {/* Workspace-level security override (#1378) — independent of any crew. */}
+      <PrivilegedCredentialsCard workspaceId={workspaceId} />
+
       {/* Overview section */}
       <section className="space-y-2.5">
         <div>

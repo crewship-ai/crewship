@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/leader"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -40,10 +41,20 @@ type RecurringIssueDispatcher struct {
 	hub    *ws.Hub
 	logger *slog.Logger
 
+	// leaderGate, when non-nil, gates each tick on holding the scheduler
+	// lease so a multi-replica deploy fires each due row once. Nil = single
+	// instance (always fire), the unchanged default (#1376).
+	leaderGate leader.Gate
+
 	startOnce sync.Once
 	stopCh    chan struct{}
 	stopped   chan struct{}
 }
+
+// SetLeaderGate attaches a leader-election gate so this dispatcher only fires
+// while its replica holds the scheduler lease. Call before Start. Nil (the
+// default) keeps single-instance behaviour.
+func (d *RecurringIssueDispatcher) SetLeaderGate(g leader.Gate) { d.leaderGate = g }
 
 // NewRecurringIssueDispatcher constructs the dispatcher. It needs the DB and a
 // logger; hub is optional (nil in tests) for broadcast.
@@ -107,6 +118,12 @@ type recurringDueRow struct {
 // tick selects due rows and fires each. Single instance, no leader election —
 // same assumption as the pipeline scheduler.
 func (d *RecurringIssueDispatcher) tick(ctx context.Context) {
+	// Leader gate: only the lease holder fires on a multi-replica deploy, so
+	// two replicas don't both stamp the same due recurring issue. Nil gate
+	// (single-instance default) always passes.
+	if d.leaderGate != nil && !d.leaderGate.IsLeader() {
+		return
+	}
 	rows, err := d.db.QueryContext(ctx, `
 		SELECT id, workspace_id, crew_id, title, description, priority,
 		       project_id, milestone_id, assignee_type, assignee_id, labels_json, cron_expression,

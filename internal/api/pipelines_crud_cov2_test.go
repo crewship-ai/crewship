@@ -32,7 +32,10 @@ func cov2PCRig(t *testing.T) (*PipelineHandler, *sql.DB, string, string, string)
 	crewID := seedCrewRow(t, db, "cov2pc_crew", wsID, "Lead Crew", "cov2pc-crew")
 	seedAgentRow(t, db, "cov2pc_agent", wsID, crewID, "Lead", "agent_lead", "LEAD")
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	return NewPipelineHandler(db, logger, nil, nil), db, userID, wsID, crewID
+	h := NewPipelineHandler(db, logger, nil, nil)
+	// #1371: InternalSave clears the test-gate only against an HMAC save_token.
+	h.SetSaveTokenSecret([]byte(testSaveTokenSecret1371))
+	return h, db, userID, wsID, crewID
 }
 
 func cov2PCTrigger(t *testing.T, db *sql.DB, name, opAndTable string) {
@@ -260,11 +263,15 @@ func TestCov2PCSave_StoreInsertBlocked500(t *testing.T) {
 
 func cov2PCInternalBody(wsID, slug string, withTestRun bool) string {
 	def := covPCDef(slug)
-	testRun := ""
+	proof := ""
 	if withTestRun {
-		testRun = `,"last_test_run_at":"` + time.Now().UTC().Format(time.RFC3339Nano) + `","last_test_run_passed":true`
+		// #1371: the store gate clears only against a valid save_token
+		// (minted over this definition + authoring crew), never a forgeable
+		// last_test_run_passed flag.
+		token := signInternalSaveTokenForTest([]byte(testSaveTokenSecret1371), wsID, "cov2pc_crew", def)
+		proof = `,"save_token":"` + token + `"`
 	}
-	return `{"workspace_id":"` + wsID + `","slug":"` + slug + `","name":"` + slug + `","author_crew_id":"cov2pc_crew","definition":` + def + testRun + `}`
+	return `{"workspace_id":"` + wsID + `","slug":"` + slug + `","name":"` + slug + `","author_crew_id":"cov2pc_crew","definition":` + def + proof + `}`
 }
 
 func TestCov2PCInternalSave_BoundTokenMismatch403(t *testing.T) {
@@ -296,9 +303,10 @@ func TestCov2PCInternalSave_AgentLookupWarnStillSaves(t *testing.T) {
 	if _, err := db.Exec(`DROP TABLE agents`); err != nil {
 		t.Fatalf("drop agents: %v", err)
 	}
+	def := covPCDef("ip3")
+	token := signInternalSaveTokenForTest([]byte(testSaveTokenSecret1371), wsID, crewID, def)
 	body := `{"workspace_id":"` + wsID + `","slug":"ip3","name":"ip3","author_crew_id":"` + crewID + `",
-		"definition":` + covPCDef("ip3") + `,
-		"last_test_run_at":"` + time.Now().UTC().Format(time.RFC3339Nano) + `","last_test_run_passed":true}`
+		"definition":` + def + `,"save_token":"` + token + `"}`
 	rr := httptest.NewRecorder()
 	h.InternalSave(rr, httptest.NewRequest("POST", "/x", strings.NewReader(body)))
 	if rr.Code != http.StatusCreated {

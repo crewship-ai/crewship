@@ -11,11 +11,18 @@ import (
 // importing sidecar (which would form an import cycle now that the sidecar MCP
 // gateway builds its gated client through egresspolicy). These aliases keep
 // every existing sidecar call site — and the ~40 tests referencing
-// NewDomainAllowlist / DefaultAllowedDomains — unchanged.
+// NewDomainAllowlist / DefaultAllowedDomains / PackageRegistryDomains —
+// unchanged. The wildcard/subdomain matching and the package-registry preset
+// (#1377) live in the leaf alongside the type they extend.
 type DomainAllowlist = egressallow.DomainAllowlist
 
 // DefaultAllowedDomains re-exports the leaf's default LLM/CLI allowlist.
 var DefaultAllowedDomains = egressallow.DefaultAllowedDomains
+
+// PackageRegistryDomains re-exports the leaf's curated "allow package
+// registries" preset (#1377) — the set the one-click UI button and the CLI
+// `--allow-package-registries` flag append.
+var PackageRegistryDomains = egressallow.PackageRegistryDomains
 
 // NewDomainAllowlist re-exports the leaf constructor.
 func NewDomainAllowlist(domains []string) *DomainAllowlist {

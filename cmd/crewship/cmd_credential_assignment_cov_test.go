@@ -63,6 +63,43 @@ func TestCredAssignRunE_HappyPath(t *testing.T) {
 	}
 }
 
+// TestCredAssignRunE_TTLLease verifies --ttl is translated to ttl_seconds on
+// the assign POST body (#1373 lease parity).
+func TestCredAssignRunE_TTLLease(t *testing.T) {
+	stub := covCredStub(t)
+	stub.OnPost("/api/v1/agents/"+covAgentIDCli8+"/credentials", clitest.JSONResponse(200, map[string]any{"id": "asn-1"}))
+	covSetFlagCli8(t, credAssignCmd, "env-var-name", "ANTHROPIC_API_KEY")
+	covSetFlagCli8(t, credAssignCmd, "ttl", "30m")
+
+	if err := credAssignCmd.RunE(credAssignCmd, []string{"anthropic-key", "viktor"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	calls := stub.CallsFor("POST", "/api/v1/agents/"+covAgentIDCli8+"/credentials")
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 assign POST, got %d", len(calls))
+	}
+	var body map[string]any
+	clitest.MustDecodeJSONBody(calls[0].Body, &body)
+	if body["ttl_seconds"] != float64(1800) {
+		t.Errorf("expected ttl_seconds=1800 for 30m, got %v", body["ttl_seconds"])
+	}
+}
+
+// TestCredAssignRunE_TTLInvalid verifies a malformed --ttl fails before any
+// request is sent.
+func TestCredAssignRunE_TTLInvalid(t *testing.T) {
+	stub := covCredStub(t)
+	_ = stub
+	covSetFlagCli8(t, credAssignCmd, "env-var-name", "KEY")
+	covSetFlagCli8(t, credAssignCmd, "ttl", "banana")
+
+	err := credAssignCmd.RunE(credAssignCmd, []string{"anthropic-key", "viktor"})
+	if err == nil || !strings.Contains(err.Error(), "invalid --ttl") {
+		t.Errorf("expected invalid --ttl error; got %v", err)
+	}
+}
+
 func TestCredAssignRunE_CredentialNotFound(t *testing.T) {
 	stub := covCredStub(t)
 	_ = stub

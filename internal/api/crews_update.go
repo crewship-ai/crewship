@@ -117,8 +117,21 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.DevcontainerConfig != nil && *req.DevcontainerConfig != "" {
-		if _, err := devcontainer.ParseBytes([]byte(*req.DevcontainerConfig)); err != nil {
+		cfg, err := devcontainer.ParseBytes([]byte(*req.DevcontainerConfig))
+		if err != nil {
 			replyError(w, http.StatusBadRequest, "invalid devcontainer_config: "+err.Error())
+			return
+		}
+		// #1380: enforce the container-privilege controls server-side on
+		// update too — otherwise an operator could sidestep the create-time
+		// gate by PATCHing privileged/capAdd/mounts onto an existing crew.
+		allowPriv, err := h.workspaceAllowsPrivileged(r.Context(), workspaceID)
+		if err != nil {
+			replyInternalError(w, h.logger, "check workspace privileged flag", err)
+			return
+		}
+		if verr := cfg.ValidateSecurity(allowPriv); verr != nil {
+			replyDevcontainerSecurityError(w, verr)
 			return
 		}
 	}
