@@ -60,14 +60,21 @@ func buildSecretsCleanupScript(agentSlug string) string {
 // hasFileMountedCreds reports whether any credential in the run request will
 // be materialized on disk by buildCredFileScript — i.e. whether there is
 // anything for the post-run cleanup to remove. Mirrors buildCredFileScript's
-// skip conditions (empty env var / empty value / sidecar-injected types).
-func hasFileMountedCreds(creds []Credential) bool {
+// skip conditions (empty env var / empty value / sidecar-injected types) AND
+// its keeperEnabled gate: SECRET is file-mounted only when Keeper is OFF, so
+// with Keeper ON a run whose only file-typed creds are SECRETs writes nothing
+// and needs no cleanup/lock. Keep this in lockstep with buildCredFileScript.
+func hasFileMountedCreds(creds []Credential, keeperEnabled bool) bool {
 	for _, c := range creds {
 		if c.EnvVarName == "" || c.PlainValue == "" {
 			continue
 		}
 		switch c.Type {
-		case "CLI_TOKEN", "SECRET", "GENERIC_SECRET", "USERPASS", "SSH_KEY", "CERTIFICATE":
+		case "SECRET":
+			if !keeperEnabled {
+				return true
+			}
+		case "CLI_TOKEN", "GENERIC_SECRET", "USERPASS", "SSH_KEY", "CERTIFICATE":
 			return true
 		}
 	}

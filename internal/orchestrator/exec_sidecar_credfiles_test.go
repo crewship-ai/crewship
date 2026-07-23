@@ -29,6 +29,7 @@ func TestBuildCredFileScript_PerType(t *testing.T) {
 	cases := []struct {
 		name      string
 		creds     []Credential
+		keeper    bool // Keeper enabled → SECRET files are withheld
 		wantEmpty bool
 		// substrings the script must contain
 		wantSubs []string
@@ -96,6 +97,54 @@ func TestBuildCredFileScript_PerType(t *testing.T) {
 				"chmod 0400 /secrets/agent-a/STRIPE_HOOK",
 			},
 			wantEnv: []string{"STRIPE_HOOK=/secrets/agent-a/STRIPE_HOOK"},
+		},
+		{
+			// Keeper ON: SECRET must NOT be written to disk — the system
+			// prompt tells the agent it does not have the value in its
+			// environment; it must fetch it via the Keeper API instead.
+			// A lone SECRET therefore yields an empty script.
+			name: "SECRET withheld when Keeper enabled",
+			creds: []Credential{
+				{EnvVarName: "WEBHOOK_SECRET", PlainValue: "shhh", Type: "SECRET"},
+			},
+			keeper:    true,
+			wantEmpty: true,
+		},
+		{
+			// Keeper ON gates ONLY SECRET. CLI_TOKEN and GENERIC_SECRET are
+			// still written (the prompt makes no withhold claim for them),
+			// while the SECRET in the same batch is skipped.
+			name: "Keeper enabled withholds SECRET but keeps CLI_TOKEN + GENERIC_SECRET",
+			creds: []Credential{
+				{EnvVarName: "GH_TOKEN", PlainValue: "ghp_xxx", Type: "CLI_TOKEN"},
+				{EnvVarName: "WEBHOOK_SECRET", PlainValue: "shhh", Type: "SECRET"},
+				{EnvVarName: "STRIPE_HOOK", PlainValue: "whsec_xxx", Type: "GENERIC_SECRET"},
+			},
+			keeper: true,
+			wantSubs: []string{
+				"chmod 0400 /secrets/agent-a/GH_TOKEN",
+				"chmod 0400 /secrets/agent-a/STRIPE_HOOK",
+			},
+			wantNotSubs: []string{
+				"/secrets/agent-a/WEBHOOK_SECRET",
+			},
+			wantEnv: []string{
+				"GH_TOKEN=/secrets/agent-a/GH_TOKEN",
+				"STRIPE_HOOK=/secrets/agent-a/STRIPE_HOOK",
+			},
+		},
+		{
+			// Keeper OFF: unchanged legacy behaviour — SECRET lands as a
+			// 0400 file exactly like before the gate existed.
+			name: "SECRET still written when Keeper disabled",
+			creds: []Credential{
+				{EnvVarName: "WEBHOOK_SECRET", PlainValue: "shhh", Type: "SECRET"},
+			},
+			keeper: false,
+			wantSubs: []string{
+				"chmod 0400 /secrets/agent-a/WEBHOOK_SECRET",
+			},
+			wantEnv: []string{"WEBHOOK_SECRET=/secrets/agent-a/WEBHOOK_SECRET"},
 		},
 		{
 			name: "USERPASS expands into username + password files",
@@ -166,7 +215,7 @@ func TestBuildCredFileScript_PerType(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			script, count, err := buildCredFileScript(tc.creds, "/secrets/agent-a")
+			script, count, err := buildCredFileScript(tc.creds, "/secrets/agent-a", tc.keeper)
 			if err != nil {
 				t.Fatalf("buildCredFileScript: %v", err)
 			}
@@ -210,7 +259,7 @@ func TestBuildCredFileScript_USERPASSMissingUsername(t *testing.T) {
 	creds := []Credential{
 		{EnvVarName: "GMAIL", PlainValue: "pa55", Type: "USERPASS"}, // no Username
 	}
-	_, _, err := buildCredFileScript(creds, "/secrets/agent-a")
+	_, _, err := buildCredFileScript(creds, "/secrets/agent-a", false)
 	if err == nil {
 		t.Fatal("expected error for USERPASS without Username, got nil")
 	}
@@ -227,7 +276,7 @@ func TestBuildCredFileScript_RejectsBadEnvVarName(t *testing.T) {
 	creds := []Credential{
 		{EnvVarName: "GH;rm -rf /", PlainValue: "x", Type: "SECRET"},
 	}
-	_, _, err := buildCredFileScript(creds, "/secrets/agent-a")
+	_, _, err := buildCredFileScript(creds, "/secrets/agent-a", false)
 	if err == nil {
 		t.Fatal("expected error for malicious env var name, got nil")
 	}
