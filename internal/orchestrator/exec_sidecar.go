@@ -395,6 +395,20 @@ func writeCredentialFiles(
 	keeperEnabled bool,
 	logger *slog.Logger,
 ) error {
+	// #1364: withholding a SECRET from file delivery under Keeper must be
+	// observable, not silent. buildCredFileScript skips these with a bare
+	// `continue`; surface each one at WARN (env var name only, never the
+	// value) so the isolation gate leaves an audit trace — symmetric to the
+	// env path (AgentEnvCredentialExposures) and the MCP path (exec_env.go).
+	if keeperEnabled {
+		for _, c := range creds {
+			if c.Type == "SECRET" && c.EnvVarName != "" && c.PlainValue != "" {
+				logger.Warn("SECRET withheld from file delivery under Keeper — agent must obtain it via /keeper/request",
+					"agent_slug", agentSlug, "env_var", c.EnvVarName)
+			}
+		}
+	}
+
 	script, fileCount, err := buildCredFileScript(creds, secretsAgentDir, keeperEnabled)
 	if err != nil {
 		return fmt.Errorf("build credential script: %w", err)

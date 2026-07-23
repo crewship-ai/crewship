@@ -270,6 +270,15 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		if keeperBlock != "" {
 			sysPrompt += "\n\n" + keeperBlock
 		}
+		// #1364: the resolver is the single chokepoint for SECRET isolation.
+		// buildKeeperBlock blanks SECRET values as a side effect of building
+		// the prompt; make that an EXPLICIT, independently-guaranteed invariant
+		// so a refactor of the prompt builder can't silently re-open the leak.
+		// With the plaintext withheld here, it never reaches the orchestrator
+		// process, so the env/file/MCP delivery gates become defense-in-depth.
+		// Idempotent when buildKeeperBlock already ran; SECRET-only by design
+		// (GENERIC_SECRET / CLI_TOKEN are still delivered — see credentials.mdx).
+		withholdKeeperSecretValues(creds)
 	}
 
 	// [CONNECTED INTEGRATIONS] section — appended after MCP resolution so the
@@ -1295,6 +1304,24 @@ func (h *InternalHandler) buildDefaultComposioEntry(r *http.Request, wsID, serve
 // -----------------------------------------------------------------------------
 // Keeper — credential-access-control prompt block for SECRET-typed creds.
 // -----------------------------------------------------------------------------
+
+// withholdKeeperSecretValues blanks the decrypted plaintext of SECRET-typed
+// credentials in place so it is never serialized into the resolved agent config.
+// Under Keeper, SECRET values are reachable only through /keeper/request; the
+// env, file and MCP orchestrator delivery paths all gate on Keeper too, but
+// withholding here — at the single resolver chokepoint — keeps the plaintext
+// from ever leaving the API process, which is what makes those gates
+// defense-in-depth rather than the sole line. SECRET-only by design:
+// GENERIC_SECRET and CLI_TOKEN are intentionally still delivered (see
+// docs/guides/credentials.mdx and buildKeeperBlock). Caller must gate on
+// h.keeperEnabled.Load().
+func withholdKeeperSecretValues(creds []mcpCredEntry) {
+	for i := range creds {
+		if creds[i].Type == "SECRET" {
+			creds[i].Value = ""
+		}
+	}
+}
 
 // buildKeeperBlock builds the [CREDENTIAL ACCESS CONTROL] system prompt section
 // for agents with Keeper-guarded SECRET credentials. Returns empty string if no
