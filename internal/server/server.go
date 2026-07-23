@@ -852,7 +852,7 @@ func (s *Server) mountAPIRouter(
 // endpoint, IPC config). Pure code motion out of New(). Returns the
 // orchestrator and the IPC base URL containers use to reach this server.
 func buildOrchestrator(cfg *config.Config, logger *slog.Logger, ctr provider.ContainerProvider, sta provider.StateProvider) (*orchestrator.Orchestrator, string) {
-	orch := orchestrator.New(ctr, sta, logger)
+	orch := orchestrator.New(ctr, sta, logger, orchestrator.WithMaxConcurrentRuns(cfg.Orchestrator.MaxConcurrentRuns))
 	if cfg.Container.SidecarEnabled {
 		orch.SetSidecarEnabled(true)
 		logger.Info("sidecar proxy enabled for credential injection")

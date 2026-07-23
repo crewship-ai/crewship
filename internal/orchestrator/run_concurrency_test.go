@@ -202,7 +202,7 @@ func runConcurrencyProbe(t *testing.T, n int) (peak int, cap int) {
 func TestRunAgent_ConcurrencyCapped(t *testing.T) {
 	// Pick N comfortably above the configured cap so excess runs must block on
 	// the semaphore regardless of any CREWSHIP_MAX_CONCURRENT_RUNS override.
-	n := resolveRunSemCap()*3 + 4
+	n := resolveRunSemCap(0)*3 + 4
 
 	peak, cap := runConcurrencyProbe(t, n)
 	if peak > cap {

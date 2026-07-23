@@ -52,7 +52,21 @@ type Config struct {
 	License   LicenseConfig   `yaml:"license"`
 	Composio  ComposioConfig  `yaml:"composio"`
 
-	LocalModels LocalModelsConfig `yaml:"local_models"`
+	LocalModels  LocalModelsConfig  `yaml:"local_models"`
+	Orchestrator OrchestratorConfig `yaml:"orchestrator"`
+}
+
+// OrchestratorConfig holds settings for the agent-run orchestrator's
+// admission control.
+type OrchestratorConfig struct {
+	// MaxConcurrentRuns bounds the number of agent-run exec fan-outs that
+	// may be in flight at once (internal/orchestrator's runSem). Overridden
+	// by the CREWSHIP_MAX_CONCURRENT_RUNS env var when set — env takes
+	// precedence over this field, which takes precedence over the
+	// orchestrator package's built-in default of 8. The cap is sized once
+	// at orchestrator construction, so a change here (or via the env var)
+	// requires a server restart to take effect.
+	MaxConcurrentRuns int `yaml:"max_concurrent_runs"`
 }
 
 // LocalModelsConfig points coding agents at an OpenAI-compatible local
@@ -252,6 +266,9 @@ func Default() *Config {
 			// cfg.auxiliary.keeper.model defaulting to claude-haiku-4-5.
 			Model: "",
 		},
+		Orchestrator: OrchestratorConfig{
+			MaxConcurrentRuns: 8,
+		},
 	}
 }
 
@@ -345,6 +362,9 @@ func (c *Config) Validate() error {
 	if c.Auth.NextjsURL == "" {
 		return fmt.Errorf("auth.nextjs_url is required (set CREWSHIP_NEXTJS_URL)")
 	}
+	if c.Orchestrator.MaxConcurrentRuns <= 0 {
+		return fmt.Errorf("orchestrator.max_concurrent_runs must be > 0, got %d", c.Orchestrator.MaxConcurrentRuns)
+	}
 	// PR-Z Z.2: silent phi3:mini fallback removed. An enabled Keeper must
 	// have an explicit model configured; loud config error beats silent
 	// degradation that masked mis-configurations in earlier builds.
@@ -381,6 +401,19 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.Server.Port = port
 		} else {
 			slog.Warn("ignoring invalid CREWSHIP_PORT", "value", v, "error", err)
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("CREWSHIP_MAX_CONCURRENT_RUNS")); v != "" {
+		// TrimSpace mirrors orchestrator.resolveRunSemCap so the two readers of
+		// this env var can never disagree on whitespace: a padded value like
+		// " 16 " is honored here just as it is there (previously it was dropped
+		// with a misleading "ignoring invalid" warning while the orchestrator
+		// silently applied it). A padded non-positive value now reaches Validate
+		// and fails loud, matching the unpadded case.
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Orchestrator.MaxConcurrentRuns = n
+		} else {
+			slog.Warn("ignoring invalid CREWSHIP_MAX_CONCURRENT_RUNS", "value", v, "error", err)
 		}
 	}
 	if v := os.Getenv("CREWSHIP_SOCKET_PATH"); v != "" {
