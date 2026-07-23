@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 // --- helpers --------------------------------------------------------------
@@ -24,11 +23,15 @@ func httpRoutineDef() string {
 		`{"id":"h","type":"http","http":{"method":"GET","url":"https://api.example.com/x"}}]}`
 }
 
+// internalSaveBody builds an InternalSave body carrying a valid save_token —
+// the #1371 gate proof — so the save clears the test-gate the way the real
+// sidecar two-step flow does. Handlers driven with this must have
+// internalSaveTestSecret wired (newPipelineHandlerForCRUDTest does).
 func internalSaveBody(t *testing.T, wsID, slug, crewID, def string) string {
 	t.Helper()
-	fresh := time.Now().UTC().Format(time.RFC3339)
+	token := internalSaveTokenFor(wsID, crewID, def)
 	return `{"workspace_id":"` + wsID + `","slug":"` + slug + `","name":"` + slug + `","author_crew_id":"` + crewID + `",` +
-		`"last_test_run_passed":true,"last_test_run_at":"` + fresh + `","definition":` + def + `}`
+		`"save_token":"` + token + `","definition":` + def + `}`
 }
 
 func doInternalSave(t *testing.T, h *PipelineHandler, body string) *httptest.ResponseRecorder {

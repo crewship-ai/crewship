@@ -12,6 +12,8 @@ func TestWakeCell(t *testing.T) {
 		{"gated, never checked", scheduleRow{WakePipelineSlug: "cost-probe"}, "cost-probe"},
 		{"gated with telemetry", scheduleRow{WakePipelineSlug: "cost-probe", WakeCheckCount: 96, WakeFireCount: 3}, "cost-probe 3/96"},
 		{"slug missing, id fallback", scheduleRow{WakePipelineID: "pln_probe"}, "pln_probe"},
+		{"fail-closed marked", scheduleRow{WakePipelineSlug: "cost-probe", WakeFailClosed: true}, "cost-probe (fail-closed)"},
+		{"fail-closed with telemetry", scheduleRow{WakePipelineSlug: "cost-probe", WakeFailClosed: true, WakeCheckCount: 96, WakeFireCount: 3}, "cost-probe (fail-closed) 3/96"},
 	}
 	for _, c := range cases {
 		if got := wakeCell(c.row); got != c.want {

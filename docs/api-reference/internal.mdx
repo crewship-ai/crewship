@@ -196,7 +196,7 @@ These are the trusted forward-targets for agent-authored pipelines and the sidec
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/v1/internal/pipelines/test_run` | Test-run an agent-authored pipeline before save (step 1 of the agent save flow). Same internal-token trust as save; the public `test_run` is JWT-authed. |
+| `POST` | `/api/v1/internal/pipelines/test_run` | Test-run an agent-authored pipeline before save (step 1 of the agent save flow). Same internal-token trust as save; the public `test_run` is JWT-authed. On a passing dry-run it mints the `save_token` step 2 must present (#1371). |
 | `POST` | `/api/v1/internal/pipelines/save` | Save an agent-authored pipeline definition. See [Pipeline save](#pipeline-save). |
 | `POST` | `/api/v1/internal/pipelines/run` | Run a saved routine — the sidecar→main forward for the `run_routine` MCP tool. The public run route rejects the internal token, so agents invoke saved routines through this surface (workspace + invoker identity injected from IPC). |
 | `POST` | `/api/v1/internal/routines/schedules` | Slash-action mirror — create a pipeline schedule (routine). See [Slash-action mirrors](#slash-action-mirrors). |
@@ -399,9 +399,8 @@ The trusted endpoint the sidecar forwards to when an agent emits a new pipeline 
 | `slug` | string | **Required.** |
 | `definition` | JSON | **Required.** Raw pipeline DSL. |
 | `name`, `description` | string | Optional metadata. |
-| `author_crew_id`, `author_agent_id`, `author_chat_id`, `author_run_id` | string | Author attribution; recorded with `authored_via = agent`. `author_crew_id` also scopes the agent-slug validation set. |
-| `last_test_run_at` | string | RFC 3339. Feeds the test-run gate. |
-| `last_test_run_passed` | bool | Feeds the test-run gate. |
+| `author_crew_id`, `author_agent_id`, `author_chat_id`, `author_run_id` | string | Author attribution; recorded with `authored_via = agent`. `author_crew_id` also scopes the agent-slug validation set **and** binds the `save_token` principal. |
+| `save_token` | string | **The test-run gate proof (#1371).** The HMAC token the internal `test_run` mints on a passing dry-run, bound to (workspace, definition hash, author crew). This is the **only** way to clear the gate — the server no longer trusts a body-supplied "it passed" claim, so the old `last_test_run_at` / `last_test_run_passed` fields are gone. A missing or invalid token leaves the gate unmet → `422`. Matches the user path's `save_token`, binding to the crew instead of the user (autonomous ≥ interactive). |
 
 **Response:** `201 Created` — the saved pipeline object (`toPipelineResponse`).
 

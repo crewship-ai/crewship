@@ -381,7 +381,9 @@ func TestHandlePipelinesSave_HappyPath_InjectsAuthorIdentityFromIPC(t *testing.T
 				t.Errorf("test_run author_crew_id = %v, want crew-real (sidecar must overwrite)", got["author_crew_id"])
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
+			// Mint a save_token the way the internal test_run does — the
+			// sidecar must thread THIS value into the save call (#1371).
+			_, _ = w.Write([]byte(`{"status":"COMPLETED","save_token":"tok-from-test-run"}`))
 		case strings.HasSuffix(r.URL.Path, "/internal/pipelines/save"):
 			_ = json.NewDecoder(r.Body).Decode(&saveBody)
 			w.Header().Set("Content-Type", "application/json")
@@ -430,8 +432,15 @@ func TestHandlePipelinesSave_HappyPath_InjectsAuthorIdentityFromIPC(t *testing.T
 	if saveBody["workspace_id"] != "ws-real" {
 		t.Errorf("workspace_id = %v, want ws-real", saveBody["workspace_id"])
 	}
-	if saveBody["last_test_run_passed"] != true {
-		t.Errorf("last_test_run_passed = %v, want true", saveBody["last_test_run_passed"])
+	// The save_token minted by Step-1 test_run must be threaded into the save
+	// call — that HMAC proof, not a self-asserted body flag, is what clears the
+	// server-side test-gate (#1371).
+	if saveBody["save_token"] != "tok-from-test-run" {
+		t.Errorf("save_token = %v, want tok-from-test-run (must be forwarded from test_run)", saveBody["save_token"])
+	}
+	// The forgeable body claim is gone — the sidecar no longer sends it.
+	if _, ok := saveBody["last_test_run_passed"]; ok {
+		t.Errorf("last_test_run_passed present (%v) — the forgeable claim must not be forwarded", saveBody["last_test_run_passed"])
 	}
 }
 

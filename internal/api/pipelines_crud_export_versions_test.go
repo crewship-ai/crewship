@@ -26,7 +26,11 @@ func newPipelineHandlerForCRUDTest(t *testing.T) (*PipelineHandler, string, stri
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	return NewPipelineHandler(db, logger, nil, nil), userID, wsID
+	h := NewPipelineHandler(db, logger, nil, nil)
+	// Wire the save_token secret so InternalSave's test-gate (#1371) can be
+	// cleared by tokens minted via internalSaveTokenFor / internalSaveBody.
+	h.SetSaveTokenSecret(internalSaveTestSecret)
+	return h, userID, wsID
 }
 
 // seedPipelineWithVersions inserts a pipelines row plus N pipeline_versions

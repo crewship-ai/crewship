@@ -139,9 +139,12 @@ func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest, au
 		return testRes.status, testRes.body
 	}
 	// Decode test_run result to confirm passed=true and capture the
-	// timestamp the store will check at save time.
+	// save_token — the HMAC proof (bound to this definition + crew) that the
+	// dry-run passed. Step 2's save is gated on this token, not on any body
+	// field the sidecar could set itself (#1371: autonomous ≥ interactive).
 	var testRunResult struct {
-		Status string `json:"status"`
+		Status    string `json:"status"`
+		SaveToken string `json:"save_token"`
 	}
 	_ = json.Unmarshal(testRes.body, &testRunResult)
 	// The internal test_run dry-run-validates (fast, no agent execution), so
@@ -155,19 +158,20 @@ func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest, au
 		})
 	}
 
-	// Step 2: forward to internal save with author injected from IPC.
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	// Step 2: forward to internal save with author injected from IPC. The
+	// test-gate is cleared by the save_token minted in Step 1, not by any
+	// body-supplied timestamp — the server no longer trusts a "it passed"
+	// claim from the caller (#1371).
 	saveBody, err := json.Marshal(map[string]any{
-		"workspace_id":         s.ipc.WorkspaceID,
-		"slug":                 slug,
-		"name":                 body.Name,
-		"description":          body.Description,
-		"definition":           body.Definition,
-		"author_crew_id":       s.ipc.CrewID,
-		"author_agent_id":      authorAgentID,
-		"author_chat_id":       s.ipc.ChatID,
-		"last_test_run_at":     now,
-		"last_test_run_passed": true,
+		"workspace_id":    s.ipc.WorkspaceID,
+		"slug":            slug,
+		"name":            body.Name,
+		"description":     body.Description,
+		"definition":      body.Definition,
+		"author_crew_id":  s.ipc.CrewID,
+		"author_agent_id": authorAgentID,
+		"author_chat_id":  s.ipc.ChatID,
+		"save_token":      testRunResult.SaveToken,
 	})
 	if err != nil {
 		return http.StatusInternalServerError, mustJSON(map[string]string{"error": "marshal save body"})

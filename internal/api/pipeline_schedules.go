@@ -42,8 +42,10 @@ type scheduleResponse struct {
 	WakeFireCount    int            `json:"wake_fire_count,omitempty"`
 	LastWakeAt       *time.Time     `json:"last_wake_at,omitempty"`
 	LastWakeStatus   string         `json:"last_wake_status,omitempty"`
-	CreatedAt        time.Time      `json:"created_at"`
-	UpdatedAt        time.Time      `json:"updated_at"`
+	// WakeFailClosed: a probe error holds the run instead of failing open.
+	WakeFailClosed bool      `json:"wake_fail_closed,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlug string) scheduleResponse {
@@ -82,6 +84,7 @@ func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlu
 		WakeFireCount:         s.WakeFireCount,
 		LastWakeAt:            s.LastWakeAt,
 		LastWakeStatus:        s.LastWakeStatus,
+		WakeFailClosed:        s.WakeFailClosed,
 		CreatedAt:             s.CreatedAt,
 		UpdatedAt:             s.UpdatedAt,
 	}
@@ -103,6 +106,11 @@ type scheduleRequestBody struct {
 	WakePipelineSlug *string        `json:"wake_pipeline_slug,omitempty"`
 	WakePipelineID   *string        `json:"wake_pipeline_id,omitempty"`
 	WakeInputs       map[string]any `json:"wake_inputs,omitempty"`
+	// WakeFailClosed opts into fail-closed wake semantics (probe error holds
+	// the run). Pointer so PATCH distinguishes "absent — keep existing" from
+	// explicit true/false. Only meaningful when a wake gate is set; it is
+	// coerced to false when the schedule has no wake pipeline.
+	WakeFailClosed *bool `json:"wake_fail_closed,omitempty"`
 }
 
 // resolveWakePipeline validates a wake-gate reference at save time —
@@ -203,6 +211,10 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// fail_closed is only meaningful with a wake gate — coerce it off when
+	// there's no probe so we never persist dead config.
+	failClosed := body.WakeFailClosed != nil && *body.WakeFailClosed && wakeID != ""
+
 	in := pipeline.SaveScheduleInput{
 		WorkspaceID:           workspaceID,
 		Name:                  defaultIfBlank(body.Name, slug),
@@ -214,6 +226,7 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		Enabled:               enabled,
 		WakePipelineID:        wakeID,
 		WakeInputs:            body.WakeInputs,
+		WakeFailClosed:        failClosed,
 	}
 	saved, err := h.schedules.Save(r.Context(), in)
 	if err != nil {
@@ -411,6 +424,15 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 	if wakeInputs == nil && wakeID != "" {
 		_ = json.Unmarshal([]byte(existing.WakeInputsJSON), &wakeInputs)
 	}
+	// Whole-row replace: keep the existing fail_closed unless the caller sets
+	// it explicitly. Coerce off when the schedule ends up with no wake gate.
+	failClosed := existing.WakeFailClosed
+	if body.WakeFailClosed != nil {
+		failClosed = *body.WakeFailClosed
+	}
+	if wakeID == "" {
+		failClosed = false
+	}
 
 	in := pipeline.SaveScheduleInput{
 		ID:                    scheduleID,
@@ -424,6 +446,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		Enabled:               enabled,
 		WakePipelineID:        wakeID,
 		WakeInputs:            wakeInputs,
+		WakeFailClosed:        failClosed,
 	}
 	saved, err := h.schedules.Save(r.Context(), in)
 	if err != nil {

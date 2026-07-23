@@ -1678,6 +1678,11 @@ END;
 	// stop getting unrestricted egress. See
 	// migrate_consts_v148_backfill_network_mode_restricted.go (#1366).
 	{version: 148, name: "backfill_network_mode_restricted", fn: migrateBackfillNetworkModeRestricted},
+	// v149 adds an opt-in fail-closed policy to the wake gate: a probe error
+	// HOLDS the gated run instead of failing open. Default 0 preserves every
+	// existing schedule's fail-open behaviour. See
+	// migrate_consts_v149_schedule_wake_fail_closed.go (#1372).
+	{version: 149, name: "schedule_wake_fail_closed", sql: migrationScheduleWakeFailClosed},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

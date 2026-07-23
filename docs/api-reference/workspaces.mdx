@@ -1299,6 +1299,9 @@ Accepts either `target_pipeline_slug` (UI-friendly) or `target_pipeline_id` (CLI
 | `timezone` | string | no | IANA name (e.g. `"Europe/Prague"`); default UTC |
 | `inputs` | object | no | Static inputs passed on every fire |
 | `enabled` | boolean | no | Default `true` |
+| `wake_pipeline_slug` / `wake_pipeline_id` | string | no | Wake gate: an [agentless](/guides/routines#agentless-routines) probe run before each fire — the main routine fires only when the probe's final output is truthy. Must be agentless, in this workspace, and not the schedule's own routine. |
+| `wake_inputs` | object | no | Inputs passed to the wake probe on each tick |
+| `wake_fail_closed` | boolean | no | Default `false` (fail **open** — a probe error fires the run anyway). When `true`, a probe error **holds** the run instead (recorded `last_wake_status: HELD`). Only meaningful with a wake gate; coerced to `false` when the schedule has no probe. |
 
 **Response:** `201 Created` -- schedule object.
 

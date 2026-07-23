@@ -61,7 +61,11 @@ type Schedule struct {
 	WakeCheckCount int
 	WakeFireCount  int
 	LastWakeAt     *time.Time
-	LastWakeStatus string // WOKE | SKIPPED | ERROR
+	LastWakeStatus string // WOKE | SKIPPED | ERROR | HELD
+	// WakeFailClosed opts this schedule into fail-CLOSED wake semantics: a
+	// probe error HOLDS the gated run instead of firing it (the default is
+	// fail-open — see runWakeCheck). Only meaningful when WakePipelineID is set.
+	WakeFailClosed bool
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -73,6 +77,7 @@ const (
 	WakeStatusWoke    = "WOKE"    // probe truthy (or absent) — main routine fired
 	WakeStatusSkipped = "SKIPPED" // probe falsey — tick skipped, no main run
 	WakeStatusError   = "ERROR"   // probe failed — failed OPEN, main routine fired
+	WakeStatusHeld    = "HELD"    // probe failed under fail_closed — run HELD, no main run
 )
 
 // SaveScheduleInput is the payload for ScheduleStore.Save.
@@ -93,6 +98,10 @@ type SaveScheduleInput struct {
 	// store persists what it's given.
 	WakePipelineID string
 	WakeInputs     map[string]any
+	// WakeFailClosed opts into fail-closed wake semantics (a probe error holds
+	// the run instead of firing it). Default false = fail open, unchanged for
+	// existing schedules. Only meaningful alongside WakePipelineID.
+	WakeFailClosed bool
 }
 
 // ScheduleStore is the persistence + listing API for
@@ -152,14 +161,14 @@ func (s *ScheduleStore) Save(ctx context.Context, in SaveScheduleInput) (*Schedu
 INSERT INTO pipeline_schedules (
     id, workspace_id, name, target_pipeline_id, target_pipeline_version,
     cron_expr, timezone, inputs_json, enabled, next_run_at,
-    wake_pipeline_id, wake_inputs_json,
+    wake_pipeline_id, wake_inputs_json, wake_fail_closed,
     created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, in.WorkspaceID, in.Name, in.TargetPipelineID,
 			nullInt(in.TargetPipelineVersion),
 			in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(in.Enabled),
 			tsformat.Format(nextRun),
-			nullStr(in.WakePipelineID), string(wakeInputsJSON),
+			nullStr(in.WakePipelineID), string(wakeInputsJSON), boolToInt(in.WakeFailClosed),
 			tsformat.Format(now), tsformat.Format(now),
 		)
 		if err != nil {
@@ -174,12 +183,14 @@ UPDATE pipeline_schedules
 SET name = ?, target_pipeline_id = ?, target_pipeline_version = ?,
     cron_expr = ?, timezone = ?, inputs_json = ?, enabled = ?,
     next_run_at = ?, wake_pipeline_id = ?, wake_inputs_json = ?,
+    wake_fail_closed = ?,
     updated_at = ?
 WHERE id = ? AND deleted_at IS NULL`,
 		in.Name, in.TargetPipelineID, nullInt(in.TargetPipelineVersion),
 		in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(in.Enabled),
 		tsformat.Format(nextRun),
 		nullStr(in.WakePipelineID), string(wakeInputsJSON),
+		boolToInt(in.WakeFailClosed),
 		tsformat.Format(now),
 		in.ID,
 	)
@@ -596,12 +607,18 @@ func (s *PipelineScheduler) alertFailedScheduledRun(ctx context.Context, sched *
 //
 //   - probe COMPLETED + truthy final output → (true, WOKE)
 //   - probe COMPLETED + falsey final output → (false, SKIPPED)
-//   - probe failed / didn't load            → (true, ERROR)
+//   - probe failed / didn't load            → (true, ERROR)  [default]
+//   - probe failed AND WakeFailClosed set    → (false, HELD)  [#1372]
 //
-// Errors fail OPEN: a monitoring schedule whose probe broke must wake
-// the main routine rather than go silently blind — occasional token
-// spend on a flapping probe is the cheaper failure mode. The ERROR
-// wake status keeps the breakage visible to operators.
+// Errors fail OPEN by default: a monitoring schedule whose probe broke must
+// wake the main routine rather than go silently blind — occasional token
+// spend on a flapping probe is the cheaper failure mode. The ERROR wake
+// status keeps the breakage visible to operators.
+//
+// A schedule can opt into fail-CLOSED (WakeFailClosed) when the probe is a
+// genuine safety gate rather than a monitor: then a probe error HOLDS the run
+// (proceed=false) and records the distinct HELD status, so a broken or
+// tampered probe suppresses the autonomous run instead of waving it through.
 //
 // Truthiness reuses evalIfCondition, the same falsey rule step `if:`
 // conditions use (empty/false/0/null/nil/no/off → skip), so probe
@@ -635,6 +652,14 @@ func (s *PipelineScheduler) runWakeCheck(ctx context.Context, sched *Schedule) (
 		} else if res != nil {
 			errMsg = res.ErrorMessage
 		}
+		if sched.WakeFailClosed {
+			// Fail CLOSED: the probe is a safety gate, so a broken probe holds
+			// the run rather than firing it. HELD (not ERROR) so telemetry
+			// distinguishes "held on a broken gate" from "fired open".
+			s.logger.Warn("pipeline scheduler: wake check failed — holding run (fail_closed)",
+				"schedule", sched.ID, "wake_pipeline", sched.WakePipelineID, "error", errMsg)
+			return false, WakeStatusHeld
+		}
 		s.logger.Warn("pipeline scheduler: wake check failed — failing open",
 			"schedule", sched.ID, "wake_pipeline", sched.WakePipelineID, "error", errMsg)
 		return true, WakeStatusError
@@ -653,20 +678,22 @@ SELECT id, workspace_id, name, target_pipeline_id, target_pipeline_version,
        COALESCE(wake_pipeline_id, ''), COALESCE(wake_inputs_json, '{}'),
        wake_check_count, wake_fire_count,
        last_wake_at, COALESCE(last_wake_status, ''),
+       COALESCE(wake_fail_closed, 0),
        created_at, updated_at, deleted_at
 FROM pipeline_schedules`
 
 func scanSchedule(rs rowScanner) (*Schedule, error) {
 	var (
-		s             Schedule
-		targetVersion sql.NullInt64
-		lastRunAt     sql.NullString
-		nextRunAt     sql.NullString
-		lastWakeAt    sql.NullString
-		deletedAt     sql.NullString
-		enabled       int
-		createdAt     string
-		updatedAt     string
+		s              Schedule
+		targetVersion  sql.NullInt64
+		lastRunAt      sql.NullString
+		nextRunAt      sql.NullString
+		lastWakeAt     sql.NullString
+		deletedAt      sql.NullString
+		enabled        int
+		wakeFailClosed int
+		createdAt      string
+		updatedAt      string
 	)
 	err := rs.Scan(
 		&s.ID, &s.WorkspaceID, &s.Name, &s.TargetPipelineID, &targetVersion,
@@ -676,12 +703,14 @@ func scanSchedule(rs rowScanner) (*Schedule, error) {
 		&s.WakePipelineID, &s.WakeInputsJSON,
 		&s.WakeCheckCount, &s.WakeFireCount,
 		&lastWakeAt, &s.LastWakeStatus,
+		&wakeFailClosed,
 		&createdAt, &updatedAt, &deletedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 	s.Enabled = enabled != 0
+	s.WakeFailClosed = wakeFailClosed != 0
 	if targetVersion.Valid {
 		v := int(targetVersion.Int64)
 		s.TargetPipelineVersion = &v

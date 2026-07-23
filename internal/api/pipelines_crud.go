@@ -498,21 +498,27 @@ func (h *PipelineHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 }
 
 // internalSaveRequest carries the IPC body sidecar→main forwards
-// for an agent emitting a new pipeline definition. Test-run gate
-// is enforced by the handler — the sidecar must call test_run
-// first and pass the resulting timestamp through.
+// for an agent emitting a new pipeline definition. The test-run gate
+// is enforced by the handler via the HMAC SaveToken — the sidecar must
+// call the internal test_run first and pass the minted token through.
 type internalSaveRequest struct {
-	WorkspaceID       string          `json:"workspace_id"`
-	Slug              string          `json:"slug"`
-	Name              string          `json:"name"`
-	Description       string          `json:"description"`
-	Definition        json.RawMessage `json:"definition"`
-	AuthorCrewID      string          `json:"author_crew_id"`
-	AuthorAgentID     string          `json:"author_agent_id"`
-	AuthorChatID      string          `json:"author_chat_id"`
-	AuthorRunID       string          `json:"author_run_id"`
-	LastTestRunAt     string          `json:"last_test_run_at"` // RFC3339
-	LastTestRunPassed bool            `json:"last_test_run_passed"`
+	WorkspaceID   string          `json:"workspace_id"`
+	Slug          string          `json:"slug"`
+	Name          string          `json:"name"`
+	Description   string          `json:"description"`
+	Definition    json.RawMessage `json:"definition"`
+	AuthorCrewID  string          `json:"author_crew_id"`
+	AuthorAgentID string          `json:"author_agent_id"`
+	AuthorChatID  string          `json:"author_chat_id"`
+	AuthorRunID   string          `json:"author_run_id"`
+	// SaveToken is the HMAC proof minted by the internal /test_run that a
+	// dry-run just passed for THIS definition under THIS crew (#1371). It is
+	// the unattended-path equivalent of the user path's save_token: the gate
+	// is cleared ONLY by a valid token, never by a body-supplied "it passed"
+	// claim. The legacy last_test_run_at / last_test_run_passed body fields
+	// are deliberately gone — they were forgeable, which is the whole reason
+	// the token exists (autonomous ≥ interactive). See pipelines_save_token.go.
+	SaveToken string `json:"save_token,omitempty"`
 	// ChangeSummary is an optional one-line provenance note recorded on the
 	// pipeline_versions row (surfaced in the versions UI and CLI).
 	ChangeSummary string `json:"change_summary,omitempty"`
@@ -840,12 +846,38 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 			RunID:   body.AuthorRunID,
 			Via:     pipeline.AuthoredViaAgent,
 		},
-		LastTestRunPassed: body.LastTestRunPassed,
-		Status:            statusForRisk(risky),
-		ChangeSummary:     body.ChangeSummary,
+		// Default the gate to UNMET. The unattended path does NOT trust any
+		// body-supplied "it passed" claim — that was forgeable, and the whole
+		// point of #1371 is that autonomous authoring is gated at least as
+		// strictly as the interactive user path. Only a valid save_token flips
+		// it, exactly mirroring the user save's save_token branch below.
+		Status:        statusForRisk(risky),
+		ChangeSummary: body.ChangeSummary,
 	}
-	if t, err := parseRFC3339(body.LastTestRunAt); err == nil {
-		in.LastTestRunAt = &t
+
+	// The ONLY path that clears the test-gate for an agent save: a SaveToken —
+	// the HMAC proof the internal /test_run minted, binding a passing dry-run
+	// to THIS definition_hash under THIS author crew. Verified server-side, no
+	// body trust. A missing/invalid token leaves the gate UNMET and the store
+	// returns ErrTestRunGateFailed → 422 (same 422 the user path returns for a
+	// bad token). There is deliberately no body-trust fallback and no agent
+	// skip escape hatch — a risky agent save is still human-reviewed above.
+	if body.SaveToken != "" {
+		defHash := definitionHashHex(body.Definition)
+		if err := verifySaveToken(h.saveTokenSecret, body.SaveToken, body.WorkspaceID, defHash, internalSavePrincipal(body.AuthorCrewID)); err != nil {
+			h.logger.Warn("pipeline internal save: save_token rejected",
+				"crew", body.AuthorCrewID, "slug", body.Slug, "err", err)
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
+				"error": "save_token invalid (expired, malformed, or signed for a different definition/crew)",
+			})
+			return
+		}
+		// Token verified — synthesize a passing-now timestamp so the store gate
+		// doesn't fire on the (now absent) body fields.
+		now := time.Now().UTC()
+		in.LastTestRunAt = &now
+		in.LastTestRunPassed = true
+		h.logger.Info("pipeline internal save: cleared via save_token", "crew", body.AuthorCrewID, "slug", body.Slug)
 	}
 
 	saved, err := h.store.Save(r.Context(), in)

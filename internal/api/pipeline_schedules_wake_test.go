@@ -72,6 +72,71 @@ func TestPipelineSchedules_Create_WithWakeGate_Returns201(t *testing.T) {
 	}
 }
 
+// TestPipelineSchedules_Create_WakeFailClosed_RoundTrips pins the #1372 API
+// surface: a create with wake_fail_closed:true persists and echoes the flag.
+func TestPipelineSchedules_Create_WakeFailClosed_RoundTrips(t *testing.T) {
+	h, db, userID, wsID := scheduleHandlerRig(t)
+	seedPipelineRow(t, db, wsID, "pln_main", "ping-hosts")
+	seedPipelineRowDef(t, db, wsID, "pln_probe", "cost-probe", agentlessProbeDef)
+
+	body := `{
+		"cron_expr": "*/10 * * * *",
+		"target_pipeline_slug": "ping-hosts",
+		"wake_pipeline_slug": "cost-probe",
+		"wake_fail_closed": true
+	}`
+	req := withWorkspaceUser(httptest.NewRequest("POST",
+		"/api/v1/workspaces/"+wsID+"/pipeline-schedules", strings.NewReader(body)),
+		userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.CreateSchedule(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (body: %s)", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["wake_fail_closed"] != true {
+		t.Errorf("wake_fail_closed: got %v, want true", resp["wake_fail_closed"])
+	}
+	// And it must be persisted, not just echoed.
+	var stored int
+	if err := db.QueryRow(`SELECT wake_fail_closed FROM pipeline_schedules WHERE id = ?`, resp["id"]).Scan(&stored); err != nil {
+		t.Fatalf("read stored flag: %v", err)
+	}
+	if stored != 1 {
+		t.Errorf("stored wake_fail_closed = %d, want 1", stored)
+	}
+}
+
+// TestPipelineSchedules_Create_FailClosedWithoutGate_Coerced pins the guard:
+// fail_closed is meaningless without a probe, so it's coerced off.
+func TestPipelineSchedules_Create_FailClosedWithoutGate_Coerced(t *testing.T) {
+	h, db, userID, wsID := scheduleHandlerRig(t)
+	seedPipelineRow(t, db, wsID, "pln_main", "ping-hosts")
+
+	body := `{
+		"cron_expr": "*/10 * * * *",
+		"target_pipeline_slug": "ping-hosts",
+		"wake_fail_closed": true
+	}`
+	req := withWorkspaceUser(httptest.NewRequest("POST",
+		"/api/v1/workspaces/"+wsID+"/pipeline-schedules", strings.NewReader(body)),
+		userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.CreateSchedule(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (body: %s)", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	// omitempty means the flag is absent (false) — never true without a gate.
+	if resp["wake_fail_closed"] == true {
+		t.Errorf("wake_fail_closed must be coerced off when there is no wake gate")
+	}
+}
+
 func TestPipelineSchedules_Create_WakeGateNonAgentless_Returns400(t *testing.T) {
 	h, db, userID, wsID := scheduleHandlerRig(t)
 	seedPipelineRow(t, db, wsID, "pln_main", "ping-hosts")

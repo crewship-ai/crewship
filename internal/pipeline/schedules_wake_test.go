@@ -213,6 +213,81 @@ func TestPipelineScheduler_FireOne_WakeGateFailsOpen(t *testing.T) {
 	}
 }
 
+// mustSaveWakeScheduleFailClosed saves a wake-gated schedule with the
+// fail-closed policy set — a probe error must HOLD the run (#1372).
+func mustSaveWakeScheduleFailClosed(t *testing.T, store *ScheduleStore, wakePipelineID string) *Schedule {
+	t.Helper()
+	sched, err := store.Save(context.Background(), SaveScheduleInput{
+		WorkspaceID:      "ws_test",
+		Name:             "gated-fc",
+		TargetPipelineID: "pipe_main",
+		CronExpr:         "* * * * *",
+		WakePipelineID:   wakePipelineID,
+		WakeInputs:       map[string]any{"threshold": "100"},
+		WakeFailClosed:   true,
+		Enabled:          true,
+	})
+	if err != nil {
+		t.Fatalf("save fail-closed schedule: %v", err)
+	}
+	return sched
+}
+
+// TestScheduleStore_Save_WakeFailClosedRoundTrip pins the persistence of the
+// new policy flag: it survives create and read-back.
+func TestScheduleStore_Save_WakeFailClosedRoundTrip(t *testing.T) {
+	db, store, _ := newWakeTestRig(t)
+	defer db.Close()
+	seedPipelineDef(t, db, "pipe_main", "main", transformPipelineDef("main", "ran"))
+	seedPipelineDef(t, db, "pipe_probe", "probe", transformPipelineDef("probe", "true"))
+
+	sched := mustSaveWakeScheduleFailClosed(t, store, "pipe_probe")
+	if !sched.WakeFailClosed {
+		t.Fatalf("wake_fail_closed did not round-trip on create")
+	}
+	got, _ := store.GetByID(context.Background(), sched.ID)
+	if !got.WakeFailClosed {
+		t.Errorf("wake_fail_closed did not round-trip on read-back")
+	}
+	// Default schedules stay fail-open.
+	def := mustSaveWakeSchedule(t, store, "pipe_probe")
+	if def.WakeFailClosed {
+		t.Errorf("default schedule must be fail-open (wake_fail_closed=false)")
+	}
+}
+
+// TestPipelineScheduler_FireOne_WakeGateFailsClosed is the #1372 red-first
+// pin: a fail-closed schedule whose probe ERRORS must HOLD the gated run — the
+// main routine must NOT fire, and the tick records HELD (not ERROR).
+func TestPipelineScheduler_FireOne_WakeGateFailsClosed(t *testing.T) {
+	db, store, sched := newWakeTestRig(t)
+	defer db.Close()
+	seedPipelineDef(t, db, "pipe_main", "main", transformPipelineDef("main", "ran"))
+	// Probe id points nowhere → probe run errors. Under fail_closed the run
+	// must be HELD rather than fired.
+	row := mustSaveWakeScheduleFailClosed(t, store, "pipe_ghost")
+
+	sched.fireOne(context.Background(), row)
+
+	got, _ := store.GetByID(context.Background(), row.ID)
+	if got.LastWakeStatus != WakeStatusHeld {
+		t.Errorf("last_wake_status: got %q, want HELD", got.LastWakeStatus)
+	}
+	// Main routine must NOT have run — the whole point of fail-closed.
+	if got.LastStatus != "" || got.LastRunID != "" {
+		t.Errorf("fail-closed probe error must hold the run, but main ran: status=%q run=%q", got.LastStatus, got.LastRunID)
+	}
+	// A held tick is not a fire.
+	if got.WakeCheckCount != 1 || got.WakeFireCount != 0 {
+		t.Errorf("counters: got %d/%d, want 1/0 (checked once, fired zero)", got.WakeCheckCount, got.WakeFireCount)
+	}
+	// Held ticks still advance next_run_at (like a skip) so the schedule
+	// isn't wedged on the failed occurrence.
+	if got.NextRunAt == nil || !got.NextRunAt.After(time.Now()) {
+		t.Errorf("held tick must still advance next_run_at, got %v", got.NextRunAt)
+	}
+}
+
 func TestPipelineScheduler_FireOne_NoGate_Unchanged(t *testing.T) {
 	// Regression pin: schedules without a wake gate keep today's
 	// behaviour — fire immediately, no wake telemetry.

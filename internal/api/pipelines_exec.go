@@ -594,7 +594,24 @@ func (h *PipelineHandler) InternalTestRun(w http.ResponseWriter, r *http.Request
 		replyError(w, http.StatusInternalServerError, "Failed to test-run pipeline")
 		return
 	}
-	writeJSON(w, http.StatusOK, res)
+
+	// Mint the save_token so the paired InternalSave can clear its test-gate
+	// without trusting any body-supplied "it passed" claim (#1371). Bound to
+	// (workspace, definition_hash, crew principal): it proves a dry-run just
+	// passed for THIS exact definition under THIS crew. Only minted on a
+	// passing dry-run AND when a signing secret is wired — mirrors TestRun.
+	// DRY_RUN_OK is the dry-run pass status; COMPLETED tolerated for
+	// forward-compat. author_crew_id is the binding already validated above.
+	var saveToken string
+	if res != nil && (res.Status == "DRY_RUN_OK" || res.Status == "COMPLETED") && len(h.saveTokenSecret) > 0 {
+		defHash := definitionHashHex(body.Definition)
+		saveToken = signSaveToken(h.saveTokenSecret, body.WorkspaceID, defHash, internalSavePrincipal(body.AuthorCrewID), time.Now())
+	}
+	type internalTestRunResponse struct {
+		*pipeline.RunResult
+		SaveToken string `json:"save_token,omitempty"`
+	}
+	writeJSON(w, http.StatusOK, internalTestRunResponse{RunResult: res, SaveToken: saveToken})
 }
 
 // ListRunRecords returns runs from the pipeline_runs table directly

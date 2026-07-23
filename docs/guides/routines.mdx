@@ -811,7 +811,11 @@ Per-step `complexity` annotation drives the resolver. With `on_fail: "escalate_t
 
 ## Save validation gate
 
-Save endpoints (sidecar `/pipelines/save`, user `/api/v1/workspaces/{ws}/pipelines/save`, internal `/api/v1/internal/pipelines/save`) require the routine to clear a validation gate before it persists. The gate is a **dry-run validation** of the draft, not a real execution — there is no "test run" mode (you cannot run an agent dry). The sidecar agent-authoring flow forwards the draft to `/api/v1/internal/pipelines/test_run`, which parses, schema-validates, and dry-runs it (rendering every template, invoking no agent); on success it sets `last_test_run_passed` and forwards to save.
+Save endpoints (sidecar `/pipelines/save`, user `/api/v1/workspaces/{ws}/pipelines/save`, internal `/api/v1/internal/pipelines/save`) require the routine to clear a validation gate before it persists. The gate is a **dry-run validation** of the draft, not a real execution — there is no "test run" mode (you cannot run an agent dry). The sidecar agent-authoring flow forwards the draft to `/api/v1/internal/pipelines/test_run`, which parses, schema-validates, and dry-runs it (rendering every template, invoking no agent); on success it mints an HMAC **`save_token`** bound to (workspace, definition hash, author crew), and the sidecar forwards **that token** to save.
+
+<Info>
+**Autonomous ≥ interactive: the unattended path is gated at least as strictly as the interactive one.** Both save paths now clear the gate the same way — with a `save_token` the server mints on a passing dry-run and re-verifies, never a body-supplied "it passed" claim. The user path binds the token to the saving **user**; the internal (agent/sidecar) path binds it to the author **crew**. The old `last_test_run_at` / `last_test_run_passed` body fields were forgeable and are gone from `InternalSave` — an agent cannot activate a routine that never passed a dry-run, and there is **no** agent-side skip escape hatch (`skip_test_gate` is OWNER/ADMIN, user path only). This closes the gap where autonomous authoring was weaker than the interactive flow (#1371).
+</Info>
 
 This is the **self-improvement loop**: an authoring agent that writes brittle DSL gets a structured failure report it can read and revise from. Without the gate, MVP would ship pipelines that pass schema but fail at runtime. Real execution happens on the first live `run`, and risky routines are human-reviewed (governance) before they go live.
 
@@ -914,7 +918,13 @@ Point the probe's `url`/`expected_items` inputs at your own endpoint to make it 
 Semantics worth knowing:
 
 - The probe must be `agentless: true`, live in the same workspace, and can't be the schedule's own routine — all validated when the schedule is saved.
-- **Probe errors fail open**: a broken or deleted probe wakes the main routine instead of going silently blind, and records `last_wake_status: ERROR` so you can see the probe needs fixing.
+- **Probe errors fail open by default**: a broken or deleted probe wakes the main routine instead of going silently blind, and records `last_wake_status: ERROR` so you can see the probe needs fixing. That's the right default for a *monitoring* probe (a little wasted token spend beats a blind spot).
+- **Fail-closed (opt-in) for gates that must hold** (#1372): when the probe is a genuine safety gate rather than a monitor, pass `--fail-closed` on create (or `--fail-closed` / `--fail-closed=false` on update). A probe error then **holds** the run instead of firing it, and records the distinct `last_wake_status: HELD`. A held tick advances `next_run_at` (so the schedule isn't wedged) but counts as a check, not a fire. `--fail-closed` requires a wake probe; a schedule with no gate can't be fail-closed. Choose it when a broken or tampered probe firing the routine anyway is worse than the routine not firing.
+
+    ```bash
+    crewship routine schedules create --slug deploy-canary \
+        --cron "*/5 * * * *" --wake-slug canary-healthy-probe --fail-closed
+    ```
 - A skipped tick advances `next_run_at` but leaves `last_run_*` untouched — run telemetry stays strictly about main runs. Wake telemetry lives in `wake_check_count` / `wake_fire_count` / `last_wake_at` / `last_wake_status`, and `routine schedules list` shows it as `<probe> woke/checked` in the WAKE column.
 - Probe executions are regular runs with `triggered_via: wake_check`, so they're auditable in run history and filterable out of dashboards.
 

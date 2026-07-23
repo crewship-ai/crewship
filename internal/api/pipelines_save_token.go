@@ -43,6 +43,16 @@ const (
 	saveTokenSep = "."
 )
 
+// internalSavePrincipal namespaces the crew identity used as the save_token
+// principal on the unattended (sidecar/agent) save path. The user path binds
+// its token to user.ID; the internal path has no user, so it binds to the
+// author crew instead. The "crew:" prefix keeps the two realms disjoint — a
+// user token (principal = a raw "usr_…" id) can never be replayed on the
+// internal path and vice versa, even though both use the same HMAC secret.
+func internalSavePrincipal(crewID string) string {
+	return "crew:" + crewID
+}
+
 // signSaveToken returns "<unix_ts>.<hex_hmac>". Inputs are
 // concatenated with pipe — the pipe is also non-base64/hex so a
 // crafted definition_hash can't collide with the boundary.
