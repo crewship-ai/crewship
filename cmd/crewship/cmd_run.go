@@ -473,6 +473,7 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 		}
 		return saveErr
 	}
+	var closeReason string
 	for {
 		msg, err := ws.ReadMessage()
 		if err != nil {
@@ -480,7 +481,20 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			// A dropped WS connection is a real failure — exit non-zero so
 			// scripts (e.g. `crewship run x "y" || alert`) notice. Was
 			// previously masking this as success when --save was unset.
+			// #1386: if the server sent a rejection frame just before the
+			// close, print WHY instead of a bare "ws read: EOF".
+			if closeReason != "" {
+				return joinErrs(fmt.Errorf("server rejected the connection: %s", closeReason))
+			}
 			return joinErrs(fmt.Errorf("ws read: %w", err))
+		}
+
+		// #1386: the server writes one error/session_revoked frame before
+		// closing a refused connection. Capture its reason so the EOF above
+		// can report it (x/net/websocket drops the WS close reason itself).
+		if reason, ok := cli.CloseReason(msg); ok {
+			closeReason = reason
+			continue
 		}
 
 		event, err := cli.ParseChatEvent(msg)

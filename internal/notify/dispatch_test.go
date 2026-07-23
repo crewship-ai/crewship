@@ -28,7 +28,7 @@ func (s staticLister) ListEnabled(context.Context, string) ([]Channel, error) {
 // tests don't sleep for real.
 func fastDispatcher(t *testing.T, lister ChannelLister, m mailer.Mailer) *Dispatcher {
 	t.Helper()
-	d := NewDispatcher(lister, m, nil)
+	d := NewDispatcher(lister, m, nil, nil)
 	d.baseBackoff = time.Millisecond
 	return d
 }
@@ -241,7 +241,7 @@ func TestDispatch_EventFilter_SkipsUnsubscribed(t *testing.T) {
 }
 
 func TestScrubPreview_CapIsRuneSafe(t *testing.T) {
-	d := NewDispatcher(staticLister{nil}, nil, nil)
+	d := NewDispatcher(staticLister{nil}, nil, nil, nil)
 	// 4-byte runes so a byte-offset cut would land mid-rune.
 	preview := strings.Repeat("😀", 1000) // 4000 bytes, well over the 1KB cap
 	got := d.scrubPreview(preview)

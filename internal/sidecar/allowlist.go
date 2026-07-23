@@ -1,130 +1,30 @@
 package sidecar
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"net"
-	"sort"
 	"strings"
-	"sync"
+
+	"github.com/crewship-ai/crewship/internal/egressallow"
 )
 
-// DefaultAllowedDomains contains the LLM API domains that the sidecar
-// will forward requests to. All other domains are blocked. Mirrors the
-// frontend list in components/features/crews/crew-network-policy.tsx —
-// keep both lists in sync.
-//
-// Each entry exists for a specific CLI; comments document which.
-var DefaultAllowedDomains = []string{
-	// Anthropic
-	"api.anthropic.com",     // Claude Code (API key + OAuth)
-	"console.anthropic.com", // Claude Code OAuth refresh callback
+// The domain-allowlist primitive moved to the dependency-free leaf package
+// internal/egressallow so that internal/egresspolicy can share it WITHOUT
+// importing sidecar (which would form an import cycle now that the sidecar MCP
+// gateway builds its gated client through egresspolicy). These aliases keep
+// every existing sidecar call site — and the ~40 tests referencing
+// NewDomainAllowlist / DefaultAllowedDomains — unchanged.
+type DomainAllowlist = egressallow.DomainAllowlist
 
-	// OpenAI / Codex
-	"api.openai.com",  // Codex CLI (API key)
-	"auth.openai.com", // Codex CLI ChatGPT-subscription login flow
-	"chatgpt.com",     // Codex CLI subscription routing
+// DefaultAllowedDomains re-exports the leaf's default LLM/CLI allowlist.
+var DefaultAllowedDomains = egressallow.DefaultAllowedDomains
 
-	// Google / Gemini
-	"generativelanguage.googleapis.com", // Gemini CLI (AI Studio path)
-	"oauth2.googleapis.com",             // Gemini CLI OAuth flow
-	"accounts.google.com",               // Gemini CLI OAuth UI redirect
-
-	// Cursor
-	"api.cursor.sh",  // Cursor CLI auth/billing
-	"api2.cursor.sh", // Cursor CLI primary model gateway (since 2026-Q1)
-
-	// Factory Droid
-	"api.factory.ai", // Factory Droid (legacy)
-	"app.factory.ai", // Factory Droid CLI installer + API base
-
-	// OpenCode BYOK providers (#944) — every provider whose models the
-	// frontend registry advertises (lib/cli-adapters.ts OPENCODE_MODELS)
-	// and whose API key exec_env.go accepts into the agent env. Without
-	// these, restricted-mode crews silently egress-block the provider the
-	// user configured.
-	"openrouter.ai",    // OpenRouter gateway
-	"api.x.ai",         // xAI Grok
-	"api.groq.com",     // Groq
-	"api.deepseek.com", // DeepSeek
-	"api.moonshot.ai",  // Moonshot Kimi (global endpoint)
-	"api.z.ai",         // Z.ai GLM
-	"api.minimax.io",   // MiniMax (global endpoint)
-}
-
-// DomainAllowlist controls which outbound domains the agent is allowed to reach.
-// Thread-safe.
-type DomainAllowlist struct {
-	mu      sync.RWMutex
-	domains map[string]bool
-}
-
-// NewDomainAllowlist creates an allowlist from the given domains.
+// NewDomainAllowlist re-exports the leaf constructor.
 func NewDomainAllowlist(domains []string) *DomainAllowlist {
-	al := &DomainAllowlist{
-		domains: make(map[string]bool, len(domains)),
-	}
-	for _, d := range domains {
-		al.domains[strings.ToLower(d)] = true
-	}
-	return al
+	return egressallow.NewDomainAllowlist(domains)
 }
 
-// IsAllowed returns true if the host (with optional :port) is on the allowlist.
-// Handles IPv6 addresses correctly (e.g. [::1]:443).
-func (al *DomainAllowlist) IsAllowed(host string) bool {
-	al.mu.RLock()
-	defer al.mu.RUnlock()
-
-	h := stripPort(host)
-	return al.domains[strings.ToLower(h)]
-}
-
-// Add adds a domain to the allowlist.
-func (al *DomainAllowlist) Add(domain string) {
-	al.mu.Lock()
-	defer al.mu.Unlock()
-	al.domains[strings.ToLower(domain)] = true
-}
-
-// Hash returns a short, deterministic content hash of the current domain
-// set — sorted so member ORDER never affects it (domains are already
-// lower-cased on insert, so case doesn't either). Advertised on /health so
-// the orchestrator (#1160) can tell whether a restricted-mode crew's
-// allowlist actually changed since the sidecar started, instead of
-// restarting it unconditionally on every exec.
-func (al *DomainAllowlist) Hash() string {
-	al.mu.RLock()
-	domains := make([]string, 0, len(al.domains))
-	for d := range al.domains {
-		domains = append(domains, d)
-	}
-	al.mu.RUnlock()
-
-	sort.Strings(domains)
-	h := sha256.New()
-	for _, d := range domains {
-		h.Write([]byte(d))
-		h.Write([]byte{'\n'})
-	}
-	return hex.EncodeToString(h.Sum(nil))[:12]
-}
-
-// stripPort removes the port from a host string, handling IPv6 bracket notation.
-func stripPort(host string) string {
-	// Fast path: bare hostnames have no colon and no brackets — return as-is
-	// instead of paying for net.SplitHostPort's error-alloc on every port-less
-	// call from the proxy's IsAllowed / providerForHost hot path.
-	if strings.IndexByte(host, ':') < 0 && strings.IndexByte(host, '[') < 0 {
-		return host
-	}
-	// Try net.SplitHostPort (handles [::1]:443, host:port, etc.)
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		return h
-	}
-	// No port present — strip brackets if bare IPv6 (e.g. "[::1]").
-	return strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
-}
+// stripPort delegates to the leaf so providerForHost (below) and the sidecar
+// allowlist fuzz test keep a single implementation.
+func stripPort(host string) string { return egressallow.StripPort(host) }
 
 // providerForHost returns the LLM provider type for a given host, or empty string.
 func providerForHost(host string) ProviderType {

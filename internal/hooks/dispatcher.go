@@ -56,7 +56,7 @@ func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Ev
 		if !h.Blocking {
 			continue
 		}
-		res, runErr := runHandler(ctx, h, ec)
+		res, runErr := runHandler(ctx, db, h, ec)
 		emitFired(ctx, emitter, h, ec, res, runErr)
 		if runErr != nil {
 			errs = append(errs, fmt.Errorf("hook %s: %w", h.ID, runErr))
@@ -101,7 +101,7 @@ func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Ev
 					Message: panicErr.Error(),
 				}, panicErr)
 			}()
-			res, runErr := runHandler(bgCtx, h, ec)
+			res, runErr := runHandler(bgCtx, db, h, ec)
 			emitFired(bgCtx, emitter, h, ec, res, runErr)
 			if runErr == nil && res.Outcome == OutcomeBlock {
 				// Non-blocking Block still lands in the journal so
@@ -120,12 +120,12 @@ func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Ev
 // runHandler dispatches to the correct backend based on HandlerKind.
 // Centralized here so the dispatcher logic doesn't have to know anything
 // about the individual handlers.
-func runHandler(ctx context.Context, h Hook, ec EventContext) (Result, error) {
+func runHandler(ctx context.Context, db *sql.DB, h Hook, ec EventContext) (Result, error) {
 	switch h.HandlerKind {
 	case HandlerKindShell:
 		return shellHandler(ctx, h, ec)
 	case HandlerKindHTTP:
-		return httpHandler(ctx, h, ec)
+		return httpHandler(ctx, db, h, ec)
 	case HandlerKindSubagent:
 		return subagentHandlerDispatch(ctx, h, ec)
 	default:

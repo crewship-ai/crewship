@@ -34,6 +34,7 @@ crewship admin <subcommand> [flags]
 | `invalidate-sessions` | Force-logout every active session for a user (no password change). |
 | `sessions list` | Forensic read of `user_sessions` for one user — all rows, including revoked + expired. |
 | `prune-legacy` | Remove orphaned pre-C1 crew docker resources that block agents from starting. **HTTP-backed — needs a running server + login** (the one exception in this group). |
+| `reap-orphan-containers` | Detect (and with `--apply` reap) crew containers holding a stale internal token after a master rotation. **HTTP-backed — needs a running server + login.** |
 
 ---
 
@@ -203,6 +204,79 @@ Removed 4 legacy resource(s):
 
 Requires the `OWNER` or `ADMIN` role. Returns `503` when the server's container
 provider is not docker (nothing to prune).
+
+---
+
+## `crewship admin reap-orphan-containers`
+
+Finds — and, with `--apply`, reaps — **crew containers orphaned by an
+internal-token master rotation**. When crewshipd restarts with a *different*
+internal-token master while a per-crew agent container survives, that container
+keeps the crew-bound token (`crwv1.<ws>.<crew>.<mac>`) it was minted with, and
+the new process rejects it forever:
+
+```text
+WARN internal API auth failed: invalid crew-bound token  path=/api/v1/internal/credentials
+```
+
+The container's credential sync is silently and permanently broken while
+`docker ps` still shows it "healthy", and it re-emits the warning every reap
+interval (log-noise that drowns real signal). This command clears those
+orphans.
+
+```bash
+crewship admin reap-orphan-containers            # dry-run: report only
+crewship admin reap-orphan-containers --apply     # stop + remove the orphans
+```
+
+<Warning>
+  **HTTP-backed**, like `prune-legacy`: the docker daemon lives behind the
+  running server, so this needs a reachable server and an authenticated session
+  (`crewship login`). **Dry-run by default** — nothing is removed unless you
+  pass `--apply`.
+</Warning>
+
+### One-time step after upgrading to the stable-master build
+
+The [stable internal-token master](/api-reference/internal#internal-token-authentication)
+(#1385) stops *future* restarts from ever orphaning a container. But the
+**deploy that first introduces it rotates the master once** — from the old
+per-boot random to the value derived from `ENCRYPTION_KEY`. Any container that
+outlived that one deploy is orphaned exactly once and does not self-heal.
+
+After rolling out the new build, do **one** of:
+
+- **Recreate the surviving containers** — a normal redeploy / crew re-dispatch
+  starts a fresh container that re-mints a valid token; or
+- **Run `crewship admin reap-orphan-containers --apply`** to stop+remove just
+  the orphaned ones (the next dispatch to each crew recreates them fresh).
+
+From then on the master is stable and no further action is needed unless you
+deliberately rotate `CREWSHIP_INTERNAL_TOKEN` or the `ENCRYPTION_KEY` it derives
+from.
+
+### How detection stays safe
+
+For each of the workspace's crews the command probes the running container's
+sidecar `/health` for the token fingerprint it advertises (`token_fp`, #1385)
+and compares it against the fingerprint of the token the server would mint
+**today**. A container is listed **only** on a definite, non-empty mismatch —
+an unreachable sidecar, a pre-#1385 sidecar that reports no fingerprint, or an
+unconfigured master are all treated as *unknown* and are **never** reaped. A
+healthy container is never touched. Any agent inside an orphaned container is
+already broken (its credentials can't sync), so recreation restores it rather
+than interrupting healthy work.
+
+Dry-run prints the orphans it found; `--apply` reports what it reaped:
+
+```text
+Found 2 orphaned crew container(s):
+  - crew engineering (c-eng) container 3f9a… — reaped
+  - crew quality (c-qua) container 71b2… — reaped
+```
+
+Requires the `OWNER` or `ADMIN` role. Returns `503` when the server's container
+provider is not docker.
 
 ---
 

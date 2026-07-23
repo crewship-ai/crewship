@@ -84,6 +84,15 @@ type Proxy struct {
 	// comment in server.go's NewServer for why the distinction matters.
 	// Advertised on /health as domains_hash.
 	policyDomainsHash string
+	// tokenFP (#1385) is a short one-way fingerprint of the crew-bound
+	// X-Internal-Token this sidecar was booted with, advertised on /health as
+	// token_fp. The server compares it against the fingerprint of the token it
+	// WOULD mint today: a mismatch means this container survived a restart that
+	// rotated the internal-token master and now holds a stale, permanently-
+	// rejected token ("invalid crew-bound token"). Empty when no IPC token is
+	// configured (a crew-less/standalone sidecar) — the server never
+	// false-classifies an empty fingerprint as orphaned.
+	tokenFP string
 
 	// dnsCache, dnsResolve, and dialer back the shared resolve-then-pin SSRF
 	// dialer (#961, cache added #1081). ONE instance lives on the Proxy and is
@@ -132,6 +141,11 @@ type ProxyConfig struct {
 	// domains — see the Proxy field doc comment. Empty is a valid value
 	// (free mode, or restricted with an empty allowlist).
 	PolicyDomainsHash string
+	// TokenFP (#1385) is the one-way fingerprint of the crew-bound internal
+	// token this sidecar holds (internaltoken.Fingerprint). Echoed on /health
+	// as token_fp so the server can detect a container orphaned by a master
+	// rotation. Empty = no IPC token configured (never flagged as orphaned).
+	TokenFP string
 	// Transport overrides the outbound RoundTripper the proxy hands every
 	// forwarded request to (handleHTTP, handleReverseProxy). nil (the
 	// default) builds the real resolve-then-pin SSRF-guarded *http.Transport
@@ -159,6 +173,7 @@ func NewProxy(cfg ProxyConfig) *Proxy {
 		subPlan:           cfg.SubscriptionPlan,
 		buildHash:         cfg.BuildHash,
 		policyDomainsHash: cfg.PolicyDomainsHash,
+		tokenFP:           cfg.TokenFP,
 		dnsCache:          newDNSPositiveCache(ssrfDNSCacheTTL),
 		dnsResolve:        net.DefaultResolver.LookupIPAddr,
 		dialer:            &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second},
@@ -531,13 +546,14 @@ func (p *Proxy) handleLocal(w http.ResponseWriter, r *http.Request) {
 			networkMode = "restricted"
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"ok","anthropic_creds":%d,"openai_creds":%d,"google_creds":%d,"network_mode":"%s","sidecar_hash":"%s","domains_hash":"%s"}`,
+		fmt.Fprintf(w, `{"status":"ok","anthropic_creds":%d,"openai_creds":%d,"google_creds":%d,"network_mode":"%s","sidecar_hash":"%s","domains_hash":"%s","token_fp":"%s"}`,
 			p.credStore.Count(ProviderAnthropic),
 			p.credStore.Count(ProviderOpenAI),
 			p.credStore.Count(ProviderGoogle),
 			networkMode,
 			p.buildHash,
 			p.policyDomainsHash,
+			p.tokenFP,
 		)
 	case strings.HasPrefix(r.URL.Path, "/gemini/"):
 		// #1030: reverse-proxy to generativelanguage.googleapis.com. The

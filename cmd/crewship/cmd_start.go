@@ -553,7 +553,7 @@ var startCmd = &cobra.Command{
 				// scheduled runs with no connected client still notify.
 				// Async + best-effort: delivery never slows or fails a run.
 				notifyDispatcher := notify.NewDispatcher(
-					notify.NewChannelStore(deps.DB), mailer.NewFromEnv(), logger)
+					notify.NewChannelStore(deps.DB), mailer.NewFromEnv(), logger, deps.DB)
 				rs := runStore
 				rs.SetTerminalNotifier(func(_ context.Context, runID string, status pipeline.RunStatus) {
 					et := notify.EventTypeForStatus(string(status))
@@ -578,12 +578,24 @@ var startCmd = &cobra.Command{
 						if err != nil || rec == nil {
 							return
 						}
+						// The crew that authored the routine owns the egress
+						// policy the webhook delivery is gated on (#1367) —
+						// the same crews.network_mode/allowed_domains dial the
+						// sidecar proxy enforces for that crew's agents. Empty
+						// (grandfathered/system routine) → the gate allows.
+						authorCrewID := ""
+						if rec.PipelineID != "" {
+							_ = deps.DB.QueryRowContext(bg,
+								`SELECT COALESCE(author_crew_id, '') FROM pipelines WHERE id = ?`,
+								rec.PipelineID).Scan(&authorCrewID)
+						}
 						notifyDispatcher.Dispatch(bg, notify.NotificationEvent{
 							Type:          et,
 							WorkspaceID:   rec.WorkspaceID,
 							RunID:         rec.ID,
 							RoutineSlug:   rec.PipelineSlug,
 							Status:        string(status),
+							AuthorCrewID:  authorCrewID,
 							OutputPreview: rec.Output,
 							TriggeredBy:   rec.InvokingUserID,
 						})

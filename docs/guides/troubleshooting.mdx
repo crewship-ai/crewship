@@ -50,6 +50,25 @@ Find your symptom below; each panel expands to its diagnosis and fix.
 
 <AccordionGroup>
 
+<Accordion title="Interactive `crewship ask` / `run` fails with `ws read: EOF`">
+
+The interactive path opens a WebSocket to the server. When the connection is refused **after** the upgrade (the `101` succeeds, then the socket closes), the CLI now prints the server's reason instead of a bare `ws read: EOF` — for example:
+
+```
+server rejected the connection: invalid or expired ws-token
+server rejected the connection: no auth message received within 10s (handshake timed out)
+```
+
+Match the reason to the fix:
+
+- **`invalid or expired ws-token`** — the short-lived WS ticket (15 min) expired or didn't validate. Just retry; the CLI mints a fresh ticket per run. Persisting means clock skew or a JWT-secret mismatch between the CLI's server target and the server.
+- **`no auth message received … (handshake timed out)`** — the upgrade succeeded but the client's auth frame never arrived in time. Usually a proxy buffering the first WS frame, or a stale CLI. Check any reverse proxy in front of `/ws` streams frames without buffering, and run `crewship self-update`.
+- **`session_revoked`** — your browser session was revoked; re-authenticate.
+
+On the **server**, every post-upgrade rejection now logs a `WARN` line — grep the server log for `ws connection rejected after upgrade` to see the reason and `remote_addr`. If you also see a **version-skew** warning when the CLI fetches its ws-token, upgrade the stale side first.
+
+</Accordion>
+
 <Accordion title="`crewship start` exits immediately, no error">
 
 Almost always means migrations failed silently or the data directory

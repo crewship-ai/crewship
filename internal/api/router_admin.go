@@ -176,4 +176,13 @@ func (r *Router) registerAdminRoutes() {
 	}
 	crewRuntimeH := NewCrewRuntimeHandler(r.db, r.logger, runtimePruner)
 	r.authedMut("POST", "/api/v1/admin/prune-crew-runtimes", roleManage, crewRuntimeH.Prune)
+
+	// #1385: reap crew containers orphaned by an internal-token master rotation
+	// across a restart — they hold a crew-bound token the new process rejects
+	// forever ("invalid crew-bound token") with no self-healing. Dry-run by
+	// default (report which containers are orphaned); ?apply=true stops+removes
+	// them so the next dispatch re-mints a valid token. Nil provider (non-docker)
+	// or a provider without crew-container lookup → handler 503s.
+	orphanH := NewOrphanContainerHandler(r.db, r.logger, r.keeperContainer, r.internalToken)
+	r.authedMut("POST", "/api/v1/admin/reap-orphan-containers", roleManage, orphanH.Reap)
 }

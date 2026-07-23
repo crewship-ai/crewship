@@ -397,7 +397,12 @@ func TestSidecarMCPHandlers_WithGateway(t *testing.T) {
 		MCPServers: []MCPServerInput{
 			{ID: "srv1", Name: "email", DisplayName: "Email", Transport: "streamable-http", Endpoint: mcpSrv.URL},
 		},
-		Logger: newTestLogger(),
+		// Free mode: this test exercises the MCP handler happy path, not the
+		// crew egress gate (#1367). The mock server binds 127.0.0.1, which the
+		// default restricted allowlist would (correctly) block — see
+		// TestMCPGatewayCrewEgress* for the gate's own coverage.
+		NetworkPolicy: &NetworkPolicyConfig{Mode: "free"},
+		Logger:        newTestLogger(),
 	})
 
 	// Connect and discover

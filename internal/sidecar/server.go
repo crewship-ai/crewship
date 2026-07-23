@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
@@ -259,6 +260,14 @@ func NewServer(cfg ServerConfig) *Server {
 	}
 	subscriptionPlan := os.Getenv("CREWSHIP_SUBSCRIPTION_PLAN")
 
+	// #1385: fingerprint the crew-bound IPC token so /health can advertise
+	// which master minted it. Empty when no IPC token is configured (crew-less
+	// or standalone sidecar), which the server reads as "nothing to compare".
+	var tokenFP string
+	if cfg.IPC != nil {
+		tokenFP = internaltoken.Fingerprint(cfg.IPC.Token)
+	}
+
 	proxy := NewProxy(ProxyConfig{
 		CredStore:         credStore,
 		Allowlist:         allowlist,
@@ -272,6 +281,7 @@ func NewServer(cfg ServerConfig) *Server {
 		SubscriptionPlan:  subscriptionPlan,
 		BuildHash:         selfExeHash(),
 		PolicyDomainsHash: policyDomainsHash,
+		TokenFP:           tokenFP,
 	})
 	s.proxy = proxy
 
@@ -344,6 +354,10 @@ func NewServer(cfg ServerConfig) *Server {
 	// Initialize MCP Gateway if servers are configured
 	if len(cfg.MCPServers) > 0 {
 		s.mcpGateway = NewMCPGateway(cfg.MCPServers, cfg.IPC, cfg.Logger)
+		// #1367: gate MCP egress on the SAME crew allowlist the proxy enforces
+		// for agent container egress, so a restricted crew cannot reach a
+		// non-allowlisted host through an MCP tool call.
+		s.mcpGateway.SetEgressAllowlist(allowlist, freeMode)
 		cfg.Logger.Info("MCP gateway initialized", "servers", len(cfg.MCPServers))
 	}
 

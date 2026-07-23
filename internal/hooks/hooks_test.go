@@ -438,7 +438,7 @@ func TestHTTPHandlerPass(t *testing.T) {
 			"secret": "shh",
 		},
 	}
-	res, err := httpHandler(context.Background(), h, EventContext{
+	res, err := httpHandler(context.Background(), nil, h, EventContext{
 		Event:       EventPreToolCall,
 		WorkspaceID: "ws_test",
 	})
@@ -466,7 +466,7 @@ func TestHTTPHandlerBlockOn5xx(t *testing.T) {
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": ts.URL},
 	}
-	res, err := httpHandler(context.Background(), h, EventContext{WorkspaceID: "ws_test"})
+	res, err := httpHandler(context.Background(), nil, h, EventContext{WorkspaceID: "ws_test"})
 	if err != nil {
 		t.Fatalf("http: %v", err)
 	}
@@ -536,7 +536,7 @@ func TestHTTPHandlerSSRFGuard(t *testing.T) {
 				HandlerKind:   HandlerKindHTTP,
 				HandlerConfig: map[string]any{"url": tc.url},
 			}
-			res, err := httpHandler(context.Background(), h, EventContext{WorkspaceID: "ws_test"})
+			res, err := httpHandler(context.Background(), nil, h, EventContext{WorkspaceID: "ws_test"})
 			if !tc.wantBlock {
 				if err != nil {
 					t.Fatalf("expected pass, got err: %v", err)

@@ -79,9 +79,13 @@ func TestReadPump_RoutesClientMessages(t *testing.T) {
 	t.Parallel()
 	hub, conn := newUpgradedConn(t)
 
-	// Malformed JSON must be skipped without killing the connection.
+	// Malformed JSON must NOT kill the connection, and now (#1386) also yields a
+	// client-visible error frame instead of a silent drop — consume+assert it.
 	if _, err := conn.Write([]byte("{not json")); err != nil {
 		t.Fatal(err)
+	}
+	if msg := wsRecv(t, conn); msg.Type != "error" {
+		t.Errorf("malformed frame: type = %q, want error frame", msg.Type)
 	}
 
 	// subscribe registers the channel on the hub.
