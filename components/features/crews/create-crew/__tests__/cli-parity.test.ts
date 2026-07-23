@@ -45,6 +45,13 @@ const EXPECTED_MAP: Record<string, { wizardField: keyof WizardState | "n/a"; bod
   "ttl":              { wizardField: "ttlHours",        bodyKey: "container_ttl_hours" },
   "network-mode":     { wizardField: "networkMode",     bodyKey: "network_mode" },
   "allowed-domains":  { wizardField: "allowedDomains",  bodyKey: "allowed_domains" },
+  // Convenience preset (#1377): --allow-package-registries has no dedicated
+  // wizard state field or API body key of its own. Both CLI and wizard fold it
+  // into allowedDomains — the CLI merges sidecar.PackageRegistryDomains into the
+  // allowed_domains payload, and the wizard's "package registries" preset button
+  // (step-runtime.tsx) merges PACKAGE_REGISTRY_DOMAINS into state.allowedDomains,
+  // which submits as allowed_domains. So it is wizard-covered via that field.
+  "allow-package-registries": { wizardField: "allowedDomains", bodyKey: "allowed_domains", note: "preset that appends the common package-registry domains onto allowedDomains; no distinct field/body key" },
   // Intentionally CLI-only (#961/#974): private-network model-endpoint egress
   // is an ADMIN-tier security capability that also requires the instance-level
   // CREWSHIP_ALLOW_PRIVATE_ENDPOINTS ceiling to take effect. It is deliberately
