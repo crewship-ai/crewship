@@ -11,12 +11,12 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// TestMigrationV149_BackfillsValidChain lands the pre-chain schema (≤ v148),
-// inserts raw unchained journal rows across two workspaces, applies v149, and
+// TestMigrationV152_BackfillsValidChain lands the pre-chain schema (≤ v148),
+// inserts raw unchained journal rows across two workspaces, applies v152, and
 // asserts each workspace verifies as a well-formed hash-chain — i.e. the
 // backfill reconstructs a chain that journal.VerifyChain accepts, and a later
 // tamper is then detectable.
-func TestMigrationV149_BackfillsValidChain(t *testing.T) {
+func TestMigrationV152_BackfillsValidChain(t *testing.T) {
 	ctx := context.Background()
 	// foreign_keys OFF so we can insert journal rows without materializing
 	// every FK parent (workspaces/crews/agents/missions).
@@ -50,21 +50,21 @@ func TestMigrationV149_BackfillsValidChain(t *testing.T) {
 		}
 	}
 
-	// Apply ONLY v149 against the populated v148 schema.
-	m149, err := findMigration(149)
+	// Apply ONLY v152 against the populated v148 schema.
+	m152, err := findMigration(152)
 	if err != nil {
-		t.Fatalf("find v149: %v", err)
+		t.Fatalf("find v152: %v", err)
 	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := m149.fn(ctx, tx, logger); err != nil {
+	if err := m152.fn(ctx, tx, logger); err != nil {
 		_ = tx.Rollback()
-		t.Fatalf("apply v149: %v", err)
+		t.Fatalf("apply v152: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit v149: %v", err)
+		t.Fatalf("commit v152: %v", err)
 	}
 
 	for _, ws := range []string{"ws_a", "ws_b"} {

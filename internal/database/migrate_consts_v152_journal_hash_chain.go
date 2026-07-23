@@ -9,7 +9,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
-// v149: make the audit journal tamper-evident with a per-workspace hash-chain
+// v152: make the audit journal tamper-evident with a per-workspace hash-chain
 // (issue #1369).
 //
 // Adds three columns to journal_entries:
