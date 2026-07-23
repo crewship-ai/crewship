@@ -599,6 +599,7 @@ func init() {
 
 	credAssignCmd.Flags().String("env-var-name", "", "Environment variable name override")
 	credAssignCmd.Flags().Int("priority", 0, "Priority (1-10)")
+	credAssignCmd.Flags().String("ttl", "", "Issue a short-lived lease instead of a standing grant, e.g. 30m, 2h, 24h (max 30d). The grant is refused at injection time once it expires.")
 
 	credDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 

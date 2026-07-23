@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -45,6 +46,21 @@ var credAssignCmd = &cobra.Command{
 			body["priority"] = priority
 		}
 
+		// --ttl turns the assignment into a short-lived LEASE (#1373): the
+		// grant expires after the given duration and is refused at
+		// credential-injection time (e.g. /keeper/execute) once it lapses.
+		// Omit it for a standing grant.
+		if ttlStr, _ := cmd.Flags().GetString("ttl"); ttlStr != "" {
+			d, perr := time.ParseDuration(ttlStr)
+			if perr != nil {
+				return fmt.Errorf("invalid --ttl %q: %w (use e.g. 30m, 2h, 24h)", ttlStr, perr)
+			}
+			if d <= 0 {
+				return fmt.Errorf("--ttl must be positive (got %s)", ttlStr)
+			}
+			body["ttl_seconds"] = int64(d.Seconds())
+		}
+
 		resp, err := client.Post("/api/v1/agents/"+agentID+"/credentials", body)
 		if err != nil {
 			return err
@@ -54,7 +70,12 @@ var credAssignCmd = &cobra.Command{
 		}
 		resp.Body.Close()
 
-		cli.PrintSuccess(fmt.Sprintf("Credential assigned to agent %s", args[1]))
+		if _, ok := body["ttl_seconds"]; ok {
+			ttlStr, _ := cmd.Flags().GetString("ttl")
+			cli.PrintSuccess(fmt.Sprintf("Credential leased to agent %s (expires in %s)", args[1], ttlStr))
+		} else {
+			cli.PrintSuccess(fmt.Sprintf("Credential assigned to agent %s", args[1]))
+		}
 		return nil
 	},
 }
