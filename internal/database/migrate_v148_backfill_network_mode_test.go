@@ -63,11 +63,13 @@ VALUES ('crew_free','ws1','Legacy','legacy','free', NULL),
 	}
 }
 
-// TestMigrateV148_LeavesColumnDefaultAsFree documents the deliberate scope
-// boundary: v148 backfills existing rows but does NOT rebuild the crews table
-// to flip the column DEFAULT (see the migration's doc comment for why). If a
-// future change intentionally flips the default, update this test alongside it.
-func TestMigrateV148_LeavesColumnDefaultAsFree(t *testing.T) {
+// TestMigrateV148_NewInsertDefaultsRestricted is the fail-safe-by-construction
+// proof: after v148 a raw INSERT that OMITS network_mode lands on 'restricted' —
+// no writer (app path, seed, later migration, hand-written SQL) has to remember
+// to set it. Red on the backfill-only branch (default still 'free'); green after
+// the writable_schema DEFAULT flip. Also asserts the flip is idempotent on
+// re-apply so re-running the migration doesn't trip the "rewrote 0 rows" guard.
+func TestMigrateV148_NewInsertDefaultsRestricted(t *testing.T) {
 	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.Background()
 	db, err := Open("file:" + filepath.Join(t.TempDir(), "v148def.db"))
@@ -78,13 +80,49 @@ func TestMigrateV148_LeavesColumnDefaultAsFree(t *testing.T) {
 	if err := Migrate(ctx, db.DB, silent); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
+	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1','Work','work')`); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
 
+	// The load-bearing assertion: omit network_mode entirely.
+	if _, err := db.Exec(
+		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('c_raw','ws1','Raw','raw')`); err != nil {
+		t.Fatalf("insert crew omitting network_mode: %v", err)
+	}
+	var mode string
+	if err := db.QueryRow(`SELECT network_mode FROM crews WHERE id = 'c_raw'`).Scan(&mode); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if mode != "restricted" {
+		t.Errorf("raw insert omitting network_mode defaulted to %q, want restricted (fail-safe)", mode)
+	}
+
+	// The declared column default reflects the flip.
 	var def any
 	if err := db.QueryRow(`SELECT dflt_value FROM pragma_table_info('crews') WHERE name = 'network_mode'`).Scan(&def); err != nil {
 		t.Fatalf("table_info: %v", err)
 	}
-	// dflt_value is stored quoted in the schema, e.g. 'free'.
-	if got, ok := def.(string); !ok || got != "'free'" {
-		t.Errorf("crews.network_mode default = %v, want 'free' (v148 is backfill-only, no rebuild)", def)
+	if got, _ := def.(string); got != "'restricted'" {
+		t.Errorf("crews.network_mode default = %v, want 'restricted'", def)
+	}
+
+	// The CHECK constraint must survive the DEFAULT rewrite — both values still valid.
+	if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug, network_mode) VALUES ('c_free','ws1','F','f','free')`); err != nil {
+		t.Errorf("CHECK constraint corrupted by the DEFAULT rewrite (explicit 'free' rejected): %v", err)
+	}
+
+	// Idempotent re-apply: clearing the marker and re-migrating must not error
+	// (the strings.Contains skip handles the already-flipped schema).
+	if _, err := db.Exec(`DELETE FROM _migrations WHERE version = 148`); err != nil {
+		t.Fatalf("clear v148 marker: %v", err)
+	}
+	if err := Migrate(ctx, db.DB, silent); err != nil {
+		t.Fatalf("re-apply v148 after flip must be idempotent: %v", err)
+	}
+	if err := db.QueryRow(`SELECT dflt_value FROM pragma_table_info('crews') WHERE name = 'network_mode'`).Scan(&def); err != nil {
+		t.Fatalf("table_info after re-apply: %v", err)
+	}
+	if got, _ := def.(string); got != "'restricted'" {
+		t.Errorf("default after idempotent re-apply = %v, want 'restricted'", def)
 	}
 }
