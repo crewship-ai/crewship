@@ -1,11 +1,13 @@
 package ws
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -110,10 +112,17 @@ func (s *stubChatHandler) HandleChatMessage(ctx context.Context, _, _, _ string,
 type hubOpts struct {
 	validator *auth.JWTValidator
 	sessions  sessions.Store
+	logger    *slog.Logger
 }
 
 func withValidator(v *auth.JWTValidator) func(*hubOpts) {
 	return func(o *hubOpts) { o.validator = v }
+}
+
+// withLogger injects a logger so a test can capture the WARN lines the hub
+// emits (e.g. the #1386 post-upgrade rejection log).
+func withLogger(l *slog.Logger) func(*hubOpts) {
+	return func(o *hubOpts) { o.logger = l }
 }
 
 // newRunningHub starts a hub.Run in a goroutine and registers t.Cleanup to stop it.
@@ -123,15 +132,15 @@ func withValidator(v *auth.JWTValidator) func(*hubOpts) {
 // is no longer a variadic deps bag to abuse.
 func newRunningHub(t *testing.T, opts ...func(*hubOpts)) *Hub {
 	t.Helper()
-	logger := logging.New("error", "json", io.Discard)
 	o := &hubOpts{
 		validator: defaultTestValidator(t),
 		sessions:  NopSessionsForTests,
+		logger:    logging.New("error", "json", io.Discard),
 	}
 	for _, fn := range opts {
 		fn(o)
 	}
-	hub := NewHub(logger, nil, o.validator, o.sessions)
+	hub := NewHub(o.logger, nil, o.validator, o.sessions)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -875,6 +884,10 @@ func TestSetChatHandlerReplaces(t *testing.T) {
 // connection that never sends {"type":"auth",...} isn't rejected at the
 // HTTP layer — the upgrade succeeds and the server instead closes the
 // connection once authReadTimeout elapses with no valid auth message.
+//
+// #1386: that timeout path used to close SILENTLY (Debug log, no frame),
+// producing the opaque "ws read: EOF". It now sends an error frame naming
+// the reason before closing.
 func TestHandleUpgrade_NoAuthMessage_ClosesAfterDeadline(t *testing.T) {
 	t.Parallel()
 	hub := newRunningHub(t)
@@ -893,9 +906,32 @@ func TestHandleUpgrade_NoAuthMessage_ClosesAfterDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	var raw []byte
-	if err := websocket.Message.Receive(conn, &raw); err == nil {
-		t.Fatalf("expected the connection to close without a live auth message, got frame %q", raw)
+	if err := websocket.Message.Receive(conn, &raw); err != nil {
+		t.Fatalf("expected an error frame naming the handshake timeout before close, got read error: %v", err)
 	}
+	typ, message := parseServerFrame(t, raw)
+	if typ != "error" {
+		t.Errorf("type = %q, want error", typ)
+	}
+	if !strings.Contains(message, "no auth message") {
+		t.Errorf("reason = %q, want it to name the missing auth message", message)
+	}
+}
+
+// parseServerFrame decodes a raw WS text frame into its type + payload.message
+// — the shape sendWSAuthFrame writes for every post-upgrade rejection (#1386).
+func parseServerFrame(t *testing.T, raw []byte) (typ, message string) {
+	t.Helper()
+	var m struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Message string `json:"message"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("unmarshal frame %q: %v", raw, err)
+	}
+	return m.Type, m.Payload.Message
 }
 
 // The `?token=` query string is no longer read at all — a client that
@@ -925,9 +961,15 @@ func TestHandleUpgrade_URLTokenAloneIsRejected(t *testing.T) {
 	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
+	// A URL-only token sends no post-upgrade auth message, so it hits the
+	// handshake-timeout path — which now (#1386) reports the reason via an
+	// error frame rather than closing silently.
 	var raw []byte
-	if err := websocket.Message.Receive(conn, &raw); err == nil {
-		t.Fatalf("expected a URL-only token (no post-upgrade auth message) to be rejected, got frame %q", raw)
+	if err := websocket.Message.Receive(conn, &raw); err != nil {
+		t.Fatalf("expected a rejection frame for a URL-only token, got read error: %v", err)
+	}
+	if typ, _ := parseServerFrame(t, raw); typ != "error" {
+		t.Errorf("type = %q, want error (URL token alone must be rejected with a reason)", typ)
 	}
 }
 
@@ -990,6 +1032,69 @@ func TestHandleUpgradeInvalidToken(t *testing.T) {
 	}
 	if msg.Type != "error" {
 		t.Errorf("type = %q, want error", msg.Type)
+	}
+}
+
+// lockedBuffer is a goroutine-safe io.Writer for capturing log output written
+// by the hub's handler goroutine while the test goroutine reads it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// TestHandleUpgrade_RejectionIsLoggedWARN is the core #1386 assertion: a
+// connection refused AFTER the 101 upgrade must produce a WARN server log
+// naming the reason. Before the fix several paths (and the prime-suspect
+// handshake-timeout path) closed with no log at all — "101, then silent
+// close, no server log". The client-visible frame is asserted by the sibling
+// tests; this pins the operator-visible side.
+func TestHandleUpgrade_RejectionIsLoggedWARN(t *testing.T) {
+	t.Parallel()
+	buf := &lockedBuffer{}
+	// A plain slog handler with a FIXED level, deliberately NOT logging.New:
+	// that helper binds every logger to a process-wide runtime level, which a
+	// sibling test's "error" logger could reset mid-run and suppress this
+	// capture. This handler's level is immune to that shared control.
+	logger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	v := defaultTestValidator(t)
+	hub := newRunningHub(t, withValidator(v), withLogger(logger))
+	srv := httptest.NewServer(http.HandlerFunc(hub.HandleUpgrade))
+	t.Cleanup(srv.Close)
+
+	u, _ := url.Parse(srv.URL)
+	conn, err := websocket.Dial(fmt.Sprintf("ws://%s/", u.Host), "", srv.URL)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	wsAuth(t, conn, "garbage-token")
+
+	// The server logs the WARN before it writes the frame (see rejectUpgrade),
+	// so once we read the frame the log is already flushed.
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var raw []byte
+	if err := websocket.Message.Receive(conn, &raw); err != nil {
+		t.Fatalf("expected the rejection frame, got read error: %v", err)
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "ws connection rejected after upgrade") {
+		t.Errorf("missing the WARN rejection log line; got: %s", got)
+	}
+	if !strings.Contains(got, "invalid or expired ws-token") {
+		t.Errorf("WARN log does not name the reason; got: %s", got)
 	}
 }
 

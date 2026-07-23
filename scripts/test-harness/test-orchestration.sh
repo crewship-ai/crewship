@@ -136,4 +136,31 @@ else
   skip "cross-tier eval" "EVAL=0"
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "5. Interactive WS path never fails with a bare 'ws read: EOF' (#1386)"
+# ─────────────────────────────────────────────────────────────────────────────
+# The interactive `ask`/`run` path runs over a WebSocket. When the server
+# refuses the connection after the 101 upgrade, the CLI must now print the
+# server's close REASON, never an opaque `ws read: EOF`. We run a trivial ask;
+# whether it succeeds or fails, assert the output never contains the bare EOF —
+# a failure must carry a reason ("server rejected the connection: …").
+ASK_AGENT="${ASK_AGENT:-robin}"
+ask_out="$(mktemp -t cs-ask.XXXXXX)"
+cs ask --agent "$ASK_AGENT" "reply with the single word OK" >"$ask_out" 2>&1; ask_rc=$?
+if (( ask_rc == 0 )); then
+  _pass "interactive 'ask' over WS completed"
+elif grep -qiE '(^|[^[:alnum:]_])read: *EOF' "$ask_out" && ! grep -qi 'server rejected the connection' "$ask_out"; then
+  _fail "ask failure carries a reason" "opaque 'ws read: EOF' with no reason — #1386 regressed: $(tail -c 160 "$ask_out" | tr '\n' ' ')"
+else
+  # The ask didn't complete, but it FAILED LEGIBLY (a real close reason, not a
+  # bare EOF) — which is exactly what #1386 guarantees. That's a green outcome
+  # for the observability contract, yet the ask itself is still unusable in this
+  # environment. A silent skip would render that green even though the feature
+  # can't be exercised here, so surface it LOUDLY as a known-broken xfail
+  # (visible, referencing #1386) without turning CI hard-red on an env issue.
+  xfail "interactive ask over WS (known broken here)" \
+    "#1386: ask failed with a legible reason (not a bare EOF), but did not complete in this env: $(tail -c 160 "$ask_out" | tr '\n' ' ')"
+fi
+rm -f "$ask_out"
+
 finish
