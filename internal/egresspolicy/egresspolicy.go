@@ -16,7 +16,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/crewship-ai/crewship/internal/sidecar"
+	"github.com/crewship-ai/crewship/internal/egressallow"
 )
 
 // Check enforces the crew egress policy for a single outbound host. nil =
@@ -35,8 +35,8 @@ import (
 //     crew that never opted into restriction — wiring this gate must not
 //     break existing notify/hook/http egress of crews with no policy.
 //   - network_mode "restricted" → host (port stripped, case normalized —
-//     sidecar.DomainAllowlist semantics) must be one of
-//     sidecar.DefaultAllowedDomains + the crew's allowed_domains. Exact-match
+//     egressallow.DomainAllowlist semantics) must be one of
+//     egressallow.DefaultAllowedDomains + the crew's allowed_domains. Exact-match
 //     only, identical to the container proxy: every egress path sees one
 //     boundary.
 //   - unknown mode / DB error / malformed allowed_domains → block (fail
@@ -68,7 +68,7 @@ func Check(ctx context.Context, db *sql.DB, crewID, host string) error {
 	case "", "free":
 		return nil
 	case "restricted":
-		domains := append([]string{}, sidecar.DefaultAllowedDomains...)
+		domains := append([]string{}, egressallow.DefaultAllowedDomains...)
 		if domainsJSON.Valid && domainsJSON.String != "" {
 			var crewDomains []string
 			if jerr := json.Unmarshal([]byte(domainsJSON.String), &crewDomains); jerr != nil {
@@ -80,7 +80,7 @@ func Check(ctx context.Context, db *sql.DB, crewID, host string) error {
 			}
 			domains = append(domains, crewDomains...)
 		}
-		if !sidecar.NewDomainAllowlist(domains).IsAllowed(host) {
+		if !egressallow.NewDomainAllowlist(domains).IsAllowed(host) {
 			return fmt.Errorf("crew %q network policy is 'restricted' and its allowed_domains do not include host %q — add it to the crew's allowed domains to permit egress", crewID, host)
 		}
 		return nil

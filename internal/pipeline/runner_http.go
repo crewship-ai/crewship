@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/egresspolicy"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
@@ -165,47 +166,45 @@ func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender Rend
 		}
 	}
 
-	// CheckRedirect re-validates the destination host against the
-	// egress allowlist AND re-runs the URL scheme/IP guard on every
-	// 3xx hop. Without this, a sender that allows api.partner.com →
-	// 302 → 169.254.169.254 (AWS IMDS) or localhost or any other
-	// internal host would leak metadata into the step output. Default
-	// Go client follows up to 10 redirects; checking each is the only
-	// safe stance.
+	// The redirect gate is the shared egresspolicy.Client — the SAME
+	// factory notify/webhook, hooks, and the MCP gateway build from, so
+	// the http step no longer hand-rolls its own CheckRedirect (the
+	// "one gated client, all paths" goal). Constructing it wires, on
+	// EVERY 3xx hop:
 	//
-	// httpsafe.SafeTransport is the dial-time guard: even if a
-	// rendered URL passes the string-level checks, a DNS alias to a
-	// private IP is refused at connect time. Tests with
-	// allowPrivateHTTP=true fall back to the default transport so they
-	// can target httptest.NewServer on 127.0.0.1.
-	transport := http.RoundTripper(httpsafe.SafeTransport())
-	if e.allowPrivateHTTP {
-		transport = http.DefaultTransport
+	//   - the scheme + literal-IP SSRF re-check (ValidateURLForEndpoint,
+	//     endpoint-aware so the allowPrivateHTTP test hatch reaches a
+	//     loopback httptest server while cloud metadata stays blocked);
+	//   - the crew network-policy re-check (crewHopCheck below), so a
+	//     host in the crew allowlist that 302s to one that isn't is
+	//     refused instead of followed;
+	//   - the routine's egress_targets re-check (ExtraHop below), the
+	//     same allowlist-bypass-via-redirect defence, keyed on the
+	//     routine's declared targets.
+	//
+	// Both crew and routine layers still fail with the structured
+	// *EgressBlockedError the journal and tests key off — the crew one
+	// rides through egresspolicy's ErrEgressBlocked wrapper (joined with
+	// %w, so errors.As still recovers it).
+	crewHopCheck := func(hctx context.Context, host string) error {
+		if e.egressAllowed == nil {
+			return nil
+		}
+		if gerr := e.egressAllowed(hctx, scope, host); gerr != nil {
+			return &EgressBlockedError{
+				StepID: step.ID, Host: host,
+				Rule:   EgressRuleCrewNetworkPolicy,
+				Detail: "redirect target: " + gerr.Error(),
+			}
+		}
+		return nil
 	}
-	client := http.Client{
-		Timeout:   time.Duration(timeoutSec) * time.Second,
-		Transport: transport,
-		CheckRedirect: func(redirReq *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return fmt.Errorf("http step %q: too many redirects", step.ID)
-			}
-			if !e.allowPrivateHTTP {
-				if _, err := httpsafe.ValidateURL(redirReq.URL.String(), "http", "https"); err != nil {
-					return fmt.Errorf("http step %q redirect %w", step.ID, err)
-				}
-			}
-			if e.egressAllowed != nil {
-				if gerr := e.egressAllowed(redirReq.Context(), scope, redirReq.URL.Host); gerr != nil {
-					return &EgressBlockedError{
-						StepID: step.ID, Host: redirReq.URL.Host,
-						Rule:   EgressRuleCrewNetworkPolicy,
-						Detail: "redirect target: " + gerr.Error(),
-					}
-				}
-			}
-			// Re-enforce the routine's egress_targets on every redirect
-			// hop, else a host in the allowlist could 302 to one that
-			// isn't (the classic allowlist-bypass-via-redirect).
+	client := egresspolicy.Client(crewHopCheck, egresspolicy.Options{
+		Timeout:      time.Duration(timeoutSec) * time.Second,
+		Schemes:      []string{"http", "https"},
+		AllowPrivate: e.allowPrivateHTTP,
+		MaxRedirects: 10,
+		ExtraHop: func(redirReq *http.Request) error {
 			if !hostInEgressTargets(redirReq.URL.Hostname(), parentRender.EgressTargets) {
 				return &EgressBlockedError{
 					StepID: step.ID, Host: redirReq.URL.Hostname(),
@@ -216,7 +215,7 @@ func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender Rend
 			}
 			return nil
 		},
-	}
+	})
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("http step %q request: %w", step.ID, err)

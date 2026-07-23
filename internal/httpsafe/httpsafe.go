@@ -183,6 +183,20 @@ func IsBlockedIPForEndpoint(ip net.IP, allowPrivate bool) bool {
 // for cases where http URLs are legitimate (admin-configured intranet
 // MCP servers).
 func ValidateURL(raw string, allowSchemes ...string) (*url.URL, error) {
+	return ValidateURLForEndpoint(raw, false, allowSchemes...)
+}
+
+// ValidateURLForEndpoint is ValidateURL with the two-tier private-network
+// opt-in wired into its literal-IP reject (IsBlockedIPForEndpoint): the hard
+// tier (link-local/IMDS/multicast/reserved) is refused ALWAYS, and the soft
+// tier (loopback/RFC1918/ULA) is refused only when allowPrivate is false.
+// allowPrivate=false is byte-for-byte identical to ValidateURL — every existing
+// caller keeps the strict posture. Callers that legitimately reach LAN/on-prem
+// endpoints (LAN webhooks, an on-prem MCP server, a routine http step under the
+// allowPrivateHTTP test hatch) pass true so a redirect to a loopback/RFC1918
+// literal is validated the same way its dialer will treat it, while cloud
+// metadata stays blocked regardless.
+func ValidateURLForEndpoint(raw string, allowPrivate bool, allowSchemes ...string) (*url.URL, error) {
 	if raw == "" {
 		return nil, fmt.Errorf("%w: empty", ErrInvalidURL)
 	}
@@ -213,7 +227,7 @@ func ValidateURL(raw string, allowSchemes ...string) (*url.URL, error) {
 	if strings.EqualFold(host, "localhost") {
 		return nil, fmt.Errorf("%w: localhost not allowed", ErrInvalidURL)
 	}
-	if ip := net.ParseIP(host); ip != nil && IsBlockedIP(ip) {
+	if ip := net.ParseIP(host); ip != nil && IsBlockedIPForEndpoint(ip, allowPrivate) {
 		return nil, fmt.Errorf("%w: literal private/internal IP %s not allowed", ErrInvalidURL, ip)
 	}
 	return u, nil

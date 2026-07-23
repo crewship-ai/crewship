@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/egresspolicy"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
@@ -67,6 +68,42 @@ func (g *MCPGateway) SetEgressAllowlist(al *DomainAllowlist, freeMode bool) {
 	defer g.mu.Unlock()
 	g.egressAllowlist = al
 	g.egressFreeMode = freeMode
+	// Rebuild each per-server client so its CheckRedirect re-gates against the
+	// NOW-installed crew allowlist. egresspolicy.AllowlistChecker captures the
+	// allowlist + freeMode at construction, and the gateway learns them only
+	// here (after NewMCPGateway) — so the client built in NewMCPGateway with the
+	// then-nil allowlist (allow-all) has to be replaced once the real policy is
+	// known. Production always calls this before Connect, so the first bytes out
+	// already ride the gated client.
+	for _, c := range g.clients {
+		c.httpClient = g.newGatedClient()
+	}
+}
+
+// newGatedClient builds the shared, redirect-re-gating egresspolicy.Client the
+// per-server MCP clients use for all JSON-RPC traffic — the SAME factory the
+// routine http-step, notify, webhook, and hook paths use, so MCP no longer
+// hand-rolls its own CheckRedirect. The AllowlistChecker enforces the crew
+// allowlist on every hop (nil allowlist / free mode → allow all), while the
+// httpsafe transport blocks SSRF on every hop's dial. Reads g's set-once
+// egress fields at call time; callers hold g.mu (or are in single-threaded
+// construction).
+func (g *MCPGateway) newGatedClient() *http.Client {
+	return egresspolicy.Client(
+		egresspolicy.AllowlistChecker(g.egressAllowlist, g.egressFreeMode),
+		egresspolicy.Options{
+			Timeout: 30 * time.Second,
+			// MCP endpoints are admin-configured and legitimately http (on-prem
+			// streamable-http / sse servers), so both schemes are re-checked per
+			// hop — matching the endpoint validation at integration create/update.
+			Schemes:      []string{"http", "https"},
+			MaxRedirects: 10,
+			// mcpClientTransport is httpsafe.SafeTransport() in production and a
+			// loopback-allowing transport under the package TestMain override;
+			// reading it here preserves both.
+			Transport: mcpClientTransport,
+		},
+	)
 }
 
 // endpointAllowed reports whether an MCP server endpoint may be reached under
@@ -261,28 +298,16 @@ func NewMCPGateway(servers []MCPServerInput, ipc *IPCConfig, logger *slog.Logger
 			transport:   s.Transport,
 			endpoint:    s.Endpoint,
 			credential:  s.Credential,
-			httpClient: &http.Client{
-				Timeout:   30 * time.Second,
-				Transport: mcpClientTransport,
-				// #1367: re-gate the crew allowlist on EVERY redirect hop, not
-				// just the configured endpoint at Connect/CallTool. A malicious
-				// but allowlisted MCP server must not 302 its JSON-RPC POST — with
-				// its injected credential headers — to a non-allowlisted host.
-				// mcpClientTransport (SafeTransport) already re-blocks SSRF on
-				// each hop's dial; this closes the crew-allowlist half. Reads g's
-				// set-once allowlist at hop time (installed by SetEgressAllowlist
-				// before Connect).
-				CheckRedirect: func(req *http.Request, via []*http.Request) error {
-					if len(via) >= 10 {
-						return fmt.Errorf("mcp gateway: too many redirects")
-					}
-					if ok, reason := g.endpointAllowed(req.URL.String()); !ok {
-						return fmt.Errorf("mcp gateway egress: redirect to %q blocked: %s", req.URL.Host, reason)
-					}
-					return nil
-				},
-			},
-			logger: logger,
+			// #1367: the JSON-RPC client is the shared egresspolicy.Client, whose
+			// CheckRedirect re-gates the crew allowlist on EVERY redirect hop (not
+			// just the configured endpoint at Connect/CallTool) — a malicious but
+			// allowlisted MCP server must not 302 its POST, carrying injected
+			// credential headers, to a non-allowlisted host. SetEgressAllowlist
+			// rebuilds this with the real crew allowlist before Connect; the
+			// allowlist is nil here (allow-all) so the ~20 unit tests that never
+			// install a policy keep their prior ungated behaviour.
+			httpClient: g.newGatedClient(),
+			logger:     logger,
 		}
 	}
 

@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/egressallow"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
-	"github.com/crewship-ai/crewship/internal/sidecar"
 )
 
 // ErrEgressBlocked marks a request refused by the crew allowlist on a redirect
@@ -36,9 +36,11 @@ func DBChecker(db *sql.DB, crewID string) HostChecker {
 // AllowlistChecker binds a pre-resolved allowlist as a HostChecker, for callers
 // with no control-plane DB — the in-container sidecar MCP gateway, which is
 // pushed the crew's DomainAllowlist rather than querying crews. freeMode true
-// (or a nil allowlist) means the crew is unrestricted. Reads the pointer at
-// call time so a set-once push before the first request is observed.
-func AllowlistChecker(al *sidecar.DomainAllowlist, freeMode bool) HostChecker {
+// (or a nil allowlist) means the crew is unrestricted. Captures the pointer and
+// freeMode at construction, so callers whose allowlist is installed after the
+// gateway is built must (re)construct the client once the allowlist is known —
+// the sidecar MCP gateway does exactly this in SetEgressAllowlist.
+func AllowlistChecker(al *egressallow.DomainAllowlist, freeMode bool) HostChecker {
 	return func(_ context.Context, host string) error {
 		if freeMode || al == nil {
 			return nil
@@ -123,11 +125,20 @@ func Client(check HostChecker, opts Options) *http.Client {
 			if len(via) >= maxRedirects {
 				return fmt.Errorf("egresspolicy: too many redirects (%d)", len(via))
 			}
-			if _, err := httpsafe.ValidateURL(req.URL.String(), schemes...); err != nil {
+			// Endpoint-aware so AllowPrivate is honoured on the hop exactly as the
+			// dialer honours it: a caller that legitimately reaches loopback/RFC1918
+			// (LAN webhook, on-prem MCP, the http-step test hatch) is not tripped by
+			// a strict literal-IP reject here, while cloud metadata stays blocked.
+			if _, err := httpsafe.ValidateURLForEndpoint(req.URL.String(), opts.AllowPrivate, schemes...); err != nil {
 				return err
 			}
+			// Wrap with %w (not %v) so callers can BOTH classify the block via
+			// errors.Is(ErrEgressBlocked) AND introspect a structured checker error
+			// (e.g. the pipeline's *EgressBlockedError) via errors.As — the crew
+			// re-gate closes the redirect bypass without erasing the path's own
+			// error taxonomy.
 			if err := check(req.Context(), req.URL.Host); err != nil {
-				return fmt.Errorf("%w: %v", ErrEgressBlocked, err)
+				return fmt.Errorf("%w: %w", ErrEgressBlocked, err)
 			}
 			if opts.ExtraHop != nil {
 				return opts.ExtraHop(req)
