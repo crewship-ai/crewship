@@ -352,6 +352,41 @@ A service that **publishes a port to the host** cannot use `auto_credentials`
 bridge, the external attack surface deserves an operator-chosen credential.
 </Warning>
 
+### Inventory: what's actually running
+
+The manifest above is what you *declared*. What's actually running can
+drift from it — a sidecar you stopped by hand while debugging, or one
+Docker OOM-killed, still shows up as "configured" if you only look at the
+crew's stored config. `crewship crew services` answers the live question
+instead, reading straight from Docker rather than any stored snapshot:
+
+```bash
+crewship crew services <crew-slug-or-id>
+```
+
+```text
+NAME       TYPE      STATUS    IMAGE            PORTS
+redis      redis     running   redis:7-alpine   6379/tcp
+postgres   postgres  stopped   postgres:16      5432/tcp
+```
+
+- **STATUS** is the container's current state (`running` / `stopped` /
+  `creating` / `error`) — the same vocabulary `crewship crew
+  container-status` uses for the crew's own runtime container.
+- **TYPE** is inferred from the image (`postgres` / `redis` / `mysql` /
+  `mongodb` / `other`), the same inference the capabilities endpoint
+  uses for a crew's datastore capabilities.
+- **PORTS** are the container-internal ports the sidecar exposes — never
+  a host mapping, since sidecars are never published to the host (see
+  above).
+
+This is a read: it never starts, stops, or recreates anything. A service
+your manifest declares but whose container isn't running yet (first
+apply still in flight, or it failed to start) simply doesn't appear
+until Docker reports it. The CLI wraps `GET
+/api/v1/crews/{crewId}/services`, which any agent can call directly for
+the same live facts as JSON.
+
 ### Delivering files into the crew: `files:`
 
 A crew spec can carry local files (scripts, fixtures, configs) that apply
