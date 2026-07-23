@@ -124,6 +124,63 @@ func TestHandleFileDownload_SharedRoundTrip(t *testing.T) {
 	}
 }
 
+// TestHandleFileDelete_SharedRoundTrip: a saved shared file can be removed
+// via the delete route and is gone from the crew bind tree afterwards
+// (#1391 — save → delete → gone).
+func TestHandleFileDelete_SharedRoundTrip(t *testing.T) {
+	s, dir := newFileServer(t)
+
+	save := httptest.NewRequest("PUT", "/crews/crewX/files/save?path=shared/probe.sh",
+		strings.NewReader("#!/bin/sh\n"))
+	save.SetPathValue("id", "crewX")
+	sr := httptest.NewRecorder()
+	s.ipcMux.ServeHTTP(sr, save)
+	if sr.Code != http.StatusOK {
+		t.Fatalf("save: %d %s", sr.Code, sr.Body.String())
+	}
+	onDisk := filepath.Join(dir, "crews", "crewX", "shared", "probe.sh")
+	if _, err := os.Stat(onDisk); err != nil {
+		t.Fatalf("precondition: saved file missing: %v", err)
+	}
+
+	del := httptest.NewRequest("DELETE", "/crews/crewX/files/delete?path=shared/probe.sh", nil)
+	del.SetPathValue("id", "crewX")
+	dr := httptest.NewRecorder()
+	s.ipcMux.ServeHTTP(dr, del)
+	if dr.Code != http.StatusOK {
+		t.Fatalf("delete shared file: status = %d, body=%s", dr.Code, dr.Body.String())
+	}
+	if _, err := os.Stat(onDisk); !os.IsNotExist(err) {
+		t.Errorf("file still present after delete: err=%v", err)
+	}
+}
+
+// TestHandleFileDelete_MissingPathParam_400 keeps parity with save.
+func TestHandleFileDelete_MissingPathParam_400(t *testing.T) {
+	s, _ := newFileServer(t)
+	req := httptest.NewRequest("DELETE", "/crews/crewX/files/delete", nil)
+	req.SetPathValue("id", "crewX")
+	rec := httptest.NewRecorder()
+	s.ipcMux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 (missing path)", rec.Code)
+	}
+}
+
+// TestHandleFileDelete_RejectsTraversal keeps the traversal guard on delete.
+func TestHandleFileDelete_RejectsTraversal(t *testing.T) {
+	s, _ := newFileServer(t)
+	for _, p := range []string{"shared/../../etc/passwd", "/etc/passwd", "../evil"} {
+		req := httptest.NewRequest("DELETE", "/crews/crewX/files/delete?path="+p, nil)
+		req.SetPathValue("id", "crewX")
+		rec := httptest.NewRecorder()
+		s.ipcMux.ServeHTTP(rec, req)
+		if rec.Code == http.StatusOK {
+			t.Errorf("path %q should be rejected, got 200", p)
+		}
+	}
+}
+
 // TestResolveCrewFileKey_RejectsUnsafeCrewID pins the CodeRabbit Major on
 // this PR: r.PathValue("id") can decode to a value carrying a slash or
 // dot-dot (an encoded-slash URL), and filepath.Join("crews", crewID, ...)

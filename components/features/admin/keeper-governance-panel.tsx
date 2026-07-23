@@ -43,6 +43,13 @@ interface GovernanceResponse {
   deny_notify_min_risk: number
   watch_spec?: string
   watch_presets?: string[]
+  // Four-eyes credential gate (#1084): when true, an escalation raised by an
+  // agent hired by user A cannot be resolved by user A — a different approver
+  // is required. Backed by keeper_governance_settings.require_second_approver.
+  require_second_approver?: boolean
+  // Non-blocking advisory returned by PUT — e.g. enabling the four-eyes rule on
+  // a workspace that lacks a second eligible approver. Empty on GET.
+  warning?: string
   // Governance-model override (backed by keeper_governance.go). All optional:
   // an empty provider means "use the server default model". When provider is
   // non-empty the server requires gov_model_id; credential is always optional.
@@ -100,6 +107,7 @@ interface FormState {
   enabled: boolean
   contact: string // "" = everyone with MANAGER role
   risk: string    // kept as string so the number input can be edited freely
+  requireSecondApprover: boolean // four-eyes credential gate (#1084)
   watchSpec: string       // free-form NL rules
   watchPresets: string[]  // enabled preset keys
   govProvider: string     // "" | ollama | anthropic | openai_compat
@@ -143,7 +151,8 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
   const [configured, setConfigured] = useState(false)
   const [admins, setAdmins] = useState<WorkspaceMember[]>([])
   const emptyForm: FormState = {
-    enabled: false, contact: "", risk: "7", watchSpec: "", watchPresets: [],
+    enabled: false, contact: "", risk: "7", requireSecondApprover: false,
+    watchSpec: "", watchPresets: [],
     govProvider: "", govModelId: "", govCredentialId: "",
   }
   const [form, setForm] = useState<FormState>(emptyForm)
@@ -203,6 +212,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
         enabled: gov.enabled,
         contact: gov.security_contact_user_id ?? "",
         risk: String(gov.deny_notify_min_risk ?? 7),
+        requireSecondApprover: gov.require_second_approver ?? false,
         watchSpec: gov.watch_spec ?? "",
         watchPresets: gov.watch_presets ?? [],
         govProvider: gov.gov_model_provider ?? "",
@@ -230,6 +240,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
     form.enabled !== baseline.enabled ||
     form.contact !== baseline.contact ||
     form.risk !== baseline.risk ||
+    form.requireSecondApprover !== baseline.requireSecondApprover ||
     form.watchSpec !== baseline.watchSpec ||
     !sameSet(form.watchPresets, baseline.watchPresets) ||
     form.govProvider !== baseline.govProvider ||
@@ -262,6 +273,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
             enabled: form.enabled,
             security_contact_user_id: form.contact,
             deny_notify_min_risk: riskNum,
+            require_second_approver: form.requireSecondApprover,
             watch_spec: form.watchSpec,
             watch_presets: form.watchPresets,
             gov_model_provider: form.govProvider,
@@ -293,6 +305,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
         enabled: body.enabled,
         contact: body.security_contact_user_id ?? "",
         risk: String(body.deny_notify_min_risk ?? riskNum),
+        requireSecondApprover: body.require_second_approver ?? false,
         watchSpec: body.watch_spec ?? "",
         watchPresets: body.watch_presets ?? [],
         govProvider: body.gov_model_provider ?? "",
@@ -301,7 +314,14 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
       }
       setForm(next)
       setBaseline(next)
-      toast.success(body.enabled ? "Watchdog enabled" : "Watchdog governance saved")
+      // A non-blocking advisory (e.g. four-eyes enabled without a second
+      // eligible approver) is surfaced as a warning toast, not an error —
+      // the save still succeeded server-side.
+      if (body.warning) {
+        toast.warning(body.warning)
+      } else {
+        toast.success(body.enabled ? "Watchdog enabled" : "Watchdog governance saved")
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save governance")
     } finally {
@@ -430,6 +450,25 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
           className="h-8 w-16 text-xs text-right tabular-nums"
           aria-label="DENY notification risk threshold (1-10)"
           data-testid="keeper-governance-risk"
+        />
+      </SettingsRow>
+
+      {/* Four-eyes credential gate (#1084). When on, an escalation raised by an
+          agent hired by user A must be resolved by a DIFFERENT approver. The
+          server warns (not blocks) if the workspace lacks a second eligible
+          approver; that advisory is surfaced as a toast on save. */}
+      <SettingsRow
+        label="Require a second approver"
+        description="Four-eyes: credential escalations can't be approved by the same person who owns the requesting agent. Needs ≥2 OWNER/ADMIN/MANAGER members."
+      >
+        <Switch
+          checked={form.requireSecondApprover}
+          onCheckedChange={(checked) =>
+            setForm((f) => ({ ...f, requireSecondApprover: checked }))
+          }
+          disabled={!canEdit || saving}
+          data-testid="keeper-governance-second-approver"
+          aria-label="Toggle require a second approver"
         />
       </SettingsRow>
 

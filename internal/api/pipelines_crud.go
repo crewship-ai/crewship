@@ -502,17 +502,22 @@ func (h *PipelineHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 // is enforced by the handler — the sidecar must call test_run
 // first and pass the resulting timestamp through.
 type internalSaveRequest struct {
-	WorkspaceID       string          `json:"workspace_id"`
-	Slug              string          `json:"slug"`
-	Name              string          `json:"name"`
-	Description       string          `json:"description"`
-	Definition        json.RawMessage `json:"definition"`
-	AuthorCrewID      string          `json:"author_crew_id"`
-	AuthorAgentID     string          `json:"author_agent_id"`
-	AuthorChatID      string          `json:"author_chat_id"`
-	AuthorRunID       string          `json:"author_run_id"`
-	LastTestRunAt     string          `json:"last_test_run_at"` // RFC3339
-	LastTestRunPassed bool            `json:"last_test_run_passed"`
+	WorkspaceID   string          `json:"workspace_id"`
+	Slug          string          `json:"slug"`
+	Name          string          `json:"name"`
+	Description   string          `json:"description"`
+	Definition    json.RawMessage `json:"definition"`
+	AuthorCrewID  string          `json:"author_crew_id"`
+	AuthorAgentID string          `json:"author_agent_id"`
+	AuthorChatID  string          `json:"author_chat_id"`
+	AuthorRunID   string          `json:"author_run_id"`
+	// SaveToken is the HMAC-signed proof minted by the internal
+	// /pipelines/test_run that THIS authoring crew just dry-run-validated
+	// THIS definition_hash. It is the ONLY thing that clears the store
+	// test-gate on the agent-authored path (#1371). The previously-accepted
+	// last_test_run_at / last_test_run_passed body fields were forgeable and
+	// are no longer read — an agent claiming "it passed" is not proof it did.
+	SaveToken string `json:"save_token,omitempty"`
 	// ChangeSummary is an optional one-line provenance note recorded on the
 	// pipeline_versions row (surfaced in the versions UI and CLI).
 	ChangeSummary string `json:"change_summary,omitempty"`
@@ -840,12 +845,35 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 			RunID:   body.AuthorRunID,
 			Via:     pipeline.AuthoredViaAgent,
 		},
-		LastTestRunPassed: body.LastTestRunPassed,
+		// #1371: default the gate UNMET. The autonomous authoring path is held
+		// to the SAME bar as the interactive one — it does NOT trust the
+		// forgeable last_test_run_passed / last_test_run_at body fields (the
+		// whole reason the user path uses a save_token). The ONLY thing that
+		// clears the gate is a valid internal save_token minted by
+		// /internal/pipelines/test_run for THIS definition_hash + authoring
+		// crew. No token → gate stays UNMET → store returns
+		// ErrTestRunGateFailed → 422. There is deliberately no OWNER/ADMIN
+		// skip escape on this path: an agent has no such role.
+		LastTestRunPassed: false,
 		Status:            statusForRisk(risky),
 		ChangeSummary:     body.ChangeSummary,
 	}
-	if t, err := parseRFC3339(body.LastTestRunAt); err == nil {
-		in.LastTestRunAt = &t
+	if body.SaveToken != "" {
+		defHash := definitionHashHex(body.Definition)
+		if err := verifySaveToken(h.saveTokenSecret, body.SaveToken, body.WorkspaceID, defHash, internalSaveTokenSubject(body.AuthorCrewID)); err != nil {
+			h.logger.Warn("pipeline internal save: save_token rejected",
+				"crew", body.AuthorCrewID, "slug", body.Slug, "err", err)
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
+				"error": "save_token invalid (expired, malformed, or signed for a different definition/crew)",
+			})
+			return
+		}
+		// Token verified — synthesize a passing-now timestamp so the store
+		// gate clears without trusting any body-supplied claim.
+		now := time.Now().UTC()
+		in.LastTestRunAt = &now
+		in.LastTestRunPassed = true
+		h.logger.Info("pipeline internal save: cleared via save_token", "crew", body.AuthorCrewID, "slug", body.Slug)
 	}
 
 	saved, err := h.store.Save(r.Context(), in)

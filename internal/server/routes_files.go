@@ -281,6 +281,100 @@ func (s *Server) handleFileSave(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved", "path": filePath})
 }
 
+// handleFileDelete removes a single file from a crew's shared/output tree.
+// Path routing and traversal rejection are identical to save/download
+// (resolveCrewFileKey). Delete is idempotent — localfs RemoveAll treats a
+// missing key as success — so a repeat delete still returns 200.
+func (s *Server) handleFileDelete(w http.ResponseWriter, r *http.Request) {
+	crewID := r.PathValue("id")
+	filePath := r.URL.Query().Get("path")
+
+	if filePath == "" {
+		http.Error(w, "path query parameter required", http.StatusBadRequest)
+		return
+	}
+
+	storageKey, ok := resolveCrewFileKey(crewID, filePath)
+	if !ok {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	if s.storage == nil {
+		http.Error(w, "storage not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	err := s.storage.Delete(r.Context(), storageKey)
+	if err == nil {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "path": filePath})
+		return
+	}
+
+	// #922 ownership handoff: after a crew is provisioned the entrypoint
+	// chowns /crew (the bind source of "crews/<id>/shared/...") to the agent
+	// UID 1001, so a host-side unlink by the server UID fails with EACCES —
+	// removing a file needs write on its parent directory, which 1001 now
+	// owns. Re-route the removal through the container as 1001, mirroring the
+	// exec-as-1001 fallback handleFileSave uses for the same reason.
+	cpath, isShared := crewSharedContainerPath(crewID, storageKey)
+	if isShared && s.container != nil && errors.Is(err, fs.ErrPermission) {
+		if cerr := s.deleteCrewSharedFileViaContainer(r.Context(), crewID, cpath); cerr != nil {
+			s.logger.Error("file delete via container failed", "path", sanitizeLogPath(filePath), "error", cerr)
+			status, msg := containerSaveErrorResponse(cerr)
+			writeJSON(w, status, map[string]string{"error": msg})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "path": filePath})
+		return
+	}
+
+	s.logger.Error("file delete failed", "path", sanitizeLogPath(filePath), "error", err)
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete file"})
+}
+
+// deleteCrewSharedFileViaContainer removes containerPath inside the crew
+// container as UID 1001 — the owner of the provisioned /crew tree — so a
+// host-side EACCES unlink (#922) still lands. The parent directory's realpath
+// is checked INSIDE the container (defence-in-depth on top of the host-side
+// resolveCrewFileKey fence) so a symlinked path component can't redirect the
+// removal outside /crew/shared. Paths pass via env so a crafted destination
+// can't break out of the shell command.
+func (s *Server) deleteCrewSharedFileViaContainer(ctx context.Context, crewID, containerPath string) error {
+	containerName, _, ok := s.resolveCrewContainer(ctx, crewID, false)
+	if !ok {
+		return errCrewNotFound
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	const script = `set -eu; d=$(dirname "$DEST"); ` +
+		`rp=$(realpath "$d"); case "$rp" in /crew/shared|/crew/shared/*) ;; ` +
+		`*) echo "refuse: destination escapes /crew/shared" >&2; exit 3 ;; esac; ` +
+		`rm -f "$DEST"`
+	result, err := s.container.Exec(ctx, provider.ExecConfig{
+		ContainerID: containerName,
+		Cmd:         []string{"sh", "-c", script},
+		Env:         []string{"DEST=" + containerPath},
+		User:        "1001:1001",
+	})
+	if err != nil {
+		return fmt.Errorf("%w: %v", errCrewContainerUnavailable, err)
+	}
+	defer result.Reader.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(result.Reader, 64*1024))
+
+	_, code, ierr := s.container.ExecInspect(ctx, result.ExecID)
+	if ierr != nil {
+		return fmt.Errorf("inspect container delete: %w", ierr)
+	}
+	if code != 0 {
+		return fmt.Errorf("container delete exited %d", code)
+	}
+	return nil
+}
+
 // maxCrewFileSaveBytes bounds a single crew-file save. Crew scripts/config are
 // small; the cap only exists so a buffered body can't exhaust server memory.
 const maxCrewFileSaveBytes int64 = 32 << 20 // 32 MiB

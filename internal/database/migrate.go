@@ -1678,6 +1678,10 @@ END;
 	// stop getting unrestricted egress. See
 	// migrate_consts_v148_backfill_network_mode_restricted.go (#1366).
 	{version: 148, name: "backfill_network_mode_restricted", fn: migrateBackfillNetworkModeRestricted},
+	// v149: optional short-lived lease (expires_at) on the agent_credentials
+	// grant — an expired lease is refused at injection time (fail-closed). See
+	// migrate_consts_v149_credential_lease.go and issue #1373.
+	{version: 149, name: "credential_lease_expiry", sql: migrationCredentialLeaseExpiry},
 	// v150: single-row lease table backing scheduler leader election (#1376),
 	// so the agent/pipeline cron loops and the recurring-issue dispatcher fire
 	// on exactly one replica in a multi-replica deploy. Instance-local runtime

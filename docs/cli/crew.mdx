@@ -43,6 +43,7 @@ crewship crew <subcommand> [flags]
 | `files list` | List entries under the crew's `/crew/shared/` Shared Ship volume |
 | `files get` | Download a file from the crew's shared volume |
 | `files save` | Upload bytes (stdin / `--file` / `--content`) into the shared volume |
+| `files delete` | Remove a file from the shared volume (alias `files rm`) |
 
 ---
 
@@ -470,6 +471,21 @@ crewship crew files save demo-crew shared/data.bin --file /tmp/data.bin
 | `--file` | string | | Local file path to upload. |
 
 Save issues a raw `PUT /api/v1/crews/{crewId}/files/save?path=…` with `Content-Type: application/octet-stream` so binary uploads round-trip byte-for-byte.
+
+### `crewship crew files delete <slug-or-id> <path>`
+
+Remove a file from the crew shared volume — the CLI-native way to clean up a probe script or scratch file instead of falling back to `rm` on the host. Alias: `crew files rm`. Prompts for confirmation unless `--yes` is given. Path-traversal is rejected server-side, identical to save.
+
+```bash
+crewship crew files delete demo-crew shared/probe.sh
+crewship crew files delete demo-crew shared/tmp.log --yes
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--yes`, `-y` | bool | `false` | Skip the confirmation prompt. |
+
+Delete issues `DELETE /api/v1/crews/{crewId}/files/delete?path=…` and is idempotent — removing a file that is already gone still succeeds. On a running crew whose shared tree the runtime owns (UID 1001), the removal is routed through the container so it lands regardless of host-side file ownership.
 
 ---
 

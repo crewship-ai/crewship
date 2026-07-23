@@ -23,7 +23,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 // crewBoundCtx1222 builds a request context as requireInternal would for a
@@ -134,9 +133,12 @@ func TestCrewBoundToken_OmittedCrew_PipelineInternalSave_AttributedToBoundCrew(t
 	h, db, _, wsID, crewID := cov2PCRig(t)
 
 	def := `{"name":"omit-crew-1222","steps":[{"id":"a","type":"call_pipeline","pipeline_slug":"some-other"}]}`
+	// #1371: the store gate clears only against a save_token. author_crew_id is
+	// omitted here (assertBoundCrewWorkspaceDB fills it from the bound token),
+	// so the token's subject binds to that same bound crew.
+	token := signInternalSaveTokenForTest([]byte(testSaveTokenSecret1371), wsID, crewID, def)
 	body := `{"workspace_id":"` + wsID + `","slug":"omit-crew-1222","name":"omit-crew-1222",` +
-		`"definition":` + def + `,` +
-		`"last_test_run_at":"` + time.Now().UTC().Format(time.RFC3339Nano) + `","last_test_run_passed":true}`
+		`"definition":` + def + `,"save_token":"` + token + `"}`
 	req := httptest.NewRequest("POST", "/x", strings.NewReader(body)).WithContext(crewBoundCtx1222(wsID, crewID))
 	rr := httptest.NewRecorder()
 	h.InternalSave(rr, req)

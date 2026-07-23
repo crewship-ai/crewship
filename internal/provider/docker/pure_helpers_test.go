@@ -160,9 +160,14 @@ func TestBuildMounts_FullLayout(t *testing.T) {
 		mtype    mount.Type
 		readOnly bool
 	}{
-		"/workspace": {source: "/ws", mtype: mount.TypeBind, readOnly: false},
-		"/output":    {source: "/out", mtype: mount.TypeBind, readOnly: false},
-		"/crew":      {source: "/crew", mtype: mount.TypeBind, readOnly: false},
+		// #1400: the agent-writable, host-persistent crew data mounts ride
+		// bind-backed noexec local volumes (noexecBindMount) — TypeVolume with
+		// no Source (anonymous, driver-bound to the host path via DriverConfig
+		// device=). The noexec/nosuid opts are asserted in
+		// TestBuildMountsAgentWritableBindsAreNoexec.
+		"/workspace": {source: "", mtype: mount.TypeVolume, readOnly: false},
+		"/output":    {source: "", mtype: mount.TypeVolume, readOnly: false},
+		"/crew":      {source: "", mtype: mount.TypeVolume, readOnly: false},
 		// /secrets is deliberately absent: it rides HostConfig.Tmpfs
 		// (secretsTmpfsSpec), not the Mounts API — the daemon rejects
 		// uid/gid options on a Mounts-API tmpfs.
@@ -219,8 +224,14 @@ func TestBuildMounts_NoSlugSkipsHomeAndToolsVolumes(t *testing.T) {
 			t.Errorf("did not expect %q mount when slug is empty (got source=%q)",
 				m.Target, m.Source)
 		}
-		if m.Type == mount.TypeVolume {
-			t.Errorf("did not expect any volume mounts when slug is empty (got %+v)", m)
+		// The named home/tools volumes carry a Source; skipping them when the
+		// slug is empty means no Source-bearing (named) volume must appear.
+		// The agent-writable /workspace, /output and /crew mounts are now
+		// bind-backed anonymous volumes (#1400) — TypeVolume but with an empty
+		// Source — and are always present, so type alone no longer proves a
+		// named volume leaked.
+		if m.Type == mount.TypeVolume && m.Source != "" {
+			t.Errorf("did not expect any named volume mounts when slug is empty (got %+v)", m)
 		}
 	}
 }

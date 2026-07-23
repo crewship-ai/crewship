@@ -594,7 +594,27 @@ func (h *PipelineHandler) InternalTestRun(w http.ResponseWriter, r *http.Request
 		replyError(w, http.StatusInternalServerError, "Failed to test-run pipeline")
 		return
 	}
-	writeJSON(w, http.StatusOK, res)
+
+	// Mint an internal save_token when the dry-run passed and a signing secret
+	// is wired — the agent-authoring parity of the public /test_run token
+	// (pipelines_exec.go TestRun). InternalSave verifies this instead of
+	// trusting the forgeable last_test_run_passed body field, so the
+	// autonomous authoring path is no weaker than the interactive one (#1371).
+	// The token binds (workspace_id, definition_hash, crew) — Save re-derives
+	// the HMAC over the definition it is about to persist and the authoring
+	// crew, so a token can't be replayed against a tampered definition or a
+	// sibling crew.
+	var saveToken string
+	if res != nil && (res.Status == "DRY_RUN_OK" || res.Status == "COMPLETED") && len(h.saveTokenSecret) > 0 {
+		defHash := definitionHashHex(body.Definition)
+		saveToken = signSaveToken(h.saveTokenSecret, body.WorkspaceID, defHash,
+			internalSaveTokenSubject(body.AuthorCrewID), time.Now())
+	}
+	type internalTestRunResponse struct {
+		*pipeline.RunResult
+		SaveToken string `json:"save_token,omitempty"`
+	}
+	writeJSON(w, http.StatusOK, internalTestRunResponse{RunResult: res, SaveToken: saveToken})
 }
 
 // ListRunRecords returns runs from the pipeline_runs table directly
