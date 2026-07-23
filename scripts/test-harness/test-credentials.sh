@@ -159,6 +159,93 @@ else
   _fail "file-based credential '$REV_NAME' create/assign"
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "5. Keeper ON withholds SECRET files (delivery contract, #keeper-gate)"
+# ─────────────────────────────────────────────────────────────────────────────
+# Security contract: when Keeper is ENABLED, a SECRET credential is NOT written
+# to /secrets/{agent-slug}/ and is NOT injected as an env var. The agent's
+# system prompt says it does not have the value; the ONLY way to obtain it is
+# the Keeper API (/keeper/request | /keeper/execute), which enforces access
+# control + audit. This mirrors the Go unit gate in buildCredFileScript /
+# hasFileMountedCreds (exec_sidecar.go, secrets_cleanup.go).
+#
+# The gate is SECRET-only: CLI_TOKEN / GENERIC_SECRET / USERPASS / SSH_KEY /
+# CERTIFICATE are still delivered as files regardless of Keeper state.
+#
+# NOTE: the file-absence half of this contract is verified ON THE DEV VM
+# (docker exec … 'ls /secrets/<slug>'), NOT from this machine — the CLI never
+# exposes /secrets. This machine (Mac Mini / Claude Code) has no Docker and no
+# dev container; run the docker-exec assertions below on dev2 during runtime
+# validation. Everything the CLI *can* observe is asserted inline here.
+if ! cs keeper --help >/dev/null 2>&1; then
+  skip "Keeper SECRET-withhold contract" "installed crewship has no 'keeper' command — rebuild"
+else
+  # Remember the starting Keeper state and restore it on the way out (shared
+  # dev instance — leave governance as we found it).
+  KEEPER_WAS_ENABLED="false"
+  if have jq; then
+    KEEPER_WAS_ENABLED="$(cs keeper status --format json 2>/dev/null | jq -r '.governance.enabled // false')"
+  fi
+  restore_keeper() {
+    if [[ "$KEEPER_WAS_ENABLED" == "true" ]]; then cs keeper enable  >/dev/null 2>&1 || true
+    else                                           cs keeper disable >/dev/null 2>&1 || true; fi
+  }
+  trap restore_keeper EXIT
+
+  if cs keeper enable >/dev/null 2>&1; then
+    _pass "keeper enable (SECRET file delivery now gated OFF)"
+  else
+    _fail "keeper enable"
+  fi
+
+  KSEC_NAME="HARNESS_KEEPERSEC_$(nonce SEC | tr '-' '_')"
+  info "Creating a SECRET $KSEC_NAME and assigning to morgan (Keeper ON)…"
+  if printf 'keeper-gated-secret-value' | cs credential create \
+        --name "$KSEC_NAME" --type SECRET --provider CUSTOM_CLI \
+        --env-var-name "$KSEC_NAME" --value-stdin >/dev/null 2>&1 \
+     && cs credential assign "$KSEC_NAME" morgan --env-var-name "$KSEC_NAME" >/dev/null 2>&1; then
+    _pass "SECRET credential '$KSEC_NAME' created + assigned under Keeper"
+  else
+    _fail "SECRET credential '$KSEC_NAME' create/assign"
+  fi
+
+  # Drive a run so preflight materializes (or, under Keeper, WITHHOLDS) the
+  # file. The agent's answer is a soft signal; the load-bearing check is the
+  # docker-exec file-absence note below.
+  info "Running morgan so the /secrets preflight fires under Keeper…"
+  reply="$(ask_agent morgan "Do you have a file at \$CREWSHIP_SECRETS_DIR/${KSEC_NAME} \
+containing a secret value in your environment right now? Answer YES or NO, then \
+in one sentence say how you would obtain ${KSEC_NAME} if you needed it." 2>/dev/null || true)"
+
+  # Security invariant still holds: the plaintext never comes back from the API.
+  if have jq; then
+    assert_not_contains "SECRET value is NOT exposed by the API (Keeper ON)" \
+      "$(cs credential list --format json 2>/dev/null)" "keeper-gated-secret-value"
+  fi
+  # The agent must not have been handed the raw value on the wire either.
+  assert_not_contains "agent reply does not leak the raw SECRET value" \
+    "$reply" "keeper-gated-secret-value"
+
+  cat <<EOF_NOTE
+   ── DEV-VM VERIFICATION (run on dev2, not this machine) ──
+   With Keeper ENABLED and morgan mid-run:
+     docker exec <crew-container> sh -c 'ls -la /secrets/morgan/ 2>/dev/null'
+       → MUST NOT list a '${KSEC_NAME}' file, and the .env map MUST NOT
+         contain a '${KSEC_NAME}=' line (SECRET withheld from the filesystem).
+     docker exec <crew-container> printenv ${KSEC_NAME}
+       → MUST be empty (SECRET withheld from the env, per exec_env.go gate).
+   Then confirm the agent can still OBTAIN it via the Keeper API:
+     from inside the container, POST /keeper/execute (or /keeper/request) for
+     ${KSEC_NAME} → returns the value / runs the command, and writes a
+     keeper.decision audit row.
+   Finally flip Keeper OFF and re-run: /secrets/morgan/${KSEC_NAME} SHOULD
+   then exist as a 0400 file (legacy delivery, unchanged).
+EOF_NOTE
+
+  # Best-effort cleanup of the SECRET we minted.
+  cs credential delete "$KSEC_NAME" --yes >/dev/null 2>&1 || true
+fi
+
 info "Cleanup note: harness credentials are prefixed HARNESS_ — remove with:"
 info "  crewship credential list --format json | jq -r '.[]|select(.name|startswith(\"HARNESS_\")).name'"
 

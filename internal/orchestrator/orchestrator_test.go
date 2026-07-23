@@ -602,7 +602,7 @@ func TestInjectMCPCredentialEnvVarsRespectsLiteralValues(t *testing.T) {
 		},
 	}
 
-	got := injectMCPCredentialEnvVars(req, nil)
+	got := injectMCPCredentialEnvVars(req, nil, false, nil)
 
 	var sawLiteralOverride bool
 	var sawHostInjected bool
@@ -635,7 +635,7 @@ func TestInjectMCP_HTTPHeaderBearerToken(t *testing.T) {
 			{ID: "c1", EnvVarName: "LINEAR_TOKEN", PlainValue: "lin_real_secret"},
 		},
 	}
-	got := injectMCPCredentialEnvVars(req, nil)
+	got := injectMCPCredentialEnvVars(req, nil, false, nil)
 
 	found := false
 	for _, e := range got {

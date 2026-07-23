@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -67,7 +68,21 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 	return env
 }
 
-func injectMCPCredentialEnvVars(req AgentRunRequest, env []string) []string {
+// injectMCPCredentialEnvVars adds the actual credential values for env vars
+// referenced by the MCP config (${VAR}) into the exec env, so Claude Code and
+// the other CLIs can expand "Bearer ${TOKEN}" style references at MCP startup.
+//
+// #1362 — Keeper gate: this is the THIRD credential-delivery path (alongside the
+// file path and BuildEnvVarsSidecar), and it must honour the same SECRET-vs-
+// Keeper withholding contract. When keeperEnabled is true, a SECRET-typed
+// credential is NOT injected here — even if an MCP config references it — because
+// the Keeper promise ("the value is not in your environment") would otherwise be
+// bypassed via /proc/self/environ. The MCP process runs inside the agent
+// container and cannot call /keeper/request itself, so a genuinely-needed value
+// must be delivered via a non-SECRET credential type or without Keeper-gating
+// that secret (see docs/guides/credentials.mdx). Non-SECRET types (API_KEY,
+// CLI_TOKEN, OAUTH2, GENERIC_SECRET, …) and Keeper-off are unchanged.
+func injectMCPCredentialEnvVars(req AgentRunRequest, env []string, keeperEnabled bool, logger *slog.Logger) []string {
 	// Collect env var names referenced anywhere in the MCP config — env
 	// blocks, headers, top-level URL strings, and (for Codex) the
 	// bearer_token_env_var TOML key referenced indirectly via Authorization
@@ -108,6 +123,17 @@ func injectMCPCredentialEnvVars(req AgentRunRequest, env []string) []string {
 			continue
 		}
 		if existing[cred.EnvVarName] {
+			continue
+		}
+		// #1362: fail-closed SECRET withholding under Keeper. A SECRET-typed
+		// credential referenced by an MCP config must not be written into the
+		// agent env when Keeper is on — that would leak it via
+		// /proc/self/environ and bypass the /keeper/request audit gate.
+		if keeperEnabled && cred.Type == "SECRET" {
+			if logger != nil {
+				logger.Warn("SECRET referenced by MCP config withheld under Keeper; the MCP server will not receive it — route it via the Keeper API or use a non-SECRET credential type",
+					"env_var", cred.EnvVarName)
+			}
 			continue
 		}
 		env = append(env, cred.EnvVarName+"="+cred.PlainValue)

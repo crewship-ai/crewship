@@ -300,7 +300,16 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// The retain MUST precede the credential write below: taken any later, a
 	// finishing run of the same agent could hit count→0 and rm the files this
 	// run just wrote (TOCTOU window #1, see secrets_cleanup.go).
-	fileCreds := hasFileMountedCreds(req.Credentials)
+	// keeperEnabled decides whether SECRET credentials reach the agent as
+	// files. Read once under RLock (the setter at orchestrator.go
+	// SetKeeperEnabled races otherwise) and thread it through both the
+	// file-mounted-creds accounting and the credential write below so the
+	// hold/cleanup bookkeeping matches what actually lands on disk.
+	o.mu.RLock()
+	keeperEnabled := o.keeperEnabled
+	o.mu.RUnlock()
+
+	fileCreds := hasFileMountedCreds(req.Credentials, keeperEnabled)
 	agentExecStillRunning := false
 	if fileCreds {
 		o.retainAgentSecrets(req.ContainerID, req.AgentSlug)
@@ -314,7 +323,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		}()
 	}
 
-	env, workDir, err := o.preparePreflightDirs(ctx, req, env, fileCreds, runState.ID)
+	env, workDir, err := o.preparePreflightDirs(ctx, req, env, fileCreds, keeperEnabled, runState.ID)
 	if err != nil {
 		return err
 	}
@@ -1081,7 +1090,10 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		// Claude Code expands from the process environment. With sidecar enabled
 		// credentials normally skip env vars (they go via stdin instead), but
 		// MCP env references still need the actual values in the exec env.
-		env = injectMCPCredentialEnvVars(*req, env)
+		// #1362: reuse the keeperEnabled read taken under o.mu.RLock at the top
+		// of ensureSidecar (L830). injectMCPCredentialEnvVars is the third
+		// credential-delivery path and must withhold SECRETs under Keeper too.
+		env = injectMCPCredentialEnvVars(*req, env, keeperEnabled, o.logger)
 	} else {
 		env = BuildEnvVars(*req, cred)
 	}
@@ -1094,10 +1106,10 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 // one-time memory migration, credential-file writes, Claude config, MCP
 // config, MCP OAuth tokens, and CLI system-prompt files. fileCreds is the
 // caller's hasFileMountedCreds result (the caller holds the matching secrets
-// retain); runID is the run-state row failRun marks on fatal errors. Returns
-// the augmented env and the exec working directory. Pure extraction from
-// RunAgent.
-func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunRequest, env []string, fileCreds bool, runID string) ([]string, string, error) {
+// retain); keeperEnabled gates SECRET file delivery (see buildCredFileScript);
+// runID is the run-state row failRun marks on fatal errors. Returns the
+// augmented env and the exec working directory. Pure extraction from RunAgent.
+func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunRequest, env []string, fileCreds bool, keeperEnabled bool, runID string) ([]string, string, error) {
 	scratchDir := path.Join("/workspace", req.AgentSlug)
 	outputDir := path.Join("/output", req.AgentSlug)
 	workDir := outputDir // CWD = output dir so files are immediately visible to user
@@ -1200,7 +1212,7 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 			lk.Lock()
 			defer lk.Unlock()
 		}
-		return writeCredentialFiles(ctx, o.container, req.ContainerID, req.AgentSlug, req.Credentials, secretsAgentDir, secretsSharedDir, o.logger)
+		return writeCredentialFiles(ctx, o.container, req.ContainerID, req.AgentSlug, req.Credentials, secretsAgentDir, secretsSharedDir, keeperEnabled, o.logger)
 	}()
 	if credWriteErr != nil {
 		// Same fail-loud posture as the mkdir preflight above: a run that

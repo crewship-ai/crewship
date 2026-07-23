@@ -94,11 +94,60 @@ func TestWriteCredentialFiles_RunsAsAgentUID(t *testing.T) {
 		{ID: "c1", EnvVarName: "GH_TOKEN", PlainValue: "ghp_abc", Type: "CLI_TOKEN"},
 	}
 	if err := writeCredentialFiles(context.Background(), fake, "ctr-x", "agent-a", creds,
-		"/secrets/agent-a", "/secrets/shared", quietCredLogger()); err != nil {
+		"/secrets/agent-a", "/secrets/shared", false, quietCredLogger()); err != nil {
 		t.Fatalf("writeCredentialFiles: %v", err)
 	}
 	if fake.lastCfg.User != "1001:1001" {
 		t.Errorf("script must run as 1001:1001 (owner of secretsAgentDir), got %q", fake.lastCfg.User)
+	}
+}
+
+// TestWriteCredentialFiles_KeeperWithholdsSecretFile pins the security
+// fix: with Keeper ENABLED the agent's system prompt claims it does NOT
+// have SECRET credentials in its environment. The file-delivery path must
+// honour that — a lone SECRET produces an empty script (no exec), so the
+// cleartext value never touches the container filesystem. The agent obtains
+// it via the Keeper API instead. Non-SECRET file creds in the same run are
+// unaffected (asserted separately below).
+func TestWriteCredentialFiles_KeeperWithholdsSecretFile(t *testing.T) {
+	t.Parallel()
+	fake := &credExecFake{}
+	creds := []Credential{
+		{ID: "c1", EnvVarName: "WEBHOOK_SECRET", PlainValue: "shhh", Type: "SECRET"},
+	}
+	if err := writeCredentialFiles(context.Background(), fake, "ctr-x", "agent-a", creds,
+		"/secrets/agent-a", "/secrets/shared", true, quietCredLogger()); err != nil {
+		t.Fatalf("writeCredentialFiles: %v", err)
+	}
+	if fake.execCalls != 0 {
+		t.Errorf("Keeper ON: a lone SECRET must not exec any write (script empty), got %d exec(s); script:\n%s",
+			fake.execCalls, fake.scriptSeen)
+	}
+}
+
+// TestWriteCredentialFiles_KeeperKeepsNonSecretFiles confirms the gate is
+// SECRET-only: with Keeper ON, a batch of {CLI_TOKEN, SECRET, GENERIC_SECRET}
+// still writes the two non-SECRET files and skips only the SECRET.
+func TestWriteCredentialFiles_KeeperKeepsNonSecretFiles(t *testing.T) {
+	t.Parallel()
+	fake := &credExecFake{}
+	creds := []Credential{
+		{ID: "c1", EnvVarName: "GH_TOKEN", PlainValue: "ghp_abc", Type: "CLI_TOKEN"},
+		{ID: "c2", EnvVarName: "WEBHOOK_SECRET", PlainValue: "shhh", Type: "SECRET"},
+		{ID: "c3", EnvVarName: "STRIPE_HOOK", PlainValue: "whsec", Type: "GENERIC_SECRET"},
+	}
+	if err := writeCredentialFiles(context.Background(), fake, "ctr-x", "agent-a", creds,
+		"/secrets/agent-a", "/secrets/shared", true, quietCredLogger()); err != nil {
+		t.Fatalf("writeCredentialFiles: %v", err)
+	}
+	if !strings.Contains(fake.scriptSeen, "/secrets/agent-a/GH_TOKEN") {
+		t.Errorf("Keeper ON must still write CLI_TOKEN file; script:\n%s", fake.scriptSeen)
+	}
+	if !strings.Contains(fake.scriptSeen, "/secrets/agent-a/STRIPE_HOOK") {
+		t.Errorf("Keeper ON must still write GENERIC_SECRET file; script:\n%s", fake.scriptSeen)
+	}
+	if strings.Contains(fake.scriptSeen, "/secrets/agent-a/WEBHOOK_SECRET") {
+		t.Errorf("Keeper ON must NOT write SECRET file; script:\n%s", fake.scriptSeen)
 	}
 }
 
@@ -117,7 +166,7 @@ func TestWriteCredentialFiles_ScriptOmitsChown(t *testing.T) {
 		{ID: "c3", EnvVarName: "VAULT_USER", PlainValue: "pw", Type: "USERPASS", Username: "alice"},
 	}
 	if err := writeCredentialFiles(context.Background(), fake, "ctr-x", "agent-a", creds,
-		"/secrets/agent-a", "/secrets/shared", quietCredLogger()); err != nil {
+		"/secrets/agent-a", "/secrets/shared", false, quietCredLogger()); err != nil {
 		t.Fatalf("writeCredentialFiles: %v", err)
 	}
 	if strings.Contains(fake.scriptSeen, "chown") {
@@ -154,7 +203,7 @@ func TestWriteCredentialFiles_ScriptRemovesPathBeforeWrite(t *testing.T) {
 		{ID: "c3", EnvVarName: "VAULT_USER", PlainValue: "pw", Type: "USERPASS", Username: "alice"},
 	}
 	if err := writeCredentialFiles(context.Background(), fake, "ctr-x", "agent-a", creds,
-		"/secrets/agent-a", "/secrets/shared", quietCredLogger()); err != nil {
+		"/secrets/agent-a", "/secrets/shared", false, quietCredLogger()); err != nil {
 		t.Fatalf("writeCredentialFiles: %v", err)
 	}
 
@@ -203,7 +252,7 @@ func TestWriteCredentialFiles_NonZeroExitErrors(t *testing.T) {
 		{ID: "c1", EnvVarName: "GH_TOKEN", PlainValue: "ghp_abc", Type: "CLI_TOKEN"},
 	}
 	err := writeCredentialFiles(context.Background(), fake, "ctr-x", "agent-a", creds,
-		"/secrets/agent-a", "/secrets/shared", quietCredLogger())
+		"/secrets/agent-a", "/secrets/shared", false, quietCredLogger())
 	if err == nil {
 		t.Fatal("non-zero exit code from cred-write script must surface as error")
 	}
@@ -219,7 +268,7 @@ func TestWriteCredentialFiles_InspectErrorPropagates(t *testing.T) {
 		{ID: "c1", EnvVarName: "GH_TOKEN", PlainValue: "ghp_abc", Type: "CLI_TOKEN"},
 	}
 	err := writeCredentialFiles(context.Background(), fake, "ctr-x", "agent-a", creds,
-		"/secrets/agent-a", "/secrets/shared", quietCredLogger())
+		"/secrets/agent-a", "/secrets/shared", false, quietCredLogger())
 	if err == nil || !strings.Contains(err.Error(), "daemon unreachable") {
 		t.Errorf("ExecInspect error must surface; got %v", err)
 	}
@@ -237,7 +286,7 @@ func TestWriteCredentialFiles_StillRunningErrors(t *testing.T) {
 		{ID: "c1", EnvVarName: "GH_TOKEN", PlainValue: "ghp_abc", Type: "CLI_TOKEN"},
 	}
 	err := writeCredentialFiles(context.Background(), fake, "ctr-x", "agent-a", creds,
-		"/secrets/agent-a", "/secrets/shared", quietCredLogger())
+		"/secrets/agent-a", "/secrets/shared", false, quietCredLogger())
 	if err == nil || !strings.Contains(err.Error(), "still running") {
 		t.Errorf("running=true after EOF must error; got %v", err)
 	}

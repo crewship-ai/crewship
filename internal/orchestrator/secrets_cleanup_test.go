@@ -55,44 +55,58 @@ func TestBuildSecretsCleanupScript(t *testing.T) {
 
 func TestHasFileMountedCreds(t *testing.T) {
 	cases := []struct {
-		name  string
-		creds []Credential
-		want  bool
+		name   string
+		creds  []Credential
+		keeper bool
+		want   bool
 	}{
-		{"nil", nil, false},
+		{"nil", nil, false, false},
 		{"sidecar-injected only", []Credential{
 			{Type: "API_KEY", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: "x"},
 			{Type: "AI_CLI_TOKEN", EnvVarName: "CLAUDE_CODE_OAUTH_TOKEN", PlainValue: "x"},
 			{Type: "OAUTH2", EnvVarName: "GH_OAUTH", PlainValue: "x"},
-		}, false},
+		}, false, false},
 		{"cli token lands on disk", []Credential{
 			{Type: "CLI_TOKEN", EnvVarName: "GH_TOKEN", PlainValue: "x"},
-		}, true},
-		{"secret lands on disk", []Credential{
+		}, false, true},
+		{"secret lands on disk when keeper off", []Credential{
 			{Type: "SECRET", EnvVarName: "DB_PASS", PlainValue: "x"},
-		}, true},
+		}, false, true},
+		{"secret withheld when keeper on (nothing to clean up)", []Credential{
+			{Type: "SECRET", EnvVarName: "DB_PASS", PlainValue: "x"},
+		}, true, false},
+		{"cli token still lands with keeper on", []Credential{
+			{Type: "CLI_TOKEN", EnvVarName: "GH_TOKEN", PlainValue: "x"},
+		}, true, true},
+		{"secret + cli token with keeper on: cli token keeps files alive", []Credential{
+			{Type: "SECRET", EnvVarName: "DB_PASS", PlainValue: "x"},
+			{Type: "CLI_TOKEN", EnvVarName: "GH_TOKEN", PlainValue: "x"},
+		}, true, true},
 		{"generic secret lands on disk", []Credential{
 			{Type: "GENERIC_SECRET", EnvVarName: "TOK", PlainValue: "x"},
-		}, true},
+		}, false, true},
+		{"generic secret lands on disk even with keeper on", []Credential{
+			{Type: "GENERIC_SECRET", EnvVarName: "TOK", PlainValue: "x"},
+		}, true, true},
 		{"userpass lands on disk", []Credential{
 			{Type: "USERPASS", EnvVarName: "DB", PlainValue: "x", Username: "u"},
-		}, true},
+		}, false, true},
 		{"ssh key lands on disk", []Credential{
 			{Type: "SSH_KEY", EnvVarName: "DEPLOY", PlainValue: "x"},
-		}, true},
+		}, false, true},
 		{"certificate lands on disk", []Credential{
 			{Type: "CERTIFICATE", EnvVarName: "CA", PlainValue: "x"},
-		}, true},
+		}, false, true},
 		{"file type without value is skipped by the writer", []Credential{
 			{Type: "SECRET", EnvVarName: "DB_PASS", PlainValue: ""},
-		}, false},
+		}, false, false},
 		{"file type without env var is skipped by the writer", []Credential{
 			{Type: "SECRET", EnvVarName: "", PlainValue: "x"},
-		}, false},
+		}, false, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := hasFileMountedCreds(c.creds); got != c.want {
+			if got := hasFileMountedCreds(c.creds, c.keeper); got != c.want {
 				t.Errorf("hasFileMountedCreds = %v, want %v", got, c.want)
 			}
 		})

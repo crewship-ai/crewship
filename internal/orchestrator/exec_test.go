@@ -719,7 +719,7 @@ func TestPreRunInstallPackages_EmptyList(t *testing.T) {
 }
 
 func TestWriteCredentialFiles_NoCredentials(t *testing.T) {
-	err := writeCredentialFiles(context.TODO(), nil, "ctr-1", "agent-a", nil, "/secrets/agent-a", "/secrets/shared", slog.Default())
+	err := writeCredentialFiles(context.TODO(), nil, "ctr-1", "agent-a", nil, "/secrets/agent-a", "/secrets/shared", false, slog.Default())
 	if err != nil {
 		t.Errorf("expected nil error for empty creds, got %v", err)
 	}
@@ -731,7 +731,7 @@ func TestWriteCredentialFiles_SkipsAPIKeys(t *testing.T) {
 		{ID: "c1", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: "sk-ant-123", Type: "API_KEY"},
 		{ID: "c2", EnvVarName: "CLAUDE_CODE_OAUTH_TOKEN", PlainValue: "sk-ant-oat-123", Type: "AI_CLI_TOKEN"},
 	}
-	err := writeCredentialFiles(context.TODO(), nil, "ctr-1", "agent-a", creds, "/secrets/agent-a", "/secrets/shared", slog.Default())
+	err := writeCredentialFiles(context.TODO(), nil, "ctr-1", "agent-a", creds, "/secrets/agent-a", "/secrets/shared", false, slog.Default())
 	if err != nil {
 		t.Errorf("expected nil for API-only creds, got %v", err)
 	}
@@ -742,7 +742,7 @@ func TestWriteCredentialFiles_SkipsEmptyValues(t *testing.T) {
 		{ID: "c1", EnvVarName: "GH_TOKEN", PlainValue: "", Type: "CLI_TOKEN"},
 		{ID: "c2", EnvVarName: "", PlainValue: "some-val", Type: "SECRET"},
 	}
-	err := writeCredentialFiles(context.TODO(), nil, "ctr-1", "agent-a", creds, "/secrets/agent-a", "/secrets/shared", slog.Default())
+	err := writeCredentialFiles(context.TODO(), nil, "ctr-1", "agent-a", creds, "/secrets/agent-a", "/secrets/shared", false, slog.Default())
 	if err != nil {
 		t.Errorf("expected nil for creds with empty name/value, got %v", err)
 	}

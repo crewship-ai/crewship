@@ -147,9 +147,19 @@ type credFileSpec struct {
 // Per-type behaviour:
 //
 //	API_KEY, AI_CLI_TOKEN, OAUTH2  → skipped (sidecar proxy handles them)
-//	CLI_TOKEN, SECRET, GENERIC_SECRET
-//	                               → one file at secretsAgentDir/<envvar>,
+//	CLI_TOKEN, GENERIC_SECRET      → one file at secretsAgentDir/<envvar>,
 //	                                 mode 0400. .env maps envvar to path.
+//	SECRET                         → same flat-file layout as CLI_TOKEN,
+//	                                 BUT ONLY when Keeper is disabled. With
+//	                                 Keeper enabled the agent's system prompt
+//	                                 tells it "you do NOT have these
+//	                                 credentials in your environment" and the
+//	                                 env-delivery path withholds them
+//	                                 (exec_env.go); writing the cleartext file
+//	                                 anyway would contradict that prompt and
+//	                                 defeat Keeper's access-control + audit
+//	                                 gate. Under Keeper the agent must fetch
+//	                                 the value via the Keeper API instead.
 //	USERPASS                       → two files <envvar>_USERNAME and
 //	                                 <envvar>_PASSWORD, mode 0400.
 //	                                 Cleartext username is stored on the
@@ -170,7 +180,7 @@ type credFileSpec struct {
 // files mounted (for logging), or an error if any env var name fails
 // the sanitiser. Empty input yields ("", 0, nil) so callers can early-
 // exit without a noop exec.
-func buildCredFileScript(creds []Credential, secretsAgentDir string) (string, int, error) {
+func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabled bool) (string, int, error) {
 	var specs []credFileSpec
 	var envLines []string
 
@@ -183,7 +193,28 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string) (string, in
 		}
 
 		switch c.Type {
-		case "CLI_TOKEN", "SECRET", "GENERIC_SECRET":
+		case "SECRET":
+			// SECRET is the one file-mounted type Keeper withholds: when
+			// Keeper is enabled the system prompt claims the agent does NOT
+			// have it in its environment (agent_config.go buildKeeperBlock),
+			// and the env-delivery path honours that (exec_env.go gates
+			// SECRET→env on !keeperEnabled). Writing the cleartext file
+			// unconditionally contradicted that prompt — the file path is
+			// gated here to mirror the env gate. Keeper OFF: unchanged, the
+			// value lands as a 0400 file exactly like CLI_TOKEN below.
+			if keeperEnabled {
+				continue
+			}
+			path := secretsAgentDir + "/" + c.EnvVarName
+			specs = append(specs, credFileSpec{
+				EnvVar: c.EnvVarName, Value: c.PlainValue, Path: path, Mode: "0400",
+			})
+			envLines = append(envLines, c.EnvVarName+"="+path)
+
+		case "CLI_TOKEN", "GENERIC_SECRET":
+			// Not gated on Keeper: the prompt only withholds SECRET, and CLI
+			// tools (gh, glab, …) plus generic secrets are expected to read
+			// these from disk regardless of Keeper state.
 			path := secretsAgentDir + "/" + c.EnvVarName
 			specs = append(specs, credFileSpec{
 				EnvVar: c.EnvVarName, Value: c.PlainValue, Path: path, Mode: "0400",
@@ -348,9 +379,11 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string) (string, in
 //     up to the caller's warn-and-continue path instead of writing
 //     a false-success log entry.
 //
-// Per-type behaviour is documented on buildCredFileScript. The
-// secretsSharedDir parameter is unused today but retained on the
-// signature for the crew-shared credentials work tracked separately.
+// Per-type behaviour is documented on buildCredFileScript, including the
+// keeperEnabled gate that withholds SECRET file delivery when Keeper is on
+// (the value must then be fetched via the Keeper API, matching the system
+// prompt). The secretsSharedDir parameter is unused today but retained on
+// the signature for the crew-shared credentials work tracked separately.
 func writeCredentialFiles(
 	ctx context.Context,
 	ctr provider.ContainerProvider,
@@ -359,9 +392,10 @@ func writeCredentialFiles(
 	creds []Credential,
 	secretsAgentDir string,
 	secretsSharedDir string,
+	keeperEnabled bool,
 	logger *slog.Logger,
 ) error {
-	script, fileCount, err := buildCredFileScript(creds, secretsAgentDir)
+	script, fileCount, err := buildCredFileScript(creds, secretsAgentDir, keeperEnabled)
 	if err != nil {
 		return fmt.Errorf("build credential script: %w", err)
 	}
