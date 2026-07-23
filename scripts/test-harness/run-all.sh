@@ -25,6 +25,10 @@ tests=(test-memory.sh test-delegation.sh test-notifications.sh test-orchestratio
 # Local-Ollama scenario is macOS-only and self-skips when Ollama isn't reachable,
 # so it's safe to always include; opt out with WITH_OLLAMA=0.
 [[ "${WITH_OLLAMA:-1}" == "1" ]] && tests+=(test-ollama-local.sh)
+# Orphaned-container reap (#1385) is a read-only dry-run sweep that self-skips
+# when the server's provider isn't docker (503), so it's safe to always include;
+# opt out with WITH_ORPHAN_REAP=0.
+[[ "${WITH_ORPHAN_REAP:-1}" == "1" ]] && tests+=(test-orphan-token-reap.sh)
 
 declare -a results=()
 overall=0

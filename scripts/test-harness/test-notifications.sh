@@ -97,4 +97,30 @@ else
   skip "failed_run inbox for manual run" "by design: failed_run inbox is scheduled-run-only; manual failures surface via exit code + records (asserted above)"
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "5. Webhook egress honors the crew allowlist / SSRF guard (#1367)"
+# ─────────────────────────────────────────────────────────────────────────────
+# The webhook delivery path now routes through the SSRF-safe transport + the
+# crew egress allowlist (internal/egresspolicy), the SAME dial the sidecar
+# proxy enforces for agent egress. A blocked or unreachable webhook must be
+# best-effort: it can NEVER fail the run that triggered it. That invariant is
+# the observable contract here — we point a channel at a deliberately
+# non-allowlisted, unreachable host and assert the routine run still COMPLETES.
+BLOCKED_URL="${BLOCKED_URL:-https://blocked.egress.invalid/hook}"
+if have jq && "$CREWSHIP" --server "$SERVER" notifychannel add \
+     --type webhook --url "$BLOCKED_URL" --events completed \
+     --format json >/tmp/cs-nch.json 2>/dev/null; then
+  NCH_ID="$(jq -r '.id // .channel.id // empty' /tmp/cs-nch.json 2>/dev/null)"
+  info "Created webhook channel $NCH_ID → $BLOCKED_URL (non-allowlisted/unreachable)"
+  if cs routine run "$ROUTINE" >/tmp/cs-run-egress.out 2>&1; then
+    _pass "routine run still COMPLETES despite a blocked/unreachable webhook (delivery is best-effort)"
+  else
+    _fail "run survives blocked webhook" "$(head -c 200 /tmp/cs-run-egress.out | tr '\n' ' ')"
+  fi
+  # Cleanup so repeated harness runs don't accrue dead channels.
+  [ -n "$NCH_ID" ] && "$CREWSHIP" --server "$SERVER" notifychannel rm "$NCH_ID" --yes >/dev/null 2>&1 || true
+else
+  skip "webhook egress allowlist probe" "notifychannel add unavailable or jq missing"
+fi
+
 finish

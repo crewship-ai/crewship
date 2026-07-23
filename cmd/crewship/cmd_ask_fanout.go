@@ -196,6 +196,7 @@ func fanoutOne(ctx context.Context, client *cli.Client, server, wsToken, agentID
 	}()
 
 	var text strings.Builder
+	var closeReason string
 	for {
 		msg, err := ws.ReadMessage()
 		if err != nil {
@@ -204,7 +205,15 @@ func fanoutOne(ctx context.Context, client *cli.Client, server, wsToken, agentID
 			if ctx.Err() != nil {
 				return text.String(), fmt.Errorf("cancelled: %w", ctx.Err())
 			}
+			// #1386: surface a server rejection reason instead of a bare EOF.
+			if closeReason != "" {
+				return text.String(), fmt.Errorf("server rejected the connection: %s", closeReason)
+			}
 			return text.String(), fmt.Errorf("read: %w", err)
+		}
+		if reason, ok := cli.CloseReason(msg); ok {
+			closeReason = reason
+			continue
 		}
 		event, err := cli.ParseChatEvent(msg)
 		if err != nil || event == nil {

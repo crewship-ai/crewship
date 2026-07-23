@@ -856,13 +856,20 @@ func (h *Hub) authenticateUpgradedConn(r *http.Request, conn *websocket.Conn) (u
 		timeout = wsAuthReadTimeout
 	}
 	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-		h.logger.Warn("ws set auth read deadline", "error", err)
+		h.rejectUpgrade(r, conn, "error", "connection setup failed", "stage", "set_read_deadline", "error", err)
 		return "", "", false
 	}
 
 	var raw []byte
 	if err := websocket.Message.Receive(conn, &raw); err != nil {
-		h.logger.Debug("ws auth read failed (no auth message within deadline)", "error", err)
+		// #1386: this is the prime silent-close path — the 101 succeeds, then
+		// the client never sends the auth frame (or a proxy/version-skew
+		// stalls it) and the read deadline fires. It used to log at Debug
+		// (invisible by default) and send no frame, so the CLI saw only
+		// "ws read: EOF". Now it WARNs and tells the client why.
+		h.rejectUpgrade(r, conn, "error",
+			fmt.Sprintf("no auth message received within %s (handshake timed out)", timeout),
+			"stage", "auth_read", "error", err)
 		return "", "", false
 	}
 
@@ -871,7 +878,7 @@ func (h *Hub) authenticateUpgradedConn(r *http.Request, conn *websocket.Conn) (u
 		Token string `json:"token"`
 	}
 	if err := json.Unmarshal(raw, &authMsg); err != nil || authMsg.Type != "auth" || authMsg.Token == "" {
-		h.sendWSAuthFrame(conn, "error", "invalid auth message")
+		h.rejectUpgrade(r, conn, "error", "invalid auth message (expected {\"type\":\"auth\",\"token\":...})", "stage", "auth_parse")
 		return "", "", false
 	}
 
@@ -880,8 +887,7 @@ func (h *Hub) authenticateUpgradedConn(r *http.Request, conn *websocket.Conn) (u
 	// that made revoke-on-WS optional.
 	claims, err := h.jwtValidator.ValidateWS(authMsg.Token)
 	if err != nil {
-		h.logger.Warn("ws auth failed", "error", err)
-		h.sendWSAuthFrame(conn, "error", "invalid token")
+		h.rejectUpgrade(r, conn, "error", "invalid or expired ws-token", "stage", "validate_token", "error", err)
 		return "", "", false
 	}
 	userID = claims.ID
@@ -894,24 +900,37 @@ func (h *Hub) authenticateUpgradedConn(r *http.Request, conn *websocket.Conn) (u
 		sess, sErr := h.sessions.Get(r.Context(), authSessionID)
 		if sErr != nil {
 			if errors.Is(sErr, sessions.ErrNotFound) {
-				h.sendWSAuthFrame(conn, "session_revoked", "session_revoked")
+				h.rejectUpgrade(r, conn, "session_revoked", "session_revoked", "stage", "session_lookup", "user_id", userID)
 				return "", "", false
 			}
-			h.logger.Error("ws session lookup", "error", sErr)
-			h.sendWSAuthFrame(conn, "error", "internal error")
+			h.rejectUpgrade(r, conn, "error", "internal error resolving session", "stage", "session_lookup", "user_id", userID, "error", sErr)
 			return "", "", false
 		}
 		if !sess.Active(time.Now()) {
-			h.sendWSAuthFrame(conn, "session_revoked", "session_revoked")
+			h.rejectUpgrade(r, conn, "session_revoked", "session_revoked", "stage", "session_inactive", "user_id", userID)
 			return "", "", false
 		}
 	}
 
 	if err := conn.SetReadDeadline(time.Time{}); err != nil {
-		h.logger.Warn("ws clear auth read deadline", "error", err)
+		h.rejectUpgrade(r, conn, "error", "connection setup failed", "stage", "clear_read_deadline", "user_id", userID, "error", err)
 		return "", "", false
 	}
 	return userID, authSessionID, true
+}
+
+// rejectUpgrade is the single exit for a WS connection that fails AFTER the
+// 101 upgrade (#1386). It does the two things every such path used to skip on
+// at least one branch: (1) a WARN log naming the reason + stage + remote addr
+// — the line that was missing when the socket closed "with no server log",
+// and (2) a best-effort client-visible frame carrying the reason, so the CLI
+// read loop can print it instead of a bare "ws read: EOF". frameType is
+// "session_revoked" for the session paths (the frontend keys on it) and
+// "error" otherwise. The caller still Close()s the connection.
+func (h *Hub) rejectUpgrade(r *http.Request, conn *websocket.Conn, frameType, reason string, extra ...any) {
+	kv := append([]any{"reason", reason, "remote_addr", r.RemoteAddr}, extra...)
+	h.logger.Warn("ws connection rejected after upgrade", kv...)
+	h.sendWSAuthFrame(conn, frameType, reason)
 }
 
 // sendWSAuthFrame best-effort writes a ServerMessage frame to a connection
@@ -922,11 +941,18 @@ func (h *Hub) authenticateUpgradedConn(r *http.Request, conn *websocket.Conn) (u
 // mid-session revocation identically. conn.Write (not
 // websocket.Message.Send with a []byte, which forces a binary frame) keeps
 // this a text frame, matching every other JSON frame this hub sends.
+//
+// The write is bounded by a short deadline: the connection isn't registered,
+// so it has no writePump enforcing defaultWriteWait, and a dead/slow reader
+// would otherwise wedge the rejected HandleUpgrade goroutine in Write until
+// the kernel TCP timeout (minutes). A best-effort reject frame must not
+// outlive its usefulness.
 func (h *Hub) sendWSAuthFrame(conn *websocket.Conn, typ, message string) {
 	data, err := json.Marshal(ServerMessage{Type: typ, Payload: map[string]string{"message": message}})
 	if err != nil {
 		return
 	}
+	_ = conn.SetWriteDeadline(time.Now().Add(defaultWriteWait))
 	_, _ = conn.Write(data)
 }
 

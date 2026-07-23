@@ -36,6 +36,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -69,14 +70,14 @@ func hasFileMountedCreds(creds []Credential, keeperEnabled bool) bool {
 		if c.EnvVarName == "" || c.PlainValue == "" {
 			continue
 		}
-		switch c.Type {
-		case "SECRET":
-			if !keeperEnabled {
-				return true
-			}
-		case "CLI_TOKEN", "GENERIC_SECRET", "USERPASS", "SSH_KEY", "CERTIFICATE":
-			return true
+		pol := credpolicy.For(c.Type)
+		if !pol.FileMounted() {
+			continue // not written to /secrets (proxy/env-only or unknown)
 		}
+		if pol.KeeperGated && keeperEnabled {
+			continue // withheld under Keeper — nothing written, nothing to clean
+		}
+		return true
 	}
 	return false
 }

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
@@ -125,11 +126,12 @@ func injectMCPCredentialEnvVars(req AgentRunRequest, env []string, keeperEnabled
 		if existing[cred.EnvVarName] {
 			continue
 		}
-		// #1362: fail-closed SECRET withholding under Keeper. A SECRET-typed
+		// #1362/#1364: fail-closed withholding under Keeper. A Keeper-gated
 		// credential referenced by an MCP config must not be written into the
 		// agent env when Keeper is on — that would leak it via
-		// /proc/self/environ and bypass the /keeper/request audit gate.
-		if keeperEnabled && cred.Type == "SECRET" {
+		// /proc/self/environ and bypass the /keeper/request audit gate. Gated
+		// set is table-driven (credpolicy), not a SECRET-only special case.
+		if keeperEnabled && credpolicy.IsKeeperGated(cred.Type) {
 			if logger != nil {
 				logger.Warn("SECRET referenced by MCP config withheld under Keeper; the MCP server will not receive it — route it via the Keeper API or use a non-SECRET credential type",
 					"env_var", cred.EnvVarName)
@@ -366,12 +368,14 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		}
 	}
 
-	// SECRET credentials: when Keeper is enabled, agents must request them via
-	// the Keeper API (/keeper/request), enforcing access control + audit trail.
-	// When Keeper is disabled, inject them directly as env vars (legacy mode).
+	// Keeper-gated credentials (SECRET today): when Keeper is enabled, agents
+	// must request them via the Keeper API (/keeper/request), enforcing access
+	// control + audit trail — so they are not injected here. When Keeper is
+	// disabled, inject them directly as env vars (legacy mode). Table-driven
+	// (credpolicy) rather than a SECRET-only special case.
 	if !keeperEnabled {
 		for _, cred := range req.Credentials {
-			if cred.Type == "SECRET" && cred.EnvVarName != "" && cred.PlainValue != "" {
+			if credpolicy.IsKeeperGated(cred.Type) && cred.EnvVarName != "" && cred.PlainValue != "" {
 				env = append(env, cred.EnvVarName+"="+cred.PlainValue)
 			}
 		}
@@ -616,16 +620,17 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 		})
 	}
 
-	// SECRET credentials: isolated behind the Keeper request/execute flow when
-	// Keeper is enabled, but injected to env as a legacy fallback when it is off.
-	// This is the one exposure an operator can close, so flag it actionable.
+	// Keeper-gated credentials (SECRET today): isolated behind the Keeper
+	// request/execute flow when Keeper is enabled, but injected to env as a
+	// legacy fallback when it is off. This is the one exposure an operator can
+	// close, so flag it actionable. Table-driven (credpolicy).
 	if !keeperEnabled {
 		for _, cred := range req.Credentials {
-			if cred.Type == "SECRET" && cred.EnvVarName != "" && cred.PlainValue != "" {
+			if credpolicy.IsKeeperGated(cred.Type) && cred.EnvVarName != "" && cred.PlainValue != "" {
 				out = append(out, CredentialEnvExposure{
 					EnvVarName: cred.EnvVarName,
-					Type:       "SECRET",
-					Reason:     "Keeper is disabled; enable it (set KEEPER_MODEL / KEEPER_OLLAMA_URL) to isolate SECRET credentials behind /keeper/request",
+					Type:       cred.Type,
+					Reason:     "Keeper is disabled; enable it (set KEEPER_MODEL / KEEPER_OLLAMA_URL) to isolate this credential behind /keeper/request",
 					Actionable: true,
 				})
 			}

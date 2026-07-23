@@ -705,7 +705,9 @@ func TestCovCfgBuildKeeperBlock(t *testing.T) {
 		t.Errorf("expected empty keeper block, got %q", got)
 	}
 
-	// SECRET creds → block lists them and the input value is redacted.
+	// SECRET creds → block lists them (read-only). The value withholding is now
+	// done explicitly by withholdKeeperSecretValues at the resolver chokepoint,
+	// not as a side effect of the prompt builder (#1364).
 	creds := []mcpCredEntry{
 		{Type: "SECRET", EnvVar: "API_KEY", Value: "should-be-wiped"},
 		{Type: "OAUTH2", EnvVar: "OTHER", Value: "keep"},
@@ -721,8 +723,9 @@ func TestCovCfgBuildKeeperBlock(t *testing.T) {
 			t.Errorf("keeper block missing %q", want)
 		}
 	}
+	withholdKeeperSecretValues(creds)
 	if creds[0].Value != "" {
-		t.Errorf("SECRET value should be wiped, got %q", creds[0].Value)
+		t.Errorf("SECRET value should be wiped by withholdKeeperSecretValues, got %q", creds[0].Value)
 	}
 	if creds[1].Value != "keep" {
 		t.Errorf("non-SECRET value should be untouched, got %q", creds[1].Value)
