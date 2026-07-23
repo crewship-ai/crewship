@@ -1,11 +1,12 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Globe, Shield } from "lucide-react"
+import { Globe, Shield, Package } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { PACKAGE_REGISTRY_DOMAINS, mergeDomains } from "./registry-presets"
 
 // Must match internal/sidecar/allowlist.go DefaultAllowedDomains
 const DEFAULT_DOMAINS = [
@@ -51,6 +52,11 @@ export function CrewNetworkPolicy({ networkMode, allowedDomains, canEdit, onSave
   // Compare parsed domain arrays instead of raw strings to avoid false dirty state
   const parsedDomains = isFree ? [] : domains.split(/[,\n]+/).map((d) => d.trim().toLowerCase()).filter(Boolean)
   const hasChanges = mode !== networkMode || JSON.stringify(parsedDomains) !== JSON.stringify(allowedDomains)
+
+  function addRegistryPreset() {
+    const current = domains.split(/[,\n]+/).map((d) => d.trim()).filter(Boolean)
+    setDomains(mergeDomains(current, PACKAGE_REGISTRY_DOMAINS).join(", "))
+  }
 
   async function handleSave() {
     setSaving(true)
@@ -133,17 +139,31 @@ export function CrewNetworkPolicy({ networkMode, allowedDomains, canEdit, onSave
             </div>
             {canEdit ? (
               <div className="space-y-1">
-                <Label htmlFor="allowed-domains" className="text-xs">Extra Allowed Domains</Label>
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="allowed-domains" className="text-xs">Extra Allowed Domains</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={addRegistryPreset}
+                  >
+                    <Package className="mr-1 h-3 w-3" />
+                    Allow package registries
+                  </Button>
+                </div>
                 <Textarea
                   id="allowed-domains"
                   value={domains}
                   onChange={(e) => setDomains(e.target.value)}
                   rows={2}
-                  placeholder="github.com, api.github.com, registry.npmjs.org"
+                  placeholder="github.com, *.github.com, registry.npmjs.org"
                   className="font-mono text-xs"
                 />
                 <p className="text-[11px] text-muted-foreground">
-                  Comma or newline-separated list of additional domains to allow.
+                  Comma or newline-separated. Use a <code className="font-mono">*.github.com</code> wildcard
+                  to allow every subdomain (the apex <code className="font-mono">github.com</code> stays separate).
+                  “Allow package registries” adds npm, pip, cargo, go, apt &amp; Docker Hub hosts.
                 </p>
               </div>
             ) : allowedDomains.length > 0 && (

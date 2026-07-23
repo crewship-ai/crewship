@@ -46,6 +46,17 @@ func normalizeDomain(raw string) string {
 	if !strings.Contains(s, ".") || strings.ContainsAny(s, " \t\n\r") {
 		return ""
 	}
+	// Wildcard subdomains (#1377): "*" is only valid as the leading label of a
+	// "*.example.com" entry. Anything after the leading "*." — and every other
+	// label — must be a plain hostname label, so "a.*.com", "*.foo*.com" and a
+	// bare "*." are rejected while "*.github.com" is preserved verbatim.
+	rest := s
+	if wild := strings.HasPrefix(s, "*."); wild {
+		rest = s[2:]
+	}
+	if rest == "" || strings.ContainsRune(rest, '*') {
+		return ""
+	}
 	return s
 }
 
