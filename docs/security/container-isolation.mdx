@@ -87,6 +87,34 @@ Containers are created with these security measures (`internal/provider/docker/d
 - **ExtraHosts:** `host.docker.internal:host-gateway` enables container-to-host communication
 - **Named volumes:** `crewship-home-{slug}-{crewID}` and `crewship-tools-{slug}-{crewID}` for persistent home and tools directories (namespaced by crew ID to prevent cross-tenant collisions)
 
+## Runtime Escape Hatches
+
+A crew's container can opt out of individual isolation layers through its
+`devcontainer_config`. These are the settings with the **largest blast radius**,
+so the crew settings UI (**Container image & features → Security** tab) now
+exposes them as labeled, validated controls with inline warnings instead of a
+raw JSON blob. Each control serializes to the exact top-level
+`devcontainer_config` key the runtime reads, and a raw-JSON "advanced" editor
+remains available for anything the structured UI does not model (it is preserved
+verbatim on save).
+
+| Control | JSON key | What it costs you |
+|---------|----------|-------------------|
+| **Privileged mode** | `privileged` | Nulls `no-new-privileges`, drops the read-only rootfs, grants ~all Linux capabilities and host device access. An agent can escape to the host. Admin-only in the UI, and refused on save unless the workspace has `allow_privileged_credentials` set. Prefer adding a single capability instead. |
+| **Added capabilities** | `capAdd` | Re-adds specific Linux capabilities on top of `--cap-drop=ALL`. Only `NET_BIND_SERVICE` is auto-allowed for community features; the rest (`SYS_ADMIN`, `NET_RAW`, `DAC_OVERRIDE`, …) are operator-only and flagged **high-risk** in the picker. |
+| **Extra mounts** | `mounts` | Bind/volume mounts into the container. The allowlist mirrors `internal/devcontainer/mount_validate.go`: only `/dev/fuse` and valid named volumes are permitted. The Docker socket (`/var/run/docker.sock`), `/var/lib/docker`, `/tmp` and arbitrary host paths are rejected — each is a container-escape primitive. A `ro` toggle marks a mount read-only. |
+| **Init process (PID 1)** | `init` | Runs a tiny init as PID 1 to reap zombie processes (docker `--init`). Low risk. |
+| **Container environment** | `containerEnv` | Extra env vars injected at start. `CREWSHIP_*` keys are reserved and ignored. |
+| **Start hook (init script)** | `postStartCommand` | Shell commands run on **every** container start as the agent user (UID 1001). Note the crew's `/crew` directory is an agent-writable host bind that **survives container removal** — a script auto-executed from there is a persistence surface, so treat everything it runs as code you wrote or audited. |
+
+<Warning>
+  A crew running **privileged** has essentially no container isolation left. The
+  Security tab surfaces an **"Isolation reduced"** badge on any such crew so the
+  posture is visible wherever the crew is configured. Reserve privileged mode for
+  crews you fully trust (e.g. Docker-in-Docker) and grant a single capability
+  where that is enough.
+</Warning>
+
 ## Network Policy
 
 Each crew can have a network access policy:
