@@ -236,7 +236,9 @@ type Orchestrator struct {
 	// 2026-06 security audit. The lighter git-diff path already had a cap
 	// (gitDiffSem, internal/server/routes_container.go); this is the
 	// ~15×-heavier run path's equivalent. Capacity is runSemCap, configurable
-	// via CREWSHIP_MAX_CONCURRENT_RUNS. The token is acquired AFTER the
+	// via cfg.orchestrator.max_concurrent_runs (WithMaxConcurrentRuns) or the
+	// CREWSHIP_MAX_CONCURRENT_RUNS env var, which takes precedence — see
+	// resolveRunSemCap. The token is acquired AFTER the
 	// `accepting` drain check (so a draining orchestrator rejects fast without
 	// consuming a slot) and with ctx-cancellation in the acquire (so a stopped
 	// or timed-out run never blocks forever on a full pool — no deadlock with
@@ -949,13 +951,21 @@ const skillInvocationSemCap = 64
 // protection against daemon saturation / host OOM (finding P1).
 const defaultRunSemCap = 8
 
-// resolveRunSemCap reads CREWSHIP_MAX_CONCURRENT_RUNS, falling back to
-// defaultRunSemCap when unset, non-numeric, or non-positive.
-func resolveRunSemCap() int {
+// resolveRunSemCap resolves the agent-run concurrency cap with precedence
+// env > config > built-in default: CREWSHIP_MAX_CONCURRENT_RUNS wins when
+// set to a valid positive integer; otherwise configDefault (typically
+// cfg.Orchestrator.MaxConcurrentRuns, threaded in via WithMaxConcurrentRuns)
+// wins when positive; otherwise defaultRunSemCap (8). configDefault==0 means
+// "no config value supplied" (e.g. New() called directly, as ~20 existing
+// call sites/tests do), so it never overrides the built-in default.
+func resolveRunSemCap(configDefault int) int {
 	if v := strings.TrimSpace(os.Getenv("CREWSHIP_MAX_CONCURRENT_RUNS")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n
 		}
+	}
+	if configDefault > 0 {
+		return configDefault
 	}
 	return defaultRunSemCap
 }
@@ -978,12 +988,41 @@ func (o *Orchestrator) acquireRunSlot(ctx context.Context) (func(), error) {
 	}
 }
 
+// Option customizes Orchestrator construction. The zero value (no options
+// passed) preserves New's original 3-argument behavior, so none of the
+// ~20 existing call sites (production and test) need to change.
+type Option func(*newOptions)
+
+type newOptions struct {
+	// maxConcurrentRunsDefault is the config-provided default for the
+	// agent-run concurrency cap (cfg.Orchestrator.MaxConcurrentRuns). Zero
+	// means "not supplied", in which case resolveRunSemCap falls back to
+	// defaultRunSemCap.
+	maxConcurrentRunsDefault int
+}
+
+// WithMaxConcurrentRuns threads the configured default for the agent-run
+// concurrency cap into New. It is still overridden by
+// CREWSHIP_MAX_CONCURRENT_RUNS when that env var is set to a valid positive
+// integer — see resolveRunSemCap for the full env > config > default
+// precedence.
+func WithMaxConcurrentRuns(n int) Option {
+	return func(o *newOptions) {
+		o.maxConcurrentRunsDefault = n
+	}
+}
+
 func New(
 	container provider.ContainerProvider,
 	state provider.StateProvider,
 	logger *slog.Logger,
+	opts ...Option,
 ) *Orchestrator {
-	runSemCap := resolveRunSemCap()
+	var o newOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	runSemCap := resolveRunSemCap(o.maxConcurrentRunsDefault)
 	return &Orchestrator{
 		container:          container,
 		state:              state,
