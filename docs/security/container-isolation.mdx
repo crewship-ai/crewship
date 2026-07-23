@@ -123,6 +123,8 @@ Each crew can have a network access policy:
 
 <Note>
   Unknown network modes default to **restricted** (fail closed). This prevents a typo in the configuration from accidentally allowing unrestricted access.
+
+  New crews are created `restricted` by default, and existing crews still on the legacy `free` default are backfilled to `restricted` on upgrade (migration v148). A crew that genuinely needs open egress can be re-opened to `free`, or granted the specific domains it needs.
 </Note>
 
 ### Domain Allowlist Implementation

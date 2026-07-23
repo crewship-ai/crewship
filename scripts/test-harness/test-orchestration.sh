@@ -136,4 +136,22 @@ else
   skip "cross-tier eval" "EVAL=0"
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "5. Crew network policy defaults to restricted (#1366)"
+# ─────────────────────────────────────────────────────────────────────────────
+# A crew created without --network-mode must come up 'restricted' (fail-closed
+# egress), and the v148 backfill tightens legacy 'free' rows to match. We
+# create a throwaway crew, assert `crew get` reports restricted, then clean up.
+NM_SLUG="harness-netmode-$$"
+if cs crew create --name "Harness NetMode $$" --slug "$NM_SLUG" >/tmp/cs-nm.out 2>&1; then
+  if cs crew get "$NM_SLUG" 2>/dev/null | grep -iq "network mode.*restricted"; then
+    _pass "new crew defaults to network_mode=restricted"
+  else
+    _fail "new crew network mode default" "expected restricted; got: $(cs crew get "$NM_SLUG" 2>/dev/null | grep -i 'network mode' | tr -s ' ')"
+  fi
+  cs crew delete "$NM_SLUG" --yes >/dev/null 2>&1 || true
+else
+  skip "crew network-mode default" "crew create unavailable: $(head -c 160 /tmp/cs-nm.out | tr '\n' ' ')"
+fi
+
 finish
