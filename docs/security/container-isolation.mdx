@@ -125,6 +125,20 @@ Each crew can have a network access policy:
   Unknown network modes default to **restricted** (fail closed). This prevents a typo in the configuration from accidentally allowing unrestricted access.
 </Note>
 
+### One allowlist, every egress path
+
+A crew's `network_mode` + `allowed_domains` is a **single security dial** enforced everywhere the platform makes an outbound request on that crew's behalf — not only through the agent container's sidecar proxy. All of these resolve the crew boundary from one shared source (`internal/egresspolicy`), so a `restricted` crew cannot exfiltrate through whichever path an author reaches for:
+
+| Egress path | SSRF guard | Crew allowlist |
+|---|---|---|
+| Agent sidecar proxy (in-container egress) | ✓ | ✓ |
+| Routine `http` steps | ✓ | ✓ |
+| **Notify / webhook channels** | ✓ | ✓ |
+| **MCP tool calls** | ✓ | ✓ |
+| **Hooks (`http` handler)** | ✓ | ✓ |
+
+For notify and hooks the boundary is keyed on the crew that **authored** the routine (or owns the hook); the block is applied **before any bytes leave** — a webhook to a non-allowlisted host is never sent, and an MCP server whose endpoint host is outside the allowlist is never connected. A `free` crew (the default) is unaffected: every path allows all hosts, exactly as before.
+
 ### Domain Allowlist Implementation
 
 The `DomainAllowlist` (`internal/sidecar/allowlist.go`) is a thread-safe set of allowed domain names:

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,6 +46,47 @@ type MCPGateway struct {
 	auditDone    chan struct{}   // closed when audit worker exits
 	shutdownCh   chan struct{}   // closed on shutdown to prevent send-to-closed-channel panic
 	closeOnce    sync.Once
+	// egressAllowlist / egressFreeMode carry the crew network policy the
+	// gateway enforces on every MCP server endpoint (#1367) — the SAME dial
+	// the sidecar proxy applies to agent container egress, so a restricted
+	// crew cannot reach a non-allowlisted host via an MCP tool call. Set once
+	// at startup via SetEgressAllowlist (before Connect/CallTool), then read
+	// without locking. nil allowlist = ungated (unit paths only); production
+	// always installs the crew allowlist.
+	egressAllowlist *DomainAllowlist
+	egressFreeMode  bool
+}
+
+// SetEgressAllowlist installs the crew network-policy allowlist the gateway
+// enforces on every MCP server endpoint (#1367). A nil allowlist leaves MCP
+// egress ungated (used only by unit tests that build a gateway directly);
+// NewServer always installs the crew allowlist. In free mode the check is
+// skipped (allow all). Call once at startup, before Connect.
+func (g *MCPGateway) SetEgressAllowlist(al *DomainAllowlist, freeMode bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.egressAllowlist = al
+	g.egressFreeMode = freeMode
+}
+
+// endpointAllowed reports whether an MCP server endpoint may be reached under
+// the installed crew network policy. Ungated (nil allowlist) or free mode →
+// allowed. Restricted → the endpoint host (port stripped, case-insensitive —
+// DomainAllowlist semantics) must be on the allowlist, exactly as the
+// container proxy enforces. The second return is the offending host (or a
+// reason) for the log/error. Reads set-once fields without locking.
+func (g *MCPGateway) endpointAllowed(endpoint string) (bool, string) {
+	if g.egressAllowlist == nil || g.egressFreeMode {
+		return true, ""
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" {
+		return false, "unparseable endpoint"
+	}
+	if !g.egressAllowlist.IsAllowed(u.Host) {
+		return false, u.Host
+	}
+	return true, ""
 }
 
 type auditEntry struct {
@@ -238,6 +280,17 @@ func (g *MCPGateway) Connect(ctx context.Context) error {
 
 	var lastErr error
 	for name, client := range g.clients {
+		// Crew egress allowlist (#1367): a restricted crew's MCP server whose
+		// endpoint host is not on the crew allowlist is never connected — the
+		// initialize JSON-RPC below (the first bytes to leave) is skipped, so
+		// nothing reaches a non-allowlisted host. The client stays unconnected,
+		// and CallTool/DiscoverTools skip it.
+		if ok, reason := g.endpointAllowed(client.endpoint); !ok {
+			g.logger.Warn("MCP server endpoint blocked by crew network policy, not connecting",
+				"name", name, "endpoint", client.endpoint, "blocked_host", reason)
+			lastErr = fmt.Errorf("MCP server %q endpoint blocked by crew network policy", name)
+			continue
+		}
 		if err := client.initialize(ctx); err != nil {
 			g.logger.Error("MCP server init failed", "name", name, "error", err)
 			lastErr = err
@@ -307,6 +360,13 @@ func (g *MCPGateway) CallTool(ctx context.Context, serverName, toolName string, 
 
 	if !ok {
 		return nil, fmt.Errorf("MCP server %q not found", serverName)
+	}
+	// Defense in depth: a blocked endpoint never connects (see Connect), so
+	// this normally short-circuits at the not-connected check below. The
+	// explicit crew-policy check gives a precise error and guards against a
+	// future path that connects without going through Connect.
+	if allowed, reason := g.endpointAllowed(client.endpoint); !allowed {
+		return nil, fmt.Errorf("MCP server %q endpoint host %q blocked by crew network policy", serverName, reason)
 	}
 	client.mu.Lock()
 	connected := client.sessionID != ""

@@ -344,6 +344,10 @@ func NewServer(cfg ServerConfig) *Server {
 	// Initialize MCP Gateway if servers are configured
 	if len(cfg.MCPServers) > 0 {
 		s.mcpGateway = NewMCPGateway(cfg.MCPServers, cfg.IPC, cfg.Logger)
+		// #1367: gate MCP egress on the SAME crew allowlist the proxy enforces
+		// for agent container egress, so a restricted crew cannot reach a
+		// non-allowlisted host through an MCP tool call.
+		s.mcpGateway.SetEgressAllowlist(allowlist, freeMode)
 		cfg.Logger.Info("MCP gateway initialized", "servers", len(cfg.MCPServers))
 	}
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/egresspolicy"
 )
 
 // ErrSSRFBlocked is returned when a hook URL resolves to an address the
@@ -142,7 +145,7 @@ func validateHookURL(raw string) error {
 // errors = Error. If handler_config.secret is set the body is signed with
 // HMAC-SHA256 and the hex digest shipped in X-Crewship-Signature so the
 // receiver can verify the request originated from this workspace.
-func httpHandler(ctx context.Context, h Hook, ec EventContext) (Result, error) {
+func httpHandler(ctx context.Context, db *sql.DB, h Hook, ec EventContext) (Result, error) {
 	start := time.Now()
 
 	rawURL, _ := h.HandlerConfig["url"].(string)
@@ -159,6 +162,21 @@ func httpHandler(ctx context.Context, h Hook, ec EventContext) (Result, error) {
 			Message: "url rejected: " + err.Error(),
 			Latency: time.Since(start),
 		}, err
+	}
+
+	// Crew egress allowlist (the same crews.network_mode/allowed_domains dial
+	// the agent-container sidecar proxy enforces): a hook authored under a
+	// restricted crew cannot POST to a host outside that crew's allowlist.
+	// Checked here, before any bytes leave — this is the allowlist layer on
+	// top of the SSRF dialer above, resolved from the one shared source.
+	if u, perr := url.Parse(rawURL); perr == nil {
+		if err := egresspolicy.Check(ctx, db, ec.CrewID, u.Host); err != nil {
+			return Result{
+				Outcome: OutcomeBlock,
+				Message: "crew egress policy: " + err.Error(),
+				Latency: time.Since(start),
+			}, err
+		}
 	}
 
 	body := map[string]any{
