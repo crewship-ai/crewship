@@ -82,3 +82,8 @@ c3a9bd20707c23f94fe80d40c54a4d961636a574:packaging/SIGNING.md:generic-api-key:8
 f8bbfe66789c1d410434fd40ae7e0d2d2f0e477a:internal/sidecar/proxy_health_hash_test.go:generic-api-key:51
 f8bbfe66789c1d410434fd40ae7e0d2d2f0e477a:internal/sidecar/proxy_health_hash_test.go:generic-api-key:61
 f8bbfe66789c1d410434fd40ae7e0d2d2f0e477a:internal/orchestrator/exec_sidecar_tokenfp_test.go:generic-api-key:24
+
+# PR #1401 (#1369) — journal hash-chain test derives the chain key from a FAKE
+# ENCRYPTION_KEY fixture (`test-encryption-key-…`). Not a real secret; line
+# carries //gitleaks:allow at HEAD, this covers the original commit in history.
+391253f1abf87bbfd1e8861729475be5d7c7327c:internal/journal/verify_test.go:generic-api-key:45
