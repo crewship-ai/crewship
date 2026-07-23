@@ -42,7 +42,7 @@ func plainChainHash(prevHash string, f ChainFields) string {
 func TestVerifyChain_KeyedRejectsRecomputedHash(t *testing.T) {
 	// A real, non-empty ENCRYPTION_KEY so the derived HMAC key is a genuine
 	// secret the simulated attacker does not know.
-	t.Setenv("ENCRYPTION_KEY", "test-encryption-key-0123456789abcdef")
+	t.Setenv("ENCRYPTION_KEY", "test-encryption-key-0123456789abcdef") //gitleaks:allow — fake test fixture key (HMAC chain-key derivation), not a real secret
 
 	db := openTestDB(t)
 	defer db.Close()
