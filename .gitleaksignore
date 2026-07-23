@@ -73,3 +73,12 @@
 # on the 40-hex-char entropy. HEAD reformats it in spaced GPG groups so it no
 # longer matches; this entry covers the original commit in branch history.
 c3a9bd20707c23f94fe80d40c54a4d961636a574:packaging/SIGNING.md:generic-api-key:8
+
+# PR #1387 (#1385) — token-fingerprint reap tests. `abc123def456` is a fake
+# 12-hex test fixture for a token FINGERPRINT — a one-way hash the sidecar
+# advertises on /health for orphan detection, not a secret. The lines carry
+# //gitleaks:allow at HEAD; these entries cover the original f8bbfe66 commit
+# that gitleaks still sees in a full-history scan.
+f8bbfe66789c1d410434fd40ae7e0d2d2f0e477a:internal/sidecar/proxy_health_hash_test.go:generic-api-key:51
+f8bbfe66789c1d410434fd40ae7e0d2d2f0e477a:internal/sidecar/proxy_health_hash_test.go:generic-api-key:61
+f8bbfe66789c1d410434fd40ae7e0d2d2f0e477a:internal/orchestrator/exec_sidecar_tokenfp_test.go:generic-api-key:24

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
@@ -259,6 +260,14 @@ func NewServer(cfg ServerConfig) *Server {
 	}
 	subscriptionPlan := os.Getenv("CREWSHIP_SUBSCRIPTION_PLAN")
 
+	// #1385: fingerprint the crew-bound IPC token so /health can advertise
+	// which master minted it. Empty when no IPC token is configured (crew-less
+	// or standalone sidecar), which the server reads as "nothing to compare".
+	var tokenFP string
+	if cfg.IPC != nil {
+		tokenFP = internaltoken.Fingerprint(cfg.IPC.Token)
+	}
+
 	proxy := NewProxy(ProxyConfig{
 		CredStore:         credStore,
 		Allowlist:         allowlist,
@@ -272,6 +281,7 @@ func NewServer(cfg ServerConfig) *Server {
 		SubscriptionPlan:  subscriptionPlan,
 		BuildHash:         selfExeHash(),
 		PolicyDomainsHash: policyDomainsHash,
+		TokenFP:           tokenFP,
 	})
 	s.proxy = proxy
 
