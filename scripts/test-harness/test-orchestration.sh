@@ -136,4 +136,24 @@ else
   skip "cross-tier eval" "EVAL=0"
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "5. Interactive WS path never fails with a bare 'ws read: EOF' (#1386)"
+# ─────────────────────────────────────────────────────────────────────────────
+# The interactive `ask`/`run` path runs over a WebSocket. When the server
+# refuses the connection after the 101 upgrade, the CLI must now print the
+# server's close REASON, never an opaque `ws read: EOF`. We run a trivial ask;
+# whether it succeeds or fails, assert the output never contains the bare EOF —
+# a failure must carry a reason ("server rejected the connection: …").
+ASK_AGENT="${ASK_AGENT:-robin}"
+ask_out="$(mktemp -t cs-ask.XXXXXX)"
+cs ask --agent "$ASK_AGENT" "reply with the single word OK" >"$ask_out" 2>&1; ask_rc=$?
+if (( ask_rc == 0 )); then
+  _pass "interactive 'ask' over WS completed"
+elif grep -qiE 'ws read: *EOF' "$ask_out" && ! grep -qi 'server rejected the connection' "$ask_out"; then
+  _fail "ask failure carries a reason" "opaque 'ws read: EOF' with no reason — #1386 regressed: $(tail -c 160 "$ask_out" | tr '\n' ' ')"
+else
+  skip "interactive ask over WS" "ask did not complete but failed with a reason (not a bare EOF): $(tail -c 160 "$ask_out" | tr '\n' ' ')"
+fi
+rm -f "$ask_out"
+
 finish

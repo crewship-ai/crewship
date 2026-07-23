@@ -150,6 +150,31 @@ func (c *WSClient) ReadMessage() (*WSMessage, error) {
 	return &msg, nil
 }
 
+// CloseReason returns a human-readable reason when msg is a server rejection
+// frame — type "error" or "session_revoked". The server (internal/ws/hub.go)
+// writes exactly one such frame just before it closes a connection it refuses
+// after the 101 upgrade (#1386). Because golang.org/x/net/websocket discards
+// WebSocket close codes/reasons on the client, this ordinary text frame is the
+// ONLY channel the reason can travel; the read loops capture it so a rejected
+// connection prints the reason instead of a bare "ws read: EOF".
+func CloseReason(msg *WSMessage) (string, bool) {
+	if msg == nil {
+		return "", false
+	}
+	if msg.Type != "error" && msg.Type != "session_revoked" {
+		return "", false
+	}
+	var p struct {
+		Message string `json:"message"`
+	}
+	_ = json.Unmarshal(msg.Payload, &p)
+	reason := p.Message
+	if reason == "" {
+		reason = msg.Type
+	}
+	return reason, true
+}
+
 // Close closes the WebSocket connection.
 func (c *WSClient) Close() error {
 	c.mu.Lock()
