@@ -23,6 +23,14 @@ const credReapInterval = 60 * time.Second
 // key's in-memory plaintext is retained. On ANY fetch/parse error it does
 // nothing (fail toward availability: a transient crewshipd blip must not nuke
 // working keys; the revoked key is simply reaped on the next good tick).
+//
+// #1373: the crew-scoped listing is also LEASE-gated on the server — a grant
+// whose agent_credentials.expires_at has lapsed is omitted from the response
+// exactly like a revoked one. So this same reaper is what evicts an expired
+// lease: a leased provider key delivered at boot (while its lease was valid) is
+// dropped from the in-memory store within one interval of its TTL lapsing, and
+// the container stops being served it. No extra client-side expiry logic is
+// needed — the source-of-truth query returns only non-expired ACTIVE creds.
 func (s *Server) reapRevokedCredentials(ctx context.Context) {
 	if s == nil || s.ipc == nil || s.ipc.BaseURL == "" || s.ipc.WorkspaceID == "" {
 		return
