@@ -149,7 +149,7 @@ ask_out="$(mktemp -t cs-ask.XXXXXX)"
 cs ask --agent "$ASK_AGENT" "reply with the single word OK" >"$ask_out" 2>&1; ask_rc=$?
 if (( ask_rc == 0 )); then
   _pass "interactive 'ask' over WS completed"
-elif grep -qiE 'ws read: *EOF' "$ask_out" && ! grep -qi 'server rejected the connection' "$ask_out"; then
+elif grep -qiE '(^|[^[:alnum:]_])read: *EOF' "$ask_out" && ! grep -qi 'server rejected the connection' "$ask_out"; then
   _fail "ask failure carries a reason" "opaque 'ws read: EOF' with no reason — #1386 regressed: $(tail -c 160 "$ask_out" | tr '\n' ' ')"
 else
   skip "interactive ask over WS" "ask did not complete but failed with a reason (not a bare EOF): $(tail -c 160 "$ask_out" | tr '\n' ' ')"

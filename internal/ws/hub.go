@@ -941,11 +941,18 @@ func (h *Hub) rejectUpgrade(r *http.Request, conn *websocket.Conn, frameType, re
 // mid-session revocation identically. conn.Write (not
 // websocket.Message.Send with a []byte, which forces a binary frame) keeps
 // this a text frame, matching every other JSON frame this hub sends.
+//
+// The write is bounded by a short deadline: the connection isn't registered,
+// so it has no writePump enforcing defaultWriteWait, and a dead/slow reader
+// would otherwise wedge the rejected HandleUpgrade goroutine in Write until
+// the kernel TCP timeout (minutes). A best-effort reject frame must not
+// outlive its usefulness.
 func (h *Hub) sendWSAuthFrame(conn *websocket.Conn, typ, message string) {
 	data, err := json.Marshal(ServerMessage{Type: typ, Payload: map[string]string{"message": message}})
 	if err != nil {
 		return
 	}
+	_ = conn.SetWriteDeadline(time.Now().Add(defaultWriteWait))
 	_, _ = conn.Write(data)
 }
 
