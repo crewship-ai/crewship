@@ -128,6 +128,82 @@ func TestCrewServicesInventory_NotFound(t *testing.T) {
 	}
 }
 
+// TestCrewServicesInventory_CrossWorkspace_404 is the IDOR guard: a crew
+// that exists but belongs to ANOTHER workspace must answer 404 — never
+// that workspace's services — and the container provider must never be
+// asked for the foreign crew's slug (so no foreign slug ever reaches the
+// shared docker daemon). This pins the `AND workspace_id = ?` scoping in
+// the crew-resolve query.
+func TestCrewServicesInventory_CrossWorkspace_404(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID) // the caller's workspace
+
+	// A SECOND, foreign workspace with its own crew.
+	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws-other', 'Other', 'other')`); err != nil {
+		t.Fatalf("insert other workspace: %v", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at)
+		VALUES (?, 'ws-other', 'Secret', 'secret', ?, ?)`, "crew-foreign", now, now); err != nil {
+		t.Fatalf("seed foreign crew: %v", err)
+	}
+
+	lister := newFakeServiceLister([]provider.CrewServiceStatus{
+		{Name: "postgres", Image: "postgres:16", State: "running"},
+	}, nil)
+	h := NewCrewHandler(db, newTestLogger())
+	h.SetContainer(lister)
+
+	// Caller is scoped to wsID but asks for the foreign crew's id.
+	req := withWorkspaceCtx(httptest.NewRequest("GET", "/x", nil), wsID)
+	req.SetPathValue("crewId", "crew-foreign")
+	w := httptest.NewRecorder()
+	h.Services(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace IDOR: expected 404, got %d body=%s", w.Code, w.Body.String())
+	}
+	if lister.lastSlug != "" {
+		t.Errorf("container provider was queried with foreign crew slug %q — must never reach the daemon", lister.lastSlug)
+	}
+}
+
+// TestCrewServicesInventory_DeletedCrew_404 pins the `deleted_at IS NULL`
+// clause: a soft-deleted crew must 404, not surface its (possibly still
+// lingering) sidecars.
+func TestCrewServicesInventory_DeletedCrew_404(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at, deleted_at)
+		VALUES (?, ?, 'Gone', 'gone', ?, ?, ?)`, "crew-del", wsID, now, now, now); err != nil {
+		t.Fatalf("seed deleted crew: %v", err)
+	}
+
+	lister := newFakeServiceLister([]provider.CrewServiceStatus{
+		{Name: "redis", Image: "redis:7", State: "running"},
+	}, nil)
+	h := NewCrewHandler(db, newTestLogger())
+	h.SetContainer(lister)
+
+	req := withWorkspaceCtx(httptest.NewRequest("GET", "/x", nil), wsID)
+	req.SetPathValue("crewId", "crew-del")
+	w := httptest.NewRecorder()
+	h.Services(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("deleted crew: expected 404, got %d body=%s", w.Code, w.Body.String())
+	}
+	if lister.lastSlug != "" {
+		t.Errorf("container provider queried for a deleted crew (slug %q)", lister.lastSlug)
+	}
+}
+
 // TestCrewServicesInventory_NoContainerProvider_EmptyList covers
 // --no-docker / unwired-provider builds: the endpoint answers 200 with
 // an empty list rather than erroring.

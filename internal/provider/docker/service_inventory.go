@@ -9,39 +9,43 @@ package docker
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/moby/moby/client"
 )
 
-// crewServiceNamePrefix returns "<namePrefix>-svc-<crewSlug>-" — the
-// name segment that identifies a container as one of the crew's
-// sidecars (mirrors sidecarContainerName). The trailing "-" is
-// load-bearing: it's stripped off each matching container's name to
-// recover the plain service name the manifest declared.
-func (p *Provider) crewServiceNamePrefix(crewSlug string) string {
-	return p.namePrefix() + "-svc-" + crewSlug + "-"
-}
-
-// matchCrewServiceName returns the service name (prefix stripped) if
-// any of the container's names carries the crew's sidecar prefix.
-func matchCrewServiceName(names []string, prefix string) (string, bool) {
-	for _, n := range names {
-		trimmed := strings.TrimPrefix(n, "/")
-		if strings.HasPrefix(trimmed, prefix) {
-			return strings.TrimPrefix(trimmed, prefix), true
-		}
+// matchCrewService reports whether a listed container is one of crewSlug's
+// sidecars and, if so, returns the manifest service name.
+//
+// It keys off the exact per-container labels every sidecar is stamped with
+// at create time (crewship.crew / crewship.kind / crewship.svc — see
+// sidecarContainerName's cfg.Labels), NOT the container name. This is the
+// same authoritative match StopCrewServices and RemoveCrewServices use.
+//
+// A name-prefix match ("<prefix>-svc-<slug>-") is UNSAFE here: crew slugs
+// are DNS-label-shaped and may contain hyphens, so crew "alpha"'s prefix
+// "crewship-svc-alpha-" also prefixes crew "alpha-foo"'s container
+// "crewship-svc-alpha-foo-redis". Since slugs are only workspace-unique
+// while the docker daemon is shared instance-wide, that boundary confusion
+// is a cross-tenant information disclosure. Exact-label match has no such
+// ambiguity: crewship.crew == "alpha" never equals "alpha-foo".
+func matchCrewService(labels map[string]string, crewSlug string) (string, bool) {
+	if labels["crewship.crew"] != crewSlug || labels["crewship.kind"] != "sidecar" {
+		return "", false
 	}
-	return "", false
+	svc := labels["crewship.svc"]
+	if svc == "" {
+		return "", false
+	}
+	return svc, true
 }
 
 // ListCrewServices enumerates a crew's live sidecar containers. Docker
-// has no server-side "name starts with" filter, so — like
+// has no server-side label filter wired here, so — like
 // FindCrewContainer and ensureSidecar before it — this lists ALL
 // containers (All: true, so stopped sidecars are included) and filters
-// by name prefix in Go. Read-only: never starts, stops, or removes
-// anything.
+// by the crewship.crew label in Go. Read-only: never starts, stops, or
+// removes anything.
 //
 // State comes from ContainerStatus (an inspect call) rather than the
 // list Summary's own State field, so a service row reports through the
@@ -53,7 +57,6 @@ func (p *Provider) ListCrewServices(ctx context.Context, crewSlug string) ([]pro
 	if crewSlug == "" {
 		return nil, fmt.Errorf("docker: ListCrewServices requires a crew slug")
 	}
-	prefix := p.crewServiceNamePrefix(crewSlug)
 
 	listResult, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
@@ -62,7 +65,7 @@ func (p *Provider) ListCrewServices(ctx context.Context, crewSlug string) ([]pro
 
 	out := []provider.CrewServiceStatus{}
 	for _, c := range listResult.Items {
-		name, matched := matchCrewServiceName(c.Names, prefix)
+		name, matched := matchCrewService(c.Labels, crewSlug)
 		if !matched {
 			continue
 		}
