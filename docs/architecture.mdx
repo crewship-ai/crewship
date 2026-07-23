@@ -174,7 +174,7 @@ New crews default to **restricted** with an empty allowlist (fail-safe defaults)
 
 **Externally-triggered runs are always confined:** a webhook-initiated run executes under `restricted` egress regardless of the crew's own mode (the payload comes from outside the trust boundary), while the crew's `allowed_domains` still apply.
 
-Default allowed domains (from `internal/sidecar/allowlist.go` — each entry exists for a specific CLI):
+Default allowed domains (from `internal/egressallow/allowlist.go`, re-exported by `internal/sidecar` — each entry exists for a specific CLI):
 
 - **Anthropic** — `api.anthropic.com` (Claude Code API key + OAuth), `console.anthropic.com` (OAuth refresh callback)
 - **OpenAI / Codex** — `api.openai.com` (API key), `auth.openai.com` (ChatGPT-subscription login), `chatgpt.com` (subscription routing)

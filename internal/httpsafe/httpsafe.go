@@ -183,6 +183,20 @@ func IsBlockedIPForEndpoint(ip net.IP, allowPrivate bool) bool {
 // for cases where http URLs are legitimate (admin-configured intranet
 // MCP servers).
 func ValidateURL(raw string, allowSchemes ...string) (*url.URL, error) {
+	return ValidateURLForEndpoint(raw, false, allowSchemes...)
+}
+
+// ValidateURLForEndpoint is ValidateURL with the two-tier private-network
+// opt-in wired into its literal-IP reject (IsBlockedIPForEndpoint): the hard
+// tier (link-local/IMDS/multicast/reserved) is refused ALWAYS, and the soft
+// tier (loopback/RFC1918/ULA) is refused only when allowPrivate is false.
+// allowPrivate=false is byte-for-byte identical to ValidateURL — every existing
+// caller keeps the strict posture. Callers that legitimately reach LAN/on-prem
+// endpoints (LAN webhooks, an on-prem MCP server, a routine http step under the
+// allowPrivateHTTP test hatch) pass true so a redirect to a loopback/RFC1918
+// literal is validated the same way its dialer will treat it, while cloud
+// metadata stays blocked regardless.
+func ValidateURLForEndpoint(raw string, allowPrivate bool, allowSchemes ...string) (*url.URL, error) {
 	if raw == "" {
 		return nil, fmt.Errorf("%w: empty", ErrInvalidURL)
 	}
@@ -213,7 +227,7 @@ func ValidateURL(raw string, allowSchemes ...string) (*url.URL, error) {
 	if strings.EqualFold(host, "localhost") {
 		return nil, fmt.Errorf("%w: localhost not allowed", ErrInvalidURL)
 	}
-	if ip := net.ParseIP(host); ip != nil && IsBlockedIP(ip) {
+	if ip := net.ParseIP(host); ip != nil && IsBlockedIPForEndpoint(ip, allowPrivate) {
 		return nil, fmt.Errorf("%w: literal private/internal IP %s not allowed", ErrInvalidURL, ip)
 	}
 	return u, nil
@@ -261,6 +275,49 @@ func SafeDialContext(timeout time.Duration) func(ctx context.Context, network, a
 func SafeTransport() *http.Transport {
 	return &http.Transport{
 		DialContext:           SafeDialContext(10 * time.Second),
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		IdleConnTimeout:       60 * time.Second,
+		MaxIdleConns:          16,
+	}
+}
+
+// SafeDialContextForEndpoint is SafeDialContext with the two-tier endpoint gate
+// (IsBlockedIPForEndpoint): the hard tier (link-local/IMDS/multicast/reserved)
+// is always blocked, and the soft tier (loopback/RFC1918/ULA) is reachable only
+// when allowPrivate is true. For callers that legitimately reach LAN/on-prem
+// endpoints — LAN webhooks, an on-prem MCP server — while still hard-blocking
+// cloud metadata. Re-resolves and dials the resolved IP so a DNS rebind can't
+// swap the destination after the check, on every hop.
+func SafeDialContextForEndpoint(timeout time.Duration, allowPrivate bool) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: timeout, KeepAlive: 30 * time.Second}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, fmt.Errorf("httpsafe: invalid address %q: %w", addr, err)
+		}
+		ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+		if err != nil {
+			return nil, fmt.Errorf("httpsafe: DNS resolution failed for %s: %w", host, err)
+		}
+		if len(ips) == 0 {
+			return nil, fmt.Errorf("httpsafe: no addresses for %s", host)
+		}
+		for _, ip := range ips {
+			if IsBlockedIPForEndpoint(ip.IP, allowPrivate) {
+				return nil, fmt.Errorf("%w: %s", ErrBlocked, ip.IP)
+			}
+		}
+		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+	}
+}
+
+// SafeTransportForEndpoint is SafeTransport with the allowPrivate opt-in wired
+// into its dialer (SafeDialContextForEndpoint). allowPrivate=false is identical
+// to SafeTransport's strict posture.
+func SafeTransportForEndpoint(allowPrivate bool) *http.Transport {
+	return &http.Transport{
+		DialContext:           SafeDialContextForEndpoint(10*time.Second, allowPrivate),
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 30 * time.Second,
 		IdleConnTimeout:       60 * time.Second,

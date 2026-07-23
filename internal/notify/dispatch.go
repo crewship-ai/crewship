@@ -3,19 +3,48 @@ package notify
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 	"unicode/utf8"
 
+	"github.com/crewship-ai/crewship/internal/egresspolicy"
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 	"github.com/crewship-ai/crewship/internal/webhook"
 )
+
+// webhookTransport is the http.RoundTripper used for all outbound webhook
+// deliveries. It defaults to an SSRF-safe transport whose DialContext
+// re-resolves the host at connect time and refuses any private / loopback /
+// link-local IP — the runtime defence against a channel URL that RESOLVES to
+// RFC1918 / 169.254.169.254 (cloud metadata IMDS) even if it looked public at
+// channel-create time (DNS-rebind / split-horizon SSRF). Before #1367 the
+// dispatcher used a bare http.Client with NO SSRF guard at all.
+//
+// It is a package var (not a const) so the test binary can swap in a
+// loopback-allowing transport — httptest servers bind 127.0.0.1, which
+// SafeTransport blocks. Production code never reassigns it; see TestMain in
+// this package for the test override.
+var webhookTransport http.RoundTripper = httpsafe.SafeTransport()
+
+// SetWebhookTransportForTesting swaps the webhook transport — normally the
+// SSRF-safe SafeTransport, which blocks loopback — so tests in OTHER packages
+// (e.g. the internal/api notify-channel handler test) can deliver to an
+// httptest server on 127.0.0.1. Returns a restore func. Production never calls
+// it; this package's own tests use the TestMain override instead.
+func SetWebhookTransportForTesting(rt http.RoundTripper) func() {
+	prev := webhookTransport
+	webhookTransport = rt
+	return func() { webhookTransport = prev }
+}
 
 // Event types. These mirror the run terminal states the dispatcher fires
 // on and become the "event" field of the webhook payload.
@@ -31,11 +60,19 @@ const outputPreviewCap = 1024
 
 // NotificationEvent is the terminal-run fact a Dispatcher fans out.
 type NotificationEvent struct {
-	Type          string // EventRunCompleted | EventRunFailed
-	WorkspaceID   string
-	RunID         string
-	RoutineSlug   string
-	Status        string
+	Type        string // EventRunCompleted | EventRunFailed
+	WorkspaceID string
+	RunID       string
+	RoutineSlug string
+	Status      string
+	// AuthorCrewID is the crew that authored the routine whose run fired
+	// this event. It keys the crew egress allowlist (#1367): a webhook
+	// delivery is gated on the SAME crews.network_mode/allowed_domains dial
+	// the sidecar proxy enforces for that crew's agents, so a restricted
+	// crew cannot exfiltrate through a notify channel a non-allowlisted host.
+	// Empty = no crew scope (e.g. a manual `notifychannel test` send) → the
+	// gate allows, the SSRF guard still applies.
+	AuthorCrewID  string
 	OutputPreview string // raw; scrubbed + capped by the dispatcher
 	TriggeredBy   string
 }
@@ -64,15 +101,17 @@ type Dispatcher struct {
 	lister      ChannelLister
 	mail        mailer.Mailer
 	scrub       *scrubber.Scrubber
-	client      *http.Client
+	db          *sql.DB // crew egress-policy source (#1367); nil = no crew gate
 	logger      *slog.Logger
 	maxAttempts int
 	baseBackoff time.Duration
 }
 
 // NewDispatcher wires a dispatcher. A nil mailer degrades e-mail delivery
-// to a logged no-op (webhook channels still work).
-func NewDispatcher(lister ChannelLister, mail mailer.Mailer, logger *slog.Logger) *Dispatcher {
+// to a logged no-op (webhook channels still work). db is the control-plane
+// handle the webhook path resolves the crew egress allowlist from (#1367);
+// pass nil only in unit paths with no crew policy to enforce.
+func NewDispatcher(lister ChannelLister, mail mailer.Mailer, logger *slog.Logger, db *sql.DB) *Dispatcher {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -83,11 +122,26 @@ func NewDispatcher(lister ChannelLister, mail mailer.Mailer, logger *slog.Logger
 		lister:      lister,
 		mail:        mail,
 		scrub:       scrubber.New(),
-		client:      &http.Client{Timeout: 15 * time.Second},
+		db:          db,
 		logger:      logger,
 		maxAttempts: 3,
 		baseBackoff: 200 * time.Millisecond,
 	}
+}
+
+// webhookClient builds the http.Client for one delivery via the shared gated
+// constructor: SSRF-safe transport + a CheckRedirect that re-validates EVERY
+// hop against both the SSRF guard and the crew allowlist — a permissive first
+// host cannot 3xx-bounce into a private IP or a host outside the crew's
+// allowed_domains. Using egresspolicy.Client (rather than hand-rolling the
+// CheckRedirect) is what keeps this path in lockstep with hooks / http-steps by
+// construction.
+func (d *Dispatcher) webhookClient(crewID string) *http.Client {
+	return egresspolicy.Client(egresspolicy.DBChecker(d.db, crewID), egresspolicy.Options{
+		Timeout:   15 * time.Second,
+		Schemes:   []string{"http", "https"},
+		Transport: webhookTransport,
+	})
 }
 
 // Dispatch fans an event out to every enabled channel in the workspace.
@@ -174,6 +228,21 @@ func (d *Dispatcher) deliverWebhook(ctx context.Context, ch Channel, ev Notifica
 	}
 	sig := "sha256=" + webhook.ComputeHMAC(body, ch.Secret)
 
+	// Crew egress allowlist (#1367): a restricted authoring crew cannot
+	// deliver to a host outside its allowed_domains. Checked once here,
+	// BEFORE the first request is built or sent — no bytes leave for a
+	// blocked destination — and re-checked per redirect hop by
+	// webhookClient's CheckRedirect. A policy block is permanent, so it
+	// short-circuits the retry loop rather than being retried.
+	host := ch.URL
+	if u, perr := url.Parse(ch.URL); perr == nil {
+		host = u.Host
+	}
+	if err := egresspolicy.Check(ctx, d.db, ev.AuthorCrewID, host); err != nil {
+		return fmt.Errorf("crew egress policy: %w", err)
+	}
+	client := d.webhookClient(ev.AuthorCrewID)
+
 	var lastErr error
 	for attempt := 0; attempt < d.maxAttempts; attempt++ {
 		if attempt > 0 {
@@ -190,7 +259,7 @@ func (d *Dispatcher) deliverWebhook(ctx context.Context, ch Channel, ev Notifica
 		req.Header.Set("X-Crewship-Signature", sig)
 		req.Header.Set("X-Crewship-Event", ev.Type)
 
-		resp, err := d.client.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			lastErr = err
 			continue // transport error — retry

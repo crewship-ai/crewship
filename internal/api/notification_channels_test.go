@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/mailer"
+	"github.com/crewship-ai/crewship/internal/notify"
 	"github.com/crewship-ai/crewship/internal/webhook"
 	_ "modernc.org/sqlite"
 )
@@ -125,6 +126,12 @@ func TestNotifyChannelHandler_Delete_ScopedAndSoftDeletes(t *testing.T) {
 }
 
 func TestNotifyChannelHandler_Test_DeliversSignedWebhook(t *testing.T) {
+	// The webhook path now uses the SSRF-safe transport, which blocks the
+	// loopback httptest receiver below. Swap it for the default transport so
+	// this handler test can assert real delivery; the SSRF guard itself is
+	// covered in internal/httpsafe and internal/notify.
+	defer notify.SetWebhookTransportForTesting(http.DefaultTransport)()
+
 	var (
 		mu      sync.Mutex
 		gotBody []byte
