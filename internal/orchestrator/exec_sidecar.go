@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
+	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -192,29 +193,23 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabl
 			return "", 0, fmt.Errorf("invalid credential env var name: %q", c.EnvVarName)
 		}
 
-		switch c.Type {
-		case "SECRET":
-			// SECRET is the one file-mounted type Keeper withholds: when
-			// Keeper is enabled the system prompt claims the agent does NOT
-			// have it in its environment (agent_config.go buildKeeperBlock),
-			// and the env-delivery path honours that (exec_env.go gates
-			// SECRET→env on !keeperEnabled). Writing the cleartext file
-			// unconditionally contradicted that prompt — the file path is
-			// gated here to mirror the env gate. Keeper OFF: unchanged, the
-			// value lands as a 0400 file exactly like CLI_TOKEN below.
-			if keeperEnabled {
-				continue
-			}
-			path := secretsAgentDir + "/" + c.EnvVarName
-			specs = append(specs, credFileSpec{
-				EnvVar: c.EnvVarName, Value: c.PlainValue, Path: path, Mode: "0400",
-			})
-			envLines = append(envLines, c.EnvVarName+"="+path)
+		// #1364: Keeper-gated types are withheld from ALL delivery when Keeper
+		// is on — the agent fetches them via /keeper/request. Applied here
+		// generically (credpolicy table) rather than as a SECRET-only special
+		// case, so a newly-gated type is covered without editing this switch.
+		// Defense-in-depth: the resolver already blanks these values, so in the
+		// normal flow PlainValue is "" and the empty-value guard above already
+		// skipped them; this is the belt to that resolver-side braces.
+		if keeperEnabled && credpolicy.IsKeeperGated(c.Type) {
+			continue
+		}
 
-		case "CLI_TOKEN", "GENERIC_SECRET":
-			// Not gated on Keeper: the prompt only withholds SECRET, and CLI
-			// tools (gh, glab, …) plus generic secrets are expected to read
-			// these from disk regardless of Keeper state.
+		switch c.Type {
+		case "SECRET", "CLI_TOKEN", "GENERIC_SECRET":
+			// Opaque secret material delivered as a single 0400 file (+ an env
+			// var pointing at the path). SECRET is the Keeper-gated one, already
+			// skipped above when Keeper is on; CLI tools (gh, glab, …) and
+			// generic secrets are read from disk regardless of Keeper state.
 			path := secretsAgentDir + "/" + c.EnvVarName
 			specs = append(specs, credFileSpec{
 				EnvVar: c.EnvVarName, Value: c.PlainValue, Path: path, Mode: "0400",
@@ -395,20 +390,6 @@ func writeCredentialFiles(
 	keeperEnabled bool,
 	logger *slog.Logger,
 ) error {
-	// #1364: withholding a SECRET from file delivery under Keeper must be
-	// observable, not silent. buildCredFileScript skips these with a bare
-	// `continue`; surface each one at WARN (env var name only, never the
-	// value) so the isolation gate leaves an audit trace — symmetric to the
-	// env path (AgentEnvCredentialExposures) and the MCP path (exec_env.go).
-	if keeperEnabled {
-		for _, c := range creds {
-			if c.Type == "SECRET" && c.EnvVarName != "" && c.PlainValue != "" {
-				logger.Warn("SECRET withheld from file delivery under Keeper — agent must obtain it via /keeper/request",
-					"agent_slug", agentSlug, "env_var", c.EnvVarName)
-			}
-		}
-	}
-
 	script, fileCount, err := buildCredFileScript(creds, secretsAgentDir, keeperEnabled)
 	if err != nil {
 		return fmt.Errorf("build credential script: %w", err)

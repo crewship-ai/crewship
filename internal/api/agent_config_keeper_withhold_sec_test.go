@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -86,6 +88,33 @@ func TestSecKeeper_SecretValueWithheldFromResponseWhenKeeperOn(t *testing.T) {
 	}
 	if val != "" {
 		t.Errorf("SECRET value must be blank under Keeper, got %q", val)
+	}
+}
+
+// #1364 R1: the withhold must be observable, and it must be logged where it
+// actually happens — the RESOLVER (a WARN in writeCredentialFiles would be dead
+// code, since the value is already blanked before the orchestrator sees it).
+func TestSecKeeper_ResolverLogsWithheldCredentialAtWarn(t *testing.T) {
+	h, wsID, _, agentID := covCfg2Rig(t)
+	h.SetKeeperEnabled(true)
+	var buf bytes.Buffer
+	h.logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	seedAgentSecret(t, h, wsID, agentID, "ProdKey", "PROD_KEY", "SECRET")
+
+	rr := covCfg2Resolve(t, h, agentID)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "PROD_KEY") {
+		t.Errorf("resolver must WARN naming the withheld credential's env var; got:\n%s", out)
+	}
+	if !strings.Contains(out, "level=WARN") {
+		t.Errorf("the withhold must be observable at WARN; got:\n%s", out)
+	}
+	if strings.Contains(out, withholdSecretPlaintext) {
+		t.Errorf("the withhold log must never contain the secret value; got:\n%s", out)
 	}
 }
 

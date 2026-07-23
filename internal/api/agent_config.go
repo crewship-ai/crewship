@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/composio"
+	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/policy"
@@ -270,14 +271,21 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		if keeperBlock != "" {
 			sysPrompt += "\n\n" + keeperBlock
 		}
-		// #1364: the resolver is the single chokepoint for SECRET isolation.
-		// buildKeeperBlock blanks SECRET values as a side effect of building
-		// the prompt; make that an EXPLICIT, independently-guaranteed invariant
-		// so a refactor of the prompt builder can't silently re-open the leak.
-		// With the plaintext withheld here, it never reaches the orchestrator
-		// process, so the env/file/MCP delivery gates become defense-in-depth.
-		// Idempotent when buildKeeperBlock already ran; SECRET-only by design
-		// (GENERIC_SECRET / CLI_TOKEN are still delivered — see credentials.mdx).
+		// #1364: the resolver is the single chokepoint for credential isolation
+		// under Keeper. Which types are gated is decided by the credpolicy table
+		// (not a scattered `== "SECRET"` special case), so a new credential type
+		// is governed by one row rather than by editing every delivery path.
+		//
+		// Log the withhold HERE — this is where it actually happens and where
+		// the plaintext still exists to name (env var only, never the value).
+		// The value is then blanked so it never leaves the API process, making
+		// the orchestrator env/file/MCP gates defense-in-depth.
+		for i := range creds {
+			if credpolicy.IsKeeperGated(creds[i].Type) && creds[i].Value != "" {
+				h.logger.Warn("credential withheld under Keeper — reachable only via /keeper/request",
+					"agent_slug", data.agentSlug, "env_var", creds[i].EnvVar, "type", creds[i].Type)
+			}
+		}
 		withholdKeeperSecretValues(creds)
 	}
 
@@ -1305,19 +1313,18 @@ func (h *InternalHandler) buildDefaultComposioEntry(r *http.Request, wsID, serve
 // Keeper — credential-access-control prompt block for SECRET-typed creds.
 // -----------------------------------------------------------------------------
 
-// withholdKeeperSecretValues blanks the decrypted plaintext of SECRET-typed
-// credentials in place so it is never serialized into the resolved agent config.
-// Under Keeper, SECRET values are reachable only through /keeper/request; the
-// env, file and MCP orchestrator delivery paths all gate on Keeper too, but
-// withholding here — at the single resolver chokepoint — keeps the plaintext
-// from ever leaving the API process, which is what makes those gates
-// defense-in-depth rather than the sole line. SECRET-only by design:
-// GENERIC_SECRET and CLI_TOKEN are intentionally still delivered (see
-// docs/guides/credentials.mdx and buildKeeperBlock). Caller must gate on
-// h.keeperEnabled.Load().
+// withholdKeeperSecretValues blanks the decrypted plaintext of every
+// Keeper-gated credential type (per the credpolicy table) in place, so it is
+// never serialized into the resolved agent config. Under Keeper, gated values
+// are reachable only through /keeper/request; withholding here — at the single
+// resolver chokepoint — keeps the plaintext from ever leaving the API process,
+// which is what makes the orchestrator env/file/MCP gates defense-in-depth
+// rather than the sole line. Which types are gated is table-driven (SECRET
+// today; GENERIC_SECRET / CLI_TOKEN and the vault types are explicitly NOT
+// gated — see internal/credpolicy). Caller must gate on h.keeperEnabled.Load().
 func withholdKeeperSecretValues(creds []mcpCredEntry) {
 	for i := range creds {
-		if creds[i].Type == "SECRET" {
+		if credpolicy.IsKeeperGated(creds[i].Type) {
 			creds[i].Value = ""
 		}
 	}
@@ -1327,11 +1334,15 @@ func withholdKeeperSecretValues(creds []mcpCredEntry) {
 // for agents with Keeper-guarded SECRET credentials. Returns empty string if no
 // SECRET credentials exist.
 func (h *InternalHandler) buildKeeperBlock(agentSlug string, creds []mcpCredEntry) string {
+	// Read-only: list the Keeper-gated credential names for the prompt. The
+	// actual value withholding is done once, explicitly, by
+	// withholdKeeperSecretValues at the resolver chokepoint — not as a side
+	// effect here — so the invariant is testable and can't be lost in a refactor
+	// of this prompt builder. Gated set is table-driven (internal/credpolicy).
 	var secretCreds []string
 	for i := range creds {
-		if creds[i].Type == "SECRET" {
+		if credpolicy.IsKeeperGated(creds[i].Type) {
 			secretCreds = append(secretCreds, creds[i].EnvVar)
-			creds[i].Value = ""
 		}
 	}
 	if len(secretCreds) == 0 {
