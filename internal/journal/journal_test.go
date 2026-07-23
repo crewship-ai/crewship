@@ -43,6 +43,14 @@ CREATE TABLE journal_entries (
 );
 CREATE INDEX idx_journal_ws_ts ON journal_entries(workspace_id, ts DESC);
 CREATE UNIQUE INDEX idx_journal_ws_seq ON journal_entries(workspace_id, seq) WHERE seq > 0;
+
+CREATE TABLE journal_chain_checkpoints (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    removed_json TEXT NOT NULL,
+    mac TEXT NOT NULL
+);
 `
 
 func openTestDB(t *testing.T) *sql.DB {

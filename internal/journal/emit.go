@@ -58,6 +58,12 @@ type Writer struct {
 	// reject — dropping an audit entry. One writer at a time keeps the
 	// chain append well-defined without relying on SQLite lock timing.
 	writeMu sync.Mutex
+
+	// chainKey is the HMAC key for the tamper-evident hash-chain. It is
+	// derived once from the persisted ENCRYPTION_KEY (never stored in the DB)
+	// so a DB-write attacker cannot forge entry_hash values. Verify + the
+	// migration backfill derive the same key from the same seed.
+	chainKey []byte
 }
 
 // DB exposes the underlying *sql.DB for callers that need to run a
@@ -95,6 +101,11 @@ type WriterOptions struct {
 	QueueSize     int           // buffered channel capacity (default 1024)
 	FlushSize     int           // write when this many pending (default 64)
 	FlushInterval time.Duration // write at least this often (default 100ms)
+	// ChainKey overrides the HMAC key for the hash-chain. Nil (the
+	// production default) derives it from the process ENCRYPTION_KEY via
+	// ChainKeyFromEnv, matching the verify path and the migration backfill.
+	// Set explicitly only in tests that need a known key.
+	ChainKey []byte
 }
 
 // NewWriter builds a Writer bound to db. Callers MUST call Close before
@@ -112,6 +123,10 @@ func NewWriter(db *sql.DB, logger *slog.Logger, opts WriterOptions) *Writer {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	chainKey := opts.ChainKey
+	if chainKey == nil {
+		chainKey = ChainKeyFromEnv()
+	}
 	w := &Writer{
 		db:       db,
 		logger:   logger,
@@ -119,6 +134,7 @@ func NewWriter(db *sql.DB, logger *slog.Logger, opts WriterOptions) *Writer {
 		flushN:   opts.FlushSize,
 		flushDur: opts.FlushInterval,
 		closed:   make(chan struct{}),
+		chainKey: chainKey,
 	}
 	w.wg.Add(1)
 	go w.run()
@@ -488,7 +504,7 @@ func (w *Writer) persistBatch(ctx context.Context, batch []Entry) error {
 
 			seq := head.seq + 1
 			prevHash := head.prevHash
-			entryHash := ChainHash(prevHash, ChainFields{
+			entryHash := ChainHashKeyed(w.chainKey, prevHash, ChainFields{
 				Seq:       seq,
 				ID:        e.ID,
 				Workspace: e.WorkspaceID,

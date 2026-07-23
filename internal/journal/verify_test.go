@@ -2,9 +2,108 @@ package journal
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"testing"
 	"time"
 )
+
+// plainChainHash reproduces the UNKEYED sha256 an attacker (or the pre-fix
+// code) would compute over an entry's public columns, using the exact same
+// length-framing as the real chain hash. It exists only so the keying test can
+// simulate a DB-write attacker who recomputes hash columns without the HMAC
+// key — the whole point of the fix is that this recomputation no longer
+// validates.
+func plainChainHash(prevHash string, f ChainFields) string {
+	h := sha256.New()
+	var seqb [8]byte
+	binary.BigEndian.PutUint64(seqb[:], uint64(f.Seq))
+	h.Write(seqb[:])
+	for _, field := range []string{
+		prevHash, f.ID, f.Workspace, f.CrewID, f.AgentID, f.MissionID,
+		f.TS, f.EntryType, f.Severity, f.Priority, f.ActorType, f.ActorID,
+		f.Summary, f.Payload, f.Refs, f.TraceID, f.SpanID, f.ExpiresAt,
+	} {
+		var n [8]byte
+		binary.BigEndian.PutUint64(n[:], uint64(len(field)))
+		h.Write(n[:])
+		h.Write([]byte(field))
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// TestVerifyChain_KeyedRejectsRecomputedHash proves the chain is KEYED: a
+// DB-write attacker who mutates a row and recomputes every downstream
+// entry_hash/prev_hash with a bare sha256 (which they can compute, unlike the
+// HMAC) still fails verification. Before the fix (plain sha256 chain) this
+// exact recomputation VALIDATED — an undetectable rewrite. It must now be
+// caught because the verifier keys the hash with a secret the attacker lacks.
+func TestVerifyChain_KeyedRejectsRecomputedHash(t *testing.T) {
+	// A real, non-empty ENCRYPTION_KEY so the derived HMAC key is a genuine
+	// secret the simulated attacker does not know.
+	t.Setenv("ENCRYPTION_KEY", "test-encryption-key-0123456789abcdef")
+
+	db := openTestDB(t)
+	defer db.Close()
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushInterval: time.Hour})
+	defer w.Close()
+
+	ids := seedChain(t, w, "ws_test", 5)
+
+	// Sanity: the honestly-emitted chain verifies clean under the keyed hash.
+	if res, err := VerifyChain(context.Background(), db, "ws_test"); err != nil || !res.OK {
+		t.Fatalf("baseline chain should verify; err=%v res=%+v", err, res)
+	}
+
+	// Attacker rewrites entry 3 and re-links entries 3..5 with a bare sha256,
+	// exactly the recompute the review describes. Walk the tail in seq order,
+	// carrying prevHash forward so the *plain* chain is internally consistent
+	// (isolating the key as the sole reason verification fails).
+	prev := ""
+	// prev must start as the (untouched) entry_hash of seq 2.
+	if err := db.QueryRow(`SELECT entry_hash FROM journal_entries WHERE id = ?`, ids[1]).Scan(&prev); err != nil {
+		t.Fatalf("read seq2 hash: %v", err)
+	}
+	for i := 2; i < 5; i++ {
+		var f ChainFields
+		if err := db.QueryRow(`
+			SELECT seq, id, workspace_id, COALESCE(crew_id,''), COALESCE(agent_id,''),
+			       COALESCE(mission_id,''), ts, entry_type, severity,
+			       COALESCE(priority,'normal'), actor_type, COALESCE(actor_id,''),
+			       summary, payload, refs, COALESCE(trace_id,''), COALESCE(span_id,''),
+			       COALESCE(expires_at,'')
+			FROM journal_entries WHERE id = ?`, ids[i]).Scan(
+			&f.Seq, &f.ID, &f.Workspace, &f.CrewID, &f.AgentID, &f.MissionID,
+			&f.TS, &f.EntryType, &f.Severity, &f.Priority, &f.ActorType, &f.ActorID,
+			&f.Summary, &f.Payload, &f.Refs, &f.TraceID, &f.SpanID, &f.ExpiresAt,
+		); err != nil {
+			t.Fatalf("read row %d: %v", i, err)
+		}
+		if i == 2 {
+			f.Summary = "TAMPERED-BY-ATTACKER" // the actual forgery
+		}
+		newHash := plainChainHash(prev, f)
+		if _, err := db.Exec(
+			`UPDATE journal_entries SET summary = ?, prev_hash = ?, entry_hash = ? WHERE id = ?`,
+			f.Summary, prev, newHash, f.ID); err != nil {
+			t.Fatalf("attacker rewrite row %d: %v", i, err)
+		}
+		prev = newHash
+	}
+
+	res, err := VerifyChain(context.Background(), db, "ws_test")
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if res.OK {
+		t.Fatalf("KEYING BROKEN: attacker's plain-sha256 rewrite validated — the chain is not actually keyed")
+	}
+	if res.BrokenID != ids[2] {
+		t.Fatalf("want break at the forged row %s, got %s (seq=%d, reason=%q)",
+			ids[2], res.BrokenID, res.BrokenSeq, res.Reason)
+	}
+}
 
 // seedChain emits n well-formed entries into ws via a real Writer and
 // flushes, so the hash-chain columns are populated by the production

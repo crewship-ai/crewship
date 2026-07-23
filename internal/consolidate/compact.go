@@ -28,6 +28,21 @@ type Compactor struct {
 	Journal journal.Emitter
 	Logger  *slog.Logger
 	Now     func() time.Time
+	// ChainKey is the HMAC key used to SIGN compaction checkpoints so a
+	// legitimate mid-chain delete does not read as tampering. Nil (the
+	// production default) derives it from ENCRYPTION_KEY via
+	// journal.ChainKeyFromEnv, matching the emit + verify paths. Set
+	// explicitly only in tests that need a known key.
+	ChainKey []byte
+}
+
+// chainKey resolves the checkpoint-signing key, defaulting to the
+// env-derived key that the emit path and VerifyChain use.
+func (c *Compactor) chainKey() []byte {
+	if c.ChainKey != nil {
+		return c.ChainKey
+	}
+	return journal.ChainKeyFromEnv()
 }
 
 // compactableTypes is the allowlist of entry types the compactor will
@@ -338,6 +353,11 @@ func (c *Compactor) deleteBucket(ctx context.Context, workspaceID string, ids []
 	var (
 		totalDeleted int64
 		bytesFreed   int64
+		// removed accumulates the (seq, entry_hash) of every chained row this
+		// delete removes, so we can commit a signed checkpoint covering the
+		// resulting gap in the SAME transaction (crash-atomic: a gap can never
+		// exist without its checkpoint).
+		removed []journal.RemovedEntry
 	)
 	for start := 0; start < len(ids); start += chunk {
 		end := start + chunk
@@ -367,6 +387,33 @@ func (c *Compactor) deleteBucket(ctx context.Context, workspaceID string, ids []
 		}
 		bytesFreed += bsum.Int64
 
+		// Capture the chain identity of each row before it is deleted so the
+		// checkpoint can attest exactly what left the chain.
+		hashRows, err := tx.QueryContext(ctx,
+			`SELECT seq, COALESCE(entry_hash,'') FROM journal_entries
+			   WHERE workspace_id = ? AND id IN (`+placeholders+`)`,
+			sizeArgs...)
+		if err != nil {
+			_ = tx.Rollback()
+			return 0, 0, fmt.Errorf("read chunk chain ids: %w", err)
+		}
+		for hashRows.Next() {
+			var seq int64
+			var h string
+			if err := hashRows.Scan(&seq, &h); err != nil {
+				hashRows.Close()
+				_ = tx.Rollback()
+				return 0, 0, fmt.Errorf("scan chunk chain id: %w", err)
+			}
+			removed = append(removed, journal.RemovedEntry{Seq: seq, Hash: h})
+		}
+		if err := hashRows.Err(); err != nil {
+			hashRows.Close()
+			_ = tx.Rollback()
+			return 0, 0, fmt.Errorf("iterate chunk chain ids: %w", err)
+		}
+		hashRows.Close()
+
 		res, err := tx.ExecContext(ctx,
 			`DELETE FROM journal_entries WHERE workspace_id = ? AND id IN (`+placeholders+`)`,
 			sizeArgs...)
@@ -377,6 +424,14 @@ func (c *Compactor) deleteBucket(ctx context.Context, workspaceID string, ids []
 		n, _ := res.RowsAffected()
 		totalDeleted += n
 	}
+
+	// Sign a checkpoint over the removed chained rows (WriteChainCheckpoint
+	// filters seq 0 legacy rows and no-ops when nothing chained was removed).
+	if err := journal.WriteChainCheckpoint(ctx, tx, c.chainKey(), workspaceID, removed); err != nil {
+		_ = tx.Rollback()
+		return 0, 0, fmt.Errorf("checkpoint: %w", err)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return 0, 0, fmt.Errorf("commit: %w", err)
 	}

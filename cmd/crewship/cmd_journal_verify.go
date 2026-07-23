@@ -48,6 +48,7 @@ Examples:
 			WorkspaceID string `json:"workspace_id"`
 			OK          bool   `json:"ok"`
 			Count       int    `json:"count"`
+			Checkpoints int    `json:"checkpoints"`
 			BrokenSeq   int64  `json:"broken_seq"`
 			BrokenID    string `json:"broken_id"`
 			Reason      string `json:"reason"`
@@ -59,7 +60,10 @@ Examples:
 		f := newFormatter()
 		if err := f.AutoHuman(res, func() {
 			if res.OK {
-				fmt.Printf("Journal chain OK — %d entries verified, no tampering detected.\n", res.Count)
+				fmt.Printf("Journal chain OK — %d entries verified against the keyed HMAC chain, no tampering detected.\n", res.Count)
+				if res.Checkpoints > 0 {
+					fmt.Printf("%d signed compaction checkpoint(s) bridged legitimately-deleted ranges.\n", res.Checkpoints)
+				}
 				return
 			}
 			fmt.Printf("Journal chain BROKEN at seq %d (entry %s): %s\n", res.BrokenSeq, res.BrokenID, res.Reason)

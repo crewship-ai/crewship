@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // Sentinel errors returned by Store. Wrap with %w if you need to add
@@ -47,6 +49,53 @@ type Store struct {
 // must already be open and migrated to v78 or later.
 func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
+}
+
+// purgeJournalForPipeline deletes every journal entry carrying the given
+// pipeline_id and, in the SAME transaction, writes a signed chain checkpoint
+// per workspace committing to the removed (seq, entry_hash). Without the
+// checkpoint the mid-chain deletion would surface as tampering in
+// journal.VerifyChain. The signing key is derived from ENCRYPTION_KEY, the same
+// key the emit + verify paths use, so an attacker with DB write cannot forge a
+// checkpoint to hide their own deletions.
+func purgeJournalForPipeline(ctx context.Context, tx *sql.Tx, pipelineID string) error {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT workspace_id, seq, COALESCE(entry_hash,'')
+		   FROM journal_entries WHERE json_extract(payload, '$.pipeline_id') = ?`,
+		pipelineID)
+	if err != nil {
+		return fmt.Errorf("pipeline: read stale journal on resurrect: %w", err)
+	}
+	perWS := map[string][]journal.RemovedEntry{}
+	for rows.Next() {
+		var ws, hash string
+		var seq int64
+		if err := rows.Scan(&ws, &seq, &hash); err != nil {
+			rows.Close()
+			return fmt.Errorf("pipeline: scan stale journal row: %w", err)
+		}
+		perWS[ws] = append(perWS[ws], journal.RemovedEntry{Seq: seq, Hash: hash})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("pipeline: iterate stale journal: %w", err)
+	}
+	rows.Close()
+
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM journal_entries WHERE json_extract(payload, '$.pipeline_id') = ?`,
+		pipelineID,
+	); err != nil {
+		return fmt.Errorf("pipeline: purge stale journal on resurrect: %w", err)
+	}
+
+	key := journal.ChainKeyFromEnv()
+	for ws, removed := range perWS {
+		if err := journal.WriteChainCheckpoint(ctx, tx, key, ws, removed); err != nil {
+			return fmt.Errorf("pipeline: checkpoint stale journal purge: %w", err)
+		}
+	}
+	return nil
 }
 
 // Save persists a new pipeline OR upserts an existing one (matched by
@@ -180,11 +229,11 @@ WHERE id = ?`,
 		}
 
 		if wasDeleted {
-			if _, err := tx.ExecContext(ctx,
-				`DELETE FROM journal_entries WHERE json_extract(payload, '$.pipeline_id') = ?`,
-				existingID,
-			); err != nil {
-				return nil, fmt.Errorf("pipeline: purge stale journal on resurrect: %w", err)
+			// This purge deletes mid-chain journal rows, so it must sign a
+			// checkpoint covering them (per workspace) or the resulting seq gap
+			// would later read as tampering in VerifyChain.
+			if err := purgeJournalForPipeline(ctx, tx, existingID); err != nil {
+				return nil, err
 			}
 		}
 
