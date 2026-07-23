@@ -255,6 +255,27 @@ type AutoCredential struct {
 	// (e.g. mariadb) want MARIADB_ROOT_PASSWORD. Empty = use Name.
 	InjectAsEnv string `yaml:"inject_as_env,omitempty" json:"inject_as_env,omitempty"`
 
+	// InjectAsCommand, when non-empty, is a command-argument template
+	// the generated value is spliced into and written to the sidecar's
+	// Command (the docker-run argv) instead of the sidecar env. It
+	// exists for images that read their auth secret from a CLI flag
+	// rather than an env var: the official redis image ignores an env
+	// password and needs `redis-server --requirepass <value>`.
+	//
+	// Each element is copied verbatim except the placeholder token
+	// "{{value}}" (autoCredentialValuePlaceholder), which is replaced
+	// by the generated (or reused) secret. When set, the sidecar
+	// receives the value ONLY via Command — the env literal is skipped
+	// — but the agent env_refs path (InjectToAgents) is unchanged, so
+	// agents still get the credential under Name to authenticate.
+	//
+	// Precedence: command injection only fires when the operator left
+	// Service.Command empty. An operator-supplied Command means the
+	// operator manages the secret themselves, so generation, the
+	// credential row, and the agent env_ref append are all skipped —
+	// mirroring the operator-pinned-env rule for the env channel.
+	InjectAsCommand []string `yaml:"inject_as_command,omitempty" json:"inject_as_command,omitempty"`
+
 	// InjectToAgents controls whether crew agents pick the
 	// credential up automatically. Nil pointer = true; set false
 	// when the sidecar uses the secret internally but no agent

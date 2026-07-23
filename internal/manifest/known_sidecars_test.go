@@ -3,6 +3,7 @@ package manifest
 import (
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -52,8 +53,8 @@ func TestLookupSidecarDefaults_KnownImages(t *testing.T) {
 		{"mongo:7", true, "MONGO_INITDB_ROOT_PASSWORD"},
 		{"rabbitmq:3-management", true, "RABBITMQ_DEFAULT_PASS"},
 		{"elasticsearch:8.13.0", true, "ELASTIC_PASSWORD"},
-		// Negative: redis has no auto-cred (auth not on by default).
-		{"redis:7-alpine", false, ""},
+		// Redis is now always auth-protected via an auto-credential.
+		{"redis:7-alpine", true, "REDIS_PASSWORD"},
 		// Negative: unknown image.
 		{"nginx:latest", false, ""},
 		// Negative: empty.
@@ -92,6 +93,33 @@ func TestService_ResolveAutoCredentials_SugarOnly(t *testing.T) {
 	got := s.ResolveAutoCredentials()
 	if len(got) != 1 || got[0].Name != "POSTGRES_PASSWORD" {
 		t.Fatalf("sugar-only postgres: want [POSTGRES_PASSWORD], got %+v", got)
+	}
+}
+
+func TestService_ResolveAutoCredentials_RedisSugar(t *testing.T) {
+	// Redis resolves an always-on auto-credential from the catalog.
+	// Unlike the DB images it does not read the password from an env
+	// var, so the catalog entry declares a command-arg injection
+	// template (--requirepass <value>) rather than relying on env.
+	s := &Service{Name: "redis", Image: "redis:7-alpine"}
+	got := s.ResolveAutoCredentials()
+	if len(got) != 1 || got[0].Name != "REDIS_PASSWORD" {
+		t.Fatalf("redis sugar: want [REDIS_PASSWORD], got %+v", got)
+	}
+	if len(got[0].InjectAsCommand) == 0 {
+		t.Fatalf("redis auto-cred must declare a command-arg injection template, got %+v", got[0])
+	}
+	if got[0].Description == "" {
+		t.Errorf("redis auto-cred missing Description (UI surfaces it on hover)")
+	}
+	// The template must carry the requirepass flag + the value placeholder.
+	joined := strings.Join(got[0].InjectAsCommand, " ")
+	if !strings.Contains(joined, "--requirepass") {
+		t.Errorf("redis command template missing --requirepass: %+v", got[0].InjectAsCommand)
+	}
+	if !strings.Contains(joined, autoCredentialValuePlaceholder) {
+		t.Errorf("redis command template missing value placeholder %q: %+v",
+			autoCredentialValuePlaceholder, got[0].InjectAsCommand)
 	}
 }
 

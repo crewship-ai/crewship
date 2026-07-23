@@ -3,6 +3,7 @@ package manifest
 import (
 	"context"
 	"encoding/hex"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -48,6 +49,120 @@ func TestExpandAutoCredentials_PostgresSugarFires(t *testing.T) {
 		if !containsString(ag.EnvRefs, "POSTGRES_PASSWORD") {
 			t.Errorf("agent %q missing POSTGRES_PASSWORD env_ref: %+v", ag.Slug, ag.EnvRefs)
 		}
+	}
+}
+
+// TestExpandAutoCredentials_RedisRequirepassCommand is the core of the
+// always-auth-Redis feature. A crew declares a stock redis sidecar with
+// no auth of its own; expansion must:
+//   - generate a strong-random hex secret (>= the byte floor),
+//   - splice it into the redis server's Command as `--requirepass <value>`
+//     (the official image ignores env passwords, so command is the channel),
+//   - NOT bake the value into the sidecar env,
+//   - append REDIS_PASSWORD to every agent's env_refs (so the agent can
+//     authenticate), and
+//   - queue a plannedAutoCredential for the credential row.
+func TestExpandAutoCredentials_RedisRequirepassCommand(t *testing.T) {
+	spec := CrewSpec{
+		Services: []Service{
+			{Name: "redis", Image: "redis:7-alpine"},
+		},
+		Agents: []Agent{
+			{Slug: "lead", Name: "Lead", AgentRole: "LEAD"},
+			{Slug: "worker", Name: "Worker", AgentRole: "AGENT"},
+		},
+	}
+	planned, err := expandAutoCredentialsInCrewSpec(&spec, "")
+	if err != nil {
+		t.Fatalf("expand: %v", err)
+	}
+	if len(planned) != 1 || planned[0].Name != "REDIS_PASSWORD" {
+		t.Fatalf("want one REDIS_PASSWORD planned entry, got %+v", planned)
+	}
+	if planned[0].ProvisionedForService != "redis" {
+		t.Errorf("ProvisionedForService = %q, want redis", planned[0].ProvisionedForService)
+	}
+
+	val := planned[0].Value
+	// Strong-random hex, not empty/static, at least the byte floor long.
+	if len(val) < 2*minAutoCredentialBytes {
+		t.Errorf("value length = %d, want >= %d hex chars", len(val), 2*minAutoCredentialBytes)
+	}
+	if _, err := hex.DecodeString(val); err != nil {
+		t.Errorf("value not hex-decodable (%q): %v", val, err)
+	}
+
+	redis := spec.Services[0]
+	// The generated value must reach the server via --requirepass on Command.
+	wantCmd := []string{"redis-server", "--requirepass", val}
+	if !reflect.DeepEqual(redis.Command, wantCmd) {
+		t.Errorf("redis Command = %+v, want %+v", redis.Command, wantCmd)
+	}
+	// It must NOT be baked as a sidecar env literal — command is the channel.
+	if _, has := redis.Env["REDIS_PASSWORD"]; has {
+		t.Errorf("redis sidecar env should not carry REDIS_PASSWORD; command is the channel: %+v", redis.Env)
+	}
+	// Every agent gets REDIS_PASSWORD via env_refs so it can authenticate.
+	for _, ag := range spec.Agents {
+		if !containsString(ag.EnvRefs, "REDIS_PASSWORD") {
+			t.Errorf("agent %q missing REDIS_PASSWORD env_ref: %+v", ag.Slug, ag.EnvRefs)
+		}
+	}
+}
+
+// TestExpandAutoCredentials_RedisOperatorCommandWins proves that a redis
+// service which ALREADY declares its own auth (an operator-supplied
+// Command) is left untouched: no generation, no credential row, no agent
+// env_ref append. Mirrors the operator-pinned-env precedence for the
+// command-injection channel.
+func TestExpandAutoCredentials_RedisOperatorCommandWins(t *testing.T) {
+	opCmd := []string{"redis-server", "--requirepass", "operator-chose-this"}
+	spec := CrewSpec{
+		Services: []Service{
+			{Name: "redis", Image: "redis:7-alpine", Command: opCmd},
+		},
+		Agents: []Agent{
+			{Slug: "lead", Name: "Lead", AgentRole: "LEAD"},
+		},
+	}
+	planned, err := expandAutoCredentialsInCrewSpec(&spec, "")
+	if err != nil {
+		t.Fatalf("expand: %v", err)
+	}
+	if len(planned) != 0 {
+		t.Errorf("operator-supplied command must suppress the auto-cred; got %+v", planned)
+	}
+	if !reflect.DeepEqual(spec.Services[0].Command, opCmd) {
+		t.Errorf("operator command mutated: %+v", spec.Services[0].Command)
+	}
+	if containsString(spec.Agents[0].EnvRefs, "REDIS_PASSWORD") {
+		t.Errorf("no agent env_ref expected when operator manages auth: %+v", spec.Agents[0].EnvRefs)
+	}
+}
+
+// TestExpandAutoCredentials_RedisReusesPriorCommandValue is the idempotence
+// guarantee for command-injected creds: a re-apply reuses the prior value
+// carried in services_json's Command instead of rotating the password.
+func TestExpandAutoCredentials_RedisReusesPriorCommandValue(t *testing.T) {
+	spec := CrewSpec{
+		Services: []Service{{Name: "redis", Image: "redis:7-alpine"}},
+	}
+	prior := strings.Repeat("ab", 32) // 64 hex chars, valid
+	priorJSON := `[{"name":"redis","image":"redis:7-alpine","command":["redis-server","--requirepass","` + prior + `"]}]`
+
+	planned, err := expandAutoCredentialsInCrewSpec(&spec, priorJSON)
+	if err != nil {
+		t.Fatalf("expand: %v", err)
+	}
+	if len(planned) != 1 {
+		t.Fatalf("expected 1 planned, got %d", len(planned))
+	}
+	if planned[0].Value != prior {
+		t.Errorf("expected reuse of prior command value, got fresh: %q vs %q", planned[0].Value, prior)
+	}
+	want := []string{"redis-server", "--requirepass", prior}
+	if !reflect.DeepEqual(spec.Services[0].Command, want) {
+		t.Errorf("redis Command = %+v, want reused %+v", spec.Services[0].Command, want)
 	}
 }
 
@@ -133,7 +248,7 @@ func TestExpandAutoCredentials_NoOpOnEmptyOrUnknown(t *testing.T) {
 		nil,
 		{},
 		{Services: []Service{{Name: "x", Image: "nginx:latest"}}},
-		{Services: []Service{{Name: "x", Image: "redis:7-alpine"}}}, // known but no auto-creds
+		{Services: []Service{{Name: "x", Image: "busybox:latest"}}}, // unknown, no auto-creds
 	}
 	for i, spec := range cases {
 		t.Run("case_"+string(rune('0'+i)), func(t *testing.T) {
@@ -257,6 +372,77 @@ spec:
 	}
 	if !strings.Contains(crewServicesJSON, "POSTGRES_USER") {
 		t.Errorf("services_json missing POSTGRES_USER sugar default: %s", crewServicesJSON)
+	}
+}
+
+// End-to-end for Redis: apply a manifest with a stock redis sidecar and
+// assert the credential row is POSTed as a GENERIC_SECRET / AUTO_MANAGED
+// row (not plaintext-only), and that the crew's services_json carries the
+// generated secret via --requirepass on the redis Command.
+func TestApply_RedisAutoManagedCredential_EndToEnd(t *testing.T) {
+	body := []byte(`
+apiVersion: crewship/v1
+kind: Crew
+metadata: {name: RCrew, slug: rcrew}
+spec:
+  services:
+    - { name: cache, image: redis:7-alpine }
+  agents:
+    - {slug: lead, name: Lead, agent_role: LEAD, prompt: x}
+`)
+	b, err := Load(body)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	fake := newFakeAPI(t)
+	client := NewClient(fake)
+	if _, err := Apply(context.Background(), client, b, Options{Mode: ApplyUpsert, Yes: true}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	var credBody map[string]any
+	for _, call := range fake.Calls {
+		if call.Method != "POST" || call.Path != "/api/v1/credentials" {
+			continue
+		}
+		if name, _ := call.Body["name"].(string); name == "REDIS_PASSWORD" {
+			credBody = call.Body
+			break
+		}
+	}
+	if credBody == nil {
+		t.Fatal("no POST /api/v1/credentials for REDIS_PASSWORD was issued")
+	}
+	if got, _ := credBody["type"].(string); got != "GENERIC_SECRET" {
+		t.Errorf("type = %q, want GENERIC_SECRET", got)
+	}
+	if got, _ := credBody["provider"].(string); got != "AUTO_MANAGED" {
+		t.Errorf("provider = %q, want AUTO_MANAGED", got)
+	}
+	if got, _ := credBody["provisioned_for_service"].(string); got != "rcrew/cache" {
+		t.Errorf("provisioned_for_service = %q, want rcrew/cache", got)
+	}
+	genValue, _ := credBody["value"].(string)
+	if len(genValue) != 64 {
+		t.Errorf("value len = %d, want 64 hex chars", len(genValue))
+	}
+
+	var crewServicesJSON string
+	for _, call := range fake.Calls {
+		if call.Method == "POST" && call.Path == "/api/v1/crews" {
+			crewServicesJSON, _ = call.Body["services_json"].(string)
+		}
+	}
+	if crewServicesJSON == "" {
+		t.Fatal("crew body missing services_json")
+	}
+	if !strings.Contains(crewServicesJSON, "--requirepass") {
+		t.Errorf("services_json missing --requirepass command arg: %s", crewServicesJSON)
+	}
+	// The exact generated secret must be the requirepass argument (the
+	// server boots redis from services_json, so the two MUST agree).
+	if genValue != "" && !strings.Contains(crewServicesJSON, genValue) {
+		t.Errorf("services_json requirepass value does not match the credential value %q: %s", genValue, crewServicesJSON)
 	}
 }
 

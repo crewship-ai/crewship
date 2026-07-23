@@ -328,14 +328,16 @@ services:
 ```
 
 Each entry produces an `AUTO_MANAGED` credential row at apply time (attributed
-to the crew's lead agent), is injected as an env var into the sidecar, and is
-appended to every crew agent's `env_refs` automatically so agents can reach the
-service with the right value. Fields and defaults:
+to the crew's lead agent), is injected into the sidecar (as an env var by
+default, or as a command arg via `inject_as_command` for images like Redis),
+and is appended to every crew agent's `env_refs` automatically so agents can
+reach the service with the right value. Fields and defaults:
 
 | Field | Default | Meaning |
 | ----- | ------- | ------- |
 | `name` | _(required)_ | Workspace-unique credential name AND the default env-var name (SCREAMING_SNAKE_CASE) |
 | `inject_as_env` | = `name` | Override the env-var name the sidecar receives (e.g. `MARIADB_ROOT_PASSWORD`) |
+| `inject_as_command` | _(none)_ | Command-arg template for images that read the secret from a CLI flag instead of env. `{{value}}` is replaced by the generated secret and the rendered argv becomes the sidecar's `command`. Used for Redis (`["redis-server", "--requirepass", "{{value}}"]`); the sidecar env is skipped in this mode. |
 | `inject_to_agents` | `true` | Set `false` when only the sidecar should see the secret |
 | `length` | `32` bytes (64 hex chars) | Random bytes generated; minimum 16 |
 | `description` | sugar-filled | Shown in the credentials UI |
@@ -345,6 +347,14 @@ You rarely write this by hand: for well-known images (`postgres:*`, `mysql:*`,
 default** in automatically — see [auto-managed credentials](/guides/auto-managed-credentials)
 for the full image catalog. Explicit entries win over sugar defaults with the
 same `name`.
+
+<Note>
+**Datastores are always password-protected**, Redis included. A stock
+`redis:*` sidecar boots with `--requirepass <generated>` and hands agents
+the secret as a `REDIS_PASSWORD` env credential — bridge isolation is never
+the only gate. Supply your own `command:` on the service to opt out and
+manage the password yourself.
+</Note>
 
 <Warning>
 A service that **publishes a port to the host** cannot use `auto_credentials`

@@ -76,9 +76,11 @@ func expandAutoCredentialsInCrewSpec(spec *CrewSpec, existingServicesJSON string
 		return nil, nil
 	}
 
-	// Parse the existing services_json into a name → env-map lookup
-	// so we can pull out the prior value per (service, env-key).
-	priorEnvByService := parseExistingServiceEnvs(existingServicesJSON)
+	// Parse the existing services_json into a name → Service lookup so
+	// we can pull out the prior value per service — from Env for the
+	// env-injected creds, or from Command for command-injected ones
+	// (redis --requirepass), which is where their value lives.
+	priorByService := parseExistingServices(existingServicesJSON)
 
 	// Track names so we can detect cross-service collisions early —
 	// two services can't both declare POSTGRES_PASSWORD because the
@@ -119,7 +121,21 @@ func expandAutoCredentialsInCrewSpec(spec *CrewSpec, existingServicesJSON string
 		}
 		for _, ac := range autoCreds {
 			injectKey := ac.EffectiveInjectAsEnv()
-			if operatorPinned[injectKey] {
+			cmdInject := len(ac.InjectAsCommand) > 0
+
+			// Precedence: an operator who already declared the auth for
+			// this service owns the secret — we skip generation, the
+			// credential row, and the agent env_ref append. For env-
+			// injected creds that means an operator-pinned env literal;
+			// for command-injected creds (redis) it means a non-empty
+			// operator-supplied Command (they wrote their own
+			// --requirepass, or any other command). This mirrors the
+			// "operator values always win on collision" contract.
+			if cmdInject {
+				if len(svc.Command) > 0 {
+					continue
+				}
+			} else if operatorPinned[injectKey] {
 				// Operator-pinned literal wins; no sugar generation,
 				// no credential row, no agent env_refs append.
 				// svc.Env already carries the operator's value from
@@ -133,7 +149,7 @@ func expandAutoCredentialsInCrewSpec(spec *CrewSpec, existingServicesJSON string
 			}
 			seen[ac.Name] = svc.Name
 
-			value, reused := reuseOrGenerate(ac, priorEnvByService[svc.Name])
+			value, reused := reuseOrGenerate(ac, priorByService[svc.Name])
 			if !reused {
 				v, err := generateAutoCredentialValue(ac.EffectiveLength())
 				if err != nil {
@@ -142,11 +158,20 @@ func expandAutoCredentialsInCrewSpec(spec *CrewSpec, existingServicesJSON string
 				value = v
 			}
 
-			// Sidecar env: write under inject_as_env (often same as Name).
-			if svc.Env == nil {
-				svc.Env = make(map[string]string, 1)
+			if cmdInject {
+				// Command channel: the sidecar receives the value via
+				// its argv, never as an env literal. The rendered
+				// command lands in services_json (invariant: the value
+				// still travels literally so the provider can boot the
+				// container), exactly like the env channel does.
+				svc.Command = renderCommandTemplate(ac.InjectAsCommand, value)
+			} else {
+				// Sidecar env: write under inject_as_env (often same as Name).
+				if svc.Env == nil {
+					svc.Env = make(map[string]string, 1)
+				}
+				svc.Env[injectKey] = value
 			}
-			svc.Env[injectKey] = value
 
 			// Agent env_refs: append to every agent in the crew that
 			// inject_to_agents=true asks us to reach.
@@ -170,46 +195,109 @@ func expandAutoCredentialsInCrewSpec(spec *CrewSpec, existingServicesJSON string
 	return out, nil
 }
 
-// reuseOrGenerate returns (value, true) when the prior services_json
-// env map carries a value for ac's inject_as_env key that satisfies
-// the AutoCredential's length contract (≥ EffectiveLength * 2 hex
-// chars). Anything else returns ("", false) so the caller generates
-// fresh — including malformed prior content, drift, or first-ever
-// apply (priorEnv is nil).
+// reuseOrGenerate returns (value, true) when the prior service carries
+// a value that satisfies the AutoCredential's length contract (≥
+// EffectiveLength * 2 hex chars). The prior value is read from the
+// channel the credential injects into: the prior Command for
+// command-injected creds (redis --requirepass), the prior Env under
+// inject_as_env otherwise. Anything else returns ("", false) so the
+// caller generates fresh — including malformed prior content, drift,
+// or first-ever apply (prior is the zero Service).
 //
 // Why the length check: an operator who lowered the auto_credential
 // length in the manifest expects a fresh shorter value, and an
 // operator who raised it expects a fresh longer one. Reusing values
 // that no longer satisfy the declared length would leave the
 // manifest and the DB out of sync.
-func reuseOrGenerate(ac AutoCredential, priorEnv map[string]string) (string, bool) {
-	if priorEnv == nil {
-		return "", false
-	}
-	prior, ok := priorEnv[ac.EffectiveInjectAsEnv()]
-	if !ok || prior == "" {
-		return "", false
+func reuseOrGenerate(ac AutoCredential, prior Service) (string, bool) {
+	var value string
+	if len(ac.InjectAsCommand) > 0 {
+		v, ok := extractCommandArgValue(ac.InjectAsCommand, prior.Command)
+		if !ok {
+			return "", false
+		}
+		value = v
+	} else {
+		if prior.Env == nil {
+			return "", false
+		}
+		v, ok := prior.Env[ac.EffectiveInjectAsEnv()]
+		if !ok || v == "" {
+			return "", false
+		}
+		value = v
 	}
 	wantChars := ac.EffectiveLength() * 2 // hex doubles byte count
-	if len(prior) != wantChars {
+	if len(value) != wantChars {
 		return "", false
 	}
 	// Confirm the prior value is hex — a hand-edited services_json
 	// could carry anything; we'd rather regen than copy junk forward.
-	if _, err := hex.DecodeString(prior); err != nil {
+	if _, err := hex.DecodeString(value); err != nil {
 		return "", false
 	}
-	return prior, true
+	return value, true
 }
 
-// parseExistingServiceEnvs decodes a services_json blob into a
-// service-name → env-map lookup. Returns nil when the input is
-// empty or unparsable — the caller treats a nil map as "first apply,
-// generate fresh." We intentionally don't surface parse errors:
-// services_json on a real crew is server-authored, but operator
-// drift can land there too, and a malformed prior shouldn't block a
-// fresh-value path.
-func parseExistingServiceEnvs(servicesJSON string) map[string]map[string]string {
+// renderCommandTemplate returns a fresh argv with every
+// autoCredentialValuePlaceholder element replaced by value. The input
+// template is never mutated — the catalog entry is a package global
+// shared across every crew, so aliasing it would leak one crew's
+// secret into another's command.
+func renderCommandTemplate(template []string, value string) []string {
+	out := make([]string, len(template))
+	for i, tok := range template {
+		if tok == autoCredentialValuePlaceholder {
+			out[i] = value
+			continue
+		}
+		out[i] = tok
+	}
+	return out
+}
+
+// extractCommandArgValue recovers the value previously spliced into a
+// rendered command by renderCommandTemplate, so an idempotent re-apply
+// can reuse it instead of rotating the secret. It returns ok=false on
+// any structural mismatch (different length, a fixed token that no
+// longer matches, an empty prior) — the caller then regenerates. When
+// the template has multiple placeholders they must all have resolved
+// to the same value; a disagreement is treated as drift (ok=false).
+func extractCommandArgValue(template, prior []string) (string, bool) {
+	if len(prior) != len(template) || len(template) == 0 {
+		return "", false
+	}
+	found := false
+	var value string
+	for i, tok := range template {
+		if tok == autoCredentialValuePlaceholder {
+			if found && prior[i] != value {
+				return "", false
+			}
+			value = prior[i]
+			found = true
+			continue
+		}
+		if prior[i] != tok {
+			return "", false
+		}
+	}
+	if !found || value == "" {
+		return "", false
+	}
+	return value, true
+}
+
+// parseExistingServices decodes a services_json blob into a
+// service-name → Service lookup. The full Service is retained (not just
+// Env) so the reuse path can recover a command-injected value from the
+// prior Command as well as an env value from the prior Env. Returns nil
+// when the input is empty or unparsable — the caller treats a nil map
+// as "first apply, generate fresh." We intentionally don't surface
+// parse errors: services_json on a real crew is server-authored, but
+// operator drift can land there too, and a malformed prior shouldn't
+// block a fresh-value path.
+func parseExistingServices(servicesJSON string) map[string]Service {
 	if servicesJSON == "" {
 		return nil
 	}
@@ -220,12 +308,9 @@ func parseExistingServiceEnvs(servicesJSON string) map[string]map[string]string 
 	if len(services) == 0 {
 		return nil
 	}
-	out := make(map[string]map[string]string, len(services))
+	out := make(map[string]Service, len(services))
 	for i := range services {
-		if services[i].Env == nil {
-			continue
-		}
-		out[services[i].Name] = services[i].Env
+		out[services[i].Name] = services[i]
 	}
 	return out
 }
