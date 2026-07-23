@@ -18,6 +18,7 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/leader"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -318,20 +319,32 @@ WHERE id = ?`,
 }
 
 // PipelineScheduler ticks every 30s, fires due schedules through
-// the supplied Executor, and updates next_run_at. Single-instance
-// — running multiple replicas would double-fire schedules; we'll
-// add leader election alongside crew-level state in a follow-up.
+// the supplied Executor, and updates next_run_at.
+//
+// Multi-replica safe: when a leader Gate is attached (SetLeaderGate),
+// the tick fires only on the replica holding the scheduler lease, so
+// two replicas can't double-fire. A nil gate means "always leader" —
+// the unchanged single-instance behaviour (#1376).
 type PipelineScheduler struct {
 	store     *ScheduleStore
 	pipelines *Store // pipeline lookup for the run
 	executor  *Executor
 	logger    *slog.Logger
 
+	// leaderGate, when non-nil, gates each tick on holding the scheduler
+	// lease. Nil = single-instance (always fire).
+	leaderGate leader.Gate
+
 	stopCh    chan struct{}
 	stopped   chan struct{}
 	startOnce sync.Once
 	stopOnce  sync.Once
 }
+
+// SetLeaderGate attaches a leader-election gate so this scheduler only fires
+// while its replica holds the scheduler lease. Call before Start. Passing nil
+// (the default) keeps single-instance behaviour.
+func (s *PipelineScheduler) SetLeaderGate(g leader.Gate) { s.leaderGate = g }
 
 // NewPipelineScheduler wires a scheduler ready to start. Caller
 // invokes Start to spawn the tick goroutine.
@@ -384,6 +397,12 @@ func (s *PipelineScheduler) run(ctx context.Context) {
 }
 
 func (s *PipelineScheduler) tick(ctx context.Context) {
+	// Leader gate: on a multi-replica deploy only the lease holder fires, so
+	// two replicas don't both dispatch the same due schedule. Nil gate (the
+	// single-instance default) always passes.
+	if s.leaderGate != nil && !s.leaderGate.IsLeader() {
+		return
+	}
 	due, err := s.store.listDueSchedules(ctx)
 	if err != nil {
 		s.logger.Warn("pipeline scheduler: list due", "error", err)

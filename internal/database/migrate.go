@@ -1678,6 +1678,12 @@ END;
 	// stop getting unrestricted egress. See
 	// migrate_consts_v148_backfill_network_mode_restricted.go (#1366).
 	{version: 148, name: "backfill_network_mode_restricted", fn: migrateBackfillNetworkModeRestricted},
+	// v149: single-row lease table backing scheduler leader election (#1376),
+	// so the agent/pipeline cron loops and the recurring-issue dispatcher fire
+	// on exactly one replica in a multi-replica deploy. Instance-local runtime
+	// state — not workspace-scoped, never in a backup bundle. See
+	// migrate_consts_v149_scheduler_leader.go and internal/leader.
+	{version: 149, name: "scheduler_leader", sql: migrationSchedulerLeader},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
