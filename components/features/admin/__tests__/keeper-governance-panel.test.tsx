@@ -42,10 +42,12 @@ vi.mock("@/hooks/use-abilities", () => ({
 
 const toastSuccess = vi.fn()
 const toastError = vi.fn()
+const toastWarning = vi.fn()
 vi.mock("sonner", () => ({
   toast: {
     success: (...args: unknown[]) => toastSuccess(...args),
     error: (...args: unknown[]) => toastError(...args),
+    warning: (...args: unknown[]) => toastWarning(...args),
   },
 }))
 
@@ -80,6 +82,7 @@ function mockRoutes(gov: {
   enabled: boolean
   security_contact_user_id: string
   deny_notify_min_risk: number
+  require_second_approver?: boolean
   watch_spec?: string
   watch_presets?: string[]
   gov_model_provider?: string
@@ -105,6 +108,7 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     apiFetch.mockReset()
     toastSuccess.mockReset()
     toastError.mockReset()
+    toastWarning.mockReset()
     canManage = true
   })
 
@@ -155,6 +159,7 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
       enabled: true,
       security_contact_user_id: "u-owner",
       deny_notify_min_risk: 9,
+      require_second_approver: false,
       watch_spec: "",
       watch_presets: [],
       gov_model_provider: "",
@@ -373,5 +378,103 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
       await screen.findByText(/failed to load governance settings/i),
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument()
+  })
+
+  // #1378 — the four-eyes credential gate (require_second_approver) was
+  // CLI-only; these cover the GET hydration → toggle → PUT round-trip and the
+  // non-blocking warning the server returns when the workspace lacks a second
+  // eligible approver.
+  it("hydrates require_second_approver OFF and PUTs it true when toggled on", async () => {
+    mockRoutes({
+      configured: true,
+      enabled: true,
+      security_contact_user_id: "",
+      deny_notify_min_risk: 7,
+      require_second_approver: false,
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    const sw = await screen.findByTestId("keeper-governance-second-approver")
+    expect(sw).toHaveAttribute("aria-checked", "false")
+    // Pristine → Save disabled until the toggle flips.
+    expect(screen.getByTestId("keeper-governance-save")).toBeDisabled()
+
+    fireEvent.click(sw)
+    const save = screen.getByTestId("keeper-governance-save")
+    expect(save).toBeEnabled()
+    fireEvent.click(save)
+
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+    const putCall = apiFetch.mock.calls.find(([, init]) => (init as RequestInit)?.method === "PUT")
+    const [, putInit] = putCall as [string, RequestInit]
+    expect(JSON.parse(String(putInit.body))).toMatchObject({ require_second_approver: true })
+  })
+
+  it("hydrates require_second_approver ON from GET", async () => {
+    mockRoutes({
+      configured: true,
+      enabled: true,
+      security_contact_user_id: "",
+      deny_notify_min_risk: 7,
+      require_second_approver: true,
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    const sw = await screen.findByTestId("keeper-governance-second-approver")
+    expect(sw).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByTestId("keeper-governance-save")).toBeDisabled()
+  })
+
+  it("surfaces the server's second-approver warning as a warning toast", async () => {
+    apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes("/admin/keeper/governance")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            configured: true,
+            enabled: true,
+            security_contact_user_id: "",
+            deny_notify_min_risk: 7,
+            require_second_approver: true,
+            warning: "second-approver is enabled, but this workspace has fewer than 2 members who can approve escalations",
+          })
+        }
+        return jsonResponse({
+          configured: true,
+          enabled: true,
+          security_contact_user_id: "",
+          deny_notify_min_risk: 7,
+          require_second_approver: false,
+        })
+      }
+      if (url.includes("/credentials")) return jsonResponse(CREDENTIALS)
+      if (url.includes("/members")) return jsonResponse(MEMBERS)
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    const sw = await screen.findByTestId("keeper-governance-second-approver")
+    fireEvent.click(sw)
+    fireEvent.click(screen.getByTestId("keeper-governance-save"))
+
+    await waitFor(() =>
+      expect(toastWarning).toHaveBeenCalledWith(
+        expect.stringContaining("fewer than 2 members"),
+      ),
+    )
+    expect(toastSuccess).not.toHaveBeenCalled()
+  })
+
+  it("disables the second-approver switch when the caller cannot manage", async () => {
+    canManage = false
+    mockRoutes({
+      configured: true,
+      enabled: true,
+      security_contact_user_id: "",
+      deny_notify_min_risk: 7,
+      require_second_approver: false,
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    expect(await screen.findByTestId("keeper-governance-second-approver")).toBeDisabled()
   })
 })

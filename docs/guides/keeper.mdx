@@ -238,6 +238,14 @@ restart needed:
 | **Watchdog enabled** | Master toggle for behavior monitoring + DENY notifications in this workspace | **Off (opt-in)** — enable per workspace |
 | **Security contact** | A named OWNER/ADMIN the escalation is highlighted for (via the inbox item's target) | Unset — findings go to all MANAGER+ members |
 | **Notify on DENY at risk ≥ N** | High-risk DENY decisions (1–10 scale) also land in the inbox as non-blocking items — ESCALATE always does | 7 |
+| **Require a second approver** | Four-eyes: a `CREDENTIAL` escalation can't be resolved by the person who owns the requesting agent (segregation of duties, #1084) | **Off (opt-in)** |
+
+The **Require a second approver** switch sits in the same **Admin → Keeper →
+Watchdog governance** panel as the settings above and writes through the same
+`PUT /api/v1/admin/keeper/governance` endpoint. Enabling it on a workspace with
+fewer than two eligible approvers (OWNER/ADMIN/MANAGER) is allowed but surfaces
+a non-blocking warning — the gate would otherwise deadlock. This is the in-app
+equivalent of `crewship keeper second-approver enable`.
 
 When a security contact is set the escalation targets that person **and** keeps
 the MANAGER fanout, so managers still see it as a fallback. Keeper findings push

@@ -703,6 +703,16 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 						p.logger.Info("/secrets is not tmpfs (legacy bind mount), will recreate container",
 							"container", containerName, "mount_type", m.Type)
 					}
+					// Migration (#1400): the agent-writable, host-persistent crew
+					// data mounts now ride bind-backed noexec local volumes
+					// (noexecBindMount). Containers created before that carry them
+					// as plain, exec-allowed host binds. Recreate so noexec takes
+					// effect and a stale exec-capable foothold cannot linger.
+					if legacyWritableBindNeedsNoexec(m.Destination, m.Type) {
+						needsRecreate = true
+						p.logger.Info("agent-writable mount is a legacy exec-capable bind, will recreate container for noexec",
+							"container", containerName, "mount", m.Destination, "mount_type", m.Type)
+					}
 				}
 				// /secrets rides HostConfig.Tmpfs (not the Mounts API — see
 				// secretsTmpfsSpec), so it never appears in inspect.Mounts.
@@ -1132,10 +1142,18 @@ func (p *Provider) runByoiSidecarCheck(ctx context.Context, containerID, image s
 // force-removes it and drops the crew's warm-cache entry. Stop/remove errors
 // are deliberately ignored: every caller falls through to create a fresh
 // container regardless.
+//
+// RemoveVolumes is set so the anonymous, bind-backed noexec volumes for
+// /workspace, /output and /crew (see noexecBindMount, #1400) are cleaned up
+// on recreate instead of accumulating as dangling volume records. This is
+// safe: (a) Docker only auto-removes ANONYMOUS volumes with RemoveVolumes —
+// the named home/tools volumes are never touched; (b) removing a bind-backed
+// local volume drops only its metadata record, never the host `device`
+// directory, so crew data persists across the recreate.
 func (p *Provider) forceTeardown(ctx context.Context, containerID, crewID string) {
 	timeout := 10
 	_, _ = p.client.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout})
-	_, _ = p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true})
+	_, _ = p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
 	p.evictWarm(crewID)
 }
 
