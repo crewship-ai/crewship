@@ -1682,6 +1682,12 @@ END;
 	// grant — an expired lease is refused at injection time (fail-closed). See
 	// migrate_consts_v149_credential_lease.go and issue #1373.
 	{version: 149, name: "credential_lease_expiry", sql: migrationCredentialLeaseExpiry},
+	// v150: single-row lease table backing scheduler leader election (#1376),
+	// so the agent/pipeline cron loops and the recurring-issue dispatcher fire
+	// on exactly one replica in a multi-replica deploy. Instance-local runtime
+	// state — not workspace-scoped, never in a backup bundle. See
+	// migrate_consts_v150_scheduler_leader.go and internal/leader.
+	{version: 150, name: "scheduler_leader", sql: migrationSchedulerLeader},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

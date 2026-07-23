@@ -264,6 +264,45 @@ If any step in the trigger pipeline fails (chat creation, resolution, container 
 
 The next scheduled trigger will attempt the full pipeline again. There is no exponential backoff -- the cron schedule determines retry timing.
 
+## Running multiple replicas (leader election)
+
+Crewship runs three scheduling loops in each server process: the **agent cron
+scheduler** (this guide), the **pipeline/routine cron scheduler**, and the
+**recurring-issue dispatcher**. If you run more than one `crewship` replica
+against the same database, every replica would tick — and without coordination
+they would all fire the same due job, double-running scheduled agents and
+double-stamping recurring issues.
+
+To make a multi-replica deploy safe, the schedulers use a small **database-backed
+leader election lease**. A single row in the `scheduler_leader` table records the
+current leader and an expiry; each replica renews it on an interval and only
+fires while it holds a non-expired lease. Exactly one replica is leader at a
+time, so each due occurrence fires once. (Per-occurrence idempotency remains as a
+second line of defence.)
+
+- **Enabled by default.** A lone replica wins the lease immediately, so
+  single-instance behaviour is unchanged — nothing to configure for a single
+  server.
+- **No extra infrastructure.** The lease lives in the same database the
+  schedulers already use (SQLite or Postgres) — no etcd/consul/redis.
+- **Failover.** The lease TTL is **60 seconds** and the leader renews every
+  **20 seconds**. If the leader crashes or loses the database, a standby steals
+  the expired lease within one TTL and takes over. A clean shutdown releases the
+  lease immediately, so failover is near-instant.
+
+### Configuration
+
+| Env var | Default | Purpose |
+| --- | --- | --- |
+| `CREWSHIP_SCHEDULER_LEADER_ELECTION` | `1` (on) | Set to `0`/`false`/`off` to disable leader election and leave every scheduling loop always-fire (the pre-election behaviour). Only safe with exactly one replica. |
+| `CREWSHIP_REPLICA_ID` | random per process | A stable identity for this replica in the lease row. Handy for logs/debugging; optional. |
+
+<Warning>
+Until you enable leader election (or while it is disabled), run **exactly one**
+scheduler-bearing replica. Two replicas with election disabled will double-fire
+every schedule and recurring issue.
+</Warning>
+
 ## What's Next
 
 - [Orchestration](/guides/orchestration) -- multi-agent missions with task dependencies
