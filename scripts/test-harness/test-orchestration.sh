@@ -152,7 +152,14 @@ if (( ask_rc == 0 )); then
 elif grep -qiE '(^|[^[:alnum:]_])read: *EOF' "$ask_out" && ! grep -qi 'server rejected the connection' "$ask_out"; then
   _fail "ask failure carries a reason" "opaque 'ws read: EOF' with no reason — #1386 regressed: $(tail -c 160 "$ask_out" | tr '\n' ' ')"
 else
-  skip "interactive ask over WS" "ask did not complete but failed with a reason (not a bare EOF): $(tail -c 160 "$ask_out" | tr '\n' ' ')"
+  # The ask didn't complete, but it FAILED LEGIBLY (a real close reason, not a
+  # bare EOF) — which is exactly what #1386 guarantees. That's a green outcome
+  # for the observability contract, yet the ask itself is still unusable in this
+  # environment. A silent skip would render that green even though the feature
+  # can't be exercised here, so surface it LOUDLY as a known-broken xfail
+  # (visible, referencing #1386) without turning CI hard-red on an env issue.
+  xfail "interactive ask over WS (known broken here)" \
+    "#1386: ask failed with a legible reason (not a bare EOF), but did not complete in this env: $(tail -c 160 "$ask_out" | tr '\n' ' ')"
 fi
 rm -f "$ask_out"
 

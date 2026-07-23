@@ -29,6 +29,31 @@ func TestCloseReason(t *testing.T) {
 	}
 }
 
+// TestCloseReason_RunPathFrameSchema pins that CloseReason surfaces the reason
+// from the POST-auth run-path error frame (client.go sendError), not just the
+// auth-reject frame. That frame now carries the reason under BOTH "message" and
+// "error"; older/other producers used only "error". Both must yield the reason
+// (#1386) — a legibly-failing run must never collapse to a bare "ws read: EOF".
+func TestCloseReason_RunPathFrameSchema(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{"dual key (unified schema)", `{"message":"unknown message type: teleport","error":"unknown message type: teleport"}`, "unknown message type: teleport"},
+		{"message only", `{"message":"malformed message frame"}`, "malformed message frame"},
+		{"error only (back-compat)", `{"error":"invalid payload"}`, "invalid payload"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := &WSMessage{Type: "error", Payload: json.RawMessage(tc.payload)}
+			if r, ok := CloseReason(msg); !ok || r != tc.want {
+				t.Errorf("got (%q,%v), want (%q,true)", r, ok, tc.want)
+			}
+		})
+	}
+}
+
 // TestWSClientSurfacesCloseReason exercises the read-loop pattern both CLI run
 // loops use: the server writes an error frame then closes; the loop captures
 // the reason via CloseReason and, on the subsequent EOF, has a reason to print

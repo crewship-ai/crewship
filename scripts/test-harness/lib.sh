@@ -55,7 +55,9 @@ POLL_INTERVAL="${POLL_INTERVAL:-3}" # seconds between polls
 _PASS=0
 _FAIL=0
 _SKIP=0
+_XFAIL=0
 declare -a _FAILED_NAMES=()
+declare -a _XFAIL_NAMES=()
 
 if [[ -t 1 ]]; then
   _C_GREEN=$'\033[32m'; _C_RED=$'\033[31m'; _C_YEL=$'\033[33m'
@@ -71,6 +73,16 @@ _pass() { _PASS=$((_PASS+1)); printf '%s  ✓ PASS%s %s\n' "$_C_GREEN" "$_C_OFF"
 _fail() { _FAIL=$((_FAIL+1)); _FAILED_NAMES+=("$1"); printf '%s  ✗ FAIL%s %s\n' "$_C_RED" "$_C_OFF" "$1";
           [[ -n "${2:-}" ]] && printf '%s        %s%s\n' "$_C_DIM" "$2" "$_C_OFF"; }
 skip()  { _SKIP=$((_SKIP+1)); printf '%s  ⊘ SKIP%s %s%s\n' "$_C_YEL" "$_C_OFF" "$1" \
+            "${2:+ ($2)}"; }
+
+# xfail <name> <reason> — an EXPECTED failure: a known-broken behaviour we
+# deliberately do NOT let turn CI hard-red (usually an environment/build gap,
+# not a code regression), but which must stay LOUD and visible instead of
+# hiding inside the skip bucket. Printed bold-yellow with an explicit XFAIL
+# label + reason; counted separately and re-listed in the summary. Reserve for
+# cases tracked by an issue — put the issue ref in the reason.
+xfail() { _XFAIL=$((_XFAIL+1)); _XFAIL_NAMES+=("$1"); \
+          printf '%s%s  ✗ XFAIL (known broken)%s %s%s\n' "$_C_BOLD" "$_C_YEL" "$_C_OFF" "$1" \
             "${2:+ ($2)}"; }
 
 # ── CLI wrappers ────────────────────────────────────────────────────────────
@@ -180,8 +192,13 @@ preflight() {
 # finish — print summary, set exit code (0 = all green / only skips).
 finish() {
   printf '\n%s──────── summary ────────%s\n' "$_C_BOLD" "$_C_OFF"
-  printf '  %spassed: %d%s   %sfailed: %d%s   %sskipped: %d%s\n' \
-    "$_C_GREEN" "$_PASS" "$_C_OFF" "$_C_RED" "$_FAIL" "$_C_OFF" "$_C_YEL" "$_SKIP" "$_C_OFF"
+  printf '  %spassed: %d%s   %sfailed: %d%s   %sskipped: %d%s   %sxfail: %d%s\n' \
+    "$_C_GREEN" "$_PASS" "$_C_OFF" "$_C_RED" "$_FAIL" "$_C_OFF" \
+    "$_C_YEL" "$_SKIP" "$_C_OFF" "$_C_BOLD$_C_YEL" "$_XFAIL" "$_C_OFF"
+  if (( _XFAIL > 0 )); then
+    printf '  %sknown-broken (xfail):%s\n' "$_C_BOLD$_C_YEL" "$_C_OFF"
+    printf '    - %s\n' "${_XFAIL_NAMES[@]}"
+  fi
   if (( _FAIL > 0 )); then
     printf '  %sfailures:%s\n' "$_C_RED" "$_C_OFF"
     printf '    - %s\n' "${_FAILED_NAMES[@]}"

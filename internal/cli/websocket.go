@@ -164,11 +164,20 @@ func CloseReason(msg *WSMessage) (string, bool) {
 	if msg.Type != "error" && msg.Type != "session_revoked" {
 		return "", false
 	}
+	// The reason travels under "message" on the reject-path frames
+	// (hub.go sendWSAuthFrame) and post-auth run-path frames (client.go
+	// sendError). Older/other producers used only "error", so fall back to it
+	// before the bare type label — a run-path error frame must surface its
+	// reason to the same reader that already handles auth rejections (#1386).
 	var p struct {
 		Message string `json:"message"`
+		Error   string `json:"error"`
 	}
 	_ = json.Unmarshal(msg.Payload, &p)
 	reason := p.Message
+	if reason == "" {
+		reason = p.Error
+	}
 	if reason == "" {
 		reason = msg.Type
 	}

@@ -58,6 +58,13 @@ func (c *Client) readPump() {
 
 		var msg ClientMessage
 		if err := json.Unmarshal(raw, &msg); err != nil {
+			// A frame we can't even parse is an operator-visible symptom (a
+			// broken/skewed client), not a silent no-op — WARN it with remote +
+			// agent context and hand the client a legible error frame instead of
+			// dropping the frame on the floor with no signal on either side (#1386).
+			c.hub.logger.Warn("malformed message frame",
+				"user_id", c.userID, "remote_addr", c.remoteAddr(), "error", err)
+			c.sendError("", "malformed message frame")
 			continue
 		}
 
@@ -76,8 +83,30 @@ func (c *Client) readPump() {
 			c.handleCancelMessage(msg)
 		case "resume":
 			c.handleResume(msg)
+		default:
+			// An unrecognized type is the version-skew symptom #1386 named: a
+			// newer/older client speaking a verb this server doesn't route. Log it
+			// WARN (with the type + remote + agent context) and tell the client so
+			// the mismatch is visible on both sides rather than silently ignored.
+			c.hub.logger.Warn("unknown message type",
+				"type", msg.Type, "user_id", c.userID, "remote_addr", c.remoteAddr())
+			c.sendError(msg.Channel, "unknown message type: "+msg.Type)
 		}
 	}
+}
+
+// remoteAddr returns this connection's remote address for log context,
+// best-effort: the server-side websocket.Conn carries the originating
+// *http.Request, but a Client constructed without a real socket (tests that
+// only drain the send channel) has neither, so both nil cases return "".
+func (c *Client) remoteAddr() string {
+	if c.conn == nil {
+		return ""
+	}
+	if req := c.conn.Request(); req != nil {
+		return req.RemoteAddr
+	}
+	return ""
 }
 
 // defaultWriteWait bounds how long a single outbound frame may block in
@@ -135,27 +164,32 @@ func (c *Client) writeFrame(msg []byte) bool {
 // (Hub.sweepRevokedSessions in hub.go), not a per-connection watcher —
 // see that function's doc comment for why (#1255 item 3).
 
-// sendError marshals the standard error frame ({"error": msg} payload on the
-// given channel) and queues it on this client's send buffer.
+// sendError marshals the standard error frame and queues it on this client's
+// send buffer. The payload carries the reason under BOTH "message" and "error":
+// "message" is the key the reject-path frames (hub.go sendWSAuthFrame) and the
+// CLI's CloseReason reader use, so a post-auth run-path error is now legible to
+// the same reader that already surfaces auth rejections (#1386); "error" is kept
+// for back-compat with existing consumers (e.g. the dashboard) that key on it.
 func (c *Client) sendError(channel, msg string) {
-	resp, _ := json.Marshal(ServerMessage{
-		Type:    "error",
-		Channel: channel,
-		Payload: map[string]string{"error": msg},
-	})
-	c.safeSend(resp)
+	c.safeSend(errorFrame(channel, msg))
 }
 
 // trySendError is sendError with a non-blocking enqueue (trySend). Hub
 // sweep/notify goroutines use it so one client's full send buffer can't
 // stall the shared loop; the frame is best-effort there.
 func (c *Client) trySendError(channel, msg string) {
+	c.trySend(errorFrame(channel, msg))
+}
+
+// errorFrame builds the unified error frame shared by sendError/trySendError.
+// See sendError for why the reason appears under both "message" and "error".
+func errorFrame(channel, msg string) []byte {
 	resp, _ := json.Marshal(ServerMessage{
 		Type:    "error",
 		Channel: channel,
-		Payload: map[string]string{"error": msg},
+		Payload: map[string]string{"message": msg, "error": msg},
 	})
-	c.trySend(resp)
+	return resp
 }
 
 // unwrapDoubleEncoded handles a double-encoded payload (the frontend sends a
@@ -372,13 +406,19 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 	// Handle double-encoded payload (frontend sends JSON.stringify'd string)
 	raw := unwrapDoubleEncoded(msg.Payload)
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		c.hub.logger.Debug("invalid send_message payload", "error", err, "payload_len", len(msg.Payload))
+		// A send_message the server can't decode never starts a run (no run row,
+		// no log) — the exact silent-failure shape #1386 chases. WARN it (with
+		// agent + remote context) and return the reason to the client.
+		c.hub.logger.Warn("invalid send_message payload",
+			"user_id", c.userID, "remote_addr", c.remoteAddr(), "error", err, "payload_len", len(msg.Payload))
 		c.sendError(msg.Channel, "invalid payload")
 		return
 	}
 
 	if payload.ChatID == "" || payload.Content == "" {
-		c.hub.logger.Debug("send_message missing fields", "chat_id_empty", payload.ChatID == "", "content_empty", payload.Content == "")
+		c.hub.logger.Warn("send_message missing fields",
+			"user_id", c.userID, "remote_addr", c.remoteAddr(),
+			"chat_id_empty", payload.ChatID == "", "content_empty", payload.Content == "")
 		c.sendError(msg.Channel, "session_id and content required")
 		return
 	}
