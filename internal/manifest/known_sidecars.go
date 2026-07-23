@@ -111,7 +111,29 @@ var imagePrefixCatalog = map[string]sidecarDefaults{
 			},
 		},
 	},
+	"redis": {
+		// The official redis image does NOT read a password from an
+		// env var — it needs `redis-server --requirepass <value>` as a
+		// command arg. So the auto-credential injects into the sidecar
+		// Command (not Env) via InjectAsCommand, while the default
+		// InjectToAgents=true still delivers REDIS_PASSWORD to every
+		// agent's env_refs so they can authenticate. Redis is always
+		// auth-protected: bridge isolation alone is not the gate.
+		AutoCredentials: []AutoCredential{
+			{
+				Name:            "REDIS_PASSWORD",
+				Description:     "Auto-generated requirepass secret for the crew-private Redis sidecar.",
+				InjectAsCommand: []string{"redis-server", "--requirepass", autoCredentialValuePlaceholder},
+			},
+		},
+	},
 }
+
+// autoCredentialValuePlaceholder is the token in an AutoCredential's
+// InjectAsCommand template that the generated secret is substituted
+// for. Chosen to be shell- and JSON-inert so a template element like
+// "--requirepass" stays literal and only the placeholder is rewritten.
+const autoCredentialValuePlaceholder = "{{value}}"
 
 // lookupSidecarDefaults returns the catalog entry for an image
 // reference, or (zero, false) when nothing matches. Normalisation

@@ -233,6 +233,22 @@ type Service struct {
 	// credential, so validate.go refuses auto_credentials in that
 	// configuration.
 	AutoCredentials []AutoCredential `yaml:"auto_credentials,omitempty" json:"auto_credentials,omitempty"`
+
+	// AllowUnauthenticated is the explicit, acknowledged opt-out from
+	// the "recognised datastores are always authenticated" invariant.
+	//
+	// When a service's image resolves an auto-credential from the
+	// catalog (a known datastore: postgres/redis/mysql/...), Crewship
+	// normally mints and injects the auth secret for you. If you
+	// override the sidecar's `command:` (or the auth env) and thereby
+	// take ownership of the channel, that override MUST itself provide
+	// authentication (e.g. `--requirepass <secret>`, or a non-empty
+	// password env). If it does not, `crewship apply` fails closed —
+	// unless you set this flag to true, which is a deliberate
+	// acknowledgement that this datastore should boot open on the
+	// crew-private bridge with no authentication. Leave it false (the
+	// default) for every datastore that should stay authenticated.
+	AllowUnauthenticated bool `yaml:"allow_unauthenticated,omitempty" json:"allow_unauthenticated,omitempty"`
 }
 
 // AutoCredential is one auto-managed secret declaration on a Service.
@@ -254,6 +270,27 @@ type AutoCredential struct {
 	// Some images want POSTGRES_PASSWORD literally; others
 	// (e.g. mariadb) want MARIADB_ROOT_PASSWORD. Empty = use Name.
 	InjectAsEnv string `yaml:"inject_as_env,omitempty" json:"inject_as_env,omitempty"`
+
+	// InjectAsCommand, when non-empty, is a command-argument template
+	// the generated value is spliced into and written to the sidecar's
+	// Command (the docker-run argv) instead of the sidecar env. It
+	// exists for images that read their auth secret from a CLI flag
+	// rather than an env var: the official redis image ignores an env
+	// password and needs `redis-server --requirepass <value>`.
+	//
+	// Each element is copied verbatim except the placeholder token
+	// "{{value}}" (autoCredentialValuePlaceholder), which is replaced
+	// by the generated (or reused) secret. When set, the sidecar
+	// receives the value ONLY via Command — the env literal is skipped
+	// — but the agent env_refs path (InjectToAgents) is unchanged, so
+	// agents still get the credential under Name to authenticate.
+	//
+	// Precedence: command injection only fires when the operator left
+	// Service.Command empty. An operator-supplied Command means the
+	// operator manages the secret themselves, so generation, the
+	// credential row, and the agent env_ref append are all skipped —
+	// mirroring the operator-pinned-env rule for the env channel.
+	InjectAsCommand []string `yaml:"inject_as_command,omitempty" json:"inject_as_command,omitempty"`
 
 	// InjectToAgents controls whether crew agents pick the
 	// credential up automatically. Nil pointer = true; set false
