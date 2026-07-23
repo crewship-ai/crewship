@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -125,6 +126,91 @@ func TestDefaultAllowedDomains_CoverOpenCodeBYOKProviders(t *testing.T) {
 	} {
 		if !al.IsAllowed(host) {
 			t.Errorf("DefaultAllowedDomains missing BYOK provider host %q", host)
+		}
+	}
+}
+
+// TestDomainAllowlist_Wildcard is #1377: an exact-match allowlist is the
+// single biggest Restricted-mode trap — a user who adds "github.com" is
+// surprised that raw.githubusercontent.com / codeload.github.com stay
+// blocked. A "*.example.com" entry must match any subdomain (one or more
+// labels) but must NOT match the apex itself, an unrelated suffix, or a
+// look-alike that merely ends in the same text.
+func TestDomainAllowlist_Wildcard(t *testing.T) {
+	al := NewDomainAllowlist([]string{"*.github.com", "api.anthropic.com"})
+	tests := []struct {
+		host    string
+		allowed bool
+	}{
+		{"raw.github.com", true},         // direct subdomain
+		{"codeload.github.com", true},    // direct subdomain
+		{"objects.a.b.github.com", true}, // deep subdomain
+		{"RAW.GITHUB.COM", true},         // case-insensitive
+		{"raw.github.com:443", true},     // port stripped
+		{"github.com", false},            // apex is NOT covered by "*."
+		{"notgithub.com", false},         // suffix-text look-alike
+		{"github.com.evil.com", false},   // suffix injection
+		{"evilgithub.com", false},        // no dot boundary
+		{"api.anthropic.com", true},      // exact entry still works alongside wildcard
+		{"other.anthropic.com", false},   // exact entry does NOT become a wildcard
+	}
+	for _, tt := range tests {
+		if al.IsAllowed(tt.host) != tt.allowed {
+			t.Errorf("IsAllowed(%q) = %v, want %v", tt.host, !tt.allowed, tt.allowed)
+		}
+	}
+}
+
+// TestDomainAllowlist_WildcardAddAndHash verifies wildcards added after
+// construction take effect and that the /health hash (#1160) reflects
+// wildcard membership — otherwise the orchestrator can't tell a
+// wildcard-only policy change apart and skips a needed sidecar restart.
+func TestDomainAllowlist_WildcardAddAndHash(t *testing.T) {
+	al := NewDomainAllowlist(nil)
+	if al.IsAllowed("raw.githubusercontent.com") {
+		t.Fatal("should not be allowed before add")
+	}
+	al.Add("*.githubusercontent.com")
+	if !al.IsAllowed("raw.githubusercontent.com") {
+		t.Error("wildcard should be allowed after Add")
+	}
+	if al.IsAllowed("githubusercontent.com") {
+		t.Error("Add(*.x) must not allow the apex")
+	}
+
+	a := NewDomainAllowlist([]string{"*.github.com"})
+	b := NewDomainAllowlist([]string{"github.com"})
+	if a.Hash() == b.Hash() {
+		t.Errorf("hash must distinguish a wildcard from its apex: a=%q b=%q", a.Hash(), b.Hash())
+	}
+}
+
+// TestPackageRegistryDomains_Preset is #1377: the one-click "allow package
+// registries" preset must contain the hosts the common language + OS
+// package managers actually dial, so a Restricted crew can npm/pip/cargo/go
+// install without the user enumerating every host by hand.
+func TestPackageRegistryDomains_Preset(t *testing.T) {
+	al := NewDomainAllowlist(PackageRegistryDomains)
+	for _, host := range []string{
+		"registry.npmjs.org",     // npm
+		"pypi.org",               // pip
+		"files.pythonhosted.org", // pip wheels
+		"crates.io",              // cargo
+		"static.crates.io",       // cargo downloads
+		"proxy.golang.org",       // go modules
+		"sum.golang.org",         // go checksum db
+		"deb.debian.org",         // apt (debian)
+		"archive.ubuntu.com",     // apt (ubuntu)
+		"registry-1.docker.io",   // docker hub pulls
+	} {
+		if !al.IsAllowed(host) {
+			t.Errorf("PackageRegistryDomains missing registry host %q", host)
+		}
+	}
+	// The preset must not smuggle in a wildcard that opens unrelated egress.
+	for _, d := range PackageRegistryDomains {
+		if strings.HasPrefix(d, "*.") {
+			t.Errorf("registry preset entry %q is a wildcard; presets should be explicit hosts", d)
 		}
 	}
 }

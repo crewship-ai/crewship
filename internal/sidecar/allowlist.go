@@ -52,39 +52,131 @@ var DefaultAllowedDomains = []string{
 	"api.minimax.io",   // MiniMax (global endpoint)
 }
 
-// DomainAllowlist controls which outbound domains the agent is allowed to reach.
-// Thread-safe.
-type DomainAllowlist struct {
-	mu      sync.RWMutex
-	domains map[string]bool
+// PackageRegistryDomains is the curated "allow package registries" preset
+// (#1377). A Restricted-mode crew can't `npm/pip/cargo/go install` or pull a
+// Docker Hub image unless every host those tools dial is on the allowlist —
+// enumerating them by hand is the second-biggest Restricted-mode trap. This
+// set is what the one-click UI button and the CLI `--allow-package-registries`
+// flag append. Kept to explicit, well-known hosts (no wildcards) so the preset
+// never widens egress beyond the registries it names. Mirrors the frontend
+// list in components/features/crews/registry-presets.ts — keep both in sync.
+var PackageRegistryDomains = []string{
+	// npm
+	"registry.npmjs.org",
+	// pip (PyPI)
+	"pypi.org",
+	"files.pythonhosted.org",
+	// cargo (crates.io)
+	"crates.io",
+	"static.crates.io",
+	"index.crates.io",
+	// Go modules
+	"proxy.golang.org",
+	"sum.golang.org",
+	// apt (Debian + Ubuntu mirrors)
+	"deb.debian.org",
+	"security.debian.org",
+	"archive.ubuntu.com",
+	"security.ubuntu.com",
+	"ports.ubuntu.com",
+	// Docker Hub image pulls
+	"registry-1.docker.io",
+	"auth.docker.io",
+	"index.docker.io",
+	"production.cloudflare.docker.com",
 }
 
-// NewDomainAllowlist creates an allowlist from the given domains.
+// DomainAllowlist controls which outbound domains the agent is allowed to reach.
+// Thread-safe.
+//
+// Two kinds of entry are supported (#1377):
+//   - exact — "api.github.com" matches only that host.
+//   - wildcard — "*.github.com" matches any subdomain (one or more labels:
+//     "raw.github.com", "a.b.github.com") but NOT the apex "github.com" and
+//     NOT a look-alike suffix ("notgithub.com", "github.com.evil.com").
+//
+// Wildcards are stored as their bare suffix (".github.com"); the apex is
+// excluded by requiring at least one label before the suffix. Exact lookups
+// stay O(1); wildcard matching is a short linear scan over the (typically tiny)
+// wildcard set, so it never touches the exact hot path.
+type DomainAllowlist struct {
+	mu       sync.RWMutex
+	exact    map[string]bool
+	wildcard map[string]bool // keyed by suffix incl. leading dot, e.g. ".github.com"
+}
+
+// NewDomainAllowlist creates an allowlist from the given domains. Entries of
+// the form "*.example.com" are treated as subdomain wildcards; everything else
+// is an exact host match.
 func NewDomainAllowlist(domains []string) *DomainAllowlist {
 	al := &DomainAllowlist{
-		domains: make(map[string]bool, len(domains)),
+		exact:    make(map[string]bool, len(domains)),
+		wildcard: make(map[string]bool),
 	}
 	for _, d := range domains {
-		al.domains[strings.ToLower(d)] = true
+		al.add(d)
 	}
 	return al
 }
 
-// IsAllowed returns true if the host (with optional :port) is on the allowlist.
-// Handles IPv6 addresses correctly (e.g. [::1]:443).
+// add classifies and stores one entry. Caller holds the write lock (or holds
+// no references yet, as during construction).
+func (al *DomainAllowlist) add(domain string) {
+	d := strings.ToLower(strings.TrimSpace(domain))
+	if suffix, ok := wildcardSuffix(d); ok {
+		al.wildcard[suffix] = true
+		return
+	}
+	if d != "" {
+		al.exact[d] = true
+	}
+}
+
+// wildcardSuffix reports whether entry is a "*.example.com" wildcard and, if
+// so, returns the suffix to match against (".example.com"). A bare "*." with
+// no domain after it is rejected — it would match everything and is never what
+// the operator meant.
+func wildcardSuffix(entry string) (string, bool) {
+	if !strings.HasPrefix(entry, "*.") {
+		return "", false
+	}
+	suffix := entry[1:] // keep the leading dot: ".example.com"
+	if len(suffix) < 2 {
+		return "", false // bare "*." — refuse to allow everything
+	}
+	return suffix, true
+}
+
+// IsAllowed returns true if the host (with optional :port) is on the allowlist,
+// by exact match or by a "*." subdomain wildcard. Handles IPv6 addresses
+// correctly (e.g. [::1]:443).
 func (al *DomainAllowlist) IsAllowed(host string) bool {
 	al.mu.RLock()
 	defer al.mu.RUnlock()
 
-	h := stripPort(host)
-	return al.domains[strings.ToLower(h)]
+	h := strings.ToLower(stripPort(host))
+	if h == "" {
+		return false
+	}
+	if al.exact[h] {
+		return true
+	}
+	for suffix := range al.wildcard {
+		// HasSuffix + a strictly-longer host guarantees at least one label
+		// before the suffix, so "*.github.com" matches "raw.github.com" but
+		// not the apex "github.com" and not "notgithub.com".
+		if len(h) > len(suffix) && strings.HasSuffix(h, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
-// Add adds a domain to the allowlist.
+// Add adds a domain (exact or "*." wildcard) to the allowlist.
 func (al *DomainAllowlist) Add(domain string) {
 	al.mu.Lock()
 	defer al.mu.Unlock()
-	al.domains[strings.ToLower(domain)] = true
+	al.add(domain)
 }
 
 // Hash returns a short, deterministic content hash of the current domain
@@ -95,9 +187,14 @@ func (al *DomainAllowlist) Add(domain string) {
 // restarting it unconditionally on every exec.
 func (al *DomainAllowlist) Hash() string {
 	al.mu.RLock()
-	domains := make([]string, 0, len(al.domains))
-	for d := range al.domains {
+	domains := make([]string, 0, len(al.exact)+len(al.wildcard))
+	for d := range al.exact {
 		domains = append(domains, d)
+	}
+	// Reconstruct the wildcard's canonical "*.example.com" form so a wildcard
+	// entry hashes differently from its apex ("github.com" vs "*.github.com").
+	for suffix := range al.wildcard {
+		domains = append(domains, "*"+suffix)
 	}
 	al.mu.RUnlock()
 

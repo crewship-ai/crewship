@@ -103,20 +103,51 @@ Each crew can have a network access policy:
   <Tab title="Restricted Mode">
     Only connections to allowlisted domains are permitted. Unknown domains are blocked with HTTP 403.
 
-    Default allowed domains (`internal/sidecar/allowlist.go`):
+    Default allowed domains (`internal/sidecar/allowlist.go` — `DefaultAllowedDomains`):
 
     - **Anthropic** — `api.anthropic.com`, `console.anthropic.com` (OAuth refresh callback)
     - **OpenAI / Codex** — `api.openai.com`, `auth.openai.com` (ChatGPT-subscription login), `chatgpt.com` (subscription routing)
     - **Google / Gemini** — `generativelanguage.googleapis.com`, `oauth2.googleapis.com` (OAuth), `accounts.google.com` (OAuth UI redirect)
     - **Cursor** — `api.cursor.sh`, `api2.cursor.sh` (primary model gateway, since 2026-Q1)
     - **Factory Droid** — `api.factory.ai` (legacy), `app.factory.ai` (CLI installer + API base)
+    - **OpenCode BYOK providers** (#944) — `openrouter.ai`, `api.x.ai` (xAI Grok), `api.groq.com`, `api.deepseek.com`, `api.moonshot.ai` (Kimi), `api.z.ai` (GLM), `api.minimax.io`
+
+    These defaults are always allowed in restricted mode — you never list them yourself.
 
     Additional domains can be added per-crew:
     ```json
     {
       "mode": "restricted",
-      "allowed_domains": ["github.com", "registry.npmjs.org"]
+      "allowed_domains": ["github.com", "*.github.com", "registry.npmjs.org"]
     }
+    ```
+
+    #### Wildcard subdomains
+
+    An entry of the form `*.example.com` matches **any subdomain** — `raw.github.com`,
+    `codeload.github.com`, `a.b.github.com` — with one or more labels. It does **not**
+    match the apex `github.com` itself (list that separately if you need it) and never
+    matches a look-alike suffix such as `notgithub.com` or `github.com.evil.com`. This
+    is the fix for the classic trap where adding `github.com` alone leaves
+    `raw.githubusercontent.com` blocked — use `*.githubusercontent.com`.
+
+    #### Package-registry preset
+
+    The create-crew wizard, the crew **Network** settings tab, and the CLI expose a
+    one-click **“Allow package registries”** action. It appends the curated set a
+    restricted crew needs to run the common package managers, so you don't enumerate
+    every mirror by hand:
+
+    - **npm** — `registry.npmjs.org`
+    - **pip** — `pypi.org`, `files.pythonhosted.org`
+    - **cargo** — `crates.io`, `static.crates.io`, `index.crates.io`
+    - **Go modules** — `proxy.golang.org`, `sum.golang.org`
+    - **apt** — `deb.debian.org`, `security.debian.org`, `archive.ubuntu.com`, `security.ubuntu.com`, `ports.ubuntu.com`
+    - **Docker Hub** — `registry-1.docker.io`, `auth.docker.io`, `index.docker.io`, `production.cloudflare.docker.com`
+
+    From the CLI:
+    ```bash
+    crewship crew update my-crew --network-mode restricted --allow-package-registries
     ```
   </Tab>
 </Tabs>
@@ -132,7 +163,8 @@ The `DomainAllowlist` (`internal/sidecar/allowlist.go`) is a thread-safe set of 
 - Domains are stored lowercase for case-insensitive matching
 - Port numbers are stripped before comparison
 - IPv6 bracket notation is handled correctly
-- Domains can be added at runtime via `allowlist.Add(domain)`
+- `*.example.com` entries are stored as a subdomain-suffix matcher (matches any subdomain, not the apex); everything else is an exact host match
+- Domains can be added at runtime via `allowlist.Add(domain)` (exact or wildcard)
 
 ## Proxy Security
 

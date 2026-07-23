@@ -535,6 +535,16 @@ func TestNormalizeDomain(t *testing.T) {
 		{"", ""},
 		{"localhost", ""}, // no dot
 		{"foo bar.com", ""},
+		// Wildcard subdomains (#1377) — a leading "*." is preserved so the
+		// sidecar allowlist can match every subdomain of a service.
+		{"*.github.com", "*.github.com"},
+		{"*.GITHUB.com", "*.github.com"},
+		{"https://*.githubusercontent.com/x", "*.githubusercontent.com"},
+		{"*.github.com:443", "*.github.com"},
+		{"*.", ""},         // bare wildcard would allow everything
+		{"*.com", "*.com"}, // broad, but the operator's explicit choice
+		{"a.*.com", ""},    // "*" is only valid as the leading label
+		{"*.foo*.com", ""}, // extra "*" is not a valid label
 	}
 	for _, c := range cases {
 		if got := normalizeDomain(c.in); got != c.out {

@@ -8,7 +8,60 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/sidecar"
 )
+
+// mergeDomains unions extra into base, preserving base's order and appending
+// only entries not already present (case-insensitive). Used to fold the
+// package-registry preset into a crew's allowed_domains without duplicating or
+// re-ordering the domains the operator already set (#1377).
+func mergeDomains(base, extra []string) []string {
+	seen := make(map[string]bool, len(base)+len(extra))
+	out := make([]string, 0, len(base)+len(extra))
+	for _, d := range append(append([]string{}, base...), extra...) {
+		key := strings.ToLower(strings.TrimSpace(d))
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, key)
+	}
+	return out
+}
+
+// fetchCrewAllowedDomains reads a crew's current allowed_domains so a
+// preset-only `crew update --allow-package-registries` can union onto them
+// instead of overwriting. Returns an error rather than an empty slice on
+// failure, so a transient GET error never silently wipes the crew's domains.
+func fetchCrewAllowedDomains(client *cli.Client, crewID string) ([]string, error) {
+	resp, err := client.Get("/api/v1/crews/" + crewID)
+	if err != nil {
+		return nil, err
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return nil, err
+	}
+	var crew struct {
+		AllowedDomains []string `json:"allowed_domains"`
+	}
+	if err := cli.ReadJSON(resp, &crew); err != nil {
+		return nil, err
+	}
+	return crew.AllowedDomains, nil
+}
+
+// splitDomainsCSV parses a comma-separated --allowed-domains value into a
+// trimmed, non-empty slice.
+func splitDomainsCSV(v string) []string {
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, d := range parts {
+		if d = strings.TrimSpace(d); d != "" {
+			out = append(out, d)
+		}
+	}
+	return out
+}
 
 // validateCrewFlags rejects negative resource limits and unknown network modes.
 func validateCrewFlags(memoryMB int, cpus float64, ttl int, ttlSet bool, networkMode string) error {
@@ -150,16 +203,15 @@ var crewCreateCmd = &cobra.Command{
 			v, _ := flags.GetBool("allow-private-endpoints")
 			body["allow_private_endpoints"] = v
 		}
+		var domains []string
 		if v, _ := flags.GetString("allowed-domains"); v != "" {
-			domains := strings.Split(v, ",")
-			trimmed := make([]string, 0, len(domains))
-			for _, d := range domains {
-				d = strings.TrimSpace(d)
-				if d != "" {
-					trimmed = append(trimmed, d)
-				}
-			}
-			body["allowed_domains"] = trimmed
+			domains = splitDomainsCSV(v)
+		}
+		if pkg, _ := flags.GetBool("allow-package-registries"); pkg {
+			domains = mergeDomains(domains, sidecar.PackageRegistryDomains)
+		}
+		if len(domains) > 0 {
+			body["allowed_domains"] = domains
 		}
 
 		client := newAPIClient()
@@ -250,21 +302,33 @@ var crewUpdateCmd = &cobra.Command{
 			v, _ := flags.GetBool("allow-private-endpoints")
 			body["allow_private_endpoints"] = v
 		}
-		if flags.Changed("allowed-domains") {
-			v, _ := flags.GetString("allowed-domains")
-			if v == "" {
-				body["allowed_domains"] = []string{}
-			} else {
-				domains := strings.Split(v, ",")
-				trimmed := make([]string, 0, len(domains))
-				for _, d := range domains {
-					d = strings.TrimSpace(d)
-					if d != "" {
-						trimmed = append(trimmed, d)
-					}
+		pkgRegistries, _ := flags.GetBool("allow-package-registries")
+		if flags.Changed("allowed-domains") || pkgRegistries {
+			var base []string
+			switch {
+			case flags.Changed("allowed-domains"):
+				v, _ := flags.GetString("allowed-domains")
+				base = splitDomainsCSV(v)
+			case pkgRegistries:
+				// Preset-only update: fold the registries into the crew's
+				// EXISTING allowed_domains rather than clobbering them.
+				existing, ferr := fetchCrewAllowedDomains(client, crewID)
+				if ferr != nil {
+					return fmt.Errorf("fetch current allowed domains to merge registry preset: %w", ferr)
 				}
-				body["allowed_domains"] = trimmed
+				base = existing
 			}
+			if pkgRegistries {
+				base = mergeDomains(base, sidecar.PackageRegistryDomains)
+			} else {
+				base = mergeDomains(base, nil) // dedup + normalize
+			}
+			// A restricted crew with no domains is meaningful (locks egress),
+			// so send an explicit empty array rather than dropping the field.
+			if base == nil {
+				base = []string{}
+			}
+			body["allowed_domains"] = base
 		}
 
 		if len(body) == 0 {
@@ -382,7 +446,8 @@ func init() {
 	crewCreateCmd.Flags().Float64("cpus", 0, "Container CPU limit")
 	crewCreateCmd.Flags().Int("ttl", 0, "Auto-stop after idle hours (0 = never stop)")
 	crewCreateCmd.Flags().String("network-mode", "", "Network policy mode: free or restricted")
-	crewCreateCmd.Flags().String("allowed-domains", "", "Comma-separated allowed domains for restricted mode")
+	crewCreateCmd.Flags().String("allowed-domains", "", "Comma-separated allowed domains for restricted mode (supports *.example.com wildcards)")
+	crewCreateCmd.Flags().Bool("allow-package-registries", false, "Also allow the common package registries (npm, pip, cargo, go, apt, Docker Hub)")
 	crewCreateCmd.Flags().Bool("allow-private-endpoints", false, "Allow agents to reach a private/LAN model endpoint (RFC1918/loopback); link-local/metadata stay blocked")
 
 	crewUpdateCmd.Flags().String("name", "", "Crew name")
@@ -393,7 +458,8 @@ func init() {
 	crewUpdateCmd.Flags().Float64("cpus", 0, "Container CPU limit")
 	crewUpdateCmd.Flags().Int("ttl", -1, "Auto-stop after idle hours (0 = disable TTL)")
 	crewUpdateCmd.Flags().String("network-mode", "", "Network policy mode: free or restricted")
-	crewUpdateCmd.Flags().String("allowed-domains", "", "Comma-separated allowed domains for restricted mode")
+	crewUpdateCmd.Flags().String("allowed-domains", "", "Comma-separated allowed domains for restricted mode (supports *.example.com wildcards)")
+	crewUpdateCmd.Flags().Bool("allow-package-registries", false, "Append the common package registries (npm, pip, cargo, go, apt, Docker Hub) to the crew's allowed domains")
 	crewUpdateCmd.Flags().Bool("allow-private-endpoints", false, "Allow agents to reach a private/LAN model endpoint (RFC1918/loopback); link-local/metadata stay blocked")
 
 	crewDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")

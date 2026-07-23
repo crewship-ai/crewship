@@ -94,7 +94,9 @@ crewship crew create --name "Backend Team" --memory-mb 4096 --cpus 2.0
 | `--cpus` | `float64` | `0` | Container CPU limit. |
 | `--ttl` | `int` | `0` | Auto-stop after idle hours (0 = never stop). |
 | `--network-mode` | `string` | | Network policy: `free` or `restricted`. |
-| `--allowed-domains` | `string` | | Comma-separated allowed domains for restricted mode. |
+| `--allowed-domains` | `string` | | Comma-separated allowed domains for restricted mode. Supports `*.example.com` subdomain wildcards. |
+| `--allow-package-registries` | `bool` | `false` | Also allow the common package registries (npm, pip, cargo, go, apt, Docker Hub). Appended to `--allowed-domains`. |
+| `--allow-private-endpoints` | `bool` | `false` | Allow agents to reach a private/LAN model endpoint (RFC1918/loopback). Link-local and cloud-metadata addresses stay blocked. Subject to the instance ceiling `CREWSHIP_ALLOW_PRIVATE_ENDPOINTS`. |
 
 ---
 
@@ -116,7 +118,9 @@ crewship crew update <slug-or-id> --memory-mb 8192 --cpus 4.0
 | `--cpus` | `float64` | | Container CPU limit. |
 | `--ttl` | `int` | `-1` | Auto-stop after idle hours (0 = disable TTL). |
 | `--network-mode` | `string` | | Network policy: `free` or `restricted`. |
-| `--allowed-domains` | `string` | | Comma-separated allowed domains. Pass empty string to clear. |
+| `--allowed-domains` | `string` | | Comma-separated allowed domains. Supports `*.example.com` subdomain wildcards. Pass empty string to clear. |
+| `--allow-package-registries` | `bool` | `false` | Append the common package registries (npm, pip, cargo, go, apt, Docker Hub) to the crew's allowed domains. When passed alone it unions onto the crew's existing domains rather than replacing them. |
+| `--allow-private-endpoints` | `bool` | `false` | Allow agents to reach a private/LAN model endpoint (RFC1918/loopback). Link-local and cloud-metadata addresses stay blocked. Subject to the instance ceiling `CREWSHIP_ALLOW_PRIVATE_ENDPOINTS`. |
 
 ---
 
