@@ -342,3 +342,28 @@ func ShortID(id string) string {
 	}
 	return id
 }
+
+// CrewServiceStatus is one live sidecar container's raw facts, read
+// directly from the container runtime — no DB, no manifest. Name has
+// the "<namePrefix>-svc-<crewSlug>-" prefix stripped, so it matches
+// the service name from the manifest's services: block. Deliberately
+// thin: type inference (postgres/redis/…) is an API-layer concern
+// (inferDatastoreType), not something the provider should know about.
+type CrewServiceStatus struct {
+	Name   string   // service name (manifest name, prefix stripped)
+	Image  string   // image reference the container is currently running
+	Status string   // docker's human status string, e.g. "Up 2 hours"
+	State  string   // "running" | "stopped" | "creating" | "error" — same vocabulary as ContainerStatus
+	Ports  []string // "5432/tcp" etc, container-internal only (sidecars never publish to the host)
+}
+
+// ServiceLister is an optional interface for container providers that can
+// enumerate a crew's live sidecar containers straight from the daemon — the
+// live counterpart to the crews.services_json DB snapshot, which can drift
+// (a sidecar stopped by hand, or OOM-killed, still reads "configured" there).
+// The docker provider implements it; providers that don't (apple-container
+// today) leave the GET /services endpoint answering an empty list rather
+// than erroring.
+type ServiceLister interface {
+	ListCrewServices(ctx context.Context, crewSlug string) ([]CrewServiceStatus, error)
+}

@@ -356,6 +356,7 @@ func init() {
 	crewCmd.AddCommand(crewDeleteCmd)
 	crewCmd.AddCommand(crewStatusCmd)
 	crewCmd.AddCommand(crewContainerStatusCmd)
+	crewCmd.AddCommand(crewServicesCmd)
 	crewCmd.AddCommand(crewMemberCmd)
 	crewCmd.AddCommand(crewConnectCmd)
 	crewCmd.AddCommand(crewDisconnectCmd)

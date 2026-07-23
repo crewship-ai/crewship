@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/license"
+	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -64,6 +65,11 @@ type CrewHandler struct {
 	license     *license.License
 	socketPath  string
 	provisioner crewProvisionEnqueuer
+	// container reaches the live container runtime for the /services live
+	// inventory endpoint (#services). nil when Docker isn't wired (tests,
+	// --no-docker) — Services then answers an empty list rather than
+	// erroring. Set via SetContainer.
+	container provider.ContainerProvider
 }
 
 // NewCrewHandler creates a CrewHandler with the given database and logger.
@@ -118,6 +124,10 @@ func (h *CrewHandler) SetLicense(lic *license.License) { h.license = lic }
 // SetSocketPath sets the Unix socket path used to restart crew containers via IPC.
 
 func (h *CrewHandler) SetSocketPath(path string) { h.socketPath = path }
+
+// SetContainer wires the container provider used by the live service
+// inventory endpoint (GET /api/v1/crews/{crewId}/services).
+func (h *CrewHandler) SetContainer(cp provider.ContainerProvider) { h.container = cp }
 
 // restartCrewContainer stops the crew container via IPC so it gets recreated
 // with the new network policy on the next agent run.

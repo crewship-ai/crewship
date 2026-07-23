@@ -36,6 +36,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	if r.hub != nil {
 		crews.SetHub(r.hub)
 	}
+	// Live service inventory (GET .../services) reads the container
+	// runtime directly; nil (tests / --no-docker) makes it answer an
+	// empty list rather than erroring — see crew_service_inventory.go.
+	crews.SetContainer(r.keeperContainer)
 	agents := NewAgentHandler(r.db, r.logger)
 	r.agentHandler = agents
 	if r.hub != nil {
@@ -116,6 +120,11 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// + agents + runtimes (#862). Literal "capabilities" beats the {crewId}
 	// catch-all in net/http matching, so no ordering hazard.
 	r.mux.Handle("GET /api/v1/crews/{crewId}/capabilities", authed(wsCtx(http.HandlerFunc(crews.Capabilities))))
+	// Live-Docker-read service inventory (status/ports/type of the crew's
+	// running sidecar containers). Literal "services" beats the {crewId}
+	// catch-all the same way "capabilities" does above, so no ordering
+	// hazard.
+	r.mux.Handle("GET /api/v1/crews/{crewId}/services", authed(wsCtx(http.HandlerFunc(crews.Services))))
 	r.authedMut("PATCH", "/api/v1/crews/{crewId}", roleManage, crews.Update)
 	r.authedMut("PUT", "/api/v1/crews/{crewId}", roleManage, crews.Update)
 	r.authedMut("DELETE", "/api/v1/crews/{crewId}", roleManage, crews.Delete)
