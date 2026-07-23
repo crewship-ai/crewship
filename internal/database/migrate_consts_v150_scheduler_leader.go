@@ -1,6 +1,6 @@
 package database
 
-// migrationSchedulerLeader (v149) adds the single-row lease table that backs
+// migrationSchedulerLeader (v150) adds the single-row lease table that backs
 // scheduler leader election (issue #1376). Before multi-replica deploys, the
 // agent cron scheduler, the pipeline cron scheduler, and the recurring-issue
 // dispatcher would each tick on every replica and double-fire; the lease lets

@@ -10,7 +10,7 @@ import (
 )
 
 // newTestDB returns an in-memory SQLite DB with the scheduler_leader table
-// created. The DDL mirrors migration v149 (migrate_consts_v149_scheduler_leader.go)
+// created. The DDL mirrors migration v150 (migrate_consts_v150_scheduler_leader.go)
 // so the store is exercised against the real column set.
 func newTestDB(t *testing.T) *sql.DB {
 	t.Helper()
