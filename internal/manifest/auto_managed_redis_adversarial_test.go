@@ -128,64 +128,49 @@ func TestRedis_ReusePath_RejectsMalformedPrior(t *testing.T) {
 	}
 }
 
-// --- Angle 5 (CRUX): operator-precedence bypass -----------------------
+// --- Angle 5 (CRUX): operator-precedence must not defeat always-auth ----
 //
-// The feature's headline guarantee is "a stock redis sidecar is ALWAYS
-// password-protected." Precedence skips generation when svc.Command is
-// non-empty. That means an operator (or a crafted manifest) can ship a
-// redis with command:["redis-server"] — NO --requirepass — and expand
-// leaves it untouched: no credential, no agent env_ref, and crucially
-// a PASSWORDLESS redis reachable by every container on the crew bridge.
+// The feature's headline guarantee is "a recognised datastore sidecar is
+// ALWAYS authenticated." Precedence still lets an operator own the secret
+// by supplying their own Command — but if that command drops auth (no
+// --requirepass), the apply must FAIL rather than silently boot a
+// PASSWORDLESS redis reachable by every container on the crew bridge.
 //
-// This test CONFIRMS the bypass. It is by-design precedence (mirrors
-// operator-pinned-env), so it is reported, not "fixed" — but it means
-// the always-auth guarantee does NOT hold whenever an operator supplies
-// their own Command. See report, Angle 5, for the blunt verdict.
-func TestRedis_OperatorPasswordlessCommand_DefeatsAlwaysAuth(t *testing.T) {
+// #1363 closes this gap: an operator command without auth on a catalog
+// datastore is rejected unless the service explicitly sets
+// allow_unauthenticated: true.
+func TestRedis_OperatorPasswordlessCommand_IsRejected(t *testing.T) {
 	passwordless := []string{"redis-server"} // no --requirepass at all
 	spec := &CrewSpec{
 		Services: []Service{{Name: "redis", Image: "redis:7-alpine", Command: passwordless}},
 		Agents:   []Agent{{Slug: "lead", AgentRole: "LEAD"}},
 	}
-	planned, err := expandAutoCredentialsInCrewSpec(spec, "")
-	if err != nil {
-		t.Fatalf("expand: %v", err)
+	_, err := expandAutoCredentialsInCrewSpec(spec, "")
+	if err == nil {
+		t.Fatalf("expected apply to fail for a passwordless redis command; got nil error")
 	}
-
-	// CONFIRMED HOLE: no credential is minted for the passwordless redis.
-	if len(planned) != 0 {
-		t.Fatalf("expected precedence to suppress generation (documents the bypass); got %+v", planned)
-	}
-	// The redis boots exactly as the operator wrote it — with NO auth.
-	if !reflect.DeepEqual(spec.Services[0].Command, passwordless) {
-		t.Fatalf("operator command mutated: %+v", spec.Services[0].Command)
-	}
-	if strings.Contains(strings.Join(spec.Services[0].Command, " "), "--requirepass") {
-		t.Fatalf("unexpected requirepass injected; test premise broken")
-	}
-	// No agent env_ref either, so nothing signals the missing auth.
-	if containsString(spec.Agents[0].EnvRefs, "REDIS_PASSWORD") {
-		t.Fatalf("agent got REDIS_PASSWORD env_ref for a passwordless redis: %+v", spec.Agents[0].EnvRefs)
+	// The error must name the service, the flag to add, and the opt-out.
+	for _, want := range []string{"redis", "--requirepass", "allow_unauthenticated"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
 	}
 }
 
 // A partial operator command that names a DIFFERENT flag (still no
-// requirepass) is likewise passed through untouched — the precedence
-// gate is "any non-empty Command", it does not inspect the args.
-func TestRedis_OperatorNonAuthCommand_StillBypasses(t *testing.T) {
+// requirepass) is likewise rejected — the enforcement inspects the args
+// for the datastore's auth flag, it does not merely check "any command".
+func TestRedis_OperatorNonAuthCommand_IsRejected(t *testing.T) {
 	cmd := []string{"redis-server", "--maxmemory", "256mb"}
 	spec := &CrewSpec{
 		Services: []Service{{Name: "redis", Image: "redis:7-alpine", Command: cmd}},
 	}
-	planned, err := expandAutoCredentialsInCrewSpec(spec, "")
-	if err != nil {
-		t.Fatalf("expand: %v", err)
+	_, err := expandAutoCredentialsInCrewSpec(spec, "")
+	if err == nil {
+		t.Fatalf("non-auth operator command must be rejected; got nil error")
 	}
-	if len(planned) != 0 {
-		t.Fatalf("non-auth operator command must still bypass; got %+v", planned)
-	}
-	if !reflect.DeepEqual(spec.Services[0].Command, cmd) {
-		t.Fatalf("command mutated: %+v", spec.Services[0].Command)
+	if !strings.Contains(err.Error(), "--requirepass") {
+		t.Errorf("error %q should name the missing auth flag", err.Error())
 	}
 }
 

@@ -233,6 +233,22 @@ type Service struct {
 	// credential, so validate.go refuses auto_credentials in that
 	// configuration.
 	AutoCredentials []AutoCredential `yaml:"auto_credentials,omitempty" json:"auto_credentials,omitempty"`
+
+	// AllowUnauthenticated is the explicit, acknowledged opt-out from
+	// the "recognised datastores are always authenticated" invariant.
+	//
+	// When a service's image resolves an auto-credential from the
+	// catalog (a known datastore: postgres/redis/mysql/...), Crewship
+	// normally mints and injects the auth secret for you. If you
+	// override the sidecar's `command:` (or the auth env) and thereby
+	// take ownership of the channel, that override MUST itself provide
+	// authentication (e.g. `--requirepass <secret>`, or a non-empty
+	// password env). If it does not, `crewship apply` fails closed —
+	// unless you set this flag to true, which is a deliberate
+	// acknowledgement that this datastore should boot open on the
+	// crew-private bridge with no authentication. Leave it false (the
+	// default) for every datastore that should stay authenticated.
+	AllowUnauthenticated bool `yaml:"allow_unauthenticated,omitempty" json:"allow_unauthenticated,omitempty"`
 }
 
 // AutoCredential is one auto-managed secret declaration on a Service.

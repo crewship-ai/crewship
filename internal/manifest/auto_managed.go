@@ -91,25 +91,39 @@ func expandAutoCredentialsInCrewSpec(spec *CrewSpec, existingServicesJSON string
 	for i := range spec.Services {
 		svc := &spec.Services[i]
 
-		// Snapshot the env keys the operator literally pinned in the
-		// manifest, BEFORE ResolveEnv overlays catalog defaults. This
-		// is the only way to tell "operator wrote
-		// POSTGRES_PASSWORD: my-literal" apart from "catalog set
-		// POSTGRES_USER=postgres" once the two maps have merged.
+		// Snapshot what the operator literally wrote for this service,
+		// BEFORE ResolveEnv overlays catalog defaults. This is the only
+		// way to tell "operator wrote POSTGRES_PASSWORD: my-literal"
+		// apart from "catalog set POSTGRES_USER=postgres" once the two
+		// maps have merged.
+		//
+		//   - operatorEnvKeys: keys the operator supplied at all, even
+		//     with an empty value. An operator who writes
+		//     `POSTGRES_PASSWORD: ""` has taken ownership of the auth
+		//     channel but provided NO auth — that is a rejected config
+		//     for a catalog datastore, not a silent generate.
+		//   - operatorEnvAuth: keys the operator supplied with a
+		//     non-empty value — genuine operator-owned auth.
 		//
 		// The sidecar catalog deliberately never lists an
 		// auto-credential's inject_as_env as a default in its Env map
 		// (passwords are minted, not defaulted), so any key collision
-		// here is genuinely operator-pinned and we treat it as
-		// authoritative — skip generation, skip the DB row, skip the
-		// agent env_refs append. Mirrors the schema docstring on
-		// ResolveEnv: "Operator values always win on key collision."
-		operatorPinned := make(map[string]bool, len(svc.Env))
+		// here is genuinely operator-supplied.
+		operatorEnvKeys := make(map[string]bool, len(svc.Env))
+		operatorEnvAuth := make(map[string]bool, len(svc.Env))
 		for k, v := range svc.Env {
+			operatorEnvKeys[k] = true
 			if v != "" {
-				operatorPinned[k] = true
+				operatorEnvAuth[k] = true
 			}
 		}
+		operatorSuppliedCommand := len(svc.Command) > 0
+
+		// Whether this service's image is a recognised catalog datastore
+		// — the "always authenticated" invariant is scoped to those.
+		// Operators own non-catalog images entirely (explicit
+		// auto_credentials on an unknown image are not force-authed).
+		_, isKnownDatastore := lookupSidecarDefaults(svc.Image)
 
 		// Apply sugar defaults to env (postgres → POSTGRES_USER=postgres etc.)
 		if resolved := svc.ResolveEnv(); resolved != nil {
@@ -123,23 +137,67 @@ func expandAutoCredentialsInCrewSpec(spec *CrewSpec, existingServicesJSON string
 			injectKey := ac.EffectiveInjectAsEnv()
 			cmdInject := len(ac.InjectAsCommand) > 0
 
-			// Precedence: an operator who already declared the auth for
-			// this service owns the secret — we skip generation, the
-			// credential row, and the agent env_ref append. For env-
-			// injected creds that means an operator-pinned env literal;
-			// for command-injected creds (redis) it means a non-empty
-			// operator-supplied Command (they wrote their own
-			// --requirepass, or any other command). This mirrors the
-			// "operator values always win on collision" contract.
+			// Precedence + always-auth enforcement (#1363). When the
+			// operator has taken ownership of this credential's channel
+			// (supplied their own command for a command-injected cred,
+			// or pinned the env key for an env-injected one), we do not
+			// generate. But for a recognised catalog datastore the
+			// operator's config MUST itself carry authentication —
+			// otherwise the datastore would boot open on the crew
+			// bridge and the "always authenticated" invariant breaks.
+			//
+			//   - operator owns channel + provides auth  → skip (theirs)
+			//   - operator owns channel + no auth, known → error, unless
+			//                                               allow_unauthenticated
+			//   - operator did not touch the channel      → generate
+			var (
+				operatorOwnsChannel bool
+				operatorAuthOK      bool
+				authFlag            string // the flag the operator must supply (command channel)
+			)
 			if cmdInject {
-				if len(svc.Command) > 0 {
+				operatorOwnsChannel = operatorSuppliedCommand
+				if operatorOwnsChannel {
+					if flag, ok := authFlagFromCommandTemplate(ac.InjectAsCommand); ok {
+						authFlag = flag
+						operatorAuthOK = commandProvidesAuth(svc.Command, flag)
+					}
+				}
+			} else {
+				operatorOwnsChannel = operatorEnvKeys[injectKey]
+				operatorAuthOK = operatorEnvAuth[injectKey]
+			}
+
+			if operatorOwnsChannel {
+				if operatorAuthOK {
+					// Operator owns the secret and it carries auth; no
+					// generation, no credential row, no agent env_refs
+					// append. svc.Command / svc.Env already carry the
+					// operator's value.
 					continue
 				}
-			} else if operatorPinned[injectKey] {
-				// Operator-pinned literal wins; no sugar generation,
-				// no credential row, no agent env_refs append.
-				// svc.Env already carries the operator's value from
-				// the ResolveEnv overlay above.
+				// Operator took the channel but supplied no auth.
+				if isKnownDatastore && !svc.AllowUnauthenticated {
+					if cmdInject {
+						fix := "add its auth flag"
+						if authFlag != "" {
+							fix = fmt.Sprintf("add %s <secret> to the command", authFlag)
+						}
+						return nil, fmt.Errorf(
+							"service %q (image %q) is a recognised datastore that must boot authenticated, "+
+								"but its operator-supplied command sets no authentication — %s, "+
+								"or set allow_unauthenticated: true on the service to run it open",
+							svc.Name, svc.Image, fix)
+					}
+					return nil, fmt.Errorf(
+						"service %q (image %q) is a recognised datastore that must boot authenticated, "+
+							"but the operator-supplied env %s is empty — set %s to a non-empty password, "+
+							"or set allow_unauthenticated: true on the service to run it open",
+						svc.Name, svc.Image, injectKey, injectKey)
+				}
+				// Explicitly acknowledged open datastore, or a
+				// non-catalog image the operator owns outright: skip
+				// silently, exactly as legacy precedence did.
 				continue
 			}
 			if first, dup := seen[ac.Name]; dup {
@@ -237,6 +295,50 @@ func reuseOrGenerate(ac AutoCredential, prior Service) (string, bool) {
 		return "", false
 	}
 	return value, true
+}
+
+// authFlagFromCommandTemplate derives the authentication flag an
+// operator must supply when they override a command-injected
+// datastore's Command. It returns the fixed (non-placeholder) token
+// immediately preceding the first {{value}} placeholder in the
+// AutoCredential's InjectAsCommand template — for the redis template
+// []{"redis-server", "--requirepass", "{{value}}"} that is
+// "--requirepass". Kept general (no hardcoded "redis"): any catalog
+// datastore whose secret rides a `--flag <value>` argv exposes its
+// flag this way.
+//
+// Returns ("", false) when the template has no placeholder, when the
+// placeholder is the first token (nothing precedes it), or when the
+// preceding token is itself the placeholder (no fixed flag to name).
+func authFlagFromCommandTemplate(template []string) (string, bool) {
+	for i, tok := range template {
+		if tok == autoCredentialValuePlaceholder {
+			if i == 0 {
+				return "", false
+			}
+			prev := template[i-1]
+			if prev == autoCredentialValuePlaceholder {
+				return "", false
+			}
+			return prev, true
+		}
+	}
+	return "", false
+}
+
+// commandProvidesAuth reports whether an operator-supplied command
+// actually authenticates the datastore: it must contain the auth flag
+// token followed by a non-empty argument. A trailing flag (no argument
+// after it) or a flag followed by an empty string does NOT count. When
+// the flag appears more than once, any occurrence with a non-empty
+// argument satisfies the check.
+func commandProvidesAuth(command []string, flag string) bool {
+	for i, tok := range command {
+		if tok == flag && i+1 < len(command) && command[i+1] != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // renderCommandTemplate returns a fresh argv with every

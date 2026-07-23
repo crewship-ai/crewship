@@ -578,12 +578,16 @@ func TestExpandAutoCredentials_OperatorPinnedEnvWins(t *testing.T) {
 	}
 }
 
-// TestExpandAutoCredentials_OperatorPinnedEmptyStringIgnored makes
-// the precedence rule precise: an empty-string operator value is
-// treated as "not pinned" (fall through to sugar). Otherwise a
-// half-edited manifest with `POSTGRES_PASSWORD: ""` would
-// silently nuke the auto-credential path.
-func TestExpandAutoCredentials_OperatorPinnedEmptyStringIgnored(t *testing.T) {
+// TestExpandAutoCredentials_OperatorPinnedEmptyStringRejected makes
+// the precedence rule precise under the #1363 always-auth invariant:
+// an empty-string operator value on a recognised datastore means the
+// operator took ownership of the auth channel but supplied NO auth, so
+// the apply is REJECTED (a half-edited manifest with
+// `POSTGRES_PASSWORD: ""` must not silently boot an open datastore, and
+// must not silently mint a value the operator did not ask for either).
+// The operator fixes it by supplying a real password or opting out with
+// allow_unauthenticated: true (covered in the authguard suite).
+func TestExpandAutoCredentials_OperatorPinnedEmptyStringRejected(t *testing.T) {
 	spec := CrewSpec{
 		Services: []Service{
 			{
@@ -593,15 +597,11 @@ func TestExpandAutoCredentials_OperatorPinnedEmptyStringIgnored(t *testing.T) {
 			},
 		},
 	}
-	planned, err := expandAutoCredentialsInCrewSpec(&spec, "")
-	if err != nil {
-		t.Fatalf("expand: %v", err)
+	_, err := expandAutoCredentialsInCrewSpec(&spec, "")
+	if err == nil {
+		t.Fatalf("empty-string operator password on a catalog datastore must be rejected; got nil")
 	}
-	if len(planned) != 1 || planned[0].Name != "POSTGRES_PASSWORD" {
-		t.Fatalf("empty-string operator value should fall through to sugar; got %+v", planned)
-	}
-	got := spec.Services[0].Env["POSTGRES_PASSWORD"]
-	if len(got) != 64 {
-		t.Errorf("expected 64-char generated value, got %q (len=%d)", got, len(got))
+	if !strings.Contains(err.Error(), "POSTGRES_PASSWORD") {
+		t.Errorf("error %q should name the empty auth env", err.Error())
 	}
 }
