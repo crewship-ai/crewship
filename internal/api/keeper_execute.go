@@ -268,6 +268,15 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	// RATE_LIMITED is treated as unavailable here — the same not-found path —
 	// so a stale/revoked secret is never injected even though the row is not
 	// yet soft-deleted.
+	// #1373: a credential grant may be a short-lived LEASE (agent_credentials
+	// .expires_at). An expired lease is treated exactly like a missing
+	// assignment here — the same not-found path — so a lapsed lease can never
+	// be injected. NULL expires_at is a standing grant and always passes.
+	// leaseNow is the fixed-width RFC3339 UTC comparison value; all lease
+	// timestamps are written in the same form, so a TEXT comparison orders
+	// correctly.
+	leaseNow := time.Now().UTC().Format(time.RFC3339)
+
 	var credName string
 	var secLevel int
 	err = h.db.QueryRowContext(r.Context(), `
@@ -275,8 +284,9 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		FROM credentials c
 		JOIN agent_credentials ac ON ac.credential_id = c.id
 		WHERE c.id = ? AND ac.agent_id = ? AND c.workspace_id = ?
-		  AND c.status = 'ACTIVE' AND c.deleted_at IS NULL`,
-		body.CredentialID, body.RequestingAgentID, body.WorkspaceID).Scan(&credName, &secLevel)
+		  AND c.status = 'ACTIVE' AND c.deleted_at IS NULL
+		  AND (ac.expires_at IS NULL OR ac.expires_at > ?)`,
+		body.CredentialID, body.RequestingAgentID, body.WorkspaceID, leaseNow).Scan(&credName, &secLevel)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "credential not found")
@@ -477,8 +487,10 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		`SELECT 1 FROM credentials c
 		 JOIN agent_credentials ac ON ac.credential_id = c.id
 		 WHERE c.id = ? AND ac.agent_id = ? AND c.workspace_id = ?
-		   AND c.status = 'ACTIVE' AND c.deleted_at IS NULL`,
-		body.CredentialID, body.RequestingAgentID, body.WorkspaceID).Scan(&stillActive); err != nil {
+		   AND c.status = 'ACTIVE' AND c.deleted_at IS NULL
+		   AND (ac.expires_at IS NULL OR ac.expires_at > ?)`,
+		body.CredentialID, body.RequestingAgentID, body.WorkspaceID,
+		time.Now().UTC().Format(time.RFC3339)).Scan(&stillActive); err != nil {
 		h.logger.Warn("keeper execute: credential no longer active at inject time",
 			"credential_id", body.CredentialID, "error", err)
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "credential not found"})

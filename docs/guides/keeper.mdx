@@ -157,6 +157,20 @@ Non-SECRET credentials reach agents through their normal delivery paths
 (env vars, `/secrets/` files) instead.
 </Note>
 
+<Note>
+**Credential leases (TTL) apply on both delivery paths.** A grant issued with
+`--ttl` (see [Short-lived leases](/guides/credentials#short-lived-leases-ttl))
+is refused once it lapses, whichever path would inject it — not only at
+`/keeper/execute`. For **SECRET** credentials that is this execute path (the
+lookup and the pre-injection re-validation both require `expires_at > now`). For
+**boot-delivered provider keys** (`API_KEY` / `AI_CLI_TOKEN`, e.g. the Anthropic
+key) the same gate is applied by the internal credential listing the sidecar
+consumes at boot and by the sidecar's credential reaper, so an expired lease is
+never delivered and a key delivered while valid is evicted from the container's
+in-memory store within one reaper interval (~60s) of its TTL lapsing. A leased
+provider key does **not** survive for the container's whole lifetime.
+</Note>
+
 <Steps>
   <Step title="Agent sends execute request">
     ```json
