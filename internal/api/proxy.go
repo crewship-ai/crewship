@@ -63,6 +63,14 @@ func (h *ProxyHandler) ipcPut(ctx context.Context, path string, body io.Reader) 
 	return h.client.Do(req)
 }
 
+func (h *ProxyHandler) ipcDelete(ctx context.Context, path string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, "DELETE", "http://crewshipd"+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	return h.client.Do(req)
+}
+
 func (h *ProxyHandler) proxyJSON(w http.ResponseWriter, resp *http.Response) {
 	defer resp.Body.Close()
 	w.Header().Set("Content-Type", "application/json")

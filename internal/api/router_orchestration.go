@@ -470,6 +470,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/crews/{crewId}/files", authed(wsCtx(http.HandlerFunc(proxy.CrewFiles))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/files/download", authed(wsCtx(http.HandlerFunc(proxy.CrewFileDownload))))
 	r.authedMut("PUT", "/api/v1/crews/{crewId}/files/save", roleCreate, proxy.CrewFileSave)
+	r.authedMut("DELETE", "/api/v1/crews/{crewId}/files/delete", roleCreate, proxy.CrewFileDelete)
 	r.mux.Handle("GET /api/v1/agents/{agentId}/container-files", authed(wsCtx(http.HandlerFunc(proxy.AgentContainerFiles))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}/git-log", authed(wsCtx(http.HandlerFunc(proxy.AgentGitLog))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/git-diff", authed(wsCtx(http.HandlerFunc(proxy.CrewGitDiff))))
