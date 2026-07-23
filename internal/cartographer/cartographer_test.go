@@ -78,7 +78,10 @@ CREATE TABLE journal_entries (
     refs TEXT NOT NULL DEFAULT '{}',
     trace_id TEXT,
     span_id TEXT,
-    expires_at TEXT
+    expires_at TEXT,
+    seq INTEGER NOT NULL DEFAULT 0,
+    prev_hash TEXT NOT NULL DEFAULT '',
+    entry_hash TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE checkpoints (

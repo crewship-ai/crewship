@@ -116,7 +116,10 @@ func TestEmitFileWrittenEntry_Projection(t *testing.T) {
 		trace_id TEXT,
 		span_id TEXT,
 		expires_at TEXT,
-		priority TEXT NOT NULL DEFAULT 'normal'
+		priority TEXT NOT NULL DEFAULT 'normal',
+		seq INTEGER NOT NULL DEFAULT 0,
+		prev_hash TEXT NOT NULL DEFAULT '',
+		entry_hash TEXT NOT NULL DEFAULT ''
 	)`)
 
 	emitFileWrittenEntry(w, "crew-1", fileserver.FileEvent{
