@@ -951,6 +951,19 @@ const skillInvocationSemCap = 64
 // protection against daemon saturation / host OOM (finding P1).
 const defaultRunSemCap = 8
 
+// runSemCapWarnThreshold is the soft ceiling above which a configured agent-run
+// concurrency cap is almost certainly a mistake. The run path is the heaviest
+// work the daemon does — each admitted run fans out a sidecar start, ~6 setup
+// execs, and a long-lived agent CLI exec, all against one Docker daemon — which
+// is exactly why the semaphore exists (2026-06 audit finding P1, daemon
+// saturation / host OOM). A cap far above the default of 8 reopens that window
+// and can also turn into a provider rate-limit storm. We deliberately do NOT
+// clamp: an operator on a large host may legitimately want more, and silently
+// capping their value would be its own footgun. Instead we warn loudly at
+// construction so an accidental extra zero (an intended 80 typed as 800, or a
+// stray 1000000) is visible at startup rather than discovered under load.
+const runSemCapWarnThreshold = 128
+
 // resolveRunSemCap resolves the agent-run concurrency cap with precedence
 // env > config > built-in default: CREWSHIP_MAX_CONCURRENT_RUNS wins when
 // set to a valid positive integer; otherwise configDefault (typically
@@ -1023,6 +1036,16 @@ func New(
 		opt(&o)
 	}
 	runSemCap := resolveRunSemCap(o.maxConcurrentRunsDefault)
+	if runSemCap > runSemCapWarnThreshold && logger != nil {
+		logger.Warn("orchestrator max concurrent runs is far above the default; "+
+			"each run drives a full container fan-out against a single Docker "+
+			"daemon, so a very high cap can saturate the host or trigger a "+
+			"provider rate-limit storm (2026-06 audit finding P1) — verify this "+
+			"was intentional",
+			"max_concurrent_runs", runSemCap,
+			"default", defaultRunSemCap,
+			"warn_threshold", runSemCapWarnThreshold)
+	}
 	return &Orchestrator{
 		container:          container,
 		state:              state,

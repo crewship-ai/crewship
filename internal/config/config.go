@@ -403,7 +403,13 @@ func applyEnvOverrides(cfg *Config) {
 			slog.Warn("ignoring invalid CREWSHIP_PORT", "value", v, "error", err)
 		}
 	}
-	if v := os.Getenv("CREWSHIP_MAX_CONCURRENT_RUNS"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("CREWSHIP_MAX_CONCURRENT_RUNS")); v != "" {
+		// TrimSpace mirrors orchestrator.resolveRunSemCap so the two readers of
+		// this env var can never disagree on whitespace: a padded value like
+		// " 16 " is honored here just as it is there (previously it was dropped
+		// with a misleading "ignoring invalid" warning while the orchestrator
+		// silently applied it). A padded non-positive value now reaches Validate
+		// and fails loud, matching the unpadded case.
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.Orchestrator.MaxConcurrentRuns = n
 		} else {

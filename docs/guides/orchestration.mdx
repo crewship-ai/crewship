@@ -85,6 +85,7 @@ Tuning guidance:
 - Raising the cap increases parallelism, but the practical ceiling is whichever comes first: host RAM (each run's container + agent CLI + MCP processes) or your LLM provider's own rate limits.
 - Idle agents and provisioned-but-inactive crews cost nothing against this cap -- it only limits agent runs actively executing at a given moment.
 - The semaphore is sized once when the orchestrator is constructed at server startup. Changing `CREWSHIP_MAX_CONCURRENT_RUNS` or `orchestrator.max_concurrent_runs` **requires a server restart** to take effect.
+- There is no hard upper limit, but a value above **128** is treated as suspicious: the server emits a loud `WARN` at startup (`orchestrator max concurrent runs is far above the default`) so an accidental extra zero -- an intended `80` typed as `800`, or a stray `1000000` -- is caught before it saturates the daemon. The value is still honored; the warning is advisory only.
 
 ## Task States
 
