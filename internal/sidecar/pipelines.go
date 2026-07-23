@@ -139,9 +139,12 @@ func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest, au
 		return testRes.status, testRes.body
 	}
 	// Decode test_run result to confirm passed=true and capture the
-	// timestamp the store will check at save time.
+	// save_token the store gate will require at save time (#1371). The token
+	// is the server's proof that THIS definition just passed the dry-run —
+	// the save step no longer trusts a forgeable last_test_run_passed flag.
 	var testRunResult struct {
-		Status string `json:"status"`
+		Status    string `json:"status"`
+		SaveToken string `json:"save_token"`
 	}
 	_ = json.Unmarshal(testRes.body, &testRunResult)
 	// The internal test_run dry-run-validates (fast, no agent execution), so
@@ -155,19 +158,21 @@ func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest, au
 		})
 	}
 
-	// Step 2: forward to internal save with author injected from IPC.
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	// Step 2: forward to internal save with author injected from IPC. The
+	// save_token minted by the internal test_run above is the store gate's
+	// proof-of-test — InternalSave no longer trusts a body-supplied
+	// last_test_run_passed flag (#1371). If the test_run minted no token
+	// (secret unwired), the save fails the gate closed, which is correct.
 	saveBody, err := json.Marshal(map[string]any{
-		"workspace_id":         s.ipc.WorkspaceID,
-		"slug":                 slug,
-		"name":                 body.Name,
-		"description":          body.Description,
-		"definition":           body.Definition,
-		"author_crew_id":       s.ipc.CrewID,
-		"author_agent_id":      authorAgentID,
-		"author_chat_id":       s.ipc.ChatID,
-		"last_test_run_at":     now,
-		"last_test_run_passed": true,
+		"workspace_id":    s.ipc.WorkspaceID,
+		"slug":            slug,
+		"name":            body.Name,
+		"description":     body.Description,
+		"definition":      body.Definition,
+		"author_crew_id":  s.ipc.CrewID,
+		"author_agent_id": authorAgentID,
+		"author_chat_id":  s.ipc.ChatID,
+		"save_token":      testRunResult.SaveToken,
 	})
 	if err != nil {
 		return http.StatusInternalServerError, mustJSON(map[string]string{"error": "marshal save body"})
