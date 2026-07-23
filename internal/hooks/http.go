@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/egresspolicy"
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
 // ErrSSRFBlocked is returned when a hook URL resolves to an address the
@@ -226,7 +227,19 @@ func httpHandler(ctx context.Context, db *sql.DB, h Hook, ec EventContext) (Resu
 		req.Header.Set("X-Crewship-Signature", "sha256="+sig)
 	}
 
-	resp, err := defaultHTTPClient.Do(req)
+	// #1367: the crew allowlist must be re-checked on EVERY hop, not just the
+	// pre-flight host above — otherwise an allowlisted host can 302-redirect the
+	// signed hook body to a non-allowlisted one, silently bypassing the crew
+	// boundary. Wrap the SSRF-guarded transport in the shared gated client whose
+	// CheckRedirect re-runs the same egresspolicy.Check per hop, so the guarantee
+	// is by construction rather than something this handler has to remember.
+	client := egresspolicy.Client(egresspolicy.DBChecker(db, ec.CrewID), egresspolicy.Options{
+		Timeout:      timeout,
+		Schemes:      []string{"http", "https"},
+		AllowPrivate: allowPrivateHookDestinations(),
+		Transport:    defaultHTTPClient.Transport,
+	})
+	resp, err := client.Do(req)
 	latency := time.Since(start)
 	if err != nil {
 		// SSRF rejections wear an OutcomeBlock so the journal makes the
@@ -236,6 +249,15 @@ func httpHandler(ctx context.Context, db *sql.DB, h Hook, ec EventContext) (Resu
 			return Result{
 				Outcome: OutcomeBlock,
 				Message: "ssrf guard: " + err.Error(),
+				Latency: latency,
+			}, err
+		}
+		// #1367: a redirect refused by the crew allowlist (or SSRF re-check) on a
+		// hop is a policy decision, not a transport error — surface it as a Block.
+		if errors.Is(err, egresspolicy.ErrEgressBlocked) || errors.Is(err, httpsafe.ErrBlocked) {
+			return Result{
+				Outcome: OutcomeBlock,
+				Message: "crew egress policy (redirect): " + err.Error(),
 				Latency: latency,
 			}, err
 		}

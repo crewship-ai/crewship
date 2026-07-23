@@ -129,25 +129,19 @@ func NewDispatcher(lister ChannelLister, mail mailer.Mailer, logger *slog.Logger
 	}
 }
 
-// webhookClient builds the http.Client for one delivery. It carries the
-// SSRF-safe transport plus a CheckRedirect that re-validates EVERY hop
-// against both the SSRF guard and the crew allowlist — a permissive first
+// webhookClient builds the http.Client for one delivery via the shared gated
+// constructor: SSRF-safe transport + a CheckRedirect that re-validates EVERY
+// hop against both the SSRF guard and the crew allowlist — a permissive first
 // host cannot 3xx-bounce into a private IP or a host outside the crew's
-// allowed_domains.
+// allowed_domains. Using egresspolicy.Client (rather than hand-rolling the
+// CheckRedirect) is what keeps this path in lockstep with hooks / http-steps by
+// construction.
 func (d *Dispatcher) webhookClient(crewID string) *http.Client {
-	return &http.Client{
+	return egresspolicy.Client(egresspolicy.DBChecker(d.db, crewID), egresspolicy.Options{
 		Timeout:   15 * time.Second,
+		Schemes:   []string{"http", "https"},
 		Transport: webhookTransport,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return fmt.Errorf("notify: too many redirects")
-			}
-			if _, err := httpsafe.ValidateURL(req.URL.String(), "http", "https"); err != nil {
-				return err
-			}
-			return egresspolicy.Check(req.Context(), d.db, crewID, req.URL.Host)
-		},
-	}
+	})
 }
 
 // Dispatch fans an event out to every enabled channel in the workspace.

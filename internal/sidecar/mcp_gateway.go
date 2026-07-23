@@ -264,6 +264,23 @@ func NewMCPGateway(servers []MCPServerInput, ipc *IPCConfig, logger *slog.Logger
 			httpClient: &http.Client{
 				Timeout:   30 * time.Second,
 				Transport: mcpClientTransport,
+				// #1367: re-gate the crew allowlist on EVERY redirect hop, not
+				// just the configured endpoint at Connect/CallTool. A malicious
+				// but allowlisted MCP server must not 302 its JSON-RPC POST — with
+				// its injected credential headers — to a non-allowlisted host.
+				// mcpClientTransport (SafeTransport) already re-blocks SSRF on
+				// each hop's dial; this closes the crew-allowlist half. Reads g's
+				// set-once allowlist at hop time (installed by SetEgressAllowlist
+				// before Connect).
+				CheckRedirect: func(req *http.Request, via []*http.Request) error {
+					if len(via) >= 10 {
+						return fmt.Errorf("mcp gateway: too many redirects")
+					}
+					if ok, reason := g.endpointAllowed(req.URL.String()); !ok {
+						return fmt.Errorf("mcp gateway egress: redirect to %q blocked: %s", req.URL.Host, reason)
+					}
+					return nil
+				},
 			},
 			logger: logger,
 		}
