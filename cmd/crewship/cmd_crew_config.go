@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -40,7 +41,17 @@ Examples:
 
 		hasSet := devcontainerPath != "" || misePath != "" || runtimeImage != ""
 
-		// Mutual exclusion: show / export / clear / set are mutually exclusive.
+		// #1380: security knobs merge onto the crew's stored devcontainer_config
+		// and are server-validated on PATCH (privileged → 403 without the
+		// workspace flag; disallowed cap → 400). They form their own set mode so
+		// they never clobber image/features on the round-trip.
+		privileged, _ := cmd.Flags().GetBool("privileged")
+		initFlag, _ := cmd.Flags().GetBool("init")
+		capAdd, _ := cmd.Flags().GetStringSlice("cap-add")
+		secChanged := cmd.Flags().Changed("privileged") ||
+			cmd.Flags().Changed("init") || cmd.Flags().Changed("cap-add")
+
+		// Mutual exclusion: show / export / clear / set / security-set.
 		modeCount := 0
 		if show {
 			modeCount++
@@ -54,11 +65,14 @@ Examples:
 		if hasSet {
 			modeCount++
 		}
+		if secChanged {
+			modeCount++
+		}
 		if modeCount == 0 {
-			return fmt.Errorf("specify one of --show, --export, --clear, or a set flag (--devcontainer, --mise, --runtime-image)")
+			return fmt.Errorf("specify one of --show, --export, --clear, a set flag (--devcontainer, --mise, --runtime-image), or a security flag (--privileged, --cap-add, --init)")
 		}
 		if modeCount > 1 {
-			return fmt.Errorf("--show, --export, --clear, and set flags (--devcontainer/--mise/--runtime-image) are mutually exclusive")
+			return fmt.Errorf("--show, --export, --clear, set flags (--devcontainer/--mise/--runtime-image), and security flags (--privileged/--cap-add/--init) are mutually exclusive")
 		}
 
 		client := newAPIClient()
@@ -74,6 +88,11 @@ Examples:
 			return exportCrewConfig(client, crewID)
 		case clear:
 			return clearCrewConfig(client, crewID)
+		case secChanged:
+			return setCrewSecurity(client, crewID,
+				cmd.Flags().Changed("privileged"), privileged,
+				cmd.Flags().Changed("init"), initFlag,
+				cmd.Flags().Changed("cap-add"), capAdd)
 		default:
 			return setCrewConfig(client, crewID, devcontainerPath, misePath, runtimeImage)
 		}
@@ -262,6 +281,71 @@ func setCrewConfig(client *cli.Client, crewID, devcontainerPath, misePath, runti
 	return patchCrew(client, crewID, body, "Crew configuration updated.")
 }
 
+// setCrewSecurity merges the #1380 container-privilege knobs (privileged / init
+// / capAdd) onto the crew's stored devcontainer_config and PATCHes it back. The
+// keys are top-level devcontainer.json fields the runtime honours; the server
+// re-validates them on write (privileged requires the workspace
+// allow_privileged_credentials flag → 403; capAdd is bounded to the
+// NET_BIND_SERVICE allowlist → 400). We GET-merge rather than replace so image
+// / features / mise stay intact.
+func setCrewSecurity(client *cli.Client, crewID string,
+	setPriv, privileged, setInit, initFlag, setCap bool, capAdd []string) error {
+	info, err := fetchCrewInfo(client, crewID)
+	if err != nil {
+		return err
+	}
+	if info.DevcontainerConfig == nil || *info.DevcontainerConfig == "" {
+		return fmt.Errorf("crew has no devcontainer_config; set a base config with --devcontainer <file> before toggling privilege controls")
+	}
+	var cfg map[string]interface{}
+	if err := json.Unmarshal([]byte(*info.DevcontainerConfig), &cfg); err != nil {
+		return fmt.Errorf("stored devcontainer_config is not valid JSON: %w", err)
+	}
+
+	if setPriv {
+		if privileged {
+			cfg["privileged"] = true
+		} else {
+			delete(cfg, "privileged")
+		}
+	}
+	if setInit {
+		if initFlag {
+			cfg["init"] = true
+		} else {
+			delete(cfg, "init")
+		}
+	}
+	if setCap {
+		// Normalize CAP_ prefix / case so "cap_net_bind_service" and
+		// "NET_BIND_SERVICE" both land as the canonical Docker cap name the
+		// server allowlist compares against.
+		if len(capAdd) == 0 {
+			delete(cfg, "capAdd")
+		} else {
+			norm := make([]string, 0, len(capAdd))
+			for _, c := range capAdd {
+				norm = append(norm, normalizeCapCLI(c))
+			}
+			cfg["capAdd"] = norm
+		}
+	}
+
+	encoded, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("encode devcontainer_config: %w", err)
+	}
+	s := string(encoded)
+	body := map[string]interface{}{"devcontainer_config": &s}
+	return patchCrew(client, crewID, body, "Crew privilege controls updated.")
+}
+
+// normalizeCapCLI upper-cases and strips a leading CAP_ from a capability name.
+func normalizeCapCLI(raw string) string {
+	up := strings.ToUpper(strings.TrimSpace(raw))
+	return strings.TrimPrefix(up, "CAP_")
+}
+
 func readConfigFile(path string) (string, error) {
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
@@ -296,6 +380,9 @@ func init() {
 	crewConfigCmd.Flags().String("devcontainer", "", "Path to devcontainer.json file to upload")
 	crewConfigCmd.Flags().String("mise", "", "Path to mise config JSON file to upload")
 	crewConfigCmd.Flags().String("runtime-image", "", "Custom base image reference (e.g. debian:bookworm-slim)")
+	crewConfigCmd.Flags().Bool("privileged", false, "Run the crew container privileged (server-validated: requires the workspace allow_privileged_credentials flag)")
+	crewConfigCmd.Flags().Bool("init", false, "Run a docker --init reaper (PID 1) inside the crew container")
+	crewConfigCmd.Flags().StringSlice("cap-add", nil, "Linux capabilities to add (server-validated against the NET_BIND_SERVICE allowlist)")
 
 	crewCmd.AddCommand(crewConfigCmd)
 }
