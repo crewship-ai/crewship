@@ -224,7 +224,7 @@ func TestCovJrnStreamNoFlusher(t *testing.T) {
 // also fires. Uses a fully-populated row so the poll-path serializer
 // covers the optional fields too.
 func TestCovJrnStreamFreshEmptyThenLivePoll(t *testing.T) {
-	h, userID, wsID, _ := newJournalHandlerTest(t)
+	h, userID, wsID, rec := newJournalHandlerTest(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -240,12 +240,15 @@ func TestCovJrnStreamFreshEmptyThenLivePoll(t *testing.T) {
 
 	// Let the empty seed land and the live tail watermark settle to "now".
 	time.Sleep(150 * time.Millisecond)
-	// Insert a row strictly newer than the watermark so the poll tick
-	// picks it up.
+	// Insert a row strictly newer than the watermark, then simulate the
+	// journal Writer's flush notify (#1411 — Stream no longer polls on a
+	// fixed 1s tick; it wakes off flushNotifier.Notify() instead, with only
+	// a slow 20s tick as a fallback).
 	covJrnFullRow(t, h, "j_live", wsID, time.Now().UTC().Add(2*time.Second))
+	rec.WakeNotify()
 
-	// Wait past one 1s poll tick so the entry is emitted.
-	time.Sleep(1300 * time.Millisecond)
+	// Give the woken poll a moment to land.
+	time.Sleep(150 * time.Millisecond)
 	cancel()
 	select {
 	case <-done:

@@ -111,6 +111,12 @@ type updateWorkspaceRequest struct {
 	PreferredLanguage *string `json:"preferred_language"`
 	// AllowPrivilegedCredentials (#1032) — see workspaceResponse doc comment.
 	AllowPrivilegedCredentials *bool `json:"allow_privileged_credentials"`
+	// RunRetentionDays (#1407) — override for the pipeline_runs retention
+	// sweep window. nil leaves the column untouched; 0 is rejected (use
+	// the sweep's own NULL-means-default behavior by not setting this
+	// field, rather than a magic 0 that could be mistaken for "keep
+	// forever" — see pipeline.DefaultRunRetentionDays).
+	RunRetentionDays *int `json:"run_retention_days"`
 }
 
 // Update modifies workspace settings such as name, slug, logo, and preferred language.
@@ -137,6 +143,10 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Slug != nil && (len(*req.Slug) < 2 || len(*req.Slug) > 50) {
 		replyError(w, http.StatusBadRequest, "slug must be 2-50 characters")
+		return
+	}
+	if req.RunRetentionDays != nil && *req.RunRetentionDays <= 0 {
+		replyError(w, http.StatusBadRequest, "run_retention_days must be a positive number of days")
 		return
 	}
 
@@ -190,6 +200,9 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		ub.Set("allow_privileged_credentials", val)
 	}
+	if req.RunRetentionDays != nil {
+		ub.Set("run_retention_days", *req.RunRetentionDays)
+	}
 	if !ub.Empty() {
 		query, args := ub.Build("workspaces", "id = ?", workspaceID)
 		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
@@ -201,14 +214,14 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var ws workspaceResponse
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT w.id, w.name, w.slug, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
-			w.allow_privileged_credentials,
+			w.allow_privileged_credentials, w.run_retention_days,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
 		FROM workspaces w
 		WHERE w.id = ? AND w.deleted_at IS NULL
 	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
-		&ws.CreatedAt, &ws.UpdatedAt, &ws.AllowPrivilegedCredentials,
+		&ws.CreatedAt, &ws.UpdatedAt, &ws.AllowPrivilegedCredentials, &ws.RunRetentionDays,
 		&ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
 	if err != nil {
 		replyInternalError(w, h.logger, "get workspace after update", err)

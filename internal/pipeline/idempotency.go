@@ -5,8 +5,19 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	mathrand "math/rand/v2"
 	"time"
 )
+
+// idempotencySweepOneInN throttles the lazy sweep (see LookupOrReserve) to
+// roughly 1 in N calls instead of every call. Every keyed run start
+// previously took a DB write lock TWICE — once for this DELETE, once for
+// the INSERT OR IGNORE reservation right after — on the run hot path. The
+// sweep is a pure housekeeping cleanup: correctness never depends on it
+// running (the duplicate-lookup SELECT below always re-checks expires_at >
+// now regardless of whether a sweep just ran), so sampling it costs nothing
+// but a slightly larger table between sweeps. See issue #1411.
+const idempotencySweepOneInN = 20
 
 // DefaultIdempotencyTTL is the window during which a duplicate
 // idempotency_key resolves to the original run. Picked at 24h to
@@ -44,8 +55,11 @@ func NewIdempotencyStore(db *sql.DB) *IdempotencyStore {
 // isNew=false. The caller should NOT execute again — the original
 // run is the authoritative result.
 //
-// Expired rows (expires_at <= now) are swept lazily before the
-// insert, so a key reused after 24h is treated as a fresh request.
+// Expired rows (expires_at <= now) are swept lazily — a sampled bulk
+// sweep for table hygiene, plus a per-key force-delete-and-retry when
+// THIS call's own conflict check finds its key specifically expired —
+// so a key reused after 24h is always treated as a fresh request in one
+// call, regardless of when the bulk sweep last ran.
 func (s *IdempotencyStore) LookupOrReserve(
 	ctx context.Context,
 	workspaceID, idempotencyKey, runID, pipelineID string,
@@ -63,50 +77,70 @@ func (s *IdempotencyStore) LookupOrReserve(
 	// Lazy sweep — keeps the table small without a dedicated
 	// background worker. The DELETE is bounded by the partial index
 	// on expires_at so it's O(expired_rows), not a full scan.
-	if _, sweepErr := s.db.ExecContext(ctx,
-		`DELETE FROM pipeline_run_idempotency WHERE expires_at <= ?`,
-		now.Format(time.RFC3339Nano),
-	); sweepErr != nil {
-		// Sweep failure is non-fatal — we still want to attempt the
-		// reservation. A persistent sweep error will accumulate dead
-		// rows but won't break correctness.
-		_ = sweepErr
+	//
+	// Sampled to ~1-in-N calls (idempotencySweepOneInN): this DELETE was
+	// previously unconditional on every keyed run start, taking a second
+	// write-lock acquisition on the run hot path for a cleanup that doesn't
+	// affect correctness (the SELECT below always filters expires_at > now
+	// itself). See issue #1411.
+	if mathrand.IntN(idempotencySweepOneInN) == 0 {
+		if _, sweepErr := s.db.ExecContext(ctx,
+			`DELETE FROM pipeline_run_idempotency WHERE expires_at <= ?`,
+			now.Format(time.RFC3339Nano),
+		); sweepErr != nil {
+			// Sweep failure is non-fatal — we still want to attempt the
+			// reservation. A persistent sweep error will accumulate dead
+			// rows but won't break correctness.
+			_ = sweepErr
+		}
 	}
 
-	res, err := s.db.ExecContext(ctx, `
+	nowStr := now.Format(time.RFC3339Nano)
+
+	// At most 2 attempts: the second only happens when the first hits a
+	// conflict against a row THIS call discovers is expired and force-
+	// deletes itself. That keeps "an expired key resolves as fresh" a
+	// single-call guarantee independent of whether the sampled bulk sweep
+	// above happened to run this time (#1411) — the bulk sweep is pure
+	// housekeeping; this per-key self-heal is what correctness relies on.
+	for attempt := 0; attempt < 2; attempt++ {
+		res, err := s.db.ExecContext(ctx, `
 INSERT OR IGNORE INTO pipeline_run_idempotency
   (workspace_id, idempotency_key, run_id, pipeline_id, expires_at)
 VALUES (?, ?, ?, ?, ?)`,
-		workspaceID, idempotencyKey, runID, pipelineID, expires,
-	)
-	if err != nil {
-		return "", false, fmt.Errorf("idempotency: insert: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 1 {
-		return runID, true, nil
-	}
+			workspaceID, idempotencyKey, runID, pipelineID, expires,
+		)
+		if err != nil {
+			return "", false, fmt.Errorf("idempotency: insert: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		if n == 1 {
+			return runID, true, nil
+		}
 
-	// Conflict — read the existing row, but only if it is NOT
-	// expired. Without the expires_at filter, a sweep failure above
-	// would leave an expired row in the table, and INSERT OR IGNORE
-	// would silently match it; we'd then return the dead run_id as
-	// if it were live, and the caller (a webhook redelivery, say)
-	// would resolve to a zombie run.
-	nowStr := now.Format(time.RFC3339Nano)
-	var existing string
-	err = s.db.QueryRowContext(ctx, `
+		// Conflict — read the existing row, but only if it is NOT
+		// expired. Without the expires_at filter, a matched expired row
+		// would silently return a dead run_id as if it were live, and the
+		// caller (a webhook redelivery, say) would resolve to a zombie run.
+		var existing string
+		err = s.db.QueryRowContext(ctx, `
 SELECT run_id FROM pipeline_run_idempotency
 WHERE workspace_id = ? AND idempotency_key = ? AND expires_at > ?`,
-		workspaceID, idempotencyKey, nowStr,
-	).Scan(&existing)
-	if errors.Is(err, sql.ErrNoRows) {
-		// The matching row exists but has expired. The sweep failed
-		// to delete it. Treat as if no reservation existed: caller
-		// retries with the same key, INSERT OR IGNORE will conflict
-		// again, and the next call needs the row gone. Force-delete
-		// this exact key so the retry succeeds; if even that fails,
-		// surface a clean error so the caller backs off.
+			workspaceID, idempotencyKey, nowStr,
+		).Scan(&existing)
+		if err == nil {
+			return existing, false, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", false, fmt.Errorf("idempotency: read after conflict: %w", err)
+		}
+
+		// The matching row exists but has expired and the bulk sweep
+		// hasn't reached it yet. Force-delete this exact key and loop
+		// once to retry the insert — a genuinely concurrent caller
+		// reserving the SAME key in the gap makes the retry conflict
+		// again, but against a live row this time, resolved by the
+		// isNew=false read path above.
 		if _, delErr := s.db.ExecContext(ctx, `
 DELETE FROM pipeline_run_idempotency
 WHERE workspace_id = ? AND idempotency_key = ? AND expires_at <= ?`,
@@ -114,12 +148,12 @@ WHERE workspace_id = ? AND idempotency_key = ? AND expires_at <= ?`,
 		); delErr != nil {
 			return "", false, fmt.Errorf("idempotency: stale row force-delete: %w", delErr)
 		}
-		return "", false, errStaleRowDeleted
 	}
-	if err != nil {
-		return "", false, fmt.Errorf("idempotency: read after conflict: %w", err)
-	}
-	return existing, false, nil
+	// Reached only if two consecutive attempts both hit a freshly-expired
+	// row for this exact key — pathologically unlikely (would need the row
+	// to keep re-expiring between our own delete and our own insert).
+	// Surface a clean error rather than looping unboundedly.
+	return "", false, errStaleRowDeleted
 }
 
 // errStaleRowDeleted signals to the caller (via Reserve) that an

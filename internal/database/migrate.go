@@ -1717,6 +1717,25 @@ END;
 	// read namespace and the `state_write` step binding (watermark patterns).
 	// See migrate_consts_v155_routine_state.go (#1420).
 	{version: 155, name: "routine_state", sql: migrationRoutineState},
+
+	// v156: narrower (workspace_id, trace_id, entry_type, ts) partial index
+	// scoped to entry_type LIKE 'run.%' so the run_aggregates CTE
+	// (journal.ListRuns/countRuns/RunStats/RunInsights) stops scanning every
+	// traced row in the workspace via the broader v60 idx_journal_ws_trace.
+	// Renumbered from v153 to sit above the engine stack (#1405/#1409/#1420).
+	// See migrate_consts_v156_run_aggregation_index.go and issue #1411.
+	{version: 156, name: "run_aggregation_index", sql: migrationRunAggregationIndex},
+
+	// v157: idx_pipeline_runs_active (v83) widened to include the 'waiting'
+	// status so it actually matches RunStore.ListActive/ListInFlight's
+	// filter, which the index predicate had drifted out of sync with. See
+	// migrate_consts_v157_pipeline_runs_active_index.go and issue #1411.
+	{version: 157, name: "pipeline_runs_active_index_fix", sql: migrationPipelineRunsActiveIndexFix},
+
+	// v158: workspaces.run_retention_days — per-workspace override for the
+	// pipeline_runs retention sweep. See
+	// migrate_consts_v158_run_retention_days.go and issue #1407.
+	{version: 158, name: "run_retention_days", sql: migrationRunRetentionDays},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

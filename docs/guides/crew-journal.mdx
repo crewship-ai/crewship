@@ -308,6 +308,7 @@ Cross-tenant existence is never leaked: unknown IDs return 404 with the same sha
 - `expires_at` is an optional TTL; compaction skips rows past it.
 - The daily **Compactor** (see [Consolidate](/guides/consolidate)) rolls up `info`/`notice` rows older than 30 days into one `system.compaction` entry and deletes the originals. `warn`/`error` rows are kept indefinitely.
 - `exec.output_chunk`, `container.metrics`, and `network.*` are never embedded into [Episodic memory](/guides/episodic-memory) because they would drown the signal.
+- **`pipeline_runs`** (the query-optimized run projection the Runs tab and `/api/v1/runs` read — see [Unified runs surface](#unified-runs-surface)) has its own daily sweep, separate from the journal compaction above: terminal runs (`completed`/`failed`/`cancelled`/`interrupted`) older than a per-workspace window (`workspaces.run_retention_days`, default **90 days**) are purged. `run_tags` cascade-delete with their run automatically. Always kept regardless of age: the most recent 10 runs per pipeline, any run still `queued`/`running`/`waiting`, a run with a pending approval waitpoint, and a run another surviving run's `replay_of` points at. Each sweep that deletes ≥1 row emits a `pipeline.runs_swept` journal entry with the deleted count.
 
 ## Gotchas
 

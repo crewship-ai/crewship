@@ -782,6 +782,16 @@ var startCmd = &cobra.Command{
 				}
 			}
 
+			// pipeline_runs retention sweep (#1407) — mirrors the memory
+			// consolidation worker started in server_lifecycle.go: one
+			// background ticker, daily by default, per-workspace override
+			// via workspaces.run_retention_days. Started here (rather than
+			// server_lifecycle.go) because it needs deps.DB, which this
+			// scope already has wired for the pipeline stores above.
+			if deps.DB != nil {
+				pipeline.StartRunRetentionSweeper(ctx, deps.DB, srv.JournalWriter(), 24*time.Hour)
+			}
+
 			// Pipeline schedules — cron triggers for saved pipelines.
 			// The store backs the CRUD endpoints; the scheduler runs
 			// in-process and fires due schedules every 30s. Started
