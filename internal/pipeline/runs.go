@@ -279,16 +279,18 @@ func (s *RunStore) MarkWaiting(ctx context.Context, runID, stepID string) error 
 	res, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_runs
 SET status = 'waiting', current_step_id = ?, updated_at = datetime('now','subsec')
-WHERE id = ? AND status IN ('queued','running')`, stepID, runID)
+WHERE id = ? AND status IN ('queued','running','waiting')`, stepID, runID)
 	if err != nil {
 		return fmt.Errorf("pipeline_runs: mark waiting: %w", err)
 	}
 	// Durability + transition guard: the async WAITING contract requires a
 	// persisted, still-live run row to resume from. The status filter ensures
-	// we only park a queued/running run — a late/racing wait update can never
-	// resurrect a terminal (completed/failed/cancelled/interrupted) row back to
-	// 'waiting'. RowsAffected!=1 means no eligible row matched, so the caller
-	// fails closed instead of surfacing a WAITING token nothing can resume.
+	// we only park a queued/running/waiting run — 'waiting' is included so a
+	// resume RE-PARK (#1428, 2.9) is idempotent — while a late/racing wait
+	// update can never resurrect a terminal (completed/failed/cancelled/
+	// interrupted) row back to 'waiting'. RowsAffected!=1 means no eligible row
+	// matched, so the caller fails closed instead of surfacing a WAITING token
+	// nothing can resume.
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("pipeline_runs: mark waiting rows: %w", err)

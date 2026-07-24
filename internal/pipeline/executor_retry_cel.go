@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -98,6 +99,12 @@ func evalRetryOn(prg cel.Program, err error) bool {
 		return false
 	}
 	if prg == nil {
+		// No retry_on: retry any transient EXECUTION error by default, but a
+		// tiers-exhausted validation/outcomes failure is terminal (#1429,
+		// 2.10) — retrying re-runs the whole worker+grader escalation chain.
+		if errors.Is(err, errStepOutcomeExhausted) {
+			return false
+		}
 		return true
 	}
 	msg := err.Error()

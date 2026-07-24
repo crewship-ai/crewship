@@ -185,6 +185,30 @@ func TestPipelinesAPI_StepRun_NonAgentStep400(t *testing.T) {
 	}
 }
 
+// #1417 part 2 — step_run invokes a live agent, so a governance-disabled
+// routine must be refused with 409 instead of executing a step.
+func TestPipelinesAPI_StepRun_DisabledRoutine409(t *testing.T) {
+	db := openSmokeDB(t)
+	defer db.Close()
+	insertRawPipeline(t, db, "gov", `{"name":"gov","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`)
+	if _, err := db.ExecContext(context.Background(),
+		`UPDATE pipelines SET status = 'disabled' WHERE slug = 'gov'`); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	runner := &recordingRunner{output: "ok"}
+	h := NewPipelineHandler(db, slog.Default(), runner, nil)
+	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", strings.NewReader(`{"step_id":"a"}`)), "ws_smoke")
+	req.SetPathValue("slug", "gov")
+	w := httptest.NewRecorder()
+	h.StepRun(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for disabled routine, got %d body=%s", w.Code, w.Body.String())
+	}
+	if runner.calls != 0 {
+		t.Errorf("disabled routine must not invoke agent; got %d calls", runner.calls)
+	}
+}
+
 func TestPipelinesAPI_StepRun_MissingStepID400(t *testing.T) {
 	db := openSmokeDB(t)
 	defer db.Close()

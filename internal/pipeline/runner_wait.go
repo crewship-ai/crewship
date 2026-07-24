@@ -107,23 +107,54 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 			token = created
 		}
 
-		// Async suspend: for a top-level foreground run (depth==0, ModeRun,
-		// not a resume) with a persisted run row, PARK instead of blocking.
-		// Mark the run waiting (status=waiting + current_step) and return the
-		// suspend sentinel; runDSL/runDAG turn it into a WAITING RunResult and
-		// release the slot. Approving the waitpoint calls ResumeAfterApproval,
-		// which re-enters with in.resume=true — that path falls through to
-		// WaitFor below and resolves immediately from the recorded decision.
-		// Non-top-level / test_run / no-store callers keep the blocking
-		// behaviour (they have no row to resume and nobody to return WAITING to).
-		if depth == 0 && in.Mode == ModeRun && !in.resume && e.runStore != nil && in.pipeline != nil {
-			if err := e.runStore.MarkWaiting(ctx, runID, step.ID); err != nil {
-				return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q mark waiting: %w", step.ID, err)
+		// Async suspend: for a top-level foreground run (depth==0, ModeRun)
+		// with a persisted run row, PARK instead of blocking. Mark the run
+		// waiting (status=waiting + current_step) and return the suspend
+		// sentinel; runDSL/runDAG turn it into a WAITING RunResult and release
+		// the slot. Non-top-level / test_run / no-store callers keep the
+		// blocking behaviour (they have no row to resume and nobody to return
+		// WAITING to).
+		if depth == 0 && in.Mode == ModeRun && e.runStore != nil && in.pipeline != nil {
+			// Park on a fresh run; on a resume, RE-PARK only while the waitpoint
+			// is still pending (#1428, 2.9). A boot/approval-resumed run re-
+			// acquires a concurrency slot, and blocking on WaitFor below would
+			// hold that slot for up to the 24h approval timeout. Re-parking
+			// returns the suspend sentinel so runDSL releases the slot again. A
+			// DECIDED waitpoint (approved/denied/timed_out) falls through to
+			// WaitFor to resolve immediately from the recorded decision.
+			park := !in.resume
+			if in.resume {
+				if reader, ok := e.waitpoints.(WaitpointStatusReader); ok {
+					if st, serr := reader.WaitpointStatus(ctx, token); serr == nil && st == "pending" {
+						park = true
+					}
+				}
 			}
-			return "", 0, time.Since(stepStart).Milliseconds(), &suspendError{token: token, stepID: step.ID}
+			if park {
+				// MarkWaiting flips the row back to 'waiting' (the step-entry
+				// projection stamped it 'running'); it is idempotent for a row
+				// already parked.
+				if err := e.runStore.MarkWaiting(ctx, runID, step.ID); err != nil {
+					return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q mark waiting: %w", step.ID, err)
+				}
+				return "", 0, time.Since(stepStart).Milliseconds(), &suspendError{token: token, stepID: step.ID}
+			}
 		}
 
 		approved, err := e.waitpoints.WaitFor(ctx, token)
+		// Blocking run died mid-wait (#1426, 3.2): the run's ctx was cancelled
+		// rather than the waitpoint resolving. Flip the waitpoint to cancelled
+		// so its inbox approval card stops being actionable (approving a
+		// waitpoint whose run is gone resolves nothing). Detached context —
+		// ctx is already cancelled, so a store call keyed on it would fail.
+		if ctx.Err() != nil {
+			if wc, ok := e.waitpoints.(WaitpointCanceller); ok {
+				cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_, _ = wc.CancelWaitpointsForRun(cctx, runID)
+				cancel()
+			}
+			return "", 0, time.Since(stepStart).Milliseconds(), ctx.Err()
+		}
 		if err != nil {
 			return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q wait: %w", step.ID, err)
 		}

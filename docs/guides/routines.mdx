@@ -378,7 +378,7 @@ has no services and no notable tools.
 | `backoff.max_ms` | Delay ceiling. Default `60000`. |
 | `backoff.factor` | Multiplier per attempt. Default `2.0`; `1.0` = constant. |
 | `backoff.jitter` | Full jitter — actual sleep is uniform in `[0, delay)`. Default `true`. Keeps a fleet of runs that all trip the same upstream 429 from retrying in lockstep. |
-| `retry_on` | A **CEL** predicate deciding whether a given error is retryable. Empty = retry any error. |
+| `retry_on` | A **CEL** predicate deciding whether a given error is retryable. Empty = retry any *execution* error, but **not** a validation/rubric failure that already exhausted its tier chain (that outcome is `on_fail`'s job, not the retry loop's — retrying it re-runs the whole worker+grader escalation and multiplies spend). To retry that class anyway, opt in explicitly, e.g. `'error.contains("exhausting tiers")'`. |
 
 `retry_on` sees three variables: `error` (the message string), `transient` (a bool from the built-in 429/5xx/timeout/net-blip classifier), and `status` (the HTTP status an `http` step failed with — parsed from its `HTTP <code>` error, `0` for any other error, so a stray number elsewhere in a message is never misread as a status). It must evaluate to `bool`. Examples: `'transient'` (shorthand), `'status == 429'`, `'status >= 500'`, `'error.contains("429")'`, `'error.matches("(?i)timeout|5\\d\\d")'`. A predicate that doesn't compile — or doesn't return a bool — is rejected at save time; if a stored routine somehow carries a broken one, the runtime **fails safe and does not retry** rather than retrying on every error.
 

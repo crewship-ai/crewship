@@ -81,13 +81,19 @@ func (e *Executor) runHooksAround(ctx context.Context, in RunInput, runID, pipel
 	if in.dsl != nil {
 		hooks = in.dsl.Hooks
 	}
-	// No hooks, or a context where hooks shouldn't fire (resume re-entry,
-	// dry-run): run the body untouched.
-	if hooks == nil || in.resume || in.Mode == ModeDryRun {
+	// No hooks, or dry-run (a preview must not fire side-channel hooks):
+	// run the body untouched.
+	if hooks == nil || in.Mode == ModeDryRun {
 		return body()
 	}
 
-	if hooks.BeforeAll != nil {
+	// before_all is resume-gated: it already ran in the run's original
+	// lifetime, and re-running it on a boot/approval resume would double a
+	// setup side effect (#1428, 2.7). after_all / on_failure are NOT
+	// resume-gated — a resumed run still reaches its terminal outcome, and a
+	// teardown/failure hook that never fires on the resume path leaves
+	// credentials unreleased and failures unannounced.
+	if !in.resume && hooks.BeforeAll != nil {
 		if _, err := e.runRoutineHook(ctx, hooks.BeforeAll, in, runID, pipelineSlug); err != nil {
 			e.persistWarn("hook before_all", runID, err)
 			return &RunResult{

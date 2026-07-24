@@ -274,15 +274,21 @@ VALUES ('tok_resume_wait', 'ws_test', 'run_resume_wait', 'gate', 'approval', 'ok
 		t.Fatalf("resumed=%d interrupted=%d, want 1/0", resumed, interrupted)
 	}
 
-	// The approval still works after the restart: approving the
-	// ORIGINAL token unblocks the resumed run.
+	// The approval still works after the restart. Post-#1428/2.9 the
+	// boot-resumed run RE-PARKS (releasing its slot) rather than blocking on
+	// WaitFor for up to 24h, so the approval must trigger ResumeAfterApproval
+	// to drive it to completion — exactly what the /approve HTTP handler does
+	// (pipeline_waitpoint_callback.go). Approving the ORIGINAL token then
+	// completes the run.
 	approveErr := make(chan error, 1)
 	go func() {
-		// Give the resumed goroutine a moment to park on WaitFor —
-		// both orderings must work (WaitFor re-checks DB state), so
-		// this is pacing, not a correctness wait.
+		// Give the resumed goroutine a moment to re-park.
 		time.Sleep(100 * time.Millisecond)
-		approveErr <- wpStore.CompleteApproval(context.Background(), "tok_resume_wait", true, "user_test", "")
+		err := wpStore.CompleteApproval(context.Background(), "tok_resume_wait", true, "user_test", "")
+		if err == nil {
+			exec.ResumeAfterApproval("run_resume_wait", slog.Default())
+		}
+		approveErr <- err
 	}()
 
 	rec := waitForRunStatus(t, runStore, "run_resume_wait", RunStatusCompleted, 5*time.Second)

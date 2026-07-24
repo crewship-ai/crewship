@@ -133,6 +133,16 @@ func (e *Executor) runStepWithRetry(
 	return lastOut, costSum, lastDur, lastErr
 }
 
+// errStepOutcomeExhausted marks a step that failed after exhausting every
+// fallback tier because validation/outcomes never passed — as opposed to a
+// transient execution error the retry loop exists for. It is NON-retryable by
+// default (#1429, 2.10): the per-step retry loop with no explicit retry_on
+// would otherwise re-run the ENTIRE worker+grader escalation chain
+// (max_attempts × tiers LLM calls, up to ~40 worker + 40 grader calls),
+// multiplying spend on a deterministic validation failure. Only an explicit
+// retry_on that matches may opt it back in — see evalRetryOn.
+var errStepOutcomeExhausted = errors.New("step failed after exhausting tiers")
+
 // retryMaxAttemptsCeiling caps MaxAttempts to keep a runaway retry from
 // monopolising the run budget.
 const retryMaxAttemptsCeiling = 10

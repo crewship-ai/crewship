@@ -489,13 +489,16 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("executor: load pipeline: %w", err)
 	}
-	// Governance airbag — central chokepoint. Every real-run dispatch path
-	// (HTTP Run/InternalRun/RunBatch, the cron scheduler, webhook dispatch,
-	// and the deferred-run dispatcher) funnels through here, so enforcing the
-	// status gate at the executor means a 'proposed' (unapproved) or
-	// 'disabled' (admin-killed) routine cannot run from ANY trigger — not just
-	// the handlers that remember to pre-check. dry_run / test_run are exempt:
-	// they preview/validate and carry no persisted status to honor.
+	// Governance airbag — top-level chokepoint. Every real-run dispatch path
+	// that starts at Run() (HTTP Run/InternalRun/RunBatch, the cron scheduler,
+	// webhook dispatch, and the deferred-run dispatcher) funnels through here,
+	// so enforcing the status gate at the executor means a 'proposed'
+	// (unapproved) or 'disabled' (admin-killed) routine cannot run from ANY
+	// top-level trigger — not just the handlers that remember to pre-check.
+	// Nested call_pipeline invocations do NOT pass through Run() (they enter
+	// runDSL directly), so runDSL carries its own copy of this gate (#1417).
+	// dry_run / test_run are exempt: they preview/validate and carry no
+	// persisted status to honor.
 	if in.Mode == ModeRun && !routineStatusRunnable(p.Status) {
 		return nil, fmt.Errorf("%w: status=%s", ErrRoutineNotActive, p.Status)
 	}
@@ -935,6 +938,37 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		// persist helper short-circuits when result is unset
 		// (recursive helper returns early).
 		defer e.persistRunTerminal(ctx, runID, in, pipelineID, result, startedAt)
+
+		// Cancel classification (#1426, 2.1). Registered AFTER the terminal
+		// write above so — defers being LIFO — it runs FIRST, re-labelling a
+		// user-cancelled run from FAILED to CANCELLED before persistRunTerminal
+		// reads result.Status AND before runHooksAround (which wraps this
+		// frame) inspects the returned status. Doing it here rather than in
+		// Run() means the cancel is honoured everywhere at once: no failed row,
+		// no error_fingerprint (MarkTerminal only mints one for FAILED), no
+		// failure-notification fan-out (TerminalNotifier skips CANCELLED), and
+		// no on_failure hook (runHooksAround gates it on FAILED).
+		defer func() {
+			if result != nil && result.Status == "FAILED" &&
+				e.runs != nil && e.runs.IsCancelRequested(runID) {
+				result.Status = "CANCELLED"
+				if result.ErrorMessage == "" {
+					result.ErrorMessage = "run cancelled"
+				}
+			}
+		}()
+	}
+
+	// Governance airbag (runtime, #1417). Run() enforces the status gate
+	// for top-level dispatch, but nested call_pipeline invocations reach
+	// runDSL directly (runCallPipelineStep → runDSL), bypassing that check.
+	// Re-enforce here keyed on the persisted target's status so a
+	// disabled/proposed nested routine cannot execute. Drafts have no
+	// persisted row (in.pipeline == nil, e.g. RunDefinition) and stay
+	// exempt; dry_run / test_run carry no status to honour.
+	if in.Mode == ModeRun && in.pipeline != nil && !routineStatusRunnable(in.pipeline.Status) {
+		return e.failRun(ctx, in, emit, result, "",
+			fmt.Sprintf("%v: status=%s", ErrRoutineNotActive, in.pipeline.Status), false, startedAt), nil
 	}
 
 	// Runtime gates — each returns the terminal FAILED result when it
@@ -1553,9 +1587,13 @@ func (e *Executor) runAgentStep(
 	}
 
 	// Exhausted all tiers; surface the last failure reason
-	// (validation OR outcomes — they share lastValidationReason).
+	// (validation OR outcomes — they share lastValidationReason). Wrapped in
+	// errStepOutcomeExhausted so the per-step retry loop treats it as terminal
+	// by default (#1429, 2.10) — retrying re-runs the whole tier chain. The
+	// message is unchanged, so a retry_on predicate matching the text still
+	// opts in.
 	return "", totalCost, time.Since(startTotal).Milliseconds(),
-		fmt.Errorf("step failed after exhausting tiers: %s", lastValidationReason)
+		fmt.Errorf("%w: %s", errStepOutcomeExhausted, lastValidationReason)
 }
 
 // runCallPipelineStep handles a call_pipeline step by looking up the
@@ -1576,6 +1614,14 @@ func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent Ru
 			return "", 0, 0, fmt.Errorf("call_pipeline: %w (slug=%q)", ErrPipelineNotFound, step.PipelineSlug)
 		}
 		return "", 0, 0, fmt.Errorf("call_pipeline: lookup: %w", err)
+	}
+	// Governance gate (#1417, belt-and-suspenders). runDSL enforces this
+	// too, but reject here as well so the sentinel wraps cleanly for
+	// errors.Is at the call site — a disabled/proposed target is never
+	// dispatched from a call_pipeline step.
+	if parent.Mode == ModeRun && !routineStatusRunnable(target.Status) {
+		return "", 0, 0, fmt.Errorf("call_pipeline %q: %w: status=%s",
+			step.PipelineSlug, ErrRoutineNotActive, target.Status)
 	}
 	dsl, err := Parse([]byte(target.DefinitionJSON))
 	if err != nil {

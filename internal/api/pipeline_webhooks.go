@@ -588,6 +588,16 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 				h.logger.Warn("webhook fire (async run)", "error", runErr,
 					"webhook_id", wh.ID, "run_id", runID)
 			}
+		} else if res != nil && res.Status == "FAILED" {
+			// The run executed but FAILED (Run returned no error). Without
+			// releasing the key, the idempotency reservation wedges the failed
+			// run for the full TTL (24h) and every sender redelivery DEDUPES
+			// onto it — the sender never gets a re-fire even though the work
+			// never succeeded (#1429, 2.6). Forget so a redelivery re-executes.
+			// COMPLETED keeps its key (a real success must dedupe); WAITING /
+			// CANCELLED keep theirs too (parked or deliberately stopped, not a
+			// failure to re-fire).
+			_ = idem.Forget(context.Background(), wh.WorkspaceID, idemKey)
 		}
 		// Bookkeeping on a fresh context: at shutdown dispatchCtx is
 		// already cancelled when the run winds down, and the terminal

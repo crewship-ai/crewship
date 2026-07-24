@@ -105,6 +105,18 @@ func (h *PipelineHandler) StepRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Governance gate (#1417): step_run invokes a real agent, so a
+	// 'disabled'/'proposed' routine must be refused just like /run. 409
+	// Conflict — the routine's governance state conflicts with executing it.
+	if !pipeline.StatusRunnable(p.Status) {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error":  "routine is not active",
+			"status": p.Status,
+			"hint":   "step_run executes a live agent step; approve/enable the routine first",
+		})
+		return
+	}
+
 	dsl, err := pipeline.Parse([]byte(p.DefinitionJSON))
 	if err != nil {
 		replyError(w, http.StatusInternalServerError, "parse pipeline definition")

@@ -186,7 +186,10 @@ func TestRetryPolicy_CostCapEndsRetryMidLoop(t *testing.T) {
 	dsl := &DSL{Name: "x", MaxCostUSD: 2.5, Steps: []Step{
 		{ID: "s1", Type: StepAgentRun, AgentSlug: "worker", Prompt: "go",
 			Validation: &Validation{MinLength: intPtr(100)},
-			Retry:      &RetryPolicy{MaxAttempts: 5}},
+			// Post-#1429/2.10 a tiers-exhausted validation failure is
+			// non-retryable by DEFAULT; an explicit retry_on opts it back in.
+			// This test exercises the cost-cap-mid-retry logic, so it opts in.
+			Retry: &RetryPolicy{MaxAttempts: 5, RetryOn: `error.contains("below min")`}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
 		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,

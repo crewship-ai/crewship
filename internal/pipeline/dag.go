@@ -275,6 +275,20 @@ func (e *Executor) runDAG(
 	sem := make(chan struct{}, dagWaveConcurrency)
 
 	for {
+		// Between-wave cancel pre-emption (#1424). Without this, a run
+		// cancelled AFTER a wave completes but BEFORE the next is scheduled
+		// recomputes the ready set and spawns the next wave's goroutines,
+		// which all short-circuit on dagCtx.Err() WITHOUT recording an
+		// output or setting firstErr — so `completed`/`ready` never change
+		// and the loop respawns forever at full CPU. Run() then never
+		// returns and the deferred release() never frees the concurrency
+		// slot. Mirror the linear loop's between-step cancel exit: stamp a
+		// terminal FAILED result (Run() re-labels to CANCELLED when the
+		// registry confirms a user cancel) and return.
+		if cerr := ctx.Err(); cerr != nil {
+			return e.failRun(ctx, in, emit, result, "", cerr.Error(), false, startedAt), nil
+		}
+
 		// Compute the ready set: completed[needs[*]] && !completed[id]
 		ready := make([]*Step, 0, len(dsl.Steps))
 		resMu.Lock()
@@ -321,7 +335,7 @@ func (e *Executor) runDAG(
 				if dagCtx.Err() != nil {
 					return
 				}
-				e.executeOneStep(dagCtx, step, stepIndex[step.ID], in, runID, pipelineID, emit, inputsForCtx, renderEnv, runMeta, depth, &resMu, result, dsl, &firstErr, &suspended, dagCancel)
+				e.executeOneStep(dagCtx, step, stepIndex[step.ID], in, runID, pipelineID, emit, inputsForCtx, renderEnv, runMeta, depth, &resMu, result, dsl, &firstErr, &suspended, dagCancel, startedAt)
 			}()
 		}
 		wg.Wait()
@@ -457,6 +471,7 @@ func (e *Executor) executeOneStep(
 	firstErr *atomic.Value,
 	suspended *atomic.Value,
 	dagCancel context.CancelFunc,
+	startedAt time.Time,
 ) {
 	// Render against a fresh snapshot of step outputs so peer-wave
 	// outputs are visible to this step's templates.
@@ -522,7 +537,23 @@ func (e *Executor) executeOneStep(
 	result.StepOutputs[step.ID] = output
 	result.CostUSD += stepCost
 	costNow := result.CostUSD
+	// Snapshot the growing outputs map under the lock for an incremental
+	// durability flush (#1428, 2.8). DAG persistence was per-WAVE only, so a
+	// hard kill mid-wave lost every already-completed step in that wave and
+	// replayed them all on resume — up to a dozen non-idempotent POSTs /
+	// notifies fired twice. Flushing after each step lands completed steps
+	// durably so resume skips them. Snapshot here (cheap map copy under the
+	// lock); the DB write happens after the unlock so peers aren't stalled.
+	flushSnap := make(map[string]string, len(result.StepOutputs))
+	for k, v := range result.StepOutputs {
+		flushSnap[k] = v
+	}
 	resMu.Unlock()
+	// Best-effort projection write, off the lock. Concurrent per-step flushes
+	// may momentarily race to write a slightly stale snapshot, but each is a
+	// monotonically-growing superset and the wave-boundary flush re-writes the
+	// full set — strictly better than losing the whole wave.
+	e.persistStepOutputs(ctx, in, depth, runID, flushSnap, costNow, startedAt)
 	emit.emitStepCompleted(ctx, *step, output, stepDur, stepCost)
 
 	// Cost-cap gate (post-step). The check reads from the locked
