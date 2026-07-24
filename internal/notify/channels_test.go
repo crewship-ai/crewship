@@ -24,12 +24,18 @@ func newChannelStore(t *testing.T) *ChannelStore {
 	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(`
 CREATE TABLE notification_channels (
-    id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, type TEXT NOT NULL,
+    id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('email','webhook','shoutrrr')),
+    provider TEXT NOT NULL DEFAULT '',
     config_json TEXT NOT NULL DEFAULT '{}', secret_enc TEXT,
     events_json TEXT NOT NULL DEFAULT '["run.failed"]',
     enabled INTEGER NOT NULL DEFAULT 1, created_by TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','subsec')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now','subsec')), deleted_at TEXT);`); err != nil {
+    updated_at TEXT NOT NULL DEFAULT (datetime('now','subsec')), deleted_at TEXT,
+    scope TEXT NOT NULL DEFAULT 'workspace' CHECK (scope IN ('workspace','user')),
+    owner_user_id TEXT,
+    categories_json TEXT NOT NULL DEFAULT '[]',
+    min_priority TEXT NOT NULL DEFAULT 'low' CHECK (min_priority IN ('low','medium','high','urgent')));`); err != nil {
 		t.Fatal(err)
 	}
 	return NewChannelStore(db)
@@ -49,7 +55,7 @@ func TestChannelStore_CreateWebhook_EncryptsSecretReturnsOnce(t *testing.T) {
 		t.Fatal("create should auto-generate and return a webhook secret once")
 	}
 	// API-facing List must never carry the secret.
-	list, err := s.List(ctx, "w")
+	list, err := s.List(ctx, "w", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,9 +148,58 @@ func TestChannelStore_Delete_SoftDeletesScoped(t *testing.T) {
 	if ok, _ := s.Delete(ctx, "w", ch.ID); !ok {
 		t.Fatal("delete should succeed for owning workspace")
 	}
-	list, _ := s.List(ctx, "w")
+	list, _ := s.List(ctx, "w", "")
 	if len(list) != 0 {
 		t.Fatalf("soft-deleted channel should not list; got %d", len(list))
+	}
+}
+
+// TestChannelStore_List_PersonalChannelsAreOwnerScoped guards against a
+// real privacy leak (#1412): a personal (scope=user) channel's metadata
+// (its URL, provider — not its secret, but still a member's own contact
+// info) must never appear in another member's List() view, only the
+// owner's.
+func TestChannelStore_List_PersonalChannelsAreOwnerScoped(t *testing.T) {
+	s := newChannelStore(t)
+	ctx := context.Background()
+
+	if _, err := s.Create(ctx, ChannelInput{
+		WorkspaceID: "w", Type: ChannelWebhook, URL: "https://hooks.example.com/workspace-wide",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Create(ctx, ChannelInput{
+		WorkspaceID: "w", Type: ChannelWebhook, URL: "https://hooks.example.com/alices-personal",
+		Scope: ScopeUser, OwnerUserID: "alice",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Create(ctx, ChannelInput{
+		WorkspaceID: "w", Type: ChannelWebhook, URL: "https://hooks.example.com/bobs-personal",
+		Scope: ScopeUser, OwnerUserID: "bob",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	aliceView, err := s.List(ctx, "w", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(aliceView) != 2 {
+		t.Fatalf("alice should see the workspace channel + her own personal channel (2), got %d: %+v", len(aliceView), aliceView)
+	}
+	for _, c := range aliceView {
+		if c.Scope == ScopeUser && c.OwnerUserID != "alice" {
+			t.Fatalf("alice's List() leaked another member's personal channel: %+v", c)
+		}
+	}
+
+	anonView, err := s.List(ctx, "w", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(anonView) != 1 {
+		t.Fatalf("a viewer with no user id should see ONLY the workspace channel, got %d: %+v", len(anonView), anonView)
 	}
 }
 

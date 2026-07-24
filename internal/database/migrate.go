@@ -1707,6 +1707,14 @@ END;
 	// pipeline's run, plus disclose its run_id). See
 	// migrate_consts_v153_idempotency_pipeline_scope.go (#1415).
 	{version: 153, name: "idempotency_pipeline_scope", sql: migrationIdempotencyPipelineScope},
+	// v154: native outbound notification system, MVP (issue #1412). Widens
+	// notification_channels (v133) with provider/scope/owner_user_id/
+	// categories_json/min_priority and admits the new 'shoutrrr' delivery
+	// type (Slack/Discord/Telegram via github.com/nicholas-fedor/shoutrrr).
+	// Adds user_notification_prefs (per-user category × channel matrix) and
+	// notification_deliveries (persistent outbox/delivery log). See
+	// migrate_consts_v154_notification_prefs.go.
+	{version: 154, name: "notification_prefs", fn: migrationNotificationPrefs},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

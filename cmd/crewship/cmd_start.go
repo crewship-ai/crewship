@@ -27,11 +27,13 @@ import (
 	"github.com/crewship-ai/crewship/internal/crashreport"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/leader"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/notify"
+	"github.com/crewship-ai/crewship/internal/notifyroute"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/preflight"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -320,6 +322,24 @@ var startCmd = &cobra.Command{
 		// wired here rather than at Bridge construction.
 		if deps.DB != nil {
 			bridge.SetReplyNotifier(chatnotify.New(deps.DB, srv.WSHub(), logger))
+		}
+
+		// Native outbound notification system (#1412): wire the
+		// preference-routed fan-out at the inbox write-through
+		// chokepoint (internal/inbox.Insert/UpsertMessage) — every
+		// waitpoint/escalation/failed_run/message/consolidation write
+		// already funnels through there, so this single call reaches
+		// all of them without touching any call site. Reuses the same
+		// WS hub as the chat-reply presence gate above (a user watching
+		// the relevant session live doesn't get an external push
+		// either).
+		if deps.DB != nil {
+			notifyRouterDispatcher := notify.NewDispatcher(
+				notify.NewChannelStore(deps.DB), mailer.NewFromEnv(), logger, deps.DB)
+			notifyRateLimiter := notifyroute.NewRateLimiter(5, 1.0/30.0) // burst 5, refill 1/30s
+			inbox.SetExternalNotifier(notifyroute.NewRouter(
+				deps.DB, notifyRouterDispatcher, srv.WSHub(), notifyRateLimiter, logger))
+			logger.Info("notification preference router wired (#1412: category matrix + anti-storm rate gate)")
 		}
 
 		// Wire the API router's ProvisioningHandler into chatbridge so the

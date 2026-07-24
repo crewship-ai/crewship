@@ -4,27 +4,45 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
 
 // NotificationChannel mirrors internal/notify.Channel as serialized by
-// GET /api/v1/notification-channels. The webhook signing secret is NEVER
-// returned by list — it surfaces exactly once, on the create response
-// (Stripe/GitHub-style one-time reveal).
+// GET /api/v1/notification-channels. The webhook signing secret / shoutrrr
+// service url is NEVER returned by list — it surfaces exactly once, on
+// the create response (Stripe/GitHub-style one-time reveal).
 export interface NotificationChannel {
   id: string
   workspace_id: string
-  type: "email" | "webhook" | string
+  type: "email" | "webhook" | "shoutrrr" | string
+  provider?: string // slack | discord | telegram — set when type is "shoutrrr"
   url?: string
   to?: string
   events: string[]
   enabled: boolean
   created_by?: string
   created_at?: string
+  // #1412 — two-layer preference system.
+  scope?: "workspace" | "user"
+  owner_user_id?: string
+  categories?: string[] // admin allowlist; empty/omitted = every category
+  min_priority?: "low" | "medium" | "high" | "urgent"
 }
 
 export interface ChannelCreateBody {
-  type: "email" | "webhook"
+  type: "email" | "webhook" | "shoutrrr"
   url?: string // webhook
   to?: string // email
   secret?: string // webhook, optional — auto-generated when blank
-  events?: string[] // completed | failed | all (server default: failed)
+  events?: string[] // completed | failed | all (server default: failed) — legacy #850 path
+  provider?: string // slack | discord | telegram — required for type "shoutrrr"
+  shoutrrr_url?: string // the Apprise-style service url — required for type "shoutrrr"
+  personal?: boolean // true = your own channel (self-service, any role)
+  categories?: string[] // admin allowlist for a workspace channel; omit = every category
+  min_priority?: "low" | "medium" | "high" | "urgent"
+}
+
+export interface ChannelPatchBody {
+  enabled?: boolean
+  categories?: string[]
+  min_priority?: "low" | "medium" | "high" | "urgent"
+  events?: string[]
 }
 
 /** Create response: the channel plus, for webhooks, the one-time secret. */
@@ -133,5 +151,25 @@ export function useNotificationChannels(workspaceId: string | null | undefined) 
     [workspaceId],
   )
 
-  return { channels, loading, error, refresh, create, remove, sendTest }
+  const patch = useCallback(
+    async (id: string, body: ChannelPatchBody): Promise<void> => {
+      if (!workspaceId) return
+      const res = await apiFetch(
+        `/api/v1/notification-channels/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      )
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => null)
+        throw new Error(errBody?.error ?? errBody?.detail ?? `update channel: ${res.status}`)
+      }
+      await refresh()
+    },
+    [workspaceId, refresh],
+  )
+
+  return { channels, loading, error, refresh, create, remove, sendTest, patch }
 }

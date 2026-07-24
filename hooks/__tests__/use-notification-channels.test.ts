@@ -147,4 +147,40 @@ describe("useNotificationChannels", () => {
     expect(testUrl).toContain("/api/v1/notification-channels/nc1/test")
     expect(testInit.method).toBe("POST")
   })
+
+  it("patch PATCHes the body and refreshes (#1412)", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
+    fetchMock
+      .mockResolvedValueOnce(okJSON({ channels: [CH] })) // mount
+      .mockResolvedValueOnce(okJSON({ updated: "nc1" })) // patch
+      .mockResolvedValueOnce(okJSON({ channels: [{ ...CH, categories: ["security"] }] })) // refresh
+
+    const { result } = renderHook(() => useNotificationChannels("ws1"))
+    await waitFor(() => expect(result.current.channels).toHaveLength(1))
+
+    await act(async () => {
+      await result.current.patch("nc1", { categories: ["security"] })
+    })
+    const [patchUrl, patchInit] = fetchMock.mock.calls[1] as [string, RequestInit]
+    expect(patchUrl).toContain("/api/v1/notification-channels/nc1")
+    expect(patchInit.method).toBe("PATCH")
+    expect(JSON.parse(patchInit.body as string).categories).toEqual(["security"])
+    await waitFor(() => expect(result.current.channels[0].categories).toEqual(["security"]))
+  })
+
+  it("patch surfaces the server's error message", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
+    fetchMock
+      .mockResolvedValueOnce(okJSON({ channels: [CH] }))
+      .mockResolvedValueOnce(errJSON(400, "notify: unknown category \"bogus\""))
+
+    const { result } = renderHook(() => useNotificationChannels("ws1"))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    await expect(
+      act(async () => {
+        await result.current.patch("nc1", { categories: ["bogus"] })
+      }),
+    ).rejects.toThrow(/unknown category/)
+  })
 })

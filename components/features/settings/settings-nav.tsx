@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import {
   User, Building, Users,
   Box, Link2, Activity,
-  Shield, Cpu, Bell,
+  Shield, Cpu, Bell, BellRing,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { LucideIcon } from "lucide-react"
@@ -38,6 +38,7 @@ const sections: NavSection[] = [
     items: [
       { key: "profile", label: "Profile", icon: User },
       { key: "privacy", label: "Privacy", icon: Shield },
+      { key: "notification-prefs", label: "Notification Prefs", icon: BellRing },
     ],
   },
   {

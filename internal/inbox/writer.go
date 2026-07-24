@@ -29,6 +29,64 @@ const (
 	KindMemoryConsolidation = "memory_consolidation"
 )
 
+// ExternalNotifier is the injected seam that fans a freshly-committed
+// inbox item out to a recipient's EXTERNAL notification channels — email /
+// webhook / Slack / Discord / Telegram, per their category × channel
+// preference matrix (issue #1412). This is the single chokepoint the
+// design calls for: Insert and UpsertMessage are already the funnel every
+// inbox-writing call site (waitpoint, escalation, failed_run, message,
+// consolidation — ~13 call sites) goes through, so hooking here reaches
+// all of them without touching any of them.
+//
+// Kept as a minimal interface (Item in, nothing out) rather than importing
+// internal/notify — this package is a deliberate leaf (see the package
+// doc) that every layer imports without cycles; the concrete
+// implementation (internal/notifyroute.Router) is wired at server boot via
+// SetExternalNotifier, exactly like RunStore.SetTerminalNotifier wires the
+// #850 run-terminal fan-out. The nil zero value is a safe no-op so every
+// existing caller keeps working unchanged on a boot path that hasn't wired
+// a notifier (tests, `crewship seed`, etc).
+//
+// Implementations MUST be fire-and-forget: NotifyInboxItem is called
+// inline on the writer's hot path (an HTTP handler, a pipeline step), so a
+// slow or blocking implementation would slow down every inbox write in the
+// product. internal/notifyroute.Router dispatches through its own
+// goroutine internally for exactly this reason.
+type ExternalNotifier interface {
+	NotifyInboxItem(ctx context.Context, item Item)
+}
+
+// externalNotifier is the process-wide hook, set once at boot before the
+// server starts accepting traffic (mirrors webhookTransport-style package
+// vars elsewhere in this codebase). Not mutex-guarded: production sets it
+// exactly once during wiring, before any request can reach Insert/
+// UpsertMessage; tests that need isolation use SetExternalNotifierForTesting.
+var externalNotifier ExternalNotifier
+
+// SetExternalNotifier wires the production external-notification fan-out.
+// Called once at boot (cmd_start.go). Passing nil restores the no-op
+// default.
+func SetExternalNotifier(n ExternalNotifier) { externalNotifier = n }
+
+// SetExternalNotifierForTesting swaps the notifier and returns a restore
+// func, for tests in OTHER packages that need to assert on the fan-out
+// without a real boot sequence.
+func SetExternalNotifierForTesting(n ExternalNotifier) func() {
+	prev := externalNotifier
+	externalNotifier = n
+	return func() { externalNotifier = prev }
+}
+
+// notifyExternal calls the wired notifier, if any. A nil interface (no
+// notifier wired) or nil db is silently skipped — matches the rest of this
+// file's "caller bugs / unwired paths are a no-op, not a panic" contract.
+func notifyExternal(ctx context.Context, item Item) {
+	if externalNotifier == nil {
+		return
+	}
+	externalNotifier.NotifyInboxItem(ctx, item)
+}
+
 // Item is the payload passed to Insert. The exported fields map 1:1
 // onto inbox_items columns; the writer fills in the deterministic
 // id, state ('unread'), and timestamps so callers don't repeat that
@@ -86,7 +144,7 @@ func Insert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error
 	if in.Blocking {
 		blocking = 1
 	}
-	_, err := db.ExecContext(ctx, `
+	res, err := db.ExecContext(ctx, `
 		INSERT OR IGNORE INTO inbox_items (
 			id, workspace_id, kind, source_id,
 			target_user_id, target_role,
@@ -108,6 +166,14 @@ func Insert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error
 	if err != nil {
 		logger.Warn("inbox insert", "error", err, "kind", in.Kind, "source_id", in.SourceID)
 		return err
+	}
+	// Fan out to external channels ONLY when a NEW row was actually
+	// written — INSERT OR IGNORE makes a retried/duplicate source_id a
+	// no-op, and a no-op must not re-push a notification that already
+	// went out on the first call (mirrors the dedup contract the (kind,
+	// source_id) unique index already gives the in-product inbox).
+	if n, _ := res.RowsAffected(); n > 0 {
+		notifyExternal(ctx, in)
 	}
 	return nil
 }
@@ -186,6 +252,12 @@ func UpsertMessage(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item
 		logger.Warn("inbox upsert", "error", err, "kind", in.Kind, "source_id", in.SourceID)
 		return err
 	}
+	// Unlike Insert, UpsertMessage always fans out — by design, a repeated
+	// call here means a genuinely new event (another chat reply) refreshed
+	// an existing row rather than being ignored as a duplicate; the caller
+	// (chatnotify) already scopes SourceID per (chat, recipient) so this
+	// fires once per real reply per recipient, not once per row-write.
+	notifyExternal(ctx, in)
 	return nil
 }
 
