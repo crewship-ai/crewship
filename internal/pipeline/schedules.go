@@ -231,6 +231,23 @@ INSERT INTO pipeline_schedules (
 	if in.MaxConsecutiveFailures > 0 {
 		newMaxFailures = in.MaxConsecutiveFailures
 	}
+
+	// Preserve a DUE-but-unfired occurrence across an edit that doesn't
+	// change WHEN the schedule fires (#1430, 3.5). Recomputing
+	// next_run_at = Next(now) on every Save silently pushes a row whose
+	// next_run_at has already passed (due, waiting for the next tick) into
+	// the future — the pending run is swallowed by an unrelated edit
+	// (rename, input tweak, re-enable). When the cron expr AND timezone are
+	// unchanged and the stored next_run_at is already due, keep it so the
+	// pending occurrence still fires. Any change to cron/timezone
+	// legitimately recomputes (the old bar no longer means anything).
+	nextRunToStore := nextRun
+	if existing, gerr := s.GetByID(ctx, in.ID); gerr == nil {
+		if existing.CronExpr == in.CronExpr && existing.Timezone == in.Timezone &&
+			existing.NextRunAt != nil && !existing.NextRunAt.After(time.Now()) {
+			nextRunToStore = *existing.NextRunAt
+		}
+	}
 	_, err = s.db.ExecContext(ctx, `
 UPDATE pipeline_schedules
 SET name = ?, target_pipeline_id = ?, target_pipeline_version = ?,
@@ -245,7 +262,7 @@ WHERE id = ? AND deleted_at IS NULL`,
 		in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(in.Enabled),
 		newMaxFailures,
 		boolToInt(in.Enabled), boolToInt(in.Enabled),
-		tsformat.Format(nextRun),
+		tsformat.Format(nextRunToStore),
 		nullStr(in.WakePipelineID), string(wakeInputsJSON), boolToInt(in.WakeFailClosed),
 		tsformat.Format(now),
 		in.ID,
@@ -957,6 +974,17 @@ func (s *PipelineScheduler) alertFailedScheduledRun(ctx context.Context, sched *
 // output on a COMPLETED run is already non-affirmative → SKIPPED, so it
 // never fires the main run regardless of policy.
 func evalWakeProbe(res *RunResult, runErr error, failClosed bool) (bool, string) {
+	// A DEDUPED probe means a duplicate tick (or a restart before next_run_at
+	// advanced) hit the probe's own idempotency key — the ORIGINAL tick's
+	// probe already owns the wake decision for this occurrence (#1430, 3.6).
+	// Treating DEDUPED as a generic non-affirmative outcome would fail OPEN and
+	// fire the main routine off the dedupe, even when the in-flight probe would
+	// return falsey. It is neither a truthy probe nor a failure: do NOT fire,
+	// and don't touch the fail-open/closed policy (there is nothing broken to
+	// protect against — a probe IS deciding). Record it as a skipped tick.
+	if runErr == nil && res != nil && res.Status == "DEDUPED" {
+		return false, WakeStatusSkipped
+	}
 	if runErr != nil || res == nil || res.Status != "COMPLETED" {
 		if failClosed {
 			return false, WakeStatusHeld

@@ -1175,9 +1175,18 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 	}
 
 	result.DurationMs = time.Since(startedAt).Milliseconds()
-	if len(dsl.Steps) > 0 {
-		lastID := dsl.Steps[len(dsl.Steps)-1].ID
-		result.Output = result.StepOutputs[lastID]
+	// Skip-aware final output (#1430, 3.3). Taking the LAST step's output
+	// verbatim breaks a wake-probe whose final step if-skips: it records the
+	// "<skipped>" sentinel, which evalIfCondition reads as TRUTHY, so the
+	// schedule wakes wrongly. Mirror the DAG epilogue (dag.go): walk backward
+	// to the last step that actually produced a meaningful output, treating
+	// both "" and "<skipped>" as "no output here."
+	for i := len(dsl.Steps) - 1; i >= 0; i-- {
+		out := result.StepOutputs[dsl.Steps[i].ID]
+		if out != "" && out != "<skipped>" {
+			result.Output = out
+			break
+		}
 	}
 
 	switch in.Mode {
