@@ -48,7 +48,8 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Failures | `bulk-replay` | Replay all failed runs under a fingerprint (after a fix) |
 | Deferred | `pending ...` | List or cancel deferred (delayed/debounced) routine triggers |
 | Versions | `versions <slug>` | List version history |
-| Versions | `rollback <slug> --to N` | Roll back to version N |
+| Versions | `diff <slug> --from N --to M` | Unified diff between two versions' definitions |
+| Versions | `rollback <slug> --to N` | Roll back to version N (prints a post-rollback "what changed" diff) |
 | Authoring | `validate [file.json]` | Validate DSL offline (no server call) |
 | Authoring | `tag <slug> ...` | Add or remove discovery tags on a routine definition |
 | Authoring | `step-override <slug> ...` | Override a step's prompt/model without bumping the routine version |
@@ -610,6 +611,33 @@ crewship routine versions summarize-text
 ```
 
 **Output columns:** VERSION, HEAD, PARENT, HASH, AUTHOR, CREATED, SUMMARY. The `*` marker tags the current HEAD.
+
+## `crewship routine diff <slug> --from N --to M`
+
+Unified diff between two versions' definitions (#1422 item 5) — `versions
+show <n>` dumps one version at a time for external diffing; this is the
+native in-product equivalent. The diff is computed over pretty-printed
+JSON, so a single field change reads as a single-hunk diff instead of the
+whole minified blob changing.
+
+```bash
+crewship routine diff summarize-text --from 2 --to 5
+crewship routine diff summarize-text --from 2 --to 5 --format json | jq -r .unified_diff
+```
+
+| Flag | Required | Description |
+|------|:---:|-------------|
+| `--from` | ✓ | Source version number |
+| `--to` | ✓ | Target version number |
+
+Identical versions (same `definition_hash`) print a one-line confirmation
+instead of an empty diff. `--format json` returns `{slug, from_version,
+to_version, from_hash, to_hash, identical, unified_diff}`.
+
+`crewship routine rollback <slug> --to N` calls this same endpoint after a
+successful rollback to print a **"What changed"** view against the
+version it just rolled back from — best-effort, so a diff-fetch failure
+never fails the rollback itself.
 
 ## `crewship routine iterate <slug>`
 

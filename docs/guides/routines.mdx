@@ -1163,6 +1163,16 @@ crewship routine rollback email-fetch --to 3
 
 History is preserved — you can roll forward to a later version by another rollback. There is no "delete version" — if a version was bad, the trail stays: "v1 → v2 → v3, HEAD back on v2, then v4 (fix)" is the audit story you keep, and each run additionally records the content hash it executed.
 
+### Diffing versions
+
+`crewship routine diff <slug> --from N --to M` prints a unified diff between two versions' definitions (pretty-printed JSON, so a single field change shows as a single-hunk diff rather than the whole minified blob changing):
+
+```bash
+crewship routine diff email-fetch --from 2 --to 3
+```
+
+`rollback` calls the same endpoint automatically and prints a **"What changed"** view against the version it just rolled back from, so you see exactly what the rollback undid without a separate command. Identical versions (same `definition_hash`) print a one-line confirmation instead of an empty diff. See the [CLI reference](/cli/routine#crewship-routine-diff-slug---from-n---to-m) for the JSON shape and `--format json` output.
+
 ## The improvement loop: `routine iterate`
 
 Version history is also the substrate for **self-improving routines**. `crewship routine iterate` closes the loop that ad-hoc "agent loop" setups hand-roll in a single chat session — run, score, rewrite, repeat — but with the runtime's guarantees attached:
@@ -1528,7 +1538,8 @@ Fixes, in order of preference:
 | `routine step-override set/list/clear` | Live prompt/model override for one step, no version bump |
 | `routine pending list/cancel <id>` | Inspect / cancel deferred (`--delay` / `--debounce-key`) triggers |
 | `routine versions <slug>` | Version history |
-| `routine rollback <slug> --to N` | Roll back to v N |
+| `routine diff <slug> --from N --to M` | Unified diff between two versions' definitions |
+| `routine rollback <slug> --to N` | Roll back to v N (prints a post-rollback "what changed" diff) |
 | `routine export <slug>` | JSON bundle to stdout |
 | `routine import [bundle.json]` | Load from file or stdin |
 | `routine validate [file.json]` | Offline DSL check |

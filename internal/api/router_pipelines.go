@@ -69,6 +69,9 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/save", roleCreate, pipes.Save)
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions", authed(wsCtx(http.HandlerFunc(pipes.ListVersions))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions/{n}", authed(wsCtx(http.HandlerFunc(pipes.GetVersion))))
+	// #1422 item 5: native version diff (`?from=N&to=M`) — unified diff of
+	// two versions' definitions, no external round-trip needed.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/diff", authed(wsCtx(http.HandlerFunc(pipes.DiffVersions))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback", roleManage, pipes.Rollback)
 	// Marketplace prep: portable JSON bundles for cross-workspace
 	// transfer. Export is read-only; import requires author_crew_id
