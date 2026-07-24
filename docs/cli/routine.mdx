@@ -32,6 +32,7 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Governance | `enable <slug>` | Re-enable a disabled routine (OWNER/ADMIN) |
 | Diagnostics | `doctor <slug>` | Preflight checklist — catches blind alleys before `run` |
 | Diagnostics | `bench <slug>` | Variance characterisation — N runs, pass-rate + cost/latency stats |
+| Diagnostics | `backtest <slug> --against <version>` | Replay recent successful runs against a candidate version and diff outputs (read-only) |
 | Runs | `runs <slug>` | List recent runs from journal |
 | Runs | `records <slug>` | List runs from `pipeline_runs` projection (v83) |
 | Runs | `active` | List in-flight runs across the workspace |
@@ -315,6 +316,51 @@ Output reports total / mean / p95 / max cost; p50 / p95 / max duration; fail-rea
 | `UNRELIABLE` | &lt;70% pass rate (escalate tier or rewrite gates) |
 | `BROKEN` | 0% pass rate (auth issue, unsatisfiable gate, or cost guardrail trips every time) |
 | `INSUFFICIENT_DATA` | 0 runs |
+
+---
+
+## `crewship routine backtest <slug>`
+
+Replay a corpus of recent, successful runs against a **candidate version** and diff the outputs — validate a routine change before rollout, without creating a new version or touching which version is live. Read-only: `--against` names an immutable [`versions`](#crewship-routine-versions-slug) row; the backtest never bumps `head_version` and never changes what `run`/schedules/webhooks execute.
+
+```bash
+# Backtest v9 against the last 7 days of successful runs
+crewship routine backtest support-triage --against 9 --last 7d
+
+# Narrower corpus + JSON for CI (non-zero exit on regression)
+crewship routine backtest support-triage --against 9 --last 24h --limit 5 -f json
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--against` | int | | **Required.** Candidate routine version to backtest (see `routine versions <slug>`) |
+| `--last` | string | `7d` | How far back to pull the corpus of successful runs (`1h`, `24h`, `7d`, or an RFC3339 timestamp) |
+| `--limit` | int | `20` | Max captured runs to replay |
+
+Composes two existing primitives — no new engine surface:
+
+1. **Corpus selection** — `GET /api/v1/workspaces/{ws}/pipelines/{slug}/run-records?status=completed`, filtered client-side to the `--last` window (newest-first, capped at `--limit`).
+2. **Pinned-version replay** — for each corpus run, `POST /api/v1/workspaces/{ws}/pipelines/runs/{run_id}/replay` with `{"pinned_version": N}`. This replays that run's **original captured inputs** against the pinned version's definition instead of head (same `PinnedVersion` mechanism the cron scheduler and webhook dispatch already use for pinned triggers) and is graded against what was actually recorded.
+
+Per-run verdict:
+
+| Verdict | Meaning |
+|---|---|
+| `MATCH` | Candidate passed and its output is byte-identical to the original |
+| `DIVERGED` | Candidate passed but produced different output — behaviour changed |
+| `REGRESSED` | Candidate did not pass (`FAILED` / `CANCELLED` / etc.) |
+| `ERROR` | The replay call itself failed (transport error, or `--against` names a deleted version) |
+
+Aggregate verdict (also the process exit code — `REGRESSION_DETECTED` exits non-zero, CI-friendly like `eval baseline diff`):
+
+| Verdict | When |
+|---|---|
+| `NO_CORPUS` | No completed runs found in the `--last` window |
+| `CLEAN` | Every replayed run matched exactly |
+| `DIVERGED_OUTPUTS` | No regressions, but at least one output changed |
+| `REGRESSION_DETECTED` | At least one run regressed or errored |
+
+For a matrix sweep across many routines/tiers or a saved regression baseline, see [`eval scenarios`](/cli/eval#crewship-eval-scenarios) and [`eval baseline`](/cli/eval#crewship-eval-baseline) — `backtest` answers a narrower question ("is *this* candidate version safe to promote?") using the workspace's own recent traffic as the corpus instead of an authored eval suite.
 
 ---
 
@@ -686,9 +732,18 @@ Re-run a prior run with its original captured inputs. The new run is stamped `is
 
 ```bash
 crewship routine replay run_cmox10oci00016b48aacd
+
+# Pin the replay to an immutable routine version instead of head —
+# read-only, never changes head_version. See `routine backtest` for
+# doing this across a whole corpus of recent runs at once.
+crewship routine replay run_cmox10oci00016b48aacd --version 9
 ```
 
-Backed by `POST /api/v1/workspaces/{ws}/pipelines/runs/{run_id}/replay`. Output: `Replayed <run_id> → new run <new_id>: <status> ($cost)`, plus the run output if non-empty.
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--version` | int | (head) | Pin the replay to this immutable routine version instead of head |
+
+Backed by `POST /api/v1/workspaces/{ws}/pipelines/runs/{run_id}/replay` (body: `{"pinned_version": N}` when `--version` is set). Output: `Replayed <run_id> → new run <new_id>: <status> ($cost)`, plus the run output if non-empty.
 
 ---
 
