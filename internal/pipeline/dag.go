@@ -275,6 +275,20 @@ func (e *Executor) runDAG(
 	sem := make(chan struct{}, dagWaveConcurrency)
 
 	for {
+		// Between-wave cancel pre-emption (#1424). Without this, a run
+		// cancelled AFTER a wave completes but BEFORE the next is scheduled
+		// recomputes the ready set and spawns the next wave's goroutines,
+		// which all short-circuit on dagCtx.Err() WITHOUT recording an
+		// output or setting firstErr — so `completed`/`ready` never change
+		// and the loop respawns forever at full CPU. Run() then never
+		// returns and the deferred release() never frees the concurrency
+		// slot. Mirror the linear loop's between-step cancel exit: stamp a
+		// terminal FAILED result (Run() re-labels to CANCELLED when the
+		// registry confirms a user cancel) and return.
+		if cerr := ctx.Err(); cerr != nil {
+			return e.failRun(ctx, in, emit, result, "", cerr.Error(), false, startedAt), nil
+		}
+
 		// Compute the ready set: completed[needs[*]] && !completed[id]
 		ready := make([]*Step, 0, len(dsl.Steps))
 		resMu.Lock()
