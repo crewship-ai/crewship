@@ -1700,6 +1700,13 @@ END;
 	// journal.VerifyChain then detects mutation / reorder / mid-chain
 	// deletion. See migrate_consts_v152_journal_hash_chain.go (#1369).
 	{version: 152, name: "journal_hash_chain", fn: migrationJournalHashChain},
+	// v153 adds a per-schedule circuit breaker: consecutive_failures +
+	// max_consecutive_failures + disabled_reason on pipeline_schedules, so
+	// a schedule whose target keeps failing auto-disables after K
+	// straight failures instead of spamming the MANAGER inbox and
+	// burning agent cost forever. See
+	// migrate_consts_v153_schedule_circuit_breaker.go (#1405).
+	{version: 153, name: "schedule_circuit_breaker", sql: migrationScheduleCircuitBreaker},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

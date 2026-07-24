@@ -222,6 +222,13 @@ const (
 	// run.id, payload carries step_id + duration_ms.
 	EntryPipelineStepContainerReady EntryType = "pipeline.step.container_ready"
 
+	// EntryPipelineScheduleCircuitBreaker fires when a schedule auto-disables
+	// after K consecutive FAILED fires (#1405). Payload carries schedule_id,
+	// consecutive_failures, max_consecutive_failures. Distinct from
+	// EntryPipelineRunFailed (which is per-run) — this is the schedule-level
+	// breaker tripping, emitted exactly once per trip.
+	EntryPipelineScheduleCircuitBreaker EntryType = "pipeline.schedule.circuit_breaker_tripped"
+
 	// EntryRunAgentSpan is one INTERNAL action of an agent_run step — a single
 	// tool the agent invoked (Bash/Write/Edit/Read/MCP/HTTP). It is the leaf of
 	// the drillable run-trace tree (run → step → tool). trace_id == run.id (so

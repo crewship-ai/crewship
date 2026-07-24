@@ -833,6 +833,10 @@ var startCmd = &cobra.Command{
 				if schedulerLease != nil {
 					scheduler.SetLeaderGate(schedulerLease)
 				}
+				// Journal emitter for scheduler-level events (circuit breaker
+				// trips #1405, missed-occurrence catch-up #1409) — reuses the
+				// same writer the executor emits run/step events through.
+				scheduler.SetEmitter(ph.Emitter())
 				scheduler.Start(ctx)
 				defer scheduler.Stop()
 				logger.Info("pipeline scheduler wired (cron triggers; 30s tick)")

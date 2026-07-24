@@ -133,6 +133,7 @@ func runRoutineDoctor(cmd *cobra.Command, args []string) error {
 		{"egress_allowlist", func() []doctorCheck { return checkEgressTargets(pipeline.Definition) }},
 		{"cost_cap", func() []doctorCheck { return []doctorCheck{checkCostCap(pipeline.Definition)} }},
 		{"validation_gates", func() []doctorCheck { return checkValidationGates(pipeline.Definition) }},
+		{"schedule_circuit_breaker", func() []doctorCheck { return checkScheduleCircuitBreaker(client, ws, slug) }},
 	}
 	for _, check := range checks {
 		report.Checks = append(report.Checks, check.run()...)

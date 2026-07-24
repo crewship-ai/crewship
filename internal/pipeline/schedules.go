@@ -18,6 +18,7 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/leader"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
@@ -71,10 +72,34 @@ type Schedule struct {
 	// longer be the thing that triggers an unattended autonomous run.
 	WakeFailClosed bool
 
+	// Circuit breaker (#1405). ConsecutiveFailures counts back-to-back
+	// FAILED main-routine fires; a COMPLETED fire resets it to 0.
+	// MaxConsecutiveFailures is the per-schedule trip threshold (default
+	// defaultMaxConsecutiveFailures). Once ConsecutiveFailures reaches
+	// the threshold the schedule is disabled with DisabledReason set to
+	// scheduleDisabledReasonCircuitBreaker, a journal event fires, and a
+	// single actionable alert lands in the MANAGER inbox. Re-enabling
+	// (Save with Enabled transitioning false→true) resets both.
+	ConsecutiveFailures    int
+	MaxConsecutiveFailures int
+	DisabledReason         string
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DeletedAt *time.Time
 }
+
+// defaultMaxConsecutiveFailures is the trip threshold used when a
+// schedule doesn't specify its own MaxConsecutiveFailures (zero/negative
+// on create, or a pre-migration row).
+const defaultMaxConsecutiveFailures = 5
+
+// scheduleDisabledReasonCircuitBreaker is the DisabledReason value set
+// when the circuit breaker (not an operator, not a bad cron expr)
+// disables a schedule. Surfaced verbatim by the CLI (`schedules list` /
+// `routine doctor`) so an operator can tell at a glance why a schedule
+// went dark.
+const scheduleDisabledReasonCircuitBreaker = "circuit_breaker"
 
 // Wake check outcomes recorded in pipeline_schedules.last_wake_status.
 const (
@@ -105,6 +130,11 @@ type SaveScheduleInput struct {
 	// WakeFailClosed opts the gate into fail-closed probe-failure
 	// handling (#1372). Ignored when WakePipelineID is empty (no gate).
 	WakeFailClosed bool
+	// MaxConsecutiveFailures overrides the circuit breaker's trip
+	// threshold (#1405). <= 0 means "use defaultMaxConsecutiveFailures" —
+	// on create that's a fresh default; on update the existing stored
+	// value is left untouched (see Save's CASE-guarded UPDATE).
+	MaxConsecutiveFailures int
 }
 
 // ScheduleStore is the persistence + listing API for
@@ -156,6 +186,10 @@ func (s *ScheduleStore) Save(ctx context.Context, in SaveScheduleInput) (*Schedu
 		wakeInputsJSON = []byte("{}")
 	}
 	now := time.Now().UTC()
+	maxFailures := in.MaxConsecutiveFailures
+	if maxFailures <= 0 {
+		maxFailures = defaultMaxConsecutiveFailures
+	}
 
 	if in.ID == "" {
 		// Create
@@ -165,13 +199,15 @@ INSERT INTO pipeline_schedules (
     id, workspace_id, name, target_pipeline_id, target_pipeline_version,
     cron_expr, timezone, inputs_json, enabled, next_run_at,
     wake_pipeline_id, wake_inputs_json, wake_fail_closed,
+    max_consecutive_failures,
     created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, in.WorkspaceID, in.Name, in.TargetPipelineID,
 			nullInt(in.TargetPipelineVersion),
 			in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(in.Enabled),
 			tsformat.Format(nextRun),
 			nullStr(in.WakePipelineID), string(wakeInputsJSON), boolToInt(in.WakeFailClosed),
+			maxFailures,
 			tsformat.Format(now), tsformat.Format(now),
 		)
 		if err != nil {
@@ -180,16 +216,35 @@ INSERT INTO pipeline_schedules (
 		return s.GetByID(ctx, id)
 	}
 
-	// Update
+	// Update. consecutive_failures / disabled_reason reset to a clean
+	// slate exactly when this Save re-enables a previously-disabled
+	// schedule (enabled false→true) — the CASE reads the PRE-update
+	// `enabled` column value, so it correctly distinguishes "was already
+	// enabled, stays enabled" (leave the breaker state alone) from
+	// "was disabled, now enabled" (re-enable = clean slate). This is the
+	// single code path both the dedicated `schedules enable` CLI command
+	// and any generic `update --enabled` call go through.
+	// max_consecutive_failures only changes when the caller explicitly
+	// passed a positive override; otherwise the stored value survives an
+	// unrelated field edit (cron tweak, rename, ...).
+	newMaxFailures := any(nil)
+	if in.MaxConsecutiveFailures > 0 {
+		newMaxFailures = in.MaxConsecutiveFailures
+	}
 	_, err = s.db.ExecContext(ctx, `
 UPDATE pipeline_schedules
 SET name = ?, target_pipeline_id = ?, target_pipeline_version = ?,
     cron_expr = ?, timezone = ?, inputs_json = ?, enabled = ?,
+    max_consecutive_failures = COALESCE(?, max_consecutive_failures),
+    consecutive_failures = CASE WHEN ? = 1 AND enabled = 0 THEN 0 ELSE consecutive_failures END,
+    disabled_reason = CASE WHEN ? = 1 AND enabled = 0 THEN NULL ELSE disabled_reason END,
     next_run_at = ?, wake_pipeline_id = ?, wake_inputs_json = ?,
     wake_fail_closed = ?, updated_at = ?
 WHERE id = ? AND deleted_at IS NULL`,
 		in.Name, in.TargetPipelineID, nullInt(in.TargetPipelineVersion),
 		in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(in.Enabled),
+		newMaxFailures,
+		boolToInt(in.Enabled), boolToInt(in.Enabled),
 		tsformat.Format(nextRun),
 		nullStr(in.WakePipelineID), string(wakeInputsJSON), boolToInt(in.WakeFailClosed),
 		tsformat.Format(now),
@@ -285,13 +340,40 @@ ORDER BY next_run_at ASC LIMIT 100`,
 
 // recordRun persists the outcome of a fire — last_run_at, last_status,
 // last_run_id — and computes next_run_at from the cron expr.
+//
+// Circuit breaker bookkeeping (#1405) rides along here since it's the
+// same terminal-status transition: a COMPLETED fire resets
+// consecutive_failures to 0 (the routine is healthy again); a FAILED
+// fire increments it. SKIPPED / WAITING / DEDUPED are non-terminal or
+// healthy-but-not-a-success outcomes and leave the counter untouched.
 func (s *ScheduleStore) recordRun(ctx context.Context, scheduleID, runID, status string, nextRun time.Time) error {
+	now := tsformat.Format(time.Now())
+	var counterSQL string
+	switch status {
+	case "COMPLETED":
+		counterSQL = `, consecutive_failures = 0`
+	case "FAILED":
+		counterSQL = `, consecutive_failures = consecutive_failures + 1`
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE pipeline_schedules
+SET last_run_at = ?, last_status = ?, last_run_id = ?, next_run_at = ?, updated_at = ?`+counterSQL+`
+WHERE id = ?`,
+		now, status, nullStr(runID), tsformat.Format(nextRun), now, scheduleID,
+	)
+	return err
+}
+
+// disableForCircuitBreaker disables a schedule and stamps
+// disabled_reason so the CLI can distinguish an operator-initiated
+// disable (disabled_reason stays NULL) from a circuit-breaker trip.
+func (s *ScheduleStore) disableForCircuitBreaker(ctx context.Context, scheduleID string) error {
 	now := tsformat.Format(time.Now())
 	_, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_schedules
-SET last_run_at = ?, last_status = ?, last_run_id = ?, next_run_at = ?, updated_at = ?
+SET enabled = 0, disabled_reason = ?, updated_at = ?
 WHERE id = ?`,
-		now, status, nullStr(runID), tsformat.Format(nextRun), now, scheduleID,
+		scheduleDisabledReasonCircuitBreaker, now, scheduleID,
 	)
 	return err
 }
@@ -349,6 +431,12 @@ type PipelineScheduler struct {
 	// lease. Nil = single-instance (always fire).
 	leaderGate leader.Gate
 
+	// emitter records journal events for scheduler-level occurrences that
+	// aren't per-run (circuit breaker trips, missed-occurrence catch-up).
+	// Nil-safe via ensureEmitter — defaults to a no-op so schedulers built
+	// without SetEmitter (most existing tests) keep working unchanged.
+	emitter Emitter
+
 	stopCh    chan struct{}
 	stopped   chan struct{}
 	startOnce sync.Once
@@ -359,6 +447,11 @@ type PipelineScheduler struct {
 // while its replica holds the scheduler lease. Call before Start. Passing nil
 // (the default) keeps single-instance behaviour.
 func (s *PipelineScheduler) SetLeaderGate(g leader.Gate) { s.leaderGate = g }
+
+// SetEmitter wires the journal emitter used for scheduler-level events
+// (circuit breaker trips #1405, missed-occurrence catch-up #1409). Nil
+// (the default) keeps events unrecorded rather than panicking.
+func (s *PipelineScheduler) SetEmitter(e Emitter) { s.emitter = ensureEmitter(e) }
 
 // NewPipelineScheduler wires a scheduler ready to start. Caller
 // invokes Start to spawn the tick goroutine.
@@ -371,6 +464,7 @@ func NewPipelineScheduler(store *ScheduleStore, pipelines *Store, executor *Exec
 		pipelines: pipelines,
 		executor:  executor,
 		logger:    logger,
+		emitter:   nopEmitter{},
 		stopCh:    make(chan struct{}),
 		stopped:   make(chan struct{}),
 	}
@@ -583,6 +677,73 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 			errLine = truncateForPreview(runErr.Error())
 		}
 		s.alertFailedScheduledRun(ctx, sched, pipeline.ID, pipeline.Slug, runID, errLine)
+		s.maybeTripCircuitBreaker(ctx, sched, pipeline.Slug)
+	}
+}
+
+// maybeTripCircuitBreaker checks whether this FAILED fire pushed the
+// schedule's consecutive-failure streak to (or past) its trip
+// threshold and, if so, disables it (#1405). sched is the row as it
+// was BEFORE this fire's recordRun — its ConsecutiveFailures is the
+// pre-fire count, so + 1 is exactly the count recordRun just
+// persisted. Guarded on sched.DisabledReason so a caller that fires an
+// already-tripped schedule directly (bypassing listDueSchedules'
+// enabled=1 filter) can never re-trip or double-alert.
+func (s *PipelineScheduler) maybeTripCircuitBreaker(ctx context.Context, sched *Schedule, pipelineSlug string) {
+	if sched.DisabledReason == scheduleDisabledReasonCircuitBreaker {
+		return
+	}
+	maxFailures := sched.MaxConsecutiveFailures
+	if maxFailures <= 0 {
+		maxFailures = defaultMaxConsecutiveFailures
+	}
+	newCount := sched.ConsecutiveFailures + 1
+	if newCount < maxFailures {
+		return
+	}
+	if err := s.store.disableForCircuitBreaker(ctx, sched.ID); err != nil {
+		s.logger.Warn("pipeline scheduler: circuit breaker disable", "error", err, "schedule", sched.ID)
+		return
+	}
+	label := pipelineSlug
+	if label == "" {
+		label = "target routine"
+	}
+	s.logger.Warn("pipeline scheduler: circuit breaker tripped — schedule disabled",
+		"schedule", sched.ID, "pipeline", label, "consecutive_failures", newCount, "max", maxFailures)
+	_, _ = s.emitter.Emit(ctx, journal.Entry{
+		WorkspaceID: sched.WorkspaceID,
+		Type:        journal.EntryPipelineScheduleCircuitBreaker,
+		Severity:    journal.SeverityError,
+		ActorType:   journal.ActorOrchestrator,
+		ActorID:     sched.ID,
+		Summary:     fmt.Sprintf("Schedule %s disabled after %d straight failures", sched.Name, newCount),
+		Payload: map[string]any{
+			"schedule_id":              sched.ID,
+			"pipeline_slug":            label,
+			"consecutive_failures":     newCount,
+			"max_consecutive_failures": maxFailures,
+		},
+	})
+	if err := inbox.Insert(ctx, s.store.db, s.logger, inbox.Item{
+		WorkspaceID: sched.WorkspaceID,
+		Kind:        "schedule_circuit_breaker_tripped",
+		SourceID:    sched.ID,
+		TargetRole:  "MANAGER",
+		Title:       fmt.Sprintf("Routine %s paused after %d straight failures", label, newCount),
+		BodyMD: fmt.Sprintf(
+			"Schedule **%s** (routine `%s`) failed %d times in a row and has been auto-disabled to stop the spam / cost bleed. "+
+				"Inspect the recent failed runs, fix the cause, then `crewship routine schedules enable %s`.",
+			sched.Name, label, newCount, sched.ID),
+		SenderType: "pipeline",
+		SenderName: sched.Name,
+		Priority:   "high",
+		Payload: map[string]interface{}{
+			"schedule_id":          sched.ID,
+			"consecutive_failures": newCount,
+		},
+	}); err != nil {
+		s.logger.Warn("pipeline scheduler: circuit breaker inbox alert", "error", err, "schedule", sched.ID)
 	}
 }
 
@@ -714,6 +875,8 @@ SELECT id, workspace_id, name, target_pipeline_id, target_pipeline_version,
        wake_check_count, wake_fire_count,
        last_wake_at, COALESCE(last_wake_status, ''),
        COALESCE(wake_fail_closed, 0),
+       COALESCE(consecutive_failures, 0), COALESCE(max_consecutive_failures, 5),
+       COALESCE(disabled_reason, ''),
        created_at, updated_at, deleted_at
 FROM pipeline_schedules`
 
@@ -739,6 +902,8 @@ func scanSchedule(rs rowScanner) (*Schedule, error) {
 		&s.WakeCheckCount, &s.WakeFireCount,
 		&lastWakeAt, &s.LastWakeStatus,
 		&wakeFailClsd,
+		&s.ConsecutiveFailures, &s.MaxConsecutiveFailures,
+		&s.DisabledReason,
 		&createdAt, &updatedAt, &deletedAt,
 	)
 	if err != nil {

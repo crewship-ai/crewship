@@ -936,6 +936,33 @@ Semantics worth knowing:
 - A skipped tick advances `next_run_at` but leaves `last_run_*` untouched — run telemetry stays strictly about main runs. Wake telemetry lives in `wake_check_count` / `wake_fire_count` / `last_wake_at` / `last_wake_status`, and `routine schedules list` shows it as `<probe> woke/checked` in the WAKE column.
 - Probe executions are regular runs with `triggered_via: wake_check`, so they're auditable in run history and filterable out of dashboards.
 
+### Circuit breaker
+
+A schedule whose target routine is broken (deleted agent, expired credential, a bug in the routine) fires on every tick, fails every time, and each failed run raises a MANAGER inbox alert — unbounded inbox spam and burned agent cost with no backstop. The **circuit breaker** auto-disables a schedule after **5 consecutive failed fires** (the default; override per schedule with `--max-failures`), so a broken cron goes quiet instead of failing forever.
+
+```bash
+# Trip after 3 straight failures instead of the default 5:
+crewship routine schedules create --slug nightly-report \
+    --cron "0 6 * * *" --max-failures 3
+
+# Change the threshold on an existing schedule:
+crewship routine schedules update <schedule_id> --max-failures 10
+```
+
+When the breaker trips:
+
+- The schedule is disabled (`enabled: false`) with `disabled_reason: circuit_breaker` — distinct from an operator-initiated disable (`disabled_reason` stays empty), so `routine schedules list` and `routine doctor` can tell you *why* a schedule went dark.
+- A journal event (`pipeline.schedule.circuit_breaker_tripped`) and exactly **one** actionable MANAGER inbox alert fire for the trip itself — separate from the per-run `failed_run` alerts, which still fire once per failed run.
+- A **successful** fire resets the consecutive-failure counter to 0, so an intermittently-flaky routine that eventually succeeds never trips.
+
+`routine schedules list` surfaces the live counter in the `FAILS` column (`2/5`) and the tripped state inline in `ENABLED` (`no (circuit_breaker)`); `routine doctor <slug>` reports the same state as a `schedule_circuit_breaker` check (`OK` / `WARN` while approaching the threshold / `FAIL` once tripped).
+
+Re-enabling clears the slate — the counter resets to 0 and `disabled_reason` clears:
+
+```bash
+crewship routine schedules enable <schedule_id>
+```
+
 ### Webhooks
 
 ```bash
@@ -1426,7 +1453,7 @@ The `pipeline` alias is preserved for back-compat on the legacy subcommands (`pi
 
 ## Backend reference
 
-- Migrations v78 (pipelines + execution_tiers_json), v79 (versions + waitpoints), v80 (schedules), v81 (run idempotency), v82 (webhooks), v115 (schedule wake gates)
+- Migrations v78 (pipelines + execution_tiers_json), v79 (versions + waitpoints), v80 (schedules), v81 (run idempotency), v82 (webhooks), v115 (schedule wake gates), v153 (schedule circuit breaker)
 - Source: `internal/pipeline/` (~10 700 LOC, 36 files)
 - API: `internal/api/pipelines.go`, `pipeline_runs.go`, `pipeline_schedules.go`, `pipeline_webhooks.go`
 - Sidecar: `internal/sidecar/pipelines.go` (port 9119)
