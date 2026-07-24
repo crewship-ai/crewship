@@ -436,10 +436,28 @@ gates at run time, checked pre-flight AND on every redirect hop
    applies regardless.
 2. **Crew layer — network policy.** The authoring crew's network policy
    (`network_mode` + allowed domains — the same dial that governs the crew's
-   agent containers) also applies to direct `http` steps. Crews on the
-   default `free` mode are unaffected; a `restricted` crew's routines can
-   only reach the crew's allowed domains (exact host match, same as the
-   container proxy).
+   agent containers) also applies to direct `http` steps. A `restricted`
+   crew's routines can only reach the crew's allowed domains (exact host
+   match, same as the container proxy).
+
+   A crew on `free` mode is **not** unconditionally open at this layer: an
+   `http` step that does **not** declare `egress_targets` is still held to
+   the same floor `restricted` mode enforces — the sidecar's default LLM/CLI
+   provider domains only. This closes an SSRF gap where any `create`-role
+   member (or a webhook payload driving `{{ inputs.url }}`) could otherwise
+   point an undeclared `http` step at an arbitrary public host just because
+   the crew allows its agents free egress. Declaring `egress_targets` on the
+   routine is the escape hatch — it bypasses this floor and the routine's
+   own allowlist governs instead (private/link-local IPs still blocked by
+   the SSRF guard regardless).
+
+   **Webhook-triggered runs go further: they're always held to the
+   `restricted` floor**, regardless of the crew's own `network_mode` — the
+   inbound payload is untrusted, so a routine fired by a webhook delivery
+   can't be used to reach an arbitrary host even if the authoring crew is
+   nominally `free`. The crew's own `allowed_domains` (if configured) still
+   apply on top of the shared defaults, same as a genuinely-`restricted`
+   crew.
 
 A blocked request fails the step with a structured error naming the step,
 the host, and which layer denied it — before any bytes leave the server.
@@ -944,6 +962,46 @@ crewship routine webhooks create --slug pr-review-structured \
 ```
 
 Output reveals the public URL and signing secret **once** (Stripe-style). External services POST event payload to `/api/v1/webhooks/{token}`. With HMAC, sender includes header `X-Crewship-Signature: sha256=<hex_hmac_of_body>`, validated server-side via `hmac.Equal` (timing-safe). Rate limited per token, per minute, default 60.
+
+**Replay defense — timestamped signatures (optional).** A body-only HMAC is
+replayable for as long as the delivery's idempotency reservation is live (up
+to 24h, and a failed run can reopen the window). To close that gap, a sender
+can additionally include `X-Crewship-Timestamp: <unix_seconds>` and sign
+`"<timestamp>.<body>"` instead of the bare body:
+
+```bash
+ts=$(date +%s)
+sig=$(printf '%s.%s' "$ts" "$body" | openssl dgst -sha256 -hmac "$secret" | cut -d' ' -f2)
+curl -X POST "https://.../api/v1/webhooks/$token" \
+  -H "X-Crewship-Timestamp: $ts" \
+  -H "X-Crewship-Signature: sha256=$sig" \
+  -d "$body"
+```
+
+When `X-Crewship-Timestamp` is present, the signature must cover the
+timestamped material AND the timestamp must be within a 5-minute freshness
+window — a captured signed request becomes useless once that window passes,
+even if it's replayed before the idempotency reservation expires. Omitting
+the header falls back to the body-only scheme unchanged, so existing
+senders keep working without any change.
+
+**Injection fence + forced egress for webhook-triggered runs.** The request
+body lands in the routine's inputs as `inputs.event` (parsed JSON or raw
+string), `inputs.raw` (the raw bytes as a string), and `inputs.headers` — all
+attacker-influenced if the upstream sender's payload carries untrusted text
+(an issue title, a commit message, a customer-supplied field). Two
+protections apply automatically, with no DSL changes required:
+
+- Any `agent_run` step's rendered prompt wraps those three input values in
+  the same untrusted-ingress fence (`<untrusted source="webhook" ...>`) the
+  agent-webhook path already uses — the model is told to treat fenced
+  content as data, never instructions. Other template destinations (`http`
+  URL/body/headers, `code`, `transform`, `if`) are **not** fenced — wrapping
+  those would corrupt a URL or a JSON body rather than protect anything;
+  they're covered by the egress hardening below instead.
+- Every `http` step in a webhook-triggered run is held to the crew network
+  policy's `restricted` floor regardless of the crew's actual `network_mode`
+  — see [Egress enforcement](#http) above.
 
 **Delivery is asynchronous.** The endpoint verifies the signature, rate limit, governance status, and the routine's `concurrency_key` gate synchronously, reserves a run id, then answers immediately:
 
