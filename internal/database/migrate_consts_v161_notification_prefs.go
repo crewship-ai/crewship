@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// v154: native outbound notification system, MVP (issue #1412).
+// v161: native outbound notification system, MVP (issue #1412).
 //
 // Extends the v133 notification_channels table with the columns a
 // per-user category × channel preference matrix needs, and adds two new

@@ -1,6 +1,6 @@
 package database
 
-// migrationIdempotencyPipelineScope (v153) namespaces the
+// migrationIdempotencyPipelineScope (v160) namespaces the
 // pipeline_run_idempotency primary key by pipeline_id (issue #1415).
 //
 // Before this migration the PK was (workspace_id, idempotency_key)
@@ -34,7 +34,7 @@ package database
 // full-table copy during migration is cheap even on an
 // established instance.
 const migrationIdempotencyPipelineScope = `
-CREATE TABLE pipeline_run_idempotency_v153 (
+CREATE TABLE pipeline_run_idempotency_v160 (
     workspace_id     TEXT NOT NULL,
     pipeline_id      TEXT NOT NULL,
     idempotency_key  TEXT NOT NULL,
@@ -43,12 +43,12 @@ CREATE TABLE pipeline_run_idempotency_v153 (
     expires_at       TEXT NOT NULL,
     PRIMARY KEY (workspace_id, pipeline_id, idempotency_key)
 );
-INSERT INTO pipeline_run_idempotency_v153
+INSERT INTO pipeline_run_idempotency_v160
     (workspace_id, pipeline_id, idempotency_key, run_id, created_at, expires_at)
 SELECT workspace_id, pipeline_id, idempotency_key, run_id, created_at, expires_at
 FROM pipeline_run_idempotency;
 DROP TABLE pipeline_run_idempotency;
-ALTER TABLE pipeline_run_idempotency_v153 RENAME TO pipeline_run_idempotency;
+ALTER TABLE pipeline_run_idempotency_v160 RENAME TO pipeline_run_idempotency;
 CREATE INDEX IF NOT EXISTS idx_pipeline_run_idempotency_expires
     ON pipeline_run_idempotency (expires_at);
 `

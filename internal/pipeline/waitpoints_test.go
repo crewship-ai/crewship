@@ -105,6 +105,51 @@ func TestWaitpointStore_AlreadyDecidedRejectsSecondCall(t *testing.T) {
 	}
 }
 
+// TestWaitpointStore_CrossTenantApprovalRejected pins the #1415 tenant
+// scoping: a caller in workspace B must NOT be able to approve (or deny) a
+// waitpoint that belongs to workspace A, even with the correct token. The
+// approval token alone is not authority — CompleteApproval scopes its UPDATE
+// by workspace_id, so a cross-tenant call matches zero rows and leaves the
+// waitpoint pending for its real owner to decide.
+func TestWaitpointStore_CrossTenantApprovalRejected(t *testing.T) {
+	store, cleanup := openWaitpointsTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	token, err := store.CreateApproval(ctx, WaitpointApprovalRequest{
+		WorkspaceID: "ws_A", PipelineRunID: "run_A", StepID: "gate", Prompt: "ok?", TimeoutSec: 30,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Attacker in ws_B holds the token but must not be able to decide it.
+	err = store.CompleteApproval(ctx, "ws_B", token, true, "u_attacker", "")
+	if !errors.Is(err, ErrAlreadyDecided) {
+		t.Fatalf("cross-tenant approval must be rejected, got err=%v", err)
+	}
+
+	// The waitpoint must still be pending — the cross-tenant call changed
+	// nothing.
+	var status, decidedBy string
+	if err := store.db.QueryRowContext(ctx,
+		`SELECT status, COALESCE(decided_by_user_id,'') FROM pipeline_waitpoints WHERE token = ?`, token).
+		Scan(&status, &decidedBy); err != nil {
+		t.Fatalf("read waitpoint: %v", err)
+	}
+	if status != "pending" {
+		t.Errorf("waitpoint status = %q after cross-tenant call, want still pending", status)
+	}
+	if decidedBy != "" {
+		t.Errorf("waitpoint decided_by = %q, want empty (attacker must not be recorded)", decidedBy)
+	}
+
+	// The real owner in ws_A can still decide it.
+	if err := store.CompleteApproval(ctx, "ws_A", token, true, "u_owner", ""); err != nil {
+		t.Fatalf("legitimate owner approval failed: %v", err)
+	}
+}
+
 func TestWaitpointStore_ContextCancelExitsWait(t *testing.T) {
 	store, cleanup := openWaitpointsTestDB(t)
 	defer cleanup()

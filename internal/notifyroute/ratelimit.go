@@ -26,6 +26,15 @@ type RateLimiter struct {
 	nowFunc  func() time.Time
 }
 
+// evictThreshold is the bucket-count at which Allow opportunistically
+// sweeps fully-refilled (idle) buckets. Without this the map grows one
+// entry per (recipient, channel, category) seen since boot and never
+// shrinks — an unbounded leak on a workspace with churny recipients or
+// many channels. A bucket idle long enough to have refilled to capacity
+// is indistinguishable from a freshly-created one, so dropping it is
+// lossless: the next Allow for that key recreates it at full capacity.
+const evictThreshold = 2048
+
 type bucket struct {
 	tokens     float64
 	lastRefill time.Time
@@ -61,6 +70,9 @@ func (r *RateLimiter) Allow(recipientUserID, channelID, category string) bool {
 	defer r.mu.Unlock()
 	b, ok := r.buckets[key]
 	if !ok {
+		if len(r.buckets) >= evictThreshold {
+			r.evictIdleLocked(now)
+		}
 		b = &bucket{tokens: r.capacity, lastRefill: now}
 		r.buckets[key] = b
 	}
@@ -77,4 +89,20 @@ func (r *RateLimiter) Allow(recipientUserID, channelID, category string) bool {
 	}
 	b.tokens--
 	return true
+}
+
+// evictIdleLocked drops every bucket that has been idle long enough to
+// have refilled to full capacity. Such a bucket is byte-for-byte
+// equivalent to a fresh one, so eviction never changes an allow/deny
+// decision — it only reclaims memory. Caller must hold r.mu.
+func (r *RateLimiter) evictIdleLocked(now time.Time) {
+	if r.refillPS <= 0 {
+		return // no refill → buckets never return to capacity; keep them
+	}
+	fullRefillSecs := r.capacity / r.refillPS // empty → full
+	for k, b := range r.buckets {
+		if now.Sub(b.lastRefill).Seconds() >= fullRefillSecs {
+			delete(r.buckets, k)
+		}
+	}
 }

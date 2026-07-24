@@ -115,6 +115,46 @@ func (s *DeliveryStore) MarkFailed(ctx context.Context, id, errMsg string) error
 	return nil
 }
 
+// ListRecoverable returns outbox rows that are stuck and worth another
+// delivery attempt: still pending (the process died between InsertPending
+// and MarkSent/MarkFailed) or failed (a transient dispatch error), under
+// the per-row attempt cap, and not touched within graceSecs (so an
+// in-flight first attempt is never double-fired, and failed rows back off).
+// Global across workspaces — this backs the boot/periodic recovery sweep
+// that makes the delivery outbox actually survive a restart (v161). Newest
+// first, capped, so one sweep can't scan an unbounded backlog.
+func (s *DeliveryStore) ListRecoverable(ctx context.Context, maxAttempts, graceSecs, limit int) ([]Delivery, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, workspace_id, channel_id, COALESCE(user_id,''), category, dedup_key,
+       COALESCE(source_kind,''), COALESCE(source_id,''), COALESCE(title,''),
+       status, COALESCE(error,''), attempts, created_at, updated_at, COALESCE(sent_at,'')
+FROM notification_deliveries
+WHERE status IN ('pending','failed')
+  AND attempts < ?
+  AND updated_at < strftime('%Y-%m-%dT%H:%M:%fZ','now', ?)
+ORDER BY created_at DESC
+LIMIT ?`,
+		maxAttempts, fmt.Sprintf("-%d seconds", graceSecs), limit)
+	if err != nil {
+		return nil, fmt.Errorf("notifyroute: list recoverable deliveries: %w", err)
+	}
+	defer rows.Close()
+	var out []Delivery
+	for rows.Next() {
+		var d Delivery
+		if err := rows.Scan(&d.ID, &d.WorkspaceID, &d.ChannelID, &d.UserID, &d.Category, &d.DedupKey,
+			&d.SourceKind, &d.SourceID, &d.Title, &d.Status, &d.Error, &d.Attempts,
+			&d.CreatedAt, &d.UpdatedAt, &d.SentAt); err != nil {
+			return nil, fmt.Errorf("notifyroute: scan recoverable: %w", err)
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 // ListFilter narrows List's result set. Zero-value fields are unfiltered.
 type ListFilter struct {
 	Status    string

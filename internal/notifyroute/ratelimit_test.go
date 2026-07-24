@@ -53,6 +53,64 @@ func TestRateLimiter_Allow_KeyedPerRecipientChannelCategory(t *testing.T) {
 	}
 }
 
+func TestRateLimiter_EvictsIdleBucketsLosslessly(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := NewRateLimiter(5, 1) // capacity 5, refill 1/s → full refill in 5s
+	r.nowFunc = func() time.Time { return now }
+
+	// Two buckets created now; both will go idle.
+	r.Allow("u_idle1", "c", "security")
+	r.Allow("u_idle2", "c", "security")
+	if got := len(r.buckets); got != 2 {
+		t.Fatalf("want 2 buckets seeded, got %d", got)
+	}
+
+	// Advance past the full-refill window, then touch a fresh key so it is
+	// NOT idle at eviction time.
+	now = now.Add(6 * time.Second)
+	r.Allow("u_recent", "c", "security")
+
+	r.mu.Lock()
+	r.evictIdleLocked(now)
+	kept := len(r.buckets)
+	_, recentKept := r.buckets["u_recent\x00c\x00security"]
+	r.mu.Unlock()
+
+	if !recentKept {
+		t.Error("the recently-touched bucket must survive eviction")
+	}
+	if kept != 1 {
+		t.Errorf("idle buckets should be evicted: want 1 kept, got %d", kept)
+	}
+
+	// Lossless: an evicted key is recreated at full capacity, so a fresh
+	// burst of `capacity` calls all succeed — exactly as if it were never
+	// evicted.
+	for i := 0; i < 5; i++ {
+		if !r.Allow("u_idle1", "c", "security") {
+			t.Fatalf("re-created bucket must start at full capacity; call %d denied", i)
+		}
+	}
+}
+
+// evictIdleLocked must never touch buckets that carry real state (not yet
+// refilled), or eviction would silently reset someone's throttle.
+func TestRateLimiter_EvictKeepsActiveBuckets(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := NewRateLimiter(5, 1) // full refill in 5s
+	r.nowFunc = func() time.Time { return now }
+	r.Allow("u", "c", "security") // consumes 1 → 4 tokens left, not full
+
+	now = now.Add(2 * time.Second) // idle 2s < 5s full-refill window → must be kept
+	r.mu.Lock()
+	r.evictIdleLocked(now)
+	_, kept := r.buckets["u\x00c\x00security"]
+	r.mu.Unlock()
+	if !kept {
+		t.Error("a bucket idle for less than the full-refill window must not be evicted")
+	}
+}
+
 func TestRateLimiter_NilLimiterNeverBlocks(t *testing.T) {
 	var r *RateLimiter
 	for i := 0; i < 100; i++ {

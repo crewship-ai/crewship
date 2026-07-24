@@ -1,6 +1,6 @@
 package database
 
-// migrationScheduleCatchup (v155) adds a per-schedule missed-run
+// migrationScheduleCatchup (v162) adds a per-schedule missed-run
 // catch-up policy (issue #1422 item 2).
 //
 // Background: today an overdue schedule (scheduler was down, or the

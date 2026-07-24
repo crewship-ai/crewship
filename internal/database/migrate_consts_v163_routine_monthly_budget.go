@@ -1,6 +1,6 @@
 package database
 
-// migrationRoutineMonthlyBudget (v156) adds an opt-in MONTHLY spend cap
+// migrationRoutineMonthlyBudget (v163) adds an opt-in MONTHLY spend cap
 // per routine (issue #1422 item 3).
 //
 // This is a distinct concept from DSL.MaxCostUSD (internal/pipeline
