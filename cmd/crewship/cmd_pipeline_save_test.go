@@ -26,6 +26,7 @@ type routineSaveMock struct {
 	gotSlug          string
 	gotAuthorCrew    string
 	gotTestRunCrew   string
+	gotDefinition    json.RawMessage
 	internalSaveHits int
 }
 
@@ -77,6 +78,7 @@ func (m *routineSaveMock) handler() http.Handler {
 		m.gotSaveToken = body.SaveToken
 		m.gotSlug = body.Slug
 		m.gotAuthorCrew = body.AuthorCrewID
+		m.gotDefinition = body.Definition
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -196,5 +198,75 @@ func TestRoutineSave_ResolvesAuthorCrewSlug(t *testing.T) {
 	}
 	if m.gotAuthorCrew != "ccrewengineering00001" {
 		t.Errorf("save author_crew_id: got %q, want the resolved CUID", m.gotAuthorCrew)
+	}
+}
+
+// TestRoutineSave_AcceptsYAMLDefinition pins #1423 item 2 through the full
+// `routine save` path: a --definition file written as YAML (comments, a
+// literal block-scalar prompt) is converted to canonical JSON before
+// either the test_run or the save request body is built, so the server —
+// mocked here — sees the same JSON it always has, with the multiline
+// prompt intact (not JSON-escaped, not truncated).
+func TestRoutineSave_AcceptsYAMLDefinition(t *testing.T) {
+	saveCLIState(t)
+
+	m := &routineSaveMock{t: t}
+	srv := httptest.NewServer(m.handler())
+	defer srv.Close()
+
+	cliCfg = &cli.CLIConfig{Token: "user-token", Workspace: "ws_test_1", Server: srv.URL}
+
+	defPath := filepath.Join(t.TempDir(), "probe.yaml")
+	def := `
+# authored as YAML — comments + a real multiline prompt
+dsl_version: "1.0"
+name: save-yaml-probe
+steps:
+  - id: a
+    type: agent_run
+    agent_slug: x
+    prompt: |
+      Line one.
+      Line two.
+`
+	if err := os.WriteFile(defPath, []byte(def), 0o600); err != nil {
+		t.Fatalf("write definition: %v", err)
+	}
+
+	set := func(flag, val string) {
+		if err := pipelineSaveCmd.Flags().Set(flag, val); err != nil {
+			t.Fatalf("set --%s: %v", flag, err)
+		}
+	}
+	set("name", "save-yaml-probe")
+	set("definition", defPath)
+	set("author-crew", "ccrewtest000000000001")
+	t.Cleanup(func() {
+		set("name", "")
+		set("definition", "")
+		set("author-crew", "")
+	})
+
+	if err := pipelineSaveCmd.RunE(pipelineSaveCmd, nil); err != nil {
+		t.Fatalf("routine save failed: %v", err)
+	}
+
+	if !json.Valid(m.gotDefinition) {
+		t.Fatalf("definition sent to /save is not valid JSON: %s", m.gotDefinition)
+	}
+	var sent struct {
+		Name  string `json:"name"`
+		Steps []struct {
+			Prompt string `json:"prompt"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal(m.gotDefinition, &sent); err != nil {
+		t.Fatalf("decode definition: %v", err)
+	}
+	if sent.Name != "save-yaml-probe" {
+		t.Errorf("name: got %q", sent.Name)
+	}
+	if len(sent.Steps) != 1 || sent.Steps[0].Prompt != "Line one.\nLine two.\n" {
+		t.Errorf("multiline prompt not preserved through YAML→JSON conversion: %+v", sent.Steps)
 	}
 }

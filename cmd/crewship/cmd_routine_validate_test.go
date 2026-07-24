@@ -111,6 +111,39 @@ func TestValidateCmd_MultiErrorSurfacesEveryFailure(t *testing.T) {
 	}
 }
 
+// TestValidateCmd_AcceptsYAML pins #1423 item 2: validate sniffs YAML
+// content (regardless of file extension) and converts it to canonical
+// JSON before Parse/Validate — comments and a real multiline prompt
+// block scalar both survive the round-trip.
+func TestValidateCmd_AcceptsYAML(t *testing.T) {
+	yamlSrc := []byte(`
+# a routine authored as YAML
+dsl_version: "1.0"
+name: yaml-demo
+steps:
+  - id: a
+    type: agent_run
+    agent_slug: x
+    prompt: |
+      Line one.
+      Line two.
+`)
+	converted, err := pipeline.ToCanonicalJSON(yamlSrc)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if err := validateBytesForTest(converted); err != nil {
+		t.Errorf("converted YAML should validate: %v", err)
+	}
+	dsl, err := pipeline.Parse(converted)
+	if err != nil {
+		t.Fatalf("parse converted: %v", err)
+	}
+	if !strings.Contains(dsl.Steps[0].Prompt, "Line one.\nLine two.") {
+		t.Errorf("multiline prompt lost in conversion: %q", dsl.Steps[0].Prompt)
+	}
+}
+
 func TestValidateCmd_HandlesManyInputs(t *testing.T) {
 	// Sanity: validation accepts inputs of varying size without hangs.
 	body := []byte(`{

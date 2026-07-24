@@ -101,6 +101,35 @@ Minimal valid routine:
 }
 ```
 
+### YAML instead of JSON
+
+`crewship routine validate` and `crewship routine save --definition` also accept **YAML** — sniffed from the file's content, not its extension, and converted to canonical JSON before validation/upload. The same minimal routine, as YAML:
+
+```yaml
+dsl_version: "1.0"
+name: summarize-text
+# comments are fine — YAML only, dropped on conversion, same as they
+# always were once JSON.Marshal'd a hand-authored JSON file
+description: Summarize input text in 3 bullets.
+inputs:
+  - name: text
+    type: string
+    required: true
+outputs:
+  - name: summary
+    type: string
+steps:
+  - id: summarize
+    type: agent_run
+    agent_slug: tomas
+    complexity: fast
+    prompt: |
+      Summarize the following text in exactly 3 bullets:
+      {{ inputs.text }}
+```
+
+The main win is a real multiline `prompt` via YAML's literal block scalar (`|`) instead of a JSON string full of `\n` escapes — this is also why `routine init`'s scaffold used to smuggle its "run `routine schema`, replace `agent_slug`" pointer into the `description` field (JSON has no comment syntax); with YAML input that workaround is no longer necessary, though the JSON scaffold itself is unchanged. The API, the DB, and every other `Parse` call site still only ever see canonical JSON — YAML is purely a convenience at these two CLI entry points, not a second stored format.
+
 ### Top-level fields
 
 | Field | Type | Notes |
