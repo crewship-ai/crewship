@@ -1,20 +1,40 @@
 ---
 title: "Outbound notifications"
-description: "Email and signed-webhook delivery when a routine run completes or fails — reach people who aren't watching the in-product inbox."
+description: "Email, signed-webhook, Slack, Discord, and Telegram delivery for approvals, escalations, failed runs, chat replies, and more — with a per-user preference matrix and anti-storm rate limiting."
 icon: "bell"
 ---
 
-## Two halves of the same story
+## Two systems, one page
 
-Crewship notifies you about routine runs on two surfaces:
+Crewship has grown two outbound-notification mechanisms, documented together here:
 
-- **In-product** — the [`notify` step](/guides/routines#notify) posts live, scrubbed updates into the inbox mid-run, and a run's end pings connected desktops. Great while you're at your desk.
-- **Outbound** (this page) — **email** and **signed webhooks** fire when a run reaches a terminal **completed** or **failed** state, so the news reaches someone who isn't looking at Crewship: an on-call admin, a Slack relay, an incident bot, your own service.
+1. **Run-terminal broadcast** (issue #850, below in [Legacy: run-terminal broadcast](#legacy-run-terminal-broadcast)) — workspace-wide **email**/**webhook** channels that fire on a routine run's `completed`/`failed` terminal state. Unchanged by everything below; still the right tool for "tell the whole workspace when this routine fails."
+2. **Category preference system** (issue #1412, the rest of this page) — a per-user, Linear/Novu-style **category × channel matrix** covering nine notification categories (approvals, escalations, failed/completed runs, chat replies, security, budget, system, and memory events), delivered to **email, webhook, Slack, Discord, or Telegram**, with admin-managed workspace channels AND self-service personal channels, an anti-storm rate gate, and a persistent delivery log.
 
-Outbound channels are **workspace-scoped** and configured once. Each channel subscribes to the outcomes it cares about — by default **failures only**, so a routine that runs hourly doesn't flood an inbox with success pings. Opt into completions with `--events completed` (or `--events all`).
+Both ride the same channel type (`notification_channels`) and the same low-level delivery code — a channel you create can serve BOTH systems (a workspace webhook can both receive the legacy `run.completed` broadcast and be selected in someone's category matrix).
 
 <Note>
-Managing channels requires **MANAGER+**. A signing secret is shown **once** at creation — store it then; it can never be read back.
+Workspace-scoped channel writes require **ADMIN/OWNER**. A personal channel (`--personal`) is self-service — any member may add their own. A signing secret / shoutrrr service URL is shown **once** at creation — store it then; it can never be read back.
+</Note>
+
+## The 9 categories
+
+| Category | Fires on | Bypasses the rate gate? |
+| --- | --- | --- |
+| `approvals` | A waitpoint needs a decision | Yes — never silently dropped |
+| `escalations` | An escalation needs review | Yes — never silently dropped |
+| `runs.failed` | A routine run fails | No |
+| `runs.completed` | A routine run completes | No |
+| `chat.replies` | An agent replies and you're not watching live | No |
+| `security` | Reserved for future emit points | No |
+| `budget` | Reserved for future emit points | No |
+| `system` | Reserved for future emit points | No |
+| `memory` | A memory-consolidation event | No |
+
+`approvals` and `escalations` always deliver immediately and skip the anti-storm token bucket entirely — a blocking HITL item must never be dropped as "too many notifications." `security`/`budget`/`system` are selectable in the matrix today even though nothing emits them yet (the category vocabulary is fixed so a future emit point needs no schema change).
+
+<Note>
+Every cell's state is `off` (default) or `immediate`. A `digest` value is legal in the schema (so a future digest-batching window needs no migration) but nothing writes it yet — that's v2 scope.
 </Note>
 
 ## Channel types
@@ -60,58 +80,184 @@ Delivery is **best-effort with retries**: 3 attempts with exponential backoff. A
 
 An email channel sends via the instance mailer. **Email delivery must be configured** (`RESEND_API_KEY` and `RESEND_FROM` set on the server) — otherwise creating an email channel is rejected with a clear error, so you learn at configuration time rather than silently losing notifications (**fail-closed**).
 
+### Shoutrrr — Slack, Discord, Telegram
+
+A `shoutrrr` channel delivers via [github.com/nicholas-fedor/shoutrrr](https://github.com/nicholas-fedor/shoutrrr), an Apprise-style notification library. Give it a **provider** and a **service URL**:
+
+| Provider | URL format | Notes |
+| --- | --- | --- |
+| `slack` | `slack://hook:TOKEN@webhook` | `TOKEN` is your Slack incoming-webhook token (the part after `/services/` in the webhook URL, dash-joined) |
+| `discord` | `discord://token@channel` | `token` and `channel` come from your Discord webhook URL: `.../webhooks/{channel}/{token}` |
+| `telegram` | `telegram://token@telegram?chats=@channel-1,chat-id-2` | `token` is your bot token from BotFather; `chats` is a comma-separated list of `@channel` handles or numeric chat ids |
+
+The service URL is **secret** (it embeds your bot token / webhook token) — it rides the exact same `secret_enc` encrypt-at-rest column the webhook signing secret uses, is returned **once** at creation, and is never exposed again by any read endpoint.
+
+```bash
+# Workspace-wide Slack channel (ADMIN/OWNER only)
+crewship notifychannel add --type shoutrrr --provider slack \
+  --url "slack://hook:xoxb-...@webhook" --categories approvals,escalations
+
+# Your OWN personal Telegram channel (any role — self-service)
+crewship notifychannel add --type shoutrrr --provider telegram \
+  --url "telegram://123456:ABC-token@telegram?chats=@myhandle" --personal
+```
+
+A shoutrrr channel also participates in the [legacy run-terminal broadcast](#legacy-run-terminal-broadcast) if it subscribes to `events` — Slack/Discord/Telegram is a **new provider alongside** email/webhook, not a replacement.
+
+An instance admin can disable a provider instance-wide (`crewship notifychannel providers`, `PATCH /api/v1/notification-providers/{provider}`); a disabled provider is rejected at **channel-create time** (fail-closed) but doesn't retroactively break channels that already exist.
+
 ## Payload safety
 
-The `output_preview` is passed through the secret **scrubber** (the same redaction the `notify` step uses) and **capped at 1KB** before it leaves the instance — API keys and tokens in a run's output never reach a webhook body or an email.
+Every notification body — the legacy `output_preview` and the new category message's `body` — is passed through the secret **scrubber** (the same redaction the `notify` step uses) and capped before it leaves the instance — API keys and tokens in a run's output or an agent's reply never reach a webhook body, an email, or a chat message.
+
+## Two-layer preferences (the #1412 category system)
+
+Notification routing follows the **Linear/Novu pattern**: an admin layer decides what's *available*, a user layer decides what *reaches them*.
+
+### Admin layer
+
+An ADMIN/OWNER controls, per workspace channel:
+
+- **Which providers are enabled** instance-wide (`crewship notifychannel providers`) — a create-time gate, not a kill switch for existing channels.
+- **Which categories a channel may serve** (`--categories`, `PATCH .../notification-channels/{id}`) — empty means "every category."
+- **A priority floor** (`--min-priority`) — an item below the floor never reaches that channel, however the user's matrix is set.
+
+### User layer
+
+Every member manages their **own** matrix — a category (row) × channel (column) grid, off/immediate per cell — over **workspace channels the admin allowlisted for that category** plus their **own personal channels**. A cell defaults to `off`: nothing is delivered externally until a member opts in.
+
+A special `*` "category" mutes a channel entirely, overriding every other cell for that channel — the fastest way to say "stop pinging me on Telegram" without touching nine individual cells.
+
+```bash
+# See your current matrix
+crewship notify prefs get
+
+# Get pinged in Slack immediately when an approval is waiting
+crewship notify prefs set --category approvals --channel nch_abc123 --state immediate
+
+# Mute a channel entirely (overrides every category on it)
+crewship notify prefs set --category "*" --channel nch_abc123 --state immediate
+```
+
+### Presence-aware suppression
+
+For `chat.replies`, a member watching the chat live (an open WebSocket subscription on that session) never gets an external push for the same reply that's streaming to their screen — the same presence gate the in-product chat-reply bell already uses.
+
+## Anti-storm rate limiting
+
+Delivery is gated by an in-process **token bucket per (recipient, channel, category)** — a burst of 5, refilling at roughly 1 token per 30 seconds by default — so a misconfigured routine notifying the same person in a loop can't flood their Slack. Overflow is a **soft drop**: it's recorded in the delivery log with status `dropped_rate`, never silently swallowed.
+
+`approvals` and `escalations` **bypass the rate gate entirely** — a blocking human-in-the-loop item is never dropped for being "too frequent."
+
+Repeated fires for the exact same source event (a retried hook, a re-processed job) **coalesce** on `category:source_id` — one delivery row, one send, regardless of how many times the underlying write-through fires.
+
+## Delivery log
+
+Every attempted delivery through the #1412 category system is recorded — `pending → sent | failed | dropped_pref | dropped_rate` — so "why didn't my notification arrive?" has an answer instead of a buried log line.
+
+```bash
+crewship notifychannel deliveries --status failed
+crewship notifychannel deliveries --category approvals --channel nch_abc123
+```
+
+Reading the log is **admin-only** (`GET /api/v1/notification-deliveries`, ADMIN/OWNER) since it spans every recipient in the workspace, not just the caller.
 
 ## CLI
 
 ```bash
 # Add a signed-webhook channel (secret auto-generated and printed once).
-# Default: notifies on failures only.
+# Default: notifies on failures only via the legacy broadcast.
 crewship notifychannel add --type webhook --url https://hooks.example.com/crewship
 
-# Notify on both completion and failure
+# Notify on both completion and failure (legacy broadcast)
 crewship notifychannel add --type webhook --url https://hooks.example.com/crewship --events all
 
 # Add an email channel (requires a configured mailer)
 crewship notifychannel add --type email --to ops@example.com
 
-# List the workspace's channels (secrets never shown)
+# Workspace Slack channel restricted to two categories (ADMIN/OWNER)
+crewship notifychannel add --type shoutrrr --provider slack \
+  --url slack://hook:TOKEN@webhook --categories approvals,security
+
+# Your own personal Telegram channel (any role)
+crewship notifychannel add --type shoutrrr --provider telegram \
+  --url "telegram://TOKEN@telegram?chats=@you" --personal
+
+# List channels (secrets never shown)
 crewship notifychannel list
+
+# Which providers does this instance support, and are they enabled?
+crewship notifychannel providers
 
 # Send a synthetic test event to verify the receiver/secret
 crewship notifychannel test nch_abc123
 
+# Delivery log — why didn't my notification arrive? (admin only)
+crewship notifychannel deliveries --status failed
+
 # Remove a channel
 crewship notifychannel rm nch_abc123 --yes
+
+# Your own category x channel preference matrix
+crewship notify prefs get
+crewship notify prefs set --category approvals --channel nch_abc123 --state immediate
 ```
 
 Provide your own webhook secret with `--secret <value>` instead of letting Crewship generate one.
 
-`notifychannel add` and `list` honour the global `--format` flag (`json`/`yaml`/`ndjson`)
-for scripting — see [Output Formats](/cli/overview#output-formats).
+`notifychannel add`/`list`/`providers`/`deliveries` and `notify prefs get` honour the global `--format` flag (`json`/`yaml`/`ndjson`) for scripting — see [Output Formats](/cli/overview#output-formats).
 
 ## API
 
-All routes are workspace-scoped (the workspace comes from your auth context) and mutations require **MANAGER+**.
+All routes are workspace-scoped (the workspace comes from your auth context).
 
 | Method | Path | Role | Purpose |
 | --- | --- | --- | --- |
 | `GET` | `/api/v1/notification-channels` | member | List channels (secrets redacted) |
-| `POST` | `/api/v1/notification-channels` | MANAGER+ | Create a channel |
-| `POST` | `/api/v1/notification-channels/{id}/test` | MANAGER+ | Send a test event |
-| `DELETE` | `/api/v1/notification-channels/{id}` | MANAGER+ | Delete a channel |
+| `POST` | `/api/v1/notification-channels` | ADMIN/OWNER, or self for `personal:true` | Create a channel |
+| `PATCH` | `/api/v1/notification-channels/{id}` | ADMIN/OWNER, or owner for a personal channel | Update `enabled`/`categories`/`min_priority`/`events` |
+| `POST` | `/api/v1/notification-channels/{id}/test` | ADMIN/OWNER, or owner for a personal channel | Send a test event |
+| `DELETE` | `/api/v1/notification-channels/{id}` | ADMIN/OWNER, or owner for a personal channel | Delete a channel |
+| `GET` | `/api/v1/notification-providers` | member | Supported shoutrrr providers + enabled state |
+| `PATCH` | `/api/v1/notification-providers/{provider}` | ADMIN/OWNER | Enable/disable a provider instance-wide |
+| `GET` | `/api/v1/me/notification-prefs` | self | Your category x channel matrix |
+| `PUT` | `/api/v1/me/notification-prefs` | self | Upsert one or more cells in your matrix |
+| `GET` | `/api/v1/notification-deliveries` | ADMIN/OWNER | Delivery log, filterable by `status`/`channel_id`/`category` |
 
-Create body (`events` is optional — defaults to `["run.failed"]`; accepts `completed`, `failed`, or `all`):
+<Note>
+A **workspace-scoped** channel write (the default; `personal` omitted or `false`) requires **ADMIN/OWNER** — tightened from MANAGER+ as part of #1412, since a workspace channel is now a shared delivery target for the whole category-preference system, not just a run-terminal broadcast target. A **personal** channel (`personal: true`) is self-service: any authenticated member may create their own, and only its owner (never another member, regardless of role) may update, test, or delete it. `owner_user_id` is always forced to the authenticated caller server-side — never trust a client-supplied owner.
+</Note>
+
+Create body:
 
 ```json
 { "type": "webhook", "url": "https://hooks.example.com/crewship", "events": ["all"] }
 { "type": "email", "to": "ops@example.com" }
+{ "type": "shoutrrr", "provider": "slack", "shoutrrr_url": "slack://hook:TOKEN@webhook",
+  "categories": ["approvals", "escalations"], "min_priority": "medium" }
+{ "type": "shoutrrr", "provider": "telegram", "shoutrrr_url": "telegram://TOKEN@telegram?chats=@you",
+  "personal": true }
 ```
 
-The create response for a webhook includes the `secret` field **once** — the only time it is ever returned.
+`events` (optional, legacy broadcast — defaults to `["run.failed"]`; accepts `completed`, `failed`, or `all`), `categories` (optional, admin allowlist — defaults to every category), `min_priority` (optional — defaults to `low`) are independent of each other: a channel can serve the legacy broadcast, the category matrix, both, or neither.
 
-## How it fires
+The create response for a webhook or shoutrrr channel includes the `secret` field **once** — the signing secret or the shoutrrr service URL — the only time it is ever returned.
 
-Delivery is hooked on the run's **terminal write** in the pipeline finalize path — not on the CLI — so **scheduled runs** with no connected client notify exactly the same as interactive ones. Only `completed` and `failed` outcomes fire (and then only to channels subscribed to that outcome); `cancelled` and `interrupted` are operational states and are intentionally silent. Fan-out is asynchronous and best-effort, so it never slows or fails the run.
+Preference matrix body (`PUT /api/v1/me/notification-prefs`):
+
+```json
+{ "cells": [
+  { "category": "approvals", "channel_id": "nch_abc123", "state": "immediate" },
+  { "category": "*", "channel_id": "nch_def456", "state": "immediate" }
+] }
+```
+
+`PUT` **upserts** the cells you send — it does not replace your whole matrix, so a single-cell UI edit never needs to resend every other cell.
+
+## Legacy: run-terminal broadcast
+
+The original (#850) mechanism: workspace-wide email/webhook/shoutrrr channels that fire on a routine run's terminal state. **Unchanged** by #1412 — this is documented for reference, not deprecated; it's still the right tool for "tell the whole workspace when this routine fails," independent of anyone's personal preference matrix.
+
+Each channel subscribes to the outcomes it cares about via `events` — by default **failures only**, so a routine that runs hourly doesn't flood an inbox with success pings. Opt into completions with `--events completed` (or `--events all`). See [Channel types](#channel-types) above for the webhook payload shape, HMAC verification, and the shoutrrr message format.
+
+Delivery is hooked on the run's **terminal write** in the pipeline finalize path — not on the CLI — so **scheduled runs** with no connected client notify exactly the same as interactive ones. Only `completed` and `failed` outcomes fire (and then only to channels subscribed to that outcome); `cancelled` and `interrupted` are operational states and are intentionally silent. Fan-out is asynchronous and best-effort, so it never slows or fails the run — a failing channel is logged, not retried into oblivion (3 attempts with exponential backoff, then it drops).
