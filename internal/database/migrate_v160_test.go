@@ -10,16 +10,16 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// TestMigrationV153_WidensIdempotencyPKToPipelineScope lands the
-// pre-v153 schema (PK = workspace_id, idempotency_key), seeds a row,
-// applies v153, and asserts:
+// TestMigrationV160_WidensIdempotencyPKToPipelineScope lands the
+// pre-v160 schema (PK = workspace_id, idempotency_key), seeds a row,
+// applies v160, and asserts:
 //   - the pre-existing row survived the table rebuild intact
 //   - two different pipelines can now hold rows with the SAME
 //     (workspace_id, idempotency_key) — the collision the migration
 //     exists to close (#1415)
 //   - the old 2-column uniqueness is gone: a fresh INSERT under the
 //     OLD PK shape would have collided; under the new PK it does not
-func TestMigrationV153_WidensIdempotencyPKToPipelineScope(t *testing.T) {
+func TestMigrationV160_WidensIdempotencyPKToPipelineScope(t *testing.T) {
 	ctx := context.Background()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -41,20 +41,20 @@ VALUES ('ws_a', 'order-123', 'run_legacy', 'pipe_legacy', '2099-01-01T00:00:00Z'
 		t.Fatalf("seed legacy row: %v", err)
 	}
 
-	m153, err := findMigration(153)
+	m160, err := findMigration(160)
 	if err != nil {
-		t.Fatalf("find v153: %v", err)
+		t.Fatalf("find v160: %v", err)
 	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if _, err := tx.ExecContext(ctx, m153.sql); err != nil {
+	if _, err := tx.ExecContext(ctx, m160.sql); err != nil {
 		_ = tx.Rollback()
-		t.Fatalf("apply v153: %v", err)
+		t.Fatalf("apply v160: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit v153: %v", err)
+		t.Fatalf("commit v160: %v", err)
 	}
 
 	// The legacy row survived the rebuild with all columns intact.
@@ -70,7 +70,7 @@ VALUES ('ws_a', 'order-123', 'run_legacy', 'pipe_legacy', '2099-01-01T00:00:00Z'
 
 	// A DIFFERENT pipeline can now reuse the SAME (workspace_id,
 	// idempotency_key) pair without violating the PK — this would have
-	// failed under the pre-v153 schema.
+	// failed under the pre-v160 schema.
 	if _, err := db.ExecContext(ctx, `
 INSERT INTO pipeline_run_idempotency
   (workspace_id, idempotency_key, run_id, pipeline_id, expires_at)

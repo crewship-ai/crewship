@@ -1705,28 +1705,28 @@ END;
 	// idempotency_key). Closes a cross-pipeline idempotency-key collision
 	// (pre-poison a predictable key to silently dedupe/DoS a different
 	// pipeline's run, plus disclose its run_id). See
-	// migrate_consts_v153_idempotency_pipeline_scope.go (#1415).
-	{version: 153, name: "idempotency_pipeline_scope", sql: migrationIdempotencyPipelineScope},
+	// migrate_consts_v160_idempotency_pipeline_scope.go (#1415).
+	{version: 160, name: "idempotency_pipeline_scope", sql: migrationIdempotencyPipelineScope},
 	// v154: native outbound notification system, MVP (issue #1412). Widens
 	// notification_channels (v133) with provider/scope/owner_user_id/
 	// categories_json/min_priority and admits the new 'shoutrrr' delivery
 	// type (Slack/Discord/Telegram via github.com/nicholas-fedor/shoutrrr).
 	// Adds user_notification_prefs (per-user category × channel matrix) and
 	// notification_deliveries (persistent outbox/delivery log). See
-	// migrate_consts_v154_notification_prefs.go.
-	{version: 154, name: "notification_prefs", fn: migrationNotificationPrefs},
+	// migrate_consts_v161_notification_prefs.go.
+	{version: 161, name: "notification_prefs", fn: migrationNotificationPrefs},
 	// v155: per-schedule missed-run catch-up policy (issue #1422 item 2).
 	// Adds pipeline_schedules.catchup_policy ('skip'|'once'|'all', default
 	// 'once' = unchanged behaviour) + last_missed_count, and widens
 	// inbox_items.kind to admit 'schedule_missed'. See
-	// migrate_consts_v155_schedule_catchup.go.
-	{version: 155, name: "schedule_catchup", sql: migrationScheduleCatchup},
+	// migrate_consts_v162_schedule_catchup.go.
+	{version: 162, name: "schedule_catchup", sql: migrationScheduleCatchup},
 	// v156: opt-in monthly spend cap per routine (issue #1422 item 3),
 	// distinct from DSL.MaxCostUSD's per-run hard gate. 0 = no budget set.
 	// Powers the budget-vs-actual meter on the routine detail page + a
 	// workspace roll-up, aggregating over pipeline_runs.cost_usd. See
-	// migrate_consts_v156_routine_monthly_budget.go.
-	{version: 156, name: "routine_monthly_budget", sql: migrationRoutineMonthlyBudget},
+	// migrate_consts_v163_routine_monthly_budget.go.
+	{version: 163, name: "routine_monthly_budget", sql: migrationRoutineMonthlyBudget},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
