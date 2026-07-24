@@ -664,6 +664,37 @@ var startCmd = &cobra.Command{
 			srv.APIRouter().PipelinesHandler.SetRunRegistry(runRegistry)
 			logger.Info("pipeline run registry wired (cancel + concurrency_key gating)")
 
+			// Wire the waitpoint sweeper's resume path (#1425). When an
+			// approval waitpoint times out while the server is up, the 30s
+			// sweeper flips it terminal but nothing drove the async-parked
+			// run out of 'waiting' — it stranded until restart. Point the
+			// sweeper at a fully-wired executor's ResumeAfterApproval so a
+			// timed-out run fails/continues per its on_fail immediately,
+			// sharing the same runStore / waitpoint / registry instances as
+			// HTTP-driven runs.
+			if wpStore != nil && runStore != nil {
+				if ph := srv.APIRouter().PipelinesHandler; ph.Runner() != nil {
+					timeoutResumeExec := pipeline.NewWiredExecutor(pipeline.ExecutorDeps{
+						Store:        pipeline.NewStore(deps.DB),
+						Resolver:     pipeline.NewResolver(deps.DB),
+						Runner:       ph.Runner(),
+						Emitter:      ph.Emitter(),
+						DB:           deps.DB,
+						Waitpoints:   pipelineWaitpoints,
+						WS:           pipelineWS,
+						Runs:         runRegistry,
+						RunStore:     runStore,
+						CodeRunner:   codeRunner,
+						ScriptRunner: ph.ScriptRunner(),
+						Signals:      signalRegistry,
+					})
+					wpStore.SetTimeoutResumer(func(runID string) {
+						timeoutResumeExec.ResumeAfterApproval(runID, logger)
+					})
+					logger.Info("pipeline waitpoint timeout-resume wired (parked runs resume on timeout without restart; #1425)")
+				}
+			}
+
 			// Boot cutoff for the resume scan's lifetime fence,
 			// captured BEFORE any run source (scheduler, HTTP server)
 			// exists: every pipeline_runs row started before this

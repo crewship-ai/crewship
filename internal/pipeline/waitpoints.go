@@ -44,6 +44,41 @@ type SQLWaitpointStore struct {
 	listeners map[string]chan waitDecision
 	sweeperWg sync.WaitGroup
 	stopCh    chan struct{}
+
+	// resumer, when wired, is invoked with a waitpoint's pipeline_run_id
+	// the moment a timeout sweep flips it terminal (#1425). Without it a
+	// timed-out approval only signals the in-memory WaitFor listener — but
+	// an async-parked run has NO live listener (it released its slot and
+	// returned WAITING), so nothing drove it out of 'waiting' until the
+	// next process restart. Production wires this to
+	// Executor.ResumeAfterApproval so the parked run fails/continues per
+	// its on_fail immediately.
+	resumer func(runID string)
+}
+
+// SetTimeoutResumer wires the callback the sweeper (and boot recovery)
+// invokes with a waitpoint's pipeline_run_id when a timeout flips it
+// terminal, so a parked async run resumes immediately instead of stranding
+// in 'waiting' until restart. Safe to leave unset (no resume cascade).
+func (s *SQLWaitpointStore) SetTimeoutResumer(fn func(runID string)) {
+	s.mu.Lock()
+	s.resumer = fn
+	s.mu.Unlock()
+}
+
+// resumeRun invokes the wired resumer (if any) on a detached goroutine so a
+// slow resume can't stall the sweep loop. Snapshotting under the lock keeps
+// SetTimeoutResumer race-free.
+func (s *SQLWaitpointStore) resumeRun(runID string) {
+	if runID == "" {
+		return
+	}
+	s.mu.Lock()
+	fn := s.resumer
+	s.mu.Unlock()
+	if fn != nil {
+		go fn(runID)
+	}
 }
 
 // waitDecision is the value passed through the channel when an
@@ -109,23 +144,28 @@ WHERE status = 'pending' AND timeout_at <= ?`, now, now)
 
 	if timedOut > 0 {
 		rows, qerr := s.db.QueryContext(ctx, `
-SELECT token FROM pipeline_waitpoints
+SELECT token, pipeline_run_id FROM pipeline_waitpoints
 WHERE status = 'timed_out' AND decided_at = ?`, now)
 		if qerr != nil {
 			return timedOut, 0, fmt.Errorf("waitpoints: recover transitioned scan: %w", qerr)
 		}
-		var expired []string
+		type expiredWP struct{ token, runID string }
+		var expired []expiredWP
 		for rows.Next() {
-			var tok string
-			if scanErr := rows.Scan(&tok); scanErr == nil {
-				expired = append(expired, tok)
+			var e expiredWP
+			if scanErr := rows.Scan(&e.token, &e.runID); scanErr == nil {
+				expired = append(expired, e)
 			}
 		}
 		rows.Close()
 		// Mirror each timeout into the inbox so the "blocking" row
-		// clears at the same moment the source becomes terminal.
-		for _, tok := range expired {
-			inbox.ResolveBySource(ctx, s.db, slog.Default(), "waitpoint", tok, "timed_out", "")
+		// clears at the same moment the source becomes terminal, and
+		// resume the parked run if a resumer is wired (#1425). At boot the
+		// resumer is usually unset — the boot run-recovery scan handles
+		// these — so resumeRun is a no-op there.
+		for _, wp := range expired {
+			inbox.ResolveBySource(ctx, s.db, slog.Default(), "waitpoint", wp.token, "timed_out", "")
+			s.resumeRun(wp.runID)
 		}
 	}
 
@@ -437,22 +477,24 @@ func (s *SQLWaitpointStore) sweepOnce() {
 	// past the regular sweep until RecoverPending runs at next boot.
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	rows, err := s.db.QueryContext(ctx, `
-SELECT token FROM pipeline_waitpoints
+SELECT token, pipeline_run_id FROM pipeline_waitpoints
 WHERE status = 'pending' AND timeout_at <= ?
 LIMIT 200`, now)
 	if err != nil {
 		return
 	}
 	defer rows.Close()
-	var expired []string
+	type expiredWP struct{ token, runID string }
+	var expired []expiredWP
 	for rows.Next() {
-		var tok string
-		if err := rows.Scan(&tok); err == nil {
-			expired = append(expired, tok)
+		var e expiredWP
+		if err := rows.Scan(&e.token, &e.runID); err == nil {
+			expired = append(expired, e)
 		}
 	}
 	_ = rows.Err()
-	for _, tok := range expired {
+	for _, wp := range expired {
+		tok := wp.token
 		// Gate the cascade on whether THIS UPDATE actually flipped
 		// the row. RowsAffected==0 means CompleteApproval (or
 		// another sweep) already moved the waitpoint terminal —
@@ -482,6 +524,12 @@ WHERE token = ? AND status = 'pending'`, now, tok)
 			}
 		}
 		s.mu.Unlock()
+		// Drive the parked run out of 'waiting' (#1425). A live in-memory
+		// WaitFor listener (blocking-mode run) is woken by the signal above;
+		// an async-parked run has none, so without this it strands in
+		// 'waiting' until restart. resumeRun is a no-op when no resumer is
+		// wired and detaches so a slow resume can't stall the sweep.
+		s.resumeRun(wp.runID)
 	}
 }
 
