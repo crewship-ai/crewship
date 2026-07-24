@@ -641,6 +641,19 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 	}
 	nextRun := cronSched.Next(time.Now().In(loc))
 
+	// Missed-occurrence visibility (#1409): if this row's due bar
+	// (NextRunAt) lagged behind now by more than one cron interval —
+	// downtime, a stuck process, a long leader-election gap — a live
+	// process would have fired more than once in that window. We still
+	// only fire ONCE here (no backfill), but the silent loss is worth a
+	// single breadcrumb so an incident review can see it.
+	if sched.NextRunAt != nil {
+		now := time.Now().In(loc)
+		if missed := countMissedOccurrences(cronSched, *sched.NextRunAt, now); missed > 0 {
+			s.emitMissedOccurrences(ctx, sched, missed, *sched.NextRunAt, now)
+		}
+	}
+
 	// Wake gate — when the schedule carries a probe routine, run it
 	// first and only fall through to the main routine when the probe
 	// says wake. A SKIPPED tick advances next_run_at via the wake
@@ -769,6 +782,54 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 // persisted. Guarded on sched.DisabledReason so a caller that fires an
 // already-tripped schedule directly (bypassing listDueSchedules'
 // enabled=1 filter) can never re-trip or double-alert.
+// maxMissedOccurrenceScan bounds countMissedOccurrences' walk so a
+// pathological case (a sub-minute cron left dark for months) can't spin
+// the loop indefinitely. Past this many occurrences we stop counting
+// and report the cap — the exact figure doesn't matter once it's this
+// large; "the schedule was down for a very long time" is the message.
+const maxMissedOccurrenceScan = 10000
+
+// countMissedOccurrences walks cronSched forward from `from` (a
+// schedule's stale next_run_at) counting occurrences that fall at or
+// before `now` — i.e. fires that a continuously-running process would
+// have made but this one didn't. Capped at maxMissedOccurrenceScan.
+func countMissedOccurrences(cronSched cron.Schedule, from, now time.Time) int {
+	missed := 0
+	cursor := from
+	for missed < maxMissedOccurrenceScan {
+		next := cronSched.Next(cursor)
+		if next.After(now) {
+			break
+		}
+		missed++
+		cursor = next
+	}
+	return missed
+}
+
+// emitMissedOccurrences records the #1409 observability breadcrumb: a
+// schedule recovering from a gap wide enough to have silently absorbed
+// one or more cron occurrences.
+func (s *PipelineScheduler) emitMissedOccurrences(ctx context.Context, sched *Schedule, missed int, windowStart, windowEnd time.Time) {
+	s.logger.Warn("pipeline scheduler: schedule recovering from downtime — occurrences skipped",
+		"schedule", sched.ID, "missed", missed, "window_start", windowStart, "window_end", windowEnd)
+	_, _ = s.emitter.Emit(ctx, journal.Entry{
+		WorkspaceID: sched.WorkspaceID,
+		Type:        journal.EntryPipelineScheduleMissedOccurrences,
+		Severity:    journal.SeverityWarn,
+		ActorType:   journal.ActorOrchestrator,
+		ActorID:     sched.ID,
+		Summary: fmt.Sprintf("Schedule %s skipped %d occurrence(s) between %s and %s",
+			sched.Name, missed, windowStart.UTC().Format(time.RFC3339), windowEnd.UTC().Format(time.RFC3339)),
+		Payload: map[string]any{
+			"schedule_id":  sched.ID,
+			"missed_count": missed,
+			"window_start": windowStart.UTC().Format(time.RFC3339),
+			"window_end":   windowEnd.UTC().Format(time.RFC3339),
+		},
+	})
+}
+
 func (s *PipelineScheduler) maybeTripCircuitBreaker(ctx context.Context, sched *Schedule, pipelineSlug string) {
 	if sched.DisabledReason == scheduleDisabledReasonCircuitBreaker {
 		return

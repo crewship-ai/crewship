@@ -1707,6 +1707,11 @@ END;
 	// burning agent cost forever. See
 	// migrate_consts_v153_schedule_circuit_breaker.go (#1405).
 	{version: 153, name: "schedule_circuit_breaker", sql: migrationScheduleCircuitBreaker},
+	// v154 introduces pipeline_signal_waits — durable arm/deliver state for
+	// `wait: event` steps, so a signal survives a process restart instead of
+	// depending on an in-memory-only registry. See
+	// migrate_consts_v154_signal_waits.go (#1409).
+	{version: 154, name: "signal_waits", sql: migrationSignalWaits},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

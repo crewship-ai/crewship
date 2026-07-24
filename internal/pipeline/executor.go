@@ -124,6 +124,15 @@ type Executor struct {
 	// once Phase 2 lands).
 	waitpoints WaitpointStore
 
+	// signalWaits persists wait(event) step arm/delivery state
+	// (pipeline_signal_waits, v154) so a signal survives a process
+	// restart (#1409) — the durable counterpart to `signals` above,
+	// mirroring how `waitpoints` is to wait(approval). Nil = wait:event
+	// steps keep the pre-#1409 in-memory-only behaviour (blocking, no
+	// park, no restart survival) — useful for tests, wrong for
+	// production.
+	signalWaits SignalWaitStore
+
 	// ws is the WebSocket hub for live event push to subscribed
 	// frontend clients. Nil = no broadcast (tests, headless mode);
 	// production wiring passes ws.Hub via WithWSBroadcaster.
@@ -268,6 +277,15 @@ func (e *Executor) WithScriptRunner(r ScriptRunner) *Executor {
 // steps execute in-memory and don't survive a process restart.
 func (e *Executor) WithWaitpointStore(s WaitpointStore) *Executor {
 	e.waitpoints = s
+	return e
+}
+
+// WithSignalWaitStore wires wait(event) persistence (#1409). Without
+// it, wait:event steps keep the pre-#1409 in-memory-only behaviour —
+// blocking the run's goroutine with no park, and losing any signal
+// delivered while nothing is registered to receive it.
+func (e *Executor) WithSignalWaitStore(s SignalWaitStore) *Executor {
+	e.signalWaits = s
 	return e
 }
 

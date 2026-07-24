@@ -83,6 +83,11 @@ func NewWiredExecutor(d ExecutorDeps) *Executor {
 	if d.DB != nil {
 		exec = exec.WithIdempotencyStore(NewIdempotencyStore(d.DB))
 		exec = exec.WithStepOverrides(NewStepOverrideStore(d.DB))
+		// wait:event durability (#1409) — same thin, goroutine-free DB
+		// wrapper shape as the two stores above, so every production
+		// executor gets it automatically: forgetting it at a call site
+		// is the exact class of omission this factory exists to close.
+		exec = exec.WithSignalWaitStore(NewSQLSignalWaitStore(d.DB))
 		// http-step security perimeter — both read the same DB the
 		// rest of the run uses, so any production executor (HTTP
 		// handler, boot resume, cron scheduler, pending dispatcher)
