@@ -316,7 +316,7 @@ func (c *pipelineEmitContext) emitStepSkipped(ctx context.Context, step Step, co
 	_, _ = c.emitter.Emit(ctx, journal.Entry{
 		WorkspaceID: c.workspaceID,
 		CrewID:      c.authorCrewID,
-		Type:        journal.EntryPipelineStepCompleted, // reuse step.completed type with kind=skipped marker
+		Type:        journal.EntryPipelineStepSkipped, // kind=skipped retained for pre-dedicated-type readers
 		Severity:    journal.SeverityInfo,
 		ActorType:   journal.ActorOrchestrator,
 		ActorID:     c.runID,
@@ -345,7 +345,7 @@ func (c *pipelineEmitContext) emitStepRetry(ctx context.Context, step Step, atte
 	_, _ = c.emitter.Emit(ctx, journal.Entry{
 		WorkspaceID: c.workspaceID,
 		CrewID:      c.authorCrewID,
-		Type:        journal.EntryPipelineStepFailed, // reuse step.failed type w/ attempt counter; dedicated type would require a journal migration
+		Type:        journal.EntryPipelineStepRetrying, // kind=retry retained for pre-dedicated-type readers
 		Severity:    journal.SeverityWarn,
 		ActorType:   journal.ActorOrchestrator,
 		ActorID:     c.runID,

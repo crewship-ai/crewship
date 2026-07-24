@@ -212,6 +212,21 @@ const (
 	EntryPipelineStepValidation EntryType = "pipeline.step.validation_failed"
 	EntryPipelineDryRun         EntryType = "pipeline.dry_run"
 
+	// EntryPipelineStepSkipped / EntryPipelineStepRetrying make the two
+	// non-terminal step outcomes first-class instead of overloading
+	// completed/failed with a payload `kind` marker (the old scheme, which
+	// left a skipped step indistinguishable from a completed one at the
+	// storage layer and a retry attempt indistinguishable from a terminal
+	// failure). entry_type is an unconstrained TEXT column (no CHECK), so
+	// these need no schema migration; pre-existing rows keep their
+	// completed+kind=skipped / failed+kind=retry shape and readers fall
+	// back to the marker for those. Skipped = the step's If condition was
+	// false so it never ran; Retrying = a transient failure the retry
+	// policy is about to swallow (the terminal completed/failed still
+	// follows).
+	EntryPipelineStepSkipped  EntryType = "pipeline.step.skipped"
+	EntryPipelineStepRetrying EntryType = "pipeline.step.retrying"
+
 	// EntryPipelineStepContainerReady records how long a step spent acquiring
 	// its crew container (the EnsureCrewRuntime call), isolating the
 	// container-provision cost from the LLM/tool time buried in the step's

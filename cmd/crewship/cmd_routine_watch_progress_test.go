@@ -52,6 +52,28 @@ func TestComputeProgress_InFlightRun(t *testing.T) {
 	}
 }
 
+func TestComputeProgress_SkippedStepCountsAsProcessed(t *testing.T) {
+	// A skipped step must advance the step counter — otherwise "step N/total"
+	// stalls below total whenever a conditional branch is skipped, reading as
+	// a stuck run. Dedicated pipeline.step.skipped type, no cost.
+	now := time.Date(2026, 7, 7, 12, 0, 30, 0, time.UTC)
+	rows := []watchEntry{
+		ev("run-1", "pipeline.run.started", "", "2026-07-07T12:00:00Z", nil),
+		ev("run-1", "pipeline.step.completed", "parse", "2026-07-07T12:00:10Z", map[string]any{"cost_usd": 0.002}),
+		ev("run-1", "pipeline.step.skipped", "notify", "2026-07-07T12:00:12Z", map[string]any{"kind": "skipped", "condition": "false"}),
+	}
+	p := computeProgress(rows, 2, "", now)
+	if p == nil {
+		t.Fatal("nil progress")
+	}
+	if p.Completed != 2 || p.Total != 2 {
+		t.Errorf("steps = %d/%d, want 2/2 (skipped step counts)", p.Completed, p.Total)
+	}
+	if p.CostUSD != 0.002 {
+		t.Errorf("cost = %v, want 0.002 (skip adds none)", p.CostUSD)
+	}
+}
+
 func TestComputeProgress_TerminalUsesTotalCostAndEndTime(t *testing.T) {
 	now := time.Date(2026, 7, 7, 12, 5, 0, 0, time.UTC) // long after end
 	rows := []watchEntry{

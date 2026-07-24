@@ -266,7 +266,7 @@ and `run_id`.
 | `pipeline.step.started` | Step began | `{ step_id, step_index, step_type, tier_adapter, tier_model }` |
 | `pipeline.step.completed` | Step completed | `{ step_id, output_preview, duration_ms, cost_usd }` |
 | `pipeline.step.skipped` | Step skipped (`if` condition false) | `{ step_id, condition }` |
-| `pipeline.step.retry` | Transient failure, step is being retried | `{ step_id, attempt, error_message_preview, sleep_ms }` |
+| `pipeline.step.retrying` | Transient failure, step is being retried (non-terminal; the step's `completed`/`failed` still follows) | `{ step_id, attempt, max, error_message_preview, sleep_ms }` |
 | `pipeline.step.failed` | Step failed terminally | `{ step_id, error_class, error_message_preview }` |
 | `pipeline.step.validation_failed` | Step output failed a validation gate | `{ step_id, reason, action }` |
 

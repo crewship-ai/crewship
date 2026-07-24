@@ -359,13 +359,29 @@ func reportStepsFromEvents(rows []watchEntry, runID string, stepOutputs map[stri
 			order = append(order, sid)
 			byStep[sid] = &reportStep{ID: sid, Status: "running"}
 		}
+		// kind marker distinguishes the pre-dedicated-type rows: skipped
+		// steps used to arrive as completed+kind=skipped, retry breadcrumbs
+		// as failed+kind=retry. Dedicated types (below) carry it too.
+		kind, _ := r.Payload["kind"].(string)
 		switch r.EntryType {
 		case "pipeline.step.completed":
-			byStep[sid].Status = "completed"
-			byStep[sid].CostUSD = payloadFloat(r.Payload, "cost_usd")
-			byStep[sid].DurationMs = int64(payloadFloat(r.Payload, "duration_ms"))
+			if kind == "skipped" {
+				byStep[sid].Status = "skipped"
+			} else {
+				byStep[sid].Status = "completed"
+				byStep[sid].CostUSD = payloadFloat(r.Payload, "cost_usd")
+				byStep[sid].DurationMs = int64(payloadFloat(r.Payload, "duration_ms"))
+			}
+		case "pipeline.step.skipped":
+			byStep[sid].Status = "skipped"
 		case "pipeline.step.failed":
-			byStep[sid].Status = "failed"
+			// A retry breadcrumb is not a terminal failure — leave the step's
+			// status for its eventual completed/failed event to set.
+			if kind != "retry" {
+				byStep[sid].Status = "failed"
+			}
+		case "pipeline.step.retrying":
+			// Non-terminal; the step's real outcome event sets the status.
 		}
 	}
 	out := make([]reportStep, 0, len(order))

@@ -102,6 +102,43 @@ func TestReportStepsFromEvents_OrdersAndAttachesOutput(t *testing.T) {
 	}
 }
 
+func TestReportStepsFromEvents_SkippedAndRetry(t *testing.T) {
+	// Newest-first (server DESC). A skipped step (dedicated type) must land
+	// as "skipped", not stall on "running"; a retry breadcrumb must NOT mark
+	// its step failed — the step's real completed event wins.
+	rows := []watchEntry{
+		ev("r", "pipeline.step.completed", "fetch", "2026-07-07T12:00:30Z", map[string]any{"cost_usd": 0.002}),
+		ev("r", "pipeline.step.retrying", "fetch", "2026-07-07T12:00:20Z", map[string]any{"kind": "retry", "attempt": 1.0, "max": 3.0}),
+		ev("r", "pipeline.step.started", "fetch", "2026-07-07T12:00:11Z", nil),
+		ev("r", "pipeline.step.skipped", "notify", "2026-07-07T12:00:10Z", map[string]any{"kind": "skipped", "condition": "{{ inputs.dry }}"}),
+		ev("r", "pipeline.step.started", "notify", "2026-07-07T12:00:01Z", nil),
+	}
+	steps := reportStepsFromEvents(rows, "r", nil)
+	byID := map[string]string{}
+	for _, s := range steps {
+		byID[s.ID] = s.Status
+	}
+	if byID["notify"] != "skipped" {
+		t.Errorf("skipped step status = %q, want skipped", byID["notify"])
+	}
+	if byID["fetch"] != "completed" {
+		t.Errorf("retried-then-completed step status = %q, want completed (retry must not mark it failed)", byID["fetch"])
+	}
+}
+
+func TestReportStepsFromEvents_LegacyKindSkippedMarker(t *testing.T) {
+	// Pre-dedicated-type rows: skipped arrived as completed+kind=skipped.
+	// The kind fallback must still render it as skipped, not completed.
+	rows := []watchEntry{
+		ev("r", "pipeline.step.completed", "notify", "2026-07-07T12:00:10Z", map[string]any{"kind": "skipped", "condition": "false"}),
+		ev("r", "pipeline.step.started", "notify", "2026-07-07T12:00:01Z", nil),
+	}
+	steps := reportStepsFromEvents(rows, "r", nil)
+	if len(steps) != 1 || steps[0].Status != "skipped" {
+		t.Fatalf("legacy skipped marker not honoured: %+v", steps)
+	}
+}
+
 func TestBuildReport_FailedRunShowsError(t *testing.T) {
 	d := sampleReport()
 	d.Status = "failed"
