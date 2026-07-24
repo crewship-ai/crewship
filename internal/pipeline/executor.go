@@ -8,8 +8,30 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/scrubber"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 )
+
+// stepOutputScrubber redacts credential-shaped substrings from a step's
+// output before it is persisted to step_outputs_json or broadcast/
+// journaled to workspace members (#1416 item 5). The same scrubber the
+// notify path's scrubPreview (internal/notify/dispatch.go) and the script
+// runner's argv audit already use — one shared redaction pass rather than
+// a bespoke one for this chokepoint. Package-level: Scrubber is
+// documented safe for concurrent use and stateless beyond its (fixed,
+// never mutated here) pattern set.
+var stepOutputScrubber = scrubber.New()
+
+// scrubStepOutput is the persist/broadcast-only redaction pass. The
+// IN-MEMORY value callers keep in RunResult.StepOutputs (used to resolve
+// {{ steps.X.output }} in later steps) is deliberately left untouched —
+// scrubbing it would silently break a routine that legitimately produces
+// a secret in one step and consumes it in the next (e.g. provisioning a
+// credential and using it in the following http step). Only the
+// persisted/broadcast COPY is redacted.
+func scrubStepOutput(output string) string {
+	return stepOutputScrubber.Scrub(output)
+}
 
 // ErrPipelineNotFound is returned by Run when a call_pipeline step
 // references a slug that is not registered in the workspace.
@@ -200,6 +222,23 @@ type Executor struct {
 type RunScope struct {
 	WorkspaceID  string
 	AuthorCrewID string
+	// WebhookTriggered marks a run started by an inbound pipeline webhook
+	// delivery (#1416 item 1) — untrusted external input. The http-step
+	// egress gate (NewCrewNetworkPolicyGate) holds this run's crew-network
+	// floor to 'restricted' regardless of the crew's own network_mode,
+	// mirroring the agent-webhook path's NetworkMode="restricted" override
+	// (internal/api/webhook.go).
+	WebhookTriggered bool
+	// RoutineDeclaresEgress reports whether the routine declared a
+	// non-empty egress_targets allowlist (#1416 item 3). When false and
+	// the crew's network policy is free/unrestricted, the egress gate
+	// additionally requires the host to clear egressallow.DefaultAllowedDomains
+	// — the same minimum 'restricted' mode enforces — so an undeclared http
+	// step (or one driven by a webhook-controlled {{ inputs.url }}) cannot
+	// reach an arbitrary public host merely because the authoring crew
+	// allows its agents free egress. hostInEgressTargets remains the
+	// authoritative per-host gate when this is true.
+	RoutineDeclaresEgress bool
 }
 
 // WithEgressGate wires the crew/workspace-level HTTP host gate. The
@@ -1085,6 +1124,29 @@ func (e *Executor) agentlessGate(ctx context.Context, in RunInput, emit *pipelin
 	return nil
 }
 
+// renderAgentPrompt renders step.Prompt, additionally fencing
+// webhook-sourced input values (WebhookUntrustedInputKeys) when this run
+// was triggered by an inbound pipeline webhook and the step is an
+// agent_run (#1416 item 1). The rendered prompt is the ONLY thing fenced
+// here — If/HTTP/Code/Transform/Wait rendering in the SAME step still uses
+// the plain ctxRender the caller already built, because wrapping a URL,
+// JSON body, or script arg in `<untrusted ...>` tags would corrupt it
+// rather than protect anything (those vectors are closed by the egress
+// hardening in egress_gate.go / runner_http.go instead).
+//
+// Scoped to StepAgentRun only: call_pipeline forwards structured inputs to
+// a child routine, which re-renders (and re-fences, if IT is later
+// determined to be webhook-triggered) on its own terms — fencing here
+// would double-wrap and is out of scope for this fix.
+func renderAgentPrompt(step Step, ctxRender RenderContext, triggeredVia TriggeredVia) string {
+	if step.Type != StepAgentRun || triggeredVia != TriggeredViaWebhook {
+		return Render(step.Prompt, ctxRender)
+	}
+	fenced := ctxRender
+	fenced.UntrustedInputs = WebhookUntrustedInputKeys
+	return Render(step.Prompt, fenced)
+}
+
 // runLinearStep is the per-step execution body of the sequential loop
 // in runDSL: render → `if:` skip eval → tier resolve → dispatch →
 // post-step cost-cap gate. It mirrors executeOneStep in dag.go (the
@@ -1112,7 +1174,7 @@ func (e *Executor) runLinearStep(
 ) *RunResult {
 	// Build the rendered prompt for both run + dry-run paths.
 	ctxRender := buildStepRenderContext(inputsForCtx, result.StepOutputs, renderEnv, runMeta, dsl.EgressTargets)
-	renderedPrompt := Render(step.Prompt, ctxRender)
+	renderedPrompt := renderAgentPrompt(step, ctxRender, in.TriggeredVia)
 
 	// Conditional execution. We evaluate the rendered If string
 	// for truthiness BEFORE tier resolution / runner dispatch so
@@ -1206,7 +1268,10 @@ func (e *Executor) runLinearStep(
 		}
 		result.StepOutputs[step.ID] = output
 		result.CostUSD += stepCost
-		emit.emitStepCompleted(ctx, step, output, stepDur, stepCost)
+		// #1416 item 5: the journal/broadcast copy is scrubbed; the
+		// in-memory result.StepOutputs entry above stays raw for
+		// downstream template chaining.
+		emit.emitStepCompleted(ctx, step, scrubStepOutput(output), stepDur, stepCost)
 		// Flush the outputs map at the step boundary so a kill
 		// between steps loses at most the in-flight step.
 		e.persistStepOutputs(ctx, in, depth, runID, result.StepOutputs, result.CostUSD, startedAt)
@@ -1656,7 +1721,15 @@ func (e *Executor) persistStepOutputs(ctx context.Context, in RunInput, depth in
 	if !e.stepPersistEnabled(in, depth) {
 		return
 	}
-	if err := e.runStore.AppendStepOutput(ctx, runID, stepOutputs, costUSD, time.Since(startedAt).Milliseconds()); err != nil {
+	// #1416 item 5: scrub before persist. The caller's stepOutputs map is
+	// the in-memory chaining copy (template resolution needs the real
+	// value) — copy it rather than mutate in place, so persistence never
+	// leaks back into what later steps see.
+	scrubbed := make(map[string]string, len(stepOutputs))
+	for k, v := range stepOutputs {
+		scrubbed[k] = scrubStepOutput(v)
+	}
+	if err := e.runStore.AppendStepOutput(ctx, runID, scrubbed, costUSD, time.Since(startedAt).Milliseconds()); err != nil {
 		e.persistWarn("step outputs", runID, err)
 	}
 }
@@ -1809,9 +1882,16 @@ func (e *Executor) persistRunTerminal(runCtx context.Context, runID string, in R
 		terminal.FailedAtStep = result.FailedAtStep
 		terminal.CostUSD = result.CostUSD
 		// Persist step outputs map so the run-detail UI can render
-		// per-step content even after the goroutine terminates.
+		// per-step content even after the goroutine terminates. Scrubbed
+		// before persist (#1416 item 5) — same rationale as
+		// persistStepOutputs: the in-memory result.StepOutputs stays raw,
+		// only this projected copy is redacted.
 		if len(result.StepOutputs) > 0 {
-			if err := e.runStore.AppendStepOutput(ctx, runID, result.StepOutputs, result.CostUSD, dur); err != nil {
+			scrubbed := make(map[string]string, len(result.StepOutputs))
+			for k, v := range result.StepOutputs {
+				scrubbed[k] = scrubStepOutput(v)
+			}
+			if err := e.runStore.AppendStepOutput(ctx, runID, scrubbed, result.CostUSD, dur); err != nil {
 				e.persistWarn("step outputs flush", runID, err)
 			}
 		}

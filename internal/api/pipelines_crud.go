@@ -256,7 +256,11 @@ func (h *PipelineHandler) ImportPipeline(w http.ResponseWriter, r *http.Request)
 		// bundle deliberately doesn't carry one.
 		AuthorCrewID string `json:"author_crew_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&bundle); err != nil {
+	// #1416 item 4: cap the request body like every exec route already
+	// does (maxExecBodyBytes) -- unlike those routes, ImportPipeline had
+	// no MaxBytesReader at all, so a create-role member could pin server
+	// memory with an oversized/deeply-nested bundle.
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&bundle); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid bundle")
 		return
 	}
@@ -598,8 +602,12 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// #1416 item 4: cap the request body like every exec route already
+	// does (maxExecBodyBytes) -- Save had no MaxBytesReader at all, so a
+	// MANAGER+ member could pin server memory with an oversized/deeply-
+	// nested definition.
 	var body userSaveRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
