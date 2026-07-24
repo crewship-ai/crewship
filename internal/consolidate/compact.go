@@ -167,6 +167,15 @@ func (c *Compactor) Run(ctx context.Context, workspaceID string, olderThan time.
 		if err != nil {
 			return result, fmt.Errorf("compact: emit run marker: %w", err)
 		}
+		// Drain the async writer before returning. Emit only queues the
+		// marker; without this Flush the writer goroutine is still writing
+		// it to the shared DB connection when Run returns, so a caller (or
+		// test) that reads the journal immediately after races the writer
+		// on the same connection. Flush blocks on a barrier ack, so on
+		// return no compaction-issued write is in flight.
+		if err := c.Journal.Flush(ctx); err != nil {
+			logger.Warn("compact: flush run marker failed", "err", err)
+		}
 	}
 	return result, nil
 }
