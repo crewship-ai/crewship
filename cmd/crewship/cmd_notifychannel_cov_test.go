@@ -21,10 +21,12 @@ func covNotifyChannelSubs(t *testing.T) map[string]func() error {
 		return func() error { return cmd.RunE(cmd, args) }
 	}
 	return map[string]func() error{
-		"list": run(notifyChannelListCmd, nil),
-		"add":  run(notifyChannelAddCmd, nil),
-		"test": run(notifyChannelTestCmd, []string{"nch_1"}),
-		"rm":   run(notifyChannelRmCmd, []string{"nch_1"}),
+		"list":       run(notifyChannelListCmd, nil),
+		"add":        run(notifyChannelAddCmd, nil),
+		"test":       run(notifyChannelTestCmd, []string{"nch_1"}),
+		"rm":         run(notifyChannelRmCmd, []string{"nch_1"}),
+		"providers":  run(notifyChannelProvidersCmd, nil),
+		"deliveries": run(notifyChannelDeliveriesCmd, nil),
 	}
 }
 
@@ -69,6 +71,18 @@ func TestNotifyChannelCmds_HappyPath(t *testing.T) {
 		"ok": true, "channel_id": "nch_1",
 	}))
 	s.OnDelete("/api/v1/notification-channels/nch_1", clitest.JSONResponse(200, map[string]any{"deleted": "nch_1"}))
+	s.OnGet("/api/v1/notification-providers", clitest.JSONResponse(200, map[string]any{
+		"providers": []map[string]any{
+			{"provider": "slack", "scheme": "slack", "enabled": true},
+			{"provider": "discord", "scheme": "discord", "enabled": true},
+			{"provider": "telegram", "scheme": "telegram", "enabled": false},
+		},
+	}))
+	s.OnGet("/api/v1/notification-deliveries", clitest.JSONResponse(200, map[string]any{
+		"deliveries": []map[string]any{
+			{"id": "del_1", "channel_id": "nch_1", "category": "security", "status": "sent", "attempts": 1, "created_at": "2026-01-01T00:00:00Z"},
+		},
+	}))
 
 	covSetFlagCli9(t, notifyChannelAddCmd, "type", "webhook")
 	covSetFlagCli9(t, notifyChannelAddCmd, "url", "https://hooks.example.com/x")
@@ -84,6 +98,12 @@ func TestNotifyChannelCmds_HappyPath(t *testing.T) {
 		if err := notifyChannelTestCmd.RunE(notifyChannelTestCmd, []string{"nch_1"}); err != nil {
 			t.Errorf("test: %v", err)
 		}
+		if err := notifyChannelProvidersCmd.RunE(notifyChannelProvidersCmd, nil); err != nil {
+			t.Errorf("providers: %v", err)
+		}
+		if err := notifyChannelDeliveriesCmd.RunE(notifyChannelDeliveriesCmd, nil); err != nil {
+			t.Errorf("deliveries: %v", err)
+		}
 		if err := notifyChannelRmCmd.RunE(notifyChannelRmCmd, []string{"nch_1"}); err != nil {
 			t.Errorf("rm: %v", err)
 		}
@@ -94,6 +114,12 @@ func TestNotifyChannelCmds_HappyPath(t *testing.T) {
 	}
 	if !strings.Contains(out, "nch_1") {
 		t.Errorf("expected channel id in output; got:\n%s", out)
+	}
+	if !strings.Contains(out, "slack") {
+		t.Errorf("providers table should list slack; got:\n%s", out)
+	}
+	if !strings.Contains(out, "del_1") {
+		t.Errorf("deliveries table should list the seeded delivery; got:\n%s", out)
 	}
 }
 
@@ -116,7 +142,18 @@ func TestNotifyChannelAdd_ValidationLocal(t *testing.T) {
 	}
 
 	covSetFlagCli9(t, notifyChannelAddCmd, "type", "sms")
-	if err := notifyChannelAddCmd.RunE(notifyChannelAddCmd, nil); err == nil || !strings.Contains(err.Error(), "email' or 'webhook") {
+	if err := notifyChannelAddCmd.RunE(notifyChannelAddCmd, nil); err == nil || !strings.Contains(err.Error(), "'shoutrrr'") {
 		t.Errorf("bad type should fail locally; got %v", err)
+	}
+
+	covSetFlagCli9(t, notifyChannelAddCmd, "type", "shoutrrr")
+	covSetFlagCli9(t, notifyChannelAddCmd, "provider", "")
+	if err := notifyChannelAddCmd.RunE(notifyChannelAddCmd, nil); err == nil || !strings.Contains(err.Error(), "--provider") {
+		t.Errorf("shoutrrr without provider should fail locally; got %v", err)
+	}
+	covSetFlagCli9(t, notifyChannelAddCmd, "provider", "slack")
+	covSetFlagCli9(t, notifyChannelAddCmd, "url", "")
+	if err := notifyChannelAddCmd.RunE(notifyChannelAddCmd, nil); err == nil || !strings.Contains(err.Error(), "--url") {
+		t.Errorf("shoutrrr without url should fail locally; got %v", err)
 	}
 }
