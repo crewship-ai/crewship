@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+// maxForeachItems bounds how many elements a foreach may fan out over. The
+// items array is Render()'d from a template that can reference untrusted input
+// (a webhook body, an upstream step output), so without a cap a caller could
+// drive an unbounded allocation / run explosion. 10k is far above any real
+// routine and keeps the pre-sized results slice bounded.
+const maxForeachItems = 10000
+
 // runForeachStep executes a foreach step: it renders the items template to a
 // JSON array and fans the body out over each element (#1419, part 1).
 //
@@ -37,6 +44,11 @@ func (e *Executor) runForeachStep(ctx context.Context, step Step, in RunInput, p
 	if len(items) == 0 {
 		// An empty array is a valid no-op: emit an empty result array.
 		return "[]", 0, time.Since(stepStart).Milliseconds(), nil
+	}
+	if len(items) > maxForeachItems {
+		// Bound the fan-out before the per-item allocation below — items is
+		// derived from an untrusted template (webhook body / step output).
+		return "", 0, 0, fmt.Errorf("foreach step %q: %d items exceeds the maximum of %d — bound the input array", step.ID, len(items), maxForeachItems)
 	}
 
 	concurrency := fe.Parallelism
@@ -137,7 +149,10 @@ func (e *Executor) runForeachItem(ctx context.Context, step Step, item any, in R
 	// Per-item step-output map seeded with the parent's outputs so a body
 	// step can reference an upstream (pre-foreach) step. Each item gets its
 	// OWN map, so parallel items never race on shared state.
-	subOutputs := make(map[string]string, len(parentRender.StepOutputs)+len(fe.Steps))
+	// No size hint: len+len tripped CodeQL's allocation-size-overflow on an
+	// unbounded sum; the map is small (per-item, seeded from parent outputs)
+	// so pre-sizing is not worth the flagged arithmetic.
+	subOutputs := make(map[string]string)
 	for k, v := range parentRender.StepOutputs {
 		subOutputs[k] = v
 	}

@@ -184,3 +184,42 @@ func TestEvalStepCondition_Units(t *testing.T) {
 		}
 	}
 }
+
+// Security (go/uncontrolled-allocation-size): a foreach over an untrusted
+// array must be bounded — an oversized items array is rejected before the
+// per-item allocation/fan-out rather than driving an unbounded run.
+func TestExecutor_Foreach_RejectsOversizedArray(t *testing.T) {
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+	runner := &echoRunner{}
+	exec := NewExecutor(store, resolver, runner, nil)
+
+	big := make([]any, maxForeachItems+1)
+	for i := range big {
+		big[i] = "x"
+	}
+	dsl := &DSL{
+		Name: "toobig",
+		Steps: []Step{{
+			ID:   "each",
+			Type: StepForeach,
+			Foreach: &ForeachStep{
+				Items: `{{ inputs.arr }}`,
+				As:    "item",
+				Steps: []Step{{ID: "work", Type: StepAgentRun, AgentSlug: "worker", Prompt: "{{ inputs.item }}"}},
+			},
+		}},
+	}
+	res, _ := exec.RunDefinition(context.Background(), dsl, RunInput{
+		WorkspaceID:  "ws_test",
+		AuthorCrewID: "crew_a",
+		Mode:         ModeRun,
+		Inputs:       map[string]any{"arr": big},
+	})
+	if res.Status == "COMPLETED" {
+		t.Fatalf("expected the oversized foreach to fail, got COMPLETED")
+	}
+	if runner.calls() != 0 {
+		t.Errorf("body must not run for an over-cap array, ran %d", runner.calls())
+	}
+}
