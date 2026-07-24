@@ -31,7 +31,7 @@ type PrefCell struct {
 	State     string `json:"state"` // off | immediate | digest (digest is v2-reserved; MVP never writes it)
 }
 
-// PrefStore is the persistence layer for user_notification_prefs (v153).
+// PrefStore is the persistence layer for user_notification_prefs (v154).
 type PrefStore struct {
 	db *sql.DB
 }

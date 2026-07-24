@@ -2,11 +2,11 @@ package database
 
 import "testing"
 
-// TestMigrate_V153_NotificationChannelsWidened asserts the v133
+// TestMigrate_V154_NotificationChannelsWidened asserts the v133
 // notification_channels table gained the new metadata columns and that
 // the type CHECK now admits 'shoutrrr' alongside the original
 // 'email'/'webhook' (#1412).
-func TestMigrate_V153_NotificationChannelsWidened(t *testing.T) {
+func TestMigrate_V154_NotificationChannelsWidened(t *testing.T) {
 	t.Parallel()
 	db := migrateChainSetup(t)
 
@@ -41,7 +41,7 @@ func TestMigrate_V153_NotificationChannelsWidened(t *testing.T) {
 	}
 	for col, found := range want {
 		if !found {
-			t.Errorf("notification_channels missing column %q after v153", col)
+			t.Errorf("notification_channels missing column %q after v154", col)
 		}
 	}
 
@@ -50,7 +50,7 @@ func TestMigrate_V153_NotificationChannelsWidened(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO notification_channels
 		(id, workspace_id, type, provider, config_json, events_json, categories_json)
 		VALUES ('nch_shoutrrr', 'ws_1', 'shoutrrr', 'slack', '{}', '[]', '[]')`); err != nil {
-		t.Fatalf("insert shoutrrr-type channel should succeed post-v153: %v", err)
+		t.Fatalf("insert shoutrrr-type channel should succeed post-v154: %v", err)
 	}
 	if _, err := db.Exec(`INSERT INTO notification_channels
 		(id, workspace_id, type, config_json) VALUES ('nch_bad', 'ws_1', 'carrier-pigeon', '{}')`); err == nil {
@@ -62,11 +62,11 @@ func TestMigrate_V153_NotificationChannelsWidened(t *testing.T) {
 	}
 }
 
-// TestMigrate_V153_UserNotificationPrefs asserts the matrix table's
+// TestMigrate_V154_UserNotificationPrefs asserts the matrix table's
 // shape: category CHECK (including the '*' mute-all sentinel), state
 // CHECK (with the not-yet-used 'digest' value already legal), and the
 // (user, category, channel) uniqueness that makes an upsert idempotent.
-func TestMigrate_V153_UserNotificationPrefs(t *testing.T) {
+func TestMigrate_V154_UserNotificationPrefs(t *testing.T) {
 	t.Parallel()
 	db := migrateChainSetup(t)
 
@@ -110,11 +110,11 @@ func TestMigrate_V153_UserNotificationPrefs(t *testing.T) {
 	}
 }
 
-// TestMigrate_V153_NotificationDeliveries asserts the outbox/delivery-log
+// TestMigrate_V154_NotificationDeliveries asserts the outbox/delivery-log
 // table's status CHECK and the (channel_id, dedup_key) UNIQUE index that
 // backs coalescing — a re-fired source event INSERT-OR-IGNOREs into the
 // same row instead of double-delivering.
-func TestMigrate_V153_NotificationDeliveries(t *testing.T) {
+func TestMigrate_V154_NotificationDeliveries(t *testing.T) {
 	t.Parallel()
 	db := migrateChainSetup(t)
 
@@ -150,12 +150,12 @@ func TestMigrate_V153_NotificationDeliveries(t *testing.T) {
 	}
 }
 
-// TestMigrate_V153_IdempotentReapply guards the writable_schema CHECK
+// TestMigrate_V154_IdempotentReapply guards the writable_schema CHECK
 // rewrite specifically: running the full chain twice (the existing
 // TestMigrate_Chain_RunTwice_IsIdempotent covers every migration, but this
-// pins the v153-specific "already widened" short-circuit) must not error
+// pins the v154-specific "already widened" short-circuit) must not error
 // and must not double-append 'shoutrrr' into the CHECK text.
-func TestMigrate_V153_IdempotentReapply(t *testing.T) {
+func TestMigrate_V154_IdempotentReapply(t *testing.T) {
 	t.Parallel()
 	db := migrateChainSetup(t)
 

@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// Delivery is one row of the notification_deliveries outbox/log (v153).
+// Delivery is one row of the notification_deliveries outbox/log (v154).
 type Delivery struct {
 	ID          string
 	WorkspaceID string
