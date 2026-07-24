@@ -5,6 +5,26 @@ import (
 	"testing"
 )
 
+// TestBackupTableIntent_AllIncludedAreDumped guards the intent→dump wiring:
+// a table declared IntentInclude but absent from BackupTables is never
+// actually exported/restored (the dumper iterates BackupTables only), so it
+// is silent data loss. This is exactly the class of regression that shipped
+// pipeline_routine_state / pipeline_run_step_outputs as "backed up" while the
+// dumper skipped them. Any new IntentInclude table must also be added to
+// BackupTables (with a workspaceFilterSQL scope clause if it has no
+// workspace_id column).
+func TestBackupTableIntent_AllIncludedAreDumped(t *testing.T) {
+	dumped := map[string]bool{}
+	for _, n := range BackupTables {
+		dumped[n] = true
+	}
+	for _, n := range IncludedTables() {
+		if !dumped[n] {
+			t.Errorf("table %q is IntentInclude but missing from BackupTables — it will never be backed up or restored (silent data loss). Add it to BackupTables in FK-safe order.", n)
+		}
+	}
+}
+
 func TestIncludedTables_ReturnsOnlyInclude(t *testing.T) {
 	got := IncludedTables()
 	if len(got) == 0 {

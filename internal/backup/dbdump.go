@@ -138,8 +138,12 @@ var BackupTables = []string{
 	"pipeline_schedules",
 	"pipeline_webhooks",
 	"pipeline_runs",
-	"pipeline_waitpoints", // suspended workflow state — durable
-	"gdpr_actions",        // Art. 15/17 compliance audit trail
+	"pipeline_run_step_outputs", // normalized per-step outputs (v159) — run-detail waterfall; FK run_id
+	"pipeline_routine_state",    // cross-run "since last run" watermarks (v155) — FK pipeline_id
+	"pending_runs",              // deferred/debounced triggers — durable queued work
+	"pipeline_tags",             // routine-definition discovery tags (v125)
+	"pipeline_waitpoints",       // suspended workflow state — durable
+	"gdpr_actions",              // Art. 15/17 compliance audit trail
 	// Credential audit/rotations: depend on credentials being in already
 	"credential_audit",
 	"credential_rotations",
@@ -162,6 +166,16 @@ var BackupTables = []string{
 	"captain_chats",
 	"peer_cards",
 	"user_peer_consent",
+	// Previously IntentInclude but never wired into the dump (the tail of
+	// the "#4 intent→dump wiring" gap). All FK parents appear earlier, so
+	// restore order is safe.
+	"chat_participants",          // FK chat_id → chats (scoped below)
+	"chat_read_cursors",          // FK chat_id → chats (scoped below)
+	"run_tags",                   // FK run_id → pipeline_runs; has workspace_id
+	"routine_step_overrides",     // FK pipeline_id; has workspace_id
+	"composio_settings",          // workspace_id PK
+	"keeper_governance_settings", // workspace_id PK
+	"user_models",                // has workspace_id
 }
 
 // DBDump captures the exported rows from one or more tables. Keys are
@@ -277,6 +291,15 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 		// bundles); bindings WITH credential_id will FK-fail on restore
 		// against a fresh target. Tracked separately.
 		return "agent_id IN (SELECT a.id FROM agents a JOIN crews c ON a.crew_id = c.id WHERE c.workspace_id = ?)", []any{workspaceID}, true
+	case "pipeline_run_step_outputs":
+		// No workspace_id column — scoped via its run.
+		return "run_id IN (SELECT id FROM pipeline_runs WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "chat_participants", "chat_read_cursors":
+		// No workspace_id column — scoped via the chat.
+		return "chat_id IN (SELECT id FROM chats WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "pipeline_routine_state":
+		// No workspace_id column — scoped via its routine (pipeline).
+		return "pipeline_id IN (SELECT id FROM pipelines WHERE workspace_id = ?)", []any{workspaceID}, true
 	default:
 		// Generic case: table has a workspace_id column.
 		return "workspace_id = ?", []any{workspaceID}, false
