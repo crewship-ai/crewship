@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/spf13/cobra"
 )
 
@@ -96,6 +97,8 @@ Examples:
   crewship routine schedules list --slug summarize-text
   crewship routine schedules create --slug summarize-text \
       --name "daily-summary" --cron "0 9 * * *" --inputs '{"text":"…"}'
+  crewship routine schedules create --slug summarize-text \
+      --name "daily-summary" --when "every weekday at 9"   # NL→cron, confirms next 3 fires
   crewship routine schedules create --slug cost-report \
       --cron "*/15 * * * *" --wake-slug cost-spike-probe   # LLM only on spike
   crewship routine schedules create --slug daily-digest \
@@ -194,14 +197,54 @@ var routineSchedulesCreateCmd = &cobra.Command{
 		slug, _ := cmd.Flags().GetString("slug")
 		name, _ := cmd.Flags().GetString("name")
 		cronExpr, _ := cmd.Flags().GetString("cron")
+		when, _ := cmd.Flags().GetString("when")
 		timezone, _ := cmd.Flags().GetString("timezone")
 		inputsJSON, _ := cmd.Flags().GetString("inputs")
 		enabled, _ := cmd.Flags().GetBool("enabled")
 		wakeSlug, _ := cmd.Flags().GetString("wake-slug")
 		wakeInputsJSON, _ := cmd.Flags().GetString("wake-inputs")
 		failClosed, _ := cmd.Flags().GetBool("fail-closed")
-		if slug == "" || cronExpr == "" {
-			return fmt.Errorf("--slug and --cron are required")
+		yes, _ := cmd.Flags().GetBool("yes")
+		if slug == "" {
+			return fmt.Errorf("--slug is required")
+		}
+		if cronExpr != "" && when != "" {
+			return fmt.Errorf("--cron and --when are mutually exclusive — pass one or the other")
+		}
+		if cronExpr == "" && when == "" {
+			return fmt.Errorf("--cron or --when is required")
+		}
+		// #1422 item 1: NL→cron. --when is parsed to a cron expression,
+		// then echoed back with its next 3 fire times so the operator can
+		// confirm the derived schedule actually means what they intended
+		// before it's saved — the whole point of exposing this instead of
+		// silently trusting the guess.
+		if when != "" {
+			derived, perr := pipeline.ParseNaturalCron(when)
+			if perr != nil {
+				return perr
+			}
+			cronExpr = derived
+			previewTZ := timezone
+			if previewTZ == "" {
+				previewTZ = "UTC"
+			}
+			occs, oerr := pipeline.NextOccurrences(cronExpr, previewTZ, 3, time.Now())
+			fmt.Printf("Parsed %q as cron %q (%s).\n", when, cronExpr, previewTZ)
+			if oerr == nil {
+				fmt.Println("Next 3 fire times:")
+				for _, o := range occs {
+					fmt.Printf("  - %s\n", o.Format("2006-01-02 15:04 MST"))
+				}
+			}
+			if !yes {
+				fmt.Print("Create this schedule? [y/N]: ")
+				var input string
+				_, _ = fmt.Scanln(&input)
+				if strings.ToLower(strings.TrimSpace(input)) != "y" && strings.ToLower(strings.TrimSpace(input)) != "yes" {
+					return fmt.Errorf("aborted")
+				}
+			}
 		}
 		if wakeInputsJSON != "" && wakeSlug == "" {
 			return fmt.Errorf("--wake-inputs requires --wake-slug")
@@ -575,7 +618,9 @@ func init() {
 
 	routineSchedulesCreateCmd.Flags().String("slug", "", "target routine slug (REQUIRED)")
 	routineSchedulesCreateCmd.Flags().String("name", "", "human-readable schedule name (default: '<slug> schedule')")
-	routineSchedulesCreateCmd.Flags().String("cron", "", "5-field cron expression — e.g. '0 9 * * *' (REQUIRED)")
+	routineSchedulesCreateCmd.Flags().String("cron", "", "5-field cron expression — e.g. '0 9 * * *' (required unless --when is given)")
+	routineSchedulesCreateCmd.Flags().String("when", "", `natural-language schedule phrase — e.g. "every weekday at 9", "every day at 9am", "every monday at 14:00", "every hour", "every 15 minutes" (parsed to cron, previewed with its next 3 fire times, and confirmed before saving; mutually exclusive with --cron)`)
+	routineSchedulesCreateCmd.Flags().Bool("yes", false, "skip the --when confirmation prompt")
 	routineSchedulesCreateCmd.Flags().String("timezone", "", "IANA timezone (default: UTC; for host-local pass an IANA zone like Europe/Prague — `date +%Z` returns abbreviations the server rejects)")
 	routineSchedulesCreateCmd.Flags().String("inputs", "", "JSON object passed as inputs on each tick (e.g. '{\"text\":\"…\"}')")
 	routineSchedulesCreateCmd.Flags().Bool("enabled", true, "create the schedule already enabled (default true)")

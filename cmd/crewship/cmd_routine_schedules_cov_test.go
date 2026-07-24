@@ -112,6 +112,7 @@ func newScheduleFlagsCmd() *cobra.Command {
 	c.Flags().String("slug", "", "")
 	c.Flags().String("name", "", "")
 	c.Flags().String("cron", "", "")
+	c.Flags().String("when", "", "")
 	c.Flags().String("timezone", "", "")
 	c.Flags().String("inputs", "", "")
 	c.Flags().Bool("enabled", true, "")
@@ -220,8 +221,9 @@ func TestScheduleCreate_Validation(t *testing.T) {
 		set     map[string]string
 		wantErr string
 	}{
-		{"missing slug+cron", map[string]string{}, "--slug and --cron are required"},
-		{"missing cron", map[string]string{"slug": "x"}, "--slug and --cron are required"},
+		{"missing slug+cron", map[string]string{}, "--slug is required"},
+		{"missing cron", map[string]string{"slug": "x"}, "--cron or --when is required"},
+		{"cron and when both set", map[string]string{"slug": "x", "cron": "* * * * *", "when": "every day at 9am"}, "--cron and --when are mutually exclusive"},
 		{"wake-inputs without wake-slug", map[string]string{"slug": "x", "cron": "* * * * *", "wake-inputs": `{"a":1}`}, "--wake-inputs requires --wake-slug"},
 		{"bad inputs json", map[string]string{"slug": "x", "cron": "* * * * *", "inputs": "{nope"}, "--inputs must be valid JSON"},
 		{"bad wake-inputs json", map[string]string{"slug": "x", "cron": "* * * * *", "wake-slug": "probe", "wake-inputs": "{nope"}, "--wake-inputs must be valid JSON"},
@@ -296,6 +298,60 @@ func TestScheduleCreate_Success(t *testing.T) {
 	inputs, _ := body["inputs"].(map[string]any)
 	if inputs["text"] != "hello" {
 		t.Errorf("inputs = %v", body["inputs"])
+	}
+}
+
+// #1422 item 1: `--when` parses NL to cron, previews the next 3 fire
+// times, and (with --yes, skipping the interactive prompt) proceeds to
+// create using the derived cron expression.
+func TestScheduleCreate_When_Success(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	stub.OnPost(schedulesPath, clitest.JSONResponse(201, scheduleRow{
+		ID: "sch-nl", Name: "summarize schedule", CronExpr: "0 9 * * 1-5", Timezone: "UTC",
+	}))
+	setStubCLI(t, stub.URL())
+
+	c := newScheduleFlagsCmd()
+	for k, v := range map[string]string{
+		"slug": "summarize", "when": "every weekday at 9", "yes": "true",
+	} {
+		if err := c.Flags().Set(k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := captureStdoutCovCli2(t, func() {
+		if err := routineSchedulesCreateCmd.RunE(c, nil); err != nil {
+			t.Errorf("create: %v", err)
+		}
+	})
+	if !strings.Contains(out, `Parsed "every weekday at 9" as cron "0 9 * * 1-5"`) {
+		t.Errorf("missing NL parse echo:\n%s", out)
+	}
+	if !strings.Contains(out, "Next 3 fire times:") {
+		t.Errorf("missing next-3-occurrences preview:\n%s", out)
+	}
+	calls := stub.CallsFor("POST", schedulesPath)
+	if len(calls) != 1 {
+		t.Fatalf("POST calls = %d", len(calls))
+	}
+	var body map[string]any
+	clitest.MustDecodeJSONBody(calls[0].Body, &body)
+	if body["cron_expr"] != "0 9 * * 1-5" {
+		t.Errorf("cron_expr = %v, want derived cron", body["cron_expr"])
+	}
+}
+
+func TestScheduleCreate_When_Unrecognized(t *testing.T) {
+	c := newScheduleFlagsCmd()
+	for k, v := range map[string]string{"slug": "x", "when": "whenever the mood strikes"} {
+		if err := c.Flags().Set(k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := routineSchedulesCreateCmd.RunE(c, nil)
+	if err == nil || !strings.Contains(err.Error(), "could not understand") {
+		t.Errorf("got %v, want unrecognized-phrase error", err)
 	}
 }
 

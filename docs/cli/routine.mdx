@@ -871,7 +871,8 @@ crewship routine schedules create \
 | Flag | Required | Description |
 |------|:---:|-------------|
 | `--slug` | ✓ | Target routine slug |
-| `--cron` | ✓ | 5-field cron expression |
+| `--cron` | one of `--cron` / `--when` | 5-field cron expression |
+| `--when` | one of `--cron` / `--when` | Natural-language schedule phrase — e.g. `"every weekday at 9"`, `"every day at 9am"`, `"every monday at 14:00"`, `"every hour"`, `"every 15 minutes"`. Parsed to a cron expression, previewed with its next 3 fire times, and confirmed before saving (skip the prompt with `--yes`). Mutually exclusive with `--cron`. |
 | `--name` | | Schedule name (default: `"<slug> schedule"`) |
 | `--timezone` | | IANA timezone (default: `UTC`; for host-local, pass an IANA zone such as `America/Los_Angeles` or read it from `cat /etc/timezone` / `timedatectl show -p Timezone --value`) |
 | `--inputs` | | JSON object passed as inputs on each tick |
