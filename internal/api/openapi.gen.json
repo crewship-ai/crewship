@@ -213,26 +213,6 @@
         ]
       }
     },
-    "/api/v1/activity": {
-      "get": {
-        "operationId": "get_api_v1_activity",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          }
-        },
-        "tags": [
-          "activity"
-        ]
-      }
-    },
     "/api/v1/admin/backups": {
       "delete": {
         "operationId": "delete_api_v1_admin_backups",

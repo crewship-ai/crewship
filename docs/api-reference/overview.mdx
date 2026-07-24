@@ -268,7 +268,7 @@ No authentication required. Returns `{"status": "ok"}` with HTTP 200.
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/v1/activity` | Cross-crew activity feed (assignments, peer conversations, escalations). Supports `crew_id` and `limit` query parameters. See also `crewship activity` CLI command. |
+| `GET /api/v1/journal?entry_type=peer.conversation,peer.escalation,assignment.created,assignment.running` | Cross-crew activity feed, sourced from the journal (the standalone `/api/v1/activity` aggregator was removed). Filter by `crew_id`/`agent_id`, bound with `since=`. See also the `crewship activity` CLI command. |
 
 ### Auth / Signup
 

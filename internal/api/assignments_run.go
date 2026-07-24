@@ -357,6 +357,17 @@ func (h *AssignmentHandler) runAssignment(
 		`UPDATE assignments SET status='RUNNING', started_at=? WHERE id=?`, now, assignmentID); err != nil {
 		h.logger.Error("update assignment to running", "error", err, "assignment_id", assignmentID)
 	}
+	// Resolve the assigner (assigned_by_id) so the RUNNING entry carries
+	// the same "from" the created entry does. Without this the emit left
+	// actor_id empty, and every activity-feed reader (CLI + dashboard)
+	// fell back to agent_id — the TARGET — rendering the row as the agent
+	// assigning work to itself. Best-effort: a missing assigner just
+	// leaves the from column blank, same as any unresolved actor.
+	var runAssignerID string
+	if err := h.db.QueryRowContext(ctx,
+		`SELECT COALESCE(assigned_by_id,'') FROM assignments WHERE id=?`, assignmentID).Scan(&runAssignerID); err != nil {
+		h.logger.Warn("resolve assigner for assignment.running emit", "error", err, "assignment_id", assignmentID)
+	}
 	// Mirror RUNNING to the journal so the Timeline records the
 	// kick-off. Without this the gap between "created" and the first
 	// exec.command can be seconds-to-minutes (image pull, container
@@ -366,15 +377,21 @@ func (h *AssignmentHandler) runAssignment(
 	// FK is not tripped). Note: this differs from assignment.created above,
 	// which keys off body.ChatID (a chat-session id with no guaranteed
 	// missions row) and so must omit MissionID. trace_id ties the entry
-	// back to the run; chat_id lives in payload + refs.
+	// back to the run; chat_id lives in payload + refs. CrewID mirrors the
+	// created entry so a crew-scoped feed query keeps the row.
 	if _, jerr := h.journal.Emit(ctx, journal.Entry{
 		WorkspaceID: body.WorkspaceID,
+		CrewID:      body.CrewID,
 		AgentID:     target.ID,
 		MissionID:   missionID,
 		Type:        journal.EntryAssignmentRun,
 		Severity:    journal.SeverityInfo,
-		ActorType:   journal.ActorOrchestrator,
-		Summary:     fmt.Sprintf("assignment %s running on %s", shortRunID(assignmentID), body.TargetSlug),
+		// The orchestrator performs the transition, but the assignment's
+		// "from" is the assigner — mirror the created entry so the feed's
+		// from→to reads assigner→target consistently across the lifecycle.
+		ActorType: journal.ActorOrchestrator,
+		ActorID:   runAssignerID,
+		Summary:   fmt.Sprintf("assignment %s running on %s", shortRunID(assignmentID), body.TargetSlug),
 		Payload: map[string]any{
 			"assignment_id": assignmentID,
 			"target_slug":   body.TargetSlug,
@@ -731,6 +748,63 @@ func (h *AssignmentHandler) finishAssignment(
 			TraceID:     runID,
 		}); err != nil {
 			h.logger.Error("emit terminal run entry for assignment", "error", err, "run_id", runID)
+		}
+	}
+
+	// Emit the terminal assignment.* lifecycle entry — the ONE terminal
+	// signal the cross-crew activity feed shows. The run.* entry above is
+	// keyed by trace_id for run-tracking consumers (metrics, trajectory)
+	// and, crucially, is NOT emitted when runID=="" (early dispatch
+	// failures, and the recovery sweeper which owns no run trace). Without
+	// this emit a completed/failed assignment vanishes from the feed
+	// entirely — the feed only ever saw created/running. Emitted
+	// unconditionally (independent of runID) so recovery-failed rows land
+	// here too; this is the single place assignment.completed /
+	// assignment.failed are written, so failInterruptedAssignment no
+	// longer emits its own.
+	{
+		termType := journal.EntryAssignmentDone
+		termSeverity := journal.SeverityInfo
+		if status == "FAILED" {
+			termType = journal.EntryAssignmentFail
+			termSeverity = journal.SeverityWarn
+		}
+		// Routing/attribution for the feed: crew_id scopes a crew-filtered
+		// feed query, agent_id is the target, actor_id is the assigner so
+		// the from→to column reads assigner→target like created/running.
+		// All best-effort — a lookup miss degrades a column, never blocks
+		// the terminal signal.
+		var crewID, assignedByID, assignedToID string
+		_ = h.db.QueryRowContext(ctx,
+			`SELECT COALESCE(a.crew_id,''), COALESCE(asn.assigned_by_id,''), COALESCE(asn.assigned_to_id,'')
+			   FROM assignments asn
+			   LEFT JOIN agents a ON a.id = asn.assigned_to_id
+			  WHERE asn.id = ?`, assignmentID).Scan(&crewID, &assignedByID, &assignedToID)
+
+		termPayload := map[string]any{"assignment_id": assignmentID}
+		if targetSlug != "" {
+			termPayload["target_slug"] = targetSlug
+		}
+		if errMsg != "" {
+			termPayload["error_message"] = errMsg
+		}
+		if status == "COMPLETED" {
+			termPayload["exit_code"] = 0
+		}
+		if _, err := h.journal.Emit(ctx, journal.Entry{
+			WorkspaceID: workspaceID,
+			CrewID:      crewID,
+			AgentID:     assignedToID,
+			Type:        termType,
+			Severity:    termSeverity,
+			ActorType:   journal.ActorOrchestrator,
+			ActorID:     assignedByID,
+			Summary:     fmt.Sprintf("assignment %s %s on %s", shortRunID(assignmentID), strings.ToLower(status), targetSlug),
+			Payload:     termPayload,
+			Refs:        map[string]any{"assignment_id": assignmentID, "chat_id": chatID},
+			TraceID:     runID,
+		}); err != nil {
+			h.logger.Error("emit terminal assignment entry", "error", err, "assignment_id", assignmentID)
 		}
 	}
 

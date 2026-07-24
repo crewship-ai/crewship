@@ -42,8 +42,6 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // defaultRunningSweepInterval is the gap between stuck-RUNNING sweeper
@@ -123,25 +121,13 @@ func (h *AssignmentHandler) failInterruptedAssignment(ctx context.Context, assig
 		return false, nil
 	}
 
-	// Audit trail: mirror the recovery into the journal. finishAssignment
-	// above only writes the terminal run.* entry when it has a runID —
-	// recovery passes none — so without this emit the timeline would
-	// show an assignment silently flipping FAILED.
-	if _, jerr := h.journal.Emit(ctx, journal.Entry{
-		WorkspaceID: workspaceID,
-		Type:        journal.EntryAssignmentFail,
-		Severity:    journal.SeverityWarn,
-		ActorType:   journal.ActorSystem,
-		ActorID:     "assignment_recovery",
-		Summary:     fmt.Sprintf("assignment %s failed by recovery: %s", shortRunID(assignmentID), reason),
-		Payload: map[string]any{
-			"assignment_id": assignmentID,
-			"reason":        reason,
-		},
-		Refs: map[string]any{"assignment_id": assignmentID, "chat_id": chatID},
-	}); jerr != nil {
-		h.logger.Warn("assignment recovery journal emit failed", "error", jerr, "assignment_id", assignmentID)
-	}
+	// The terminal assignment.failed journal entry is emitted inside
+	// finishAssignment (unconditionally, independent of runID), so the
+	// recovery path no longer writes its own — a second emit here would
+	// duplicate the row in the activity feed. finishAssignment's entry
+	// carries the same assignment_id/chat_id refs plus crew/agent routing;
+	// the recovery reason travels through the errMsg argument above and
+	// lands in that entry's error_message payload.
 	return true, nil
 }
 

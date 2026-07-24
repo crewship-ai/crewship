@@ -6,7 +6,9 @@ icon: "activity"
 
 # Activity
 
-`cmd/crewship/cmd_activity.go` wraps `GET /api/v1/activity`. The server merges three sources (assignments, peer conversations, escalations) into a single list, descending by `created_at`, narrowable by crew. Anything beyond that (free-text search, type filter, time window) is applied client-side after the page lands — the endpoint itself has no `type=` or `since=` parameter, and there is intentionally no SSE stream.
+`cmd/crewship/cmd_activity.go` is a journal-backed view: it queries `GET /api/v1/journal` filtered to the activity entry types (`peer.conversation`, `peer.escalation`, and the full assignment lifecycle `assignment.created` → `assignment.running` → `assignment.completed`/`assignment.failed`), descending by time, narrowable by crew. The journal is the canonical event stream, so this is an **event** feed (one row per event) — not the entity snapshot the retired `/api/v1/activity` aggregator returned. The terminal rows are included on purpose: without them the feed would never show an assignment finishing or failing. The parallel `run.completed`/`run.failed` entries (keyed by `trace_id`) are the finer per-run trace — use [`crewship journal`](/cli/journal) for those.
+
+`--since` is now a **server-side** filter (the journal honours `since=`); `--type` remains a client-side substring match on the entry type. A repeated peer conversation (its question + answer share one `thread_id`) is collapsed to a single row.
 
 For a live tail of granular events, use [`crewship journal --follow`](/cli/journal) or its shortcut [`crewship watch`](/cli/watch).
 
@@ -15,9 +17,9 @@ For a live tail of granular events, use [`crewship journal --follow`](/cli/journ
 | Flag | Type | Default | Effect |
 |---|---|---|---|
 | `--crew <slug-or-id>` | string | (unset) | Narrow to a single crew. Server-side filter via `crew_id`. |
-| `--lines <n>` | int | `50` | Page size. The server caps at 100. |
-| `--type <substring>` | string | (unset) | Client-side filter by activity type substring (case-insensitive). |
-| `--since <window>` | string | (unset) | Client-side filter — `1h`, `24h`, `7d`, or RFC3339 timestamp. |
+| `--lines <n>` | int | `50` | Page size, `1`–`500`. An out-of-range value is rejected (hard error), not silently clamped — the same `1..500` bound the journal endpoint enforces server-side. |
+| `--type <substring>` | string | (unset) | Client-side filter by entry type substring (e.g. `escalation`, `assignment`). |
+| `--since <window>` | string | (unset) | Server-side time filter — `1h`, `24h`, `7d`, or RFC3339 timestamp. |
 | `--export <fmt>` | string | (unset) | Dump the current page: `ndjson` or `csv`. Wins over `--format`. |
 | `--out <path>` | string | (unset) | Write `--export` output to file (default: stdout). |
 
@@ -36,11 +38,12 @@ crewship activity --export ndjson --out activity.ndjson
 crewship activity --export csv > activity.csv
 ```
 
-Default output is a coloured one-line-per-event table with timestamps, type tag (ASSIGNMENT, COMPLETED, ESCALATION, QUERY, RESPONSE), crew slug, and summary.
+Default output is a coloured one-line-per-event table with timestamps, the journal entry type (`assignment.created`, `peer.conversation`, `peer.escalation`, …), and the entry summary (which already names the participants, e.g. `api asked db: …`). `--export csv` columns are `ts,entry_type,from_slug,to_slug,summary`; the `from`/`to` slugs are resolved from the entry payload when present, otherwise from the workspace agent lookup (`GET /api/v1/journal/lookup`) keyed by `actor_id`/`target_id` — so an assignment row, which carries the assigner only as an id, still renders a real `from`. `--export ndjson` dumps each raw journal entry enriched with the resolved `from_slug`/`to_slug`.
 
 ### Common errors
 
 - **`bad --since: <reason>`** — value did not parse as `1h`/`24h`/`7d` or RFC3339.
+- **`--lines must be between 1 and 500 (got N)`** — out-of-range page size; pick a value in `1`–`500`.
 - **`--export must be ndjson or csv (got "xlsx")`** — only those two shapes are supported.
 - **`open --out: <fs error>`** — destination file path is unwritable.
 
