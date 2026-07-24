@@ -7,6 +7,7 @@ import type { Pipeline } from "@/hooks/use-pipelines"
 import { usePipelineRuns } from "@/hooks/use-pipeline-runs"
 import { aggregateRunCosts, formatUsd } from "@/lib/routines-insights"
 import { Card } from "./_shared"
+import { RoutineBudgetSummaryCard } from "./routine-budget-summary-card"
 
 // RoutinesInsightsView — quick-glance health snapshot for the routine
 // catalog. Surfaces four simple numbers (total runs, recent success
@@ -182,6 +183,9 @@ export function RoutinesInsightsView({
             )}
           </Card>
         </div>
+
+        {/* Budgets — spent-this-month-vs-cap roll-up (#1422 item 3). */}
+        <RoutineBudgetSummaryCard workspaceId={workspaceId} onSelect={onSelect} />
       </div>
     </div>
   )

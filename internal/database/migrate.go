@@ -1721,6 +1721,12 @@ END;
 	// inbox_items.kind to admit 'schedule_missed'. See
 	// migrate_consts_v155_schedule_catchup.go.
 	{version: 155, name: "schedule_catchup", sql: migrationScheduleCatchup},
+	// v156: opt-in monthly spend cap per routine (issue #1422 item 3),
+	// distinct from DSL.MaxCostUSD's per-run hard gate. 0 = no budget set.
+	// Powers the budget-vs-actual meter on the routine detail page + a
+	// workspace roll-up, aggregating over pipeline_runs.cost_usd. See
+	// migrate_consts_v156_routine_monthly_budget.go.
+	{version: 156, name: "routine_monthly_budget", sql: migrationRoutineMonthlyBudget},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

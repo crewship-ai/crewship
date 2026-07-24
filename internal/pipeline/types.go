@@ -726,6 +726,14 @@ type Pipeline struct {
 	//   disabled — admin airbag; run gate refuses, in-flight runs cancelled
 	Status string
 
+	// MonthlyBudgetUSD is an opt-in workspace-operator-set spend cap for
+	// this routine, aggregated across every run in the current calendar
+	// month (migration v156, #1422 item 3). 0 = no budget set. Distinct
+	// from DSL.MaxCostUSD, which is a per-run hard gate authored into the
+	// definition itself — this is an external monthly cap set out-of-band
+	// via UpdateBudget, never touched by Save.
+	MonthlyBudgetUSD float64
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DeletedAt *time.Time

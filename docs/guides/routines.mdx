@@ -1381,6 +1381,35 @@ Both the UI Runs sub-tab waterfall and `crewship routine logs <run_id> --slug X`
 
 Worker tier escalation is visible too — a failed validation gate that retries on a higher tier emits a second `step.started`+`step.completed` pair with its own cost on the retry, so the column-summed footer reflects the *full* spend (including retries), not just the first attempt.
 
+### Monthly budget meter
+
+Per-step cost is the trace-level view; **monthly budget** (#1422 item 3) is the operator-level one — a spend cap you set for a routine, compared against actual `pipeline_runs.cost_usd` for the current calendar month:
+
+```bash
+crewship routine budget set my-routine --amount 50    # cap at $50/month
+crewship routine budget get my-routine
+# my-routine (2026-07): [#####---------------]
+#   $12.50 of $50.00 (25%)
+crewship routine budget set my-routine --amount 0      # clear the cap
+crewship routine budget summary                        # workspace roll-up
+```
+
+This is **not** the same knob as DSL `max_cost_usd` (above) — that's a per-RUN hard gate authored into the definition and enforced mid-run by the executor (a run aborts if it would breach it). The monthly budget is external operator config, set out-of-band from the DSL (never touched by `routine save`, never bumps the version history), and is a **view + soft cap indicator**, not an enforcement gate — a routine over its monthly budget keeps running; nothing currently blocks the next invocation. A routine can have neither, either, or both knobs.
+
+`routine budget summary` rolls up every routine that has a budget set OR spend this month (a routine with neither is excluded — noise reduction for workspaces with dozens of zero-cost deterministic routines):
+
+```bash
+$ crewship routine budget summary
+ROUTINE          BUDGET   SPENT   PCT   STATUS
+my-routine       $50.00   $12.50  25%
+cost-report      $20.00   $22.10  111%  OVER
+summarize-text   —        $3.40   —
+
+2026-07 total: $37.99 spent of $70.00 budgeted
+```
+
+The routine detail page shows the same meter (spent-vs-cap bar) when a budget is set, and the workspace roll-up appears on the routines list page. API: `GET/PATCH /pipelines/{slug}/budget`, `GET /pipelines/budget-summary` — see the [CLI reference](/cli/routine#crewship-routine-budget) for the full flag/response shape.
+
 ### Run tags & metadata
 
 Tag and annotate a run at invoke time to make it filterable later:
@@ -1569,6 +1598,7 @@ Fixes, in order of preference:
 | `routine delete <slug>` | Soft-delete |
 | `routine doctor <slug>` | Preflight checklist (✓/⚠/✗) — catches blind alleys before run |
 | `routine bench <slug>` | N-runs variance characterisation — pass-rate + cost/latency stats |
+| `routine budget get/set/summary` | Monthly spend cap vs actual (budget-vs-actual view, not an enforcement gate) |
 | `routine runs <slug>` | Run history from journal |
 | `routine records <slug>` | Run history from `pipeline_runs` projection (filterable by status) |
 | `routine logs <run_id>` | Full journal trace for one run (post-mortem) |

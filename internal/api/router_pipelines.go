@@ -96,6 +96,17 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// other half of concurrency control: a stuck run holds a slot
 	// until either it finishes or the operator pre-empts it.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/runs/active", authed(wsCtx(http.HandlerFunc(pipes.ListActiveRuns))))
+	// Per-routine monthly budget meter (#1422 item 3): GET reads
+	// budget-vs-actual for one routine, PATCH sets/clears the cap
+	// (manage-tier — same as pausing/disabling a routine), and the
+	// workspace roll-up lists every routine with a budget set or spend
+	// this month. budget-summary is a single literal segment after
+	// /pipelines/ (depth 1) vs {slug}/budget's depth 2, so it can't
+	// collide with the per-slug route the way /pipelines/runs/... would
+	// (see the comment below on /pipeline-runs/).
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/budget-summary", authed(wsCtx(http.HandlerFunc(pipes.GetBudgetSummary))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget", authed(wsCtx(http.HandlerFunc(pipes.GetBudget))))
+	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget", roleManage, pipes.SetBudget)
 	// Single-run + workspace-list lookups under /pipeline-runs/ (top-
 	// level resource) instead of /pipelines/runs/ because the latter
 	// collides with /pipelines/{slug}/runs in net/http's pattern-

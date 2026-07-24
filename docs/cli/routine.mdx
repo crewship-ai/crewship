@@ -33,6 +33,7 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Diagnostics | `doctor <slug>` | Preflight checklist — catches blind alleys before `run` |
 | Diagnostics | `bench <slug>` | Variance characterisation — N runs, pass-rate + cost/latency stats |
 | Diagnostics | `backtest <slug> --against <version>` | Replay recent successful runs against a candidate version and diff outputs (read-only) |
+| Diagnostics | `budget get/set/summary` | Monthly spend cap vs actual — budget-vs-actual view, not an enforcement gate |
 | Runs | `runs <slug>` | List recent runs from journal |
 | Runs | `records <slug>` | List runs from `pipeline_runs` projection (v83) |
 | Runs | `active` | List in-flight runs across the workspace |
@@ -362,6 +363,41 @@ Aggregate verdict (also the process exit code — `REGRESSION_DETECTED` exits no
 | `REGRESSION_DETECTED` | At least one run regressed or errored |
 
 For a matrix sweep across many routines/tiers or a saved regression baseline, see [`eval scenarios`](/cli/eval#crewship-eval-scenarios) and [`eval baseline`](/cli/eval#crewship-eval-baseline) — `backtest` answers a narrower question ("is *this* candidate version safe to promote?") using the workspace's own recent traffic as the corpus instead of an authored eval suite.
+
+---
+
+## `crewship routine budget`
+
+Per-routine monthly spend budget (#1422 item 3) — a cap you set out-of-band from the DSL, compared against actual `pipeline_runs.cost_usd` for the current calendar month. Distinct from DSL `max_cost_usd` (a per-RUN hard gate the executor enforces mid-run); this is a budget-**vs-actual view**, not an enforcement gate — going over doesn't block the next run.
+
+### `routine budget get <slug>`
+
+```bash
+crewship routine budget get my-routine
+```
+
+Prints an ASCII meter + `$spent of $cap (pct%)`, or a "no budget set" hint with the current spend if none is configured. `--format json` returns `{slug, has_budget, monthly_budget_usd, month, spent_usd, pct_used, over_budget}` (`pct_used`/`over_budget` are omitted when `has_budget` is false).
+
+### `routine budget set <slug> --amount <N>`
+
+```bash
+crewship routine budget set my-routine --amount 50
+crewship routine budget set my-routine --amount 0    # clears the budget
+```
+
+| Flag | Required | Description |
+|------|:---:|-------------|
+| `--amount` | ✓ | Monthly cap in USD. `0` clears an existing budget. Negative values are rejected. |
+
+Setting a budget never touches the DSL and never bumps the routine's version history — it's independent of `routine save`/`rollback`.
+
+### `routine budget summary`
+
+```bash
+crewship routine budget summary
+```
+
+Workspace-wide roll-up: every routine with a budget set **or** spend this month (a routine with neither is excluded — a fresh workspace can have dozens of zero-cost deterministic routines, and listing all of them would be noise). Table columns: `ROUTINE BUDGET SPENT PCT STATUS` (`STATUS` shows `OVER` when spend exceeds the cap), plus a workspace total line. `--format json` returns `{month, routines: [...], total_budget_usd, total_spent_usd}`.
 
 ---
 

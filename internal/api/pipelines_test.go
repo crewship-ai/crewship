@@ -61,6 +61,7 @@ CREATE TABLE pipelines (
     execution_tier_json      TEXT,
     status                   TEXT NOT NULL DEFAULT 'active'
                                CHECK (status IN ('active','proposed','disabled')),
+    monthly_budget_usd       REAL NOT NULL DEFAULT 0,
     created_at               TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at               TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     deleted_at               TEXT,
