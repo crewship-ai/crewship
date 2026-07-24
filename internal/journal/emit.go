@@ -69,6 +69,50 @@ type Writer struct {
 	// below). Separate from writeMu: readers must never block on a DB write.
 	notifyMu sync.Mutex
 	notifyCh chan struct{}
+
+	// commitMu guards commitObs, an optional observer invoked with the
+	// entries that just durably committed. The journal→WebSocket bridge
+	// (internal/server) registers one to forward feed-relevant entries onto
+	// the opt-in journal WS channel. The observer MUST be cheap and
+	// non-blocking (it runs on the write path) and MUST consume its slice
+	// synchronously — the backing array is reused after it returns.
+	commitMu  sync.RWMutex
+	commitObs func([]Entry)
+}
+
+// SetCommitObserver registers fn to be called after each durable commit
+// with the entries that landed. Pass nil to clear. Safe to call at any
+// time. The observer runs inline on the persist path, so it must not block
+// or retain the slice past the call.
+func (w *Writer) SetCommitObserver(fn func([]Entry)) {
+	w.commitMu.Lock()
+	w.commitObs = fn
+	w.commitMu.Unlock()
+}
+
+// notifyObserver hands the just-committed entries to the registered
+// observer, if any. A panic in a third-party observer must never corrupt
+// the journal write path, so it is contained here.
+func (w *Writer) notifyObserver(committed []Entry) {
+	if len(committed) == 0 {
+		return
+	}
+	w.commitMu.RLock()
+	fn := w.commitObs
+	w.commitMu.RUnlock()
+	if fn == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	fn(committed)
+}
+
+// afterCommit is the single post-commit fan-out: wake the SSE Notify
+// listeners AND push the committed entries to the observer. Call it at each
+// site that fully commits a set of entries.
+func (w *Writer) afterCommit(committed []Entry) {
+	w.wakeNotify()
+	w.notifyObserver(committed)
 }
 
 // Notify returns a channel that closes the next time one or more entries
@@ -223,7 +267,7 @@ func (w *Writer) Emit(ctx context.Context, e Entry) (string, error) {
 		// Writer is shutting down; persist inline so we don't drop the entry.
 		perr := w.persistOne(ctx, e)
 		if perr == nil {
-			w.wakeNotify()
+			w.afterCommit([]Entry{e})
 		}
 		return e.ID, perr
 	default:
@@ -240,7 +284,7 @@ func (w *Writer) Emit(ctx context.Context, e Entry) (string, error) {
 			"entry_type", e.Type, "workspace_id", e.WorkspaceID)
 		perr := w.persistOne(ctx, e)
 		if perr == nil {
-			w.wakeNotify()
+			w.afterCommit([]Entry{e})
 		}
 		return e.ID, perr
 	}
@@ -327,8 +371,11 @@ func (w *Writer) run() {
 		err := w.persistBatch(context.Background(), batch)
 		if err == nil {
 			persistFailures = 0
+			// Capture before the reslice reuses the backing array — afterCommit
+			// consumes the slice synchronously, so no copy is needed.
+			committed := batch
 			batch = batch[:0]
-			w.wakeNotify()
+			w.afterCommit(committed)
 			return
 		}
 		// A permanent error (constraint violation, un-marshalable payload)
@@ -345,11 +392,15 @@ func (w *Writer) run() {
 		if isPermanentDBError(err) {
 			kept := batch[:0]
 			dropped := 0
+			// committed is a SEPARATE slice (its own backing array) — kept
+			// reuses batch's array, so appending committed rows there would be
+			// clobbered by the in-place filter.
+			var committed []Entry
 			for _, e := range batch {
 				perr := w.persistOne(context.Background(), e)
 				switch {
 				case perr == nil:
-					// committed
+					committed = append(committed, e)
 				case isPermanentDBError(perr):
 					w.logger.Error("journal entry permanently rejected — dropping to unblock the stream",
 						"err", perr, "entry_id", e.ID, "entry_type", e.Type,
@@ -362,10 +413,12 @@ func (w *Writer) run() {
 			}
 			// Any row that isn't in kept either committed or was dropped as
 			// poison — either way, forward progress happened and durable
-			// state changed, so waiting SSE listeners should re-poll.
+			// state changed, so waiting SSE listeners should re-poll. Only the
+			// rows that actually committed are pushed to the observer.
 			if len(kept) != len(batch) {
 				w.wakeNotify()
 			}
+			w.notifyObserver(committed)
 			batch = kept
 			// Dropping the poison is forward progress: reset the failure
 			// counter so a later transient blip starts its own backoff.

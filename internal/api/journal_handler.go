@@ -633,42 +633,11 @@ func (h *JournalHandler) SetPriority(w http.ResponseWriter, r *http.Request) {
 // shape. The TS field becomes an RFC3339Nano string so the UI can
 // parse with the built-in Date constructor.
 func serializeEntries(entries []journal.Entry) []map[string]any {
-	out := make([]map[string]any, 0, len(entries))
-	for _, e := range entries {
-		row := map[string]any{
-			"id":           e.ID,
-			"workspace_id": e.WorkspaceID,
-			"ts":           e.TS.UTC().Format(time.RFC3339Nano),
-			"entry_type":   string(e.Type),
-			"severity":     string(e.Severity),
-			"priority":     string(e.Priority),
-			"actor_type":   string(e.ActorType),
-			"summary":      e.Summary,
-		}
-		if e.CrewID != "" {
-			row["crew_id"] = e.CrewID
-		}
-		if e.AgentID != "" {
-			row["agent_id"] = e.AgentID
-		}
-		if e.MissionID != "" {
-			row["mission_id"] = e.MissionID
-		}
-		if e.ActorID != "" {
-			row["actor_id"] = e.ActorID
-		}
-		if e.TraceID != "" {
-			row["trace_id"] = e.TraceID
-		}
-		if len(e.Payload) > 0 {
-			row["payload"] = e.Payload
-		}
-		if len(e.Refs) > 0 {
-			row["refs"] = e.Refs
-		}
-		out = append(out, row)
-	}
-	return out
+	// Single source of truth: journal.SerializeEntries produces the exact
+	// wire shape the WS journal bridge also emits, so an SSE `entry` frame
+	// and a WS `journal.entry` frame are identical (both parse against the
+	// one frontend journalEntrySchema). See internal/journal/serialize.go.
+	return journal.SerializeEntries(entries)
 }
 
 // writeSSEEvent frames one journal entry as an SSE message. Uses the
