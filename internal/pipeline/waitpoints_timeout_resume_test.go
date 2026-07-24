@@ -44,7 +44,7 @@ func TestSweepOnce_NoResumeForAlreadyTerminal(t *testing.T) {
 INSERT INTO pipeline_waitpoints
 (token, workspace_id, pipeline_run_id, step_id, kind, status, timeout_at)
 VALUES ('tok-done', 'ws_test', 'run_done', 'gate', 'approval', 'approved', ?)`,
-		time.Now().Add(-1*time.Hour).UTC().Format(time.RFC3339Nano)); err != nil {
+		time.Now().Add(-1*time.Hour).UTC().Format(time.RFC3339Nano)); err != nil { // tsformat:allow: seeds timeout_at in this store's RFC3339Nano format for parity with production writes
 		t.Fatalf("seed: %v", err)
 	}
 	store.sweepOnce()
@@ -95,7 +95,7 @@ func TestWaitpointTimeout_ResumesParkedRun_NoRestart(t *testing.T) {
 	// Elapse the waitpoint's timeout, then fire the live sweep (no restart).
 	if _, err := db.ExecContext(ctx,
 		`UPDATE pipeline_waitpoints SET timeout_at = ? WHERE token = ?`,
-		time.Now().Add(-1*time.Hour).UTC().Format(time.RFC3339Nano), res.WaitpointToken); err != nil {
+		time.Now().Add(-1*time.Hour).UTC().Format(time.RFC3339Nano), res.WaitpointToken); err != nil { // tsformat:allow: elapses timeout_at in this store's RFC3339Nano format for parity with production writes
 		t.Fatalf("elapse timeout: %v", err)
 	}
 	wpStore.sweepOnce()

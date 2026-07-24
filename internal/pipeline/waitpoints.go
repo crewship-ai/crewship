@@ -430,7 +430,7 @@ WHERE token = ? AND status = 'pending'`,
 // blocking run unblocks immediately. Returns the number of waitpoints
 // cancelled. Best-effort inbox/listener cascade mirrors CompleteApproval.
 func (s *SQLWaitpointStore) CancelWaitpointsForRun(ctx context.Context, pipelineRunID string) (int, error) {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: decided_at is stored/compared as RFC3339Nano throughout this store (see the timeout sweep match) — format parity is required, tsformat would mismatch
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT token FROM pipeline_waitpoints WHERE pipeline_run_id = ? AND status = 'pending'`,
 		pipelineRunID)
