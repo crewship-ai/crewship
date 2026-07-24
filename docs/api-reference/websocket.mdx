@@ -292,6 +292,36 @@ and `run_id`.
 | `recurring_issue.updated` | Recurring issue updated | `{ id }` |
 | `recurring_issue.deleted` | Recurring issue deleted | `{ id }` |
 
+#### Journal Channel (`journal:{id}`)
+
+The journal→WS bridge forwards durably-committed journal entries onto a
+**dedicated, opt-in** channel — `journal:{workspaceId}` — **not** the workspace
+channel. A client only receives these frames if it explicitly subscribes to
+`journal:{workspaceId}` (authorized against the same workspace membership as the
+other tenant channels). Tabs that don't subscribe pay nothing, so this is never
+an unconditional firehose.
+
+| Event Type | Description | Payload |
+|---|---|---|
+| `journal.entry` | One journal entry that just durably committed, forwarded by the journal→WS bridge. Payload is the full serialized entry — the **same shape** the SSE stream (`GET /api/v1/journal/stream`) serves, so a client parses both identically. | `{ id, workspace_id, ts, entry_type, severity, priority, actor_type, summary, crew_id?, agent_id?, mission_id?, actor_id?, trace_id?, payload?, refs? }` |
+
+**Status: realtime plumbing, no dashboard consumer yet.** The authoritative
+journal feed is still the SSE stream, which keeps a gap-free `Last-Event-ID`
+replay and server-side filtering. This channel is the foundation for later
+retiring SSE, but it does **not** yet replace it.
+
+Caveats to know before consuming it:
+
+- **Best-effort delivery.** Under sustained backpressure the bridge drops live
+  frames rather than stalling the journal write path. A consumer that needs a
+  gap-free view must reconcile via the SSE stream's `Last-Event-ID` replay or a
+  `GET /api/v1/journal?since=` refetch on (re)connect.
+- **Coarse server-side filtering only.** High-frequency telemetry (streamed exec
+  output, per-sample container metrics, tracing spans, sweep bookkeeping) is
+  dropped at the bridge and never broadcast. Beyond that the channel is
+  workspace-wide: fine-grained filtering (`crew_id`, `entry_type`, `severity`, …)
+  is server-side on the SSE/REST paths but must be applied **client-side** here.
+
 ### Crew Channel (`crew:{id}`)
 
 | Event Type | Description | Payload |

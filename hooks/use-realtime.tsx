@@ -75,6 +75,17 @@ export type RealtimeEventType =
   | "pipeline.step.validation_failed"
   | "pipeline.waitpoint.created"
   | "inbox.updated"
+  // Feed-relevant journal rows forwarded by the journal→WS bridge
+  // (internal/server/journal_ws_bridge.go), carrying the same serialized shape
+  // the SSE stream serves (lib/types/journal.ts). NOTE: this is opt-in
+  // plumbing with NO consumer yet — the bridge broadcasts on the dedicated
+  // `journal:{workspaceId}` channel, which nothing here subscribes to, so the
+  // event does not currently arrive. The journal feed is still served by the
+  // SSE stream (hooks/use-journal-stream.ts), which keeps the gap-free
+  // Last-Event-ID replay this best-effort channel does not. The type + set
+  // entry below are scaffolding so a future consumer can dispatch it without a
+  // wire-contract change; until then it is deliberately inert.
+  | "journal.entry"
   // Synthetic client-side event — NEVER sent by the server (and deliberately
   // absent from VALID_REALTIME_TYPES so a wire message can't spoof it).
   // Dispatched by the provider after the socket RE-connects, so pure-WS
@@ -122,6 +133,11 @@ const VALID_REALTIME_TYPES: Set<string> = new Set([
   // "the badge count looks stuck."
   "pipeline.waitpoint.created",
   "inbox.updated",
+  // Journal entries forwarded by the journal→WS bridge on the opt-in
+  // `journal:{workspaceId}` channel. Allowlisted so a future consumer's
+  // subscription dispatches them; nothing subscribes to that channel yet, so
+  // today no such frame is delivered. See the type union above.
+  "journal.entry",
 ])
 
 const RealtimeContext = createContext<RealtimeContextValue | null>(null)
