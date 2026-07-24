@@ -1,11 +1,16 @@
 package main
 
 // Routine step-run subcommand. The "unit test for one step": execute a
-// single agent_run step against a supplied input fixture — no DAG, no
-// upstream steps, no persisted run record — and print its output +
-// validation verdict + cost. Closes the recurring-cost half of the debug
-// loop that dry-run (no execution) and a full run (~8 min, real tokens)
-// leave open. See POST /pipelines/{slug}/step_run.
+// single step — agent_run, http, script, or transform (#1423 item 3
+// widened this beyond agent_run only) — against a supplied input fixture:
+// no DAG, no upstream steps, no persisted run record — and print its
+// output + validation verdict (+ cost, for agent_run). Closes the
+// recurring-cost half of the debug loop that dry-run (no execution) and a
+// full run (~8 min, real tokens) leave open — and for http/script/
+// transform, which never had a "run just this step" option at all before
+// item 3, since they're deterministic and token-zero, the cheapest steps
+// to unit-test are the ones this used to skip. See POST
+// /pipelines/{slug}/step_run.
 
 import (
 	"encoding/json"
@@ -24,19 +29,24 @@ var (
 
 var routineStepRunCmd = &cobra.Command{
 	Use:   "step-run <slug> <step>",
-	Short: "Execute one agent_run step against a fixture, without the full pipeline",
-	Long: `Run a SINGLE agent_run step of a routine against a given input fixture, in
-isolation — no upstream steps, no DAG, no persisted run record — and print
-its output, validation verdict, and cost.
+	Short: "Execute one step against a fixture, without the full pipeline",
+	Long: `Run a SINGLE step of a routine against a given input fixture, in isolation —
+no upstream steps, no DAG, no persisted run record — and print its output +
+validation verdict (+ cost, for agent_run).
 
-The "unit test for a step": iterate on one parse/extract prompt in seconds
-instead of running the whole pipeline (dry-run doesn't execute; a full run is
-too slow and costs real tokens).
+Supports agent_run, http, script, and transform steps (#1423 item 3 — the
+"unit test for a step" used to cover only agent_run, leaving the cheapest,
+most deterministic step types impossible to debug without running the
+whole pipeline). wait, notify, call_pipeline, and code aren't supported —
+they either have side effects step-run's isolation can't make sense of, or
+(code) need container wiring this doesn't have yet.
 
   crewship routine step-run parse-invoice extract --input @sample.json
   crewship routine step-run reconcile-invoices reconcile \
     --input @sample.json --outputs @upstream.json
   crewship routine step-run parse-invoice extract --input '{"name":"a.pdf"}' --tier-override fast
+  crewship routine step-run fetch-and-transform normalize --input @raw.json   # transform step
+  crewship routine step-run notify-webhook post-it --input @payload.json     # http step
 
 --input is a JSON object (the step's inputs fixture), inline or @file.json.
 --outputs seeds upstream {{ steps.X.output }} refs — a JSON object mapping
@@ -45,7 +55,13 @@ stringified). Most non-first steps consume an upstream output, so without it
 the ref renders empty and the command warns that you're debugging against
 different input than a real run.
 --tier-override swaps the step's tier (trivial|fast|moderate|smart) for cheap
-structural iteration; a step-level model_override still wins.`,
+structural iteration on an agent_run step; a step-level model_override still
+wins. Ignored for http/script/transform (no tier to override).
+
+An http step-run still goes through the real egress/SSRF guard — it's not a
+lighter-weight check, and a script step-run still executes for real, in the
+crew's container (real side effects; only the "this belongs to a run"
+bookkeeping is skipped).`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		slug, stepID := args[0], args[1]
@@ -86,9 +102,18 @@ structural iteration; a step-level model_override still wins.`,
 		if !res.Valid {
 			verdict = "FAIL"
 		}
-		fmt.Printf("Step %s (%s) → %s  [%s %s]\n", res.StepID, res.StepType, verdict, res.Adapter, res.Model)
-		fmt.Printf("  cost $%.4f · %d→%d tok · %dms · simulated (no run record)\n",
-			res.CostUSD, res.TokensIn, res.TokensOut, res.DurationMs)
+		// Adapter/Model/token counts are agent_run-only — the server leaves
+		// them zero-valued for http/script/transform (#1423 item 3), so the
+		// human view drops that clause entirely instead of printing a
+		// misleading "[ ]" / "0→0 tok".
+		if res.Adapter != "" || res.Model != "" {
+			fmt.Printf("Step %s (%s) → %s  [%s %s]\n", res.StepID, res.StepType, verdict, res.Adapter, res.Model)
+			fmt.Printf("  cost $%.4f · %d→%d tok · %dms · simulated (no run record)\n",
+				res.CostUSD, res.TokensIn, res.TokensOut, res.DurationMs)
+		} else {
+			fmt.Printf("Step %s (%s) → %s\n", res.StepID, res.StepType, verdict)
+			fmt.Printf("  %dms · simulated (no run record)\n", res.DurationMs)
+		}
 		if !res.Valid && res.ValidationReason != "" {
 			fmt.Printf("  validation: %s\n", res.ValidationReason)
 		}

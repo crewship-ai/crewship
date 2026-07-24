@@ -18,15 +18,21 @@ import (
 )
 
 var routineValidateCmd = &cobra.Command{
-	Use:   "validate [file.json]",
+	Use:   "validate [file.json|file.yaml]",
 	Short: "Validate a routine DSL file offline (no server call)",
-	Long: `Parses + validates a routine DSL JSON file locally. Reports the same
-errors the server would on save, except cross-routine cycle detection
-(which needs the workspace's full call graph). Exit code 0 = valid,
-1 = invalid.
+	Long: `Parses + validates a routine DSL file locally — JSON or YAML, sniffed from
+the content, not the extension. Reports the same errors the server would on
+save, except cross-routine cycle detection (which needs the workspace's
+full call graph). Exit code 0 = valid, 1 = invalid.
+
+YAML input gets comments and real multiline strings instead of JSON's
+"\n"-escaped ones — useful for a long agent_run prompt. It's converted to
+canonical JSON before validation; the JSON-pointer paths in error messages
+and the definition saved to the server are unaffected either way.
 
 Reads from the given file argument, or from stdin if no argument:
   crewship routine validate routine.json
+  crewship routine validate routine.yaml
   cat routine.json | crewship routine validate
 
 Use in CI:
@@ -73,6 +79,16 @@ Server-side checks not run locally:
 			}
 			raw = b
 			src = "<stdin>"
+		}
+
+		// #1423 item 2: accept YAML as well as JSON — comments and real
+		// multiline block-scalar strings (`prompt: |`) instead of
+		// JSON-escaped "\n". Pass-through for JSON input; converted to
+		// canonical JSON here so everything downstream (Parse, Validate,
+		// the JSON-pointer paths in validation errors) is unaffected.
+		raw, err := pipeline.ToCanonicalJSON(raw)
+		if err != nil {
+			return printValidationError(src, "parse", err)
 		}
 
 		// Resolve the agent-slug set the validator checks agent_slug

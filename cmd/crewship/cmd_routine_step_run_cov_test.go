@@ -177,6 +177,37 @@ func TestRoutineStepRunRunE_FormatJSON(t *testing.T) {
 	}
 }
 
+// TestRoutineStepRunRunE_DeterministicStepOmitsAdapterLine pins #1423 item
+// 3's human-view rendering: a transform/http/script step_run response has
+// no Adapter/Model/tokens (agent_run-only), so the CLI must not print a
+// misleading "[ ]" bracket or "0→0 tok" line for it.
+func TestRoutineStepRunRunE_DeterministicStepOmitsAdapterLine(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnPost(covStepRunPath, clitest.JSONResponse(200, cli.StepRunResult{
+		StepID: "normalize", StepType: "transform", Output: `{"a":1}`, Valid: true,
+		DurationMs: 3, Simulated: true,
+	}))
+	covSetupCli10(t, s.URL())
+	defer func() { stepRunInput = ""; stepRunTierOverride = "" }()
+
+	out, err := captureStdoutCovCli10(t, func() error {
+		return routineStepRunCmd.RunE(routineStepRunCmd, []string{"parse-invoice", "normalize"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if strings.Contains(out, "[ ]") || strings.Contains(out, "0→0 tok") {
+		t.Errorf("should not print an empty adapter bracket or token line for a deterministic step:\n%s", out)
+	}
+	if !strings.Contains(out, "PASS") || !strings.Contains(out, "transform") {
+		t.Errorf("verdict/step_type missing:\n%s", out)
+	}
+	if !strings.Contains(out, "simulated (no run record)") {
+		t.Errorf("simulation marker missing:\n%s", out)
+	}
+}
+
 func TestRoutineStepRunRunE_ServerError(t *testing.T) {
 	s := clitest.NewStubServer()
 	defer s.Close()
