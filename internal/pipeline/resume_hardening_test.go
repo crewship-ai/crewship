@@ -246,8 +246,12 @@ func TestResume_ConcurrencyLimit_RetriedNotInterrupted(t *testing.T) {
 	releaseBlocker()
 	releasedBlocker = true
 	final := waitForRunStatus(t, runStore, "run_resume_cc", RunStatusCompleted, 5*time.Second)
-	if !strings.Contains(final.StepOutputsJSON, "out-b") {
-		t.Errorf("resumed run did not execute step b: %s", final.StepOutputsJSON)
+	finalOutputs, err := runStore.GetStepOutputs(ctx, final.ID)
+	if err != nil {
+		t.Fatalf("get step outputs: %v", err)
+	}
+	if finalOutputs["b"] != "out-b" {
+		t.Errorf("resumed run did not execute step b: %#v", finalOutputs)
 	}
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
@@ -571,8 +575,12 @@ func TestResume_MatchingHashAfterSlotWait_StillResumes(t *testing.T) {
 	releasedBlocker = true
 
 	final := waitForRunStatus(t, runStore, "run_toctou_ok", RunStatusCompleted, 5*time.Second)
-	if !strings.Contains(final.StepOutputsJSON, "out-b") {
-		t.Errorf("resumed run did not execute step b: %s", final.StepOutputsJSON)
+	finalOutputs, err := runStore.GetStepOutputs(ctx, final.ID)
+	if err != nil {
+		t.Fatalf("get step outputs: %v", err)
+	}
+	if finalOutputs["b"] != "out-b" {
+		t.Errorf("resumed run did not execute step b: %#v", finalOutputs)
 	}
 	runner.mu.Lock()
 	defer runner.mu.Unlock()

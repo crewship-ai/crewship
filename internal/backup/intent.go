@@ -152,7 +152,12 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// schedule) (v155); dropping it on restore makes routines reprocess from
 	// scratch or lose their "since last run" cursor.
 	"pipeline_routine_state": IntentInclude,
-	"pipeline_schedules":     IntentInclude,
+	// pipeline_run_step_outputs (v159) is the normalized per-step
+	// projection that replaced pipeline_runs.step_outputs_json on the hot
+	// write path — same durability class as pipeline_runs itself (it's
+	// the run-detail waterfall's data), and cascade-deletes with its run.
+	"pipeline_run_step_outputs": IntentInclude,
+	"pipeline_schedules":        IntentInclude,
 	// pipeline_tags = routine-DEFINITION discovery tags (v125).
 	"pipeline_tags":     IntentInclude,
 	"pipeline_versions": IntentInclude,

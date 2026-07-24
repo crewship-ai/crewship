@@ -1297,7 +1297,7 @@ func (e *Executor) runLinearStep(
 		if !evalStepCondition(step.If, ctxRender) {
 			emit.emitStepSkipped(ctx, step, step.If)
 			result.StepOutputs[step.ID] = "<skipped>"
-			e.persistStepOutputs(ctx, in, depth, runID, result.StepOutputs, result.CostUSD, startedAt)
+			e.persistStepOutput(ctx, in, depth, runID, step.ID, result.StepOutputs[step.ID], result.CostUSD, startedAt)
 			return nil
 		}
 	}
@@ -1397,9 +1397,9 @@ func (e *Executor) runLinearStep(
 		result.StepOutputs[step.ID] = output
 		result.CostUSD += stepCost
 		emit.emitStepCompleted(ctx, step, output, stepDur, stepCost)
-		// Flush the outputs map at the step boundary so a kill
+		// Flush this step's output at the step boundary so a kill
 		// between steps loses at most the in-flight step.
-		e.persistStepOutputs(ctx, in, depth, runID, result.StepOutputs, result.CostUSD, startedAt)
+		e.persistStepOutput(ctx, in, depth, runID, step.ID, output, result.CostUSD, startedAt)
 		// Persist this step's state_write bindings for the NEXT run (#1420).
 		// ctxRender.StepOutputs is result.StepOutputs (already carrying this
 		// step's output), so a value template can reference the step itself.
@@ -1974,21 +1974,36 @@ func (e *Executor) persistStepEntry(ctx context.Context, in RunInput, depth int,
 	}
 }
 
-// persistStepOutputs flushes the step-outputs map + running cost at a
-// step boundary so boot-time resume can restore every completed step.
-// Duration is wall time since this lifetime's start — on a resumed
-// run it intentionally restarts from the resume point rather than
-// pretending continuity across the gap the process was down.
+// persistStepOutput flushes ONE step's output + running cost at a step
+// boundary so boot-time resume can restore every completed step. Duration
+// is wall time since this lifetime's start — on a resumed run it
+// intentionally restarts from the resume point rather than pretending
+// continuity across the gap the process was down.
 //
-// Takes the outputs map + cost explicitly (not *RunResult) so the DAG
-// scheduler can pass a mutex-guarded snapshot without holding the
-// lock across a DB write.
-func (e *Executor) persistStepOutputs(ctx context.Context, in RunInput, depth int, runID string, stepOutputs map[string]string, costUSD float64, startedAt time.Time) {
+// Takes the single (stepID, output) pair explicitly (not *RunResult) so
+// the DAG scheduler can pass a mutex-guarded snapshot value without
+// holding the lock across a DB write. A single-row upsert (#1411 item 4)
+// replaced the old whole-map rewrite here.
+func (e *Executor) persistStepOutput(ctx context.Context, in RunInput, depth int, runID, stepID, output string, costUSD float64, startedAt time.Time) {
 	if !e.stepPersistEnabled(in, depth) {
 		return
 	}
-	if err := e.runStore.AppendStepOutput(ctx, runID, stepOutputs, costUSD, time.Since(startedAt).Milliseconds()); err != nil {
-		e.persistWarn("step outputs", runID, err)
+	if err := e.runStore.UpsertStepOutput(ctx, runID, stepID, output, costUSD, time.Since(startedAt).Milliseconds()); err != nil {
+		e.persistWarn("step output", runID, err)
+	}
+}
+
+// persistWaveOutputs flushes every step that finished in one DAG wave.
+// The parallel scheduler has no single current_step_id to stamp (see
+// dag.go), so its resume granularity is per-wave: this upserts every
+// entry in the wave's outputs snapshot in one transaction instead of
+// rewriting the whole step_outputs_json blob (#1411 item 4).
+func (e *Executor) persistWaveOutputs(ctx context.Context, in RunInput, depth int, runID string, stepOutputs map[string]string, costUSD float64, startedAt time.Time) {
+	if !e.stepPersistEnabled(in, depth) {
+		return
+	}
+	if err := e.runStore.FlushStepOutputs(ctx, runID, stepOutputs, costUSD, time.Since(startedAt).Milliseconds()); err != nil {
+		e.persistWarn("wave outputs", runID, err)
 	}
 }
 
@@ -2142,7 +2157,7 @@ func (e *Executor) persistRunTerminal(runCtx context.Context, runID string, in R
 		// Persist step outputs map so the run-detail UI can render
 		// per-step content even after the goroutine terminates.
 		if len(result.StepOutputs) > 0 {
-			if err := e.runStore.AppendStepOutput(ctx, runID, result.StepOutputs, result.CostUSD, dur); err != nil {
+			if err := e.runStore.FlushStepOutputs(ctx, runID, result.StepOutputs, result.CostUSD, dur); err != nil {
 				e.persistWarn("step outputs flush", runID, err)
 			}
 		}

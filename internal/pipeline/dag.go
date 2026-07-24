@@ -367,7 +367,7 @@ func (e *Executor) runDAG(
 		// kill mid-DAG loses at most the in-flight wave. DAG resume
 		// granularity is therefore per-wave, not per-step — the
 		// parallel scheduler has no single current_step_id to stamp.
-		e.persistStepOutputs(ctx, in, depth, runID, outputsSnap, costSnap, startedAt)
+		e.persistWaveOutputs(ctx, in, depth, runID, outputsSnap, costSnap, startedAt)
 
 		// Suspend takes precedence over a failure: a wait step parked on an
 		// approval (MarkWaiting already stamped status=waiting + current_step
@@ -537,23 +537,18 @@ func (e *Executor) executeOneStep(
 	result.StepOutputs[step.ID] = output
 	result.CostUSD += stepCost
 	costNow := result.CostUSD
-	// Snapshot the growing outputs map under the lock for an incremental
-	// durability flush (#1428, 2.8). DAG persistence was per-WAVE only, so a
-	// hard kill mid-wave lost every already-completed step in that wave and
-	// replayed them all on resume — up to a dozen non-idempotent POSTs /
-	// notifies fired twice. Flushing after each step lands completed steps
-	// durably so resume skips them. Snapshot here (cheap map copy under the
-	// lock); the DB write happens after the unlock so peers aren't stalled.
-	flushSnap := make(map[string]string, len(result.StepOutputs))
-	for k, v := range result.StepOutputs {
-		flushSnap[k] = v
-	}
 	resMu.Unlock()
-	// Best-effort projection write, off the lock. Concurrent per-step flushes
-	// may momentarily race to write a slightly stale snapshot, but each is a
-	// monotonically-growing superset and the wave-boundary flush re-writes the
-	// full set — strictly better than losing the whole wave.
-	e.persistStepOutputs(ctx, in, depth, runID, flushSnap, costNow, startedAt)
+	// Per-step incremental durability flush (#1428, 2.8). DAG persistence was
+	// per-WAVE only, so a hard kill mid-wave lost every already-completed step
+	// in that wave and replayed them all on resume — up to a dozen
+	// non-idempotent POSTs / notifies fired twice. Flushing after each step
+	// lands it durably so resume skips it. #1411 normalized step outputs into
+	// their own table, so this is a single-row upsert of THIS step (its own
+	// goroutine owns `output`/`step.ID`; `costNow` was snapshotted under the
+	// lock) rather than the old whole-map rewrite — per-step granularity
+	// without the O(N²) blob churn. The wave-boundary flush
+	// (persistWaveOutputs) still re-upserts the full set.
+	e.persistStepOutput(ctx, in, depth, runID, step.ID, output, costNow, startedAt)
 	// State_write bindings persist for the NEXT run (#1420). Add this step's
 	// own output to the goroutine-local snapshot so a value template can
 	// reference it, then render+upsert off the shared lock.

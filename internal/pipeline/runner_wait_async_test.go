@@ -128,15 +128,15 @@ const asyncApprovalLinearWithPriorStepDSL = `{
   ]
 }`
 
-// TestRun_ApprovalWaitStep_PersistsPriorStepOutput guards the #1411 perf fix
-// (stop rewriting step_outputs_json after every step — only at terminal +
-// WAITING-park): a step BEFORE the wait step must still have its output
-// durably captured in pipeline_runs.step_outputs_json at the moment the run
-// parks, since the resumed run reconstructs result.StepOutputs from that
-// column (the original goroutine is gone by the time approval lands) and
-// "final" here templates directly off "prep"'s output. Without an explicit
-// flush at the suspend point, removing the unconditional per-step flush
-// would silently strand every WAITING park with an empty/stale outputs map.
+// TestRun_ApprovalWaitStep_PersistsPriorStepOutput guards the #1411
+// per-step-upsert rewrite (pipeline_run_step_outputs, migration v156): a
+// step BEFORE the wait step must still have its output durably persisted
+// at the moment the run parks, since the resumed run reconstructs
+// result.StepOutputs from that table (the original goroutine is gone by
+// the time approval lands) and "final" here templates directly off
+// "prep"'s output. A regression that dropped the per-step upsert on the
+// suspend path would silently strand every WAITING park with an empty
+// outputs map.
 func TestRun_ApprovalWaitStep_PersistsPriorStepOutput(t *testing.T) {
 	db := openResumeTestDB(t)
 	defer db.Close()
@@ -170,12 +170,19 @@ func TestRun_ApprovalWaitStep_PersistsPriorStepOutput(t *testing.T) {
 		t.Fatalf("status: got %q, want WAITING", res.Status)
 	}
 
-	rec, err := runStore.Get(ctx, res.RunID)
+	outputs, err := runStore.GetStepOutputs(ctx, res.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(rec.StepOutputsJSON, "prepped") {
-		t.Fatalf("WAITING park lost the prior step's output: step_outputs_json=%q", rec.StepOutputsJSON)
+	found := false
+	for _, v := range outputs {
+		if strings.Contains(v, "prepped") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("WAITING park lost the prior step's output: %#v", outputs)
 	}
 
 	if err := wpStore.CompleteApproval(ctx, res.WaitpointToken, true, "u_admin", ""); err != nil {
@@ -183,7 +190,7 @@ func TestRun_ApprovalWaitStep_PersistsPriorStepOutput(t *testing.T) {
 	}
 	resumeAndAwait(t, exec, runStore, res.RunID)
 
-	rec, _ = runStore.Get(ctx, res.RunID)
+	rec, _ := runStore.Get(ctx, res.RunID)
 	if rec.Status != RunStatusCompleted {
 		t.Fatalf("after approval+resume status: got %q, want completed (error: %s)", rec.Status, rec.ErrorMessage)
 	}
@@ -285,8 +292,8 @@ func TestRunDAG_ApprovalWaitStep(t *testing.T) {
 	if rec.CurrentStepID != "gate" {
 		t.Errorf("DAG run row current_step: got %q, want gate", rec.CurrentStepID)
 	}
-	if rec.StepOutputsJSON == "" {
-		t.Error("DAG suspend should have persisted the draft output for resume")
+	if outputs, err := runStore.GetStepOutputs(ctx, res.RunID); err != nil || len(outputs) == 0 {
+		t.Errorf("DAG suspend should have persisted the draft output for resume: outputs=%#v err=%v", outputs, err)
 	}
 
 	if err := wpStore.CompleteApproval(ctx, res.WaitpointToken, true, "u_admin", ""); err != nil {

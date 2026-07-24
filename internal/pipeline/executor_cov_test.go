@@ -724,6 +724,13 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     warnings_json       TEXT NOT NULL DEFAULT '[]',
     created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
+);
+CREATE TABLE IF NOT EXISTS pipeline_run_step_outputs (
+    run_id     TEXT NOT NULL,
+    step_id    TEXT NOT NULL,
+    output     TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, step_id)
 );`
 
 func TestExecutor_RunStorePersistence_FullLifecycle(t *testing.T) {
@@ -762,8 +769,12 @@ func TestExecutor_RunStorePersistence_FullLifecycle(t *testing.T) {
 	if rec.DefinitionHash != p.DefinitionHash {
 		t.Errorf("definition hash not stamped: %q", rec.DefinitionHash)
 	}
-	if !strings.Contains(rec.StepOutputsJSON, "s1") {
-		t.Errorf("step outputs not flushed: %q", rec.StepOutputsJSON)
+	outputs, err := runStore.GetStepOutputs(ctx, res.RunID)
+	if err != nil {
+		t.Fatalf("get step outputs: %v", err)
+	}
+	if _, ok := outputs["s1"]; !ok {
+		t.Errorf("step outputs not flushed: %#v", outputs)
 	}
 }
 

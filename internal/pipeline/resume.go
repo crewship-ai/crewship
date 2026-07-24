@@ -2,12 +2,13 @@ package pipeline
 
 // Boot-time resume-from-step (Release 1.0 hardening W6).
 //
-// The executor persists current_step_id + step_outputs_json at every
-// step boundary (executor.go persistStepEntry / persistStepOutputs),
-// so after a hard kill the pipeline_runs row carries enough state to
-// re-enter the run instead of stamping it "interrupted":
+// The executor persists current_step_id (pipeline_runs) + each step's
+// output (pipeline_run_step_outputs, migration v156) at every step
+// boundary (executor.go persistStepEntry / persistStepOutput), so after
+// a hard kill there's enough durable state to re-enter the run instead
+// of stamping it "interrupted":
 //
-//   - completed steps are restored from step_outputs_json and skipped
+//   - completed steps are restored from pipeline_run_step_outputs and skipped
 //   - the in-flight step (current_step_id) re-executes from scratch —
 //     at-least-once semantics for the step that was mid-flight
 //   - runs parked on a `wait` approval step re-register their
@@ -288,11 +289,13 @@ func (e *Executor) buildResumePlan(ctx context.Context, rec *RunRecord) (*resume
 		return nil, "stored definition no longer parses: " + err.Error()
 	}
 
-	restored := map[string]string{}
-	if rec.StepOutputsJSON != "" {
-		if err := json.Unmarshal([]byte(rec.StepOutputsJSON), &restored); err != nil {
-			return nil, "persisted step outputs unreadable: " + err.Error()
-		}
+	// Step outputs live in pipeline_run_step_outputs (migration v156), not
+	// rec.StepOutputsJSON — that column stopped being written on the hot
+	// per-step path (#1411 item 4) and only pre-migration history is
+	// backfilled there. See internal/pipeline/runs.go GetStepOutputs.
+	restored, err := e.runStore.GetStepOutputs(ctx, rec.ID)
+	if err != nil {
+		return nil, "persisted step outputs unreadable: " + err.Error()
 	}
 	// Drift gate — shared with Run's resume re-validation (see
 	// resumeDefinitionDrift for the rationale behind each check).
