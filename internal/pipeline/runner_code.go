@@ -23,11 +23,16 @@ import (
 //
 // Stdout becomes the step's downstream output; stderr is logged in
 // the journal but doesn't propagate. ExitCode != 0 → step failure.
-func (e *Executor) runCodeStep(ctx context.Context, step Step, parentRender RenderContext, in RunInput) (string, float64, int64, error) {
+func (e *Executor) runCodeStep(ctx context.Context, step Step, parentRender RenderContext, in RunInput) (out string, cost float64, dur int64, err error) {
 	stepStart := time.Now()
 	if step.Code == nil {
 		return "", 0, 0, fmt.Errorf("code step %q missing body", step.ID)
 	}
+	// Resolve {{ secrets.<type> }} into the render context; the deferred
+	// scrub strips resolved values out of the step output / error.
+	var secrets *secretScrub
+	parentRender, secrets = e.resolveStepSecrets(ctx, step, parentRender, in)
+	defer func() { out, err = secrets.scrub(out), secrets.scrubErr(err) }()
 	if e.codeRunner == nil {
 		// Production builds do not yet wire a Docker-backed CodeRunner;
 		// the interface is in place but the impl is tracked as a
@@ -77,7 +82,7 @@ func (e *Executor) runCodeStep(ctx context.Context, step Step, parentRender Rend
 		TimeoutSec: timeoutSec,
 		MaxBytes:   1_000_000, // 1 MB stdout cap; matches HTTP step default
 	})
-	dur := time.Since(stepStart).Milliseconds()
+	dur = time.Since(stepStart).Milliseconds()
 	if err != nil {
 		return res.Stdout, 0, dur, fmt.Errorf("code step %q: %w (stderr: %s)", step.ID, err, truncateForGraderLog(res.Stderr))
 	}

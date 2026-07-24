@@ -72,6 +72,10 @@ func (h *PipelineHandler) RunBatch(w http.ResponseWriter, r *http.Request) {
 		if h.gateMissingResources(w, r, workspaceID, p.AuthorCrewID, "", ds, tools) {
 			return
 		}
+		// Credential gate — run-time enforcement of credentials_required.
+		if h.gateMissingCredentials(w, r, workspaceID, p.AuthorCrewID, "", dsl) {
+			return
+		}
 	}
 
 	var body batchRunBody
