@@ -135,7 +135,7 @@ func TestIdempotency_LookupOrReserve_SelfHealsWithoutBulkSweep(t *testing.T) {
 	store := NewIdempotencyStore(db)
 	ctx := context.Background()
 
-	expired := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339Nano)
+	expired := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339Nano) // tsformat:allow: seeds expires_at in this store's RFC3339Nano format for parity with production idempotency writes
 	if _, err := db.ExecContext(ctx, `
 INSERT INTO pipeline_run_idempotency
   (workspace_id, idempotency_key, run_id, pipeline_id, expires_at, created_at)

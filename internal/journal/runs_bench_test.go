@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/tsformat"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -72,10 +74,10 @@ VALUES (?, ?, ?, ?, 'sidecar', 'x', ?)`)
 	for r := 0; r < nRuns; r++ {
 		traceID := fmt.Sprintf("run_%d", r)
 		startTS := base.Add(time.Duration(r) * time.Second)
-		if _, err := stmt.ExecContext(ctx, nextID(), "ws_bench", startTS.Format(time.RFC3339Nano), "run.started", traceID); err != nil {
+		if _, err := stmt.ExecContext(ctx, nextID(), "ws_bench", tsformat.Format(startTS.UTC()), "run.started", traceID); err != nil {
 			b.Fatalf("seed run.started: %v", err)
 		}
-		if _, err := stmt.ExecContext(ctx, nextID(), "ws_bench", startTS.Add(time.Minute).Format(time.RFC3339Nano), "run.completed", traceID); err != nil {
+		if _, err := stmt.ExecContext(ctx, nextID(), "ws_bench", tsformat.Format(startTS.Add(time.Minute).UTC()), "run.completed", traceID); err != nil {
 			b.Fatalf("seed run.completed: %v", err)
 		}
 		for n := 0; n < noisePerRun; n++ {
@@ -84,7 +86,7 @@ VALUES (?, ?, ?, ?, 'sidecar', 'x', ?)`)
 			if n%2 == 0 {
 				entryType = "exec.command"
 			}
-			if _, err := stmt.ExecContext(ctx, nextID(), "ws_bench", ts.Format(time.RFC3339Nano), entryType, traceID); err != nil {
+			if _, err := stmt.ExecContext(ctx, nextID(), "ws_bench", tsformat.Format(ts.UTC()), entryType, traceID); err != nil {
 				b.Fatalf("seed noise row: %v", err)
 			}
 		}

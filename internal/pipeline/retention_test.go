@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/tsformat"
+
 	"github.com/crewship-ai/crewship/internal/journal"
 	_ "modernc.org/sqlite"
 )
@@ -97,8 +99,8 @@ func TestSweepRunRetention_DeletesOldTerminalRuns_KeepsRecentAndProtected(t *tes
 	defer db.Close()
 	ctx := context.Background()
 
-	old := time.Now().Add(-100 * 24 * time.Hour).UTC().Format(time.RFC3339Nano)
-	recent := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339Nano)
+	old := tsformat.Format(time.Now().Add(-100 * 24 * time.Hour).UTC())
+	recent := tsformat.Format(time.Now().Add(-1 * time.Hour).UTC())
 
 	// pln_a: 3 old completed runs. The keep-3 floor used below counts
 	// ACROSS the whole pipeline_id including run_recent (inserted next) —
@@ -106,9 +108,9 @@ func TestSweepRunRetention_DeletesOldTerminalRuns_KeepsRecentAndProtected(t *tes
 	// floor, leaving only run_old_1 (rank4, oldest) eligible on rank alone.
 	insertRunForRetention(t, db, "run_old_1", "ws_a", "pln_a", "completed", old, "")
 	insertRunForRetention(t, db, "run_old_2", "ws_a", "pln_a", "completed",
-		time.Now().Add(-99*24*time.Hour).UTC().Format(time.RFC3339Nano), "")
+		tsformat.Format(time.Now().Add(-99*24*time.Hour).UTC()), "")
 	insertRunForRetention(t, db, "run_old_3", "ws_a", "pln_a", "completed",
-		time.Now().Add(-98*24*time.Hour).UTC().Format(time.RFC3339Nano), "")
+		tsformat.Format(time.Now().Add(-98*24*time.Hour).UTC()), "")
 
 	// Recent run — within the retention window, never eligible regardless
 	// of rank.
@@ -167,7 +169,7 @@ func TestSweepRunRetention_Idempotent(t *testing.T) {
 	defer db.Close()
 	ctx := context.Background()
 
-	old := time.Now().Add(-100 * 24 * time.Hour).UTC().Format(time.RFC3339Nano)
+	old := tsformat.Format(time.Now().Add(-100 * 24 * time.Hour).UTC())
 	insertRunForRetention(t, db, "run_old", "ws_a", "pln_a", "completed", old, "")
 
 	first, err := SweepRunRetention(ctx, db, nil, "ws_a", 90, 0)
@@ -194,7 +196,7 @@ func TestSweepRunRetention_EmitsJournalBreadcrumb(t *testing.T) {
 	defer db.Close()
 	ctx := context.Background()
 
-	old := time.Now().Add(-100 * 24 * time.Hour).UTC().Format(time.RFC3339Nano)
+	old := tsformat.Format(time.Now().Add(-100 * 24 * time.Hour).UTC())
 	insertRunForRetention(t, db, "run_old", "ws_a", "pln_a", "completed", old, "")
 
 	rec := &captureEmitter{}
@@ -231,7 +233,7 @@ func TestSweepAllWorkspacesRunRetention_PerWorkspaceOverride(t *testing.T) {
 	}
 	// ws_b: no override — falls back to the 90-day default, so the same
 	// 10-day-old run must NOT be eligible.
-	tenDaysAgo := time.Now().Add(-10 * 24 * time.Hour).UTC().Format(time.RFC3339Nano)
+	tenDaysAgo := tsformat.Format(time.Now().Add(-10 * 24 * time.Hour).UTC())
 	insertRunForRetention(t, db, "run_a", "ws_a", "pln_a", "completed", tenDaysAgo, "")
 	insertRunForRetention(t, db, "run_b", "ws_b", "pln_a", "completed", tenDaysAgo, "")
 

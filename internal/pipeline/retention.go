@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // DefaultRunRetentionDays is the cutoff applied when a workspace has no
@@ -73,8 +74,11 @@ func SweepRunRetention(
 		keepLastN = 0
 	}
 
-	cutoff := time.Now().Add(-time.Duration(retentionDays) * 24 * time.Hour).
-		UTC().Format(time.RFC3339Nano)
+	// tsformat (fixed-width, lex-sortable): cutoff is compared
+	// `started_at < cutoff`, and pipeline_runs.started_at is stored via
+	// tsformat. A variable-width format would mis-compare across the
+	// fractional-second boundary and purge the wrong rows.
+	cutoff := tsformat.Format(time.Now().Add(-time.Duration(retentionDays) * 24 * time.Hour).UTC())
 
 	// ranked numbers each workspace's runs 1..N per pipeline_id, newest
 	// first, so "rn > keepLastN" identifies everything outside the

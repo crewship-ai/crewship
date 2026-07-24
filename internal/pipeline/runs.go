@@ -314,7 +314,7 @@ func (s *RunStore) UpsertStepOutput(ctx context.Context, runID, stepID, output s
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := formatRFC3339(time.Now().UTC())
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO pipeline_run_step_outputs (run_id, step_id, output, updated_at)
 VALUES (?, ?, ?, ?)
@@ -361,7 +361,7 @@ ON CONFLICT (run_id, step_id) DO UPDATE SET output = excluded.output, updated_at
 	}
 	defer stmt.Close()
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := formatRFC3339(time.Now().UTC())
 	for stepID, output := range stepOutputs {
 		if _, err := stmt.ExecContext(ctx, runID, stepID, output, now); err != nil {
 			return fmt.Errorf("pipeline_run_step_outputs: flush upsert step %s: %w", stepID, err)

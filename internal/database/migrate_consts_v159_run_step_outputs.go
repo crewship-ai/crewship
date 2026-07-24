@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // migrationRunStepOutputs (v159) replaces the O(N²) step_outputs_json
@@ -99,7 +101,7 @@ ON CONFLICT (run_id, step_id) DO UPDATE SET output = excluded.output, updated_at
 		}
 		updatedAt := r.updatedAt
 		if updatedAt == "" {
-			updatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			updatedAt = tsformat.Format(time.Now().UTC())
 		}
 		for stepID, output := range outputs {
 			if _, err := stmt.ExecContext(ctx, r.runID, stepID, output, updatedAt); err != nil {

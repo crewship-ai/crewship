@@ -72,7 +72,7 @@ func (s *IdempotencyStore) LookupOrReserve(
 		ttl = DefaultIdempotencyTTL
 	}
 	now := time.Now().UTC()
-	expires := now.Add(ttl).Format(time.RFC3339Nano)
+	expires := now.Add(ttl).Format(time.RFC3339Nano) // tsformat:allow: pipeline_run_idempotency is a self-contained 24h-TTL dedup cache — expires_at is written and compared only here in RFC3339Nano, never against a tsformat column; pre-existing format, converting would mix formats across the deploy TTL window
 
 	// Lazy sweep — keeps the table small without a dedicated
 	// background worker. The DELETE is bounded by the partial index
@@ -86,7 +86,7 @@ func (s *IdempotencyStore) LookupOrReserve(
 	if mathrand.IntN(idempotencySweepOneInN) == 0 {
 		if _, sweepErr := s.db.ExecContext(ctx,
 			`DELETE FROM pipeline_run_idempotency WHERE expires_at <= ?`,
-			now.Format(time.RFC3339Nano),
+			now.Format(time.RFC3339Nano), // tsformat:allow: same-format comparison against expires_at (RFC3339Nano throughout this store)
 		); sweepErr != nil {
 			// Sweep failure is non-fatal — we still want to attempt the
 			// reservation. A persistent sweep error will accumulate dead
@@ -95,7 +95,7 @@ func (s *IdempotencyStore) LookupOrReserve(
 		}
 	}
 
-	nowStr := now.Format(time.RFC3339Nano)
+	nowStr := now.Format(time.RFC3339Nano) // tsformat:allow: created_at/expires_at inserts stay in this store's RFC3339Nano format for parity with the sweep comparison above
 
 	// At most 2 attempts: the second only happens when the first hits a
 	// conflict against a row THIS call discovers is expired and force-
