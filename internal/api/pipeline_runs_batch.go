@@ -96,6 +96,15 @@ func (h *PipelineHandler) RunBatch(w http.ResponseWriter, r *http.Request) {
 	batchTag := "batch:" + batchID
 	tierOverride := pipeline.Complexity(body.TierOverride)
 
+	// The user who triggered the batch — propagated to every run so a
+	// `to: trigger` notify inside a routine reaches them (#1427, 3.7).
+	// Empty for service/token calls, which makes `to: trigger` fall back
+	// to a workspace-wide notice (same contract as the single-run path).
+	invokingUser := ""
+	if u := UserFromContext(r.Context()); u != nil {
+		invokingUser = u.ID
+	}
+
 	type itemResult struct {
 		Index  int    `json:"index"`
 		RunID  string `json:"run_id,omitempty"`
@@ -108,14 +117,15 @@ func (h *PipelineHandler) RunBatch(w http.ResponseWriter, r *http.Request) {
 		tags = append(tags, item.Tags...)
 		exec := h.newExecutor()
 		res, err := exec.Run(r.Context(), pipeline.RunInput{
-			PipelineID:   p.ID,
-			WorkspaceID:  workspaceID,
-			Inputs:       item.Inputs,
-			Mode:         pipeline.ModeRun,
-			TierOverride: tierOverride,
-			TriggeredVia: pipeline.TriggeredViaManual,
-			Tags:         tags,
-			MetadataJSON: marshalMetadata(item.Metadata),
+			PipelineID:     p.ID,
+			WorkspaceID:    workspaceID,
+			InvokingUserID: invokingUser,
+			Inputs:         item.Inputs,
+			Mode:           pipeline.ModeRun,
+			TierOverride:   tierOverride,
+			TriggeredVia:   pipeline.TriggeredViaManual,
+			Tags:           tags,
+			MetadataJSON:   marshalMetadata(item.Metadata),
 		})
 		if err != nil {
 			results = append(results, itemResult{Index: i, Error: err.Error()})

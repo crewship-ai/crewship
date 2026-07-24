@@ -21,6 +21,15 @@ var ErrPipelineNotFound = errors.New("pipeline: target pipeline not found")
 // only flagged at runtime.
 var ErrMaxDepthExceeded = fmt.Errorf("pipeline: max nested depth %d exceeded", MaxNestedPipelineDepth)
 
+// ErrRuntimeCycleDetected is returned when a call_pipeline chain revisits a
+// pipeline slug already on the live call stack (#1427, 2.3). Save-time
+// CycleDetect catches loops built through already-persisted definitions, but
+// a B→A / A→B pair authored in the wrong order (the second save can't see the
+// first as a draft) can slip past and only manifest at run time — where the
+// depth ceiling would otherwise let it churn ~10 levels before ErrMaxDepthExceeded.
+// The runtime slug-path guard rejects the revisit immediately instead.
+var ErrRuntimeCycleDetected = errors.New("pipeline: call_pipeline cycle detected at runtime")
+
 // ErrPinnedVersionNotFound is returned by Run when the caller pinned
 // the run to a specific pipeline version (RunInput.PinnedVersion —
 // schedules/webhooks with target_pipeline_version set) and that
@@ -786,6 +795,22 @@ type RunInput struct {
 	pipeline *Pipeline
 	dsl      *DSL
 
+	// remainingBudget bounds how many additional USD this run (and its
+	// call_pipeline subtree) may spend, as dictated by an ANCESTOR run's
+	// max_cost_usd minus what the ancestor had already spent when it
+	// invoked this one (#1427, 2.4). 0 = no externally-imposed cap. The
+	// run's EFFECTIVE cap is min-nonzero(dsl.MaxCostUSD, remainingBudget)
+	// — see effectiveCostCap — so a nested routine can no longer overrun
+	// its parent's budget by starting its own count from zero. Set only
+	// by buildNestedRunInput; top-level callers leave it zero.
+	remainingBudget float64
+	// callPath is the ordered list of pipeline slugs currently on the
+	// call_pipeline stack ABOVE this run (ancestors, excluding self).
+	// runCallPipelineStep rejects a target already present here (or equal
+	// to the current run's own slug) with ErrRuntimeCycleDetected before
+	// dispatching it. Set only by buildNestedRunInput.
+	callPath []string
+
 	// resume marks this input as a boot-time re-entry of a run from a
 	// previous process lifetime (W6 resume-from-step). Set only by
 	// ResumeInterruptedRuns — external callers cannot reach it, which
@@ -821,6 +846,63 @@ type RunInput struct {
 func costCapExceededMessage(costUSD, capUSD float64, stepID string) string {
 	return fmt.Sprintf("cost cap exceeded: $%.4f > $%.4f after step %q", costUSD, capUSD, stepID)
 }
+
+// minNonZero returns the smaller of two caps treating 0 as "no cap"
+// (unbounded). If both are 0 the result is 0 (unbounded); otherwise the
+// smaller of the non-zero values wins.
+func minNonZero(a, b float64) float64 {
+	switch {
+	case a <= 0:
+		return b
+	case b <= 0:
+		return a
+	case a < b:
+		return a
+	default:
+		return b
+	}
+}
+
+// effectiveCostCap resolves the budget ceiling a run must honour: the
+// tighter of its OWN max_cost_usd and any remaining budget handed down by
+// an ancestor call_pipeline frame (#1427, 2.4). 0 = unbounded. Every
+// cost-cap gate (linear post-step, DAG post-step, resume-time, the retry
+// loop's predictive guard) reads this so a nested run can't overrun the
+// parent's budget by counting from zero against only its own cap.
+func effectiveCostCap(in RunInput) float64 {
+	self := 0.0
+	if in.dsl != nil {
+		self = in.dsl.MaxCostUSD
+	}
+	return minNonZero(self, in.remainingBudget)
+}
+
+// childRemainingBudget computes the budget a call_pipeline child may spend:
+// this run's effective cap minus what it has already spent. 0 = unbounded
+// (this run has no effective cap to pass down). Never negative — a run that
+// has already met its cap hands the child 0-with-a-cap semantics via the
+// pre-dispatch gate, which stops the child's first step.
+func childRemainingBudget(in RunInput, spentUSD float64) float64 {
+	cap := effectiveCostCap(in)
+	if cap <= 0 {
+		return 0
+	}
+	rem := cap - spentUSD
+	if rem <= 0 {
+		// Fully consumed. Return a tiny positive sentinel so the child
+		// inherits a cap (any spend trips its gate) rather than 0 which
+		// would read as "unbounded". The pre-dispatch gate in the parent
+		// already refuses to start the child in this state, so this is a
+		// defense-in-depth floor.
+		return negligibleBudget
+	}
+	return rem
+}
+
+// negligibleBudget is an effectively-zero-but-nonzero budget floor handed to
+// a nested run whose parent has already exhausted its cap, so the child
+// inherits a real ceiling (0 would read as "unbounded" via minNonZero).
+const negligibleBudget = 1e-9
 
 // runDSL is the actual step loop. depth bounds call_pipeline recursion
 // across nested invocations; the top-level Run starts depth at 0.
@@ -1099,7 +1181,8 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 // Returns the terminal FAILED result when the gate trips, nil otherwise.
 func (e *Executor) resumeCostCapGate(ctx context.Context, in RunInput, emit *pipelineEmitContext, result *RunResult, startedAt time.Time) *RunResult {
 	dsl := in.dsl
-	if !in.resume || dsl.MaxCostUSD <= 0 || result.CostUSD < dsl.MaxCostUSD {
+	cap := effectiveCostCap(in)
+	if !in.resume || cap <= 0 || result.CostUSD < cap {
 		return nil
 	}
 	// Attribute the breach to the last restored step in source
@@ -1111,7 +1194,7 @@ func (e *Executor) resumeCostCapGate(ctx context.Context, in RunInput, emit *pip
 			lastRestored = dsl.Steps[i].ID
 		}
 	}
-	return e.failRun(ctx, in, emit, result, lastRestored, costCapExceededMessage(result.CostUSD, dsl.MaxCostUSD, lastRestored), true, startedAt)
+	return e.failRun(ctx, in, emit, result, lastRestored, costCapExceededMessage(result.CostUSD, cap, lastRestored), true, startedAt)
 }
 
 // agentlessGate enforces the agentless guarantee — runtime
@@ -1230,6 +1313,22 @@ func (e *Executor) runLinearStep(
 		return nil
 
 	case ModeRun:
+		// Pre-step budget gate (#1427, 2.4). Stop BEFORE spending when the
+		// run has already met its effective cap — its own max_cost_usd
+		// tightened by any remaining budget an ancestor call_pipeline frame
+		// handed down. Without this, a nested run whose parent's budget was
+		// already exhausted would still fire its first step. estimateStepCost
+		// adds a coarse predictive nudge so a step whose estimate alone would
+		// breach an already-tight remaining budget is caught up front rather
+		// than only after the spend. The estimate is order-of-magnitude and
+		// tiny for short prompts, so it never falsely trips a run with real
+		// headroom; the authoritative stop stays the post-step gate below.
+		if cap := effectiveCostCap(in); cap > 0 {
+			if result.CostUSD >= cap || result.CostUSD+estimateStepCost(step, renderedPrompt) > cap {
+				return e.failRun(ctx, in, emit, result, step.ID, costCapExceededMessage(result.CostUSD, cap, step.ID), true, startedAt)
+			}
+		}
+
 		emit.emitStepStarted(ctx, step, stepIdx, tier)
 
 		output, stepCost, stepDur, stepErr := e.runStepWithRetry(ctx, step, renderedPrompt, tier, fallback, in, runID, pipelineID, emit, ctxRender, depth, result.CostUSD)
@@ -1266,11 +1365,12 @@ func (e *Executor) runLinearStep(
 		// Cost-cap gate. Checked AFTER the step completes (we
 		// can't refund work already done) but BEFORE the next
 		// step kicks off so a runaway pipeline halts as soon as
-		// the budget is breached. Per-RunInput max would also
-		// be useful but DSL-level is the more common case
-		// (templates pin the budget regardless of caller).
-		if dsl.MaxCostUSD > 0 && result.CostUSD > dsl.MaxCostUSD {
-			return e.failRun(ctx, in, emit, result, step.ID, costCapExceededMessage(result.CostUSD, dsl.MaxCostUSD, step.ID), true, startedAt)
+		// the budget is breached. The cap is the run's EFFECTIVE
+		// ceiling (own max_cost_usd tightened by an ancestor
+		// call_pipeline frame's remaining budget, #1427 2.4) so a
+		// nested run can't overrun its parent by counting from zero.
+		if cap := effectiveCostCap(in); cap > 0 && result.CostUSD > cap {
+			return e.failRun(ctx, in, emit, result, step.ID, costCapExceededMessage(result.CostUSD, cap, step.ID), true, startedAt)
 		}
 	}
 	return nil
@@ -1323,6 +1423,7 @@ func (e *Executor) runStep(
 	emit *pipelineEmitContext,
 	parentRender RenderContext,
 	depth int,
+	priorCostUSD float64,
 ) (output string, costUSD float64, durationMs int64, err error) {
 
 	// Wrap every step type in a routine.step span so the trace tree shows
@@ -1353,7 +1454,7 @@ func (e *Executor) runStep(
 		}
 	}
 
-	out, cost, dur, err := e.dispatchStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit, parentRender, depth)
+	out, cost, dur, err := e.dispatchStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit, parentRender, depth, priorCostUSD)
 
 	// Per-step after hook: best-effort once the step itself completes
 	// (logged, never overrides the step's outcome).
@@ -1378,12 +1479,13 @@ func (e *Executor) dispatchStep(
 	emit *pipelineEmitContext,
 	parentRender RenderContext,
 	depth int,
+	priorCostUSD float64,
 ) (string, float64, int64, error) {
 	switch step.Type {
 	case StepAgentRun:
 		return e.runAgentStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit)
 	case StepCallPipeline:
-		return e.runCallPipelineStep(ctx, step, in, parentRender, depth)
+		return e.runCallPipelineStep(ctx, step, in, parentRender, depth, runID, priorCostUSD)
 	case StepHTTP:
 		return e.runHTTPStep(ctx, step, parentRender, in)
 	case StepCode:
@@ -1624,8 +1726,24 @@ func (e *Executor) runAgentStep(
 // inputs and step outputs (not against literal placeholders), and
 // (b) recursion depth accumulates across levels — without that the
 // safety ceiling never fires for legitimately deep call chains.
-func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent RunInput, parentRender RenderContext, depth int) (string, float64, int64, error) {
+func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent RunInput, parentRender RenderContext, depth int, parentRunID string, priorCostUSD float64) (string, float64, int64, error) {
 	stepStart := time.Now()
+
+	// Runtime cycle guard (#1427, 2.3). Save-time CycleDetect catches loops
+	// built through already-persisted definitions, but a B→A / A→B pair saved
+	// in the wrong order can slip past it — the second save can't see the
+	// first as a draft. Reject a target already on the live call stack
+	// (ancestors + this run's own slug) BEFORE dispatching, so a genuine cycle
+	// fails immediately instead of churning ~10 depth levels to
+	// ErrMaxDepthExceeded. Legitimately deep-but-acyclic chains are unaffected.
+	callStack := append(append([]string{}, parent.callPath...), parentRunSlug(parent))
+	for _, slug := range callStack {
+		if slug != "" && slug == step.PipelineSlug {
+			return "", 0, 0, fmt.Errorf("call_pipeline %q: %w (path: %v)",
+				step.PipelineSlug, ErrRuntimeCycleDetected, append(callStack, step.PipelineSlug))
+		}
+	}
+
 	target, err := e.pipes.GetBySlug(ctx, parent.WorkspaceID, step.PipelineSlug)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -1662,17 +1780,8 @@ func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent Ru
 		}
 	}
 
-	nestedIn := RunInput{
-		WorkspaceID:     parent.WorkspaceID,
-		AuthorCrewID:    target.AuthorCrewID, // nested runs in nested pipeline's author context
-		AuthorAgentID:   target.AuthorAgentID,
-		InvokingCrewID:  parent.AuthorCrewID, // parent's author IS the invoker for the nested call
-		InvokingAgentID: parent.AuthorAgentID,
-		Inputs:          nestedInputs,
-		Mode:            parent.Mode,
-		pipeline:        target,
-		dsl:             dsl,
-	}
+	nestedIn := buildNestedRunInput(parent, target, dsl, nestedInputs, parentRunID,
+		childRemainingBudget(parent, priorCostUSD), callStack)
 	// depth+1 so the runtime safety ceiling fires for legitimately
 	// deep chains (A→B→C→...). Save-time cycle detection catches
 	// loops; this ceiling catches accidental long chains.
@@ -1685,6 +1794,57 @@ func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent Ru
 			fmt.Errorf("nested pipeline %q failed at step %q: %s", step.PipelineSlug, nested.FailedAtStep, nested.ErrorMessage)
 	}
 	return nested.Output, nested.CostUSD, time.Since(stepStart).Milliseconds(), nil
+}
+
+// parentRunSlug resolves the slug of the currently-running pipeline from a
+// RunInput — the persisted row's slug when saved, else the parsed DSL name
+// (drafts / RunDefinition). Used to seed the call_pipeline cycle guard.
+func parentRunSlug(in RunInput) string {
+	if in.pipeline != nil && in.pipeline.Slug != "" {
+		return in.pipeline.Slug
+	}
+	if in.dsl != nil {
+		return in.dsl.Name
+	}
+	return ""
+}
+
+// buildNestedRunInput assembles the RunInput for a call_pipeline child.
+// Single seam so the properties that MUST cross the parent→child boundary
+// stay in one place and testable (#1427, 3.7 / 3.8):
+//   - author identity flips to the TARGET's crew/agent (the security gate for
+//     cross-crew reuse — the invoker never impersonates the author);
+//   - InvokingUserID + TierOverride PROPAGATE from the parent so a `to: trigger`
+//     notify inside a child reaches the human who triggered the top run, and an
+//     eval-suite tier override applies through the whole call tree (previously
+//     both were silently dropped at the boundary);
+//   - TriggeredVia=call_pipeline + TriggeredByID=<parent run id> stamp
+//     parentage. NOTE: depth>0 runs deliberately persist NO pipeline_runs row
+//     (see persistRunStart — nested runs reuse the parent's row id), so these
+//     fields do not surface in RunTree today; they are set for correctness and
+//     so a future decision to persist child rows makes the tree light up
+//     without another executor change;
+//   - remainingBudget carries the ancestor's leftover budget so effectiveCostCap
+//     bounds the child (2.4);
+//   - callPath threads the live call stack for the runtime cycle guard (2.3).
+func buildNestedRunInput(parent RunInput, target *Pipeline, dsl *DSL, nestedInputs map[string]any, parentRunID string, remaining float64, callPath []string) RunInput {
+	return RunInput{
+		WorkspaceID:     parent.WorkspaceID,
+		AuthorCrewID:    target.AuthorCrewID, // nested runs in nested pipeline's author context
+		AuthorAgentID:   target.AuthorAgentID,
+		InvokingCrewID:  parent.AuthorCrewID, // parent's author IS the invoker for the nested call
+		InvokingAgentID: parent.AuthorAgentID,
+		InvokingUserID:  parent.InvokingUserID, // 3.7 — propagate the human trigger
+		TierOverride:    parent.TierOverride,   // 3.7 — propagate the batch/eval tier override
+		TriggeredVia:    TriggeredViaCallPipeline,
+		TriggeredByID:   parentRunID, // 3.8 — parentage for RunTree (once child rows persist)
+		Inputs:          nestedInputs,
+		Mode:            parent.Mode,
+		remainingBudget: remaining,
+		callPath:        callPath,
+		pipeline:        target,
+		dsl:             dsl,
+	}
 }
 
 // stepPersistEnabled centralises the gate for per-step run-state

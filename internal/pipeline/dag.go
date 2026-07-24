@@ -558,11 +558,15 @@ func (e *Executor) executeOneStep(
 
 	// Cost-cap gate (post-step). The check reads from the locked
 	// snapshot above so two parallel completions can't both miss
-	// the cap by tripping the gate against a stale total.
-	if dsl.MaxCostUSD > 0 && costNow > dsl.MaxCostUSD {
+	// the cap by tripping the gate against a stale total. The cap is
+	// the run's EFFECTIVE ceiling (own max_cost_usd tightened by any
+	// ancestor call_pipeline budget, #1427 2.4) — though a DAG never
+	// contains a call_pipeline step so remainingBudget is normally 0
+	// here, reading it keeps the linear and DAG gates identical.
+	if cap := effectiveCostCap(in); cap > 0 && costNow > cap {
 		f := &dagStepFailure{
 			stepID:    step.ID,
-			message:   costCapExceededMessage(costNow, dsl.MaxCostUSD, step.ID),
+			message:   costCapExceededMessage(costNow, cap, step.ID),
 			isCostCap: true,
 		}
 		firstErr.CompareAndSwap(nil, f)

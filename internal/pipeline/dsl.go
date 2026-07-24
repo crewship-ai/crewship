@@ -463,6 +463,25 @@ func checkTemplateRef(ref string, inputs, earlier map[string]struct{}) error {
 // architectural errors, not transient runtime conditions, and catching
 // them early gives the author a clean error message before any agent
 // invocation.
+// DraftAwareResolver wraps a workspace pipeline resolver so a lookup for the
+// pipeline currently being SAVED (draftSlug) returns the in-memory draft
+// instead of its last-persisted definition (#1427, 2.3a). Without this, a
+// B→A / A→B pair authored in the wrong order slips past CycleDetect: when B
+// (the draft, which now calls A) is saved, the walk resolves A from the DB
+// (A calls B), then resolves B again — but the inner resolver returns B's
+// STALE persisted definition (which doesn't yet call A), so the back-edge is
+// invisible and the cycle is missed until it churns at runtime. Feeding the
+// draft back for its own slug closes the graph so the save-time walk sees the
+// real back-edge and rejects the cycle. Any other slug falls through to inner.
+func DraftAwareResolver(draftSlug string, draft *DSL, inner func(slug string) (*DSL, error)) func(slug string) (*DSL, error) {
+	return func(slug string) (*DSL, error) {
+		if draftSlug != "" && slug == draftSlug {
+			return draft, nil
+		}
+		return inner(slug)
+	}
+}
+
 func CycleDetect(dsl *DSL, resolveTargets func(slug string) (*DSL, error)) error {
 	if dsl == nil {
 		return nil
