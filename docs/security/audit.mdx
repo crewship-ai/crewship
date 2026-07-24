@@ -176,6 +176,126 @@ WriteAuditLog(r.Context(), h.db, h.journal, "create", "AGENT", agentID, userID, 
 
 The function generates a random hex ID, writes the row in the same request context, and — when `j` is non-nil — dual-emits a typed `audit.entity_*` entry into the unified Crew Journal. If the write fails, a warning is logged but the original operation is not rolled back -- the audit log is best-effort to avoid blocking user operations.
 
+## Tamper-Evidence: the Journal Hash-Chain
+
+Crewship deliberately chooses **accountability ex-post** over real-time
+control, which makes the journal the load-bearing safety mechanism. To keep
+that record trustworthy, every `journal_entries` row is linked into a
+per-workspace **hash-chain**:
+
+- **`seq`** — a per-workspace monotonic sequence number (1-based). It gives a
+  deterministic order independent of the random `id` primary key and the
+  wall-clock `ts` (which can collide), and a deleted middle row shows up as a
+  gap. A `UNIQUE(workspace_id, seq)` index enforces that no two rows share a
+  slot.
+- **`prev_hash`** — the `entry_hash` of the immediately preceding entry in the
+  same workspace. The first entry (genesis) uses the empty string.
+- **`entry_hash`** — a **keyed** `HMAC-SHA256` over the entry's committed
+  content **plus** `prev_hash`.
+
+### The chain is keyed — that's the point
+
+The threat model is an attacker (or compromised operator) **with write access
+to the database**. A bare hash would give them no trouble: they could edit a
+row, recompute its `entry_hash`, and recompute `prev_hash`/`entry_hash` for
+every following row, producing a perfectly self-consistent forged chain.
+
+Crewship defeats this by keying the chain. `entry_hash` is
+`HMAC-SHA256(chain_key, …)`, where `chain_key` is **derived from the persisted
+`ENCRYPTION_KEY`** (domain-separated, one-way) and **never stored in the
+database**:
+
+```
+chain_key = HMAC-SHA256(ENCRYPTION_KEY, "crewship journal chain v1\x00")
+```
+
+An attacker with DB write can still mutate rows, but cannot recompute a valid
+`entry_hash` without the key — so verification fails. The same key derivation is
+used by the write path, the verifier, and the upgrade migration's backfill, so
+they never drift.
+
+### What the chain detects
+
+- **Mutation** — editing any committed field of a written row (the recomputed
+  keyed hash no longer matches the stored one).
+- **Reorder** — swapping entries in place (the `prev_hash` linkage no longer
+  matches).
+- **Mid-chain deletion** — removing a row leaves a `seq` gap with no signed
+  checkpoint covering it.
+- **Forged rewrite by a DB-write attacker** — recomputing the hash columns
+  without the key does not validate (this is the property a bare hash lacked).
+
+### Legitimate deletion vs. tampering: signed checkpoints
+
+Some deletions are legitimate: the daily **compaction** worker rolls up
+high-volume low-signal entries and deletes the originals, and the
+pipeline-resurrect purge removes a defunct routine's journal rows. These delete
+rows from the *middle* of the chain, which would otherwise read as tampering.
+
+To distinguish the two, every such delete writes a **signed checkpoint** into
+`journal_chain_checkpoints` in the **same transaction** as the delete. The
+checkpoint commits — under the same HMAC key — to the exact `(seq, entry_hash)`
+of every row it removed. Verification bridges a `seq` gap when a valid
+checkpoint covers it, and continues linking `prev_hash` pointers across the gap.
+
+An attacker cannot abuse this: forging a checkpoint requires the key, and a
+mid-chain delete with **no** checkpoint (or a checkpoint with a bad MAC) still
+fails verification.
+
+<Note>
+  **Residual gaps (no overclaiming).** Two attacks are *not* fully covered:
+  **tail truncation** — deleting the newest N entries leaves a shorter but
+  internally-consistent chain (anchoring the tip with a signed high-water
+  checkpoint is the tracked follow-up, issue #1369); and **plaintext dev mode**
+  — when no `ENCRYPTION_KEY` is configured the chain key is derived from an
+  empty seed and is therefore reproducible, so keying degrades to detecting only
+  key-unaware edits. Production installs always have a persisted `ENCRYPTION_KEY`.
+</Note>
+
+### Determinism
+
+Hashing never depends on Go map iteration order. `payload` and `refs` are
+hashed as their stored JSON strings (encoding/json emits map keys sorted), and
+every field is **length-framed** (an 8-byte length prefix) before hashing, so
+no value can be confused with a delimiter or spill into its neighbour.
+
+### Verifying integrity
+
+Run verification for the current workspace with the CLI (ADMIN or OWNER):
+
+```bash
+crewship journal verify
+```
+
+It walks the keyed chain and prints `Journal chain OK — N entries verified
+against the keyed HMAC chain` (plus a count of signed compaction checkpoints
+bridged, if any) or, on a break, the first bad `seq`/entry and the reason. The
+command **exits non-zero** when the chain is broken, so it can gate a cron job
+or CI check. The `--format json` variant emits the raw result for machine
+consumers.
+
+The same check is available over HTTP:
+
+```
+GET /api/v1/admin/journal/verify        # ADMIN or OWNER
+```
+
+```json
+{ "workspace_id": "ws-uuid", "ok": true, "count": 128, "checkpoints": 2 }
+```
+
+`checkpoints` is the number of valid signed compaction checkpoints applied
+while walking the chain. On a broken chain the response stays `200` with
+`"ok": false` plus `broken_seq`, `broken_id`, and a human-readable `reason`.
+
+<Info>
+  Upgrading an existing instance runs a migration that **backfills** every
+  historical row into a valid chain (ordered by `workspace_id, ts, id`), so
+  verification passes immediately after upgrade. On shared dev slots a
+  nuke+reseed is still the cleanest path, since any out-of-band edits made
+  before the upgrade are frozen into the chain as genuine.
+</Info>
+
 ## What's Next
 
 <CardGroup cols={2}>

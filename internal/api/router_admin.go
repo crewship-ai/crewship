@@ -50,6 +50,13 @@ func (r *Router) registerAdminRoutes() {
 	keeperLog := NewKeeperLogHandler(r.db, r.logger)
 	r.authedAdmin("GET", "/api/v1/admin/keeper/requests", keeperLog.List)
 
+	// Journal integrity (issue #1369): walk the workspace's audit
+	// hash-chain and report the first broken link (mutation / reorder /
+	// mid-chain deletion). Read-only, ADMIN+ — the tamper-evidence check
+	// that the whole ex-post accountability model leans on.
+	journalIntegrity := NewJournalIntegrityHandler(r.db, r.logger)
+	r.authedAdmin("GET", "/api/v1/admin/journal/verify", journalIntegrity.Verify)
+
 	// Keeper watchdog governance (issue #1001 M0): workspace toggle, named
 	// security contact, DENY-notify threshold. Read ADMIN+, write OWNER/ADMIN.
 	keeperGov := NewKeeperGovernanceHandler(r.db, r.logger, r.Journal())

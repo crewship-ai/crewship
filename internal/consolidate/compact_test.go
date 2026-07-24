@@ -30,6 +30,106 @@ func emitDirect(t *testing.T, db *sql.DB, id, workspaceID, crewID string, ts tim
 	}
 }
 
+// TestCompactor_ChainStaysVerifiableAfterCompaction is the core chain-safety
+// regression for issue #1369 review blocker #1: a legitimate compaction pass
+// DELETEs mid-chain rows, and the audit hash-chain must still verify OK
+// afterwards (the deleted range is covered by a signed checkpoint), while a
+// RAW mid-chain delete with no checkpoint must still be caught as tampering.
+//
+// Red-first: before the fix, VerifyChain treats any seq gap as tampering, so
+// the post-compaction assertion (ok == true) fails on PR head.
+func TestCompactor_ChainStaysVerifiableAfterCompaction(t *testing.T) {
+	// Real key so the checkpoint MAC is a genuine secret; the Writer, the
+	// compactor, and VerifyChain all read the same ENCRYPTION_KEY.
+	t.Setenv("ENCRYPTION_KEY", "compaction-key-0123456789abcdef0123")
+
+	db := openDB(t)
+	defer db.Close()
+	w := journal.NewWriter(db, quietLogger(), journal.WriterOptions{FlushInterval: time.Hour})
+	defer w.Close()
+
+	ctx := context.Background()
+
+	// Emit a real, chained sequence: two survivors, then a block of 12
+	// compactable chunks (one bucket), then a trailing survivor. Emitting via
+	// the Writer assigns seq/prev_hash/entry_hash the production way.
+	emit := func(kind journal.EntryType, summary string) string {
+		id, err := w.Emit(ctx, journal.Entry{
+			WorkspaceID: "ws_test",
+			CrewID:      "crew_test",
+			Type:        kind,
+			ActorType:   journal.ActorAgent,
+			Summary:     summary,
+			Payload:     map[string]any{"s": summary},
+		})
+		if err != nil {
+			t.Fatalf("emit %s: %v", summary, err)
+		}
+		return id
+	}
+	emit(journal.EntryRunStarted, "survivor-1")
+	emit(journal.EntryRunStarted, "survivor-2")
+	var chunkIDs []string
+	for i := 0; i < 12; i++ {
+		chunkIDs = append(chunkIDs, emit(journal.EntryExecOutputChunk, "chunk"))
+	}
+	emit(journal.EntryRunStarted, "survivor-3")
+	if err := w.Flush(ctx); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	// Baseline: the honest chain verifies.
+	if res, err := journal.VerifyChain(ctx, db, "ws_test"); err != nil || !res.OK {
+		t.Fatalf("baseline verify failed: err=%v res=%+v", err, res)
+	}
+
+	// Age ONLY the chunk rows so compaction selects them. We touch just `ts`
+	// (never the hash columns) and only on rows that will be deleted, so the
+	// surviving rows' verification is unaffected and the checkpoint records the
+	// chunks' real stored entry_hash.
+	old := time.Now().UTC().Add(-45 * 24 * time.Hour).Format("2006-01-02T15:04:05.000Z")
+	for _, id := range chunkIDs {
+		if _, err := db.Exec(`UPDATE journal_entries SET ts = ? WHERE id = ?`, old, id); err != nil {
+			t.Fatalf("age chunk: %v", err)
+		}
+	}
+
+	c := &Compactor{DB: db, Journal: w, Logger: quietLogger()}
+	res, err := c.Run(ctx, "ws_test", 30*24*time.Hour)
+	if err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if res.EntriesDeleted != 12 {
+		t.Fatalf("expected 12 chunks deleted, got %d", res.EntriesDeleted)
+	}
+
+	// The whole point: after a legitimate compaction the chain still verifies.
+	vr, err := journal.VerifyChain(ctx, db, "ws_test")
+	if err != nil {
+		t.Fatalf("verify after compaction: %v", err)
+	}
+	if !vr.OK {
+		t.Fatalf("FALSE POSITIVE: compaction made the chain read as tampered at seq=%d: %s", vr.BrokenSeq, vr.Reason)
+	}
+	if vr.Checkpoints < 1 {
+		t.Fatalf("expected at least one signed checkpoint to bridge the compacted gap, got %d", vr.Checkpoints)
+	}
+
+	// Contrast: a RAW mid-chain delete of a survivor, with no checkpoint, MUST
+	// still be caught. Delete survivor-2 (seq 2) directly.
+	if _, err := db.Exec(
+		`DELETE FROM journal_entries WHERE workspace_id = 'ws_test' AND summary = 'survivor-2'`); err != nil {
+		t.Fatalf("raw delete: %v", err)
+	}
+	bad, err := journal.VerifyChain(ctx, db, "ws_test")
+	if err != nil {
+		t.Fatalf("verify after raw delete: %v", err)
+	}
+	if bad.OK {
+		t.Fatalf("SECURITY HOLE: an uncheckpointed mid-chain delete was not detected")
+	}
+}
+
 func TestCompactor_RollsUpDailyBuckets(t *testing.T) {
 	db := openDB(t)
 	defer db.Close()

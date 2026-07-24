@@ -86,7 +86,10 @@ func auditTestRig(t *testing.T) (string, *sql.DB, journal.Emitter, *scrubber.Scr
 		    refs         TEXT NOT NULL DEFAULT '{}',
 		    trace_id     TEXT,
 		    span_id      TEXT,
-		    expires_at   TEXT
+		    expires_at   TEXT,
+		    seq          INTEGER NOT NULL DEFAULT 0,
+		    prev_hash    TEXT NOT NULL DEFAULT '',
+		    entry_hash   TEXT NOT NULL DEFAULT ''
 		);
 		INSERT INTO workspaces (id) VALUES ('ws_audit');
 		INSERT INTO crews (id, workspace_id) VALUES ('crew_audit', 'ws_audit');

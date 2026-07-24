@@ -19,6 +19,8 @@
 #   5. keeper scrubber bookkeeping + model fields are exposed.
 #   6. fail-silent audit drop under write pressure (T6) — SKIP.
 #   7. returned-vs-persisted decision mismatch (T7) — SKIP.
+#   8. journal hash-chain tamper-evidence: `journal verify` is OK on a healthy
+#      journal and DETECTS an out-of-band row mutation (issue #1369).
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
@@ -157,6 +159,65 @@ section "7. Returned-vs-persisted decision mismatch (needs token, T7) — SKIP"
 # ─────────────────────────────────────────────────────────────────────────────
 skip "returned-vs-persisted decision mismatch (test T7)" \
   "decision UPDATE failures are logged-and-swallowed (keeper_request.go:229, keeper_execute.go:287/418). Induce the UPDATE-failure window, then compare the API response decision to the row read via GET /keeper/request/{id}. Requires the internal token — sidecar-side probe."
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "8. Journal hash-chain is tamper-evident (issue #1369)"
+# ─────────────────────────────────────────────────────────────────────────────
+# The journal is the accountability spine. Every entry chains onto the prior
+# one's hash, so mutation/reorder/mid-chain deletion is detectable via
+# `crewship journal verify` (GET /api/v1/admin/journal/verify). We assert the
+# healthy chain verifies, then — if a DB path is reachable (CREWSHIP_DB) so we
+# can play the attacker — tamper a row and assert the break is reported.
+if have jq; then
+  verify_json="$(cs journal verify --format json 2>/dev/null)"
+  if printf '%s' "$verify_json" | jq -e '.ok==true' >/dev/null 2>&1; then
+    n_ok="$(printf '%s' "$verify_json" | jq -r '.count // 0')"
+    _pass "journal chain verifies OK on a healthy journal ($n_ok entries)"
+  else
+    # Either the endpoint is missing (stale server) or the chain is already
+    # broken — both are real signals; surface as a FAIL rather than a pass.
+    _fail "journal chain verifies OK" "verify did not report ok=true: $(printf '%s' "$verify_json" | head -c 200)"
+  fi
+
+  # Exit-code contract: verify must exit 0 on a clean chain.
+  if cs journal verify >/dev/null 2>&1; then
+    _pass "journal verify exits 0 on a clean chain"
+  else
+    _fail "journal verify exit 0 on clean chain" "non-zero exit with no tamper applied"
+  fi
+
+  # Tamper leg — needs direct DB access to play the attacker. Only runs when a
+  # sqlite DB path is provided (co-located run); otherwise SKIP honestly.
+  if [[ -n "${CREWSHIP_DB:-}" ]] && [[ -f "${CREWSHIP_DB}" ]] && have sqlite3; then
+    tgt="$(sqlite3 "$CREWSHIP_DB" "SELECT id FROM journal_entries ORDER BY seq DESC LIMIT 1;" 2>/dev/null)"
+    if [[ -n "$tgt" ]]; then
+      # Snapshot then mutate a committed field out-of-band.
+      orig="$(sqlite3 "$CREWSHIP_DB" "SELECT summary FROM journal_entries WHERE id='$tgt';" 2>/dev/null)"
+      sqlite3 "$CREWSHIP_DB" "UPDATE journal_entries SET summary='TAMPERED-BY-HARNESS' WHERE id='$tgt';" 2>/dev/null
+      tv="$(cs journal verify --format json 2>/dev/null)"
+      if printf '%s' "$tv" | jq -e '.ok==false' >/dev/null 2>&1; then
+        _pass "tampered journal row is DETECTED (ok=false, break at seq $(printf '%s' "$tv" | jq -r '.broken_seq'))"
+      else
+        _fail "tampered journal row detected" "verify still reported ok=true after out-of-band UPDATE"
+      fi
+      if ! cs journal verify >/dev/null 2>&1; then
+        _pass "journal verify exits non-zero on a broken chain"
+      else
+        _fail "journal verify exit non-zero on broken chain" "exited 0 despite tamper"
+      fi
+      # Restore so the tamper doesn't poison later suites in the same run.
+      sqlite3 "$CREWSHIP_DB" "UPDATE journal_entries SET summary='$(printf '%s' "$orig" | sed "s/'/''/g")' WHERE id='$tgt';" 2>/dev/null
+      info "Restored the tampered summary; note the chain hash for that row is now stale — re-seed for a pristine chain."
+    else
+      skip "journal tamper detection" "no journal_entries rows found in $CREWSHIP_DB"
+    fi
+  else
+    skip "journal tamper detection (out-of-band UPDATE)" \
+      "needs a reachable SQLite DB to play the attacker — set CREWSHIP_DB=/path/to/crewship.db and install sqlite3, then re-run co-located with the server. The verify-OK + exit-code legs above already exercise the endpoint via the CLI."
+  fi
+else
+  skip "journal hash-chain assertions" "jq missing"
+fi
 
 info "Cleanup: harness credentials are prefixed HARNESS_."
 
