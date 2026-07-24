@@ -150,6 +150,7 @@ Anywhere a string is interpolated (prompt, http URL/body/headers, wait until, co
 - `steps.Y.output.path` — JSON path into a step's output (when output parses as JSON)
 - `env.AUTHOR_CREW_NAME` / etc. — read-only allowlist of execution context
 - `secrets.<type>` — a workspace-vault credential, resolved at run time **by type** (see [Secrets](#secrets-secrets-type) below)
+- `routine.state.<key>` — durable cross-run state carried forward from a **previous** run (see [Cross-run state](#cross-run-state-routine-state-key) below)
 
 Save-time validator walks **every** template-bearing field (prompt, nested inputs, http url/body/headers, wait until, event_filter, approval_prompt, code body, code env values, transform input, transform expression, if condition) and rejects placeholders that reference unknown inputs or unseen-yet steps.
 
@@ -180,6 +181,29 @@ Templates are **regex substitution, not expression evaluation**. There is no ari
 
 <Info>
 Save-time validation walks **every** template-bearing field and rejects placeholders that reference unknown inputs or unseen-yet steps — so a typo'd `{{ inputs.tyop }}` fails at save, not at 3am in production.
+</Info>
+
+### Cross-run state (`{{ routine.state.<key> }}`)
+
+`run.metadata.*` is per-run scratch — gone when the run ends. **Cross-run state** carries a value *forward* to the next run of the same routine, which is what every incremental / polling job needs: a **watermark** ("last processed id / timestamp") so each run picks up where the last left off.
+
+- **Read** with `{{ routine.state.<key> }}`. A key that was never written renders empty (like a missing input). The value you read is the snapshot **as of run start** — it reflects what a *prior* run wrote, not a write earlier in this same run.
+- **Write** with a step's `state_write` binding — a map of `key → template`, rendered **after** the step completes (so it can reference the step's own output) and persisted for the next run:
+
+```json
+{
+  "id": "sync",
+  "type": "agent_run",
+  "agent_slug": "importer",
+  "prompt": "Import records created after id {{ routine.state.last_id }}. Return the highest id you imported.",
+  "state_write": { "last_id": "{{ steps.sync.output }}" }
+}
+```
+
+State is **isolated per schedule**: two cron schedules of the same routine keep independent watermarks (keyed on `(routine, schedule)`); manual / webhook runs share a single default bucket per routine. It is **durable** — a value written before a restart is read after it — because it lives in the database, not memory. A [wake gate](#wake-gates) probe reads the **same** bucket its main scheduled routine writes, so an agentless probe can gate on the last watermark.
+
+<Info>
+State is a small key/value store for coordination values (cursors, timestamps, counts), not a data warehouse. Writes are **best-effort** — a failed state write logs a warning and never fails the step. Values are opaque strings; JSON-encode a structure yourself if you need one.
 </Info>
 
 ## Required integrations

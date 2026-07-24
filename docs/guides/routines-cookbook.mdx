@@ -540,6 +540,66 @@ The verdict (`DIVERGE-B-PASS`) tells you Haiku can't satisfy the gate but Opus c
 
 ---
 
+## Recipe 10 — Incremental sync with a cross-run watermark
+
+**Goal**: a scheduled routine that processes only what's *new* since the last run — the classic watermark pattern. Each run reads the last cursor from `{{ routine.state.* }}`, does its work, and writes the new cursor back with `state_write` for the next run.
+
+```json
+{
+  "dsl_version": "1.0",
+  "name": "incremental-invoice-sync",
+  "display_name": "Sync invoices created since the last run",
+  "max_cost_usd": 0.50,
+  "steps": [
+    {
+      "id": "fetch",
+      "type": "http",
+      "http": {
+        "method": "GET",
+        "url": "https://api.example.com/invoices?since_id={{ routine.state.last_id }}",
+        "credential_ref": { "type": "example_api" }
+      }
+    },
+    {
+      "id": "process",
+      "type": "agent_run",
+      "agent_slug": "bookkeeper",
+      "needs": ["fetch"],
+      "if": "steps.fetch != \"[]\"",
+      "prompt": "Reconcile these new invoices:\n\n{{ steps.fetch.output }}\n\nReturn ONLY the highest invoice id you processed.",
+      "validation": { "min_length": 1 },
+      "state_write": { "last_id": "{{ steps.process.output }}" }
+    }
+  ]
+}
+```
+
+Attach a cron schedule and it runs incrementally:
+
+```bash
+crewship routine schedules create --slug incremental-invoice-sync \
+    --name "invoice-sync" --cron "*/15 * * * *"
+```
+
+### How the watermark flows
+
+- **First run**: `{{ routine.state.last_id }}` is empty, so `since_id=` fetches from the beginning. The `process` step writes `last_id` = the highest id it handled.
+- **Every run after**: reads the `last_id` the previous run wrote, fetches only newer records, and advances the watermark. A CEL `if:` (`steps.fetch != "[]"`) skips the write-back entirely on an empty batch, so the cursor never regresses.
+- **Per-schedule isolation**: if you attach a *second* schedule (say a manual backfill schedule), it keeps its **own** `last_id` — the two never clobber each other. Manual `crewship routine run` calls share one default bucket.
+- **Restart-safe**: the cursor is in the database, not memory. A process restart between runs loses nothing.
+
+### Watermark + wake gate
+
+Because the state bucket is shared with the schedule's [wake gate](/guides/routines#wake-gates), an **agentless** probe can read the same watermark to decide whether there's anything new before the (paid) main routine fires — attach the probe when you create the schedule:
+
+```bash
+# main routine only wakes when the probe finds records past the watermark
+crewship routine schedules create --slug incremental-invoice-sync \
+    --name "invoice-sync" --cron "*/15 * * * *" --wake-slug has-new-invoices
+```
+
+---
+
 ## What's intentionally NOT in the cookbook
 
 These exist in the routines documentation but aren't recipes here because they don't change the patterns above:

@@ -333,6 +333,15 @@ type Step struct {
 	// each element of a JSON array with bounded concurrency, collecting the
 	// per-item outputs into a JSON array as this step's output.
 	Foreach *ForeachStep `json:"foreach,omitempty"`
+
+	// StateWrite persists cross-run routine state (#1420): a map of state
+	// key → template, rendered AFTER this step completes (so a value can
+	// reference the step's own output) and upserted into the routine's
+	// per-schedule state bucket. The next run of the same routine on the
+	// same schedule reads it back via {{ routine.state.<key> }} — the
+	// watermark ("last processed id/timestamp") primitive. Any step type
+	// may declare it; writes are best-effort and never fail the step.
+	StateWrite map[string]string `json:"state_write,omitempty"`
 }
 
 // ForeachStep fans a body of steps out over a JSON array (#1419, part 1).

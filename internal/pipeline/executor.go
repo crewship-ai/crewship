@@ -164,6 +164,13 @@ type Executor struct {
 	// real store at boot so list-active-runs + boot-recovery work.
 	runStore *RunStore
 
+	// stateStore persists cross-run routine state (migration v155, #1420):
+	// the {{ routine.state.* }} read namespace + `state_write` step binding,
+	// scoped per (pipeline_id, schedule_id). Nil = the feature is off — reads
+	// resolve empty and writes are a best-effort no-op, so routines that don't
+	// use state behave identically.
+	stateStore *RoutineStateStore
+
 	// notifier delivers non-blocking notify-step messages to the inbox.
 	// Production wiring (NewWiredExecutor with a DB) installs a writer
 	// backed by inbox.Insert. Nil = notify steps are a best-effort no-op
@@ -336,6 +343,14 @@ func (e *Executor) WithIdempotencyStore(s *IdempotencyStore) *Executor {
 // at boot.
 func (e *Executor) WithRunStore(s *RunStore) *Executor {
 	e.runStore = s
+	return e
+}
+
+// WithStateStore wires the cross-run routine-state layer (pipeline_routine_state,
+// migration v155, #1420) that backs {{ routine.state.* }} + `state_write`.
+// Without it the namespace resolves empty and state_write is a no-op.
+func (e *Executor) WithStateStore(s *RoutineStateStore) *Executor {
+	e.stateStore = s
 	return e
 }
 
@@ -810,6 +825,11 @@ type RunInput struct {
 	// to the current run's own slug) with ErrRuntimeCycleDetected before
 	// dispatching it. Set only by buildNestedRunInput.
 	callPath []string
+	// stateSnapshot is the routine's cross-run state bucket loaded once at
+	// run start (#1420), threaded into every step's render context as the
+	// {{ routine.state.* }} namespace. Populated internally by runDSL from
+	// the RoutineStateStore; external callers leave it nil.
+	stateSnapshot map[string]string
 
 	// resume marks this input as a boot-time re-entry of a run from a
 	// previous process lifetime (W6 resume-from-step). Set only by
@@ -1095,6 +1115,16 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 	// (linear loop) or every step goroutine (DAG).
 	runMeta := parseRunMetadata(in.MetadataJSON)
 
+	// Cross-run routine state (#1420): load the (pipeline, schedule) bucket
+	// ONCE, snapshot-as-of-run-start. Threaded through in.stateSnapshot into
+	// every step's render context as {{ routine.state.* }}. A step's own
+	// state_write persists for the NEXT run — reads here reflect the prior
+	// run, which is exactly the watermark contract. Skipped entirely when no
+	// store is wired (feature off) or on a draft (no pipeline id).
+	if in.stateSnapshot == nil {
+		in.stateSnapshot = e.loadRoutineState(ctx, statePipelineID(in), stateScheduleID(in))
+	}
+
 	if in.Mode != ModeDryRun {
 		switch parallelismMode(dsl) {
 		case ParallelismAuto:
@@ -1246,7 +1276,7 @@ func (e *Executor) runLinearStep(
 	startedAt time.Time,
 ) *RunResult {
 	// Build the rendered prompt for both run + dry-run paths.
-	ctxRender := buildStepRenderContext(inputsForCtx, result.StepOutputs, renderEnv, runMeta, dsl.EgressTargets)
+	ctxRender := buildStepRenderContext(inputsForCtx, result.StepOutputs, renderEnv, runMeta, dsl.EgressTargets, in.stateSnapshot)
 	renderedPrompt := Render(step.Prompt, ctxRender)
 
 	// Conditional execution. We evaluate the rendered If string
@@ -1361,6 +1391,10 @@ func (e *Executor) runLinearStep(
 		// Flush the outputs map at the step boundary so a kill
 		// between steps loses at most the in-flight step.
 		e.persistStepOutputs(ctx, in, depth, runID, result.StepOutputs, result.CostUSD, startedAt)
+		// Persist this step's state_write bindings for the NEXT run (#1420).
+		// ctxRender.StepOutputs is result.StepOutputs (already carrying this
+		// step's output), so a value template can reference the step itself.
+		e.persistStateWrites(ctx, step, in, ctxRender)
 
 		// Cost-cap gate. Checked AFTER the step completes (we
 		// can't refund work already done) but BEFORE the next
@@ -1796,6 +1830,68 @@ func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent Ru
 			fmt.Errorf("nested pipeline %q failed at step %q: %s", step.PipelineSlug, nested.FailedAtStep, nested.ErrorMessage)
 	}
 	return nested.Output, nested.CostUSD, time.Since(stepStart).Milliseconds(), nil
+}
+
+// stateScheduleID resolves the schedule bucket a run's cross-run state lives
+// in: the schedule id for schedule/wake-check triggers (so a routine keeps a
+// per-schedule watermark AND a wake probe reads the SAME bucket its main
+// routine writes), else the empty-string default bucket shared by
+// manual/webhook/nested runs of the same pipeline.
+func stateScheduleID(in RunInput) string {
+	switch in.TriggeredVia {
+	case TriggeredViaSchedule, TriggeredViaWakeCheck:
+		return in.TriggeredByID
+	}
+	return ""
+}
+
+// statePipelineID returns the persisted pipeline id used to scope cross-run
+// state, or "" for a draft / RunDefinition run (no pipelines row exists, so
+// there is nothing to key FK-valid state against).
+func statePipelineID(in RunInput) string {
+	if in.pipeline != nil {
+		return in.pipeline.ID
+	}
+	return ""
+}
+
+// loadRoutineState reads the (pipeline, schedule) cross-run state bucket.
+// Best-effort: a store read error logs and yields an empty map so a transient
+// failure renders {{ routine.state.* }} empty rather than sinking the run —
+// state is an optimization (watermarks), never a correctness gate. Returns an
+// empty (never nil) map when the feature is off or on a draft run.
+func (e *Executor) loadRoutineState(ctx context.Context, pipelineID, scheduleID string) map[string]string {
+	if e.stateStore == nil || pipelineID == "" {
+		return map[string]string{}
+	}
+	st, err := e.stateStore.Load(ctx, pipelineID, scheduleID)
+	if err != nil {
+		e.persistWarn("routine state load", pipelineID, err)
+		return map[string]string{}
+	}
+	return st
+}
+
+// persistStateWrites renders a step's state_write bindings against the
+// post-step render context and upserts them into the routine's (pipeline,
+// schedule) state bucket (#1420). Best-effort: a write failure logs and never
+// fails the step. No-op when the store is off, on a draft run, in dry-run, or
+// when the step declares no state_write.
+func (e *Executor) persistStateWrites(ctx context.Context, step Step, in RunInput, renderCtx RenderContext) {
+	if len(step.StateWrite) == 0 || e.stateStore == nil || in.Mode == ModeDryRun {
+		return
+	}
+	pipelineID := statePipelineID(in)
+	if pipelineID == "" {
+		return
+	}
+	scheduleID := stateScheduleID(in)
+	for key, tmpl := range step.StateWrite {
+		val := Render(tmpl, renderCtx)
+		if err := e.stateStore.Write(ctx, pipelineID, scheduleID, key, val); err != nil {
+			e.persistWarn("routine state write", in.RunIDOverride, err)
+		}
+	}
 }
 
 // parentRunSlug resolves the slug of the currently-running pipeline from a

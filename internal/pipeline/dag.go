@@ -481,7 +481,7 @@ func (e *Executor) executeOneStep(
 		outputsSnap[k] = v
 	}
 	resMu.Unlock()
-	ctxRender := buildStepRenderContext(inputsForCtx, outputsSnap, renderEnv, runMeta, dsl.EgressTargets)
+	ctxRender := buildStepRenderContext(inputsForCtx, outputsSnap, renderEnv, runMeta, dsl.EgressTargets, in.stateSnapshot)
 	renderedPrompt := Render(step.Prompt, ctxRender)
 
 	// Conditional skip — same semantics as the linear path.
@@ -554,6 +554,13 @@ func (e *Executor) executeOneStep(
 	// monotonically-growing superset and the wave-boundary flush re-writes the
 	// full set — strictly better than losing the whole wave.
 	e.persistStepOutputs(ctx, in, depth, runID, flushSnap, costNow, startedAt)
+	// State_write bindings persist for the NEXT run (#1420). Add this step's
+	// own output to the goroutine-local snapshot so a value template can
+	// reference it, then render+upsert off the shared lock.
+	if len(step.StateWrite) > 0 {
+		outputsSnap[step.ID] = output
+		e.persistStateWrites(ctx, *step, in, buildStepRenderContext(inputsForCtx, outputsSnap, renderEnv, runMeta, dsl.EgressTargets, in.stateSnapshot))
+	}
 	emit.emitStepCompleted(ctx, *step, output, stepDur, stepCost)
 
 	// Cost-cap gate (post-step). The check reads from the locked

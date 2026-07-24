@@ -475,8 +475,15 @@ func checkTemplateRef(ref string, inputs, earlier map[string]struct{}) error {
 		// save time; whether the type actually resolves is enforced
 		// separately by credentials_required (declare it there to make an
 		// unresolvable secret a hard validation failure).
+	case "routine":
+		// routine.state.<key> — cross-run routine state (#1420), resolved
+		// at render time from the per-schedule state bucket. A missing key
+		// renders empty; the shape (routine.state.X) is checked here.
+		if len(parts) < 3 || parts[1] != "state" {
+			return fmt.Errorf("invalid template ref %q (expected routine.state.<key>)", ref)
+		}
 	default:
-		return fmt.Errorf("template ref %q uses unknown namespace %q (allowed: inputs, steps, env, run, secrets)", ref, parts[0])
+		return fmt.Errorf("template ref %q uses unknown namespace %q (allowed: inputs, steps, env, run, secrets, routine)", ref, parts[0])
 	}
 	return nil
 }
@@ -622,6 +629,14 @@ type RenderContext struct {
 	// missing REQUIRED credential is caught separately by
 	// credentials_required enforcement.
 	Secrets map[string]string
+	// State is the routine's cross-run state bucket for the {{ routine.state.<key> }}
+	// read namespace (#1420). Loaded once per run from RoutineStateStore keyed on
+	// (pipeline_id, schedule_id) — the snapshot AS OF run start, so a step reads
+	// what a PRIOR run wrote (a step's own state_write lands for the NEXT run,
+	// not mid-run). A key with no stored value renders empty, like a missing
+	// input. Isolated per schedule; survives process restart (it is durable in
+	// SQL, not in-memory).
+	State map[string]string
 }
 
 // resolveRef walks one template body (already trimmed of {{ }}) against
@@ -696,6 +711,17 @@ func resolveRef(ref string, ctx RenderContext) (string, bool) {
 		// supported (a secret is an opaque scalar).
 		if v, ok := ctx.Secrets[parts[1]]; ok {
 			return v, true
+		}
+		return "", false
+	case "routine":
+		// routine.state.<key> — cross-run routine state (#1420), loaded per
+		// (pipeline, schedule) at run start. A missing key renders empty,
+		// like an input. Deeper paths aren't supported (a state value is an
+		// opaque scalar string).
+		if parts[1] == "state" && len(parts) == 3 {
+			if v, ok := ctx.State[parts[2]]; ok {
+				return v, true
+			}
 		}
 		return "", false
 	}

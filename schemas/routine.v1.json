@@ -241,7 +241,12 @@
         "transform": { "$ref": "#/$defs/TransformStep" },
         "notify": { "$ref": "#/$defs/NotifyStep" },
         "script": { "$ref": "#/$defs/ScriptStep" },
-        "foreach": { "$ref": "#/$defs/ForeachStep" }
+        "foreach": { "$ref": "#/$defs/ForeachStep" },
+        "state_write": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Cross-run state bindings: map of state key → template, rendered after this step and persisted per (routine, schedule). The next run reads them via {{ routine.state.<key> }} (watermark pattern)."
+        }
       },
       "allOf": [
         {
