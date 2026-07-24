@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -17,6 +18,9 @@ import (
 // handler's mapping from wire format → journal.Entry can be asserted.
 type emitRecorder struct {
 	entries []journal.Entry
+
+	notifyMu sync.Mutex
+	notifyCh chan struct{}
 }
 
 func (r *emitRecorder) Emit(_ context.Context, e journal.Entry) (string, error) {
@@ -27,6 +31,29 @@ func (r *emitRecorder) Emit(_ context.Context, e journal.Entry) (string, error) 
 	return e.ID, nil
 }
 func (r *emitRecorder) Flush(_ context.Context) error { return nil }
+
+// Notify + WakeNotify give tests a way to exercise the flushNotifier path
+// (see internal/api/journal_handler.go) without a real journal.Writer:
+// WakeNotify simulates "a batch just committed" so a Stream() call polls
+// immediately instead of waiting for its fallback tick.
+func (r *emitRecorder) Notify() <-chan struct{} {
+	r.notifyMu.Lock()
+	defer r.notifyMu.Unlock()
+	if r.notifyCh == nil {
+		r.notifyCh = make(chan struct{})
+	}
+	return r.notifyCh
+}
+
+func (r *emitRecorder) WakeNotify() {
+	r.notifyMu.Lock()
+	defer r.notifyMu.Unlock()
+	if r.notifyCh == nil {
+		r.notifyCh = make(chan struct{})
+	}
+	close(r.notifyCh)
+	r.notifyCh = make(chan struct{})
+}
 
 // newJournalTestRouter wires a Router with just enough surface area to
 // test the sidecar-emit endpoint. We deliberately skip the full

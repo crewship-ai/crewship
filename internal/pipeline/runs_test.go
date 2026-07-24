@@ -61,6 +61,13 @@ CREATE TABLE pipeline_runs (
     created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
 );
+CREATE TABLE IF NOT EXISTS pipeline_run_step_outputs (
+    run_id     TEXT NOT NULL,
+    step_id    TEXT NOT NULL,
+    output     TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, step_id)
+);
 CREATE TABLE IF NOT EXISTS run_tags (
     run_id       TEXT NOT NULL,
     workspace_id TEXT NOT NULL,
@@ -169,17 +176,19 @@ func TestRunStore_LifecycleTransitions(t *testing.T) {
 		t.Errorf("running: %+v", r)
 	}
 
-	if err := store.AppendStepOutput(ctx, "run_lc",
-		map[string]string{"step1": "hello world"},
-		0.0023, 120); err != nil {
-		t.Fatalf("append: %v", err)
+	if err := store.UpsertStepOutput(ctx, "run_lc", "step1", "hello world", 0.0023, 120); err != nil {
+		t.Fatalf("upsert step output: %v", err)
 	}
 	r, _ = store.Get(ctx, "run_lc")
 	if r.CostUSD != 0.0023 || r.DurationMs != 120 {
-		t.Errorf("append cost/dur: %+v", r)
+		t.Errorf("upsert cost/dur: %+v", r)
 	}
-	if r.StepOutputsJSON == "{}" {
-		t.Errorf("step_outputs not persisted: %s", r.StepOutputsJSON)
+	outputs, err := store.GetStepOutputs(ctx, "run_lc")
+	if err != nil {
+		t.Fatalf("get step outputs: %v", err)
+	}
+	if outputs["step1"] != "hello world" {
+		t.Errorf("step output not persisted: %+v", outputs)
 	}
 
 	if err := store.MarkTerminal(ctx, MarkTerminalInput{

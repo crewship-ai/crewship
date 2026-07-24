@@ -122,6 +122,40 @@ func TestIdempotency_LookupOrReserve_ExpiredKeyReplaces(t *testing.T) {
 	}
 }
 
+// TestIdempotency_LookupOrReserve_SelfHealsWithoutBulkSweep proves the
+// #1411 fix: LookupOrReserve resolves an expired key as fresh in ONE call
+// via its own per-key force-delete-and-retry, independent of whether the
+// (now-sampled, ~1-in-N) bulk sweep happened to run. Seeds the expired row
+// directly via SQL — bypassing LookupOrReserve entirely — so this call is
+// guaranteed to be the first thing that ever looks at it; the bulk sweep
+// cannot have touched a row it never had a chance to run against.
+func TestIdempotency_LookupOrReserve_SelfHealsWithoutBulkSweep(t *testing.T) {
+	db := openIdempotencyTestDB(t)
+	defer db.Close()
+	store := NewIdempotencyStore(db)
+	ctx := context.Background()
+
+	expired := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339Nano) // tsformat:allow: seeds expires_at in this store's RFC3339Nano format for parity with production idempotency writes
+	if _, err := db.ExecContext(ctx, `
+INSERT INTO pipeline_run_idempotency
+  (workspace_id, idempotency_key, run_id, pipeline_id, expires_at, created_at)
+VALUES
+  ('ws_test', 'key_1', 'ghost_run', 'pipe_1', ?, datetime('now'))`, expired); err != nil {
+		t.Fatalf("seed expired row: %v", err)
+	}
+
+	got, isNew, err := store.LookupOrReserve(ctx, "ws_test", "key_1", "run_b", "pipe_1", time.Hour)
+	if err != nil {
+		t.Fatalf("LookupOrReserve on a pre-existing expired row (no sweep involved) failed: %v", err)
+	}
+	if !isNew {
+		t.Errorf("expected the expired row to resolve as fresh in one call, got isNew=%v", isNew)
+	}
+	if got != "run_b" {
+		t.Errorf("expected new reservation run_b, got %s", got)
+	}
+}
+
 func TestIdempotency_Forget_AllowsRetry(t *testing.T) {
 	db := openIdempotencyTestDB(t)
 	defer db.Close()

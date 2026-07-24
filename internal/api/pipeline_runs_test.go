@@ -403,6 +403,14 @@ func TestPipelineRuns_List_OmitsStepOutputs_DetailStillHasIt(t *testing.T) {
 		now, now); err != nil {
 		t.Fatalf("seed run with step_outputs: %v", err)
 	}
+	// Step outputs live in pipeline_run_step_outputs (migration v156), not
+	// the legacy column above — GetRun reads from there now.
+	if _, err := db.Exec(`
+		INSERT INTO pipeline_run_step_outputs (run_id, step_id, output, updated_at)
+		VALUES (?, ?, ?, ?)`,
+		"prn_heavy", "step1", "a very large chunk of agent transcript that must never ride the list feed", now); err != nil {
+		t.Fatalf("seed run step output: %v", err)
+	}
 
 	listReq := withWorkspaceUser(
 		httptest.NewRequest("GET", "/api/v1/workspaces/"+wsID+"/pipeline-runs", nil),

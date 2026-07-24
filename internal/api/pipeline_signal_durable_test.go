@@ -95,9 +95,12 @@ func TestSignalRun_DeliversDurably_ResumesParkedRun(t *testing.T) {
 	if rec.Status != "completed" {
 		t.Fatalf("final run status = %q (error=%q), want completed", rec.Status, rec.ErrorMessage)
 	}
-	var outputs map[string]string
-	if err := json.Unmarshal([]byte(rec.StepOutputsJSON), &outputs); err != nil {
-		t.Fatalf("unmarshal step outputs: %v", err)
+	// Step outputs live in the normalized pipeline_run_step_outputs table
+	// (#1411), read via GetStepOutputs — the same source resume restores from;
+	// the legacy step_outputs_json blob is no longer written on the hot path.
+	outputs, err := runStore.GetStepOutputs(context.Background(), res.RunID)
+	if err != nil {
+		t.Fatalf("get step outputs: %v", err)
 	}
 	if outputs["gate"] != "approved-by-test" {
 		t.Errorf("gate step output = %q, want approved-by-test", outputs["gate"])

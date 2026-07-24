@@ -222,8 +222,14 @@ func TestRunStore_ClosedDB_ErrorPaths(t *testing.T) {
 	if _, err := store.RecoverInterruptedAtBoot(ctx); err == nil || !strings.Contains(err.Error(), "recover") {
 		t.Errorf("Recover: %v", err)
 	}
-	if err := store.AppendStepOutput(ctx, "x", map[string]string{"a": "b"}, 0, 0); err == nil {
-		t.Error("AppendStepOutput should error on closed DB")
+	if err := store.UpsertStepOutput(ctx, "x", "a", "b", 0, 0); err == nil {
+		t.Error("UpsertStepOutput should error on closed DB")
+	}
+	if err := store.FlushStepOutputs(ctx, "x", map[string]string{"a": "b"}, 0, 0); err == nil {
+		t.Error("FlushStepOutputs should error on closed DB")
+	}
+	if _, err := store.GetStepOutputs(ctx, "x"); err == nil {
+		t.Error("GetStepOutputs should error on closed DB")
 	}
 }
 

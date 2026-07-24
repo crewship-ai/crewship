@@ -26,7 +26,6 @@ package pipeline
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"reflect"
@@ -339,9 +338,9 @@ func TestResume_CodeStep_ExecutesWithFactoryExecutor(t *testing.T) {
 	}
 
 	rec := waitForRunStatus(t, deps.RunStore, "run_resume_code", RunStatusCompleted, 5*time.Second)
-	var outputs map[string]string
-	if err := json.Unmarshal([]byte(rec.StepOutputsJSON), &outputs); err != nil {
-		t.Fatalf("unmarshal outputs: %v", err)
+	outputs, err := deps.RunStore.GetStepOutputs(ctx, rec.ID)
+	if err != nil {
+		t.Fatalf("get step outputs: %v", err)
 	}
 	if outputs["a"] != "restored-a" || outputs["calc"] != "true" || outputs["c"] != "final-c" {
 		t.Errorf("step outputs after code-step resume: %#v", outputs)

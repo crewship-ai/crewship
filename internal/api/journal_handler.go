@@ -71,11 +71,13 @@ func (h *JournalHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Stream serves GET /api/v1/journal/stream. Implements Server-Sent Events:
 // the client subscribes once and receives new journal entries as they are
-// written. Under the hood this polls the journal every 1s for entries
-// newer than the last-sent ID. Using the journal table as the source
-// rather than tapping the Writer directly keeps the stream recoverable
-// across server restarts — if the connection drops, reconnecting with
-// Last-Event-ID replays the missed window.
+// written. Under the hood this wakes on the journal Writer's flush notify
+// (see flushNotifier) and re-reads entries newer than the last-sent ID, with
+// a 20s fallback tick as a safety net (#1411 — was an unconditional 1s poll
+// per client). Using the journal table as the source rather than tapping the
+// Writer directly keeps the stream recoverable across server restarts — if
+// the connection drops, reconnecting with Last-Event-ID replays the missed
+// window.
 func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
@@ -234,13 +236,58 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		lastSeenTime = time.Now().UTC()
 	}
 
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
+	// Event-driven polling (#1411): if the wired emitter exposes Notify (the
+	// production journal.Writer does), wake immediately after a batch
+	// commits instead of waiting up to a full tick. notifyCh is nil when the
+	// emitter doesn't support it (e.g. noopEmitter in tests) — a nil channel
+	// blocks forever in select, so the stream just falls back to the slow
+	// tick below, same as before this change.
+	var notifyCh <-chan struct{}
+	if n, ok := h.journal.(flushNotifier); ok {
+		notifyCh = n.Notify()
+	}
+	// Slow fallback tick: a safety net in case a Notify wake is ever missed
+	// (e.g. the emitter swapped mid-stream) or unsupported. 1s→20s since
+	// Notify now carries the common case — was every connected client
+	// polling every second regardless of activity (#1411 audit).
+	fallback := time.NewTicker(20 * time.Second)
+	defer fallback.Stop()
 	// Heartbeat every 15s to keep proxies from closing the connection
 	// as idle. SSE comments (": heartbeat\n\n") don't surface to the
 	// client handler but keep the TCP connection warm.
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
+
+	poll := func() {
+		pq := q
+		pq.Since = lastSeenTime
+		pq.Cursor = ""
+		pq.Limit = 100
+		rows, _, err := journal.List(r.Context(), h.db, pq)
+		if err != nil {
+			h.logger.Warn("journal stream poll failed", "err", err)
+			return
+		}
+		// Emit oldest first so the client timeline appends in order.
+		for i := len(rows) - 1; i >= 0; i-- {
+			e := rows[i]
+			ts := e.TS.UTC()
+			// Skip entries the client has already seen, tied by
+			// id when ts matches so burst-within-ms doesn't drop
+			// rows. id comparison is stable because the journal
+			// IDs are time-ordered hex tokens. Comparing on
+			// time.Time directly avoids the variable-width
+			// RFC3339Nano string sort (no fractional vs. .000
+			// quirks).
+			if ts.Before(lastSeenTime) || (ts.Equal(lastSeenTime) && e.ID <= lastSeenID) {
+				continue
+			}
+			writeSSEEvent(w, "entry", e)
+			lastSeenTime = ts
+			lastSeenID = e.ID
+		}
+		flusher.Flush()
+	}
 
 	for {
 		select {
@@ -249,37 +296,24 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		case <-heartbeat.C:
 			_, _ = fmt.Fprintf(w, ": heartbeat\n\n")
 			flusher.Flush()
-		case <-ticker.C:
-			poll := q
-			poll.Since = lastSeenTime
-			poll.Cursor = ""
-			poll.Limit = 100
-			rows, _, err := journal.List(r.Context(), h.db, poll)
-			if err != nil {
-				h.logger.Warn("journal stream poll failed", "err", err)
-				continue
+		case <-notifyCh:
+			poll()
+			if n, ok := h.journal.(flushNotifier); ok {
+				notifyCh = n.Notify() // single-use channel — re-subscribe
 			}
-			// Emit oldest first so the client timeline appends in order.
-			for i := len(rows) - 1; i >= 0; i-- {
-				e := rows[i]
-				ts := e.TS.UTC()
-				// Skip entries the client has already seen, tied by
-				// id when ts matches so burst-within-ms doesn't drop
-				// rows. id comparison is stable because the journal
-				// IDs are time-ordered hex tokens. Comparing on
-				// time.Time directly avoids the variable-width
-				// RFC3339Nano string sort (no fractional vs. .000
-				// quirks).
-				if ts.Before(lastSeenTime) || (ts.Equal(lastSeenTime) && e.ID <= lastSeenID) {
-					continue
-				}
-				writeSSEEvent(w, "entry", e)
-				lastSeenTime = ts
-				lastSeenID = e.ID
-			}
-			flusher.Flush()
+		case <-fallback.C:
+			poll()
 		}
 	}
+}
+
+// flushNotifier is an optional capability journal.Emitter implementations
+// may satisfy (the production journal.Writer does) to let the SSE stream
+// wake on new data instead of only polling on a fixed tick. Deliberately not
+// part of the journal.Emitter interface itself — that would force every
+// Emitter (including test doubles) to implement it.
+type flushNotifier interface {
+	Notify() <-chan struct{}
 }
 
 // parseJournalQuery turns URL query params into a journal.Query.

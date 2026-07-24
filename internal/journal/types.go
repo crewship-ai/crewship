@@ -239,6 +239,17 @@ const (
 	// window_end (RFC3339).
 	EntryPipelineScheduleMissedOccurrences EntryType = "pipeline.schedule.missed_occurrences"
 
+	// EntryPipelineRunsSwept fires when the per-workspace pipeline_runs
+	// retention sweep (internal/pipeline/retention.go) deletes one or more
+	// terminal runs older than the configured window. run_tags cascade-
+	// deletes with their run (ON DELETE CASCADE); warnings_json is a
+	// column on the row itself, not a separate table — nothing else needs
+	// cleanup. Payload carries `workspace_id`, `deleted_count` (int),
+	// `retention_days`, and `keep_last_n_per_pipeline`. Severity is info:
+	// routine maintenance, mirrors EntryMemoryVersionsSwept's contract.
+	// See issue #1407.
+	EntryPipelineRunsSwept EntryType = "pipeline.runs_swept"
+
 	// EntryRunAgentSpan is one INTERNAL action of an agent_run step — a single
 	// tool the agent invoked (Bash/Write/Edit/Read/MCP/HTTP). It is the leaf of
 	// the drillable run-trace tree (run → step → tool). trace_id == run.id (so

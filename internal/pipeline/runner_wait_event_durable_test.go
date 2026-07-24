@@ -20,7 +20,6 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"testing"
@@ -139,9 +138,12 @@ func TestExecutor_WaitEventStep_SurvivesRestart_DeliveredWhileDown(t *testing.T)
 	if final.Status != "completed" {
 		t.Fatalf("final run status = %q (error=%q), want completed", final.Status, final.ErrorMessage)
 	}
-	var outputs map[string]string
-	if err := json.Unmarshal([]byte(final.StepOutputsJSON), &outputs); err != nil {
-		t.Fatalf("unmarshal step outputs: %v", err)
+	// Step outputs live in the normalized pipeline_run_step_outputs table
+	// (#1411), read via GetStepOutputs — the same source resume restores from;
+	// the legacy step_outputs_json blob is no longer written on the hot path.
+	outputs, err := deps.RunStore.GetStepOutputs(ctx, res.RunID)
+	if err != nil {
+		t.Fatalf("get step outputs: %v", err)
 	}
 	if outputs["gate"] != `{"approved":true}` {
 		t.Errorf("gate step output = %q, want the delivered payload", outputs["gate"])

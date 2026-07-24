@@ -223,22 +223,8 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 	}
 	// Backfill the fired run id now that we have it (claim used "").
 	if res != nil {
-		if uerr := d.store.SetFiredRunID(ctx, pr.ID, runIDOf(res)); uerr != nil {
+		if uerr := d.store.SetFiredRunID(ctx, pr.ID, res.RunID); uerr != nil {
 			d.logger.Warn("pending dispatcher: backfill run id", "error", uerr, "pending_id", pr.ID)
 		}
 	}
-}
-
-// runIDOf extracts the run id from a RunResult via JSON to avoid
-// coupling to its concrete field layout.
-func runIDOf(res *RunResult) string {
-	b, err := json.Marshal(res)
-	if err != nil {
-		return ""
-	}
-	var m struct {
-		RunID string `json:"run_id"`
-	}
-	_ = json.Unmarshal(b, &m)
-	return m.RunID
 }

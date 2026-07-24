@@ -2,8 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 )
@@ -54,21 +52,22 @@ func TestExecutor_DAG_IncrementalFlush_PersistsCompletedStepMidWave(t *testing.T
 	}()
 
 	// Poll for step a's output persisted WHILE b is still blocked (wave open).
+	// Step outputs live in the normalized pipeline_run_step_outputs table
+	// (#1411) — read them through GetStepOutputs, the same source resume and
+	// the API use; the legacy step_outputs_json blob is no longer written on
+	// the hot path.
 	deadline := time.Now().Add(3 * time.Second)
 	sawA := false
 	for time.Now().Before(deadline) {
-		rec, gerr := runStore.Get(ctx, runID)
-		if gerr == nil && rec != nil && rec.StepOutputsJSON != "" {
-			var m map[string]string
-			if json.Unmarshal([]byte(rec.StepOutputsJSON), &m) == nil {
-				if _, ok := m["a"]; ok {
-					sawA = true
-					// b must still be blocked — its output not yet present.
-					if _, bDone := m["b"]; bDone {
-						t.Fatal("agent_b finished before release; test can't prove mid-wave flush")
-					}
-					break
+		m, gerr := runStore.GetStepOutputs(ctx, runID)
+		if gerr == nil {
+			if _, ok := m["a"]; ok {
+				sawA = true
+				// b must still be blocked — its output not yet present.
+				if _, bDone := m["b"]; bDone {
+					t.Fatal("agent_b finished before release; test can't prove mid-wave flush")
 				}
+				break
 			}
 		}
 		time.Sleep(15 * time.Millisecond)
@@ -79,8 +78,12 @@ func TestExecutor_DAG_IncrementalFlush_PersistsCompletedStepMidWave(t *testing.T
 
 	// Let b finish and the run complete.
 	close(release)
-	final := waitForRunStatus(t, runStore, runID, RunStatusCompleted, 3*time.Second)
-	if !strings.Contains(final.StepOutputsJSON, `"b"`) {
-		t.Errorf("final outputs missing b: %s", final.StepOutputsJSON)
+	waitForRunStatus(t, runStore, runID, RunStatusCompleted, 3*time.Second)
+	finalOuts, gerr := runStore.GetStepOutputs(ctx, runID)
+	if gerr != nil {
+		t.Fatalf("get final step outputs: %v", gerr)
+	}
+	if _, ok := finalOuts["b"]; !ok {
+		t.Errorf("final outputs missing b: %v", finalOuts)
 	}
 }

@@ -274,11 +274,81 @@ LIMIT ? OFFSET ?`
 	}
 
 	// Total row count (unbounded by limit/offset) for pagination UI.
-	total, err := countRuns(ctx, db, innerConds, innerArgs, outerConds, outerArgs)
-	if err != nil {
-		return nil, 0, err
+	//
+	// Skip the extra COUNT(*) query when the answer is already provable from
+	// this page alone:
+	//   - a non-empty page shorter than q.Limit means LIMIT wasn't fully
+	//     consumed, so this is the last page and total = offset + len(rows)
+	//     regardless of what offset was requested.
+	//   - an empty first page (offset 0) means there are no matching rows.
+	// An empty page at a non-zero offset is ambiguous (offset could be
+	// anywhere past a total we haven't measured), and a full page always is
+	// — both still run countRuns. See issue #1411.
+	var total int
+	switch {
+	case len(out) > 0 && len(out) < q.Limit:
+		total = q.Offset + len(out)
+	case len(out) == 0 && q.Offset == 0:
+		total = 0
+	default:
+		total, err = countRuns(ctx, db, innerConds, innerArgs, outerConds, outerArgs)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 	return out, total, nil
+}
+
+// GetRunByID looks up a single run by trace_id, scoped to workspaceID.
+// Returns (nil, nil) when no such run exists in the caller's workspace —
+// callers translate that into a 404 themselves so cross-tenant lookups
+// stay masked as "not found" rather than leaking existence.
+//
+// Runs the same run_aggregates CTE as ListRuns with trace_id folded into
+// the inner WHERE, so it hits idx_journal_ws_trace (or the narrower
+// idx_journal_ws_trace_runs partial index once migration v153 lands) as
+// an exact probe instead of ListRuns' unbounded-offset page scan
+// (internal/api/runs.go RunHandler.Get used to page up to 1000 rows).
+func GetRunByID(ctx context.Context, db *sql.DB, workspaceID, traceID string) (*RunAggregated, error) {
+	if workspaceID == "" {
+		return nil, fmt.Errorf("journal: GetRunByID requires workspace_id")
+	}
+	if traceID == "" {
+		return nil, fmt.Errorf("journal: GetRunByID requires trace_id")
+	}
+
+	cte, cteArgs := runAggregatesCTE(
+		[]string{"started_at", "finished_at", "terminal_type", "agent_id",
+			"triggered_by", "started_payload", "terminal_payload"},
+		"workspace_id = ? AND trace_id = ? AND entry_type LIKE 'run.%'")
+	q := cte + `
+SELECT trace_id, started_at, finished_at, terminal_type,
+       agent_id, triggered_by, started_payload, terminal_payload
+FROM run_aggregates
+WHERE started_at IS NOT NULL
+LIMIT 1`
+
+	args := make([]any, 0, len(cteArgs)+2)
+	args = append(args, cteArgs...)
+	args = append(args, workspaceID, traceID)
+
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("journal: get run by id: %w", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("journal: get run by id: %w", err)
+		}
+		return nil, nil
+	}
+	r, err := scanRunAggregated(rows, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
 }
 
 // scanRunAggregated scans one run_aggregates row — column order (trace_id,
