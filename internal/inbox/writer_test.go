@@ -8,8 +8,10 @@ import (
 	"log/slog"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 	_ "modernc.org/sqlite"
 )
 
@@ -92,6 +94,46 @@ func TestInsert_HappyPath(t *testing.T) {
 	// single-key case by just substring-matching the value.
 	if payloadJSON != `{"branch":"main"}` {
 		t.Errorf("payload_json: want {\"branch\":\"main\"}, got %q", payloadJSON)
+	}
+}
+
+// TestInsert_CreatedAtIsFixedWidthSortable pins the inbox created_at format:
+// every writer must emit the fixed-width tsformat.Layout (9 fractional digits)
+// so the (workspace_id, state, created_at DESC) index sorts by real time. A
+// variable-width RFC3339Nano value (trailing fractional zeros trimmed) or the
+// column's narrower strftime-ms DEFAULT would string-compare wrong against a
+// fixed-width sibling inside the same second. This is the regression guard for
+// the mixed-format ordering bug: the stored value must round-trip through
+// tsformat.Layout AND keep its exact fixed width.
+func TestInsert_CreatedAtIsFixedWidthSortable(t *testing.T) {
+	t.Parallel()
+	db := newInboxTestDB(t)
+	ctx := context.Background()
+
+	Insert(ctx, db, quietLogger(), Item{
+		WorkspaceID: "ws1",
+		Kind:        "message",
+		SourceID:    "ts-1",
+		Title:       "ts check",
+	})
+
+	var createdAt, updatedAt string
+	if err := db.QueryRow(
+		`SELECT created_at, updated_at FROM inbox_items WHERE source_id = 'ts-1'`).
+		Scan(&createdAt, &updatedAt); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	for label, got := range map[string]string{"created_at": createdAt, "updated_at": updatedAt} {
+		parsed, err := time.Parse(tsformat.Layout, got)
+		if err != nil {
+			t.Errorf("%s = %q does not parse as tsformat.Layout: %v", label, got, err)
+			continue
+		}
+		// Fixed width == the width tsformat.Format itself produces. Any
+		// trimmed-zero (RFC3339Nano) or strftime-ms DEFAULT value differs.
+		if want := tsformat.Format(parsed); want != got {
+			t.Errorf("%s = %q is not fixed-width tsformat form (re-format = %q)", label, got, want)
+		}
 	}
 }
 

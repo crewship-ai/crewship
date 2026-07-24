@@ -366,6 +366,60 @@ func TestApproveWaitpoint_AlreadyDecided_409(t *testing.T) {
 	}
 }
 
+// TestApproveWaitpoint_CrossTenant_409 is the #1415 regression at the HTTP
+// boundary, complementing the store-level TestWaitpointStore_CrossTenantApprovalRejected.
+// A MANAGER of workspace B who holds (or guesses) workspace A's pending
+// approval token must NOT be able to release A's gated run. The handler threads
+// WorkspaceIDFromContext into CompleteApproval, whose UPDATE is scoped by
+// workspace_id, so a cross-tenant POST matches zero rows → ErrAlreadyDecided →
+// 409, and A's waitpoint stays pending for its real owner to decide. Uses a
+// real SQLWaitpointStore (not the stub) so the workspace_id filter actually runs.
+func TestApproveWaitpoint_CrossTenant_409(t *testing.T) {
+	h, _, wsA := newPipelineHandlerForCRUDTest(t)
+	store := pipeline.NewSQLWaitpointStore(h.db)
+	t.Cleanup(store.Close)
+	h.SetWaitpointStore(store)
+
+	// Owner of workspace A parks a run on an approval waitpoint.
+	token, err := store.CreateApproval(context.Background(), pipeline.WaitpointApprovalRequest{
+		WorkspaceID:   wsA,
+		PipelineRunID: "run_A",
+		StepID:        "gate",
+		Prompt:        "ok?",
+		TimeoutSec:    30,
+	})
+	if err != nil {
+		t.Fatalf("create approval: %v", err)
+	}
+
+	// Attacker: MANAGER of a DIFFERENT workspace, holding A's token.
+	body := strings.NewReader(`{"approved":true,"comment":"pwned"}`)
+	req := httptest.NewRequest("POST", "/x", body)
+	req.ContentLength = int64(body.Len())
+	req.SetPathValue("token", token)
+	req = withWorkspaceUser(req, "u_attacker", "ws_B_other", "OWNER")
+	rr := httptest.NewRecorder()
+	h.ApproveWaitpoint(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("cross-tenant approve status = %d body=%s, want 409 (workspace-scoped UPDATE matches 0 rows)", rr.Code, rr.Body.String())
+	}
+
+	// The waitpoint must still be pending and unattributed to the attacker.
+	var status, decidedBy string
+	if err := h.db.QueryRow(
+		`SELECT status, COALESCE(decided_by_user_id,'') FROM pipeline_waitpoints WHERE token = ?`, token).
+		Scan(&status, &decidedBy); err != nil {
+		t.Fatalf("read waitpoint: %v", err)
+	}
+	if status != "pending" {
+		t.Errorf("waitpoint status = %q after cross-tenant approve, want still pending", status)
+	}
+	if decidedBy != "" {
+		t.Errorf("decided_by = %q, want empty (attacker must not be recorded)", decidedBy)
+	}
+}
+
 func TestApproveWaitpoint_NoBody_DefaultsToApprovedFalse(t *testing.T) {
 	// Source: "if r.ContentLength > 0" gates the JSON decode; with
 	// ContentLength 0 the body struct stays zero-value. The endpoint

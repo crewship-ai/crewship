@@ -2,9 +2,9 @@ package database
 
 import "testing"
 
-// TestMigrate_V156_MonthlyBudgetColumn asserts pipelines gained
+// TestMigrate_V163_MonthlyBudgetColumn asserts pipelines gained
 // monthly_budget_usd (default 0 = no budget set) — issue #1422 item 3.
-func TestMigrate_V156_MonthlyBudgetColumn(t *testing.T) {
+func TestMigrate_V163_MonthlyBudgetColumn(t *testing.T) {
 	t.Parallel()
 	db := migrateChainSetup(t)
 
@@ -37,7 +37,7 @@ func TestMigrate_V156_MonthlyBudgetColumn(t *testing.T) {
 		t.Fatalf("rows: %v", err)
 	}
 	if !found {
-		t.Fatal("pipelines missing monthly_budget_usd column after v156")
+		t.Fatal("pipelines missing monthly_budget_usd column after v163")
 	}
 	if defaultVal == nil || *defaultVal != "0" {
 		t.Errorf("monthly_budget_usd default = %v, want 0", defaultVal)

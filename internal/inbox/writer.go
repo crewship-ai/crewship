@@ -15,6 +15,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // Kind constants enumerate the inbox_items.kind CHECK values. Callers
@@ -143,7 +145,12 @@ func Insert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error
 		}
 	}
 	id := "ibx_" + in.Kind + "_" + in.SourceID
-	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: every inbox_items write in this file uses RFC3339Nano, so created_at/updated_at ordering stays self-consistent
+	// Fixed-width sortable form: every inbox_items writer (here + the hire
+	// path in internal/api/agents_hire.go) must agree on this format so the
+	// (workspace_id, state, created_at DESC) index orders correctly across
+	// writers. A trailing-zero-trimmed nano form is variable width and would
+	// mis-sort against a fixed-width row inside the same second.
+	now := tsformat.Format(time.Now())
 	blocking := 0
 	if in.Blocking {
 		blocking = 1
@@ -211,7 +218,9 @@ func UpsertMessage(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item
 		}
 	}
 	id := "ibx_" + in.Kind + "_" + in.SourceID
-	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: every inbox_items write in this file uses RFC3339Nano, so created_at/updated_at ordering stays self-consistent
+	// Fixed-width sortable form — see Insert for why every inbox_items writer
+	// must share this format for the created_at index to order correctly.
+	now := tsformat.Format(time.Now())
 	blocking := 0
 	if in.Blocking {
 		blocking = 1

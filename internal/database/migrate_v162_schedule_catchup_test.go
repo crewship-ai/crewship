@@ -2,10 +2,10 @@ package database
 
 import "testing"
 
-// TestMigrate_V155_ScheduleCatchupColumns asserts pipeline_schedules gained
+// TestMigrate_V162_ScheduleCatchupColumns asserts pipeline_schedules gained
 // catchup_policy (default 'once') and last_missed_count (default 0) —
 // issue #1422 item 2.
-func TestMigrate_V155_ScheduleCatchupColumns(t *testing.T) {
+func TestMigrate_V162_ScheduleCatchupColumns(t *testing.T) {
 	t.Parallel()
 	db := migrateChainSetup(t)
 
@@ -46,10 +46,10 @@ func TestMigrate_V155_ScheduleCatchupColumns(t *testing.T) {
 	}
 }
 
-// TestMigrate_V155_InboxKindWidened asserts inbox_items.kind now admits
+// TestMigrate_V162_InboxKindWidened asserts inbox_items.kind now admits
 // 'schedule_missed' alongside the pre-existing kinds, and that an existing
 // row (any kind) survives the CHECK-widening table rebuild.
-func TestMigrate_V155_InboxKindWidened(t *testing.T) {
+func TestMigrate_V162_InboxKindWidened(t *testing.T) {
 	t.Parallel()
 	db := migrateChainSetup(t)
 
@@ -62,7 +62,7 @@ func TestMigrate_V155_InboxKindWidened(t *testing.T) {
 	}
 	if _, err := db.Exec(`INSERT INTO inbox_items (id, workspace_id, kind, source_id, title)
 		VALUES ('ib_missed', 'ws_1', 'schedule_missed', 'sched_1', 'schedule missed occurrences')`); err != nil {
-		t.Fatalf("insert schedule_missed kind should succeed post-v155: %v", err)
+		t.Fatalf("insert schedule_missed kind should succeed post-v162: %v", err)
 	}
 	if _, err := db.Exec(`INSERT INTO inbox_items (id, workspace_id, kind, source_id, title)
 		VALUES ('ib_bad', 'ws_1', 'not-a-kind', 'src_bad', 'x')`); err == nil {
