@@ -63,6 +63,25 @@ CREATE TABLE IF NOT EXISTS routine_step_overrides (
 );`); err != nil {
 		t.Fatalf("step overrides schema: %v", err)
 	}
+	// wait:event durability (#1409, migration v154) — NewWiredExecutor
+	// wires a SignalWaitStore whenever DB != nil, so the rig must carry
+	// the table to match production.
+	if _, err := db.ExecContext(context.Background(), `
+CREATE TABLE IF NOT EXISTS pipeline_signal_waits (
+    id           TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    run_id       TEXT NOT NULL,
+    step_id      TEXT NOT NULL,
+    event_type   TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending',
+    payload      TEXT,
+    created_at   TEXT NOT NULL,
+    delivered_at TEXT,
+    consumed_at  TEXT,
+    UNIQUE (run_id, step_id)
+);`); err != nil {
+		t.Fatalf("signal waits schema: %v", err)
+	}
 	return db
 }
 

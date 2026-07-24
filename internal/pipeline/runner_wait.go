@@ -178,17 +178,59 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 		return "waited:approval:approved", 0, time.Since(stepStart).Milliseconds(), nil
 
 	case "event":
-		// Input-stream injection (Wave 4.3): block until an external
-		// caller delivers a signal for this (run, event_type) via
+		// Input-stream injection (Wave 4.3): wait for an external caller
+		// to deliver a signal for this (run, event_type) via
 		// POST /pipeline-runs/{id}/signal. The payload becomes the step
 		// output (so downstream steps read {{ steps.<id>.output }}).
-		// Blocking + in-memory (like wait:datetime) — steers a live run.
+		//
+		// Durability (#1409): a signal delivered while this run's
+		// goroutine isn't live to receive it — process restart, or the
+		// delivery racing ahead of this step even registering — used to
+		// be lost forever (in-memory-only SignalRegistry). Now, when a
+		// SignalWaitStore is wired, the wait durably ARMs before it does
+		// anything else blocking, and checks for an already-delivered
+		// payload FIRST (covers both a resume finding a signal that
+		// arrived during downtime, and the ordinary race where the
+		// signal endpoint's Deliver committed a hair before Register
+		// below would have caught it).
 		eventType := Render(step.Wait.EventType, parentRender)
 		// (ModeDryRun is short-circuited for every wait kind at the top.)
 		if e.signals == nil {
 			return "", 0, time.Since(stepStart).Milliseconds(),
 				fmt.Errorf("wait step %q (event) no signal registry wired", step.ID)
 		}
+		if e.signalWaits != nil {
+			if !in.resume {
+				if err := e.signalWaits.Arm(ctx, in.WorkspaceID, runID, step.ID, eventType); err != nil {
+					return "", 0, time.Since(stepStart).Milliseconds(),
+						fmt.Errorf("wait step %q (event) arm: %w", step.ID, err)
+				}
+			}
+			if payload, ok, cerr := e.signalWaits.ConsumeDelivered(ctx, runID, step.ID); cerr != nil {
+				return "", 0, time.Since(stepStart).Milliseconds(),
+					fmt.Errorf("wait step %q (event) check delivered: %w", step.ID, cerr)
+			} else if ok {
+				return payload, 0, time.Since(stepStart).Milliseconds(), nil
+			}
+		}
+
+		// Async suspend: mirrors wait(approval)'s park (runner_wait.go
+		// case "approval" above) — a top-level foreground run with a
+		// persisted row parks (MarkWaiting + suspendError) instead of
+		// blocking the goroutine, so a process restart re-enters via the
+		// normal resume path (ResumeInterruptedRuns / ResumeAfterSignal)
+		// rather than needing THIS goroutine to still be alive when the
+		// signal lands. Nested/test-only/no-store callers keep the
+		// blocking behaviour below (they have no row to resume and
+		// nobody to return WAITING to).
+		if e.signalWaits != nil && depth == 0 && in.Mode == ModeRun && !in.resume && e.runStore != nil && in.pipeline != nil {
+			if err := e.runStore.MarkWaiting(ctx, runID, step.ID); err != nil {
+				return "", 0, time.Since(stepStart).Milliseconds(),
+					fmt.Errorf("wait step %q (event) mark waiting: %w", step.ID, err)
+			}
+			return "", 0, time.Since(stepStart).Milliseconds(), &suspendError{stepID: step.ID}
+		}
+
 		ch, cancel := e.signals.Register(runID, eventType)
 		defer cancel()
 		// Honor the step timeout (default 1h) so an event that never

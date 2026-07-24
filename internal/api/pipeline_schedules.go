@@ -43,8 +43,16 @@ type scheduleResponse struct {
 	WakeFireCount    int            `json:"wake_fire_count,omitempty"`
 	LastWakeAt       *time.Time     `json:"last_wake_at,omitempty"`
 	LastWakeStatus   string         `json:"last_wake_status,omitempty"`
-	CreatedAt        time.Time      `json:"created_at"`
-	UpdatedAt        time.Time      `json:"updated_at"`
+	// Circuit breaker (#1405). ConsecutiveFailures/MaxConsecutiveFailures
+	// are always present (unlike the wake fields) since every schedule has
+	// a breaker threshold whether or not it has ever failed.
+	// DisabledReason is "" for an operator-disabled schedule and
+	// "circuit_breaker" once the breaker has tripped it.
+	ConsecutiveFailures    int       `json:"consecutive_failures"`
+	MaxConsecutiveFailures int       `json:"max_consecutive_failures"`
+	DisabledReason         string    `json:"disabled_reason,omitempty"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
 }
 
 func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlug string) scheduleResponse {
@@ -62,30 +70,33 @@ func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlu
 		}
 	}
 	return scheduleResponse{
-		ID:                    s.ID,
-		WorkspaceID:           s.WorkspaceID,
-		Name:                  s.Name,
-		TargetPipelineID:      s.TargetPipelineID,
-		TargetPipelineSlug:    slug,
-		TargetPipelineVersion: s.TargetPipelineVersion,
-		CronExpr:              s.CronExpr,
-		Timezone:              s.Timezone,
-		Inputs:                inputs,
-		Enabled:               s.Enabled,
-		LastRunAt:             s.LastRunAt,
-		LastStatus:            s.LastStatus,
-		LastRunID:             s.LastRunID,
-		NextRunAt:             s.NextRunAt,
-		WakePipelineID:        s.WakePipelineID,
-		WakePipelineSlug:      wakeSlug,
-		WakeInputs:            wakeInputs,
-		WakeFailClosed:        s.WakeFailClosed,
-		WakeCheckCount:        s.WakeCheckCount,
-		WakeFireCount:         s.WakeFireCount,
-		LastWakeAt:            s.LastWakeAt,
-		LastWakeStatus:        s.LastWakeStatus,
-		CreatedAt:             s.CreatedAt,
-		UpdatedAt:             s.UpdatedAt,
+		ID:                     s.ID,
+		WorkspaceID:            s.WorkspaceID,
+		Name:                   s.Name,
+		TargetPipelineID:       s.TargetPipelineID,
+		TargetPipelineSlug:     slug,
+		TargetPipelineVersion:  s.TargetPipelineVersion,
+		CronExpr:               s.CronExpr,
+		Timezone:               s.Timezone,
+		Inputs:                 inputs,
+		Enabled:                s.Enabled,
+		LastRunAt:              s.LastRunAt,
+		LastStatus:             s.LastStatus,
+		LastRunID:              s.LastRunID,
+		NextRunAt:              s.NextRunAt,
+		WakePipelineID:         s.WakePipelineID,
+		WakePipelineSlug:       wakeSlug,
+		WakeInputs:             wakeInputs,
+		WakeFailClosed:         s.WakeFailClosed,
+		WakeCheckCount:         s.WakeCheckCount,
+		WakeFireCount:          s.WakeFireCount,
+		LastWakeAt:             s.LastWakeAt,
+		LastWakeStatus:         s.LastWakeStatus,
+		ConsecutiveFailures:    s.ConsecutiveFailures,
+		MaxConsecutiveFailures: s.MaxConsecutiveFailures,
+		DisabledReason:         s.DisabledReason,
+		CreatedAt:              s.CreatedAt,
+		UpdatedAt:              s.UpdatedAt,
 	}
 }
 
@@ -110,6 +121,11 @@ type scheduleRequestBody struct {
 	// existing policy" from an explicit false. Only meaningful when a
 	// wake gate is set; ignored on an ungated schedule.
 	WakeFailClosed *bool `json:"wake_fail_closed,omitempty"`
+	// MaxConsecutiveFailures overrides the circuit breaker's trip
+	// threshold (#1405). Pointer so PATCH can distinguish "absent — keep
+	// the existing/default threshold" from an explicit override. nil or
+	// <= 0 on create means "use the store default" (5).
+	MaxConsecutiveFailures *int `json:"max_consecutive_failures,omitempty"`
 }
 
 // resolveWakePipeline validates a wake-gate reference at save time —
@@ -210,18 +226,23 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	maxFailures := 0
+	if body.MaxConsecutiveFailures != nil {
+		maxFailures = *body.MaxConsecutiveFailures
+	}
 	in := pipeline.SaveScheduleInput{
-		WorkspaceID:           workspaceID,
-		Name:                  defaultIfBlank(body.Name, slug),
-		TargetPipelineID:      pipelineID,
-		TargetPipelineVersion: body.TargetPipelineVersion,
-		CronExpr:              body.CronExpr,
-		Timezone:              body.Timezone,
-		Inputs:                body.Inputs,
-		Enabled:               enabled,
-		WakePipelineID:        wakeID,
-		WakeInputs:            body.WakeInputs,
-		WakeFailClosed:        body.WakeFailClosed != nil && *body.WakeFailClosed,
+		WorkspaceID:            workspaceID,
+		Name:                   defaultIfBlank(body.Name, slug),
+		TargetPipelineID:       pipelineID,
+		TargetPipelineVersion:  body.TargetPipelineVersion,
+		CronExpr:               body.CronExpr,
+		Timezone:               body.Timezone,
+		Inputs:                 body.Inputs,
+		Enabled:                enabled,
+		WakePipelineID:         wakeID,
+		WakeInputs:             body.WakeInputs,
+		WakeFailClosed:         body.WakeFailClosed != nil && *body.WakeFailClosed,
+		MaxConsecutiveFailures: maxFailures,
 	}
 	saved, err := h.schedules.Save(r.Context(), in)
 	if err != nil {
@@ -430,19 +451,24 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		wakeFailClosed = false
 	}
 
+	maxFailures := 0
+	if body.MaxConsecutiveFailures != nil {
+		maxFailures = *body.MaxConsecutiveFailures
+	}
 	in := pipeline.SaveScheduleInput{
-		ID:                    scheduleID,
-		WorkspaceID:           workspaceID,
-		Name:                  defaultIfBlank(body.Name, existing.Name),
-		TargetPipelineID:      pipelineID,
-		TargetPipelineVersion: body.TargetPipelineVersion,
-		CronExpr:              cronExpr,
-		Timezone:              tz,
-		Inputs:                inputs,
-		Enabled:               enabled,
-		WakePipelineID:        wakeID,
-		WakeInputs:            wakeInputs,
-		WakeFailClosed:        wakeFailClosed,
+		ID:                     scheduleID,
+		WorkspaceID:            workspaceID,
+		Name:                   defaultIfBlank(body.Name, existing.Name),
+		TargetPipelineID:       pipelineID,
+		TargetPipelineVersion:  body.TargetPipelineVersion,
+		CronExpr:               cronExpr,
+		Timezone:               tz,
+		Inputs:                 inputs,
+		Enabled:                enabled,
+		WakePipelineID:         wakeID,
+		WakeInputs:             wakeInputs,
+		WakeFailClosed:         wakeFailClosed,
+		MaxConsecutiveFailures: maxFailures,
 	}
 	saved, err := h.schedules.Save(r.Context(), in)
 	if err != nil {

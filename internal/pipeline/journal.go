@@ -160,6 +160,7 @@ func (c *pipelineEmitContext) emitRunStarted(ctx context.Context, mode RunMode, 
 const (
 	resumeReasonRestart  = "restart"  // boot-time scan re-entering an in-flight run
 	resumeReasonApproval = "approval" // waitpoint approved, run un-parked in-process
+	resumeReasonSignal   = "signal"   // wait:event signal delivered, run un-parked in-process (#1409)
 )
 
 // emitRunResumed records that a previously in-flight run was re-entered
