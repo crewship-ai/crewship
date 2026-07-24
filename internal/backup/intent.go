@@ -146,9 +146,13 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// pending_runs holds deferred/debounced triggers waiting to fire
 	// (delay/ttl/priority). A pending row is a scheduled future run —
 	// durable, like a waitpoint; dropping it on restore loses queued work.
-	"pending_runs":       IntentInclude,
-	"pipeline_runs":      IntentInclude,
-	"pipeline_schedules": IntentInclude,
+	"pending_runs":  IntentInclude,
+	"pipeline_runs": IntentInclude,
+	// pipeline_routine_state = durable cross-run watermarks per (pipeline,
+	// schedule) (v155); dropping it on restore makes routines reprocess from
+	// scratch or lose their "since last run" cursor.
+	"pipeline_routine_state": IntentInclude,
+	"pipeline_schedules":     IntentInclude,
 	// pipeline_tags = routine-DEFINITION discovery tags (v125).
 	"pipeline_tags":     IntentInclude,
 	"pipeline_versions": IntentInclude,
