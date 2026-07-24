@@ -335,7 +335,7 @@ func (e *Executor) runDAG(
 				if dagCtx.Err() != nil {
 					return
 				}
-				e.executeOneStep(dagCtx, step, stepIndex[step.ID], in, runID, pipelineID, emit, inputsForCtx, renderEnv, runMeta, depth, &resMu, result, dsl, &firstErr, &suspended, dagCancel)
+				e.executeOneStep(dagCtx, step, stepIndex[step.ID], in, runID, pipelineID, emit, inputsForCtx, renderEnv, runMeta, depth, &resMu, result, dsl, &firstErr, &suspended, dagCancel, startedAt)
 			}()
 		}
 		wg.Wait()
@@ -471,6 +471,7 @@ func (e *Executor) executeOneStep(
 	firstErr *atomic.Value,
 	suspended *atomic.Value,
 	dagCancel context.CancelFunc,
+	startedAt time.Time,
 ) {
 	// Render against a fresh snapshot of step outputs so peer-wave
 	// outputs are visible to this step's templates.
@@ -536,7 +537,23 @@ func (e *Executor) executeOneStep(
 	result.StepOutputs[step.ID] = output
 	result.CostUSD += stepCost
 	costNow := result.CostUSD
+	// Snapshot the growing outputs map under the lock for an incremental
+	// durability flush (#1428, 2.8). DAG persistence was per-WAVE only, so a
+	// hard kill mid-wave lost every already-completed step in that wave and
+	// replayed them all on resume — up to a dozen non-idempotent POSTs /
+	// notifies fired twice. Flushing after each step lands completed steps
+	// durably so resume skips them. Snapshot here (cheap map copy under the
+	// lock); the DB write happens after the unlock so peers aren't stalled.
+	flushSnap := make(map[string]string, len(result.StepOutputs))
+	for k, v := range result.StepOutputs {
+		flushSnap[k] = v
+	}
 	resMu.Unlock()
+	// Best-effort projection write, off the lock. Concurrent per-step flushes
+	// may momentarily race to write a slightly stale snapshot, but each is a
+	// monotonically-growing superset and the wave-boundary flush re-writes the
+	// full set — strictly better than losing the whole wave.
+	e.persistStepOutputs(ctx, in, depth, runID, flushSnap, costNow, startedAt)
 	emit.emitStepCompleted(ctx, *step, output, stepDur, stepCost)
 
 	// Cost-cap gate (post-step). The check reads from the locked
