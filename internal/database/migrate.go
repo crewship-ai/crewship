@@ -1700,6 +1700,13 @@ END;
 	// journal.VerifyChain then detects mutation / reorder / mid-chain
 	// deletion. See migrate_consts_v152_journal_hash_chain.go (#1369).
 	{version: 152, name: "journal_hash_chain", fn: migrationJournalHashChain},
+	// v153 namespaces pipeline_run_idempotency's primary key by pipeline_id:
+	// (workspace_id, idempotency_key) → (workspace_id, pipeline_id,
+	// idempotency_key). Closes a cross-pipeline idempotency-key collision
+	// (pre-poison a predictable key to silently dedupe/DoS a different
+	// pipeline's run, plus disclose its run_id). See
+	// migrate_consts_v153_idempotency_pipeline_scope.go (#1415).
+	{version: 153, name: "idempotency_pipeline_scope", sql: migrationIdempotencyPipelineScope},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

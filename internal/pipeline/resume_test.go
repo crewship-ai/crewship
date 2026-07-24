@@ -282,7 +282,7 @@ VALUES ('tok_resume_wait', 'ws_test', 'run_resume_wait', 'gate', 'approval', 'ok
 		// both orderings must work (WaitFor re-checks DB state), so
 		// this is pacing, not a correctness wait.
 		time.Sleep(100 * time.Millisecond)
-		approveErr <- wpStore.CompleteApproval(context.Background(), "tok_resume_wait", true, "user_test", "")
+		approveErr <- wpStore.CompleteApproval(context.Background(), "ws_test", "tok_resume_wait", true, "user_test", "")
 	}()
 
 	rec := waitForRunStatus(t, runStore, "run_resume_wait", RunStatusCompleted, 5*time.Second)

@@ -196,7 +196,7 @@ func (d *RecurringIssueDispatcher) fireOne(ctx context.Context, row recurringDue
 		if !reserved || row.nextRunBucket == "" {
 			return
 		}
-		if ferr := idemStore.Forget(ctx, row.workspaceID, idemKey); ferr != nil {
+		if ferr := idemStore.Forget(ctx, row.workspaceID, row.id, idemKey); ferr != nil {
 			d.logger.Warn("recurring issue dispatcher: release reservation failed", "id", row.id, "error", ferr)
 		}
 	}

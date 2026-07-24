@@ -321,7 +321,7 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 	// pipeline executor's Forget-on-concurrency-reject).
 	if !pipeline.AllowWebhookFire(agentWebhookRateKey(agentID), h.agentRatePerMin) {
 		if h.idem != nil && info.WorkspaceID != "" {
-			if fErr := h.idem.Forget(ctx, info.WorkspaceID, idemKey); fErr != nil {
+			if fErr := h.idem.Forget(ctx, info.WorkspaceID, webhookIdempotencyPipelineID, idemKey); fErr != nil {
 				h.logger.Warn("webhook rate gate: failed to release reservation", "agent_id", agentID, "error", fErr)
 			}
 		}
@@ -347,7 +347,7 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		})
 		if acqErr != nil {
 			if h.idem != nil && info.WorkspaceID != "" {
-				if fErr := h.idem.Forget(ctx, info.WorkspaceID, idemKey); fErr != nil {
+				if fErr := h.idem.Forget(ctx, info.WorkspaceID, webhookIdempotencyPipelineID, idemKey); fErr != nil {
 					h.logger.Warn("webhook concurrency gate: failed to release reservation", "agent_id", agentID, "error", fErr)
 				}
 			}
@@ -389,7 +389,7 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		// redelivery with the same key must be allowed to retry rather than
 		// being deduped against a reservation that never produced a run.
 		if h.idem != nil && info.WorkspaceID != "" {
-			if fErr := h.idem.Forget(ctx, info.WorkspaceID, idemKey); fErr != nil {
+			if fErr := h.idem.Forget(ctx, info.WorkspaceID, webhookIdempotencyPipelineID, idemKey); fErr != nil {
 				h.logger.Warn("webhook startup failure: failed to release reservation", "agent_id", agentID, "error", fErr)
 			}
 		}

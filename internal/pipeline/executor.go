@@ -612,7 +612,7 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 			// Free the idempotency reservation (mirrors the Acquire
 			// failure path below) and surface the misconfiguration.
 			if in.IdempotencyKey != "" && e.idempotency != nil {
-				_ = e.idempotency.Forget(ctx, in.WorkspaceID, in.IdempotencyKey)
+				_ = e.idempotency.Forget(ctx, in.WorkspaceID, p.ID, in.IdempotencyKey)
 			}
 			return nil, fmt.Errorf("%w: template %q", keyErr, dsl.ConcurrencyKey)
 		}
@@ -630,7 +630,7 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 			// retry the same key without waiting 24h. Best-effort —
 			// failure here just means the key stays reserved.
 			if in.IdempotencyKey != "" && e.idempotency != nil {
-				_ = e.idempotency.Forget(ctx, in.WorkspaceID, in.IdempotencyKey)
+				_ = e.idempotency.Forget(ctx, in.WorkspaceID, p.ID, in.IdempotencyKey)
 			}
 			return nil, regErr
 		}

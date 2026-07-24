@@ -10,15 +10,18 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// Mirrors the production schema post-v153 (#1415): the PK is namespaced
+// by pipeline_id so two pipelines can independently use the same
+// human-readable idempotency key without colliding.
 const idempotencySchemaSQL = `
 CREATE TABLE IF NOT EXISTS pipeline_run_idempotency (
     workspace_id    TEXT NOT NULL,
+    pipeline_id     TEXT NOT NULL,
     idempotency_key TEXT NOT NULL,
     run_id          TEXT NOT NULL,
-    pipeline_id     TEXT NOT NULL,
     created_at      TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     expires_at      TEXT NOT NULL,
-    PRIMARY KEY (workspace_id, idempotency_key)
+    PRIMARY KEY (workspace_id, pipeline_id, idempotency_key)
 );`
 
 func openIdempotencyTestDB(t *testing.T) *sql.DB {
@@ -96,6 +99,91 @@ func TestIdempotency_LookupOrReserve_DifferentWorkspacesIndependent(t *testing.T
 	}
 }
 
+// TestIdempotency_LookupOrReserve_DifferentPipelinesIndependent pins
+// #1415: the same workspace + the same human-readable Idempotency-Key
+// value (e.g. "order-123") must NOT collide across two different
+// pipelines. Before the v153 PK widening, a `create`-role member could
+// pre-poison a predictable key and silently dedupe a legitimate run in
+// an unrelated pipeline onto their own (cross-pipeline DoS), plus the
+// dedupe response would disclose the other pipeline's run_id.
+func TestIdempotency_LookupOrReserve_DifferentPipelinesIndependent(t *testing.T) {
+	db := openIdempotencyTestDB(t)
+	defer db.Close()
+	store := NewIdempotencyStore(db)
+	ctx := context.Background()
+
+	got1, isNew1, err := store.LookupOrReserve(ctx, "ws_shared", "order-123", "run_pipe_a", "pipe_a", time.Hour)
+	if err != nil || !isNew1 || got1 != "run_pipe_a" {
+		t.Fatalf("pipe_a fresh: got %s isNew=%v err=%v", got1, isNew1, err)
+	}
+	// Same workspace, SAME key string, DIFFERENT pipeline — must reserve
+	// independently, not dedupe onto pipe_a's run.
+	got2, isNew2, err := store.LookupOrReserve(ctx, "ws_shared", "order-123", "run_pipe_b", "pipe_b", time.Hour)
+	if err != nil {
+		t.Fatalf("pipe_b reserve: %v", err)
+	}
+	if !isNew2 {
+		t.Fatalf("pipe_b: expected isNew=true (independent of pipe_a's reservation), got isNew=false resolved=%s", got2)
+	}
+	if got2 != "run_pipe_b" {
+		t.Errorf("pipe_b: expected its own reservation run_pipe_b, got %s", got2)
+	}
+
+	// A genuine duplicate WITHIN pipe_a must still dedupe onto pipe_a's
+	// original run — namespacing must not break same-pipeline dedup.
+	got3, isNew3, err := store.LookupOrReserve(ctx, "ws_shared", "order-123", "run_pipe_a_retry", "pipe_a", time.Hour)
+	if err != nil {
+		t.Fatalf("pipe_a duplicate: %v", err)
+	}
+	if isNew3 {
+		t.Errorf("pipe_a duplicate: expected isNew=false, got true")
+	}
+	if got3 != "run_pipe_a" {
+		t.Errorf("pipe_a duplicate: expected original run_pipe_a, got %s", got3)
+	}
+}
+
+// TestIdempotency_Forget_ScopedToPipeline pins the Forget half of
+// #1415: releasing a reservation for one pipeline must not delete a
+// different pipeline's live reservation that happens to share the
+// same (workspace_id, idempotency_key).
+func TestIdempotency_Forget_ScopedToPipeline(t *testing.T) {
+	db := openIdempotencyTestDB(t)
+	defer db.Close()
+	store := NewIdempotencyStore(db)
+	ctx := context.Background()
+
+	if _, _, err := store.LookupOrReserve(ctx, "ws_shared", "dup-key", "run_a", "pipe_a", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.LookupOrReserve(ctx, "ws_shared", "dup-key", "run_b", "pipe_b", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	// Forget pipe_a's reservation only.
+	if err := store.Forget(ctx, "ws_shared", "pipe_a", "dup-key"); err != nil {
+		t.Fatalf("forget: %v", err)
+	}
+
+	// pipe_a's key is free again.
+	gotA, isNewA, err := store.LookupOrReserve(ctx, "ws_shared", "dup-key", "run_a_retry", "pipe_a", time.Hour)
+	if err != nil || !isNewA || gotA != "run_a_retry" {
+		t.Errorf("pipe_a after forget: got %s isNew=%v err=%v, want fresh run_a_retry", gotA, isNewA, err)
+	}
+
+	// pipe_b's reservation must be UNTOUCHED by pipe_a's Forget.
+	gotB, isNewB, err := store.LookupOrReserve(ctx, "ws_shared", "dup-key", "run_b_retry", "pipe_b", time.Hour)
+	if err != nil {
+		t.Fatalf("pipe_b relookup: %v", err)
+	}
+	if isNewB {
+		t.Fatalf("pipe_b: Forget on pipe_a's key wrongly freed pipe_b's reservation")
+	}
+	if gotB != "run_b" {
+		t.Errorf("pipe_b: expected original run_b preserved, got %s", gotB)
+	}
+}
+
 func TestIdempotency_LookupOrReserve_ExpiredKeyReplaces(t *testing.T) {
 	db := openIdempotencyTestDB(t)
 	defer db.Close()
@@ -129,7 +217,7 @@ func TestIdempotency_Forget_AllowsRetry(t *testing.T) {
 	ctx := context.Background()
 
 	_, _, _ = store.LookupOrReserve(ctx, "ws_test", "key_1", "run_a", "pipe_1", time.Hour)
-	if err := store.Forget(ctx, "ws_test", "key_1"); err != nil {
+	if err := store.Forget(ctx, "ws_test", "pipe_1", "key_1"); err != nil {
 		t.Fatalf("forget: %v", err)
 	}
 	got, isNew, err := store.LookupOrReserve(ctx, "ws_test", "key_1", "run_b", "pipe_1", time.Hour)

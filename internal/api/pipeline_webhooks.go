@@ -570,7 +570,7 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 			// key instead of dedupe-ing onto a run that never
 			// happened. Mirrors the executor's own Forget on its
 			// concurrency-rejection path.
-			_ = idem.Forget(context.Background(), wh.WorkspaceID, idemKey)
+			_ = idem.Forget(context.Background(), wh.WorkspaceID, wh.TargetPipelineID, idemKey)
 			if errors.Is(runErr, pipeline.ErrConcurrencyLimitReached) {
 				// Residual TOCTOU race: the synchronous pre-check above
 				// saw a free slot, but another dispatch Acquire'd it

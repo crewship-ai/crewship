@@ -864,7 +864,7 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 	// interface only exposes WaitFor + CreateApproval — so we type-
 	// assert here. Production wiring always uses the SQL store.
 	type approver interface {
-		CompleteApproval(ctx context.Context, token string, approved bool, deciderUserID, payload string) error
+		CompleteApproval(ctx context.Context, workspaceID, token string, approved bool, deciderUserID, payload string) error
 	}
 	wp, ok := h.waitpoints.(approver)
 	if !ok {
@@ -881,7 +881,13 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 		deciderID = user.ID
 	}
 	payload := body.Comment
-	if err := wp.CompleteApproval(r.Context(), token, body.Approved, deciderID, payload); err != nil {
+	// Workspace isolation (#1415): resolve the token strictly within the
+	// caller's own workspace — mirrors SignalRun's rec.WorkspaceID check
+	// in pipeline_run_metadata.go. Without this, a MANAGER of workspace A
+	// who learns/guesses a pending waitpoint token from workspace B could
+	// approve/deny B's gated run.
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if err := wp.CompleteApproval(r.Context(), workspaceID, token, body.Approved, deciderID, payload); err != nil {
 		// pipeline.ErrAlreadyDecided → 409
 		if err.Error() == "waitpoint: already decided or expired" {
 			replyError(w, http.StatusConflict, err.Error())

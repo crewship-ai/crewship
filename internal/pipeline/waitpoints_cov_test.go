@@ -156,7 +156,7 @@ func TestWaitpointStore_ClosedDB_ErrorPaths(t *testing.T) {
 	if _, err := store.WaitpointStatus(ctx, "t"); err == nil {
 		t.Error("WaitpointStatus should error on closed DB")
 	}
-	if err := store.CompleteApproval(ctx, "t", true, "", ""); err == nil || !strings.Contains(err.Error(), "waitpoints: update") {
+	if err := store.CompleteApproval(ctx, "ws", "t", true, "", ""); err == nil || !strings.Contains(err.Error(), "waitpoints: update") {
 		t.Errorf("CompleteApproval: %v", err)
 	}
 	if _, _, err := store.checkDecided(ctx, "t"); err == nil {
