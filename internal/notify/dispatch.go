@@ -19,7 +19,54 @@ import (
 	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 	"github.com/crewship-ai/crewship/internal/webhook"
+	"github.com/nicholas-fedor/shoutrrr"
 )
+
+// Provider is the seam behind which the shoutrrr delivery mechanism sits
+// (issue #1412) — a plain interface so tests can swap in a fake without
+// touching the network, mirroring how webhookTransport lets tests swap the
+// HTTP round-tripper. Production always uses shoutrrrProvider.
+type Provider interface {
+	// Send delivers message via the Apprise-style service url (e.g.
+	// "slack://hook:TOKEN@webhook"). ctx governs cancellation only —
+	// shoutrrr.Send itself is synchronous with no context parameter, so
+	// Send runs it in a goroutine and races it against ctx.Done().
+	Send(ctx context.Context, url, message string) error
+}
+
+// shoutrrrProvider is the production Provider: github.com/nicholas-fedor/
+// shoutrrr, a maintained fork of the Apprise-style notification library
+// that powers Watchtower. Pure Go, MIT-licensed. One dependency buys
+// Slack/Discord/Telegram (and, if the category/channel model widens later,
+// every other shoutrrr-supported service) without hand-rolling a payload
+// format per provider.
+type shoutrrrProvider struct{}
+
+func (shoutrrrProvider) Send(ctx context.Context, rawURL, message string) error {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- shoutrrr.Send(rawURL, message)
+	}()
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// provider is the package-level Provider — swappable for tests via
+// SetProviderForTesting, exactly like webhookTransport.
+var provider Provider = shoutrrrProvider{}
+
+// SetProviderForTesting swaps the shoutrrr Provider so tests can assert on
+// what would have been sent without making a real network call. Returns a
+// restore func.
+func SetProviderForTesting(p Provider) func() {
+	prev := provider
+	provider = p
+	return func() { provider = prev }
+}
 
 // webhookTransport is the http.RoundTripper used for all outbound webhook
 // deliveries. It defaults to an SSRF-safe transport whose DialContext
@@ -206,9 +253,41 @@ func (d *Dispatcher) deliver(ctx context.Context, ch Channel, ev NotificationEve
 		return d.deliverWebhook(ctx, ch, ev)
 	case ChannelEmail:
 		return d.deliverEmail(ctx, ch, ev)
+	case ChannelShoutrrr:
+		return d.deliverShoutrrr(ctx, ch, ev)
 	default:
 		return fmt.Errorf("notify: unknown channel type %q", ch.Type)
 	}
+}
+
+// deliverShoutrrr sends a run-terminal event through the Provider seam
+// (#1412) — added alongside deliverWebhook/deliverEmail, which are
+// untouched. ch.Secret carries the decrypted shoutrrr service URL (the
+// same secret_enc column the webhook signing secret uses; see
+// ChannelStore.Create).
+func (d *Dispatcher) deliverShoutrrr(ctx context.Context, ch Channel, ev NotificationEvent) error {
+	if ch.Secret == "" {
+		return fmt.Errorf("notify: shoutrrr channel %s has no service url", ch.ID)
+	}
+	message := fmt.Sprintf("Crewship: routine %s %s (run %s)", ev.RoutineSlug, ev.Status, ev.RunID)
+	if ev.OutputPreview != "" {
+		message += "\n\n" + ev.OutputPreview
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < d.maxAttempts; attempt++ {
+		if attempt > 0 {
+			if err := sleepBackoff(ctx, d.baseBackoff, attempt); err != nil {
+				return err
+			}
+		}
+		if err := provider.Send(ctx, ch.Secret, message); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("shoutrrr delivery failed after %d attempts: %w", d.maxAttempts, lastErr)
 }
 
 // deliverWebhook POSTs the signed payload with retries. Retries on
