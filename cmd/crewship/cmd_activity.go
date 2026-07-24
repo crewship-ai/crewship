@@ -14,15 +14,23 @@ import (
 )
 
 // activityEntryTypes is the set of journal entry types that make up the
-// cross-crew "activity" view: peer queries, escalations, and assignment
-// starts. This is the journal-native replacement for the retired
-// /api/v1/activity aggregator (which merged three tables server-side and
-// silently dropped a whole source on any query error). Assignment TERMINAL
-// state is logged as run.completed/run.failed (with an assignment_id ref),
-// not assignment.*, so it is intentionally out of scope here — the
-// created/running rows plus their summaries cover the "what's happening"
-// glance without pulling in every pipeline run.
-const activityEntryTypes = "peer.conversation,peer.escalation,assignment.created,assignment.running"
+// cross-crew "activity" view: peer queries, escalations, and the full
+// assignment lifecycle (created → running → completed/failed). This is the
+// journal-native replacement for the retired /api/v1/activity aggregator
+// (which merged three tables server-side and silently dropped a whole
+// source on any query error). The terminal rows matter: without
+// assignment.completed / assignment.failed a user watching the feed never
+// saw an assignment finish or fail. Terminal run-tracking still lives on
+// the parallel run.completed/run.failed entries (keyed by trace_id), which
+// this feed deliberately excludes so it stays scoped to assignments rather
+// than every routine/pipeline run.
+const activityEntryTypes = "peer.conversation,peer.escalation,assignment.created,assignment.running,assignment.completed,assignment.failed"
+
+// activityMaxLines mirrors the journal List handler's server-side page cap
+// (internal/api/journal_handler.go: limit must be 1..500). Kept in sync so
+// the CLI rejects an out-of-range --lines locally with the same bound
+// instead of round-tripping to a 400.
+const activityMaxLines = 500
 
 // activityCmd surfaces the cross-crew activity feed, now sourced from the
 // journal (`GET /api/v1/journal`) rather than the deleted /api/v1/activity
@@ -63,8 +71,8 @@ Examples:
 For a live tail of granular events, use:
   crewship journal --follow
 
-Assignment completion/failure is recorded as run.completed / run.failed in
-the journal (not assignment.*); use ` + "`crewship journal`" + ` for those.`,
+The full assignment lifecycle (created → running → completed/failed) shows
+here. For the finer per-run trace (LLM calls, exec, egress) use ` + "`crewship journal`" + `.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -81,6 +89,15 @@ the journal (not assignment.*); use ` + "`crewship journal`" + ` for those.`,
 		sinceStr, _ := cmd.Flags().GetString("since")
 		exportFmt, _ := cmd.Flags().GetString("export")
 		outPath, _ := cmd.Flags().GetString("out")
+
+		// Hard-reject an out-of-range page size rather than silently
+		// clamping it. The journal List handler enforces the same 1..500
+		// bound server-side (and 400s), so a clamp here would only paper
+		// over a mistake — a user who asks for 1000 rows and silently gets
+		// 500 has been lied to about what they received. Fail loud, local.
+		if lines < 1 || lines > activityMaxLines {
+			return fmt.Errorf("--lines must be between 1 and %d (got %d)", activityMaxLines, lines)
+		}
 
 		q := url.Values{}
 		q.Set("limit", fmt.Sprintf("%d", lines))
@@ -116,7 +133,7 @@ the journal (not assignment.*); use ` + "`crewship journal`" + ` for those.`,
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
 		}
-		entries := body.Entries
+		entries := dedupeActivity(body.Entries)
 
 		// Client-side type narrowing: a substring match on entry_type keeps
 		// the familiar `--type escalation` / `--type assignment` UX even
@@ -130,6 +147,14 @@ the journal (not assignment.*); use ` + "`crewship journal`" + ` for those.`,
 				}
 			}
 			entries = kept
+		}
+
+		// The "from"/"to" columns resolve agent ids to slugs against the
+		// workspace lookup table; only the export renderers surface those
+		// columns, so skip the fetch for the default table view.
+		var agents map[string]string
+		if exportFmt != "" {
+			agents = fetchAgentSlugs(client)
 		}
 
 		// Export path runs before the normal renderers so --export wins over
@@ -148,7 +173,10 @@ the journal (not assignment.*); use ` + "`crewship journal`" + ` for those.`,
 			case "ndjson":
 				enc := json.NewEncoder(out)
 				for _, e := range entries {
-					if err := enc.Encode(e); err != nil {
+					// Enrich each raw entry with the resolved participant
+					// slugs so an incident-review pipeline gets the "from"
+					// without re-implementing the actor_id→slug lookup.
+					if err := enc.Encode(e.export(agents)); err != nil {
 						return fmt.Errorf("ndjson encode: %w", err)
 					}
 				}
@@ -158,7 +186,7 @@ the journal (not assignment.*); use ` + "`crewship journal`" + ` for those.`,
 					return fmt.Errorf("csv header: %w", err)
 				}
 				for _, e := range entries {
-					if err := w.Write([]string{e.TS, e.EntryType, e.fromSlug(), e.toSlug(), e.Summary}); err != nil {
+					if err := w.Write([]string{e.TS, e.EntryType, e.fromSlug(agents), e.toSlug(agents), e.Summary}); err != nil {
 						return fmt.Errorf("csv row: %w", err)
 					}
 				}
@@ -195,9 +223,11 @@ the journal (not assignment.*); use ` + "`crewship journal`" + ` for those.`,
 }
 
 // activityRow is one journal entry as the activity feed consumes it. The
-// participant slugs live in the entry payload (from_slug / target_slug),
-// not as top-level columns — the journal stores ids + slugs, never the
-// joined display names the old /activity endpoint synthesised.
+// journal stores ids (actor_id / agent_id) and, for some entry types, slugs
+// in the payload — never the joined display names the old /activity endpoint
+// synthesised. The "from" column is therefore resolved client-side: an
+// assignment entry carries the assigner only as actor_id, so the CLI maps it
+// to a slug via the /api/v1/journal/lookup reference table (see fromSlug).
 type activityRow struct {
 	ID        string         `json:"id" yaml:"id"`
 	TS        string         `json:"ts" yaml:"ts"`
@@ -206,12 +236,32 @@ type activityRow struct {
 	Summary   string         `json:"summary" yaml:"summary"`
 	CrewID    string         `json:"crew_id,omitempty" yaml:"crew_id,omitempty"`
 	AgentID   string         `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
+	ActorID   string         `json:"actor_id,omitempty" yaml:"actor_id,omitempty"`
 	Payload   map[string]any `json:"payload,omitempty" yaml:"payload,omitempty"`
 }
 
-func (e activityRow) fromSlug() string { return payloadString(e.Payload, "from_slug") }
+// fromSlug resolves the "from" participant. Peer/escalation payloads carry
+// an explicit from_slug; assignments carry the assigner only as actor_id, so
+// we fall back to the agents lookup (actor_id, then agent_id). Mirrors the
+// dashboard's journalEntriesToFeedRows resolution so both surfaces agree.
+func (e activityRow) fromSlug(agents map[string]string) string {
+	if s := payloadString(e.Payload, "from_slug"); s != "" {
+		return s
+	}
+	if s := agents[e.ActorID]; e.ActorID != "" && s != "" {
+		return s
+	}
+	return agents[e.AgentID]
+}
 
-func (e activityRow) toSlug() string { return payloadString(e.Payload, "target_slug") }
+// toSlug resolves the "to" participant: an explicit target_slug in the
+// payload, else the agents lookup keyed by target_id.
+func (e activityRow) toSlug(agents map[string]string) string {
+	if s := payloadString(e.Payload, "target_slug"); s != "" {
+		return s
+	}
+	return agents[payloadString(e.Payload, "target_id")]
+}
 
 func payloadString(p map[string]any, key string) string {
 	if p == nil {
@@ -221,14 +271,93 @@ func payloadString(p map[string]any, key string) string {
 	return s
 }
 
+// activityExport is the shape written to NDJSON: the raw journal entry plus
+// the resolved participant slugs, so a downstream consumer gets the "from"
+// column without re-doing the actor_id→slug lookup the CLI already did.
+type activityExport struct {
+	activityRow
+	FromSlug string `json:"from_slug"`
+	ToSlug   string `json:"to_slug"`
+}
+
+func (e activityRow) export(agents map[string]string) activityExport {
+	return activityExport{activityRow: e, FromSlug: e.fromSlug(agents), ToSlug: e.toSlug(agents)}
+}
+
+// dedupeActivity collapses duplicate-event noise in the feed. The journal is
+// an append-only event log, so a single peer query lands as TWO
+// peer.conversation rows (the question, then the answer) sharing one
+// peer_conversation_id — rendering both reads as the same conversation
+// appearing twice. We keep the first row seen for a given conversation
+// (entries arrive newest-first, so that is the answer once it exists, else
+// the still-open question) and drop the rest. Every other entry type has a
+// unique identity and is keyed by its own id, so a stray repeated row (e.g.
+// a stream replay after reconnect) is dropped too, while the distinct
+// assignment lifecycle rows (created/running/completed) all survive.
+func dedupeActivity(entries []activityRow) []activityRow {
+	seen := make(map[string]struct{}, len(entries))
+	kept := entries[:0]
+	for _, e := range entries {
+		key := activityDedupKey(e)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		kept = append(kept, e)
+	}
+	return kept
+}
+
+func activityDedupKey(e activityRow) string {
+	if e.EntryType == "peer.conversation" {
+		if cid := payloadString(e.Payload, "thread_id"); cid != "" {
+			return "peer.conversation:" + cid
+		}
+	}
+	return "id:" + e.ID
+}
+
+// fetchAgentSlugs loads the workspace's agent id→slug reference table from
+// GET /api/v1/journal/lookup — the same denormalised table the dashboard's
+// JournalLookupProvider consumes. Best-effort: a lookup failure returns an
+// empty map so the feed still renders (participant columns just fall back to
+// whatever the payload carried, or blank), rather than failing the command.
+func fetchAgentSlugs(client *cli.Client) map[string]string {
+	agents := map[string]string{}
+	resp, err := client.Get("/api/v1/journal/lookup")
+	if err != nil {
+		return agents
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return agents
+	}
+	var body struct {
+		Agents []struct {
+			ID   string `json:"id"`
+			Slug string `json:"slug"`
+		} `json:"agents"`
+	}
+	if err := cli.ReadJSON(resp, &body); err != nil {
+		return agents
+	}
+	for _, a := range body.Agents {
+		if a.ID != "" && a.Slug != "" {
+			agents[a.ID] = a.Slug
+		}
+	}
+	return agents
+}
+
 // activityTypeColor picks a colour by entry-type family so the feed scans
 // the same way the old type-coloured column did.
 func activityTypeColor(entryType string) string {
 	switch {
+	case entryType == "assignment.completed":
+		return cli.Green
+	case entryType == "assignment.failed", entryType == "peer.escalation":
+		return cli.Red
 	case strings.HasPrefix(entryType, "assignment."):
 		return cli.Blue
-	case entryType == "peer.escalation":
-		return cli.Red
 	case entryType == "peer.conversation":
 		return cli.Cyan
 	default:

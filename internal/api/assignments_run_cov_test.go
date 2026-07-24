@@ -515,3 +515,87 @@ func TestUserFacingAssignmentError(t *testing.T) {
 		})
 	}
 }
+
+// TestFinishAssignment_TerminalAppearsInActivityFeed is the behaviour proof
+// for the terminal-visibility fix. Before it, the journal-sourced activity
+// feed filtered on created/running only, and finishAssignment emitted the
+// terminal state as run.completed/run.failed (excluded from the feed) — so a
+// finished or failed assignment vanished from the feed entirely. We now emit a
+// dedicated assignment.completed/assignment.failed and include both in the
+// feed. This drives a REAL finishAssignment through the REAL journal writer and
+// then queries the journal with the SAME entry-type filter the CLI + dashboard
+// send, asserting the terminal row is present, crew-scoped, attributed to the
+// assigner, and carrying the failure reason.
+func TestFinishAssignment_TerminalAppearsInActivityFeed(t *testing.T) {
+	// activityFeedTypes mirrors cmd/crewship/cmd_activity.go activityEntryTypes
+	// and components/features/crews/crew-activity-feed.tsx ACTIVITY_ENTRY_TYPES.
+	activityFeedTypes := []journal.EntryType{
+		journal.EntryPeerConversation, journal.EntryPeerEscalation,
+		journal.EntryAssignmentCreate, journal.EntryAssignmentRun,
+		journal.EntryAssignmentDone, journal.EntryAssignmentFail,
+	}
+
+	run := func(t *testing.T, asgID, result, errMsg string, wantType journal.EntryType) {
+		h, wsID, crewID, leadID, workerID, chatID := covAsgRig(t)
+		jw := journal.NewWriter(h.db, newTestLogger(), journal.WriterOptions{FlushSize: 1})
+		t.Cleanup(func() { _ = jw.Close() })
+		h.SetJournal(jw)
+
+		if _, err := h.db.Exec(`
+			INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, created_at)
+			VALUES (?, ?, ?, ?, ?, 'task', 'RUNNING', ?, datetime('now'))`,
+			asgID, wsID, chatID, leadID, workerID, chatID); err != nil {
+			t.Fatalf("seed assignment: %v", err)
+		}
+
+		// runID="" on purpose — proves the terminal feed row is NOT gated on
+		// having a run trace (early-failure + recovery both pass none).
+		if ok := h.finishAssignment(context.Background(), asgID, "", chatID, "asg-worker", wsID, result, errMsg); !ok {
+			t.Fatal("finishAssignment should have won the terminal CAS")
+		}
+		if err := jw.Flush(context.Background()); err != nil {
+			t.Fatalf("flush: %v", err)
+		}
+
+		entries, _, err := journal.List(context.Background(), h.db, journal.Query{
+			WorkspaceID: wsID, Types: activityFeedTypes, Limit: 50,
+		})
+		if err != nil {
+			t.Fatalf("journal.List: %v", err)
+		}
+		var found *journal.Entry
+		for i := range entries {
+			if entries[i].Type == wantType {
+				if aid, _ := entries[i].Payload["assignment_id"].(string); aid == asgID {
+					found = &entries[i]
+					break
+				}
+			}
+		}
+		if found == nil {
+			t.Fatalf("%s for %s did not appear in the activity feed; %d feed entries returned", wantType, asgID, len(entries))
+		}
+		// Crew-scoped: a crew-filtered feed query joins on crew_id, so a
+		// missing crew_id would silently drop the terminal row.
+		if found.CrewID != crewID {
+			t.Errorf("feed row crew_id = %q, want %q", found.CrewID, crewID)
+		}
+		// "From" attribution: actor_id is the assigner, so the from→to column
+		// reads assigner→target like the created/running rows.
+		if found.ActorID != leadID {
+			t.Errorf("feed row actor_id = %q, want assigner %q", found.ActorID, leadID)
+		}
+		if errMsg != "" {
+			if msg, _ := found.Payload["error_message"].(string); msg != errMsg {
+				t.Errorf("feed row error_message = %q, want %q", msg, errMsg)
+			}
+		}
+	}
+
+	t.Run("failed", func(t *testing.T) {
+		run(t, "asg-feed-fail", "", "the run blew up", journal.EntryAssignmentFail)
+	})
+	t.Run("completed", func(t *testing.T) {
+		run(t, "asg-feed-done", "all good", "", journal.EntryAssignmentDone)
+	})
+}

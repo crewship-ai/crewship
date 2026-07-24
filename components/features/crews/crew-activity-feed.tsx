@@ -36,11 +36,14 @@ interface CrewActivityFeedProps {
 }
 
 // The journal entry types that make up the "activity" view: peer queries,
-// escalations, and assignment starts. This mirrors the CLI's
-// activityEntryTypes (cmd/crewship/cmd_activity.go). Assignment TERMINAL
-// state is logged as run.completed/failed, not assignment.*, so it is out of
-// scope — the created/running rows carry the "what's happening" glance.
-const ACTIVITY_ENTRY_TYPES = "peer.conversation,peer.escalation,assignment.created,assignment.running"
+// escalations, and the full assignment lifecycle (created → running →
+// completed/failed). Mirrors the CLI's activityEntryTypes
+// (cmd/crewship/cmd_activity.go). The terminal rows matter — without
+// assignment.completed / assignment.failed a user watching the feed never
+// saw an assignment finish or fail. The parallel run.completed/run.failed
+// entries (keyed by trace_id) are the run-tracking view and are excluded
+// here so the feed stays scoped to assignments, not every routine run.
+const ACTIVITY_ENTRY_TYPES = "peer.conversation,peer.escalation,assignment.created,assignment.running,assignment.completed,assignment.failed"
 
 type FeedType = "assignment" | "peer_conversation" | "escalation"
 
@@ -113,10 +116,24 @@ export function journalEntriesToFeedRows(
   agents: Map<string, AgentLookup>,
 ): ActivityFeedRow[] {
   const rows: ActivityFeedRow[] = []
+  // Dedupe key per entry. A peer query lands as TWO peer.conversation
+  // entries (question then answer) sharing one thread_id — rendering both
+  // reads as the same conversation twice, so collapse them to the first
+  // seen (entries arrive newest-first, so that is the answer once it
+  // exists). Everything else keys on its own id, which drops a stray
+  // repeated row (e.g. a live-prepend racing a refetch) while keeping the
+  // distinct assignment lifecycle rows (created/running/completed).
+  const seen = new Set<string>()
   for (const e of entries) {
     const type = classifyEntryType(e.entry_type)
     if (!type) continue
     const p = e.payload
+    const dedupKey =
+      e.entry_type === "peer.conversation" && typeof p?.thread_id === "string" && p.thread_id !== ""
+        ? `peer.conversation:${p.thread_id}`
+        : `id:${e.id}`
+    if (seen.has(dedupKey)) continue
+    seen.add(dedupKey)
     const crew = e.crew_id ? crews.get(e.crew_id) : undefined
     // FROM: peer/escalation payloads carry from_slug; assignments carry the
     // assigner only as actor_id, so fall back to the lookup.
@@ -154,7 +171,7 @@ export function CrewActivityFeed({ workspaceId, agentId, crewId }: CrewActivityF
     [crewId, agentId],
   )
 
-  const { entries, loading, refresh } = useJournalList({
+  const { entries, loading, error, refresh } = useJournalList({
     workspaceId,
     params,
     limit: 30,
@@ -181,6 +198,27 @@ export function CrewActivityFeed({ workspaceId, agentId, crewId }: CrewActivityF
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-body text-muted-foreground">Loading activity…</div>
+      </div>
+    )
+  }
+
+  // Surface load failures instead of falling through to the empty state,
+  // which would misreport a broken fetch as "no activity yet" (#1408).
+  if (error && items.length === 0) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-12 text-center">
+        <AlertTriangle className="h-8 w-8 text-amber-500" />
+        <div>
+          <p className="text-body text-muted-foreground">Couldn&apos;t load activity.</p>
+          <p className="text-label text-muted-foreground mt-1">{error}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => { refresh() }}
+          className="text-label text-primary underline underline-offset-2 hover:no-underline"
+        >
+          Retry
+        </button>
       </div>
     )
   }

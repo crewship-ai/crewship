@@ -155,16 +155,26 @@ func TestRecoverInterruptedRunning_FailsOrphan_FreesSlot_EmitsSignals(t *testing
 		t.Errorf("mission callback got (%q, %q, %q), want a_orphan/FAILED/restart reason", gotCall.assignmentID, gotCall.status, gotCall.errMsg)
 	}
 
-	// Journal: an assignment.failed entry attributed to the recovery.
-	found := false
+	// Journal: exactly one assignment.failed terminal entry, emitted by
+	// finishAssignment (recovery no longer emits its own — a second would
+	// duplicate the row in the activity feed). It carries the recovery
+	// reason in its error_message payload.
+	failEntries := 0
+	reasonCarried := false
 	for _, e := range rec.snapshot() {
-		if e.Type == journal.EntryAssignmentFail && e.ActorID == "assignment_recovery" {
-			found = true
-			break
+		if e.Type != journal.EntryAssignmentFail {
+			continue
+		}
+		failEntries++
+		if msg, _ := e.Payload["error_message"].(string); strings.Contains(msg, "interrupted by server restart") {
+			reasonCarried = true
 		}
 	}
-	if !found {
-		t.Errorf("no assignment.failed journal entry from recovery")
+	if failEntries != 1 {
+		t.Errorf("assignment.failed entries = %d, want exactly 1 (no recovery-path duplicate)", failEntries)
+	}
+	if !reasonCarried {
+		t.Errorf("assignment.failed entry did not carry the recovery reason in error_message")
 	}
 }
 

@@ -140,13 +140,36 @@ func covCaptureStderrCli9(t *testing.T, fn func()) string {
 
 // ─── activity: export / filter / rendering paths ───────────────────────
 
+// covActLeadID is the CUID-shaped agent id an assignment.created entry carries
+// as its actor_id (the assigner). The activity feed has NO from_slug in the
+// assignment payload — the "from" column is resolved by looking this id up in
+// the journal/lookup reference table (see covLookupResponse), so the tests
+// exercise that real resolution path instead of a fabricated payload slug.
+const covActLeadID = "cleadabcdefghijklmnop"
+
 func covActivityRows() []map[string]any {
 	return []map[string]any{
-		{"id": "j1", "entry_type": "assignment.created", "severity": "info", "summary": "assigned task A", "ts": "2026-06-10T10:00:00Z", "payload": map[string]any{"from_slug": "lead", "target_slug": "viktor"}},
+		// assignment.created carries the assigner ONLY as actor_id (no
+		// from_slug in the payload — that mirrors the real emitter); the
+		// target is in payload.target_slug.
+		{"id": "j1", "entry_type": "assignment.created", "severity": "info", "summary": "assigned task A", "ts": "2026-06-10T10:00:00Z", "actor_id": covActLeadID, "payload": map[string]any{"target_slug": "viktor"}},
 		{"id": "j2", "entry_type": "assignment.running", "severity": "info", "summary": "assignment running", "ts": "2026-06-10T11:00:00Z"},
 		{"id": "j3", "entry_type": "peer.escalation", "severity": "warn", "summary": "escalated to lead", "ts": "2026-06-10T12:00:00Z"},
 		{"id": "j4", "entry_type": "peer.conversation", "severity": "info", "summary": "asked a question", "ts": "2026-06-10T12:30:00Z"},
 		{"id": "j5", "entry_type": "custom.thing", "severity": "info", "summary": "unknown type", "ts": "not-a-timestamp"},
+	}
+}
+
+// covLookupResponse is the /api/v1/journal/lookup reference table the CLI
+// fetches to resolve actor_id → slug. Mapping covActLeadID → "lead" is what
+// lets the assignment row render a real "from" column.
+func covLookupResponse() map[string]any {
+	return map[string]any{
+		"crews": []map[string]any{},
+		"agents": []map[string]any{
+			{"id": covActLeadID, "name": "Lead", "slug": "lead"},
+		},
+		"missions": []map[string]any{},
 	}
 }
 
@@ -232,9 +255,15 @@ func TestActivityRunE_ExportNDJSONToFile(t *testing.T) {
 	}
 }
 
-func TestActivityRunE_ExportCSVToStdout(t *testing.T) {
+// TestActivityRunE_ExportCSV_FromResolvedViaLookup is the real-path coverage
+// for the "from" column. The assignment.created entry carries NO from_slug —
+// only actor_id — so a passing `from=lead` in the CSV proves the CLI actually
+// hit /api/v1/journal/lookup and resolved the id, not that a fixture baked the
+// slug into the payload.
+func TestActivityRunE_ExportCSV_FromResolvedViaLookup(t *testing.T) {
 	s := covStubCli9(t)
 	s.OnGet("/api/v1/journal", clitest.JSONResponse(200, covActivityResponse(covActivityRows()[:1])))
+	s.OnGet("/api/v1/journal/lookup", clitest.JSONResponse(200, covLookupResponse()))
 	covSetFlagCli9(t, activityCmd, "export", "csv")
 
 	out := covCaptureStdoutCli9(t, func() {
@@ -245,8 +274,67 @@ func TestActivityRunE_ExportCSVToStdout(t *testing.T) {
 	if !strings.Contains(out, "ts,entry_type,from_slug,to_slug,summary") {
 		t.Errorf("csv header missing:\n%s", out)
 	}
+	// from=lead is resolved from actor_id via the lookup; to=viktor is the
+	// payload target_slug.
 	if !strings.Contains(out, "2026-06-10T10:00:00Z,assignment.created,lead,viktor,assigned task A") {
-		t.Errorf("csv row missing:\n%s", out)
+		t.Errorf("csv row missing resolved from-slug:\n%s", out)
+	}
+}
+
+// TestActivityRunE_ExportCSV_NoLookup_BlankFrom proves the fallback is honest:
+// with no lookup available, the id-only "from" degrades to blank rather than
+// crashing or inventing a slug.
+func TestActivityRunE_ExportCSV_NoLookup_BlankFrom(t *testing.T) {
+	s := covStubCli9(t)
+	s.OnGet("/api/v1/journal", clitest.JSONResponse(200, covActivityResponse(covActivityRows()[:1])))
+	// No /api/v1/journal/lookup handler → fetchAgentSlugs gets a 404 and
+	// returns an empty map (best-effort).
+	covSetFlagCli9(t, activityCmd, "export", "csv")
+
+	out := covCaptureStdoutCli9(t, func() {
+		if err := activityCmd.RunE(activityCmd, nil); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+	if !strings.Contains(out, "2026-06-10T10:00:00Z,assignment.created,,viktor,assigned task A") {
+		t.Errorf("csv row should have a blank from with no lookup:\n%s", out)
+	}
+}
+
+// TestActivityRunE_LinesOutOfRange asserts an out-of-range --lines is a hard
+// error, not a silent clamp.
+func TestActivityRunE_LinesOutOfRange(t *testing.T) {
+	covStubCli9(t)
+	for _, v := range []string{"0", "501", "-3"} {
+		covSetFlagCli9(t, activityCmd, "lines", v)
+		err := activityCmd.RunE(activityCmd, nil)
+		if err == nil || !strings.Contains(err.Error(), "--lines must be between 1 and 500") {
+			t.Errorf("--lines=%s: expected range error, got %v", v, err)
+		}
+	}
+}
+
+// TestActivityRunE_DedupePeerConversation asserts a peer query's question +
+// answer rows (same thread_id) collapse to a single feed row.
+func TestActivityRunE_DedupePeerConversation(t *testing.T) {
+	s := covStubCli9(t)
+	rows := []map[string]any{
+		{"id": "q1", "entry_type": "peer.conversation", "severity": "info", "summary": "api → db: index is present", "ts": "2026-06-10T12:01:00Z", "payload": map[string]any{"thread_id": "conv-1", "message_type": "answer"}},
+		{"id": "q0", "entry_type": "peer.conversation", "severity": "info", "summary": "api asked db: is the index there?", "ts": "2026-06-10T12:00:00Z", "payload": map[string]any{"thread_id": "conv-1", "message_type": "question"}},
+	}
+	s.OnGet("/api/v1/journal", clitest.JSONResponse(200, covActivityResponse(rows)))
+
+	out := covCaptureStdoutCli9(t, func() {
+		if err := activityCmd.RunE(activityCmd, nil); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+	// Newest-first: the answer survives, the question is dropped.
+	if !strings.Contains(out, "index is present") {
+		t.Errorf("expected the answer row to survive dedupe:\n%s", out)
+	}
+	if strings.Contains(out, "is the index there?") {
+		t.Errorf("duplicate question row was not deduped:\n%s", out)
 	}
 }
 

@@ -88,6 +88,50 @@ describe("journalEntriesToFeedRows", () => {
     expect(rows[0].from_slug).toBeNull()
   })
 
+  it("assignment.completed / assignment.failed → terminal rows survive (visible in feed)", () => {
+    const rows = journalEntriesToFeedRows(
+      [
+        entry({ id: "d1", entry_type: "assignment.completed", crew_id: "crew1", actor_id: "ag_lead", summary: "assignment done on db", payload: { target_slug: "db" } }),
+        entry({ id: "f1", entry_type: "assignment.failed", crew_id: "crew1", actor_id: "ag_lead", summary: "assignment failed on db", payload: { target_slug: "db", error_message: "boom" } }),
+      ],
+      crews,
+      agents,
+    )
+    expect(rows).toHaveLength(2)
+    expect(rows.every((r) => r.type === "assignment")).toBe(true)
+    expect(rows[0].from_slug).toBe("lead")
+    expect(rows[0].to_slug).toBe("db")
+  })
+
+  it("dedupes a peer conversation's question+answer (same thread_id) into one row", () => {
+    const rows = journalEntriesToFeedRows(
+      [
+        // newest-first: the answer arrives before the question in the list.
+        entry({ id: "a1", entry_type: "peer.conversation", ts: "2026-07-13T08:01:00Z", crew_id: "crew1", payload: { thread_id: "conv-1", from_slug: "api", target_slug: "db", response: "yes, present" } }),
+        entry({ id: "a0", entry_type: "peer.conversation", ts: "2026-07-13T08:00:00Z", crew_id: "crew1", payload: { thread_id: "conv-1", from_slug: "api", target_slug: "db", question: "is the index there?" } }),
+      ],
+      crews,
+      agents,
+    )
+    expect(rows).toHaveLength(1)
+    // The first-seen (answer) survives.
+    expect(rows[0].id).toBe("a1")
+    expect(rows[0].detail).toBe("yes, present")
+  })
+
+  it("keeps distinct assignment lifecycle rows even though they share an assignment", () => {
+    const rows = journalEntriesToFeedRows(
+      [
+        entry({ id: "l3", entry_type: "assignment.completed", crew_id: "crew1", payload: { assignment_id: "asg-1", target_slug: "db" } }),
+        entry({ id: "l2", entry_type: "assignment.running", crew_id: "crew1", payload: { assignment_id: "asg-1", target_slug: "db" } }),
+        entry({ id: "l1", entry_type: "assignment.created", crew_id: "crew1", payload: { assignment_id: "asg-1", target_slug: "db" } }),
+      ],
+      crews,
+      agents,
+    )
+    expect(rows).toHaveLength(3)
+  })
+
   it("drops non-activity entry types", () => {
     const rows = journalEntriesToFeedRows(
       [
