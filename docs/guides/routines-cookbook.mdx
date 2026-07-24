@@ -469,7 +469,74 @@ The verdict (`DIVERGE-B-PASS`) tells you Haiku can't satisfy the gate but Opus c
 
 - Each sub-routine has its own benched baseline. A regression in `summarize-events` shows up as a regression in any composed routine that calls it — you don't have to re-bench the parent.
 - Author-crew context is preserved per call. If `summarize-events` lives in the `quality` crew, calling it from a `engineering` routine still runs with `quality`'s persona.
-- Cycle detection at save time: A → B → A is rejected. Maximum nested depth is 10 (PIPELINES.md §6.4).
+- Cycle detection: A → B → A is rejected at **save time** (even a pair authored in the wrong order — the being-saved draft is fed back into the check), and a runtime guard rejects any cycle that still slips through **before** it churns to the depth ceiling. Maximum nested depth is 10.
+- The parent's budget **bounds the child**: a `call_pipeline` child inherits the parent's remaining `max_cost_usd` and stops when it's exhausted, rather than counting from zero against only its own cap.
+
+---
+
+## Recipe 9 — Fan out over a list with `foreach` + CEL gating
+
+**Goal**: process every element of an array concurrently — one HTTP fetch + one summary per URL — then keep only the non-trivial results with a CEL `if:`. The per-item outputs collect into a single array you can hand to a final step.
+
+```json
+{
+  "dsl_version": "1.0",
+  "name": "summarize-feed",
+  "display_name": "Summarize each feed URL (bounded fan-out)",
+  "max_cost_usd": 1.50,
+  "inputs": [
+    { "name": "urls", "type": "array", "required": true },
+    { "name": "min_len", "type": "integer", "default": 200 }
+  ],
+  "steps": [
+    {
+      "id": "each",
+      "type": "foreach",
+      "foreach": {
+        "items": "{{ inputs.urls }}",
+        "as": "url",
+        "parallelism": 6,
+        "steps": [
+          {
+            "id": "fetch",
+            "type": "http",
+            "http": { "method": "GET", "url": "{{ inputs.url }}" }
+          },
+          {
+            "id": "summarize",
+            "type": "agent_run",
+            "agent_slug": "summarizer",
+            "complexity": "fast",
+            "if": "inputs.url != \"\"",
+            "prompt": "One-paragraph summary of:\n\n{{ steps.fetch.output }}"
+          }
+        ]
+      }
+    },
+    {
+      "id": "digest",
+      "type": "agent_run",
+      "agent_slug": "editor",
+      "needs": ["each"],
+      "if": "steps.each != \"[]\"",
+      "prompt": "Combine these per-URL summaries into a newsletter:\n\n{{ steps.each.output }}"
+    }
+  ]
+}
+```
+
+### How it runs
+
+- `each` renders `{{ inputs.urls }}` to a JSON array and runs the two-step body **once per URL**, up to **6 in flight** at a time (`parallelism`). Each URL is bound as `{{ inputs.url }}` inside the body.
+- The body's `summarize` step gates on a **CEL expression** — `inputs.url != ""` — a real comparison, not a template. Before CEL support, `"if": "inputs.url != \"\""` rendered to the literal string and always read as truthy; now it evaluates.
+- `each`'s output is the JSON array of every item's last body-step output, in input order: `["summary 1","summary 2",…]`. The `digest` step's own CEL `if:` — `steps.each != "[]"` — skips the newsletter when the fan-out produced nothing.
+- **Cost is summed across all items** and attributed to `each`, so the routine-level `max_cost_usd: 1.50` bounds the entire fan-out — a runaway 500-URL input stops at the budget instead of spending unbounded.
+
+### Gotchas
+
+- `items` must render to a **JSON array**. An `object` or scalar is a hard error; an empty array is a valid no-op (`[]`).
+- No `wait`, `call_pipeline`, or nested `foreach` inside the body — keep the fan-out bounded and self-contained. Reach for `call_pipeline` at the top level if an item needs to invoke a whole other routine.
+- Fan-out is **fail-fast**: the first item that fails cancels the rest and fails the step. Wrap a flaky body step in `retry:` if transient failures shouldn't sink the batch.
 
 ---
 

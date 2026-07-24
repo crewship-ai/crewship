@@ -55,7 +55,7 @@ func TestRoutineSchema_AllStepTypesCovered(t *testing.T) {
 	enum, _ := typeProp["enum"].([]interface{})
 
 	expected := []StepType{
-		StepAgentRun, StepCallPipeline, StepHTTP, StepCode, StepWait, StepTransform, StepNotify, StepScript,
+		StepAgentRun, StepCallPipeline, StepHTTP, StepCode, StepWait, StepTransform, StepNotify, StepScript, StepForeach,
 	}
 	if len(enum) != len(expected) {
 		t.Errorf("step type count mismatch: schema enum=%d, runtime=%d", len(enum), len(expected))

@@ -28,6 +28,16 @@ func validateAgentless(dsl *DSL) error {
 			return fmt.Errorf("pipeline: step %q is agent_run — not allowed in an agentless routine (token-zero guarantee)", st.ID)
 		case StepCallPipeline:
 			return fmt.Errorf("pipeline: step %q is call_pipeline — not allowed in an agentless routine (nested target resolves at runtime, guarantee can't be enforced)", st.ID)
+		case StepForeach:
+			// A foreach is agentless only if its whole body is — an
+			// agent_run inside the fan-out is token spend all the same.
+			if st.Foreach != nil {
+				for _, bs := range st.Foreach.Steps {
+					if bs.Type == StepAgentRun {
+						return fmt.Errorf("pipeline: step %q foreach body contains agent_run %q — not allowed in an agentless routine", st.ID, bs.ID)
+					}
+				}
+			}
 		}
 	}
 	if dsl.Eval != nil && dsl.Eval.Online != nil && dsl.Eval.Online.SampleRate > 0 {

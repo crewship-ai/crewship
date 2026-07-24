@@ -192,7 +192,7 @@
         },
         "type": {
           "type": "string",
-          "enum": ["agent_run", "call_pipeline", "http", "code", "wait", "transform", "notify", "script"]
+          "enum": ["agent_run", "call_pipeline", "http", "code", "wait", "transform", "notify", "script", "foreach"]
         },
         "complexity": {
           "type": "string",
@@ -210,7 +210,7 @@
         },
         "if": {
           "type": "string",
-          "description": "Optional template-rendered boolean. False → step skipped."
+          "description": "Optional gate. A bare CEL expression is evaluated against inputs / steps / run (e.g. `inputs.dry_run == false`, `steps.classify == \"spam\"`); a {{ ... }} template is rendered then truthy-checked (back-compat). Falsey (empty/false/0/null/nil/no/off) → step skipped."
         },
         "needs": {
           "type": "array",
@@ -240,7 +240,8 @@
         "wait": { "$ref": "#/$defs/WaitStep" },
         "transform": { "$ref": "#/$defs/TransformStep" },
         "notify": { "$ref": "#/$defs/NotifyStep" },
-        "script": { "$ref": "#/$defs/ScriptStep" }
+        "script": { "$ref": "#/$defs/ScriptStep" },
+        "foreach": { "$ref": "#/$defs/ForeachStep" }
       },
       "allOf": [
         {
@@ -274,8 +275,40 @@
         {
           "if": { "properties": { "type": { "const": "script" } } },
           "then": { "required": ["script"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "foreach" } } },
+          "then": { "required": ["foreach"] }
         }
       ]
+    },
+    "ForeachStep": {
+      "type": "object",
+      "required": ["items", "steps"],
+      "additionalProperties": false,
+      "description": "Fan a body of steps out over each element of a JSON array with bounded concurrency, collecting per-item outputs into a JSON array.",
+      "properties": {
+        "items": {
+          "type": "string",
+          "description": "Template rendering to a JSON array, e.g. {{ inputs.urls }} or {{ steps.fetch.output }}."
+        },
+        "as": {
+          "type": "string",
+          "default": "item",
+          "description": "Name the loop variable is bound to in each body step's context, read as {{ inputs.<as> }}."
+        },
+        "parallelism": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Max concurrent items. 0 = default wave concurrency; 1 = sequential. Clamped to the wave cap."
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/Step" },
+          "description": "Per-item body. Runs sequentially within an item, in parallel across items. wait / call_pipeline / nested foreach are not allowed."
+        }
+      }
     },
     "Outcomes": {
       "type": "object",

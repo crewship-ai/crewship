@@ -486,7 +486,7 @@ func (e *Executor) executeOneStep(
 
 	// Conditional skip — same semantics as the linear path.
 	if step.If != "" {
-		if !evalIfCondition(Render(step.If, ctxRender)) {
+		if !evalStepCondition(step.If, ctxRender) {
 			emit.emitStepSkipped(ctx, *step, step.If)
 			resMu.Lock()
 			result.StepOutputs[step.ID] = "<skipped>"

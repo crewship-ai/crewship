@@ -1255,7 +1255,7 @@ func (e *Executor) runLinearStep(
 	// Skipped steps still appear in the journal so observers see
 	// "this branch wasn't taken."
 	if step.If != "" {
-		if !evalIfCondition(Render(step.If, ctxRender)) {
+		if !evalStepCondition(step.If, ctxRender) {
 			emit.emitStepSkipped(ctx, step, step.If)
 			result.StepOutputs[step.ID] = "<skipped>"
 			e.persistStepOutputs(ctx, in, depth, runID, result.StepOutputs, result.CostUSD, startedAt)
@@ -1498,6 +1498,8 @@ func (e *Executor) dispatchStep(
 		return e.runNotifyStep(ctx, step, parentRender, in, runID)
 	case StepScript:
 		return e.runScriptStep(ctx, step, parentRender, in, runID)
+	case StepForeach:
+		return e.runForeachStep(ctx, step, in, parentRender, runID, pipelineID, emit, depth)
 	default:
 		return "", 0, 0, fmt.Errorf("unsupported step type %q", step.Type)
 	}

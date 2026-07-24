@@ -724,9 +724,43 @@ For the zero-config version — a desktop ping when a run *ends* (success or fai
 
 To reach **outside** Crewship when a run completes or fails — email or a signed webhook to an admin, a Slack relay, or your own service — configure [outbound notification channels](/guides/notifications). The `notify` step is the in-product half; outbound channels are the half that reaches people who aren't watching the inbox.
 
+### `foreach` — fan out over an array
+
+```json
+{
+  "id": "process_each",
+  "type": "foreach",
+  "foreach": {
+    "items": "{{ inputs.urls }}",
+    "as": "url",
+    "parallelism": 8,
+    "steps": [
+      { "id": "fetch",  "type": "http",      "http": { "method": "GET", "url": "{{ inputs.url }}" } },
+      { "id": "digest", "type": "agent_run", "agent_slug": "summarizer", "prompt": "Summarize: {{ steps.fetch.output }}" }
+    ]
+  }
+}
+```
+
+Runs the **body** once per element of a JSON array, collecting each item's result into a JSON array as the step's output (`{{ steps.process_each.output }}` → `["…","…"]`, in input order).
+
+| Field | Notes |
+| --- | --- |
+| `items` | Template that must render to a **JSON array** — usually `{{ inputs.<name> }}` or `{{ steps.<id>.output }}`. An empty array is a valid no-op (output `[]`). |
+| `as` | Name the current element is bound to inside the body, read as `{{ inputs.<as> }}` (or `{{ inputs.<as>.field }}` for object elements). Default `item`. |
+| `parallelism` | Max items in flight at once. `0` (default) uses the platform wave concurrency; `1` forces sequential; higher values are clamped to the wave cap. |
+| `steps` | The per-item body. Steps run **sequentially within an item** and **in parallel across items** (bounded). Each body step sees the parent's inputs, the loop variable, every upstream (pre-`foreach`) step output, and its own earlier body steps. |
+
+Within an item the body runs like a mini-pipeline: per-step `retry:`, `validation`, `outcomes`, and tier escalation all apply. **Cost is summed across every item** and attributed to the `foreach` step, so `max_cost_usd` still bounds the whole fan-out. The first item that fails cancels the rest and fails the step (fail-fast). `wait`, `call_pipeline`, and a nested `foreach` are **not allowed** inside the body — the fan-out is a bounded, self-contained unit.
+
 ### Conditional `if`
 
-Any step can carry `"if": "{{ inputs.run_summary }}"`. The placeholder is rendered as a plain string — empty / `false` / `0` / `no` / `off` (case-insensitive) → step skipped and marked `<skipped>` in StepOutputs; anything else counts as truthy. Templates are plain substitution, not expression evaluation, so put the boolean upstream (e.g. set `inputs.run_summary` from the caller) rather than writing `==` / `!=` inside the `if` value.
+Any step can carry an `if:` gate. Two forms, chosen automatically:
+
+- **CEL expression** (no `{{ … }}`): evaluated against the typed variables `inputs`, `steps`, and `run`. Real comparisons and logic work — `"if": "inputs.dry_run == false"`, `"if": "steps.classify == \"spam\""`, `"if": "inputs.count > 0 && run.is_replay == false"`. A boolean result gates directly; a number/string result falls through to the truthy rule below.
+- **Template** (`"if": "{{ inputs.run_summary }}"`): rendered to a plain string, then truthy-checked — empty / `false` / `0` / `no` / `off` (case-insensitive) → step **skipped** and marked `<skipped>` in StepOutputs; anything else is truthy. A bare literal like `"yes"` / `"false"` follows the same truthy rule.
+
+The CEL variables are: `inputs.*` (the run's inputs, numbers stay numbers for arithmetic), `steps.<id>` (that step's output **string**), and `run.metadata.*` / `run.is_replay` / `run.replay_of`. A skipped step never trips `on_fail` — "didn't run" is structurally different from "ran and failed".
 
 ### DAG with `needs[]`
 

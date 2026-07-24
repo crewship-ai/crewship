@@ -147,6 +147,9 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 		if err := validateStepHooks(st); err != nil {
 			return err
 		}
+		if err := validateForeachStep(st, dsl, agentSlugs); err != nil {
+			return err
+		}
 	}
 
 	if err := validateHooks(dsl); err != nil {
@@ -396,6 +399,34 @@ func validateTemplatesInStep(st Step, inputs, earlier map[string]struct{}) error
 		}
 		if err := walk(st.Transform.Expression); err != nil {
 			return err
+		}
+	}
+
+	// foreach: the items template resolves against this step's own inputs/
+	// earlier-steps context; the body steps additionally see the loop
+	// variable (inputs.<as>) and each other in source order (#1419).
+	if st.Foreach != nil {
+		if err := walk(st.Foreach.Items); err != nil {
+			return err
+		}
+		as := st.Foreach.As
+		if as == "" {
+			as = "item"
+		}
+		bodyInputs := make(map[string]struct{}, len(inputs)+1)
+		for k := range inputs {
+			bodyInputs[k] = struct{}{}
+		}
+		bodyInputs[as] = struct{}{}
+		bodyEarlier := make(map[string]struct{}, len(earlier)+len(st.Foreach.Steps))
+		for k := range earlier {
+			bodyEarlier[k] = struct{}{}
+		}
+		for _, bs := range st.Foreach.Steps {
+			if err := validateTemplatesInStep(bs, bodyInputs, bodyEarlier); err != nil {
+				return err
+			}
+			bodyEarlier[bs.ID] = struct{}{}
 		}
 	}
 
