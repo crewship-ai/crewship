@@ -29,52 +29,6 @@ func newQueryHandler(t *testing.T) (*QueryHandler, string, string, string, strin
 	return h, userID, wsID, crewID, leadID, workerID
 }
 
-// ── Activity feed ─────────────────────────────────────────────────────
-
-func TestActivity_ListAll(t *testing.T) {
-	h, userID, wsID, crewID, leadID, workerID := newQueryHandler(t)
-	// chat needed for assignments
-	chatID := generateCUID()
-	if _, err := h.db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,mode,status) VALUES (?, ?, ?, 'CHAT', 'ACTIVE')`, chatID, leadID, wsID); err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	h.db.Exec(`INSERT INTO assignments(id,workspace_id,chat_id,assigned_by_id,assigned_to_id,task,status,created_at)
-		VALUES (?, ?, ?, ?, ?, 'do thing', 'PENDING', ?)`, "a1", wsID, chatID, leadID, workerID, now)
-	h.db.Exec(`INSERT INTO peer_conversations(id,workspace_id,crew_id,chat_id,from_agent_id,to_agent_id,question,status,created_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'q?', 'COMPLETED', ?)`, "p1", wsID, crewID, chatID, leadID, workerID, now)
-	h.db.Exec(`INSERT INTO escalations(id,workspace_id,crew_id,chat_id,from_agent_id,reason,status,created_at)
-		VALUES (?, ?, ?, ?, ?, 'help', 'PENDING', ?)`, "e1", wsID, crewID, chatID, leadID, now)
-
-	req := httptest.NewRequest("GET", "/?limit=10", nil)
-	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
-	rr := httptest.NewRecorder()
-	h.ListAllActivity(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
-	}
-	var items []activityItem
-	json.Unmarshal(rr.Body.Bytes(), &items)
-	if len(items) != 3 {
-		t.Errorf("got %d items want 3", len(items))
-	}
-}
-
-func TestActivity_ListAll_Pagination(t *testing.T) {
-	h, userID, wsID, _, _, _ := newQueryHandler(t)
-
-	req := httptest.NewRequest("GET", "/?limit=10&offset=5000", nil)
-	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
-	rr := httptest.NewRecorder()
-	h.ListAllActivity(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d", rr.Code)
-	}
-	if rr.Body.String() != "[]\n" {
-		t.Errorf("expected [], got %q", rr.Body.String())
-	}
-}
-
 // ── Escalation ────────────────────────────────────────────────────────
 
 func TestEscalation_PendingCount(t *testing.T) {

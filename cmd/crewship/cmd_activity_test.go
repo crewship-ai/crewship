@@ -70,12 +70,13 @@ func TestActivityRunE_NoWorkspace(t *testing.T) {
 	}
 }
 
-// activityMock captures the activity URL served and optionally responds to
-// /api/v1/crews so the slug→id resolution can be exercised.
+// activityMock captures the journal URL the activity feed queries and
+// optionally responds to /api/v1/crews so the slug→id resolution can be
+// exercised. The feed is now journal-backed (GET /api/v1/journal).
 type activityMock struct {
 	t          *testing.T
 	activityMu sync.Mutex
-	activity   string // last /api/v1/activity URL
+	activity   string // last /api/v1/journal URL
 	crews      []struct {
 		ID   string `json:"id"`
 		Slug string `json:"slug"`
@@ -86,7 +87,7 @@ type activityMock struct {
 func (m *activityMock) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case strings.HasPrefix(r.URL.Path, "/api/v1/activity"):
+		case strings.HasPrefix(r.URL.Path, "/api/v1/journal"):
 			m.activityMu.Lock()
 			m.activity = r.URL.RequestURI()
 			m.activityMu.Unlock()
@@ -96,7 +97,7 @@ func (m *activityMock) handler() http.Handler {
 				_ = json.NewEncoder(w).Encode(map[string]string{"error": "boom"})
 				return
 			}
-			_, _ = w.Write([]byte(`[]`))
+			_, _ = w.Write([]byte(`{"entries":[]}`))
 		case r.URL.Path == "/api/v1/crews":
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(m.crews)

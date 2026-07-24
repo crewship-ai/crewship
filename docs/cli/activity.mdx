@@ -6,7 +6,9 @@ icon: "activity"
 
 # Activity
 
-`cmd/crewship/cmd_activity.go` wraps `GET /api/v1/activity`. The server merges three sources (assignments, peer conversations, escalations) into a single list, descending by `created_at`, narrowable by crew. Anything beyond that (free-text search, type filter, time window) is applied client-side after the page lands — the endpoint itself has no `type=` or `since=` parameter, and there is intentionally no SSE stream.
+`cmd/crewship/cmd_activity.go` is a journal-backed view: it queries `GET /api/v1/journal` filtered to the activity entry types (`peer.conversation`, `peer.escalation`, `assignment.created`, `assignment.running`), descending by time, narrowable by crew. The journal is the canonical event stream, so this is an **event** feed (one row per event) — not the entity snapshot the retired `/api/v1/activity` aggregator returned. Assignment completion/failure is logged as `run.completed` / `run.failed` (with an `assignment_id` ref), not `assignment.*`, so use [`crewship journal`](/cli/journal) for those.
+
+`--since` is now a **server-side** filter (the journal honours `since=`); `--type` remains a client-side substring match on the entry type.
 
 For a live tail of granular events, use [`crewship journal --follow`](/cli/journal) or its shortcut [`crewship watch`](/cli/watch).
 
@@ -15,9 +17,9 @@ For a live tail of granular events, use [`crewship journal --follow`](/cli/journ
 | Flag | Type | Default | Effect |
 |---|---|---|---|
 | `--crew <slug-or-id>` | string | (unset) | Narrow to a single crew. Server-side filter via `crew_id`. |
-| `--lines <n>` | int | `50` | Page size. The server caps at 100. |
-| `--type <substring>` | string | (unset) | Client-side filter by activity type substring (case-insensitive). |
-| `--since <window>` | string | (unset) | Client-side filter — `1h`, `24h`, `7d`, or RFC3339 timestamp. |
+| `--lines <n>` | int | `50` | Page size. The server caps at 500. |
+| `--type <substring>` | string | (unset) | Client-side filter by entry type substring (e.g. `escalation`, `assignment`). |
+| `--since <window>` | string | (unset) | Server-side time filter — `1h`, `24h`, `7d`, or RFC3339 timestamp. |
 | `--export <fmt>` | string | (unset) | Dump the current page: `ndjson` or `csv`. Wins over `--format`. |
 | `--out <path>` | string | (unset) | Write `--export` output to file (default: stdout). |
 
@@ -36,7 +38,7 @@ crewship activity --export ndjson --out activity.ndjson
 crewship activity --export csv > activity.csv
 ```
 
-Default output is a coloured one-line-per-event table with timestamps, type tag (ASSIGNMENT, COMPLETED, ESCALATION, QUERY, RESPONSE), crew slug, and summary.
+Default output is a coloured one-line-per-event table with timestamps, the journal entry type (`assignment.created`, `peer.conversation`, `peer.escalation`, …), and the entry summary (which already names the participants, e.g. `api asked db: …`). `--export csv` columns are `ts,entry_type,from_slug,to_slug,summary`, with the slugs read from the entry payload; `--export ndjson` dumps each raw journal entry.
 
 ### Common errors
 

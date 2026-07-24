@@ -157,16 +157,16 @@ func TestJournalCountRunE_DefaultStaysHuman(t *testing.T) {
 
 func TestActivityRunE_DefaultStaysHuman(t *testing.T) {
 	stub := covSetupCli5(t)
-	stub.OnGet("/api/v1/activity", clitest.JSONResponse(200, []map[string]any{
-		{"type": "ESCALATION", "crew_slug": "backend-team", "summary": "spend cap hit", "created_at": "2026-07-13T08:00:00Z"},
-	}))
+	stub.OnGet("/api/v1/journal", clitest.JSONResponse(200, map[string]any{"entries": []map[string]any{
+		{"id": "j1", "entry_type": "peer.escalation", "severity": "warn", "summary": "spend cap hit", "ts": "2026-07-13T08:00:00Z"},
+	}}))
 
 	var err error
 	out := covCaptureStdoutCli5(t, func() { err = activityCmd.RunE(activityCmd, nil) })
 	if err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	for _, want := range []string{"ESCALATION", "backend-team", "spend cap hit"} {
+	for _, want := range []string{"peer.escalation", "spend cap hit"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("human output missing %q; got:\n%s", want, out)
 		}
@@ -174,14 +174,14 @@ func TestActivityRunE_DefaultStaysHuman(t *testing.T) {
 }
 
 // TestActivityRunE_YAMLAndNDJSON is the flip side of DefaultStaysHuman:
-// activityCmd routes the activities slice through f.AutoHuman now, so
+// activityCmd routes the journal entries slice through f.AutoHuman now, so
 // --format yaml/ndjson must carry the rows instead of the colored feed.
 func TestActivityRunE_YAMLAndNDJSON(t *testing.T) {
 	stub := covSetupCli5(t)
-	stub.OnGet("/api/v1/activity", clitest.JSONResponse(200, []map[string]any{
-		{"type": "ESCALATION", "crew_slug": "backend-team", "summary": "spend cap hit", "created_at": "2026-07-13T08:00:00Z"},
-		{"type": "ASSIGNMENT", "crew_slug": "frontend-team", "summary": "assigned task B", "created_at": "2026-07-13T08:05:00Z"},
-	}))
+	stub.OnGet("/api/v1/journal", clitest.JSONResponse(200, map[string]any{"entries": []map[string]any{
+		{"id": "j1", "entry_type": "peer.escalation", "severity": "warn", "summary": "spend cap hit", "ts": "2026-07-13T08:00:00Z"},
+		{"id": "j2", "entry_type": "assignment.created", "severity": "info", "summary": "assigned task B", "ts": "2026-07-13T08:05:00Z"},
+	}}))
 
 	flagFormat = "yaml"
 	var err error
@@ -196,7 +196,7 @@ func TestActivityRunE_YAMLAndNDJSON(t *testing.T) {
 	if len(yamlRows) != 2 {
 		t.Fatalf("yaml: want 2 activity rows, got %d; out:\n%s", len(yamlRows), out)
 	}
-	if yamlRows[0]["type"] != "ESCALATION" || yamlRows[1]["type"] != "ASSIGNMENT" {
+	if yamlRows[0]["entry_type"] != "peer.escalation" || yamlRows[1]["entry_type"] != "assignment.created" {
 		t.Errorf("yaml rows mismatch: %+v", yamlRows)
 	}
 
@@ -216,7 +216,7 @@ func TestActivityRunE_YAMLAndNDJSON(t *testing.T) {
 	if uerr := json.Unmarshal([]byte(lines[1]), &second); uerr != nil {
 		t.Fatalf("ndjson line 1 is not valid JSON: %v\nline:\n%s", uerr, lines[1])
 	}
-	if first["type"] != "ESCALATION" || second["type"] != "ASSIGNMENT" {
+	if first["entry_type"] != "peer.escalation" || second["entry_type"] != "assignment.created" {
 		t.Errorf("ndjson rows mismatch: %+v / %+v", first, second)
 	}
 }

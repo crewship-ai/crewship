@@ -142,24 +142,30 @@ func covCaptureStderrCli9(t *testing.T, fn func()) string {
 
 func covActivityRows() []map[string]any {
 	return []map[string]any{
-		{"type": "ASSIGNMENT", "crew_slug": "backend", "summary": "assigned task A", "created_at": "2026-06-10T10:00:00Z", "from_slug": "lead", "to_slug": "viktor"},
-		{"type": "COMPLETED", "crew_slug": "backend", "summary": "finished task A", "created_at": "2026-06-10T11:00:00Z"},
-		{"type": "ESCALATION", "crew_slug": "backend", "summary": "escalated to lead", "created_at": "2026-06-10T12:00:00Z"},
-		{"type": "QUERY", "crew_slug": "backend", "summary": "asked a question", "created_at": "2026-06-10T12:30:00Z"},
-		{"type": "weird", "crew_slug": "backend", "summary": "unknown type", "created_at": "not-a-timestamp"},
+		{"id": "j1", "entry_type": "assignment.created", "severity": "info", "summary": "assigned task A", "ts": "2026-06-10T10:00:00Z", "payload": map[string]any{"from_slug": "lead", "target_slug": "viktor"}},
+		{"id": "j2", "entry_type": "assignment.running", "severity": "info", "summary": "assignment running", "ts": "2026-06-10T11:00:00Z"},
+		{"id": "j3", "entry_type": "peer.escalation", "severity": "warn", "summary": "escalated to lead", "ts": "2026-06-10T12:00:00Z"},
+		{"id": "j4", "entry_type": "peer.conversation", "severity": "info", "summary": "asked a question", "ts": "2026-06-10T12:30:00Z"},
+		{"id": "j5", "entry_type": "custom.thing", "severity": "info", "summary": "unknown type", "ts": "not-a-timestamp"},
 	}
+}
+
+// covActivityResponse wraps journal rows in the List envelope the
+// /api/v1/journal handler returns (entries + next_cursor + count).
+func covActivityResponse(rows []map[string]any) map[string]any {
+	return map[string]any{"entries": rows, "next_cursor": nil, "count": len(rows)}
 }
 
 func TestActivityRunE_TableRendersRows(t *testing.T) {
 	s := covStubCli9(t)
-	s.OnGet("/api/v1/activity", clitest.JSONResponse(200, covActivityRows()))
+	s.OnGet("/api/v1/journal", clitest.JSONResponse(200, covActivityResponse(covActivityRows())))
 
 	out := covCaptureStdoutCli9(t, func() {
 		if err := activityCmd.RunE(activityCmd, nil); err != nil {
 			t.Errorf("RunE: %v", err)
 		}
 	})
-	for _, want := range []string{"assigned task A", "finished task A", "escalated to lead", "asked a question", "unknown type", "2026-06-10 10:00:00", "not-a-timestamp"} {
+	for _, want := range []string{"assigned task A", "assignment running", "escalated to lead", "asked a question", "unknown type", "2026-06-10 10:00:00", "not-a-timestamp"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("table output missing %q:\n%s", want, out)
 		}
@@ -168,7 +174,7 @@ func TestActivityRunE_TableRendersRows(t *testing.T) {
 
 func TestActivityRunE_TypeAndSinceFilters(t *testing.T) {
 	s := covStubCli9(t)
-	s.OnGet("/api/v1/activity", clitest.JSONResponse(200, covActivityRows()))
+	s.OnGet("/api/v1/journal", clitest.JSONResponse(200, covActivityResponse(covActivityRows())))
 	covSetFlagCli9(t, activityCmd, "type", "assign")
 	covSetFlagCli9(t, activityCmd, "since", "2026-06-01T00:00:00Z")
 
@@ -178,10 +184,10 @@ func TestActivityRunE_TypeAndSinceFilters(t *testing.T) {
 		}
 	})
 	if !strings.Contains(out, "assigned task A") {
-		t.Errorf("type filter should keep ASSIGNMENT row:\n%s", out)
+		t.Errorf("type filter should keep assignment.* rows:\n%s", out)
 	}
-	if strings.Contains(out, "finished task A") {
-		t.Errorf("type filter should drop COMPLETED row:\n%s", out)
+	if strings.Contains(out, "escalated to lead") {
+		t.Errorf("type filter %q should drop the escalation row:\n%s", "assign", out)
 	}
 }
 
@@ -197,7 +203,7 @@ func TestActivityRunE_BadSince(t *testing.T) {
 
 func TestActivityRunE_ExportNDJSONToFile(t *testing.T) {
 	s := covStubCli9(t)
-	s.OnGet("/api/v1/activity", clitest.JSONResponse(200, covActivityRows()[:2]))
+	s.OnGet("/api/v1/journal", clitest.JSONResponse(200, covActivityResponse(covActivityRows()[:2])))
 	outPath := filepath.Join(t.TempDir(), "activity.ndjson")
 	covSetFlagCli9(t, activityCmd, "export", "ndjson")
 	covSetFlagCli9(t, activityCmd, "out", outPath)
@@ -221,14 +227,14 @@ func TestActivityRunE_ExportNDJSONToFile(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &row); err != nil {
 		t.Fatalf("first ndjson line is not JSON: %v", err)
 	}
-	if row["type"] != "ASSIGNMENT" {
-		t.Errorf("first row type = %v, want ASSIGNMENT", row["type"])
+	if row["entry_type"] != "assignment.created" {
+		t.Errorf("first row entry_type = %v, want assignment.created", row["entry_type"])
 	}
 }
 
 func TestActivityRunE_ExportCSVToStdout(t *testing.T) {
 	s := covStubCli9(t)
-	s.OnGet("/api/v1/activity", clitest.JSONResponse(200, covActivityRows()[:1]))
+	s.OnGet("/api/v1/journal", clitest.JSONResponse(200, covActivityResponse(covActivityRows()[:1])))
 	covSetFlagCli9(t, activityCmd, "export", "csv")
 
 	out := covCaptureStdoutCli9(t, func() {
@@ -236,17 +242,17 @@ func TestActivityRunE_ExportCSVToStdout(t *testing.T) {
 			t.Errorf("RunE: %v", err)
 		}
 	})
-	if !strings.Contains(out, "created_at,type,crew_slug,from_slug,to_slug,summary") {
+	if !strings.Contains(out, "ts,entry_type,from_slug,to_slug,summary") {
 		t.Errorf("csv header missing:\n%s", out)
 	}
-	if !strings.Contains(out, "ASSIGNMENT,backend,lead,viktor,assigned task A") {
+	if !strings.Contains(out, "2026-06-10T10:00:00Z,assignment.created,lead,viktor,assigned task A") {
 		t.Errorf("csv row missing:\n%s", out)
 	}
 }
 
 func TestActivityRunE_ExportUnknownFormat(t *testing.T) {
 	s := covStubCli9(t)
-	s.OnGet("/api/v1/activity", clitest.JSONResponse(200, []map[string]any{}))
+	s.OnGet("/api/v1/journal", clitest.JSONResponse(200, covActivityResponse([]map[string]any{})))
 	covSetFlagCli9(t, activityCmd, "export", "xml")
 
 	err := activityCmd.RunE(activityCmd, nil)
@@ -257,7 +263,7 @@ func TestActivityRunE_ExportUnknownFormat(t *testing.T) {
 
 func TestActivityRunE_JSONFormat(t *testing.T) {
 	s := covStubCli9(t)
-	s.OnGet("/api/v1/activity", clitest.JSONResponse(200, covActivityRows()[:1]))
+	s.OnGet("/api/v1/journal", clitest.JSONResponse(200, covActivityResponse(covActivityRows()[:1])))
 	flagFormat = "json"
 
 	out := covCaptureStdoutCli9(t, func() {
@@ -265,7 +271,7 @@ func TestActivityRunE_JSONFormat(t *testing.T) {
 			t.Errorf("RunE: %v", err)
 		}
 	})
-	if !strings.Contains(out, `"ASSIGNMENT"`) {
-		t.Errorf("json output should contain the row type:\n%s", out)
+	if !strings.Contains(out, `"assignment.created"`) {
+		t.Errorf("json output should contain the row entry_type:\n%s", out)
 	}
 }

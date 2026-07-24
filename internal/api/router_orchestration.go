@@ -549,9 +549,6 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Workspace-wide escalation count (public, authenticated)
 	r.mux.Handle("GET /api/v1/escalations/pending-count", authed(wsCtx(http.HandlerFunc(queries.PendingEscalationCount))))
 
-	// Cross-crew activity feed (public, authenticated)
-	r.mux.Handle("GET /api/v1/activity", authed(wsCtx(http.HandlerFunc(queries.ListAllActivity))))
-
 	// Cross-session conversation search (public, authenticated). Backed by
 	// the conversation_messages FTS5 mirror (v111). The handler verifies
 	// the requested agent belongs to the caller's workspace before the
