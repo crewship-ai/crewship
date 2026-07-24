@@ -122,6 +122,7 @@ func newScheduleFlagsCmd() *cobra.Command {
 	c.Flags().Bool("fail-closed", false, "")
 	c.Flags().Bool("json", false, "")
 	c.Flags().Bool("yes", false, "")
+	c.Flags().String("catchup", "", "")
 	return c
 }
 
@@ -352,6 +353,59 @@ func TestScheduleCreate_When_Unrecognized(t *testing.T) {
 	err := routineSchedulesCreateCmd.RunE(c, nil)
 	if err == nil || !strings.Contains(err.Error(), "could not understand") {
 		t.Errorf("got %v, want unrecognized-phrase error", err)
+	}
+}
+
+// #1422 item 2: --catchup is sent through on create, and last_missed_count
+// renders in the list's MISSED column when nonzero.
+func TestScheduleCreate_CatchupPolicy(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	stub.OnPost(schedulesPath, clitest.JSONResponse(201, scheduleRow{
+		ID: "sch-cu", Name: "n", CronExpr: "0 9 * * *", Timezone: "UTC", CatchupPolicy: "all",
+	}))
+	setStubCLI(t, stub.URL())
+
+	c := newScheduleFlagsCmd()
+	for k, v := range map[string]string{"slug": "x", "cron": "0 9 * * *", "catchup": "all"} {
+		if err := c.Flags().Set(k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := routineSchedulesCreateCmd.RunE(c, nil); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	calls := stub.CallsFor("POST", schedulesPath)
+	if len(calls) != 1 {
+		t.Fatalf("POST calls = %d", len(calls))
+	}
+	var body map[string]any
+	clitest.MustDecodeJSONBody(calls[0].Body, &body)
+	if body["catchup_policy"] != "all" {
+		t.Errorf("catchup_policy = %v, want all", body["catchup_policy"])
+	}
+}
+
+func TestScheduleList_ShowsMissedColumn(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	stub.OnGet(schedulesPath, clitest.JSONResponse(200, []scheduleRow{
+		{ID: "sch-1", Name: "n1", CronExpr: "* * * * *", Timezone: "UTC", CatchupPolicy: "skip", LastMissedCount: 4},
+		{ID: "sch-2", Name: "n2", CronExpr: "* * * * *", Timezone: "UTC"},
+	}))
+	setStubCLI(t, stub.URL())
+
+	c := newScheduleFlagsCmd()
+	out := captureStdoutCovCli2(t, func() {
+		if err := routineSchedulesListCmd.RunE(c, nil); err != nil {
+			t.Errorf("list: %v", err)
+		}
+	})
+	if !strings.Contains(out, "4 (skip)") {
+		t.Errorf("missing missed-count cell:\n%s", out)
+	}
+	if !strings.Contains(out, "MISSED") {
+		t.Errorf("missing MISSED header:\n%s", out)
 	}
 }
 

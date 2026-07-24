@@ -881,6 +881,7 @@ crewship routine schedules create \
 | `--wake-slug` | | Wake gate: agentless probe routine evaluated before each fire — the main routine runs only when the probe's output is truthy. |
 | `--wake-inputs` | | JSON object passed to the wake probe on each tick (requires `--wake-slug`). |
 | `--fail-closed` | | Wake gate: **hold** the run when the probe errors, times out, or finishes non-`COMPLETED`, instead of failing open (requires `--wake-slug`). Default off — a broken probe fires the main run and records `last_wake_status: ERROR`. With this on, that outcome records `HELD` and no main run fires. Use it when the gate must *suppress* an autonomous run, not just save tokens. |
+| `--catchup` | | Missed-run catch-up policy for when the schedule falls overdue by more than one occurrence: `skip` / `once` (default) / `all`. See [Missed-run catch-up](/guides/routines#missed-run-catch-up). Ignored by wake-gated schedules, which always behave like `once`. |
 
 `create` is the only command that mints a schedule ID, and every other
 schedule command takes that ID with no prefix-matching fallback — so to

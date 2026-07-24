@@ -36,9 +36,9 @@ Schedules attach to a saved routine (pipeline) and fire it on a cron expression.
 
 | Subcommand | Purpose |
 |------------|---------|
-| `list [--slug <routine>]` | List schedules in this workspace, optionally filtered by target routine. |
-| `create --slug <routine> --cron '<expr>' [--name ...] [--timezone <IANA>] [--inputs <json>] [--enabled=false]` | Create a schedule. `--slug` and `--cron` are required; defaults to UTC and enabled. |
-| `update <id> [--cron ...] [--timezone ...] [--name ...] [--enabled / --enabled=false] [--inputs <json>]` | Patch one or more fields. |
+| `list [--slug <routine>]` | List schedules in this workspace, optionally filtered by target routine. Shows a **MISSED** column when a schedule's most recent tick dropped or collapsed overdue occurrences (see `--catchup` below). |
+| `create --slug <routine> (--cron '<expr>' \| --when '<phrase>') [--name ...] [--timezone <IANA>] [--inputs <json>] [--enabled=false] [--catchup skip\|once\|all]` | Create a schedule. `--slug` and one of `--cron`/`--when` are required; defaults to UTC, enabled, `--catchup once`. `--when` accepts a small set of natural-language phrases (`"every weekday at 9"`, `"every day at 9am"`, `"every monday at 14:00"`, `"every hour"`, `"every 15 minutes"`) — it's parsed to a cron expression, previewed with its next 3 fire times, and confirmed before saving (`--yes` skips the prompt). |
+| `update <id> [--cron ...] [--timezone ...] [--name ...] [--enabled / --enabled=false] [--inputs <json>] [--catchup skip\|once\|all]` | Patch one or more fields. |
 | `enable <id>` | Enable a paused schedule (fires on next 30 s tick). |
 | `disable <id>` | Pause a schedule without deleting it. |
 | `now <id>` | Force-fire out of cycle (useful for smoke tests). |
@@ -201,6 +201,18 @@ so every firing path is at-most-once.
   double-fire (each replica runs its own in-memory cron); true multi-replica
   exactly-once needs leader election, tracked separately.
 </Note>
+
+### Missed-run catch-up (routine schedules)
+
+At-most-once firing says a re-fire of the SAME occurrence never runs twice.
+It doesn't say what happens when a **routine** (pipeline) schedule fell
+behind by more than one occurrence — downtime, a long disable/re-enable gap,
+etc. That is `catchup_policy` on `crewship routine schedules create/update
+--catchup`: `skip` drops the whole backlog, `once` (default, unchanged
+pre-existing behaviour) fires exactly once for it, `all` fires once per
+missed occurrence (capped at 20 fires/tick). See [Missed-run
+catch-up](/guides/routines#missed-run-catch-up) in the Routines
+guide for the full semantics and the inbox notice it raises.
 
 ## Timeout
 

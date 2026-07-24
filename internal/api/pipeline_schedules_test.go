@@ -160,6 +160,117 @@ func TestPipelineSchedules_Create_HappyPath_Returns201(t *testing.T) {
 	}
 }
 
+// #1422 item 2: catchup_policy round-trips through create, defaults to
+// "once", and rejects an unknown value with 400.
+func TestPipelineSchedules_Create_CatchupPolicy(t *testing.T) {
+	h, db, userID, wsID := scheduleHandlerRig(t)
+	seedPipelineRow(t, db, wsID, "pln_x", "ping-hosts")
+
+	// Default (field omitted) is "once".
+	req := withWorkspaceUser(httptest.NewRequest("POST",
+		"/api/v1/workspaces/"+wsID+"/pipeline-schedules",
+		strings.NewReader(`{"cron_expr":"0 9 * * *","target_pipeline_slug":"ping-hosts"}`)),
+		userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.CreateSchedule(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp scheduleResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.CatchupPolicy != "once" {
+		t.Errorf("default catchup_policy = %q, want once", resp.CatchupPolicy)
+	}
+
+	// Explicit "all" round-trips.
+	req2 := withWorkspaceUser(httptest.NewRequest("POST",
+		"/api/v1/workspaces/"+wsID+"/pipeline-schedules",
+		strings.NewReader(`{"cron_expr":"0 10 * * *","target_pipeline_slug":"ping-hosts","catchup_policy":"all"}`)),
+		userID, wsID, "OWNER")
+	rr2 := httptest.NewRecorder()
+	h.CreateSchedule(rr2, req2)
+	if rr2.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rr2.Code, rr2.Body.String())
+	}
+	var resp2 scheduleResponse
+	if err := json.Unmarshal(rr2.Body.Bytes(), &resp2); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp2.CatchupPolicy != "all" {
+		t.Errorf("catchup_policy = %q, want all", resp2.CatchupPolicy)
+	}
+
+	// Invalid value → 400.
+	req3 := withWorkspaceUser(httptest.NewRequest("POST",
+		"/api/v1/workspaces/"+wsID+"/pipeline-schedules",
+		strings.NewReader(`{"cron_expr":"0 11 * * *","target_pipeline_slug":"ping-hosts","catchup_policy":"sometimes"}`)),
+		userID, wsID, "OWNER")
+	rr3 := httptest.NewRecorder()
+	h.CreateSchedule(rr3, req3)
+	if rr3.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for invalid catchup_policy; body=%s", rr3.Code, rr3.Body.String())
+	}
+}
+
+// An update that doesn't mention catchup_policy keeps the existing value —
+// same whole-row-replace-with-merge convention as the wake gate / version
+// pin fields.
+func TestPipelineSchedules_Update_CatchupPolicy_PreservedWhenAbsent(t *testing.T) {
+	h, db, userID, wsID := scheduleHandlerRig(t)
+	seedPipelineRow(t, db, wsID, "pln_x", "ping-hosts")
+
+	createReq := withWorkspaceUser(httptest.NewRequest("POST",
+		"/api/v1/workspaces/"+wsID+"/pipeline-schedules",
+		strings.NewReader(`{"cron_expr":"0 9 * * *","target_pipeline_slug":"ping-hosts","catchup_policy":"skip"}`)),
+		userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.CreateSchedule(rr, createReq)
+	var created scheduleResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+
+	// Unrelated update (rename) must not reset catchup_policy back to "once".
+	updReq := withWorkspaceUser(httptest.NewRequest("PATCH",
+		"/api/v1/workspaces/"+wsID+"/pipeline-schedules/"+created.ID,
+		strings.NewReader(`{"name":"renamed"}`)),
+		userID, wsID, "OWNER")
+	updReq.SetPathValue("scheduleId", created.ID)
+	rr2 := httptest.NewRecorder()
+	h.UpdateSchedule(rr2, updReq)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr2.Code, rr2.Body.String())
+	}
+	var updated scheduleResponse
+	if err := json.Unmarshal(rr2.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode update: %v", err)
+	}
+	if updated.CatchupPolicy != "skip" {
+		t.Errorf("catchup_policy after unrelated update = %q, want skip (preserved)", updated.CatchupPolicy)
+	}
+
+	// Explicit change is honoured.
+	updReq2 := withWorkspaceUser(httptest.NewRequest("PATCH",
+		"/api/v1/workspaces/"+wsID+"/pipeline-schedules/"+created.ID,
+		strings.NewReader(`{"catchup_policy":"all"}`)),
+		userID, wsID, "OWNER")
+	updReq2.SetPathValue("scheduleId", created.ID)
+	rr3 := httptest.NewRecorder()
+	h.UpdateSchedule(rr3, updReq2)
+	if rr3.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr3.Code, rr3.Body.String())
+	}
+	var updated2 scheduleResponse
+	if err := json.Unmarshal(rr3.Body.Bytes(), &updated2); err != nil {
+		t.Fatalf("decode update2: %v", err)
+	}
+	if updated2.CatchupPolicy != "all" {
+		t.Errorf("catchup_policy after explicit update = %q, want all", updated2.CatchupPolicy)
+	}
+}
+
 // ── ListSchedules ───────────────────────────────────────────────────────
 
 func TestPipelineSchedules_List_NoBackend_Returns503(t *testing.T) {

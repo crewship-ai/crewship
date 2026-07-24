@@ -931,6 +931,40 @@ at 10am`, `every monday at 14:00` (any named weekday), `every hour`, `every
 confirmation prompt (scripts / CI). Anything outside that phrase set returns
 an error asking for a raw `--cron` expression instead of guessing wrong.
 
+#### Missed-run catch-up
+
+If a schedule falls overdue by more than one cron occurrence — the server
+was down, the schedule sat disabled for a while, `next_run_at` otherwise
+fell behind — `catchup_policy` decides what happens to the backlog:
+
+| Policy | Behaviour |
+|---|---|
+| `once` (default) | Fire **once** for the backlog, then resume from the next future occurrence. This is the original, unchanged behaviour — every schedule created before this field existed keeps working exactly as it did. |
+| `skip` | Fire **nothing** for the backlog; just resume from the next future occurrence. |
+| `all` | Fire **once per missed occurrence**, oldest first (capped at 20 fires per tick so a long-down schedule can't turn one tick into an unbounded loop — any remainder is picked up, and further capped, on the next tick). |
+
+```bash
+crewship routine schedules create --slug daily-report \
+    --cron "0 9 * * *" --catchup all   # backfill every missed daily run
+
+crewship routine schedules update <schedule_id> --catchup skip
+```
+
+Whenever a tick drops or collapses backlog occurrences, `routine schedules
+list` shows it in the **MISSED** column (`4 (skip)`, `3 (once)`) instead of
+the gap being silently invisible, and a `medium`-priority MANAGER inbox
+notice is raised the first time it happens for that occurrence.
+`catchup=all` never "misses" anything (`MISSED` stays `—`) since every
+occurrence in the backlog actually fires.
+
+<Note>
+A **wake-gated** schedule (see below) always behaves like `catchup=once` —
+the probe is evaluated live ("is now the moment to wake"), never re-run
+against a backdated historical timestamp, so `skip`/`all` only apply to
+plain schedules. Missed occurrences are still counted and surfaced for a
+gated schedule; only the multi-fire/no-fire policy expansion doesn't apply.
+</Note>
+
 ### Wake gates
 
 A plain cron fires the full routine — including its LLM steps — on every tick, even when there is nothing worth the model's attention. A **wake gate** fixes that: the schedule references an [agentless](#agentless-routines) probe routine, the scheduler runs the probe first on each tick (free of LLM spend by the agentless guarantee), and the main routine fires only when the probe's **final output is truthy**. Same falsy rule as step `if:` conditions — empty, `false`, `0`, `null`, `nil`, `no`, `off` (case-insensitive) skip the tick; anything else wakes the routine.

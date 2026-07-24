@@ -43,8 +43,14 @@ type scheduleResponse struct {
 	WakeFireCount    int            `json:"wake_fire_count,omitempty"`
 	LastWakeAt       *time.Time     `json:"last_wake_at,omitempty"`
 	LastWakeStatus   string         `json:"last_wake_status,omitempty"`
-	CreatedAt        time.Time      `json:"created_at"`
-	UpdatedAt        time.Time      `json:"updated_at"`
+	// CatchupPolicy + LastMissedCount — missed-run catch-up (#1422 item
+	// 2). CatchupPolicy is always populated (defaults to "once");
+	// LastMissedCount is telemetry from the most recent tick (0 = current
+	// or a fully-drained backlog).
+	CatchupPolicy   string    `json:"catchup_policy"`
+	LastMissedCount int       `json:"last_missed_count,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlug string) scheduleResponse {
@@ -84,6 +90,8 @@ func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlu
 		WakeFireCount:         s.WakeFireCount,
 		LastWakeAt:            s.LastWakeAt,
 		LastWakeStatus:        s.LastWakeStatus,
+		CatchupPolicy:         s.CatchupPolicy,
+		LastMissedCount:       s.LastMissedCount,
 		CreatedAt:             s.CreatedAt,
 		UpdatedAt:             s.UpdatedAt,
 	}
@@ -110,6 +118,11 @@ type scheduleRequestBody struct {
 	// existing policy" from an explicit false. Only meaningful when a
 	// wake gate is set; ignored on an ungated schedule.
 	WakeFailClosed *bool `json:"wake_fail_closed,omitempty"`
+	// CatchupPolicy — see pipeline.Schedule.CatchupPolicy (#1422 item 2).
+	// Empty on create defaults to "once"; empty on update keeps the
+	// existing value (same absent-keeps-existing convention as the wake
+	// gate fields above).
+	CatchupPolicy string `json:"catchup_policy,omitempty"`
 }
 
 // resolveWakePipeline validates a wake-gate reference at save time —
@@ -226,6 +239,7 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		WakePipelineID:        wakeID,
 		WakeInputs:            body.WakeInputs,
 		WakeFailClosed:        body.WakeFailClosed != nil && *body.WakeFailClosed,
+		CatchupPolicy:         body.CatchupPolicy,
 	}
 	saved, err := h.schedules.Save(r.Context(), in)
 	if err != nil {
@@ -433,6 +447,12 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 	if wakeID == "" {
 		wakeFailClosed = false
 	}
+	// catchup_policy merge: absent field keeps the existing value (same
+	// convention as name/cron/timezone above), explicit value replaces it.
+	catchupPolicy := existing.CatchupPolicy
+	if body.CatchupPolicy != "" {
+		catchupPolicy = body.CatchupPolicy
+	}
 
 	in := pipeline.SaveScheduleInput{
 		ID:                    scheduleID,
@@ -447,6 +467,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		WakePipelineID:        wakeID,
 		WakeInputs:            wakeInputs,
 		WakeFailClosed:        wakeFailClosed,
+		CatchupPolicy:         catchupPolicy,
 	}
 	saved, err := h.schedules.Save(r.Context(), in)
 	if err != nil {

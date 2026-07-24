@@ -44,6 +44,8 @@ type scheduleRow struct {
 	WakeFireCount         int                    `json:"wake_fire_count,omitempty"`
 	LastWakeAt            *string                `json:"last_wake_at,omitempty"`
 	LastWakeStatus        string                 `json:"last_wake_status,omitempty"`
+	CatchupPolicy         string                 `json:"catchup_policy,omitempty"`
+	LastMissedCount       int                    `json:"last_missed_count,omitempty"`
 	CreatedAt             string                 `json:"created_at"`
 	UpdatedAt             string                 `json:"updated_at"`
 }
@@ -173,7 +175,7 @@ var routineSchedulesListCmd = &cobra.Command{
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tNAME\tROUTINE\tCRON\tTZ\tENABLED\tWAKE\tNEXT")
+		fmt.Fprintln(w, "ID\tNAME\tROUTINE\tCRON\tTZ\tENABLED\tWAKE\tNEXT\tMISSED")
 		for _, s := range rows {
 			next := "—"
 			if s.NextRunAt != nil && *s.NextRunAt != "" {
@@ -183,8 +185,15 @@ var routineSchedulesListCmd = &cobra.Command{
 			if s.Enabled {
 				enabled = "yes"
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				shortID(s.ID), s.Name, routineCell(s.TargetPipelineSlug, s.TargetPipelineVersion), s.CronExpr, s.Timezone, enabled, wakeCell(s), next)
+			// #1422 item 2: surface backlog occurrences dropped/collapsed
+			// on the most recent tick. "—" when current (the overwhelming
+			// common case) so an on-time schedule list stays uncluttered.
+			missed := "—"
+			if s.LastMissedCount > 0 {
+				missed = fmt.Sprintf("%d (%s)", s.LastMissedCount, defaultIfBlankCLI(s.CatchupPolicy, "once"))
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				shortID(s.ID), s.Name, routineCell(s.TargetPipelineSlug, s.TargetPipelineVersion), s.CronExpr, s.Timezone, enabled, wakeCell(s), next, missed)
 		}
 		return w.Flush()
 	},
@@ -204,6 +213,7 @@ var routineSchedulesCreateCmd = &cobra.Command{
 		wakeSlug, _ := cmd.Flags().GetString("wake-slug")
 		wakeInputsJSON, _ := cmd.Flags().GetString("wake-inputs")
 		failClosed, _ := cmd.Flags().GetBool("fail-closed")
+		catchup, _ := cmd.Flags().GetString("catchup")
 		yes, _ := cmd.Flags().GetBool("yes")
 		if slug == "" {
 			return fmt.Errorf("--slug is required")
@@ -276,6 +286,9 @@ var routineSchedulesCreateCmd = &cobra.Command{
 			"timezone":             timezone,
 			"inputs":               inputs,
 			"enabled":              enabled,
+		}
+		if catchup != "" {
+			body["catchup_policy"] = catchup
 		}
 		if cmd.Flags().Changed("pin-version") {
 			pin, _ := cmd.Flags().GetInt("pin-version")
@@ -369,6 +382,9 @@ var routineSchedulesUpdateCmd = &cobra.Command{
 			}
 			body["inputs"] = inputs
 		}
+		if v, _ := cmd.Flags().GetString("catchup"); v != "" {
+			body["catchup_policy"] = v
+		}
 		unpin, _ := cmd.Flags().GetBool("unpin")
 		if cmd.Flags().Changed("pin-version") {
 			if unpin {
@@ -415,7 +431,7 @@ var routineSchedulesUpdateCmd = &cobra.Command{
 			body["wake_fail_closed"] = fc
 		}
 		if len(body) == 0 {
-			return fmt.Errorf("at least one of --cron / --timezone / --name / --enabled / --inputs / --pin-version / --unpin / --wake-slug / --wake-inputs / --no-wake / --fail-closed required")
+			return fmt.Errorf("at least one of --cron / --timezone / --name / --enabled / --inputs / --pin-version / --unpin / --wake-slug / --wake-inputs / --no-wake / --fail-closed / --catchup required")
 		}
 		if err := requireAuth(); err != nil {
 			return err
@@ -590,6 +606,15 @@ func setScheduleEnabled(cmd *cobra.Command, scheduleID string, enabled bool) err
 	)
 }
 
+// defaultIfBlankCLI returns fallback when s is empty — used for display
+// only (e.g. an older server that hasn't populated catchup_policy yet).
+func defaultIfBlankCLI(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
+}
+
 func formatTimestamp(iso string) string {
 	t, err := time.Parse(time.RFC3339, iso)
 	if err != nil {
@@ -628,6 +653,7 @@ func init() {
 	routineSchedulesCreateCmd.Flags().String("wake-inputs", "", "JSON object passed to the wake probe on each tick (requires --wake-slug)")
 	routineSchedulesCreateCmd.Flags().Bool("fail-closed", false, "wake gate: HOLD the run when the probe errors/times out/returns non-COMPLETED instead of failing open (requires --wake-slug; default off — a broken probe fires the main run and records ERROR)")
 	routineSchedulesCreateCmd.Flags().Int("pin-version", 0, "pin the schedule to a specific routine version — every fire executes that immutable version instead of head (see 'crewship routine versions <slug>'); if the version is later deleted the fire FAILS with an inbox alert rather than silently running head")
+	routineSchedulesCreateCmd.Flags().String("catchup", "", "missed-run catch-up policy when the schedule falls overdue by more than one occurrence: 'skip' (fire nothing for the backlog), 'once' (default — fire once for the backlog, unchanged behaviour), or 'all' (fire once per missed occurrence, oldest first, capped). Ignored by wake-gated schedules, which always behave like 'once'.")
 
 	routineSchedulesUpdateCmd.Flags().String("name", "", "new schedule name")
 	routineSchedulesUpdateCmd.Flags().String("cron", "", "new cron expression")
@@ -640,6 +666,7 @@ func init() {
 	routineSchedulesUpdateCmd.Flags().Bool("fail-closed", false, "set the wake gate's probe-failure policy: --fail-closed HOLDS the run on a probe error/timeout; --fail-closed=false restores fail-open (fire anyway, record ERROR). Absent = keep existing")
 	routineSchedulesUpdateCmd.Flags().Int("pin-version", 0, "pin (or re-pin) the schedule to a specific routine version; fires execute that immutable version instead of head")
 	routineSchedulesUpdateCmd.Flags().Bool("unpin", false, "remove the version pin (fires track head again); updates that mention neither --pin-version nor --unpin keep the existing pin")
+	routineSchedulesUpdateCmd.Flags().String("catchup", "", "set the missed-run catch-up policy: 'skip' / 'once' / 'all' (see 'schedules create --help'). Absent = keep existing")
 
 	routineSchedulesDeleteCmd.Flags().Bool("yes", false, "skip the interactive confirmation prompt")
 
