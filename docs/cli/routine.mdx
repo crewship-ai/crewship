@@ -516,7 +516,20 @@ crewship routine validate r.json --agents triage,writer,editor
 crewship routine validate r.json --author-crew growth
 ```
 
-A typo'd `agent_slug` (or an `outcomes.grader_agent_slug`) not in the resolved set fails validation, naming the step.
+A typo'd `agent_slug` (or an `outcomes.grader_agent_slug`) not in the resolved set fails validation, naming the step — and, if a close match exists in the resolved roster, suggests it (`did you mean: triage?`). The same fuzzy suggestion applies to an unresolved `{{ inputs.X }}` reference against a typo'd input name.
+
+### Every failure in one pass, with a jump-to path
+
+`validate` no longer stops at the first problem — it accumulates every static-check failure it finds and reports them all together, each prefixed with a JSON-pointer path to the offending field (`/name`, `/steps/2/agent_slug`, `/steps/0/http/url`, …) so an editor/LSP integration can jump straight there:
+
+```text
+✗ routine.json failed at validate phase:
+  2 validation errors:
+  - /name: pipeline: name "BAD NAME" must be lowercase kebab-case (1–64 chars, a-z 0-9 - _)
+  - /steps/0/agent_slug: pipeline: step "a" references unknown agent_slug "triaeg" (did you mean: triage?)
+```
+
+This matters most for the `capabilities | claude -p → validate → fix` authoring loop (see [Routines cookbook](/guides/routines-cookbook)): an AI author fixing every reported field in one revision converges in fewer round-trips than fixing one error, re-running, hitting the next one, and repeating. The one exception is the step-count bound (`MaxPipelineSteps`, 500) — a definition already over that limit fails immediately on its own, since walking the rest of the checks against an oversized definition isn't meaningful.
 
 ---
 

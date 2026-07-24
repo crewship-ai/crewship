@@ -49,7 +49,10 @@ func validateStepGates(st Step, agentSlugs map[string]struct{}) error {
 		}
 		if agentSlugs != nil {
 			if _, ok := agentSlugs[st.Outcomes.GraderAgentSlug]; !ok {
-				return fmt.Errorf("pipeline: step %q outcomes.grader_agent_slug %q not found in author crew", st.ID, st.Outcomes.GraderAgentSlug)
+				// Same typo class as agent_slug (#1423 item 1) — reuse the
+				// same fuzzy did-you-mean ranking against the live roster.
+				hint := didYouMean(st.Outcomes.GraderAgentSlug, sortedSetKeys(agentSlugs))
+				return fmt.Errorf("pipeline: step %q outcomes.grader_agent_slug %q not found in author crew%s", st.ID, st.Outcomes.GraderAgentSlug, hint)
 			}
 		}
 		if len(st.Outcomes.Criteria) == 0 {

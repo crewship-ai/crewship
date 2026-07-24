@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -76,6 +77,37 @@ func TestValidateCmd_DetectsDuplicateStepID(t *testing.T) {
 	}`)
 	if err := validateBytesForTest(bad); err == nil {
 		t.Error("expected rejection for duplicate step ID")
+	}
+}
+
+// TestValidateCmd_MultiErrorSurfacesEveryFailure pins #1423 item 1's CLI
+// contract: `routine validate` prints every accumulated failure (path +
+// fuzzy did-you-mean included) in one pass, not just the first one — the
+// exact behaviour the offline `capabilities | claude -p → validate → fix`
+// authoring loop relies on to converge in fewer round-trips.
+func TestValidateCmd_MultiErrorSurfacesEveryFailure(t *testing.T) {
+	bad := []byte(`{
+		"dsl_version": "1.0",
+		"name": "BAD NAME",
+		"steps": [{"id":"a","type":"agent_run","agent_slug":"triaeg","prompt":"hi"}]
+	}`)
+	dsl, err := pipeline.Parse(bad)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	err = pipeline.Validate(dsl, map[string]struct{}{"triage": {}}, nil)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "/name") {
+		t.Errorf("expected /name path in error, got %q", msg)
+	}
+	if !strings.Contains(msg, "/steps/0/agent_slug") {
+		t.Errorf("expected /steps/0/agent_slug path in error, got %q", msg)
+	}
+	if !strings.Contains(msg, "did you mean: triage") {
+		t.Errorf("expected fuzzy did-you-mean hint, got %q", msg)
 	}
 }
 
