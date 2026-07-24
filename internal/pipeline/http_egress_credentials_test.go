@@ -118,6 +118,7 @@ func TestCrewNetworkPolicyGate_Semantics(t *testing.T) {
 	db := openPolicyTestDB(t)
 	defer db.Close()
 	seedCrew(t, db, "crew_free", "free", "")
+	seedCrew(t, db, "crew_free_domains", "free", `["partner.example.com"]`)
 	seedCrew(t, db, "crew_restricted", "restricted", `["api.partner.com","127.0.0.1"]`)
 	seedCrew(t, db, "crew_restricted_bare", "restricted", "")
 	seedCrew(t, db, "crew_weird", "yolo", "")
@@ -130,24 +131,40 @@ func TestCrewNetworkPolicyGate_Semantics(t *testing.T) {
 		name  string
 		crew  string
 		host  string
+		scope RunScope // WorkspaceID/AuthorCrewID filled in below from crew
 		allow bool
 	}{
-		{"no crew in scope allows", "", "evil.example.com", true},
-		{"missing crew row allows (v18 default free)", "crew_ghost", "evil.example.com", true},
-		{"free mode allows anything", "crew_free", "evil.example.com", true},
-		{"restricted allows listed host", "crew_restricted", "api.partner.com", true},
-		{"restricted strips port before match", "crew_restricted", "127.0.0.1:8443", true},
-		{"restricted is case-insensitive", "crew_restricted", "API.PARTNER.COM", true},
-		{"restricted blocks unlisted host", "crew_restricted", "evil.example.com", false},
-		{"restricted is exact-match (no subdomains, sidecar parity)", "crew_restricted", "sub.api.partner.com", false},
-		{"restricted keeps sidecar default LLM domains", "crew_restricted_bare", "api.anthropic.com", true},
-		{"restricted with no crew domains blocks the rest", "crew_restricted_bare", "api.partner.com", false},
-		{"unknown mode fails closed", "crew_weird", "api.partner.com", false},
-		{"malformed allowed_domains fails closed", "crew_badjson", "api.anthropic.com", false},
+		{"no crew in scope allows", "", "evil.example.com", RunScope{}, true},
+		{"missing crew row allows (v18 default free)", "crew_ghost", "evil.example.com", RunScope{}, true},
+		// #1416 item 3: 'free' mode no longer allows an arbitrary public
+		// host once the crew-policy layer is asked (RunScope's zero-value
+		// RoutineDeclaresEgress means "nothing declared") — it now holds to
+		// egressallow.DefaultAllowedDomains, the same floor 'restricted'
+		// mode enforces before any operator-curated allowed_domains.
+		{"free mode + undeclared: arbitrary host now blocked (SSRF floor)", "crew_free", "evil.example.com", RunScope{}, false},
+		{"free mode + undeclared: sidecar default domain still allowed", "crew_free", "api.anthropic.com", RunScope{}, true},
+		{"free mode + routine declares egress_targets: floor bypassed", "crew_free", "evil.example.com", RunScope{RoutineDeclaresEgress: true}, true},
+		// #1416 item 1: a webhook-triggered run is held to 'restricted'
+		// regardless of the crew's own mode — the crew's own allowed_domains
+		// (if any) still apply, on top of the shared defaults.
+		{"webhook-triggered forces restricted floor on a free crew", "crew_free", "evil.example.com", RunScope{WebhookTriggered: true}, false},
+		{"webhook-triggered still honours the crew's own allowed_domains", "crew_free_domains", "partner.example.com", RunScope{WebhookTriggered: true}, true},
+		{"restricted allows listed host", "crew_restricted", "api.partner.com", RunScope{}, true},
+		{"restricted strips port before match", "crew_restricted", "127.0.0.1:8443", RunScope{}, true},
+		{"restricted is case-insensitive", "crew_restricted", "API.PARTNER.COM", RunScope{}, true},
+		{"restricted blocks unlisted host", "crew_restricted", "evil.example.com", RunScope{}, false},
+		{"restricted is exact-match (no subdomains, sidecar parity)", "crew_restricted", "sub.api.partner.com", RunScope{}, false},
+		{"restricted keeps sidecar default LLM domains", "crew_restricted_bare", "api.anthropic.com", RunScope{}, true},
+		{"restricted with no crew domains blocks the rest", "crew_restricted_bare", "api.partner.com", RunScope{}, false},
+		{"unknown mode fails closed", "crew_weird", "api.partner.com", RunScope{}, false},
+		{"malformed allowed_domains fails closed", "crew_badjson", "api.anthropic.com", RunScope{}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := gate(ctx, RunScope{WorkspaceID: "ws_test", AuthorCrewID: c.crew}, c.host)
+			scope := c.scope
+			scope.WorkspaceID = "ws_test"
+			scope.AuthorCrewID = c.crew
+			err := gate(ctx, scope, c.host)
 			if c.allow && err != nil {
 				t.Errorf("gate(%q, %q) = %v, want allow", c.crew, c.host, err)
 			}
@@ -281,18 +298,20 @@ func TestWiredHTTPStep_CrewPolicy_BlocksAndAllows(t *testing.T) {
 	}
 }
 
-// TestWiredHTTPStep_RoutineEgressTargets_Contract pins the routine
-// layer end to end on a factory-built executor, including the
-// CRITICAL backward-compat contract: a routine that declares NO
-// egress_targets keeps working against any (public) host — matching
-// hostInEgressTargets and the DSL validator, which both treat the
-// field as optional.
+// TestWiredHTTPStep_RoutineEgressTargets_Contract pins the ROUTINE layer
+// end to end on a factory-built executor. It uses a 'restricted' crew that
+// already allows the httptest host outright, so these assertions stay
+// scoped to hostInEgressTargets' own back-compat contract (empty =
+// unrestricted AT THIS LAYER) without being entangled with the crew-layer
+// free-mode floor — that floor is pinned separately in
+// TestWiredHTTPStep_FreeCrew_UndeclaredEgressRequiresDefaultAllowedDomains
+// (#1416 item 3).
 func TestWiredHTTPStep_RoutineEgressTargets_Contract(t *testing.T) {
 	db := openPolicyTestDB(t)
 	defer db.Close()
-	seedCrew(t, db, "crew_free", "free", "")
+	seedCrew(t, db, "crew_open", "restricted", `["127.0.0.1"]`)
 	exec := wiredHTTPExecutor(t, db)
-	in := RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_free"}
+	in := RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_open"}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -301,7 +320,7 @@ func TestWiredHTTPStep_RoutineEgressTargets_Contract(t *testing.T) {
 	defer srv.Close()
 	step := Step{ID: "call", Type: StepHTTP, HTTP: &HTTPStep{Method: "GET", URL: srv.URL}}
 
-	t.Run("undeclared egress_targets stays unrestricted (back-compat)", func(t *testing.T) {
+	t.Run("undeclared egress_targets stays unrestricted at the routine layer (back-compat)", func(t *testing.T) {
 		out, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{}, in)
 		if err != nil || out != "ok" {
 			t.Fatalf("got (%q, %v), want ok — empty egress_targets must not restrict", out, err)
@@ -326,6 +345,47 @@ func TestWiredHTTPStep_RoutineEgressTargets_Contract(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "egress_targets") {
 			t.Errorf("error should tell the operator which knob to turn: %v", err)
+		}
+	})
+}
+
+// TestWiredHTTPStep_FreeCrew_UndeclaredEgressRequiresDefaultAllowedDomains
+// pins #1416 item 3 end to end through the wired (factory-built) executor:
+// a routine on a 'free'-network crew that does NOT declare egress_targets
+// can no longer reach an arbitrary public/loopback host — only
+// egressallow.DefaultAllowedDomains — closing the SSRF gap a create-role
+// member (or a webhook payload driving {{ inputs.url }}) previously had.
+// Declaring egress_targets remains the escape hatch (bypasses the floor,
+// per TestWiredHTTPStep_RoutineEgressTargets_Contract above).
+func TestWiredHTTPStep_FreeCrew_UndeclaredEgressRequiresDefaultAllowedDomains(t *testing.T) {
+	db := openPolicyTestDB(t)
+	defer db.Close()
+	seedCrew(t, db, "crew_free", "free", "")
+	exec := wiredHTTPExecutor(t, db)
+	in := RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_free"}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+	step := Step{ID: "call", Type: StepHTTP, HTTP: &HTTPStep{Method: "GET", URL: srv.URL}}
+
+	t.Run("undeclared egress_targets on a free crew is blocked (SSRF floor)", func(t *testing.T) {
+		_, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{}, in)
+		var blocked *EgressBlockedError
+		if err == nil || !errors.As(err, &blocked) {
+			t.Fatalf("expected EgressBlockedError, got %v", err)
+		}
+		if blocked.Rule != EgressRuleCrewNetworkPolicy {
+			t.Errorf("blocked error fields: %+v", blocked)
+		}
+	})
+	t.Run("declaring egress_targets bypasses the free-mode floor", func(t *testing.T) {
+		out, _, _, err := exec.runHTTPStep(context.Background(), step,
+			RenderContext{EgressTargets: []string{"127.0.0.1"}}, in)
+		if err != nil || out != "ok" {
+			t.Fatalf("got (%q, %v), want ok — declared egress_targets should bypass the floor", out, err)
 		}
 	})
 }
@@ -355,7 +415,11 @@ func TestWiredHTTPStep_CredentialInjection(t *testing.T) {
 			Method: "GET", URL: srv.URL,
 			CredentialRef: &CredentialRef{Type: "api_key"},
 		}}
-		if _, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{}, in); err != nil {
+		// EgressTargets declares the httptest host so this credential-focused
+		// test isn't tripped by the free-mode crew-layer floor (#1416 item
+		// 3) — that floor is pinned separately in
+		// TestWiredHTTPStep_FreeCrew_UndeclaredEgressRequiresDefaultAllowedDomains.
+		if _, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{EgressTargets: []string{"127.0.0.1"}}, in); err != nil {
 			t.Fatalf("step: %v", err)
 		}
 		if seenAuth != "Bearer vault-token-123" {
@@ -364,7 +428,11 @@ func TestWiredHTTPStep_CredentialInjection(t *testing.T) {
 	})
 	t.Run("no credential_ref leaves the request bare", func(t *testing.T) {
 		step := Step{ID: "call", Type: StepHTTP, HTTP: &HTTPStep{Method: "GET", URL: srv.URL}}
-		if _, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{}, in); err != nil {
+		// EgressTargets declares the httptest host so this credential-focused
+		// test isn't tripped by the free-mode crew-layer floor (#1416 item
+		// 3) — that floor is pinned separately in
+		// TestWiredHTTPStep_FreeCrew_UndeclaredEgressRequiresDefaultAllowedDomains.
+		if _, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{EgressTargets: []string{"127.0.0.1"}}, in); err != nil {
 			t.Fatalf("step: %v", err)
 		}
 		if seenAuth != "" {
@@ -376,7 +444,11 @@ func TestWiredHTTPStep_CredentialInjection(t *testing.T) {
 			Method: "GET", URL: srv.URL,
 			CredentialRef: &CredentialRef{Type: "CERTIFICATE"},
 		}}
-		if _, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{}, in); err != nil {
+		// EgressTargets declares the httptest host so this credential-focused
+		// test isn't tripped by the free-mode crew-layer floor (#1416 item
+		// 3) — that floor is pinned separately in
+		// TestWiredHTTPStep_FreeCrew_UndeclaredEgressRequiresDefaultAllowedDomains.
+		if _, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{EgressTargets: []string{"127.0.0.1"}}, in); err != nil {
 			t.Fatalf("step: %v", err)
 		}
 		if seenAuth != "" {

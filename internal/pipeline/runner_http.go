@@ -60,11 +60,18 @@ func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender Rend
 	if step.HTTP == nil {
 		return "", 0, 0, fmt.Errorf("http step missing body")
 	}
-	// Policy scope for the egress gate + credential resolver. Both
-	// fields come off RunInput: WorkspaceID is validated non-empty at
-	// the Run/RunDefinition boundary, AuthorCrewID is loaded from the
-	// pipeline row (and required for live RunDefinition calls).
-	scope := RunScope{WorkspaceID: in.WorkspaceID, AuthorCrewID: in.AuthorCrewID}
+	// Policy scope for the egress gate + credential resolver. WorkspaceID
+	// and AuthorCrewID come off RunInput as before; WebhookTriggered +
+	// RoutineDeclaresEgress feed the SSRF/webhook hardening in
+	// NewCrewNetworkPolicyGate (#1416 items 1 & 3) — EgressTargets is
+	// fixed for the whole run (dsl.EgressTargets), so "did the routine
+	// declare one" is a scope-level fact, not a per-request one.
+	scope := RunScope{
+		WorkspaceID:           in.WorkspaceID,
+		AuthorCrewID:          in.AuthorCrewID,
+		WebhookTriggered:      in.TriggeredVia == TriggeredViaWebhook,
+		RoutineDeclaresEgress: len(parentRender.EgressTargets) > 0,
+	}
 
 	// Render templates on URL, body, and header values. We
 	// deliberately DO NOT render header keys — that's a misuse

@@ -19,6 +19,31 @@ import (
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
+// DefaultWebhookTimestampTolerance mirrors webhook.DefaultTimestampTolerance
+// (internal/webhook/handler.go) — the agent-webhook path's Stripe/Svix
+// ts.body scheme. #1416 item 2: pipeline webhooks get the same freshness
+// window when a sender opts in via X-Crewship-Timestamp.
+const DefaultWebhookTimestampTolerance = 5 * time.Minute
+
+// WebhookUntrustedInputKeys names the inputs map keys FireWebhook derives
+// directly from the raw request bytes (event payload, raw body, headers).
+// The single source of truth for two independent hardening pieces:
+//
+//  1. internal/api/pipeline_webhooks.go's reservedWebhookInputKeys — an
+//     operator-defined inputs_template may not override these (audit
+//     A17.2 M2, confused-deputy).
+//  2. #1416 item 1 — the executor fences these input values before they
+//     reach an agent_run prompt on a webhook-triggered run (see
+//     renderAgentPrompt).
+//
+// Keeping ONE set for both prevents the "template override" allowlist and
+// the "needs fencing" allowlist from drifting apart.
+var WebhookUntrustedInputKeys = map[string]struct{}{
+	"event":   {},
+	"raw":     {},
+	"headers": {},
+}
+
 // Webhook is the persisted record for an event-driven trigger.
 // Token-addressed: POST /api/v1/webhooks/{token} fires this pipeline
 // with the request body delivered as the `event` input.
@@ -261,6 +286,56 @@ func (w *Webhook) ValidateSignature(body []byte, providedHex string) bool {
 	return hmac.Equal([]byte(expected), []byte(providedHex))
 }
 
+// ValidateTimestampedSignature verifies the HMAC-SHA256 of "<ts>.<body>"
+// using the webhook's signing_secret, requiring ts (unix seconds) to be
+// within tolerance of now. #1416 item 2: this is the pipeline-webhook
+// mirror of the agent-webhook path's ts.body scheme
+// (internal/webhook/handler.go:81-103,183-194).
+//
+// ValidateSignature's bare-body HMAC is replayable indefinitely — bounded
+// only by the (up to 24h, and Forget-reopenable on a failed run)
+// idempotency window, so anyone who captures one signed delivery could
+// re-fire the routine any time inside that window. A sender that adopts
+// X-Crewship-Timestamp gets a signature that is cryptographically bound to
+// the timestamp (so it can't be stripped or swapped) and useless once ts
+// falls outside tolerance, closing that gap for senders who opt in.
+//
+// tolerance<=0 uses DefaultWebhookTimestampTolerance. now is passed in
+// (rather than reading time.Now internally) so callers/tests can pin a
+// deterministic clock; production callers pass time.Now().
+func (w *Webhook) ValidateTimestampedSignature(body []byte, ts, providedHex string, now time.Time, tolerance time.Duration) bool {
+	if w.SigningSecret == "" {
+		// Mirrors ValidateSignature: no secret on this row means no
+		// signature is verifiable, timestamped or not.
+		return false
+	}
+	secs, err := strconv.ParseInt(ts, 10, 64)
+	if err != nil {
+		return false
+	}
+	if tolerance <= 0 {
+		tolerance = DefaultWebhookTimestampTolerance
+	}
+	// Compare in seconds against non-overflowing bounds rather than via
+	// time.Sub — mirrors internal/webhook.Handler.timestampFresh's
+	// overflow-safety rationale: an absurd far-future/far-past ts could
+	// otherwise wrap an int64-nanosecond Duration and defeat the check.
+	tolSec := int64(tolerance / time.Second)
+	nowSec := now.Unix()
+	if secs < nowSec-tolSec || secs > nowSec+tolSec {
+		return false
+	}
+	providedHex = strings.TrimPrefix(providedHex, "sha256=")
+	if providedHex == "" {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(w.SigningSecret))
+	_, _ = mac.Write([]byte(ts + "."))
+	_, _ = mac.Write(body)
+	expected := hex.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(expected), []byte(providedHex))
+}
+
 // rateLimiter is the in-memory throttle for webhooks. Per-token
 // sliding 60-second window with a single integer counter; cleared
 // when the window rolls. The trade-off vs. a token-bucket: simpler,
@@ -278,6 +353,17 @@ type rateWindow struct {
 
 var globalRateLimiter = &rateLimiter{windows: map[string]*rateWindow{}}
 
+// rateLimiterPruneThreshold bounds how large the window map is allowed to
+// grow before allow() opportunistically sweeps long-expired entries.
+// #1416 nit: the map was previously never pruned at all — a token that
+// fires once and is never reused (e.g. an attacker who mints many one-off
+// webhook tokens, or a legitimate integration that's since been deleted)
+// left a permanent entry for the life of the process. Sized generously so
+// the sweep stays rare in the common case of a handful of active tokens;
+// bounded by distinct tokens (as the original comment already noted), so
+// this is defense-in-depth rather than a fix for unbounded growth.
+const rateLimiterPruneThreshold = 10000
+
 // allow reports whether a hit on `key` is within the limit. limit=0
 // is treated as unlimited.
 //
@@ -294,6 +380,9 @@ func (r *rateLimiter) allow(key string, limit int) bool {
 	now := time.Now()
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if len(r.windows) > rateLimiterPruneThreshold {
+		r.pruneLocked(now)
+	}
 	w, ok := r.windows[key]
 	if !ok || now.Sub(w.startedAt) >= time.Minute {
 		w = &rateWindow{startedAt: now}
@@ -301,6 +390,19 @@ func (r *rateLimiter) allow(key string, limit int) bool {
 	}
 	w.count++
 	return w.count <= int64(limit)
+}
+
+// pruneLocked deletes every window whose minute has already elapsed. No
+// goroutines/timers by design (matches the rest of this limiter's
+// "simpler, approximate, no goroutines" trade-off) — pruning rides the
+// existing allow() call path, amortized across whichever caller happens to
+// trip the threshold. Caller must hold r.mu.
+func (r *rateLimiter) pruneLocked(now time.Time) {
+	for k, w := range r.windows {
+		if now.Sub(w.startedAt) >= time.Minute {
+			delete(r.windows, k)
+		}
+	}
 }
 
 // AllowFire is the public throttle entrypoint used by the webhook

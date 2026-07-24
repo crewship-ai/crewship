@@ -467,7 +467,7 @@ func (e *Executor) executeOneStep(
 	}
 	resMu.Unlock()
 	ctxRender := buildStepRenderContext(inputsForCtx, outputsSnap, renderEnv, runMeta, dsl.EgressTargets)
-	renderedPrompt := Render(step.Prompt, ctxRender)
+	renderedPrompt := renderAgentPrompt(*step, ctxRender, in.TriggeredVia)
 
 	// Conditional skip — same semantics as the linear path.
 	if step.If != "" {
@@ -523,7 +523,10 @@ func (e *Executor) executeOneStep(
 	result.CostUSD += stepCost
 	costNow := result.CostUSD
 	resMu.Unlock()
-	emit.emitStepCompleted(ctx, *step, output, stepDur, stepCost)
+	// #1416 item 5: the journal/broadcast copy is scrubbed; the
+	// in-memory result.StepOutputs entry above stays raw for downstream
+	// template chaining.
+	emit.emitStepCompleted(ctx, *step, scrubStepOutput(output), stepDur, stepCost)
 
 	// Cost-cap gate (post-step). The check reads from the locked
 	// snapshot above so two parallel completions can't both miss

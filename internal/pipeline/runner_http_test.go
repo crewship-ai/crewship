@@ -235,6 +235,57 @@ func TestHTTPStep_SSRFViaRedirectBlocked(t *testing.T) {
 	}
 }
 
+// TestHTTPStep_ScopeCarriesWebhookAndEgressDeclaration pins #1416 items 1 &
+// 3's plumbing: runHTTPStep must derive RunScope.WebhookTriggered from
+// in.TriggeredVia and RunScope.RoutineDeclaresEgress from whether the
+// routine declared any egress_targets, and hand both to the egress gate on
+// every call. NewCrewNetworkPolicyGate's actual free/restricted/
+// force-restricted decision table is pinned separately in
+// internal/egresspolicy — this test only proves the executor wires the two
+// new scope fields correctly.
+func TestHTTPStep_ScopeCarriesWebhookAndEgressDeclaration(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+
+	var captured RunScope
+	exec := NewExecutor(store, resolver, nil, nil).WithEgressGate(
+		func(_ context.Context, scope RunScope, _ string) error {
+			captured = scope
+			return nil
+		})
+	exec.SetAllowPrivateHTTPForTesting(true)
+
+	step := Step{ID: "fetch", Type: StepHTTP, HTTP: &HTTPStep{Method: "GET", URL: srv.URL}}
+	ctxRender := RenderContext{EgressTargets: []string{"127.0.0.1"}}
+	_, _, _, err := exec.runHTTPStep(context.Background(), step, ctxRender, RunInput{TriggeredVia: TriggeredViaWebhook})
+	if err != nil {
+		t.Fatalf("http step: %v", err)
+	}
+	if !captured.WebhookTriggered {
+		t.Error("expected scope.WebhookTriggered=true for a TriggeredViaWebhook run")
+	}
+	if !captured.RoutineDeclaresEgress {
+		t.Error("expected scope.RoutineDeclaresEgress=true when EgressTargets is non-empty")
+	}
+
+	// Manual trigger + no declared egress_targets: both flags must be false.
+	_, _, _, err = exec.runHTTPStep(context.Background(), step, RenderContext{}, RunInput{TriggeredVia: TriggeredViaManual})
+	if err != nil {
+		t.Fatalf("http step: %v", err)
+	}
+	if captured.WebhookTriggered {
+		t.Error("expected scope.WebhookTriggered=false for a manual run")
+	}
+	if captured.RoutineDeclaresEgress {
+		t.Error("expected scope.RoutineDeclaresEgress=false when EgressTargets is empty")
+	}
+}
+
 // mustParseHost extracts the host:port from a test-server URL. We
 // don't pull in net/url import surface beyond what runner_http_test
 // already needs; httptest URLs are always well-formed.

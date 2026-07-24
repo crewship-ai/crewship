@@ -181,8 +181,12 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// #1416 item 4: cap the request body like every exec route already
+	// does (maxExecBodyBytes) -- CreateSchedule had no MaxBytesReader at
+	// all, so a create-role (or capability-granted) member could pin
+	// server memory with an oversized body.
 	var body scheduleRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}

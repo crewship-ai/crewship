@@ -46,7 +46,67 @@ import (
 // The query is one indexed PK SELECT ahead of a network round trip — a policy
 // flip therefore applies to the very next request rather than waiting out a
 // cache TTL.
+//
+// Check is the notify/hooks/general-purpose entry point — its "free mode
+// allows anything" behaviour is UNCHANGED by CheckHTTPStep below (see
+// httpStepOpts.enforceFreeFloor, which only CheckHTTPStep sets).
 func Check(ctx context.Context, db *sql.DB, crewID, host string) error {
+	return checkInternal(ctx, db, crewID, host, httpStepOpts{})
+}
+
+// httpStepOpts carries the two independent hardening dials pipeline http
+// steps compose (#1416 items 1 & 3), kept OFF (zero value) for every other
+// caller of checkInternal so Check's contract never changes underneath
+// notify/hooks.
+type httpStepOpts struct {
+	// enforceFreeFloor, when true, additionally requires a free/unrestricted
+	// crew's host to clear egressallow.DefaultAllowedDomains unless
+	// routineDeclaresEgress is also true. Set only by CheckHTTPStep.
+	enforceFreeFloor bool
+	// routineDeclaresEgress reports that the CALLING routine's own
+	// egress_targets is non-empty — runner_http.go's hostInEgressTargets is
+	// the authoritative per-host gate for that declaration, so the crew-
+	// policy floor steps aside rather than double-gating an explicit,
+	// author-declared target.
+	routineDeclaresEgress bool
+	// forceRestricted, when true, treats the crew's network_mode as
+	// 'restricted' regardless of what's actually stored — the webhook-
+	// triggered-run override (#1416 item 1), mirroring the agent-webhook
+	// path's NetworkMode="restricted" (internal/api/webhook.go).
+	forceRestricted bool
+}
+
+// CheckHTTPStep is Check plus SSRF hardening scoped to pipeline http steps
+// (#1416 items 1 & 3) — it does NOT change Check's own contract, so
+// notify/hooks (which call Check, not this) are byte-for-byte unaffected.
+//
+//   - routineDeclaresEgress: pass true when the routine's own egress_targets
+//     is non-empty. hostInEgressTargets already enforces that declaration
+//     per-host; this only tells the crew-policy layer "the author opted in
+//     to an explicit allowlist," so the free-mode floor below steps aside.
+//   - forceRestricted: pass true for a webhook-triggered run. The crew's
+//     network policy is evaluated as if it were 'restricted' — its own
+//     allowed_domains (if any) still apply, on top of
+//     egressallow.DefaultAllowedDomains — regardless of the crew's actual
+//     network_mode. This is the "stronger" form of the free-mode floor:
+//     even a routine that DOES declare egress_targets still has to clear
+//     it, because the inbound payload driving this run is untrusted.
+//
+// Fix for the residual gap Check's "free mode allows anything" left open:
+// a routine on a default `free` crew with an undeclared `{{ inputs.url }}`
+// http step could previously reach ANY public host (private/link-local IPs
+// stay blocked by httpsafe regardless — unaffected). An undeclared free-mode
+// step is now held to the same floor 'restricted' mode enforces before any
+// operator-curated allowed_domains are added.
+func CheckHTTPStep(ctx context.Context, db *sql.DB, crewID, host string, routineDeclaresEgress, forceRestricted bool) error {
+	return checkInternal(ctx, db, crewID, host, httpStepOpts{
+		enforceFreeFloor:      true,
+		routineDeclaresEgress: routineDeclaresEgress,
+		forceRestricted:       forceRestricted,
+	})
+}
+
+func checkInternal(ctx context.Context, db *sql.DB, crewID, host string, opts httpStepOpts) error {
 	if crewID == "" || db == nil {
 		return nil
 	}
@@ -64,8 +124,21 @@ func Check(ctx context.Context, db *sql.DB, crewID, host string) error {
 	if err != nil {
 		return fmt.Errorf("crew network policy lookup for crew %q failed (failing closed): %w", crewID, err)
 	}
+	if opts.forceRestricted {
+		// Webhook-triggered run: hold the crew to the 'restricted' floor
+		// regardless of its actual network_mode. domainsJSON (the crew's
+		// own allowed_domains column, whatever it holds) still applies on
+		// top of the shared defaults — same as a genuinely-restricted crew.
+		mode = "restricted"
+	}
 	switch mode {
 	case "", "free":
+		if !opts.enforceFreeFloor || opts.routineDeclaresEgress {
+			return nil
+		}
+		if !egressallow.NewDomainAllowlist(egressallow.DefaultAllowedDomains).IsAllowed(host) {
+			return fmt.Errorf("crew %q network policy is 'free' and this http step declares no egress_targets — add %q to the routine's egress_targets, or set the crew's network_mode to 'restricted' with allowed_domains, to permit this egress", crewID, host)
+		}
 		return nil
 	case "restricted":
 		domains := append([]string{}, egressallow.DefaultAllowedDomains...)
