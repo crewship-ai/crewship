@@ -27,6 +27,10 @@ const (
 	KindFailedRun           = "failed_run"
 	KindMessage             = "message"
 	KindMemoryConsolidation = "memory_consolidation"
+	// KindScheduleMissed surfaces a schedule that dropped or reported
+	// overdue cron occurrences per its catchup_policy (#1422 item 2).
+	// Requires migration v155 (widens the inbox_items.kind CHECK).
+	KindScheduleMissed = "schedule_missed"
 )
 
 // ExternalNotifier is the injected seam that fans a freshly-committed

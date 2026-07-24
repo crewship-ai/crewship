@@ -72,7 +72,7 @@ func TestScheduleStore_ClosedDB_ErrorPaths(t *testing.T) {
 	if _, err := store.listDueSchedules(ctx); err == nil {
 		t.Error("listDueSchedules should error on closed DB")
 	}
-	if err := store.recordRun(ctx, "x", "r", "COMPLETED", time.Now().UTC()); err == nil {
+	if err := store.recordRun(ctx, "x", "r", "COMPLETED", time.Now().UTC(), 0); err == nil {
 		t.Error("recordRun should error on closed DB")
 	}
 	if err := store.recordWakeCheck(ctx, "x", WakeStatusWoke, time.Now().UTC(), false); err == nil {

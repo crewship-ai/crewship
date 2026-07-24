@@ -1409,6 +1409,8 @@ func (e *Executor) dispatchStep(
 		return e.runNotifyStep(ctx, step, parentRender, in, runID)
 	case StepScript:
 		return e.runScriptStep(ctx, step, parentRender, in, runID)
+	case StepQuery:
+		return e.runQueryStep(ctx, step, in)
 	default:
 		return "", 0, 0, fmt.Errorf("unsupported step type %q", step.Type)
 	}

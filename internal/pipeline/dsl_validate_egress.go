@@ -121,8 +121,18 @@ func validateStepEgress(st Step) error {
 		if _, err := resolveInterpreter(st.Script.Interpreter, abs); err != nil {
 			return fmt.Errorf("pipeline: step %q (script) %w", st.ID, err)
 		}
+	case StepQuery:
+		if st.Query == nil {
+			return fmt.Errorf("pipeline: step %q (query) missing query body", st.ID)
+		}
+		if st.Query.Source != "pipeline_runs" {
+			return fmt.Errorf("pipeline: step %q (query) source %q invalid (allowed: pipeline_runs)", st.ID, st.Query.Source)
+		}
+		if st.Query.WindowHours < 0 {
+			return fmt.Errorf("pipeline: step %q (query) window_hours cannot be negative", st.ID)
+		}
 	default:
-		return fmt.Errorf("pipeline: step %q has unsupported type %q (allowed: agent_run, call_pipeline, http, code, wait, transform, notify, script)", st.ID, st.Type)
+		return fmt.Errorf("pipeline: step %q has unsupported type %q (allowed: agent_run, call_pipeline, http, code, wait, transform, notify, script, query)", st.ID, st.Type)
 	}
 	return nil
 }

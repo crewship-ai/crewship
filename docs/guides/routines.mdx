@@ -710,6 +710,38 @@ For the zero-config version — a desktop ping when a run *ends* (success or fai
 
 To reach **outside** Crewship when a run completes or fails — email or a signed webhook to an admin, a Slack relay, or your own service — configure [outbound notification channels](/guides/notifications). The `notify` step is the in-product half; outbound channels are the half that reaches people who aren't watching the inbox.
 
+### `query`
+
+```json
+{
+  "id": "stats",
+  "type": "query",
+  "query": { "source": "pipeline_runs", "window_hours": 24 }
+}
+```
+
+A deterministic, read-only aggregate query over the run's own workspace's operational data — no LLM, no network egress, agentless-compatible. `source: "pipeline_runs"` is the only source today: run counts, cost, and top failures over a trailing window (default 24h, capped at 720h/30 days regardless of what's authored). This is the data source behind the [workspace digest](#workspace-digest-template) routine template.
+
+| Field | Notes |
+| --- | --- |
+| `source` | `"pipeline_runs"` (only value today). |
+| `window_hours` | Trailing window in hours. Default `24` when 0/absent. |
+
+Output is a JSON object — pipe it through a `transform` step to pull a single field for a downstream `notify`/`http` step, exactly like any other structured step output:
+
+```json
+{
+  "id": "summary",
+  "type": "transform",
+  "needs": ["stats"],
+  "transform": { "input": "{{ steps.stats.output }}", "expression": ".summary_md" }
+}
+```
+
+`{ window_hours, total_runs, completed, failed, waiting, cancelled, total_cost_usd, top_failures: [{pipeline_slug, count}], summary_md }` — `summary_md` is a pre-rendered markdown digest, so the common case (query → notify) needs only the one `transform` step shown above to extract it.
+
+Strictly workspace-scoped: the query always runs against the invoking run's own `workspace_id` — a routine can never read another tenant's run history no matter what it's authored to ask for.
+
 ### Conditional `if`
 
 Any step can carry `"if": "{{ inputs.run_summary }}"`. The placeholder is rendered as a plain string — empty / `false` / `0` / `no` / `off` (case-insensitive) → step skipped and marked `<skipped>` in StepOutputs; anything else counts as truthy. Templates are plain substitution, not expression evaluation, so put the boolean upstream (e.g. set `inputs.run_summary` from the caller) rather than writing `==` / `!=` inside the `if` value.
@@ -941,6 +973,64 @@ crewship routine schedules create --slug summarize-text \
 Single-instance only — running multiple replicas would double-fire (no leader election yet).
 </Warning>
 
+#### Natural-language schedules (`--when`)
+
+Pass `--when` instead of `--cron` for the common phrasings — it parses to a
+cron expression and echoes the **next 3 fire times** so you can confirm the
+schedule means what you intended before it saves:
+
+```bash
+crewship routine schedules create --slug summarize-text \
+    --name "daily-summary" --when "every weekday at 9"
+# Parsed "every weekday at 9" as cron "0 9 * * 1-5" (UTC).
+# Next 3 fire times:
+#   - 2026-07-27 09:00 UTC
+#   - 2026-07-28 09:00 UTC
+#   - 2026-07-29 09:00 UTC
+# Create this schedule? [y/N]:
+```
+
+Supported phrasings: `every day at 9am`, `every weekday at 9`, `every weekend
+at 10am`, `every monday at 14:00` (any named weekday), `every hour`, `every
+15 minutes`, `every 2 hours`. `--cron` and `--when` are mutually exclusive;
+`--when` respects `--timezone` for the preview. Pass `--yes` to skip the
+confirmation prompt (scripts / CI). Anything outside that phrase set returns
+an error asking for a raw `--cron` expression instead of guessing wrong.
+
+#### Missed-run catch-up
+
+If a schedule falls overdue by more than one cron occurrence — the server
+was down, the schedule sat disabled for a while, `next_run_at` otherwise
+fell behind — `catchup_policy` decides what happens to the backlog:
+
+| Policy | Behaviour |
+|---|---|
+| `once` (default) | Fire **once** for the backlog, then resume from the next future occurrence. This is the original, unchanged behaviour — every schedule created before this field existed keeps working exactly as it did. |
+| `skip` | Fire **nothing** for the backlog; just resume from the next future occurrence. |
+| `all` | Fire **once per missed occurrence**, oldest first (capped at 20 fires per tick so a long-down schedule can't turn one tick into an unbounded loop — any remainder is picked up, and further capped, on the next tick). |
+
+```bash
+crewship routine schedules create --slug daily-report \
+    --cron "0 9 * * *" --catchup all   # backfill every missed daily run
+
+crewship routine schedules update <schedule_id> --catchup skip
+```
+
+Whenever a tick drops or collapses backlog occurrences, `routine schedules
+list` shows it in the **MISSED** column (`4 (skip)`, `3 (once)`) instead of
+the gap being silently invisible, and a `medium`-priority MANAGER inbox
+notice is raised the first time it happens for that occurrence.
+`catchup=all` never "misses" anything (`MISSED` stays `—`) since every
+occurrence in the backlog actually fires.
+
+<Note>
+A **wake-gated** schedule (see below) always behaves like `catchup=once` —
+the probe is evaluated live ("is now the moment to wake"), never re-run
+against a backdated historical timestamp, so `skip`/`all` only apply to
+plain schedules. Missed occurrences are still counted and surfaced for a
+gated schedule; only the multi-fire/no-fire policy expansion doesn't apply.
+</Note>
+
 ### Wake gates
 
 A plain cron fires the full routine — including its LLM steps — on every tick, even when there is nothing worth the model's attention. A **wake gate** fixes that: the schedule references an [agentless](#agentless-routines) probe routine, the scheduler runs the probe first on each tick (free of LLM spend by the agentless guarantee), and the main routine fires only when the probe's **final output is truthy**. Same falsy rule as step `if:` conditions — empty, `false`, `0`, `null`, `nil`, `no`, `off` (case-insensitive) skip the tick; anything else wakes the routine.
@@ -1139,6 +1229,16 @@ crewship routine rollback email-fetch --to 3
 
 History is preserved — you can roll forward to a later version by another rollback. There is no "delete version" — if a version was bad, the trail stays: "v1 → v2 → v3, HEAD back on v2, then v4 (fix)" is the audit story you keep, and each run additionally records the content hash it executed.
 
+### Diffing versions
+
+`crewship routine diff <slug> --from N --to M` prints a unified diff between two versions' definitions (pretty-printed JSON, so a single field change shows as a single-hunk diff rather than the whole minified blob changing):
+
+```bash
+crewship routine diff email-fetch --from 2 --to 3
+```
+
+`rollback` calls the same endpoint automatically and prints a **"What changed"** view against the version it just rolled back from, so you see exactly what the rollback undid without a separate command. Identical versions (same `definition_hash`) print a one-line confirmation instead of an empty diff. See the [CLI reference](/cli/routine#crewship-routine-diff-slug---from-n---to-m) for the JSON shape and `--format json` output.
+
 ## The improvement loop: `routine iterate`
 
 Version history is also the substrate for **self-improving routines**. `crewship routine iterate` closes the loop that ad-hoc "agent loop" setups hand-roll in a single chat session — run, score, rewrite, repeat — but with the runtime's guarantees attached:
@@ -1315,6 +1415,35 @@ Both the UI Runs sub-tab waterfall and `crewship routine logs <run_id> --slug X`
 
 Worker tier escalation is visible too — a failed validation gate that retries on a higher tier emits a second `step.started`+`step.completed` pair with its own cost on the retry, so the column-summed footer reflects the *full* spend (including retries), not just the first attempt.
 
+### Monthly budget meter
+
+Per-step cost is the trace-level view; **monthly budget** (#1422 item 3) is the operator-level one — a spend cap you set for a routine, compared against actual `pipeline_runs.cost_usd` for the current calendar month:
+
+```bash
+crewship routine budget set my-routine --amount 50    # cap at $50/month
+crewship routine budget get my-routine
+# my-routine (2026-07): [#####---------------]
+#   $12.50 of $50.00 (25%)
+crewship routine budget set my-routine --amount 0      # clear the cap
+crewship routine budget summary                        # workspace roll-up
+```
+
+This is **not** the same knob as DSL `max_cost_usd` (above) — that's a per-RUN hard gate authored into the definition and enforced mid-run by the executor (a run aborts if it would breach it). The monthly budget is external operator config, set out-of-band from the DSL (never touched by `routine save`, never bumps the version history), and is a **view + soft cap indicator**, not an enforcement gate — a routine over its monthly budget keeps running; nothing currently blocks the next invocation. A routine can have neither, either, or both knobs.
+
+`routine budget summary` rolls up every routine that has a budget set OR spend this month (a routine with neither is excluded — noise reduction for workspaces with dozens of zero-cost deterministic routines):
+
+```bash
+$ crewship routine budget summary
+ROUTINE          BUDGET   SPENT   PCT   STATUS
+my-routine       $50.00   $12.50  25%
+cost-report      $20.00   $22.10  111%  OVER
+summarize-text   —        $3.40   —
+
+2026-07 total: $37.99 spent of $70.00 budgeted
+```
+
+The routine detail page shows the same meter (spent-vs-cap bar) when a budget is set, and the workspace roll-up appears on the routines list page. API: `GET/PATCH /pipelines/{slug}/budget`, `GET /pipelines/budget-summary` — see the [CLI reference](/cli/routine#crewship-routine-budget) for the full flag/response shape.
+
 ### Run tags & metadata
 
 Tag and annotate a run at invoke time to make it filterable later:
@@ -1402,6 +1531,16 @@ crewship routine schedules create --slug incident-summary \
 ```
 
 The probe runs every 5 minutes for free; the LLM routine fires only on the ticks where the probe's output is truthy. `routine schedules list` shows how often the gate woke vs. checked.
+
+### "Get a daily ops digest of runs, cost, and failures" {#workspace-digest-template}
+
+The seeded `workspace-digest` routine (`query` → `transform` → `notify`, agentless, zero cost) covers this out of the box — wire a cadence with:
+
+```bash
+crewship digest enable --crew ops
+```
+
+Creates the routine (if a prior nuke removed it — `--crew` names who'll own it) and a daily 08:00 UTC schedule, idempotently. See the [Digest CLI reference](/cli/digest) for `--cron`/`--when` and how delivery to Slack/email works (it's the same `notify` step + notification-preference matrix every other routine uses).
 
 ### "Cancel an in-flight run"
 
@@ -1493,6 +1632,7 @@ Fixes, in order of preference:
 | `routine delete <slug>` | Soft-delete |
 | `routine doctor <slug>` | Preflight checklist (✓/⚠/✗) — catches blind alleys before run |
 | `routine bench <slug>` | N-runs variance characterisation — pass-rate + cost/latency stats |
+| `routine budget get/set/summary` | Monthly spend cap vs actual (budget-vs-actual view, not an enforcement gate) |
 | `routine runs <slug>` | Run history from journal |
 | `routine records <slug>` | Run history from `pipeline_runs` projection (filterable by status) |
 | `routine logs <run_id>` | Full journal trace for one run (post-mortem) |
@@ -1504,7 +1644,8 @@ Fixes, in order of preference:
 | `routine step-override set/list/clear` | Live prompt/model override for one step, no version bump |
 | `routine pending list/cancel <id>` | Inspect / cancel deferred (`--delay` / `--debounce-key`) triggers |
 | `routine versions <slug>` | Version history |
-| `routine rollback <slug> --to N` | Roll back to v N |
+| `routine diff <slug> --from N --to M` | Unified diff between two versions' definitions |
+| `routine rollback <slug> --to N` | Roll back to v N (prints a post-rollback "what changed" diff) |
 | `routine export <slug>` | JSON bundle to stdout |
 | `routine import [bundle.json]` | Load from file or stdin |
 | `routine validate [file.json]` | Offline DSL check |
@@ -1544,4 +1685,4 @@ These are known gaps in the current MVP — none block production use, but they 
 - **Single-instance scheduler** — running multiple replicas would double-fire schedules.
 - **`credentials_required` is declared-only** — unlike `integrations_required` and `resources`, it is not yet enforced at run time (see [Required integrations](#required-integrations)).
 - **No cross-adapter tier swap yet** — same-provider model swap (Haiku→Opus) works; Claude→Gemini swap requires a shorthand→constant mapping not yet wired.
-- **No NL→cron converter** — ops still hand-type `0 9 * * *`. Foundation PRD has the design; not in MVP.
+- **NL→cron covers a fixed phrase set** — `routine schedules create --when` (see [Cron schedules](#cron-schedules)) handles the common onboarding phrasings (`every weekday at 9`, `every day at 9am`, `every monday at 14:00`, `every hour`, `every N minutes/hours`) via a small hand-rolled parser, not a general NLP model; anything outside that set still needs a raw `--cron` expression.

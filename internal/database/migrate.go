@@ -1715,6 +1715,18 @@ END;
 	// notification_deliveries (persistent outbox/delivery log). See
 	// migrate_consts_v154_notification_prefs.go.
 	{version: 154, name: "notification_prefs", fn: migrationNotificationPrefs},
+	// v155: per-schedule missed-run catch-up policy (issue #1422 item 2).
+	// Adds pipeline_schedules.catchup_policy ('skip'|'once'|'all', default
+	// 'once' = unchanged behaviour) + last_missed_count, and widens
+	// inbox_items.kind to admit 'schedule_missed'. See
+	// migrate_consts_v155_schedule_catchup.go.
+	{version: 155, name: "schedule_catchup", sql: migrationScheduleCatchup},
+	// v156: opt-in monthly spend cap per routine (issue #1422 item 3),
+	// distinct from DSL.MaxCostUSD's per-run hard gate. 0 = no budget set.
+	// Powers the budget-vs-actual meter on the routine detail page + a
+	// workspace roll-up, aggregating over pipeline_runs.cost_usd. See
+	// migrate_consts_v156_routine_monthly_budget.go.
+	{version: 156, name: "routine_monthly_budget", sql: migrationRoutineMonthlyBudget},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

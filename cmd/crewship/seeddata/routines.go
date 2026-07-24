@@ -1008,6 +1008,23 @@ var Routines = []RoutineDef{
 	},
 
 	// ───────────────────────────────────────────────────────────────
+	// 15c. workspace-digest — agentless ops digest (#1422 item 4)
+	//      query(pipeline_runs) -> transform(extract summary_md) ->
+	//      notify(workspace). Zero LLM spend, zero egress: the query
+	//      step reads pipeline_runs directly, deterministically. Ships
+	//      unscheduled like feed-watch-probe/feed-change-report — wire
+	//      a cadence with `crewship digest enable` (wraps `routine
+	//      schedules create --slug workspace-digest`).
+	// ───────────────────────────────────────────────────────────────
+	{
+		Slug:        "workspace-digest",
+		Name:        "Workspace digest",
+		Description: "Token-zero ops digest: run counts, cost, and top failures over a trailing window, posted to the workspace inbox (fans out to Slack/email via your notification channel prefs).",
+		CrewSlug:    "ops",
+		Definition:  WorkspaceDigestDefinition,
+	},
+
+	// ───────────────────────────────────────────────────────────────
 	// 16. approval-gate-demo — wait(approval) HITL (meta/process)
 	// ───────────────────────────────────────────────────────────────
 	{
@@ -1151,6 +1168,68 @@ var Routines = []RoutineDef{
 					"type":          "call_pipeline",
 					"pipeline_slug": "normalize-dates",
 				},
+			},
+		},
+	},
+}
+
+// WorkspaceDigestDefinition is the DSL for the "workspace-digest" seed
+// routine (#1422 item 4), exported so `crewship digest enable` can save it
+// on demand for a workspace that predates this template (or nuked it) —
+// one source of truth for both the seeder and the CLI wrapper.
+//
+// Three deterministic steps, zero LLM spend, zero network egress:
+//  1. query pipeline_runs over a trailing 24h window
+//  2. transform: extract the pre-rendered `summary_md` field
+//  3. notify the workspace — lands in the inbox and fans out to Slack/
+//     email/etc per each recipient's notification channel preferences
+//     (issue #1412's existing category × channel matrix, untouched)
+//
+// agentless: true is accurate here (not "agentless(-ish)" hedging) — query
+// and transform are both server-side/deterministic and notify never
+// touches an LLM either, so the whole routine is genuinely token-zero.
+// window_hours on the query step is NOT template-substituted — like
+// HTTPStep.MaxResponseBytes / step timeout_seconds, it's a static
+// per-step config value set at author time, not a per-run variable (the
+// DSL template engine only resolves string-typed fields). 24h is the
+// digest's fixed lookback; author a second routine (or a copy with a
+// different window_hours) for a different cadence.
+var WorkspaceDigestDefinition = map[string]interface{}{
+	"dsl_version":        "1.0",
+	"name":               "workspace-digest",
+	"display_name":       "Workspace digest",
+	"description":        "Token-zero ops digest: run counts, cost, and top failures over a trailing window, posted to the workspace inbox.",
+	"estimated_cost_usd": 0.0,
+	"agentless":          true,
+	"outputs": []map[string]interface{}{
+		{"name": "summary_md", "type": "string"},
+	},
+	"steps": []map[string]interface{}{
+		{
+			"id":   "stats",
+			"type": "query",
+			"query": map[string]interface{}{
+				"source":       "pipeline_runs",
+				"window_hours": 24,
+			},
+		},
+		{
+			"id":    "summary",
+			"type":  "transform",
+			"needs": []string{"stats"},
+			"transform": map[string]interface{}{
+				"input":      "{{ steps.stats.output }}",
+				"expression": ".summary_md",
+			},
+		},
+		{
+			"id":    "post",
+			"type":  "notify",
+			"needs": []string{"summary"},
+			"notify": map[string]interface{}{
+				"to":    "workspace",
+				"title": "Workspace digest",
+				"body":  "{{ steps.summary.output }}",
 			},
 		},
 	},

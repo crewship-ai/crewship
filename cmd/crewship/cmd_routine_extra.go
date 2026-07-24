@@ -212,6 +212,90 @@ var routineActiveCmd = &cobra.Command{
 	},
 }
 
+// ---- diff (#1422 item 5) ----
+
+// versionDiffRow mirrors internal/api.versionDiffResponse.
+type versionDiffRow struct {
+	Slug        string `json:"slug"`
+	FromVersion int    `json:"from_version"`
+	ToVersion   int    `json:"to_version"`
+	FromHash    string `json:"from_hash"`
+	ToHash      string `json:"to_hash"`
+	Identical   bool   `json:"identical"`
+	UnifiedDiff string `json:"unified_diff"`
+}
+
+// fetchVersionDiff calls GET .../pipelines/{slug}/diff?from=N&to=M. Shared
+// by `routine diff` and rollback's post-rollback "what changed" view.
+func fetchVersionDiff(client *cli.Client, ws, slug string, from, to int) (*versionDiffRow, error) {
+	resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/diff?from=%d&to=%d", ws, slug, from, to))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if err := cli.CheckError(resp); err != nil {
+		return nil, err
+	}
+	var out versionDiffRow
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode diff response: %w", err)
+	}
+	return &out, nil
+}
+
+// printVersionDiff renders a versionDiffRow the same way in both call
+// sites (`routine diff` and the post-rollback view), just with a
+// different leading line.
+func printVersionDiff(d *versionDiffRow, slug, leadingLine string) {
+	if d.Identical {
+		fmt.Printf("v%d and v%d are identical (hash %s).\n", d.FromVersion, d.ToVersion, truncIDForCLI(d.FromHash, 12))
+		return
+	}
+	if leadingLine != "" {
+		fmt.Println(leadingLine)
+	}
+	fmt.Printf("--- %s (v%d)\n+++ %s (v%d)\n", slug, d.FromVersion, slug, d.ToVersion)
+	fmt.Print(d.UnifiedDiff)
+}
+
+var routineDiffCmd = &cobra.Command{
+	Use:   "diff <slug>",
+	Short: "Show a unified diff between two versions of a routine",
+	Long: `Fetches GET /pipelines/{slug}/diff?from=N&to=M and prints a unified
+diff between the two versions' definitions (pretty-printed JSON, so a
+single field change reads as a single-hunk diff rather than the whole
+minified blob changing). 'versions show <n>' dumps one version at a time
+for external diffing; this is the native in-product equivalent.
+
+Examples:
+  crewship routine diff my-routine --from 2 --to 5
+  crewship routine diff my-routine --from 2 --to 5 --format json | jq -r .unified_diff
+`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		from, _ := cmd.Flags().GetInt("from")
+		to, _ := cmd.Flags().GetInt("to")
+		if from <= 0 || to <= 0 {
+			return fmt.Errorf("--from and --to are required (positive version numbers)")
+		}
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		ws := client.GetWorkspaceID()
+		d, err := fetchVersionDiff(client, ws, args[0], from, to)
+		if err != nil {
+			return err
+		}
+		return resolvedFormatter(cmd).AutoHuman(d, func() {
+			printVersionDiff(d, args[0], "")
+		})
+	},
+}
+
 // ---- rollback ----
 
 var routineRollbackCmd = &cobra.Command{
@@ -220,7 +304,12 @@ var routineRollbackCmd = &cobra.Command{
 	Long: `Repoints the routine's HEAD at the target version and makes its
 definition live. No new version row is created (versions are deduped
 by content hash); history is preserved, so you can re-roll forward by
-another rollback. 'crewship routine versions' marks the new HEAD.`,
+another rollback. 'crewship routine versions' marks the new HEAD.
+
+Prints a "What changed" unified diff against the version it just rolled
+back FROM, so the operator sees exactly what the rollback undid without a
+separate 'routine diff' call — best-effort: a failure fetching that diff
+never fails the rollback itself.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target, _ := cmd.Flags().GetInt("to")
@@ -235,6 +324,11 @@ another rollback. 'crewship routine versions' marks the new HEAD.`,
 		}
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
+
+		// Best-effort: capture the pre-rollback HEAD so we can show what
+		// the rollback undid. Never blocks the rollback on failure.
+		prevHead := fetchHeadVersion(client, ws, args[0])
+
 		body := mustJSON(map[string]any{"target_version": target})
 		resp, err := client.Post(
 			fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/rollback", ws, args[0]),
@@ -248,8 +342,40 @@ another rollback. 'crewship routine versions' marks the new HEAD.`,
 			return err
 		}
 		fmt.Printf("Rolled back %s to v%d.\n", args[0], target)
+
+		if prevHead > 0 && prevHead != target {
+			if d, derr := fetchVersionDiff(client, ws, args[0], target, prevHead); derr == nil {
+				printVersionDiff(d, args[0], fmt.Sprintf("\nWhat changed (v%d -> v%d, now undone):", target, prevHead))
+			}
+		}
 		return nil
 	},
+}
+
+// fetchHeadVersion looks up the routine's current HEAD version via the
+// versions list endpoint. Returns 0 (meaning "unknown, skip") on any
+// error or on a server that doesn't mark is_head — this is a best-effort
+// lookup for the rollback command's post-rollback diff, never a hard
+// dependency.
+func fetchHeadVersion(client *cli.Client, ws, slug string) int {
+	resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/versions", ws, slug))
+	if err != nil {
+		return 0
+	}
+	defer resp.Body.Close()
+	if err := cli.CheckError(resp); err != nil {
+		return 0
+	}
+	var rows []pipelineVersionRow
+	if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
+		return 0
+	}
+	for _, v := range rows {
+		if v.IsHead {
+			return v.Version
+		}
+	}
+	return 0
 }
 
 // ---- export ----
@@ -525,7 +651,13 @@ func init() {
 	_ = routineVersionsShowCmd.MarkFlagRequired("version")
 	routineVersionsCmd.AddCommand(routineVersionsShowCmd)
 
+	routineDiffCmd.Flags().Int("from", 0, "source version number (REQUIRED)")
+	routineDiffCmd.Flags().Int("to", 0, "target version number (REQUIRED)")
+	_ = routineDiffCmd.MarkFlagRequired("from")
+	_ = routineDiffCmd.MarkFlagRequired("to")
+
 	pipelineCmd.AddCommand(routineVersionsCmd)
+	pipelineCmd.AddCommand(routineDiffCmd)
 	pipelineCmd.AddCommand(routineRollbackCmd)
 	pipelineCmd.AddCommand(routineExportCmd)
 	pipelineCmd.AddCommand(routineImportCmd)

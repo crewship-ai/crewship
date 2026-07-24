@@ -339,6 +339,110 @@ func TestRoutineRollbackCmd(t *testing.T) {
 	})
 }
 
+// ─── diff (#1422 item 5) ────────────────────────────────────────────────
+
+func TestRoutineDiffCmd(t *testing.T) {
+	diffPath := "/api/v1/workspaces/" + covWSCli3 + "/pipelines/my-routine/diff"
+
+	t.Run("requires --from and --to", func(t *testing.T) {
+		covStub(t)
+		covResetFlags(t, routineDiffCmd)
+		err := routineDiffCmd.RunE(routineDiffCmd, []string{"my-routine"})
+		if err == nil || !strings.Contains(err.Error(), "--from and --to") {
+			t.Fatalf("expected --from/--to error, got %v", err)
+		}
+	})
+
+	t.Run("happy path prints unified diff", func(t *testing.T) {
+		stub := covStub(t)
+		covResetFlags(t, routineDiffCmd)
+		stub.OnGet(diffPath, clitest.JSONResponse(200, versionDiffRow{
+			Slug: "my-routine", FromVersion: 1, ToVersion: 3,
+			FromHash: "h1", ToHash: "h3",
+			UnifiedDiff: "--- v1\n+++ v3\n@@ -1 +1 @@\n-old\n+new\n",
+		}))
+		covSetFlags(t, routineDiffCmd, map[string]string{"from": "1", "to": "3"})
+		out := covCaptureStdoutCli3(t, func() {
+			if err := routineDiffCmd.RunE(routineDiffCmd, []string{"my-routine"}); err != nil {
+				t.Errorf("RunE: %v", err)
+			}
+		})
+		if !strings.Contains(out, "-old") || !strings.Contains(out, "+new") {
+			t.Errorf("diff output missing hunk lines:\n%s", out)
+		}
+		calls := stub.CallsFor("GET", diffPath)
+		if len(calls) != 1 {
+			t.Fatalf("expected 1 GET, got %d", len(calls))
+		}
+		if !strings.Contains(calls[0].Query, "from=1") || !strings.Contains(calls[0].Query, "to=3") {
+			t.Errorf("query params = %q", calls[0].Query)
+		}
+	})
+
+	t.Run("identical versions", func(t *testing.T) {
+		stub := covStub(t)
+		covResetFlags(t, routineDiffCmd)
+		stub.OnGet(diffPath, clitest.JSONResponse(200, versionDiffRow{
+			Slug: "my-routine", FromVersion: 2, ToVersion: 2,
+			FromHash: "h2", ToHash: "h2", Identical: true,
+		}))
+		covSetFlags(t, routineDiffCmd, map[string]string{"from": "2", "to": "2"})
+		out := covCaptureStdoutCli3(t, func() {
+			if err := routineDiffCmd.RunE(routineDiffCmd, []string{"my-routine"}); err != nil {
+				t.Errorf("RunE: %v", err)
+			}
+		})
+		if !strings.Contains(out, "identical") {
+			t.Errorf("expected identical message, got:\n%s", out)
+		}
+	})
+
+	t.Run("api error", func(t *testing.T) {
+		stub := covStub(t)
+		covResetFlags(t, routineDiffCmd)
+		stub.OnGet(diffPath, clitest.ErrorResponse(404, "to version not found"))
+		covSetFlags(t, routineDiffCmd, map[string]string{"from": "1", "to": "99"})
+		err := routineDiffCmd.RunE(routineDiffCmd, []string{"my-routine"})
+		if err == nil || !strings.Contains(err.Error(), "to version not found") {
+			t.Fatalf("expected 404, got %v", err)
+		}
+	})
+}
+
+// Post-rollback "what changed" view: rollback captures the pre-rollback
+// HEAD version, then prints an inline diff against the version it rolled
+// back to. Best-effort — a diff-fetch failure must never fail the rollback
+// itself (existing TestRoutineRollbackCmd cases don't stub /versions or
+// /diff at all and must keep passing unchanged).
+func TestRoutineRollbackCmd_PrintsWhatChanged(t *testing.T) {
+	rollbackPath := "/api/v1/workspaces/" + covWSCli3 + "/pipelines/my-routine/rollback"
+	versionsPath := "/api/v1/workspaces/" + covWSCli3 + "/pipelines/my-routine/versions"
+	diffPath := "/api/v1/workspaces/" + covWSCli3 + "/pipelines/my-routine/diff"
+
+	stub := covStub(t)
+	covResetFlags(t, routineRollbackCmd)
+	stub.OnGet(versionsPath, clitest.JSONResponse(200, []pipelineVersionRow{
+		{Version: 3, IsHead: true}, {Version: 2}, {Version: 1},
+	}))
+	stub.OnPost(rollbackPath, clitest.JSONResponse(200, map[string]any{"version": 2}))
+	stub.OnGet(diffPath, clitest.JSONResponse(200, versionDiffRow{
+		Slug: "my-routine", FromVersion: 2, ToVersion: 3,
+		UnifiedDiff: "--- v2\n+++ v3\n@@ -1 +1 @@\n-a\n+b\n",
+	}))
+	covSetFlags(t, routineRollbackCmd, map[string]string{"to": "2"})
+	out := covCaptureStdoutCli3(t, func() {
+		if err := routineRollbackCmd.RunE(routineRollbackCmd, []string{"my-routine"}); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+	if !strings.Contains(out, "Rolled back my-routine to v2.") {
+		t.Errorf("missing rollback confirmation:\n%s", out)
+	}
+	if !strings.Contains(out, "What changed") || !strings.Contains(out, "-a") || !strings.Contains(out, "+b") {
+		t.Errorf("missing post-rollback diff:\n%s", out)
+	}
+}
+
 // ─── export ─────────────────────────────────────────────────────────────
 
 func TestRoutineExportCmd(t *testing.T) {

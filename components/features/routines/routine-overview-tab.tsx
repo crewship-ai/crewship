@@ -32,6 +32,7 @@ import { Card } from "./_shared"
 import { RoutineTouches } from "./routine-touches"
 import { RoutineMiniTrace } from "./routine-mini-trace"
 import { RunTagChips } from "./routine-tag-chips"
+import { RoutineBudgetCard } from "./routine-budget-card"
 import { StepOverrideChip } from "./routine-step-override-chip"
 import { buildPlainSteps, type PlainStep } from "@/lib/routine-flow"
 import { buildMiniTrace } from "@/lib/routine-mini-trace"
@@ -290,6 +291,10 @@ export function RoutineOverviewTab({
               </div>
             )}
           </Card>
+
+          {/* Budget — spent-this-month-vs-cap meter (#1422 item 3),
+              distinct from the DSL max_cost_usd per-run hard gate. */}
+          <RoutineBudgetCard workspaceId={workspaceId} slug={routine.slug} />
 
           {/* Metadata */}
           <Card title="Metadata">

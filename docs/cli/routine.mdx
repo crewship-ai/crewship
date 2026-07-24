@@ -33,6 +33,7 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Diagnostics | `doctor <slug>` | Preflight checklist — catches blind alleys before `run` |
 | Diagnostics | `bench <slug>` | Variance characterisation — N runs, pass-rate + cost/latency stats |
 | Diagnostics | `backtest <slug> --against <version>` | Replay recent successful runs against a candidate version and diff outputs (read-only) |
+| Diagnostics | `budget get/set/summary` | Monthly spend cap vs actual — budget-vs-actual view, not an enforcement gate |
 | Runs | `runs <slug>` | List recent runs from journal |
 | Runs | `records <slug>` | List runs from `pipeline_runs` projection (v83) |
 | Runs | `active` | List in-flight runs across the workspace |
@@ -48,7 +49,8 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Failures | `bulk-replay` | Replay all failed runs under a fingerprint (after a fix) |
 | Deferred | `pending ...` | List or cancel deferred (delayed/debounced) routine triggers |
 | Versions | `versions <slug>` | List version history |
-| Versions | `rollback <slug> --to N` | Roll back to version N |
+| Versions | `diff <slug> --from N --to M` | Unified diff between two versions' definitions |
+| Versions | `rollback <slug> --to N` | Roll back to version N (prints a post-rollback "what changed" diff) |
 | Authoring | `validate [file.json]` | Validate DSL offline (no server call) |
 | Authoring | `tag <slug> ...` | Add or remove discovery tags on a routine definition |
 | Authoring | `step-override <slug> ...` | Override a step's prompt/model without bumping the routine version |
@@ -364,6 +366,41 @@ For a matrix sweep across many routines/tiers or a saved regression baseline, se
 
 ---
 
+## `crewship routine budget`
+
+Per-routine monthly spend budget (#1422 item 3) — a cap you set out-of-band from the DSL, compared against actual `pipeline_runs.cost_usd` for the current calendar month. Distinct from DSL `max_cost_usd` (a per-RUN hard gate the executor enforces mid-run); this is a budget-**vs-actual view**, not an enforcement gate — going over doesn't block the next run.
+
+### `routine budget get <slug>`
+
+```bash
+crewship routine budget get my-routine
+```
+
+Prints an ASCII meter + `$spent of $cap (pct%)`, or a "no budget set" hint with the current spend if none is configured. `--format json` returns `{slug, has_budget, monthly_budget_usd, month, spent_usd, pct_used, over_budget}` (`pct_used`/`over_budget` are omitted when `has_budget` is false).
+
+### `routine budget set <slug> --amount <N>`
+
+```bash
+crewship routine budget set my-routine --amount 50
+crewship routine budget set my-routine --amount 0    # clears the budget
+```
+
+| Flag | Required | Description |
+|------|:---:|-------------|
+| `--amount` | ✓ | Monthly cap in USD. `0` clears an existing budget. Negative values are rejected. |
+
+Setting a budget never touches the DSL and never bumps the routine's version history — it's independent of `routine save`/`rollback`.
+
+### `routine budget summary`
+
+```bash
+crewship routine budget summary
+```
+
+Workspace-wide roll-up: every routine with a budget set **or** spend this month (a routine with neither is excluded — a fresh workspace can have dozens of zero-cost deterministic routines, and listing all of them would be noise). Table columns: `ROUTINE BUDGET SPENT PCT STATUS` (`STATUS` shows `OVER` when spend exceeds the cap), plus a workspace total line. `--format json` returns `{month, routines: [...], total_budget_usd, total_spent_usd}`.
+
+---
+
 ## `crewship routine records <slug>`
 
 List runs for a routine using the `pipeline_runs` projection (introduced in migration v83). Backed by indexed columns, so this is O(log n) where `runs` is O(scan-with-LIKE) over `journal_entries`. Prefer `records` for filterable / scriptable run history.
@@ -623,6 +660,33 @@ crewship routine versions summarize-text
 ```
 
 **Output columns:** VERSION, HEAD, PARENT, HASH, AUTHOR, CREATED, SUMMARY. The `*` marker tags the current HEAD.
+
+## `crewship routine diff <slug> --from N --to M`
+
+Unified diff between two versions' definitions (#1422 item 5) — `versions
+show <n>` dumps one version at a time for external diffing; this is the
+native in-product equivalent. The diff is computed over pretty-printed
+JSON, so a single field change reads as a single-hunk diff instead of the
+whole minified blob changing.
+
+```bash
+crewship routine diff summarize-text --from 2 --to 5
+crewship routine diff summarize-text --from 2 --to 5 --format json | jq -r .unified_diff
+```
+
+| Flag | Required | Description |
+|------|:---:|-------------|
+| `--from` | ✓ | Source version number |
+| `--to` | ✓ | Target version number |
+
+Identical versions (same `definition_hash`) print a one-line confirmation
+instead of an empty diff. `--format json` returns `{slug, from_version,
+to_version, from_hash, to_hash, identical, unified_diff}`.
+
+`crewship routine rollback <slug> --to N` calls this same endpoint after a
+successful rollback to print a **"What changed"** view against the
+version it just rolled back from — best-effort, so a diff-fetch failure
+never fails the rollback itself.
 
 ## `crewship routine iterate <slug>`
 
@@ -884,7 +948,8 @@ crewship routine schedules create \
 | Flag | Required | Description |
 |------|:---:|-------------|
 | `--slug` | ✓ | Target routine slug |
-| `--cron` | ✓ | 5-field cron expression |
+| `--cron` | one of `--cron` / `--when` | 5-field cron expression |
+| `--when` | one of `--cron` / `--when` | Natural-language schedule phrase — e.g. `"every weekday at 9"`, `"every day at 9am"`, `"every monday at 14:00"`, `"every hour"`, `"every 15 minutes"`. Parsed to a cron expression, previewed with its next 3 fire times, and confirmed before saving (skip the prompt with `--yes`). Mutually exclusive with `--cron`. |
 | `--name` | | Schedule name (default: `"<slug> schedule"`) |
 | `--timezone` | | IANA timezone (default: `UTC`; for host-local, pass an IANA zone such as `America/Los_Angeles` or read it from `cat /etc/timezone` / `timedatectl show -p Timezone --value`) |
 | `--inputs` | | JSON object passed as inputs on each tick |
@@ -893,6 +958,7 @@ crewship routine schedules create \
 | `--wake-slug` | | Wake gate: agentless probe routine evaluated before each fire — the main routine runs only when the probe's output is truthy. |
 | `--wake-inputs` | | JSON object passed to the wake probe on each tick (requires `--wake-slug`). |
 | `--fail-closed` | | Wake gate: **hold** the run when the probe errors, times out, or finishes non-`COMPLETED`, instead of failing open (requires `--wake-slug`). Default off — a broken probe fires the main run and records `last_wake_status: ERROR`. With this on, that outcome records `HELD` and no main run fires. Use it when the gate must *suppress* an autonomous run, not just save tokens. |
+| `--catchup` | | Missed-run catch-up policy for when the schedule falls overdue by more than one occurrence: `skip` / `once` (default) / `all`. See [Missed-run catch-up](/guides/routines#missed-run-catch-up). Ignored by wake-gated schedules, which always behave like `once`. |
 
 `create` is the only command that mints a schedule ID, and every other
 schedule command takes that ID with no prefix-matching fallback — so to
