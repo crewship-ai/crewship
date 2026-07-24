@@ -28,6 +28,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // dispatchBlockingRunner signals `started` with the agent slug on every RunStep
@@ -66,8 +68,8 @@ func (r *dispatchBlockingRunner) RunStep(ctx context.Context, req AgentStepReque
 
 func seedDueScheduleRow(t *testing.T, db *sql.DB, id, pipelineID string) {
 	t.Helper()
-	pastTime := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	pastTime := tsformat.Format(time.Now().Add(-time.Minute).UTC()) // match schedules.go's fixed-width next_run_at (#990); it is string-compared in listDueSchedules
+	now := tsformat.Format(time.Now().UTC())
 	_, err := db.ExecContext(context.Background(), `
 INSERT INTO pipeline_schedules
   (id, workspace_id, name, target_pipeline_id, cron_expr, timezone, inputs_json, enabled, next_run_at, created_at, updated_at)

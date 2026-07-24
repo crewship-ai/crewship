@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // SignalWaitStore persists wait(event) step arm/delivery state
@@ -53,7 +55,7 @@ func NewSQLSignalWaitStore(db *sql.DB) *SQLSignalWaitStore {
 }
 
 func (s *SQLSignalWaitStore) Arm(ctx context.Context, workspaceID, runID, stepID, eventType string) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := tsformat.Format(time.Now().UTC()) // fixed-width so created_at ORDER BY sorts correctly (#990)
 	id := "sigwait_" + runID + "_" + stepID
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO pipeline_signal_waits (id, workspace_id, run_id, step_id, event_type, status, created_at)
@@ -68,7 +70,7 @@ ON CONFLICT (run_id, step_id) DO NOTHING`,
 }
 
 func (s *SQLSignalWaitStore) Deliver(ctx context.Context, runID, eventType, payload string) (bool, error) {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := tsformat.Format(time.Now().UTC()) // fixed-width for consistency with created_at (#990)
 	res, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_signal_waits
 SET status = 'delivered', payload = ?, delivered_at = ?
@@ -102,7 +104,7 @@ WHERE run_id = ? AND step_id = ? AND status = 'delivered'`,
 	if err != nil {
 		return "", false, fmt.Errorf("signal_waits: consume read: %w", err)
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := tsformat.Format(time.Now().UTC()) // fixed-width for consistency with created_at (#990)
 	res, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_signal_waits SET status = 'consumed', consumed_at = ?
 WHERE run_id = ? AND step_id = ? AND status = 'delivered'`,
