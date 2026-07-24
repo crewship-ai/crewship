@@ -218,7 +218,7 @@ SELECT pipeline_id, pipeline_slug, SUM(cost_usd) AS total
 FROM pipeline_runs
 WHERE workspace_id = ? AND started_at >= ?
 GROUP BY pipeline_id, pipeline_slug
-ORDER BY total DESC
+ORDER BY total DESC, pipeline_id ASC
 LIMIT ?`, workspaceID, cutoff, topN)
 	if err != nil {
 		return fmt.Errorf("journal: top routines: %w", err)
@@ -247,7 +247,7 @@ func topRuns(ctx context.Context, db *sql.DB, workspaceID, cutoff string, topN i
 SELECT id, pipeline_slug, cost_usd
 FROM pipeline_runs
 WHERE workspace_id = ? AND started_at >= ?
-ORDER BY cost_usd DESC
+ORDER BY cost_usd DESC, id ASC
 LIMIT ?`, workspaceID, cutoff, topN)
 	if err != nil {
 		return fmt.Errorf("journal: top runs: %w", err)

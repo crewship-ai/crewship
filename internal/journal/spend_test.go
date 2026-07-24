@@ -287,3 +287,69 @@ func TestSpend_TopN_Respected(t *testing.T) {
 		t.Errorf("len(TopRuns) = %d, want 3", len(res.TopRuns))
 	}
 }
+
+// TestSpend_TopN_TieOrderStable asserts equal-cost ties in the top-N
+// rankings break deterministically on the secondary key (pipeline_id ASC
+// for routines, run id ASC for runs) rather than on SQLite's arbitrary
+// row order — so identical inputs always yield an identical ranking.
+func TestSpend_TopN_TieOrderStable(t *testing.T) {
+	now := time.Now().UTC()
+
+	// Every routine/run costs exactly the same, so ONLY the secondary sort
+	// key can decide order. Insert in a jumbled id order to make sure the
+	// result isn't just echoing insertion order.
+	insertOrder := []string{"pln_c", "pln_a", "pln_e", "pln_b", "pln_d"}
+	runOrder := []string{"run_c", "run_a", "run_e", "run_b", "run_d"}
+
+	want := func(t *testing.T) ([]string, []string) {
+		t.Helper()
+		db := openSpendTestDB(t)
+		t.Cleanup(func() { db.Close() })
+		for i, p := range insertOrder {
+			insertPipelineRun(t, db, runOrder[i], "ws_tie", p, "slug-"+p, now.Add(-time.Duration(i)*time.Minute), 4.2)
+		}
+		res, err := Spend(context.Background(), db, "ws_tie", RunWindow24h, 5)
+		if err != nil {
+			t.Fatalf("spend: %v", err)
+		}
+		gotRoutines := make([]string, len(res.TopRoutines))
+		for i, r := range res.TopRoutines {
+			gotRoutines[i] = r.ID
+		}
+		gotRuns := make([]string, len(res.TopRuns))
+		for i, r := range res.TopRuns {
+			gotRuns[i] = r.ID
+		}
+		return gotRoutines, gotRuns
+	}
+
+	routines, runs := want(t)
+
+	wantRoutines := []string{"pln_a", "pln_b", "pln_c", "pln_d", "pln_e"}
+	wantRuns := []string{"run_a", "run_b", "run_c", "run_d", "run_e"}
+	if !equalStrs(routines, wantRoutines) {
+		t.Errorf("TopRoutines tie order = %v, want %v (secondary key pipeline_id ASC)", routines, wantRoutines)
+	}
+	if !equalStrs(runs, wantRuns) {
+		t.Errorf("TopRuns tie order = %v, want %v (secondary key id ASC)", runs, wantRuns)
+	}
+
+	// Determinism across repeated evaluations: a second independent run over
+	// the same inputs must produce byte-identical rankings.
+	routines2, runs2 := want(t)
+	if !equalStrs(routines, routines2) || !equalStrs(runs, runs2) {
+		t.Errorf("ranking not stable across runs: routines %v vs %v, runs %v vs %v", routines, routines2, runs, runs2)
+	}
+}
+
+func equalStrs(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
