@@ -55,7 +55,7 @@ func TestWaitpointStore_ApproveDuringWait(t *testing.T) {
 	// Approve in 50ms
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		if err := store.CompleteApproval(ctx, token, true, "user_42", `{"comment":"yes"}`); err != nil {
+		if err := store.CompleteApproval(ctx, "ws_test", token, true, "user_42", `{"comment":"yes"}`); err != nil {
 			t.Errorf("complete: %v", err)
 		}
 	}()
@@ -78,7 +78,7 @@ func TestWaitpointStore_DenyDuringWait(t *testing.T) {
 	})
 	go func() {
 		time.Sleep(20 * time.Millisecond)
-		_ = store.CompleteApproval(ctx, token, false, "user_42", "")
+		_ = store.CompleteApproval(ctx, "ws_test", token, false, "user_42", "")
 	}()
 	approved, err := store.WaitFor(ctx, token)
 	if err != nil {
@@ -96,10 +96,10 @@ func TestWaitpointStore_AlreadyDecidedRejectsSecondCall(t *testing.T) {
 	token, _ := store.CreateApproval(ctx, WaitpointApprovalRequest{
 		WorkspaceID: "ws_test", PipelineRunID: "run_1", StepID: "step_1", TimeoutSec: 30,
 	})
-	if err := store.CompleteApproval(ctx, token, true, "u1", ""); err != nil {
+	if err := store.CompleteApproval(ctx, "ws_test", token, true, "u1", ""); err != nil {
 		t.Fatalf("first complete: %v", err)
 	}
-	err := store.CompleteApproval(ctx, token, false, "u2", "")
+	err := store.CompleteApproval(ctx, "ws_test", token, false, "u2", "")
 	if !errors.Is(err, ErrAlreadyDecided) {
 		t.Errorf("expected ErrAlreadyDecided on double-complete, got %v", err)
 	}
@@ -131,7 +131,7 @@ func TestWaitpointStore_RecoveryAfterRestart(t *testing.T) {
 	token, _ := store.CreateApproval(ctx, WaitpointApprovalRequest{
 		WorkspaceID: "ws_test", PipelineRunID: "run_1", StepID: "step_1", TimeoutSec: 30,
 	})
-	if err := store.CompleteApproval(ctx, token, true, "u1", ""); err != nil {
+	if err := store.CompleteApproval(ctx, "ws_test", token, true, "u1", ""); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
 	// Drop the in-memory listener (simulates a restart)
@@ -200,7 +200,7 @@ func TestWaitpointStore_LostWakeupRace(t *testing.T) {
 		// flips the row. Without the fix, the value 0 here would
 		// make the test hang reliably.
 		time.Sleep(time.Microsecond)
-		if err := store.CompleteApproval(ctx, token, true, "u1", ""); err != nil {
+		if err := store.CompleteApproval(ctx, "ws_race", token, true, "u1", ""); err != nil {
 			t.Fatalf("[%d] complete: %v", i, err)
 		}
 

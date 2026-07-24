@@ -21,10 +21,20 @@ const DefaultIdempotencyTTL = 24 * time.Hour
 // prior request with the same key.
 //
 // The contract is atomic: two concurrent calls with the same
-// (workspace_id, idempotency_key) cannot both come back with
-// IsNew=true. SQLite's INSERT OR IGNORE semantics give us that
+// (workspace_id, pipeline_id, idempotency_key) cannot both come back
+// with IsNew=true. SQLite's INSERT OR IGNORE semantics give us that
 // guarantee for free as long as the PK is the composite of those
-// two columns.
+// three columns.
+//
+// Namespacing by pipeline_id (v153 migration, issue #1415) matters
+// because Idempotency-Key is a human-readable, client-supplied string
+// (e.g. "order-123"): before v153 the PK was only (workspace_id,
+// idempotency_key), so any `create`-role member of a workspace could
+// pre-poison a predictable key and silently dedupe a DIFFERENT user's
+// run in a DIFFERENT pipeline onto their own — a cross-pipeline DoS,
+// plus disclosure of the original run_id in the dedupe response.
+// Scoping the key to its pipeline closes that: two pipelines can
+// legitimately reuse the same key value without colliding.
 type IdempotencyStore struct {
 	db *sql.DB
 }
@@ -51,8 +61,8 @@ func (s *IdempotencyStore) LookupOrReserve(
 	workspaceID, idempotencyKey, runID, pipelineID string,
 	ttl time.Duration,
 ) (resolvedRunID string, isNew bool, err error) {
-	if workspaceID == "" || idempotencyKey == "" || runID == "" {
-		return "", false, errors.New("idempotency: workspace_id + idempotency_key + run_id required")
+	if workspaceID == "" || idempotencyKey == "" || runID == "" || pipelineID == "" {
+		return "", false, errors.New("idempotency: workspace_id + idempotency_key + run_id + pipeline_id required")
 	}
 	if ttl <= 0 {
 		ttl = DefaultIdempotencyTTL
@@ -93,12 +103,19 @@ VALUES (?, ?, ?, ?, ?)`,
 	// would silently match it; we'd then return the dead run_id as
 	// if it were live, and the caller (a webhook redelivery, say)
 	// would resolve to a zombie run.
+	//
+	// pipeline_id is part of the PK (v153, #1415): two different
+	// pipelines can legitimately hold rows with the same
+	// (workspace_id, idempotency_key) pair, so this filter also
+	// selects the specific row THIS caller's pipeline reserved,
+	// rather than returning an arbitrary match from an unrelated
+	// pipeline that happens to share the key string.
 	nowStr := now.Format(time.RFC3339Nano)
 	var existing string
 	err = s.db.QueryRowContext(ctx, `
 SELECT run_id FROM pipeline_run_idempotency
-WHERE workspace_id = ? AND idempotency_key = ? AND expires_at > ?`,
-		workspaceID, idempotencyKey, nowStr,
+WHERE workspace_id = ? AND pipeline_id = ? AND idempotency_key = ? AND expires_at > ?`,
+		workspaceID, pipelineID, idempotencyKey, nowStr,
 	).Scan(&existing)
 	if errors.Is(err, sql.ErrNoRows) {
 		// The matching row exists but has expired. The sweep failed
@@ -109,8 +126,8 @@ WHERE workspace_id = ? AND idempotency_key = ? AND expires_at > ?`,
 		// surface a clean error so the caller backs off.
 		if _, delErr := s.db.ExecContext(ctx, `
 DELETE FROM pipeline_run_idempotency
-WHERE workspace_id = ? AND idempotency_key = ? AND expires_at <= ?`,
-			workspaceID, idempotencyKey, nowStr,
+WHERE workspace_id = ? AND pipeline_id = ? AND idempotency_key = ? AND expires_at <= ?`,
+			workspaceID, pipelineID, idempotencyKey, nowStr,
 		); delErr != nil {
 			return "", false, fmt.Errorf("idempotency: stale row force-delete: %w", delErr)
 		}
@@ -135,14 +152,20 @@ var errStaleRowDeleted = errors.New("idempotency: stale row force-deleted; retry
 // any side effects). Without this, a 429 would poison the key for
 // 24h and the caller couldn't legitimately retry.
 //
+// pipelineID must match the value LookupOrReserve was called with —
+// it's part of the PK (v153, #1415). Without it here, a Forget for one
+// pipeline's key could delete a DIFFERENT pipeline's live reservation
+// that happens to share the same (workspace_id, idempotency_key), now
+// that those are allowed to collide by design.
+//
 // No-op if the key is already gone.
-func (s *IdempotencyStore) Forget(ctx context.Context, workspaceID, idempotencyKey string) error {
-	if workspaceID == "" || idempotencyKey == "" {
+func (s *IdempotencyStore) Forget(ctx context.Context, workspaceID, pipelineID, idempotencyKey string) error {
+	if workspaceID == "" || pipelineID == "" || idempotencyKey == "" {
 		return nil
 	}
 	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM pipeline_run_idempotency WHERE workspace_id = ? AND idempotency_key = ?`,
-		workspaceID, idempotencyKey,
+		`DELETE FROM pipeline_run_idempotency WHERE workspace_id = ? AND pipeline_id = ? AND idempotency_key = ?`,
+		workspaceID, pipelineID, idempotencyKey,
 	)
 	return err
 }

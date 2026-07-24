@@ -746,6 +746,8 @@ crew and keep the workspace-wide `include_values` path.
 | Memory scanner — tool-result path | ✅ partial — Claude `tool_result` wired; per-adapter sweep is PR-F4 follow-up |
 | GDPR cascade (Art. 17) | ✅ shipped — migration v107 + `DELETE /api/v1/admin/users/{id}/data` |
 | GDPR export (Art. 15) | ✅ shipped — `GET /api/v1/admin/users/{id}/data` |
+| Waitpoint approval cross-workspace completion (a token from workspace B, approved/denied via workspace A's route) | ✅ closed — `CompleteApproval`'s `UPDATE` is scoped by `workspace_id` (#1415), mirroring `SignalRun`'s `rec.WorkspaceID` check |
+| Idempotency-Key cross-pipeline collision (predictable key pre-poisons/dedupes a different pipeline's run, disclosing its `run_id`) | ✅ closed — migration v153 widens `pipeline_run_idempotency`'s PK to `(workspace_id, pipeline_id, idempotency_key)` (#1415) |
 
 ## Layer 6 — Authorization chokepoint (complete mediation)
 

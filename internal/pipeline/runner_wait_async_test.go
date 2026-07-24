@@ -90,7 +90,7 @@ func TestRun_ApprovalWaitStep_ReturnsWaiting(t *testing.T) {
 	}
 
 	// Approve, then resume — the run drives to COMPLETED.
-	if err := wpStore.CompleteApproval(ctx, res.WaitpointToken, true, "u_admin", "lgtm"); err != nil {
+	if err := wpStore.CompleteApproval(ctx, "ws_test", res.WaitpointToken, true, "u_admin", "lgtm"); err != nil {
 		t.Fatalf("complete approval: %v", err)
 	}
 	resumeAndAwait(t, exec, runStore, res.RunID)
@@ -145,7 +145,7 @@ func TestRun_ApprovalDenied_ResolvesRunFailed(t *testing.T) {
 	}
 
 	// Deny the approval, then resume. The run must reach a terminal state.
-	if err := wpStore.CompleteApproval(ctx, res.WaitpointToken, false, "u_admin", "nope"); err != nil {
+	if err := wpStore.CompleteApproval(ctx, "ws_test", res.WaitpointToken, false, "u_admin", "nope"); err != nil {
 		t.Fatalf("complete (deny): %v", err)
 	}
 	resumeAndAwait(t, exec, runStore, res.RunID)
@@ -215,7 +215,7 @@ func TestRunDAG_ApprovalWaitStep(t *testing.T) {
 		t.Error("DAG suspend should have persisted the draft output for resume")
 	}
 
-	if err := wpStore.CompleteApproval(ctx, res.WaitpointToken, true, "u_admin", ""); err != nil {
+	if err := wpStore.CompleteApproval(ctx, "ws_test", res.WaitpointToken, true, "u_admin", ""); err != nil {
 		t.Fatalf("complete approval: %v", err)
 	}
 	resumeAndAwait(t, exec, runStore, res.RunID)

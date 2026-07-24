@@ -26,6 +26,7 @@ import (
 // inline `approver` interface ApproveWaitpoint type-asserts to.
 type stubApproverWaitpoints struct {
 	completeCalls            int
+	gotWorkspaceID           string
 	gotToken                 string
 	gotApproved              bool
 	gotDecider               string
@@ -43,8 +44,9 @@ func (s *stubApproverWaitpoints) WaitFor(_ context.Context, _ string) (bool, err
 
 // CompleteApproval matches the inline `approver` interface in
 // ApproveWaitpoint. Production wiring uses *pipeline.SQLWaitpointStore.
-func (s *stubApproverWaitpoints) CompleteApproval(_ context.Context, token string, approved bool, deciderUserID, payload string) error {
+func (s *stubApproverWaitpoints) CompleteApproval(_ context.Context, workspaceID, token string, approved bool, deciderUserID, payload string) error {
 	s.completeCalls++
+	s.gotWorkspaceID = workspaceID
 	s.gotToken = token
 	s.gotApproved = approved
 	s.gotDecider = deciderUserID
@@ -330,6 +332,9 @@ func TestApproveWaitpoint_HappyPath_ForwardsApprovedAndDeciderToStore(t *testing
 	if stub.completeCalls != 1 {
 		t.Errorf("CompleteApproval called %d times, want 1", stub.completeCalls)
 	}
+	if stub.gotWorkspaceID != wsID {
+		t.Errorf("workspaceID = %q, want %q (#1415: must thread the caller's workspace through)", stub.gotWorkspaceID, wsID)
+	}
 	if stub.gotToken != "tok-approve-1" {
 		t.Errorf("token = %q", stub.gotToken)
 	}
@@ -438,6 +443,80 @@ func TestListPendingWaitpoints_FiltersByStatusPendingAndWorkspace(t *testing.T) 
 		if tok == "tok-foreign" {
 			t.Errorf("foreign-workspace waitpoint leaked: %+v", row)
 		}
+	}
+}
+
+// TestApproveWaitpoint_CrossWorkspace_CannotApproveForeignWaitpoint pins
+// #1415: a MANAGER/OWNER in workspace A must not be able to approve or
+// deny a pending waitpoint token that belongs to workspace B, even
+// though the URL role-gate on {workspaceId} passes (the token happens
+// to leak or get guessed). This exercises the REAL SQLWaitpointStore
+// (not the stub) so the workspace-scoped SQL predicate in
+// pipeline.CompleteApproval is what's actually under test — mirrors
+// SignalRun's rec.WorkspaceID != workspaceID guard.
+func TestApproveWaitpoint_CrossWorkspace_CannotApproveForeignWaitpoint(t *testing.T) {
+	h, userID, wsA := newPipelineHandlerForCRUDTest(t)
+	wsB := "ws-waitpoint-foreign"
+	if _, err := h.db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'F', 'f-waitpoint')`, wsB); err != nil {
+		t.Fatalf("seed wsB: %v", err)
+	}
+
+	store := pipeline.NewSQLWaitpointStore(h.db)
+	t.Cleanup(store.Close)
+	h.SetWaitpointStore(store)
+
+	token, err := store.CreateApproval(context.Background(), pipeline.WaitpointApprovalRequest{
+		WorkspaceID:   wsB,
+		PipelineRunID: "run-foreign",
+		StepID:        "gate",
+		Prompt:        "approve me?",
+		TimeoutSec:    3600,
+	})
+	if err != nil {
+		t.Fatalf("seed foreign waitpoint: %v", err)
+	}
+
+	// Attacker: an authenticated MANAGER of workspace A, hitting the
+	// workspace-A-scoped route with workspace B's token.
+	body := strings.NewReader(`{"approved":true,"comment":"pwned"}`)
+	req := httptest.NewRequest("POST", "/x", body)
+	req.ContentLength = int64(body.Len())
+	req.SetPathValue("token", token)
+	req = withWorkspaceUser(req, userID, wsA, "MANAGER")
+	rr := httptest.NewRecorder()
+	h.ApproveWaitpoint(rr, req)
+
+	if rr.Code == http.StatusOK {
+		t.Fatalf("cross-workspace approve succeeded: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	// The waitpoint must still be pending — the cross-tenant decision
+	// must not have landed, regardless of which status code the
+	// handler chose to surface.
+	var status string
+	if err := h.db.QueryRow(`SELECT status FROM pipeline_waitpoints WHERE token = ?`, token).Scan(&status); err != nil {
+		t.Fatalf("query waitpoint status: %v", err)
+	}
+	if status != "pending" {
+		t.Fatalf("waitpoint status = %q, want pending (cross-workspace approval must not have applied)", status)
+	}
+
+	// The legitimate owner (workspace B) can still approve it.
+	body2 := strings.NewReader(`{"approved":true}`)
+	req2 := httptest.NewRequest("POST", "/x", body2)
+	req2.ContentLength = int64(body2.Len())
+	req2.SetPathValue("token", token)
+	req2 = withWorkspaceUser(req2, userID, wsB, "MANAGER")
+	rr2 := httptest.NewRecorder()
+	h.ApproveWaitpoint(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("legitimate owner approve failed: status=%d body=%s", rr2.Code, rr2.Body.String())
+	}
+	if err := h.db.QueryRow(`SELECT status FROM pipeline_waitpoints WHERE token = ?`, token).Scan(&status); err != nil {
+		t.Fatalf("query waitpoint status after legitimate approve: %v", err)
+	}
+	if status != "approved" {
+		t.Fatalf("waitpoint status = %q, want approved after legitimate owner approves", status)
 	}
 }
 

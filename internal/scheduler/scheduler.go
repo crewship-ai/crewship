@@ -398,7 +398,7 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 	// invoked the reservation stands.
 	releaseReservation := func() {
 		if idemKey != "" && s.idem != nil {
-			if fErr := s.idem.Forget(ctx, ag.Workspace, idemKey); fErr != nil {
+			if fErr := s.idem.Forget(ctx, ag.Workspace, ag.ID, idemKey); fErr != nil {
 				s.logger.Warn("scheduled: failed to release idempotency reservation", "agent", ag.Slug, "error", fErr)
 			}
 		}

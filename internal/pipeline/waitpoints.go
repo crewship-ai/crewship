@@ -317,6 +317,27 @@ func (s *SQLWaitpointStore) RunIDForToken(ctx context.Context, token string) (st
 	return runID, nil
 }
 
+// WorkspaceIDForToken returns the workspace a waitpoint token belongs
+// to. The public token-callback endpoint (no workspace JWT — the
+// token itself is the bearer credential) uses this to look up the
+// token's own workspace and feed it back into CompleteApproval, so
+// that call site conforms to the same workspace-scoped UPDATE as the
+// authed inbox path without changing who is allowed to complete a
+// public token (still: anyone holding the token).
+func (s *SQLWaitpointStore) WorkspaceIDForToken(ctx context.Context, token string) (string, error) {
+	var workspaceID string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT workspace_id FROM pipeline_waitpoints WHERE token = ?`, token,
+	).Scan(&workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("waitpoints: workspace id for token: %w", err)
+	}
+	return workspaceID, nil
+}
+
 // WaitpointStatus implements WaitpointStatusReader: it returns the
 // row's current status string so the wait step can distinguish a
 // timeout/cancellation from a human denial after WaitFor reports
@@ -342,9 +363,21 @@ func (s *SQLWaitpointStore) WaitpointStatus(ctx context.Context, token string) (
 // any waiting goroutine. Called by the public HTTP endpoint when
 // an operator clicks approve/deny in the inbox.
 //
+// workspaceID scopes the UPDATE so a caller can only complete a
+// waitpoint that belongs to their own workspace — mirrors the
+// rec.WorkspaceID != workspaceID guard SignalRun uses
+// (pipeline_run_metadata.go). Without it, a MANAGER of workspace A who
+// learns/guesses a pending token from workspace B could approve/deny
+// B's gated run (issue #1415). A workspace mismatch affects zero rows,
+// same as an unknown token or an already-decided one, so it surfaces
+// as ErrAlreadyDecided — the caller can't distinguish "wrong
+// workspace" from "already decided" from the error alone, which is
+// the same non-disclosure property SignalRun's 404 gives.
+//
 // Returns ErrAlreadyDecided if the waitpoint already has a final
-// status — protects against double-decide races.
-func (s *SQLWaitpointStore) CompleteApproval(ctx context.Context, token string, approved bool, deciderUserID, payload string) error {
+// status (or belongs to a different workspace) — protects against
+// double-decide races and cross-tenant completion alike.
+func (s *SQLWaitpointStore) CompleteApproval(ctx context.Context, workspaceID, token string, approved bool, deciderUserID, payload string) error {
 	status := "approved"
 	if !approved {
 		status = "denied"
@@ -353,8 +386,8 @@ func (s *SQLWaitpointStore) CompleteApproval(ctx context.Context, token string, 
 	res, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_waitpoints
 SET status = ?, decided_at = ?, decided_by_user_id = ?, decision_payload = ?
-WHERE token = ? AND status = 'pending'`,
-		status, now, nullableStr(deciderUserID), nullableStr(payload), token,
+WHERE token = ? AND workspace_id = ? AND status = 'pending'`,
+		status, now, nullableStr(deciderUserID), nullableStr(payload), token, workspaceID,
 	)
 	if err != nil {
 		return fmt.Errorf("waitpoints: update: %w", err)
