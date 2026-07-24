@@ -62,6 +62,13 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
 );
+CREATE TABLE IF NOT EXISTS pipeline_run_step_outputs (
+    run_id     TEXT NOT NULL,
+    step_id    TEXT NOT NULL,
+    output     TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, step_id)
+);
 CREATE TABLE IF NOT EXISTS pipeline_waitpoints (
     token              TEXT PRIMARY KEY,
     workspace_id       TEXT NOT NULL,
@@ -95,7 +102,13 @@ func saveResumePipeline(t *testing.T, store *Store, slug, definitionJSON string)
 	return p
 }
 
-// insertInFlightRun fabricates the row a hard kill leaves behind.
+// insertInFlightRun fabricates the row a hard kill leaves behind. Tests
+// seed completed-step state via rec.StepOutputsJSON for readability, but
+// production resume (migration v156) reads pipeline_run_step_outputs, not
+// that column — so a run this helper fabricates with prior step outputs
+// wouldn't actually be resumable unless we also seed the new table, the
+// way real incremental UpsertStepOutput calls would have during the
+// run's original (pre-kill) execution.
 func insertInFlightRun(t *testing.T, runStore *RunStore, rec *RunRecord) {
 	t.Helper()
 	if rec.Status == "" {
@@ -104,8 +117,21 @@ func insertInFlightRun(t *testing.T, runStore *RunStore, rec *RunRecord) {
 	if rec.Mode == "" {
 		rec.Mode = ModeRun
 	}
+	stepOutputsJSON := rec.StepOutputsJSON
 	if err := runStore.Insert(context.Background(), rec); err != nil {
 		t.Fatalf("insert in-flight run: %v", err)
+	}
+	if stepOutputsJSON == "" || stepOutputsJSON == "{}" {
+		return
+	}
+	var outputs map[string]string
+	if err := json.Unmarshal([]byte(stepOutputsJSON), &outputs); err != nil {
+		t.Fatalf("insert in-flight run: unmarshal seeded step outputs: %v", err)
+	}
+	for stepID, output := range outputs {
+		if err := runStore.UpsertStepOutput(context.Background(), rec.ID, stepID, output, rec.CostUSD, rec.DurationMs); err != nil {
+			t.Fatalf("insert in-flight run: seed step output %s: %v", stepID, err)
+		}
 	}
 }
 
@@ -178,9 +204,9 @@ func TestResume_KillBetweenSteps_ResumesAndCompletes(t *testing.T) {
 	}
 
 	rec := waitForRunStatus(t, runStore, "run_resume_linear", RunStatusCompleted, 5*time.Second)
-	var outputs map[string]string
-	if err := json.Unmarshal([]byte(rec.StepOutputsJSON), &outputs); err != nil {
-		t.Fatalf("unmarshal outputs: %v", err)
+	outputs, err := runStore.GetStepOutputs(ctx, rec.ID)
+	if err != nil {
+		t.Fatalf("get step outputs: %v", err)
 	}
 	if outputs["a"] != "restored-output-a" || outputs["b"] != "output-b" || outputs["c"] != "output-c" {
 		t.Errorf("step outputs after resume: %#v", outputs)
@@ -274,15 +300,21 @@ VALUES ('tok_resume_wait', 'ws_test', 'run_resume_wait', 'gate', 'approval', 'ok
 		t.Fatalf("resumed=%d interrupted=%d, want 1/0", resumed, interrupted)
 	}
 
-	// The approval still works after the restart: approving the
-	// ORIGINAL token unblocks the resumed run.
+	// The approval still works after the restart. Post-#1428/2.9 the
+	// boot-resumed run RE-PARKS (releasing its slot) rather than blocking on
+	// WaitFor for up to 24h, so the approval must trigger ResumeAfterApproval
+	// to drive it to completion — exactly what the /approve HTTP handler does
+	// (pipeline_waitpoint_callback.go). Approving the ORIGINAL token then
+	// completes the run.
 	approveErr := make(chan error, 1)
 	go func() {
-		// Give the resumed goroutine a moment to park on WaitFor —
-		// both orderings must work (WaitFor re-checks DB state), so
-		// this is pacing, not a correctness wait.
+		// Give the resumed goroutine a moment to re-park.
 		time.Sleep(100 * time.Millisecond)
-		approveErr <- wpStore.CompleteApproval(context.Background(), "ws_test", "tok_resume_wait", true, "user_test", "")
+		err := wpStore.CompleteApproval(context.Background(), "ws_test", "tok_resume_wait", true, "user_test", "")
+		if err == nil {
+			exec.ResumeAfterApproval("run_resume_wait", slog.Default())
+		}
+		approveErr <- err
 	}()
 
 	rec := waitForRunStatus(t, runStore, "run_resume_wait", RunStatusCompleted, 5*time.Second)
@@ -290,8 +322,7 @@ VALUES ('tok_resume_wait', 'ws_test', 'run_resume_wait', 'gate', 'approval', 'ok
 		t.Fatalf("approve original token: %v", err)
 	}
 
-	var outputs map[string]string
-	_ = json.Unmarshal([]byte(rec.StepOutputsJSON), &outputs)
+	outputs, _ := runStore.GetStepOutputs(ctx, rec.ID)
 	if outputs["a"] != "out-a" || outputs["b"] != "output-b" {
 		t.Errorf("step outputs after wait resume: %#v", outputs)
 	}
@@ -364,8 +395,7 @@ func TestResume_DAGRun_SkipsRestoredSteps(t *testing.T) {
 	}
 
 	rec := waitForRunStatus(t, runStore, "run_resume_dag", RunStatusCompleted, 5*time.Second)
-	var outputs map[string]string
-	_ = json.Unmarshal([]byte(rec.StepOutputsJSON), &outputs)
+	outputs, _ := runStore.GetStepOutputs(ctx, rec.ID)
 	if outputs["a"] != "dag-restored-a" || outputs["b"] != "dag-b" || outputs["c"] != "dag-c" {
 		t.Errorf("DAG step outputs after resume: %#v", outputs)
 	}
@@ -532,9 +562,9 @@ func TestExecutor_PersistsStepStateMidRun(t *testing.T) {
 	if rec.Status != RunStatusRunning {
 		t.Errorf("mid-run status: %q, want running", rec.Status)
 	}
-	var midOutputs map[string]string
-	if err := json.Unmarshal([]byte(rec.StepOutputsJSON), &midOutputs); err != nil {
-		t.Fatalf("unmarshal mid-run outputs: %v", err)
+	midOutputs, err := runStore.GetStepOutputs(ctx, rec.ID)
+	if err != nil {
+		t.Fatalf("get mid-run step outputs: %v", err)
 	}
 	if midOutputs["a"] != "live-a" {
 		t.Errorf("step a output not persisted before step b ran: %#v", midOutputs)
@@ -546,8 +576,7 @@ func TestExecutor_PersistsStepStateMidRun(t *testing.T) {
 		t.Fatalf("run did not complete: %+v", res)
 	}
 	final := waitForRunStatus(t, runStore, res.RunID, RunStatusCompleted, 2*time.Second)
-	var outputs map[string]string
-	_ = json.Unmarshal([]byte(final.StepOutputsJSON), &outputs)
+	outputs, _ := runStore.GetStepOutputs(ctx, final.ID)
 	if outputs["a"] != "live-a" || outputs["b"] != "live-b" || outputs["c"] != "live-c" {
 		t.Errorf("final outputs: %#v", outputs)
 	}

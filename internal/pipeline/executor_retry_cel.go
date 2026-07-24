@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -62,6 +63,19 @@ func extractHTTPStatus(msg string) int {
 	return 0
 }
 
+// retryOnCache holds compiled retry_on cel.Program values keyed by the raw
+// expression string. Unlike schemaCache (json schema, potentially large —
+// keyed by sha256 to bound the map key size), retry_on expressions are short
+// authored predicates, so the expr string itself is a fine key directly.
+//
+// Only successful compiles are cached: a compile failure here means the
+// stored row's retry_on is malformed despite save-time validation (a rare
+// anomaly per compileRetryOn's doc), not a hot path worth memoizing.
+// sync.Map fits the access pattern: write-once per distinct expression,
+// read-many afterward across every retry attempt of every run that uses it.
+// See issue #1411 — previously recompiled every runStepWithRetry call.
+var retryOnCache sync.Map // map[string]cel.Program
+
 // compileRetryOn compiles a retry_on predicate. Empty/whitespace expr
 // returns (nil, nil): the caller treats a nil program as "retry any
 // error", preserving the historical default. A non-bool result type is
@@ -70,6 +84,9 @@ func extractHTTPStatus(msg string) int {
 func compileRetryOn(expr string) (cel.Program, error) {
 	if strings.TrimSpace(expr) == "" {
 		return nil, nil
+	}
+	if v, ok := retryOnCache.Load(expr); ok {
+		return v.(cel.Program), nil
 	}
 	env, err := getRetryCelEnv()
 	if err != nil {
@@ -86,6 +103,7 @@ func compileRetryOn(expr string) (cel.Program, error) {
 	if err != nil {
 		return nil, fmt.Errorf("retry_on: program: %w", err)
 	}
+	retryOnCache.Store(expr, prg)
 	return prg, nil
 }
 
@@ -98,6 +116,12 @@ func evalRetryOn(prg cel.Program, err error) bool {
 		return false
 	}
 	if prg == nil {
+		// No retry_on: retry any transient EXECUTION error by default, but a
+		// tiers-exhausted validation/outcomes failure is terminal (#1429,
+		// 2.10) — retrying re-runs the whole worker+grader escalation chain.
+		if errors.Is(err, errStepOutcomeExhausted) {
+			return false
+		}
 		return true
 	}
 	msg := err.Error()

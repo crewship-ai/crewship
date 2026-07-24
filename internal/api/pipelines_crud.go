@@ -654,7 +654,10 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	if err := pipeline.CycleDetect(dsl, h.cycleResolver(r.Context(), workspaceID)); err != nil {
+	// Draft-aware resolver so a B→A / A→B cycle authored in the wrong order
+	// is caught: the being-saved draft is fed back for its own slug rather
+	// than its stale persisted definition (#1427, 2.3a).
+	if err := pipeline.CycleDetect(dsl, pipeline.DraftAwareResolver(body.Slug, dsl, h.cycleResolver(r.Context(), workspaceID))); err != nil {
 		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
@@ -830,7 +833,7 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	// candidate. The resolver loads target DSLs lazily; nodes that
 	// aren't in the workspace yet stop the walk on that branch (no
 	// false positives — see pipeline.CycleDetect docstring).
-	if err := pipeline.CycleDetect(dsl, h.cycleResolver(r.Context(), body.WorkspaceID)); err != nil {
+	if err := pipeline.CycleDetect(dsl, pipeline.DraftAwareResolver(body.Slug, dsl, h.cycleResolver(r.Context(), body.WorkspaceID))); err != nil {
 		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}

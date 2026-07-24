@@ -437,6 +437,53 @@ func TestPriorityOrNormal(t *testing.T) {
 	}
 }
 
+// TestWriter_Notify_WakesOnBatchCommit verifies the #1411 SSE-nudge plumbing:
+// a goroutine blocked on Notify()'s channel wakes shortly after a batch
+// commits, and does NOT wake before anything has been written.
+func TestWriter_Notify_WakesOnBatchCommit(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	w := NewWriter(db, quietLogger(), WriterOptions{
+		QueueSize:     128,
+		FlushSize:     64,
+		FlushInterval: 1 * time.Hour, // only the FlushSize/explicit Flush triggers a batch
+	})
+	defer w.Close()
+
+	woke := make(chan struct{})
+	ch := w.Notify()
+	go func() {
+		<-ch
+		close(woke)
+	}()
+
+	select {
+	case <-woke:
+		t.Fatal("Notify woke before any entry was committed")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	ctx := context.Background()
+	if _, err := w.Emit(ctx, Entry{
+		WorkspaceID: "ws_test",
+		Type:        EntryRunStarted,
+		ActorType:   ActorAgent,
+		Summary:     "notify me",
+	}); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	if err := w.Flush(ctx); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	select {
+	case <-woke:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Notify did not wake within 2s of a committed entry")
+	}
+}
+
 // TestNullable verifies the empty-string-to-NULL coercion that keeps the
 // indexed "agent_id IS NULL" queries cheap.
 func TestNullable(t *testing.T) {

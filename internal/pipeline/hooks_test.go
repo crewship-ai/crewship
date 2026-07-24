@@ -82,14 +82,16 @@ func TestRunHooksAround(t *testing.T) {
 		t.Fatalf("defaulted-input hook should pass: bodyRan=%v status=%s err=%v", bodyRan, res.Status, err)
 	}
 
-	// Resume re-entry skips hooks entirely (body runs, before_all ignored).
+	// Resume re-entry skips ONLY before_all (it already ran in the original
+	// lifetime); the body still runs. after_all/on_failure resume behaviour
+	// is pinned separately in TestRunHooksAround_ResumeRunsTeardownHooks.
 	bodyRan = false
 	in3 := RunInput{PipelineID: "p", resume: true, dsl: &DSL{Hooks: &RoutineHooks{
 		BeforeAll: &Step{ID: "pre", Type: StepCode, Code: &CodeStep{Runtime: "cel", Code: "missing.var > 1"}},
 	}}}
 	_, err = e.runHooksAround(ctx, in3, "run3", "slug", body)
 	if err != nil || !bodyRan {
-		t.Fatalf("resume must skip hooks and run body: bodyRan=%v err=%v", bodyRan, err)
+		t.Fatalf("resume must skip before_all and run body: bodyRan=%v err=%v", bodyRan, err)
 	}
 }
 

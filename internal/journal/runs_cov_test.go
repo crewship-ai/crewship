@@ -183,6 +183,55 @@ func TestListRuns_LimitClampAndOffset(t *testing.T) {
 	}
 }
 
+// TestListRuns_ShortPageSkipsCountQuery proves the #1411 optimization: when a
+// page returns fewer rows than Limit (LIMIT wasn't fully consumed), total is
+// still correct — offset + len(rows) — without running the separate
+// countRuns COUNT(*) query. Uses a non-zero offset since that's the case
+// most likely to be miscomputed if the shortcut's arithmetic is wrong.
+func TestListRuns_ShortPageSkipsCountQuery(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 1})
+	defer w.Close()
+	ctx := context.Background()
+	base := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
+
+	for i := 0; i < 3; i++ {
+		emitRun(t, w, "ws_test", "ag_1", "run_"+string(rune('a'+i)), "COMPLETED", "manual",
+			base.Add(time.Duration(i)*time.Hour))
+	}
+	if err := w.Flush(ctx); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	// 3 runs total; offset=1, limit=5 returns the remaining 2 (< limit) —
+	// the short-page path, not the full countRuns path.
+	runs, total, err := ListRuns(ctx, db, RunsQuery{WorkspaceID: "ws_test", Limit: 5, Offset: 1})
+	if err != nil {
+		t.Fatalf("ListRuns short page: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("short page rows = %d, want 2", len(runs))
+	}
+	if total != 3 {
+		t.Errorf("short page total = %d, want 3 (offset 1 + 2 rows)", total)
+	}
+
+	// offset past the end: 0 rows at a non-zero offset is ambiguous from the
+	// page alone (offset could be anywhere past an unmeasured total), so this
+	// must fall back to countRuns rather than reporting total = offset.
+	runs, total, err = ListRuns(ctx, db, RunsQuery{WorkspaceID: "ws_test", Limit: 5, Offset: 10})
+	if err != nil {
+		t.Fatalf("ListRuns past end: %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("past-end rows = %d, want 0", len(runs))
+	}
+	if total != 3 {
+		t.Errorf("past-end total = %d, want 3 (true count, not offset 10)", total)
+	}
+}
+
 func TestListRuns_RequiresWorkspaceAndClosedDB(t *testing.T) {
 	db := openTestDB(t)
 	if _, _, err := ListRuns(context.Background(), db, RunsQuery{}); err == nil {

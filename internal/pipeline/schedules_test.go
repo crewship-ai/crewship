@@ -42,7 +42,10 @@ CREATE TABLE IF NOT EXISTS pipeline_schedules (
     last_wake_status         TEXT,
     wake_fail_closed         INTEGER NOT NULL DEFAULT 0,
     catchup_policy           TEXT NOT NULL DEFAULT 'once',
-    last_missed_count        INTEGER NOT NULL DEFAULT 0
+    last_missed_count        INTEGER NOT NULL DEFAULT 0,
+    consecutive_failures     INTEGER NOT NULL DEFAULT 0,
+    max_consecutive_failures INTEGER NOT NULL DEFAULT 5,
+    disabled_reason          TEXT
 );
 `
 

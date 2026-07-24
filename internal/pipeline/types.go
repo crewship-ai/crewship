@@ -335,6 +335,51 @@ type Step struct {
 	// step completes. Same deterministic-side-channel restriction as
 	// routine hooks — code | http | transform only.
 	Hooks *StepHooks `json:"hooks,omitempty"`
+
+	// foreach fields (Type == StepForeach). Fan out a body of steps over
+	// each element of a JSON array with bounded concurrency, collecting the
+	// per-item outputs into a JSON array as this step's output.
+	Foreach *ForeachStep `json:"foreach,omitempty"`
+
+	// StateWrite persists cross-run routine state (#1420): a map of state
+	// key → template, rendered AFTER this step completes (so a value can
+	// reference the step's own output) and upserted into the routine's
+	// per-schedule state bucket. The next run of the same routine on the
+	// same schedule reads it back via {{ routine.state.<key> }} — the
+	// watermark ("last processed id/timestamp") primitive. Any step type
+	// may declare it; writes are best-effort and never fail the step.
+	StateWrite map[string]string `json:"state_write,omitempty"`
+}
+
+// ForeachStep fans a body of steps out over a JSON array (#1419, part 1).
+// Items is a template that must render to a JSON array (typically
+// {{ inputs.urls }} or {{ steps.fetch.output }}); each element is bound into
+// the body's render context under the `As` name (default "item") so a body
+// step reads it as {{ inputs.item }} / {{ inputs.item.field }}. Body steps
+// run per item — sequentially within an item, in parallel ACROSS items up to
+// Parallelism (bounded by dagWaveConcurrency, reusing the same wave semaphore
+// discipline so a wide fan-out can't stampede the provider). Each item's LAST
+// body step output is the item result; the step output is the JSON array of
+// those results in input order. Per-item retry rides on each body step's own
+// retry policy; cost is summed across items and attributed to the foreach step
+// (so max_cost_usd still bounds the whole fan-out).
+//
+// Body steps may reference upstream (pre-foreach) step outputs and their own
+// prior body steps. wait / call_pipeline / nested foreach are rejected at save
+// time — the fan-out is a bounded, self-contained unit, not a place to park or
+// recurse.
+type ForeachStep struct {
+	// Items is a template rendering to a JSON array. Required.
+	Items string `json:"items"`
+	// As names the per-item variable bound into the body render context as
+	// inputs.<as>. Default "item".
+	As string `json:"as,omitempty"`
+	// Parallelism caps concurrent item executions. 0 (default) uses the
+	// shared wave concurrency (dagWaveConcurrency); 1 forces sequential;
+	// values above the wave cap are clamped to it.
+	Parallelism int `json:"parallelism,omitempty"`
+	// Steps is the per-item body. At least one step required.
+	Steps []Step `json:"steps"`
 }
 
 // StepHooks wraps a single step with before/after lifecycle steps.
@@ -535,6 +580,7 @@ const (
 	StepNotify       StepType = "notify"
 	StepScript       StepType = "script"
 	StepQuery        StepType = "query"
+	StepForeach      StepType = "foreach"
 )
 
 // Complexity tags a step's reasoning depth, mapping to a workspace-

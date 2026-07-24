@@ -80,3 +80,44 @@ LIMIT 1`,
 		return plain, nil
 	}
 }
+
+// NewVaultCredentialProbe builds the availability check behind
+// credentials_required enforcement (#1418): reports whether an ACTIVE
+// credential of a given type EXISTS in the run scope, WITHOUT decrypting
+// or returning the value. It applies the exact same workspace + author-crew
+// + status='ACTIVE' + not-deleted filter as NewVaultCredentialResolver, so
+// "declared credential resolves" means precisely "the runtime would inject
+// it" — no drift between the enforcement gate and the actual resolution.
+//
+// A missing scope workspace is an error (a probe that can't scope must not
+// silently report "available"); no matching row → (false, nil). It never
+// reads encrypted_value, so it holds no secret material.
+func NewVaultCredentialProbe(db *sql.DB) func(ctx context.Context, scope RunScope, credType string) (bool, error) {
+	return func(ctx context.Context, scope RunScope, credType string) (bool, error) {
+		credType = strings.TrimSpace(credType)
+		if scope.WorkspaceID == "" {
+			return false, fmt.Errorf("credential probe requires a workspace scope")
+		}
+		if credType == "" {
+			return false, fmt.Errorf("credential type is empty")
+		}
+		var one int
+		err := db.QueryRowContext(ctx, `
+SELECT 1 FROM credentials
+WHERE workspace_id = ?
+  AND UPPER(type) = UPPER(?)
+  AND status = 'ACTIVE'
+  AND deleted_at IS NULL
+  AND (crew_id IS NULL OR crew_id = '' OR crew_id = ?)
+LIMIT 1`,
+			scope.WorkspaceID, credType, scope.AuthorCrewID,
+		).Scan(&one)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("credential probe for type %q: %w", credType, err)
+		}
+		return true, nil
+	}
+}

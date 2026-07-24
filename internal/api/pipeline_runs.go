@@ -61,6 +61,39 @@ func (h *PipelineHandler) CancelRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !found {
+		// Registry fallback for a parked WAITING run (#1426, 3.1). An async
+		// approval-parked run released its concurrency slot + registry entry
+		// when it parked, so the in-memory scan above can't see it — but it is
+		// still cancellable. Mark the persisted row cancelled and cancel its
+		// pending waitpoint(s) so the inbox approval card stops being
+		// actionable (an approve/deny would otherwise resolve a waitpoint whose
+		// run the user just killed).
+		if h.runStore != nil {
+			if rec, gerr := h.runStore.Get(r.Context(), runID); gerr == nil && rec != nil &&
+				rec.WorkspaceID == workspaceID && rec.Status == pipeline.RunStatusWaiting {
+				if err := h.runStore.MarkTerminal(r.Context(), pipeline.MarkTerminalInput{
+					RunID:        runID,
+					Status:       pipeline.RunStatusCancelled,
+					ErrorMessage: "run cancelled while waiting for approval",
+				}); err != nil {
+					h.logger.Warn("cancel parked run: mark terminal", "error", err, "run_id", runID)
+					replyError(w, http.StatusInternalServerError, "failed to cancel run")
+					return
+				}
+				if wc, ok := h.waitpoints.(pipeline.WaitpointCanceller); ok {
+					if _, err := wc.CancelWaitpointsForRun(r.Context(), runID); err != nil {
+						h.logger.Warn("cancel parked run: cancel waitpoints", "error", err, "run_id", runID)
+					}
+				}
+				writeJSON(w, http.StatusOK, map[string]any{
+					"run_id":              runID,
+					"cancel_requested":    true,
+					"parked":              true,
+					"cancel_requested_at": time.Now().UTC().Format(time.RFC3339Nano),
+				})
+				return
+			}
+		}
 		writeJSON(w, http.StatusNotFound, map[string]string{
 			"error": "run not found in this workspace (already finished or not started here)",
 		})
@@ -93,9 +126,12 @@ func (h *PipelineHandler) CancelRun(w http.ResponseWriter, r *http.Request) {
 // inbox waitpoint detail panel to render "where did it pause" with
 // real data from pipeline_runs (the projection table v83 introduced).
 //
-// step_outputs_json is parsed server-side into an object so the UI
-// doesn't have to JSON.parse twice; the frontend renders one panel
-// per (step_id, output) pair.
+// Step outputs are loaded separately from pipeline_run_step_outputs
+// (migration v156, RunStore.GetStepOutputs) rather than parsed off a
+// step_outputs_json column here — that column stopped being written on
+// the hot per-step path (#1411 item 4). Returned pre-shaped as an
+// object so the UI doesn't have to JSON.parse twice; the frontend
+// renders one panel per (step_id, output) pair.
 func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	runID := r.PathValue("runId")
@@ -106,7 +142,7 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 
 	var (
 		id, wsID, pipelineID, pipelineSlug, status, mode string
-		currentStepID, stepOutputsJSON, output           sql.NullString
+		currentStepID, output                            sql.NullString
 		startedAt                                        string
 		endedAt, errorMessage, failedAtStep              sql.NullString
 		costUSD                                          float64
@@ -129,7 +165,7 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 	// pipeline's name to anyone who can guess the run id.
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT r.id, r.workspace_id, r.pipeline_id, r.pipeline_slug, r.status, r.mode,
-		       r.current_step_id, r.step_outputs_json, r.output, r.started_at,
+		       r.current_step_id, r.output, r.started_at,
 		       r.ended_at, r.error_message, r.failed_at_step,
 		       r.cost_usd, r.duration_ms,
 		       r.triggered_via, r.triggered_by_id, r.idempotency_key, r.inputs_json,
@@ -146,7 +182,7 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		runID, workspaceID,
 	).Scan(
 		&id, &wsID, &pipelineID, &pipelineSlug, &status, &mode,
-		&currentStepID, &stepOutputsJSON, &output, &startedAt,
+		&currentStepID, &output, &startedAt,
 		&endedAt, &errorMessage, &failedAtStep,
 		&costUSD, &durationMs,
 		&triggeredVia, &triggeredByID, &idempotencyKey, &inputsJSON,
@@ -163,13 +199,19 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse step_outputs_json into a map so the UI can iterate steps
-	// without a second JSON.parse. Default to empty object on parse
-	// failure rather than failing the whole call — the rest of the
-	// metadata is still useful.
-	var stepOutputs map[string]interface{}
-	if stepOutputsJSON.Valid && stepOutputsJSON.String != "" {
-		_ = json.Unmarshal([]byte(stepOutputsJSON.String), &stepOutputs)
+	// Step outputs live in pipeline_run_step_outputs (migration v156), not
+	// a step_outputs_json column — see RunStore.GetStepOutputs. Queried via
+	// a throwaway RunStore (a stateless *sql.DB wrapper) rather than
+	// h.runStore, which some handler-construction paths (including tests)
+	// leave nil — this data must not depend on that field being wired, the
+	// way it never used to depend on it when it was a plain column in the
+	// main SELECT above. Best-effort: a lookup failure shouldn't sink the
+	// rest of the run detail response.
+	stepOutputs := map[string]string{}
+	if so, soErr := pipeline.NewRunStore(h.db).GetStepOutputs(r.Context(), runID); soErr == nil {
+		stepOutputs = so
+	} else {
+		h.logger.Warn("get pipeline run: step outputs", "error", soErr, "run_id", runID)
 	}
 	var inputs map[string]interface{}
 	if inputsJSON != "" {

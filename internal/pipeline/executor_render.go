@@ -4,10 +4,174 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
+
+// secretRedactionMarker replaces a resolved {{ secrets.<type> }} value
+// anywhere it would otherwise leak out of a step — the downstream step
+// output, an error message, a journaled preview. Distinct, greppable, and
+// stable so operators recognise "a secret was here, and it was scrubbed."
+const secretRedactionMarker = "[REDACTED:secret]"
+
+// secretScrub holds the exact decrypted values a step injected via
+// {{ secrets.<type> }} so the runner can strip them from any string that
+// leaves it. We scrub by LITERAL value (not by credential-shape regex):
+// a workspace secret can be any bytes — an opaque bearer, a DB password,
+// a PEM blob — so only exact-match replacement can guarantee it never
+// survives on an author-visible surface (step_outputs_json, journal, error
+// text). A step that referenced no secrets carries an empty set and every
+// scrub is a no-op, so existing routines see byte-for-byte identical output.
+type secretScrub struct {
+	values []string
+}
+
+// active reports whether there is anything to scrub.
+func (s *secretScrub) active() bool { return s != nil && len(s.values) > 0 }
+
+// scrub replaces every resolved secret value in str with the marker.
+func (s *secretScrub) scrub(str string) string {
+	if !s.active() || str == "" {
+		return str
+	}
+	for _, v := range s.values {
+		if v == "" {
+			continue
+		}
+		str = strings.ReplaceAll(str, v, secretRedactionMarker)
+	}
+	return str
+}
+
+// scrubErr scrubs an error's message. When the message carries no secret
+// (the common case — egress/SSRF/wiring errors), the ORIGINAL error is
+// returned untouched so typed errors (e.g. *EgressBlockedError) still
+// satisfy errors.As at the call site. Only when a secret is actually
+// present is the error flattened to a redacted plain error — losing the
+// type is the correct trade when the alternative is leaking the value.
+func (s *secretScrub) scrubErr(err error) error {
+	if err == nil || !s.active() {
+		return err
+	}
+	msg := err.Error()
+	cleaned := s.scrub(msg)
+	if cleaned == msg {
+		return err
+	}
+	return errors.New(cleaned)
+}
+
+// secretTypesInStep scans a step's template-bearing fields for
+// {{ secrets.<type> }} references and returns the distinct set of types.
+// Scoped to the step kinds that carry secrets to a non-agent runtime
+// (code | script | notify | http) — the same kinds resolveStepSecrets
+// enriches. An empty result means no vault lookup happens at all.
+func secretTypesInStep(step Step) map[string]struct{} {
+	out := map[string]struct{}{}
+	add := func(s string) {
+		if s == "" {
+			return
+		}
+		for _, m := range templateRE.FindAllStringSubmatch(s, -1) {
+			parts := strings.SplitN(strings.TrimSpace(m[1]), ".", 3)
+			if len(parts) >= 2 && parts[0] == "secrets" {
+				if t := strings.TrimSpace(parts[1]); t != "" {
+					out[t] = struct{}{}
+				}
+			}
+		}
+	}
+	if step.HTTP != nil {
+		add(step.HTTP.URL)
+		add(step.HTTP.Body)
+		for _, v := range step.HTTP.Headers {
+			add(v)
+		}
+	}
+	if step.Code != nil {
+		add(step.Code.Code)
+		for _, v := range step.Code.Env {
+			add(v)
+		}
+	}
+	if step.Script != nil {
+		for _, a := range step.Script.Args {
+			add(a)
+		}
+		for _, v := range step.Script.Env {
+			add(v)
+		}
+	}
+	if step.Notify != nil {
+		// Notify.To is deliberately NOT scanned. `to:` is a routing address
+		// (workspace / user:<id> / role:<ROLE> / crew:<slug> / trigger),
+		// never a place for a vault value. If a secret resolved there it
+		// would render into toRaw — which runNotifyStep logs and persists as
+		// a run warning when a secret-shaped target fails to resolve — a leak
+		// the deferred output/error scrub can't reach. Only Title/Body may
+		// legitimately carry a secret, and both are scrubbed from the
+		// delivered notice.
+		add(step.Notify.Title)
+		add(step.Notify.Body)
+	}
+	return out
+}
+
+// secretResolveTimeout bounds a single vault lookup during step-secret
+// resolution. Unlike the http credential_ref path — which inherits the
+// step's own request timeout — code/script/notify steps have no
+// per-step deadline, so a stalled resolver could otherwise hold the run
+// open indefinitely. Best-effort semantics are preserved: a timeout is
+// just another lookup error, so the type renders empty rather than
+// failing the step.
+const secretResolveTimeout = 5 * time.Second
+
+// resolveStepSecrets enriches parentRender with the {{ secrets.<type> }}
+// values a step references, resolved from the workspace vault via the
+// wired credential resolver (workspace + author-crew scoped, ACTIVE-only —
+// the SAME path http's credential_ref uses). It returns the enriched
+// context plus a scrubber loaded with the resolved values so the runner
+// can strip them from its output/error before returning.
+//
+// The returned RenderContext is a shallow copy: only .Secrets is set, so
+// the caller's context (and any sibling step sharing it) is untouched.
+// A step that references no secrets — or an executor with no resolver
+// wired — gets parentRender back unchanged and an empty (no-op) scrubber,
+// so there is zero overhead and zero behaviour change for existing steps.
+//
+// Resolution is best-effort per type, mirroring credential_ref: a type
+// with no ACTIVE credential renders empty rather than failing the step
+// (public endpoints / optional secrets keep working). Turning an
+// unresolvable-but-required credential into a hard failure is the job of
+// credentials_required enforcement (the API layer's gateMissingCredentials),
+// not this hot path.
+func (e *Executor) resolveStepSecrets(ctx context.Context, step Step, parentRender RenderContext, in RunInput) (RenderContext, *secretScrub) {
+	types := secretTypesInStep(step)
+	if len(types) == 0 || e.credentialByType == nil {
+		return parentRender, &secretScrub{}
+	}
+	scope := RunScope{WorkspaceID: in.WorkspaceID, AuthorCrewID: in.AuthorCrewID}
+	resolved := make(map[string]string, len(types))
+	scrub := &secretScrub{}
+	for t := range types {
+		val, err := func() (string, error) {
+			lookupCtx, cancel := context.WithTimeout(ctx, secretResolveTimeout)
+			defer cancel()
+			return e.credentialByType(lookupCtx, scope, t)
+		}()
+		if err != nil || val == "" {
+			continue
+		}
+		resolved[t] = val
+		scrub.values = append(scrub.values, val)
+	}
+	enriched := parentRender // shallow copy — only Secrets diverges
+	enriched.Secrets = resolved
+	return enriched, scrub
+}
 
 // evalIfCondition decides whether a step.If render result counts as
 // "true". Empty + the obvious falsey strings short-circuit to false;

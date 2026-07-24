@@ -26,7 +26,6 @@ package pipeline
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"reflect"
@@ -62,6 +61,25 @@ CREATE TABLE IF NOT EXISTS routine_step_overrides (
     PRIMARY KEY (pipeline_id, step_id)
 );`); err != nil {
 		t.Fatalf("step overrides schema: %v", err)
+	}
+	// wait:event durability (#1409, migration v154) — NewWiredExecutor
+	// wires a SignalWaitStore whenever DB != nil, so the rig must carry
+	// the table to match production.
+	if _, err := db.ExecContext(context.Background(), `
+CREATE TABLE IF NOT EXISTS pipeline_signal_waits (
+    id           TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    run_id       TEXT NOT NULL,
+    step_id      TEXT NOT NULL,
+    event_type   TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending',
+    payload      TEXT,
+    created_at   TEXT NOT NULL,
+    delivered_at TEXT,
+    consumed_at  TEXT,
+    UNIQUE (run_id, step_id)
+);`); err != nil {
+		t.Fatalf("signal waits schema: %v", err)
 	}
 	return db
 }
@@ -320,9 +338,9 @@ func TestResume_CodeStep_ExecutesWithFactoryExecutor(t *testing.T) {
 	}
 
 	rec := waitForRunStatus(t, deps.RunStore, "run_resume_code", RunStatusCompleted, 5*time.Second)
-	var outputs map[string]string
-	if err := json.Unmarshal([]byte(rec.StepOutputsJSON), &outputs); err != nil {
-		t.Fatalf("unmarshal outputs: %v", err)
+	outputs, err := deps.RunStore.GetStepOutputs(ctx, rec.ID)
+	if err != nil {
+		t.Fatalf("get step outputs: %v", err)
 	}
 	if outputs["a"] != "restored-a" || outputs["calc"] != "true" || outputs["c"] != "final-c" {
 		t.Errorf("step outputs after code-step resume: %#v", outputs)

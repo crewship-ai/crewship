@@ -279,16 +279,18 @@ func (s *RunStore) MarkWaiting(ctx context.Context, runID, stepID string) error 
 	res, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_runs
 SET status = 'waiting', current_step_id = ?, updated_at = datetime('now','subsec')
-WHERE id = ? AND status IN ('queued','running')`, stepID, runID)
+WHERE id = ? AND status IN ('queued','running','waiting')`, stepID, runID)
 	if err != nil {
 		return fmt.Errorf("pipeline_runs: mark waiting: %w", err)
 	}
 	// Durability + transition guard: the async WAITING contract requires a
 	// persisted, still-live run row to resume from. The status filter ensures
-	// we only park a queued/running run — a late/racing wait update can never
-	// resurrect a terminal (completed/failed/cancelled/interrupted) row back to
-	// 'waiting'. RowsAffected!=1 means no eligible row matched, so the caller
-	// fails closed instead of surfacing a WAITING token nothing can resume.
+	// we only park a queued/running/waiting run — 'waiting' is included so a
+	// resume RE-PARK (#1428, 2.9) is idempotent — while a late/racing wait
+	// update can never resurrect a terminal (completed/failed/cancelled/
+	// interrupted) row back to 'waiting'. RowsAffected!=1 means no eligible row
+	// matched, so the caller fails closed instead of surfacing a WAITING token
+	// nothing can resume.
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("pipeline_runs: mark waiting rows: %w", err)
@@ -299,20 +301,110 @@ WHERE id = ? AND status IN ('queued','running')`, stepID, runID)
 	return nil
 }
 
-// AppendStepOutput rewrites step_outputs_json with the supplied map.
-// We don't try to merge JSON in SQL — the caller has the full map in
-// memory anyway, and serializing once is cheaper than parsing+merging
-// in SQLite. Cost + duration are accumulated by caller (Executor).
-func (s *RunStore) AppendStepOutput(ctx context.Context, runID string, stepOutputs map[string]string, costUSD float64, durationMs int64) error {
-	raw, err := json.Marshal(stepOutputs)
+// UpsertStepOutput records ONE step's output as a single-row upsert into
+// pipeline_run_step_outputs (migration v156), plus the cheap fixed-column
+// cost/duration update on pipeline_runs itself. This replaced the old
+// AppendStepOutput, which rewrote the entire step_outputs_json blob on
+// every step boundary — O(1) bytes written here per call vs. O(N) bytes
+// per call (O(N²) over a run) before. See #1411 item 4.
+func (s *RunStore) UpsertStepOutput(ctx context.Context, runID, stepID, output string, costUSD float64, durationMs int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("pipeline_runs: marshal step outputs: %w", err)
+		return fmt.Errorf("pipeline_run_step_outputs: begin: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx, `
+	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+
+	now := formatRFC3339(time.Now().UTC())
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO pipeline_run_step_outputs (run_id, step_id, output, updated_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT (run_id, step_id) DO UPDATE SET output = excluded.output, updated_at = excluded.updated_at`,
+		runID, stepID, output, now); err != nil {
+		return fmt.Errorf("pipeline_run_step_outputs: upsert: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
 UPDATE pipeline_runs
-SET step_outputs_json = ?, cost_usd = ?, duration_ms = ?, updated_at = datetime('now','subsec')
-WHERE id = ?`, string(raw), costUSD, durationMs, runID)
-	return err
+SET cost_usd = ?, duration_ms = ?, updated_at = datetime('now','subsec')
+WHERE id = ?`, costUSD, durationMs, runID); err != nil {
+		return fmt.Errorf("pipeline_runs: update cost/duration: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("pipeline_run_step_outputs: commit: %w", err)
+	}
+	return nil
+}
+
+// FlushStepOutputs upserts every entry of a full step-outputs map in one
+// transaction. Used only at the terminal write (executor.go), where it
+// serves two purposes: catching any step whose output was never
+// incrementally persisted (the DAG/parallel scheduler doesn't call
+// UpsertStepOutput per step today — only the linear path does) and
+// re-affirming already-persisted steps (idempotent, harmless). Unlike the
+// old whole-blob rewrite this happens O(N) times ONCE per run, not on
+// every step boundary.
+func (s *RunStore) FlushStepOutputs(ctx context.Context, runID string, stepOutputs map[string]string, costUSD float64, durationMs int64) error {
+	if len(stepOutputs) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("pipeline_run_step_outputs: flush begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+
+	stmt, err := tx.PrepareContext(ctx, `
+INSERT INTO pipeline_run_step_outputs (run_id, step_id, output, updated_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT (run_id, step_id) DO UPDATE SET output = excluded.output, updated_at = excluded.updated_at`)
+	if err != nil {
+		return fmt.Errorf("pipeline_run_step_outputs: flush prepare: %w", err)
+	}
+	defer stmt.Close()
+
+	now := formatRFC3339(time.Now().UTC())
+	for stepID, output := range stepOutputs {
+		if _, err := stmt.ExecContext(ctx, runID, stepID, output, now); err != nil {
+			return fmt.Errorf("pipeline_run_step_outputs: flush upsert step %s: %w", stepID, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+UPDATE pipeline_runs
+SET cost_usd = ?, duration_ms = ?, updated_at = datetime('now','subsec')
+WHERE id = ?`, costUSD, durationMs, runID); err != nil {
+		return fmt.Errorf("pipeline_runs: flush update cost/duration: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("pipeline_run_step_outputs: flush commit: %w", err)
+	}
+	return nil
+}
+
+// GetStepOutputs loads every persisted step output for one run from
+// pipeline_run_step_outputs (migration v156). Replaces parsing
+// RunRecord.StepOutputsJSON, which stopped being written on the hot path
+// (see UpsertStepOutput) — this is now the only current read path for a
+// run's step outputs; pre-migration runs are covered by the v156
+// backfill. Returns an empty, non-nil map when the run has no rows yet.
+func (s *RunStore) GetStepOutputs(ctx context.Context, runID string) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT step_id, output FROM pipeline_run_step_outputs WHERE run_id = ?`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("pipeline_run_step_outputs: get: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[string]string{}
+	for rows.Next() {
+		var stepID, output string
+		if err := rows.Scan(&stepID, &output); err != nil {
+			return nil, fmt.Errorf("pipeline_run_step_outputs: scan: %w", err)
+		}
+		out[stepID] = output
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("pipeline_run_step_outputs: iterate: %w", err)
+	}
+	return out, nil
 }
 
 // MarkTerminal flips the row to a terminal status. Output, error,

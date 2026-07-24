@@ -97,6 +97,24 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 		}
 	}
 
+	// A freshly created index (e.g. v153/v154's pipeline_runs/journal_entries
+	// indexes) has no sqlite_stat1 row until something analyzes it — without
+	// one, SQLite's query planner has no row-count evidence to prefer a new
+	// narrow/partial index over an older broader one that also matches the
+	// query shape, and can keep picking the old index indefinitely. Verified
+	// empirically (internal/journal/runs_bench_test.go): a partial index
+	// perfectly matching the WHERE clause was still passed over for a
+	// broader index on the same leading columns until ANALYZE ran.
+	// PRAGMA optimize — the normally-recommended cheaper alternative — was
+	// tried first but produces coarser sampled estimates on this driver
+	// (modernc.org/sqlite) that were NOT precise enough to flip the plan in
+	// the same test; plain ANALYZE was required. Runs once per process
+	// startup (Migrate is called once at boot), which is an acceptable
+	// cost for a self-hosted SQLite instance.
+	if _, err := db.ExecContext(ctx, "ANALYZE"); err != nil {
+		logger.Warn("post-migration ANALYZE failed", "error", err)
+	}
+
 	return nil
 }
 
@@ -1700,32 +1718,77 @@ END;
 	// journal.VerifyChain then detects mutation / reorder / mid-chain
 	// deletion. See migrate_consts_v152_journal_hash_chain.go (#1369).
 	{version: 152, name: "journal_hash_chain", fn: migrationJournalHashChain},
-	// v153 namespaces pipeline_run_idempotency's primary key by pipeline_id:
+	// v153 adds a per-schedule circuit breaker: consecutive_failures +
+	// max_consecutive_failures + disabled_reason on pipeline_schedules, so
+	// a schedule whose target keeps failing auto-disables after K
+	// straight failures instead of spamming the MANAGER inbox and
+	// burning agent cost forever. See
+	// migrate_consts_v153_schedule_circuit_breaker.go (#1405).
+	{version: 153, name: "schedule_circuit_breaker", sql: migrationScheduleCircuitBreaker},
+	// v154 introduces pipeline_signal_waits — durable arm/deliver state for
+	// `wait: event` steps, so a signal survives a process restart instead of
+	// depending on an in-memory-only registry. See
+	// migrate_consts_v154_signal_waits.go (#1409).
+	{version: 154, name: "signal_waits", sql: migrationSignalWaits},
+	// v155 introduces pipeline_routine_state — durable cross-run key/value
+	// state scoped per (pipeline, schedule), backing the {{ routine.state.* }}
+	// read namespace and the `state_write` step binding (watermark patterns).
+	// See migrate_consts_v155_routine_state.go (#1420).
+	{version: 155, name: "routine_state", sql: migrationRoutineState},
+
+	// v156: narrower (workspace_id, trace_id, entry_type, ts) partial index
+	// scoped to entry_type LIKE 'run.%' so the run_aggregates CTE
+	// (journal.ListRuns/countRuns/RunStats/RunInsights) stops scanning every
+	// traced row in the workspace via the broader v60 idx_journal_ws_trace.
+	// Renumbered from v153 to sit above the engine stack (#1405/#1409/#1420).
+	// See migrate_consts_v156_run_aggregation_index.go and issue #1411.
+	{version: 156, name: "run_aggregation_index", sql: migrationRunAggregationIndex},
+
+	// v157: idx_pipeline_runs_active (v83) widened to include the 'waiting'
+	// status so it actually matches RunStore.ListActive/ListInFlight's
+	// filter, which the index predicate had drifted out of sync with. See
+	// migrate_consts_v157_pipeline_runs_active_index.go and issue #1411.
+	{version: 157, name: "pipeline_runs_active_index_fix", sql: migrationPipelineRunsActiveIndexFix},
+
+	// v158: workspaces.run_retention_days — per-workspace override for the
+	// pipeline_runs retention sweep. See
+	// migrate_consts_v158_run_retention_days.go and issue #1407.
+	{version: 158, name: "run_retention_days", sql: migrationRunRetentionDays},
+
+	// v159: pipeline_run_step_outputs — normalized per-step table replacing
+	// the O(N²) step_outputs_json blob rewrite on the hot per-step path,
+	// with a backfill so pre-migration runs keep their history under the
+	// new read path. Renumbered from v156 to sit above the engine stack.
+	// See migrate_consts_v159_run_step_outputs.go and issue #1411 item 4.
+	{version: 159, name: "run_step_outputs", fn: migrationRunStepOutputs},
+
+	// v160 namespaces pipeline_run_idempotency's primary key by pipeline_id:
 	// (workspace_id, idempotency_key) → (workspace_id, pipeline_id,
 	// idempotency_key). Closes a cross-pipeline idempotency-key collision
 	// (pre-poison a predictable key to silently dedupe/DoS a different
-	// pipeline's run, plus disclose its run_id). See
+	// pipeline's run, plus disclose its run_id). Renumbered from v153 to sit
+	// above the engine stack. See
 	// migrate_consts_v160_idempotency_pipeline_scope.go (#1415).
 	{version: 160, name: "idempotency_pipeline_scope", sql: migrationIdempotencyPipelineScope},
-	// v154: native outbound notification system, MVP (issue #1412). Widens
+	// v161: native outbound notification system, MVP (issue #1412). Widens
 	// notification_channels (v133) with provider/scope/owner_user_id/
 	// categories_json/min_priority and admits the new 'shoutrrr' delivery
 	// type (Slack/Discord/Telegram via github.com/nicholas-fedor/shoutrrr).
 	// Adds user_notification_prefs (per-user category × channel matrix) and
-	// notification_deliveries (persistent outbox/delivery log). See
-	// migrate_consts_v161_notification_prefs.go.
+	// notification_deliveries (persistent outbox/delivery log). Renumbered
+	// from v154. See migrate_consts_v161_notification_prefs.go.
 	{version: 161, name: "notification_prefs", fn: migrationNotificationPrefs},
-	// v155: per-schedule missed-run catch-up policy (issue #1422 item 2).
+	// v162: per-schedule missed-run catch-up policy (issue #1422 item 2).
 	// Adds pipeline_schedules.catchup_policy ('skip'|'once'|'all', default
 	// 'once' = unchanged behaviour) + last_missed_count, and widens
-	// inbox_items.kind to admit 'schedule_missed'. See
+	// inbox_items.kind to admit 'schedule_missed'. Renumbered from v155. See
 	// migrate_consts_v162_schedule_catchup.go.
 	{version: 162, name: "schedule_catchup", sql: migrationScheduleCatchup},
-	// v156: opt-in monthly spend cap per routine (issue #1422 item 3),
+	// v163: opt-in monthly spend cap per routine (issue #1422 item 3),
 	// distinct from DSL.MaxCostUSD's per-run hard gate. 0 = no budget set.
 	// Powers the budget-vs-actual meter on the routine detail page + a
-	// workspace roll-up, aggregating over pipeline_runs.cost_usd. See
-	// migrate_consts_v163_routine_monthly_budget.go.
+	// workspace roll-up, aggregating over pipeline_runs.cost_usd. Renumbered
+	// from v156. See migrate_consts_v163_routine_monthly_budget.go.
 	{version: 163, name: "routine_monthly_budget", sql: migrationRoutineMonthlyBudget},
 }
 

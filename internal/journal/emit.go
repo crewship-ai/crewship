@@ -64,6 +64,37 @@ type Writer struct {
 	// so a DB-write attacker cannot forge entry_hash values. Verify + the
 	// migration backfill derive the same key from the same seed.
 	chainKey []byte
+
+	// notifyMu guards notifyCh, the flush-broadcast channel for Notify (see
+	// below). Separate from writeMu: readers must never block on a DB write.
+	notifyMu sync.Mutex
+	notifyCh chan struct{}
+}
+
+// Notify returns a channel that closes the next time one or more entries
+// durably commit (batch write, poison-isolation retry, or the synchronous
+// fallback path in Emit). Used by the journal SSE stream (#1411) to poll
+// promptly on new data instead of only on a fixed tick.
+//
+// The returned channel is single-use: after it closes, call Notify again to
+// get the next one. Safe to call from multiple goroutines — each gets its
+// own handle to the same underlying broadcast.
+func (w *Writer) Notify() <-chan struct{} {
+	w.notifyMu.Lock()
+	defer w.notifyMu.Unlock()
+	return w.notifyCh
+}
+
+// wakeNotify closes the current notify channel (waking every current
+// listener) and installs a fresh one for the next round. Call after a
+// successful commit, never on a no-op or a fully-failed attempt — a wake
+// with nothing new to see just costs the listeners a wasted poll.
+func (w *Writer) wakeNotify() {
+	w.notifyMu.Lock()
+	old := w.notifyCh
+	w.notifyCh = make(chan struct{})
+	w.notifyMu.Unlock()
+	close(old)
 }
 
 // DB exposes the underlying *sql.DB for callers that need to run a
@@ -135,6 +166,7 @@ func NewWriter(db *sql.DB, logger *slog.Logger, opts WriterOptions) *Writer {
 		flushDur: opts.FlushInterval,
 		closed:   make(chan struct{}),
 		chainKey: chainKey,
+		notifyCh: make(chan struct{}),
 	}
 	w.wg.Add(1)
 	go w.run()
@@ -189,7 +221,11 @@ func (w *Writer) Emit(ctx context.Context, e Entry) (string, error) {
 	select {
 	case <-w.closed:
 		// Writer is shutting down; persist inline so we don't drop the entry.
-		return e.ID, w.persistOne(ctx, e)
+		perr := w.persistOne(ctx, e)
+		if perr == nil {
+			w.wakeNotify()
+		}
+		return e.ID, perr
 	default:
 	}
 
@@ -202,7 +238,11 @@ func (w *Writer) Emit(ctx context.Context, e Entry) (string, error) {
 		// Fall back to a synchronous write so durability trumps latency.
 		w.logger.Warn("journal queue saturated, writing synchronously",
 			"entry_type", e.Type, "workspace_id", e.WorkspaceID)
-		return e.ID, w.persistOne(ctx, e)
+		perr := w.persistOne(ctx, e)
+		if perr == nil {
+			w.wakeNotify()
+		}
+		return e.ID, perr
 	}
 }
 
@@ -288,6 +328,7 @@ func (w *Writer) run() {
 		if err == nil {
 			persistFailures = 0
 			batch = batch[:0]
+			w.wakeNotify()
 			return
 		}
 		// A permanent error (constraint violation, un-marshalable payload)
@@ -318,6 +359,12 @@ func (w *Writer) run() {
 					// transient for this specific entry — keep for retry
 					kept = append(kept, e)
 				}
+			}
+			// Any row that isn't in kept either committed or was dropped as
+			// poison — either way, forward progress happened and durable
+			// state changed, so waiting SSE listeners should re-poll.
+			if len(kept) != len(batch) {
+				w.wakeNotify()
 			}
 			batch = kept
 			// Dropping the poison is forward progress: reset the failure

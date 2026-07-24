@@ -31,7 +31,7 @@ func TestPipelineScheduler_Catchup_OnceIsDefaultAndUnchanged(t *testing.T) {
 	_, err := db.ExecContext(context.Background(),
 		`UPDATE pipelines SET definition_json = ?, last_test_run_at = ?, last_test_run_passed = 1 WHERE id = 'pipe_1'`,
 		`{"name":"x","steps":[{"id":"s1","type":"agent_run","agent":"agent_lead","prompt":"hi"}]}`,
-		time.Now().UTC().Format(time.RFC3339Nano),
+		time.Now().UTC().Format(time.RFC3339Nano), // tsformat:allow: last_test_run_at freshness is checked in Go via time.Since, never SQL-compared
 	)
 	if err != nil {
 		t.Fatalf("update pipeline def: %v", err)
@@ -46,7 +46,7 @@ func TestPipelineScheduler_Catchup_OnceIsDefaultAndUnchanged(t *testing.T) {
 	// Due 5 whole minutes ago on an every-minute cron — a real backlog of
 	// several occurrences, all dropped except the one that fires.
 	dueAt := time.Now().UTC().Add(-5 * time.Minute).Truncate(time.Minute)
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: schedule created_at/updated_at are not ordered/compared in SQL; next_run_at (the compared column) uses tsformatForTest
 	_, err = db.ExecContext(context.Background(), `
 INSERT INTO pipeline_schedules
   (id, workspace_id, name, target_pipeline_id, cron_expr, timezone, inputs_json, enabled, next_run_at, catchup_policy, created_at, updated_at)
@@ -81,7 +81,7 @@ func TestPipelineScheduler_Catchup_Skip(t *testing.T) {
 	_, err := db.ExecContext(context.Background(),
 		`UPDATE pipelines SET definition_json = ?, last_test_run_at = ?, last_test_run_passed = 1 WHERE id = 'pipe_1'`,
 		`{"name":"x","steps":[{"id":"s1","type":"agent_run","agent":"agent_lead","prompt":"hi"}]}`,
-		time.Now().UTC().Format(time.RFC3339Nano),
+		time.Now().UTC().Format(time.RFC3339Nano), // tsformat:allow: last_test_run_at freshness is checked in Go via time.Since, never SQL-compared
 	)
 	if err != nil {
 		t.Fatalf("update pipeline def: %v", err)
@@ -94,7 +94,7 @@ func TestPipelineScheduler_Catchup_Skip(t *testing.T) {
 	exec := NewExecutor(pipelineStore, resolver, runner, nil)
 
 	dueAt := time.Now().UTC().Add(-5 * time.Minute).Truncate(time.Minute)
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: schedule created_at/updated_at are not ordered/compared in SQL; next_run_at (the compared column) uses tsformatForTest
 	_, err = db.ExecContext(context.Background(), `
 INSERT INTO pipeline_schedules
   (id, workspace_id, name, target_pipeline_id, cron_expr, timezone, inputs_json, enabled, next_run_at, catchup_policy, created_at, updated_at)
@@ -132,7 +132,7 @@ func TestPipelineScheduler_Catchup_All(t *testing.T) {
 	_, err := db.ExecContext(context.Background(),
 		`UPDATE pipelines SET definition_json = ?, last_test_run_at = ?, last_test_run_passed = 1 WHERE id = 'pipe_1'`,
 		`{"name":"x","steps":[{"id":"s1","type":"agent_run","agent":"agent_lead","prompt":"hi"}]}`,
-		time.Now().UTC().Format(time.RFC3339Nano),
+		time.Now().UTC().Format(time.RFC3339Nano), // tsformat:allow: last_test_run_at freshness is checked in Go via time.Since, never SQL-compared
 	)
 	if err != nil {
 		t.Fatalf("update pipeline def: %v", err)
@@ -145,7 +145,7 @@ func TestPipelineScheduler_Catchup_All(t *testing.T) {
 	exec := NewExecutor(pipelineStore, resolver, runner, nil)
 
 	dueAt := time.Now().UTC().Add(-5 * time.Minute).Truncate(time.Minute)
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: schedule created_at/updated_at are not ordered/compared in SQL; next_run_at (the compared column) uses tsformatForTest
 	_, err = db.ExecContext(context.Background(), `
 INSERT INTO pipeline_schedules
   (id, workspace_id, name, target_pipeline_id, cron_expr, timezone, inputs_json, enabled, next_run_at, catchup_policy, created_at, updated_at)
@@ -187,7 +187,7 @@ func TestPipelineScheduler_Catchup_OnTimeIgnoresPolicy(t *testing.T) {
 			_, err := db.ExecContext(context.Background(),
 				`UPDATE pipelines SET definition_json = ?, last_test_run_at = ?, last_test_run_passed = 1 WHERE id = 'pipe_1'`,
 				`{"name":"x","steps":[{"id":"s1","type":"agent_run","agent":"agent_lead","prompt":"hi"}]}`,
-				time.Now().UTC().Format(time.RFC3339Nano),
+				time.Now().UTC().Format(time.RFC3339Nano), // tsformat:allow: last_test_run_at freshness is checked in Go via time.Since, never SQL-compared
 			)
 			if err != nil {
 				t.Fatalf("update pipeline def: %v", err)
@@ -198,8 +198,10 @@ func TestPipelineScheduler_Catchup_OnTimeIgnoresPolicy(t *testing.T) {
 			runner := &stubAgentRunner{}
 			exec := NewExecutor(pipelineStore, resolver, runner, nil)
 
-			pastTime := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)
-			now := time.Now().UTC().Format(time.RFC3339Nano)
+			// next_run_at IS ordered/compared in SQL by listDueSchedules, so
+			// seed it with the same fixed-width tsformat the store writes.
+			pastTime := tsformatForTest(time.Now().Add(-time.Minute).UTC())
+			now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: schedule created_at/updated_at are not ordered/compared in SQL; next_run_at (the compared column) uses tsformatForTest
 			_, err = db.ExecContext(context.Background(), `
 INSERT INTO pipeline_schedules
   (id, workspace_id, name, target_pipeline_id, cron_expr, timezone, inputs_json, enabled, next_run_at, catchup_policy, created_at, updated_at)

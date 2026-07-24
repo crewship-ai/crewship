@@ -181,6 +181,25 @@ func seedWorkspace(t *testing.T, db *sql.DB) string {
 		}
 	}
 
+	// Outbound notifications (#1412): a workspace-configured channel plus
+	// one operator's per-category routing preference. Both carry a plain
+	// workspace_id (no workspaces FK), so they only ride bundles because
+	// they're listed explicitly in BackupTables — this seeds the data the
+	// round-trip asserts survives. prefs.channel_id → notification_channels
+	// so the channel must exist first.
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO notification_channels (id, workspace_id, type, config_json, created_by)
+		 VALUES (?, ?, 'email', ?, ?)`,
+		"nc_alpha_1", workspaceID, `{"to":"ops@e2e.test"}`, "u_admin"); err != nil {
+		t.Fatalf("seed notification_channel: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO user_notification_prefs (id, workspace_id, user_id, category, channel_id, state)
+		 VALUES (?, ?, ?, 'runs.failed', ?, 'immediate')`,
+		"unp_alpha_1", workspaceID, "u_admin", "nc_alpha_1"); err != nil {
+		t.Fatalf("seed user_notification_pref: %v", err)
+	}
+
 	return workspaceID
 }
 
@@ -237,6 +256,10 @@ func snapshotWorkspaceScopedTables(t *testing.T, db *sql.DB, workspaceID string)
 		                  WHERE c.workspace_id = ? ORDER BY cm.id`},
 		{"chats", `SELECT * FROM chats WHERE workspace_id = ? ORDER BY id`},
 		{"journal_entries", `SELECT * FROM journal_entries WHERE workspace_id = ? ORDER BY id`},
+		// Outbound notifications (#1412) — direct workspace_id scope, same
+		// as the generic workspaceFilterSQL default the dumper applies.
+		{"notification_channels", `SELECT * FROM notification_channels WHERE workspace_id = ? ORDER BY id`},
+		{"user_notification_prefs", `SELECT * FROM user_notification_prefs WHERE workspace_id = ? ORDER BY id`},
 	}
 
 	out := map[string]tableSnapshot{}

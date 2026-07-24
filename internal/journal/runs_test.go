@@ -230,6 +230,56 @@ func TestListRuns_WorkspaceIsolation(t *testing.T) {
 	}
 }
 
+// TestGetRunByID pins the indexed single-run lookup (#1411/#1408): it
+// must find a run by trace_id directly rather than the caller paging
+// through ListRuns, and it must stay workspace-scoped like every other
+// journal read.
+func TestGetRunByID(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO workspaces (id) VALUES ('ws_other')`); err != nil {
+		t.Fatal(err)
+	}
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 1})
+	defer w.Close()
+
+	now := time.Now().UTC()
+	emitRun(t, w, "ws_test", "agent_a", "run_1", "COMPLETED", "USER", now.Add(-10*time.Minute))
+	emitRun(t, w, "ws_other", "agent_a", "run_1_other_tenant", "COMPLETED", "USER", now.Add(-9*time.Minute))
+	_ = w.Flush(context.Background())
+	time.Sleep(50 * time.Millisecond)
+
+	run, err := GetRunByID(context.Background(), db, "ws_test", "run_1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if run == nil {
+		t.Fatal("expected a run, got nil")
+	}
+	if run.ID != "run_1" || run.Status != RunStatusCompleted {
+		t.Errorf("got %+v", run)
+	}
+
+	// Unknown trace_id → nil, not an error.
+	missing, err := GetRunByID(context.Background(), db, "ws_test", "run_does_not_exist")
+	if err != nil {
+		t.Fatalf("get missing: %v", err)
+	}
+	if missing != nil {
+		t.Errorf("expected nil for missing run, got %+v", missing)
+	}
+
+	// Cross-tenant lookup must not leak — same trace_id shape, different
+	// workspace than the caller's.
+	leaked, err := GetRunByID(context.Background(), db, "ws_test", "run_1_other_tenant")
+	if err != nil {
+		t.Fatalf("get cross-tenant: %v", err)
+	}
+	if leaked != nil {
+		t.Errorf("cross-tenant leak: %+v", leaked)
+	}
+}
+
 func runFirstID(runs []RunAggregated) string {
 	if len(runs) == 0 {
 		return ""

@@ -180,6 +180,13 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		if h.gateMissingResources(w, r, workspaceID, p.AuthorCrewID, "", ds, tools) {
 			return
 		}
+		// Credential gate (run-time enforcement of credentials_required):
+		// block when the routine declares a {{ secrets.* }} credential type
+		// the author crew's vault doesn't hold, so a live run fails fast with
+		// a clear 422 instead of an opaque auth error deep in a runner.
+		if h.gateMissingCredentials(w, r, workspaceID, p.AuthorCrewID, "", dsl) {
+			return
+		}
 	}
 
 	// Deferred dispatch: a delay or a debounce key parks the trigger in
@@ -300,6 +307,10 @@ func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
 		}
 		ds, tools := declaredResources(dsl)
 		if h.gateMissingResources(w, r, body.WorkspaceID, p.AuthorCrewID, "", ds, tools) {
+			return
+		}
+		// Credential gate — run-time enforcement of credentials_required.
+		if h.gateMissingCredentials(w, r, body.WorkspaceID, p.AuthorCrewID, "", dsl) {
 			return
 		}
 	}
@@ -474,6 +485,10 @@ func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 	}
 	ds, tools := declaredResources(dsl)
 	if h.gateMissingResources(w, r, workspaceID, body.AuthorCrewID, "", ds, tools) {
+		return
+	}
+	// Credential gate — run-time enforcement of credentials_required.
+	if h.gateMissingCredentials(w, r, workspaceID, body.AuthorCrewID, "", dsl) {
 		return
 	}
 

@@ -66,11 +66,19 @@ func TestReplayRun_PinnedVersion_ExecutesPinned_NotHead(t *testing.T) {
 	if rec.PipelineVersion == nil || *rec.PipelineVersion != 1 {
 		t.Errorf("replayed run pipeline_version: got %v, want 1", rec.PipelineVersion)
 	}
-	if !strings.Contains(rec.StepOutputsJSON, "v1step") {
-		t.Errorf("step outputs %q missing v1step — pinned version did not execute", rec.StepOutputsJSON)
+	// Step outputs live in the normalized pipeline_run_step_outputs table
+	// since #1411 — RunRecord.StepOutputsJSON is no longer written on the
+	// hot path, so read via GetStepOutputs (same as the sibling
+	// pipeline_trigger_pinning_test.go).
+	outputs, err := runStore.GetStepOutputs(t.Context(), rec.ID)
+	if err != nil {
+		t.Fatalf("get step outputs: %v", err)
 	}
-	if strings.Contains(rec.StepOutputsJSON, "v2step") {
-		t.Errorf("step outputs %q contain v2step — HEAD executed despite the pin", rec.StepOutputsJSON)
+	if _, ok := outputs["v1step"]; !ok {
+		t.Errorf("step outputs %#v missing v1step — pinned version did not execute", outputs)
+	}
+	if _, ok := outputs["v2step"]; ok {
+		t.Errorf("step outputs %#v contain v2step — HEAD executed despite the pin", outputs)
 	}
 
 	// The read-only guarantee: head must be untouched by the backtest
@@ -168,7 +176,13 @@ func TestReplayRun_NoPinnedVersion_ExecutesHead_Unchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load replayed run row: %v", err)
 	}
-	if !strings.Contains(rec.StepOutputsJSON, "v2step") {
-		t.Errorf("step outputs %q missing v2step — expected HEAD (v2) to execute when unpinned", rec.StepOutputsJSON)
+	// Step outputs read from the normalized table (#1411), not the
+	// no-longer-written StepOutputsJSON column.
+	outputs, err := runStore.GetStepOutputs(t.Context(), rec.ID)
+	if err != nil {
+		t.Fatalf("get step outputs: %v", err)
+	}
+	if _, ok := outputs["v2step"]; !ok {
+		t.Errorf("step outputs %#v missing v2step — expected HEAD (v2) to execute when unpinned", outputs)
 	}
 }

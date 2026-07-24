@@ -145,7 +145,7 @@ The main win is a real multiline `prompt` via YAML's literal block scalar (`|`) 
 | `estimated_cost_usd` | number | Author estimate; UI surfaces overrun warnings. |
 | `egress_targets` | array of string | Declared outbound hosts. Enforced at run time for every `http` step and `http` hook, including redirect hops; empty/omitted = unrestricted at the routine layer (the crew network policy and SSRF guards still apply). See [`http`](#http). |
 | `integrations_required` | array of string | Declared third-party integrations (Composio connector slugs like `"github"`, `"slack"`). **Declared AND enforced at run time** — see [Required integrations](#required-integrations) below. Slugs are lowercased/trimmed. |
-| `credentials_required` | array of CredReq | Declared credential needs (`type` + `scope`). Declared-only today (not yet enforced at run time). |
+| `credentials_required` | array of CredReq | Declared credential needs (`type` + `scope`). **Declared AND enforced at run time** — a live run is refused with `422` + `missing_credentials` when the author crew's vault holds no ACTIVE credential of a declared type. See [Required credentials](#required-credentials) below. |
 | `resources` | object | Agent-declared capability manifest — `datastores[]` and `tools[]` the routine touches that **can't** be inferred from the step graph. **Declared AND enforced at run time** against the crew's container resources — see [Required resources](#required-resources) below. See [Capability manifest](#capability-manifest) below for the shape. |
 | `max_cost_usd` | number | Runtime cost cap; run aborts if exceeded between steps. |
 | `concurrency_key` | string | Template that gates how many runs can be in flight at once for the same workspace + rendered key. Typical pattern `"{{ inputs.account_id }}"` to serialise per-tenant runs. Empty (default) = no gate. See [Concurrency + idempotency](/guides/routines-cookbook#recipe-5-idempotent-routine-with-concurrency-key) recipe and the fail-fast note in [Troubleshooting](#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value). |
@@ -178,8 +178,31 @@ Anywhere a string is interpolated (prompt, http URL/body/headers, wait until, co
 - `steps.Y.output` — full text output of an earlier step
 - `steps.Y.output.path` — JSON path into a step's output (when output parses as JSON)
 - `env.AUTHOR_CREW_NAME` / etc. — read-only allowlist of execution context
+- `secrets.<type>` — a workspace-vault credential, resolved at run time **by type** (see [Secrets](#secrets-secrets-type) below)
+- `routine.state.<key>` — durable cross-run state carried forward from a **previous** run (see [Cross-run state](#cross-run-state-routine-state-key) below)
 
 Save-time validator walks **every** template-bearing field (prompt, nested inputs, http url/body/headers, wait until, event_filter, approval_prompt, code body, code env values, transform input, transform expression, if condition) and rejects placeholders that reference unknown inputs or unseen-yet steps.
+
+### Secrets (`{{ secrets.<type> }}`)
+
+A `code` / `script` / `notify` / `http` step that needs an API key, token, or password references it as `{{ secrets.<type> }}` — **never** by pasting the value into an `env:` map (which is versioned, exported, and diffed in **plaintext**). At run time the placeholder resolves to the decrypted value of a matching **ACTIVE** credential in the workspace vault, resolved **by type** exactly like an `http` step's [`credential_ref`](#http): workspace-scoped, author-crew isolated, newest-active-wins on rotation.
+
+```json
+{
+  "id": "charge",
+  "type": "script",
+  "script": {
+    "path": "scripts/charge.py",
+    "env": { "STRIPE_KEY": "{{ secrets.stripe }}" }
+  }
+}
+```
+
+The value **never** lands in the versioned DSL (the definition carries only the `{{ secrets.stripe }}` template), and it is **scrubbed** from the step's downstream output, the run journal, script-audit command lines, notification bodies, and error messages — so an echoed or reflected secret shows up as `[REDACTED:secret]`, not the real value. A type with no ACTIVE credential renders **empty** (like a missing input), so a public/optional call keeps working; to make an unresolvable credential a hard failure, declare it in [`credentials_required`](#required-credentials).
+
+<Warning>
+Because secrets are scrubbed from step outputs, you **cannot** thread a secret between steps as `{{ steps.X.output }}` — each step re-resolves `{{ secrets.<type> }}` fresh. This is deliberate: a plaintext secret must never flow through the step-outputs record.
+</Warning>
 
 <Warning>
 Templates are **regex substitution, not expression evaluation**. There is no arithmetic, no function calls, no inline conditionals. If you need logic, add another step.
@@ -187,6 +210,29 @@ Templates are **regex substitution, not expression evaluation**. There is no ari
 
 <Info>
 Save-time validation walks **every** template-bearing field and rejects placeholders that reference unknown inputs or unseen-yet steps — so a typo'd `{{ inputs.tyop }}` fails at save, not at 3am in production.
+</Info>
+
+### Cross-run state (`{{ routine.state.<key> }}`)
+
+`run.metadata.*` is per-run scratch — gone when the run ends. **Cross-run state** carries a value *forward* to the next run of the same routine, which is what every incremental / polling job needs: a **watermark** ("last processed id / timestamp") so each run picks up where the last left off.
+
+- **Read** with `{{ routine.state.<key> }}`. A key that was never written renders empty (like a missing input). The value you read is the snapshot **as of run start** — it reflects what a *prior* run wrote, not a write earlier in this same run.
+- **Write** with a step's `state_write` binding — a map of `key → template`, rendered **after** the step completes (so it can reference the step's own output) and persisted for the next run:
+
+```json
+{
+  "id": "sync",
+  "type": "agent_run",
+  "agent_slug": "importer",
+  "prompt": "Import records created after id {{ routine.state.last_id }}. Return the highest id you imported.",
+  "state_write": { "last_id": "{{ steps.sync.output }}" }
+}
+```
+
+State is **isolated per schedule**: two cron schedules of the same routine keep independent watermarks (keyed on `(routine, schedule)`); manual / webhook runs share a single default bucket per routine. It is **durable** — a value written before a restart is read after it — because it lives in the database, not memory. A [wake gate](#wake-gates) probe reads the **same** bucket its main scheduled routine writes, so an agentless probe can gate on the last watermark.
+
+<Info>
+State is a small key/value store for coordination values (cursors, timestamps, counts), not a data warehouse. Writes are **best-effort** — a failed state write logs a warning and never fails the step. Values are opaque strings; JSON-encode a structure yourself if you need one.
 </Info>
 
 ## Required integrations
@@ -239,9 +285,48 @@ under the workspace **default connector** (every agent inherits all connected
 apps), the gate treats integrations as available without enumerating them; and
 resolution reflects what's **wired**, not live connection health (a revoked
 account still reads as available until its binding is removed).
-`credentials_required` remains **declared-only** for now — it is not yet
-enforced at run time the way `integrations_required` is.
 </Note>
+
+## Required credentials
+
+A routine DECLARES the vault credentials its `{{ secrets.<type> }}` refs (and
+`http` `credential_ref`s) need with the top-level `credentials_required` array
+of `{ "type": "...", "scope": "..." }`. Like `integrations_required`, the type
+is matched against the workspace vault **by purpose, not by ID**, so a
+marketplace "stripe" template runs against any workspace holding a `stripe`
+credential.
+
+```json
+{
+  "name": "charge-and-notify",
+  "credentials_required": [{ "type": "stripe" }],
+  "steps": [ ... ]
+}
+```
+
+Semantics (mirroring [Required integrations](#required-integrations)):
+
+- **Declared is always allowed.** Saving/importing a routine that names a
+  credential the vault lacks is fine — you can connect it later. Save-time
+  validation only checks the list is well-formed (non-empty `type`, deduped,
+  within a count cap).
+- **Enforced at run time.** Before a live `run` starts, Crewship probes the
+  author crew's workspace vault for an **ACTIVE** credential of each declared
+  type. If any are missing the run is **blocked** with an RFC 7807 Problem
+  Details response, HTTP **422**, carrying a machine-readable
+  `missing_credentials: string[]` member and a human `detail`. No tokens spent,
+  no half-run with an opaque auth failure deep in a step.
+- **No-op fast path.** An empty / absent `credentials_required` does zero
+  probe work.
+- **Fail-open on infra, fail-closed on absence.** A probe *error* (DB hiccup)
+  allows the run with a warning; a *confirmed-missing* credential blocks it.
+- **Enforced wherever `integrations_required` is.** Live `run`, `run_batch`,
+  internal runs, and the `test_run` save-preview gate all check it — the same
+  precondition boundary that already probes for required integrations and
+  resources. Only the executor's pure `dry_run` mode — which invokes no steps
+  and resolves no secrets — is exempt. Persisting a well-formed draft is still
+  fine (see above); it's *running* and the *test-run preview* that block until
+  the credential is connected.
 
 ## Capability manifest
 
@@ -407,7 +492,7 @@ has no services and no notable tools.
 | `backoff.max_ms` | Delay ceiling. Default `60000`. |
 | `backoff.factor` | Multiplier per attempt. Default `2.0`; `1.0` = constant. |
 | `backoff.jitter` | Full jitter — actual sleep is uniform in `[0, delay)`. Default `true`. Keeps a fleet of runs that all trip the same upstream 429 from retrying in lockstep. |
-| `retry_on` | A **CEL** predicate deciding whether a given error is retryable. Empty = retry any error. |
+| `retry_on` | A **CEL** predicate deciding whether a given error is retryable. Empty = retry any *execution* error, but **not** a validation/rubric failure that already exhausted its tier chain (that outcome is `on_fail`'s job, not the retry loop's — retrying it re-runs the whole worker+grader escalation and multiplies spend). To retry that class anyway, opt in explicitly, e.g. `'error.contains("exhausting tiers")'`. |
 
 `retry_on` sees three variables: `error` (the message string), `transient` (a bool from the built-in 429/5xx/timeout/net-blip classifier), and `status` (the HTTP status an `http` step failed with — parsed from its `HTTP <code>` error, `0` for any other error, so a stray number elsewhere in a message is never misread as a status). It must evaluate to `bool`. Examples: `'transient'` (shorthand), `'status == 429'`, `'status >= 500'`, `'error.contains("429")'`, `'error.matches("(?i)timeout|5\\d\\d")'`. A predicate that doesn't compile — or doesn't return a bool — is rejected at save time; if a stored routine somehow carries a broken one, the runtime **fails safe and does not retry** rather than retrying on every error.
 
@@ -517,7 +602,7 @@ credentials (public endpoints keep working). Injection schemes: `bearer`
 }
 ```
 
-Three kinds: `approval` (HITL token), `datetime` (sleep until ISO timestamp), `event` (filter on journal events). The DB-backed waitpoint store survives process restart for the `approval` kind: at boot, the run that was parked on the wait step is resumed and re-attaches to the original pending token, so the approval stays answerable (see [Durability and restart recovery](#durability-and-restart-recovery)).
+Three kinds: `approval` (HITL token), `datetime` (sleep until ISO timestamp), `event` (external signal via `POST /pipeline-runs/{id}/signal`). Both `approval` and `event` survive a process restart: a top-level run parks (`status: WAITING`) with durable state — `pipeline_waitpoints` for approval, `pipeline_signal_waits` for event (migration v154, #1409) — and at boot the parked run is resumed from that state. For `event` specifically, a signal delivered while the process was down (or a hair before the step even reached the wait) is not lost: the signal endpoint records the delivery durably before attempting any in-process wake, and the resumed step reads it straight back out (see [Durability and restart recovery](#durability-and-restart-recovery)).
 
 **Async, non-blocking.** Hitting a `kind: approval` gate does **not** hold a goroutine or fail the run. A foreground `crewship routine run` returns promptly with `status: WAITING` (exit 0) and a waitpoint token, and **releases its execution slot** while it waits. Approving **or** rejecting resumes the run from the gate (already-completed steps are restored/skipped); a rejection resolves the run to `FAILED` cleanly rather than stranding it. Parked approvals whose `timeout_sec` elapsed are reconciled at the next boot scan.
 
@@ -742,9 +827,43 @@ Output is a JSON object — pipe it through a `transform` step to pull a single 
 
 Strictly workspace-scoped: the query always runs against the invoking run's own `workspace_id` — a routine can never read another tenant's run history no matter what it's authored to ask for.
 
+### `foreach` — fan out over an array
+
+```json
+{
+  "id": "process_each",
+  "type": "foreach",
+  "foreach": {
+    "items": "{{ inputs.urls }}",
+    "as": "url",
+    "parallelism": 8,
+    "steps": [
+      { "id": "fetch",  "type": "http",      "http": { "method": "GET", "url": "{{ inputs.url }}" } },
+      { "id": "digest", "type": "agent_run", "agent_slug": "summarizer", "prompt": "Summarize: {{ steps.fetch.output }}" }
+    ]
+  }
+}
+```
+
+Runs the **body** once per element of a JSON array, collecting each item's result into a JSON array as the step's output (`{{ steps.process_each.output }}` → `["…","…"]`, in input order).
+
+| Field | Notes |
+| --- | --- |
+| `items` | Template that must render to a **JSON array** — usually `{{ inputs.<name> }}` or `{{ steps.<id>.output }}`. An empty array is a valid no-op (output `[]`). |
+| `as` | Name the current element is bound to inside the body, read as `{{ inputs.<as> }}` (or `{{ inputs.<as>.field }}` for object elements). Default `item`. |
+| `parallelism` | Max items in flight at once. `0` (default) uses the platform wave concurrency; `1` forces sequential; higher values are clamped to the wave cap. |
+| `steps` | The per-item body. Steps run **sequentially within an item** and **in parallel across items** (bounded). Each body step sees the parent's inputs, the loop variable, every upstream (pre-`foreach`) step output, and its own earlier body steps. |
+
+Within an item the body runs like a mini-pipeline: per-step `retry:`, `validation`, `outcomes`, and tier escalation all apply. **Cost is summed across every item** and attributed to the `foreach` step, so `max_cost_usd` still bounds the whole fan-out. The first item that fails cancels the rest and fails the step (fail-fast). `wait`, `call_pipeline`, and a nested `foreach` are **not allowed** inside the body — the fan-out is a bounded, self-contained unit.
+
 ### Conditional `if`
 
-Any step can carry `"if": "{{ inputs.run_summary }}"`. The placeholder is rendered as a plain string — empty / `false` / `0` / `no` / `off` (case-insensitive) → step skipped and marked `<skipped>` in StepOutputs; anything else counts as truthy. Templates are plain substitution, not expression evaluation, so put the boolean upstream (e.g. set `inputs.run_summary` from the caller) rather than writing `==` / `!=` inside the `if` value.
+Any step can carry an `if:` gate. Two forms, chosen automatically:
+
+- **CEL expression** (no `{{ … }}`): evaluated against the typed variables `inputs`, `steps`, and `run`. Real comparisons and logic work — `"if": "inputs.dry_run == false"`, `"if": "steps.classify == \"spam\""`, `"if": "inputs.count > 0 && run.is_replay == false"`. A boolean result gates directly; a number/string result falls through to the truthy rule below.
+- **Template** (`"if": "{{ inputs.run_summary }}"`): rendered to a plain string, then truthy-checked — empty / `false` / `0` / `no` / `off` (case-insensitive) → step **skipped** and marked `<skipped>` in StepOutputs; anything else is truthy. A bare literal like `"yes"` / `"false"` follows the same truthy rule.
+
+The CEL variables are: `inputs.*` (the run's inputs, numbers stay numbers for arithmetic), `steps.<id>` (that step's output **string**), and `run.metadata.*` / `run.is_replay` / `run.replay_of`. A skipped step never trips `on_fail` — "didn't run" is structurally different from "ran and failed".
 
 ### DAG with `needs[]`
 
@@ -967,7 +1086,7 @@ crewship routine schedules create --slug summarize-text \
     --inputs '{"text":"…default"}'
 ```
 
-5-field cron expression. Scheduler runs in-process and ticks every 30s, so minimum resolution is 1 minute.
+5-field cron expression. Scheduler runs in-process and ticks every 30s, so minimum resolution is 1 minute. Multiple schedules due in the same tick fire **concurrently** (a bounded pool of up to 12 at once) — a slow routine no longer stalls every other co-due schedule for the rest of that tick.
 
 <Warning>
 Single-instance only — running multiple replicas would double-fire (no leader election yet).
@@ -1077,6 +1196,37 @@ Semantics worth knowing:
   Note an empty or ambiguous output on a `COMPLETED` probe run is already treated as falsy → `SKIPPED` (the main run never fires) regardless of policy — `--fail-closed` only changes the *failure* branch.
 - A skipped tick advances `next_run_at` but leaves `last_run_*` untouched — run telemetry stays strictly about main runs. Wake telemetry lives in `wake_check_count` / `wake_fire_count` / `last_wake_at` / `last_wake_status`, and `routine schedules list` shows it as `<probe> woke/checked` in the WAKE column.
 - Probe executions are regular runs with `triggered_via: wake_check`, so they're auditable in run history and filterable out of dashboards.
+
+### Circuit breaker
+
+A schedule whose target routine is broken (deleted agent, expired credential, a bug in the routine) fires on every tick, fails every time, and each failed run raises a MANAGER inbox alert — unbounded inbox spam and burned agent cost with no backstop. The **circuit breaker** auto-disables a schedule after **5 consecutive failed fires** (the default; override per schedule with `--max-failures`), so a broken cron goes quiet instead of failing forever.
+
+```bash
+# Trip after 3 straight failures instead of the default 5:
+crewship routine schedules create --slug nightly-report \
+    --cron "0 6 * * *" --max-failures 3
+
+# Change the threshold on an existing schedule:
+crewship routine schedules update <schedule_id> --max-failures 10
+```
+
+When the breaker trips:
+
+- The schedule is disabled (`enabled: false`) with `disabled_reason: circuit_breaker` — distinct from an operator-initiated disable (`disabled_reason` stays empty), so `routine schedules list` and `routine doctor` can tell you *why* a schedule went dark.
+- A journal event (`pipeline.schedule.circuit_breaker_tripped`) and exactly **one** actionable MANAGER inbox alert fire for the trip itself — separate from the per-run `failed_run` alerts, which still fire once per failed run.
+- A **successful** fire resets the consecutive-failure counter to 0, so an intermittently-flaky routine that eventually succeeds never trips.
+
+`routine schedules list` surfaces the live counter in the `FAILS` column (`2/5`) and the tripped state inline in `ENABLED` (`no (circuit_breaker)`); `routine doctor <slug>` reports the same state as a `schedule_circuit_breaker` check (`OK` / `WARN` while approaching the threshold / `FAIL` once tripped).
+
+Re-enabling clears the slate — the counter resets to 0 and `disabled_reason` clears:
+
+```bash
+crewship routine schedules enable <schedule_id>
+```
+
+### Missed occurrences on recovery
+
+`next_run_at` is always computed from `time.Now()` at fire time, so downtime spanning several cron occurrences (server down for 3 hours on an hourly schedule) yields **at most one fire** on recovery — the routine still only runs once, it does not backfill the missed occurrences. Before #1409 that gap was invisible; now the scheduler emits **one** `pipeline.schedule.missed_occurrences` journal event per schedule when it detects the gap, reporting how many occurrences were skipped and the time window: "schedule X skipped 11 occurrence(s) between `<window_start>` and `<window_end>`". This is observability only — pair it with the [circuit breaker](#circuit-breaker) and journal search if you need to know a schedule went dark for a while.
 
 ### Webhooks
 
@@ -1312,6 +1462,7 @@ At boot, the server scans for runs left in `queued`/`running` from the previous 
 - **Completed steps are restored, not re-executed.** Their outputs feed downstream `{{ steps.X.output }}` templates exactly as if the process had never died.
 - **The in-flight step re-executes from scratch** — at-least-once semantics. For an `agent_run` step this means the agent call is re-issued (and re-billed); `http`/`code`/`script` steps with external side effects may fire twice. Design steps to be idempotent where that matters.
 - **Runs parked on a `wait` approval step re-attach to the original waitpoint token.** No duplicate approval card is created; the pending inbox item stays answerable across the restart, and approving it resumes the run.
+- **Runs parked on a `wait: event` step re-attach the same way** (#1409): the wait durably ARMs a `pipeline_signal_waits` row before parking, so a signal delivered via `POST .../signal` at any point — including while the process was down — lands in that row rather than an in-memory-only channel. Resume checks for an already-delivered payload first; if none has arrived yet it re-registers and waits again.
 - **DAG runs (`needs:`) resume at wave granularity** — the parallel scheduler flushes state when each wave completes, so a kill mid-wave re-executes that wave's unfinished steps.
 - **`call_pipeline` boundaries are NOT persisted.** A kill while a nested pipeline is executing re-runs the **entire nested pipeline** on resume — the parent's `call_pipeline` step is the unit of recovery, and the nested run's own per-step progress is not checkpointed. Keep nested pipelines short or idempotent if a mid-flight kill matters to you.
 - The accumulated cost is restored too, so `max_cost_usd` keeps counting across the restart instead of resetting. **Caveat:** cost is flushed at step boundaries, so whatever the killed in-flight step had already spent before the kill is **not** in the restored total — the cap under-counts the true spend by up to one step's worth (and the re-executed step is billed again on top).
@@ -1659,7 +1810,7 @@ The `pipeline` alias is preserved for back-compat on the legacy subcommands (`pi
 
 ## Backend reference
 
-- Migrations v78 (pipelines + execution_tiers_json), v79 (versions + waitpoints), v80 (schedules), v81 (run idempotency), v82 (webhooks), v115 (schedule wake gates)
+- Migrations v78 (pipelines + execution_tiers_json), v79 (versions + waitpoints), v80 (schedules), v81 (run idempotency), v82 (webhooks), v115 (schedule wake gates), v153 (schedule circuit breaker), v154 (signal waits)
 - Source: `internal/pipeline/` (~10 700 LOC, 36 files)
 - API: `internal/api/pipelines.go`, `pipeline_runs.go`, `pipeline_schedules.go`, `pipeline_webhooks.go`
 - Sidecar: `internal/sidecar/pipelines.go` (port 9119)
@@ -1683,6 +1834,6 @@ These are known gaps in the current MVP — none block production use, but they 
 
 - **Resume is at-least-once, step-granular** — restart recovery re-enters runs from the last persisted step boundary (see [Durability and restart recovery](#durability-and-restart-recovery)). The step that was in flight at the kill re-executes from scratch; there is no sub-step checkpointing, nested `call_pipeline` runs re-execute in full, and DAG runs recover at wave granularity. Runs whose definition changed since the run started (content-hash mismatch) fall back to `interrupted`. `max_cost_usd` under-counts true spend after a crash — see [Production notes](#production-notes).
 - **Single-instance scheduler** — running multiple replicas would double-fire schedules.
-- **`credentials_required` is declared-only** — unlike `integrations_required` and `resources`, it is not yet enforced at run time (see [Required integrations](#required-integrations)).
+- **`credentials_required` scope field is documentary** — the `type` is enforced at run time (a live run is refused with `422` + `missing_credentials` when the vault lacks an ACTIVE credential of that type — see [Required credentials](#required-credentials)), but the optional per-entry `scope` is not yet used for finer-grained matching.
 - **No cross-adapter tier swap yet** — same-provider model swap (Haiku→Opus) works; Claude→Gemini swap requires a shorthand→constant mapping not yet wired.
 - **NL→cron covers a fixed phrase set** — `routine schedules create --when` (see [Cron schedules](#cron-schedules)) handles the common onboarding phrasings (`every weekday at 9`, `every day at 9am`, `every monday at 14:00`, `every hour`, `every N minutes/hours`) via a small hand-rolled parser, not a general NLP model; anything outside that set still needs a raw `--cron` expression.

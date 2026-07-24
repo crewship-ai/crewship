@@ -70,12 +70,11 @@ type pagination struct {
 // Get returns a single run by id.
 // GET /api/v1/runs/{id}
 //
-// Reads via journal.ListRuns with a workspace + agent filter scoped to a
-// single trace_id; reuses the same enrichment as List so the response
-// shape is identical to a List row. 404 when no run with that id exists
-// in the caller's workspace — cross-tenant lookups are intentionally
-// masked as 404 to avoid leaking the run's existence in another
-// workspace.
+// Reads via journal.GetRunByID — an indexed trace_id probe (idx_journal_ws_trace_run,
+// migration v153) — rather than paging journal.ListRuns. 404 when no run with
+// that id exists in the caller's workspace — cross-tenant lookups are
+// intentionally masked as 404 to avoid leaking the run's existence in
+// another workspace.
 func (h *RunHandler) Get(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
@@ -88,55 +87,10 @@ func (h *RunHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// journal.ListRuns doesn't accept a trace_id filter directly, so we
-	// pull a small page and scan in-memory. The expected hit is page 1
-	// (most lookups are recent), which the FE also relies on for its
-	// stats badge.  This is bounded by limit=100 — a future
-	// journal.GetRunByID can replace this when the surface grows.
-	aggregated, _, err := journal.ListRuns(r.Context(), h.db, journal.RunsQuery{
-		WorkspaceID: workspaceID,
-		Limit:       100,
-	})
+	found, err := journal.GetRunByID(r.Context(), h.db, workspaceID, id)
 	if err != nil {
-		replyInternalError(w, h.logger, "get run: list", err)
+		replyInternalError(w, h.logger, "get run", err)
 		return
-	}
-	var found *journal.RunAggregated
-	for i := range aggregated {
-		if aggregated[i].ID == id {
-			found = &aggregated[i]
-			break
-		}
-	}
-	if found == nil {
-		// Fallback: scan deeper pages up to a hard cap so older runs are
-		// still resolvable by id. 1k entries ≈ 10 page sweeps; the cost is
-		// bounded and the typical lookup is page 1.
-		//
-		// A query failure on a deeper page is a 500, NOT a 404 — silently
-		// breaking out of the loop and returning "run not found" would
-		// misreport a transient SQL error as the run not existing.
-		for offset := 100; offset < 1000 && found == nil; offset += 100 {
-			page, _, err := journal.ListRuns(r.Context(), h.db, journal.RunsQuery{
-				WorkspaceID: workspaceID,
-				Limit:       100,
-				Offset:      offset,
-			})
-			if err != nil {
-				h.logger.Error("get run: deep page", "error", err, "offset", offset)
-				replyError(w, http.StatusInternalServerError, "Internal server error")
-				return
-			}
-			if len(page) == 0 {
-				break
-			}
-			for i := range page {
-				if page[i].ID == id {
-					found = &page[i]
-					break
-				}
-			}
-		}
 	}
 	if found == nil {
 		replyError(w, http.StatusNotFound, "run not found")

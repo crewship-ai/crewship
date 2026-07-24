@@ -55,11 +55,20 @@ func (e *EgressBlockedError) Error() string {
 // Returns (output, costUSD=0, durationMs, err). HTTP steps don't
 // burn LLM tokens, so cost is always 0 — pipeline cost reporting
 // stays accurate.
-func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender RenderContext, in RunInput) (string, float64, int64, error) {
+func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender RenderContext, in RunInput) (out string, cost float64, dur int64, err error) {
 	stepStart := time.Now()
 	if step.HTTP == nil {
 		return "", 0, 0, fmt.Errorf("http step missing body")
 	}
+	// {{ secrets.<type> }} in the URL / body / header values resolves the
+	// SAME way credential_ref does (workspace vault, ACTIVE-only), unifying
+	// the two paths. The deferred scrub keeps a resolved value from
+	// surfacing in the response body (step output) or an error; a scrubbed
+	// EgressBlockedError keeps its type unless a secret was actually present
+	// (see secretScrub.scrubErr), so the egress-rule assertions still hold.
+	var secrets *secretScrub
+	parentRender, secrets = e.resolveStepSecrets(ctx, step, parentRender, in)
+	defer func() { out, err = secrets.scrub(out), secrets.scrubErr(err) }()
 	// Policy scope for the egress gate + credential resolver. WorkspaceID
 	// and AuthorCrewID come off RunInput as before; WebhookTriggered +
 	// RoutineDeclaresEgress feed the SSRF/webhook hardening in

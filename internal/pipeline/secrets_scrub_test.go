@@ -58,16 +58,19 @@ func TestExecutor_StepOutput_ScrubbedBeforePersistAndBroadcast(t *testing.T) {
 		t.Errorf("in-memory StepOutputs must keep the raw value for template chaining, got %q", res.StepOutputs["s1"])
 	}
 
-	// Persisted projection: scrubbed.
-	rec, err := runStore.Get(ctx, res.RunID)
+	// Persisted projection: scrubbed. Step outputs live in the normalized
+	// pipeline_run_step_outputs table since #1411 (RunRecord.StepOutputsJSON
+	// is no longer written on the hot path), so read the persisted copy via
+	// GetStepOutputs.
+	persisted, err := runStore.GetStepOutputs(ctx, res.RunID)
 	if err != nil {
-		t.Fatalf("run row: %v", err)
+		t.Fatalf("get step outputs: %v", err)
 	}
-	if strings.Contains(rec.StepOutputsJSON, secret) {
-		t.Errorf("persisted step_outputs_json leaked the secret: %q", rec.StepOutputsJSON)
+	if strings.Contains(persisted["s1"], secret) {
+		t.Errorf("persisted step output leaked the secret: %q", persisted["s1"])
 	}
-	if !strings.Contains(rec.StepOutputsJSON, "[REDACTED") {
-		t.Errorf("persisted step_outputs_json should carry a [REDACTED...] marker, got %q", rec.StepOutputsJSON)
+	if !strings.Contains(persisted["s1"], "[REDACTED") {
+		t.Errorf("persisted step output should carry a [REDACTED...] marker, got %q", persisted["s1"])
 	}
 
 	// Broadcast/journal event: scrubbed.

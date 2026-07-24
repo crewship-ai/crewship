@@ -275,6 +275,20 @@ func (e *Executor) runDAG(
 	sem := make(chan struct{}, dagWaveConcurrency)
 
 	for {
+		// Between-wave cancel pre-emption (#1424). Without this, a run
+		// cancelled AFTER a wave completes but BEFORE the next is scheduled
+		// recomputes the ready set and spawns the next wave's goroutines,
+		// which all short-circuit on dagCtx.Err() WITHOUT recording an
+		// output or setting firstErr — so `completed`/`ready` never change
+		// and the loop respawns forever at full CPU. Run() then never
+		// returns and the deferred release() never frees the concurrency
+		// slot. Mirror the linear loop's between-step cancel exit: stamp a
+		// terminal FAILED result (Run() re-labels to CANCELLED when the
+		// registry confirms a user cancel) and return.
+		if cerr := ctx.Err(); cerr != nil {
+			return e.failRun(ctx, in, emit, result, "", cerr.Error(), false, startedAt), nil
+		}
+
 		// Compute the ready set: completed[needs[*]] && !completed[id]
 		ready := make([]*Step, 0, len(dsl.Steps))
 		resMu.Lock()
@@ -321,7 +335,7 @@ func (e *Executor) runDAG(
 				if dagCtx.Err() != nil {
 					return
 				}
-				e.executeOneStep(dagCtx, step, stepIndex[step.ID], in, runID, pipelineID, emit, inputsForCtx, renderEnv, runMeta, depth, &resMu, result, dsl, &firstErr, &suspended, dagCancel)
+				e.executeOneStep(dagCtx, step, stepIndex[step.ID], in, runID, pipelineID, emit, inputsForCtx, renderEnv, runMeta, depth, &resMu, result, dsl, &firstErr, &suspended, dagCancel, startedAt)
 			}()
 		}
 		wg.Wait()
@@ -353,7 +367,7 @@ func (e *Executor) runDAG(
 		// kill mid-DAG loses at most the in-flight wave. DAG resume
 		// granularity is therefore per-wave, not per-step — the
 		// parallel scheduler has no single current_step_id to stamp.
-		e.persistStepOutputs(ctx, in, depth, runID, outputsSnap, costSnap, startedAt)
+		e.persistWaveOutputs(ctx, in, depth, runID, outputsSnap, costSnap, startedAt)
 
 		// Suspend takes precedence over a failure: a wait step parked on an
 		// approval (MarkWaiting already stamped status=waiting + current_step
@@ -457,6 +471,7 @@ func (e *Executor) executeOneStep(
 	firstErr *atomic.Value,
 	suspended *atomic.Value,
 	dagCancel context.CancelFunc,
+	startedAt time.Time,
 ) {
 	// Render against a fresh snapshot of step outputs so peer-wave
 	// outputs are visible to this step's templates.
@@ -466,12 +481,12 @@ func (e *Executor) executeOneStep(
 		outputsSnap[k] = v
 	}
 	resMu.Unlock()
-	ctxRender := buildStepRenderContext(inputsForCtx, outputsSnap, renderEnv, runMeta, dsl.EgressTargets)
+	ctxRender := buildStepRenderContext(inputsForCtx, outputsSnap, renderEnv, runMeta, dsl.EgressTargets, in.stateSnapshot)
 	renderedPrompt := renderAgentPrompt(*step, ctxRender, in.TriggeredVia)
 
 	// Conditional skip — same semantics as the linear path.
 	if step.If != "" {
-		if !evalIfCondition(Render(step.If, ctxRender)) {
+		if !evalStepCondition(step.If, ctxRender) {
 			emit.emitStepSkipped(ctx, *step, step.If)
 			resMu.Lock()
 			result.StepOutputs[step.ID] = "<skipped>"
@@ -523,18 +538,40 @@ func (e *Executor) executeOneStep(
 	result.CostUSD += stepCost
 	costNow := result.CostUSD
 	resMu.Unlock()
-	// #1416 item 5: the journal/broadcast copy is scrubbed; the
-	// in-memory result.StepOutputs entry above stays raw for downstream
-	// template chaining.
+	// Per-step incremental durability flush (#1428, 2.8). DAG persistence was
+	// per-WAVE only, so a hard kill mid-wave lost every already-completed step
+	// in that wave and replayed them all on resume — up to a dozen
+	// non-idempotent POSTs / notifies fired twice. Flushing after each step
+	// lands it durably so resume skips it. #1411 normalized step outputs into
+	// their own table, so this is a single-row upsert of THIS step (its own
+	// goroutine owns `output`/`step.ID`; `costNow` was snapshotted under the
+	// lock) rather than the old whole-map rewrite — per-step granularity
+	// without the O(N²) blob churn. The wave-boundary flush
+	// (persistWaveOutputs) still re-upserts the full set. persistStepOutput
+	// scrubs the persisted copy (#1416 item 5).
+	e.persistStepOutput(ctx, in, depth, runID, step.ID, output, costNow, startedAt)
+	// State_write bindings persist for the NEXT run (#1420). Add this step's
+	// own output to the goroutine-local snapshot so a value template can
+	// reference it, then render+upsert off the shared lock.
+	if len(step.StateWrite) > 0 {
+		outputsSnap[step.ID] = output
+		e.persistStateWrites(ctx, *step, in, buildStepRenderContext(inputsForCtx, outputsSnap, renderEnv, runMeta, dsl.EgressTargets, in.stateSnapshot))
+	}
+	// #1416 item 5: the journal/broadcast copy is scrubbed; the in-memory
+	// result.StepOutputs entry above stays raw for downstream template chaining.
 	emit.emitStepCompleted(ctx, *step, scrubStepOutput(output), stepDur, stepCost)
 
 	// Cost-cap gate (post-step). The check reads from the locked
 	// snapshot above so two parallel completions can't both miss
-	// the cap by tripping the gate against a stale total.
-	if dsl.MaxCostUSD > 0 && costNow > dsl.MaxCostUSD {
+	// the cap by tripping the gate against a stale total. The cap is
+	// the run's EFFECTIVE ceiling (own max_cost_usd tightened by any
+	// ancestor call_pipeline budget, #1427 2.4) — though a DAG never
+	// contains a call_pipeline step so remainingBudget is normally 0
+	// here, reading it keeps the linear and DAG gates identical.
+	if cap := effectiveCostCap(in); cap > 0 && costNow > cap {
 		f := &dagStepFailure{
 			stepID:    step.ID,
-			message:   costCapExceededMessage(costNow, dsl.MaxCostUSD, step.ID),
+			message:   costCapExceededMessage(costNow, cap, step.ID),
 			isCostCap: true,
 		}
 		firstErr.CompareAndSwap(nil, f)

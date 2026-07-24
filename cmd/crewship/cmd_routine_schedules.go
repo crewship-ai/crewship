@@ -46,8 +46,12 @@ type scheduleRow struct {
 	LastWakeStatus        string                 `json:"last_wake_status,omitempty"`
 	CatchupPolicy         string                 `json:"catchup_policy,omitempty"`
 	LastMissedCount       int                    `json:"last_missed_count,omitempty"`
-	CreatedAt             string                 `json:"created_at"`
-	UpdatedAt             string                 `json:"updated_at"`
+	// Circuit breaker (#1405).
+	ConsecutiveFailures    int    `json:"consecutive_failures"`
+	MaxConsecutiveFailures int    `json:"max_consecutive_failures"`
+	DisabledReason         string `json:"disabled_reason,omitempty"`
+	CreatedAt              string `json:"created_at"`
+	UpdatedAt              string `json:"updated_at"`
 }
 
 // routineCell renders the ROUTINE column for trigger lists: the target
@@ -61,6 +65,36 @@ func routineCell(slug string, pinnedVersion *int) string {
 		return slug
 	}
 	return fmt.Sprintf("%s@v%d", slug, *pinnedVersion)
+}
+
+// enabledCell renders the ENABLED column. A circuit-breaker trip
+// (disabled_reason="circuit_breaker") is surfaced inline — "no
+// (circuit_breaker)" — so an operator scanning `schedules list`
+// doesn't have to guess whether a disabled row was a deliberate pause
+// or the breaker auto-disabling a broken routine (#1405).
+func enabledCell(s scheduleRow) string {
+	if s.Enabled {
+		return "yes"
+	}
+	if s.DisabledReason != "" {
+		return fmt.Sprintf("no (%s)", s.DisabledReason)
+	}
+	return "no"
+}
+
+// failsCell renders the FAILS column: consecutive_failures/threshold,
+// or "—" for a schedule that has never failed back-to-back. Lets an
+// operator spot a schedule creeping toward its circuit-breaker trip
+// before it actually disables.
+func failsCell(s scheduleRow) string {
+	if s.ConsecutiveFailures == 0 {
+		return "—"
+	}
+	max := s.MaxConsecutiveFailures
+	if max <= 0 {
+		max = 5
+	}
+	return fmt.Sprintf("%d/%d", s.ConsecutiveFailures, max)
 }
 
 // wakeCell renders the WAKE column: the probe slug plus woke/checked
@@ -175,15 +209,11 @@ var routineSchedulesListCmd = &cobra.Command{
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tNAME\tROUTINE\tCRON\tTZ\tENABLED\tWAKE\tNEXT\tMISSED")
+		fmt.Fprintln(w, "ID\tNAME\tROUTINE\tCRON\tTZ\tENABLED\tFAILS\tWAKE\tNEXT\tMISSED")
 		for _, s := range rows {
 			next := "—"
 			if s.NextRunAt != nil && *s.NextRunAt != "" {
 				next = formatTimestamp(*s.NextRunAt)
-			}
-			enabled := "no"
-			if s.Enabled {
-				enabled = "yes"
 			}
 			// #1422 item 2: surface backlog occurrences dropped/collapsed
 			// on the most recent tick. "—" when current (the overwhelming
@@ -192,8 +222,9 @@ var routineSchedulesListCmd = &cobra.Command{
 			if s.LastMissedCount > 0 {
 				missed = fmt.Sprintf("%d (%s)", s.LastMissedCount, defaultIfBlankCLI(s.CatchupPolicy, "once"))
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				shortID(s.ID), s.Name, routineCell(s.TargetPipelineSlug, s.TargetPipelineVersion), s.CronExpr, s.Timezone, enabled, wakeCell(s), next, missed)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				shortID(s.ID), s.Name, routineCell(s.TargetPipelineSlug, s.TargetPipelineVersion), s.CronExpr, s.Timezone,
+				enabledCell(s), failsCell(s), wakeCell(s), next, missed)
 		}
 		return w.Flush()
 	},
@@ -296,6 +327,13 @@ var routineSchedulesCreateCmd = &cobra.Command{
 				return fmt.Errorf("--pin-version must be a positive routine version number")
 			}
 			body["target_pipeline_version"] = pin
+		}
+		if cmd.Flags().Changed("max-failures") {
+			maxFailures, _ := cmd.Flags().GetInt("max-failures")
+			if maxFailures < 1 {
+				return fmt.Errorf("--max-failures must be a positive integer")
+			}
+			body["max_consecutive_failures"] = maxFailures
 		}
 		if wakeSlug != "" {
 			body["wake_pipeline_slug"] = wakeSlug
@@ -400,6 +438,13 @@ var routineSchedulesUpdateCmd = &cobra.Command{
 			// Explicit null clears the pin (absent field keeps it).
 			body["target_pipeline_version"] = nil
 		}
+		if cmd.Flags().Changed("max-failures") {
+			maxFailures, _ := cmd.Flags().GetInt("max-failures")
+			if maxFailures < 1 {
+				return fmt.Errorf("--max-failures must be a positive integer")
+			}
+			body["max_consecutive_failures"] = maxFailures
+		}
 		noWake, _ := cmd.Flags().GetBool("no-wake")
 		wakeSlug, _ := cmd.Flags().GetString("wake-slug")
 		if noWake && wakeSlug != "" {
@@ -431,7 +476,7 @@ var routineSchedulesUpdateCmd = &cobra.Command{
 			body["wake_fail_closed"] = fc
 		}
 		if len(body) == 0 {
-			return fmt.Errorf("at least one of --cron / --timezone / --name / --enabled / --inputs / --pin-version / --unpin / --wake-slug / --wake-inputs / --no-wake / --fail-closed / --catchup required")
+			return fmt.Errorf("at least one of --cron / --timezone / --name / --enabled / --inputs / --pin-version / --unpin / --max-failures / --wake-slug / --wake-inputs / --no-wake / --fail-closed / --catchup required")
 		}
 		if err := requireAuth(); err != nil {
 			return err
@@ -654,6 +699,7 @@ func init() {
 	routineSchedulesCreateCmd.Flags().Bool("fail-closed", false, "wake gate: HOLD the run when the probe errors/times out/returns non-COMPLETED instead of failing open (requires --wake-slug; default off — a broken probe fires the main run and records ERROR)")
 	routineSchedulesCreateCmd.Flags().Int("pin-version", 0, "pin the schedule to a specific routine version — every fire executes that immutable version instead of head (see 'crewship routine versions <slug>'); if the version is later deleted the fire FAILS with an inbox alert rather than silently running head")
 	routineSchedulesCreateCmd.Flags().String("catchup", "", "missed-run catch-up policy when the schedule falls overdue by more than one occurrence: 'skip' (fire nothing for the backlog), 'once' (default — fire once for the backlog, unchanged behaviour), or 'all' (fire once per missed occurrence, oldest first, capped). Ignored by wake-gated schedules, which always behave like 'once'.")
+	routineSchedulesCreateCmd.Flags().Int("max-failures", 0, "circuit breaker: consecutive FAILED fires before the schedule auto-disables (default 5)")
 
 	routineSchedulesUpdateCmd.Flags().String("name", "", "new schedule name")
 	routineSchedulesUpdateCmd.Flags().String("cron", "", "new cron expression")
@@ -667,6 +713,7 @@ func init() {
 	routineSchedulesUpdateCmd.Flags().Int("pin-version", 0, "pin (or re-pin) the schedule to a specific routine version; fires execute that immutable version instead of head")
 	routineSchedulesUpdateCmd.Flags().Bool("unpin", false, "remove the version pin (fires track head again); updates that mention neither --pin-version nor --unpin keep the existing pin")
 	routineSchedulesUpdateCmd.Flags().String("catchup", "", "set the missed-run catch-up policy: 'skip' / 'once' / 'all' (see 'schedules create --help'). Absent = keep existing")
+	routineSchedulesUpdateCmd.Flags().Int("max-failures", 0, "circuit breaker: consecutive FAILED fires before the schedule auto-disables; absent keeps the existing threshold")
 
 	routineSchedulesDeleteCmd.Flags().Bool("yes", false, "skip the interactive confirmation prompt")
 

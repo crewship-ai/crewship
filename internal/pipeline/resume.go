@@ -2,12 +2,13 @@ package pipeline
 
 // Boot-time resume-from-step (Release 1.0 hardening W6).
 //
-// The executor persists current_step_id + step_outputs_json at every
-// step boundary (executor.go persistStepEntry / persistStepOutputs),
-// so after a hard kill the pipeline_runs row carries enough state to
-// re-enter the run instead of stamping it "interrupted":
+// The executor persists current_step_id (pipeline_runs) + each step's
+// output (pipeline_run_step_outputs, migration v156) at every step
+// boundary (executor.go persistStepEntry / persistStepOutput), so after
+// a hard kill there's enough durable state to re-enter the run instead
+// of stamping it "interrupted":
 //
-//   - completed steps are restored from step_outputs_json and skipped
+//   - completed steps are restored from pipeline_run_step_outputs and skipped
 //   - the in-flight step (current_step_id) re-executes from scratch —
 //     at-least-once semantics for the step that was mid-flight
 //   - runs parked on a `wait` approval step re-register their
@@ -203,6 +204,57 @@ func (e *Executor) ResumeAfterApproval(runID string, logger *slog.Logger) {
 	go e.runResumedRun(ctx, plan, logger)
 }
 
+// ResumeAfterSignal re-enters a run that PARKED on a wait(event) step
+// (status=waiting) once a signal has been durably delivered
+// (SignalWaitStore.Deliver committed, #1409). In-process analogue of
+// ResumeAfterApproval: load the run row, build the same resume plan,
+// and re-run via the normal Run path with resume=true. The resumed
+// wait step finds the delivered payload already sitting in
+// pipeline_signal_waits (ConsumeDelivered) and continues without
+// blocking again.
+//
+// Call AFTER the signal endpoint's Deliver has committed. Runs in its
+// own goroutine on a detached context so it outlives the HTTP request;
+// a shutdown mid-resume leaves the row in-flight for the next boot
+// scan (which reaches the same wait step and finds the same delivered
+// row — no signal is lost either way). Safe to call for non-resumable
+// rows — it no-ops with a logged reason rather than erroring.
+func (e *Executor) ResumeAfterSignal(runID string, logger *slog.Logger) {
+	if e.runStore == nil {
+		return
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	ctx := context.Background()
+	rec, err := e.runStore.Get(ctx, runID)
+	if err != nil || rec == nil {
+		logger.Warn("signal resume: run not found", "run_id", runID, "error", err)
+		return
+	}
+	if rec.Status != RunStatusWaiting {
+		// Not parked (already resumed, completed, or a non-suspend run) —
+		// nothing to do. Avoids double-execution if the signal endpoint
+		// somehow fires twice for the same delivery.
+		logger.Info("signal resume: run not in waiting state; skipping",
+			"run_id", runID, "status", rec.Status)
+		return
+	}
+	plan, reason := e.buildResumePlan(ctx, rec)
+	if plan != nil {
+		plan.reason = resumeReasonSignal
+	}
+	if plan == nil {
+		markCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = e.runStore.MarkInterrupted(markCtx, rec.ID, "not resumable after signal: "+reason)
+		cancel()
+		logger.Warn("signal resume: not resumable", "run_id", runID, "reason", reason)
+		return
+	}
+	logger.Info("resuming pipeline run after signal delivery", "run_id", runID, "pipeline_slug", rec.PipelineSlug)
+	go e.runResumedRun(ctx, plan, logger)
+}
+
 // buildResumePlan validates that a run's persisted state is
 // sufficient to resume. Returns (nil, reason) when it is not — the
 // reason lands in the row's error_message so operators can see WHY a
@@ -237,11 +289,13 @@ func (e *Executor) buildResumePlan(ctx context.Context, rec *RunRecord) (*resume
 		return nil, "stored definition no longer parses: " + err.Error()
 	}
 
-	restored := map[string]string{}
-	if rec.StepOutputsJSON != "" {
-		if err := json.Unmarshal([]byte(rec.StepOutputsJSON), &restored); err != nil {
-			return nil, "persisted step outputs unreadable: " + err.Error()
-		}
+	// Step outputs live in pipeline_run_step_outputs (migration v156), not
+	// rec.StepOutputsJSON — that column stopped being written on the hot
+	// per-step path (#1411 item 4) and only pre-migration history is
+	// backfilled there. See internal/pipeline/runs.go GetStepOutputs.
+	restored, err := e.runStore.GetStepOutputs(ctx, rec.ID)
+	if err != nil {
+		return nil, "persisted step outputs unreadable: " + err.Error()
 	}
 	// Drift gate — shared with Run's resume re-validation (see
 	// resumeDefinitionDrift for the rationale behind each check).

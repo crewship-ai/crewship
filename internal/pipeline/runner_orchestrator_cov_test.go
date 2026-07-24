@@ -69,6 +69,11 @@ type orchCovContainer struct {
 	ensureErr   error
 	agentStream string
 	execScripts []string
+	// inspectExit is the exit code ExecInspect reports for the agent exec.
+	// Zero (the default) is a clean exit; non-zero drives RunAgent to
+	// return a post-stream error while the streamed usage is already
+	// captured — the seam #1426/3.4 exercises.
+	inspectExit int
 }
 
 func (m *orchCovContainer) EnsureCrewRuntime(_ context.Context, _ provider.CrewConfig) (string, error) {
@@ -91,7 +96,7 @@ func (m *orchCovContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*pr
 	return &provider.ExecResult{ExecID: "noop", Reader: io.NopCloser(strings.NewReader(""))}, nil
 }
 func (m *orchCovContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
-	return false, 0, nil
+	return false, m.inspectExit, nil
 }
 func (m *orchCovContainer) ContainerStats(_ context.Context, _ string) (*provider.ContainerMetrics, error) {
 	return nil, nil

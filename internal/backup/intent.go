@@ -105,6 +105,22 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"agent_status":    IntentExcludeRuntime, // live status; agent boots IDLE
 	"notifications":   IntentExcludeRuntime, // transient; resend on the new instance
 
+	// === Outbound notifications (#1412) =============================
+	// These tables carry only a plain workspace_id column (no FK to
+	// workspaces), so the FK-walk discovery never surfaces them — they
+	// are dumped via their explicit BackupTables entries, not discovery.
+	// notification_channels (v133) is the provider/route config a
+	// workspace configured; user_notification_prefs (v161) is each
+	// operator's per-category × channel routing matrix. Both are durable
+	// user configuration that MUST survive a restore — losing them
+	// silently unsubscribes everyone. notification_deliveries (v161) is
+	// the outbox/delivery LOG (dedup keys, retry counters, sent_at) —
+	// operational telemetry that regenerates as new events fire, so it
+	// does NOT ride bundles.
+	"notification_channels":   IntentInclude,
+	"user_notification_prefs": IntentInclude,
+	"notification_deliveries": IntentExcludeOperational,
+
 	// === Discovered via drift detection (2026-05-25) ===============
 	// Every workspace-scoped table the FK walk currently surfaces.
 	// Default classification leans toward IntentInclude because the
@@ -146,9 +162,18 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// pending_runs holds deferred/debounced triggers waiting to fire
 	// (delay/ttl/priority). A pending row is a scheduled future run —
 	// durable, like a waitpoint; dropping it on restore loses queued work.
-	"pending_runs":       IntentInclude,
-	"pipeline_runs":      IntentInclude,
-	"pipeline_schedules": IntentInclude,
+	"pending_runs":  IntentInclude,
+	"pipeline_runs": IntentInclude,
+	// pipeline_routine_state = durable cross-run watermarks per (pipeline,
+	// schedule) (v155); dropping it on restore makes routines reprocess from
+	// scratch or lose their "since last run" cursor.
+	"pipeline_routine_state": IntentInclude,
+	// pipeline_run_step_outputs (v159) is the normalized per-step
+	// projection that replaced pipeline_runs.step_outputs_json on the hot
+	// write path — same durability class as pipeline_runs itself (it's
+	// the run-detail waterfall's data), and cascade-deletes with its run.
+	"pipeline_run_step_outputs": IntentInclude,
+	"pipeline_schedules":        IntentInclude,
 	// pipeline_tags = routine-DEFINITION discovery tags (v125).
 	"pipeline_tags":     IntentInclude,
 	"pipeline_versions": IntentInclude,

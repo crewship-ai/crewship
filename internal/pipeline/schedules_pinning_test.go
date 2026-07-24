@@ -177,11 +177,15 @@ func TestSchedulerFire_PinnedVersion_ExecutesPinnedDefinition(t *testing.T) {
 	if want := definitionHash(pinV1DSL); rec.DefinitionHash != want {
 		t.Errorf("run definition_hash: got %q, want the PINNED v1 hash %q", rec.DefinitionHash, want)
 	}
-	if !strings.Contains(rec.StepOutputsJSON, "v1step") {
-		t.Errorf("step outputs %q missing v1step — the pinned v1 definition did not execute", rec.StepOutputsJSON)
+	outputs, err := rig.deps.RunStore.GetStepOutputs(ctx, rec.ID)
+	if err != nil {
+		t.Fatalf("get step outputs: %v", err)
 	}
-	if strings.Contains(rec.StepOutputsJSON, "v2step") {
-		t.Errorf("step outputs %q contain v2step — HEAD executed despite the pin", rec.StepOutputsJSON)
+	if _, ok := outputs["v1step"]; !ok {
+		t.Errorf("step outputs %#v missing v1step — the pinned v1 definition did not execute", outputs)
+	}
+	if _, ok := outputs["v2step"]; ok {
+		t.Errorf("step outputs %#v contain v2step — HEAD executed despite the pin", outputs)
 	}
 }
 
@@ -206,8 +210,12 @@ func TestSchedulerFire_Unpinned_ExecutesHead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load run row: %v", err)
 	}
-	if !strings.Contains(rec.StepOutputsJSON, "v2step") {
-		t.Errorf("unpinned schedule must execute HEAD (v2), got outputs %q", rec.StepOutputsJSON)
+	outputs, err := rig.deps.RunStore.GetStepOutputs(ctx, rec.ID)
+	if err != nil {
+		t.Fatalf("get step outputs: %v", err)
+	}
+	if _, ok := outputs["v2step"]; !ok {
+		t.Errorf("unpinned schedule must execute HEAD (v2), got outputs %#v", outputs)
 	}
 	if rec.PipelineVersion != nil {
 		t.Errorf("unpinned run should not stamp a pinned version, got %d", *rec.PipelineVersion)
@@ -335,7 +343,11 @@ func TestResume_PinnedRun_ResumesPinnedDefinition(t *testing.T) {
 		t.Fatalf("resumed=%d interrupted=%d, want 1/0 — pinned run must resume against its pinned definition, not head", resumed, interrupted)
 	}
 	rec := waitForRunStatus(t, rig.deps.RunStore, "run_pin_resume", RunStatusCompleted, 5*time.Second)
-	if !strings.Contains(rec.StepOutputsJSON, "v1step") {
-		t.Errorf("resumed outputs %q missing v1step — resume did not execute the pinned definition", rec.StepOutputsJSON)
+	outputs, err := rig.deps.RunStore.GetStepOutputs(ctx, rec.ID)
+	if err != nil {
+		t.Fatalf("get step outputs: %v", err)
+	}
+	if _, ok := outputs["v1step"]; !ok {
+		t.Errorf("resumed outputs %#v missing v1step — resume did not execute the pinned definition", outputs)
 	}
 }

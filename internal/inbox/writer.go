@@ -143,7 +143,7 @@ func Insert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error
 		}
 	}
 	id := "ibx_" + in.Kind + "_" + in.SourceID
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: every inbox_items write in this file uses RFC3339Nano, so created_at/updated_at ordering stays self-consistent
 	blocking := 0
 	if in.Blocking {
 		blocking = 1
@@ -211,7 +211,7 @@ func UpsertMessage(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item
 		}
 	}
 	id := "ibx_" + in.Kind + "_" + in.SourceID
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: every inbox_items write in this file uses RFC3339Nano, so created_at/updated_at ordering stays self-consistent
 	blocking := 0
 	if in.Blocking {
 		blocking = 1

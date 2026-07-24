@@ -222,6 +222,34 @@ const (
 	// run.id, payload carries step_id + duration_ms.
 	EntryPipelineStepContainerReady EntryType = "pipeline.step.container_ready"
 
+	// EntryPipelineScheduleCircuitBreaker fires when a schedule auto-disables
+	// after K consecutive FAILED fires (#1405). Payload carries schedule_id,
+	// consecutive_failures, max_consecutive_failures. Distinct from
+	// EntryPipelineRunFailed (which is per-run) — this is the schedule-level
+	// breaker tripping, emitted exactly once per trip.
+	EntryPipelineScheduleCircuitBreaker EntryType = "pipeline.schedule.circuit_breaker_tripped"
+
+	// EntryPipelineScheduleMissedOccurrences fires once per fire when a
+	// schedule's next_run_at lagged far enough behind "now" that more
+	// than one cron occurrence would have fired had the process been
+	// continuously up (#1409) — e.g. a server restart / downtime window.
+	// fireOne still only fires ONCE for the current occurrence (this is
+	// observability, not a backfill); the entry makes the otherwise-silent
+	// gap visible. Payload carries schedule_id, missed_count, window_start,
+	// window_end (RFC3339).
+	EntryPipelineScheduleMissedOccurrences EntryType = "pipeline.schedule.missed_occurrences"
+
+	// EntryPipelineRunsSwept fires when the per-workspace pipeline_runs
+	// retention sweep (internal/pipeline/retention.go) deletes one or more
+	// terminal runs older than the configured window. run_tags cascade-
+	// deletes with their run (ON DELETE CASCADE); warnings_json is a
+	// column on the row itself, not a separate table — nothing else needs
+	// cleanup. Payload carries `workspace_id`, `deleted_count` (int),
+	// `retention_days`, and `keep_last_n_per_pipeline`. Severity is info:
+	// routine maintenance, mirrors EntryMemoryVersionsSwept's contract.
+	// See issue #1407.
+	EntryPipelineRunsSwept EntryType = "pipeline.runs_swept"
+
 	// EntryRunAgentSpan is one INTERNAL action of an agent_run step — a single
 	// tool the agent invoked (Bash/Write/Edit/Read/MCP/HTTP). It is the leaf of
 	// the drillable run-trace tree (run → step → tool). trace_id == run.id (so

@@ -128,11 +128,15 @@ func TestPipelineWebhooks_Fire_PinnedVersion_ExecutesPinned(t *testing.T) {
 	if rec.DefinitionHash != "h1" {
 		t.Errorf("run definition_hash: got %q, want the pinned v1 hash %q", rec.DefinitionHash, "h1")
 	}
-	if !strings.Contains(rec.StepOutputsJSON, "v1step") {
-		t.Errorf("step outputs %q missing v1step — pinned definition did not execute", rec.StepOutputsJSON)
+	outputs, err := runStore.GetStepOutputs(t.Context(), rec.ID)
+	if err != nil {
+		t.Fatalf("get step outputs: %v", err)
 	}
-	if strings.Contains(rec.StepOutputsJSON, "v2step") {
-		t.Errorf("step outputs %q contain v2step — HEAD executed despite the pin", rec.StepOutputsJSON)
+	if _, ok := outputs["v1step"]; !ok {
+		t.Errorf("step outputs %#v missing v1step — pinned definition did not execute", outputs)
+	}
+	if _, ok := outputs["v2step"]; ok {
+		t.Errorf("step outputs %#v contain v2step — HEAD executed despite the pin", outputs)
 	}
 }
 
@@ -301,8 +305,14 @@ func TestPipelineSchedules_Run_PinnedVersion_ExecutesPinned(t *testing.T) {
 	if rec.PipelineVersion == nil || *rec.PipelineVersion != 1 {
 		t.Errorf("run pipeline_version: got %v, want 1", rec.PipelineVersion)
 	}
-	if !strings.Contains(rec.StepOutputsJSON, "v1step") || strings.Contains(rec.StepOutputsJSON, "v2step") {
-		t.Errorf("force-fire executed the wrong definition; outputs=%q", rec.StepOutputsJSON)
+	outputs, err := runStore.GetStepOutputs(t.Context(), rec.ID)
+	if err != nil {
+		t.Fatalf("get step outputs: %v", err)
+	}
+	_, hasV1 := outputs["v1step"]
+	_, hasV2 := outputs["v2step"]
+	if !hasV1 || hasV2 {
+		t.Errorf("force-fire executed the wrong definition; outputs=%#v", outputs)
 	}
 }
 

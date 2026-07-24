@@ -102,6 +102,13 @@ CREATE TABLE pipeline_runs (
     created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
 );
+CREATE TABLE IF NOT EXISTS pipeline_run_step_outputs (
+    run_id     TEXT NOT NULL,
+    step_id    TEXT NOT NULL,
+    output     TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, step_id)
+);
 CREATE TABLE IF NOT EXISTS run_tags (
     run_id       TEXT NOT NULL,
     workspace_id TEXT NOT NULL,

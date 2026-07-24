@@ -361,9 +361,18 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 			"dropped", recorder.Dropped(), "truncated", recorder.Truncated())
 	}
 	if runErr != nil {
+		// Partial-usage on error (#1426, 3.4). A cancelled or killed stream
+		// may still have surfaced usage metadata for the tokens already
+		// spent; report it so a cancel mid-agent-step records the real
+		// partial cost instead of $0 (the cost cap + paymaster otherwise
+		// undercount every interrupted run).
+		costUSD, tokIn, tokOut := orchestrator.ParseResultUsage(acc.ResultMeta())
 		return AgentStepResult{
 			Output:     acc.Text(),
 			DurationMs: time.Since(startedAt).Milliseconds(),
+			CostUSD:    costUSD,
+			TokensIn:   tokIn,
+			TokensOut:  tokOut,
 		}, fmt.Errorf("orchestrator: %w", runErr)
 	}
 

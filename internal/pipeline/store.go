@@ -531,7 +531,7 @@ func (s *Store) SetMonthlyBudget(ctx context.Context, id string, amountUSD float
 	if amountUSD < 0 {
 		return fmt.Errorf("pipeline: monthly budget cannot be negative")
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: pipelines.updated_at is not ordered/compared in SQL; the whole pipelines table writes RFC3339Nano consistently
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE pipelines SET monthly_budget_usd = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`,
 		amountUSD, now, id)
@@ -550,7 +550,7 @@ func (s *Store) SetMonthlyBudget(ctx context.Context, id string, amountUSD float
 // row is soft-deleted mid-run, we silently no-op — the run already
 // happened and journal_entries hold the truth.
 func (s *Store) RecordInvocation(ctx context.Context, id string, status string) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: last_invoked_at IS ordered at :455 but every pipelines timestamp (created_at/updated_at/last_invoked_at) is written RFC3339Nano, so the COALESCE(last_invoked_at, created_at) sort compares like-for-like
 	_, err := s.db.ExecContext(ctx, `
 UPDATE pipelines
 SET invocation_count = invocation_count + 1,

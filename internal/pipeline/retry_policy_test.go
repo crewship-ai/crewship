@@ -186,7 +186,10 @@ func TestRetryPolicy_CostCapEndsRetryMidLoop(t *testing.T) {
 	dsl := &DSL{Name: "x", MaxCostUSD: 2.5, Steps: []Step{
 		{ID: "s1", Type: StepAgentRun, AgentSlug: "worker", Prompt: "go",
 			Validation: &Validation{MinLength: intPtr(100)},
-			Retry:      &RetryPolicy{MaxAttempts: 5}},
+			// Post-#1429/2.10 a tiers-exhausted validation failure is
+			// non-retryable by DEFAULT; an explicit retry_on opts it back in.
+			// This test exercises the cost-cap-mid-retry logic, so it opts in.
+			Retry: &RetryPolicy{MaxAttempts: 5, RetryOn: `error.contains("below min")`}},
 	}}
 	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
 		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
@@ -311,6 +314,42 @@ func TestRetryOnClassifier(t *testing.T) {
 	// A syntactically invalid expression is rejected too.
 	if _, err := compileRetryOn("error.("); err == nil {
 		t.Error("invalid CEL must fail to compile")
+	}
+}
+
+// TestCompileRetryOn_CachesProgramByExpression proves the #1411 fix: a
+// second compileRetryOn call with the SAME expression string returns the
+// already-compiled program (interface equality on cel.Program, whose
+// concrete implementation is comparable) instead of recompiling, while a
+// DIFFERENT expression still gets its own distinct program that evaluates
+// independently and correctly.
+func TestCompileRetryOn_CachesProgramByExpression(t *testing.T) {
+	expr := `error.contains("cache-hit-me")`
+	prg1, err := compileRetryOn(expr)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	prg2, err := compileRetryOn(expr)
+	if err != nil {
+		t.Fatalf("compile (second call): %v", err)
+	}
+	if prg1 != prg2 {
+		t.Error("second compileRetryOn call with the same expression should return the cached program, not a fresh one")
+	}
+	if !evalRetryOn(prg2, errors.New("cache-hit-me")) {
+		t.Error("cached program should still evaluate correctly")
+	}
+
+	other := `error.contains("different-expr")`
+	prg3, err := compileRetryOn(other)
+	if err != nil {
+		t.Fatalf("compile other: %v", err)
+	}
+	if prg3 == prg1 {
+		t.Error("a different expression must not share the cached program of an unrelated one")
+	}
+	if !evalRetryOn(prg3, errors.New("different-expr")) || evalRetryOn(prg3, errors.New("cache-hit-me")) {
+		t.Error("distinct cached programs must evaluate their own predicate, not the other's")
 	}
 }
 

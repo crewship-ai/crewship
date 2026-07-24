@@ -118,6 +118,87 @@ func TestRun_ApprovalWaitStep_ReturnsWaiting(t *testing.T) {
 	}
 }
 
+const asyncApprovalLinearWithPriorStepDSL = `{
+  "dsl_version": "1.0",
+  "name": "appr-linear-prior-step",
+  "steps": [
+    {"id": "prep", "type": "transform", "transform": {"input": "prepped", "expression": "."}},
+    {"id": "gate", "type": "wait", "wait": {"kind": "approval", "approval_prompt": "ship it?"}},
+    {"id": "final", "type": "transform", "transform": {"input": "final-{{ steps.prep.output }}", "expression": "."}}
+  ]
+}`
+
+// TestRun_ApprovalWaitStep_PersistsPriorStepOutput guards the #1411
+// per-step-upsert rewrite (pipeline_run_step_outputs, migration v156): a
+// step BEFORE the wait step must still have its output durably persisted
+// at the moment the run parks, since the resumed run reconstructs
+// result.StepOutputs from that table (the original goroutine is gone by
+// the time approval lands) and "final" here templates directly off
+// "prep"'s output. A regression that dropped the per-step upsert on the
+// suspend path would silently strand every WAITING park with an empty
+// outputs map.
+func TestRun_ApprovalWaitStep_PersistsPriorStepOutput(t *testing.T) {
+	db := openResumeTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	store := NewStore(db)
+	runStore := NewRunStore(db)
+	wpStore := NewSQLWaitpointStore(db)
+	defer wpStore.Close()
+	p := saveResumePipeline(t, store, "appr-linear-prior-step", asyncApprovalLinearWithPriorStepDSL)
+
+	exec := NewExecutor(store, NewResolver(db), newMockRunner(), &captureEmitter{}).
+		WithRunStore(runStore).
+		WithWaitpointStore(wpStore)
+
+	done := make(chan *RunResult, 1)
+	go func() {
+		res, err := exec.Run(ctx, RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeRun})
+		if err != nil {
+			t.Errorf("run: %v", err)
+		}
+		done <- res
+	}()
+	var res *RunResult
+	select {
+	case res = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("run blocked on the approval instead of returning WAITING")
+	}
+	if res.Status != "WAITING" {
+		t.Fatalf("status: got %q, want WAITING", res.Status)
+	}
+
+	outputs, err := runStore.GetStepOutputs(ctx, res.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, v := range outputs {
+		if strings.Contains(v, "prepped") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("WAITING park lost the prior step's output: %#v", outputs)
+	}
+
+	if err := wpStore.CompleteApproval(ctx, "ws_test", res.WaitpointToken, true, "u_admin", ""); err != nil {
+		t.Fatalf("complete approval: %v", err)
+	}
+	resumeAndAwait(t, exec, runStore, res.RunID)
+
+	rec, _ := runStore.Get(ctx, res.RunID)
+	if rec.Status != RunStatusCompleted {
+		t.Fatalf("after approval+resume status: got %q, want completed (error: %s)", rec.Status, rec.ErrorMessage)
+	}
+	if !strings.Contains(rec.Output, "prepped") {
+		t.Errorf("final step output should template off the restored prep output, got %q", rec.Output)
+	}
+}
+
 // TestRun_ApprovalDenied_ResolvesRunFailed — a DENIED approval must resume the
 // parked run to a terminal FAILED state, never strand it in 'waiting'. Guards
 // the "deny doesn't strand the run" contract (resume fires on reject too).
@@ -211,8 +292,8 @@ func TestRunDAG_ApprovalWaitStep(t *testing.T) {
 	if rec.CurrentStepID != "gate" {
 		t.Errorf("DAG run row current_step: got %q, want gate", rec.CurrentStepID)
 	}
-	if rec.StepOutputsJSON == "" {
-		t.Error("DAG suspend should have persisted the draft output for resume")
+	if outputs, err := runStore.GetStepOutputs(ctx, res.RunID); err != nil || len(outputs) == 0 {
+		t.Errorf("DAG suspend should have persisted the draft output for resume: outputs=%#v err=%v", outputs, err)
 	}
 
 	if err := wpStore.CompleteApproval(ctx, "ws_test", res.WaitpointToken, true, "u_admin", ""); err != nil {

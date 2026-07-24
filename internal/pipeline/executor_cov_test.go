@@ -424,19 +424,19 @@ func TestExecutor_RunStep_DispatchBranches(t *testing.T) {
 	render := RenderContext{}
 
 	// Unsupported type.
-	if _, _, _, err := exec.runStep(ctx, Step{ID: "z", Type: StepType("warp")}, "", AdapterModel{}, nil, in, "r", "p", emit, render, 0); err == nil || !strings.Contains(err.Error(), "unsupported step type") {
+	if _, _, _, err := exec.runStep(ctx, Step{ID: "z", Type: StepType("warp")}, "", AdapterModel{}, nil, in, "r", "p", emit, render, 0, 0); err == nil || !strings.Contains(err.Error(), "unsupported step type") {
 		t.Errorf("unsupported type: %v", err)
 	}
 
 	// Code step without a wired CodeRunner.
 	codeStep := Step{ID: "c", Type: StepCode, Code: &CodeStep{Runtime: "bash", Code: "echo hi"}}
-	if _, _, _, err := exec.runStep(ctx, codeStep, "", AdapterModel{}, nil, in, "r", "p", emit, render, 0); err == nil {
+	if _, _, _, err := exec.runStep(ctx, codeStep, "", AdapterModel{}, nil, in, "r", "p", emit, render, 0, 0); err == nil {
 		t.Error("code step without runner must error")
 	}
 
 	// HTTP step against a private address with SSRF guards ON.
 	httpStep := Step{ID: "h", Type: StepHTTP, HTTP: &HTTPStep{Method: "GET", URL: "http://127.0.0.1:1/x"}}
-	if _, _, _, err := exec.runStep(ctx, httpStep, "", AdapterModel{}, nil, in, "r", "p", emit, render, 0); err == nil {
+	if _, _, _, err := exec.runStep(ctx, httpStep, "", AdapterModel{}, nil, in, "r", "p", emit, render, 0, 0); err == nil {
 		t.Error("http step to loopback must be blocked by the SSRF guard")
 	}
 }
@@ -662,12 +662,12 @@ func TestExecutor_CallPipeline_NestedBranches(t *testing.T) {
 	parent := RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun}
 	render := RenderContext{Inputs: map[string]any{"x": "rendered-val"}}
 
-	if _, _, _, err := exec.runCallPipelineStep(ctx, Step{ID: "s", Type: StepCallPipeline, PipelineSlug: "bad-child"}, parent, render, 0); err == nil || !strings.Contains(err.Error(), "parse target") {
+	if _, _, _, err := exec.runCallPipelineStep(ctx, Step{ID: "s", Type: StepCallPipeline, PipelineSlug: "bad-child"}, parent, render, 0, "run_test", 0); err == nil || !strings.Contains(err.Error(), "parse target") {
 		t.Errorf("bad child: %v", err)
 	}
 
 	// Generic lookup error (not ErrNotFound).
-	if _, _, _, err := exec.runCallPipelineStep(ctx, Step{ID: "s", Type: StepCallPipeline, PipelineSlug: "ghost"}, parent, render, 0); err == nil || !strings.Contains(err.Error(), "lookup") {
+	if _, _, _, err := exec.runCallPipelineStep(ctx, Step{ID: "s", Type: StepCallPipeline, PipelineSlug: "ghost"}, parent, render, 0, "run_test", 0); err == nil || !strings.Contains(err.Error(), "lookup") {
 		t.Errorf("lookup error: %v", err)
 	}
 
@@ -676,7 +676,7 @@ func TestExecutor_CallPipeline_NestedBranches(t *testing.T) {
 	out, _, _, err := exec.runCallPipelineStep(ctx, Step{
 		ID: "s", Type: StepCallPipeline, PipelineSlug: "good-child",
 		NestedInputs: map[string]any{"a": "{{ inputs.x }}", "b": 42},
-	}, parent, render, 0)
+	}, parent, render, 0, "run_test", 0)
 	if err != nil {
 		t.Fatalf("nested run: %v", err)
 	}
@@ -724,6 +724,13 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     warnings_json       TEXT NOT NULL DEFAULT '[]',
     created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
+);
+CREATE TABLE IF NOT EXISTS pipeline_run_step_outputs (
+    run_id     TEXT NOT NULL,
+    step_id    TEXT NOT NULL,
+    output     TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, step_id)
 );`
 
 func TestExecutor_RunStorePersistence_FullLifecycle(t *testing.T) {
@@ -762,8 +769,12 @@ func TestExecutor_RunStorePersistence_FullLifecycle(t *testing.T) {
 	if rec.DefinitionHash != p.DefinitionHash {
 		t.Errorf("definition hash not stamped: %q", rec.DefinitionHash)
 	}
-	if !strings.Contains(rec.StepOutputsJSON, "s1") {
-		t.Errorf("step outputs not flushed: %q", rec.StepOutputsJSON)
+	outputs, err := runStore.GetStepOutputs(ctx, res.RunID)
+	if err != nil {
+		t.Fatalf("get step outputs: %v", err)
+	}
+	if _, ok := outputs["s1"]; !ok {
+		t.Errorf("step outputs not flushed: %#v", outputs)
 	}
 }
 

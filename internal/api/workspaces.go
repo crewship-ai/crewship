@@ -109,6 +109,10 @@ type workspaceResponse struct {
 	// agent-config resolver fails closed and omits credentials for a
 	// privileged crew.
 	AllowPrivilegedCredentials bool `json:"allow_privileged_credentials"`
+	// RunRetentionDays (#1407) is the per-workspace override for the
+	// pipeline_runs retention sweep window in days. nil means "use
+	// pipeline.DefaultRunRetentionDays (90)".
+	RunRetentionDays *int `json:"run_retention_days"`
 	// Nested `_count` is the canonical shape the frontend consumes
 	// (#866.1). The flat `_count_*` keys are retained one release for
 	// back-compat with any older client and should be removed after.
