@@ -183,6 +183,10 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/journal", authed(wsCtx(http.HandlerFunc(jh.List))))
 	r.mux.Handle("GET /api/v1/journal/stream", authed(wsCtx(http.HandlerFunc(jh.Stream))))
 	r.mux.Handle("GET /api/v1/journal/count", authed(wsCtx(http.HandlerFunc(jh.Count))))
+	// Cost rollup (#1404) — literal path, must be registered before the
+	// {id} wildcard below (same "literal wins over pattern" ordering
+	// convention as runs.Insights above).
+	r.mux.Handle("GET /api/v1/journal/spend", authed(wsCtx(http.HandlerFunc(jh.Spend))))
 	// Single-entry GET — needed by deep-links from the timeline (e.g. a
 	// shared URL pointing at one keeper.decision row) and by the CLI's
 	// `journal get <id>`. Workspace-scoped; cross-tenant IDs return 404

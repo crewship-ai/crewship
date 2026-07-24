@@ -14,9 +14,7 @@ package server
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"log/slog"
-	"os"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/behaviorhook"
@@ -177,38 +175,11 @@ func buildAuxGatekeeper(
 }
 
 // buildLLMProvider maps an AuxModel.Provider string to a concrete
-// llm.Provider implementation. Closed set today: "anthropic" + "ollama".
-// New providers (gemini, openai) require extending this switch in lockstep
-// with internal/llm/. Returns an error rather than a silent no-op so
-// mis-configuration surfaces as a startup warn line operators can grep.
-//
-// "anthropic" sources the key from ANTHROPIC_API_KEY (the same env the
-// rest of the codebase reads — see internal/chatbridge/resolver_test.go).
-// An empty key here is treated as a hard error: NewAnthropic would build
-// a provider that 401s on every request, which is strictly worse than
-// returning 503 from the endpoint with a clear "not configured" reason.
+// llm.Provider implementation. Thin wrapper over llm.BuildAuxProvider
+// (shared with internal/api's post-run verdict wiring, #1403) kept so
+// call sites in this file don't need an `llm.` qualifier rename.
 func buildLLMProvider(m llm.AuxModel) (llm.Provider, error) {
-	switch m.Provider {
-	case "anthropic":
-		key := os.Getenv("ANTHROPIC_API_KEY")
-		if key == "" {
-			return nil, fmt.Errorf("ANTHROPIC_API_KEY env not set (required for anthropic aux slot %q)", m.Model)
-		}
-		return llm.NewAnthropic(key), nil
-	case "ollama":
-		// Ollama aux slot — base URL is the same Keeper Ollama (or a
-		// dedicated one). For MVP we accept the same env Keeper uses,
-		// falling back to localhost. Production wiring for ollama-backed
-		// aux slots is a deferred follow-up; the immediate F4 path is
-		// anthropic (PR-B F3 MVP default).
-		base := os.Getenv("KEEPER_OLLAMA_URL")
-		if base == "" {
-			base = "http://localhost:11434"
-		}
-		return llm.NewOllama(base, m.Model), nil
-	default:
-		return nil, fmt.Errorf("unsupported aux provider %q (want anthropic|ollama)", m.Provider)
-	}
+	return llm.BuildAuxProvider(m)
 }
 
 // registerBehaviorHook installs the F4.2 behavior monitor as the

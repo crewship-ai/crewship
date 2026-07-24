@@ -23,6 +23,7 @@ func TestAuxiliaryModels_DefaultsAreHaiku(t *testing.T) {
 		{"Behavior", cfg.Behavior},
 		{"MemoryHealth", cfg.MemoryHealth},
 		{"Negative", cfg.Negative},
+		{"RunSummary", cfg.RunSummary},
 		{"Fallback", cfg.Fallback},
 	}
 	for _, s := range slots {
@@ -79,6 +80,23 @@ func TestResolveAux_NoFallbackNoSlot_ReturnsError(t *testing.T) {
 	cfg := AuxiliaryModels{} // every slot empty, Fallback empty
 	if _, err := ResolveAux(cfg, SlotKeeper); err == nil {
 		t.Error("expected error when neither slot nor Fallback has a provider")
+	}
+}
+
+// TestResolveAux_RunSummarySlot verifies the run-verdict summarizer
+// (#1403) resolves through the same slot machinery as every other aux
+// consumer — explicit slot wins, same as SlotKeeper etc.
+func TestResolveAux_RunSummarySlot(t *testing.T) {
+	cfg := AuxiliaryModels{
+		RunSummary: AuxModel{Provider: "anthropic", Model: "claude-haiku-4-5", Timeout: 15 * time.Second},
+		Fallback:   AuxModel{Provider: "anthropic", Model: "claude-haiku-4-5", Timeout: 5 * time.Second},
+	}
+	got, err := ResolveAux(cfg, SlotRunSummary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Timeout != 15*time.Second {
+		t.Errorf("Timeout = %v, want 15s (explicit slot wins)", got.Timeout)
 	}
 }
 

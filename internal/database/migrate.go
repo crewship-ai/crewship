@@ -1761,6 +1761,13 @@ END;
 	// new read path. Renumbered from v156 to sit above the engine stack.
 	// See migrate_consts_v159_run_step_outputs.go and issue #1411 item 4.
 	{version: 159, name: "run_step_outputs", fn: migrationRunStepOutputs},
+
+	// v164 seeds the "run_verdict_summaries" feature flag row — the first
+	// row ever inserted into feature_flags, gating the post-run outcome
+	// verdict (#1403). Renumbered from v156 to sit above the engine stack
+	// (v156-159) and PR #1438's reserved v160-163. See
+	// migrate_consts_v164_run_verdict_flag.go.
+	{version: 164, name: "run_verdict_flag", sql: migrationRunVerdictFlag},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

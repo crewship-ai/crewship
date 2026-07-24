@@ -1,16 +1,21 @@
 "use client"
 
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, useState } from "react"
+import { AlertTriangle, CheckCircle2, ChevronDown, HelpCircle, XCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatLogTime } from "@/lib/utils/log-format"
 import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
 import type { JournalEntry } from "@/lib/types/journal"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
+  extractVerdict,
   humanizeRun,
   isRunInFlight,
   type RunActivityRow,
   type RunActivityTone,
+  type RunVerdict,
+  type RunVerdictOutcome,
 } from "@/lib/run-activity"
 
 // RunActivityTimeline — the readable "what the agent did" rail for a single
@@ -51,6 +56,7 @@ export const RUN_WORK_ENTRY_TYPES = [
   "llm.call",
   "keeper.request",
   "keeper.decision",
+  "summary.generated",
 ] as const
 
 interface RunActivityTimelineProps {
@@ -114,6 +120,11 @@ export function RunActivityTimeline({
   useJournalStream({ workspaceId, params: stableParams, enabled: enabled && live, onEntry })
 
   const rows = useMemo(() => humanizeRun(entries), [entries])
+  // Extracted from the raw entries, NOT from `rows` — a verdict is generated
+  // AFTER the run finishes, so by wall-clock timestamp it would otherwise
+  // sort to the end of `rows`. It's rendered as a pinned header instead (see
+  // RunActivityRail), independent of the humanized/sorted row list.
+  const verdict = useMemo(() => extractVerdict(entries), [entries])
   const detectedRunning = useMemo(() => isRunInFlight(entries.map((e) => e.entry_type)), [entries])
   // Before the first row lands, fall back to the caller's hint so the empty
   // state reads "waiting…" rather than "no activity recorded".
@@ -125,6 +136,7 @@ export function RunActivityTimeline({
   return (
     <RunActivityRail
       rows={rows}
+      verdict={verdict}
       running={running}
       loading={loading}
       title={title}
@@ -135,6 +147,11 @@ export function RunActivityTimeline({
 
 interface RunActivityRailProps {
   rows: RunActivityRow[]
+  /** LLM-generated outcome verdict (#1403) — pinned as the rail's first,
+   * always-visible row. When present, the step timeline below it starts
+   * collapsed; clicking the verdict expands it. No verdict → today's
+   * always-expanded behavior, unchanged. */
+  verdict?: RunVerdict | null
   running?: boolean
   /**
    * Run is parked on a human approval. Renders an amber "Waiting for approval"
@@ -149,6 +166,20 @@ interface RunActivityRailProps {
   className?: string
 }
 
+const VERDICT_ICON: Record<RunVerdictOutcome, typeof CheckCircle2> = {
+  goal_met: CheckCircle2,
+  partial: AlertTriangle,
+  needs_human: HelpCircle,
+  failed: XCircle,
+}
+
+const VERDICT_ICON_TONE: Record<RunVerdictOutcome, string> = {
+  goal_met: "text-emerald-400",
+  partial: "text-amber-400",
+  needs_human: "text-amber-400",
+  failed: "text-red-400",
+}
+
 /**
  * Presentational rail. Renders humanized rows with the connector + toned
  * icon nodes. Source-agnostic — fed by the journal timeline, pipeline runs,
@@ -156,6 +187,7 @@ interface RunActivityRailProps {
  */
 export function RunActivityRail({
   rows,
+  verdict,
   running = false,
   waiting = false,
   loading = false,
@@ -163,6 +195,13 @@ export function RunActivityRail({
   emptyLabel,
   className,
 }: RunActivityRailProps) {
+  // Collapsed by default when a verdict exists — the one-liner is the
+  // answer; the full step timeline is opt-in detail. No verdict → always
+  // open, matching the rail's behavior before #1403.
+  const [timelineOpen, setTimelineOpen] = useState(!verdict)
+  const open = verdict ? timelineOpen : true
+  const VerdictIcon = verdict ? VERDICT_ICON[verdict.outcome] : null
+
   return (
     <div className={cn("border-t border-white/[0.06] pt-3 px-4 pb-4", className)}>
       <div className="flex items-center justify-between mb-3">
@@ -185,19 +224,46 @@ export function RunActivityRail({
         )}
       </div>
 
-      {loading && rows.length === 0 ? (
-        <p className="text-[11px] text-foreground/40">Loading activity…</p>
-      ) : rows.length === 0 ? (
-        <p className="text-[11px] text-foreground/40">
-          {running ? "Waiting for the first step…" : emptyLabel ?? "No activity recorded for this run"}
-        </p>
-      ) : (
-        <ol className="space-y-0">
-          {rows.map((row, i) => (
-            <RunActivityRowView key={row.id} row={row} last={i === rows.length - 1} />
-          ))}
-        </ol>
-      )}
+      <Collapsible open={open} onOpenChange={setTimelineOpen}>
+        {verdict && VerdictIcon && (
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="mb-2 -mx-2 flex w-[calc(100%+1rem)] items-start gap-2.5 rounded-md px-2 py-2 text-left hover:bg-white/[0.03]"
+            >
+              <VerdictIcon className={cn("h-4 w-4 shrink-0 mt-0.5", VERDICT_ICON_TONE[verdict.outcome])} />
+              <div className="min-w-0 flex-1">
+                <span className="text-[12px] font-medium text-foreground/90">{verdict.verdict}</span>
+                {verdict.summary && (
+                  <p className="mt-0.5 text-[10px] text-foreground/50">{verdict.summary}</p>
+                )}
+              </div>
+              <ChevronDown
+                className={cn(
+                  "h-3.5 w-3.5 shrink-0 mt-0.5 text-foreground/30 transition-transform",
+                  open && "rotate-180",
+                )}
+              />
+            </button>
+          </CollapsibleTrigger>
+        )}
+
+        <CollapsibleContent>
+          {loading && rows.length === 0 ? (
+            <p className="text-[11px] text-foreground/40">Loading activity…</p>
+          ) : rows.length === 0 ? (
+            <p className="text-[11px] text-foreground/40">
+              {running ? "Waiting for the first step…" : emptyLabel ?? "No activity recorded for this run"}
+            </p>
+          ) : (
+            <ol className="space-y-0">
+              {rows.map((row, i) => (
+                <RunActivityRowView key={row.id} row={row} last={i === rows.length - 1} />
+              ))}
+            </ol>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   )
 }

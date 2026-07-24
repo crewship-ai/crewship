@@ -1342,6 +1342,7 @@ Every routine run emits a sequence of journal entries:
 - `pipeline.step.skipped` — the step's `if` condition was false, so it never ran (payload carries the `condition`). A dedicated entry type rather than a `completed` row with a marker, so a skipped branch is distinguishable from a real completion at the storage layer.
 - `pipeline.step.retrying` — a transient failure the retry policy is about to swallow; **non-terminal**, one per attempt (`attempt`/`max`), followed by the step's eventual `completed`/`failed`. (Rows written before this type existed arrive as `pipeline.step.completed`/`failed` carrying a `kind=skipped`/`kind=retry` payload marker; readers honour that marker as a fallback.)
 - `pipeline.run.completed` / `pipeline.run.failed` — once at run end
+- `summary.generated` — an LLM-generated outcome verdict ("did the run accomplish the goal?"), fired once after the run terminates. Shown as an outcome pill next to the status pill in the Runs sub-tab. Gated by the `run_verdict_summaries` feature flag and skipped for agentless/dry-run routines — see the [Crew Journal guide](/guides/crew-journal#outcome-verdict-summarygenerated) for the full contract.
 
 Plus WebSocket broadcast on the workspace channel for live UI updates (PipelineRunNode in the orchestration graph + Runs sub-tab waterfall both subscribe).
 

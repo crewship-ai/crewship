@@ -48,6 +48,15 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// Attach the sleep-time consolidator hook (PRD §8.1). nil is a
 	// no-op; SetPostRunTrigger no-ops on a nil receiver hook.
 	internal.SetPostRunTrigger(oh.postRunTrigger)
+	// Post-run outcome verdict (#1403): the provider is resolved lazily
+	// (once) on Router and shared with every pipeline.NewWiredExecutor
+	// call site (see Router.RunVerdictProvider), so this call either
+	// builds it here (first caller) or reuses an already-built one.
+	internal.SetRunVerdict(r.RunVerdictProvider(), r.RunVerdictModel())
+	// Retain a reference so graceful shutdown can drain this handler's
+	// in-flight post-run verdict goroutines before the journal closes
+	// (Router.DrainVerdicts). Otherwise `internal` is local to this func.
+	r.internalHandler = internal
 	internalAuth := internal.requireInternal
 	// Pipeline save — sidecar→main forward. Trust comes from
 	// X-Internal-Token (sidecar attaches it via proxyIPCJSON);

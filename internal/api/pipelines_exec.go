@@ -784,11 +784,19 @@ func (h *PipelineHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	if includeSteps {
 		entryFilter = "pipeline.%"
 	}
+	// summary.generated (#1403, the post-run outcome verdict) is a
+	// run-level entry like pipeline.run.completed, but its own type
+	// name doesn't match the "pipeline.%" LIKE prefix — it's emitted by
+	// internal/runverdict, not internal/pipeline/journal.go. OR it in
+	// explicitly (in both default and include_steps modes; a verdict is
+	// as run-level as pipeline.run.completed) rather than renaming the
+	// type, which would break the existing summary.generated consumers
+	// (lib/journal-icons.ts, the Timeline tab's entry-type grouping).
 	rows, err := h.db.QueryContext(r.Context(), `
 SELECT id, ts, entry_type, severity, summary, payload
 FROM journal_entries
 WHERE workspace_id = ?
-  AND entry_type LIKE ?
+  AND (entry_type LIKE ? OR entry_type = 'summary.generated')
   AND json_extract(payload, '$.pipeline_id') = ?
 ORDER BY ts DESC
 LIMIT ?`, workspaceID, entryFilter, p.ID, limit)

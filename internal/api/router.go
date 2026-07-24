@@ -220,6 +220,73 @@ type Router struct {
 	behaviorEval    *gatekeeper.BehaviorEvaluator
 	memHealthEval   *gatekeeper.MemoryHealthEvaluator
 	negativeEval    *gatekeeper.NegativeLearningEvaluator
+
+	// runVerdictProvider/runVerdictModel back the post-run outcome
+	// verdict (#1403): built lazily (once) from the run_summary aux
+	// slot, shared by every production executor construction site —
+	// the internal-runs terminal handler (ad-hoc agent runs) and every
+	// pipeline.NewWiredExecutor call (routine runs: HTTP, boot-resume,
+	// cron scheduler) — so they resolve/build the same provider once
+	// instead of duplicating llm.ResolveAux + llm.BuildAuxProvider at
+	// each call site. nil provider (after resolution) means the slot
+	// is unconfigured/unbuildable; callers treat that as "feature off".
+	runVerdictProvider llm.Provider
+	runVerdictModel    string
+	runVerdictOnce     sync.Once
+
+	// internalHandler is retained (it is otherwise local to
+	// registerInternalRoutes) so shutdown can drain its in-flight
+	// post-run verdict goroutines before the journal writer closes.
+	internalHandler *InternalHandler
+}
+
+// DrainVerdicts drains in-flight post-run verdict goroutines across both
+// call sites — ad-hoc agent runs (InternalHandler) and routine runs
+// (PipelineHandler) — bounded by timeout so a wedged LLM call can't hang
+// shutdown. Invoked from the server's shutdown sequence AFTER the HTTP
+// listener stops but BEFORE the journal writer closes, so a verdict that
+// was mid-generation still records its journal entry (#1403).
+func (r *Router) DrainVerdicts(timeout time.Duration) {
+	if r.internalHandler != nil {
+		r.internalHandler.DrainVerdicts(timeout)
+	}
+	if r.PipelinesHandler != nil {
+		r.PipelinesHandler.DrainVerdicts(timeout)
+	}
+}
+
+// resolveRunVerdict builds the run_summary aux provider once. A
+// misconfigured/unbuildable slot (e.g. no ANTHROPIC_API_KEY) logs a
+// warning and leaves runVerdictProvider nil — never fails boot.
+func (r *Router) resolveRunVerdict() {
+	aux, err := llm.ResolveAux(r.AuxModels(), llm.SlotRunSummary)
+	if err != nil {
+		r.logger.Warn("run verdict: run_summary aux slot resolve failed; outcome verdicts disabled", "error", err)
+		return
+	}
+	provider, err := llm.BuildAuxProvider(aux)
+	if err != nil {
+		r.logger.Warn("run verdict: run_summary provider build failed; outcome verdicts disabled", "error", err)
+		return
+	}
+	r.runVerdictProvider = provider
+	r.runVerdictModel = aux.Model
+}
+
+// RunVerdictProvider returns the pre-resolved LLM provider for the
+// post-run outcome verdict (#1403), lazily building it on first call.
+// nil when the run_summary aux slot is unconfigured or unbuildable —
+// callers must treat nil as "verdict generation is off", not an error.
+func (r *Router) RunVerdictProvider() llm.Provider {
+	r.runVerdictOnce.Do(r.resolveRunVerdict)
+	return r.runVerdictProvider
+}
+
+// RunVerdictModel returns the model string paired with
+// RunVerdictProvider(). Empty when the provider is nil.
+func (r *Router) RunVerdictModel() string {
+	r.runVerdictOnce.Do(r.resolveRunVerdict)
+	return r.runVerdictModel
 }
 
 // SetKeeperPhase2Evaluators is the legacy post-construction setter.

@@ -513,6 +513,51 @@ func (h *JournalHandler) Count(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"total": n})
 }
 
+// Spend serves GET /api/v1/journal/spend — the #1404 cost rollup.
+// Query params:
+//
+//	window=24h|7d|30d — default 24h
+//	top=<N> — bounds top_routines/top_runs, default 5, clamped to 1..50
+func (h *JournalHandler) Spend(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		replyError(w, http.StatusUnauthorized, "workspace required")
+		return
+	}
+
+	// Same explicit-reject convention as RunHandler.Insights: an unknown
+	// window value is a caller typo, not something to silently default.
+	windowRaw := r.URL.Query().Get("window")
+	if windowRaw == "" {
+		windowRaw = "24h"
+	}
+	window := journal.RunInsightsWindow(windowRaw)
+	switch window {
+	case journal.RunWindow24h, journal.RunWindow7d, journal.RunWindow30d:
+	default:
+		replyError(w, http.StatusBadRequest, "window must be one of: 24h, 7d, 30d")
+		return
+	}
+
+	topN := 5
+	if raw := r.URL.Query().Get("top"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 50 {
+			replyError(w, http.StatusBadRequest, "top must be an integer between 1 and 50")
+			return
+		}
+		topN = n
+	}
+
+	res, err := journal.Spend(r.Context(), h.db, workspaceID, window, topN)
+	if err != nil {
+		h.logger.Error("journal spend failed", "err", err)
+		replyError(w, http.StatusInternalServerError, "journal spend failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 // SetPriority serves POST /api/v1/journal/{id}/priority. Body:
 //
 //	{"priority": "permanent|high|pin|normal", "reason": "..."}
