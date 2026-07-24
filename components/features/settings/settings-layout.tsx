@@ -23,6 +23,7 @@ import { ConnectionsSection } from "./sections/connections-section"
 import { CrewAuditSection } from "./sections/crew-audit-section"
 import { AuxStatusSection } from "./sections/aux-status-section"
 import { NotificationChannelsSection } from "./sections/notification-channels-section"
+import { NotificationPrefsSection } from "./sections/notification-prefs-section"
 
 interface Org {
   id: string
@@ -47,7 +48,8 @@ const sectionTitles: Record<string, { title: string; description?: string }> = {
   crews: { title: "Crews & Containers", description: "Manage crews, resources and network policies" },
   "aux-models": { title: "Auxiliary Models", description: "Cheap fast models that power keeper evaluators (PRD §6 F3)" },
   connections: { title: "Connections", description: "Cross-crew communication links" },
-  notifications: { title: "Notifications", description: "Outbound email / webhook delivery for run outcomes" },
+  notifications: { title: "Notifications", description: "Outbound email / webhook / Slack / Discord / Telegram delivery targets" },
+  "notification-prefs": { title: "Notification Prefs", description: "Your own category x channel preference matrix" },
   members: { title: "Members", description: "Team members and permissions" },
   audit: { title: "Audit Log", description: "Track workspace activity" },
 }
@@ -198,6 +200,9 @@ export function SettingsLayout() {
     }
     if (activeTab === "notifications" && workspaceId) {
       return <NotificationChannelsSection workspaceId={workspaceId} />
+    }
+    if (activeTab === "notification-prefs" && workspaceId) {
+      return <NotificationPrefsSection workspaceId={workspaceId} />
     }
     if (activeTab === "audit" && workspaceId) {
       return <CrewAuditSection workspaceId={workspaceId} />
