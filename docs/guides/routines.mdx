@@ -681,6 +681,38 @@ For the zero-config version — a desktop ping when a run *ends* (success or fai
 
 To reach **outside** Crewship when a run completes or fails — email or a signed webhook to an admin, a Slack relay, or your own service — configure [outbound notification channels](/guides/notifications). The `notify` step is the in-product half; outbound channels are the half that reaches people who aren't watching the inbox.
 
+### `query`
+
+```json
+{
+  "id": "stats",
+  "type": "query",
+  "query": { "source": "pipeline_runs", "window_hours": 24 }
+}
+```
+
+A deterministic, read-only aggregate query over the run's own workspace's operational data — no LLM, no network egress, agentless-compatible. `source: "pipeline_runs"` is the only source today: run counts, cost, and top failures over a trailing window (default 24h, capped at 720h/30 days regardless of what's authored). This is the data source behind the [workspace digest](#workspace-digest-template) routine template.
+
+| Field | Notes |
+| --- | --- |
+| `source` | `"pipeline_runs"` (only value today). |
+| `window_hours` | Trailing window in hours. Default `24` when 0/absent. |
+
+Output is a JSON object — pipe it through a `transform` step to pull a single field for a downstream `notify`/`http` step, exactly like any other structured step output:
+
+```json
+{
+  "id": "summary",
+  "type": "transform",
+  "needs": ["stats"],
+  "transform": { "input": "{{ steps.stats.output }}", "expression": ".summary_md" }
+}
+```
+
+`{ window_hours, total_runs, completed, failed, waiting, cancelled, total_cost_usd, top_failures: [{pipeline_slug, count}], summary_md }` — `summary_md` is a pre-rendered markdown digest, so the common case (query → notify) needs only the one `transform` step shown above to extract it.
+
+Strictly workspace-scoped: the query always runs against the invoking run's own `workspace_id` — a routine can never read another tenant's run history no matter what it's authored to ask for.
+
 ### Conditional `if`
 
 Any step can carry `"if": "{{ inputs.run_summary }}"`. The placeholder is rendered as a plain string — empty / `false` / `0` / `no` / `off` (case-insensitive) → step skipped and marked `<skipped>` in StepOutputs; anything else counts as truthy. Templates are plain substitution, not expression evaluation, so put the boolean upstream (e.g. set `inputs.run_summary` from the caller) rather than writing `==` / `!=` inside the `if` value.
@@ -1436,6 +1468,16 @@ crewship routine schedules create --slug incident-summary \
 ```
 
 The probe runs every 5 minutes for free; the LLM routine fires only on the ticks where the probe's output is truthy. `routine schedules list` shows how often the gate woke vs. checked.
+
+### "Get a daily ops digest of runs, cost, and failures" {#workspace-digest-template}
+
+The seeded `workspace-digest` routine (`query` → `transform` → `notify`, agentless, zero cost) covers this out of the box — wire a cadence with:
+
+```bash
+crewship digest enable --crew ops
+```
+
+Creates the routine (if a prior nuke removed it — `--crew` names who'll own it) and a daily 08:00 UTC schedule, idempotently. See the [Digest CLI reference](/cli/digest) for `--cron`/`--when` and how delivery to Slack/email works (it's the same `notify` step + notification-preference matrix every other routine uses).
 
 ### "Cancel an in-flight run"
 

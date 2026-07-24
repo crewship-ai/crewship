@@ -192,7 +192,7 @@
         },
         "type": {
           "type": "string",
-          "enum": ["agent_run", "call_pipeline", "http", "code", "wait", "transform", "notify", "script"]
+          "enum": ["agent_run", "call_pipeline", "http", "code", "wait", "transform", "notify", "script", "query"]
         },
         "complexity": {
           "type": "string",
@@ -240,7 +240,8 @@
         "wait": { "$ref": "#/$defs/WaitStep" },
         "transform": { "$ref": "#/$defs/TransformStep" },
         "notify": { "$ref": "#/$defs/NotifyStep" },
-        "script": { "$ref": "#/$defs/ScriptStep" }
+        "script": { "$ref": "#/$defs/ScriptStep" },
+        "query": { "$ref": "#/$defs/QueryStep" }
       },
       "allOf": [
         {
@@ -274,6 +275,10 @@
         {
           "if": { "properties": { "type": { "const": "script" } } },
           "then": { "required": ["script"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "query" } } },
+          "then": { "required": ["query"] }
         }
       ]
     },
@@ -440,6 +445,24 @@
       "properties": {
         "input": { "type": "string", "description": "Template-substitutable; usually {{ steps.X.output }}." },
         "expression": { "type": "string", "description": "jq-flavored projection: '.path' / '.items[0]' / '.a + .b' etc." }
+      }
+    },
+    "QueryStep": {
+      "type": "object",
+      "required": ["source"],
+      "additionalProperties": false,
+      "description": "Deterministic, read-only aggregate query over the run's own workspace's operational data. No LLM, no network egress. Output is a JSON object; use a transform step to extract a single field (e.g. '.summary_md') for a downstream notify/http step.",
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["pipeline_runs"],
+          "description": "Only 'pipeline_runs' is supported today: run counts, cost, and top failures over a trailing window — the data source behind the workspace-digest routine template."
+        },
+        "window_hours": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bounds the query to rows from the trailing N hours. Default 24 when 0/absent; capped at 720 (30 days) at runtime regardless of what's authored here."
+        }
       }
     },
     "NotifyStep": {

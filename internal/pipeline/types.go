@@ -323,6 +323,13 @@ type Step struct {
 	// to shell out to a script": faster, cheaper, and reproducible.
 	Script *ScriptStep `json:"script,omitempty"`
 
+	// query fields (Type == StepQuery). A deterministic, read-only
+	// aggregate query over the run's own workspace's operational data —
+	// no LLM, no network egress. Powers the workspace-digest routine
+	// template (#1422 item 4): query pipeline_runs → notify. See
+	// QueryStep.
+	Query *QueryStep `json:"query,omitempty"`
+
 	// Hooks are per-step lifecycle steps (Wave 4.1): before runs ahead
 	// of this step (its failure fails the step), after runs once this
 	// step completes. Same deterministic-side-channel restriction as
@@ -497,6 +504,22 @@ type NotifyStep struct {
 	Priority string `json:"priority,omitempty"`
 }
 
+// QueryStep is a deterministic, read-only aggregate query over the run's
+// own workspace's operational data (Type == StepQuery, #1422 item 4). No
+// LLM, no network egress — the runner queries the database directly and
+// scopes strictly to RunInput.WorkspaceID, so a routine can never read
+// another tenant's data regardless of what it's authored to ask for.
+type QueryStep struct {
+	// Source selects the query. Only "pipeline_runs" is supported today
+	// (run counts, cost, and top failures over a trailing window — the
+	// data source behind the workspace-digest routine template).
+	Source string `json:"source"`
+	// WindowHours bounds the query to rows from the trailing N hours.
+	// Default 24 when zero; capped at 720 (30 days) regardless of what's
+	// authored, so a misconfigured digest can't force an unbounded scan.
+	WindowHours int `json:"window_hours,omitempty"`
+}
+
 // StepType is the closed set of step kinds the executor recognises.
 // Adding a new kind requires updating the parser, the executor switch,
 // and the runtime tier resolver. Keep the list short and well-tested.
@@ -511,6 +534,7 @@ const (
 	StepTransform    StepType = "transform"
 	StepNotify       StepType = "notify"
 	StepScript       StepType = "script"
+	StepQuery        StepType = "query"
 )
 
 // Complexity tags a step's reasoning depth, mapping to a workspace-

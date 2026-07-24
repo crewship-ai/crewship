@@ -1,0 +1,95 @@
+---
+title: "Digest"
+description: "Workspace digest routine — a token-zero ops summary of runs, cost, and failures, delivered via the notification system."
+icon: "newspaper"
+---
+
+# crewship digest
+
+The **workspace-digest** routine (issue #1422 item 4) is a token-zero ops
+digest — run counts, total cost, and top failures over a trailing 24h
+window — posted to the workspace inbox and fanned out to Slack/email/etc
+via your existing [notification channel preferences](/guides/notifications).
+It ships seeded into every fresh workspace; `crewship digest enable`
+creates it on demand for a workspace that predates the template (or that
+nuked its seed data) and wires a cron schedule.
+
+```bash
+crewship digest <subcommand> [flags]
+```
+
+## How it's built
+
+Three deterministic [step types](/guides/routines#step-types), zero LLM
+spend, zero network egress:
+
+1. **`query`** (`source: pipeline_runs`) — a read-only aggregate over the
+   run's own workspace, strictly scoped to `workspace_id` (see [the `query`
+   step docs](/guides/routines#query)).
+2. **`transform`** — extracts the pre-rendered `summary_md` field from the
+   query step's JSON output.
+3. **`notify`** (`to: workspace`) — posts the digest to the workspace
+   inbox. This is the **existing** #1412 notification system, used
+   unmodified: recipients configure Slack/email/etc delivery via
+   `crewship notifychannel` + `crewship notify prefs`, exactly like any
+   other routine's `notify` step.
+
+The routine declares `agentless: true` — genuinely, not "agentless-ish":
+every step in the chain is deterministic.
+
+## `crewship digest enable`
+
+Ensures the routine exists and is scheduled. Both steps are idempotent —
+running it again with the routine and a schedule already in place is a
+no-op (other than confirming the current state).
+
+```bash
+crewship digest enable --crew ops
+crewship digest enable --crew ops --cron "0 9 * * 1-5"     # weekdays 9am
+crewship digest enable --crew ops --when "every day at 9am"
+```
+
+| Flag | Required | Description |
+|------|:---:|-------------|
+| `--crew` | only if the routine doesn't exist yet | Crew slug/id that will own the routine. |
+| `--cron` | | Cron expression for the digest schedule. Default `0 8 * * *` (daily 08:00 UTC). Mutually exclusive with `--when`. |
+| `--when` | | Natural-language schedule phrase — same parser as [`routine schedules create --when`](/cli/routine#schedules-create). Mutually exclusive with `--cron`. |
+| `--yes` | | Skip the `--when` confirmation prompt. |
+
+What it does, step by step:
+
+1. `GET /pipelines/workspace-digest` — if the routine already exists, skip creation.
+2. If missing: resolves `--crew` to a crew id, then saves
+   `seeddata.WorkspaceDigestDefinition` — the **same definition the seeder
+   uses** — through the normal `test_run` → `save_token` → `save` flow
+   (identical to `routine save`; no privileged skip-gate path).
+3. Lists existing schedules; if one already targets `workspace-digest`,
+   leaves it alone and reports its id. Otherwise creates one with the
+   resolved cron expression.
+
+```bash
+$ crewship digest enable --crew ops
+Routine workspace-digest already exists.
+A schedule already targets workspace-digest (id=psched_abc123) — leaving its cadence as-is. Use `crewship routine schedules update psched_abc123 --cron '...'` to change it.
+Configure delivery to Slack/email: `crewship notifychannel add ...` + `crewship notify prefs set`.
+```
+
+`--format json` returns `{routine_created, schedule_created, schedule_id, cron_expr}` for scripting.
+
+## Changing the cadence or turning it off
+
+`digest enable` never touches an existing schedule's cadence — use the
+ordinary schedule commands once it exists:
+
+```bash
+crewship routine schedules list --slug workspace-digest
+crewship routine schedules update <schedule_id> --cron "0 9 * * 1-5"
+crewship routine schedules disable <schedule_id>   # pause without deleting
+```
+
+## See also
+
+- [Routines guide — `query` step](/guides/routines#query)
+- [Routines guide — Cron schedules](/guides/routines#cron-schedules)
+- [Outbound notifications guide](/guides/notifications) — configure Slack/email delivery for the digest (and every other `notify` step / terminal-run notification)
+- [`crewship notify`](/cli/notify) — `notify prefs` / `notifychannel` manage delivery
