@@ -883,7 +883,7 @@ crewship routine schedules create --slug summarize-text \
     --inputs '{"text":"…default"}'
 ```
 
-5-field cron expression. Scheduler runs in-process and ticks every 30s, so minimum resolution is 1 minute.
+5-field cron expression. Scheduler runs in-process and ticks every 30s, so minimum resolution is 1 minute. Multiple schedules due in the same tick fire **concurrently** (a bounded pool of up to 12 at once) — a slow routine no longer stalls every other co-due schedule for the rest of that tick.
 
 <Warning>
 Single-instance only — running multiple replicas would double-fire (no leader election yet).

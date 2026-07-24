@@ -437,11 +437,38 @@ type PipelineScheduler struct {
 	// without SetEmitter (most existing tests) keep working unchanged.
 	emitter Emitter
 
+	// maxConcurrency bounds how many due schedules fire at once per tick
+	// (#1406). Before this, tick() called fireOne serially — one slow
+	// COMPLETED/FAILED routine stalled every other due schedule for the
+	// rest of that 30s tick. Mirrors PendingRunDispatcher's worker-pool
+	// pattern (pending_dispatcher.go). Zero (the NewPipelineScheduler
+	// default) falls back to defaultScheduleDispatchConcurrency at the
+	// first tick; tests may set it directly before calling tick/Start.
+	maxConcurrency int
+	// sem is the bounded worker pool, sized lazily (via poolOnce) on the
+	// first tick so a maxConcurrency set directly after construction (as
+	// tests do) still takes effect.
+	sem      chan struct{}
+	poolOnce sync.Once
+	// dispatchSaturatedCount counts ticks where at least one due
+	// schedule had to wait for a free pool slot — the observability
+	// breadcrumb #1406 asks for so an under-provisioned scheduler (more
+	// due schedules per tick than maxConcurrency) is visible rather than
+	// silently queueing.
+	dispatchSaturatedCount atomic.Int64
+
 	stopCh    chan struct{}
 	stopped   chan struct{}
 	startOnce sync.Once
 	stopOnce  sync.Once
 }
+
+// defaultScheduleDispatchConcurrency bounds how many due schedules fire
+// concurrently in one tick when the caller hasn't overridden
+// maxConcurrency. Same band as PendingRunDispatcher's
+// defaultDispatchConcurrency (#834) — high enough that co-due schedules
+// start together, low enough not to stampede the executor/provider.
+const defaultScheduleDispatchConcurrency = 12
 
 // SetLeaderGate attaches a leader-election gate so this scheduler only fires
 // while its replica holds the scheduler lease. Call before Start. Passing nil
@@ -504,6 +531,16 @@ func (s *PipelineScheduler) run(ctx context.Context) {
 	}
 }
 
+// tick fires every due schedule for this poll. Schedules dispatch onto a
+// bounded worker pool (mirrors PendingRunDispatcher, pending_dispatcher.go)
+// instead of running serially (#1406) — one slow COMPLETED/FAILED routine
+// used to stall every other due schedule for the rest of the 30s tick.
+// tick blocks until every schedule dispatched THIS call has finished (a
+// per-tick sync.WaitGroup, not the scheduler's lifetime), so callers that
+// invoke tick() directly and immediately assert on the outcome (existing
+// tests, force-fire paths) keep working unchanged — what changed is that
+// due schedules within one tick now run CONCURRENTLY with each other
+// rather than one-at-a-time.
 func (s *PipelineScheduler) tick(ctx context.Context) {
 	// Leader gate: on a multi-replica deploy only the lease holder fires, so
 	// two replicas don't both dispatch the same due schedule. Nil gate (the
@@ -516,9 +553,52 @@ func (s *PipelineScheduler) tick(ctx context.Context) {
 		s.logger.Warn("pipeline scheduler: list due", "error", err)
 		return
 	}
-	for _, sched := range due {
-		s.fireOne(ctx, sched)
+	if len(due) == 0 {
+		return
 	}
+	s.poolOnce.Do(func() {
+		max := s.maxConcurrency
+		if max < 1 {
+			max = defaultScheduleDispatchConcurrency
+		}
+		s.maxConcurrency = max
+		s.sem = make(chan struct{}, max)
+	})
+
+	var wg sync.WaitGroup
+	saturatedThisTick := false
+	for _, sched := range due {
+		select {
+		case s.sem <- struct{}{}:
+		default:
+			// Pool saturated: every worker slot is already claimed by an
+			// earlier due schedule in THIS tick. Record the breadcrumb once
+			// per tick (not once per waiting schedule — that would just be
+			// a duplicate signal) so an under-provisioned scheduler (more
+			// co-due schedules than maxConcurrency) is observable instead
+			// of silently queueing, then fall through to a blocking
+			// acquire — the schedule still fires, just after a slot frees.
+			if !saturatedThisTick {
+				saturatedThisTick = true
+				s.dispatchSaturatedCount.Add(1)
+				s.logger.Warn("pipeline scheduler: dispatch pool saturated",
+					"due_count", len(due), "max_concurrency", s.maxConcurrency)
+			}
+			select {
+			case s.sem <- struct{}{}:
+			case <-ctx.Done():
+				wg.Wait()
+				return
+			}
+		}
+		wg.Add(1)
+		go func(sc *Schedule) {
+			defer wg.Done()
+			defer func() { <-s.sem }()
+			s.fireOne(ctx, sc)
+		}(sched)
+	}
+	wg.Wait()
 }
 
 // ScheduledFireIdempotencyKey derives a deterministic idempotency key for one
