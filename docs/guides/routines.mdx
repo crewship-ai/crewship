@@ -267,9 +267,13 @@ Semantics (mirroring [Required integrations](#required-integrations)):
   probe work.
 - **Fail-open on infra, fail-closed on absence.** A probe *error* (DB hiccup)
   allows the run with a warning; a *confirmed-missing* credential blocks it.
-- **`run` is gated; `dry_run` / the save draft-gate are not.** A preview
-  invokes no steps and resolves no secrets, so declaring ahead of connecting
-  never blocks authoring.
+- **Enforced wherever `integrations_required` is.** Live `run`, `run_batch`,
+  internal runs, and the `test_run` save-preview gate all check it — the same
+  precondition boundary that already probes for required integrations and
+  resources. Only the executor's pure `dry_run` mode — which invokes no steps
+  and resolves no secrets — is exempt. Persisting a well-formed draft is still
+  fine (see above); it's *running* and the *test-run preview* that block until
+  the credential is connected.
 
 ## Capability manifest
 

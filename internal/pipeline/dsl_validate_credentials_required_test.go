@@ -51,6 +51,15 @@ func TestValidateRequiredCredentials(t *testing.T) {
 		}
 	})
 
+	t.Run("blank entry mixed with a valid one is still rejected", func(t *testing.T) {
+		// Regression: the empty-type check must run even when the list also
+		// holds a valid entry (len(types) != 0), not only on an all-empty list.
+		dsl := &DSL{Name: "x", CredsRequired: []CredReq{{Type: "stripe"}, {Type: ""}}}
+		if err := ValidateRequiredCredentials(ctx, dsl, probe); err == nil {
+			t.Fatal("expected failure for a blank entry mixed with a valid one")
+		}
+	})
+
 	t.Run("nil probe fails closed", func(t *testing.T) {
 		dsl := &DSL{Name: "x", CredsRequired: []CredReq{{Type: "stripe"}}}
 		if err := ValidateRequiredCredentials(ctx, dsl, nil); err == nil {

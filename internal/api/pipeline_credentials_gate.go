@@ -23,10 +23,15 @@ import (
 //   - probe error on a type → FAIL-OPEN for that type (treated as present):
 //     same bias to availability as the sibling gates.
 //
-// Declaring a credential is always allowed at SAVE time (the dry-run save
-// gate does not call this); enforcement lives here on the live-run path,
-// where the {{ secrets.* }} resolver would otherwise fail deep in a runner
-// with an opaque auth error instead of a clear, actionable 422.
+// Declaring a credential is always allowed at persist/save time — a
+// definition may name a credential the vault doesn't hold yet. Enforcement
+// runs on every dispatch path that would actually resolve secrets: Run,
+// InternalRun, RunBatch, AND the TestRun save-preview gate, where it sits
+// alongside its sibling gateMissingIntegrations / gateMissingResources
+// preconditions. Only the executor's own dry_run mode (which carries no
+// persisted status and touches no vault) is exempt. Enforcing here means the
+// {{ secrets.* }} resolver never fails deep in a runner with an opaque auth
+// error instead of a clear, actionable 422.
 func (h *PipelineHandler) gateMissingCredentials(w http.ResponseWriter, r *http.Request, workspaceID, crewID, crewName string, dsl *pipeline.DSL) bool {
 	required := pipeline.RequiredCredentialTypes(dsl)
 	if len(required) == 0 {

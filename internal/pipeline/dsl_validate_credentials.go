@@ -96,17 +96,19 @@ type CredentialProbe func(ctx context.Context, credType string) (bool, error)
 // caller runs this at the enforcement boundary (the API run gate), passing
 // a probe scoped to the running workspace + author crew.
 func ValidateRequiredCredentials(ctx context.Context, dsl *DSL, probe CredentialProbe) error {
-	types := RequiredCredentialTypes(dsl)
-	if len(types) == 0 {
-		// Reject a declared-but-empty entry so a malformed
-		// `credentials_required: [{}]` doesn't pass as "nothing required".
-		if dsl != nil {
-			for _, cr := range dsl.CredsRequired {
-				if strings.TrimSpace(cr.Type) == "" {
-					return errors.New("pipeline: credentials_required entry missing type")
-				}
+	// Reject any declared-but-empty entry unconditionally — a malformed
+	// `credentials_required: [{}]`, OR a blank entry mixed with valid ones
+	// (`[{"type":"stripe"},{}]`), must never pass silently. Checked before the
+	// empty-list fast path so a non-empty list with one blank entry still trips.
+	if dsl != nil {
+		for _, cr := range dsl.CredsRequired {
+			if strings.TrimSpace(cr.Type) == "" {
+				return errors.New("pipeline: credentials_required entry missing type")
 			}
 		}
+	}
+	types := RequiredCredentialTypes(dsl)
+	if len(types) == 0 {
 		return nil
 	}
 	if len(types) > maxCredentialsRequired {
