@@ -36,7 +36,7 @@ func TestExecutor_StatusGate_CallPipeline(t *testing.T) {
 
 	// Belt: the explicit reject in runCallPipelineStep wraps ErrRoutineNotActive.
 	_, _, _, err := exec.runCallPipelineStep(ctx,
-		Step{ID: "s", Type: StepCallPipeline, PipelineSlug: "disabled-child"}, parent, render, 0)
+		Step{ID: "s", Type: StepCallPipeline, PipelineSlug: "disabled-child"}, parent, render, 0, "run_parent", 0)
 	if err == nil {
 		t.Fatalf("expected disabled call_pipeline target to be rejected, got nil error")
 	}

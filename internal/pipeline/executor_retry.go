@@ -44,7 +44,7 @@ func (e *Executor) runStepWithRetry(
 		rp = defaultRetryPolicy()
 	}
 	if rp == nil || rp.MaxAttempts <= 1 {
-		return e.runStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit, parentRender, depth)
+		return e.runStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit, parentRender, depth, priorCostUSD)
 	}
 
 	maxAttempts := rp.MaxAttempts
@@ -65,12 +65,11 @@ func (e *Executor) runStepWithRetry(
 		classifier = nil
 	}
 
-	// Cost ceiling: reading in.dsl keeps the retry loop honest about the
-	// run-level budget so it stops mid-retry instead of overrunning it.
-	var maxCost float64
-	if in.dsl != nil {
-		maxCost = in.dsl.MaxCostUSD
-	}
+	// Cost ceiling: the run's EFFECTIVE cap (its own max_cost_usd tightened
+	// by any budget an ancestor call_pipeline frame handed down, #1427 2.4)
+	// keeps the retry loop honest about the budget so it stops mid-retry
+	// instead of overrunning it.
+	maxCost := effectiveCostCap(in)
 
 	var (
 		lastOut string
@@ -83,7 +82,7 @@ func (e *Executor) runStepWithRetry(
 		if err := ctx.Err(); err != nil {
 			return "", costSum, 0, err
 		}
-		out, c, dur, err := e.runStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit, parentRender, depth)
+		out, c, dur, err := e.runStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit, parentRender, depth, priorCostUSD)
 		costSum += c
 		if err == nil {
 			return out, costSum, dur, nil

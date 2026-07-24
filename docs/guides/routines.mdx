@@ -150,6 +150,7 @@ Anywhere a string is interpolated (prompt, http URL/body/headers, wait until, co
 - `steps.Y.output.path` — JSON path into a step's output (when output parses as JSON)
 - `env.AUTHOR_CREW_NAME` / etc. — read-only allowlist of execution context
 - `secrets.<type>` — a workspace-vault credential, resolved at run time **by type** (see [Secrets](#secrets-secrets-type) below)
+- `routine.state.<key>` — durable cross-run state carried forward from a **previous** run (see [Cross-run state](#cross-run-state-routine-state-key) below)
 
 Save-time validator walks **every** template-bearing field (prompt, nested inputs, http url/body/headers, wait until, event_filter, approval_prompt, code body, code env values, transform input, transform expression, if condition) and rejects placeholders that reference unknown inputs or unseen-yet steps.
 
@@ -180,6 +181,29 @@ Templates are **regex substitution, not expression evaluation**. There is no ari
 
 <Info>
 Save-time validation walks **every** template-bearing field and rejects placeholders that reference unknown inputs or unseen-yet steps — so a typo'd `{{ inputs.tyop }}` fails at save, not at 3am in production.
+</Info>
+
+### Cross-run state (`{{ routine.state.<key> }}`)
+
+`run.metadata.*` is per-run scratch — gone when the run ends. **Cross-run state** carries a value *forward* to the next run of the same routine, which is what every incremental / polling job needs: a **watermark** ("last processed id / timestamp") so each run picks up where the last left off.
+
+- **Read** with `{{ routine.state.<key> }}`. A key that was never written renders empty (like a missing input). The value you read is the snapshot **as of run start** — it reflects what a *prior* run wrote, not a write earlier in this same run.
+- **Write** with a step's `state_write` binding — a map of `key → template`, rendered **after** the step completes (so it can reference the step's own output) and persisted for the next run:
+
+```json
+{
+  "id": "sync",
+  "type": "agent_run",
+  "agent_slug": "importer",
+  "prompt": "Import records created after id {{ routine.state.last_id }}. Return the highest id you imported.",
+  "state_write": { "last_id": "{{ steps.sync.output }}" }
+}
+```
+
+State is **isolated per schedule**: two cron schedules of the same routine keep independent watermarks (keyed on `(routine, schedule)`); manual / webhook runs share a single default bucket per routine. It is **durable** — a value written before a restart is read after it — because it lives in the database, not memory. A [wake gate](#wake-gates) probe reads the **same** bucket its main scheduled routine writes, so an agentless probe can gate on the last watermark.
+
+<Info>
+State is a small key/value store for coordination values (cursors, timestamps, counts), not a data warehouse. Writes are **best-effort** — a failed state write logs a warning and never fails the step. Values are opaque strings; JSON-encode a structure yourself if you need one.
 </Info>
 
 ## Required integrations
@@ -724,9 +748,43 @@ For the zero-config version — a desktop ping when a run *ends* (success or fai
 
 To reach **outside** Crewship when a run completes or fails — email or a signed webhook to an admin, a Slack relay, or your own service — configure [outbound notification channels](/guides/notifications). The `notify` step is the in-product half; outbound channels are the half that reaches people who aren't watching the inbox.
 
+### `foreach` — fan out over an array
+
+```json
+{
+  "id": "process_each",
+  "type": "foreach",
+  "foreach": {
+    "items": "{{ inputs.urls }}",
+    "as": "url",
+    "parallelism": 8,
+    "steps": [
+      { "id": "fetch",  "type": "http",      "http": { "method": "GET", "url": "{{ inputs.url }}" } },
+      { "id": "digest", "type": "agent_run", "agent_slug": "summarizer", "prompt": "Summarize: {{ steps.fetch.output }}" }
+    ]
+  }
+}
+```
+
+Runs the **body** once per element of a JSON array, collecting each item's result into a JSON array as the step's output (`{{ steps.process_each.output }}` → `["…","…"]`, in input order).
+
+| Field | Notes |
+| --- | --- |
+| `items` | Template that must render to a **JSON array** — usually `{{ inputs.<name> }}` or `{{ steps.<id>.output }}`. An empty array is a valid no-op (output `[]`). |
+| `as` | Name the current element is bound to inside the body, read as `{{ inputs.<as> }}` (or `{{ inputs.<as>.field }}` for object elements). Default `item`. |
+| `parallelism` | Max items in flight at once. `0` (default) uses the platform wave concurrency; `1` forces sequential; higher values are clamped to the wave cap. |
+| `steps` | The per-item body. Steps run **sequentially within an item** and **in parallel across items** (bounded). Each body step sees the parent's inputs, the loop variable, every upstream (pre-`foreach`) step output, and its own earlier body steps. |
+
+Within an item the body runs like a mini-pipeline: per-step `retry:`, `validation`, `outcomes`, and tier escalation all apply. **Cost is summed across every item** and attributed to the `foreach` step, so `max_cost_usd` still bounds the whole fan-out. The first item that fails cancels the rest and fails the step (fail-fast). `wait`, `call_pipeline`, and a nested `foreach` are **not allowed** inside the body — the fan-out is a bounded, self-contained unit.
+
 ### Conditional `if`
 
-Any step can carry `"if": "{{ inputs.run_summary }}"`. The placeholder is rendered as a plain string — empty / `false` / `0` / `no` / `off` (case-insensitive) → step skipped and marked `<skipped>` in StepOutputs; anything else counts as truthy. Templates are plain substitution, not expression evaluation, so put the boolean upstream (e.g. set `inputs.run_summary` from the caller) rather than writing `==` / `!=` inside the `if` value.
+Any step can carry an `if:` gate. Two forms, chosen automatically:
+
+- **CEL expression** (no `{{ … }}`): evaluated against the typed variables `inputs`, `steps`, and `run`. Real comparisons and logic work — `"if": "inputs.dry_run == false"`, `"if": "steps.classify == \"spam\""`, `"if": "inputs.count > 0 && run.is_replay == false"`. A boolean result gates directly; a number/string result falls through to the truthy rule below.
+- **Template** (`"if": "{{ inputs.run_summary }}"`): rendered to a plain string, then truthy-checked — empty / `false` / `0` / `no` / `off` (case-insensitive) → step **skipped** and marked `<skipped>` in StepOutputs; anything else is truthy. A bare literal like `"yes"` / `"false"` follows the same truthy rule.
+
+The CEL variables are: `inputs.*` (the run's inputs, numbers stay numbers for arithmetic), `steps.<id>` (that step's output **string**), and `run.metadata.*` / `run.is_replay` / `run.replay_of`. A skipped step never trips `on_fail` — "didn't run" is structurally different from "ran and failed".
 
 ### DAG with `needs[]`
 

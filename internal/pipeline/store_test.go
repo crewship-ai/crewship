@@ -93,6 +93,15 @@ CREATE TABLE journal_chain_checkpoints (
     removed_json TEXT NOT NULL,
     mac TEXT NOT NULL
 );
+
+CREATE TABLE pipeline_routine_state (
+    pipeline_id  TEXT NOT NULL,
+    schedule_id  TEXT NOT NULL DEFAULT '',
+    key          TEXT NOT NULL,
+    value        TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    PRIMARY KEY (pipeline_id, schedule_id, key)
+);
 `
 
 func openStoreTestDB(t *testing.T) *sql.DB {

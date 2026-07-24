@@ -25,13 +25,14 @@ func parseRunMetadata(s string) map[string]any {
 // the two paths can't drift; metadata is parsed once per run
 // (parseRunMetadata) and threaded through rather than re-unmarshalled
 // per step.
-func buildStepRenderContext(inputs map[string]any, stepOutputs map[string]string, env map[string]string, metadata map[string]any, egressTargets []string) RenderContext {
+func buildStepRenderContext(inputs map[string]any, stepOutputs map[string]string, env map[string]string, metadata map[string]any, egressTargets []string, state map[string]string) RenderContext {
 	return RenderContext{
 		Inputs:        inputs,
 		StepOutputs:   stepOutputs,
 		Env:           env,
 		Metadata:      metadata,
 		EgressTargets: egressTargets,
+		State:         state,
 	}
 }
 

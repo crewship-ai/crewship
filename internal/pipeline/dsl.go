@@ -147,6 +147,9 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 		if err := validateStepHooks(st); err != nil {
 			return err
 		}
+		if err := validateForeachStep(st, dsl, agentSlugs); err != nil {
+			return err
+		}
 	}
 
 	if err := validateHooks(dsl); err != nil {
@@ -399,6 +402,34 @@ func validateTemplatesInStep(st Step, inputs, earlier map[string]struct{}) error
 		}
 	}
 
+	// foreach: the items template resolves against this step's own inputs/
+	// earlier-steps context; the body steps additionally see the loop
+	// variable (inputs.<as>) and each other in source order (#1419).
+	if st.Foreach != nil {
+		if err := walk(st.Foreach.Items); err != nil {
+			return err
+		}
+		as := st.Foreach.As
+		if as == "" {
+			as = "item"
+		}
+		bodyInputs := make(map[string]struct{}, len(inputs)+1)
+		for k := range inputs {
+			bodyInputs[k] = struct{}{}
+		}
+		bodyInputs[as] = struct{}{}
+		bodyEarlier := make(map[string]struct{}, len(earlier)+len(st.Foreach.Steps))
+		for k := range earlier {
+			bodyEarlier[k] = struct{}{}
+		}
+		for _, bs := range st.Foreach.Steps {
+			if err := validateTemplatesInStep(bs, bodyInputs, bodyEarlier); err != nil {
+				return err
+			}
+			bodyEarlier[bs.ID] = struct{}{}
+		}
+	}
+
 	return nil
 }
 
@@ -444,8 +475,15 @@ func checkTemplateRef(ref string, inputs, earlier map[string]struct{}) error {
 		// save time; whether the type actually resolves is enforced
 		// separately by credentials_required (declare it there to make an
 		// unresolvable secret a hard validation failure).
+	case "routine":
+		// routine.state.<key> — cross-run routine state (#1420), resolved
+		// at render time from the per-schedule state bucket. A missing key
+		// renders empty; the shape (routine.state.X) is checked here.
+		if len(parts) < 3 || parts[1] != "state" {
+			return fmt.Errorf("invalid template ref %q (expected routine.state.<key>)", ref)
+		}
 	default:
-		return fmt.Errorf("template ref %q uses unknown namespace %q (allowed: inputs, steps, env, run, secrets)", ref, parts[0])
+		return fmt.Errorf("template ref %q uses unknown namespace %q (allowed: inputs, steps, env, run, secrets, routine)", ref, parts[0])
 	}
 	return nil
 }
@@ -463,6 +501,25 @@ func checkTemplateRef(ref string, inputs, earlier map[string]struct{}) error {
 // architectural errors, not transient runtime conditions, and catching
 // them early gives the author a clean error message before any agent
 // invocation.
+// DraftAwareResolver wraps a workspace pipeline resolver so a lookup for the
+// pipeline currently being SAVED (draftSlug) returns the in-memory draft
+// instead of its last-persisted definition (#1427, 2.3a). Without this, a
+// B→A / A→B pair authored in the wrong order slips past CycleDetect: when B
+// (the draft, which now calls A) is saved, the walk resolves A from the DB
+// (A calls B), then resolves B again — but the inner resolver returns B's
+// STALE persisted definition (which doesn't yet call A), so the back-edge is
+// invisible and the cycle is missed until it churns at runtime. Feeding the
+// draft back for its own slug closes the graph so the save-time walk sees the
+// real back-edge and rejects the cycle. Any other slug falls through to inner.
+func DraftAwareResolver(draftSlug string, draft *DSL, inner func(slug string) (*DSL, error)) func(slug string) (*DSL, error) {
+	return func(slug string) (*DSL, error) {
+		if draftSlug != "" && slug == draftSlug {
+			return draft, nil
+		}
+		return inner(slug)
+	}
+}
+
 func CycleDetect(dsl *DSL, resolveTargets func(slug string) (*DSL, error)) error {
 	if dsl == nil {
 		return nil
@@ -572,6 +629,14 @@ type RenderContext struct {
 	// missing REQUIRED credential is caught separately by
 	// credentials_required enforcement.
 	Secrets map[string]string
+	// State is the routine's cross-run state bucket for the {{ routine.state.<key> }}
+	// read namespace (#1420). Loaded once per run from RoutineStateStore keyed on
+	// (pipeline_id, schedule_id) — the snapshot AS OF run start, so a step reads
+	// what a PRIOR run wrote (a step's own state_write lands for the NEXT run,
+	// not mid-run). A key with no stored value renders empty, like a missing
+	// input. Isolated per schedule; survives process restart (it is durable in
+	// SQL, not in-memory).
+	State map[string]string
 }
 
 // resolveRef walks one template body (already trimmed of {{ }}) against
@@ -646,6 +711,17 @@ func resolveRef(ref string, ctx RenderContext) (string, bool) {
 		// supported (a secret is an opaque scalar).
 		if v, ok := ctx.Secrets[parts[1]]; ok {
 			return v, true
+		}
+		return "", false
+	case "routine":
+		// routine.state.<key> — cross-run routine state (#1420), loaded per
+		// (pipeline, schedule) at run start. A missing key renders empty,
+		// like an input. Deeper paths aren't supported (a state value is an
+		// opaque scalar string).
+		if parts[1] == "state" && len(parts) == 3 {
+			if v, ok := ctx.State[parts[2]]; ok {
+				return v, true
+			}
 		}
 		return "", false
 	}

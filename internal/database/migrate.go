@@ -1712,6 +1712,11 @@ END;
 	// depending on an in-memory-only registry. See
 	// migrate_consts_v154_signal_waits.go (#1409).
 	{version: 154, name: "signal_waits", sql: migrationSignalWaits},
+	// v155 introduces pipeline_routine_state — durable cross-run key/value
+	// state scoped per (pipeline, schedule), backing the {{ routine.state.* }}
+	// read namespace and the `state_write` step binding (watermark patterns).
+	// See migrate_consts_v155_routine_state.go (#1420).
+	{version: 155, name: "routine_state", sql: migrationRoutineState},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
