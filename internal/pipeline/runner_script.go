@@ -139,11 +139,17 @@ func resolveInterpreter(explicit, absPath string) (string, error) {
 // becomes CREWSHIP_INPUT_<NAME_UPPER>, and script.args / script.env values are
 // template-substituted ({{ inputs.x }} / {{ steps.y.output }}) exactly like an
 // agent_run prompt. Stdout is the step output; ExitCode != 0 fails the step.
-func (e *Executor) runScriptStep(ctx context.Context, step Step, parentRender RenderContext, in RunInput, runID string) (string, float64, int64, error) {
+func (e *Executor) runScriptStep(ctx context.Context, step Step, parentRender RenderContext, in RunInput, runID string) (out string, cost float64, dur int64, err error) {
 	stepStart := time.Now()
 	if step.Script == nil {
 		return "", 0, 0, fmt.Errorf("script step %q missing body", step.ID)
 	}
+	// Resolve {{ secrets.<type> }} into the render context and load the
+	// scrubber; the deferred scrub strips the resolved value out of the
+	// step output and any error before either leaves this runner.
+	var secrets *secretScrub
+	parentRender, secrets = e.resolveStepSecrets(ctx, step, parentRender, in)
+	defer func() { out, err = secrets.scrub(out), secrets.scrubErr(err) }()
 	if e.scriptRunner == nil {
 		// Mirrors the code-step wiring guard: a silent no-op would let a
 		// "script" step falsely succeed. Production wiring installs the
@@ -195,7 +201,7 @@ func (e *Executor) runScriptStep(ctx context.Context, step Step, parentRender Re
 		PipelineRunID: runID,
 		StepID:        step.ID,
 	})
-	dur := time.Since(stepStart).Milliseconds()
+	dur = time.Since(stepStart).Milliseconds()
 
 	// Audit: record WHAT ran (argv), its exit code + duration, as an
 	// exec.command journal entry keyed to the run — a durable, post-hoc trail
@@ -207,7 +213,7 @@ func (e *Executor) runScriptStep(ctx context.Context, step Step, parentRender Re
 	if runErr != nil && exitForAudit == 0 {
 		exitForAudit = -1
 	}
-	e.emitScriptAudit(ctx, in, runID, step.ID, interp, abs, args, exitForAudit, dur, runErr)
+	e.emitScriptAudit(ctx, in, runID, step.ID, interp, abs, args, exitForAudit, dur, runErr, secrets)
 
 	if runErr != nil {
 		return res.Stdout, 0, dur, fmt.Errorf("script step %q: %w (stderr: %s)", step.ID, runErr, truncateForGraderLog(res.Stderr))
@@ -222,11 +228,14 @@ func (e *Executor) runScriptStep(ctx context.Context, step Step, parentRender Re
 // argv, exit code, and duration of a script step. This is the "complete audit"
 // half of first-class scripts: the run tree already carries the step + its
 // stdout output; this entry captures the command itself for post-hoc review.
-func (e *Executor) emitScriptAudit(ctx context.Context, in RunInput, runID, stepID, interp, absPath string, args []string, exitCode int, durMs int64, runErr error) {
+func (e *Executor) emitScriptAudit(ctx context.Context, in RunInput, runID, stepID, interp, absPath string, args []string, exitCode int, durMs int64, runErr error, secrets *secretScrub) {
 	argv := append(append([]string{}, strings.Fields(interp)...), append([]string{absPath}, args...)...)
 	// Rendered args can carry a templated secret — scrub before the command
-	// line is persisted / broadcast.
-	command := scriptAuditScrubber.Scrub(strings.Join(argv, " "))
+	// line is persisted / broadcast. Two layers: the shape-based auditor
+	// (catches known token formats in {{ inputs.* }} data) and the exact
+	// {{ secrets.* }} value scrub (catches an opaque vault value the regex
+	// set would miss).
+	command := secrets.scrub(scriptAuditScrubber.Scrub(strings.Join(argv, " ")))
 	payload := map[string]any{
 		"run_id":      runID,
 		"step_id":     stepID,
@@ -238,7 +247,7 @@ func (e *Executor) emitScriptAudit(ctx context.Context, in RunInput, runID, step
 		"duration_ms": durMs,
 	}
 	if runErr != nil {
-		payload["error"] = scriptAuditScrubber.Scrub(runErr.Error())
+		payload["error"] = secrets.scrub(scriptAuditScrubber.Scrub(runErr.Error()))
 	}
 	_, _ = ensureEmitter(e.emitter).Emit(ctx, journal.Entry{
 		WorkspaceID: in.WorkspaceID,

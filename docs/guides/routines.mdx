@@ -116,7 +116,7 @@ Minimal valid routine:
 | `estimated_cost_usd` | number | Author estimate; UI surfaces overrun warnings. |
 | `egress_targets` | array of string | Declared outbound hosts. Enforced at run time for every `http` step and `http` hook, including redirect hops; empty/omitted = unrestricted at the routine layer (the crew network policy and SSRF guards still apply). See [`http`](#http). |
 | `integrations_required` | array of string | Declared third-party integrations (Composio connector slugs like `"github"`, `"slack"`). **Declared AND enforced at run time** — see [Required integrations](#required-integrations) below. Slugs are lowercased/trimmed. |
-| `credentials_required` | array of CredReq | Declared credential needs (`type` + `scope`). Declared-only today (not yet enforced at run time). |
+| `credentials_required` | array of CredReq | Declared credential needs (`type` + `scope`). **Declared AND enforced at run time** — a live run is refused with `422` + `missing_credentials` when the author crew's vault holds no ACTIVE credential of a declared type. See [Required credentials](#required-credentials) below. |
 | `resources` | object | Agent-declared capability manifest — `datastores[]` and `tools[]` the routine touches that **can't** be inferred from the step graph. **Declared AND enforced at run time** against the crew's container resources — see [Required resources](#required-resources) below. See [Capability manifest](#capability-manifest) below for the shape. |
 | `max_cost_usd` | number | Runtime cost cap; run aborts if exceeded between steps. |
 | `concurrency_key` | string | Template that gates how many runs can be in flight at once for the same workspace + rendered key. Typical pattern `"{{ inputs.account_id }}"` to serialise per-tenant runs. Empty (default) = no gate. See [Concurrency + idempotency](/guides/routines-cookbook#recipe-5-idempotent-routine-with-concurrency-key) recipe and the fail-fast note in [Troubleshooting](#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value). |
@@ -149,8 +149,30 @@ Anywhere a string is interpolated (prompt, http URL/body/headers, wait until, co
 - `steps.Y.output` — full text output of an earlier step
 - `steps.Y.output.path` — JSON path into a step's output (when output parses as JSON)
 - `env.AUTHOR_CREW_NAME` / etc. — read-only allowlist of execution context
+- `secrets.<type>` — a workspace-vault credential, resolved at run time **by type** (see [Secrets](#secrets-secrets-type) below)
 
 Save-time validator walks **every** template-bearing field (prompt, nested inputs, http url/body/headers, wait until, event_filter, approval_prompt, code body, code env values, transform input, transform expression, if condition) and rejects placeholders that reference unknown inputs or unseen-yet steps.
+
+### Secrets (`{{ secrets.<type> }}`)
+
+A `code` / `script` / `notify` / `http` step that needs an API key, token, or password references it as `{{ secrets.<type> }}` — **never** by pasting the value into an `env:` map (which is versioned, exported, and diffed in **plaintext**). At run time the placeholder resolves to the decrypted value of a matching **ACTIVE** credential in the workspace vault, resolved **by type** exactly like an `http` step's [`credential_ref`](#http): workspace-scoped, author-crew isolated, newest-active-wins on rotation.
+
+```json
+{
+  "id": "charge",
+  "type": "script",
+  "script": {
+    "path": "scripts/charge.py",
+    "env": { "STRIPE_KEY": "{{ secrets.stripe }}" }
+  }
+}
+```
+
+The value **never** lands in the versioned DSL (the definition carries only the `{{ secrets.stripe }}` template), and it is **scrubbed** from the step's downstream output, the run journal, script-audit command lines, notification bodies, and error messages — so an echoed or reflected secret shows up as `[REDACTED:secret]`, not the real value. A type with no ACTIVE credential renders **empty** (like a missing input), so a public/optional call keeps working; to make an unresolvable credential a hard failure, declare it in [`credentials_required`](#required-credentials).
+
+<Warning>
+Because secrets are scrubbed from step outputs, you **cannot** thread a secret between steps as `{{ steps.X.output }}` — each step re-resolves `{{ secrets.<type> }}` fresh. This is deliberate: a plaintext secret must never flow through the step-outputs record.
+</Warning>
 
 <Warning>
 Templates are **regex substitution, not expression evaluation**. There is no arithmetic, no function calls, no inline conditionals. If you need logic, add another step.
@@ -210,9 +232,44 @@ under the workspace **default connector** (every agent inherits all connected
 apps), the gate treats integrations as available without enumerating them; and
 resolution reflects what's **wired**, not live connection health (a revoked
 account still reads as available until its binding is removed).
-`credentials_required` remains **declared-only** for now — it is not yet
-enforced at run time the way `integrations_required` is.
 </Note>
+
+## Required credentials
+
+A routine DECLARES the vault credentials its `{{ secrets.<type> }}` refs (and
+`http` `credential_ref`s) need with the top-level `credentials_required` array
+of `{ "type": "...", "scope": "..." }`. Like `integrations_required`, the type
+is matched against the workspace vault **by purpose, not by ID**, so a
+marketplace "stripe" template runs against any workspace holding a `stripe`
+credential.
+
+```json
+{
+  "name": "charge-and-notify",
+  "credentials_required": [{ "type": "stripe" }],
+  "steps": [ ... ]
+}
+```
+
+Semantics (mirroring [Required integrations](#required-integrations)):
+
+- **Declared is always allowed.** Saving/importing a routine that names a
+  credential the vault lacks is fine — you can connect it later. Save-time
+  validation only checks the list is well-formed (non-empty `type`, deduped,
+  within a count cap).
+- **Enforced at run time.** Before a live `run` starts, Crewship probes the
+  author crew's workspace vault for an **ACTIVE** credential of each declared
+  type. If any are missing the run is **blocked** with an RFC 7807 Problem
+  Details response, HTTP **422**, carrying a machine-readable
+  `missing_credentials: string[]` member and a human `detail`. No tokens spent,
+  no half-run with an opaque auth failure deep in a step.
+- **No-op fast path.** An empty / absent `credentials_required` does zero
+  probe work.
+- **Fail-open on infra, fail-closed on absence.** A probe *error* (DB hiccup)
+  allows the run with a warning; a *confirmed-missing* credential blocks it.
+- **`run` is gated; `dry_run` / the save draft-gate are not.** A preview
+  invokes no steps and resolves no secrets, so declaring ahead of connecting
+  never blocks authoring.
 
 ## Capability manifest
 
@@ -1482,6 +1539,6 @@ These are known gaps in the current MVP — none block production use, but they 
 
 - **Resume is at-least-once, step-granular** — restart recovery re-enters runs from the last persisted step boundary (see [Durability and restart recovery](#durability-and-restart-recovery)). The step that was in flight at the kill re-executes from scratch; there is no sub-step checkpointing, nested `call_pipeline` runs re-execute in full, and DAG runs recover at wave granularity. Runs whose definition changed since the run started (content-hash mismatch) fall back to `interrupted`. `max_cost_usd` under-counts true spend after a crash — see [Production notes](#production-notes).
 - **Single-instance scheduler** — running multiple replicas would double-fire schedules.
-- **`credentials_required` is declared-only** — unlike `integrations_required` and `resources`, it is not yet enforced at run time (see [Required integrations](#required-integrations)).
+- **`credentials_required` scope field is documentary** — the `type` is enforced at run time (a live run is refused with `422` + `missing_credentials` when the vault lacks an ACTIVE credential of that type — see [Required credentials](#required-credentials)), but the optional per-entry `scope` is not yet used for finer-grained matching.
 - **No cross-adapter tier swap yet** — same-provider model swap (Haiku→Opus) works; Claude→Gemini swap requires a shorthand→constant mapping not yet wired.
 - **No NL→cron converter** — ops still hand-type `0 9 * * *`. Foundation PRD has the design; not in MVP.

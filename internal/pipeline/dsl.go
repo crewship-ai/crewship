@@ -437,8 +437,15 @@ func checkTemplateRef(ref string, inputs, earlier map[string]struct{}) error {
 		// run.metadata.<key> / run.is_replay / run.replay_of — resolved
 		// at render time from the run's metadata + env (Wave 2.4). A
 		// missing key renders empty, like inputs/steps.
+	case "secrets":
+		// secrets.<type> — resolved at render time from the workspace
+		// vault via the credential resolver (#1418), scrubbed from every
+		// step output / journal entry / error. Allowed like env/run at
+		// save time; whether the type actually resolves is enforced
+		// separately by credentials_required (declare it there to make an
+		// unresolvable secret a hard validation failure).
 	default:
-		return fmt.Errorf("template ref %q uses unknown namespace %q (allowed: inputs, steps, env, run)", ref, parts[0])
+		return fmt.Errorf("template ref %q uses unknown namespace %q (allowed: inputs, steps, env, run, secrets)", ref, parts[0])
 	}
 	return nil
 }
@@ -553,6 +560,18 @@ type RenderContext struct {
 	// (back-compat for routines that declare none); the crew
 	// network-policy gate and the httpsafe guard still apply.
 	EgressTargets []string
+	// Secrets maps a credential TYPE (e.g. "stripe") to its decrypted
+	// value for the {{ secrets.<type> }} render namespace (#1418). It is
+	// populated per-step by the executor (resolveStepSecrets) from the
+	// workspace vault — workspace + author-crew scoped, ACTIVE-only, the
+	// SAME resolver an http step's credential_ref uses. It is NEVER part
+	// of the versioned DSL: the definition carries only the template ref,
+	// the value is resolved at render time and scrubbed from every step
+	// output / journal entry / error. A type absent from this map renders
+	// empty (like a missing input) so a public step keeps working; a
+	// missing REQUIRED credential is caught separately by
+	// credentials_required enforcement.
+	Secrets map[string]string
 }
 
 // resolveRef walks one template body (already trimmed of {{ }}) against
@@ -614,6 +633,18 @@ func resolveRef(ref string, ctx RenderContext) (string, bool) {
 			return "", false
 		}
 		if v, ok := ctx.Env[parts[1]]; ok { // is_replay, replay_of, run_id
+			return v, true
+		}
+		return "", false
+	case "secrets":
+		// secrets.<type> — resolved at render time from the workspace
+		// vault (populated in ctx.Secrets by resolveStepSecrets). A type
+		// with no ACTIVE credential renders empty, like a missing input:
+		// the value never appears here unless it was actually resolved,
+		// and the runner scrubs it back out of any output/error it lands
+		// in. parts[1] is the credential type; deeper paths aren't
+		// supported (a secret is an opaque scalar).
+		if v, ok := ctx.Secrets[parts[1]]; ok {
 			return v, true
 		}
 		return "", false
