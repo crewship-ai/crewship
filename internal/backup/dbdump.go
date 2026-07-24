@@ -118,12 +118,19 @@ var BackupTables = []string{
 	"missions",
 	"crew_templates",
 	"credentials",
+	// composio_settings / keeper_governance_settings: workspace_id IS the
+	// PK (1 row/workspace), so the generic workspace_id=? scope applies.
+	"composio_settings",
+	"keeper_governance_settings",
 	// Depth 2: workspace via crews
 	"crew_members",
 	"agents",
 	"crew_connections",
 	"crew_mcp_servers",
 	"credential_crews",
+	// user_models: direct workspace_id; crew_id → crews (nullable), so it
+	// restores after crews.
+	"user_models",
 	// Depth 3+: workspace via agents
 	"agent_skills",
 	"agent_mcp_bindings",
@@ -135,16 +142,34 @@ var BackupTables = []string{
 	"approvals_queue",
 	"pipelines",
 	"pipeline_versions",
+	// pipeline-scoped children (pipeline_id → pipelines). pipeline_tags /
+	// routine_step_overrides carry workspace_id; pipeline_routine_state does
+	// NOT (see workspaceFilterSQL for its hand-rolled pipeline_id scope).
+	"pipeline_tags",
+	"routine_step_overrides",
+	"pipeline_routine_state",
 	"pipeline_schedules",
 	"pipeline_webhooks",
 	"pipeline_runs",
+	// run-scoped children (run_id → pipeline_runs). run_tags carries
+	// workspace_id; pipeline_run_step_outputs does NOT (hand-rolled scope).
+	// pending_runs carries workspace_id but also FKs pipeline_id → pipelines
+	// and fired_run_id → pipeline_runs, so it restores after both.
+	"pipeline_run_step_outputs",
+	"run_tags",
+	"pending_runs",
 	"pipeline_waitpoints", // suspended workflow state — durable
 	"gdpr_actions",        // Art. 15/17 compliance audit trail
 	// Credential audit/rotations: depend on credentials being in already
 	"credential_audit",
 	"credential_rotations",
-	// Chat sub-entities
+	// Chat sub-entities. chat_participants / chat_read_cursors have no
+	// workspace_id (composite PKs on chat_id+user_id); see workspaceFilterSQL
+	// for their hand-rolled chat_id → chats scope. Both restore after chats
+	// and users.
 	"chat_branches",
+	"chat_participants",
+	"chat_read_cursors",
 	"message_reactions",
 	"message_feedback",
 	// Memory / mission sub-entities
@@ -277,6 +302,20 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 		// bundles); bindings WITH credential_id will FK-fail on restore
 		// against a fresh target. Tracked separately.
 		return "agent_id IN (SELECT a.id FROM agents a JOIN crews c ON a.crew_id = c.id WHERE c.workspace_id = ?)", []any{workspaceID}, true
+	case "chat_participants", "chat_read_cursors":
+		// No workspace_id column (composite PK chat_id+user_id). Scope
+		// through the parent chat. Without this explicit case DumpWorkspace
+		// would fall to the generic workspace_id=? branch, find no such
+		// column, and silently SKIP the table (data loss).
+		return "chat_id IN (SELECT id FROM chats WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "pipeline_routine_state":
+		// No workspace_id column (PK pipeline_id+schedule_id+key). Scope
+		// through the owning routine/pipeline.
+		return "pipeline_id IN (SELECT id FROM pipelines WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "pipeline_run_step_outputs":
+		// No workspace_id column (PK run_id+step_id). Scope through the
+		// owning run.
+		return "run_id IN (SELECT id FROM pipeline_runs WHERE workspace_id = ?)", []any{workspaceID}, true
 	default:
 		// Generic case: table has a workspace_id column.
 		return "workspace_id = ?", []any{workspaceID}, false

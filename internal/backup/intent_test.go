@@ -5,6 +5,31 @@ import (
 	"testing"
 )
 
+// TestIncludedTables_AllInBackupTables is the guard that would have caught
+// the silent data-loss bug: a table marked IntentInclude in intent.go but
+// absent from dbdump.go's BackupTables is NEVER dumped (DumpWorkspace only
+// iterates BackupTables), so it is dropped from every workspace bundle
+// while the drift test stays green. Every IntentInclude table MUST appear
+// in BackupTables. (The reverse — a BackupTables entry that is not
+// IntentInclude — is covered by the restore-time drift check.)
+func TestIncludedTables_AllInBackupTables(t *testing.T) {
+	inBackup := make(map[string]bool, len(BackupTables))
+	for _, tbl := range BackupTables {
+		inBackup[tbl] = true
+	}
+	var missing []string
+	for _, tbl := range IncludedTables() {
+		if !inBackup[tbl] {
+			missing = append(missing, tbl)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		t.Fatalf("IntentInclude tables missing from BackupTables (silently dropped from every backup): %v\n"+
+			"add each to BackupTables in dbdump.go in FK-safe order; tables without a workspace_id column also need a workspaceFilterSQL case", missing)
+	}
+}
+
 func TestIncludedTables_ReturnsOnlyInclude(t *testing.T) {
 	got := IncludedTables()
 	if len(got) == 0 {
