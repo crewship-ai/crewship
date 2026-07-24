@@ -1587,9 +1587,13 @@ func (e *Executor) runAgentStep(
 	}
 
 	// Exhausted all tiers; surface the last failure reason
-	// (validation OR outcomes — they share lastValidationReason).
+	// (validation OR outcomes — they share lastValidationReason). Wrapped in
+	// errStepOutcomeExhausted so the per-step retry loop treats it as terminal
+	// by default (#1429, 2.10) — retrying re-runs the whole tier chain. The
+	// message is unchanged, so a retry_on predicate matching the text still
+	// opts in.
 	return "", totalCost, time.Since(startTotal).Milliseconds(),
-		fmt.Errorf("step failed after exhausting tiers: %s", lastValidationReason)
+		fmt.Errorf("%w: %s", errStepOutcomeExhausted, lastValidationReason)
 }
 
 // runCallPipelineStep handles a call_pipeline step by looking up the
