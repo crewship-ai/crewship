@@ -131,6 +131,61 @@ func TestScheduler_CircuitBreaker_TripsAfterKConsecutiveFailures(t *testing.T) {
 	}
 }
 
+// TestScheduler_CircuitBreaker_TripsWhenTargetRoutineDeleted pins the
+// load-failure path: a schedule whose target routine is soft-deleted can
+// never load its pipeline, so every fire returns early at the
+// target-load failure (GetByID filters deleted_at IS NULL). That path
+// records a FAILED run and raises a per-run alert, but historically
+// never consulted the circuit breaker — so the schedule fired, failed,
+// and spammed the inbox forever without ever auto-disabling. The breaker
+// must trip on this path exactly as it does for a runtime failure.
+func TestScheduler_CircuitBreaker_TripsWhenTargetRoutineDeleted(t *testing.T) {
+	r := newCircuitBreakerRig(t)
+	seedPipelineDef(t, r.db, "pipe_gone", "will-be-deleted", failingTransformDSL)
+	sched := r.saveScheduleWithMax(t, "pipe_gone", 3)
+
+	// Soft-delete the target routine. GetByID filters deleted_at IS NULL,
+	// so every subsequent fire takes the "target could not be loaded" path.
+	if _, err := r.db.Exec(`UPDATE pipelines SET deleted_at = ? WHERE id = ?`,
+		"2026-01-01T00:00:00Z", "pipe_gone"); err != nil {
+		t.Fatalf("soft-delete target routine: %v", err)
+	}
+
+	// Three distinct occurrences, each a fresh in-memory row the way the
+	// tick() loop would re-read it — mirrors the runtime-failure test.
+	var got *Schedule
+	for i := 0; i < 3; i++ {
+		got, _ = r.store.GetByID(context.Background(), sched.ID)
+		occ := time.Date(2026, 2, i+1, 8, 0, 0, 0, time.UTC)
+		got.NextRunAt = &occ
+		r.scheduler.fireOne(context.Background(), got)
+	}
+
+	final, err := r.store.GetByID(context.Background(), sched.ID)
+	if err != nil {
+		t.Fatalf("get schedule: %v", err)
+	}
+	if final.ConsecutiveFailures != 3 {
+		t.Errorf("consecutive_failures = %d, want 3", final.ConsecutiveFailures)
+	}
+	if final.Enabled {
+		t.Errorf("a schedule pointing at a deleted routine must trip the breaker and disable")
+	}
+	if final.DisabledReason != "circuit_breaker" {
+		t.Errorf("disabled_reason = %q, want %q", final.DisabledReason, "circuit_breaker")
+	}
+	// The load-failure alert dedups to one card: with no run id it falls
+	// back to the schedule id as the dedup key, so repeated load failures
+	// collapse to a single "failed_run" alert (by design — no flood).
+	if n := countInboxAlerts(t, r, "failed_run"); n != 1 {
+		t.Errorf("expected 1 deduped failed_run alert for the load-failure path, got %d", n)
+	}
+	// ...plus exactly one trip alert for the breaker itself.
+	if n := countInboxAlerts(t, r, "schedule_circuit_breaker_tripped"); n != 1 {
+		t.Errorf("expected exactly 1 circuit-breaker inbox alert, got %d", n)
+	}
+}
+
 func TestScheduler_CircuitBreaker_SuccessResetsCounter(t *testing.T) {
 	r := newCircuitBreakerRig(t)
 	seedPipelineDef(t, r.db, "pipe_fail", "always-fails", failingTransformDSL)

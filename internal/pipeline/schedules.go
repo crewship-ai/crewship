@@ -678,6 +678,13 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 		// it returns before the post-execution alert below, so without this
 		// a broken cron target fails silently forever.
 		s.alertFailedScheduledRun(ctx, sched, "", "", "", "the schedule's target routine could not be loaded (deleted or broken)")
+		// A permanently-broken target (deleted routine) fails every tick.
+		// recordRun just bumped the consecutive-failure count; consult the
+		// breaker here too so this path auto-disables like a runtime
+		// failure does — otherwise the schedule fires and fails forever.
+		// The pipeline never loaded, so there's no slug to label it with;
+		// maybeTripCircuitBreaker falls back to "target routine".
+		s.maybeTripCircuitBreaker(ctx, sched, "")
 		return
 	}
 	var inputs map[string]any
