@@ -6,6 +6,7 @@ import {
   formatBytes,
   awaitingApprovalRow,
   withAwaitingApproval,
+  extractVerdict,
 } from "@/lib/run-activity"
 // formatDuration moved to lib/time as formatDurationPrecise (byte-identical).
 import { formatDurationPrecise as formatDuration } from "@/lib/time"
@@ -261,5 +262,83 @@ describe("humanizeRun", () => {
     ])
     // 09Z precedes 09.5Z, even though a raw string sort would flip them.
     expect(rows.map((r) => r.title)).toEqual(["Ran command", "Completed"])
+  })
+})
+
+describe("summary.generated humanize case (#1403)", () => {
+  it("renders the verdict as the title, success tone for goal_met", () => {
+    const row = humanizeEntry(
+      entry({
+        entry_type: "summary.generated",
+        summary: "Tests pass and the fix landed.",
+        payload: {
+          outcome: "goal_met",
+          verdict: "Tests pass and the fix landed.",
+          summary: "The agent fixed the failing test and confirmed green.",
+        },
+      }),
+    )
+    expect(row).not.toBeNull()
+    expect(row!.tone).toBe("success")
+    expect(row!.title).toBe("Tests pass and the fix landed.")
+    expect(row!.detail).toBe("The agent fixed the failing test and confirmed green.")
+  })
+
+  it.each([
+    ["goal_met", "success"],
+    ["partial", "warn"],
+    ["needs_human", "warn"],
+    ["failed", "error"],
+  ] as const)("outcome %s maps to tone %s", (outcome, tone) => {
+    const row = humanizeEntry(entry({ entry_type: "summary.generated", payload: { outcome, verdict: "x" } }))
+    expect(row!.tone).toBe(tone)
+  })
+})
+
+describe("extractVerdict", () => {
+  it("pulls the verdict out of a raw entry list", () => {
+    const entries = [
+      entry({ entry_type: "run.started", ts: "2026-06-26T10:31:00Z" }),
+      entry({ entry_type: "exec.command", ts: "2026-06-26T10:31:05Z", payload: { command: "go test" } }),
+      entry({
+        entry_type: "summary.generated",
+        ts: "2026-06-26T10:31:10Z",
+        summary: "Tests pass.",
+        payload: { outcome: "goal_met", verdict: "Tests pass.", summary: "Ran the suite, all green." },
+      }),
+      entry({ entry_type: "run.completed", ts: "2026-06-26T10:31:09Z" }),
+    ]
+    const v = extractVerdict(entries)
+    expect(v).not.toBeNull()
+    expect(v!.outcome).toBe("goal_met")
+    expect(v!.verdict).toBe("Tests pass.")
+    expect(v!.summary).toBe("Ran the suite, all green.")
+  })
+
+  it("returns null when no summary.generated entry exists", () => {
+    expect(extractVerdict([entry({ entry_type: "run.completed" })])).toBeNull()
+  })
+
+  it("returns null when the outcome is missing or unrecognized (defensive against a stale/partial backend)", () => {
+    expect(
+      extractVerdict([entry({ entry_type: "summary.generated", payload: { verdict: "x" } })]),
+    ).toBeNull()
+    expect(
+      extractVerdict([
+        entry({ entry_type: "summary.generated", payload: { outcome: "vibes_immaculate", verdict: "x" } }),
+      ]),
+    ).toBeNull()
+  })
+
+  it("falls back to the entry's summary field when payload.verdict is absent", () => {
+    const v = extractVerdict([
+      entry({
+        entry_type: "summary.generated",
+        summary: "fallback verdict text",
+        payload: { outcome: "failed" },
+      }),
+    ])
+    expect(v).not.toBeNull()
+    expect(v!.verdict).toBe("fallback verdict text")
   })
 })

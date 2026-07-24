@@ -11,9 +11,12 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/llm"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -221,6 +224,18 @@ type InternalHandler struct {
 	// route (~52 routes share this one *InternalHandler instance, see
 	// registerInternalRoutes's single `internalAuth := internal.requireInternal`).
 	allowAnyWarnOnce sync.Once
+	// runVerdictProvider/runVerdictModel back the post-run outcome
+	// verdict (#1403): pre-resolved once at boot (mirrors
+	// buildAuxGatekeeper's provider selection) rather than re-resolved
+	// per run. nil provider disables verdict generation (e.g. the
+	// run_summary aux slot has no buildable provider). Wired via
+	// SetRunVerdict from router_internal.go.
+	runVerdictProvider llm.Provider
+	runVerdictModel    string
+	// verdictWG tracks the async generateRunVerdict goroutines spawned
+	// by UpdateRun so tests can wait for them instead of sleeping (same
+	// idiom as reconcileWG above).
+	verdictWG sync.WaitGroup
 }
 
 // postRunTriggerHook is the narrow interface UpdateRun calls. The
@@ -268,6 +283,27 @@ func (h *InternalHandler) SetContainer(cp provider.ContainerProvider) { h.contai
 // safe — approval_mode falls back to "" (harbormaster ModeNone).
 func (h *InternalHandler) SetPolicyResolver(r *policy.Resolver) {
 	h.policyResolver = r
+}
+
+// SetRunVerdict wires the pre-resolved LLM provider + model used to
+// generate a post-run outcome verdict (#1403) from UpdateRun. A nil
+// provider disables verdict generation entirely (the run_summary aux
+// slot had no buildable provider at boot) — UpdateRun no-ops the
+// verdict step in that case rather than erroring.
+func (h *InternalHandler) SetRunVerdict(p llm.Provider, model string) {
+	h.runVerdictProvider = p
+	h.runVerdictModel = model
+}
+
+// DrainVerdicts blocks until every in-flight post-run verdict goroutine
+// spawned by UpdateRun (ad-hoc agent runs) has finished, or timeout
+// elapses. Called during graceful shutdown after the listener stops but
+// BEFORE the journal writer closes, so a verdict mid-generation still
+// lands its journal entry instead of being silently dropped. Bounded so a
+// wedged LLM call can't hang shutdown. Returns true if drained, false on
+// timeout.
+func (h *InternalHandler) DrainVerdicts(timeout time.Duration) bool {
+	return pipeline.WaitTimeout(&h.verdictWG, timeout)
 }
 
 // SetComposioDefaultConnector arms (or disarms) the default-connector

@@ -47,12 +47,12 @@ func TestAuxStatus_HappyPath_DefaultsAllSlots(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	// MVP defaults: 5 explicit slots, every one on anthropic/claude-haiku-4-5
+	// MVP defaults: 6 explicit slots, every one on anthropic/claude-haiku-4-5
 	// (Fallback is NOT in the slot list — it's an internal backstop).
-	if got, want := len(resp.Slots), 5; got != want {
+	if got, want := len(resp.Slots), 6; got != want {
 		t.Fatalf("slot count = %d, want %d", got, want)
 	}
-	wantOrder := []string{"curator", "keeper", "behavior", "memory_health", "negative"}
+	wantOrder := []string{"curator", "keeper", "behavior", "memory_health", "negative", "run_summary"}
 	for i, row := range resp.Slots {
 		if row.Slot != wantOrder[i] {
 			t.Errorf("slots[%d].Slot = %q, want %q", i, row.Slot, wantOrder[i])
@@ -161,8 +161,8 @@ func TestAuxStatus_UnconfiguredWhenSlotAndFallbackEmpty(t *testing.T) {
 	var resp auxStatusResponse
 	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 
-	if len(resp.Slots) != 5 {
-		t.Fatalf("slot count = %d, want 5", len(resp.Slots))
+	if len(resp.Slots) != 6 {
+		t.Fatalf("slot count = %d, want 6", len(resp.Slots))
 	}
 	for _, row := range resp.Slots {
 		if row.Source != "unconfigured" {

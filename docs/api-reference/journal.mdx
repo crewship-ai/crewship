@@ -22,6 +22,7 @@ The journal is **append-only at the entry level** — there is no endpoint that 
 | GET | [`/api/v1/journal/count`](#count-entries) | Count entries matching a filter |
 | POST | [`/api/v1/journal/{id}/priority`](#set-entry-priority) | Set an entry's priority marker |
 | GET | [`/api/v1/journal/lookup`](#workspace-lookup-table) | Workspace lookup table for card enrichment |
+| GET | [`/api/v1/journal/spend`](#spend-rollup) | Cost rollup — by agent, by routine, top spenders |
 
 ---
 
@@ -316,6 +317,64 @@ Soft-deleted crews and agents (`deleted_at IS NOT NULL`) are filtered out. Missi
 The journal entries themselves never carry display strings — they store stable IDs only. This endpoint is the join surface used by every UI card.
 
 **Errors:** `401` on missing workspace; `500` on DB error.
+
+---
+
+## Spend rollup
+
+Cost rollup over `cost.incurred` journal entries and `pipeline_runs.cost_usd` (#1404) — a separate, journal-native surface from [Paymaster](/api-reference/paymaster)'s `/api/v1/paymaster/spend/*`.
+
+```
+GET /api/v1/journal/spend
+```
+
+**Query parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `window` | string | `24h`, `7d`, or `30d`. Default `24h`. Unknown values → `400` (not silently defaulted). |
+| `top` | integer | Bounds `top_routines`/`top_runs`. 1-50, default 5. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "window": "24h",
+  "total_cost_usd": 12.5,
+  "by_agent": [
+    {"date": "2026-07-24", "crew_id": "crw_backend", "agent_id": "agt_viktor", "cost_usd": 10.0, "call_count": 5}
+  ],
+  "by_routine": [
+    {"date": "2026-07-24", "pipeline_id": "pln_abc", "pipeline_slug": "nightly-report", "cost_usd": 2.5, "run_count": 2}
+  ],
+  "top_routines": [
+    {"kind": "routine", "id": "pln_abc", "label": "nightly-report", "cost_usd": 2.5}
+  ],
+  "top_runs": [
+    {"kind": "run", "id": "run_xyz", "label": "nightly-report", "cost_usd": 1.5}
+  ],
+  "truncated": false
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `total_cost_usd` | number | Sum of `cost.incurred` entries only — the ledger's source of truth. Not the sum of `by_routine`, which reads a denormalized copy of the same spend. Summed by a dedicated unbounded query, so it stays **exact even when `truncated` is set** (it is not affected by the `by_agent` row cap). |
+| `by_agent` | array | Day × crew × agent buckets, keyed on the **UTC** calendar day. |
+| `by_routine` | array | Day × routine buckets, keyed on the **UTC** calendar day. |
+| `top_routines` | array | Top-N routines by total spend across their runs in the window. |
+| `top_runs` | array | Top-N individual runs by cost in the window. |
+| `truncated` | boolean | Set when the window held more rows than the aggregation cap (20000) — the `by_agent`/`by_routine` breakdowns cover the most-recent rows only. `total_cost_usd` is unaffected. |
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Bad `window` or `top`. |
+| 401 | No workspace context. |
+| 500 | DB error. |
+
+CLI: `crewship spend --window 7d --top 10` — see [`crewship spend`](/cli/spend).
 
 ---
 

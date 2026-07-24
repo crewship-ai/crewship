@@ -33,6 +33,7 @@ type AuxiliaryModels struct {
 	Behavior     AuxModel `yaml:"behavior"`      // F4.2 behavior monitor
 	MemoryHealth AuxModel `yaml:"memory_health"` // F4.3 memory health evaluator
 	Negative     AuxModel `yaml:"negative"`      // F4.4 negative learning evaluator
+	RunSummary   AuxModel `yaml:"run_summary"`   // post-run outcome verdict (#1403)
 	Fallback     AuxModel `yaml:"fallback"`      // used when a specific slot is empty
 }
 
@@ -48,6 +49,7 @@ const (
 	SlotBehavior     Slot = "behavior"
 	SlotMemoryHealth Slot = "memory_health"
 	SlotNegative     Slot = "negative"
+	SlotRunSummary   Slot = "run_summary"
 )
 
 // DefaultAuxiliaryModels returns the MVP-default config: every slot
@@ -64,6 +66,7 @@ func DefaultAuxiliaryModels() AuxiliaryModels {
 		Behavior:     haiku(8 * time.Second),
 		MemoryHealth: haiku(15 * time.Second),
 		Negative:     haiku(5 * time.Second),
+		RunSummary:   haiku(15 * time.Second),
 		Fallback:     haiku(10 * time.Second),
 	}
 }
@@ -92,6 +95,7 @@ func AuxiliaryModelsFromEnv(base AuxiliaryModels, getenv func(string) string) Au
 		"BEHAVIOR":      &base.Behavior,
 		"MEMORY_HEALTH": &base.MemoryHealth,
 		"NEGATIVE":      &base.Negative,
+		"RUN_SUMMARY":   &base.RunSummary,
 		"FALLBACK":      &base.Fallback,
 	}
 	for name, slot := range slots {
@@ -128,6 +132,8 @@ func ResolveAux(cfg AuxiliaryModels, slot Slot) (AuxModel, error) {
 		picked = cfg.MemoryHealth
 	case SlotNegative:
 		picked = cfg.Negative
+	case SlotRunSummary:
+		picked = cfg.RunSummary
 	default:
 		return AuxModel{}, fmt.Errorf("llm: unknown aux slot %q", slot)
 	}

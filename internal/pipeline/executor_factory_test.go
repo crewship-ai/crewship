@@ -29,8 +29,11 @@ import (
 	"io"
 	"log/slog"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/llm"
 )
 
 // openFactoryTestDB layers every schema the fully-wired executor can
@@ -91,20 +94,40 @@ func fullExecutorDeps(t *testing.T, db *sql.DB, runner AgentRunner) ExecutorDeps
 	wpStore := NewSQLWaitpointStore(db)
 	t.Cleanup(wpStore.Close)
 	return ExecutorDeps{
-		Store:        NewStore(db),
-		Resolver:     NewResolver(db),
-		Runner:       runner,
-		Emitter:      &captureEmitter{},
-		DB:           db,
-		Waitpoints:   wpStore,
-		WS:           &captureWSBroadcaster{},
-		Runs:         NewRunRegistry(),
-		RunStore:     NewRunStore(db),
-		CodeRunner:   NewMultiCodeRunner(),
-		Signals:      NewSignalRegistry(),
-		ScriptRunner: &fakeScriptRunner{},
+		Store:              NewStore(db),
+		Resolver:           NewResolver(db),
+		Runner:             runner,
+		Emitter:            &captureEmitter{},
+		DB:                 db,
+		Waitpoints:         wpStore,
+		WS:                 &captureWSBroadcaster{},
+		Runs:               NewRunRegistry(),
+		RunStore:           NewRunStore(db),
+		CodeRunner:         NewMultiCodeRunner(),
+		Signals:            NewSignalRegistry(),
+		ScriptRunner:       &fakeScriptRunner{},
+		RunVerdictProvider: &stubVerdictProviderForFactoryTest{},
+		RunVerdictModel:    "claude-haiku-4-5",
+		VerdictWG:          &sync.WaitGroup{},
 	}
 }
+
+// stubVerdictProviderForFactoryTest is a minimal llm.Provider so
+// fullExecutorDeps can exercise the run-verdict wiring path in the
+// construction-parity test without a real LLM call ever happening —
+// the parity test only checks exec.runVerdict is non-nil, it never
+// invokes it.
+type stubVerdictProviderForFactoryTest struct{}
+
+func (s *stubVerdictProviderForFactoryTest) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	return &llm.Response{Content: `{"outcome":"goal_met","verdict":"ok","summary":"ok"}`}, nil
+}
+
+func (s *stubVerdictProviderForFactoryTest) Stream(ctx context.Context, req llm.Request, handler func(llm.StreamEvent) error) (*llm.Response, error) {
+	return nil, nil
+}
+
+func (s *stubVerdictProviderForFactoryTest) Name() string { return "stub" }
 
 // TestNewWiredExecutor_WiresEveryDependency is the regression guard for
 // the whole per-call-site-drift class. Two layers:
@@ -144,6 +167,7 @@ func TestNewWiredExecutor_WiresEveryDependency(t *testing.T) {
 		"signals":          exec.signals != nil,
 		"egressAllowed":    exec.egressAllowed != nil,
 		"credentialByType": exec.credentialByType != nil,
+		"runVerdict":       exec.runVerdict != nil,
 	}
 	for field, ok := range checks {
 		if !ok {

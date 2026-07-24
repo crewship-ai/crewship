@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ChevronRight, CheckCircle2, XCircle, Eye, Play, Square } from "lucide-react"
+import { ChevronRight, CheckCircle2, XCircle, AlertTriangle, HelpCircle, Eye, Play, Square } from "lucide-react"
 import { toast } from "sonner"
 import { Spinner } from "@/components/ui/spinner"
 import { usePipelineRuns } from "@/hooks/use-pipelines"
@@ -10,6 +10,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { useRunSubSpans } from "@/hooks/use-run-sub-spans"
 import { cn } from "@/lib/utils"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
+import { extractVerdict, type RunVerdict, type RunVerdictOutcome } from "@/lib/run-activity"
 import { RoutineRunsSkeleton } from "./routine-skeletons"
 import { Card, EmptyState, Pill } from "./_shared"
 import { RunTagChips } from "./routine-tag-chips"
@@ -245,16 +246,21 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
                       <Pill className="capitalize">{run.triggeredVia.replace(/_/g, " ")}</Pill>
                     </span>
                   )}
-                  {run.status === "failed" && run.errorMessage ? (
-                    <span
-                      className="min-w-0 flex-1 truncate text-[12px] text-rose-400/80"
-                      title={run.errorMessage}
-                    >
-                      {run.errorMessage}
-                    </span>
-                  ) : (
-                    <span className="flex-1" />
-                  )}
+                  {(() => {
+                    const verdict = verdictFromEntries(run.entries)
+                    if (verdict) return <RunVerdictSummary verdict={verdict} />
+                    if (run.status === "failed" && run.errorMessage) {
+                      return (
+                        <span
+                          className="min-w-0 flex-1 truncate text-[12px] text-rose-400/80"
+                          title={run.errorMessage}
+                        >
+                          {run.errorMessage}
+                        </span>
+                      )
+                    }
+                    return <span className="flex-1" />
+                  })()}
                   <span className="ml-auto flex shrink-0 items-center gap-3 font-mono text-[12px] tabular-nums text-muted-foreground">
                     {run.durationMs != null && run.durationMs > 0 && (
                       <span title="Run duration">{formatStepDuration(run.durationMs)}</span>
@@ -306,6 +312,54 @@ function RunStatusIcon({ status }: { status: "running" | "completed" | "failed" 
   if (status === "failed") return <XCircle className="h-4 w-4 shrink-0 text-rose-400" />
   if (status === "running") return <Spinner className="h-4 w-4 shrink-0 text-blue-400" />
   return <Eye className="h-4 w-4 shrink-0 text-muted-foreground" />
+}
+
+// verdictFromEntries adapts GroupedRun's loosely-typed journal entries
+// (ts/entry_type/severity/summary/payload — no `id`, `payload` typed
+// `unknown`) to lib/run-activity.ts's VerdictSourceEntry, so the same
+// extractVerdict used by the ad-hoc agent-run timeline (#1403) also
+// surfaces the routine-run verdict here.
+function verdictFromEntries(entries: GroupedRun["entries"]): RunVerdict | null {
+  return extractVerdict(
+    entries.map((e, i) => ({
+      id: String(i),
+      ts: e.ts,
+      entry_type: e.entry_type,
+      summary: e.summary,
+      payload: (e.payload ?? undefined) as Record<string, unknown> | undefined,
+    })),
+  )
+}
+
+const VERDICT_OUTCOME_ICON: Record<RunVerdictOutcome, typeof CheckCircle2> = {
+  goal_met: CheckCircle2,
+  partial: AlertTriangle,
+  needs_human: HelpCircle,
+  failed: XCircle,
+}
+
+const VERDICT_OUTCOME_PILL_TONE: Record<RunVerdictOutcome, "emerald" | "amber" | "rose"> = {
+  goal_met: "emerald",
+  partial: "amber",
+  needs_human: "amber",
+  failed: "rose",
+}
+
+/** Compact outcome pill + one-liner shown in the (always-visible)
+ * collapsed row header — satisfies "verdict as the first row" without a
+ * second nested expand state; the full detail stays behind the
+ * existing chevron → RunWaterfall expand. */
+function RunVerdictSummary({ verdict }: { verdict: RunVerdict }) {
+  const Icon = VERDICT_OUTCOME_ICON[verdict.outcome]
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-1.5" title={verdict.summary}>
+      <Pill tone={VERDICT_OUTCOME_PILL_TONE[verdict.outcome]} className="inline-flex shrink-0 items-center gap-1">
+        <Icon className="h-3 w-3" />
+        {verdict.outcome.replace(/_/g, " ")}
+      </Pill>
+      <span className="min-w-0 truncate text-[12px] text-foreground/70">{verdict.verdict}</span>
+    </span>
+  )
 }
 
 function RunWaterfall({

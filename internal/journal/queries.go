@@ -34,10 +34,16 @@ type Query struct {
 	ActorTypes   []ActorType // empty → any actor; use to filter by user/agent/system/keeper
 	Priorities   []Priority  // empty → any priority; use to surface only 'permanent'+'high'+'pin' etc.
 	TraceID      string      // when set, narrows to a single run (run.* + every span sharing trace_id)
-	Since        time.Time
-	Until        time.Time
-	Cursor       string // opaque — set from a prior page's last entry ID+TS
-	Limit        int
+	// ActorID narrows to entries stamped with this actor_id. Ad-hoc
+	// agent runs correlate via TraceID (== run.id); pipeline/routine
+	// runs never set TraceID (internal/pipeline/journal.go stamps
+	// ActorID: runID on every emit instead) — ActorID is the filter
+	// that reaches those. Combines AND with every other filter.
+	ActorID string
+	Since   time.Time
+	Until   time.Time
+	Cursor  string // opaque — set from a prior page's last entry ID+TS
+	Limit   int
 
 	// FTSQuery is a free-text search applied via the journal_entries_fts
 	// virtual table (migration 55). When non-empty, List joins the FTS5
@@ -95,6 +101,10 @@ func buildJournalFilters(q Query) (conds []string, args []any) {
 	if q.TraceID != "" {
 		conds = append(conds, "trace_id = ?")
 		args = append(args, q.TraceID)
+	}
+	if q.ActorID != "" {
+		conds = append(conds, "actor_id = ?")
+		args = append(args, q.ActorID)
 	}
 	if len(q.Types) > 0 {
 		conds = append(conds, "entry_type IN ("+sqlInPlaceholders(len(q.Types))+")")

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/telemetry"
@@ -214,6 +215,111 @@ type Executor struct {
 	// full jitter via math/rand). Set only from tests.
 	sleepFn  func(ctx context.Context, d time.Duration) bool
 	jitterFn func(d time.Duration) time.Duration
+
+	// runVerdict is the optional post-run outcome verdict hook (#1403).
+	// Production wiring (NewWiredExecutor) installs a closure that
+	// checks the run_verdict_summaries feature flag, fetches the run's
+	// journal entries, and calls runverdict.GenerateAndEmit — built
+	// once at boot from the resolved run_summary aux slot (mirrors
+	// internal/api/router_internal.go's wiring for ad-hoc agent runs).
+	// Nil = the feature is off (unconfigured aux slot); tests that
+	// don't wire it are unaffected. See WithRunVerdict.
+	runVerdict func(ctx context.Context, workspaceID, crewID, agentID, pipelineID, pipelineSlug, runID string)
+	// verdictWG tracks the async runVerdict goroutines spawned by
+	// completeRun/failRun so tests can wait for them instead of
+	// sleeping. It is the executor's own group by default; a shared group
+	// (sharedVerdictWG) supersedes it when set so many short-lived
+	// executors — each handler request builds a fresh one via newExecutor
+	// — can be drained together at shutdown before the journal closes.
+	verdictWG       sync.WaitGroup
+	sharedVerdictWG *sync.WaitGroup
+}
+
+// verdictWaitGroup returns the group verdict goroutines register on: the
+// shared one when wired, else the executor's own.
+func (e *Executor) verdictWaitGroup() *sync.WaitGroup {
+	if e.sharedVerdictWG != nil {
+		return e.sharedVerdictWG
+	}
+	return &e.verdictWG
+}
+
+// WithSharedVerdictWaitGroup routes this executor's async verdict
+// goroutines onto a caller-owned WaitGroup so a long-lived owner (the
+// PipelineHandler) can drain in-flight verdicts across every ephemeral
+// executor it builds. Nil restores the executor-local group.
+func (e *Executor) WithSharedVerdictWaitGroup(wg *sync.WaitGroup) *Executor {
+	e.sharedVerdictWG = wg
+	return e
+}
+
+// DrainVerdicts blocks until every in-flight async verdict goroutine has
+// returned, or timeout elapses — whichever comes first. Returns true if
+// they all drained, false on timeout. Bounded so a wedged LLM call can't
+// hang process shutdown. A zero/negative timeout waits indefinitely.
+func (e *Executor) DrainVerdicts(timeout time.Duration) bool {
+	return WaitTimeout(e.verdictWaitGroup(), timeout)
+}
+
+// WaitTimeout waits on wg for up to timeout. timeout <= 0 waits forever.
+// Returns true if wg drained, false on timeout. Shared with the API
+// handlers so their verdict drains use one bounded-wait implementation.
+func WaitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	if timeout <= 0 {
+		<-done
+		return true
+	}
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	select {
+	case <-done:
+		return true
+	case <-t.C:
+		return false
+	}
+}
+
+// WithRunVerdict wires the post-run outcome verdict hook (#1403). fn
+// is called on a background context (outlives the run's own ctx) once
+// a run reaches a terminal state, unless the run is agentless (DSL's
+// token-zero guarantee) or a dry run — completeRun/failRun gate on
+// both before invoking fn, so the hook itself doesn't need to
+// re-check them. Nil disables verdict generation entirely.
+func (e *Executor) WithRunVerdict(fn func(ctx context.Context, workspaceID, crewID, agentID, pipelineID, pipelineSlug, runID string)) *Executor {
+	e.runVerdict = fn
+	return e
+}
+
+// maybeGenerateRunVerdict fires the run-verdict hook (if wired) for a
+// terminal run, unless the run is agentless, a dry run, or the ctx was
+// cancelled (a user-aborted run has no goal outcome to assess — same
+// CANCELLED skip as internal_runs.go's UpdateRun). Runs on a
+// background context via a tracked goroutine (verdictWG) so it never
+// adds latency to completeRun/failRun's caller.
+func (e *Executor) maybeGenerateRunVerdict(ctx context.Context, in RunInput, emit *pipelineEmitContext) {
+	if e.runVerdict == nil || emit == nil {
+		return
+	}
+	if in.dsl != nil && in.dsl.Agentless {
+		return
+	}
+	if in.Mode == ModeDryRun {
+		return
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	wg := e.verdictWaitGroup()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		e.runVerdict(context.Background(), emit.workspaceID, emit.invokingCrewID, emit.invokingAgentID, emit.pipelineID, emit.pipelineSlug, emit.runID)
+	}()
 }
 
 // RunScope identifies the run on whose behalf a step-level policy
@@ -1434,6 +1540,7 @@ func (e *Executor) failRun(ctx context.Context, in RunInput, emit *pipelineEmitC
 		_ = e.store.RecordInvocation(ctx, in.pipeline.ID, "FAILED")
 	}
 	result.DurationMs = time.Since(startedAt).Milliseconds()
+	e.maybeGenerateRunVerdict(ctx, in, emit)
 	return result
 }
 
@@ -1446,6 +1553,7 @@ func (e *Executor) completeRun(ctx context.Context, in RunInput, emit *pipelineE
 	if in.Mode == ModeRun && in.pipeline != nil {
 		_ = e.store.RecordInvocation(ctx, in.pipeline.ID, "COMPLETED")
 	}
+	e.maybeGenerateRunVerdict(ctx, in, emit)
 }
 
 // runStep dispatches one non-dry-run step to either the AgentRunner

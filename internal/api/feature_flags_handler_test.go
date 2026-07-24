@@ -56,10 +56,25 @@ func createTestFlag(t *testing.T, db *sql.DB, key string, enabled bool, percenta
 // a *sql.DB and the test setup wraps it inside the handler.
 func dbFromHandler(h *FeatureFlagHandler) *sql.DB { return h.db }
 
+// clearSeededFeatureFlags wipes any flags migrations seed at boot (e.g.
+// "run_verdict_summaries" from migrate_consts_v164_run_verdict_flag.go)
+// so List assertions in this file can reason about an exact row count
+// without coupling to what the current migration set happens to seed.
+func clearSeededFeatureFlags(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.Exec(`DELETE FROM feature_flag_overrides`); err != nil {
+		t.Fatalf("clear seeded feature_flag_overrides: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM feature_flags`); err != nil {
+		t.Fatalf("clear seeded feature_flags: %v", err)
+	}
+}
+
 // ── List ───────────────────────────────────────────────────────────────────
 
 func TestFeatureFlag_List_Empty(t *testing.T) {
 	h, userID, wsID := newFeatureFlagHandler(t)
+	clearSeededFeatureFlags(t, dbFromHandler(h))
 
 	req := httptest.NewRequest("GET", "/api/v1/feature-flags", nil)
 	req = req.WithContext(withFFCtx(userID, wsID, "VIEWER"))
@@ -79,6 +94,7 @@ func TestFeatureFlag_List_Empty(t *testing.T) {
 func TestFeatureFlag_List_WithFlagsAndOverride(t *testing.T) {
 	h, userID, wsID := newFeatureFlagHandler(t)
 	db := dbFromHandler(h)
+	clearSeededFeatureFlags(t, db)
 
 	flagAID := createTestFlag(t, db, "alpha", true, 0)
 	createTestFlag(t, db, "beta", false, 50)
@@ -124,6 +140,7 @@ func TestFeatureFlag_List_WithFlagsAndOverride(t *testing.T) {
 func TestFeatureFlag_List_OtherWorkspaceOverride_NotLeaked(t *testing.T) {
 	h, userID, wsID := newFeatureFlagHandler(t)
 	db := dbFromHandler(h)
+	clearSeededFeatureFlags(t, db)
 
 	flagID := createTestFlag(t, db, "gamma", false, 0)
 
