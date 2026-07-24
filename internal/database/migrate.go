@@ -1790,6 +1790,11 @@ END;
 	// workspace roll-up, aggregating over pipeline_runs.cost_usd. Renumbered
 	// from v156. See migrate_consts_v163_routine_monthly_budget.go.
 	{version: 163, name: "routine_monthly_budget", sql: migrationRoutineMonthlyBudget},
+	// v164 seeds the "run_verdict_summaries" feature flag row — the first
+	// row ever inserted into feature_flags, gating the post-run outcome
+	// verdict (#1403). Sits above the engine stack (v156-159) and this
+	// branch's v160-163. See migrate_consts_v164_run_verdict_flag.go.
+	{version: 164, name: "run_verdict_flag", sql: migrationRunVerdictFlag},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

@@ -94,13 +94,16 @@ describe("useJournalList", () => {
     expect(result.current.error).toMatch(/Failed.*500/)
   })
 
-  it("malformed response → empty entries (graceful)", async () => {
+  it("malformed response → empty entries AND surfaces an error (#1408, not swallowed)", async () => {
     ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(okJSON({ wrong: 1 }))
 
     const { result } = renderHook(() => useJournalList({ workspaceId: "ws_test" }))
     await waitFor(() => expect(result.current.loading).toBe(false))
 
     expect(result.current.entries).toEqual([])
+    // A 200 with a body that doesn't match the schema is a real fault — it
+    // must surface, not silently render as "no activity".
+    expect(result.current.error).toMatch(/malformed/i)
   })
 
   it("loadMore appends next page and dedupes by id", async () => {
@@ -201,12 +204,15 @@ describe("useJournalList", () => {
     expect(url).not.toContain("search=")
   })
 
-  it("network rejection → empty entries (no crash)", async () => {
+  it("network rejection → empty entries AND surfaces an error (no crash, not swallowed)", async () => {
     ;(global.fetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("offline"))
 
     const { result } = renderHook(() => useJournalList({ workspaceId: "ws_test" }))
     await waitFor(() => expect(result.current.loading).toBe(false))
 
     expect(result.current.entries).toEqual([])
+    // Transport failure must surface so the UI can distinguish it from an
+    // empty feed (#1408) rather than swallowing it into "no activity".
+    expect(result.current.error).toMatch(/Failed to load journal/i)
   })
 })

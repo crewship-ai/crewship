@@ -100,16 +100,24 @@ export function useJournalList(opts: UseJournalListOptions): UseJournalListResul
       const parsed = journalListResponseSchema.safeParse(json)
       if (reqIdRef.current !== requestId) return
       if (!parsed.success) {
+        // A response that came back 200 but doesn't match the schema is a
+        // real fault (contract drift / a proxy mangling the body), not an
+        // empty feed — surface it instead of silently showing "no
+        // activity", which hides the failure from the user (#1408).
         setEntries([])
         setNextCursor(null)
+        setError("Journal response was malformed")
         return
       }
       setEntries(parsed.data.entries)
       setNextCursor(parsed.data.next_cursor ?? null)
     } catch {
       if (reqIdRef.current === requestId) {
+        // Network/transport failure — surface it rather than swallowing it
+        // into an empty list the user can't distinguish from "no activity".
         setEntries([])
         setNextCursor(null)
+        setError("Failed to load journal")
       }
     } finally {
       if (reqIdRef.current === requestId) setLoading(false)

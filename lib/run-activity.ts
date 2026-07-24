@@ -112,6 +112,37 @@ function hostOnly(raw: string | undefined): string | undefined {
  * Convert one journal entry into a readable timeline row, or null when the
  * entry is noise / not worth surfacing in a human run feed.
  */
+// renderStepSkipped / renderStepRetrying centralise the two non-terminal
+// step outcomes so the dedicated entry types (pipeline.step.skipped /
+// .retrying) and the pre-dedicated-type rows (completed/failed carrying a
+// `kind` marker) render identically. Old rows never rendered as skip/retry
+// before — nothing read the marker — so honouring it here is a strict
+// improvement, not just back-compat.
+type RowBase = Pick<RunActivityRow, "id" | "ts" | "icon">
+
+function renderStepSkipped(base: RowBase, p: JournalEntry["payload"]): RunActivityRow {
+  const step = str(p, "step_id")
+  return {
+    ...base,
+    tone: "default",
+    title: step ? `Step ${step} skipped` : "Step skipped",
+    detail: str(p, "condition"),
+  }
+}
+
+function renderStepRetrying(base: RowBase, p: JournalEntry["payload"]): RunActivityRow {
+  const step = str(p, "step_id")
+  const attempt = num(p, "attempt")
+  const max = num(p, "max")
+  return {
+    ...base,
+    tone: "warn",
+    title: step ? `Step ${step} retrying` : "Step retrying",
+    detail: str(p, "error_message_preview", "error_message"),
+    meta: joinMeta(attempt !== undefined && max !== undefined ? `attempt ${attempt}/${max}` : null),
+  }
+}
+
 export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
   if (NOISE_TYPES.has(e.entry_type)) return null
 
@@ -243,6 +274,8 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
       }
 
     case "pipeline.step.completed": {
+      // Pre-dedicated-type skipped rows arrived as completed+kind=skipped.
+      if (str(p, "kind") === "skipped") return renderStepSkipped(base, p)
       const step = str(p, "step_id")
       return {
         ...base,
@@ -253,7 +286,12 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
       }
     }
 
+    case "pipeline.step.skipped":
+      return renderStepSkipped(base, p)
+
     case "pipeline.step.failed": {
+      // Pre-dedicated-type retry breadcrumbs arrived as failed+kind=retry.
+      if (str(p, "kind") === "retry") return renderStepRetrying(base, p)
       const step = str(p, "step_id")
       return {
         ...base,
@@ -261,6 +299,19 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
         title: step ? `Step ${step} failed` : "Step failed",
         detail: str(p, "error_message_preview", "error_message"),
         meta: joinMeta(str(p, "error_class")),
+      }
+    }
+
+    case "pipeline.step.retrying":
+      return renderStepRetrying(base, p)
+
+    case "summary.generated": {
+      const outcome = str(p, "outcome")
+      return {
+        ...base,
+        tone: toneForOutcome(outcome),
+        title: str(p, "verdict") ?? e.summary,
+        detail: str(p, "summary"),
       }
     }
 
@@ -331,6 +382,77 @@ export function humanizeRun(entries: JournalEntry[]): RunActivityRow[] {
       if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta - tb
       return a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0
     })
+}
+
+// ---- outcome verdict (#1403) ------------------------------------------------
+
+/** Closed set the backend's runverdict package emits — see internal/runverdict/verdict.go. */
+export type RunVerdictOutcome = "goal_met" | "partial" | "failed" | "needs_human"
+
+function isRunVerdictOutcome(v: string | undefined): v is RunVerdictOutcome {
+  return v === "goal_met" || v === "partial" || v === "failed" || v === "needs_human"
+}
+
+function toneForOutcome(v: string | undefined): RunActivityTone {
+  switch (v) {
+    case "goal_met":
+      return "success"
+    case "partial":
+    case "needs_human":
+      return "warn"
+    case "failed":
+      return "error"
+    default:
+      return "default"
+  }
+}
+
+export interface RunVerdict {
+  id: string
+  ts: string
+  outcome: RunVerdictOutcome
+  /** One-liner, e.g. "Tests pass and the fix landed." */
+  verdict: string
+  /** 2-3 sentence recap; optional — the LLM may omit it on a terse run. */
+  summary?: string
+}
+
+/**
+ * Minimal shape extractVerdict actually reads — a structural subset of
+ * JournalEntry, so callers that don't have a full JournalEntry on hand
+ * (e.g. routine-runs-tab.tsx's GroupedRun entries, which omit `id` and
+ * type `payload` as `unknown`) can adapt their own shape with a one-line
+ * map instead of round-tripping through the zod schema. JournalEntry
+ * itself satisfies this structurally, so existing JournalEntry[] callers
+ * are unaffected.
+ */
+export interface VerdictSourceEntry {
+  id: string
+  ts: string
+  entry_type: string
+  summary: string
+  payload?: Record<string, unknown>
+}
+
+/**
+ * Pull the run's outcome verdict (if any) out of a raw entry list — NOT out
+ * of `humanizeRun`'s output, since a verdict must be pinned as the run's
+ * first, always-visible row regardless of its actual timestamp (it's
+ * generated AFTER the run finishes, so by wall-clock it would otherwise sort
+ * last). Returns null when no `summary.generated` entry exists yet, or its
+ * payload doesn't match the expected shape (still-rolling-out backend,
+ * malformed payload, etc.) — callers should treat that identically to "no
+ * verdict" rather than erroring.
+ */
+export function extractVerdict(entries: VerdictSourceEntry[]): RunVerdict | null {
+  const entry = entries.find((e) => e.entry_type === "summary.generated")
+  if (!entry) return null
+  const p = entry.payload
+  const outcome = str(p, "outcome")
+  if (!isRunVerdictOutcome(outcome)) return null
+  const verdict = str(p, "verdict") ?? entry.summary
+  if (!verdict) return null
+  return { id: entry.id, ts: entry.ts, outcome, verdict, summary: str(p, "summary") }
 }
 
 // ---- awaiting-approval injection -------------------------------------------

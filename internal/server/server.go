@@ -393,6 +393,22 @@ func (s *Server) mountAPIRouter(
 	s.journalWriter = journal.NewWriter(deps.DB, logger, journal.WriterOptions{})
 	opts = append(opts, goapi.WithJournal(s.journalWriter))
 
+	// Bridge the journal onto the WebSocket hub: every feed-relevant entry that
+	// durably commits is pushed as a `journal.entry` event on the OPT-IN
+	// `journal:{workspaceId}` channel (NOT the workspace channel every tab
+	// auto-subscribes to), so only a client that explicitly subscribes pays for
+	// it and high-frequency telemetry is filtered out at the source. This is
+	// realtime PLUMBING with no dashboard consumer yet — the SSE stream
+	// (GET /api/v1/journal/stream) remains the authoritative, gap-free feed;
+	// migrating consumers onto this channel and retiring SSE is a deliberate
+	// follow-up (it needs Last-Event-ID-equivalent resume before it can safely
+	// replace the SSE delivery guarantee). The bridge owns a buffered channel
+	// and a drain goroutine so the journal WRITE path never blocks on a
+	// slow/full hub (best-effort: it drops under sustained backpressure;
+	// subscribers reconcile via the SSE replay / a /api/v1/journal refetch).
+	journalBridge := newJournalWSBridge(wsHub, logger)
+	s.journalWriter.SetCommitObserver(journalBridge.observe)
+
 	// Wire the journal into the orchestrator so Docker exec, network,
 	// and filesystem hook points inside the orchestrator can emit
 	// Crow's Nest entries with full scope (workspace / crew / agent /

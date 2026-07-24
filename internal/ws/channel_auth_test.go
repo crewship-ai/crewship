@@ -86,6 +86,27 @@ func TestDBChannelAuthorizer_UserChannel(t *testing.T) {
 	}
 }
 
+// TestDBChannelAuthorizer_JournalChannel covers the opt-in journal:{workspaceId}
+// channel the journal→WS bridge fans out on: a workspace member may subscribe,
+// a non-member is denied, and both verdicts are definitive (gated on the same
+// membership as the workspace channel).
+func TestDBChannelAuthorizer_JournalChannel(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	if _, err := db.Exec(
+		"INSERT INTO workspace_members (workspace_id, user_id) VALUES (?, ?)", "ws1", "member"); err != nil {
+		t.Fatalf("seed member: %v", err)
+	}
+	auth := NewDBChannelAuthorizer(db)
+
+	if !mustVerdict(t, auth, "member", "journal:ws1") {
+		t.Error("workspace member should be allowed on journal:ws1")
+	}
+	if mustVerdict(t, auth, "stranger", "journal:ws1") {
+		t.Error("non-member must be denied journal:ws1")
+	}
+}
+
 // openTestDB returns a minimal SQLite DB for authorizer tests. It only needs
 // the schema objects CanSubscribe reads from (workspace_members and friends),
 // which we create directly instead of wiring the whole migration runner.

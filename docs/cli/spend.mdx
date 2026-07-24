@@ -1,0 +1,54 @@
+---
+title: "Spend"
+description: "Journal-native cost rollup — by agent, by routine, and top spenders."
+icon: "dollar-sign"
+---
+
+# Spend
+
+`cmd/crewship/cmd_spend.go` is the CLI counterpart to [`GET /api/v1/journal/spend`](/api-reference/journal#spend-rollup) (#1404) — a cost rollup built directly over the journal (`cost.incurred` entries) and `pipeline_runs.cost_usd`.
+
+<Note>
+`crewship spend` is a **separate, journal-native rollup** from [`crewship cost`](/cli/cost) / [`crewship paymaster`](/cli/paymaster), which hit `/api/v1/paymaster/*`. This is an intentional duplication, not a redundant command — see the [Crew Journal guide](/guides/crew-journal#spend-cost-rollup) for why two cost surfaces coexist.
+</Note>
+
+## `crewship spend`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--window <window>` | string | `24h` | Aggregation window: `24h`, `7d`, or `30d`. |
+| `--top <n>` | int | `5` | Number of top routines/runs to show (1-50). |
+
+### Examples
+
+```bash
+crewship spend
+crewship spend --window 7d
+crewship spend --window 30d --top 10
+crewship spend --format json | jq '.top_routines'
+```
+
+### Output
+
+```
+Spend rollup  window=24h  total=$12.5000
+────────────────────────────────────────────────────────────────
+
+Top routines
+   1. nightly-report                            $  2.5000
+   2. summarize-issues                           $  0.8000
+
+Top runs
+   1. nightly-report                            $  1.5000
+
+By agent
+  2026-07-24    agt_viktor                $ 10.0000      5 calls
+  2026-07-24    agt_eva                   $  2.5000      3 calls
+```
+
+`--format json`/`yaml`/`ndjson` return the full structured payload (`window`, `total_cost_usd`, `by_agent[]`, `by_routine[]`, `top_routines[]`, `top_runs[]`, `truncated`) for scripting — see the [API reference](/api-reference/journal#spend-rollup) for the exact shape.
+
+## See also
+
+- [`crewship cost`](/cli/cost) / [`crewship paymaster`](/cli/paymaster) — the Paymaster-backed cost surfaces.
+- [Crew Journal guide](/guides/crew-journal#spend-cost-rollup) — why two cost rollups exist.

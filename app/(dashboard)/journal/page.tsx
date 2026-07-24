@@ -21,6 +21,7 @@ import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { RunsView } from "@/components/features/journal/runs-view"
+import { JournalSpendView } from "@/components/features/journal/journal-spend-view"
 import { LogsPanel } from "@/components/features/logs/logs-panel"
 import { ResourcesStrip } from "@/components/features/logs/resources-strip"
 import { sinceFromTimeRange, type CustomRange, type TimeRange } from "@/components/features/logs/time-range-picker"
@@ -73,7 +74,7 @@ interface TabDef {
 const ALL_TABS: TabDef[] = [
   { id: "timeline", label: "Timeline", icon: ListOrdered },
   { id: "runs", label: "Runs", icon: Activity },
-  { id: "spend", label: "Spend", icon: DollarSign, adminOnly: true, locked: true },
+  { id: "spend", label: "Spend", icon: DollarSign, adminOnly: true },
 ]
 
 /**
@@ -533,6 +534,19 @@ export default function JournalPage() {
             className="flex-1 min-h-0 overflow-hidden flex flex-col"
           >
             <RunsView workspaceId={workspaceId} workspaceLoading={wsLoading} />
+          </motion.div>
+        )}
+
+        {activeTab === "spend" && (
+          <motion.div
+            key="spend"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="flex-1 min-h-0 overflow-hidden flex flex-col"
+          >
+            <JournalSpendView workspaceId={workspaceId} workspaceLoading={wsLoading} />
           </motion.div>
         )}
       </AnimatePresence>

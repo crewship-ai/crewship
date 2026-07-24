@@ -98,6 +98,14 @@ func computeProgress(rows []watchEntry, totalSteps int, runIDFilter string, now 
 				completed[sid] = true
 			}
 			p.CostUSD += payloadFloat(r.Payload, "cost_usd")
+		case "pipeline.step.skipped":
+			// A skipped step is "processed" for progress purposes (step N/total
+			// shouldn't stall below total just because a branch was skipped).
+			// Pre-dedicated-type rows arrived as completed+kind=skipped and were
+			// already counted by the case above; this covers the new type.
+			if sid := payloadStepID(r.Payload); sid != "" {
+				completed[sid] = true
+			}
 		case "pipeline.waitpoint.created":
 			if !p.Terminal {
 				p.Status = "waiting"

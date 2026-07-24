@@ -513,6 +513,51 @@ func (h *JournalHandler) Count(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"total": n})
 }
 
+// Spend serves GET /api/v1/journal/spend — the #1404 cost rollup.
+// Query params:
+//
+//	window=24h|7d|30d — default 24h
+//	top=<N> — bounds top_routines/top_runs, default 5, clamped to 1..50
+func (h *JournalHandler) Spend(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		replyError(w, http.StatusUnauthorized, "workspace required")
+		return
+	}
+
+	// Same explicit-reject convention as RunHandler.Insights: an unknown
+	// window value is a caller typo, not something to silently default.
+	windowRaw := r.URL.Query().Get("window")
+	if windowRaw == "" {
+		windowRaw = "24h"
+	}
+	window := journal.RunInsightsWindow(windowRaw)
+	switch window {
+	case journal.RunWindow24h, journal.RunWindow7d, journal.RunWindow30d:
+	default:
+		replyError(w, http.StatusBadRequest, "window must be one of: 24h, 7d, 30d")
+		return
+	}
+
+	topN := 5
+	if raw := r.URL.Query().Get("top"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 50 {
+			replyError(w, http.StatusBadRequest, "top must be an integer between 1 and 50")
+			return
+		}
+		topN = n
+	}
+
+	res, err := journal.Spend(r.Context(), h.db, workspaceID, window, topN)
+	if err != nil {
+		h.logger.Error("journal spend failed", "err", err)
+		replyError(w, http.StatusInternalServerError, "journal spend failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 // SetPriority serves POST /api/v1/journal/{id}/priority. Body:
 //
 //	{"priority": "permanent|high|pin|normal", "reason": "..."}
@@ -633,42 +678,11 @@ func (h *JournalHandler) SetPriority(w http.ResponseWriter, r *http.Request) {
 // shape. The TS field becomes an RFC3339Nano string so the UI can
 // parse with the built-in Date constructor.
 func serializeEntries(entries []journal.Entry) []map[string]any {
-	out := make([]map[string]any, 0, len(entries))
-	for _, e := range entries {
-		row := map[string]any{
-			"id":           e.ID,
-			"workspace_id": e.WorkspaceID,
-			"ts":           e.TS.UTC().Format(time.RFC3339Nano),
-			"entry_type":   string(e.Type),
-			"severity":     string(e.Severity),
-			"priority":     string(e.Priority),
-			"actor_type":   string(e.ActorType),
-			"summary":      e.Summary,
-		}
-		if e.CrewID != "" {
-			row["crew_id"] = e.CrewID
-		}
-		if e.AgentID != "" {
-			row["agent_id"] = e.AgentID
-		}
-		if e.MissionID != "" {
-			row["mission_id"] = e.MissionID
-		}
-		if e.ActorID != "" {
-			row["actor_id"] = e.ActorID
-		}
-		if e.TraceID != "" {
-			row["trace_id"] = e.TraceID
-		}
-		if len(e.Payload) > 0 {
-			row["payload"] = e.Payload
-		}
-		if len(e.Refs) > 0 {
-			row["refs"] = e.Refs
-		}
-		out = append(out, row)
-	}
-	return out
+	// Single source of truth: journal.SerializeEntries produces the exact
+	// wire shape the WS journal bridge also emits, so an SSE `entry` frame
+	// and a WS `journal.entry` frame are identical (both parse against the
+	// one frontend journalEntrySchema). See internal/journal/serialize.go.
+	return journal.SerializeEntries(entries)
 }
 
 // writeSSEEvent frames one journal entry as an SSE message. Uses the

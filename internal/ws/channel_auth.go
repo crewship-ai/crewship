@@ -67,6 +67,12 @@ func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel 
 	case "keeper":
 		// keeper:{workspaceId} — check workspace membership
 		return a.isMemberOfWorkspace(ctx, userID, chID)
+	case "journal":
+		// journal:{workspaceId} — the opt-in realtime journal firehose (the
+		// journal→WS bridge broadcasts `journal.entry` here). Gated on the
+		// same workspace membership as the tenant's other channels; a client
+		// must explicitly subscribe, so non-journal tabs never receive it.
+		return a.isMemberOfWorkspace(ctx, userID, chID)
 	case "files":
 		// files:{crewId} — check crew's workspace membership
 		return a.isMemberOfCrewWorkspace(ctx, userID, chID)

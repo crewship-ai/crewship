@@ -179,6 +179,41 @@ func TestListRuns_IncludeStepsWidensFilter(t *testing.T) {
 	}
 }
 
+// TestListRuns_IncludesSummaryGenerated_DefaultFilter pins #1403: the
+// post-run outcome verdict must surface in the routine runs tab even
+// without ?include_steps=1 — it's a run-level entry (like
+// pipeline.run.completed), not step-level detail, so it doesn't
+// belong behind the steps-widening flag.
+func TestListRuns_IncludesSummaryGenerated_DefaultFilter(t *testing.T) {
+	h, userID, wsID := newPipelineHandlerForCRUDTest(t)
+	seedPipelineWithVersions(t, h, wsID, "pln-verdict", "verdictslug", 1)
+	insertJournalEntry(t, h.db, wsID, "pipeline.run.started", "pln-verdict", "run-V")
+	insertJournalEntry(t, h.db, wsID, "pipeline.run.completed", "pln-verdict", "run-V")
+	insertJournalEntry(t, h.db, wsID, "summary.generated", "pln-verdict", "run-V")
+
+	req := httptest.NewRequest("GET", "/x", nil)
+	req.SetPathValue("slug", "verdictslug")
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.ListRuns(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
+	found := false
+	for _, row := range got {
+		if row["entry_type"] == "summary.generated" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("summary.generated missing from default-filter ListRuns response: %+v", got)
+	}
+}
+
 func TestListRuns_CrossPipelineExclusion(t *testing.T) {
 	// Entries for a different pipeline in the same workspace must not
 	// surface — the json_extract filter on pipeline_id is the gate.

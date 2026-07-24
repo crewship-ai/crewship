@@ -9,8 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/runverdict"
 )
+
+// runVerdictFlagKey is the feature_flags row seeded by migration v164
+// (migrate_consts_v164_run_verdict_flag.go) — gates the post-run
+// outcome verdict (#1403) per workspace.
+const runVerdictFlagKey = "run_verdict_summaries"
 
 // CreateRun records a new agent run started by the sidecar.
 // POST /api/v1/internal/runs
@@ -245,6 +252,20 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Post-run outcome verdict (#1403): fire-and-forget, same pattern as
+	// the sleep-time consolidator trigger below — never blocks the
+	// response, never fails the run it narrates. Skipped for CANCELLED
+	// (a user-aborted run has no goal outcome to assess) and whenever
+	// the run_summary aux slot has no buildable provider (SetRunVerdict
+	// wired nil) or the workspace has the feature flag off.
+	if body.Status != "CANCELLED" && h.runVerdictProvider != nil {
+		h.verdictWG.Add(1)
+		go func() {
+			defer h.verdictWG.Done()
+			h.generateRunVerdict(context.Background(), workspaceID, agentID, runID)
+		}()
+	}
+
 	// Refresh the agent's atomic status. RUNNING when another run for
 	// the same agent is still active (no terminal yet for that trace),
 	// IDLE / ERROR otherwise. The subquery counts active runs in the
@@ -334,6 +355,62 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		})
 
 	writeJSON(w, http.StatusOK, map[string]string{"id": runID, "status": body.Status})
+}
+
+// generateRunVerdict fetches the run's journal entries and asks
+// runverdict to produce+emit an outcome verdict (#1403). Called on a
+// background context (outlives the HTTP request that spawned it, same
+// pattern as OnRunCompleted below); swallows its own errors at Debug
+// level since a verdict is a best-effort narrative aid, never allowed
+// to surface as a caller-visible failure.
+func (h *InternalHandler) generateRunVerdict(ctx context.Context, workspaceID, agentID, runID string) {
+	enabled, err := featureflags.IsEnabled(ctx, h.db, workspaceID, runVerdictFlagKey)
+	if err != nil {
+		h.logger.Debug("run verdict: feature flag check", "error", err, "run_id", runID)
+		return
+	}
+	if !enabled {
+		return
+	}
+
+	// Emit queues entries for async background write (internal/journal
+	// emit.go's Writer.Emit returns as soon as the entry is queued, not
+	// once it's durable). The terminal entry this goroutine was spawned
+	// right after may not have hit h.db yet — force the drain before
+	// reading it back, or the entry count check below can under-count
+	// and skip a run that genuinely has activity.
+	if err := h.journal.Flush(ctx); err != nil {
+		h.logger.Debug("run verdict: flush before read", "error", err, "run_id", runID)
+	}
+
+	entries, _, err := journal.List(ctx, h.db, journal.Query{WorkspaceID: workspaceID, TraceID: runID, Limit: 500})
+	if err != nil {
+		h.logger.Debug("run verdict: fetch entries", "error", err, "run_id", runID)
+		return
+	}
+
+	var crewID sql.NullString
+	if agentID != "" {
+		if err := h.db.QueryRowContext(ctx, "SELECT crew_id FROM agents WHERE id = ?", agentID).Scan(&crewID); err != nil {
+			h.logger.Debug("run verdict: crew lookup", "error", err, "agent_id", agentID)
+		}
+	}
+
+	base := journal.Entry{
+		WorkspaceID: workspaceID,
+		CrewID:      crewID.String,
+		AgentID:     agentID,
+		TraceID:     runID,
+	}
+	if err := runverdict.GenerateAndEmit(ctx, h.journal, h.runVerdictProvider, h.runVerdictModel, base, entries); err != nil {
+		h.logger.Debug("run verdict: generate", "error", err, "run_id", runID)
+	}
+	// Same async-queue caveat as above: drain the verdict entry itself
+	// so it's immediately visible to readers (UI polling right after
+	// this goroutine completes, tests reading h.db directly).
+	if err := h.journal.Flush(ctx); err != nil {
+		h.logger.Debug("run verdict: flush after emit", "error", err, "run_id", runID)
+	}
 }
 
 // shortRunID returns the first 8 characters of a run id for use in

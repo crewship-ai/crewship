@@ -339,6 +339,7 @@
             "expanded": false,
             "pages": [
               "cli/cost",
+              "cli/spend",
               "cli/paymaster"
             ]
           },

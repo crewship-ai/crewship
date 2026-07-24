@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
@@ -35,6 +36,13 @@ type PipelineHandler struct {
 	codeRunner   pipeline.CodeRunner      // optional; nil → type:code steps fail closed with a wiring hint
 	scriptRunner pipeline.ScriptRunner    // optional; nil → type:script steps fail closed with a wiring hint
 	signals      *pipeline.SignalRegistry // optional; shared registry for wait:event signal delivery (Wave 4.3)
+	// runVerdictProvider/runVerdictModel back the post-run outcome
+	// verdict (#1403) for routine runs — pre-resolved once at boot from
+	// the run_summary aux slot, same as internal.InternalHandler's
+	// wiring for ad-hoc agent runs. nil provider → no verdict hook
+	// installed (NewWiredExecutor's degraded-mode contract).
+	runVerdictProvider llm.Provider
+	runVerdictModel    string
 	// saveTokenSecret signs the optional save_token returned by
 	// /test_run and verified by /save. Lets save flows skip the body-
 	// trust on last_test_run_at (callers can otherwise mint timestamps;
@@ -55,6 +63,13 @@ type PipelineHandler struct {
 	// tests) drain in-flight dispatches via WaitWebhookDispatches
 	// instead of orphaning them mid-write.
 	webhookDispatchWG sync.WaitGroup
+
+	// verdictWG is the shared group every executor this handler builds
+	// (newExecutor) — plus the boot-time executors that opt in via
+	// VerdictWaitGroup() — registers its async post-run verdict goroutine
+	// on, so shutdown can drain in-flight verdicts (DrainVerdicts) before
+	// the journal writer closes (#1403).
+	verdictWG sync.WaitGroup
 }
 
 // NewPipelineHandler wires the pipeline subsystem against an
@@ -130,6 +145,15 @@ func (h *PipelineHandler) SetRunStore(s *pipeline.RunStore) {
 // wait:event steps and the signal endpoint share delivery channels.
 func (h *PipelineHandler) SetSignalRegistry(s *pipeline.SignalRegistry) {
 	h.signals = s
+}
+
+// SetRunVerdict wires the pre-resolved LLM provider + model used to
+// generate a post-run outcome verdict (#1403) for routine runs. A nil
+// provider disables verdict generation entirely (the run_summary aux
+// slot had no buildable provider at boot).
+func (h *PipelineHandler) SetRunVerdict(p llm.Provider, model string) {
+	h.runVerdictProvider = p
+	h.runVerdictModel = model
 }
 
 // SignalRegistry exposes the wired registry (nil until set) so the
@@ -246,15 +270,39 @@ func (h *PipelineHandler) newExecutor() *pipeline.Executor {
 		// DB derives the idempotency + step-override stores inside the
 		// factory — thin, goroutine-free DB wrappers, cheap to
 		// reconstruct per-run, impossible to forget at a call site.
-		DB:           h.db,
-		Waitpoints:   h.waitpoints,
-		WS:           h.ws,
-		Runs:         h.runs,
-		RunStore:     h.runStore,
-		CodeRunner:   h.codeRunner,
-		ScriptRunner: h.scriptRunner,
-		Signals:      h.signals,
+		DB:                 h.db,
+		Waitpoints:         h.waitpoints,
+		WS:                 h.ws,
+		Runs:               h.runs,
+		RunStore:           h.runStore,
+		CodeRunner:         h.codeRunner,
+		ScriptRunner:       h.scriptRunner,
+		Signals:            h.signals,
+		RunVerdictProvider: h.runVerdictProvider,
+		RunVerdictModel:    h.runVerdictModel,
+		// Shared verdict WaitGroup: every ephemeral executor this handler
+		// builds registers its async verdict goroutine here so shutdown can
+		// drain them all (DrainVerdicts) before the journal writer closes.
+		VerdictWG: &h.verdictWG,
 	})
+}
+
+// VerdictWaitGroup exposes the handler's shared verdict WaitGroup so
+// boot-time executors built outside the handler (resume scan, cron
+// scheduler, pending dispatcher in cmd_start) can register their async
+// verdicts on the SAME group and be drained together at shutdown.
+func (h *PipelineHandler) VerdictWaitGroup() *sync.WaitGroup {
+	return &h.verdictWG
+}
+
+// DrainVerdicts blocks until every in-flight post-run verdict goroutine
+// (routine runs) has finished, or timeout elapses. Called during graceful
+// shutdown after the listener stops but BEFORE the journal writer closes,
+// so a verdict that was mid-generation still lands its journal entry
+// instead of being silently dropped. Bounded so a wedged LLM call can't
+// hang shutdown.
+func (h *PipelineHandler) DrainVerdicts(timeout time.Duration) bool {
+	return pipeline.WaitTimeout(&h.verdictWG, timeout)
 }
 
 // pipelineResponse is the wire shape returned by GET endpoints. We

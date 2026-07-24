@@ -80,6 +80,7 @@ func (h *AuxStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 		{llm.SlotBehavior, h.cfg.Behavior, h.cfg.Fallback},
 		{llm.SlotMemoryHealth, h.cfg.MemoryHealth, h.cfg.Fallback},
 		{llm.SlotNegative, h.cfg.Negative, h.cfg.Fallback},
+		{llm.SlotRunSummary, h.cfg.RunSummary, h.cfg.Fallback},
 	}
 
 	out := auxStatusResponse{Slots: make([]auxSlotRow, 0, len(slots))}

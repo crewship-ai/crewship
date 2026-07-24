@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // ---------------------------------------------------------------------------
@@ -199,6 +201,53 @@ func TestEmitRunResumed_ReasonInSummary(t *testing.T) {
 		if got := emitted.entries[0].Summary; !strings.Contains(got, tc.wantSummary) {
 			t.Errorf("reason %q: summary %q, want it to contain %q", tc.reason, got, tc.wantSummary)
 		}
+	}
+}
+
+// TestEmitStepSkippedRetry_DedicatedTypes pins the PERSISTED journal
+// entry type for skip/retry to their dedicated types. Historically these
+// reused pipeline.step.completed / pipeline.step.failed with a `kind`
+// payload marker, which made a skipped step indistinguishable from a
+// completed one at the storage layer (readers had to sniff the payload).
+// The dedicated types make the outcome first-class; the `kind` marker is
+// retained so pre-existing rows and back-compat readers keep working.
+func TestEmitStepSkippedRetry_DedicatedTypes(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	emitted := &captureEmitter{}
+	c := &pipelineEmitContext{
+		emitter: emitted, workspaceID: "ws1",
+		authorCrewID: "crew_a", pipelineID: "pln_1", pipelineSlug: "report", runID: "run_1",
+	}
+	step := Step{ID: "s1", Type: StepAgentRun}
+
+	c.emitStepSkipped(ctx, step, "{{ inputs.go }}")
+	c.emitStepRetry(ctx, step, 2, 3, "rate limit", 800*time.Millisecond)
+
+	if len(emitted.entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(emitted.entries))
+	}
+
+	skip := emitted.entries[0]
+	if skip.Type != journal.EntryPipelineStepSkipped {
+		t.Errorf("skipped entry type = %q, want %q", skip.Type, journal.EntryPipelineStepSkipped)
+	}
+	if skip.Payload["kind"] != "skipped" {
+		t.Errorf("skipped entry lost back-compat kind marker: %v", skip.Payload["kind"])
+	}
+	if skip.Payload["condition"] != "{{ inputs.go }}" {
+		t.Errorf("skipped entry lost condition: %v", skip.Payload["condition"])
+	}
+
+	retry := emitted.entries[1]
+	if retry.Type != journal.EntryPipelineStepRetrying {
+		t.Errorf("retry entry type = %q, want %q", retry.Type, journal.EntryPipelineStepRetrying)
+	}
+	if retry.Payload["kind"] != "retry" {
+		t.Errorf("retry entry lost back-compat kind marker: %v", retry.Payload["kind"])
+	}
+	if retry.Severity != journal.SeverityWarn {
+		t.Errorf("retry entry severity = %q, want warn", retry.Severity)
 	}
 }
 

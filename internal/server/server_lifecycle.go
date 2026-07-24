@@ -403,6 +403,12 @@ func (s *Server) Shutdown() error {
 		if pipes := s.apiRouter.PipelinesHandler; pipes != nil {
 			pipes.WaitWebhookDispatches()
 		}
+		// Drain in-flight post-run outcome-verdict goroutines (#1403) —
+		// both ad-hoc agent runs (InternalHandler) and routine runs
+		// (PipelineHandler) — while the journal writer is still open, so a
+		// verdict caught mid-generation still records its entry. Bounded so
+		// a wedged LLM call can't hang shutdown past the configured timeout.
+		s.apiRouter.DrainVerdicts(s.cfg.Server.ShutdownTimeout)
 	}
 
 	s.logWriter.Close()

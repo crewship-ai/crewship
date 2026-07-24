@@ -1212,11 +1212,13 @@ func (s *PipelineScheduler) runWakeCheck(ctx context.Context, sched *Schedule) (
 	})
 	proceed, status := evalWakeProbe(res, err, sched.WakeFailClosed)
 	if status == WakeStatusError || status == WakeStatusHeld {
+		// Scrub before logging: a wake-probe error can echo rendered step
+		// content, which may include a templated secret ({{ secrets.* }}).
 		errMsg := ""
 		if err != nil {
-			errMsg = err.Error()
+			errMsg = scriptAuditScrubber.Scrub(err.Error())
 		} else if res != nil {
-			errMsg = res.ErrorMessage
+			errMsg = scriptAuditScrubber.Scrub(res.ErrorMessage)
 		}
 		disposition := "failing open — firing main run"
 		if status == WakeStatusHeld {
