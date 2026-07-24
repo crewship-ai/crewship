@@ -112,6 +112,37 @@ function hostOnly(raw: string | undefined): string | undefined {
  * Convert one journal entry into a readable timeline row, or null when the
  * entry is noise / not worth surfacing in a human run feed.
  */
+// renderStepSkipped / renderStepRetrying centralise the two non-terminal
+// step outcomes so the dedicated entry types (pipeline.step.skipped /
+// .retrying) and the pre-dedicated-type rows (completed/failed carrying a
+// `kind` marker) render identically. Old rows never rendered as skip/retry
+// before — nothing read the marker — so honouring it here is a strict
+// improvement, not just back-compat.
+type RowBase = Pick<RunActivityRow, "id" | "ts" | "icon">
+
+function renderStepSkipped(base: RowBase, p: JournalEntry["payload"]): RunActivityRow {
+  const step = str(p, "step_id")
+  return {
+    ...base,
+    tone: "default",
+    title: step ? `Step ${step} skipped` : "Step skipped",
+    detail: str(p, "condition"),
+  }
+}
+
+function renderStepRetrying(base: RowBase, p: JournalEntry["payload"]): RunActivityRow {
+  const step = str(p, "step_id")
+  const attempt = num(p, "attempt")
+  const max = num(p, "max")
+  return {
+    ...base,
+    tone: "warn",
+    title: step ? `Step ${step} retrying` : "Step retrying",
+    detail: str(p, "error_message_preview", "error_message"),
+    meta: joinMeta(attempt !== undefined && max !== undefined ? `attempt ${attempt}/${max}` : null),
+  }
+}
+
 export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
   if (NOISE_TYPES.has(e.entry_type)) return null
 
@@ -243,6 +274,8 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
       }
 
     case "pipeline.step.completed": {
+      // Pre-dedicated-type skipped rows arrived as completed+kind=skipped.
+      if (str(p, "kind") === "skipped") return renderStepSkipped(base, p)
       const step = str(p, "step_id")
       return {
         ...base,
@@ -253,7 +286,12 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
       }
     }
 
+    case "pipeline.step.skipped":
+      return renderStepSkipped(base, p)
+
     case "pipeline.step.failed": {
+      // Pre-dedicated-type retry breadcrumbs arrived as failed+kind=retry.
+      if (str(p, "kind") === "retry") return renderStepRetrying(base, p)
       const step = str(p, "step_id")
       return {
         ...base,
@@ -263,6 +301,9 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
         meta: joinMeta(str(p, "error_class")),
       }
     }
+
+    case "pipeline.step.retrying":
+      return renderStepRetrying(base, p)
 
     case "keeper.request":
       return { ...base, tone: "warn", title: "Requested credential", detail: e.summary || undefined }

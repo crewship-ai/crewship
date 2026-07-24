@@ -209,6 +209,34 @@ describe("humanizeEntry — pipeline (routine) runs", () => {
     expect(row!.detail).toBe("boom")
   })
 
+  it("pipeline.step.skipped → default tone, 'skipped' title, condition detail", () => {
+    const row = humanizeEntry(entry({ entry_type: "pipeline.step.skipped", payload: { step_id: "notify", condition: "{{ inputs.dry }}" } }))
+    expect(row!.tone).toBe("default")
+    expect(row!.title).toContain("notify")
+    expect(row!.title.toLowerCase()).toContain("skipped")
+    expect(row!.detail).toBe("{{ inputs.dry }}")
+  })
+
+  it("pipeline.step.retrying → warn tone, 'retrying' title, attempt meta", () => {
+    const row = humanizeEntry(entry({ entry_type: "pipeline.step.retrying", severity: "warn", payload: { step_id: "fetch", attempt: 2, max: 3, error_message_preview: "rate limit" } }))
+    expect(row!.tone).toBe("warn")
+    expect(row!.title.toLowerCase()).toContain("retrying")
+    expect(row!.detail).toBe("rate limit")
+    expect(row!.meta).toContain("2/3")
+  })
+
+  it("legacy completed+kind=skipped renders as skipped (back-compat)", () => {
+    const row = humanizeEntry(entry({ entry_type: "pipeline.step.completed", payload: { step_id: "notify", kind: "skipped", condition: "false" } }))
+    expect(row!.title.toLowerCase()).toContain("skipped")
+    expect(row!.tone).toBe("default")
+  })
+
+  it("legacy failed+kind=retry renders as retrying, not error (back-compat)", () => {
+    const row = humanizeEntry(entry({ entry_type: "pipeline.step.failed", severity: "warn", payload: { step_id: "fetch", kind: "retry", attempt: 1, max: 3, error_message_preview: "429" } }))
+    expect(row!.tone).toBe("warn")
+    expect(row!.title.toLowerCase()).toContain("retrying")
+  })
+
   it("pipeline.step.started and pipeline.dry_run are dropped as noise", () => {
     expect(humanizeEntry(entry({ entry_type: "pipeline.step.started", payload: { step_id: "x" } }))).toBeNull()
     expect(humanizeEntry(entry({ entry_type: "pipeline.dry_run" }))).toBeNull()
