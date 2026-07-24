@@ -89,11 +89,14 @@ func (e *Executor) runNotifyStep(ctx context.Context, step Step, parentRender Re
 	if step.Notify == nil {
 		return "", 0, 0, fmt.Errorf("notify step %q missing notify body", step.ID)
 	}
-	// {{ secrets.<type> }} in a notification renders the vault value, but a
-	// notice is broadcast to workspace members — so the resolved value MUST
-	// be scrubbed back out of the title/body (below) and any output/error
-	// (deferred). This is defense: an author who references a secret in a
-	// notice can never actually leak it.
+	// {{ secrets.<type> }} in a notification's TITLE or BODY renders the
+	// vault value, but a notice is broadcast to workspace members — so the
+	// resolved value MUST be scrubbed back out of the title/body (below) and
+	// any output/error (deferred). The `to:` selector is NOT secret-resolved
+	// (see secretTypesInStep): a routing address is never a secret sink, so a
+	// secret can't reach toRaw. We still scrub toRaw defensively before it
+	// hits a log line or a run warning, covering the edge case where the same
+	// secret value appears in the body (and thus in the scrubber) too.
 	var secrets *secretScrub
 	parentRender, secrets = e.resolveStepSecrets(ctx, step, parentRender, in)
 	defer func() { out, err = secrets.scrub(out), secrets.scrubErr(err) }()
@@ -114,10 +117,16 @@ func (e *Executor) runNotifyStep(ctx context.Context, step Step, parentRender Re
 	toRaw := strings.TrimSpace(Render(step.Notify.To, parentRender))
 	recipients, crewSlug, terr := resolveNotifyTargets(toRaw, in.InvokingUserID)
 	if terr != nil {
+		// safeTo is what we expose on the log line and the run warning:
+		// toRaw scrubbed of any resolved secret value (defense in depth —
+		// `to:` isn't secret-resolved, but the body might carry the same
+		// value). The error text from resolveNotifyTargets also echoes the
+		// target, so scrub it the same way.
+		safeTo := secrets.scrub(toRaw)
 		slog.Default().Warn("notify step: unresolvable target — falling back to workspace notice",
-			"run", runID, "step", step.ID, "to", toRaw, "error", terr)
+			"run", runID, "step", step.ID, "to", safeTo, "error", secrets.scrubErr(terr))
 		e.recordRunWarning(ctx, runID, "notify:"+step.ID,
-			fmt.Errorf("target %q not delivered as addressed — sent as a workspace notice instead: %w", toRaw, terr))
+			fmt.Errorf("target %q not delivered as addressed — sent as a workspace notice instead: %w", safeTo, secrets.scrubErr(terr)))
 		recipients, crewSlug = workspaceNotice(), ""
 		degraded = true
 	}

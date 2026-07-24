@@ -7,74 +7,8 @@ package pipeline
 
 import (
 	"context"
-	"errors"
-	"strings"
 	"testing"
 )
-
-func TestValidateRequiredCredentials(t *testing.T) {
-	ctx := context.Background()
-
-	// probe: "stripe" resolves, everything else does not.
-	probe := func(_ context.Context, credType string) (bool, error) {
-		return strings.EqualFold(credType, "stripe"), nil
-	}
-
-	t.Run("passes when every declared credential resolves", func(t *testing.T) {
-		dsl := &DSL{Name: "pays", CredsRequired: []CredReq{{Type: "stripe"}}}
-		if err := ValidateRequiredCredentials(ctx, dsl, probe); err != nil {
-			t.Fatalf("expected pass, got %v", err)
-		}
-	})
-
-	t.Run("fails when a declared credential is unresolvable", func(t *testing.T) {
-		dsl := &DSL{Name: "pays", CredsRequired: []CredReq{{Type: "stripe"}, {Type: "twilio"}}}
-		err := ValidateRequiredCredentials(ctx, dsl, probe)
-		if err == nil {
-			t.Fatal("expected failure for unresolvable credential")
-		}
-		if !strings.Contains(err.Error(), "twilio") {
-			t.Errorf("error should name the missing credential, got %v", err)
-		}
-	})
-
-	t.Run("no declared credentials is a no-op pass", func(t *testing.T) {
-		if err := ValidateRequiredCredentials(ctx, &DSL{Name: "x"}, probe); err != nil {
-			t.Fatalf("empty credentials_required should pass, got %v", err)
-		}
-	})
-
-	t.Run("empty type entry is rejected", func(t *testing.T) {
-		dsl := &DSL{Name: "x", CredsRequired: []CredReq{{Type: "   "}}}
-		if err := ValidateRequiredCredentials(ctx, dsl, probe); err == nil {
-			t.Fatal("expected failure for empty credential type")
-		}
-	})
-
-	t.Run("blank entry mixed with a valid one is still rejected", func(t *testing.T) {
-		// Regression: the empty-type check must run even when the list also
-		// holds a valid entry (len(types) != 0), not only on an all-empty list.
-		dsl := &DSL{Name: "x", CredsRequired: []CredReq{{Type: "stripe"}, {Type: ""}}}
-		if err := ValidateRequiredCredentials(ctx, dsl, probe); err == nil {
-			t.Fatal("expected failure for a blank entry mixed with a valid one")
-		}
-	})
-
-	t.Run("nil probe fails closed", func(t *testing.T) {
-		dsl := &DSL{Name: "x", CredsRequired: []CredReq{{Type: "stripe"}}}
-		if err := ValidateRequiredCredentials(ctx, dsl, nil); err == nil {
-			t.Fatal("expected failure when no probe is available to confirm resolvability")
-		}
-	})
-
-	t.Run("probe error surfaces (not silently allowed)", func(t *testing.T) {
-		boom := func(_ context.Context, _ string) (bool, error) { return false, errors.New("db down") }
-		dsl := &DSL{Name: "x", CredsRequired: []CredReq{{Type: "stripe"}}}
-		if err := ValidateRequiredCredentials(ctx, dsl, boom); err == nil {
-			t.Fatal("expected probe error to fail validation")
-		}
-	})
-}
 
 func TestRequiredCredentialTypes(t *testing.T) {
 	dsl := &DSL{CredsRequired: []CredReq{

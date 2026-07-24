@@ -106,12 +106,28 @@ func secretTypesInStep(step Step) map[string]struct{} {
 		}
 	}
 	if step.Notify != nil {
-		add(step.Notify.To)
+		// Notify.To is deliberately NOT scanned. `to:` is a routing address
+		// (workspace / user:<id> / role:<ROLE> / crew:<slug> / trigger),
+		// never a place for a vault value. If a secret resolved there it
+		// would render into toRaw — which runNotifyStep logs and persists as
+		// a run warning when a secret-shaped target fails to resolve — a leak
+		// the deferred output/error scrub can't reach. Only Title/Body may
+		// legitimately carry a secret, and both are scrubbed from the
+		// delivered notice.
 		add(step.Notify.Title)
 		add(step.Notify.Body)
 	}
 	return out
 }
+
+// secretResolveTimeout bounds a single vault lookup during step-secret
+// resolution. Unlike the http credential_ref path — which inherits the
+// step's own request timeout — code/script/notify steps have no
+// per-step deadline, so a stalled resolver could otherwise hold the run
+// open indefinitely. Best-effort semantics are preserved: a timeout is
+// just another lookup error, so the type renders empty rather than
+// failing the step.
+const secretResolveTimeout = 5 * time.Second
 
 // resolveStepSecrets enriches parentRender with the {{ secrets.<type> }}
 // values a step references, resolved from the workspace vault via the
@@ -130,7 +146,8 @@ func secretTypesInStep(step Step) map[string]struct{} {
 // with no ACTIVE credential renders empty rather than failing the step
 // (public endpoints / optional secrets keep working). Turning an
 // unresolvable-but-required credential into a hard failure is the job of
-// credentials_required (ValidateRequiredCredentials), not this hot path.
+// credentials_required enforcement (the API layer's gateMissingCredentials),
+// not this hot path.
 func (e *Executor) resolveStepSecrets(ctx context.Context, step Step, parentRender RenderContext, in RunInput) (RenderContext, *secretScrub) {
 	types := secretTypesInStep(step)
 	if len(types) == 0 || e.credentialByType == nil {
@@ -140,7 +157,11 @@ func (e *Executor) resolveStepSecrets(ctx context.Context, step Step, parentRend
 	resolved := make(map[string]string, len(types))
 	scrub := &secretScrub{}
 	for t := range types {
-		val, err := e.credentialByType(ctx, scope, t)
+		val, err := func() (string, error) {
+			lookupCtx, cancel := context.WithTimeout(ctx, secretResolveTimeout)
+			defer cancel()
+			return e.credentialByType(lookupCtx, scope, t)
+		}()
 		if err != nil || val == "" {
 			continue
 		}

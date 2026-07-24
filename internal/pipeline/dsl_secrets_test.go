@@ -240,6 +240,64 @@ func TestSecretsNamespace_HTTPStep_InjectsAndScrubs(t *testing.T) {
 	}
 }
 
+// TestSecretsNamespace_NotifyStep_SecretInToDoesNotLeak pins the leak
+// fix: a notify `to:` selector is a routing ADDRESS, never a place to
+// resolve a vault value. If {{ secrets.* }} in `to:` were resolved, the
+// rendered value would land in toRaw — which is logged AND persisted as a
+// run warning when the (now-secret-shaped) target fails to resolve — and
+// the deferred scrub only covers the step's return value, not those side
+// channels. So `to:` must not be part of the secret-resolution set at all;
+// the secret value must never reach the run warning or the marker.
+func TestSecretsNamespace_NotifyStep_SecretInToDoesNotLeak(t *testing.T) {
+	store, db := openRunsTestDB(t)
+	defer db.Close()
+
+	// A pipeline_runs row is required for AppendWarning to persist onto.
+	if _, err := db.Exec(`
+INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, status, started_at)
+VALUES ('run_leak', 'ws_runs', 'pln_x', 'leak-bot', 'running', '2026-07-24T00:00:00Z')`); err != nil {
+		t.Fatalf("seed run row: %v", err)
+	}
+
+	fake := &fakeInboxNotifier{}
+	exec := NewExecutor(nil, nil, nil, nil).
+		WithRunStore(store).
+		WithInboxNotifier(fake).
+		WithCredentialResolver(fakeSecretResolver)
+
+	step := Step{ID: "tell", Type: StepNotify, Notify: &NotifyStep{
+		To:    "{{ secrets.stripe }}",
+		Title: "done",
+		Body:  "all good",
+	}}
+	in := RunInput{WorkspaceID: "ws_runs", Mode: ModeRun}
+	in.dsl = &DSL{Name: "leak-bot"}
+
+	out, _, _, err := exec.runNotifyStep(context.Background(), step, RenderContext{}, in, "run_leak")
+	if err != nil {
+		t.Fatalf("runNotifyStep: %v", err)
+	}
+
+	// 1) The returned marker must not carry the resolved secret.
+	if strings.Contains(out, stripeSecretValue) {
+		t.Errorf("notify marker leaked the secret value: %q", out)
+	}
+
+	// 2) No persisted run warning may contain the secret value. With the
+	//    bug, `to:` resolves to the raw secret, which is not a valid
+	//    selector, so the degrade path records `target "<secret>" not
+	//    delivered ...` — a plaintext leak into warnings_json.
+	rec, gerr := store.Get(context.Background(), "run_leak")
+	if gerr != nil {
+		t.Fatalf("get run: %v", gerr)
+	}
+	for _, w := range rec.Warnings() {
+		if strings.Contains(w.Message, stripeSecretValue) {
+			t.Errorf("run warning leaked the secret value: %q", w.Message)
+		}
+	}
+}
+
 // TestSecretsNamespace_Validates confirms {{ secrets.<type> }} is an
 // accepted namespace at save-time template validation (like env / run).
 func TestSecretsNamespace_Validates(t *testing.T) {

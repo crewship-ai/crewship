@@ -1,8 +1,6 @@
 package pipeline
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -38,11 +36,6 @@ func validateStepCredentials(st Step) error {
 	return nil
 }
 
-// maxCredentialsRequired caps how many credential types one routine may
-// declare — a guardrail against a malformed definition blowing up the
-// enforcement loop + 422 payload, mirroring maxIntegrationsRequired.
-const maxCredentialsRequired = 64
-
 // RequiredCredentialTypes returns the routine's declared
 // credentials_required types, trimmed + lowercased, de-duplicated, with
 // empties dropped. nil/empty in → nil out (the enforcement no-op fast
@@ -72,59 +65,10 @@ func RequiredCredentialTypes(d *DSL) []string {
 	return out
 }
 
-// CredentialProbe reports whether a credential of credType is resolvable
-// in the run scope. Availability only — it NEVER returns the secret value,
-// so the validator can enforce credentials_required without ever holding a
-// decrypted credential. NewVaultCredentialProbe builds the production
-// implementation over the workspace vault.
-type CredentialProbe func(ctx context.Context, credType string) (bool, error)
-
-// ValidateRequiredCredentials enforces a routine's credentials_required:
-// each declared type must be resolvable via probe, else validation fails
-// with a message naming the missing type. This closes the "declared-only,
-// enforced-by-nobody" gap (#1418) — credentials_required was previously
-// documentary.
-//
-// It is fail-CLOSED, unlike the integrations run-gate's fail-open bias: a
-// routine that explicitly declares it needs a credential is asserting the
-// run cannot function without it, so a missing (or unverifiable) credential
-// must block rather than silently proceed to a step that will fail deep in
-// a runner with an opaque auth error. A nil probe (no way to confirm
-// resolvability) therefore fails too, rather than rubber-stamping.
-//
-// Declaring is still always allowed at SAVE time (like integrations) — the
-// caller runs this at the enforcement boundary (the API run gate), passing
-// a probe scoped to the running workspace + author crew.
-func ValidateRequiredCredentials(ctx context.Context, dsl *DSL, probe CredentialProbe) error {
-	// Reject any declared-but-empty entry unconditionally — a malformed
-	// `credentials_required: [{}]`, OR a blank entry mixed with valid ones
-	// (`[{"type":"stripe"},{}]`), must never pass silently. Checked before the
-	// empty-list fast path so a non-empty list with one blank entry still trips.
-	if dsl != nil {
-		for _, cr := range dsl.CredsRequired {
-			if strings.TrimSpace(cr.Type) == "" {
-				return errors.New("pipeline: credentials_required entry missing type")
-			}
-		}
-	}
-	types := RequiredCredentialTypes(dsl)
-	if len(types) == 0 {
-		return nil
-	}
-	if len(types) > maxCredentialsRequired {
-		return fmt.Errorf("pipeline: too many credentials_required (%d > %d)", len(types), maxCredentialsRequired)
-	}
-	if probe == nil {
-		return fmt.Errorf("pipeline: cannot verify credentials_required %v — no credential resolver available", types)
-	}
-	for _, t := range types {
-		ok, err := probe(ctx, t)
-		if err != nil {
-			return fmt.Errorf("pipeline: resolving required credential %q: %w", t, err)
-		}
-		if !ok {
-			return fmt.Errorf("pipeline: required credential %q is not resolvable in this workspace vault — connect a credential of that type", t)
-		}
-	}
-	return nil
-}
+// Run-time enforcement of credentials_required lives in the API layer's
+// gateMissingCredentials (internal/api/pipeline_credentials_gate.go), which
+// probes the workspace vault via NewVaultCredentialProbe on every dispatch
+// path that resolves secrets. That is the single production enforcement
+// path — this file only supplies the parse-time shape gate
+// (validateStepCredentials) and the normalized required-type set
+// (RequiredCredentialTypes) it consumes.
