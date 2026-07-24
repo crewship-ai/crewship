@@ -33,6 +33,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/policy"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // hireRequest is the POST /api/v1/agents/hire body. Slug-based
@@ -1050,12 +1051,18 @@ func (h *AgentHandler) writeInboxItem(r *http.Request, id, workspaceID, agentID,
 	if mErr == nil {
 		payload = string(payloadBytes)
 	}
+	// Write created_at/updated_at explicitly through tsformat.Format rather
+	// than leaning on the column's strftime-ms DEFAULT: the inbox writers in
+	// internal/inbox/writer.go emit this same fixed-width form, and mixing it
+	// with the narrower DEFAULT shape mis-sorts the (workspace_id, state,
+	// created_at DESC) index for rows landing inside the same second.
+	now := tsformat.Format(time.Now())
 	_, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO inbox_items (
 			id, workspace_id, kind, source_id, sender_type, sender_id, sender_name,
-			title, body_md, state, priority, blocking, payload_json)
-		VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?, 'unread', 'medium', ?, ?)`,
-		id, workspaceID, kind, agentID, senderUserID, agentName, title, body, blockingFlag, payload)
+			title, body_md, state, priority, blocking, payload_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?, 'unread', 'medium', ?, ?, ?, ?)`,
+		id, workspaceID, kind, agentID, senderUserID, agentName, title, body, blockingFlag, payload, now, now)
 	if err != nil {
 		h.logger.Warn("hire: write inbox item", "error", err, "agent_id", agentID)
 	}

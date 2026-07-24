@@ -310,7 +310,7 @@ VALUES ('tok_resume_wait', 'ws_test', 'run_resume_wait', 'gate', 'approval', 'ok
 	go func() {
 		// Give the resumed goroutine a moment to re-park.
 		time.Sleep(100 * time.Millisecond)
-		err := wpStore.CompleteApproval(context.Background(), "tok_resume_wait", true, "user_test", "")
+		err := wpStore.CompleteApproval(context.Background(), "ws_test", "tok_resume_wait", true, "user_test", "")
 		if err == nil {
 			exec.ResumeAfterApproval("run_resume_wait", slog.Default())
 		}

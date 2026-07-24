@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/untrusted"
 )
 
 // SupportedDSLVersion is the only DSL version this build understands.
@@ -13,6 +15,16 @@ import (
 // time. When we ship a v2 schema we add it here and gate forward-
 // compat behaviour from the version string — never from heuristics.
 const SupportedDSLVersion = "1.0"
+
+// MaxPipelineSteps bounds the number of top-level steps a definition may
+// declare (#1416 item 4). The body-size cap on Save/Import/CreateSchedule/
+// CreateWebhook bounds request BYTES; it doesn't bound step COUNT — a
+// definition of many tiny steps could still pin memory/CPU (per-step
+// render context, journal entries, DAG scheduling) well under the byte
+// cap. 500 is generous for any legitimate routine (the DAG scheduler and
+// per-step render/journal overhead start to dominate long before a
+// hand-authored or agent-authored routine would need more).
+const MaxPipelineSteps = 500
 
 // MaxNestedPipelineDepth caps recursion through call_pipeline. The
 // cycle-detection at save time prevents A→B→A loops, but a user
@@ -100,69 +112,95 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 	if dsl == nil {
 		return errors.New("pipeline: nil DSL")
 	}
+
+	// #1423 item 1: accumulate every static check failure into one
+	// ValidationErrors instead of returning on the first, with a
+	// JSON-pointer path per entry for editor jump-to. `errs` is the single
+	// accumulator every check below feeds; `errs.add` flattens whatever
+	// shape a sibling dsl_validate_*.go check returns (plain error,
+	// *ValidationError, or ValidationErrors) into it.
+	var errs ValidationErrors
+
 	if dsl.DSLVersion != "" && dsl.DSLVersion != SupportedDSLVersion {
-		return fmt.Errorf("pipeline: unsupported DSL version %q (this build understands %q)", dsl.DSLVersion, SupportedDSLVersion)
+		errs.add("/dsl_version", fmt.Errorf("pipeline: unsupported DSL version %q (this build understands %q)", dsl.DSLVersion, SupportedDSLVersion))
 	}
 	if dsl.Name == "" {
-		return errors.New("pipeline: name required")
+		errs.add("/name", errors.New("pipeline: name required"))
+	} else if !slugRE.MatchString(dsl.Name) {
+		errs.add("/name", fmt.Errorf("pipeline: name %q must be lowercase kebab-case (1–64 chars, a-z 0-9 - _)", dsl.Name))
 	}
 	switch dsl.Parallelism {
 	case "", ParallelismExplicit, ParallelismAuto, ParallelismOff:
 	default:
-		return fmt.Errorf("pipeline: parallelism %q invalid (allowed: explicit, auto, off)", dsl.Parallelism)
-	}
-	if !slugRE.MatchString(dsl.Name) {
-		return fmt.Errorf("pipeline: name %q must be lowercase kebab-case (1–64 chars, a-z 0-9 - _)", dsl.Name)
+		errs.add("/parallelism", fmt.Errorf("pipeline: parallelism %q invalid (allowed: explicit, auto, off)", dsl.Parallelism))
 	}
 	if len(dsl.Steps) == 0 {
-		return errors.New("pipeline: at least one step required")
+		errs.add("/steps", errors.New("pipeline: at least one step required"))
 	}
-	if err := validateAgentless(dsl); err != nil {
-		return err
+	// MaxPipelineSteps stays an early, first-class, single-error RETURN
+	// (#1416 added this bound; #1423 item 1 explicitly keeps it this way):
+	// a definition already past the step-count cap isn't safe to keep
+	// walking — the per-step render/journal/DAG overhead the cap exists to
+	// bound would apply to every subsequent check too — so this does NOT
+	// fold into `errs`, and its message/behavior is unchanged from before
+	// multi-error accumulation existed.
+	if len(dsl.Steps) > MaxPipelineSteps {
+		return fmt.Errorf("pipeline: %d steps exceeds the %d step limit", len(dsl.Steps), MaxPipelineSteps)
 	}
-	if err := validateIntegrationsRequired(dsl); err != nil {
-		return err
-	}
-	if err := validateResources(dsl); err != nil {
-		return err
-	}
+
+	errs.add("/agentless", validateAgentless(dsl))
+	errs.add("/integrations_required", validateIntegrationsRequired(dsl))
+	errs.add("/resources", validateResources(dsl))
 
 	seenStepIDs := make(map[string]struct{}, len(dsl.Steps))
 	for i, st := range dsl.Steps {
-		if err := validateStepSlugs(i, st, dsl, agentSlugs, seenStepIDs); err != nil {
-			return err
+		stepPath := fmt.Sprintf("/steps/%d", i)
+		// validateStepSlugs returns *ValidationError directly (not error) so
+		// this stays a plain nil check — passing it through errs.add would
+		// hit the classic typed-nil-in-interface trap (err != nil even when
+		// the returned *ValidationError itself is nil).
+		if ve := validateStepSlugs(i, st, dsl, agentSlugs, seenStepIDs); ve != nil {
+			errs = append(errs, ve)
 		}
-		if err := validateStepEgress(st); err != nil {
-			return err
-		}
-		if err := validateStepCredentials(st); err != nil {
-			return err
-		}
-		if err := validateStepGates(st, agentSlugs); err != nil {
-			return err
-		}
-		if err := validateStepOutputGate(st); err != nil {
-			return err
-		}
-		if err := validateStepHooks(st); err != nil {
-			return err
-		}
-		if err := validateForeachStep(st, dsl, agentSlugs); err != nil {
-			return err
-		}
+		errs.add(stepPath+"/"+stepBodyField(st.Type), validateStepEgress(st))
+		errs.add(stepPath+"/http/credential_ref", validateStepCredentials(st))
+		errs.add(stepPath+"/gates", validateStepGates(st, agentSlugs))
+		errs.add(stepPath+"/validation", validateStepOutputGate(st))
+		errs.add(stepPath+"/hooks", validateStepHooks(st))
+		errs.add(stepPath+"/foreach", validateForeachStep(st, dsl, agentSlugs))
 	}
 
-	if err := validateHooks(dsl); err != nil {
-		return err
-	}
-	if err := validateEgressTargets(dsl); err != nil {
-		return err
-	}
-	if err := validateConcurrencyKey(dsl); err != nil {
-		return err
-	}
+	errs.add("/hooks", validateHooks(dsl))
+	errs.add("/egress_targets", validateEgressTargets(dsl))
+	errs.add("/concurrency_key", validateConcurrencyKey(dsl))
+	errs.add("", validateTemplates(dsl))
 
-	return validateTemplates(dsl)
+	return errs.asErr()
+}
+
+// stepBodyField maps a step type to the DSL field its body-shape checks
+// (validateStepEgress) live under, so Validate can attach a JSON-pointer
+// path without validateStepEgress itself needing to become path-aware.
+// Falls back to "type" for step kinds validated elsewhere (agent_run,
+// call_pipeline — handled in validateStepSlugs) or an unrecognized type,
+// where the error is about the type field itself.
+func stepBodyField(t StepType) string {
+	switch t {
+	case StepHTTP:
+		return "http"
+	case StepCode:
+		return "code"
+	case StepWait:
+		return "wait"
+	case StepTransform:
+		return "transform"
+	case StepNotify:
+		return "notify"
+	case StepScript:
+		return "script"
+	default:
+		return "type"
+	}
 }
 
 // validateStepHooks checks a step's per-step before/after hooks (Wave
@@ -228,6 +266,8 @@ func validateTemplates(dsl *DSL) error {
 		inputNames[in.Name] = struct{}{}
 	}
 
+	var errs ValidationErrors
+
 	// "Earlier" determination: linear pipelines (no needs[] anywhere)
 	// use source order — the historical, predictable behaviour. DAG
 	// pipelines (any step has needs[]) compute a per-step set of
@@ -250,6 +290,11 @@ func validateTemplates(dsl *DSL) error {
 		// closure for template validation. Without this, a DSL with
 		// `needs: ["ghost"]` plus `{{ steps.ghost.output }}` slips
 		// past Save and only blows up at runtime in validateDAG.
+		//
+		// This stays a single early return (not folded into `errs`):
+		// an invalid graph has no well-defined reachable-set per step,
+		// so every per-step template check below it would be
+		// meaningless noise on top of the real problem.
 		if err := validateDAG(dsl); err != nil {
 			return fmt.Errorf("pipeline: %w", err)
 		}
@@ -257,25 +302,21 @@ func validateTemplates(dsl *DSL) error {
 		for i := range dsl.Steps {
 			stepByID[dsl.Steps[i].ID] = &dsl.Steps[i]
 		}
-		for _, st := range dsl.Steps {
+		for i, st := range dsl.Steps {
 			reachable := make(map[string]struct{})
 			collectReachableNeeds(st.ID, stepByID, reachable)
-			if err := validateTemplatesInStep(st, inputNames, reachable); err != nil {
-				return err
-			}
+			validateTemplatesInStep(i, st, inputNames, reachable, &errs)
 		}
-		return nil
+		return errs.asErr()
 	}
 
 	// Linear mode (preserve historical behaviour): source-order.
 	earlierSteps := make(map[string]struct{}, len(dsl.Steps))
-	for _, st := range dsl.Steps {
-		if err := validateTemplatesInStep(st, inputNames, earlierSteps); err != nil {
-			return err
-		}
+	for i, st := range dsl.Steps {
+		validateTemplatesInStep(i, st, inputNames, earlierSteps, &errs)
 		earlierSteps[st.ID] = struct{}{}
 	}
-	return nil
+	return errs.asErr()
 }
 
 // collectReachableNeeds walks the `needs` chain from stepID and
@@ -320,19 +361,27 @@ func collectReachableNeeds(stepID string, stepByID map[string]*Step, out map[str
 // breadth, a malformed template in (e.g.) HTTP.URL passes save and
 // crashes the runtime — discovered at first invocation rather than
 // at author time.
-func validateTemplatesInStep(st Step, inputs, earlier map[string]struct{}) error {
-	walk := func(s string) error {
+//
+// #1423 item 1: every bad template ref in the step is appended to `errs`
+// with a JSON-pointer path (rather than returning on the first), so a step
+// with three typo'd refs across prompt/http/code reports all three in one
+// validate pass.
+func validateTemplatesInStep(i int, st Step, inputs, earlier map[string]struct{}, errs *ValidationErrors) {
+	base := fmt.Sprintf("/steps/%d", i)
+	walk := func(path, s string) {
 		if s == "" {
-			return nil
+			return
 		}
 		matches := templateRE.FindAllStringSubmatch(s, -1)
 		for _, m := range matches {
 			ref := strings.TrimSpace(m[1])
 			if err := checkTemplateRef(ref, inputs, earlier); err != nil {
-				return fmt.Errorf("pipeline: step %q: %w", st.ID, err)
+				*errs = append(*errs, &ValidationError{
+					Path:    path,
+					Message: fmt.Sprintf("pipeline: step %q: %s", st.ID, err.Error()),
+				})
 			}
 		}
-		return nil
 	}
 
 	// agent_run prompt + nested inputs (recursive: NestedInputs can be
@@ -340,75 +389,55 @@ func validateTemplatesInStep(st Step, inputs, earlier map[string]struct{}) error
 	// of inputs to the child routine, and any string anywhere inside
 	// can carry a {{ ... }} template). Only walking top-level string
 	// values used to let bad templates inside nested objects pass save.
-	if err := walk(st.Prompt); err != nil {
-		return err
-	}
-	if err := walkNestedTemplates(st.NestedInputs, walk); err != nil {
-		return err
-	}
+	// NestedInputs paths aren't tracked per-key (arbitrary depth/shape),
+	// so every bad ref found inside it points at the shared "/inputs"
+	// bucket rather than a specific leaf.
+	walk(base+"/prompt", st.Prompt)
+	_ = walkNestedTemplates(st.NestedInputs, func(s string) error {
+		walk(base+"/inputs", s)
+		return nil // never short-circuit — we want every bad ref, not just the first
+	})
 
 	// Conditional `if` expression
-	if err := walk(st.If); err != nil {
-		return err
-	}
+	walk(base+"/if", st.If)
 
 	// HTTP step fields
 	if st.HTTP != nil {
-		if err := walk(st.HTTP.URL); err != nil {
-			return err
-		}
-		if err := walk(st.HTTP.Body); err != nil {
-			return err
-		}
-		for _, v := range st.HTTP.Headers {
-			if err := walk(v); err != nil {
-				return err
-			}
+		walk(base+"/http/url", st.HTTP.URL)
+		walk(base+"/http/body", st.HTTP.Body)
+		for k, v := range st.HTTP.Headers {
+			walk(base+"/http/headers/"+k, v)
 		}
 	}
 
 	// Wait step fields
 	if st.Wait != nil {
-		if err := walk(st.Wait.Until); err != nil {
-			return err
-		}
-		if err := walk(st.Wait.EventFilter); err != nil {
-			return err
-		}
-		if err := walk(st.Wait.ApprovalPrompt); err != nil {
-			return err
-		}
+		walk(base+"/wait/until", st.Wait.Until)
+		walk(base+"/wait/event_filter", st.Wait.EventFilter)
+		walk(base+"/wait/approval_prompt", st.Wait.ApprovalPrompt)
 	}
 
 	// Code step fields
 	if st.Code != nil {
-		if err := walk(st.Code.Code); err != nil {
-			return err
-		}
-		for _, v := range st.Code.Env {
-			if err := walk(v); err != nil {
-				return err
-			}
+		walk(base+"/code/code", st.Code.Code)
+		for k, v := range st.Code.Env {
+			walk(base+"/code/env/"+k, v)
 		}
 	}
 
 	// Transform step fields
 	if st.Transform != nil {
-		if err := walk(st.Transform.Input); err != nil {
-			return err
-		}
-		if err := walk(st.Transform.Expression); err != nil {
-			return err
-		}
+		walk(base+"/transform/input", st.Transform.Input)
+		walk(base+"/transform/expression", st.Transform.Expression)
 	}
 
 	// foreach: the items template resolves against this step's own inputs/
 	// earlier-steps context; the body steps additionally see the loop
 	// variable (inputs.<as>) and each other in source order (#1419).
+	// #1423 item 1: bad refs accumulate into `errs` (JSON-pointer path)
+	// rather than returning on the first, same as the rest of this walk.
 	if st.Foreach != nil {
-		if err := walk(st.Foreach.Items); err != nil {
-			return err
-		}
+		walk(base+"/foreach/items", st.Foreach.Items)
 		as := st.Foreach.As
 		if as == "" {
 			as = "item"
@@ -423,14 +452,10 @@ func validateTemplatesInStep(st Step, inputs, earlier map[string]struct{}) error
 			bodyEarlier[k] = struct{}{}
 		}
 		for _, bs := range st.Foreach.Steps {
-			if err := validateTemplatesInStep(bs, bodyInputs, bodyEarlier); err != nil {
-				return err
-			}
+			validateTemplatesInStep(i, bs, bodyInputs, bodyEarlier, errs)
 			bodyEarlier[bs.ID] = struct{}{}
 		}
 	}
-
-	return nil
 }
 
 // checkTemplateRef validates a single template body like
@@ -445,7 +470,11 @@ func checkTemplateRef(ref string, inputs, earlier map[string]struct{}) error {
 	case "inputs":
 		name := parts[1]
 		if _, ok := inputs[name]; !ok {
-			return fmt.Errorf("template ref %q points at unknown input %q", ref, name)
+			// #1423 item 1: input-name typos are exactly the other
+			// highest-leverage did-you-mean case named in the issue,
+			// alongside agent_slug — same fuzzy.Nearest ranking.
+			hint := didYouMean(name, sortedSetKeys(inputs))
+			return fmt.Errorf("template ref %q points at unknown input %q%s", ref, name, hint)
 		}
 		// inputs.X.something — JSON path into a structured input.
 		// We don't validate the path itself, just allow it.
@@ -455,7 +484,8 @@ func checkTemplateRef(ref string, inputs, earlier map[string]struct{}) error {
 		}
 		stepID := parts[1]
 		if _, ok := earlier[stepID]; !ok {
-			return fmt.Errorf("template ref %q points at step %q which hasn't run yet at this point", ref, stepID)
+			hint := didYouMean(stepID, sortedSetKeys(earlier))
+			return fmt.Errorf("template ref %q points at step %q which hasn't run yet at this point%s", ref, stepID, hint)
 		}
 		// parts[2] = "output" or "output.path"; we don't enforce
 		// shape here. The renderer will produce an empty string if
@@ -617,6 +647,21 @@ type RenderContext struct {
 	// (back-compat for routines that declare none); the crew
 	// network-policy gate and the httpsafe guard still apply.
 	EgressTargets []string
+	// UntrustedInputs names the top-level Inputs keys whose resolved
+	// value must be wrapped in the untrusted-ingress fence
+	// (internal/untrusted) before substitution (#1416 item 1). Applied
+	// at the LEAF value — after any nested-path traversal — so
+	// {{ inputs.event.title }} still resolves the real nested field and
+	// only the final string gets fenced, keeping payload-shaped inputs
+	// (a GitHub/Stripe event object) usable in templates.
+	//
+	// Nil (the zero value every Render call site except the dedicated
+	// agent_run-prompt render used) means no fencing — HTTP/code/
+	// transform/if rendering is deliberately unaffected, since wrapping
+	// a URL, JSON body, or script arg in `<untrusted ...>` tags would
+	// corrupt it rather than protect anything; those vectors are closed
+	// by the egress hardening in egress_gate.go instead.
+	UntrustedInputs map[string]struct{}
 	// Secrets maps a credential TYPE (e.g. "stripe") to its decrypted
 	// value for the {{ secrets.<type> }} render namespace (#1418). It is
 	// populated per-step by the executor (resolveStepSecrets) from the
@@ -658,12 +703,12 @@ func resolveRef(ref string, ctx RenderContext) (string, bool) {
 		if len(parts) == 3 {
 			if m, ok := v.(map[string]any); ok {
 				if nested, ok := m[parts[2]]; ok {
-					return stringify(nested), true
+					return fenceIfUntrusted(ctx, parts[1], stringify(nested)), true
 				}
 				return "", false
 			}
 		}
-		return stringify(v), true
+		return fenceIfUntrusted(ctx, parts[1], stringify(v)), true
 	case "steps":
 		if len(parts) < 3 {
 			return "", false
@@ -726,6 +771,23 @@ func resolveRef(ref string, ctx RenderContext) (string, bool) {
 		return "", false
 	}
 	return "", false
+}
+
+// fenceIfUntrusted wraps value in the untrusted-ingress fence when
+// inputName is listed in ctx.UntrustedInputs (#1416 item 1). source is
+// fixed to "webhook" — the only producer of UntrustedInputs today is the
+// webhook-triggered agent_run prompt render; a future second source would
+// need to thread its own label through, not spoof this one, since the
+// label is caller-derived and never taken from the payload itself (see
+// untrusted.Wrap's contract).
+func fenceIfUntrusted(ctx RenderContext, inputName, value string) string {
+	if ctx.UntrustedInputs == nil {
+		return value
+	}
+	if _, ok := ctx.UntrustedInputs[inputName]; !ok {
+		return value
+	}
+	return untrusted.Wrap("webhook", value)
 }
 
 // stringify converts an arbitrary input value to a string for template

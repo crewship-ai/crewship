@@ -9,8 +9,11 @@ import (
 )
 
 // StepRunResult mirrors POST /workspaces/{ws}/pipelines/{slug}/step_run —
-// the verdict of executing ONE agent_run step against a fixture, in
-// isolation, without a persisted run record. Only the fields the CLI
+// the verdict of executing ONE step against a fixture, in isolation,
+// without a persisted run record. agent_run, http, script, and transform
+// steps are supported (#1423 item 3 widened this beyond agent_run only);
+// Adapter/Model/TokensIn/TokensOut/CostUSD are agent_run-only and stay
+// zero-valued for the deterministic step types. Only the fields the CLI
 // renders are decoded; unknown members pass through untouched.
 type StepRunResult struct {
 	StepID           string   `json:"step_id"`
@@ -29,10 +32,11 @@ type StepRunResult struct {
 	Warnings         []string `json:"warnings"`
 }
 
-// StepRunRoutine executes a single agent_run step of a routine against the
-// supplied input fixture (and optional seeded upstream step outputs) and
-// returns its output + validation verdict + cost, without running the rest of
-// the pipeline or writing a run record.
+// StepRunRoutine executes a single step of a routine — agent_run, http,
+// script, or transform — against the supplied input fixture (and optional
+// seeded upstream step outputs) and returns its output + validation verdict
+// + cost (agent_run only; always 0 for the deterministic types), without
+// running the rest of the pipeline or writing a run record.
 func (c *Client) StepRunRoutine(ctx context.Context, slug, stepID string, inputs map[string]any, stepOutputs map[string]string, tierOverride string) (*StepRunResult, error) {
 	if strings.TrimSpace(slug) == "" {
 		return nil, errors.New("routine slug required")

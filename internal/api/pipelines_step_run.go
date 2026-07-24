@@ -135,28 +135,38 @@ func (h *PipelineHandler) StepRun(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusNotFound, "step not found: "+body.StepID)
 		return
 	}
-	if step.Type != pipeline.StepAgentRun {
-		replyError(w, http.StatusBadRequest,
-			"step_run supports only agent_run steps; "+body.StepID+" is "+string(step.Type))
-		return
-	}
-
-	// Render the step prompt against the fixture + any seeded upstream outputs.
-	// Most non-first steps consume `{{ steps.X.output }}`; step_outputs stands
-	// in for the DAG so those steps can be debugged in isolation. WARN loudly
-	// when a referenced upstream output wasn't seeded — it rendered empty, so
-	// you'd be iterating on a prompt that never sees production's real data.
+	// WARN loudly when a referenced upstream output wasn't seeded via
+	// --outputs — it rendered empty, so the step is seeing different input
+	// than it would in a real run. Scans every template-bearing field for
+	// the step's type (not just agent_run's Prompt), so the same hazard is
+	// caught for the deterministic step types below (#1423 item 3).
 	var warnings []string
-	for _, ref := range pipeline.ReferencedStepOutputs(step.Prompt) {
-		if _, ok := body.StepOutputs[ref]; !ok {
-			warnings = append(warnings, fmt.Sprintf(
-				"prompt references {{ steps.%s.output }} but no --outputs fixture was provided for %q — it rendered empty; the step is seeing different input than a real run",
-				ref, ref))
+	seenRefs := map[string]bool{}
+	for _, src := range stepRunTemplateSources(step) {
+		for _, ref := range pipeline.ReferencedStepOutputs(src) {
+			if seenRefs[ref] {
+				continue
+			}
+			if _, ok := body.StepOutputs[ref]; !ok {
+				seenRefs[ref] = true
+				warnings = append(warnings, fmt.Sprintf(
+					"step references {{ steps.%s.output }} but no --outputs fixture was provided for %q — it rendered empty; the step is seeing different input than a real run",
+					ref, ref))
+			}
 		}
 	}
 	if len(warnings) > 0 {
 		h.logger.Warn("step_run: unseeded upstream output refs", "slug", slug, "step", body.StepID, "count", len(warnings))
 	}
+
+	if step.Type != pipeline.StepAgentRun {
+		h.stepRunDeterministic(w, r, p, dsl, step, body, warnings)
+		return
+	}
+
+	// Render the step prompt against the fixture + any seeded upstream outputs.
+	// Most non-first steps consume `{{ steps.X.output }}`; step_outputs stands
+	// in for the DAG so those steps can be debugged in isolation.
 	rendered := pipeline.Render(step.Prompt, pipeline.RenderContext{
 		Inputs:      body.Inputs,
 		StepOutputs: body.StepOutputs,
@@ -218,4 +228,98 @@ func (h *PipelineHandler) StepRun(w http.ResponseWriter, r *http.Request) {
 		Simulated:        true,
 		Warnings:         warnings,
 	})
+}
+
+// stepRunDeterministic handles the #1423 item 3 extension of /step_run to
+// http, script, and transform steps — the cheapest, most deterministic step
+// types, and precisely the ones a routine author most wants to unit-test in
+// isolation (no LLM, no waiting on a real run). Reuses
+// pipeline.Executor.RunDeterministicStep, which itself reuses the exact
+// runner methods the real DAG dispatch loop calls — this handler does not
+// reimplement step execution.
+func (h *PipelineHandler) stepRunDeterministic(w http.ResponseWriter, r *http.Request, p *pipeline.Pipeline, dsl *pipeline.DSL, step *pipeline.Step, body stepRunRequestBody, warnings []string) {
+	if !pipeline.DeterministicStepTypes[step.Type] {
+		replyError(w, http.StatusBadRequest,
+			"step_run supports agent_run, http, script, and transform steps; "+body.StepID+" is "+string(step.Type))
+		return
+	}
+	workspaceID := WorkspaceIDFromContext(r.Context())
+
+	// EgressTargets mirrors what a real run threads into the http step's
+	// render context (buildStepRenderContext(..., dsl.EgressTargets)) — an
+	// http step-run has to see the same "does this routine declare its own
+	// allowlist" signal a real run would, or its egress-policy behavior
+	// would silently diverge from production.
+	renderCtx := pipeline.RenderContext{
+		Inputs:        body.Inputs,
+		StepOutputs:   body.StepOutputs,
+		EgressTargets: dsl.EgressTargets,
+	}
+
+	exec := h.newExecutor()
+	output, costUSD, durationMs, err := exec.RunDeterministicStep(r.Context(), *step, renderCtx, pipeline.RunInput{
+		WorkspaceID:  workspaceID,
+		AuthorCrewID: p.AuthorCrewID,
+		// PipelineID / a runID deliberately absent → non-persisted
+		// simulation, matching the agent_run step-run path above.
+	}, "")
+	if err != nil {
+		h.logger.Warn("step_run: deterministic execution failed", "error", err, "slug", p.Slug, "step", body.StepID, "step_type", step.Type)
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error":  "step execution failed",
+			"detail": err.Error(),
+		})
+		return
+	}
+
+	valid, reason := pipeline.ValidateStepOutput(output, step.Validation)
+
+	writeJSON(w, http.StatusOK, stepRunResponse{
+		StepID:           step.ID,
+		StepType:         string(step.Type),
+		Output:           output,
+		Valid:            valid,
+		ValidationReason: reason,
+		CostUSD:          costUSD,
+		DurationMs:       durationMs,
+		Simulated:        true,
+		Warnings:         warnings,
+	})
+}
+
+// stepRunTemplateSources returns every template-bearing string field for a
+// step's type — the same fields dsl.go's validateTemplatesInStep walks at
+// save time — so step_run's "you forgot to seed an upstream output" warning
+// covers http/transform/script the same way it always covered agent_run's
+// Prompt.
+func stepRunTemplateSources(step *pipeline.Step) []string {
+	switch step.Type {
+	case pipeline.StepAgentRun:
+		return []string{step.Prompt}
+	case pipeline.StepHTTP:
+		if step.HTTP == nil {
+			return nil
+		}
+		out := []string{step.HTTP.URL, step.HTTP.Body}
+		for _, v := range step.HTTP.Headers {
+			out = append(out, v)
+		}
+		return out
+	case pipeline.StepTransform:
+		if step.Transform == nil {
+			return nil
+		}
+		return []string{step.Transform.Input, step.Transform.Expression}
+	case pipeline.StepScript:
+		if step.Script == nil {
+			return nil
+		}
+		out := append([]string{}, step.Script.Args...)
+		for _, v := range step.Script.Env {
+			out = append(out, v)
+		}
+		return out
+	default:
+		return nil
+	}
 }

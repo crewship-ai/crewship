@@ -170,18 +170,107 @@ func TestPipelinesAPI_StepRun_UnknownStep404(t *testing.T) {
 	}
 }
 
-func TestPipelinesAPI_StepRun_NonAgentStep400(t *testing.T) {
+// TestPipelinesAPI_StepRun_UnsupportedStepType400 pins the still-rejected
+// step types after #1423 item 3 widened step_run beyond agent_run: wait
+// (and call_pipeline, notify, code) aren't deterministic-step-runnable —
+// wait blocks on external state, notify/call_pipeline have side effects
+// step_run's "no persisted run record" isolation can't make sense of, and
+// code needs a sandboxed container runner item 3 didn't scope in.
+func TestPipelinesAPI_StepRun_UnsupportedStepType400(t *testing.T) {
 	db := openSmokeDB(t)
 	defer db.Close()
-	// A transform step — step-run only supports agent_run.
-	insertRawPipeline(t, db, "demo", `{"name":"demo","steps":[{"id":"t","type":"transform","transform":{"input":"true","expression":"."}}]}`)
+	insertRawPipeline(t, db, "demo", `{"name":"demo","steps":[{"id":"w","type":"wait","wait":{"kind":"approval","approval_prompt":"ok?"}}]}`)
 	h := NewPipelineHandler(db, slog.Default(), &recordingRunner{}, nil)
-	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", strings.NewReader(`{"step_id":"t"}`)), "ws_smoke")
+	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", strings.NewReader(`{"step_id":"w"}`)), "ws_smoke")
 	req.SetPathValue("slug", "demo")
 	w := httptest.NewRecorder()
 	h.StepRun(w, req)
 	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400 for non-agent_run step, got %d", w.Code)
+		t.Errorf("expected 400 for a wait step, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestPipelinesAPI_StepRun_TransformStep pins #1423 item 3: a transform
+// step now executes through step_run — no agent, no run record, pure jq-
+// subset evaluation via the same runTransformStep the real DAG uses.
+func TestPipelinesAPI_StepRun_TransformStep(t *testing.T) {
+	db := openSmokeDB(t)
+	defer db.Close()
+	insertRawPipeline(t, db, "demo", `{"name":"demo","steps":[{"id":"t","type":"transform","transform":{"input":"{{ inputs.raw }}","expression":"@json"}}]}`)
+	h := NewPipelineHandler(db, slog.Default(), &recordingRunner{}, nil)
+
+	body := strings.NewReader(`{"step_id":"t","inputs":{"raw":"{\"b\":2,\"a\":1}"}}`)
+	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", body), "ws_smoke")
+	req.SetPathValue("slug", "demo")
+	w := httptest.NewRecorder()
+	h.StepRun(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", w.Code, w.Body.String())
+	}
+	var out map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out["output"] != `{"a":1,"b":2}` {
+		t.Errorf("output: got %+v, want canonical-JSON-sorted", out["output"])
+	}
+	if out["simulated"] != true {
+		t.Errorf("expected simulated=true: %+v", out)
+	}
+	if out["step_type"] != "transform" {
+		t.Errorf("step_type: got %+v", out["step_type"])
+	}
+}
+
+// TestPipelinesAPI_StepRun_HTTPStep_RoutesThroughRealEgressGuard pins
+// #1423 item 3's wiring for http steps: the handler dispatches to
+// RunDeterministicStep → runHTTPStep, the SAME SSRF/private-IP guard a
+// real run enforces — proven here by a literal-IP target (what
+// httptest.NewServer binds to) getting blocked exactly like it would in
+// production, not silently allowed because it's "just a step-run".
+// pipeline.TestRunDeterministicStep_HTTP (internal/pipeline package)
+// covers the successful-fetch path with the test-only SetAllowPrivateHTTP
+// hatch, which the API layer never flips.
+func TestPipelinesAPI_StepRun_HTTPStep_RoutesThroughRealEgressGuard(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("pong"))
+	}))
+	defer srv.Close()
+
+	db := openSmokeDB(t)
+	defer db.Close()
+	def := `{"name":"demo","steps":[{"id":"h","type":"http","http":{"method":"GET","url":"` + srv.URL + `"}}]}`
+	insertRawPipeline(t, db, "demo", def)
+	h := NewPipelineHandler(db, slog.Default(), &recordingRunner{}, nil)
+
+	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", strings.NewReader(`{"step_id":"h"}`)), "ws_smoke")
+	req.SetPathValue("slug", "demo")
+	w := httptest.NewRecorder()
+	h.StepRun(w, req)
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 (blocked by the real SSRF guard, same as a real run), got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "private") && !strings.Contains(w.Body.String(), "internal") {
+		t.Errorf("expected the SSRF guard's reason in the error detail, got %s", w.Body.String())
+	}
+}
+
+// TestPipelinesAPI_StepRun_ScriptStepWithoutRunnerFailsClosed pins that a
+// script step-run without a wired ScriptRunner fails closed with an
+// actionable error rather than a false success — same contract as a real
+// run (runScriptStep's own "no ScriptRunner wired" guard).
+func TestPipelinesAPI_StepRun_ScriptStepWithoutRunnerFailsClosed(t *testing.T) {
+	db := openSmokeDB(t)
+	defer db.Close()
+	insertRawPipeline(t, db, "demo", `{"name":"demo","steps":[{"id":"s","type":"script","script":{"path":"scripts/x.py"}}]}`)
+	h := NewPipelineHandler(db, slog.Default(), &recordingRunner{}, nil)
+
+	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", strings.NewReader(`{"step_id":"s"}`)), "ws_smoke")
+	req.SetPathValue("slug", "demo")
+	w := httptest.NewRecorder()
+	h.StepRun(w, req)
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("expected 502 (execution failed) without a wired ScriptRunner, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 

@@ -84,6 +84,42 @@ func TestSeedShowcase_FeedWatchProbeIsAgentlessTokenZero(t *testing.T) {
 	}
 }
 
+// workspace-digest (#1422 item 4) must be a genuinely token-zero ops
+// digest: query(pipeline_runs) -> transform(extract summary_md) ->
+// notify(workspace), no agent step anywhere in the chain.
+func TestSeedShowcase_WorkspaceDigestIsAgentlessTokenZero(t *testing.T) {
+	dsl := parseSeedRoutine(t, "workspace-digest")
+	if !dsl.Agentless {
+		t.Fatal("workspace-digest must declare agentless: true (token-zero digest contract)")
+	}
+	if dsl.EstimatedCostUSD != 0 {
+		t.Errorf("workspace-digest estimated_cost_usd = %v, want 0 (token-zero)", dsl.EstimatedCostUSD)
+	}
+	var hasQuery, hasTransform, hasNotify bool
+	for _, st := range dsl.Steps {
+		switch st.Type {
+		case pipeline.StepQuery:
+			hasQuery = true
+			if st.Query == nil || st.Query.Source != "pipeline_runs" {
+				t.Errorf("workspace-digest query step %q must source pipeline_runs", st.ID)
+			}
+		case pipeline.StepTransform:
+			hasTransform = true
+		case pipeline.StepNotify:
+			hasNotify = true
+			if st.Notify == nil || st.Notify.To == "" {
+				t.Errorf("workspace-digest notify step %q missing a recipient", st.ID)
+			}
+		case pipeline.StepAgentRun, pipeline.StepCallPipeline:
+			t.Errorf("workspace-digest step %q is %q — must stay agentless (query/transform/notify only)", st.ID, st.Type)
+		}
+	}
+	if !hasQuery || !hasTransform || !hasNotify {
+		t.Fatalf("workspace-digest must chain query + transform + notify; got query=%v transform=%v notify=%v",
+			hasQuery, hasTransform, hasNotify)
+	}
+}
+
 // morning-briefing must still be a working agent routine even though the
 // demo seed no longer wires it to a cron schedule — it's runnable on
 // demand or scheduled by hand.

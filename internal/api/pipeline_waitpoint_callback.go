@@ -51,17 +51,35 @@ func (h *PipelineHandler) CompleteWaitpointToken(w http.ResponseWriter, r *http.
 	}
 
 	type approver interface {
-		CompleteApproval(ctx context.Context, token string, approved bool, deciderUserID, payload string) error
+		CompleteApproval(ctx context.Context, workspaceID, token string, approved bool, deciderUserID, payload string) error
 	}
 	wp, ok := h.waitpoints.(approver)
 	if !ok {
 		replyError(w, http.StatusServiceUnavailable, "waitpoint store does not support completion")
 		return
 	}
+	// This endpoint has no workspace JWT — the high-entropy token in the
+	// path is the sole auth surface (see doc comment above), so there's no
+	// caller-asserted workspace to check the token against. We still thread
+	// a workspaceID through CompleteApproval so its UPDATE stays scoped
+	// like the authed ApproveWaitpoint path (#1415): look up the token's
+	// OWN workspace first and pass that back. This can't reject a
+	// legitimate holder of the token (the value always matches itself) —
+	// it just keeps both call sites sharing one workspace-scoped query
+	// instead of the callback path using a laxer one.
+	type workspaceLookup interface {
+		WorkspaceIDForToken(ctx context.Context, token string) (string, error)
+	}
+	workspaceID := ""
+	if wl, ok := h.waitpoints.(workspaceLookup); ok {
+		if wsID, wErr := wl.WorkspaceIDForToken(r.Context(), token); wErr == nil {
+			workspaceID = wsID
+		}
+	}
 	// deciderUserID = "external-callback": no human user, the token is the
 	// authority. Audit queries can distinguish callback completions from
 	// inbox approvals by this sentinel.
-	if err := wp.CompleteApproval(r.Context(), token, approved, "external-callback", payload); err != nil {
+	if err := wp.CompleteApproval(r.Context(), workspaceID, token, approved, "external-callback", payload); err != nil {
 		if err.Error() == "waitpoint: already decided or expired" {
 			replyError(w, http.StatusConflict, err.Error())
 			return

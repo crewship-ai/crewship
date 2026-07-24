@@ -43,6 +43,12 @@ type scheduleResponse struct {
 	WakeFireCount    int            `json:"wake_fire_count,omitempty"`
 	LastWakeAt       *time.Time     `json:"last_wake_at,omitempty"`
 	LastWakeStatus   string         `json:"last_wake_status,omitempty"`
+	// CatchupPolicy + LastMissedCount — missed-run catch-up (#1422 item
+	// 2). CatchupPolicy is always populated (defaults to "once");
+	// LastMissedCount is telemetry from the most recent tick (0 = current
+	// or a fully-drained backlog).
+	CatchupPolicy   string `json:"catchup_policy"`
+	LastMissedCount int    `json:"last_missed_count,omitempty"`
 	// Circuit breaker (#1405). ConsecutiveFailures/MaxConsecutiveFailures
 	// are always present (unlike the wake fields) since every schedule has
 	// a breaker threshold whether or not it has ever failed.
@@ -92,6 +98,8 @@ func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlu
 		WakeFireCount:          s.WakeFireCount,
 		LastWakeAt:             s.LastWakeAt,
 		LastWakeStatus:         s.LastWakeStatus,
+		CatchupPolicy:          s.CatchupPolicy,
+		LastMissedCount:        s.LastMissedCount,
 		ConsecutiveFailures:    s.ConsecutiveFailures,
 		MaxConsecutiveFailures: s.MaxConsecutiveFailures,
 		DisabledReason:         s.DisabledReason,
@@ -121,6 +129,11 @@ type scheduleRequestBody struct {
 	// existing policy" from an explicit false. Only meaningful when a
 	// wake gate is set; ignored on an ungated schedule.
 	WakeFailClosed *bool `json:"wake_fail_closed,omitempty"`
+	// CatchupPolicy — see pipeline.Schedule.CatchupPolicy (#1422 item 2).
+	// Empty on create defaults to "once"; empty on update keeps the
+	// existing value (same absent-keeps-existing convention as the wake
+	// gate fields above).
+	CatchupPolicy string `json:"catchup_policy,omitempty"`
 	// MaxConsecutiveFailures overrides the circuit breaker's trip
 	// threshold (#1405). Pointer so PATCH can distinguish "absent — keep
 	// the existing/default threshold" from an explicit override. nil or
@@ -197,8 +210,12 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// #1416 item 4: cap the request body like every exec route already
+	// does (maxExecBodyBytes) -- CreateSchedule had no MaxBytesReader at
+	// all, so a create-role (or capability-granted) member could pin
+	// server memory with an oversized body.
 	var body scheduleRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
@@ -242,6 +259,7 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		WakePipelineID:         wakeID,
 		WakeInputs:             body.WakeInputs,
 		WakeFailClosed:         body.WakeFailClosed != nil && *body.WakeFailClosed,
+		CatchupPolicy:          body.CatchupPolicy,
 		MaxConsecutiveFailures: maxFailures,
 	}
 	saved, err := h.schedules.Save(r.Context(), in)
@@ -450,6 +468,12 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 	if wakeID == "" {
 		wakeFailClosed = false
 	}
+	// catchup_policy merge: absent field keeps the existing value (same
+	// convention as name/cron/timezone above), explicit value replaces it.
+	catchupPolicy := existing.CatchupPolicy
+	if body.CatchupPolicy != "" {
+		catchupPolicy = body.CatchupPolicy
+	}
 
 	maxFailures := 0
 	if body.MaxConsecutiveFailures != nil {
@@ -468,6 +492,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		WakePipelineID:         wakeID,
 		WakeInputs:             wakeInputs,
 		WakeFailClosed:         wakeFailClosed,
+		CatchupPolicy:          catchupPolicy,
 		MaxConsecutiveFailures: maxFailures,
 	}
 	saved, err := h.schedules.Save(r.Context(), in)

@@ -103,3 +103,57 @@ func TestCheck_NilDBAllows(t *testing.T) {
 		t.Errorf("Check(nil db) = %v, want allow", err)
 	}
 }
+
+// TestCheckHTTPStep_Semantics pins #1416 item 3 (SSRF to arbitrary public
+// hosts on free-network crews) and item 1 (force-restricted egress for
+// webhook-triggered runs). CheckHTTPStep is the pipeline http-step-only
+// entry point — Check (and therefore notify/hooks, pinned by
+// TestCheck_Semantics above) is completely unaffected by this change.
+func TestCheckHTTPStep_Semantics(t *testing.T) {
+	db := openCrewsTestDB(t)
+	seedCrew(t, db, "crew_free", "free", "")
+	seedCrew(t, db, "crew_free_domains", "free", `["partner.example.com"]`)
+	seedCrew(t, db, "crew_restricted", "restricted", `["api.partner.com"]`)
+
+	ctx := context.Background()
+	cases := []struct {
+		name                  string
+		crew                  string
+		host                  string
+		routineDeclaresEgress bool
+		forceRestricted       bool
+		allow                 bool
+	}{
+		{"free+undeclared+default-domain allowed", "crew_free", "api.anthropic.com", false, false, true},
+		{"free+undeclared+arbitrary host blocked", "crew_free", "evil.example.com", false, false, false},
+		{"free+declared egress_targets bypasses the floor", "crew_free", "evil.example.com", true, false, true},
+		{"restricted mode unaffected by CheckHTTPStep", "crew_restricted", "evil.example.com", false, false, false},
+		{"restricted mode unaffected: listed host still allowed", "crew_restricted", "api.partner.com", false, false, true},
+		{"force-restricted on a free crew blocks an undeclared arbitrary host", "crew_free", "evil.example.com", false, true, false},
+		{"force-restricted on a free crew still honours the crew's own allowed_domains", "crew_free_domains", "partner.example.com", false, true, true},
+		{"force-restricted on a free crew keeps the sidecar default domains", "crew_free", "api.anthropic.com", false, true, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := CheckHTTPStep(ctx, db, c.crew, c.host, c.routineDeclaresEgress, c.forceRestricted)
+			if c.allow && err != nil {
+				t.Errorf("CheckHTTPStep(%q, %q, declares=%v, force=%v) = %v, want allow", c.crew, c.host, c.routineDeclaresEgress, c.forceRestricted, err)
+			}
+			if !c.allow && err == nil {
+				t.Errorf("CheckHTTPStep(%q, %q, declares=%v, force=%v) allowed, want block", c.crew, c.host, c.routineDeclaresEgress, c.forceRestricted)
+			}
+		})
+	}
+}
+
+// TestCheck_FreeModeUnaffectedByHTTPStepHardening re-confirms (belt and
+// suspenders alongside TestCheck_Semantics) that Check's own "free mode
+// allows anything" contract — the one notify/hooks depend on — is
+// untouched by adding CheckHTTPStep.
+func TestCheck_FreeModeUnaffectedByHTTPStepHardening(t *testing.T) {
+	db := openCrewsTestDB(t)
+	seedCrew(t, db, "crew_free", "free", "")
+	if err := Check(context.Background(), db, "crew_free", "evil.example.com"); err != nil {
+		t.Errorf("Check on free-mode crew = %v, want allow (notify/hooks contract)", err)
+	}
+}

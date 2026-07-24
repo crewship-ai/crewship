@@ -112,6 +112,7 @@ func newScheduleFlagsCmd() *cobra.Command {
 	c.Flags().String("slug", "", "")
 	c.Flags().String("name", "", "")
 	c.Flags().String("cron", "", "")
+	c.Flags().String("when", "", "")
 	c.Flags().String("timezone", "", "")
 	c.Flags().String("inputs", "", "")
 	c.Flags().Bool("enabled", true, "")
@@ -121,6 +122,7 @@ func newScheduleFlagsCmd() *cobra.Command {
 	c.Flags().Bool("fail-closed", false, "")
 	c.Flags().Bool("json", false, "")
 	c.Flags().Bool("yes", false, "")
+	c.Flags().String("catchup", "", "")
 	return c
 }
 
@@ -220,8 +222,9 @@ func TestScheduleCreate_Validation(t *testing.T) {
 		set     map[string]string
 		wantErr string
 	}{
-		{"missing slug+cron", map[string]string{}, "--slug and --cron are required"},
-		{"missing cron", map[string]string{"slug": "x"}, "--slug and --cron are required"},
+		{"missing slug+cron", map[string]string{}, "--slug is required"},
+		{"missing cron", map[string]string{"slug": "x"}, "--cron or --when is required"},
+		{"cron and when both set", map[string]string{"slug": "x", "cron": "* * * * *", "when": "every day at 9am"}, "--cron and --when are mutually exclusive"},
 		{"wake-inputs without wake-slug", map[string]string{"slug": "x", "cron": "* * * * *", "wake-inputs": `{"a":1}`}, "--wake-inputs requires --wake-slug"},
 		{"bad inputs json", map[string]string{"slug": "x", "cron": "* * * * *", "inputs": "{nope"}, "--inputs must be valid JSON"},
 		{"bad wake-inputs json", map[string]string{"slug": "x", "cron": "* * * * *", "wake-slug": "probe", "wake-inputs": "{nope"}, "--wake-inputs must be valid JSON"},
@@ -296,6 +299,113 @@ func TestScheduleCreate_Success(t *testing.T) {
 	inputs, _ := body["inputs"].(map[string]any)
 	if inputs["text"] != "hello" {
 		t.Errorf("inputs = %v", body["inputs"])
+	}
+}
+
+// #1422 item 1: `--when` parses NL to cron, previews the next 3 fire
+// times, and (with --yes, skipping the interactive prompt) proceeds to
+// create using the derived cron expression.
+func TestScheduleCreate_When_Success(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	stub.OnPost(schedulesPath, clitest.JSONResponse(201, scheduleRow{
+		ID: "sch-nl", Name: "summarize schedule", CronExpr: "0 9 * * 1-5", Timezone: "UTC",
+	}))
+	setStubCLI(t, stub.URL())
+
+	c := newScheduleFlagsCmd()
+	for k, v := range map[string]string{
+		"slug": "summarize", "when": "every weekday at 9", "yes": "true",
+	} {
+		if err := c.Flags().Set(k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := captureStdoutCovCli2(t, func() {
+		if err := routineSchedulesCreateCmd.RunE(c, nil); err != nil {
+			t.Errorf("create: %v", err)
+		}
+	})
+	if !strings.Contains(out, `Parsed "every weekday at 9" as cron "0 9 * * 1-5"`) {
+		t.Errorf("missing NL parse echo:\n%s", out)
+	}
+	if !strings.Contains(out, "Next 3 fire times:") {
+		t.Errorf("missing next-3-occurrences preview:\n%s", out)
+	}
+	calls := stub.CallsFor("POST", schedulesPath)
+	if len(calls) != 1 {
+		t.Fatalf("POST calls = %d", len(calls))
+	}
+	var body map[string]any
+	clitest.MustDecodeJSONBody(calls[0].Body, &body)
+	if body["cron_expr"] != "0 9 * * 1-5" {
+		t.Errorf("cron_expr = %v, want derived cron", body["cron_expr"])
+	}
+}
+
+func TestScheduleCreate_When_Unrecognized(t *testing.T) {
+	c := newScheduleFlagsCmd()
+	for k, v := range map[string]string{"slug": "x", "when": "whenever the mood strikes"} {
+		if err := c.Flags().Set(k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := routineSchedulesCreateCmd.RunE(c, nil)
+	if err == nil || !strings.Contains(err.Error(), "could not understand") {
+		t.Errorf("got %v, want unrecognized-phrase error", err)
+	}
+}
+
+// #1422 item 2: --catchup is sent through on create, and last_missed_count
+// renders in the list's MISSED column when nonzero.
+func TestScheduleCreate_CatchupPolicy(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	stub.OnPost(schedulesPath, clitest.JSONResponse(201, scheduleRow{
+		ID: "sch-cu", Name: "n", CronExpr: "0 9 * * *", Timezone: "UTC", CatchupPolicy: "all",
+	}))
+	setStubCLI(t, stub.URL())
+
+	c := newScheduleFlagsCmd()
+	for k, v := range map[string]string{"slug": "x", "cron": "0 9 * * *", "catchup": "all"} {
+		if err := c.Flags().Set(k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := routineSchedulesCreateCmd.RunE(c, nil); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	calls := stub.CallsFor("POST", schedulesPath)
+	if len(calls) != 1 {
+		t.Fatalf("POST calls = %d", len(calls))
+	}
+	var body map[string]any
+	clitest.MustDecodeJSONBody(calls[0].Body, &body)
+	if body["catchup_policy"] != "all" {
+		t.Errorf("catchup_policy = %v, want all", body["catchup_policy"])
+	}
+}
+
+func TestScheduleList_ShowsMissedColumn(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	stub.OnGet(schedulesPath, clitest.JSONResponse(200, []scheduleRow{
+		{ID: "sch-1", Name: "n1", CronExpr: "* * * * *", Timezone: "UTC", CatchupPolicy: "skip", LastMissedCount: 4},
+		{ID: "sch-2", Name: "n2", CronExpr: "* * * * *", Timezone: "UTC"},
+	}))
+	setStubCLI(t, stub.URL())
+
+	c := newScheduleFlagsCmd()
+	out := captureStdoutCovCli2(t, func() {
+		if err := routineSchedulesListCmd.RunE(c, nil); err != nil {
+			t.Errorf("list: %v", err)
+		}
+	})
+	if !strings.Contains(out, "4 (skip)") {
+		t.Errorf("missing missed-count cell:\n%s", out)
+	}
+	if !strings.Contains(out, "MISSED") {
+		t.Errorf("missing MISSED header:\n%s", out)
 	}
 }
 

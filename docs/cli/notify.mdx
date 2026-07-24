@@ -59,6 +59,32 @@ crewship notify send "Deploy done" "merged feature/x"
 crewship notify send "Build broken" "tests failed on main" --level critical
 ```
 
+## `crewship notify prefs` — server-side notification preferences
+
+Distinct from everything above: `notify prefs` manages your **server-side** category × channel preference matrix (issue #1412) — which of your workspace/personal notification channels (email, webhook, Slack, Discord, Telegram; created with `crewship notifychannel add`) get pinged for which category of event (approvals, escalations, failed runs, chat replies, …). See the full [Outbound notifications guide](/guides/notifications) for the category list, the `notifychannel` command family, and the two-layer (admin + user) preference model.
+
+```bash
+# Show your current matrix
+crewship notify prefs get
+
+# Get pinged in Slack immediately when an approval is waiting
+crewship notify prefs set --category approvals --channel nch_abc123 --state immediate
+
+# Mute a channel entirely (the "*" category overrides every cell on it)
+crewship notify prefs set --category "*" --channel nch_abc123 --state immediate
+
+# Turn a cell back off
+crewship notify prefs set --category approvals --channel nch_abc123 --state off
+```
+
+| Flag | Effect |
+|---|---|
+| `--category <name>` | One of `approvals`, `escalations`, `runs.failed`, `runs.completed`, `chat.replies`, `security`, `budget`, `system`, `memory`, or `*` (mute the whole channel) |
+| `--channel <id>` | A channel id from `crewship notifychannel list` |
+| `--state <off\|immediate>` | `off` (default when unset) or `immediate` |
+
+A cell you never set defaults to `off` — nothing is delivered externally until you opt in.
+
 ## Long-run threshold
 
 The internal helper `maybeNotifyRunComplete` only fires when:

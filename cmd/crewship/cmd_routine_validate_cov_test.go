@@ -48,6 +48,45 @@ func TestRoutineValidateRunE_FileTableOutput(t *testing.T) {
 	}
 }
 
+// TestRoutineValidateRunE_AcceptsYAMLFile pins #1423 item 2 end-to-end
+// through the real RunE (not just the pipeline.ToCanonicalJSON helper):
+// a .yaml file with comments and a literal block-scalar prompt validates
+// exactly like the equivalent JSON, sniffed from content rather than the
+// file extension.
+func TestRoutineValidateRunE_AcceptsYAMLFile(t *testing.T) {
+	yamlDSL := `
+# demo routine authored as YAML
+dsl_version: "1.0"
+name: demo-routine
+steps:
+  - id: a
+    type: agent_run
+    agent_slug: x
+    prompt: |
+      Line one.
+      Line two.
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "routine.yaml")
+	if err := os.WriteFile(path, []byte(yamlDSL), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	covSetupCli10(t, "http://127.0.0.1:0")
+
+	out, err := captureStdoutCovCli10(t, func() error {
+		return routineValidateCmd.RunE(routineValidateCmd, []string{path})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "is a valid routine DSL") {
+		t.Errorf("valid banner missing:\n%s", out)
+	}
+	if !strings.Contains(out, "demo-routine") {
+		t.Errorf("name missing:\n%s", out)
+	}
+}
+
 func TestRoutineValidateRunE_FileJSONOutput(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "routine.json")

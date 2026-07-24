@@ -482,7 +482,7 @@ func (e *Executor) executeOneStep(
 	}
 	resMu.Unlock()
 	ctxRender := buildStepRenderContext(inputsForCtx, outputsSnap, renderEnv, runMeta, dsl.EgressTargets, in.stateSnapshot)
-	renderedPrompt := Render(step.Prompt, ctxRender)
+	renderedPrompt := renderAgentPrompt(*step, ctxRender, in.TriggeredVia)
 
 	// Conditional skip — same semantics as the linear path.
 	if step.If != "" {
@@ -547,7 +547,8 @@ func (e *Executor) executeOneStep(
 	// goroutine owns `output`/`step.ID`; `costNow` was snapshotted under the
 	// lock) rather than the old whole-map rewrite — per-step granularity
 	// without the O(N²) blob churn. The wave-boundary flush
-	// (persistWaveOutputs) still re-upserts the full set.
+	// (persistWaveOutputs) still re-upserts the full set. persistStepOutput
+	// scrubs the persisted copy (#1416 item 5).
 	e.persistStepOutput(ctx, in, depth, runID, step.ID, output, costNow, startedAt)
 	// State_write bindings persist for the NEXT run (#1420). Add this step's
 	// own output to the goroutine-local snapshot so a value template can
@@ -556,7 +557,9 @@ func (e *Executor) executeOneStep(
 		outputsSnap[step.ID] = output
 		e.persistStateWrites(ctx, *step, in, buildStepRenderContext(inputsForCtx, outputsSnap, renderEnv, runMeta, dsl.EgressTargets, in.stateSnapshot))
 	}
-	emit.emitStepCompleted(ctx, *step, output, stepDur, stepCost)
+	// #1416 item 5: the journal/broadcast copy is scrubbed; the in-memory
+	// result.StepOutputs entry above stays raw for downstream template chaining.
+	emit.emitStepCompleted(ctx, *step, scrubStepOutput(output), stepDur, stepCost)
 
 	// Cost-cap gate (post-step). The check reads from the locked
 	// snapshot above so two parallel completions can't both miss

@@ -72,6 +72,20 @@ type Schedule struct {
 	// longer be the thing that triggers an unattended autonomous run.
 	WakeFailClosed bool
 
+	// CatchupPolicy governs what happens when the schedule was overdue by
+	// MORE THAN ONE cron occurrence — scheduler downtime, a long disable/
+	// re-enable gap, etc (#1422 item 2). One of CatchupSkip / CatchupOnce
+	// (default) / CatchupAll. Only consulted for a schedule WITHOUT a wake
+	// gate — a gate is evaluated live per tick by design, never backdated
+	// for historical occurrences, so a gated schedule always behaves like
+	// CatchupOnce regardless of this field.
+	CatchupPolicy string
+	// LastMissedCount is how many occurrences beyond the ones that
+	// actually fired were dropped on the most recent tick (0 when the
+	// schedule is current, or once a backlog has fully drained).
+	// Telemetry only — never governs behaviour.
+	LastMissedCount int
+
 	// Circuit breaker (#1405). ConsecutiveFailures counts back-to-back
 	// FAILED main-routine fires; a COMPLETED fire resets it to 0.
 	// MaxConsecutiveFailures is the per-schedule trip threshold (default
@@ -109,6 +123,20 @@ const (
 	WakeStatusHeld    = "HELD"    // probe failed, fail-CLOSED gate — run held, no main run (#1372)
 )
 
+// Missed-run catch-up policies (pipeline_schedules.catchup_policy, #1422
+// item 2). See Schedule.CatchupPolicy.
+const (
+	CatchupSkip = "skip" // fire nothing for the backlog; just resume from the next future occurrence
+	CatchupOnce = "once" // default — fire exactly once for the backlog (unchanged pre-#1422 behaviour)
+	CatchupAll  = "all"  // fire once per missed occurrence, oldest first (capped — see maxCatchupFireOccurrences)
+)
+
+// validCatchupPolicies is used by Save to reject typos loudly instead of
+// silently falling back to a default the caller didn't ask for.
+var validCatchupPolicies = map[string]bool{
+	CatchupSkip: true, CatchupOnce: true, CatchupAll: true,
+}
+
 // SaveScheduleInput is the payload for ScheduleStore.Save.
 type SaveScheduleInput struct {
 	ID                    string // "" = create; non-empty = update
@@ -130,6 +158,9 @@ type SaveScheduleInput struct {
 	// WakeFailClosed opts the gate into fail-closed probe-failure
 	// handling (#1372). Ignored when WakePipelineID is empty (no gate).
 	WakeFailClosed bool
+	// CatchupPolicy — see Schedule.CatchupPolicy. Empty defaults to
+	// CatchupOnce (today's unchanged behaviour).
+	CatchupPolicy string
 	// MaxConsecutiveFailures overrides the circuit breaker's trip
 	// threshold (#1405). <= 0 means "use defaultMaxConsecutiveFailures" —
 	// on create that's a fresh default; on update the existing stored
@@ -171,6 +202,13 @@ func (s *ScheduleStore) Save(ctx context.Context, in SaveScheduleInput) (*Schedu
 		return nil, fmt.Errorf("invalid cron expression %q: %w", in.CronExpr, err)
 	}
 	nextRun := sched.Next(time.Now().In(loc))
+	if in.CatchupPolicy == "" {
+		in.CatchupPolicy = CatchupOnce
+	}
+	if !validCatchupPolicies[in.CatchupPolicy] {
+		return nil, fmt.Errorf("pipeline_schedules: invalid catchup_policy %q (must be %q, %q, or %q)",
+			in.CatchupPolicy, CatchupSkip, CatchupOnce, CatchupAll)
+	}
 	inputsJSON, err := json.Marshal(in.Inputs)
 	if err != nil {
 		return nil, fmt.Errorf("marshal inputs: %w", err)
@@ -199,14 +237,16 @@ INSERT INTO pipeline_schedules (
     id, workspace_id, name, target_pipeline_id, target_pipeline_version,
     cron_expr, timezone, inputs_json, enabled, next_run_at,
     wake_pipeline_id, wake_inputs_json, wake_fail_closed,
+    catchup_policy,
     max_consecutive_failures,
     created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, in.WorkspaceID, in.Name, in.TargetPipelineID,
 			nullInt(in.TargetPipelineVersion),
 			in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(in.Enabled),
 			tsformat.Format(nextRun),
 			nullStr(in.WakePipelineID), string(wakeInputsJSON), boolToInt(in.WakeFailClosed),
+			in.CatchupPolicy,
 			maxFailures,
 			tsformat.Format(now), tsformat.Format(now),
 		)
@@ -256,7 +296,7 @@ SET name = ?, target_pipeline_id = ?, target_pipeline_version = ?,
     consecutive_failures = CASE WHEN ? = 1 AND enabled = 0 THEN 0 ELSE consecutive_failures END,
     disabled_reason = CASE WHEN ? = 1 AND enabled = 0 THEN NULL ELSE disabled_reason END,
     next_run_at = ?, wake_pipeline_id = ?, wake_inputs_json = ?,
-    wake_fail_closed = ?, updated_at = ?
+    wake_fail_closed = ?, catchup_policy = ?, updated_at = ?
 WHERE id = ? AND deleted_at IS NULL`,
 		in.Name, in.TargetPipelineID, nullInt(in.TargetPipelineVersion),
 		in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(in.Enabled),
@@ -264,6 +304,7 @@ WHERE id = ? AND deleted_at IS NULL`,
 		boolToInt(in.Enabled), boolToInt(in.Enabled),
 		tsformat.Format(nextRunToStore),
 		nullStr(in.WakePipelineID), string(wakeInputsJSON), boolToInt(in.WakeFailClosed),
+		in.CatchupPolicy,
 		tsformat.Format(now),
 		in.ID,
 	)
@@ -358,12 +399,18 @@ ORDER BY next_run_at ASC LIMIT 100`,
 // recordRun persists the outcome of a fire — last_run_at, last_status,
 // last_run_id — and computes next_run_at from the cron expr.
 //
+// missedCount (#1422 item 2) is the number of cron occurrences beyond
+// this one that were dropped on this tick per the schedule's
+// catchup_policy (0 on a normal on-time fire); it overwrites
+// last_missed_count so a resolved backlog goes back to 0 on its next
+// on-time tick.
+//
 // Circuit breaker bookkeeping (#1405) rides along here since it's the
 // same terminal-status transition: a COMPLETED fire resets
 // consecutive_failures to 0 (the routine is healthy again); a FAILED
 // fire increments it. SKIPPED / WAITING / DEDUPED are non-terminal or
 // healthy-but-not-a-success outcomes and leave the counter untouched.
-func (s *ScheduleStore) recordRun(ctx context.Context, scheduleID, runID, status string, nextRun time.Time) error {
+func (s *ScheduleStore) recordRun(ctx context.Context, scheduleID, runID, status string, nextRun time.Time, missedCount int) error {
 	now := tsformat.Format(time.Now())
 	var counterSQL string
 	switch status {
@@ -374,9 +421,25 @@ func (s *ScheduleStore) recordRun(ctx context.Context, scheduleID, runID, status
 	}
 	_, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_schedules
-SET last_run_at = ?, last_status = ?, last_run_id = ?, next_run_at = ?, updated_at = ?`+counterSQL+`
+SET last_run_at = ?, last_status = ?, last_run_id = ?, next_run_at = ?, last_missed_count = ?, updated_at = ?`+counterSQL+`
 WHERE id = ?`,
-		now, status, nullStr(runID), tsformat.Format(nextRun), now, scheduleID,
+		now, status, nullStr(runID), tsformat.Format(nextRun), missedCount, now, scheduleID,
+	)
+	return err
+}
+
+// recordCatchupSkip persists a catchup_policy='skip' tick that dropped an
+// entire overdue backlog without firing anything: next_run_at advances,
+// last_missed_count records the drop, and last_run_* is left untouched
+// (no run happened) — the same convention the wake gate's SKIPPED tick
+// uses (recordWakeCheck with advanceNext=true).
+func (s *ScheduleStore) recordCatchupSkip(ctx context.Context, scheduleID string, missedCount int, nextRun time.Time) error {
+	now := tsformat.Format(time.Now())
+	_, err := s.db.ExecContext(ctx, `
+UPDATE pipeline_schedules
+SET last_status = 'SKIPPED', next_run_at = ?, last_missed_count = ?, updated_at = ?
+WHERE id = ?`,
+		tsformat.Format(nextRun), missedCount, now, scheduleID,
 	)
 	return err
 }
@@ -676,6 +739,13 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 	// says wake. A SKIPPED tick advances next_run_at via the wake
 	// record (no recordRun follows) and leaves last_run_* untouched,
 	// so the run telemetry stays strictly about main runs.
+	//
+	// A gated schedule always fires the SINGLE due occurrence — the
+	// catchup_policy expansion below (skip / all) only applies to a plain
+	// schedule, because the probe is evaluated LIVE ("is now the moment to
+	// wake"), never re-run against a backdated timestamp. Backlog beyond
+	// the one occurrence is still counted and surfaced via
+	// notifyMissedOccurrences so it isn't silently invisible.
 	if sched.WakePipelineID != "" {
 		proceed, wakeStatus := s.runWakeCheck(ctx, sched)
 		if err := s.store.recordWakeCheck(ctx, sched.ID, wakeStatus, nextRun, !proceed); err != nil {
@@ -684,13 +754,133 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 		if !proceed {
 			return
 		}
+		dueAt := scheduleDueAt(sched)
+		missed := len(missedOccurrencesSince(cronSched, dueAt, time.Now()))
+		s.notifyMissedOccurrences(ctx, sched, dueAt, missed, CatchupOnce)
+		s.fireSingleOccurrence(ctx, sched, dueAt, nextRun, missed)
+		return
 	}
 
-	// Resolve pipeline + parse inputs
+	// Plain (ungated) schedule — apply the schedule's catchup_policy
+	// (#1422 item 2). dueAt is the occurrence that made this row due;
+	// extra is every ADDITIONAL occurrence that also came due before now
+	// (scheduler downtime, a long disable/re-enable gap, …).
+	dueAt := scheduleDueAt(sched)
+	extra := missedOccurrencesSince(cronSched, dueAt, time.Now())
+	if len(extra) == 0 {
+		// Common case: on time. Behaviour is identical regardless of
+		// catchup_policy — there is no backlog to apply a policy to.
+		s.fireSingleOccurrence(ctx, sched, dueAt, nextRun, 0)
+		return
+	}
+
+	policy := sched.CatchupPolicy
+	if policy == "" {
+		policy = CatchupOnce
+	}
+	switch policy {
+	case CatchupSkip:
+		missed := len(extra) + 1 // dueAt itself plus every extra occurrence
+		s.notifyMissedOccurrences(ctx, sched, dueAt, missed, policy)
+		if err := s.store.recordCatchupSkip(ctx, sched.ID, missed, nextRun); err != nil {
+			s.logger.Warn("pipeline scheduler: record catchup skip", "error", err, "schedule", sched.ID)
+		}
+	case CatchupAll:
+		allDue := append([]time.Time{dueAt}, extra...)
+		for _, occ := range allDue {
+			s.fireSingleOccurrence(ctx, sched, occ, nextRun, 0)
+		}
+	default: // CatchupOnce — unchanged pre-#1422 behaviour: fire exactly
+		// the original due occurrence; report the rest as missed.
+		s.notifyMissedOccurrences(ctx, sched, dueAt, len(extra), policy)
+		s.fireSingleOccurrence(ctx, sched, dueAt, nextRun, len(extra))
+	}
+}
+
+// maxCatchupFireOccurrences bounds how many occurrences
+// missedOccurrencesSince will ever return, so a schedule left down (or
+// disabled) for a long stretch can't turn one tick into an unbounded
+// catch-up loop — CatchupAll processes at most this many fires per tick;
+// any remainder is picked up (and further capped) on the following tick.
+const maxCatchupFireOccurrences = 20
+
+// scheduleDueAt is the occurrence timestamp that made this row due.
+// next_run_at is that timestamp; it stays fixed across a mid-run restart
+// (recordRun advances it only after the run returns), which is also why
+// it doubles as the idempotency bucket for the occurrence. Defensive
+// fallback (should never be nil for a due row): a minute bucket so
+// distinct minutes still fire and we never dedupe forever.
+func scheduleDueAt(sched *Schedule) time.Time {
+	if sched.NextRunAt != nil {
+		return sched.NextRunAt.UTC()
+	}
+	return time.Now().UTC().Truncate(time.Minute)
+}
+
+// missedOccurrencesSince returns the cron occurrences strictly after
+// `from` and at-or-before `now`, oldest first, capped at
+// maxCatchupFireOccurrences. Used to size the backlog beyond the single
+// occurrence that made a schedule row due.
+func missedOccurrencesSince(cronSched cron.Schedule, from, now time.Time) []time.Time {
+	var occs []time.Time
+	t := from
+	for len(occs) < maxCatchupFireOccurrences {
+		t = cronSched.Next(t)
+		if t.After(now) {
+			break
+		}
+		occs = append(occs, t)
+	}
+	return occs
+}
+
+// notifyMissedOccurrences raises a low-noise MANAGER inbox notice when a
+// schedule tick drops (catchup=skip) or reports (catchup=once) backlog
+// occurrences, so the gap is visible instead of silently invisible.
+// catchup=all never drops anything (missed==0), so this is a no-op for
+// that policy. Dedup key is schedule+occurrence so a duplicate tick for
+// the same due timestamp doesn't spam a second notice.
+func (s *PipelineScheduler) notifyMissedOccurrences(ctx context.Context, sched *Schedule, dueAt time.Time, missed int, policy string) {
+	if missed <= 0 {
+		return
+	}
+	verb := "fired once for"
+	if policy == CatchupSkip {
+		verb = "skipped"
+	}
+	if err := inbox.Insert(ctx, s.store.db, s.logger, inbox.Item{
+		WorkspaceID: sched.WorkspaceID,
+		Kind:        inbox.KindScheduleMissed,
+		SourceID:    sched.ID + ":" + dueAt.UTC().Format(time.RFC3339),
+		TargetRole:  "MANAGER",
+		Title:       fmt.Sprintf("Schedule missed %d occurrence(s): %s", missed, sched.Name),
+		BodyMD: fmt.Sprintf("Schedule **%s** was overdue and %s %d occurrence(s) (catchup policy: `%s`).",
+			sched.Name, verb, missed, policy),
+		SenderType: "pipeline",
+		SenderName: sched.Name,
+		Priority:   "medium",
+		Payload: map[string]interface{}{
+			"schedule_id":    sched.ID,
+			"missed_count":   missed,
+			"catchup_policy": policy,
+		},
+	}); err != nil {
+		s.logger.Warn("pipeline scheduler: inbox alert on missed occurrences", "error", err, "schedule", sched.ID)
+	}
+}
+
+// fireSingleOccurrence resolves the target pipeline, invokes the executor
+// for ONE specific cron occurrence, and records the outcome. This is the
+// pre-#1422 fireOne body, parameterized by occurrence (the idempotency
+// bucket — previously always sched.NextRunAt) and missedCount (persisted
+// as telemetry via recordRun/recordCatchupSkip). Called once for the
+// common on-time case and the gated/once-policy backlog case, and once
+// per occurrence in a CatchupAll loop.
+func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Schedule, occurrence, nextRun time.Time, missedCount int) {
 	pipeline, err := s.pipelines.GetByID(ctx, sched.TargetPipelineID)
 	if err != nil {
 		s.logger.Error("pipeline scheduler: load pipeline", "error", err, "schedule", sched.ID)
-		_ = s.store.recordRun(ctx, sched.ID, "", "FAILED", nextRun)
+		_ = s.store.recordRun(ctx, sched.ID, "", "FAILED", nextRun, missedCount)
 		// This FAILED path (deleted/broken target routine) must alert too —
 		// it returns before the post-execution alert below, so without this
 		// a broken cron target fails silently forever.
@@ -709,15 +899,12 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 		_ = json.Unmarshal([]byte(sched.InputsJSON), &inputs)
 	}
 
-	// Bucket = the occurrence identity. next_run_at is the timestamp that made
-	// this row due; it stays fixed across a mid-run restart (recordRun advances
-	// it only after the run returns) and is distinct for the next occurrence.
-	// Defensive fallback (should never be nil for a due row): a minute bucket so
-	// distinct minutes still fire and we never dedupe forever.
-	occBucket := time.Now().UTC().Truncate(time.Minute).Format(time.RFC3339)
-	if sched.NextRunAt != nil {
-		occBucket = sched.NextRunAt.UTC().Format(time.RFC3339)
-	}
+	// Bucket = the occurrence identity, so a re-fire of the SAME occurrence
+	// (duplicate tick / restart before next_run_at advanced, or a
+	// CatchupAll loop re-run after a crash) dedupes at the idempotency
+	// chokepoint, while each distinct occurrence in a backlog gets its own
+	// key and actually runs.
+	occBucket := occurrence.UTC().Format(time.RFC3339)
 
 	in := RunInput{
 		PipelineID: pipeline.ID,
@@ -748,7 +935,7 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 	if errors.Is(runErr, ErrRoutineNotActive) {
 		s.logger.Info("pipeline scheduler: skipping non-active routine",
 			"schedule", sched.ID, "pipeline", pipeline.Slug, "reason", runErr)
-		if err := s.store.recordRun(ctx, sched.ID, "", "SKIPPED", nextRun); err != nil {
+		if err := s.store.recordRun(ctx, sched.ID, "", "SKIPPED", nextRun, missedCount); err != nil {
 			s.logger.Warn("pipeline scheduler: record skipped run", "error", err)
 		}
 		return
@@ -784,7 +971,7 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 		s.logger.Warn("pipeline scheduler: run failed", "schedule", sched.ID, "pipeline", pipeline.Slug, "error", runErr)
 	}
 
-	if err := s.store.recordRun(ctx, sched.ID, runID, status, nextRun); err != nil {
+	if err := s.store.recordRun(ctx, sched.ID, runID, status, nextRun, missedCount); err != nil {
 		s.logger.Warn("pipeline scheduler: record run", "error", err)
 	}
 
@@ -1053,6 +1240,7 @@ SELECT id, workspace_id, name, target_pipeline_id, target_pipeline_version,
        wake_check_count, wake_fire_count,
        last_wake_at, COALESCE(last_wake_status, ''),
        COALESCE(wake_fail_closed, 0),
+       COALESCE(catchup_policy, 'once'), COALESCE(last_missed_count, 0),
        COALESCE(consecutive_failures, 0), COALESCE(max_consecutive_failures, 5),
        COALESCE(disabled_reason, ''),
        created_at, updated_at, deleted_at
@@ -1080,6 +1268,7 @@ func scanSchedule(rs rowScanner) (*Schedule, error) {
 		&s.WakeCheckCount, &s.WakeFireCount,
 		&lastWakeAt, &s.LastWakeStatus,
 		&wakeFailClsd,
+		&s.CatchupPolicy, &s.LastMissedCount,
 		&s.ConsecutiveFailures, &s.MaxConsecutiveFailures,
 		&s.DisabledReason,
 		&createdAt, &updatedAt, &deletedAt,

@@ -27,11 +27,13 @@ import (
 	"github.com/crewship-ai/crewship/internal/crashreport"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/leader"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/notify"
+	"github.com/crewship-ai/crewship/internal/notifyroute"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/preflight"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -322,6 +324,38 @@ var startCmd = &cobra.Command{
 			bridge.SetReplyNotifier(chatnotify.New(deps.DB, srv.WSHub(), logger))
 		}
 
+		// Native outbound notification system (#1412): wire the
+		// preference-routed fan-out at the inbox write-through
+		// chokepoint (internal/inbox.Insert/UpsertMessage) — every
+		// waitpoint/escalation/failed_run/message/consolidation write
+		// already funnels through there, so this single call reaches
+		// all of them without touching any call site. Reuses the same
+		// WS hub as the chat-reply presence gate above (a user watching
+		// the relevant session live doesn't get an external push
+		// either).
+		//
+		// startNotifyRecovery is set here but invoked below once the
+		// scheduler leader lease exists, so the outbox recovery sweep can be
+		// gated on leadership (single-replica: nil lease → always sweep).
+		var startNotifyRecovery func(isLeader func() bool)
+		if deps.DB != nil {
+			notifyRouterDispatcher := notify.NewDispatcher(
+				notify.NewChannelStore(deps.DB), mailer.NewFromEnv(), logger, deps.DB)
+			notifyRateLimiter := notifyroute.NewRateLimiter(5, 1.0/30.0) // burst 5, refill 1/30s
+			notifyRouter := notifyroute.NewRouter(
+				deps.DB, notifyRouterDispatcher, srv.WSHub(), notifyRateLimiter, logger)
+			inbox.SetExternalNotifier(notifyRouter)
+			// Delivery-outbox recovery sweep (#1412): re-attempt rows a crash
+			// left 'pending' between InsertPending and the terminal mark, plus
+			// transient 'failed' rows — this is what makes the persistent
+			// outbox actually survive a restart. Gated on the scheduler leader
+			// (wired just below) so only one replica re-delivers.
+			startNotifyRecovery = func(isLeader func() bool) {
+				go notifyRouter.RunRecoveryLoop(ctx, isLeader)
+			}
+			logger.Info("notification preference router wired (#1412: category matrix + anti-storm rate gate + outbox recovery)")
+		}
+
 		// Wire the API router's ProvisioningHandler into chatbridge so the
 		// "send first message at unprovisioned crew" path can auto-trigger
 		// the build instead of erroring out. The result-shape adapter exists
@@ -359,6 +393,17 @@ var startCmd = &cobra.Command{
 			schedulerLease = lease
 			logger.Info("scheduler leader election enabled",
 				"holder", lease.HolderID(), "leader", lease.IsLeader())
+		}
+
+		// Start the notification outbox recovery sweep, gated on the scheduler
+		// leader when election is active (so only one replica re-delivers), or
+		// always-on for a lone replica / disabled election.
+		if startNotifyRecovery != nil {
+			var isLeader func() bool
+			if schedulerLease != nil {
+				isLeader = schedulerLease.IsLeader
+			}
+			startNotifyRecovery(isLeader)
 		}
 
 		// Start agent scheduler (cron-based scheduled runs)

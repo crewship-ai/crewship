@@ -5,6 +5,7 @@
 #   ./run-all.sh                      # memory, notifications, credentials, determinism
 #   WITH_GITHUB=1 ./run-all.sh        # also the GitHub real-world scenario
 #   WITH_KEEPER_SECURITY=1 ./run-all.sh  # also the keeper adversarial suite
+#   WITH_NOTIFICATIONS_SHOUTRRR=1 ./run-all.sh  # also the #1412 preference-matrix suite
 #   ./run-all.sh --quick              # skip the slower determinism sweep
 #
 # Each test-*.sh is self-contained and exits non-zero if any assertion failed.
@@ -29,6 +30,13 @@ tests=(test-memory.sh test-delegation.sh test-notifications.sh test-orchestratio
 # when the server's provider isn't docker (503), so it's safe to always include;
 # opt out with WITH_ORPHAN_REAP=0.
 [[ "${WITH_ORPHAN_REAP:-1}" == "1" ]] && tests+=(test-orphan-token-reap.sh)
+# #1412 category preference-matrix suite — opt-in: it creates two PERSONAL
+# notification channels + writes real cells into the CURRENT session user's
+# preference matrix (cleaned up on exit, but a crash mid-run could leave
+# fixture channels behind on a shared dev slot). Also binds a local port for
+# the fake webhook receiver — see the script header for the network-
+# reachability note when SERVER is a remote devN.
+[[ "${WITH_NOTIFICATIONS_SHOUTRRR:-0}" == "1" ]] && tests+=(test-notifications-shoutrrr.sh)
 
 declare -a results=()
 overall=0

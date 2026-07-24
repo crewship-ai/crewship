@@ -105,6 +105,22 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"agent_status":    IntentExcludeRuntime, // live status; agent boots IDLE
 	"notifications":   IntentExcludeRuntime, // transient; resend on the new instance
 
+	// === Outbound notifications (#1412) =============================
+	// These tables carry only a plain workspace_id column (no FK to
+	// workspaces), so the FK-walk discovery never surfaces them — they
+	// are dumped via their explicit BackupTables entries, not discovery.
+	// notification_channels (v133) is the provider/route config a
+	// workspace configured; user_notification_prefs (v161) is each
+	// operator's per-category × channel routing matrix. Both are durable
+	// user configuration that MUST survive a restore — losing them
+	// silently unsubscribes everyone. notification_deliveries (v161) is
+	// the outbox/delivery LOG (dedup keys, retry counters, sent_at) —
+	// operational telemetry that regenerates as new events fire, so it
+	// does NOT ride bundles.
+	"notification_channels":   IntentInclude,
+	"user_notification_prefs": IntentInclude,
+	"notification_deliveries": IntentExcludeOperational,
+
 	// === Discovered via drift detection (2026-05-25) ===============
 	// Every workspace-scoped table the FK walk currently surfaces.
 	// Default classification leans toward IntentInclude because the

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -600,6 +601,96 @@ func TestPipelineWebhooks_Fire_ValidSignature_Accepts202(t *testing.T) {
 	}
 	if _, ok := resp["run_id"]; !ok {
 		t.Errorf("response missing run_id: %v", resp)
+	}
+}
+
+// TestPipelineWebhooks_Fire_TimestampedSignature_Accepts202 pins #1416
+// item 2: a sender that opts into the timestamped scheme (X-Crewship-
+// Timestamp + a signature over "<ts>.<body>") is accepted, mirroring the
+// agent-webhook path's ts.body scheme.
+func TestPipelineWebhooks_Fire_TimestampedSignature_Accepts202(t *testing.T) {
+	setTestEncryptionKeyParallelSafe(t)
+	h, db, _, wsID := webhookHandlerRig(t)
+	h.SetRunner(&stubRunner{output: "ok"})
+	seedWebhookPipeline(t, db, wsID, "pln_a", "ours")
+	wh := seedWebhookRow(t, db, wsID, "pln_a", "real-secret", true)
+
+	body := `{"hello":"world"}`
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	mac := hmac.New(sha256.New, []byte("real-secret"))
+	mac.Write([]byte(ts + "."))
+	mac.Write([]byte(body))
+	sig := hex.EncodeToString(mac.Sum(nil))
+
+	req := httptest.NewRequest("POST", "/api/v1/webhooks/"+wh.Token,
+		strings.NewReader(body))
+	req.SetPathValue("token", wh.Token)
+	req.Header.Set("X-Crewship-Signature", sig)
+	req.Header.Set("X-Crewship-Timestamp", ts)
+	rr := httptest.NewRecorder()
+	h.FireWebhook(rr, req)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestPipelineWebhooks_Fire_StaleTimestamp_Returns401 pins the replay-
+// defense half of #1416 item 2: a captured signed request replayed after
+// the freshness window closes must be rejected, even though the HMAC
+// itself is mathematically correct for that (stale) timestamp.
+func TestPipelineWebhooks_Fire_StaleTimestamp_Returns401(t *testing.T) {
+	setTestEncryptionKeyParallelSafe(t)
+	h, db, _, wsID := webhookHandlerRig(t)
+	h.SetRunner(&stubRunner{output: "ok"})
+	seedWebhookPipeline(t, db, wsID, "pln_a", "ours")
+	wh := seedWebhookRow(t, db, wsID, "pln_a", "real-secret", true)
+
+	body := `{"hello":"world"}`
+	staleTS := strconv.FormatInt(time.Now().Add(-1*time.Hour).Unix(), 10)
+	mac := hmac.New(sha256.New, []byte("real-secret"))
+	mac.Write([]byte(staleTS + "."))
+	mac.Write([]byte(body))
+	sig := hex.EncodeToString(mac.Sum(nil))
+
+	req := httptest.NewRequest("POST", "/api/v1/webhooks/"+wh.Token,
+		strings.NewReader(body))
+	req.SetPathValue("token", wh.Token)
+	req.Header.Set("X-Crewship-Signature", sig)
+	req.Header.Set("X-Crewship-Timestamp", staleTS)
+	rr := httptest.NewRecorder()
+	h.FireWebhook(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (stale timestamp must be rejected — replay defense); body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestPipelineWebhooks_Fire_TimestampedSignature_WrongTimestampRejected
+// pins that the timestamp is bound INTO the signed material (an attacker
+// can't just tack on a fresh X-Crewship-Timestamp next to a body-only
+// signature to bypass the freshness check).
+func TestPipelineWebhooks_Fire_TimestampedSignature_WrongTimestampRejected(t *testing.T) {
+	setTestEncryptionKeyParallelSafe(t)
+	h, db, _, wsID := webhookHandlerRig(t)
+	h.SetRunner(&stubRunner{output: "ok"})
+	seedWebhookPipeline(t, db, wsID, "pln_a", "ours")
+	wh := seedWebhookRow(t, db, wsID, "pln_a", "real-secret", true)
+
+	body := `{"hello":"world"}`
+	// Sign over the BODY ONLY (the old scheme), then attach a fresh
+	// timestamp header — the signature does not cover it, so it must fail.
+	mac := hmac.New(sha256.New, []byte("real-secret"))
+	mac.Write([]byte(body))
+	bodyOnlySig := hex.EncodeToString(mac.Sum(nil))
+
+	req := httptest.NewRequest("POST", "/api/v1/webhooks/"+wh.Token,
+		strings.NewReader(body))
+	req.SetPathValue("token", wh.Token)
+	req.Header.Set("X-Crewship-Signature", bodyOnlySig)
+	req.Header.Set("X-Crewship-Timestamp", strconv.FormatInt(time.Now().Unix(), 10))
+	rr := httptest.NewRecorder()
+	h.FireWebhook(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (body-only signature must not validate against ts.body); body=%s", rr.Code, rr.Body.String())
 	}
 }
 

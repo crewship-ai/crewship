@@ -600,6 +600,64 @@ crewship routine schedules create --slug incremental-invoice-sync \
 
 ---
 
+## Recipe 9 — Backtest a candidate version before rollout
+
+**Goal**: you edited `support-triage` (new prompt, tightened gate, whatever) and saved it as v9. Before it becomes the version live traffic gets, prove it behaves at least as well as v8 did — on real recent inputs, not a hand-picked eval suite.
+
+```bash
+# 1. Check what changed and confirm v9 is what you think it is
+crewship routine versions support-triage
+
+# 2. Replay the last week of successful runs against v9, diff the outputs
+crewship routine backtest support-triage --against 9 --last 7d
+```
+
+Output:
+
+```
+Backtesting support-triage against v9 — 12 captured run(s) since 2026-07-17T09:00:00Z
+  run_cmox10oci0001…  →  COMPLETED  MATCH
+  run_cmox10oci0002…  →  COMPLETED  MATCH
+  run_cmox10oci0003…  →  COMPLETED  DIVERGED  (output differs from the recorded original)
+  run_cmox10oci0004…  →  FAILED     REGRESSED  (outcomes failed: category_valid)
+  ...
+
+────── backtest support-triage against v9 (since 2026-07-17T09:00:00Z) ──────
+
+  Runs:       12
+  Matched:    9
+  Diverged:   2
+  Regressed:  1
+  Errored:    0
+
+  Verdict:    REGRESSION_DETECTED
+```
+
+Exit code is non-zero on `REGRESSION_DETECTED` — wire it into CI the same way as [`eval baseline diff`](/cli/eval#crewship-eval-baseline):
+
+```bash
+crewship routine backtest support-triage --against "$CANDIDATE_VERSION" --last 7d -f json
+```
+
+### Why this is read-only
+
+`backtest` never creates a pipeline version and never changes `head_version` — it replays each corpus run's **original captured inputs** pinned to the immutable version you named with `--against` (the same pinning mechanism cron schedules and webhooks already use for `target_pipeline_version`). Live traffic keeps resolving to whatever `head_version` already was, before, during, and after the backtest. If it reports `CLEAN`, roll forward with [`routine rollback`](/cli/routine#crewship-routine-rollback-slug) or your normal promotion path — `backtest` only tells you whether it's safe, it doesn't flip anything.
+
+### What to do at each verdict
+
+| Verdict | Action |
+|---|---|
+| `CLEAN` | Every replayed run matched byte-for-byte. Safe to promote. |
+| `DIVERGED_OUTPUTS` | No failures, but wording/content changed. Skim a few `DIVERGED` rows — often fine (rephrased summary), sometimes not (dropped a field). Use `-f json` and inspect `source_output` vs `candidate_output` per row. |
+| `REGRESSION_DETECTED` | At least one run that used to pass now fails (or the replay itself errored). Don't promote. Check the failing rows' `error` field — usually a tightened gate the new prompt doesn't satisfy yet. |
+| `NO_CORPUS` | No completed runs in the `--last` window — widen it, or this routine doesn't have enough production traffic yet to backtest meaningfully (fall back to [Recipe 6](#recipe-6-eval-driven-promotion-to-production)'s authored eval suite instead). |
+
+### How this differs from Recipe 6
+
+Recipe 6 (eval-driven promotion) validates against an **authored eval suite** — scenarios you wrote, run fresh against each tier. `backtest` validates against **actual production inputs** already captured for this routine — no authoring required, and it catches regressions an eval suite's fixed scenario set wouldn't (a real customer message the gate didn't anticipate). Use both: eval suite for the tier decision, `backtest` as the pre-rollout gate for every subsequent version bump.
+
+---
+
 ## What's intentionally NOT in the cookbook
 
 These exist in the routines documentation but aren't recipes here because they don't change the patterns above:

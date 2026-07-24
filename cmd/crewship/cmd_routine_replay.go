@@ -21,7 +21,12 @@ var routineReplayCmd = &cobra.Command{
 	Long: `Loads the run's captured inputs and invokes the routine again. The
 new run is stamped is_replay=true + replay_of=<run_id> so steps can
 short-circuit side effects via {{ env.is_replay }}, and it inherits the
-original run's tags so it groups with the source.`,
+original run's tags so it groups with the source.
+
+--version pins the replay to an immutable routine version's definition
+instead of head — a single-run version of what "crewship routine
+backtest" does across a whole corpus (see its docs for the read-only
+guarantee: this never changes head_version or which version is live).`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -30,11 +35,16 @@ original run's tags so it groups with the source.`,
 		if err := requireWorkspace(); err != nil {
 			return err
 		}
+		version, _ := cmd.Flags().GetInt("version")
+		body := map[string]any{}
+		if version > 0 {
+			body["pinned_version"] = version
+		}
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
 		resp, err := client.WithTimeout(evalRunTimeout).Post(
 			fmt.Sprintf("/api/v1/workspaces/%s/pipelines/runs/%s/replay", ws, args[0]),
-			map[string]any{},
+			body,
 		)
 		if err != nil {
 			return err
@@ -160,6 +170,7 @@ var routineBulkReplayCmd = &cobra.Command{
 }
 
 func init() {
+	routineReplayCmd.Flags().Int("version", 0, "pin the replay to this routine version instead of head (read-only — never changes head_version)")
 	routineErrorsCmd.Flags().Int("limit", 50, "max fingerprint groups to list")
 	routineBulkReplayCmd.Flags().String("fingerprint", "", "error fingerprint to replay (REQUIRED; from `routine errors`)")
 	routineBulkReplayCmd.Flags().Int("limit", 50, "max runs to replay from the group")

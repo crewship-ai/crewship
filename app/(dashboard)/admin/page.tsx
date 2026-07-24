@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import {
   LayoutDashboard, Building, Users, Server, Shield, Database, ListTodo, FileLock,
-  AlertTriangle,
+  AlertTriangle, Bell,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -25,6 +25,7 @@ import { UsersTab } from "./tabs/users-tab"
 import { BackupsTab } from "./tabs/backups-tab"
 import { KeeperQueuePanel } from "@/components/features/admin/keeper-queue-panel"
 import { GdprActionsPanel } from "@/components/features/admin/gdpr-actions-panel"
+import { NotificationsTab } from "./tabs/notifications-tab"
 
 /**
  * Admin sidebar sections — ONLY real, wired tabs.
@@ -60,6 +61,7 @@ const sections: NavSection[] = [
     label: "Infrastructure",
     items: [
       { key: "providers", label: "Runtime", icon: Server },
+      { key: "notifications", label: "Notifications", icon: Bell },
     ],
   },
   {
@@ -288,6 +290,10 @@ export default function AdminPage() {
 
     if (tab === "backups") {
       return <BackupsTab workspaceId={workspaceId ?? undefined} />
+    }
+
+    if (tab === "notifications") {
+      return <NotificationsTab workspaceId={workspaceId} />
     }
 
     if (tab === "reviews") {

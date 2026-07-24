@@ -104,6 +104,16 @@ var BackupTables = []string{
 	"issue_counters",
 	"subscriptions",
 	"inbox_items",
+	// Outbound notifications (#1412). Both carry a direct workspace_id
+	// column (dumped via the generic workspaceFilterSQL default), NOT a
+	// workspaces FK — so the FK-walk discovery never surfaced them and
+	// they must be listed explicitly here. notification_channels (v133)
+	// before user_notification_prefs (v161): prefs.channel_id REFERENCES
+	// notification_channels(id), so the parent must restore first.
+	// notification_deliveries is intentionally absent — it's the
+	// operational delivery log (IntentExcludeOperational), not config.
+	"notification_channels",
+	"user_notification_prefs",
 	"webhooks",
 	"routines",
 	"schedules",

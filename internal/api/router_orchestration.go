@@ -212,15 +212,47 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedMut("POST", "/api/v1/checkpoints/{id}/fork", roleCreate, ch.Fork)
 	r.authedMut("DELETE", "/api/v1/checkpoints/{id}", roleCreate, ch.Delete)
 
-	// Notification channels: outbound e-mail + signed-webhook delivery on
-	// run completion/failure (#850). Writes are MANAGER+. The mailer is
-	// resolved from env (RESEND_*) here, mirroring the recovery handler;
-	// an email channel is rejected at create when no transport is wired.
+	// Notification channels: outbound e-mail / signed-webhook / shoutrrr
+	// (Slack, Discord, Telegram) delivery targets (#850, widened by
+	// #1412). A WORKSPACE-scoped channel write requires MANAGER+ — TIGHTENED
+	// from roleCreate to roleManage by #1412 (a MEMBER could previously
+	// stand up a workspace-wide delivery target); a PERSONAL channel
+	// (personal=true in the body) is self-service, gated by ownership
+	// instead. Both cases share one route so the handler runs a layered
+	// gate — hence roleInline (see NotifyChannelHandler.authorizeChannelWrite)
+	// rather than a single declared role. The mailer is resolved from env
+	// (RESEND_*) here, mirroring the recovery handler; an email channel is
+	// rejected at create when no transport is wired.
 	nch := NewNotifyChannelHandler(r.db, mailer.NewFromEnv(), r.logger)
 	r.mux.Handle("GET /api/v1/notification-channels", authed(wsCtx(http.HandlerFunc(nch.List))))
-	r.authedMut("POST", "/api/v1/notification-channels", roleCreate, nch.Create)
-	r.authedMut("DELETE", "/api/v1/notification-channels/{id}", roleCreate, nch.Delete)
-	r.authedMut("POST", "/api/v1/notification-channels/{id}/test", roleCreate, nch.Test)
+	r.authedMut("POST", "/api/v1/notification-channels", roleInline, nch.Create)
+	r.authedMut("PATCH", "/api/v1/notification-channels/{id}", roleInline, nch.Patch)
+	r.authedMut("DELETE", "/api/v1/notification-channels/{id}", roleInline, nch.Delete)
+	r.authedMut("POST", "/api/v1/notification-channels/{id}/test", roleInline, nch.Test)
+
+	// Providers registry (#1412): which shoutrrr providers this instance
+	// supports and which are admin-enabled. Read is any authenticated
+	// member (roleSelf — informational, no secrets); the enable/disable
+	// toggle is ADMIN/OWNER (roleManage).
+	nph := NewNotifyProvidersHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/notification-providers", authed(wsCtx(http.HandlerFunc(nph.List))))
+	r.authedMut("PATCH", "/api/v1/notification-providers/{provider}", roleManage, nph.Patch)
+
+	// Per-user category x channel preference matrix (#1412). Self-scoped:
+	// every member manages their OWN matrix; the workspace is still in
+	// context because categories are workspace-relative (a channel from
+	// another workspace can never appear in the response).
+	nprH := NewNotifyPrefsHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/me/notification-prefs", authed(wsCtx(http.HandlerFunc(nprH.Get))))
+	r.authedMut("PUT", "/api/v1/me/notification-prefs", roleSelf, nprH.Put)
+
+	// Delivery log (#1412) — read-only outbox history backing "why didn't
+	// my notification arrive?" Admin-only: the log spans every user's
+	// deliveries in the workspace, not just the caller's own. Enforced
+	// in-handler (NotifyDeliveriesHandler.List) since authedMut only
+	// declares roles for mutation routes.
+	ndH := NewNotifyDeliveriesHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/notification-deliveries", authed(wsCtx(http.HandlerFunc(ndH.List))))
 
 	// Paymaster: cost + budget read endpoints backed by the cost_ledger
 	// rollup queries. Writes to the ledger happen inside the LLM

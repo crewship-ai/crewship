@@ -54,11 +54,12 @@ const defaultWebhookRatePerMin = 600
 // {"event": "tampered"} would silently replace the real payload before
 // the pipeline DSL saw it. Templates may still add new keys; they
 // just can't override the request-derived ones.
-var reservedWebhookInputKeys = map[string]struct{}{
-	"event":   {},
-	"raw":     {},
-	"headers": {},
-}
+//
+// Aliased to pipeline.WebhookUntrustedInputKeys (#1416 item 1) so this
+// "can't be overridden by inputs_template" allowlist and the executor's
+// "must be fenced before reaching an agent_run prompt" allowlist share one
+// definition instead of silently drifting apart.
+var reservedWebhookInputKeys = pipeline.WebhookUntrustedInputKeys
 
 // webhookResponse is the wire shape returned by webhook list/get/save.
 // The token surfaces in CRUD responses so the UI can show the user
@@ -148,8 +149,12 @@ func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// #1416 item 4: cap the request body like every exec route already
+	// does (maxExecBodyBytes) -- CreateWebhook had no MaxBytesReader at
+	// all, so a create-role member could pin server memory with an
+	// oversized body.
 	var body webhookRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
@@ -349,8 +354,24 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	// "signature mismatch" response shape for both "wrong sig" and
 	// "no secret on this row" so an attacker can't enumerate which
 	// is which.
+	//
+	// #1416 item 2: when the sender includes X-Crewship-Timestamp, the
+	// signature must cover "<timestamp>.<body>" AND the timestamp must be
+	// fresh (DefaultWebhookTimestampTolerance) — the same ts.body scheme +
+	// freshness window internal/webhook.Handler already enforces for
+	// agent webhooks. This closes the replay gap ValidateSignature's
+	// bare-body HMAC leaves open: a captured signed request could
+	// otherwise be re-fired any time inside the (up to 24h,
+	// Forget-reopenable) idempotency window. Optional — a sender that
+	// hasn't adopted the header falls back to the body-only scheme
+	// unchanged, so existing integrations keep working.
 	sig := r.Header.Get("X-Crewship-Signature")
-	if !wh.ValidateSignature(body, sig) {
+	if ts := r.Header.Get("X-Crewship-Timestamp"); ts != "" {
+		if !wh.ValidateTimestampedSignature(body, ts, sig, time.Now(), 0) {
+			replyError(w, http.StatusUnauthorized, "signature mismatch")
+			return
+		}
+	} else if !wh.ValidateSignature(body, sig) {
 		replyError(w, http.StatusUnauthorized, "signature mismatch")
 		return
 	}
@@ -552,6 +573,13 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 			Inputs:        inputs,
 			Mode:          pipeline.ModeRun,
 			RunIDOverride: runID,
+			// TriggeredVia marks this run as webhook-originated so the
+			// audit trail is accurate AND so the executor's egress/fence
+			// hardening (#1416 items 1 & 3) engages: agent_run prompts
+			// fence the request-derived inputs, and http-step egress is
+			// held to the crew's 'restricted' floor regardless of the
+			// crew's own network_mode.
+			TriggeredVia: pipeline.TriggeredViaWebhook,
 		})
 		status := "FAILED"
 		firedRunID := ""
@@ -570,7 +598,7 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 			// key instead of dedupe-ing onto a run that never
 			// happened. Mirrors the executor's own Forget on its
 			// concurrency-rejection path.
-			_ = idem.Forget(context.Background(), wh.WorkspaceID, idemKey)
+			_ = idem.Forget(context.Background(), wh.WorkspaceID, wh.TargetPipelineID, idemKey)
 			if errors.Is(runErr, pipeline.ErrConcurrencyLimitReached) {
 				// Residual TOCTOU race: the synchronous pre-check above
 				// saw a free slot, but another dispatch Acquire'd it
@@ -597,7 +625,7 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 			// COMPLETED keeps its key (a real success must dedupe); WAITING /
 			// CANCELLED keep theirs too (parked or deliberately stopped, not a
 			// failure to re-fire).
-			_ = idem.Forget(context.Background(), wh.WorkspaceID, idemKey)
+			_ = idem.Forget(context.Background(), wh.WorkspaceID, wh.TargetPipelineID, idemKey)
 		}
 		// Bookkeeping on a fresh context: at shutdown dispatchCtx is
 		// already cancelled when the run winds down, and the terminal

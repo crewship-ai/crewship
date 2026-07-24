@@ -133,6 +133,10 @@ func scopeForRoute(pattern string) string {
 		return "skills:write"
 	case "notification-channels":
 		return "webhooks:write"
+	case "notification-providers":
+		// Instance-wide provider enable/disable toggle (#1412) — an
+		// administration action, not a webhook-delivery-target write.
+		return "workspace:admin"
 	case "workspaces":
 		// Nested resources under /workspaces/{id}/… carry their own scope;
 		// everything else at the workspace level is administration.

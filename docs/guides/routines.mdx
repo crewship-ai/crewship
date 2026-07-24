@@ -101,6 +101,35 @@ Minimal valid routine:
 }
 ```
 
+### YAML instead of JSON
+
+`crewship routine validate` and `crewship routine save --definition` also accept **YAML** — sniffed from the file's content, not its extension, and converted to canonical JSON before validation/upload. The same minimal routine, as YAML:
+
+```yaml
+dsl_version: "1.0"
+name: summarize-text
+# comments are fine — YAML only, dropped on conversion, same as they
+# always were once JSON.Marshal'd a hand-authored JSON file
+description: Summarize input text in 3 bullets.
+inputs:
+  - name: text
+    type: string
+    required: true
+outputs:
+  - name: summary
+    type: string
+steps:
+  - id: summarize
+    type: agent_run
+    agent_slug: tomas
+    complexity: fast
+    prompt: |
+      Summarize the following text in exactly 3 bullets:
+      {{ inputs.text }}
+```
+
+The main win is a real multiline `prompt` via YAML's literal block scalar (`|`) instead of a JSON string full of `\n` escapes — this is also why `routine init`'s scaffold used to smuggle its "run `routine schema`, replace `agent_slug`" pointer into the `description` field (JSON has no comment syntax); with YAML input that workaround is no longer necessary, though the JSON scaffold itself is unchanged. The API, the DB, and every other `Parse` call site still only ever see canonical JSON — YAML is purely a convenience at these two CLI entry points, not a second stored format.
+
 ### Top-level fields
 
 | Field | Type | Notes |
@@ -521,10 +550,28 @@ gates at run time, checked pre-flight AND on every redirect hop
    applies regardless.
 2. **Crew layer — network policy.** The authoring crew's network policy
    (`network_mode` + allowed domains — the same dial that governs the crew's
-   agent containers) also applies to direct `http` steps. Crews on the
-   default `free` mode are unaffected; a `restricted` crew's routines can
-   only reach the crew's allowed domains (exact host match, same as the
-   container proxy).
+   agent containers) also applies to direct `http` steps. A `restricted`
+   crew's routines can only reach the crew's allowed domains (exact host
+   match, same as the container proxy).
+
+   A crew on `free` mode is **not** unconditionally open at this layer: an
+   `http` step that does **not** declare `egress_targets` is still held to
+   the same floor `restricted` mode enforces — the sidecar's default LLM/CLI
+   provider domains only. This closes an SSRF gap where any `create`-role
+   member (or a webhook payload driving `{{ inputs.url }}`) could otherwise
+   point an undeclared `http` step at an arbitrary public host just because
+   the crew allows its agents free egress. Declaring `egress_targets` on the
+   routine is the escape hatch — it bypasses this floor and the routine's
+   own allowlist governs instead (private/link-local IPs still blocked by
+   the SSRF guard regardless).
+
+   **Webhook-triggered runs go further: they're always held to the
+   `restricted` floor**, regardless of the crew's own `network_mode` — the
+   inbound payload is untrusted, so a routine fired by a webhook delivery
+   can't be used to reach an arbitrary host even if the authoring crew is
+   nominally `free`. The crew's own `allowed_domains` (if configured) still
+   apply on top of the shared defaults, same as a genuinely-`restricted`
+   crew.
 
 A blocked request fails the step with a structured error naming the step,
 the host, and which layer denied it — before any bytes leave the server.
@@ -748,6 +795,38 @@ For the zero-config version — a desktop ping when a run *ends* (success or fai
 
 To reach **outside** Crewship when a run completes or fails — email or a signed webhook to an admin, a Slack relay, or your own service — configure [outbound notification channels](/guides/notifications). The `notify` step is the in-product half; outbound channels are the half that reaches people who aren't watching the inbox.
 
+### `query`
+
+```json
+{
+  "id": "stats",
+  "type": "query",
+  "query": { "source": "pipeline_runs", "window_hours": 24 }
+}
+```
+
+A deterministic, read-only aggregate query over the run's own workspace's operational data — no LLM, no network egress, agentless-compatible. `source: "pipeline_runs"` is the only source today: run counts, cost, and top failures over a trailing window (default 24h, capped at 720h/30 days regardless of what's authored). This is the data source behind the [workspace digest](#workspace-digest-template) routine template.
+
+| Field | Notes |
+| --- | --- |
+| `source` | `"pipeline_runs"` (only value today). |
+| `window_hours` | Trailing window in hours. Default `24` when 0/absent. |
+
+Output is a JSON object — pipe it through a `transform` step to pull a single field for a downstream `notify`/`http` step, exactly like any other structured step output:
+
+```json
+{
+  "id": "summary",
+  "type": "transform",
+  "needs": ["stats"],
+  "transform": { "input": "{{ steps.stats.output }}", "expression": ".summary_md" }
+}
+```
+
+`{ window_hours, total_runs, completed, failed, waiting, cancelled, total_cost_usd, top_failures: [{pipeline_slug, count}], summary_md }` — `summary_md` is a pre-rendered markdown digest, so the common case (query → notify) needs only the one `transform` step shown above to extract it.
+
+Strictly workspace-scoped: the query always runs against the invoking run's own `workspace_id` — a routine can never read another tenant's run history no matter what it's authored to ask for.
+
 ### `foreach` — fan out over an array
 
 ```json
@@ -861,7 +940,9 @@ Only non-empty fields win — a prompt-only override leaves the authored model u
 
 ## Debug a single step (`step-run`)
 
-Iterating on one step's prompt shouldn't cost a whole pipeline run. `crewship routine step-run` executes a **single `agent_run` step against an input fixture**, in isolation — no upstream steps, no DAG, no persisted run record — and prints the step output, validation verdict, and cost:
+Iterating on one step's prompt shouldn't cost a whole pipeline run. `crewship routine step-run` executes a **single step against an input fixture**, in isolation — no upstream steps, no DAG, no persisted run record — and prints the step output, validation verdict, and (for `agent_run`) cost.
+
+**Supports `agent_run`, `http`, `script`, and `transform`.** The deterministic three used to have no "run just this step" option at all — you had to run the whole pipeline to see whether a `transform` expression or an `http` step's URL rendered correctly, even though they're the cheapest, most deterministic steps in the DSL (no LLM, no waiting):
 
 ```bash
 crewship routine step-run parse-invoice extract --input @sample.json
@@ -869,12 +950,15 @@ crewship routine step-run parse-invoice extract --input @sample.json
 crewship routine step-run reconcile-invoices reconcile \
   --input @sample.json --outputs '{"parse":"{\"total\":42}"}'
 crewship routine step-run parse-invoice extract --input '{"name":"a.pdf"}' --tier-override fast
+crewship routine step-run fetch-and-transform normalize --input @raw.json   # transform step
+crewship routine step-run notify-webhook post-it --input @payload.json     # http step
 ```
 
 - **`--input`** is the step's inputs fixture — a JSON object, inline or `@file.json`. The step's `{{ inputs.X }}` refs resolve against it.
-- **`--outputs`** seeds upstream `{{ steps.X.output }}` refs — a JSON object mapping `step_id` → that step's output (a string, or any JSON value, which is stringified). **Most non-first steps read an upstream output** (a `reconcile` step reads `{{ steps.parse.output }}`), so without `--outputs` those refs render **empty** and you'd be iterating on a prompt that never sees production's real data — so the command **warns loudly** (`⚠ prompt references {{ steps.parse.output }} but no --outputs fixture was provided…`) when a referenced upstream output isn't seeded. Still no DAG traversal — the fixture stands in for upstream steps; nothing upstream executes.
-- **`--tier-override`** (`trivial|fast|moderate|smart`) swaps the step's tier for cheap structural iteration; a step-level `model_override` still wins.
-- The response is marked `simulated: true` — it does **not** create a run record, so it never shows up in `routine records`/metrics or pollutes the run trace.
+- **`--outputs`** seeds upstream `{{ steps.X.output }}` refs — a JSON object mapping `step_id` → that step's output (a string, or any JSON value, which is stringified). **Most non-first steps read an upstream output**, so without `--outputs` those refs render **empty** and you'd be iterating against different input than a real run — so the command **warns loudly** (`⚠ step references {{ steps.parse.output }} but no --outputs fixture was provided…`) when a referenced upstream output isn't seeded, across whichever fields the step type actually templates (prompt for `agent_run`; url/body/headers for `http`; input/expression for `transform`; args/env for `script`). Still no DAG traversal — the fixture stands in for upstream steps; nothing upstream executes.
+- **`--tier-override`** (`trivial|fast|moderate|smart`) swaps the step's tier for cheap structural iteration on an `agent_run` step; a step-level `model_override` still wins. Ignored for `http`/`script`/`transform` — there's no tier to override.
+- The response is marked `simulated: true` — it does **not** create a run record, so it never shows up in `routine records`/metrics or pollutes the run trace. A `script` step-run still executes for real in the crew's container (real side effects — only the run-record bookkeeping is skipped), and an `http` step-run still goes through the same egress/SSRF guard a real run enforces, not a relaxed check.
+- **Not supported:** `wait` (blocks on external state), `notify`/`call_pipeline` (side effects that don't make sense without a real run), and `code` (needs the same sandboxed-container wiring `script` has, not yet extended here).
 
 This is the "unit test for one step": seconds instead of the full pipeline. It complements the two tools that leave a gap — `routine dry-run` renders prompts but **executes nothing**, and a full `run` executes everything but is slow and costs real tokens. Backed by `POST /api/v1/workspaces/{ws}/pipelines/{slug}/step_run`.
 
@@ -1008,6 +1092,64 @@ crewship routine schedules create --slug summarize-text \
 Single-instance only — running multiple replicas would double-fire (no leader election yet).
 </Warning>
 
+#### Natural-language schedules (`--when`)
+
+Pass `--when` instead of `--cron` for the common phrasings — it parses to a
+cron expression and echoes the **next 3 fire times** so you can confirm the
+schedule means what you intended before it saves:
+
+```bash
+crewship routine schedules create --slug summarize-text \
+    --name "daily-summary" --when "every weekday at 9"
+# Parsed "every weekday at 9" as cron "0 9 * * 1-5" (UTC).
+# Next 3 fire times:
+#   - 2026-07-27 09:00 UTC
+#   - 2026-07-28 09:00 UTC
+#   - 2026-07-29 09:00 UTC
+# Create this schedule? [y/N]:
+```
+
+Supported phrasings: `every day at 9am`, `every weekday at 9`, `every weekend
+at 10am`, `every monday at 14:00` (any named weekday), `every hour`, `every
+15 minutes`, `every 2 hours`. `--cron` and `--when` are mutually exclusive;
+`--when` respects `--timezone` for the preview. Pass `--yes` to skip the
+confirmation prompt (scripts / CI). Anything outside that phrase set returns
+an error asking for a raw `--cron` expression instead of guessing wrong.
+
+#### Missed-run catch-up
+
+If a schedule falls overdue by more than one cron occurrence — the server
+was down, the schedule sat disabled for a while, `next_run_at` otherwise
+fell behind — `catchup_policy` decides what happens to the backlog:
+
+| Policy | Behaviour |
+|---|---|
+| `once` (default) | Fire **once** for the backlog, then resume from the next future occurrence. This is the original, unchanged behaviour — every schedule created before this field existed keeps working exactly as it did. |
+| `skip` | Fire **nothing** for the backlog; just resume from the next future occurrence. |
+| `all` | Fire **once per missed occurrence**, oldest first (capped at 20 fires per tick so a long-down schedule can't turn one tick into an unbounded loop — any remainder is picked up, and further capped, on the next tick). |
+
+```bash
+crewship routine schedules create --slug daily-report \
+    --cron "0 9 * * *" --catchup all   # backfill every missed daily run
+
+crewship routine schedules update <schedule_id> --catchup skip
+```
+
+Whenever a tick drops or collapses backlog occurrences, `routine schedules
+list` shows it in the **MISSED** column (`4 (skip)`, `3 (once)`) instead of
+the gap being silently invisible, and a `medium`-priority MANAGER inbox
+notice is raised the first time it happens for that occurrence.
+`catchup=all` never "misses" anything (`MISSED` stays `—`) since every
+occurrence in the backlog actually fires.
+
+<Note>
+A **wake-gated** schedule (see below) always behaves like `catchup=once` —
+the probe is evaluated live ("is now the moment to wake"), never re-run
+against a backdated historical timestamp, so `skip`/`all` only apply to
+plain schedules. Missed occurrences are still counted and surfaced for a
+gated schedule; only the multi-fire/no-fire policy expansion doesn't apply.
+</Note>
+
 ### Wake gates
 
 A plain cron fires the full routine — including its LLM steps — on every tick, even when there is nothing worth the model's attention. A **wake gate** fixes that: the schedule references an [agentless](#agentless-routines) probe routine, the scheduler runs the probe first on each tick (free of LLM spend by the agentless guarantee), and the main routine fires only when the probe's **final output is truthy**. Same falsy rule as step `if:` conditions — empty, `false`, `0`, `null`, `nil`, `no`, `off` (case-insensitive) skip the tick; anything else wakes the routine.
@@ -1094,6 +1236,46 @@ crewship routine webhooks create --slug pr-review-structured \
 ```
 
 Output reveals the public URL and signing secret **once** (Stripe-style). External services POST event payload to `/api/v1/webhooks/{token}`. With HMAC, sender includes header `X-Crewship-Signature: sha256=<hex_hmac_of_body>`, validated server-side via `hmac.Equal` (timing-safe). Rate limited per token, per minute, default 60.
+
+**Replay defense — timestamped signatures (optional).** A body-only HMAC is
+replayable for as long as the delivery's idempotency reservation is live (up
+to 24h, and a failed run can reopen the window). To close that gap, a sender
+can additionally include `X-Crewship-Timestamp: <unix_seconds>` and sign
+`"<timestamp>.<body>"` instead of the bare body:
+
+```bash
+ts=$(date +%s)
+sig=$(printf '%s.%s' "$ts" "$body" | openssl dgst -sha256 -hmac "$secret" | cut -d' ' -f2)
+curl -X POST "https://.../api/v1/webhooks/$token" \
+  -H "X-Crewship-Timestamp: $ts" \
+  -H "X-Crewship-Signature: sha256=$sig" \
+  -d "$body"
+```
+
+When `X-Crewship-Timestamp` is present, the signature must cover the
+timestamped material AND the timestamp must be within a 5-minute freshness
+window — a captured signed request becomes useless once that window passes,
+even if it's replayed before the idempotency reservation expires. Omitting
+the header falls back to the body-only scheme unchanged, so existing
+senders keep working without any change.
+
+**Injection fence + forced egress for webhook-triggered runs.** The request
+body lands in the routine's inputs as `inputs.event` (parsed JSON or raw
+string), `inputs.raw` (the raw bytes as a string), and `inputs.headers` — all
+attacker-influenced if the upstream sender's payload carries untrusted text
+(an issue title, a commit message, a customer-supplied field). Two
+protections apply automatically, with no DSL changes required:
+
+- Any `agent_run` step's rendered prompt wraps those three input values in
+  the same untrusted-ingress fence (`<untrusted source="webhook" ...>`) the
+  agent-webhook path already uses — the model is told to treat fenced
+  content as data, never instructions. Other template destinations (`http`
+  URL/body/headers, `code`, `transform`, `if`) are **not** fenced — wrapping
+  those would corrupt a URL or a JSON body rather than protect anything;
+  they're covered by the egress hardening below instead.
+- Every `http` step in a webhook-triggered run is held to the crew network
+  policy's `restricted` floor regardless of the crew's actual `network_mode`
+  — see [Egress enforcement](#http) above.
 
 **Delivery is asynchronous.** The endpoint verifies the signature, rate limit, governance status, and the routine's `concurrency_key` gate synchronously, reserves a run id, then answers immediately:
 
@@ -1196,6 +1378,16 @@ crewship routine rollback email-fetch --to 3
 ```
 
 History is preserved — you can roll forward to a later version by another rollback. There is no "delete version" — if a version was bad, the trail stays: "v1 → v2 → v3, HEAD back on v2, then v4 (fix)" is the audit story you keep, and each run additionally records the content hash it executed.
+
+### Diffing versions
+
+`crewship routine diff <slug> --from N --to M` prints a unified diff between two versions' definitions (pretty-printed JSON, so a single field change shows as a single-hunk diff rather than the whole minified blob changing):
+
+```bash
+crewship routine diff email-fetch --from 2 --to 3
+```
+
+`rollback` calls the same endpoint automatically and prints a **"What changed"** view against the version it just rolled back from, so you see exactly what the rollback undid without a separate command. Identical versions (same `definition_hash`) print a one-line confirmation instead of an empty diff. See the [CLI reference](/cli/routine#crewship-routine-diff-slug---from-n---to-m) for the JSON shape and `--format json` output.
 
 ## The improvement loop: `routine iterate`
 
@@ -1377,6 +1569,35 @@ Both the UI Runs sub-tab waterfall and `crewship routine logs <run_id> --slug X`
 
 Worker tier escalation is visible too — a failed validation gate that retries on a higher tier emits a second `step.started`+`step.completed` pair with its own cost on the retry, so the column-summed footer reflects the *full* spend (including retries), not just the first attempt.
 
+### Monthly budget meter
+
+Per-step cost is the trace-level view; **monthly budget** (#1422 item 3) is the operator-level one — a spend cap you set for a routine, compared against actual `pipeline_runs.cost_usd` for the current calendar month:
+
+```bash
+crewship routine budget set my-routine --amount 50    # cap at $50/month
+crewship routine budget get my-routine
+# my-routine (2026-07): [#####---------------]
+#   $12.50 of $50.00 (25%)
+crewship routine budget set my-routine --amount 0      # clear the cap
+crewship routine budget summary                        # workspace roll-up
+```
+
+This is **not** the same knob as DSL `max_cost_usd` (above) — that's a per-RUN hard gate authored into the definition and enforced mid-run by the executor (a run aborts if it would breach it). The monthly budget is external operator config, set out-of-band from the DSL (never touched by `routine save`, never bumps the version history), and is a **view + soft cap indicator**, not an enforcement gate — a routine over its monthly budget keeps running; nothing currently blocks the next invocation. A routine can have neither, either, or both knobs.
+
+`routine budget summary` rolls up every routine that has a budget set OR spend this month (a routine with neither is excluded — noise reduction for workspaces with dozens of zero-cost deterministic routines):
+
+```bash
+$ crewship routine budget summary
+ROUTINE          BUDGET   SPENT   PCT   STATUS
+my-routine       $50.00   $12.50  25%
+cost-report      $20.00   $22.10  111%  OVER
+summarize-text   —        $3.40   —
+
+2026-07 total: $37.99 spent of $70.00 budgeted
+```
+
+The routine detail page shows the same meter (spent-vs-cap bar) when a budget is set, and the workspace roll-up appears on the routines list page. API: `GET/PATCH /pipelines/{slug}/budget`, `GET /pipelines/budget-summary` — see the [CLI reference](/cli/routine#crewship-routine-budget) for the full flag/response shape.
+
 ### Run tags & metadata
 
 Tag and annotate a run at invoke time to make it filterable later:
@@ -1464,6 +1685,16 @@ crewship routine schedules create --slug incident-summary \
 ```
 
 The probe runs every 5 minutes for free; the LLM routine fires only on the ticks where the probe's output is truthy. `routine schedules list` shows how often the gate woke vs. checked.
+
+### "Get a daily ops digest of runs, cost, and failures" {#workspace-digest-template}
+
+The seeded `workspace-digest` routine (`query` → `transform` → `notify`, agentless, zero cost) covers this out of the box — wire a cadence with:
+
+```bash
+crewship digest enable --crew ops
+```
+
+Creates the routine (if a prior nuke removed it — `--crew` names who'll own it) and a daily 08:00 UTC schedule, idempotently. See the [Digest CLI reference](/cli/digest) for `--cron`/`--when` and how delivery to Slack/email works (it's the same `notify` step + notification-preference matrix every other routine uses).
 
 ### "Cancel an in-flight run"
 
@@ -1555,6 +1786,7 @@ Fixes, in order of preference:
 | `routine delete <slug>` | Soft-delete |
 | `routine doctor <slug>` | Preflight checklist (✓/⚠/✗) — catches blind alleys before run |
 | `routine bench <slug>` | N-runs variance characterisation — pass-rate + cost/latency stats |
+| `routine budget get/set/summary` | Monthly spend cap vs actual (budget-vs-actual view, not an enforcement gate) |
 | `routine runs <slug>` | Run history from journal |
 | `routine records <slug>` | Run history from `pipeline_runs` projection (filterable by status) |
 | `routine logs <run_id>` | Full journal trace for one run (post-mortem) |
@@ -1566,7 +1798,8 @@ Fixes, in order of preference:
 | `routine step-override set/list/clear` | Live prompt/model override for one step, no version bump |
 | `routine pending list/cancel <id>` | Inspect / cancel deferred (`--delay` / `--debounce-key`) triggers |
 | `routine versions <slug>` | Version history |
-| `routine rollback <slug> --to N` | Roll back to v N |
+| `routine diff <slug> --from N --to M` | Unified diff between two versions' definitions |
+| `routine rollback <slug> --to N` | Roll back to v N (prints a post-rollback "what changed" diff) |
 | `routine export <slug>` | JSON bundle to stdout |
 | `routine import [bundle.json]` | Load from file or stdin |
 | `routine validate [file.json]` | Offline DSL check |
@@ -1606,4 +1839,4 @@ These are known gaps in the current MVP — none block production use, but they 
 - **Single-instance scheduler** — running multiple replicas would double-fire schedules.
 - **`credentials_required` scope field is documentary** — the `type` is enforced at run time (a live run is refused with `422` + `missing_credentials` when the vault lacks an ACTIVE credential of that type — see [Required credentials](#required-credentials)), but the optional per-entry `scope` is not yet used for finer-grained matching.
 - **No cross-adapter tier swap yet** — same-provider model swap (Haiku→Opus) works; Claude→Gemini swap requires a shorthand→constant mapping not yet wired.
-- **No NL→cron converter** — ops still hand-type `0 9 * * *`. Foundation PRD has the design; not in MVP.
+- **NL→cron covers a fixed phrase set** — `routine schedules create --when` (see [Cron schedules](#cron-schedules)) handles the common onboarding phrasings (`every weekday at 9`, `every day at 9am`, `every monday at 14:00`, `every hour`, `every N minutes/hours`) via a small hand-rolled parser, not a general NLP model; anything outside that set still needs a raw `--cron` expression.

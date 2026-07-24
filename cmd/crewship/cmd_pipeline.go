@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/spf13/cobra"
 )
 
@@ -276,15 +277,18 @@ var pipelineGetCmd = &cobra.Command{
 
 var pipelineSaveCmd = &cobra.Command{
 	Use:   "save",
-	Short: "Save a new routine from a JSON DSL file",
-	Long: `Save a routine by uploading a DSL JSON file. The server validates the
+	Short: "Save a new routine from a JSON or YAML DSL file",
+	Long: `Save a routine by uploading a DSL file. The server validates the
 DSL on save — it is parsed, schema-validated, and cycle-checked before
 the row lands in the registry. There is no separate "test run" step:
 you cannot run an agent dry (its scripts have real side effects), so a
 real run is reserved for the first live invocation (crewship routine run).
 
-The DSL file should be a JSON document matching the format described
-in ROUTINES.md (top-level: name, description, inputs, steps).
+The DSL file should be a JSON or YAML document matching the format
+described in ROUTINES.md (top-level: name, description, inputs, steps).
+YAML input (sniffed from content, not the file extension) is converted to
+canonical JSON before it's sent — useful for comments and a real multiline
+agent_run prompt instead of a JSON-escaped one.
 
 You also need to supply --author-crew so the runtime knows which
 crew owns the routine. The agent_slug references inside the DSL
@@ -318,6 +322,14 @@ reuse contract).`,
 		definitionRaw, err := os.ReadFile(definitionPath)
 		if err != nil {
 			return fmt.Errorf("read definition file: %w", err)
+		}
+		// #1423 item 2: accept YAML as well as JSON for --definition — the
+		// same content-sniffing conversion `routine validate` uses. JSON
+		// input passes through unchanged; the server, test_run, and the
+		// saved `definition` column always see canonical JSON either way.
+		definitionRaw, err = pipeline.ToCanonicalJSON(definitionRaw)
+		if err != nil {
+			return fmt.Errorf("parse --definition: %w", err)
 		}
 
 		var sampleInputs map[string]any

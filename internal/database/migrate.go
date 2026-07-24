@@ -1762,11 +1762,38 @@ END;
 	// See migrate_consts_v159_run_step_outputs.go and issue #1411 item 4.
 	{version: 159, name: "run_step_outputs", fn: migrationRunStepOutputs},
 
+	// v160 namespaces pipeline_run_idempotency's primary key by pipeline_id:
+	// (workspace_id, idempotency_key) → (workspace_id, pipeline_id,
+	// idempotency_key). Closes a cross-pipeline idempotency-key collision
+	// (pre-poison a predictable key to silently dedupe/DoS a different
+	// pipeline's run, plus disclose its run_id). Renumbered from v153 to sit
+	// above the engine stack. See
+	// migrate_consts_v160_idempotency_pipeline_scope.go (#1415).
+	{version: 160, name: "idempotency_pipeline_scope", sql: migrationIdempotencyPipelineScope},
+	// v161: native outbound notification system, MVP (issue #1412). Widens
+	// notification_channels (v133) with provider/scope/owner_user_id/
+	// categories_json/min_priority and admits the new 'shoutrrr' delivery
+	// type (Slack/Discord/Telegram via github.com/nicholas-fedor/shoutrrr).
+	// Adds user_notification_prefs (per-user category × channel matrix) and
+	// notification_deliveries (persistent outbox/delivery log). Renumbered
+	// from v154. See migrate_consts_v161_notification_prefs.go.
+	{version: 161, name: "notification_prefs", fn: migrationNotificationPrefs},
+	// v162: per-schedule missed-run catch-up policy (issue #1422 item 2).
+	// Adds pipeline_schedules.catchup_policy ('skip'|'once'|'all', default
+	// 'once' = unchanged behaviour) + last_missed_count, and widens
+	// inbox_items.kind to admit 'schedule_missed'. Renumbered from v155. See
+	// migrate_consts_v162_schedule_catchup.go.
+	{version: 162, name: "schedule_catchup", sql: migrationScheduleCatchup},
+	// v163: opt-in monthly spend cap per routine (issue #1422 item 3),
+	// distinct from DSL.MaxCostUSD's per-run hard gate. 0 = no budget set.
+	// Powers the budget-vs-actual meter on the routine detail page + a
+	// workspace roll-up, aggregating over pipeline_runs.cost_usd. Renumbered
+	// from v156. See migrate_consts_v163_routine_monthly_budget.go.
+	{version: 163, name: "routine_monthly_budget", sql: migrationRoutineMonthlyBudget},
 	// v164 seeds the "run_verdict_summaries" feature flag row — the first
 	// row ever inserted into feature_flags, gating the post-run outcome
-	// verdict (#1403). Renumbered from v156 to sit above the engine stack
-	// (v156-159) and PR #1438's reserved v160-163. See
-	// migrate_consts_v164_run_verdict_flag.go.
+	// verdict (#1403). Sits above the engine stack (v156-159) and this
+	// branch's v160-163. See migrate_consts_v164_run_verdict_flag.go.
 	{version: 164, name: "run_verdict_flag", sql: migrationRunVerdictFlag},
 }
 

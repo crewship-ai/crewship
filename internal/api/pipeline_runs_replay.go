@@ -22,10 +22,27 @@ func marshalMetadata(m map[string]any) string {
 	return string(b)
 }
 
+// replayRequestBody carries optional replay-time overrides. Decoded
+// only by the single-run ReplayRun handler — bulk-replay stays
+// unpinned (it exists to re-run a fingerprint group after a fix ships
+// to HEAD, not to backtest a candidate version).
+type replayRequestBody struct {
+	// PinnedVersion, when set, replays against that immutable
+	// pipeline_versions row's definition instead of HEAD. This is the
+	// primitive `crewship routine backtest` composes on: N replays of
+	// recent captured-input runs, all pinned to the same candidate
+	// version, diffed against the originals — a read-only evaluation
+	// that never changes which version is HEAD/live (see RunInput.
+	// PinnedVersion doc in internal/pipeline/executor.go).
+	PinnedVersion *int `json:"pinned_version,omitempty"`
+}
+
 // replayRun re-invokes the routine behind an existing run with the
 // original inputs, stamping is_replay + replay_of. Shared by the
 // single- and bulk-replay handlers. Returns the new run result.
-func (h *PipelineHandler) replayRun(r *http.Request, workspaceID, runID string) (any, int, error) {
+// pinnedVersion is nil for the ordinary "re-run against HEAD" replay;
+// bulk-replay always passes nil.
+func (h *PipelineHandler) replayRun(r *http.Request, workspaceID, runID string, pinnedVersion *int) (any, int, error) {
 	if h.runStore == nil {
 		return nil, http.StatusServiceUnavailable, errors.New("run store not wired")
 	}
@@ -67,10 +84,21 @@ func (h *PipelineHandler) replayRun(r *http.Request, workspaceID, runID string) 
 		MetadataJSON:  orig.MetadataJSON,
 		IsReplay:      true,
 		ReplayOf:      runID,
+		PinnedVersion: pinnedVersion,
 	})
 	if err != nil {
 		if errors.Is(err, pipeline.ErrConcurrencyLimitReached) {
 			return nil, http.StatusTooManyRequests, err
+		}
+		// The caller pinned a version that no longer exists — a request
+		// problem, not a server fault. 409 with the executor's legible
+		// error (names routine + version), same mapping the schedule
+		// force-fire and webhook fire paths use for the same error.
+		// Never fall back to executing HEAD silently: a backtest that
+		// silently compared HEAD against itself would misreport as a
+		// clean pass.
+		if errors.Is(err, pipeline.ErrPinnedVersionNotFound) {
+			return nil, http.StatusConflict, err
 		}
 		return nil, http.StatusInternalServerError, err
 	}
@@ -90,7 +118,14 @@ func (h *PipelineHandler) ReplayRun(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "runId required")
 		return
 	}
-	res, code, err := h.replayRun(r, workspaceID, runID)
+	var body replayRequestBody
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
+			replyError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+	res, code, err := h.replayRun(r, workspaceID, runID, body.PinnedVersion)
 	if err != nil {
 		replyError(w, code, err.Error())
 		return
@@ -163,7 +198,7 @@ func (h *PipelineHandler) BulkReplayRuns(w http.ResponseWriter, r *http.Request)
 		replayed int
 	)
 	for _, id := range ids {
-		res, _, err := h.replayRun(r, workspaceID, id)
+		res, _, err := h.replayRun(r, workspaceID, id, nil)
 		if err != nil {
 			results = append(results, replayOutcome{SourceRunID: id, Error: err.Error()})
 			continue

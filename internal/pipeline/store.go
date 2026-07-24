@@ -523,13 +523,34 @@ func (s *Store) SetStatus(ctx context.Context, id, status string) error {
 	return nil
 }
 
+// SetMonthlyBudget sets (or clears, with 0) the routine's monthly spend
+// cap (#1422 item 3). Independent of Save/versioning — this is
+// out-of-band operator config, not part of the DSL, so it never bumps
+// the routine's version history.
+func (s *Store) SetMonthlyBudget(ctx context.Context, id string, amountUSD float64) error {
+	if amountUSD < 0 {
+		return fmt.Errorf("pipeline: monthly budget cannot be negative")
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: pipelines.updated_at is not ordered/compared in SQL; the whole pipelines table writes RFC3339Nano consistently
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE pipelines SET monthly_budget_usd = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`,
+		amountUSD, now, id)
+	if err != nil {
+		return fmt.Errorf("pipeline: set monthly budget: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // RecordInvocation increments invocation_count and updates
 // last_invoked_at + last_invocation_status. Called by the executor
 // after a run completes (success or failure). Best-effort: if the
 // row is soft-deleted mid-run, we silently no-op — the run already
 // happened and journal_entries hold the truth.
 func (s *Store) RecordInvocation(ctx context.Context, id string, status string) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: last_invoked_at IS ordered at :455 but every pipelines timestamp (created_at/updated_at/last_invoked_at) is written RFC3339Nano, so the COALESCE(last_invoked_at, created_at) sort compares like-for-like
 	_, err := s.db.ExecContext(ctx, `
 UPDATE pipelines
 SET invocation_count = invocation_count + 1,
@@ -614,6 +635,7 @@ const pipelineColumns = `
     last_test_run_at, last_test_run_passed,
     COALESCE(execution_tier_json, ''),
     COALESCE(status, 'active'),
+    COALESCE(monthly_budget_usd, 0),
     created_at, updated_at, deleted_at`
 
 // rowScanner narrows the rows interface to just what we need so
@@ -652,6 +674,7 @@ func scanPipeline(rs rowScanner) (*Pipeline, error) {
 		&lastTestRunAt, &lastTestRunPassed,
 		&p.ExecutionTierJSON,
 		&p.Status,
+		&p.MonthlyBudgetUSD,
 		&createdAt, &updatedAt, &deletedAt,
 	)
 	if err != nil {

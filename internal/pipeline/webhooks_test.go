@@ -1,6 +1,11 @@
 package pipeline
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -86,4 +91,99 @@ func TestRateLimiter_ZeroLimitTreatedAsUnlimited(t *testing.T) {
 			t.Errorf("limit=0 must always allow, iter %d", i)
 		}
 	}
+}
+
+// TestRateLimiter_PrunesStaleWindows pins the #1416 nit: the window map
+// was never pruned, so a token fired once and never reused left a
+// permanent entry. Once the map crosses the prune threshold, allow() must
+// opportunistically sweep entries whose window has long since expired.
+func TestRateLimiter_PrunesStaleWindows(t *testing.T) {
+	rl := &rateLimiter{windows: map[string]*rateWindow{}}
+	// Seed past the prune threshold with long-stale, distinct-token
+	// entries (never reused, exactly the one-off-webhook-token scenario).
+	for i := 0; i < rateLimiterPruneThreshold+10; i++ {
+		rl.windows[fmt.Sprintf("stale-%d", i)] = &rateWindow{
+			startedAt: time.Now().Add(-2 * time.Hour),
+			count:     1,
+		}
+	}
+	before := len(rl.windows)
+
+	// A single allow() call (any key) must trigger the sweep once the
+	// threshold is crossed.
+	rl.allow("fresh", 10)
+
+	after := len(rl.windows)
+	if after >= before {
+		t.Fatalf("expected stale windows to be pruned: before=%d after=%d", before, after)
+	}
+	// Only the just-inserted fresh window (and nothing stale) should
+	// remain.
+	if after != 1 {
+		t.Errorf("expected exactly 1 surviving window (the fresh one), got %d", after)
+	}
+	if _, ok := rl.windows["fresh"]; !ok {
+		t.Error("the fresh window itself must survive its own insertion")
+	}
+}
+
+// TestWebhook_ValidateTimestampedSignature pins #1416 item 2: pipeline
+// webhooks gain the same timestamped ("ts.body") HMAC scheme + freshness
+// window internal/webhook/handler.go already enforces for agent webhooks —
+// closing the gap where a captured signed request could be replayed any
+// time within the (up to 24h, Forget-reopenable) idempotency window.
+func TestWebhook_ValidateTimestampedSignature(t *testing.T) {
+	w := &Webhook{SigningSecret: "s3cr3t"}
+	body := []byte(`{"hello":"world"}`)
+	now := time.Unix(1_700_000_000, 0)
+
+	sign := func(ts string) string {
+		mac := hmac.New(sha256.New, []byte(w.SigningSecret))
+		mac.Write([]byte(ts + "."))
+		mac.Write(body)
+		return hex.EncodeToString(mac.Sum(nil))
+	}
+
+	t.Run("fresh timestamp with correct signature validates", func(t *testing.T) {
+		ts := strconv.FormatInt(now.Unix(), 10)
+		if !w.ValidateTimestampedSignature(body, ts, sign(ts), now, 0) {
+			t.Error("expected a fresh, correctly-signed request to validate")
+		}
+	})
+	t.Run("stale timestamp is rejected even with a correct signature", func(t *testing.T) {
+		staleTS := strconv.FormatInt(now.Add(-1*time.Hour).Unix(), 10)
+		if w.ValidateTimestampedSignature(body, staleTS, sign(staleTS), now, 0) {
+			t.Error("expected a stale timestamp to be rejected (replay defense)")
+		}
+	})
+	t.Run("captured request replayed later fails once outside tolerance", func(t *testing.T) {
+		ts := strconv.FormatInt(now.Unix(), 10)
+		sig := sign(ts) // captured at time `now`
+		later := now.Add(10 * time.Minute)
+		if w.ValidateTimestampedSignature(body, ts, sig, later, 0) {
+			t.Error("expected a replayed signature to fail once the tolerance window has passed")
+		}
+	})
+	t.Run("wrong signature is rejected regardless of timestamp freshness", func(t *testing.T) {
+		ts := strconv.FormatInt(now.Unix(), 10)
+		if w.ValidateTimestampedSignature(body, ts, "0000", now, 0) {
+			t.Error("expected an incorrect signature to be rejected")
+		}
+	})
+	t.Run("empty signing secret never validates", func(t *testing.T) {
+		bare := &Webhook{}
+		ts := strconv.FormatInt(now.Unix(), 10)
+		mac := hmac.New(sha256.New, []byte(""))
+		mac.Write([]byte(ts + "."))
+		mac.Write(body)
+		sig := hex.EncodeToString(mac.Sum(nil))
+		if bare.ValidateTimestampedSignature(body, ts, sig, now, 0) {
+			t.Error("expected empty signing secret to never validate")
+		}
+	})
+	t.Run("malformed timestamp is rejected", func(t *testing.T) {
+		if w.ValidateTimestampedSignature(body, "not-a-number", sign("not-a-number"), now, 0) {
+			t.Error("expected a malformed timestamp to be rejected")
+		}
+	})
 }
