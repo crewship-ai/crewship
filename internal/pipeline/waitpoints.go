@@ -422,6 +422,63 @@ WHERE token = ? AND status = 'pending'`,
 	return nil
 }
 
+// CancelWaitpointsForRun flips every still-pending waitpoint belonging to a
+// run to 'cancelled' (#1426, 3.1/3.2). Used when a parked or blocking run is
+// cancelled or dies: without it the inbox "needs approval" card stays
+// actionable and an approve/deny would resolve a waitpoint whose run is gone.
+// Cascades into the inbox projection and wakes any live WaitFor listener so a
+// blocking run unblocks immediately. Returns the number of waitpoints
+// cancelled. Best-effort inbox/listener cascade mirrors CompleteApproval.
+func (s *SQLWaitpointStore) CancelWaitpointsForRun(ctx context.Context, pipelineRunID string) (int, error) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT token FROM pipeline_waitpoints WHERE pipeline_run_id = ? AND status = 'pending'`,
+		pipelineRunID)
+	if err != nil {
+		return 0, fmt.Errorf("waitpoints: cancel-for-run scan: %w", err)
+	}
+	var tokens []string
+	for rows.Next() {
+		var tok string
+		if scanErr := rows.Scan(&tok); scanErr == nil {
+			tokens = append(tokens, tok)
+		}
+	}
+	rows.Close()
+
+	cancelled := 0
+	for _, tok := range tokens {
+		res, execErr := s.db.ExecContext(ctx, `
+UPDATE pipeline_waitpoints
+SET status = 'cancelled', decided_at = ?
+WHERE token = ? AND status = 'pending'`, now, tok)
+		if execErr != nil {
+			continue
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			continue
+		}
+		cancelled++
+		inbox.ResolveBySource(ctx, s.db, slog.Default(), "waitpoint", tok, "cancelled", "")
+		s.mu.Lock()
+		if ch, ok := s.listeners[tok]; ok {
+			select {
+			case ch <- waitDecision{approved: false}:
+			default:
+			}
+		}
+		s.mu.Unlock()
+	}
+	return cancelled, nil
+}
+
+// WaitpointCanceller is the optional capability a WaitpointStore implements to
+// cancel a run's pending waitpoints. Detected via type assertion so test
+// stubs implementing only WaitpointStore keep working.
+type WaitpointCanceller interface {
+	CancelWaitpointsForRun(ctx context.Context, pipelineRunID string) (int, error)
+}
+
 // ErrAlreadyDecided is returned by CompleteApproval when the
 // waitpoint isn't in pending state.
 var ErrAlreadyDecided = errors.New("waitpoint: already decided or expired")

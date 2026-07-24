@@ -938,6 +938,25 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		// persist helper short-circuits when result is unset
 		// (recursive helper returns early).
 		defer e.persistRunTerminal(ctx, runID, in, pipelineID, result, startedAt)
+
+		// Cancel classification (#1426, 2.1). Registered AFTER the terminal
+		// write above so — defers being LIFO — it runs FIRST, re-labelling a
+		// user-cancelled run from FAILED to CANCELLED before persistRunTerminal
+		// reads result.Status AND before runHooksAround (which wraps this
+		// frame) inspects the returned status. Doing it here rather than in
+		// Run() means the cancel is honoured everywhere at once: no failed row,
+		// no error_fingerprint (MarkTerminal only mints one for FAILED), no
+		// failure-notification fan-out (TerminalNotifier skips CANCELLED), and
+		// no on_failure hook (runHooksAround gates it on FAILED).
+		defer func() {
+			if result != nil && result.Status == "FAILED" &&
+				e.runs != nil && e.runs.IsCancelRequested(runID) {
+				result.Status = "CANCELLED"
+				if result.ErrorMessage == "" {
+					result.ErrorMessage = "run cancelled"
+				}
+			}
+		}()
 	}
 
 	// Governance airbag (runtime, #1417). Run() enforces the status gate

@@ -61,6 +61,39 @@ func (h *PipelineHandler) CancelRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !found {
+		// Registry fallback for a parked WAITING run (#1426, 3.1). An async
+		// approval-parked run released its concurrency slot + registry entry
+		// when it parked, so the in-memory scan above can't see it — but it is
+		// still cancellable. Mark the persisted row cancelled and cancel its
+		// pending waitpoint(s) so the inbox approval card stops being
+		// actionable (an approve/deny would otherwise resolve a waitpoint whose
+		// run the user just killed).
+		if h.runStore != nil {
+			if rec, gerr := h.runStore.Get(r.Context(), runID); gerr == nil && rec != nil &&
+				rec.WorkspaceID == workspaceID && rec.Status == pipeline.RunStatusWaiting {
+				if err := h.runStore.MarkTerminal(r.Context(), pipeline.MarkTerminalInput{
+					RunID:        runID,
+					Status:       pipeline.RunStatusCancelled,
+					ErrorMessage: "run cancelled while waiting for approval",
+				}); err != nil {
+					h.logger.Warn("cancel parked run: mark terminal", "error", err, "run_id", runID)
+					replyError(w, http.StatusInternalServerError, "failed to cancel run")
+					return
+				}
+				if wc, ok := h.waitpoints.(pipeline.WaitpointCanceller); ok {
+					if _, err := wc.CancelWaitpointsForRun(r.Context(), runID); err != nil {
+						h.logger.Warn("cancel parked run: cancel waitpoints", "error", err, "run_id", runID)
+					}
+				}
+				writeJSON(w, http.StatusOK, map[string]any{
+					"run_id":              runID,
+					"cancel_requested":    true,
+					"parked":              true,
+					"cancel_requested_at": time.Now().UTC().Format(time.RFC3339Nano),
+				})
+				return
+			}
+		}
 		writeJSON(w, http.StatusNotFound, map[string]string{
 			"error": "run not found in this workspace (already finished or not started here)",
 		})

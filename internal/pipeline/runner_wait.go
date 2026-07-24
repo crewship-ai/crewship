@@ -124,6 +124,19 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 		}
 
 		approved, err := e.waitpoints.WaitFor(ctx, token)
+		// Blocking run died mid-wait (#1426, 3.2): the run's ctx was cancelled
+		// rather than the waitpoint resolving. Flip the waitpoint to cancelled
+		// so its inbox approval card stops being actionable (approving a
+		// waitpoint whose run is gone resolves nothing). Detached context —
+		// ctx is already cancelled, so a store call keyed on it would fail.
+		if ctx.Err() != nil {
+			if wc, ok := e.waitpoints.(WaitpointCanceller); ok {
+				cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_, _ = wc.CancelWaitpointsForRun(cctx, runID)
+				cancel()
+			}
+			return "", 0, time.Since(stepStart).Milliseconds(), ctx.Err()
+		}
 		if err != nil {
 			return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q wait: %w", step.ID, err)
 		}
