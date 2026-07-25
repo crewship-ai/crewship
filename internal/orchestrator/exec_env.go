@@ -481,6 +481,14 @@ func instanceAllowsPrivateEndpoints() bool {
 	return false
 }
 
+// InstanceAllowsPrivateEndpoints is the exported form for callers that need to
+// REPORT the ceiling rather than enforce it (the admin security-posture
+// endpoint). Exported deliberately instead of re-reading the env var at the
+// reporting site: a posture that parses the flag its own way can drift from the
+// one that gates traffic, and then it reassures an operator about a state the
+// runtime doesn't actually have.
+func InstanceAllowsPrivateEndpoints() bool { return instanceAllowsPrivateEndpoints() }
+
 // effectiveAllowPrivateEndpoints ANDs the per-crew opt-in with the instance-
 // level ceiling (#974 S5). Private-network egress requires BOTH.
 func effectiveAllowPrivateEndpoints(crewFlag bool) bool {
