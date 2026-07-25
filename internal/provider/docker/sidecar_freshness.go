@@ -53,6 +53,10 @@ func sidecarStaleReason(sidecarMtime, serverMtime time.Time) string {
 // site); passing it in keeps the function testable. Every stat error fails open
 // (no warning) — a freshness check must never itself become a boot-time noise
 // source.
+//
+// It stats the host filesystem directly (os.Stat), mirroring onDiskSidecarHash
+// in this package — there is no filesystem-provider abstraction here, and two
+// boot-time stat calls neither need nor benefit from context cancellation.
 func (p *Provider) assertSidecarFreshAtStartup(serverBinaryPath string) {
 	path := p.cfg.SidecarBinaryPath
 	if path == "" {

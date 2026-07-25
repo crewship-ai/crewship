@@ -170,9 +170,11 @@ crewship crew restart-agents   # remount the fresh sidecar into containers
 
 Restarting agents **without** recopying the binary remounts the same stale
 file, so the rebuild step is the one that matters. On dev slots `dev.sh`
-rebuilds the sidecar alongside the server every start and ignores a stale
-`CREWSHIP_SIDECAR_PATH` pin in `.env.local`, so this warning there means the
-pin points somewhere `dev.sh` isn't rebuilding — remove it.
+rebuilds the sidecar alongside the server on every start and forces
+`CREWSHIP_SIDECAR_PATH` to that fresh, co-located binary (ignoring any stale pin
+in `.env.local`, since #1402), so this warning should not normally appear
+there — if it does, the co-located build step itself was skipped or failed;
+re-run the deploy and check the build output.
 
 </Accordion>
 
