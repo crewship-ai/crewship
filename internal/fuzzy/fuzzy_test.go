@@ -56,6 +56,19 @@ func TestLevenshtein_OversizedInputShortCircuits(t *testing.T) {
 	}
 }
 
+// TestLevenshtein_AtCapBoundaryUsesRealDP pins the boundary: strings of exactly
+// maxLevenshteinLen still take the true DP path (the guard is strict `>`), so a
+// future accidental `>=` regression — which would start returning the bounded
+// approximation for in-range input — is caught. Two exactly-cap strings that
+// differ in one position must report distance 1, not the max(len) short-circuit.
+func TestLevenshtein_AtCapBoundaryUsesRealDP(t *testing.T) {
+	a := strings.Repeat("a", maxLevenshteinLen)
+	b := strings.Repeat("a", maxLevenshteinLen-1) + "b" // differs only in the last char
+	if got := Levenshtein(a, b); got != 1 {
+		t.Errorf("Levenshtein at exactly cap = %d, want true DP distance 1 (not short-circuited)", got)
+	}
+}
+
 func TestNearest_Typo(t *testing.T) {
 	pool := []string{"viktor", "eva", "piotr", "captain", "lead"}
 	got := Nearest("vitkor", pool, 3)
