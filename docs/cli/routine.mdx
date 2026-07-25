@@ -34,6 +34,7 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Diagnostics | `bench <slug>` | Variance characterisation — N runs, pass-rate + cost/latency stats |
 | Diagnostics | `backtest <slug> --against <version>` | Replay recent successful runs against a candidate version and diff outputs (read-only) |
 | Diagnostics | `budget get/set/summary` | Monthly spend cap vs actual — budget-vs-actual view, not an enforcement gate |
+| Diagnostics | `state list/set/rm/clear <slug>` | Inspect and repair durable cross-run state (watermarks) |
 | Runs | `runs <slug>` | List recent runs from journal |
 | Runs | `records <slug>` | List runs from `pipeline_runs` projection (v83) |
 | Runs | `active` | List in-flight runs across the workspace |
@@ -398,6 +399,61 @@ crewship routine budget summary
 ```
 
 Workspace-wide roll-up: every routine with a budget set **or** spend this month (a routine with neither is excluded — a fresh workspace can have dozens of zero-cost deterministic routines, and listing all of them would be noise). Table columns: `ROUTINE BUDGET SPENT PCT STATUS` (`STATUS` shows `OVER` when spend exceeds the cap), plus a workspace total line. `--format json` returns `{month, routines: [...], total_budget_usd, total_spent_usd}`.
+
+---
+
+## `crewship routine state`
+
+Inspect and repair a routine's **durable cross-run state** — the key/value bucket behind `{{ routine.state.<key> }}` and a step's `state_write` binding. See [Cross-run state](/guides/routines#cross-run-state-routine-state-key) for how a routine reads and writes it.
+
+State is scoped per **(routine, schedule)**: two cron schedules of the same routine keep independent watermarks, and manual / webhook runs share a separate bucket shown as `(manual/webhook)`. That isolation is the reason this command exists — when a routine "stops seeing new items", the stuck cursor sits in a bucket you can't guess from the outside, and until now nothing outside a run could read it.
+
+<Warning>
+Mutations are **ADMIN-tier**. A watermark governs what every future *unattended* run does — rewriting one has the same blast radius as disabling the routine.
+</Warning>
+
+### `routine state list <slug>`
+
+```bash
+crewship routine state list nightly-import
+crewship routine state list nightly-import --schedule psched_abc123
+crewship routine state list nightly-import --schedule ""   # the manual/webhook bucket
+```
+
+Prints each bucket as `schedule: <id>` followed by a `KEY VALUE UPDATED` table. **Omitting `--schedule` shows every bucket** — that's the diagnostic default. `UPDATED` is usually the tell: a cursor frozen days ago next to schedules that ran this morning.
+
+Passing `--schedule ""` explicitly is *not* the same as omitting it: an empty value selects the shared manual/webhook bucket, while an absent flag means "all buckets".
+
+`--format json` returns `{slug, buckets: [{schedule_id, entries: [{key, value, updated_at}]}]}`.
+
+### `routine state set <slug> <key> <value>`
+
+```bash
+crewship routine state set nightly-import last_id 41200 --schedule psched_abc123
+```
+
+Writes one key into one bucket. The next run of that schedule reads the new value from `{{ routine.state.<key> }}`. This is the preferred repair — rewinding to a known-good cursor is bounded, where clearing is not.
+
+### `routine state rm <slug> <key>`
+
+```bash
+crewship routine state rm nightly-import last_id --schedule psched_abc123 --yes
+```
+
+Removes one key. The next run reads it as empty. A key that was never written returns **404** rather than a silent success — a mistyped key is the usual reason a delete "doesn't work", and reporting success would send you looking in the wrong place.
+
+### `routine state clear <slug>`
+
+```bash
+crewship routine state clear nightly-import --schedule psched_abc123 --yes
+```
+
+Drops every key in **one** bucket and reports how many went. There is deliberately no "clear every schedule" form: each schedule's cursor is an independent watermark, and dropping all of them at once makes every schedule reprocess its whole backlog with no undo.
+
+| Flag | Applies to | Description |
+|------|-----------|-------------|
+| `--schedule <id>` | all | Schedule that owns the bucket. Omit on `list` for every bucket; pass an empty value for the shared manual/webhook bucket. |
+| `--yes` / `-y` | `rm`, `clear` | Skip the confirmation prompt. |
 
 ---
 

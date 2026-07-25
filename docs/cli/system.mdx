@@ -21,6 +21,7 @@ crewship system <subcommand>
 | `stats` | Show admin stats (workspaces, users, agents, running) |
 | `onboarding` | Onboarding status / setup / complete (subcommands: `status`, `setup`, `complete`) |
 | `aux-status` | Show auxiliary model assignment per slot (PR-B F3) |
+| `openapi` | Print the server's generated OpenAPI spec (JSON) to stdout |
 
 ---
 
@@ -213,6 +214,28 @@ crewship system health -f json | jq '.disk.used_pct'
 ```
 
 `disk` reports `total_bytes` / `free_bytes` / `used_bytes` / `used_pct` for the default data-dir filesystem (`free_bytes` matches `df` "Avail"). A custom `DATABASE_URL` on a different volume isn't reflected — the default location is the volume that fills in practice (DB + agent outputs + logs all live under it).
+
+## `crewship system openapi`
+
+Fetch `GET /openapi.json` from the target server and write it to stdout unchanged. Aliased as `system spec`.
+
+```bash
+crewship system openapi > openapi.json
+crewship system openapi | jq '.paths | keys | length'
+crewship system openapi --out ./spec/openapi.json
+```
+
+The spec is **generated from the server's actual route registrations**, so it always matches the instance you're pointed at — paths, methods and path parameters are exact. Request/response bodies use a generic placeholder schema: it's a route contract, not a hand-authored data model.
+
+| Flag | Description |
+|------|-------------|
+| `--out <path>` | Write to a file instead of stdout. |
+
+Output is a byte-for-byte passthrough — the spec is the artifact, so it isn't reformatted. If the server answers with a non-JSON content type (the SPA catch-all serving `index.html`, which is what a build without the spec route does) the command **fails loudly** rather than writing an HTML page into your `openapi.json`.
+
+<Note>
+Regenerating the embedded spec after adding or renaming a server route is a maintainer step: `go generate ./internal/api/`. A stale spec silently under-reports the API to anything using it as the contract.
+</Note>
 
 ## See also
 

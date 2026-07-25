@@ -503,6 +503,26 @@
         ]
       }
     },
+    "/api/v1/admin/journal/verify": {
+      "get": {
+        "operationId": "get_api_v1_admin_journal_verify",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/keeper/governance": {
       "get": {
         "operationId": "get_api_v1_admin_keeper_governance",
@@ -786,6 +806,35 @@
     "/api/v1/admin/prune-legacy-resources": {
       "post": {
         "operationId": "post_api_v1_admin_prune-legacy-resources",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/reap-orphan-containers": {
+      "post": {
+        "operationId": "post_api_v1_admin_reap-orphan-containers",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5013,6 +5062,36 @@
         ]
       }
     },
+    "/api/v1/crews/{crewId}/files/delete": {
+      "delete": {
+        "operationId": "delete_api_v1_crews_crewId_files_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "crews"
+        ]
+      }
+    },
     "/api/v1/crews/{crewId}/files/download": {
       "get": {
         "operationId": "get_api_v1_crews_crewId_files_download",
@@ -7068,6 +7147,36 @@
         ]
       }
     },
+    "/api/v1/crews/{crewId}/services": {
+      "get": {
+        "operationId": "get_api_v1_crews_crewId_services",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "crews"
+        ]
+      }
+    },
     "/api/v1/crews/{crewId}/standup": {
       "get": {
         "operationId": "get_api_v1_crews_crewId_standup",
@@ -8729,6 +8838,26 @@
         ]
       }
     },
+    "/api/v1/journal/spend": {
+      "get": {
+        "operationId": "get_api_v1_journal_spend",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "journal"
+        ]
+      }
+    },
     "/api/v1/journal/stream": {
       "get": {
         "operationId": "get_api_v1_journal_stream",
@@ -9018,6 +9147,53 @@
         },
         "tags": [
           "mcp-tool-calls"
+        ]
+      }
+    },
+    "/api/v1/me/notification-prefs": {
+      "get": {
+        "operationId": "get_api_v1_me_notification-prefs",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "me"
+        ]
+      },
+      "put": {
+        "operationId": "put_api_v1_me_notification-prefs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "me"
         ]
       }
     },
@@ -9535,6 +9711,43 @@
         "tags": [
           "notification-channels"
         ]
+      },
+      "patch": {
+        "operationId": "patch_api_v1_notification-channels_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "notification-channels"
+        ]
       }
     },
     "/api/v1/notification-channels/{id}/test": {
@@ -9573,6 +9786,85 @@
         },
         "tags": [
           "notification-channels"
+        ]
+      }
+    },
+    "/api/v1/notification-deliveries": {
+      "get": {
+        "operationId": "get_api_v1_notification-deliveries",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "notification-deliveries"
+        ]
+      }
+    },
+    "/api/v1/notification-providers": {
+      "get": {
+        "operationId": "get_api_v1_notification-providers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "notification-providers"
+        ]
+      }
+    },
+    "/api/v1/notification-providers/{provider}": {
+      "patch": {
+        "operationId": "patch_api_v1_notification-providers_provider",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "notification-providers"
         ]
       }
     },
@@ -13021,6 +13313,36 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspaceId}/pipelines/budget-summary": {
+      "get": {
+        "operationId": "get_api_v1_workspaces_workspaceId_pipelines_budget-summary",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspaceId}/pipelines/import": {
       "post": {
         "operationId": "post_api_v1_workspaces_workspaceId_pipelines_import",
@@ -13606,6 +13928,127 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget": {
+      "get": {
+        "operationId": "get_api_v1_workspaces_workspaceId_pipelines_slug_budget",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "workspaces"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_api_v1_workspaces_workspaceId_pipelines_slug_budget",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/diff": {
+      "get": {
+        "operationId": "get_api_v1_workspaces_workspaceId_pipelines_slug_diff",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/disable": {
       "post": {
         "operationId": "post_api_v1_workspaces_workspaceId_pipelines_slug_disable",
@@ -14070,6 +14513,179 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/state": {
+      "delete": {
+        "operationId": "delete_api_v1_workspaces_workspaceId_pipelines_slug_state",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "workspaces"
+        ]
+      },
+      "get": {
+        "operationId": "get_api_v1_workspaces_workspaceId_pipelines_slug_state",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key}": {
+      "delete": {
+        "operationId": "delete_api_v1_workspaces_workspaceId_pipelines_slug_state_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "workspaces"
+        ]
+      },
+      "put": {
+        "operationId": "put_api_v1_workspaces_workspaceId_pipelines_slug_state_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {

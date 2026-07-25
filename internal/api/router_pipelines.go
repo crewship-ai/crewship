@@ -107,6 +107,16 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/budget-summary", authed(wsCtx(http.HandlerFunc(pipes.GetBudgetSummary))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget", authed(wsCtx(http.HandlerFunc(pipes.GetBudget))))
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget", roleManage, pipes.SetBudget)
+	// Cross-run routine state (#1420). The DSL can only WRITE a watermark
+	// ({{ routine.state.* }} + state_write), so a bad cursor silently made every
+	// later run a no-op with no way to inspect or correct it short of a DB
+	// shell. Read is member-tier (diagnosis); every mutation is manage-tier
+	// because a watermark governs what UNATTENDED runs do — same blast radius
+	// as disabling the routine, hence the same tier as /budget's PATCH.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state", authed(wsCtx(http.HandlerFunc(pipes.GetState))))
+	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key}", roleManage, pipes.SetState)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key}", roleManage, pipes.DeleteStateKey)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/state", roleManage, pipes.ClearState)
 	// Single-run + workspace-list lookups under /pipeline-runs/ (top-
 	// level resource) instead of /pipelines/runs/ because the latter
 	// collides with /pipelines/{slug}/runs in net/http's pattern-
