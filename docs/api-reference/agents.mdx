@@ -1151,6 +1151,16 @@ GET /api/v1/agents/{agentId}/credentials?workspace_id={workspaceId}
 
 **Response:** `200 OK` -- array of credential assignment objects.
 
+Each object carries the grant's **lease** state (see
+[Short-lived leases](/guides/credentials#short-lived-leases-ttl)):
+
+| Field | Type | Description |
+|---|---|---|
+| `expires_at` | string | Lease expiry (RFC3339 UTC). Omitted for a **standing** grant. |
+| `expired` | boolean | Whether that lease has already lapsed. An expired grant is refused at every injection point, so `true` means the credential no longer works. |
+| `lease_source` | string | What minted the lease: `manual` (an explicit `ttl_seconds`), `keeper_allow` (auto-issued on a Keeper ALLOW), `escalation_approve` (auto-issued when a human approved an agent-proposed credential). Omitted for a standing grant and for leases predating migration v165. |
+| `lease_issued_at` | string | When the lease was minted (RFC3339 UTC). Omitted when unset. |
+
 ### Assign Credential
 
 ```
@@ -1166,12 +1176,14 @@ POST /api/v1/agents/{agentId}/credentials?workspace_id={workspaceId}
 | `credential_id` | string | Yes | Credential to assign (must exist in this workspace) |
 | `env_var_name` | string | Yes | Environment variable name to inject into the agent container |
 | `priority` | integer | No | Resolution priority when multiple credentials share an `env_var_name` |
+| `ttl_seconds` | integer | No | Issue the grant as a short-lived **lease** expiring this many seconds from now, instead of a standing grant. Capped at 30 days (`2592000`). Recorded with `lease_source: "manual"`. Omit or `0` for a standing grant. |
 
 ```json
 {
   "credential_id": "cred_abc",
   "env_var_name": "ANTHROPIC_API_KEY",
-  "priority": 0
+  "priority": 0,
+  "ttl_seconds": 1800
 }
 ```
 
@@ -1183,7 +1195,7 @@ POST /api/v1/agents/{agentId}/credentials?workspace_id={workspaceId}
 
 | Status | Condition |
 |---|---|
-| `400` | Missing `credential_id` or `env_var_name` |
+| `400` | Missing `credential_id` or `env_var_name`; negative `ttl_seconds`; `ttl_seconds` over 30 days |
 | `403` | Insufficient role |
 | `404` | Agent or credential not found |
 | `409` | Credential already assigned to this agent |

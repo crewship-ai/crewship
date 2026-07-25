@@ -47,6 +47,11 @@ interface GovernanceResponse {
   // agent hired by user A cannot be resolved by user A — a different approver
   // is required. Backed by keeper_governance_settings.require_second_approver.
   require_second_approver?: boolean
+  // Credential-lease auto-issuance TTL in seconds (#1373). 0 = off (grants stay
+  // standing). A positive value makes a Keeper ALLOW / escalation approve
+  // re-issue an L3/L4 grant as a lease of that length. Server accepts 0 or
+  // [60, 2592000] and 400s anything else rather than clamping.
+  auto_lease_seconds?: number
   // Non-blocking advisory returned by PUT — e.g. enabling the four-eyes rule on
   // a workspace that lacks a second eligible approver. Empty on GET.
   warning?: string
@@ -108,11 +113,53 @@ interface FormState {
   contact: string // "" = everyone with MANAGER role
   risk: string    // kept as string so the number input can be edited freely
   requireSecondApprover: boolean // four-eyes credential gate (#1084)
+  // autoLeaseMinutes is the credential-lease auto-issuance TTL (#1373), held in
+  // MINUTES because that is the unit an operator thinks in ("15 minutes"), not
+  // the seconds the wire uses. "" or "0" = off. Kept as a string so the number
+  // input can be cleared and retyped without snapping to a value mid-edit.
+  autoLeaseMinutes: string
+  // autoLeaseSecondsRaw is the EXACT value the server returned, kept alongside
+  // the rounded minutes so an unrelated save cannot rewrite it.
+  //
+  // The CLI accepts any Go duration (`keeper auto-lease set 90s`), so the stored
+  // TTL need not be a whole number of minutes. Rendering it as minutes rounds —
+  // and if save() always resent the recomputed seconds, toggling the watchdog
+  // switch would silently rewrite 90s to 120s. Only a save that actually EDITED
+  // the minutes field sends a recomputed value; otherwise this raw value is
+  // resent unchanged.
+  autoLeaseSecondsRaw: number
   watchSpec: string       // free-form NL rules
   watchPresets: string[]  // enabled preset keys
   govProvider: string     // "" | ollama | anthropic | openai_compat
   govModelId: string      // required when govProvider != ""
   govCredentialId: string // optional; "" = none
+}
+
+// Auto-lease bounds, mirroring governance.MinAutoLeaseSeconds /
+// MaxAutoLeaseSeconds. The server rejects out-of-range values rather than
+// clamping them, so validating here is what turns a bare 400 into an actionable
+// message — it is not the gate.
+const AUTO_LEASE_MIN_SECONDS = 60
+const AUTO_LEASE_MAX_SECONDS = 30 * 24 * 60 * 60
+
+// secondsToLeaseMinutes renders the wire value for the minutes input. 0 /
+// undefined (auto-lease off) becomes "" so the field reads as empty rather than
+// as a meaningful zero.
+function secondsToLeaseMinutes(seconds: number | undefined): string {
+  if (!seconds || seconds <= 0) return ""
+  return String(Math.round(seconds / 60))
+}
+
+// leaseMinutesToSeconds parses the input back to wire seconds. "" (cleared) is a
+// deliberate "off", so it maps to 0 rather than to an error. Returns null for a
+// value that isn't a whole non-negative number of minutes, so the caller can
+// explain the problem instead of sending NaN.
+function leaseMinutesToSeconds(minutes: string): number | null {
+  const trimmed = minutes.trim()
+  if (trimmed === "") return 0
+  const n = Number(trimmed)
+  if (!Number.isInteger(n) || n < 0) return null
+  return n * 60
 }
 
 // sameSet compares two preset-key arrays order-independently (the wire order is
@@ -152,7 +199,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
   const [admins, setAdmins] = useState<WorkspaceMember[]>([])
   const emptyForm: FormState = {
     enabled: false, contact: "", risk: "7", requireSecondApprover: false,
-    watchSpec: "", watchPresets: [],
+    autoLeaseMinutes: "", autoLeaseSecondsRaw: 0, watchSpec: "", watchPresets: [],
     govProvider: "", govModelId: "", govCredentialId: "",
   }
   const [form, setForm] = useState<FormState>(emptyForm)
@@ -213,6 +260,8 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
         contact: gov.security_contact_user_id ?? "",
         risk: String(gov.deny_notify_min_risk ?? 7),
         requireSecondApprover: gov.require_second_approver ?? false,
+        autoLeaseMinutes: secondsToLeaseMinutes(gov.auto_lease_seconds),
+        autoLeaseSecondsRaw: gov.auto_lease_seconds ?? 0,
         watchSpec: gov.watch_spec ?? "",
         watchPresets: gov.watch_presets ?? [],
         govProvider: gov.gov_model_provider ?? "",
@@ -241,6 +290,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
     form.contact !== baseline.contact ||
     form.risk !== baseline.risk ||
     form.requireSecondApprover !== baseline.requireSecondApprover ||
+    form.autoLeaseMinutes !== baseline.autoLeaseMinutes ||
     form.watchSpec !== baseline.watchSpec ||
     !sameSet(form.watchPresets, baseline.watchPresets) ||
     form.govProvider !== baseline.govProvider ||
@@ -262,6 +312,30 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
       toast.error("A model id is required when a governance-model provider is set")
       return
     }
+    // Auto-lease (#1373): the server rejects (not clamps) anything outside
+    // {0} ∪ [60s, 30d], so validate here to give an actionable message instead of
+    // a bare 400. Expressed in minutes: 1 minute is the floor, 43200 the cap.
+    //
+    // Only recompute from the minutes field when it was actually EDITED. A TTL the
+    // CLI set to a non-minute-aligned value (e.g. 90s) renders rounded, so
+    // resending the recomputed value on an unrelated save would silently rewrite
+    // it — a config change nobody asked for, on a security control.
+    const autoLeaseEdited = form.autoLeaseMinutes !== baseline.autoLeaseMinutes
+    const autoLeaseSeconds = autoLeaseEdited
+      ? leaseMinutesToSeconds(form.autoLeaseMinutes)
+      : form.autoLeaseSecondsRaw
+    if (autoLeaseSeconds === null) {
+      toast.error("Auto-lease must be a whole number of minutes (0 or empty turns it off)")
+      return
+    }
+    if (autoLeaseSeconds > 0 && autoLeaseSeconds < AUTO_LEASE_MIN_SECONDS) {
+      toast.error("Auto-lease must be at least 1 minute — a shorter lease can lapse inside Keeper's own evaluation")
+      return
+    }
+    if (autoLeaseSeconds > AUTO_LEASE_MAX_SECONDS) {
+      toast.error("Auto-lease must be at most 30 days (43200 minutes)")
+      return
+    }
     setSaving(true)
     try {
       const res = await apiFetch(
@@ -274,6 +348,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
             security_contact_user_id: form.contact,
             deny_notify_min_risk: riskNum,
             require_second_approver: form.requireSecondApprover,
+            auto_lease_seconds: autoLeaseSeconds,
             watch_spec: form.watchSpec,
             watch_presets: form.watchPresets,
             gov_model_provider: form.govProvider,
@@ -306,6 +381,8 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
         contact: body.security_contact_user_id ?? "",
         risk: String(body.deny_notify_min_risk ?? riskNum),
         requireSecondApprover: body.require_second_approver ?? false,
+        autoLeaseMinutes: secondsToLeaseMinutes(body.auto_lease_seconds),
+        autoLeaseSecondsRaw: body.auto_lease_seconds ?? 0,
         watchSpec: body.watch_spec ?? "",
         watchPresets: body.watch_presets ?? [],
         govProvider: body.gov_model_provider ?? "",
@@ -470,6 +547,34 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
           data-testid="keeper-governance-second-approver"
           aria-label="Toggle require a second approver"
         />
+      </SettingsRow>
+
+      {/* Credential-lease auto-issuance (#1373). Empty/0 = off, which is the
+          default: grants stay standing and nothing changes. A value makes every
+          Keeper ALLOW (and every approved agent-proposed credential) re-issue
+          the L3/L4 grant as a lease of that length, refreshed on each approval.
+          Never shortens a longer hand-set --ttl lease. */}
+      <SettingsRow
+        label="Auto-issue credential leases"
+        description="Minutes an L3/L4 credential grant stays valid after each Keeper approval. Empty or 0 keeps grants standing (default). Min 1 minute, max 43200 (30 days). L1/L2 self-service keys are never leased."
+      >
+        <div className="flex items-center gap-1.5">
+          <Input
+            type="number"
+            min={0}
+            max={AUTO_LEASE_MAX_SECONDS / 60}
+            step={1}
+            inputMode="numeric"
+            placeholder="off"
+            value={form.autoLeaseMinutes}
+            onChange={(e) => setForm((f) => ({ ...f, autoLeaseMinutes: e.target.value }))}
+            disabled={!canEdit || saving}
+            className="h-8 w-20 text-xs text-right tabular-nums"
+            aria-label="Credential auto-lease TTL in minutes (0 or empty to disable)"
+            data-testid="keeper-governance-auto-lease"
+          />
+          <span className="text-xs text-muted-foreground">min</span>
+        </div>
       </SettingsRow>
 
       {/* Governance model — which model the credential-access gatekeeper uses.

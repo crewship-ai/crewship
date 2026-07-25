@@ -681,11 +681,17 @@ func startSidecar(
 	mcpServers []MCPServerConfig,
 	logger *slog.Logger,
 ) error {
+	// Field names/tags must match sidecar.Credential — the sidecar unmarshals the
+	// boot payload straight into that type.
 	type sidecarCred struct {
 		ID       string `json:"id"`
 		Provider string `json:"provider"`
 		Token    string `json:"token"`
 		Priority int    `json:"priority"`
+		// LeaseExpiresAt hands the grant's #1373 lease deadline to the CredStore
+		// so a leased provider key stops being served when its TTL lapses,
+		// instead of living as long as the container.
+		LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
 	}
 
 	var sc []sidecarCred
@@ -695,10 +701,11 @@ func startSidecar(
 			continue
 		}
 		sc = append(sc, sidecarCred{
-			ID:       c.ID,
-			Provider: prov,
-			Token:    c.PlainValue,
-			Priority: c.Priority,
+			ID:             c.ID,
+			Provider:       prov,
+			Token:          c.PlainValue,
+			Priority:       c.Priority,
+			LeaseExpiresAt: c.LeaseExpiresAt,
 		})
 	}
 	if len(sc) == 0 {

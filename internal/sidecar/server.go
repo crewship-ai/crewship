@@ -130,6 +130,23 @@ type Server struct {
 	// same sidecar concurrently.
 	peerMemoryEngines   map[string]*memory.Engine
 	peerMemoryEnginesMu sync.Mutex
+	// peerEngineInitGates serializes CONSTRUCTION per slug (slug -> *sync.Mutex).
+	//
+	// peerMemoryEnginesMu deliberately does not cover construction — holding it
+	// across MkdirAll + a SQLite open + a full tier reindex would serialize every
+	// agent's memory operation behind one slow cold start (see
+	// peerMemoryEngineFor). But letting N goroutines construct the SAME slug
+	// concurrently means N of them run memory.New against the SAME SQLite file,
+	// each executing `CREATE VIRTUAL TABLE IF NOT EXISTS … USING fts5` on a fresh
+	// DB. That DDL needs an exclusive lock, so the losers get SQLITE_BUSY and
+	// return an error to their caller — a 500 on a legitimate concurrent first
+	// access. busy_timeout does not save it: the FTS5 creation plus the WAL-mode
+	// switch on a brand-new file is not a plain lock-wait.
+	//
+	// A per-slug gate fixes that without reintroducing the global stall: two
+	// different peers still cold-start in parallel, two requests for the SAME peer
+	// serialize, and only one of them ever runs the DDL.
+	peerEngineInitGates sync.Map
 	// agentMemoryBase / crewMemoryBase are the resolved base paths
 	// the write handler joins relative paths under. Mirrors what's
 	// in cfg.Memory.{BasePath,CrewMemoryPath}, stashed on the Server
@@ -737,9 +754,9 @@ func (s *Server) Start(ctx context.Context) error {
 		}()
 	}
 
-	// Reconcile the in-memory credential snapshot against crewshipd so a
-	// credential revoked after boot stops being served within one interval.
-	// No-op without an IPC config (standalone/tests).
+	// Reconcile the in-memory credential snapshot: evict credentials whose
+	// #1373 lease has lapsed (local, every tick) and drop any crewshipd no
+	// longer lists as live (revocation — needs IPC, fails open).
 	go s.startCredentialReaper(ctx)
 
 	// Connect to MCP servers in the background (don't block startup)

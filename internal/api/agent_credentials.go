@@ -22,6 +22,14 @@ type agentCredentialResponse struct {
 	// an expired grant is refused at credential-injection time (fail-closed).
 	ExpiresAt string `json:"expires_at,omitempty"`
 	Expired   bool   `json:"expired"`
+	// LeaseSource is the provenance of the lease: "manual" (an operator's
+	// ttl_seconds), "keeper_allow" (auto-issued on a Keeper ALLOW) or
+	// "escalation_approve" (auto-issued when a human approved an agent-proposed
+	// credential). Empty for a standing grant and for pre-v165 leases. Without
+	// it an operator sees a grant expiring with no way to tell what set it.
+	LeaseSource string `json:"lease_source,omitempty"`
+	// LeaseIssuedAt is when the lease was minted (RFC3339 UTC), empty when unset.
+	LeaseIssuedAt string `json:"lease_issued_at,omitempty"`
 }
 
 // ListCredentials returns all credentials assigned to the specified agent.
@@ -49,7 +57,7 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 		SELECT ac.id, ac.agent_id, ac.credential_id,
 			COALESCE(c.name, ''), COALESCE(c.type, ''), COALESCE(c.provider, ''), COALESCE(c.status, ''),
 			COALESCE(ac.env_var_name, ''), ac.priority, COALESCE(ac.created_at, ''),
-			COALESCE(ac.expires_at, '')
+			COALESCE(ac.expires_at, ''), COALESCE(ac.lease_source, ''), COALESCE(ac.lease_issued_at, '')
 		FROM agent_credentials ac
 		JOIN credentials c ON c.id = ac.credential_id
 		WHERE ac.agent_id = ?
@@ -66,7 +74,8 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 		var c agentCredentialResponse
 		if err := rows.Scan(&c.ID, &c.AgentID, &c.CredentialID, &c.CredName,
 			&c.CredType, &c.CredProvider, &c.CredStatus,
-			&c.EnvVarName, &c.Priority, &c.CreatedAt, &c.ExpiresAt); err != nil {
+			&c.EnvVarName, &c.Priority, &c.CreatedAt, &c.ExpiresAt,
+			&c.LeaseSource, &c.LeaseIssuedAt); err != nil {
 			replyInternalError(w, h.logger, "scan agent credential", err)
 			return
 		}
@@ -157,19 +166,24 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 	id := generateCUID()
 
 	// NULL expires_at = standing grant; a positive TTL makes it a short-lived
-	// lease refused at injection time once it lapses (#1373).
-	var expiresAt sql.NullString
+	// lease refused at injection time once it lapses (#1373). An explicitly-set
+	// TTL is recorded with lease_source 'manual' so it is distinguishable from an
+	// auto-issued one — and so issueCredentialLease's "never shorten a longer
+	// lease" rule has provenance to preserve.
+	var expiresAt, leaseSource, leaseIssuedAt sql.NullString
 	if req.TTLSeconds > 0 {
 		expiresAt = sql.NullString{
 			String: now.Add(time.Duration(req.TTLSeconds) * time.Second).Format(time.RFC3339),
 			Valid:  true,
 		}
+		leaseSource = sql.NullString{String: leaseSourceManual, Valid: true}
+		leaseIssuedAt = sql.NullString{String: nowStr, Valid: true}
 	}
 
 	_, err = h.db.ExecContext(r.Context(),
-		`INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, created_at, expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, agentID, req.CredentialID, req.EnvVarName, req.Priority, nowStr, expiresAt)
+		`INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, created_at, expires_at, lease_source, lease_issued_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, agentID, req.CredentialID, req.EnvVarName, req.Priority, nowStr, expiresAt, leaseSource, leaseIssuedAt)
 	if err != nil {
 		h.logger.Error("add agent credential", "error", err)
 		replyError(w, http.StatusConflict, "Credential already assigned to agent")

@@ -26,6 +26,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
@@ -553,6 +554,28 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "credential not found"})
 		return
 	}
+
+	// #1373: mint the lease on the ALLOW, before the secret is fetched and
+	// injected. Placed AFTER the re-validation above so we only ever lease a
+	// grant that is genuinely still live, and BEFORE the injection so the audit
+	// order reads "lease issued → secret injected" rather than the reverse.
+	//
+	// Safe against self-denial: issueCredentialLease only ever writes an expiry
+	// in the future (and never shortens a longer existing lease), so the request
+	// currently being served cannot be invalidated by its own lease.
+	execGov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
+	issueCredentialLease(r.Context(), h.db, h.logger, h.journal, leaseIssueInput{
+		WorkspaceID:    body.WorkspaceID,
+		CrewID:         body.RequestingCrewID,
+		AgentID:        body.RequestingAgentID,
+		AgentName:      agentName,
+		CredentialID:   body.CredentialID,
+		CredentialName: credName,
+		SecurityLevel:  secLevel,
+		Source:         leaseSourceKeeperAllow,
+		RequestID:      reqID,
+		TTLSeconds:     execGov.AutoLeaseSeconds,
+	})
 
 	plainValue, found := h.secrets.Get(body.CredentialID)
 	if !found {

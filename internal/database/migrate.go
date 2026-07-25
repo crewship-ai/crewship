@@ -1795,10 +1795,14 @@ END;
 	// verdict (#1403). Sits above the engine stack (v156-159) and this
 	// branch's v160-163. See migrate_consts_v164_run_verdict_flag.go.
 	{version: 164, name: "run_verdict_flag", sql: migrationRunVerdictFlag},
-	// v165 is reserved for the credential-lease-mint work (#1373) landing in
-	// parallel; this branch takes v166 so the two merge in ascending order
-	// without a renumber. See migrate_consts_v166_keeper_append_only.go.
-	//
+	// v165: lease provenance on agent_credentials (lease_source /
+	// lease_issued_at / lease_request_id) plus the per-workspace
+	// keeper_governance_settings.auto_lease_seconds opt-in that makes a Keeper
+	// ALLOW / escalation approve auto-issue a short-lived lease instead of
+	// leaving a standing grant (#1373, second increment — v149 added the
+	// expires_at the enforcement paths already gate on).
+	// See migrate_consts_v165_credential_lease_mint.go.
+	{version: 165, name: "credential_lease_mint", sql: migrationCredentialLeaseMint},
 	// v166: the append-only halves of the tamper-evident audit trail (#1369).
 	// keeper_request_events records every keeper decision TRANSITION (the
 	// operational keeper_requests row is UPDATEd in place, destroying prior

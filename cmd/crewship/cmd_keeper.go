@@ -38,7 +38,8 @@ Examples:
   crewship keeper contact admin@example.com
   crewship keeper contact --clear
   crewship keeper threshold 8
-  crewship keeper second-approver enable`,
+  crewship keeper second-approver enable
+  crewship keeper auto-lease set 15m`,
 }
 
 // keeperGovernance mirrors the GET/PUT /api/v1/admin/keeper/governance
@@ -56,6 +57,11 @@ type keeperGovernance struct {
 	// is not exempt. Rides on this same governance row/endpoint but is a
 	// distinct concern from the behavioral watchdog above it.
 	RequireSecondApprover bool `json:"require_second_approver"`
+	// AutoLeaseSeconds is the credential-lease auto-issuance TTL (issue #1373):
+	// 0 = off (grants stay standing), positive = a Keeper ALLOW / escalation
+	// approve re-issues an L3/L4 grant as a lease of that length. Managed by
+	// `crewship keeper auto-lease`.
+	AutoLeaseSeconds int `json:"auto_lease_seconds"`
 	// Warning is a non-blocking advisory the server returns on a mutation —
 	// e.g. enabling second-approver with fewer than 2 eligible approvers.
 	Warning string `json:"warning,omitempty"`
@@ -139,6 +145,7 @@ func printKeeperGovernance(gov keeperGovernance) {
 	fmt.Printf("  Contact:      %s\n", contact)
 	fmt.Printf("  DENY-notify:  risk >= %d\n", gov.DenyNotifyMinRisk)
 	fmt.Printf("  2nd approver: %s\n", secondApprover)
+	fmt.Printf("  Auto-lease:   %s\n", formatAutoLease(gov.AutoLeaseSeconds))
 }
 
 var keeperStatusCmd = &cobra.Command{

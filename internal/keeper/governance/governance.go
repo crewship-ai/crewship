@@ -24,6 +24,18 @@ import (
 // decision is snitched to the inbox when a workspace has no explicit setting.
 const DefaultDenyNotifyMinRisk = 7
 
+// MaxAutoLeaseSeconds caps the auto-issued credential lease at 30 days,
+// mirroring the manual `credential assign --ttl` cap in internal/api. A lease is
+// a session-scoped construct; a multi-month "lease" is a standing grant in
+// disguise and defeats the ephemerality guarantee the setting exists to provide.
+const MaxAutoLeaseSeconds = 30 * 24 * 60 * 60
+
+// MinAutoLeaseSeconds is the floor for a configured auto-lease. Below a minute
+// the lease lapses inside a single gatekeeper round-trip (the evaluator is an
+// LLM call) and every ALLOW would be immediately followed by a refusal at the
+// injection point — a self-inflicted outage dressed up as a security control.
+const MinAutoLeaseSeconds = 60
+
 // Settings is the per-workspace watchdog configuration.
 type Settings struct {
 	// Enabled gates the behavioral watchdog layer (behavior monitoring,
@@ -61,6 +73,19 @@ type Settings struct {
 	GovModelProvider string `json:"gov_model_provider"`
 	// GovModelID is the wire model identifier passed to the chosen provider.
 	GovModelID string `json:"gov_model_id"`
+	// AutoLeaseSeconds is the credential-lease auto-issuance TTL (#1373).
+	// 0 (the default) means auto-issuance is OFF and a grant stays standing
+	// exactly as before. A positive value makes a Keeper ALLOW — and the
+	// approval of an agent-proposed CREDENTIAL escalation — re-issue the
+	// requesting agent's grant as a short-lived LEASE of that many seconds,
+	// so credential access decays instead of persisting. Only L3/L4
+	// (security_level >= 3) credentials are auto-leased: L1/L2 are the
+	// boot-delivered self-service tier whose whole point is that the agent
+	// holds them for the run. Clamped to MaxAutoLeaseSeconds on write.
+	// Enforced in internal/api (issueCredentialLease + the delivery-path
+	// gates), not here — this package only resolves the setting.
+	AutoLeaseSeconds int `json:"auto_lease_seconds"`
+
 	// GovModelCredentialID optionally points the provider at a vault credential
 	// (ENDPOINT_URL / API_KEY) for its endpoint/key. Empty = no credential.
 	// Revoke-safety (§4.4): a revoke is a soft delete (credentials.deleted_at),
@@ -84,10 +109,10 @@ func Get(ctx context.Context, db *sql.DB, workspaceID string) (Settings, bool, e
 	)
 	err := db.QueryRowContext(ctx, `
 		SELECT enabled, security_contact_user_id, deny_notify_min_risk, watch_spec, watch_presets, require_second_approver,
-		       gov_model_provider, gov_model_id, gov_model_credential_id
+		       gov_model_provider, gov_model_id, gov_model_credential_id, auto_lease_seconds
 		FROM keeper_governance_settings WHERE workspace_id = ?`, workspaceID).
 		Scan(&enabled, &contact, &s.DenyNotifyMinRisk, &s.WatchSpec, &presets, &secondApprov,
-			&s.GovModelProvider, &s.GovModelID, &govCredID)
+			&s.GovModelProvider, &s.GovModelID, &govCredID, &s.AutoLeaseSeconds)
 	if err == sql.ErrNoRows {
 		return Settings{DenyNotifyMinRisk: DefaultDenyNotifyMinRisk}, false, nil
 	}
@@ -115,6 +140,21 @@ func Upsert(ctx context.Context, db *sql.DB, workspaceID string, s Settings, upd
 	if s.DenyNotifyMinRisk > 10 {
 		s.DenyNotifyMinRisk = 10
 	}
+	// Clamp the auto-lease TTL rather than rejecting it: Upsert is a partial-
+	// update sink shared by the CLI, the admin API and the settings UI, and a
+	// nonsensical value there must degrade to a safe one, never to an error the
+	// caller has to special-case. Negative → 0 (off). A positive value below the
+	// floor is raised to it so an operator typing `--ttl 5s` gets a usable lease
+	// instead of one that lapses before the gatekeeper answers.
+	if s.AutoLeaseSeconds < 0 {
+		s.AutoLeaseSeconds = 0
+	}
+	if s.AutoLeaseSeconds > 0 && s.AutoLeaseSeconds < MinAutoLeaseSeconds {
+		s.AutoLeaseSeconds = MinAutoLeaseSeconds
+	}
+	if s.AutoLeaseSeconds > MaxAutoLeaseSeconds {
+		s.AutoLeaseSeconds = MaxAutoLeaseSeconds
+	}
 	// Marshal presets to a JSON array; empty → "" for a stable default that
 	// round-trips back to a nil slice in Get.
 	presets := ""
@@ -129,8 +169,8 @@ func Upsert(ctx context.Context, db *sql.DB, workspaceID string, s Settings, upd
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO keeper_governance_settings
 			(workspace_id, enabled, security_contact_user_id, deny_notify_min_risk, watch_spec, watch_presets, require_second_approver,
-			 gov_model_provider, gov_model_id, gov_model_credential_id, updated_by, created_at, updated_at)
-		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?)
+			 gov_model_provider, gov_model_id, gov_model_credential_id, auto_lease_seconds, updated_by, created_at, updated_at)
+		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
 			enabled = excluded.enabled,
 			security_contact_user_id = excluded.security_contact_user_id,
@@ -141,11 +181,12 @@ func Upsert(ctx context.Context, db *sql.DB, workspaceID string, s Settings, upd
 			gov_model_provider = excluded.gov_model_provider,
 			gov_model_id = excluded.gov_model_id,
 			gov_model_credential_id = excluded.gov_model_credential_id,
+			auto_lease_seconds = excluded.auto_lease_seconds,
 			updated_by = excluded.updated_by,
 			updated_at = excluded.updated_at`,
 		workspaceID, boolToInt(s.Enabled), s.SecurityContactUserID, s.DenyNotifyMinRisk,
 		s.WatchSpec, presets, boolToInt(s.RequireSecondApprover),
-		s.GovModelProvider, s.GovModelID, s.GovModelCredentialID,
+		s.GovModelProvider, s.GovModelID, s.GovModelCredentialID, s.AutoLeaseSeconds,
 		updatedBy, now, now)
 	if err != nil {
 		return fmt.Errorf("governance: upsert: %w", err)

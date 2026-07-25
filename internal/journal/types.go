@@ -299,6 +299,14 @@ const (
 	// Anthropic credentials in the workspace, so the agent will need a manual
 	// assignment before it can chat. Most common cause of "silent run" reports.
 	EntryCredentialAutoAssignEmpty EntryType = "credential.auto_assign_empty"
+	// EntryCredentialLeaseIssued (#1373): an agent's credential grant was
+	// (re-)issued as a short-lived LEASE rather than left standing — minted on a
+	// Keeper ALLOW or on the approval of an agent-proposed CREDENTIAL escalation
+	// when the workspace has keeper_governance_settings.auto_lease_seconds set.
+	// Payload carries the source, the resulting expiry and the authorising
+	// request id. Not in the compactor's allowlist, so it is never rolled up:
+	// this is the record that explains why a credential stopped working.
+	EntryCredentialLeaseIssued EntryType = "credential.lease_issued"
 
 	// Skills — registry-level + per-agent assignment lifecycle. Skill rows
 	// are global (no workspace_id column), but every event carries the
