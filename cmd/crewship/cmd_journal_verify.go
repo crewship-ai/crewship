@@ -61,9 +61,13 @@ Examples:
 				ID     string `json:"id"`
 				Kind   string `json:"kind"`
 				Reason string `json:"reason"`
-			} `json:"breaks"`
-			BreakCount      int  `json:"break_count"`
-			BreaksTruncated bool `json:"breaks_truncated"`
+			} `json:"breaks,omitempty"`
+			// omitempty so an OLDER server — which sends none of these — yields
+			// byte-identical JSON to before. Without it the CLI would assert
+			// "break_count: 0", i.e. "no further breaks", when the truth is
+			// "this server never told us".
+			BreakCount      int  `json:"break_count,omitempty"`
+			BreaksTruncated bool `json:"breaks_truncated,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &res); err != nil {
 			return err
