@@ -84,13 +84,19 @@ Examples:
 			}
 			// NOT "verified N entries before the break" any more: the walk no
 			// longer stops at the first one, so Count is every entry examined.
-			// Saying "before" would understate what was checked and hide that
-			// there may be more than one break.
-			n := res.BreakCount
-			if n == 0 {
-				n = 1 // older server: only the single-break fields are populated
+			//
+			// And the unit is CHECKS, not entries: one row runs both a content
+			// and a priority check, so a single bad entry can contribute two
+			// breaks. Zero means either a STRUCTURAL break — a sequence gap or
+			// disorder, which halts before any per-row check is recorded — or an
+			// older server that does not send the field. Neither justifies
+			// inventing a count of 1.
+			if res.BreakCount > 0 {
+				fmt.Printf("Journal chain BROKEN — %d integrity check(s) failed across %d entries examined.\n",
+					res.BreakCount, res.Count)
+			} else {
+				fmt.Printf("Journal chain BROKEN after examining %d entries.\n", res.Count)
 			}
-			fmt.Printf("Journal chain BROKEN — %d of %d entries failed an integrity check.\n", n, res.Count)
 			fmt.Printf("First break at seq %d (entry %s): %s\n", res.BrokenSeq, res.BrokenID, res.Reason)
 			if len(res.Breaks) > 1 {
 				shown := len(res.Breaks)
