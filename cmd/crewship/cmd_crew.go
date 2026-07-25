@@ -148,7 +148,11 @@ var crewGetCmd = &cobra.Command{
 			TTLHours       *int     `json:"container_ttl_hours"`
 			NetworkMode    string   `json:"network_mode"`
 			AllowedDomains []string `json:"allowed_domains"`
-			CreatedAt      string   `json:"created_at"`
+			// #1377: the API has always returned this; the CLI projection
+			// dropped it, so `crew get` couldn't answer "is private egress on?"
+			// — the one question the flag exists to answer.
+			AllowPrivateEndpoints bool   `json:"allow_private_endpoints"`
+			CreatedAt             string `json:"created_at"`
 		}
 		if err := cli.ReadJSON(resp, &crew); err != nil {
 			return err
@@ -171,6 +175,13 @@ var crewGetCmd = &cobra.Command{
 		if crew.TTLHours != nil && *crew.TTLHours > 0 {
 			ttlStr = fmt.Sprintf("%d hours", *crew.TTLHours)
 		}
+		// Name the instance ceiling on the "on" line: the crew flag alone does
+		// nothing without CREWSHIP_ALLOW_PRIVATE_ENDPOINTS, and that AND is the
+		// most common "I enabled it and it's still blocked" surprise.
+		privateEndpointsStr := "blocked (RFC1918 / loopback / link-local)"
+		if crew.AllowPrivateEndpoints {
+			privateEndpointsStr = "allowed (also needs CREWSHIP_ALLOW_PRIVATE_ENDPOINTS on the server)"
+		}
 		pairs := [][]string{
 			{"Name", crew.Name},
 			{"Slug", crew.Slug},
@@ -181,6 +192,7 @@ var crewGetCmd = &cobra.Command{
 			{"TTL", ttlStr},
 			{"Network Mode", networkMode},
 			{"Allowed Domains", domainsStr},
+			{"Private Endpoints", privateEndpointsStr},
 			{"Created", crew.CreatedAt},
 		}
 		return f.AutoDetail(crew, pairs)

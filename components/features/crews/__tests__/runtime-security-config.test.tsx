@@ -104,6 +104,36 @@ describe("<RuntimeSecurityConfig>", () => {
     expect(screen.getByText(/not allowed/i)).toBeInTheDocument()
   })
 
+  // #1380 tail — the backend save path (Config.ValidateSecurity) rejects every
+  // cap except NET_BIND_SERVICE with a 400. The picker must not offer a fresh
+  // selection the server is certain to refuse.
+  it("locks capabilities the save path would reject", () => {
+    renderCfg()
+    expect(screen.getByRole("checkbox", { name: /^NET_BIND_SERVICE$/i })).toBeEnabled()
+    expect(screen.getByRole("checkbox", { name: /^SYS_ADMIN$/i })).toBeDisabled()
+    expect(screen.getAllByText(/privileged only/i).length).toBeGreaterThan(0)
+  })
+
+  it("keeps a legacy stored cap unlockable so it can be removed", () => {
+    // Saved before the gate landed: still checked, still interactive, and
+    // called out as no-longer-saveable.
+    const { onChange } = renderCfg({ capAdd: ["SYS_ADMIN"] })
+    const box = screen.getByRole("checkbox", { name: /^SYS_ADMIN$/i })
+    expect(box).toBeEnabled()
+    expect(screen.getByText(/no longer accepted/i)).toBeInTheDocument()
+    fireEvent.click(box)
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ capAdd: [] }))
+  })
+
+  it("preserves an unmodeled capability across a toggle", () => {
+    // BPF isn't in KNOWN_CAPS; a plain filter would silently drop it.
+    const { onChange } = renderCfg({ capAdd: ["BPF"] })
+    fireEvent.click(screen.getByRole("checkbox", { name: /^NET_BIND_SERVICE$/i }))
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ capAdd: ["NET_BIND_SERVICE", "BPF"] }),
+    )
+  })
+
   it("edits the start hook (init script)", () => {
     const { onChange } = renderCfg()
     fireEvent.change(screen.getByLabelText(/start hook/i), {

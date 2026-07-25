@@ -46,6 +46,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { CLI_ADAPTERS, CLI_ADAPTER_KEYS } from "@/lib/cli-adapters"
 import { AvatarPicker } from "@/components/avatar-picker"
 import { AvatarOverrideBadge } from "@/components/features/agents/settings/avatar-override-badge"
+import { WebhookSecretCard } from "@/components/features/agents/settings/webhook-secret-card"
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 
@@ -559,6 +560,13 @@ export function SettingsPageClient() {
                 provider override is the main escape hatch — change it only if you really know what
                 you&apos;re doing.
               </p>
+              {/* #1378 — rotation was CLI-only (cmd_agent_webhook.go); this is
+                  the missing UI control for an endpoint that already exists. */}
+              {agentId && (
+                <div className="border-t pt-3">
+                  <WebhookSecretCard agentId={agentId} />
+                </div>
+              )}
             </div>
           )}
         </SectionCard>

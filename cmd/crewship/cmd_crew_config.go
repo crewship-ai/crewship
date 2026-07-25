@@ -22,7 +22,15 @@ Examples:
   crewship crew config my-crew --mise ./mise.json
   crewship crew config my-crew --runtime-image debian:bookworm-slim
   crewship crew config my-crew --export
-  crewship crew config my-crew --clear`,
+  crewship crew config my-crew --clear
+
+Container-privilege controls (#1380) merge onto the stored devcontainer_config
+and are validated server-side on save:
+  crewship crew config my-crew --privileged          # needs allow_privileged_credentials
+  crewship crew config my-crew --cap-add NET_BIND_SERVICE
+  crewship crew config my-crew --init                # docker --init (PID 1 reaper)
+  crewship crew config my-crew --init-hook ./init.sh # runs on every container start
+  crewship crew config my-crew --init-hook ""        # remove the start hook`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -48,8 +56,10 @@ Examples:
 		privileged, _ := cmd.Flags().GetBool("privileged")
 		initFlag, _ := cmd.Flags().GetBool("init")
 		capAdd, _ := cmd.Flags().GetStringSlice("cap-add")
+		initHookPath, _ := cmd.Flags().GetString("init-hook")
 		secChanged := cmd.Flags().Changed("privileged") ||
-			cmd.Flags().Changed("init") || cmd.Flags().Changed("cap-add")
+			cmd.Flags().Changed("init") || cmd.Flags().Changed("cap-add") ||
+			cmd.Flags().Changed("init-hook")
 
 		// Mutual exclusion: show / export / clear / set / security-set.
 		modeCount := 0
@@ -69,10 +79,10 @@ Examples:
 			modeCount++
 		}
 		if modeCount == 0 {
-			return fmt.Errorf("specify one of --show, --export, --clear, a set flag (--devcontainer, --mise, --runtime-image), or a security flag (--privileged, --cap-add, --init)")
+			return fmt.Errorf("specify one of --show, --export, --clear, a set flag (--devcontainer, --mise, --runtime-image), or a security flag (--privileged, --cap-add, --init, --init-hook)")
 		}
 		if modeCount > 1 {
-			return fmt.Errorf("--show, --export, --clear, set flags (--devcontainer/--mise/--runtime-image), and security flags (--privileged/--cap-add/--init) are mutually exclusive")
+			return fmt.Errorf("--show, --export, --clear, set flags (--devcontainer/--mise/--runtime-image), and security flags (--privileged/--cap-add/--init/--init-hook) are mutually exclusive")
 		}
 
 		client := newAPIClient()
@@ -89,10 +99,23 @@ Examples:
 		case clear:
 			return clearCrewConfig(client, crewID)
 		case secChanged:
+			// --init-hook takes a script FILE (same shape as --devcontainer /
+			// --mise); an explicitly empty value removes the hook. Read it here
+			// so a missing file fails before any network call.
+			initHook := ""
+			setHook := cmd.Flags().Changed("init-hook")
+			if setHook && initHookPath != "" {
+				data, err := readConfigFile(initHookPath)
+				if err != nil {
+					return err
+				}
+				initHook = strings.TrimRight(data, "\n")
+			}
 			return setCrewSecurity(client, crewID,
 				cmd.Flags().Changed("privileged"), privileged,
 				cmd.Flags().Changed("init"), initFlag,
-				cmd.Flags().Changed("cap-add"), capAdd)
+				cmd.Flags().Changed("cap-add"), capAdd,
+				setHook, initHook)
 		default:
 			return setCrewConfig(client, crewID, devcontainerPath, misePath, runtimeImage)
 		}
@@ -282,14 +305,15 @@ func setCrewConfig(client *cli.Client, crewID, devcontainerPath, misePath, runti
 }
 
 // setCrewSecurity merges the #1380 container-privilege knobs (privileged / init
-// / capAdd) onto the crew's stored devcontainer_config and PATCHes it back. The
-// keys are top-level devcontainer.json fields the runtime honours; the server
-// re-validates them on write (privileged requires the workspace
-// allow_privileged_credentials flag → 403; capAdd is bounded to the
+// / capAdd / the start hook) onto the crew's stored devcontainer_config and
+// PATCHes it back. The keys are top-level devcontainer.json fields the runtime
+// honours; the server re-validates them on write (privileged requires the
+// workspace allow_privileged_credentials flag → 403; capAdd is bounded to the
 // NET_BIND_SERVICE allowlist → 400). We GET-merge rather than replace so image
 // / features / mise stay intact.
 func setCrewSecurity(client *cli.Client, crewID string,
-	setPriv, privileged, setInit, initFlag, setCap bool, capAdd []string) error {
+	setPriv, privileged, setInit, initFlag, setCap bool, capAdd []string,
+	setHook bool, initHook string) error {
 	info, err := fetchCrewInfo(client, crewID)
 	if err != nil {
 		return err
@@ -328,6 +352,16 @@ func setCrewSecurity(client *cli.Client, crewID string,
 				norm = append(norm, normalizeCapCLI(c))
 			}
 			cfg["capAdd"] = norm
+		}
+	}
+	if setHook {
+		// The hook auto-executes on every container start. Removing it is a key
+		// delete, not an empty string — devcontainer treats "" as a
+		// present-but-empty command and it would survive the round-trip.
+		if initHook == "" {
+			delete(cfg, "postStartCommand")
+		} else {
+			cfg["postStartCommand"] = initHook
 		}
 	}
 
@@ -383,6 +417,7 @@ func init() {
 	crewConfigCmd.Flags().Bool("privileged", false, "Run the crew container privileged (server-validated: requires the workspace allow_privileged_credentials flag)")
 	crewConfigCmd.Flags().Bool("init", false, "Run a docker --init reaper (PID 1) inside the crew container")
 	crewConfigCmd.Flags().StringSlice("cap-add", nil, "Linux capabilities to add (server-validated against the NET_BIND_SERVICE allowlist)")
+	crewConfigCmd.Flags().String("init-hook", "", "Path to a start-hook script run on every container start (postStartCommand); pass an empty value to remove it")
 
 	crewCmd.AddCommand(crewConfigCmd)
 }

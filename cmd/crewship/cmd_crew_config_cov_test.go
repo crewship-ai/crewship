@@ -108,8 +108,9 @@ func covResetCrewConfigFlags(t *testing.T) {
 	// #1380 security dispatch, which keys off Changed(), would leak across
 	// tests. Clear the Changed bit for every flag we touch to keep tests
 	// hermetic regardless of run order.
+	covSetFlagCli5(t, crewConfigCmd, "init-hook", "")
 	for _, name := range []string{"show", "export", "clear", "devcontainer", "mise",
-		"runtime-image", "privileged", "init", "cap-add"} {
+		"runtime-image", "privileged", "init", "cap-add", "init-hook"} {
 		if f := crewConfigCmd.Flags().Lookup(name); f != nil {
 			f.Changed = false
 		}
@@ -315,6 +316,86 @@ func TestCrewConfigRunE_SetSecurityMergesConfig(t *testing.T) {
 	caps, _ := sent["capAdd"].([]any)
 	if len(caps) != 1 || caps[0] != "NET_BIND_SERVICE" {
 		t.Errorf("capAdd = %v, want [NET_BIND_SERVICE] normalized", sent["capAdd"])
+	}
+}
+
+// #1380 tail: --init-hook is the last raw-JSON-only privilege control. It reads
+// a script FILE (like --devcontainer/--mise) and lands as postStartCommand, the
+// key the runtime auto-executes on every container start.
+func TestCrewConfigRunE_SetInitHookFromFile(t *testing.T) {
+	stub := covSetupCli5(t)
+	covResetCrewConfigFlags(t)
+	stub.OnGet("/api/v1/crews/"+covCrewIDCli5, clitest.JSONResponse(200, map[string]any{
+		"id":                  covCrewIDCli5,
+		"name":                "Backend",
+		"slug":                "backend",
+		"devcontainer_config": `{"image":"debian:bookworm-slim","features":{"x":{}}}`,
+	}))
+	stub.OnPatch("/api/v1/crews/"+covCrewIDCli5, clitest.JSONResponse(200, map[string]any{"ok": true}))
+
+	hook := filepath.Join(t.TempDir(), "init.sh")
+	if err := os.WriteFile(hook, []byte("npm ci\n./scripts/warm-cache.sh\n"), 0o600); err != nil {
+		t.Fatalf("write hook: %v", err)
+	}
+	covSetFlagCli5(t, crewConfigCmd, "init-hook", hook)
+
+	var err error
+	covCaptureAll(t, func() { err = crewConfigCmd.RunE(crewConfigCmd, []string{covCrewIDCli5}) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	var body map[string]string
+	clitest.MustDecodeJSONBody(stub.CallsFor("PATCH", "/api/v1/crews/"+covCrewIDCli5)[0].Body, &body)
+	var sent map[string]any
+	if jsonErr := json.Unmarshal([]byte(body["devcontainer_config"]), &sent); jsonErr != nil {
+		t.Fatalf("patched config not JSON: %v", jsonErr)
+	}
+	if sent["image"] != "debian:bookworm-slim" {
+		t.Errorf("image clobbered: %v", sent["image"])
+	}
+	if got := sent["postStartCommand"]; got != "npm ci\n./scripts/warm-cache.sh" {
+		t.Errorf("postStartCommand = %q, want the file contents trimmed", got)
+	}
+}
+
+// An explicitly empty --init-hook is the documented "remove the hook" form —
+// it must delete the key, not store "" (which would round-trip as a hook).
+func TestCrewConfigRunE_ClearInitHook(t *testing.T) {
+	stub := covSetupCli5(t)
+	covResetCrewConfigFlags(t)
+	stub.OnGet("/api/v1/crews/"+covCrewIDCli5, clitest.JSONResponse(200, map[string]any{
+		"id":                  covCrewIDCli5,
+		"name":                "Backend",
+		"slug":                "backend",
+		"devcontainer_config": `{"image":"debian:bookworm-slim","postStartCommand":"echo hi"}`,
+	}))
+	stub.OnPatch("/api/v1/crews/"+covCrewIDCli5, clitest.JSONResponse(200, map[string]any{"ok": true}))
+	covSetFlagCli5(t, crewConfigCmd, "init-hook", "")
+
+	var err error
+	covCaptureAll(t, func() { err = crewConfigCmd.RunE(crewConfigCmd, []string{covCrewIDCli5}) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	var body map[string]string
+	clitest.MustDecodeJSONBody(stub.CallsFor("PATCH", "/api/v1/crews/"+covCrewIDCli5)[0].Body, &body)
+	var sent map[string]any
+	if jsonErr := json.Unmarshal([]byte(body["devcontainer_config"]), &sent); jsonErr != nil {
+		t.Fatalf("patched config not JSON: %v", jsonErr)
+	}
+	if _, present := sent["postStartCommand"]; present {
+		t.Errorf("postStartCommand should be removed, got %v", sent["postStartCommand"])
+	}
+}
+
+func TestCrewConfigRunE_InitHookMissingFile(t *testing.T) {
+	covSetupCli5(t)
+	covResetCrewConfigFlags(t)
+	covSetFlagCli5(t, crewConfigCmd, "init-hook", filepath.Join(t.TempDir(), "nope.sh"))
+
+	err := crewConfigCmd.RunE(crewConfigCmd, []string{covCrewIDCli5})
+	if err == nil || !strings.Contains(err.Error(), "file not found") {
+		t.Errorf("expected file-not-found; got %v", err)
 	}
 }
 

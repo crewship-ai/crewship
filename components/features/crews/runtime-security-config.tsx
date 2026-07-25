@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils"
 import {
   KNOWN_CAPS,
   isAllowedMountSource,
+  isServerGrantableCap,
   type MountEntry,
 } from "./runtime-config-data"
 
@@ -51,12 +52,26 @@ export function RuntimeSecurityConfig({
 
   const capSet = useMemo(() => new Set(value.capAdd), [value.capAdd])
 
+  // Caps stored on the crew that this UI has no row for. Kept aside so a
+  // toggle doesn't silently drop an operator's hand-written capability the way
+  // a plain KNOWN_CAPS filter would.
+  const unknownCaps = useMemo(
+    () => value.capAdd.filter((c) => !KNOWN_CAPS.some((k) => k.name === c)),
+    [value.capAdd],
+  )
+
   function toggleCap(name: string) {
     const next = new Set(capSet)
     if (next.has(name)) next.delete(name)
     else next.add(name)
-    // Preserve KNOWN_CAPS declaration order for a stable, diff-friendly JSON.
-    patch({ capAdd: KNOWN_CAPS.filter((c) => next.has(c.name)).map((c) => c.name) })
+    // Preserve KNOWN_CAPS declaration order for a stable, diff-friendly JSON,
+    // then re-append anything we don't model.
+    patch({
+      capAdd: [
+        ...KNOWN_CAPS.filter((c) => next.has(c.name)).map((c) => c.name),
+        ...unknownCaps,
+      ],
+    })
   }
 
   function updateMount(i: number, m: Partial<MountEntry>) {
@@ -154,39 +169,60 @@ export function RuntimeSecurityConfig({
           <Label className="text-xs font-medium">Added Linux capabilities</Label>
           <p className="text-[11px] text-muted-foreground">
             Re-add a single capability instead of going privileged. Only{" "}
-            <code>NET_BIND_SERVICE</code> is auto-allowed for community features;
-            the rest are operator-only escape hatches.
+            <code>NET_BIND_SERVICE</code> can be granted directly — the save path
+            rejects anything broader (<code>ValidateSecurity</code>), because a
+            per-cap grant of e.g. <code>SYS_ADMIN</code> is a bigger escalation than
+            the privileged flag it would bypass. Use privileged mode for those.
           </p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 rounded-md border border-border/40 p-2">
           {KNOWN_CAPS.map((cap) => {
             const checked = capSet.has(cap.name)
+            const grantable = isServerGrantableCap(cap.name)
+            // A non-grantable cap stays interactive only while it's already set:
+            // that's a legacy config saved before the gate landed, and the
+            // operator needs to be able to UNcheck it. Otherwise it's inert, so
+            // nobody builds a config the server is certain to refuse.
+            const locked = !grantable && !checked
             return (
               <label
                 key={cap.name}
                 className={cn(
-                  "flex items-start gap-2 rounded-md px-2 py-1.5 text-xs cursor-pointer hover:bg-accent/30",
+                  "flex items-start gap-2 rounded-md px-2 py-1.5 text-xs",
+                  locked ? "opacity-55 cursor-not-allowed" : "cursor-pointer hover:bg-accent/30",
                   checked && "bg-accent/20",
                 )}
               >
                 <Checkbox
                   checked={checked}
+                  disabled={locked}
                   onCheckedChange={() => toggleCap(cap.name)}
                   aria-label={cap.name}
                   className="mt-0.5"
                 />
                 <span className="min-w-0">
-                  <span className="font-mono font-medium flex items-center gap-1">
+                  <span className="font-mono font-medium flex items-center gap-1 flex-wrap">
                     {cap.name}
                     {cap.danger && (
                       <span className="text-[9px] px-1 rounded bg-destructive/15 text-destructive">
                         high-risk
                       </span>
                     )}
+                    {!grantable && (
+                      <span className="text-[9px] px-1 rounded bg-muted text-muted-foreground">
+                        privileged only
+                      </span>
+                    )}
                   </span>
                   <span className="block text-[10px] text-muted-foreground">
                     {cap.description}
                   </span>
+                  {!grantable && checked && (
+                    <span className="block text-[10px] text-destructive">
+                      Stored on this crew but no longer accepted — saving with it set
+                      is rejected. Uncheck it, or switch to privileged mode.
+                    </span>
+                  )}
                 </span>
               </label>
             )

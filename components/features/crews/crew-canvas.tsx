@@ -9,6 +9,7 @@ import { CrewIconPickerDialog } from "@/components/features/crews/crew-icon-pick
 import { apiFetch } from "@/lib/api-fetch"
 
 import { ProvisioningBanner } from "./crew-canvas-banner"
+import { CrewPrivilegedBadge } from "./crew-privileged-badge"
 import {
   CanvasShell,
   CanvasTabs,
@@ -257,6 +258,9 @@ export function CrewCanvas({
             <span className="text-[11px] flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-zinc-800 text-foreground/80 border border-white/10">
               Crew
             </span>
+            {/* #1380 — surface the effective isolation posture on the surface
+                operators actually open, not only inside the Security tab. */}
+            <CrewPrivilegedBadge devcontainerConfig={crew.devcontainer_config} />
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
             <code className="text-foreground/80 text-xs px-1.5 py-0.5 rounded bg-zinc-900 border border-white/8">
