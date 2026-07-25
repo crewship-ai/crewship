@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync"
 
 	"github.com/crewship-ai/crewship/internal/memory"
 )
@@ -459,6 +460,26 @@ func (s *Server) peerMemoryEngineFor(ctx context.Context, slug string) (engine *
 	}
 	s.peerMemoryEnginesMu.Unlock()
 
+	// Serialize construction for THIS slug (see peerEngineInitGates). Without
+	// this, concurrent first accesses to the same peer each run memory.New against
+	// the same fresh SQLite file, whose `CREATE VIRTUAL TABLE … USING fts5` needs
+	// an exclusive lock — the losers get SQLITE_BUSY and 500 their callers. Gating
+	// per slug (not globally) keeps different peers cold-starting in parallel,
+	// which is the whole reason construction sits outside peerMemoryEnginesMu.
+	gate, _ := s.peerEngineInitGates.LoadOrStore(slug, &sync.Mutex{})
+	initMu := gate.(*sync.Mutex)
+	initMu.Lock()
+	defer initMu.Unlock()
+
+	// Re-check under the gate: whoever held it before us may have cached an
+	// engine, and rebuilding would waste a SQLite open and a full reindex.
+	s.peerMemoryEnginesMu.Lock()
+	if eng, ok := s.peerMemoryEngines[slug]; ok {
+		s.peerMemoryEnginesMu.Unlock()
+		return eng, dir, nil
+	}
+	s.peerMemoryEnginesMu.Unlock()
+
 	// Mirrors NewServer's own boot-time engine init (server.go): the
 	// directory may not exist yet on a freshly provisioned crew, and
 	// SQLite errors SQLITE_CANTOPEN rather than creating parents.
@@ -475,9 +496,10 @@ func (s *Server) peerMemoryEngineFor(ctx context.Context, slug string) (engine *
 
 	s.peerMemoryEnginesMu.Lock()
 	if existing, ok := s.peerMemoryEngines[slug]; ok {
-		// Lost the construction race — another request cached its engine
-		// while we were building ours. Serve the winner; close the loser
-		// outside the lock so a slow SQLite close can't stall the cache.
+		// Belt-and-braces: the per-slug gate above means we should be the only
+		// builder for this slug, so reaching here implies a caller bypassed the
+		// gate. Serve the winner; close the loser outside the lock so a slow
+		// SQLite close can't stall the cache.
 		s.peerMemoryEnginesMu.Unlock()
 		if cerr := eng.Close(); cerr != nil {
 			s.logger.Warn("peer memory engine close after lost construction race failed",

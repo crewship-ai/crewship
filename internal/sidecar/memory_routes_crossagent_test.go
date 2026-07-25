@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/memory"
 )
@@ -493,5 +494,81 @@ func TestMemoryMCPRoute_SiblingStillAllowed(t *testing.T) {
 
 	if w.Code == 403 {
 		t.Fatalf("sibling refused on its own per-agent MCP route: %s", w.Body.String())
+	}
+}
+
+// TestPeerMemoryEngineFor_ConcurrentFirstAccessNeverErrors pins the *cause* of the
+// flake that TestPeerMemoryEngineFor_ConcurrentFirstAccessConverges exposed only
+// intermittently (~1 run in 10 locally, near-deterministically on CI).
+//
+// Before the per-slug construction gate, N concurrent first accesses each called
+// memory.New against the SAME index.sqlite, so each executed
+// `CREATE VIRTUAL TABLE IF NOT EXISTS … USING fts5` on a brand-new DB. That DDL
+// takes an exclusive lock, so losers came back with SQLITE_BUSY — a 500 on a
+// legitimate concurrent read of a peer's memory. busy_timeout does not cover it:
+// FTS5 creation plus the WAL-mode switch on a fresh file is not a plain lock-wait.
+//
+// The convergence assertion is the symptom; "no goroutine gets an error" is the
+// property, so it is asserted directly and repeatedly.
+func TestPeerMemoryEngineFor_ConcurrentFirstAccessNeverErrors(t *testing.T) {
+	// Repeat: one pass hits the race only ~10% of the time, which is exactly how
+	// this survived as a "flaky test" instead of being read as a bug. 40 rounds
+	// makes a single `go test` run catch it near-deterministically, and costs
+	// well under a second (each round is a fresh temp dir + 16 goroutines).
+	for round := 0; round < 40; round++ {
+		s, base := newLegacyMemoryRouteServer(t, true)
+		seedBootTier(t, base)
+
+		const n = 16
+		errs := make([]error, n)
+		var wg sync.WaitGroup
+		wg.Add(n)
+		for i := 0; i < n; i++ {
+			go func(i int) {
+				defer wg.Done()
+				_, _, errs[i] = s.peerMemoryEngineFor(context.Background(), "beta")
+			}(i)
+		}
+		wg.Wait()
+
+		for i, err := range errs {
+			if err != nil {
+				t.Fatalf("round %d goroutine %d: concurrent first access failed: %v", round, i, err)
+			}
+		}
+	}
+}
+
+// TestPeerMemoryEngineFor_DistinctSlugsStillInitInParallel guards the reason
+// construction sits outside peerMemoryEnginesMu in the first place (#1341
+// follow-up): one peer's slow cold start must not block another's. The fix must
+// gate per SLUG, not globally.
+func TestPeerMemoryEngineFor_DistinctSlugsStillInitInParallel(t *testing.T) {
+	s, base := newLegacyMemoryRouteServer(t, true)
+	seedBootTier(t, base)
+
+	// Hold the gate for "beta" while asking for a different peer. If the gate were
+	// global, the second call could not complete until this one released.
+	gate, _ := s.peerEngineInitGates.LoadOrStore("beta", &sync.Mutex{})
+	betaGate := gate.(*sync.Mutex)
+	betaGate.Lock()
+
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := s.peerMemoryEngineFor(context.Background(), "gamma")
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		betaGate.Unlock()
+		if err != nil {
+			// gamma may legitimately not be a crew member in this fixture; the
+			// point is that the call RETURNED rather than blocking on beta's gate.
+			t.Logf("gamma init returned an error (fine — it returned): %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		betaGate.Unlock()
+		t.Fatal("a second peer's init blocked on another slug's construction gate — the gate must be per-slug")
 	}
 }
