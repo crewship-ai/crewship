@@ -150,6 +150,34 @@ start agent container". The full raw cause is in the run journal / server logs.
 
 </Accordion>
 
+<Accordion title='Server logs "stale crewship-sidecar bind-mounted into crew containers" at startup'>
+
+The server compares the configured `CREWSHIP_SIDECAR_PATH` binary against its
+own build at boot. This `WARN` means the sidecar is **older than the running
+server**, so it was not rebuilt/recopied for this deploy — crew containers are
+bind-mounting a stale sidecar, and sidecar-side features shipped since (egress
+client, the memory-auth chokepoint, `token_fp` used by orphan-container reaping)
+may be running from an older binary.
+
+Fix — rebuild and recopy the sidecar to the path the server actually uses, then
+restart agents so new containers pick it up:
+
+```bash
+make build:sidecar          # rebuild crewship-sidecar for this deploy
+# copy it to $CREWSHIP_SIDECAR_PATH (or point that env at the fresh artifact)
+crewship crew restart-agents   # remount the fresh sidecar into containers
+```
+
+Restarting agents **without** recopying the binary remounts the same stale
+file, so the rebuild step is the one that matters. On dev slots `dev.sh`
+rebuilds the sidecar alongside the server on every start and forces
+`CREWSHIP_SIDECAR_PATH` to that fresh, co-located binary (ignoring any stale pin
+in `.env.local`, since #1402), so this warning should not normally appear
+there — if it does, the co-located build step itself was skipped or failed;
+re-run the deploy and check the build output.
+
+</Accordion>
+
 <Accordion title='"Agent exited with code 123"'>
 
 Specific to Claude Code adapter. **Almost always missing or invalid

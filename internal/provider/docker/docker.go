@@ -364,6 +364,13 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 	// per-crew removal in EnsureCrewRuntime (see secrets_sweep.go).
 	p.sweepLegacySecretsDirs(ctx)
 
+	// Surface a stale bind-mounted sidecar loudly at boot rather than leaving
+	// it silent until the first agent exec (#1390). os.Executable() failure
+	// fails the assertion open (no warning), never startup.
+	if self, err := os.Executable(); err == nil {
+		p.assertSidecarFreshAtStartup(self)
+	}
+
 	return p, nil
 }
 
