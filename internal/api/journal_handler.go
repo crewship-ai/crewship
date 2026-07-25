@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // JournalHandler serves the Crew Journal read API: paginated list and
@@ -733,7 +734,10 @@ func (h *JournalHandler) recordPriorityChange(
 			?, ?, NULLIF(?,''), NULLIF(?,''), ?)`,
 		generateCUID(), entryID, workspaceID, entryID,
 		previous, next, reason, actorID,
-		time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		// set_at records the ordering of successive operator edits, so it goes
+		// through tsformat: a truncated fractional second is not fixed-width and
+		// can sort two edits inside the same second the wrong way round.
+		tsformat.Format(time.Now())); err != nil {
 		return 0, fmt.Errorf("journal priority: append change ledger: %w", err)
 	}
 

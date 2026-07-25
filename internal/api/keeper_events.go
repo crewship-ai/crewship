@@ -31,6 +31,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // Keeper transition states. PENDING and the decision values mirror
@@ -124,7 +126,10 @@ func appendKeeperTransitionTx(ctx context.Context, tx *sql.Tx, tr keeperTransiti
 		generateCUID(), tr.RequestID, tr.WorkspaceID, tr.RequestID,
 		state, tr.RequestType, tr.AgentID, tr.CrewID, tr.CredentialID,
 		tr.Intent, tr.Command, tr.Reason, risk, exit, actorType, tr.ActorID,
-		time.Now().UTC().Format(time.RFC3339Nano))
+		// recorded_at is indexed (workspace_id, recorded_at DESC) and read as an
+		// ordering, so it goes through tsformat: a truncated fractional second is
+		// not fixed-width and can sort two transitions inside one second wrongly.
+		tsformat.Format(time.Now()))
 	if err != nil {
 		return fmt.Errorf("keeper transition: append %s for %s: %w", state, tr.RequestID, err)
 	}
