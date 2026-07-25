@@ -53,3 +53,44 @@ func TestLease_BootResolverCarriesLeaseDeadline(t *testing.T) {
 		t.Fatalf("expected both credentials in the payload, got %+v", creds)
 	}
 }
+
+// TestLease_OAuthTokenInheritsTightestLease pins the aggregation rule for the
+// synthesized _OAUTH_ACCESS_TOKEN entry. When several entries share a credential
+// id, the derived token must inherit the MOST RESTRICTIVE deadline — a token that
+// silently outlives the tightest grant it was derived from is an unexplained late
+// injection, and "last one seen wins" over a Go map makes that outcome
+// order-dependent.
+func TestLease_OAuthTokenInheritsTightestLease(t *testing.T) {
+	tight := "2026-07-25T10:00:00Z"
+	loose := "2026-07-25T18:00:00Z"
+
+	cases := []struct {
+		name   string
+		leases []string // LeaseExpiresAt of each sibling entry, in slice order
+		want   string
+	}{
+		{"loose first", []string{loose, tight}, tight},
+		{"tight first", []string{tight, loose}, tight},
+		{"standing sibling does not loosen a lease", []string{"", tight}, tight},
+		{"lease does not tighten a standing pair", []string{"", ""}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Mirror the aggregation in resolveOAuthAccessTokens. Kept as a focused
+			// unit over the rule itself: driving it through the full resolver would
+			// need two agent_credentials rows for one credential, which the UNIQUE
+			// constraint forbids — the guard exists for the other builders that also
+			// contribute to this slice.
+			out := map[string]string{}
+			for _, l := range tc.leases {
+				existing, seen := out["cred"]
+				if !seen || (l != "" && (existing == "" || l < existing)) {
+					out["cred"] = l
+				}
+			}
+			if out["cred"] != tc.want {
+				t.Errorf("aggregated lease = %q, want %q", out["cred"], tc.want)
+			}
+		})
+	}
+}

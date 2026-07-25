@@ -118,6 +118,16 @@ interface FormState {
   // the seconds the wire uses. "" or "0" = off. Kept as a string so the number
   // input can be cleared and retyped without snapping to a value mid-edit.
   autoLeaseMinutes: string
+  // autoLeaseSecondsRaw is the EXACT value the server returned, kept alongside
+  // the rounded minutes so an unrelated save cannot rewrite it.
+  //
+  // The CLI accepts any Go duration (`keeper auto-lease set 90s`), so the stored
+  // TTL need not be a whole number of minutes. Rendering it as minutes rounds —
+  // and if save() always resent the recomputed seconds, toggling the watchdog
+  // switch would silently rewrite 90s to 120s. Only a save that actually EDITED
+  // the minutes field sends a recomputed value; otherwise this raw value is
+  // resent unchanged.
+  autoLeaseSecondsRaw: number
   watchSpec: string       // free-form NL rules
   watchPresets: string[]  // enabled preset keys
   govProvider: string     // "" | ollama | anthropic | openai_compat
@@ -189,7 +199,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
   const [admins, setAdmins] = useState<WorkspaceMember[]>([])
   const emptyForm: FormState = {
     enabled: false, contact: "", risk: "7", requireSecondApprover: false,
-    autoLeaseMinutes: "", watchSpec: "", watchPresets: [],
+    autoLeaseMinutes: "", autoLeaseSecondsRaw: 0, watchSpec: "", watchPresets: [],
     govProvider: "", govModelId: "", govCredentialId: "",
   }
   const [form, setForm] = useState<FormState>(emptyForm)
@@ -251,6 +261,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
         risk: String(gov.deny_notify_min_risk ?? 7),
         requireSecondApprover: gov.require_second_approver ?? false,
         autoLeaseMinutes: secondsToLeaseMinutes(gov.auto_lease_seconds),
+        autoLeaseSecondsRaw: gov.auto_lease_seconds ?? 0,
         watchSpec: gov.watch_spec ?? "",
         watchPresets: gov.watch_presets ?? [],
         govProvider: gov.gov_model_provider ?? "",
@@ -304,7 +315,15 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
     // Auto-lease (#1373): the server rejects (not clamps) anything outside
     // {0} ∪ [60s, 30d], so validate here to give an actionable message instead of
     // a bare 400. Expressed in minutes: 1 minute is the floor, 43200 the cap.
-    const autoLeaseSeconds = leaseMinutesToSeconds(form.autoLeaseMinutes)
+    //
+    // Only recompute from the minutes field when it was actually EDITED. A TTL the
+    // CLI set to a non-minute-aligned value (e.g. 90s) renders rounded, so
+    // resending the recomputed value on an unrelated save would silently rewrite
+    // it — a config change nobody asked for, on a security control.
+    const autoLeaseEdited = form.autoLeaseMinutes !== baseline.autoLeaseMinutes
+    const autoLeaseSeconds = autoLeaseEdited
+      ? leaseMinutesToSeconds(form.autoLeaseMinutes)
+      : form.autoLeaseSecondsRaw
     if (autoLeaseSeconds === null) {
       toast.error("Auto-lease must be a whole number of minutes (0 or empty turns it off)")
       return
@@ -363,6 +382,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
         risk: String(body.deny_notify_min_risk ?? riskNum),
         requireSecondApprover: body.require_second_approver ?? false,
         autoLeaseMinutes: secondsToLeaseMinutes(body.auto_lease_seconds),
+        autoLeaseSecondsRaw: body.auto_lease_seconds ?? 0,
         watchSpec: body.watch_spec ?? "",
         watchPresets: body.watch_presets ?? [],
         govProvider: body.gov_model_provider ?? "",

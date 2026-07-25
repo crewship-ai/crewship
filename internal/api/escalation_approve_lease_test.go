@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -183,5 +184,60 @@ func TestEscalationApprove_L2CredentialNotGranted(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("an L2 credential must not be auto-granted/leased on approve, got %d grants", n)
+	}
+}
+
+// TestEscalationApprove_WritesLeaseAuditTrail is the regression for a bug the
+// grant-state assertions above could not see: the INSERT used to set expires_at
+// itself, at the same RFC3339 second issueCredentialLease would compute, so its
+// strict `expires_at < newExpiry` gate matched 0 rows and the LEASED audit row
+// plus the credential.lease_issued journal entry were silently skipped — for the
+// COMMON fresh-grant case, which is precisely what the provenance trail exists to
+// explain.
+//
+// Asserting the grant looks leased is not enough; the trail that says WHY it
+// expires has to exist too.
+func TestEscalationApprove_WritesLeaseAuditTrail(t *testing.T) {
+	h, userID, wsID, crewID, leadID, _ := newQueryHandler(t)
+	escID, credID := seedCredentialEscalation(t, h.db, userID, wsID, crewID, leadID)
+	enableAutoLease(t, h.db, wsID, 900)
+
+	if rr := approveEscalation(t, h, userID, wsID, escID); rr.Code != http.StatusOK {
+		t.Fatalf("approve: status = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	// The LEASED credential-audit row, carrying the source and the authorising
+	// escalation id.
+	var n int
+	var meta string
+	if err := h.db.QueryRow(`
+		SELECT COUNT(*), COALESCE(MAX(metadata_json),'') FROM credential_audit
+		 WHERE credential_id = ? AND event_type = ?`,
+		credID, string(AuditEventLeased)).Scan(&n, &meta); err != nil {
+		t.Fatalf("count LEASED audit rows: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("LEASED audit rows = %d, want 1 — the lease was minted with no trail", n)
+	}
+	if !strings.Contains(meta, leaseSourceEscalationApprove) {
+		t.Errorf("audit metadata %q should record lease_source=%q", meta, leaseSourceEscalationApprove)
+	}
+	if !strings.Contains(meta, escID) {
+		t.Errorf("audit metadata %q should record the authorising escalation id %q", meta, escID)
+	}
+
+	// And the grant is genuinely leased — both halves must hold, since the whole
+	// bug was one holding without the other.
+	var expiresAt, source sql.NullString
+	if err := h.db.QueryRow(
+		`SELECT expires_at, lease_source FROM agent_credentials WHERE agent_id = ? AND credential_id = ?`,
+		leadID, credID).Scan(&expiresAt, &source); err != nil {
+		t.Fatalf("read grant: %v", err)
+	}
+	if !expiresAt.Valid || expiresAt.String == "" {
+		t.Error("grant is not leased")
+	}
+	if source.String != leaseSourceEscalationApprove {
+		t.Errorf("lease_source = %q, want %q", source.String, leaseSourceEscalationApprove)
 	}
 }

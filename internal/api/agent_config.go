@@ -682,9 +682,23 @@ func (h *InternalHandler) resolveOAuthAccessTokens(r *http.Request, creds []mcpC
 	// token entry inherits the same #1373 lease as the client_id/client_secret
 	// entries it was derived from. Without this the derived entry would look like
 	// a standing grant even when its parent is leased.
+	//
+	// When several entries share a credential id, keep the MOST RESTRICTIVE
+	// (earliest non-empty) deadline rather than letting the last one seen win. The
+	// UNIQUE(agent_id, credential_id) constraint means resolveAgentCredentials
+	// cannot currently produce two rows for one credential — but this map is fed
+	// from a []mcpCredEntry that other builders also contribute to, and a
+	// synthesized token silently outliving the tightest grant it was derived from
+	// is the kind of bug that only shows up as an unexplained late injection.
+	// RFC3339 UTC strings sort lexicographically in chronological order, so a
+	// plain string compare is the right ordering here.
 	resolvedOAuthIDs := make(map[string]string)
 	for _, c := range creds {
-		if c.Type == "OAUTH2" {
+		if c.Type != "OAUTH2" {
+			continue
+		}
+		existing, seen := resolvedOAuthIDs[c.ID]
+		if !seen || (c.LeaseExpiresAt != "" && (existing == "" || c.LeaseExpiresAt < existing)) {
 			resolvedOAuthIDs[c.ID] = c.LeaseExpiresAt
 		}
 	}

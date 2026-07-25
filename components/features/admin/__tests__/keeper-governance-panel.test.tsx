@@ -577,6 +577,56 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     expect(body.auto_lease_seconds).toBe(0)
   })
 
+  it("an unrelated save preserves a non-minute-aligned auto-lease TTL", async () => {
+    // The CLI accepts any Go duration (`keeper auto-lease set 90s`), so the stored
+    // TTL need not be minute-aligned. The panel renders it rounded — so a save
+    // that recomputed from the rounded minutes would silently rewrite 90s to 120s
+    // when the operator only meant to toggle the watchdog.
+    mockRoutes({
+      configured: true,
+      enabled: false,
+      security_contact_user_id: "",
+      deny_notify_min_risk: 7,
+      auto_lease_seconds: 90,
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    // Rendered rounded (90s -> 2 min), but untouched.
+    expect(await screen.findByTestId("keeper-governance-auto-lease")).toHaveValue(2)
+
+    // Change something else entirely.
+    fireEvent.click(screen.getByTestId("keeper-governance-switch"))
+    fireEvent.click(screen.getByTestId("keeper-governance-save"))
+
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+    const putCall = apiFetch.mock.calls.find(([, init]) => (init as RequestInit)?.method === "PUT")
+    const body = JSON.parse(String((putCall as [string, RequestInit])[1].body)) as Record<string, unknown>
+    expect(body.auto_lease_seconds).toBe(90)
+  })
+
+  it("editing the auto-lease field does send the recomputed seconds", async () => {
+    // The other half of the rule: preserving the raw value must not make the field
+    // read-only in practice.
+    mockRoutes({
+      configured: true,
+      enabled: true,
+      security_contact_user_id: "",
+      deny_notify_min_risk: 7,
+      auto_lease_seconds: 90,
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    fireEvent.change(await screen.findByTestId("keeper-governance-auto-lease"), {
+      target: { value: "45" },
+    })
+    fireEvent.click(screen.getByTestId("keeper-governance-save"))
+
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+    const putCall = apiFetch.mock.calls.find(([, init]) => (init as RequestInit)?.method === "PUT")
+    const body = JSON.parse(String((putCall as [string, RequestInit])[1].body)) as Record<string, unknown>
+    expect(body.auto_lease_seconds).toBe(2700)
+  })
+
   it("disables the auto-lease input when the caller cannot manage", async () => {
     canManage = false
     mockRoutes({

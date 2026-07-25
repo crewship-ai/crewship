@@ -249,21 +249,27 @@ func (h *QueryHandler) grantLeasedCredentialOnApprove(
 		envVar = "KEEPER_SECRET"
 	}
 
-	now := time.Now().UTC()
-	expiresAt := now.Add(time.Duration(ttl) * time.Second).Format(time.RFC3339)
-
-	// INSERT OR IGNORE, then let issueCredentialLease do the lease write. The
-	// two-step keeps ONE place responsible for lease semantics (narrow standing,
-	// extend shorter, never shorten longer) and for the audit/journal trail,
-	// instead of duplicating that logic in an upsert here. The UNIQUE constraint
-	// on (agent_id, credential_id) makes the INSERT a no-op when the operator had
+	// INSERT the grant as a plain STANDING row, then let issueCredentialLease be
+	// the SOLE place that mints the lease. The UNIQUE constraint on
+	// (agent_id, credential_id) makes the INSERT a no-op when the operator had
 	// already assigned the credential.
+	//
+	// The grant deliberately carries NO lease columns here. Setting expires_at in
+	// this INSERT looks harmless but silently defeats the audit trail: both
+	// timestamps are RFC3339 (second precision) computed microseconds apart, so
+	// they land on the same second, and issueCredentialLease's strict
+	// `expires_at < newExpiry` gate then matches 0 rows and returns not-issued —
+	// skipping the LEASED audit row and the credential.lease_issued journal entry
+	// for the common fresh-grant case, which is exactly the case the provenance
+	// trail exists to explain. Keeping ONE writer for the lease keeps the
+	// semantics (narrow standing, extend shorter, never shorten longer) and the
+	// trail in one place, which is what the code below already assumes.
 	if _, err := h.db.ExecContext(ctx, `
 		INSERT OR IGNORE INTO agent_credentials
-			(id, agent_id, credential_id, env_var_name, priority, created_at, expires_at, lease_source, lease_issued_at, lease_request_id)
-		VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
-		generateCUID(), agentID, credentialID, envVar, now.Format(time.RFC3339),
-		expiresAt, leaseSourceEscalationApprove, now.Format(time.RFC3339), escalationID,
+			(id, agent_id, credential_id, env_var_name, priority, created_at)
+		VALUES (?, ?, ?, ?, 0, ?)`,
+		generateCUID(), agentID, credentialID, envVar,
+		time.Now().UTC().Format(time.RFC3339),
 	); err != nil {
 		h.logger.Warn("credential lease on approve: grant insert failed",
 			"error", err, "agent_id", agentID, "credential_id", credentialID)
