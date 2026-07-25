@@ -10,6 +10,14 @@
 // wraps it. One algorithm, two callers.
 package fuzzy
 
+// maxLevenshteinLen caps the operand length before the DP matrix is
+// allocated. Fuzzy "did you mean?" suggestions are only ever computed over
+// short slugs/names (<30 chars in practice); an operand longer than this is
+// never a plausible near-match, so we skip the O(len(a)*len(b)) work. It also
+// bounds the `make([]int, len(b)+1)` allocation so it cannot overflow on
+// hostile input (CodeQL go/allocation-size-overflow).
+const maxLevenshteinLen = 4096
+
 // Levenshtein returns the edit distance between a and b. Pure DP,
 // O(len(a)*len(b)). Slug/name lengths are typically <30 characters so the
 // cost is negligible even across hundreds of candidates.
@@ -19,6 +27,16 @@ func Levenshtein(a, b string) int {
 	}
 	if len(b) == 0 {
 		return len(a)
+	}
+	// Beyond any real slug/name — not a plausible suggestion candidate.
+	// Return max(len) (a valid upper bound on the edit distance) without
+	// allocating the matrix: it is always >= Nearest's threshold, so such a
+	// pair is correctly rejected as "no match".
+	if len(a) > maxLevenshteinLen || len(b) > maxLevenshteinLen {
+		if len(a) > len(b) {
+			return len(a)
+		}
+		return len(b)
 	}
 	// Two-row optimisation — we only need the previous row to compute the
 	// current one. Saves O(len(a)*len(b)) memory for O(min(len(a), len(b)))

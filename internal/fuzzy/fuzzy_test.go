@@ -2,6 +2,7 @@ package fuzzy
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -28,6 +29,30 @@ func TestLevenshtein(t *testing.T) {
 		if got := Levenshtein(c.a, c.b); got != c.want {
 			t.Errorf("Levenshtein(%q, %q) = %d, want %d", c.a, c.b, got, c.want)
 		}
+	}
+}
+
+// TestLevenshtein_OversizedInputShortCircuits guards the length cap that keeps
+// the O(len(a)*len(b)) DP matrix from being allocated on absurdly long input
+// (CodeQL go/allocation-size-overflow on `make([]int, len(b)+1)`). Fuzzy
+// suggestions are only ever computed over short slugs/names; beyond the cap a
+// candidate is never a plausible "did you mean?", so we return a bounded
+// upper-bound distance (= the longer length) without building the matrix.
+func TestLevenshtein_OversizedInputShortCircuits(t *testing.T) {
+	long := strings.Repeat("a", maxLevenshteinLen+1000)
+	shorter := strings.Repeat("a", maxLevenshteinLen+1)
+	// True edit distance here is 999 (delete 999 trailing 'a's), but once
+	// either operand exceeds the cap we short-circuit to max(len) = len(long).
+	if got := Levenshtein(long, shorter); got != len(long) {
+		t.Errorf("Levenshtein(oversized) = %d, want short-circuit to %d", got, len(long))
+	}
+	// Symmetric in argument order.
+	if got := Levenshtein(shorter, long); got != len(long) {
+		t.Errorf("Levenshtein(oversized, swapped) = %d, want %d", got, len(long))
+	}
+	// A candidate this far from the target must never surface as a match.
+	if hits := Nearest(long, []string{shorter}, 3); len(hits) != 0 {
+		t.Errorf("Nearest over oversized input returned %v, want none", hits)
 	}
 }
 
