@@ -235,6 +235,38 @@ State is **isolated per schedule**: two cron schedules of the same routine keep 
 State is a small key/value store for coordination values (cursors, timestamps, counts), not a data warehouse. Writes are **best-effort** — a failed state write logs a warning and never fails the step. Values are opaque strings; JSON-encode a structure yourself if you need one.
 </Info>
 
+#### Inspecting and repairing state
+
+A watermark can go wrong in a way that is silent and permanent: write a cursor
+that is too far ahead (a future timestamp, an id from the wrong source) and every
+later run finds nothing to do — and reports success. `crewship routine state` is
+the operator surface for that.
+
+```bash
+# Which cursor is stuck, and when was it last written?
+crewship routine state list nightly-import
+
+# Rewind one schedule's watermark to a known-good value
+crewship routine state set nightly-import last_id 41200 --schedule psched_abc123
+
+# Drop one key, or the whole bucket
+crewship routine state rm    nightly-import last_id --schedule psched_abc123
+crewship routine state clear nightly-import          --schedule psched_abc123
+```
+
+`state list` shows **every** bucket by default — because state is isolated per
+schedule, the stuck cursor is usually in a bucket you would not have guessed.
+The `UPDATED` column is normally the tell: a cursor frozen three days ago next to
+schedules that ran this morning.
+
+Mutations are **ADMIN-tier**. A watermark governs what every future *unattended*
+run does, so rewriting one carries the same blast radius as disabling the
+routine. `clear` is deliberately bucket-scoped — there is no "wipe every
+schedule" form, because that makes each schedule reprocess its whole backlog with
+no undo. Prefer `set` to a known-good value when you can.
+
+Full flags: [`crewship routine state`](/cli/routine#crewship-routine-state).
+
 ## Required integrations
 
 A routine can DECLARE the third-party integrations (Composio connectors) it
