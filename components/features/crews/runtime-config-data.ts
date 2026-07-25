@@ -204,6 +204,25 @@ export const KNOWN_CAPS: ReadonlyArray<{
 
 const KNOWN_CAP_NAMES = new Set(KNOWN_CAPS.map((c) => c.name))
 
+// Capabilities the SAVE PATH will actually accept. Mirrors
+// internal/devcontainer/features.go `allowedFeatureCapAdd`, which
+// Config.ValidateSecurity enforces on crew create/update — anything outside it
+// is a 400 (`ErrCapabilityNotAllowed`), not a silent drop.
+//
+// KNOWN_CAPS above is the descriptive catalog (what each cap means, how much
+// blast radius it carries); this is the narrower "you may grant it directly"
+// set. They are deliberately separate: the catalog still has to explain
+// SYS_ADMIN so an operator understands the cap they're reading in a legacy
+// stored config, but the UI must not offer it as a fresh pick that the server
+// is guaranteed to refuse.
+const SERVER_GRANTABLE_CAPS = new Set(["NET_BIND_SERVICE"])
+
+/** True when the (normalized) capability is one the crew save path accepts
+ *  directly. Broader capabilities require privileged mode instead. */
+export function isServerGrantableCap(raw: string): boolean {
+  return SERVER_GRANTABLE_CAPS.has(normalizeCap(raw))
+}
+
 /** Uppercases and strips a leading CAP_ so "cap_net_bind_service" and
  *  "NET_BIND_SERVICE" normalize to the same Docker cap name. */
 export function normalizeCap(raw: string): string {

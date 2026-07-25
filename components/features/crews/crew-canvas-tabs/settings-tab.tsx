@@ -4,6 +4,7 @@ import Link from "next/link"
 import { Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
+import { useAbilities } from "@/hooks/use-abilities"
 import { EditableField } from "@/components/shared/editable-field"
 import { CrewRuntimeConfig } from "@/components/features/crews/crew-runtime-config"
 import { CrewContainerConfig } from "@/components/features/crews/crew-container-config"
@@ -43,6 +44,12 @@ export function SettingsTab({
   applyAvatarStyle,
   onDelete,
 }: SettingsTabProps) {
+  // Private-endpoint egress is an ADMIN ("manage") capability server-side —
+  // mirror that gate in the UI so a MANAGER sees the posture but can't flip it
+  // and eat a 403 on save.
+  const { role } = useAbilities()
+  const isAdmin = role === "OWNER" || role === "ADMIN"
+
   // Saving a network policy stops the crew container so it's recreated with
   // the new policy on the next agent run. Without feedback that restart was
   // invisible — the save just returned and the container quietly cycled. This
@@ -181,9 +188,19 @@ export function SettingsTab({
             allowedDomains={Array.isArray(crew.allowed_domains)
               ? crew.allowed_domains
               : (crew.allowed_domains ? String(crew.allowed_domains).split(",").map((s) => s.trim()).filter(Boolean) : [])}
+            allowPrivateEndpoints={crew.allow_private_endpoints}
             canEdit
-            onSave={async (mode, domains) => {
-              await patch({ network_mode: mode, allowed_domains: domains.length > 0 ? domains : null })
+            canEditPrivateEndpoints={isAdmin}
+            onSave={async (mode, domains, allowPrivate) => {
+              const body: Record<string, unknown> = {
+                network_mode: mode,
+                allowed_domains: domains.length > 0 ? domains : null,
+              }
+              // Only send the field when the crew record carried it — a bare
+              // `undefined` would still serialize as an explicit JSON null on
+              // some paths and clear a flag the operator never touched.
+              if (allowPrivate !== undefined) body.allow_private_endpoints = allowPrivate
+              await patch(body)
               // Fire-and-forget: surface the container restart the policy
               // change triggers. Not awaited so the editor closes immediately.
               void pollContainerRestart(crew.id)

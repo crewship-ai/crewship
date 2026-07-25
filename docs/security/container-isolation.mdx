@@ -154,6 +154,31 @@ This means toggling **Privileged** in the UI actually makes (or, without the
 workspace flag, *refuses* to make) the container privileged — the change reaches
 `HostConfig.Privileged`, not just the stored JSON.
 
+Because the save path is the authority, the capability picker only offers what
+the save path will accept: `NET_BIND_SERVICE` is selectable, everything broader
+renders as **privileged only** and is inert. A capability stored on a crew from
+before the gate landed stays interactive so it can be *removed*, flagged as no
+longer saveable.
+
+### Seeing the posture
+
+A privileged crew is not something you should have to go looking for. The
+effective posture is surfaced in three places:
+
+- **Crew canvas header** — a red **Privileged · isolation reduced** badge next
+  to the crew name, on the first screen anyone opens.
+- **Security tab** — an *Isolation reduced* badge plus a dot on the tab itself.
+- **CLI** — `crewship crew config <crew> --show` prints the stored
+  `devcontainer_config`, `privileged` included.
+
+### Setting them from the CLI
+
+Every control above has a flag on `crewship crew config` —
+`--privileged`, `--cap-add`, `--init`, `--init-hook` — so a privileged change is
+scriptable and reviewable rather than a hand-edited JSON blob. See
+[`crewship crew config`](/cli/crew#container-privilege-controls). The flags merge
+onto the stored config and hit the identical server-side gate.
+
 <Warning>
   A crew running **privileged** has essentially no container isolation left. The
   Security tab surfaces an **"Isolation reduced"** badge on any such crew so the
@@ -244,8 +269,48 @@ Each crew can have a network access policy:
     ```bash
     crewship crew update my-crew --network-mode restricted --allow-package-registries
     ```
+
+    #### Fixing a denial from the journal
+
+    A blocked request is not silent: the sidecar emits a `network.egress` journal
+    entry with `payload.denied = true` and a summary naming the policy
+    (`… → BLOCKED by network policy (not in allowed_domains)`). Expand that row in
+    the **Journal** timeline and an admin gets a one-click **Add ‹host› to
+    allowlist** action — it reads the crew's current `allowed_domains`, unions the
+    port-stripped host onto it, and PATCHes the crew. Nothing is clobbered, and a
+    host that is already covered reports that instead of writing a no-op.
+
+    The action adds the **exact host**. To cover every subdomain, edit the entry to
+    a `*.example.com` wildcard in the crew's Network settings.
+
+    <Warning>
+    The denied host is chosen by the agent that was blocked, and the button renders
+    it as its own label — so the one-click path deliberately refuses hosts with
+    non-ASCII or `xn--` (punycode) labels. A rogue agent could otherwise request a
+    homoglyph of a trusted domain (Cyrillic `а` in `аpi.anthropic.com`), get denied
+    on purpose, and have the remediation button read like a familiar name while
+    allowlisting a host it controls. Such a host is shown with a warning instead;
+    add it deliberately in crew settings if it is genuinely what you meant.
+    </Warning>
   </Tab>
 </Tabs>
+
+### Private / LAN endpoints
+
+The SSRF fence blocks RFC1918, loopback and link-local targets in **both** network
+modes, so an on-prem Ollama or a self-hosted model endpoint is unreachable by
+default even for a `free` crew. Opening it takes **two** independent opt-ins:
+
+1. **Per crew** — `allow_private_endpoints`. Set it from the crew's **Network
+   policy** panel (admin-only toggle) or with
+   `crewship crew update <crew> --allow-private-endpoints`.
+2. **Per instance** — the operator ceiling `CREWSHIP_ALLOW_PRIVATE_ENDPOINTS`.
+
+They are ANDed (#974 S5), so a workspace admin cannot self-grant private egress on
+a shared or cloud host by flipping the crew flag alone — which is exactly the
+"I set the flag and it's still blocked" case the UI toggle calls out inline.
+Link-local and cloud-metadata addresses (`169.254.169.254`) stay hard-blocked
+regardless of either setting.
 
 <Note>
   Unknown network modes default to **restricted** (fail closed). This prevents a typo in the configuration from accidentally allowing unrestricted access.

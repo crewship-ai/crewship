@@ -26,6 +26,9 @@ export interface CrewRecord {
   issue_prefix: string | null
   network_mode: string
   allowed_domains: string[] | string | null
+  /** #1377 — crews.allow_private_endpoints (v135). Optional so a client
+   *  talking to an older backend hides the toggle instead of showing it off. */
+  allow_private_endpoints?: boolean
   container_memory_mb: number
   container_cpus: number
   container_ttl_hours: number | null

@@ -14,6 +14,7 @@ import {
   severityOf,
 } from "@/lib/journal-style"
 import { formatRelativeTime } from "@/lib/time"
+import { EgressAllowlistAction } from "./egress-allowlist-action"
 
 interface LogsListProps {
   entries: JournalEntry[]
@@ -253,6 +254,10 @@ function Detail({
           ) : null,
         )}
       </div>
+      {/* #1377 — a blocked-egress row carries its own remediation: add the
+          denied host to the crew allowlist without leaving the timeline.
+          Renders nothing for every other entry type. */}
+      <EgressAllowlistAction entry={entry} />
       {entry.payload && Object.keys(entry.payload).length > 0 && (
         <DetailJson title="payload" value={entry.payload} />
       )}

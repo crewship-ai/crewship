@@ -200,6 +200,11 @@ or via the API:
 POST /api/v1/agents/{agentId}/webhook-secret/rotate
 ```
 
+or from the dashboard: **Agent → Settings → Advanced → Webhook signing secret →
+Rotate**. The UI confirms first (the previous secret stops validating the instant
+the new one is minted), then shows the value once with a copy button — it is
+never re-displayed on a reload.
+
 The response contains the freshly minted `webhook_secret` exactly once — store it in the external system (GitHub/Grafana/… webhook config) immediately. Deliveries signed with the previous secret are rejected as soon as the rotation lands. Rotation requires agent-edit rights (OWNER/ADMIN, or MANAGER for agents they created).
 
 `GET /api/v1/agents/{agentId}` exposes only a `webhook_secret_set` boolean so clients can tell whether a secret is configured.

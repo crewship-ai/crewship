@@ -1,10 +1,11 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Globe, Shield, Package } from "lucide-react"
+import { Globe, Shield, Package, Network } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { PACKAGE_REGISTRY_DOMAINS, mergeDomains } from "./registry-presets"
 
@@ -35,23 +36,44 @@ const DEFAULT_DOMAINS = [
 interface CrewNetworkPolicyProps {
   networkMode: string
   allowedDomains: string[]
+  /** #1377 gap 3 — crews.allow_private_endpoints (migration v135). Undefined
+   *  means the caller didn't load the field; the toggle stays hidden rather
+   *  than rendering a control that would PATCH a value we never read. */
+  allowPrivateEndpoints?: boolean
   canEdit: boolean
-  onSave: (mode: string, domains: string[]) => Promise<void>
+  /** Private-endpoint egress is an ADMIN ("manage") capability server-side
+   *  (crews_create.go:303 / the crews_update manage gate). Off by default so a
+   *  caller that forgets to pass it renders read-only, not falsely editable. */
+  canEditPrivateEndpoints?: boolean
+  onSave: (mode: string, domains: string[], allowPrivateEndpoints?: boolean) => Promise<void>
 }
 
-export function CrewNetworkPolicy({ networkMode, allowedDomains, canEdit, onSave }: CrewNetworkPolicyProps) {
+export function CrewNetworkPolicy({
+  networkMode,
+  allowedDomains,
+  allowPrivateEndpoints,
+  canEdit,
+  canEditPrivateEndpoints = false,
+  onSave,
+}: CrewNetworkPolicyProps) {
   const [mode, setMode] = useState(networkMode)
   const [domains, setDomains] = useState(allowedDomains.join(", "))
+  const [privateEndpoints, setPrivateEndpoints] = useState(Boolean(allowPrivateEndpoints))
   const [saving, setSaving] = useState(false)
 
   // Resync editor state when props change (e.g. after server-side normalization)
   useEffect(() => { setMode(networkMode) }, [networkMode])
   useEffect(() => { setDomains(allowedDomains.join(", ")) }, [allowedDomains])
+  useEffect(() => { setPrivateEndpoints(Boolean(allowPrivateEndpoints)) }, [allowPrivateEndpoints])
 
   const isFree = mode === "free"
+  const showPrivateEndpoints = allowPrivateEndpoints !== undefined
   // Compare parsed domain arrays instead of raw strings to avoid false dirty state
   const parsedDomains = isFree ? [] : domains.split(/[,\n]+/).map((d) => d.trim().toLowerCase()).filter(Boolean)
-  const hasChanges = mode !== networkMode || JSON.stringify(parsedDomains) !== JSON.stringify(allowedDomains)
+  const hasChanges =
+    mode !== networkMode ||
+    JSON.stringify(parsedDomains) !== JSON.stringify(allowedDomains) ||
+    (showPrivateEndpoints && privateEndpoints !== Boolean(allowPrivateEndpoints))
 
   function addRegistryPreset() {
     const current = domains.split(/[,\n]+/).map((d) => d.trim()).filter(Boolean)
@@ -62,7 +84,7 @@ export function CrewNetworkPolicy({ networkMode, allowedDomains, canEdit, onSave
     setSaving(true)
     try {
       const parsed = isFree ? [] : domains.split(/[,\n]+/).map((d) => d.trim()).filter(Boolean)
-      await onSave(mode, parsed)
+      await onSave(mode, parsed, showPrivateEndpoints ? privateEndpoints : undefined)
     } finally {
       setSaving(false)
     }
@@ -177,6 +199,55 @@ export function CrewNetworkPolicy({ networkMode, allowedDomains, canEdit, onSave
                   ))}
                 </div>
               </div>
+            )}
+          </div>
+        )}
+
+        {/* Private endpoints — orthogonal to free/restricted. The SSRF fence
+            blocks RFC1918 / loopback / link-local targets in BOTH modes, so an
+            on-prem Ollama or LAN model needs this opt-in even on a `free` crew.
+            Surfacing it here is what stops "why is my LAN model unreachable?"
+            from being a CLI-only mystery (#1377 gap 3). */}
+        {showPrivateEndpoints && (
+          <div className="space-y-1.5 border-t pt-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <Label htmlFor="allow-private-endpoints" className="text-xs font-medium flex items-center gap-1.5">
+                  <Network className="h-3.5 w-3.5 text-muted-foreground" />
+                  Private endpoints
+                </Label>
+                <p className="text-[11px] text-muted-foreground">
+                  Let this crew reach private / LAN addresses (on-prem Ollama, a
+                  self-hosted model endpoint). Off by default — the SSRF fence blocks
+                  RFC1918, loopback and link-local targets in both network modes.
+                </p>
+              </div>
+              <Switch
+                id="allow-private-endpoints"
+                aria-label="Private endpoints"
+                checked={privateEndpoints}
+                disabled={!canEdit || !canEditPrivateEndpoints}
+                onCheckedChange={setPrivateEndpoints}
+              />
+            </div>
+            {privateEndpoints && (
+              <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                Also requires the instance ceiling{" "}
+                <code className="font-mono">CREWSHIP_ALLOW_PRIVATE_ENDPOINTS</code> on the
+                server — without it the crew flag alone will not unblock a private target.
+              </p>
+            )}
+            {!privateEndpoints && (
+              <p className="text-[11px] text-muted-foreground">
+                Blocked targets are reported as an SSRF-fence denial. The server ceiling{" "}
+                <code className="font-mono">CREWSHIP_ALLOW_PRIVATE_ENDPOINTS</code> must also
+                be set for this flag to take effect.
+              </p>
+            )}
+            {!canEditPrivateEndpoints && (
+              <p className="text-[11px] text-muted-foreground">
+                Requires an admin to change.
+              </p>
             )}
           </div>
         )}
