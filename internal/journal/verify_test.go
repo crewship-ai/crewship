@@ -282,3 +282,84 @@ func TestVerifyChain_Isolation(t *testing.T) {
 		t.Fatalf("tampered workspace not flagged")
 	}
 }
+
+// TestVerifyChain_ReportsEveryContentBreak: one unverifiable row must not
+// blind the operator to everything after it.
+//
+// This is the failure observed on stage 2026-07-25: verify halted at seq 86657
+// with a content-hash mismatch, so the ~86k entries written afterwards were
+// never checked at all. The broken row was legacy — a pre-v166 entry whose
+// priority was pinned before the migration backfilled priority_at_emit, losing
+// the emit-time value the stored hash commits to — and it is unrepairable.
+// Halting there means the tamper-evidence is dead for everything newer, which
+// is the opposite of what it exists to do.
+//
+// A content-hash mismatch is a fact about ONE row. The rows after it still
+// chain onto its STORED hash, so the walk can and must continue.
+func TestVerifyChain_ReportsEveryContentBreak(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushInterval: time.Hour})
+	defer w.Close()
+
+	ids := seedChain(t, w, "ws_test", 6)
+
+	// Two independent tampered rows, with clean rows between and after.
+	for _, i := range []int{1, 4} {
+		if _, err := db.Exec(`UPDATE journal_entries SET summary = ? WHERE id = ?`,
+			"TAMPERED", ids[i]); err != nil {
+			t.Fatalf("tamper %d: %v", i, err)
+		}
+	}
+
+	res, err := VerifyChain(context.Background(), db, "ws_test")
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if res.OK {
+		t.Fatal("tampering went undetected")
+	}
+	if len(res.Breaks) != 2 {
+		t.Fatalf("Breaks = %d, want 2 — a halt at the first break hides the rest: %+v", len(res.Breaks), res.Breaks)
+	}
+	if res.Breaks[0].ID != ids[1] || res.Breaks[1].ID != ids[4] {
+		t.Errorf("breaks at %s/%s, want %s/%s", res.Breaks[0].ID, res.Breaks[1].ID, ids[1], ids[4])
+	}
+	// The whole chain must still be walked, so a later tamper is reachable.
+	if res.Count != 6 {
+		t.Errorf("Count = %d, want 6 — the walk stopped early", res.Count)
+	}
+	// Back-compat: the legacy single-break fields keep naming the FIRST break.
+	if res.BrokenID != ids[1] {
+		t.Errorf("BrokenID = %s, want the first break %s", res.BrokenID, ids[1])
+	}
+	if res.Reason == "" {
+		t.Error("Reason must still describe the first break")
+	}
+}
+
+// A structural break is different in kind: once the sequence itself cannot be
+// trusted, continuing produces cascading noise rather than information. Those
+// still halt.
+func TestVerifyChain_StructuralBreakStillHalts(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushInterval: time.Hour})
+	defer w.Close()
+
+	ids := seedChain(t, w, "ws_test", 5)
+	if _, err := db.Exec(`DELETE FROM journal_entries WHERE id = ?`, ids[2]); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	res, err := VerifyChain(context.Background(), db, "ws_test")
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if res.OK {
+		t.Fatal("uncovered deletion went undetected")
+	}
+	if res.Count >= 5 {
+		t.Errorf("Count = %d — a sequence gap must stop the walk, not continue past it", res.Count)
+	}
+}

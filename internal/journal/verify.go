@@ -274,6 +274,39 @@ type VerifyResult struct {
 	BrokenSeq   int64  `json:"broken_seq,omitempty"`  // seq of first bad entry (0 when OK)
 	BrokenID    string `json:"broken_id,omitempty"`   // id of first bad entry
 	Reason      string `json:"reason,omitempty"`      // human-readable failure cause
+
+	// Breaks lists EVERY per-row integrity failure found, not just the first.
+	//
+	// Halting at the first one was actively harmful: on stage a single legacy
+	// row (pre-v166, pinned before the migration backfilled priority_at_emit,
+	// so its emit-time value is gone and its hash can never be recomputed)
+	// stopped the walk at seq 86657 — leaving the ~86k entries written after it
+	// completely unchecked. One unrepairable row must not blind the operator to
+	// real tampering that follows it.
+	//
+	// BrokenSeq/BrokenID/Reason are retained and still describe the FIRST
+	// break, so existing callers and the CLI's exit code are unchanged.
+	Breaks []ChainBreak `json:"breaks,omitempty"`
+}
+
+// ChainBreak is one row that failed its integrity check.
+type ChainBreak struct {
+	Seq    int64  `json:"seq"`
+	ID     string `json:"id"`
+	Kind   string `json:"kind"` // content | priority
+	Reason string `json:"reason"`
+}
+
+// note records a per-row break and keeps the legacy first-break fields
+// pointing at the earliest one.
+func (r *VerifyResult) note(seq int64, id, kind, reason string) {
+	r.OK = false
+	r.Breaks = append(r.Breaks, ChainBreak{Seq: seq, ID: id, Kind: kind, Reason: reason})
+	if r.BrokenSeq == 0 {
+		r.BrokenSeq = seq
+		r.BrokenID = id
+		r.Reason = reason
+	}
 }
 
 // verifySelect pulls the columns the hash commits to, in seq order. Nullable
@@ -507,13 +540,13 @@ func VerifyChain(ctx context.Context, db *sql.DB, workspaceID string) (*VerifyRe
 		}
 
 		// Content integrity: recompute the KEYED hash and compare.
+		// A content mismatch is a fact about THIS row. Rows after it chain onto
+		// its STORED hash, which is unaffected, so the walk continues and later
+		// tampering stays reachable.
 		want := ChainHashKeyed(key, prevHash, f)
 		if want != entryHash {
-			res.OK = false
-			res.BrokenSeq = f.Seq
-			res.BrokenID = f.ID
-			res.Reason = fmt.Sprintf("content hash mismatch at seq %d: entry was modified after write (or the chain key differs)", f.Seq)
-			return res, nil
+			res.note(f.Seq, f.ID, "content",
+				fmt.Sprintf("content hash mismatch at seq %d: entry was modified after write (or the chain key differs)", f.Seq))
 		}
 
 		// Priority reconciliation (#1369). `priority` is outside the hash because
@@ -522,13 +555,9 @@ func VerifyChain(ctx context.Context, db *sql.DB, workspaceID string) (*VerifyRe
 		// ledger of operator edits. A raw column flip leaves no ledger row and is
 		// caught here.
 		if !reconcilePriority(f.Priority, livePriority, priorityEdits[f.ID]) {
-			res.OK = false
-			res.BrokenSeq = f.Seq
-			res.BrokenID = f.ID
-			res.Reason = fmt.Sprintf(
+			res.note(f.Seq, f.ID, "priority", fmt.Sprintf(
 				"priority mismatch at seq %d: live priority %q is not reachable from the emit-time %q through the recorded priority changes",
-				f.Seq, livePriority, f.Priority)
-			return res, nil
+				f.Seq, livePriority, f.Priority))
 		}
 
 		expectedPrev = entryHash
