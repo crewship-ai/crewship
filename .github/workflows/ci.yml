@@ -367,6 +367,31 @@ jobs:
       - name: tsformat proximity lint
         run: go run ./scripts/lint-tsformat origin/main
 
+      # OpenAPI spec freshness. internal/api/openapi.gen.json is generated
+      # from the r.mux.Handle / r.authedMut / r.authedAdmin / r.authedSelfMut
+      # route registrations, and it is what GET /openapi.json serves — the API
+      # contract anything driving Crewship programmatically reads. Nothing
+      # forced a regenerate, so it drifted silently: 14 routes missing by
+      # 2026-07-25 (journal verify, the notifications suite, crew services,
+      # crew files delete, pipelines budget/diff, …), and it drifted again
+      # within hours of being fixed. A stale spec under-reports the API rather
+      # than failing loudly, which is the worst failure mode for a contract.
+      #
+      # Invoked from the repo root, NOT via `go generate ./internal/api/`:
+      # gen-openapi resolves its output path relative to the working
+      # directory, so the go:generate form writes to the wrong place and
+      # errors out.
+      - name: OpenAPI spec is up to date
+        run: |
+          go run ./cmd/gen-openapi
+          if ! git diff --quiet -- internal/api/openapi.gen.json; then
+            echo "::error file=internal/api/openapi.gen.json::openapi.gen.json is stale. Run 'go run ./cmd/gen-openapi' from the repo root and commit the result."
+            git diff --stat -- internal/api/openapi.gen.json
+            git diff -- internal/api/openapi.gen.json | head -60
+            exit 1
+          fi
+          echo "openapi.gen.json matches the registered routes."
+
   # ── Full binary build (push to main only — verifies embed works) ──
   #
   # Stays push-only to conserve runner minutes. The Go job already catches
