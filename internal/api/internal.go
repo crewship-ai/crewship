@@ -181,6 +181,12 @@ type mcpCredEntry struct {
 	// credential. Always empty for other types — the sidecar mount
 	// path branches on Type and only reads Username for USERPASS.
 	Username string `json:"username,omitempty"`
+	// LeaseExpiresAt is the delivering grant's credential-lease deadline in
+	// RFC3339 UTC, empty for a standing grant (#1373). It rides the boot payload
+	// into the sidecar's CredStore, which refuses and then evicts a credential
+	// once the deadline passes — the only way lease expiry can reach a
+	// crew-shared, credential-scoped store that has no per-agent dimension.
+	LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
 }
 
 // InternalHandler provides endpoints called by the sidecar over the Unix socket using X-Internal-Token auth.

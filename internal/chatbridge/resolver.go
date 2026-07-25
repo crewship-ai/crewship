@@ -174,6 +174,11 @@ type credentialResponse struct {
 	// Username is populated for USERPASS credentials only — see the
 	// per-type behaviour table in orchestrator.buildCredFileScript.
 	Username string `json:"username,omitempty"`
+	// LeaseExpiresAt mirrors mcpCredEntry.LeaseExpiresAt: the delivering grant's
+	// #1373 lease deadline (RFC3339 UTC), empty for a standing grant. Must be
+	// threaded through to the orchestrator or the crew sidecar receives no
+	// deadline and holds a leased key for the container's whole life.
+	LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
 }
 
 // CreateChatRequest holds the parameters for creating a new chat session.
@@ -426,12 +431,13 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 	creds := make([]orchestrator.Credential, len(data.Credentials))
 	for i, c := range data.Credentials {
 		creds[i] = orchestrator.Credential{
-			ID:         c.ID,
-			EnvVarName: c.EnvVar,
-			PlainValue: c.Value,
-			Priority:   c.Priority,
-			Type:       c.Type,
-			Username:   c.Username,
+			ID:             c.ID,
+			EnvVarName:     c.EnvVar,
+			PlainValue:     c.Value,
+			Priority:       c.Priority,
+			Type:           c.Type,
+			Username:       c.Username,
+			LeaseExpiresAt: c.LeaseExpiresAt,
 		}
 	}
 

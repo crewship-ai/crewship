@@ -343,12 +343,18 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 
 	var status, chatID, crewID, fromSlug, escalationType string
 	var credentialID, initiatorUserID sql.NullString
+	// fromAgentID/fromAgentName: the agent that raised the escalation. Needed by
+	// the #1373 lease mint below — approving an agent-proposed credential is an
+	// approval, and an approval is what issues a lease.
+	var fromAgentID, fromAgentName string
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT e.status, e.chat_id, e.crew_id, a.slug, e.type, e.credential_id, a.created_by_user_id
+		SELECT e.status, e.chat_id, e.crew_id, a.slug, e.type, e.credential_id, a.created_by_user_id,
+		       e.from_agent_id, COALESCE(a.name, '')
 		FROM escalations e
 		JOIN agents a ON a.id = e.from_agent_id
 		WHERE e.id = ? AND e.workspace_id = ?
-	`, escalationID, workspaceID).Scan(&status, &chatID, &crewID, &fromSlug, &escalationType, &credentialID, &initiatorUserID)
+	`, escalationID, workspaceID).Scan(&status, &chatID, &crewID, &fromSlug, &escalationType, &credentialID, &initiatorUserID,
+		&fromAgentID, &fromAgentName)
 
 	// Validate redirect_to agent exists in the same crew (after we know crew_id).
 	if err == nil && body.Action == "redirect" && body.RedirectTo != "" {
@@ -500,6 +506,13 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 			} else {
 				recordCredentialEventBestEffort(r.Context(), h.db, h.logger, credentialID.String,
 					AuditEventApproved, "", "", map[string]any{"approved_by": approverID})
+				// #1373: the approval is the moment access is granted, so it is the
+				// moment to issue a LEASE. Only runs when the workspace has opted
+				// in (auto_lease_seconds > 0) — see grantLeasedCredentialOnApprove
+				// for why the opt-in gate is load-bearing here and not merely a
+				// feature flag.
+				h.grantLeasedCredentialOnApprove(r.Context(), workspaceID, crewID,
+					fromAgentID, fromAgentName, credentialID.String, escalationID)
 			}
 		case "reject":
 			res, credErr := h.db.ExecContext(r.Context(), `

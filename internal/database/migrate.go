@@ -1795,6 +1795,14 @@ END;
 	// verdict (#1403). Sits above the engine stack (v156-159) and this
 	// branch's v160-163. See migrate_consts_v164_run_verdict_flag.go.
 	{version: 164, name: "run_verdict_flag", sql: migrationRunVerdictFlag},
+	// v165: lease provenance on agent_credentials (lease_source /
+	// lease_issued_at / lease_request_id) plus the per-workspace
+	// keeper_governance_settings.auto_lease_seconds opt-in that makes a Keeper
+	// ALLOW / escalation approve auto-issue a short-lived lease instead of
+	// leaving a standing grant (#1373, second increment — v149 added the
+	// expires_at the enforcement paths already gate on).
+	// See migrate_consts_v165_credential_lease_mint.go.
+	{version: 165, name: "credential_lease_mint", sql: migrationCredentialLeaseMint},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

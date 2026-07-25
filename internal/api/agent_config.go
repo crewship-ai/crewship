@@ -618,14 +618,24 @@ func (h *InternalHandler) lookupCrewNamesForWorkspace(r *http.Request, workspace
 // proceed with garbage tokens. Filtering at the SQL boundary is
 // the load-bearing guard; the defensive sentinel check inside the
 // decrypt loop catches a future code path that bypasses this query.
+//
+// #1373: the grant may be a short-lived LEASE (agent_credentials.expires_at).
+// This is the BOOT delivery path — its output becomes the container's env vars,
+// its /secrets files and the sidecar credstore — so a lapsed lease slipping
+// through here is held for the container's entire life, which is precisely the
+// standing-credential problem the lease exists to remove. Gate it with the same
+// predicate /keeper/execute enforces (credentialLeaseGateSQL); NULL expires_at is
+// a standing grant and is unaffected.
 func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID string) ([]mcpCredEntry, error) {
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT ac.credential_id, ac.env_var_name, ac.priority, c.encrypted_value, c.type, COALESCE(c.username, '')
+		SELECT ac.credential_id, ac.env_var_name, ac.priority, c.encrypted_value, c.type, COALESCE(c.username, ''),
+		       COALESCE(ac.expires_at, '')
 		FROM agent_credentials ac
 		JOIN credentials c ON c.id = ac.credential_id
 		WHERE ac.agent_id = ? AND c.deleted_at IS NULL AND c.status = 'ACTIVE'
+		  AND `+credentialLeaseGateSQL+`
 		ORDER BY ac.priority ASC
-	`, agentID)
+	`, agentID, leaseComparisonNow())
 	if err != nil {
 		h.logger.Error("resolve agent credentials", "error", err)
 		return nil, err
@@ -636,7 +646,7 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 	for rows.Next() {
 		var ce mcpCredEntry
 		var encValue string
-		if err := rows.Scan(&ce.ID, &ce.EnvVar, &ce.Priority, &encValue, &ce.Type, &ce.Username); err != nil {
+		if err := rows.Scan(&ce.ID, &ce.EnvVar, &ce.Priority, &encValue, &ce.Type, &ce.Username, &ce.LeaseExpiresAt); err != nil {
 			h.logger.Error("scan credential for resolve", "error", err)
 			return nil, err
 		}
@@ -668,13 +678,31 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 // resolveOAuthAccessTokens ensures OAUTH2 credentials include their access tokens
 // so the orchestrator can write tokens.json.
 func (h *InternalHandler) resolveOAuthAccessTokens(r *http.Request, creds []mcpCredEntry) []mcpCredEntry {
-	resolvedOAuthIDs := make(map[string]bool)
+	// credID -> the delivering grant's lease deadline, so the synthesized access
+	// token entry inherits the same #1373 lease as the client_id/client_secret
+	// entries it was derived from. Without this the derived entry would look like
+	// a standing grant even when its parent is leased.
+	//
+	// When several entries share a credential id, keep the MOST RESTRICTIVE
+	// (earliest non-empty) deadline rather than letting the last one seen win. The
+	// UNIQUE(agent_id, credential_id) constraint means resolveAgentCredentials
+	// cannot currently produce two rows for one credential — but this map is fed
+	// from a []mcpCredEntry that other builders also contribute to, and a
+	// synthesized token silently outliving the tightest grant it was derived from
+	// is the kind of bug that only shows up as an unexplained late injection.
+	// RFC3339 UTC strings sort lexicographically in chronological order, so a
+	// plain string compare is the right ordering here.
+	resolvedOAuthIDs := make(map[string]string)
 	for _, c := range creds {
-		if c.Type == "OAUTH2" {
-			resolvedOAuthIDs[c.ID] = true
+		if c.Type != "OAUTH2" {
+			continue
+		}
+		existing, seen := resolvedOAuthIDs[c.ID]
+		if !seen || (c.LeaseExpiresAt != "" && (existing == "" || c.LeaseExpiresAt < existing)) {
+			resolvedOAuthIDs[c.ID] = c.LeaseExpiresAt
 		}
 	}
-	for credID := range resolvedOAuthIDs {
+	for credID, leaseExpiresAt := range resolvedOAuthIDs {
 		// Check if access token is already in creds
 		hasAccessToken := false
 		for _, c := range creds {
@@ -696,10 +724,11 @@ func (h *InternalHandler) resolveOAuthAccessTokens(r *http.Request, creds []mcpC
 			"SELECT encrypted_value FROM credentials WHERE id = ? AND deleted_at IS NULL AND status = 'ACTIVE'", credID).Scan(&encVal); err == nil {
 			if dec, err := decryptCredential(encVal); err == nil && dec != "" && !isPendingSentinel(dec) {
 				creds = append(creds, mcpCredEntry{
-					ID:     credID,
-					EnvVar: "_OAUTH_ACCESS_TOKEN:" + credID,
-					Value:  dec,
-					Type:   "OAUTH2",
+					ID:             credID,
+					EnvVar:         "_OAUTH_ACCESS_TOKEN:" + credID,
+					Value:          dec,
+					Type:           "OAUTH2",
+					LeaseExpiresAt: leaseExpiresAt,
 				})
 			}
 		}

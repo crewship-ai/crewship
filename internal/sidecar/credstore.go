@@ -3,6 +3,7 @@ package sidecar
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // ProviderType identifies an LLM API provider.
@@ -29,7 +30,39 @@ type Credential struct {
 	Provider ProviderType `json:"provider"`
 	Token    string       `json:"token"`
 	Priority int          `json:"priority"`
+	// LeaseExpiresAt is the grant's credential-lease deadline in RFC3339 UTC,
+	// carried in the boot payload from the server-side grant that delivered this
+	// credential (#1373). Empty means a STANDING grant with no expiry — the
+	// default, and the behaviour of every credential before leases existed.
+	//
+	// It travels with the credential rather than being polled because boot
+	// delivery is credential-scoped (one crew-wide CredStore keyed by credential
+	// id) while a lease is grant-scoped (per agent). The crew-wide listing the
+	// revocation reaper polls has no per-agent dimension and a workspace-scoped
+	// credential passes its visibility filter regardless of any grant's TTL, so
+	// the server cannot express "this delivery was leased" through that channel.
+	LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
+
+	// leaseDeadline is LeaseExpiresAt parsed once at Load, so the hot Select path
+	// does no time parsing. Zero value means "no lease" (standing). Unexported,
+	// so it never round-trips through the boot JSON.
+	leaseDeadline time.Time
 }
+
+// leaseLapsed reports whether this credential's lease has expired as of now.
+// A standing grant (zero deadline) never lapses. The comparison is "at or after
+// the deadline is lapsed", mirroring the server-side gate (expires_at > now) so
+// the two sides agree on the exact instant a lease dies.
+func (c *Credential) leaseLapsed(now time.Time) bool {
+	return !c.leaseDeadline.IsZero() && !now.Before(c.leaseDeadline)
+}
+
+// leaseEpochSentinel is the deadline assigned to a credential whose
+// LeaseExpiresAt could not be parsed. The server always writes a fixed-width
+// RFC3339 UTC value, so an unparseable one means corruption — and for a security
+// control the safe reading of "I cannot tell when this expires" is "it already
+// did", not "it never does".
+var leaseEpochSentinel = time.Unix(0, 0).UTC()
 
 // CredStore holds credentials in memory. Never written to disk.
 // Safe for concurrent use.
@@ -49,12 +82,26 @@ func NewCredStore() *CredStore {
 	return &CredStore{}
 }
 
-// Load replaces all credentials in the store.
+// Load replaces all credentials in the store, parsing each one's lease deadline
+// (#1373) so Select can enforce it without re-parsing per request.
 func (cs *CredStore) Load(creds []Credential) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	cs.creds = make([]Credential, len(creds))
 	copy(cs.creds, creds)
+	for i := range cs.creds {
+		raw := cs.creds[i].LeaseExpiresAt
+		if raw == "" {
+			cs.creds[i].leaseDeadline = time.Time{} // standing grant
+			continue
+		}
+		if d, err := time.Parse(time.RFC3339, raw); err == nil {
+			cs.creds[i].leaseDeadline = d
+		} else {
+			// Fail closed — see leaseEpochSentinel.
+			cs.creds[i].leaseDeadline = leaseEpochSentinel
+		}
+	}
 	// Restart round-robin from the top on a reload (matches the previous
 	// idx-map reset). Safe under the write lock held here; no Select can be
 	// mid-flight because Select holds the read lock.
@@ -73,6 +120,14 @@ func (cs *CredStore) Select(provider ProviderType) *Credential {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
 
+	// #1373: a credential whose lease has lapsed is not selectable, and the
+	// filter is applied in BOTH passes so a lapsed key neither inflates the tier
+	// count nor shadows a usable sibling. Enforcing it here (rather than relying
+	// on the 60s reaper sweep) makes expiry immediate instead of up to a full
+	// interval late — the reaper's job is to stop the plaintext being resident,
+	// not to be the gate.
+	now := time.Now()
+
 	// Pass 1: find the best (lowest-numeric) Priority for this provider and
 	// count how many creds sit in that top tier. Done in a single scan instead
 	// of building an intermediate `candidates` slice.
@@ -80,7 +135,7 @@ func (cs *CredStore) Select(provider ProviderType) *Credential {
 	topCount := 0
 	for i := range cs.creds {
 		c := &cs.creds[i]
-		if c.Provider != provider {
+		if c.Provider != provider || c.leaseLapsed(now) {
 			continue
 		}
 		if topCount == 0 || c.Priority < bestPriority {
@@ -106,7 +161,7 @@ func (cs *CredStore) Select(provider ProviderType) *Credential {
 	seen := 0
 	for i := range cs.creds {
 		c := &cs.creds[i]
-		if c.Provider != provider || c.Priority != bestPriority {
+		if c.Provider != provider || c.Priority != bestPriority || c.leaseLapsed(now) {
 			continue
 		}
 		if seen == target {
@@ -170,6 +225,41 @@ func (cs *CredStore) Reap(keep map[string]struct{}) int {
 		cs.rr.Clear()
 	}
 	return removed
+}
+
+// ExpireLeases removes every credential whose lease has lapsed as of now,
+// returning how many were dropped (#1373). This is the reaper's lease primitive,
+// and it is deliberately independent of the revocation reaper's server fetch:
+//
+//   - Revocation is fail-OPEN. The sidecar cannot know about a revocation without
+//     asking crewshipd, so a transient fetch failure must keep the current keys
+//     (see reapRevokedCredentials) or a blip would nuke a working agent.
+//   - Lease expiry is fail-CLOSED. The deadline was delivered with the
+//     credential, so no round-trip is needed and an unreachable server is no
+//     excuse for continuing to serve a lapsed lease.
+//
+// Select already refuses a lapsed lease, so this is not the correctness gate —
+// it is what stops the expired plaintext from staying resident in the process.
+func (cs *CredStore) ExpireLeases(now time.Time) int {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	filtered := cs.creds[:0]
+	dropped := 0
+	for _, c := range cs.creds {
+		if c.leaseLapsed(now) {
+			dropped++
+			continue
+		}
+		filtered = append(filtered, c)
+	}
+	cs.creds = filtered
+	if dropped > 0 {
+		// Mirrors Reap/Remove: a shrunk tier can leave a stale round-robin
+		// counter pointing past the end.
+		cs.rr.Clear()
+	}
+	return dropped
 }
 
 // Count returns the number of credentials for a provider.

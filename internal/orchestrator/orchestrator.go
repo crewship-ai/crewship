@@ -158,6 +158,12 @@ type Credential struct {
 	// from PlainValue so the env-var pair X_USERNAME / X_PASSWORD can
 	// be emitted at mount time without re-parsing a JSON blob.
 	Username string `json:"username,omitempty"`
+	// LeaseExpiresAt is the delivering agent_credentials grant's credential-lease
+	// deadline in RFC3339 UTC, empty for a standing grant (#1373). Passed through
+	// to the sidecar boot payload so the crew's CredStore can refuse and then
+	// evict the credential once its lease lapses — the server-side gates only
+	// cover the moment of delivery, not the container's whole lifetime.
+	LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
 }
 
 // RunState tracks the runtime state of an active agent run, persisted in the
