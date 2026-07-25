@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"text/tabwriter"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -44,6 +46,8 @@ Examples:
 			return err
 		}
 
+		// Mirrors journal.VerifyResult. The machine formats re-serialise THIS
+		// struct, so a field missing here is a field the harness never sees.
 		var res struct {
 			WorkspaceID string `json:"workspace_id"`
 			OK          bool   `json:"ok"`
@@ -52,6 +56,18 @@ Examples:
 			BrokenSeq   int64  `json:"broken_seq"`
 			BrokenID    string `json:"broken_id"`
 			Reason      string `json:"reason"`
+			Breaks      []struct {
+				Seq    int64  `json:"seq"`
+				ID     string `json:"id"`
+				Kind   string `json:"kind"`
+				Reason string `json:"reason"`
+			} `json:"breaks,omitempty"`
+			// omitempty so an OLDER server — which sends none of these — yields
+			// byte-identical JSON to before. Without it the CLI would assert
+			// "break_count: 0", i.e. "no further breaks", when the truth is
+			// "this server never told us".
+			BreakCount      int  `json:"break_count,omitempty"`
+			BreaksTruncated bool `json:"breaks_truncated,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &res); err != nil {
 			return err
@@ -66,8 +82,40 @@ Examples:
 				}
 				return
 			}
-			fmt.Printf("Journal chain BROKEN at seq %d (entry %s): %s\n", res.BrokenSeq, res.BrokenID, res.Reason)
-			fmt.Printf("Verified %d entries before the break.\n", res.Count)
+			// NOT "verified N entries before the break" any more: the walk no
+			// longer stops at the first one, so Count is every entry examined.
+			//
+			// And the unit is CHECKS, not entries: one row runs both a content
+			// and a priority check, so a single bad entry can contribute two
+			// breaks. Zero means either a STRUCTURAL break — a sequence gap or
+			// disorder, which halts before any per-row check is recorded — or an
+			// older server that does not send the field. Neither justifies
+			// inventing a count of 1.
+			if res.BreakCount > 0 {
+				fmt.Printf("Journal chain BROKEN — %d integrity check(s) failed across %d entries examined.\n",
+					res.BreakCount, res.Count)
+			} else {
+				fmt.Printf("Journal chain BROKEN after examining %d entries.\n", res.Count)
+			}
+			fmt.Printf("First break at seq %d (entry %s): %s\n", res.BrokenSeq, res.BrokenID, res.Reason)
+			if len(res.Breaks) > 1 {
+				shown := len(res.Breaks)
+				if res.BreaksTruncated {
+					fmt.Printf("\nFirst %d of %d breaks:\n", shown, res.BreakCount)
+				} else {
+					fmt.Printf("\nAll %d breaks:\n", shown)
+				}
+				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+				fmt.Fprintln(w, "SEQ\tKIND\tENTRY\tREASON")
+				for _, b := range res.Breaks {
+					reason := b.Reason
+					if len(reason) > 72 {
+						reason = reason[:69] + "..."
+					}
+					fmt.Fprintf(w, "%d\t%s\t%s\t%s\n", b.Seq, b.Kind, b.ID, reason)
+				}
+				w.Flush() //nolint:errcheck // best-effort table render
+			}
 		}); err != nil {
 			return err
 		}

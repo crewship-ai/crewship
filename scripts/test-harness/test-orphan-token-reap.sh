@@ -30,7 +30,15 @@ preflight
 section "1. The reap-orphan-containers command exists in the CLI"
 # ─────────────────────────────────────────────────────────────────────────────
 help_out="$(cs admin reap-orphan-containers --help 2>&1)"
-if printf '%s' "$help_out" | grep -qi "stale internal token"; then
+# Assert on the FLAGS, not on prose.
+#
+# This used to grep for "stale internal token", which appears only in the
+# command's `Short` description — and cobra renders `Long` for --help, so the
+# check went red the moment the Long text was reworded. The command was wired
+# correctly the whole time. Flag names are the actual CLI contract this test
+# exists to protect; wording is not.
+if printf '%s' "$help_out" | grep -q -- "--apply" &&
+  printf '%s' "$help_out" | grep -qi "reap-orphan-containers"; then
   _pass "admin reap-orphan-containers is wired (API↔CLI parity)"
 else
   _fail "admin reap-orphan-containers --help" "$(printf '%s' "$help_out" | head -c 200 | tr '\n' ' ')"
