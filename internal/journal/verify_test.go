@@ -363,3 +363,52 @@ func TestVerifyChain_StructuralBreakStillHalts(t *testing.T) {
 		t.Errorf("Count = %d — a sequence gap must stop the walk, not continue past it", res.Count)
 	}
 }
+
+// TestVerifyChain_BreaksAreCapped: a wholly-unverifiable chain must not be
+// answered with a megabyte of JSON.
+//
+// The failure mode that motivates this: if the chain KEY differs — a rotated
+// or unset ENCRYPTION_KEY — then every single row mismatches. Before breaks
+// were collected the walk returned at row 1; collecting them without a bound
+// turns that same scenario into one ChainBreak per entry, which on stage's
+// 86k-entry journal is tens of megabytes allocated and serialised on an admin
+// endpoint. The operator still needs to know the true scale, so the count is
+// exact even though the list is not.
+func TestVerifyChain_BreaksAreCapped(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushInterval: time.Hour})
+	defer w.Close()
+
+	const n = maxReportedBreaks + 15
+	ids := seedChain(t, w, "ws_test", n)
+
+	// Tamper with every row — the "wrong key" shape, without needing to
+	// rotate a key mid-test.
+	for _, id := range ids {
+		if _, err := db.Exec(`UPDATE journal_entries SET summary = ? WHERE id = ?`, "TAMPERED", id); err != nil {
+			t.Fatalf("tamper: %v", err)
+		}
+	}
+
+	res, err := VerifyChain(context.Background(), db, "ws_test")
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if res.OK {
+		t.Fatal("wholesale tampering went undetected")
+	}
+	if len(res.Breaks) > maxReportedBreaks {
+		t.Errorf("Breaks = %d, want at most %d — an unbounded list is the bug", len(res.Breaks), maxReportedBreaks)
+	}
+	if res.BreakCount != n {
+		t.Errorf("BreakCount = %d, want %d — the count must stay exact even when the list is trimmed", res.BreakCount, n)
+	}
+	if !res.BreaksTruncated {
+		t.Error("BreaksTruncated must say so when the list is shorter than the count")
+	}
+	// The first break still names the earliest row, as before.
+	if res.BrokenID != ids[0] {
+		t.Errorf("BrokenID = %s, want %s", res.BrokenID, ids[0])
+	}
+}

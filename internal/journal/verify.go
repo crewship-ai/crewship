@@ -286,8 +286,22 @@ type VerifyResult struct {
 	//
 	// BrokenSeq/BrokenID/Reason are retained and still describe the FIRST
 	// break, so existing callers and the CLI's exit code are unchanged.
-	Breaks []ChainBreak `json:"breaks,omitempty"`
+	//
+	// CAPPED at maxReportedBreaks. If the chain key differs — a rotated or
+	// unset ENCRYPTION_KEY — then EVERY row mismatches, and an unbounded list
+	// would answer an admin request with one entry per journal row (tens of
+	// megabytes on stage's 86k-entry journal). BreakCount stays exact so the
+	// true scale is never hidden by the trim.
+	Breaks          []ChainBreak `json:"breaks,omitempty"`
+	BreakCount      int          `json:"break_count,omitempty"`      // total breaks found (>= len(Breaks))
+	BreaksTruncated bool         `json:"breaks_truncated,omitempty"` // list trimmed; see BreakCount
 }
+
+// maxReportedBreaks bounds the per-row breaks carried in a VerifyResult. A
+// hundred is far more than an operator will read and enough to tell "one
+// legacy row" from "the whole chain is unverifiable" — which is the only
+// distinction that changes what they do next.
+const maxReportedBreaks = 100
 
 // ChainBreak is one row that failed its integrity check.
 type ChainBreak struct {
@@ -301,7 +315,12 @@ type ChainBreak struct {
 // pointing at the earliest one.
 func (r *VerifyResult) note(seq int64, id, kind, reason string) {
 	r.OK = false
-	r.Breaks = append(r.Breaks, ChainBreak{Seq: seq, ID: id, Kind: kind, Reason: reason})
+	r.BreakCount++
+	if len(r.Breaks) < maxReportedBreaks {
+		r.Breaks = append(r.Breaks, ChainBreak{Seq: seq, ID: id, Kind: kind, Reason: reason})
+	} else {
+		r.BreaksTruncated = true
+	}
 	if r.BrokenSeq == 0 {
 		r.BrokenSeq = seq
 		r.BrokenID = id
