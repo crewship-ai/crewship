@@ -1,17 +1,35 @@
 package docker
 
 import (
+	"log/slog"
 	"os"
 	"time"
 )
 
-// startupMtimeSkew is the grace window before a sidecar that is merely a little
-// older than the server binary is called stale. A single deploy builds the
-// server and the sidecar within the same run (dev.sh builds them back to back;
-// a release Makefile makes build:go depend on build:sidecar), so their mtimes
-// land within a minute of each other. Only a sidecar meaningfully older than
-// the server indicates a missed rebuild/recopy for this deploy.
-const startupMtimeSkew = 60 * time.Second
+// startupMtimeSkew is the grace window before a sidecar older than the server
+// binary is called stale. It must be wide enough to absorb the LEGITIMATE mtime
+// spread between a server and a sidecar built in the SAME deploy but not
+// necessarily back-to-back:
+//
+//   - dev.sh / `make` build them seconds apart (same shell run) — tiny spread.
+//   - GoReleaser builds `crewship` (which //go:embed's the ~55MB Next.js export,
+//     so it compiles+links measurably slower) and the small, embed-free
+//     `crewship-sidecar` as INDEPENDENT `builds:` entries with no ordering or
+//     archive mtime normalization, so within one release run their mtimes can
+//     legitimately differ by minutes on a busy multi-arch matrix — with zero
+//     actual staleness. A 60s window would cry wolf on a fresh release install
+//     (the primary install.sh / Homebrew channel), the exact false alarm this
+//     check must avoid.
+//
+// Genuine staleness — a sidecar that was never rebuilt for this deploy — is
+// days-to-weeks old (the live dev1 case was a ~4-week-old pinned binary), so a
+// 24h window cleanly separates real staleness from same-run build-order spread:
+// no single release/deploy run takes anywhere near a day, and a genuinely stale
+// sidecar is far older than one. (The authoritative signal for release builds
+// is the injected build hash — see assertSidecarFreshAtStartup; wiring that
+// hash into .goreleaser.yml so it is populated on release binaries too is a
+// tracked follow-up. This mtime check is the coarse, deploy-agnostic backstop.)
+const startupMtimeSkew = 24 * time.Hour
 
 // sidecarStaleReason is the pure classifier behind the startup freshness
 // assertion (#1390). It returns a short human reason when the configured
@@ -83,7 +101,16 @@ func (p *Provider) assertSidecarFreshAtStartup(serverBinaryPath string) {
 	if reason == "" {
 		return
 	}
-	p.logger.Warn("stale crewship-sidecar bind-mounted into crew containers: the configured sidecar predates this server build, so sidecar-side features shipped since (egress client, memory-auth chokepoint, #1387 token_fp / orphan-reap) may be running from an older binary — rebuild + recopy crewship-sidecar for this deploy (dev slots: it is co-located with the server binary; a stale CREWSHIP_SIDECAR_PATH pin in .env.local is ignored by dev.sh since #1402), then restart agents (#1390)",
+	// Mirror warnStaleSidecarArtifact's nil-logger guard: this method promises
+	// never to become a boot-time noise source, and a hand-constructed Provider
+	// (as several tests build) could have a nil logger — Warn on it would panic
+	// rather than fail open. New() always defaults it, so this only matters off
+	// that path.
+	log := p.logger
+	if log == nil {
+		log = slog.Default()
+	}
+	log.Warn("stale crewship-sidecar bind-mounted into crew containers: the configured sidecar predates this server build, so sidecar-side features shipped since (egress client, memory-auth chokepoint, #1387 token_fp / orphan-reap) may be running from an older binary — rebuild + recopy crewship-sidecar for this deploy (dev slots: it is co-located with the server binary; a stale CREWSHIP_SIDECAR_PATH pin in .env.local is ignored by dev.sh since #1402), then restart agents (#1390)",
 		"sidecar_path", path,
 		"sidecar_mtime", si.ModTime(),
 		"server_binary", serverBinaryPath,

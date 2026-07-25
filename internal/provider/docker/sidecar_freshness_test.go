@@ -24,8 +24,8 @@ func TestSidecarStaleReason(t *testing.T) {
 		wantStale    bool
 	}{
 		{
-			name:         "sidecar far older than server -> stale",
-			sidecarMtime: base.Add(-2 * time.Hour),
+			name:         "sidecar days older than server -> stale",
+			sidecarMtime: base.Add(-3 * 24 * time.Hour),
 			serverMtime:  base,
 			wantStale:    true,
 		},
@@ -42,8 +42,20 @@ func TestSidecarStaleReason(t *testing.T) {
 			wantStale:    false,
 		},
 		{
-			name:         "sidecar within skew window -> fresh (same build)",
-			sidecarMtime: base.Add(-30 * time.Second),
+			// A GoReleaser release run can leave the sidecar minutes older than
+			// the embed-heavy server binary with zero real staleness — must stay
+			// fresh, or the check cries wolf on a clean install (#1446 review).
+			name:         "sidecar minutes older (release build-order spread) -> fresh",
+			sidecarMtime: base.Add(-30 * time.Minute),
+			serverMtime:  base,
+			wantStale:    false,
+		},
+		{
+			// Boundary: exactly startupMtimeSkew older is fresh (comparison is a
+			// non-strict `<`). Pins the edge so an accidental `<=`/`>=` regression
+			// or a change to the constant is caught.
+			name:         "sidecar exactly at skew boundary -> fresh",
+			sidecarMtime: base.Add(-startupMtimeSkew),
 			serverMtime:  base,
 			wantStale:    false,
 		},
@@ -92,11 +104,11 @@ func TestAssertSidecarFreshAtStartup_WarnsOnStale(t *testing.T) {
 		}
 	}
 	serverT := time.Now()
-	// Sidecar two hours older than the server binary -> stale.
+	// Sidecar days older than the server binary -> stale (well past the 24h skew).
 	if err := os.Chtimes(server, serverT, serverT); err != nil {
 		t.Fatal(err)
 	}
-	staleT := serverT.Add(-2 * time.Hour)
+	staleT := serverT.Add(-3 * 24 * time.Hour)
 	if err := os.Chtimes(sidecar, staleT, staleT); err != nil {
 		t.Fatal(err)
 	}
@@ -138,4 +150,31 @@ func TestAssertSidecarFreshAtStartup_NoBindMount(t *testing.T) {
 	if buf.Len() != 0 {
 		t.Fatalf("expected no warning when no sidecar is bind-mounted, got:\n%s", buf.String())
 	}
+}
+
+// TestAssertSidecarFreshAtStartup_NilLoggerDoesNotPanic guards the fail-open
+// promise on a hand-constructed Provider with no logger (New() always defaults
+// it, but tests and future callers may not): a stale sidecar must not turn a
+// nil logger into a boot-time panic. Mirrors warnStaleSidecarArtifact's guard.
+func TestAssertSidecarFreshAtStartup_NilLoggerDoesNotPanic(t *testing.T) {
+	dir := t.TempDir()
+	server := filepath.Join(dir, "server-bin")
+	sidecar := filepath.Join(dir, "crewship-sidecar")
+	for _, f := range []string{server, sidecar} {
+		if err := os.WriteFile(f, []byte("x"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	serverT := time.Now()
+	if err := os.Chtimes(server, serverT, serverT); err != nil {
+		t.Fatal(err)
+	}
+	// Days-stale so the WARN branch (which touches the logger) is reached.
+	staleT := serverT.Add(-3 * 24 * time.Hour)
+	if err := os.Chtimes(sidecar, staleT, staleT); err != nil {
+		t.Fatal(err)
+	}
+	p := &Provider{cfg: Config{SidecarBinaryPath: sidecar}, logger: nil}
+	// Must not panic — the guard falls back to slog.Default().
+	p.assertSidecarFreshAtStartup(server)
 }
