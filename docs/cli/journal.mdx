@@ -149,6 +149,29 @@ fi
 [Audit Log](/security/audit#tamper-evidence-the-journal-hash-chain) page for
 the guarantee and what it does (and does not) cover.
 
+Verification also reconciles the one committed field that is *meant* to change
+after write — entry **priority**. Setting a pin or `permanent` marker is an
+authorised action, so the chain commits to the immutable emit-time value while the
+live column is checked against its append-only change ledger. A `priority
+mismatch at seq N` reason therefore means the column was flipped **without** a
+recorded operator edit, i.e. directly in the database. Pinning an entry through
+the API or UI never breaks verification.
+
+<Note>
+Before this reconciliation existed, priority was hashed directly — so the first
+time anyone pinned an entry, `journal verify` started reporting that workspace as
+tampered forever. If you have been ignoring a persistent break, re-run after
+upgrading: a false positive from a legitimate pin is now impossible.
+</Note>
+
+## `crewship keeper history`
+
+Print the append-only decision history for one Keeper request — see
+[`crewship keeper history`](/guides/keeper#governance-cli). `crewship keeper
+requests` shows what was *decided*; `history` shows how the request got there
+(that it was `PENDING`, who caused each transition, and the exit code of any
+command an `ALLOW` ran).
+
 ## `crewship journal lookup`
 
 Fetch the workspace reference table the web timeline uses to render journal cards with human-readable crew/agent/mission names. Useful for joining `crewship journal --format json` output against names in shell pipelines.

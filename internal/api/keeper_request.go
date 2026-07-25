@@ -180,11 +180,29 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// can induce DB write pressure suppress the audit trail while still
 	// obtaining the decision. Fail closed, matching the F4 recordKeeperRequest
 	// path which 500s on the same failure.
-	if _, err := h.db.ExecContext(r.Context(), `
+	//
+	// #1369: the PENDING row and its seq-1 ledger transition are written in ONE
+	// transaction. keeper_requests is UPDATEd in place to its decision below, so
+	// without the ledger there would be no surviving record that this request was
+	// ever pending — and the projection and the history must never be able to
+	// disagree about that.
+	if err := insertKeeperRequestWithTransition(r.Context(), h.db, `
 		INSERT INTO keeper_requests (id, requesting_agent_id, requesting_crew_id, credential_id, task_id, intent, decision, created_at)
 		VALUES (?, ?, ?, ?, NULLIF(?,?), ?, 'PENDING', ?)`,
-		reqID, body.RequestingAgentID, body.RequestingCrewID, body.CredentialID,
-		body.TaskID, "", body.Intent, req.CreatedAt.Format(time.RFC3339)); err != nil {
+		[]any{reqID, body.RequestingAgentID, body.RequestingCrewID, body.CredentialID,
+			body.TaskID, "", body.Intent, req.CreatedAt.Format(time.RFC3339)},
+		keeperTransition{
+			RequestID:    reqID,
+			WorkspaceID:  body.WorkspaceID,
+			State:        keeperStatePending,
+			RequestType:  string(keeper.RequestTypeAccess),
+			AgentID:      body.RequestingAgentID,
+			CrewID:       body.RequestingCrewID,
+			CredentialID: body.CredentialID,
+			Intent:       body.Intent,
+			ActorType:    keeperActorAgent,
+			ActorID:      body.RequestingAgentID,
+		}); err != nil {
 		h.logger.Error("keeper: insert PENDING request failed; refusing to decide without an audit row", "error", err)
 		replyError(w, http.StatusInternalServerError, "audit persistence failed")
 		return
@@ -259,10 +277,31 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := h.db.ExecContext(r.Context(), `
+	// #1369: the in-place UPDATE to the decision now rides a transaction that also
+	// appends the transition to the append-only ledger, so the PENDING→decided
+	// step is recorded rather than overwritten. Failure stays logged (not fatal):
+	// the gatekeeper has already decided and the response below reports that
+	// decision — turning a bookkeeping failure into a 500 would flip the agent's
+	// semantics from "decided" to "retry", which is the wrong recovery for an
+	// outcome that has already happened.
+	if err := updateKeeperDecisionWithTransition(r.Context(), h.db, `
 		UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, decided_at=?, ollama_prompt=?, ollama_raw_response=? WHERE id=?`,
-		gkResp.Decision, gkResp.Reason, gkResp.RiskScore, now,
-		nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), reqID); err != nil {
+		[]any{gkResp.Decision, gkResp.Reason, gkResp.RiskScore, now,
+			nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), reqID},
+		keeperTransition{
+			RequestID:    reqID,
+			WorkspaceID:  body.WorkspaceID,
+			State:        gkResp.Decision,
+			RequestType:  string(keeper.RequestTypeAccess),
+			AgentID:      body.RequestingAgentID,
+			CrewID:       body.RequestingCrewID,
+			CredentialID: body.CredentialID,
+			Intent:       body.Intent,
+			Reason:       gkResp.Reason,
+			RiskScore:    &gkResp.RiskScore,
+			ActorType:    keeperActorKeeper,
+			ActorID:      "keeper",
+		}); err != nil {
 		h.logger.Error("keeper: update request decision", "error", err)
 	}
 

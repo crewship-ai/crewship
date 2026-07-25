@@ -1795,6 +1795,17 @@ END;
 	// verdict (#1403). Sits above the engine stack (v156-159) and this
 	// branch's v160-163. See migrate_consts_v164_run_verdict_flag.go.
 	{version: 164, name: "run_verdict_flag", sql: migrationRunVerdictFlag},
+	// v165 is reserved for the credential-lease-mint work (#1373) landing in
+	// parallel; this branch takes v166 so the two merge in ascending order
+	// without a renumber. See migrate_consts_v166_keeper_append_only.go.
+	//
+	// v166: the append-only halves of the tamper-evident audit trail (#1369).
+	// keeper_request_events records every keeper decision TRANSITION (the
+	// operational keeper_requests row is UPDATEd in place, destroying prior
+	// state), and journal_entries.priority_at_emit + journal_entry_priorities
+	// stop the operator-facing priority edit from permanently breaking the
+	// hash-chain it is inside. Both new tables are append-only by trigger.
+	{version: 166, name: "keeper_append_only_audit", sql: migrationKeeperAppendOnlyAudit},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

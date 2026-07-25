@@ -88,6 +88,12 @@ var BackupTables = []string{
 	"workspace_files",
 	"chat_attachments",
 	"journal_entries",
+	// journal_entry_priorities (v166) FKs journal_entries(id), so it must land
+	// AFTER its parent. It carries the append-only ledger of operator pin/
+	// permanent edits: without it a restored bundle's live `priority` values have
+	// no ledger to reconcile against, and VerifyChain reads every historical edit
+	// as a silent DB-level flip (i.e. as tampering).
+	"journal_entry_priorities",
 	"workspace_members",
 	"workspace_invitations",
 	"workspace_mcp_servers",

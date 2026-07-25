@@ -28,6 +28,7 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | `GET` | [/api/v1/admin/memory/config](#get-api-v1-admin-memory-config) | Read per-workspace memory configuration |
 | `PATCH` | [/api/v1/admin/memory/config](#patch-api-v1-admin-memory-config) | Partial-merge update of memory configuration |
 | `GET` | [/api/v1/admin/keeper/requests](#get-api-v1-admin-keeper-requests) | Keeper access-request audit log |
+| `GET` | [/api/v1/admin/keeper/requests/{requestId}/events](#get-api-v1-admin-keeper-requests-requestid-events) | Append-only transition history for one request |
 | `GET` | [/api/v1/admin/journal/verify](#get-api-v1-admin-journal-verify) | Verify the audit journal hash-chain (tamper-evidence) |
 | `POST` | [/api/v1/internal/keeper/skill-review](#post-api-v1-internal-keeper-skill-review) | F4.1 — periodic skill audit |
 | `POST` | [/api/v1/internal/keeper/behavior](#post-api-v1-internal-keeper-behavior) | F4.2 — post-tool-call behavior monitor |
@@ -689,6 +690,80 @@ Returns the Keeper access request audit log -- every credential access and comma
 <Note>
   Phase 2 request types (`skill_review`, `behavior`, `memory_health`, `negative_learning`) populate the same audit log surface as Phase 1 (`credential`, `execute`) with the same shape. The `intent` column carries the F4 evaluator's structured summary instead of a free-form access reason; the `ollama_prompt` + `ollama_raw_response` capture the LLM evaluation round-trip. Filter by `request_type` to slice the log into per-evaluator views.
 </Note>
+
+<Note>
+  This endpoint returns the **current** state of each request. `decision` is written `PENDING` and updated in place, so it cannot tell you how the request got there. For that, use the transition history below.
+</Note>
+
+## GET /api/v1/admin/keeper/requests/{requestId}/events
+
+Returns the **append-only transition history** for one Keeper request, oldest first — the record that the in-place `decision` update would otherwise destroy (issue #1369).
+
+**Required role:** ADMIN or OWNER (manage permission)
+
+### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `requestId` | `string` | The `keeper_requests.id` whose history to read |
+
+### Response
+
+```json
+[
+  {
+    "seq": 1,
+    "state": "PENDING",
+    "request_type": "execute",
+    "requesting_agent_id": "agent-uuid",
+    "agent_name": "Viktor",
+    "credential_id": "cred-uuid",
+    "credential_name": "Deploy Key",
+    "intent": "Ship the release branch",
+    "command": "gh pr merge 1449",
+    "actor_type": "agent",
+    "actor_id": "agent-uuid",
+    "recorded_at": "2026-07-25T10:30:00Z"
+  },
+  {
+    "seq": 2,
+    "state": "ALLOW",
+    "request_type": "execute",
+    "reason": "Scoped merge with clear intent",
+    "risk_score": 2,
+    "exit_code": 0,
+    "actor_type": "keeper",
+    "actor_id": "keeper",
+    "recorded_at": "2026-07-25T10:30:05Z"
+  }
+]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `seq` | `integer` | 1-based, monotonic per request. A gap or duplicate is itself a signal |
+| `state` | `string` | The state *entered* by this transition: `PENDING`, `ALLOW`, `DENY`, `ESCALATE`, `DUPLICATE_SUPPRESSED`, or a Phase-2 verdict |
+| `actor_type` | `string` | `agent` (raised the request), `keeper` (decided it), `user` (an operator resolved it), `system` (dedup suppression) |
+| `actor_id` | `string?` | The specific actor, when known |
+| `reason` / `risk_score` / `exit_code` | — | Decision detail at that transition. Omitted where not yet applicable: a `PENDING` has no risk score, and no exit code exists before the command ran |
+| `request_type`, `requesting_agent_id`, `agent_name`, `requesting_crew_id`, `credential_id`, `credential_name`, `intent`, `command` | — | Copied onto every transition so the record stays self-describing if the `keeper_requests` row is later pruned |
+| `recorded_at` | `string` | ISO 8601 timestamp of the transition |
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Success — including an **empty array** for an unknown request id *or* one belonging to another workspace (deliberately indistinguishable, so the endpoint cannot be used to probe which ids exist) |
+| `400` | Missing `requestId` or workspace context |
+| `403` | Caller is not ADMIN/OWNER |
+
+<Warning>
+  `keeper_request_events` is append-only at the database level — a `BEFORE UPDATE` trigger aborts any rewrite of a recorded transition. A decision can only be superseded by a further transition, which appears here as an extra row. See [Audit → Keeper Decision Auditing](/security/audit#keeper-decision-auditing).
+</Warning>
+
+<Note>
+  Requests raised before the ledger migration have their current state backfilled (a `PENDING` at `created_at` plus the decision at `decided_at`) but no intermediate history.
+</Note>
+
+CLI parity: `crewship keeper history <request-id>`.
 
 ## Keeper Phase 2 — F4 evaluators
 
