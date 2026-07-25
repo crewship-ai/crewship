@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -187,5 +188,96 @@ func TestJournalPriority_ForeignWorkspaceLeavesNoLedgerRow(t *testing.T) {
 	}
 	if live != "normal" {
 		t.Errorf("priority = %q after a rejected edit, want normal", live)
+	}
+}
+
+// TestJournalPriority_ConcurrentEditsStillChain is the regression for a race in
+// recordPriorityChange: previous_priority used to come from the handler's
+// `journal.Get`, which ran BEFORE the transaction opened. Two concurrent
+// SetPriority calls on one entry both read the same stale value, so the second
+// ledger row did not chain from the first row's result — and VerifyChain's
+// reconciliation then reported tampering on two legitimate, sequential,
+// authorised edits. That is exactly the false positive this feature exists to
+// remove, so the ledger has to be self-consistent under concurrency.
+//
+// previous_priority is now read inside the same transaction as the UPDATE.
+func TestJournalPriority_ConcurrentEditsStillChain(t *testing.T) {
+	setTestEncryptionKey(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewJournalHandler(db, newTestLogger(), noopEmitter{})
+
+	_, ids := seedChainForPriority(t, h, wsID, 2)
+	target := ids[0]
+
+	// Two operators racing on the same entry. Both must land, and the two ledger
+	// rows must form a chain (normal -> X -> Y) regardless of who won.
+	const editors = 4
+	var wg sync.WaitGroup
+	codes := make([]int, editors)
+	prios := []string{"high", "pin", "permanent", "normal"}
+	wg.Add(editors)
+	for i := 0; i < editors; i++ {
+		go func(i int) {
+			defer wg.Done()
+			codes[i] = patchPriority(t, h, userID, wsID, target, prios[i]).Code
+		}(i)
+	}
+	wg.Wait()
+
+	for i, c := range codes {
+		if c != http.StatusOK {
+			t.Fatalf("editor %d: status %d, want 200", i, c)
+		}
+	}
+
+	// The ledger must be a chain: each row's previous_priority equals the prior
+	// row's priority, starting from the emit-time value.
+	rows, err := db.Query(
+		`SELECT seq, previous_priority, priority FROM journal_entry_priorities
+		  WHERE entry_id = ? ORDER BY seq`, target)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	defer rows.Close()
+	cur := "normal" // seedChainForPriority emits at the default priority
+	n := 0
+	for rows.Next() {
+		var seq int
+		var prev, next string
+		if err := rows.Scan(&seq, &prev, &next); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		n++
+		if seq != n {
+			t.Errorf("row %d has seq %d, want %d", n, seq, n)
+		}
+		if prev != cur {
+			t.Fatalf("ledger row %d claims previous_priority=%q but the chain is at %q — concurrent edits produced a non-chaining ledger",
+				seq, prev, cur)
+		}
+		cur = next
+	}
+	if n != editors {
+		t.Fatalf("ledger rows = %d, want %d (one per edit)", n, editors)
+	}
+
+	// The live value must be the tail of that chain.
+	var live string
+	if err := db.QueryRow(`SELECT priority FROM journal_entries WHERE id = ?`, target).Scan(&live); err != nil {
+		t.Fatalf("read live priority: %v", err)
+	}
+	if live != cur {
+		t.Errorf("live priority %q != ledger tail %q", live, cur)
+	}
+
+	// And the whole point: verification must still be clean.
+	res, err := journal.VerifyChain(context.Background(), db, wsID)
+	if err != nil {
+		t.Fatalf("VerifyChain: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("two concurrent authorised edits broke verification: %+v", res)
 	}
 }

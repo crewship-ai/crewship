@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -637,7 +638,7 @@ func (h *JournalHandler) SetPriority(w http.ResponseWriter, r *http.Request) {
 	// isolation boundary for writes. Dropping it would let a caller flip a foreign
 	// workspace's priority via a stolen ID.
 	affected, err := h.recordPriorityChange(r.Context(), workspaceID, entryID,
-		string(existing.Priority), string(prio), body.Reason, actorID)
+		string(prio), body.Reason, actorID)
 	if err != nil {
 		h.logger.Error("journal priority: update", "err", err, "entry_id", entryID)
 		replyError(w, http.StatusInternalServerError, "update failed")
@@ -698,18 +699,41 @@ func (h *JournalHandler) SetPriority(w http.ResponseWriter, r *http.Request) {
 // so a 404 leaves no phantom history.
 //
 // The ledger seq comes from a subquery in the INSERT rather than a read-then-write,
-// and UNIQUE(entry_id, seq) turns a concurrent double-edit into a loud error
-// instead of a silently lost change — two operators racing on the same entry is
-// rare but exactly when the audit trail matters.
+// so concurrent edits cannot collide on it.
+//
+// previous_priority is read INSIDE this transaction, immediately before the
+// UPDATE — it is deliberately NOT taken from the caller. The handler's
+// `journal.Get` happened before this transaction opened, so two concurrent
+// SetPriority calls on the same entry would both see the same stale value; each
+// would then commit a ledger row claiming to start from it, and the second row
+// would not chain from the first row's result. VerifyChain's reconciliation walks
+// exactly that chain, so it would report tampering on two legitimate, sequential,
+// authorised edits — precisely the false positive this whole feature exists to
+// remove. UNIQUE(entry_id, seq) does not help: the seq subquery runs inside the
+// transaction and hands the second writer a valid seq 2; only the
+// previous_priority would be wrong.
 func (h *JournalHandler) recordPriorityChange(
 	ctx context.Context,
-	workspaceID, entryID, previous, next, reason, actorID string,
+	workspaceID, entryID, next, reason, actorID string,
 ) (int64, error) {
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("journal priority: begin: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+
+	// The authoritative pre-edit value, serialized with the UPDATE below.
+	var previous string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(priority, 'normal') FROM journal_entries WHERE id = ? AND workspace_id = ?`,
+		entryID, workspaceID).Scan(&previous); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// Wrong workspace, or the entry is gone. Commit nothing; the caller
+			// turns 0 into a 404.
+			return 0, nil
+		}
+		return 0, fmt.Errorf("journal priority: read current: %w", err)
+	}
 
 	res, err := tx.ExecContext(ctx,
 		`UPDATE journal_entries SET priority = ? WHERE id = ? AND workspace_id = ?`,

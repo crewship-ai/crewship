@@ -1,5 +1,12 @@
 package database
 
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"log/slog"
+)
+
 // migrationKeeperAppendOnlyAudit (v166) closes the last two mutable holes in the
 // tamper-evident audit story (#1369). PR #1401 gave journal_entries a keyed
 // hash-chain and signed compaction checkpoints; two paths still MUTATE audit
@@ -163,3 +170,38 @@ END;
 -- and runs forward, and inventing a change we cannot attribute would be a
 -- fabricated audit record on top of a false positive.
 `
+
+// restoreBackfillPriorityAtEmit seeds journal_entries.priority_at_emit on rows
+// restored from a bundle whose source schema predates v166 (#1369).
+//
+// Why a hook is required even though the migration already seeds the column: the
+// migration runs once, against the rows present at upgrade time. A LATER restore
+// re-inserts journal_entries rows straight from an older bundle, which has no
+// priority_at_emit column — so those rows land NULL, and the migration will never
+// run again to fix them.
+//
+// A NULL there is not harmless. VerifyChain reads
+// COALESCE(priority_at_emit, priority, 'normal'), so with the column NULL the
+// chain's anchor becomes the LIVE priority — a value that moves. The moment an
+// operator edits the priority of such a row, the ledger records
+// previous_priority = the old value while the anchor has already become the new
+// one, the chain of changes no longer starts where it must, and verification
+// reports tampering on a legitimate edit. Materializing the column pins the
+// anchor so it cannot drift.
+//
+// Idempotent by construction (the required contract): the WHERE clause only
+// touches rows that are still NULL, so a re-run after a failed restore is a
+// no-op rather than an overwrite of an already-correct value.
+func restoreBackfillPriorityAtEmit(ctx context.Context, tx *sql.Tx, logger *slog.Logger) error {
+	res, err := tx.ExecContext(ctx, `
+		UPDATE journal_entries
+		   SET priority_at_emit = COALESCE(priority, 'normal')
+		 WHERE priority_at_emit IS NULL`)
+	if err != nil {
+		return fmt.Errorf("v166 restore backfill: seed priority_at_emit: %w", err)
+	}
+	if n, aerr := res.RowsAffected(); aerr == nil && n > 0 && logger != nil {
+		logger.Info("v166 restore backfill: seeded priority_at_emit on restored rows", "rows", n)
+	}
+	return nil
+}

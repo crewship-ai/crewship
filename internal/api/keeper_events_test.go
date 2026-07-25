@@ -1,16 +1,20 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper"
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // Append-only keeper decision ledger (#1369).
@@ -486,4 +490,98 @@ func TestKeeperPhase2_EmptyDecisionRecordsPending(t *testing.T) {
 	if len(events) != 1 || events[0].State != keeperStatePending {
 		t.Fatalf("events = %+v, want a single PENDING transition", events)
 	}
+}
+
+// TestKeeperExecute_AuditSurvivesClientDisconnect: by the time the ALLOW audit is
+// written the secret has been injected and the command HAS RUN. If the audit rode
+// r.Context() and the agent (or a proxy) disconnected mid-exec, the transaction
+// would abort and the ALLOW would be recorded nowhere but the container's exec
+// log — making a disconnect a way to execute with a credential and leave no trail.
+//
+// The post-exec writes therefore use a detached, bounded context.
+func TestKeeperExecute_AuditSurvivesClientDisconnect(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, agentID, credID := seedKeeperFixture(t, db)
+
+	gk := &mockEvaluator{resp: keeper.GatekeeperResponse{
+		Decision: string(keeper.DecisionAllow), Reason: "ok", RiskScore: 2,
+	}}
+	h := NewKeeperHandler(db, "internal-token", gk, keeperEventsLogger()).
+		WithSecrets(&mockSecretGetter{secrets: map[string]string{credID: "hunter2"}}).
+		WithContainer(&mockContainerExec{output: "done", exitCode: 0, execID: "e1"})
+	jw := newKeeperTestJournal(t, db)
+	h.SetJournal(jw)
+
+	// A request whose context is ALREADY cancelled — the state the handler is in
+	// when the client hangs up while the container command is running.
+	body := keeperExecuteBody{
+		RequestingAgentID: agentID, RequestingCrewID: crewID, WorkspaceID: wsID,
+		CredentialID: credID, Intent: "list PRs", Command: "gh pr list",
+		ContainerID: "test-container",
+	}
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/keeper/execute", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	ctx, cancel := context.WithCancel(req.Context())
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	// The container mock cancels the request the moment Exec is entered — i.e.
+	// after the gatekeeper ALLOW and the secret injection, and before the audit
+	// write. That is the real disconnect-mid-exec ordering.
+	h.WithContainer(&cancelOnExecContainer{
+		mockContainerExec: &mockContainerExec{output: "done", exitCode: 0, execID: "e1"},
+		cancel:            cancel,
+	})
+	h.HandleExecute(w, req)
+
+	if ctx.Err() == nil {
+		t.Fatal("fixture did not cancel the request context — the test would not exercise the disconnect")
+	}
+
+	if err := jw.Flush(context.Background()); err != nil {
+		t.Fatalf("flush journal: %v", err)
+	}
+
+	// The decision must be recorded despite the dead request context.
+	reqID := latestRequestID(t, db)
+	events := readLedger(t, db, reqID)
+	if len(events) < 2 {
+		t.Fatalf("ledger has %d transitions (%+v) after a mid-exec disconnect — the ALLOW was lost",
+			len(events), events)
+	}
+	if last := events[len(events)-1].State; last != string(keeper.DecisionAllow) {
+		t.Errorf("ledger tail = %q, want ALLOW", last)
+	}
+
+	var decision string
+	if err := db.QueryRow(`SELECT COALESCE(decision,'') FROM keeper_requests WHERE id = ?`, reqID).Scan(&decision); err != nil {
+		t.Fatalf("read projection: %v", err)
+	}
+	if decision != string(keeper.DecisionAllow) {
+		t.Errorf("keeper_requests.decision = %q, want ALLOW", decision)
+	}
+
+	var journaled int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM journal_entries
+		 WHERE entry_type = 'keeper.decision'
+		   AND json_extract(payload, '$.request_type') = 'execute'`).Scan(&journaled); err != nil {
+		t.Fatalf("count journal entries: %v", err)
+	}
+	if journaled != 1 {
+		t.Errorf("keeper.decision journal entries = %d, want 1 (the chained record must survive the disconnect)", journaled)
+	}
+}
+
+// cancelOnExecContainer cancels the in-flight request as soon as the container
+// command starts, reproducing a client that hangs up mid-exec.
+type cancelOnExecContainer struct {
+	*mockContainerExec
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnExecContainer) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	c.cancel()
+	return c.mockContainerExec.Exec(ctx, cfg)
 }

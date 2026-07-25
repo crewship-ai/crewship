@@ -408,3 +408,72 @@ func TestMigrate_V166_PriorityLedgerRejectsUpdate(t *testing.T) {
 		t.Errorf("expected an append-only abort, got: %v", err)
 	}
 }
+
+// TestMigrate_V166_RestoreBackfillSeedsPriorityAtEmit covers the restore path the
+// migration itself cannot reach: rows re-inserted from a pre-v166 bundle land with
+// priority_at_emit NULL, and the migration has already run so it will never fix
+// them.
+//
+// A NULL anchor is not harmless. VerifyChain reads
+// COALESCE(priority_at_emit, priority, 'normal'), so the anchor becomes the LIVE
+// priority — which moves the moment an operator edits it, and the recorded change
+// then no longer starts where the anchor sits. Verification would report tampering
+// on a legitimate edit.
+func TestMigrate_V166_RestoreBackfillSeedsPriorityAtEmit(t *testing.T) {
+	t.Parallel()
+	db := migrateChainSetup(t)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.Background()
+
+	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug) VALUES ('ws1','W','w1')`)
+	// Simulate restored rows: present, but with the v166 column left NULL the way
+	// a pre-v166 bundle's INSERT leaves it.
+	mustExec(t, db.DB, `INSERT INTO journal_entries
+		(id, workspace_id, ts, entry_type, severity, actor_type, summary, priority, priority_at_emit)
+		VALUES ('je_restored_pin','ws1','2026-07-25T10:00:00Z','run.started','info','agent','s','pin',NULL)`)
+	mustExec(t, db.DB, `INSERT INTO journal_entries
+		(id, workspace_id, ts, entry_type, severity, actor_type, summary, priority_at_emit)
+		VALUES ('je_restored_plain','ws1','2026-07-25T10:00:01Z','run.started','info','agent','s',NULL)`)
+	// An already-correct row the hook must NOT touch.
+	mustExec(t, db.DB, `INSERT INTO journal_entries
+		(id, workspace_id, ts, entry_type, severity, actor_type, summary, priority, priority_at_emit)
+		VALUES ('je_intact','ws1','2026-07-25T10:00:02Z','run.started','info','agent','s','normal','permanent')`)
+
+	hook := RestoreBackfillFor(166)
+	if hook == nil {
+		t.Fatal("v166 has no restoreBackfill hook — restored pre-v166 rows would keep a NULL chain anchor")
+	}
+
+	// Run it TWICE: the contract requires idempotence, because a restore that
+	// fails on a later hook is re-run from the start against already-seeded rows.
+	for i := 0; i < 2; i++ {
+		tx, err := db.DB.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		if err := hook(ctx, tx, logger); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("hook run %d: %v", i+1, err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit run %d: %v", i+1, err)
+		}
+	}
+
+	for _, tc := range []struct{ id, want string }{
+		{"je_restored_pin", "pin"},
+		{"je_restored_plain", "normal"},
+		// Untouched: the hook only fills NULLs, so it cannot clobber a value the
+		// migration (or the emit path) already set.
+		{"je_intact", "permanent"},
+	} {
+		var atEmit string
+		if err := db.QueryRow(
+			`SELECT COALESCE(priority_at_emit,'') FROM journal_entries WHERE id=?`, tc.id).Scan(&atEmit); err != nil {
+			t.Fatalf("read %s: %v", tc.id, err)
+		}
+		if atEmit != tc.want {
+			t.Errorf("%s priority_at_emit = %q, want %q", tc.id, atEmit, tc.want)
+		}
+	}
+}

@@ -1805,7 +1805,8 @@ END;
 	// state), and journal_entries.priority_at_emit + journal_entry_priorities
 	// stop the operator-facing priority edit from permanently breaking the
 	// hash-chain it is inside. Both new tables are append-only by trigger.
-	{version: 166, name: "keeper_append_only_audit", sql: migrationKeeperAppendOnlyAudit},
+	{version: 166, name: "keeper_append_only_audit", sql: migrationKeeperAppendOnlyAudit,
+		restoreBackfill: restoreBackfillPriorityAtEmit},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

@@ -495,7 +495,7 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 			}); err != nil {
 			h.logger.Error("keeper execute: update audit (deny)", "error", err)
 		}
-		h.emitExecuteDecision(r, body, reqID, agentName, credName, gkResp.Decision, gkResp.Reason, gkResp.RiskScore, secLevel, nil)
+		h.emitExecuteDecision(r.Context(), body, reqID, agentName, credName, gkResp.Decision, gkResp.Reason, gkResp.RiskScore, secLevel, nil)
 
 		h.logger.Info("keeper execute: denied",
 			"request_id", reqID, "agent", agentName, "credential", credName, "decision", gkResp.Decision)
@@ -672,9 +672,20 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	// the one transition that is recorded AFTER its side effect — the command has
 	// already run in the container — so a failure here is logged, not fatal: there
 	// is nothing left to withhold, and a 500 would only hide the output from the
-	// agent while the command's effects persist. The dropped-record case is
-	// exactly what the ledger's seq gap makes visible on verification.
-	if err := updateKeeperDecisionWithTransition(r.Context(), h.db, `
+	// agent while the command's effects persist.
+	//
+	// auditCtx, NOT r.Context(): by this point the secret has been injected and
+	// the command HAS RUN. If the agent (or an intermediate proxy) disconnected
+	// during the exec, r.Context() is already cancelled — and writing the audit
+	// under it would abort the transaction, leaving the ALLOW recorded nowhere
+	// but the container's exec log. A disconnect must not be a way to execute
+	// with a credential and leave no trail. Bounded so a wedged DB cannot leak
+	// the goroutine, and detached with WithoutCancel (the same pattern
+	// internal_credentials.go uses for its post-revoke reconcile).
+	auditCtx, cancelAudit := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
+	defer cancelAudit()
+
+	if err := updateKeeperDecisionWithTransition(auditCtx, h.db, `
 		UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, exit_code=?, decided_at=?, ollama_prompt=?, ollama_raw_response=? WHERE id=?`,
 		[]any{string(keeper.DecisionAllow), gkResp.Reason, gkResp.RiskScore, exitCode, now,
 			nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), reqID},
@@ -697,7 +708,7 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("keeper execute: update audit (allow)", "error", err)
 	}
 
-	h.emitExecuteDecision(r, body, reqID, agentName, credName,
+	h.emitExecuteDecision(auditCtx, body, reqID, agentName, credName,
 		string(keeper.DecisionAllow), gkResp.Reason, gkResp.RiskScore, secLevel, &exitCode)
 
 	h.logger.Info("keeper execute: completed",
@@ -749,7 +760,7 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 // recorded in keeper_requests and its append-only ledger, so a journal hiccup
 // costs tamper-evidence for one entry, not the record itself.
 func (h *KeeperHandler) emitExecuteDecision(
-	r *http.Request,
+	ctx context.Context,
 	body keeperExecuteBody,
 	reqID, agentName, credName, decision, reason string,
 	riskScore, secLevel int,
@@ -782,7 +793,7 @@ func (h *KeeperHandler) emitExecuteDecision(
 	if exitCode != nil {
 		payload["exit_code"] = *exitCode
 	}
-	if _, err := h.journal.Emit(r.Context(), journal.Entry{
+	if _, err := h.journal.Emit(ctx, journal.Entry{
 		WorkspaceID: body.WorkspaceID,
 		CrewID:      body.RequestingCrewID,
 		AgentID:     body.RequestingAgentID,

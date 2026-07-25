@@ -28,7 +28,7 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | `GET` | [/api/v1/admin/memory/config](#get-api-v1-admin-memory-config) | Read per-workspace memory configuration |
 | `PATCH` | [/api/v1/admin/memory/config](#patch-api-v1-admin-memory-config) | Partial-merge update of memory configuration |
 | `GET` | [/api/v1/admin/keeper/requests](#get-api-v1-admin-keeper-requests) | Keeper access-request audit log |
-| `GET` | [/api/v1/admin/keeper/requests/{requestId}/events](#get-api-v1-admin-keeper-requests-requestid-events) | Append-only transition history for one request |
+| `GET` | [/api/v1/admin/keeper/requests/\{requestId\}/events](#get-api-v1-admin-keeper-requests-requestid-events) | Append-only transition history for one request |
 | `GET` | [/api/v1/admin/journal/verify](#get-api-v1-admin-journal-verify) | Verify the audit journal hash-chain (tamper-evidence) |
 | `POST` | [/api/v1/internal/keeper/skill-review](#post-api-v1-internal-keeper-skill-review) | F4.1 — periodic skill audit |
 | `POST` | [/api/v1/internal/keeper/behavior](#post-api-v1-internal-keeper-behavior) | F4.2 — post-tool-call behavior monitor |
@@ -695,7 +695,7 @@ Returns the Keeper access request audit log -- every credential access and comma
   This endpoint returns the **current** state of each request. `decision` is written `PENDING` and updated in place, so it cannot tell you how the request got there. For that, use the transition history below.
 </Note>
 
-## GET /api/v1/admin/keeper/requests/{requestId}/events
+## GET /api/v1/admin/keeper/requests/\{requestId\}/events
 
 Returns the **append-only transition history** for one Keeper request, oldest first — the record that the in-place `decision` update would otherwise destroy (issue #1369).
 
