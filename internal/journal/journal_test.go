@@ -39,7 +39,11 @@ CREATE TABLE journal_entries (
     expires_at TEXT,
     seq INTEGER NOT NULL DEFAULT 0,
     prev_hash TEXT NOT NULL DEFAULT '',
-    entry_hash TEXT NOT NULL DEFAULT ''
+    entry_hash TEXT NOT NULL DEFAULT '',
+    -- v166: the IMMUTABLE priority the hash-chain commits to. The priority
+    -- column above stays mutable for readers and the operator pin control; this
+    -- one is written once at emit so an authorised edit cannot break verification.
+    priority_at_emit TEXT
 );
 CREATE INDEX idx_journal_ws_ts ON journal_entries(workspace_id, ts DESC);
 CREATE UNIQUE INDEX idx_journal_ws_seq ON journal_entries(workspace_id, seq) WHERE seq > 0;
@@ -50,6 +54,22 @@ CREATE TABLE journal_chain_checkpoints (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     removed_json TEXT NOT NULL,
     mac TEXT NOT NULL
+);
+
+-- v166: append-only ledger of operator priority edits. Verification reconciles
+-- the live priority against priority_at_emit plus this chain of changes, so a
+-- silent DB-level flip (no ledger row) is still detected.
+CREATE TABLE journal_entry_priorities (
+    id TEXT PRIMARY KEY,
+    entry_id TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    previous_priority TEXT NOT NULL,
+    priority TEXT NOT NULL,
+    reason TEXT,
+    set_by TEXT,
+    set_at TEXT NOT NULL,
+    UNIQUE(entry_id, seq)
 );
 `
 
@@ -531,7 +551,10 @@ CREATE TABLE journal_entries (
     expires_at TEXT,
     seq INTEGER NOT NULL DEFAULT 0,
     prev_hash TEXT NOT NULL DEFAULT '',
-    entry_hash TEXT NOT NULL DEFAULT ''
+    entry_hash TEXT NOT NULL DEFAULT '',
+    -- v166: immutable priority the hash-chain commits to; the writer INSERTs it
+    -- unconditionally, so a fixture missing it drops every row.
+    priority_at_emit TEXT
 );
 CREATE INDEX idx_journal_ws_ts ON journal_entries(workspace_id, ts DESC);
 CREATE UNIQUE INDEX idx_journal_ws_seq ON journal_entries(workspace_id, seq) WHERE seq > 0;`

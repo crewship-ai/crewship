@@ -520,11 +520,17 @@ func isPermanentDBError(err error) bool {
 		strings.Contains(s, "journal: marshal")
 }
 
+// insertSQL writes `priority` twice: once into the mutable column every reader
+// (and the operator pin control) uses, and once into priority_at_emit — the
+// IMMUTABLE value the hash-chain commits to (#1369). They are identical at emit
+// and may diverge later, when an OWNER/ADMIN pins or un-pins the entry; keeping
+// the chain anchored to the emit-time value is what stops that authorised edit
+// from permanently breaking verification.
 const insertSQL = `INSERT INTO journal_entries
 	(id, workspace_id, crew_id, agent_id, mission_id, ts, entry_type, severity, priority,
 	 actor_type, actor_id, summary, payload, refs, trace_id, span_id, expires_at,
-	 seq, prev_hash, entry_hash)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	 seq, prev_hash, entry_hash, priority_at_emit)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 // chainHeadSQL fetches the current tip (highest seq, its entry_hash) of a
 // workspace's chain so a new entry can extend it. A workspace with no rows
@@ -646,6 +652,8 @@ func (w *Writer) persistBatch(ctx context.Context, batch []Entry) error {
 				seq,
 				prevHash,
 				entryHash,
+				// priority_at_emit — the same value the hash above committed to.
+				priorityOrNormal(e.Priority),
 			)
 			if err != nil {
 				return fmt.Errorf("journal: insert %s: %w", e.Type, err)

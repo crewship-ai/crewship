@@ -44,6 +44,12 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"chats":              IntentInclude,
 	"agent_mcp_bindings": IntentInclude,
 	"journal_entries":    IntentInclude,
+	// journal_entry_priorities (v166) is the append-only ledger of operator
+	// pin/permanent edits. It rides with journal_entries: without it a restored
+	// bundle's live `priority` values would have no ledger to reconcile against,
+	// and VerifyChain's priority check would read every historical edit as a
+	// silent DB-level flip.
+	"journal_entry_priorities": IntentInclude,
 
 	// === Credentials & secrets (round-trip; cipher preserved) ========
 	"credentials":          IntentInclude,
@@ -101,9 +107,14 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"user_sessions":   IntentExcludeRuntime,
 	"cli_pairings":    IntentExcludeRuntime,
 	"keeper_requests": IntentExcludeRuntime,
-	"rate_buckets":    IntentExcludeRuntime,
-	"agent_status":    IntentExcludeRuntime, // live status; agent boots IDLE
-	"notifications":   IntentExcludeRuntime, // transient; resend on the new instance
+	// keeper_request_events (v166) is the append-only transition ledger behind
+	// keeper_requests. It follows its projection: both are per-instance runtime
+	// audit, not portable workspace configuration, and a restored bundle should
+	// not carry another instance's keeper decision history.
+	"keeper_request_events": IntentExcludeRuntime,
+	"rate_buckets":          IntentExcludeRuntime,
+	"agent_status":          IntentExcludeRuntime, // live status; agent boots IDLE
+	"notifications":         IntentExcludeRuntime, // transient; resend on the new instance
 
 	// === Outbound notifications (#1412) =============================
 	// These tables carry only a plain workspace_id column (no FK to

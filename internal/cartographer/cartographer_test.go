@@ -81,7 +81,10 @@ CREATE TABLE journal_entries (
     expires_at TEXT,
     seq INTEGER NOT NULL DEFAULT 0,
     prev_hash TEXT NOT NULL DEFAULT '',
-    entry_hash TEXT NOT NULL DEFAULT ''
+    entry_hash TEXT NOT NULL DEFAULT '',
+    -- v166: immutable priority the hash-chain commits to; the writer
+    -- INSERTs it unconditionally, so a fixture missing it drops every row.
+    priority_at_emit TEXT
 );
 
 CREATE TABLE checkpoints (

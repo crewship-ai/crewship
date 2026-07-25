@@ -278,16 +278,137 @@ type VerifyResult struct {
 
 // verifySelect pulls the columns the hash commits to, in seq order. Nullable
 // columns are COALESCEd to ” to match how the emit path framed them.
+//
+// #1369: the hashed priority comes from priority_at_emit, NOT from the mutable
+// `priority` column. `priority` is legitimately edited in place by the
+// operator-facing pin/permanent control, and hashing it made every such edit a
+// permanent false "tampered" verdict. Both are selected: the immutable one feeds
+// the hash, the live one feeds the reconciliation check below.
+//
+// The `%s` placeholder is the expression yielding the HASHED priority; it is
+// filled in by verifySelectFor, which picks the right one for the schema on disk
+// so a row written by an older binary still verifies against the value its stored
+// hash was actually computed over.
 const verifySelect = `
 SELECT seq, id, workspace_id,
        COALESCE(crew_id,''), COALESCE(agent_id,''), COALESCE(mission_id,''),
-       ts, entry_type, severity, COALESCE(priority,'normal'), actor_type,
+       ts, entry_type, severity,
+       %s, actor_type,
        COALESCE(actor_id,''), summary, payload, refs,
        COALESCE(trace_id,''), COALESCE(span_id,''), COALESCE(expires_at,''),
-       COALESCE(prev_hash,''), COALESCE(entry_hash,'')
+       COALESCE(prev_hash,''), COALESCE(entry_hash,''),
+       COALESCE(priority,'normal')
 FROM journal_entries
 WHERE workspace_id = ?
 ORDER BY seq ASC`
+
+// verifySelectFor picks the hashed-priority expression for the schema on disk.
+//
+// On v166+ the chain commits to the immutable priority_at_emit. On an older
+// schema that column does not exist and every stored hash was computed over the
+// live `priority`, so that is what must be fed back in — otherwise verification
+// would report a mid-upgrade DB as universally tampered. The probe is one cheap
+// sqlite_master read per verify, which is negligible next to walking the chain.
+func verifySelectFor(ctx context.Context, db *sql.DB) (string, error) {
+	var present int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pragma_table_info('journal_entries') WHERE name = 'priority_at_emit'`,
+	).Scan(&present); err != nil {
+		return "", fmt.Errorf("journal: probe priority_at_emit: %w", err)
+	}
+	if present == 0 {
+		return fmt.Sprintf(verifySelect, `COALESCE(priority,'normal')`), nil
+	}
+	return fmt.Sprintf(verifySelect, `COALESCE(priority_at_emit, priority, 'normal')`), nil
+}
+
+// priorityLedgerSQL loads the append-only chain of operator priority edits for a
+// workspace, in (entry, seq) order. Used to reconcile each row's LIVE priority
+// against the immutable priority_at_emit: the live value must be reachable from
+// the emit-time value by following the recorded changes.
+const priorityLedgerSQL = `
+SELECT entry_id, seq, previous_priority, priority
+FROM journal_entry_priorities
+WHERE workspace_id = ?
+ORDER BY entry_id ASC, seq ASC`
+
+// priorityEdit is one recorded change in the ledger.
+type priorityEdit struct {
+	Seq      int64
+	Previous string
+	Next     string
+}
+
+// loadPriorityLedger groups the recorded edits by entry id.
+//
+// A DB that predates migration v166 has no such table. That is not a verification
+// failure: on such a schema priority_at_emit is also absent, verifySelect's
+// COALESCE falls back to the live `priority` (the value those rows' hashes were
+// actually computed over), and reconciliation trivially holds. Verification must
+// keep working across an upgrade boundary rather than erroring out — a verifier
+// that refuses to run is a verifier nobody trusts.
+func loadPriorityLedger(ctx context.Context, db *sql.DB, workspaceID string) (map[string][]priorityEdit, error) {
+	var present int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='journal_entry_priorities'`,
+	).Scan(&present); err != nil {
+		return nil, fmt.Errorf("journal: probe priority ledger: %w", err)
+	}
+	if present == 0 {
+		return map[string][]priorityEdit{}, nil
+	}
+
+	rows, err := db.QueryContext(ctx, priorityLedgerSQL, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("journal: load priority ledger: %w", err)
+	}
+	defer rows.Close()
+	out := map[string][]priorityEdit{}
+	for rows.Next() {
+		var id string
+		var e priorityEdit
+		if err := rows.Scan(&id, &e.Seq, &e.Previous, &e.Next); err != nil {
+			return nil, fmt.Errorf("journal: scan priority ledger: %w", err)
+		}
+		out[id] = append(out[id], e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("journal: iterate priority ledger: %w", err)
+	}
+	return out, nil
+}
+
+// reconcilePriority reports whether livePriority is explained by atEmit plus the
+// recorded chain of edits.
+//
+// With no edits the live value must still equal the emit-time value. With edits,
+// each one must start where the previous left off (beginning at atEmit) and the
+// last one must land on the live value. That makes two distinct attacks visible:
+//
+//   - a silent column flip, which leaves no ledger row at all; and
+//   - a fabricated ledger row that does not chain back to the emit-time value.
+//
+// It deliberately does NOT try to authenticate the ledger row itself with a MAC.
+// An attacker with DB write can append a fully consistent chain of fake edits, so
+// this check bounds the forgery to "must look like a plausible sequence of
+// operator actions" rather than making it impossible. The reason it is still worth
+// having: the honest path is now verifiable (no false positives), and every real
+// edit also emits a `memory.priority_changed` entry INTO the keyed chain, so a
+// forged ledger with no corresponding chained entry is detectable by comparing the
+// two — see docs/security/audit.mdx for what is and is not guaranteed.
+func reconcilePriority(atEmit, livePriority string, edits []priorityEdit) bool {
+	if len(edits) == 0 {
+		return livePriority == atEmit
+	}
+	cur := atEmit
+	for _, e := range edits {
+		if e.Previous != cur {
+			return false
+		}
+		cur = e.Next
+	}
+	return cur == livePriority
+}
 
 // VerifyChain walks the KEYED hash-chain for one workspace and reports the
 // first broken link, if any. It detects: content mutation (recomputed HMAC ≠
@@ -310,7 +431,19 @@ func VerifyChain(ctx context.Context, db *sql.DB, workspaceID string) (*VerifyRe
 	}
 	res.Checkpoints = applied
 
-	rows, err := db.QueryContext(ctx, verifySelect, workspaceID)
+	// #1369: the recorded operator priority edits, so a row whose live priority
+	// differs from the hashed emit-time value can be told apart from a silent
+	// DB-level flip.
+	priorityEdits, err := loadPriorityLedger(ctx, db, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	selectSQL, err := verifySelectFor(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.QueryContext(ctx, selectSQL, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("journal: verify query: %w", err)
 	}
@@ -321,14 +454,14 @@ func VerifyChain(ctx context.Context, db *sql.DB, workspaceID string) (*VerifyRe
 
 	for rows.Next() {
 		var f ChainFields
-		var prevHash, entryHash string
+		var prevHash, entryHash, livePriority string
 		if err := rows.Scan(
 			&f.Seq, &f.ID, &f.Workspace,
 			&f.CrewID, &f.AgentID, &f.MissionID,
 			&f.TS, &f.EntryType, &f.Severity, &f.Priority, &f.ActorType,
 			&f.ActorID, &f.Summary, &f.Payload, &f.Refs,
 			&f.TraceID, &f.SpanID, &f.ExpiresAt,
-			&prevHash, &entryHash,
+			&prevHash, &entryHash, &livePriority,
 		); err != nil {
 			return nil, fmt.Errorf("journal: verify scan: %w", err)
 		}
@@ -380,6 +513,21 @@ func VerifyChain(ctx context.Context, db *sql.DB, workspaceID string) (*VerifyRe
 			res.BrokenSeq = f.Seq
 			res.BrokenID = f.ID
 			res.Reason = fmt.Sprintf("content hash mismatch at seq %d: entry was modified after write (or the chain key differs)", f.Seq)
+			return res, nil
+		}
+
+		// Priority reconciliation (#1369). `priority` is outside the hash because
+		// it is legitimately mutable, so it gets its own check: the live value must
+		// be reachable from the hashed emit-time value through the append-only
+		// ledger of operator edits. A raw column flip leaves no ledger row and is
+		// caught here.
+		if !reconcilePriority(f.Priority, livePriority, priorityEdits[f.ID]) {
+			res.OK = false
+			res.BrokenSeq = f.Seq
+			res.BrokenID = f.ID
+			res.Reason = fmt.Sprintf(
+				"priority mismatch at seq %d: live priority %q is not reachable from the emit-time %q through the recorded priority changes",
+				f.Seq, livePriority, f.Priority)
 			return res, nil
 		}
 

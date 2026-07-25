@@ -89,7 +89,10 @@ func auditTestRig(t *testing.T) (string, *sql.DB, journal.Emitter, *scrubber.Scr
 		    expires_at   TEXT,
 		    seq          INTEGER NOT NULL DEFAULT 0,
 		    prev_hash    TEXT NOT NULL DEFAULT '',
-		    entry_hash   TEXT NOT NULL DEFAULT ''
+		    entry_hash   TEXT NOT NULL DEFAULT '',
+		    -- v166: immutable priority the hash-chain commits to; the writer
+		    -- INSERTs it unconditionally, so a fixture missing it drops every row.
+		    priority_at_emit TEXT
 		);
 		INSERT INTO workspaces (id) VALUES ('ws_audit');
 		INSERT INTO crews (id, workspace_id) VALUES ('crew_audit', 'ws_audit');

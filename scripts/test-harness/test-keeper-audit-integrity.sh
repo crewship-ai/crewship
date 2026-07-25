@@ -3,13 +3,14 @@
 # Keeper audit integrity — every credential decision should leave a durable,
 # operator-visible trace.
 #
-# The access/execute paths swallow keeper_requests INSERT failures and continue
-# ("Non-fatal — continue", keeper_request.go:152 / keeper_execute.go:233) — so a
-# decision (incl. ALLOW+exec) can proceed with NO audit row. The F4 path 500s
-# instead. This suite pins the happy-path audit contract that must hold, checks
-# the timeline grows monotonically across lifecycle events, exercises both the
-# approve AND deny escalation resolutions, and documents the fail-silent gap (T6)
-# and the returned-vs-persisted mismatch (T7) a CLI cannot force alone.
+# The PENDING keeper_requests INSERT is fatal (#1021 — never decide without a
+# record) and, since #1369, transactional with its append-only ledger row, so the
+# projection and the history cannot diverge. The DECISION update on the execute
+# path is still logged-and-swallowed by design (the command has already run). This
+# suite pins the happy-path audit contract that must hold, checks the timeline
+# grows monotonically across lifecycle events, exercises both the approve AND deny
+# escalation resolutions, asserts the tamper-evidence surfaces, and documents the
+# two windows (T6/T7) a CLI cannot force alone.
 #
 # Sections:
 #   1. lifecycle leaves a growing audit timeline (create→assign→rotate→delete).
@@ -21,6 +22,11 @@
 #   7. returned-vs-persisted decision mismatch (T7) — SKIP.
 #   8. journal hash-chain tamper-evidence: `journal verify` is OK on a healthy
 #      journal and DETECTS an out-of-band row mutation (issue #1369).
+#   9. keeper decisions are append-only: `keeper history` shows every transition,
+#      1-based and gap-free, starting at PENDING, tail matching the current
+#      decision, each with a recorded actor (issue #1369).
+#  10. an authorised priority edit does NOT break the chain — pin, verify, revert,
+#      verify (issue #1369). The raw-DB-flip half needs CREWSHIP_DB on dev2.
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
@@ -151,14 +157,20 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 section "6. Fail-silent audit drop under write pressure (needs load, T6) — SKIP"
 # ─────────────────────────────────────────────────────────────────────────────
+# UPDATED: the PENDING audit INSERT is no longer swallowed — #1021 made it fatal
+# (500 "audit persistence failed", refusing to decide without a record), and
+# #1369 put that INSERT and its ledger transition in ONE transaction so the
+# projection and the history cannot diverge. What remains untested from here is
+# the DECISION-update window: it is still logged-and-swallowed on the execute
+# path, deliberately, because the command has already run by then.
 skip "audit-row suppression under DB write pressure (test T6)" \
-  "keeper_request.go:152 / keeper_execute.go:233 swallow the audit INSERT and continue. Forcing that window needs sustained concurrent write load while a stream of assigned-credential executes runs, then diffing injections performed vs audit rows written. Run as a load scenario (see test-keeper-load.sh)."
+  "the PENDING insert is now fatal (#1021) and transactional with its ledger row (#1369), so the original T6 window is closed. What is left is the decision-UPDATE window on the execute path (logged, not fatal — the command already ran). Forcing it needs sustained concurrent write load while a stream of assigned-credential executes runs, then diffing injections performed vs ledger transitions written. Run as a load scenario (see test-keeper-load.sh)."
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "7. Returned-vs-persisted decision mismatch (needs token, T7) — SKIP"
 # ─────────────────────────────────────────────────────────────────────────────
 skip "returned-vs-persisted decision mismatch (test T7)" \
-  "decision UPDATE failures are logged-and-swallowed (keeper_request.go:229, keeper_execute.go:287/418). Induce the UPDATE-failure window, then compare the API response decision to the row read via GET /keeper/request/{id}. Requires the internal token — sidecar-side probe."
+  "decision UPDATE failures are logged-and-swallowed on the execute path (the command has already run, so a 500 would hide the output while its effects persist). Induce the UPDATE-failure window, then compare the API response decision to the row read via GET /keeper/request/{id} AND to the ledger tail from 'keeper history' — the #1369 ledger makes the divergence directly observable, which it was not before. Requires the internal token — sidecar-side probe."
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "8. Journal hash-chain is tamper-evident (issue #1369)"
@@ -217,6 +229,138 @@ if have jq; then
   fi
 else
   skip "journal hash-chain assertions" "jq missing"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "9. Keeper decisions are append-only (issue #1369)"
+# ─────────────────────────────────────────────────────────────────────────────
+# keeper_requests is written PENDING then UPDATEd in place, so on its own it
+# cannot show that a request was pending or whether a decision was rewritten.
+# Every transition is now appended to keeper_request_events, surfaced by
+# `crewship keeper history`. Assert: the history exists for a real request, it
+# starts at PENDING, it ends where the current-state log says it ended, and the
+# actor of each transition is recorded.
+if ! cs keeper history --help >/dev/null 2>&1; then
+  skip "keeper decision history" "installed crewship has no 'keeper history' command — rebuild"
+elif ! have jq; then
+  skip "keeper decision history" "jq missing"
+else
+  req_json="$(cs keeper requests --limit 20 --format json 2>/dev/null)"
+  # Prefer a DECIDED request: a still-pending one legitimately has one transition.
+  req_id="$(printf '%s' "$req_json" | jq -r \
+    'first(.[] | select((.decision // "") != "" and (.decision // "") != "PENDING")) | .id // empty')"
+
+  if [[ -z "$req_id" ]]; then
+    skip "keeper decision history" "no decided keeper request in the recent log — drive one (assign a SECRET and run a keeper execute) then re-run"
+  else
+    hist="$(cs keeper history "$req_id" --format json 2>/dev/null)"
+    n_ev="$(printf '%s' "$hist" | jq 'length' 2>/dev/null || echo 0)"
+    if [[ "${n_ev:-0}" -ge 1 ]]; then
+      _pass "keeper history for $req_id has $n_ev transition(s)"
+    else
+      _fail "keeper history is non-empty" "0 transitions for a decided request $req_id"
+    fi
+
+    # seq must be 1-based and monotonic — a gap is itself the tamper signal.
+    if printf '%s' "$hist" | jq -e '[.[].seq] == ([range(1; length+1)] | map(.))' >/dev/null 2>&1; then
+      _pass "transition seq is 1-based and gap-free"
+    else
+      _fail "transition seq is 1-based and gap-free" \
+        "got $(printf '%s' "$hist" | jq -c '[.[].seq]')"
+    fi
+
+    # The first transition is the PENDING the in-place UPDATE used to destroy.
+    # Backfilled pre-migration rows also start at PENDING, so this holds either way.
+    assert_eq "first transition is PENDING" "PENDING" \
+      "$(printf '%s' "$hist" | jq -r 'first(.[]) | .state // ""')"
+
+    # The ledger tail must agree with the current-state projection. A divergence
+    # is worse than an absent trail — you cannot tell which half lied.
+    projected="$(printf '%s' "$req_json" | jq -r --arg id "$req_id" \
+      'first(.[] | select(.id==$id)) | .decision // ""')"
+    assert_eq "ledger tail matches the current decision" "$projected" \
+      "$(printf '%s' "$hist" | jq -r 'last(.[]) | .state // ""')"
+
+    # Every transition names who caused it.
+    if printf '%s' "$hist" | jq -e 'all(.[]; (.actor_type // "") != "")' >/dev/null 2>&1; then
+      _pass "every transition records an actor_type"
+    else
+      _fail "every transition records an actor_type" \
+        "got $(printf '%s' "$hist" | jq -c '[.[].actor_type]')"
+    fi
+
+    # Cross-workspace / unknown ids must be indistinguishable and never 500.
+    if cs keeper history "kpr_does_not_exist_$(nonce X | tr '-' '_')" >/dev/null 2>&1; then
+      _pass "unknown request id returns an empty history, not an error"
+    else
+      _fail "unknown request id returns an empty history" "the command errored"
+    fi
+  fi
+
+  cat <<'EOF_APPENDONLY_NOTE'
+   ── DEV-VM VERIFICATION (run on dev2, not this machine) ──
+   The append-only guarantee is enforced by a DB trigger, which the CLI cannot
+   exercise. With CREWSHIP_DB pointing at the instance's sqlite file:
+     sqlite3 "$CREWSHIP_DB" \
+       "UPDATE keeper_request_events SET state='ALLOW' WHERE seq=1 LIMIT 1;"
+       → MUST abort with "keeper_request_events is append-only".
+     sqlite3 "$CREWSHIP_DB" \
+       "UPDATE journal_entry_priorities SET priority='normal' LIMIT 1;"
+       → MUST abort with "journal_entry_priorities is append-only".
+EOF_APPENDONLY_NOTE
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "10. An authorised priority edit does NOT break the chain (issue #1369)"
+# ─────────────────────────────────────────────────────────────────────────────
+# `priority` is operator-mutable (pin / permanent) but used to be inside the
+# hashed projection, so the FIRST pin permanently broke `journal verify` for that
+# workspace. The chain now commits to the immutable emit-time value and reconciles
+# the live column against its append-only change ledger, so a legitimate pin must
+# leave verification green — while a raw DB flip must still be caught.
+if ! have jq; then
+  skip "priority edit keeps the chain verifiable" "jq missing"
+else
+  entry_id="$(cs journal --limit 1 --format json 2>/dev/null | jq -r 'first(.[]) | .id // empty')"
+  if [[ -z "$entry_id" ]]; then
+    skip "priority edit keeps the chain verifiable" "no journal entries to pin"
+  elif ! cs journal priority --help >/dev/null 2>&1; then
+    skip "priority edit keeps the chain verifiable" "installed crewship has no 'journal priority' command"
+  else
+    if cs journal priority "$entry_id" --mark pin --reason "harness tamper-evidence check" >/dev/null 2>&1; then
+      _pass "pinned journal entry $entry_id"
+      pv="$(cs journal verify --format json 2>/dev/null)"
+      if printf '%s' "$pv" | jq -e '.ok==true' >/dev/null 2>&1; then
+        _pass "chain still verifies after an authorised priority edit"
+      else
+        _fail "chain still verifies after an authorised priority edit" \
+          "verify reported: $(printf '%s' "$pv" | jq -r '.reason // "ok=false"')"
+      fi
+      # Put it back; the un-pin is itself a recorded edit, so the chain must
+      # still verify afterwards.
+      cs journal priority "$entry_id" --mark normal --reason "harness cleanup" >/dev/null 2>&1 || true
+      if cs journal verify >/dev/null 2>&1; then
+        _pass "chain verifies after the reverting edit too"
+      else
+        _fail "chain verifies after the reverting edit" "verify exited non-zero"
+      fi
+    else
+      skip "priority edit keeps the chain verifiable" \
+        "journal priority set failed (needs OWNER/ADMIN in the current workspace)"
+    fi
+
+    cat <<'EOF_PRIORITY_NOTE'
+   ── DEV-VM VERIFICATION (run on dev2, not this machine) ──
+   The security half needs a raw DB write the CLI cannot make:
+     sqlite3 "$CREWSHIP_DB" \
+       "UPDATE journal_entries SET priority='normal'
+         WHERE id=(SELECT id FROM journal_entries WHERE priority='pin' LIMIT 1);"
+     crewship journal verify
+       → MUST report ok=false with a "priority mismatch at seq N" reason
+         (a flip with no ledger row is indistinguishable from tampering).
+     Then re-pin through the API to restore a consistent ledger.
+EOF_PRIORITY_NOTE
+  fi
 fi
 
 info "Cleanup: harness credentials are prefixed HARNESS_."

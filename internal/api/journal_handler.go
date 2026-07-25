@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // JournalHandler serves the Crew Journal read API: paginated list and
@@ -614,19 +617,34 @@ func (h *JournalHandler) SetPriority(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Scoped UPDATE — workspace_id in the WHERE clause is the tenant
-	// isolation boundary for writes. Dropping it would let a caller
-	// flip a foreign workspace's priority via a stolen ID.
-	res, err := h.db.ExecContext(r.Context(),
-		`UPDATE journal_entries SET priority = ? WHERE id = ? AND workspace_id = ?`,
-		string(prio), entryID, workspaceID)
+	actorID := ""
+	if u := UserFromContext(r.Context()); u != nil {
+		actorID = u.ID
+	}
+
+	// #1369: `priority` is deliberately OUTSIDE the journal hash-chain (the chain
+	// commits to the immutable priority_at_emit) precisely so this authorised edit
+	// cannot break verification. That freedom is paid for here: every edit MUST
+	// append to journal_entry_priorities in the SAME transaction as the UPDATE,
+	// because verification reconciles the live value against priority_at_emit plus
+	// that ledger. An update with no ledger row is indistinguishable from a raw
+	// DB-level flip — which is exactly what VerifyChain now reports as tampering.
+	//
+	// Hence: FATAL, not best-effort. Committing the column change without its
+	// ledger row would make an operator's own legitimate action show up as
+	// tampering on the next `crewship journal verify`.
+	//
+	// The scoped UPDATE keeps workspace_id in the WHERE clause — the tenant
+	// isolation boundary for writes. Dropping it would let a caller flip a foreign
+	// workspace's priority via a stolen ID.
+	affected, err := h.recordPriorityChange(r.Context(), workspaceID, entryID,
+		string(prio), body.Reason, actorID)
 	if err != nil {
 		h.logger.Error("journal priority: update", "err", err, "entry_id", entryID)
 		replyError(w, http.StatusInternalServerError, "update failed")
 		return
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
+	if affected == 0 {
 		replyError(w, http.StatusNotFound, "entry not found")
 		return
 	}
@@ -636,10 +654,9 @@ func (h *JournalHandler) SetPriority(w http.ResponseWriter, r *http.Request) {
 	// silent UPDATE would hide who upgraded or downgraded what, and why.
 	// The reason body field is captured here — otherwise it was purely
 	// echoed back in the response and evaporated.
-	actorID := ""
-	if u := UserFromContext(r.Context()); u != nil {
-		actorID = u.ID
-	}
+	// This chained entry is also the cross-check on the ledger above: a fabricated
+	// journal_entry_priorities row with no matching memory.priority_changed entry
+	// in the keyed chain is detectable by comparing the two.
 	if _, emitErr := h.journal.Emit(r.Context(), journal.Entry{
 		WorkspaceID: workspaceID,
 		CrewID:      existing.CrewID,
@@ -672,6 +689,86 @@ func (h *JournalHandler) SetPriority(w http.ResponseWriter, r *http.Request) {
 		"reason":   body.Reason,
 		"previous": string(existing.Priority),
 	})
+}
+
+// recordPriorityChange flips journal_entries.priority and appends the change to
+// the append-only journal_entry_priorities ledger, atomically (#1369).
+//
+// Returns the number of journal_entries rows affected, so the caller can keep its
+// 404-on-zero behaviour. The ledger row is only written when the UPDATE matched,
+// so a 404 leaves no phantom history.
+//
+// The ledger seq comes from a subquery in the INSERT rather than a read-then-write,
+// so concurrent edits cannot collide on it.
+//
+// previous_priority is read INSIDE this transaction, immediately before the
+// UPDATE — it is deliberately NOT taken from the caller. The handler's
+// `journal.Get` happened before this transaction opened, so two concurrent
+// SetPriority calls on the same entry would both see the same stale value; each
+// would then commit a ledger row claiming to start from it, and the second row
+// would not chain from the first row's result. VerifyChain's reconciliation walks
+// exactly that chain, so it would report tampering on two legitimate, sequential,
+// authorised edits — precisely the false positive this whole feature exists to
+// remove. UNIQUE(entry_id, seq) does not help: the seq subquery runs inside the
+// transaction and hands the second writer a valid seq 2; only the
+// previous_priority would be wrong.
+func (h *JournalHandler) recordPriorityChange(
+	ctx context.Context,
+	workspaceID, entryID, next, reason, actorID string,
+) (int64, error) {
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("journal priority: begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+
+	// The authoritative pre-edit value, serialized with the UPDATE below.
+	var previous string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(priority, 'normal') FROM journal_entries WHERE id = ? AND workspace_id = ?`,
+		entryID, workspaceID).Scan(&previous); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// Wrong workspace, or the entry is gone. Commit nothing; the caller
+			// turns 0 into a 404.
+			return 0, nil
+		}
+		return 0, fmt.Errorf("journal priority: read current: %w", err)
+	}
+
+	res, err := tx.ExecContext(ctx,
+		`UPDATE journal_entries SET priority = ? WHERE id = ? AND workspace_id = ?`,
+		next, entryID, workspaceID)
+	if err != nil {
+		return 0, fmt.Errorf("journal priority: update: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("journal priority: rows affected: %w", err)
+	}
+	if affected == 0 {
+		// Nothing matched (wrong workspace, or the entry is gone). Commit nothing.
+		return 0, nil
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO journal_entry_priorities
+			(id, entry_id, workspace_id, seq, previous_priority, priority, reason, set_by, set_at)
+		VALUES (?, ?, ?,
+			(SELECT COALESCE(MAX(seq), 0) + 1 FROM journal_entry_priorities WHERE entry_id = ?),
+			?, ?, NULLIF(?,''), NULLIF(?,''), ?)`,
+		generateCUID(), entryID, workspaceID, entryID,
+		previous, next, reason, actorID,
+		// set_at records the ordering of successive operator edits, so it goes
+		// through tsformat: a truncated fractional second is not fixed-width and
+		// can sort two edits inside the same second the wrong way round.
+		tsformat.Format(time.Now())); err != nil {
+		return 0, fmt.Errorf("journal priority: append change ledger: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("journal priority: commit: %w", err)
+	}
+	return affected, nil
 }
 
 // serializeEntries turns the journal.Entry slice into a JSON-friendly

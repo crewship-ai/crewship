@@ -49,6 +49,10 @@ func (r *Router) registerAdminRoutes() {
 	// Keeper admin log
 	keeperLog := NewKeeperLogHandler(r.db, r.logger)
 	r.authedAdmin("GET", "/api/v1/admin/keeper/requests", keeperLog.List)
+	// Append-only transition history for one request (issue #1369). The List
+	// route above returns the CURRENT decision; this returns how the request got
+	// there, which the in-place UPDATE used to overwrite.
+	r.authedAdmin("GET", "/api/v1/admin/keeper/requests/{requestId}/events", keeperLog.ListEvents)
 
 	// Journal integrity (issue #1369): walk the workspace's audit
 	// hash-chain and report the first broken link (mutation / reorder /

@@ -313,15 +313,38 @@ func (h *KeeperPhase2Handler) recordKeeperRequest(
 	}
 	id := "kpr_" + shortPrefix(reqType) + "_" + suffix
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := h.db.ExecContext(ctx, `
+	// #1369: a Phase-2 verdict is written already-decided (created_at == decided_at
+	// — there is no PENDING window), so its ledger entry is a single terminal
+	// transition at seq 1. Recorded in the same transaction as the projection row
+	// so the two cannot disagree, and fatal for the same reason the insert already
+	// was: a verdict that produced an inbox item must not exist without a record.
+	//
+	// Phase-2 endpoints do not carry a workspace_id, so it is resolved from the
+	// agent; a sweep row with no agent lands with a NULL workspace, which the
+	// schema allows.
+	ws := keeperRequestWorkspace(ctx, h.db, h.logger, agentID, crewID)
+	if err := insertKeeperRequestWithTransition(ctx, h.db, `
 		INSERT INTO keeper_requests (
 			id, requesting_agent_id, requesting_crew_id, credential_id,
 			intent, decision, reason, risk_score, created_at, decided_at,
 			request_type, ollama_prompt, ollama_raw_response
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, nullIfEmpty(agentID), nullIfEmpty(crewID), nullIfEmpty(""),
-		intent, nullIfEmpty(decision), nullIfEmpty(reason), risk, now, now,
-		string(reqType), nullIfEmpty(prompt), nullIfEmpty(raw),
+		[]any{id, nullIfEmpty(agentID), nullIfEmpty(crewID), nullIfEmpty(""),
+			intent, nullIfEmpty(decision), nullIfEmpty(reason), risk, now, now,
+			string(reqType), nullIfEmpty(prompt), nullIfEmpty(raw)},
+		keeperTransition{
+			RequestID:   id,
+			WorkspaceID: ws,
+			State:       decision,
+			RequestType: string(reqType),
+			AgentID:     agentID,
+			CrewID:      crewID,
+			Intent:      intent,
+			Reason:      reason,
+			RiskScore:   &risk,
+			ActorType:   keeperActorKeeper,
+			ActorID:     "keeper",
+		},
 	); err != nil {
 		return "", fmt.Errorf("keeper_phase2: insert keeper_requests (%s): %w", reqType, err)
 	}

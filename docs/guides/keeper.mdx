@@ -311,6 +311,10 @@ crewship keeper contact --clear
 # DENY notification threshold (1-10)
 crewship keeper threshold 6
 
+# Decision audit: current state, then the append-only transition history
+crewship keeper requests
+crewship keeper history <request-id>
+
 # Require a different human to resolve a CREDENTIAL escalation than the one
 # who owns the agent that raised it (segregation of duties, issue #1084)
 crewship keeper second-approver enable

@@ -14,6 +14,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -22,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
@@ -339,14 +341,32 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("keeper execute: duplicate request suppressed",
 			"agent", agentName, "credential", credName)
 		dupNow := time.Now().UTC()
-		if _, err := h.db.ExecContext(r.Context(), `
+		// #1369: a suppression is a terminal single-state record — it never
+		// transitions — so its ledger entry is seq 1 and final. Recorded through
+		// the same transactional helper so the ledger cannot miss a request the
+		// projection has.
+		dupID := generateCUID()
+		if err := insertKeeperRequestWithTransition(r.Context(), h.db, `
 			INSERT INTO keeper_requests
 			  (id, requesting_agent_id, requesting_crew_id, credential_id, task_id, intent,
 			   request_type, command, decision, created_at, decided_at)
 			VALUES (?, ?, ?, ?, NULLIF(?,?), ?, 'execute', ?, 'DUPLICATE_SUPPRESSED', ?, ?)`,
-			generateCUID(), body.RequestingAgentID, body.RequestingCrewID, body.CredentialID,
-			body.TaskID, "", body.Intent, body.Command,
-			dupNow.Format(time.RFC3339), dupNow.Format(time.RFC3339)); err != nil {
+			[]any{dupID, body.RequestingAgentID, body.RequestingCrewID, body.CredentialID,
+				body.TaskID, "", body.Intent, body.Command,
+				dupNow.Format(time.RFC3339), dupNow.Format(time.RFC3339)},
+			keeperTransition{
+				RequestID:    dupID,
+				WorkspaceID:  body.WorkspaceID,
+				State:        "DUPLICATE_SUPPRESSED",
+				RequestType:  string(keeper.RequestTypeExecute),
+				AgentID:      body.RequestingAgentID,
+				CrewID:       body.RequestingCrewID,
+				CredentialID: body.CredentialID,
+				Intent:       body.Intent,
+				Command:      body.Command,
+				ActorType:    keeperActorSystem,
+				ActorID:      "keeper-dedup",
+			}); err != nil {
 			h.logger.Error("keeper execute: insert duplicate-suppressed audit record failed", "error", err)
 		}
 		writeJSON(w, http.StatusConflict, map[string]string{
@@ -377,13 +397,31 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	// NO record; an attacker inducing DB write pressure could suppress the
 	// trail while still getting the secret + exec. Fail closed before any
 	// evaluation or injection.
-	if _, err := h.db.ExecContext(r.Context(), `
+	//
+	// #1369: PENDING row + seq-1 ledger transition in one transaction, for the
+	// same reason the insert is fatal at all — this is the highest-stakes keeper
+	// path, and a decision here must never exist without a durable record of the
+	// state it came from.
+	if err := insertKeeperRequestWithTransition(r.Context(), h.db, `
 		INSERT INTO keeper_requests
 		  (id, requesting_agent_id, requesting_crew_id, credential_id, task_id, intent,
 		   request_type, command, decision, created_at)
 		VALUES (?, ?, ?, ?, NULLIF(?,?), ?, 'execute', ?, 'PENDING', ?)`,
-		reqID, body.RequestingAgentID, body.RequestingCrewID, body.CredentialID,
-		body.TaskID, "", body.Intent, body.Command, req.CreatedAt.Format(time.RFC3339)); err != nil {
+		[]any{reqID, body.RequestingAgentID, body.RequestingCrewID, body.CredentialID,
+			body.TaskID, "", body.Intent, body.Command, req.CreatedAt.Format(time.RFC3339)},
+		keeperTransition{
+			RequestID:    reqID,
+			WorkspaceID:  body.WorkspaceID,
+			State:        keeperStatePending,
+			RequestType:  string(keeper.RequestTypeExecute),
+			AgentID:      body.RequestingAgentID,
+			CrewID:       body.RequestingCrewID,
+			CredentialID: body.CredentialID,
+			Intent:       body.Intent,
+			Command:      body.Command,
+			ActorType:    keeperActorAgent,
+			ActorID:      body.RequestingAgentID,
+		}); err != nil {
 		h.logger.Error("keeper execute: insert PENDING audit record failed; refusing to decide without an audit row", "error", err)
 		replyError(w, http.StatusInternalServerError, "audit persistence failed")
 		return
@@ -434,13 +472,32 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	if gkResp.Decision != string(keeper.DecisionAllow) {
-		// DENY or ESCALATE: update audit and return without executing
-		if _, err := h.db.ExecContext(r.Context(), `
+		// DENY or ESCALATE: update audit and return without executing.
+		// #1369: the PENDING→decided step is appended to the ledger in the same
+		// transaction as the in-place UPDATE.
+		if err := updateKeeperDecisionWithTransition(r.Context(), h.db, `
 			UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, decided_at=?, ollama_prompt=?, ollama_raw_response=? WHERE id=?`,
-			gkResp.Decision, gkResp.Reason, gkResp.RiskScore, now,
-			nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), reqID); err != nil {
+			[]any{gkResp.Decision, gkResp.Reason, gkResp.RiskScore, now,
+				nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), reqID},
+			keeperTransition{
+				RequestID:    reqID,
+				WorkspaceID:  body.WorkspaceID,
+				State:        gkResp.Decision,
+				RequestType:  string(keeper.RequestTypeExecute),
+				AgentID:      body.RequestingAgentID,
+				CrewID:       body.RequestingCrewID,
+				CredentialID: body.CredentialID,
+				Intent:       body.Intent,
+				Command:      body.Command,
+				Reason:       gkResp.Reason,
+				RiskScore:    &gkResp.RiskScore,
+				ActorType:    keeperActorKeeper,
+				ActorID:      "keeper",
+			}); err != nil {
 			h.logger.Error("keeper execute: update audit (deny)", "error", err)
 		}
+		h.emitExecuteDecision(r.Context(), body, reqID, agentName, credName, gkResp.Decision, gkResp.Reason, gkResp.RiskScore, secLevel, nil)
+
 		h.logger.Info("keeper execute: denied",
 			"request_id", reqID, "agent", agentName, "credential", credName, "decision", gkResp.Decision)
 		if h.broadcaster != nil {
@@ -633,13 +690,49 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	}
 	scrubbedOutput := s.Scrub(string(rawOutput))
 
-	// Update the audit record with the final decision and exit code
-	if _, err := h.db.ExecContext(r.Context(), `
+	// Update the audit record with the final decision and exit code.
+	// #1369: appended to the append-only ledger in the same transaction. This is
+	// the one transition that is recorded AFTER its side effect — the command has
+	// already run in the container — so a failure here is logged, not fatal: there
+	// is nothing left to withhold, and a 500 would only hide the output from the
+	// agent while the command's effects persist.
+	//
+	// auditCtx, NOT r.Context(): by this point the secret has been injected and
+	// the command HAS RUN. If the agent (or an intermediate proxy) disconnected
+	// during the exec, r.Context() is already cancelled — and writing the audit
+	// under it would abort the transaction, leaving the ALLOW recorded nowhere
+	// but the container's exec log. A disconnect must not be a way to execute
+	// with a credential and leave no trail. Bounded so a wedged DB cannot leak
+	// the goroutine, and detached with WithoutCancel (the same pattern
+	// internal_credentials.go uses for its post-revoke reconcile).
+	auditCtx, cancelAudit := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
+	defer cancelAudit()
+
+	if err := updateKeeperDecisionWithTransition(auditCtx, h.db, `
 		UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, exit_code=?, decided_at=?, ollama_prompt=?, ollama_raw_response=? WHERE id=?`,
-		string(keeper.DecisionAllow), gkResp.Reason, gkResp.RiskScore, exitCode, now,
-		nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), reqID); err != nil {
+		[]any{string(keeper.DecisionAllow), gkResp.Reason, gkResp.RiskScore, exitCode, now,
+			nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), reqID},
+		keeperTransition{
+			RequestID:    reqID,
+			WorkspaceID:  body.WorkspaceID,
+			State:        string(keeper.DecisionAllow),
+			RequestType:  string(keeper.RequestTypeExecute),
+			AgentID:      body.RequestingAgentID,
+			CrewID:       body.RequestingCrewID,
+			CredentialID: body.CredentialID,
+			Intent:       body.Intent,
+			Command:      body.Command,
+			Reason:       gkResp.Reason,
+			RiskScore:    &gkResp.RiskScore,
+			ExitCode:     &exitCode,
+			ActorType:    keeperActorKeeper,
+			ActorID:      "keeper",
+		}); err != nil {
 		h.logger.Error("keeper execute: update audit (allow)", "error", err)
 	}
+
+	h.emitExecuteDecision(auditCtx, body, reqID, agentName, credName,
+		string(keeper.DecisionAllow), gkResp.Reason, gkResp.RiskScore, secLevel, &exitCode)
 
 	h.logger.Info("keeper execute: completed",
 		"request_id", reqID, "agent", agentName, "credential", credName,
@@ -669,6 +762,75 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		Output:    scrubbedOutput,
 		ExitCode:  exitCode,
 	})
+}
+
+// emitExecuteDecision mirrors a /keeper/execute verdict into the journal (#1369).
+//
+// This path previously emitted NOTHING to the journal — only a WebSocket
+// broadcast and the in-place keeper_requests UPDATE. That mattered more than it
+// looks: /keeper/execute is the highest-stakes keeper path (an ALLOW injects a
+// plaintext secret and runs a command with it), and the journal is the only store
+// with a keyed tamper-evident hash-chain. So the single most sensitive class of
+// keeper decision was the one class living exclusively in a mutable table, while
+// #1401's rationale for scoping keeper_requests out was precisely that "keeper
+// decisions are already mirrored into the journal". For /keeper/request they were;
+// for /keeper/execute they were not.
+//
+// keeper.decision is not in the compactor's allowlist, so these entries are never
+// rolled up — they inherit the chain and stay verifiable for their whole retention.
+//
+// Best-effort, matching the /keeper/request emitter: the decision is already
+// recorded in keeper_requests and its append-only ledger, so a journal hiccup
+// costs tamper-evidence for one entry, not the record itself.
+func (h *KeeperHandler) emitExecuteDecision(
+	ctx context.Context,
+	body keeperExecuteBody,
+	reqID, agentName, credName, decision, reason string,
+	riskScore, secLevel int,
+	exitCode *int,
+) {
+	if h.journal == nil {
+		return
+	}
+	severity := journal.SeverityNotice
+	if decision == string(keeper.DecisionDeny) {
+		// A denied credential-bound command is what an operator wants to see
+		// without scrolling — it usually means an agent went off the rails.
+		severity = journal.SeverityWarn
+	}
+	payload := map[string]any{
+		"request_id":      reqID,
+		"request_type":    string(keeper.RequestTypeExecute),
+		"credential_id":   body.CredentialID,
+		"credential_name": credName,
+		"decision":        decision,
+		"reason":          reason,
+		"risk_score":      riskScore,
+		"security_level":  secLevel,
+		"intent":          body.Intent,
+		// The command is already stored in keeper_requests.command and shown in
+		// the admin log; including it here is what makes the chained entry
+		// self-sufficient if that row is ever pruned.
+		"command": body.Command,
+	}
+	if exitCode != nil {
+		payload["exit_code"] = *exitCode
+	}
+	if _, err := h.journal.Emit(ctx, journal.Entry{
+		WorkspaceID: body.WorkspaceID,
+		CrewID:      body.RequestingCrewID,
+		AgentID:     body.RequestingAgentID,
+		Type:        journal.EntryKeeperDecision,
+		Severity:    severity,
+		ActorType:   journal.ActorKeeper,
+		ActorID:     "keeper",
+		Summary: fmt.Sprintf("keeper %s command with credential %s for %s (risk %d)",
+			decision, credName, agentName, riskScore),
+		Payload: payload,
+		Refs:    map[string]any{"keeper_request_id": reqID, "credential_id": body.CredentialID},
+	}); err != nil {
+		h.logger.Warn("keeper execute: journal emit decision failed", "error", err, "request_id", reqID)
+	}
 }
 
 // GetRequest handles GET /api/v1/internal/keeper/request/{requestId}.

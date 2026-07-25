@@ -37,6 +37,61 @@ Keeper security decisions are stored in the `keeper_requests` table with detaile
 | `ollama_prompt` | Full prompt sent to the Keeper LLM |
 | `ollama_raw_response` | Raw LLM response for review |
 
+#### The decision history is append-only
+
+`keeper_requests` holds the **current** state of a request. It is written `PENDING`
+and then updated in place once the gatekeeper decides — so on its own it cannot
+tell you that a request was ever pending, how long it sat there, or whether a
+decision was later rewritten.
+
+Every state **transition** is therefore also appended to `keeper_request_events`:
+
+| Column | Description |
+|--------|-------------|
+| `request_id` | The `keeper_requests` row this transition belongs to |
+| `seq` | 1-based, monotonic per request. A gap or duplicate is itself a signal |
+| `state` | The state *entered*: `PENDING`, `ALLOW`, `DENY`, `ESCALATE`, `DUPLICATE_SUPPRESSED`, or a Phase-2 verdict |
+| `actor_type` / `actor_id` | Who caused it — `agent` (raised the request), `keeper` (decided it), `user` (resolved an escalation), `system` (dedup suppression) |
+| `reason`, `risk_score`, `exit_code` | The decision detail at that transition. `NULL` where not yet applicable — a `PENDING` has no risk score, and no exit code exists before the command ran |
+| `recorded_at` | When the transition happened |
+
+The agent, crew, credential, intent and command are **copied onto every
+transition** rather than joined, so the record stays readable and self-describing
+if the operational `keeper_requests` row is ever pruned.
+
+<Warning>
+  `keeper_request_events` is append-only **at the database level**: a `BEFORE
+  UPDATE` trigger aborts any attempt to rewrite a recorded transition. A decision
+  cannot be edited, only superseded by a further transition — which appears as an
+  extra row rather than a silently changed value. Immutability that depended on
+  every future caller remembering to insert instead of update would not be
+  immutability.
+
+  `DELETE` is deliberately *not* blocked: `workspace_id` carries `ON DELETE
+  CASCADE` so workspace teardown and `backup --replace` still work. Deletion is
+  covered by the other half of the model — every keeper decision is also mirrored
+  into the hash-chained journal, where a removal shows up as a sequence gap that
+  only a signed checkpoint can legitimately bridge.
+</Warning>
+
+Read the history with:
+
+```bash
+crewship keeper requests                  # current state of recent requests
+crewship keeper history <request-id>      # every transition, oldest first
+```
+
+Or `GET /api/v1/admin/keeper/requests/{requestId}/events` (ADMIN+). A request
+belonging to another workspace returns an empty list rather than a 404, so the
+endpoint cannot be used to probe which request ids exist.
+
+<Note>
+Requests raised **before** the ledger migration have their current state
+backfilled (a `PENDING` at `created_at` plus the decision at `decided_at`) but no
+intermediate history — earlier rewrites, if any happened, are unrecoverable. That
+loss is exactly what the ledger stops from here on.
+</Note>
+
 ## Audit Log Table Structure
 
 ```sql
@@ -224,6 +279,15 @@ they never drift.
   checkpoint covering it.
 - **Forged rewrite by a DB-write attacker** — recomputing the hash columns
   without the key does not validate (this is the property a bare hash lacked).
+- **Unrecorded priority change** — the one committed field that is legitimately
+  mutable is reconciled against its append-only change ledger, so flipping it
+  directly in the DB is caught (see below).
+
+Keeper decisions are inside this chain. `/keeper/request` and `/keeper/execute`
+both emit a `keeper.decision` entry, and `keeper.decision` is not in the
+compactor's allowlist, so those entries are never rolled up and stay verifiable
+for their whole retention. The execute entry carries the command and its exit
+code, so it remains meaningful even if the `keeper_requests` row is later pruned.
 
 ### Legitimate deletion vs. tampering: signed checkpoints
 
@@ -241,6 +305,52 @@ checkpoint covers it, and continues linking `prev_hash` pointers across the gap.
 An attacker cannot abuse this: forging a checkpoint requires the key, and a
 mid-chain delete with **no** checkpoint (or a checkpoint with a bad MAC) still
 fails verification.
+
+### Legitimate mutation vs. tampering: entry priority
+
+One committed field is *meant* to change after write. An OWNER/ADMIN can mark an
+entry `high`, `pin` or `permanent` (`PATCH /api/v1/journal/{id}/priority`) — a
+load-bearing marker, since `permanent` entries are never compacted and pins land
+in the curated `pins.md`.
+
+Hashing that mutable column would make every authorised pin a permanent false
+"tampered" verdict, which is worse than no verification at all: it trains
+operators to ignore the result. So the chain commits to **`priority_at_emit`**,
+written once at emit and never updated, while the live `priority` column stays
+where every reader looks.
+
+The mutable column is not left unguarded. Each edit appends to
+`journal_entry_priorities` — also append-only by trigger — in the **same
+transaction** as the column update, and verification reconciles the two: the live
+value must be reachable from `priority_at_emit` by following the recorded chain of
+changes. That makes two distinct attacks visible:
+
+- a **silent column flip** (a raw DB write) leaves no ledger row at all; and
+- a **fabricated ledger row** whose `previous_priority` does not chain back to the
+  emit-time value.
+
+Why it matters that this is checked: downgrading a `permanent` entry to `normal`
+would let the next compaction pass remove it *legitimately*, complete with a valid
+signed checkpoint — laundering a deletion through a mechanism designed to
+authorise one.
+
+<Note>
+This check bounds forgery rather than eliminating it. An attacker with DB write
+can append a fully self-consistent chain of fake edits. Two things still stand in
+the way: the honest path is now verifiable (no false positives to hide behind),
+and every real edit also emits a `memory.priority_changed` entry **into the keyed
+chain** — so a forged ledger with no corresponding chained entry is detectable by
+comparing the two.
+</Note>
+
+<Note>
+Entries pinned **before** the upgrade keep working: `priority_at_emit` is seeded
+from their current priority — the value their stored hash was already computed
+over — and the edit ledger is deliberately left **empty** for them, so
+reconciliation holds with zero recorded changes. The pre-upgrade edit history is
+unrecoverable, and inventing a change nobody can be attributed to would be a
+fabricated audit record. The guarantee starts at the upgrade and runs forward.
+</Note>
 
 <Note>
   **Residual gaps (no overclaiming).** Two attacks are *not* fully covered:

@@ -1803,6 +1803,14 @@ END;
 	// expires_at the enforcement paths already gate on).
 	// See migrate_consts_v165_credential_lease_mint.go.
 	{version: 165, name: "credential_lease_mint", sql: migrationCredentialLeaseMint},
+	// v166: the append-only halves of the tamper-evident audit trail (#1369).
+	// keeper_request_events records every keeper decision TRANSITION (the
+	// operational keeper_requests row is UPDATEd in place, destroying prior
+	// state), and journal_entries.priority_at_emit + journal_entry_priorities
+	// stop the operator-facing priority edit from permanently breaking the
+	// hash-chain it is inside. Both new tables are append-only by trigger.
+	{version: 166, name: "keeper_append_only_audit", sql: migrationKeeperAppendOnlyAudit,
+		restoreBackfill: restoreBackfillPriorityAtEmit},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
