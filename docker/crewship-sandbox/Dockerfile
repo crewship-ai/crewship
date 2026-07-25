@@ -47,6 +47,29 @@ RUN chmod +x /usr/local/bin/init-firewall.sh && \
     echo "agent ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/agent-firewall && \
     chmod 0440 /etc/sudoers.d/agent-firewall
 
+# Defense-in-depth: strip the SUID bit from every setuid binary except sudo
+# (#1400 part 2). The base image ships su, mount, umount, passwd, chsh, chfn,
+# newgrp, gpasswd, ssh-keysign, … as SUID-root — gratuitous within-container
+# attack surface. They are inert TODAY because the runtime sets NoNewPrivs=1
+# (the kernel ignores setuid), but a single regression that drops NoNewPrivs or
+# grants a capability would re-arm all of them at once.
+#
+# sudo is the one SUID binary kept: it is the elevation path for the NOPASSWD
+# firewall-init sudoers rule above, and package-install postCreate flows on
+# devcontainer bases rely on `sudo apt-get`. It stays inert under NoNewPrivs=1
+# like the rest, but removing its SUID would break those paths.
+#
+# The trailing assertion FAILS THE BUILD if any SUID binary other than
+# /usr/bin/sudo survives, so a future base-image bump that reintroduces one is
+# caught at build time (the #1400 "find / -perm -4000" acceptance check, minus
+# the load-bearing sudo).
+RUN find / -xdev -perm -4000 -type f ! -path /usr/bin/sudo -exec chmod u-s {} + 2>/dev/null || true; \
+    remaining="$(find / -xdev -perm -4000 -type f 2>/dev/null | sort | tr '\n' ' ' | sed 's/ $//')"; \
+    if [ "$remaining" != "/usr/bin/sudo" ]; then \
+        echo "SUID strip assertion failed (#1400): expected only /usr/bin/sudo, found: [$remaining]" >&2; \
+        exit 1; \
+    fi
+
 # Switch to non-root user
 USER agent
 ENV HOME=/home/agent
