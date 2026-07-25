@@ -68,6 +68,11 @@ type keeperGovernancePutBody struct {
 	WatchPresets          *[]string `json:"watch_presets"`
 	RequireSecondApprover *bool     `json:"require_second_approver"`
 
+	// AutoLeaseSeconds is the credential-lease auto-issuance TTL (#1373).
+	// 0 turns auto-issuance off (the default); a positive value is clamped to
+	// [governance.MinAutoLeaseSeconds, governance.MaxAutoLeaseSeconds].
+	AutoLeaseSeconds *int `json:"auto_lease_seconds"`
+
 	// Governance-model selection (M2a, #1001). Empty provider = "use the
 	// server/env default". A credential ref must point at an ENDPOINT_URL /
 	// API_KEY credential in this workspace.
@@ -128,6 +133,27 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.RequireSecondApprover != nil {
 		cur.RequireSecondApprover = *body.RequireSecondApprover
+	}
+	if body.AutoLeaseSeconds != nil {
+		// Reject rather than silently clamp on the API boundary: an operator who
+		// asks for a 10-second lease has misunderstood the control, and returning
+		// 200 with a quietly-rewritten 60s would hide that. governance.Upsert still
+		// clamps as a last-resort invariant for non-HTTP writers.
+		v := *body.AutoLeaseSeconds
+		if v < 0 {
+			replyError(w, http.StatusBadRequest, "auto_lease_seconds must not be negative")
+			return
+		}
+		if v > 0 && v < governance.MinAutoLeaseSeconds {
+			replyError(w, http.StatusBadRequest,
+				"auto_lease_seconds must be 0 (off) or at least 60 — a shorter lease can lapse inside the gatekeeper's own evaluation")
+			return
+		}
+		if v > governance.MaxAutoLeaseSeconds {
+			replyError(w, http.StatusBadRequest, "auto_lease_seconds exceeds the maximum lease of 30 days")
+			return
+		}
+		cur.AutoLeaseSeconds = v
 	}
 	if body.GovModelProvider != nil {
 		// Empty is allowed and means "use the server/env default". A non-empty
@@ -246,6 +272,7 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 			"watch_preset_count":      len(s.WatchPresets),
 			"watch_spec_len":          len(s.WatchSpec),
 			"require_second_approver": s.RequireSecondApprover,
+			"auto_lease_seconds":      s.AutoLeaseSeconds,
 			// Governance-model selection: log the provider/model + whether a
 			// vault credential backs it (never the credential value).
 			"gov_model_provider": s.GovModelProvider,

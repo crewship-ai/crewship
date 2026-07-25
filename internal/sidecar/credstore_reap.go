@@ -24,13 +24,18 @@ const credReapInterval = 60 * time.Second
 // nothing (fail toward availability: a transient crewshipd blip must not nuke
 // working keys; the revoked key is simply reaped on the next good tick).
 //
-// #1373: the crew-scoped listing is also LEASE-gated on the server — a grant
-// whose agent_credentials.expires_at has lapsed is omitted from the response
-// exactly like a revoked one. So this same reaper is what evicts an expired
-// lease: a leased provider key delivered at boot (while its lease was valid) is
-// dropped from the in-memory store within one interval of its TTL lapsing, and
-// the container stops being served it. No extra client-side expiry logic is
-// needed — the source-of-truth query returns only non-expired ACTIVE creds.
+// Credential LEASES (#1373) are NOT enforced through this fetch. An earlier
+// increment claimed they were, on the grounds that the crew-scoped listing
+// lease-gates its agent_credentials EXISTS clause — but that clause is one arm of
+// an OR with `credentials.scope = 'WORKSPACE'`, which is the default scope for
+// exactly the provider keys (API_KEY / AI_CLI_TOKEN) delivered here, so a leased
+// provider key stayed listed forever. More fundamentally, boot delivery is
+// credential-scoped (one crew-wide store keyed by credential id) while a lease is
+// grant-scoped (per agent), so a crew-wide listing has no dimension in which to
+// express "agent A's lease lapsed". Lease expiry is therefore enforced against a
+// deadline delivered WITH each credential — see CredStore.ExpireLeases and the
+// lease gate in Select — which also makes it fail-closed rather than dependent on
+// this fetch succeeding.
 func (s *Server) reapRevokedCredentials(ctx context.Context) {
 	if s == nil || s.ipc == nil || s.ipc.BaseURL == "" || s.ipc.WorkspaceID == "" {
 		return
@@ -93,10 +98,19 @@ func (s *Server) reapRevokedCredentials(ctx context.Context) {
 	}
 }
 
-// startCredentialReaper runs reapRevokedCredentials on a ticker until ctx is
-// cancelled. Guarded so it's a no-op without an IPC config (tests, standalone).
+// startCredentialReaper runs both sweeps on a ticker until ctx is cancelled:
+//
+//  1. Lease expiry (#1373) — local, needs no server, so it runs on EVERY tick
+//     regardless of IPC configuration. Gating it on IPC (as the revocation sweep
+//     is) would mean a sidecar started without an IPC config never evicts a
+//     lapsed lease's plaintext from memory.
+//  2. Revocation reconciliation — requires crewshipd; reapRevokedCredentials
+//     guards its own preconditions and fails open on any fetch error.
+//
+// The loop itself only needs a credStore, so it is no longer short-circuited by a
+// missing IPC config.
 func (s *Server) startCredentialReaper(ctx context.Context) {
-	if s == nil || s.ipc == nil || s.ipc.BaseURL == "" || s.ipc.WorkspaceID == "" {
+	if s == nil || s.credStore == nil {
 		return
 	}
 	ticker := time.NewTicker(credReapInterval)
@@ -105,7 +119,10 @@ func (s *Server) startCredentialReaper(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case tick := <-ticker.C:
+			if dropped := s.credStore.ExpireLeases(tick); dropped > 0 {
+				s.logger.Info("credential reap: dropped credentials with lapsed leases", "count", dropped)
+			}
 			s.reapRevokedCredentials(ctx)
 		}
 	}

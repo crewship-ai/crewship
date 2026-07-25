@@ -330,6 +330,12 @@ var agentCredentialsCmd = &cobra.Command{
 			EnvVarName     string `json:"env_var_name"`
 			ExpiresAt      string `json:"expires_at"`
 			Expired        bool   `json:"expired"`
+			// LeaseSource explains WHY the grant expires (#1373): "manual" (an
+			// operator's `credential assign --ttl`), "keeper_allow" (auto-issued
+			// on a Keeper ALLOW) or "escalation_approve" (auto-issued when a human
+			// approved an agent-proposed credential). Empty on a standing grant
+			// and on pre-v165 leases.
+			LeaseSource string `json:"lease_source,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &creds); err != nil {
 			return err
@@ -341,7 +347,7 @@ var agentCredentialsCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		headers := []string{"ID", "NAME", "PROVIDER", "TYPE", "ENV VAR", "LEASE"}
+		headers := []string{"ID", "NAME", "PROVIDER", "TYPE", "ENV VAR", "LEASE", "SOURCE"}
 		var rows [][]string
 		for _, c := range creds {
 			lease := "standing"
@@ -352,7 +358,13 @@ var agentCredentialsCmd = &cobra.Command{
 					lease = "expires " + c.ExpiresAt
 				}
 			}
-			rows = append(rows, []string{c.ID[:min(12, len(c.ID))], c.CredentialName, c.Provider, c.Type, c.EnvVarName, lease})
+			// A grant that is quietly expiring is only actionable if the operator
+			// can see which approval put the lease there.
+			source := "-"
+			if c.LeaseSource != "" {
+				source = c.LeaseSource
+			}
+			rows = append(rows, []string{c.ID[:min(12, len(c.ID))], c.CredentialName, c.Provider, c.Type, c.EnvVarName, lease, source})
 		}
 		return f.Auto(creds, headers, rows)
 	},

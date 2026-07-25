@@ -55,6 +55,13 @@ const (
 	// then APPROVED it (→ ACTIVE) or REJECTED it (→ soft-deleted).
 	AuditEventApproved CredentialAuditEvent = "APPROVED"
 	AuditEventRejected CredentialAuditEvent = "REJECTED"
+	// AuditEventLeased (#1373): the credential's grant to an agent was
+	// (re-)issued as a short-lived lease — by an operator's explicit --ttl, or
+	// automatically on a Keeper ALLOW / escalation approve when the workspace
+	// has auto_lease_seconds configured. The metadata carries the source, the
+	// resulting expiry and the authorising request id, so "why did this
+	// credential stop working at 14:32?" is answerable from the timeline.
+	AuditEventLeased CredentialAuditEvent = "LEASED"
 )
 
 var validAuditEvents = map[CredentialAuditEvent]struct{}{
@@ -66,6 +73,7 @@ var validAuditEvents = map[CredentialAuditEvent]struct{}{
 	AuditEventCreated:  {},
 	AuditEventApproved: {},
 	AuditEventRejected: {},
+	AuditEventLeased:   {},
 }
 
 // credentialAuditDropped counts audit events that a best-effort call

@@ -83,6 +83,7 @@ function mockRoutes(gov: {
   security_contact_user_id: string
   deny_notify_min_risk: number
   require_second_approver?: boolean
+  auto_lease_seconds?: number
   watch_spec?: string
   watch_presets?: string[]
   gov_model_provider?: string
@@ -160,6 +161,8 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
       security_contact_user_id: "u-owner",
       deny_notify_min_risk: 9,
       require_second_approver: false,
+      // Auto-lease is opt-in (#1373): an untouched form sends 0 = off.
+      auto_lease_seconds: 0,
       watch_spec: "",
       watch_presets: [],
       gov_model_provider: "",
@@ -476,5 +479,115 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
 
     expect(await screen.findByTestId("keeper-governance-second-approver")).toBeDisabled()
+  })
+
+  // ── Credential auto-lease (#1373) ────────────────────────────────────────
+
+  it("renders auto-lease empty (off) when the workspace has not opted in", async () => {
+    mockRoutes({
+      configured: true,
+      enabled: true,
+      security_contact_user_id: "",
+      deny_notify_min_risk: 7,
+      auto_lease_seconds: 0,
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    // Empty, not "0": a meaningful-looking zero reads as a configured value.
+    expect(await screen.findByTestId("keeper-governance-auto-lease")).toHaveValue(null)
+  })
+
+  it("hydrates auto-lease seconds into minutes", async () => {
+    mockRoutes({
+      configured: true,
+      enabled: true,
+      security_contact_user_id: "",
+      deny_notify_min_risk: 7,
+      auto_lease_seconds: 900,
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    expect(await screen.findByTestId("keeper-governance-auto-lease")).toHaveValue(15)
+  })
+
+  it("sends auto_lease_seconds in seconds when minutes are entered", async () => {
+    mockRoutes({
+      configured: true,
+      enabled: true,
+      security_contact_user_id: "",
+      deny_notify_min_risk: 7,
+      auto_lease_seconds: 0,
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    fireEvent.change(await screen.findByTestId("keeper-governance-auto-lease"), {
+      target: { value: "30" },
+    })
+    fireEvent.click(screen.getByTestId("keeper-governance-save"))
+
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+    const putCall = apiFetch.mock.calls.find(([, init]) => (init as RequestInit)?.method === "PUT")
+    const body = JSON.parse(String((putCall as [string, RequestInit])[1].body)) as Record<string, unknown>
+    expect(body.auto_lease_seconds).toBe(1800)
+  })
+
+  it("rejects a sub-minute auto-lease before hitting the server", async () => {
+    mockRoutes({
+      configured: true,
+      enabled: true,
+      security_contact_user_id: "",
+      deny_notify_min_risk: 7,
+      auto_lease_seconds: 900,
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    // A fractional minute is below the 60s floor: such a lease can lapse inside
+    // Keeper's own evaluation, so the ALLOW would deny the request it authorised.
+    fireEvent.change(await screen.findByTestId("keeper-governance-auto-lease"), {
+      target: { value: "0.5" },
+    })
+    fireEvent.click(screen.getByTestId("keeper-governance-save"))
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(expect.stringContaining("whole number of minutes")),
+    )
+    expect(
+      apiFetch.mock.calls.some(([, init]) => (init as RequestInit)?.method === "PUT"),
+    ).toBe(false)
+  })
+
+  it("clearing the auto-lease field turns it off (sends 0)", async () => {
+    mockRoutes({
+      configured: true,
+      enabled: true,
+      security_contact_user_id: "",
+      deny_notify_min_risk: 7,
+      auto_lease_seconds: 900,
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    fireEvent.change(await screen.findByTestId("keeper-governance-auto-lease"), {
+      target: { value: "" },
+    })
+    fireEvent.click(screen.getByTestId("keeper-governance-save"))
+
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+    const putCall = apiFetch.mock.calls.find(([, init]) => (init as RequestInit)?.method === "PUT")
+    const body = JSON.parse(String((putCall as [string, RequestInit])[1].body)) as Record<string, unknown>
+    expect(body.auto_lease_seconds).toBe(0)
+  })
+
+  it("disables the auto-lease input when the caller cannot manage", async () => {
+    canManage = false
+    mockRoutes({
+      configured: true,
+      enabled: true,
+      security_contact_user_id: "",
+      deny_notify_min_risk: 7,
+      auto_lease_seconds: 900,
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    expect(await screen.findByTestId("keeper-governance-auto-lease")).toBeDisabled()
   })
 })

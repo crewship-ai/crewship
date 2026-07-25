@@ -146,13 +146,19 @@ func (h *AssignmentHandler) loadAgentCredentials(ctx context.Context, agentID st
 	// rotation in progress) carry sentinel encrypted bodies. Without this filter
 	// the delegation/hire loader would decrypt and inject "pending_manifest" /
 	// "pending_oauth" as a real env value at the sub-agent boundary.
+	//
+	// #1373: also gate the grant's short-lived LEASE. This is the sub-agent
+	// boundary, so a lapsed lease handed over here is worse than at boot — the
+	// value crosses to an agent the lease was never issued to.
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT ac.credential_id, ac.env_var_name, ac.priority, c.encrypted_value, c.type
+		SELECT ac.credential_id, ac.env_var_name, ac.priority, c.encrypted_value, c.type,
+		       COALESCE(ac.expires_at, '')
 		FROM agent_credentials ac
 		JOIN credentials c ON c.id = ac.credential_id
 		WHERE ac.agent_id = ? AND c.deleted_at IS NULL AND c.status = 'ACTIVE'
+		  AND `+credentialLeaseGateSQL+`
 		ORDER BY ac.priority ASC
-	`, agentID)
+	`, agentID, leaseComparisonNow())
 	if err != nil {
 		return nil, fmt.Errorf("query credentials: %w", err)
 	}
@@ -162,7 +168,7 @@ func (h *AssignmentHandler) loadAgentCredentials(ctx context.Context, agentID st
 	for rows.Next() {
 		var c orchestrator.Credential
 		var encValue string
-		if err := rows.Scan(&c.ID, &c.EnvVarName, &c.Priority, &encValue, &c.Type); err != nil {
+		if err := rows.Scan(&c.ID, &c.EnvVarName, &c.Priority, &encValue, &c.Type, &c.LeaseExpiresAt); err != nil {
 			return nil, fmt.Errorf("scan credential: %w", err)
 		}
 		dec, err := encryption.Decrypt(encValue)

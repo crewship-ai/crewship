@@ -266,6 +266,31 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("keeper: update request decision", "error", err)
 	}
 
+	// #1373: an ALLOW is an APPROVAL, and an approval is what mints a lease.
+	// Re-issue the requesting agent's grant as a short-lived lease so access
+	// decays instead of persisting — opt-in per workspace (auto_lease_seconds,
+	// default 0 = off) and L3/L4 only. Done before the journal/inbox fan-out so
+	// the lease exists by the time the decision is visible; best-effort, so a
+	// lease-write hiccup never turns an ALLOW into a 500.
+	//
+	// gov is resolved further down for the inbox routing; do it here because the
+	// lease TTL lives on the same row and one Resolve serves both.
+	gov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
+	if gkResp.Decision == string(keeper.DecisionAllow) {
+		issueCredentialLease(r.Context(), h.db, h.logger, h.journal, leaseIssueInput{
+			WorkspaceID:    body.WorkspaceID,
+			CrewID:         body.RequestingCrewID,
+			AgentID:        body.RequestingAgentID,
+			AgentName:      agentName,
+			CredentialID:   body.CredentialID,
+			CredentialName: credName,
+			SecurityLevel:  secLevel,
+			Source:         leaseSourceKeeperAllow,
+			RequestID:      reqID,
+			TTLSeconds:     gov.AutoLeaseSeconds,
+		})
+	}
+
 	// Emit keeper.decision so the Timeline shows the verdict alongside
 	// the request. Severity escalates to warn for DENY because a denied
 	// credential ask is the kind of event an operator wants to see
@@ -323,8 +348,8 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// high-risk DENY notify is opt-in and gated on the workspace watchdog
 	// being enabled — Resolve returns disabled for an unconfigured workspace
 	// (default OFF), matching the behavior hook so the two paths agree on
-	// what "enabled" means.
-	gov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
+	// what "enabled" means. (gov is resolved once above, where the lease TTL
+	// is also read off the same row.)
 
 	// inbox.Insert returns its SQL error; only broadcast on a real write so
 	// a failed projection doesn't flash a phantom bell update with nothing

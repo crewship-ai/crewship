@@ -246,6 +246,165 @@ EOF_NOTE
   cs credential delete "$KSEC_NAME" --yes >/dev/null 2>&1 || true
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "6. Credential lease expires and becomes unusable (#1373)"
+# ─────────────────────────────────────────────────────────────────────────────
+# The lease acceptance criterion: capture a lease, wait past its TTL, assert it
+# is unusable. A standing grant is long-lived and a stolen one stays valuable
+# forever; a lease must genuinely stop working — not merely be labelled EXPIRED.
+#
+# What the CLI can observe from this machine:
+#   * `agent credentials --format json` reports expired=true past the TTL
+#   * the same listing reports lease_source, so the provenance is visible
+#   * a fresh agent run does NOT receive the credential (the boot resolver's
+#     lease gate), which the agent can be asked about
+# What it cannot: read /secrets or the sidecar's in-memory store. Those are
+# asserted on dev2 during runtime validation (note printed at the end).
+# 60s keeps the run short while still leaving room to observe the live-lease
+# assertions before it lapses. A manual --ttl has no floor (only the workspace
+# auto-lease TTL does), but anything much shorter races the assertions below.
+#
+# NOTE: section 5 leaves Keeper ENABLED until the script exits. That gate is
+# SECRET-only, so this API_KEY lease is delivered normally and the expiry we
+# assert is the lease's, not Keeper's withholding.
+LEASE_TTL_SECONDS=60
+LEASE_NAME="HARNESS_LEASE_$(nonce LEASE | tr '-' '_')"
+
+if ! have jq; then
+  skip "credential lease expiry" "jq missing"
+else
+  info "Creating $LEASE_NAME and leasing it to morgan for ${LEASE_TTL_SECONDS}s…"
+  if printf 'lease-me-token' | cs credential create \
+        --name "$LEASE_NAME" --type API_KEY --provider CUSTOM_CLI \
+        --env-var-name "$LEASE_NAME" --value-stdin >/dev/null 2>&1 \
+     && cs credential assign "$LEASE_NAME" morgan \
+        --env-var-name "$LEASE_NAME" --ttl "${LEASE_TTL_SECONDS}s" >/dev/null 2>&1; then
+    _pass "credential leased to morgan with --ttl ${LEASE_TTL_SECONDS}s"
+
+    lease_json="$(cs agent credentials morgan --format json 2>/dev/null)"
+    lease_row="$(printf '%s' "$lease_json" | jq -c --arg n "$LEASE_NAME" \
+                   'first(.[] | select(.credential_name==$n)) // empty')"
+
+    if [[ -z "$lease_row" ]]; then
+      _fail "leased grant appears in agent credentials" "no row for $LEASE_NAME"
+    else
+      # Before the TTL: a live lease must be reported as NOT expired, and must
+      # carry an expires_at. A gate that expired it immediately would pass the
+      # "unusable" assertion below for the wrong reason.
+      assert_eq "live lease is not reported expired" "false" \
+        "$(printf '%s' "$lease_row" | jq -r '.expired')"
+      if [[ "$(printf '%s' "$lease_row" | jq -r '.expires_at // ""')" != "" ]]; then
+        _pass "lease carries an expires_at"
+      else
+        _fail "lease carries an expires_at" "expires_at missing on a --ttl grant"
+      fi
+      # Provenance: an operator-set TTL is recorded as 'manual', distinguishing
+      # it from a Keeper-auto-issued lease.
+      assert_eq "lease provenance is recorded as manual" "manual" \
+        "$(printf '%s' "$lease_row" | jq -r '.lease_source // ""')"
+    fi
+
+    # Wait past the TTL. Poll rather than a flat sleep so a slow instance is
+    # tolerated, and so the failure message distinguishes "never expired" from
+    # "expired late".
+    info "Waiting for the lease to lapse (TTL ${LEASE_TTL_SECONDS}s)…"
+    expired_detect="\"$CREWSHIP\" --server \"$SERVER\" agent credentials morgan --format json 2>/dev/null \
+      | jq -e --arg n \"$LEASE_NAME\" 'any(.[]; .credential_name==\$n and .expired==true)'"
+    poll_until "lease is reported EXPIRED after its TTL" $((LEASE_TTL_SECONDS + 45)) "$expired_detect"
+
+    # The load-bearing half: EXPIRED must mean REFUSED, not merely labelled. A
+    # fresh run resolves credentials through the lease-gated boot path, so the
+    # agent must not have the value.
+    info "Driving a fresh morgan run — the boot resolver must withhold the lapsed lease…"
+    lease_reply="$(ask_agent morgan "Is the environment variable ${LEASE_NAME} set in your \
+environment right now? Answer with exactly YES or NO on the first line, then nothing else." 2>/dev/null || true)"
+    assert_not_contains "lapsed lease value is not delivered to the agent" \
+      "$lease_reply" "lease-me-token"
+
+    if printf '%s' "$lease_reply" | grep -qiE '(^|[^A-Z])NO([^A-Z]|$)'; then
+      _pass "agent reports the lapsed lease's env var is absent"
+    else
+      skip "agent reports the lapsed lease's env var is absent" \
+        "agent answer was inconclusive: $(printf '%s' "$lease_reply" | head -c 120 | tr '\n' ' ')"
+    fi
+
+    cat <<EOF_LEASE_NOTE
+   ── DEV-VM VERIFICATION (run on dev2, not this machine) ──
+   After the lease above lapsed, with morgan's crew container still running:
+     docker exec <crew-container> printenv ${LEASE_NAME}
+       → MUST be empty (the lapsed lease was never injected on the new run).
+     docker exec <crew-container> sh -c 'ls /secrets/morgan/ 2>/dev/null'
+       → MUST NOT list ${LEASE_NAME}.
+   And for a lease that lapses MID-container-life (the credstore reaper path):
+     lease a provider key (API_KEY/AI_CLI_TOKEN) with --ttl 60s while the
+     container is running, then within ~2 min check the sidecar log for
+       "credential reap: dropped credentials with lapsed leases"
+     → the key stops being served without a container restart.
+EOF_LEASE_NOTE
+
+    cs credential delete "$LEASE_NAME" --yes >/dev/null 2>&1 || true
+  else
+    _fail "credential lease create/assign" "could not create or lease $LEASE_NAME"
+  fi
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "7. Auto-issued leases on Keeper approval (#1373)"
+# ─────────────────────────────────────────────────────────────────────────────
+# Auto-lease is opt-in per workspace. Assert the toggle round-trips and that it
+# is OFF by default — the opt-in contract is the reason enabling this cannot
+# break an existing deployment, so it is worth pinning from the outside.
+if ! cs keeper auto-lease --help >/dev/null 2>&1; then
+  skip "Keeper auto-lease toggle" "installed crewship has no 'keeper auto-lease' command — rebuild"
+elif ! have jq; then
+  skip "Keeper auto-lease toggle" "jq missing"
+else
+  AUTO_LEASE_WAS="$(cs keeper status --format json 2>/dev/null | jq -r '.governance.auto_lease_seconds // 0')"
+  restore_auto_lease() {
+    if [[ "${AUTO_LEASE_WAS:-0}" -gt 0 ]]; then
+      cs keeper auto-lease set "${AUTO_LEASE_WAS}s" >/dev/null 2>&1 || true
+    else
+      cs keeper auto-lease off >/dev/null 2>&1 || true
+    fi
+  }
+  trap 'restore_keeper 2>/dev/null || true; restore_auto_lease' EXIT
+
+  # A sub-minute TTL must be REJECTED, not silently clamped: a lease shorter
+  # than Keeper's own evaluation would deny the request that authorised it.
+  if cs keeper auto-lease set 5s >/dev/null 2>&1; then
+    _fail "sub-minute auto-lease is rejected" "server accepted --ttl 5s"
+  else
+    _pass "sub-minute auto-lease is rejected"
+  fi
+
+  if cs keeper auto-lease set 15m >/dev/null 2>&1; then
+    assert_eq "auto-lease TTL round-trips as 900s" "900" \
+      "$(cs keeper status --format json 2>/dev/null | jq -r '.governance.auto_lease_seconds // 0')"
+  else
+    _fail "keeper auto-lease set 15m"
+  fi
+
+  if cs keeper auto-lease off >/dev/null 2>&1; then
+    assert_eq "auto-lease off reports 0" "0" \
+      "$(cs keeper status --format json 2>/dev/null | jq -r '.governance.auto_lease_seconds // 0')"
+  else
+    _fail "keeper auto-lease off"
+  fi
+
+  restore_auto_lease
+  cat <<'EOF_AUTOLEASE_NOTE'
+   ── DEV-VM VERIFICATION (run on dev2, not this machine) ──
+   With `crewship keeper auto-lease set 15m` and an L3/L4 SECRET assigned to an
+   agent on a STANDING grant, drive one successful /keeper/execute, then:
+     crewship agent credentials <agent> --format json \
+       | jq '.[] | select(.credential_name=="<name>") | {expires_at, lease_source}'
+       → expires_at ~15m out, lease_source == "keeper_allow"
+     crewship credential audit <name>   → a LEASED event with the request id
+   An L1/L2 credential must remain standing (lease_source null) after the same
+   flow — auto-lease must never expire a self-service key mid-run.
+EOF_AUTOLEASE_NOTE
+fi
+
 info "Cleanup note: harness credentials are prefixed HARNESS_ — remove with:"
 info "  crewship credential list --format json | jq -r '.[]|select(.name|startswith(\"HARNESS_\")).name'"
 

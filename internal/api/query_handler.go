@@ -528,15 +528,30 @@ func (h *QueryHandler) finishQuery(
 	h.logger.Info("peer query finished", "query_id", convID, "status", status, "duration_ms", durationMs)
 }
 
-// loadAgentCredentials queries and decrypts all credentials for an agent.
+// loadAgentCredentials queries and decrypts all credentials for an agent, for
+// the peer-query run.
+//
+// Two filters here are load-bearing and were both missing:
+//
+//   - status = 'ACTIVE' (#1051): PENDING rows (manifest slots, OAuth
+//     mid-handshake, rotation in progress) carry sentinel encrypted bodies.
+//     resolveAgentCredentials and the delegation loader were both fixed for this;
+//     this third loader was not, so a peer query decrypted and injected
+//     "pending_oauth" as a real env value. The in-code sentinel guard below
+//     mirrors theirs as defence in depth.
+//   - the #1373 lease gate: a grant may be a short-lived lease, and a peer query
+//     is a full agent run — delivering a lapsed lease here reintroduces exactly
+//     the standing credential the TTL was meant to remove.
 func (h *QueryHandler) loadAgentCredentials(ctx context.Context, agentID string) ([]orchestrator.Credential, error) {
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT ac.credential_id, ac.env_var_name, ac.priority, c.encrypted_value, c.type
+		SELECT ac.credential_id, ac.env_var_name, ac.priority, c.encrypted_value, c.type,
+		       COALESCE(ac.expires_at, '')
 		FROM agent_credentials ac
 		JOIN credentials c ON c.id = ac.credential_id
-		WHERE ac.agent_id = ? AND c.deleted_at IS NULL
+		WHERE ac.agent_id = ? AND c.deleted_at IS NULL AND c.status = 'ACTIVE'
+		  AND `+credentialLeaseGateSQL+`
 		ORDER BY ac.priority ASC
-	`, agentID)
+	`, agentID, leaseComparisonNow())
 	if err != nil {
 		return nil, fmt.Errorf("query credentials: %w", err)
 	}
@@ -546,12 +561,15 @@ func (h *QueryHandler) loadAgentCredentials(ctx context.Context, agentID string)
 	for rows.Next() {
 		var c orchestrator.Credential
 		var encValue string
-		if err := rows.Scan(&c.ID, &c.EnvVarName, &c.Priority, &encValue, &c.Type); err != nil {
+		if err := rows.Scan(&c.ID, &c.EnvVarName, &c.Priority, &encValue, &c.Type, &c.LeaseExpiresAt); err != nil {
 			return nil, fmt.Errorf("scan credential: %w", err)
 		}
 		dec, err := encryption.Decrypt(encValue)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt credential %s: %w", c.ID, err)
+		}
+		if isPendingSentinel(dec) {
+			continue
 		}
 		c.PlainValue = dec
 		creds = append(creds, c)
