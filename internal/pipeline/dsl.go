@@ -447,7 +447,11 @@ func validateTemplatesInStep(i int, st Step, inputs, earlier map[string]struct{}
 			bodyInputs[k] = struct{}{}
 		}
 		bodyInputs[as] = struct{}{}
-		bodyEarlier := make(map[string]struct{}, len(earlier)+len(st.Foreach.Steps))
+		// No size hint: len(earlier)+len(st.Foreach.Steps) is an untrusted
+		// (pipeline-authored) sum that CodeQL flags as overflow-prone
+		// (go/allocation-size-overflow), and the map is small — same call as
+		// #1445's executor_foreach fix. Grows as needed.
+		bodyEarlier := make(map[string]struct{})
 		for k := range earlier {
 			bodyEarlier[k] = struct{}{}
 		}
