@@ -91,61 +91,67 @@ broken (its credentials can't sync), so recreation restores it.`,
 			return fmt.Errorf("reap-orphan-containers failed: HTTP %d", resp.StatusCode)
 		}
 
-		// "Nothing found" is only reassuring if the detector could actually
-		// look. An empty token fingerprint fails SAFE (never reaped), which
-		// means a slot whose sidecar binary was never re-pointed reports a
-		// clean sweep forever — the #1390 failure. Say which one this was.
-		if out.DetectorInert {
-			inspected := 0
-			if out.Inspected != nil {
-				inspected = *out.Inspected
-			}
-			fmt.Printf("DETECTOR INERT — inspected %d running crew container(s), but NONE advertised a token fingerprint.\n", inspected)
-			fmt.Println("\"No orphans\" here means \"could not tell\", not \"none\": the sidecar binary is")
-			fmt.Println("probably stale (pre-#1385), so this sweep cannot detect an orphan at all.")
-			fmt.Println("Fix the slot's sidecar (it must be rebuilt + re-pointed on reconcile, #1390),")
-			fmt.Println("then re-run. Nothing was reaped.")
-			return nil
-		}
-
-		if out.Count == 0 {
-			if out.Inspected == nil || out.Identified == nil {
-				// Server predates the coverage fields — don't invent certainty
-				// it never expressed.
-				fmt.Println("No orphaned crew containers found — nothing to reap.")
-				fmt.Println("(This server does not report detector coverage; upgrade it to tell a clean sweep from an inert detector — see #1390.)")
-				return nil
-			}
-			if *out.Inspected == 0 {
-				fmt.Println("No running crew containers to inspect — nothing to reap.")
-				return nil
-			}
-			fmt.Printf("No orphaned crew containers found — %d of %d inspected container(s) reported a token fingerprint and matched.\n",
-				*out.Identified, *out.Inspected)
-			if *out.Identified < *out.Inspected {
-				fmt.Printf("Note: %d container(s) advertised no fingerprint and could not be classified.\n",
-					*out.Inspected-*out.Identified)
-			}
-			return nil
-		}
-
-		if out.Applied {
-			fmt.Printf("Found %d orphaned crew container(s):\n", out.Count)
-		} else {
-			fmt.Printf("Found %d orphaned crew container(s) (dry-run — re-run with --apply to reap):\n", out.Count)
-		}
-		for _, o := range out.Orphans {
-			status := "stale token"
-			if out.Applied {
-				if o.Reaped {
-					status = "reaped"
-				} else {
-					status = "reap FAILED (see server log)"
+		// -f json/yaml/ndjson must emit the decoded payload, not the prose
+		// below. This command predates the formatter helpers and printed
+		// straight to stdout on every path, so `--format json` silently
+		// returned the human text — including the coverage fields the docs
+		// promise are machine-readable.
+		return resolvedFormatter(cmd).AutoHuman(out, func() {
+			// "Nothing found" is only reassuring if the detector could actually
+			// look. An empty token fingerprint fails SAFE (never reaped), which
+			// means a slot whose sidecar binary was never re-pointed reports a
+			// clean sweep forever — the #1390 failure. Say which one this was.
+			if out.DetectorInert {
+				inspected := 0
+				if out.Inspected != nil {
+					inspected = *out.Inspected
 				}
+				fmt.Printf("DETECTOR INERT — inspected %d running crew container(s), but NONE advertised a token fingerprint.\n", inspected)
+				fmt.Println("\"No orphans\" here means \"could not tell\", not \"none\": the sidecar binary is")
+				fmt.Println("probably stale (pre-#1385), so this sweep cannot detect an orphan at all.")
+				fmt.Println("Fix the slot's sidecar (it must be rebuilt + re-pointed on reconcile, #1390),")
+				fmt.Println("then re-run. Nothing was reaped.")
+				return
 			}
-			fmt.Printf("  - crew %s (%s) container %s — %s\n", o.Slug, o.CrewID, o.ContainerID, status)
-		}
-		return nil
+
+			if out.Count == 0 {
+				if out.Inspected == nil || out.Identified == nil {
+					// Server predates the coverage fields — don't invent certainty
+					// it never expressed.
+					fmt.Println("No orphaned crew containers found — nothing to reap.")
+					fmt.Println("(This server does not report detector coverage; upgrade it to tell a clean sweep from an inert detector — see #1390.)")
+					return
+				}
+				if *out.Inspected == 0 {
+					fmt.Println("No running crew containers to inspect — nothing to reap.")
+					return
+				}
+				fmt.Printf("No orphaned crew containers found — %d of %d inspected container(s) reported a token fingerprint and matched.\n",
+					*out.Identified, *out.Inspected)
+				if *out.Identified < *out.Inspected {
+					fmt.Printf("Note: %d container(s) advertised no fingerprint and could not be classified.\n",
+						*out.Inspected-*out.Identified)
+				}
+				return
+			}
+
+			if out.Applied {
+				fmt.Printf("Found %d orphaned crew container(s):\n", out.Count)
+			} else {
+				fmt.Printf("Found %d orphaned crew container(s) (dry-run — re-run with --apply to reap):\n", out.Count)
+			}
+			for _, o := range out.Orphans {
+				status := "stale token"
+				if out.Applied {
+					if o.Reaped {
+						status = "reaped"
+					} else {
+						status = "reap FAILED (see server log)"
+					}
+				}
+				fmt.Printf("  - crew %s (%s) container %s — %s\n", o.Slug, o.CrewID, o.ContainerID, status)
+			}
+		})
 	},
 }
 

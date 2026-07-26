@@ -129,3 +129,60 @@ func TestAdminReapOrphan_Coverage(t *testing.T) {
 		}
 	})
 }
+
+// The command predated the formatter helpers and printed straight to stdout on
+// every path, so `--format json` returned the human prose — including on the
+// inert branch, where the docs specifically promise machine-readable coverage
+// fields. Caught by running the merged binary against dev3.
+func TestAdminReapOrphan_FormatJSONEmitsThePayload(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want []string
+	}{
+		{
+			name: "inert",
+			body: `{"orphans":[],"count":0,"applied":false,"inspected":3,"identified":0,"detector_inert":true}`,
+			want: []string{`"detector_inert": true`, `"inspected": 3`, `"identified": 0`},
+		},
+		{
+			name: "clean sweep",
+			body: `{"orphans":[],"count":0,"applied":false,"inspected":2,"identified":2,"detector_inert":false}`,
+			want: []string{`"inspected": 2`, `"identified": 2`},
+		},
+		{
+			name: "orphans found",
+			body: `{"count":1,"applied":false,"inspected":2,"identified":2,"orphans":[{"crew_id":"c-qua","slug":"quality","container_id":"ctr-qua"}]}`,
+			want: []string{`"slug": "quality"`, `"count": 1`},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := covStub(t)
+			body := tc.body
+			stub.OnPost(reapPath, func(*http.Request, []byte) (int, []byte, string) {
+				return 200, []byte(body), "application/json"
+			})
+			covResetFlags(t, adminReapOrphanCmd)
+			// --format is a PERSISTENT flag on rootCmd, so it is the package
+			// var that has to move, not the subcommand's flag set. Setting the
+			// latter silently no-ops (and made the first version of this test
+			// skip itself, which proves nothing).
+			orig := flagFormat
+			flagFormat = "json"
+			t.Cleanup(func() { flagFormat = orig })
+			out := covCaptureAll(t, func() {
+				if err := adminReapOrphanCmd.RunE(adminReapOrphanCmd, nil); err != nil {
+					t.Errorf("RunE: %v", err)
+				}
+			})
+			for _, w := range tc.want {
+				if !strings.Contains(out, w) {
+					t.Errorf("--format json should emit %s, got:\n%s", w, out)
+				}
+			}
+			if strings.Contains(out, "DETECTOR INERT") || strings.Contains(out, "nothing to reap") {
+				t.Errorf("human prose leaked into --format json output:\n%s", out)
+			}
+		})
+	}
+}
