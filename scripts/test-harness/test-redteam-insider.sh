@@ -124,8 +124,25 @@ esac
 if [[ -z "$SECRETS" || "$SECRETS" == "?" ]]; then _pass "no cleartext secret files under /secrets (#1364 stays fixed)"
   else _fail "cleartext secret files present under /secrets (#1364 regression)" "found: ${SECRETS:0:200}"; fi
 
+# blocked_code <value> — true when a probe result means "nothing was reached".
+#
+# `case`, not `[[ =~ ]]`: the original patterns carried a trailing empty
+# alternative — ^(000|ERR|BLOCKED|)$ — and in bash 3.2 (what macOS ships, and
+# what lib.sh's `${arr[@]+...}` idiom already accommodates) that makes the whole
+# expression match NOTHING, not even the empty string. Both egress assertions
+# were therefore dead: they could never report PASS, so a correctly blocked
+# request read as broken. Verified: with the trailing `|`, "000" -> NOMATCH;
+# without it, "000" -> MATCH. A regression gate that cannot go green is not a
+# gate.
+blocked_code() {
+  case "$1" in
+    ""|000|ERR|BLOCKED|NO-HTTP-CLIENT|403) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # #1368 — raw egress bypassing HTTP_PROXY must die at L3. Open issue → xfail.
-if [[ "$RAW" =~ ^(000|ERR|BLOCKED|)$ ]]; then _pass "raw egress blocked at L3 ($RAW)"
+if blocked_code "$RAW"; then _pass "raw egress blocked at L3 ($RAW)"
   else xfail "raw egress reaches the internet" \
         "#1368 open — HTTP $RAW to 1.1.1.1 bypassing HTTP_PROXY; egress is app-layer only, there is no network-layer fence yet"; fi
 if [[ "$TCP" == "closed" ]]; then _pass "raw TCP:443 to public IP refused"
@@ -143,11 +160,11 @@ if [[ "$TCP" == "closed" ]]; then _pass "raw TCP:443 to public IP refused"
 # distinguishable in the output.
 if [[ "$NETMODE" != "restricted" ]]; then
   skip "non-allowlisted host blocked" "crew '$CREW' is network_mode=$NETMODE — the allowlist only binds on 'restricted'"
-elif [[ "$PROXIED" =~ ^(000|403|ERR|BLOCKED|)$ ]]; then
+elif blocked_code "$PROXIED"; then
   _pass "non-allowlisted host blocked ($PROXIED)"
 else
-  xfail "restricted crew reached a non-allowlisted host" \
-    "#1473 — HTTP $PROXIED to example.org with proxy=$(get proxy). Fixed in main; this server predates the fix, or it regressed"
+  _fail "restricted crew reached a non-allowlisted host (#1473 regression)" \
+    "HTTP $PROXIED to example.org with proxy=$(get proxy) — the fix is in main, so this is either a server older than 1e498fe4 or a regression"
 fi
 
 finish
