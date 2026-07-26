@@ -33,6 +33,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -80,8 +81,51 @@ func fingerprint(e entry, allSourcesByPath map[string][]byte) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "v=%d|n=%s|ref=%s|body=", e.version, e.name, e.refName)
 	if e.refName != "" {
-		body := findBody(e.refName, allSourcesByPath)
+		body, path, isFunc := findBodyWithPath(e.refName, allSourcesByPath)
 		h.Write(body)
+		// A `fn:` migration almost never does its work inline — it delegates
+		// to helpers, and hashing only the registered function left those
+		// completely outside the immutability guarantee. Every fn: migration
+		// in the tree does this:
+		//
+		//   v152 migrationJournalHashChain      -> backfillJournalChain
+		//   v159 migrationRunStepOutputs        -> backfillRunStepOutputs
+		//   v161 migrationNotificationPrefs     -> widenNotificationChannelType
+		//   v141 migrationNormalize...Tsformat  -> parseLegacyMemoryVersion...
+		//   v144 migrationConvertDatetimeNow... -> rewriteTableDefaultLiteral,
+		//                                          backfillLegacyTimestampRows
+		//
+		// rewriteTableDefaultLiteral is shared by v144, v148 and v161, so ONE
+		// edit silently changed the behaviour of three already-shipped
+		// migrations with no violation reported. Immutability that a helper
+		// edit walks straight through is not immutability.
+		//
+		// What gets folded is the transitive closure of same-file functions
+		// the body actually CALLS. Two blunter designs were tried and both
+		// over-fire on legitimate work, which would get the tool switched off:
+		//
+		//   - hashing the whole declaring file: `migrate.go` holds the registry
+		//     slice as well as some bodies, so ADDING a migration would flag
+		//     every fn: migration declared beside it.
+		//   - hashing every func in the file: adding a NEW migration's helper
+		//     to that same file would flag the existing ones.
+		//
+		// Adding a migration is the most common legitimate operation there is
+		// and must stay silent. Resolving calls keeps it silent while still
+		// catching the case this exists for.
+		//
+		// Same-file only, and identifier-matched rather than parsed — this is a
+		// text-level guard that has to keep working on `git show` bytes from
+		// two commits, without a Go toolchain. A helper moved to a different
+		// file is still outside the fence; putting it in the migration's own
+		// file is the convention that keeps it inside.
+		//
+		// Scoped to func bodies only. `sql:` migrations are self-contained
+		// backtick consts with nothing to delegate to.
+		if isFunc && path != "" {
+			fmt.Fprintf(h, "|helpers=%s|", path)
+			h.Write(calledFuncBodies(allSourcesByPath[path], body))
+		}
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -97,11 +141,30 @@ func fingerprint(e entry, allSourcesByPath map[string][]byte) string {
 // Returns nil if not found — the fingerprint hash then degrades
 // gracefully (only the (version, name, ref-name) tuple matters).
 func findBody(name string, allSourcesByPath map[string][]byte) []byte {
-	for _, src := range allSourcesByPath {
+	body, _, _ := findBodyWithPath(name, allSourcesByPath)
+	return body
+}
+
+// findBodyWithPath is findBody plus the path of the file the symbol was
+// declared in and whether it was a func (rather than a string const). The
+// fingerprint needs both so it can fold a func's whole declaring file — see
+// the comment there for why.
+//
+// Iteration order over a map is random, so paths are walked in sorted order:
+// two runs over the same sources must agree on which file declared a symbol,
+// or the fingerprint would flap between commits and report phantom edits.
+func findBodyWithPath(name string, allSourcesByPath map[string][]byte) ([]byte, string, bool) {
+	paths := make([]string, 0, len(allSourcesByPath))
+	for p := range allSourcesByPath {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		src := allSourcesByPath[path]
 		// Fast path: backtick-quoted const / var.
 		for _, m := range stringConstDecl.FindAllSubmatch(src, -1) {
 			if string(m[1]) == name {
-				return m[2]
+				return m[2], path, false
 			}
 		}
 		// Slower path: func declaration. Scan for `func <name>(` and
@@ -125,12 +188,12 @@ func findBody(name string, allSourcesByPath map[string][]byte) []byte {
 			case '}':
 				depth--
 				if depth == 0 {
-					return src[start : i+1]
+					return src[start : i+1], path, true
 				}
 			}
 		}
 	}
-	return nil
+	return nil, "", false
 }
 
 // parse extracts every migration entry from the given migrate.go bytes
@@ -288,4 +351,93 @@ func main() {
 	}
 	fmt.Printf("migration-lint: ok (%d migrations on %s, %d added in this branch)\n",
 		len(baseMap), baseRef, added)
+}
+
+// topLevelFuncs indexes every top-level func body in src by name. Method
+// declarations (`func (r *T) Name(`) are skipped — the migration bodies this
+// guards are all plain functions.
+func topLevelFuncs(src []byte) map[string]string {
+	out := map[string]string{}
+	for i := 0; i+5 < len(src); i++ {
+		if !bytes.HasPrefix(src[i:], []byte("func ")) {
+			continue
+		}
+		if i > 0 && src[i-1] != '\n' {
+			continue
+		}
+		rest := src[i+len("func "):]
+		paren := bytes.IndexByte(rest, '(')
+		if paren < 0 {
+			continue
+		}
+		name := strings.TrimSpace(string(rest[:paren]))
+		if name == "" || strings.ContainsAny(name, " \t)") {
+			continue
+		}
+		brace := bytes.IndexByte(src[i:], '{')
+		if brace < 0 {
+			continue
+		}
+		start := i + brace
+		depth := 0
+		for j := start; j < len(src); j++ {
+			switch src[j] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					out[name] = string(src[start : j+1])
+					i = j
+					j = len(src)
+				}
+			}
+		}
+	}
+	return out
+}
+
+var identifier = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
+
+// calledFuncBodies returns the bodies of every same-file function reachable
+// from root, name-sorted so the digest does not depend on declaration order.
+//
+// "Reachable" is identifier matching, not real call analysis: any word in a
+// body that names a top-level func in the same file counts as a call. That
+// over-approximates (a local variable sharing a helper's name pulls it in) and
+// over-approximating is the safe direction here — it can only widen what the
+// immutability guarantee covers, never narrow it.
+func calledFuncBodies(src []byte, root []byte) []byte {
+	funcs := topLevelFuncs(src)
+	if len(funcs) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	queue := []string{}
+	visit := func(body []byte) {
+		for _, id := range identifier.FindAll(body, -1) {
+			n := string(id)
+			if _, ok := funcs[n]; ok && !seen[n] {
+				seen[n] = true
+				queue = append(queue, n)
+			}
+		}
+	}
+	visit(root)
+	for i := 0; i < len(queue); i++ {
+		visit([]byte(funcs[queue[i]]))
+	}
+	names := make([]string, 0, len(seen))
+	for n := range seen {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var out bytes.Buffer
+	for _, n := range names {
+		out.WriteString(n)
+		out.WriteByte(0)
+		out.WriteString(funcs[n])
+		out.WriteByte(0)
+	}
+	return out.Bytes()
 }

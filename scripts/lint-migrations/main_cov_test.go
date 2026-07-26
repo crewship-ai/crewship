@@ -414,3 +414,106 @@ func TestMain_DuplicateVersionOnHeadExitTwo(t *testing.T) {
 		t.Errorf("stderr = %q, want parse HEAD duplicate error", stderr)
 	}
 }
+
+// The hole this closes: a `fn:` migration delegates its real work to helpers,
+// and hashing only the registered function left those outside the immutability
+// guarantee entirely. In the real tree rewriteTableDefaultLiteral is shared by
+// v144, v148 and v161 — one edit changed the behaviour of three already-shipped
+// migrations with no violation reported.
+//
+// Editing the HELPER, not the registered fn, must now be caught.
+func TestMain_HelperEditOnAShippedMigrationIsCaught(t *testing.T) {
+	base := `package database
+
+var migrations = []migration{
+	{version: 1, name: "init", sql: migrationInit},
+	{version: 2, name: "add_flags", fn: migrationAddFlags},
+}
+
+const migrationInit = ` + "`CREATE TABLE crews (id TEXT PRIMARY KEY);`" + `
+
+func migrationAddFlags(db something) error {
+	return applyFlagDefault(db)
+}
+
+func applyFlagDefault(db something) error {
+	return db.exec("ALTER TABLE crews ADD COLUMN flags TEXT DEFAULT 'off'")
+}
+`
+	dir := t.TempDir()
+	initRepo(t, dir, map[string]string{"internal/database/migrate.go": base})
+
+	// The registered function is untouched; only the helper it calls changes.
+	head := strings.Replace(base, `DEFAULT 'off'`, `DEFAULT 'on'`, 1)
+	if head == base {
+		t.Fatal("fixture did not change — the test would prove nothing")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "internal", "database", "migrate.go"), []byte(head), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Violations exit 1, so this runs the linter as a subprocess like
+	// TestMain_ViolationsExitOne does rather than calling main() in-process.
+	code, stderr := runLintHelper(t, dir)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1 — editing a helper of a shipped fn: migration was NOT reported, so the immutability guarantee walks straight through helper indirection\nstderr: %s", code, stderr)
+	}
+	if !strings.Contains(stderr, "BODY CHANGED") {
+		t.Errorf("stderr = %q, want a BODY CHANGED violation", stderr)
+	}
+	if !strings.Contains(stderr, "v2") {
+		t.Errorf("violation should name v2, got %q", stderr)
+	}
+}
+
+// The counterpart, and the reason the fingerprint folds func BODIES rather than
+// the whole file: adding a migration is the most common legitimate operation
+// there is. migrate.go holds the registry slice AND some bodies, so a
+// file-level hash would flag every fn: migration declared beside a new entry.
+func TestMain_AddingAMigrationDoesNotDisturbSiblingFingerprints(t *testing.T) {
+	base := `package database
+
+var migrations = []migration{
+	{version: 1, name: "init", sql: migrationInit},
+	{version: 2, name: "add_flags", fn: migrationAddFlags},
+}
+
+const migrationInit = ` + "`CREATE TABLE crews (id TEXT PRIMARY KEY);`" + `
+
+func migrationAddFlags(db something) error {
+	return applyFlagDefault(db)
+}
+
+func applyFlagDefault(db something) error {
+	return db.exec("ALTER TABLE crews ADD COLUMN flags TEXT")
+}
+`
+	dir := t.TempDir()
+	initRepo(t, dir, map[string]string{"internal/database/migrate.go": base})
+
+	// New migration appended, plus its own helper — nothing existing touched.
+	head := strings.Replace(base,
+		`	{version: 2, name: "add_flags", fn: migrationAddFlags},`,
+		`	{version: 2, name: "add_flags", fn: migrationAddFlags},
+	{version: 3, name: "add_notes", fn: migrationAddNotes},`, 1) + `
+func migrationAddNotes(db something) error {
+	return db.exec("ALTER TABLE crews ADD COLUMN notes TEXT")
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "internal", "database", "migrate.go"), []byte(head), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	oldArgs := os.Args
+	os.Args = []string{"lint-migrations", "HEAD"}
+	defer func() { os.Args = oldArgs }()
+
+	out := captureStdout(t, main)
+	if strings.Contains(out, "BODY CHANGED") {
+		t.Errorf("adding a new migration flagged an existing one — the lint fires on the most common legitimate change and would get switched off.\nstdout = %q", out)
+	}
+	if !strings.Contains(out, "migration-lint: ok") {
+		t.Errorf("stdout = %q, want ok", out)
+	}
+}

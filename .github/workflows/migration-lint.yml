@@ -12,16 +12,19 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'internal/database/migrate.go'
-      - 'internal/database/migrate_consts_*.go'
-      - 'internal/database/migrate_lint_test.go'
+      # migrate*.go, not an enumeration: the previous list named migrate.go
+      # and migrate_consts_*.go and so never fired for a PR touching only
+      # migrate_backfill_timestamps.go (v45), migrate_v141_*.go or
+      # migrate_v144_*.go — three files that hold shipped migration bodies,
+      # including the rewriteTableDefaultLiteral helper that v144, v148 and
+      # v161 all share. A guard that does not run is not a guard.
+      - 'internal/database/migrate*.go'
       - 'scripts/lint-migrations/**'
       - '.github/workflows/migration-lint.yml'
   push:
     branches: [main]
     paths:
-      - 'internal/database/migrate.go'
-      - 'internal/database/migrate_consts_*.go'
+      - 'internal/database/migrate*.go'
 
 permissions:
   contents: read
