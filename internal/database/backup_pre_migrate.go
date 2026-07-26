@@ -173,3 +173,19 @@ func pruneOldSnapshots(dbPath string, keep int, logger *slog.Logger) error {
 	}
 	return nil
 }
+
+// PendingMigrations reports the schema upgrade a Migrate call would perform:
+// the highest applied version, the highest known version, and how many would
+// be applied. On a database with no _migrations table it returns 0/0/0 —
+// "fresh install", which callers must distinguish from "up to date" (also
+// 0 pending) by the fromVersion.
+//
+// Exported so a caller can decide NOT to migrate. A diagnostic or read-only
+// command that opens the local database should not silently apply a schema
+// upgrade: the snapshot and the secrets bootstrap that make an upgrade safe
+// live on the server's startup path, and an upgrade taken without them is one
+// that cannot be rolled back — and, for the migrations that key off
+// ENCRYPTION_KEY, one that produces permanently wrong data.
+func PendingMigrations(ctx context.Context, db *sql.DB) (from, to, pending int, err error) {
+	return pendingMigrationRange(ctx, db)
+}
