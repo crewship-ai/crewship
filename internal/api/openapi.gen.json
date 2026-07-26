@@ -590,6 +590,36 @@
         ]
       }
     },
+    "/api/v1/admin/keeper/requests/{requestId}/events": {
+      "get": {
+        "operationId": "get_api_v1_admin_keeper_requests_requestId_events",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "requestId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/legacy-resources": {
       "get": {
         "operationId": "get_api_v1_admin_legacy-resources",
