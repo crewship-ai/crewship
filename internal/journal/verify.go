@@ -297,9 +297,14 @@ type VerifyResult struct {
 	// Repairable lists rows the v166 backfill corrupted but whose content is
 	// PROVABLY authentic — see recoverEmitPriority. They are not breaks; they
 	// are a wrong value in a column, and EmitPriority is what to write back.
-	Repairable      []RepairableEntry `json:"repairable,omitempty"`
-	BreakCount      int               `json:"break_count,omitempty"`      // total breaks found (>= len(Breaks))
-	BreaksTruncated bool              `json:"breaks_truncated,omitempty"` // list trimmed; see BreakCount
+	// Capped exactly like Breaks, and for exactly the same reason: a workspace
+	// where the migration touched many rows would otherwise return one item per
+	// recovered row on an admin request. The count survives the trim.
+	Repairable          []RepairableEntry `json:"repairable,omitempty"`
+	RepairableCount     int               `json:"repairable_count,omitempty"`
+	RepairableTruncated bool              `json:"repairable_truncated,omitempty"`
+	BreakCount          int               `json:"break_count,omitempty"`      // total breaks found (>= len(Breaks))
+	BreaksTruncated     bool              `json:"breaks_truncated,omitempty"` // list trimmed; see BreakCount
 }
 
 // maxReportedBreaks bounds the per-row breaks carried in a VerifyResult. A
@@ -642,9 +647,14 @@ func VerifyChain(ctx context.Context, db *sql.DB, workspaceID string) (*VerifyRe
 				recovered = recoverEmitPriority(key, prevHash, f, entryHash)
 			}
 			if recovered != "" {
-				res.Repairable = append(res.Repairable, RepairableEntry{
-					Seq: f.Seq, ID: f.ID, StoredPriority: f.Priority, EmitPriority: recovered,
-				})
+				res.RepairableCount++
+				if len(res.Repairable) < maxReportedBreaks {
+					res.Repairable = append(res.Repairable, RepairableEntry{
+						Seq: f.Seq, ID: f.ID, StoredPriority: f.Priority, EmitPriority: recovered,
+					})
+				} else {
+					res.RepairableTruncated = true
+				}
 				hashedPriority = recovered
 				recoveredRow = true
 			} else {

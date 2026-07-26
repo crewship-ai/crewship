@@ -499,3 +499,43 @@ func TestVerifyChain_RecoveryDoesNotHideRealTampering(t *testing.T) {
 		t.Errorf("breaks = %+v, want exactly the tampered row %s", res.Breaks, ids[2])
 	}
 }
+
+// Same cap as Breaks, for the same reason — and this is the third time in one
+// change-set that an unbounded list slipped into the admin response, so it gets
+// a test rather than another round of remembering.
+func TestVerifyChain_RepairableIsCapped(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushInterval: time.Hour})
+	defer w.Close()
+
+	const n = maxReportedBreaks + 12
+	ids := seedChain(t, w, "ws_test", n)
+
+	// The v166 damage shape on every row: emit and live both pinned, so the
+	// fingerprint matches and each row recovers.
+	for _, id := range ids {
+		if _, err := db.Exec(
+			`UPDATE journal_entries SET priority = 'pin', priority_at_emit = 'pin' WHERE id = ?`,
+			id); err != nil {
+			t.Fatalf("damage: %v", err)
+		}
+	}
+
+	res, err := VerifyChain(context.Background(), db, "ws_test")
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if len(res.Repairable) > maxReportedBreaks {
+		t.Errorf("Repairable = %d, want at most %d", len(res.Repairable), maxReportedBreaks)
+	}
+	if res.RepairableCount != n {
+		t.Errorf("RepairableCount = %d, want %d — the count must survive the trim", res.RepairableCount, n)
+	}
+	if !res.RepairableTruncated {
+		t.Error("RepairableTruncated must say the list was trimmed")
+	}
+	if !res.OK {
+		t.Error("recoverable rows are not tampering — OK must stay true")
+	}
+}
