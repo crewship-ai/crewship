@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -343,21 +344,67 @@ func TestRunScript_ExecEnvCarriesSidecarProxy(t *testing.T) {
 	}
 }
 
-// A step must not be able to unset its own fence by declaring HTTP_PROXY in
-// `script.env` — the platform value wins. Otherwise the fix is one line of
+// A step must not be able to unset its own fence by declaring a proxy variable
+// in `script.env` — the platform value wins. Otherwise the fix is one line of
 // routine DSL away from being undone, by exactly the actor it constrains.
+//
+// The mixed-case and ALL_PROXY cases are not paranoia. CPython's
+// urllib.request.getproxies_environment() lowercases every env name before
+// matching a `_proxy` suffix — verified: with only HtTp_PrOxY set it returns
+// {'http': ...} — and `.py` is a first-class script interpreter. curl honours
+// ALL_PROXY for protocols the specific vars miss. An exact-case blocklist of the
+// six canonical names lets both through.
 func TestRunScript_StepEnvCannotOverrideProxy(t *testing.T) {
+	hostile := map[string]string{
+		"HTTP_PROXY":  "",                           // blank it outright
+		"https_proxy": "http://evil.example:8080",   // lower-case spelling
+		"HtTp_PrOxY":  "http://evil.example:8080",   // Python lowercases the name
+		"ALL_PROXY":   "socks5://evil.example:1080", // catch-all curl honours
+		"NO_PROXY":    "*",                          // exempt everything from the proxy
+	}
 	c := &scriptCovContainer{}
 	r := newScriptTestRunner(c)
 	if _, err := r.RunScript(context.Background(), ScriptRunRequest{
-		AuthorCrewID: "crew_1", Interpreter: "bash", Path: "/crew/shared/s.sh",
-		Env: map[string]string{"HTTP_PROXY": "", "https_proxy": "http://evil.example:8080"},
+		AuthorCrewID: "crew_1", Interpreter: "python3", Path: "/crew/shared/s.py",
+		Env: hostile,
 	}); err != nil {
 		t.Fatalf("RunScript: %v", err)
 	}
+
 	for _, kv := range c.lastExecCfg.Env {
-		if kv == "HTTP_PROXY=" || kv == "https_proxy=http://evil.example:8080" {
-			t.Errorf("step env overrode the platform proxy: %q — a script step could disable its own egress fence (#1473)", kv)
+		eq := strings.IndexByte(kv, '=')
+		if eq <= 0 {
+			continue
+		}
+		k, v := kv[:eq], kv[eq+1:]
+		if hostile[k] == v && !isPlatformProxyValue(k, v) {
+			t.Errorf("step env survived: %q=%q — a script step could redirect or disable its own egress fence (#1473)", k, v)
 		}
 	}
+
+	// And the platform values must still be the ones that landed.
+	got := map[string]string{}
+	for _, kv := range c.lastExecCfg.Env {
+		if eq := strings.IndexByte(kv, '='); eq > 0 {
+			got[kv[:eq]] = kv[eq+1:]
+		}
+	}
+	if got["HTTP_PROXY"] != "http://127.0.0.1:9119" {
+		t.Errorf("HTTP_PROXY = %q, want the sidecar proxy after a hostile step env", got["HTTP_PROXY"])
+	}
+	if got["NO_PROXY"] == "*" {
+		t.Error(`NO_PROXY = "*" — the step exempted every host from the proxy`)
+	}
+}
+
+// isPlatformProxyValue reports whether a key/value pair is one the platform
+// itself sets, so the hostile-env check doesn't flag a collision where the
+// step merely declared the same value we were going to set anyway.
+func isPlatformProxyValue(k, v string) bool {
+	for _, kv := range orchestrator.SidecarProxyEnv() {
+		if kv == k+"="+v {
+			return true
+		}
+	}
+	return false
 }

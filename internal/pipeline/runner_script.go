@@ -61,6 +61,26 @@ type ScriptRunResult struct {
 	ExitCode int
 }
 
+// isProxyEnvKey reports whether an environment variable name would be read as
+// proxy configuration by something a script step can run. A step may not set
+// one: the crew egress allowlist is enforced by the sidecar the platform points
+// these at, so a step that could redefine them could redefine its own fence.
+//
+// Matching an exact list of names is not enough. CPython's
+// urllib.request.getproxies_environment() LOWERCASES every variable name before
+// looking for a `_proxy` suffix, so `HtTp_PrOxY` reaches Python's http proxy
+// setting even though nothing else on the box reads that name — and `.py` is a
+// first-class script interpreter here. curl likewise honours ALL_PROXY/all_proxy
+// for protocols the specific vars don't cover. So the rule is the shape, not the
+// spelling: any case of `*_proxy`, plus no_proxy itself.
+//
+// Nothing legitimate needs one of these in script.env — egress configuration is
+// the platform's, not the routine's.
+func isProxyEnvKey(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, "_proxy") || lower == "no_proxy"
+}
+
 // scriptSharedRoot is the crew shared mount where bundled scripts live and
 // the only tree a script step may execute from. Anchoring here (and rejecting
 // traversal) keeps a routine from execing an arbitrary host path.
@@ -318,23 +338,18 @@ func (r *OrchestratorRunner) RunScript(ctx context.Context, req ScriptRunRequest
 	// agent-process path cannot drift apart again — that divergence is the bug.
 	proxyEnv := orchestrator.SidecarProxyEnv()
 	// A step must not be able to switch off the fence that constrains it, so
-	// drop any proxy key the caller declared before appending ours. Relying on
-	// "the last duplicate wins" would work on Docker and silently not on a
-	// provider that resolves duplicates the other way — the guarantee has to
-	// hold at this layer, not in the runtime's env parser.
-	reserved := make(map[string]bool, len(proxyEnv))
-	for _, kv := range proxyEnv {
-		if eq := strings.IndexByte(kv, '='); eq > 0 {
-			reserved[kv[:eq]] = true
-		}
-	}
+	// drop any proxy variable the caller declared before appending ours.
+	// Relying on "the last duplicate wins" would work on Docker and silently
+	// not on a provider that resolves duplicates the other way — the guarantee
+	// has to hold at this layer, not in the runtime's env parser.
+	//
 	// Capacity hinted from the caller's map alone. Adding len(proxyEnv) trips
-	// CodeQL's allocation-size-overflow rule, and the six extra elements are
-	// not worth a suppression comment for a growth the runtime handles.
+	// CodeQL's allocation-size-overflow rule, and the six extra entries are not
+	// worth a suppression comment for a growth the runtime handles.
 	env := make([]string, 0, len(req.Env))
 	for k, v := range req.Env {
-		if reserved[k] {
-			r.logger.Warn("script step declared a reserved proxy env var — ignoring, the crew egress fence is not step-configurable",
+		if isProxyEnvKey(k) {
+			r.logger.Warn("script step declared a proxy env var — ignoring, the crew egress fence is not step-configurable",
 				"key", k, "run_id", req.PipelineRunID, "step_id", req.StepID)
 			continue
 		}
