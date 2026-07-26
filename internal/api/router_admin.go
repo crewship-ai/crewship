@@ -61,6 +61,14 @@ func (r *Router) registerAdminRoutes() {
 	journalIntegrity := NewJournalIntegrityHandler(r.db, r.logger)
 	r.authedAdmin("GET", "/api/v1/admin/journal/verify", journalIntegrity.Verify)
 
+	// Instance security posture (issue #1379). Read-only, ADMIN+. The
+	// env-driven instance flags stay env-driven — this only makes their STATE
+	// visible, so an admin can answer "are we storing secrets in plaintext? is
+	// signup open? is the limiter off?" without shell access to the box.
+	// Booleans only; no secret value is ever serialized.
+	posture := NewSecurityPostureHandler(r.allowSignup, r.googleClientID != "" && r.googleSecret != "")
+	r.authedAdmin("GET", "/api/v1/admin/security-posture", posture.Get)
+
 	// Keeper watchdog governance (issue #1001 M0): workspace toggle, named
 	// security contact, DENY-notify threshold. Read ADMIN+, write OWNER/ADMIN.
 	keeperGov := NewKeeperGovernanceHandler(r.db, r.logger, r.Journal())

@@ -5,6 +5,7 @@ import {
 import { StatusBadge } from "@/components/ui/status-badge"
 import { Button } from "@/components/ui/button"
 import { SettingsCard } from "@/components/features/settings/shared"
+import { SecurityPostureCard } from "@/components/features/admin/security-posture-card"
 import { cn } from "@/lib/utils"
 
 interface RuntimeTabProps {
@@ -25,6 +26,7 @@ export const RuntimeTab = React.memo(function RuntimeTab({
   onCheckRuntime,
 }: RuntimeTabProps) {
   return (
+    <div className="space-y-4">
     <SettingsCard
       title="Container runtime"
       description="Detected container runtime(s) for running agent containers"
@@ -115,5 +117,10 @@ export const RuntimeTab = React.memo(function RuntimeTab({
         )}
       </div>
     </SettingsCard>
+
+    {/* #1379 — the env-driven instance flags an admin otherwise had to SSH in
+        to read. Read-only: these are deploy decisions, not app settings. */}
+    <SecurityPostureCard />
+    </div>
   )
 })

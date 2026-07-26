@@ -920,6 +920,26 @@
         ]
       }
     },
+    "/api/v1/admin/security-posture": {
+      "get": {
+        "operationId": "get_api_v1_admin_security-posture",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/stats": {
       "get": {
         "operationId": "get_api_v1_admin_stats",

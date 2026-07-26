@@ -35,6 +35,7 @@ crewship admin <subcommand> [flags]
 | `sessions list` | Forensic read of `user_sessions` for one user — all rows, including revoked + expired. |
 | `prune-legacy` | Remove orphaned pre-C1 crew docker resources that block agents from starting. **HTTP-backed — needs a running server + login** (the one exception in this group). |
 | `reap-orphan-containers` | Detect (and with `--apply` reap) crew containers holding a stale internal token after a master rotation. **HTTP-backed — needs a running server + login.** |
+| `security-posture` | Read-only view of the instance's env-driven security flags (encryption, egress ceiling, signup, rate limiting). **HTTP-backed — needs a running server + login.** |
 
 ---
 
@@ -315,3 +316,57 @@ provider is not docker.
 - [`crewship doctor`](/cli/doctor) — the `legacy crew resources` check WARNs when a prune is needed.
 - [`crewship session`](/cli/session) — user-scoped self-service of the same `user_sessions` table.
 - [`crewship doctor`](/cli/doctor) — adjacent host-side diagnostics (data dir, schema version, container runtime).
+
+
+---
+
+## `crewship admin security-posture`
+
+Report how this instance is postured: encryption at rest, the private-egress ceiling, signup policy, rate limiting, and whether email/OAuth are configured.
+
+```bash
+crewship admin security-posture
+crewship admin security-posture --format json | jq '.warnings[] | select(.severity=="high")'
+```
+
+**Read-only by design.** These are env-driven *deploy* decisions and are deliberately not settable from the app or from this command — the gap it closes is that their **state** was invisible without shell access to the box, which the person triaging an incident often doesn't have.
+
+<Note>
+No secret value is ever returned — only whether something is configured. That is the whole contract, and it's what lets this be a plain admin `GET` with nothing worth stealing in the response. A regression test asserts no secret-shaped env value reaches the wire, including via a warning message.
+</Note>
+
+### What it reports
+
+| Setting | Source |
+|---|---|
+| Encryption key | `ENCRYPTION_KEY` present |
+| Plaintext secrets | `CREWSHIP_ALLOW_PLAINTEXT_SECRETS` |
+| Private-egress ceiling | `CREWSHIP_ALLOW_PRIVATE_ENDPOINTS` — the instance half of the two-key opt-in; the other half is per-crew `allow_private_endpoints` |
+| Signup | `CREWSHIP_ALLOW_SIGNUP` |
+| Rate limiter | `CREWSHIP_RATELIMIT_DISABLED` (and the legacy `CREWSHIP_DISABLE_RATELIMIT`) |
+| Email / OAuth | `RESEND_API_KEY` + `RESEND_FROM` / Google client id + secret — presence only |
+
+Each value is read through the **same accessor the runtime enforces with**, not re-parsed locally. A posture that parses a flag its own way eventually disagrees with the code that acts on it, and a security report that confidently states the wrong thing is worse than no report.
+
+### Intent vs. effect
+
+The rate limiter is reported twice on purpose. In production the limiter runs **regardless** of the disable flag (`MustNotDisableRateLimitInProd`), so:
+
+```
+Rate limiter    disable flag set, but IGNORED (production) — limiter running
+```
+
+Reporting that as "disabled" would send you chasing an exposure that doesn't exist; reporting it as plain "enabled" would hide that your config says otherwise and will bite the first time this config lands somewhere the guard doesn't apply.
+
+### Warnings
+
+Beyond the raw state, the report derives warnings that name the **consequence**:
+
+- `plaintext_secrets_allowed` (**high**) — anyone with the database file can read every stored secret.
+- `encryption_key_missing` (**medium**, **high** when combined with the above) — the combination means new credentials are being written in the clear.
+- `rate_limit_disabled` (**medium**) — credential-stuffing and the `/credentials/test` oracle are unthrottled.
+- `rate_limit_disabled_ignored_in_prod` (**info**) — a disable flag is set but the production guard keeps the limiter running. Not an exposure; it means your config and the running state disagree, which matters the first time that config lands somewhere the guard doesn't apply.
+- `signup_open` (**medium**, **high** in production) — anyone who can reach the instance can create an account.
+- `private_endpoints_ceiling_open` (**info**) — crews that also opt in can reach RFC1918/loopback. Link-local and cloud-metadata stay blocked regardless.
+
+The same data backs the **Admin → Runtime → Security posture** card in the dashboard.
