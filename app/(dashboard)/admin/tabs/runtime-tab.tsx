@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/ui/status-badge"
 import { Button } from "@/components/ui/button"
 import { SettingsCard } from "@/components/features/settings/shared"
 import { SecurityPostureCard } from "@/components/features/admin/security-posture-card"
+import { MemoryConfigCard } from "@/components/features/admin/memory-config-card"
 import { cn } from "@/lib/utils"
 
 interface RuntimeTabProps {
@@ -121,6 +122,10 @@ export const RuntimeTab = React.memo(function RuntimeTab({
     {/* #1379 — the env-driven instance flags an admin otherwise had to SSH in
         to read. Read-only: these are deploy decisions, not app settings. */}
     <SecurityPostureCard />
+
+    {/* #1379 — the memory retention window. The endpoint existed so this
+        wouldn't need a SQLite edit; nothing rendered it until now. */}
+    <MemoryConfigCard />
     </div>
   )
 })
