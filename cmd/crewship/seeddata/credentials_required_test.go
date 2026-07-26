@@ -2,9 +2,15 @@ package seeddata
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+// A COMPLETE interpolation, not the bare substring: a prompt that merely says
+// the word "secrets." in prose would otherwise let a fabricated declaration
+// through the check below. Tolerates {{secrets.x}} and {{ secrets.x }} alike.
+var secretRef = regexp.MustCompile(`\{\{[[:space:]]*secrets\.[^[:space:]}]+[[:space:]]*\}\}`)
 
 // The seeded dataset must be able to satisfy its own declarations.
 //
@@ -88,7 +94,7 @@ func TestSeededRoutines_DeclareOnlyCredentialsTheyConsume(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: marshal definition: %v", r.Slug, err)
 		}
-		if !strings.Contains(string(body), "secrets.") {
+		if !secretRef.Match(body) {
 			t.Errorf("routine %q declares credentials_required %v but never references {{ secrets.* }} — "+
 				"the declaration is fabricated and will 422 every run", r.Slug, declared)
 		}
