@@ -412,3 +412,90 @@ func TestVerifyChain_BreaksAreCapped(t *testing.T) {
 		t.Errorf("BrokenID = %s, want %s", res.BrokenID, ids[0])
 	}
 }
+
+// TestVerifyChain_RecoversBackfilledPriority: a row broken by the v166 backfill
+// is RECOVERABLE, not lost — and proving that is better than waiving it.
+//
+// The v166 migration set priority_at_emit = COALESCE(priority,'normal') from
+// the value at migration time. For a row whose priority had already been
+// edited, that wrote the EDITED value into the column the hash commits to, so
+// verification failed forever. Stage has one: seq 86657, and it halted the
+// walk over ~86k newer entries.
+//
+// The emit-time value is not gone, though — it is one of exactly four:
+// normal | high | pin | permanent. Recomputing the keyed hash against each and
+// finding the one that reproduces the STORED hash proves the entry is
+// authentic and recovers the value at the same time.
+//
+// This does not weaken the oracle. The hash is an HMAC under a secret chain
+// key; an attacker who could produce a matching hash for any of four candidate
+// priorities could already forge one for the real value. What the search
+// removes is a false positive, not a real detection.
+func TestVerifyChain_RecoversBackfilledPriority(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushInterval: time.Hour})
+	defer w.Close()
+
+	ids := seedChain(t, w, "ws_test", 4)
+
+	// Reproduce the v166 damage on one row: the operator pinned it, and the
+	// migration then copied the pinned value over the emit-time one.
+	if _, err := db.Exec(
+		`UPDATE journal_entries SET priority = 'pin', priority_at_emit = 'pin' WHERE id = ?`,
+		ids[1]); err != nil {
+		t.Fatalf("simulate backfill damage: %v", err)
+	}
+
+	res, err := VerifyChain(context.Background(), db, "ws_test")
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+
+	if len(res.Breaks) != 0 {
+		t.Errorf("reported %d break(s) for a row whose content is provably authentic: %+v",
+			len(res.Breaks), res.Breaks)
+	}
+	if !res.OK {
+		t.Errorf("OK=false — a recoverable backfill artefact is not tampering (reason: %q)", res.Reason)
+	}
+	if len(res.Repairable) != 1 {
+		t.Fatalf("Repairable = %d, want 1 — the wrong stored value must still be surfaced", len(res.Repairable))
+	}
+	if res.Repairable[0].ID != ids[1] {
+		t.Errorf("Repairable names %s, want %s", res.Repairable[0].ID, ids[1])
+	}
+	// The recovered value is what makes a repair possible rather than a guess.
+	if res.Repairable[0].EmitPriority == "" {
+		t.Error("recovered emit-time priority is empty — nothing to repair with")
+	}
+	if res.Count != 4 {
+		t.Errorf("Count = %d, want 4 — the walk must not stop", res.Count)
+	}
+}
+
+// Genuine tampering must NOT be laundered by the recovery search.
+func TestVerifyChain_RecoveryDoesNotHideRealTampering(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushInterval: time.Hour})
+	defer w.Close()
+
+	ids := seedChain(t, w, "ws_test", 4)
+
+	// Content edit — no priority value can reproduce this hash.
+	if _, err := db.Exec(`UPDATE journal_entries SET summary = 'TAMPERED' WHERE id = ?`, ids[2]); err != nil {
+		t.Fatalf("tamper: %v", err)
+	}
+
+	res, err := VerifyChain(context.Background(), db, "ws_test")
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if res.OK {
+		t.Fatal("the recovery search laundered a real content edit")
+	}
+	if len(res.Breaks) != 1 || res.Breaks[0].ID != ids[2] {
+		t.Errorf("breaks = %+v, want exactly the tampered row %s", res.Breaks, ids[2])
+	}
+}

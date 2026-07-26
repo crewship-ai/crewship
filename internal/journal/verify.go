@@ -292,9 +292,14 @@ type VerifyResult struct {
 	// would answer an admin request with one entry per journal row (tens of
 	// megabytes on stage's 86k-entry journal). BreakCount stays exact so the
 	// true scale is never hidden by the trim.
-	Breaks          []ChainBreak `json:"breaks,omitempty"`
-	BreakCount      int          `json:"break_count,omitempty"`      // total breaks found (>= len(Breaks))
-	BreaksTruncated bool         `json:"breaks_truncated,omitempty"` // list trimmed; see BreakCount
+	Breaks []ChainBreak `json:"breaks,omitempty"`
+
+	// Repairable lists rows the v166 backfill corrupted but whose content is
+	// PROVABLY authentic — see recoverEmitPriority. They are not breaks; they
+	// are a wrong value in a column, and EmitPriority is what to write back.
+	Repairable      []RepairableEntry `json:"repairable,omitempty"`
+	BreakCount      int               `json:"break_count,omitempty"`      // total breaks found (>= len(Breaks))
+	BreaksTruncated bool              `json:"breaks_truncated,omitempty"` // list trimmed; see BreakCount
 }
 
 // maxReportedBreaks bounds the per-row breaks carried in a VerifyResult. A
@@ -302,6 +307,43 @@ type VerifyResult struct {
 // legacy row" from "the whole chain is unverifiable" — which is the only
 // distinction that changes what they do next.
 const maxReportedBreaks = 100
+
+// RepairableEntry is a row whose stored priority_at_emit is wrong but whose
+// emit-time value was recovered, proving the entry itself is untouched.
+type RepairableEntry struct {
+	Seq            int64  `json:"seq"`
+	ID             string `json:"id"`
+	StoredPriority string `json:"stored_priority"` // what the backfill wrote
+	EmitPriority   string `json:"emit_priority"`   // what the hash proves it was
+}
+
+// priorityDomain is the complete set of values the column can hold
+// (journal_handler.go validates exactly these). Small enough to search.
+var priorityDomain = []string{"normal", "high", "pin", "permanent"}
+
+// recoverEmitPriority finds the emit-time priority that reproduces storedHash,
+// or "" when none does.
+//
+// WHY THIS IS SOUND, and not a loosening of the oracle: the hash is an
+// HMAC-SHA256 under a per-installation secret chain key. Producing content that
+// hashes correctly under ANY candidate priority requires the key. An attacker
+// who could do that for one of four values could already do it for the real
+// one, so the search removes a false positive without removing a real
+// detection. What it buys is the difference between "this row is unverifiable
+// forever" and "this row is authentic and one column needs fixing".
+func recoverEmitPriority(key []byte, prevHash string, f ChainFields, storedHash string) string {
+	for _, candidate := range priorityDomain {
+		if candidate == f.Priority {
+			continue // already tried by the caller
+		}
+		probe := f
+		probe.Priority = candidate
+		if ChainHashKeyed(key, prevHash, probe) == storedHash {
+			return candidate
+		}
+	}
+	return ""
+}
 
 // ChainBreak is one row that failed its integrity check.
 type ChainBreak struct {
@@ -361,17 +403,21 @@ ORDER BY seq ASC`
 // live `priority`, so that is what must be fed back in — otherwise verification
 // would report a mid-upgrade DB as universally tampered. The probe is one cheap
 // sqlite_master read per verify, which is negligible next to walking the chain.
-func verifySelectFor(ctx context.Context, db *sql.DB) (string, error) {
+// The bool reports whether the schema has the IMMUTABLE priority_at_emit
+// column. It gates the backfill recovery: only when the hash is taken over a
+// column the operator-facing pin cannot touch is a content mismatch guaranteed
+// not to be a live priority flip.
+func verifySelectFor(ctx context.Context, db *sql.DB) (string, bool, error) {
 	var present int
 	if err := db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM pragma_table_info('journal_entries') WHERE name = 'priority_at_emit'`,
 	).Scan(&present); err != nil {
-		return "", fmt.Errorf("journal: probe priority_at_emit: %w", err)
+		return "", false, fmt.Errorf("journal: probe priority_at_emit: %w", err)
 	}
 	if present == 0 {
-		return fmt.Sprintf(verifySelect, `COALESCE(priority,'normal')`), nil
+		return fmt.Sprintf(verifySelect, `COALESCE(priority,'normal')`), false, nil
 	}
-	return fmt.Sprintf(verifySelect, `COALESCE(priority_at_emit, priority, 'normal')`), nil
+	return fmt.Sprintf(verifySelect, `COALESCE(priority_at_emit, priority, 'normal')`), true, nil
 }
 
 // priorityLedgerSQL loads the append-only chain of operator priority edits for a
@@ -491,7 +537,7 @@ func VerifyChain(ctx context.Context, db *sql.DB, workspaceID string) (*VerifyRe
 		return nil, err
 	}
 
-	selectSQL, err := verifySelectFor(ctx, db)
+	selectSQL, hasEmitColumn, err := verifySelectFor(ctx, db)
 	if err != nil {
 		return nil, err
 	}
@@ -563,9 +609,48 @@ func VerifyChain(ctx context.Context, db *sql.DB, workspaceID string) (*VerifyRe
 		// its STORED hash, which is unaffected, so the walk continues and later
 		// tampering stays reachable.
 		want := ChainHashKeyed(key, prevHash, f)
+		hashedPriority := f.Priority
+		recoveredRow := false
 		if want != entryHash {
-			res.note(f.Seq, f.ID, "content",
-				fmt.Sprintf("content hash mismatch at seq %d: entry was modified after write (or the chain key differs)", f.Seq))
+			// Before calling it tampering, try the one benign explanation we
+			// know of: the v166 backfill overwrote priority_at_emit with an
+			// already-edited value. If some candidate priority reproduces the
+			// stored hash, the entry is authentic and only the column is wrong.
+			// ONLY on a schema where the hashed priority is the immutable
+			// priority_at_emit. Before v166 the hash covered the LIVE priority,
+			// so a silent in-place flip changes it — and searching the domain
+			// there would launder exactly the attack reconcilePriority exists to
+			// catch. (Caught by TestVerifyChain_SilentPriorityFlipDetected.)
+			// TWO conditions, and the second is what keeps this honest.
+			//
+			//  1. The schema must hash the IMMUTABLE priority_at_emit. Before
+			//     v166 the hash covered the LIVE priority, so a silent in-place
+			//     flip changes it, and searching the domain there would launder
+			//     exactly the attack reconcilePriority exists to catch.
+			//
+			//  2. The stored emit value must EQUAL the live one. That is the
+			//     migration's fingerprint: v166 ran
+			//     `priority_at_emit = COALESCE(priority,'normal')`, so a row it
+			//     damaged necessarily has the two columns identical. An
+			//     attacker editing priority_at_emit to some other value leaves
+			//     them different — and that stays a break, recoverable or not.
+			//     (TestVerifyChain_SilentPriorityFlipDetected sets emit to
+			//     'permanent' while live is 'normal'; without this condition the
+			//     search would have laundered it.)
+			recovered := ""
+			if hasEmitColumn && f.Priority == livePriority {
+				recovered = recoverEmitPriority(key, prevHash, f, entryHash)
+			}
+			if recovered != "" {
+				res.Repairable = append(res.Repairable, RepairableEntry{
+					Seq: f.Seq, ID: f.ID, StoredPriority: f.Priority, EmitPriority: recovered,
+				})
+				hashedPriority = recovered
+				recoveredRow = true
+			} else {
+				res.note(f.Seq, f.ID, "content",
+					fmt.Sprintf("content hash mismatch at seq %d: entry was modified after write (or the chain key differs)", f.Seq))
+			}
 		}
 
 		// Priority reconciliation (#1369). `priority` is outside the hash because
@@ -573,10 +658,26 @@ func VerifyChain(ctx context.Context, db *sql.DB, workspaceID string) (*VerifyRe
 		// be reachable from the hashed emit-time value through the append-only
 		// ledger of operator edits. A raw column flip leaves no ledger row and is
 		// caught here.
-		if !reconcilePriority(f.Priority, livePriority, priorityEdits[f.ID]) {
+		// A recovered row was pinned BEFORE v166 created the ledger, so no
+		// ledger row can exist for that edit and reconciliation has nothing to
+		// reconcile against. Reporting it as tampering would be a false
+		// positive; the row is surfaced as Repairable instead, which is the
+		// honest answer — its content is proven, its live value's provenance is
+		// older than the mechanism that would record it.
+		// Reconciliation is skipped ONLY for a recovered row that carries no
+		// ledger entry at all — the signature of a pin made before v166 created
+		// the ledger, where there is by definition nothing to reconcile against.
+		//
+		// A recovered row that DOES have ledger rows is post-v166 and gets
+		// reconciled normally against the recovered emit value. Without that
+		// distinction an attacker could set `priority` and `priority_at_emit` to
+		// the same wrong value, satisfy the backfill fingerprint above, and have
+		// the live flip skipped along with it.
+		skipReconcile := recoveredRow && len(priorityEdits[f.ID]) == 0
+		if !skipReconcile && !reconcilePriority(hashedPriority, livePriority, priorityEdits[f.ID]) {
 			res.note(f.Seq, f.ID, "priority", fmt.Sprintf(
 				"priority mismatch at seq %d: live priority %q is not reachable from the emit-time %q through the recorded priority changes",
-				f.Seq, livePriority, f.Priority))
+				f.Seq, livePriority, hashedPriority))
 		}
 
 		expectedPrev = entryHash
