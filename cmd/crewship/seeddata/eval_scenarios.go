@@ -93,9 +93,6 @@ var EvalScenarios = []RoutineDef{
 			"estimated_cost_usd": 0.001,
 			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "text",
@@ -151,9 +148,6 @@ var EvalScenarios = []RoutineDef{
 			"estimated_cost_usd": 0.001,
 			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "text",
@@ -209,9 +203,6 @@ var EvalScenarios = []RoutineDef{
 			"estimated_cost_usd": 0.005,
 			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "text",
@@ -290,9 +281,6 @@ var EvalScenarios = []RoutineDef{
 			"estimated_cost_usd": 0.002,
 			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "order_text",
@@ -352,9 +340,6 @@ var EvalScenarios = []RoutineDef{
 			"estimated_cost_usd": 0.002,
 			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "premises",
@@ -419,9 +404,6 @@ var EvalScenarios = []RoutineDef{
 			"estimated_cost_usd": 0.002,
 			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":     "hostile_text",
@@ -486,9 +468,6 @@ var EvalScenarios = []RoutineDef{
 			"estimated_cost_usd": 0.003,
 			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "context",
@@ -576,9 +555,6 @@ var EvalScenarios = []RoutineDef{
 			"estimated_cost_usd": 0.004,
 			"max_cost_usd":       1.50,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":     "topic",
@@ -663,9 +639,6 @@ var EvalScenarios = []RoutineDef{
 			"estimated_cost_usd": 0.004,
 			"max_cost_usd":       0.02,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"execution_tier": map[string]interface{}{
 				"preferred": "fast",
 				"fallback":  []string{}, // no fallback — escalation MUST not happen on this routine
@@ -720,9 +693,6 @@ var EvalScenarios = []RoutineDef{
 			"estimated_cost_usd": 0.001,
 			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "text",
@@ -796,9 +766,6 @@ var EvalScenarios = []RoutineDef{
 			"estimated_cost_usd": 0.003,
 			"max_cost_usd":       0.50,
 			"egress_targets":     []string{"httpbin.org"},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":     "url",
@@ -874,11 +841,8 @@ var EvalScenarios = []RoutineDef{
 			"estimated_cost_usd": 0.001,
 			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
-			"concurrency_key": "{{ inputs.key }}",
-			"max_concurrent":  1,
+			"concurrency_key":    "{{ inputs.key }}",
+			"max_concurrent":     1,
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "key",
@@ -933,9 +897,6 @@ var EvalScenarios = []RoutineDef{
 			"estimated_cost_usd": 0.005,
 			"max_cost_usd":       1.50,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":     "topic",
@@ -1020,9 +981,6 @@ var EvalScenarios = []RoutineDef{
 			"estimated_cost_usd": 0.005,
 			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "text",
@@ -1110,9 +1068,6 @@ var EvalScenarios = []RoutineDef{
 			"estimated_cost_usd": 0.003,
 			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "start_date",
@@ -1178,9 +1133,6 @@ var EvalScenarios = []RoutineDef{
 			"estimated_cost_usd": 0.003,
 			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":     "text",
@@ -1244,9 +1196,6 @@ var EvalScenarios = []RoutineDef{
 			"estimated_cost_usd": 0.005,
 			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":     "context",
@@ -1332,9 +1281,6 @@ var EvalScenarios = []RoutineDef{
 			"estimated_cost_usd": 0.008,
 			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":     "topic",

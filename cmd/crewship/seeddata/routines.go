@@ -83,9 +83,6 @@ var Routines = []RoutineDef{
 			"description":        "Take any input text and return a concise 3-bullet summary.",
 			"estimated_cost_usd": 0.001,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "text",
@@ -131,9 +128,6 @@ var Routines = []RoutineDef{
 			// Narrow allowlist on the seed routine so the demo doesn't
 			// double as an SSRF lab. Workspace admins broaden via the editor.
 			"egress_targets": []string{"httpbin.org"},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "url",
@@ -189,9 +183,6 @@ var Routines = []RoutineDef{
 			"description":        "Pull every email + phone from free text into a canonical, sorted JSON object.",
 			"estimated_cost_usd": 0.001,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "text",
@@ -245,9 +236,6 @@ var Routines = []RoutineDef{
 			"description":        "Turn a raw incident log excerpt into a canonical, chronologically-ordered JSON timeline.",
 			"estimated_cost_usd": 0.003,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":     "log",
@@ -305,9 +293,6 @@ var Routines = []RoutineDef{
 			"description":        "Classify a ticket into fixed category / priority / sentiment label sets (grader-checked).",
 			"estimated_cost_usd": 0.002,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "ticket",
@@ -368,9 +353,6 @@ var Routines = []RoutineDef{
 			"description":        "The crew lead compiles a morning briefing from real workspace activity and lands it in your inbox.",
 			"estimated_cost_usd": 0.004,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "focus",
@@ -416,9 +398,6 @@ var Routines = []RoutineDef{
 			"description":        "Find every date in the text and output them normalized to YYYY-MM-DD, sorted ascending.",
 			"estimated_cost_usd": 0.001,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "text",
@@ -463,9 +442,6 @@ var Routines = []RoutineDef{
 			"description":        "Mask API keys, tokens, passwords and emails in text, replacing each with [REDACTED].",
 			"estimated_cost_usd": 0.001,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "text",
@@ -511,9 +487,6 @@ var Routines = []RoutineDef{
 			"description":        "Check a JSON object for required keys and report {valid, missing, extra} canonically.",
 			"estimated_cost_usd": 0.001,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "json",
@@ -568,9 +541,6 @@ var Routines = []RoutineDef{
 			"description":        "Review a diff and produce structured feedback (summary + issues + suggestions), grader-checked.",
 			"estimated_cost_usd": 0.005,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "diff",
@@ -638,9 +608,6 @@ var Routines = []RoutineDef{
 			"description":        "Parse an invoice into canonical JSON with nested line items, grader-checked.",
 			"estimated_cost_usd": 0.003,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "invoice",
@@ -701,9 +668,6 @@ var Routines = []RoutineDef{
 			"description":        "Apply a fixed rule table to inputs and return the single resulting route + reason.",
 			"estimated_cost_usd": 0.001,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "type",
@@ -758,9 +722,6 @@ var Routines = []RoutineDef{
 			"description":        "Summarize a source where every bullet must be backed by a verbatim quote (faithfulness-graded).",
 			"estimated_cost_usd": 0.003,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "source",
@@ -815,9 +776,6 @@ var Routines = []RoutineDef{
 			"description":        "Score a git diff for change size and risk into a canonical JSON object.",
 			"estimated_cost_usd": 0.002,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "diff",
@@ -964,9 +922,6 @@ var Routines = []RoutineDef{
 			"description":        "Wake-gated by the feed-watch probe: re-fetch the changed feed and brief the crew on what's in it now.",
 			"estimated_cost_usd": 0.003,
 			"egress_targets":     []string{"httpbin.org"},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "url",
@@ -1039,9 +994,6 @@ var Routines = []RoutineDef{
 			"description":        "Draft an action, pause for human approval, then emit the final go-ahead.",
 			"estimated_cost_usd": 0.001,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
 			"inputs": []map[string]interface{}{
 				{"name": "action", "type": "string", "required": false, "default": "Restart the auth-svc pods in production"},
 			},
@@ -1142,11 +1094,8 @@ var Routines = []RoutineDef{
 			"description":        "Run the core deterministic recipes back-to-back so their outputs can be diffed across tiers.",
 			"estimated_cost_usd": 0.006,
 			"egress_targets":     []string{},
-			"credentials_required": []map[string]interface{}{
-				{"type": "anthropic", "scope": "any"},
-			},
-			"inputs":  []map[string]interface{}{},
-			"outputs": []map[string]interface{}{{"name": "swept", "type": "string"}},
+			"inputs":             []map[string]interface{}{},
+			"outputs":            []map[string]interface{}{{"name": "swept", "type": "string"}},
 			"steps": []map[string]interface{}{
 				{
 					"id":            "contacts",
