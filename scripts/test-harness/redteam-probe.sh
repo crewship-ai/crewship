@@ -14,12 +14,29 @@ PROXY="HTTP=${HTTP_PROXY:-none} HTTPS=${HTTPS_PROXY:-none}"
 SECRETS_LS="$(ls -la /secrets 2>&1 | head -15 || true)"
 SECRETS_FILES="$(find /secrets -maxdepth 4 -type f 2>/dev/null | head -25 || true)"
 
-# HTTP prober (curl or wget)
+# HTTP prober (curl or wget). Emits exactly ONE token: an HTTP status, or
+# "000" when the transport never got a response, or "ERR"/"NO-HTTP-CLIENT".
+#
+# The obvious `curl -w '%{http_code}' ... || echo ERR` is wrong and was: curl
+# writes the -w template even on a connection failure, so a blocked request
+# emitted "000" AND THEN "ERR" — the concatenated "000ERR" matched none of the
+# caller's expected values and a correctly-blocked request read as a failure.
+# That masked a working egress fence. Capture first, decide after.
 httpcode() { # url [extra curl args...]
   local url="$1"; shift || true
-  if have curl; then curl -s -o /dev/null -w '%{http_code}' --max-time 8 "$@" "$url" 2>/dev/null || echo ERR
-  elif have wget; then wget -q -O /dev/null -T 8 "$url" 2>/dev/null && echo 200 || echo ERR
-  else echo NO-HTTP-CLIENT; fi
+  local out rc
+  if have curl; then
+    out="$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 "$@" "$url" 2>/dev/null)"
+    rc=$?
+    # curl still prints 000 on a transport failure; that IS the answer we want
+    # (nothing was reached). Only fall back to ERR when there is no answer.
+    if [ -n "$out" ]; then printf '%s' "$out"; else printf 'ERR'; fi
+    return 0
+  elif have wget; then
+    if wget -q -O /dev/null -T 8 "$url" 2>/dev/null; then printf '200'; else printf '000'; fi
+    return 0
+  fi
+  printf 'NO-HTTP-CLIENT'
 }
 
 # Tier-B premise: is the internal API reachable from inside the container?
