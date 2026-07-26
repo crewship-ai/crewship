@@ -193,3 +193,50 @@ func TestSecurityPosture_AdminGetsTheReport(t *testing.T) {
 		t.Error("warnings must serialize as [] rather than null")
 	}
 }
+
+// TestSecurityPosture_WarningKeysAreTheDocumentedSet pins the warning-key set
+// as a contract. CodeRabbit caught the docs listing 5 of the 6 emitted keys on
+// this PR; enumerating them here means the next key added has to come past this
+// test, which is the prompt to update docs/cli/admin.mdx with it.
+//
+// Deliberately not reading the .mdx from Go — coupling a unit test to a docs
+// file path is more fragile than it is worth. This asserts the source of truth;
+// the doc list is checked against it by eye at review time.
+func TestSecurityPosture_WarningKeysAreTheDocumentedSet(t *testing.T) {
+	documented := map[string]bool{
+		"plaintext_secrets_allowed":           true,
+		"encryption_key_missing":              true,
+		"rate_limit_disabled":                 true,
+		"rate_limit_disabled_ignored_in_prod": true,
+		"signup_open":                         true,
+		"private_endpoints_ceiling_open":      true,
+	}
+
+	// Drive every branch that can emit a warning and collect the keys.
+	seen := map[string]bool{}
+	collect := func(p securityPostureResponse) {
+		for _, w := range p.Warnings {
+			seen[w.Key] = true
+		}
+	}
+	// Worst case: no key, plaintext allowed, signup open, ceiling open, dev.
+	t.Setenv("CREWSHIP_ENV", "dev")
+	t.Setenv("ENCRYPTION_KEY", "")
+	t.Setenv(encryption.AllowPlaintextSecretsEnvVar, "true")
+	t.Setenv("CREWSHIP_ALLOW_PRIVATE_ENDPOINTS", "1")
+	collect(buildSecurityPosture(true, false, false, true))
+	// Prod with the limiter flag set — the only path to the ignored-in-prod key.
+	t.Setenv("CREWSHIP_ENV", "prod")
+	collect(buildSecurityPosture(true, false, false, true))
+
+	for k := range seen {
+		if !documented[k] {
+			t.Errorf("warning key %q is emitted but not in the documented set — add it to docs/cli/admin.mdx and to this test", k)
+		}
+	}
+	for k := range documented {
+		if !seen[k] {
+			t.Errorf("warning key %q is documented but no branch emitted it — stale docs, or a branch this test no longer reaches", k)
+		}
+	}
+}

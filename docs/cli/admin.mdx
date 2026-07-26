@@ -365,6 +365,7 @@ Beyond the raw state, the report derives warnings that name the **consequence**:
 - `plaintext_secrets_allowed` (**high**) — anyone with the database file can read every stored secret.
 - `encryption_key_missing` (**medium**, **high** when combined with the above) — the combination means new credentials are being written in the clear.
 - `rate_limit_disabled` (**medium**) — credential-stuffing and the `/credentials/test` oracle are unthrottled.
+- `rate_limit_disabled_ignored_in_prod` (**info**) — a disable flag is set but the production guard keeps the limiter running. Not an exposure; it means your config and the running state disagree, which matters the first time that config lands somewhere the guard doesn't apply.
 - `signup_open` (**medium**, **high** in production) — anyone who can reach the instance can create an account.
 - `private_endpoints_ceiling_open` (**info**) — crews that also opt in can reach RFC1918/loopback. Link-local and cloud-metadata stay blocked regardless.
 
