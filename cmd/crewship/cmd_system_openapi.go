@@ -44,8 +44,19 @@ Examples:
 			return err
 		}
 		client := newAPIClient()
-		// Not under /api/v1 — the spec is mounted at the mux root so tooling
-		// can find it at the conventional well-known path.
+		// The spec is workspace-agnostic — it describes the whole instance and
+		// is served unauthenticated at the mux root, outside /api/v1. The shared
+		// client resolves the configured workspace slug on EVERY request and
+		// hard-fails a miss (client.go resolveWorkspaceID), so a stale stored
+		// workspace would break a command that never needed one:
+		//
+		//   $ crewship system openapi
+		//   workspace not found: demo-cmruhne4 (check --workspace …)
+		//
+		// Clearing it skips resolution entirely — resolveWorkspaceID
+		// short-circuits on an empty WorkspaceID — and drops the pointless
+		// ?workspace_id= the injector would otherwise append.
+		client.WorkspaceID = ""
 		resp, err := client.Get("/openapi.json")
 		if err != nil {
 			return err

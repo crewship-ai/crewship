@@ -93,6 +93,37 @@ func TestSystemOpenAPI(t *testing.T) {
 		}
 	})
 
+	t.Run("works with a stale stored workspace, and sends no workspace_id", func(t *testing.T) {
+		// The spec describes the whole instance and is served unauthenticated
+		// outside /api/v1 — it never needed a workspace. Before this guard the
+		// shared client's per-request slug resolution turned a stale stored
+		// workspace into "workspace not found" on a command that doesn't use one.
+		stub := covStub(t)
+		stub.OnGet("/openapi.json", func(*http.Request, []byte) (int, []byte, string) {
+			return 200, []byte(spec), "application/json"
+		})
+		// Any /workspaces preflight would 404 the stale slug — if resolution
+		// still ran, the command would fail here instead of returning the spec.
+		stub.OnGet("/api/v1/workspaces", clitest.ErrorResponse(404, "workspace not found"))
+		covResetFlags(t, systemOpenAPICmd)
+
+		out := covCaptureStdoutCli3(t, func() {
+			if err := systemOpenAPICmd.RunE(systemOpenAPICmd, nil); err != nil {
+				t.Errorf("RunE: %v", err)
+			}
+		})
+		if strings.TrimSpace(out) != spec {
+			t.Errorf("spec not returned:\n%s", out)
+		}
+		calls := stub.CallsFor("GET", "/openapi.json")
+		if len(calls) != 1 {
+			t.Fatalf("want 1 GET, got %d", len(calls))
+		}
+		if strings.Contains(calls[0].Query, "workspace_id") {
+			t.Errorf("a workspace-agnostic route must not carry ?workspace_id=, got %q", calls[0].Query)
+		}
+	})
+
 	t.Run("api error propagates", func(t *testing.T) {
 		stub := covStub(t)
 		stub.OnGet("/openapi.json", clitest.ErrorResponse(404, "not found"))
