@@ -5,13 +5,20 @@
 # test-attack-surface.sh Tier B (documented skips), this one ACTUALLY RUNS the
 # attack via a `script` step and asserts what containment should look like.
 #
-# It is the regression gate for #1368 (network-layer egress fence) and #1473
-# (routine script steps get no HTTP_PROXY, so the crew allowlist never binds to
-# them — found by this suite's first live run). Three assertions are XFAIL while
-# those stay open: they are marked xfail rather than fail so the suite can run
-# in run-all.sh without turning a known-open gap into permanent CI red, while
-# staying loud in the summary. When the issues land they flip to PASS and the
-# xfail markers come out — that transition is the acceptance test.
+# It is the regression gate for #1368 (network-layer egress fence, still open)
+# and #1473 (routine script steps got no HTTP_PROXY, so the crew allowlist never
+# bound to them — found by this suite's first live run, fixed 2026-07-26).
+#
+# The two #1368 assertions are XFAIL while it stays open: marked xfail rather
+# than fail so the suite can run in run-all.sh without turning a known-open gap
+# into permanent CI red, while staying loud in the summary. When it lands they
+# flip to PASS and the markers come out — that transition is the acceptance test.
+#
+# The #1473 assertion is xfail for a different and temporary reason: the fix is
+# in main, but this suite runs against a LIVE server that may be older. It
+# reports PASS the moment the target carries the fix. Convert it to a hard
+# _fail once dev and stage are both past 1e498fe4, so a genuine regression is
+# caught instead of absorbed.
 #
 # Mechanism: a token-zero `script` step runs redteam-probe.sh inside the crew
 # container and emits a JSON report. No WebSocket (survives flaky edges) — the
@@ -128,17 +135,19 @@ if [[ "$TCP" == "closed" ]]; then _pass "raw TCP:443 to public IP refused"
 # A restricted crew's script step must not reach a non-allowlisted host. Only
 # assert it where the allowlist actually applies.
 #
-# This is what the suite found on its first live run (#1473): script steps get
-# NO proxy env at all, so the allowlist never binds to them — a plain curl walks
-# out. Not a #1368 proxy *bypass*; there is simply no proxy to bypass. The probe
-# reports `proxy` so the two failure modes stay distinguishable in the output.
+# This is what the suite found on its first live run (#1473): script steps got
+# NO proxy env at all, so the allowlist never bound to them — a plain curl walked
+# out. Not a #1368 proxy *bypass*; there was simply no proxy to bypass. Fixed in
+# main; a failure here now means the target server predates the fix, or it
+# regressed. The probe reports `proxy` so the two failure modes stay
+# distinguishable in the output.
 if [[ "$NETMODE" != "restricted" ]]; then
   skip "non-allowlisted host blocked" "crew '$CREW' is network_mode=$NETMODE — the allowlist only binds on 'restricted'"
 elif [[ "$PROXIED" =~ ^(000|403|ERR|BLOCKED|)$ ]]; then
   _pass "non-allowlisted host blocked ($PROXIED)"
 else
   xfail "restricted crew reached a non-allowlisted host" \
-    "#1473 open — HTTP $PROXIED to example.org; script steps run without HTTP_PROXY (proxy=$(get proxy)), so the crew allowlist does not apply to them"
+    "#1473 — HTTP $PROXIED to example.org with proxy=$(get proxy). Fixed in main; this server predates the fix, or it regressed"
 fi
 
 finish

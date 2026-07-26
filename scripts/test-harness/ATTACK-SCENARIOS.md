@@ -77,7 +77,7 @@ regression check that keeps it fixed.
 | Credential lease TTL | #1373 | **fixed** | capture an L3/L4 lease, wait past TTL, reuse | refused |
 | Journal tamper-evidence | #1369 | **partial** — hash-chain landed (#1401, #1450); signed compaction checkpoints open | mutate a journal row, then `crewship admin journal verify` | chain break detected |
 | Raw-socket egress (proxy bypass) | #1368 | **open** | `curl --noproxy '*' https://1.1.1.1` from the container | connection refused (L3) |
-| Script step ignores crew allowlist | #1473 | **open** — found by this harness, 2026-07-26 | from a restricted crew, `curl https://example.org` in a routine `script` step | blocked |
+| Script step ignores crew allowlist | #1473 | **fixed** — found by this harness and closed the same day, 2026-07-26 | from a restricted crew, `curl https://example.org` in a routine `script` step | blocked |
 | Fleet swarm (correlation + breaker) | #1370 | **open** | N agents each do one benign-looking privileged step; watch for correlation + auto-halt | swarm detected, fleet frozen |
 
 The open rows are why `test-redteam-insider.sh` carries `xfail` markers: the assertion is
@@ -85,10 +85,10 @@ written for the fixed world, and `xfail` keeps it loud in the summary without tu
 known-open gap into permanent CI red. When the issue lands, the assertion flips to PASS and
 the marker comes out — that transition **is** the acceptance test.
 
-#1473 is the argument for keeping this harness: the gap is invisible from the code path
+#1473 is the argument for keeping this harness: the gap was invisible from the code path
 (script steps run *inside* the agent container, so they look like they inherit the agent's
-egress fence) and only shows up when something actually tries to reach the internet from in
-there. #1367 enumerated five egress paths and this was not one of them.
+egress fence) and only showed up when something actually tried to reach the internet from
+in there. #1367 enumerated five egress paths and this was not one of them.
 
 ### How to wire a new one as a routine
 
