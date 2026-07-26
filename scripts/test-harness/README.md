@@ -56,7 +56,21 @@ ROUTINE=classify-ticket ./test-notifications.sh
 ```
 
 Override any of: `CREWSHIP` (binary path — absolute, or relative to your cwd),
-`SERVER`/`CREWSHIP_SERVER`, `ASK_TIMEOUT`, `POLL_TIMEOUT`, `POLL_INTERVAL`.
+`SERVER`/`CREWSHIP_SERVER`, `CREWSHIP_PROFILE`, `CREWSHIP_WORKSPACE`,
+`ASK_TIMEOUT`, `POLL_TIMEOUT`, `POLL_INTERVAL`.
+
+> **`CREWSHIP_PROFILE` is not optional as often as it looks.** The CLI refuses
+> to send a token to a host it was not issued for, so pointing `CREWSHIP_SERVER`
+> at a slot whose credential lives under a differently-named profile fails with
+> a mismatch error, not a 401. Profile names do not have to match slot names — a
+> `dev3` profile can point at dev1. Name the profile explicitly, and use
+> `CREWSHIP_WORKSPACE` when a reseed has moved the workspace id out from under
+> the profile:
+>
+> ```bash
+> CREWSHIP_SERVER=https://crewship-dev3.unifylab.cz \
+> CREWSHIP_PROFILE=dev3-fresh CREWSHIP_WORKSPACE=<workspace id> ./run-all.sh
+> ```
 
 ## What each suite asserts
 
@@ -77,6 +91,16 @@ Override any of: `CREWSHIP` (binary path — absolute, or relative to your cwd),
 | `test-keeper-toctou.sh` | a decision reflects **injection-time** state, not approval-time: `rotate --grace-seconds 0` scrubs the stale value now, **grace-window rotate + rotation-cancel** scrubs early, a **concurrent rotate race** leaves the credential coherent + `ACTIVE`, `unassign`/`reassign` toggles the binding the keeper requires, **delete-while-assigned** revokes cleanly, **peer value** is never exposed; **SKIPs** the container-only deferred race (T2) and the token-only double-execute (T10). |
 | `test-keeper-audit-integrity.sh` | decisions leave a **durable, monotonic trace**: lifecycle events grow the `credential audit` timeline, **REVOKE** on delete, a granted escalation resolves off `PENDING` (**approve** path) and a **denied** one is recorded (deny path), `system keeper` exposes scrubber + model; the journal **hash-chain** verifies clean and detects an out-of-band row mutation; keeper decisions are **append-only** — `keeper history` shows every transition, 1-based and gap-free, starting at `PENDING`, tail matching the current decision, each with an actor; an **authorised priority edit does not break the chain** (pin → verify → revert → verify). **SKIPs** the load-only fail-silent drop (T6) and the token-only returned-vs-persisted mismatch (T7); the DB-trigger and raw-flip legs print `sqlite3` commands to run on dev2 with `CREWSHIP_DB` set. |
 | `test-keeper-load.sh` | **correctness under load** (the real "perf" tests): read-path **p50/p95/p99** latency baseline at `CONC` concurrency, server stays **healthy through a write burst** (no 5xx / health flap), the **rate-limiter** yields 200/429 never 5xx, **pending-count stays consistent** under concurrent reads, keeper **status reachable under load**; **SKIPs** inbox-flooding advisory-loss (T8) and evaluator-saturation fail-closed (T9). Tunables: `CONC`, `SAMPLES`, `BURST`. |
+
+| `test-attack-surface.sh` | **Tier A perimeter** — drives the server as an *external* attacker: protected + admin routes reject no-auth and a garbage token, every `/api/v1/internal/*` route is **404 from the edge** (no token / user JWT / guessed static token), a spoofed `X-Forwarded-For: 127.0.0.1` does **not** fake a private origin (#1020), and a non-member workspace answers 403. Read-only — it creates nothing. Tier B (insider) attacks are listed as SKIPs carrying the exact agent-context command, each tagged with its issue and whether that issue is fixed, partial, or open. Cross-workspace checks SKIP unless `CREWSHIP_ATTACK_OTHER_WS` names a workspace that **exists** and the token holder is not a member of — a guessed id answers 404 and would prove nothing. *Uses raw `curl` by necessity: its job is to send requests the CLI would never construct.* Opt-in: `WITH_ATTACK_SURFACE=1 ./run-all.sh`. |
+| `test-redteam-insider.sh` | **Tier B insider** — the self-attacking routine. Delivers `redteam-probe.sh` into the crew's shared dir, saves a one-step `script` routine, runs it **inside the crew container**, and asserts containment from the report: the internal API does not accept an unauthenticated agent-context request, no cleartext files under `/secrets` (#1364 regression check), raw non-proxied egress dies at L3 (**xfail: #1368**), and a restricted crew cannot reach a non-allowlisted host (**xfail: #1473** — script steps get no `HTTP_PROXY`, found by this suite). The routine is soft-deleted on exit; the probe file stays (`crew files` has no delete verb) and is inert + overwritten each run. **Dev slots only — never point it at prod.** Opt-in: `WITH_REDTEAM_INSIDER=1 ./run-all.sh`. |
+
+> **Adversarial suites** (`test-attack-surface.sh`, `test-redteam-insider.sh`)
+> are opt-in and deliberately outside the default set — the insider one mutates
+> a shared dev slot and carries `xfail` assertions for open issues that must stay
+> visible rather than become noise in an unrelated run. Scenario catalog, safety
+> rails, and how to turn each Tier B attack into a scheduled red-team routine:
+> `ATTACK-SCENARIOS.md`.
 
 > **Keeper adversarial suite** (the three `test-keeper-*` above) is opt-in:
 > `WITH_KEEPER_SECURITY=1 ./run-all.sh`. Design + the full test catalog (T1–T13,

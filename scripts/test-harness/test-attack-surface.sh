@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# shellcheck shell=bash
+# Adversarial harness — drives the REAL server as an attacker and asserts the
+# security boundaries hold. Companion to the architecture-review issues
+# #1364–#1380. Two tiers:
+#
+#   Tier A — EXTERNAL attacker (no privileged position). Runnable from any
+#            machine with a normal user token. Validates the perimeter:
+#            auth fence, internal-surface unreachability, cross-workspace
+#            isolation.
+#
+#   Tier B — INSIDER / compromised agent (holds a sidecar/internal token or runs
+#            inside an agent container). SKIPPED here, because they need an
+#            in-container position; each skip carries the exact command to run
+#            FROM AGENT CONTEXT. test-redteam-insider.sh actually executes the
+#            #1368 subset via a routine `script` step; see ATTACK-SCENARIOS.md
+#            for the rest.
+#
+# Usage (Tier A live):
+#   CREWSHIP_SERVER=https://crewship-dev3.unifylab.cz \
+#   CREWSHIP=/path/to/crewship  bash test-attack-surface.sh
+#
+# Token: $CREWSHIP_ATTACK_TOKEN, else the token of the cli-config profile whose
+# `server:` matches $SERVER (NOT blindly `current:` — that profile may point at
+# a different slot, which would make A3 fail for the wrong reason). Never
+# hard-code a token here.
+#
+# Why raw curl instead of the CLI: CLAUDE.md requires ops to go through the
+# `crewship` CLI, and every other suite here does. This one cannot. Its whole
+# job is to send requests the CLI would never construct — a garbage bearer
+# token, a spoofed X-Forwarded-For, an unauthenticated POST at
+# /api/v1/internal/*. A CLI that could express those would itself be the
+# vulnerability. The probes stay read-only and are all expected to be REJECTED.
+#
+# Read-only / reversible: Tier A only performs probes that are meant to be
+# rejected. It creates nothing. Safe against a shared dev slot.
+
+set -uo pipefail
+_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$_DIR/lib.sh"
+
+# ── resolve token + workspace ────────────────────────────────────────────────
+# Pick the profile whose server matches the target, so the token belongs to the
+# instance under attack. Falls back to `current:`; prints nothing on any error
+# (the caller then reports "no token" rather than leaking a parse trace).
+_profile_token() { # <server-url>
+  python3 - "$HOME/.crewship/cli-config.yaml" "$1" <<'PY' 2>/dev/null || true
+import sys
+try:
+    import yaml
+except ImportError:
+    sys.exit(0)
+try:
+    with open(sys.argv[1]) as fh:
+        cfg = yaml.safe_load(fh) or {}
+except OSError:
+    sys.exit(0)
+want = sys.argv[2].rstrip("/")
+servers = cfg.get("servers") or {}
+if not isinstance(servers, dict):
+    sys.exit(0)
+for prof in servers.values():
+    if isinstance(prof, dict) and str(prof.get("server", "")).rstrip("/") == want:
+        if prof.get("token"):
+            print(prof["token"])
+            sys.exit(0)
+cur = servers.get(cfg.get("current"))
+if isinstance(cur, dict) and cur.get("token"):
+    print(cur["token"])
+PY
+}
+TOKEN="${CREWSHIP_ATTACK_TOKEN:-$(_profile_token "$SERVER")}"
+WS="${CREWSHIP_ATTACK_WS:-$(cs workspace list --format json 2>/dev/null | jq -r '.[0].id' 2>/dev/null)}"
+# A workspace that EXISTS and the token holder is NOT a member of. There is no
+# safe way to discover one (a non-member cannot list it), and guessing is worse
+# than skipping: a made-up id answers 404, which is indistinguishable from a
+# real isolation failure and would either false-pass or cry wolf. So the
+# cross-workspace checks run only when the operator names one.
+OTHER_WS="${CREWSHIP_ATTACK_OTHER_WS:-}"
+
+# ── http helper: prints the status code, stashes body in $_ATK_BODY ───────────
+# Per-run temp file: a fixed /tmp path is both a symlink target on a shared box
+# and a collision between two concurrent runs.
+_ATK_BODY=""
+_ATK_BODY_FILE="$(mktemp -t atk_body.XXXXXX)"
+trap 'rm -f "$_ATK_BODY_FILE"' EXIT
+code() { # method path [curl args...]
+  local m="$1" p="$2"; shift 2
+  local c; c=$(/usr/bin/curl -sS -o "$_ATK_BODY_FILE" -w '%{http_code}' -X "$m" "$SERVER$p" "$@" 2>/dev/null)
+  _ATK_BODY="$(/usr/bin/head -c200 "$_ATK_BODY_FILE" 2>/dev/null | /usr/bin/tr '\n' ' ')"
+  printf '%s' "$c"
+}
+# assert_code <name> <expected-code> <method> <path> [curl args...]
+assert_code() {
+  local name="$1" want="$2" m="$3" p="$4"; shift 4
+  local got; got=$(code "$m" "$p" "$@")
+  if [[ "$got" == "$want" ]]; then _pass "$name (HTTP $got)"
+  else _fail "$name" "expected HTTP $want, got $got — body: ${_ATK_BODY:0:120}"; fi
+}
+# assert_code_in <name> <regex> <method> <path> ... — accept any of several codes
+assert_code_in() {
+  local name="$1" re="$2" m="$3" p="$4"; shift 4
+  local got; got=$(code "$m" "$p" "$@")
+  if [[ "$got" =~ $re ]]; then _pass "$name (HTTP $got)"
+  else _fail "$name" "expected HTTP ~$re, got $got — body: ${_ATK_BODY:0:120}"; fi
+}
+
+section "Preflight"
+[[ -n "$TOKEN" ]] || { printf '  ✗ no token (set CREWSHIP_ATTACK_TOKEN or run crewship login)\n'; exit 2; }
+[[ -n "$WS" ]] || { printf '  ✗ could not resolve workspace id (set CREWSHIP_ATTACK_WS)\n'; exit 2; }
+info "server=$SERVER ws=$WS"
+AUTH=(-H "Authorization: Bearer $TOKEN")
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "Tier A · Auth fence (external attacker)"
+assert_code    "A1 protected route rejects no-auth"       401 GET "/api/v1/crews?workspace_id=$WS"
+assert_code    "A2 protected route rejects garbage token" 401 GET "/api/v1/crews?workspace_id=$WS" -H "Authorization: Bearer deadbeef-not-real"
+assert_code    "A3 valid token is accepted"               200 GET "/api/v1/crews?workspace_id=$WS" "${AUTH[@]}"
+assert_code    "A4 admin route rejects no-auth"           401 GET "/api/v1/admin/stats?workspace_id=$WS"
+
+section "Tier A · Internal surface must be UNREACHABLE from the edge (#audit L0.1)"
+# requireInternal fails the network gate for a public source → 404. Any 2xx here
+# would mean the internal keeper/credential surface is internet-reachable.
+assert_code    "B1 /internal/credentials unreachable no-token"  404 GET  "/api/v1/internal/credentials?workspace_id=$WS"
+assert_code    "B2 /internal/credentials unreachable via userJWT" 404 GET "/api/v1/internal/credentials?workspace_id=$WS" "${AUTH[@]}"
+assert_code    "B3 /internal/keeper/request unreachable no-token" 404 POST "/api/v1/internal/keeper/request" -H "Content-Type: application/json" -d '{"agent_slug":"x","credential_id":"y","intent":"probe"}'
+assert_code    "B4 /internal/keeper/request unreachable w/ guessed static token" 404 POST "/api/v1/internal/keeper/request" -H "X-Internal-Token: internal-dev-token" -H "Content-Type: application/json" -d '{"agent_slug":"x","credential_id":"y","intent":"probe"}'
+assert_code    "B5 /internal/agents unreachable no-token"        404 GET  "/api/v1/internal/agents?workspace_id=$WS"
+# The network-origin gate must not be spoofable by a header an edge proxy would
+# otherwise be trusted to set (#1020). A 2xx/4xx-other here means XFF is honoured.
+assert_code    "B6 spoofed X-Forwarded-For does not fake a private origin" 404 GET "/api/v1/internal/agents?workspace_id=$WS" -H "X-Forwarded-For: 127.0.0.1"
+
+section "Tier A · Cross-workspace isolation"
+if [[ -z "$OTHER_WS" ]]; then
+  skip "C1/C2 cross-workspace isolation" "set CREWSHIP_ATTACK_OTHER_WS to a workspace that EXISTS and this token is NOT a member of — a guessed id answers 404 and would prove nothing"
+else
+  assert_code  "C1 crews of a non-member workspace → 403" 403 GET "/api/v1/crews?workspace_id=$OTHER_WS" "${AUTH[@]}"
+  assert_code  "C2 admin/users of a non-member workspace → 403" 403 GET "/api/v1/admin/users?workspace_id=$OTHER_WS" "${AUTH[@]}"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "Tier B · Insider / compromised-agent attacks (run from AGENT CONTEXT)"
+info "These require a sidecar/internal token or in-container position. The ones"
+info "marked FIXED are regression checks — they must stay contained. See"
+info "ATTACK-SCENARIOS.md; test-redteam-insider.sh runs the #1368 subset live."
+
+skip "T-1364 SECRET file-mount leak [FIXED #1364]" \
+  "with Keeper ON and a SECRET cred assigned, /secrets/<slug>/<VAR> must NOT exist inside the container. Check: test -e /secrets/<slug>/<VAR> && echo LEAK"
+skip "T-1365 cross-crew issue mutation [FIXED #1365]" \
+  "with a crew-A crwv1 sidecar token, PATCH /api/v1/internal/issues/<crewB-issue>/status (and POST .../comment) must be 403"
+skip "T-1367 egress bypass via notify/MCP/hook [FIXED #1367]" \
+  "from a RESTRICTED crew, trigger a notify webhook / MCP tool / hook at a NON-allowlisted host (https://example.org) — must be blocked"
+skip "T-1371 agent-authored routine skips test-gate [FIXED #1371]" \
+  "via run_routine/InternalSave, save a routine with forged LastTestRunPassed=true and no dry-run — must land 'proposed'/inactive"
+skip "T-1373 credential lease TTL [FIXED #1373]" \
+  "capture an L3/L4 credential lease, wait past TTL, reuse — must be refused"
+skip "T-1369 journal tamper-evidence [PARTIAL — #1369 open]" \
+  "hash-chain landed (#1401, #1450): mutate/delete a journal row then 'crewship admin journal verify' — must report the break. Signed compaction checkpoints still open."
+skip "T-1368 raw-socket egress (proxy bypass) [OPEN — #1368]" \
+  "from inside an agent container, curl --noproxy '*' https://1.1.1.1 — must be refused at L3. Today app-layer only, so it succeeds. test-redteam-insider.sh asserts this live."
+skip "T-1370 fleet swarm (correlation + breaker) [OPEN — #1370]" \
+  "N agents each take one benign-looking privileged step — the fleet must correlate and halt"
+
+finish

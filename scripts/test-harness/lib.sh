@@ -86,7 +86,18 @@ xfail() { _XFAIL=$((_XFAIL+1)); _XFAIL_NAMES+=("$1"); \
             "${2:+ ($2)}"; }
 
 # ── CLI wrappers ────────────────────────────────────────────────────────────
-cs() { "$CREWSHIP" --server "$SERVER" "$@"; }
+# The CLI refuses to send a token to a host the token was not issued for, so
+# pointing SERVER at a slot whose credential lives under a DIFFERENT profile
+# name fails with a mismatch error rather than a 401. Profile names do not have
+# to match slot names (a `dev3` profile can point at dev1), so name the profile
+# explicitly via CREWSHIP_PROFILE. CREWSHIP_WORKSPACE overrides a workspace id
+# gone stale in that profile after a reseed. Both default to unset, in which
+# case this is exactly the plain `--server` wrapper it has always been.
+# ${arr[@]+"${arr[@]}"} — bash 3.2 (macOS) errors on an empty array under set -u.
+_CS_ARGS=()
+[[ -n "${CREWSHIP_PROFILE:-}" ]]   && _CS_ARGS+=(--profile "$CREWSHIP_PROFILE")
+[[ -n "${CREWSHIP_WORKSPACE:-}" ]] && _CS_ARGS+=(--workspace "$CREWSHIP_WORKSPACE")
+cs() { "$CREWSHIP" --server "$SERVER" ${_CS_ARGS[@]+"${_CS_ARGS[@]}"} "$@"; }
 
 # nonce <prefix> — emit a hard-to-guess token, e.g. FALCON-7F3A9C.
 # Uppercased so models echo it back verbatim more reliably.
