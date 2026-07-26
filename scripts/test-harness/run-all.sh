@@ -46,8 +46,9 @@ tests=(test-memory.sh test-delegation.sh test-notifications.sh test-orchestratio
 # test-redteam-insider.sh actually attacks the instance from inside a crew
 # container. It is opt-in for two reasons: it saves + runs a routine (soft-
 # deleted on exit) on a shared dev slot, and it carries xfail assertions for
-# open issues (#1368, #1473) that must stay visible rather than become
-# background noise in an unrelated run. Dev slots only — never point it at prod.
+# open or recently-fixed issues (#1368, #1473) that must stay visible rather
+# than become background noise in an unrelated run. Dev slots only — never
+# point it at prod.
 [[ "${WITH_ATTACK_SURFACE:-0}" == "1" ]] && tests+=(test-attack-surface.sh)
 [[ "${WITH_REDTEAM_INSIDER:-0}" == "1" ]] && tests+=(test-redteam-insider.sh)
 
