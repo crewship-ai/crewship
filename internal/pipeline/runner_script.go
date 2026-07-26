@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
@@ -308,10 +309,35 @@ func (r *OrchestratorRunner) RunScript(ctx context.Context, req ScriptRunRequest
 	// "$@" expands to argv; the shell's exit status is the script's.
 	cmd := append([]string{"sh", "-c", `"$@" 2>` + stderrFile, "crewship-script"}, argv...)
 
-	env := make([]string, 0, len(req.Env))
+	// #1473: a script step runs inside the agent container but used to build
+	// its environment from the step's own inputs alone, so it carried no
+	// proxy — and the crew egress allowlist is enforced by the sidecar proxy.
+	// A `restricted` crew allowlisted to one host reached the open internet
+	// from a script step with a plain curl. Not a bypass of the fence; it
+	// never met it. Sourced from the orchestrator so this path and the
+	// agent-process path cannot drift apart again — that divergence is the bug.
+	proxyEnv := orchestrator.SidecarProxyEnv()
+	// A step must not be able to switch off the fence that constrains it, so
+	// drop any proxy key the caller declared before appending ours. Relying on
+	// "the last duplicate wins" would work on Docker and silently not on a
+	// provider that resolves duplicates the other way — the guarantee has to
+	// hold at this layer, not in the runtime's env parser.
+	reserved := make(map[string]bool, len(proxyEnv))
+	for _, kv := range proxyEnv {
+		if eq := strings.IndexByte(kv, '='); eq > 0 {
+			reserved[kv[:eq]] = true
+		}
+	}
+	env := make([]string, 0, len(req.Env)+len(proxyEnv))
 	for k, v := range req.Env {
+		if reserved[k] {
+			r.logger.Warn("script step declared a reserved proxy env var — ignoring, the crew egress fence is not step-configurable",
+				"key", k, "run_id", req.PipelineRunID, "step_id", req.StepID)
+			continue
+		}
 		env = append(env, k+"="+v)
 	}
+	env = append(env, proxyEnv...)
 
 	// Enforce the step timeout. The exec attach read below does NOT observe
 	// ctx on its own (a hijacked Docker stream blocks until EOF), so a

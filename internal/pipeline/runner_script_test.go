@@ -295,3 +295,69 @@ func TestScriptAudit_CommandScrubbed(t *testing.T) {
 	}
 	t.Fatal("no exec.command audit entry emitted")
 }
+
+// #1473: a routine `script` step runs inside the agent container but built its
+// exec environment from req.Env alone, so it inherited no HTTP_PROXY. The crew
+// egress allowlist is enforced by the sidecar proxy, so a step with no proxy
+// env is not merely bypassing the fence — it never meets it. Found live: a
+// `restricted` crew allowlisted to httpbin.org reached example.org with a
+// plain curl from a script step.
+//
+// The env must come from the same source the agent-process path uses, so the
+// two in-container paths cannot drift apart again.
+func TestRunScript_ExecEnvCarriesSidecarProxy(t *testing.T) {
+	c := &scriptCovContainer{}
+	r := newScriptTestRunner(c)
+	if _, err := r.RunScript(context.Background(), ScriptRunRequest{
+		AuthorCrewID: "crew_1", Interpreter: "bash", Path: "/crew/shared/s.sh",
+		Env: map[string]string{"CREWSHIP_INPUT_X": "1"},
+	}); err != nil {
+		t.Fatalf("RunScript: %v", err)
+	}
+
+	got := make(map[string]string, len(c.lastExecCfg.Env))
+	for _, kv := range c.lastExecCfg.Env {
+		if eq := strings.IndexByte(kv, '='); eq > 0 {
+			got[kv[:eq]] = kv[eq+1:]
+		}
+	}
+
+	// Every variable the agent path sets, in both cases — Go honours the
+	// upper-case pair, most CLIs (curl, wget) read the lower-case one, and a
+	// script step is exactly where a bare `curl` runs.
+	for _, k := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"} {
+		if got[k] != "http://127.0.0.1:9119" {
+			t.Errorf("%s = %q, want the sidecar proxy — without it the crew egress allowlist never applies to script steps (#1473)", k, got[k])
+		}
+	}
+	// NO_PROXY keeps loopback direct; without it a script's call to the sidecar
+	// itself (or a localhost health check) proxies through the sidecar and loops.
+	for _, k := range []string{"NO_PROXY", "no_proxy"} {
+		if got[k] == "" {
+			t.Errorf("%s is unset — loopback must stay direct or the proxy recurses into itself", k)
+		}
+	}
+	// The step's own env must survive alongside the platform vars.
+	if got["CREWSHIP_INPUT_X"] != "1" {
+		t.Errorf("declared input dropped: CREWSHIP_INPUT_X = %q, want 1", got["CREWSHIP_INPUT_X"])
+	}
+}
+
+// A step must not be able to unset its own fence by declaring HTTP_PROXY in
+// `script.env` — the platform value wins. Otherwise the fix is one line of
+// routine DSL away from being undone, by exactly the actor it constrains.
+func TestRunScript_StepEnvCannotOverrideProxy(t *testing.T) {
+	c := &scriptCovContainer{}
+	r := newScriptTestRunner(c)
+	if _, err := r.RunScript(context.Background(), ScriptRunRequest{
+		AuthorCrewID: "crew_1", Interpreter: "bash", Path: "/crew/shared/s.sh",
+		Env: map[string]string{"HTTP_PROXY": "", "https_proxy": "http://evil.example:8080"},
+	}); err != nil {
+		t.Fatalf("RunScript: %v", err)
+	}
+	for _, kv := range c.lastExecCfg.Env {
+		if kv == "HTTP_PROXY=" || kv == "https_proxy=http://evil.example:8080" {
+			t.Errorf("step env overrode the platform proxy: %q — a script step could disable its own egress fence (#1473)", kv)
+		}
+	}
+}

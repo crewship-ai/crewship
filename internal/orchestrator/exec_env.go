@@ -225,6 +225,36 @@ func collectMCPEnvRefs(configs ...string) map[string]bool {
 	return refs
 }
 
+// SidecarProxyEnv is the canonical proxy environment for a process running
+// inside a crew container: all outbound HTTP goes through the sidecar on
+// 127.0.0.1:9119, which is where the crew egress allowlist is enforced.
+//
+// This exists as one exported source because the allowlist is only a boundary
+// for processes that actually carry these variables, and there is more than one
+// way into a crew container. #1473: routine `script` steps built their exec
+// environment from the step's own inputs alone, so they ran with no proxy at
+// all — a `restricted` crew allowlisted to one host reached the open internet
+// from a script step with a plain curl. Not a bypass of the fence; they never
+// met it. Any new code path that execs into a crew container must append this.
+//
+// Both cases are set deliberately: Go reads the upper-case pair, most CLIs
+// (curl, wget) read the lower-case one, and a script step is exactly where a
+// bare curl runs.
+//
+// NO_PROXY keeps loopback direct. Without it a request to 127.0.0.1 — a health
+// check, or the sidecar's own API — would be proxied through the sidecar
+// itself and recurse.
+func SidecarProxyEnv() []string {
+	return []string{
+		"HTTP_PROXY=http://127.0.0.1:9119",
+		"HTTPS_PROXY=http://127.0.0.1:9119",
+		"http_proxy=http://127.0.0.1:9119",
+		"https_proxy=http://127.0.0.1:9119",
+		"NO_PROXY=127.0.0.1,localhost,::1",
+		"no_proxy=127.0.0.1,localhost,::1",
+	}
+}
+
 // BuildEnvVarsSidecar builds env vars for the agent when sidecar mode is active.
 // API key credentials are NOT included -- the sidecar proxy injects them into HTTP requests.
 // OAuth tokens (AI_CLI_TOKEN) are injected directly as CLAUDE_CODE_OAUTH_TOKEN because
@@ -251,18 +281,7 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		}
 	}
 
-	env := append(baseAgentEnv(req),
-		// Proxy config -- all outbound HTTP goes through the sidecar
-		"HTTP_PROXY=http://127.0.0.1:9119",
-		"HTTPS_PROXY=http://127.0.0.1:9119",
-		"http_proxy=http://127.0.0.1:9119",
-		"https_proxy=http://127.0.0.1:9119",
-		// SECURITY: NO_PROXY prevents infinite proxy loops for localhost health checks
-		// and internal sidecar communication. Without this, curl/wget/Python requests
-		// would try to proxy requests to 127.0.0.1 through the proxy itself.
-		"NO_PROXY=127.0.0.1,localhost,::1",
-		"no_proxy=127.0.0.1,localhost,::1",
-	)
+	env := append(baseAgentEnv(req), SidecarProxyEnv()...)
 
 	if hasOAuth {
 		// OAuth mode: Claude Code authenticates via HTTPS CONNECT tunnel.
